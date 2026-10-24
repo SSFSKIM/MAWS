@@ -194,7 +194,7 @@ test('UX2: plain-click stacking, same-tool tabs, and overflow icon pinning', asy
   expect(maws.consoleErrors()).toEqual([]);
 });
 
-test('UX2: at 900 the sidebar yields; at 600 a surface is a dismissible sheet', async ({ maws }, info) => {
+test('UX2: at 900 the sidebar yields; at 620 a surface is a dismissible sheet', async ({ maws }, info) => {
   const { page } = maws;
   await size(maws, 1280, 820);
   await openSession(page);
@@ -210,24 +210,27 @@ test('UX2: at 900 the sidebar yields; at 600 a surface is a dismissible sheet', 
   expect(beforeOverlay.width).toBeGreaterThan(0);
   expect(Math.round(beforeOverlay.x + beforeOverlay.width)).toBe(Math.round(beside.x));
   expect(Math.round(beside.x + beside.width)).toBe(900);
+  await expect(page.getByRole('banner').getByRole('button', { name: /^Overview/ })).toBeVisible();
   await shot(maws, info, 'narrow-sidebar-yields');
   await page.getByRole('banner').getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
   await expect(sidebar(page)).toHaveJSProperty('inert', false);
   await expect(page.getByRole('button', { name: 'Close sidebar overlay', exact: true })).toBeVisible();
   expect((await box(main(page))).width, 'the temporary sidebar overlays without squeezing main').toBe(beforeOverlay.width);
+  await expect(page.getByRole('button', { name: 'Close sidebar overlay', exact: true })).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  await shot(maws, info, 'narrow-sidebar-overlay');
   await sidebar(page).getByRole('searchbox').focus();
   await page.keyboard.press('Escape');
   await expect(sidebar(page)).toHaveJSProperty('inert', true);
 
-  await size(maws, 600, 820);
+  await size(maws, 620, 820);
   await expect(sidebar(page)).toHaveJSProperty('inert', true);
   await expect(main(page)).toHaveJSProperty('inert', true); // the sheet owns input; covered content must not take focus
   const sheet = await box(panel(page));
   const under = await box(main(page));
-  expect(under.width, 'a sheet overlays rather than reserving a side column').toBe(600);
+  expect(under.width, 'a sheet overlays rather than reserving a side column').toBe(620);
   expect(sheet.x).toBeGreaterThan(under.x);
   expect(sheet.x).toBeLessThan(under.x + under.width);
-  expect(Math.round(sheet.x + sheet.width)).toBe(600);
+  expect(Math.round(sheet.x + sheet.width)).toBe(620);
   await expect(panel(page)).toHaveCSS('position', 'absolute');
   await shot(maws, info, 'narrow-surface-sheet');
   expect(await layout(page, 'regions'), 'narrow rendering never changes remembered widths or collapse preferences').toEqual(remembered);
@@ -236,10 +239,13 @@ test('UX2: at 900 the sidebar yields; at 600 a surface is a dismissible sheet', 
   expect((await box(sidebar(page))).width).toBe(240);
   await expect(panel(page)).toHaveCSS('position', 'relative');
   expect(await layout(page, 'regions')).toEqual(remembered);
-  await size(maws, 600, 820);
-  await closeSurface(page, 'Files');
+  await size(maws, 620, 820);
+  await page.keyboard.press('Escape');
   await expect.poll(async () => (await box(panel(page))).width).toBe(0);
-  expect((await box(main(page))).width).toBe(600);
+  await openSurface(page, 'Files');
+  await page.getByRole('button', { name: 'Close surface sheet', exact: true }).click({ position: { x: 5, y: 60 } });
+  await expect.poll(async () => (await box(panel(page))).width).toBe(0);
+  expect((await box(main(page))).width).toBe(620);
   await shot(maws, info, 'narrow-sheet-dismissed');
   await size(maws, 900, 820);
   await expect(sidebar(page)).toHaveJSProperty('inert', false);
@@ -372,6 +378,39 @@ test('UX2: real Library document and deck editors use main without an empty pane
     await expect(page.getByRole('menu', { name: 'Arrange', exact: true })).toHaveCount(0);
     await toolbar.getByRole('button', { name: 'Version history', exact: true }).click();
     await toolbar.getByRole('button', { name: 'Inspector', exact: true }).click();
+  }
+  expect(maws.consoleErrors()).toEqual([]);
+});
+
+
+test('Acceptance: overflowing tabs remain reachable and F6 visits cards and surface content', async ({ maws }, info) => {
+  const { page } = maws;
+  await size(maws, 1280, 820);
+  await openSession(page);
+  const composer = main(page).locator('[contenteditable="true"]').first();
+  await composer.focus();
+  await menu(maws.app, 'region.focusNext');
+  await expect.poll(() => page.evaluate(() => document.activeElement?.closest('[data-region="cards"]') !== null)).toBe(true);
+  await openSurface(page, 'Files');
+  await composer.focus();
+  await menu(maws.app, 'region.focusNext');
+  await expect.poll(() => page.evaluate(() => document.activeElement?.closest('[data-panel-content]') !== null)).toBe(true);
+  await closeSurface(page, 'Files');
+
+  for (let i = 0; i < 12; i++) await menu(maws.app, 'session.new');
+  await menu(maws.app, 'settings.open');
+  for (const dimensions of [...SIZES, { width: 900, height: 820 }, { width: 620, height: 820 }]) {
+    await size(maws, dimensions.width, dimensions.height);
+    const all = page.getByRole('button', { name: 'All tabs', exact: true });
+    await expect(all).toBeVisible();
+    const chromeBox = await box(page.locator('[data-chrome-tabs]'));
+    const overflowBox = await box(all);
+    expect(overflowBox.x + overflowBox.width).toBeLessThanOrEqual(chromeBox.x + chromeBox.width + 1);
+    await all.click();
+    await expect(page.getByRole('menuitemradio', { name: 'Settings', exact: true })).toBeVisible();
+    await shot(maws, info, 'acceptance-tab-overflow');
+    await page.getByRole('menuitemradio', { name: 'Settings', exact: true }).click();
+    await expect(page.locator('[data-chrome-tabs]').getByRole('tab', { name: 'Settings', exact: true })).toHaveAttribute('aria-selected', 'true');
   }
   expect(maws.consoleErrors()).toEqual([]);
 });

@@ -23,7 +23,7 @@ export const ARTIFACTS_TOOL_COPY = {
 // P4-B3 (its Decision Log 18, 20, 21; the prior art's M1 to M5, Z7): moving an artifact between the panel and a main tab.
 // The actions' names follow VS Code's "Move Terminal into Panel"; the drop labels name the outcome (Codex's words).
 export const TRANSFER_COPY = {
-  moveToPanel: 'Move to panel',
+  moveToPanel: 'Move to side surface',
   moveToTab: 'Move to tab', // the record bar's button (it was "Open in tab"; a move since P3-F wave S, F16)
   moveToMain: 'Move to main area', // the panel's Artifacts tab's context menu
   openInSplit: 'Open in split',

@@ -71,7 +71,7 @@ function useSessionLabel(appSessionId: AppSessionId): TabLabel {
   return { title: displayTitle(record), secondary: record.projectId === current ? null : project, glyph: glyphFor(record, digest ?? null, pending, ended), fileType: null };
 }
 
-function useTabLabel(tab: TabRef): TabLabel {
+export function useTabLabel(tab: TabRef): TabLabel {
   const appSessionId = tab.kind === 'session' || tab.kind === 'agent' ? tab.appSessionId : ('' as AppSessionId);
   const session = useSessionLabel(appSessionId);
   const browserTitle = useBrowserTitle(tab.kind === 'browser' ? tab.appSessionId : null, tab.kind === 'browser' ? tab.browserTabId : null); // E4a
@@ -132,6 +132,7 @@ export function Tab({ tab, pane, domId, active, stop, onKeyDown }: TabProps) {
       id={domId}
       aria-selected={active}
       aria-label={name}
+      title={name}
       tabIndex={stop ? 0 : -1}
       data-tab-id={tab.id}
       data-dirty={dirty ? 'true' : undefined} // E5
@@ -141,7 +142,7 @@ export function Tab({ tab, pane, domId, active, stop, onKeyDown }: TabProps) {
       onMouseDown={(event) => event.button === 1 && event.preventDefault()} // no autoscroll on a middle press
       onAuxClick={onAuxClick}
       onKeyDown={onKeyDown}
-      className={`group/tab relative flex max-w-60 shrink-0 cursor-default items-center gap-1.5 border-r border-border px-2.5 text-ui-sm whitespace-nowrap outline-accent select-none focus-visible:outline-2 focus-visible:-outline-offset-2 ${
+      className={`group/tab relative flex ${active ? 'min-w-24' : 'min-w-16'} max-w-60 shrink cursor-default items-center gap-1.5 border-r border-border px-2.5 text-ui-sm whitespace-nowrap outline-accent select-none focus-visible:outline-2 focus-visible:-outline-offset-2 ${
         active ? 'bg-bg-raised text-fg shadow-[inset_0_-2px_0_0_var(--accent)]' : 'text-fg-muted hover:bg-bg-hover hover:text-fg'
       }`}
     >
@@ -165,7 +166,7 @@ export function Tab({ tab, pane, domId, active, stop, onKeyDown }: TabProps) {
           event.stopPropagation();
           void requestCloseTab(tab.id);
         }}
-        className={`-mr-1 ml-0.5 inline-flex size-4 items-center justify-center rounded-sm text-fg-muted hover:bg-bg-active hover:text-fg ${
+        className={`-mr-1 ml-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded-sm text-fg-muted hover:bg-bg-active hover:text-fg ${
           active ? '' : 'invisible group-hover/tab:visible group-focus-visible/tab:visible'
         }`}
       >

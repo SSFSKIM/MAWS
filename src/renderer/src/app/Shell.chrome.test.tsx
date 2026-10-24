@@ -77,7 +77,7 @@ describe('the chrome yields to the tab strip', () => {
     const row = within(chrome()).getByRole('toolbar', { name: 'Session surfaces' });
     expect(within(row).queryByRole('button', { name: 'terminal' })).toBeNull();
     expect(within(chrome()).queryByRole('button', { name: 'Session actions' })).toBeNull();
-    expect(within(chrome()).queryByRole('button', { name: 'Overview' })).toBeNull();
+    expect(within(chrome()).getByRole('button', { name: 'Overview' })).toBeTruthy();
     expect(within(strips()).getByRole('tablist', { name: 'Open tabs' })).toBeTruthy();
     const more = within(row).getByRole('button', { name: 'More surfaces' });
     act(() => more.focus());
@@ -131,6 +131,35 @@ describe('the chrome yields to the tab strip', () => {
     expect(panel.className).toContain('row-start-3');
     expect(within(chrome()).getByRole('button', { name: 'browser' }).closest('[inert]')).toBeNull();
   });
+});
+
+it('dismisses a narrow sheet with Escape or its backdrop without forgetting its tools', async () => {
+  setWidth(620);
+  useLayout.getState().setPanelTabs(A, { tabs: [ref('review:aaaaaaaa')], activeTabId: 'review:aaaaaaaa' });
+  renderShell();
+  await userEvent.keyboard('{Escape}');
+  expect(document.getElementById('region-main')!.hasAttribute('inert')).toBe(false);
+  expect(useLayout.getState().effectivePanelTabs(A)).toHaveLength(1);
+  act(() => useLayout.getState().setPanel({ collapsed: false }));
+  await userEvent.click(screen.getByRole('button', { name: 'Close surface sheet' }));
+  expect(document.getElementById('region-main')!.hasAttribute('inert')).toBe(false);
+});
+
+it('does not show Session cards as pressed for an unstarted New chat', () => {
+  useLayout.getState().openTab({ kind: 'session', appSessionId: 'unstarted-chat' as typeof A });
+  renderShell();
+  const cards = within(chrome()).getByRole('button', { name: 'Session cards' });
+  expect(cards.getAttribute('aria-pressed')).toBe('false');
+  expect(cards.hasAttribute('disabled')).toBe(true);
+  expect(screen.queryByRole('complementary', { name: 'Session cards' })).toBeNull();
+});
+
+it('keeps Overview reachable at 900 with a surface', async () => {
+  setWidth(900);
+  useLayout.getState().setPanelTabs(A, { tabs: [ref('review:aaaaaaaa')], activeTabId: 'review:aaaaaaaa' });
+  renderShell();
+  await userEvent.click(within(chrome()).getByRole('button', { name: 'Overview' }));
+  expect(useLayout.getState().overviewOpen).toBe(true);
 });
 
 describe('the portaled pane strip order', () => {

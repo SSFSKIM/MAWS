@@ -325,3 +325,14 @@ describe('placeRect', () => {
     expect(placeRect({ x: 0, y: 0, width: 800, height: 800 }, { width: 300, height: 200 })).toEqual({ x: 0, y: 0, width: 300, height: 200 });
   });
 });
+
+
+it('Escape dismisses the Overview even after focus moves outside it', async () => {
+  const user = userEvent.setup();
+  render(<World />);
+  await user.click(screen.getByRole('button', { name: /^Overview/ }));
+  expect(screen.getByRole('dialog', { name: 'Overview' })).toBeTruthy();
+  await user.click(screen.getByRole('button', { name: 'Somewhere else' }));
+  await user.keyboard('{Escape}');
+  expect(screen.queryByRole('dialog', { name: 'Overview' })).toBeNull();
+});

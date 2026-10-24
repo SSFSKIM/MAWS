@@ -232,3 +232,21 @@ describe('visible region focus', () => {
     expect(document.activeElement).toBe(screen.getByLabelText('Pane 0 content'));
   });
 });
+
+
+it('visits Session cards and surface content without stopping on resize controls', () => {
+  render(<>
+    <section id="region-sidebar"><button>Sidebar destination</button></section>
+    <section id="region-main"><div data-pane="0"><div role="tabpanel"><textarea aria-label="Conversation" /></div></div>
+      <aside data-region="cards"><button>Environment card</button></aside>
+    </section>
+    <section id="region-panel"><button role="separator">Resize surface</button><div data-panel-content><section data-surface="terminal"><button>Close surface</button><div role="tabpanel"><input aria-label="Terminal input" /></div></section></div></section>
+  </>);
+  screen.getByLabelText('Conversation').focus();
+  pressMenu({ key: 'F6', code: 'F6' });
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Environment card' }));
+  pressMenu({ key: 'F6', code: 'F6' });
+  expect(document.activeElement).toBe(screen.getByLabelText('Terminal input'));
+  pressMenu({ key: 'F6', code: 'F6', shiftKey: true });
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Environment card' }));
+});

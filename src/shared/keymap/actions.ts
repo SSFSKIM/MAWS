@@ -37,18 +37,27 @@ export const ACTIONS = {
   'pane.split':           { title: 'Split / move to other pane',  chord: 'Cmd+\\',       sink: 'menu', menu: 'view', scope: 'app' },
   'pane.focusOther':      { title: 'Focus other pane',            chord: 'Cmd+Shift+\\', sink: 'menu', menu: 'view', scope: 'app' },
   'sidebar.toggle':       { title: 'Toggle sidebar',              chord: 'Cmd+B',        sink: 'menu', menu: 'view', scope: 'app' },
-  'panel.toggle':         { title: 'Toggle right panel',          chord: 'Cmd+Shift+B',  sink: 'menu', menu: 'view', scope: 'app' },
-  'panel.maximize':       { title: 'Maximize right panel',        chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
+  'panel.toggle':         { title: 'Toggle session cards',          chord: 'Cmd+Shift+B',  sink: 'menu', menu: 'view', scope: 'app' },
+  'surface.terminal': { title: 'Toggle Terminal surface', chord: null, sink: 'menu', menu: 'view', scope: 'app' },
+  'surface.review': { title: 'Toggle Review surface', chord: null, sink: 'menu', menu: 'view', scope: 'app' },
+  'surface.browser': { title: 'Toggle Browser surface', chord: null, sink: 'menu', menu: 'view', scope: 'app' },
+  'surface.files': { title: 'Toggle Files surface', chord: null, sink: 'menu', menu: 'view', scope: 'app' },
+  'surface.source-control': { title: 'Toggle Source control surface', chord: null, sink: 'menu', menu: 'view', scope: 'app' },
+  'surface.subagents': { title: 'Toggle Subagents surface', chord: null, sink: 'menu', menu: 'view', scope: 'app' },
+  'surface.background': { title: 'Toggle Background work surface', chord: null, sink: 'menu', menu: 'view', scope: 'app' },
+  'surface.session-info': { title: 'Toggle Session info surface', chord: null, sink: 'menu', menu: 'view', scope: 'app' },
+  'surface.ask-sheet': { title: 'Toggle Questions surface', chord: null, sink: 'menu', menu: 'view', scope: 'app' },
+  'panel.maximize':       { title: 'Expand surface',        chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
   // P3-G (§D1.7): the panel's floating state, the third region state of the B family (⌘B the sidebar, ⇧⌘B the panel); a
   // page in the browser passes every ⌥⌘ chord to the menu, so it works with a page focused
-  'panel.float':          { title: 'Float session over panel',    chord: 'Cmd+Alt+B',    sink: 'menu', menu: 'view', scope: 'app' },
+  'panel.float':          { title: 'Float conversation over surface',    chord: 'Cmd+Alt+B',    sink: 'menu', menu: 'view', scope: 'app' },
   // P4-B3 (X32 amendment; its Decision Log 12): the focused pane takes the main area and the session beside it floats in
   // the split's card, as the editor header's Expand does; on a floating split it restores the split. No default chord.
   // P4-B3x (P4 Decision Log 40): it also folds an open right panel, which restoring the split opens again
   'main.expandArtifactPane': { title: 'Expand pane',              chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
   // P4-B3 (X38; its Decision Log 21): the focused main artifact tab into the panel ("Show in panel"), and the shown
   // panel's Artifacts record into a main tab ("Move to tab"), as a drag does; refused with the drag's reason. No chords
-  'artifact.moveToPanel':    { title: 'Move to panel',            chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
+  'artifact.moveToPanel':    { title: 'Move to side surface',            chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
   'artifact.moveToTab':      { title: 'Move to tab',              chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
   'theme.light':          { title: 'Appearance: Light',           chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
   'theme.dark':           { title: 'Appearance: Dark',            chord: null,           sink: 'menu', menu: 'view', scope: 'app' },

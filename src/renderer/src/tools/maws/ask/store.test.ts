@@ -17,7 +17,8 @@ import { activeTab, sessionOfTab } from '../../../stores/layout-model';
 import { useSessions } from '../../../stores/sessions';
 import type { AskRowData } from '../../../transcript';
 import { mawsTranscriptActionsOver } from '../actions';
-import { connectAsks } from './connect';
+import { connectAsks, settleWaitingAsks } from './connect';
+import { surfaceTabs } from '../../../panel/surface-model';
 import { EMPTY_DRAFT, pickOption, setDesignSystem, setOther, setText } from './draft';
 import { applyAskEvents, askSheet, editDraft, ensureLoaded, resetAskSheets, selectAsk, shownAsk, submitAsk } from './store';
 
@@ -459,4 +460,31 @@ it('stores are per session', () => {
   applyAskEvents('app-b' as AppSessionId, [opened('b1')]);
   expect(state().asks.size).toBe(0);
   expect(askSheet('app-b' as AppSessionId).getState().asks.has('b1')).toBe(true);
+});
+
+
+it('releases an automatically opened Questions surface after its final answer', () => {
+  useSessions.setState({ records: new Map([[A, record(A)]]) });
+  registerPanelTool(probeTool(ASK_SHEET_TOOL_ID, { multiInstance: false, pinnable: false }).tool);
+  const fake = fakeClient();
+  const off = connectAsks(fake.client);
+  fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1'), opened('a2')] });
+  expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.toolId)).toEqual([ASK_SHEET_TOOL_ID]);
+  fake.event('session.eventBatch', { appSessionId: A, events: [answered('a1')] });
+  expect(surfaceTabs(useLayout.getState(), A)).toHaveLength(1);
+  fake.event('session.eventBatch', { appSessionId: A, events: [answered('a2')] });
+  expect(surfaceTabs(useLayout.getState(), A)).toHaveLength(0);
+  off();
+});
+
+it('does not dismiss Questions explicitly opened to inspect an answer', () => {
+  useSessions.setState({ records: new Map([[A, record(A)]]) });
+  registerPanelTool(probeTool(ASK_SHEET_TOOL_ID, { multiInstance: false, pinnable: false }).tool);
+  const fake = fakeClient();
+  const off = connectAsks(fake.client);
+  fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
+  settleWaitingAsks(A);
+  fake.event('session.eventBatch', { appSessionId: A, events: [answered('a1')] });
+  expect(surfaceTabs(useLayout.getState(), A)).toHaveLength(1);
+  off();
 });

@@ -117,6 +117,18 @@ function OverviewPanel({ bounds }: { bounds: { width: number; height: number } }
     [],
   );
 
+  useEffect(() => {
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      // A nested modal or menu gets the first opportunity to consume Escape.
+      if (document.querySelector('[aria-modal="true"], [role="menu"][data-state="open"]')) return;
+      event.preventDefault();
+      useLayout.getState().setOverviewOpen(false);
+    };
+    window.addEventListener('keydown', escape);
+    return () => window.removeEventListener('keydown', escape);
+  }, []);
+
   const close = () => useLayout.getState().setOverviewOpen(false);
   const sessionCreated = () => {
     // Completion belongs to this panel's lifetime, not a replacement opened after it was dismissed.

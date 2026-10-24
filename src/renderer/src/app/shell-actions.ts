@@ -22,15 +22,15 @@ import { registerSessionAction } from './session-actions';
 import { focusRegion, focusSidebar, stepMainTab } from '../keymap/shell-navigation';
 import { toggleKeyboardShortcuts } from '../keymap/KeyboardShortcuts';
 import { toggleSidebar } from './shell-view';
+import { toggleSessionCards, toggleSurface } from '../panel/SurfaceRow';
 
 export function registerShellActions(client: MawsBridge = ipc): () => void {
   const layout = () => useLayout.getState();
   const offs = [
     registerAction('sidebar.toggle', toggleSidebar),
     // Hiding a maximized panel also un-maximizes it; maximizing a hidden one shows it.
-    registerAction('panel.toggle', () =>
-      layout().setPanel(layout().regions.panel.collapsed ? { collapsed: false } : { collapsed: true, maximized: false }),
-    ),
+    registerAction('panel.toggle', toggleSessionCards),
+    ...(['terminal', 'review', 'browser', 'files', 'source-control', 'subagents', 'background', 'session-info', 'ask-sheet'] as const).map((id) => registerAction(`surface.${id}`, () => toggleSurface(id))),
     registerAction('panel.maximize', () =>
       layout().setPanel(layout().regions.panel.maximized ? { maximized: false } : { maximized: true, collapsed: false }),
     ),

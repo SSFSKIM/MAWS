@@ -7,7 +7,8 @@
 // amended) and the floating card draws the shown session over the panel body. P4-B3 (X38): while a main tab is dragged,
 // the region (header and body) is covered by one drop target, which moves in an artifact the panel can take and refuses
 // (no drop cursor) everything else.
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
+import { holdCover } from '../tools/browser/covering';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PanelTabRef } from '@shared/ipc/schema/layout';
 import { runAction } from '../keymap/actions-runtime';
@@ -37,7 +38,20 @@ export function PanelRegion() {
   const shown = useShownPanel(); // P3-G: the header and the host read one selection
   const cover = useCoverState('panel'); // P4-B3 (Z3): the panel is one target for an artifact main tab
 
-  return (
+  useEffect(() => {
+    if (!geometry.sheet) return;
+    const release = holdCover();
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      event.preventDefault();
+      useLayout.getState().setPanel({ collapsed: true });
+    };
+    window.addEventListener('keydown', escape);
+    return () => { window.removeEventListener('keydown', escape); release(); };
+  }, [geometry.sheet]);
+
+  return (<>
+    {geometry.sheet && <button aria-label="Close surface sheet" onClick={() => setPanel({ collapsed: true })} className="absolute inset-0 top-(--toolbar-h) z-30 bg-fg/10" />}
     <section
       id={PANEL_REGION_ID}
       data-region="panel"
@@ -66,7 +80,7 @@ export function PanelRegion() {
       )}
       {/* The contents clip here, not on the region, so the resizer can straddle the region's edge. */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <div ref={body} className="min-h-0 flex-1 overflow-auto">
+        <div ref={body} data-panel-content className="min-h-0 flex-1 overflow-auto">
           <Host maximized={maximized || floating} shown={shown} />
         </div>
       </div>
@@ -80,7 +94,7 @@ export function PanelRegion() {
         />
       )}
     </section>
-  );
+  </>);
 }
 
 interface ShownPanel {

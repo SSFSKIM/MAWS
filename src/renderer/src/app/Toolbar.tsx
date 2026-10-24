@@ -82,8 +82,7 @@ export function Toolbar() {
   const split = useLayout((s) => currentSet(s.main).panes.length === 2);
   // Budget against the grid's actual header, not the window: a full-height surface can leave only 360px.
   // Preserve a usable, scrolling strip (including New chat) before allocating optional chrome controls.
-  const compact = geometry.chrome < 520;
-  const leading = compact ? 118 : geometry.sidebar || 150;
+  const leading = geometry.sidebar || 150;
   const stripRoom = split ? 240 : 180;
   const projectChip = geometry.chrome >= leading + stripRoom + 322;
   const controlsRoom = geometry.chrome - leading - 16 - stripRoom - (projectChip ? 96 : 0);
@@ -99,7 +98,7 @@ export function Toolbar() {
           <IconButton label="Toggle sidebar" action="sidebar.toggle" pressed={geometry.sidebarAside ? overlay : !sidebar.collapsed} onClick={() => runAction('sidebar.toggle')}>
             <SidebarIcon />
           </IconButton>
-          {!compact && <IconButton
+          <IconButton
             label={waiting > 0 ? `Overview, ${waiting} waiting` : 'Overview'}
             action="tab.overview"
             pressed={overviewOpen}
@@ -112,7 +111,7 @@ export function Toolbar() {
                 ◐{waiting}
               </span>
             )}
-          </IconButton>}
+          </IconButton>
         </div>
       </div>
       {projectChip && <div className="max-w-24 min-w-0 shrink"><ProjectChip /></div>}
@@ -122,7 +121,6 @@ export function Toolbar() {
       </div>
       <div className="ml-auto flex shrink-0 items-center gap-1 px-2">
         <SurfaceRow maxIcons={surfaceIcons} overflowControls={<>
-          {compact && <DropdownMenu.Item className="flex h-8 items-center rounded-sm px-2 text-ui outline-none data-highlighted:bg-bg-hover" onSelect={() => useLayout.getState().setOverviewOpen(!overviewOpen)}>{waiting > 0 ? `Overview, ${waiting} waiting` : 'Overview'}</DropdownMenu.Item>}
           {appSessionId && <SessionMenuOverflow appSessionId={appSessionId} />}
         </>} />
       </div>
