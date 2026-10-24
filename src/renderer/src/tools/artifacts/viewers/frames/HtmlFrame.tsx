@@ -113,8 +113,13 @@ export function HtmlFrame({ url, title, onMount, onLoad: loaded, picking = false
         if (load.current.loaded) post();
         else waiting.add(post);
       });
+    // A load is the bridge-ready signal. Publish a fresh locate identity so a claimed card re-asks after the page
+    // loads, even if an earlier ask was lost or answered from the previous document. Keep this frame's id counter.
+    const refresh = () => announce({ locate: (selector) => locate(selector) });
+    frame.addEventListener('load', refresh);
     announce({ locate });
     return () => {
+      frame.removeEventListener('load', refresh);
       announce(null);
       for (const gone of [...unanswered]) gone();
     };

@@ -103,7 +103,7 @@ describe('re-pin', () => {
     expect(card()!.style).toMatchObject({ left: '24px', top: '94px' });
   });
 
-  it('asks once more only: two nulls leave a re-docked card at the corner; a picked card, which has its rect, is not asked again', async () => {
+  it('asks once more only: two nulls leave a re-docked card at the corner and a picked card at its stored rect', async () => {
     const locate = vi.fn(async (): Promise<CardRect | null> => null);
     render(<Host frame={frameOf('k1', locate)} />);
     redock();
@@ -112,7 +112,7 @@ describe('re-pin', () => {
     expect(card()!.style).toMatchObject({ left: `${600 - 300 - 8}px`, top: '8px' });
     pick(HERO);
     await settle();
-    expect(locate).toHaveBeenCalledTimes(3);
+    expect(locate).toHaveBeenCalledTimes(4);
     expect(card()!.style).toMatchObject({ left: '24px', top: '94px' });
   });
 
@@ -130,7 +130,21 @@ describe('re-pin', () => {
     expect(useCommentCard.getState().open?.serial).toBe(serial);
   });
 
-  it('a null answer in the new frame keeps the card where it was', async () => {
+  it.each(['re-docked', 'picked'] as const)('a %s card retries a transient null in the new frame instead of keeping the old pin', async (origin) => {
+    const view = render(<Host frame={frameOf('v2#0', async () => MOVED)} />);
+    if (origin === 're-docked') redock();
+    else pick(MOVED);
+    await settle();
+    expect(card()!.style).toMatchObject({ left: '40px', top: '254px' });
+
+    const locate = vi.fn(async (): Promise<CardRect | null> => HERO).mockResolvedValueOnce(null);
+    view.rerender(<Host frame={frameOf('v1#0', locate)} />);
+    await settle();
+    expect(card()!.style).toMatchObject({ left: '24px', top: '94px' });
+    expect(locate).toHaveBeenCalledTimes(2);
+  });
+
+  it('two null answers in the new frame keep the card where it was', async () => {
     const locate = vi.fn(async (): Promise<CardRect | null> => HERO);
     const view = render(<Host frame={frameOf('v1#0', locate)} />);
     redock();
@@ -138,7 +152,7 @@ describe('re-pin', () => {
     locate.mockResolvedValue(null);
     view.rerender(<Host frame={frameOf('v1#1', locate)} />);
     await settle();
-    expect(locate).toHaveBeenCalledTimes(2);
+    expect(locate).toHaveBeenCalledTimes(3);
     expect(card()!.style).toMatchObject({ left: '24px', top: '94px' });
   });
 

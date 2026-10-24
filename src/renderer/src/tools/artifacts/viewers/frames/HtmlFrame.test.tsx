@@ -70,6 +70,27 @@ describe('the HTML frame’s locate handle', () => {
     expect(await result).toEqual(RECT);
   });
 
+  it('each page load announces a fresh locate handle so a claimed card re-asks, without reusing an old ask’s id', async () => {
+    const { handle, frame, sent } = mount();
+    const mounted = handle();
+    load(frame);
+    const firstLoad = handle();
+    expect(firstLoad.locate).not.toBe(mounted.locate);
+    const old = firstLoad.locate('#hero');
+
+    load(frame); // a later page load can share the same window, but its bridge and layout are new
+    const nextLoad = handle();
+    expect(nextLoad.locate).not.toBe(firstLoad.locate);
+    const current = nextLoad.locate('#hero');
+    const [oldId, currentId] = sent.map(idOf);
+    expect(currentId).not.toBe(oldId);
+    answer(located(oldId!, '#hero', MOVED), frame.contentWindow);
+    expect(await old).toEqual(MOVED);
+    expect(await stateOf(current)).toEqual({ settled: false });
+    answer(located(currentId!, '#hero', RECT), frame.contentWindow);
+    expect(await current).toEqual(RECT);
+  });
+
   it('after the load, a locate is posted at once; another window’s answer, another selector’s or a malformed one is ignored', async () => {
     const { handle, frame, sent } = mount();
     load(frame);
