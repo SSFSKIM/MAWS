@@ -124,6 +124,24 @@ describe('the floating Overview', () => {
     expect(document.activeElement).toBe(elsewhere);
   });
 
+  it.each(['panel', 'editor'] as const)('leaves composing Escape and focus with the %s instead of dismissing Overview', async (where) => {
+    const user = userEvent.setup();
+    render(<><World /><input aria-label="Korean editor" defaultValue="한" /></>);
+    const opener = screen.getByRole('button', { name: 'Somewhere else' });
+    opener.focus();
+    act(() => useLayout.getState().setOverviewOpen(true));
+    const target = where === 'panel' ? panel() : screen.getByRole('textbox', { name: 'Korean editor' });
+    target.focus();
+    const composing = new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true, cancelable: true });
+    act(() => target.dispatchEvent(composing));
+    expect(useLayout.getState().overviewOpen).toBe(true);
+    expect(composing.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(target);
+    await user.keyboard('{Escape}');
+    expect(useLayout.getState().overviewOpen).toBe(false);
+    expect(document.activeElement).toBe(opener);
+  });
+
   it('leaves Esc to a card that handles it (a request’s decline)', async () => {
     const user = userEvent.setup();
     render(<World />);

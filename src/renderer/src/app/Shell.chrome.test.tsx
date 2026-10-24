@@ -145,6 +145,23 @@ it('dismisses a narrow sheet with Escape or its backdrop without forgetting its 
   expect(document.getElementById('region-main')!.hasAttribute('inert')).toBe(false);
 });
 
+it('leaves composing Escape and keyboard focus in a narrow sheet field', async () => {
+  setWidth(620);
+  offs.push(registerPanelTool(probeTool('ime', { render: () => <input aria-label="Korean sheet field" defaultValue="한" /> }).tool));
+  useLayout.getState().setPanelTabs(A, { tabs: [ref('ime:aaaaaaaa')], activeTabId: 'ime:aaaaaaaa' });
+  renderShell();
+  const field = screen.getByRole('textbox', { name: 'Korean sheet field' });
+  field.focus();
+  const composing = new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true, cancelable: true });
+  act(() => field.dispatchEvent(composing));
+  expect(useLayout.getState().regions.panel.collapsed).toBe(false);
+  expect(screen.getByRole('button', { name: 'Close surface sheet' })).toBeTruthy();
+  expect(composing.defaultPrevented).toBe(false);
+  expect(document.activeElement).toBe(field);
+  await userEvent.keyboard('{Escape}');
+  expect(screen.queryByRole('button', { name: 'Close surface sheet' })).toBeNull();
+});
+
 it('does not show Session cards as pressed for an unstarted New chat', () => {
   useLayout.getState().openTab({ kind: 'session', appSessionId: 'unstarted-chat' as typeof A });
   renderShell();

@@ -40,7 +40,7 @@ export function PanelRegion() {
   useEffect(() => {
     if (!geometry.sheet) return;
     const escape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
       event.preventDefault();
       useLayout.getState().setPanel({ collapsed: true });
     };

@@ -119,7 +119,7 @@ function OverviewPanel({ bounds }: { bounds: { width: number; height: number } }
 
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
       // An Overview behind a surface sheet or another hidden main region does not own this key.
       if (panel.current?.closest('[inert], [hidden], [aria-hidden="true"]')) return;
       // A nested modal or menu gets the first opportunity to consume Escape.
@@ -175,6 +175,7 @@ function OverviewPanel({ bounds }: { bounds: { width: number; height: number } }
       onClickCapture={markAction}
       onKeyDownCapture={markAction}
       onKeyDown={(event) => {
+        if (event.nativeEvent.isComposing) return;
         // From the panel itself, ArrowDown enters the board at its tab stop.
         if (event.key === 'ArrowDown' && event.target === event.currentTarget) {
           event.preventDefault();
