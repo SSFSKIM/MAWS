@@ -17,7 +17,7 @@ export const usagePill = (page: Page): Locator => sidebarFooter(page).locator('[
 // Destinations remain reachable when the narrow layout puts the sidebar in an overlay.
 export async function openAppDestination(page: Page, name: 'Projects' | 'Artifacts' | 'Customize'): Promise<void> {
   const entry = page.getByRole('navigation', { name: 'App destinations' }).getByRole('button', { name, exact: true });
-  if (await page.locator('[data-region="sidebar"]').evaluate((element) => element.inert)) await menu(applicationOf(page), 'sidebar.toggle');
+  if (await page.locator('[data-region="sidebar"]').evaluate((element) => element.hasAttribute('inert'))) await menu(applicationOf(page), 'sidebar.toggle');
   await entry.click();
   await expect(mainTab(page, new RegExp(name))).toHaveAttribute('aria-selected', 'true');
 }
