@@ -166,7 +166,10 @@ export class MessageQueue {
     this.checkContent(content);
     if (!this.deps.canWrite()) throw new QueueEntryError('the session is not ready');
     const entry: QueueEntry = { queueId: randomUUID(), appSessionId: this.deps.appSessionId, content, createdAt: new Date().toISOString(), state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false };
-    const submitNow = !this.releasePaused && !this.busy && this.queuedCount === 0; // FIFO: a send never overtakes an entry already waiting
+    // Stop holds the text already waiting, not a fresh instruction written after the turn stopped. This one
+    // submission may bypass that interrupt pause, without resuming the older entries. Other pauses retain FIFO.
+    const interruptPauseVersion = this.releasePaused && this.pauseReason === 'interrupt' ? this.pauseVersion : undefined;
+    const submitNow = !this.busy && (interruptPauseVersion !== undefined || (!this.releasePaused && this.queuedCount === 0));
     this.entries.push(entry);
     if (!submitNow) {
       try {
@@ -176,7 +179,7 @@ export class MessageQueue {
       }
       return { entry: structuredClone(entry), disposition: 'queued' };
     }
-    const sent = await this.submit(entry, 'send');
+    const sent = await this.submit(entry, 'send', 'write_failed', interruptPauseVersion);
     return { entry: structuredClone(entry), disposition: sent ? 'sent' : 'queued' };
   }
 
@@ -236,7 +239,10 @@ export class MessageQueue {
   }
 
   async pause(reason: PauseReason): Promise<void> {
-    if (this.paused) return;
+    if (this.paused) {
+      ++this.pauseVersion; // a fresh Stop also holds an in-flight post-stop preparation
+      return;
+    }
     this.pauseFor(reason); // C7: through pauseFor
     await this.persist();
   }
@@ -629,8 +635,8 @@ export class MessageQueue {
 
   // queued → (prepared) → submitting (persisted) → the frame written; true when it reached the pipe. A failed write reverts
   // the entry and pauses the queue with `failReason` (`engine_turn` after an engine-initiated turn, with its held notice).
-  private async submit(entry: QueueEntry, trigger: ReleaseTrigger, failReason: 'write_failed' | 'engine_turn' = 'write_failed'): Promise<boolean> {
-    if (!this.deps.prepare) return this.write(entry, trigger, failReason, entry.content);
+  private async submit(entry: QueueEntry, trigger: ReleaseTrigger, failReason: 'write_failed' | 'engine_turn' = 'write_failed', interruptPauseVersion?: number): Promise<boolean> {
+    if (!this.deps.prepare) return this.write(entry, trigger, failReason, entry.content, interruptPauseVersion);
     // P4-A3: the frame's content first, the entry still queued and the queue busy. A pause, an exit or the entry's removal
     // meanwhile leaves it as it is (queued, or gone; the pause, the exit or the removal saved it) with nothing written and
     // nothing saved here, and a removal lets the next head go; an entry edited meanwhile goes with its new content,
@@ -648,22 +654,26 @@ export class MessageQueue {
     let written = false;
     let usedPrepared = false;
     try {
-      if (!this.deps.canWrite() || this.releasePaused) return false;
+      if (!this.deps.canWrite() || this.holdsSubmission(interruptPauseVersion)) return false;
       if (entry.state !== 'queued' || !this.entries.includes(entry)) {
         await this.releaseHead(trigger);
         return false;
       }
       // decided once, before the write: an edit whose save then fails puts the old content back during it
       usedPrepared = entry.content === from;
-      written = await this.write(entry, trigger, failReason, usedPrepared ? prepared.content : entry.content);
+      written = await this.write(entry, trigger, failReason, usedPrepared ? prepared.content : entry.content, interruptPauseVersion);
       return written;
     } finally {
       prepared.settle(written && usedPrepared);
     }
   }
 
+  private holdsSubmission(interruptPauseVersion?: number): boolean {
+    return this.releasePaused && (this.pauseReason !== 'interrupt' || interruptPauseVersion !== this.pauseVersion);
+  }
+
   // queued → submitting (persisted) → the frame, `content`, written; true when it reached the pipe.
-  private async write(entry: QueueEntry, trigger: ReleaseTrigger, failReason: 'write_failed' | 'engine_turn', content: SendContent): Promise<boolean> {
+  private async write(entry: QueueEntry, trigger: ReleaseTrigger, failReason: 'write_failed' | 'engine_turn', content: SendContent, interruptPauseVersion?: number): Promise<boolean> {
     const uuid = randomUUID() as MessageUuid;
     Object.assign(entry, { state: 'submitting', messageUuid: uuid, submittedAt: new Date().toISOString(), uncertain: false });
     const current = () => entry.state === 'submitting' && entry.messageUuid === uuid && this.entries.includes(entry);
@@ -677,7 +687,7 @@ export class MessageQueue {
       return false;
     }
     if (!current()) return false; // the process exited during the persist; recovery already took the entry
-    if (!this.deps.canWrite()) {
+    if (!this.deps.canWrite() || this.holdsSubmission(interruptPauseVersion)) {
       this.revert(entry);
       await this.persist().catch((error: unknown) => this.log(`revert not saved: ${messageOf(error)}`));
       return false;

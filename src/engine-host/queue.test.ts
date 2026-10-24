@@ -305,11 +305,11 @@ describe('queue release never follows an engine-initiated turn', () => {
     expect(queueRows(t.rows)).toEqual(['pause:interrupt', 'resume:user', 'release:resume']);
   });
 
-  it('a send at an idle session goes behind entries still queued (FIFO), and setPaused(false) at idle releases the head', async () => {
+  it('a send at an idle session goes behind entries in a user-paused queue (FIFO), and setPaused(false) at idle releases the head', async () => {
     const t = await harness();
     t.h.turn = true;
     await t.queue.send('first');
-    await t.queue.pause('interrupt');
+    await t.queue.pause('user');
     t.h.turn = false;
     await t.queue.onTurnEnded(turnEnded());
     const { disposition } = await t.queue.send('second');
@@ -1059,15 +1059,40 @@ describe('F2 paused queue admission', () => {
     expect(t.writes.map((w) => w.message.content)).toEqual(['ordinary prompt']);
   });
 
-  it('a send into an empty interrupted queue stays persisted until Resume', async () => {
+  it('l2-transcript-15: a new send after Stop goes immediately, even when the interrupted queue is empty', async () => {
     const t = await harness();
     await t.queue.pause('interrupt');
     const sent = await t.queue.send('after Stop');
-    expect(sent.disposition).toBe('queued');
-    expect(t.writes).toEqual([]);
-    expect(await t.store.loadQueue(ID)).toMatchObject({ paused: true, entries: [{ content: 'after Stop', state: 'queued' }] });
-    await t.queue.setPaused(false);
+    expect(sent.disposition).toBe('sent');
     expect(t.writes.map((w) => w.message.content)).toEqual(['after Stop']);
+    expect(await t.store.loadQueue(ID)).toMatchObject({ paused: true, entries: [{ content: 'after Stop', state: 'submitting' }] });
+  });
+
+  it('l2-transcript-15: new text bypasses the interrupted queue without resuming the pre-existing held items', async () => {
+    const t = await harness();
+    const running = await t.queue.send('running');
+    t.queue.onLifecycle(lifecycle(running.entry.messageUuid, 'started'));
+    const held = await t.queue.send('held before Stop');
+    await t.queue.pause('interrupt');
+    t.h.turn = false;
+    await t.queue.onTurnEnded(turnEnded({ userMessageUuids: [running.entry.messageUuid!], terminalReason: 'aborted_streaming', isError: true }));
+    expect(t.writes.map((w) => w.message.content)).toEqual(['running']);
+    const fresh = await t.queue.send('fresh after Stop');
+    expect(fresh.disposition).toBe('sent');
+    expect(t.writes.map((w) => w.message.content)).toEqual(['running', 'fresh after Stop']);
+    expect(t.storeAtWrite.at(-1)!.entries).toMatchObject([{ queueId: held.entry.queueId, state: 'queued' }, { queueId: fresh.entry.queueId, state: 'submitting' }]);
+    t.h.turn = false;
+    await t.queue.onTurnEnded(turnEnded({ userMessageUuids: [fresh.entry.messageUuid!] }));
+    expect(t.queue.state).toMatchObject({ paused: true, pauseReason: 'interrupt', entries: [{ content: 'held before Stop', state: 'queued' }] });
+    await t.queue.setPaused(false);
+    expect(t.writes.map((w) => w.message.content)).toEqual(['running', 'fresh after Stop', 'held before Stop']);
+  });
+
+  it.each(['user', 'uncertain', 'store_failed'] as const)('l2-transcript-15: a %s pause still holds a new send', async (reason) => {
+    const t = await harness();
+    await t.queue.pause(reason);
+    expect((await t.queue.send('held')).disposition).toBe('queued');
+    expect(t.writes).toEqual([]);
   });
 });
 
@@ -1501,6 +1526,33 @@ describe('a prepared submission', () => {
     await queue.settled();
     expect(writes.map((w) => w.message.content)).toEqual([[{ type: 'text', text: 'fix it' }, READ]]);
     expect(p.settled).toEqual([['fix it', false], ['fix it', true]]);
+  });
+
+  it('l2-transcript-15: prepares a fresh post-stop send, but a second Stop during preparation holds it', async () => {
+    const g = gate();
+    const p = preparer({ fresh: g.opened });
+    const { queue, writes } = await harness({ prepare: p.prepare });
+    await queue.pause('interrupt');
+    const sending = queue.send('fresh');
+    await flush();
+    expect(queue.busy).toBe(true);
+    await queue.pause('interrupt');
+    g.open();
+    expect((await sending).disposition).toBe('queued');
+    expect(writes).toEqual([]);
+    expect(p.settled).toEqual([['fresh', false]]);
+    await queue.setPaused(false);
+    expect(writes.map((w) => w.message.content)).toEqual([[{ type: 'text', text: 'fresh' }, READ]]);
+  });
+
+  it('l2-transcript-15: a prepared fresh send bypasses only the interrupt pause and leaves it paused', async () => {
+    const p = preparer();
+    const { queue, writes } = await harness({ prepare: p.prepare });
+    await queue.pause('interrupt');
+    expect((await queue.send('fresh')).disposition).toBe('sent');
+    expect(writes.map((w) => w.message.content)).toEqual([[{ type: 'text', text: 'fresh' }, READ]]);
+    expect(p.settled).toEqual([['fresh', true]]);
+    expect(queue.state.paused).toBe(true);
   });
 
   it('is busy while it prepares: a send meanwhile waits behind it, in order', async () => {

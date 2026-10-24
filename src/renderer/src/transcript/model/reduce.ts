@@ -503,7 +503,9 @@ function apply(batch: Batch, event: SessionEvent): void {
     case 'turn.ended': {
       if (event.isEchoReceipt) return batch.loose(event, false);
       const turnOf = (uuid: MessageUuid) => state.turns.get(turnIdOf.ofMessage(uuid)) ?? (index.messages.has(uuid) ? state.turns.get(index.messages.get(uuid)!) : undefined);
-      const named = event.userMessageUuids.map(turnOf).find((turn) => turn?.state === 'open');
+      // The interrupt marker can close the turn before its result arrives. Keep that result (and its accounting)
+      // on the turn it names, even if another prompt has started meanwhile.
+      const named = event.userMessageUuids.map(turnOf).find((turn) => turn?.state === 'open' || (turn?.closedBy === 'stopped' && turn.ended === null));
       const turn = named ? batch.touch(named.id) : batch.current();
       if (!turn) return batch.loose(event, false);
       batch.close(turn, event);
@@ -537,8 +539,16 @@ function apply(batch: Batch, event: SessionEvent): void {
         if (!pushRouted(null)) batch.loose(event); // a bash or local_command row; never a turn
         return;
       }
-      if (event.isSynthetic || isInterruptionMarker(event.origin, event.content)) {
-        if (!event.isSynthetic && batch.foldMarkerBack(event)) return;
+      if (isInterruptionMarker(event.origin, event.content) && !event.isSynthetic) {
+        if (batch.foldMarkerBack(event)) return;
+        const turn = batch.current();
+        if (turn) {
+          batch.push(turn, event, false); // retained evidence, never a prompt bubble
+          batch.closeUnended(turn, 'stopped', event.at);
+        }
+        return;
+      }
+      if (event.isSynthetic) {
         pushRouted(null, false); // retained on the turn, no row of its own
         return;
       }
