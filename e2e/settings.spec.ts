@@ -7,6 +7,7 @@
 // `appearance.monoFont` names an installed Nerd Font, and boxes again when it is cleared.
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { scratchMarketplace, writePluginCliStub } from '../test/support/plugin-cli-stub';
+import { LAYOUT_DEFAULTS } from '../src/shared/ipc/schema/layout';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
@@ -482,6 +483,7 @@ test('Customize and Projects are reachable without a chat, at desktop and narrow
   const cli = writePluginCliStub(userData, { marketplaces: [{ name: 'harbor-tools', source: 'directory', path: market, plugins }], installed: [{ id: 'editorial-tools@harbor-tools', version: '1.0.0', scope: 'user', enabled: true, projectPath: null }], fail: {} });
   try {
     const maws = await launchMaws({ userData, env: { MAWS_HARNESS: '0', MAWS_E2E_ENGINE_BIN: cli.bin }, prepare: ({ claudeConfigDir }) => {
+      writeFileSync(join(userData, 'layout.json'), JSON.stringify({ regions: { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, width: 240 }, panel: { ...LAYOUT_DEFAULTS.regions.panel, collapsed: true } } }));
       mkdirSync(join(claudeConfigDir, 'skills', 'proofread'), { recursive: true });
       writeFileSync(join(claudeConfigDir, 'skills', 'proofread', 'SKILL.md'), '---\nname: proofread\ndescription: Check wording, consistency and citations.\n---\n# Proofread\n');
       writeFileSync(join(claudeConfigDir, '.claude.json'), JSON.stringify({ mcpServers: { notion: { type: 'http', url: 'https://example.invalid/notion' } } }));
@@ -494,7 +496,7 @@ test('Customize and Projects are reachable without a chat, at desktop and narrow
       await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption({ label: 'harbor-quarterly-review' });
       await expect(page.locator('[data-plugins-section="my-items"]')).toBeVisible();
       const shot = async (name: string) => { const path = testInfo.outputPath(`${name}.png`); await page.screenshot({ path }); await testInfo.attach(name, { path, contentType: 'image/png' }); };
-      for (const [width, height] of [[1280, 820], [1512, 982], [600, 760]] as const) {
+      for (const [width, height] of [[1280, 820], [1512, 982], [900, 760], [600, 760]] as const) {
         await app.evaluate(({ BrowserWindow }, [width, height]) => { const win = BrowserWindow.getAllWindows()[0]; win.setMinimumSize(600, 600); win.setContentSize(width, height); }, [width, height]);
         await page.waitForFunction(([width, height]) => innerWidth === width && innerHeight === height, [width, height]);
         await page.getByRole('tab', { name: 'Plugins', exact: true }).click();
