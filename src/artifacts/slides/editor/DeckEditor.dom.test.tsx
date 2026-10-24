@@ -2,6 +2,7 @@
 // the filmstrip's thumbnails, sections, hidden and held slides; the slide gestures as one undo step each; the notes
 // bound by character diff in both directions. Drag reorder, zoom by fit and paint are the e2e's.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -52,6 +53,31 @@ function PortalToolbar({ session, consume = false }: { session: DeckSession; con
 }
 
 describe('the deck editor', () => {
+  it.each(['Insert', 'Arrange', 'Text style'].flatMap((name) => [false, true].map((shiftKey) => ({ name, shiftKey }))))('routes F6 from the real open $name menu (shift: $shiftKey) back into the editor ring', async ({ name, shiftKey }) => {
+    const user = userEvent.setup();
+    const { session, container } = mount();
+    act(() => session.select(['t']));
+    await user.click(within(screen.getByRole('toolbar', { name: 'Deck' })).getByRole('button', { name, exact: true }));
+    const menu = await screen.findByRole('menu');
+    expect(container.contains(menu)).toBe(false); // Radix renders this React-owned menu under document.body.
+    act(() => menu.focus());
+    expect(document.activeElement).toBe(menu);
+    const event = new KeyboardEvent('keydown', { key: 'F6', code: 'F6', shiftKey, bubbles: true, cancelable: true });
+    act(() => { menu.dispatchEvent(event); });
+    expect(event.defaultPrevented).toBe(true);
+    expect(document.activeElement?.closest(shiftKey ? '.deck-notes' : '.deck-toolbar')).not.toBeNull();
+  });
+
+  it('consults the owner keymap only once for one DOM-and-React-owned F6 event', () => {
+    const bindsKey = vi.fn(() => true);
+    render(<DeckEditor session={new DeckSession(deck())} assetUrl={() => null} system={null} readOnly={false} bindsKey={bindsKey} />);
+    const inspector = within(screen.getByRole('toolbar', { name: 'Deck' })).getByRole('button', { name: 'Inspector' });
+    inspector.focus();
+    fireEvent.keyDown(inspector, { key: 'F6', code: 'F6' });
+    expect(document.activeElement).toBe(inspector);
+    expect(bindsKey).toHaveBeenCalledTimes(1);
+  });
+
   it('cycles F6 from a separately rendered host portal and remembers that toolbar control on return', () => {
     const session = new DeckSession(deck());
     render(<PortalToolbar session={session} />);

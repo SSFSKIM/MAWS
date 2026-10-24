@@ -234,7 +234,18 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
   const previewDrawn = useCallback(() => onPreviewDrawn?.(performance.now() - requestedAt), [onPreviewDrawn, requestedAt]);
 
   const [regions] = useState(() => new RegionRing(DECK_REGIONS)); // P4-B2 (D14)
+  const root = useRef<HTMLDivElement | null>(null); // P4-B2 K6: the Edit menu's Undo and Redo, under onKeyDown's conditions
+  const regionEvents = useRef(new WeakSet<KeyboardEvent>());
+  const routeRegionKey = useCallback((event: ReactKeyboardEvent<HTMLDivElement> | KeyboardEvent) => {
+    const node = root.current;
+    if (!node) return false;
+    const native = 'nativeEvent' in event ? event.nativeEvent : event;
+    if (native.defaultPrevented || regionEvents.current.has(native)) return false;
+    regionEvents.current.add(native);
+    return regionKey(event, regions, session, bindsKey, node);
+  }, [regions, session, bindsKey]);
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (routeRegionKey(event)) return;
     const mod = event.metaKey || event.ctrlKey;
     if (!mod || readOnly || preview) return; // M8: no undo in history (the live deck is not shown)
     const target = event.target as HTMLElement;
@@ -250,7 +261,6 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
       session.redoStep();
     }
   };
-  const root = useRef<HTMLDivElement | null>(null); // P4-B2 K6: the Edit menu's Undo and Redo, under onKeyDown's conditions
   const [below, setBelow] = useState(compact);
   useLayoutEffect(() => {
     const node = root.current;
@@ -263,14 +273,15 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
   }, []);
   const thumbnailWidth = below ? 112 : 96;
 
-  // Host controls may be React portals from outside the editor's React tree. Their DOM ancestry still owns this ring.
+  // React ownership reaches editor menus portalled under body; DOM ownership reaches host controls portalled into the
+  // toolbar from a different React tree. One native event takes only one route, after nested handlers can consume it.
   useEffect(() => {
     const node = root.current;
     if (!node) return;
     const focus = (event: FocusEvent) => regions.note(node, event.target);
     const key = (event: KeyboardEvent) => {
       // Document bubbling follows React's delegated handlers, so nested controls can consume the key first.
-      if (event.target instanceof Node && node.contains(event.target)) regionKey(event, regions, session, bindsKey, node);
+      if (event.target instanceof Node && node.contains(event.target)) routeRegionKey(event);
     };
     node.addEventListener('focusin', focus);
     node.ownerDocument.addEventListener('keydown', key);
@@ -278,7 +289,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
       node.removeEventListener('focusin', focus);
       node.ownerDocument.removeEventListener('keydown', key);
     };
-  }, [regions, session, bindsKey]);
+  }, [regions, routeRegionKey]);
 
   useEditClaim(registerEditClaimant, root, session, readOnly || preview !== null); // P4-B2 K6
 
@@ -391,7 +402,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
   );
   const toolbarHost = onToolbarHost && <div ref={onToolbarHost} className="deck-toolbar-host" />;
   const editor = (
-    <div ref={root /* P4-B2 K6 */} className="deck-editor" data-deck-editor data-compact={compact || undefined} data-history-previewing={preview ? '' : undefined} onKeyDown={onKeyDown}>
+    <div ref={root /* P4-B2 K6 */} className="deck-editor" data-deck-editor data-compact={compact || undefined} data-history-previewing={preview ? '' : undefined} onKeyDown={onKeyDown} onFocus={(event) => regions.note(event.currentTarget, event.target)}>
       {faces && <style data-deck-faces>{faces}</style>}
       {!preview &&
         historySnapshot?.banner && (
