@@ -172,23 +172,24 @@ test("G1: the report over the session's rows — marked turns folded to one reco
   }
 
   // The toggle: the transcript has no records and more dividers, and back to the same rows.
-  const report = await allTranscriptRowIds(view);
+  const firstRow = view.getByText(FIRST_ROW, { exact: true });
+  const report = await allTranscriptRowIds(view, firstRow);
   await toggle(page, 'Transcript').click();
   await expect(toggle(page, 'Transcript')).toHaveAttribute('aria-pressed', 'true');
-  const transcript = await allTranscriptRowIds(view);
+  const transcript = await allTranscriptRowIds(view, firstRow);
   expect(transcript.filter((id) => id.startsWith('owner-record:'))).toEqual([]);
   expect(transcript.filter((id) => id.startsWith('divider:')).length).toBeGreaterThan(report.filter((id) => id.startsWith('divider:')).length);
   await expect(records(view)).toHaveCount(0);
   await expect(view.locator('[data-row-id^="divider:"]').first()).toBeVisible();
   await toggle(page, 'Report').click();
-  expect(await allTranscriptRowIds(view)).toEqual(report);
+  expect(await allTranscriptRowIds(view, firstRow)).toEqual(report);
 
   // A reload draws the same rows.
   await page.reload();
   await revealEarlier(view, view.locator('.owner-message-ink').filter({ hasText: ANSWER }));
   await expect(view.locator('.owner-message-ink').filter({ hasText: ANSWER })).toBeVisible();
   await expect(toggle(page, 'Report')).toHaveAttribute('aria-pressed', 'true');
-  expect(await allTranscriptRowIds(view, 15_000)).toEqual(report);
+  expect(await allTranscriptRowIds(view, firstRow, 15_000)).toEqual(report);
 });
 
 test('G1: a marked answer streams per block into its folded turn, its record working; it settles with no double; its turn_duration reads the turn finished', async ({ page, hub }) => {

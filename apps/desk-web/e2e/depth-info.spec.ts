@@ -128,7 +128,7 @@ test("a streaming message stays authored text until closed, then receives unboxe
   const settled = view.locator('[data-kind="assistant_text"]').filter({ hasText: 'Both subagents reported back.' });
   await expect(settled).toHaveCount(1); // one answer row, not one ink span per Markdown leaf
   await expect(settled).toContainText('Both subagents reported back. The kettle is on the second shelf, and the last word in words.txt is "gamma".');
-  await expect(settled.locator('p .owner-message-ink').first()).toContainText('Both subagents reported back.');
+  await expect(settled.locator('p .owner-message-ink').filter({ hasText: 'Both subagents reported back.' })).toHaveCount(1);
   await expect(settled.locator('li')).toHaveText([
     'notes.md: the kettle is on the second shelf.',
     'words.txt: the file lists alpha, beta, gamma, then an empty trailing line, so the last word is "gamma".',

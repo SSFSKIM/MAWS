@@ -18,13 +18,22 @@ export async function revealEarlier(view: Locator, target: Locator): Promise<voi
   throw new Error('the earlier transcript row was not reached in 100 windows');
 }
 
-/** Compare the whole logical history, not an overscan window whose mounted rows vary with measurement. */
-export async function allTranscriptRowIds(view: Locator, timeout = 15_000): Promise<string[]> {
+/** Load through the known first row, then compare the whole history rather than a measured overscan window. */
+export async function allTranscriptRowIds(view: Locator, firstRow: Locator, timeout = 15_000): Promise<string[]> {
   const scroller = view.locator('[data-transcript-scroller]').first();
   const ids = new Set<string>();
   const deadline = Date.now() + timeout;
-  await scroller.evaluate((el) => { el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); el.scrollTo({ top: 0 }); });
+  let atFirstRow = false;
+  await scroller.dispatchEvent('wheel', { deltaY: -200 });
   for (let i = 0; i < 100 && Date.now() < deadline; i++) {
+    if (!atFirstRow) {
+      // Older-page installation preserves the reader's anchor, so each arriving page can move us away from the top.
+      await scroller.evaluate((el) => el.scrollTo({ top: 0 }));
+      await view.page().waitForTimeout(60);
+      atFirstRow = await firstRow.evaluateAll((nodes) => nodes.some((node) => node.isConnected));
+      if (!atFirstRow) continue;
+      await scroller.evaluate((el) => el.scrollTo({ top: 0 }));
+    }
     await view.page().waitForTimeout(60);
     for (const id of await view.locator('[data-row-id]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-row-id')!))) ids.add(id);
     const atEnd = await scroller.evaluate((el) => {
@@ -34,5 +43,5 @@ export async function allTranscriptRowIds(view: Locator, timeout = 15_000): Prom
     });
     if (atEnd) return [...ids];
   }
-  throw new Error(`the transcript's end was not reached in 100 windows within ${timeout}ms (${ids.size} rows taken)`);
+  throw new Error(`the transcript's ${atFirstRow ? 'end' : 'first row'} was not reached in 100 windows within ${timeout}ms (${ids.size} rows taken)`);
 }
