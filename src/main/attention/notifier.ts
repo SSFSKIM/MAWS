@@ -9,6 +9,7 @@ import type { AttentionNavigate } from '@shared/ipc/schema/attention';
 import { isActionable, isOpen } from '@shared/attention/kinds';
 import { previewLine } from '@shared/owner/preview';
 import type { emit as emitEvent } from '../ipc/events';
+import type { NotificationActions } from './actions';
 import type { SessionReadModel } from '../sessions/read-model';
 
 const GROUP: Record<AttentionKind, keyof NotificationKinds> = {
@@ -24,6 +25,7 @@ export interface NotifierDeps {
   navigate(navigation: AttentionNavigate): void;
   settings(): Settings;
   emit: typeof emitEvent;
+  actions?: NotificationActions;
 }
 type Notice = { appSessionId: AppSessionId; attentionId: AttentionId | null; body: string };
 
@@ -36,16 +38,30 @@ export function startNotifier(model: SessionReadModel, deps: NotifierDeps): () =
   const notified = (notice: Notice, delivery: 'os' | 'fallback' | 'in-app') =>
     deps.emit('attention.notified', { appSessionId: notice.appSessionId, attentionId: notice.attentionId, delivery, at: new Date().toISOString() });
   const fallBack = (notice: Notice) => { app.dock?.bounce('informational'); notified(notice, 'fallback'); };
-  const post = (notice: Notice) => {
+  const actionFailure = (notice: Notice, error: unknown, reply?: string) => {
+    const message = error instanceof Error ? error.message : String(error);
+    deps.focusWindow();
+    deps.navigate({ appSessionId: notice.appSessionId, attentionId: notice.attentionId, source: 'notification' });
+    deps.emit('attention.notified', { appSessionId: notice.appSessionId, attentionId: notice.attentionId, delivery: 'in-app', at: new Date().toISOString(), error: `${message}${reply ? ` Reply not sent: ${reply}` : ''}` });
+  };
+  const post = (notice: Notice, allowOnce = false, checked = false) => {
     if (deps.isViewing(notice.appSessionId)) return;
     if (deps.isFocused()) { notified(notice, 'in-app'); return; }
     if (fallback !== null) { fallBack(notice); return; }
+    const item = notice.attentionId === null ? undefined : model.attention(notice.appSessionId).find((i) => i.id === notice.attentionId && i.state === 'pending');
+    if (notice.attentionId !== null && !item) return;
+    if (item?.kind === 'permission' && deps.actions && !checked) {
+      void deps.actions.canAllow(item).then((allowed) => post(notice, allowed, true)).catch(() => post(notice, false, true));
+      return;
+    }
     const record = model.record(notice.appSessionId)!;
     const project = record.projectId === null ? null : model.project(record.projectId);
     const notification = new Notification({
       title: project ? `${project.name} · ${record.title.text}` : record.title.text,
       body: previewLine(notice.body, 200) ?? notice.body,
       silent: !deps.settings().notifications.sound,
+      ...(deps.actions && notice.attentionId === null ? { hasReply: true, replyPlaceholder: 'Reply to session' } : {}),
+      ...(allowOnce ? { actions: [{ type: 'button' as const, text: 'Allow once' }] } : {}),
     });
     live.set(notification, notice);
     notification.on('show', () => notified(notice, 'os'));
@@ -58,6 +74,14 @@ export function startNotifier(model: SessionReadModel, deps: NotifierDeps): () =
       live.delete(notification);
       deps.focusWindow();
       deps.navigate({ appSessionId: notice.appSessionId, attentionId: notice.attentionId, source: 'notification' });
+    });
+    notification.on('reply', (_event, reply: string) => {
+      if (notice.attentionId !== null || !deps.actions) return;
+      void deps.actions.reply(notice.appSessionId, reply).catch((error: unknown) => actionFailure(notice, error, reply));
+    });
+    notification.on('action', (_event, index: number) => {
+      if (index !== 0 || !allowOnce || !item || !deps.actions) return;
+      void deps.actions.allow(item).catch((error: unknown) => actionFailure(notice, error));
     });
     notification.on('close', () => live.delete(notification));
     notification.show();

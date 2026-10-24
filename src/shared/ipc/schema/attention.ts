@@ -36,7 +36,7 @@ const c5Commands = {
 } as const satisfies Record<`attention.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 const c5Events = {
   // A notification was posted (or would have been: `fallback`, the unsigned-binary case); also what the smoke observes.
-  'attention.notified': z.strictObject({ appSessionId: AppSessionIdSchema, attentionId: AttentionIdSchema.nullable(), delivery: z.enum(['os', 'fallback', 'in-app']), at: z.string() }),
+  'attention.notified': z.strictObject({ appSessionId: AppSessionIdSchema, attentionId: AttentionIdSchema.nullable(), delivery: z.enum(['os', 'fallback', 'in-app']), at: z.string(), error: z.string().optional() }),
   'attention.navigate': AttentionNavigateSchema,
 } as const satisfies Record<`attention.${string}`, z.ZodType>;
 // C5 end

@@ -11,9 +11,10 @@ import { registerMainHandler } from '../ipc/router';
 import type { SessionReadModel } from '../sessions/read-model';
 import { appWindows, isAppWindow } from '../windows'; // E2
 import { createNavigationRelay } from './navigation';
+import type { NotificationActions } from './actions';
 import { startNotifier } from './notifier';
 
-export function startAttention(model: SessionReadModel, deps: { restoredIds: ReadonlySet<AttentionId>; settings(): Settings; openWindow(): BrowserWindow }): () => void {
+export function startAttention(model: SessionReadModel, deps: { actions?: NotificationActions; restoredIds: ReadonlySet<AttentionId>; settings(): Settings; openWindow(): BrowserWindow }): () => void {
   const viewing = new Map<number, AppSessionId | null>();
   registerMainHandler('attention.viewing', ({ appSessionId }, { sender }) => {
     if (!viewing.has(sender.id)) {
@@ -35,7 +36,7 @@ export function startAttention(model: SessionReadModel, deps: { restoredIds: Rea
     win.focus();
   };
   // Listen immediately, including during store retries; only restored arrivals are silent.
-  return startNotifier(model, { restoredIds: deps.restoredIds, isFocused, isViewing, focusWindow, navigate: relay.deliver, settings: deps.settings, emit });
+  return startNotifier(model, { actions: deps.actions, restoredIds: deps.restoredIds, isFocused, isViewing, focusWindow, navigate: relay.deliver, settings: deps.settings, emit });
 }
 
 // E2 start (E2 execution document, Design §7, Decision Log 21): only an app window's page load or close makes the page

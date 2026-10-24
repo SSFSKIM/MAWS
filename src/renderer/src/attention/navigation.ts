@@ -103,8 +103,9 @@ const toastId = (attentionId: AttentionId) => `attention:${attentionId}`;
 // the session's list has held it yet (main may announce an item before the page's list carries it).
 type ToastedItems = Map<AttentionId, { appSessionId: AppSessionId; held: boolean }>;
 
-function fallbackToast(toasted: ToastedItems, { appSessionId, attentionId, delivery }: EventPayload<'attention.notified'>): void {
+function fallbackToast(toasted: ToastedItems, { appSessionId, attentionId, delivery, error }: EventPayload<'attention.notified'>): void {
   if (delivery === 'os') return;
+  if (error) { useNotices.getState().toast({ level: 'error', text: error, actions: [], dismissible: true }); return; }
   if (attentionId === null) {
     const record = useSessions.getState().records.get(appSessionId);
     const digest = useSessions.getState().digests.get(appSessionId);
