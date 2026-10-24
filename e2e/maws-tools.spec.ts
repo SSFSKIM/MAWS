@@ -196,7 +196,8 @@ test('a blocking ask: the capsule waits, the sheet holds every modality, the att
     ]);
     await expect(capsule).toHaveAttribute('data-ask-state', 'answered');
     await expect(capsule.locator('[data-ask-chip]')).toHaveText('Answered');
-    await expect(sheet).toContainText('No open questions');
+    await expect(sheet).toHaveCount(0);
+    await expect(s.panel).toHaveJSProperty('inert', true); // an automatic Questions surface gives main its space back
     // the attention item went at Submit
     await expect(questionRow).toHaveCount(0);
     expect(value(await invoke(s.page, 'attention.list', undefined)).filter((item) => item.appSessionId === id && item.state === 'pending')).toEqual([]);
@@ -233,6 +234,7 @@ test('a waiting question is answered in its sidebar hover card, never queued as 
       await expect(card).toBeVisible({ timeout: 2_000 });
     }).toPass({ timeout: 10_000 });
     await expect(card.getByText(args.questions[0]!.question)).toBeVisible();
+    await test.info().attach('acceptance-hover-question.png', { body: await s.page.screenshot(), contentType: 'image/png' });
     await expect(card.getByRole('textbox', { name: /^Reply to / })).toHaveCount(0);
     await card.getByRole('radio', { name: 'hi.txt', exact: true }).click();
     await card.getByRole('textbox', { name: 'What title?' }).fill('Release notes');
@@ -243,6 +245,8 @@ test('a waiting question is answered in its sidebar hover card, never queued as 
       { id: 'title', question: 'What title?', status: 'answered', value: 'Release notes' },
     ]);
     await expect(row).toHaveCount(0);
+    await expect(sheetOf(s)).toHaveCount(0);
+    await test.info().attach('acceptance-question-answered.png', { body: await s.page.screenshot(), contentType: 'image/png' });
     expect(value(await invoke(s.page, 'session.queue.list', { appSessionId: id })).entries.filter((entry) => entry.content === 'Release notes' || entry.content === 'hi.txt')).toEqual([]);
     expect(s.journal(id).filter((row) => row.direction === 'out' && (row.frame as Frame).type === 'user')).toHaveLength(1);
     await idle(s, id);
@@ -452,8 +456,8 @@ test('previews: a single-select question lays its options beside the focused opt
     await expect(sheet).toHaveAttribute('data-ask-id', opened!.askId);
     const askSurface = surface(s.page, 'ask-sheet');
     // UX2-L caps a docked Questions surface at 420 px; maximize it to exercise the existing wide preview layout.
-    await askSurface.getByRole('button', { name: 'Maximize right panel', exact: true }).click();
-    await expect(askSurface.getByRole('button', { name: 'Restore right panel', exact: true })).toBeVisible();
+    await askSurface.getByRole('button', { name: 'Expand surface', exact: true }).click();
+    await expect(askSurface.getByRole('button', { name: 'Restore surface', exact: true })).toBeVisible();
 
     const section = sectionOf(sheet, 'q1');
     const radios = section.getByRole('radiogroup');
@@ -491,7 +495,7 @@ test('previews: a single-select question lays its options beside the focused opt
     await shoot(s, 'ask-previews');
 
     // Restore and take the panel to its narrowest: the pane under the options, as wide as they are.
-    await askSurface.getByRole('button', { name: 'Restore right panel', exact: true }).click();
+    await askSurface.getByRole('button', { name: 'Restore surface', exact: true }).click();
     const resizer = s.page.getByRole('separator', { name: 'Resize right panel' });
     await resizer.focus();
     await s.page.keyboard.press('Home');

@@ -123,7 +123,7 @@ test('WR #12: the floating session reserves document space when wide and overlay
   const record = await openInPanel(page, id, true);
   await (await sidebarRow(page, 'Harness A')).click();
   const panel = page.locator('[data-region="panel"]');
-  await panel.getByRole('button', { name: 'Float session over panel' }).click();
+  await panel.getByRole('button', { name: 'Float conversation over surface' }).click();
   const card = panel.getByRole('region', { name: 'Session card' });
   const column = record.locator('[data-document-session-column]');
   await expect(column).toBeVisible();

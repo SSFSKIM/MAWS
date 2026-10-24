@@ -226,7 +226,7 @@ test('Float with no session in front: disabled with its reason, the action float
     // Keep the pre-UX2 regression coverage: opening Overview must restore main from an actual maximized surface.
     const overviewButton = page.getByRole('banner').getByRole('button', { name: /^Overview/ });
     const overview = main.getByRole('dialog', { name: 'Overview' });
-    await panel.getByRole('button', { name: 'Maximize right panel' }).click();
+    await panel.getByRole('button', { name: 'Expand surface' }).click();
     await expect(main).toHaveJSProperty('inert', true);
     await expect(main).toHaveCSS('width', '0px');
     await overviewButton.click();
@@ -234,7 +234,7 @@ test('Float with no session in front: disabled with its reason, the action float
     await expect(overview).toBeVisible();
     await expect(overview).toBeFocused();
     // Opening via the menu is not a toggle: restore and refocus an Overview hidden by maximize.
-    await panel.getByRole('button', { name: 'Maximize right panel' }).click();
+    await panel.getByRole('button', { name: 'Expand surface' }).click();
     await expect(main).toHaveJSProperty('inert', true);
     await menu(app, 'tab.overview');
     await mainShown('the Overview menu restores main from a maximized surface');
@@ -251,7 +251,7 @@ test('Float with no session in front: disabled with its reason, the action float
     await expect(card).toHaveCount(0);
 
     await strip.getByRole('tab', { name: NORTH, exact: true }).click();
-    await panel.getByRole('button', { name: 'Float session over panel' }).click();
+    await panel.getByRole('button', { name: 'Float conversation over surface' }).click();
     await expect(card).toBeVisible();
     await expect(main).toHaveJSProperty('inert', true);
     await menu(app, 'settings.open'); // Settings comes in front of the floating card

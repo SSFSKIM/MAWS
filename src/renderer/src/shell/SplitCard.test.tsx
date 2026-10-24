@@ -379,7 +379,7 @@ describe('the split’s floating card in the Shell', () => {
     await user.click(within(panelHeader).getByRole('button', { name: 'Dock session' }));
     expect(set().floating).toBeUndefined();
     expect(useLayout.getState().regions.panel.floating).toBe(false);
-    expect(within(panelHeader).getByRole('button', { name: 'Float session over panel' })).toBeTruthy();
+    expect(within(panelHeader).getByRole('button', { name: 'Float conversation over surface' })).toBeTruthy();
   });
 
   // Over a Browser main tab in A the page is a native view: its chrome's row hosts the split card's pill (a panel

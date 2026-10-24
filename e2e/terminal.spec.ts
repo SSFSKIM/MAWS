@@ -560,9 +560,9 @@ test('floods without loss while the page stays responsive', async ({ maws }) => 
   // after Terminal exists, and again after the cards hide it. The partial FOX line plus the longest marker needs 62 cols.
   const calibrateWidth = async () => {
     const terminal = surface(h.page, 'terminal');
-    const maximize = terminal.getByRole('button', { name: 'Maximize right panel', exact: true });
+    const maximize = terminal.getByRole('button', { name: 'Expand surface', exact: true });
     if (await maximize.count()) await maximize.click();
-    await expect(terminal.getByRole('button', { name: 'Restore right panel', exact: true })).toBeVisible();
+    await expect(terminal.getByRole('button', { name: 'Restore surface', exact: true })).toBeVisible();
     await expect.poll(async () => (await h.snap(id)).cols, { message: 'the full W1 marker fits its final output row' }).toBeGreaterThanOrEqual(62);
   };
   await h.prompt(id);

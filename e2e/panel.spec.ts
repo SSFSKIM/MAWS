@@ -1108,7 +1108,7 @@ test.describe('the floating session card (P3-G)', () => {
         await expect(card).toBeVisible();
         await panel.getByRole('button', { name: 'Dock session', pressed: true }).click(); // the header's Float, pressed
         await expect(card).toHaveCount(0);
-        await panel.getByRole('button', { name: 'Float session over panel' }).click();
+        await panel.getByRole('button', { name: 'Float conversation over surface' }).click();
         await expect(card).toBeVisible();
       });
 
@@ -1460,7 +1460,7 @@ test.describe('the panel header and X32 (P3-G)', () => {
       await expect(panel.region.locator('[data-editor-header]')).toHaveCount(0);
       await panel.call('addTool', 'harness-stub');
       await expect(stubHeader.locator('[data-header-title]')).toHaveText('Stub');
-      for (const name of ['Float session over panel', 'Maximize right panel', 'Close surface']) await expect(stubHeader.getByRole('button', { name })).toBeVisible();
+      for (const name of ['Float conversation over surface', 'Expand surface', 'Close surface']) await expect(stubHeader.getByRole('button', { name })).toBeVisible();
     });
 
     const editor = await panel.call('addTool', 'harness-editor');
@@ -1494,7 +1494,7 @@ test.describe('the panel header and X32 (P3-G)', () => {
     await test.step('the header at the panel’s narrowest: three actions and Export fold into "More actions", the title keeps its room', async () => {
       await setEditor({ unresolved: 0 }); // the comments action is an ordinary action again: three actions plus Export
       await panel.call('setWidth', 280); // restored from maximized too
-      for (const name of ['Float session over panel', 'Maximize right panel', 'Close surface']) await expect(header.getByRole('button', { name })).toBeInViewport();
+      for (const name of ['Float conversation over surface', 'Expand surface', 'Close surface']) await expect(header.getByRole('button', { name })).toBeInViewport();
       await expect(title).toBeVisible();
       expect(await title.evaluate((el) => el.scrollWidth - el.clientWidth), 'the title is whole, not truncated').toBeLessThanOrEqual(0);
       for (const name of ['Version history', 'Open in tab', 'Comments', 'Export']) await expect(header.getByRole('button', { name })).toHaveCount(0);

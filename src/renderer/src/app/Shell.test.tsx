@@ -123,7 +123,7 @@ describe('shell frame', () => {
     openSurface('review');
     useLayout.getState().setPanel({ width: 444 });
     renderShell();
-    await user.click(screen.getByRole('button', { name: 'Maximize right panel' }));
+    await user.click(screen.getByRole('button', { name: 'Expand surface' }));
     expect(region('main').inert).toBe(true);
     expect(grid().style.gridTemplateColumns).toBe('240px 0px minmax(0, 1fr)');
     const toggle = within(screen.getByRole('banner')).getByRole('button', { name: 'Overview' });
@@ -354,8 +354,10 @@ describe('shell actions', () => {
     expect(useLayout.getState().regions.sidebar.collapsed).toBe(false);
     runAction('panel.maximize');
     expect(useLayout.getState().regions.panel).toMatchObject({ maximized: true, collapsed: false });
-    runAction('panel.toggle'); // hiding a maximized panel un-maximizes it
-    expect(useLayout.getState().regions.panel).toMatchObject({ maximized: false, collapsed: true });
+    runAction('panel.toggle'); // the cards action replaces a surface with session cards
+    expect(useLayout.getState().regions.panel).toMatchObject({ maximized: false, collapsed: false });
+    runAction('panel.toggle'); // and toggles the cards closed
+    expect(useLayout.getState().regions.panel.collapsed).toBe(true);
     runAction('panel.maximize'); // maximizing a hidden panel shows it
     expect(useLayout.getState().regions.panel).toMatchObject({ maximized: true, collapsed: false });
     runAction('panel.maximize');
@@ -369,7 +371,7 @@ describe('shell actions', () => {
     renderShell();
     if (alreadyOpen) act(() => runAction('tab.overview'));
     const previousDialog = screen.queryByRole('dialog', { name: 'Overview' });
-    await user.click(screen.getByRole('button', { name: 'Maximize right panel' }));
+    await user.click(screen.getByRole('button', { name: 'Expand surface' }));
     expect(region('main').inert).toBe(true);
     act(() => runAction('tab.overview'));
     expect(region('main').inert).toBe(false);
@@ -377,7 +379,7 @@ describe('shell actions', () => {
     const dialog = within(region('main')).getByRole('dialog', { name: 'Overview' });
     if (alreadyOpen) expect(dialog).toBe(previousDialog);
     await vi.waitFor(() => expect(document.activeElement).toBe(dialog));
-    act(() => screen.getByRole('button', { name: 'Maximize right panel' }).focus());
+    act(() => screen.getByRole('button', { name: 'Expand surface' }).focus());
     act(() => runAction('tab.overview'));
     expect(document.activeElement).toBe(dialog); // an ordinary bring-focus remains open, never toggles closed
     expect(useLayout.getState().overviewOpen).toBe(true);
@@ -407,10 +409,10 @@ describe('right panel', () => {
   it('keeps an empty panel inert and renders a selected surface’s own header controls', () => {
     renderShell();
     expect(region('panel').inert).toBe(true);
-    expect(within(region('panel')).queryByRole('button', { name: 'Maximize right panel' })).toBeNull();
+    expect(within(region('panel')).queryByRole('button', { name: 'Expand surface' })).toBeNull();
     act(() => openSurface());
     expect(region('panel').inert).toBe(false);
-    expect(within(region('panel')).getByRole('button', { name: 'Maximize right panel' })).toBeTruthy();
+    expect(within(region('panel')).getByRole('button', { name: 'Expand surface' })).toBeTruthy();
     expect(within(region('panel')).getByRole('button', { name: 'Close surface' })).toBeTruthy();
   });
 

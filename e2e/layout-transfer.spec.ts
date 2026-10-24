@@ -206,12 +206,12 @@ test('a document moves main → panel and panel → main by drag: the edit typed
   const id = await documentInMain(page, 'B3 transfer');
   const panel = panelRegion(page);
 
-  await test.step('main → panel: the main tab onto the panel, "Move to panel" shown over it', async () => {
+  await test.step('main → panel: the main tab onto the panel, "Move to side surface" shown over it', async () => {
     await scrollTo(inMain(page, id), 20);
     await typeAtEndOf(page, inMain(page, id), 24, ' main-edit');
     const shown = await firstBlock(inMain(page, id)); // where the reader is as the drag starts
     expect(shown, 'a page scrolled into the document').toMatch(/^Paragraph (1\d|2\d):/);
-    await drag(page, mainTab(page, id), panel, panel.getByText('Move to panel', { exact: true }));
+    await drag(page, mainTab(page, id), panel, panel.getByText('Move to side surface', { exact: true }));
     await expect(inPanel(page, id)).toBeVisible();
     await expect(mainTab(page, id), 'the main tab closed').toHaveCount(0);
     await expect(inMain(page, id)).toHaveCount(0);
@@ -257,7 +257,7 @@ test('a drop onto a panel already showing the document activates it and closes t
   const record = inPanel(page, id);
 
   await typeAtEndOf(page, inMain(page, id), 5, ' last-main-edit');
-  await drag(page, mainTab(page, id), panel, panel.getByText('Move to panel', { exact: true }));
+  await drag(page, mainTab(page, id), panel, panel.getByText('Move to side surface', { exact: true }));
   await expect(mainTab(page, id), 'the source closed').toHaveCount(0);
   await expect(record, 'the panel’s own view kept').toBeVisible();
   await expect(surface(page, 'artifacts'), 'one Artifacts singleton surface, not a cross-tool tab').toHaveCount(1);
@@ -351,7 +351,7 @@ test('a comment draft moves with its document, panel → main and back, kept onc
   expect(await draftFields(page, DRAFT), 'one draft').toBe(1);
   await expect(activePassage(inMain(page, id)).first(), 'the thread still active in main').toBeVisible();
 
-  await drag(page, mainTab(page, id), panel, panel.getByText('Move to panel', { exact: true }));
+  await drag(page, mainTab(page, id), panel, panel.getByText('Move to side surface', { exact: true }));
   await expect(inPanel(page, id)).toBeVisible();
   await expect(inPanel(page, id).locator('[data-comment-card] textarea'), 'the draft back in the panel’s card').toHaveValue(DRAFT);
   expect(await draftFields(page, DRAFT), 'one draft').toBe(1);

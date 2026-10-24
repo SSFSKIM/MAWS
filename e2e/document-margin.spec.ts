@@ -69,7 +69,7 @@ async function openInPanel(page: Page, title: string): Promise<{ id: string; mai
   await pinSurfaceForSessions(page, 'Artifacts');
   const record = panel.locator(`[data-artifact-record="${artifact.id}"]`);
   await expect(record.locator('.ds-doc .ProseMirror[data-editor="live"]')).toBeVisible({ timeout: 15_000 });
-  await panel.getByRole('button', { name: 'Maximize right panel' }).click();
+  await panel.getByRole('button', { name: 'Expand surface' }).click();
   await expect.poll(async () => (await record.locator('.doc-editor-body').boundingBox())!.width, { message: 'the panel maximized' }).toBeGreaterThan(1200);
   return { id: artifact.id, main: record };
 }
