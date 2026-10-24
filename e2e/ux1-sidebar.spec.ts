@@ -77,8 +77,17 @@ test('UX1: titles keep their width on hover and conversation search stays reacha
     await page.mouse.move(700, 400);
     const title = row.locator('[data-session-title]');
     const rest = await title.boundingBox();
+    const rowBox = await row.boundingBox();
+    const worktreeBox = await row.getByRole('img', { name: 'Worktree', exact: true }).boundingBox();
     expect(rest).not.toBeNull();
-    expect(rest!.width, 'the worktree title owns at least half of a compact 240px sidebar').toBeGreaterThanOrEqual(120);
+    expect(rowBox).not.toBeNull();
+    expect(worktreeBox).not.toBeNull();
+    // The title gets the remaining row, not an arbitrary fraction of the outer sidebar. The worktree
+    // character's width depends on the font; reserve only two 7px insets, four 5px gaps, the 12px status,
+    // the shared 26px age/menu slot and the separate 16px unread target. Extra chrome must not steal space.
+    const fixedChromeBudget = 2 * 7 + 4 * 5 + 12 + 26 + 16;
+    const titleBudget = rowBox!.width - worktreeBox!.width - fixedChromeBudget;
+    expect(rest!.width, 'the title uses the remaining width after its required marks and action slots').toBeGreaterThanOrEqual(titleBudget);
     await row.hover();
     const actions = row.getByRole('button', { name: `Actions for ${TITLE}`, exact: true });
     await expect(actions).toBeVisible();
