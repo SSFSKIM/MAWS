@@ -66,14 +66,15 @@ describe('shell frame', () => {
     ]);
   });
 
-  it('keeps the wordmark in the sidebar body and leaves title-bar navigation reachable when collapsed', () => {
+  it('keeps destinations compact and title-bar navigation reachable when the sidebar is collapsed', () => {
     fillStores(scenarioFile('empty'));
     render(<Shell />);
     const toolbar = screen.getByRole('banner');
     expect(within(toolbar).queryByText('MAWS')).toBeNull();
-    const wordmark = within(region('sidebar')).getByText('MAWS');
-    const newChat = within(region('sidebar')).getByRole('button', { name: 'New chat' });
-    expect(wordmark.nextElementSibling).toBe(newChat);
+    expect(within(region('sidebar')).queryByText('MAWS')).toBeNull();
+    const destinations = within(region('sidebar')).getByRole('navigation', { name: 'App destinations' });
+    expect(within(destinations).getByRole('searchbox')).toBeTruthy();
+    expect(within(destinations).getAllByRole('button').map((button) => button.textContent?.replace('⌘N', '').trim())).toEqual(['New chat', 'Projects', 'Artifacts', 'Customize']);
     act(() => useLayout.getState().setSidebar({ collapsed: true }));
     expect(region('sidebar').inert).toBe(true);
     for (const name of ['Toggle sidebar', 'Overview']) {
@@ -430,7 +431,7 @@ describe('right panel', () => {
   });
 });
 
-// P3-G (§D5, acceptance 12): the sidebar's Artifacts row, directly under New chat, opens the Artifacts main tab, a
+// P3-G (§D5, acceptance 12): the sidebar's Artifacts destination opens the Artifacts main tab, a
 // singleton that a second open activates, showing P3-L's library as App.tsx registers it (the slot's fallback where no
 // host registers it).
 describe('the Artifacts entry', () => {
@@ -449,7 +450,7 @@ describe('the Artifacts entry', () => {
     render(<Shell />);
     const sidebar = region('sidebar');
     const row = within(sidebar).getByRole('button', { name: 'Artifacts' });
-    expect(within(sidebar).getByRole('button', { name: 'New chat' }).nextElementSibling).toBe(row);
+    expect(within(sidebar).getByRole('button', { name: 'Projects' }).nextElementSibling).toBe(row);
     expect(row.getAttribute('aria-current')).toBeNull();
 
     await user.click(row);

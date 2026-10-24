@@ -188,7 +188,7 @@ describe('Needs you across projects', () => {
     search.focus();
     for (const name of ['Projects', 'Artifacts', 'Customize']) {
       await user.tab();
-      expect(document.activeElement).toBe(within(screen.getByRole('navigation', { name: 'App destinations' })).getByRole('button', { name, exact: true }));
+      expect(document.activeElement).toBe(within(screen.getByRole('navigation', { name: 'App destinations' })).getByRole('button', { name }));
     }
     await user.tab();
     expect(document.activeElement).toBe(buttons()[0]);
