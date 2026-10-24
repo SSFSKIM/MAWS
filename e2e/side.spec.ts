@@ -920,6 +920,29 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect(redocked).toBeVisible();
     await expect(redocked.getByRole('textbox', { name: 'Reply' })).toBeEnabled();
 
+    // Capture this boundary explicitly: the custom Electron launch has no fixture-managed tracing.
+    await maws.app.context().tracing.start({ screenshots: true, snapshots: true, sources: true });
+    cleanups.push(async () => {
+      const path = test.info().outputPath('reload-trace.zip');
+      await maws.app.context().tracing.stop({ path });
+      await test.info().attach('reload-trace', { path, contentType: 'application/zip' });
+      await test.info().attach('reload-pin-geometry', {
+        body: JSON.stringify({
+          heading: await hero.boundingBox(),
+          card: await redocked.boundingBox(),
+          host: await viewer.locator('[data-card-host]').boundingBox(),
+          frame: await viewer.locator('[data-artifact-frame="html"]').boundingBox(),
+          cardStyle: await redocked.getAttribute('style'),
+        }, null, 2),
+        contentType: 'application/json',
+      });
+      await test.info().attach('reload-screenshot', { body: await page.screenshot(), contentType: 'image/png' });
+    });
+    await page.evaluate(() => {
+      window.addEventListener('message', (event) => {
+        if (event.data?.type === 'maws:located') console.log('reload-located', JSON.stringify(event.data));
+      });
+    });
     // a Reload mounts a new frame: the card stays and is pinned in it again
     await headerAction(page, panelRegion(page), 'Reload');
     await expect(viewer.frameLocator('[data-artifact-frame="html"]').locator('#hero')).toHaveText('Sales overview');
