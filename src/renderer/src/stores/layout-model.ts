@@ -223,7 +223,7 @@ function openIn(view: View, target: TabTarget, pane: PaneTarget, activate: boole
     // ask).
     const open = paneAt(view, found.pane).tabs[found.index];
     const updated =
-      target.kind === 'settings'
+      target.kind === 'settings' || target.kind === 'customize'
         ? replaceTab(view, found.pane, found.index, toRef(target))
         : target.kind === 'file' && open.kind === 'file'
           ? replaceTab(view, found.pane, found.index, { ...open, line: target.line, appSessionId: target.appSessionId })

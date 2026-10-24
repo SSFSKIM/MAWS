@@ -89,6 +89,10 @@ function useTabLabel(tab: TabRef): TabLabel {
       return { title: 'Diagnostics', secondary: null, glyph: null, fileType: null };
     case 'settings':
       return { title: 'Settings', secondary: null, glyph: null, fileType: null };
+    case 'projects':
+      return { title: 'Projects', secondary: null, glyph: null, fileType: null };
+    case 'customize':
+      return { title: 'Customize', secondary: null, glyph: null, fileType: null };
     case 'artifacts': // P3-G
       return { title: 'Artifacts', secondary: null, glyph: null, fileType: null };
     case 'artifact': // P3-L

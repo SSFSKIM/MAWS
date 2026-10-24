@@ -13,7 +13,7 @@
 // never stand in for the list, and A's session states (its observed facts, availability and Refresh) reach `/plugins`
 // only through the loaded line and the detail's "Loaded in this session".
 import { useQueryClient } from '@tanstack/react-query';
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandOutput } from '@shared/ipc/schema';
@@ -39,6 +39,7 @@ import { MyItems } from './plugins/MyItems';
 import { PluginDetail } from './plugins/PluginDetail';
 import { usePluginsEnv, usePluginsRead, type PluginsReadResult } from './plugins/read';
 import { useReloads } from './plugins/reload';
+import { SESSION_UNAVAILABLE, type PluginSession } from './plugins/session';
 import { WidgetFrame } from './WidgetFrame';
 
 // The sessions a change reloads: those with a ready process (the host's fan-out targets).
@@ -60,28 +61,78 @@ function resolutionOf(env: PluginsReadResult<CommandOutput<'plugins.env'>>): Eng
 
 const NO_VIEWS: ReadonlyMap<string, PluginManifestView> = new Map();
 
+type LibraryPresentation = { variant: 'embedded' } | { variant: 'modal'; appSessionId: AppSessionId; close(): void };
+
+export interface PluginsLibraryProps {
+  cwd: string;
+  appSessionId: AppSessionId | null;
+}
+
+// Customize supplies a real directory and, optionally, a ready session. Runtime hooks are mounted only while that
+// attachment is actually ready; an exit never turns Customize into an engine-start surface. A project change resets
+// details and confirmations, so an old request cannot silently become a change in a different project.
+export function PluginsLibrary({ cwd, appSessionId }: PluginsLibraryProps) {
+  const ready = useSessions((s) => appSessionId !== null && s.engine.get(appSessionId)?.process === 'ready');
+  return <EmbeddedLibrary key={cwd} cwd={cwd} appSessionId={ready ? appSessionId : null} />;
+}
+
+function EmbeddedLibrary({ cwd, appSessionId }: PluginsLibraryProps) {
+  const [session, setSession] = useState<PluginSession | null>(null);
+  return (
+    <>
+      {appSessionId !== null && <ReadySession key={appSessionId} appSessionId={appSessionId} onChange={setSession} />}
+      <LibraryBody cwd={cwd} session={session?.appSessionId === appSessionId ? session : null} presentation={{ variant: 'embedded' }} />
+    </>
+  );
+}
+
+// Only the runtime reader follows the attachment. Memo keeps publishing its facts from rerendering the reader itself;
+// reload hooks return new callbacks on each render. The cwd-based body, operations and sheets remain mounted beside it.
+const ReadySession = memo(function ReadySession({ appSessionId, onChange }: { appSessionId: AppSessionId; onChange(session: PluginSession): void }) {
+  const session = usePluginSession(appSessionId, false);
+  useLayoutEffect(() => onChange(session), [onChange, session]);
+  return null;
+});
+
 export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
-  const ready = useSessions((s) => s.engine.get(appSessionId)?.process === 'ready');
   // the CLI's cwd: the launch's directory (which the host compares for project and local scope), else the record's
   const cwd = useSessions((s) => s.engine.get(appSessionId)?.cwd ?? s.records.get(appSessionId)?.directory ?? null);
+  return <SessionLibrary cwd={cwd} appSessionId={appSessionId} presentation={{ variant: 'modal', appSessionId, close }} />;
+}
+
+// The session modal alone keeps dormant-session Refresh. The embedded library exposes ready-process reloads only.
+function SessionLibrary({ cwd, appSessionId, presentation }: { cwd: string | null; appSessionId: AppSessionId; presentation: LibraryPresentation }) {
+  const session = usePluginSession(appSessionId, presentation.variant === 'modal');
+  return <LibraryBody cwd={cwd} session={session} presentation={presentation} />;
+}
+
+function usePluginSession(appSessionId: AppSessionId, allowAcquire: boolean): PluginSession {
+  const ready = useSessions((s) => s.engine.get(appSessionId)?.process === 'ready');
+  const reloads = useReloads(appSessionId);
+  const loaded = useLoadedPlugins(appSessionId);
+  const availability = useAvailability(appSessionId);
+  return { appSessionId, loaded, availability, reloads: ready ? reloads : null, allowAcquire };
+}
+
+function LibraryBody({ cwd, session, presentation }: { cwd: string | null; session: PluginSession | null; presentation: LibraryPresentation }) {
   const readySessions = useSessions((s) => readyCount(s.engine));
   const env = usePluginsEnv();
   const { reread } = env;
   const installed = usePluginsRead('plugins.list', cwd);
   const marketplaces = usePluginsRead('marketplaces.list', cwd);
-  const reloads = useReloads(appSessionId);
-  const loaded = useLoadedPlugins(appSessionId);
-  const availability = useAvailability(appSessionId);
+  const loaded = session?.loaded ?? null;
+  const reloads = session?.reloads ?? null;
+  const appSessionId = session?.appSessionId ?? null;
   const client = useQueryClient();
   // the binary and the paths are the host's answer, never a guess: every sheet reads it again and confirms nothing until
   // it names a binary (M2 review; E8 whole-branch review); the sheet names what the change writes (E11 §2.2)
   const resolveEngine = useCallback(async () => resolutionOf(await reread()), [reread]);
-  const { manage, sheet } = useManageState({ cwd: cwd ?? '', readySessions }, ready ? reloads.reloadMods : null, resolveEngine);
+  const { manage, sheet } = useManageState({ cwd: cwd ?? '', readySessions }, reloads?.reloadMods ?? null, resolveEngine);
 
   const plugins = installed.data?.plugins;
   const markets = marketplaces.data?.marketplaces;
   // the plugins the session loaded, as last observed; none observed is not "loaded none"
-  const loadedIds = useMemo(() => (loaded.freshness.kind === 'unknown' ? null : new Set(loaded.plugins.flatMap((p) => (p.source === null ? [] : [p.source])))), [loaded]);
+  const loadedIds = useMemo(() => (loaded === null || loaded.freshness.kind === 'unknown' ? null : new Set(loaded.plugins.flatMap((p) => (p.source === null ? [] : [p.source])))), [loaded]);
   // the manifest request derives from the listing held, never from the change event (§5.5)
   const requests = useMemo(() => identitiesOf(plugins ?? [], markets ?? [], NO_VIEWS, null).map(({ representative }) => ({ ...installationRef(representative), lastUpdated: representative.lastUpdated })), [plugins, markets]);
   const manifests = usePluginManifests(cwd, requests);
@@ -148,23 +199,28 @@ export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessio
   const add = <AddMenu onOpen={setDialog} />;
   const toolbar = inDetail ? null : tab === 'myItems' ? <PluginsToolbar add={add} /> : <BrowseToolbar sources={shown.sources} hasCounts={shown.hasCounts} sort={shown.sort} add={add} />;
   const pluginDetail = (identity: NonNullable<typeof detail>, backTo: string, onBack: () => void) => (
-    <PluginDetail key={identity.id} appSessionId={appSessionId} availability={availability} identity={identity} loaded={loaded} loadedIds={loadedIds} reloads={ready ? reloads : null} listManifests={manifests} listError={installed.error} backTo={backTo} onBack={onBack} />
+    <PluginDetail key={identity.id} appSessionId={appSessionId} availability={session?.availability ?? null} identity={identity} loaded={loaded} loadedIds={loadedIds} reloads={reloads} allowAcquire={session?.allowAcquire ?? false} listManifests={manifests} listError={installed.error} backTo={backTo} onBack={onBack} />
   );
 
   return (
     <ManageProvider value={manage}>
-      <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.plugins} command="plugins" state="ready" error={null} close={close} size="library" heading={<LibrarySwitch tab={tab} onChange={switchTo} />} toolbar={toolbar}>
+      <WidgetFrame {...presentation} title={WIDGET_TITLE.plugins} command="plugins" state="ready" error={null} size="library" heading={<LibrarySwitch tab={tab} onChange={switchTo} />} toolbar={toolbar}>
         {tab === 'myItems' && (
           <>
             {detail && pluginDetail(detail, L.myItems, () => setSelected(null))}
             <div className={showing ? 'hidden' : 'contents'}>
-              <LoadedLine
-                appSessionId={appSessionId}
-                availability={availability}
-                loaded={loaded}
-                reloads={ready ? reloads : null}
-                onShowLoaded={() => useLibraryStore.setState((s) => ({ plugins: { ...s.plugins, filter: 'loaded' } }))}
-              />
+              {session ? (
+                <LoadedLine
+                  appSessionId={session.appSessionId}
+                  availability={session.availability}
+                  loaded={session.loaded}
+                  reloads={session.reloads}
+                  allowAcquire={session.allowAcquire}
+                  onShowLoaded={() => useLibraryStore.setState((s) => ({ plugins: { ...s.plugins, filter: 'loaded' } }))}
+                />
+              ) : (
+                <p data-plugins-session-unavailable className="m-0 border-b border-border px-2 pb-2 text-ui-sm text-fg-muted">{SESSION_UNAVAILABLE}</p>
+              )}
               <div ref={pane} data-library-pane className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">
                 <MyItems
                   appSessionId={appSessionId}

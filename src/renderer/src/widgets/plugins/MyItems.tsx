@@ -23,12 +23,13 @@ import { LoadedBody, loadedKey, LoadedRow, present } from './LoadedView';
 import { Gone, useManage } from './manage';
 import { GroupHeading, INSTALLED_PREFIX, installationOf, installedKey, PluginRow } from './PluginRow';
 import type { PluginsReadResult } from './read';
+import { SESSION_UNAVAILABLE } from './session';
 
 export interface MyItemsProps {
-  appSessionId: AppSessionId;
+  appSessionId: AppSessionId | null;
   installed: PluginsReadResult<{ plugins: InstalledPlugin[] }>;
   identities: readonly PluginIdentity[];
-  loaded: LoadedPlugins;
+  loaded: LoadedPlugins | null;
   loadedIds: ReadonlySet<string> | null;
   onRetry(): void;
   manifestError: string | null; // `plugins.manifest`'s refusal: the rows stay, without what their files say
@@ -75,8 +76,8 @@ export function MyItems({ appSessionId, installed, identities, loaded, loadedIds
   const gone = [...ops.entries.keys()].filter((key) => key.startsWith(INSTALLED_PREFIX) && !listed.has(key));
   const loadedView = view.filter === 'loaded';
   const groups = myItems(identities, { ...view, loadedIds });
-  const extras = loadedView ? loadedOnlyShown(loadedOnly(loaded.plugins, identities), view.search) : [];
-  const problems = loadedView ? problemsShown(present(loaded).problems, view.search, groups.flatMap((g) => g.rows), extras) : [];
+  const extras = loadedView && loaded !== null ? loadedOnlyShown(loadedOnly(loaded.plugins, identities), view.search) : [];
+  const problems = loadedView && loaded !== null ? problemsShown(present(loaded).problems, view.search, groups.flatMap((g) => g.rows), extras) : [];
   const resetFilters = () => useLibraryStore.setState((s) => ({ plugins: { ...s.plugins, search: '', filter: 'all' } }));
   const showAll = () => useLibraryStore.setState((s) => ({ plugins: { ...s.plugins, filter: 'all' } }));
 
@@ -91,7 +92,7 @@ export function MyItems({ appSessionId, installed, identities, loaded, loadedIds
   } else if (loadedView && loadedIds === null) {
     body = (
       <Centered role="status">
-        <p className="m-0 text-ui text-fg-muted">{L.loadedUnknown}</p>
+        <p className="m-0 text-ui text-fg-muted">{loaded === null ? SESSION_UNAVAILABLE : L.loadedUnknown}</p>
         <button type="button" className={SECONDARY} onClick={showAll}>
           {L.showAll}
         </button>

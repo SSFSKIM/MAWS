@@ -24,6 +24,8 @@ export const TabRefSchema = z.discriminatedUnion('kind', [
   z.strictObject({ id: z.literal('settings'), kind: z.literal('settings'), section: z.enum(['engine', 'gateway', 'keyboard', 'appearance', 'notifications', 'voice', 'browser', 'artifacts', 'sessions']).nullable(), pinned: z.literal(false) }),   // C11: singleton; a second openTab activates it and updates `section`; titled 'Settings'; E9: 'voice' appended (the index places it after Keyboard); E4a: 'browser' appended (Settings › Browser, Task 3.4); P3-D: 'artifacts' appended (Settings › Artifacts, the design-system defaults)
   // P3-G (§D5): the Artifacts library, a singleton like Settings; its content is the `artifactsLibrary` slot P3-L fills
   z.strictObject({ id: z.literal('artifacts'), kind: z.literal('artifacts'), pinned: z.literal(false) }),
+  z.strictObject({ id: z.literal('projects'), kind: z.literal('projects'), pinned: z.literal(false) }),
+  z.strictObject({ id: z.literal('customize'), kind: z.literal('customize'), section: z.enum(['plugins', 'skills', 'mcp']), pinned: z.literal(false) }),
   // P3-L (Decision Log 7, 8): one artifact in its kind's editor, one tab per artifact; the workspace's, not a session's
   // (it follows the current tab set as the library does), pinnable like a file tab
   z.strictObject({ id: z.string(), kind: z.literal('artifact'), artifactId: z.string(), pinned: z.boolean() }),
@@ -53,6 +55,10 @@ export function tabId(tab: TabTarget): string {
       return 'settings';
     case 'artifacts': // P3-G
       return 'artifacts';
+    case 'projects':
+      return 'projects';
+    case 'customize':
+      return 'customize';
     case 'artifact': // P3-L
       return `artifact:${tab.artifactId}`;
     // E4a start
@@ -63,7 +69,7 @@ export function tabId(tab: TabTarget): string {
 }
 
 // Tab kinds the pin control never applies to: C11's singleton (the Accounts tab, the other, retired with W6) and P3-G's.
-export const UNPINNABLE_KINDS: ReadonlySet<TabRef['kind']> = new Set(['settings', 'artifacts']);
+export const UNPINNABLE_KINDS: ReadonlySet<TabRef['kind']> = new Set(['settings', 'artifacts', 'projects', 'customize']);
 
 // A pane holds at least one tab, except that the only pane may be empty (W5: with the Overview out of the strip, closing
 // the last tab leaves an empty main area; `activeTabId` is '' then).

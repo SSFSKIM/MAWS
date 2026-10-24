@@ -29,7 +29,13 @@ import type { CommandOutput } from '@shared/ipc/schema';
 import { displayTitle } from '../sessions/title';
 
 export const usePalette = create<{ open: boolean; scope: 'all' | 'sessions'; query: string }>()(() => ({ open: false, scope: 'all', query: '' }));
-export const togglePalette = () => usePalette.setState((s) => ({ open: !s.open, scope: 'all', query: '' }));
+export const openPalette = (query = '') => usePalette.setState({ open: true, scope: 'all', query });
+export const togglePalette = () => {
+  // Menu accelerators arrive outside React's key handler. A focused sidebar field carries its query into ⌘K too.
+  const field = document.activeElement;
+  const query = field instanceof HTMLInputElement && field.hasAttribute('data-palette-query') ? field.value : '';
+  usePalette.setState((state) => ({ open: !state.open, scope: 'all', query }));
+};
 export const openConversationSearch = (query = '') => usePalette.setState({ open: true, scope: 'sessions', query });
 
 export interface PaletteEntries {

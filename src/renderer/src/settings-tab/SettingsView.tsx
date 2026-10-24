@@ -16,6 +16,7 @@ import { useSettingsValue } from './parts';
 import { VoiceSection } from './VoiceSection'; // E9
 import { BrowserSection } from './BrowserSection'; // E4a
 import { ArtifactsSection } from './ArtifactsSection'; // P3-D
+import { openCustomize } from '../customize/open';
 
 export type SettingsSection = NonNullable<Extract<TabRef, { kind: 'settings' }>['section']>;
 const ORDER: SettingsSection[] = ['engine', 'gateway', 'keyboard', 'voice', 'appearance', 'notifications', 'sessions', 'browser', 'artifacts']; // E9: Voice after Keyboard; E4a: Browser; P3-D: Artifacts last
@@ -80,6 +81,9 @@ export function SettingsView({ section }: { section: SettingsSection | null }) {
               {SECTIONS[s]}
             </button>
           ))}
+          <button type="button" onClick={() => openCustomize()} className="mt-2 rounded-sm border-t border-border px-2 py-2 text-left text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover focus-visible:outline-2 @max-lg/settings:mt-0 @max-lg/settings:border-t-0">
+            Plugins, skills and MCP servers <span aria-hidden>›</span>
+          </button>
           <p className="m-0 px-2 pt-3.5 text-ui-sm leading-normal text-fg-muted @max-lg/settings:hidden">{INDEX.footer}</p>
         </nav>
         <div ref={body} onScroll={onScroll} data-settings-body className="min-h-0 overflow-x-hidden overflow-y-auto px-5 pt-2 pb-3 @max-lg/settings:px-3">

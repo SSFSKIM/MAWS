@@ -13,7 +13,7 @@ import { useBuiltInMods } from './builtin-mods';
 import { Switch } from './manage';
 import { GroupHeading, PluginTile } from './PluginRow';
 
-export function BuiltInMods({ appSessionId, search }: { appSessionId: AppSessionId; search: string }) {
+export function BuiltInMods({ appSessionId, search }: { appSessionId: AppSessionId | null; search: string }) {
   const { read, failure, setEnabled, setOverride } = useBuiltInMods(appSessionId);
   if (read.state === 'loading') return null;
   if (read.state === 'unavailable')
@@ -42,7 +42,7 @@ export function BuiltInMods({ appSessionId, search }: { appSessionId: AppSession
               </span>
               <span>{row.description}</span>
               <span data-mod-source={row.source}>{L.mod.source[row.source]}</span>
-              {row.perSession !== undefined && (
+              {appSessionId !== null && row.perSession !== undefined && (
                 <span className="mt-1 flex flex-wrap items-center gap-2">
                   <span>{L.mod.session}</span>
                   <Segment label={L.mod.sessionOverride(row.name)} value={row.perSession} options={L.mod.override(row.enabled)} onChange={(value) => void setOverride(row.id, value)} />

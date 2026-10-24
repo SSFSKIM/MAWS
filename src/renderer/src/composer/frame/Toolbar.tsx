@@ -33,7 +33,7 @@ export interface ToolbarProps {
 export function Toolbar({ appSessionId, bindings, cwd, dirty, editor, onOpen, ring = null }: ToolbarProps) {
   return (
     <div role="toolbar" aria-label="Composer tools" className="flex min-w-0 items-center gap-0.5">
-      <PlusMenu cwd={cwd} editor={editor} directories={bindings.directories} />
+      <PlusMenu appSessionId={appSessionId} cwd={cwd} editor={editor} directories={bindings.directories} />
       {/* New chat: an unstarted tab's project row above the box stands for the location until the session starts */}
       {bindings.project === null && <LocationChip location={bindings.location} directories={bindings.directories.value} dirty={dirty} onOpen={() => onOpen?.('rules')} />}
       <ModeChip binding={bindings.mode} onOpen={() => onOpen?.('models')} />

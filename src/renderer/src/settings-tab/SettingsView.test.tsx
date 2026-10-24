@@ -12,6 +12,9 @@ import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
 import { BINARY, settingsBridge, VOICE_HELPER, type SettingsBridge } from '../test-support/settings-bridge';
 import { SettingsView } from './SettingsView';
+import { useLayout } from '../stores/layout';
+import { activeTab } from '../stores/layout-model';
+import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 // C12 start
 import type { AppSessionId } from '@shared/graph/ids';
 import { status } from '../../../../test/support/builders';
@@ -52,9 +55,18 @@ describe('settings tab writes one field per row', () => {
   it('has the eight sections, the index and its footer', () => {
     renderView();
     const index = screen.getByRole('navigation', { name: 'Settings sections' });
-    expect(within(index).getAllByRole('button').map((x) => x.textContent)).toEqual(['Engine', 'Gateway', 'Keyboard', 'Voice', 'Appearance', 'Notifications', 'Sessions', 'Browser', 'Artifacts']); // E9: Voice after Keyboard; E4a: Browser; P3-D: Artifacts last
+    expect(within(index).getAllByRole('button').map((x) => x.textContent)).toEqual(['Engine', 'Gateway', 'Keyboard', 'Voice', 'Appearance', 'Notifications', 'Sessions', 'Browser', 'Artifacts', 'Plugins, skills and MCP servers ›']);
     expect(index.textContent).toContain("Stored in MAWS's own Application Support folder. Nothing here writes into ~/.claude.");
     for (const name of ['Engine', 'Gateway', 'Keyboard', 'Voice', 'Appearance', 'Notifications', 'Sessions', 'Browser', 'Artifacts']) expect(screen.getByRole('region', { name })).toBeTruthy();
+  });
+
+  it('opens the Customize destination from the index without changing settings', () => {
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+    renderView();
+    fireEvent.click(screen.getByRole('button', { name: 'Plugins, skills and MCP servers' }));
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'customize', section: 'plugins' });
+    expect(b.sets).toEqual([]);
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
   });
 
   it('Engine: the binary, the config home, and the subagent model as one field', async () => {

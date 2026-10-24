@@ -30,15 +30,17 @@ import { INSTALLED_PREFIX, installationOf, installedKey } from './PluginRow';
 import { requestFor } from './present';
 import type { Reloads } from './reload';
 import { OtherProjects, ScopeChips } from './ScopeChips';
+import { SESSION_UNAVAILABLE } from './session';
 import { InsideSummary, InsideTabs } from './WhatsInside';
 
 export interface PluginDetailProps {
-  appSessionId: AppSessionId;
+  appSessionId: AppSessionId | null;
   availability: Availability | null; // A's `useAvailability`
   identity: PluginIdentity;
-  loaded: SessionPlugins; // A's `useLoadedPlugins`, its `refresh` the loaded line's
+  loaded: SessionPlugins | null; // null without an attached session; otherwise A's `useLoadedPlugins`
   loadedIds: ReadonlySet<string> | null; // the loaded list's ids; null when none was observed
   reloads: Reloads | null; // on a ready process
+  allowAcquire?: boolean; // false in Customize, including its detail's reload action
   listManifests: { error: string | null; retry(): void }; // the list's read, which holds the representative installation's view
   listError?: string | null; // the installed list's later failed read: what the detail shows is the last list read (E8's rule)
   backTo?: string; // the view Back returns to: My items, or Browse for an installed card opened there
@@ -52,7 +54,7 @@ const ITEM = 'flex h-7 cursor-default items-center rounded-sm px-2 outline-none 
 
 type Change = Extract<PluginsAction, 'update' | 'uninstall' | 'enable' | 'disable'>;
 
-export function PluginDetail({ appSessionId, availability, identity, loaded, loadedIds, reloads, listManifests, listError = null, backTo = L.myItems, onBack }: PluginDetailProps) {
+export function PluginDetail({ appSessionId, availability, identity, loaded, loadedIds, reloads, allowAcquire = true, listManifests, listError = null, backTo = L.myItems, onBack }: PluginDetailProps) {
   const { ask, cwd, ops } = useManage();
   const now = useNow();
   const root = useRef<HTMLDivElement>(null);
@@ -183,7 +185,7 @@ export function PluginDetail({ appSessionId, availability, identity, loaded, loa
           <>
             {selected === OTHER_PROJECTS && <OtherProjects installations={others} />}
             {view?.description && <p className="m-0 text-ui text-fg [overflow-wrap:anywhere] whitespace-pre-line">{view.description}</p>}
-            <Facts appSessionId={appSessionId} availability={availability} identity={identity} loaded={loaded} loadedIds={loadedIds} reloads={reloads} now={now} />
+            <Facts appSessionId={appSessionId} availability={availability} identity={identity} loaded={loaded} loadedIds={loadedIds} reloads={reloads} allowAcquire={allowAcquire} now={now} />
             {installation.errors.length > 0 && (
               <ul className="m-0 list-none p-0 text-ui-sm text-danger">
                 {installation.errors.map((error, i) => (
@@ -244,7 +246,22 @@ const goneName = (key: string): string => {
 // list without it reads "Not loaded in this session" and, when the plugin is enabled here, offers Reload plugins (ready)
 // or the loaded line's Refresh, with A's line for a session that cannot start; no list reads "Not observed yet". The
 // last init's problems for this plugin beneath.
-function Facts({ appSessionId, availability, identity, loaded, loadedIds, reloads, now }: Omit<PluginDetailProps, 'onBack' | 'listManifests' | 'backTo'> & { now: number }) {
+type FactsProps = Omit<PluginDetailProps, 'onBack' | 'listManifests' | 'backTo'> & { now: number };
+
+function Facts(props: FactsProps) {
+  return (
+    <div className="flex flex-col gap-1 text-ui">
+      <p data-plugin-fact="enabled" className="m-0 text-fg">
+        {props.identity.enabledHere ? L.enabledHere : L.notEnabledHere}
+      </p>
+      {props.loaded !== null && props.appSessionId !== null
+        ? <SessionFacts {...props} appSessionId={props.appSessionId} loaded={props.loaded} />
+        : <p data-plugin-fact="loaded" className="m-0 text-fg-muted">{SESSION_UNAVAILABLE}</p>}
+    </div>
+  );
+}
+
+function SessionFacts({ appSessionId, availability, identity, loaded, loadedIds, reloads, allowAcquire = true, now }: FactsProps & { appSessionId: AppSessionId; loaded: SessionPlugins }) {
   const fact = loadedFactOf(identity.id, loaded, loadedIds);
   const refresh = useRefresh(loaded.refresh);
   const problems = present(loaded).problems.filter((p) => p.plugin === identity.name || p.plugin === identity.id);
@@ -255,25 +272,18 @@ function Facts({ appSessionId, availability, identity, loaded, loadedIds, reload
   else if (fact.freshness.kind === 'last') loadedWords = `${L.loadedHere} · ${FRESHNESS.loadedLast(fact.freshness.at, now)}`;
   else loadedWords = L.loadedHere;
   const offerReload = fact.kind === 'absent' && identity.enabledHere;
+  const reloadButton = reloads && (
+    <TextButton onClick={reloads.reloadMods} disabled={reloads.busy}>
+      {W.reloadMods}
+    </TextButton>
+  );
   return (
-    <div className="flex flex-col gap-1 text-ui">
-      <p data-plugin-fact="enabled" className="m-0 text-fg">
-        {identity.enabledHere ? L.enabledHere : L.notEnabledHere}
-      </p>
+    <>
       <div data-plugin-fact="loaded" className="flex flex-wrap items-baseline gap-x-2 text-fg [&>[data-dormant-gesture]]:mb-0">
         <span>{loadedWords}</span>
-        {offerReload && (
-          <RefreshGesture
-            appSessionId={appSessionId}
-            availability={availability}
-            refresh={refresh}
-            ready={reloads && (
-              <TextButton onClick={reloads.reloadMods} disabled={reloads.busy}>
-                {W.reloadMods}
-              </TextButton>
-            )}
-          />
-        )}
+        {offerReload && (allowAcquire
+          ? <RefreshGesture appSessionId={appSessionId} availability={availability} refresh={refresh} ready={reloadButton} />
+          : reloadButton)}
       </div>
       {offerReload && reloads?.line && (
         <p role="status" className={`m-0 text-ui-sm ${reloads.failed ? 'text-danger' : 'text-fg-muted'}`}>
@@ -295,6 +305,6 @@ function Facts({ appSessionId, availability, identity, loaded, loadedIds, reload
           ))}
         </ul>
       )}
-    </div>
+    </>
   );
 }

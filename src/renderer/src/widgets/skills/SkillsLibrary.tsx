@@ -6,13 +6,13 @@
 // text: in MAWS it would open another widget. "Use in chat" closes the dialog and puts `/<name> ` at the composer's caret,
 // sending nothing (§5.10; Desktop's local Code library has no such action, §11).
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { SortIcon } from '../../app/IconButton';
+import { Icon, SortIcon } from '../../app/IconButton';
 import { LIBRARY as L, PLUGIN_MANAGEMENT, SKILLS_LIBRARY as S } from '../copy';
 import { BackButton, backOnChord } from '../plugins/PluginDetail';
 import { Choice, SearchField } from '../plugins/LibraryHeader';
 import { useLibraryStore } from '../plugins/library-store';
 import { GroupHeading } from '../plugins/PluginRow';
-import { badgeOf, labelOf, type SkillGroup, type SkillRow, type SkillsSort } from './skills';
+import { badgeOf, invocationOf, labelOf, type SkillGroup, type SkillRow, type SkillsSort } from './skills';
 
 const setSkills = (patch: Partial<ReturnType<typeof useLibraryStore.getState>['skills']>) => useLibraryStore.setState((s) => ({ skills: { ...s.skills, ...patch } }));
 const ACTION = 'inline-flex h-7 shrink-0 items-center rounded-md px-2.5 text-ui outline-accent focus-visible:outline-2 disabled:cursor-default';
@@ -36,11 +36,11 @@ export function SkillsToolbar({ plugins, canReload, reloading, onReload }: { plu
   );
 }
 
-// A neutral tile with the slash a skill is typed with (the skills carry no icon).
-function SkillTile({ size = 'size-9' }: { size?: string }) {
+// Only a verified invocation earns the slash; disk metadata uses a neutral document glyph.
+function SkillTile({ invocable, size = 'size-9' }: { invocable: boolean; size?: string }) {
   return (
     <span aria-hidden className={`flex ${size} shrink-0 items-center justify-center rounded-md border border-border bg-bg-active font-mono text-ui text-fg-muted`}>
-      /
+      {invocable ? '/' : <Icon><path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3M6 8h4M6 10.5h4" /></Icon>}
     </span>
   );
 }
@@ -56,9 +56,10 @@ function Centered({ children, role }: { children: ReactNode; role?: 'status' | '
 // A click inside the row opens its detail unless it landed on a control of its own.
 const ownControl = (target: EventTarget): boolean => target instanceof Element && target.closest('button:not([data-row-open])') !== null;
 
-function SkillItem({ row, onOpen, onUse }: { row: SkillRow; onOpen(row: SkillRow): void; onUse(name: string): void }) {
+function SkillItem({ row, onOpen, onUse }: { row: SkillRow; onOpen(row: SkillRow): void; onUse?(name: string): void }) {
   const label = labelOf(row);
   const badge = badgeOf(row);
+  const invocation = invocationOf(row);
   return (
     <li
       data-skill-row={row.name}
@@ -68,10 +69,10 @@ function SkillItem({ row, onOpen, onUse }: { row: SkillRow; onOpen(row: SkillRow
       }}
     >
       <button type="button" data-row-open aria-label={L.view(label)} className="absolute inset-0 rounded-sm outline-accent -outline-offset-2 focus-visible:outline-2" />
-      <SkillTile />
+      <SkillTile invocable={invocation !== null} />
       <div className="relative flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex min-w-0 items-center gap-2">
-          <span data-skill-name className="truncate font-medium text-fg" title={`/${row.name}`}>
+          <span data-skill-name className="truncate font-medium text-fg" title={invocation === null ? undefined : `/${invocation}`}>
             {label}
           </span>
           {badge !== null && (
@@ -82,32 +83,34 @@ function SkillItem({ row, onOpen, onUse }: { row: SkillRow; onOpen(row: SkillRow
         </span>
         {row.description !== '' && <span className="truncate text-ui-sm text-fg-muted">{row.description}</span>}
       </div>
-      <button type="button" className={`relative ${SECONDARY}`} onClick={() => onUse(row.name)}>
+      {onUse && invocation !== null && <button type="button" className={`relative ${SECONDARY}`} onClick={() => onUse(invocation)}>
         {S.useInChat}
-      </button>
+      </button>}
     </li>
   );
 }
 
-function SkillDetail({ row, onBack, onUse }: { row: SkillRow; onBack(): void; onUse(name: string): void }) {
+function SkillDetail({ row, onBack, onUse }: { row: SkillRow; onBack(): void; onUse?(name: string): void }) {
   const root = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => root.current?.focus(), []);
+  const invocation = invocationOf(row);
   const facts: { label: string; value: ReactNode }[] = [
-    { label: S.invoke, value: <code className="font-mono text-ui-sm">/{row.name}</code> },
+    ...(invocation !== null ? [{ label: S.invoke, value: <code className="font-mono text-ui-sm">/{invocation}</code> }] : []),
     ...(row.plugin !== null ? [{ label: S.plugin, value: row.plugin }] : []),
     ...(row.source !== '' ? [{ label: S.source, value: row.source }] : []),
+    ...(row.path ? [{ label: 'File', value: row.path }] : []),
   ];
   return (
     <div ref={root} tabIndex={-1} data-skill-detail={row.name} onKeyDown={backOnChord(onBack)} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-2 pb-3 outline-none">
       <BackButton to={S.list} onBack={onBack} />
       <div className="flex items-center gap-3">
-        <SkillTile size="size-11" />
+        <SkillTile invocable={invocation !== null} size="size-11" />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <h3 className="m-0 truncate text-prose font-semibold text-fg">{labelOf(row)}</h3>
         </div>
-        <button type="button" className={PRIMARY} onClick={() => onUse(row.name)}>
+        {onUse && invocation !== null && <button type="button" className={PRIMARY} onClick={() => onUse(invocation)}>
           {S.useInChat}
-        </button>
+        </button>}
       </div>
       {row.description !== '' && <p className="m-0 max-w-[640px] text-ui whitespace-pre-wrap text-fg [overflow-wrap:anywhere]">{row.description}</p>}
       <dl className="m-0 grid max-w-[640px] grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-ui-sm">
@@ -124,7 +127,7 @@ function SkillDetail({ row, onBack, onUse }: { row: SkillRow; onBack(): void; on
 
 // The list pane and, in place of it, a row's detail. The list stays mounted beneath the detail so Back returns to it as
 // it was; its scroll is restored by hand (an element under `display:none` loses its scrollTop).
-export function SkillsLibrary({ groups, shown, onUse, onDetail }: { groups: readonly SkillGroup[]; shown: readonly SkillGroup[]; onUse(name: string): void; onDetail(open: boolean): void }) {
+export function SkillsLibrary({ groups, shown, onUse, onDetail }: { groups: readonly SkillGroup[]; shown: readonly SkillGroup[]; onUse?(name: string): void; onDetail(open: boolean): void }) {
   const [selected, setSelected] = useState<SkillRow | null>(null);
   const pane = useRef<HTMLDivElement>(null);
   const left = useRef<{ name: string; scrollTop: number } | null>(null);
@@ -169,7 +172,7 @@ export function SkillsLibrary({ groups, shown, onUse, onDetail }: { groups: read
         {group !== null && <GroupHeading label={L.group[group]} count={rows.length} />}
         <ul aria-label={group === null ? S.list : undefined} className="m-0 list-none p-0">
           {rows.map((row) => (
-            <SkillItem key={row.name} row={row} onOpen={open} onUse={onUse} />
+            <SkillItem key={row.path ?? row.name} row={row} onOpen={open} onUse={onUse} />
           ))}
         </ul>
       </section>

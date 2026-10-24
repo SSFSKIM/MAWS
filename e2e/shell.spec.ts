@@ -338,14 +338,14 @@ async function assertToolbarPlacement(page: Page): Promise<void> {
   const wordmark = page.locator('[data-sidebar-wordmark]');
   const newChat = page.locator('[data-region="sidebar"]').getByRole('button', { name: 'New chat', exact: true });
   const search = page.locator('[data-region="sidebar"]').getByRole('searchbox');
-  // the wordmark is the sidebar's: no MAWS in the title bar but the project chip's name (P3-F wave S, F17), which is MAWS
-  // when that project's set is shown
+  // The compact destination header has no wordmark. MAWS may still be the project chip's name (P3-F wave S, F17).
   const marks = toolbar.getByText('MAWS', { exact: true });
   await expect.poll(() => marks.evaluateAll((els) => els.filter((el) => !el.closest('[data-toolbar-project]')).length), { message: 'no wordmark in the title bar' }).toBe(0);
-  await expect(wordmark).toBeVisible();
-  const [markBox, newBox, searchBox] = await Promise.all([wordmark, newChat, search].map((el) => el.boundingBox()));
-  expect(newBox!.y).toBe(markBox!.y + markBox!.height);
-  expect(searchBox!.y).toBeGreaterThanOrEqual(newBox!.y + newBox!.height);
+  await expect(wordmark).toHaveCount(0);
+  const destinations = page.getByRole('navigation', { name: 'App destinations' });
+  const ordered = [search, newChat, ...['Projects', 'Artifacts', 'Customize'].map((name) => destinations.getByRole('button', { name, exact: true }))];
+  const boxes = await Promise.all(ordered.map((element) => element.boundingBox()));
+  for (let i = 1; i < boxes.length; i++) expect(boxes[i]!.y).toBeGreaterThanOrEqual(boxes[i - 1]!.y + boxes[i - 1]!.height);
   await expect(newChat.locator('svg')).toHaveCSS('color', await newChat.evaluate((el) => getComputedStyle(el).color));
   await sidebar.click();
   await expect(page.locator('[data-region="sidebar"]')).toHaveAttribute('inert', '');

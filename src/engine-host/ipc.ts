@@ -77,6 +77,7 @@ import type { ArtifactStore } from './documents/store'; // P3-A (M6)
 import type { DatasetRefreshRequests } from './connectors/dataset-requests'; // E3
 // P2-A end
 import { rendererMcpStatus } from './mcp-status'; // P3-H
+import { registerCustomizationInventory } from './customization/inventory'; // UX2-K
 
 export type DeadlineShape = 'immediate' | 'bounded' | 'operation';
 type C3Command = (typeof C3_SESSION_COMMANDS)[number] | (typeof C3_ENGINE_COMMANDS)[number];
@@ -751,6 +752,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   // session.reloadSkills"). A read is one CLI run (about a second; the bridge's 10 s deadline is accepted) reduced to the
   // fields the widget shows; every mutation is an operation completing on `plugins.operation`; `session.reloadSkills` is
   // an operation beside `session.reloadPlugins`.
+  registerCustomizationInventory(on, { userData: deps.userData, captureEnv });
   on('plugins.env', async () => {
     const [check, env] = await Promise.all([binaryProbe(), captureEnv()]);
     const home = env.HOME || homedir();
