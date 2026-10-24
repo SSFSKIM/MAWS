@@ -11,7 +11,7 @@ import { registerSessionCreator } from '../keymap/actions-runtime';
 import { closeDialog, useDialogs } from '../sessions/dialogs';
 import { SessionDialogs } from '../sessions/SessionDialogs';
 import { Toolbar } from '../app/Toolbar';
-import { item, record } from '../../../../test/support/builders';
+import { digest, item, project, record } from '../../../../test/support/builders';
 import { registerAction } from '../keymap/actions-runtime'; // C11
 import { useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
@@ -72,6 +72,80 @@ describe('sidebar destination search', () => {
     fireEvent.keyDown(field, { key: 'Escape' });
     expect((field as HTMLInputElement).value).toBe('');
     usePalette.setState({ open: false, query: '', scope: 'all' });
+  });
+});
+
+it('keeps conversation search beside the input and keyboard-reachable with all 785 matching sessions listed', async () => {
+  const chosen = project('chosen', 0);
+  const sessions = Array.from({ length: 785 }, (_, index) => record(`test ${index + 1}`, { projectId: chosen.id }));
+  fillStores({ projects: [chosen], sessions, digests: [], attention: [], engine: [], timeline: [] });
+  render(<Sidebar />);
+  const field = screen.getByRole('searchbox', { name: 'Search projects and sessions' });
+  act(() => field.focus());
+  fireEvent.change(field, { target: { value: 'test' } });
+  expect(sessionRows(row('chosen'))).toHaveLength(785);
+  expect(within(row('chosen')).getByLabelText('785 matching sessions')).toBeTruthy();
+  const search = within(screen.getByRole('navigation', { name: 'App destinations' })).getByRole('button', { name: 'Search in conversations for ‘test’' });
+  await userEvent.tab();
+  expect(document.activeElement).toBe(search);
+  await userEvent.keyboard('{Enter}');
+  expect(usePalette.getState()).toMatchObject({ open: true, query: 'test', scope: 'sessions' });
+  usePalette.setState({ open: false, query: '', scope: 'all' });
+});
+
+describe('sidebar action stability', () => {
+  const alpha = project('alpha', 0);
+  const beta = project('beta', 1);
+  const first = record('first', { projectId: alpha.id, updatedAt: '2026-10-24T10:00:00Z' });
+  const second = record('second', { projectId: alpha.id, updatedAt: '2026-10-24T09:00:00Z' });
+  const elsewhere = record('elsewhere', { projectId: beta.id, updatedAt: '2026-10-24T08:00:00Z' });
+  const start = () => {
+    fillStores({ projects: [alpha, beta], sessions: [first, second, elsewhere], digests: [], attention: [], engine: [], timeline: [] });
+    expand(alpha.id);
+    return render(<><Sidebar /><button>Outside</button></>);
+  };
+  const working = (id: AppSessionId) => act(() => useSessions.getState().applyDigest(digest(id, { phase: 'working', turnStartedAt: id === elsewhere.appId ? '2026-10-24T13:00:00Z' : '2026-10-24T12:00:00Z' })));
+
+  it.each(['pointer', 'keyboard'] as const)('holds both project and session ranks for the %s, while statuses stay live, then applies the latest ranks on leaving', (input) => {
+    start();
+    const tree = screen.getByTestId('sidebar-tree');
+    if (input === 'pointer') fireEvent.pointerEnter(tree);
+    else act(() => row('first').focus());
+    working(second.appId);
+    working(elsewhere.appId);
+    expect(projectRows()).toEqual(['alpha', 'beta']);
+    expect(sessionRows(row('alpha'))).toEqual(['first', 'second']);
+    expect(within(row('second')).getByRole('img', { name: 'Working' })).toBeTruthy();
+    if (input === 'pointer') fireEvent.pointerLeave(tree);
+    else act(() => screen.getByRole('button', { name: 'Outside' }).focus());
+    expect(projectRows()).toEqual(['beta', 'alpha']);
+    expect(sessionRows(row('alpha'))).toEqual(['second', 'first']);
+  });
+
+  it('keeps ranks held when the pointer leaves for the project context menu', async () => {
+    start();
+    const tree = screen.getByTestId('sidebar-tree');
+    fireEvent.pointerEnter(tree);
+    fireEvent.contextMenu(row('alpha'));
+    fireEvent.pointerLeave(tree);
+    working(elsewhere.appId);
+    expect(projectRows()).toEqual(['alpha', 'beta']);
+    await screen.findByRole('menu');
+    await userEvent.click(screen.getByRole('button', { name: 'Outside' }));
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+    act(() => screen.getByRole('button', { name: 'Outside' }).focus());
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Outside' }));
+    await waitFor(() => expect(projectRows()).toEqual(['beta', 'alpha']));
+  });
+
+  it('lets an explicit sort change take effect while keyboard focus remains in the sidebar', async () => {
+    start();
+    act(() => useSessions.getState().applyDigest(digest(second.appId, { phase: 'working', turnStartedAt: '2026-10-24T07:00:00Z' })));
+    expect(sessionRows(row('alpha'))).toEqual(['second', 'first']);
+    act(() => row('second').focus());
+    act(() => useLayout.getState().setSidebar({ sort: 'recency' }));
+    expect(sessionRows(row('alpha'))).toEqual(['first', 'second']);
+    expect(document.activeElement).toBe(row('second'));
   });
 });
 
@@ -371,12 +445,12 @@ describe('the project list', () => {
   });
 });
 
-// W11 (I5): the archive icon removes a project from the sidebar; a hidden project and its sessions show nowhere in the
+// W11 (I5): the removal action hides a project from the sidebar; a hidden project and its sessions show nowhere in the
 // tree (never under Other sessions), and "Hidden projects…" at the end offers them back.
 describe('removing a project from the sidebar', () => {
   beforeEach(() => fillStores(nine));
 
-  it('the archive icon beside "+" runs the confirmed removal, disabled until it has a handler', async () => {
+  it('the remove action beside "+" runs the confirmed removal, disabled until it has a handler', async () => {
     const user = userEvent.setup();
     render(<Sidebar />);
     expect((within(row('MAWS')).getByRole('button', { name: 'Remove MAWS from sidebar' }) as HTMLButtonElement).disabled).toBe(true);
@@ -493,9 +567,7 @@ describe('an expanded project', () => {
     await user.hover(session);
     const toggle = within(session).getByRole('button', { name: 'Mark read' });
     const overflow = within(session).getByRole('button', { name: 'Actions for Fix sidebar drag' });
-    expect(session.lastElementChild).toBe(toggle);
-    expect(toggle.previousElementSibling).toBe(overflow);
-    expect(overflow.className).not.toContain('absolute');
+    expect(toggle).not.toBe(overflow); // distinct actions; the real-window regression checks their hit targets
     await user.click(within(session).getByRole('button', { name: 'Mark read' }));
     expect(fake.invoked('session.update')).toEqual([{ appSessionId: idOf('Fix sidebar drag'), patch: { unread: false } }]);
     expect(within(session).queryByRole('img', { name: 'Unread' })).toBeNull();

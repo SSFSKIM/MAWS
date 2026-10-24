@@ -11,7 +11,7 @@
 // template.
 import { useState } from 'react';
 import type { ProjectId } from '@shared/graph/ids';
-import { ArchiveIcon, FolderIcon, Icon, PlusIcon, SearchIcon } from '../app/IconButton';
+import { FolderIcon, Icon, PlusIcon, SearchIcon } from '../app/IconButton';
 import { createSession, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { DisclosureBody } from '../ui/disclosure';
 import type { ProjectEntry, ProjectKey, SessionTreeRow } from './derive';
@@ -111,7 +111,7 @@ const ACTION =
   'inline-flex size-[22px] shrink-0 items-center justify-center rounded-sm text-fg-muted hover:bg-bg-active hover:text-fg disabled:text-fg-faint disabled:hover:bg-transparent';
 
 // The row's hover actions, out of the tab order (the row is the tree's stop; its context menu carries the same actions
-// for the keyboard): the search icon opens the Resume… picker on the project (I7, "Resume a session…"), the archive icon
+// for the keyboard): the search icon opens the Resume… picker on the project (I7, "Resume a session…"), the minus
 // removes the project from the sidebar after a confirm (I5; the menu's "Remove from sidebar…"), and "+" opens an
 // unstarted session tab in the project ("New chat in X", the New chat landing's open copy item).
 function ProjectActions({ projectId, name }: { projectId: ProjectId; name: string }) {
@@ -144,7 +144,7 @@ function ProjectActions({ projectId, name }: { projectId: ProjectId; name: strin
         }}
         className={ACTION}
       >
-        <ArchiveIcon className="size-[13px]" />
+        <Icon className="size-[13px]"><path d="M3 8h10" /></Icon>
       </button>
       <button
         type="button"

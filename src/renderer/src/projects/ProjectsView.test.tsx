@@ -9,6 +9,7 @@ import { closeDialog, useDialogs } from '../sessions/dialogs';
 import { useSessions } from '../stores/sessions';
 import { resetShellStores } from '../test-support/shell-stores';
 import { ProjectsView } from './ProjectsView';
+import { AddProject } from '../sidebar/AddProject';
 
 const added = project('atlas-personal', 0, { name: 'atlas', directory: '/work/personal/atlas' });
 const discovered = project('atlas-team', 1, { name: 'atlas', directory: '/work/team/atlas', discovered: true });
@@ -44,10 +45,32 @@ afterEach(() => {
 });
 
 describe('Projects sidebar membership', () => {
+  it('puts sidebar projects first on the page and in Add project, followed by hidden projects, then discoveries', async () => {
+    const mine = project('z-workstation', 0);
+    const other = project('b-notes', 1);
+    const hidden = project('y-hidden', 2, { hidden: true });
+    const discovered = project('a-temporary', 3, { discovered: true });
+    setProjects([discovered, hidden, other, mine]);
+    render(<><ProjectsView /><AddProject /></>);
+    const lists = screen.getAllByRole('list');
+    expect(lists.map((list) => list.getAttribute('aria-label'))).toEqual(['Sidebar projects', 'Hidden projects', 'Discovered projects']);
+    expect(screen.getAllByRole('listitem').map((r) => r.getAttribute('aria-label'))).toEqual(['z-workstation', 'b-notes', 'y-hidden', 'a-temporary']);
+    await userEvent.click(screen.getByRole('button', { name: 'Add project' }));
+    const chooser = await screen.findByRole('dialog', { name: 'Add project' });
+    const groups = within(chooser).getAllByRole('group');
+    expect(groups.map((group) => group.getAttribute('aria-label'))).toEqual(['Sidebar projects', 'Hidden projects', 'Discovered projects']);
+    expect(within(groups[0]).getAllByRole('button').map((button) => button.textContent)).toEqual(expect.arrayContaining([expect.stringContaining('z-workstation'), expect.stringContaining('b-notes')]));
+    expect(within(chooser).getByRole('button', { name: 'In sidebar: z-workstation' })).toHaveProperty('disabled', true);
+    await userEvent.click(within(chooser).getByRole('button', { name: 'Add y-hidden' }));
+    expect(fake.invoked('session.projects.add')).toEqual([{ directory: hidden.directory }]);
+    await act(() => fake.reply('session.projects.add', { ...hidden, hidden: false }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add project' })).toBeNull());
+  });
+
   it('offers every known project without adding discoveries, and searches names and directories with stable duplicate labels', async () => {
     const user = userEvent.setup();
     render(<ProjectsView />);
-    expect(screen.getAllByRole('listitem').map((r) => r.getAttribute('aria-label'))).toEqual(['atlas · personal', 'atlas · team', 'notes']);
+    expect(screen.getAllByRole('listitem').map((r) => r.getAttribute('aria-label'))).toEqual(['atlas · personal', 'notes', 'atlas · team']);
     expect(hide('atlas · personal')).toBeTruthy();
     expect(show('atlas · team')).toBeTruthy();
     expect(show('notes')).toBeTruthy();
