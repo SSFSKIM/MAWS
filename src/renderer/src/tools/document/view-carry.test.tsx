@@ -243,8 +243,8 @@ describe('a document moved between the panel and a main tab comes back where the
     const first = await ready();
     edit(first, source.state);
     const firstBody = liveBody(first);
-    act(() => within(screen.getByRole('toolbar', { name: 'Formatting' })).getByRole('button', { name: 'Insert', exact: true }).click());
-    act(() => screen.getByRole('menuitem', { name: 'New section', exact: true }).click());
+    act(() => within(screen.getByRole('toolbar', { name: 'Formatting' })).getByRole('button', { name: 'Insert' }).click());
+    act(() => screen.getByRole('menuitem', { name: 'New section' }).click());
     await until(() => editorOn() !== null && editorOn() !== first, 'the second tab’s editor');
     const second = await ready();
     expect(liveBody(second)).not.toBe(firstBody);

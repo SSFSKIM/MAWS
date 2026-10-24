@@ -57,7 +57,7 @@ describe('the deck editor', () => {
     const user = userEvent.setup();
     const { session, container } = mount();
     act(() => session.select(['t']));
-    await user.click(within(screen.getByRole('toolbar', { name: 'Deck' })).getByRole('button', { name, exact: true }));
+    await user.click(within(screen.getByRole('toolbar', { name: 'Deck' })).getByRole('button', { name }));
     const menu = await screen.findByRole('menu');
     expect(container.contains(menu)).toBe(false); // Radix renders this React-owned menu under document.body.
     act(() => menu.focus());
@@ -107,7 +107,7 @@ describe('the deck editor', () => {
 
   it('starts notes folded with saved content indicated, preserves the choice on remount, and follows remote notes while folded', () => {
     const { session, doc, unmount } = mount();
-    const disclosure = () => screen.getByRole('button', { name: 'Speaker notes', exact: true });
+    const disclosure = () => screen.getByRole('button', { name: 'Speaker notes' });
     expect(disclosure().getAttribute('aria-expanded')).toBe('false');
     expect(disclosure().textContent).toContain('Notes a');
     expect(screen.queryByRole('textbox', { name: 'Speaker notes' })).toBeNull();
@@ -131,7 +131,7 @@ describe('the deck editor', () => {
     const session = new DeckSession(doc);
     session.keepNotesDraft('a', { from: 'Notes a', text: 'Retained notes while read-only' });
     render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly />);
-    expect(screen.getByRole('button', { name: 'Speaker notes', exact: true }).getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Speaker notes' }).getAttribute('aria-expanded')).toBe('true');
     expect((screen.getByRole('textbox', { name: 'Speaker notes' }) as HTMLTextAreaElement).value).toBe('Retained notes while read-only');
     expect(screen.getByRole('alert')).toBeTruthy();
   });
@@ -237,7 +237,7 @@ describe('the deck editor', () => {
 // ---- fix wave 1 ----------------------------------------------------------------------------------------------------
 
 const notesField = () => {
-  const disclosure = screen.getByRole('button', { name: 'Speaker notes', exact: true });
+  const disclosure = screen.getByRole('button', { name: 'Speaker notes' });
   if (disclosure.getAttribute('aria-expanded') === 'false') fireEvent.click(disclosure);
   return screen.getByRole('textbox', { name: 'Speaker notes' }) as HTMLTextAreaElement;
 };
@@ -456,7 +456,7 @@ describe('what the editor shows, for the header’s Export (L233)', () => {
     const session = new DeckSession(doc);
     const toolbarHosts: Array<HTMLDivElement | null> = [];
     render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={false} onToolbarHost={(element) => { toolbarHosts.push(element); }} history={{ api, handle: { doc, onRestored: () => () => {} } }} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Speaker notes', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Speaker notes' }));
     act(() => session.toggleRail('history'));
     const row = (label: string) => screen.findByRole('button', { name: new RegExp(`^Version ${label} by`) });
     fireEvent.click(await row('Draft 2'));
@@ -467,7 +467,7 @@ describe('what the editor shows, for the header’s Export (L233)', () => {
     act(() => session.toggleRail('history'));
     await waitFor(() => expect(session.snapshot().shown).toBeNull());
     expect(toolbarHosts.at(-1)?.closest('[aria-label="Deck"]')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Speaker notes', exact: true }).getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Speaker notes' }).getAttribute('aria-expanded')).toBe('true');
   });
 });
 

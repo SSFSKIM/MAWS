@@ -117,7 +117,7 @@ test('Chrome measurements: document, deck and live Customize at both desktop siz
       const { page } = maws;
       await openSession(page);
       await expect.poll(async () => value(await invoke(page, 'engine.hostState', undefined)).state, { timeout: 20_000 }).toBe('ready');
-      const document = value(await invoke(page, 'artifacts.create', { kind: 'document', title: 'Chrome working notes' })).artifact;
+      const documentArtifact = value(await invoke(page, 'artifacts.create', { kind: 'document', title: 'Chrome working notes' })).artifact;
       const deck = value(await invoke(page, 'artifacts.create', { kind: 'presentation', title: 'Chrome review deck' })).artifact;
       await page.waitForFunction(() => typeof (window as unknown as { __maws_presentations?: unknown }).__maws_presentations === 'object');
       await page.evaluate(async ([id, files]) => {
@@ -128,7 +128,7 @@ test('Chrome measurements: document, deck and live Customize at both desktop siz
         const geometry = await page.evaluate((selectors) => {
           const rectangle = (node: Element) => { const b = node.getBoundingClientRect(); return { x: b.x, y: b.y, width: b.width, height: b.height, bottom: b.bottom }; };
           const visible = (node: Element) => { const b = node.getBoundingClientRect(); return b.width > 0 && b.height > 0 && getComputedStyle(node).visibility !== 'hidden'; };
-          const boxes = Object.fromEntries(Object.entries(selectors).map(([key, selector]) => [key, [...document.querySelectorAll(selector)].filter(visible).map(rectangle)]));
+          const boxes = Object.fromEntries(Object.entries(selectors).map(([key, selector]) => [key, Array.from(document.querySelectorAll(selector)).filter(visible).map(rectangle)]));
           const main = document.querySelector('[data-region="main"]')!;
           const content = boxes.page?.[0] ?? boxes.stage?.[0] ?? boxes.firstPlugin?.[0] ?? null;
           return { window: { width: innerWidth, height: innerHeight }, main: rectangle(main), boxes, contentTopFromMain: content ? content.y - main.getBoundingClientRect().y : null,
@@ -140,7 +140,7 @@ test('Chrome measurements: document, deck and live Customize at both desktop siz
       };
       for (const { width, height } of SIZES) {
         await size(maws, width, height);
-        const notes = await openArtifact(page, 'Chrome working notes', document.id);
+        const notes = await openArtifact(page, 'Chrome working notes', documentArtifact.id);
         await expect(notes.locator('.ds-doc .ProseMirror')).toBeVisible({ timeout: 15_000 });
         await capture('document-single-section', { header: '[data-region="main"] [data-editor-header]', sections: '.doc-tabs', toolbar: '.doc-toolbar', page: '.doc-page-frame', editor: '.ds-doc .ProseMirror' });
         const deckTab = await openArtifact(page, 'Chrome review deck', deck.id);

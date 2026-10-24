@@ -486,6 +486,11 @@ test('Customize and Projects are reachable without a chat, at desktop and narrow
   const cli = writePluginCliStub(userData, { marketplaces: [{ name: 'harbor-tools', source: 'directory', path: market, plugins }], installed: [{ id: 'editorial-tools@harbor-tools', version: '1.0.0', scope: 'user', enabled: true, projectPath: null }], fail: {} });
   try {
     const maws = await launchMaws({ userData, env: { MAWS_HARNESS: '0', MAWS_E2E_ENGINE_BIN: cli.bin }, prepare: ({ claudeConfigDir }) => {
+      // The cold inventory reads this registry, not the CLI stub's declared installations.
+      mkdirSync(join(claudeConfigDir, 'plugins'), { recursive: true });
+      writeFileSync(join(claudeConfigDir, 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2, plugins: {
+        'editorial-tools@harbor-tools': [{ scope: 'user', installPath: join(market, 'plugins', 'editorial-tools'), version: '1.0.0' }],
+      } }));
       // UX2-L defaults to a 240px sidebar and no surface: do not hide a reserved panel by fixture.
       mkdirSync(join(claudeConfigDir, 'skills', 'proofread'), { recursive: true });
       writeFileSync(join(claudeConfigDir, 'skills', 'proofread', 'SKILL.md'), '---\nname: proofread\ndescription: Check wording, consistency and citations.\n---\n# Proofread\n');

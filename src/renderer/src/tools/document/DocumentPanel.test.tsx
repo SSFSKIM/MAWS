@@ -163,8 +163,8 @@ describe('the document editor in L’s registry', () => {
     await until(() => first.onShown.mock.calls.length === 1, 'onShown');
     await until(() => sent.filter((name) => name === 'artifacts.markViewed').length === 1, 'the rail’s view');
     // another tab of the document mounts another editor; the body remounting (its panel tab reselected) keeps the showing
-    act(() => within(screen.getByRole('toolbar', { name: 'Formatting' })).getByRole('button', { name: 'Insert', exact: true }).click());
-    act(() => screen.getByRole('menuitem', { name: 'New section', exact: true }).click());
+    act(() => within(screen.getByRole('toolbar', { name: 'Formatting' })).getByRole('button', { name: 'Insert' }).click());
+    act(() => screen.getByRole('menuitem', { name: 'New section' }).click());
     await act(() => new Promise((resolve) => setTimeout(resolve, 60)));
     first.remount(true);
     await shown();

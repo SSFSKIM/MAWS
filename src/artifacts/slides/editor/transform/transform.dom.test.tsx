@@ -551,7 +551,7 @@ describe('P3-F: Tab leaves the stage past its last element (scalpel-4#1, WCAG 2.
     const { container } = render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={false} />);
     const stage = container.querySelector('[data-stage-surface]') as HTMLElement;
     stage.focus();
-    return { session, stage, notes: screen.getByRole('button', { name: 'Speaker notes', exact: true }), user: userEvent.setup() };
+    return { session, stage, notes: screen.getByRole('button', { name: 'Speaker notes' }), user: userEvent.setup() };
   }
 
   // P4-B2 (D1, D15 A3): a text element selected is ARMED, its box holding the focus; any other, its own node
