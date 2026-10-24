@@ -10,7 +10,7 @@
 // card is `ProjectHoverCard.tsx`.
 import { HoverCard as Radix } from 'radix-ui';
 import { useEffect, useRef, useState, type FocusEvent, type ReactNode } from 'react';
-import { QuickReply } from './QuickReply';
+import { QuickReply, useQuickReply, type QuickReplyState } from './QuickReply';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -38,19 +38,49 @@ export interface SidebarHoverCardProps {
 export function SidebarHoverCard({ label, children, content, open, onOpenChange }: SidebarHoverCardProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLAnchorElement>(null); // the row (asChild), typed as Radix types its default element
+  const dismissing = useRef(false); // Escape or a press outside: the owner's close, which a focused field does not hold off
+  const restoring = useRef(false); // focus handed back to the trigger, which opens nothing
+  // The pointer leaving (and the trigger's blur as focus moves into the card) closes the card after its delay; a field
+  // in the card that holds focus (the quick reply being typed) keeps it open through that. An explicit dismissal closes.
   const changeOpen = (next: boolean) => {
-    if (!next && contentRef.current?.contains(document.activeElement)) return;
+    const explicit = dismissing.current;
+    dismissing.current = false;
+    if (!next && !explicit && contentRef.current?.contains(document.activeElement)) return;
     setInternalOpen(next);
     onOpenChange?.(next);
   };
+  const dismiss = () => {
+    dismissing.current = true;
+    queueMicrotask(() => (dismissing.current = false)); // a dismissal Radix does not carry out holds nothing later
+  };
   return (
     <Radix.Root openDelay={300} closeDelay={150} open={open ?? internalOpen} onOpenChange={changeOpen}>
-      <Radix.Trigger asChild onFocus={guardPointerFocus}>
+      <Radix.Trigger
+        asChild
+        ref={triggerRef}
+        onFocus={(event) => {
+          if (restoring.current) event.preventDefault();
+          else guardPointerFocus(event);
+        }}
+      >
         {children}
       </Radix.Trigger>
       <Radix.Portal>
         <Radix.Content
           ref={contentRef}
+          // Escape from inside the card puts the keyboard back on the row it came from, without reopening the card
+          onEscapeKeyDown={() => {
+            dismiss();
+            if (!contentRef.current?.contains(document.activeElement)) return;
+            restoring.current = true;
+            try {
+              triggerRef.current?.focus();
+            } finally {
+              restoring.current = false;
+            }
+          }}
+          onPointerDownOutside={dismiss} // the press moves focus where it lands
           onBlurCapture={(event) => {
             if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
               setInternalOpen(false);
@@ -88,8 +118,8 @@ export function focusVisible(element: HTMLElement): boolean {
 }
 
 export function SessionHoverCard({ record, children }: { record: SessionRecord; children: ReactNode }) {
-  const [reply, setReply] = useState('');
-  return <SidebarHoverCard label={displayTitle(record)} content={<Body appSessionId={record.appId} reply={reply} setReply={setReply} />}>{children}</SidebarHoverCard>;
+  const reply = useQuickReply(record.appId);
+  return <SidebarHoverCard label={displayTitle(record)} content={<Body appSessionId={record.appId} reply={reply} />}>{children}</SidebarHoverCard>;
 }
 
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
@@ -105,7 +135,7 @@ function placeOf(record: SessionRecord): { text: string; title: string | null } 
   return branch ? { text: `⎇ ${branch}`, title: null } : null;
 }
 
-function Body({ appSessionId, reply, setReply }: { appSessionId: AppSessionId; reply: string; setReply(value: string): void }) {
+function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: QuickReplyState }) {
   const record = useSessions((s) => s.records.get(appSessionId));
   const digest = useSessions((s) => s.digests.get(appSessionId) ?? null);
   const pending = useAttention((s) => selectPendingOf(s, appSessionId));
@@ -160,7 +190,7 @@ function Body({ appSessionId, reply, setReply }: { appSessionId: AppSessionId; r
         </div>
       )}
       {!record.archived && record.holder.kind !== 'terminal' && record.holder.kind !== 'background_job' &&
-        <QuickReply record={record} value={reply} onChange={setReply} />}
+        <QuickReply record={record} reply={reply} />}
     </div>
   );
 }
