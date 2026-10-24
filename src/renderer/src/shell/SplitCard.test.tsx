@@ -221,9 +221,12 @@ describe('the split’s floating card in the Shell', () => {
     act(() => runAction('main.expandArtifactPane')); // S's pane is focused: the pane beside it (Settings) has no session
     act(() => useLayout.getState().focusPane(1));
     act(() => runAction('main.expandArtifactPane'));
-    expect(card()).not.toBeNull();
-    act(() => runAction('panel.float')); // ⌥⌘B docks the split's card
     expect(card()).toBeNull();
+    expect(within(screen.getByRole('region', { name: 'Compact session composer' })).getByTestId('composer').dataset.session).toBe(A);
+    expect(composers()).toEqual([A]);
+    act(() => runAction('panel.float')); // ⌥⌘B docks the split's compact session
+    expect(card()).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Compact session composer' })).toBeNull();
     expect(composers()).toEqual([A]);
     expect(live).toEqual({ now: 1, most: 1 });
     expect(set().splitRatio).toBe(0.4);
