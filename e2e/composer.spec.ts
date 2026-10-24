@@ -920,8 +920,9 @@ for (const { width, height } of ACCEPTANCE_SIZES) {
     await launchReady(page, id, turnsJournal(scratch, id, 2), { cwd: repo });
     await showPanes(page, [{ composer: id, transcript: true }, null]);
     await messageIn(page, 0).click();
-    await page.keyboard.insertText(Array.from({ length: 24 }, (_, i) => `Earlier instruction ${i + 1}`).join('\n'));
-    await messageIn(page, 0).press('Enter');
+    // Multiline Enter inserts a line; Cmd+Enter sends. Enough old work to scroll even at 982px high.
+    await page.keyboard.insertText(Array.from({ length: 80 }, (_, i) => `Earlier instruction ${i + 1}`).join('\n'));
+    await messageIn(page, 0).press('Meta+Enter');
     await expect.poll(() => sent(page, id)).toHaveLength(1);
     await expect.poll(async () => (await statusOf(page, id)).turn).toBeNull();
     const scroller = pane(page, 0).locator('[data-transcript-scroller]');
@@ -934,7 +935,7 @@ for (const { width, height } of ACCEPTANCE_SIZES) {
     await testInfo.attach(`composer-reading-old-${width}x${height}`, { body: await page.screenshot({ animations: 'disabled' }), contentType: 'image/png' });
     await messageIn(page, 0).click();
     await page.keyboard.insertText('red apple\ngreen pear\nblue plum');
-    await messageIn(page, 0).press('Enter');
+    await messageIn(page, 0).press('Meta+Enter');
     await expect.poll(() => sent(page, id)).toHaveLength(2);
     await expect(pane(page, 0).getByRole('button', { name: 'Jump to latest' })).toHaveCount(0);
     await expect.poll(() => scroller.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThanOrEqual(1);
