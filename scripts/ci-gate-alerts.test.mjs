@@ -201,7 +201,7 @@ test("gate.yml's env: scalars and folded lists are read, anything else throws", 
   const own = workflowEnv(readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8'));
   assert.equal(own.POOL_E2E, 'desk-web');
   assert.ok(own.CLASS1_E2E.split(' ').includes('library'));
-  assert.equal(own.MAC_VM_E2E, 'document-app widgets to-human transcript panel side c7 code scm library document settings tools');
+  assert.equal(own.MAC_VM_E2E, 'document-app widgets to-human transcript panel c7 code scm library document settings tools');
 });
 
 test('a runs-on label set is the guest, the trial slot, no Mac, or a host', () => {
@@ -267,11 +267,11 @@ test("the guest decision follows the tested tree's workflow; own-workflow runs t
   // This checkout admits the wave-2 groups, but unit:darwin and other host-only jobs still prevent an all-guest run.
   const own = tree(readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8'), readFileSync(join(root, 'package.json'), 'utf8'));
   const routes = [{}, { runner: 'macos' }, { lane: 'vm' }, { lane: 'vm-trial' }];
-  for (const gates of ['e2e:library', 'e2e:library,e2e:document', 'static,unit,e2e:side'])
+  for (const gates of ['e2e:library', 'e2e:library,e2e:document', 'static,unit,e2e:panel'])
     for (const extra of routes) assert.equal(ask(own, gates, extra), extra.lane ?? 'vm', `${gates} ${JSON.stringify(extra)}`);
-  for (const gates of ['', 'unit:darwin', 'packaged', 'e2e:side,unit:darwin', 'e2e:side,packaged', 'e2e:side,e2e:design', 'e2e:side,e2e:document-scale'])
+  for (const gates of ['', 'unit:darwin', 'packaged', 'e2e:side', 'e2e:panel,e2e:side', 'e2e:panel,unit:darwin', 'e2e:panel,packaged', 'e2e:panel,e2e:design', 'e2e:panel,e2e:document-scale'])
     for (const extra of routes) assert.equal(ask(own, gates, extra), null, `${gates} ${JSON.stringify(extra)}`);
-  for (const extra of routes) assert.equal(ask(own, 'static,unit,e2e:side', { ...extra, class1a: 'macos' }), null, `Mac class 1a ${JSON.stringify(extra)}`);
+  for (const extra of routes) assert.equal(ask(own, 'static,unit,e2e:panel', { ...extra, class1a: 'macos' }), null, `Mac class 1a ${JSON.stringify(extra)}`);
 });
 
 test('a folded MAC_SHARED_E2E keeps its groups on the shared instances, off the guest, unless the run has a Lane:', () => {
