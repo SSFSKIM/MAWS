@@ -429,7 +429,15 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
       await expect(needsYou.nth(index), 'compact rows retain their attention reason for assistive technology').toHaveAccessibleName(label);
     }
     await sidebar.getByRole('searchbox').focus();
+    // K moved Search above the app destinations; L's old Search -> Needs you Tab adjacency no longer applies.
+    for (const name of ['New chat', 'Projects', 'Artifacts', 'Customize']) {
+      await page.keyboard.press('Tab');
+      await expect(sidebar.getByRole('navigation', { name: 'App destinations' }).getByRole('button', { name, exact: true })).toBeFocused();
+    }
     await page.keyboard.press('Tab');
+    await expect(needsYou.nth(0)).toBeFocused();
+    await sidebar.getByRole('searchbox').focus();
+    await page.keyboard.press('ArrowDown');
     await expect(needsYou.nth(0)).toBeFocused();
     await page.keyboard.press('End');
     await expect(needsYou.nth(2)).toBeFocused();
