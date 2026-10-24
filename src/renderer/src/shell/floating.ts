@@ -392,7 +392,7 @@ export function togglePanelFloat(): void {
 }
 
 // P4-B3 (X32 amendment; its Decision Log 12): `main.expandArtifactPane` and the pane header's Expand. On a pane beside a
-// session, floats that session (its pane yields into the card); on a floating split, docks it ("Restore split"); else
+// session, folds that session into its compressed composer; on a floating split, docks it ("Restore split"); else
 // says why, as the panel's Float does. P4-B3x (P4 Decision Log 40): Expand also folds an open right panel, which
 // Restore split (or any end of the float) opens again unless the owner opened it meanwhile. The divider's drag to
 // float folds nothing: it moves the split's own edge, not the panel's.
@@ -402,7 +402,12 @@ export function expandPane(pane: 0 | 1 = currentSet(layout().main).focusedPane):
   const set = currentSet(layout().main);
   const other = otherPane(pane);
   const beside = set.panes.length === 2 && paneShowsSession(set, other) ? set.panes[other]?.activeTabId : null;
-  if (beside && floatSplit(beside, { foldPanel: true })) return;
+  if (beside && floatSplit(beside, { foldPanel: true })) {
+    // Expand gives the document the main area, not another full conversation column.
+    // Keep floatSplit's composer focus handoff; Close would instead focus the title.
+    useFloatingCard.getState().setClosed(true);
+    return;
+  }
   toast({ id: 'expand-pane-refused', level: 'info', text: EXPAND_COPY.noSession, actions: [], dismissible: true });
 }
 

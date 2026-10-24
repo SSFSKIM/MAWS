@@ -220,6 +220,30 @@ describe('the deck’s history controller (D11)', () => {
     expect(controller.getSnapshot().banner).toBe('Before');
   });
 
+  it('keeps the restored label when a newer versions notification leaves its refresh unpublished', async () => {
+    const h = deckHost(['a']);
+    h.version('named', HUMAN, { label: 'Draft' });
+    let versionsChanged!: () => void;
+    h.api.onVersions = (listener) => { versionsChanged = listener; return () => {}; };
+    const controller = attach(h);
+    await until(() => controller.getSnapshot().versions?.length === 1);
+    const restored = h.version('restore', HUMAN, { label: 'Restored from Draft' });
+    const versions = await h.api.versions();
+    const reads: Array<(versions: ArtifactVersion[]) => void> = [];
+    h.api.versions = () => new Promise((resolve) => { reads.push(resolve); });
+
+    h.restored(restored.id);
+    versionsChanged();
+    expect(reads).toHaveLength(2);
+    // The restore read has the label, but the subscription's newer read is still in flight.
+    reads[0]!(versions);
+    await until(() => controller.getSnapshot().banner !== null);
+    expect(controller.getSnapshot().banner).toBe('Restored from Draft');
+    reads[1]!(versions);
+    await until(() => controller.getSnapshot().versions?.length === 2);
+    expect(controller.getSnapshot().banner).toBe('Restored from Draft');
+  });
+
   it('frees a preview’s docs once the editor shows another, and every doc when it detaches', async () => {
     const h = deckHost(['a']);
     const v1 = h.version('auto');

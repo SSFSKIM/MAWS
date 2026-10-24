@@ -269,7 +269,7 @@ test('a drop onto a panel already showing the document activates it and closes t
 
 const regionWidth = (page: Page, region: 'sidebar' | 'main' | 'panel') => page.evaluate((r) => Math.round(document.querySelector(`[data-region="${r}"]`)?.getBoundingClientRect().width ?? -1), region);
 
-test('the editor header’s Expand floats the session beside it into the main area’s card and folds the right panel, and Restore split docks it with the panel back', async () => {
+test('the editor header’s Expand keeps a compressed composer and folds the right panel; reopening and Restore split preserve the draft', async () => {
   test.setTimeout(120_000);
   const page = await start();
   await (await sidebarRow(page, 'Harness A')).click();
@@ -283,25 +283,34 @@ test('the editor header’s Expand floats the session beside it into the main ar
   await openSurface(page, 'Session info');
   const header = inMain(page, id).locator('xpath=ancestor::*[@role="tabpanel"][1]');
   const card = mainRegion(page).getByRole('region', { name: 'Session card' });
+  const compact = mainRegion(page).getByRole('region', { name: 'Compact session composer' });
   const panelBefore = await regionWidth(page, 'panel');
   expect(panelBefore, 'the panel open beside the split').toBeGreaterThan(0);
 
   await header.getByRole('button', { name: 'Expand pane' }).click();
-  await expect(card).toBeVisible();
+  await expect(card).toHaveCount(0);
+  await expect(compact).toBeVisible();
   await expect.poll(() => regionWidth(page, 'panel'), 'Expand folds the right panel (P4 Decision Log 40)').toBeLessThanOrEqual(0);
-  await expect(card.getByRole('textbox', { name: 'Message' })).toBeFocused();
+  const message = compact.getByRole('textbox', { name: 'Message' });
+  await expect(message).toBeFocused();
+  await message.fill('Keep this draft through reopening and restore');
   await expect(mainRegion(page).getByRole('separator', { name: 'Resize panes' }), 'no divider while floating').toHaveCount(0);
   await expect(editorIn(inMain(page, id))).toBeVisible();
   const area = (await mainRegion(page).locator('[data-main-area]').boundingBox())!;
   const editorBox = (await inMain(page, id).boundingBox())!;
   expect(Math.round(editorBox.width), 'the editor spans the main area').toBeGreaterThanOrEqual(Math.round(area.width) - 2);
 
+  await compact.getByRole('button', { name: 'Show session card' }).click();
+  await expect(card).toBeVisible();
+  await expect(card.getByRole('textbox', { name: 'Message' })).toContainText('Keep this draft through reopening and restore');
+  await expect(card.getByRole('textbox', { name: 'Message' })).toBeFocused();
   await header.getByRole('button', { name: 'Restore split', pressed: true }).click();
   await expect(card).toHaveCount(0);
   await expect.poll(() => regionWidth(page, 'panel'), 'the panel back as it was').toBe(panelBefore);
   await expect(left.getByRole('tab', { name: /^Harness A/ })).toBeVisible();
   await expect(mainRegion(page).getByRole('separator', { name: 'Resize panes' })).toBeVisible();
   await expect(header.getByRole('button', { name: 'Expand pane', pressed: false })).toBeVisible();
+  await expect(mainRegion(page).getByRole('textbox', { name: 'Message' })).toContainText('Keep this draft through reopening and restore');
   expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
 });
 
@@ -404,9 +413,9 @@ async function settled<T>(read: () => Promise<T>, message: string): Promise<T> {
   return value!;
 }
 
-for (const width of [1280, 1512]) test(`the document margin’s tier at ${width} × 900: in the floated panel, alone in main, with the panel closed, after Expand pane and after Restore split`, async () => {
+for (const [width, height] of [[1280, 820], [1512, 982]] as const) test(`the document margin’s tier at ${width} × ${height}: in the floated panel, alone in main, with the panel closed, after Expand pane and after Restore split`, async () => {
   test.setTimeout(120_000);
-  const page = await start(undefined, [width, 900]);
+  const page = await start(undefined, [width, height]);
   await pinArtifactsTool(page);
   const id = await documentInMain(page, 'B3 margin');
   await mainTab(page, id).getByRole('button', { name: /^Close / }).click();
@@ -467,11 +476,13 @@ for (const width of [1280, 1512]) test(`the document margin’s tier at ${width}
   const header = inMain(page, id).locator('xpath=ancestor::*[@role="tabpanel"][1]');
   await expect.poll(async () => (await marginOf(inMain(page, id))).scrollBox, 'the document in its half of the split').toBeLessThan(alone.scrollBox);
   const split = await settled(() => marginOf(inMain(page, id)), '(b) split settled');
+  await test.info().attach(`before-expand-${width}x${height}`, { body: await page.screenshot(), contentType: 'image/png' });
   await header.getByRole('button', { name: 'Expand pane' }).click();
-  await expect(mainRegion(page).getByRole('region', { name: 'Session card' })).toBeVisible();
+  await expect(mainRegion(page).getByRole('region', { name: 'Compact session composer' })).toBeVisible();
   await expect.poll(async () => (await widths()).panel, 'Expand folds the right panel').toBeLessThanOrEqual(0);
-  // Record actual widths before checking the nonshrinking bound below, so a failure retains its accounting.
+  // Expand releases the conversation reservation; record both dimensions and screenshots for acceptance.
   const expanded = await settled(async () => ({ ...(await widths()), ...(await marginOf(inMain(page, id))) }), '(b) expanded settled');
+  await test.info().attach(`after-expand-${width}x${height}`, { body: await page.screenshot(), contentType: 'image/png' });
   await header.getByRole('button', { name: 'Restore split', pressed: true }).click();
   await expect(mainRegion(page).getByRole('region', { name: 'Session card' })).toHaveCount(0);
   await expect.poll(async () => (await widths()).panel, 'leaving Expand opens the panel again').toBe(alone.panel);
@@ -494,15 +505,17 @@ for (const width of [1280, 1512]) test(`the document margin’s tier at ${width}
     expect(reading.tier, `${name}: margin tier follows its measured body and page side space`).toBe(tier);
     expect(reading.threads, `${name}: the open thread survives every layout`).toBe(1);
   }
-  for (const reading of [floated, expanded]) expect(reading.conversation, 'WR #12 reserves the open conversation’s actual default column').toBe(420);
-  for (const reading of [alone, closed, split, restored]) expect(reading.conversation, 'a docked session leaves no conversation column').toBe(0);
+  expect(floated.conversation, 'WR #12 reserves the open conversation’s actual default column').toBe(420);
+  for (const reading of [alone, closed, split, expanded, restored]) expect(reading.conversation, 'a docked session leaves no conversation column').toBe(0);
   expect(alone.host, 'the alone document fills its main region').toBe(alone.main);
   expect(closed.host, 'closing the panel leaves no empty column beside the main document').toBe(closed.main);
   expect(expanded.host, 'the expanded document and conversation fill the whole main region').toBe(expanded.main);
   expect(expanded.main, 'the expanded document has the panel-closed main column').toBe(closed.main);
   expect(alone.sidebar + alone.main + alone.panel, 'docked regions account for the whole window').toBe(width);
   expect(closed.sidebar + closed.main, 'closed-panel regions account for the whole window').toBe(width);
-  expect(gain, 'Expand does not shrink the document; a zero gain remains an owner hands-on question').toBeGreaterThanOrEqual(0);
+  expect(expanded.scrollBox, 'Expand gives the document every pixel beside the 240px sidebar').toBe(width - 240);
+  expect(gain, 'Expand returns the narrow surface’s full 420px to the document').toBe(420);
+  expect(expanded.scrollBox, 'Expand is wider than the preceding split').toBeGreaterThan(split.scrollBox);
 });
 
 // Loaded in main before its entry (launchMaws's requireFirst): a frame preload registered on the window's session before
