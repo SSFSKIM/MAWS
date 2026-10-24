@@ -28,21 +28,38 @@ import { applyAskEvents, askSheet, reloadAsks } from './store';
 function openSheet(appSessionId: AppSessionId, askId: string): void {
   if (!usePanelHost.getState().tools.has(ASK_SHEET_TOOL_ID)) return;
   const visible = surfaceTabs(useLayout.getState(), appSessionId);
-  if (!visible.some((tab) => tab.toolId === ASK_SHEET_TOOL_ID)) automatic.add(appSessionId);
+  if (!visible.some((tab) => tab.toolId === ASK_SHEET_TOOL_ID) && !automatic.has(appSessionId)) {
+    automatic.set(appSessionId, askSheet(appSessionId).subscribe((state, before) => {
+      // Submit and Dismiss change the store without an engine batch. Check after any whole batch has finished too.
+      if (state.asks !== before.asks && state.asks.size === 0) queueMicrotask(() => closeEmptyAutomatic(appSessionId));
+    }));
+  }
   panelHost.addTool<AskSheetParams>(ASK_SHEET_TOOL_ID, { appSessionId, params: { askId }, activate: true });
 }
 
 // Asks that opened while their session was not shown, oldest first. One table for the window (App.tsx connects once),
 // so `openAsk` can settle it.
 const waiting = new Map<AppSessionId, string[]>();
-// Only an automatically revealed surface relinquishes its space when the question is settled.
-const automatic = new Set<AppSessionId>();
+// Only an automatically revealed surface relinquishes its space once all questions and cancellation notices are gone.
+const automatic = new Map<AppSessionId, () => void>();
+
+function stopAutomatic(appSessionId: AppSessionId): void {
+  automatic.get(appSessionId)?.();
+  automatic.delete(appSessionId);
+}
+
+function closeEmptyAutomatic(appSessionId: AppSessionId): void {
+  if (!automatic.has(appSessionId) || askSheet(appSessionId).getState().asks.size !== 0) return;
+  stopAutomatic(appSessionId);
+  const state = useLayout.getState();
+  state.setSurfaceStack(appSessionId, surfaceTabs(state, appSessionId).filter((tab) => tab.toolId !== ASK_SHEET_TOOL_ID).map((tab) => tab.id));
+}
 
 // The person opened the session's sheet themselves (`openAsk`): its waiting asks are theirs now. Called before the open,
 // whose `addTool` may show the session.
 export function settleWaitingAsks(appSessionId: AppSessionId): void {
   waiting.delete(appSessionId);
-  automatic.delete(appSessionId);
+  stopAutomatic(appSessionId);
 }
 
 export function connectAsks(client: MawsBridge = ipc): () => void {
@@ -63,11 +80,7 @@ export function connectAsks(client: MawsBridge = ipc): () => void {
     client.on('session.eventBatch', ({ appSessionId, events }) => {
       const id = appSessionId as AppSessionId;
       const opened = applyAskEvents(id, events);
-      if (automatic.has(id) && ![...askSheet(id).getState().asks.values()].some((ask) => ask.state === 'pending')) {
-        automatic.delete(id);
-        const state = useLayout.getState();
-        state.setSurfaceStack(id, surfaceTabs(state, id).filter((tab) => tab.toolId !== ASK_SHEET_TOOL_ID).map((tab) => tab.id));
-      }
+      closeEmptyAutomatic(id);
       if (opened.length === 0 || !useSessions.getState().records.has(id)) return;
       if (shownSession() === id) openSheet(id, opened.at(-1)!);
       else waiting.set(id, [...(waiting.get(id) ?? []), ...opened]); // every one: a later one may be settled first
@@ -83,6 +96,7 @@ export function connectAsks(client: MawsBridge = ipc): () => void {
   return () => {
     disposed = true; // a deferred open already queued does nothing
     waiting.clear();
+    automatic.forEach((off) => off());
     automatic.clear();
     offs.forEach((off) => off());
   };

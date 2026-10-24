@@ -20,7 +20,7 @@ import { mawsTranscriptActionsOver } from '../actions';
 import { connectAsks, settleWaitingAsks } from './connect';
 import { surfaceTabs } from '../../../panel/surface-model';
 import { EMPTY_DRAFT, pickOption, setDesignSystem, setOther, setText } from './draft';
-import { applyAskEvents, askSheet, editDraft, ensureLoaded, resetAskSheets, selectAsk, shownAsk, submitAsk } from './store';
+import { applyAskEvents, askSheet, dismissAsk, editDraft, ensureLoaded, resetAskSheets, selectAsk, shownAsk, submitAsk } from './store';
 
 const QUESTIONS: AskQuestion[] = [
   { id: 'q1', question: 'Which colour?', modality: 'choice', options: [{ label: 'Red' }, { label: 'Blue' }] },
@@ -474,6 +474,51 @@ it('releases an automatically opened Questions surface after its final answer', 
   expect(surfaceTabs(useLayout.getState(), A)).toHaveLength(1);
   fake.event('session.eventBatch', { appSessionId: A, events: [answered('a2')] });
   expect(surfaceTabs(useLayout.getState(), A)).toHaveLength(0);
+  off();
+});
+
+it.each(['exit', 'withdrawn'] as const)('keeps an automatic Questions surface for its %s cancellation notice until Dismiss', async (reason) => {
+  useSessions.setState({ records: new Map([[A, record(A)]]) });
+  registerPanelTool(probeTool(ASK_SHEET_TOOL_ID, { multiInstance: false, pinnable: false }).tool);
+  const fake = fakeClient();
+  const off = connectAsks(fake.client);
+  fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1'), opened('a2')] });
+  fake.event('session.eventBatch', { appSessionId: A, events: [cancelled('a1', reason), answered('a2')] });
+  expect(shown()).toMatchObject({ kind: 'live', ask: { askId: 'a1', state: 'cancelled', cancelReason: reason } });
+  expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.toolId)).toEqual([ASK_SHEET_TOOL_ID]);
+  dismissAsk(A, 'a1');
+  await Promise.resolve();
+  expect(shown()).toEqual({ kind: 'rest' });
+  expect(surfaceTabs(useLayout.getState(), A)).toHaveLength(0);
+  off();
+});
+
+it('releases an automatic Questions surface after a local Submit, without another engine batch', async () => {
+  useSessions.setState({ records: new Map([[A, record(A)]]) });
+  registerPanelTool(probeTool(ASK_SHEET_TOOL_ID, { multiInstance: false, pinnable: false }).tool);
+  const fake = fakeClient();
+  const off = connectAsks(fake.client);
+  fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
+  const done = submitAsk(A, 'a1', fake.client, []);
+  await fake.reply('maws.ask.answer', { outcome: 'delivered' });
+  await done;
+  expect(state().asks.size).toBe(0);
+  expect(surfaceTabs(useLayout.getState(), A)).toHaveLength(0);
+  off();
+});
+
+it('keeps an explicitly opened Questions surface after its cancellation notice is dismissed', async () => {
+  useSessions.setState({ records: new Map([[A, record(A)]]) });
+  registerPanelTool(probeTool(ASK_SHEET_TOOL_ID, { multiInstance: false, pinnable: false }).tool);
+  const fake = fakeClient();
+  const off = connectAsks(fake.client);
+  fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
+  mawsTranscriptActionsOver(fake.client).openAsk(A, { askId: 'a1', toolUseId: 'a1' as ToolUseId, title: 'Setup', context: null, blocking: true, questions: QUESTIONS, state: 'pending', answers: null, error: null, cancelReason: null });
+  fake.event('session.eventBatch', { appSessionId: A, events: [cancelled('a1')] });
+  dismissAsk(A, 'a1');
+  await Promise.resolve();
+  expect(state().asks.size).toBe(0);
+  expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.toolId)).toEqual([ASK_SHEET_TOOL_ID]);
   off();
 });
 
