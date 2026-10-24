@@ -244,9 +244,9 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 @keyframes transcript-spin { to { transform: rotate(360deg); } }
 
 /* Tool summaries share a block; only internal activity has a second fold. */
-.transcript-tool-block, .transcript-standalone > .transcript-cell { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.transcript-tool-block, .transcript-standalone .transcript-cell { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .transcript-tool-block:empty { display: none; }
-.transcript-tool-block .transcript-cell + .transcript-cell { border-top: 1px solid var(--border); }
+.transcript-tool-block > * + * { border-top: 1px solid var(--border); }
 .transcript-tool-block .transcript-cell-line, .transcript-standalone .transcript-cell-line { padding: 8px 12px; min-height: 36px; font-size: var(--text-ui); }
 .transcript-tool-block .transcript-cell-detail, .transcript-standalone .transcript-cell-detail { margin: 0 12px 12px; }
 .transcript-tool-block .transcript-chevron, .transcript-standalone .transcript-chevron { opacity: 1; }

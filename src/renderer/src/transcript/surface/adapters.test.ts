@@ -78,6 +78,16 @@ describe('transcript surface adapters', () => {
     expect(group.cells.flatMap((cell) => toolInputs(cell, turn).map((call) => call.instanceId))).toEqual(['r1', 'r3']);
   });
 
+  it('keeps a tool summary when a mod rewrites only output, but not when it changes the call', () => {
+    const b = builder(); b.turn('u');
+    b.toolUse('bash', 'Bash', { command: 'pwd' }); b.result('bash', '/p');
+    b.emit('tool.summary', { toolUseIds: [tool('bash')], summary: 'Checked the working directory' }); b.end(['u']);
+    const { rows, turn } = setup(b);
+    const input = toolInputs(find(rows, 'cell'), turn)[0];
+    expect(withToolProps(input, { ...input.props, output: '/rewritten' }).summary).toBe('Checked the working directory');
+    expect(withToolProps(input, { ...input.props, input: { command: 'echo changed' } }).summary).toBeUndefined();
+  });
+
   it('withholds the group ask while a member needs approval', () => {
     const b = builder(); b.turn('u'); b.toolUse('bash', 'Bash', { command: 'pwd' });
     const { rows, turn } = setup(b); const row = find(rows, 'group');
@@ -128,7 +138,7 @@ describe('transcript surface adapters', () => {
     expect(drawn).toMatchObject({ status: flags.status, detail: { command: 'shown', stdout: 'old', exitCode: flags.exitCode } });
     const { container } = renderRow({ ...row, ...drawn, id: row.id, expanded: true });
     expect(container.querySelector('[data-cell-id]')?.getAttribute('data-status')).toBe(flags.status);
-    expect(container.querySelector('.transcript-cell-label')?.textContent).toMatch(new RegExp(`^${flags.label} shown`));
+    expect(container.querySelector('.transcript-cell-label')?.textContent).toBe(`${flags.label} Bash`);
     expect(drawn.classification).toBe(row.classification);
     expect(row.status).toBe('done');
   });
@@ -232,7 +242,7 @@ describe('transcript surface adapters', () => {
       expect(drawn.detail).toMatchObject({ spill: { state: loadState } });
       if (loadState === 'loaded') expect(container.querySelector('pre')?.textContent).toBe('complete loaded output');
       else expect(queryByRole('status')).not.toBeNull();
-      if (rewrite === 'input') expect(container.querySelector('.transcript-cell-label')?.textContent).toMatch(/^Stopped shown/);
+      if (rewrite === 'input') expect(container.querySelector('.transcript-cell-label')?.textContent).toMatch(/^Stopped Bash/);
       else expect(drawn).toBe(row);
     }
     expect(row.detail).toMatchObject({ spill: { state: loadState } });
