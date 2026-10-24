@@ -17,6 +17,7 @@ import { startMarkup } from '../markup/session'; // P3-G
 import { openArtifacts } from '../main/artifacts'; // P3-G
 import { moveFocusedArtifactToPanel, moveShownRecordToTab } from '../shell/transfer'; // P4-B3 M4
 import { panelInMain } from './regions';
+import { setSessionUnread, visibleSessionStep } from '../keymap/session-navigation';
 import { registerSessionAction } from './session-actions';
 
 export function registerShellActions(client: MawsBridge = ipc): () => void {
@@ -45,6 +46,16 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
       const tab = activeTab(layout().main);
       if (tab) void requestCloseTab(tab.id);
     }),
+    ...([1, -1] as const).map((delta) => registerAction(delta === 1 ? 'session.next' : 'session.previous', () => {
+      const tab = activeTab(layout().main);
+      const next = visibleSessionStep(tab?.kind === 'session' ? tab.appSessionId : null, delta);
+      if (next !== null) layout().openSession(next);
+    })),
+    registerAction('session.markUnread', async () => {
+      const tab = activeTab(layout().main);
+      if (tab?.kind === 'session') await setSessionUnread(tab.appSessionId, true, client);
+    }),
+    registerAction('session.reopenClosed', () => layout().reopenClosed('session')),
     registerAction('tab.reopen', () => layout().reopenClosed()),
     // W5: ⌘0, the View menu and the palette open the floating Overview, or bring focus back to it when it is open.
     registerAction('tab.overview', () => {

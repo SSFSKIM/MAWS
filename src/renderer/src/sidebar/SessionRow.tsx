@@ -20,6 +20,7 @@ import { lineageCaption, rowBranch, sessionAge } from './derive';
 import { SessionHoverCard } from './HoverCard';
 import { ReleasedMark } from '../budget/ReleasedMark'; // C12
 import { sessionNodeId, useTree } from './tree';
+import { setSessionUnread } from '../keymap/session-navigation';
 import { displayTitle } from '../sessions/title';
 
 export const SESSION_DRAG_TYPE = 'application/x-maws-session';
@@ -99,7 +100,11 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: nu
             <PinIcon className="size-[11px]" />
           </span>
         )}
-        {record.unread && <span aria-label="Unread" role="img" className={`block size-[5px] shrink-0 rounded-full bg-info ${yields}`} />}
+        <button type="button" tabIndex={-1} aria-label={record.unread ? 'Mark read' : 'Mark unread'}
+          onClick={(event) => { event.stopPropagation(); void setSessionUnread(id, !record.unread); }}
+          className="flex size-4 shrink-0 items-center justify-center rounded-sm outline-accent focus-visible:outline-2">
+          <span aria-hidden className={`size-[5px] rounded-full ${record.unread ? 'bg-info' : 'bg-fg-faint opacity-0 group-hover/session:opacity-100'}`} />
+        </button>
         <span className={`shrink-0 text-ui-sm text-fg-muted tabular-nums ${yields}`}>{sessionAge(record, digest, now)}</span>
         {hoverActions.length > 0 && <RowActions actions={hoverActions} appSessionId={id} title={title} pinned={record.pinned} />}
       </div>
