@@ -120,6 +120,8 @@ function OverviewPanel({ bounds }: { bounds: { width: number; height: number } }
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
+      // An Overview behind a surface sheet or another hidden main region does not own this key.
+      if (panel.current?.closest('[inert], [hidden], [aria-hidden="true"]')) return;
       // A nested modal or menu gets the first opportunity to consume Escape.
       if (document.querySelector('[aria-modal="true"], [role="menu"][data-state="open"]')) return;
       event.preventDefault();

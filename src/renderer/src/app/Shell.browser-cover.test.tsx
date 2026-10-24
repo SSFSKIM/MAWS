@@ -107,7 +107,8 @@ describe('native Browser views under shell overlays', () => {
     expect(covers()).toEqual([true, false, true, false]);
   });
 
-  it('does not let an Overview hidden behind the sheet freeze its Browser surface', async () => {
+  it('keeps a Browser sheet live above Overview and lets Escape dismiss the sheet before Overview', async () => {
+    const user = userEvent.setup();
     setWidth(600);
     renderShell();
     await frames();
@@ -118,9 +119,17 @@ describe('native Browser views under shell overlays', () => {
     await frames();
     expect(covers()).toEqual([true, false]);
     expect(main.callsOf('browser.view.place').filter((call) => call.surface === 'panel').at(-1)).toMatchObject({ tabId: T2, claim: true, rect: { width: 500 } });
-    act(() => useLayout.getState().setPanel({ collapsed: true }));
+    screen.getByRole('button', { name: 'Close surface sheet' }).focus();
+    await user.keyboard('{Escape}');
     await frames();
+    expect(screen.queryByRole('button', { name: 'Close surface sheet' })).toBeNull();
+    expect(useLayout.getState().overviewOpen).toBe(true);
+    expect(mainPlaces().at(-1)).toMatchObject({ claim: true, rect: { width: 500 } });
     expect(covers()).toEqual([true, false, true]);
+    await user.keyboard('{Escape}');
+    await frames();
+    expect(useLayout.getState().overviewOpen).toBe(false);
+    expect(covers()).toEqual([true, false, true, false]);
   });
 
   it('updates native placement when a sheet opens at an already narrow window, without requiring a resize', async () => {
