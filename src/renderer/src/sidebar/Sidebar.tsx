@@ -8,8 +8,8 @@
 // serves every row, and the tree is one roving tab stop (`tree.ts`). A project removed from the sidebar (I5) is listed
 // nowhere, its sessions with it, and "Hidden projects…" at the end offers it back.
 import { ContextMenu, DropdownMenu } from 'radix-ui';
-import { Fragment, useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent } from 'react';
-import { FolderIcon, GearIcon, IconButton, SearchIcon, SortIcon } from '../app/IconButton';
+import { Fragment, useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { FolderIcon, GearIcon, IconButton, SortIcon } from '../app/IconButton';
 import { openCustomize, openProjects } from '../customize/open';
 import { useChordHint } from '../app/IconButton'; // C11
 import { createSession, focusedProject, NEW_CHAT, useSessionCreatorRegistered } from '../keymap/actions-runtime';
@@ -30,7 +30,7 @@ import { ResumeChooserHost } from '../resume/host'; // P2-D
 import { registerProjectRevealer } from './reveal';
 import { AddProject } from './AddProject';
 import { Search } from './Search';
-import { openConversationSearch } from '../palette/CommandPalette';
+import { openConversationSearch, openPalette } from '../palette/CommandPalette';
 import { NeedsYou } from './NeedsYou';
 import { SectionHeading } from './SectionHeading';
 import { moreNodeId, projectNodeId, sessionNodeId, treeCommand, TreeContext, type TreeNode } from './tree';
@@ -41,16 +41,6 @@ export function Sidebar() {
   const loaded = sessionsLoaded && attentionLoaded;
   return (
     <div className="flex min-h-0 flex-1 flex-col text-fg" aria-busy={!loaded}>
-      <div className="px-2.5 pt-2.5">
-        <div data-sidebar-wordmark className="flex h-(--row-h) items-center px-[9px] text-ui-sm font-semibold tracking-[0.08em] text-fg-muted">MAWS</div>
-        <nav aria-label="App destinations">
-          <DestinationRow kind="search" />
-          <NewChatRow />
-          <DestinationRow kind="projects" />
-          <ArtifactsRow />
-          <DestinationRow kind="customize" />
-        </nav>
-      </div>
       {loaded ? <SidebarBody /> : <SidebarSkeleton />}
       <Footer />
     </div>
@@ -68,6 +58,7 @@ interface ShownProject {
 const MORE_PROJECTS = moreNodeId(null);
 
 function SidebarBody() {
+  const searchChord = useChordHint('palette.open');
   const records = useSessions((s) => s.records);
   const recordsVersion = useSessions((s) => s.recordsVersion);
   const digests = useSessions((s) => s.digests);
@@ -238,13 +229,15 @@ function SidebarBody() {
 
   return (
     <TreeContext.Provider value={tree}>
-      <div ref={search} className="px-2.5 pt-1">
-        <Search value={query} onChange={setQuery} label="Search projects and sessions" onLeave={() => {
-          const waiting = scroller.current?.querySelector<HTMLButtonElement>('[data-needs-you][tabindex="0"]');
-          if (waiting) waiting.focus();
-          else if (tabStop) focusItem(tabStop);
-        }} />
-      </div>
+      <SidebarDestinations>
+        <div ref={search}>
+          <Search value={query} onChange={setQuery} label="Search projects and sessions" onSearch={openPalette} chord={searchChord} onLeave={() => {
+            const waiting = scroller.current?.querySelector<HTMLButtonElement>('[data-needs-you][tabindex="0"]');
+            if (waiting) waiting.focus();
+            else if (tabStop) focusItem(tabStop);
+          }} />
+        </div>
+      </SidebarDestinations>
       <ContextMenu.Root modal={false} onOpenChange={(isOpen) => !isOpen && setMenuTarget(null)}>
         <ContextMenu.Trigger asChild>
           <div
@@ -348,13 +341,23 @@ function SortMenu({ sort }: { sort: SidebarSort }) {
 // New chat (M2): directly under the sidebar wordmark, above the search and tree, as Codex's first nav row sits above its
 // projects (readable/chatgpt-26.928.40906/renderer/app/app-initial-27bc4044d9e8.js:519957-519987, 520284-520293). It
 // starts in the project whose tab set the strip shows (`focusedProject`), else in none ("Choose a project").
-function DestinationRow({ kind }: { kind: 'search' | 'projects' | 'customize' }) {
+function SidebarDestinations({ children }: { children: ReactNode }) {
+  return <nav aria-label="App destinations" className="shrink-0 px-2.5 pt-2.5 pb-1">
+    {children}
+    <NewChatRow />
+    <DestinationRow kind="projects" />
+    <ArtifactsRow />
+    <DestinationRow kind="customize" />
+  </nav>;
+}
+
+function DestinationRow({ kind }: { kind: 'projects' | 'customize' }) {
   const current = useLayout((s) => activeTab(s.main)?.kind === kind);
-  const label = { search: 'Search', projects: 'Projects', customize: 'Customize' }[kind];
-  const open = () => { if (kind === 'search') openConversationSearch(''); else if (kind === 'projects') openProjects(); else openCustomize(); };
+  const label = { projects: 'Projects', customize: 'Customize' }[kind];
+  const open = () => { if (kind === 'projects') openProjects(); else openCustomize(); };
   return <button type="button" aria-current={current ? 'page' : undefined} onClick={open}
     className={`flex h-(--row-h) w-full cursor-default items-center gap-[7px] rounded-sm pr-1 pl-[9px] text-ui text-fg outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 ${current ? 'bg-bg-active' : ''}`}>
-    {kind === 'search' ? <SearchIcon className="size-[13px]" /> : kind === 'projects' ? <FolderIcon className="size-[13px]" /> : <CustomizeIcon />}
+    {kind === 'projects' ? <FolderIcon className="size-[13px]" /> : <CustomizeIcon />}
     <span className="min-w-0 flex-1 truncate text-left">{label}</span>
   </button>;
 }
@@ -424,8 +427,9 @@ function EmptyProjects() {
 // Until both snapshots have loaded: the search field and a few placeholder project rows.
 function SidebarSkeleton() {
   return (
+    <>
+    <SidebarDestinations><div className="mx-0.5 mb-2.5 h-8 rounded-sm border border-border" /></SidebarDestinations>
     <div className="min-h-0 flex-1 overflow-hidden px-2.5 py-2.5">
-      <div className="mx-0.5 mb-3.5 h-8 rounded-sm border border-border" />
       <SectionHeading title="Projects" />
       {[0, 1, 2, 3, 4, 5].map((i) => (
         <div key={i} data-testid="skeleton-row" aria-hidden className="flex h-9 items-center px-[9px]">
@@ -433,6 +437,7 @@ function SidebarSkeleton() {
         </div>
       ))}
     </div>
+    </>
   );
 }
 

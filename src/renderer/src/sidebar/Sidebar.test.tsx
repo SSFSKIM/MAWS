@@ -26,6 +26,7 @@ import { clearPreviewCache } from '../resume/preview'; // P2-D
 import { revealProject } from './reveal';
 import { Sidebar } from './Sidebar';
 import { formatClock } from '@shared/app/date-format'; // L129
+import { togglePalette, usePalette } from '../palette/CommandPalette';
 
 const nine = scenarioFile('nine-sessions');
 const idOf = (title: string) => nine.sessions.find((r) => r.title.text === title)!.appId;
@@ -51,6 +52,27 @@ afterEach(() => {
   useResumeChooser.setState({ open: null }); // P2-D
   offs.splice(0).forEach((off) => off());
   delete (window as { maws?: MawsBridge }).maws;
+});
+
+describe('sidebar destination search', () => {
+  it('filters locally, carries the query on Enter or the palette accelerator, and clears on Escape', async () => {
+    fillStores(nine);
+    render(<Sidebar />);
+    const field = screen.getByRole('searchbox', { name: 'Search projects and sessions' });
+    await userEvent.type(field, 'Workstation north star');
+    expect(projectRows()).toEqual(['MAWS']);
+    usePalette.setState({ open: false, query: '', scope: 'sessions' });
+    fireEvent.keyDown(field, { key: 'Enter', isComposing: true });
+    expect(usePalette.getState().open).toBe(false);
+    fireEvent.keyDown(field, { key: 'Enter' });
+    expect(usePalette.getState()).toMatchObject({ open: true, query: 'Workstation north star', scope: 'all' });
+    usePalette.setState({ open: false, query: '', scope: 'all' });
+    act(() => { field.focus(); togglePalette(); });
+    expect(usePalette.getState()).toMatchObject({ open: true, query: 'Workstation north star', scope: 'all' });
+    fireEvent.keyDown(field, { key: 'Escape' });
+    expect((field as HTMLInputElement).value).toBe('');
+    usePalette.setState({ open: false, query: '', scope: 'all' });
+  });
 });
 
 describe('sidebar recovery routes', () => {
@@ -164,6 +186,10 @@ describe('Needs you across projects', () => {
     render(<Sidebar />);
     const search = screen.getByRole('searchbox');
     search.focus();
+    for (const name of ['Projects', 'Artifacts', 'Customize']) {
+      await user.tab();
+      expect(document.activeElement).toBe(within(screen.getByRole('navigation', { name: 'App destinations' })).getByRole('button', { name, exact: true }));
+    }
     await user.tab();
     expect(document.activeElement).toBe(buttons()[0]);
     expect(buttons().filter((b) => b.tabIndex === 0)).toHaveLength(1);
