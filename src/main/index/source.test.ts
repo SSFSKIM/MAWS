@@ -176,7 +176,7 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
       expect(fake.calls[0].input).toEqual({ bindings: [{ sessionId: sessionIdFor(4), appSessionId: launched.appId }] });
       const known = (fake.calls[1].input as { known: unknown[] }).known;
       expect(known).toHaveLength(3);
-      expect(known).toContainEqual({ sessionId: held.sessionId, appSessionId: heldRecord.appId, size: held.size, mtimeMs: held.mtimeMs });
+      expect(known).toContainEqual({ sessionId: held.sessionId, appSessionId: heldRecord.appId, size: -1, mtimeMs: -1 });
       expect(index.sessions.get(heldRecord.appId)?.holder).toEqual({ kind: 'terminal', pid: 7 });
       expect(index.sessions.get(staleRecord.appId)?.holder).toEqual({ kind: 'none' });
     } finally {
@@ -259,8 +259,8 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
     await settle();
 
     const records = batch.map((s) => index.sessions.getByEngineId(s.sessionId)!);
-    expect(fake.names()).toEqual(['fs.bind']);
-    expect(fake.calls[0].input).toEqual({ bindings: batch.map((s, i) => ({ sessionId: s.sessionId, appSessionId: records[i].appId })) });
+    expect(fake.names().filter((name) => name !== 'fs.sessionText')).toEqual(['fs.bind']);
+    expect(fake.calls.find((call) => call.name === 'fs.bind')!.input).toEqual({ bindings: batch.map((s, i) => ({ sessionId: s.sessionId, appSessionId: records[i].appId })) });
     const changed = events('session.changed');
     expect(changed).toHaveLength(3); // four changes to three records, one message each
     expect(changed.find((c) => c.record.appId === records[0].appId)).toMatchObject({ cause: 'discovered', record: { title: { text: 'renamed', source: 'user' } } });
@@ -943,6 +943,9 @@ describe('IndexSessionSource against the real filesystem state service', () => {
 
     await expect.poll(() => index.sessions.list().length, { timeout: 3_000 }).toBe(3);
     const allocated = S.map((sessionId) => index.sessions.getByEngineId(sessionId)!.appId);
+    await expect.poll(() => index.sessionSearch.search('hello 1').map((hit) => hit.appSessionId)).toEqual([allocated[1]]);
+    await fixture.appendLines(fixture.transcriptPath(S[1]), [JSON.stringify(user('u2', 'u1', '/work/p1', 'content-needle'))]);
+    await expect.poll(() => index.sessionSearch.search('content-needle').map((hit) => hit.appSessionId)).toEqual([allocated[1]]);
     await expect.poll(() => wired.calls.filter((c) => c.name === 'fs.bind').flatMap((c) => (c.input as { bindings: { appSessionId: string }[] }).bindings.map((b) => b.appSessionId)).sort(), { timeout: 3_000 }).toEqual([...allocated].sort());
 
     later.length = 0;

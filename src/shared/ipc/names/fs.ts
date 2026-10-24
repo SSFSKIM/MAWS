@@ -2,7 +2,7 @@
 // `../schema/fs.ts`, pinned at compile time in `../schema.ts` and per namespace in `../schema.test.ts`: an entry
 // added there adds its name here.
 export const commands = [
-  'fs.state', 'fs.scan', 'fs.bind', 'fs.unbind', 'fs.holders', 'fs.unfollow', 'fs.subagents', 'fs.agentEvents',
+  'fs.sessionText', 'fs.state', 'fs.scan', 'fs.bind', 'fs.unbind', 'fs.holders', 'fs.unfollow', 'fs.subagents', 'fs.agentEvents',
   'fs.workflows', 'fs.tasks', 'fs.readSpill',
 ] as const;
 

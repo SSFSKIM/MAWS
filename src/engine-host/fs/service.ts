@@ -26,6 +26,7 @@ import type {
   WorkflowRun,
 } from '@shared/ipc/schema/fs';
 import type { PersistedTask, TranscriptSummary } from '@shared/wire/store';
+import { readSearchText } from './search-text';
 import { readSpill } from './artifacts';
 import { Bindings } from './bindings';
 import type { FileReader } from './chain-follower';
@@ -368,6 +369,12 @@ export class FsService {
 
   readSpill(input: FsReadSpillInput): Promise<FsReadSpillOutput> {
     return readSpill(this.paths, input);
+  }
+
+  async searchText(sessionId: SessionId) {
+    const path = this.listed.get(sessionId)?.path;
+    if (!path) throw new Error(`Unknown transcript: ${sessionId}`);
+    return readSearchText(path);
   }
 
   private sessionOf(appSessionId: AppSessionId): SessionId {

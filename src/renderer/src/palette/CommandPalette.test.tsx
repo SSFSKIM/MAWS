@@ -12,7 +12,8 @@ import { activeTab, currentSet } from '../stores/layout-model';
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { Sidebar } from '../sidebar/Sidebar';
 import { projectNodeId } from '../sidebar/tree';
-import { CommandPalette, paletteEntries, usePalette } from './CommandPalette';
+import { ipc } from '../ipc/client';
+import { openConversationSearch, CommandPalette, paletteEntries, usePalette } from './CommandPalette';
 
 const nine = scenarioFile('nine-sessions');
 const idOf = (title: string) => nine.sessions.find((r) => r.title.text === title)!.appId;
@@ -171,4 +172,18 @@ it('Escape returns focus to the element focused before each palette opening', as
     await user.keyboard('{Escape}');
     await vi.waitFor(() => expect(document.activeElement).toBe(opener));
   }
+});
+
+it('opens conversation matches from the sidebar query with a snippet, without mixing in commands', async () => {
+  const id = idOf('Quota reset recovery');
+  const invoke = vi.spyOn(ipc, 'invoke').mockResolvedValue({ ok: true, value: { hits: [{ appSessionId: id, snippet: 'Remember bg-finished in the prompt' }], indexing: false } } as never);
+  try {
+    render(<CommandPalette />);
+    act(() => openConversationSearch('bg-finished'));
+    expect((within(dialog()).getByRole('combobox') as HTMLInputElement).value).toBe('bg-finished');
+    expect(await screen.findByText('Remember bg-finished in the prompt')).toBeTruthy();
+    expect(group('Actions')).toBeNull();
+    await userEvent.setup().keyboard('{Enter}');
+    expect(activeTab(useLayout.getState().main)?.id).toBe(`session:${id}`);
+  } finally { invoke.mockRestore(); }
 });

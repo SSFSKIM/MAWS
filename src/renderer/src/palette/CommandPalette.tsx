@@ -6,7 +6,7 @@
 import { useDialogFocus } from '../app/dialog-focus';
 import { Command } from 'cmdk';
 import { Dialog, VisuallyHidden } from 'radix-ui';
-import { useState, type KeyboardEvent } from 'react';
+import { useEffect, useState, type KeyboardEvent } from 'react';
 import { create } from 'zustand';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -22,10 +22,15 @@ import { selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings';
+import { ipc } from '../ipc/client';
+import { useNow } from '../app/use-now';
+import { sessionAge } from '../sidebar/derive';
+import type { CommandOutput } from '@shared/ipc/schema';
 import { displayTitle } from '../sessions/title';
 
-export const usePalette = create<{ open: boolean }>()(() => ({ open: false }));
-export const togglePalette = () => usePalette.setState((s) => ({ open: !s.open }));
+export const usePalette = create<{ open: boolean; scope: 'all' | 'sessions'; query: string }>()(() => ({ open: false, scope: 'all', query: '' }));
+export const togglePalette = () => usePalette.setState((s) => ({ open: !s.open, scope: 'all', query: '' }));
+export const openConversationSearch = (query = '') => usePalette.setState({ open: true, scope: 'sessions', query });
 
 export interface PaletteEntries {
   sessions: SessionRecord[];
@@ -85,11 +90,31 @@ export function CommandPalette() {
 }
 
 function Palette() {
-  const [query, setQuery] = useState('');
+  const query = usePalette((s) => s.query);
+  const scope = usePalette((s) => s.scope);
+  const setQuery = (query: string) => usePalette.setState({ query });
+  const [content, setContent] = useState<{ query: string; hits: CommandOutput<'session.search'>['hits']; indexing?: boolean; error?: string } | null>(null);
+  useEffect(() => {
+    if (scope !== 'sessions') return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const search = () => {
+      void ipc.invoke('session.search', { query }).then((result) => {
+        if (cancelled) return;
+        setContent(result.ok ? { query, ...result.value } : { query, hits: [], error: result.error.message });
+        if (result.ok && result.value.indexing) timer = setTimeout(search, 1000);
+      }).catch((error: unknown) => { if (!cancelled) setContent({ query, hits: [], error: String(error) }); });
+    };
+    timer = setTimeout(search, 150);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [query, scope]);
   const [selected, setSelected] = useState('');
   const records = useSessions((s) => s.records);
   const projects = useSessions((s) => s.projects);
   const entries = paletteEntries(query, { records, projects });
+  const searching = scope === 'sessions' && content?.query !== query;
+  const hits = scope === 'sessions' && !searching ? content?.hits ?? [] : [];
+  const sessions = scope === 'all' ? entries.sessions : hits.flatMap((hit) => { const record = records.get(hit.appSessionId); return record && !record.archived ? [record] : []; });
   const close = () => usePalette.setState({ open: false });
 
   const openSession = (appSessionId: AppSessionId, split: boolean) => {
@@ -117,22 +142,33 @@ function Palette() {
       <Command.Input
         value={query}
         onValueChange={setQuery}
-        placeholder="Search sessions, projects and actions"
+        placeholder={scope === 'sessions' ? 'Search in conversations' : 'Search sessions, projects and actions'}
+        maxLength={1000}
         className="h-11 w-full border-b border-border bg-transparent px-3 text-ui text-fg outline-none placeholder:text-fg-faint"
       />
-      {(entries.sessions.length > RESULT_LIMIT || entries.projects.length > RESULT_LIMIT) && (
+      <div className="flex gap-1 border-b border-border px-2 py-1" aria-label="Search scope">
+        {(['all', 'sessions'] as const).map((value) => <button key={value} type="button" aria-pressed={scope === value}
+          onClick={() => usePalette.setState({ scope: value })}
+          className={`rounded-sm px-2 py-1 text-ui-sm outline-accent focus-visible:outline-2 ${scope === value ? 'bg-bg-active text-fg' : 'text-fg-muted hover:bg-bg-hover'}`}>
+          {value === 'all' ? 'All' : 'Conversations'}
+        </button>)}
+      </div>
+      {scope === 'sessions' && content?.query === query && content.indexing && <p role="status" className="m-0 px-3 py-2 text-ui-sm text-fg-muted">Indexing conversations… Results will update.</p>}
+      {searching && <p role="status" className="m-0 px-3 py-2 text-ui-sm text-fg-muted">Searching conversations…</p>}
+      {scope === 'sessions' && content?.query === query && content.error && <p role="alert" className="m-0 px-3 py-2 text-ui-sm text-fg-muted">{content.error}</p>}
+      {(scope === 'sessions' ? sessions.length >= RESULT_LIMIT : entries.sessions.length > RESULT_LIMIT || entries.projects.length > RESULT_LIMIT) && (
         <p className="m-0 px-3 py-2 text-ui-sm text-fg-muted">Showing the first {RESULT_LIMIT} matches per group. Type to narrow results.</p>
       )}
       <Command.List className="max-h-[min(420px,60vh)] overflow-y-auto p-1">
         <Command.Empty className="p-3 text-ui-sm text-fg-muted">Nothing matches</Command.Empty>
-        {entries.sessions.length > 0 && (
+        {sessions.length > 0 && (
           <Command.Group heading="Sessions" className={GROUP}>
-            {entries.sessions.slice(0, RESULT_LIMIT).map((record) => (
-              <SessionItem key={record.appId} record={record} project={record.projectId ? (projects.get(record.projectId) ?? null) : null} onOpen={openSession} />
+            {sessions.slice(0, RESULT_LIMIT).map((record) => (
+              <SessionItem key={record.appId} record={record} snippet={hits.find((hit) => hit.appSessionId === record.appId)?.snippet} project={record.projectId ? (projects.get(record.projectId) ?? null) : null} onOpen={openSession} />
             ))}
           </Command.Group>
         )}
-        {entries.projects.length > 0 && (
+        {scope === 'all' && entries.projects.length > 0 && (
           <Command.Group heading="Projects" className={GROUP}>
             {entries.projects.slice(0, RESULT_LIMIT).map((project) => (
               <Command.Item key={project.id} value={`project:${project.id}`} onSelect={() => reveal(project.id)} className={ITEM}>
@@ -141,7 +177,7 @@ function Palette() {
             ))}
           </Command.Group>
         )}
-        {entries.actions.length > 0 && (
+        {scope === 'all' && entries.actions.length > 0 && (
           <Command.Group heading="Actions" className={GROUP}>
             {entries.actions.map((id) => (
               <ActionItem key={id} id={id} onRun={run} />
@@ -153,14 +189,16 @@ function Palette() {
   );
 }
 
-function SessionItem({ record, project, onOpen }: { record: SessionRecord; project: ProjectRecord | null; onOpen(id: AppSessionId, split: boolean): void }) {
+function SessionItem({ record, project, snippet, onOpen }: { snippet?: string | null; record: SessionRecord; project: ProjectRecord | null; onOpen(id: AppSessionId, split: boolean): void }) {
+  const now = useNow();
   const digest = useSessions((s) => s.digests.get(record.appId) ?? null);
   const pending = useAttention((s) => selectPendingOf(s, record.appId));
   return (
-    <Command.Item value={`session:${record.appId}`} onSelect={() => onOpen(record.appId, false)} className={ITEM}>
+    <Command.Item value={`session:${record.appId}`} onSelect={() => onOpen(record.appId, false)} className={`${ITEM} ${snippet ? "h-auto min-h-(--row-h) py-1.5" : ""}`}>
       <GlyphMark glyph={glyphFor(record, digest, pending)} className="w-4 shrink-0" />
-      <span className="truncate">{displayTitle(record)}</span>
-      {project && <span className="ml-auto shrink-0 text-ui-sm text-fg-muted">{project.name}</span>}
+      <span className="min-w-0 flex-1"><span className="block truncate">{displayTitle(record)}</span>{snippet && <span className="line-clamp-2 block text-ui-sm text-fg-muted">{snippet}</span>}</span>
+      {project && <span className="ml-auto max-w-[30%] shrink-0 truncate text-ui-sm text-fg-muted">{project.name}</span>}
+      <span className="shrink-0 text-ui-sm text-fg-faint">{sessionAge(record, digest ?? undefined, now)}</span>
     </Command.Item>
   );
 }

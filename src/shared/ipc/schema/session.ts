@@ -244,6 +244,7 @@ export type SessionChangeCause = (typeof SESSION_CHANGE_CAUSES)[number];
 
 const appSession = z.strictObject({ appSessionId: AppSessionIdSchema });
 const c4Commands = {
+  'session.search': { input: z.strictObject({ query: z.string().max(1000) }), output: z.strictObject({ hits: z.array(z.strictObject({ appSessionId: AppSessionIdSchema, snippet: z.string().nullable() })), indexing: z.boolean() }), owner: 'main' },
   'session.list': {
     input: z.strictObject({ includeArchived: z.boolean().optional() }),
     output: z.strictObject({ sessions: z.array(SessionRecordSchema), revision: z.number().int() }),

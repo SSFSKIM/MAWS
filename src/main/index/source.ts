@@ -74,6 +74,8 @@ export class IndexSessionSource implements SessionSource {
   private unavailableLogged = false;
   private discoveries: TranscriptSummary[] = []; // E11: fs.sessionChanged summaries not yet applied
   private draining = false; // E11: a warm-up for the queue is out
+  private searchQueue = new Map<AppSessionId, TranscriptSummary>();
+  private indexingText = false;
   private stopped = false; // E11: a drain that resumes after the stop applies nothing
 
   constructor(
@@ -254,6 +256,11 @@ export class IndexSessionSource implements SessionSource {
   private discovered(summary: TranscriptSummary): void {
     this.index.transaction(() => {
       const { record, created, advanced } = this.index.sessions.upsertFromSummary(summary);
+      if (!this.index.sessionSearch.current(record.appId, summary.sessionId, summary.size, summary.mtimeMs)) {
+        this.searchQueue.set(record.appId, summary);
+        // Leave the discovery transaction before IPC or a text-index transaction.
+        queueMicrotask(() => void this.indexText());
+      }
       const holder = this.holders.get(summary.sessionId);
       if (created && holder !== undefined) this.index.sessions.setHolder(summary.sessionId, holder);
       if (!advanced) return;
@@ -312,13 +319,28 @@ export class IndexSessionSource implements SessionSource {
     );
   }
 
+  private async indexText(): Promise<void> {
+    if (this.indexingText || this.stopped) return;
+    this.indexingText = true;
+    try {
+      while (this.searchQueue.size > 0 && !this.stopped) {
+        const [appId, summary] = this.searchQueue.entries().next().value!;
+        this.searchQueue.delete(appId);
+        const result = await this.command('fs.sessionText', { sessionId: summary.sessionId });
+        if (result && !this.stopped) this.write('session text', () => this.index.sessionSearch.replace(appId, summary.sessionId, result.size, result.mtimeMs, result.text));
+      }
+    } finally { this.indexingText = false; }
+  }
+
   private sync(): Promise<unknown> {
     this.syncs = this.syncs.then(async () => {
       const bindings = this.index.sessions.bindings();
       const bare = bindings.filter((b) => b.size === null || b.mtimeMs === null).map(({ sessionId, appSessionId }) => ({ sessionId, appSessionId }));
       const known = bindings.flatMap(({ sessionId, appSessionId, size, mtimeMs }) => (size === null || mtimeMs === null ? [] : [{ sessionId, appSessionId, size, mtimeMs }]));
       if (bare.length > 0) await this.command('fs.bind', { bindings: bare });
-      await this.command('fs.scan', { known });
+      // Keep missing transcripts in known so scan still reports removals; a stale text
+      // stamp forces a summary without losing the app/engine binding.
+      await this.command('fs.scan', { known: known.map((entry) => this.index.sessionSearch.current(entry.appSessionId, entry.sessionId, entry.size, entry.mtimeMs) ? entry : { ...entry, size: -1, mtimeMs: -1 }) });
       const state = await this.command('fs.state', undefined);
       if (state !== null) this.foldHolders(state.holders);
     });

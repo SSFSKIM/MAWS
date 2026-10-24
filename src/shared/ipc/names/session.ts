@@ -11,7 +11,7 @@ export const commands = [
   'session.mcpToggle', 'session.sideQuestion', 'session.getUsage', 'session.getContextUsage', 'session.getSettings',
   'session.listPermissionRules', 'session.getHooksListing', 'session.getMemoryDialog', 'session.getSkillsDialog',
   'session.getSandboxDialog', 'session.getWorkspaceDiff', 'session.exportConversation', 'session.getStatus',
-  'session.mcpStatus', 'session.listModels', 'session.getSessionCost', 'session.getBinaryVersion', 'session.list',
+  'session.mcpStatus', 'session.listModels', 'session.getSessionCost', 'session.getBinaryVersion', 'session.list', 'session.search',
   'session.get', 'session.update', 'session.projects.list', 'session.projects.add', 'session.projects.update',
   'session.projects.remove', 'session.drafts.get', 'session.drafts.set', 'session.replay.start',
   'session.replay.launch', 'session.replay.control', 'session.replay.fixtures', 'session.digests',
