@@ -12,6 +12,7 @@ import { DATASET_STATES, utcTime } from '../../src/artifacts/dashboard/states';
 import { invoke, SERVER, TOOL, value, wait, type ConnectorScene, type FixtureRow, type LiveEngine, type Run } from './connector-scene';
 import { AgentSeam, ok, openInMain, revisionOf, refusalOf, tipsOf, type AgentCall } from './dashboards';
 import { boundsProblems, type BlockMeasure } from './live-data-bounds';
+import { closeSurface, mainTab as shellMainTab, openSurface } from './shell';
 
 export const BOARD = 'Signups board';
 export const DATASET = 'signups';
@@ -61,7 +62,7 @@ export async function createBoard(scene: ConnectorScene, page: Page, agent: Agen
 
 export const mainTab = (page: Page, artifactId: string): Locator => page.locator(`[data-region="main"] [data-artifact-tab="${artifactId}"]`);
 /** A tab of the main area's strip by its name (main/Tab.tsx: `role="tab"`, its label the name, `aria-selected`). */
-export const stripTab = (page: Page, name: string): Locator => page.locator(`[data-region="main"] [role="tab"][data-tab-id][aria-label="${name}"]`);
+export const stripTab = (page: Page, name: string): Locator => shellMainTab(page, name);
 /** The live document's views under `scope` (a tab or a panel record), the bar first, the table second. */
 export const liveViews = (scope: Locator): Locator => scope.locator('.doc-live figure.dash-view');
 export const previewViews = (scope: Locator): Locator => scope.locator('.doc-preview figure.dash-view');
@@ -219,11 +220,10 @@ export async function readDataset(agent: AgentSeam, session: string, artifactId:
 
 // ---- layout ------------------------------------------------------------------------------------------------------------------
 
-/** The right panel shown or hidden by the owner's toolbar toggle. */
+/** The dashboard's Artifacts surface shown or hidden by its icon, retaining the record for the next opening. */
 export async function setPanel(page: Page, shown: boolean): Promise<void> {
-  const toggle = page.getByRole('button', { name: 'Toggle right panel', exact: true });
-  if ((await toggle.getAttribute('aria-pressed')) !== String(shown)) await toggle.click();
-  await expect(toggle).toHaveAttribute('aria-pressed', String(shown));
+  if (shown) await openSurface(page, 'Artifacts');
+  else await closeSurface(page, 'Artifacts');
 }
 
 /** The window as it actually is: its native frame and content size, its minimum, and the renderer's CSS viewport and

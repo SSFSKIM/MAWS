@@ -22,6 +22,7 @@ import { PANEL_CHILD_TAIL } from '../test/support/panel-child-tail';
 import { REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { latencyBudgets } from './support/latency';
 import { otherThemeColours } from './support/panel-support';
+import { hideSurfaces, openSurface, showSessionCards, surface } from './support/shell';
 
 const DIR_A = '/tmp/maws-harness/a'; // session A's directory in the harness scenario
 const HARNESS_ENV = { MAWS_HARNESS: '1', MAWS_SESSION_SOURCE: 'stub:test/fixtures/panel/harness-sessions.json' };
@@ -82,9 +83,14 @@ class Harness {
     const toggle = this.region.locator('section[data-section="done"] > h3 button');
     if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
   }
-  // A tool on A, selected (a single-instance tool already open is re-targeted and selected; Subagents opened with no
-  // params shows its lists).
-  open = (toolId: 'subagents' | 'background') => this.panel('addTool', toolId);
+  // Show the real surface, returning from a drill-in through its own Back control when needed.
+  async open(toolId: 'subagents' | 'background'): Promise<void> {
+    const name = toolId === 'subagents' ? 'Subagents' : 'Background work';
+    await hideSurfaces(this.page);
+    await openSurface(this.page, name);
+    const back = surface(this.page, toolId).getByRole('button', { name: `‹ ${name}`, exact: true });
+    if (await back.isVisible()) await back.click();
+  }
   tabs = () => this.panel('tabs');
   layoutOf = (id: 'A' | 'B') =>
     this.page.evaluate(async (key) => {
@@ -146,7 +152,7 @@ test.describe('the #panel harness: the agent tools', () => {
     const h = await Harness.open(maws);
     await h.load('A', 'pass1/subagent');
     await h.agents('clickTranscriptSubagent', 1);
-    await expect.poll(async () => (await h.tabs()).find((tab) => tab.active)?.toolId).toBe('subagents');
+    await expect(surface(h.page, 'subagents')).toBeVisible();
     await expect.poll(async () => (await h.drillIn())?.header).toBe(FIRST.title);
     const drillIn = (await h.drillIn())!;
     expect(drillIn).toMatchObject({ agentId: FIRST.agentId, dispatchedBy: `Dispatched by ${SESSION}` });
@@ -277,7 +283,7 @@ test.describe('the #panel harness: the agent tools', () => {
     await expect.poll(async () => (await card())?.title).toBe(WORKFLOW.description);
     expect((await card())!.summary).toBe('Phases arrive with the first progress frame');
     // E7: the card is compact; its phases and agents live in the run's widget.
-    await h.panel('addTool', 'background', { params: { taskId: WORKFLOW.taskId, view: 'run' } });
+    await surface(h.page, 'background').locator(`[data-workflow="${WORKFLOW.taskId}"] h4 button`).click();
     const widget = () => h.agents('widget');
     await expect.poll(async () => (await widget())?.header).toBe(WORKFLOW.description);
     expect((await widget())!).toMatchObject({ phases: [], note: 'Phases arrive with the first progress frame' });
@@ -400,9 +406,9 @@ test.describe('the #panel harness: the agent tools', () => {
     await expect.poll(async () => (await h.log())?.path).toBe(spillPath);
     const logs = async () => (await h.tabs()).filter((tab) => tab.toolId === 'log');
     const [first] = await logs();
-    await h.panel('showSummary');
+    await showSessionCards(h.page);
     await h.agents('clickTranscriptFullLog', 1);
-    await expect.poll(async () => (await h.tabs()).find((tab) => tab.active)?.id, 'the same tab, selected').toBe(first.id);
+    await expect(surface(h.page, 'log').locator(`[data-tab-id="${first.id}"]`).getByRole('tab'), 'the same tab, selected').toHaveAttribute('aria-selected', 'true');
     expect(await logs()).toHaveLength(1);
 
     const reads = (await h.agents('calls')).readSpill.length;
@@ -432,9 +438,22 @@ test.describe('the #panel harness: the agent tools', () => {
     expect((await h.tabs()).filter((tab) => tab.toolId === 'log'), 'neither Log in the strip').toEqual([]);
     await expect.poll(async () => (await h.layoutOf('A'))?.tabs.filter((tab) => tab.toolId === 'log') ?? [], 'nor in layout.json').toEqual([]);
 
-    const fresh = await h.panel('addTool', 'log', { params: { path: null, title: 'Log' } });
-    await h.panel('showSummary');
-    await h.panel('selectTab', fresh);
+    // Log is intentionally absent from the launcher: a fresh output target creates it, and opening that output
+    // again must reveal the same transient instance rather than manufacture a generic Log surface.
+    await h.load('A', 'events/agents-stop-shell', { releaseTo: AGENTS_STOP_SHELL_TAIL.first });
+    await h.agents('fakeFs', { spills: { [AGENTS_STOP_SHELL_TAIL.outputFile]: 'fresh shell output\n' } });
+    await h.open('background');
+    await expect.poll(async () => (await h.background())?.shells[0]?.output).toBe('enabled');
+    await h.agents('output', AGENTS_STOP_SHELL_TAIL.taskId);
+    const freshLogs = (await h.tabs()).filter((tab) => tab.toolId === 'log');
+    expect(freshLogs).toHaveLength(1);
+    const fresh = freshLogs[0].id;
+    expect(logIds).not.toContain(fresh);
+    await expect.poll(async () => (await h.log())?.path).toBe(AGENTS_STOP_SHELL_TAIL.outputFile);
+    await showSessionCards(h.page);
+    await h.open('background');
+    await h.agents('output', AGENTS_STOP_SHELL_TAIL.taskId);
+    await expect(surface(h.page, 'log').locator(`[data-tab-id="${fresh}"]`).getByRole('tab')).toHaveAttribute('aria-selected', 'true');
     await h.panel('switchSession', 'B');
     await h.panel('switchSession', 'A');
     expect((await h.tabs()).map((tab) => tab.id)).toContain(fresh);
@@ -488,7 +507,7 @@ test.describe('the #panel harness: the agent tools', () => {
     expect(view.notes).toContain('Shells and monitors are known only while the session runs here');
     expect(view.workflows).toEqual([expect.objectContaining({ status: 'completed', summary: 'Done' })]);
     // E7: the run's widget lists the agents the card's table did, each opening its sidecar transcript.
-    await h.panel('addTool', 'background', { params: { taskId: view.workflows[0].taskId, view: 'run' } });
+    await surface(h.page, 'background').locator(`[data-workflow="${view.workflows[0].taskId}"] h4 button`).click();
     await expect.poll(async () => (await h.agents('widget'))?.agents.map((row) => [row.label, row.openable])).toEqual([
       ['alpha', true],
       ['beta', true],
@@ -496,24 +515,25 @@ test.describe('the #panel harness: the agent tools', () => {
     h.expectQuietConsole();
   });
 
-  test("the summary sections read the tools' counts", async ({ maws }) => {
+  test('the agent surfaces show live counts and open workflow runs', async ({ maws }) => {
     const h = await Harness.open(maws);
-    const section = (name: 'Subagents' | 'Background work') => h.region.getByRole('tabpanel', { name: 'Session overview' }).getByRole('region', { name });
     await h.load('A', 'pass1/subagent', { releaseTo: PASS1.firstStart });
-    await h.panel('showSummary');
+    await h.open('subagents');
     await h.agents('releaseThrough', 'A', PASS1.secondStart);
-    await expect(section('Subagents')).toContainText('2 working · 0 done');
+    await expect.poll(async () => (await h.subagents())?.headings).toEqual(['Agents · 2 running']);
+    await expect.poll(async () => (await h.subagents())?.agents).toHaveLength(2);
     await h.agents('releaseThrough', 'A', PASS1.secondFinish);
-    await expect(section('Subagents')).toContainText('0 working · 2 done');
-    await section('Subagents').getByRole('button', { name: 'Open' }).click();
-    await expect.poll(async () => (await h.tabs()).find((tab) => tab.active)?.toolId).toBe('subagents');
+    await expect.poll(async () => (await h.subagents())?.headings).toEqual(['Done · 2']);
+    await h.expandDone();
+    expect((await h.subagents())!.agents).toEqual([]);
+    expect((await h.subagents())!.done).toHaveLength(2);
 
     await h.load('A', 'events/agents-stop-workflow', { releaseTo: AGENTS_STOP_WORKFLOW_TAIL.progress.releaseTo });
     await h.release(AGENTS_STOP_WORKFLOW_TAIL.progress.frames[0]);
-    await h.panel('showSummary');
-    await expect(section('Background work')).toContainText('1 workflow');
-    await section('Background work').getByRole('button', { name: 'Open' }).click();
-    await expect.poll(async () => (await h.tabs()).find((tab) => tab.active)?.toolId).toBe('background');
+    await h.open('background');
+    await expect.poll(async () => (await h.background())?.workflows.map((card) => card.taskId)).toEqual([WORKFLOW.taskId]);
+    await surface(h.page, 'background').locator(`[data-workflow="${WORKFLOW.taskId}"] h4 button`).click();
+    await expect.poll(async () => (await h.agents('widget'))?.taskId).toBe(WORKFLOW.taskId);
     h.expectQuietConsole();
   });
 
@@ -574,7 +594,7 @@ test.describe('the #panel harness: the agent tools', () => {
           await h.load('A', 'events/agents-stop-workflow', { releaseTo: AGENTS_STOP_WORKFLOW_TAIL.progress.releaseTo });
           for (const n of AGENTS_STOP_WORKFLOW_TAIL.progress.frames.slice(0, 2)) await h.release(n);
           await h.open('background');
-          await h.panel('addTool', 'background', { params: { taskId: WORKFLOW.taskId, view: 'run' } });
+          await surface(h.page, 'background').locator(`[data-workflow="${WORKFLOW.taskId}"] h4 button`).click();
           await expect.poll(async () => (await h.agents('widget'))?.agents.map((row) => row.label)).toEqual(['alpha', 'beta']);
         },
       ],
@@ -670,17 +690,14 @@ test.describe('E7: the orchestration views', () => {
     else process.env.TZ = zone;
   });
 
-  test('G1: a workflow run opens from the summary into its widget, and the disk-only ref opens the same widget', async ({ maws }) => {
+  test('G1: a workflow run opens from its surface into its widget, and the disk-only ref opens the same widget', async ({ maws }) => {
     const h = await Harness.open(maws);
     const { progress } = AGENTS_STOP_WORKFLOW_TAIL;
     await h.load('A', 'events/agents-stop-workflow', { releaseTo: progress.releaseTo });
     for (const n of progress.frames) await h.release(n); // the recorded run through its last progress frame: Echo 2/2
-    await h.panel('showSummary');
-    const summary = h.region.getByRole('tabpanel', { name: 'Session overview' });
-    await expect(summary.getByRole('region', { name: 'Background work' })).toContainText('1 workflow');
-    await summary.getByRole('region', { name: 'Background work' }).getByRole('button', { name: 'Open' }).click();
+    await h.open('background');
     await expect.poll(async () => (await h.background())?.workflows.map((card) => card.taskId)).toEqual([WORKFLOW.taskId]);
-    await h.region.locator(`[data-workflow="${WORKFLOW.taskId}"] h4 button`).click(); // the card's title
+    await surface(h.page, 'background').locator(`[data-workflow="${WORKFLOW.taskId}"] h4 button`).click(); // the card's title
     const widget = () => h.agents('widget');
     await expect.poll(async () => (await widget())?.taskId).toBe(WORKFLOW.taskId);
     const live = (await widget())!;
@@ -702,21 +719,21 @@ test.describe('E7: the orchestration views', () => {
     await bothThemes(h, 'g1-widget', h.region);
     const liveFacts = widgetFacts(await widget());
     // the transcript's workflow ref, on the live session, opens the same widget
-    await h.panel('showSummary');
+    await showSessionCards(h.page);
     await h.agents('clickTranscriptSubagent', 1);
-    await expect.poll(async () => (await h.tabs()).find((tab) => tab.active)?.toolId).toBe('background');
+    await expect(surface(h.page, 'background')).toBeVisible();
     await expect.poll(async () => widgetFacts(await widget()), 'the ref opens the run it names').toEqual(liveFacts);
 
     await test.step('the transcript’s workflow ref on a disk-only session opens the same widget, its agents their transcripts', async () => {
       await h.load('A', 'pass2/workflow'); // the same run recorded live: its Workflow call names the run's ids
       await h.agents('clearStatus', 'A');
       await h.agents('fixtureFs', 'workflow-disk');
-      await h.panel('showSummary');
+      await showSessionCards(h.page);
       await h.agents('clickTranscriptSubagent', 1); // the workflow ref
-      await expect.poll(async () => (await h.tabs()).find((tab) => tab.active)?.toolId).toBe('background');
+      await expect(surface(h.page, 'background')).toBeVisible();
       await expect.poll(async () => widgetFacts(await widget()), 'the disk snapshot reads as the live frames did').toEqual(liveFacts);
       await h.region.locator('[data-view="run"] tbody tr').filter({ hasText: 'alpha' }).getByRole('button').click();
-      await expect.poll(async () => (await h.tabs()).find((tab) => tab.active)?.toolId).toBe('subagents');
+      await expect(surface(h.page, 'subagents')).toBeVisible();
       await expect.poll(async () => (await h.drillIn())?.relay.disabled).toBe('Known only from disk');
     });
     h.expectQuietConsole();
@@ -838,7 +855,7 @@ test.describe('E7: the orchestration views', () => {
     h.expectQuietConsole();
   });
 
-  test('G4: the Tasks panel opens on its target, re-targets the open tab, follows the list, and edits nothing', async ({ maws }) => {
+  test('G4: the Tasks surface opens on its target, re-targets the open instance, follows the list, and edits nothing', async ({ maws }) => {
     const h = await Harness.open(maws);
     const task = (id: number, status: 'pending' | 'in_progress' | 'completed') => ({
       id: String(id), subject: `Task ${id}`, description: '', status, blocks: [], blockedBy: [], ...(status === 'in_progress' ? { activeForm: `Working on task ${id}` } : {}),

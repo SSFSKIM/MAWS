@@ -11,7 +11,7 @@
 // written prompts, the transcript's chip and image (P2-E2: the docked card becoming the thread, handed off to the Side
 // pane at the thread's permission), the thread header's page button reusing the parent's tab; (2b) P2-F L146: the Side
 // pane's "Show in browser" re-docking the thread into the card under its page, and Show here; (2c) P2-F: the Side pane
-// taking the panel's Browser's place, its "Reopen in browser" bringing Browser back with the thread's card under the page; (3) G2 without E4c: every target's anchor
+// after Browser is closed, its "Reopen in browser" bringing Browser back with the thread's card under the page; (3) G2 without E4c: every target's anchor
 // resolves with E4c's own expression in the view's page; (4) an area pick; (5) Esc in the page and in the chrome; (6)
 // the context menu's pick (through the seam's `pickAt`); (7) a navigation disarms, a stale report is dropped; (7b) a
 // tab whose preload never acknowledges the arm is refused; (7c) a tab adopted from window.open arms and shields; (8) a
@@ -35,6 +35,7 @@ import { clearToasts, closeScene, scratchProject, show, type Scratch } from './s
 import { REPO_ROOT } from './support/launch';
 import { latencyBudgets } from './support/latency';
 import { seedTranscript, SideJournal, solidPng, transcript } from './support/side-replay';
+import { closeSurface } from './support/shell';
 
 test.describe.configure({ timeout: 180_000 });
 
@@ -71,6 +72,16 @@ async function commentScene(opts: CommentSceneOptions, body: (s: BrowserScene) =
     }
     try {
       await listen(s);
+      if (/^2[bc]\./.test(test.info().title)) {
+        await s.page.evaluate(() => {
+          const log: unknown[] = [];
+          (window as unknown as { __e4dVisibility: unknown[] }).__e4dVisibility = log;
+          const record = (kind: string, payload: unknown) => { if (log.length < 100) log.push({ at: Date.now(), kind, payload }); };
+          window.maws.on('browser.tabs.changed', ({ tabs }) => record('tabs', tabs.map(({ tabId, loading, covered, placedIn, suspended, crashed, failed, loadError }) => ({ tabId, loading, covered, placedIn, suspended, crashed, failed, loadError }))));
+          window.maws.on('browser.view.covered', ({ tabId, placeholder }) => record('still', { tabId, placeholder: placeholder !== null }));
+          window.maws.on('attention.notified', (payload) => record('notification', payload));
+        });
+      }
       await body(s);
     } catch (error) {
       await s.maws.cleanup();
@@ -182,7 +193,7 @@ interface CommentTab {
   page: Page;
 }
 
-// The session shown, the Browser tool added from "+", the comment page loaded and on the pane.
+// The session shown, its optional Browser surface opened, the comment page loaded and on the pane.
 async function openCommentPage(s: BrowserScene, id: AppSessionId): Promise<CommentTab> {
   await show(s, id);
   const panel = await openBrowser(s);
@@ -191,7 +202,38 @@ async function openCommentPage(s: BrowserScene, id: AppSessionId): Promise<Comme
   const tabId = await tabAt(s, id, url);
   const page = await pageAt(s, url);
   await expect(page.locator('#increment')).toBeVisible();
-  await expectOnPane(s, tabId, paneIn(panel), 'panel');
+  // Quiet launches are natively unfocused: a preparatory turn can leave a real completion toast over this page.
+  // Dismiss it through its UI before asserting an uncovered, live page; browser.spec separately pins toast cover.
+  await clearToasts(s.page);
+  try {
+    await expectOnPane(s, tabId, paneIn(panel), 'panel');
+  } catch (error) {
+    const state = await tabState(s, tabId);
+    const shell = await s.page.evaluate((pane) => ({
+      focused: document.hasFocus(), visibility: document.visibilityState, viewport: { width: window.innerWidth, height: window.innerHeight },
+      regions: Array.from(document.querySelectorAll('[data-region]')).map((element) => ({ region: element.getAttribute('data-region'), inert: element.hasAttribute('inert'), rect: element.getBoundingClientRect().toJSON() })),
+      transitions: (window as unknown as { __e4dVisibility?: unknown[] }).__e4dVisibility,
+      layers: Array.from(document.querySelectorAll('body > :not(#root):not(script):not(style), [data-toast-viewport] > *, [role="dialog"], [role="alertdialog"], aside[aria-label="Session cards"]')).map((element) => {
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        const popper = element.matches('[data-radix-popper-content-wrapper]');
+        return {
+          tag: element.tagName, role: element.getAttribute('role'), label: element.getAttribute('aria-label'),
+          text: element.textContent?.trim().slice(0, 500), display: style.display, visibility: style.visibility,
+          hidden: element.closest('[hidden], [inert], [aria-hidden="true"]')?.outerHTML.slice(0, 300),
+          popper, tooltip: element.querySelector('[role="tooltip"]') !== null,
+          modal: !popper && (element.matches('[role="dialog"], [role="alertdialog"]') || element.querySelector('[role="dialog"], [role="alertdialog"]') !== null),
+          focusGuard: element.hasAttribute('data-radix-focus-guard'),
+          intersects: rect.left < pane.x + pane.width && rect.right > pane.x && rect.top < pane.y + pane.height && rect.bottom > pane.y,
+          rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        };
+      }),
+    }), await paneRect(paneIn(panel)));
+    const diagnostics = JSON.stringify({ state, shell }, null, 2);
+    await test.info().attach('comment-page-placement-state', { body: Buffer.from(diagnostics), contentType: 'application/json' });
+    await test.info().attach('comment-page-shell', { body: await s.page.screenshot(), contentType: 'image/png' });
+    throw new Error(`${error instanceof Error ? error.message : String(error)}\nComment-page diagnostics: ${diagnostics}`, { cause: error });
+  }
   return { panel, tabId, url, page };
 }
 
@@ -463,6 +505,8 @@ async function liveParent(s: BrowserScene, parent: AppSessionId, journal: string
 // The parent's recorded turn (its journal's `turn(MAIN_REPLY)`), sent as an ordinary prompt where a case has no Send to
 // main of its own (the parent's one written prompt); done once its result has played and the parent is idle again.
 async function parentTurn(s: BrowserScene, parent: AppSessionId): Promise<void> {
+  // Keep this preparatory turn in its session; background notification routing is tested separately.
+  await show(s, parent);
   value(await invoke(s.page, 'session.send', { appSessionId: parent, content: MAIN_COMMENT }));
   await expect.poll(() => s.journal(parent).some((r) => r.direction === 'in' && (r.frame as { type?: string }).type === 'result'), { timeout: 20_000 }).toBe(true);
   await expect.poll(async () => value(await invoke(s.page, 'session.status', { appSessionId: parent })).turn, { timeout: 20_000 }).toBeNull();
@@ -718,9 +762,9 @@ test('2b. a page thread in the Side pane re-docks into the card under the pane s
   );
 });
 
-// ---- (2c) P2-F: the Side pane took the panel's Browser's place ---------------------------------------------------------
+// ---- (2c) P2-F: reopening a closed Browser surface from the Side pane ---------------------------------------------------------
 
-test('2c. with Browser the panel’s tool, the Side pane taking its place offers Reopen in browser (not Show in browser), which makes Browser the panel’s tool again with the thread’s card docked under the page', async () => {
+test('2c. with the Browser surface closed, the Side pane offers Reopen in browser (not Show in browser), which opens Browser again with the thread’s card docked under the page', async () => {
   test.setTimeout(240_000);
   let parentJournal = '';
   await commentScene(
@@ -748,7 +792,7 @@ test('2c. with Browser the panel’s tool, the Side pane taking its place offers
       await parentTurn(s, parent);
       const t = await openCommentPage(s, parent); // the page in the panel's Browser
 
-      // a Side thread from a pick, handed to the Side pane, which takes the panel from Browser
+      // A Side thread from a pick, handed to the Side pane. Close Browser explicitly: surfaces now stack.
       await arm(s, t);
       await clickAt(t.page, centre(await rectOf(t.page.locator('#increment'))));
       let card = cardOf(s, INCREMENT_LABEL);
@@ -761,14 +805,17 @@ test('2c. with Browser the panel’s tool, the Side pane taking its place offers
       await expect(card).toHaveCount(0);
       const pane = s.panel.locator('[data-side-thread-view]');
       await expect(pane, 'the Side pane draws the thread').toBeVisible();
-      await expect(t.panel, 'the panel’s Browser gave way').toHaveCount(0);
+      await closeSurface(s.page, 'Browser');
+      await expect(t.panel, 'the Browser surface is closed').toHaveCount(0);
       const header = pane.locator('header');
       await expect(header.getByRole('button', { name: 'Show in browser' }), 'no pane holds the page').toHaveCount(0);
 
-      // Reopen in browser: Browser is the panel's tool again on the page, the thread in the card under it, no caret
+      // Reopen in browser: Browser returns on the page; the thread is drawn only in its card, with no caret.
       await header.getByRole('button', { name: 'Reopen in browser' }).click();
       await expect(t.panel).toBeVisible();
-      await expect(pane).toHaveCount(0);
+      // UX2-L keeps the other stacked surface mounted; it must not draw a second copy of the thread.
+      await expect(pane.getByText('Shown in the card under the page')).toBeVisible();
+      await expect(pane.getByRole('group', { name: 'Approval needed' })).toHaveCount(0);
       card = t.panel.locator('[data-card-dock] [data-comment-card]');
       await expect(card).toHaveAttribute('data-card-phase', 'thread');
       await expect(card.locator('[data-needs-you]'), 'the thread’s request, in the card again').toContainText('Waiting for your permission');

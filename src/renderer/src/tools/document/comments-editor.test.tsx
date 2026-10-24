@@ -60,7 +60,7 @@ async function mount() {
   const view = render(<Surface />);
   await until(() => current !== null && current.getText().includes('quarterly'), 'the editor to bind');
   act(() => void select(current!, 'ships quarterly'));
-  act(() => fireEvent.click(within(screen.getByRole('toolbar', { name: 'Formatting' })).getByRole('button', { name: 'Comment' })));
+  act(() => fireEvent.click(within(screen.getByRole('toolbar', { name: 'Formatting' })).getByRole('button', { name: 'Add comment' })));
   await act(() => ticks(4));
   const open = useCommentCard.getState().open!;
   const threadId = open.target?.kind === 'artifact' ? open.target.threadId : '';
@@ -139,7 +139,7 @@ it('withdraws a closing tab’s acknowledged unsent draft at the host, not only 
     const view = render(<Surface />);
     await until(() => current !== null && current.getText().includes('quarterly'), 'the editor to bind');
     act(() => void select(current!, 'ships quarterly'));
-    act(() => fireEvent.click(within(screen.getByRole('toolbar', { name: 'Formatting' })).getByRole('button', { name: 'Comment' })));
+    act(() => fireEvent.click(within(screen.getByRole('toolbar', { name: 'Formatting' })).getByRole('button', { name: 'Add comment' })));
     await until(() => useCommentCard.getState().open !== null, 'the card');
     const open = useCommentCard.getState().open!;
     const threadId = open.target?.kind === 'artifact' ? open.target.threadId : '';

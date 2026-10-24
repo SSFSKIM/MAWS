@@ -63,7 +63,7 @@ const posOf = (editor: Editor, id: string): number => {
 };
 const selectBlock = (editor: Editor, id: string) => act(() => void editor.commands.setNodeSelection(posOf(editor, id)));
 const toolbar = () => screen.getByRole('toolbar', { name: 'Formatting' });
-const commentButton = () => within(toolbar()).getByRole('button', { name: 'Comment' }) as HTMLButtonElement;
+const commentButton = () => within(toolbar()).getByRole('button', { name: 'Add comment' }) as HTMLButtonElement;
 const rail = () => screen.getByRole('complementary', { name: 'Comments' }); // P4-B1: each thread in it is X36's card, a group (K1)
 const quiet = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 80)));
 const chartDom = (editor: Editor) => editor.view.dom.querySelector<HTMLElement>('[data-node="chart"]')!;

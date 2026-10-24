@@ -12,12 +12,11 @@ describe('the deck header’s actions (M6)', () => {
     const header = deckHeader(state(), { present: () => calls.push('present'), toggleRail: (rail) => calls.push(rail) });
     expect(header.actions?.map((a) => [a.id, a.label])).toEqual([
       ['present', 'Present'],
-      ['comments', 'Comments'], // M7
       ['theme', 'Theme'],
       ['check', 'Check against the design system'],
     ]);
     for (const action of header.actions ?? []) action.onSelect();
-    expect(calls).toEqual(['present', 'comments', 'theme', 'check']);
+    expect(calls).toEqual(['present', 'theme', 'check']);
   });
 
   it('shows the open panel pressed and Present disabled with no slide to show', () => {
@@ -30,27 +29,12 @@ describe('the deck header’s actions (M6)', () => {
     expect(deckHeader(state()).actions).toBeUndefined();
   });
 
-  // M7 (D9): Comments after Present, the open-thread count on the header
-  it('offers Comments after Present, pressed while the threads rail is open, and counts the open threads', () => {
+  it.each(['comments', 'history'] as const)('keeps the %s card toggle in the document toolbar, with only a comment-count badge in the title header', (rail) => {
     const calls: string[] = [];
-    const header = deckHeader(state({ rail: 'comments', unresolved: 3 }), { present: () => {}, toggleRail: (rail) => calls.push(rail) });
-    expect(header.actions?.map((a) => a.id)).toEqual(['present', 'comments', 'theme', 'check']);
-    const comments = header.actions!.find((a) => a.id === 'comments')!;
-    expect([comments.label, comments.pressed]).toEqual(['Comments', true]);
-    comments.onSelect();
-    expect(calls).toEqual(['comments']);
+    const header = deckHeader(state({ rail, history: true, unresolved: 3 }), { present: () => calls.push('present'), toggleRail: (value) => calls.push(value) });
+    for (const action of header.actions ?? []) action.onSelect();
+    expect(calls).toEqual(['present', 'theme', 'check']);
     expect(header.unresolved).toBe(3);
     expect(deckHeader(state({ unresolved: 0 })).unresolved).toBeUndefined();
-  });
-
-  // M8 (D11): Version history after Comments, when the tab has the deck's history
-  it('offers Version history after Comments, pressed while its rail is open, only with the deck’s history', () => {
-    const calls: string[] = [];
-    const header = deckHeader(state({ rail: 'history', history: true }), { present: () => {}, toggleRail: (rail) => calls.push(rail) });
-    expect(header.actions?.map((a) => a.id)).toEqual(['present', 'comments', 'history', 'theme', 'check']);
-    const history = header.actions!.find((a) => a.id === 'history')!;
-    expect([history.label, history.pressed]).toEqual(['Version history', true]);
-    history.onSelect();
-    expect(calls).toEqual(['history']);
   });
 });

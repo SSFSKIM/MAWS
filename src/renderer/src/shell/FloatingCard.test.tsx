@@ -24,6 +24,7 @@ import { ChromePill } from './FloatingPill'; // P3-F (F-shell)
 import { MARKUP_COPY, resetMarkup, useMarkup } from '../markup/session'; // P3-G (M4)
 import { resetMarkupSurfaces, useRegionMarkupSurface } from '../markup/surface'; // P3-G (M4)
 import { EditorHostScopeContext } from '../panel/editor-host'; // P3-G (M4)
+import { PanelHeader } from '../panel/PanelHeader';
 import { CommentCardHost } from '../side/card/CardHost'; // P3-G (M4)
 import { fail, installFakeMain, ok } from '../test-support/code'; // P3-G (M4)
 
@@ -31,6 +32,7 @@ vi.mock('../app/Diagnostics', () => ({ Diagnostics: () => <section aria-label="D
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
+const SURFACE = { id: 'files:probe', toolId: 'files', pinned: true };
 const focused: AppSessionId[] = [];
 
 function ProbeComposer({ appSessionId }: { appSessionId: AppSessionId; paneIndex: 0 | 1 }) {
@@ -73,7 +75,9 @@ beforeEach(() => {
   setWindowWidth(1440);
   resetShellStores();
   useSessions.setState({ records: new Map([[A, { ...record('app-a'), title: { text: 'Alpha session', source: 'user' } }], [B, record('app-b')]]) });
-  useLayout.setState({ main: mainShowing(A) });
+  // A real open surface earns the panel column; absent stacks derive these legacy selections.
+  useLayout.setState({ main: mainShowing(A), panelPinned: [SURFACE], panelActiveNoSession: SURFACE.id, panelBySession: new Map([[A, { tabs: [], activeTabId: SURFACE.id }]]) });
+  registerSlot('panelHost', (props) => <PanelHeader tabs={props.tabs} activeTabId={props.activeTabId} />);
   useFloatingCard.setState({ closed: false, column: null, columnDrag: null, pillHost: null });
   useComposerStore.setState({ focusTargets: new Map(), focusOnMount: new Set() });
   focused.splice(0);
@@ -94,7 +98,7 @@ describe('the floating card in the Shell', () => {
     expect(composers()).toEqual([A]);
     await user.click(within(region('panel')).getByRole('button', { name: 'Float session over panel' }));
     expect(region('main').inert).toBe(true);
-    expect(region('main').parentElement!.style.gridTemplateColumns).toBe('300px 0px minmax(0, 1fr)');
+    expect(region('main').parentElement!.style.gridTemplateColumns).toBe('240px 0px minmax(0, 1fr)');
     const shown = card()!;
     expect(within(shown).getByRole('heading', { name: 'Alpha session' })).toBeTruthy();
     // One composer of A, in the card; the main pane holds an empty element in its place
@@ -191,7 +195,7 @@ describe('the floating card in the Shell', () => {
     await user.click(within(card()!).getByRole('button', { name: 'Dock session' }));
     expect(card()).toBeNull();
     expect(region('main').inert).toBe(false);
-    expect(region('main').parentElement!.style.gridTemplateColumns).toBe('300px minmax(0, 1fr) 444px');
+    expect(region('main').parentElement!.style.gridTemplateColumns).toBe('240px minmax(0, 1fr) 444px');
     expect(within(region('main')).getByTestId('composer').dataset.session).toBe(A);
     expect(focused).toEqual([A]);
   });
@@ -199,14 +203,14 @@ describe('the floating card in the Shell', () => {
   // P3-F wave S (F6, candidate 58): with no shown session there is nothing for the card to draw, so the panel never takes
   // main's place: a float that meets none docks, and main keeps its tab strip
   it('with no shown session, there is no card and no pill, and main is shown', async () => {
-    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, panelPinned: [], panelActiveNoSession: null });
     useLayout.getState().setPanel({ floating: true });
     render(<Shell />);
     await act(async () => {});
     expect(card()).toBeNull();
     expect(screen.queryByRole('button', { name: 'Show session card' })).toBeNull();
     expect(region('main').inert).toBe(false);
-    expect(region('main').parentElement!.style.gridTemplateColumns).toBe('300px minmax(0, 1fr) 380px');
+    expect(region('main').parentElement!.style.gridTemplateColumns).toBe('240px minmax(0, 1fr) 0px');
   });
 
   // The owner's case (P3 sitting, 09:58Z): an artifact tab in front. Float is disabled and says why; ⌥⌘B (the menu
@@ -224,8 +228,8 @@ describe('the floating card in the Shell', () => {
     await act(async () => {});
     expect(useLayout.getState().regions.panel.floating).toBe(false);
     expect(region('main').inert).toBe(false);
-    expect(region('main').parentElement!.style.gridTemplateColumns).toBe('300px minmax(0, 1fr) 380px');
-    expect(within(region('main')).getByRole('tablist')).toBeTruthy();
+    expect(region('main').parentElement!.style.gridTemplateColumns).toBe('240px minmax(0, 1fr) 720px');
+    expect(within(document.querySelector<HTMLElement>('[data-chrome-tabs]')!).getByRole('tablist')).toBeTruthy();
     expect(useNotices.getState().notices.map((n) => n.text)).toContain(FLOAT_COPY.noSession);
   });
 
@@ -233,11 +237,13 @@ describe('the floating card in the Shell', () => {
     render(<Shell />);
     const divider = within(region('panel')).getByRole('separator', { name: 'Resize right panel' });
     const max = Number(divider.getAttribute('aria-valuemax'));
+    const start = Number(divider.getAttribute('aria-valuenow'));
+    const remembered = useLayout.getState().regions.panel.width;
     act(() => void fireEvent.pointerDown(divider, { pointerId: 1, button: 0, clientX: 1000 }));
-    act(() => void fireEvent.pointerMove(divider, { pointerId: 1, clientX: 1000 - (max - 380) - 39 }));
+    act(() => void fireEvent.pointerMove(divider, { pointerId: 1, clientX: 1000 - (max - start) - 39 }));
     expect(useLayout.getState().regions.panel).toMatchObject({ floating: false, width: max });
-    act(() => void fireEvent.pointerMove(divider, { pointerId: 1, clientX: 1000 - (max - 380) - 40 }));
-    expect(useLayout.getState().regions.panel).toMatchObject({ floating: true, width: 380 });
+    act(() => void fireEvent.pointerMove(divider, { pointerId: 1, clientX: 1000 - (max - start) - 40 }));
+    expect(useLayout.getState().regions.panel).toMatchObject({ floating: true, width: remembered });
     expect(card()).not.toBeNull();
   });
 
@@ -251,14 +257,16 @@ describe('the floating card in the Shell', () => {
     render(<Shell />);
     const divider = within(region('panel')).getByRole('separator', { name: 'Resize right panel' });
     const max = Number(divider.getAttribute('aria-valuemax'));
+    const start = Number(divider.getAttribute('aria-valuenow'));
+    const remembered = useLayout.getState().regions.panel.width;
     act(() => void fireEvent.pointerDown(divider, { pointerId: 1, button: 0, clientX: 1000 }));
-    act(() => void fireEvent.pointerMove(divider, { pointerId: 1, clientX: 1000 - (max - 380) - 39 }));
+    act(() => void fireEvent.pointerMove(divider, { pointerId: 1, clientX: 1000 - (max - start) - 39 }));
     expect(useLayout.getState().regions.panel).toMatchObject({ floating: false, width: max });
-    act(() => void fireEvent.pointerMove(divider, { pointerId: 1, clientX: 1000 - (max - 380) - 40 }));
+    act(() => void fireEvent.pointerMove(divider, { pointerId: 1, clientX: 1000 - (max - start) - 40 }));
     await act(async () => {});
-    expect(useLayout.getState().regions.panel).toMatchObject({ floating: false, width: 380 });
+    expect(useLayout.getState().regions.panel).toMatchObject({ floating: false, width: remembered });
     expect(region('main').inert).toBe(false);
-    expect(region('main').parentElement!.style.gridTemplateColumns).toBe('300px minmax(0, 1fr) 380px');
+    expect(region('main').parentElement!.style.gridTemplateColumns).toBe(`240px minmax(0, 1fr) ${start}px`);
     expect(useNotices.getState().notices.map((n) => n.text)).toContain(FLOAT_COPY.noSession);
   });
 
@@ -333,7 +341,7 @@ describe('the floating card in the Shell', () => {
     expect([shown.style.width, shown.style.height]).toEqual([`${width + 40}px`, `${height + 30}px`]);
     expect(useLayout.getState().regions.floatingCard).toEqual({});
     act(() => void fireEvent.pointerUp(corner, { pointerId: 1, clientX: 460, clientY: 470 }));
-    expect(useLayout.getState().regions.floatingCard).toEqual({ summary: { w: width + 40, h: height + 30 } });
+    expect(useLayout.getState().regions.floatingCard).toEqual({ [SURFACE.id]: { w: width + 40, h: height + 30 } });
   });
 
   // M2 (§D3): a pane over a native view (the browser's) reserves a column; the card lies on the column's rect, full
@@ -364,7 +372,7 @@ describe('the floating card in the Shell', () => {
     columnWidth = 470; // the page's 280 px floor held the column narrower than the drag
     act(() => void fireEvent.pointerUp(edge, { pointerId: 1, clientX: 670, clientY: 400 }));
     expect(useFloatingCard.getState().columnDrag).toBeNull();
-    expect(useLayout.getState().regions.floatingCard).toEqual({ summary: { w: 470, h: 420 } }); // the height kept for a floating card
+    expect(useLayout.getState().regions.floatingCard).toEqual({ [SURFACE.id]: { w: 470, h: 420 } }); // the height kept for a floating card
 
     act(() => release());
     expect([card()!.style.right, card()!.style.bottom]).toEqual(['16px', '16px']);
@@ -482,10 +490,13 @@ describe('a mark-up still taken under the open card', () => {
   }
 
   it('hides the card’s layer and the comment card’s host while main takes the still, keeps both mounted, and shows them after', async () => {
-    registerSlot('panelHost', () => (
-      <EditorHostScopeContext.Provider value={{ surface: 'panel', tabId: TAB }}>
-        <ViewerProbe />
-      </EditorHostScopeContext.Provider>
+    registerSlot('panelHost', (props) => (
+      <>
+        <PanelHeader tabs={props.tabs} activeTabId={props.activeTabId} />
+        <EditorHostScopeContext.Provider value={{ surface: 'panel', tabId: TAB }}>
+          <ViewerProbe />
+        </EditorHostScopeContext.Provider>
+      </>
     ));
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1000);
     vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(700);
@@ -519,10 +530,13 @@ describe('a mark-up still taken under the open card', () => {
   });
 
   it('shows them again when the capture fails', async () => {
-    registerSlot('panelHost', () => (
-      <EditorHostScopeContext.Provider value={{ surface: 'panel', tabId: TAB }}>
-        <ViewerProbe />
-      </EditorHostScopeContext.Provider>
+    registerSlot('panelHost', (props) => (
+      <>
+        <PanelHeader tabs={props.tabs} activeTabId={props.activeTabId} />
+        <EditorHostScopeContext.Provider value={{ surface: 'panel', tabId: TAB }}>
+          <ViewerProbe />
+        </EditorHostScopeContext.Provider>
+      </>
     ));
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1000);
     vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(700);
@@ -549,10 +563,13 @@ describe('a mark-up still taken under the open card', () => {
   // P3-F (F-shell, scalpel-4#3): the toasts sit at the shell's bottom right, over the panel. A retry right after a
   // refused capture would otherwise take the refusal's own toast into the still and the picture sent to chat.
   it('hides a showing toast while main takes the still: the retry’s still holds no “Couldn’t capture” toast', async () => {
-    registerSlot('panelHost', () => (
-      <EditorHostScopeContext.Provider value={{ surface: 'panel', tabId: TAB }}>
-        <ViewerProbe />
-      </EditorHostScopeContext.Provider>
+    registerSlot('panelHost', (props) => (
+      <>
+        <PanelHeader tabs={props.tabs} activeTabId={props.activeTabId} />
+        <EditorHostScopeContext.Provider value={{ surface: 'panel', tabId: TAB }}>
+          <ViewerProbe />
+        </EditorHostScopeContext.Provider>
+      </>
     ));
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1000);
     vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(700);

@@ -7,6 +7,7 @@
 // M6: the agent's half through the host's acceptance seam (src/engine-host/dashboards/e2e-seam.ts, MAWS_E2E=1 and
 // MAWS_DASHBOARD_E2E=1, which every app of these groups starts with): the `maws` server's real tools as a named session,
 // with a real scratch working directory the spec writes the agent's files into.
+import { openArtifactInPanel, openArtifactReplicaInPanel, pinSurfaceForSessions } from './shell';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -111,21 +112,19 @@ export const figures = (scope: Locator) => scope.locator('.ds-doc figure.dash-vi
 /** Each drawable point's or bar's tip in a chart figure, in drawing order. */
 export const tipsOf = (figure: Locator) => figure.locator('svg [data-tip]').evaluateAll((els) => els.map((el) => el.getAttribute('data-tip')));
 
-/** The panel's Artifacts tool, added in session A's panel and pinned: the main area keeps showing A, so comments are offered. */
-export async function pinArtifactsTool(page: Page): Promise<void> {
-  const panel = page.locator('[data-region="panel"]');
+/** Select Harness A so the record's panel surface has a session for comments. */
+export async function selectPanelSession(page: Page): Promise<void> {
   await (await sidebarRow(page, 'Harness A')).click();
-  await panel.getByRole('button', { name: 'Add a tool' }).click();
-  await page.getByRole('menuitem', { name: 'Artifacts' }).click();
-  await panel.getByRole('button', { name: 'Pin Artifacts' }).click();
 }
 
 /** The artifact in the pinned Artifacts tool's record view. */
-export async function openInPanel(page: Page, artifactId: string): Promise<Locator> {
+export async function openInPanel(page: Page, artifactId: string, retainMain = false): Promise<Locator> {
   const panel = page.locator('[data-region="panel"]');
-  await panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /^Artifacts/ }).click();
-  await panel.getByRole('button', { name: 'All', exact: true }).click();
-  await panel.locator(`[data-artifact-row][data-artifact-id="${artifactId}"]`).click({ timeout: 15_000 });
+  if (retainMain) await openArtifactReplicaInPanel(page, artifactId);
+  else {
+    await openArtifactInPanel(page, artifactId);
+    await pinSurfaceForSessions(page, 'Artifacts');
+  }
   const record = panel.locator(`[data-artifact-record="${artifactId}"]`);
   await expect(record.locator('.ds-doc .ProseMirror').first()).toBeVisible({ timeout: 15_000 });
   return record;
@@ -138,6 +137,16 @@ export async function openInMain(page: Page, artifactId: string): Promise<Locato
   const main = page.locator(`[data-artifact-tab="${artifactId}"]`);
   await expect(main.locator('.ds-doc .ProseMirror').first()).toBeVisible({ timeout: 15_000 });
   return main;
+}
+
+/** The dashboard's Datasets action, direct when it fits or through the header's real overflow menu. */
+export async function toggleDatasets(header: Locator): Promise<void> {
+  const direct = header.getByRole('button', { name: 'Datasets', exact: true });
+  if (await direct.isVisible()) await direct.click();
+  else {
+    await header.getByRole('button', { name: 'More actions', exact: true }).click();
+    await header.page().getByRole('menuitemcheckbox', { name: 'Datasets', exact: true }).click();
+  }
 }
 
 /** The durability barrier: the replica behind the editor under `scope` has nothing the host has not acknowledged. */
@@ -318,7 +327,7 @@ export async function watchSelection(scope: Locator): Promise<{ log(): Promise<s
 
 /** Comments on the selected chart through the toolbar; when Comment is not offered, the failure carries the selection's log. */
 export async function commentSelectedChart(record: Locator, watched: { log(): Promise<string[]> }): Promise<void> {
-  const button = record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Comment', exact: true });
+  const button = record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Add comment', exact: true });
   const offered = await expect(button)
     .toBeEnabled({ timeout: 10_000 })
     .then(

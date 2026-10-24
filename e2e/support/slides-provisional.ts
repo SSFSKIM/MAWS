@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import { PerfSeam } from './document-scale';
 import { launchMaws, type MawsLaunch } from './launch';
+import { hideSurfaces } from './shell';
 
 /** One change of what the deck's (or the design's) surfaces under the recorder's root draw. */
 export interface SlideSample {
@@ -254,9 +255,10 @@ export async function startWithSeam(prefix: string, env: Record<string, string> 
   };
 }
 
-/** The sidebar and the panel collapsed through the View menu's items (the shell's own actions), so the editor is wide. */
+/** Close optional surfaces and collapse a visible sidebar through its View action, so the editor is wide. */
 export async function collapseChrome(app: SeamApp): Promise<void> {
-  for (const action of ['sidebar.toggle', 'panel.toggle']) await app.launch.app.evaluate(({ Menu }, a) => Menu.getApplicationMenu()?.getMenuItemById(a)?.click(), action);
+  await hideSurfaces(app.launch.page);
+  if (await app.launch.page.locator('[data-region="sidebar"]').isVisible()) await app.launch.app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('sidebar.toggle')?.click());
 }
 
 /** The artifact opened from the library in an `artifact` main tab; answers the tab. */

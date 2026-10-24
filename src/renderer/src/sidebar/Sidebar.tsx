@@ -9,8 +9,9 @@
 // nowhere, its sessions with it, and "Hidden projects…" at the end offers it back.
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import { Fragment, useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent } from 'react';
-import { FolderIcon, GearIcon, IconButton, SortIcon } from '../app/IconButton';
+import { GearIcon, IconButton, SortIcon } from '../app/IconButton';
 import { useChordHint } from '../app/IconButton'; // C11
+import { useSlot } from '../app/slots';
 import { createSession, focusedProject, NEW_CHAT, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { runAction, useActionEnabled } from '../keymap/actions-runtime'; // C11: the footer's gear opens Settings
 import type { ProjectId } from '@shared/graph/ids';
@@ -417,12 +418,15 @@ function SidebarSkeleton() {
 }
 
 function Footer() {
+  const Usage = useSlot('topBarEnd');
   const settings = useActionEnabled('settings.open'); // C11
   const chord = useChordHint('settings.open'); // C11
   return (
     <footer className="flex min-h-[43px] items-center gap-2 border-t border-border px-4 py-[7px] text-ui-sm text-fg-muted">
-      <FolderIcon />
-      <span>Local workspace</span>
+      <div data-sidebar-usage className="flex min-w-0 items-center">
+        {/* eslint-disable-next-line react-hooks/static-components -- the usage slot is registered once at composition */}
+        <Usage />
+      </div>
       {/* C11 start: the gear opens the Settings tab (settings.open) once C11's handler is registered */}
       <button
         type="button"

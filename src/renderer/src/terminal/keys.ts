@@ -1,7 +1,11 @@
-// The terminal's key filter (Residue *Keyboard*, the §5.7 focused-pane rule applied to a terminal): with a terminal
-// focused, every key without ⌘ goes to the pty, except ⌃Tab and ⌃⇧Tab, which stay the app's tab cycle; every ⌘ chord
-// goes to the app, except ⌘C, ⌘V and ⌘A, which the terminal handles (copy the selection, paste, select all).
+// The terminal keeps ordinary input and its copy/paste/select-all chords. Effective application menu bindings yield
+// to the shell, even without ⌘ (F6's region navigation, or a function-key override). The effective tab-cycle bindings
+// (⌃Tab / ⌃⇧Tab by default) are forwarded explicitly, because the pane dispatcher leaves terminal-owned keys alone.
 // The registry installs it on every renderer and forwards the two tab verdicts through C5's `runAction`.
+import { ACTIONS, ACTION_IDS, effectiveChord, type KeymapOverrides } from '@shared/keymap/actions';
+import { matchesChord, parseChord } from '@shared/keymap/chord';
+
+const MENU_ACTIONS = ACTION_IDS.filter((id) => ACTIONS[id].sink === 'menu');
 
 export type KeyVerdict = 'pty' | 'app' | 'tab.next' | 'tab.previous';
 
@@ -14,11 +18,19 @@ function chordLetter(ev: KeyboardEvent): string {
   return ev.code.startsWith('Key') ? ev.code.slice(3).toLowerCase() : '';
 }
 
-export function terminalKeyFilter(ev: KeyboardEvent): KeyVerdict {
-  if (ev.ctrlKey && !ev.metaKey && ev.key === 'Tab') return ev.shiftKey ? 'tab.previous' : 'tab.next';
-  if (ev.metaKey) {
-    const plain = !ev.shiftKey && !ev.altKey && !ev.ctrlKey;
-    return plain && TERMINAL_COMMAND_CHORDS.has(chordLetter(ev)) ? 'pty' : 'app';
+export function terminalKeyFilter(ev: KeyboardEvent, keymap: KeymapOverrides = {}): KeyVerdict {
+  if (ev.metaKey && !ev.shiftKey && !ev.altKey && !ev.ctrlKey && TERMINAL_COMMAND_CHORDS.has(chordLetter(ev))) return 'pty';
+  for (const id of ['tab.next', 'tab.previous'] as const) {
+    const chord = effectiveChord(id, keymap);
+    if (chord !== null && matchesChord(ev, parseChord(chord))) return id;
   }
-  return 'pty';
+  if (ev.metaKey) return 'app';
+  const bound = MENU_ACTIONS.some((id) => {
+    const chord = effectiveChord(id, keymap);
+    if (chord === null) return false;
+    const chords = id === 'tab.select' && chord.endsWith('1')
+      ? Array.from({ length: 9 }, (_, i) => `${chord.slice(0, -1)}${i + 1}`) : [chord];
+    return chords.some((accelerator) => matchesChord(ev, parseChord(accelerator)));
+  });
+  return bound ? 'app' : 'pty';
 }

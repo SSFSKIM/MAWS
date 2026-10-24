@@ -1,11 +1,12 @@
 // The Source control tool's X5 declaration (E6 execution document, Design §5, T3.4) over C8a's host, under the React
-// Compiler as the app builds it: registration and the "+" menu, `open({ target })` with a relative and an absolute
+// Compiler as the app builds it: registration and the surface overflow, `open({ target })` with a relative and an absolute
 // path, and a pinned tool starting over for another session while each session keeps its commit draft.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { record } from '../../../../../test/support/builders';
 import { panelHost } from '../../panel/host';
+import { SurfaceRow } from '../../panel/SurfaceRow';
 import { useLayout } from '../../stores/layout';
 import { useSessions } from '../../stores/sessions';
 import { panelOf, resetPanelStores, TestHost } from '../../test-support/panel';
@@ -39,13 +40,13 @@ afterEach(() => {
 });
 
 describe('the source control tool’s registration', () => {
-  it('registers Source control as a pinnable single-instance tool offered from "+"', async () => {
+  it('registers Source control as a pinnable single-instance tool offered from More surfaces', async () => {
     const tool = panelHost.tools().find((candidate) => candidate.id === 'source-control')!;
     expect(tool).toMatchObject({ title: 'Source control', pinnable: true, multiInstance: false });
     expect(tool.summary).toBeUndefined();
     const user = userEvent.setup();
-    render(<TestHost />);
-    await user.click(screen.getByRole('button', { name: 'Add a tool' }));
+    render(<><SurfaceRow /><TestHost /></>);
+    await user.click(screen.getByRole('button', { name: 'More surfaces' }));
     await user.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Source control' }));
     await waitFor(() => expect(screen.getByRole('region', { name: 'Unstaged' })).toBeTruthy());
     expect(main.callsOf('git.watch')).toContainEqual({ directory: DIR });

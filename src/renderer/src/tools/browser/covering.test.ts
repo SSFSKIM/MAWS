@@ -5,7 +5,7 @@ import { act } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { installFakeMain, ok } from '../../test-support/code';
-import { A, mainShowing } from '../../test-support/panel'; // P3-F wave S (F6)
+import { A, mainShowing, ref, resetPanelStores } from '../../test-support/panel'; // P3-F wave S (F6)
 import { floatPanel } from '../../shell/floating';
 import { useLayout } from '../../stores/layout';
 import { useNotices } from '../../stores/notices';
@@ -19,6 +19,7 @@ const sent = () => main.callsOf('browser.view.cover').map((input) => input.cover
 
 beforeEach(() => {
   resetCovering();
+  resetPanelStores();
   useLayout.setState({ regions: LAYOUT_DEFAULTS.regions, main: LAYOUT_DEFAULTS.main, overviewOpen: false });
   main = installFakeMain(() => ok());
 });
@@ -47,8 +48,11 @@ describe('the window’s cover', () => {
   it('the open Overview stops covering while the panel stands in main (floating or maximized)', async () => {
     const pane = coverPane(() => RECT);
     useLayout.setState({ main: mainShowing(A) }); // a session in front, for the card to draw (P3-F wave S, F6)
+    // UX2: floating requires a selected surface, not merely an uncollapsed empty panel.
+    useLayout.getState().setPanelTabs(A, { tabs: [ref('browser:aaaaaaaa')], activeTabId: 'browser:aaaaaaaa' });
     useLayout.getState().setOverviewOpen(true);
     floatPanel();
+    expect(useLayout.getState().regions.panel.floating).toBe(true);
     expect(useLayout.getState().overviewOpen).toBe(true);
     expect(sent()).toEqual([true, false]);
     useLayout.getState().setPanel({ floating: false });

@@ -4,9 +4,9 @@
 // with nothing left waiting, saving while edits have waited past the tab's delay for the host's acknowledgement (M9:
 // never for the milliseconds a keystroke's ack takes), reconnecting while the port is down or the replica syncs
 // again, read-only when the store is (a newer app wrote it) or a version is shown. The actions are in importance order
-// for the 360 px fold: History, then an export's progress or failure while there is one (the header's Export is G's
-// menu, drawn after the actions), Save version, Comments (the id the header's open-thread count stands for), Agent edits
-// as suggestions. The menu exports the four formats; Word and PDF on Letter, or on A4 by their own entries (the owner's
+// for the 360 px fold: an export's progress or failure while there is one (the header's Export is G's menu, drawn
+// after the actions), Save version and Agent edits as suggestions. History and Comments belong only to the document's
+// formatting toolbar (UX2); the header keeps the open-thread count as a non-interactive badge. The menu exports the four formats; Word and PDF on Letter, or on A4 by their own entries (the owner's
 // Decision Log 43).
 // P3-F (8.2, F7; c65, c66): it exports what the editor shows (the tab's `export`), so while two versions are compared
 // none is offered, as the deck's (L233); a saved export says where in a toast, so the header keeps no finished export.
@@ -14,7 +14,7 @@ import type { DocumentState } from '@artifacts/host';
 import type { DocumentRail, DocumentShown } from '@artifacts/document/editor/DocumentEditor'; // P3-F (F7): DocumentShown
 import type { PageSize } from '@artifacts/document/export/design-system';
 import type { CloseAsk, EditorHostAction, EditorHostExport, EditorHostRegistration, SavedState } from '../../panel/editor-host';
-import { CommentsIcon, HistoryIcon, SaveVersionIcon, SuggestIcon } from './icons';
+import { SaveVersionIcon, SuggestIcon } from './icons';
 
 export type DocumentExportFormat = 'md' | 'html' | 'docx' | 'pdf';
 
@@ -80,10 +80,8 @@ function exportAction(status: ExportStatus, commands: DocumentHeaderCommands): E
 
 export function documentHeader(state: DocumentHeaderState, commands: DocumentHeaderCommands): EditorHostRegistration {
   const actions: EditorHostAction[] = [];
-  if (state.history) actions.push({ id: 'history', label: 'Version history', icon: HistoryIcon, pressed: state.rail === 'history', onSelect: () => commands.toggleRail('history') });
   if (state.exporting) actions.push(exportAction(state.exporting, commands));
   if (state.history) actions.push({ id: 'save-version', label: 'Save version', icon: SaveVersionIcon, onSelect: () => commands.saveVersion() });
-  actions.push({ id: 'comments', label: 'Comments', icon: CommentsIcon, pressed: state.rail === 'comments', onSelect: () => commands.toggleRail('comments') });
   actions.push({
     id: 'suggestions',
     label: 'Agent edits as suggestions',

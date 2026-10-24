@@ -1,5 +1,5 @@
 // The title bar's project chip (P3-F wave S, F17; the owner's obs 8): the project whose tab set the strips show, named
-// left of the title, out of the crowded strip. A click is the sidebar's "+" (a new unstarted session tab in that
+// left of the chrome’s tab strips, out of their crowded row. A click is the sidebar's "+" (a new unstarted session tab in that
 // project); its context menu reveals the project in the sidebar.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -34,14 +34,15 @@ afterEach(() => {
 });
 
 describe('the title bar’s project chip', () => {
-  it('names the project whose tab set the strips show, left of the title, outside the drag region; the no-project set shows none', () => {
+  it('names the project left of the chrome tab strips, outside the drag region; the no-project set shows none', () => {
     render(<Toolbar />);
     expect(chip()).toBeNull(); // nothing open: the no-project set
     act(() => useLayout.getState().openSession(idOf('Charter + research'), { how: 'tab' }));
     expect(chip()!.textContent).toBe('MAWS');
     expect(chip()!.className).toContain('[-webkit-app-region:no-drag]');
-    const title = within(toolbar()).getByText('Charter + research');
-    expect(chip()!.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const tabs = toolbar().querySelector<HTMLElement>('[data-chrome-tabs]')!;
+    expect(chip()!.compareDocumentPosition(tabs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(toolbar()).queryByText('Charter + research')).toBeNull(); // title comes from the shell’s portaled tab strip, never a duplicate title row
     act(() => useLayout.getState().openSession(idOf('Quota reset recovery'), { how: 'tab' }));
     expect(chip()!.textContent).toBe('codex_somersault');
     act(() => useLayout.getState().setCurrentProject(null));

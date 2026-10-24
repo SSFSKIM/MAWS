@@ -36,11 +36,11 @@ export function UsagePill() {
       >
         <span aria-hidden data-dot className={`size-[7px] shrink-0 rounded-full ${pill.severity === null ? 'bg-fg-muted' : SEVERITY_BG[pill.severity]} ${pill.dimmed ? 'opacity-50' : ''}`} />
         <span aria-hidden className={`font-medium tabular-nums ${pill.percent === null ? 'text-fg-muted' : 'text-fg'}`}>
-          {pill.percent ?? '--'}
+          {pill.percent === null ? 'Usage —' : `${pill.limit ?? 'Usage'} ${pill.percent}%`}
         </span>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content aria-label={USAGE.title} side="bottom" align="end" sideOffset={4} collisionPadding={8} className={CONTENT}>
+        <Popover.Content aria-label={USAGE.title} side="top" align="start" sideOffset={4} collisionPadding={8} className={CONTENT}>
           <UsagePanel />
         </Popover.Content>
       </Popover.Portal>

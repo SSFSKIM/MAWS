@@ -8,6 +8,7 @@
 // C10's disclosure; and the banner going when the flag clears. Each state is photographed in both themes, into the
 // evidence pack under MAWS_C12_SHOTS=1 and into the test's output otherwise. Run by `pnpm e2e:c12`
 // (MAWS_C12_E2E=1), part of `pnpm verify`.
+import { openSurface } from './support/shell';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Locator, type Page, type TestInfo } from '@playwright/test';
@@ -70,7 +71,7 @@ test('a release reads idle and marked, offers resume on Send; over budget with n
     await expect(mark).toBeVisible();
     await expect(mark).toHaveAttribute('title', new RegExp(`^Released at ${CLOCK} to stay under the 2 GB memory budget · Send resumes it$`));
     await expect(row.getByRole('img', { name: 'Idle' })).toBeVisible(); // the idle glyph: no failed or exited glyph
-    await expect(row.getByLabel('Unread')).toHaveCount(0);
+    await expect(row.getByRole('img', { name: 'Unread', exact: true })).toHaveCount(0); // not the hover control “Mark unread”
     // W5: the Overview floats over the main area from the toolbar's button rather than showing as the first tab.
     const overview = main.getByRole('dialog', { name: 'Overview' });
     const overviewButton = page.getByRole('banner').getByRole('button', { name: /^Overview/ });
@@ -96,9 +97,7 @@ test('a release reads idle and marked, offers resume on Send; over budget with n
     const send = main.locator('[data-submit-state]');
     await expect(send).toBeEnabled();
     await expect(send).toHaveAttribute('aria-description', 'Starts this session'); // P2-A: every eligible record, released or not
-    const panel = page.locator('[data-region="panel"]');
-    await panel.getByRole('button', { name: 'Add a tool' }).click();
-    await page.getByRole('menuitem', { name: 'Session info' }).click();
+    await openSurface(page, 'Session info');
     const info = page.locator(`[data-session-info="${RELEASED}"]`);
     await expect(dd(info, 'Memory budget')).toHaveText('2.6 GB of 2 GB · 3 sessions');
     await expect(dd(info, 'Process')).toHaveText(new RegExp(`^Released at ${CLOCK} to stay under 2 GB$`));

@@ -18,6 +18,7 @@
 // same recordings with the ask's arguments rewritten (`askFixture`, which says why the replay still holds).
 // Runs under `pnpm e2e:tools` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list). MAWS_E1_SHOTS=1 also
 // writes the replay's screenshots in both themes under docs/doperpowers/evidence/p1-e1/ (`e1-replay-<surface>-<theme>`).
+import { surface, mainTabById } from './support/shell';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator } from '@playwright/test';
@@ -151,7 +152,11 @@ test('a blocking ask: the capsule waits, the sheet holds every modality, the att
 
     // the attention item: in Needs you and on the session's Overview card, compact, with its one button
     const needsYou = sidebarOf(s.page).getByRole('list', { name: 'Needs you' });
-    await expect(needsYou.getByRole('button').filter({ hasText: 'Question' })).toHaveCount(1);
+    const questionRow = needsYou.locator(`button[data-needs-you="${id}"]`);
+    await expect(questionRow).toHaveCount(1);
+    await expect(questionRow).toHaveAccessibleName(/ · Question$/); // UX1 keeps the reason in the row's accessible name
+    await expect.poll(async () => value(await invoke(s.page, 'attention.list', undefined)).filter((item) => item.appSessionId === id).map((item) => [item.kind, item.state, item.request.requestId]))
+      .toEqual([['question', 'pending', opened!.requestId]]);
     await s.maws.app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('tab.overview')?.click());
     const overview = s.page.locator('[data-region="main"]').getByRole('dialog', { name: 'Overview' });
     const card = overview.getByRole('article').filter({ hasText: 'Questions from the agent' });
@@ -193,7 +198,7 @@ test('a blocking ask: the capsule waits, the sheet holds every modality, the att
     await expect(capsule.locator('[data-ask-chip]')).toHaveText('Answered');
     await expect(sheet).toContainText('No open questions');
     // the attention item went at Submit
-    await expect(needsYou.getByRole('button').filter({ hasText: 'Question' })).toHaveCount(0);
+    await expect(questionRow).toHaveCount(0);
     expect(value(await invoke(s.page, 'attention.list', undefined)).filter((item) => item.appSessionId === id && item.state === 'pending')).toEqual([]);
     await idle(s, id);
     await shoot(s, 'capsule-answered');
@@ -309,7 +314,11 @@ test('an ask from a session not shown never switches the main view; its sheet op
     await expect(s.pane.locator(`[data-composer="${shown}"]`)).toBeVisible();
     await expect(s.pane.locator(`[data-composer="${asking}"]`)).toHaveCount(0);
     await expect(sheetOf(s)).toHaveCount(0);
-    await expect(sidebarOf(s.page).getByRole('list', { name: 'Needs you' }).getByRole('button').filter({ hasText: 'Question' })).toHaveCount(1);
+    const questionRow = sidebarOf(s.page).getByRole('list', { name: 'Needs you' }).locator(`button[data-needs-you="${asking}"]`);
+    await expect(questionRow).toHaveCount(1);
+    await expect(questionRow).toHaveAccessibleName(/ · Question$/);
+    await expect.poll(async () => value(await invoke(s.page, 'attention.list', undefined)).filter((item) => item.appSessionId === asking).map((item) => [item.kind, item.state, item.request.requestId]))
+      .toEqual([['question', 'pending', opened!.requestId]]);
 
     // the person goes to the asking session: its sheet opens on the ask
     await show(s, asking);
@@ -318,6 +327,7 @@ test('an ask from a session not shown never switches the main view; its sheet op
     await clearToasts(s.page);
     await sheetOf(s).getByRole('button', { name: 'Submit', exact: true }).click();
     await expect(capsuleOf(s)).toHaveAttribute('data-ask-state', 'answered');
+    await expect(questionRow).toHaveCount(0);
     await idle(s, asking);
   });
 });
@@ -395,7 +405,7 @@ test('previews: a single-select question lays its options beside the focused opt
   await scene({ titles: ['P2-C3: previews'] }, async (s) => {
     const [id] = s.ids;
     await show(s, id);
-    // room for the panel's widest (640 px past the main column's 480 px floor and the sidebar)
+    // Room for both preview columns when the otherwise narrow Questions surface is maximized.
     await s.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => w.isVisible())!.setSize(1440, 900));
     await replay(s, id, askFixture(s.scratch.root, ASK_BLOCKING, LAYOUT_ASK));
     await allowNext(s, id); // mcp__maws__ask
@@ -404,11 +414,10 @@ test('previews: a single-select question lays its options beside the focused opt
 
     const sheet = sheetOf(s);
     await expect(sheet).toHaveAttribute('data-ask-id', opened!.askId);
-    const resizer = s.page.getByRole('separator', { name: 'Resize right panel' });
-    await resizer.focus();
-    await expect(resizer).toHaveAttribute('aria-valuemax', '640');
-    await s.page.keyboard.press('End');
-    await expect(resizer).toHaveAttribute('aria-valuenow', '640');
+    const askSurface = surface(s.page, 'ask-sheet');
+    // UX2-L caps a docked Questions surface at 420 px; maximize it to exercise the existing wide preview layout.
+    await askSurface.getByRole('button', { name: 'Maximize right panel', exact: true }).click();
+    await expect(askSurface.getByRole('button', { name: 'Restore right panel', exact: true })).toBeVisible();
 
     const section = sectionOf(sheet, 'q1');
     const radios = section.getByRole('radiogroup');
@@ -445,7 +454,9 @@ test('previews: a single-select question lays its options beside the focused opt
     await expect(section.getByRole('radio', { name: 'Config file' })).toHaveAttribute('aria-checked', 'true');
     await shoot(s, 'ask-previews');
 
-    // the panel at its narrowest: the pane under the options, as wide as they are
+    // Restore and take the panel to its narrowest: the pane under the options, as wide as they are.
+    await askSurface.getByRole('button', { name: 'Restore right panel', exact: true }).click();
+    const resizer = s.page.getByRole('separator', { name: 'Resize right panel' });
     await resizer.focus();
     await s.page.keyboard.press('Home');
     await expect(resizer).toHaveAttribute('aria-valuenow', '280');
@@ -521,8 +532,8 @@ test('show_pane: the Terminal opens in the panel, an artifact no record answers 
     await show(s, id);
     await replay(s, id, SHOW_PANE);
     await allowNext(s, id); // terminal (seq 68)
-    const terminalTab = s.panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /Terminal/ });
-    await expect(terminalTab).toHaveAttribute('aria-selected', 'true');
+    const terminalSurface = surface(s.page, 'terminal');
+    await expect(terminalSurface).toBeVisible();
     await allowNext(s, id); // artifact (seq 85; the recording's deliverable, renamed in the derived fixture)
     await allowNext(s, id); // nope (seq 100)
     await idle(s, id);
@@ -593,7 +604,7 @@ test('an artifact link in the agent’s reply: a click opens it in the panel’s
     // a click: the panel's Artifacts tool on its record, the transcript still in front
     await chip('Linked plan').click();
     await expect(s.panel.locator(`[data-artifact-record="${artifact.id}"]`)).toBeVisible();
-    await expect(s.panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /Artifacts/ })).toHaveAttribute('aria-selected', 'true');
+    await expect(surface(s.page, 'artifacts')).toBeVisible();
     await expect(chip('Linked plan')).toBeVisible();
 
     // an id no record answers to: the record's not-found notice in its body, its title in the panel's header, as the tool
@@ -601,12 +612,12 @@ test('an artifact link in the agent’s reply: a click opens it in the panel’s
     await chip('Old notes').click();
     const gone = s.panel.locator(`[data-artifact-record="${GONE}"]`);
     await expect(gone.getByText('This artifact was deleted, or it is not in the library.')).toBeVisible();
-    await expect(s.panel.locator('[data-editor-header] [data-header-title]')).toHaveText('Artifact not found');
+    await expect(surface(s.page, 'artifacts').locator('[data-editor-header] [data-header-title]')).toHaveText('Artifact not found');
 
     // ⌘-click: the artifact in a main tab of its own
     await chip('Linked plan').click({ modifiers: ['Meta'] });
     await expect(s.page.locator(`[data-region="main"] [data-artifact-tab="${artifact.id}"]`)).toBeVisible();
-    await expect(s.page.locator(`[data-region="main"] [role="tab"][data-tab-id="artifact:${artifact.id}"]`)).toHaveAttribute('aria-selected', 'true');
+    await expect(mainTabById(s.page, `artifact:${artifact.id}`)).toHaveAttribute('aria-selected', 'true');
   });
 });
 

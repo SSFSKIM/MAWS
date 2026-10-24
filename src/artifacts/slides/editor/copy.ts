@@ -43,6 +43,7 @@ export const DECK_COPY = {
   zoomIn: 'Zoom in',
   zoomOut: 'Zoom out',
   zoom: 'Zoom',
+  zoomControls: 'Zoom controls',
   fit: 'Fit',
   percent: (scale: number) => `${Math.round(scale * 100)}%`,
   // M5: the transform layer, the arrange buttons, Insert

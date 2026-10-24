@@ -8,6 +8,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { clickRevealed } from './support/hover';
 import { launchMaws } from './support/launch';
 import { openProject, projectLine, projectRow, sidebarOf } from './support/sidebar';
+import { surfaceRow } from './support/shell';
 
 const SHELL_ENV = { MAWS_SESSION_SOURCE: 'stub:test/fixtures/shell/nine-sessions.json', MAWS_SCENARIO_CLOCK: 'manual' };
 const FIX = 'Fix sidebar drag'; // unread, its transcript test/fixtures/transcripts/w1-steer-next-disk.jsonl
@@ -66,7 +67,7 @@ test('resume chooser from the sidebar: library box, search, the lazy preview, En
 
     await page.keyboard.press('Enter');
     await expect(dialog).toHaveCount(0);
-    await expect(page.getByRole('tab', { name: `${FIX} · MAWS` })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tab', { name: FIX, exact: true })).toHaveAttribute('aria-selected', 'true');
     expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
   } finally {
     await maws.cleanup();
@@ -95,12 +96,17 @@ test('resume chooser: an exited session opens to its transcript with the session
     await expect(options(page)).toHaveCount(1);
     await page.keyboard.press('Enter');
     await expect(chooser(page)).toHaveCount(0);
-    await expect(page.getByRole('tab', { name: `${NORTH} · MAWS` })).toHaveAttribute('aria-selected', 'true');
-    await page.getByRole('banner').getByRole('button', { name: 'Session actions' }).click();
+    await expect(page.getByRole('tab', { name: NORTH, exact: true })).toHaveAttribute('aria-selected', 'true');
+    // UX2's single More menu keeps session actions in a submenu instead of a second ellipsis button.
+    await surfaceRow(page).getByRole('button', { name: 'More surfaces', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Session actions', exact: true }).click();
     const after = page.getByRole('menuitem', { name: 'Resume', exact: true });
     await expect(after, 'the opened session offers Resume as its row did').toBeVisible();
     expect(await after.isEnabled()).toBe(enabled);
+    await page.keyboard.press('Escape'); // close Session actions, then its containing More menu
+    await expect(after).toHaveCount(0);
     await page.keyboard.press('Escape');
+    await expect(page.getByRole('menu')).toHaveCount(0);
     // P2-A (X16): opening and selecting started nothing; the session stays resumable, for the first Send to acquire
     expect(await availabilityOf(page, NORTH)).toBe('resumable');
     expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
@@ -134,7 +140,7 @@ test('resume chooser from /resume: the same chooser over the session’s project
     await expect(page.locator('[data-region="sidebar"] [data-kind="project"]')).toHaveCount(4, { timeout: 15_000 });
     await openProject(page, 'MAWS');
     await sessionRow(page, CHARTER).click();
-    await expect(page.getByRole('tab', { name: `${CHARTER} · MAWS` })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tab', { name: CHARTER, exact: true })).toHaveAttribute('aria-selected', 'true');
     const message = page.getByRole('textbox', { name: 'Message' });
     await message.click();
     await page.keyboard.type('/resume ');
@@ -160,8 +166,8 @@ test('resume chooser from /resume: the same chooser over the session’s project
     await expect(options(page)).toHaveCount(1);
     await page.keyboard.press('Meta+Enter');
     await expect(dialog).toHaveCount(0);
-    await expect(page.getByRole('tab', { name: `${FIX} · MAWS` })).toHaveAttribute('aria-selected', 'true');
-    await expect(page.getByRole('tab', { name: `${CHARTER} · MAWS` }), 'a new tab beside the one it was opened from').toHaveCount(1);
+    await expect(page.getByRole('tab', { name: FIX, exact: true })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tab', { name: CHARTER, exact: true }), 'a new tab beside the one it was opened from').toHaveCount(1);
     expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
   } finally {
     await maws.cleanup();

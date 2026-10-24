@@ -14,6 +14,7 @@
 //   pnpm build && MAWS_C12_LIVE=1 pnpm exec playwright test e2e/c12-live.spec.ts
 // The support writes the MCP fixtures and the two repositories into $C12 on first use. MAWS_C12_LIVE_MAX_USD (default
 // 5) stops the run before it starts another session once the journals show that much spent.
+import { openSurface } from './support/shell';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
@@ -396,9 +397,7 @@ test('nine sessions under a memory budget: releases, the released surfaces, Send
       const notifiedAfter = (await notified(page)).length;
       const markTitle = await (await rowOf(page, ids.B1!)).getByText('released', { exact: true }).getAttribute('title');
       await open(page, ids.B1!);
-      const panel = page.locator('[data-region="panel"]');
-      await panel.getByRole('button', { name: 'Add a tool' }).click();
-      await page.getByRole('menuitem', { name: 'Session info' }).click();
+      await openSurface(page, 'Session info');
       const info = page.locator(`[data-session-info="${ids.B1}"]`);
       const dd = (term: string) => info.getByRole('term').filter({ hasText: new RegExp(`^${term}$`) }).locator('xpath=following-sibling::dd[1]');
       await expect(dd('Process')).toHaveText(new RegExp(String.raw`^Released at ${CLOCK} to stay under [\d.]+ GB$`));

@@ -16,6 +16,7 @@ import {
 import { buildCodeScratch, GENERATED_LINES, generatedLine, MARKER_LINE, SVG_TEXT, type CodeScratch } from './support/code-scratch';
 import { test, type MawsLaunch } from './support/launch';
 import { latencyBudgets, MEASURED_WAIT_MS } from './support/latency';
+import { hideSurfaces, mainTabs, openSurface, pinSurfaceForSessions, unfoldSessionCard } from './support/shell';
 
 const REFUSAL = "path outside the session's directories";
 const DIR_A = '/tmp/maws-harness/a'; // session A's directory in the harness scenario
@@ -77,12 +78,16 @@ async function withScratch(h: Harness, body: (scratch: CodeScratch) => Promise<v
 }
 
 // Review on Uncommitted over the scratch repository, `src/app.ts` selected with its three hunks drawn.
-async function reviewAppTs(h: Harness, opts: { pin?: boolean } = {}): Promise<string> {
-  const tab = await h.panel('addTool', 'review', opts.pin ? { pin: true } : {});
+async function reviewAppTs(h: Harness, opts: { pin?: boolean } = {}): Promise<void> {
+  await openSurface(h.page, 'Review');
+  if (opts.pin) await pinSurfaceForSessions(h.page, 'Review');
+  // Opening an existing surface preserves its scope, including Last turn from the previous theme scan.
+  const uncommitted = h.region.locator('[data-chip="uncommitted"]');
+  await uncommitted.click();
+  await expect(uncommitted).toHaveAttribute('aria-pressed', 'true');
   await expect.poll(async () => (await h.review('panel'))?.header).toBe('5 files changed · +4 −0 · Uncommitted');
   await h.code('selectFile', 'src/app.ts', 'panel');
   await expect.poll(async () => (await h.review('panel'))?.hunk).toEqual({ index: 1, count: 3 });
-  return tab;
 }
 
 test.describe('the #panel harness: Review and its hand-offs', () => {
@@ -158,13 +163,13 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
     expect(await receipt.locator('.transcript-receipt-path').allTextContents()).toEqual(['src/app.ts', 'src/store.ts', 'src/util/rows.ts']);
     const inert = () => h.region.evaluate((region) => region.hasAttribute('inert'));
 
-    await h.panel('collapse', true);
+    await hideSurfaces(h.page);
     expect(await inert(), 'the panel is hidden').toBe(true);
     await h.code('clickReceiptReview');
     await expect.poll(inert, { message: 'Review changes opens the hidden panel' }).toBe(false);
     await expect.poll(async () => (await h.review('panel'))?.scope).toBe('turn');
 
-    await h.panel('collapse', true);
+    await hideSurfaces(h.page);
     const row = receipt.locator(`.transcript-receipt-file[data-path="${root}/src/app.ts"]`);
     const hover = h.page.locator(`[data-receipt-hover="${root}/src/app.ts"]`);
     await row.hover();
@@ -282,8 +287,8 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
   test("the Environment row shows Review's diff stats", async ({ maws }) => {
     const h = await Harness.open(maws);
     await withScratch(h, async () => {
-      await h.panel('showSummary');
-      const environment = h.region.getByRole('tabpanel', { name: 'Session overview' }).getByRole('region', { name: 'Environment' });
+      await hideSurfaces(h.page);
+      const environment = await unfoldSessionCard(h.page, 'Environment');
       await expect(environment.getByTestId('change-line')).toHaveText('+4 −0 across 5 files · 3 untracked · 1 staged');
       await environment.getByRole('button', { name: 'Review', exact: true }).click();
       await expect.poll(async () => (await h.review('panel'))?.scope).toBe('uncommitted');
@@ -328,7 +333,7 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
           [
             'the Files tool',
             async () => {
-              await h.panel('addTool', 'files');
+              await openSurface(h.page, 'Files');
               await expect(h.region.locator('[data-tool="files"] [role="treeitem"]').first()).toBeVisible();
             },
           ],
@@ -698,7 +703,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
         { id: `diff:${id}:uncommitted @ src/app.ts`, kind: 'diff', appSessionId: id, ref: 'uncommitted @ src/app.ts', pinned: false },
         { id: `diff:${id}:uncommitted @ /etc/hosts`, kind: 'diff', appSessionId: id, ref: 'uncommitted @ /etc/hosts', pinned: false },
       ]);
-      const tabs = p.page.getByRole('tablist', { name: 'Open tabs' });
+      const tabs = mainTabs(p.page);
       await expect(tabs.getByRole('tab', { name: /^Diff · uncommitted @ \/etc\/hosts/ })).toBeVisible({ timeout: 15_000 });
       const outside = p.page.locator('[data-diff-tab="uncommitted @ /etc/hosts"]');
       await expect(outside.locator('[data-review-refused]')).toContainText(`Refused: ${REFUSAL}`);

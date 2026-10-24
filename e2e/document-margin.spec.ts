@@ -7,6 +7,7 @@
 // the first card while the owner types in the paragraph above, the second card is pushed down, the active thread
 // stays the owner's, and the typed text lands whole; the view states and the panel's round trip are read on the same
 // document. No engine runs; the profile is the case's own directory under /tmp.
+import { openArtifactInPanel, pinSurfaceForSessions } from './support/shell';
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -55,23 +56,17 @@ async function start(): Promise<{ page: Page; seam: PerfSeam }> {
   return { page, seam };
 }
 
-// The panel's Artifacts tool, added in session A's panel and pinned; the main area shows Harness A, so a comment has a
-// session to go to.
-async function pinArtifactsTool(page: Page): Promise<void> {
-  const panel = page.locator('[data-region="panel"]');
+// Select Harness A so the record's panel surface has a session for comments.
+async function selectPanelSession(page: Page): Promise<void> {
   await (await sidebarRow(page, 'Harness A')).click();
-  await panel.getByRole('button', { name: 'Add a tool' }).click();
-  await page.getByRole('menuitem', { name: 'Artifacts' }).click();
-  await panel.getByRole('button', { name: 'Pin Artifacts' }).click();
 }
 
 // The owner's document in the pinned Artifacts tool's record view, the panel maximized (the margin's cards tier).
 async function openInPanel(page: Page, title: string): Promise<{ id: string; main: Locator }> {
   const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'document', title });
   const panel = page.locator('[data-region="panel"]');
-  await panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /^Artifacts/ }).click();
-  await panel.getByRole('button', { name: 'All', exact: true }).click();
-  await panel.locator(`[data-artifact-row][data-artifact-id="${artifact.id}"]`).click({ timeout: 15_000 });
+  await openArtifactInPanel(page, artifact.id);
+  await pinSurfaceForSessions(page, 'Artifacts');
   const record = panel.locator(`[data-artifact-record="${artifact.id}"]`);
   await expect(record.locator('.ds-doc .ProseMirror[data-editor="live"]')).toBeVisible({ timeout: 15_000 });
   await panel.getByRole('button', { name: 'Maximize right panel' }).click();
@@ -107,7 +102,7 @@ async function keep(page: Page, main: Locator, text: Locator, index: number, quo
   const before = new Set(await text.locator('[data-thread]').evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.thread!)));
   await selectIn(text, index, quote);
   const toolbar = main.getByRole('toolbar', { name: 'Formatting' });
-  await toolbar.getByRole('button', { name: 'Comment', exact: true }).click();
+  await toolbar.getByRole('button', { name: 'Add comment', exact: true }).click();
   const card = page.locator('[data-comment-card]');
   await expect(card).toBeVisible();
   await expect(main.locator('[data-margin-entry][data-compose] [data-comment-card]'), 'the compose card hosted in the margin').toBeVisible();
@@ -126,7 +121,7 @@ async function keep(page: Page, main: Locator, text: Locator, index: number, quo
 test('an agent reply grows a card while the owner types; the stack re-lays, the active thread stays; the view states and the panel round trip', async () => {
   test.setTimeout(120_000);
   const { page, seam } = await start();
-  await pinArtifactsTool(page);
+  await selectPanelSession(page);
   const { id, main } = await openInPanel(page, 'Margin review');
   const text = main.locator('.ds-doc .ProseMirror[data-editor="live"]');
   const toolbar = main.getByRole('toolbar', { name: 'Formatting' });

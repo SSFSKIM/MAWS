@@ -15,7 +15,7 @@ import { registerSlot, resetSlots } from '../app/slots';
 import { registerArtifactEditor, resetArtifactEditors } from '../artifacts/registry';
 import { queryClient } from '../ipc/query';
 import { runAction } from '../keymap/actions-runtime';
-import { connectLibrary, resetLibrary } from '../library/store';
+import { connectLibrary, library, libraryRow, resetLibrary } from '../library/store';
 import { MainArea } from '../main/MainArea';
 import { SHOW_IN_PANEL_COPY } from '../main/Tab';
 import { instanceOf, panelHost, registerPanelTool, usePanelHost } from '../panel/host';
@@ -80,6 +80,9 @@ let fakeMain: ReturnType<typeof installFakeMain>;
 
 beforeEach(() => {
   resetPanelStores();
+  // Transfer targets need a visible surface; an empty panel no longer reserves a column.
+  const surface = { id: 'background:probe', toolId: 'background', pinned: true };
+  useLayout.setState({ panelPinned: [surface], panelSurfaces: { version: 1, stacks: { [A]: [surface.id], '@none': [surface.id] }, pinnedTools: [], contexts: {} } });
   resetArtifactEditors();
   resetLibrary();
   resetCovering();
@@ -122,12 +125,15 @@ function renderBoth() {
 const mainTab = (id: string) => document.querySelector<HTMLElement>(`[data-region="main"] [data-tab-id="${id}"]`)!;
 const panelRegion = () => document.querySelector<HTMLElement>('[data-region="panel"]')!;
 const panelTab = (id: string) => panelRegion().querySelector<HTMLElement>(`[data-tab-id="${id}"]`)!;
+const panelGrip = () => within(panelRegion()).getByTitle(TRANSFER_COPY.grip);
+const panelDragSource = (id: string) => panelTab(id) ?? panelGrip();
 const panelTarget = () => screen.queryByTestId('panel-drop-target');
 const paneTarget = (pane: 0 | 1) => document.querySelector<HTMLElement>(`[data-pane-drop-target="${pane}"]`);
 const recordOf = (id: string) => (instanceOf(id)?.state as ArtifactsHandle | undefined)?.snapshot().view;
 const mainIds = () => allTabs(useLayout.getState().main).map((t) => t.id);
 const artifactsTabOfA = () => panelOf(A)?.tabs.find((t) => t.toolId === ARTIFACTS_TOOL_ID)?.id;
 const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+const readyForTransfer = () => waitFor(() => expect(libraryRow(library.getState(), DOC).value).toBeDefined());
 // What a pointer over `region`'s editable content hits: a drop layer covering the content when one is mounted, else the
 // content itself (happy-dom does no hit-testing).
 const hitIn = (region: Element) => region.querySelector('[data-drop-overlay]') ?? region.querySelector('[data-editable]')!;
@@ -142,6 +148,7 @@ describe('a main tab dragged onto the panel', () => {
   it('Z1, Z3, Z7: the drag moves only; the panel is one target with one highlight saying “Move to panel”; the drop moves it (T1)', async () => {
     useLayout.setState({ main: panes([sessionTab(A), DOC_TAB]) });
     renderBoth();
+    await readyForTransfer();
     expect(panelTarget(), 'no target before a drag').toBeNull();
     const dt = transfer();
     drag('dragStart', mainTab(DOC_TAB.id), dt);
@@ -201,7 +208,7 @@ describe('a main tab dragged onto the panel', () => {
     const body = document.querySelector<HTMLElement>('[data-region="main"] [role="tabpanel"]')!;
     await waitFor(() => expect(body.querySelector('[data-editable]')).not.toBeNull());
     const dt = transfer();
-    drag('dragStart', panelTab(id), dt);
+    drag('dragStart', panelDragSource(id), dt);
     expect(drag('dragOver', hitIn(body), dt), 'accepted while the transfer allows it').toBe(true);
     act(() => usePanelHost.setState({ closing: new Set([id]) })); // the record's tab starts closing
     const refused = transfer();
@@ -222,7 +229,7 @@ describe('a main tab dragged onto the panel', () => {
     renderBoth();
     await settle();
     const dt = transfer();
-    drag('dragStart', panelTab(pin), dt);
+    drag('dragStart', panelDragSource(pin), dt);
     expect(screen.queryByTestId('drop-edge')).toBeNull();
     const body = document.querySelector<HTMLElement>('[data-region="main"] [role="tabpanel"]')!;
     expect(drag('dragOver', hitIn(body), dt)).toBe(true);
@@ -279,6 +286,7 @@ describe('the browser cover while a drag is on', () => {
     useLayout.setState({ main: panes([sessionTab(A), DOC_TAB]) });
     const page = coverPane(() => PAGE);
     renderBoth();
+    await readyForTransfer();
     expect(covers()).toEqual([]);
     const dt = transfer();
     drag('dragStart', mainTab(DOC_TAB.id), dt);
@@ -300,7 +308,7 @@ describe('the browser cover while a drag is on', () => {
     drag('dragStart', mainTab(NOTES_TAB.id), transfer());
     drag('dragEnd', mainTab(NOTES_TAB.id));
     expect(covers(), 'Escape').toEqual([true, false]);
-    drag('dragStart', panelTab(id), transfer());
+    drag('dragStart', panelDragSource(id), transfer());
     drag('drop', document.body); // not a target: heard on the window
     expect(covers(), 'a release elsewhere').toEqual([true, false, true, false]);
     drag('dragStart', mainTab(NOTES_TAB.id), transfer());
@@ -312,17 +320,17 @@ describe('the browser cover while a drag is on', () => {
 });
 
 describe('the panel’s record dragged into main', () => {
-  it('Z1: the Artifacts tab drags only while it shows a record, with its tool and tab as the payload', async () => {
+  it('Z1: the singleton Artifacts surface offers a drag grip only for a record, with its tool and tab as the payload', async () => {
     useLayout.setState({ main: panes([sessionTab(A)]) });
     const id = addArtifacts();
     renderBoth();
     await settle();
-    expect(panelTab(id).getAttribute('draggable')).not.toBe('true');
+    expect(within(panelRegion()).queryByTitle(TRANSFER_COPY.grip)).toBeNull();
     act(() => void (instanceOf(id)!.state as ArtifactsHandle).open({ target: DOC }));
     await settle();
-    expect(panelTab(id).getAttribute('draggable')).toBe('true');
+    expect(panelGrip().getAttribute('draggable')).toBe('true');
     const dt = transfer();
-    drag('dragStart', panelTab(id), dt);
+    drag('dragStart', panelDragSource(id), dt);
     expect(JSON.parse(dt.getData(PANEL_TAB_DRAG_TYPE))).toEqual({ toolId: ARTIFACTS_TOOL_ID, tabId: id });
     expect(dt.effectAllowed).toBe('move');
     expect(useLayout.getState().dragging).toEqual({ source: 'panel', tabId: id, toolId: ARTIFACTS_TOOL_ID, artifactId: DOC });
@@ -350,7 +358,7 @@ describe('the panel’s record dragged into main', () => {
       t.getBoundingClientRect = () => ({ left: i * 100, right: i * 100 + 100, width: 100, top: 0, bottom: 30, height: 30, x: i * 100, y: 0, toJSON: () => ({}) });
     });
     const dt = transfer();
-    drag('dragStart', panelTab(id), dt);
+    drag('dragStart', panelDragSource(id), dt);
     expect(drag('dragOver', strip, dt, 120)).toBe(true);
     expect(dt.dropEffect).toBe('move');
     expect(within(strip.parentElement!).getByText(TRANSFER_COPY.moveToTab)).toBeTruthy();
@@ -369,7 +377,7 @@ describe('the panel’s record dragged into main', () => {
     await settle();
     expect(paneTarget(0)).toBeNull();
     const dt = transfer();
-    drag('dragStart', panelTab(id), dt);
+    drag('dragStart', panelDragSource(id), dt);
     const target = paneTarget(0)!;
     expect(drag('dragEnter', target, dt)).toBe(true);
     expect(drag('dragOver', target, dt)).toBe(true);
@@ -386,7 +394,7 @@ describe('the panel’s record dragged into main', () => {
     renderBoth();
     await settle();
     const dt = transfer();
-    drag('dragStart', panelTab(id), dt);
+    drag('dragStart', panelDragSource(id), dt);
     const edge = screen.getByTestId('drop-edge');
     expect(drag('dragEnter', edge, dt)).toBe(true);
     expect(drag('dragOver', edge, dt)).toBe(true);
@@ -421,7 +429,9 @@ describe('the right edge (Z6)', () => {
 });
 
 describe('the menus and actions share the drop’s refusal (M1 to M5)', () => {
-  it('M3: the panel’s Artifacts tab offers “Move to main area”, enabled only while it shows a record', async () => {
+  it('M3: a transferable tool’s tab menu offers “Move to main area”, enabled only while it shows a record', async () => {
+    // The shipping singleton uses its record bar; explicitly enable tabs to exercise the shared tab-menu handler.
+    offs.push(registerPanelTool({ ...artifactsTool, multiInstance: true }));
     useLayout.setState({ main: panes([sessionTab(A)]) });
     const id = addArtifacts();
     renderBoth();
@@ -455,19 +465,22 @@ describe('the menus and actions share the drop’s refusal (M1 to M5)', () => {
     expect(recordOf(id)).toEqual({ kind: 'list' });
   });
 
-  it('M5: “Show in panel” is disabled with the very reason the panel refuses the drag', async () => {
+  it('M5: without a project session, “Show in panel” stays disabled with the drag refusal even with a pinned Artifacts tab', async () => {
     useLayout.setState({ main: panes([DOC_TAB]) });
+    panelHost.addTool(ARTIFACTS_TOOL_ID, { appSessionId: null, pin: true, activate: false });
     renderBoth();
+    await readyForTransfer();
     fireEvent.contextMenu(mainTab(DOC_TAB.id));
     const item = within(await screen.findByRole('menu')).getByRole('menuitem', { name: SHOW_IN_PANEL_COPY.label });
     expect(item.getAttribute('aria-disabled')).toBe('true');
-    expect(item.getAttribute('title')).toBe(TRANSFER_COPY.noPanel);
+    expect(item.getAttribute('title')).toBe(TRANSFER_COPY.noProjectSession);
   });
 
   it('M4: “Move to panel” and “Move to tab” are keymap actions with no chord; a refusal says why', async () => {
     offs.push(registerShellActions());
     useLayout.setState({ main: panes([sessionTab(A), DOC_TAB]) });
     renderBoth();
+    await readyForTransfer();
     await act(async () => runAction('artifact.moveToPanel'));
     await settle();
     expect(mainIds()).toEqual([sessionTab(A).id]);

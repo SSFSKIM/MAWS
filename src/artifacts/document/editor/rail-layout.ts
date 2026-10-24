@@ -1,10 +1,8 @@
-// P3-F1 (fix 1, docs/doperpowers/ledgers/2026-10-17-P3-F1.md): where the editor's rail (Comments, History) goes in the
-// width its body has. From RAIL_BESIDE_FROM_PX up it sits beside the page as before, the stylesheet capping it at 40 %
-// of the body and keeping the page at 420 px or more; below, in a narrow artifact panel, it is a drawer over the page's
-// right side, so the page and its toolbar keep the whole width. The drawer starts at the page frame's top, under the
-// toolbar, a preview's bar and find, which come and go inside the tab editor without resizing the body: the frames are
-// watched as well, and every render of the editor measures again (a tab switch or a suggestion review mounts another).
-// A body not laid out (0 px wide) keeps the rail beside the page.
+// The document's floating tool card (Comments, History), under the page's toolbar, preview bar and find. From
+// RAIL_BESIDE_FROM_PX up the stylesheet reserves the card's width beside the page (at most 40 % of the body); below,
+// a drawer overlays the page without narrowing it. The page frames and new-changes pills are watched as well as the
+// body: controls come and go without resizing the body. Every editor render measures again for a newly mounted frame.
+// A body not laid out (0 px wide) keeps the wide layout.
 import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { RAIL_BESIDE_FROM_PX } from '../rail-width'; // P4-B1: the margin's tiers read it too
 
@@ -34,7 +32,11 @@ export function useRailLayout(body: RefObject<HTMLElement | null>, open: boolean
       const pills = [...element.querySelectorAll<HTMLElement>('.doc-pill')];
       for (const pill of pills) observer?.observe(pill);
       const pillBottom = Math.max(0, ...pills.map(pill => pill.getBoundingClientRect()).filter(rect => rect.height > 0).map(rect => rect.bottom + 8));
-      const next: RailLayout = box.width > 0 && box.width < RAIL_BESIDE_FROM_PX ? { mode: 'drawer', top: Math.max(0, Math.ceil(Math.max(shown?.top ?? box.top, pillBottom) - box.top)) } : BESIDE;
+      const next: RailLayout = {
+        mode: box.width > 0 && box.width < RAIL_BESIDE_FROM_PX ? 'drawer' : 'beside',
+        // Both layouts are floating cards under the document's toolbar; only the wide layout reserves page space.
+        top: Math.max(0, Math.ceil(Math.max(shown?.top ?? box.top, pillBottom) - box.top)),
+      };
       setLayout((now) => (now.mode === next.mode && now.top === next.top ? now : next));
     };
     observer?.observe(element);

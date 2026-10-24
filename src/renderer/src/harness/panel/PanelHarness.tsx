@@ -11,7 +11,11 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
-import { gridColumns, useWindowWidth } from '../../app/regions';
+import { useWindowWidth } from '../../app/regions';
+import { useShellGeometry, useShellView } from '../../app/shell-view';
+import { SurfaceRow } from '../../panel/SurfaceRow';
+import { surfaceSession } from '../../panel/surface-model';
+import { FloatingSummary } from '../../panel/summary/Summary';
 import { registerShellActions } from '../../app/shell-actions';
 import { registerSlot } from '../../app/slots';
 import { ipc } from '../../ipc/client';
@@ -110,7 +114,9 @@ function bootstrap(): () => void {
     seedFakeSessions();
     // C9: the host's ptys are re-adopted before the layout hydrates, so a restored Terminal tab finds its shell.
     const adopted = await adoptTerminals((appSessionId) => FAKE_RECORDS.has(appSessionId as AppSessionId));
-    await useLayout.getState().hydrate(ipc, (id) => useSessions.getState().records.has(id));
+    await useLayout.getState().hydrate(ipc, (id) => useSessions.getState().records.has(id), {
+      projectOf: (id) => useSessions.getState().records.get(id)?.projectId ?? null,
+    });
     // A first launch shows A; a relaunch shows what the profile's main.tabs held.
     const layout = useLayout.getState();
     if (!allTabs(layout.main).some((t) => t.kind === 'session')) layout.openSession(fakeId('A'));
@@ -130,11 +136,15 @@ function tabTitle(tabId: string, toolId: string): string {
 
 const api: PanelHarnessApi = {
   switchSession(id) {
-    if (id === null) useLayout.getState().openTab({ kind: 'diagnostics' }); // W5: a tab of no session (the Overview is no tab)
-    else useLayout.getState().openSession(fakeId(id));
+    if (id === null) {
+      // Sessions are filed in their project’s set. The no-project set is genuinely session-free, unlike a
+      // document/Diagnostics tab beside a session, which correctly keeps that session’s surface context.
+      useLayout.getState().setCurrentProject(null);
+      useLayout.getState().openTab({ kind: 'diagnostics' });
+    } else useLayout.getState().openSession(fakeId(id));
   },
   addTool(toolId, opts = {}) {
-    const appSessionId = opts.appSessionId === undefined ? shownSession() : opts.appSessionId === null ? null : fakeId(opts.appSessionId);
+    const appSessionId = opts.appSessionId === undefined ? surfaceSession(useLayout.getState()) : opts.appSessionId === null ? null : fakeId(opts.appSessionId);
     return panelHost.addTool(toolId, { appSessionId, params: opts.params, pin: opts.pin, activate: opts.activate });
   },
   selectTab: (tabId) => (tabId === null || tabId === 'review' ? panelHost.showSummary() : panelHost.selectTab(tabId)),
@@ -143,7 +153,7 @@ const api: PanelHarnessApi = {
   showSummary: () => panelHost.showSummary(),
   tabs() {
     const layout = useLayout.getState();
-    const shown = shownSession();
+    const shown = surfaceSession(layout);
     const active = shown ? (layout.panelBySession.get(shown)?.activeTabId ?? null) : layout.panelActiveNoSession;
     return layout
       .effectivePanelTabs(shown)
@@ -187,7 +197,7 @@ const api: PanelHarnessApi = {
     await nextFrame(); // the restored tabs' instances are created before paint
     return adopted;
   },
-  session: () => shownSession(),
+  session: () => surfaceSession(useLayout.getState()),
   sessions: { A: fakeId('A'), B: fakeId('B') },
   inputGuard,
   // C9 end
@@ -204,7 +214,12 @@ const terminalsApi = createPanelTerminalsApi({
 
 export function PanelHarness() {
   const windowWidth = useWindowWidth();
-  const columns = useLayout((s) => gridColumns(s.regions, windowWidth));
+  const geometry = useShellGeometry();
+  const session = useLayout((s) => sessionOfTab(activeTab(s.main)));
+  const collapsed = useLayout((s) => s.regions.panel.collapsed);
+  const cardsOverlay = useShellView((s) => s.cardsOverlay);
+  const room = windowWidth - geometry.sidebar;
+  const cards = session !== null && geometry.panel === 0 && !collapsed && (room >= 960 || cardsOverlay);
 
   useEffect(() => bootstrap(), []);
   useEffect(() => {
@@ -232,13 +247,15 @@ export function PanelHarness() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <div className="grid h-full grid-rows-[var(--toolbar-h)_minmax(0,1fr)] bg-bg text-fg" style={{ gridTemplateColumns: columns }}>
+      <div data-shell data-panel-harness className="relative grid h-full grid-rows-[var(--toolbar-h)_auto_minmax(0,1fr)] bg-bg text-fg" style={{ gridTemplateColumns: geometry.columns }}>
         <Controls />
-        <DebugStrip />
-        <main className="col-start-2 row-start-2 flex min-w-0 items-center justify-center border-r border-border text-ui text-fg-muted">
-          {/* C8c start: a file or diff tab through the slots, else A's transcript with C8c's callbacks, else the title */}
-          <CodeHarnessBlock fallback={<MainTitle />} />
-          {/* C8c end */}
+        <DebugStrip hidden={geometry.sidebar === 0} />
+        <main data-region="main" aria-label="Main" inert={geometry.mainHidden} className="relative col-start-2 row-start-3 flex min-h-0 min-w-0 overflow-hidden text-ui text-fg-muted">
+          <div className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center" style={cards && room >= 960 ? { paddingRight: 304 } : undefined}>
+            {/* C8c: real file/diff slots or the loaded transcript, else the harness session’s title. */}
+            <CodeHarnessBlock fallback={<MainTitle />} />
+          </div>
+          {cards && <aside aria-label="Session cards" className="absolute top-3 right-3 bottom-3 z-20 w-70 overflow-y-auto"><FloatingSummary appSessionId={session} /></aside>}
         </main>
         <PanelRegion />
       </div>
@@ -249,31 +266,35 @@ export function PanelHarness() {
 const buttonClass = 'rounded-sm border border-border px-2 py-0.5 text-ui hover:bg-bg-hover aria-pressed:bg-bg-active aria-pressed:text-fg';
 
 function Controls() {
+  const geometry = useShellGeometry();
   const shown = useLayout((s) => shownSession(s.main));
   const collapsed = useLayout((s) => s.regions.panel.collapsed);
   const { resolvedTheme, setTheme } = useHarnessTheme();
   return (
-    <header className="col-span-3 row-start-1 flex min-w-0 items-center gap-2 overflow-x-auto border-b border-border bg-bg-raised px-3 text-fg-muted">
-      <span className="text-ui font-medium text-fg">#panel</span>
-      <div role="group" aria-label="session" className="flex gap-1">
-        {FAKE_IDS.map((id) => (
-          <button key={id} type="button" aria-pressed={shown === fakeId(id)} className={buttonClass} onClick={() => api.switchSession(id as FakeSessionId)}>
-            Session {id}
+    <header className={`${geometry.sheet || geometry.mainHidden ? 'col-span-3' : 'col-span-2'} row-start-1 flex min-w-0 items-center gap-2 border-b border-border bg-bg-raised px-3 text-fg-muted`}>
+      <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
+        <span className="text-ui font-medium text-fg">#panel</span>
+        <div role="group" aria-label="session" className="flex gap-1">
+          {FAKE_IDS.map((id) => (
+            <button key={id} type="button" aria-pressed={shown === fakeId(id)} className={buttonClass} onClick={() => api.switchSession(id as FakeSessionId)}>
+              Session {id}
+            </button>
+          ))}
+          <button type="button" aria-pressed={shown === null} className={buttonClass} onClick={() => api.switchSession(null)}>
+            Overview
           </button>
-        ))}
-        <button type="button" aria-pressed={shown === null} className={buttonClass} onClick={() => api.switchSession(null)}>
-          Overview
+        </div>
+        <TerminalControls /> {/* C9 */}
+        <span className="flex-1" />
+        <WidthControls />
+        <button type="button" className={buttonClass} onClick={() => runAction('panel.toggle')}>
+          {collapsed ? 'Show panel' : 'Hide panel'}
+        </button>
+        <button type="button" className={buttonClass} onClick={() => void setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}>
+          theme: {resolvedTheme ?? '…'}
         </button>
       </div>
-      <TerminalControls /> {/* C9 */}
-      <span className="flex-1" />
-      <WidthControls />
-      <button type="button" className={buttonClass} onClick={() => runAction('panel.toggle')}>
-        {collapsed ? 'Show panel' : 'Hide panel'}
-      </button>
-      <button type="button" className={buttonClass} onClick={() => void setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}>
-        theme: {resolvedTheme ?? '…'}
-      </button>
+      <SurfaceRow />
     </header>
   );
 }
@@ -306,7 +327,7 @@ function MainTitle() {
 }
 
 // What the host holds: the instance map's ids and the persisted lists as C5's store holds them.
-function DebugStrip() {
+function DebugStrip({ hidden }: { hidden: boolean }) {
   const instances = usePanelHost((s) => (s.version >= 0 ? instanceIds().join(', ') : ''));
   const pinned = useLayout((s) => s.panelPinned.map((t) => t.id).join(', '));
   // One string per snapshot: a selector must not return a fresh array on every read.
@@ -319,7 +340,7 @@ function DebugStrip() {
   const noSession = useLayout((s) => s.panelActiveNoSession);
   const hydrated = useLayout((s) => s.hydrated);
   return (
-    <aside aria-label="Debug" className="col-start-1 row-start-2 min-w-0 overflow-auto border-r border-border bg-bg-raised p-3 font-mono text-ui-sm text-fg-muted">
+    <aside data-region="sidebar" aria-label="Debug" inert={hidden} className={`col-start-1 row-start-3 min-h-0 min-w-0 ${hidden ? 'overflow-hidden' : 'overflow-auto border-r border-border p-3'} bg-bg-raised font-mono text-ui-sm text-fg-muted`}>
       <p>{hydrated ? 'hydrated' : `hydrating · ${pendingAdds().length} pending`}</p>
       <p data-testid="debug-instances">instances: [{instances}]</p>
       <p data-testid="debug-pinned">panel.pinned: [{pinned}]</p>

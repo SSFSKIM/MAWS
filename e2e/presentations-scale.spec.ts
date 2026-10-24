@@ -168,6 +168,12 @@ async function closeTab(page: Page, title: string): Promise<void> {
 
 /** A header action by its label: its button, or its entry under More actions when the header folded it there. */
 async function headerAction(page: Page, label: string): Promise<void> {
+  if (label === 'Version history') {
+    const editor = page.locator('[data-region="main"] [data-deck-editor]');
+    const close = editor.getByRole('button', { name: 'Close version history', exact: true });
+    if (await close.isVisible()) return close.click();
+    return editor.getByRole('toolbar', { name: 'Deck', exact: true }).getByRole('button', { name: label, exact: true }).click();
+  }
   const header = page.locator('[data-region="main"] [data-editor-header]');
   const button = header.getByRole('button', { name: label, exact: true });
   if (await button.isVisible()) return button.click();

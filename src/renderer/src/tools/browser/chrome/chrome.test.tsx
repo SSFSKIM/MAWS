@@ -364,8 +364,11 @@ describe('the address field', () => {
       return top;
     };
     registerSlot('panelHost', () => <Chrome appSessionId={A} surface="panel" tab={tab()} tabs={[tab()]} owns />);
-    useLayout.setState({ main: mainShowing(A) }); // a session in front, for the card to draw (P3-F wave S, F6)
-    useLayout.getState().setPanel({ floating: true });
+    useSessions.setState({ records: new Map([[A, record(A)]]) });
+    useLayout.setState({ main: mainShowing(A), panelPinned: [], panelBySession: new Map(), panelSurfaces: { version: 1, stacks: {}, pinnedTools: [], contexts: {} } });
+    // UX2 opens the region only for an actual surface; floating alone does not create a panel column.
+    useLayout.getState().setPanelTabs(A, { tabs: [{ id: 'browser:chrome', toolId: 'browser', pinned: false }], activeTabId: 'browser:chrome' });
+    useLayout.getState().setPanel({ collapsed: false, floating: true });
     render(<PanelRegion />);
     const region = document.querySelector('[data-region="panel"]')!;
     const layer = document.querySelector('[data-floating-layer]')!;

@@ -17,6 +17,7 @@ import { SlideCanvas } from '../../canvas';
 import { childLists, deleteElementTree, importSlide, readFlat, ROOT, setStyle, slideFile, writeDeckKeys } from '../../model';
 import { loadSlide } from '../../parse';
 import { DeckEditor } from '../DeckEditor';
+import { ElementBar } from '../ElementBar';
 import { DeckSession, type DeckSessionOptions } from '../session';
 import { startFlowMove, startMarquee, startMove, startResize, startRotate, type GestureContext } from './gestures';
 import { CLIPBOARD_TYPE, copySelection, pasteClipboard } from './clipboard';
@@ -185,6 +186,77 @@ describe('the gestures', () => {
 
 });
 
+describe('the always-available Arrange menu', () => {
+  function mount(ctx = gestureContext(deck())) {
+    const props = { session: ctx.session, slideId: ctx.slideId, canvas: ctx.canvas, scale: ctx.scale, onInsert: vi.fn(), onNotice: vi.fn(), inspectorOpen: false, onToggleInspector: vi.fn() };
+    const utils = render(<ElementBar {...props} readOnly={false} />);
+    const user = userEvent.setup();
+    const choose = async (name: string) => {
+      await user.click(screen.getByRole('button', { name: 'Arrange' }));
+      await user.click(screen.getByRole('menuitem', { name }));
+    };
+    return { ...utils, ...ctx, doc: ctx.session.doc, user, choose, readOnly: () => utils.rerender(<ElementBar {...props} readOnly />) };
+  }
+
+  it('lists the same named commands with disabled states from the selection and routes every z-order action', async () => {
+    const { doc, session, user, choose } = mount();
+    await user.click(screen.getByRole('button', { name: 'Arrange' }));
+    const items = screen.getAllByRole('menuitem');
+    expect(items.map((item) => item.getAttribute('aria-label'))).toEqual(['Bring to front', 'Bring forward', 'Send backward', 'Send to back', 'Group', 'Ungroup', 'Detach', 'Duplicate', 'Delete']);
+    expect(items.map((item) => item.querySelector('.deck-menu-shortcut')?.textContent ?? null)).toEqual([null, '⌘]', '⌘[', null, '⌘G', '⇧⌘G', null, '⌘D', '⌫']);
+    expect(items.every((item) => item.hasAttribute('data-disabled'))).toBe(true);
+    await user.keyboard('{Escape}');
+    act(() => session.select(['a']));
+    const order = () => childLists(readFlat(doc, 's', false)).get(ROOT)!.map((element) => element.id);
+    await choose('Bring to front');
+    expect(order()).toEqual(['title', 'body', 'b', 'a']);
+    await choose('Send to back');
+    expect(order()).toEqual(['a', 'title', 'body', 'b']);
+    await choose('Bring forward');
+    expect(order()).toEqual(['title', 'body', 'a', 'b']); // flow content is one paint layer
+    await choose('Send backward');
+    expect(order()).toEqual(['a', 'title', 'body', 'b']);
+  });
+
+  it('routes group, ungroup, duplicate and delete through the real selection commands and keeps undo', async () => {
+    const { doc, session, canvas, choose } = mount();
+    act(() => session.select(['a', 'b']));
+    await choose('Group');
+    const group = session.snapshot().selection[0]!;
+    expect(readFlat(doc, 's', false).find((element) => element.id === group)?.attrs['data-group']).toBe('');
+    fakeLayout(canvas);
+    await choose('Ungroup');
+    expect(readFlat(doc, 's', false).some((element) => element.id === group)).toBe(false);
+    expect(session.snapshot().selection).toEqual(['a', 'b']);
+    act(() => session.select(['a']));
+    await choose('Duplicate');
+    const copy = session.snapshot().selection[0]!;
+    expect(copy).not.toBe('a');
+    expect(styleOf(doc, copy)).toMatchObject({ left: '324px', top: '324px' });
+    await choose('Delete');
+    expect(readFlat(doc, 's', false).some((element) => element.id === copy)).toBe(false);
+    act(() => session.undoStep());
+    expect(readFlat(doc, 's', false).some((element) => element.id === copy)).toBe(true);
+  });
+
+  it('offers Detach only for a flow child and disables every editing command in a read-only editor', async () => {
+    const { doc, session, user, choose, readOnly } = mount(gestureContext(deck(), { title: [128, 128, 1664, 80], body: [128, 240, 1664, 45] }));
+    act(() => session.select(['body']));
+    await user.click(screen.getByRole('button', { name: 'Arrange' }));
+    expect(screen.getByRole('menuitem', { name: 'Detach' }).hasAttribute('data-disabled')).toBe(false);
+    expect(screen.getByRole('menuitem', { name: 'Bring to front' }).hasAttribute('data-disabled')).toBe(true);
+    await user.keyboard('{Escape}');
+    await choose('Detach');
+    expect(styleOf(doc, 'body')).toMatchObject({ position: 'absolute', top: '240px' });
+    readOnly();
+    const before = slideFile(doc, 's');
+    await user.click(screen.getByRole('button', { name: 'Arrange' }));
+    expect(screen.getAllByRole('menuitem').every((item) => item.hasAttribute('data-disabled'))).toBe(true);
+    await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
+    expect(slideFile(doc, 's')).toBe(before);
+  });
+});
+
 describe('the stage’s keys and clipboard', () => {
   function mount(doc = deck()) {
     const session = new DeckSession(doc, 0);
@@ -220,7 +292,7 @@ describe('the stage’s keys and clipboard', () => {
     expect(readFlat(doc, 's', false).some((e) => e.id === copy)).toBe(true);
   });
 
-  it('⌘] and ⌥⌘[ restack a pinned element; the toolbar’s buttons are the same commands', () => {
+  it('⌘] and ⌥⌘[ restack a pinned element; Arrange uses the same commands and follows the selected element', async () => {
     const { doc, session, stage } = mount();
     act(() => session.select(['a']));
     fireEvent.keyDown(stage, { key: ']', metaKey: true });
@@ -228,12 +300,15 @@ describe('the stage’s keys and clipboard', () => {
     expect(order()).toEqual(['title', 'body', 'b', 'a']);
     fireEvent.keyDown(stage, { key: '[', metaKey: true, altKey: true });
     expect(order()).toEqual(['a', 'title', 'body', 'b']);
-    fireEvent.click(screen.getByRole('button', { name: 'Bring to front' }));
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Arrange' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Bring to front' }));
     expect(order()).toEqual(['title', 'body', 'b', 'a']);
-    expect((screen.getByRole('button', { name: 'Detach' }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(screen.getByRole('button', { name: 'Arrange' }));
+    expect(screen.getByRole('menuitem', { name: 'Detach' }).hasAttribute('data-disabled')).toBe(true);
     act(() => session.select(['body']));
-    expect((screen.getByRole('button', { name: 'Detach' }) as HTMLButtonElement).disabled).toBe(false);
-    expect((screen.getByRole('button', { name: 'Bring to front' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole('menuitem', { name: 'Detach' }).hasAttribute('data-disabled')).toBe(false);
+    expect(screen.getByRole('menuitem', { name: 'Bring to front' }).hasAttribute('data-disabled')).toBe(true);
   });
 
   it('copies the selection as the dialect and pastes it beside itself', async () => {

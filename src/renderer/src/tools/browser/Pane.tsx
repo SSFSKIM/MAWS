@@ -27,6 +27,7 @@
 // does the same under the main split's card (the panel's card has the main region at 0 px, so it asks nothing there).
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { BrowserTab } from '@shared/browser/tab';
+import { shellGeometryOf } from '../../app/shell-view';
 import { COLUMN_PAGE_MIN, useColumnWidth, useFloatingCard } from '../../shell/floating';
 import { CommentCardHost, type CardFrame } from '../../side/card/CardHost';
 import type { OpenCard } from '../../side/card/store';
@@ -81,7 +82,13 @@ function PlacedPane({ tab, surface, onOwns }: { tab: BrowserTab; surface: 'panel
       paneId: crypto.randomUUID(),
       surface,
       owner: ownerAtMount,
-      measure: () => paneRect(pane.getBoundingClientRect()),
+      measure: () => {
+        const geometry = shellGeometryOf(useLayout.getState(), window.innerWidth);
+        // A sheet occludes main, not its own Browser surface. Release only main's native view rather than
+        // freezing every view in the window, which would also make the opened Browser sheet unusable.
+        if (surface === 'main' && (geometry.sheet || geometry.mainHidden)) return null;
+        return paneRect(pane.getBoundingClientRect());
+      },
       send: (report) => {
         place(report);
         cover?.refresh();
@@ -97,7 +104,7 @@ function PlacedPane({ tab, surface, onOwns }: { tab: BrowserTab; surface: 'panel
     resize?.observe(pane);
     let frame = 0;
     const offLayout = useLayout.subscribe((state, previous) => {
-      if ((state.regions === previous.regions && state.main === previous.main) || frame !== 0) return;
+      if ((state.regions === previous.regions && state.main === previous.main && state.panelBySession === previous.panelBySession && state.panelPinned === previous.panelPinned && state.panelSurfaces === previous.panelSurfaces && state.panelActiveNoSession === previous.panelActiveNoSession) || frame !== 0) return;
       frame = requestAnimationFrame(() => {
         frame = 0;
         control.report();

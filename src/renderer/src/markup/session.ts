@@ -8,6 +8,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { CapturedImage } from '@shared/markup/image';
 import type { EditorHostScope } from '../panel/editor-host';
 import { selectedPanelTabId, shownSession } from '../panel/host';
+import { surfaceSession, surfaceTabs } from '../panel/surface-model';
 import { queueComposerAttachment, useComposerStore } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { toast } from '../stores/notices';
@@ -91,10 +92,11 @@ export async function startMarkup(scope: EditorHostScope | null = panelScope()):
   watch(scope, surface);
 }
 
-// Whether the scope is still the one on screen: the panel's selected tab, the panel shown.
+// A panel scope stays live while its slot is rendered, regardless of which of the two tools is active.
 function current(scope: EditorHostScope): boolean {
-  if (useLayout.getState().regions.panel.collapsed) return false;
-  return scope.surface !== 'panel' || selectedPanelTabId() === scope.tabId;
+  const state = useLayout.getState();
+  if (state.regions.panel.collapsed) return false;
+  return scope.surface !== 'panel' || surfaceTabs(state, surfaceSession(state)).some((tab) => tab.id === scope.tabId);
 }
 
 function watch(scope: EditorHostScope, surface: MarkupSurface): void {

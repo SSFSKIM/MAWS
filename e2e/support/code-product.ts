@@ -7,6 +7,7 @@ import { buildCodeScratch, type CodeScratch } from './code-scratch';
 import { launchMaws, type MawsLaunch } from './launch';
 import { CHARTER } from './panel-support';
 import { sidebarOf, sidebarRow } from './sidebar';
+import { mainTabById, openSurface, surface } from './shell';
 
 // ---- themes: C5's smoke's scan, with the `--code-*` tokens in the palette -------------------------------------------------
 
@@ -84,7 +85,8 @@ export async function withProduct(body: (p: Product) => Promise<void>, prepare?:
     await expect(sidebarOf(page).locator('[data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
     await (await sidebarRow(page, CHARTER)).click();
     const panel = page.locator('[data-region="panel"]');
-    await expect(panel.getByRole('tabpanel', { name: 'Session overview' }).getByRole('heading', { level: 2 })).toContainText(CHARTER);
+    await expect(mainTabById(page, `session:${scratch.appSessionId}`)).toHaveAttribute('aria-selected', 'true');
+    await expect(mainTabById(page, `session:${scratch.appSessionId}`)).toContainText(CHARTER);
     await body({ maws, page, panel, scratch });
     expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
   } finally {
@@ -93,16 +95,15 @@ export async function withProduct(body: (p: Product) => Promise<void>, prepare?:
   }
 }
 
-export async function addTool({ page, panel }: Product, name: 'Files' | 'Review'): Promise<void> {
-  await panel.getByRole('button', { name: 'Add a tool' }).click();
-  await page.getByRole('menuitem', { name }).click();
+export async function addTool({ page }: Product, name: 'Files' | 'Review'): Promise<void> {
+  await openSurface(page, name);
 }
 
-export const treeRow = ({ panel }: Product, path: string) => panel.locator(`[data-tool="files"] [role="treeitem"][data-path="${path}"]`);
+export const treeRow = ({ page }: Product, path: string) => surface(page, 'files').locator(`[role="treeitem"][data-path="${path}"]`);
 
 // Files open, the repository's root expanded, and each directory on the way to `relative` expanded; then its row.
 export async function reveal(p: Product, relative: string): Promise<Locator> {
-  if ((await p.panel.locator('[data-tool="files"]').count()) === 0) await addTool(p, 'Files');
+  await openSurface(p.page, 'Files');
   const segments = relative.split('/');
   let at = p.scratch.dir;
   for (const segment of ['', ...segments.slice(0, -1)]) {
@@ -127,7 +128,7 @@ export async function openInViewer(p: Product, relative: string): Promise<Locato
 // Review in the panel on its default scope (Uncommitted on this dirty tree).
 export async function openReview(p: Product): Promise<Locator> {
   await addTool(p, 'Review');
-  const review = p.panel.locator('[data-review]');
+  const review = surface(p.page, 'review').locator('[data-review]');
   await expect(review.locator('[data-review-header]')).toContainText('· Uncommitted');
   return review;
 }

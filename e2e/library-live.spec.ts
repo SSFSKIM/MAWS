@@ -16,6 +16,7 @@
 // purpose only (the script builds, the flag runs):
 //   MAWS_LIBRARY_LIVE=1 pnpm e2e:library-live
 // (`pnpm e2e:library-live` alone builds and reports the case skipped.)
+import { openArtifactInPanel } from './support/shell';
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -229,8 +230,8 @@ test('an agent makes an html artifact and a file artifact through the tools; the
     note(`library.get: ${JSON.stringify([pageRow, fileRow].map((r) => ({ id: r.id, kind: r.kind, title: r.title, revision: r.revision, lastEditor: r.lastEditor, lastEditorTitle: r.lastEditorTitle, sessions: r.sessions.map((s) => ({ appSessionId: s.appSessionId, title: s.title, roles: s.roles })) })))}`);
 
     // the panel's Artifacts tool, This session: both rows
-    await panel.getByRole('button', { name: 'Add a tool' }).click();
-    await page.getByRole('menuitem', { name: 'Artifacts', exact: true }).click();
+    const record = await openArtifactInPanel(page, pageId);
+    await record.getByRole('button', { name: 'Back', exact: true }).click();
     const list = panel.locator('[data-artifacts-list]');
     await expect(list).toBeVisible();
     await expect(list.getByRole('group', { name: 'Show artifacts of' }).getByRole('button', { name: 'This session' })).toHaveAttribute('aria-pressed', 'true');

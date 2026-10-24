@@ -20,6 +20,7 @@ import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { slashPaletteMovesNothing } from './support/palette-geometry';
+import { mainTabs } from './support/shell';
 import { newChatIn, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
 
 const FIXTURES = 'spikes/protocol-probe/fixtures';
@@ -606,7 +607,7 @@ test.describe('sessions', () => {
     await page.screenshot({ path: test.info().outputPath('new-chat-project-menu.png') });
     await menu.getByRole('option', { name: alpha.name }).click();
     await expect(page.getByRole('heading', { name: `New chat in ${alpha.name}` })).toBeVisible();
-    await expect(page.getByRole('tab', { name: `New chat · ${alpha.name}` }), 'the tab names the project too').toBeVisible();
+    await expect(page.getByRole('tab', { name: 'New chat', exact: true }), 'UX2: the current project is not repeated in its tab label').toBeVisible();
     expect(value(await invoke(page, 'session.intent.get', { appSessionId: id }))).toMatchObject({ projectId: alpha.id, location: { kind: 'directory', path: first.root } });
     await expect(row.getByRole('button', { name: `Project ${alpha.name}` })).toBeVisible();
     await expect(row.getByLabel('Branch main')).toBeVisible();
@@ -650,10 +651,10 @@ test.describe('sessions', () => {
       const project = await addProject(page, trustedRepos[0].root);
       await plus(page, project.name);
       await expect(editor(page)).toBeFocused();
-      const tabs = page.locator('[data-region="main"] [role="tab"]');
+      const tabs = mainTabs(page).getByRole('tab');
       const before = await tabs.count();
       if (entry === 'title bar') await page.getByRole('banner').getByRole('button', { name: `New chat in ${project.name}` }).click();
-      else if (entry === 'tab strip') await page.locator('[data-region="main"]').getByRole('button', { name: 'New chat', exact: true }).click();
+      else if (entry === 'tab strip') await mainTabs(page).getByRole('button', { name: 'New chat', exact: true }).click();
       else if (entry === 'project plus') await newChatIn(page, project.name);
       else if (entry === 'sidebar New chat') await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'New chat', exact: true }).click();
       else {

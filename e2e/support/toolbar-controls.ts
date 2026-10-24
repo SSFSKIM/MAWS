@@ -5,6 +5,14 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { squeezed, type Box, type MeasuredControl } from './toolbar-judge';
 
+/** The shared deck/design element commands live in Arrange at every editor width. */
+export async function openArrange(page: Page, editor: Locator): Promise<Locator> {
+  await editor.getByRole('button', { name: 'Arrange', exact: true }).click();
+  const menu = page.getByRole('menu', { name: 'Arrange', exact: true });
+  await expect(menu).toBeVisible();
+  return menu;
+}
+
 export interface ControlBounds {
   /** The box no control may reach past sideways (the panel); none to read no such bound. */
   within?: Locator;

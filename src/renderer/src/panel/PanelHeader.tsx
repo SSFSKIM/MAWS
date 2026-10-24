@@ -4,6 +4,7 @@
 // 360 px header all of them in "More actions", so the title keeps the room), then the region's own controls.
 // `EditorHeader` is the row; the panel draws it over the selected tab as `PanelHeader`, with Float, Maximize and Hide; a main tab whose body registers draws it with no region controls (`main/Pane.tsx`). A tool
 // that registers nothing (X32) shows the strip's label, so today's tools read as they did.
+import { preserveSubmenuPointer } from '@artifacts/ui/menu-pointer';
 import { DropdownMenu } from 'radix-ui';
 import { Fragment, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type ReactNode, type RefObject } from 'react';
 import type { PanelTabRef } from '@shared/ipc/schema/layout';
@@ -136,9 +137,9 @@ function useNarrow(ref: RefObject<HTMLElement | null>): boolean {
 
 // The panel's header over its selected tab (the summary when none): the tab's registration under its panel scope, else
 // its strip label; then Float, Maximize / Restore and Hide.
-export function PanelHeader({ tabs, activeTabId }: { tabs: readonly PanelTabRef[]; activeTabId: string | null }) {
+export function PanelHeader({ tabs, activeTabId, hide, secondary = false }: { tabs: readonly PanelTabRef[]; activeTabId: string | null; hide?: () => void; secondary?: boolean }) {
   const tab = tabs.find((t) => t.id === activeTabId && !isRestoredLog(t.id)) ?? null;
-  const controls = <RegionControls />;
+  const controls = <RegionControls hide={hide} secondary={secondary} />;
   return tab ? <ToolHeader tab={tab} controls={controls} /> : <EditorHeader title={HEADER_COPY.overview} registration={null} controls={controls} />;
 }
 
@@ -165,7 +166,7 @@ function MarkupButton({ scope }: { scope: EditorHostScope }) {
 // Float's label names what a click does (`togglePanelFloat`): floats a docked panel; over a floating one, brings a card
 // closed to its pill back (P3-F L129), else docks. With no session in front there is nothing to float: disabled, the
 // label saying why (P3-F wave S, F6). P4-B3 (its Decision Log 8): with the main split's card up, a click docks that card.
-function RegionControls() {
+function RegionControls({ hide, secondary = false }: { hide?: () => void; secondary?: boolean }) {
   const { maximized, floating } = useLayout((s) => s.regions.panel);
   const closed = useFloatingCard((s) => s.closed);
   const shown = useLayout(cardSession);
@@ -174,7 +175,7 @@ function RegionControls() {
   const nothing = useLayout((s) => !s.regions.panel.floating && cardHost(s) === null && shownSession(s.main) === null);
   return (
     <>
-      <IconButton
+      {!secondary && <><IconButton
         label={nothing ? FLOAT_COPY.noSession : split ? 'Dock session' : !floating ? 'Float session over panel' : pill ? 'Open session card' : 'Dock session'}
         action="panel.float"
         pressed={floating}
@@ -185,9 +186,9 @@ function RegionControls() {
       </IconButton>
       <IconButton label={maximized ? 'Restore right panel' : 'Maximize right panel'} action="panel.maximize" pressed={maximized} onClick={() => runAction('panel.maximize')}>
         {maximized ? <RestoreIcon /> : <MaximizeIcon />}
-      </IconButton>
-      <IconButton label="Hide right panel" action="panel.toggle" onClick={() => runAction('panel.toggle')}>
-        <PanelIcon />
+      </IconButton></>}
+      <IconButton label={hide ? 'Close surface' : 'Hide right panel'} action={hide ? undefined : 'panel.toggle'} onClick={hide ?? (() => runAction('panel.toggle'))}>
+        {hide ? <Icon><path d="m4 4 8 8M12 4l-8 8" /></Icon> : <PanelIcon />}
       </IconButton>
     </>
   );
@@ -288,7 +289,7 @@ function ExportMenu({ exports }: { exports: readonly EditorHostExport[] }) {
 function ExportEntries({ exports }: { exports: readonly EditorHostExport[] }) {
   return exports.map((entry) => entry.children ? (
     <DropdownMenu.Sub key={entry.id}>
-      <DropdownMenu.SubTrigger disabled={entry.disabled} className={ITEM}>{entry.label}<span aria-hidden className="ml-auto">›</span></DropdownMenu.SubTrigger>
+      <DropdownMenu.SubTrigger onPointerLeave={preserveSubmenuPointer} disabled={entry.disabled} className={ITEM}>{entry.label}<span aria-hidden className="ml-auto">›</span></DropdownMenu.SubTrigger>
       <DropdownMenu.Portal>
         <DropdownMenu.SubContent sideOffset={4} className={MENU}><ExportEntries exports={entry.children} /></DropdownMenu.SubContent>
       </DropdownMenu.Portal>

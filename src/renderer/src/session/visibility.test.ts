@@ -19,6 +19,11 @@ let focused = true;
 let visibility: DocumentVisibilityState = 'visible';
 
 const sent = () => fake.invoked('session.setVisible');
+const showSurface = (appSessionId: AppSessionId, toolId: string) => {
+  const tab = { id: `${toolId}:probe`, toolId, pinned: false };
+  useLayout.getState().setPanelTabs(appSessionId, { tabs: [...useLayout.getState().effectivePanelTabs(appSessionId), tab], activeTabId: tab.id });
+  return tab.id;
+};
 
 beforeEach(() => {
   resetShellStores();
@@ -39,6 +44,22 @@ afterEach(() => {
 });
 
 describe('session visibility', () => {
+  it('tracks a Side slot in remembered document context and re-reports when only the surface stack changes', () => {
+    const CHILD = 'app-child' as AppSessionId;
+    useSessions.setState({ records: new Map([[A, record(A)], [CHILD, record(CHILD)]]) });
+    useLayout.getState().openSession(A);
+    const side = showSurface(A, 'side');
+    const terminal = showSurface(A, 'terminal');
+    useLayout.getState().openTab({ kind: 'artifact', artifactId: 'doc' });
+    showSideChild(A, CHILD);
+    expect(sent().at(-1)).toEqual({ appSessionId: CHILD, visible: true });
+    const before = sent().length;
+    useLayout.getState().setSurfaceStack(A, [terminal]);
+    expect(sent().slice(before)).toEqual([{ appSessionId: CHILD, visible: false }]);
+    useLayout.getState().setSurfaceStack(A, [side, terminal]);
+    expect(sent().at(-1)).toEqual({ appSessionId: CHILD, visible: true });
+  });
+
   it('is sent true once when a session tab becomes active, and false when another tab takes over', () => {
     expect(sent()).toEqual([]);
     useLayout.getState().openSession(A);
@@ -86,6 +107,7 @@ describe('session visibility', () => {
 
   it('is false while the right panel is maximized over the main region', () => {
     useLayout.getState().openSession(A);
+    showSurface(A, 'terminal');
     useLayout.getState().setPanel({ maximized: true });
     expect(sent().at(-1)).toEqual({ appSessionId: A, visible: false });
   });
@@ -99,6 +121,7 @@ describe('session visibility', () => {
       { appSessionId: A, visible: true },
       { appSessionId: B, visible: true },
     ]);
+    showSurface(B, 'terminal');
     useLayout.getState().setPanel({ floating: true }); // B's pane is focused: the card draws B
     expect(sent().slice(2)).toEqual([{ appSessionId: A, visible: false }]);
     closeCard();
@@ -143,6 +166,7 @@ describe('session visibility', () => {
     useSessions.setState({ records: new Map([[A, record('app-a')], [B, record('app-b')], [CHILD, record('app-child')]]) });
     useLayout.getState().setPanel({ collapsed: false });
     useLayout.getState().openSession(A);
+    showSurface(A, 'side');
     showSideChild(A, CHILD);
     expect(sent()).toEqual([
       { appSessionId: A, visible: true },
@@ -163,6 +187,7 @@ describe('session visibility', () => {
     useSessions.setState({ records: new Map([[A, record('app-a')], [CHILD, record('app-child')]]) });
     useLayout.getState().setPanel({ collapsed: false });
     useLayout.getState().openSession(A);
+    showSurface(A, 'side');
     showSideChild(A, CHILD);
     expect(sent()).toEqual([
       { appSessionId: A, visible: true },
@@ -182,6 +207,7 @@ describe('session visibility', () => {
     useSessions.setState({ records: new Map([[A, record('app-a')], [CHILD, record('app-child')]]) });
     useLayout.getState().setPanel({ collapsed: false });
     useLayout.getState().openTab({ kind: 'file', path: '/work/a.ts', line: null, appSessionId: A });
+    showSurface(A, 'side');
     showSideChild(A, CHILD);
     expect(sent()).toEqual([{ appSessionId: CHILD, visible: true }]);
   });

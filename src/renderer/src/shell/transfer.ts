@@ -18,15 +18,17 @@
 // read the payload) and act on the payload at `drop`. While it is set, the browser cover is held (Decision Log 39), so
 // no page's native view covers a target.
 import { useSyncExternalStore, type DragEvent } from 'react';
+import { library, libraryRow } from '../library/store';
 import type { AppSessionId } from '@shared/graph/ids';
 import { tabId as mainTabIdOf, type PanelTabRef, type TabRef } from '@shared/ipc/schema/layout';
 import { ARTIFACTS_TOOL_ID } from '@shared/maws/panes';
 import { adoptStagedArtifactEditorState, handArtifactViewOver, heldArtifactEditorState, stageArtifactEditorState } from '../artifacts/registry';
 import { askEditorHostClose, type CloseAsk, type EditorHostScope } from '../panel/editor-host';
 import { instanceOf, panelHost, usePanelHost } from '../panel/host';
+import { surfaceSession } from '../panel/surface-model';
 import { useLayout, type LayoutState } from '../stores/layout';
 import { toast } from '../stores/notices';
-import { activeTab, allTabs, closeTab, currentSet, locateTab, sessionOfTab } from '../stores/layout-model';
+import { activeTab, allTabs, currentSet, locateTab } from '../stores/layout-model';
 import type { ArtifactsHandle } from '../tools/artifacts/ArtifactsTool';
 import { TRANSFER_COPY } from '../tools/artifacts/copy';
 import { withdrawVersionRequest } from '../tools/artifacts/viewers/requests'; // P4-B4: a stale main ask goes with a move
@@ -51,8 +53,20 @@ const layout = () => useLayout.getState();
 
 // ---- the panel side ------------------------------------------------------------------------------------------------------
 
-// The session whose panel shows once the main tab is gone (`closeTab`'s rule, T18): the one the focused pane shows next.
-const panelSessionWithout = (mainTabId: string): AppSessionId | null => sessionOfTab(activeTab(closeTab(layout().main, mainTabId)));
+// The loaded Library row owns the artifact's project; an unprojected artifact uses its containing tab set. Show
+// beside that project's most recently used chat, not the Library/document its close would activate. A remembered
+// context is eligible only while that project's set still holds its actual session tab.
+function panelSessionForArtifact(mainTabId: string): AppSessionId | null {
+  const state = layout();
+  const at = locateTab(state.main, mainTabId);
+  if (!at) return null;
+  const tab = state.main.sets[at.set]?.panes[at.pane]?.tabs[at.index];
+  if (tab?.kind !== 'artifact') return null;
+  const project = libraryRow(library.getState(), tab.artifactId).value?.project?.id ?? at.set;
+  const main = { ...state.main, current: project };
+  const sessions = currentSet(main).panes.flatMap((pane) => pane.tabs.flatMap((tab) => tab.kind === 'session' ? [tab.appSessionId] : []));
+  return surfaceSession({ ...state, main, knownSession: (session) => state.knownSession(session) && sessions.includes(session) });
+}
 
 // The Artifacts tab `openArtifactInPanel` lands in for a session (the pins first; no session: a pinned one).
 const artifactsTabOf = (appSessionId: AppSessionId | null): PanelTabRef | undefined =>
@@ -97,7 +111,9 @@ export function transferRefusal(request: TransferRequest): string | null {
   if (request.to === 'panel') {
     const tab = allTabs(layout().main).find((t) => t.id === request.mainTabId);
     if (tab?.kind !== 'artifact') return TRANSFER_COPY.notArtifact;
-    const session = panelSessionWithout(request.mainTabId);
+    if (libraryRow(library.getState(), tab.artifactId).value == null) return TRANSFER_COPY.loading;
+    const session = panelSessionForArtifact(request.mainTabId);
+    if (session === null) return TRANSFER_COPY.noProjectSession;
     if (!canShowArtifactInPanel(session)) return TRANSFER_COPY.noPanel;
     const dest = artifactsTabOf(session);
     return dest && closing.has(dest.id) ? TRANSFER_COPY.closing : null;
@@ -111,9 +127,11 @@ export function transferRefusal(request: TransferRequest): string | null {
 const subscribeTransfer = (listener: () => void) => {
   const offLayout = useLayout.subscribe(listener);
   const offHost = usePanelHost.subscribe(listener);
+  const offLibrary = library.subscribe(listener);
   return () => {
     offLayout();
     offHost();
+    offLibrary();
   };
 };
 export const useTransferRefusal = (request: TransferRequest | null): string | null =>
@@ -139,7 +157,7 @@ export async function moveArtifactToPanel(mainTabId: string): Promise<boolean> {
   if (transferRefusal({ to: 'panel', mainTabId }) !== null) return false;
   const tab = allTabs(layout().main).find((t) => t.id === mainTabId) as Extract<TabRef, { kind: 'artifact' }>;
   const { artifactId } = tab;
-  const session = panelSessionWithout(mainTabId);
+  const session = panelSessionForArtifact(mainTabId);
   const dest = artifactsTabOf(session);
   if (dest && panelRecordOf(dest.id) === artifactId) {
     // T5: the panel shows it already. That view is activated, unmounted nothing, and the tab closes through its guard,
@@ -147,16 +165,18 @@ export async function moveArtifactToPanel(mainTabId: string): Promise<boolean> {
     const source: EditorHostScope = { surface: 'main', tabId: mainTabId };
     const held = heldArtifactEditorState(source);
     if (!(await movingGuardAllows(source))) return false;
-    if (transferRefusal({ to: 'panel', mainTabId }) !== null || panelRecordOf(dest.id) !== artifactId || heldArtifactEditorState(source) !== held) return false;
+    if (transferRefusal({ to: 'panel', mainTabId }) !== null || panelSessionForArtifact(mainTabId) !== session || panelRecordOf(dest.id) !== artifactId || heldArtifactEditorState(source) !== held) return false;
     handArtifactViewOver(source, { surface: 'panel', tabId: dest.id }); // synchronous from here to the close
     layout().closeTab(mainTabId, { remember: false }); // a move is not a close (Decision Log 32): no ⌘⇧T entry
+    layout().activateTab(mainTabIdOf({ kind: 'session', appSessionId: session! }));
     panelHost.selectTab(dest.id);
     return true;
   }
   if (!(await freePanelFor(session, artifactId))) return false;
   // After the guard: the panel the tab would land in is the one shown now (it may have changed while the guard asked).
   if (transferRefusal({ to: 'panel', mainTabId }) !== null) return false;
-  const now = panelSessionWithout(mainTabId);
+  const now = panelSessionForArtifact(mainTabId);
+  if (now === null) return false;
   const there = artifactsTabOf(now);
   const shown = there ? panelRecordOf(there.id) : null;
   if (shown === artifactId) return moveArtifactToPanel(mainTabId); // it came to show the artifact meanwhile: T5
@@ -164,8 +184,9 @@ export async function moveArtifactToPanel(mainTabId: string): Promise<boolean> {
   // The hand-off, synchronous from here to the adoption.
   stageArtifactEditorState({ surface: 'main', tabId: mainTabId });
   layout().closeTab(mainTabId, { remember: false });
+  layout().activateTab(mainTabIdOf({ kind: 'session', appSessionId: now }));
   // `carried`: the editor's state comes with it, so the record asks its viewer for no version (it keeps the one it shows).
-  const panelTabId = panelHost.addTool(ARTIFACTS_TOOL_ID, { appSessionId: now, pin: now === null, params: { target: artifactId, carried: true }, activate: true });
+  const panelTabId = panelHost.addTool(ARTIFACTS_TOOL_ID, { appSessionId: now, params: { target: artifactId, carried: true }, activate: true });
   // A tab reserved before the layout is read has no instance yet (its id may change at the barrier): the staged state
   // is then left to the sweep, and the record makes its own.
   if (instanceOf(panelTabId)) adoptStagedArtifactEditorState(artifactId, { surface: 'panel', tabId: panelTabId });
@@ -256,7 +277,7 @@ export function moveFocusedArtifactToPanel(): void {
 }
 
 export function moveShownRecordToTab(): void {
-  const shown = sessionOfTab(activeTab(layout().main));
+  const shown = surfaceSession(layout());
   const selected = shown === null ? layout().panelActiveNoSession : (layout().panelBySession.get(shown)?.activeTabId ?? null);
   const tabs = layout().effectivePanelTabs(shown).filter(panelTabMoves);
   const tab = tabs.find((t) => t.id === selected) ?? tabs[0];

@@ -628,8 +628,7 @@ test('the scale gate at 200 pages: typing, two agents, first sync, history, memo
   });
 
   await test.step('7: the history preview’s enter and leave, three times; the renderers after', async () => {
-    const header = page.locator('[data-region="main"] [data-editor-header]');
-    await header.getByRole('button', { name: 'Version history' }).click();
+    await page.locator(`[data-artifact-tab="${id}"]`).getByRole('toolbar', { name: 'Formatting', exact: true }).getByRole('button', { name: 'Version history', exact: true }).click();
     const rail = page.locator(`[data-artifact-tab="${id}"]`).getByRole('complementary', { name: 'Version history' });
     await expect(rail).toBeVisible();
     for (let k = 1; k <= 3; k++) {

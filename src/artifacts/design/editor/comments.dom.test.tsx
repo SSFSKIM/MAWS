@@ -58,7 +58,7 @@ describe('comments on a design', () => {
       session.show('b2');
       view.selectFrame('b1');
     });
-    const comment = within(toolbar()).getByRole('button', { name: 'Comment' });
+    const comment = within(toolbar()).getByRole('button', { name: 'Add comment' });
     expect(comment.getAttribute('title')).toBe('Comment on board Phone (⌥⌘M)');
     fireEvent.click(comment);
     expect(opened).toHaveBeenCalledTimes(1);
@@ -100,12 +100,12 @@ describe('comments on a design', () => {
       session.show('b1');
       session.select(['lede']);
     });
-    fireEvent.click(within(toolbar()).getByRole('button', { name: 'Comment' }));
+    fireEvent.click(within(toolbar()).getByRole('button', { name: 'Add comment' }));
     const passage = opened.mock.calls[0]![0];
     expect(passage).toEqual({ threadId: expect.any(String), tabId: 'b1', tabTitle: 'Phone', quote: 'Ship the first week.', artifactTarget: 'element' });
     expect(thread(doc, passage.threadId)).toMatchObject({ slideId: 'b1', elementId: 'lede' });
     act(() => session.select(['lede', 'title']));
-    expect(within(toolbar()).getByRole('button', { name: 'Comment' }).hasAttribute('disabled')).toBe(true); // two: neither target
+    expect(within(toolbar()).getByRole('button', { name: 'Add comment' }).hasAttribute('disabled')).toBe(true); // two: neither target
   });
 
   it('the card’s frame locates a board’s thread by its frame and an element’s on its own board; unknown threads nowhere', () => {

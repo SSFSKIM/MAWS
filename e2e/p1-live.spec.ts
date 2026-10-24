@@ -63,6 +63,7 @@
 // It spends money; run on purpose only (the script builds, the flag runs):
 //   MAWS_P1_LIVE=1 pnpm e2e:p1-live
 // (`pnpm e2e:p1-live` alone builds and reports every case skipped.)
+import { activeMainTab, openSurface, surface } from './support/shell';
 import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -570,7 +571,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
   // (P2-E1: the card keeps the sheet's accessible names, so the form's locators are the sheet's).
   async function pickTitle(l: Live): Promise<Locator> {
     const viewer = viewerOf(l.panel);
-    await l.panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /Artifacts/ }).click();
+    await openSurface(l.page, 'Artifacts');
     await expect(viewer).toHaveAttribute('data-artifact-viewer', artifact!.deliverableId);
     const frame = await frameAt(l.page, await pageUrlOf(l.page, artifact!.deliverableId, Number(await viewer.getAttribute('data-version'))));
     await l.panel.locator('[data-editor-header]').getByRole('button', { name: 'Comment', exact: true }).click();
@@ -609,7 +610,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
     let passed = false; // its checks held; PASS is logged only once its spend has settled within the allocation
     let overspend: string | null = null;
     try {
-      // the card stays and becomes the thread (P2-E1): no Side pane, the Artifacts tab still selected
+      // The card stays and becomes the thread (P2-E1): no Side pane; the Artifacts surface stays open.
       await expect(card).toHaveAttribute('data-card-phase', 'thread', { timeout: 60_000 });
       await expect.poll(async () => (child = await sideThreadOf(l)), { timeout: 60_000 }).not.toBe('');
       l.started.push({ label: 'side thread', id: child });
@@ -619,7 +620,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
       await expect(card.locator(`[data-card-thread="${child}"]`), 'the card draws the thread').toBeVisible();
       await expect(card.locator('[data-chip="anchor"]').first(), 'the comment under its anchor chip').toHaveAttribute('data-anchor-kind', 'artifact-element');
       await expect(l.panel.locator(`[data-side-thread-view="${child}"]`), 'no Side pane on the thread').toHaveCount(0);
-      await expect(l.panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /Artifacts/ })).toHaveAttribute('aria-selected', 'true');
+      await expect(surface(l.page, 'artifacts'), 'the Artifacts surface stays open').toBeVisible();
 
       const row = l.page.locator(`[data-region="main"] [data-side-thread="${child}"]`);
       const allowed: string[] = [];
@@ -998,7 +999,7 @@ test('A-47: a permission request on a session not in front raises the fallback t
     const notifiedOf = async () => (await live.page.evaluate(() => (window as unknown as { __e11Notified: { appSessionId: string; delivery: string; at: string; receivedAt: number }[] }).__e11Notified)).filter((n) => n.appSessionId === back);
     let notified: { delivery: string; at: string; receivedAt: number } | undefined;
     await expect.poll(async () => (notified = (await notifiedOf())[0]) !== undefined, { timeout: 30_000, message: `attention.notified for the back session (a focused window ${focused} would post none)` }).toBe(true);
-    const shownTab = await live.page.locator('[data-region="main"] [role="tab"][aria-selected="true"]').first().getAttribute('data-tab-id').catch(() => null);
+    const shownTab = await activeMainTab(live.page).getAttribute('data-tab-id').catch(() => null);
     const toast = live.page.locator('[data-toast-viewport] li').filter({ hasText: ' needs you' }); // the one session asking
     await expect(toast, 'the fallback toast').toBeVisible({ timeout: 10_000 });
     const toastText = (await toast.textContent())?.trim() ?? '';

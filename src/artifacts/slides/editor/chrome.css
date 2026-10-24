@@ -29,21 +29,101 @@
 .deck-ds-scope {
   display: contents;
 }
-/* M7 (Decision Log 31's narrow-panel ruling): under 720 px of editor width a rail (Comments, Theme, Check) overlays the
-   stage as a sheet from the right instead of sitting beside it, so the stage never collapses (the panel's widths). */
+/* UX2: optional tools are floating cards in one stack. Nothing reserves a column while they are closed; the stage
+   measures the stack for Fit and uses the same reservation for centering and notes. Below a usable stage width the
+   cards overlay as a sheet rather than squeezing the slide to its minimum zoom. */
 .deck-editor {
   container: deck-editor / inline-size;
 }
-@container deck-editor (width < 720px) {
-  .deck-editor-body [data-deck-rail] {
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 20;
-    max-width: 100%;
-    box-shadow: var(--shadow-float);
-  }
+.deck-tool-cards {
+  position: absolute;
+  top: calc(var(--space) * 2);
+  right: calc(var(--space) * 2);
+  bottom: calc(var(--space) * 2);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space) * 2);
+  width: min(calc(var(--space) * 76), calc(100% - var(--space) * 4));
+  pointer-events: none;
+}
+.deck-tool-card {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-float);
+  pointer-events: auto;
+}
+.deck-tool-card .deck-inspector {
+  width: 100%;
+  border: 0;
+  flex-shrink: 1;
+}
+.deck-tool-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  padding: var(--space) calc(var(--space) * 3);
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+}
+.deck-tool-card .deck-history-rail {
+  flex-shrink: 1;
+}
+.deck-editor-body .deck-stage-center {
+  padding-right: calc(24px + var(--deck-card-reserve, 0px));
+}
+.deck-editor-body .deck-notes {
+  margin-right: var(--deck-card-reserve, 0px);
+}
+/* The editor's width, not the window's: the sidebar or an opened session surface can make a wide window narrow here. */
+.deck-editor-body[data-filmstrip='horizontal'] {
+  flex-direction: column;
+}
+.deck-editor-body[data-filmstrip='horizontal'] .deck-filmstrip {
+  order: 2;
+}
+.deck-editor-body[data-filmstrip='horizontal'] > .deck-tool-cards {
+  bottom: calc(var(--space) * 30); /* the filmstrip's 28 units and the card stack's lower gutter */
+}
+.deck-filmstrip[data-direction='horizontal'] {
+  flex-direction: row;
+  height: calc(var(--space) * 28);
+  border-right: 0;
+  border-top: 1px solid var(--border);
+}
+.deck-filmstrip[data-direction='horizontal'] .deck-filmstrip-list {
+  display: flex;
+  align-items: flex-end;
+  gap: calc(var(--space) * 2);
+  min-width: 0;
+  padding-block: calc(var(--space) * 2);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.deck-filmstrip[data-direction='horizontal'] .deck-filmstrip-item {
+  flex-shrink: 0;
+  margin: 0;
+}
+.deck-filmstrip[data-direction='horizontal'] .deck-section {
+  margin-top: 0;
+}
+.deck-filmstrip[data-direction='horizontal'] .deck-new-slides {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: var(--space);
+  border-left: 1px solid var(--border);
+}
+.deck-filmstrip[data-direction='horizontal'] .deck-new-slide {
+  margin: var(--space);
 }
 
 /* toolbar: one row when it fits; in a narrow editor (the panel's 280 px included) it wraps onto more rows by whole
@@ -114,6 +194,17 @@
 .deck-zoom {
   border-color: var(--border);
   color: var(--fg);
+}
+/* Fit and its two step controls travel as one unit, including when a genuinely narrow toolbar wraps. */
+.deck-zoom-controls {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space);
+  margin-left: auto;
+}
+.deck-zoom-controls > * {
+  flex-shrink: 0;
 }
 
 /* filmstrip */
@@ -278,6 +369,16 @@
 }
 .deck-menu-item[data-disabled] {
   color: var(--fg-faint);
+}
+.deck-menu-shortcut {
+  margin-left: auto;
+  padding-left: calc(var(--space) * 4);
+  color: var(--fg-muted);
+  font-size: var(--text-ui-sm);
+  white-space: nowrap;
+}
+.deck-menu-item[data-disabled] .deck-menu-shortcut {
+  color: inherit;
 }
 .deck-menu-item[data-danger] {
   color: var(--danger);

@@ -18,7 +18,7 @@ import { expect, test, type Locator } from '@playwright/test';
 import { profilePartition } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
 import { buildChromeUserData } from '../test/support/chrome-profile';
-import { address, browserIn, chipsIn, openBrowser, pageAt } from './support/browser-scene';
+import { address, chipsIn, openBrowser, pageAt } from './support/browser-scene';
 import { startBrowserServer } from './support/browser-server';
 import {
   addExtensions, closeSheet, echoedCookies, expectContentScript, expectNothingLogged, importScratch, importThrough, launchImportScene, openImportSheet, openSettingsBrowser, phasesHeard,
@@ -41,9 +41,7 @@ const pill = (view: Locator) => view.locator('[data-browser-partition] [data-bro
 // The session shown and its Browser tool in the panel (the tool comes back after a relaunch, or is added afresh).
 async function browserPanel(s: ImportScene, id: AppSessionId): Promise<Locator> {
   await show(s, id);
-  const panel = browserIn(s, 'panel');
-  await expect(panel.or(s.panel.getByRole('button', { name: 'Add a tool' })).first()).toBeVisible();
-  return (await panel.isVisible()) ? panel : openBrowser(s);
+  return openBrowser(s);
 }
 
 // A new tab in the panel (in the active profile's partition) loading `url`; its page.

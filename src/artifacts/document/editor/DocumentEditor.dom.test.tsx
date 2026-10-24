@@ -959,7 +959,7 @@ describe('a read-only document', () => {
     const editor = () => current!;
     // a thread to resolve, and the rail open on it
     act(() => void editor().chain().focus().setTextSelection({ from: 1, to: 9 }).run());
-    press('Comment');
+    press('Add comment');
     // The thread is written before its passage mark; the live-target count follows after the document settles.
     await until(() => within(toolbar()).queryByRole('button', { name: 'Comments (1 open)' }) !== null, 'the live-target comment count');
     press('Comments (1 open)');
@@ -967,7 +967,7 @@ describe('a read-only document', () => {
     act(() => set(true));
     expect(editor().isEditable).toBe(false);
     expect(editor().view.dom.getAttribute('contenteditable')).toBe('false');
-    for (const name of ['Bold', 'Insert', 'Comment']) expect(within(toolbar()).getByRole('button', { name })).toHaveProperty('disabled', true);
+    for (const name of ['Bold', 'Insert', 'Add comment']) expect(within(toolbar()).getByRole('button', { name })).toHaveProperty('disabled', true);
     expect(screen.getByRole('button', { name: 'Add tab' })).toHaveProperty('disabled', true);
     act(() => fireEvent.doubleClick(screen.getByRole('tab', { selected: true })));
     expect(screen.queryByLabelText('Tab title')).toBeNull();
@@ -1066,7 +1066,7 @@ describe('a control drawn before the store turned read-only', () => {
     } };
     const { editor, set, handle } = await mountSwitchable(owner, comments);
     act(() => void editor().chain().focus().setTextSelection({ from: 1, to: 9 }).run());
-    press('Comment');
+    press('Add comment');
     const [threadId] = liveThreadIds(handle.doc);
     const kept = drawn!;
     act(() => set(true));

@@ -95,7 +95,7 @@ describe('X32 in a main tab', () => {
     act(() => useLayout.getState().openTab({ kind: 'settings', section: null }));
     act(() => useLayout.getState().openSession(idOf('Charter + research'), { how: 'tab' }));
     expect(screen.queryByText('settings body'), 'Settings is inactive: its body is unmounted').toBeNull();
-    within(main()).getByRole('tab', { name: /Settings/ }).focus();
+    within(document.querySelector<HTMLElement>('[data-chrome-tabs]')!).getByRole('tab', { name: /Settings/ }).focus();
     await user.keyboard('{Delete}');
     expect(settingsOpen(), 'the inactive tab’s guard vetoes').toBe(true);
     expect(kindGuard).not.toHaveBeenCalled();

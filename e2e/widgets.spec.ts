@@ -22,6 +22,7 @@ import { KILL_GRACE_MS } from '../src/engine-host/plugins/runner';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
+import { unfoldSessionCard } from './support/shell';
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now.
 const HARNESS_BUILT = !process.env.MAWS_E2E_EXECUTABLE && existsSync(join(REPO_ROOT, 'out/renderer/harness.html'));
@@ -1530,12 +1531,12 @@ test.describe('plugin management (E8)', () => {
     expect(backend.consoleErrors()).toEqual([]);
   });
 
-  test('the panel’s Plugins section counts the loaded plugins and reloads mods and skills; /skills reloads skills', async ({ appBackend: backend }) => {
+  test('the Connectors card counts the loaded plugins and reloads mods and skills; /skills reloads skills', async ({ appBackend: backend }) => {
     const { page } = backend;
     await holdOperations(backend, true);
-    // the product's window: the session's tab and its panel summary
+    // The product's window: the session's tab and the Plugins controls inside its floating Connectors card.
     await (await sidebarRow(page, { appSessionId: READY })).click();
-    const plugins = page.locator('[data-region="panel"]').getByRole('region', { name: 'Plugins' });
+    const plugins = await unfoldSessionCard(page, 'Connectors');
     await expect(plugins).toContainText('Plugins · 11 loaded'); // pass2/real-settings seq 15
     const reloadMods = plugins.getByRole('button', { name: 'Reload plugins' });
     const line = reloadMods.locator('xpath=following-sibling::*[@role="status"]');

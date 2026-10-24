@@ -66,8 +66,9 @@ function useSessionLabel(appSessionId: AppSessionId): TabLabel {
   const ended = useAttention((s) => selectEndedWithErrorOf(s, appSessionId)); // E11 F2b
   const project = useProjectName(appSessionId);
   const unstarted = useUnstartedTitle(appSessionId);
-  if (!record) return { title: unstarted.title, secondary: unstarted.project, glyph: null, fileType: null };
-  return { title: displayTitle(record), secondary: project, glyph: glyphFor(record, digest ?? null, pending, ended), fileType: null };
+  const current = useLayout((s) => s.main.current);
+  if (!record) return { title: unstarted.title, secondary: null, glyph: null, fileType: null };
+  return { title: displayTitle(record), secondary: record.projectId === current ? null : project, glyph: glyphFor(record, digest ?? null, pending, ended), fileType: null };
 }
 
 function useTabLabel(tab: TabRef): TabLabel {

@@ -14,6 +14,7 @@
 // paste moves it, a real mouse drag keeps exactly one; A's restore brings back a deleted tab and the earlier text while
 // a reply posted after the version stays and a thread made after it shows orphaned.
 // Every launch's userData is its own directory under /tmp; windows are never shown (the e2e quiet mode).
+import { openArtifactInPanel, openArtifactReplicaInPanel, pinSurfaceForSessions } from './support/shell';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { withNativeClipboard } from './support/clipboard';
@@ -66,22 +67,19 @@ async function openInMain(page: Page, title: string): Promise<{ id: string; main
   return { id: artifact.id, main };
 }
 
-// The panel's Artifacts tool, added in a session's panel (tools belong to a session) and pinned, so it stays beside
-// whatever the main area shows (an `artifact` tab is no session).
-async function pinArtifactsTool(page: Page): Promise<void> {
-  const panel = page.locator('[data-region="panel"]');
+// Select the session that receives the artifact's panel surface; openInPanel pins the real record after transfer.
+async function selectPanelSession(page: Page): Promise<void> {
   await (await sidebarRow(page, 'Harness A')).click();
-  await panel.getByRole('button', { name: 'Add a tool' }).click();
-  await page.getByRole('menuitem', { name: 'Artifacts' }).click();
-  await panel.getByRole('button', { name: 'Pin Artifacts' }).click();
 }
 
 // The document in the pinned Artifacts tool's record view.
-async function openInPanel(page: Page, artifactId: string): Promise<Locator> {
+async function openInPanel(page: Page, artifactId: string, retainMain = false): Promise<Locator> {
   const panel = page.locator('[data-region="panel"]');
-  await panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /^Artifacts/ }).click();
-  await panel.getByRole('button', { name: 'All', exact: true }).click();
-  await panel.locator(`[data-artifact-row][data-artifact-id="${artifactId}"]`).click({ timeout: 15_000 });
+  if (retainMain) await openArtifactReplicaInPanel(page, artifactId);
+  else {
+    await openArtifactInPanel(page, artifactId);
+    await pinSurfaceForSessions(page, 'Artifacts');
+  }
   const record = panel.locator(`[data-artifact-record="${artifactId}"]`);
   await expect(record.locator('.ds-doc .ProseMirror')).toBeVisible({ timeout: 15_000 });
   return record;
@@ -120,9 +118,9 @@ async function watchSaved(page: Page, header: Locator): Promise<() => Promise<st
 test('WR #12: the floating session reserves document space when wide and overlays only when narrow', async () => {
   const page = await start();
   await launch!.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1600, 900));
-  await pinArtifactsTool(page);
+  await selectPanelSession(page);
   const { id } = await openInMain(page, 'Reading beside a conversation');
-  const record = await openInPanel(page, id);
+  const record = await openInPanel(page, id, true);
   await (await sidebarRow(page, 'Harness A')).click();
   const panel = page.locator('[data-region="panel"]');
   await panel.getByRole('button', { name: 'Float session over panel' }).click();
@@ -145,9 +143,9 @@ test('WR #12: the floating session reserves document space when wide and overlay
 test('a document opens in a main tab and in the panel as two replicas; the header follows saves and a host restart; History saves, lists and restores', async () => {
   test.setTimeout(150_000);
   const page = await start();
-  await pinArtifactsTool(page);
+  await selectPanelSession(page);
   const { id, main } = await openInMain(page, 'Launch plan');
-  const record = await openInPanel(page, id);
+  const record = await openInPanel(page, id, true);
   const mainText = main.locator('.ds-doc .ProseMirror');
   const panelText = record.locator('.ds-doc .ProseMirror');
   const mainHeader = page.locator('[data-region="main"] [data-editor-header]');
@@ -203,14 +201,14 @@ test('a document opens in a main tab and in the panel as two replicas; the heade
     await expect(rail.getByRole('button', { name: /^Version / })).toHaveCount(listed.versions.length);
 
     // the rail closes from the header, then the text after the version goes and comes back by Restore
-    await mainHeader.getByRole('button', { name: 'Version history' }).click();
+    await main.getByRole('toolbar', { name: 'Formatting', exact: true }).getByRole('button', { name: 'Version history', exact: true }).click();
     await expect(rail).toBeHidden();
     await mainText.click();
     await page.keyboard.press('End');
     await page.keyboard.type(' Doomed sentence.');
     await expect(panelText).toContainText('Doomed sentence.', { timeout: 10_000 });
     await durable(main);
-    await mainHeader.getByRole('button', { name: 'Version history' }).click();
+    await main.getByRole('toolbar', { name: 'Formatting', exact: true }).getByRole('button', { name: 'Version history', exact: true }).click();
     await rail.getByRole('button', { name: /^Version Before the cut/ }).click();
     const bar = main.getByRole('toolbar', { name: 'Version preview' });
     await expect(bar).toBeVisible({ timeout: 10_000 });
@@ -258,9 +256,9 @@ test('a link opens on ⌘-click through main’s opener in a main tab and in the
   const openLog = join(seam, 'open.log');
   try {
     const page = await start(false, { MAWS_E2E_OPEN_LOG: openLog });
-    await pinArtifactsTool(page);
+    await selectPanelSession(page);
     const { id, main } = await openInMain(page, 'Link notes');
-    const record = await openInPanel(page, id);
+    const record = await openInPanel(page, id, true);
     type LinkRoot = HTMLElement & { editor: { commands: { insertContent(value: string): boolean }; state: { selection: { toJSON(): unknown } } } };
     const mainText = main.locator('.ds-doc .ProseMirror');
     await mainText.evaluate((el) => (el as LinkRoot).editor.commands.insertContent('<p>Read <a href="https://example.com/brief">the brief</a> and <a href="https://example.com/notes">the notes</a>.</p>'));
@@ -384,7 +382,7 @@ test('the document exports through A’s export service: Markdown, HTML, DOCX an
       await page.keyboard.type(' Added after the version.');
       await durable(main);
       await ok(page, 'artifacts.saveVersion', { artifactId: id, label: 'With the addition' });
-      await mainHeader.getByRole('button', { name: 'Version history' }).click();
+      await main.getByRole('toolbar', { name: 'Formatting', exact: true }).getByRole('button', { name: 'Version history', exact: true }).click();
       const rail = main.getByRole('complementary', { name: 'Version history' });
       await rail.getByRole('button', { name: /^Version Three tabs/ }).click();
       const bar = main.getByRole('toolbar', { name: 'Version preview' });
@@ -402,7 +400,7 @@ test('the document exports through A’s export service: Markdown, HTML, DOCX an
       for (const item of await items.all()) await expect(item, 'two versions compared: nothing to export').toBeDisabled();
       await page.keyboard.press('Escape');
 
-      await mainHeader.getByRole('button', { name: 'Version history' }).click();
+      await rail.getByRole('button', { name: 'Close version history', exact: true }).click();
       await expect(bar).toBeHidden();
       rmSync(savedFile('Quarterly plan.md'));
       await pick('Markdown (.md)');
@@ -423,7 +421,7 @@ test('the document exports through A’s export service: Markdown, HTML, DOCX an
 
 // The document in the panel's Artifacts tool beside session A, typed into: one paragraph per line.
 async function openBesideSession(page: Page, title: string, lines: string[]): Promise<{ id: string; record: Locator; text: Locator }> {
-  await pinArtifactsTool(page); // the main area shows Harness A
+  await selectPanelSession(page); // the main area shows Harness A
   const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'document', title });
   const record = await openInPanel(page, artifact.id);
   const text = record.locator('.ds-doc .ProseMirror');
@@ -596,7 +594,7 @@ const markedText = (text: Locator) =>
 async function commentOn(page: Page, record: Locator, text: Locator, index: number, quote: string): Promise<string> {
   const before = new Set(Object.keys(await markedText(text)));
   await selectIn(text, index, quote);
-  await record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Comment', exact: true }).click();
+  await record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Add comment', exact: true }).click();
   const card = page.locator('[data-comment-card]');
   await expect(card).toBeVisible();
   await expect(card).toHaveAttribute('data-anchor-kind', 'artifact-comment');

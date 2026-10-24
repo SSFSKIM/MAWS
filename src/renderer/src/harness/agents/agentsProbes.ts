@@ -45,7 +45,7 @@ function selectedTab(): { id: string; toolId: string } | null {
   const tab = layout.effectivePanelTabs(shown).find((t) => t.id === active);
   return tab ? { id: tab.id, toolId: tab.toolId } : null;
 }
-const bodyOf = (toolId: string) => (selectedTab()?.toolId === toolId ? region()?.querySelector<HTMLElement>('[role="tabpanel"]') : null) ?? null;
+const bodyOf = (toolId: string) => region()?.querySelector<HTMLElement>(`[data-surface="${CSS.escape(toolId)}"] [role="tabpanel"]`) ?? null;
 
 function click(el: Element | null | undefined, what: string): void {
   if (!(el instanceof HTMLElement)) throw new Error(`agents: no ${what}`);

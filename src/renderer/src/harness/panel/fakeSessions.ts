@@ -6,7 +6,7 @@ import * as z from 'zod';
 import { EngineSessionStatusSchema, type EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import { SessionRecordSchema, type SessionRecord } from '@shared/graph/session';
-import { SessionDigestSchema, type SessionDigest } from '@shared/ipc/schema';
+import { ProjectRecordSchema, SessionDigestSchema, type SessionDigest } from '@shared/ipc/schema';
 import { useSessions } from '../../stores/sessions';
 import scenario from '../../../../../test/fixtures/panel/harness-sessions.json';
 
@@ -14,6 +14,7 @@ export const FAKE_IDS = ['A', 'B'] as const;
 export type FakeId = (typeof FAKE_IDS)[number];
 
 const records = z.array(SessionRecordSchema).parse(scenario.sessions);
+const projects = z.array(ProjectRecordSchema).parse(scenario.projects);
 const digests = z.array(SessionDigestSchema.omit({ revision: true, availability: true })).parse(scenario.digests); // P2-A: availability is main's read model's
 
 export const FAKE_RECORDS: ReadonlyMap<AppSessionId, SessionRecord> = new Map(records.map((r) => [r.appId, r]));
@@ -43,10 +44,12 @@ export function seedFakeSessions(): void {
   useSessions.setState((s) => ({
     loaded: true,
     records: new Map(FAKE_RECORDS),
+    projects: new Map(projects.map((project) => [project.id, project])),
     // P2-A: what main's read model would derive: A's process is ready, B is disk-only
     digests: new Map(digests.map((d): [AppSessionId, SessionDigest] => [d.appSessionId, { ...d, availability: d.appSessionId === fakeId('A') ? 'usable' : 'resumable', revision: 1 }])),
     engine: new Map([[fakeId('A'), liveStatus(FAKE_RECORDS.get(fakeId('A'))!)]]),
     recordsVersion: s.recordsVersion + 1,
+    projectsVersion: s.projectsVersion + 1,
     digestsVersion: s.digestsVersion + 1,
   }));
 }

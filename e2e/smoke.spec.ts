@@ -28,13 +28,17 @@ test('MAWS opens light, hosts answer, pty echoes, survives reload and window clo
   const peerModule = await app.evaluate(() => (globalThis as { __maws_browser?: { cua?: { inspect(): { peerModule: string } } } }).__maws_browser?.cua?.inspect().peerModule);
   expect(peerModule, 'without the addon every cua connection is refused (run scripts/build-peer-auth.sh)').toBe('loaded');
 
-  // Item 1: one window titled MAWS, three regions side by side, light theme, clean console.
-  const regions = ['sidebar', 'main', 'panel'].map((name) => page.locator(`[data-region="${name}"]`));
+  // Item 1, UX2 optional-surfaces ruling: one window titled MAWS, sidebar beside main, no empty panel reservation.
+  const regions = ['sidebar', 'main'].map((name) => page.locator(`[data-region="${name}"]`));
   for (const region of regions) await expect(region).toBeVisible({ timeout: 10_000 });
   expect(Date.now() - launchedAt, 'the window shows its regions within ten seconds').toBeLessThan(10_000);
   const lefts = await Promise.all(regions.map(async (region) => (await region.boundingBox())!.x));
-  expect(lefts, 'sidebar, main and panel sit left to right').toEqual([...lefts].sort((a, b) => a - b));
-  expect(new Set(lefts).size).toBe(3);
+  expect(lefts, 'sidebar and main sit left to right').toEqual([...lefts].sort((a, b) => a - b));
+  expect(new Set(lefts).size).toBe(2);
+  const panel = page.locator('[data-region="panel"]');
+  await expect(panel).toHaveJSProperty('inert', true);
+  await expect.poll(async () => (await panel.boundingBox())?.width ?? 0).toBe(0);
+  await expect.poll(() => page.locator('[data-region="main"]').evaluate((region) => Math.round(region.getBoundingClientRect().right))).toBe(await page.evaluate(() => innerWidth));
   expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((win) => win.getTitle()))).toEqual(['MAWS']);
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(LIGHT_BG);

@@ -4,6 +4,7 @@
 // `newElement`, loaded through the dialect; where it goes is the editor's.
 // Final fix wave (B4): the image's upload is the session's awaited edit (`later`): the tab's close waits for it, and it
 // is placed only if the deck still takes writes when the upload is done.
+import { preserveSubmenuPointer } from '../../../ui/menu-pointer';
 import { DropdownMenu } from 'radix-ui';
 import { useRef } from 'react';
 import { ICON_GLYPHS } from '../../glyphs';
@@ -66,7 +67,7 @@ export function InsertMenu({ session, disabled, onInsert, uploadAsset, onNotice 
             {item('bullets', C.insertBullets)}
             {item('numbers', C.insertNumbers)}
             <DropdownMenu.Sub>
-              <DropdownMenu.SubTrigger className="deck-menu-item">{C.insertShape} ›</DropdownMenu.SubTrigger>
+              <DropdownMenu.SubTrigger onPointerLeave={preserveSubmenuPointer} className="deck-menu-item">{C.insertShape} ›</DropdownMenu.SubTrigger>
               <DropdownMenu.Portal>
                 <DropdownMenu.SubContent className="deck-menu" sideOffset={2}>
                   {SHAPES.map((kind) => (
@@ -78,7 +79,7 @@ export function InsertMenu({ session, disabled, onInsert, uploadAsset, onNotice 
               </DropdownMenu.Portal>
             </DropdownMenu.Sub>
             <DropdownMenu.Sub>
-              <DropdownMenu.SubTrigger className="deck-menu-item">{C.insertIcon} ›</DropdownMenu.SubTrigger>
+              <DropdownMenu.SubTrigger onPointerLeave={preserveSubmenuPointer} className="deck-menu-item">{C.insertIcon} ›</DropdownMenu.SubTrigger>
               <DropdownMenu.Portal>
                 <DropdownMenu.SubContent className="deck-menu deck-icon-grid" sideOffset={2}>
                   {ICON_NAMES.map((name) => (
@@ -97,7 +98,7 @@ export function InsertMenu({ session, disabled, onInsert, uploadAsset, onNotice 
               </DropdownMenu.Item>
             )}
             <DropdownMenu.Sub>
-              <DropdownMenu.SubTrigger className="deck-menu-item">{C.insertTable} ›</DropdownMenu.SubTrigger>
+              <DropdownMenu.SubTrigger onPointerLeave={preserveSubmenuPointer} className="deck-menu-item">{C.insertTable} ›</DropdownMenu.SubTrigger>
               <DropdownMenu.Portal>
                 <DropdownMenu.SubContent className="deck-menu" sideOffset={2}>
                   {TABLES.map(([rows, cols]) => (

@@ -14,6 +14,7 @@ import type { AttentionKind } from '@shared/graph/enums';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { FloatingCardSize, LayoutMain, LayoutRegions } from '@shared/ipc/schema/layout';
 import { panelInMain } from '../app/regions';
+import { surfaceSession, surfaceTabs } from '../panel/surface-model';
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { markFocusOnMount, useComposerStore } from '../stores/composer';
 import { mainCardKey, SUMMARY_CARD_KEY, useLayout, type LayoutState } from '../stores/layout';
@@ -105,7 +106,8 @@ export const useFloatingCard = create<FloatingCardState>()((set, get) => {
   };
 });
 
-type Layout = Pick<LayoutState, 'main' | 'regions'>;
+type Layout = Pick<LayoutState, 'main' | 'regions' | 'panelPinned' | 'panelBySession' | 'panelActiveNoSession' | 'panelSurfaces' | 'knownSession'>;
+const hasPanelSurface = (state: Layout) => surfaceTabs(state, surfaceSession(state)).length > 0;
 const isFloating = (regions: LayoutRegions) => regions.panel.floating && !regions.panel.collapsed;
 const otherPane = (pane: 0 | 1): 0 | 1 => (pane === 0 ? 1 : 0);
 
@@ -120,9 +122,10 @@ export function splitFloat(main: LayoutMain): { pane: 0 | 1; appSessionId: AppSe
 // P4-B3 (its Decision Log 8): the card that is up. The panel's while the panel floats with a session to show; else the
 // split's while the current set floats a pane and the main area is on screen (under a maximized panel it is at 0 px, so
 // the split's card hides with it, its float kept); else none.
-export function cardHost({ main, regions }: Layout): CardHost | null {
-  if (isFloating(regions)) return sessionOfTab(activeTab(main)) === null ? null : 'panel';
-  if (panelInMain(regions)) return null;
+export function cardHost(state: Layout): CardHost | null {
+  const { main, regions } = state;
+  if (isFloating(regions) && hasPanelSurface(state)) return sessionOfTab(activeTab(main)) === null ? null : 'panel';
+  if (panelInMain(regions) && hasPanelSurface(state)) return null;
   return splitFloat(main) === null ? null : 'split';
 }
 
@@ -141,7 +144,7 @@ export const openCardSession = (layout: Layout, closed: boolean = useFloatingCar
 // §D1.5: the key of the card's size in `regions.floatingCard`: what the card sits over. The panel's card: the panel tab
 // (the shown session's selected one), or the resting summary's. P4-B3 (its Decision Log 10): the split's card, the
 // active tab of the pane beside it (`main:<tab id>`).
-export function cardSizeKey(state: Pick<LayoutState, 'main' | 'regions' | 'panelBySession'>): string {
+export function cardSizeKey(state: Layout): string {
   const split = cardHost(state) === 'split' ? splitFloat(state.main) : null;
   if (split !== null) return mainCardKey(currentSet(state.main).panes[otherPane(split.pane)]?.activeTabId ?? '');
   const shown = sessionOfTab(activeTab(state.main));
@@ -157,6 +160,15 @@ const floatIdentity = (state: Layout): string | null => {
   return splitFloat(state.main) === null ? null : (currentSet(state.main).floating?.sessionTabId ?? null);
 };
 useLayout.subscribe((state, before) => {
+  // Removing the last surface docks in the layout store, without a Dock button's handoff. Carry the same session
+  // back to its ordinary pane before React remounts its transcript and composer.
+  if (before.regions.panel.floating && !state.regions.panel.floating && !hasPanelSurface(state)) {
+    const tab = activeTab(state.main);
+    if (tab?.kind === 'session' && cardSession(before) === tab.appSessionId) {
+      markTranscriptCarry(tab.appSessionId);
+      markFocusOnMount(tab.appSessionId);
+    }
+  }
   if (floatIdentity(state) !== floatIdentity(before) && useFloatingCard.getState().closed) useFloatingCard.setState({ closed: false, pillTakesFocus: false });
 });
 
@@ -209,7 +221,7 @@ useLayout.subscribe(raiseOnRequest);
 // float that meets none docks: one restored over such a tab, or one such a tab came in front of (⌘, opens Settings over
 // the card). Refused, not kept docked while `floating` stays stored: every reader of the panel's place reads `regions`
 // alone (`panelInMain`), and a stored float would come back unasked the next time a session's tab is in front.
-export const FLOAT_COPY = { noSession: 'Select a session’s tab to float it' };
+export const FLOAT_COPY = { noSession: 'Select a session’s tab to float it', noSurface: 'Open a tool surface to float the chat over it' };
 
 // The dock runs in a microtask, still before a paint: written inside this listener, it would reach the later listeners
 // before the change that caused it, and persistence would take a restored float's dock for the hydrated baseline and
@@ -286,9 +298,9 @@ const shown = () => sessionOfTab(activeTab(layout().main));
 // one card at a time, so a floating split docks first.
 export function floatPanel(patch: { width?: number } = {}): void {
   const session = shown();
-  if (session === null) {
+  if (session === null || !hasPanelSurface(layout())) {
     if (patch.width !== undefined) layout().setPanel({ width: patch.width });
-    toast({ id: 'panel-float-no-session', level: 'info', text: FLOAT_COPY.noSession, actions: [], dismissible: true });
+    toast({ id: 'panel-float-no-session', level: 'info', text: session === null ? FLOAT_COPY.noSession : FLOAT_COPY.noSurface, actions: [], dismissible: true });
     return;
   }
   // The split's card goes back into its pane with focus left where it is (the panel's card shows the focused pane's

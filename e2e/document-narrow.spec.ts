@@ -3,11 +3,12 @@
 // an image and a table: Insert's menu opens whole under its button from the toolbar's scrolling strip; with the comments
 // rail open the rail is a drawer over the page's right side, under the toolbar, the page and its table keep their width,
 // the toolbar stays one row with its controls uncovered, the thread in the rail takes its clicks and Escape closes the
-// drawer. With the panel maximized the rail sits beside the page at its old width. Captures: `narrow-insert-menu`,
+// drawer. Maximized, the card still floats, and only the page reserves its width plus the two gutters. Captures: `narrow-insert-menu`,
 // `narrow-rail-drawer`, `maximized-rail-beside`. Every launch's userData is its own directory under /tmp; windows are
 // never shown (the e2e quiet mode).
 // P3-F wave S F3: a document's and a dashboard's toolbar (the dashboard's is the document's, DashboardPanel.tsx) in the
 // panel at its 280 px minimum: still one scrolling row, no control squeezed. Capture: `panel-280-toolbars`.
+import { openArtifactInPanel, pinSurfaceForSessions } from './support/shell';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { launchMaws, type MawsLaunch } from './support/launch';
@@ -35,7 +36,8 @@ test.afterEach(async () => {
 // The panel's harness scenario (C8a): two synthetic sessions main serves, so a session's panel can hold tools.
 const SESSIONS = 'stub:test/fixtures/panel/harness-sessions.json';
 const PANEL_PX = 600; // the dashboard proofs' panel
-const RAIL_PX = 304; // the rail's width beside the page, before and after the fix (chrome.css: 76 × --space)
+const RAIL_PX = 304; // the floating card's width (chrome.css: 76 × --space)
+const CARD_INSET_PX = 8; // the floating card's inset from the page frame (chrome.css: 2 × --space)
 // A 2 × 2 PNG, red and blue, as a person would pick from disk.
 const TWO_BY_TWO_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP4z8DwnwEIGBgYGBgYAAAy7QL+1Hdq+wAAAABJRU5ErkJggg==', 'base64');
 
@@ -51,21 +53,15 @@ async function start(): Promise<Page> {
   return page;
 }
 
-// The panel's Artifacts tool, added in session A's panel and pinned; the main area shows Harness A, so a comment has a
-// session to go to.
-async function pinArtifactsTool(page: Page): Promise<void> {
-  const panel = page.locator('[data-region="panel"]');
+// Select Harness A so the record's panel surface has a session for comments.
+async function selectPanelSession(page: Page): Promise<void> {
   await (await sidebarRow(page, 'Harness A')).click();
-  await panel.getByRole('button', { name: 'Add a tool' }).click();
-  await page.getByRole('menuitem', { name: 'Artifacts' }).click();
-  await panel.getByRole('button', { name: 'Pin Artifacts' }).click();
 }
 
 async function openInPanel(page: Page, artifactId: string): Promise<Locator> {
   const panel = page.locator('[data-region="panel"]');
-  await panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /^Artifacts/ }).click();
-  await panel.getByRole('button', { name: 'All', exact: true }).click();
-  await panel.locator(`[data-artifact-row][data-artifact-id="${artifactId}"]`).click({ timeout: 15_000 });
+  await openArtifactInPanel(page, artifactId);
+  await pinSurfaceForSessions(page, 'Artifacts');
   const record = panel.locator(`[data-artifact-record="${artifactId}"]`);
   await expect(record.locator('.ds-doc .ProseMirror')).toBeVisible({ timeout: 15_000 });
   return record;
@@ -188,10 +184,10 @@ const wrappedLabels = (toolbar: Locator) =>
     return wrapped;
   });
 
-test('in a 600 px panel the comments rail is a drawer over the page, the toolbar one row whose menus open whole; maximized, the rail sits beside the page as before', async () => {
+test('in a 600 px panel the comments card floats over the unchanged page; maximized, only the page reserves its width and gutters', async () => {
   test.setTimeout(150_000);
   const page = await start();
-  await pinArtifactsTool(page);
+  await selectPanelSession(page);
   const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'document', title: 'Narrow review' });
   const record = await openInPanel(page, artifact.id);
   await resizePanel(page, PANEL_PX);
@@ -238,7 +234,7 @@ test('in a 600 px panel the comments rail is a drawer over the page, the toolbar
 
   await test.step('a comment on the passage, kept', async () => {
     await selectIn(text, 0, 'launch plan');
-    await toolbar.getByRole('button', { name: 'Comment', exact: true }).click();
+    await toolbar.getByRole('button', { name: 'Add comment', exact: true }).click();
     const card = page.locator('[data-comment-card]');
     await expect(card).toBeVisible();
     await card.getByRole('button', { name: 'Resolve' }).click();
@@ -258,12 +254,14 @@ test('in a 600 px panel the comments rail is a drawer over the page, the toolbar
     expect(tableNow.x, 'the table whole in the page').toBeGreaterThanOrEqual(frameNow.x);
     expect(tableNow.x + tableNow.width, 'the table whole in the page').toBeLessThanOrEqual(frameNow.x + frameNow.width);
     expect(frameNow.width, 'a usable page').toBeGreaterThan(PANEL_PX - 40);
-    expect(Math.abs(railBox.x + railBox.width - (bodyBox.x + bodyBox.width)), 'the drawer at the right edge').toBeLessThan(1);
-    expect(railBox.width).toBeLessThan(bodyBox.width / 2 + 40);
-    expect(railBox.y, 'the drawer under the toolbar').toBeGreaterThanOrEqual(barBox.y + barBox.height - 1);
+    expect(Math.abs(railBox.x + railBox.width - (bodyBox.x + bodyBox.width - CARD_INSET_PX)), 'the floating card is inset from the right edge').toBeLessThan(1);
+    expect(Math.abs(railBox.width - RAIL_PX), 'the card keeps its readable width').toBeLessThan(1);
+    expect(Math.abs(railBox.y - frameNow.y - CARD_INSET_PX), 'the floating card starts below the page frame’s top inset').toBeLessThan(1);
+    expect(railBox.y + railBox.height, 'the card stays inside the body’s lower inset').toBeLessThanOrEqual(bodyBox.y + bodyBox.height - CARD_INSET_PX + 1);
+    expect(railBox.y, 'the card leaves the toolbar uncovered').toBeGreaterThanOrEqual(barBox.y + barBox.height + CARD_INSET_PX - 1);
     expect(await oneRow(toolbar)).toBe(true);
     expect(await wrappedLabels(toolbar), 'every label one line with the drawer open').toEqual([]);
-    for (const name of ['Comment', 'Find']) expect(await takesClicks(toolbar.getByRole('button', { name, exact: true })), `${name} uncovered`).toBe(true);
+    for (const name of ['Add comment', 'Find']) expect(await takesClicks(toolbar.getByRole('button', { name, exact: true })), `${name} uncovered`).toBe(true);
     expect(await takesClicks(toolbar.getByRole('button', { name: /^Comments/ })), 'the rail’s toggle uncovered').toBe(true);
 
     // the thread in the drawer takes its clicks: reopened from it
@@ -283,17 +281,21 @@ test('in a 600 px panel the comments rail is a drawer over the page, the toolbar
     expect(await text.evaluate((el) => el === document.activeElement)).toBe(true);
   });
 
-  await test.step('maximized: the rail beside the page at its old width', async () => {
+  await test.step('maximized: the floating card leaves its own width and gutters beside the page, never beside the toolbar', async () => {
     await page.locator('[data-region="panel"]').getByRole('button', { name: 'Maximize right panel' }).click();
     await expect.poll(async () => (await box(body)).width).toBeGreaterThan(1000);
     await toolbar.getByRole('button', { name: /^Comments/ }).click();
     const rail = record.getByRole('complementary', { name: 'Comments' });
     await expect(rail).toBeVisible();
     await expect(body).toHaveAttribute('data-rail-layout', 'beside');
-    expect(await rail.evaluate((el) => getComputedStyle(el).position)).toBe('static');
-    const [railBox, bodyBox, frameBox] = [await box(rail), await box(body), await box(frame)];
-    expect(Math.abs(railBox.width - RAIL_PX), 'the rail at its old width').toBeLessThan(1);
-    expect(Math.abs(frameBox.width - (bodyBox.width - RAIL_PX)), 'the page beside it').toBeLessThan(1);
+    expect(await rail.evaluate((el) => getComputedStyle(el).position)).toBe('absolute');
+    const [railBox, bodyBox, frameBox, barBox] = [await box(rail), await box(body), await box(frame), await box(toolbar)];
+    expect(Math.abs(railBox.width - RAIL_PX), 'the card keeps its readable width').toBeLessThan(1);
+    expect(Math.abs(frameBox.width - (bodyBox.width - RAIL_PX - 2 * CARD_INSET_PX)), 'only the page reserves the card and its two gutters').toBeLessThan(1);
+    expect(Math.abs(frameBox.x + frameBox.width + CARD_INSET_PX - railBox.x), 'the page ends before the floating card’s left gutter').toBeLessThan(1);
+    expect(Math.abs(railBox.x + railBox.width + CARD_INSET_PX - bodyBox.x - bodyBox.width), 'the card’s right gutter').toBeLessThan(1);
+    expect(Math.abs(barBox.width - bodyBox.width), 'the document toolbar keeps the full body width').toBeLessThan(1);
+    expect(Math.abs(railBox.y - frameBox.y - CARD_INSET_PX), 'the card floats below the page-frame top').toBeLessThan(1);
     expect(await oneRow(toolbar)).toBe(true);
     expect(await wrappedLabels(toolbar), 'every label one line maximized').toEqual([]);
     await text.locator('td p').first().click(); // the caret in the table: its controls in the row too
@@ -301,6 +303,9 @@ test('in a 600 px panel the comments rail is a drawer over the page, the toolbar
     expect(await oneRow(toolbar)).toBe(true);
     expect(await wrappedLabels(toolbar), 'every label one line maximized, with the table’s controls').toEqual([]);
     await test.info().attach('maximized-rail-beside', { body: await page.screenshot(), contentType: 'image/png' });
+    await toolbar.getByRole('button', { name: /^Comments/ }).click();
+    await expect(rail).toHaveCount(0);
+    await expect.poll(async () => Math.abs((await box(frame)).width - (await box(body)).width), { message: 'closing the card leaves no empty column' }).toBeLessThan(1);
   });
 });
 
@@ -311,15 +316,14 @@ test('in a 600 px panel the comments rail is a drawer over the page, the toolbar
 test('at the panel’s 280 px minimum a document’s and a dashboard’s toolbar stay one scrolling row, no control squeezed', async () => {
   test.setTimeout(120_000);
   const page = await start();
-  await pinArtifactsTool(page);
+  await selectPanelSession(page);
   const panel = page.locator('[data-region="panel"]');
   const shots: Buffer[] = [];
   for (const kind of ['document', 'dashboard'] as const) {
     const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind, title: `Narrowest ${kind}` });
     // openInPanel's steps, with a dashboard's several editors allowed (its views' captions)
-    await panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /^Artifacts/ }).click();
-    await panel.getByRole('button', { name: 'All', exact: true }).click();
-    await panel.locator(`[data-artifact-row][data-artifact-id="${artifact.id}"]`).click({ timeout: 15_000 });
+    await openArtifactInPanel(page, artifact.id);
+    await pinSurfaceForSessions(page, 'Artifacts');
     const record = panel.locator(`[data-artifact-record="${artifact.id}"]`);
     await expect(record.locator('.ds-doc .ProseMirror').first()).toBeVisible({ timeout: 15_000 });
     if (kind === 'document') await resizePanel(page, 280); // opened at the panel's width, as the case above; the dashboard at 280

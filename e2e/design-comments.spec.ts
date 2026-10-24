@@ -15,6 +15,7 @@
 // - Deleting the element orphans its thread with the last text, Undo brings it back; deleting the board orphans the
 //   board's thread with the last title, a restore of a version from before brings the board back with the thread live and
 //   every conversation since kept.
+import { openArtifactInPanel } from './support/shell';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -76,10 +77,7 @@ test('comments on a design’s boards and elements: the card, the pins through m
   await openProject(page, project.name);
   await newChatIn(page, project.name);
   const panel = page.locator('[data-region="panel"]');
-  await panel.getByRole('button', { name: 'Add a tool' }).click();
-  await page.getByRole('menuitem', { name: 'Artifacts', exact: true }).click();
-  await panel.getByRole('button', { name: 'All', exact: true }).click();
-  await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click();
+  await openArtifactInPanel(page, id);
   const ws = panel.locator(`[data-design-artifact="${id}"]`);
   await expect(ws.locator('[data-design-editor]')).toBeVisible({ timeout: 15_000 });
   const divider = panel.getByRole('separator', { name: 'Resize right panel' });
@@ -108,7 +106,7 @@ test('comments on a design’s boards and elements: the card, the pins through m
     await zoomTo('Phone');
     await ws.getByRole('button', { name: 'Board Phone', exact: true }).click(); // its frame selected
     await expect.poll(async () => (await viewOf(page, id, 'panel')).frame).toBe('phone');
-    await toolbar.getByRole('button', { name: 'Comment', exact: true }).click();
+    await toolbar.getByRole('button', { name: 'Add comment', exact: true }).click();
     await expect(card).toBeVisible();
     await expect(card).toHaveAttribute('data-anchor-kind', 'artifact-comment');
     await expect(card).toHaveAttribute('data-anchor-locator', 'Phone');
@@ -141,7 +139,7 @@ test('comments on a design’s boards and elements: the card, the pins through m
     await zoomTo('Desktop');
     await pressOn(page, ws.locator('[data-board-id="desktop"] [data-eid="note"]')); // the inactive desktop activated, the note selected
     await expect.poll(async () => (await viewOf(page, id, 'panel')).selection).toEqual(['note']);
-    await toolbar.getByRole('button', { name: 'Comment', exact: true }).click();
+    await toolbar.getByRole('button', { name: 'Add comment', exact: true }).click();
     await expect(card).toHaveAttribute('data-anchor-locator', 'Edit me');
     await expect(card).toHaveAttribute('aria-label', 'Comment on Launch screens, Desktop');
     noteThread = (await threadOf((t) => t.elementId === 'note'))!.id;

@@ -17,6 +17,7 @@
 // Spends money within MAWS_LIVE_DOCUMENT_MAX_USD (US$1.00 when unset); the model is MAWS_LIVE_DOCUMENT_MODEL (haiku when
 // unset). Run on purpose only: MAWS_LIVE_DOCUMENT=1 pnpm e2e:document-live
 // Evidence: test-results/document-provisional-live/live-run.txt (the scratch root is kept for inspection).
+import { openArtifactInPanel } from './support/shell';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
@@ -334,10 +335,7 @@ test('the live run: the agent’s edit on a 200-page document is seen as it is w
     note(`the document: ${artifact.id} "${TITLE}", seeded with ${seed.stats.topBlocks} top blocks (${seed.stats.words} words, ${seed.stats.sections} sections) at revision ${seeded.revision}`);
 
     // the document in the panel's Artifacts tool beside the composer
-    await panel.getByRole('button', { name: 'Add a tool' }).click();
-    await page.getByRole('menuitem', { name: 'Artifacts' }).click();
-    await panel.getByRole('button', { name: 'All', exact: true }).click();
-    await panel.locator(`[data-artifact-row][data-artifact-id="${artifact.id}"]`).click({ timeout: 15_000 });
+    await openArtifactInPanel(page, artifact.id);
     const record = panel.locator(`[data-artifact-record="${artifact.id}"]`);
     const editor = record.locator('.ds-doc .ProseMirror[data-editor="live"]');
     await expect(editor).toBeVisible({ timeout: 30_000 });

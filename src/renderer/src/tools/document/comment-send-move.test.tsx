@@ -17,6 +17,8 @@ import { listThreads } from '@artifacts/document/threads';
 import type { ArtifactHost } from '@artifacts/host';
 import type { CommandName, MawsBridge } from '@shared/ipc/schema';
 import type { LayoutMain, TabRef } from '@shared/ipc/schema/layout';
+import type { LibraryRow } from '@shared/ipc/schema/library';
+import { library, resetLibrary, rowKey } from '../../library/store';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT } from '@shared/ipc/schema/layout';
 import { record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
@@ -60,6 +62,7 @@ afterAll(() => {
 
 beforeEach(() => {
   resetShellStores();
+  resetLibrary();
   resetEditorHosts();
   resetMarkupSurfaces();
   resetArtifactEditors();
@@ -136,7 +139,7 @@ async function commentSent(): Promise<void> {
     editor.commands.insertContent('Quarterly plans ship on time.');
     editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 1, 10)));
   });
-  await userEvent.click(screen.getByRole('button', { name: 'Comment' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Add comment' }));
   await waitFor(() => expect(field()).toBeTruthy());
   await userEvent.type(field(), 'Monthly?{Enter}');
   expect(fake.invoked('side.thread.open')).toHaveLength(1);
@@ -198,6 +201,8 @@ describe('an unsent comment when its document moves onto a view of it already op
 
   beforeEach(() => {
     resetPanelHost();
+    const row: LibraryRow = { id: DOC, kind: 'document', title: 'Launch plan', createdBy: { kind: 'human' }, createdAt: 0, updatedAt: 0, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 1, lastEditor: { kind: 'human' }, lastEditedAt: 0, sessions: [] };
+    library.setState({ reads: new Map([[rowKey(DOC), { status: 'ready', value: row, error: null }]]) });
     offs.push(registerPanelTool(artifactsTool));
   });
 
@@ -217,7 +222,7 @@ describe('an unsent comment when its document moves onto a view of it already op
       editor.commands.insertContent('Quarterly plans ship on time.');
       editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 1, 10)));
     });
-    await userEvent.click(screen.getByRole('button', { name: 'Comment' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Add comment' }));
     await waitFor(() => expect(field()).toBeTruthy());
     await userEvent.type(field(), TEXT);
     expect(commentDraftOf(DOC)?.text).toBe(TEXT);

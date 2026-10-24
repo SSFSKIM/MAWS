@@ -1,4 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { queryClient } from '../ipc/query';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -27,7 +29,10 @@ import { resetLibrary } from '../library/store';
 import { Shell } from './Shell';
 import { registerSlot, resetSlots } from './slots';
 import { toolbarTitle } from './Toolbar';
-import { fillStores, scenarioFile } from '../test-support/shell-stores';
+import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
+import { probeTool, ref, resetPanelStores } from '../test-support/panel';
+import { registerPanelTool } from '../panel/host';
+import { PanelHost } from '../panel/PanelHost';
 import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
 
 vi.mock('./Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
@@ -39,14 +44,24 @@ const withActive = (tab: TabRef): LayoutMain => ({ ...LAYOUT_DEFAULTS.main, sets
 const region = (name: string) => document.querySelector<HTMLElement>(`[data-region="${name}"]`)!;
 const grid = () => region('main').parentElement!;
 const offs: (() => void)[] = [];
+const chromeTabs = () => screen.getByRole('banner').querySelector<HTMLElement>('[data-chrome-tabs]')!;
+const renderShell = () => render(<QueryClientProvider client={queryClient}><Shell /></QueryClientProvider>);
+// Geometry and maximize checks need a selected surface; an empty panel reserves no space.
+function openSurface(toolId = 'terminal') {
+  offs.push(registerPanelTool(probeTool(toolId).tool));
+  registerSlot('panelHost', PanelHost);
+  useSessions.setState({ records: new Map([[A, record('app-a')]]) });
+  useLayout.setState({ main: withActive(sessionTab(A)), panelBySession: new Map([[A, { tabs: [ref(`${toolId}:aaaaaaaa`)], activeTabId: `${toolId}:aaaaaaaa` }]]) });
+}
+
 // happy-dom's window, resized as a person resizes the app's (it dispatches `resize`).
 const setWindowWidth = (width: number) => (window as unknown as { happyDOM: { setWindowSize(size: { width: number }): void } }).happyDOM.setWindowSize({ width });
 
 beforeEach(() => {
   useNotices.setState({ notices: [] });
   setWindowWidth(1440); // the app window's default size
-  useLayout.setState({ regions: LAYOUT_DEFAULTS.regions, main: LAYOUT_DEFAULTS.main, panelPinned: [], panelBySession: new Map(), panelActiveNoSession: null, hydrated: true, overviewOpen: false });
-  useSessions.setState({ records: new Map() });
+  resetPanelStores();
+  resetShellStores();
 });
 afterEach(() => {
   cleanup();
@@ -55,20 +70,19 @@ afterEach(() => {
 });
 
 describe('shell frame', () => {
-  it('renders the toolbar, the three regions and two keyboard-operable resizers', () => {
-    render(<Shell />);
-    expect(screen.getByRole('banner')).toBeTruthy();
+  it('renders one chrome row and only the sidebar resizer until a surface opens', () => {
+    renderShell();
+    expect(screen.getAllByRole('banner')).toHaveLength(1);
     expect(['sidebar', 'main', 'panel'].map((name) => region(name).dataset.region)).toEqual(['sidebar', 'main', 'panel']);
-    const separators = screen.getAllByRole('separator');
-    expect(separators.map((s) => [s.getAttribute('aria-controls'), s.getAttribute('aria-valuenow')])).toEqual([
-      [region('sidebar').id, '300'],
-      [region('panel').id, '380'],
-    ]);
+    expect(region('panel').inert).toBe(true);
+    expect(screen.getAllByRole('separator').map((s) => [s.getAttribute('aria-controls'), s.getAttribute('aria-valuenow')])).toEqual([[region('sidebar').id, '240']]);
+    expect(within(chromeTabs()).getByRole('tablist', { name: 'Open tabs' })).toBeTruthy();
+    expect(within(region('main')).queryByRole('tablist')).toBeNull();
   });
 
   it('keeps the wordmark in the sidebar body and leaves title-bar navigation reachable when collapsed', () => {
     fillStores(scenarioFile('empty'));
-    render(<Shell />);
+    renderShell();
     const toolbar = screen.getByRole('banner');
     expect(within(toolbar).queryByText('MAWS')).toBeNull();
     const wordmark = within(region('sidebar')).getByText('MAWS');
@@ -85,7 +99,7 @@ describe('shell frame', () => {
 
   it('puts the Overview toggle beside the sidebar toggle in the title-bar toolbar', async () => {
     const user = userEvent.setup();
-    render(<Shell />);
+    renderShell();
     const toolbar = screen.getByRole('banner');
     const toggle = within(toolbar).getByRole('button', { name: 'Overview' });
     const sidebar = within(toolbar).getByRole('button', { name: 'Toggle sidebar' });
@@ -105,16 +119,17 @@ describe('shell frame', () => {
   it('the toolbar Overview toggle restores main from a maximized panel and still closes on a second click', async () => {
     const user = userEvent.setup();
     offs.push(registerShellActions(fakeBridge()));
+    openSurface('review');
     useLayout.getState().setPanel({ width: 444 });
-    render(<Shell />);
+    renderShell();
     await user.click(screen.getByRole('button', { name: 'Maximize right panel' }));
     expect(region('main').inert).toBe(true);
-    expect(grid().style.gridTemplateColumns).toBe('300px 0px minmax(0, 1fr)');
+    expect(grid().style.gridTemplateColumns).toBe('240px 0px minmax(0, 1fr)');
     const toggle = within(screen.getByRole('banner')).getByRole('button', { name: 'Overview' });
     expect((toggle as HTMLButtonElement).disabled).toBe(false);
     await user.click(toggle);
     expect(region('main').inert).toBe(false);
-    expect(grid().style.gridTemplateColumns).toBe('300px minmax(0, 1fr) 444px');
+    expect(grid().style.gridTemplateColumns).toBe('240px minmax(0, 1fr) 444px');
     const dialog = within(region('main')).getByRole('dialog', { name: 'Overview' });
     expect(document.activeElement).toBe(dialog);
     expect(toggle.getAttribute('aria-pressed')).toBe('true');
@@ -125,29 +140,32 @@ describe('shell frame', () => {
     expect(region('main').inert).toBe(false);
   });
 
-  it('mounts the usage slot before the session actions and panel toggle in the title-bar toolbar', () => {
+  it('mounts the usage slot in the sidebar footer, not in the chrome row', () => {
     registerSlot('topBarEnd', () => <button type="button">Usage</button>);
-    render(<Shell />);
+    renderShell();
     const toolbar = screen.getByRole('banner');
-    const usage = within(toolbar).getByRole('button', { name: 'Usage' });
-    const end = usage.parentElement!;
-    expect(end.className).toContain('[-webkit-app-region:no-drag]');
-    expect(end.nextElementSibling).toBe(within(toolbar).getByRole('button', { name: 'Session actions' }));
-    expect(within(toolbar).getByRole('button', { name: 'Toggle right panel' })).toBeTruthy();
+    expect(within(toolbar).queryByRole('button', { name: 'Usage' })).toBeNull();
+    const usage = within(region('sidebar')).getByRole('button', { name: 'Usage' });
+    expect(usage.closest('footer')).toBeTruthy();
+    expect(usage.closest('[data-sidebar-usage]')!.nextElementSibling).toBe(within(region('sidebar')).getByRole('button', { name: 'Workspace settings' }));
+    expect(within(toolbar).getByRole('toolbar', { name: 'Session surfaces' })).toBeTruthy();
   });
 
-  it('lays the regions on a grid whose columns are the layout store’s widths', () => {
-    render(<Shell />);
-    expect(grid().style.gridTemplateColumns).toBe('300px minmax(0, 1fr) 380px');
-    act(() => useLayout.getState().setSidebar({ width: 240 }));
+  it('uses remembered widths only for open regions, leaving no empty panel column', () => {
+    renderShell();
+    expect(grid().style.gridTemplateColumns).toBe('240px minmax(0, 1fr) 0px');
+    act(() => useLayout.getState().setSidebar({ width: 280 }));
     act(() => useLayout.getState().setPanel({ width: 320 }));
-    expect(grid().style.gridTemplateColumns).toBe('240px minmax(0, 1fr) 320px');
+    expect(grid().style.gridTemplateColumns).toBe('280px minmax(0, 1fr) 0px');
+    act(() => openSurface());
+    expect(grid().style.gridTemplateColumns).toBe('280px minmax(0, 1fr) 320px');
   });
 
   it('a collapsed region gets a zero column, goes inert and loses its resizer', () => {
-    render(<Shell />);
+    openSurface();
+    renderShell();
     act(() => useLayout.getState().setSidebar({ collapsed: true }));
-    expect(grid().style.gridTemplateColumns).toBe('0px minmax(0, 1fr) 380px');
+    expect(grid().style.gridTemplateColumns).toBe('0px minmax(0, 1fr) 420px');
     expect(region('sidebar').inert).toBe(true);
     act(() => useLayout.getState().setPanel({ collapsed: true }));
     expect(grid().style.gridTemplateColumns).toBe('0px minmax(0, 1fr) 0px');
@@ -156,20 +174,23 @@ describe('shell frame', () => {
   });
 
   it('a maximized panel takes the main column and the main region stays mounted', () => {
-    render(<Shell />);
+    openSurface();
+    renderShell();
     act(() => useLayout.getState().setPanel({ maximized: true }));
-    expect(grid().style.gridTemplateColumns).toBe('300px 0px minmax(0, 1fr)');
+    expect(grid().style.gridTemplateColumns).toBe('240px 0px minmax(0, 1fr)');
     expect(region('main').inert).toBe(true);
-    expect(within(region('main')).getByRole('tablist', { name: 'Open tabs' })).toBeTruthy();
+    expect(within(region('main')).getByRole('tabpanel')).toBeTruthy();
+    expect(within(chromeTabs()).getByRole('tablist', { name: 'Open tabs' })).toBeTruthy();
     expect(screen.getAllByRole('separator').map((s) => s.getAttribute('aria-controls'))).toEqual([region('sidebar').id]);
   });
 
   it('a resizer writes its width to the layout store', async () => {
     const user = userEvent.setup();
-    render(<Shell />);
+    openSurface();
+    renderShell();
     screen.getAllByRole('separator')[1].focus();
     await user.keyboard('{ArrowLeft}');
-    expect(useLayout.getState().regions.panel.width).toBe(388);
+    expect(useLayout.getState().regions.panel.width).toBe(428);
     screen.getAllByRole('separator')[0].focus();
     await user.keyboard('{Home}');
     expect(useLayout.getState().regions.sidebar.width).toBe(200);
@@ -177,47 +198,48 @@ describe('shell frame', () => {
 
   it('a persisted width outside the bounds renders clamped', () => {
     useLayout.setState({ regions: { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, width: 900 } } });
-    render(<Shell />);
-    expect(grid().style.gridTemplateColumns).toBe('480px minmax(0, 1fr) 380px');
+    renderShell();
+    expect(grid().style.gridTemplateColumns).toBe('480px minmax(0, 1fr) 0px');
   });
 
-  it('keeps the main column at least 480 px wide at the 960 px minimum window, the panel yielding first', () => {
+  it('temporarily sets the sidebar aside below 1100 while a surface is open and uses a sheet below 700', () => {
+    openSurface('review');
     const regions = LAYOUT_DEFAULTS.regions;
     useLayout.setState({ regions: { ...regions, sidebar: { ...regions.sidebar, width: 480 }, panel: { ...regions.panel, width: 640 } } });
-    render(<Shell />);
-    expect(grid().style.gridTemplateColumns).toBe('480px minmax(0, 1fr) 480px'); // 1440 wide: main keeps 480
+    renderShell();
+    expect(grid().style.gridTemplateColumns).toBe('480px minmax(0, 1fr) 600px');
     act(() => setWindowWidth(960));
-    expect(grid().style.gridTemplateColumns).toBe('200px minmax(0, 1fr) 280px'); // 960 - 200 - 280 = 480
-    const bounds = () => screen.getAllByRole('separator').map((s) => [s.getAttribute('aria-valuenow'), s.getAttribute('aria-valuemax')]);
-    expect(bounds()).toEqual([['200', '200'], ['280', '280']]);
-    act(() => useLayout.getState().setPanel({ collapsed: true })); // the sidebar may take the panel's room
+    expect(grid().style.gridTemplateColumns).toBe('0px minmax(0, 1fr) 600px');
+    expect(region('sidebar').inert).toBe(true);
+    expect(screen.getAllByRole('separator').map((s) => [s.getAttribute('aria-valuenow'), s.getAttribute('aria-valuemax')])).toEqual([['600', '600']]);
+    act(() => useLayout.getState().setPanel({ collapsed: true }));
     expect(grid().style.gridTemplateColumns).toBe('480px minmax(0, 1fr) 0px');
     act(() => useLayout.getState().setPanel({ collapsed: false }));
-    act(() => setWindowWidth(1100)); // 620 px of room: the sidebar keeps 340 beside the panel's 280
-    expect(grid().style.gridTemplateColumns).toBe('340px minmax(0, 1fr) 280px');
-    act(() => useLayout.getState().setPanel({ maximized: true })); // the maximized panel is the main column
-    expect(grid().style.gridTemplateColumns).toBe('480px 0px minmax(0, 1fr)');
-    act(() => useLayout.getState().setPanel({ maximized: false }));
-    act(() => setWindowWidth(1440)); // the persisted widths were never touched
-    expect(grid().style.gridTemplateColumns).toBe('480px minmax(0, 1fr) 480px');
+    act(() => setWindowWidth(680));
+    expect(grid().style.gridTemplateColumns).toBe('0px minmax(0, 1fr) 0px');
+    expect(region('panel').style.width).toBe('656px');
+    expect(region('panel').inert).toBe(false);
+    expect(screen.queryAllByRole('separator')).toHaveLength(0);
+    act(() => setWindowWidth(1440));
+    expect(grid().style.gridTemplateColumns).toBe('480px minmax(0, 1fr) 600px');
     expect([useLayout.getState().regions.sidebar.width, useLayout.getState().regions.panel.width]).toEqual([480, 640]);
   });
 
-  it('a drag-collapse of a clamped region keeps its persisted width, so it reopens at that size', () => {
+  it('a drag-collapse of a clamped region keeps its remembered width for reopening', () => {
+    openSurface('review');
     const regions = LAYOUT_DEFAULTS.regions;
-    useLayout.setState({ regions: { ...regions, sidebar: { ...regions.sidebar, width: 480 }, panel: { ...regions.panel, width: 640 } } });
-    setWindowWidth(960);
-    render(<Shell />);
-    const sidebarHandle = screen.getByRole('separator', { name: 'Resize sidebar' });
-    const panelHandle = () => screen.getByRole('separator', { name: 'Resize right panel' });
+    useLayout.setState({ regions: { ...regions, sidebar: { ...regions.sidebar, width: 900 }, panel: { ...regions.panel, width: 1000 } } });
+    renderShell();
     const dragBy = (handle: HTMLElement, dx: number) => {
       act(() => void fireEvent.pointerDown(handle, { pointerId: 1, button: 0, clientX: 500 }));
       act(() => void fireEvent.pointerMove(handle, { pointerId: 1, clientX: 500 + dx }));
     };
-    dragBy(sidebarHandle, -50); // shown at 200 (persisted 480): 50 px leftwards is past the collapse threshold
-    expect(useLayout.getState().regions.sidebar).toMatchObject({ collapsed: true, width: 480 });
-    dragBy(panelHandle(), 250); // shown at 480 beside the collapsed sidebar (persisted 640): collapsed
-    expect(useLayout.getState().regions.panel).toMatchObject({ collapsed: true, width: 640 });
+    dragBy(screen.getByRole('separator', { name: 'Resize sidebar' }), -330);
+    expect(useLayout.getState().regions.sidebar).toMatchObject({ collapsed: true, width: 900 });
+    dragBy(screen.getByRole('separator', { name: 'Resize right panel' }), 850);
+    expect(useLayout.getState().regions.panel).toMatchObject({ collapsed: true, width: 1000 });
+    act(() => useLayout.getState().setPanel({ collapsed: false }));
+    expect(grid().style.gridTemplateColumns).toBe('0px minmax(0, 1fr) 1000px');
   });
 });
 
@@ -236,49 +258,63 @@ describe('toolbar', () => {
     expect(toolbarTitle(sessionTab('app-a'), new Map([[A, record('app-a', { branch: 'HEAD' })]])).branch).toBeNull();
   });
 
-  it('shows the focused pane’s active tab title and branch chip', () => {
+  it('shows the focused pane’s tabs in the chrome without duplicating a title row', () => {
     useSessions.setState({ records: new Map([[A, record('app-a', { title: { text: 'Fix sidebar drag', source: 'user' }, branch: 'feat/sidebar' })]]) });
-    render(<Shell />);
-    const toolbar = screen.getByRole('banner');
-    expect(within(toolbar).queryByText('Overview')).toBeNull(); // an empty pane leaves the title blank and no branch chip
-    expect(within(toolbar).queryByText(/⎇/)).toBeNull();
+    renderShell();
+    expect(within(chromeTabs()).queryByRole('tab')).toBeNull();
     act(() => useLayout.setState({ main: withActive(sessionTab('app-a')) }));
-    expect(within(toolbar).getByText('Fix sidebar drag')).toBeTruthy();
-    expect(within(toolbar).getByText('⎇ feat/sidebar')).toBeTruthy();
+    expect(within(chromeTabs()).getByRole('tab', { name: 'Fix sidebar drag' }).getAttribute('aria-selected')).toBe('true');
+    expect(within(screen.getByRole('banner')).getAllByText('Fix sidebar drag')).toHaveLength(1);
+    expect(within(region('main')).queryByRole('tablist')).toBeNull();
   });
 
-  it('the sidebar and panel toggles run their actions and show their state and chords', async () => {
+  it('the sidebar toggle runs its action, while Session cards toggles the cards and shows its chord', async () => {
     const user = userEvent.setup();
     const sidebar = vi.fn();
-    const panel = vi.fn();
-    offs.push(registerAction('sidebar.toggle', sidebar), registerAction('panel.toggle', panel));
-    render(<Shell />);
-    const panelToggle = screen.getByRole('button', { name: 'Toggle right panel' });
-    expect(panelToggle.getAttribute('aria-pressed')).toBe('true');
-    expect(panelToggle.getAttribute('title')).toBe('Toggle right panel · ⌘⇧B');
+    offs.push(registerAction('sidebar.toggle', sidebar));
+    useSessions.setState({ records: new Map([[A, record('app-a')]]) });
+    useLayout.setState({ main: withActive(sessionTab(A)) });
+    renderShell();
+    const cards = within(screen.getByRole('banner')).getByRole('button', { name: 'Session cards' });
+    expect(cards.getAttribute('aria-pressed')).toBe('true');
+    expect(cards.getAttribute('title')).toBe('Session cards · ⌘⇧B');
+    const floatingCards = screen.getByRole('complementary', { name: 'Session cards' });
+    expect(region('main').contains(floatingCards)).toBe(true);
+    expect(region('panel').contains(floatingCards)).toBe(false);
+    expect(['Environment', 'Context', 'Connectors', 'Artifacts'].map((name) => within(within(floatingCards).getByRole('region', { name })).getByRole('button').getAttribute('aria-expanded'))).toEqual(['false', 'false', 'false', 'false']);
     await user.click(screen.getByRole('button', { name: 'Toggle sidebar' }));
-    await user.click(panelToggle);
     expect(sidebar).toHaveBeenCalledOnce();
-    expect(panel).toHaveBeenCalledOnce();
+    await user.click(cards);
+    expect(cards.getAttribute('aria-pressed')).toBe('false');
+    expect(screen.queryByRole('complementary', { name: 'Session cards' })).toBeNull();
+    expect(useLayout.getState().regions.panel.collapsed).toBe(true);
+    await user.click(cards);
+    expect(screen.getByRole('complementary', { name: 'Session cards' })).toBeTruthy();
+    expect(grid().style.gridTemplateColumns).toBe('240px minmax(0, 1fr) 0px');
   });
 
   it('shows a rebound chord in the tooltip', () => {
     useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V18, keymap: { 'sidebar.toggle': 'Cmd+Alt+S' } }, resolvedTheme: 'light' } });
-    render(<Shell />);
+    renderShell();
     expect(screen.getByRole('button', { name: 'Toggle sidebar' }).getAttribute('title')).toBe('Toggle sidebar · ⌘⌥S');
     useSettings.setState({ state: null });
   });
 
-  it('the session menu is disabled with no tab open and lists the §5.1 actions for a session, unregistered ones disabled', async () => {
+  it('More omits session actions with no tab open and lists the §5.1 submenu for a session, unregistered ones disabled', async () => {
     const user = userEvent.setup();
     useSessions.setState({ records: new Map([[A, record('app-a')]]) });
-    render(<Shell />);
-    expect((screen.getByRole('button', { name: 'Session actions' }) as HTMLButtonElement).disabled).toBe(true);
+    renderShell();
+    await user.click(screen.getByRole('button', { name: 'More surfaces' }));
+    expect(screen.queryByRole('menuitem', { name: 'Session actions' })).toBeNull();
+    await user.keyboard('{Escape}');
     const split = vi.fn();
     offs.push(registerShellActions(fakeBridge()), (await import('./session-actions')).registerSessionAction('openInSplit', split));
     act(() => useLayout.setState({ main: withActive(sessionTab('app-a')) }));
-    await user.click(screen.getByRole('button', { name: 'Session actions' }));
-    const menu = await screen.findByRole('menu');
+    await user.click(screen.getByRole('button', { name: 'More surfaces' }));
+    const actions = await screen.findByRole('menuitem', { name: 'Session actions' });
+    act(() => actions.focus());
+    await user.keyboard('{ArrowRight}');
+    const menu = (await screen.findByRole('menuitem', { name: 'Pin' })).closest<HTMLElement>('[role="menu"]')!;
     const items = within(menu).getAllByRole('menuitem');
     expect(items.map((i) => [i.textContent, i.getAttribute('aria-disabled') === 'true'])).toEqual([
       ['Open in split', false],
@@ -294,19 +330,22 @@ describe('toolbar', () => {
   });
 
   it('offers a foreign-live session no actions, as the sidebar does (D-12): the scenario’s terminal-held session', async () => {
+    const user = userEvent.setup();
     const nine = scenarioFile('nine-sessions');
     const held = nine.sessions.find((r) => r.holder.kind === 'terminal')!;
     useSessions.setState({ records: new Map(nine.sessions.map((r) => [r.appId, r])) });
     offs.push(registerShellActions(fakeBridge()));
-    render(<Shell />);
+    renderShell();
     act(() => useLayout.setState({ main: withActive(sessionTab(held.appId)) }));
-    expect(within(screen.getByRole('banner')).getByText(held.title.text)).toBeTruthy();
-    expect((screen.getByRole('button', { name: 'Session actions' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(chromeTabs()).getByRole('tab', { name: held.title.text })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'More surfaces' }));
+    expect((await screen.findByRole('menuitem', { name: 'Session actions' })).getAttribute('aria-disabled')).toBe('true');
   });
 });
 
 describe('shell actions', () => {
   it('toggle the sidebar and panel, maximize and restore the panel', () => {
+    openSurface();
     offs.push(registerShellActions(fakeBridge()));
     runAction('sidebar.toggle');
     expect(useLayout.getState().regions.sidebar.collapsed).toBe(true);
@@ -325,14 +364,15 @@ describe('shell actions', () => {
   it.each([false, true])('the Overview action restores main and focuses the dialog when already open=%s', async (alreadyOpen) => {
     const user = userEvent.setup();
     offs.push(registerShellActions(fakeBridge()));
-    render(<Shell />);
+    openSurface();
+    renderShell();
     if (alreadyOpen) act(() => runAction('tab.overview'));
     const previousDialog = screen.queryByRole('dialog', { name: 'Overview' });
     await user.click(screen.getByRole('button', { name: 'Maximize right panel' }));
     expect(region('main').inert).toBe(true);
     act(() => runAction('tab.overview'));
     expect(region('main').inert).toBe(false);
-    expect(grid().style.gridTemplateColumns).toBe('300px minmax(0, 1fr) 380px');
+    expect(grid().style.gridTemplateColumns).toBe('240px minmax(0, 1fr) 420px');
     const dialog = within(region('main')).getByRole('dialog', { name: 'Overview' });
     if (alreadyOpen) expect(dialog).toBe(previousDialog);
     await vi.waitFor(() => expect(document.activeElement).toBe(dialog));
@@ -363,10 +403,14 @@ describe('shell actions', () => {
 });
 
 describe('right panel', () => {
-  it('renders the panel host fallback and its header controls', () => {
-    render(<Shell />);
-    expect(within(region('panel')).getByText('No tools open')).toBeTruthy();
+  it('keeps an empty panel inert and renders a selected surface’s own header controls', () => {
+    renderShell();
+    expect(region('panel').inert).toBe(true);
+    expect(within(region('panel')).queryByRole('button', { name: 'Maximize right panel' })).toBeNull();
+    act(() => openSurface());
+    expect(region('panel').inert).toBe(false);
     expect(within(region('panel')).getByRole('button', { name: 'Maximize right panel' })).toBeTruthy();
+    expect(within(region('panel')).getByRole('button', { name: 'Close surface' })).toBeTruthy();
   });
 
   it('hands a registered host the session’s effective tabs and splits its changes back by pin', async () => {
@@ -382,7 +426,7 @@ describe('right panel', () => {
       panelBySession: new Map([[A, { tabs: [{ id: 'o', toolId: 'files', pinned: false }], activeTabId: 'o' }]]),
     });
     offs.push(registerShellActions(fakeBridge()));
-    render(<Shell />);
+    renderShell();
     expect(within(region('panel')).getByText('host')).toBeTruthy();
     expect(props!).toMatchObject({ appSessionId: A, activeTabId: 'o', maximized: false });
     expect(props!.tabs.map((t) => t.id)).toEqual(['p', 'o']);
@@ -404,7 +448,7 @@ describe('right panel', () => {
     const p1 = { id: 'p1', toolId: 'terminal', pinned: true };
     const p2 = { id: 'p2', toolId: 'files', pinned: true };
     useLayout.setState({ panelPinned: [p1, p2] });
-    render(<Shell />);
+    renderShell();
     expect(props!).toMatchObject({ appSessionId: null, activeTabId: null });
     act(() => props!.onChange({ tabs: [p1, p2], activeTabId: 'p2' }));
     expect(props!.activeTabId).toBe('p2');
@@ -425,7 +469,7 @@ describe('right panel', () => {
       props = p;
       return null;
     });
-    render(<Shell />);
+    renderShell();
     expect(props!).toMatchObject({ appSessionId: null, tabs: [], activeTabId: null });
   });
 });
@@ -446,7 +490,7 @@ describe('the Artifacts entry', () => {
       resetLibrary();
     });
     registerSlot('artifactsLibrary', Library);
-    render(<Shell />);
+    renderShell();
     const sidebar = region('sidebar');
     const row = within(sidebar).getByRole('button', { name: 'Artifacts' });
     expect(within(sidebar).getByRole('button', { name: 'New chat' }).nextElementSibling).toBe(row);
@@ -454,7 +498,7 @@ describe('the Artifacts entry', () => {
 
     await user.click(row);
     expect(artifactsTabs()).toEqual([{ id: 'artifacts', kind: 'artifacts', pinned: false }]);
-    expect(within(region('main')).getByRole('tab', { name: 'Artifacts' }).getAttribute('aria-selected')).toBe('true');
+    expect(within(chromeTabs()).getByRole('tab', { name: 'Artifacts' }).getAttribute('aria-selected')).toBe('true');
     expect(within(screen.getByRole('banner')).getByText('Artifacts')).toBeTruthy();
     const panel = within(region('main')).getByRole('tabpanel');
     expect(within(panel).getByRole('heading', { level: 1, name: 'Artifacts' })).toBeTruthy();
@@ -466,7 +510,7 @@ describe('the Artifacts entry', () => {
     expect(row.getAttribute('aria-current')).toBeNull();
     await user.click(row);
     expect(artifactsTabs()).toHaveLength(1);
-    expect(within(region('main')).getAllByRole('tab').map((tab) => [tab.getAttribute('aria-label'), tab.getAttribute('aria-selected')])).toEqual([
+    expect(within(chromeTabs()).getAllByRole('tab').map((tab) => [tab.getAttribute('aria-label'), tab.getAttribute('aria-selected')])).toEqual([
       ['Artifacts', 'true'],
       ['Diagnostics', 'false'],
     ]);
@@ -481,16 +525,15 @@ describe('the Artifacts entry', () => {
   ] as const)('from a %s panel', (_, patch) => {
     const placeholder = 'Artifacts unavailable';
     const startHidden = () => {
-      useSessions.setState({ records: new Map([[A, record('app-a')]]) });
-      useLayout.setState({ main: withActive(sessionTab('app-a')) });
+      openSurface();
       useLayout.getState().setPanel(patch);
-      render(<Shell />);
+      renderShell();
       expect(region('main').inert).toBe(true);
     };
     const expectShown = () => {
       expect(useLayout.getState().regions.panel).toMatchObject({ floating: false, maximized: false, collapsed: false });
       expect(region('main').inert).toBe(false);
-      expect(grid().style.gridTemplateColumns).toBe('300px minmax(0, 1fr) 380px');
+      expect(grid().style.gridTemplateColumns).toBe('240px minmax(0, 1fr) 420px');
       expect(screen.queryByRole('region', { name: 'Session card' })).toBeNull();
       expect(within(within(region('main')).getByRole('tabpanel')).getByText(placeholder)).toBeTruthy();
     };
@@ -514,7 +557,7 @@ describe('the Artifacts entry', () => {
   it('draws the library a later child registers into the slot', () => {
     registerSlot('artifactsLibrary', () => <section aria-label="Library">library</section>);
     useLayout.setState({ main: withActive({ id: 'artifacts', kind: 'artifacts', pinned: false }) });
-    render(<Shell />);
+    renderShell();
     expect(within(region('main')).getByRole('region', { name: 'Library' })).toBeTruthy();
     expect(screen.queryByText('Artifacts unavailable')).toBeNull();
   });
@@ -542,8 +585,9 @@ it('keeps fallback notifications and quit-wait actions outside the hidden main r
   const user = userEvent.setup();
   const fake = fakeClient({ 'layout.quitWait': { waiting: null }, 'layout.quitWaitAnswer': undefined, 'attention.pendingNavigate': { navigate: null } });
   offs.push(connectQuitWait(fake.client), connectAttention(fake.client));
+  openSurface();
   useLayout.getState().setPanel({ maximized: true, collapsed: false });
-  render(<Shell />);
+  renderShell();
   act(() => {
     fake.event('layout.quitWait', { waiting: { midTurn: 1, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false, unsavedFiles: [] /* E5 */ } });
     fake.event('attention.notified', { appSessionId: A, attentionId: 'att-a', delivery: 'fallback', at: '2026-10-02T10:00:00Z' });
@@ -568,7 +612,7 @@ it.each(['tab', 'content'] as const)('Cmd+W from focused %s restores the active 
   useLayout.getState().openTab({ kind: 'file', path: '/one.ts', line: null, appSessionId: null });
   useLayout.getState().openTab({ kind: 'file', path: '/two.ts', line: null, appSessionId: null });
   useLayout.getState().openTab({ kind: 'file', path: '/three.ts', line: null, appSessionId: null });
-  render(<Shell />);
+  renderShell();
   act(() => (from === 'tab' ? screen.getByRole('tab', { name: /three.ts/ }) : screen.getByRole('textbox', { name: 'File content' })).focus());
   act(() => runAction('tab.close'));
   await vi.waitFor(() => expect(document.activeElement).toBe(screen.getByRole('tab', { name: /two.ts/ })));
@@ -580,7 +624,7 @@ it('closing the last split tab restores focus in the surviving pane; closing its
   offs.push(registerShellActions(fakeBridge()));
   useLayout.getState().openTab({ kind: 'file', path: '/left.ts', line: null, appSessionId: null });
   useLayout.getState().openTab({ kind: 'file', path: '/right.ts', line: null, appSessionId: null }, { pane: 'other' });
-  render(<Shell />);
+  renderShell();
   act(() => screen.getByRole('tab', { name: /right.ts/ }).focus());
   act(() => runAction('tab.close'));
   await vi.waitFor(() => expect(document.activeElement).toBe(screen.getByRole('tab', { name: /left.ts/ })));
@@ -591,7 +635,7 @@ it('closing the last split tab restores focus in the surviving pane; closing its
 it('a refused Cmd+W keeps the tab and its focus', async () => {
   offs.push(registerShellActions(fakeBridge()), registerCloseGuard('file', async () => false));
   useLayout.getState().openTab({ kind: 'file', path: '/keep.ts', line: null, appSessionId: null });
-  render(<Shell />);
+  renderShell();
   const tab = screen.getByRole('tab', { name: /keep.ts/ });
   act(() => tab.focus());
   await act(async () => runAction('tab.close'));
@@ -623,7 +667,7 @@ it('Delete on an arrow-focused inactive draft tab restores focus after the real 
   putIntent(intent({ draft: { doc: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'keep my draft' }] }] }, attachments: [], updatedAt: '2026-09-29T10:00:00.000Z' } }));
   useLayout.getState().openTab({ kind: 'session', appSessionId: ID });
   useLayout.getState().openTab({ kind: 'file', path: '/survivor.ts', line: null, appSessionId: null });
-  render(<><Shell /><SessionDialogs /></>);
+  render(<QueryClientProvider client={queryClient}><Shell /><SessionDialogs /></QueryClientProvider>);
   const survivor = screen.getByRole('tab', { name: /survivor.ts/ });
   act(() => survivor.focus());
   await user.keyboard('{ArrowLeft}');
@@ -642,7 +686,7 @@ it('middle-closing the active left tab preserves the surviving right editor focu
   useLayout.getState().openTab({ kind: 'file', path: '/left-survivor.ts', line: null, appSessionId: null });
   useLayout.getState().openTab({ kind: 'file', path: '/left-close.ts', line: null, appSessionId: null });
   useLayout.getState().openTab({ kind: 'file', path: '/right.ts', line: null, appSessionId: null }, { pane: 'other' });
-  render(<Shell />);
+  renderShell();
   const editor = within(screen.getByRole('region', { name: 'Right pane' })).getByRole('textbox');
   act(() => editor.focus());
   fireEvent(screen.getByRole('tab', { name: /left-close.ts/ }), new MouseEvent('auxclick', { bubbles: true, button: 1 }));
@@ -657,7 +701,7 @@ it.each([true, false])('context-menu Close restores pane focus when the closing 
   useLayout.getState().openTab({ kind: 'file', path: '/menu-close.ts', line: null, appSessionId: null });
   useLayout.getState().openTab({ kind: 'file', path: '/menu-survivor.ts', line: null, appSessionId: null });
   if (active) useLayout.getState().activateTab('file:/menu-close.ts');
-  render(<Shell />);
+  renderShell();
   const tab = screen.getByRole('tab', { name: 'menu-close.ts' });
   act(() => tab.focus());
   fireEvent.contextMenu(tab);

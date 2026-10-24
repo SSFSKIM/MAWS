@@ -13,6 +13,7 @@ import { PROFILE_VARIABLE } from '../test/support/shell-home';
 import { withNativeClipboard } from './support/clipboard';
 import { test } from './support/launch';
 import { latencyBudgets, MEASURED_WAIT_MS } from './support/latency';
+import { openSurface, pinSurfaceForSessions, showSessionCards, surface } from './support/shell';
 
 // The parent-session variables a terminal must never inherit (§4.1), two engine-launch ones (D-19) and an Electron
 // switch a launcher sets (`ELECTRON_RENDERER_URL` itself would make the built app a dev-server client), set to fake
@@ -122,10 +123,15 @@ class Harness {
   run = (id: TerminalId, command: string) => this.type(id, `${command}\r`);
   counters = (id: TerminalId) => this.call<Counters>('terminals', 'counters', id);
 
-  async addTerminal(opts: Record<string, unknown> = {}): Promise<{ tabId: string; id: TerminalId }> {
-    const tabId = await this.call<string>('panel', 'addTool', 'terminal', opts);
-    const tab = (await this.tabs()).find((t) => t.id === tabId)!;
-    return { tabId, id: tab.terminalId! };
+  async addTerminal(): Promise<{ tabId: string; id: TerminalId }> {
+    const tabs = await this.tabs();
+    const before = new Set(tabs.map((tab) => tab.id));
+    await openSurface(this.page, 'Terminal');
+    if (tabs.some((tab) => tab.toolId === 'terminal')) {
+      await surface(this.page, 'terminal').getByRole('button', { name: 'New terminal tab', exact: true }).click();
+    }
+    const tab = (await this.tabs()).find((tab) => !before.has(tab.id))!;
+    return { tabId: tab.id, id: tab.terminalId! };
   }
 
   snap(id: TerminalId): Promise<Snap> {
@@ -198,9 +204,13 @@ class Harness {
     );
   }
 
-  // C8a (the stand-in fold): a tab of the product strip is its row (`data-tab-id`), whose `tab` role is its select button.
-  tab = (tabId: string) => this.page.locator(`[data-tab-id="${tabId}"]`);
-  bar = (name: string) => this.page.getByRole('status', { name });
+  // Instance tabs belong to the Terminal surface, never the shell's main tab row.
+  tab = (tabId: string) => surface(this.page, 'terminal').locator(`[data-tab-id="${tabId}"]`);
+  async selectTerminalTab(tabId: string): Promise<void> {
+    await openSurface(this.page, 'Terminal');
+    await this.tab(tabId).getByRole('tab').click();
+  }
+  bar = (name: string) => surface(this.page, 'terminal').getByRole('status', { name });
 }
 
 const harnessOf = async (maws: { page: Page; app: ElectronApplication }) => {
@@ -259,14 +269,18 @@ test('opens a login shell in the session directory with the terminal environment
   const h = await harnessOf(maws);
   const { page } = maws;
   const A = (await h.sessions()).A;
-  // "+", Terminal, and the time from the click to the first visible line of the new terminal.
-  const openFromMenu = async (): Promise<{ id: TerminalId; ms: number }> => {
+  // The first shell opens from the surface row; another uses Terminal's own new-tab button. Both measure from
+  // the opening action to the first visible line, under the same cold and warm prompt bounds.
+  const openFromChrome = async (): Promise<{ id: TerminalId; ms: number }> => {
     const before = new Set((await h.tabs()).map((t) => t.id));
-    await page.getByRole('button', { name: 'Add a tool' }).click();
+    const terminal = surface(page, 'terminal');
+    const shown = await terminal.isVisible();
     const clicked = Date.now();
-    await page.getByRole('menuitem', { name: 'Terminal' }).click();
+    if (shown) await terminal.getByRole('button', { name: 'New terminal tab', exact: true }).click();
+    else await openSurface(page, 'Terminal');
     const tab = (await h.tabs()).find((t) => !before.has(t.id))!;
     expect(tab).toMatchObject({ toolId: 'terminal', selected: true, home: A });
+    await expect(h.tab(tab.id).getByRole('tab')).toHaveAttribute('aria-selected', 'true');
     await untilLine(h, tab.terminalId!, null);
     return { id: tab.terminalId!, ms: Date.now() - clicked };
   };
@@ -274,11 +288,11 @@ test('opens a login shell in the session directory with the terminal environment
   // Acceptance item 2: the first terminal after launch, opened as soon as the host reads ready, also waits for what is
   // left of the host's one-time login-shell environment capture; it is held to three seconds and its number logged.
   await hostReady(h);
-  const cold = await openFromMenu();
+  const cold = await openFromChrome();
   within('coldPromptMs', cold.ms, 3_000, 'the first terminal after launch shows a prompt within three seconds');
   await h.prompt(cold.id);
   // A terminal opened in the running app: two seconds from the click.
-  const warm = await openFromMenu();
+  const warm = await openFromChrome();
   within('promptMs', warm.ms, 2_000, 'a prompt appears within two seconds');
   const id = warm.id;
   await h.prompt(id);
@@ -308,7 +322,7 @@ test('opens a login shell in the session directory with the terminal environment
   expect(maws.consoleErrors()).toEqual([]);
 });
 
-test('keeps its buffer and process across tab switches', async ({ maws }) => {
+test('keeps its buffer and process while the Terminal surface is hidden', async ({ maws }) => {
   const h = await harnessOf(maws);
   const { tabId, id } = await h.addTerminal();
   await h.prompt(id);
@@ -320,12 +334,12 @@ test('keeps its buffer and process across tab switches', async ({ maws }) => {
     await expect.poll(lastNumber, { timeout: 5_000 }).toBeGreaterThan(50);
     const before = await lastNumber();
 
-    await h.page.getByRole('button', { name: 'Session overview' }).click(); // the summary: every tool unmounted
-    await expect(h.page.locator(`[data-terminal-id="${id}"]`), 'the unselected tool is unmounted').toHaveCount(0);
+    await showSessionCards(h.page); // showing the floating cards hides every tool surface
+    await expect(h.page.locator(`[data-terminal-id="${id}"]`), 'the hidden surface is unmounted').toHaveCount(0);
     expect(await h.info(id)).toMatchObject({ visible: false, status: 'running' });
     await sleep(5_000);
 
-    await h.tab(tabId).getByRole('tab').click();
+    await h.selectTerminalTab(tabId);
     await expect(h.page.locator(`[data-terminal-id="${id}"]`)).toHaveCount(1);
     const lines = await h.lines(id);
     expect(lines.some((line) => line.trim() === 'line 1') || lines.length >= SCROLLBACK, 'the buffer was not restarted').toBe(true);
@@ -347,10 +361,10 @@ test('pinned tab keeps its shell across sessions and warns about the worktree', 
   await h.prompt(id);
   const pid = (await h.info(id))!.pid!;
 
-  await h.tab(tabId).getByRole('button', { name: 'Pin Terminal' }).click();
+  await pinSurfaceForSessions(page, 'Terminal');
   await page.getByRole('group', { name: 'session' }).getByRole('button', { name: 'Session B' }).click();
-  // Each session keeps its own selection (C5's panel lists): B has none yet, so the pin is selected there by a click.
-  await h.tab(tabId).getByRole('tab').click();
+  // Each session keeps its own surface stack: open the pinned terminal in B before checking its worktree warning.
+  await h.selectTerminalTab(tabId);
   await expect(h.tab(tabId).getByRole('tab')).toHaveAttribute('aria-selected', 'true');
   expect(await h.info(id)).toMatchObject({ pid, status: 'running', visible: true });
   const warning = h.bar('worktree warning');
@@ -478,7 +492,7 @@ test('re-adopts a live pty after reload exactly', async ({ maws }) => {
   const h = await harnessOf(maws);
   await guarded(h, async () => {
     const { t1, t2 } = await reloadScene(h);
-    await h.call('panel', 'selectTab', t1.tabId);
+    await h.selectTerminalTab(t1.tabId);
     await h.idle(t1.id);
     const before1 = await h.snap(t1.id);
     const before2 = await h.snap(t2.id);
@@ -489,14 +503,14 @@ test('re-adopts a live pty after reload exactly', async ({ maws }) => {
     expect(a2).toMatchObject({ reconnect: 'exact', status: 'running', label: t2.tabId });
     expect((await h.tabs()).map((tab) => tab.id).sort(), 'one tab per re-adopted shell, under its label').toEqual([t1.tabId, t2.tabId].sort());
 
-    await h.call('panel', 'selectTab', t1.tabId);
+    await h.selectTerminalTab(t1.tabId);
     const after1 = await h.snap(a1!.id);
     expect(after1.count, 'the same lines, and no new prompt drawn').toBe(before1.count);
     expect(after1.first).toBe(before1.first);
     expect(after1.modes).toEqual(before1.modes);
     expect(after1.modes.bracketedPaste).toBe(true);
 
-    await h.call('panel', 'selectTab', t2.tabId);
+    await h.selectTerminalTab(t2.tabId);
     const frame = await h.snap(a2!.id);
     expect(frame.modes).toEqual(before2.modes);
     expect(frame.modes.alternateScreen).toBe(true);
@@ -516,17 +530,17 @@ test('reconnects lossily with a notice when no checkpoint reaches the ring', asy
     const { t1, t2 } = await reloadScene(h);
     const pids = [(await h.info(t1.id))!.pid!, (await h.info(t2.id))!.pid!];
     await h.call('terminals', 'setCheckpoints', false);
-    await h.call('panel', 'selectTab', t1.tabId);
+    await h.selectTerminalTab(t1.tabId);
     await h.run(t1.id, 'yes | head -c 5000000');
     await h.idle(t1.id, 1_000);
 
     const [l1, l2] = await reloadAndFind(h, pids);
     expect(l1!.reconnect).toBe('lossy');
-    await h.call('panel', 'selectTab', t1.tabId);
+    await h.selectTerminalTab(t1.tabId);
     await expect(h.bar('reconnect notice')).toHaveText('Reconnected; earlier output was not kept');
     expect((await h.snap(l1!.id)).first, 'the buffer starts on a whole line').toBe('y');
 
-    await h.call('panel', 'selectTab', t2.tabId);
+    await h.selectTerminalTab(t2.tabId);
     test.info().annotations.push({ type: 'topReconnect', description: String(l2!.reconnect) });
     const frame = JSON.stringify((await h.snap(l2!.id)).screen);
     const shownAt = Date.now();
@@ -542,7 +556,17 @@ test('floods without loss while the page stays responsive', async ({ maws }) => 
   const within = latencyBudgets();
   const h = await harnessOf(maws);
   const { tabId, id } = await h.addTerminal();
+  // UX2 docks an empty surface stack, so load's pre-creation maximize cannot calibrate this workload. Expand only
+  // after Terminal exists, and again after the cards hide it. The partial FOX line plus the longest marker needs 62 cols.
+  const calibrateWidth = async () => {
+    const terminal = surface(h.page, 'terminal');
+    const maximize = terminal.getByRole('button', { name: 'Maximize right panel', exact: true });
+    if (await maximize.count()) await maximize.click();
+    await expect(terminal.getByRole('button', { name: 'Restore right panel', exact: true })).toBeVisible();
+    await expect.poll(async () => (await h.snap(id)).cols, { message: 'the full W1 marker fits its final output row' }).toBeGreaterThanOrEqual(62);
+  };
   await h.prompt(id);
+  await calibrateWidth();
   // A prompt without a clock or a duration, so `true` and the workload differ only by the workload's output.
   await h.run(id, 'exec /bin/bash --norc --noprofile');
   await sleep(800);
@@ -564,17 +588,18 @@ test('floods without loss while the page stays responsive', async ({ maws }) => 
     test.info().annotations.push({ type: 'pausedSeenVisible', description: String(await pausedSeen()) });
     await h.idle(id, 500);
 
-    // W1 again with its tab hidden from its first byte: the summary is shown (C9's Review placeholder, folded into C8a's host) before the command is written to
-    // the pty (through `pty.write`, which needs no focus), and a hidden terminal acknowledges at most 256 KiB per
+    // W1 again with its surface hidden from its first byte: the session cards are shown before the command is written
+    // to the pty (through `pty.write`, which needs no focus), and a hidden terminal acknowledges at most 256 KiB per
     // 250 ms, so the host must pause the pty at the high watermark and hold it paused between ticks. Waited for while
     // hidden (the output reaches the watermark in about a second on a quiet machine, later under load).
     await h.call('terminals', 'resetPausedSeen', id); // this phase proves its own pause, not the visible run's
     expect(await pausedSeen()).toBe(false);
-    await h.call('panel', 'selectTab', 'review');
+    await showSessionCards(h.page);
     await expect.poll(async () => (await h.info(id))!.visible, { message: 'the terminal is hidden' }).toBe(false);
     await h.run(id, `${FOX}; echo W1-HIDDEN-$((6*7))`);
     await expect.poll(pausedSeen, { timeout: 30_000, message: "W1's fox line pauses the pty at the high watermark" }).toBe(true);
-    await h.call('panel', 'selectTab', tabId);
+    await h.selectTerminalTab(tabId);
+    await calibrateWidth();
     await ends('W1-HIDDEN-42');
     await h.idle(id, 500);
 
@@ -841,8 +866,8 @@ test('falls back to the DOM renderer on context loss and returns to WebGL on nex
     await h.run(id, 'echo AFTER-LOSS-$((6*7))');
     await h.expectLine(id, 'AFTER-LOSS-42');
 
-    await h.call('panel', 'selectTab', 'review');
-    await h.call('panel', 'selectTab', tabId);
+    await showSessionCards(h.page);
+    await h.selectTerminalTab(tabId);
     await expect.poll(async () => (await h.info(id))!.acceleration, { timeout: 3_000 }).toBe('webgl');
   });
 });

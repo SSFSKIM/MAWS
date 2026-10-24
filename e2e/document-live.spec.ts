@@ -20,6 +20,7 @@
 // MAWS_LIVE_DOCUMENT_MODEL (haiku when unset). Run on purpose only:
 //   MAWS_LIVE_DOCUMENT=1 pnpm e2e:document-live
 // Evidence: test-results/document-live/live-run.txt (plain text; the scratch root is kept for inspection).
+import { openArtifactInPanel } from './support/shell';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
@@ -456,9 +457,6 @@ test('the live run: the agent creates, reads and edits a document in one batch w
     await (await sidebarRow(page, { appSessionId: id })).click();
     await page.mouse.move(700, 20);
     await expect(pane.locator(`[data-composer="${id}"]`)).toBeVisible();
-    // the panel's Artifacts tool, in this session's panel: the editor beside the session (its composer's card stays in view)
-    await panel.getByRole('button', { name: 'Add a tool' }).click();
-    await page.getByRole('menuitem', { name: 'Artifacts' }).click();
 
     const spec = { ...launchDefaults(id as AppSessionId, sc.repo), model: MODEL, permissionMode: 'default' as const, subagentModel: 'haiku', maxBudgetUsd: CAP_USD };
     expect(value(await invoke(page, 'session.launch', { spec }))).toMatchObject({ status: 'launching' });
@@ -484,9 +482,7 @@ test('the live run: the agent creates, reads and edits a document in one batch w
     expect(warm.at(-1)!.result?.isError).toBeUndefined();
 
     // the document in the panel's Artifacts tool (its record view): a second replica of the host doc
-    await panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /^Artifacts/ }).click();
-    await panel.getByRole('button', { name: 'All', exact: true }).click();
-    await panel.locator(`[data-artifact-row][data-artifact-id="${artifactId}"]`).click({ timeout: 15_000 });
+    await openArtifactInPanel(page, artifactId);
     const record = panel.locator(`[data-artifact-record="${artifactId}"]`);
     const editor = record.locator('.ds-doc .ProseMirror');
     await expect(editor).toBeVisible({ timeout: 15_000 });

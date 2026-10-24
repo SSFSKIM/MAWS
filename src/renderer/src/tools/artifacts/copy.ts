@@ -31,6 +31,8 @@ export const TRANSFER_COPY = {
   // the refusals
   notArtifact: 'Only an artifact moves to the panel',
   noPanel: 'No session’s panel to show it in',
+  noProjectSession: 'Open a session in this project to show it beside the chat',
+  loading: 'Loading…',
   noRecord: 'The panel shows no artifact',
   closing: 'The panel tab is closing',
 } as const;

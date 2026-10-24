@@ -14,6 +14,7 @@
 // The data is bound as `artifact_dataset` binds it (an uploaded asset and its descriptor in the doc's `datasets` root),
 // written here through the human's upload and the host's MAWS_E2E test writer, since this milestone's proof is the
 // editor's; the agent's tool is M2's (unit-proved) and M6's (product). Evidence shots go to test-results/dashboard-proof/.
+import { openArtifactReplicaInPanel } from './support/shell';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -22,7 +23,7 @@ import { GDP_CSV, PENGUINS_CSV } from '../src/artifacts/dashboard/fixtures/datas
 import { DatasetError, parseDataset } from '../src/artifacts/dashboard/parse';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
-import { bindCsv, commentSelectedChart, durable, openInMain, openInPanel, pinArtifactsTool, railOf, refusalOf, reply, revisionOf, selectChart, startApp, watchSelection, type DashboardApp } from './support/dashboards'; // M6
+import { bindCsv, commentSelectedChart, durable, openInMain, openInPanel, selectPanelSession, railOf, refusalOf, reply, revisionOf, selectChart, startApp, toggleDatasets, watchSelection, type DashboardApp } from './support/dashboards'; // M6
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 async function ok<T>(page: Page, name: string, input?: unknown): Promise<T> {
@@ -228,9 +229,6 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
   const page = await start();
   const panel = page.locator('[data-region="panel"]');
   await (await sidebarRow(page, 'Harness A')).click();
-  await panel.getByRole('button', { name: 'Add a tool' }).click();
-  await page.getByRole('menuitem', { name: 'Artifacts' }).click();
-  await panel.getByRole('button', { name: 'Pin Artifacts' }).click();
 
   const title = '성장률 대시보드';
   const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'dashboard', title });
@@ -276,9 +274,7 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
 
   let record: Locator | null = null;
   await test.step('the panel, a second replica, draws the same views; a narrow column scrolls a figure rather than shrinking it', async () => {
-    await panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /^Artifacts/ }).click();
-    await panel.getByRole('button', { name: 'All', exact: true }).click();
-    await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click({ timeout: 15_000 });
+    await openArtifactReplicaInPanel(page, id);
     const shown = panel.locator(`[data-artifact-record="${id}"]`);
     record = shown;
     await expect(figures(shown)).toHaveCount(VIEWS.length, { timeout: 15_000 });
@@ -304,12 +300,17 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
     await page.mouse.move(last.x, last.y);
     await expect(scatter.locator('.dash-tip')).toHaveText(last.tip);
     const counts = figures(main).nth(3);
-    await counts.scrollIntoViewIfNeeded();
-    const hatched = await counts.locator('svg').evaluate((svg) => {
-      const hatch = Array.from(svg.querySelectorAll('path[pointer-events="none"]')).find((p) => p.previousElementSibling?.hasAttribute('data-tip'))!;
+    const hatch = counts.locator('svg path[data-tip] + path[pointer-events="none"]').first();
+    // The figure keeps its 480px legibility floor: a narrow main column must scroll to the same hatched bar.
+    await hatch.scrollIntoViewIfNeeded();
+    const hatched = await hatch.evaluate((hatch) => {
       const box = hatch.getBoundingClientRect();
-      return { x: box.left + box.width / 2, y: box.top + box.height / 2, tip: hatch.previousElementSibling!.getAttribute('data-tip')! };
+      const x = box.left + box.width / 2;
+      const y = box.top + box.height / 2;
+      const hit = hatch.ownerDocument.elementFromPoint(x, y)?.closest('[data-tip]');
+      return { x, y, tip: hatch.previousElementSibling!.getAttribute('data-tip')!, hitTip: hit?.getAttribute('data-tip') ?? null };
     });
+    expect(hatched.hitTip, 'the visible hatching lets the real pointer reach its bar underneath').toBe(hatched.tip);
     await page.mouse.move(hatched.x, hatched.y);
     await expect(counts.locator('.dash-tip')).toHaveText(hatched.tip);
     await counts.screenshot({ path: `${PROOF}/hatched-hover.png` });
@@ -343,11 +344,21 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
 
   await test.step('a long name\'s tip wraps and stays whole at a scrolled right-edge point near the frame\'s bottom', async () => {
     const sites = figures(main).nth(6);
-    const hovered = await hoverLastPoint(page, sites, 'long-tip-hover');
-    expect(hovered.tip).toBe(`2 · ${SITE(8)} · level: 1`);
-    expect(hovered.scrollLeft, 'the frame is scrolled to the point').toBeGreaterThan(0);
-    expect(hovered.lines, 'the tip wraps').toBeGreaterThanOrEqual(2);
-    expect(hovered.roomBelow, 'too little room below the point: the tip must turn above it').toBeLessThan(hovered.tipHeight + 12);
+    const divider = panel.getByRole('separator', { name: 'Resize right panel', exact: true });
+    const defaultWidth = await divider.getAttribute('aria-valuenow');
+    // This case deliberately needs a narrow main column, independent of the resting surface's content-sized default.
+    await divider.press('End');
+    try {
+      await expect.poll(() => sites.locator('.dash-figure').evaluate((frame) => frame.scrollWidth - frame.clientWidth), { message: 'the real divider leaves the figure horizontally scrollable' }).toBeGreaterThan(0);
+      const hovered = await hoverLastPoint(page, sites, 'long-tip-hover');
+      expect(hovered.tip).toBe(`2 · ${SITE(8)} · level: 1`);
+      expect(hovered.scrollLeft, 'the frame is scrolled to the point').toBeGreaterThan(0);
+      expect(hovered.lines, 'the tip wraps').toBeGreaterThanOrEqual(2);
+      expect(hovered.roomBelow, 'too little room below the point: the tip must turn above it').toBeLessThan(hovered.tipHeight + 12);
+    } finally {
+      await divider.press('Enter'); // the scene started at the surface's default width; return to it for the sheet steps
+      await expect(divider).toHaveAttribute('aria-valuenow', defaultWidth!);
+    }
   });
 
   await test.step('the keyboard opens the source sheet from a label, on the view\'s own rows, and closes it, the focus returning', async () => {
@@ -396,11 +407,8 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
     await page.keyboard.press('Escape');
   });
 
-  await test.step('the header\'s Datasets (after B\'s actions, in More actions) opens the sheet on every dataset of the shown document', async () => {
-    const datasets = async () => {
-      await mainHeader.getByRole('button', { name: 'More actions' }).click();
-      await page.getByRole('menuitemcheckbox', { name: 'Datasets' }).click();
-    };
+  await test.step('the header\'s Datasets opens the sheet on every dataset of the shown document', async () => {
+    const datasets = () => toggleDatasets(mainHeader);
     await datasets();
     const picker = page.getByRole('dialog').getByRole('combobox', { name: 'Dataset' });
     await expect(picker.locator('option')).toHaveText(['세계은행 GDP 성장률 (gdp)', 'Palmer penguins (penguins)', '마라도 관측소 (합성) (sites)']);
@@ -541,7 +549,7 @@ test('beside the agent’s views the owner comments on the chart and writes; B�
   test.setTimeout(240_000);
   agentApp = await startApp(PROOF);
   const { page, agent, launch } = agentApp;
-  await pinArtifactsTool(page);
+  await selectPanelSession(page);
   const { artifactId: id, revision } = await agent.ok<Created>('A', 'artifact_create', { kind: 'dashboard', title: 'Owner and agent', content: BOARD_MARKDOWN });
   await agent.ok<Bound>('A', 'artifact_dataset', { artifact: id, baseRevision: revision, id: 'sales', title: 'Sales', path: await agent.write('A', 'sales.csv', AGENT_CSV) });
   const record = await openInPanel(page, id);

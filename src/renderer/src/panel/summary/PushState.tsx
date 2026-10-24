@@ -23,7 +23,7 @@ import { actionClass, Row, Section } from './Section';
 
 const SCM_TOOL_ID = 'source-control'; // E6's tool id (the tool's module stays out of the summary's graph)
 
-export function PushState({ directory, appSessionId }: { directory: string; appSessionId: AppSessionId }) {
+export function PushState({ directory, appSessionId, embedded = false }: { directory: string; appSessionId: AppSessionId; embedded?: boolean }) {
   const status = useGit((s) => s.entries.get(directory)?.status ?? null);
   const toolRegistered = usePanelHost((s) => s.tools.has(SCM_TOOL_ID));
   if (!status || status.branch === null) return null;
@@ -33,8 +33,8 @@ export function PushState({ directory, appSessionId }: { directory: string; appS
     push.kind === 'not_pushed'
       ? SUMMARY_COPY.notPushed
       : `${push.ahead > 0 ? SUMMARY_COPY.ahead(push.ahead, push.upstream) : SUMMARY_COPY.upToDate(push.upstream)}${push.behind > 0 ? SUMMARY_COPY.behind(push.behind) : ''}`;
-  return (
-    <Section id="push">
+  const body = (
+    <>
       <Row
         action={
           url && (
@@ -59,8 +59,9 @@ export function PushState({ directory, appSessionId }: { directory: string; appS
         )}
       </Row>
       <PrRow appSessionId={appSessionId} directory={directory} branch={status.branch} />
-    </Section>
+    </>
   );
+  return embedded ? body : <Section id="push">{body}</Section>;
 }
 
 function PrRow({ appSessionId, directory, branch }: { appSessionId: AppSessionId; directory: string; branch: string }) {

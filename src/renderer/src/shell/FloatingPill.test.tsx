@@ -20,7 +20,7 @@ import { resetComposerStore, useComposerStore } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
-import { mainShowing } from '../test-support/panel';
+import { mainShowing, ref } from '../test-support/panel';
 import { resetShellStores } from '../test-support/shell-stores';
 import { FloatingCardLayer, SplitCardLayer } from './FloatingCard';
 import { useFloatingCard } from './floating';
@@ -50,7 +50,14 @@ beforeEach(() => {
     'session.interrupt': { stillQueued: [], cancelled: [] },
   });
   window.maws = fake.client;
-  useLayout.setState({ main: mainShowing(A) });
+  // A selected surface, not the now-floating summary cards, gives the panel float something to stand over.
+  // Keep the pinned terminal selected for both sessions so switching A/B tests the same live card boundary.
+  const terminal = ref('terminal:shared00', true);
+  useLayout.setState({
+    main: mainShowing(A),
+    panelPinned: [terminal],
+    panelBySession: new Map([A, B].map((id) => [id, { tabs: [], activeTabId: terminal.id }])),
+  });
   useSessions.setState({ records: new Map([[A, record(A)], [B, record(B)]]), engine: new Map([[A, status(A)], [B, status(B)]]) });
   useFloatingCard.setState({ closed: true, pillTakesFocus: false, column: null, columnDrag: null, pillHost: null });
   registerSlot('composer', Composer);

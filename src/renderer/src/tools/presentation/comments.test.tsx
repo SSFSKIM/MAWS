@@ -119,7 +119,7 @@ describe('a deck’s compose card keeps its draft', () => {
     const session = hold.state.snapshot().session!;
     const comment = async () => {
       act(() => session.select(['body']));
-      const button = await waitFor(() => within(screen.getByRole('toolbar', { name: 'Deck' })).getByRole('button', { name: 'Comment' }));
+      const button = await waitFor(() => within(screen.getByRole('toolbar', { name: 'Deck' })).getByRole('button', { name: 'Add comment' }));
       act(() => button.click());
       await act(async () => {});
     };

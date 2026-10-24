@@ -9,6 +9,7 @@
 // themes (shots under MAWS_E4A_SHOTS=1).
 // Runs under `pnpm e2e:browser` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); each launch passes
 // MAWS_HARNESS=0, so the window is the product app.
+import { closeSurface, openSurface, surfaceRow, usagePill } from './support/shell';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -166,14 +167,13 @@ test('show_pane opens one tab for two windows’ worth of one request; links and
       await expectOnPane(s, a, paneIn(panel), 'panel');
       await expect(paneIn(main).locator('[data-browser-page="elsewhere"]')).toBeVisible();
     }
-    // another panel tab selected: the Browser tool's pane unmounts and the main tab takes the view back
-    await s.panel.getByRole('button', { name: 'Add a tool' }).click();
-    await s.page.getByRole('menuitem', { name: 'Artifacts' }).click();
+    // Closing the optional Browser surface unmounts its pane; the main tab takes the view back.
+    await closeSurface(s.page, 'Browser');
     await expectOnPane(s, a, paneIn(main), 'main');
     expect((await viewOf(s, a))?.owner?.surface).toBe('main');
 
     // the opener closed: its window.open child lives on as its own tab (outlivesOpener)
-    await s.panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /Browser/ }).click();
+    await openSurface(s.page, 'Browser');
     await expect(panel).toBeVisible();
     await chipOf(panel, a).getByRole('button', { name: /^Close / }).click();
     await expect.poll(async () => (await tabsOf(s, id)).tabs.map((tab) => tab.tabId)).toEqual([b, c, expect.any(String)]);
@@ -368,12 +368,26 @@ test('the cover: the palette hides the view within 200 ms behind its picture and
     await expect(placeholder).toHaveCount(0);
     await expectOnPane(s, t, pane, 'panel');
 
-    // the panel's "+" menu drops over the Browser tool's pane: covers
-    await s.panel.getByRole('button', { name: 'Add a tool' }).click();
-    await expect(s.page.getByRole('menuitem', { name: 'Artifacts' })).toBeVisible();
-    await covered(true, 'the + menu');
+    // The shell toolbar ends before the right surface: its More surfaces menu is beside the page, not over it.
+    await surfaceRow(s.page).getByRole('button', { name: 'More surfaces' }).click();
+    await expect(s.page.getByRole('menuitem', { name: 'Session info', exact: true })).toBeVisible();
+    await s.page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    const [surfacesMenuBox, pageBox] = [(await s.page.getByRole('menu').boundingBox())!, (await pane.boundingBox())!];
+    expect(surfacesMenuBox.x + surfacesMenuBox.width, 'the shell menu stays left of the Browser page').toBeLessThanOrEqual(pageBox.x);
+    await covered(false, 'the disjoint More surfaces menu');
+    await expectOnPane(s, t, pane, 'panel');
     await s.page.keyboard.press('Escape');
-    await covered(false, 'the + menu closed');
+    await expect(s.page.getByRole('menu')).toHaveCount(0);
+
+    // Browser's own options menu does overlap its page: the native view must yield to that menu.
+    await panel.getByRole('button', { name: 'Browser options', exact: true }).click();
+    await expect(s.page.getByRole('menuitem', { name: 'Open in tab', exact: true })).toBeVisible();
+    await covered(true, 'the Browser options menu');
+    const optionsBox = (await s.page.getByRole('menu').boundingBox())!;
+    expect(Math.min(optionsBox.x + optionsBox.width, pageBox.x + pageBox.width) - Math.max(optionsBox.x, pageBox.x), 'the Browser menu overlaps the page horizontally').toBeGreaterThan(0);
+    expect(Math.min(optionsBox.y + optionsBox.height, pageBox.y + pageBox.height) - Math.max(optionsBox.y, pageBox.y), 'the Browser menu overlaps the page vertically').toBeGreaterThan(0);
+    await s.page.keyboard.press('Escape');
+    await covered(false, 'the Browser options menu closed');
 
     // a composer chip's popover opens over the composer, away from the pane: no cover
     await s.pane.getByRole('button', { name: /^Model / }).click();
@@ -384,9 +398,14 @@ test('the cover: the palette hides the view within 200 ms behind its picture and
     await s.page.keyboard.press('Escape');
     await expect(s.page.getByRole('dialog', { name: 'Model and effort' })).toHaveCount(0);
 
-    // a popover opened over the pane (the top bar's usage popover drops along the window's right edge): covers
-    await s.page.locator('[data-usage-pill]').click();
-    await covered(true, 'the usage popover');
+    // UX2-L moved Usage to the left sidebar footer, away from the right Browser pane: no cover.
+    await usagePill(s.page).click();
+    const usage = s.page.getByRole('dialog', { name: 'Claude Usage' });
+    await expect(usage).toBeVisible();
+    await s.page.waitForTimeout(300); // past the popper's two-frame measure, as for the composer popover above
+    const [usageBox, browserBox] = [(await usage.boundingBox())!, (await pane.boundingBox())!];
+    expect(usageBox.x + usageBox.width).toBeLessThanOrEqual(browserBox.x);
+    await covered(false, 'the sidebar Usage popover');
     await s.page.keyboard.press('Escape');
     await covered(false, 'the usage popover closed');
 
@@ -460,12 +479,14 @@ test('placement: the panel resized by the keyboard and by a 40-step drag, and th
     await expectOnPane(s, t, pane, 'panel');
     const resizer = s.page.getByRole('separator', { name: 'Resize right panel' });
     const width = async () => Number(await resizer.getAttribute('aria-valuenow'));
-    // room for the panel to grow by 160 px past the main column's 480 px floor
+    // UX2-L lets the surface grow to the available room minus the main column's 360 px floor.
     await resizeWindow(s, pane, 200, 0);
-    await expect(resizer).toHaveAttribute('aria-valuemax', '640');
+    const available = await s.page.evaluate(() => window.innerWidth) - (await s.page.locator('[data-region="sidebar"]').boundingBox())!.width;
+    await expect(resizer).toHaveAttribute('aria-valuemax', String(available - 360));
     await expectOnPane(s, t, pane, 'panel');
 
-    // the keyboard: five big steps of 32 px, 160 px wider
+    // Start at the minimum so the new content-sized default cannot clamp the original 160 px keyboard motion.
+    await resizer.press('Home');
     const before = await width();
     await resizer.focus();
     for (let k = 0; k < 5; k++) await s.page.keyboard.press('Shift+ArrowLeft');
@@ -702,8 +723,7 @@ test('a relaunch restores the tabs suspended: both chips muted, the selected one
       await show(second, id);
       const panel = browserIn(second, 'panel');
       // the panel comes back as it was (the Browser tool), or the tool is added afresh
-      await expect(panel.or(second.panel.getByRole('button', { name: 'Add a tool' })).first()).toBeVisible();
-      if (!(await panel.isVisible())) await openBrowser(second);
+      await openBrowser(second);
       await expect(chipsIn(panel)).toHaveCount(2);
       for (const tabId of [a, b]) await expect(chipOf(panel, tabId)).toHaveAttribute('data-suspended', 'true');
       await expect(chipOf(panel, a).getByRole('tab')).toHaveText('Page A');
@@ -869,6 +889,15 @@ test('cua #103: human control in a 380 px panel keeps the icon, Hand back and ev
     const [id] = s.ids as [AppSessionId];
     await show(s, id);
     const panel = await openBrowser(s);
+    // Keep this regression at its original 379 px chrome width despite UX2-L's wider content-sized default.
+    const resizer = s.page.getByRole('separator', { name: 'Resize right panel' });
+    const chromeBox = (await panel.locator('[data-browser-chrome]').boundingBox())!;
+    const handle = (await resizer.boundingBox())!;
+    await s.page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+    await s.page.mouse.down();
+    await s.page.mouse.move(handle.x + handle.width / 2 + chromeBox.width - 379, handle.y + handle.height / 2);
+    await s.page.mouse.up();
+    await expect.poll(async () => Math.round((await panel.locator('[data-browser-chrome]').boundingBox())!.width)).toBe(379);
     const url = s.server.url('/a.html');
     await address(panel, url);
     const tab = await tabAt(s, id, url);

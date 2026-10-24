@@ -9,6 +9,7 @@ import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
+import { openSurface } from './support/shell';
 
 async function invoke<N extends CommandName>(page: Page, name: N, input: CommandInput<N>) {
   const result = await page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name as string, input as unknown] as const) as CommandResult<N>;
@@ -45,9 +46,7 @@ for (const ready of [true, false]) {
       await expect.poll(async () => (await invoke(page, 'session.list', {})).sessions.some((r) => r.engineSessionId === sid), { timeout: 20_000 }).toBe(true);
       const record = (await invoke(page, 'session.list', {})).sessions.find((r) => r.engineSessionId === sid)!;
       await (await sidebarRow(page, { appSessionId: record.appId })).click();
-      const panel = page.locator('[data-region="panel"]');
-      await panel.getByRole('button', { name: 'Add a tool' }).click();
-      await page.getByRole('menuitem', { name: 'Terminal', exact: true }).click();
+      await openSurface(page, 'Terminal');
       await expect.poll(async () => (await invoke(page, 'pty.list', undefined)).ptys.filter((p) => p.alive), { timeout: 15_000 }).toHaveLength(1);
       const pane = (await invoke(page, 'pty.list', undefined)).ptys.find((p) => p.alive)!;
       await expect.poll(async () => (await invoke(page, 'pty.foreground', { ptyId: pane.ptyId })).busy).toBe(false);

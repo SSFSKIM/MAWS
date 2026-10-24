@@ -12,6 +12,7 @@ import { queryClient } from '../ipc/query';
 import { connectPanelHost, instanceIds, panelHost, pendingAdds, registerPanelTool, resetPanelHost } from '../panel/host';
 import { PanelHost } from '../panel/PanelHost';
 import type { PanelTool } from '../panel/tool';
+import { surfaceSession } from '../panel/surface-model';
 import { createLayoutStore, persistLayout, useLayout } from '../stores/layout';
 import { activeTab, currentSet, sessionOfTab } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
@@ -45,7 +46,11 @@ const removeA = () => {
 const settle = () => act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 
 const panel = () => document.querySelector<HTMLElement>('[data-region="panel"]')!;
-const stripIds = () => [...panel().querySelectorAll<HTMLElement>('[data-tab-id]')].map((el) => el.dataset.tabId);
+// Refs remain in the session inventory while their surface is closed; only same-tool tabs render a strip.
+const effectiveIds = () => {
+  const state = useLayout.getState();
+  return state.effectivePanelTabs(surfaceSession(state)).map((tab) => tab.id);
+};
 const selectedId = () => panel().querySelector('[role="tab"][aria-selected="true"]')?.closest<HTMLElement>('[data-tab-id]')?.dataset.tabId ?? null;
 const shownSession = () => sessionOfTab(activeTab(useLayout.getState().main)); // as C5's region derives it
 const sessionTabs = () => currentSet(useLayout.getState().main).panes.flatMap((p) => p.tabs.filter((t) => t.kind === 'session').map((t) => t.id));
@@ -73,23 +78,25 @@ afterEach(() => {
 });
 
 describe('shell renders the panel host in the region', () => {
-  it('shows the pin first and the session’s selected tab over the summary, and the pin glyph moves the ref as C5’s region does', async () => {
+  it('keeps pins first in the inventory, shows only the selected tool’s tabs, and the pin glyph moves its ref', async () => {
     const user = userEvent.setup();
-    register(probeTool('terminal').tool); // `files` stays unregistered: a placeholder tab
+    register(probeTool('terminal').tool, probeTool('files').tool);
     useLayout.setState({
       panelPinned: [ref('terminal:pin00000', true)],
       panelBySession: new Map([[A, { tabs: [ref('files:aaaaaaaa')], activeTabId: 'files:aaaaaaaa' }]]),
     });
     renderShell();
-    expect(stripIds()).toEqual(['terminal:pin00000', 'files:aaaaaaaa']);
+    expect(effectiveIds()).toEqual(['terminal:pin00000', 'files:aaaaaaaa']);
     expect(selectedId()).toBe('files:aaaaaaaa');
-    expect(within(panel()).getByText('files is not available')).toBeTruthy();
-    expect(within(panel()).queryByText(/^Tools stay with this session/)).toBeNull(); // the summary is behind the tab
+    expect(within(panel()).getByRole('tablist', { name: 'files tabs' })).toBeTruthy();
+    expect(within(panel()).queryByRole('tablist', { name: 'terminal tabs' })).toBeNull();
+    expect(screen.getByTestId('body:files:aaaaaaaa').textContent).toContain(`${A} · unpinned · visible`);
+    expect(screen.queryByRole('complementary', { name: 'Session cards' })).toBeNull();
 
     await user.click(within(panel()).getByRole('button', { name: 'Pin files' }));
     expect(pinIds()).toEqual(['terminal:pin00000', 'files:aaaaaaaa']);
     expect(panelOf(A)).toEqual({ tabs: [], activeTabId: 'files:aaaaaaaa' });
-    expect(stripIds()).toEqual(['terminal:pin00000', 'files:aaaaaaaa']);
+    expect(effectiveIds()).toEqual(['terminal:pin00000', 'files:aaaaaaaa']);
   });
 
   it('a restored tab whose tool registers after hydration gets its instance at the registration', () => {
@@ -117,7 +124,8 @@ describe('shell renders the panel host in the region', () => {
     expect(probe.beforeClose).toEqual([]);
     expect(instanceIds()).toEqual(['terminal:pin00000']);
     expect(shownSession()).toBeNull(); // the Overview: the pin alone in the strip
-    expect(stripIds()).toEqual(['terminal:pin00000']);
+    expect(effectiveIds()).toEqual(['terminal:pin00000']);
+    expect(panel().inert).toBe(true); // the pin survives, but no surface is selected on the Overview
   });
 
   it('addTool for a session with activate: false while the Overview is focused writes that session’s list and switches nothing', () => {
@@ -132,7 +140,7 @@ describe('shell renders the panel host in the region', () => {
     expect(pinIds()).toEqual(['terminal:pin00000']);
     expect(useLayout.getState().panelActiveNoSession).toBe('terminal:pin00000');
     expect(useLayout.getState().main).toBe(main);
-    expect(stripIds()).toEqual(['terminal:pin00000']);
+    expect(effectiveIds()).toEqual(['terminal:pin00000']);
     expect(selectedId()).toBe('terminal:pin00000');
     expect(probe.created.at(-1)).toMatchObject({ appSessionId: A, instanceId: id });
   });
@@ -145,9 +153,28 @@ describe('shell renders the panel host in the region', () => {
     act(() => void (id = panelHost.addTool('terminal', { appSessionId: A })));
     expect(shownSession()).toBe(A);
     expect(panelOf(A)).toEqual({ tabs: [ref(id)], activeTabId: id });
-    expect(stripIds()).toEqual(['terminal:pin00000', id]);
+    expect(effectiveIds()).toEqual(['terminal:pin00000', id]);
     expect(selectedId()).toBe(id);
     expect(screen.getByTestId(`body:${id}`).textContent).toBe(`terminal · ${A} · unpinned · visible · focus 1`);
+  });
+
+  it('keeps the session’s surface icons on a document tab and opens the tool for the remembered session, not a document-only scope', async () => {
+    const user = userEvent.setup();
+    const terminal = probeTool('terminal', { title: 'Terminal' });
+    register(terminal.tool);
+    useLayout.setState({ main: mainShowing(A, B) });
+    useLayout.getState().activateTab(`session:${A}`);
+    useLayout.getState().openTab({ kind: 'artifact', artifactId: 'document-a' });
+    renderShell();
+    const row = within(screen.getByRole('toolbar', { name: 'Session surfaces' }));
+    expect((row.getByRole('button', { name: 'Session cards' }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(row.getByRole('button', { name: 'Terminal' }));
+    const id = panelOf(A)!.activeTabId!;
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'artifact', artifactId: 'document-a' });
+    expect(terminal.probe.created).toEqual([expect.objectContaining({ appSessionId: A, instanceId: id })]);
+    expect(panelOf(B)).toBeUndefined();
+    expect(screen.getByTestId(`body:${id}`).textContent).toContain(`${A} · unpinned · visible`);
+    expect(within(panel()).getByRole('tablist', { name: 'terminal tabs' })).toBeTruthy();
   });
 
   describe('over a held hydration and a recorded layout.json', () => {
@@ -172,7 +199,7 @@ describe('shell renders the panel host in the region', () => {
       expect(shownSession()).toBe(B);
       expect(panelOf(A)!.tabs).toEqual([ref(own)]);
       expect(pinIds()).toEqual([pin]);
-      expect(stripIds()).toEqual([pin]); // B on screen: the pin alone
+      expect(effectiveIds()).toEqual([pin]); // B on screen: the pin alone
       expect(bridge.sets.filter((s) => s.key.startsWith('panel.'))).toEqual([]); // not yet: C5's 250 ms write-back
       stopPersistence(); // flushes what is pending
       expect(bridge.written(`panel.${A}`)).toEqual({ tabs: [ref(own)], activeTabId: null });
@@ -189,8 +216,10 @@ describe('shell renders the panel host in the region', () => {
       const { panelPinned, panelBySession } = relaunched.getState();
       useLayout.setState({ panelPinned, panelBySession, main: mainShowing(A), hydrated: true });
       renderShell();
-      expect(stripIds()).toEqual([pin, own]);
+      expect(effectiveIds()).toEqual([pin, own]);
       expect(instanceIds().sort()).toEqual([own, pin].sort());
+      expect(panel().inert).toBe(true); // activate:false restores refs without opening a surface
+      expect(within(panel()).queryByRole('tabpanel')).toBeNull();
     });
 
     it('a pending add for a session removed before the barrier lands nothing under either activation or as a pin; a sessionless pin lands', async () => {
@@ -217,7 +246,7 @@ describe('shell renders the panel host in the region', () => {
       expect(panelOf(A)).toBeUndefined();
       expect(bridge.written(`panel.${A}`)).toBeUndefined();
       expect(bridge.written('panel.pinned')).toEqual([ref(kept, true)]);
-      expect(stripIds()).toEqual([kept]);
+      expect(effectiveIds()).toEqual([kept]);
     });
 
     it('a restored pinned log that B selected is pruned from the strip and from panel.pinned once A is shown, and panel.B names a surviving ref', async () => {
@@ -234,7 +263,7 @@ describe('shell renders the panel host in the region', () => {
       renderShell();
       await hydrateHeld(bridge);
       expect(shownSession()).toBe(A);
-      expect(stripIds()).toEqual(['t:pin00000', 't:aaaaaaaa']);
+      expect(effectiveIds()).toEqual(['t:pin00000', 't:aaaaaaaa']);
       expect(instanceIds()).not.toContain('log:pinned00');
       stopPersistence();
       expect(bridge.written('panel.pinned')).toEqual([ref('t:pin00000', true)]);
@@ -268,8 +297,10 @@ describe('shell renders the panel host in the region', () => {
       expect((bridge.written(`panel.${B}`) as PanelSessionState).activeTabId).toBe(id);
       expect(useLayout.getState().panelActiveNoSession).toBe(id);
       expect(sessionTabs()).toEqual([]);
-      expect(stripIds()).toEqual([id, 't:pin00000']);
-      expect(selectedId()).toBe(id);
+      expect(effectiveIds()).toEqual([id, 't:pin00000']);
+      expect(within(panel()).getByRole('tabpanel', { name: 'session-info' })).toBeTruthy();
+      const singleton = within(panel()).getByRole('region', { name: 'session-info' });
+      expect(within(singleton).queryByRole('tablist')).toBeNull(); // other stacked tools may have their own strips
       expect(info.probe.created).toEqual([expect.objectContaining({ instanceId: id, params: 'p' })]);
     });
   });
@@ -294,7 +325,7 @@ describe('shell renders the panel host in the region', () => {
     await user.click(within(panel()).getByRole('button', { name: 'Close p' }));
     await settle();
     expect(p.probe.disposed).toEqual(['p:pin00000']);
-    expect(stripIds()).toEqual(['q:pin00001']);
+    expect(effectiveIds()).toEqual(['q:pin00001']);
     expect(selectedId()).toBe('q:pin00001');
     expect(panelOf(B)!.activeTabId).toBe('q:pin00001');
     stopPersistence();

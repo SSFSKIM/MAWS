@@ -294,7 +294,7 @@ test.describe('the document editor', () => {
     const { page } = maws;
     const QUOTE = 'river runs north';
     await page.evaluate(([id, text]) => (window as unknown as HarnessWindow).__maws_document.selectText('a', id, text), ['para0002', QUOTE] as const);
-    await toolbar(page, 'a').getByRole('button', { name: 'Comment', exact: true }).click();
+    await toolbar(page, 'a').getByRole('button', { name: 'Add comment', exact: true }).click();
 
     const card = replica(page, 'a').locator('[data-comment-card]');
     await expect(card).toBeVisible();
@@ -370,7 +370,7 @@ test.describe('the document editor', () => {
     const { page } = maws;
     const QUOTE = 'river runs north';
     await page.evaluate(([id, text]) => (window as unknown as HarnessWindow).__maws_document.selectText('a', id, text), ['para0002', QUOTE] as const);
-    await toolbar(page, 'a').getByRole('button', { name: 'Comment', exact: true }).click();
+    await toolbar(page, 'a').getByRole('button', { name: 'Add comment', exact: true }).click();
     // the thread is read from the host's doc, which has it once replica A's update arrived over its port
     const threads = () => page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.threads());
     await expect.poll(async () => (await threads()).length, { message: 'the new thread at the host' }).toBe(1);
@@ -420,7 +420,7 @@ test.describe('the document editor', () => {
     const keep = async (id: string, quote: string): Promise<string> => {
       const before = new Set((await threads()).map((t) => t.id));
       await page.evaluate(([blockId, text]) => (window as unknown as HarnessWindow).__maws_document.selectText('a', blockId, text), [id, quote] as const);
-      await toolbar(page, 'a').getByRole('button', { name: 'Comment', exact: true }).click();
+      await toolbar(page, 'a').getByRole('button', { name: 'Add comment', exact: true }).click();
       const card = replica(page, 'a').locator('[data-comment-card]');
       await expect(card).toBeVisible();
       await expect(margin.locator('[data-margin-entry][data-compose] [data-comment-card]'), 'the compose card hosted in the margin').toBeVisible();

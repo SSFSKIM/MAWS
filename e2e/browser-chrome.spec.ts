@@ -42,6 +42,7 @@
 // naming the extension, and lists no action.
 // Runs under `pnpm e2e:browser-chrome` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); each launch
 // passes MAWS_HARNESS=0, so the window is the product app.
+import { mainTabById, mainTabs as chromeTabs } from './support/shell';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -236,9 +237,7 @@ async function launchBarScene(scratch: Scratch, server: BrowserServer, chrome: C
 // The session shown and its Browser tool in the panel (the tool comes back after a relaunch, or is added afresh).
 async function browserPanel(s: ImportScene, id: AppSessionId): Promise<Locator> {
   await show(s, id);
-  const panel = browserIn(s, 'panel');
-  await expect(panel.or(s.panel.getByRole('button', { name: 'Add a tool' })).first()).toBeVisible();
-  return (await panel.isVisible()) ? panel : openBrowser(s);
+  return openBrowser(s);
 }
 
 const barIn = (view: Locator) => view.locator('[data-bookmarks-bar]');
@@ -685,6 +684,15 @@ test('the cover\'s still: the profile popover over the 380 px panel shows the pa
     const [id] = s.ids as [AppSessionId];
     try {
       const panel = await browserPanel(s, id);
+      // Keep the still/hole regression narrow; the new default surface width is content-sized.
+      const resizer = s.page.getByRole('separator', { name: 'Resize right panel' });
+      const before = await paneRect(paneIn(panel));
+      const handle = (await resizer.boundingBox())!;
+      await s.page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+      await s.page.mouse.down();
+      await s.page.mouse.move(handle.x + handle.width / 2 + before.width - 380, handle.y + handle.height / 2);
+      await s.page.mouse.up();
+      await expect.poll(async () => Math.round((await paneRect(paneIn(panel))).width)).toBeLessThanOrEqual(380);
       expect(Math.round((await paneRect(paneIn(panel))).width)).toBeLessThanOrEqual(380);
       await address(panel, server.url('/a.html'));
       const tabId = await tabAt(s, id, server.url('/a.html'));
@@ -742,6 +750,19 @@ test('9, 10, 12: the extensions action bar: the probe\'s icon right of the addre
   const popupUrl = `chrome-extension://${probeId}/popup.html`;
   const optionsUrl = `chrome-extension://${probeId}/options.html`;
   const OPTIONS_TITLE = 'MAWS probe extension · Options';
+  const narrowPanel = async (s: ImportScene, panel: Locator) => {
+    // ActionBar folds when inline icons would leave the address slot under 160px. UX2-L's content-wide default
+    // no longer exercises that case, so restore the original 379px chrome through the real panel separator.
+    const resizer = s.page.getByRole('separator', { name: 'Resize right panel' });
+    const chrome = panel.locator('[data-browser-chrome]');
+    const before = (await chrome.boundingBox())!;
+    const handle = (await resizer.boundingBox())!;
+    await s.page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+    await s.page.mouse.down();
+    await s.page.mouse.move(handle.x + handle.width / 2 + before.width - 379, handle.y + handle.height / 2);
+    await s.page.mouse.up();
+    await expect.poll(async () => Math.round((await chrome.boundingBox())!.width)).toBe(379);
+  };
   try {
     const s = await launchBarScene(scratch, server, chrome, { keychain });
     const [id] = s.ids as [AppSessionId];
@@ -761,6 +782,7 @@ test('9, 10, 12: the extensions action bar: the probe\'s icon right of the addre
       const panel = await browserPanel(s, id);
       await address(panel, server.url('/a.html'));
       pageTab = await tabAt(s, id, server.url('/a.html'));
+      await narrowPanel(s, panel);
       await expect(puzzleIn(panel)).toBeVisible();
       await expect(panel.locator('[data-extension-actions]')).toHaveCount(0);
       const folded = await menuAfter(s.maws.app, () => puzzleIn(panel).click());
@@ -846,14 +868,14 @@ test('9, 10, 12: the extensions action bar: the probe\'s icon right of the addre
       // leaving the options tab (the person's navigation, as a bookmark chip's): it closes, and the page opens as a new
       // ordinary tab that the options tab's main tab shows in place (one main tab where there was one), with no Back
       // into the options page
-      const mainTabs = () => s.page.locator('[data-region="main"] [role="tab"][data-tab-id^="browser:"]').evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-tab-id')));
+      const mainTabs = () => chromeTabs(s.page).locator('[role="tab"][data-tab-id^="browser:"]').evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-tab-id')));
       expect(await mainTabs()).toEqual([`browser:${id}:${pageTab}`, `browser:${id}:${optionsTab}`]);
       value(await invoke(s.page, 'browser.tabs.navigate', { tabId: optionsTab, to: { url: server.url('/b.html'), typed: false } }));
       await expect.poll(async () => (await tabsOf(s, id)).tabs.some((tab) => tab.tabId === optionsTab)).toBe(false);
       const left = (await tabsOf(s, id)).tabs.find((tab) => tab.tabId !== pageTab)!;
       expect(left).toMatchObject({ url: server.url('/b.html'), internal: null, partition: DEFAULT });
       await expect.poll(mainTabs).toEqual([`browser:${id}:${pageTab}`, `browser:${id}:${left.tabId}`]);
-      await expect(s.page.locator(`[data-region="main"] [role="tab"][data-tab-id="browser:${id}:${left.tabId}"]`)).toHaveAttribute('aria-selected', 'true');
+      await expect(mainTabById(s.page, `browser:${id}:${left.tabId}`)).toHaveAttribute('aria-selected', 'true');
       expect((await tabsOf(s, id)).selected).toBe(left.tabId);
       await expect(chipOf(main, left.tabId).locator('[aria-selected]')).toHaveAttribute('aria-selected', 'true');
       await expect.poll(async () => (await viewOf(s, left.tabId))?.visible).toBe(true);
@@ -880,6 +902,7 @@ test('9, 10, 12: the extensions action bar: the probe\'s icon right of the addre
       // (10, the actions) Remove imported profile: its open options tab closes with a notice naming the extension, and
       // the actions list is empty
       const panel = await browserPanel(again, id);
+      await narrowPanel(again, panel);
       await expect(puzzleIn(panel)).toBeVisible();
       value(await invoke(again.page, 'browser.extensions.action.options', { tabId: pageTab, extensionId: probeId }));
       await expect.poll(async () => (await tabsOf(again, id)).tabs.some((tab) => tab.url === optionsUrl)).toBe(true);

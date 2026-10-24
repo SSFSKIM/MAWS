@@ -27,6 +27,7 @@ import { cappedEngine, capWords } from './support/live-budget';
 import { auditOf, manifestOf, untilQuiet, type Manifest, type Tree } from '../test/support/plugins-audit';
 import { pluginsLiveSkipReason, pluginsScratch, trackPluginReads, type PluginReads, type PluginsScratch } from './support/plugins-live';
 import { newChatIn } from './support/sidebar';
+import { unfoldSessionCard } from './support/shell';
 
 const skip = pluginsLiveSkipReason();
 test.skip(skip !== null, skip ?? '');
@@ -186,7 +187,6 @@ async function loadedIds(w: Locator): Promise<string[]> {
 // engine's `--available` stops offering it and nothing installed it.
 const browseLine = (w: Locator, id: string) => w.locator(`[data-plugins-section="browse"] [data-browse-card="${id}"], [data-plugins-section="browse"] [data-plugin-result="${id}"]`);
 const sheetOf = (page: Page, action: string) => page.locator(`[data-plugins-sheet="${action}"]`);
-const panelPlugins = (page: Page) => page.locator('[data-region="panel"]').getByRole('region', { name: 'Plugins' });
 
 // A row's operation once it has ended: its status line neither `Working…` nor `Reloading running sessions…`, and no
 // Stop (shown while the CLI runs). Answers the line's words.
@@ -372,9 +372,9 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
       expect(s.plugins.map((p) => p.name)).toContain('e8-probe');
     });
 
-    await step('panel-reload', 'the panel’s Plugins section: Plugins · N loaded (the built-in ones and e8-probe), Reload plugins, Reload skills', async () => {
+    await step('panel-reload', 'the Connectors card: Plugins · N loaded (the built-in ones and e8-probe), Reload plugins, Reload skills', async () => {
       await closeWidgets(page);
-      const panel = panelPlugins(page);
+      const panel = await unfoldSessionCard(page, 'Connectors');
       await expect(panel).toContainText(`Plugins · ${builtin + 1} loaded`);
       const mods = panel.getByRole('button', { name: 'Reload plugins' });
       const line = mods.locator('xpath=following-sibling::*[@role="status"]');

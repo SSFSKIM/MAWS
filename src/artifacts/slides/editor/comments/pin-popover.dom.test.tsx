@@ -396,7 +396,7 @@ describe('the compose card and the keys (V12)', () => {
     const { pin, session, toolbar, surface: s, stage, doc } = await mount();
     fireEvent.click(pin('title')!);
     act(() => session.select(['title']));
-    fireEvent.click(within(toolbar).getByRole('button', { name: 'Comment' }));
+    fireEvent.click(within(toolbar).getByRole('button', { name: 'Add comment' }));
     expect(popover()).toBeNull();
     const id = s.opened.at(-1)!.threadId;
     expect(document.querySelector('[data-card-slot="hidden"]')).toBeNull();
@@ -413,7 +413,7 @@ describe('the compose card and the keys (V12)', () => {
   it('a pin whose only open thread is the compose card’s reveals and focuses the card', async () => {
     const { session, toolbar, surface: s, pin, container } = await mount();
     act(() => session.select(['body']));
-    fireEvent.click(within(toolbar).getByRole('button', { name: 'Comment' }));
+    fireEvent.click(within(toolbar).getByRole('button', { name: 'Add comment' }));
     const id = s.opened.at(-1)!.threadId;
     act(() => s.reach.current!.hosting!(id));
     // the body's two other threads resolved elsewhere: only the card's is open on it
@@ -447,7 +447,7 @@ describe('the compose card and the keys (V12)', () => {
     s.kept.current = 'tb1';
     act(() => session.select(['title']));
     const before = listThreads(doc).length;
-    fireEvent.click(within(toolbar).getByRole('button', { name: 'Comment' }));
+    fireEvent.click(within(toolbar).getByRole('button', { name: 'Add comment' }));
     expect(listThreads(doc)).toHaveLength(before);
     expect(s.focusDraft).toHaveBeenCalledTimes(1);
   });
@@ -455,7 +455,7 @@ describe('the compose card and the keys (V12)', () => {
   it('the card stands at its thread’s pin, read from the element as drawn, so it is there with the element’s move and with the pins hidden', async () => {
     const { session, toolbar, surface: s, pin, doc, stage } = await mount();
     act(() => session.select(['body']));
-    fireEvent.click(within(toolbar).getByRole('button', { name: 'Comment' }));
+    fireEvent.click(within(toolbar).getByRole('button', { name: 'Add comment' }));
     const id = s.opened.at(-1)!.threadId;
     await settle();
     // the body's pin is drawn at (352, 180, 20 × 20): the card's locate answers the same rect

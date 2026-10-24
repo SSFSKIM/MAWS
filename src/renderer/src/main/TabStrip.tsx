@@ -15,6 +15,8 @@ import { useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
 import { TRANSFER_COPY } from '../tools/artifacts/copy'; // P4-B3
 import { Tab, TAB_DRAG_TYPE } from './Tab';
+import { useKeyChord } from '../keymap/useKeyChord';
+import { focusPaneElement } from './pane-dom';
 
 export { TAB_DRAG_TYPE };
 
@@ -46,6 +48,14 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
   const state = useLayout((s) => currentSet(s.main).panes[pane]);
   const focused = useLayout((s) => currentSet(s.main).focusedPane === pane);
   const strip = useRef<HTMLDivElement>(null);
+  // A strip portaled into the window chrome is outside its pane's native DOM. Own Ctrl+Tab here as well as in the pane.
+  const cycle = (delta: 1 | -1) => {
+    useLayout.getState().focusPane(pane);
+    useLayout.getState().cycleTab(delta);
+    requestAnimationFrame(() => focusPaneElement(pane));
+  };
+  useKeyChord('tab.next', () => cycle(1), { within: strip });
+  useKeyChord('tab.previous', () => cycle(-1), { within: strip });
   // The insertion line's x while a drag hovers, and the outcome's label for a panel record (P4-B3, Z7).
   const [marker, setMarker] = useState<{ left: number; label: string | null; labelLeft: number } | null>(null);
   const activeTabId = state?.activeTabId;
@@ -128,7 +138,7 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
   const stop = tabs.some((t) => t.id === state.activeTabId) ? state.activeTabId : tabs[0]?.id;
 
   return (
-    <div className="relative flex h-10 shrink-0 items-stretch border-b border-border">
+    <div className="relative flex h-full min-w-0 shrink-0 items-stretch [-webkit-app-region:no-drag]">
       <div
         ref={strip}
         role="tablist"

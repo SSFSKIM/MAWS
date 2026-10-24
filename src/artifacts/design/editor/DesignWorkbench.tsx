@@ -486,10 +486,11 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
               onNotice={setNotice}
               inspectorOpen={inspectorOpen}
               onToggleInspector={() => setInspectorOpen((open) => !open)}
-            />
+            >
+              <TextStyleMenu session={session} slideId={active?.id ?? null} tokens={tokens} readOnly={!editable} onNotice={setNotice} />
+            </ElementBar>
           )}
         </WithZoom>
-        <TextStyleMenu session={session} slideId={active?.id ?? null} tokens={tokens} readOnly={!editable} onNotice={setNotice} />
         <DesignCommentButtons api={commentsApi} view={view} railOpen={state.rail === 'comments'} onToggleRail={() => session.toggleRail('comments')} />
         <span role="status" className="deck-notice" data-deck-notice>
           {notice}

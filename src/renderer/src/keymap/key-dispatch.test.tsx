@@ -241,11 +241,12 @@ describe('composer chords', () => {
 // P4-B2 (D14): the deck and design editors' F6 steps aside for a key the owner's keymap binds, whichever sink
 describe('keymapBinds', () => {
   const press = (init: KeyboardEventInit) => new KeyboardEvent('keydown', init);
-  it('answers the effective keymap: an override of either sink, the menu’s numbered tab items; F6 unbound by default', () => {
-    expect(keymapBinds(press({ key: 'F6' }), {})).toBe(false);
-    expect(keymapBinds(press({ key: 'F6' }), { 'palette.open': 'F6' })).toBe(true); // a menu accelerator
-    expect(keymapBinds(press({ key: 'F6', shiftKey: true }), { 'tab.next': 'Shift+F6' })).toBe(true); // a renderer chord
-    expect(keymapBinds(press({ key: 'F6', shiftKey: true }), { 'palette.open': 'F6' })).toBe(false);
+  it('answers the effective keymap: region F6, an override of either sink and the menu’s numbered tab items', () => {
+    expect(keymapBinds(press({ key: 'F6' }), {})).toBe(true); // editors yield to shell region navigation
+    expect(keymapBinds(press({ key: 'F6' }), { 'region.focusNext': null })).toBe(false);
+    expect(keymapBinds(press({ key: 'F7' }), { 'palette.open': 'F7' })).toBe(true); // a menu accelerator
+    expect(keymapBinds(press({ key: 'F7', shiftKey: true }), { 'tab.next': 'Shift+F7' })).toBe(true); // a renderer chord
+    expect(keymapBinds(press({ key: 'F7', shiftKey: true }), { 'palette.open': 'F7' })).toBe(false);
     expect(keymapBinds(press({ key: '7', code: 'Digit7', metaKey: true }), {})).toBe(true); // Select Tab 7
     expect(keymapBinds(press({ key: 'n', code: 'KeyN', metaKey: true }), { 'session.new': null })).toBe(false); // unbound
   });

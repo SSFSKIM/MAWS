@@ -12,8 +12,9 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { PanelTabRef } from '@shared/ipc/schema/layout';
 import { runAction } from '../keymap/actions-runtime';
 import { useLayout } from '../stores/layout';
-import { activeTab, sessionOfTab } from '../stores/layout-model';
-import { COLLAPSE_THRESHOLD_PX, PANEL_BOUNDS, regionWidths, useWindowWidth } from '../app/regions';
+import { surfaceSession } from './surface-model';
+import { useShellGeometry } from '../app/shell-view';
+import { COLLAPSE_THRESHOLD_PX, PANEL_BOUNDS } from '../app/regions';
 import { Resizer } from '../app/Resizer';
 import { useSlot } from '../app/slots';
 import { FloatingCardLayer } from '../shell/FloatingCard'; // P3-G
@@ -21,15 +22,15 @@ import { floatPanel } from '../shell/floating'; // P3-G
 import { DropOverlay } from '../shell/DropOverlay'; // P4-B3 M4
 import { moveArtifactToPanel, TAB_DRAG_TYPE, useCoverState } from '../shell/transfer'; // P4-B3 M4
 import { TRANSFER_COPY } from '../tools/artifacts/copy'; // P4-B3 M4
-import { PanelHeader } from './PanelHeader'; // P3-G
 
 export const PANEL_REGION_ID = 'region-panel';
 
 export function PanelRegion() {
-  const { collapsed, maximized, floating } = useLayout((s) => s.regions.panel);
-  const windowWidth = useWindowWidth();
-  const width = useLayout((s) => regionWidths(s.regions, windowWidth).panel);
-  const max = useLayout((s) => regionWidths(s.regions, windowWidth).panelMax);
+  const { maximized, floating } = useLayout((s) => s.regions.panel);
+  const geometry = useShellGeometry();
+  const collapsed = geometry.panel === 0;
+  const width = geometry.panel;
+  const max = geometry.panelMax;
   const persisted = useLayout((s) => s.regions.panel.width);
   const setPanel = useLayout((s) => s.setPanel);
   const body = useRef<HTMLDivElement>(null); // P3-G: the floating card's layer starts at the host's tool body
@@ -42,9 +43,10 @@ export function PanelRegion() {
       data-region="panel"
       aria-label="Panel"
       inert={collapsed}
-      className={`relative col-start-3 row-start-2 flex min-h-0 min-w-0 bg-bg-raised ${collapsed ? '' : 'border-l border-border'}`}
+      className={`col-start-3 ${geometry.mainHidden ? 'row-start-3' : 'row-span-3 row-start-1'} flex min-h-0 min-w-0 ${geometry.sheet ? 'absolute inset-y-0 top-(--toolbar-h) right-0 z-30 shadow-float' : 'relative'} ${collapsed ? 'overflow-hidden' : 'py-1.5 pr-1.5 pl-1'}`}
+      style={geometry.sheet ? { width } : undefined}
     >
-      {!collapsed && !maximized && !floating && (
+      {!collapsed && !maximized && !floating && !geometry.sheet && (
         <Resizer
           label="Resize right panel"
           controls={PANEL_REGION_ID}
@@ -64,7 +66,6 @@ export function PanelRegion() {
       )}
       {/* The contents clip here, not on the region, so the resizer can straddle the region's edge. */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <PanelHeader tabs={shown.tabs} activeTabId={shown.activeTabId} />
         <div ref={body} className="min-h-0 flex-1 overflow-auto">
           <Host maximized={maximized || floating} shown={shown} />
         </div>
@@ -90,8 +91,7 @@ interface ShownPanel {
 
 // The session the focused pane shows and that session's effective panel tabs (the global pins first) with its selection.
 function useShownPanel(): ShownPanel {
-  const tab = useLayout((s) => activeTab(s.main));
-  const appSessionId: AppSessionId | null = sessionOfTab(tab);
+  const appSessionId = useLayout(surfaceSession);
   const pinned = useLayout((s) => s.panelPinned);
   const own = useLayout((s) => (appSessionId ? s.panelBySession.get(appSessionId) : undefined));
   const activeNoSession = useLayout((s) => s.panelActiveNoSession);

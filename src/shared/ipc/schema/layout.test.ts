@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { commands, events, LAYOUT_DEFAULTS, type LayoutMainV1, LayoutKeySchema, LayoutMainSchema, PanelActiveNoSessionSchema, PanelParamsSchema, LayoutRegionsSchema, PanelPinnedSchema, PanelSessionStateSchema, StoredMainSchema, StoredRegionsSchema, TabRefSchema, tabId, UNPINNABLE_KINDS, UsageBannersSchema, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema
+import { commands, events, LAYOUT_DEFAULTS, type LayoutMainV1, LayoutKeySchema, LayoutMainSchema, PanelActiveNoSessionSchema, PanelParamsSchema, PanelSurfacesSchema, LayoutRegionsSchema, PanelPinnedSchema, PanelSessionStateSchema, StoredMainSchema, StoredRegionsSchema, TabRefSchema, tabId, UNPINNABLE_KINDS, UsageBannersSchema, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema
 
 describe('layout value shapes', () => {
   it('validates its own defaults', () => {
     expect(LayoutRegionsSchema.parse(LAYOUT_DEFAULTS.regions)).toEqual(LAYOUT_DEFAULTS.regions);
     expect(LayoutMainSchema.parse(LAYOUT_DEFAULTS.main)).toEqual(LAYOUT_DEFAULTS.main);
     expect(PanelPinnedSchema.parse(LAYOUT_DEFAULTS.panelPinned)).toEqual([]);
-    expect(LAYOUT_DEFAULTS.regions.sidebar.width).toBe(300);
+    expect(LAYOUT_DEFAULTS.regions.sidebar.width).toBe(240);
     expect(LAYOUT_DEFAULTS.regions.panel.width).toBe(380);
     // W5: the Overview floats over the main area rather than being a tab, so a fresh layout opens on one empty pane and
     // the panel in its default place.
@@ -77,6 +77,16 @@ describe('layout value shapes', () => {
     for (const activeTabId of ['artifacts:abcdefgh', null]) expect(PanelActiveNoSessionSchema.parse({ version: 1, activeTabId })).toEqual({ version: 1, activeTabId });
     expect(PanelActiveNoSessionSchema.safeParse({ version: 1 }).success).toBe(false);
     expect(PanelActiveNoSessionSchema.safeParse({ version: 1, activeTabId: 3 }).success).toBe(false);
+  });
+
+  it('admits the additive surface key and bounded versioned stacks without requiring their refs to be present', () => {
+    const value = { version: 1, stacks: { 'app-a': ['files:1', 'terminal:1'], '@none': [] }, pinnedTools: ['files'], contexts: { 'project-a': 'app-a', none: 'app-b' } };
+    expect(LayoutKeySchema.parse('panelTools.surfaces')).toBe('panelTools.surfaces');
+    expect(PanelSurfacesSchema.parse(value)).toEqual(value);
+    expect(PanelSurfacesSchema.safeParse({ ...value, version: 2 }).success).toBe(false);
+    expect(PanelSurfacesSchema.safeParse({ ...value, stacks: { 'app-a': ['a', 'b', 'c'] } }).success).toBe(false);
+    expect(PanelSurfacesSchema.safeParse({ ...value, contexts: { none: null } }).success).toBe(false);
+    expect(PanelSurfacesSchema.safeParse({ ...value, extra: true }).success).toBe(false);
   });
 
   it('derives deterministic tab ids', () => {

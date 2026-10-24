@@ -1,6 +1,6 @@
 // R2: a plugin's panes as `plugin-pane` panel tabs (panes.ts, PaneTool.tsx): the roster read when a session attaches and
 // followed through `plugin.panes`, tabs opened and closed with it, the pane's drawing or Desktop's placeholder, the
-// engine told which pane shows and when the person closes one, and the panel's "+" listing them under "Plugin panes".
+// engine told which pane shows and when the person closes one, and the surface overflow listing the available panes.
 // The pane's tree is the one 2.1.287 answered in pass3/mods-surface-render-sites.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -12,6 +12,7 @@ import { status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { loadJournal } from '../../../../test/support/fixtures';
 import { panelHost, usePanelHost } from '../panel/host';
+import { SurfaceRow } from '../panel/SurfaceRow';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { registerFocusTarget } from '../stores/composer';
@@ -93,20 +94,19 @@ describe('plugin panes as panel tabs (R2)', () => {
     await waitFor(() => expect(fake.invoked('session.ui.paneShow')).toEqual([{ appSessionId: A, id: 'two' }]));
   });
 
-  it('"+" lists the session’s panes under "Plugin panes"; choosing a pane whose tab was closed opens it again', async () => {
+  it('More surfaces lists the session’s plugin panes; choosing a pane whose tab was closed opens it again', async () => {
     const user = userEvent.setup();
     connect({ 'session.ui.panes': roster([pane('one', 'One'), pane('two', 'Two')], 'one'), 'session.ui.render': PANE_ANSWER });
-    render(<TestHost />);
+    render(<><SurfaceRow /><TestHost /></>);
     attach();
     await waitFor(() => expect(paneTabs()).toHaveLength(2));
     // the tab of `two` goes (as a restored tab would, or one closed while the plugin kept the pane)
     const two = paneTabs()[1]!.id;
     act(() => useLayout.getState().updatePanelTabs(A, (refs) => refs.filter((r) => r.id !== two)));
-    await user.click(screen.getByRole('button', { name: 'Add a tool' }));
-    const group = await screen.findByRole('group', { name: 'Plugin panes' });
-    expect(within(group).getByText('Plugin panes')).toBeTruthy();
-    expect(within(group).getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Onemods-probe', 'Twomods-probe']);
-    await user.click(within(group).getByRole('menuitem', { name: /Two/ }));
+    await user.click(screen.getByRole('button', { name: 'More surfaces' }));
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Onemods-probe', 'Twomods-probe']);
+    await user.click(within(menu).getByRole('menuitem', { name: /Two/ }));
     await waitFor(() => expect(tabs()).toEqual([['Plugin pane · One', false], ['Plugin pane · Two', true]]));
     await waitFor(() => expect(fake.invoked('session.ui.paneShow')).toEqual([{ appSessionId: A, id: 'two' }]));
   });

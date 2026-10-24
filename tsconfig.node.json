@@ -89,6 +89,7 @@
   // the slide canvas and the deck editor, likewise (M9: `canvas/css.ts` stays in, since the exporters in main write it).
   "exclude": [
     "src/main/artifacts/*.dom.test.tsx",
+    "src/artifacts/ui/**/*", // portable React/DOM helpers are typechecked by tsconfig.web.json
     "src/artifacts/document/editor/**/*",
     "src/artifacts/document/import/html*",
     "src/artifacts/document/import/docx*",

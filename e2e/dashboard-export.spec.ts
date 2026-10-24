@@ -22,7 +22,7 @@ import { join, resolve } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import JSZip from 'jszip';
 import { asDocumentReplay } from './support/document-replay';
-import { bindCsv, chart, commentSelectedChart, durable, figures, insertBlocks, ok, openInMain, openInPanel, paragraph, pinArtifactsTool, railOf, reply, selectChart, SESSION_A, startApp, watchSelection, type DashboardApp } from './support/dashboards';
+import { bindCsv, chart, commentSelectedChart, durable, figures, insertBlocks, ok, openInMain, openInPanel, paragraph, selectPanelSession, railOf, reply, selectChart, SESSION_A, startApp, watchSelection, type DashboardApp } from './support/dashboards';
 import { allowNext, idle, mcpCalls, mcpResultOf, PASS3, recordedCwd, replay, resultText, scene, show } from './support/maws-tools';
 
 const PROOF = 'test-results/dashboard-proof';
@@ -207,7 +207,7 @@ test('the four exports draw the editor’s figure and native table with snapshot
   await test.step('P3-F (8.2, F7): during a version’s preview the menu saves that version’s data and time, while two are compared nothing, and the live data once history is left', async () => {
     await durable(main);
     await ok(page, 'artifacts.saveVersion', { artifactId: id, label: 'New data' });
-    await header.getByRole('button', { name: 'Version history' }).click();
+    await main.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Version history' }).click();
     const rail = main.getByRole('complementary', { name: 'Version history' });
     await rail.getByRole('button', { name: /^Version Old data/ }).click();
     const bar = main.getByRole('toolbar', { name: 'Version preview' });
@@ -227,7 +227,7 @@ test('the four exports draw the editor’s figure and native table with snapshot
     for (const item of await items.all()) await expect(item, 'two versions compared: nothing to export').toBeDisabled();
     await page.keyboard.press('Escape');
 
-    await header.getByRole('button', { name: 'Version history' }).click();
+    await bar.getByRole('button', { name: 'Back to document' }).click();
     await expect(bar).toBeHidden();
     rmSync(savedFile('Export board.md'));
     await pick('Markdown (.md)');
@@ -361,7 +361,7 @@ test('the owner’s comment on a chart, replied to in the rail, is a Word commen
   // WR73: export identity is explicit, never inferred from the OS login or a generic owner role.
   const authorName = 'Morgan Rivera';
   await ok(page, 'settings.set', { artifacts: { exportAuthorName: authorName } });
-  await pinArtifactsTool(page);
+  await selectPanelSession(page);
   const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'dashboard', title: 'Commented board' });
   const id = artifact.id;
   const record = await openInPanel(page, id);

@@ -1,4 +1,4 @@
-// The title-bar toolbar's usage pill and its popover end to end (W6, E1), which took over C11's Accounts tab and its spec (C11
+// The sidebar footer's usage pill and its popover end to end (W6, E1), which took over C11's Accounts tab and its spec (C11
 // execution document, Acceptance item 2, `accounts.spec.ts`; the same assertions, now against the popover): the built
 // app on C5's stub scenario (`nine-sessions.json`, manual clock, `Settings idle probe` re-pinned to engine id 73171552…)
 // with MAWS_CLAUDE_USAGE_DIR on this spec's own temporary copy of the committed ClaudeUsage fixture, every `recordedAt`
@@ -10,6 +10,7 @@
 // so the first two tests run without ClaudeUsage's control route, as before it existed; the third adds a token and a
 // stub of the route on a loopback port of this process (MAWS_CLAUDE_USAGE_CONTROL_URL). Under MAWS_E2E main reaches no
 // other port, so the owner's relay is never called.
+import { mainTab, openSurface, sidebarFooter, surface, usagePill } from './support/shell';
 import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -82,17 +83,15 @@ async function menu(app: ElectronApplication, id: string): Promise<void> {
     }, id);
   await expect.poll(click, { message: `menu item ${id} exists and is enabled` }).toBe(true);
 }
-const pillOf = (page: Page) => page.getByRole('banner').locator('[data-usage-pill]');
+const pillOf = usagePill;
 const popoverOf = (page: Page) => page.getByRole('dialog', { name: 'Claude Usage' });
 const card = (page: Page, email: string) => popoverOf(page).locator(`[data-account][aria-label="${email}"]`);
 const meter = (scope: Locator, name: string) => scope.getByRole('meter', { name, exact: true });
 // W2: the session's windows as Session info's Usage row reads them (the status line that showed them is gone).
 async function sessionWindows(page: Page, title: string): Promise<[string, string]> {
   await (await sidebarRow(page, title)).click();
-  const tools = page.locator('[data-region="panel"]');
-  await tools.getByRole('button', { name: 'Add a tool' }).click();
-  await page.getByRole('menuitem', { name: 'Session info' }).click();
-  const usage = tools.locator('[data-session-info]').getByRole('term').filter({ hasText: /^Usage$/ }).locator('xpath=following-sibling::dd[1]');
+  await openSurface(page, 'Session info');
+  const usage = surface(page, 'session-info').locator('[data-session-info]').getByRole('term').filter({ hasText: /^Usage$/ }).locator('xpath=following-sibling::dd[1]');
   await expect(usage).toHaveText(/^5h \d+% .* · Weekly \d+% /);
   const text = (await usage.textContent()) ?? '';
   return [/5h (\d+)%/.exec(text)![1]!, /Weekly (\d+)%/.exec(text)![1]!];
@@ -111,7 +110,8 @@ test('usage: the pill, and ClaudeUsage’s accounts in its geometry, the routing
 
     // The pill: 3@ routes, and its most binding limit is the Fable week at 82 %, a warning.
     const pill = pillOf(page);
-    await expect(pill).toHaveText('82');
+    await expect(pill).toHaveText('Fable 82%');
+    await expect(sidebarFooter(page).locator('[data-usage-pill]')).toBeVisible();
     await expect(page.getByRole('banner')).toHaveCSS('height', '44px');
     await expect(pill).toHaveCSS('-webkit-app-region', 'no-drag');
     await expect(pill).toHaveAttribute('data-severity', 'warning');
@@ -121,7 +121,7 @@ test('usage: the pill, and ClaudeUsage’s accounts in its geometry, the routing
     await menu(app, 'accounts.open');
     const popover = popoverOf(page);
     await expect(popover).toBeVisible();
-    await expect(page.locator('[data-region="main"]').getByRole('tab', { name: /Accounts/ })).toHaveCount(0);
+    await expect(mainTab(page, /Accounts/)).toHaveCount(0);
     await expect(popover.getByRole('heading', { name: 'Claude Usage' })).toBeVisible();
     await expect(popover.getByText(/^updated \dm ago$/)).toBeVisible(); // the compact age, in English (P4 Decision Log 4)
     await expect(popover.getByText('Usage includes all machines. Activity below is from this Mac.')).toBeVisible();
@@ -217,7 +217,7 @@ test('usage: without ClaudeUsage data the pill is a muted dash and the popover s
   const maws = await launchMaws({ env: ENV(join(scratch, 'absent')) });
   try {
     const pill = pillOf(maws.page);
-    await expect(pill).toHaveText('--');
+    await expect(pill).toHaveText('Usage —');
     await expect(pill).toHaveAttribute('data-severity', 'none');
     await expect(pill.locator('[data-dot]')).toHaveCSS('background-color', await tokenColor(maws.page, '--fg-muted'));
     await pill.click();

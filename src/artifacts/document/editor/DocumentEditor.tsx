@@ -345,7 +345,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
           </button>
         </div>
       )}
-      <div ref={body} className="doc-editor-body" data-rail-layout={railShown ? railLayout.mode : undefined} style={drawer ? ({ '--doc-drawer-top': `${railLayout.top}px` } as CSSProperties) : undefined} onKeyDown={onBodyKeyDown}>
+      <div ref={body} className="doc-editor-body" data-rail-layout={railShown ? railLayout.mode : undefined} style={railShown ? ({ '--doc-drawer-top': `${railLayout.top}px` } as CSSProperties) : undefined} onKeyDown={onBodyKeyDown}>
         {active && props.suggestions && (
           <div className="doc-tab-editor" style={{ display: preview ? 'none' : pendingSuggestions ? undefined : 'contents' }}>
             <Suggestions artifactId={props.artifactId} tabId={active.id} base={props.handle} hold={hold} typing={typing} host={props.suggestions} editorHost={props.host} onPending={setPendingSuggestions} pageScope={props.pageScope} renderChart={props.renderChart} onDisplayedDocument={setSuggestionDoc} /* P3-E */ />

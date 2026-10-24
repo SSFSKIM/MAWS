@@ -18,12 +18,14 @@ import { slashPaletteMovesNothing } from './support/palette-geometry';
 import { closeProject, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
 
 const SHELL_ENV = {
+  MAWS_HARNESS: '0',
   MAWS_SESSION_SOURCE: 'stub:test/fixtures/shell/nine-sessions.json',
   MAWS_SCENARIO_CLOCK: 'manual',
   MAWS_E2E_QUIT_ANSWER: 'quit',
 };
 
 // The scenario's sessions (test/fixtures/shell/nine-sessions.json).
+// UX2 l7-05: current-project session tabs omit the redundant project suffix; the title-bar chip names their set.
 const CHARTER = 'app-9a1d4262';
 const FIX = 'Fix sidebar drag';
 const SIP = 'Sidebar interaction pass';
@@ -88,34 +90,34 @@ test('tab sets per project: the strip switches with the project, ⌘1 counts in 
     await expect(main.locator('[data-strip-project]'), 'the strip names no project').toHaveCount(0);
     await (await sidebarRow(page, FIX)).click();
     await (await sidebarRow(page, SIP)).click({ modifiers: ['Meta'] });
-    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual([`${FIX} · MAWS`, `${SIP} · MAWS`]);
+    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual([FIX, SIP]);
 
     await clickProject('codex_somersault');
     await expect(label).toHaveText('codex_somersault');
     await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'another project, another (empty) set' }).toEqual([]);
     await (await sidebarRow(page, QUOTA)).click();
     await (await sidebarRow(page, 'Trace stream reconnects')).click(); // a click replaces the shown session
-    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual(['Trace stream reconnects · codex_somersault']);
+    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual(['Trace stream reconnects']);
     await menu(app, 'tab.reopen'); // the replaced one comes back
-    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual(['Trace stream reconnects · codex_somersault', `${QUOTA} · codex_somersault`]);
+    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual(['Trace stream reconnects', QUOTA]);
     await menu(app, 'tab.select:1');
-    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe('Trace stream reconnects · codex_somersault');
+    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe('Trace stream reconnects');
     await menu(app, 'tab.select:3'); // no third tab in this set
-    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe('Trace stream reconnects · codex_somersault');
+    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe('Trace stream reconnects');
 
     await clickProject('MAWS'); // expanded already: the click folds it and still shows its set
     await expect(projectRow(page, 'MAWS')).toHaveAttribute('aria-expanded', 'false');
     await expect(label).toHaveText('MAWS');
-    await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'MAWS’s set as it was left' }).toEqual([`${FIX} · MAWS`, `${SIP} · MAWS`]);
+    await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'MAWS’s set as it was left' }).toEqual([FIX, SIP]);
     await menu(app, 'tab.select:1');
-    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe(`${FIX} · MAWS`);
+    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe(FIX);
 
     // an open from elsewhere (the palette) of another project's session switches the strip to its set
     await openPalette(app, page);
     await page.keyboard.type('quota');
     await page.keyboard.press('Enter');
     await expect(label).toHaveText('codex_somersault');
-    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe(`${QUOTA} · codex_somersault`);
+    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe(QUOTA);
 
     // the chip's context menu reveals its project in the sidebar: its row expanded in place, and focused
     await closeProject(page, 'codex_somersault');
@@ -155,43 +157,43 @@ test('a session opens in place of Settings or Diagnostics; a pin keeps its tab; 
     await expect(page.locator('[data-region="sidebar"] [data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
     const strip = 'Open tabs';
     const labels = () => tabLabels(page, strip);
-    const tabNamed = (name: string) => page.getByRole('tablist', { name: strip }).getByRole('tab', { name });
+    const tabNamed = (name: string) => page.getByRole('tablist', { name: strip }).getByRole('tab', { name, exact: true });
     const CHARTER_ROW = 'Charter + research';
     await (await sidebarRow(page, NORTH)).click();
-    await expect.poll(labels).toEqual([`${NORTH} · MAWS`]);
+    await expect.poll(labels).toEqual([NORTH]);
 
     // Settings gives its place to the session clicked
     await menu(app, 'settings.open');
-    await expect.poll(labels).toEqual([`${NORTH} · MAWS`, 'Settings']);
+    await expect.poll(labels).toEqual([NORTH, 'Settings']);
     await (await sidebarRow(page, FIX)).click();
-    await expect.poll(labels, { message: 'Settings gave its place' }).toEqual([`${NORTH} · MAWS`, `${FIX} · MAWS`]);
+    await expect.poll(labels, { message: 'Settings gave its place' }).toEqual([NORTH, FIX]);
 
     // the session's right-click menu: Open in new tab keeps what is shown (Diagnostics here) and adds a tab
     await menu(app, 'diagnostics.open');
-    await expect.poll(labels).toEqual([`${NORTH} · MAWS`, `${FIX} · MAWS`, 'Diagnostics']);
+    await expect.poll(labels).toEqual([NORTH, FIX, 'Diagnostics']);
     await (await sidebarRow(page, SIP)).click({ button: 'right' });
     await page.getByRole('menuitem', { name: 'Open in new tab' }).click();
-    await expect.poll(labels, { message: 'Open in new tab added one' }).toEqual([`${NORTH} · MAWS`, `${FIX} · MAWS`, 'Diagnostics', `${SIP} · MAWS`]);
+    await expect.poll(labels, { message: 'Open in new tab added one' }).toEqual([NORTH, FIX, 'Diagnostics', SIP]);
 
     // a plain click on Diagnostics' place replaces it; ⌘⇧T brings it back
     await tabNamed('Diagnostics').click();
     await (await sidebarRow(page, CHARTER_ROW)).click();
-    await expect.poll(labels, { message: 'Diagnostics gave its place' }).toEqual([`${NORTH} · MAWS`, `${FIX} · MAWS`, `${CHARTER_ROW} · MAWS`, `${SIP} · MAWS`]);
+    await expect.poll(labels, { message: 'Diagnostics gave its place' }).toEqual([NORTH, FIX, CHARTER_ROW, SIP]);
     await menu(app, 'tab.reopen');
     await expect.poll(labels, { message: '⌘⇧T brings Diagnostics back' }).toContain('Diagnostics');
 
     // pinned: the pin shows, says what it does, and keeps its tab; the session opens after it
-    await tabNamed(`${CHARTER_ROW} · MAWS`).click({ button: 'middle' }); // a middle-click closes it
-    await expect.poll(labels).not.toContain(`${CHARTER_ROW} · MAWS`);
-    await tabNamed(`${FIX} · MAWS`).click();
-    await tabNamed(`${FIX} · MAWS`).click({ button: 'right' });
+    await tabNamed(CHARTER_ROW).click({ button: 'middle' }); // a middle-click closes it
+    await expect.poll(labels).not.toContain(CHARTER_ROW);
+    await tabNamed(FIX).click();
+    await tabNamed(FIX).click({ button: 'right' });
     await page.getByRole('menuitem', { name: 'Pin tab' }).click();
-    const pin = tabNamed(`${FIX} · MAWS`).getByRole('img', { name: 'Pinned' });
+    const pin = tabNamed(FIX).getByRole('img', { name: 'Pinned' });
     await expect(pin).toBeVisible();
     await expect(pin).toHaveAttribute('title', 'Pinned: stays open when you open another session');
     await (await sidebarRow(page, CHARTER_ROW)).click();
-    await expect.poll(labels, { message: 'the pinned tab stayed, the session opened after it' }).toEqual(expect.arrayContaining([`${FIX} · MAWS`, `${CHARTER_ROW} · MAWS`]));
-    await expect.poll(() => selectedTab(page, strip)).toBe(`${CHARTER_ROW} · MAWS`);
+    await expect.poll(labels, { message: 'the pinned tab stayed, the session opened after it' }).toEqual(expect.arrayContaining([FIX, CHARTER_ROW]));
+    await expect.poll(() => selectedTab(page, strip)).toBe(CHARTER_ROW);
     expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
   } finally {
     await maws.cleanup();
@@ -217,8 +219,29 @@ test('Float with no session in front: disabled with its reason, the action float
     };
     await expect(page.locator('[data-region="sidebar"] [data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
     await (await sidebarRow(page, NORTH)).click();
+    // UX2 owner ruling: surfaces are optional; Float's controls exist only over an explicitly opened surface.
+    await page.locator('[data-surface-row]').getByRole('button', { name: 'Files', exact: true }).click();
+    await expect(panel.locator('[data-surface="files"]')).toBeVisible();
+    // Keep the pre-UX2 regression coverage: opening Overview must restore main from an actual maximized surface.
+    const overviewButton = page.getByRole('banner').getByRole('button', { name: /^Overview/ });
+    const overview = main.getByRole('dialog', { name: 'Overview' });
+    await panel.getByRole('button', { name: 'Maximize right panel' }).click();
+    await expect(main).toHaveJSProperty('inert', true);
+    await expect(main).toHaveCSS('width', '0px');
+    await overviewButton.click();
+    await mainShown('the Overview toggle restores main from a maximized surface');
+    await expect(overview).toBeVisible();
+    await expect(overview).toBeFocused();
+    // Opening via the menu is not a toggle: restore and refocus an Overview hidden by maximize.
+    await panel.getByRole('button', { name: 'Maximize right panel' }).click();
+    await expect(main).toHaveJSProperty('inert', true);
+    await menu(app, 'tab.overview');
+    await mainShown('the Overview menu restores main from a maximized surface');
+    await expect(overview).toBeVisible();
+    await expect(overview).toBeFocused();
+    await overview.getByRole('button', { name: 'Close Overview' }).click();
     await menu(app, 'settings.open');
-    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual([`${NORTH} · MAWS`, 'Settings']);
+    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual([NORTH, 'Settings']);
 
     await expect(panel.getByRole('button', { name: NO_SESSION })).toBeDisabled();
     await menu(app, 'panel.float');
@@ -226,7 +249,7 @@ test('Float with no session in front: disabled with its reason, the action float
     await mainShown('the action floats nothing with Settings in front');
     await expect(card).toHaveCount(0);
 
-    await strip.getByRole('tab', { name: `${NORTH} · MAWS` }).click();
+    await strip.getByRole('tab', { name: NORTH, exact: true }).click();
     await panel.getByRole('button', { name: 'Float session over panel' }).click();
     await expect(card).toBeVisible();
     await expect(main).toHaveJSProperty('inert', true);
@@ -305,13 +328,13 @@ test('sidebar at scale: the flat tree, 36px project rows, 30px session rows, fiv
   }
 });
 
-// The owner's title-bar correction: both controls fit the existing 44px chrome; the tab strip has no extra row above it.
+// UX2 owner rulings: one chrome row (tabs inside it), with the usage pill and its unit in the sidebar footer.
 async function assertToolbarPlacement(page: Page): Promise<void> {
   const toolbar = page.getByRole('banner');
   const overview = toolbar.getByRole('button', { name: /^Overview/ });
   const sidebar = toolbar.getByRole('button', { name: 'Toggle sidebar' });
-  const usage = toolbar.locator('[data-usage-pill]');
-  const actions = toolbar.getByRole('button', { name: 'Session actions' });
+  const usage = page.locator('[data-region="sidebar"] footer [data-usage-pill]');
+  const surfaceRow = toolbar.locator('[data-surface-row]');
   const wordmark = page.locator('[data-sidebar-wordmark]');
   const newChat = page.locator('[data-region="sidebar"]').getByRole('button', { name: 'New chat', exact: true });
   const search = page.locator('[data-region="sidebar"]').getByRole('searchbox');
@@ -336,18 +359,25 @@ async function assertToolbarPlacement(page: Page): Promise<void> {
   await expect(overview).toHaveCSS('height', '28px');
   await expect(overview).toHaveCSS('-webkit-app-region', 'no-drag');
   await expect(usage).toHaveCSS('-webkit-app-region', 'no-drag');
-  const [bar, toggle, board, pill, menu, strip] = await Promise.all([
-    toolbar, sidebar, overview, usage, actions, page.locator('[data-pane-strip]').first(),
+  await expect(usage).toBeVisible();
+  await expect(usage).toContainText(/Usage|%/);
+  await expect(toolbar.locator('[data-usage-pill]')).toHaveCount(0);
+  const [bar, toggle, board, surface, strip] = await Promise.all([
+    toolbar, sidebar, overview, surfaceRow, toolbar.locator('[data-chrome-tabs] [data-pane-strip]').first(),
   ].map((el) => el.boundingBox()));
   expect(board!.x).toBe(toggle!.x + toggle!.width + 4);
-  expect(pill!.x + pill!.width).toBeLessThanOrEqual(menu!.x);
-  expect(strip!.y).toBe(bar!.y + bar!.height);
+  expect(strip!.y).toBeGreaterThanOrEqual(bar!.y);
+  expect(strip!.y + strip!.height).toBeLessThanOrEqual(bar!.y + bar!.height);
+  expect(strip!.x + strip!.width).toBeLessThanOrEqual(surface!.x);
+  await expect(page.locator('[data-region="main"] [data-pane-strip]')).toHaveCount(0);
 }
 
 interface Saved {
   regions: unknown;
   main: unknown;
   panelPinned: unknown;
+  surfaces: unknown;
+  keys: string[];
   bounds: { x: number; y: number; width: number; height: number };
   left: string[];
   right: string[];
@@ -365,24 +395,29 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
   const palette = page.getByRole('dialog', { name: 'Command palette' });
   const badge = () => app.evaluate(({ app }) => app.dock?.getBadge());
   // W12: one project's sessions, since each project has its own tab set
-  const three = [`${FIX} · MAWS`, `${SIP} · MAWS`, `${NORTH} · MAWS`];
+  const three = [FIX, SIP, NORTH];
 
-  for (const name of ['sidebar', 'main', 'panel']) await expect(page.locator(`[data-region="${name}"]`)).toBeVisible({ timeout: 10_000 });
+  // UX2 optional-surfaces ruling: an empty main has no full-height summary/panel column.
+  for (const name of ['sidebar', 'main']) await expect(page.locator(`[data-region="${name}"]`)).toBeVisible({ timeout: 10_000 });
   const tokens = await themeTokens(page); // once the stylesheet is in
   // The window's own bounds, so the relaunch has something specific to restore.
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setBounds({ x: 72, y: 48, width: 1360, height: 860 }));
 
   await test.step('Item 1: frame, light theme, sidebar', async () => {
-    for (const name of ['sidebar', 'main', 'panel']) await expect(page.locator(`[data-region="${name}"]`)).toBeVisible({ timeout: 10_000 });
+    // UX2 optional-surfaces ruling: an empty main has no full-height summary/panel column.
+    for (const name of ['sidebar', 'main']) await expect(page.locator(`[data-region="${name}"]`)).toBeVisible({ timeout: 10_000 });
     await expect(page.getByRole('banner').getByRole('button', { name: 'Toggle sidebar' })).toBeVisible();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
-    expect(await regionBackground(page)).toBe(tokens.light['--bg-raised']);
+    // UX2 approved mockup mock.css:84: the sidebar shares main's base tone. The approved sidebar is 240px;
+    // the optional-surfaces ruling leaves no summary column beside empty main.
+    expect(await regionBackground(page)).toBe(tokens.light['--bg']);
     const separators = page.locator('[role="separator"][aria-orientation="vertical"]');
-    await expect(separators).toHaveCount(2);
+    await expect(separators).toHaveCount(1);
     expect(await separators.evaluateAll((els) => els.map((el) => [el.getAttribute('aria-label'), el.getAttribute('aria-valuenow')]))).toEqual([
-      ['Resize sidebar', '300'],
-      ['Resize right panel', '380'],
+      ['Resize sidebar', '240'],
     ]);
+    await expect(page.locator('[data-region="panel"]')).toHaveJSProperty('inert', true);
+    await expect.poll(async () => (await page.locator('[data-region="panel"]').boundingBox())?.width ?? 0).toBe(0);
 
     // W11: the project list, most recently active first, with each collapsed project's waiting and working counts; no
     // Pinned section. M2 restores cross-project Needs you above it, independent of expansions.
@@ -454,17 +489,13 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     await assertToolbarPlacement(page);
     await page.screenshot({ path: testInfo.outputPath('toolbar-light.png') });
     await expect(overviewButton).toHaveAccessibleName('Overview, 3 waiting');
-    // The global toggle must restore main, not open an invisible dialog inside its zero-width/inert column.
-    const panel = page.locator('[data-region="panel"]');
-    await panel.getByRole('button', { name: 'Maximize right panel' }).click();
-    await expect(main).toHaveJSProperty('inert', true);
-    await expect(main).toHaveCSS('width', '0px');
+    // UX2 owner ruling: empty main has no surface to maximize. The real-surface maximize/Overview checks now live in
+    // the Float case above, which explicitly opens Files before driving those controls.
+    await expect(page.locator('[data-region="panel"]')).toHaveJSProperty('inert', true);
     await expect(overviewButton).toBeEnabled();
     await overviewButton.click();
     await expect(main).toHaveJSProperty('inert', false);
     await expect.poll(async () => (await main.boundingBox())!.width).toBeGreaterThan(0);
-    await expect(panel.getByRole('button', { name: 'Maximize right panel' })).toBeVisible();
-    await expect(page.getByRole('separator', { name: 'Resize right panel' })).toHaveAttribute('aria-valuenow', '380');
     await expect(overview).toBeVisible();
     await expect(overviewButton).toHaveAttribute('aria-pressed', 'true');
     await expect(overview, 'focus moves onto the panel, not a card (Esc on a card declines its request)').toBeFocused();
@@ -473,9 +504,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     await expect(overviewButton).toHaveAttribute('aria-pressed', 'false');
     await overviewButton.click();
 
-    // Menu/chord opening is not a toggle: an already-open Overview hidden by maximize is restored and refocused.
-    await panel.getByRole('button', { name: 'Maximize right panel' }).click();
-    await expect(main).toHaveJSProperty('inert', true);
+    // Opening an already-open Overview from its menu remains idempotent (the maximized-surface case is above).
     await menu(app, 'tab.overview');
     await expect(main).toHaveJSProperty('inert', false);
     await expect(overview).toBeVisible();
@@ -528,7 +557,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
   await test.step('Item 7: dark switches the whole shell', async () => {
     await menu(app, 'theme.dark');
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-    await expect.poll(() => regionBackground(page)).toBe(tokens.dark['--bg-raised']);
+    await expect.poll(() => regionBackground(page)).toBe(tokens.dark['--bg']);
     await assertToolbarPlacement(page);
     await page.screenshot({ path: testInfo.outputPath('toolbar-dark.png') });
     expect(await noLeftovers(page, tokens.light), 'no light colour in the dark theme (regions, rows, cards)').toEqual([]);
@@ -602,8 +631,8 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
 
   await test.step('Item 2: ⌘⇧J lands on the oldest Needs-you session', async () => {
     await menu(app, 'attention.next');
-    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual([`${FIX} · MAWS`]);
-    const fixTab = page.getByRole('tab', { name: `${FIX} · MAWS` });
+    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual([FIX]);
+    const fixTab = page.getByRole('tab', { name: FIX, exact: true });
     await expect(fixTab).toHaveAttribute('aria-selected', 'true');
     await expect(fixTab.getByRole('img', { name: 'Needs approval' })).toHaveText('◐');
     const panel = main.getByRole('tabpanel');
@@ -617,7 +646,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
 
     await menu(app, 'theme.light');
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
-    await expect.poll(() => regionBackground(page)).toBe(tokens.light['--bg-raised']);
+    await expect.poll(() => regionBackground(page)).toBe(tokens.light['--bg']);
   });
 
   await test.step('Item 5: tabs, the split, drags', async () => {
@@ -687,7 +716,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     const strip = page.getByRole('tablist', { name: 'Open tabs' });
     const stripBox = (await strip.boundingBox())!;
     await drag(page, await sidebarRow(page, 'Charter + research'), { x: stripBox.x + stripBox.width - 8, y: stripBox.y + stripBox.height / 2 });
-    await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'the dropped row opens a tab' }).toEqual([three[0], three[2], 'Charter + research · MAWS']);
+    await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'the dropped row opens a tab' }).toEqual([three[0], three[2], 'Charter + research']);
   });
 
   await test.step('Item 8: the ⌘K palette', async () => {
@@ -703,10 +732,10 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
       if (chord) expect(actionTexts[i], `${id} is listed with its chord`).toContain(formatChord(chord));
     }
     await menu(app, 'theme.dark');
-    await expect.poll(() => regionBackground(page)).toBe(tokens.dark['--bg-raised']);
+    await expect.poll(() => regionBackground(page)).toBe(tokens.dark['--bg']);
     expect(await noLeftovers(page, tokens.light), 'no light colour in the dark theme (palette)').toEqual([]);
     await menu(app, 'theme.light');
-    await expect.poll(() => regionBackground(page)).toBe(tokens.light['--bg-raised']);
+    await expect.poll(() => regionBackground(page)).toBe(tokens.light['--bg']);
     expect(await noLeftovers(page, tokens.dark), 'no dark colour after switching back to light').toEqual([]);
 
     await page.keyboard.type('north');
@@ -728,15 +757,13 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     await expect(palette.getByRole('group', { name: 'Sessions' }).getByRole('option')).toHaveCount(1);
     await page.keyboard.press('Meta+Enter');
     await expect.poll(() => tabLabels(page, 'Right pane tabs'), { message: '⌘⏎ opens it in the split' }).toEqual([three[2]]);
-    expect(await tabLabels(page, 'Left pane tabs')).toEqual([three[0], 'Charter + research · MAWS']);
+    expect(await tabLabels(page, 'Left pane tabs')).toEqual([three[0], 'Charter + research']);
   });
 
   await test.step('Item 6: sizes, the expanded project, the collapsed panel', async () => {
-    await dragBy(page, sidebar.getByRole('separator', { name: 'Resize sidebar' }), -60);
-    await expect(sidebar.getByRole('separator', { name: 'Resize sidebar' })).toHaveAttribute('aria-valuenow', '240');
-    const panelResizer = page.locator('[data-region="panel"]').getByRole('separator', { name: 'Resize right panel' });
-    await dragBy(page, panelResizer, 60);
-    await expect(panelResizer).toHaveAttribute('aria-valuenow', '320');
+    // UX2's approved sidebar default is 240px; resize from there to its 200px floor, not from the former 300px.
+    await dragBy(page, sidebar.getByRole('separator', { name: 'Resize sidebar' }), -40);
+    await expect(sidebar.getByRole('separator', { name: 'Resize sidebar' })).toHaveAttribute('aria-valuenow', '200');
     await showProjectList(page);
     const usageProjectId = await projectRow(page, USAGE_PROJECT).getAttribute('data-menu').then((menuId) => menuId!.slice('project:'.length));
     await closeProject(page, USAGE_PROJECT); // the 8 s entry left it expanded: the click below is the one that opens it
@@ -749,8 +776,16 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     await openPalette(app, page);
     await page.keyboard.type('charter');
     await page.keyboard.press('Enter');
-    await expect.poll(() => tabLabels(page, 'Left pane tabs')).toEqual([three[0], 'Charter + research · MAWS']);
+    await expect.poll(() => tabLabels(page, 'Left pane tabs')).toEqual([three[0], 'Charter + research']);
     await expect(projectChip).toHaveText('MAWS');
+    // UX2 optional surfaces: explicitly open one in the restored session before resizing it. Content-based widths
+    // replace the fixed 380px, so the pointer delta starts at the rendered size, not the former default.
+    await page.locator('[data-surface-row]').getByRole('button', { name: 'Files', exact: true }).click();
+    const panelResizer = page.locator('[data-region="panel"]').getByRole('separator', { name: 'Resize right panel' });
+    await expect(panelResizer).toBeVisible();
+    const panelWidth = Number(await panelResizer.getAttribute('aria-valuenow'));
+    await dragBy(page, panelResizer, panelWidth - 320);
+    await expect(panelResizer).toHaveAttribute('aria-valuenow', '320');
     await menu(app, 'panel.toggle');
     await expect(panelResizer).toHaveCount(0);
     await expect.poll(async () => (await page.locator('[data-region="panel"]').boundingBox())?.width ?? 0).toBe(0);
@@ -761,8 +796,9 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
         const main = (await layoutGet(page, 'main.tabs')) as { version: number; current: string; sets: Record<string, { panes: unknown[] }> };
         return [regions.sidebar.width, regions.panel.width, regions.panel.collapsed, regions.sidebar.expandedProjects.includes(usageProjectId), main.version, main.current, main.sets[main.current]?.panes.length];
       }, { message: 'the layout is written back' })
-      .toEqual([240, 320, true, true, 2, 'proj-maws', 2]);
-    expect((await layoutList(page)).sort()).toEqual(['main.tabs', 'panel.pinned', 'regions', 'window.main']);
+      .toEqual([200, 320, true, true, 2, 'proj-maws', 2]);
+    // UX2 preserves the per-project layout and adds only the surface-selection key and this session's Files refs.
+    expect((await layoutList(page)).sort()).toEqual(['main.tabs', `panel.${CHARTER}`, 'panel.pinned', 'panelTools.surfaces', 'regions', 'window.main'].sort());
   });
 
   expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
@@ -770,6 +806,8 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     regions: await layoutGet(page, 'regions'),
     main: await layoutGet(page, 'main.tabs'),
     panelPinned: await layoutGet(page, 'panel.pinned'),
+    surfaces: await layoutGet(page, 'panelTools.surfaces'),
+    keys: (await layoutList(page)).sort(),
     bounds: await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds()),
     left: await tabLabels(page, 'Left pane tabs'),
     right: await tabLabels(page, 'Right pane tabs'),
@@ -787,7 +825,7 @@ async function relaunchedInstance(maws: MawsLaunch, saved: Saved): Promise<void>
   // The layout comes back as it was saved.
   await expect.poll(() => tabLabels(page, 'Left pane tabs'), { message: 'the tabs and the split are back' }).toEqual(saved.left);
   expect(await tabLabels(page, 'Right pane tabs')).toEqual(saved.right);
-  await expect(sidebar.getByRole('separator', { name: 'Resize sidebar' })).toHaveAttribute('aria-valuenow', '240');
+  await expect(sidebar.getByRole('separator', { name: 'Resize sidebar' })).toHaveAttribute('aria-valuenow', '200');
   expect(await treeRows(projectRow(page, USAGE_PROJECT))).toEqual(['Usage reset countdown', 'Settings idle probe', 'SDK wire inventory']);
   await expect(page.locator('[data-region="panel"]').getByRole('separator')).toHaveCount(0);
   expect((await page.locator('[data-region="panel"]').boundingBox())?.width ?? 0, 'the panel stays collapsed').toBe(0);
@@ -795,7 +833,9 @@ async function relaunchedInstance(maws: MawsLaunch, saved: Saved): Promise<void>
   expect(await layoutGet(page, 'regions')).toEqual(saved.regions);
   expect(await layoutGet(page, 'main.tabs')).toEqual(saved.main);
   expect(await layoutGet(page, 'panel.pinned')).toEqual(saved.panelPinned);
-  expect((await layoutList(page)).sort()).toEqual(['main.tabs', 'panel.pinned', 'regions', 'window.main']);
+  // UX2's optional-surface selections/pins round-trip without resetting the established tab sets or preferences.
+  expect(await layoutGet(page, 'panelTools.surfaces')).toEqual(saved.surfaces);
+  expect((await layoutList(page)).sort()).toEqual(saved.keys);
   expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds()), 'the window bounds are restored').toEqual(saved.bounds);
   const file = JSON.parse(readFileSync(join(maws.userData, 'layout.json'), 'utf8')) as Record<string, unknown>;
   expect(file['window.main']).toMatchObject({ bounds: saved.bounds });
@@ -852,7 +892,7 @@ async function captureEvents(page: Page): Promise<void> {
 
 const captured = (page: Page) => page.evaluate(() => window.__maws_e2e!);
 
-const layoutGet = async (page: Page, key: 'regions' | 'main.tabs' | 'panel.pinned') => {
+const layoutGet = async (page: Page, key: 'regions' | 'main.tabs' | 'panel.pinned' | 'panelTools.surfaces') => {
   const result = await page.evaluate((key) => window.maws.invoke('layout.get', { key }), key);
   if (!result.ok) throw new Error(`layout.get ${key}: ${JSON.stringify(result.error)}`);
   return result.value.value;
@@ -974,6 +1014,7 @@ async function themeTokens(page: Page): Promise<{ light: Palette; dark: Palette 
   }, COLOUR_TOKENS);
 }
 
+// UX2 approved mockup mock.css:84: sidebar and main share --bg in either theme (architect-confirmed ruling).
 const regionBackground = (page: Page) => page.evaluate(() => getComputedStyle(document.querySelector('[data-region="sidebar"]')!).backgroundColor);
 
 // Elements (portals included: menus, the hover card, the palette, toasts) whose background, text or border colour is a

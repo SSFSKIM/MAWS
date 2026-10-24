@@ -56,6 +56,23 @@ describe('startMarkup', () => {
     expect(s.begin).toHaveBeenCalledTimes(1);
   });
 
+  it('marks up either visible slot while another tool is active, and ends only when its surface hides', async () => {
+    const terminal = { id: 'terminal:1', toolId: 'terminal', pinned: false };
+    const tabs = [...useLayout.getState().effectivePanelTabs(A), terminal];
+    useLayout.getState().setPanelTabs(A, { tabs, activeTabId: terminal.id });
+    const s = surface();
+    registerMarkupSurface(scope, s);
+
+    await startMarkup(scope);
+    expect(useMarkup.getState().session).toMatchObject({ scope, still });
+    expect(s.end).not.toHaveBeenCalled();
+    useLayout.getState().setPanelTabs(A, { tabs, activeTabId: terminal.id });
+    expect(useMarkup.getState().session).not.toBeNull();
+    useLayout.getState().setSurfaceStack(A, [terminal.id]);
+    expect(useMarkup.getState().session).toBeNull();
+    expect(s.end).toHaveBeenCalledTimes(1);
+  });
+
   it('shows the toast and enters nothing when the capture answers null', async () => {
     const s = surface(null);
     registerMarkupSurface(scope, s);

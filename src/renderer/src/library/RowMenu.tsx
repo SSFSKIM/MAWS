@@ -7,6 +7,7 @@
 // artifact, "Save a copy…" (export.ts), shown when the kind has either. P3-H (Decision Log 87): below the formats, Send to
 // Google Drive… and Send to Notion…; P4-B5: the direct Send to sheet (../delivery/SendToSheet.tsx), no session and no
 // Claude turn, Notion only for a kind whose Markdown makes a page.
+import { preserveSubmenuPointer } from '@artifacts/ui/menu-pointer';
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import { useEffect, useState, type ReactNode } from 'react';
 import type { LibraryRow } from '@shared/ipc/schema/library';
@@ -47,7 +48,7 @@ function RowMenuItems({ M, row }: { M: Menu; row: LibraryRow }) {
         {R.rename}
       </M.Item>
       <M.Sub>
-        <M.SubTrigger className={`${MENU_ITEM} justify-between data-[state=open]:bg-bg-hover`}>
+        <M.SubTrigger onPointerLeave={preserveSubmenuPointer} className={`${MENU_ITEM} justify-between data-[state=open]:bg-bg-hover`}>
           {R.moveToSpace}
           <span aria-hidden className="text-fg-faint">
             ›
@@ -94,7 +95,7 @@ function ExportItems({ M, row }: { M: Menu; row: LibraryRow }) {
   if (formats.length === 0 && !copies) return null;
   return (
     <M.Sub>
-      <M.SubTrigger className={`${MENU_ITEM} justify-between data-[state=open]:bg-bg-hover`}>
+      <M.SubTrigger onPointerLeave={preserveSubmenuPointer} className={`${MENU_ITEM} justify-between data-[state=open]:bg-bg-hover`}>
         {R.export}
         <span aria-hidden className="text-fg-faint">
           ›

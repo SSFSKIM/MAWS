@@ -6,7 +6,7 @@
 import { useDialogFocus } from '../app/dialog-focus';
 import { Command } from 'cmdk';
 import { Dialog, VisuallyHidden } from 'radix-ui';
-import { useEffect, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { create } from 'zustand';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -71,25 +71,40 @@ const GROUP = '[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-2 [&_[c
 export function CommandPalette() {
   const open = usePalette((s) => s.open);
   const focus = useDialogFocus();
+  const pendingFocus = useRef<ActionId | null>(null);
+  const run = (id: ActionId) => {
+    // These actions rightly refuse keys from an active modal. A palette selection is an explicit destination: wait
+    // for Radix to release the dialog and restore its opener, then navigate from that real shell focus stop.
+    const afterClose = id === 'sidebar.focus' || id === 'region.focusNext' || id === 'region.focusPrevious';
+    pendingFocus.current = afterClose ? id : null;
+    usePalette.setState({ open: false });
+    if (!afterClose) runAction(id, id === 'tab.select' ? 1 : null);
+  };
   return (
     <Dialog.Root open={open} onOpenChange={(next) => usePalette.setState({ open: next })}>
       <Dialog.Portal>
         <Dialog.Content
           {...focus}
+          onCloseAutoFocus={(event) => {
+            focus.onCloseAutoFocus(event);
+            const id = pendingFocus.current;
+            pendingFocus.current = null;
+            if (id !== null) runAction(id);
+          }}
           aria-describedby={undefined}
           className="fixed top-[16%] left-1/2 z-50 w-[min(560px,90vw)] -translate-x-1/2 overflow-hidden rounded-lg border border-border-strong bg-bg-overlay text-fg"
         >
           <VisuallyHidden.Root asChild>
             <Dialog.Title>Command palette</Dialog.Title>
           </VisuallyHidden.Root>
-          <Palette />
+          <Palette run={run} />
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
   );
 }
 
-function Palette() {
+function Palette({ run }: { run(id: ActionId): void }) {
   const query = usePalette((s) => s.query);
   const scope = usePalette((s) => s.scope);
   const setQuery = (query: string) => usePalette.setState({ query });
@@ -125,11 +140,6 @@ function Palette() {
     close();
     revealProject(projectId);
   };
-  const run = (id: ActionId) => {
-    close();
-    runAction(id, id === 'tab.select' ? 1 : null);
-  };
-
   // ⌘⏎ on a session opens it in the split; cmdk leaves a key whose default is already taken.
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key !== 'Enter' || !event.metaKey || !selected.startsWith('session:')) return;

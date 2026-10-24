@@ -27,6 +27,7 @@
 // size or more (in the simulated spec's 1600 × 1000 window it is 256 px wide, where a 9 px handle covers 70 slide px).
 // MAWS_IME_LIVE_DRY=1 checks the harness itself with no driver and no GUI: the window stays quiet, each case's done file
 // is written by the spec at once, and nothing is judged (the ready and result files are, for reading).
+import { hideSurfaces } from './support/shell';
 import { execFile, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
@@ -161,8 +162,9 @@ test.describe('the real Mac’s input method on the ARMED prototype (L0 to L8)',
     await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
     await page.locator('[data-library]').getByRole('article', { name: 'IME live', exact: true }).click();
     await expect(page.locator(`[data-region="main"] [data-artifact-tab="${id}"] [data-deck-editor]`)).toBeVisible({ timeout: 15_000 });
-    // the sidebar and the panel collapsed, through the View menu's items (the shell's own actions)
-    for (const action of ['sidebar.toggle', 'panel.toggle']) await launch.app.evaluate(({ Menu }, a) => Menu.getApplicationMenu()?.getMenuItemById(a)?.click(), action);
+    // Keep the slide unobstructed: optional surfaces closed, then collapse the sidebar through the View menu.
+    await hideSurfaces(page);
+    await launch.app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('sidebar.toggle')?.click());
     const frame = page.locator(`[data-region="main"] [data-artifact-tab="${id}"] [data-stage-slide]`);
     await expect
       .poll(async () => (await frame.boundingBox())?.width ?? 0, { message: `the slide is drawn at least ${MIN_FRAME_PX} px wide (a bigger display, or the inspector closed)` })

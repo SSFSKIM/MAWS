@@ -121,7 +121,10 @@ describe('the dashboard editor in L’s registry', () => {
 
     const ids = header().actions!.map((a) => a.id);
     expect(ids.at(-1)).toBe('sendTo'); // P4-B5: Send to, pinned, after every other action
-    expect(ids.slice(0, -1)).toEqual(['history', 'save-version', 'comments', 'suggestions', 'datasets']);
+    expect(ids.slice(0, -1)).toEqual(['save-version', 'suggestions', 'datasets']);
+    const documentTools = within(screen.getByRole('toolbar', { name: 'Formatting' }));
+    expect(documentTools.getAllByRole('button', { name: 'Version history' })).toHaveLength(1);
+    expect(documentTools.getAllByRole('button', { name: /^Comments(?: |$)/ })).toHaveLength(1);
 
     // the label opens the sheet on its own dataset; Datasets closes it, and opens it on the shown document's datasets
     act(() => label.click());

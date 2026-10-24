@@ -10,14 +10,20 @@ import { NOT_A_REPOSITORY } from '../../sessions/branch-label'; // C4's message 
 import { useGit, type GitEntry } from '../../stores/git';
 import { SUMMARY_COPY } from '../copy';
 import { changeLine } from './derive';
-import { Row, Section, ToolButton, ToolSummary, useToolSummary } from './Section';
+import { FloatingCard } from './FloatingCard';
+import { PushState } from './PushState';
+import { Row, ToolButton, ToolSummary, useToolSummary } from './Section';
 
 export function Environment({ appSessionId, record, directory }: { appSessionId: AppSessionId; record: SessionRecord; directory: string }) {
   const entry = useGit((s) => s.entries.get(directory));
   const reviewSummary = useToolSummary('review');
   const status = entry?.status ?? null;
   return (
-    <Section id="environment">
+    <FloatingCard title="Environment" summary={status ? (status.branch ?? SUMMARY_COPY.detached(status.head)) : watchFailure(entry)}>
+      <Row><span className="text-fg-muted">This Mac</span></Row>
+      <Row action={<ToolButton toolId="files" label="Files" appSessionId={appSessionId} />}>
+        <span className="block truncate" title={directory}>{directory}</span>
+      </Row>
       {status ? (
         <>
           <Row action={<ToolButton toolId="review" label={SUMMARY_COPY.review} appSessionId={appSessionId} />}>
@@ -30,11 +36,13 @@ export function Environment({ appSessionId, record, directory }: { appSessionId:
           <span className="text-fg-muted">{watchFailure(entry)}</span>
         </Row>
       )}
+      <PushState directory={directory} appSessionId={appSessionId} embedded />
+      <p className="text-ui-sm text-fg-muted">Remote control is not available in MAWS</p>
       {record.engineVersion !== null && <Row><span className="block truncate text-fg-muted">{SUMMARY_COPY.engineVersion(record.engineVersion)}</span></Row> /* W13 */}
       <Row action={<ToolButton toolId="session-info" label={SUMMARY_COPY.sessionInfo} appSessionId={appSessionId} />}>
         <ModelLine record={record} directory={directory} />
       </Row>
-    </Section>
+    </FloatingCard>
   );
 }
 

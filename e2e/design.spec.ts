@@ -22,11 +22,12 @@
 //   `.deck-toolbar` rules, no longer the workbench's own).
 // - P4-B2 (D1 to D9, D12; F9's c43 rewritten): a board's text element ARMED on its first click, words typed replacing its
 //   text (C's overlay); a double-click on an inactive board's heading edits it in one gesture (T22).
+import { mainTab, openArtifactInPanel, openSurface, pinSurfaceForSessions } from './support/shell';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { newChatIn, openProject } from './support/sidebar';
-import { resizePanel, squeezedControls } from './support/toolbar-controls';
+import { openArrange, resizePanel, squeezedControls } from './support/toolbar-controls';
 import {
   armFrameProbe,
   boardAt,
@@ -88,20 +89,18 @@ async function inPanelAndTab(page: Page, id: string): Promise<{ panel: Locator; 
   await openProject(page, project.name);
   await newChatIn(page, project.name);
   const panel = page.locator('[data-region="panel"]');
-  await panel.getByRole('button', { name: 'Add a tool' }).click();
-  await page.getByRole('menuitem', { name: 'Artifacts', exact: true }).click();
-  await panel.getByRole('button', { name: 'All', exact: true }).click();
-  await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click();
+  await openArtifactInPanel(page, id);
   const inPanel = panel.locator(`[data-design-artifact="${id}"]`);
   await expect(inPanel.locator('[data-design-editor]')).toBeVisible({ timeout: 15_000 });
-  await panel.getByRole('button', { name: /^Pin / }).first().click();
+  await pinSurfaceForSessions(page, 'Artifacts');
   await panel.getByRole('button', { name: 'Move to tab' }).click();
   const inMain = page.locator(`[data-region="main"] [data-design-artifact="${id}"]`);
   await expect(inMain.locator('[data-design-editor]')).toBeVisible({ timeout: 15_000 });
   // Move to tab moves the design (P3-F wave S, F16): the pinned tab is back on its list. Opened from it again, it is the
   // panel's replica beside the main tab's (the parent's Decision Log 8).
-  await panel.getByRole('tab', { name: 'Artifacts' }).click();
+  await openSurface(page, 'Artifacts');
   await expect(inPanel).toHaveCount(0);
+  await panel.getByRole('button', { name: 'All', exact: true }).click();
   await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click();
   await expect(inPanel.locator('[data-design-editor]')).toBeVisible({ timeout: 15_000 });
   return { panel, inPanel, inMain };
@@ -162,6 +161,10 @@ test('a design in the panel and a main tab: two replicas, every board mounted th
   await canvases.evaluateAll((ns) => ns.forEach((n, i) => ((n as HTMLElement).dataset.e2eMark = String(i))));
   const before = (await viewOf(page, id, 'main')).viewport!;
   const from = await worldAt(inMain, before, 200, 4000); // below the phone: no board there
+  expect(await inMain.locator('[data-design-world]').evaluate((world, point) => {
+    const hit = document.elementFromPoint(point.x, point.y);
+    return hit !== null && world.contains(hit) && hit.closest('[data-board-id], [data-board-title]') === null;
+  }, from), 'the empty-world pan begins on exposed canvas, not an overlaid Boards sheet').toBe(true);
   await drag(page, from, { x: from.x - 80, y: from.y - 60 });
   // P4-B3 Decision Log 35: the main tab adopts the view the panel held (X38's carry), whose arithmetic leaves the pan
   // about 3 × 10⁻⁵ px off; the offsets are compared within that, the zoom exactly
@@ -299,10 +302,7 @@ test('a design in the panel at its 280 px minimum: the toolbar wraps by whole co
   await openProject(page, project.name);
   await newChatIn(page, project.name);
   const panel = page.locator('[data-region="panel"]');
-  await panel.getByRole('button', { name: 'Add a tool' }).click();
-  await page.getByRole('menuitem', { name: 'Artifacts', exact: true }).click();
-  await panel.getByRole('button', { name: 'All', exact: true }).click();
-  await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click();
+  await openArtifactInPanel(page, id);
   const inPanel = panel.locator(`[data-design-artifact="${id}"]`);
   await expect(inPanel.locator('[data-design-editor]')).toBeVisible({ timeout: 15_000 });
   await resizePanel(page, 280);
@@ -500,10 +500,10 @@ test('elements on boards: an inactive board’s press activates and selects with
 
   // Detach pins the paragraph where it is drawn; Bring to front puts the green box last
   await page.mouse.click(...((b) => [b.x + 20, b.y + b.height / 2] as const)((await tab.locator('[data-board-id="desktop"] [data-eid="para"]').boundingBox())!));
-  await tab.getByRole('button', { name: 'Detach' }).click();
+  await (await openArrange(page, tab)).getByRole('menuitem', { name: 'Detach', exact: true }).click();
   await expect.poll(async () => (await element('para'))?.style.position).toBe('absolute');
   await page.mouse.click(d.at(700, 560).x, d.at(700, 560).y);
-  await tab.getByRole('button', { name: 'Bring to front' }).click();
+  await (await openArrange(page, tab)).getByRole('menuitem', { name: 'Bring to front', exact: true }).click();
   await expect.poll(async () => (await boardOf(page, id, 'desktop')).children.at(-1)!.id).toBe('b');
 
   // group a and b (⌘G), then ungroup (⇧⌘G)
@@ -687,7 +687,7 @@ test('the comments, history and Export sheet surfaces, wide and narrow: evidence
   const commentCard = async (surface: string, body: Locator, region: 'main' | 'panel') => {
     await body.getByRole('button', { name: 'Board Phone', exact: true }).click(); // its frame selected
     await expect.poll(async () => (await viewOf(page, id, region)).frame).toBe('phone');
-    await toolbarOf(body).getByRole('button', { name: 'Comment', exact: true }).click();
+    await toolbarOf(body).getByRole('button', { name: 'Add comment', exact: true }).click();
     const card = page.locator('[data-comment-card]');
     await expect(card).toBeVisible();
     await expect(card).toHaveAttribute('data-anchor-locator', 'Phone');
@@ -728,7 +728,7 @@ test('the comments, history and Export sheet surfaces, wide and narrow: evidence
     // P3-F (L230): the design's own context decides; none here, so the notice in the card's place says why
     await inMain.getByRole('button', { name: 'Board Phone', exact: true }).click(); // its frame selected
     await expect.poll(async () => (await viewOf(page, id, 'main')).frame).toBe('phone');
-    await toolbarOf(inMain).getByRole('button', { name: 'Comment', exact: true }).click();
+    await toolbarOf(inMain).getByRole('button', { name: 'Add comment', exact: true }).click();
     const notice = inMain.locator('[data-comment-context]');
     await expect(notice).toBeVisible();
     await expect(notice).toHaveAttribute('role', 'dialog');
@@ -744,7 +744,7 @@ test('the comments, history and Export sheet surfaces, wide and narrow: evidence
   });
 
   // the main area back on the chat: comments in the panel go to it
-  const chat = mainRegion.getByRole('tab', { name: /^New chat/ });
+  const chat = mainTab(page, /^New chat/);
   await chat.click();
   await expect(chat).toHaveAttribute('aria-selected', 'true');
   await expect(inPanel.locator('[data-design-editor]')).toBeVisible();
@@ -795,7 +795,12 @@ test('an edit in one replica patches the other within a frame: a board’s geome
     await inMain.getByRole('button', { name: 'Board Desktop options' }).click();
     await page.getByRole('menuitem', { name: 'Zoom to board' }).click();
     const d = await boardAt(inMain, 'desktop', frameOnly('desktop'));
-    await page.mouse.click(d.at(300, 560).x, d.at(300, 560).y); // the inactive desktop activated, its box selected
+    const point = d.at(300, 560);
+    expect(await inMain.locator('[data-board-id="desktop"] .design-board-canvas [data-eid="a"]').evaluate((element, point) => {
+      const hit = document.elementFromPoint(point.x, point.y);
+      return hit !== null && (hit === element || element.contains(hit));
+    }, point), 'the measured desktop box is exposed, not underneath the Boards sheet').toBe(true);
+    await page.mouse.click(point.x, point.y); // the inactive desktop activated, its box selected
     await expect.poll(async () => (await viewOf(page, id, 'main')).selection).toEqual(['a']);
     const probe = await armFrameProbe(page, id, 'panel', { kind: 'style', boardId: 'desktop', elementId: 'a', prop: 'background', value: '#0000ff' }, [{ selector: '[data-board-id="desktop"] .design-board-canvas [data-eid="a"]', style: 'background-color', equals: 'rgb(0, 0, 255)' }]);
     const fill = inMain.getByRole('complementary', { name: 'Inspector' }).getByRole('textbox', { name: 'Fill colour' });

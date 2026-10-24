@@ -1,13 +1,13 @@
 // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D9; M7): the words of the deck's comments: the
 // toolbar's Comment and Comments, the threads rail, the pins.
 export const COMMENTS_COPY = {
-  comment: 'Comment',
+  comment: 'Add comment',
   commentTitle: 'Comment on the selected element (⌥⌘M)',
   comments: 'Comments',
   commentsOpen: (open: number) => (open > 0 ? `Comments (${open} open)` : 'Comments'),
   rail: 'Comments',
   close: 'Close comments',
-  empty: 'No open comments. Select an element and choose Comment.',
+  empty: 'No open comments. Select an element and choose Add comment.',
   resolved: (n: number) => `Resolved (${n})`,
   slide: (n: number | null) => (n === null ? 'A removed slide' : `Slide ${n}`),
   show: (quote: string) => `Show element: ${quote}`,

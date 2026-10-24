@@ -7,7 +7,7 @@
 // tab); deleted, it is orphaned again and is resolved and reopened in the rail; a restore of the version brings the chart
 // back to its first tab with the thread live, every reply kept. Evidence shots go to test-results/dashboard-proof/.
 import { expect, test, type Locator } from '@playwright/test';
-import { bindCsv, chart, closeDrawer, durable, edit, figures, insertBlocks, ok, openInPanel, paragraph, pinArtifactsTool, railOf, reply, selectChart, startApp, type DashboardApp } from './support/dashboards';
+import { bindCsv, chart, closeDrawer, durable, edit, figures, insertBlocks, ok, openInPanel, paragraph, selectPanelSession, railOf, reply, selectChart, startApp, type DashboardApp } from './support/dashboards';
 
 const PROOF = 'test-results/dashboard-proof';
 const SALES_CSV = 'region,total\nNorth,10\nSouth,20\nWest,15\n';
@@ -37,7 +37,7 @@ test('a chart’s comment follows it through a cut and a paste into another tab,
   test.setTimeout(180_000);
   app = await startApp(PROOF);
   const { page, launch } = app;
-  await pinArtifactsTool(page);
+  await selectPanelSession(page);
   const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'dashboard', title: 'Regional board' });
   const id = artifact.id;
   const record = await openInPanel(page, id);
@@ -51,7 +51,7 @@ test('a chart’s comment follows it through a cut and a paste into another tab,
   let firstTab = '';
   await test.step('Comment on the selected chart opens the card on the block, its locator the view and caption, and writes no mark', async () => {
     await selectChart(record);
-    await record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Comment', exact: true }).click();
+    await record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Add comment', exact: true }).click();
     const card = page.locator('[data-comment-card]');
     await expect(card).toBeVisible();
     await expect(card).toHaveAttribute('data-anchor-kind', 'artifact-comment');

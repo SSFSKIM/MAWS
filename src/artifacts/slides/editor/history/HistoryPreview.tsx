@@ -35,6 +35,11 @@ interface Props {
   /** The editor's zoom ('fit' or a scale). */
   zoom: 'fit' | number;
   thumbnailWidth: number;
+  horizontal?: boolean;
+  /** The floating tool stack's measured reservation, shared with the live stage's centering. */
+  cardReserve?: number;
+  /** A preview owns the stage while shown, so it also reports resizes for the floating stack's reservation. */
+  onRoom?: (room: { w: number; h: number }) => void;
   /** Once the stage has drawn the shown slide with its marks (the e2e seam's preview time). */
   onDrawn?: () => void;
 }
@@ -51,7 +56,7 @@ export function historyAssets(preview: Pick<DeckPreview, 'revision' | 'earlierRe
   return { shown: pinned(preview.revision), earlier: pinned(preview.earlierRevision) };
 }
 
-export function HistoryPreview({ controller, preview, liveSystem, assets, faces, zoom, thumbnailWidth, onDrawn }: Props) {
+export function HistoryPreview({ controller, preview, liveSystem, assets, faces, zoom, thumbnailWidth, horizontal = false, cardReserve = 0, onRoom, onDrawn }: Props) {
   const view = useDeckView(preview.shown);
   const system = preview.system ?? liveSystem;
   // fix wave 3: the font tokens the Theme overrode with a deck-uploaded family name the family's private name here
@@ -69,9 +74,9 @@ export function HistoryPreview({ controller, preview, liveSystem, assets, faces,
   const change = slideId === null ? undefined : bySlide.get(slideId);
   return (
     <>
-      {scope(<HistoryFilmstrip controller={controller} preview={preview} bySlide={bySlide} assets={assets} faces={faces} width={thumbnailWidth} />)}
+      {scope(<HistoryFilmstrip controller={controller} preview={preview} bySlide={bySlide} assets={assets} faces={faces} width={thumbnailWidth} horizontal={horizontal} />)}
       <div className="deck-editor-main" data-history-preview={preview.target.kind}>
-        <HistoryStage controller={controller} preview={preview} change={change} focus={focus} assets={assets} faces={faces} zoom={zoom} scope={scope} systemReady={systemReady} onDrawn={onDrawn} />
+        <HistoryStage controller={controller} preview={preview} change={change} focus={focus} assets={assets} faces={faces} zoom={zoom} cardReserve={cardReserve} onRoom={onRoom} scope={scope} systemReady={systemReady} onDrawn={onDrawn} />
         {slideId !== null && <NotesDiff controller={controller} preview={preview} slideId={slideId} change={change} focus={focus} />}
       </div>
     </>
@@ -80,12 +85,12 @@ export function HistoryPreview({ controller, preview, liveSystem, assets, faces,
 
 // ---- the filmstrip
 
-function HistoryFilmstrip({ controller, preview, bySlide, assets, faces, width }: { controller: DeckHistoryController; preview: DeckPreview; bySlide: Map<string, SlideChange>; assets: PreviewAssets; faces: Props['faces']; width: number }) {
+function HistoryFilmstrip({ controller, preview, bySlide, assets, faces, width, horizontal }: { controller: DeckHistoryController; preview: DeckPreview; bySlide: Map<string, SlideChange>; assets: PreviewAssets; faces: Props['faces']; width: number; horizontal: boolean }) {
   // a deleted slide is shown at its earlier place only while the changes are
   const order = slideOrderOf(preview).filter((id) => preview.showChanges || bySlide.get(id)?.kind !== 'removed');
   const scale = width / SLIDE_W;
   return (
-    <nav className="deck-filmstrip" aria-label={C.filmstrip} style={{ width: width + 40 }}>
+    <nav className="deck-filmstrip" aria-label={C.filmstrip} data-direction={horizontal ? 'horizontal' : 'vertical'} style={{ width: horizontal ? undefined : width + 40 }}>
       <ol className="deck-filmstrip-list">
         {order.map((id, index) => {
           const change = preview.showChanges ? bySlide.get(id) : undefined;
@@ -142,7 +147,7 @@ interface Mark {
   title: string;
 }
 
-function HistoryStage({ controller, preview, change, focus, assets, faces, zoom, scope, systemReady, onDrawn }: { controller: DeckHistoryController; preview: DeckPreview; change: SlideChange | undefined; focus: ChangeStop | null; assets: PreviewAssets; faces: Props['faces']; zoom: 'fit' | number; scope: (children: ReactNode) => ReactNode; systemReady: boolean; onDrawn?: () => void }) {
+function HistoryStage({ controller, preview, change, focus, assets, faces, zoom, cardReserve, onRoom, scope, systemReady, onDrawn }: { controller: DeckHistoryController; preview: DeckPreview; change: SlideChange | undefined; focus: ChangeStop | null; assets: PreviewAssets; faces: Props['faces']; zoom: 'fit' | number; cardReserve: number; onRoom: Props['onRoom']; scope: (children: ReactNode) => ReactNode; systemReady: boolean; onDrawn?: () => void }) {
   const slideId = preview.slideId;
   const requestedAt = preview.requestedAt;
   const removed = change?.kind === 'removed';
@@ -157,14 +162,17 @@ function HistoryStage({ controller, preview, change, focus, assets, faces, zoom,
     const read = () => {
       const w = el.clientWidth;
       const h = el.clientHeight;
-      if (w > 0 && h > 0) setRoom({ w, h });
+      if (w > 0 && h > 0) {
+        setRoom((now) => now?.w === w && now.h === h ? now : { w, h });
+        onRoom?.({ w, h });
+      }
     };
     read();
     const observer = new ResizeObserver(read);
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
-  const fit = room ? Math.max(0.05, Math.min((room.w - STAGE_GUTTER) / SLIDE_W, (room.h - STAGE_GUTTER) / SLIDE_H)) : 0.25;
+  }, [onRoom]);
+  const fit = room ? Math.max(0.05, Math.min((room.w - cardReserve - STAGE_GUTTER) / SLIDE_W, (room.h - STAGE_GUTTER) / SLIDE_H)) : 0.25;
   const scale = zoom === 'fit' ? fit : zoom;
 
   const [canvas, setCanvas] = useState<SlideCanvas | null>(null);

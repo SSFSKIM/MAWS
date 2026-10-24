@@ -2,7 +2,7 @@
 // (MAWS_SCM_E2E=1; the spec skips itself otherwise, so `pnpm e2e` is unchanged). Every case launches the product app in
 // stub mode over a fresh scratch from `buildScmScratch()` (a repository under /tmp, local bare remotes, a fake `gh`
 // first on the captured login-shell PATH through the launcher's `prepare` seam, trust written into the launch's own
-// config home), selects *Charter + research*, opens Source control through "+" and drives it with a reader's clicks;
+// config home), selects *Charter + research*, opens the Source control surface and drives it with a reader's clicks;
 // what it asserts comes from the DOM and from the repository on disk. No engine runs; no remote command reaches a forge.
 // When MAWS_E6_SHOTS names a directory, the themes case writes the evidence screenshots there in both themes.
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -14,6 +14,7 @@ import { latencyBudgets } from './support/latency';
 import { CHARTER } from './support/panel-support';
 import { APP_EDIT, APP_LINES,buildScmScratch, CHECKS_PASSED, PR_URL, prepareScm, UNTRACKED_TEXT, type ScmScratch } from './support/scm-scratch';
 import { sidebarOf, sidebarRow } from './support/sidebar';
+import { mainTab, openSurface, sessionCards, surface, unfoldSessionCard } from './support/shell';
 
 test.skip(process.env.MAWS_SCM_E2E !== '1', 'the source control e2e runs under pnpm e2e:scm (MAWS_SCM_E2E=1)');
 
@@ -25,7 +26,6 @@ const UNTRUSTED = 'MAWS runs git here only after you trust the folder in a sessi
 interface Scm {
   maws: MawsLaunch;
   page: Page;
-  panel: Locator;
   scratch: ScmScratch;
 }
 
@@ -46,9 +46,9 @@ async function withScm(options: ScmOptions, body: (p: Scm) => Promise<void>): Pr
     const { page } = maws;
     await expect(sidebarOf(page).locator('[data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
     await (await sidebarRow(page, CHARTER)).click();
-    const panel = page.locator('[data-region="panel"]');
-    await expect(summaryOf(panel).getByRole('heading', { level: 2 })).toContainText(CHARTER);
-    const p = { maws, page, panel, scratch };
+    await expect(mainTab(page, CHARTER)).toHaveAttribute('aria-selected', 'true');
+    const p = { maws, page, scratch };
+    await showEnvironment(p);
     await expectGh(p, options.ghState ?? (gh === 'fake' ? 'ready' : 'missing'));
     await body(p);
     expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
@@ -71,30 +71,26 @@ async function expectGh({ page, scratch }: Scm, state: 'ready' | 'unauthenticate
   else expect(gh.path, 'the fake gh, never the owner’s').toBe(scratch.ghPath);
 }
 
-const summaryOf = (panel: Locator) => panel.getByRole('tabpanel', { name: 'Session overview' });
-const pushRow = (p: Scm) => summaryOf(p.panel).getByRole('region', { name: 'Push state' });
-const tool = (p: Scm) => p.panel.locator('[data-scm]');
+// Push and PR state live inside Environment now, not in a separate Push state region.
+const environment = (p: Scm) => sessionCards(p.page).getByRole('region', { name: 'Environment', exact: true });
+const tool = (p: Scm) => surface(p.page, 'source-control').locator('[data-scm]');
 const group = (p: Scm, name: 'staged' | 'unstaged' | 'untracked') => tool(p).locator(`[data-scm-group="${name}"]`);
 const row = (p: Scm, name: 'staged' | 'unstaged' | 'untracked', path: string) => group(p, name).locator(`[data-scm-row][data-path="${path}"]`);
 const count = (p: Scm, name: 'staged' | 'unstaged' | 'untracked') => group(p, name).locator('[data-scm-count]');
 const sheet = (p: Scm, kind: 'discard' | 'push' | 'pr') => p.page.locator(`[data-scm-sheet="${kind}"]`);
 const remoteAction = (p: Scm, name: 'push' | 'pr' | 'pr-link') => tool(p).locator(`[data-scm-remote-action="${name}"]`);
 const button = (scope: Locator, name: string) => scope.getByRole('button', { name, exact: true });
-const toolTab = (p: Scm) => p.panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: 'Source control' });
-
 async function openTool(p: Scm): Promise<void> {
-  await p.panel.getByRole('button', { name: 'Add a tool' }).click();
-  await p.page.getByRole('menuitem', { name: 'Source control' }).click();
+  await openSurface(p.page, 'Source control');
   await expect(tool(p).locator('[data-scm-header]')).toContainText('⎇ main');
 }
 
-async function showSummary(p: Scm): Promise<void> {
-  await p.panel.getByRole('button', { name: 'Session overview' }).click();
-  await expect(pushRow(p)).toBeVisible();
+async function showEnvironment(p: Scm): Promise<void> {
+  await expect(await unfoldSessionCard(p.page, 'Environment')).toBeVisible();
 }
 
 async function showTool(p: Scm): Promise<void> {
-  await toolTab(p).click();
+  await openSurface(p.page, 'Source control');
   await expect(tool(p)).toBeVisible();
 }
 
@@ -222,8 +218,8 @@ test.describe('source control over a scratch repository', () => {
       expect(scratch.git('log', '-1', '--format=%s')).toBe('From the panel');
       expect(existsSync(scratch.marker), 'the hook ran').toBe(true);
       await expect(count(p, 'staged')).toHaveText('0');
-      await showSummary(p);
-      await expect(pushRow(p)).toContainText('2 ahead of origin/main');
+      await showEnvironment(p);
+      await expect(environment(p)).toContainText('2 ahead of origin/main');
       await showTool(p);
 
       // Skip hooks leaves no marker
@@ -279,8 +275,8 @@ test.describe('source control over a scratch repository', () => {
       await expectRunDone(p);
       await expect(outputText(p)).toContainText('main -> main');
       expect(scratch.head(scratch.origin)).toBe(scratch.git('rev-parse', 'HEAD'));
-      await showSummary(p);
-      await expect(pushRow(p)).toContainText('Up to date with origin/main');
+      await showEnvironment(p);
+      await expect(environment(p)).toContainText('Up to date with origin/main');
       await showTool(p);
 
       // Two push destinations: the sheet lists both and the push lands in both. The origin's own URL is added as a push
@@ -316,8 +312,8 @@ test.describe('source control over a scratch repository', () => {
     test.setTimeout(120_000);
     await withScm({ setup: (scratch) => scratch.git('push', '--quiet', 'origin', 'main') }, async (p) => {
       const { scratch } = p;
-      await expect(pushRow(p)).toContainText('Up to date with origin/main');
-      await expect(pushRow(p)).toContainText('No PR for main');
+      await expect(environment(p)).toContainText('Up to date with origin/main');
+      await expect(environment(p)).toContainText('No PR for main');
       await openTool(p);
 
       await expect(remoteAction(p, 'pr')).toBeEnabled();
@@ -339,12 +335,12 @@ test.describe('source control over a scratch repository', () => {
       expect(scratch.createLog()).toEqual(['pr', 'create', '--repo', 'o/r', '--head', 'main', '--base', 'main', '--title=Panel PR', '--body=']);
       await expect(remoteAction(p, 'pr-link')).toHaveText('PR #7 ↗');
 
-      await showSummary(p);
-      const line = pushRow(p).getByTestId('pr-line');
+      await showEnvironment(p);
+      const line = environment(p).getByTestId('pr-line');
       await expect(line).toHaveText('PR #7 Open · 2 passed, 1 pending');
       scratch.gh('checks.json', JSON.stringify(CHECKS_PASSED));
       scratch.gh('checks.exit', '0');
-      await pushRow(p).getByRole('button', { name: 'Refresh PR state' }).click();
+      await environment(p).getByRole('button', { name: 'Refresh PR state' }).click();
       await expect(line).toHaveText('PR #7 Open · 3 passed');
     });
   });
@@ -362,9 +358,9 @@ test.describe('source control over a scratch repository', () => {
 
       await p.page.reload();
       await expect(sidebarOf(p.page).locator('[data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
-      await expect(toolTab(p)).toBeVisible({ timeout: 10_000 });
-      if ((await toolTab(p).getAttribute('aria-selected')) !== 'true') await toolTab(p).click();
-      await expect(tool(p)).toBeVisible();
+      // Assert persistence before any navigation could create a replacement surface, even when its icon is folded.
+      await expect(surface(p.page, 'source-control')).toBeVisible({ timeout: 10_000 });
+      await showTool(p);
       // The first line went to the page before the reload: only the snapshot can show it now.
       await expectRunDone(p);
       await expect(outputText(p)).toContainText('slow git: waiting 3 s');
@@ -375,22 +371,22 @@ test.describe('source control over a scratch repository', () => {
 
   test('without gh the row offers the install', async () => {
     await withScm({ gh: 'none' }, async (p) => {
-      await expect(pushRow(p).getByTestId('pr-line')).toHaveText('GitHub CLI not installed · Install');
-      await expect(button(pushRow(p), 'Install')).toBeVisible();
+      await expect(environment(p).getByTestId('pr-line')).toHaveText('GitHub CLI not installed · Install');
+      await expect(button(environment(p), 'Install')).toBeVisible();
     });
   });
 
   test('with gh signed out the row offers the sign-in', async () => {
     await withScm({ ghState: 'unauthenticated', setup: (scratch) => scratch.gh('auth.exit', '1') }, async (p) => {
-      await expect(pushRow(p).getByTestId('pr-line')).toHaveText('GitHub CLI not signed in · Sign in');
-      await expect(button(pushRow(p), 'Sign in')).toBeVisible();
+      await expect(environment(p).getByTestId('pr-line')).toHaveText('GitHub CLI not signed in · Sign in');
+      await expect(button(environment(p), 'Sign in')).toBeVisible();
     });
   });
 
   test('an untrusted checkout is listed with every action disabled, and main refuses a stage', async () => {
     await withScm({ trust: false }, async (p) => {
       const { scratch } = p;
-      await expect(pushRow(p)).toContainText('Trust this folder to see PR state');
+      await expect(environment(p)).toContainText('Trust this folder to see PR state');
       await openTool(p);
       await expect(tool(p).locator('[data-scm-untrusted]')).toHaveText(UNTRUSTED);
       await expect(count(p, 'untracked')).toHaveText('2');
@@ -425,7 +421,7 @@ test.describe('source control over a scratch repository', () => {
       for (const theme of themes) {
         await setTheme(p, theme);
         await scan(p, `${theme}: the tool with src/app.ts's hunks`);
-        await shot(p.panel, `scm-panel-${theme}.png`);
+        await shot(surface(p.page, 'source-control'), `scm-panel-${theme}.png`);
 
         await button(row(p, 'unstaged', 'src/app.ts'), 'Discard changes to src/app.ts').click();
         await expect(sheet(p, 'discard').locator('[data-scm-sheet-path]')).toHaveText(['src/app.ts']);
@@ -441,7 +437,7 @@ test.describe('source control over a scratch repository', () => {
         await expect(push).toHaveCount(0);
       }
 
-      // Pushed and even, the PR sheet opens; with a PR on gh, the summary's row shows it.
+      // Pushed and even, the PR sheet opens; with a PR on gh, Environment shows it.
       const push = await openPushSheet(p);
       await button(push, 'Push').click();
       await expectRunDone(p);
@@ -456,15 +452,15 @@ test.describe('source control over a scratch repository', () => {
         await expect(sheet(p, 'pr')).toHaveCount(0);
       }
       p.scratch.gh('view.none', null);
-      await showSummary(p);
-      await pushRow(p).getByRole('button', { name: 'Refresh PR state' }).click();
-      await expect(pushRow(p).getByTestId('pr-line')).toHaveText('PR #7 Open · 2 passed, 1 pending');
+      await showEnvironment(p);
+      await environment(p).getByRole('button', { name: 'Refresh PR state' }).click();
+      await expect(environment(p).getByTestId('pr-line')).toHaveText('PR #7 Open · 2 passed, 1 pending');
       await p.page.mouse.move(0, 0); // the row as it rests, Refresh neither hovered nor focused
       await p.page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
       for (const theme of themes) {
         await setTheme(p, theme);
-        await scan(p, `${theme}: the summary with the PR line`);
-        await shot(pushRow(p), `pr-state-row-${theme}.png`);
+        await scan(p, `${theme}: Environment with the PR line`);
+        await shot(environment(p), `pr-state-row-${theme}.png`);
       }
     });
   });

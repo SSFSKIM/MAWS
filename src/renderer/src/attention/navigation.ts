@@ -10,9 +10,11 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId, AttentionId } from '@shared/graph/ids';
 import type { EventPayload, MawsBridge } from '@shared/ipc/schema';
 import { tabId } from '@shared/ipc/schema/layout';
+import { ASK_SHEET_TOOL_ID } from '@shared/maws/panes';
 import { ipc } from '../ipc/client';
 import { registerAction } from '../keymap/actions-runtime';
-import { shownSession } from '../panel/host';
+import { surfaceSession, surfaceTabs } from '../panel/surface-model';
+import { SIDE_TOOL_ID } from '../side/actions';
 import { selectNeedsYou, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { activeTab, currentSet, floatingPane } from '../stores/layout-model';
@@ -66,20 +68,23 @@ function openItem(appSessionId: AppSessionId, item: AttentionItem | undefined): 
 // session's own composer (swap.ts), so the panel does not show it. Scale-review C scalpel-2#3: a side thread drawn in
 // the open panel's Side pane is its whole session pane, docked card included (visibility.ts counts it the same way).
 function requestOnScreen(appSessionId: AppSessionId, item: AttentionItem | undefined): boolean {
-  const { main, regions } = useLayout.getState();
+  const layout = useLayout.getState();
+  const { main, regions } = layout;
+  const context = surfaceSession(layout);
+  const surfaces = surfaceTabs(layout, context);
   const panelOpen = !regions.panel.collapsed;
+  const toolOnScreen = (toolId: string) => panelOpen && surfaces.some((tab) => tab.toolId === toolId);
   const set = currentSet(main);
   // P4-B3: a pane that yielded into the split's card is not in front (its tab stays active); the open card is (below)
   const inFront = set.panes.some((pane, i) => i !== floatingPane(set) && pane.activeTabId === tabId({ kind: 'session', appSessionId }));
-  if (inFront && !panelInMain(regions)) return true;
-  if (openCardSession({ main, regions }) === appSessionId) return true; // P3-G
-  const shown = shownSession(main);
-  if (panelOpen && shown !== null && sideChildrenShown().get(shown) === appSessionId) return true;
+  if (inFront && (surfaces.length === 0 || !panelInMain(regions))) return true;
+  if (openCardSession(layout) === appSessionId) return true; // P3-G
+  if (toolOnScreen(SIDE_TOOL_ID) && context !== null && sideChildrenShown().get(context) === appSessionId) return true;
   // P2-E1 start (2026-10-09): a thread a comment card draws on screen shows its requests inline (C7's card in the card's
   // thread), as the Side pane shows a thread's
   if (useCommentCard.getState().shownThread?.child === appSessionId) return true;
   // P2-E1 end
-  return item !== undefined && isMawsAsk(item) && panelOpen && shown === appSessionId;
+  return item !== undefined && isMawsAsk(item) && toolOnScreen(ASK_SHEET_TOOL_ID) && context === appSessionId;
 }
 
 // A `maws` ask's item: its originating event read as `maws.ask.opened` (swapOf's test), or, not read yet, an ask the

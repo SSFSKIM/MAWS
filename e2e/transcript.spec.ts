@@ -15,6 +15,7 @@ import type { HarnessApi, HarnessMetrics } from '../src/renderer/src/harness/api
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
+import { unfoldSessionCard } from './support/shell';
 import { addSurfaceSeedEchoes, ownerMarkedText, r3Output, r3Question, recordedSurfaceJournal, recordedSurfaceSessionId, sittingSeed, transcriptSeed } from '../test/support/r3-surface';
 
 const test = base.extend<{ harness: MawsLaunch }>({
@@ -934,8 +935,8 @@ test('a mod’s toast, log lines and status line show in the session (R1, pass3/
     expect(order.slice(start, start + 2).map((row) => row.kind)).toEqual(['error', 'user']);
     expect(order[start + 1].text).toContain('Reply with exactly MODS_PROBE_OK');
     expect(order.at(-1)?.text).toContain('mods-probe: MODS_PROBE_LOG turn');
-    // the status line, its latest text, in the panel summary's Plugins section
-    const plugins = page.locator('[data-region="panel"]').getByRole('region', { name: 'Plugins' });
+    // The latest pinned plugin status line lives inside the floating Connectors card.
+    const plugins = await unfoldSessionCard(page, 'Connectors');
     await expect(plugins).toContainText('mods-probe · MODS_PROBE_STATUS turn');
     await expect(plugins).not.toContainText('MODS_PROBE_STATUS start');
     expect(maws.consoleErrors()).toEqual([]);

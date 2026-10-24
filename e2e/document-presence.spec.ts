@@ -12,6 +12,7 @@
 // draws as it changes, so the outline is seen however briefly it holds; the case asserts what was drawn while it was
 // up, that it goes, and that it was up for most of its 4 s hold (F19: the owner missed the 1.5 s one), and annotates the
 // timeline (ms after the batch's answer). No engine runs; the profile is the case's own directory under /tmp.
+import { openArtifactReplicaInPanel } from './support/shell';
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -51,13 +52,9 @@ async function start(): Promise<Page> {
   return page;
 }
 
-// The panel's Artifacts tool, added in a session's panel and pinned, so it stays beside an `artifact` main tab.
-async function pinArtifactsTool(page: Page): Promise<void> {
-  const panel = page.locator('[data-region="panel"]');
+// Select the session that receives the artifact's panel surface; openInPanel pins it after transfer.
+async function selectPanelSession(page: Page): Promise<void> {
   await (await sidebarRow(page, 'Harness A')).click();
-  await panel.getByRole('button', { name: 'Add a tool' }).click();
-  await page.getByRole('menuitem', { name: 'Artifacts' }).click();
-  await panel.getByRole('button', { name: 'Pin Artifacts' }).click();
 }
 
 // The owner's document, opened from the library in an `artifact` main tab.
@@ -73,9 +70,7 @@ async function openInMain(page: Page, title: string): Promise<{ id: string; main
 // The same document in the pinned Artifacts tool's record view.
 async function openInPanel(page: Page, artifactId: string): Promise<Locator> {
   const panel = page.locator('[data-region="panel"]');
-  await panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /^Artifacts/ }).click();
-  await panel.getByRole('button', { name: 'All', exact: true }).click();
-  await panel.locator(`[data-artifact-row][data-artifact-id="${artifactId}"]`).click({ timeout: 15_000 });
+  await openArtifactReplicaInPanel(page, artifactId);
   const record = panel.locator(`[data-artifact-record="${artifactId}"]`);
   await expect(record.locator('.ds-doc .ProseMirror[data-editor="live"]')).toBeVisible({ timeout: 15_000 });
   return record;
@@ -149,7 +144,7 @@ test('the agent’s cursor and the blocks its batch edits are drawn in a main ta
   const page = await start();
   const seam = new PerfSeam(join(userData!, 'document-perf'));
   await expect.poll(() => existsSync(join(seam.dir, 'in')), { message: 'the host seam is up' }).toBe(true);
-  await pinArtifactsTool(page);
+  await selectPanelSession(page);
   const { id, main } = await openInMain(page, 'Presence review');
   const record = await openInPanel(page, id);
   const mainText = main.locator('.ds-doc .ProseMirror[data-editor="live"]');

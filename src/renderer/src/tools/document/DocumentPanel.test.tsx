@@ -251,10 +251,12 @@ describe('the document editor in L’s registry', () => {
     expect(header.title).toBe('Launch plan');
     expect(header.unresolved).toBe(0);
     expect(header.closeGuard).toBe(state.closeGuard);
-    act(() => header.actions!.find((a) => a.id === 'history')!.onSelect());
+    const historyToggle = within(screen.getByRole('toolbar', { name: 'Formatting' })).getByRole('button', { name: 'Version history' });
+    expect(header.actions!.some((a) => a.id === 'history' || a.id === 'comments')).toBe(false);
+    act(() => historyToggle.click());
     await until(() => screen.queryByRole('complementary', { name: 'Version history' }) !== null, 'the history rail');
-    expect(editorHostOf(scope)!.actions!.find((a) => a.id === 'history')!.pressed).toBe(true);
-    act(() => editorHostOf(scope)!.actions!.find((a) => a.id === 'history')!.onSelect());
+    expect(historyToggle.getAttribute('aria-pressed')).toBe('true');
+    act(() => historyToggle.click());
     await until(() => screen.queryByRole('complementary', { name: 'Version history' }) === null, 'the rail closed');
     // an export's failure is said in the header's own action
     act(() => editorHostOf(scope)!.exports!.find((e) => e.id === 'pdf-a4')!.onSelect());
@@ -274,9 +276,9 @@ describe('the document editor in L’s registry', () => {
   it('offers Comment only while a session is shown to send it to', async () => {
     mount();
     await shown();
-    expect(within(screen.getByRole('toolbar', { name: 'Formatting' })).queryByRole('button', { name: 'Comment' })).toBeNull();
+    expect(within(screen.getByRole('toolbar', { name: 'Formatting' })).queryByRole('button', { name: 'Add comment' })).toBeNull();
     act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: SESSION }));
-    await until(() => within(screen.getByRole('toolbar', { name: 'Formatting' })).queryByRole('button', { name: 'Comment' }) !== null, 'Comment');
+    await until(() => within(screen.getByRole('toolbar', { name: 'Formatting' })).queryByRole('button', { name: 'Add comment' }) !== null, 'Comment');
   });
 
   it('draws the page in the governing system’s scope, in the document medium, with the document’s overrides', async () => {
