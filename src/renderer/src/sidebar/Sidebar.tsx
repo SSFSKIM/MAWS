@@ -29,6 +29,7 @@ import { ResumeChooserHost } from '../resume/host'; // P2-D
 import { registerProjectRevealer } from './reveal';
 import { AddProject } from './AddProject';
 import { Search } from './Search';
+import { openConversationSearch } from '../palette/CommandPalette';
 import { NeedsYou } from './NeedsYou';
 import { SectionHeading } from './SectionHeading';
 import { moreNodeId, projectNodeId, sessionNodeId, treeCommand, TreeContext, type TreeNode } from './tree';
@@ -270,6 +271,10 @@ function SidebarBody() {
                 {moreAt === shown.length && moreProjects}
               </div>
             )}
+            {searching && <button type="button" onClick={() => openConversationSearch(query.trim())}
+              className="mt-1 w-full rounded-sm px-[9px] py-1.5 text-left text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover focus-visible:outline-2">
+              Search in conversations for ‘{query.trim()}’
+            </button>}
             {hiddenProjects.length > 0 && !searching && (
               <button
                 type="button"

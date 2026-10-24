@@ -100,6 +100,7 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       case 'layout.set':
       case 'layout.setEnabledActions':
       case 'session.setVisible':
+      case 'attention.viewing':
         return undefined;
       // C5 end
       // C7 start: the status line's shared ClaudeUsage read (none installed here); its dismissed banners come through

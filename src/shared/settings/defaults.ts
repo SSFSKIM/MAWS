@@ -12,7 +12,7 @@ export const SETTINGS_DEFAULTS_V17: Settings = {
   sessions: { archiveInactiveDays: null }, // UX1: opt-in only
   theme: 'light', // light-first (D-4, charter §10 item 10)
   keymap: {},
-  notifications: { enabled: true, sound: false, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false, asyncInput: true, essential: true /* P2-C */ } },
+  notifications: { enabled: true, sound: false, kinds: { turnFinished: true, approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false, asyncInput: true, essential: true /* P2-C */ } },
   engine: { binaryPath: null, subagentModel: null, memoryBudgetMiB: null, statefulMcpServers: [] /* C12 */, memoryBudget: { enabled: true } /* W7 */, mcpServers: [] /* P4-R8: MAWS's code names no server */, launchProfile: userScopeProfile() /* P4-A2: the user scope */ }, // W13: binaryPath null, the installed Claude Code
   gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask', offerDirect: true }, // D-19
   usage: { nearLimitPercent: 90 },

@@ -445,7 +445,7 @@ describe('settings patch merges one kind and keeps its siblings', () => {
 
   it('patches one notification kind and leaves its four siblings; a notifications field leaves kinds alone', () => {
     const store = openSettingsStore(file);
-    const siblings = { approvals: false, questions: false, planReviews: false, errors: true, heldPeerMessages: true, asyncInput: false, essential: true /* P2-C */ };
+    const siblings = { turnFinished: false, approvals: false, questions: false, planReviews: false, errors: true, heldPeerMessages: true, asyncInput: false, essential: true /* P2-C */ };
     store.update({ notifications: { kinds: siblings } });
     expect(store.update({ notifications: { kinds: { errors: false } } }).notifications.kinds).toEqual({ ...siblings, errors: false });
     expect(store.update({ notifications: { enabled: false } }).notifications).toEqual({ enabled: false, sound: false, kinds: { ...siblings, errors: false } });

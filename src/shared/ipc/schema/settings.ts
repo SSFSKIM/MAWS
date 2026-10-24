@@ -33,6 +33,7 @@ export const ChordSchema = z.string().regex(CHORD_PATTERN); // Electron accelera
 // heldPeerMessages = held_peer_message (not actionable, so it never notifies in P0).
 // P2-C (version 13): asyncInput = async_input (a question an agent left), essential = essential_unread (a must-read).
 export const NotificationKindsSchema = z.strictObject({
+  turnFinished: z.boolean().default(true), // additive v17 policy: older files default on
   approvals: z.boolean(), questions: z.boolean(), planReviews: z.boolean(), errors: z.boolean(), heldPeerMessages: z.boolean(),
   // P2-C start (2026-10-09)
   asyncInput: z.boolean(), essential: z.boolean(),
@@ -163,7 +164,7 @@ export type Settings = z.infer<typeof SettingsSchema>;
 export const SettingsPatchSchema = z.strictObject({
   theme: ThemeSettingSchema.optional(),
   keymap: SettingsSchema.shape.keymap.optional(),
-  notifications: z.strictObject({ enabled: z.boolean().optional(), sound: z.boolean().optional(), kinds: NotificationKindsSchema.partial().optional() }).optional(),
+  notifications: z.strictObject({ enabled: z.boolean().optional(), sound: z.boolean().optional(), kinds: NotificationKindsSchema.partial().extend({ turnFinished: z.boolean().optional() }).optional() }).optional(),
   engine: EngineSettingsSchema.partial().optional(),
   gateway: GatewaySettingsSchema.partial().optional(),
   usage: UsageSettingsSchema.partial().optional(),

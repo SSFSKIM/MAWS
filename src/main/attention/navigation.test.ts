@@ -14,6 +14,29 @@ describe('navigation relay (attention.pendingNavigate)', () => {
     expect(relay.take()).toBeNull();
   });
 
+  it('retains every failed action until a page subscribes, including its unsent reply', () => {
+    const emit = vi.fn();
+    const relay = createNavigationRelay(emit);
+    const failure = { appSessionId: nav(1).appSessionId, attentionId: null, delivery: 'in-app' as const, at: '2026-10-23T00:00:00Z', error: 'Session unavailable', reply: 'Keep this reply' };
+    relay.failure(failure);
+    relay.failure({ ...failure, reply: 'And this one' });
+    expect(emit).not.toHaveBeenCalled();
+    relay.take(); // subscribe-then-snapshot announces the page
+    expect(emit.mock.calls).toEqual([
+      ['attention.notified', failure],
+      ['attention.notified', { ...failure, reply: 'And this one' }],
+    ]);
+    relay.take();
+    expect(emit).toHaveBeenCalledTimes(2);
+    relay.failure(failure);
+    expect(emit).toHaveBeenCalledTimes(3);
+    relay.pageGone();
+    relay.failure(failure);
+    expect(emit).toHaveBeenCalledTimes(3);
+    relay.take();
+    expect(emit).toHaveBeenCalledTimes(4);
+  });
+
   it('keeps only the latest queued navigation', () => {
     const relay = createNavigationRelay(vi.fn());
     relay.deliver(nav(1));

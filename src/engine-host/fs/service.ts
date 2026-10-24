@@ -26,6 +26,7 @@ import type {
   WorkflowRun,
 } from '@shared/ipc/schema/fs';
 import type { PersistedTask, TranscriptSummary } from '@shared/wire/store';
+import { SearchTextReader } from './search-text';
 import { readSpill } from './artifacts';
 import { Bindings } from './bindings';
 import type { FileReader } from './chain-follower';
@@ -125,6 +126,7 @@ export class FsService {
   private readonly follows = new Map<string, FollowEntry>(); // by followKey(appSessionId, agentId)
   private readonly starting = new Map<string, Promise<FollowEntry>>();
   private readonly subagentReader = new SubagentReader();
+  private readonly searchReader = new SearchTextReader();
   private readonly agents = new Map<SessionId, SubagentEntry[]>(); // each session's agents as last listed
   private readonly agentListing = new Map<SessionId, Promise<SubagentEntry[]>>(); // one listing at a time per session
   private readonly workflowReader = new WorkflowReader();
@@ -187,6 +189,7 @@ export class FsService {
     if (this.reconcile) clearInterval(this.reconcile);
     for (const entry of this.follows.values()) entry.follow.stop();
     this.follows.clear();
+    this.searchReader.stop();
   }
 
   state(): FsState {
@@ -368,6 +371,12 @@ export class FsService {
 
   readSpill(input: FsReadSpillInput): Promise<FsReadSpillOutput> {
     return readSpill(this.paths, input);
+  }
+
+  async searchText(sessionId: SessionId, cursor?: string) {
+    const path = this.listed.get(sessionId)?.path;
+    if (!path) throw new Error(`Unknown transcript: ${sessionId}`);
+    return this.searchReader.read(path, cursor);
   }
 
   private sessionOf(appSessionId: AppSessionId): SessionId {

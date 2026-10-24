@@ -1,128 +1,128 @@
-// Main's notifier (C5 execution document, "Notifier rules"; residue *Notifications*; charter §3 and §5.7). It reads the
-// attention table through the read model, so it works with no page open:
-// - an item that first appears pending, with an actionable kind, while no MAWS window is focused and notifications are
-//   on, posts one macOS notification (`<project> · <session>`, the item's summary), once per item id ever;
-// - clicking it focuses (or re-creates) the window and hands `attention.navigate` to the navigation relay, which emits
-//   it to a page that is listening or queues it for the page to pull (`attention.pendingNavigate`);
-// - macOS delivers notifications only from a code-signed binary (an unsigned one emits `failed`), so the first failure,
-//   or no notification support at all, switches to the fallback for the process lifetime: a dock bounce, and
-//   `attention.notified { delivery: 'fallback' }`, which the page shows as a toast;
-// - the dock badge is the count of tier-1 Needs-you sessions, at all times;
-// - with C11's per-kind policy (`notifications.kinds`), only a group that is on notifies.
+// Session-scoped delivery: OS banners outside MAWS, toasts while another session
+// has focus. Restored requests/turns are silent; live requests retract on resolution.
 import { app, Notification } from 'electron';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AttentionKind } from '@shared/graph/enums';
 import type { AppSessionId, AttentionId } from '@shared/graph/ids';
-import type { NotificationKinds, Settings } from '@shared/ipc/schema'; // C11: NotificationKinds
+import type { EventPayload, NotificationKinds, Settings, SessionDigest } from '@shared/ipc/schema';
 import type { AttentionNavigate } from '@shared/ipc/schema/attention';
 import { isActionable, isOpen } from '@shared/attention/kinds';
 import { previewLine } from '@shared/owner/preview';
 import type { emit as emitEvent } from '../ipc/events';
+import type { NotificationActions } from './actions';
 import type { SessionReadModel } from '../sessions/read-model';
 
-// C11: `NotificationKinds` is settings v3's per-group switch (C11's eighth ask of C5); every version 3 file carries it
-// (the store migrates earlier files with every group on but held peer messages).
 const GROUP: Record<AttentionKind, keyof NotificationKinds> = {
-  permission: 'approvals', dialog: 'approvals', elicitation: 'approvals',
-  question: 'questions',
-  plan: 'planReviews',
-  error: 'errors', interrupted: 'errors', auto_mode_unavailable: 'errors',
-  held_peer_message: 'heldPeerMessages', // not actionable, so it never notifies today; the flag is honoured if that changes
-  async_input: 'asyncInput', essential_unread: 'essential', // P2-C (2026-10-09): settings 12's two groups
+  permission: 'approvals', dialog: 'approvals', elicitation: 'approvals', question: 'questions',
+  plan: 'planReviews', error: 'errors', interrupted: 'errors', auto_mode_unavailable: 'errors',
+  held_peer_message: 'heldPeerMessages', async_input: 'asyncInput', essential_unread: 'essential',
 };
-
-function wanted(item: AttentionItem, settings: Settings): boolean {
-  const { notifications } = settings;
-  return notifications.enabled && notifications.kinds[GROUP[item.kind]]; // C11: the schema's kinds, always present in v3
-}
-
 export interface NotifierDeps {
-  restoredIds?: ReadonlySet<AttentionId>; // live provenance set: hydration is silent, but still counts in the badge
-  isFocused(): boolean; // whether a MAWS window has focus; false with no window
-  focusWindow(): void; // brings the window forward, re-creating it if none is open
-  navigate(navigation: AttentionNavigate): void; // the navigation relay: emits `attention.navigate` to a listening page, or queues it
+  restoredIds?: ReadonlySet<AttentionId>;
+  isFocused(): boolean;
+  isViewing(appSessionId: AppSessionId): boolean;
+  focusWindow(): void;
+  navigate(navigation: AttentionNavigate): void;
+  failure(notified: EventPayload<'attention.notified'>): void;
   settings(): Settings;
   emit: typeof emitEvent;
+  actions?: NotificationActions;
 }
+type Notice = { appSessionId: AppSessionId; attentionId: AttentionId | null; body: string };
 
 export function startNotifier(model: SessionReadModel, deps: NotifierDeps): () => void {
-  // Items already waiting when the notifier starts entered Needs you before it; only later arrivals are announced.
   const seen = new Set<AttentionId>([...model.allAttention().values()].flat().map((i) => i.id));
-  // A posted notification must stay referenced, or it may be collected and its click never arrives.
-  const live = new Set<Notification>();
+  const previous = new Map(model.digests().map((d) => [d.appSessionId, d]));
+  const live = new Map<Notification, Notice>();
   let fallback: string | null = Notification.isSupported() ? null : 'notifications are not supported';
   if (fallback !== null) console.warn(unavailable(fallback));
-
-  const notified = (item: AttentionItem, delivery: 'os' | 'fallback') =>
-    deps.emit('attention.notified', { appSessionId: item.appSessionId, attentionId: item.id, delivery, at: new Date().toISOString() });
-
-  const fallBack = (item: AttentionItem) => {
-    app.dock?.bounce('informational');
-    notified(item, 'fallback');
+  const notified = (notice: Notice, delivery: 'os' | 'fallback' | 'in-app') =>
+    deps.emit('attention.notified', { appSessionId: notice.appSessionId, attentionId: notice.attentionId, delivery, at: new Date().toISOString() });
+  const fallBack = (notice: Notice) => { app.dock?.bounce('informational'); notified(notice, 'fallback'); };
+  const actionFailure = (notice: Notice, error: unknown, reply?: string) => {
+    const message = error instanceof Error ? error.message : String(error);
+    deps.focusWindow();
+    deps.navigate({ appSessionId: notice.appSessionId, attentionId: notice.attentionId, source: 'notification' });
+    deps.failure({ appSessionId: notice.appSessionId, attentionId: notice.attentionId, delivery: 'in-app', at: new Date().toISOString(), error: message, ...(reply !== undefined ? { reply } : {}) });
   };
-
-  const post = (item: AttentionItem) => {
-    if (fallback !== null) {
-      fallBack(item);
+  const post = (notice: Notice, allowOnce = false, checked = false) => {
+    if (deps.isViewing(notice.appSessionId)) return;
+    if (deps.isFocused()) { notified(notice, 'in-app'); return; }
+    if (fallback !== null) { fallBack(notice); return; }
+    const item = notice.attentionId === null ? undefined : model.attention(notice.appSessionId).find((i) => i.id === notice.attentionId && i.state === 'pending');
+    if (notice.attentionId !== null && !item) return;
+    if (item?.kind === 'permission' && deps.actions && !checked) {
+      void deps.actions.canAllow(item).then((allowed) => post(notice, allowed, true)).catch(() => post(notice, false, true));
       return;
     }
-    const record = model.record(item.appSessionId)!;
+    const record = model.record(notice.appSessionId)!;
     const project = record.projectId === null ? null : model.project(record.projectId);
     const notification = new Notification({
       title: project ? `${project.name} · ${record.title.text}` : record.title.text,
-      body: previewLine(item.summary, 200) ?? item.summary, // E11 F2b (plan 2.6)
+      body: previewLine(notice.body, 200) ?? notice.body,
       silent: !deps.settings().notifications.sound,
+      ...(deps.actions && notice.attentionId === null ? { hasReply: true, replyPlaceholder: 'Reply to session' } : {}),
+      ...(allowOnce ? { actions: [{ type: 'button' as const, text: 'Allow once' }] } : {}),
     });
-    live.add(notification);
-    notification.on('show', () => notified(item, 'os'));
+    live.set(notification, notice);
+    notification.on('show', () => notified(notice, 'os'));
     notification.on('failed', (_event, error) => {
       live.delete(notification);
-      if (fallback === null) {
-        fallback = error;
-        console.warn(unavailable(error));
-      }
-      fallBack(item);
+      if (fallback === null) { fallback = error; console.warn(unavailable(error)); }
+      fallBack(notice);
     });
     notification.on('click', () => {
       live.delete(notification);
       deps.focusWindow();
-      deps.navigate({ appSessionId: item.appSessionId, attentionId: item.id, source: 'notification' });
+      deps.navigate({ appSessionId: notice.appSessionId, attentionId: notice.attentionId, source: 'notification' });
+    });
+    notification.on('reply', (_event, reply: string) => {
+      if (notice.attentionId !== null || !deps.actions) return;
+      void deps.actions.reply(notice.appSessionId, reply).catch((error: unknown) => actionFailure(notice, error, reply));
+    });
+    notification.on('action', (_event, index: number) => {
+      if (index !== 0 || !allowOnce || !item || !deps.actions) return;
+      void deps.actions.allow(item).catch((error: unknown) => actionFailure(notice, error));
     });
     notification.on('close', () => live.delete(notification));
     notification.show();
   };
-
-  const inNeedsYou = (appSessionId: AppSessionId) => {
-    const record = model.record(appSessionId);
-    return record !== null && !record.archived;
-  };
-
+  const inNeedsYou = (id: AppSessionId) => { const r = model.record(id); return r !== null && !r.archived; };
   const onAttention = (appSessionId: AppSessionId, items: AttentionItem[]) => {
+    for (const [notification, notice] of live) {
+      if (notice.appSessionId === appSessionId && notice.attentionId !== null && !items.some((i) => i.id === notice.attentionId && isOpen(i))) {
+        live.delete(notification);
+        notification.close();
+      }
+    }
     for (const item of items) {
       if (seen.has(item.id)) continue;
       seen.add(item.id);
       if (deps.restoredIds?.has(item.id)) continue;
       if (item.state !== 'pending' || !isActionable(item) || !inNeedsYou(appSessionId)) continue;
-      if (deps.isFocused() || !wanted(item, deps.settings())) continue;
-      post(item);
+      const settings = deps.settings().notifications;
+      if (settings.enabled && settings.kinds[GROUP[item.kind]]) post({ appSessionId, attentionId: item.id, body: item.summary });
     }
     updateBadge();
   };
-
+  const onDigest = (digest: SessionDigest) => {
+    const before = previous.get(digest.appSessionId);
+    previous.set(digest.appSessionId, digest);
+    // Only a turn observed running by this process, not a disk seed or replay.
+    if (!before || !['working', 'waiting'].includes(before.phase) || digest.phase !== 'idle'
+      || digest.lastTurnEndedAt === null || digest.lastTurnEndedAt === before.lastTurnEndedAt) return;
+    const record = model.record(digest.appSessionId);
+    const policy = deps.settings().notifications;
+    if (!record || record.archived || record.holder.kind !== 'self' || !policy.enabled || !policy.kinds.turnFinished) return;
+    post({ appSessionId: digest.appSessionId, attentionId: null, body: digest.lastAssistantLine ?? 'Turn finished' });
+  };
   const updateBadge = () => {
     let count = 0;
-    for (const [appSessionId, items] of model.allAttention()) {
-      if (inNeedsYou(appSessionId) && items.some((i) => isOpen(i) && isActionable(i))) count += 1;
-    }
+    for (const [id, items] of model.allAttention()) if (inNeedsYou(id) && items.some((i) => isOpen(i) && isActionable(i))) count++;
     app.dock?.setBadge(count > 0 ? String(count) : '');
   };
-
-  const offs = [model.on('attention', onAttention), model.on('record', updateBadge)];
+  const offs = [model.on('attention', onAttention), model.on('digest', onDigest), model.on('record', updateBadge)];
   updateBadge();
-  return () => {
-    offs.forEach((off) => off());
-    live.clear();
-  };
+  return () => { offs.forEach((off) => off()); for (const n of live.keys()) n.close(); live.clear(); };
 }
-
 const unavailable = (reason: string) => `notifier: OS notifications unavailable (${reason}); using dock bounce and toasts`;

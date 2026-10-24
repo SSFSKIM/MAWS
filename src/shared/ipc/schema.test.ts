@@ -126,7 +126,7 @@ describe('ipc schema validates both directions', () => {
 
     it('carries the C4 fs.* entries, every command owned by the engine host', () => {
       expect(Object.keys(fs.commands).sort()).toEqual([
-        'fs.agentEvents', 'fs.bind', 'fs.holders', 'fs.readSpill', 'fs.scan', 'fs.state', 'fs.subagents', 'fs.tasks', 'fs.unbind', 'fs.unfollow', 'fs.workflows',
+        'fs.agentEvents', 'fs.bind', 'fs.holders', 'fs.readSpill', 'fs.scan', 'fs.sessionText', 'fs.state', 'fs.subagents', 'fs.tasks', 'fs.unbind', 'fs.unfollow', 'fs.workflows',
       ]);
       for (const spec of Object.values(fs.commands)) expect(spec.owner).toBe('engine-host');
       expect(Object.keys(fs.events).sort()).toEqual([

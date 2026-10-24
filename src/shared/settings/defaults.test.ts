@@ -89,7 +89,7 @@ describe('settings migrate v1 and v2 to v3', () => {
       theme: 'light',
       sessions: { archiveInactiveDays: null },
       keymap: {},
-      notifications: { enabled: true, sound: false, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false, asyncInput: true, essential: true /* P2-C */ } },
+      notifications: { enabled: true, sound: false, kinds: { turnFinished: true, approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false, asyncInput: true, essential: true /* P2-C */ } },
       engine: { binaryPath: null, subagentModel: null, memoryBudgetMiB: null, statefulMcpServers: [] /* C12 */, memoryBudget: { enabled: true } /* W7 */, mcpServers: [] /* P4-R8 */, launchProfile: { plugins: { off: [] }, outputStyle: 'user', hooks: 'user' } /* P4-A2: the user scope */ }, // W13: no pin
       gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask', offerDirect: true },
       usage: { nearLimitPercent: 90 },
@@ -619,7 +619,7 @@ describe('settings v3 validates and refuses unknown versions', () => {
 });
 
 describe('settings patch merges one kind and keeps its siblings', () => {
-  const siblings = { approvals: false, questions: false, planReviews: false, errors: true, heldPeerMessages: true, asyncInput: false, essential: true /* P2-C */ };
+  const siblings = { turnFinished: false, approvals: false, questions: false, planReviews: false, errors: true, heldPeerMessages: true, asyncInput: false, essential: true /* P2-C */ };
   const state: Settings = { ...SETTINGS_DEFAULTS_V17, notifications: { enabled: true, sound: false, kinds: siblings } };
 
   it('validates a patch of one kind and changes that kind alone', () => {

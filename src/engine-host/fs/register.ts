@@ -3,7 +3,7 @@
 // environment exactly as the engine reads it (`CLAUDE_CONFIG_DIR`, else `~/.claude`); C1's supervisor forks the host
 // with main's environment. When C3's login-shell capture lands in this host, the service reads the captured
 // environment through the same accessor the launch contract uses.
-import type { AgentId, AppSessionId } from '@shared/graph/ids';
+import type { AgentId, AppSessionId, SessionId } from '@shared/graph/ids';
 import type { HostEmit, HostOn } from '@shared/host/runtime';
 import type { FsHoldersQuery, FsScanKnown } from '@shared/ipc/schema/fs';
 import { resolveStorePaths } from './paths';
@@ -16,6 +16,7 @@ export function registerFs(on: HostOn, emit: HostEmit, env: NodeJS.ProcessEnv = 
   const service = new FsService({ paths: resolveStorePaths(env), emit, holders: { ownPids: options.ownPids } });
   // The runtime hands a handler the schema's parsed value, typed as its input; the ids in it passed the branded
   // id schemas, which is what the brands stand for.
+  on('fs.sessionText', async ({ sessionId, cursor }) => service.searchText(sessionId as SessionId, cursor));
   on('fs.state', async () => service.state());
   on('fs.scan', async ({ known }) => service.scan((known ?? []) as FsScanKnown[]));
   on('fs.bind', async ({ bindings }) => service.bind(bindings as Pick<FsScanKnown, 'sessionId' | 'appSessionId'>[]));
