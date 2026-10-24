@@ -21,6 +21,14 @@ export const REPO_ROOT = resolve(__dirname, '../..');
 // the test process's Intl default, which playwright.config.ts pins to the same locale.
 export const E2E_APP_ARGS = ['--lang=en-US'];
 
+const applications = new WeakMap<Page, ElectronApplication>();
+// Page-only navigation helpers still invoke the real native menu; CDP keyboard events never reach AppKit accelerators.
+export function applicationOf(page: Page): ElectronApplication {
+  const app = applications.get(page);
+  if (!app) throw new Error('The page was not opened by launchMaws');
+  return app;
+}
+
 export interface MawsLaunch {
   app: ElectronApplication;
   page: Page; // the first window
@@ -141,6 +149,7 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
     launchedHook?.(app); // E4b
     app.on('close', () => (closed = true));
     const page = await app.firstWindow();
+    applications.set(page, app);
     const consoleErrors = await collectConsoleErrors(page);
     await sizeForGroup(app, page); // P3-F1
     await placeForInstance(app); // ci-kit's mac-lane concurrency spec, M2

@@ -299,7 +299,8 @@ describe('shell renders the panel host in the region', () => {
       expect(sessionTabs()).toEqual([]);
       expect(effectiveIds()).toEqual([id, 't:pin00000']);
       expect(within(panel()).getByRole('tabpanel', { name: 'session-info' })).toBeTruthy();
-      expect(within(panel()).queryByRole('tablist')).toBeNull(); // single-instance surfaces have no tab strip
+      const singleton = within(panel()).getByRole('region', { name: 'session-info' });
+      expect(within(singleton).queryByRole('tablist')).toBeNull(); // other stacked tools may have their own strips
       expect(info.probe.created).toEqual([expect.objectContaining({ instanceId: id, params: 'p' })]);
     });
   });

@@ -10,10 +10,10 @@
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { MawsBridge } from '@shared/ipc/schema';
-import type { LayoutMain, LayoutRegions } from '@shared/ipc/schema/layout';
 import { ipc } from '../ipc/client';
-import { shownSession } from '../panel/host';
-import { useLayout } from '../stores/layout';
+import { surfaceSession, surfaceTabs } from '../panel/surface-model';
+import { useLayout, type LayoutState } from '../stores/layout';
+import { SIDE_TOOL_ID } from '../side/actions';
 import { currentSet, floatingPane } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { sideChildrenShown, useSidePane } from '../side/store'; // E3
@@ -22,15 +22,17 @@ import { panelInMain } from '../app/regions'; // P3-G
 import { openCardSession, useFloatingCard } from '../shell/floating'; // P3-G
 
 export function visibleSessions(
-  main: LayoutMain,
-  regions: LayoutRegions,
+  layout: LayoutState,
   records: ReadonlyMap<AppSessionId, SessionRecord>,
   windowActive: boolean,
   sideChildren: ReadonlyMap<AppSessionId, AppSessionId> = new Map(), // E3: parent → the child its Side pane draws
 ): Set<AppSessionId> {
   const visible = new Set<AppSessionId>();
   if (!windowActive) return visible;
-  if (!panelInMain(regions)) {
+  const { main, regions } = layout;
+  const context = surfaceSession(layout);
+  const surfaces = surfaceTabs(layout, context);
+  if (surfaces.length === 0 || !panelInMain(regions)) {
     const set = currentSet(main); // W12: the strips show the current set
     const floated = floatingPane(set); // P4-B3: a pane that yielded into the split's card is not on screen; its card is
     set.panes.forEach((pane, i) => {
@@ -40,9 +42,8 @@ export function visibleSessions(
   }
   // E3 start: the open panel shows the session of the focused pane's active tab (a file tab's included, C5's region),
   // maximized or not; the child its Side pane draws is on screen
-  if (!regions.panel.collapsed) {
-    const shown = shownSession(main);
-    const child = shown === null ? undefined : sideChildren.get(shown);
+  if (!regions.panel.collapsed && surfaces.some((tab) => tab.toolId === SIDE_TOOL_ID)) {
+    const child = context === null ? undefined : sideChildren.get(context);
     if (child !== undefined && records.has(child)) visible.add(child);
   }
   // E3 end
@@ -51,7 +52,7 @@ export function visibleSessions(
   if (card !== null && records.has(card.child)) visible.add(card.child);
   // P2-E1 end
   // P3-G start: the session the open floating card draws (either card, P4-B3)
-  const floating = openCardSession({ main, regions });
+  const floating = openCardSession(layout);
   if (floating !== null && records.has(floating)) visible.add(floating);
   // P3-G end
   return visible;
@@ -66,9 +67,10 @@ export function connectVisibility(client: MawsBridge = ipc, stores = { layout: u
     });
 
   const update = () => {
-    const { main, regions } = stores.layout.getState();
+    const layout = stores.layout.getState();
+    const { main } = layout;
     const windowActive = document.hasFocus() && document.visibilityState === 'visible';
-    const next = visibleSessions(main, regions, stores.sessions.getState().records, windowActive, sideChildrenShown(stores.side.getState()));
+    const next = visibleSessions(layout, stores.sessions.getState().records, windowActive, sideChildrenShown(stores.side.getState()));
     for (const id of reported) if (!next.has(id)) send(id, false);
     for (const id of next) if (!reported.has(id)) send(id, true);
     reported = next;
@@ -83,7 +85,7 @@ export function connectVisibility(client: MawsBridge = ipc, stores = { layout: u
   };
 
   const offLayout = stores.layout.subscribe((state, before) => {
-    if (state.main !== before.main || state.regions !== before.regions) update();
+    if (state.main !== before.main || state.regions !== before.regions || state.panelPinned !== before.panelPinned || state.panelBySession !== before.panelBySession || state.panelActiveNoSession !== before.panelActiveNoSession || state.panelSurfaces !== before.panelSurfaces || state.knownSession !== before.knownSession) update();
   });
   const offSessions = stores.sessions.subscribe((state, before) => state.records !== before.records && update());
   const offSide = stores.side.subscribe((state, before) => state.panes !== before.panes && update()); // E3

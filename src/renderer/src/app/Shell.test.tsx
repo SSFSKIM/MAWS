@@ -338,6 +338,7 @@ describe('toolbar', () => {
 
 describe('shell actions', () => {
   it('toggle the sidebar and panel, maximize and restore the panel', () => {
+    openSurface();
     offs.push(registerShellActions(fakeBridge()));
     runAction('sidebar.toggle');
     expect(useLayout.getState().regions.sidebar.collapsed).toBe(true);

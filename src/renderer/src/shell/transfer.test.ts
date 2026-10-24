@@ -126,9 +126,9 @@ describe('main → panel', () => {
     } else expect(surfaces()).toEqual(before);
   });
 
-  it('waits for metadata and updates the menu refusal when only the Library row arrives or changes project', async () => {
+  it.each(['unread', 'missing'] as const)('waits for %s metadata and updates the menu refusal when only the Library row arrives or changes project', async (status) => {
     useLayout.setState({ main: panes([sessionTab(A), DOC_TAB]) });
-    act(() => library.setState({ reads: new Map() }));
+    act(() => library.setState({ reads: status === 'unread' ? new Map() : new Map([[rowKey(DOC), { status: 'ready', value: null, error: null }]]) }));
     const refusal = renderHook(() => useTransferRefusal({ to: 'panel', mainTabId: DOC_TAB.id }));
     expect(refusal.result.current).toBe('Loading…');
     const before = surfaces();

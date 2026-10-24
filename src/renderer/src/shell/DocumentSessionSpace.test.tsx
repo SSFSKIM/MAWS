@@ -2,7 +2,7 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { resetShellStores } from '../test-support/shell-stores';
-import { mainShowing } from '../test-support/panel';
+import { mainShowing, ref } from '../test-support/panel';
 import { useLayout } from '../stores/layout';
 import { floatPanel, useFloatingCard } from './floating';
 import { DocumentSessionSpace } from './DocumentSessionSpace';
@@ -12,7 +12,12 @@ let resize: () => void;
 beforeEach(() => {
   resetShellStores();
   useFloatingCard.setState({ closed: false, column: null, columnDrag: null });
-  useLayout.setState({ main: mainShowing('a' as AppSessionId) });
+  const session = 'a' as AppSessionId;
+  const document = ref('artifacts:document');
+  useLayout.setState({
+    main: mainShowing(session),
+    panelBySession: new Map([[session, { tabs: [document], activeTabId: document.id }]]),
+  });
   floatPanel();
   width = 1200;
   vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => width);

@@ -104,7 +104,7 @@ describe('the portaled pane strip order', () => {
   it('restores left before right in DOM and keyboard order after the left session floats and docks', async () => {
     const user = userEvent.setup();
     useLayout.setState({ main: mainShowing(A) });
-    useLayout.getState().openTab({ kind: 'settings' }, { pane: 'other' });
+    useLayout.getState().openTab({ kind: 'settings', section: null }, { pane: 'other' });
     renderShell();
     const order = () => [...strips().querySelectorAll<HTMLElement>('[data-chrome-pane]')].map((node) => node.dataset.chromePane);
     expect(order()).toEqual(['0', '1']);

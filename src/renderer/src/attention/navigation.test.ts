@@ -4,6 +4,7 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, AttentionId, RequestId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
+import { ASK_SHEET_TOOL_ID } from '@shared/maws/panes';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { runAction } from '../keymap/actions-runtime';
 import { useAttention } from '../stores/attention';
@@ -23,6 +24,11 @@ const idOf = (title: string) => nine.sessions.find((r) => r.title.text === title
 const active = () => activeTab(useLayout.getState().main)?.id;
 let fake: ReturnType<typeof fakeClient>;
 let disconnect: () => void;
+const showSurface = (appSessionId: AppSessionId, toolId: string) => {
+  const tab = { id: `${toolId}:probe`, toolId, pinned: false };
+  useLayout.getState().setPanelTabs(appSessionId, { tabs: [...useLayout.getState().effectivePanelTabs(appSessionId), tab], activeTabId: tab.id });
+  return tab.id;
+};
 
 beforeEach(() => {
   resetShellStores();
@@ -119,6 +125,55 @@ describe('failed notification actions', () => {
 });
 
 describe('the fallback toast', () => {
+  it('uses the complete layout for the floating card and toasts only once that card closes', () => {
+    const fix = nine.attention.find((a) => a.appSessionId === idOf('Fix sidebar drag'))!.items[0];
+    const notify = () => fake.event('attention.notified', { appSessionId: fix.appSessionId, attentionId: fix.id, delivery: 'fallback', at: fix.createdAt });
+    useLayout.getState().openSession(fix.appSessionId);
+    showSurface(fix.appSessionId, 'terminal');
+    useLayout.getState().setPanel({ floating: true });
+    notify();
+    expect(useNotices.getState().notices).toEqual([]);
+    closeCard();
+    notify();
+    expect(useNotices.getState().notices.map((notice) => notice.id)).toEqual([`attention:${fix.id}`]);
+  });
+
+  it('counts the remembered context’s top Side slot while another tool is active, but not once that slot hides', () => {
+    const parent = idOf('Fix sidebar drag');
+    const child = idOf('Quota reset recovery');
+    const item = nine.attention.find((a) => a.appSessionId === child)!.items[0];
+    const notify = () => fake.event('attention.notified', { appSessionId: child, attentionId: item.id, delivery: 'fallback', at: item.createdAt });
+    useLayout.getState().openSession(parent);
+    showSurface(parent, 'side');
+    const terminal = showSurface(parent, 'terminal');
+    useLayout.getState().openTab({ kind: 'artifact', artifactId: 'doc' });
+    showSideChild(parent, child);
+    try {
+      notify();
+      expect(useNotices.getState().notices).toEqual([]);
+      useLayout.getState().setSurfaceStack(parent, [terminal]);
+      notify();
+      expect(useNotices.getState().notices.map((notice) => notice.id)).toEqual([`attention:${item.id}`]);
+    } finally { hideSideChild(parent, child); }
+  });
+
+  it('counts an Ask sheet in either slot rather than any open panel', () => {
+    const fix = nine.attention.find((a) => a.appSessionId === idOf('Fix sidebar drag'))!.items[0];
+    const question: AttentionItem = { ...fix, id: 'att-stacked-ask' as AttentionId, kind: 'question', request: { ...fix.request, requestId: 'req-stacked' as RequestId } };
+    act(() => useAttention.getState().applyChanged({ appSessionId: fix.appSessionId, items: [question] }));
+    applyAskEvents(fix.appSessionId, [askOpened('req-stacked')]);
+    useLayout.getState().openSession(fix.appSessionId);
+    showSurface(fix.appSessionId, ASK_SHEET_TOOL_ID);
+    const terminal = showSurface(fix.appSessionId, 'terminal');
+    useLayout.getState().openTab({ kind: 'file', path: '/p/a.ts', line: null, appSessionId: fix.appSessionId });
+    const notify = () => fake.event('attention.notified', { appSessionId: question.appSessionId, attentionId: question.id, delivery: 'fallback', at: question.createdAt });
+    notify();
+    expect(useNotices.getState().notices).toEqual([]);
+    useLayout.getState().setSurfaceStack(fix.appSessionId, [terminal]);
+    notify();
+    expect(useNotices.getState().notices.map((notice) => notice.id)).toEqual([`attention:${question.id}`]);
+  });
+
   it('reads "<title> needs you · <summary>" when delivery falls back, and its action opens the session', () => {
     const fix = nine.attention.find((a) => a.appSessionId === idOf('Fix sidebar drag'))!.items[0];
     fake.event('attention.notified', { appSessionId: fix.appSessionId, attentionId: fix.id, delivery: 'fallback', at: fix.createdAt });
@@ -173,6 +228,7 @@ describe('the fallback toast', () => {
     const notify = (item: AttentionItem) => fake.event('attention.notified', { appSessionId: item.appSessionId, attentionId: item.id, delivery: 'fallback', at: item.createdAt });
     const toasted = () => useNotices.getState().notices.map((n) => n.id);
     useLayout.getState().openSession(fix.appSessionId);
+    showSurface(fix.appSessionId, ASK_SHEET_TOOL_ID);
     useLayout.getState().setPanel({ maximized: true, collapsed: false });
     notify(fix); // the docked card is under the maximized panel
     expect(toasted()).toEqual([`attention:${fix.id}`]);
@@ -200,6 +256,7 @@ describe('the fallback toast', () => {
     useAttention.setState({ requests: new Map([[engineAsk.id, { ...askOpened('req-auq'), kind: 'question.requested' } as unknown as SessionEvent], [mawsAsk.id, askOpened('req-maws')]]) });
     const notify = (item: AttentionItem) => fake.event('attention.notified', { appSessionId: item.appSessionId, attentionId: item.id, delivery: 'fallback', at: item.createdAt });
     useLayout.getState().openSession(fix.appSessionId);
+    showSurface(fix.appSessionId, ASK_SHEET_TOOL_ID);
     useLayout.getState().setPanel({ maximized: false, collapsed: false });
     useLayout.getState().openTab({ kind: 'file', path: '/p/a.ts', line: null, appSessionId: fix.appSessionId });
     notify(engineAsk);
@@ -216,6 +273,7 @@ describe('the fallback toast', () => {
     const notify = () => fake.event('attention.notified', { appSessionId: child, attentionId: item.id, delivery: 'fallback', at: item.createdAt });
     const toasted = () => useNotices.getState().notices.map((n) => n.id);
     useLayout.getState().openSession(parent);
+    showSurface(parent, 'side');
     useLayout.getState().setPanel({ maximized: false, collapsed: false });
     showSideChild(parent, child);
     try {
@@ -313,6 +371,9 @@ it.each([
   ['next', 'floating'],
   ['notification', 'floating'],
 ] as const)('restores main when attention arrives through %s while the panel is %s', (via, state) => {
+  const idle = idOf('Settings idle probe');
+  useLayout.getState().openSession(idle);
+  showSurface(idle, 'terminal');
   useLayout.getState().setPanel({ [state]: true, collapsed: false, width: 444 });
   if (via === 'next') runAction('attention.next');
   else fake.event('attention.navigate', { appSessionId: idOf('Fix sidebar drag'), attentionId: null, source: 'notification' });

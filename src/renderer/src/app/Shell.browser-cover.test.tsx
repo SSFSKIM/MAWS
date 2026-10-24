@@ -1,5 +1,6 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { queryClient } from '../ipc/query';
 import { registerPanelTool } from '../panel/host';
@@ -61,6 +62,30 @@ afterEach(() => {
 });
 
 describe('native Browser views under shell overlays', () => {
+  it('covers the live main Browser under explicit Session cards only while the cards overlay it', async () => {
+    const user = userEvent.setup();
+    renderShell();
+    await frames();
+    expect(covers()).toEqual([]);
+    expect(screen.queryByRole('complementary', { name: 'Session cards' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Session cards' }));
+    await frames();
+    expect(screen.getByRole('complementary', { name: 'Session cards' })).toBeTruthy();
+    expect(mainPlaces().at(-1)!.rect).not.toBeNull();
+    expect(covers()).toEqual([true]);
+    await user.click(screen.getByRole('button', { name: 'Session cards' }));
+    await frames();
+    expect(screen.queryByRole('complementary', { name: 'Session cards' })).toBeNull();
+    expect(covers()).toEqual([true, false]);
+    await user.click(screen.getByRole('button', { name: 'Session cards' }));
+    await frames();
+    expect(covers()).toEqual([true, false, true]);
+    act(() => setWidth(1440));
+    await frames();
+    expect(screen.getByRole('complementary', { name: 'Session cards' })).toBeTruthy();
+    expect(covers()).toEqual([true, false, true, false]); // wide cards have their own reserved main-area column
+  });
+
   it('registers the automatic sidebar overlay with the cover lifecycle and lifts it on close or return to a docked sidebar', async () => {
     openSurface('review');
     renderShell();

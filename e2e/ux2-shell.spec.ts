@@ -6,7 +6,7 @@ import type { CommandInput, CommandName, CommandResult } from '../src/shared/ipc
 import { test, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu';
 import { sidebarRow } from './support/sidebar';
-import { closeSurface, openSurface } from './support/shell';
+import { closeSurface, openSurface, unfoldSessionCard } from './support/shell';
 
 const SIZES = [{ width: 1280, height: 820 }, { width: 1512, height: 982 }] as const;
 const ENV = {
@@ -122,6 +122,20 @@ test('UX2: plain-click stacking, same-tool tabs, and overflow icon pinning', asy
     await size(maws, width, height);
     await shot(maws, info, 'session-cards');
   }
+  // The approved expanded state uses the real session/git/connector/project Library reads, not screenshot-only data.
+  await expect.poll(async () => value(await invoke(page, 'engine.hostState', undefined)).state, { timeout: 20_000 }).toBe('ready');
+  const environment = await unfoldSessionCard(page, 'Environment');
+  const connectors = await unfoldSessionCard(page, 'Connectors');
+  const artifacts = await unfoldSessionCard(page, 'Artifacts');
+  await expect(environment).toContainText('/tmp/maws-harness/a');
+  await expect(environment.getByText('…', { exact: true })).toHaveCount(0); // git watch has answered
+  await expect(connectors.getByText('Connector status not reported', { exact: true })).toBeVisible();
+  await expect(artifacts.getByRole('combobox', { name: 'Artifacts project', exact: true })).toHaveValue('proj-harness');
+  await expect(artifacts.getByText('No artifacts in this project yet', { exact: true })).toBeVisible();
+  for (const { width, height } of SIZES) {
+    await size(maws, width, height);
+    await shot(maws, info, 'session-cards-expanded');
+  }
   await size(maws, 1280, 820);
   await openSurface(page, 'Terminal');
   await expect(surface(page, 'terminal').locator('[data-terminal-id]')).toBeVisible({ timeout: 15_000 });
@@ -158,6 +172,8 @@ test('UX2: plain-click stacking, same-tool tabs, and overflow icon pinning', asy
   // This part specifically tests toolbar pinning, so give the chrome room to retain the pinned icon.
   await size(maws, 1512, 982);
   await surfaces(page).getByRole('button', { name: 'More surfaces', exact: true }).click();
+  await expect(page.getByRole('menuitem', { name: 'Session info', exact: true })).toBeVisible();
+  await shot(maws, info, 'overflow-menu');
   await page.getByRole('menuitem', { name: 'Session info', exact: true }).click();
   await expect.poll(() => stack(page)).toEqual(['terminal', 'session-info']);
   const infoIcon = surfaces(page).getByRole('button', { name: 'Session info', exact: true });

@@ -284,7 +284,6 @@ test('the live run: the agent’s publish of a slide is seen as it is written, i
       .toBe(true);
     await expect.poll(() => page.evaluate(() => typeof (window as unknown as Partial<DeckSeam>).__maws_presentations), { message: 'the window’s presentations seam is installed' }).toBe('object');
     const pane = page.locator('[data-region="main"] [data-pane="0"]');
-    const panel = page.locator('[data-region="panel"]');
     await (await sidebarRow(page, { appSessionId: id })).click();
     await page.mouse.move(700, 20);
     await expect(pane.locator(`[data-composer="${id}"]`)).toBeVisible();

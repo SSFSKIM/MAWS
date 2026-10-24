@@ -31,6 +31,9 @@ export function Shell() {
   const cardsOverlay = useShellView((s) => s.cardsOverlay);
   const room = width - geometry.sidebar;
   const cards = session !== null && geometry.panel === 0 && !collapsed && (room >= 960 || cardsOverlay);
+  // Wide cards reserve a column below; explicitly opened narrow cards overlay main's native pages.
+  const cardsCover = cards && room < 960;
+  useEffect(() => cardsCover ? holdCover() : undefined, [cardsCover]);
   useEffect(() => { useShellView.setState({ sidebarOverlay: false }); }, [active]);
   return (
     <div data-shell className="relative grid h-full grid-rows-[var(--toolbar-h)_auto_minmax(0,1fr)] bg-bg text-fg" style={{ gridTemplateColumns: geometry.columns }}>

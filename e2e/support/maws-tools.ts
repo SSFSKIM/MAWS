@@ -367,7 +367,7 @@ export async function openArtifacts(s: Scene): Promise<void> {
     if (await back.count()) await back.click();
   } else {
     const rows = value(await invoke(s.page, 'library.list', {})).rows;
-    let artifactId = rows.find((row) => row.kind !== 'design-system')?.id;
+    let artifactId = rows.find((row) => row.kind !== 'design_system')?.id;
     const temporary = artifactId === undefined;
     if (!artifactId) artifactId = value(await invoke(s.page, 'artifacts.create', { kind: 'document', title: 'Artifact list navigation fixture' })).artifact.id;
     const record = await openArtifactInPanel(s.page, artifactId);

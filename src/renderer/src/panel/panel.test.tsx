@@ -217,32 +217,33 @@ describe('surface icons and same-tool tabs', () => {
     expect(pinIds()).toEqual([id]);
   });
 
-  it('More surfaces can show, pin, unpin and close a saved unavailable tool without deleting its ref on hide', async () => {
+  it('the More surfaces keyboard submenu can show, pin, unpin and close a saved unavailable tool without deleting its ref on hide', async () => {
     const user = userEvent.setup();
     const saved = ref('files:aaaaaaaa');
     useLayout.setState({ panelBySession: new Map([[A, { tabs: [saved], activeTabId: null }]]) });
     renderHost();
-    const openSavedMenu = async () => {
+    const chooseSaved = async (name: string) => {
       await user.click(icon('More surfaces'));
-      await user.click(await screen.findByRole('menuitem', { name: 'files (unavailable)' }));
+      const trigger = await screen.findByRole('menuitem', { name: 'files (unavailable)' });
+      act(() => trigger.focus());
+      await user.keyboard('{ArrowRight}');
+      const action = await screen.findByRole('menuitem', { name });
+      act(() => action.focus());
+      await user.keyboard('{Enter}');
     };
-    await openSavedMenu();
-    await user.click(await screen.findByRole('menuitem', { name: 'Show saved surface' }));
-    expect(screen.getByRole('tabpanel', { name: 'files' }).textContent).toBe('files is not available');
+    await chooseSaved('Show saved surface');
     expect(panelOf(A)!.activeTabId).toBe(saved.id);
-    await openSavedMenu();
-    await user.click(await screen.findByRole('menuitem', { name: 'Keep open for every session' }));
+    expect(screen.getByRole('tabpanel', { name: 'files' }).textContent).toBe('files is not available');
+    await chooseSaved('Keep open for every session');
     expect(pinIds()).toEqual([saved.id]);
     expect(panelOf(A)!).toEqual({ tabs: [], activeTabId: saved.id });
     await user.click(screen.getByRole('button', { name: 'Close surface' }));
     expect(screen.queryByRole('tabpanel')).toBeNull();
     expect(pinIds()).toEqual([saved.id]);
-    await openSavedMenu();
-    await user.click(await screen.findByRole('menuitem', { name: 'Keep with this session only' }));
+    await chooseSaved('Keep with this session only');
     expect(pinIds()).toEqual([]);
     expect(panelOf(A)!.tabs).toEqual([saved]);
-    await openSavedMenu();
-    await user.click(await screen.findByRole('menuitem', { name: 'Close saved tab' }));
+    await chooseSaved('Close saved tab');
     await waitFor(() => expect(panelOf(A)!.tabs).toEqual([]));
     expect(panelOf(A)!.activeTabId).toBeNull();
     await user.click(icon('More surfaces'));

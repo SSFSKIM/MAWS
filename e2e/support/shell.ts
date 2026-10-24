@@ -1,6 +1,8 @@
 // Shell navigation only. Tests keep their assertions about the feature itself at the call site;
 // chrome placement and the route to an optional surface belong here.
 import { expect, type Locator, type Page } from '@playwright/test';
+import { applicationOf } from './launch';
+import { menu } from './menu';
 
 export const surfaceRow = (page: Page): Locator => page.locator('[data-surface-row]');
 export const surface = (page: Page, toolId: string): Locator => page.locator(`[data-surface="${toolId}"]`);
@@ -39,7 +41,7 @@ export async function closeSurface(page: Page, name: string): Promise<void> {
 export async function hideSurfaces(page: Page): Promise<void> {
   // Collapse, rather than close the retained tools. The public default action works even when all icons have folded.
   const panel = page.locator('[data-region="panel"]:not([inert])');
-  if (await panel.count() || await sessionCards(page).isVisible()) await page.keyboard.press('Meta+Shift+b');
+  if (await panel.count() || await sessionCards(page).isVisible()) await menu(applicationOf(page), 'panel.toggle');
 }
 
 export async function showSessionCards(page: Page): Promise<Locator> {
@@ -76,7 +78,7 @@ export async function pinSurfaceForSessions(page: Page, name: string, pinned = t
 
 export async function openArtifactInPanel(page: Page, artifactId: string): Promise<Locator> {
   const library = page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true });
-  if (!await library.isVisible()) await page.keyboard.press('Meta+b');
+  if (!await library.isVisible()) await menu(applicationOf(page), 'sidebar.toggle');
   await library.click();
   await page.locator(`[data-library] article[data-artifact-row="${artifactId}"]`).click();
   return moveMainArtifactToPanel(page, artifactId);

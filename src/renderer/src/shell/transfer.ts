@@ -111,7 +111,7 @@ export function transferRefusal(request: TransferRequest): string | null {
   if (request.to === 'panel') {
     const tab = allTabs(layout().main).find((t) => t.id === request.mainTabId);
     if (tab?.kind !== 'artifact') return TRANSFER_COPY.notArtifact;
-    if (libraryRow(library.getState(), tab.artifactId).value === undefined) return TRANSFER_COPY.loading;
+    if (libraryRow(library.getState(), tab.artifactId).value == null) return TRANSFER_COPY.loading;
     const session = panelSessionForArtifact(request.mainTabId);
     if (session === null) return TRANSFER_COPY.noProjectSession;
     if (!canShowArtifactInPanel(session)) return TRANSFER_COPY.noPanel;
