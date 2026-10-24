@@ -101,11 +101,3 @@ export async function openFromLibrary(page: Page, title: string, artifactId: str
   return tab;
 }
 
-/** A header action by its label: its button, or its entry under More actions when the header folded it there. */
-export async function headerAction(page: Page, label: string): Promise<void> {
-  const header = page.locator('[data-region="main"] [data-editor-header]');
-  const button = header.getByRole('button', { name: label, exact: true });
-  if (await button.isVisible()) return button.click();
-  await header.getByRole('button', { name: 'More actions', exact: true }).click();
-  await page.getByRole('menuitemcheckbox', { name: label }).or(page.getByRole('menuitem', { name: label })).click();
-}

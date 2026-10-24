@@ -37,7 +37,7 @@ import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import type { AppSessionId } from '@shared/graph/ids';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
-import { accentBand, ACCENT_DECK, deckHeadline, headerAction, highlightMix, insertThroughEditor, markedBand, markedColor, markElement, openFromLibrary, paintedColor, READING_PASSAGE, recolourThroughReplica, unacknowledged } from './support/design-restyle';
+import { accentBand, ACCENT_DECK, deckHeadline, highlightMix, insertThroughEditor, markedBand, markedColor, markElement, openFromLibrary, paintedColor, READING_PASSAGE, recolourThroughReplica, unacknowledged } from './support/design-restyle';
 import { allowNext, fixtureRows, mcpResultOf, ofKind, PASS3, resultText, scene, show, type Frame, type McpResult, type Scene } from './support/maws-tools';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string; issues?: unknown } };
@@ -334,7 +334,8 @@ test('the real document and deck editors restyle with their system’s live toke
   });
 
   await test.step('the deck’s retained version previews in the accent it pinned', async () => {
-    await headerAction(page, 'Version history');
+    // UX2-L keeps document tools in the editor, not the shell's artifact header.
+    await deckTab.getByRole('toolbar', { name: 'Deck', exact: true }).getByRole('button', { name: 'Version history', exact: true }).click();
     await deckTab.getByRole('complementary', { name: 'Version history' }).getByRole('button', { name: /^Version Handed out/ }).click();
     await expect(deckTab.getByRole('toolbar', { name: 'Version preview' })).toBeVisible({ timeout: 10_000 });
     await expect.poll(() => paintedColor(deckHeadline(deckTab.locator('[data-history-stage]'))), { timeout: 10_000, message: 'the version keeps its accent' }).toBe(BEFORE);
@@ -342,7 +343,7 @@ test('the real document and deck editors restyle with their system’s live toke
 
   await test.step('the document’s retained version previews in the accent it pinned', async () => {
     await openFromLibrary(page, 'Reading list', doc.id, DOC_DRAWN);
-    await headerAction(page, 'Version history');
+    await docTab.getByRole('toolbar', { name: 'Formatting', exact: true }).getByRole('button', { name: 'Version history', exact: true }).click();
     await docTab.getByRole('complementary', { name: 'Version history' }).getByRole('button', { name: /^Version Handed out/ }).click();
     await expect(docTab.getByRole('toolbar', { name: 'Version preview' })).toBeVisible({ timeout: 10_000 });
     const versionBand = docTab.locator('.ds-doc[data-preview] [data-editor="preview"] mark', { hasText: 'the course reader' });
