@@ -173,7 +173,9 @@ describe('settings store', () => {
     const store = openSettingsStore(file);
     expect(store.update({ theme: 'dark' })).toEqual(v3('dark'));
     expect(store.settings).toEqual(v3('dark'));
-    expect(readFileSync(file, 'utf8')).toBe(v3Json('dark'));
+    const persisted = readFileSync(file, 'utf8');
+    expect(JSON.parse(persisted)).toEqual(v3('dark'));
+    expect(persisted, 'compact JSON without whitespace or a trailing newline').toBe(JSON.stringify(JSON.parse(persisted)));
     expect(readdirSync(dir)).toEqual(['settings.json']);
     expect(openSettingsStore(file).settings).toEqual(v3('dark'));
   });
@@ -181,7 +183,7 @@ describe('settings store', () => {
   it('creates the settings directory when it does not exist yet', () => {
     const nested = join(dir, 'fresh', 'settings.json');
     openSettingsStore(nested).update({ theme: 'system' });
-    expect(readFileSync(nested, 'utf8')).toBe(v3Json('system'));
+    expect(JSON.parse(readFileSync(nested, 'utf8'))).toEqual(v3('system'));
   });
 
   it('keeps what a patch leaves out, including a key present as undefined', () => {

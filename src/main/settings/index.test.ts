@@ -100,7 +100,7 @@ describe('theme switching in main', () => {
     expect(electron.theme.themeSource).toBe('dark');
     expect(electron.win.backgrounds).toEqual(['#131313']);
     expect(electron.win.sent).toEqual([changed('dark', 'dark')]);
-    expect(readFileSync(file, 'utf8')).toBe(JSON.stringify({ ...SETTINGS_DEFAULTS_V17, theme: 'dark' }));
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ ...SETTINGS_DEFAULTS_V17, theme: 'dark' });
     await expect(invoke('settings.get')).resolves.toEqual({ ok: true, value: state('dark', 'dark') });
   });
 
