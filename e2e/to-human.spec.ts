@@ -71,14 +71,15 @@ test('legacy mark text stays unboxed; attention jumps and owner-channel read/ans
     await expect(question).toContainText(TO_HUMAN.question);
     await expect.poll(turn).not.toBeNull();
 
-    // Leaving the tab: the row's glyph is the question's; Needs you reads the oldest item, turn 1's must-read.
+    // Leaving the tab: the row's glyph is the question's; the compact Needs-you row names the oldest item for assistive tech.
     await (await sidebarRow(page, { appSessionId: other })).click();
     await page.mouse.move(700, 450);
     await expect(pane.locator(`[data-composer="${other}"]`)).toBeVisible();
     await expect((await sidebarRow(page, { appSessionId: asking })).getByRole('img', { name: 'Question waiting' })).toBeVisible();
     await page.mouse.move(700, 450);
     const needs = page.getByRole('list', { name: 'Needs you' }).locator(`[data-needs-you="${asking}"]`);
-    await expect(needs).toContainText(`Must read — ${TO_HUMAN.essential}`);
+    await expect(needs).toHaveAccessibleName(`repo · a session that asks · Must read — ${TO_HUMAN.essential}`);
+    await expect(needs).not.toContainText(TO_HUMAN.essential);
 
     // The Needs-you row opens the session at the mark, in the report. P3-F (tracker row 199, the must-read): a focus that
     // never lands reports the page's focus timeline, its frame rate and the window's state.
@@ -105,7 +106,7 @@ test('legacy mark text stays unboxed; attention jumps and owner-channel read/ans
     const asked = (await ownerState()).marks.find((mark) => mark.kind === 'need-input')!;
     value(await invoke(page, 'ownerChannel.markRead', { appSessionId: asking as never, markIds: [essential.id] }));
     await expect.poll(async () => (await ownerState()).marks.find((mark) => mark.id === essential.id)?.essential?.state).toBe('read');
-    await expect(needs).toContainText(`Question — ${TO_HUMAN.question}`);
+    await expect(needs).toHaveAccessibleName(`repo · a session that asks · Question — ${TO_HUMAN.question}`);
     await expect(question.getByRole('button')).toHaveCount(0);
 
     await composer.click();
