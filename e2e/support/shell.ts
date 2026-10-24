@@ -4,7 +4,7 @@ import { expect, type Locator, type Page } from '@playwright/test';
 import { applicationOf } from './launch';
 import { menu } from './menu';
 
-export const surfaceRow = (page: Page): Locator => page.locator('[data-surface-row]');
+export const surfaceRow = (page: Page): Locator => page.locator('[data-surface-row][role="toolbar"]');
 export const surface = (page: Page, toolId: string): Locator => page.locator(`[data-surface="${toolId}"]`);
 export const mainTabs = (page: Page): Locator => page.locator('[data-chrome-tabs]');
 export const mainTab = (page: Page, name: string | RegExp): Locator => mainTabs(page).getByRole('tab', { name, exact: typeof name === 'string' });
