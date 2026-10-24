@@ -113,7 +113,7 @@ export function recentTurnsOf(text: string, limit: number, cut: boolean): Recent
       } else if (event.kind === 'user.message') {
         // the prompt that opened the turn: a human's, never a synthetic, a peer's, a task notification's, a marker, a
         // command's output or a bash command's output (the turn it opens shows nothing)
-        if (event.isSynthetic || event.origin !== null || commandOutput || event.bash?.part === 'output') continue;
+        if (event.isSynthetic || (event.origin !== null && event.origin !== 'human') || commandOutput || event.bash?.part === 'output') continue;
         const building = current();
         const text = promptText(event);
         if (building.turn.prompt === null && text !== '') building.turn.prompt = { text: text.slice(0, RECENT_TURN_PROMPT_MAX), at: event.at };

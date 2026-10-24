@@ -49,10 +49,10 @@ const turnsOf = (state: TranscriptState) => state.order.map((id) => state.turns.
 describe('C4 backfill through the transcript model', () => {
   // The M2 pin read "human turns only": C4's landed backfill gives each `<task-notification>` record the X1 engine origin
   // `task-notification`, so the two follow-up turns are engine turns (positive evidence), as in the live pass1/subagent.
-  it('subagent-parent: the prompt’s turn human (null origin) with its user row and the Agent calls as one subagent row, no Agent cell; the two task-notification turns engine, no bubble, Continued', async () => {
+  it('subagent-parent: the prompt’s turn retains its human origin, user row and Agent calls as one subagent row, no Agent cell; the two task-notification turns engine, no bubble, Continued', async () => {
     const SESSION = '9a1d4262-0b43-46ad-acb9-5982f31d209c';
     const events = await backfillFixture('subagent-parent', SESSION, sidecars(SESSION));
-    expect(events.filter((e) => e.kind === 'turn.started').map((e) => e.kind === 'turn.started' && e.origin)).toEqual([null, 'task-notification', 'task-notification']);
+    expect(events.filter((e) => e.kind === 'turn.started').map((e) => e.kind === 'turn.started' && e.origin)).toEqual(['human', 'task-notification', 'task-notification']);
     const state = stateOf(events);
     const turns = turnsOf(state);
     expect(turns.map((turn) => [turn.origin, turn.state, turn.closedBy])).toEqual([['human', 'closed', 'completed'], ['engine', 'closed', 'completed'], ['engine', 'closed', 'completed']]);
@@ -87,7 +87,7 @@ describe('C4 backfill through the transcript model', () => {
   it('interrupt-marker (C4 landed the ask): no marker bubble, no turn of its own, and the interrupted turn closes stopped', async () => {
     const events = await backfillFixture('interrupt-marker', '68646e1f-b5ba-4d72-bdae-3fd5f7f3ec46');
     expect(events.filter((e) => e.kind === 'turn.started')).toHaveLength(1); // C4 opens no turn for the marker
-    expect(events.filter((e) => e.kind === 'user.message').map((e) => e.kind === 'user.message' && e.origin)).toEqual([null, 'interrupt-marker']);
+    expect(events.filter((e) => e.kind === 'user.message').map((e) => e.kind === 'user.message' && e.origin)).toEqual(['human', 'interrupt-marker']);
     const state = stateOf(events);
     expect(state.order).toHaveLength(1);
     expect(turnsOf(state)[0]).toMatchObject({ state: 'closed', closedBy: 'stopped' }); // the marker is its evidence
