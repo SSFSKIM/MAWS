@@ -3,7 +3,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { status } from '../test/support/builders';
+import { parseScenario } from '../test/support/scenario';
 import { scratchMarketplace, writePluginCliStub } from '../test/support/plugin-cli-stub';
 import { expect, type Locator, type Page, type TestInfo } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '../src/shared/ipc/schema';
@@ -103,7 +103,8 @@ test('Chrome measurements: document, deck and live Customize at both desktop siz
   const scenario = JSON.parse(readFileSync(join(REPO_ROOT, 'test/fixtures/panel/harness-sessions.json'), 'utf8'));
   scenario.projects[0].directory = directory;
   scenario.sessions.forEach((record: { directory: string; worktree: unknown }) => { record.directory = directory; record.worktree = null; });
-  scenario.engine = [{ ...status('A'), cwd: directory }];
+  scenario.engine = [{ appSessionId: 'A', process: 'ready', engineState: 'idle', turn: null, pendingRequests: 0 }];
+  expect(parseScenario(scenario).engine[0]?.cwd).toBe(directory);
   const source = join(root, 'scenario.json');
   writeFileSync(source, JSON.stringify(scenario));
   const plugins = [{ name: 'chrome-review', version: '1.0.0', description: 'Review the working narrative.' }];
