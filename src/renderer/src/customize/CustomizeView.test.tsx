@@ -83,9 +83,15 @@ it('keeps disk skill names as display metadata without inventing user or plugin 
     const label = open.closest('li')!.querySelector('[data-skill-name]')!;
     expect(label.textContent).toBe(name);
     expect(label.getAttribute('title')).toBeNull();
+    const tile = open.closest('li')!.querySelector('span[aria-hidden]')!;
+    expect(tile.textContent?.trim()).not.toBe('/');
+    expect(tile.querySelector('svg')).not.toBeNull();
     fireEvent.click(open);
     const detail = document.querySelector<HTMLElement>('[data-skill-detail]')!;
     expect(within(detail).getByRole('heading', { name })).toBeTruthy();
+    const detailTile = detail.querySelector('span[aria-hidden]')!;
+    expect(detailTile.textContent?.trim()).not.toBe('/');
+    expect(detailTile.querySelector('svg')).not.toBeNull();
     expect(within(detail).queryByText('Type')).toBeNull();
     expect(within(detail).queryByText(`/${name}`)).toBeNull();
     expect(within(detail).queryByRole('button', { name: 'Use in chat' })).toBeNull();
@@ -104,8 +110,10 @@ it('retains the engine-qualified invocation and Use in chat for the live Skills 
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><SkillsWidget appSessionId={live.appSessionId} args="" close={() => {}} /></QueryClientProvider>);
   const open = await screen.findByRole('button', { name: 'View review' });
   expect(open.closest('li')!.querySelector('[data-skill-name]')!.getAttribute('title')).toBe('/reports:review');
+  expect(open.closest('li')!.querySelector('span[aria-hidden]')!.textContent?.trim()).toBe('/');
   fireEvent.click(open);
   const detail = document.querySelector<HTMLElement>('[data-skill-detail]')!;
+  expect(detail.querySelector('span[aria-hidden]')!.textContent?.trim()).toBe('/');
   expect(within(detail).getByText('Type')).toBeTruthy();
   expect(within(detail).getByText('/reports:review')).toBeTruthy();
   expect(within(detail).getByRole('button', { name: 'Use in chat' })).toBeTruthy();

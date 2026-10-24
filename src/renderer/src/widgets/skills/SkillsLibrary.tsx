@@ -6,7 +6,7 @@
 // text: in MAWS it would open another widget. "Use in chat" closes the dialog and puts `/<name> ` at the composer's caret,
 // sending nothing (§5.10; Desktop's local Code library has no such action, §11).
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { SortIcon } from '../../app/IconButton';
+import { Icon, SortIcon } from '../../app/IconButton';
 import { LIBRARY as L, PLUGIN_MANAGEMENT, SKILLS_LIBRARY as S } from '../copy';
 import { BackButton, backOnChord } from '../plugins/PluginDetail';
 import { Choice, SearchField } from '../plugins/LibraryHeader';
@@ -36,11 +36,11 @@ export function SkillsToolbar({ plugins, canReload, reloading, onReload }: { plu
   );
 }
 
-// A neutral tile with the slash a skill is typed with (the skills carry no icon).
-function SkillTile({ size = 'size-9' }: { size?: string }) {
+// Only a verified invocation earns the slash; disk metadata uses a neutral document glyph.
+function SkillTile({ invocable, size = 'size-9' }: { invocable: boolean; size?: string }) {
   return (
     <span aria-hidden className={`flex ${size} shrink-0 items-center justify-center rounded-md border border-border bg-bg-active font-mono text-ui text-fg-muted`}>
-      /
+      {invocable ? '/' : <Icon><path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3M6 8h4M6 10.5h4" /></Icon>}
     </span>
   );
 }
@@ -69,7 +69,7 @@ function SkillItem({ row, onOpen, onUse }: { row: SkillRow; onOpen(row: SkillRow
       }}
     >
       <button type="button" data-row-open aria-label={L.view(label)} className="absolute inset-0 rounded-sm outline-accent -outline-offset-2 focus-visible:outline-2" />
-      <SkillTile />
+      <SkillTile invocable={invocation !== null} />
       <div className="relative flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex min-w-0 items-center gap-2">
           <span data-skill-name className="truncate font-medium text-fg" title={invocation === null ? undefined : `/${invocation}`}>
@@ -104,7 +104,7 @@ function SkillDetail({ row, onBack, onUse }: { row: SkillRow; onBack(): void; on
     <div ref={root} tabIndex={-1} data-skill-detail={row.name} onKeyDown={backOnChord(onBack)} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-2 pb-3 outline-none">
       <BackButton to={S.list} onBack={onBack} />
       <div className="flex items-center gap-3">
-        <SkillTile size="size-11" />
+        <SkillTile invocable={invocation !== null} size="size-11" />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <h3 className="m-0 truncate text-prose font-semibold text-fg">{labelOf(row)}</h3>
         </div>
