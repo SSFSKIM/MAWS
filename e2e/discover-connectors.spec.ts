@@ -6,12 +6,20 @@
 //            and reads the MCP resource with the token. Around it, the Keychain custody of a scratch configuration
 //            directory: its exact item (fact 2) absent before and claimed, then released after (no engine ran), the
 //            Keychain left as it was found.
-import { mkdtempSync, rmSync } from 'node:fs';
+//   spike:   M4's sign-in spike (spikes/p4-aggregator/m4-signin-spike.mjs), run on the Mac lane only (Decision Log 6):
+//            the engine under the runner's HOME and a scratch CLAUDE_CONFIG_DIR, the fixture in engine mode, the one
+//            Keychain item that directory names claimed before and released after every engine the probe started has
+//            exited. The test records the answers; the verdict is read from them (it passes whatever they are, once the
+//            Keychain is left as found).
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { engineKeychainCustody, readOAuthLog, startOAuthFixture, summarizeOAuthLog, type OAuthFixture } from './support/connector-oauth';
+import { isAlive } from './support/processes';
+import { realEngine } from './support/real-engine';
 
 test.skip(process.env.MAWS_DISCOVER_E2E !== '1', 'the Discover e2e runs under pnpm e2e:discover (MAWS_DISCOVER_E2E=1)');
 
@@ -64,4 +72,48 @@ test('oauth fixture, engine mode: a localhost-redirect token exchange from a pla
 
   await fixture.close();
   expect(custody.release({ enginePids: [] })).toEqual({ service: custody.service, found: false, deleted: false });
+});
+
+// eslint-disable-next-line no-empty-pattern -- Playwright requires the fixtures argument to be destructured
+test('spike: the engine\'s own MCP sign-in over the control protocol, against the engine-mode fixture', async ({}, testInfo) => {
+  test.skip(process.platform !== 'darwin', 'the sign-in spike runs on the Mac lane alone (Decision Log 6)');
+  test.setTimeout(600_000);
+  const { bin } = realEngine();
+  const configDir = join(root, 'claude-config'); // the string the engine is given, so the item's name derives from it as written
+  const project = join(root, 'project');
+  mkdirSync(configDir, { recursive: true });
+  mkdirSync(project, { recursive: true });
+  writeFileSync(join(configDir, '.claude.json'), `${JSON.stringify({ hasCompletedOnboarding: true, projects: { [project]: { hasTrustDialogAccepted: true, hasCompletedProjectOnboarding: true } } }, null, 2)}\n`);
+  const outDir = join(root, 'spike');
+  const custody = engineKeychainCustody(configDir);
+  custody.claim();
+  const pids = () => (existsSync(join(outDir, 'pids.txt')) ? readFileSync(join(outDir, 'pids.txt'), 'utf8').split('\n').filter(Boolean).map(Number) : []);
+  let released: ReturnType<typeof custody.release> | null;
+  try {
+    fixture = await startOAuthFixture({ root, id: 'spike', mode: 'engine' });
+    const inputFile = join(root, 'spike-input.json');
+    writeFileSync(inputFile, JSON.stringify({ bin, configDir, project, resourceUrl: fixture.resourceUrl, outDir }));
+    const probe = spawnSync(process.execPath, [resolve(__dirname, '../spikes/p4-aggregator/m4-signin-spike.mjs'), inputFile], { encoding: 'utf8', timeout: 540_000 });
+    console.log(`spike probe exit ${probe.status} ${probe.signal ?? ''}\n${probe.stderr.slice(-4000)}`);
+  } finally {
+    for (const pid of pids()) if (isAlive(pid)) process.kill(pid, 'SIGKILL');
+    const until = Date.now() + 15_000;
+    while (pids().some(isAlive) && Date.now() < until) await new Promise((r) => setTimeout(r, 250));
+    const log = fixture === null ? [] : readOAuthLog(fixture);
+    await fixture?.close();
+    fixture = null;
+    released = custody.release({ enginePids: pids() });
+    const oauth = summarizeOAuthLog(log).oauth;
+    const fixtureSide = { registrations: oauth.registrations, authorizations: oauth.authorizations, codeExchanges: oauth.codeExchanges, refreshes: oauth.refreshes, unauthorized: oauth.unauthorized, refusals: oauth.refusals, byRoute: oauth.byRoute, mcp: oauth.mcp };
+    const result = existsSync(join(outDir, 'result.json')) ? (JSON.parse(readFileSync(join(outDir, 'result.json'), 'utf8')) as Record<string, unknown>) : null;
+    const debugLines = existsSync(outDir)
+      ? Object.fromEntries(readdirSync(outDir).filter((f) => f.startsWith('debug-')).map((f) => [f, readFileSync(join(outDir, f), 'utf8').split('\n').filter((l) => /fx-|oauth|keychain|credential|secure storage|redirect|persist|security/i.test(l)).map((l) => l.replace(/[A-Za-z0-9_\-.]{32,}/g, '[REDACTED]').slice(0, 300)).slice(0, 200)]))
+      : {};
+    const verdictInput = { custody: released, fixture: fixtureSide, result };
+    console.log(`spike result ${JSON.stringify(verdictInput)}`);
+    await testInfo.attach('spike-result.json', { body: JSON.stringify(verdictInput, null, 2), contentType: 'application/json' });
+    if (existsSync(join(outDir, 'frames.jsonl'))) await testInfo.attach('spike-frames.jsonl', { path: join(outDir, 'frames.jsonl'), contentType: 'application/x-ndjson' });
+    await testInfo.attach('spike-debug-lines.json', { body: JSON.stringify(debugLines, null, 2), contentType: 'application/json' });
+  }
+  expect(released).toMatchObject({ service: custody.service });
 });
