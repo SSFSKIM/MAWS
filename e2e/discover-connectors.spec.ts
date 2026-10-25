@@ -20,7 +20,7 @@
 //            11's Connectors side, in discover.spec.ts's offline case.
 //   sign-in: acceptance 9, on the Mac lane alone (Decision Log 13), under the runner's HOME (its login keychain) and a
 //            scratch CLAUDE_CONFIG_DIR, against the engine-mode fixture: (a) S1 running, a server added, signed in from
-//            S1 ("available in new sessions"), then S2 reads it connected; (b) in S2, started after the add: a consent
+//            S1 (its line as S1's own status reads it), then S2 reads it connected; (b) in S2, started after the add: a consent
 //            delayed by 15 s completes "connected here"; Cancel then a retry; a second press; S2 stopped mid-flow; with
 //            no ready session, the "Open a session" words. The scratch directory's exact Keychain item is claimed before
 //            any engine runs and released after the app and both sessions have exited.
@@ -315,11 +315,18 @@ test('sign-in: S1 then S2, connected here after a delayed consent, Cancel and a 
     await openConnectors(page, 'My items');
 
     const s1 = await startSession();
-    await test.step('(a) with S1 running, a server added and signed in from S1: available in new sessions; S2 reads it connected', async () => {
+    await test.step('(a) with S1 running, a server added and signed in from S1; S2 reads it connected', async () => {
       addServer('fx-a');
       await refresh(['fx-a']);
       await consent(await signIn('fx-a'));
-      await expect(state('fx-a')).toHaveText('Signed in · available in new sessions', { timeout: 60_000 });
+      // The result line follows S1's own mcp_status (Decision Log 14). Measured on 2.1.309 (gate run 40180917266): once
+      // the engine's config poll has read the server, the reconnect after the callback loads it into S1 as well, so S1
+      // reads it connected, not only the sessions started after.
+      await expect(state('fx-a')).toHaveText(/^Signed in · (connected here|available in new sessions)$/, { timeout: 60_000 });
+      const here = (await state('fx-a').innerText()) === 'Signed in · connected here';
+      if (here) expect(await statusIn(s1, 'fx-a'), 'connected here: S1 reads it connected').toBe('connected');
+      else expect(await statusIn(s1, 'fx-a'), 'available in new sessions: S1 does not read it connected').not.toBe('connected');
+      await test.info().attach('acceptance-9a-s1.json', { body: JSON.stringify({ line: await state('fx-a').innerText(), s1: await statusIn(s1, 'fx-a') }), contentType: 'application/json' });
     });
 
     for (const name of ['fx-b', 'fx-c', 'fx-d', 'fx-e']) addServer(name);
