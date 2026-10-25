@@ -663,6 +663,10 @@ Test seams (M1):
   Rationale: the M2 task review's five findings and the second live walk's classification of the 33 servers the first walk missed.
   Date/Author: 2026-10-25, the executing session.
 
+- Decision: one discovery surface, following the owner's ruling that Discover is the place to find new things (architect, 2026-10-25). The session `/plugins` modal's Browse becomes "Open Discover", which opens Customize → Plugins → Discover for the session's `cwd`; the modal keeps its installed view. Icons (Decision Log 7(b)) are approved on two routes as M3 measured them: `https://api.anthropic.com` `^/api/directory/plugin-icons/[0-9a-f]{64}/256\.png$`, no query, `image/png`, 512 KiB; `https://storage.googleapis.com` `^/media-assets-299d7136-cb52-d546-ee02-34bc1307c35f/mcp-directory/icons/[A-Za-z0-9._-]{1,100}\.(?:png|svg)$`, no query, `image/png` and `image/svg+xml`, 512 KiB. An icon renders only as `<img src="data:…">`, never inline SVG, `innerHTML` or `<object>`, so an SVG's scripts and external references neither run nor load; a test pins it with an SVG carrying a script and an external href.
+  Rationale: two discovery surfaces with different data would contradict the ruling; an image element is the one SVG context that runs nothing.
+  Date/Author: 2026-10-25, the architect, recorded by the executing session.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
