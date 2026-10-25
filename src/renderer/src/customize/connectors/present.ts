@@ -74,6 +74,15 @@ export const scopesFor = (cwd: string | null): PluginsScope[] => (cwd === null ?
 export const writesFor = (scope: PluginsScope, where: { globalConfig: string; cwd: string }): string => (scope === 'project' ? `${where.cwd.replace(/\/$/, '')}/.mcp.json` : where.globalConfig);
 
 const ENGINE_SCOPES: ReadonlySet<string> = new Set(PLUGINS_SCOPES);
+
+/** Where `mcp remove` must run for this entry, or null for the page's directory: a project entry lives in the `.mcp.json`
+ * it was read from, which may be a parent directory's (the inventory reads every ancestor's), and the CLI removes from
+ * the `.mcp.json` of the directory it runs in. A local entry is the page's project's; a user one is anywhere's. */
+export function removalDirectoryOf(server: CustomizationServer): string | null {
+  if (server.scope !== 'project') return null;
+  const parent = server.path.slice(0, server.path.lastIndexOf('/'));
+  return parent === '' ? '/' : parent;
+}
 export function removeRequestOf(server: CustomizationServer): PluginsRequest | null {
   if (!ENGINE_SCOPES.has(server.scope)) return null;
   return requestFor('mcp-remove', { name: server.name, scope: server.scope as PluginsScope }, null);
@@ -98,8 +107,9 @@ export function shadowedBy(server: CustomizationServer, servers: readonly Custom
 
 export const shadowWords = (scope: CustomizationServer['scope'], name: string): string => (scope === 'app' ? C.shadowedByMaws(name) : C.shadowed(scope));
 
-/** The key a configured server's operations run under (Remove), by scope and name. */
-export const serverKey = (server: Pick<CustomizationServer, 'name' | 'scope'>): string => `connector:${server.scope}:${server.name}`;
+/** The key a configured server's operations run under (Remove): its scope, name and file, since two project files may
+ * configure one name. */
+export const serverKey = (server: Pick<CustomizationServer, 'name' | 'scope' | 'path'>): string => `connector:${server.scope}:${server.name}:${server.path}`;
 
 // ---- signing in ------------------------------------------------------------------------------------------------------
 

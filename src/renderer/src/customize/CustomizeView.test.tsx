@@ -435,6 +435,20 @@ describe('Connectors', () => {
     await waitFor(() => expect(backend.calls.filter((call) => call.command === 'connectors.remove').map((call) => call.input)).toEqual([{ cwd: '/one', binary: '/engine/claude', name: 'notion', scope: 'user' }]));
   });
 
+  it('Remove of an entry from a parent directory’s .mcp.json runs in that directory and names that file (sweep#2)', async () => {
+    backend.script('plugins.env', () => ({ binary: '/engine/claude', binaryError: null, configHome: '/config', globalConfig: '/config/.claude.json' }));
+    backend.script('connectors.remove', () => ({ opId: 'remove-1' }));
+    backend.script('customization.inventory', () => ({ skills: [], servers: [{ name: 'notion', scope: 'project', path: '/.mcp.json', transport: 'http' }], warnings: [], serversRead: true }));
+    mountWith(fresh());
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove notion' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Remove notion?' });
+    await within(sheet).findByText('claude mcp remove notion --scope project');
+    expect(within(sheet).getByText('/.mcp.json')).toBeTruthy(); // the file the entry is in, not /one/.mcp.json
+    fireEvent.click(within(sheet).getByRole('checkbox'));
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(backend.calls.filter((call) => call.command === 'connectors.remove').map((call) => call.input)).toEqual([{ cwd: '/', binary: '/engine/claude', name: 'notion', scope: 'project' }]));
+  });
+
   it('Discover without any copy of Anthropic’s directory says so, with Retry', async () => {
     backend.script('catalog.sources', () => [{ key: 'directory:servers', label: 'Anthropic’s directory: connectors', fetchedAt: null, state: 'unavailable', dropped: 0 }]);
     backend.script('catalog.refresh', () => []);

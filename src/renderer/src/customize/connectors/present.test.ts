@@ -9,7 +9,7 @@ import { item } from '../discover/test-items';
 import { argvOf } from '../../widgets/plugins/present';
 import { installRequestOf } from '../discover/add';
 import { cardContentsWords } from '../discover/present';
-import { configuredOf, connectorAddOf, existingOf, resultFor, shadowedBy, shadowWords, nameProblem, removeRequestOf, scopesFor, signInSessionOf, signInViewOf, urlProblem, writesFor } from './present';
+import { configuredOf, connectorAddOf, existingOf, resultFor, shadowedBy, shadowWords, nameProblem, removeRequestOf, removalDirectoryOf, scopesFor, signInSessionOf, signInViewOf, urlProblem, writesFor } from './present';
 
 const linear = (over: Partial<CatalogItem['install']> = {}, item_: Partial<CatalogItem> = {}): CatalogItem =>
   item({
@@ -113,6 +113,13 @@ describe('removing a connector', () => {
     const request = removeRequestOf(server({ scope: 'local' }))!;
     expect(argvOf(request)).toEqual(['mcp', 'remove', 'linear', '--scope', 'local']);
     expect(removeRequestOf(server({ scope: 'app' }))).toBeNull();
+  });
+
+  it('runs a removal where the entry lives: a project entry in the directory of its own .mcp.json, others where the page is (sweep#2)', () => {
+    expect(removalDirectoryOf(server({ scope: 'project', path: '/repo/.mcp.json' }))).toBe('/repo');
+    expect(removalDirectoryOf(server({ scope: 'project', path: '/.mcp.json' }))).toBe('/');
+    expect(removalDirectoryOf(server({ scope: 'local' }))).toBeNull(); // the page's project key
+    expect(removalDirectoryOf(server({ scope: 'user' }))).toBeNull();
   });
 });
 
