@@ -170,3 +170,20 @@ New residue row, deferred by the architect:
 | Logged | Owner | Item | Evidence | Closes when |
 |---|---|---|---|---|
 | 2026-10-25 | P4 | A seed-route collision: an unrelated repository registered under a seed's marketplace name inherits that seed's installed state | src/main/catalog/normalize.ts ~315 and join.ts; the architect's verification, 2026-10-25 | a seed's route matches the engine's marketplace by source repository, not by name alone, with a test |
+
+## Addendum: the master merge (p4-discover-merge, 2026-10-25)
+
+- **Transcript blocker.** On the merge with master, the anchoring case failed twice at "the end stays pinned" (182 px; runs 40213872787, 40215238586).
+  - Not Discover's catalog: it does no work at startup.
+  - Not the CSS: the built Transcript, index, ReviewView and xterm CSS were byte-identical between the two builds.
+  - Per-frame traces of the distance from the end showed the same follower lag on master and on the merge (runs 40216982884 and 40216980417).
+  - The fix landed on master on its own branch: p4-transcript-follow, merge 0809ddc2b. A follower is now pinned in the same observer pass that measures a row's growth.
+  - Its e2e control without the fix (40218692463) failed with paintedMax 182. With the fix, paintedMax was 0 in runs 40218688881, 40219930934 and 40219934567.
+- **Owner's Details ruling** (Decision Log, 2026-10-25). Commits e13b7093d, f7f722010 and 7b2725ff5.
+  - Review: reviewer-low found one P2, a fixed scope hidden with the command. It was fixed in 7b2725ff5 and re-reviewed clean.
+  - Screenshots, all 1280×820 with Details closed, from evidence run 40224890270:
+    - `/tmp/p4-discover-evidence/maws-discover-2026-10-25-details-install-sheet-1280x820.png`
+    - `/tmp/p4-discover-evidence/maws-discover-2026-10-25-details-add-then-install-sheet-1280x820.png`
+    - `/tmp/p4-discover-evidence/maws-discover-2026-10-25-details-connector-sheet-1280x820.png`
+- **Gates on ce71c7825.** Run 40223727419 is green: class 1a, plus e2e transcript, discover, widgets, layout, settings and code.
+- **Not run.** The live specs `discover-live`, `plugins-live` and `plugins-library-live` now open Details before reading. They are typechecked only; they belong to no gate group.
