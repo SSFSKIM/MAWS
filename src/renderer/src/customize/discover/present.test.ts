@@ -4,7 +4,7 @@
 // or the softer wording when the contents are unknown; counts only where a source has them.
 import { describe, expect, it } from 'vitest';
 import type { CatalogItem } from '@shared/ipc/schema/catalog';
-import { cardContentsWords, componentsWords, installCountWords, metricWords, runsCodeWords, trustOf } from './present';
+import { cardContentsWords, componentsWords, installCountWords, metricWords, monogramOf, runsCodeWords, trustOf } from './present';
 import { item } from './test-items';
 
 describe('the trust label', () => {
@@ -81,5 +81,17 @@ describe('a card’s contents line', () => {
     expect(cardContentsWords(skills, 'skills')).toBe('greet, summarize-diff');
     expect(cardContentsWords(skills, 'plugins')).toBe('2 skills');
     expect(cardContentsWords(item({ components: null }), 'skills')).toBe('Contents shown after install');
+  });
+});
+
+describe('the monogram (an item with no icon)', () => {
+  it('is the name’s first letter; a name that starts with a digit keeps its first two characters, so 42crunch reads 42', () => {
+    expect(monogramOf('frontend-design')).toBe('F');
+    expect(monogramOf('@acme/tools')).toBe('A'); // a leading symbol is skipped
+    expect(monogramOf('42crunch')).toBe('42');
+    expect(monogramOf('1password')).toBe('1P');
+    expect(monogramOf('3')).toBe('3');
+    expect(monogramOf('élan')).toBe('É');
+    expect(monogramOf('--')).toBe('?');
   });
 });
