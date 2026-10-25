@@ -8,12 +8,12 @@
 // different skills: anthropics/skills, life-sciences), the place is ambiguous in every source: each entry there, in any
 // marketplace, is its own plugin, (repository, path, entry name), and a directory record there joins the entry of its
 // engine name (join.ts).
-import type { CatalogComponents, ConnectorRoute } from '@shared/ipc/schema/catalog';
+import type { CatalogComponents, ConnectorRoute, Ownership } from '@shared/ipc/schema/catalog';
 import type { Marketplace } from '@shared/ipc/schema/marketplaces';
 import type { AvailablePlugin, InstalledPlugin, MarketplaceManifestView, PluginManifestView, PluginSourceRef } from '@shared/ipc/schema/plugins';
 import { repositoryLocation } from '@shared/plugins/source-key';
 import type { DirectoryComponent, DirectoryServer, ManifestEntry, NetworkData } from './records';
-import { DIRECTORY_MARKETPLACE, routeRank, seedOf, SEEDS, type TestSource } from './sources';
+import { DIRECTORY_MARKETPLACE, routeRank, seedOf, SEEDS, type Seed, type TestSource } from './sources';
 
 export type Runs = boolean | 'unknown';
 export interface Known {
@@ -47,6 +47,7 @@ export interface RouteOffer {
   ref: string | null;
   present: boolean;
   rank: number;
+  ownership: Ownership; // the marketplace's class, a seed's only when it is the seed's own repository (scalpel-1#2)
 }
 
 export interface EntryListing {
@@ -120,10 +121,15 @@ function transportOf(server: unknown): CatalogComponents['mcpServers'][number]['
 
 // A marketplace entry's own declarations, believed only for an entry that is its plugin's whole manifest
 // (`strict: false`); a strict entry's plugin.json may declare more, so it says nothing.
+// `mcpServers` is a map of servers, a configuration file's path, or an array of either (the engine reads each element:
+// an inline map's servers counted, a path left unread, so its contents are unknown).
 export function knownFromEntry(entry: ManifestEntry): Known | null {
   if (entry.strict) return null;
   const { skills, mcpServers, hooks, commands, agents } = entry.declared;
-  const servers = typeof mcpServers === 'object' && mcpServers !== null && !Array.isArray(mcpServers) ? Object.entries(mcpServers) : [];
+  const declarations = list(mcpServers);
+  const isMap = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+  const servers = declarations.flatMap((d) => (isMap(d) ? Object.entries(d) : []));
+  const unread = declarations.some((d) => !isMap(d));
   const components: CatalogComponents = {
     skills: list(skills).flatMap((s) => (typeof s === 'string' && lastSegment(s) !== null ? [lastSegment(s)!] : [])),
     mcpServers: servers.map(([name, server]) => ({ name, transport: transportOf(server) })),
@@ -132,7 +138,8 @@ export function knownFromEntry(entry: ManifestEntry): Known | null {
     agents: list(agents).length,
     cli: false,
   };
-  return { components, runs: typeof mcpServers === 'string' ? 'unknown' : runsOf(components) };
+  const runs = runsOf(components);
+  return { components, runs: unread && runs !== true ? 'unknown' : runs };
 }
 
 // -- identity ------------------------------------------------------------------------------------------------------
@@ -201,20 +208,38 @@ interface ListedEntry {
 // source, or the same repository named), and not in the folder of other publishers' plugins the official marketplace
 // keeps (`external_plugins/`, third-party by fact 1b). The publisher chain falls back to the owner only then, so a
 // community plugin never reads "by Anthropic" because Anthropic runs the community marketplace.
+// Both are judged on the normalised place (repository#path, `.` and `..` applied), never on how the source is written
+// (scalpel-1#4): an object source naming the marketplace's own repository at `external_plugins/…` is someone else's.
 function ownerPublished(source: PluginSourceRef | null, at: MarketplacePlace): boolean {
   if (source === null) return false;
-  if (typeof source === 'string') return subpath(source).split('/')[0] !== 'external_plugins';
+  const inside = (sub: string | null) => sub !== null && sub.split('/')[0] !== 'external_plugins';
+  const place = placeOf(source, at);
+  if (typeof source === 'string' && (place === null || place.startsWith('local:'))) return inside(normalisedSubpath(source));
   const own = at.locator === null || (at.kind !== 'github' && at.kind !== 'git') ? null : repositoryLocation(at.locator, null);
-  return own !== null && placeOf(source, at)?.startsWith(own) === true;
+  return own !== null && place !== null && place.startsWith(own) && inside(place.slice(own.length));
 }
 
-function listingsOf(entries: readonly ListedEntry[], at: MarketplacePlace & { sourceKey: string; marketplaceSource: string; owner: string | null; present: boolean; counts?: ReadonlyMap<string, number | null> }): EntryListing[] {
+// A relative path inside a repository, `.` dropped and `..` applied; null when it climbs out.
+function normalisedSubpath(path: string): string | null {
+  const segments: string[] = [];
+  for (const segment of path.split('/')) {
+    if (segment === '' || segment === '.') continue;
+    if (segment !== '..') segments.push(segment);
+    else if (segments.pop() === undefined) return null;
+  }
+  return segments.join('/');
+}
+
+function listingsOf(entries: readonly ListedEntry[], at: MarketplacePlace & { sourceKey: string; marketplaceSource: string; owner: string | null; present: boolean; seed: Seed | null; counts?: ReadonlyMap<string, number | null> }): EntryListing[] {
+  const directory = at.name === DIRECTORY_MARKETPLACE;
+  const ownership: Ownership = directory ? 'anthropic' : (at.seed?.ownership ?? 'added');
+  const rank = routeRank(at.name, at.present, directory || at.seed !== null);
   return entries.map((e) => ({
     kind: 'entry',
     identity: '', // assigned once every source's places are known (pluginListings)
     place: e.place ?? placeOf(e.source, at),
     source: at.sourceKey,
-    route: { marketplaceName: at.name, marketplaceSource: at.marketplaceSource, pluginName: e.name, ref: pinOf(e.source), present: at.present, rank: routeRank(at.name, at.present) },
+    route: { marketplaceName: at.name, marketplaceSource: at.marketplaceSource, pluginName: e.name, ref: pinOf(e.source), present: at.present, rank, ownership },
     entryName: e.name,
     description: e.description,
     author: e.author,
@@ -229,13 +254,14 @@ function listingsOf(entries: readonly ListedEntry[], at: MarketplacePlace & { so
 const fromManifestRead = (manifest: MarketplaceManifestView, description: (name: string) => string | null): ListedEntry[] =>
   manifest.plugins.map((p) => ({ name: p.name, source: p.source, description: description(p.name) ?? p.description, author: p.author, known: p.components === null ? null : knownFromView(p.components, p.partial || p.problems.length > 0), knownBy: p.components === null ? null : 'host', homepage: null }));
 
-// A seed's organisation publishes its own code, wherever the seed is read from (Decision Log 7): never the manifest's
-// `owner`, which names a person on two seeds. A marketplace that is not a seed (same name, another repository) is not.
-function seedPublisher(name: string, locator: string | null): string | null {
+// The seed a marketplace the engine has is, when it is the seed's own repository: a marketplace named like a seed from
+// another repository is one the person added (scalpel-1#2), with no seed's ownership, rank, shelf or publisher. A seed's
+// organisation publishes its own code wherever the seed is read from (Decision Log 7), never the manifest's `owner`.
+function verifiedSeed(name: string, locator: string | null): Seed | null {
   const seed = seedOf(name);
   if (seed === null || locator === null) return null;
   const own = repositoryLocation(seed.repository, null);
-  return own !== null && repositoryLocation(locator, null) === own ? seed.publisher : null;
+  return own !== null && repositoryLocation(locator, null) === own ? seed : null;
 }
 
 /** Every plugin listing the engine, the test sources and the seeds offer for one cwd (the directory's records apart), with
@@ -260,7 +286,8 @@ export function pluginListings(network: NetworkData, engine: EngineView | null, 
             // installed plugins leave the available listing (fact 2a); without the clone's read their source is unknown
             ...(engine?.installed ?? []).filter((row) => row.marketplace === m.name && !listed.some((p) => p.name === row.name)).map((row) => ({ name: row.name, source: null, description: null, author: null, known: null, knownBy: null, homepage: null })),
           ].filter((e, i, all) => all.findIndex((o) => o.name === e.name) === i);
-    listings.push(...listingsOf(entries, { name: m.name, kind: m.source, locator: m.locator, sourceKey: `engine:${m.name}`, marketplaceSource: m.locator ?? m.name, owner: seedPublisher(m.name, m.locator) ?? manifest?.owner ?? null, present: true, counts }));
+    const seed = verifiedSeed(m.name, m.locator);
+    listings.push(...listingsOf(entries, { name: m.name, kind: m.source, locator: m.locator, sourceKey: `engine:${m.name}`, marketplaceSource: m.locator ?? m.name, owner: seed?.publisher ?? manifest?.owner ?? null, present: true, seed, counts }));
   }
 
   // the engine's Anthropic Directory: its entry names are the engine's own (not computable from a record, fact 2), and an
@@ -273,24 +300,25 @@ export function pluginListings(network: NetworkData, engine: EngineView | null, 
     if (row.marketplace === DIRECTORY_MARKETPLACE && !directoryEntries.has(row.name) && place !== undefined) directoryEntries.set(row.name, { name: row.name, source: null, place, description: null, author: null, known: null, knownBy: null, homepage: null });
   }
   const directoryCounts = new Map(availableIn(DIRECTORY_MARKETPLACE).map((p) => [p.name, p.installCount]));
-  listings.push(...listingsOf([...directoryEntries.values()], { name: DIRECTORY_MARKETPLACE, kind: 'directory-marketplace', locator: null, sourceKey: `engine:${DIRECTORY_MARKETPLACE}`, marketplaceSource: DIRECTORY_MARKETPLACE, owner: null, present: true, counts: directoryCounts }));
+  listings.push(...listingsOf([...directoryEntries.values()], { name: DIRECTORY_MARKETPLACE, kind: 'directory-marketplace', locator: null, sourceKey: `engine:${DIRECTORY_MARKETPLACE}`, marketplaceSource: DIRECTORY_MARKETPLACE, owner: null, present: true, seed: null, counts: directoryCounts }));
 
   // the test sources (fixture-only): read from disk, discoverable before the engine has them
   for (const { source, manifest } of tests) {
     if (has.has(source.marketplaceName) || manifest.state !== 'read') continue;
-    listings.push(...listingsOf(fromManifestRead(manifest, () => null), { name: source.marketplaceName, kind: 'directory', locator: source.marketplaceSource, sourceKey: source.key, marketplaceSource: source.marketplaceSource, owner: manifest.owner, present: false }));
+    listings.push(...listingsOf(fromManifestRead(manifest, () => null), { name: source.marketplaceName, kind: 'directory', locator: source.marketplaceSource, sourceKey: source.key, marketplaceSource: source.marketplaceSource, owner: manifest.owner, present: false, seed: null }));
   }
 
   // the seeds the engine does not have, from their fetched manifests (and one it has but could not list: the clone is
   // still what installs, so the route stays present)
   for (const seed of SEEDS) {
     const manifest = network.seeds.get(seed.key);
-    if (!manifest || listings.some((l) => l.source === `engine:${seed.marketplaceName}`)) continue;
+    const held = (engine?.marketplaces ?? []).some((m) => m.name === seed.marketplaceName && verifiedSeed(m.name, m.locator) !== null);
+    if (!manifest || (held && listings.some((l) => l.source === `engine:${seed.marketplaceName}`))) continue;
     const entries = manifest.entries.records.map((e): ListedEntry => {
       const known = knownFromEntry(e);
       return { name: e.name, source: e.source, description: e.description, author: e.author, known, knownBy: known === null ? null : 'entry', homepage: e.homepage };
     });
-    listings.push(...listingsOf(entries, { name: seed.marketplaceName, kind: 'github', locator: seed.repository, sourceKey: seed.key, marketplaceSource: seed.repository, owner: seed.publisher, present: has.has(seed.marketplaceName) }));
+    listings.push(...listingsOf(entries, { name: seed.marketplaceName, kind: 'github', locator: seed.repository, sourceKey: seed.key, marketplaceSource: seed.repository, owner: seed.publisher, present: held, seed }));
   }
   const ambiguous = ambiguousPlaces(listings);
   for (const l of listings) l.identity = identityOf(l.place, l.entryName, l.route.marketplaceName, ambiguous);

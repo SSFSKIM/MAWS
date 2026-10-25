@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { admitted, CATALOG_EGRESS, egressGet, type BaseFetch } from '@shared/net/egress';
-import { catalogPages, fetchSource, fixturePages, NETWORK_KEYS, networkPages, pageUrl } from './fetch';
+import { catalogPages, fetchSource, fixturePages, NETWORK_KEYS, networkPages, pageUrl, WALK_BUDGET_BYTES, type PageGet } from './fetch';
 
 const FIXTURES = resolve(__dirname, '../../../e2e/fixtures/catalog');
 
@@ -80,5 +80,50 @@ describe('the catalog’s requests', () => {
     expect(asked).toEqual([]);
     expect((await fetchSource('plugin-details', catalogPages({ MAWS_E2E: '1', MAWS_CATALOG_LIVE: '1' }, 'MAWS', get))).pages).toEqual([{ plugins: {} }]);
     expect(asked).toEqual([pageUrl('plugin-details', null)]);
+  });
+});
+
+// The branch review panel's findings on the walk (panel-discover.json: scalpel-4#1, #2).
+describe('one walk’s limits', () => {
+  const MiB = 1024 * 1024;
+  // a source whose pages never end, each answering `bytes` and naming the next
+  const endless = (bytes: number, wait: (signal: AbortSignal) => Promise<void> = async () => {}) => {
+    const asked: { maxBytes: number; signal: AbortSignal }[] = [];
+    let n = 0;
+    const get: PageGet = async (key, _token, limits) => {
+      const given = limits ?? { signal: new AbortController().signal, maxBytes: Number.NaN }; // a walk that gives none
+      asked.push(given);
+      await wait(given.signal);
+      n += 1;
+      return { body: { data: [], next_page: `p${n}` }, exchange: { url: pageUrl(key, null), bytes, contentType: 'application/json', ms: 0 } };
+    };
+    return { get, asked };
+  };
+
+  it('stops a walk past one cumulative byte budget, and asks each page for no more than what is left (scalpel-4#1)', async () => {
+    const { get, asked } = endless(40 * MiB);
+    await expect(fetchSource('directory:plugins', get)).rejects.toThrow(`over its ${WALK_BUDGET_BYTES} byte budget`);
+    expect(asked.length).toBeLessThanOrEqual(Math.ceil(WALK_BUDGET_BYTES / (40 * MiB)) + 1);
+    expect(asked.map((a) => a.maxBytes)).toEqual(asked.map((_, i) => WALK_BUDGET_BYTES - i * 40 * MiB));
+    // the guarded GET refuses a body past what the walk has left, though the route's own cap is larger
+    const base = async () => new Response(new Uint8Array(2048), { headers: { 'content-type': 'application/json' } });
+    await expect(egressGet(CATALOG_EGRESS, base)(pageUrl('directory:plugins', null), { maxBytes: 1024 })).rejects.toThrow(/over 1024/);
+  });
+
+  it('gives a whole walk one deadline and one cancellation, every page under the same signal (scalpel-4#2)', async () => {
+    const slow = (signal: AbortSignal) =>
+      new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, 30);
+        signal.addEventListener('abort', () => (clearTimeout(timer), reject(signal.reason)), { once: true });
+      });
+    const { get, asked } = endless(1, slow);
+    const started = Date.now();
+    await expect(fetchSource('directory:plugins', get, { deadlineMs: 100 })).rejects.toThrow('passed its 100 ms deadline');
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(new Set(asked.map((a) => a.signal)).size).toBe(1); // one signal across the pages, not one per request
+    const stop = new AbortController();
+    const walking = fetchSource('directory:plugins', endless(1, slow).get, { signal: stop.signal });
+    setTimeout(() => stop.abort(), 50);
+    await expect(walking).rejects.toThrow('the walk was stopped');
   });
 });

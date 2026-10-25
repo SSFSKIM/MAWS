@@ -13,7 +13,7 @@ import type { EventPayload } from '@shared/ipc/schema';
 import { readMarketplaceManifest } from '../../engine-host/plugins/manifest';
 import { CommandFailure, type registerMainHandler } from '../ipc/router';
 import { EngineReads, type HostCall } from './engine-reads';
-import { StateWatch, type WatchFn } from './state-watch';
+import { StateWatch, type PollFn, type WatchFn } from './state-watch';
 import { catalogPages, iconGet, NETWORK_KEYS, type IconGet } from './fetch';
 import { CatalogIcons } from './icons';
 import { buildCatalog } from './join';
@@ -33,6 +33,7 @@ export interface CatalogDeps {
   userAgent: string; // MAWS and its version
   log?: (line: string) => void;
   watch?: WatchFn; // the engine state watch's fs.watch (tests)
+  poll?: PollFn; // and its file polls (tests)
   iconGet?: IconGet; // how icons are read (tests); by default the environment's (fetch.ts)
 }
 
@@ -63,11 +64,17 @@ export function startCatalog(deps: CatalogDeps): Catalog {
   });
   // an outside change to the engine's plugin state: the configuration's forgets every view, a project's its own
   const watch = new StateWatch({
-    onChange: (scope) => {
+    onChange: (scope, kind) => {
+      if (kind === 'mcp') {
+        void reads.recheckServers().then((moved) => moved && changed());
+        return;
+      }
       reads.invalidate(scope === 'all' ? undefined : scope);
       changed();
     },
     watch: deps.watch,
+    poll: deps.poll,
+    appSettings: join(deps.userData, 'settings.json'),
   });
 
   // One cwd's catalog and the revision it was built under: the store's revision, the engine reads' generation at the time
@@ -132,6 +139,7 @@ export function startCatalog(deps: CatalogDeps): Catalog {
       offStore();
       offPlugins();
       watch.close();
+      store.stop();
     },
   };
 }

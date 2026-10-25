@@ -25,6 +25,7 @@ const KEPT_DIRECTORIES = 16;
 export interface EngineStatePlaces {
   configHome: string | null;
   pluginsDir: string | null;
+  globalConfig: string | null; // the engine's global file (user and local MCP servers)
   projects: string[]; // the held cwds (the user configuration's view apart)
 }
 
@@ -33,12 +34,14 @@ export interface EngineStatePlaces {
 export interface EngineSnapshot {
   serial: number;
   view: Promise<EngineView | null>;
+  servers: Promise<string | null>; // the configured MCP servers' endpoints as read beside the view, compared by recheckServers
 }
 
 export class EngineReads {
   private readonly views = new Map<string, EngineSnapshot>();
   private serials = 0;
   private configHome: string | null = null;
+  private globalConfig: string | null = null;
   private pluginsDir: string | null = null;
   /** Moves on every invalidation. */
   generation = 0;
@@ -58,7 +61,7 @@ export class EngineReads {
     const key = cwd ?? '';
     let snapshot = this.views.get(key);
     if (snapshot === undefined) {
-      snapshot = { serial: (this.serials += 1), view: this.read(cwd) };
+      snapshot = { serial: (this.serials += 1), view: this.read(cwd), servers: this.serversOf(cwd) };
       for (const oldest of this.views.keys()) {
         if (this.views.size < KEPT_DIRECTORIES) break;
         this.views.delete(oldest);
@@ -81,7 +84,27 @@ export class EngineReads {
   }
 
   places(): EngineStatePlaces {
-    return { configHome: this.configHome, pluginsDir: this.pluginsDir, projects: [...this.views.keys()].filter((key) => key !== '') };
+    return { configHome: this.configHome, pluginsDir: this.pluginsDir, globalConfig: this.globalConfig, projects: [...this.views.keys()].filter((key) => key !== '') };
+  }
+
+  /** After an MCP configuration changed: forget each held view whose configured servers (names, scopes, files,
+   * transports, endpoints) are not what they were when it was read; whether any was. A view read meanwhile is left. */
+  async recheckServers(): Promise<boolean> {
+    const held = [...this.views];
+    const moved = await Promise.all(held.map(async ([key, snapshot]) => (await snapshot.servers) !== (await this.serversOf(key === '' ? null : key))));
+    let any = false;
+    held.forEach(([key, snapshot], i) => {
+      if (!moved[i] || this.views.get(key) !== snapshot) return;
+      this.invalidate(key === '' ? null : key);
+      any = true;
+    });
+    return any;
+  }
+
+  // The configured MCP servers for `cwd` as one comparable string, or null when they could not be read.
+  private async serversOf(cwd: string | null): Promise<string | null> {
+    const answer = await this.ask('customization.serverEndpoints', { cwd });
+    return answer === null ? null : JSON.stringify(answer.servers);
   }
 
   private async ask<N extends CommandName>(name: N, input: CommandInput<N>): Promise<Extract<CommandResult<N>, { ok: true }>['value'] | null> {
@@ -92,7 +115,11 @@ export class EngineReads {
   }
 
   private async read(cwd: string | null): Promise<EngineView | null> {
-    this.configHome ??= (await this.ask('plugins.env', {}))?.configHome ?? null;
+    if (this.configHome === null) {
+      const env = await this.ask('plugins.env', {});
+      this.configHome = env?.configHome ?? null;
+      this.globalConfig = env?.globalConfig ?? null;
+    }
     const directory = cwd ?? this.configHome;
     if (directory === null) return null;
     const [installed, available, marketplaces, inventory] = await Promise.all([
