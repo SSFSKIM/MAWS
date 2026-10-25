@@ -10,8 +10,9 @@
 //   are polled for their creation.
 // - The MCP configuration the connectors' installed state and postures read (scalpel-3#1): the engine's global file
 //   (`.claude.json`: user and local servers), MAWS's own settings (its app servers), and `.mcp.json` in the project and
-//   each ancestor up to the home folder. A change there is `mcp`: main asks the host for the configured servers again and
-//   forgets only the views whose servers moved, so the engine's frequent rewrites of `.claude.json` read nothing again.
+//   every ancestor below the file system root, as the engine's inventory reads them (customization/inventory.ts). A
+//   change there is `mcp`: main asks the host for the configured servers again and forgets only the views whose servers
+//   moved, so the engine's frequent rewrites of `.claude.json` read nothing again.
 // Folders are watched only where the folder is the state's own (the configuration directory, the plugins folder, a
 // project's `.claude`), one non-recursive `fs.watch` each: on macOS a folder watch is an FSEvents stream over the
 // folder's whole tree, so the home folder, a project's root and its ancestors are never watched (they would wake main for
@@ -20,7 +21,6 @@
 // window's session paths, git/watcher.ts a repository). C4's timing gathers changes: a 250 ms trailing debounce capped
 // at 1 s from the first. A folder that cannot be watched (absent, unreadable) is skipped until the next sync.
 import { unwatchFile, watch as fsWatch, watchFile, type Stats } from 'node:fs';
-import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { EngineStatePlaces } from './engine-reads';
 
@@ -58,18 +58,14 @@ export interface StateWatchDeps {
   onChange(scope: string, kind: ChangeKind): void; // 'all' or a cwd
   watch?: WatchFn;
   poll?: PollFn;
-  home?: string; // where a project's ancestors stop being watched (os.homedir())
   appSettings?: string; // MAWS's own settings file, whose app MCP servers the engine is given (<userData>/settings.json)
 }
 
-// A project's folders whose `.mcp.json` the engine reads (every ancestor, customization/inventory.ts): each file polled up
-// to and including the home folder's, never the file system root's.
-function ancestorsOf(cwd: string, home: string): string[] {
+// A project's folders whose `.mcp.json` the engine reads: the cwd and every ancestor down to but excluding the file system
+// root, the same range as customization/inventory.ts. Each file is polled by its stat; none of these folders is watched.
+function ancestorsOf(cwd: string): string[] {
   const dirs: string[] = [];
-  for (let at = cwd; dirname(at) !== at; at = dirname(at)) {
-    dirs.push(at);
-    if (at === home) break;
-  }
+  for (let at = cwd; dirname(at) !== at; at = dirname(at)) dirs.push(at);
   return dirs;
 }
 
@@ -93,13 +89,12 @@ export class StateWatch {
     if (places.pluginsDir !== null) folder(places.pluginsDir, { names: new Set(PLUGIN_FILES), scope: 'all', kind: 'plugins' });
     if (places.globalConfig !== null) files.set(places.globalConfig, mcp);
     if (this.deps.appSettings) files.set(this.deps.appSettings, mcp);
-    const home = this.deps.home ?? homedir();
     for (const cwd of places.projects) {
       const settings = join(cwd, '.claude');
       const target: Target = { names: new Set(PROJECT_FILES), scope: cwd, kind: 'plugins' };
       if (this.watching.has(settings) || this.start(settings, [target])) folder(settings, target);
       else for (const name of PROJECT_FILES) files.set(join(settings, name), target); // .claude not there yet
-      for (const dir of ancestorsOf(cwd, home)) files.set(join(dir, PROJECT_MCP), mcp);
+      for (const dir of ancestorsOf(cwd)) files.set(join(dir, PROJECT_MCP), mcp);
     }
     for (const [dir, targets] of folders) {
       const held = this.watching.get(dir);
