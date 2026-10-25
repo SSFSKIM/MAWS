@@ -21,7 +21,8 @@
 //                    its mcp_status, findings-m4 5; Decision Log 14)
 //   failed           with a reason: no_session, timeout, denied (the callback carried `error`), engine (its words),
 //                    session_exited, other_entry (before anything else: the session's engine uses another entry of the
-//                    name than the one asked for, so it would sign that one in; ./sign-in-entry.ts, scalpel-2#1)
+//                    name than the one asked for, by its files or by the server it holds, so it would sign that one in;
+//                    ./sign-in-entry.ts, scalpel-2#1, fix-D#4)
 //   cancelled        `connectors.signInCancel`, or a second press for the same configured connector from any session
 //                    (Decision Log 14: one sign-in per connector at a time, since every session's engine writes the same
 //                    credential). A connector is its configuration: name and scope, and the directory for a project or
@@ -328,13 +329,15 @@ export function startSignIn(deps: SignInServiceDeps): { stop(): void } {
     else if (ready.has(appSessionId)) gone(appSessionId);
   });
   const offHost = deps.onHostLost(() => [...ready.keys()].forEach(gone));
-  // the entries the session's engine reads, from its own directory, as the inventory reads them (scalpel-2#1)
+  // the entries the session's engine reads, from its own directory, as the inventory reads them (scalpel-2#1), and the
+  // server it holds, as its mcp_status reports it (fix-D#4)
   const check: SignInDeps['check'] = async ({ appSessionId, ...requested }) => {
     const cwd = ready.get(appSessionId);
     if (cwd === undefined) return 'that session is not ready';
-    const read = await deps.host.call('customization.serverEndpoints', { cwd });
+    const [read, status] = await Promise.all([deps.host.call('customization.serverEndpoints', { cwd }), deps.host.call('session.mcpStatus', { appSessionId })]);
     if (!read.ok) return `that session’s configuration could not be read: ${read.error.message}`;
-    return entryRefusal(requested, cwd, read.value.servers);
+    if (!status.ok) return `that session’s servers could not be read: ${status.error.message}`;
+    return entryRefusal(requested, cwd, read.value.servers, status.value.mcpServers);
   };
   const signIn = createSignIn({
     host: deps.host,

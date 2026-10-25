@@ -5,24 +5,42 @@ import { describe, expect, it } from 'vitest';
 import { entryRefusal } from './sign-in-entry';
 
 const GLOBAL = '/cfg/.claude.json';
-const user = { name: 'linear', scope: 'user', path: GLOBAL } as const;
-const local = { name: 'linear', scope: 'local', path: GLOBAL } as const;
+const URL_U = 'https://u.example/mcp';
+const user = { name: 'linear', scope: 'user', path: GLOBAL, transport: 'http', url: URL_U } as const;
+const local = { name: 'linear', scope: 'local', path: GLOBAL, transport: 'http', url: 'https://l.example/mcp' } as const;
+const project = (path: string) => ({ name: 'linear', scope: 'project', path, transport: 'http', url: 'https://p.example/mcp' }) as const;
+const DIFFERENT = 'This session uses a different linear; start a new session to sign in';
+// what 2.1.309's mcp_status reports for a server (cli.pretty.js 1128186): its scope, transport and redacted config
+const live = (scope: string, url: string, transport = 'http') => ({ name: 'linear', status: 'needs-auth', scope, transport, config: { type: transport, url } });
 
 describe('the session’s entry for a sign-in', () => {
   it('is the requested one: nothing to refuse', () => {
-    expect(entryRefusal({ ...user, cwd: null }, '/p', [user])).toBeNull();
-    expect(entryRefusal({ ...local, cwd: '/p' }, '/p', [user, local])).toBeNull();
-    expect(entryRefusal({ name: 'linear', scope: 'project', path: '/p/.mcp.json', cwd: '/p' }, '/p', [{ name: 'linear', scope: 'project', path: '/p/.mcp.json' }])).toBeNull();
+    expect(entryRefusal({ ...user, cwd: null }, '/p', [user], [])).toBeNull();
+    expect(entryRefusal({ ...local, cwd: '/p' }, '/p', [user, local], [])).toBeNull();
+    expect(entryRefusal({ name: 'linear', scope: 'project', path: '/p/.mcp.json', cwd: '/p' }, '/p', [project('/p/.mcp.json')], [])).toBeNull();
   });
 
   it('is another: a local override, MAWS’s own server, a nearer project file, or none at all', () => {
-    expect(entryRefusal({ ...user, cwd: null }, '/p', [user, local])).toBe(`that session uses the local entry in ${GLOBAL}`);
-    expect(entryRefusal({ ...user, cwd: null }, '/p', [user, { name: 'linear', scope: 'app', path: '/maws/settings.json' }])).toBe('that session uses MAWS’s linear server');
-    expect(entryRefusal({ name: 'linear', scope: 'project', path: '/p/.mcp.json', cwd: '/p/app' }, '/p/app', [{ name: 'linear', scope: 'project', path: '/p/.mcp.json' }, { name: 'linear', scope: 'project', path: '/p/app/.mcp.json' }])).toBe('that session uses the project entry in /p/app/.mcp.json');
-    expect(entryRefusal({ ...user, cwd: null }, '/p', [])).toBe('that session has no linear entry');
+    expect(entryRefusal({ ...user, cwd: null }, '/p', [user, local], [])).toBe(`that session uses the local entry in ${GLOBAL}`);
+    expect(entryRefusal({ ...user, cwd: null }, '/p', [user, { name: 'linear', scope: 'app', path: '/maws/settings.json', transport: 'http', url: URL_U }], [])).toBe('that session uses MAWS’s linear server');
+    expect(entryRefusal({ name: 'linear', scope: 'project', path: '/p/.mcp.json', cwd: '/p/app' }, '/p/app', [project('/p/.mcp.json'), project('/p/app/.mcp.json')], [])).toBe('that session uses the project entry in /p/app/.mcp.json');
+    expect(entryRefusal({ ...user, cwd: null }, '/p', [], [])).toBe('that session has no linear entry');
   });
 
   it('a local entry is its project’s: a session in another directory does not use it', () => {
-    expect(entryRefusal({ ...local, cwd: '/p' }, '/q', [user, local])).toBe('that session runs in /q, not /p');
+    expect(entryRefusal({ ...local, cwd: '/p' }, '/q', [user, local], [])).toBe('that session runs in /q, not /p');
+  });
+
+  // fix-D#4: the engine signs in the server it holds, which is what it read at launch, not what the files say now
+  it('is the one the running engine holds: same scope and endpoint, as its mcp_status reports them', () => {
+    expect(entryRefusal({ ...user, cwd: null }, '/p', [user], [live('user', URL_U)])).toBeNull();
+    expect(entryRefusal({ ...user, cwd: null }, '/p', [user], [])).toBeNull(); // not in its status yet: it reads the files when asked
+  });
+
+  it('is not, when the running engine holds another: an app server given at launch and since removed, or a changed endpoint', () => {
+    expect(entryRefusal({ ...user, cwd: null }, '/p', [user], [live('dynamic', URL_U)])).toBe(DIFFERENT);
+    expect(entryRefusal({ ...user, cwd: null }, '/p', [user], [live('user', 'https://old.example/mcp')])).toBe(DIFFERENT);
+    expect(entryRefusal({ ...user, cwd: null }, '/p', [user], [live('user', URL_U, 'sse')])).toBe(DIFFERENT);
+    expect(entryRefusal({ ...user, cwd: null }, '/p', [user], [{ name: 'linear' }])).toBe(DIFFERENT); // says nothing of its entry
   });
 });

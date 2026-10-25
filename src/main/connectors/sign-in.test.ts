@@ -18,6 +18,37 @@ interface FakeHost extends SignInHost {
   callback?: (input: { serverName: string; callbackUrl: string }) => unknown;
 }
 
+describe('the sign-in service against the running engine (fix-D#4)', () => {
+  it('refuses when the session holds another server of the name than the row, and neither signs in nor reports it connected', async () => {
+    const handlers = new Map<string, (input: unknown) => unknown>();
+    const events: ConnectorSignInChanged[] = [];
+    const statuses = new Set<(payload: { appSessionId: string; status: { process: string; cwd: string } }) => void>();
+    const host = fakeHost();
+    const call = host.call.bind(host);
+    // MAWS gave the session an app-level linear at launch (--mcp-config: scope dynamic), since removed; a user linear is on disk
+    host.call = (async (name: string, input: unknown) => {
+      if (name === 'customization.serverEndpoints') return { ok: true, value: { servers: [{ name: 'linear', scope: 'user', path: GLOBAL, transport: 'http', url: 'https://u.example/mcp' }] } };
+      if (name === 'session.mcpStatus') return { ok: true, value: { mcpServers: [{ name: 'linear', status: 'connected', scope: 'dynamic', transport: 'http', config: { type: 'http', url: 'https://app.example/mcp' } }] } };
+      return call(name as never, input as never);
+    }) as never;
+    const service = startSignIn({
+      register: ((name: string, handler: (input: unknown) => unknown) => handlers.set(name, handler)) as never,
+      emit: (_name, event) => events.push(event),
+      host,
+      onSessionStatus: (listener) => (statuses.add(listener), () => statuses.delete(listener)),
+      onHostLost: () => () => {},
+      open: () => true,
+      listen: listenLoopback,
+    });
+    stop = () => service.stop();
+    statuses.forEach((l) => l({ appSessionId: SESSION, status: { process: 'ready', cwd: '/p' } }));
+    const { opId } = handlers.get('connectors.signIn')!({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }) as { opId: string };
+    await vi.waitFor(() => expect(['failed', 'done']).toContain(events.filter((e) => e.opId === opId).at(-1)?.state));
+    expect(events.filter((e) => e.opId === opId).at(-1)).toMatchObject({ state: 'failed', reason: 'other_entry', message: 'This session uses a different linear; start a new session to sign in' });
+    expect(host.asked.map((a) => a.name)).not.toContain('session.mcpAuthenticate');
+  });
+});
+
 function fakeHost(): FakeHost {
   const host: FakeHost = {
     status: new Map([['linear', 'needs-auth']]),
