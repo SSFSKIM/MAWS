@@ -13,6 +13,8 @@
 //   (single-use codes, RFC 8707 resource binding, expiring access tokens, refresh rotation with replay detection) and
 //   RFC 7009 revocation. `/mcp` then requires a live Bearer token of this fixture.
 // Grants survive phase changes, so a relaunch and a later OAuth phase can reuse them.
+// P4-AGG M1: in engine mode (`mode: 'engine'`) registration admits the engine's own callbacks instead,
+// `http://localhost:<port>/callback` and `http://127.0.0.1:<port>/callback`; everything else is the same.
 //
 // Each request yields its answer, one safe log entry and the secrets it saw or minted. Entries carry the pathname
 // only, counts and ordinals and token hashes, never a state, code, verifier, challenge or token value; the secrets go
@@ -61,6 +63,9 @@ export const tokenHash = (value) => createHash('sha256').update(value).digest('h
 const VERIFIER = /^[A-Za-z0-9\-._~]{43,128}$/;
 const CHALLENGE = /^[A-Za-z0-9_-]{43}$/;
 const LOOPBACK_REDIRECT = /^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}\/[A-Za-z0-9\-._~/]*$/;
+// P4-AGG M1: engine mode's callbacks, the engine's own `localhost` listener and the `127.0.0.1` one a host passes it,
+// both at `/callback` (the spec's fact 2).
+const ENGINE_REDIRECT = /^http:\/\/(localhost|127\.0\.0\.1):[1-9][0-9]{0,4}\/callback$/;
 
 function routeOf(path) {
   switch (path) {
@@ -91,7 +96,8 @@ function single(params, name) {
 const answer = (status, body, headers = {}) => ({ status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...headers }, body: JSON.stringify(body) });
 const empty = (status, headers = {}) => ({ status, headers, body: '' });
 
-export function createOAuthFixtureCore({ id, origin, tools = ['read_series'], now, randomToken }) {
+export function createOAuthFixtureCore({ id, origin, tools = ['read_series'], mode = 'maws', now, randomToken }) {
+  const redirectAllowed = mode === 'engine' ? ENGINE_REDIRECT : LOOPBACK_REDIRECT; // P4-AGG M1
   const resource = `${origin}/mcp`;
   const resourceMetadataUrl = `${origin}/.well-known/oauth-protected-resource/mcp`;
   const clients = new Map(); // client_id → {ordinal, redirectUris}
@@ -200,7 +206,7 @@ export function createOAuthFixtureCore({ id, origin, tools = ['read_series'], no
     };
     if (metadata === null || typeof metadata !== 'object' || Array.isArray(metadata)) return refuse('invalid_client_metadata');
     const { redirect_uris: redirectUris, token_endpoint_auth_method: authMethod, grant_types: grants = ['authorization_code'], response_types: responses = ['code'] } = metadata;
-    if (!Array.isArray(redirectUris) || redirectUris.length === 0 || !redirectUris.every((uri) => typeof uri === 'string' && LOOPBACK_REDIRECT.test(uri))) return refuse('invalid_redirect_uri');
+    if (!Array.isArray(redirectUris) || redirectUris.length === 0 || !redirectUris.every((uri) => typeof uri === 'string' && redirectAllowed.test(uri))) return refuse('invalid_redirect_uri');
     if (authMethod !== 'none') return refuse('invalid_client_metadata'); // a public client only
     if (!Array.isArray(grants) || !grants.every((grant) => grant === 'authorization_code' || grant === 'refresh_token')) return refuse('invalid_client_metadata');
     if (!Array.isArray(responses) || !responses.every((type) => type === 'code')) return refuse('invalid_client_metadata');

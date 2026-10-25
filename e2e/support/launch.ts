@@ -9,7 +9,9 @@ import { join, resolve } from 'node:path';
 import { _electron, test as base, type ElectronApplication, type Page } from '@playwright/test';
 import { writeReplayEngine } from '../../test/support/replay-engine';
 import { writeScratchShellHome } from '../../test/support/shell-home';
+import { writeDiscoverScratch, type DiscoverScratch, type DiscoverScratchOptions } from './discover-scratch'; // P4-AGG M1
 import { shellsUnder, untilExited } from './processes';
+import { realEngine, type RealEngine } from './real-engine'; // P4-AGG M1
 import { launchEnvironment } from './scratch-env';
 import { cornerOrigin, windowCorner } from './window-origin';
 
@@ -37,6 +39,8 @@ export interface MawsLaunch {
   shellHome: string; // the scratch shell home under `userData` (ZDOTDIR, and where the shells' history goes)
   packaged: boolean;
   launchedAt: number; // Date.now() just before the process was started
+  // P4-AGG M1: under the `realEngine` option, the engine the app runs and the scratch written around it
+  realEngine?: RealEngine & { scratch: DiscoverScratch };
   cleanup(): Promise<void>; // closes the app if it is still open and removes the profile it created; throws if the app would not close
 }
 
@@ -73,6 +77,12 @@ export interface ShellLaunchOptions extends MawsLaunchOptions {
   // P4-W2L: the app's Chromium locale for this launch instead of en-US (`ko-KR`, the owner's), for a spec showing that
   // every age, date and time stays English whatever the system's (P4 Decision Log 4).
   lang?: string;
+  // P4-AGG M1 (docs/doperpowers/specs/2026-10-24-plugin-aggregator-design.md): the real pinned engine (real-engine.ts:
+  // MAWS_E2E_ENGINE_BIN, else the installed 2.1.309; missing or another version fails the launch), with the Discover
+  // scratch around it (discover-scratch.ts): the engine's Anthropic Directory off, scratch projects, the test
+  // marketplace and its test-source descriptor, the recorded catalog sources, and a scratch HOME unless `home: 'runner'`.
+  // The engine store stays the launch's own `claude-config`.
+  realEngine?: DiscoverScratchOptions;
 }
 // C5 end
 
@@ -91,6 +101,10 @@ export async function onLaunched<T>(hook: (app: ElectronApplication) => void, la
 // E4b end
 
 export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLaunch> {
+  // P4-AGG M1: verified before anything is created, so a missing engine leaves nothing behind; the scratch is written
+  // into the launch's own engine store, which another one named by the test would bypass.
+  if (opts.realEngine && (opts.env?.CLAUDE_CONFIG_DIR !== undefined || opts.ownerConfigHome)) throw new Error('realEngine writes its scratch into the launch’s own engine store: name no other');
+  const engine = opts.realEngine ? realEngine() : null;
   const executable = process.env.MAWS_E2E_EXECUTABLE ? resolve(REPO_ROOT, process.env.MAWS_E2E_EXECUTABLE) : null;
   if (executable && !existsSync(executable)) throw new Error(`MAWS_E2E_EXECUTABLE does not exist: ${executable} (run pnpm build:app)`);
   const main = join(REPO_ROOT, 'out/main/index.js');
@@ -105,6 +119,7 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   // switches, with the e2e mark, the profile, the empty engine store (C4) and no ClaudeUsage data (C7):
   // scratch-env.ts's launchEnvironment, pinned by its unit test. A test's `env` may name a CLAUDE* variable on purpose.
   const env = launchEnvironment(process.env, userData);
+  if (engine) env.MAWS_E2E_ENGINE_BIN = engine.bin; // P4-AGG M1: the real engine, never the replay stub
   // FX4: replay launch gates need a version, not an installed engine. Live specs explicitly pass ENGINE_BIN;
   // an environment override or the Engine setting can still name another binary. The scratch owns this stub.
   const keptStub = opts.keepConfigHome && existsSync(join(userData, 'replay-engine')) ? join(userData, 'replay-engine') : null; // E10
@@ -120,6 +135,8 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   // and the engine read.
   const shellHome = writeScratchShellHome(join(userData, 'shell-home'));
   Object.assign(env, shellHome.env);
+  const discover = opts.realEngine ? writeDiscoverScratch(userData, env.CLAUDE_CONFIG_DIR!, opts.realEngine) : null; // P4-AGG M1
+  if (discover) Object.assign(env, discover.env);
   Object.assign(env, opts.env); // C3
   if (opts.ownerConfigHome) delete env.CLAUDE_CONFIG_DIR; // P4-A1
 
@@ -158,7 +175,7 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
     await sizeForGroup(app, page); // P3-F1
     await placeForInstance(app); // ci-kit's mac-lane concurrency spec, M2
     await reportForeground(app);
-    return { app, page, consoleErrors, userData, shellHome: shellHome.dir, packaged: executable !== null, launchedAt, cleanup };
+    return { app, page, consoleErrors, userData, shellHome: shellHome.dir, packaged: executable !== null, launchedAt, ...(engine && discover && { realEngine: { ...engine, scratch: discover } }), cleanup };
   } catch (error) {
     await cleanup().catch((cleanupError) => console.error('[e2e] cleanup after a failed launch also failed', cleanupError));
     throw error;

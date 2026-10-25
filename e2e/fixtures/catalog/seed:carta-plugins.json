@@ -1,0 +1,35 @@
+{
+  "key": "seed:carta-plugins",
+  "recordedAt": "2026-10-25T02:24:15.671Z",
+  "pages": [
+    {
+      "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+      "name": "carta-plugins",
+      "description": "Official Carta plugins for Claude Code",
+      "owner": {
+        "name": "Carta Engineering",
+        "email": "engineering@carta.com"
+      },
+      "plugins": [
+        {
+          "name": "carta-cap-table",
+          "source": "./plugins/carta-cap-table",
+          "description": "Carta Cap Table plugin — skills and hooks for querying cap tables, grants, SAFEs, 409A valuations, financing rounds, and more",
+          "category": "productivity"
+        },
+        {
+          "name": "carta-investors",
+          "source": "./plugins/carta-investors",
+          "description": "Carta Investors plugin — write-capable skills for querying and updating investors data, performance benchmarks, regulatory reporting, AGM deck generation, brand extraction, and more via the Carta MCP server",
+          "category": "productivity"
+        },
+        {
+          "name": "carta-crm",
+          "source": "./plugins/carta-crm",
+          "description": "Manage the Carta CRM conversationally — search, add, update, and enrich investors, companies, contacts, deals, notes, and fundraisings via the Carta CRM MCP Server",
+          "category": "productivity"
+        }
+      ]
+    }
+  ]
+}

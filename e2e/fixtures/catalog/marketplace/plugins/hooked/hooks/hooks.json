@@ -1,0 +1,6 @@
+{
+  "description": "Runs `true` at session start: a hook that does nothing, so installing it runs code but changes nothing.",
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "true" }] }]
+  }
+}

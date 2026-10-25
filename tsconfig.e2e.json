@@ -32,6 +32,9 @@
     // whose seam imports the dialect's IR
     "src/artifacts/slides/ir.ts",
     "src/engine-host/binary-info.ts",
+    // P4-AGG M1: the Discover launch names the catalog's two test seams by their modules' constants
+    "src/main/catalog/fetch.ts",
+    "src/main/catalog/sources.ts",
     // P3-H: the connector runs drive a scratch engine through the host's control client and route E's call
     "src/engine-host/controls.ts",
     // P3-HD: the direct-route probe observes real reports through route D's cache and compares H's fingerprint

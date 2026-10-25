@@ -1,0 +1,101 @@
+{
+  "key": "seed:knowledge-work-plugins",
+  "recordedAt": "2026-10-25T02:24:15.671Z",
+  "pages": [
+    {
+      "name": "knowledge-work-plugins",
+      "owner": {
+        "name": "Anthropic"
+      },
+      "plugins": [
+        {
+          "name": "adspirer-ads-agent",
+          "displayName": "Adspirer",
+          "description": "Cross-platform ad management for Google Ads, Meta Ads, TikTok Ads, and LinkedIn Ads. 91 tools for keyword research, campaign creation, performance analysis, and budget optimization.",
+          "category": "productivity",
+          "source": {
+            "source": "url",
+            "url": "https://github.com/amekala/adspirer-mcp-plugin.git",
+            "sha": "e3067cec8803e28da91834d0f38e0405ad23429b"
+          },
+          "homepage": "https://www.adspirer.com"
+        },
+        {
+          "name": "ai-firstify",
+          "displayName": "AI-Firstify",
+          "description": "AI-first project auditor and re-engineer based on the 9 design principles and 7 design patterns from the TechWolf AI-First Bootcamp",
+          "source": {
+            "source": "git-subdir",
+            "url": "https://github.com/techwolf-ai/ai-first-toolkit.git",
+            "path": "plugins/ai-firstify",
+            "ref": "main",
+            "sha": "f6380c947b04ae0817c2723fbf589784d4501357"
+          },
+          "homepage": "https://ai-first.techwolf.ai"
+        },
+        {
+          "name": "adobe-for-creativity",
+          "displayName": "Adobe",
+          "author": {
+            "name": "Adobe"
+          },
+          "description": "Brings together Adobe Creative Cloud tools for images, vectors, design, and video. Edit multiple assets at once, adapt for different platforms, and complete multi-step creative workflows for polished results.",
+          "category": "design",
+          "source": {
+            "source": "git-subdir",
+            "url": "https://github.com/adobe/skills.git",
+            "path": "plugins/creative-cloud/adobe-for-creativity",
+            "ref": "main",
+            "sha": "0f487c9b1b98d8e62dfc80ee4d28b29f5471261f"
+          },
+          "homepage": "https://github.com/adobe/skills/tree/main/plugins/creative-cloud/adobe-for-creativity"
+        },
+        {
+          "name": "airtable",
+          "description": "Airtable is the database and operations layer for your agents — whether running product, marketing, sales, ops, HR, or a custom business app. It combines structured data with multiplayer visual surfaces (grid, kanban, calendar, gallery, timeline) humans and agents share — plus sync integrations to Jira, Salesforce, Zendesk, Google Drive, and Databricks. Makes Claude fluent in Airtable: bases and schema, records, and collaboration UI. Bundles the official Airtable MCP server.",
+          "author": {
+            "name": "Airtable"
+          },
+          "category": "productivity",
+          "source": {
+            "source": "git-subdir",
+            "url": "https://github.com/Airtable/skills.git",
+            "path": "plugins/airtable",
+            "ref": "main",
+            "sha": "812ee67f1fd3d76fb45ff8df40afaa0448602ba8"
+          },
+          "homepage": "https://www.airtable.com"
+        },
+        {
+          "name": "airwallex-agentos",
+          "displayName": "Airwallex",
+          "description": "Bring Airwallex's global financial infrastructure to Claude. Orchestrate actions across your account in plain language, e.g., set up invoices from a PO, onboard suppliers from invoices, and check current cash position across currencies. AgentOS bundles pre-built finance Skills with MCP servers. A public CLI connects your agent to Airwallex's capabilities.",
+          "author": {
+            "name": "Airwallex"
+          },
+          "category": "productivity",
+          "source": {
+            "source": "git-subdir",
+            "url": "https://github.com/airwallex/airwallex-marketplace.git",
+            "path": "plugins/airwallex-agentos",
+            "ref": "master",
+            "sha": "877551077786664d1cbeb32013443291c66e69e6"
+          },
+          "homepage": "https://www.airwallex.com/docs"
+        },
+        {
+          "name": "activecampaign",
+          "displayName": "ActiveCampaign",
+          "description": "Marketing automation, CRM, and email marketing powered by ActiveCampaign. Manage contacts, campaigns, automations, deals, and get AI-powered marketing insights — all from Claude.",
+          "category": "productivity",
+          "source": {
+            "source": "url",
+            "url": "https://github.com/ActiveCampaign/activecampaign-plugin.git",
+            "sha": "0ff858728bc52aee335d5475b0d4eb5f3a9589b0"
+          },
+          "homepage": "https://www.activecampaign.com"
+        }
+      ]
+    }
+  ]
+}

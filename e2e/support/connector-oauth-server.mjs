@@ -3,7 +3,8 @@
 // file on every request (absent or invalid means the open phase), and appends each request's safe entry to the log and
 // what it saw or minted to the secrets file (created 0600; a scene scans its evidence against it and never retains it).
 // Grants live in this process's memory, so they outlast an app relaunch while the scene keeps the process.
-//   node connector-oauth-server.mjs --id <id> --log <file> --control <file> --secrets <file> [--tools '<json>']
+//   node connector-oauth-server.mjs --id <id> --log <file> --control <file> --secrets <file> [--tools '<json>'] [--mode maws|engine]
+// P4-AGG M1: `--mode engine` registers the engine's own callbacks (./connector-oauth-core.mjs).
 //   (prints {"port":n} once listening)
 import { Buffer } from 'node:buffer';
 import { appendFileSync, readFileSync } from 'node:fs';
@@ -26,6 +27,7 @@ const log = arg('log');
 const controlFile = arg('control');
 const secretsFile = arg('secrets');
 const tools = JSON.parse(arg('tools', '["read_series"]'));
+const mode = arg('mode', 'maws'); // P4-AGG M1
 const BODY_LIMIT = 1_000_000;
 
 function control() {
@@ -57,7 +59,7 @@ const server = createServer((req, res) => {
 });
 server.listen(0, '127.0.0.1', () => {
   const { port } = server.address();
-  core = createOAuthFixtureCore({ id, origin: `http://127.0.0.1:${port}`, tools, now: Date.now, randomToken: () => randomBytes(32).toString('base64url') });
+  core = createOAuthFixtureCore({ id, origin: `http://127.0.0.1:${port}`, tools, mode, now: Date.now, randomToken: () => randomBytes(32).toString('base64url') });
   appendFileSync(log, `${JSON.stringify({ at: new Date().toISOString(), pid: process.pid, server: id, event: 'start', port })}\n`);
   process.stdout.write(`${JSON.stringify({ port })}\n`);
 });

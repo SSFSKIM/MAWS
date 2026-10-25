@@ -1,0 +1,970 @@
+{
+  "key": "directory:servers",
+  "recordedAt": "2026-10-25T02:24:15.671Z",
+  "pages": [
+    {
+      "servers": [
+        {
+          "id": "fa50c30c-9f62-4f94-b851-217868185db6",
+          "type": "remote",
+          "source_feed": "remote",
+          "name": "Linear",
+          "one_liner": "Manage issues, projects & team workflows in Linear",
+          "description": "Manage issues, projects, and team workflows in Linear with natural language. Create and update issues, track progress, plan cycles, and coordinate development tasks using Linear’s streamlined project management interface for faster, more efficient workflows.",
+          "icon_url": "https://mcp.linear.app/mcp",
+          "author": {
+            "name": "Linear (Linear Orbit, Inc.)",
+            "url": "https://linear.app"
+          },
+          "tool_names": [
+            "list_comments",
+            "create_comment",
+            "list_cycles",
+            "get_document",
+            "list_documents",
+            "get_issue",
+            "list_issues",
+            "create_issue",
+            "update_issue",
+            "list_issue_statuses",
+            "get_issue_status",
+            "list_my_issues",
+            "list_issue_labels",
+            "list_projects",
+            "get_project",
+            "create_project",
+            "update_project",
+            "list_teams",
+            "get_team",
+            "list_users",
+            "get_user",
+            "search_documentation"
+          ],
+          "prompt_names": [],
+          "categories": [
+            "productivity"
+          ],
+          "works_with": [
+            "claude",
+            "claude-api",
+            "claude-code"
+          ],
+          "documentation": "https://linear.app/docs/mcp",
+          "ema_support_documentation": "https://linear.app/docs/mcp#enterprise-managed-authorization",
+          "sort_order": 0,
+          "rank": 66,
+          "popularity_rank": 14,
+          "trending_rank": 298,
+          "popularity_score": 20999,
+          "trending_score": 44305,
+          "slug": "linear",
+          "directory_url": "https://claude.ai/directory/fa50c30c-9f62-4f94-b851-217868185db6",
+          "visibility": [
+            "commercial"
+          ],
+          "verified_tier": "partner",
+          "permissions": "Read and write",
+          "support": "https://linear.app/contact/support",
+          "privacy_policy": "https://linear.app/privacy",
+          "display_name": "Linear",
+          "server_label": "mcp.linear.app",
+          "logo": "linear",
+          "background_pattern": "Line 1",
+          "hero_video_id": "xBV60h9_lbw",
+          "hero_video_preview_link": "https://cdn.sanity.io/files/4zrzovbb/website/5a520c2349640aa2e64105cfa1398a0da575ddd6.mp4",
+          "html_content": "<p id=\"\">Manage issues, projects, and team workflows in Linear with natural language. Create and update issues, track progress, plan cycles, and coordinate development tasks using Linear's streamlined project management interface for faster, more efficient workflows.</p><p id=\"\">You can use the Linear connector to:<br><br>Create and assign issues:<br>\"Create a new issue titled 'Login fails on mobile Safari' in the Onboarding team's triage queue. Set priority to high, assign it to Alexandra, and add the label 'bug'\"</p><p id=\"\">Investigate and analyze issues:<br>\"Analyze the Linear issue LIN-36 and suggest potential fixes or approaches\"</p><p id=\"\">Manage releases:<br>\"Create a release preparation checklist for v2.3.0 with all the standard deployment issues\"</p><p id=\"\">Respond to incidents:<br>\"Create a high-priority incident report for the project related to the outage on July 12th. Include the timeline and impact assessment\"</p>",
+          "claude_code_copy_text": "claude mcp add --transport http linear https://mcp.linear.app/mcp",
+          "source": "auto-sync",
+          "added_at": "2025-11-12",
+          "taxonomy": {
+            "object_acted_on": [
+              "tickets-tasks",
+              "files-documents"
+            ],
+            "work_department": "engineering",
+            "industry": null,
+            "life_area": null,
+            "subject": null
+          },
+          "remote": {
+            "url": "https://mcp.linear.app/mcp",
+            "url_regex": null,
+            "transport": "streamable-http",
+            "is_authless": false,
+            "auth_posture": "auth_required",
+            "supports_id_jag": true
+          }
+        },
+        {
+          "id": "b89f7865-a755-4f86-8062-c3bd651740ce",
+          "type": "remote",
+          "source_feed": "remote",
+          "name": "Google Drive",
+          "one_liner": "Search, read, and upload files instantly",
+          "description": "Connect Google Drive to Claude to search through your documents, read file contents, upload new files, and analyze your data. Claude can find specific documents even when you don't remember the exact name, read and analyze the content of Google Docs, Sheets, Slides, and PDFs, and upload files directly to your Drive. Useful for finding project notes, extracting data from spreadsheets, preparing meeting materials, or organizing files scattered across your Drive.",
+          "icon_url": "https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://drive.google.com&size=64",
+          "author": {
+            "name": "Google",
+            "url": "https://cloud.google.com"
+          },
+          "tool_names": [
+            "copy_file",
+            "create_file",
+            "download_file_content",
+            "get_file_metadata",
+            "get_file_permissions",
+            "list_recent_files",
+            "read_file_content",
+            "search_files",
+            "share_file",
+            "trash_file",
+            "update_file"
+          ],
+          "prompt_names": [],
+          "categories": [
+            "productivity",
+            "data"
+          ],
+          "works_with": [
+            "claude",
+            "claude-api",
+            "claude-code"
+          ],
+          "documentation": "https://developers.google.com/workspace/drive",
+          "ema_support_documentation": null,
+          "sort_order": null,
+          "rank": 28,
+          "popularity_rank": 1,
+          "trending_rank": 116,
+          "popularity_score": 24868,
+          "trending_score": 72813,
+          "slug": "google-drive-drivemcp",
+          "directory_url": "https://claude.ai/directory/b89f7865-a755-4f86-8062-c3bd651740ce",
+          "visibility": [
+            "commercial"
+          ],
+          "verified_tier": "partner",
+          "support": "https://developers.google.com/workspace/support",
+          "privacy_policy": "https://policies.google.com/privacy",
+          "display_name": "Google Drive",
+          "source": "manual",
+          "added_at": "2026-03-18",
+          "taxonomy": {
+            "object_acted_on": [
+              "files-documents"
+            ],
+            "work_department": null,
+            "industry": null,
+            "life_area": null,
+            "subject": null
+          },
+          "remote": {
+            "url": "https://drivemcp.googleapis.com/mcp/v1",
+            "url_regex": null,
+            "transport": "streamable-http",
+            "is_authless": false,
+            "auth_posture": "auth_required"
+          }
+        },
+        {
+          "id": "2701e52f-b826-4aaf-8b25-11f2a97c98b0",
+          "type": "remote",
+          "source_feed": "remote",
+          "name": "Gmail",
+          "one_liner": "Draft replies, summarize threads, & search your inbox",
+          "description": "Connect Gmail to Claude to quickly find important emails and understand long conversations. Claude can search through your messages, read entire email threads to give you context, and help you stay on top of your inbox. Perfect for finding that message you remember sending, catching up on email chains you missed, or preparing for meetings.",
+          "icon_url": "https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://mail.google.com&size=64",
+          "author": {
+            "name": "Google",
+            "url": "https://cloud.google.com"
+          },
+          "tool_names": [
+            "apply_sensitive_message_label",
+            "apply_sensitive_thread_label",
+            "create_draft",
+            "create_filter",
+            "create_label",
+            "delete_label",
+            "forward",
+            "get_message",
+            "get_thread",
+            "label_message",
+            "label_thread",
+            "list_drafts",
+            "list_filters",
+            "list_labels",
+            "mark_message_spam",
+            "mark_thread_spam",
+            "reply",
+            "search_threads",
+            "send_message",
+            "trash_message",
+            "trash_thread",
+            "unlabel_message",
+            "unlabel_thread",
+            "unmark_message_spam",
+            "unmark_thread_spam",
+            "untrash_message",
+            "untrash_thread",
+            "update_draft",
+            "update_label"
+          ],
+          "prompt_names": [],
+          "categories": [
+            "communication"
+          ],
+          "works_with": [
+            "claude",
+            "claude-api",
+            "claude-code"
+          ],
+          "documentation": "https://developers.google.com/workspace/gmail",
+          "ema_support_documentation": null,
+          "sort_order": null,
+          "rank": 35,
+          "popularity_rank": 2,
+          "trending_rank": 176,
+          "popularity_score": 24345,
+          "trending_score": 58449,
+          "slug": "gmail-gmailmcp",
+          "directory_url": "https://claude.ai/directory/2701e52f-b826-4aaf-8b25-11f2a97c98b0",
+          "visibility": [
+            "commercial"
+          ],
+          "verified_tier": "partner",
+          "support": "https://developers.google.com/workspace/support",
+          "privacy_policy": "https://policies.google.com/privacy",
+          "display_name": "Gmail",
+          "source": "manual",
+          "added_at": "2026-03-18",
+          "taxonomy": {
+            "object_acted_on": [
+              "email-messages"
+            ],
+            "work_department": null,
+            "industry": null,
+            "life_area": null,
+            "subject": null
+          },
+          "remote": {
+            "url": "https://gmailmcp.googleapis.com/mcp/v1",
+            "url_regex": null,
+            "transport": "streamable-http",
+            "is_authless": false,
+            "auth_posture": "auth_required"
+          }
+        },
+        {
+          "id": "2a838eaa-f7b4-4bc2-bd47-c326f3c813c5",
+          "type": "remote",
+          "source_feed": "remote",
+          "name": "Google Calendar",
+          "one_liner": "Manage your schedule and coordinate meetings effortlessly",
+          "description": "Connect Google Calendar to Claude to view your schedule, manage events, and coordinate meetings. Claude can search your calendar for events, check your availability, find free time slots, create and update events, respond to invitations, and help you prepare for meetings. Useful for understanding what's coming up, scheduling new meetings by finding mutual availability, managing your calendar by creating or updating events, coordinating schedules across multiple people, or preparing for meetings by reviewing attendee lists and details.",
+          "icon_url": "https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://calendar.google.com&size=64",
+          "author": {
+            "name": "Google",
+            "url": "https://cloud.google.com"
+          },
+          "tool_names": [
+            "create_event",
+            "delete_event",
+            "get_event",
+            "list_calendars",
+            "list_events",
+            "respond_to_event",
+            "search_events",
+            "suggest_time",
+            "update_event"
+          ],
+          "prompt_names": [
+            "schedule_meeting",
+            "quick_meeting_today",
+            "recurring_1on1",
+            "team_meeting_scheduler",
+            "analyze_availability"
+          ],
+          "categories": [
+            "productivity"
+          ],
+          "works_with": [
+            "claude",
+            "claude-api",
+            "claude-code"
+          ],
+          "documentation": "https://developers.google.com/workspace/calendar",
+          "ema_support_documentation": null,
+          "sort_order": null,
+          "rank": 38,
+          "popularity_rank": 3,
+          "trending_rank": 208,
+          "popularity_score": 24136,
+          "trending_score": 53812,
+          "slug": "google-calendar-calendarmcp",
+          "directory_url": "https://claude.ai/directory/2a838eaa-f7b4-4bc2-bd47-c326f3c813c5",
+          "visibility": [
+            "commercial"
+          ],
+          "verified_tier": "partner",
+          "support": "https://developers.google.com/workspace/support",
+          "privacy_policy": "https://policies.google.com/privacy",
+          "display_name": "Google Calendar",
+          "source": "manual",
+          "added_at": "2026-03-18",
+          "taxonomy": {
+            "object_acted_on": [
+              "events-tickets"
+            ],
+            "work_department": null,
+            "industry": null,
+            "life_area": null,
+            "subject": null
+          },
+          "remote": {
+            "url": "https://calendarmcp.googleapis.com/mcp/v1",
+            "url_regex": null,
+            "transport": "streamable-http",
+            "is_authless": false,
+            "auth_posture": "auth_required"
+          }
+        },
+        {
+          "id": "eb9240f2-e1c1-43c1-828f-0fda40c22e4c",
+          "type": "remote",
+          "source_feed": "remote",
+          "name": "Canva",
+          "one_liner": "Search, create, autofill, and export Canva designs",
+          "description": "Browse, summarize, autofill, and even generate new Canva designs directly from Claude. Make Canva a native part of your AI workflow—an AI-powered design agent that helps you create polished visuals faster, with less friction.",
+          "icon_url": "https://mcp.canva.com/mcp",
+          "author": {
+            "name": "Canva",
+            "url": "https://canva.com"
+          },
+          "tool_names": [
+            "search-designs",
+            "get-design",
+            "get-design-pages",
+            "get-design-content",
+            "search",
+            "fetch",
+            "import-design-from-url",
+            "get-design-import-from-url-status",
+            "export-design",
+            "get-export-formats",
+            "get-design-export-status",
+            "create-folder",
+            "move-item-to-folder",
+            "list-folder-items",
+            "add-comment-thread-to-design",
+            "generate-design",
+            "get-design-generation-job"
+          ],
+          "prompt_names": [],
+          "categories": [
+            "design",
+            "education"
+          ],
+          "works_with": [
+            "claude",
+            "claude-api",
+            "claude-code"
+          ],
+          "documentation": "https://www.canva.dev/docs/connect/canva-mcp-server-setup/",
+          "ema_support_documentation": "https://www.canva.com/help/manage-cross-app-access",
+          "sort_order": 1,
+          "rank": 44,
+          "popularity_rank": 4,
+          "trending_rank": 284,
+          "popularity_score": 22899,
+          "trending_score": 44781,
+          "slug": "canva",
+          "directory_url": "https://claude.ai/directory/eb9240f2-e1c1-43c1-828f-0fda40c22e4c",
+          "visibility": [
+            "commercial"
+          ],
+          "has_mcp_app": true,
+          "verified_tier": "partner",
+          "permissions": "Read and write",
+          "support": "https://www.canva.com/en_au/help/",
+          "privacy_policy": "https://www.canva.com/policies/privacy-policy/",
+          "display_name": "Canva",
+          "server_label": "mcp.canva.com",
+          "logo": "canva",
+          "background_pattern": "Line 1",
+          "hero_video_id": "wXC2u36w2Rc",
+          "hero_video_preview_link": "https://cdn.sanity.io/files/4zrzovbb/website/4925fcd732bab964631e2678e413dfa2a549a2a9.mp4",
+          "html_content": "<p id=\"\">Browse, summarize, autofill, and even generate new Canva designs directly from Claude. Make Canva a native part of your workflow—helping you create polished visuals faster, with less friction.</p><p id=\"\">You can use the Canva connector to: <br>‍<br>Browse, Search &amp; Summarize: <br>\"Summarize my Q2 product strategy doc\"</p><p id=\"\">Create New Designs from Conversation:<br>\"Generate a pitch deck for our AI launch with 5 slides and a bold tone\"</p><p id=\"\">Autofill Charts:<br>\"Add a chart showing monthly signups in NZ for Q1\"</p><p id=\"\">Autofill Brand Templates:<br>\"Populate our branded template with content for a product launch presentation, 8 slides, professional tone\"</p><p id=\"\">Import Files via Link:<br>\"Import this PDF [insert URL] into Canva\"</p><p id=\"\">Resize or Export:<br>\"Resize my Instagram post for LinkedIn and export as a PNG\"</p>",
+          "image_urls": [
+            {
+              "prompt": "Generate a sales report presentation with outline ",
+              "image_url": "https://storage.googleapis.com/media-assets-299d7136-cb52-d546-ee02-34bc1307c35f/Connectors%20Directory/Carousel%20Prompt%20Images/App%20Canva%20Card%201.png"
+            },
+            {
+              "prompt": "Create a social post for the upcoming Big Chopper Burger. Use the Chopify brand kit",
+              "image_url": "https://storage.googleapis.com/media-assets-299d7136-cb52-d546-ee02-34bc1307c35f/Connectors%20Directory/Carousel%20Prompt%20Images/App%20Canva%20Card%202.png"
+            },
+            {
+              "prompt": "Create a sales report for the last quarter to share our wins internally",
+              "image_url": "https://storage.googleapis.com/media-assets-299d7136-cb52-d546-ee02-34bc1307c35f/Connectors%20Directory/Carousel%20Prompt%20Images/App%20Canva%20Card%203.png"
+            }
+          ],
+          "claude_code_copy_text": "claude mcp add --transport http canva https://mcp.canva.com/mcp",
+          "source": "auto-sync",
+          "added_at": "2025-11-12",
+          "taxonomy": {
+            "object_acted_on": [
+              "designs-media"
+            ],
+            "work_department": "design",
+            "industry": null,
+            "life_area": null,
+            "subject": null
+          },
+          "remote": {
+            "url": "https://mcp.canva.com/mcp",
+            "url_regex": null,
+            "transport": "streamable-http",
+            "is_authless": false,
+            "auth_posture": "auth_required",
+            "supports_id_jag": true
+          }
+        },
+        {
+          "id": "ce0c9cda-5ea5-44c5-9cf2-40810dfa6582",
+          "type": "remote",
+          "source_feed": "remote",
+          "name": "Microsoft 365",
+          "one_liner": "Access your company's SharePoint, OneDrive, Outlook, and Teams directly in Claude",
+          "description": "Access SharePoint, OneDrive, Outlook, and Teams directly in Claude. Search and analyze documents across sites and libraries, review email threads and communications, and extract insights from calendar and chat data. Make Microsoft 365 a native part of your Claude workflows while respecting all existing permissions and security controls. Built for Microsoft 365 at work — your company's SharePoint, OneDrive, Outlook, and Teams. Requires a work or school account (you@yourcompany.com). Personal accounts like outlook.com, hotmail.com, or live.com aren't supported.",
+          "icon_url": "https://www.microsoft.com/microsoft-365",
+          "author": {
+            "name": "Anthropic",
+            "url": "https://anthropic.com"
+          },
+          "tool_names": [
+            "sharepoint_search",
+            "sharepoint_folder_search",
+            "outlook_email_search",
+            "outlook_calendar_search",
+            "find_meeting_availability",
+            "chat_message_search",
+            "read_resource"
+          ],
+          "prompt_names": [],
+          "categories": [
+            "productivity",
+            "communication"
+          ],
+          "works_with": [
+            "claude",
+            "claude-api",
+            "claude-code"
+          ],
+          "documentation": "https://support.claude.com/en/articles/12542951-enabling-and-using-the-microsoft-365-connector",
+          "ema_support_documentation": null,
+          "sort_order": 1,
+          "rank": 39,
+          "popularity_rank": 5,
+          "trending_rank": 177,
+          "popularity_score": 22568,
+          "trending_score": 58213,
+          "slug": "microsoft-365",
+          "directory_url": "https://claude.ai/directory/ce0c9cda-5ea5-44c5-9cf2-40810dfa6582",
+          "visibility": [
+            "commercial"
+          ],
+          "verified_tier": "anthropic",
+          "support": "https://support.anthropic.com",
+          "privacy_policy": "https://www.anthropic.com/privacy",
+          "display_name": "Microsoft 365",
+          "source": "manual",
+          "added_at": "2025-11-14",
+          "taxonomy": {
+            "object_acted_on": [
+              "files-documents",
+              "email-messages",
+              "events-tickets"
+            ],
+            "work_department": null,
+            "industry": null,
+            "life_area": null,
+            "subject": null
+          },
+          "remote": {
+            "url": "https://microsoft365.mcp.claude.com/mcp",
+            "url_regex": null,
+            "transport": "streamable-http",
+            "is_authless": false,
+            "auth_posture": "auth_required"
+          }
+        }
+      ],
+      "total": 12,
+      "next_cursor": "fixture-page-2",
+      "stale_feeds": []
+    },
+    {
+      "servers": [
+        {
+          "id": "69f3a300-cc60-48c4-b237-dfac56530dbf",
+          "type": "remote",
+          "source_feed": "remote",
+          "name": "Notion",
+          "one_liner": "Connect your Notion workspace to search, update, and power workflows across tools",
+          "description": "Notion MCP helps you plug tools into your Notion workspace, allowing you to create, edit, search and organize content directly from Claude. Get contextual and relevant assistance from Claude, while keeping knowledge organized in Notion.",
+          "icon_url": "https://www.notion.so/images/notion-logo-block-main.svg",
+          "author": {
+            "name": "Notion",
+            "url": "https://notion.com"
+          },
+          "tool_names": [
+            "search",
+            "fetch",
+            "create-pages",
+            "update-page",
+            "move-pages",
+            "duplicate-page",
+            "create-database",
+            "update-database",
+            "create-comment",
+            "get-comments",
+            "get-users",
+            "get-self",
+            "get-user"
+          ],
+          "prompt_names": [],
+          "categories": [
+            "productivity"
+          ],
+          "works_with": [
+            "claude",
+            "claude-api",
+            "claude-code"
+          ],
+          "documentation": "https://developers.notion.com/docs/mcp",
+          "ema_support_documentation": "https://www.notion.com/help/set-up-enterprise-managed-connections-for-notion-mcp",
+          "sort_order": 0,
+          "rank": 46,
+          "popularity_rank": 6,
+          "trending_rank": 244,
+          "popularity_score": 22392,
+          "trending_score": 49043,
+          "slug": "notion",
+          "directory_url": "https://claude.ai/directory/69f3a300-cc60-48c4-b237-dfac56530dbf",
+          "visibility": [
+            "commercial"
+          ],
+          "verified_tier": "partner",
+          "permissions": "Read and write",
+          "support": "mailto:developers@makenotion.com",
+          "privacy_policy": "https://www.notion.so/notion/Privacy-Policy-3468d120cf614d4c9014c09f6adc9091",
+          "display_name": "Notion",
+          "server_label": "mcp.notion.com",
+          "logo": "notion",
+          "background_pattern": "Line 1",
+          "hero_video_id": "xBV60h9_lbw",
+          "hero_video_preview_link": "https://cdn.sanity.io/files/4zrzovbb/website/5a520c2349640aa2e64105cfa1398a0da575ddd6.mp4",
+          "html_content": "<p id=\"\">Create, edit, search and organize Notion content directly from Claude. Get contextual and relevant assistance from Claude, while keeping knowledge organized in Notion.</p><p id=\"\">You can use the Notion connector to:<br><br>Create pages with structured content:<br>\"Create a meeting notes page for today's standup with action items\"</p><p id=\"\">Check workspace connections:<br>\"Which Notion workspace am I currently connected to?\"</p><p id=\"\">Search across pages:<br>\"Find all project pages that mention 'ready for dev'\"</p><p id=\"\">Update page properties:<br>\"Change the status of this task from 'In Progress' to 'Complete'\"<br><br>You also combine the Notion Connector with <a href=\"https://www.claude.com/blog/skills\">Skills</a> to help with:<br>‍<br>• Meeting intelligence: Prepare meeting materials by gathering context from Notion, enriching with Claude research, and creating both an internal pre-read and external agenda saved to Notion.<br> <br>• Research &amp; Documentation: Search across your Notion workspace, synthesize findings from multiple pages, and create a comprehensive research documentation saved as new Notion pages. <br>‍<br>• Knowledge Capture: Turn discussions into durable knowledge in Notion. Capture insights and decisions from chat, format them clearly, and file them to the right wiki or database with smart linking.<br>‍<br>• Spec to Implementation: Turn product or tech specs into concrete Notion tasks that Claude Code can implement.<br><br>See <a id=\"\" href=\"https://notiondevs.notion.site/notion-skills-for-claude\">here</a> for details on how to use Skills with Notion's connector. </p>",
+          "claude_code_copy_text": "claude mcp add --transport http notion https://mcp.notion.com/mcp",
+          "source": "auto-sync",
+          "added_at": "2025-11-12",
+          "taxonomy": {
+            "object_acted_on": [
+              "files-documents",
+              "notes-memory",
+              "databases"
+            ],
+            "work_department": null,
+            "industry": null,
+            "life_area": null,
+            "subject": null
+          },
+          "remote": {
+            "url": "https://mcp.notion.com/mcp",
+            "url_regex": null,
+            "transport": "streamable-http",
+            "is_authless": false,
+            "auth_posture": "auth_required",
+            "supports_id_jag": true
+          }
+        },
+        {
+          "id": "a352dbf6-c732-43d4-84c1-0bbb389d3921",
+          "type": "remote",
+          "source_feed": "remote",
+          "name": "Salesforce - Beta",
+          "one_liner": "Sell, serve, and operate at scale with Salesforce.",
+          "description": "The Salesforce MCP Server lets your teams securely access Customer 360 data and Salesforce capabilities without leaving the chat — all while honoring Salesforce security, permissions, and governance. Knowledge workers ask about pipeline, summarize cases, create campaigns, draft updates, and reason across accounts, opportunities, and more — grounded in real Salesforce data. Builders can use the Salesforce MCP server to configure and customize Salesforce to move their teams faster than ever. \n\nThe Salesforce Headless 360 MCP Server is a Beta Service. Read our Developer Documentation to learn more: https://developer.salesforce.com/docs/platform/hosted-mcp-servers/guide/headless-360-mcp.html",
+          "icon_url": null,
+          "author": {
+            "name": "Salesforce",
+            "url": "https://www.salesforce.com/"
+          },
+          "tool_names": [
+            "describe",
+            "discover",
+            "dispatch",
+            "dispatch_readonly"
+          ],
+          "prompt_names": [],
+          "categories": [
+            "sales-and-marketing",
+            "data-analytics",
+            "commerce-shopping",
+            "other",
+            "nonprofit"
+          ],
+          "works_with": [
+            "claude",
+            "claude-api",
+            "claude-code",
+            "claude-desktop"
+          ],
+          "documentation": "https://developer.salesforce.com/docs/platform/hosted-mcp-servers/guide/headless-360-mcp.html",
+          "ema_support_documentation": null,
+          "sort_order": null,
+          "rank": 97,
+          "popularity_rank": 31,
+          "trending_rank": 299,
+          "popularity_score": 19378,
+          "trending_score": 44141,
+          "slug": "salesforce-headless-360",
+          "directory_url": "https://claude.ai/directory/a352dbf6-c732-43d4-84c1-0bbb389d3921",
+          "visibility": [
+            "commercial"
+          ],
+          "verified_tier": "partner",
+          "support": "https://help.salesforce.com/s/",
+          "privacy_policy": "https://www.salesforce.com/company/legal/privacy/",
+          "display_name": "Salesforce - Beta",
+          "logo": "https://www.salesforce.com/news/wp-content/uploads/sites/3/2021/05/Salesforce-logo.jpg",
+          "source": "manual",
+          "added_at": "2026-08-11",
+          "taxonomy": {
+            "object_acted_on": [
+              "contacts-leads",
+              "tickets-tasks"
+            ],
+            "work_department": "sales",
+            "industry": null,
+            "life_area": null,
+            "subject": null
+          },
+          "remote": {
+            "url": null,
+            "url_regex": "^https://api\\.salesforce\\.com/platform/mcp/v1/(?:d/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?/(?:(?:develop|sandbox|scratch)/)?|sandbox/)?platform/headless-360$",
+            "transport": "streamable-http",
+            "is_authless": false,
+            "required_fields": [
+              {
+                "field": "url",
+                "source_url": "https://github.com/forcedotcom/mcp-hosted/wiki/Connecting-Your-MCP-Client"
+              },
+              {
+                "field": "custom_oauth_client_id",
+                "source_url": "https://developer.salesforce.com/docs/platform/hosted-mcp-servers/guide/setup-overview.html"
+              },
+              {
+                "field": "custom_oauth_client_secret",
+                "source_url": "https://developer.salesforce.com/docs/platform/hosted-mcp-servers/guide/setup-overview.html"
+              }
+            ],
+            "auth_posture": "auth_required"
+          }
+        },
+        {
+          "id": "89a7ddf5-2a6b-410c-be11-aa0e1a1b35a6",
+          "type": "remote",
+          "source_feed": "remote",
+          "name": "Microsoft Learn",
+          "one_liner": "Search trusted Microsoft docs to power your development",
+          "description": "The Microsoft Learn MCP Server enables clients like GitHub Copilot and other AI agents to bring trusted and up-to-date information directly from Microsoft's official documentation. It is a remote MCP server that uses streamable http. It allows to search through documentation, fetch a complete article, and search through code samples.",
+          "icon_url": "https://learn.microsoft.com/en-us/",
+          "author": {
+            "name": "Microsoft",
+            "url": "https://learn.microsoft.com/en-us/"
+          },
+          "tool_names": [
+            "microsoft_docs_search",
+            "microsoft_docs_fetch",
+            "microsoft_code_sample_search"
+          ],
+          "prompt_names": [],
+          "categories": [
+            "code"
+          ],
+          "works_with": [
+            "claude",
+            "claude-api",
+            "claude-code"
+          ],
+          "documentation": "https://learn.microsoft.com/en-us/training/support/mcp",
+          "ema_support_documentation": null,
+          "sort_order": 1,
+          "rank": 100,
+          "popularity_rank": 30,
+          "trending_rank": 373,
+          "popularity_score": 19381,
+          "trending_score": 39351,
+          "slug": "microsoft-learn",
+          "directory_url": "https://claude.ai/directory/89a7ddf5-2a6b-410c-be11-aa0e1a1b35a6",
+          "visibility": [
+            "commercial"
+          ],
+          "verified_tier": "partner",
+          "permissions": "Read",
+          "support": "https://github.com/MicrosoftDocs/mcp/issues",
+          "privacy_policy": "https://www.microsoft.com/en-us/privacy/privacystatement",
+          "display_name": "Microsoft Learn",
+          "server_label": "learn.microsoft.com/api/mcp",
+          "logo": "microsoft-learn",
+          "background_pattern": "Line 1",
+          "claude_code_copy_text": "claude mcp add --transport http microsoft-learn https://learn.microsoft.com/api/mcp\n",
+          "source": "manual",
+          "added_at": "2026-02-15",
+          "taxonomy": {
+            "object_acted_on": [
+              "reference-docs"
+            ],
+            "work_department": "engineering",
+            "industry": null,
+            "life_area": null,
+            "subject": null
+          },
+          "remote": {
+            "url": "https://learn.microsoft.com/api/mcp",
+            "url_regex": null,
+            "transport": "streamable-http",
+            "is_authless": true,
+            "auth_posture": "no_auth"
+          }
+        },
+        {
+          "id": "fa0fb2e1-c3ba-4486-b576-0881432c5a4e",
+          "type": "remote",
+          "source_feed": "remote",
+          "name": "alphaXiv",
+          "one_liner": "Fast search and full-text access over arXiv pre-prints",
+          "description": "Fast retrieval (both keyword and embedding search) tools across the millions of papers in the arXiv corpus. Give your agent context on the latest research papers.",
+          "icon_url": "https://www.alphaxiv.org/",
+          "author": {
+            "name": "alphaXiv",
+            "url": "https://www.alphaxiv.org/"
+          },
+          "tool_names": [
+            "answer_pdf_queries",
+            "get_paper_content",
+            "read_files_from_github",
+            "embedding_similarity_search",
+            "full_text_papers_search",
+            "agentic_paper_retrieval"
+          ],
+          "prompt_names": [],
+          "categories": [
+            "data"
+          ],
+          "works_with": [
+            "claude",
+            "claude-desktop",
+            "claude-code",
+            "claude-api"
+          ],
+          "documentation": "https://www.alphaxiv.org/docs/mcp",
+          "ema_support_documentation": null,
+          "sort_order": null,
+          "rank": 495,
+          "popularity_rank": 227,
+          "trending_rank": 563,
+          "popularity_score": 15512,
+          "trending_score": 32714,
+          "slug": "alphaxiv",
+          "directory_url": "https://claude.ai/directory/fa0fb2e1-c3ba-4486-b576-0881432c5a4e",
+          "visibility": [
+            "commercial"
+          ],
+          "verified_tier": "partner",
+          "permissions": "Read",
+          "support": "https://github.com/alphaXiv/feedback",
+          "privacy_policy": "https://www.alphaxiv.org/privacy",
+          "display_name": "alphaXiv",
+          "server_label": "api.alphaxiv.org/mcp/v1",
+          "logo": "alphaxiv",
+          "background_pattern": "Line 1",
+          "claude_code_copy_text": "claude mcp add --transport sse alphaxiv https://api.alphaxiv.org/mcp/v1\n",
+          "source": "manual",
+          "added_at": "2026-06-14",
+          "taxonomy": {
+            "object_acted_on": [
+              "papers-articles"
+            ],
+            "work_department": null,
+            "industry": "research-academia",
+            "life_area": null,
+            "subject": null
+          },
+          "remote": {
+            "url": "https://api.alphaxiv.org/mcp/v1",
+            "url_regex": null,
+            "transport": "sse",
+            "is_authless": false,
+            "auth_posture": "auth_required"
+          }
+        },
+        {
+          "id": "ant.dir.ant.anthropic.filesystem",
+          "type": "local",
+          "source_feed": "dxt",
+          "name": "Filesystem",
+          "one_liner": "Let Claude access your filesystem to read and write files.",
+          "description": "This extension allows Claude to interact with your local filesystem, enabling it to read and write files directly. This can be useful for tasks such as file management, data processing, and automation of repetitive tasks. The extension provides a set of tools that can be used to navigate directories, read file contents, and write new files or modify existing ones.\n\nUnderneath the hood, it uses @modelcontextprotocol/server-filesystem v2026.7.4.",
+          "icon_url": "https://claude.ai/api/dxt/extensions/ant.dir.ant.anthropic.filesystem/versions/2026.7.10/icon.png",
+          "author": {
+            "name": "Anthropic",
+            "url": "https://www.claude.ai"
+          },
+          "tool_names": [
+            "read_file",
+            "read_text_file",
+            "read_media_file",
+            "read_multiple_files",
+            "write_file",
+            "edit_file",
+            "create_directory",
+            "list_directory",
+            "list_directory_with_sizes",
+            "directory_tree",
+            "move_file",
+            "search_files",
+            "get_file_info",
+            "list_allowed_directories"
+          ],
+          "prompt_names": [],
+          "categories": [],
+          "works_with": [
+            "claude-desktop"
+          ],
+          "documentation": "https://support.anthropic.com/en/collections/4078531-claude-ai",
+          "ema_support_documentation": null,
+          "sort_order": null,
+          "rank": 1064,
+          "popularity_rank": 689,
+          "popularity_score": 12375,
+          "trending_score": null,
+          "visibility": [
+            "commercial"
+          ],
+          "verified_tier": "partner",
+          "support": "https://www.claude.ai",
+          "support_url": "https://support.anthropic.com/en/collections/4078531-claude-ai",
+          "display_name": "Filesystem",
+          "added_at": "2026-07-17T19:31:40.245000+00:00",
+          "local": {
+            "version": "2026.7.10",
+            "size": 4000876,
+            "platforms": [
+              "darwin",
+              "win32",
+              "linux"
+            ],
+            "repository_url": "https://github.com/modelcontextprotocol/servers"
+          }
+        },
+        {
+          "id": "80917cb7-3071-4fca-b053-a4262d356c60",
+          "type": "remote",
+          "source_feed": "remote",
+          "name": "Shopify",
+          "one_liner": "Build, manage, and analyze your Shopify store",
+          "description": "Shopify for Claude makes starting, running, and growing an online store as easy as having a conversation. Turn a small business idea into an ecommerce website with Shopify’s AI store builder: describe what you sell, create your store, add products, and sell online. Already have a Shopify store? Connect it to manage inventory across locations, create discount codes, review orders and customer details, and pull analytics on your store’s performance. Shopify supports selling online, in person, B2B, on marketplaces, and selling internationally. Whether you run a print on demand business, sell digital products, operate an online boutique, dropship, or serve wholesale buyers, Shopify gives you the foundation to build, sell, and grow.",
+          "icon_url": "https://www.shopify.com/",
+          "author": {
+            "name": "Shopify",
+            "url": "https://www.shopify.com/"
+          },
+          "tool_names": [
+            "search_products",
+            "get-shop-info",
+            "get-product",
+            "create-product",
+            "update-product",
+            "list-orders",
+            "get-order",
+            "list-customers",
+            "get-inventory-levels",
+            "set-inventory",
+            "create-discount",
+            "add-to-collection",
+            "run-analytics-query",
+            "bulk-update-product-status",
+            "search_collections",
+            "get-collection",
+            "create-collection",
+            "update-collection",
+            "upload-image",
+            "switch-shop",
+            "graphql_schema",
+            "graphql_query",
+            "graphql_mutation",
+            "validate_graphql_codeblocks",
+            "search_docs_chunks"
+          ],
+          "prompt_names": [],
+          "categories": [
+            "productivity",
+            "sales-and-marketing",
+            "commerce-shopping"
+          ],
+          "works_with": [
+            "claude",
+            "claude-api"
+          ],
+          "documentation": "https://help.shopify.com/en/manual/apps/connecting-ai-tools",
+          "ema_support_documentation": null,
+          "sort_order": null,
+          "rank": 78,
+          "popularity_rank": 22,
+          "trending_rank": 273,
+          "popularity_score": 19826,
+          "trending_score": 46182,
+          "slug": "shopify",
+          "directory_url": "https://claude.ai/directory/80917cb7-3071-4fca-b053-a4262d356c60",
+          "visibility": [
+            "commercial"
+          ],
+          "has_mcp_app": true,
+          "verified_tier": "partner",
+          "permissions": "Read + Write",
+          "support": "https://help.shopify.com",
+          "privacy_policy": "https://www.shopify.com/legal/privacy",
+          "display_name": "Shopify",
+          "server_label": "setup.shopify.com/mcp",
+          "logo": "shopify",
+          "background_pattern": "Line 1",
+          "claude_code_copy_text": "claude mcp add --transport http shopify https://setup.shopify.com/mcp",
+          "source": "manual",
+          "added_at": "2026-04-29",
+          "taxonomy": {
+            "object_acted_on": [
+              "websites",
+              "contacts-leads"
+            ],
+            "work_department": null,
+            "industry": "retail-ecommerce",
+            "life_area": null,
+            "subject": null
+          },
+          "remote": {
+            "url": "https://setup.shopify.com/mcp",
+            "url_regex": null,
+            "transport": "streamable-http",
+            "is_authless": true,
+            "auth_posture": "no_auth"
+          }
+        }
+      ],
+      "total": 12,
+      "next_cursor": null,
+      "stale_feeds": []
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+# The engine builds the Discover e2e group runs, pinned by sha256 (scripts/provision-engine.sh; the P4-AGG spec, M1).
+# One line per version and platform: <version> <platform> <sha256 of the binary>. The checksum is the one Anthropic's
+# signed release manifest publishes, https://downloads.claude.ai/claude-code-releases/<version>/manifest.json
+# (`platforms.<platform>.checksum`), and the one the binary the installer placed on this MacBook hashes to.
+2.1.309 darwin-arm64 5eadc0009cdcdbc0d06e58110d7b2baf88ced6088b1c33a60a21217fe410619c

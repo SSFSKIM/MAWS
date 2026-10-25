@@ -10,12 +10,18 @@
 // tools/call attempts and answers per token generation, registrations, code exchanges, refreshes and revocations.
 // `scanForSecrets` checks texts a scene would retain against what the fixture saw or minted, reporting kinds only; the
 // secrets file itself, like the raw open log (./connector-oauth-browser.ts), is never retained.
-import { spawn } from 'node:child_process';
+// P4-AGG M1 (docs/doperpowers/specs/2026-10-24-plugin-aggregator-design.md): an engine mode, for the engine's own
+// sign-in. `startOAuthFixture({ mode: 'engine' })` starts in the OAuth phase with no engine-PID gate, since the engine is
+// what signs in, and registers the engine's callbacks (`http://localhost:<port>/callback` and the `127.0.0.1` one).
+// `engineKeychainCustody` owns the one Keychain item the engine's secure storage writes for the scene's scratch
+// configuration directory. The MAWS mode above keeps every safeguard it has.
+import { createHash } from 'node:crypto';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   OPEN_CONTROL, parseOAuthControl,
-  type OAuthAdvertise, type OAuthControl, type OAuthLogEntry, type OAuthPhase, type OAuthRoute, type OAuthSecret, type OAuthSecretKind,
+  type OAuthFixtureMode, type OAuthAdvertise, type OAuthControl, type OAuthLogEntry, type OAuthPhase, type OAuthRoute, type OAuthSecret, type OAuthSecretKind,
 } from './connector-oauth-core.mjs';
 import { isAlive } from './processes';
 
@@ -33,18 +39,22 @@ export function oauthFixturePaths(root: string, id: string): OAuthFixturePaths {
 }
 
 export interface OAuthFixture extends OAuthFixturePaths {
+  mode: OAuthFixtureMode; // P4-AGG M1
   origin: string; // http://127.0.0.1:<port>, also the issuer
   resourceUrl: string; // <origin>/mcp: the URL a scene configures
   pid: number;
   close(): Promise<void>;
 }
 
-// The fixture process, in the open phase; it lives until `close`, so its grants outlast an app relaunch.
-export async function startOAuthFixture(options: { root: string; id: string; tools?: readonly string[] }): Promise<OAuthFixture> {
+// The fixture process, in the open phase (engine mode: the OAuth phase); it lives until `close`, so its grants outlast
+// an app relaunch.
+export async function startOAuthFixture(options: { root: string; id: string; tools?: readonly string[]; mode?: OAuthFixtureMode }): Promise<OAuthFixture> {
+  const mode = options.mode ?? 'maws'; // P4-AGG M1
   const paths = oauthFixturePaths(options.root, options.id);
-  if (existsSync(paths.control)) enterOpenPhase(paths); // a restart in the same scene opens a new window
+  if (mode === 'engine') writeControl(paths, { ...OPEN_CONTROL, seq: existsSync(paths.control) ? readControl(paths).seq + 1 : 0, phase: 'oauth' }); // P4-AGG M1: the engine signs in, so no gate
+  else if (existsSync(paths.control)) enterOpenPhase(paths); // a restart in the same scene opens a new window
   else writeControl(paths, OPEN_CONTROL);
-  const child = spawn(process.execPath, [OAUTH_SERVER, '--id', paths.id, '--log', paths.log, '--control', paths.control, '--secrets', paths.secrets, '--tools', JSON.stringify(options.tools ?? ['read_series'])], { stdio: ['ignore', 'pipe', 'inherit'] });
+  const child = spawn(process.execPath, [OAUTH_SERVER, '--id', paths.id, '--log', paths.log, '--control', paths.control, '--secrets', paths.secrets, '--tools', JSON.stringify(options.tools ?? ['read_series']), '--mode', mode], { stdio: ['ignore', 'pipe', 'inherit'] });
   const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
   const port = await new Promise<number>((resolve, reject) => {
     child.stdout!.once('data', (chunk: Buffer) => resolve((JSON.parse(chunk.toString('utf8').split('\n')[0]!) as { port: number }).port));
@@ -53,6 +63,7 @@ export async function startOAuthFixture(options: { root: string; id: string; too
   const origin = `http://127.0.0.1:${port}`;
   return {
     ...paths,
+    mode,
     origin,
     resourceUrl: `${origin}/mcp`,
     pid: child.pid!,
@@ -240,4 +251,63 @@ export function scanForSecrets(paths: Pick<OAuthFixturePaths, 'secrets'>, texts:
     for (const kind of kinds) bump(found, kind);
   }
   return { clean: Object.keys(found).length === 0, found };
+}
+
+// ---- P4-AGG M1: the engine's Keychain item ------------------------------------------------------------------------
+
+// The service name of the one Keychain item the engine's secure storage uses for `configDir` (the spec's fact 2,
+// confirmed against 2.1.309: cli.pretty.js 318187 to 318190, `Claude Code${OAUTH_FILE_SUFFIX}-credentials-` and the
+// first 8 hex of sha256 of the config directory, which 1245553 takes from CLAUDE_CONFIG_DIR as given, NFC-normalised).
+// `engineEnv` is the engine's environment: the two variables that would make it name another item are refused.
+export function engineKeychainService(configDir: string, engineEnv: Record<string, string | undefined> = {}): string {
+  if (configDir === '') throw new Error('engineKeychainService: no configuration directory');
+  for (const name of ['CLAUDE_SECURESTORAGE_CONFIG_DIR', 'CLAUDE_CODE_CUSTOM_OAUTH_URL']) {
+    if (engineEnv[name] !== undefined) throw new Error(`engineKeychainService: the engine runs with ${name}, under which it names another item`);
+  }
+  return `Claude Code-credentials-${createHash('sha256').update(configDir.normalize('NFC')).digest('hex').slice(0, 8)}`;
+}
+
+// `security <verb> -s <service>`'s exit status: 0 found (or deleted), anything else not.
+export type SecurityCommand = (args: readonly string[]) => number;
+const systemSecurity: SecurityCommand = (args) => {
+  try {
+    execFileSync('/usr/bin/security', [...args], { stdio: 'ignore', timeout: 15_000 });
+    return 0;
+  } catch (error) {
+    const status = (error as { status?: number | null }).status;
+    if (typeof status === 'number') return status;
+    throw error;
+  }
+};
+
+export interface EngineKeychainCustody {
+  readonly service: string;
+  // Before the engine can store anything: the item must be absent, so whatever is there later is this run's.
+  claim(): void;
+  // After every engine that ran under the directory has exited (their pids; none when none ran): deletes exactly the
+  // claimed item if it is there and verifies it gone. Nothing else is ever looked up or removed.
+  release(proof: { enginePids: readonly number[] }): { service: string; found: boolean; deleted: boolean };
+}
+
+export function engineKeychainCustody(configDir: string, options: { engineEnv?: Record<string, string | undefined>; security?: SecurityCommand; alive?: (pid: number) => boolean } = {}): EngineKeychainCustody {
+  const service = engineKeychainService(configDir, options.engineEnv);
+  const security = options.security ?? systemSecurity;
+  const alive = options.alive ?? isAlive;
+  const present = () => security(['find-generic-password', '-s', service]) === 0;
+  let claimed = false;
+  return {
+    service,
+    claim() {
+      if (present()) throw new Error(`the Keychain item "${service}" exists before the run; it is not this run's to delete`);
+      claimed = true;
+    },
+    release({ enginePids }) {
+      if (!claimed) throw new Error(`the Keychain item "${service}" was never claimed by this run`);
+      for (const pid of enginePids) if (alive(pid)) throw new Error(`engine ${pid} is still alive; the Keychain item "${service}" is released only after every engine has exited`);
+      if (!present()) return { service, found: false, deleted: false };
+      security(['delete-generic-password', '-s', service]);
+      if (present()) throw new Error(`the Keychain item "${service}" is still in the Keychain after its deletion`);
+      return { service, found: true, deleted: true };
+    },
+  };
 }

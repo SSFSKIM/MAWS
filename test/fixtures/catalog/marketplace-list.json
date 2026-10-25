@@ -1,0 +1,24 @@
+{
+  "engine": "2.1.309 (Claude Code)",
+  "argv": [
+    "plugin",
+    "marketplace",
+    "list",
+    "--json"
+  ],
+  "cwd": "<scratch>/project-a",
+  "output": [
+    {
+      "name": "maws-discover-test",
+      "source": "directory",
+      "path": "<scratch>/maws-discover-test",
+      "installLocation": "<scratch>/maws-discover-test"
+    },
+    {
+      "name": "maws-recorded-pins",
+      "source": "directory",
+      "path": "<scratch>/maws-recorded-pins",
+      "installLocation": "<scratch>/maws-recorded-pins"
+    }
+  ]
+}
