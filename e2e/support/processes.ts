@@ -4,7 +4,8 @@
 // and e2e/supervisor-packaged.spec.ts; free of Playwright, so test/support/processes.test.ts runs it under vitest. The
 // launch's own cleanup (launch.ts) waits here for the shells the app started before it removes their scratch home.
 import { execFileSync } from 'node:child_process';
-import { basename } from 'node:path';
+import { readlinkSync, realpathSync } from 'node:fs';
+import { basename, sep } from 'node:path';
 
 export function isAlive(pid: number): boolean {
   try {
@@ -18,7 +19,7 @@ export function isAlive(pid: number): boolean {
 // One `ps -o <field>=` of the process, or '' when there is no such process.
 export function ps(pid: number, field: string): string {
   try {
-    return execFileSync('ps', ['-o', `${field}=`, '-p', String(pid)], { encoding: 'utf8' }).trim();
+    return execFileSync('ps', ['-o', `${field}=`, '-p', String(pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } }).trim();
   } catch {
     return ''; // no such process
   }
@@ -35,26 +36,82 @@ export function processesNaming(text: string): { pid: number; command: string }[
     .filter((p) => p.pid !== process.pid);
 }
 
-// Kills (SIGKILL) every `recorded` pid and every process naming `root`, a recorded pid only while it still names the root
-// (never a reused pid), then waits up to `timeoutMs` for no process naming the root to be left: the survivor check. A
-// survivor is thrown, by pid and command, after the wait; the caller removes its files first and rethrows. `kill` is the
+// A process can use the scratch project as cwd without naming it in argv (notably an engine whose title is `claude`).
+// The caller binds these bare pids to a pre-discovery identity snapshot and validates it before signalling.
+// Resolve the root because macOS reports /private/var rather than /var; both native cwd readers preserve path spaces.
+function processesWorkingIn(root: string, pids: Iterable<number>): number[] {
+  const directory = realpathSync(root);
+  const found: number[] = [];
+  const record = (pid: number, cwd: string) => {
+    if (pid !== process.pid && (cwd === directory || cwd.startsWith(`${directory}${sep}`))) found.push(pid);
+  };
+  if (process.platform === 'linux') {
+    // /proc is native on the Linux unit pool; unlike macOS, that pool does not provide lsof.
+    for (const pid of pids) {
+      let cwd: string;
+      try {
+        cwd = readlinkSync(`/proc/${pid}/cwd`);
+      } catch (error) {
+        if (!['ENOENT', 'EACCES', 'EPERM'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
+        continue; // exited meanwhile, or another user's process
+      }
+      record(pid, cwd);
+    }
+    return found;
+  }
+  let out: string;
+  try {
+    out = execFileSync('lsof', ['-nP', '-d', 'cwd', '-Fpn'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (error) {
+    const failed = error as { status?: number; stdout?: string };
+    if (failed.status !== 1) throw error; // lsof exits 1 when nothing is open
+    out = failed.stdout ?? '';
+  }
+  let pid = 0;
+  for (const line of out.split('\n')) {
+    if (line.startsWith('p')) pid = Number(line.slice(1));
+    if (line.startsWith('n')) record(pid, line.slice(1));
+  }
+  return found;
+}
+
+// Kills each process owning the scratch root through argv or cwd, never a recorded pid that no longer owns it. Track
+// start times through exit: losing its argv/cwd during shutdown does not mean a signalled process has finished writing.
+// Re-scan before removing files, including processes that were still starting during the first scan. `kill` is the
 // signal's sender (the survivor case's test passes one that sends nothing).
 export async function killScratchProcesses(root: string, recorded: Iterable<number>, opts: { timeoutMs?: number; kill?: (pid: number) => void } = {}): Promise<void> {
   const kill = opts.kill ?? ((pid: number) => process.kill(pid, 'SIGKILL'));
-  for (const pid of new Set([...recorded, ...processesNaming(root).map((p) => p.pid)])) {
-    if (!isAlive(pid) || !ps(pid, 'command').includes(root)) continue;
-    try {
-      kill(pid);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') console.error(error); // gone meanwhile is fine
-    }
-  }
+  const tracked = new Map<number, ProcessIdentity & { command: string }>();
   const deadline = Date.now() + (opts.timeoutMs ?? 10_000);
   for (;;) {
-    const left = processesNaming(root);
-    if (left.length === 0) return;
-    if (Date.now() > deadline) throw new Error(`processes of ${root} outlive the case: ${left.map((p) => `${p.pid} ${p.command}`).join('; ')}`);
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    const left = [...tracked.values()].filter(running);
+    if (left.length > 0) {
+      if (Date.now() > deadline) throw new Error(`processes of ${root} outlive the case: ${left.map((p) => `${p.pid} ${p.command}`).join('; ')}`);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      continue;
+    }
+    // Every tracked identity has exited before this snapshot, so children born during the previous kill are visible.
+    // One snapshot captures identity and argv before cwd discovery; C locale keeps lstart parseable and equal to ps().
+    const snapshot = new Map<number, ProcessIdentity & { command: string }>();
+    for (const line of execFileSync('ps', ['-axo', 'pid=,lstart=,command='], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } }).split('\n')) {
+      const m = /^\s*(\d+)\s+((?:\S+\s+){4}\S+)\s+(.*)$/.exec(line);
+      if (m && Number(m[1]) !== process.pid) snapshot.set(Number(m[1]), { pid: Number(m[1]), started: m[2]!, command: m[3]! });
+    }
+    const named = [...snapshot.values()].filter((p) => p.command.includes(root));
+    const working = new Set(processesWorkingIn(root, snapshot.keys()));
+    let signalled = false;
+    for (const pid of new Set([...recorded, ...named.map((p) => p.pid), ...working])) {
+      const identity = snapshot.get(pid);
+      if (!identity || (!identity.command.includes(root) && !working.has(pid)) || !running(identity)) continue;
+      tracked.set(pid, identity);
+      signalled = true;
+      try {
+        kill(pid);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') console.error(error); // gone meanwhile is fine
+      }
+    }
+    if (!signalled) return;
   }
 }
 
