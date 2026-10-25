@@ -722,6 +722,15 @@ Test seams (M1):
   Rationale: each finding was verified with a reproduction; each fix has a test that failed before it.
   Date/Author: 2026-10-25, the executing session, from the architect's panel and rulings.
 
+- Decision: the bounded verification's four fixes (the architect's reviewer-high on 504c67c9c..e477f4514, 2026-10-25; 4e2b951d5, cfedb7871, 884dcde1c, 9340c4894).
+  - The keychain guard validates only the environment the login shell actually captured, with the host's own parsing and fallback, and refuses to start when the scratch `CLAUDE_CONFIG_DIR` is absent or different.
+  - A prompt probe that cannot tell counts as a prompt: the guarded process tree is stopped, then the step fails.
+  - The state watch polls `.mcp.json` in every ancestor below `/`, by stat, the same range the inventory reads.
+  - Sign in compares the selected session's live server (scope, transport and URL from its `mcp_status`, cli.pretty.js 1128186; `streamable-http` read as `http`) with the row's entry, and when they differ refuses with "this session uses a different <name>; start a new session to sign in".
+  - Deferred to residue: an unrelated repository registered under a seed's marketplace name inherits that seed's installed state (`src/main/catalog/normalize.ts` ~315, `join.ts`).
+  Rationale: each verified with a reproduction; each fix has a test that failed before it.
+  Date/Author: 2026-10-25, the executing session, from the architect's verification.
+
 ## Outcomes & Retrospective
 
 **2026-10-25, the executing session, at hand-back (before the architect's branch review).**

@@ -152,3 +152,21 @@ The architect's panel (xhigh, fbeb2ceb6..504c67c9c) returned 13 verified finding
 Each fix has a test that failed before it. The finding-to-commit map is in the PR body and in spec Decision Log 18.
 
 The held gate.yml change is applied in 254f7dd99. Run 40203244376 on that commit covered the whole Mac matrix, discover included and provisioned: every job was green on attempt 1. This report's earlier residue row for the gate.yml change is closed by that commit.
+
+## Addendum: the bounded verification's fixes (2026-10-25)
+
+Four fixes, each with a test that fails first:
+- the keychain guard checks only the captured login-shell environment (item 1);
+- a failed prompt probe stops the tree, then fails (item 2);
+- the state watch polls every ancestor's .mcp.json below / (item 3);
+- Sign in refuses when the running session holds a different server of that name, judged by mcp_status scope, transport and URL, with streamable-http read as http (item 4).
+
+Commits: 4e2b951d5, cfedb7871, 884dcde1c, 9340c4894.
+
+Gates: run 40213411717 on 9340c4894 (static, unit 4/4, probes, e2e:discover on the mini) is green. e2e/support/launch.ts is untouched, so the whole-matrix run 40203244376 still stands for the other groups.
+
+New residue row, deferred by the architect:
+
+| Logged | Owner | Item | Evidence | Closes when |
+|---|---|---|---|---|
+| 2026-10-25 | P4 | A seed-route collision: an unrelated repository registered under a seed's marketplace name inherits that seed's installed state | src/main/catalog/normalize.ts ~315 and join.ts; the architect's verification, 2026-10-25 | a seed's route matches the engine's marketplace by source repository, not by name alone, with a test |
