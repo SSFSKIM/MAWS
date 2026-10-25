@@ -665,10 +665,11 @@ export class EngineSession {
     this.client = client;
     client.onInbound((req) => this.inbound(req));
     client.onInboundCancel((requestId) => this.maws.cancel(requestId)); // E1: the engine withdrew a tool call
-    // A late read applied nothing, and a host-issued one (the gateway and context reads) showed no error to anyone: only a
-    // late mutation gets the notice (debt wave 3 review).
+    // Host-issued reads and the startup display preference showed no error to anyone; only a human's late mutation
+    // gets a notice that it may have applied after the reported failure.
+    let thinkingDisplayRequestId: RequestId | null = null;
     client.onLateResponse((late) => {
-      if (requestClassOf(late.subtype) === 'read') return;
+      if (requestClassOf(late.subtype) === 'read' || late.requestId === thinkingDisplayRequestId) return;
       this.record('meta', { event: 'notice', level: 'warning', key: `late_response:${late.subtype}:${late.requestId}`, text: `${late.subtype} answered after its deadline; it may have applied after the error you saw.` });
     });
     const reading = this.readLoop(transport);
@@ -717,12 +718,11 @@ export class EngineSession {
     // C10 end
     await this.surface.attach(client, init.capabilities); // R2: as the desktop surface, when the engine speaks ui_surface_v1
 
-    // Visibility only: null preserves the engine's thinking budget (2.1.309 probe).
-    try {
-      await setMaxThinkingTokens(client, { max_thinking_tokens: null, thinking_display: 'summarized' });
-    } catch (error) {
-      this.notice('thinking:display_failed', `Reasoning summaries could not be enabled: ${messageOf(error)}`);
-    }
+    // Visibility only: null preserves the engine's thinking budget (2.1.309 probe). Queue it before the gateway read,
+    // but never hold readiness or a prompt for its acknowledgement.
+    void setMaxThinkingTokens(client, { max_thinking_tokens: null, thinking_display: 'summarized' }, {
+      onWritten: (requestId) => { thinkingDisplayRequestId = requestId; },
+    }).catch((error: unknown) => this.log(`Reasoning summaries could not be enabled: ${messageOf(error)}`));
     await this.verifyGateway();
     await this.fallBackFromAuto(client, init); // W3
     if ((this.spec.resume !== null || this.inheritedGrants /* C10 */) && this.grants.allow.length > 0 && this.processState === 'initializing') {

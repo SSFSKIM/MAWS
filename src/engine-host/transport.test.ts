@@ -298,8 +298,8 @@ describe('transport frames and journals', () => {
           let end;
           while ((end = buffer.indexOf('\\n')) >= 0) {
             const frame = JSON.parse(buffer.slice(0, end)); buffer = buffer.slice(end + 1);
-            if (frame.type === 'control_request' && ['initialize', 'get_status'].includes(frame.request.subtype)) {
-              const response = frame.request.subtype === 'initialize' ? ${JSON.stringify(INIT_RESPONSE)} : ${JSON.stringify(ROUTED_STATUS)};
+            if (frame.type === 'control_request' && ['initialize', 'set_max_thinking_tokens', 'get_status'].includes(frame.request.subtype)) {
+              const response = frame.request.subtype === 'initialize' ? ${JSON.stringify(INIT_RESPONSE)} : frame.request.subtype === 'get_status' ? ${JSON.stringify(ROUTED_STATUS)} : {};
               process.stdout.write(JSON.stringify({ type: 'control_response', response: { subtype: 'success', request_id: frame.request_id, response } }) + '\\n');
               if (frame.request.subtype === 'get_status') process.stdin.pause();
             } else if (frame.type === 'control_response') process.stderr.write('mutation:' + frame.response.request_id + '\\n');

@@ -103,7 +103,7 @@ describe('EngineSession: the handshake, journal-before-normalise and the gateway
     const { session, transport, journal, events } = setup({ spec: { trust: { accepted: true, directory: '/tmp/maws-session' } } });
     expect(session.status()).toMatchObject({ process: 'starting', cwd: '/tmp/maws-session', pendingPlan: null }); // from the reservation onward
     await session.start();
-    expect(shape(journal)).toEqual(['meta:spawn', 'out:control_request/initialize', 'in:control_response', 'meta:initialize', 'out:control_request/set_max_thinking_tokens', 'in:control_response', 'out:control_request/get_status', 'in:control_response', 'meta:status_check', 'meta:queue' /* P2-C: the queue's recovered row */, 'out:control_request/get_context_usage', 'in:control_response']); // the ready read for `ctx` (debt wave 3)
+    expect(shape(journal)).toEqual(['meta:spawn', 'out:control_request/initialize', 'in:control_response', 'meta:initialize', 'out:control_request/set_max_thinking_tokens', 'out:control_request/get_status', 'in:control_response', 'in:control_response', 'meta:status_check', 'meta:queue' /* P2-C: the queue's recovered row */, 'out:control_request/get_context_usage', 'in:control_response']); // the ready read for `ctx` (debt wave 3)
     const thinking = loadJournal('pass1', 'p4/p4-tool-summaries-thinking-edits').find((row) => row.direction === 'out' && (row.frame as { request?: { subtype?: string } }).request?.subtype === 'set_max_thinking_tokens')!;
     expect(transport.requestsOf('set_max_thinking_tokens')[0]!.request).toEqual((thinking.frame as { request: unknown }).request);
     expect(transport.requestsOf('initialize')[0]!.request).toEqual({
@@ -131,6 +131,48 @@ describe('EngineSession: the handshake, journal-before-normalise and the gateway
     const started = events.find((e) => e.kind === 'turn.started')!;
     expect(started).toMatchObject({ seq: journal.rows.at(-1)!.seq, userMessageUuid: messageUuid, origin: 'human' });
     expect(session.status().turn).toEqual({ id: started.id, origin: 'human', startedAt: '2026-09-28T10:00:01.000Z', acceptedAt: '2026-09-28T10:00:01.000Z', userMessageUuids: [messageUuid] }); // id: the turn.started event's
+  });
+
+  it.each(['timeout', 'refusal'] as const)('a display preference %s never blocks readiness or a prompt and stays out of the transcript', async (outcome) => {
+    vi.useFakeTimers();
+    const { session, transport, events, logs } = setup({ responder: defaultResponder({
+      set_max_thinking_tokens: () => outcome === 'timeout' ? null : { error: 'thinking_display is not supported' },
+    }) });
+    try {
+      let ready = false;
+      const starting = session.start().then(() => { ready = true; });
+      await vi.advanceTimersByTimeAsync(0); // flush the handshake without advancing the preference's deadline
+      expect(ready).toBe(true);
+      await starting;
+      expect(session.status().process).toBe('ready');
+      expect(transport.writes.filter((frame) => frame.type === 'control_request').slice(0, 3).map((frame) => frame.request.subtype)).toEqual(['initialize', 'set_max_thinking_tokens', 'get_status']);
+      expect(transport.requestsOf('set_max_thinking_tokens')[0]!.request).toEqual({ subtype: 'set_max_thinking_tokens', max_thinking_tokens: null, thinking_display: 'summarized' });
+      expect(events).toEqual([]);
+      const sent = await session.send('Start before the display preference answers');
+      expect(transport.writes).toContainEqual(expect.objectContaining({ type: 'user', uuid: sent.messageUuid }));
+      transport.push({ type: 'command_lifecycle', command_uuid: sent.messageUuid, state: 'queued', uuid: 'display-prompt-queued', session_id: 's' });
+      await vi.advanceTimersByTimeAsync(0);
+      const beforeFailure = [...events];
+      if (outcome === 'timeout') {
+        expect(logs.filter((line) => line.startsWith('Reasoning summaries could not be enabled:'))).toEqual([]);
+        await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS.mutate);
+      }
+      expect(logs.filter((line) => line.startsWith('Reasoning summaries could not be enabled:'))).toEqual([
+        expect.stringContaining(outcome === 'timeout' ? 'set_max_thinking_tokens unanswered after 8 s' : 'thinking_display is not supported'),
+      ]);
+      expect(session.status().process).toBe('ready');
+      expect(events).toEqual(beforeFailure);
+      if (outcome === 'timeout') {
+        transport.answer('set_max_thinking_tokens'); // a late preference acknowledgement must be quiet too
+        await vi.advanceTimersByTimeAsync(0);
+        expect(events).toEqual(beforeFailure);
+        expect(session.status().process).toBe('ready');
+      }
+    } finally {
+      transport.exit(0);
+      await vi.advanceTimersByTimeAsync(0);
+      await session.exited;
+    }
   });
 
   it('every event carries the seq of a journal row it derives from, and normaliser warnings become meta rows', async () => {
@@ -178,7 +220,7 @@ describe('EngineSession: the handshake, journal-before-normalise and the gateway
   it('a resume journals reconnect rows, re-applies the grant snapshot before ready, and reports the grants', async () => {
     const { session, journal, transport, events } = setup({ spec: { resume: { sessionId: '44444444-4444-4444-8444-444444444444' as LaunchSpec['sessionId'] & string, fork: false }, sessionId: null }, session: { grants: { allow: ['Bash(touch granted.txt)'] } } });
     await session.start();
-    expect(shape(journal)).toEqual(['meta:reconnect', 'meta:spawn', 'out:control_request/initialize', 'in:control_response', 'meta:initialize', 'meta:reconnect', 'out:control_request/set_max_thinking_tokens', 'in:control_response', 'out:control_request/get_status', 'in:control_response', 'meta:status_check', 'out:control_request/apply_flag_settings', 'in:control_response', 'meta:queue' /* P2-C: the queue's recovered row */, 'out:control_request/get_context_usage', 'in:control_response']); // then the ready read
+    expect(shape(journal)).toEqual(['meta:reconnect', 'meta:spawn', 'out:control_request/initialize', 'in:control_response', 'meta:initialize', 'meta:reconnect', 'out:control_request/set_max_thinking_tokens', 'out:control_request/get_status', 'in:control_response', 'in:control_response', 'meta:status_check', 'out:control_request/apply_flag_settings', 'in:control_response', 'meta:queue' /* P2-C: the queue's recovered row */, 'out:control_request/get_context_usage', 'in:control_response']); // then the ready read
     expect(transport.requestsOf('apply_flag_settings')[0]!.request).toEqual({ subtype: 'apply_flag_settings', settings: { permissions: { allow: ['Bash(touch granted.txt)'] } } });
     expect(events.map((e) => e.kind === 'session.reconnect' && e.phase)).toEqual(['attempting', 'reconnected']);
     expect(session.status()).toMatchObject({ process: 'ready', grants: ['Bash(touch granted.txt)'], keepAlive: [] });
@@ -590,19 +632,29 @@ describe('a stop before the process is spawned (whole-branch review)', () => {
 describe('late answers after the deadline (debt wave 3 review)', () => {
   it("a host-issued read answering late posts no notice (nobody saw an error); a late mutation still says it may have applied", async () => {
     vi.useFakeTimers();
-    const { session, transport, journal } = setup({ responder: defaultResponder({ get_context_usage: () => null }) });
+    const { session, transport, journal } = setup({ responder: defaultResponder({
+      get_context_usage: () => null,
+      set_max_thinking_tokens: (request) => request.max_thinking_tokens === null ? {} : null,
+    }) });
     const starting = session.start();
     await vi.advanceTimersByTimeAsync(0);
     await starting;
     expect(transport.requestsOf('get_context_usage')).toHaveLength(1); // the ready read, never answered by the responder
     const setModel = session.control!.request('set_model', { model: 'opus' }).catch(() => 'timed out');
+    // A human's thinking-budget mutation must retain its outcome notice, unlike the startup display preference.
+    const setThinking = session.control!.request('set_max_thinking_tokens', { max_thinking_tokens: 4096 }).catch(() => 'timed out');
     await vi.advanceTimersByTimeAsync(8_000);
     expect(await setModel).toBe('timed out');
+    expect(await setThinking).toBe('timed out');
     transport.answer('get_context_usage', { totalTokens: 1, maxTokens: 2, percentage: 50, isAutoCompactEnabled: true, model: 'm', categories: [] });
     transport.answer('set_model');
+    transport.answer('set_max_thinking_tokens');
     await vi.advanceTimersByTimeAsync(0);
     const notices = journal.rows.filter((r) => (r.frame as { event?: string }).event === 'notice').map((r) => (r.frame as { key: string }).key);
-    expect(notices.filter((k) => k.startsWith('late_response:'))).toEqual([`late_response:set_model:${transport.requestsOf('set_model')[0]!.request_id}`]);
+    expect(notices.filter((k) => k.startsWith('late_response:'))).toEqual([
+      `late_response:set_model:${transport.requestsOf('set_model')[0]!.request_id}`,
+      `late_response:set_max_thinking_tokens:${transport.requestsOf('set_max_thinking_tokens')[1]!.request_id}`,
+    ]);
   });
 });
 
