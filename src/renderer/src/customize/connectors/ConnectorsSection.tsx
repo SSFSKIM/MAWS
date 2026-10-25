@@ -30,7 +30,7 @@ import { DiscoverToolbar } from '../discover/DiscoverToolbar';
 import { useCatalogPostures, useCatalogRefresh, useCatalogSources } from '../discover/read';
 import { ConnectorSheet } from './ConnectorSheet';
 import { CONNECTORS as C } from './copy';
-import { removeRequestOf, resultFor, serverKey, signInSessionOf, signInViewOf, type AuthPosture, type ConfiguredServers, type ReadySession, type SignInFacts, type SignInView } from './present';
+import { removeRequestOf, resultFor, serverKey, shadowedBy, signInSessionOf, signInViewOf, type AuthPosture, type ConfiguredServers, type ReadySession, type SignInFacts, type SignInView } from './present';
 import { cancelSignIn, forgetSignIn, signInKeyOf, startSignIn, useSignIns } from './sign-in';
 
 const BUTTON = 'rounded-sm px-2 py-1 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint';
@@ -163,19 +163,21 @@ function Configured({ servers, readAt, cwd, place, attached }: { servers: readon
       ))}
       <ul aria-label={C.configured} className="m-0 list-none p-0">
         {servers.map((server) => (
-          <ServerRow key={serverKey(server)} server={server} cwd={cwd} place={place} session={signInSessionOf(server.scope, ready, attached, cwd)} live={liveOf(server.name)} liveRead={liveRead} posture={postureOf(server)?.authPosture ?? null} fingerprint={postureOf(server)?.fingerprint ?? null} />
+          <ServerRow key={`${serverKey(server)}:${server.path}`} server={server} shadow={shadowedBy(server, servers)} cwd={cwd} place={place} session={signInSessionOf(server.scope, ready, attached, cwd)} live={liveOf(server.name)} liveRead={liveRead} posture={postureOf(server)?.authPosture ?? null} fingerprint={postureOf(server)?.fingerprint ?? null} />
         ))}
       </ul>
     </>
   );
 }
 
-function ServerRow({ server, cwd, place, session, live, liveRead, posture, fingerprint }: { server: CustomizationServer; cwd: string | null; place: string | null; session: string | null; live: SignInFacts['live']; liveRead: SignInFacts['liveRead']; posture: AuthPosture | null; fingerprint: string | null }) {
+// A row the engine does not use (the same name in a scope it ranks higher, ./present.ts `shadowedBy`) says which entry
+// shadows it and offers no Sign in: the engine signs a name in, so Sign in belongs to the row it uses.
+function ServerRow({ server, shadow, cwd, place, session, live, liveRead, posture, fingerprint }: { server: CustomizationServer; shadow: CustomizationServer['scope'] | null; cwd: string | null; place: string | null; session: string | null; live: SignInFacts['live']; liveRead: SignInFacts['liveRead']; posture: AuthPosture | null; fingerprint: string | null }) {
   const { ask, ops } = useManage();
   const target = server.scope === 'app' ? null : { name: server.name, scope: server.scope, cwd };
   const record = resultFor(useSignIns((s) => (target === null ? null : (s.byServer.get(signInKeyOf(target)) ?? null))), fingerprint);
   const last = record?.event ?? null;
-  const state = signInViewOf({ live, liveRead, posture, last: record, transport: server.transport });
+  const state: SignInView | null = shadow !== null ? { text: C.shadowed(shadow), tone: 'muted', signIn: false, cancel: false } : signInViewOf({ live, liveRead, posture, last: record, transport: server.transport });
   const key = serverKey(server);
   const remove = removeRequestOf(server);
   const busy = ops.entries.get(key)?.state.phase === 'working';

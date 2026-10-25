@@ -9,7 +9,7 @@ import { item } from '../discover/test-items';
 import { argvOf } from '../../widgets/plugins/present';
 import { installRequestOf } from '../discover/add';
 import { cardContentsWords } from '../discover/present';
-import { configuredOf, connectorAddOf, existingOf, resultFor, nameProblem, removeRequestOf, scopesFor, signInSessionOf, signInViewOf, urlProblem, writesFor } from './present';
+import { configuredOf, connectorAddOf, existingOf, resultFor, shadowedBy, nameProblem, removeRequestOf, scopesFor, signInSessionOf, signInViewOf, urlProblem, writesFor } from './present';
 
 const linear = (over: Partial<CatalogItem['install']> = {}, item_: Partial<CatalogItem> = {}): CatalogItem =>
   item({
@@ -212,5 +212,29 @@ describe('which result a row shows', () => {
   it('a sign-in under way, whatever the fingerprints say: it is this slot’s one operation, and Cancel must reach it', () => {
     const running = event({ state: 'waiting_callback' }, 1_000, 's1', null);
     expect(resultFor(running, 'print-1')).toBe(running);
+  });
+});
+
+describe('a name configured in more than one scope', () => {
+  // the engine's precedence (2.1.309 cli.pretty.js 720870, 720898): local over user over project, and among project
+  // .mcp.json files the one nearest the directory (720717: read from the root down, each assigned over the last)
+  const user = server({ scope: 'user' });
+  const local = server({ scope: 'local' });
+  const outer = server({ scope: 'project', path: '/p/.mcp.json' });
+  const inner = server({ scope: 'project', path: '/p/app/.mcp.json' });
+  const app = server({ scope: 'app', path: '/maws/settings.json' });
+
+  it('names the entry the engine uses over each other one; the used one is shadowed by none', () => {
+    const all = [app, user, outer, inner, local];
+    expect(shadowedBy(local, all)).toBeNull();
+    expect(shadowedBy(user, all)).toBe('local');
+    expect(shadowedBy(inner, all)).toBe('local');
+    expect(shadowedBy(outer, all)).toBe('local');
+    expect(shadowedBy(user, [user, inner])).toBeNull();
+    expect(shadowedBy(inner, [user, inner])).toBe('user');
+    expect(shadowedBy(outer, [outer, inner])).toBe('project'); // the nearer .mcp.json
+    expect(shadowedBy(inner, [outer, inner])).toBeNull();
+    expect(shadowedBy(user, [user, server({ name: 'notion', scope: 'local' })])).toBeNull(); // another name
+    expect(shadowedBy(app, all)).toBeNull(); // MAWS's own servers are not the engine's configuration
   });
 });

@@ -225,22 +225,36 @@ describe('the sign-in operation', () => {
     expect(t.last(second).state).toBe('done');
   });
 
-  it('one sign-in per configured connector: a press from another session cancels the first; one that only shares the name is its own', async () => {
+  it('one sign-in per configured connector: a press from another session cancels the first; one that only shares the name, in another session, is its own', async () => {
     const t = make({ ready: () => true });
     const first = t.signIn.start({ name: 'linear', scope: 'user', cwd: '/a', appSessionId: SESSION }).opId;
     await t.until(() => t.last(first)?.state === 'waiting_callback', 'first waiting');
     const second = t.signIn.start({ name: 'linear', scope: 'user', cwd: '/b', appSessionId: 'app-session-2' }).opId; // user scope: the directory is not part of it
     expect(t.last(first).state).toBe('cancelled');
     await t.until(() => t.last(second)?.state === 'waiting_callback', 'second waiting');
-    // project servers of one name in two projects are two configurations
-    const inA = t.signIn.start({ name: 'linear', scope: 'project', cwd: '/a', appSessionId: SESSION }).opId;
-    const inB = t.signIn.start({ name: 'linear', scope: 'project', cwd: '/b', appSessionId: 'app-session-2' }).opId;
+    // project servers of one name in two projects, signed in from two sessions: two configurations on two engine flows
+    const inA = t.signIn.start({ name: 'linear', scope: 'project', cwd: '/a', appSessionId: 'app-session-3' }).opId;
+    const inB = t.signIn.start({ name: 'linear', scope: 'project', cwd: '/b', appSessionId: 'app-session-4' }).opId;
     await t.until(() => t.last(inA)?.state === 'waiting_callback' && t.last(inB)?.state === 'waiting_callback', 'both waiting');
     expect(t.last(second).state).toBe('waiting_callback');
+    for (const opId of [second, inA, inB]) expect(t.signIn.cancel(opId)).toBe(true);
+  });
+
+  it('one engine flow per session and server name: configurations of one name in one session cancel each other, since the engine knows only the name', async () => {
+    const t = make({ ready: () => true });
+    const user = t.signIn.start({ name: 'linear', scope: 'user', cwd: '/a', appSessionId: SESSION }).opId;
+    await t.until(() => t.last(user)?.state === 'waiting_callback', 'user waiting');
+    const project = t.signIn.start({ name: 'linear', scope: 'project', cwd: '/a', appSessionId: SESSION }).opId;
+    expect(t.last(user).state).toBe('cancelled');
+    await t.until(() => t.last(project)?.state === 'waiting_callback', 'project waiting');
     const local = t.signIn.start({ name: 'linear', scope: 'local', cwd: '/a', appSessionId: SESSION }).opId;
+    expect(t.last(project).state).toBe('cancelled');
     await t.until(() => t.last(local)?.state === 'waiting_callback', 'local waiting');
-    expect(t.last(inA).state).toBe('waiting_callback'); // local and project are two scopes
-    for (const opId of [second, inA, inB, local]) expect(t.signIn.cancel(opId)).toBe(true);
+    // the one left is the session's flow: its callback completes
+    await fetch(`${t.redirectOf().origin}/callback?code=c&state=engine-state`);
+    await t.ended(local);
+    expect(t.last(local).state).toBe('done');
+    expect(t.events.filter((e) => e.state === 'cancelled').map((e) => e.opId)).toEqual([user, project]);
   });
 
   it('the same configured connector keeps one sign-in when the signing session changes (fake timers)', async () => {

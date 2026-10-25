@@ -79,6 +79,19 @@ export function removeRequestOf(server: CustomizationServer): PluginsRequest | n
   return requestFor('mcp-remove', { name: server.name, scope: server.scope as PluginsScope }, null);
 }
 
+// The engine's precedence for one name across its scopes (2.1.309 cli.pretty.js: 720870 drops a project server a user or
+// local one names, 720898 lays local over user; 720717 reads .mcp.json from the root down, each over the last): local,
+// else user, else the project file nearest the directory, which the inventory lists last.
+const RANK: Partial<Record<CustomizationServer['scope'], number>> = { local: 3, user: 2, project: 1 };
+
+/** The scope of the entry the engine uses instead of this one, or null when this is the one it uses (or MAWS's own). */
+export function shadowedBy(server: CustomizationServer, servers: readonly CustomizationServer[]): CustomizationServer['scope'] | null {
+  if (RANK[server.scope] === undefined) return null;
+  let used: CustomizationServer | null = null;
+  for (const other of servers) if (other.name === server.name && RANK[other.scope] !== undefined && (used === null || RANK[other.scope]! >= RANK[used.scope]!)) used = other;
+  return used === null || (used.scope === server.scope && used.path === server.path) ? null : used.scope;
+}
+
 /** The key a configured server's operations run under (Remove), by scope and name. */
 export const serverKey = (server: Pick<CustomizationServer, 'name' | 'scope'>): string => `connector:${server.scope}:${server.name}`;
 

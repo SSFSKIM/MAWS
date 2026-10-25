@@ -353,6 +353,20 @@ describe('Connectors', () => {
     expect(backend.calls.filter((call) => call.command.startsWith('session.') || call.command === 'connectors.signIn')).toEqual([]);
   });
 
+  it('a name configured in two scopes: the entry the engine uses offers Sign in, the other says it is shadowed and offers none', async () => {
+    const client = fresh();
+    backend.script('catalog.postures', () => ({ servers: [{ name: 'notion', scope: 'user', authPosture: 'auth_required', fingerprint: 'print-user' }, { name: 'notion', scope: 'local', authPosture: 'auth_required', fingerprint: 'print-local' }] }));
+    backend.script('customization.inventory', () => ({ skills: [], servers: [{ name: 'notion', scope: 'user', path: '/config/.claude.json', transport: 'http' }, { name: 'notion', scope: 'local', path: '/config/.claude.json', transport: 'http' }], warnings: [], serversRead: true }));
+    const here = { ...status('here'), cwd: '/one' };
+    useSessions.setState({ engine: new Map([[here.appSessionId, here]]) });
+    mountWith(client);
+    await screen.findAllByText('notion');
+    const rowOf = (scope: string) => document.querySelector(`[data-connector="notion"][data-connector-scope="${scope}"]`) as HTMLElement;
+    expect(await within(rowOf('local')).findByRole('button', { name: 'Sign in to notion' })).toBeTruthy();
+    expect(within(rowOf('user')).getByText('Shadowed by the local entry')).toBeTruthy();
+    expect(within(rowOf('user')).queryByRole('button', { name: 'Sign in to notion' })).toBeNull();
+  });
+
   it('an authless server reads No sign-in needed and offers no sign-in', async () => {
     const client = fresh();
     posture(client, 'notion', 'no_auth');

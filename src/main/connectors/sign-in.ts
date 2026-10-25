@@ -23,7 +23,10 @@
 //   cancelled        `connectors.signInCancel`, or a second press for the same configured connector from any session
 //                    (Decision Log 14: one sign-in per connector at a time, since every session's engine writes the same
 //                    credential). A connector is its configuration: name and scope, and the directory for a project or
-//                    local one; servers that only share a name are separate connectors.
+//                    local one; servers that only share a name are separate connectors. A press for the same server name
+//                    in the same session cancels too, whatever its configuration: the engine knows a flow only by its
+//                    server name (mcp_authenticate and the callback carry no scope), so a second flow replaces the
+//                    first and refuses its callback (findings-m4 3, 4).
 //
 // The engine's own pending flow is left to lapse; a new `mcp_authenticate` starts a new flow and the engine refuses the
 // old flow's callback (findings-m4 3, 4). No event carries the authorization URL, a code or a state. MAWS's own OAuth
@@ -107,6 +110,8 @@ export function createSignIn(deps: SignInDeps): SignIn {
   const log = deps.log ?? ((line: string) => console.warn(`[connectors] ${line}`));
   const operations = new Map<string, Operation>(); // live ones, by opId
   const byConnector = new Map<string, string>(); // a configured connector (connectorKey) → its live opId
+  const byFlow = new Map<string, string>(); // the engine's flow (flowKey: the session and the server name) → its live opId
+  const flowKey = (op: { appSessionId: string; name: string }) => `${op.appSessionId}\u0000${op.name}`;
 
   const live = (op: Operation) => !TERMINAL.has(op.state);
   const move = (op: Operation, state: State, extra: { reason?: Reason; message?: string | null; where?: 'here' | 'new_sessions' } = {}) => {
@@ -119,6 +124,7 @@ export function createSignIn(deps: SignInDeps): SignIn {
       op.listener = null;
       operations.delete(op.opId);
       if (byConnector.get(op.connector) === op.opId) byConnector.delete(op.connector);
+      if (byFlow.get(flowKey(op)) === op.opId) byFlow.delete(flowKey(op));
     }
     deps.emit({ opId: op.opId, name: op.name, state, reason: extra.reason ?? null, message: extra.message ?? null, where: extra.where ?? null });
   };
@@ -242,14 +248,15 @@ export function createSignIn(deps: SignInDeps): SignIn {
   return {
     start({ name, scope, cwd, appSessionId }) {
       const connector = connectorKey({ name, scope, cwd });
-      const previous = byConnector.get(connector);
-      if (previous !== undefined) {
-        const op = operations.get(previous);
+      // the connector's running sign-in, and the one driving this session's engine flow for the name
+      for (const previous of new Set([byConnector.get(connector), byFlow.get(flowKey({ appSessionId, name }))])) {
+        const op = previous === undefined ? undefined : operations.get(previous);
         if (op) move(op, 'cancelled');
       }
       const op: Operation = { opId: randomUUID(), name, connector, appSessionId, state: 'starting', listener: null, timers: new Set() };
       operations.set(op.opId, op);
       byConnector.set(connector, op.opId);
+      byFlow.set(flowKey(op), op.opId);
       deps.emit({ opId: op.opId, name, state: 'starting', reason: null, message: null, where: null });
       queueMicrotask(() => void run(op).catch((error: unknown) => {
         log(`sign-in to ${name} failed: ${error instanceof Error ? error.message : String(error)}`);
