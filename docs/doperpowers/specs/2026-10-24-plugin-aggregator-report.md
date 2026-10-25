@@ -141,3 +141,14 @@ Every Critical or Important finding from the five task reviews was fixed and re-
 |---|---|---|---|---|
 | A subagent controller that ends its turn while its own workers run never receives their completions. The harness then forces an interim SubagentHandback. | Two forced interim hand-backs and a coordinator round-trip. | Wait in the foreground with a bounded loop that greps the worker's transcript for a new SubagentHandback line (`/tmp/maws-p4-tools/wait-handback.sh`), and never end the turn while a worker runs. | A controller subagent ends its turn with a worker running and gets the completion. | live (harness; no repo) |
 | A scratch HOME on a Mac with a logged-in desktop turns each failed keychain write into a modal dialog on the owner's screen. | About 120 dialogs; the owner's screen interrupted. | Keychain-touching runs go only in gate jobs on the mini (Decision Log 13). Under a scratch HOME there, create a scratch login keychain and delete it in teardown. | `security default-keychain` under a scratch HOME on a desktop Mac, with a write that fails. | conditional (live on any Mac with a logged-in GUI session) |
+
+## Addendum: the branch panel fix wave (2026-10-25)
+
+The architect's panel (xhigh, fbeb2ceb6..504c67c9c) returned 13 verified findings: 2 P1 and 11 P2. All 13 were fixed in one wave of three parallel fix branches, each merged with --no-ff:
+- 371fd50bc: catalog, findings 0, 1, 3, 4, 5, 9, 10;
+- 283c01937: connectors and sign-in, findings 2, 6, 7, 8, plus keychain conditions (a)(b)(c);
+- 16c7930bf: the install sheet and taste, findings 11, 12, the byline and the monogram.
+
+Each fix has a test that failed before it. The finding-to-commit map is in the PR body and in spec Decision Log 18.
+
+The held gate.yml change is applied in 254f7dd99. Run 40203244376 on that commit covered the whole Mac matrix, discover included and provisioned: every job was green on attempt 1. This report's earlier residue row for the gate.yml change is closed by that commit.
