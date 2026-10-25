@@ -700,6 +700,28 @@ Test seams (M1):
   Rationale: the M5 executor's report and its task review.
   Date/Author: 2026-10-25, the executing session.
 
+- Decision: the branch review panel's thirteen findings, fixed in one wave (the architect's panel at xhigh on fbeb2ceb6..504c67c9c, 2026-10-25; fixes merged at 371fd50bc, 16c7930bf, 283c01937).
+  - A card's contents and its runs-code warning follow the chosen route's own revision: the engine's clone of that route outranks the directory record.
+  - A seed's ownership is assigned only after its repository is verified.
+  - `mcpServers` given as an array counts as contents.
+  - The other-repository publisher exclusion applies to the normalised path.
+  - Each source's walk has one cumulative byte budget (64 MiB; `egressGet` gains a `maxBytes` option that can only lower a route's cap) and one deadline and cancellation across all its pages (180 s); stopping the store cancels a walk in flight.
+  - Connector snapshots go stale on MCP configuration changes. The configuration directory, the plugins folder and each held project's `.claude` are watched as directories. The engine's global `.claude.json`, MAWS's own `settings.json` and every `.mcp.json` from the project up to the home folder (never `/`) are polled by stat about every 2 s. Neither the home folder nor any ancestor is ever watched as a directory, so main does not hold an FSEvents stream over the person's home. Only views whose configured servers changed are dropped.
+  - A connector's removal runs in the directory of the `.mcp.json` its entry lives in.
+  - A sign-in runs only in a session whose engine uses exactly the row's entry. The precedence rule is shared, in `src/shared/plugins/connector-precedence.ts`, and `connectors.signIn` gains `path`.
+  - `mcp_authenticate` calls for one session and server go one at a time, so a replacement waits for the cancelled call still in flight.
+  - A server the session already has connected ends at once ("Already connected in that session"), with no consent page opened.
+  - Customize's plugin operations outlive its views and a project switch, held per page and section.
+  - The recovery's Remove marketplace names the plugins currently installed from that marketplace, read when it is pressed.
+  - Taste: the publisher keeps its line and the trust label wraps beneath it. A digit-led name's monogram is its first two characters ("42"), any other name's its first letter.
+  - The held `gate.yml` change is applied (254f7dd99), cleared by CI-opt on three standing conditions for every test that can reach the mini's login keychain, which holds the owner's real Claude Code credential:
+    - (a) tests delete only the two service names derived from their own scratch `CLAUDE_CONFIG_DIR` and created in that run, never the bare `Claude Code-credentials`;
+    - (b) nothing reads an item that existed before the run: existence checks only, both derived items required absent before any engine runs, and the engine's environment checked before launch and after each session starts;
+    - (c) a keychain dialog fails the test fast: every `security` call is bounded at 5 s and checks for a SecurityAgent prompt before and after, and every real-engine launch on a Mac is watched, its process tree killed on a prompt.
+    `e2e/support/keychain-guard.ts`, `e2e/support/connector-oauth.ts` and `test/support/keychain-discover-pin.test.ts` hold and pin them.
+  Rationale: each finding was verified with a reproduction; each fix has a test that failed before it.
+  Date/Author: 2026-10-25, the executing session, from the architect's panel and rulings.
+
 ## Outcomes & Retrospective
 
 **2026-10-25, the executing session, at hand-back (before the architect's branch review).**
