@@ -1,6 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { ConnectorSignInChanged } from '@shared/ipc/schema/connectors';
+import { heard, useSignIns } from './connectors/sign-in';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { ProjectId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
@@ -291,4 +293,88 @@ it('shows configured servers without inventing connection state or offering a se
   expect(screen.queryByRole('button', { name: 'Load now' })).toBeNull();
   await waitFor(() => expect(backend.calls.some((call) => call.command === 'customization.inventory')).toBe(true));
   expect(backend.calls.filter((call) => call.command.startsWith('session.'))).toEqual([]);
+});
+
+// P4-AGG M4: Customize › Connectors (the Discover spec, Design "My items", "Signing in", "Which session").
+describe('Connectors', () => {
+  const posture = (client: QueryClient, name: string, authPosture: 'auth_required' | 'no_auth') =>
+    client.setQueryData(['maws', 'catalog', 'home', { tab: 'connectors', cwd: '/one' }], { featured: { kind: 'connector', install: { kind: 'connector', name, authPosture } }, shelves: [] });
+  const mountWith = (client: QueryClient) => render(<QueryClientProvider client={client}><CustomizeView section="mcp" /></QueryClientProvider>);
+  const fresh = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  afterEach(() => useSignIns.setState({ byName: new Map() }));
+
+  it('is the tab named Connectors; a user-scope server signs in from any ready session and shows each step and the result', async () => {
+    const elsewhere = { ...status('signer'), cwd: '/two' };
+    useSessions.setState({ engine: new Map([[elsewhere.appSessionId, elsewhere]]) });
+    backend.script('connectors.signIn', () => ({ opId: 'op-1' }));
+    backend.script('connectors.signInCancel', () => ({ cancelled: true }));
+    const client = fresh();
+    posture(client, 'notion', 'auth_required');
+    mountWith(client);
+    expect(screen.getByRole('tab', { name: 'Connectors' })).toBeTruthy();
+    const row = (await screen.findByText('notion')).closest('li')!;
+    expect(within(row).getByText('Sign in needed')).toBeTruthy();
+    fireEvent.click(within(row).getByRole('button', { name: 'Sign in to notion' }));
+    await waitFor(() => expect(backend.calls.filter((call) => call.command === 'connectors.signIn').map((call) => call.input)).toEqual([{ name: 'notion', appSessionId: 'signer' }]));
+    const changed = (state: ConnectorSignInChanged['state'], over: Partial<ConnectorSignInChanged> = {}) => act(() => heard({ opId: 'op-1', name: 'notion', state, reason: null, message: null, where: null, ...over }));
+    changed('starting');
+    changed('waiting_callback');
+    expect(within(row).getByText('Finish signing in in your browser…')).toBeTruthy();
+    fireEvent.click(within(row).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(backend.calls.filter((call) => call.command === 'connectors.signInCancel').map((call) => call.input)).toEqual([{ opId: 'op-1' }]));
+    changed('submitting');
+    changed('done', { where: 'new_sessions' });
+    expect(within(row).getByText('Signed in · available in new sessions')).toBeTruthy();
+    expect(within(row).queryByRole('button', { name: 'Sign in to notion' })).toBeNull();
+    expect(backend.calls.filter((call) => call.command === 'session.acquire')).toEqual([]);
+  });
+
+  it('with no ready session whose scope includes the server, Sign in says to open one and does nothing else', async () => {
+    const client = fresh();
+    posture(client, 'notion', 'auth_required');
+    backend.script('customization.inventory', () => ({ skills: [], servers: [{ name: 'notion', scope: 'local', path: '/config/.claude.json', transport: 'http' }], warnings: [] }));
+    const elsewhere = { ...status('elsewhere'), cwd: '/two' };
+    useSessions.setState({ engine: new Map([[elsewhere.appSessionId, elsewhere]]) });
+    mountWith(client);
+    const row = (await screen.findByText('notion')).closest('li')!;
+    expect(within(row).getByText('Open a session in One, then sign in')).toBeTruthy();
+    expect(within(row).queryByRole('button', { name: 'Sign in to notion' })).toBeNull();
+    expect(backend.calls.filter((call) => call.command.startsWith('session.') || call.command === 'connectors.signIn')).toEqual([]);
+  });
+
+  it('an authless server reads No sign-in needed and offers no sign-in', async () => {
+    const client = fresh();
+    posture(client, 'notion', 'no_auth');
+    mountWith(client);
+    const row = (await screen.findByText('notion')).closest('li')!;
+    expect(within(row).getByText('No sign-in needed')).toBeTruthy();
+    expect(within(row).queryByRole('button', { name: 'Sign in to notion' })).toBeNull();
+  });
+
+  it('Remove opens the sheet with the exact command and file, behind the acknowledgement, then runs claude mcp remove', async () => {
+    backend.script('plugins.env', () => ({ binary: '/engine/claude', binaryError: null, configHome: '/config', globalConfig: '/config/.claude.json' }));
+    backend.script('connectors.remove', () => ({ opId: 'remove-1' }));
+    mountWith(fresh());
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove notion' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Remove notion?' });
+    const argv = await within(sheet).findByText('claude mcp remove notion --scope user');
+    expect(JSON.parse(argv.getAttribute('data-plugins-argv')!)).toEqual(['mcp', 'remove', 'notion', '--scope', 'user']);
+    expect(within(sheet).getByText('/config/.claude.json')).toBeTruthy();
+    const submit = within(sheet).getByRole('button', { name: 'Remove' });
+    expect((submit as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(within(sheet).getByRole('checkbox'));
+    fireEvent.click(submit);
+    await waitFor(() => expect(backend.calls.filter((call) => call.command === 'connectors.remove').map((call) => call.input)).toEqual([{ cwd: '/one', binary: '/engine/claude', name: 'notion', scope: 'user' }]));
+  });
+
+  it('Discover without any copy of Anthropic’s directory says so, with Retry', async () => {
+    backend.script('catalog.sources', () => [{ key: 'directory:servers', label: 'Anthropic’s directory: connectors', fetchedAt: null, state: 'unavailable', dropped: 0 }]);
+    backend.script('catalog.refresh', () => []);
+    mountWith(fresh());
+    fireEvent.click(await screen.findByRole('radio', { name: 'Discover' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('Anthropic’s directory is unavailable.');
+    fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(backend.calls.some((call) => call.command === 'catalog.refresh')).toBe(true));
+  });
 });

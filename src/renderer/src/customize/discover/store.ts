@@ -16,8 +16,8 @@ export interface DiscoverChoices {
 
 export const NO_CHOICES: DiscoverChoices = { text: '', chips: [], category: null, source: null, notInstalled: false, sort: 'installs', reverse: false };
 
-type DiscoverTab = Exclude<CatalogTab, 'connectors'>;
-export const useDiscoverStore: UseBoundStore<StoreApi<Record<DiscoverTab, DiscoverChoices>>> = create<Record<DiscoverTab, DiscoverChoices>>()(() => ({ plugins: NO_CHOICES, skills: NO_CHOICES }));
+type DiscoverTab = CatalogTab;
+export const useDiscoverStore: UseBoundStore<StoreApi<Record<DiscoverTab, DiscoverChoices>>> = create<Record<DiscoverTab, DiscoverChoices>>()(() => ({ plugins: NO_CHOICES, skills: NO_CHOICES, connectors: NO_CHOICES }));
 
 export const setChoices = (tab: DiscoverTab, patch: Partial<DiscoverChoices>) => useDiscoverStore.setState((s) => ({ [tab]: { ...s[tab], ...patch } }));
 

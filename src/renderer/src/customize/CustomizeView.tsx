@@ -1,7 +1,7 @@
 // D6 / UX2-K: one app destination, with disk configuration independent of session lifetime.
 import { Tabs } from 'radix-ui';
-import { useMemo, useState, type ReactNode } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { CommandOutput } from '@shared/ipc/schema';
 import { NO_PROJECT } from '@shared/ipc/schema/layout';
@@ -27,9 +27,11 @@ import { useEngineRead } from '../widgets/read';
 import { LIBRARY, SKILLS_LIBRARY } from '../widgets/copy';
 import { homeAbbreviated } from '../tools/session-info/model';
 import { useCustomizeProject, type CustomizeSection } from './open';
+import { ConnectorsSection } from './connectors/ConnectorsSection';
+import { CONNECTORS } from './connectors/copy';
 
 const DIRECTORY_PAGE = '\0directory'; // the selector's value for a directory page: no project id or '' can equal it
-const SECTIONS = { plugins: 'Plugins', skills: 'Skills', mcp: 'MCP servers' } as const;
+const SECTIONS = { plugins: 'Plugins', skills: 'Skills', mcp: 'Connectors' } as const; // P4-AGG M4: the value `mcp` stays, so saved tabs keep working
 const BUTTON = 'rounded-sm px-2 py-1 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint';
 type Inventory = CommandOutput<'customization.inventory'>;
 
@@ -40,6 +42,9 @@ export function CustomizeView({ section }: { section: CustomizeSection }) {
   // P4-AGG M3: Skills too, since its Discover runs changes (an add, then an install) that must outlive a section switch
   const [visitedSkills, setVisitedSkills] = useState(section === 'skills');
   if (section === 'skills' && !visitedSkills) setVisitedSkills(true);
+  // P4-AGG M4: Connectors too (an add or a removal runs on, its line kept, across a section switch)
+  const [visitedConnectors, setVisitedConnectors] = useState(section === 'mcp');
+  if (section === 'mcp' && !visitedConnectors) setVisitedConnectors(true);
   const projects = useSessions((s) => s.projects);
   const records = useSessions((s) => s.records);
   const engine = useSessions((s) => s.engine);
@@ -57,6 +62,9 @@ export function CustomizeView({ section }: { section: CustomizeSection }) {
     .sort((a, b) => a.appSessionId.localeCompare(b.appSessionId));
   const [pickedSession, setPickedSession] = useState<AppSessionId | null>(null);
   const attached = live.find((status) => status.appSessionId === pickedSession) ?? live[0] ?? null;
+  const client = useQueryClient();
+  // every CLI change the runner makes (an MCP server added or removed among them) reads the configuration again
+  useEffect(() => ipc.on('plugins.changed', () => void client.invalidateQueries({ queryKey: ['maws', 'customization.inventory'] })), [client]);
   const inventory = useQuery({
     queryKey: ['maws', 'customization.inventory', { cwd }],
     queryFn: async () => {
@@ -98,11 +106,17 @@ export function CustomizeView({ section }: { section: CustomizeSection }) {
     <Tabs.Content value="skills" forceMount={visitedSkills ? true : undefined} className="flex min-h-0 flex-1 flex-col p-3 outline-none data-[state=inactive]:hidden">
       <SkillsSection key={cwd ?? 'user'} cwd={cwd} inventory={inventory} scope={liveScope} />
     </Tabs.Content>
-    <Tabs.Content value="mcp" className="min-h-0 flex-1 overflow-y-auto p-3 outline-none data-[state=inactive]:hidden">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><h2 className="m-0 text-ui font-medium">Configured on disk</h2><button type="button" className={BUTTON} onClick={() => void inventory.refetch()}>Refresh</button></div>
-      <InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} refresh={() => void inventory.refetch()} />
-      {inventory.data && <McpBody compact view={{ servers: inventory.data.servers.map((server) => ({ ...server, status: 'Configured', command: null, source: server.path, error: null, tools: [] })) }} />}
-      {attached ? <LiveConnectors appSessionId={attached.appSessionId} scope={liveScope} /> : <p className="mt-4 text-ui-sm text-fg-muted">Connection state and tools are unavailable without a running session in this project.</p>}
+    <Tabs.Content value="mcp" forceMount={visitedConnectors ? true : undefined} className="flex min-h-0 flex-1 flex-col pt-3 outline-none data-[state=inactive]:hidden">
+      <ConnectorsSection
+        key={cwd ?? 'user'}
+        cwd={cwd}
+        place={project?.name ?? (cwd === null ? null : homeAbbreviated(cwd))}
+        servers={inventory.data?.servers}
+        inventoryState={<InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} refresh={() => void inventory.refetch()} />}
+        refresh={() => void inventory.refetch()}
+        attached={attached?.appSessionId ?? null}
+        live={attached ? <LiveConnectors appSessionId={attached.appSessionId} scope={section === 'mcp' ? liveScope : null} /> : <p className="mt-4 px-2 text-ui-sm text-fg-muted">{CONNECTORS.noLive}</p>}
+      />
     </Tabs.Content>
   </Tabs.Root>;
 }
@@ -192,7 +206,7 @@ function DiskSkills({ inventory, refresh, scope, switcher }: { inventory: Invent
 function LiveConnectors({ appSessionId, scope }: { appSessionId: AppSessionId; scope: ReactNode }) {
   return <section aria-label="Live connectors" className="mt-5 border-t border-border pt-3">
     <div data-customize-toolbar="mcp" className="mb-2 flex flex-wrap items-center gap-2">
-      <h2 className="m-0 text-ui font-medium">Live in the attached session</h2>
+      <h2 className="m-0 text-ui font-medium">{CONNECTORS.live}</h2>
       <div className="ml-auto max-w-full shrink-0 @max-sm/customize:ml-0 @max-sm/customize:w-full">{scope}</div>
     </div>
     <LiveConnectorStatus key={appSessionId} appSessionId={appSessionId} />

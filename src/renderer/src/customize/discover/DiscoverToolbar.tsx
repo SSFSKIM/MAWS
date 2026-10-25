@@ -15,7 +15,7 @@ import { DISCOVER as D } from './copy';
 import { useCatalogHome, useCatalogRefresh, useCatalogSources } from './read';
 import { NO_CHOICES, setChoices, useDiscoverStore } from './store';
 
-type Tab = Exclude<CatalogTab, 'connectors'>;
+type Tab = CatalogTab; // P4-AGG M4: Connectors too
 const CHIPS: readonly CatalogChip[] = ['anthropic', 'partner', 'community', 'added'];
 const ANY = '';
 const QUIET = 'inline-flex h-7 items-center gap-1 rounded-md px-2 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint';
@@ -107,7 +107,7 @@ export function FilterRow({ tab, cwd }: { tab: Tab; cwd: string | null }) {
   return (
     <div data-discover-filters className="flex min-w-0 flex-wrap items-center gap-1.5">
       <span role="group" aria-label={D.chipsLabel} className="flex flex-wrap gap-1.5">
-        {CHIPS.map((chip) => (
+        {CHIPS.filter((chip) => tab !== 'connectors' || chip !== 'added').map((chip) => ( // nobody adds a connector source
           <button
             key={chip}
             type="button"

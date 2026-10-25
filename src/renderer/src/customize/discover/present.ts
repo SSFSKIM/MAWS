@@ -9,6 +9,7 @@
 // - Counts are shown where a source has them and nowhere else: installs for official plugins, a rank for connectors.
 import type { CatalogItem, CatalogTab } from '@shared/ipc/schema/catalog';
 import { DISCOVER as D } from './copy';
+import { CONNECTORS as C } from '../connectors/copy';
 
 export interface Trust {
   label: string;
@@ -61,8 +62,10 @@ export function componentsWords(item: CatalogItem): string {
   return [...parts, ...(item.runsOnYourComputer === true ? [D.runsCode] : [])].join(' · ');
 }
 
-/** A card's contents line: on Skills, the skills by name (the Design's Skills row); elsewhere the components line. */
+/** A card's contents line: on Skills, the skills by name (the Design's Skills row); a connector's URL; elsewhere the
+ * components line. */
 export function cardContentsWords(item: CatalogItem, tab: CatalogTab): string {
+  if (item.install.kind === 'connector') return item.install.url ?? item.install.urlOptions[0]?.url ?? C.asksInstanceUrl; // P4-AGG M4: the URL it adds
   const skills = item.components?.skills ?? [];
   return tab === 'skills' && skills.length > 0 ? skills.join(', ') : componentsWords(item);
 }

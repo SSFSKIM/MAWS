@@ -523,7 +523,7 @@ test('Customize and Projects are reachable without a chat, at desktop and narrow
         await expect(page.getByText('Inventory coverage', { exact: true })).toBeVisible();
         await expect(page.getByText('Some configuration could not be read', { exact: true })).toHaveCount(0);
         await shot(`ux2k-skills-${width}x${height}`);
-        await page.getByRole('tab', { name: 'MCP servers', exact: true }).click();
+        await page.getByRole('tab', { name: 'Connectors', exact: true }).click(); // P4-AGG M4: the tab's new name
         await expect(page.getByText('documents', { exact: true })).toBeVisible();
         await expect(page.getByText(/Connection state and tools are unavailable/)).toBeVisible();
         await expect(page.locator('body')).not.toContainText('must-not-reach-renderer');

@@ -3,10 +3,11 @@
 // the sheet shows beside the command (what gets installed, "Also listed by", the runs-code warning) and, when the engine
 // does not have the route's marketplace yet, the first step that adds it at the sheet's scope (the sheet runs both, add
 // first; the one-step `--marketplace` form is never used, fact 2). From Skills the sheet names the plugin and its skills:
-// that is the unit the engine installs.
+// that is the unit the engine installs. A connector's + adds the server (customize/connectors).
 import type { CatalogItem, CatalogTab } from '@shared/ipc/schema/catalog';
 import { requestFor, type PluginsRequest } from '../../widgets/plugins/present';
 import { componentParts, runsCodeWords } from './present';
+import { connectorAddOf } from '../connectors/present';
 
 /** The operation key a card's + runs under: its line shows on the card and in its detail. */
 export const CATALOG_KEY = 'catalog:';
@@ -17,6 +18,7 @@ export const pluginIdOf = (item: CatalogItem): string | null => (item.install.ki
 
 export function installRequestOf(item: CatalogItem, tab: CatalogTab): PluginsRequest | null {
   const route = item.install;
+  if (route.kind === 'connector') return connectorAddOf(item); // P4-AGG M4: `claude mcp add`, through the connector sheet
   if (route.kind !== 'plugin' || item.scanBlocked !== null) return null;
   return requestFor(
     'install',

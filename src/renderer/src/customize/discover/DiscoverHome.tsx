@@ -18,7 +18,7 @@ import { addable, componentsWords, metricWords } from './present';
 import { useCatalogHome } from './read';
 import { queryOf, setChoices, useDiscoverStore } from './store';
 
-type Tab = Exclude<CatalogTab, 'connectors'>;
+type Tab = CatalogTab; // P4-AGG M4: Connectors too
 const SORTS: readonly CatalogSort[] = ['installs', 'updated', 'name'];
 
 function Featured({ item, tab, onOpen }: { item: CatalogItem; tab: Tab; onOpen(item: CatalogItem): void }) {
@@ -58,11 +58,12 @@ function Featured({ item, tab, onOpen }: { item: CatalogItem; tab: Tab; onOpen(i
 /** All's head: the count, the sort and its direction. */
 export function SortControl({ tab }: { tab: Tab }) {
   const { sort, reverse } = useDiscoverStore((s) => s[tab]);
+  const words = tab === 'connectors' ? { ...D.sort, installs: D.rankSort } : D.sort; // a connector's count is its rank
   return (
     <span className="flex items-center gap-1">
-      <Choice label={D.sortBy} icon={<SortIcon />} value={sort} values={SORTS} words={D.sort} isDefault={sort === 'installs'} onChange={(next) => setChoices(tab, { sort: next })} />
+      <Choice label={D.sortBy} icon={<SortIcon />} value={sort} values={SORTS} words={words} isDefault={sort === 'installs'} onChange={(next) => setChoices(tab, { sort: next })} />
       <span data-sort-shown className="text-ui-sm text-fg-muted">
-        {D.sort[sort]}
+        {words[sort]}
       </span>
       <IconButton label={D.reverse} pressed={reverse} onClick={() => setChoices(tab, { reverse: !reverse })}>
         <svg viewBox="0 0 16 16" aria-hidden className="size-4 fill-none stroke-current [stroke-linecap:round] [stroke-linejoin:round] [stroke-width:1.5]">

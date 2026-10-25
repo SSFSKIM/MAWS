@@ -18,7 +18,7 @@ import { filtering, NO_CHOICES, queryOf, setChoices, useDiscoverStore } from './
 import { OperationLine, useManage } from '../../widgets/plugins/manage';
 import { CATALOG_KEY } from './add';
 
-type Tab = Exclude<CatalogTab, 'connectors'>;
+type Tab = CatalogTab; // P4-AGG M4: Connectors too
 
 // A change's result whose item the catalog no longer lists (an install the marketplace withdrew, an uninstall that
 // dropped a plugin nobody else lists): its card is gone, so its line stays at the head, by the item's name.
