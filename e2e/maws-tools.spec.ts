@@ -480,7 +480,7 @@ test('previews: a single-select question lays its options beside the focused opt
     await expect(pane).toHaveAttribute('data-preview-of', 'Sidebar');
     await expect(pane).toContainText('| General   | Theme      [ Light  v ] |');
     const mono = async () => pane.locator('pre').first().evaluate((pre) => getComputedStyle(pre.querySelector('code') ?? pre).fontFamily);
-    expect(await mono()).toMatch(/mono|menlo|monospace/i);
+    await expect.poll(mono).toMatch(/mono|menlo|monospace/i); // retried: a re-render between locate and read answers ""
     // side by side: the pane right of the options, their tops level
     await expect(async () => {
       const [options, preview] = [await box(radios), await box(pane)];
@@ -496,7 +496,7 @@ test('previews: a single-select question lays its options beside the focused opt
     await s.page.keyboard.press('ArrowDown');
     await expect(pane).toHaveAttribute('data-preview-of', 'Config file');
     await expect(pane).toContainText('"fontSize": 14');
-    expect(await mono()).toMatch(/mono|menlo|monospace/i);
+    await expect.poll(mono).toMatch(/mono|menlo|monospace/i);
     await s.page.keyboard.press('ArrowDown');
     await expect(pane).toHaveAttribute('data-preview-of', 'Ask me later');
     await expect(pane).toHaveText('No preview for this option');
