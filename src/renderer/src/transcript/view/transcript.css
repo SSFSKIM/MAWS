@@ -196,7 +196,7 @@ button.transcript-chip:hover { background: var(--bg-hover); }
    and the cell line are flex and space it by their gap; the group and cell labels are single-line text, so it flows
    inline there with its own margin and the ellipsis still truncates the line. It is larger than the text; its negative
    block margin keeps the rows at their height. */
-.thinking-mark { flex: none; display: inline-block; vertical-align: middle; margin-block: -4px; }
+.thinking-mark { flex: none; display: inline-block; vertical-align: middle; margin-block: -3px; }
 .transcript-group-label > .thinking-mark, .transcript-cell-label > .thinking-mark { margin-right: 7px; }
 
 /* Work divider */
