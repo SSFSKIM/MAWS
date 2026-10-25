@@ -22,7 +22,7 @@ Discover is for the person. Agents get no catalog, no discovery tool and no sugg
 - [x] (2026-10-24 23:50Z) Design approved by the owner (six rulings, below). Research hand-back recorded in this spec.
 - [x] (2026-10-25 02:30Z) Spec reviews (design, 13 findings; buildability, 7 findings) and the architect's rulings on them folded in (Decision Log, second entry). The facts section was re-measured against the live directory, the 2.1.309 engine and the e2e harness.
 - [x] (2026-10-25 04:10Z) Buildability review, round 2 (five gaps on 259658d64), folded in (Decision Log, third entry): the test-source seam, exact Keychain custody, engine provisioning, the added-marketplace metadata read, the terminal fallback's launch.
-- [ ] M1 — the real-engine test harness and the catalog fixtures.
+- [x] (2026-10-25 02:59Z) M1 — the real-engine test harness and the catalog fixtures (0df1e2398, fix 95b775f2f; class 1a run 40154912725, e2e:discover run 40154941453 2/2 on the mini's installed 2.1.309; review clean). The `gate.yml` change (the group in CLASS1_E2E, the provisioning step, the default-group pin) is held uncommitted pending CI-opt's clearance.
 - [ ] M2 — the catalog.
 - [ ] M3 — Discover for Plugins and Skills.
 - [ ] M4 — Connectors: the spike, then Discover, add, remove and sign in.
@@ -580,7 +580,7 @@ Terminal fallback (M4, discard path only): `PtySpawnInputSchema` gains `env: z.s
 Test seams (M1):
 - the environment variable `MAWS_CATALOG_FIXTURES` (Design, Fetching); `e2e/fixtures/catalog/<source-key>.json` with the network source keys `seed:<marketplace name>`, `directory:plugins`, `directory:servers`, `plugin-details`;
 - the environment variable `MAWS_CATALOG_TEST_SOURCES` (Design, Sources 3a), a JSON array of `{ key: string, label: string, ownership: 'added', marketplaceName: string, marketplaceSource: string /* absolute path */, manifestPath: string /* absolute path */ }`, generated at launch;
-- `e2e/fixtures/catalog/marketplace/.claude-plugin/marketplace.json` with the four plugins named above; `test/fixtures/catalog/` with the recorded `plugins.available` and `plugins.marketplaceManifest` outputs for unit tests;
+- `e2e/fixtures/catalog/marketplace/.claude-plugin/marketplace.json` with the four plugins named above; `test/fixtures/catalog/` with the scratch engine's raw CLI JSON (M1) and the recorded `plugins.marketplaceManifest` answer (M2) for unit tests;
 - `e2e/support/real-engine.ts` exporting the resolved binary and version; `scripts/provision-engine.sh` and `scripts/engine-checksums.txt`.
 
 ## Surprises & Discoveries
