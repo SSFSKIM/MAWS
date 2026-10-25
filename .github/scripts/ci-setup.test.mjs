@@ -45,6 +45,13 @@ for (const platform of ['Darwin', 'Linux']) {
 }
 
 for (const engine of ['missing', 'broken']) {
+  test(`Linux does not install a ${engine} engine that its gates never launch`, (t) => {
+    const f = fixture(t, { platform: 'Linux', engine });
+    const result = f.run();
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(f.calls(), '');
+  });
+
   test(`a ${engine} native engine is installed once and then reused`, (t) => {
     const f = fixture(t, { engine });
     const first = f.run();
