@@ -138,6 +138,17 @@ export function parseDirectoryPlugins(pages: readonly unknown[]): Parsed<Directo
 
 // -- the directory's servers ---------------------------------------------------------------------------------------
 
+// A server's fixed choice of URLs (`remote.url_options`, as Desktop reads it: `{url, label, description?}` each); an
+// option without a URL or a label says nothing and is left out.
+const UrlOptionSchema = z.looseObject({ url: str, label: str, description: text });
+function urlOptionsOf(options: unknown[] | null | undefined): { url: string; label: string; description: string | null }[] {
+  return (options ?? []).flatMap((option) => {
+    const parsed = UrlOptionSchema.safeParse(option);
+    if (!parsed.success || nonEmpty(parsed.data.url) === null || nonEmpty(parsed.data.label) === null) return [];
+    return [{ url: parsed.data.url, label: parsed.data.label, description: nonEmpty(parsed.data.description) }];
+  });
+}
+
 const ServerSchema = z
   .looseObject({
     id: str.min(1),
@@ -151,7 +162,7 @@ const ServerSchema = z
     author: opt(z.looseObject({ name: text })),
     categories: z.array(z.unknown()).catch([]),
     works_with: z.array(z.unknown()).catch([]),
-    remote: opt(z.looseObject({ url: text, url_regex: text, transport: text, auth_posture: text, is_authless: opt(z.boolean()) })),
+    remote: opt(z.looseObject({ url: text, url_regex: text, url_options: z.array(z.unknown()).nullish().catch(null), transport: text, auth_posture: text, is_authless: opt(z.boolean()) })),
     claude_code_copy_text: text,
     verified_tier: opt(z.enum(['anthropic', 'partner', 'community'])),
     taxonomy: TaxonomySchema,
@@ -169,7 +180,7 @@ const ServerSchema = z
     publisher: nonEmpty(s.author?.name),
     categories: s.categories.filter((c): c is string => typeof c === 'string'),
     worksWithClaudeCode: s.works_with.includes('claude-code'),
-    remote: s.remote ? { url: nonEmpty(s.remote.url), urlPattern: nonEmpty(s.remote.url_regex), transport: s.remote.transport ?? null, authPosture: s.remote.auth_posture === 'no_auth' || (s.remote.auth_posture == null && s.remote.is_authless === true) ? ('no_auth' as const) : ('auth_required' as const) } : null,
+    remote: s.remote ? { url: nonEmpty(s.remote.url), urlPattern: nonEmpty(s.remote.url_regex), urlOptions: urlOptionsOf(s.remote.url_options), transport: s.remote.transport ?? null, authPosture: s.remote.auth_posture === 'no_auth' || (s.remote.auth_posture == null && s.remote.is_authless === true) ? ('no_auth' as const) : ('auth_required' as const) } : null,
     copyText: nonEmpty(s.claude_code_copy_text),
     tier: s.verified_tier ?? null,
     taxonomy: s.taxonomy,

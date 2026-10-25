@@ -16,10 +16,11 @@ export interface Seed {
   repository: string; // owner/repo on GitHub: what `plugin marketplace add` takes
   marketplaceName: string;
   label: string;
+  publisher: string; // the organisation that publishes it: the publisher chain's fallback for the seed's own code (Decision Log 7)
   ownership: Exclude<Ownership, 'added'>;
 }
 
-const seed = (repository: string, marketplaceName: string, label: string, ownership: Seed['ownership']): Seed => ({ key: `seed:${marketplaceName}`, repository, marketplaceName, label, ownership });
+const seed = (repository: string, marketplaceName: string, label: string, ownership: Seed['ownership'], publisher = 'Anthropic'): Seed => ({ key: `seed:${marketplaceName}`, repository, marketplaceName, label, publisher, ownership });
 
 // The spec's twelve general repositories, in its table's order (fact 1).
 export const SEEDS: readonly Seed[] = [
@@ -32,9 +33,9 @@ export const SEEDS: readonly Seed[] = [
   seed('anthropics/life-sciences', 'life-sciences', 'Life sciences', 'anthropic'),
   seed('anthropics/k12-teacher-skills', 'k12-teacher-skills', 'K-12 teacher skills', 'anthropic'),
   seed('anthropics/claude-for-financial-advisors', 'claude-for-financial-advisors', 'Claude for Financial Advisors', 'anthropic'),
-  seed('makenotion/claude-code-notion-plugin', 'notion-plugin-marketplace', 'Notion', 'partner'),
-  seed('canva-sdks/canva-skills', 'canva-skills', 'Canva', 'partner'),
-  seed('carta/plugins', 'carta-plugins', 'Carta', 'partner'),
+  seed('makenotion/claude-code-notion-plugin', 'notion-plugin-marketplace', 'Notion', 'partner', 'Notion'),
+  seed('canva-sdks/canva-skills', 'canva-skills', 'Canva', 'partner', 'Canva'),
+  seed('carta/plugins', 'carta-plugins', 'Carta', 'partner', 'Carta'),
 ];
 
 export const OFFICIAL = 'claude-plugins-official';

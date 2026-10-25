@@ -24,7 +24,7 @@ function notShownReason(server: DirectoryServer): string {
   if (!server.worksWithClaudeCode) return 'not for Claude Code';
   if (server.remote === null) return 'no remote';
   if (server.remote.transport !== 'streamable-http' && server.remote.transport !== 'sse') return `transport ${server.remote.transport}`;
-  return 'neither a URL nor a URL pattern';
+  return 'no URL, URL pattern or choice of URLs';
 }
 
 const count = <T>(values: readonly T[], key: (value: T) => string) => {

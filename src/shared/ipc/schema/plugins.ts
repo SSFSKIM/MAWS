@@ -134,6 +134,10 @@ export const MarketplaceManifestViewSchema = z.strictObject({
   plugins: z.array(z.strictObject({ name: z.string(), author: z.string().nullable(), source: PluginSourceRefSchema.nullable(), components: PluginManifestViewSchema.shape.components.nullable(), partial: z.boolean(), problems: z.array(z.string()) })),
 });
 export type MarketplaceManifestView = z.infer<typeof MarketplaceManifestViewSchema>;
+// `plugins.directoryProvenance`: where the engine recorded each installed Anthropic Directory plugin's code (its
+// repository key, `host/path#subpath`), read from the engine's own records in its plugins folder for the entry names
+// asked; a name it has no record of is left out. `pluginsDir` is the folder read (for main's watch of it).
+export const DirectoryProvenanceSchema = z.strictObject({ pluginsDir: z.string(), entries: z.array(z.strictObject({ name: z.string(), repositoryKey: z.string() })) });
 // P4-AGG M2 end
 
 const cwd = { cwd: PluginsCwdSchema };
@@ -155,6 +159,7 @@ export const commands = {
   'plugins.manifest': host(z.strictObject({ cwd: PluginsCwdSchema, items: z.array(ManifestItemRefSchema).max(256) }), z.strictObject({ manifests: z.array(PluginManifestViewSchema) })),
   // P2-B end
   'plugins.marketplaceManifest': host(z.strictObject({ cwd: PluginsCwdSchema, name: PluginsArgumentSchema }), MarketplaceManifestViewSchema), // P4-AGG M2: a read of one marketplace's clone
+  'plugins.directoryProvenance': host(z.strictObject({ names: z.array(PluginsArgumentSchema).max(1000) }), DirectoryProvenanceSchema), // P4-AGG M2: the engine's records of installed directory plugins
 } as const satisfies Record<`plugins.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

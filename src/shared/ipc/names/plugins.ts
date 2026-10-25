@@ -6,6 +6,7 @@ export const commands = [
   'plugins.enable', 'plugins.disable', 'plugins.cancel',
   'plugins.manifest', // P2-B (2026-10-09)
   'plugins.marketplaceManifest', // P4-AGG M2
+  'plugins.directoryProvenance', // P4-AGG M2
 ] as const;
 
 export const events = [

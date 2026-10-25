@@ -807,7 +807,7 @@ describe('ipc schema validates both directions', () => {
   describe('E8 entries', () => {
     const cwd = '/r';
     it('adds plugins.* and marketplaces.*, every command owned by the engine host, and session.reloadSkills as an operation', () => {
-      expect(Object.keys(plugins.commands)).toEqual(['plugins.env', 'plugins.list', 'plugins.available', 'plugins.install', 'plugins.update', 'plugins.uninstall', 'plugins.enable', 'plugins.disable', 'plugins.cancel', 'plugins.manifest' /* P2-B */, 'plugins.marketplaceManifest' /* P4-AGG M2 */]);
+      expect(Object.keys(plugins.commands)).toEqual(['plugins.env', 'plugins.list', 'plugins.available', 'plugins.install', 'plugins.update', 'plugins.uninstall', 'plugins.enable', 'plugins.disable', 'plugins.cancel', 'plugins.manifest' /* P2-B */, 'plugins.marketplaceManifest' /* P4-AGG M2 */, 'plugins.directoryProvenance' /* P4-AGG M2 */]);
       expect(Object.keys(plugins.events)).toEqual(['plugins.operation', 'plugins.changed']);
       expect(Object.keys(marketplaces.commands)).toEqual(['marketplaces.list', 'marketplaces.add', 'marketplaces.update', 'marketplaces.remove']);
       expect(Object.keys(marketplaces.events)).toEqual([]);
@@ -911,6 +911,16 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandOutput('plugins.marketplaceManifest', { state: 'unknown', owner: null, plugins: [] }).ok).toBe(true);
       expect(validateCommandOutput('plugins.marketplaceManifest', { state: 'read', owner: null, plugins: [{ ...entry, components: { ...components, mcpServers: [{ name: 's', transport: 'stdio', command: 'npx' }] } }] }).ok).toBe(false);
       expect(validateCommandOutput('plugins.marketplaceManifest', { state: 'read', owner: null, plugins: [{ ...entry, url: 'https://x' }] }).ok).toBe(false);
+    });
+
+    it('plugins.directoryProvenance is an engine-host read of entry names, never a path; it answers repository keys', () => {
+      expect(plugins.commands['plugins.directoryProvenance'].owner).toBe('engine-host');
+      expect(NAMES.plugins.commands).toContain('plugins.directoryProvenance');
+      expect(validateCommandInput('plugins.directoryProvenance', { names: ['frontend-design'] }).ok).toBe(true);
+      expect(validateCommandInput('plugins.directoryProvenance', { names: ['--scope'] }).ok).toBe(false);
+      expect(validateCommandInput('plugins.directoryProvenance', { names: [], pluginsDir: '/etc' }).ok).toBe(false);
+      expect(validateCommandOutput('plugins.directoryProvenance', { pluginsDir: '/c/plugins', entries: [{ name: 'f', repositoryKey: 'github.com/a/b#p' }] }).ok).toBe(true);
+      expect(validateCommandOutput('plugins.directoryProvenance', { pluginsDir: '/c/plugins', entries: [{ name: 'f', repositoryKey: 'k', source: {} }] }).ok).toBe(false);
     });
   });
   // P2-B end

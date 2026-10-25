@@ -1,11 +1,12 @@
 // P4-AGG M2: the catalog's engine reads (the Discover spec, Design "Parts", the boundary): asked of the host per cwd,
-// held until invalidated, the last 16 cwds kept; a failed read is null and does not stop the others; an Anthropic
-// Directory entry's source outlives its leaving the available listing once installed.
+// held until invalidated (all, or one cwd), the last 16 cwds kept; a failed read is null and does not stop the others; an
+// installed Anthropic Directory entry is known by the engine's own record of it, asked for the installed names only.
 import { describe, expect, it } from 'vitest';
 import type { CommandName, CommandResult } from '@shared/ipc/schema';
 import { EngineReads, type HostCall } from './engine-reads';
 
 const DIRECTORY_ENTRY = { pluginId: 'fd@anthropic-plugin-directory', name: 'fd', marketplaceName: 'anthropic-plugin-directory', description: null, version: null, source: { kind: 'git-subdir', url: 'https://github.com/a/b', repo: null, path: 'p', ref: null, sha: 'f'.repeat(40) }, installCount: null };
+const INSTALLED = { id: 'fd@anthropic-plugin-directory', name: 'fd', marketplace: 'anthropic-plugin-directory', scope: 'user', projectPath: null };
 
 function host(answers: Partial<Record<CommandName, unknown>>) {
   const asked: { name: string; input: unknown }[] = [];
@@ -25,7 +26,9 @@ const ANSWERS = {
   'plugins.marketplaceManifest': { state: 'read', owner: 'O', plugins: [] },
   'customization.inventory': { skills: [], servers: [{ name: 'linear', scope: 'user', path: '/x', transport: 'http' }], warnings: [] },
   'plugins.env': { binary: null, binaryError: null, configHome: '/config', globalConfig: '/config/.claude.json' },
+  'plugins.directoryProvenance': { pluginsDir: '/config/plugins', entries: [] },
 };
+const READS = ['customization.inventory', 'marketplaces.list', 'plugins.available', 'plugins.directoryProvenance', 'plugins.list', 'plugins.marketplaceManifest'];
 
 describe('EngineReads', () => {
   it('asks the host in the cwd, each listed marketplace’s clone, and the configured servers; holds the view until invalidated', async () => {
@@ -34,14 +37,30 @@ describe('EngineReads', () => {
     const view = await reads.view('/w');
     expect(view).toMatchObject({ cwd: '/w', installed: [], available: [DIRECTORY_ENTRY], servers: ['linear'] });
     expect(view!.manifests.get('m')).toEqual({ state: 'read', owner: 'O', plugins: [] });
-    expect(h.asked.map((a) => a.name).sort()).toEqual(['customization.inventory', 'marketplaces.list', 'plugins.available', 'plugins.list', 'plugins.marketplaceManifest']);
+    expect(h.asked.map((a) => a.name).sort()).toEqual([...READS, 'plugins.env'].sort()); // the configuration's place, once
     await reads.view('/w');
-    expect(h.asked).toHaveLength(5);
+    expect(h.asked).toHaveLength(7);
     const generation = reads.generation;
     reads.invalidate();
     expect(reads.generation).toBe(generation + 1);
     await reads.view('/w');
-    expect(h.asked).toHaveLength(10);
+    expect(h.asked).toHaveLength(13);
+    expect(reads.places()).toEqual({ configHome: '/config', pluginsDir: '/config/plugins', projects: ['/w'] });
+  });
+
+  it('forgets one cwd’s view alone when only its settings changed', async () => {
+    const h = host(ANSWERS);
+    const reads = new EngineReads(h.call);
+    await reads.view('/a');
+    await reads.view('/b');
+    const before = h.asked.length;
+    const generation = reads.generation;
+    reads.invalidate('/a');
+    expect(reads.generation).toBe(generation + 1);
+    await reads.view('/b');
+    expect(h.asked.length).toBe(before);
+    await reads.view('/a');
+    expect(h.asked.length).toBe(before + 6);
   });
 
   it('reads the user configuration in the engine’s configuration directory, and is null when even that cannot be asked', async () => {
@@ -56,13 +75,11 @@ describe('EngineReads', () => {
     expect(view).toMatchObject({ available: null, installed: [], servers: ['linear'] });
   });
 
-  it('remembers a directory entry’s source after it leaves the available listing', async () => {
-    const h = host(ANSWERS);
-    const reads = new EngineReads(h.call);
-    await reads.view('/w');
-    h.answers['plugins.available'] = { plugins: [] }; // installed: the engine no longer lists it
-    reads.invalidate();
-    expect((await reads.view('/w'))!.directorySources.get('fd')).toEqual(DIRECTORY_ENTRY.source);
+  it('knows an installed directory entry by the engine’s record of it, on a cold start', async () => {
+    const h = host({ ...ANSWERS, 'plugins.list': { plugins: [INSTALLED] }, 'plugins.available': { plugins: [] }, 'plugins.directoryProvenance': { pluginsDir: '/config/plugins', entries: [{ name: 'fd', repositoryKey: 'github.com/a/b#p' }] } });
+    const view = await new EngineReads(h.call).view('/w');
+    expect(h.asked.find((a) => a.name === 'plugins.directoryProvenance')?.input).toEqual({ names: ['fd'] });
+    expect(view!.directoryInstalled).toEqual(new Map([['fd', 'github.com/a/b#p']]));
   });
 
   it('keeps the last 16 cwds', async () => {

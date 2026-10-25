@@ -44,7 +44,7 @@ export async function recordedEngine(cwd: string, over: Partial<EngineView> = {}
     marketplaces: marketplacesOf(JSON.stringify(recorded('marketplace-list.json'))),
     manifests: new Map([['maws-discover-test', manifest]]), // maws-recorded-pins' clone is not recorded: its listing stands in
     servers: [],
-    directorySources: new Map(),
+    directoryInstalled: new Map(),
     ...over,
   };
 }

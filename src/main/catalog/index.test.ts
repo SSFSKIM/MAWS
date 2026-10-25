@@ -1,14 +1,15 @@
 // P4-AGG M2: the catalog service over `catalog.*` (the Discover spec, M2 Decisions): the engine's reads go through the
 // host and are held per cwd until `plugins.changed`, which also tells the renderer `catalog.changed` once; Refresh reads
 // the engine again; a cwd of null reads the user configuration in the engine's configuration directory; an engine that
-// cannot be read leaves the network's items; the test-source seam makes the local test marketplace discoverable.
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+// cannot be read leaves the network's items; the test-source seam makes the local test marketplace discoverable; a read
+// an invalidation overtakes is read again; an outside change to a project's settings invalidates without Refresh.
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import { commands } from '@shared/ipc/schema';
-import { NETWORK_FIXTURES, PROJECT_A, recordedEngine, TEST_MARKETPLACE } from '../../../test/support/catalog-inputs';
+import { NETWORK_FIXTURES, PROJECT_A, recordedEngine, SCRATCH, TEST_MARKETPLACE } from '../../../test/support/catalog-inputs';
 import type { HostCall } from './engine-reads';
 import { startCatalog } from './index';
 import type { EngineView } from './normalize';
@@ -22,12 +23,12 @@ afterEach(() => rmSync(userData, { recursive: true, force: true }));
 const CONFIG_HOME = '/scratch-root/config';
 
 // The engine host as the catalog asks it, answering from a recorded view; counts each command.
-function host(view: () => Promise<EngineView>, failing = false) {
+function host(view: (name: CommandName) => Promise<EngineView>, failing = false) {
   const asked: { name: string; input: unknown }[] = [];
   const call = (async (name: CommandName, input: unknown): Promise<CommandResult<CommandName>> => {
     asked.push({ name, input });
     if (failing) return { ok: false, error: { code: 'host_unavailable', message: 'the engine host is not running' } };
-    const v = await view();
+    const v = await view(name);
     const value = (() => {
       switch (name) {
         case 'plugins.env':
@@ -42,6 +43,8 @@ function host(view: () => Promise<EngineView>, failing = false) {
           return v.manifests.get((input as CommandInput<'plugins.marketplaceManifest'>).name) ?? { state: 'unknown', owner: null, plugins: [] };
         case 'customization.inventory':
           return { skills: [], servers: (v.servers ?? []).map((n) => ({ name: n, scope: 'user', path: '/x/.claude.json', transport: 'http' })), warnings: [] };
+        case 'plugins.directoryProvenance':
+          return { pluginsDir: `${CONFIG_HOME}/plugins`, entries: [...v.directoryInstalled].map(([name, repositoryKey]) => ({ name, repositoryKey })) };
         default:
           throw new Error(`unexpected ${name}`);
       }
@@ -142,6 +145,48 @@ describe('the catalog service', () => {
     expect(page.total).toBeGreaterThan(60);
     expect(page.items.find((i) => i.name === 'agentmail' || i.name === 'AgentMail')?.install).toMatchObject({ kind: 'manual', reason: 'Not installable by this engine: its listing could not be read' });
     await expect(invoke('catalog.item', { id: 'nothing', cwd: PROJECT_A })).rejects.toMatchObject({ error: { code: 'invalid_input' } });
+  });
+
+  it('reads again a view an invalidation overtook, and never keeps the old one under the new revision', async () => {
+    let current = await recordedEngine(PROJECT_A, { installed: [] });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const engine = host(async (name) => {
+      const snapshot = current; // what the engine holds when the read starts
+      if (name !== 'plugins.env') await gate;
+      return snapshot;
+    });
+    const { invoke, pluginsChanged } = service(engine.call);
+    const skillsOnly = `local:${SCRATCH}/maws-discover-test#plugins/skills-only`;
+    const pending = invoke('catalog.item', { id: skillsOnly, cwd: PROJECT_A });
+    await vi.waitFor(() => expect(engine.asked.some((a) => a.name === 'plugins.list')).toBe(true)); // the read has started
+    current = await recordedEngine(PROJECT_A); // skills-only installed at user scope, outside the pending read
+    pluginsChanged();
+    release();
+    expect((await pending).installed).toBe('here');
+    const lists = engine.asked.filter((a) => a.name === 'plugins.list').length;
+    expect((await invoke('catalog.item', { id: skillsOnly, cwd: PROJECT_A })).installed).toBe('here');
+    expect(engine.asked.filter((a) => a.name === 'plugins.list')).toHaveLength(lists); // kept, under the current revision
+  });
+
+  it('sees an outside change to a project’s settings and reads that project again without Refresh', async () => {
+    const project = mkdtempSync(join(tmpdir(), 'maws-agg-project-'));
+    try {
+      mkdirSync(join(project, '.claude'));
+      writeFileSync(join(project, '.claude', 'settings.json'), '{}');
+      let current = await recordedEngine(project, { installed: [] });
+      const { invoke, emitted, catalog } = service(host(async () => current).call);
+      const skillsOnly = `local:${SCRATCH}/maws-discover-test#plugins/skills-only`;
+      expect((await invoke('catalog.item', { id: skillsOnly, cwd: project })).installed).toBe('no');
+      current = await recordedEngine(project); // an agent installed it from a terminal
+      emitted.length = 0;
+      writeFileSync(join(project, '.claude', 'settings.local.json'), JSON.stringify({ enabledPlugins: { 'skills-only@maws-discover-test': true } }));
+      await vi.waitFor(async () => expect((await invoke('catalog.item', { id: skillsOnly, cwd: project })).installed).toBe('here'), { timeout: 5_000, interval: 100 });
+      expect(emitted).toContain('catalog.changed');
+      catalog.stop();
+    } finally {
+      rmSync(project, { recursive: true, force: true });
+    }
   });
 
   it('makes the test source discoverable before the engine has its marketplace', async () => {

@@ -69,6 +69,7 @@ import { promptHistory } from './prompt-history';
 // P2-B start (2026-10-09)
 import { pluginRowsOf } from './plugins/cli-result';
 import { LastListings, manifestsFor, marketplaceManifestFor } from './plugins/listings';
+import { directoryProvenance } from './plugins/directory-provenance';
 // P2-B end
 // P2-A start (2026-10-09; X17)
 import { ObservedFactsService } from './observed-facts';
@@ -786,6 +787,13 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   on('plugins.manifest', async ({ cwd, items }) => ({ manifests: await manifestsFor(cwd, items, { listings, listPlugins: () => listPlugins(cwd), listMarketplaces: () => listMarketplaces(cwd) }) }));
   // P4-AGG M2: one marketplace's clone read whole for Discover's catalog, admitted by the same kept listing
   on('plugins.marketplaceManifest', ({ cwd, name }) => marketplaceManifestFor(cwd, name, { listings, listMarketplaces: () => listMarketplaces(cwd) }));
+  // P4-AGG M2: the engine's own records of where installed Anthropic Directory plugins came from, in its plugins folder
+  // (the override the engine honours, else <config>/plugins, as session-start-hooks.ts reads it)
+  on('plugins.directoryProvenance', async ({ names }) => {
+    const env = await captureEnv();
+    const pluginsDir = env.CLAUDE_CODE_PLUGIN_CACHE_DIR || join(env.CLAUDE_CONFIG_DIR || join(env.HOME || homedir(), '.claude'), 'plugins');
+    return { pluginsDir, entries: await directoryProvenance(pluginsDir, names) };
+  });
   // P2-B end
 
   // E1 start: the `maws` tool server's commands. A session this host does not hold has no ask and nothing pending;

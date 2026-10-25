@@ -9,7 +9,7 @@ import { PROJECT_A, PROJECT_B, recordedEngine, recordedNetwork, recordedSources,
 import { buildCatalog } from './join';
 import { connectorName, type EngineView } from './normalize';
 import { categoryTitle, homeOf, queryOf } from './query';
-import { TAXONOMY_AXES } from './records';
+import { networkData, parseSource, TAXONOMY_AXES } from './records';
 import { axisCoverage } from './summary';
 
 const catalog = async (over: { engine?: EngineView | null; omit?: string[]; tests?: boolean } = {}) =>
@@ -24,13 +24,13 @@ const OFFICIAL = (path: string) => `github.com/anthropics/claude-plugins-officia
 const TEST = (plugin: string) => `local:/scratch-root/maws-discover-test#plugins/${plugin}`;
 
 describe('the catalog over the recorded sources', () => {
-  it('holds one valid item per thing: 78 plugins and 10 Claude Code connectors', async () => {
+  it('holds one valid item per thing: 77 plugins and 10 Claude Code connectors', async () => {
     const items = await catalog();
     for (const item of items) expect(CatalogItemSchema.safeParse(item).success, item.id).toBe(true);
     expect(new Set(items.map((i) => i.id)).size).toBe(items.length);
-    // 12 seeds' 69 entries, 61 directory records, 4 test-marketplace and 3 recorded-pin entries, joined: 78 plugins.
+    // 12 seeds' 69 entries, 61 directory records, 4 test-marketplace and 3 recorded-pin entries, joined: 77 plugins.
     // The servers' 12 records less the local desktop extension and the one not made for Claude Code: 10 connectors.
-    expect(items.filter((i) => i.kind === 'plugin')).toHaveLength(78);
+    expect(items.filter((i) => i.kind === 'plugin')).toHaveLength(77);
     expect(items.filter((i) => i.kind === 'connector').map((i) => i.name)).toEqual(['Linear', 'Google Drive', 'Gmail', 'Google Calendar', 'Canva', 'Microsoft 365', 'Notion', 'Salesforce - Beta', 'Microsoft Learn', 'alphaXiv']);
   });
 
@@ -51,6 +51,22 @@ describe('the catalog over the recorded sources', () => {
     const skills = items.filter((i) => i.id.startsWith('github.com/anthropics/skills#?entry='));
     expect(skills.map((i) => i.name)).toEqual(['document-skills', 'example-skills', 'claude-api', 'academy-guide', 'discernment-nudge']);
     expect(byId(items, 'github.com/anthropics/skills#?entry=document-skills').components?.skills).toEqual(['xlsx', 'docx', 'pptx', 'pdf']);
+  });
+
+  it('tells entries at one place apart in every source: the directory’s document-skills joins the seed entry of that name', async () => {
+    const items = await catalog();
+    expect(named(items, 'document-skills')).toHaveLength(1);
+    const documents = byId(items, 'github.com/anthropics/skills#?entry=document-skills');
+    // the route from the seed, the tier from the directory; what is installed is the entry's four skills, not the
+    // nineteen the directory's record finds in the whole repository
+    expect(documents).toMatchObject({ reviewTier: 'anthropic', install: { kind: 'plugin', marketplaceName: 'anthropic-agent-skills', pluginName: 'document-skills' }, components: { skills: ['xlsx', 'docx', 'pptx', 'pdf'] } });
+    expect(documents.sources).toEqual(expect.arrayContaining(['directory:plugins', 'seed:anthropic-agent-skills']));
+    // the engine's directory entry at that place joins it too, by the engine's own entry name
+    const engine = await recordedEngine(PROJECT_A);
+    engine.available = [...engine.available!, { pluginId: 'document-skills@anthropic-plugin-directory', name: 'document-skills', marketplaceName: 'anthropic-plugin-directory', description: null, version: null, source: { kind: 'url', url: 'https://github.com/anthropics/skills.git', repo: null, path: null, ref: null, sha: '3'.repeat(40) }, installCount: null }];
+    const withDirectory = await catalog({ engine });
+    expect(named(withDirectory, 'document-skills')).toHaveLength(1);
+    expect(byId(withDirectory, 'github.com/anthropics/skills#?entry=document-skills')).toMatchObject({ install: { marketplaceName: 'anthropic-plugin-directory' }, alsoListedBy: ['anthropic-agent-skills'] });
   });
 
   it('chooses the route the engine already has, then claude-plugins-official, the seeds, the directory, community, an added one', async () => {
@@ -85,14 +101,24 @@ describe('the catalog over the recorded sources', () => {
     expect(named(linear, 'Linear')[0]!.installed).toBe('here');
   });
 
-  it('knows an installed Anthropic Directory plugin by the source it was last listed with, and makes no card of one it never saw', async () => {
-    const source = { kind: 'git-subdir', url: 'https://github.com/anthropics/claude-plugins-official', repo: null, path: 'plugins/frontend-design', ref: null, sha: '5'.repeat(40) };
+  it('knows an installed Anthropic Directory plugin by the repository the engine recorded for it, after a restart too', async () => {
     const engine = await recordedEngine(PROJECT_A);
     const row = { ...engine.installed![0]!, id: 'frontend-design@anthropic-plugin-directory', name: 'frontend-design', marketplace: 'anthropic-plugin-directory', scope: 'user', projectPath: null, here: false, coversHere: false };
-    const unseen = { ...row, id: 'never-listed@anthropic-plugin-directory', name: 'never-listed' };
-    const items = await catalog({ engine: { ...engine, installed: [...engine.installed!, row, unseen], directorySources: new Map([['frontend-design', source]]) } });
-    expect(byId(items, OFFICIAL('plugins/frontend-design'))).toMatchObject({ installed: 'here', install: { marketplaceName: 'anthropic-plugin-directory', present: true } });
-    expect(items.some((i) => i.name === 'never-listed')).toBe(false);
+    const unseen = { ...row, id: 'never-recorded@anthropic-plugin-directory', name: 'never-recorded' };
+    // a cold start: the available listing omits it (installed), and only the engine's own record of it names its code
+    const items = await catalog({ engine: { ...engine, installed: [...engine.installed!, row, unseen], directoryInstalled: new Map([['frontend-design', 'github.com/anthropics/claude-plugins-official#plugins/frontend-design']]) } });
+    expect(byId(items, OFFICIAL('plugins/frontend-design'))).toMatchObject({ installed: 'here', install: { marketplaceName: 'anthropic-plugin-directory', pluginName: 'frontend-design', present: true }, alsoListedBy: ['claude-plugins-official'] });
+    expect(items.some((i) => i.name === 'never-recorded')).toBe(false); // no name join: My items shows it
+  });
+
+  it('keeps an installed item’s route, whatever ranks first: installed from community, it is not offered from official', async () => {
+    const engine = await recordedEngine(PROJECT_A);
+    const official = { name: 'claude-plugins-official', source: 'github', locator: 'anthropics/claude-plugins-official', ref: null, installLocation: '/scratch-root/config/plugins/marketplaces/claude-plugins-official' };
+    const community = { ...official, name: 'claude-community', locator: 'anthropics/claude-plugins-community', installLocation: '/scratch-root/config/plugins/marketplaces/claude-community' };
+    const row = { ...engine.installed![0]!, id: '42crunch-api-security-testing@claude-community', name: '42crunch-api-security-testing', marketplace: 'claude-community', scope: 'user', projectPath: null, here: false, coversHere: false };
+    const read = { state: 'read' as const, owner: 'Anthropic', plugins: [{ name: '42crunch-api-security-testing', author: null, source: { kind: 'git-subdir' as const, url: '42Crunch-AI/claude-plugins', repo: null, path: 'plugins/api-security-testing', ref: 'v1.0.1', sha: '30287f5e3f122a646d1ac5ca3ab96e130c52a3ad' }, components: null, partial: false, problems: [] }] };
+    const items = await catalog({ engine: { ...engine, marketplaces: [...engine.marketplaces!, official, community], manifests: new Map([...engine.manifests, ['claude-community', read]]), installed: [...engine.installed!, row] } });
+    expect(named(items, '42crunch-api-security-testing')[0]).toMatchObject({ installed: 'here', install: { marketplaceName: 'claude-community', present: true }, alsoListedBy: ['claude-plugins-official'] });
   });
 
   it('says whether an item runs code on the computer: a stdio server yes, a remote one no, unknown contents unknown', async () => {
@@ -108,12 +134,41 @@ describe('the catalog over the recorded sources', () => {
     expect(byId(items, OFFICIAL('external_plugins/github')).runsOnYourComputer).toBe(false); // its server sends data out
   });
 
-  it('names the publisher: the directory’s, else the entry’s author, else the owner of the repository the code lives in', async () => {
+  it('never says no from a partial inventory: unknown, unless what was read already runs code', async () => {
+    const tests = await testSourceData();
+    const partial = (name: string, change: (c: NonNullable<(typeof tests.manifest.plugins)[number]['components']>) => void) => {
+      const plugin = tests.manifest.plugins.find((p) => p.name === name)!;
+      change(plugin.components!);
+      plugin.partial = true;
+      plugin.problems = ['hooks/hooks.json: too large'];
+    };
+    partial('hooked', (c) => (c.hooks = []));
+    partial('local-server', () => {});
+    const engine = await recordedEngine(PROJECT_A, { marketplaces: [], available: [], installed: [], manifests: new Map() });
+    const items = buildCatalog({ network: recordedNetwork(), engine, tests: [tests] });
+    expect(byId(items, TEST('hooked')).runsOnYourComputer).toBe('unknown');
+    expect(byId(items, TEST('local-server')).runsOnYourComputer).toBe(true);
+    expect(byId(items, TEST('skills-only')).runsOnYourComputer).toBe(false); // read whole
+  });
+
+  it('names the publisher: the directory’s, else the entry’s author, else the seed’s organisation for its own code', async () => {
     const items = await catalog();
     expect(byId(items, 'github.com/anthropics/claude-for-legal#commercial-legal').publisher).toBe('Anthropic'); // the manifest's author
     expect(byId(items, TEST('hooked')).publisher).toBe('MAWS e2e hooks');
-    expect(byId(items, 'github.com/carta/plugins#plugins/carta-crm').publisher).toBe('Carta Engineering'); // the owner, its own code
-    expect(byId(items, 'github.com/makenotion/claude-code-notion-plugin#').publisher).toBe('Notion Labs, Inc.'); // the owner's own repository
+    expect(byId(items, 'github.com/carta/plugins#plugins/carta-crm').publisher).toBe('Carta'); // the seed's organisation, its own code
+    expect(byId(items, 'github.com/makenotion/claude-code-notion-plugin#').publisher).toBe('Notion'); // the seed's own repository
+    // a person as the manifest's owner is not who publishes Anthropic's skills
+    expect(byId(items, 'github.com/anthropics/skills#?entry=example-skills').publisher).toBe('Anthropic');
+    // so with the engine holding that seed's clone, read by the host
+    const engine = await recordedEngine(PROJECT_A);
+    const skillsClone = { name: 'anthropic-agent-skills', source: 'github', locator: 'anthropics/skills', ref: null, installLocation: '/scratch-root/config/plugins/marketplaces/anthropic-agent-skills' };
+    const read = { state: 'read' as const, owner: 'Keith Lazuka', plugins: ['document-skills', 'example-skills'].map((name) => ({ name, author: null, source: './', components: null, partial: false, problems: [] })) };
+    const held = await catalog({ engine: { ...engine, marketplaces: [...engine.marketplaces!, skillsClone], manifests: new Map([...engine.manifests, ['anthropic-agent-skills', read]]) } });
+    expect(byId(held, 'github.com/anthropics/skills#?entry=example-skills').publisher).toBe('Anthropic');
+    // an added marketplace's owner stands in for its own entries
+    const owned = await testSourceData();
+    owned.manifest.plugins.find((p) => p.name === 'skills-only')!.author = null;
+    expect(byId(buildCatalog({ network: recordedNetwork(), engine: null, tests: [owned] }), TEST('skills-only')).publisher).toBe('MAWS e2e');
     // the owner does not publish what it only lists: community plugins, and the official marketplace's external plugins
     expect(byId(items, 'github.com/qressy/10x-claude-plugin#').publisher).toBeNull();
     expect(byId(items, OFFICIAL('external_plugins/github')).publisher).toBeNull();
@@ -141,12 +196,12 @@ describe('the catalog over the recorded sources', () => {
       do {
         const page = queryOf(items, { tab: 'plugins', cwd: null, sort: 'updated', reverse, cursor, limit: 7 }, 'r1');
         expect(page.restarted).toBe(false);
-        expect(page.total).toBe(78);
+        expect(page.total).toBe(77);
         seen.push(...page.items.map((i) => i.id));
         cursor = page.nextCursor;
       } while (cursor !== null);
-      expect(seen).toHaveLength(78);
-      expect(new Set(seen).size).toBe(78);
+      expect(seen).toHaveLength(77);
+      expect(new Set(seen).size).toBe(77);
     }
     // ties fall to name then id: code-review, code-simplifier and claude-md-management share a date
     const tied = queryOf(items, { tab: 'plugins', cwd: null, sort: 'updated', limit: 200 }, 'r1').items.filter((i) => i.updatedAt === '2026-02-20T01:06:49Z');
@@ -202,7 +257,7 @@ describe('the home', () => {
     const items = await catalog();
     const home = homeOf(items, 'plugins');
     expect(home.featured?.name).toBe('frontend-design');
-    expect(home.total).toBe(78);
+    expect(home.total).toBe(77);
     expect(home.shelves.map((s) => s.key)).toEqual([
       'added',
       'seed:claude-plugins-official',
@@ -252,6 +307,14 @@ describe('a connector’s route', () => {
     expect(connectorName({ copyText: 'claude mcp add --transport http --scope user my_server https://x', slug: 'other', name: 'X' })).toBe('my_server');
     expect(connectorName({ copyText: null, slug: 'has space', name: 'Google Drive' })).toBe('google-drive');
     expect(connectorName({ copyText: null, slug: null, name: 'Salesforce - Beta' })).toBe('salesforce-beta');
+  });
+
+  it('offers a server’s fixed choice of URLs; one with no URL, pattern or choice is not a connector', () => {
+    const server = (remote: Record<string, unknown>) => ({ id: `s-${Object.keys(remote).join('-')}`, type: 'remote', name: 'Regional', display_name: 'Regional', works_with: ['claude-code'], remote: { transport: 'streamable-http', auth_posture: 'auth_required', ...remote } });
+    const parsed = parseSource('directory:servers', [{ servers: [server({ url: null, url_regex: null, url_options: [{ url: 'https://eu.example.com/mcp', label: 'EU', description: 'Data in the EU' }, { url: 'https://us.example.com/mcp', label: 'US' }, { label: 'no url' }] }), server({ url: '', url_regex: '' })], next_cursor: null }]);
+    const items = buildCatalog({ network: networkData(new Map([['directory:servers', parsed]])), engine: null, tests: [] });
+    expect(items).toHaveLength(1);
+    expect(items[0]!.install).toEqual({ kind: 'connector', name: 'regional', url: null, urlPattern: null, urlOptions: [{ url: 'https://eu.example.com/mcp', label: 'EU', description: 'Data in the EU' }, { url: 'https://us.example.com/mcp', label: 'US', description: null }], transport: 'http', authPosture: 'auth_required' });
   });
 });
 

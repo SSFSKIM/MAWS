@@ -1,8 +1,12 @@
 // One item per thing (docs/doperpowers/specs/2026-10-24-plugin-aggregator-design.md, Design "One item per thing",
 // "Normalising", "Publisher chain", "Categories"): the listings that point at the same code become one CatalogItem.
 // - Routes: every listing's (marketplace, entry), one per pair, in route precedence (sources.ts `routeRank`: present
-//   marketplaces first); the first is the item's `install`, the rest "Also listed by". A directory plugin no route reaches
-//   is shown with its documentation and the reason, never with +.
+//   marketplaces first); the first is the item's `install`, the rest "Also listed by". A route the item is installed
+//   through comes first whatever its rank (here before elsewhere): it is the one that updates or removes it, and a second
+//   install through another marketplace would be the same code twice. A directory plugin no route reaches is shown with
+//   its documentation and the reason, never with +.
+// - At an ambiguous place (one source lists several entries there, normalize.ts), a directory record joins the entry of
+//   its engine name, and the contents are the routes' own: the record describes the whole repository.
 // - Metadata precedence: the directory's record (tier, publisher, categories, components, icon), plugin-details for an
 //   official plugin's counts, contents and date, the host's read of a clone (or a test source's of its folder), then the
 //   manifest entry, each in route order.
@@ -10,7 +14,7 @@
 //   in another project.
 import type { CatalogItem } from '@shared/ipc/schema/catalog';
 import { repositoryLocation } from '@shared/plugins/source-key';
-import { connectorRoute, knownFromDetail, knownFromDirectory, pluginListings, type EngineView, type EntryListing, type Known, type TestSourceData } from './normalize';
+import { connectorRoute, directoryEntryName, identityOf, knownFromDetail, knownFromDirectory, pluginListings, type EngineView, type EntryListing, type Known, type TestSourceData } from './normalize';
 import type { DirectoryPlugin, NetworkData } from './records';
 import { DIRECTORY_MARKETPLACE, OFFICIAL, ownershipOf } from './sources';
 
@@ -29,6 +33,8 @@ function installedState(ids: ReadonlySet<string>, engine: EngineView | null): Ca
   if (rows.some((row) => (row.scope === 'project' || row.scope === 'local' ? row.coversHere : true))) return 'here';
   return rows.length > 0 ? 'elsewhere' : 'no';
 }
+const routeId = (l: EntryListing) => `${l.route.pluginName}@${l.route.marketplaceName}`;
+const INSTALLED_FIRST: Record<CatalogItem['installed'], number> = { here: 0, elsewhere: 1, no: 2 };
 
 function notInstallable(record: DirectoryPlugin, engine: EngineView | null): string {
   const why =
@@ -47,12 +53,16 @@ function notInstallable(record: DirectoryPlugin, engine: EngineView | null): str
 function pluginItem(identity: string, listed: readonly EntryListing[], records: readonly DirectoryPlugin[], input: CatalogInput): CatalogItem {
   const { network, engine } = input;
   const ordered = [...listed].sort((a, b) => a.route.rank - b.route.rank || a.route.marketplaceName.localeCompare(b.route.marketplaceName) || a.route.pluginName.localeCompare(b.route.pluginName));
-  const routes = ordered.filter((l, i) => ordered.findIndex((o) => o.route.marketplaceName === l.route.marketplaceName && o.route.pluginName === l.route.pluginName) === i);
+  const ranked = ordered.filter((l, i) => ordered.findIndex((o) => o.route.marketplaceName === l.route.marketplaceName && o.route.pluginName === l.route.pluginName) === i);
+  const state = (l: EntryListing) => INSTALLED_FIRST[installedState(new Set([routeId(l)]), engine)];
+  const routes = ranked.map((l, i) => ({ l, i, s: state(l) })).sort((a, b) => a.s - b.s || a.i - b.i).map(({ l }) => l);
   const chosen = routes[0] ?? null;
   const record = records[0] ?? null;
   const officialRoute = routes.find((l) => l.route.marketplaceName === OFFICIAL);
   const detail = officialRoute ? (network.details?.get(`${officialRoute.route.pluginName}@${OFFICIAL}`) ?? null) : null;
+  const own = identity.includes('?entry=') ? (chosen?.known ?? first(routes.map((l) => l.known))) : null;
   const known: Known | null =
+    own ??
     (record ? knownFromDirectory(record.components) : null) ??
     (detail?.components ? knownFromDetail(detail.components) : null) ??
     first(routes.filter((l) => l.knownBy === 'host').map((l) => l.known)) ??
@@ -80,7 +90,7 @@ function pluginItem(identity: string, listed: readonly EntryListing[], records: 
       : { kind: 'manual', docsUrl: record?.homepage ?? null, reason: record ? notInstallable(record, engine) : 'Not installable by this engine' },
     alsoListedBy: distinct(routes.slice(1).map((l) => l.route.marketplaceName)).filter((m) => m !== chosen?.route.marketplaceName),
     sources: distinct([...(record ? ['directory:plugins'] : []), ...(detail ? ['plugin-details'] : []), ...ordered.map((l) => l.source)]),
-    installed: installedState(new Set(routes.map((l) => `${l.route.pluginName}@${l.route.marketplaceName}`)), engine),
+    installed: installedState(new Set(routes.map(routeId)), engine),
   };
 }
 
@@ -88,8 +98,12 @@ function pluginItem(identity: string, listed: readonly EntryListing[], records: 
 export function buildCatalog(input: CatalogInput): CatalogItem[] {
   const groups = new Map<string, { listed: EntryListing[]; records: DirectoryPlugin[] }>();
   const group = (identity: string) => groups.get(identity) ?? groups.set(identity, { listed: [], records: [] }).get(identity)!;
-  for (const listing of pluginListings(input.network, input.engine, input.tests)) group(listing.identity).listed.push(listing);
-  for (const record of input.network.plugins ?? []) group(repositoryLocation(record.repository, record.path) ?? `directory:${record.id}`).records.push(record);
+  const { listings, ambiguous } = pluginListings(input.network, input.engine, input.tests);
+  for (const listing of listings) group(listing.identity).listed.push(listing);
+  for (const record of input.network.plugins ?? []) {
+    const place = repositoryLocation(record.repository, record.path);
+    group(place === null ? `directory:${record.id}` : identityOf(place, directoryEntryName(record.name), DIRECTORY_MARKETPLACE, ambiguous)).records.push(record);
+  }
 
   const items = [...groups].map(([identity, { listed, records }]) => pluginItem(identity, listed, records, input));
   const configured = new Set(input.engine?.servers ?? []);

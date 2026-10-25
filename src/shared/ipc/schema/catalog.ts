@@ -24,8 +24,9 @@ export const PluginRouteSchema = z.strictObject({
 export const ConnectorRouteSchema = z.strictObject({
   kind: z.literal('connector'),
   name: z.string(), // the engine-legal name the sheet proposes
-  url: z.string().nullable(), // null when the server takes an instance URL
+  url: z.string().nullable(), // null when the server takes an instance URL or offers a choice
   urlPattern: z.string().nullable(), // the directory's url_regex
+  urlOptions: z.array(z.strictObject({ url: z.string(), label: z.string(), description: z.string().nullable() })), // the directory's url_options: a fixed choice of URLs (regional endpoints); empty when none
   transport: z.enum(['http', 'sse']),
   authPosture: z.enum(['auth_required', 'no_auth']),
 });

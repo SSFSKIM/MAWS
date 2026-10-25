@@ -2,8 +2,10 @@
 // (store.ts), the engine's reads per cwd (engine-reads.ts) and the test sources joined into one list per cwd, served over
 // `catalog.*`. The catalog is the person's: no engine tool, prompt or session context carries it.
 // - `catalog.changed` fires once per refresh that changed anything and once per engine-read invalidation
-//   (`plugins.changed`, and Refresh, which reads the engine again).
-// - A cwd's built catalog is kept until the network data or the engine's reads move.
+//   (`plugins.changed`; a change the watch of the engine's plugin state sees, state-watch.ts; and Refresh, which reads
+//   the engine again).
+// - A cwd's built catalog is kept until the network data or the engine's reads move, under the revision of the reads it
+//   was built from: a read that an invalidation overtook is read again, never kept under the newer revision.
 import { dirname, join } from 'node:path';
 import type { CatalogItem } from '@shared/ipc/schema/catalog';
 import { ipcError } from '@shared/ipc/errors';
@@ -11,6 +13,7 @@ import type { EventPayload } from '@shared/ipc/schema';
 import { readMarketplaceManifest } from '../../engine-host/plugins/manifest';
 import { CommandFailure, type registerMainHandler } from '../ipc/router';
 import { EngineReads, type HostCall } from './engine-reads';
+import { StateWatch, type WatchFn } from './state-watch';
 import { catalogPages, NETWORK_KEYS } from './fetch';
 import { buildCatalog } from './join';
 import type { TestSourceData } from './normalize';
@@ -27,7 +30,10 @@ export interface CatalogDeps {
   env: Record<string, string | undefined>;
   userAgent: string; // MAWS and its version
   log?: (line: string) => void;
+  watch?: WatchFn; // the engine state watch's fs.watch (tests)
 }
+
+const READ_ATTEMPTS = 3; // a read overtaken by an invalidation this many times in a row answers what it has, uncached
 
 export interface Catalog {
   /** One cwd's catalog now (null: the user configuration). */
@@ -40,22 +46,9 @@ export function startCatalog(deps: CatalogDeps): Catalog {
   const store = new CatalogStore({ dir: join(deps.userData, 'catalog'), keys: NETWORK_KEYS, pages: catalogPages(deps.env, deps.userAgent), log });
   const reads = new EngineReads(deps.call, log);
   const built = new Map<string, { revision: string; items: CatalogItem[] }>();
-  const revision = () => `${store.revision}.${reads.generation}`;
   let tests: Promise<TestSourceData[]> | null = null;
   const testData = () =>
     (tests ??= Promise.all(testSources(deps.env).map(async (source) => ({ source, manifest: await readMarketplaceManifest(dirname(dirname(source.manifestPath))) }))));
-
-  async function items(cwd: string | null): Promise<CatalogItem[]> {
-    await store.ready();
-    const [engine, test] = await Promise.all([reads.view(cwd), testData()]);
-    const key = cwd ?? '';
-    const now = revision();
-    const kept = built.get(key);
-    if (kept?.revision === now) return kept.items;
-    const fresh = buildCatalog({ network: store.data(), engine, tests: test });
-    built.set(key, { revision: now, items: fresh });
-    return fresh;
-  }
 
   const changed = () => void deps.emit('catalog.changed', {});
   const offStore = store.onChange(changed);
@@ -63,11 +56,40 @@ export function startCatalog(deps: CatalogDeps): Catalog {
     reads.invalidate();
     changed();
   });
+  // an outside change to the engine's plugin state: the configuration's forgets every view, a project's its own
+  const watch = new StateWatch({
+    onChange: (scope) => {
+      reads.invalidate(scope === 'all' ? undefined : scope);
+      changed();
+    },
+    watch: deps.watch,
+  });
+
+  // One cwd's catalog and the revision it was built under: the store's and the engine reads' generation at the time the
+  // view was asked for. A view an invalidation overtook while it was read is read again.
+  async function catalogOf(cwd: string | null): Promise<{ revision: string; items: CatalogItem[] }> {
+    await store.ready();
+    const key = cwd ?? '';
+    for (let attempt = 1; ; attempt += 1) {
+      const generation = reads.generation;
+      const [engine, test] = await Promise.all([reads.view(cwd), testData()]);
+      const current = generation === reads.generation;
+      if (!current && attempt < READ_ATTEMPTS) continue;
+      watch.sync(reads.places());
+      const revision = `${store.revision}.${generation}`; // the store's data is read now, synchronously, under this revision
+      const kept = built.get(key);
+      if (kept?.revision === revision) return kept;
+      const fresh = { revision, items: buildCatalog({ network: store.data(), engine, tests: test }) };
+      if (current) built.set(key, fresh);
+      return fresh;
+    }
+  }
+  const items = async (cwd: string | null) => (await catalogOf(cwd)).items;
 
   deps.register('catalog.home', async ({ tab, cwd }) => homeOf(await items(cwd), tab));
   deps.register('catalog.query', async (input) => {
-    const all = await items(input.cwd);
-    return queryOf(all, input, revision());
+    const { revision, items: all } = await catalogOf(input.cwd);
+    return queryOf(all, input, revision);
   });
   deps.register('catalog.item', async ({ id, cwd }) => {
     const item = (await items(cwd)).find((i) => i.id === id);
@@ -91,6 +113,7 @@ export function startCatalog(deps: CatalogDeps): Catalog {
     stop() {
       offStore();
       offPlugins();
+      watch.close();
     },
   };
 }
