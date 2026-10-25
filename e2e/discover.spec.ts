@@ -26,7 +26,9 @@
 //              model the same tool list, as one started before; nothing of the catalog reaches the model. Each session
 //              runs one turn against a loopback stand-in for the relay (support/model-stub.ts): no spend (acceptance
 //              12's e2e half, M5; its unit half is src/main/catalog/agents.test.ts).
-// The detail and the install sheet are attached as screenshots beside the home's (M5, for the owner's references).
+// The detail, the install sheet and the add-then-install sheet are attached as screenshots beside the home's (M5, for
+// the owner's references), each sheet as it opens: its commands and files behind a closed Details (the owner's ruling,
+// 2026-10-25).
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -101,9 +103,20 @@ async function openCard(page: Page, card: Locator): Promise<void> {
   await page.keyboard.press('Enter');
 }
 
+// A sheet's Details: the exact commands and the files they write (the owner's ruling, 2026-10-25).
+const details = (s: Locator) => s.getByRole('button', { name: 'Details', exact: true });
+async function openDetails(s: Locator): Promise<void> {
+  if ((await details(s).getAttribute('aria-expanded')) === 'false') await details(s).click();
+  await expect(details(s)).toHaveAttribute('aria-expanded', 'true');
+  await expect(s.locator('[data-plugins-argv]')).toBeVisible();
+}
+
+// The sheet once plugins.env answered: its commands and files behind Details, which every opening shows closed.
 async function sheetFor(page: Page, card: Locator, name: string): Promise<Locator> {
   await card.getByRole('button', { name: `Add ${name}`, exact: true }).click();
-  await expect(sheet(page).locator('[data-plugins-argv]')).toBeVisible({ timeout: 30_000 });
+  await expect(details(sheet(page))).toBeVisible({ timeout: 30_000 });
+  await expect(details(sheet(page))).toHaveAttribute('aria-expanded', 'false');
+  await expect(sheet(page).locator('[data-plugins-argv]')).toHaveCount(0);
   return sheet(page);
 }
 
@@ -112,7 +125,15 @@ async function cancel(s: Locator): Promise<void> {
   await expect(s).toBeHidden();
 }
 
-const argvOf = async (s: Locator, attribute: 'data-plugins-argv' | 'data-plugins-add-argv') => JSON.parse((await s.locator(`[${attribute}]`).getAttribute(attribute))!) as string[];
+async function argvOf(s: Locator, attribute: 'data-plugins-argv' | 'data-plugins-add-argv'): Promise<string[]> {
+  await openDetails(s);
+  return JSON.parse((await s.locator(`[${attribute}]`).getAttribute(attribute))!) as string[];
+}
+// The add step's command, behind Details: there while the engine lacks the marketplace, absent once it has it.
+async function expectAddSteps(s: Locator, count: 0 | 1): Promise<void> {
+  await openDetails(s);
+  await expect(s.locator('[data-plugins-add-argv]')).toHaveCount(count);
+}
 
 // Every item of a tab, paged through catalog.query as Discover's All is.
 async function allItems(page: Page, input: { tab: 'plugins' | 'skills' | 'connectors'; cwd: string | null }) {
@@ -145,7 +166,8 @@ async function addMarketplace(page: Page, source: string, name: string): Promise
   await dialog.getByRole('textbox', { name: 'Source' }).fill(source);
   await dialog.getByRole('button', { name: 'Add', exact: true }).click();
   const add = page.locator('[data-plugins-sheet="marketplace-add"]');
-  await expect(add.locator('[data-plugins-argv]')).toBeVisible({ timeout: 30_000 });
+  await expect(details(add)).toBeVisible({ timeout: 30_000 });
+  await openDetails(add);
   await add.getByRole('button', { name: 'Add', exact: true }).click();
   await expect(dialog.locator('[data-marketplace-add-line]')).toContainText(`Successfully added marketplace: ${name}`, { timeout: CLI_MS });
   await dialog.getByRole('button', { name: 'Done' }).click();
@@ -158,7 +180,8 @@ async function removeMarketplace(page: Page, name: string): Promise<void> {
   await manage.locator(`[data-marketplace-row="${name}"]`).getByRole('button', { name: /^More actions for / }).click();
   await page.getByRole('menuitem', { name: 'Remove…', exact: true }).click();
   const remove = page.locator('[data-plugins-sheet="marketplace-remove"]');
-  await expect(remove.locator('[data-plugins-argv]')).toBeVisible({ timeout: 30_000 });
+  await expect(details(remove)).toBeVisible({ timeout: 30_000 });
+  await openDetails(remove);
   const acknowledge = remove.getByRole('checkbox', { name: 'I understand' });
   if ((await acknowledge.count()) > 0) await acknowledge.check();
   await remove.getByRole('button', { name: 'Remove', exact: true }).click();
@@ -378,13 +401,13 @@ test('install: + adds the marketplace and installs through the real CLI; warning
     const card = () => results(page).locator(`[data-catalog-card="${id}"]`);
     await searchAfresh(page, 'skills-only');
     let s = await sheetFor(page, card(), 'skills-only');
-    await expect(s.locator('[data-plugins-add-argv]')).toHaveCount(1);
+    await expectAddSteps(s, 1);
     await cancel(s);
     await addMarketplace(page, marketplace, TEST_MARKETPLACE);
     await expect.poll(present, { timeout: CLI_MS }).toBe(true);
     await searchAfresh(page, 'skills-only'); // the same page: Discover was never left
     s = await sheetFor(page, card(), 'skills-only');
-    await expect(s.locator('[data-plugins-add-argv]')).toHaveCount(0);
+    await expectAddSteps(s, 0);
     await expect(s.locator('[data-catalog-summary]')).toHaveText(`Installs skills-only from ${TEST_MARKETPLACE}`);
     await expect(s.locator('[data-catalog-contents]')).toHaveText('Comes with: 2 skills');
     await cancel(s);
@@ -392,7 +415,7 @@ test('install: + adds the marketplace and installs through the real CLI; warning
     await expect.poll(present, { timeout: CLI_MS }).toBe(false);
     await searchAfresh(page, 'skills-only');
     s = await sheetFor(page, card(), 'skills-only');
-    await expect(s.locator('[data-plugins-add-argv]')).toHaveCount(1);
+    await expectAddSteps(s, 1);
     await expect(s.locator('[data-catalog-summary]')).toHaveText(`Adds the marketplace ${TEST_MARKETPLACE} (user) and installs skills-only`);
     await cancel(s);
   });
@@ -403,10 +426,11 @@ test('install: + adds the marketplace and installs through the real CLI; warning
     await expect(s.locator('[data-catalog-summary]')).toHaveText(`Adds the marketplace ${TEST_MARKETPLACE} (user) and installs hooked`);
     await expect(s.locator('[data-catalog-contents]')).toHaveText('Comes with: hooks');
     await expect(s.locator('[data-runs-code]')).toHaveText('Includes components that run code on your computer: hooks.');
+    await expect(s.getByRole('radio', { name: 'User' })).toBeChecked();
+    await shot(page, test.info(), 'discover-add-then-install-sheet-1280x820.png'); // as it opens: Details closed
     expect(await argvOf(s, 'data-plugins-add-argv')).toEqual(expect.arrayContaining(['plugin', 'marketplace', 'add', marketplace, '--scope', 'user']));
     const install = await argvOf(s, 'data-plugins-argv');
     expect(install.slice(0, 3)).toEqual(['plugin', 'install', `hooked@${TEST_MARKETPLACE}`]);
-    await shot(page, test.info(), 'discover-install-sheet-1280x820.png');
     await s.getByRole('button', { name: 'Install', exact: true }).click();
     await expect(s).toBeHidden();
     await expect(byName(results(page), 'hooked')).toHaveAttribute('data-installed', 'here', { timeout: 2 * CLI_MS });
@@ -429,9 +453,10 @@ test('install: + adds the marketplace and installs through the real CLI; warning
   await test.step('the marketplace now present: local-server installs in one step', async () => {
     await searchAfresh(page, 'local-server');
     const s = await sheetFor(page, byName(results(page), 'local-server'), 'local-server');
-    await expect(s.locator('[data-plugins-add-argv]')).toHaveCount(0);
     await expect(s.locator('[data-catalog-summary]')).toHaveText(`Installs local-server from ${TEST_MARKETPLACE}`);
     await expect(s.locator('[data-runs-code]')).toContainText('a local MCP server');
+    await shot(page, test.info(), 'discover-install-sheet-1280x820.png'); // as it opens: Details closed
+    await expectAddSteps(s, 0);
     await cancel(s);
   });
 
@@ -463,7 +488,7 @@ test('install: + adds the marketplace and installs through the real CLI; warning
     await expect(theirs).toContainText('by MAWS e2e servers');
     await expect(theirs.locator('[data-trust]')).toHaveAttribute('data-trust', 'Added by you');
     const s = await sheetFor(page, theirs, 'local-server');
-    await expect(s.locator('[data-plugins-add-argv]')).toHaveCount(0); // the engine has it now
+    await expectAddSteps(s, 0); // the engine has it now
     await expect(s.locator('[data-runs-code]')).toContainText('a local MCP server');
     await cancel(s);
     await searchAfresh(page, 'skills-only'); // its skills, from the same read

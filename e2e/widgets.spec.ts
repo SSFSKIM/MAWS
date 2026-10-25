@@ -245,7 +245,19 @@ async function detailUninstall(detail: Locator): Promise<void> {
   await detail.page().getByRole('menuitem', { name: 'Uninstall…', exact: true }).click();
 }
 const sheetOf = (page: Page, action: string) => page.locator(`[data-plugins-sheet="${action}"]`);
-const argvOf = async (sheet: Locator) => JSON.parse((await sheet.locator('[data-plugins-argv]').getAttribute('data-plugins-argv')) ?? 'null') as string[];
+// The commands and the files they write sit behind a sheet's Details, closed at every opening (the owner's ruling,
+// 2026-10-25); the second sheet, for a marketplace-declared command, has none: its command is in view.
+const detailsOf = (sheet: Locator) => sheet.getByRole('button', { name: 'Details', exact: true });
+async function openDetails(sheet: Locator): Promise<void> {
+  await expect(sheet.locator('[data-plugins-details], [data-plugins-argv]').first()).toBeVisible(); // plugins.env answered
+  const details = detailsOf(sheet);
+  if ((await details.count()) > 0 && (await details.getAttribute('aria-expanded')) === 'false') await details.click();
+  await expect(sheet.locator('[data-plugins-argv]')).toBeVisible();
+}
+const argvOf = async (sheet: Locator) => {
+  await openDetails(sheet);
+  return JSON.parse((await sheet.locator('[data-plugins-argv]').getAttribute('data-plugins-argv')) ?? 'null') as string[];
+};
 // A row's own status line (the widget holds several).
 const lineOf = (row: Locator) => row.getByRole('status');
 // P4-AGG Decision Log 10: `/plugins` finds new plugins through Open Discover, which closes it and opens Customize ›
@@ -1058,6 +1070,9 @@ test.describe('plugin management (E8)', () => {
     await addOn(card);
     const sheet = sheetOf(page, 'install');
     await expect(sheet.getByRole('heading', { name: 'Install e8-probe@e8-scratch?' })).toBeVisible();
+    await expect(detailsOf(sheet)).toHaveAttribute('aria-expanded', 'false'); // as it opens: the command and the writes behind Details
+    await expect(sheet.locator('[data-plugins-argv]')).toHaveCount(0);
+    await expect(sheet.getByRole('list', { name: "The engine's CLI writes:" })).toHaveCount(0);
     const argv = await argvOf(sheet);
     expect(argv).toEqual(['plugin', 'install', 'e8-probe@e8-scratch', '--scope', 'user', '--json']);
     await expect(sheet.locator('[data-plugins-argv]')).toHaveText('claude plugin install e8-probe@e8-scratch --scope user --json');
@@ -1169,6 +1184,7 @@ test.describe('plugin management (E8)', () => {
     const toggle = enableSwitch(detail);
     await expect(toggle).toHaveAttribute('aria-checked', 'true');
     await toggle.click();
+    await openDetails(sheetOf(page, 'disable'));
     await expect(sheetOf(page, 'disable').getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem')).toHaveText([`${configHome(backend)}/settings.json`]);
     await confirm('disable', 'Disable', ['plugin', 'disable', id, '--scope', 'user', '--json']);
     await expect(opLineOf(detail)).toHaveText('Successfully disabled plugin: e8-tools (scope: user) · No running session to reload');
@@ -1239,6 +1255,8 @@ test.describe('plugin management (E8)', () => {
     const declared = sheetOf(page, 'install');
     await expect(declared.getByRole('heading', { name: 'Run the command e8-probe@e8-scratch declares?' })).toBeVisible();
     await expect(declared.locator('[data-plugins-declared]')).toHaveText('node ./scripts/setup.js');
+    await expect(declared.locator('[data-plugins-argv]')).toBeVisible(); // the command is the decision: in view, no Details
+    await expect(detailsOf(declared)).toHaveCount(0);
     const accepted = await argvOf(declared);
     expect(accepted).toEqual(['plugin', 'install', 'e8-probe@e8-scratch', '--scope', 'user', '--accept-command', sha256, '--json']);
     await declared.getByRole('button', { name: 'Run it' }).click();
@@ -1330,6 +1348,7 @@ test.describe('plugin management (E8)', () => {
     const w = await openDiscover(await openSessionPlugins(backend));
     await addOn(cardOf(w, 'e8-deps@e8-scratch'));
     const install = sheetOf(page, 'install');
+    await openDetails(install);
     await expect(install.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem')).toHaveText([`${home}/settings.json`, `${home}/plugins/installed_plugins.json`, `${home}/plugins/cache/e8-scratch/e8-deps/<version>/`, `${home}/plugins/cache/<any-marketplace>/<dependency>/`]);
     await expect(install).toContainText('and the cache directories of any dependencies the marketplace declares, from this or an allowlisted marketplace, each enabled in the settings file above');
     const shown = [await argvOf(install)];

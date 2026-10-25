@@ -187,6 +187,14 @@ async function sheetFor(page: Page, name: string): Promise<Locator> {
   return addSheet(page);
 }
 
+// A sheet's Details: the exact command and the file it changes (the owner's ruling, 2026-10-25), closed at every opening.
+const details = (sheet: Locator) => sheet.getByRole('button', { name: 'Details', exact: true });
+async function openDetails(sheet: Locator): Promise<void> {
+  await expect(details(sheet)).toBeVisible({ timeout: 30_000 }); // once plugins.env answered
+  if ((await details(sheet).getAttribute('aria-expanded')) === 'false') await details(sheet).click();
+  await expect(details(sheet)).toHaveAttribute('aria-expanded', 'true');
+}
+
 async function cancel(sheet: Locator): Promise<void> {
   await sheet.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(sheet).toBeHidden();
@@ -210,12 +218,19 @@ test('add: Linear from Discover through the connector sheet and the real CLI; th
     await expect(card.locator('[data-catalog-components]')).toHaveText('https://mcp.linear.app/mcp');
   });
 
-  await test.step('+ opens the sheet: the name linear, user scope, the exact command; Add runs it and the configuration has it', async () => {
+  await test.step('+ opens the sheet: the name linear, its URL and transport; behind Details, closed, the exact command at user scope and the file; Add runs it and the configuration has it', async () => {
     const sheet = await sheetFor(page, 'Linear');
     await expect(sheet.getByRole('textbox', { name: 'Name' })).toHaveValue('linear');
+    await expect(sheet.locator('[data-connector-url]')).toHaveText('https://mcp.linear.app/mcp');
+    await expect(sheet.locator('[data-plugins-sheet-body]')).toContainText('Transport: HTTP (streamable)');
+    await expect(details(sheet)).toBeVisible({ timeout: 30_000 });
+    await expect(details(sheet)).toHaveAttribute('aria-expanded', 'false');
+    await expect(sheet.locator('[data-plugins-argv]')).toHaveCount(0);
+    await expect(sheet.locator('[data-connector-writes]')).toHaveCount(0);
+    await test.info().attach('discover-connector-sheet-1280x820.png', { body: await page.screenshot(), contentType: 'image/png' }); // M5: beside the owner's references, as it opens
+    await openDetails(sheet);
     await expect(sheet.locator('[data-plugins-argv]')).toHaveAttribute('data-plugins-argv', JSON.stringify(['mcp', 'add', '--transport', 'http', 'linear', 'https://mcp.linear.app/mcp', '--scope', 'user']));
     await expect(sheet.locator('[data-connector-writes]')).toHaveText(configFile);
-    await test.info().attach('discover-connector-sheet-1280x820.png', { body: await page.screenshot(), contentType: 'image/png' }); // M5: beside the owner's references
     await sheet.getByRole('button', { name: 'Add', exact: true }).click();
     await expect(sheet).toBeHidden();
     await expect(pane(page).locator(`[data-catalog-card="${LINEAR}"]`).first()).toHaveAttribute('data-installed', 'here', { timeout: CLI_MS });
@@ -261,6 +276,7 @@ test('add: Linear from Discover through the connector sheet and the real CLI; th
     await expect(row(page, 'linear').locator('[data-sign-in-state]')).toHaveText('Sign in needed');
     await row(page, 'linear').getByRole('button', { name: 'Remove linear' }).click();
     const sheet = page.locator('[data-plugins-sheet="mcp-remove"]');
+    await openDetails(sheet);
     await expect(sheet.locator('[data-plugins-argv]')).toHaveAttribute('data-plugins-argv', JSON.stringify(['mcp', 'remove', 'linear', '--scope', 'user']));
     await sheet.getByRole('checkbox').check();
     await sheet.getByRole('button', { name: 'Remove', exact: true }).click();

@@ -410,9 +410,11 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
       await supabase.locator('[data-catalog-add]').click();
       const sheet = page.locator('[data-plugins-sheet="install"]');
       await sheet.getByRole('radio', { name: 'Project' }).check();
+      await expect(sheet.getByRole('button', { name: 'Details', exact: true })).toBeVisible({ timeout: 30_000 }); // plugins.env answered
+      await shot('discover-install-sheet'); // as it opens: the command behind a closed Details (the owner's ruling, 2026-10-25)
+      await sheet.getByRole('button', { name: 'Details', exact: true }).click();
       const argv = await sheet.locator('[data-plugins-argv]').innerText();
       scratch.log(`sheet: ${argv}`);
-      await shot('discover-install-sheet');
       await sheet.getByRole('button', { name: 'Install', exact: true }).click();
       await expect(supabase).toHaveAttribute('data-installed', 'here', { timeout: 120_000 });
       // the session is running since Refresh, so E8's reload of the running sessions follows the install before its result

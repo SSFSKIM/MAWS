@@ -148,7 +148,8 @@ test('live: the real sources counted twice; a directory plugin installed and uni
     await expect(card).toHaveCount(1, { timeout: 60_000 });
     await card.getByRole('button', { name: `Add ${DIRECTORY_PLUGIN}`, exact: true }).click();
     const install = sheet(page, 'install');
-    await expect(install.locator('[data-plugins-argv]')).toBeVisible({ timeout: 30_000 });
+    await install.getByRole('button', { name: 'Details', exact: true }).click({ timeout: 30_000 }); // the commands sit behind it (the owner's ruling, 2026-10-25)
+    await expect(install.locator('[data-plugins-argv]')).toBeVisible();
     await expect(install.locator('[data-plugins-add-argv]')).toHaveCount(0); // the engine's own marketplace, always present
     expect(JSON.parse((await install.locator('[data-plugins-argv]').getAttribute('data-plugins-argv'))!)).toEqual(expect.arrayContaining(['plugin', 'install', DIRECTORY_ID]));
     await install.getByRole('button', { name: 'Install', exact: true }).click();

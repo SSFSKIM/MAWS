@@ -271,7 +271,9 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
     const before = scratch.tree();
     await open();
     const sheet = sheetOf(page, spec.sheet);
-    await expect(sheet.locator('[data-plugins-argv]')).toBeVisible({ timeout: 30_000 });
+    // the command and the writes sit behind Details, closed as the sheet opens (the owner's ruling, 2026-10-25)
+    await sheet.getByRole('button', { name: 'Details', exact: true }).click({ timeout: 30_000 });
+    await expect(sheet.locator('[data-plugins-argv]')).toBeVisible();
     const argv = await sheet.locator('[data-plugins-argv]').innerText();
     const writes = await sheet.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem').allInnerTexts();
     const then = /Reloads plugins in \d+ running sessions?|No running session to reload|Nothing to reload[^\n]*/.exec(await sheet.innerText())?.[0] ?? null;
