@@ -249,7 +249,7 @@ const argvOf = async (sheet: Locator) => JSON.parse((await sheet.locator('[data-
 // A row's own status line (the widget holds several).
 const lineOf = (row: Locator) => row.getByRole('status');
 // P4-AGG Decision Log 10: `/plugins` finds new plugins through Open Discover, which closes it and opens Customize ›
-// Plugins › Discover for the session's project: main's catalog over the engine's reads (the stub's here; under
+// Plugins › Discover for the session's directory: main's catalog over the engine's reads (the stub's here; under
 // MAWS_E2E the network sources are offline), whose cards install through E8's sheet. Customize is the product window's,
 // so the cases through Discover run there (`appBackend`, `openSessionPlugins`); the harness page has no main area. The
 // Add menu's two marketplace dialogs are sheets beside the frame under which E8's confirm sheet stacks.

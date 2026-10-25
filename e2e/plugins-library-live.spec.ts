@@ -28,6 +28,7 @@ import { launchMaws } from './support/launch';
 import { cappedEngine, capWords } from './support/live-budget';
 import { promptsEnded, sessionJournal, writtenPrompts } from './support/live-turns';
 import { pluginsLiveSkipReason, pluginsScratch, type PluginsScratch } from './support/plugins-live';
+import { mainTab } from './support/shell';
 import { newChatIn } from './support/sidebar';
 
 const skip = pluginsLiveSkipReason();
@@ -126,6 +127,15 @@ async function send(page: Page, text: string): Promise<void> {
   await composer(page).click();
   await page.keyboard.insertText(text);
   await page.keyboard.press('Enter');
+}
+// Back to the session after Discover: Open Discover leaves Customize the main tab, and the embedded library has no Close,
+// so the composer steps close Customize's tab first (none open: nothing to do).
+async function backToSession(page: Page): Promise<void> {
+  const customize = mainTab(page, /^Customize/);
+  if ((await customize.count()) === 0) return;
+  await customize.getByRole('button', { name: /^Close / }).click();
+  await expect(customize).toHaveCount(0);
+  await expect(composer(page)).toBeVisible();
 }
 async function openWidget(page: Page, name: string): Promise<Locator> {
   await closeWidgets(page);
@@ -367,7 +377,7 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
     });
 
     // P4-AGG Decision Log 10: new plugins are found in Discover; `/plugins`' Open Discover opens Customize › Plugins ›
-    // Discover for the session's project. Its counts are the catalog's (plugin-details for official plugins), so the
+    // Discover for the session's directory. Its counts are the catalog's (plugin-details for official plugins), so the
     // CLI's count is logged beside the card's rather than required equal.
     await step('discover', 'Open Discover from /plugins: counts on official cards, none on a directory-only card; supabase Installed in another project, installed here', async () => {
       if (!needsCatalogue()) return;
@@ -422,6 +432,10 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
       scratch.log(`Manage marketplaces: ${(await manage.innerText()).replaceAll('\n', ' · ')}`);
       await bothThemes('manage');
       await manage.getByRole('button', { name: 'Done' }).click();
+    });
+
+    await step('back', 'Close Customize’s tab: the session is the main tab again, its composer shown', async () => {
+      await backToSession(page);
     });
 
     await step('skills', '/skills: p2b-project and frontend-design’s skill under In this project, p2b-user under Created by you; Use in chat inserts and sends nothing', async () => {

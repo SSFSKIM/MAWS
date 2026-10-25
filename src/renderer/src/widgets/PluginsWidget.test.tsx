@@ -604,7 +604,7 @@ describe('plugins widget: loaded in this session and the reloads', () => {
 });
 
 describe('plugins widget: management', () => {
-  it('lists installed plugins and reads no catalogue; Open Discover opens Customize › Plugins › Discover for the session’s project and closes', async () => {
+  it('lists installed plugins and reads no catalogue; Open Discover opens Customize › Plugins › Discover for the session’s directory, its project’s page here, and closes', async () => {
     const close = vi.fn();
     const project = 'project-e8' as ProjectId;
     useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]), projects: new Map([[project, projectRecord(project, 0, { directory: cwd })]]) });
@@ -628,13 +628,36 @@ describe('plugins widget: management', () => {
     expect(invoked('catalog.home')).toEqual([]);
     fireEvent.click(screen.getByRole('button', { name: 'Open Discover' }));
     expect(close).toHaveBeenCalledTimes(1);
-    expect(useCustomizeProject.getState().projectId).toBe(project);
+    expect(useCustomizeProject.getState()).toEqual({ projectId: project }); // the project whose directory it is
     expect(useDiscoverRequest.getState()).toEqual({ cwd }); // taken by the library showing that project's page
     // Customize's library for that page opens on Discover, mounted for the request
     render(discoverLibrary(new QueryClient({ defaultOptions: { queries: { retry: false } } })));
     await waitFor(() => expect(document.querySelector('[data-discover="plugins"]')).toBeTruthy());
     expect(useDiscoverRequest.getState()).toEqual({});
   });
+  // Decision Log 10: Discover for the session's exact directory, never its parent project nor the user configuration
+  for (const [where, directoryOf, owned] of [
+    ['a worktree of its project', (base: string) => join(base, '.claude', 'worktrees', 'feature'), true],
+    ['a directory no project owns', (base: string) => join(base, 'loose'), false],
+  ] as const) {
+    it(`Open Discover from a session in ${where} opens Customize for that directory itself`, () => {
+      const project = 'project-e8' as ProjectId;
+      const here = directoryOf(cwd);
+      useSessions.setState({
+        engine: new Map([[ID, { ...backend.status(ID), cwd: here }]]),
+        records: new Map([[ID, record(ID, { projectId: owned ? project : null, directory: here })]]),
+        projects: new Map([[project, projectRecord(project, 0, { directory: cwd })]]),
+      });
+      render(
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <PluginsWidget appSessionId={ID} args="" close={() => {}} />
+        </QueryClientProvider>,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Open Discover' }));
+      expect(useCustomizeProject.getState()).toEqual({ projectId: null, directory: here });
+      expect(useDiscoverRequest.getState()).toEqual({ cwd: here });
+    });
+  }
   it('Cancel on the confirm sheet runs nothing; a card’s + runs the argument list the sheet showed, at the scope chosen', async () => {
     useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
     render(discoverLibrary(new QueryClient({ defaultOptions: { queries: { retry: false } } }), ID));

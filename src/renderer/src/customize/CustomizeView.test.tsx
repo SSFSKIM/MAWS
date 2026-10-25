@@ -215,6 +215,27 @@ it('retains the engine-qualified invocation and Use in chat for the live Skills 
   expect(within(detail).getByRole('button', { name: 'Use in chat' })).toBeTruthy();
 });
 
+// P4-AGG Decision Log 10: `/plugins`' Open Discover hands Customize the session's exact directory. One no project has as
+// its directory (a worktree, a folder no project owns) is shown as itself, labelled by its path in the page's selector,
+// never as its parent project nor as the user configuration; choosing a page there leaves it.
+it('shows a session directory no project has as its directory as itself, its path in the selector, until a page is chosen', async () => {
+  const worktree = '/one/.claude/worktrees/feature';
+  backend.script('plugins.list', () => ({ plugins: [] }));
+  backend.script('marketplaces.list', () => ({ marketplaces: [] }));
+  backend.script('mods.list', () => []);
+  window.maws = backend.bridge();
+  useCustomizeProject.setState({ projectId: null, directory: worktree }, true);
+  mount('plugins');
+  const select = screen.getByRole('combobox', { name: 'Project' }) as HTMLSelectElement;
+  expect(select.selectedOptions[0]!.textContent).toBe(worktree);
+  await waitFor(() => expect(backend.calls.filter((call) => call.command === 'plugins.list').map((call) => (call.input as { cwd: string }).cwd)).toContain(worktree));
+  expect(backend.calls.filter((call) => call.command === 'plugins.list').map((call) => (call.input as { cwd: string }).cwd).filter((cwd) => cwd !== worktree)).toEqual([]);
+  await waitFor(() => expect(backend.calls.filter((call) => call.command === 'customization.inventory').map((call) => call.input)).toContainEqual({ cwd: worktree }));
+  fireEvent.change(select, { target: { value: P } });
+  expect(useCustomizeProject.getState()).toEqual({ projectId: P });
+  expect([...select.options].map((option) => option.textContent)).not.toContain(worktree);
+});
+
 it('opens the connector Manage footer for the composer project even when no session exists', async () => {
   const user = userEvent.setup();
   render(<PlusMenu cwd="/two" editor={{ current: null }} />);

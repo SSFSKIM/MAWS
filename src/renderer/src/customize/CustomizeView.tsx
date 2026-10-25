@@ -25,8 +25,10 @@ import { useLibraryStore } from '../widgets/plugins/library-store';
 import { McpBody, present } from '../widgets/McpWidget';
 import { useEngineRead } from '../widgets/read';
 import { LIBRARY, SKILLS_LIBRARY } from '../widgets/copy';
+import { homeAbbreviated } from '../tools/session-info/model';
 import { useCustomizeProject, type CustomizeSection } from './open';
 
+const DIRECTORY_PAGE = '\0directory'; // the selector's value for a directory page: no project id or '' can equal it
 const SECTIONS = { plugins: 'Plugins', skills: 'Skills', mcp: 'MCP servers' } as const;
 const BUTTON = 'rounded-sm px-2 py-1 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint';
 type Inventory = CommandOutput<'customization.inventory'>;
@@ -43,9 +45,11 @@ export function CustomizeView({ section }: { section: CustomizeSection }) {
   const engine = useSessions((s) => s.engine);
   const current = useLayout((s) => s.main.current);
   const chosen = useCustomizeProject((s) => s.projectId);
+  // a directory no project has as its own (Open Discover from a session there, Decision Log 10): the page is that directory
+  const directory = useCustomizeProject((s) => s.directory);
   const projectId = chosen === undefined ? (current === NO_PROJECT ? null : current) : chosen;
-  const project = projectId ? projects.get(projectId) : undefined;
-  const cwd = project?.directory ?? null;
+  const project = directory === undefined && projectId ? projects.get(projectId) : undefined;
+  const cwd = directory ?? project?.directory ?? null;
   const labels = useMemo(() => projectLabels([...projects.values()]), [projects]);
   // Attach only a ready process in exactly the chosen directory. Project membership alone would also match a worktree
   // with different local configuration. A page never acquires a session, including after an attached process exits.
@@ -63,7 +67,8 @@ export function CustomizeView({ section }: { section: CustomizeSection }) {
   });
   const selectSection = (next: string) => useLayout.getState().openTab({ kind: 'customize', section: next as CustomizeSection });
   const setProject = (value: string) => {
-    useCustomizeProject.setState({ projectId: value === '' ? null : value as ProjectId });
+    if (value === DIRECTORY_PAGE) return;
+    useCustomizeProject.setState({ projectId: value === '' ? null : value as ProjectId }, true);
     setPickedSession(null);
   };
   const liveScope = attached && <label className="flex min-w-0 max-w-full flex-wrap items-center gap-2 text-ui-sm text-fg-muted">
@@ -80,8 +85,9 @@ export function CustomizeView({ section }: { section: CustomizeSection }) {
       </Tabs.List>
       <label className="ml-auto flex min-w-0 max-w-full items-center gap-2 text-ui-sm text-fg-muted @max-sm/customize:ml-0 @max-sm/customize:w-full">
         <span className="shrink-0">Showing</span>
-        <select aria-label="Project" value={project?.id ?? ''} onChange={(event) => setProject(event.target.value)} className="max-w-64 min-w-0 rounded-sm border border-border bg-bg-raised px-2 py-1 text-ui text-fg outline-accent focus-visible:outline-2 @max-sm/customize:max-w-full @max-sm/customize:flex-1">
+        <select aria-label="Project" value={directory !== undefined ? DIRECTORY_PAGE : (project?.id ?? '')} onChange={(event) => setProject(event.target.value)} className="max-w-64 min-w-0 rounded-sm border border-border bg-bg-raised px-2 py-1 text-ui text-fg outline-accent focus-visible:outline-2 @max-sm/customize:max-w-full @max-sm/customize:flex-1">
           <option value="">User configuration</option>
+          {directory !== undefined && <option value={DIRECTORY_PAGE}>{homeAbbreviated(directory)}</option>}
           {[...projects.values()].sort((a, b) => a.name.localeCompare(b.name)).map((item) => <option key={item.id} value={item.id}>{labels.get(item.id)}</option>)}
         </select>
       </label>

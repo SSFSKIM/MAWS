@@ -1,7 +1,7 @@
 // `/plugins` (C11; E8 execution document, M2; P2-B execution document §5.2 to §5.9): the plugin library, Claude Desktop's
 // grouped plugin library as its 2.16120.0 bundle ships it, over E8's management through the engine's own CLI. A
 // library-sized dialog (X19) whose head carries the title and, at the left, Open Discover (P4-AGG Decision Log 10: new
-// plugins are found in Customize › Plugins › Discover, which it opens for the session's project) and, at the right, My
+// plugins are found in Customize › Plugins › Discover, which it opens for the session's directory) and, at the right, My
 // items' Search, Show and Sort, and the Add menu (Add marketplace, Manage marketplaces). Customize's embedded library has
 // the My items | Discover switch there instead. My items: the loaded line about this session, then one row per plugin in
 // Desktop's source groups. Selecting a row opens its detail in place of the list (§5.7): the list stays mounted beneath
@@ -14,7 +14,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { EngineSessionStatus } from '@shared/engine/status';
-import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandOutput } from '@shared/ipc/schema';
 import type { PluginManifestView } from '@shared/ipc/schema/plugins';
 import { useAvailability } from '../sessions/availability';
@@ -42,14 +42,6 @@ import { DISCOVER } from '../customize/discover/copy';
 import { DiscoverPane } from '../customize/discover/DiscoverPane';
 import { DiscoverToolbar } from '../customize/discover/DiscoverToolbar';
 import { openDiscover, takeDiscoverRequest, useDiscoverRequest } from '../customize/open';
-
-// The project `/plugins`' Open Discover shows: the one whose directory is the session's cwd, else the session's own,
-// else the user configuration.
-function projectOf(cwd: string | null, appSessionId: AppSessionId | null): ProjectId | null {
-  const { projects, records } = useSessions.getState();
-  const here = [...projects.values()].find((project) => project.directory === cwd);
-  return here?.id ?? (appSessionId === null ? null : (records.get(appSessionId)?.projectId ?? null));
-}
 
 // The sessions a change reloads: those with a ready process (the host's fan-out targets).
 const readyCount = (engine: ReadonlyMap<AppSessionId, EngineSessionStatus>): number => {
@@ -197,18 +189,20 @@ function LibraryBody({ cwd, session, presentation, discover }: { cwd: string | n
   const add = <AddMenu onOpen={setDialog} />;
   const toolbar = discover && tab === 'discover' ? <DiscoverToolbar tab="plugins" add={add} /> : showing ? null : <PluginsToolbar add={add} />;
   // the session's `/plugins` finds new plugins in Discover (Decision Log 10): Customize › Plugins › Discover for the
-  // session's project (the project whose directory is the session's cwd, else the session's own), the modal closed
+  // session's own directory (the CLI's cwd here), the modal closed; with no directory known there is nothing to open
   const heading = discover ? (
     <LibrarySwitch tab={tab} onChange={switchTo} second={DISCOVER.discover} />
   ) : (
     <button
       type="button"
       data-open-discover
+      disabled={cwd === null}
       onClick={() => {
+        if (cwd === null) return;
         if (presentation.variant === 'modal') presentation.close();
-        openDiscover(projectOf(cwd, appSessionId));
+        openDiscover(cwd);
       }}
-      className="inline-flex h-7 shrink-0 items-center rounded-md border border-border px-2.5 text-ui text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2"
+      className="inline-flex h-7 shrink-0 items-center rounded-md border border-border px-2.5 text-ui text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint"
     >
       {DISCOVER.openDiscover}
     </button>

@@ -3,7 +3,7 @@
 // /tmp whose config home the engine and its plugin CLI write (support/plugins-live.ts). A session is created through
 // "+" on a scratch repository and runs one turn so `system/init` reports its plugins; then, in `/plugins` (P2-B's
 // library: My items and the Add menu's Add marketplace and Manage marketplaces), Discover (P4-AGG Decision Log 10:
-// `/plugins`' Open Discover, Customize › Plugins › Discover for the session's project, where a plugin is found and +
+// `/plugins`' Open Discover, Customize › Plugins › Discover for the session's directory, where a plugin is found and +
 // installs it through the same sheet) and the panel, every management
 // action runs through its confirm sheet: the scratch folder marketplace added, one repository-source
 // marketplace added from GitHub and removed (network-dependent: a refusal is recorded, the folder case stays the gate),
