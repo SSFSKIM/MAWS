@@ -4,11 +4,11 @@ description: >-
   the checkout: pnpm from packageManager, Node 22 and the frozen install. Hosted Linux jobs cache the pnpm store and
   Electron's download by its version; the self-hosted runners (the macOS runner, ci-kit's pool) rely on their own disks
   and take pnpm through corepack, never pnpm/action-setup.
-  On Linux, e2e jobs get the virtual display, the CJK fonts and Electron's sandbox, and LibreOffice for the groups that
-  render documents through it.
+  Every lane applies .github/ci-kit.yml. On Linux, e2e jobs also lift Electron's sandbox restriction, and groups that
+  render documents through LibreOffice install it separately.
 inputs:
   e2e:
-    description: Install xvfb and the CJK fonts, and lift the apparmor restriction on unprivileged user namespaces.
+    description: Lift the apparmor restriction on unprivileged user namespaces for Electron's sandbox.
     default: 'false'
   libreoffice:
     description: Install LibreOffice Writer and Impress.
@@ -47,18 +47,17 @@ runs:
       with:
         path: ~/.cache/electron
         key: electron-${{ runner.os }}-${{ runner.arch }}-${{ steps.electron.outputs.version }}
-    # The Linux packages; a macOS runner carries its display and fonts, and LibreOffice there is the machine's own.
-    - if: runner.os == 'Linux' && (inputs.e2e == 'true' || inputs.libreoffice == 'true' || inputs.apt != '')
+    - uses: SSFSKIM/ci-kit/setup@v1
+      with:
+        install: 'true'
+    # Group-specific Linux packages; the declaration supplies every lane's common tools and macOS's LibreOffice.
+    - if: runner.os == 'Linux' && (inputs.libreoffice == 'true' || inputs.apt != '')
       shell: bash
       env:
-        E2E: ${{ inputs.e2e }}
         LIBREOFFICE: ${{ inputs.libreoffice }}
         APT: ${{ inputs.apt }}
       run: |
         read -ra packages <<<"$APT"
-        # Korean text; the faces the UI tokens name after the Mac's own (Inter after SF Pro, JetBrains Mono after SF Mono),
-        # so text sets in metrics close to the Mac's; zsh, the Mac's login shell, which the e2e jobs name in SHELL.
-        if [[ $E2E == true ]]; then packages+=(xvfb fonts-noto-cjk fonts-inter fonts-jetbrains-mono zsh); fi
         if [[ $LIBREOFFICE == true ]]; then packages+=(libreoffice-writer libreoffice-impress); fi
         # Only what is missing: ci-kit's pool image carries these, and apt there cost ~35 s a job (static, each unit
         # shard) and failed outright when the git-core PPA answered 503 (run 39630489726).
@@ -78,10 +77,3 @@ runs:
     - if: runner.os == 'Linux' && inputs.e2e == 'true'
       shell: bash
       run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-    # The recorded fixtures name paths under macOS's /private/tmp (where /tmp resolves there), which the e2e scenes
-    # recreate; a real directory, so a path under it keeps its recorded realpath.
-    - if: runner.os == 'Linux' && inputs.e2e == 'true'
-      shell: bash
-      run: sudo install -d -m 1777 /private/tmp
-    - shell: bash
-      run: pnpm install --frozen-lockfile
