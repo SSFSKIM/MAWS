@@ -138,6 +138,10 @@ describe('which session signs in', () => {
     expect(signInSessionOf('user', sessions, null, null)).toBe('a'); // the user configuration's page: main checks the session's own entries
   });
 
+  it('a server the session already had connected says so, not that a sign-in happened (scalpel-2#3)', () => {
+    expect(signInViewOf({ live: undefined, liveRead: null, posture: null, transport: 'http', last: event({ state: 'done', where: 'here', message: 'already connected' }) })).toEqual({ text: 'Already connected in that session', tone: 'success', signIn: false, cancel: false });
+  });
+
   it('a session that uses another entry of the name says so', () => {
     expect(signInViewOf({ live: undefined, liveRead: null, posture: null, transport: 'http', last: event({ state: 'failed', reason: 'other_entry', message: 'that session uses the local entry in /cfg/.claude.json' }) })!.text).toBe('Sign-in didn’t finish: that session uses the local entry in /cfg/.claude.json');
   });

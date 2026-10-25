@@ -5,7 +5,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectorSignInChanged } from '@shared/ipc/schema/connectors';
 import { listenLoopback } from './oauth-callback';
-import { createSignIn, startSignIn, type SignInDeps, type SignInHost } from './sign-in';
+import { ALREADY_CONNECTED, createSignIn, startSignIn, type SignInDeps, type SignInHost } from './sign-in';
 
 const SESSION = 'app-session-1';
 const GLOBAL = '/cfg/.claude.json';
@@ -126,6 +126,18 @@ describe('the sign-in operation', () => {
     expect(t.states(opId)).toEqual(['starting', 'waiting_browser', 'watching_status', 'done']);
     expect(t.last(opId).where).toBe('here');
     expect(t.host.asked.map((a) => a.name)).not.toContain('session.mcpOAuthCallback');
+  });
+
+  it('a connection that was already there is not this flow’s success: no consent is opened, and the end says it was already connected (scalpel-2#3)', async () => {
+    const t = make();
+    t.host.status.set('linear', 'connected'); // connected before the press
+    t.host.authenticate = () => ({ ok: true, answer: { authUrl: AUTH(null), requiresUserAction: true, callbackExpected: true, redirectScheme: 'localhost', state: 's', callbackPort: 5555 } });
+    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION });
+    await t.ended(opId);
+    expect(t.states(opId)).toEqual(['starting', 'done']);
+    expect(t.last(opId)).toMatchObject({ state: 'done', where: 'here', message: ALREADY_CONNECTED });
+    expect(t.opened).toEqual([]);
+    expect(t.host.asked.map((a) => a.name)).not.toContain('session.mcpAuthenticate');
   });
 
   it('localhost scheme: a server the status reports failed ends failed with the engine\'s words', async () => {

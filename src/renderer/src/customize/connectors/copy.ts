@@ -62,6 +62,7 @@ export const CONNECTORS = {
     submitting: 'Finishing sign-in…',
     watching_status: 'Waiting for the server to connect…',
   } satisfies Record<Step, string>,
+  alreadyConnected: 'Already connected in that session',
   signedIn: { here: 'Signed in · connected here', new_sessions: 'Signed in · available in new sessions' } as const,
   didntFinish: (why: string) => `Sign-in didn’t finish: ${why}`,
   reason: {

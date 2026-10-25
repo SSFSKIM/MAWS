@@ -18,6 +18,7 @@ import type { CatalogItem } from '@shared/ipc/schema/catalog';
 import type { CustomizationServer } from '@shared/ipc/schema/customization';
 import { isMcpName, isMcpUrl, PLUGINS_SCOPES, type PluginsScope } from '@shared/plugins/cli';
 import { patternCheck } from '@shared/plugins/connector-url';
+import { CONNECTOR_ALREADY_CONNECTED } from '@shared/ipc/schema/connectors';
 import { usedEntry } from '@shared/plugins/connector-precedence';
 import { requestFor, type PluginsRequest } from '../../widgets/plugins/present';
 import { trustOf } from '../discover/present';
@@ -161,7 +162,7 @@ export function signInViewOf({ live, liveRead, posture, last: record, transport 
     const last = record.event;
     switch (last.state) {
       case 'done':
-        return view(C.signedIn[last.where ?? 'here'], 'success', false);
+        return view(last.message === CONNECTOR_ALREADY_CONNECTED ? C.alreadyConnected : C.signedIn[last.where ?? 'here'], 'success', false);
       case 'cancelled':
         return view(C.didntFinish(C.cancelled), 'danger', true);
       case 'failed': {

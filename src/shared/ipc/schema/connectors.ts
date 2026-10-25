@@ -335,6 +335,9 @@ export const McpServerNameSchema = z.string().max(128).refine(isMcpName, 'letter
 export const McpServerUrlSchema = z.string().max(4096).refine(isMcpUrl, 'an http or https URL');
 const McpAt = { cwd: PluginsCwdSchema, binary: PluginsBinarySchema, name: McpServerNameSchema, scope: PluginsScopeSchema };
 export const CONNECTOR_SIGN_IN_STATES = ['starting', 'waiting_browser', 'waiting_callback', 'watching_status', 'submitting', 'done', 'failed', 'cancelled'] as const;
+// A `done` whose message is this: the session had the server connected before anything started, so no flow ran (fixB
+// scalpel-2#3); the row says so rather than that a sign-in happened.
+export const CONNECTOR_ALREADY_CONNECTED = 'already connected';
 export const CONNECTOR_SIGN_IN_REASONS = ['no_session', 'timeout', 'denied', 'engine', 'session_exited', 'other_entry'] as const; // other_entry: the session uses another entry of the name (its words in `message`)
 export const ConnectorSignInChangedSchema = z.strictObject({
   opId: z.string(),

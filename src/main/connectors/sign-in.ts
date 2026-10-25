@@ -4,7 +4,8 @@
 // at once and the steps arrive as `connectors.signInChanged`, because consent takes as long as the person takes and
 // every call into the engine host must answer within the supervisor's 10 s.
 //
-//   starting         the receipt is issued; MAWS's loopback listener (127.0.0.1, an ephemeral port, /callback) comes up
+//   starting         the receipt is issued; the session's status read first (a server it already has connected ends
+//                    done at once, its message ALREADY_CONNECTED, no flow started: scalpel-2#3); MAWS's loopback listener (127.0.0.1, an ephemeral port, /callback) comes up
 //                    and the engine is asked `mcp_authenticate` with it as the redirect URI (again, for up to CONFIG_MS,
 //                    while it answers "Server not found" for a server added before its config poll read it)
 //   waiting_browser  the engine answered an authorization URL; MAWS opens it in the system browser
@@ -34,7 +35,7 @@
 // store (./oauth-store.ts) is not involved. `mcp_set_servers` is never used (it drops the session's SDK server).
 import { randomUUID } from 'node:crypto';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
-import type { ConnectorSignInChanged } from '@shared/ipc/schema/connectors';
+import { CONNECTOR_ALREADY_CONNECTED, type ConnectorSignInChanged } from '@shared/ipc/schema/connectors';
 import { entryRefusal } from './sign-in-entry';
 import { OAUTH_CALLBACK_HOST, type ListenLoopback, type LoopbackListener, type LoopbackReply, type LoopbackRequest } from './oauth-callback';
 
@@ -46,6 +47,9 @@ export const SETTLE_MS = 15_000; // after an accepted custom callback: how long 
 export const CONFIG_MS = 10_000;
 const CONFIG_POLL_MS = 1_000;
 const NOT_READ_YET = /^Server not found: /;
+// scalpel-2#3: the end of a sign-in for a server the session already had connected before anything started: no flow is
+// started (no consent page opened), since a connection that was already there is no evidence of one.
+export const ALREADY_CONNECTED = CONNECTOR_ALREADY_CONNECTED;
 const REPLY_FLUSH_MS = 50; // the browser's page written before the listener closes
 
 type SignInCommand = 'session.mcpAuthenticate' | 'session.mcpOAuthCallback' | 'session.mcpReconnect' | 'session.mcpStatus' | 'customization.serverEndpoints';
@@ -211,6 +215,9 @@ export function createSignIn(deps: SignInDeps): SignIn {
     const refusal = await deps.check({ ...op.configuration, appSessionId: op.appSessionId });
     if (!live(op)) return;
     if (refusal !== null) return fail(op, 'other_entry', refusal);
+    const before = await serverOf(op); // the baseline: a connection already there is not this flow's
+    if (before === undefined || !live(op)) return;
+    if (before?.status === 'connected') return move(op, 'done', { where: 'here', message: ALREADY_CONNECTED });
     let expected: string | null = null; // the engine's state, once it answered
     let port = 0;
     let endWait = () => {}; // clears waiting_callback's deadline once the callback is taken
