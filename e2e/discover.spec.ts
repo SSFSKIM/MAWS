@@ -172,6 +172,7 @@ test('home: Featured, the shelves, All under Installs; the two desktop sizes; Se
       await expect(card).toContainText('by MAWS e2e');
       await expect(card.locator('[data-catalog-components]')).not.toHaveText('Contents shown after install');
     }
+    await expect(byName(results(page), 'hooked')).toContainText('A plugin whose one component is a hook.'); // its manifest entry's description, before the add
     await pane(page).getByRole('button', { name: 'Remove filter Your sources' }).click();
     await expect(pane(page).locator('[data-filter-chip]')).toHaveCount(0);
   });
@@ -333,6 +334,7 @@ test('install: + adds the marketplace and installs through the real CLI; warning
     await expect(skills.locator('[data-skills-note]')).toHaveText('Items whose contents are not known before install are under Plugins.');
     await search(page, 'skills-only');
     const card = byName(results(page, skills), 'skills-only');
+    await expect(card.locator('[data-catalog-components]')).toHaveText('greet, summarize-diff'); // a Skills card lists its skills
     await card.getByRole('button', { name: 'Add skills-only', exact: true }).click();
     await expect(sheet(page).locator('[data-catalog-summary]')).toHaveText(new RegExp(`^Installs the plugin skills-only from ${TEST_MARKETPLACE}, with 2 skills: .*greet`));
     await cancel(sheet(page));
