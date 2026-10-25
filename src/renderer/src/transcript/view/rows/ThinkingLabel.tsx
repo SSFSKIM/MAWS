@@ -2,8 +2,10 @@
 // gets longer", and Codex's light sweep over "Thinking"). While a thinking block streams its label reads the CLI's tier,
 // the session's effort and the time it has run (copy.ts, `liveThinkingLabel`), ticking once a second, and turns toward
 // the warning colour between 10 and 20 s as the CLI's does (`thinkingWarmth`); Codex's shimmer sweeps the text while it
-// is live, static under reduced motion (transcript.css, `.transcript-shimmer`).
+// is live, static under reduced motion (transcript.css, `.transcript-shimmer`). The thinking mark turns beside it
+// (ui/thinking-mark: the owner's triquetra, still under reduced motion).
 import type { CSSProperties, ReactNode } from 'react';
+import { ThinkingMark } from '../../../ui/thinking-mark/ThinkingMark';
 import { liveThinkingLabel, thinkingWarmth } from '../../model/copy';
 import { useTranscriptContext } from '../context';
 import { useWorkingMs } from './parts';
@@ -21,5 +23,10 @@ export function Shimmer({ children, warmth = 0 }: { children: ReactNode; warmth?
 export function LiveThinkingLabel({ startedAt }: { startedAt: string }) {
   const { storeKey, effort } = useTranscriptContext();
   const elapsedMs = useWorkingMs(storeKey, startedAt);
-  return <Shimmer warmth={thinkingWarmth(elapsedMs)}>{liveThinkingLabel(elapsedMs, effort ?? null)}</Shimmer>;
+  return (
+    <>
+      <ThinkingMark />
+      <Shimmer warmth={thinkingWarmth(elapsedMs)}>{liveThinkingLabel(elapsedMs, effort ?? null)}</Shimmer>
+    </>
+  );
 }

@@ -192,6 +192,12 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 @media (prefers-reduced-motion: reduce) {
   .transcript-shimmer { animation: none; background-image: none; }
 }
+/* The thinking mark (ui/thinking-mark) sits between the chevron and the live label, centred on the text. The disclosure
+   and the cell line are flex and space it by their gap; the group and cell labels are single-line text, so it flows
+   inline there with its own margin and the ellipsis still truncates the line. It is larger than the text; its negative
+   block margin keeps the rows at their height. */
+.thinking-mark { flex: none; display: inline-block; vertical-align: middle; margin-block: -3px; }
+.transcript-group-label > .thinking-mark, .transcript-cell-label > .thinking-mark { margin-right: 7px; }
 
 /* Work divider */
 .transcript-divider { display: flex; align-items: center; gap: 7px; padding: 2px 0 14px; color: var(--fg-muted); font-size: var(--text-ui-sm); }
