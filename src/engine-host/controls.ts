@@ -26,6 +26,7 @@ import {
   ListModelsResponseSchema,
   ListPermissionRulesResponseSchema,
   McpCallResponseSchema, // P3-H
+  McpAuthenticateResponseSchema, // P4-AGG M4
   McpStatusResponseSchema,
   ReloadPluginsResponseSchema,
   ReloadSkillsResponseSchema,
@@ -122,6 +123,10 @@ export const CONTROLS = {
   // P3-H: route E's tool call, long because the engine may first wait up to 30 s for the server to connect, then runs the
   // tool for as long as it takes; main-only (src/engine-host/mcp-call.ts), never a renderer read
   mcp_call: control<C.McpCallRequest, typeof McpCallResponseSchema>(McpCallResponseSchema, 'long'),
+  // P4-AGG M4: the engine's own MCP sign-in, main's sign-in operation alone; each answers well inside the mutate bound
+  // (the client registered, or the code exchanged: 134 to 234 ms and 41 to 67 ms against the fixture, findings-m4.txt)
+  mcp_authenticate: control<C.McpAuthenticateRequest, typeof McpAuthenticateResponseSchema>(McpAuthenticateResponseSchema, 'mutate'),
+  mcp_oauth_callback_url: control<C.McpOAuthCallbackUrlRequest, typeof VoidResponseSchema>(VoidResponseSchema, 'mutate'),
 } as const;
 
 export type OutboundSubtype = keyof typeof CONTROLS;
@@ -160,6 +165,8 @@ export const getWorkspaceDiff = fn('get_workspace_diff');
 export const exportConversation = fn('export_conversation');
 export const getStatus = fn('get_status');
 export const mcpStatus = fn('mcp_status');
+export const mcpAuthenticate = fn('mcp_authenticate'); // P4-AGG M4
+export const mcpOAuthCallbackUrl = fn('mcp_oauth_callback_url'); // P4-AGG M4
 export const listModels = fn('list_models');
 export const getSessionCost = fn('get_session_cost');
 export const getBinaryVersion = fn('get_binary_version');

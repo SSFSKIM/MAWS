@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { sourceKey } from '../../shared/plugins/source-key';
-import { availableOf, installedOf, listing, marketplacesOf, mutationOutcome, pluginRowsOf } from './cli-result';
+import { availableOf, installedOf, listing, marketplacesOf, mutationOutcome, mcpOutcome, pluginRowsOf } from './cli-result';
 
 const INSTALLED = '{"command":"install","outcome":"ok","plugin":"e8-probe@e8-scratch","pluginId":"e8-probe@e8-scratch","scope":"user","message":"Successfully installed plugin: e8-probe@e8-scratch (scope: user)"}';
 const NOT_FOUND = '{"command":"install","outcome":"failed","plugin":"nope@e8-scratch","scope":"user","message":"Plugin \\"nope\\" not found in marketplace \\"e8-scratch\\". Your local copy may be out of date — try `claude plugin marketplace update e8-scratch`.","failureCode":"not_found"}';
@@ -203,5 +203,27 @@ describe('the reads', () => {
     expect(() => pluginRowsOf('{"installed":[]}')).toThrow(/plugin list --json/);
     expect(() => availableOf('[]')).toThrow(/--available/);
     expect(() => marketplacesOf('{}')).toThrow(/marketplace list --json/);
+  });
+});
+
+// P4-AGG M4: `claude mcp add|remove` print a line, not JSON (2.1.309, measured on a scratch HOME): the success line on
+// stdout with the file it modified after it, a refusal on stderr with exit 1.
+describe('mcpOutcome', () => {
+  it('reads a success from the line the CLI printed', () => {
+    const run = { stdout: 'Added HTTP MCP server linear with URL: https://mcp.linear.app/mcp to user config\nFile modified: /cfg/.claude.json\n', stderr: '', code: 0 };
+    expect(mcpOutcome('mcp-add', { name: 'linear', url: 'https://mcp.linear.app/mcp', transport: 'http', scope: 'user' }, run)).toEqual({
+      ok: true,
+      result: { command: 'mcp add', outcome: 'ok', message: 'Added HTTP MCP server linear with URL: https://mcp.linear.app/mcp to user config', name: 'linear', scope: 'user' },
+    });
+    expect(mcpOutcome('mcp-remove', { name: 'linear', scope: 'user' }, { stdout: 'Removed MCP server linear from user config\nFile modified: /cfg/.claude.json\n', stderr: '', code: 0 })).toMatchObject({ ok: true, result: { command: 'mcp remove', message: 'Removed MCP server linear from user config' } });
+  });
+
+  it('answers a refusal in the engine\'s own words', () => {
+    expect(mcpOutcome('mcp-add', { name: 'linear', url: 'https://mcp.linear.app/mcp', transport: 'http', scope: 'user' }, { stdout: '', stderr: 'MCP server linear already exists in user config\n', code: 1 })).toEqual({
+      ok: false,
+      error: { code: 'cli_failed', message: 'MCP server linear already exists in user config', failureCode: null, shownCommand: null },
+    });
+    expect(mcpOutcome('mcp-remove', { name: 'nosuch', scope: 'local' }, { stdout: '', stderr: 'No MCP server named "nosuch" in local scope', code: 1 })).toMatchObject({ ok: false, error: { message: 'No MCP server named "nosuch" in local scope' } });
+    expect(mcpOutcome('mcp-remove', { name: 'x', scope: 'user' }, { stdout: '', stderr: '', code: null })).toMatchObject({ ok: false, error: { code: 'no_result', message: 'the CLI ended without a result' } });
   });
 });

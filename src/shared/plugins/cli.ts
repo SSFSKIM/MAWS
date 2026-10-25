@@ -60,6 +60,52 @@ export function commandLine<A extends PluginsAction>(action: A, input: PluginsAc
   throw new Error(`unknown plugins action ${String(action)}`);
 }
 
+// P4-AGG M4 (docs/doperpowers/specs/2026-10-24-plugin-aggregator-design.md, Design "Adding", Connectors): the engine's
+// `claude mcp add|remove` for a remote server, run by the same runner as the plugin verbs. The CLI has no `--json`: its
+// result is the line it prints (`mcpOutcome` in the engine host). A name holds letters, digits, hyphens and underscores
+// (the engine's own rule, which refuses anything else: "Invalid name …"); a URL is http or https. `--scope` is always
+// given, so the command the sheet shows is the scope the person chose, never the engine's default (local).
+export const MCP_ACTIONS = ['mcp-add', 'mcp-remove'] as const;
+export type McpAction = (typeof MCP_ACTIONS)[number];
+export const MCP_TRANSPORTS = ['http', 'sse'] as const;
+export type McpTransport = (typeof MCP_TRANSPORTS)[number];
+
+export interface McpActionInputs {
+  'mcp-add': { name: string; url: string; transport: McpTransport; scope: PluginsScope };
+  'mcp-remove': { name: string; scope: PluginsScope };
+}
+
+export const isMcpName = (name: string): boolean => /^[A-Za-z0-9_-]+$/.test(name) && name.length <= 128 && !name.startsWith('-');
+
+export function isMcpUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return (parsed.protocol === 'https:' || parsed.protocol === 'http:') && parsed.hostname.length > 0 && url === url.trim();
+  } catch {
+    return false;
+  }
+}
+
+export function mcpCommandLine<A extends McpAction>(action: A, input: McpActionInputs[A]): string[] {
+  if (!isMcpName(input.name)) throw new Error(`"${input.name}" is not a server name the engine accepts (letters, digits, hyphens and underscores)`);
+  if (action === 'mcp-add') {
+    const { url, transport, scope } = input as McpActionInputs['mcp-add'];
+    if (!isMcpUrl(url)) throw new Error(`"${url}" is not an http or https URL`);
+    return ['mcp', 'add', '--transport', transport, input.name, url, '--scope', scope];
+  }
+  return ['mcp', 'remove', input.name, '--scope', (input as McpActionInputs['mcp-remove']).scope];
+}
+
+// Every verb the runner runs: the plugin CLI's and the MCP CLI's.
+export const RUNNER_ACTIONS = [...PLUGINS_ACTIONS, ...MCP_ACTIONS] as const;
+export type RunnerAction = (typeof RUNNER_ACTIONS)[number];
+export type RunnerActionInputs = PluginsActionInputs & McpActionInputs;
+export const isMcpAction = (action: RunnerAction): action is McpAction => (MCP_ACTIONS as readonly string[]).includes(action);
+
+export function runnerCommandLine<A extends RunnerAction>(action: A, input: RunnerActionInputs[A]): string[] {
+  return isMcpAction(action) ? mcpCommandLine<McpAction>(action, input as McpActionInputs[McpAction]) : commandLine(action as PluginsAction, input as PluginsActionInputs[PluginsAction]);
+}
+
 export interface PluginsWrites {
   settings: string; // the scope's settings file: relative to the config home (user) or to the project (project, local)
   others: string[]; // relative to the config home's `plugins/`; `<…>` names a segment the operation fills

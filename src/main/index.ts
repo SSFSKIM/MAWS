@@ -149,6 +149,8 @@ import { registerDashboardExporters } from './dashboard/export'; // E2 M5
 import { startConnectors } from './connectors'; // P3-H H3b
 import { createDirectRoute } from './connectors/direct-route'; // P3-HD: route D, MAWS's own MCP connections
 import { productionConnectorOAuth } from './connectors/oauth-root'; // P3-HD M3c2: MAWS's own OAuth beside route D
+import { listenLoopback } from './connectors/oauth-callback'; // P4-AGG M4
+import { startSignIn } from './connectors/sign-in'; // P4-AGG M4
 import { startDelivery } from './delivery'; // P4-B5: the owner's Send to
 import { startCatalog } from './catalog'; // P4-AGG M2: Discover's catalog
 
@@ -638,6 +640,18 @@ void startWithProfileLock(app, () => {
   // P3-HD M3c2: with it, MAWS's own OAuth provider (sealed under userData, safeStorage asked only on demand)
   const connectors = startConnectors({ hosts, register: registerMainHandler, index, windowOf: (sender) => BrowserWindow.fromWebContents(sender as WebContents), direct: createDirectRoute, oauth: productionConnectorOAuth });
   shutdown.add('connectors', connectors.stop);
+  // P4-AGG M4: Customize › Connectors' Sign in, the engine's own MCP sign-in in one ready session (its credential is the
+  // engine's, in the engine's keychain item; MAWS's own OAuth store is not involved)
+  const signIn = startSignIn({
+    register: registerMainHandler,
+    emit: (name, payload) => emit(name, payload),
+    host: { call: (name, input) => hosts.dispatch('engine-host', name, input) as never },
+    onSessionStatus: (listener) => hosts.onEvent('session.status', (payload) => listener(payload)),
+    onHostLost: (listener) => hosts.onState('engine-host', (state) => (state.state === 'ready' ? undefined : listener())),
+    open: (url) => openExternalUrl(url),
+    listen: listenLoopback,
+  });
+  shutdown.add('connector sign-in', signIn.stop);
   // P4-B5: the owner's Send to, no Claude turn: Notion through route D (MAWS's own connection), Drive through the gws CLI
   // the owner installed, run with the login shell's environment (the CLI keeps its sign-in; MAWS holds no Google
   // credential); the export is X31's, as the library's

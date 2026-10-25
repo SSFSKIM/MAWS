@@ -31,6 +31,7 @@ import {
   GetWorkspaceDiffResponseSchema,
   ListModelsResponseSchema,
   ListPermissionRulesResponseSchema,
+  McpAuthenticateResponseSchema, // P4-AGG M4
   McpStatusResponseSchema,
   SetCwdResponseSchema,
 } from '../../wire/control';
@@ -81,6 +82,7 @@ export const CatalogSchema = z.strictObject({
   commands: z.array(z.unknown()), agents: z.array(z.unknown()), skills: z.array(z.unknown()), terminalSlashCommands: z.array(z.unknown()), revision: z.number().int(),
 });
 
+const EngineRefused = z.strictObject({ ok: z.literal(false), message: z.string() }); // P4-AGG M4: the engine's error, in its words
 const MemoryTargetSchema = z.strictObject({ kind: z.enum(['user', 'project', 'path']), path: z.string().nullable() });
 const MessageUuidOutput = z.strictObject({ messageUuid: MessageUuidSchema });
 
@@ -144,6 +146,12 @@ const c3Commands = {
   'session.exportConversation': read(ExportConversationResponseSchema),
   'session.getStatus': read(GetStatusResponseSchema),
   'session.mcpStatus': read(McpStatusResponseSchema),
+  // P4-AGG M4 (docs/doperpowers/specs/2026-10-24-plugin-aggregator-design.md, Design "Signing in"): the engine's own MCP
+  // sign-in, main's alone (never bridged: the authorization URL stays in main, which opens it). Bounded: the engine
+  // answers `mcp_authenticate` once its client is registered (134 to 234 ms against the fixture, spikes/p4-aggregator/
+  // findings-m4.txt 8), `mcp_oauth_callback_url` once the code is exchanged. An engine refusal is the error's message.
+  'session.mcpAuthenticate': host(input({ serverName: z.string(), redirectUri: z.string().nullable() }), z.union([z.strictObject({ ok: z.literal(true), answer: McpAuthenticateResponseSchema }), EngineRefused])),
+  'session.mcpOAuthCallback': host(input({ serverName: z.string(), callbackUrl: z.string() }), z.union([z.strictObject({ ok: z.literal(true) }), EngineRefused])),
   'session.listModels': read(ListModelsResponseSchema),
   'session.getSessionCost': read(GetSessionCostResponseSchema),
   'session.getBinaryVersion': read(GetBinaryVersionResponseSchema),

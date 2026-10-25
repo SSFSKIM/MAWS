@@ -25,6 +25,9 @@ import {
   type ConnectorRefusalState,
 } from '../../artifacts/connectors';
 import { AppSessionIdSchema } from '../../graph/ids';
+import { OperationReceiptSchema } from '../../engine/operations'; // P4-AGG M4
+import { isMcpName, isMcpUrl, MCP_TRANSPORTS } from '../../plugins/cli'; // P4-AGG M4
+import { PluginsBinarySchema, PluginsCwdSchema, PluginsScopeSchema } from './plugins'; // P4-AGG M4
 import { JsonValueSchema, type CommandSpec } from './common';
 
 const main = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'main' as const });
@@ -320,6 +323,32 @@ const OwnerSource = z.strictObject({ artifactId: ArtifactId, sourceHandle: Sourc
 const ToolOf = z.strictObject({ artifactId: ArtifactId, ...ConnectorToolRefSchema.shape });
 export const ConnectorGrantChangedSchema = z.strictObject({ ...ToolOf.shape, change: z.enum(['granted', 'revoked', 'consumed']) });
 
+// P4-AGG M4 start (docs/doperpowers/specs/2026-10-24-plugin-aggregator-design.md, Interfaces "Connector commands"):
+// Customize › Connectors. `connectors.add` and `connectors.remove` are the engine host's plugin runner running the
+// engine's own `claude mcp add|remove` in the page's directory, operations completing on `plugins.operation` like a
+// plugin verb; like a plugin mutation, each names the binary its sheet showed (`plugins.env`'s), so a binary changed in
+// Settings › Engine meanwhile runs nothing. Renderer-callable, the two engine-host commands of this namespace a window
+// reaches. `connectors.signIn` is main's operation over the engine's own MCP sign-in in one ready session: a receipt at
+// once, its progress as `connectors.signInChanged`, which carries the server's name and the state alone (never the
+// authorization URL, a code or a token).
+export const McpServerNameSchema = z.string().max(128).refine(isMcpName, 'letters, digits, hyphens and underscores (the engine\'s rule for a server name)');
+export const McpServerUrlSchema = z.string().max(4096).refine(isMcpUrl, 'an http or https URL');
+const McpAt = { cwd: PluginsCwdSchema, binary: PluginsBinarySchema, name: McpServerNameSchema, scope: PluginsScopeSchema };
+export const CONNECTOR_SIGN_IN_STATES = ['starting', 'waiting_browser', 'waiting_callback', 'watching_status', 'submitting', 'done', 'failed', 'cancelled'] as const;
+export const CONNECTOR_SIGN_IN_REASONS = ['no_session', 'timeout', 'denied', 'engine', 'session_exited'] as const;
+export const ConnectorSignInChangedSchema = z.strictObject({
+  opId: z.string(),
+  name: McpServerNameSchema,
+  state: z.enum(CONNECTOR_SIGN_IN_STATES),
+  reason: z.enum(CONNECTOR_SIGN_IN_REASONS).nullable(), // failed only
+  message: z.string().max(2000).nullable(), // the engine's words, when it gave some
+  // done only (Decision Log 14): the signing session's mcp_status lists the server connected ('here'), else the credential
+  // serves the sessions started from now ('new_sessions')
+  where: z.enum(['here', 'new_sessions']).nullable(),
+});
+export type ConnectorSignInChanged = z.infer<typeof ConnectorSignInChangedSchema>;
+// P4-AGG M4 end
+
 const Lease = z.strictObject({ leaseId: LeaseId });
 const LeaseWatch = z.strictObject({ leaseId: LeaseId, watchId: WatchId });
 
@@ -350,6 +379,12 @@ export const commands = {
   'connectors.reconnect': main(OwnerSource, ConnectorOwnerAckSchema), // an explicit replacement: the old sign-in is withdrawn first
   'connectors.disconnect': main(z.strictObject({ connectionId: ConnectionId }), ConnectorOwnerAckSchema), // MAWS's own only; no current source needed
   // P3-HD M3c2 end
+  // P4-AGG M4 start: Customize › Connectors (above)
+  'connectors.add': host(z.strictObject({ ...McpAt, url: McpServerUrlSchema, transport: z.enum(MCP_TRANSPORTS) }), OperationReceiptSchema),
+  'connectors.remove': host(z.strictObject(McpAt), OperationReceiptSchema),
+  'connectors.signIn': main(z.strictObject({ name: McpServerNameSchema, appSessionId: AppSessionIdSchema }), OperationReceiptSchema),
+  'connectors.signInCancel': main(z.strictObject({ opId: z.string() }), z.strictObject({ cancelled: z.boolean() })),
+  // P4-AGG M4 end
   // ── the engine host's, main's alone ──
   'connectors.grants': host(z.strictObject({ artifactId: ArtifactId }), z.strictObject({ grants: z.array(ConnectorGrantSchema) })),
   'connectors.grant': host(z.strictObject({ artifactId: ArtifactId, grant: ConnectorGrantRequestSchema }), z.strictObject({ grant: ConnectorGrantSchema })),
@@ -399,4 +434,6 @@ export const events = {
   'connectors.directOperation': z.strictObject({ operationId: OperationId }),
   // P3-HD M3c2: main's, to the windows that read the artifact's server rows: they changed (read them again); nothing else
   'connectors.serversChanged': z.strictObject({ artifactId: ArtifactId }),
+  // P4-AGG M4: main's, to every window: a sign-in operation moved
+  'connectors.signInChanged': ConnectorSignInChangedSchema,
 } as const satisfies Record<`connectors.${string}`, z.ZodType>;

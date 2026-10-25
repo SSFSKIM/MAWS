@@ -1948,7 +1948,10 @@ describe('ipc schema validates both directions', () => {
     const ID = '00000000-0000-4000-8000-000000000001';
     it('bridges the page-lease commands, which are main’s, and never the store’s or the engine leg’s', () => {
       const owners = Object.fromEntries(Object.entries(connectors.commands).map(([name, spec]) => [name, spec.owner]));
-      for (const name of NAMES.connectors.commands) expect(owners[name], name).toBe('main');
+      // P4-AGG M4: Customize's add and remove are the engine host's plugin runner, which a window reaches as it reaches
+      // `plugins.install`; every other bridged connectors command is main's
+      const runner = ['connectors.add', 'connectors.remove'];
+      for (const name of NAMES.connectors.commands) expect(owners[name], name).toBe(runner.includes(name) ? 'engine-host' : 'main');
       const hidden = ['connectors.grants', 'connectors.grant', 'connectors.revoke', 'connectors.check', 'connectors.resolve', 'connectors.start', 'connectors.take', 'connectors.cancel'];
       for (const name of hidden) {
         expect(owners[name], name).toBe('engine-host');

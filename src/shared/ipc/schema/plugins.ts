@@ -5,7 +5,7 @@
 // `plugins.changed`. Owner `engine-host` for every command. The `marketplaces.*` mutations complete on the same event.
 import * as z from 'zod';
 import { OperationReceiptSchema } from '../../engine/operations';
-import { isPluginsArgument, PLUGINS_ACTIONS, PLUGINS_SCOPES } from '../../plugins/cli';
+import { isPluginsArgument, PLUGINS_ACTIONS, PLUGINS_SCOPES, RUNNER_ACTIONS } from '../../plugins/cli';
 import type { CommandSpec } from './common';
 
 const host = <I extends z.ZodType, O extends z.ZodType>(i: I, o: O) => ({ input: i, output: o, owner: 'engine-host' as const });
@@ -87,8 +87,8 @@ export type SessionReload = z.infer<typeof SessionReloadSchema>;
 
 export const PluginsOperationEventSchema = z.strictObject({
   opId: z.string(),
-  action: PluginsActionSchema,
-  target: z.string(), // the plugin id, the marketplace name or the source as typed
+  action: z.enum(RUNNER_ACTIONS), // P4-AGG M4: the runner's MCP verbs (`connectors.add`, `connectors.remove`) complete here too
+  target: z.string(), // the plugin id, the marketplace name, the source as typed, or the MCP server's name
   phase: z.enum(['started', 'output', 'reloading', 'done']),
   line: z.string().optional(), // phase output: one line the CLI printed (stdout or stderr), trimmed
   outcome: PluginsOutcomeSchema.optional(), // phase done

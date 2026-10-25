@@ -7,6 +7,7 @@ import { sep } from 'node:path';
 import * as z from 'zod';
 import type { AvailablePlugin, InstalledPlugin, PluginSourceRef, PluginsOutcome } from '@shared/ipc/schema/plugins';
 import type { Marketplace } from '@shared/ipc/schema/marketplaces';
+import type { McpAction, McpActionInputs } from '@shared/plugins/cli';
 
 export interface CliRun {
   stdout: string;
@@ -43,6 +44,18 @@ export function mutationOutcome(run: CliRun): PluginsOutcome {
   const failureCode = str(result.failureCode);
   const shownCommand = failureCode !== null && SHOWN_COMMAND_CODES.has(failureCode) && isRecord(result.shownCommand) ? result.shownCommand : null;
   return { ok: false, error: { code: 'cli_failed', message: str(result.message) ?? `${String(result.command)} failed`, failureCode, shownCommand } };
+}
+
+// P4-AGG M4: `claude mcp add|remove` print a sentence, not JSON (2.1.309): on success the result on stdout's first line
+// ("Added HTTP MCP server linear with URL: … to user config", then "File modified: …"), on a refusal the reason on stderr
+// with exit 1 ("MCP server linear already exists in user config", "No MCP server named "x" in user scope", "Invalid
+// name …"). The result carries the CLI's line as its `message`, as a plugin verb's does.
+export function mcpOutcome<A extends McpAction>(action: A, input: McpActionInputs[A], run: CliRun): PluginsOutcome {
+  const command = action === 'mcp-add' ? 'mcp add' : 'mcp remove';
+  if (run.code === 0) return { ok: true, result: { command, outcome: 'ok', message: lines(run.stdout)[0] ?? `${command} ${input.name}`, name: input.name, scope: input.scope } };
+  const said = lines(run.stderr).at(-1) ?? lines(run.stdout).at(-1);
+  if (said === undefined) return { ok: false, error: { code: 'no_result', message: run.code === null ? 'the CLI ended without a result' : `the CLI exited ${run.code} without a result`, failureCode: null, shownCommand: null } };
+  return { ok: false, error: { code: 'cli_failed', message: said, failureCode: null, shownCommand: null } };
 }
 
 // -- the reads -----------------------------------------------------------------------------------------------------------
