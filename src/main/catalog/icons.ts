@@ -28,7 +28,7 @@ interface Saved {
 // The bytes are the image their type names: a PNG's signature, or an SVG document's root element.
 function isImage({ contentType, bytes }: IconAnswer): boolean {
   if (contentType === 'image/png') return PNG_MAGIC.every((byte, at) => bytes[at] === byte);
-  if (contentType === 'image/svg+xml') return /^(?:﻿)?\s*(?:<\?xml[^>]*>\s*)?(?:<!--[\s\S]*?-->\s*)*(?:<!DOCTYPE[^>]*>\s*)?<svg[\s>]/i.test(new TextDecoder().decode(bytes.slice(0, 4096)));
+  if (contentType === 'image/svg+xml') return /^\uFEFF?\s*(?:<\?xml[^>]*>\s*)?(?:<!--[\s\S]*?-->\s*)*(?:<!DOCTYPE[^>]*>\s*)?<svg[\s>]/i.test(new TextDecoder().decode(bytes.slice(0, 4096)));
   return false;
 }
 

@@ -67,7 +67,7 @@ describe('the catalog’s icons', () => {
   it('remembers a failure for five minutes, then asks again', async () => {
     let now = 1_000_000;
     let up = false;
-    const { asked, get } = network((url) => (up ? new Response(PNG, { headers: { 'content-type': 'image/png' } }) : new Response('no', { status: 503 })));
+    const { asked, get } = network(() => (up ? new Response(PNG, { headers: { 'content-type': 'image/png' } }) : new Response('no', { status: 503 })));
     const icons = new CatalogIcons({ dir, get, now: () => now });
     expect(await icons.dataUrl(PLUGIN_ICON)).toBeNull();
     up = true;
