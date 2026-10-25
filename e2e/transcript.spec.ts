@@ -248,6 +248,68 @@ test('follow mode breaks on scroll-up and Jump to latest restores it', async ({ 
   expect(harness.consoleErrors()).toEqual([]);
 });
 
+// P4-TF (2026-10-25): a follower sees the end in every frame the streamed answer grows in. The last row's content
+// overflows the list's sizer the moment it grows, and the sizer's height commits a frame or two later; the end used to
+// wait for that commit, so a reader saw it 20 to 212 px away for two frames at a time. What a frame paints is read in a
+// ResizeObserver created after the list's own: the observers of one rendering step are delivered in the order they were
+// created, so it reads each step after the list has followed and before the frame paints. A read between frames (a
+// rAF, or a test's own page.evaluate) can still land after a commit and before the next step, a state no frame paints:
+// those are reported, not asserted.
+test('a follower is at the end in every frame the streamed answer grows in', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  await load(page, 'synthetic/500');
+  await play(page, 1);
+  await page.waitForTimeout(1000);
+  expect((await metrics(page)).following, 'following at the end while streaming').toBe(true);
+  const before = await metrics(page);
+  const seen = await page.evaluate(async (durationMs) => {
+    const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+    const away = () => scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
+    const painted: number[] = [];
+    let grew = 0;
+    let height = scroller.scrollHeight;
+    const observer = new ResizeObserver(() => {
+      if (scroller.scrollHeight > height) grew += 1;
+      height = scroller.scrollHeight;
+      painted.push(away());
+    });
+    const watched = new WeakSet<Element>();
+    const watch = () => {
+      for (const row of Array.from(scroller.querySelectorAll('[data-index]'))) {
+        if (watched.has(row)) continue;
+        watched.add(row);
+        observer.observe(row);
+      }
+    };
+    watch();
+    const rows = new MutationObserver(watch);
+    rows.observe(scroller, { childList: true, subtree: true });
+    const betweenFrames: number[] = [];
+    const started = performance.now();
+    while (performance.now() - started < durationMs) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      betweenFrames.push(away());
+    }
+    observer.disconnect();
+    rows.disconnect();
+    const over = (values: number[], px: number) => values.filter((value) => value > px).length;
+    return {
+      steps: painted.length, grew, paintedMax: Math.max(0, ...painted), paintedOver1: over(painted, 1),
+      rafFrames: betweenFrames.length, rafMax: Math.max(0, ...betweenFrames), rafOver1: over(betweenFrames, 1), rafOver80: over(betweenFrames, 80),
+    };
+  }, 5000);
+  const after = await metrics(page);
+  console.log(`follow frames: ${JSON.stringify({ ...seen, batches: after.batches - before.batches })}`);
+  test.info().annotations.push({ type: 'follow frames', description: JSON.stringify(seen) });
+  expect(after.batches - before.batches, 'the stream ran throughout').toBeGreaterThan(100);
+  expect(seen.grew, 'the streamed answer grew').toBeGreaterThan(20);
+  expect(seen.paintedMax, 'no painted frame leaves a follower away from the end').toBeLessThanOrEqual(1);
+  expect(after.following, 'still following').toBe(true);
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
 // P2-C (2026-10-09): a viewport that shrinks with no scroll is not a scroll upward, even right after the browser clamped
 // the offset upward as the viewport grew (a permission card leaving the composer, then the ask notice growing it): the
 // follower stays in follow mode and the end in view, however far past the 80 px threshold the shrink moves it.
