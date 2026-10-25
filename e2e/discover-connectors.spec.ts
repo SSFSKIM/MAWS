@@ -34,7 +34,7 @@ import { invoke, value } from './support/c7-replay';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { openAppDestination } from './support/shell';
 import { engineKeychainCustody, readOAuthLog, startOAuthFixture, summarizeOAuthLog, type OAuthFixture } from './support/connector-oauth';
-import { assertEngineProcessKeychainEnv, guardKeychain } from './support/keychain-guard';
+import { assertEngineProcessKeychainEnv, guardKeychain, killTree } from './support/keychain-guard';
 import { isAlive } from './support/processes';
 import { realEngine } from './support/real-engine';
 
@@ -121,8 +121,8 @@ test('spike: the engine\'s own MCP sign-in over the control protocol, against th
     let stderr = '';
     child.stderr.on('data', (chunk: Buffer) => (stderr = (stderr + chunk.toString()).slice(-4000)));
     const stopAll = () => {
-      child.kill('SIGKILL');
-      for (const pid of pids()) if (isAlive(pid)) process.kill(pid, 'SIGKILL');
+      if (child.pid !== undefined) killTree(child.pid); // the probe, its engines and their `security` children
+      for (const pid of pids()) if (isAlive(pid)) killTree(pid);
     };
     const exit = await guardKeychain('the sign-in spike', () => new Promise<{ code: number | null; signal: string | null }>((done) => child.on('exit', (code, signal) => done({ code, signal }))), { onPrompt: stopAll });
     console.log(`spike probe exit ${exit.code} ${exit.signal ?? ''}\n${stderr}`);
@@ -162,7 +162,7 @@ async function engineCli(launch: MawsLaunch, args: string[]): Promise<string> {
   let child: ReturnType<typeof execFile> | null = null;
   return guardKeychain(`claude ${args.join(' ')}`, () => new Promise<string>((done, failed) => {
     child = execFile('/usr/bin/env', ['-i', `HOME=${home}`, `CLAUDE_CONFIG_DIR=${engine.scratch.configDir}`, 'PATH=/usr/bin:/bin', 'DISABLE_AUTOUPDATER=1', 'TERM=dumb', engine.bin, ...args], { cwd: engine.scratch.projects[0], encoding: 'utf8', timeout: CLI_MS }, (error, stdout) => (error ? failed(error) : done(stdout)));
-  }), { onPrompt: () => child?.kill('SIGKILL') });
+  }), { onPrompt: () => child?.pid !== undefined && killTree(child.pid) });
 }
 
 const userServers = (launch: MawsLaunch) => (JSON.parse(readFileSync(join(launch.realEngine!.scratch.configDir, '.claude.json'), 'utf8')) as { mcpServers?: Record<string, { type?: string; url?: string }> }).mcpServers ?? {};

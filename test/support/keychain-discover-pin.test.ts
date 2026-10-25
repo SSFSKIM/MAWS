@@ -37,7 +37,7 @@ describe('the discover e2e’s keychain reach', () => {
     const launch = read('e2e/support/launch.ts');
     expect(launch).toMatch(/const keychainScene = Boolean\(opts\.realEngine\) && process\.platform === 'darwin'/);
     expect(launch).toMatch(/assertEngineKeychainEnv\(loginShellEnvironment\(env\), env\.CLAUDE_CONFIG_DIR!/);
-    expect(launch).toMatch(/keychainWatch = watchKeychainPrompt\(\(\) => child\?\.kill\('SIGKILL'\)\)/);
+    expect(launch).toMatch(/keychainWatch = watchKeychainPrompt\(\(\) => child\?\.pid !== undefined && killTree\(child\.pid\)\)/);
     expect(launch).toMatch(/if \(prompted\) throw prompted;/);
   });
 });

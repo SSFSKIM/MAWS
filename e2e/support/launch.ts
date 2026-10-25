@@ -12,7 +12,7 @@ import { writeScratchShellHome } from '../../test/support/shell-home';
 import { writeDiscoverScratch, type DiscoverScratch, type DiscoverScratchOptions } from './discover-scratch'; // P4-AGG M1
 import { shellsUnder, untilExited } from './processes';
 import { realEngine, type RealEngine } from './real-engine'; // P4-AGG M1
-import { assertEngineKeychainEnv, assertNoKeychainPrompt, loginShellEnvironment, watchKeychainPrompt } from './keychain-guard'; // fixB
+import { assertEngineKeychainEnv, assertNoKeychainPrompt, killTree, loginShellEnvironment, watchKeychainPrompt } from './keychain-guard'; // fixB
 import { launchEnvironment } from './scratch-env';
 import { cornerOrigin, windowCorner } from './window-origin';
 
@@ -182,7 +182,7 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
     // Playwright's process() reads its live application channel, which may already be disposed before 'close' arrives.
     // Keep the actual ChildProcess while available, including for cleanup's failed-close fallback.
     child = app.process();
-    if (keychainScene) keychainWatch = watchKeychainPrompt(() => child?.kill('SIGKILL'));
+    if (keychainScene) keychainWatch = watchKeychainPrompt(() => child?.pid !== undefined && killTree(child.pid)); // the app, its hosts, their engines and their `security` children
     launchedHook?.(app); // E4b
     app.on('close', () => (closed = true));
     const page = await app.firstWindow();

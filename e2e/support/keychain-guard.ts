@@ -89,6 +89,31 @@ export function watchKeychainPrompt(onPrompt: () => unknown, options: { probe?: 
   };
 }
 
+/** Kills `rootPid` and every descendant (deepest first, read in one `ps` pass): a dialog's requester (an engine's
+ * `security` child) dying is what withdraws it, so stopping the app alone is not enough. Best effort; bounded. */
+export function killTree(rootPid: number): void {
+  const ps = spawnSync('/bin/ps', ['-axo', 'pid=,ppid='], { encoding: 'utf8', timeout: PROMPT_CHECK_MS });
+  const children = new Map<number, number[]>();
+  for (const line of (ps.stdout ?? '').split('\n')) {
+    const m = /^\s*(\d+)\s+(\d+)\s*$/.exec(line);
+    if (m) children.set(Number(m[2]), [...(children.get(Number(m[2])) ?? []), Number(m[1])]);
+  }
+  const order: number[] = [];
+  const queue = [rootPid];
+  while (queue.length > 0) {
+    const pid = queue.shift()!;
+    order.push(pid);
+    queue.push(...(children.get(pid) ?? []));
+  }
+  for (const pid of order.reverse()) {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // gone already
+    }
+  }
+}
+
 const REFUSED = ['CLAUDE_SECURESTORAGE_CONFIG_DIR', 'CLAUDE_CODE_CUSTOM_OAUTH_URL'] as const;
 
 /** The engine environment names its keychain items after `configDir` alone. */

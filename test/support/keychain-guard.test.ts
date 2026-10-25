@@ -2,7 +2,8 @@
 // a pending keychain prompt fails the step at once and stops what it started; an engine environment that would name
 // another keychain item than its scratch configuration's is refused. A fake probe stands in for SecurityAgent.
 import { describe, expect, it, vi } from 'vitest';
-import { assertEngineKeychainEnv, assertNoKeychainPrompt, guardKeychain, securityAgentRunning, watchKeychainPrompt } from '../../e2e/support/keychain-guard';
+import { spawn } from 'node:child_process';
+import { assertEngineKeychainEnv, assertNoKeychainPrompt, guardKeychain, killTree, securityAgentRunning, watchKeychainPrompt } from '../../e2e/support/keychain-guard';
 
 const never = () => new Promise<never>(() => {});
 
@@ -56,6 +57,24 @@ describe('the app’s keychain watch', () => {
 
   it('answers nothing when no prompt came', () => {
     expect(watchKeychainPrompt(() => {}, { probe: () => false }).stop()).toBeNull();
+  });
+});
+
+describe('stopping what could have raised a prompt', () => {
+  it('kills a process and its descendants, so a dialog’s requester does not outlive it', async () => {
+    const parent = spawn('/bin/sh', ['-c', 'sleep 30 & echo $!; wait'], { stdio: ['ignore', 'pipe', 'ignore'] });
+    const grandchild = Number(await new Promise<string>((done) => parent.stdout.once('data', (d: Buffer) => done(d.toString().trim()))));
+    const alive = (pid: number) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    expect(alive(grandchild)).toBe(true);
+    killTree(parent.pid!);
+    await vi.waitFor(() => expect(alive(grandchild)).toBe(false));
   });
 });
 
