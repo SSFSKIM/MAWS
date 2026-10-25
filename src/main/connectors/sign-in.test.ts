@@ -148,10 +148,11 @@ describe('the sign-in operation', () => {
 
   it('the engine refusing the authentication ends failed (engine) with its words, the listener closed', async () => {
     const t = make();
-    t.host.authenticate = () => ({ ok: false, message: 'Server not found: linear' });
+    t.host.authenticate = () => ({ ok: false, message: 'MCP server linear is blocked by enterprise managed policy' });
     const { opId } = t.signIn.start({ name: 'linear', appSessionId: SESSION });
     await t.ended(opId);
-    expect(t.last(opId)).toMatchObject({ state: 'failed', reason: 'engine', message: 'Server not found: linear' });
+    expect(t.last(opId)).toMatchObject({ state: 'failed', reason: 'engine', message: 'MCP server linear is blocked by enterprise managed policy' });
+    expect(t.host.asked.filter((a) => a.name === 'session.mcpAuthenticate')).toHaveLength(1); // asked once: only "not found" is asked again
   });
 
   it('a callback carrying an error is submitted, and the engine\'s refusal reads denied', async () => {
@@ -172,6 +173,27 @@ describe('the sign-in operation', () => {
     await fetch(`${t.redirectOf().origin}/callback?code=c&state=engine-state`);
     await t.ended(opId);
     expect(t.last(opId)).toMatchObject({ state: 'failed', reason: 'engine' });
+  });
+
+  it('a server the engine has not read yet (Server not found just after an add) is asked again while its config poll catches up, then signs in', async () => {
+    const t = make({ configMs: 200, configPollMs: 10 });
+    let refusals = 3; // the engine re-reads its global config file about once a second (2.1.309: fs.watchFile, 1000 ms)
+    t.host.authenticate = (i) => (refusals-- > 0 ? { ok: false, message: 'Server not found: linear' } : { ok: true, answer: { authUrl: AUTH(i.redirectUri), requiresUserAction: true, callbackExpected: true, redirectScheme: 'custom', state: 'engine-state' } });
+    const { opId } = t.signIn.start({ name: 'linear', appSessionId: SESSION });
+    await t.until(() => t.last(opId)?.state === 'waiting_callback', 'waiting_callback');
+    expect(t.host.asked.filter((a) => a.name === 'session.mcpAuthenticate')).toHaveLength(4);
+    await fetch(`${t.redirectOf().origin}/callback?code=c&state=engine-state`);
+    await t.ended(opId);
+    expect(t.last(opId)).toMatchObject({ state: 'done', where: 'here' });
+  });
+
+  it('a server the engine still does not know after the config window fails with the engine’s words', async () => {
+    const t = make({ configMs: 50, configPollMs: 10 });
+    t.host.authenticate = () => ({ ok: false, message: 'Server not found: linear' });
+    const { opId } = t.signIn.start({ name: 'linear', appSessionId: SESSION });
+    await t.ended(opId);
+    expect(t.last(opId)).toMatchObject({ state: 'failed', reason: 'engine', message: 'Server not found: linear' });
+    expect(t.opened).toEqual([]);
   });
 
   it('Cancel closes the listener and ends cancelled; a retry starts a new operation that completes', async () => {

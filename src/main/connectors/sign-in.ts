@@ -5,7 +5,8 @@
 // every call into the engine host must answer within the supervisor's 10 s.
 //
 //   starting         the receipt is issued; MAWS's loopback listener (127.0.0.1, an ephemeral port, /callback) comes up
-//                    and the engine is asked `mcp_authenticate` with it as the redirect URI
+//                    and the engine is asked `mcp_authenticate` with it as the redirect URI (again, for up to CONFIG_MS,
+//                    while it answers "Server not found" for a server added before its config poll read it)
 //   waiting_browser  the engine answered an authorization URL; MAWS opens it in the system browser
 //   waiting_callback the engine took MAWS's redirect ('custom'): the one request whose `state` is the engine's →
 //                    submitting; any other request is answered 400 and the wait goes on; CALLBACK_MS → failed (timeout)
@@ -32,6 +33,11 @@ import { OAUTH_CALLBACK_HOST, type ListenLoopback, type LoopbackListener, type L
 export const CALLBACK_MS = 5 * 60_000;
 export const POLL_MS = 2_000;
 export const SETTLE_MS = 15_000; // after an accepted custom callback: how long the signing session may take to read connected
+// A server added a moment ago: the engine reads its global config file again about once a second (2.1.309 polls it with
+// fs.watchFile, 1000 ms) and answers "Server not found" until it has; MAWS asks again within this window.
+export const CONFIG_MS = 10_000;
+const CONFIG_POLL_MS = 1_000;
+const NOT_READ_YET = /^Server not found: /;
 const REPLY_FLUSH_MS = 50; // the browser's page written before the listener closes
 
 type SignInCommand = 'session.mcpAuthenticate' | 'session.mcpOAuthCallback' | 'session.mcpReconnect' | 'session.mcpStatus';
@@ -49,6 +55,8 @@ export interface SignInDeps {
   callbackMs?: number;
   pollMs?: number;
   settleMs?: number;
+  configMs?: number;
+  configPollMs?: number;
   log?: (line: string) => void;
 }
 
@@ -81,6 +89,8 @@ export function createSignIn(deps: SignInDeps): SignIn {
   const callbackMs = deps.callbackMs ?? CALLBACK_MS;
   const pollMs = deps.pollMs ?? POLL_MS;
   const settleMs = deps.settleMs ?? SETTLE_MS;
+  const configMs = deps.configMs ?? CONFIG_MS;
+  const configPollMs = deps.configPollMs ?? CONFIG_POLL_MS;
   const log = deps.log ?? ((line: string) => console.warn(`[connectors] ${line}`));
   const operations = new Map<string, Operation>(); // live ones, by opId
   const byServer = new Map<string, string>(); // server name → its live opId
@@ -178,7 +188,14 @@ export function createSignIn(deps: SignInDeps): SignIn {
     }
     if (!live(op)) return void op.listener?.close();
     port = op.listener.port;
-    const auth = await ask(op, 'session.mcpAuthenticate', { appSessionId: op.appSessionId, serverName: op.name, redirectUri: `http://${OAUTH_CALLBACK_HOST}:${port}/callback` });
+    const authenticate = () => ask(op, 'session.mcpAuthenticate', { appSessionId: op.appSessionId, serverName: op.name, redirectUri: `http://${OAUTH_CALLBACK_HOST}:${port}/callback` });
+    const notReadBy = Date.now() + configMs;
+    let auth = await authenticate();
+    while (auth !== null && !auth.ok && NOT_READ_YET.test(auth.message) && Date.now() < notReadBy) {
+      await new Promise((resolve) => setTimeout(resolve, configPollMs));
+      if (!live(op)) return;
+      auth = await authenticate();
+    }
     if (auth === null) return;
     if (!auth.ok) return fail(op, 'engine', auth.message);
     const { authUrl, requiresUserAction, redirectScheme, state } = auth.answer;
