@@ -510,6 +510,7 @@ export const ConnectorRouteSchema = z.strictObject({
   name: z.string(),                // the engine-legal name the sheet proposes
   url: z.string().nullable(),      // null when the server takes an instance URL
   urlPattern: z.string().nullable(), // the directory's url_regex
+  urlOptions: z.array(z.string()),  // the directory's url_options: a choice of URLs (Decision Log, ninth entry)
   transport: z.enum(['http', 'sse']),
   authPosture: z.enum(['auth_required', 'no_auth']),
 });
@@ -575,6 +576,7 @@ Plugin installs reuse `plugins.install` and `marketplaces.add` as they are, with
 Engine-host extensions (M2), in `src/shared/ipc/schema/plugins.ts`:
 - `PluginSourceRefSchema`'s object form gains `sha: z.string().nullable()` and keeps `ref` whether or not a sha pins the entry;
 - `plugins.marketplaceManifest({cwd, name})` → `{ state: 'read' | 'missing' | 'unknown', owner, plugins: { name: string, author: string | null, source: PluginSourceRef | null, components: PluginManifestView['components'] | null, partial: boolean, problems: string[] }[] }`, read from the marketplace's clone under its `installLocation` under `MANIFEST_READ_MS`; a marketplace the engine does not have answers `unknown`.
+- `plugins.directoryProvenance({cwd, names})` → `{pluginsDir, entries: {name, repositoryKey}[]}`: for installed `anthropic-plugin-directory` entries, where the engine recorded each one's code, read only from the engine's own records in its plugins folder (`plugin-directory-bindings.json`, then the `entryNames` of `plugin-directory-cache-v2.json`); never a join by name (Decision Log, ninth entry).
 
 Terminal fallback (M4, discard path only): `PtySpawnInputSchema` gains `env: z.strictObject({ CLAUDE_CONFIG_DIR: z.string() }).optional()`, the one variable the pty host sets after its stripping.
 
@@ -655,6 +657,10 @@ Test seams (M1):
 
 - Decision: settings-change invalidation (the M2 task review, 2026-10-25). The Design's "the host's settings watcher" does not exist: `reload-after.ts` waits a fixed interval for the engine's own watcher and forwards no event. Main adds a read-only, debounced file watch on what the engine's plugin state lives in for the configuration and each `cwd` the catalog holds (the user `settings.json`, the plugins folder's installed and known-marketplace records, and the project's `.claude/settings.json` and `.claude/settings.local.json`), reusing an existing watcher where MAWS already has one; a change invalidates that `cwd`'s engine reads and fires `catalog.changed`. The alternative, Refresh only, lost: a plugin an agent installs from a terminal would read "not installed" until the person pressed Refresh.
   Rationale: the Design's re-read on outside changes is the intent; only its named mechanism was missing.
+  Date/Author: 2026-10-25, the executing session.
+
+- Decision: M2's review fixes (2026-10-25). An item's install route is the route it was installed through, ahead of precedence. A (repository, path) any source lists more than once is ambiguous everywhere; every listing there carries `?entry=<name>` and a directory record there joins as the entry of its engine name; components there come from the routes, not the directory record. An installed directory plugin's source after a restart comes from the new host read `plugins.directoryProvenance` (Interfaces). A catalog build is bound to the engine reads' generation; a read overtaken by an invalidation is read again up to three times, then answered uncached; the generation is shared across `cwd`s, so any invalidation restarts open cursors. A partial manifest inventory reads `true` if what was read runs code, else `'unknown'`, never `false`. The servers endpoint's `url_options` (31 Claude Code remote servers with neither `url` nor `url_regex`, one with an empty `url_regex`) is a choice of URLs, as in Claude Desktop: `ConnectorRoute.urlOptions`, and M4's connector sheet offers a picker; one server with neither is left out.
+  Rationale: the M2 task review's five findings and the second live walk's classification of the 33 servers the first walk missed.
   Date/Author: 2026-10-25, the executing session.
 
 ## Outcomes & Retrospective
