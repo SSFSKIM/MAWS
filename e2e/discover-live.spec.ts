@@ -233,12 +233,13 @@ test('live: the real sources counted twice; a directory plugin installed and uni
           requestAnimationFrame(tick);
         }),
     );
+    const mounted = await page.evaluate(() => ({ nodes: document.getElementsByTagName('*').length, heapMB: Math.round(((performance as unknown as { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize ?? 0) / 1_048_576) }));
     // a search typed with every card mounted: the time until its answer is drawn
     const searchStarted = Date.now();
     await search(page, 'legal');
     await expect(results(page).getByRole('heading', { name: /^\d[\d,]* results?$/ })).toBeVisible({ timeout: 60_000 });
     const searchMs = Date.now() - searchStarted;
-    const page_ = await page.evaluate(() => ({ nodes: document.getElementsByTagName('*').length, heapMB: Math.round(((performance as unknown as { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize ?? 0) / 1_048_576), longTasks: (window as unknown as { __longTasks: number[] }).__longTasks }));
+    const longTasks = await page.evaluate(() => (window as unknown as { __longTasks: number[] }).__longTasks);
     const scale = {
       total,
       reached,
@@ -247,9 +248,8 @@ test('live: the real sources counted twice; a directory plugin installed and uni
       lastPagesMs: steps.slice(-5).map((s, i, all) => (i === 0 ? null : s.ms - all[i - 1]!.ms)).slice(1),
       frames,
       searchMs,
-      domNodes: page_.nodes,
-      heapMB: page_.heapMB,
-      longTasks: { count: page_.longTasks.length, totalMs: Math.round(page_.longTasks.reduce((a, b) => a + b, 0)), maxMs: Math.round(Math.max(0, ...page_.longTasks)) },
+      atTheEnd: mounted, // every card mounted
+      longTasks: { count: longTasks.length, totalMs: Math.round(longTasks.reduce((a, b) => a + b, 0)), maxMs: Math.round(Math.max(0, ...longTasks)) },
     };
     console.log(`all-grid scale\n${JSON.stringify(scale, null, 2)}`);
     await info.attach('all-grid-scale.json', { body: JSON.stringify(scale, null, 2), contentType: 'application/json' });
