@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CommandName } from '@shared/ipc/schema';
 import type { PluginsOperationEvent } from '@shared/ipc/schema/plugins';
-import type { PluginsAction } from '@shared/plugins/cli';
+import type { RunnerAction } from '@shared/plugins/cli';
 import { ipc } from '../../ipc/client';
 import { transportWords } from '../read';
 import type { PluginOpState, PluginsRequest } from './present';
@@ -22,7 +22,9 @@ const COMMAND_OF = {
   'marketplace-add': 'marketplaces.add',
   'marketplace-update': 'marketplaces.update',
   'marketplace-remove': 'marketplaces.remove',
-} as const satisfies Record<PluginsAction, CommandName>;
+  'mcp-add': 'connectors.add', // P4-AGG M4: Customize › Connectors
+  'mcp-remove': 'connectors.remove',
+} as const satisfies Record<RunnerAction, CommandName>;
 
 export interface PluginOperationEntry {
   request: PluginsRequest;

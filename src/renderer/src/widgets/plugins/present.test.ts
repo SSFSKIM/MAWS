@@ -31,7 +31,7 @@ describe('the sheet’s command and writes', () => {
     for (const action of PLUGINS_ACTIONS)
       for (const scope of PLUGINS_SCOPES) {
         const request = sample(action, scope);
-        expect(argvOf(request), `${action} ${scope}`).toEqual(commandLine(request.action, request.input as never));
+        expect(argvOf(request), `${action} ${scope}`).toEqual(commandLine(request.action as PluginsAction, request.input as never));
       }
     const install = requestFor('install', { plugin: 'e8-probe@e8-scratch', scope: 'project' }, null);
     expect(commandWords('/Users/me/.local/share/claude/versions/2.1.290', argvOf(install))).toBe('2.1.290 plugin install e8-probe@e8-scratch --scope project --json');

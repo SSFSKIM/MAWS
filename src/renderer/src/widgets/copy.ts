@@ -387,8 +387,10 @@ export const PLUGIN_MANAGEMENT = {
     'marketplace-add': 'Add marketplace',
     'marketplace-update': 'Refresh marketplace',
     'marketplace-remove': 'Remove marketplace',
+    'mcp-add': 'Add connector', // P4-AGG M4
+    'mcp-remove': 'Remove connector',
   } as const,
-  submit: { install: 'Install', update: 'Update', uninstall: 'Uninstall', enable: 'Enable', disable: 'Disable', 'marketplace-add': 'Add', 'marketplace-update': 'Refresh', 'marketplace-remove': 'Remove' } as const,
+  submit: { install: 'Install', update: 'Update', uninstall: 'Uninstall', enable: 'Enable', disable: 'Disable', 'marketplace-add': 'Add', 'marketplace-update': 'Refresh', 'marketplace-remove': 'Remove', 'mcp-add': 'Add', 'mcp-remove': 'Remove' } as const,
   title: (verb: string, target: string) => `${verb} ${target}?`,
   scope: 'Scope',
   scopeName: { user: 'User', project: 'Project', local: 'Local' } as const,

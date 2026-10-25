@@ -31,8 +31,8 @@ import { OAUTH_CALLBACK_HOST, type ListenLoopback, type LoopbackListener, type L
 
 export const CALLBACK_MS = 5 * 60_000;
 export const POLL_MS = 2_000;
-export const SETTLE_MS = 15_000;
-const REPLY_FLUSH_MS = 50; // the browser's page written before the listener closes // after an accepted custom callback: how long the signing session may take to read connected
+export const SETTLE_MS = 15_000; // after an accepted custom callback: how long the signing session may take to read connected
+const REPLY_FLUSH_MS = 50; // the browser's page written before the listener closes
 
 type SignInCommand = 'session.mcpAuthenticate' | 'session.mcpOAuthCallback' | 'session.mcpReconnect' | 'session.mcpStatus';
 export interface SignInHost {
