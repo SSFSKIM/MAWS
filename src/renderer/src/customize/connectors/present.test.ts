@@ -132,6 +132,16 @@ describe('which session signs in', () => {
     expect(signInSessionOf('project', ready, 'a', '/p')).toBe('a');
     expect(signInSessionOf('user', ready, 'a', '/p')).toBe('a');
   });
+  it('signs a user-scope server in from a ready session in the page’s directory first, whose entries the page shows (scalpel-2#1)', () => {
+    const sessions = [{ appSessionId: 'a', cwd: '/p' }, { appSessionId: 'b', cwd: '/q' }];
+    expect(signInSessionOf('user', sessions, null, '/q')).toBe('b');
+    expect(signInSessionOf('user', sessions, null, null)).toBe('a'); // the user configuration's page: main checks the session's own entries
+  });
+
+  it('a session that uses another entry of the name says so', () => {
+    expect(signInViewOf({ live: undefined, liveRead: null, posture: null, transport: 'http', last: event({ state: 'failed', reason: 'other_entry', message: 'that session uses the local entry in /cfg/.claude.json' }) })!.text).toBe('Sign-in didn’t finish: that session uses the local entry in /cfg/.claude.json');
+  });
+
   it('signs a user-scope server in from any ready session, and a project or local one only from a session in that directory', () => {
     expect(signInSessionOf('user', ready, null, null)).toBe('a');
     expect(signInSessionOf('local', ready, null, '/p')).toBe('a');

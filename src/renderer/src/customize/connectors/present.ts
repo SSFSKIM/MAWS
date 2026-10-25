@@ -18,6 +18,7 @@ import type { CatalogItem } from '@shared/ipc/schema/catalog';
 import type { CustomizationServer } from '@shared/ipc/schema/customization';
 import { isMcpName, isMcpUrl, PLUGINS_SCOPES, type PluginsScope } from '@shared/plugins/cli';
 import { patternCheck } from '@shared/plugins/connector-url';
+import { usedEntry } from '@shared/plugins/connector-precedence';
 import { requestFor, type PluginsRequest } from '../../widgets/plugins/present';
 import { trustOf } from '../discover/present';
 import { CONNECTORS as C } from './copy';
@@ -88,20 +89,11 @@ export function removeRequestOf(server: CustomizationServer): PluginsRequest | n
   return requestFor('mcp-remove', { name: server.name, scope: server.scope as PluginsScope }, null);
 }
 
-// The engine's precedence for one name across its scopes (2.1.309 cli.pretty.js: 720870 drops a project server a user or
-// local one names, 720898 lays local over user; 720717 reads .mcp.json from the root down, each over the last): local,
-// else user, else the project file nearest the directory, which the inventory lists last. MAWS's own server of the same
-// name outranks them all, conservatively: MAWS passes its servers with --mcp-config, which the engine loads as `dynamic`
-// (457558), and its authentication resolver prefers a loaded client's own configuration over the files' (853424).
-const RANK: Partial<Record<CustomizationServer['scope'], number>> = { local: 3, user: 2, project: 1 };
-
 /** The scope of the entry the engine uses instead of this one (`app`: MAWS's own server of the name), or null when this
- * is the one it uses. */
+ * is the one it uses; MAWS's own rows are never shadowed (@shared/plugins/connector-precedence). */
 export function shadowedBy(server: CustomizationServer, servers: readonly CustomizationServer[]): CustomizationServer['scope'] | null {
-  if (RANK[server.scope] === undefined) return null;
-  if (servers.some((other) => other.name === server.name && other.scope === 'app')) return 'app';
-  let used: CustomizationServer | null = null;
-  for (const other of servers) if (other.name === server.name && RANK[other.scope] !== undefined && (used === null || RANK[other.scope]! >= RANK[used.scope]!)) used = other;
+  if (server.scope === 'app') return null;
+  const used = usedEntry(server.name, servers);
   return used === null || (used.scope === server.scope && used.path === server.path) ? null : used.scope;
 }
 
@@ -118,12 +110,15 @@ export interface ReadySession {
   cwd: string;
 }
 
-/** The session a server signs in from: the attached one, else the first ready session whose scope includes the server;
- * null when none does (Sign in then says to open one). MAWS's own servers are not signed in through the engine. */
+/** The session a server signs in from: the attached one, else the first ready session whose scope includes the server,
+ * one in the page's directory first (the entries the page shows are the ones it reads); null when none does (Sign in then
+ * says to open one). MAWS's own servers are not signed in through the engine. Main refuses a session whose engine uses
+ * another entry of the name (scalpel-2#1). */
 export function signInSessionOf(scope: CustomizationServer['scope'], ready: readonly ReadySession[], attached: string | null, cwd: string | null): string | null {
   if (scope === 'app') return null;
   if (attached !== null) return attached;
-  const inScope = ready.filter((session) => scope === 'user' || (cwd !== null && session.cwd === cwd)).sort((a, b) => a.appSessionId.localeCompare(b.appSessionId));
+  const here = (session: ReadySession) => (cwd !== null && session.cwd === cwd ? 0 : 1);
+  const inScope = ready.filter((session) => scope === 'user' || here(session) === 0).sort((a, b) => here(a) - here(b) || a.appSessionId.localeCompare(b.appSessionId));
   return inScope[0]?.appSessionId ?? null;
 }
 
@@ -171,7 +166,7 @@ export function signInViewOf({ live, liveRead, posture, last: record, transport 
         return view(C.didntFinish(C.cancelled), 'danger', true);
       case 'failed': {
         const reason = last.reason ?? 'engine';
-        const why = reason === 'engine' ? (last.message ?? C.reason.engine) : reason === 'denied' && last.message ? `${C.reason.denied} (${last.message})` : C.reason[reason];
+        const why = reason === 'engine' || reason === 'other_entry' ? (last.message ?? C.reason[reason]) : reason === 'denied' && last.message ? `${C.reason.denied} (${last.message})` : C.reason[reason];
         return view(C.didntFinish(why), 'danger', true);
       }
       default:

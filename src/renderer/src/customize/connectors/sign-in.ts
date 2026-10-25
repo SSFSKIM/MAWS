@@ -22,6 +22,7 @@ export interface SignInTarget {
   name: string;
   scope: PluginsScope; // MAWS's own (`app`) servers are not signed in through the engine
   cwd: string | null; // the page's directory: part of a project or local server's identity
+  path: string; // the file the entry is in: main signs in only from a session whose engine uses this entry (scalpel-2#1)
 }
 
 export interface SignInRecord {
@@ -31,7 +32,7 @@ export interface SignInRecord {
   fingerprint: string | null; // the configuration's, when Sign in was pressed; null: not read then
 }
 
-export const signInKeyOf = ({ name, scope, cwd }: SignInTarget): string => [scope, scope === 'user' ? '' : (cwd ?? ''), name].join('\u0000');
+export const signInKeyOf = ({ name, scope, cwd }: Omit<SignInTarget, 'path'>): string => [scope, scope === 'user' ? '' : (cwd ?? ''), name].join('\u0000');
 
 interface SignIns {
   byServer: ReadonlyMap<string, SignInRecord>;
@@ -70,7 +71,7 @@ export function connectSignInEvents(bridge: MawsBridge = ipc): () => void {
 
 export async function startSignIn(target: SignInTarget, fingerprint: string | null, appSessionId: string, bridge: MawsBridge = ipc): Promise<void> {
   const key = signInKeyOf(target);
-  const answer = await bridge.invoke('connectors.signIn', { name: target.name, scope: target.scope, cwd: target.cwd, appSessionId: appSessionId as AppSessionId });
+  const answer = await bridge.invoke('connectors.signIn', { name: target.name, scope: target.scope, cwd: target.cwd, path: target.path, appSessionId: appSessionId as AppSessionId });
   if (!answer.ok) {
     newest.set(key, `refused:${key}`);
     record(key, { appSessionId, fingerprint }, { opId: `refused:${key}`, name: target.name, state: 'failed', reason: 'engine', message: transportWords(answer.error), where: null }, Date.now());
@@ -90,7 +91,7 @@ export function cancelSignIn(opId: string, bridge: MawsBridge = ipc): void {
 
 /** A server's result forgotten, and the rest of an operation still running for it dropped: MAWS removed or replaced its
  * configuration, so nothing that operation says is about what is configured now. */
-export function forgetSignIn(target: SignInTarget): void {
+export function forgetSignIn(target: Omit<SignInTarget, 'path'>): void {
   const key = signInKeyOf(target);
   newest.delete(key);
   useSignIns.setState(({ byServer }) => {

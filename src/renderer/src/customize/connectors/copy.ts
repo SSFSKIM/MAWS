@@ -70,6 +70,7 @@ export const CONNECTORS = {
     denied: 'the sign-in was declined',
     engine: 'the engine refused it',
     session_exited: 'the session ended',
+    other_entry: 'that session uses another entry of this name',
   } satisfies Record<Reason, string>,
   cancelled: 'cancelled',
   // Discover

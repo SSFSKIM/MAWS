@@ -320,7 +320,7 @@ describe('Connectors', () => {
     const row = (await screen.findByText('notion')).closest('li')!;
     expect(await within(row).findByText('Sign in needed')).toBeTruthy(); // main's posture, read after the list
     fireEvent.click(within(row).getByRole('button', { name: 'Sign in to notion' }));
-    await waitFor(() => expect(backend.calls.filter((call) => call.command === 'connectors.signIn').map((call) => call.input)).toEqual([{ name: 'notion', scope: 'user', cwd: '/one', appSessionId: 'signer' }]));
+    await waitFor(() => expect(backend.calls.filter((call) => call.command === 'connectors.signIn').map((call) => call.input)).toEqual([{ name: 'notion', scope: 'user', cwd: '/one', path: '/config/.claude.json', appSessionId: 'signer' }]));
     const changed = (state: ConnectorSignInChanged['state'], over: Partial<ConnectorSignInChanged> = {}) => act(() => heard({ opId: 'op-1', name: 'notion', state, reason: null, message: null, where: null, ...over }));
     changed('starting');
     changed('waiting_callback');

@@ -181,7 +181,7 @@ function Configured({ servers, readAt, cwd, place, attached, askIn }: { servers:
 // shadows it and offers no Sign in: the engine signs a name in, so Sign in belongs to the row it uses.
 function ServerRow({ server, askIn, shadow, cwd, place, session, live, liveRead, posture, fingerprint }: { server: CustomizationServer; askIn: AskIn; shadow: CustomizationServer['scope'] | null; cwd: string | null; place: string | null; session: string | null; live: SignInFacts['live']; liveRead: SignInFacts['liveRead']; posture: AuthPosture | null; fingerprint: string | null }) {
   const { ops } = useManage();
-  const target = server.scope === 'app' ? null : { name: server.name, scope: server.scope, cwd };
+  const target = server.scope === 'app' ? null : { name: server.name, scope: server.scope, cwd, path: server.path };
   const record = resultFor(useSignIns((s) => (target === null ? null : (s.byServer.get(signInKeyOf(target)) ?? null))), fingerprint);
   const last = record?.event ?? null;
   const state: SignInView | null = shadow !== null ? { text: shadowWords(shadow, server.name), tone: 'muted', signIn: false, cancel: false } : signInViewOf({ live, liveRead, posture, last: record, transport: server.transport });

@@ -335,7 +335,7 @@ export const McpServerNameSchema = z.string().max(128).refine(isMcpName, 'letter
 export const McpServerUrlSchema = z.string().max(4096).refine(isMcpUrl, 'an http or https URL');
 const McpAt = { cwd: PluginsCwdSchema, binary: PluginsBinarySchema, name: McpServerNameSchema, scope: PluginsScopeSchema };
 export const CONNECTOR_SIGN_IN_STATES = ['starting', 'waiting_browser', 'waiting_callback', 'watching_status', 'submitting', 'done', 'failed', 'cancelled'] as const;
-export const CONNECTOR_SIGN_IN_REASONS = ['no_session', 'timeout', 'denied', 'engine', 'session_exited'] as const;
+export const CONNECTOR_SIGN_IN_REASONS = ['no_session', 'timeout', 'denied', 'engine', 'session_exited', 'other_entry'] as const; // other_entry: the session uses another entry of the name (its words in `message`)
 export const ConnectorSignInChangedSchema = z.strictObject({
   opId: z.string(),
   name: McpServerNameSchema,
@@ -383,7 +383,7 @@ export const commands = {
   'connectors.add': host(z.strictObject({ ...McpAt, url: McpServerUrlSchema, transport: z.enum(MCP_TRANSPORTS) }), OperationReceiptSchema),
   'connectors.remove': host(z.strictObject(McpAt), OperationReceiptSchema),
   // the connector is its configuration (name, scope, and the directory for a project or local one): one sign-in at a time
-  'connectors.signIn': main(z.strictObject({ name: McpServerNameSchema, scope: PluginsScopeSchema, cwd: PluginsCwdSchema.nullable(), appSessionId: AppSessionIdSchema }), OperationReceiptSchema),
+  'connectors.signIn': main(z.strictObject({ name: McpServerNameSchema, scope: PluginsScopeSchema, cwd: PluginsCwdSchema.nullable(), path: PluginsCwdSchema, appSessionId: AppSessionIdSchema }), OperationReceiptSchema), // path: the file the entry is in
   'connectors.signInCancel': main(z.strictObject({ opId: z.string() }), z.strictObject({ cancelled: z.boolean() })),
   // P4-AGG M4 end
   // ── the engine host's, main's alone ──

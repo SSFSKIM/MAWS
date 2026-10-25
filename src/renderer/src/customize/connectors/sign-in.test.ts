@@ -7,9 +7,9 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import { forgetSignIn, heard, resetSignIns, signInKeyOf, startSignIn, useSignIns } from './sign-in';
 
 const event = (opId: string, state: ConnectorSignInChanged['state'], name = 'linear'): ConnectorSignInChanged => ({ opId, name, state, reason: null, message: null, where: null });
-const USER = { name: 'linear', scope: 'user', cwd: '/a', fingerprint: 'print-user' } as const;
-const PROJECT_A = { name: 'linear', scope: 'project', cwd: '/a', fingerprint: 'print-a' } as const;
-const PROJECT_B = { name: 'linear', scope: 'project', cwd: '/b', fingerprint: 'print-b' } as const;
+const USER = { name: 'linear', scope: 'user', cwd: '/a', path: '/cfg/.claude.json', fingerprint: 'print-user' } as const;
+const PROJECT_A = { name: 'linear', scope: 'project', cwd: '/a', path: '/a/.mcp.json', fingerprint: 'print-a' } as const;
+const PROJECT_B = { name: 'linear', scope: 'project', cwd: '/b', path: '/b/.mcp.json', fingerprint: 'print-b' } as const;
 const recordOf = (target: Parameters<typeof signInKeyOf>[0]) => useSignIns.getState().byServer.get(signInKeyOf(target));
 // main answers the receipt after it has already said `starting` (and cancelled an earlier operation), as connectors.signIn does
 const bridgeAnswering = (...opIds: string[]) => {
@@ -68,7 +68,7 @@ describe('a server’s latest sign-in', () => {
   it('reads a refused invoke as a sign-in that did not finish, in the transport’s words', async () => {
     const bridge = { invoke: vi.fn(async () => ({ ok: false, error: { code: 'unavailable', message: 'main is not ready' } })) } as unknown as MawsBridge;
     await startSignIn(USER, USER.fingerprint, 'session-1', bridge);
-    expect(bridge.invoke).toHaveBeenCalledWith('connectors.signIn', { name: 'linear', scope: 'user', cwd: '/a', appSessionId: 'session-1' });
+    expect(bridge.invoke).toHaveBeenCalledWith('connectors.signIn', { name: 'linear', scope: 'user', cwd: '/a', path: '/cfg/.claude.json', appSessionId: 'session-1' });
     expect(recordOf(USER)).toMatchObject({ event: { state: 'failed', reason: 'engine' }, appSessionId: 'session-1' });
     expect(recordOf(USER)!.event.message).toBeTruthy();
   });
