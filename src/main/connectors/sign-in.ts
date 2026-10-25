@@ -116,6 +116,18 @@ export function createSignIn(deps: SignInDeps): SignIn {
   const byConnector = new Map<string, string>(); // a configured connector (connectorKey) → its live opId
   const byFlow = new Map<string, string>(); // the engine's flow (flowKey: the session and the server name) → its live opId
   const flowKey = (op: { appSessionId: string; name: string }) => `${op.appSessionId}\u0000${op.name}`;
+  // scalpel-2#2: the engine's mcp_authenticate sets its flow up after discovery and installs it when done, so a call still
+  // in flight could replace a later call's flow. Each flow's calls go one after another: a replacement's waits for the
+  // cancelled operation's to answer (its answer is then dropped), and a call whose operation ended first is not sent.
+  const authTail = new Map<string, Promise<unknown>>(); // flowKey → the last mcp_authenticate sent or queued for it
+  const authenticateInOrder = (op: Operation, input: CommandInput<'session.mcpAuthenticate'>) => {
+    const key = flowKey(op);
+    const call = (authTail.get(key) ?? Promise.resolve()).then(() => (live(op) ? ask(op, 'session.mcpAuthenticate', input) : null));
+    const tail = call.catch(() => {});
+    authTail.set(key, tail);
+    void tail.then(() => authTail.get(key) === tail && authTail.delete(key));
+    return call;
+  };
 
   const live = (op: Operation) => !TERMINAL.has(op.state);
   const move = (op: Operation, state: State, extra: { reason?: Reason; message?: string | null; where?: 'here' | 'new_sessions' } = {}) => {
@@ -221,7 +233,7 @@ export function createSignIn(deps: SignInDeps): SignIn {
     }
     if (!live(op)) return void op.listener?.close();
     port = op.listener.port;
-    const authenticate = () => ask(op, 'session.mcpAuthenticate', { appSessionId: op.appSessionId, serverName: op.name, redirectUri: `http://${OAUTH_CALLBACK_HOST}:${port}/callback` });
+    const authenticate = () => authenticateInOrder(op, { appSessionId: op.appSessionId, serverName: op.name, redirectUri: `http://${OAUTH_CALLBACK_HOST}:${port}/callback` });
     const notReadBy = Date.now() + configMs;
     let auth = await authenticate();
     while (auth !== null && !auth.ok && NOT_READ_YET.test(auth.message) && Date.now() < notReadBy) {

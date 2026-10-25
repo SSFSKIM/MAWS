@@ -293,6 +293,29 @@ describe('the sign-in operation', () => {
     expect(t.opened).toEqual([]);
   });
 
+  it('a replacement’s mcp_authenticate waits for the one still in flight, so the old answer cannot overtake the new flow (scalpel-2#2)', async () => {
+    const t = make();
+    let release: (() => void) | null = null;
+    let sent = 0; // mcp_authenticate requests sent to the engine host
+    const call = t.host.call.bind(t.host);
+    t.host.call = (async (name: string, input: unknown) => {
+      if (name === 'session.mcpAuthenticate' && ++sent === 1) await new Promise<void>((resolve) => (release = resolve)); // the first flow's setup is slow
+      return call(name as never, input as never);
+    }) as never;
+    const first = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }).opId;
+    await t.until(() => release !== null, 'the first authenticate in flight');
+    const second = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }).opId;
+    expect(t.last(first).state).toBe('cancelled');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sent).toBe(1); // the replacement waits
+    release!();
+    await t.until(() => t.last(second)?.state === 'waiting_callback', 'the replacement waiting');
+    expect(sent).toBe(2);
+    await fetch(`${t.redirectOf().origin}/callback?code=c&state=engine-state`);
+    await t.ended(second);
+    expect(t.last(second).state).toBe('done');
+  });
+
   it('no ready session: failed (no_session) without asking the engine', async () => {
     const t = make();
     const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: 'not-ready' });
