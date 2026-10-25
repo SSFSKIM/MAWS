@@ -60,6 +60,7 @@ let restartOnCursor: boolean;
 let held: Map<string, () => void>; // operations whose completion a test releases
 let holding: Set<CommandName>;
 let iconAnswer: (url: string) => string | null; // catalog.icon's data URL for a URL
+let installedToo: { id: string; name: string; marketplace: string }[]; // installations plugins.list answers besides code-review
 
 const emit = (name: EventName, payload: unknown) => listeners.get(name)?.forEach((listener) => listener(payload));
 
@@ -109,7 +110,7 @@ function answer(name: CommandName, input: unknown): unknown {
     case 'plugins.env':
       return { binary: BINARY, binaryError: null, configHome: HOME, globalConfig: `${HOME}/.claude.json` };
     case 'plugins.list':
-      return { plugins: [{ id: 'code-review@claude-plugins-official', name: 'code-review', marketplace: 'claude-plugins-official', version: '1.0.0', scope: 'user', enabled: true, projectPath: null, installPath: `${HOME}/plugins/cache/x`, errors: [], notes: [], installedAt: null, lastUpdated: null, here: false, coversHere: true }] };
+      return { plugins: [{ id: 'code-review@claude-plugins-official', name: 'code-review', marketplace: 'claude-plugins-official' }, ...installedToo].map((p) => ({ ...p, version: '1.0.0', scope: 'user', enabled: true, projectPath: null, installPath: `${HOME}/plugins/cache/x`, errors: [], notes: [], installedAt: null, lastUpdated: null, here: false, coversHere: true, projectEnabled: true })) };
     case 'marketplaces.list':
       return { marketplaces: [] };
     case 'plugins.manifest':
@@ -139,6 +140,7 @@ beforeEach(() => {
   restartOnCursor = false;
   held = new Map();
   holding = new Set();
+  installedToo = [];
   iconAnswer = (url) => (url.includes('plugin-icons') ? 'data:image/png;base64,iVBORw0KGgo=' : null);
   outcome = () => ({ ok: true, result: { message: 'done' } });
   const bridge: MawsBridge = {
@@ -290,6 +292,20 @@ describe('Customize › Plugins › Discover', () => {
     fireEvent.click(within(card(hooked.id)).getByRole('button', { name: 'Remove marketplace' }));
     await waitFor(() => expect(sheet()?.getAttribute('data-plugins-sheet')).toBe('marketplace-remove'));
     expect(JSON.parse(sheet().querySelector('[data-plugins-argv]')!.getAttribute('data-plugins-argv')!)).toEqual(['plugin', 'marketplace', 'remove', 'maws-discover-test', '--scope', 'user', '--json']); // at the scope it was added at
+  });
+
+  it('the recovery’s Remove marketplace names what the removal uninstalls now: a plugin installed from it since the failed install', async () => {
+    outcome = (name) => (name === 'plugins.install' ? { ok: false, error: { code: 'cli_failed', message: 'plugin not found', failureCode: null, shownCommand: null } } : { ok: true, result: {} });
+    mountPlugins();
+    await discover();
+    fireEvent.click(within(card(hooked.id)).getByRole('button', { name: 'Add hooked' }));
+    await waitFor(() => expect(sheet().querySelector('[data-plugins-argv]')).toBeTruthy());
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
+    await waitFor(() => expect(card(hooked.id).querySelector('[data-marketplace-stays]')).toBeTruthy());
+    installedToo = [{ id: 'skills-only@maws-discover-test', name: 'skills-only', marketplace: 'maws-discover-test' }]; // installed since, elsewhere
+    fireEvent.click(within(card(hooked.id)).getByRole('button', { name: 'Remove marketplace' }));
+    await waitFor(() => expect(sheet()?.getAttribute('data-plugins-sheet')).toBe('marketplace-remove'));
+    expect(sheet().textContent).toContain('Also uninstalls 1 plugin: skills-only@maws-discover-test (user)');
   });
 
   it('a present marketplace’s plugin installs in one step; unknown contents get the softer warning', async () => {

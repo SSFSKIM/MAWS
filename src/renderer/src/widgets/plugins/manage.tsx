@@ -2,6 +2,7 @@
 // key, `ask` (which opens the confirm sheet; nothing runs before it is confirmed), and a row's operation line. The sheet
 // is drawn beside the widget frame rather than inside a row, so it survives the row leaving the list and its Escape
 // closes only the sheet.
+import { useQueryClient } from '@tanstack/react-query';
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { displayTitle } from '../../sessions/title';
@@ -11,7 +12,10 @@ import { TextButton } from '../parts';
 import { CATALOG_INSTALL as D } from './catalog-words';
 import { ConfirmSheet, type Declared, type EngineResolution } from './ConfirmSheet';
 import { usePluginOperations, type PluginOperations } from './operation';
-import { addStepOf, afterAddOf, declaredOf, operationWords, requestFor, scopeOf, type PluginsRequest } from './present';
+import { addStepOf, afterAddOf, declaredOf, operationWords, requestFor, scopeOf, uninstallsOf, type PluginsRequest } from './present';
+import { readInstalledNow } from './read';
+import { errorWords } from '../read';
+import { IpcCommandError } from '../../ipc/query';
 
 export interface Manage {
   cwd: string; // the session's directory, where every change runs
@@ -95,9 +99,12 @@ const titleOf = (appSessionId: string): string => {
 // A row's operation: `Working…`, the CLI's progress, the engine's result or failure with the reload report; Stop while
 // the CLI runs, and Reload again when a session did not reflect the change.
 // An install that followed adding its marketplace and failed leaves the marketplace added: the line says so and offers
-// Remove marketplace (its own sheet, at the scope it was added at).
+// Remove marketplace (its own sheet, at the scope it was added at), which names the plugins installed from that
+// marketplace as they are when it is asked: the removal uninstalls them all (scalpel-5#2).
 export function OperationLine({ opKey, label }: { opKey: string; label?: string }) {
-  const { ops, reloadMods, ask } = useManage();
+  const { ops, reloadMods, ask, cwd } = useManage();
+  const client = useQueryClient();
+  const [unread, setUnread] = useState<string | null>(null); // the installed list could not be read for the removal
   const entry = ops.entries.get(opKey);
   const words = entry ? operationWords(entry.state, titleOf, scopeOf(entry.request)) : null;
   if (!entry || words === null) return null;
@@ -114,7 +121,18 @@ export function OperationLine({ opKey, label }: { opKey: string; label?: string 
       {stays && (
         <span data-marketplace-stays={stays.marketplace} className="flex flex-wrap items-baseline gap-x-2 text-fg-muted">
           {D.staysAdded(stays.marketplace)}
-          <TextButton onClick={() => ask(opKey, requestFor('marketplace-remove', { name: stays.marketplace, scope: stays.scope }, null))}>{D.removeMarketplace}</TextButton>
+          <TextButton
+            onClick={() => {
+              setUnread(null);
+              readInstalledNow(client, cwd).then(
+                ({ plugins }) => ask(opKey, requestFor('marketplace-remove', { name: stays.marketplace, scope: stays.scope }, null, { uninstalls: uninstallsOf(plugins, stays.marketplace) })),
+                (error: unknown) => setUnread(error instanceof IpcCommandError ? errorWords(error) : String(error)),
+              );
+            }}
+          >
+            {D.removeMarketplace}
+          </TextButton>
+          {unread && <span className="text-danger">{unread}</span>}
         </span>
       )}
     </span>
