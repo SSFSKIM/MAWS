@@ -473,14 +473,12 @@ export const LIBRARY = {
   list: 'Plugins',
   noneHere: 'No plugins installed for this project yet.',
   firstTitle: 'Add your first plugins',
-  firstBody: 'Give Claude role-level expertise with plugins. Add them from Browse.',
+  firstBody: 'Give Claude role-level expertise with plugins. Find them in Discover.',
   noMatch: 'Nothing matches these filters.',
   resetFilters: 'Reset filters',
   loadedUnknown: 'What this session loaded is not observed yet.', // Show › Loaded in this session with nothing observed
   showAll: 'Show all plugins',
   failed: "Couldn't load your plugins.",
-  marketplacesFailed: "Couldn't load your marketplaces.", // Browse: the read its sections and installed cards join
-  browseUnknown: "Can't say what matches until the lists above are read.", // Browse empty while a joined read failed
   retry: 'Retry',
   manifestsFailed: "Couldn't read your plugins' details.", // `plugins.manifest` refused: the rows stay, by name
   // a row
@@ -570,25 +568,8 @@ export const LIBRARY = {
   missing: 'This plugin’s files are not on disk.',
   unread: 'What’s inside could not be read.',
   detailsFailed: "Couldn't read this plugin's details.", // the detail's `plugins.manifest` refused: the controls and facts stay
-  // the switch, Browse and the Add menu (M5; §5.8, §5.9; Desktop's words where it has them)
+  // the switch and the Add menu (M5; §5.8, §5.9; Desktop's words where it has them)
   library: 'Library',
-  browse: 'Browse',
-  filterBy: 'Filter',
-  status: 'Status',
-  statusWords: { installed: 'Installed', notInstalled: 'Not installed' } as const,
-  source: 'Source',
-  allSources: 'All sources',
-  browseSort: { popular: 'Most popular', name: 'Name' } as const,
-  install: 'Install',
-  installed: 'Installed',
-  installedElsewhere: 'Installed in other projects',
-  installs: (count: string) => `${count} installs`,
-  from: (marketplace: string) => `from ${marketplace}`,
-  alsoListedIn: (marketplace: string) => `Also listed in ${marketplace}`,
-  insideOnceInstalled: 'What’s inside is listed once it is installed.',
-  noDescription: 'No description provided.',
-  browseFailed: "Couldn't load the plugins to browse.",
-  noOffers: 'Nothing to browse yet. Add a marketplace to see what it offers.',
   add: 'Add',
   addMarketplace: 'Add marketplace',
   manageMarketplaces: 'Manage marketplaces',
@@ -611,7 +592,7 @@ export const SKILLS_LIBRARY = {
   sort: { name: 'Name', plugin: 'Plugin name' } as const,
   useInChat: 'Use in chat',
   firstTitle: 'Add your first skills',
-  firstBody: 'Skills teach Claude how you work. Plugins bring them: Browse in /plugins lists what your marketplaces offer.',
+  firstBody: 'Skills teach Claude how you work. Plugins bring them: Customize › Skills › Discover lists the plugins that carry skills.',
   failed: "Couldn't load your skills.",
   invoke: 'Type',
   plugin: 'Plugin',

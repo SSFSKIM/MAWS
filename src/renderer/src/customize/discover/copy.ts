@@ -7,6 +7,7 @@ import { CATALOG_INSTALL } from '../../widgets/plugins/catalog-words';
 export const DISCOVER = {
   ...CATALOG_INSTALL, // the sheet's words, shared with widgets/plugins
   discover: 'Discover',
+  openDiscover: 'Open Discover',
   search: 'Search all sources',
   refresh: 'Refresh',
   refreshing: 'Refreshing…',

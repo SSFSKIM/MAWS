@@ -1,21 +1,19 @@
 // The plugin library's head controls (P2-B execution document §5.2, §5.4, §5.8; Claude Desktop's in-dialog header, title
 // and switch at the left and its actions at the right, readable/app-2.16120.0/web/app/v1/ccefd43d9-CoNZ8js5.js:18-57):
-// the My items | Browse switch in `WidgetFrame`'s heading slot; in its toolbar slot, per tab, the search field ("Search
-// plugins", at most 200 characters; Escape clears it first, `/` focuses it), then My items' Show ("All plugins /
-// Enabled / Disabled" and MAWS's "Loaded in this session" and "Other projects") and Sort by ("Last updated", "Name"), or
-// Browse's Filter (Desktop's directory filter: Status, at least one kept checked, and Source) and Sort by ("Most popular",
-// offered only when some card has a count, and "Name"; c17e00059-BnqIc8l8.js:13-178), and the Add menu after either.
-// The choices live in the library store for the app run.
+// Customize's My items | Discover switch in `WidgetFrame`'s heading slot (the session's `/plugins` has Open Discover
+// there, P4-AGG Decision Log 10); in its toolbar slot, My items' search field ("Search plugins", at most 200 characters;
+// Escape clears it first, `/` focuses it), Show ("All plugins / Enabled / Disabled" and MAWS's "Loaded in this session"
+// and "Other projects") and Sort by ("Last updated", "Name"), and the Add menu. The choices live in the library store
+// for the app run.
 import { DropdownMenu, ToggleGroup } from 'radix-ui';
 import type { ReactNode } from 'react';
 import { IconButton, SearchIcon, SortIcon } from '../../app/IconButton';
 import { LIBRARY as L } from '../copy';
-import { sectionKey, type BrowseChoices, type BrowseSection, type BrowseSort } from './browse';
 import { FilterIcon } from './icons';
 import type { LibraryFilter, LibrarySort } from './library';
 import { useLibraryStore } from './library-store';
 
-export type LibraryTab = 'myItems' | 'browse';
+export type LibraryTab = 'myItems' | 'discover';
 
 const FILTERS: readonly LibraryFilter[] = ['all', 'enabled', 'disabled', 'loaded', 'otherProjects'];
 const SORTS: readonly LibrarySort[] = ['updated', 'name'];
@@ -23,11 +21,9 @@ const MENU = 'z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay
 const ITEM = 'flex h-7 cursor-default items-center gap-2 rounded-sm px-2 outline-none select-none data-highlighted:bg-bg-hover';
 const LABEL = 'px-2 py-1 text-ui-sm text-fg-muted';
 const set = (patch: Partial<ReturnType<typeof useLibraryStore.getState>['plugins']>) => useLibraryStore.setState((s) => ({ plugins: { ...s.plugins, ...patch } }));
-const setBrowse = (patch: Partial<BrowseChoices>) => useLibraryStore.setState((s) => ({ browse: { ...s.browse, ...patch } }));
 
-// Desktop's segmented switch beside the title: one of two views, each open starting on My items. Customize names its
-// second view Discover (P4-AGG M3), the session's `/plugins` Browse.
-export function LibrarySwitch({ tab, onChange, second = L.browse }: { tab: LibraryTab; onChange(tab: LibraryTab): void; second?: string }) {
+// Desktop's segmented switch beside the title: My items and, second, Discover (P4-AGG M3), named by the caller.
+export function LibrarySwitch({ tab, onChange, second }: { tab: LibraryTab; onChange(tab: LibraryTab): void; second: string }) {
   const item = 'h-6 rounded-sm px-2.5 text-ui text-fg-muted outline-accent hover:text-fg focus-visible:outline-2 data-[state=on]:bg-bg data-[state=on]:text-fg data-[state=on]:ring-1 data-[state=on]:ring-border';
   return (
     <ToggleGroup.Root
@@ -41,7 +37,7 @@ export function LibrarySwitch({ tab, onChange, second = L.browse }: { tab: Libra
       <ToggleGroup.Item value="myItems" className={item}>
         {L.myItems}
       </ToggleGroup.Item>
-      <ToggleGroup.Item value="browse" className={item}>
+      <ToggleGroup.Item value="discover" className={item}>
         {second}
       </ToggleGroup.Item>
     </ToggleGroup.Root>
@@ -132,55 +128,3 @@ export function PluginsToolbar({ add }: { add: ReactNode }) {
   );
 }
 
-// A source's name in the filter: Anthropic's section by its heading, a marketplace by its own name.
-export const sourceWords = (source: BrowseSection): string => (source.kind === 'anthropic' ? L.group.anthropic : source.name);
-
-const ALL_SOURCES = '\u0000all'; // the radio value of All sources (no section key can be it)
-
-export function BrowseToolbar({ sources, hasCounts, sort, add }: { sources: readonly BrowseSection[]; hasCounts: boolean; sort: BrowseSort; add: ReactNode }) {
-  const { search, status, source } = useLibraryStore((s) => s.browse);
-  // Desktop's Status: both checked by default, and the last checked one cannot be unchecked
-  const toggle = (which: keyof BrowseChoices['status']) => {
-    const next = { ...status, [which]: !status[which] };
-    if (next.installed || next.notInstalled) setBrowse({ status: next });
-  };
-  const sorts: readonly BrowseSort[] = hasCounts ? ['popular', 'name'] : ['name'];
-  const byKey = new Map(sources.map((s) => [sectionKey(s), s]));
-  return (
-    <span className="flex min-w-0 items-center gap-1">
-      <SearchField value={search} onChange={(next) => setBrowse({ search: next })} />
-      <Menu label={L.filterBy} icon={<FilterIcon />} pressed={!(status.installed && status.notInstalled) || source !== null}>
-        <DropdownMenu.Label className={LABEL}>{L.status}</DropdownMenu.Label>
-        {(['installed', 'notInstalled'] as const).map((which) => (
-          <DropdownMenu.CheckboxItem
-            key={which}
-            checked={status[which]}
-            onSelect={(event) => {
-              event.preventDefault(); // Desktop keeps the menu open while Status is chosen
-              toggle(which);
-            }}
-            className={ITEM}
-          >
-            <span aria-hidden className="w-3 text-accent">
-              <DropdownMenu.ItemIndicator>✓</DropdownMenu.ItemIndicator>
-            </span>
-            {L.statusWords[which]}
-          </DropdownMenu.CheckboxItem>
-        ))}
-        <DropdownMenu.Separator className="my-1 h-px bg-border" />
-        <DropdownMenu.Label className={LABEL}>{L.source}</DropdownMenu.Label>
-        <Radios
-          value={source === null ? ALL_SOURCES : sectionKey(source)}
-          values={[ALL_SOURCES, ...byKey.keys()]}
-          words={(v) => {
-            const section = byKey.get(v);
-            return section ? sourceWords(section) : L.allSources;
-          }}
-          onChange={(next) => setBrowse({ source: byKey.get(next) ?? null })}
-        />
-      </Menu>
-      <Choice label={L.sortBy} icon={<SortIcon />} value={sort} values={sorts} words={L.browseSort} isDefault={sort === (hasCounts ? 'popular' : 'name')} onChange={(next) => setBrowse({ sort: next })} />
-      {add}
-    </span>
-  );
-}

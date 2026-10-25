@@ -9,8 +9,8 @@
 // size with Esc handing the keyboard back; My items' groups; frontend-design's detail ("Loaded last time"); the loaded
 // line on the exited session ("Loaded last time, <relative>" with Refresh) with no engine started; `/skills` on the
 // exited session in P2-A's dormant state, starting nothing until its Load now (which then reads the skills with no
-// turn), the session stopped again; the loaded line's Refresh ("Starting…", then "Loaded now"); Browse's counts and the
-// other-projects card installing here; Manage marketplaces; `/skills`' groups with Use in chat, and `/sandbox`. Light
+// turn), the session stopped again; the loaded line's Refresh ("Starting…", then "Loaded now"); Open Discover's counts
+// and the other-projects card installing here (P4-AGG Decision Log 10); Manage marketplaces; `/skills`' groups with Use in chat, and `/sandbox`. Light
 // and dark shots of each library. The owner's ~/.claude.json check runs
 // around the whole run, outside this file (§6.3). Run on purpose only; it spends usage (one one-line Haiku turn):
 //   MAWS_HARNESS=1 pnpm exec electron-vite build && unset MAWS_E2E; MAWS_E8_LIVE=1 [MAWS_LIVE_MAX_USD=0.15] pnpm exec playwright test e2e/plugins-library-live.spec.ts --reporter=line
@@ -21,7 +21,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import type { AppSessionId } from '@shared/graph/ids';
-import { installCountWords } from '../src/renderer/src/widgets/plugins/browse';
+import { installCountWords } from '../src/renderer/src/customize/discover/present';
 import { ENGINE_BIN, ENGINE_VERSION } from '../test/support/engine-pin';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws } from './support/launch';
@@ -44,7 +44,7 @@ let scratch: PluginsScratch;
 let other: string; // a second project, trusted in the scratch home, where supabase is installed
 let refusal: string | null = null; // the network's words when the marketplace could not be added
 // an official plugin not installed here, counted in the millions, and the count of a directory entry of its name (the
-// card Browse folds them into keeps the larger)
+// catalog joins into one card; logged beside Discover's own count)
 let popular: { name: string; count: number; directoryCount: number | null } | null = null;
 let directoryOnly: string | null = null; // a directory entry no official entry shares a name with
 
@@ -84,7 +84,7 @@ test.beforeAll(() => {
     expect(run('install code-review --scope user', ['install', o('code-review'), '--scope', 'user'], scratch.root).ok).toBe(true);
     expect(run('install frontend-design --scope project (proj)', ['install', o('frontend-design'), '--scope', 'project'], scratch.repo).ok).toBe(true);
     expect(run('install supabase --scope project (other)', ['install', o('supabase'), '--scope', 'project'], other).ok).toBe(true);
-    // what Browse should show, from the engine's own catalogue listing (a listing: catalogue caches only)
+    // what Discover should show, from the engine's own catalogue listing (a listing: catalogue caches only)
     const listed = cli(['list', '--json', '--available'], scratch.repo);
     const available = (JSON.parse(listed.out) as { available: { name: string; marketplaceName: string; installCount?: unknown }[] }).available;
     const official = available.filter((p) => p.marketplaceName === OFFICIAL);
@@ -366,43 +366,43 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
       await plugins.getByRole('button', { name: /^Back to / }).click();
     });
 
-    await step('browse', 'Browse after its click: counts on official cards, none on a directory-only card; supabase Installed in other projects, installed here', async () => {
+    // P4-AGG Decision Log 10: new plugins are found in Discover; `/plugins`' Open Discover opens Customize › Plugins ›
+    // Discover for the session's project. Its counts are the catalog's (plugin-details for official plugins), so the
+    // CLI's count is logged beside the card's rather than required equal.
+    await step('discover', 'Open Discover from /plugins: counts on official cards, none on a directory-only card; supabase Installed in another project, installed here', async () => {
       if (!needsCatalogue()) return;
-      const w = page.locator('[data-widget="plugins"]');
-      await w.getByRole('radio', { name: 'Browse' }).click();
-      const browse = w.locator('[data-plugins-section="browse"]');
-      await expect(browse.locator('[data-browse-card]').first()).toBeVisible({ timeout: 120_000 });
-      const search = w.getByRole('searchbox', { name: 'Search plugins' });
-      // the marketplace was added, so the catalogue must offer both candidates: a count left unproved is a failure
+      await page.locator('[data-widget="plugins"]').getByRole('button', { name: 'Open Discover', exact: true }).click();
+      const w = page.locator('[data-region="main"] [data-widget="plugins"][data-widget-variant="embedded"]');
+      const discover = w.locator('[data-discover="plugins"]');
+      await expect(discover.locator('[data-catalog-card]').first()).toBeVisible({ timeout: 120_000 });
+      const search = w.getByRole('searchbox', { name: 'Search all sources' });
+      const named = (name: string) => discover.locator('[data-catalog-results]').last().locator(`[data-catalog-grid] [data-catalog-card][data-install-name="${name}"]`);
+      // the marketplace was added, so the catalog must list both candidates: a count left unproved is a failure
       if (!popular) throw new Error('the catalogue offers no official plugin counted in the millions: the counts went unproved');
       if (!directoryOnly) throw new Error('the catalogue offers no directory-only entry: the uncounted card went unproved');
       await search.fill(popular.name);
-      // the official entry's own card, or the directory's card it folded into, which keeps the larger count (§5.8)
-      const own = browse.locator(`[data-browse-card="${o(popular.name)}"]`);
-      const folded = browse.locator(`[data-browse-card="${popular.name}@${DIRECTORY}"]`);
-      await expect(own.or(folded).first()).toBeVisible();
-      const isOwn = (await own.count()) > 0;
-      const counted = isOwn ? own : folded;
-      const expected = `${installCountWords(isOwn ? popular.count : Math.max(popular.count, popular.directoryCount ?? 0))} installs`;
-      await expect(counted.locator('[data-install-count]')).toHaveText(expected);
-      scratch.log(`${popular.name}: ${await counted.getAttribute('data-browse-card')} · ${await counted.locator('[data-install-count]').innerText()} (the CLI's ${popular.count}, its directory entry's ${popular.directoryCount ?? 'none'})`);
+      const counted = named(popular.name).filter({ has: page.locator('[data-catalog-metric]') }).first();
+      await expect(counted).toBeVisible({ timeout: 60_000 });
+      const shown = await counted.locator('[data-catalog-metric]').innerText();
+      expect(shown).toMatch(/^\d+(?:\.\d)?[KM]? installs$/);
+      scratch.log(`${popular.name}: ${await counted.getAttribute('data-catalog-card')} · ${shown} (the CLI's ${popular.count}, ${installCountWords(popular.count)} installs; its directory entry's ${popular.directoryCount ?? 'none'})`);
       await search.fill(directoryOnly);
-      const uncounted = browse.locator(`[data-browse-card="${directoryOnly}@${DIRECTORY}"]`);
-      await expect(uncounted).toBeVisible();
-      await expect(uncounted.locator('[data-install-count]')).toHaveCount(0);
-      scratch.log(`${directoryOnly}@${DIRECTORY}: no count`);
+      const uncounted = named(directoryOnly).first();
+      await expect(uncounted).toBeVisible({ timeout: 60_000 });
+      await expect(uncounted.locator('[data-catalog-metric]')).toHaveCount(0);
+      scratch.log(`${directoryOnly}: ${await uncounted.getAttribute('data-catalog-card')} · no count`);
       await search.fill('');
-      await bothThemes('browse');
+      await bothThemes('discover');
       await search.fill('supabase');
-      const supabase = browse.locator(`[data-browse-card="${o('supabase')}"]`);
-      await expect(supabase).toHaveAttribute('data-installed', 'otherProjects');
-      await expect(supabase).toContainText('Installed in other projects');
-      await supabase.getByRole('button', { name: 'Install', exact: true }).click();
+      const supabase = named('supabase').and(discover.locator(`[data-install-marketplace="${OFFICIAL}"]`));
+      await expect(supabase).toHaveAttribute('data-installed', 'elsewhere', { timeout: 60_000 });
+      await expect(supabase).toContainText('Installed in another project');
+      await supabase.locator('[data-catalog-add]').click();
       const sheet = page.locator('[data-plugins-sheet="install"]');
       await sheet.getByRole('radio', { name: 'Project' }).check();
       const argv = await sheet.locator('[data-plugins-argv]').innerText();
       scratch.log(`sheet: ${argv}`);
-      await shot('browse-install-sheet');
+      await shot('discover-install-sheet');
       await sheet.getByRole('button', { name: 'Install', exact: true }).click();
       await expect(supabase).toHaveAttribute('data-installed', 'here', { timeout: 120_000 });
       // the session is running since Refresh, so E8's reload of the running sessions follows the install before its result

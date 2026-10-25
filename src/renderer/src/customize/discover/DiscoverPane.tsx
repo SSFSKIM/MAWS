@@ -13,9 +13,40 @@ import { DISCOVER as D } from './copy';
 import { QueryGrid, ShelfHeading } from './DiscoverGrid';
 import { DiscoverHome, SortControl } from './DiscoverHome';
 import { FilterRow } from './DiscoverToolbar';
+import { useCatalogItem } from './read';
 import { filtering, NO_CHOICES, queryOf, setChoices, useDiscoverStore } from './store';
+import { OperationLine, useManage } from '../../widgets/plugins/manage';
+import { CATALOG_KEY } from './add';
 
 type Tab = Exclude<CatalogTab, 'connectors'>;
+
+// A change's result whose item the catalog no longer lists (an install the marketplace withdrew, an uninstall that
+// dropped a plugin nobody else lists): its card is gone, so its line stays at the head, by the item's name.
+function LeftResults({ cwd }: { cwd: string | null }) {
+  const { ops } = useManage();
+  const keys = [...ops.entries.keys()].filter((key) => key.startsWith(CATALOG_KEY));
+  return keys.length === 0 ? null : (
+    <div className="flex flex-col gap-1 empty:hidden">
+      {keys.map((key) => (
+        <LeftResult key={key} opKey={key} cwd={cwd} />
+      ))}
+    </div>
+  );
+}
+
+function LeftResult({ opKey, cwd }: { opKey: string; cwd: string | null }) {
+  const { ops } = useManage();
+  const id = opKey.slice(CATALOG_KEY.length);
+  const read = useCatalogItem(id, cwd);
+  const request = ops.entries.get(opKey)?.request;
+  if (!read.isError || request === undefined) return null;
+  return (
+    <p data-catalog-result={id} className="m-0 flex min-w-0 flex-wrap items-baseline gap-x-2 text-ui-sm">
+      <span className="font-medium text-fg">{request.catalog?.name ?? id}</span>
+      <OperationLine opKey={opKey} />
+    </p>
+  );
+}
 
 export function DiscoverPane({ tab, cwd, onOpenInstalled }: { tab: Tab; cwd: string | null; onOpenInstalled(item: CatalogItem): void }) {
   const choices = useDiscoverStore((s) => s[tab]);
@@ -43,6 +74,7 @@ export function DiscoverPane({ tab, cwd, onOpenInstalled }: { tab: Tab; cwd: str
       {detail && <CatalogDetail key={detail.id} item={detail} tab={tab} cwd={cwd} onBack={() => setDetail(null)} />}
       <div ref={pane} data-discover-pane className={showing ? 'hidden' : 'flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-2 pt-1 pb-4'}>
         <FilterRow tab={tab} cwd={cwd} />
+        <LeftResults cwd={cwd} />
         {tab === 'skills' && (
           <p data-skills-note className="m-0 text-ui-sm text-fg-muted">
             {D.skillsNote}

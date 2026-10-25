@@ -134,7 +134,7 @@ function SkillsSection({ cwd, inventory, scope }: { cwd: string | null; inventor
   // the management state outlives both views (SkillsManage): a change asked in Discover runs on while My items shows
   return (
     <SkillsManage cwd={cwd}>
-      {view === 'browse' ? (
+      {view === 'discover' ? (
         <>
           {toolbar}
           <SkillsDiscover

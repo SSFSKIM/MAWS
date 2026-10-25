@@ -1,21 +1,20 @@
 // `/plugins` (C11; E8 execution document, M2; P2-B execution document §5.2 to §5.9): the plugin library, Claude Desktop's
 // grouped plugin library as its 2.16120.0 bundle ships it, over E8's management through the engine's own CLI. A
-// library-sized dialog (X19) whose head carries the title and the My items | Browse switch at the left and, at the right,
-// the open view's Search, Show or Filter, and Sort, and the Add menu (Add marketplace, Manage marketplaces). Every open
-// starts on My items with no selection, so Browse's catalogue read runs only on the click that opens it (E8 D-7: the
-// listing refreshes the engine's catalogue caches), and is kept while the dialog stays open. My items: the loaded line
-// about this session, then one row per plugin in Desktop's source groups. Selecting a row or a card opens its detail in
-// place of its list (§5.7, §5.8): the list stays mounted beneath it, hidden, so Back returns to it with its search,
-// filter, scroll and focus as they were; the head's controls and the loaded line belong to the list and leave with it.
-// An installed card opens the plugin's My items detail, whose Back returns to Browse. The two marketplace dialogs are
+// library-sized dialog (X19) whose head carries the title and, at the left, Open Discover (P4-AGG Decision Log 10: new
+// plugins are found in Customize › Plugins › Discover, which it opens for the session's project) and, at the right, My
+// items' Search, Show and Sort, and the Add menu (Add marketplace, Manage marketplaces). Customize's embedded library has
+// the My items | Discover switch there instead. My items: the loaded line about this session, then one row per plugin in
+// Desktop's source groups. Selecting a row opens its detail in place of the list (§5.7): the list stays mounted beneath
+// it, hidden, so Back returns to it with its search, filter, scroll and focus as they were; the head's controls and the
+// loaded line belong to the list and leave with it. The two marketplace dialogs are
 // sheets beside the frame, as E8's confirm sheet is, which stacks above them; every change is E8's CLI run after that
 // sheet. The CLI needs no engine process, so a session with no ready process still manages plugins: the frame's states
 // never stand in for the list, and A's session states (its observed facts, availability and Refresh) reach `/plugins`
 // only through the loaded line and the detail's "Loaded in this session".
 import { useQueryClient } from '@tanstack/react-query';
-import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { EngineSessionStatus } from '@shared/engine/status';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { CommandOutput } from '@shared/ipc/schema';
 import type { PluginManifestView } from '@shared/ipc/schema/plugins';
 import { useAvailability } from '../sessions/availability';
@@ -24,11 +23,8 @@ import { useSessions } from '../stores/sessions';
 import { LIBRARY as L, PLUGIN_MANAGEMENT, WIDGET_TITLE } from './copy';
 import { AddMarketplaceDialog } from './plugins/AddMarketplaceDialog';
 import { AddMenu, type MarketplaceDialog } from './plugins/AddMenu';
-import { BrowsePane } from './plugins/BrowsePane';
-import { browseCards, browseView, isInstalledHere, type BrowseCard } from './plugins/browse';
-import { BrowseDetail } from './plugins/BrowseDetail';
 import type { EngineResolution } from './plugins/ConfirmSheet';
-import { BrowseToolbar, LibrarySwitch, PluginsToolbar, type LibraryTab } from './plugins/LibraryHeader';
+import { LibrarySwitch, PluginsToolbar, type LibraryTab } from './plugins/LibraryHeader';
 import { identitiesOf, installationRef } from './plugins/library';
 import { useLibraryStore } from './plugins/library-store';
 import { LoadedLine } from './plugins/LoadedLine';
@@ -45,6 +41,15 @@ import { pluginIdOf } from '../customize/discover/add';
 import { DISCOVER } from '../customize/discover/copy';
 import { DiscoverPane } from '../customize/discover/DiscoverPane';
 import { DiscoverToolbar } from '../customize/discover/DiscoverToolbar';
+import { openDiscover, takeDiscoverRequest, useDiscoverRequest } from '../customize/open';
+
+// The project `/plugins`' Open Discover shows: the one whose directory is the session's cwd, else the session's own,
+// else the user configuration.
+function projectOf(cwd: string | null, appSessionId: AppSessionId | null): ProjectId | null {
+  const { projects, records } = useSessions.getState();
+  const here = [...projects.values()].find((project) => project.directory === cwd);
+  return here?.id ?? (appSessionId === null ? null : (records.get(appSessionId)?.projectId ?? null));
+}
 
 // The sessions a change reloads: those with a ready process (the host's fan-out targets).
 const readyCount = (engine: ReadonlyMap<AppSessionId, EngineSessionStatus>): number => {
@@ -68,7 +73,7 @@ const NO_VIEWS: ReadonlyMap<string, PluginManifestView> = new Map();
 type LibraryPresentation = { variant: 'embedded'; scope?: ReactNode } | { variant: 'modal'; appSessionId: AppSessionId; close(): void };
 
 // P4-AGG M3: Customize's library shows Discover (the catalog over `catalog.*`, Discover's page cwd: null for the user
-// configuration) in Browse's place; the session's `/plugins` keeps Browse.
+// configuration) beside My items; the session's `/plugins` keeps My items and opens Discover there (Decision Log 10).
 export interface DiscoverOption {
   cwd: string | null;
 }
@@ -151,14 +156,15 @@ function LibraryBody({ cwd, session, presentation, discover }: { cwd: string | n
   const { views } = manifests;
   const identities = useMemo(() => identitiesOf(plugins ?? [], markets ?? [], views, loadedIds), [plugins, markets, views, loadedIds]);
 
-  // the view: My items or Browse, this open's own; Browse's catalogue is read from its first click until the dialog closes
-  const [tab, setTab] = useState<LibraryTab>('myItems');
-  const [browsed, setBrowsed] = useState(false);
-  const available = usePluginsRead('plugins.available', cwd, browsed && !discover, tab === 'browse');
-  const offers = available.data?.plugins;
-  const cards = useMemo(() => browseCards(offers ?? [], identities, markets ?? []), [offers, identities, markets]);
-  const choices = useLibraryStore((s) => s.browse);
-  const shown = useMemo(() => browseView(cards, choices), [cards, choices]);
+  // the view: My items, or (in Customize) Discover; a request from the session's `/plugins` (Open Discover, Decision Log
+  // 10) for this library's page opens it on Discover, whether it is mounted already or mounts for it
+  const [tab, setTab] = useState<LibraryTab>(() => (discover && takeDiscoverRequest(discover.cwd) ? 'discover' : 'myItems'));
+  useEffect(() => {
+    if (!discover) return;
+    return useDiscoverRequest.subscribe(() => {
+      if (takeDiscoverRequest(discover.cwd)) setTab('discover');
+    });
+  }, [discover]);
   const [dialog, setDialog] = useState<MarketplaceDialog | null>(null);
 
   // My items' detail: the plugin selected in this open, while it is listed (one uninstalled everywhere returns to the list)
@@ -182,34 +188,31 @@ function LibraryBody({ cwd, session, presentation, discover }: { cwd: string | n
     target?.focus();
   }, [showing]);
 
-  // Browse's detail. A card's detail shows the card as last read, refreshed whenever the reads list it, and leaves only by
-  // Back, the switch or closing the dialog: never because the card is missing from the latest reads. A change's reads
-  // answer one by one (an install's catalogue leaves the plugin out before the installed list adds it back, and a change
-  // during a listing is reread after it), so a missing card says nothing about whether it left; and the detail offers
-  // only Install, so nothing done in it can make it leave. A card installed for the user or here opens its My items
-  // detail instead, which follows the installed list as My items' does (its Uninstall… returns to the grid).
-  const [picked, setPicked] = useState<{ installed: boolean; card: BrowseCard } | null>(null);
-  const fresh = picked === null ? undefined : cards.find((c) => c.pluginId === picked.card.pluginId);
-  if (picked !== null && fresh !== undefined && fresh !== picked.card) setPicked({ ...picked, card: fresh }); // keep the card as last read
-  const card: BrowseCard | null = picked === null || picked.installed ? null : (fresh ?? picked.card);
-  const pickedIdentity = picked?.installed ? (identities.find((i) => i.id === picked.card.pluginId) ?? null) : null;
-  const browseDetail = picked === null ? null : picked.installed ? pickedIdentity : card;
-  const pick = useCallback((c: BrowseCard) => setPicked({ installed: isInstalledHere(c), card: c }), []);
-  if (picked?.installed && pickedIdentity === null) setPicked(null); // its installed list answered without it: back to the grid
-
   // a view's switch: to the other view, or (the view already shown) back to its list
   const switchTo = (next: LibraryTab) => {
-    if (next === 'browse') setBrowsed(true);
-    if (next === tab) {
-      if (next === 'myItems') setSelected(null);
-      else setPicked(null);
-    }
+    if (next === tab && next === 'myItems') setSelected(null);
     setTab(next);
   };
 
-  const inDetail = tab === 'myItems' ? showing : browseDetail !== null;
   const add = <AddMenu onOpen={setDialog} />;
-  const toolbar = discover && tab === 'browse' ? <DiscoverToolbar tab="plugins" add={add} /> : inDetail ? null : tab === 'myItems' ? <PluginsToolbar add={add} /> : <BrowseToolbar sources={shown.sources} hasCounts={shown.hasCounts} sort={shown.sort} add={add} />;
+  const toolbar = discover && tab === 'discover' ? <DiscoverToolbar tab="plugins" add={add} /> : showing ? null : <PluginsToolbar add={add} />;
+  // the session's `/plugins` finds new plugins in Discover (Decision Log 10): Customize › Plugins › Discover for the
+  // session's project (the project whose directory is the session's cwd, else the session's own), the modal closed
+  const heading = discover ? (
+    <LibrarySwitch tab={tab} onChange={switchTo} second={DISCOVER.discover} />
+  ) : (
+    <button
+      type="button"
+      data-open-discover
+      onClick={() => {
+        if (presentation.variant === 'modal') presentation.close();
+        openDiscover(projectOf(cwd, appSessionId));
+      }}
+      className="inline-flex h-7 shrink-0 items-center rounded-md border border-border px-2.5 text-ui text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2"
+    >
+      {DISCOVER.openDiscover}
+    </button>
+  );
   // an item Discover shows installed here opens in My items, its detail when My items lists it under that id
   const openInstalled = (item: Parameters<typeof pluginIdOf>[0]) => {
     const id = pluginIdOf(item);
@@ -222,7 +225,7 @@ function LibraryBody({ cwd, session, presentation, discover }: { cwd: string | n
 
   return (
     <ManageProvider value={manage}>
-      <WidgetFrame {...presentation} title={WIDGET_TITLE.plugins} command="plugins" state="ready" error={null} size="library" heading={<LibrarySwitch tab={tab} onChange={switchTo} second={discover ? DISCOVER.discover : undefined} />} toolbar={toolbar}>
+      <WidgetFrame {...presentation} title={WIDGET_TITLE.plugins} command="plugins" state="ready" error={null} size="library" heading={heading} toolbar={toolbar}>
         {tab === 'myItems' && (
           <>
             {detail && pluginDetail(detail, L.myItems, () => setSelected(null))}
@@ -255,26 +258,7 @@ function LibraryBody({ cwd, session, presentation, discover }: { cwd: string | n
             </div>
           </>
         )}
-        {tab === 'browse' && discover && <DiscoverPane tab="plugins" cwd={discover.cwd} onOpenInstalled={openInstalled} />}
-        {tab === 'browse' && !discover && (
-          <>
-            {picked !== null && pickedIdentity !== null && pluginDetail(pickedIdentity, L.browse, () => setPicked(null))}
-            {picked !== null && !picked.installed && card !== null && <BrowseDetail key={card.pluginId} card={card} onBack={() => setPicked(null)} />}
-            <BrowsePane
-              read={available}
-              cards={cards}
-              installed={plugins}
-              joins={[
-                { key: 'installed', read: installed, onRetry: installed.retry },
-                { key: 'marketplaces', read: marketplaces, onRetry: marketplaces.retry },
-              ]}
-              view={shown}
-              hidden={browseDetail !== null}
-              onOpen={pick}
-              onRetry={() => void client.refetchQueries({ queryKey: ['maws', 'plugins.available', { cwd }] })}
-            />
-          </>
-        )}
+        {tab === 'discover' && discover && <DiscoverPane tab="plugins" cwd={discover.cwd} onOpenInstalled={openInstalled} />}
       </WidgetFrame>
       {dialog === 'manage' && <ManageMarketplaces marketplaces={marketplaces} installed={plugins ?? []} onClose={() => setDialog(null)} />}
       {dialog === 'add' && <AddMarketplaceDialog onClose={() => setDialog(null)} />}

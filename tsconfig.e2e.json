@@ -79,7 +79,10 @@
     "src/renderer/src/tools/browser/comment/copy.ts",
     "src/renderer/src/tools/artifacts/viewers/connectors/copy.ts", // P3-HD M4b: route D's scenes read the sheet's own words
     "src/renderer/src/tools/presentation/drag-stats.ts", // P4-B2 M0: the drag spec reads the seam's drag probe by its type
-    "src/renderer/src/widgets/plugins/browse.ts",
+    // P4-AGG M3: the live library run formats install counts with Discover's own words
+    "src/renderer/src/customize/discover/present.ts",
+    "src/renderer/src/customize/discover/copy.ts",
+    "src/renderer/src/widgets/plugins/catalog-words.ts",
     "src/renderer/src/widgets/plugins/library.ts",
     "test/live/support/live.ts",
     "test/live/support/tool-time.ts", // P4-A2 (X34): the paid live specs read the tool-time guard after their last turn; P4-A1: the parity bench's arm reads MAWS's tool time through its reader

@@ -9,7 +9,8 @@ import { requestFor, type PluginsRequest } from '../../widgets/plugins/present';
 import { componentParts, runsCodeWords } from './present';
 
 /** The operation key a card's + runs under: its line shows on the card and in its detail. */
-export const catalogKey = (item: CatalogItem): string => `catalog:${item.id}`;
+export const CATALOG_KEY = 'catalog:';
+export const catalogKey = (item: CatalogItem): string => `${CATALOG_KEY}${item.id}`;
 
 /** The id My items knows an installed route by (`<plugin>@<marketplace>`), or null for a route that is not a plugin. */
 export const pluginIdOf = (item: CatalogItem): string | null => (item.install.kind === 'plugin' ? `${item.install.pluginName}@${item.install.marketplaceName}` : null);

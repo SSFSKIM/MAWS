@@ -8,7 +8,6 @@
 //   Desktop's softer "may include".
 // - Counts are shown where a source has them and nowhere else: installs for official plugins, a rank for connectors.
 import type { CatalogItem, CatalogTab } from '@shared/ipc/schema/catalog';
-import { installCountWords } from '../../widgets/plugins/browse';
 import { DISCOVER as D } from './copy';
 
 export interface Trust {
@@ -79,6 +78,14 @@ export function runsCodeWords(item: CatalogItem): string | null {
   if (local > 0) named.push(D.codeLocalServers(local));
   if (c?.cli) named.push(D.codeCli);
   return named.length > 0 ? D.runsCodeNamed(named) : D.runsCodeUnnamed;
+}
+
+/** An install count as Desktop formats it: the integer below 1,000, then one decimal (".0" dropped) with K or M. */
+export function installCountWords(n: number): string {
+  if (n < 1000) return String(n);
+  const [scaled, unit] = n < 999_950 ? [n / 1000, 'K'] : [n / 1_000_000, 'M'];
+  const fixed = scaled.toFixed(1);
+  return `${fixed.endsWith('.0') ? fixed.slice(0, -2) : fixed}${unit}`;
 }
 
 /** "1.3M installs" or "#4 most popular", where a source has the number; a 0 is no count. */

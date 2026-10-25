@@ -4,7 +4,7 @@
 // or the softer wording when the contents are unknown; counts only where a source has them.
 import { describe, expect, it } from 'vitest';
 import type { CatalogItem } from '@shared/ipc/schema/catalog';
-import { componentsWords, metricWords, runsCodeWords, trustOf } from './present';
+import { cardContentsWords, componentsWords, installCountWords, metricWords, runsCodeWords, trustOf } from './present';
 import { item } from './test-items';
 
 describe('the trust label', () => {
@@ -59,5 +59,27 @@ describe('counts', () => {
     expect(metricWords(item({ kind: 'connector', rank: 4 }))).toBe('#4 most popular');
     expect(metricWords(item({ installs: null }))).toBeNull();
     expect(metricWords(item({ installs: 0 }))).toBeNull();
+  });
+});
+
+describe('install counts', () => {
+  it('formats as Desktop does: the integer below 1,000, then one decimal with .0 dropped and K or M', () => {
+    expect(installCountWords(0)).toBe('0');
+    expect(installCountWords(999)).toBe('999');
+    expect(installCountWords(1_000)).toBe('1K');
+    expect(installCountWords(3_448)).toBe('3.4K');
+    expect(installCountWords(12_345)).toBe('12.3K');
+    expect(installCountWords(999_949)).toBe('999.9K');
+    expect(installCountWords(999_950)).toBe('1M');
+    expect(installCountWords(1_290_640)).toBe('1.3M');
+  });
+});
+
+describe('a card’s contents line', () => {
+  it('on Skills, the skills by name; elsewhere, and with no skills known, the components line', () => {
+    const skills = item({ components: { skills: ['greet', 'summarize-diff'], mcpServers: [], hooks: false, commands: 0, agents: 0, cli: false } });
+    expect(cardContentsWords(skills, 'skills')).toBe('greet, summarize-diff');
+    expect(cardContentsWords(skills, 'plugins')).toBe('2 skills');
+    expect(cardContentsWords(item({ components: null }), 'skills')).toBe('Contents shown after install');
   });
 });

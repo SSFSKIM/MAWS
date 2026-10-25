@@ -208,28 +208,41 @@ const sheetOf = (page: Page, action: string) => page.locator(`[data-plugins-shee
 const argvOf = async (sheet: Locator) => JSON.parse((await sheet.locator('[data-plugins-argv]').getAttribute('data-plugins-argv')) ?? 'null') as string[];
 // A row's own status line (the widget holds several).
 const lineOf = (row: Locator) => row.getByRole('status');
-// P2-B M5: Browse (its `--available` read on the switch's click), its cards and their detail; the Add menu's two
-// marketplace dialogs, sheets beside the frame under which E8's confirm sheet stacks.
-const browseOf = (w: Locator) => w.locator('[data-plugins-section="browse"]');
-async function openBrowse(w: Locator): Promise<Locator> {
-  await w.getByRole('radio', { name: 'Browse' }).click();
-  await expect(browseOf(w).locator('[data-browse-card]').first()).toBeVisible();
-  return browseOf(w);
+// P4-AGG Decision Log 10: `/plugins` finds new plugins through Open Discover, which closes it and opens Customize ›
+// Plugins › Discover for the session's project: main's catalog over the engine's reads (the stub's here; under
+// MAWS_E2E the network sources are offline), whose cards install through E8's sheet. The Add menu's two marketplace
+// dialogs are sheets beside the frame under which E8's confirm sheet stacks.
+const customizeLibrary = (page: Page) => page.locator('[data-region="main"] [data-widget="plugins"][data-widget-variant="embedded"]');
+const allOf = (w: Locator) => w.locator('[data-discover="plugins"] [data-catalog-results]').last(); // All, on the home
+async function openDiscover(w: Locator): Promise<Locator> {
+  await w.getByRole('button', { name: 'Open Discover', exact: true }).click();
+  await expect(w).toBeHidden();
+  const library = customizeLibrary(w.page());
+  await expect(allOf(library).locator('[data-catalog-grid] [data-catalog-card]').first()).toBeVisible({ timeout: 30_000 });
+  return library;
 }
 async function toMyItems(w: Locator): Promise<void> {
-  await w.getByRole('radio', { name: 'My items' }).click();
+  const view = w.getByRole('radio', { name: 'My items' }); // Customize's switch; `/plugins` is My items alone (Decision Log 10)
+  if ((await view.count()) > 0) await view.click();
   await expect(w.locator('[data-plugins-section="my-items"]')).toBeVisible();
 }
-const cardOf = (w: Locator, id: string) => browseOf(w).locator(`[data-browse-card="${id}"]`);
-const browseDetailOf = (w: Locator) => w.locator('[data-browse-detail]');
-// A card's click opens its detail (here on its description: Install keeps its own click).
+// A plugin's card in All, by the `<plugin>@<marketplace>` the engine installs: its install name and the marketplace
+// its route installs from (the card's own id is the catalog's identity).
+const cardOf = (w: Locator, id: string) => {
+  const [name, marketplace] = id.split('@');
+  return allOf(w).locator(`[data-catalog-grid] [data-catalog-card][data-install-name="${name}"][data-install-marketplace="${marketplace}"]`);
+};
+const addOn = (card: Locator) => card.locator('[data-catalog-add]').click();
+const detailOfCard = (w: Locator) => w.locator('[data-catalog-detail]');
+// A card's detail, by keyboard (its whole-card target, then Enter; + keeps its own click).
 async function openCard(w: Locator, id: string): Promise<Locator> {
-  await cardOf(w, id).locator('p').first().click();
-  await expect(browseDetailOf(w)).toHaveAttribute('data-browse-detail', id);
-  return browseDetailOf(w);
+  await cardOf(w, id).locator('[data-card-open]').focus();
+  await w.page().keyboard.press('Enter');
+  await expect(detailOfCard(w)).toBeVisible();
+  return detailOfCard(w);
 }
-// An install whose card the next read no longer offers keeps its result above the grid.
-const browseResult = (w: Locator, id: string) => lineOf(browseOf(w).locator(`[data-plugin-result="${id}"]`));
+// An install whose card the next read no longer lists keeps its result at Discover's head.
+const discoverResult = (w: Locator, name: string) => lineOf(w.locator('[data-catalog-result]').filter({ hasText: name }));
 async function openAdd(w: Locator, item: 'Add marketplace' | 'Manage marketplaces'): Promise<Locator> {
   await w.getByRole('button', { name: 'Add', exact: true }).click();
   await w.page().getByRole('menuitem', { name: item, exact: true }).click();
@@ -959,7 +972,7 @@ test('P2-C /plugins shows MAWS mods · Built in: To-human with its version, its 
 // parsing are the product's own; the stub keeps its registry in a state file and logs every argv it ran (`calls.log`).
 // The scenario's sessions have no host process, so a change reloads no session (`No running session to reload`).
 test.describe('plugin management (E8)', () => {
-  test('lists the engine’s plugins and marketplaces; Browse is read only on its click', async ({ backend }) => {
+  test('lists the engine’s plugins and marketplaces; the catalogue is read only once Open Discover shows it', async ({ backend }) => {
     const { page } = backend;
     const w = await openPlugins(backend);
     const tools = installedRow(w, 'e8-tools@e8-scratch');
@@ -982,26 +995,26 @@ test.describe('plugin management (E8)', () => {
     const reads = () => stubCalls(backend.cli).filter((argv) => argv[0] === 'plugin');
     expect(reads()).toContainEqual(['plugin', 'list', '--json']);
     expect(reads()).toContainEqual(['plugin', 'marketplace', 'list', '--json']);
-    expect(reads().filter((argv) => argv.includes('--available'))).toEqual([]); // not before Browse's click
-    const browse = await openBrowse(w);
-    expect(reads()).toContainEqual(['plugin', 'list', '--json', '--available']);
-    await expect(cardOf(w, 'e8-probe@e8-scratch').getByRole('button', { name: 'Install', exact: true })).toBeVisible();
-    await expect(cardOf(w, 'e8-extra@e8-scratch').getByRole('button', { name: 'Install', exact: true })).toBeVisible();
-    // the engine leaves the installed e8-tools out; Browse joins it back in, Installed
-    await expect(cardOf(w, 'e8-tools@e8-scratch')).toHaveAttribute('data-installed', 'here');
-    await expect(cardOf(w, 'e8-tools@e8-scratch').getByRole('button', { name: 'Install', exact: true })).toHaveCount(0);
-    await expect(browse.locator('[data-browse-section]')).toHaveCount(1);
-    await expect(page.locator('[data-install-count]')).toHaveCount(0); // a folder marketplace carries no count
+    expect(reads().filter((argv) => argv.includes('--available'))).toEqual([]); // `/plugins` reads no catalogue
+    await expect(w.getByRole('radio', { name: 'Browse' })).toHaveCount(0); // Decision Log 10: one discovery surface
+    const d = await openDiscover(w);
+    expect(reads()).toContainEqual(['plugin', 'list', '--json', '--available']); // main's catalog, through the host
+    await expect(cardOf(d, 'e8-probe@e8-scratch').locator('[data-catalog-add]')).toBeVisible();
+    await expect(cardOf(d, 'e8-extra@e8-scratch').locator('[data-catalog-add]')).toBeVisible();
+    // the engine leaves the installed e8-tools out; the catalog joins it back in, Installed
+    await expect(cardOf(d, 'e8-tools@e8-scratch')).toHaveAttribute('data-installed', 'here');
+    await expect(cardOf(d, 'e8-tools@e8-scratch').locator('[data-catalog-add]')).toHaveCount(0);
+    await expect(cardOf(d, 'e8-probe@e8-scratch').locator('[data-trust]')).toHaveAttribute('data-trust', 'Added by you');
+    await expect(page.locator('[data-catalog-metric]')).toHaveCount(0); // a folder marketplace carries no count
     expect(mutations(backend)).toEqual([]);
     expect(backend.consoleErrors()).toEqual([]);
   });
 
-  test('install at user scope from a Browse card: the sheet names the command and the writes; the card shows the CLI’s progress, then its result; the CLI ran the sheet’s argv', async ({ backend }) => {
+  test('install at user scope from a Discover card: the sheet names the command and the writes; the card shows the CLI’s progress, then its result; the CLI ran the sheet’s argv', async ({ backend }) => {
     const { page } = backend;
-    const w = await openPlugins(backend);
-    await openBrowse(w);
+    const w = await openDiscover(await openPlugins(backend));
     const card = cardOf(w, 'e8-probe@e8-scratch');
-    await card.getByRole('button', { name: 'Install', exact: true }).click();
+    await addOn(card);
     const sheet = sheetOf(page, 'install');
     await expect(sheet.getByRole('heading', { name: 'Install e8-probe@e8-scratch?' })).toBeVisible();
     const argv = await argvOf(sheet);
@@ -1012,7 +1025,7 @@ test.describe('plugin management (E8)', () => {
     await expect(sheet).toContainText(`and keeps its own records in ${home}/.claude.json`);
     await expect(sheet).toContainText(/Reloads plugins in \d+ running sessions?|No running session to reload/);
     expect(mutations(backend)).toEqual([]); // nothing ran before the confirm
-    await expect(browseDetailOf(w)).toHaveCount(0); // Install keeps its own click
+    await expect(detailOfCard(w)).toHaveCount(0); // + keeps its own click
 
     backend.cli.hold(true);
     await sheet.getByRole('button', { name: 'Install', exact: true }).click();
@@ -1020,7 +1033,7 @@ test.describe('plugin management (E8)', () => {
     await expect(lineOf(card)).toHaveText('Holding install e8-probe@e8-scratch --scope user (plugin CLI stub)'); // the CLI's progress line
     await expect(card.getByRole('button', { name: 'Stop' })).toBeVisible();
     backend.cli.hold(false);
-    // plugins.changed reread both lists: the engine no longer offers it, and its card is the installed plugin's, keeping the result
+    // catalog.changed after the change: the catalog reads it installed here, and its card keeps the result
     await expect(card).toHaveAttribute('data-installed', 'here');
     await expect(lineOf(card)).toHaveText('Successfully installed plugin: e8-probe@e8-scratch (scope: user) · No running session to reload');
     await toMyItems(w);
@@ -1034,10 +1047,9 @@ test.describe('plugin management (E8)', () => {
   // grace ends them; the run ends only once the group is empty.
   test('Stop on a CLI that ignores SIGTERM: its whole process group is gone after the SIGKILL grace, and the card reads cancelled', async ({ backend }) => {
     const { page } = backend;
-    const w = await openPlugins(backend);
-    await openBrowse(w);
+    const w = await openDiscover(await openPlugins(backend));
     const card = cardOf(w, 'e8-probe@e8-scratch');
-    await card.getByRole('button', { name: 'Install', exact: true }).click();
+    await addOn(card);
     backend.cli.hold(true);
     backend.cli.stubborn(true);
     try {
@@ -1065,8 +1077,7 @@ test.describe('plugin management (E8)', () => {
 
   test('install at project and at local scope from a card’s detail: the argv carries the scope and the sheet names the project’s settings file', async ({ backend }) => {
     const { page, project } = backend;
-    const w = await openPlugins(backend);
-    await openBrowse(w);
+    const w = await openDiscover(await openPlugins(backend));
     const shown: string[][] = [];
     for (const [plugin, scope, label, file] of [
       ['e8-probe', 'project', 'Project', '.claude/settings.json'],
@@ -1074,8 +1085,8 @@ test.describe('plugin management (E8)', () => {
     ] as const) {
       const id = `${plugin}@e8-scratch`;
       const detail = await openCard(w, id);
-      await expect(detail).toContainText('from e8-scratch');
-      await detail.getByRole('button', { name: 'Install', exact: true }).click();
+      await expect(detail).toContainText('From e8-scratch');
+      await detail.getByRole('button', { name: 'Add', exact: true }).click();
       const sheet = sheetOf(page, 'install');
       await sheet.getByRole('radio', { name: label }).check();
       await expect(sheet).toContainText(`In ${project}`);
@@ -1085,8 +1096,8 @@ test.describe('plugin management (E8)', () => {
       shown.push(argv);
       await sheet.getByRole('button', { name: 'Install', exact: true }).click();
       await expect(lineOf(detail)).toHaveText(`Successfully installed plugin: ${id} (scope: ${scope}) · No running session to reload`);
-      await expect(detail.getByRole('button', { name: 'Install', exact: true })).toHaveCount(0); // installed here now
-      await detail.getByRole('button', { name: 'Back to Browse' }).click();
+      await expect(detail.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0); // installed here now
+      await detail.getByRole('button', { name: 'Back to Discover' }).click();
       await expect(cardOf(w, id)).toHaveAttribute('data-installed', 'here');
     }
     await toMyItems(w);
@@ -1163,18 +1174,17 @@ test.describe('plugin management (E8)', () => {
 
   test('an engine error is the engine’s words and code in red; a marketplace-declared command opens a second sheet and Run it accepts it by its sha256, never -y', async ({ backend }) => {
     const { page } = backend;
-    const w = await openPlugins(backend);
-    await openBrowse(w);
+    const w = await openDiscover(await openPlugins(backend));
 
-    // not_found: the catalogue Browse read still offers e8-extra, which the marketplace no longer has
+    // not_found: the catalog Discover read still lists e8-extra, which the marketplace no longer has
     const state = backend.cli.state();
     backend.cli.setState({ ...state, marketplaces: state.marketplaces.map((m) => ({ ...m, plugins: m.plugins.filter((p) => p.name !== 'e8-extra') })) });
     const extra = cardOf(w, 'e8-extra@e8-scratch');
-    await extra.getByRole('button', { name: 'Install', exact: true }).click();
+    await addOn(extra);
     const shown = [await argvOf(sheetOf(page, 'install'))]; // each argv a sheet showed and its confirm ran, in order
     await sheetOf(page, 'install').getByRole('button', { name: 'Install', exact: true }).click();
-    await expect(extra).toHaveCount(0); // read again once the CLI ended: no longer offered
-    const failure = browseResult(w, 'e8-extra@e8-scratch'); // the result outlives its card
+    await expect(extra).toHaveCount(0); // read again once the CLI ended: no longer listed
+    const failure = discoverResult(w, 'e8-extra'); // the result outlives its card, at Discover's head
     await expect(failure).toHaveText('Plugin "e8-extra" not found in marketplace "e8-scratch". Your local copy may be out of date — try `claude plugin marketplace update e8-scratch`. · not_found');
     await expect(failure).toHaveClass(/text-danger/);
 
@@ -1183,7 +1193,7 @@ test.describe('plugin management (E8)', () => {
     const sha256 = 'c0ffee'.padEnd(64, '0');
     backend.cli.setState({ ...backend.cli.state(), fail: { install: { failureCode: 'command_source_refused', message: 'e8-probe declares a command to run before it installs', shownCommand: { sha256, command: ['node', './scripts/setup.js'] } } } });
     const probe = cardOf(w, 'e8-probe@e8-scratch');
-    await probe.getByRole('button', { name: 'Install', exact: true }).click();
+    await addOn(probe);
     shown.push(await argvOf(sheetOf(page, 'install')));
     await sheetOf(page, 'install').getByRole('button', { name: 'Install', exact: true }).click();
     const declared = sheetOf(page, 'install');
@@ -1278,9 +1288,8 @@ test.describe('plugin management (E8)', () => {
     const home = configHome(backend);
     const state = backend.cli.state();
     backend.cli.setState({ ...state, marketplaces: state.marketplaces.map((m) => ({ ...m, plugins: [...m.plugins, { name: 'e8-deps', version: '0.5.0', description: 'Needs e8-probe', dependencies: ['e8-probe'] }] })) });
-    const w = await openPlugins(backend);
-    await openBrowse(w);
-    await cardOf(w, 'e8-deps@e8-scratch').getByRole('button', { name: 'Install', exact: true }).click();
+    const w = await openDiscover(await openPlugins(backend));
+    await addOn(cardOf(w, 'e8-deps@e8-scratch'));
     const install = sheetOf(page, 'install');
     await expect(install.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem')).toHaveText([`${home}/settings.json`, `${home}/plugins/installed_plugins.json`, `${home}/plugins/cache/e8-scratch/e8-deps/<version>/`, `${home}/plugins/cache/<any-marketplace>/<dependency>/`]);
     await expect(install).toContainText('and the cache directories of any dependencies the marketplace declares, from this or an allowlisted marketplace, each enabled in the settings file above');
@@ -1402,10 +1411,10 @@ test.describe('plugin management (E8)', () => {
     expect(backend.consoleErrors()).toEqual([]);
   });
 
-  // P2-B M5 (the execution document §4 items 4 and 5; §6.2): Browse over a registry shaped like the owner's, with the
-  // engine's built-in directory listing the twin of an official plugin, a directory-only plugin and the twin of an
-  // installed one (which the engine leaves out with it).
-  test('Browse on an owner-shaped registry: folded cards with the engine’s counts, installed cards joined in, Installed in other projects still installs here', async ({ backend }) => {
+  // P2-B M5 (the execution document §4 items 4 and 5; §6.2), Discover since P4-AGG (Decision Log 10): a registry shaped
+  // like the owner's, with the engine's built-in directory listing the twin of an official plugin, a directory-only
+  // plugin and the twin of an installed one (which the engine leaves out with it).
+  test('Discover on an owner-shaped registry: one card per plugin, installed ones joined in, Installed in another project still installs here', async ({ backend }) => {
     const { page, project, userData } = backend;
     const owner = ownerShapedState(project, join(userData, 'elsewhere'));
     const twin = (name: string) => ({ name, version: null, description: `${name}, as the directory lists it`, source: { source: 'git-subdir', url: 'https://github.com/anthropics/claude-plugins-official', path: `plugins/${name}` } });
@@ -1414,41 +1423,25 @@ test.describe('plugin management (E8)', () => {
       marketplaces: owner.marketplaces.map((m) => (m.name === 'claude-plugins-official' ? { ...m, plugins: [...m.plugins, { name: 'pr-review-toolkit', version: '1.0.0', description: 'Review pull requests with specialised agents', author: 'Anthropic', installCount: 210_500 }] } : m)),
       directory: [twin('pr-review-toolkit'), twin('code-review'), { name: 'acme-only', version: null, description: 'Listed by the directory alone', source: { source: 'url', url: 'https://github.com/acme/only.git' } }],
     });
-    const w = await openPlugins(backend);
+    const w = await openDiscover(await openPlugins(backend));
     const o = (name: string) => `${name}@claude-plugins-official`;
-    const d = (name: string) => `${name}@anthropic-plugin-directory`;
-    await openBrowse(w);
-    // the fold: one card, the directory's, with the official count; the official twin is no card of its own
-    await expect(cardOf(w, d('pr-review-toolkit')).locator('[data-install-count]')).toHaveText('210.5K installs');
-    await expect(cardOf(w, o('pr-review-toolkit'))).toHaveCount(0);
-    await expect(cardOf(w, d('acme-only'))).toBeVisible();
-    await expect(cardOf(w, d('acme-only')).locator('[data-install-count]')).toHaveCount(0);
-    await expect(cardOf(w, d('code-review'))).toHaveCount(0); // the engine hides the twin of an installed plugin
-    await expect(cardOf(w, o('code-review'))).toHaveAttribute('data-installed', 'here'); // installed here: joined back in
-    await expect(cardOf(w, o('code-review')).locator('[data-install-count]')).toHaveCount(0); // never a borrowed count
-    await expect(cardOf(w, o('code-review'))).toHaveAttribute('data-section', 'anthropic');
-    // Filter › Source lists the sections (the community marketplace is not Anthropic's); Sort › Most popular, counts first
-    await w.getByRole('button', { name: 'Filter' }).click();
-    await expect(page.getByRole('menuitemradio')).toHaveText(['All sources', 'From Anthropic & Partners', 'claude-community', 'cua', 'designer', 'doperpowers', 'ptc-tool'].map((name) => new RegExp(`${name}$`)));
-    await page.getByRole('menuitemradio', { name: 'claude-community' }).click();
-    await expect(browseOf(w).locator('[data-browse-card]')).toHaveCount(1);
-    await expect(cardOf(w, 'eli5@claude-community')).toHaveAttribute('data-section', 'marketplace:claude-community');
-    await w.getByRole('button', { name: 'Filter' }).click();
-    await page.getByRole('menuitemradio', { name: 'All sources' }).click();
-    await expect(browseOf(w).locator('[data-browse-card]').first()).toHaveAttribute('data-browse-card', d('pr-review-toolkit'));
-
-    // the folded card's detail: the credit, the count, Also listed in, What's inside from the official clone
-    const detail = await openCard(w, d('pr-review-toolkit'));
-    await expect(detail).toContainText('from anthropic-plugin-directory · 1.0.0 · 210.5K installs');
-    await expect(detail).toContainText('Also listed in claude-plugins-official');
+    const named = (name: string) => allOf(w).locator(`[data-catalog-grid] [data-catalog-card][data-install-name="${name}"]`);
+    // one item per thing: the official plugin and its directory twin are one card, Also listed by the other route
+    await expect(named('pr-review-toolkit')).toHaveCount(1);
+    await expect(named('acme-only')).toHaveCount(1);
+    await expect(named('acme-only').locator('[data-catalog-metric]')).toHaveCount(0); // no source counts it
+    await expect(named('code-review')).toHaveCount(1); // installed here: joined back in, one card
+    await expect(named('code-review')).toHaveAttribute('data-installed', 'here');
+    const detail = await openCard(w, `pr-review-toolkit@${await named('pr-review-toolkit').getAttribute('data-install-marketplace')}`);
+    await expect(detail.locator('[data-also-listed]')).toContainText(/Also listed by (claude-plugins-official|anthropic-plugin-directory)/);
     await expect(detail.getByRole('region', { name: 'What’s inside' })).toBeVisible();
-    await detail.getByRole('button', { name: 'Back to Browse' }).click();
+    await detail.getByRole('button', { name: 'Back to Discover' }).click();
 
-    // supabase: installed only in other projects (45 worktrees and one more) — Installed in other projects, and Install here
+    // supabase: installed only in other projects (45 worktrees and one more) — Installed in another project, and + here
     const supabase = cardOf(w, o('supabase'));
-    await expect(supabase).toHaveAttribute('data-installed', 'otherProjects');
-    await expect(supabase).toContainText('Installed in other projects');
-    await supabase.getByRole('button', { name: 'Install', exact: true }).click();
+    await expect(supabase).toHaveAttribute('data-installed', 'elsewhere');
+    await expect(supabase).toContainText('Installed in another project');
+    await addOn(supabase);
     const sheet = sheetOf(page, 'install');
     await sheet.getByRole('radio', { name: 'Project' }).check();
     const argv = await argvOf(sheet);

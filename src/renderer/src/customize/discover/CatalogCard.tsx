@@ -69,6 +69,7 @@ export function CatalogCard({ item, tab, onOpen }: { item: CatalogItem; tab: Cat
       data-catalog-card={item.id}
       data-installed={item.installed}
       data-install-name={item.install.kind === 'plugin' ? item.install.pluginName : undefined}
+      data-install-marketplace={item.install.kind === 'plugin' ? item.install.marketplaceName : undefined}
       className={`relative flex ${CARD_HEIGHT} min-w-0 flex-col gap-1 rounded-lg border border-border bg-bg-raised p-3 hover:border-border-strong`}
       onClick={(event) => {
         if (!(event.target instanceof Element && event.target.closest('button:not([data-card-open])'))) onOpen(item);
