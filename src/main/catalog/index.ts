@@ -63,11 +63,16 @@ export function startCatalog(deps: CatalogDeps): Catalog {
   });
   // an outside change to the engine's plugin state: the configuration's forgets every view, a project's its own
   const watch = new StateWatch({
-    onChange: (scope) => {
+    onChange: (scope, kind) => {
+      if (kind === 'mcp') {
+        void reads.recheckServers().then((moved) => moved && changed());
+        return;
+      }
       reads.invalidate(scope === 'all' ? undefined : scope);
       changed();
     },
     watch: deps.watch,
+    appSettings: join(deps.userData, 'settings.json'),
   });
 
   // One cwd's catalog and the revision it was built under: the store's revision, the engine reads' generation at the time

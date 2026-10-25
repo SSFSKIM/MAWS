@@ -27,8 +27,9 @@ const ANSWERS = {
   'customization.inventory': { skills: [], servers: [{ name: 'linear', scope: 'user', path: '/x', transport: 'http' }], warnings: [], serversRead: true },
   'plugins.env': { binary: null, binaryError: null, configHome: '/config', globalConfig: '/config/.claude.json' },
   'plugins.directoryProvenance': { pluginsDir: '/config/plugins', entries: [] },
+  'customization.serverEndpoints': { servers: [] },
 };
-const READS = ['customization.inventory', 'marketplaces.list', 'plugins.available', 'plugins.directoryProvenance', 'plugins.list', 'plugins.marketplaceManifest'];
+const READS = ['customization.inventory', 'customization.serverEndpoints', 'marketplaces.list', 'plugins.available', 'plugins.directoryProvenance', 'plugins.list', 'plugins.marketplaceManifest'];
 
 describe('EngineReads', () => {
   it('asks the host in the cwd, each listed marketplace’s clone, and the configured servers; holds the view until invalidated', async () => {
@@ -39,13 +40,13 @@ describe('EngineReads', () => {
     expect(view!.manifests.get('m')).toEqual({ state: 'read', owner: 'O', plugins: [] });
     expect(h.asked.map((a) => a.name).sort()).toEqual([...READS, 'plugins.env'].sort()); // the configuration's place, once
     await reads.view('/w');
-    expect(h.asked).toHaveLength(7);
+    expect(h.asked).toHaveLength(8);
     const generation = reads.generation;
     reads.invalidate();
     expect(reads.generation).toBe(generation + 1);
     await reads.view('/w');
-    expect(h.asked).toHaveLength(13);
-    expect(reads.places()).toEqual({ configHome: '/config', pluginsDir: '/config/plugins', projects: ['/w'] });
+    expect(h.asked).toHaveLength(15);
+    expect(reads.places()).toEqual({ configHome: '/config', pluginsDir: '/config/plugins', globalConfig: '/config/.claude.json', projects: ['/w'] });
   });
 
   it('forgets one cwd’s view alone when only its settings changed', async () => {
@@ -60,7 +61,7 @@ describe('EngineReads', () => {
     await reads.view('/b');
     expect(h.asked.length).toBe(before);
     await reads.view('/a');
-    expect(h.asked.length).toBe(before + 6);
+    expect(h.asked.length).toBe(before + 7);
   });
 
   it('reads the user configuration in the engine’s configuration directory, and is null when even that cannot be asked', async () => {
@@ -91,5 +92,18 @@ describe('EngineReads', () => {
     expect(h.asked.length).toBe(before);
     await reads.view('/w0');
     expect(h.asked.length).toBeGreaterThan(before);
+  });
+
+  it('after an MCP change, forgets only the views whose configured servers moved (scalpel-3#1)', async () => {
+    const h = host(ANSWERS);
+    const reads = new EngineReads(h.call);
+    await reads.view('/a');
+    await reads.view('/b');
+    expect(await reads.recheckServers()).toBe(false); // the global file rewritten, the servers as they were
+    expect(reads.holds('/a') && reads.holds('/b')).toBe(true);
+    h.answers['customization.serverEndpoints'] = { servers: [{ name: 'linear', scope: 'user', path: '/config/.claude.json', transport: 'http', url: 'https://mcp.linear.app/mcp' }] };
+    expect(await reads.recheckServers()).toBe(true);
+    expect(reads.holds('/a') || reads.holds('/b')).toBe(false);
+    expect(reads.places()).toMatchObject({ globalConfig: '/config/.claude.json' });
   });
 });
