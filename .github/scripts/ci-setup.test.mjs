@@ -3,8 +3,9 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import process from 'node:process';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { URL, fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const script = join(root, '.github/ci-setup.sh');
