@@ -298,7 +298,9 @@ test('sign-in: S1 then S2, connected here after a delayed consent, Cancel and a 
     const signIn = async (name: string): Promise<string> => {
       const before = opened().length;
       await row(page, name).getByRole('button', { name: `Sign in to ${name}` }).click();
-      await expect.poll(() => opened().length, { timeout: 30_000 }).toBeGreaterThan(before);
+      // the browser step, or the sign-in's end in its own words (a failure says why, which the assertion then shows)
+      await expect.poll(async () => opened().length > before || /didn’t finish|Signed in/.test(await row(page, name).innerText()), { timeout: 30_000 }).toBe(true);
+      expect(opened().length, `the browser step for ${name}; the row reads: ${await row(page, name).innerText()}`).toBeGreaterThan(before);
       await expect(state(name)).toHaveText('Finish signing in in your browser…');
       return opened().at(-1)!;
     };

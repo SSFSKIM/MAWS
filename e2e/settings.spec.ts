@@ -520,7 +520,7 @@ test('Customize and Projects are reachable without a chat, at desktop and narrow
         await shot(`ux2k-plugins-${width}x${height}`);
         await page.getByRole('tab', { name: 'Skills', exact: true }).click();
         await expect(page.getByRole('button', { name: 'View review-quarterly' })).toBeVisible();
-        await expect(page.getByText('Inventory coverage', { exact: true })).toBeVisible();
+        await expect(page.getByRole('tabpanel', { name: 'Skills' }).getByText('Inventory coverage', { exact: true })).toBeVisible(); // P4-AGG M4: Connectors stays mounted once visited, with its own
         await expect(page.getByText('Some configuration could not be read', { exact: true })).toHaveCount(0);
         await shot(`ux2k-skills-${width}x${height}`);
         await page.getByRole('tab', { name: 'Connectors', exact: true }).click(); // P4-AGG M4: the tab's new name

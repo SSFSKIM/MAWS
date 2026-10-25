@@ -787,10 +787,17 @@ test('p4/p4-agg-m4-signin: the engine\'s own sign-in over the control protocol, 
  const text = readFileSync(new URL('p4-agg-m4-signin.jsonl', dir4), 'utf8');
  assert.ok(!/(?:[?&](?:code|state|code_challenge|client_id)=)(?!%5Bredacted%5D)[^&"]/.test(text), 'an OAuth query value');
  assert.ok(!/access_token|refresh_token/.test(text));
- const rows = text.trim().split('\n').map(JSON.parse);
+ // X8 rows (the replay index lists the file as a journal); each question's engine opens with its own `spawn` meta row,
+ // and its frames follow it until the next one
+ let engine = null;
+ const rows = text.trim().split('\n').map(JSON.parse).map((r) => {
+  assert.deepEqual(Object.keys(r).sort(), ['at', 'direction', 'frame', 'seq']);
+  if (r.direction === 'meta' && r.frame.event === 'spawn') engine = r.frame.engine;
+  return { ...r, engine };
+ });
  const out = rows.filter((r) => r.direction === 'out').map((r) => r.frame);
  const answers = new Map(rows.filter((r) => r.direction === 'in').map((r) => [r.frame.response.request_id, r.frame.response]));
- for (const f of out) assert.ok(answers.has(f.request_id) || rows.some((r) => r.event === 'request_timeout' && r.engine && r.subtype === f.request.subtype), f.request.subtype);
+ for (const f of out) assert.ok(answers.has(f.request_id), f.request.subtype);
  const answered = (engine, subtype) => rows.filter((r) => r.engine === engine && r.direction === 'out' && r.frame.request.subtype === subtype).map((r) => answers.get(r.frame.request_id));
  // custom: MAWS's 127.0.0.1 redirect accepted, the callback URL taken, and mcp_reconnect then reads connected
  assert.equal(answered('custom', 'mcp_authenticate')[0].response.redirectScheme, 'custom');
