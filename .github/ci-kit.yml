@@ -1,0 +1,10 @@
+version: 1
+setup:
+  node: "22"
+  pnpm: true
+  # desk-web is the browser consumer: Linux uses Playwright's Chromium; Macs use their installed Chrome.
+  install: pnpm install --frozen-lockfile && if [ "$(uname -s)" = Linux ]; then pnpm --filter desk-web exec playwright install chromium; fi
+  apt: [zsh, fonts-noto-cjk, fonts-inter, fonts-jetbrains-mono, xvfb]
+  brew: [poppler]
+  cask: [libreoffice]
+  script: .github/ci-setup.sh
