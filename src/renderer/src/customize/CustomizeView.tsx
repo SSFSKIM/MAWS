@@ -29,6 +29,7 @@ import { homeAbbreviated } from '../tools/session-info/model';
 import { useCustomizeProject, type CustomizeSection } from './open';
 import { ConnectorsSection } from './connectors/ConnectorsSection';
 import { CONNECTORS } from './connectors/copy';
+import { configuredOf } from './connectors/present';
 
 const DIRECTORY_PAGE = '\0directory'; // the selector's value for a directory page: no project id or '' can equal it
 const SECTIONS = { plugins: 'Plugins', skills: 'Skills', mcp: 'Connectors' } as const; // P4-AGG M4: the value `mcp` stays, so saved tabs keep working
@@ -112,6 +113,7 @@ export function CustomizeView({ section }: { section: CustomizeSection }) {
         cwd={cwd}
         place={project?.name ?? (cwd === null ? null : homeAbbreviated(cwd))}
         servers={inventory.data?.servers}
+        configured={configuredOf(inventory)}
         inventoryState={<InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} refresh={() => void inventory.refetch()} />}
         refresh={() => void inventory.refetch()}
         attached={attached?.appSessionId ?? null}

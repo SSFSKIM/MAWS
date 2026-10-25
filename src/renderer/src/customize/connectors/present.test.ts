@@ -3,12 +3,13 @@
 import { describe, expect, it } from 'vitest';
 import type { CatalogItem } from '@shared/ipc/schema/catalog';
 import type { ConnectorSignInChanged } from '@shared/ipc/schema/connectors';
+import type { SignInRecord } from './sign-in';
 import type { CustomizationServer } from '@shared/ipc/schema/customization';
 import { item } from '../discover/test-items';
 import { argvOf } from '../../widgets/plugins/present';
 import { installRequestOf } from '../discover/add';
 import { cardContentsWords } from '../discover/present';
-import { connectorAddOf, existingOf, nameProblem, removeRequestOf, scopesFor, signInSessionOf, signInViewOf, urlProblem, writesFor } from './present';
+import { configuredOf, connectorAddOf, existingOf, nameProblem, removeRequestOf, scopesFor, signInSessionOf, signInViewOf, urlProblem, writesFor } from './present';
 
 const linear = (over: Partial<CatalogItem['install']> = {}, item_: Partial<CatalogItem> = {}): CatalogItem =>
   item({
@@ -25,7 +26,7 @@ const linear = (over: Partial<CatalogItem['install']> = {}, item_: Partial<Catal
   });
 
 const server = (over: Partial<CustomizationServer> = {}): CustomizationServer => ({ name: 'linear', scope: 'user', path: '/cfg/.claude.json', transport: 'http', ...over });
-const event = (over: Partial<ConnectorSignInChanged>): ConnectorSignInChanged => ({ opId: 'op', name: 'linear', state: 'starting', reason: null, message: null, where: null, ...over });
+const event = (over: Partial<ConnectorSignInChanged>, at = 1_000, appSessionId = 's1'): SignInRecord => ({ event: { opId: 'op', name: 'linear', state: 'starting', reason: null, message: null, where: null, ...over }, appSessionId, at });
 
 describe('adding a connector', () => {
   it('asks claude mcp add with the directory’s name, URL and transport at user scope, carrying what the sheet shows', () => {
@@ -52,14 +53,23 @@ describe('adding a connector', () => {
     expect(connectorAddOf(linear({}, { scanBlocked: 'failed' }))).toBeNull();
   });
 
-  it('checks an instance URL against the whole pattern, and any URL as http or https', () => {
+  it('checks an instance URL against the pattern as the directory writes it, and any URL as http or https', () => {
     const pattern = '^https://api\\.salesforce\\.com/platform/mcp/v1/platform/headless-360$';
     expect(urlProblem('', pattern)).toBe('Enter the server’s URL.');
     expect(urlProblem('https://api.salesforce.com/platform/mcp/v1/platform/headless-360', pattern)).toBeNull();
     expect(urlProblem('https://evil.example.com/?https://api.salesforce.com/platform/mcp/v1/platform/headless-360', pattern)).toBe(`The URL must match ${pattern}`);
-    expect(urlProblem('https://api.salesforce.com/platform/mcp/v1/platform/headless-360x', 'https://api\\.salesforce\\.com/.+/headless-360')).toBe('The URL must match https://api\\.salesforce\\.com/.+/headless-360'); // unanchored patterns match whole
+    // a prefix pattern (17 of the directory's 52 have no `$`) admits the paths under it
+    const snowflake = '^https://[a-zA-Z0-9._-]+\\.snowflakecomputing\\.com(/|$)';
+    expect(urlProblem('https://acme.snowflakecomputing.com/api/v2/databases/db/schemas/s/mcp-servers/m', snowflake)).toBeNull();
+    expect(urlProblem('https://acme.snowflakecomputing.com.evil.example/', snowflake)).toBe(`The URL must match ${snowflake}`);
+    // one without `^` is held from the start, never found inside another URL
+    expect(urlProblem('https://evil.example.com/?https://api.salesforce.com/x', 'https://api\\.salesforce\\.com/')).toBe('The URL must match https://api\\.salesforce\\.com/');
     expect(urlProblem('ftp://x.example.com', null)).toBe('Enter an http or https URL.');
-    expect(urlProblem('https://x.example.com/mcp', '([')).toBeNull(); // a pattern JavaScript cannot read checks only the scheme
+  });
+
+  it('refuses a URL against a pattern JavaScript cannot read: being unable to check is never a pass', () => {
+    expect(urlProblem('https://x.example.com/mcp', '([')).toBe('This server’s URL pattern can’t be checked.');
+    expect(urlProblem('', '([')).toBe('This server’s URL pattern can’t be checked.'); // said before anything is typed
   });
 
   it('holds the name to the engine’s rule', () => {
@@ -73,6 +83,14 @@ describe('adding a connector', () => {
     expect(existingOf('linear', servers)).toEqual(server());
     expect(existingOf('notion', servers)).toEqual(servers[0]);
     expect(existingOf('canva', servers)).toBeNull();
+  });
+
+  it('holds what is configured here as Add needs it: read whole, partial, failed, or still reading', () => {
+    const servers = [server()];
+    expect(configuredOf({ data: { servers, serversRead: true }, error: null })).toEqual({ state: 'read', servers });
+    expect(configuredOf({ data: { servers, serversRead: false }, error: null })).toEqual({ state: 'partial' });
+    expect(configuredOf({ data: undefined, error: new Error('the engine host is not running') })).toEqual({ state: 'failed', message: 'the engine host is not running' });
+    expect(configuredOf({ data: undefined, error: null })).toEqual({ state: 'reading' });
   });
 
   it('offers user scope alone on the user configuration, the three scopes in a project', () => {
@@ -115,7 +133,7 @@ describe('which session signs in', () => {
 });
 
 describe('a server’s sign-in state', () => {
-  const none = { live: undefined, posture: null, last: null, transport: 'http' };
+  const none = { live: undefined, liveRead: null, posture: null, last: null, transport: 'http' };
   it('reads the attached session’s mcp_status first', () => {
     expect(signInViewOf({ ...none, live: { status: 'connected', error: null } })).toEqual({ text: 'Connected', tone: 'success', signIn: false, cancel: false });
     expect(signInViewOf({ ...none, live: { status: 'needs-auth', error: null } })).toEqual({ text: 'Sign in needed', tone: 'muted', signIn: true, cancel: false });
@@ -149,17 +167,32 @@ describe('a server’s sign-in state', () => {
   });
 });
 
-describe('the directory’s posture My items reads', () => {
-  it('comes only from catalog reads the window already holds: a home, a query’s pages, an item', async () => {
-    const { QueryClient } = await import('@tanstack/react-query');
-    const { cachedPosture } = await import('../discover/read');
-    const client = new QueryClient();
-    expect(cachedPosture('linear', client)).toBeNull();
-    client.setQueryData(['maws', 'catalog', 'query', { tab: 'connectors' }], { pages: [{ items: [linear()] }], pageParams: [null] });
-    expect(cachedPosture('linear', client)).toBe('auth_required');
-    client.clear();
-    client.setQueryData(['maws', 'catalog', 'home', { tab: 'connectors' }], { featured: null, shelves: [{ items: [linear({ name: 'learn', authPosture: 'no_auth' })] }] });
-    expect(cachedPosture('learn', client)).toBe('no_auth');
-    expect(cachedPosture('linear', client)).toBeNull();
+describe('a finished sign-in against what the session reports now', () => {
+  const needsAuth = { status: 'needs-auth', error: null };
+  const facts = (last: SignInRecord, live: { status: string; error: string | null } | null, liveRead: { appSessionId: string; at: number } | null) => ({ live, liveRead, last, posture: 'auth_required' as const, transport: 'http' });
+
+  it('a read newer than a success that says the server needs a sign-in, or failed, is what the row says, with Sign in', () => {
+    const done = event({ state: 'done', where: 'here' }, 1_000, 's1');
+    expect(signInViewOf(facts(done, needsAuth, { appSessionId: 's1', at: 2_000 }))).toEqual({ text: 'Sign in needed', tone: 'muted', signIn: true, cancel: false });
+    expect(signInViewOf(facts(done, needsAuth, { appSessionId: 's2', at: 2_000 }))).toMatchObject({ text: 'Sign in needed', signIn: true }); // the attached session is another
+    expect(signInViewOf(facts(done, { status: 'failed', error: 'HTTP 401' }, { appSessionId: 's1', at: 2_000 }))).toMatchObject({ text: 'Failed: HTTP 401', signIn: true });
+  });
+
+  it('a read from before the success, one that lists it connected, or one that does not list it leaves the success', () => {
+    const done = event({ state: 'done', where: 'here' }, 1_000, 's1');
+    expect(signInViewOf(facts(done, needsAuth, { appSessionId: 's1', at: 900 }))).toMatchObject({ text: 'Signed in · connected here', signIn: false });
+    expect(signInViewOf(facts(done, { status: 'connected', error: null }, { appSessionId: 's1', at: 2_000 }))).toMatchObject({ text: 'Signed in · connected here' });
+    expect(signInViewOf(facts(done, null, { appSessionId: 's2', at: 2_000 }))).toMatchObject({ text: 'Signed in · connected here' });
+  });
+
+  it('a success for new sessions stands against the signing session’s own read, which it never claimed', () => {
+    const later = event({ state: 'done', where: 'new_sessions' }, 1_000, 's1');
+    expect(signInViewOf(facts(later, needsAuth, { appSessionId: 's1', at: 2_000 }))).toMatchObject({ text: 'Signed in · available in new sessions', signIn: false });
+    expect(signInViewOf(facts(later, needsAuth, { appSessionId: 's2', at: 2_000 }))).toMatchObject({ text: 'Sign in needed', signIn: true });
+  });
+
+  it('a sign-in that did not finish stays said, with Sign in, whatever the session reads after it', () => {
+    const failed = event({ state: 'failed', reason: 'timeout' }, 1_000);
+    expect(signInViewOf(facts(failed, needsAuth, { appSessionId: 's1', at: 2_000 }))).toEqual({ text: 'Sign-in didn’t finish: the browser didn’t return within 5 minutes', tone: 'danger', signIn: true, cancel: false });
   });
 });

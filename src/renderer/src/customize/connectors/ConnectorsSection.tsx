@@ -9,7 +9,6 @@
 // The management state (the operations and the sheet) lives here, above both views, so an add or a removal runs on, and
 // its line stays, whichever view shows; Customize keeps the section mounted once visited.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CatalogItem } from '@shared/ipc/schema/catalog';
 import type { CustomizationServer } from '@shared/ipc/schema/customization';
@@ -27,11 +26,11 @@ import { useEngineRead } from '../../widgets/read';
 import { DISCOVER } from '../discover/copy';
 import { DiscoverPane } from '../discover/DiscoverPane';
 import { DiscoverToolbar } from '../discover/DiscoverToolbar';
-import { cachedPosture, useCatalogRefresh, useCatalogSources } from '../discover/read';
+import { useCatalogPostures, useCatalogRefresh, useCatalogSources } from '../discover/read';
 import { ConnectorSheet } from './ConnectorSheet';
 import { CONNECTORS as C } from './copy';
-import { removeRequestOf, serverKey, signInSessionOf, signInViewOf, type ReadySession, type SignInView } from './present';
-import { cancelSignIn, startSignIn, useSignIns } from './sign-in';
+import { removeRequestOf, serverKey, signInSessionOf, signInViewOf, type AuthPosture, type ConfiguredServers, type ReadySession, type SignInFacts, type SignInView } from './present';
+import { cancelSignIn, signInKeyOf, startSignIn, useSignIns } from './sign-in';
 
 const BUTTON = 'rounded-sm px-2 py-1 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint';
 const TONE: Record<SignInView['tone'], string> = { muted: 'text-fg-muted', success: 'text-success', danger: 'text-danger' };
@@ -40,7 +39,7 @@ const DIRECTORY_SERVERS = 'directory:servers';
 type Asking = { key: string; request: PluginsRequest; engine: EngineResolution; opening: number };
 
 // The operations and the connector sheet: every opening reads `plugins.env` again, as the install sheet does.
-function useConnectorManage(cwd: string | null, servers: readonly CustomizationServer[]): { manage: Manage; sheet: ReactNode } {
+function useConnectorManage(cwd: string | null, configured: ConfiguredServers, retryServers: () => void): { manage: Manage; sheet: ReactNode } {
   const env = usePluginsEnv();
   const { reread } = env;
   const runCwd = cwd ?? env.data?.configHome ?? '';
@@ -60,7 +59,7 @@ function useConnectorManage(cwd: string | null, servers: readonly CustomizationS
     <ConnectorSheet
       key={`${asking.key}:${asking.opening}`}
       request={asking.request}
-      env={{ cwd, runCwd, engine: asking.engine, servers }}
+      env={{ cwd, runCwd, engine: asking.engine, configured, retryServers }}
       onConfirm={(request, binary) => {
         setAsking(null);
         void ops.run(asking.key, request, runCwd, binary);
@@ -71,17 +70,18 @@ function useConnectorManage(cwd: string | null, servers: readonly CustomizationS
   return { manage, sheet };
 }
 
-export function ConnectorsSection({ cwd, place, servers, inventoryState, refresh, attached, live }: {
+export function ConnectorsSection({ cwd, place, servers, configured, inventoryState, refresh, attached, live }: {
   cwd: string | null; // the page's directory; null for the user configuration
   place: string | null; // the page's name for "Open a session in <place>"
   servers: readonly CustomizationServer[] | undefined; // the inventory's, once read
+  configured: ConfiguredServers; // the same read as Add needs it: whole, or why not
   inventoryState: ReactNode; // reading, failed (with Retry), or the warnings
   refresh(): void;
   attached: AppSessionId | null; // the page's attached session
   live: ReactNode; // what the attached session has live
 }) {
   const [view, setView] = useState<LibraryTab>('myItems');
-  const { manage, sheet } = useConnectorManage(cwd, servers ?? []);
+  const { manage, sheet } = useConnectorManage(cwd, configured, refresh);
   const switcher = <LibrarySwitch tab={view} onChange={setView} second={DISCOVER.discover} />;
   return (
     <ManageProvider value={manage}>
@@ -140,8 +140,11 @@ function Configured({ servers, cwd, place, attached }: { servers: readonly Custo
     const entry = read.data.mcpServers.find((server) => server.name === name);
     return entry ? { status: entry.status, error: typeof entry.error === 'string' ? entry.error : null } : null;
   };
+  const liveRead = attached !== null && read.readAt !== null ? { appSessionId: attached, at: read.readAt } : null; // when its answer arrived
+  const postures = useCatalogPostures(cwd, servers).data?.servers;
+  const postureOf = (server: CustomizationServer) => postures?.find((p) => p.name === server.name && p.scope === server.scope)?.authPosture ?? null;
   // a sign-in that ended: the attached session's servers read again
-  const ended = useSignIns((s) => [...s.byName.values()].filter((event) => event.state === 'done' || event.state === 'failed').map((event) => event.opId).join(','));
+  const ended = useSignIns((s) => [...s.byServer.values()].filter(({ event }) => event.state === 'done' || event.state === 'failed').map(({ event }) => event.opId).join(','));
   const { refetch } = read;
   useEffect(() => {
     if (ended !== '') refetch();
@@ -156,21 +159,19 @@ function Configured({ servers, cwd, place, attached }: { servers: readonly Custo
       ))}
       <ul aria-label={C.configured} className="m-0 list-none p-0">
         {servers.map((server) => (
-          <ServerRow key={serverKey(server)} server={server} place={place} session={signInSessionOf(server.scope, ready, attached, cwd)} live={liveOf(server.name)} />
+          <ServerRow key={serverKey(server)} server={server} cwd={cwd} place={place} session={signInSessionOf(server.scope, ready, attached, cwd)} live={liveOf(server.name)} liveRead={liveRead} posture={postureOf(server)} />
         ))}
       </ul>
     </>
   );
 }
 
-function ServerRow({ server, place, session, live }: { server: CustomizationServer; place: string | null; session: string | null; live: { status: string; error: string | null } | null | undefined }) {
+function ServerRow({ server, cwd, place, session, live, liveRead, posture }: { server: CustomizationServer; cwd: string | null; place: string | null; session: string | null; live: SignInFacts['live']; liveRead: SignInFacts['liveRead']; posture: AuthPosture | null }) {
   const { ask, ops } = useManage();
-  const client = useQueryClient();
-  // the directory's posture: from an add made here in this run, else from the catalog reads this window holds
-  const added = [...ops.entries.values()].find((entry) => entry.request.action === 'mcp-add' && (entry.request.input as { name: string }).name === server.name)?.request.connector?.authPosture;
-  const posture = added ?? cachedPosture(server.name, client);
-  const last = useSignIns((s) => s.byName.get(server.name) ?? null);
-  const state = signInViewOf({ live, posture, last, transport: server.transport });
+  const target = { name: server.name, scope: server.scope, cwd };
+  const record = useSignIns((s) => s.byServer.get(signInKeyOf(target)) ?? null);
+  const last = record?.event ?? null;
+  const state = signInViewOf({ live, liveRead, posture, last: record, transport: server.transport });
   const key = serverKey(server);
   const remove = removeRequestOf(server);
   const busy = ops.entries.get(key)?.state.phase === 'working';
@@ -192,7 +193,7 @@ function ServerRow({ server, place, session, live }: { server: CustomizationServ
                 {C.openSession(server.scope === 'user' ? null : place)}
               </span>
             ) : (
-              <button type="button" aria-label={C.signInName(server.name)} className={SECONDARY} onClick={() => void startSignIn(server.name, session)}>
+              <button type="button" aria-label={C.signInName(server.name)} className={SECONDARY} onClick={() => void startSignIn(target, session)}>
                 {C.signIn}
               </button>
             ))}

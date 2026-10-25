@@ -21,6 +21,8 @@ beforeEach(() => {
 afterEach(() => rmSync(userData, { recursive: true, force: true }));
 
 const CONFIG_HOME = '/scratch-root/config';
+let endpoints: CommandOutput<'customization.serverEndpoints'>['servers'] = [];
+afterEach(() => { endpoints = []; });
 
 // The engine host as the catalog asks it, answering from a recorded view; counts each command.
 function host(view: (name: CommandName) => Promise<EngineView>, failing = false) {
@@ -42,7 +44,9 @@ function host(view: (name: CommandName) => Promise<EngineView>, failing = false)
         case 'plugins.marketplaceManifest':
           return v.manifests.get((input as CommandInput<'plugins.marketplaceManifest'>).name) ?? { state: 'unknown', owner: null, plugins: [] };
         case 'customization.inventory':
-          return { skills: [], servers: (v.servers ?? []).map((n) => ({ name: n, scope: 'user', path: '/x/.claude.json', transport: 'http' })), warnings: [] };
+          return { skills: [], servers: (v.servers ?? []).map((n) => ({ name: n, scope: 'user', path: '/x/.claude.json', transport: 'http' })), warnings: [], serversRead: true };
+        case 'customization.serverEndpoints':
+          return { servers: endpoints };
         case 'plugins.directoryProvenance':
           return { pluginsDir: `${CONFIG_HOME}/plugins`, entries: [...v.directoryInstalled].map(([name, repositoryKey]) => ({ name, repositoryKey })) };
         default:
@@ -200,6 +204,31 @@ describe('the catalog service', () => {
       rmSync(project, { recursive: true, force: true });
     }
   }, 15_000); // the file system's change notice, under load
+
+  it('answers each configured server’s posture from the directory record its endpoint matches, from the copy held', async () => {
+    endpoints = [
+      { name: 'work-tracker', scope: 'user', url: 'https://mcp.linear.app/mcp' },
+      { name: 'linear', scope: 'project', url: 'https://linear.internal.example/mcp' },
+    ];
+    const engine = host(() => recordedEngine(PROJECT_A));
+    const { invoke } = service(engine.call);
+    // nothing held yet: no record is read, so nothing is known
+    expect(await invoke('catalog.postures', { cwd: PROJECT_A })).toEqual({ servers: [
+      { name: 'work-tracker', scope: 'user', authPosture: null },
+      { name: 'linear', scope: 'project', authPosture: null },
+    ] });
+    await invoke('catalog.home', { tab: 'connectors', cwd: PROJECT_A }); // the directory read once
+    expect(await invoke('catalog.postures', { cwd: PROJECT_A })).toEqual({ servers: [
+      { name: 'work-tracker', scope: 'user', authPosture: 'auth_required' },
+      { name: 'linear', scope: 'project', authPosture: null }, // Linear's name, not its endpoint
+    ] });
+    expect(engine.asked.filter((a) => a.name === 'customization.serverEndpoints').map((a) => a.input)).toEqual([{ cwd: PROJECT_A }, { cwd: PROJECT_A }]);
+  });
+
+  it('refuses postures while the engine host cannot list the configured servers', async () => {
+    const { invoke } = service(host(() => recordedEngine(PROJECT_A), true).call);
+    await expect(invoke('catalog.postures', { cwd: null })).rejects.toThrow(/not running/);
+  });
 
   it('makes the test source discoverable before the engine has its marketplace', async () => {
     const descriptor = join(userData, 'catalog-test-sources.json');

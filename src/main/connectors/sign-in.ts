@@ -20,7 +20,8 @@
 //                    its mcp_status, findings-m4 5; Decision Log 14)
 //   failed           with a reason: no_session, timeout, denied (the callback carried `error`), engine (its words),
 //                    session_exited
-//   cancelled        `connectors.signInCancel`, or a second press for the same server (one operation per server)
+//   cancelled        `connectors.signInCancel`, or a second press for the same server in the same session (one
+//                    operation per session's server: a name is the session's own, not global)
 //
 // The engine's own pending flow is left to lapse; a new `mcp_authenticate` starts a new flow and the engine refuses the
 // old flow's callback (findings-m4 3, 4). No event carries the authorization URL, a code or a state. MAWS's own OAuth
@@ -93,7 +94,8 @@ export function createSignIn(deps: SignInDeps): SignIn {
   const configPollMs = deps.configPollMs ?? CONFIG_POLL_MS;
   const log = deps.log ?? ((line: string) => console.warn(`[connectors] ${line}`));
   const operations = new Map<string, Operation>(); // live ones, by opId
-  const byServer = new Map<string, string>(); // server name → its live opId
+  const byServer = new Map<string, string>(); // a session's server (serverKey) → its live opId
+  const serverKey = (op: { appSessionId: string; name: string }) => `${op.appSessionId}\u0000${op.name}`;
 
   const live = (op: Operation) => !TERMINAL.has(op.state);
   const move = (op: Operation, state: State, extra: { reason?: Reason; message?: string | null; where?: 'here' | 'new_sessions' } = {}) => {
@@ -105,17 +107,22 @@ export function createSignIn(deps: SignInDeps): SignIn {
       void op.listener?.close();
       op.listener = null;
       operations.delete(op.opId);
-      if (byServer.get(op.name) === op.opId) byServer.delete(op.name);
+      if (byServer.get(serverKey(op)) === op.opId) byServer.delete(serverKey(op));
     }
     deps.emit({ opId: op.opId, name: op.name, state, reason: extra.reason ?? null, message: extra.message ?? null, where: extra.where ?? null });
   };
   const fail = (op: Operation, reason: Reason, message: string | null = null) => move(op, 'failed', { reason, message });
-  const later = (op: Operation, ms: number, run: () => void) => {
+  // A step the operation takes after `ms` if it is still live; the answer clears it sooner.
+  const later = (op: Operation, ms: number, run: () => void): (() => void) => {
     const timer = setTimeout(() => {
       op.timers.delete(timer);
       if (live(op)) run();
     }, ms);
     op.timers.add(timer);
+    return () => {
+      clearTimeout(timer);
+      op.timers.delete(timer);
+    };
   };
 
   // A host call that answered: its value, or null after failing the operation (a session gone is `session_exited`).
@@ -170,12 +177,14 @@ export function createSignIn(deps: SignInDeps): SignIn {
     if (!deps.ready(op.appSessionId)) return fail(op, 'no_session');
     let expected: string | null = null; // the engine's state, once it answered
     let port = 0;
+    let endWait = () => {}; // clears waiting_callback's deadline once the callback is taken
     const handle = (request: LoopbackRequest): LoopbackReply => {
       const url = new URL(request.url, `http://${OAUTH_CALLBACK_HOST}:${port}`);
       if (!live(op) || op.state !== 'waiting_callback' || request.method !== 'GET' || url.pathname !== '/callback' || expected === null || url.searchParams.get('state') !== expected) return { status: 400, body: PAGE.waiting };
       const declined = url.searchParams.has('error');
       const listener = op.listener;
       op.listener = null;
+      endWait();
       move(op, 'submitting');
       // the page is answered first; the listener closes once it is written (it takes no second request), then MAWS submits
       setTimeout(() => void (listener?.close() ?? Promise.resolve()).then(() => submit(op, `http://${OAUTH_CALLBACK_HOST}:${port}${request.url}`, declined)), REPLY_FLUSH_MS);
@@ -205,7 +214,7 @@ export function createSignIn(deps: SignInDeps): SignIn {
     if (redirectScheme === 'custom' && typeof state === 'string') {
       expected = state;
       move(op, 'waiting_callback');
-      later(op, callbackMs, () => fail(op, 'timeout'));
+      endWait = later(op, callbackMs, () => fail(op, 'timeout'));
       return;
     }
     // the engine's own listener receives the redirect; MAWS's is not needed
@@ -221,14 +230,14 @@ export function createSignIn(deps: SignInDeps): SignIn {
 
   return {
     start({ name, appSessionId }) {
-      const previous = byServer.get(name);
+      const previous = byServer.get(serverKey({ appSessionId, name }));
       if (previous !== undefined) {
         const op = operations.get(previous);
         if (op) move(op, 'cancelled');
       }
       const op: Operation = { opId: randomUUID(), name, appSessionId, state: 'starting', listener: null, timers: new Set() };
       operations.set(op.opId, op);
-      byServer.set(name, op.opId);
+      byServer.set(serverKey(op), op.opId);
       deps.emit({ opId: op.opId, name, state: 'starting', reason: null, message: null, where: null });
       queueMicrotask(() => void run(op).catch((error: unknown) => {
         log(`sign-in to ${name} failed: ${error instanceof Error ? error.message : String(error)}`);

@@ -37,6 +37,11 @@ export const CONNECTORS = {
   urlRequired: 'Enter the server’s URL.',
   urlScheme: 'Enter an http or https URL.',
   urlPattern: (pattern: string) => `The URL must match ${pattern}`,
+  urlUnchecked: 'This server’s URL pattern can’t be checked.',
+  // what is configured here, which the name is checked against
+  serversReading: 'Reading what is configured here…',
+  serversFailed: (message: string) => `What is configured here couldn’t be read: ${message}`,
+  serversPartial: 'Not every configuration here could be read, so the name can’t be checked against them.',
   // sign-in
   signIn: 'Sign in',
   signInName: (name: string) => `Sign in to ${name}`,

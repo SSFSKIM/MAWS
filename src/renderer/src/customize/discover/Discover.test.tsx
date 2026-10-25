@@ -110,7 +110,7 @@ function answer(name: CommandName, input: unknown): unknown {
     case 'plugins.manifest':
       return { manifests: [] };
     case 'customization.inventory':
-      return { skills: [], servers: [], warnings: [] };
+      return { skills: [], servers: [], warnings: [], serversRead: true };
     case 'marketplaces.add':
     case 'plugins.install':
     case 'marketplaces.remove': {

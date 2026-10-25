@@ -10,7 +10,7 @@ afterEach(cleanup);
 
 const connector = (install: Partial<Extract<CatalogItem['install'], { kind: 'connector' }>> = {}) =>
   item({ id: 'x', kind: 'connector', name: 'Linear', publisher: 'Linear', reviewTier: 'partner', install: { kind: 'connector', name: 'linear', url: 'https://mcp.linear.app/mcp', urlPattern: null, urlOptions: [], transport: 'http', authPosture: 'auth_required', ...install } });
-const env = (over: Partial<ConnectorSheetEnv> = {}): ConnectorSheetEnv => ({ cwd: '/p', runCwd: '/p', engine: { state: 'ready', env: { binary: '/engine/claude', configHome: '/cfg', globalConfig: '/cfg/.claude.json' } }, servers: [], ...over });
+const env = (over: Partial<ConnectorSheetEnv> = {}): ConnectorSheetEnv => ({ cwd: '/p', runCwd: '/p', engine: { state: 'ready', env: { binary: '/engine/claude', configHome: '/cfg', globalConfig: '/cfg/.claude.json' } }, configured: { state: 'read', servers: [] }, retryServers: () => {}, ...over });
 const open = (catalog: CatalogItem, e = env()) => {
   const onConfirm = vi.fn();
   render(<ConnectorSheet request={connectorAddOf(catalog)!} env={e} onConfirm={onConfirm} onClose={() => {}} />);
@@ -46,7 +46,7 @@ describe('the connector sheet', () => {
   });
 
   it('refuses a name already configured here and shows the existing entry', () => {
-    const { sheet } = open(connector(), env({ servers: [{ name: 'linear', scope: 'local', path: '/cfg/.claude.json', transport: 'http' }] }));
+    const { sheet } = open(connector(), env({ configured: { state: 'read', servers: [{ name: 'linear', scope: 'local', path: '/cfg/.claude.json', transport: 'http' }] } }));
     expect(within(sheet).getByRole('alert').textContent).toBe('This name is already configured here (local scope, /cfg/.claude.json).');
     expect(add(sheet).disabled).toBe(true);
   });
@@ -63,6 +63,32 @@ describe('the connector sheet', () => {
     fireEvent.change(field, { target: { value: 'https://api.salesforce.com/platform/mcp/v1/platform/headless-360' } });
     expect(within(sheet).queryByRole('alert')).toBeNull();
     expect(add(sheet).disabled).toBe(false);
+  });
+
+  it('refuses every URL against a pattern JavaScript cannot read, saying so before anything is typed', () => {
+    const { sheet } = open(connector({ url: null, urlPattern: '^https://(?<a>x' }));
+    expect(within(sheet).getByRole('alert').textContent).toBe('This server’s URL pattern can’t be checked.');
+    fireEvent.change(within(sheet).getByRole('textbox', { name: 'Your instance’s URL' }), { target: { value: 'https://x.example.com/mcp' } });
+    expect(within(sheet).getByRole('alert').textContent).toBe('This server’s URL pattern can’t be checked.');
+    expect(add(sheet).disabled).toBe(true);
+  });
+
+  it('adds nothing until what is configured here is read: reading, a failure with Retry, or a partial read with Retry', () => {
+    const reading = open(connector(), env({ configured: { state: 'reading' } }));
+    expect(within(reading.sheet).getByText('Reading what is configured here…').getAttribute('role')).toBe('status');
+    expect(add(reading.sheet).disabled).toBe(true);
+    cleanup();
+    const retryServers = vi.fn();
+    const failed = open(connector(), env({ configured: { state: 'failed', message: 'the engine host is not running' }, retryServers }));
+    const alert = within(failed.sheet).getByRole('alert');
+    expect(alert.textContent).toContain('What is configured here couldn’t be read: the engine host is not running');
+    fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
+    expect(retryServers).toHaveBeenCalledTimes(1);
+    expect(add(failed.sheet).disabled).toBe(true);
+    cleanup();
+    const partial = open(connector(), env({ configured: { state: 'partial' }, retryServers }));
+    expect(within(partial.sheet).getByRole('alert').textContent).toContain('Not every configuration here could be read');
+    expect(add(partial.sheet).disabled).toBe(true);
   });
 
   it('offers the directory’s url_options as a choice', () => {

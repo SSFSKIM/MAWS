@@ -225,6 +225,20 @@ describe('the sign-in operation', () => {
     expect(t.last(second).state).toBe('done');
   });
 
+  it('the same server name in another session is its own operation: a press there cancels nothing here', async () => {
+    const t = make({ ready: () => true });
+    const here = t.signIn.start({ name: 'linear', appSessionId: SESSION }).opId;
+    await t.until(() => t.last(here)?.state === 'waiting_callback', 'here waiting');
+    const redirect = t.redirectOf();
+    const there = t.signIn.start({ name: 'linear', appSessionId: 'app-session-2' }).opId;
+    await t.until(() => t.last(there)?.state === 'waiting_callback', 'there waiting');
+    expect(t.last(here).state).toBe('waiting_callback');
+    await fetch(`${redirect.origin}/callback?code=c&state=engine-state`);
+    await t.ended(here);
+    expect(t.last(here).state).toBe('done');
+    expect(t.signIn.cancel(there)).toBe(true);
+  });
+
   it('the session exiting mid-flow ends failed (session_exited)', async () => {
     const t = make();
     const { opId } = t.signIn.start({ name: 'linear', appSessionId: SESSION });
@@ -252,5 +266,19 @@ describe('the sign-in operation', () => {
     await vi.waitFor(() => expect(t.last(opId)?.state).toBe('waiting_callback'));
     await vi.advanceTimersByTimeAsync(300_000);
     expect(t.last(opId)).toMatchObject({ state: 'failed', reason: 'timeout' });
+  });
+
+  it('a callback accepted just before the five minutes are up still finishes: the deadline ends with the wait', async () => {
+    vi.useFakeTimers();
+    let handle: ((request: { method: string; url: string }) => { status: number }) | null = null;
+    const t = make({ callbackMs: 300_000, listen: async (h) => ((handle = h), { port: 54321, close: async () => {} }) });
+    const { opId } = t.signIn.start({ name: 'linear', appSessionId: SESSION });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.last(opId).state).toBe('waiting_callback');
+    await vi.advanceTimersByTimeAsync(299_990);
+    expect(handle!({ method: 'GET', url: '/callback?code=accepted&state=engine-state' }).status).toBe(200);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(t.states(opId)).not.toContain('failed');
+    expect(t.last(opId)).toMatchObject({ state: 'done', where: 'here' });
   });
 });

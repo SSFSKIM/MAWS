@@ -59,7 +59,7 @@ import * as connectors from './schema/connectors'; // P3-H H3b
 import * as delivery from './schema/delivery'; // P4-B5
 import * as customization from './schema/customization'; // UX2-K
 import * as catalog from './schema/catalog'; // P4-AGG M2
-export { CustomizationInventorySchema, type CustomizationInventory, type CustomizationSkill, type CustomizationServer } from './schema/customization';
+export { CustomizationInventorySchema, type CustomizationInventory, type CustomizationSkill, type CustomizationServer, type CustomizationEndpoint } from './schema/customization';
 
 export {
   HostPingSchema,

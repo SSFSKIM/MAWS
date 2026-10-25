@@ -24,7 +24,7 @@ const ANSWERS = {
   'plugins.available': { plugins: [DIRECTORY_ENTRY] },
   'marketplaces.list': { marketplaces: [{ name: 'm', source: 'github', locator: 'o/m', ref: null, installLocation: '/clones/m' }] },
   'plugins.marketplaceManifest': { state: 'read', owner: 'O', plugins: [] },
-  'customization.inventory': { skills: [], servers: [{ name: 'linear', scope: 'user', path: '/x', transport: 'http' }], warnings: [] },
+  'customization.inventory': { skills: [], servers: [{ name: 'linear', scope: 'user', path: '/x', transport: 'http' }], warnings: [], serversRead: true },
   'plugins.env': { binary: null, binaryError: null, configHome: '/config', globalConfig: '/config/.claude.json' },
   'plugins.directoryProvenance': { pluginsDir: '/config/plugins', entries: [] },
 };

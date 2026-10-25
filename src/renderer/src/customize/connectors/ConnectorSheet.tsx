@@ -3,19 +3,19 @@
 // (editable within the engine's rule), publisher, trust label and URL; a choice among the directory's url_options, or a
 // required instance URL held to its url_regex with the pattern shown; the transport; the scope (user by default; a
 // project's two only on a project's page); "No sign-in needed" for an authless server; the exact command; and the file it
-// changes. A name already configured in any scope that applies here is refused, the existing entry shown. Removing shows
+// changes. A name already configured in any scope that applies here is refused, the existing entry shown; until every
+// such scope's configuration is read, Add waits, or says why it cannot, with Retry (M4 fix wave). Removing shows
 // the command and the file, behind the acknowledgement. The binary is `plugins.env`'s, read at every opening: until it
 // answers the sheet names no command and confirms nothing.
 import { useState } from 'react';
-import type { CustomizationServer } from '@shared/ipc/schema/customization';
 import type { McpActionInputs, PluginsScope } from '@shared/plugins/cli';
 import { Sheet, SheetForm } from '../../sessions/Sheet';
-import { CHOICE, DANGER, FIELD, PRIMARY } from '../../sessions/ui';
+import { CHOICE, DANGER, FIELD, PRIMARY, SECONDARY } from '../../sessions/ui';
 import { PLUGIN_MANAGEMENT as W } from '../../widgets/copy';
 import type { EngineResolution } from '../../widgets/plugins/ConfirmSheet';
 import { argvOf, commandWords, type PluginsRequest } from '../../widgets/plugins/present';
 import { CONNECTORS as C } from './copy';
-import { existingOf, nameProblem, scopesFor, urlProblem, writesFor } from './present';
+import { existingOf, nameProblem, scopesFor, urlProblem, writesFor, type ConfiguredServers } from './present';
 
 type Add = McpActionInputs['mcp-add'];
 
@@ -23,7 +23,8 @@ export interface ConnectorSheetEnv {
   cwd: string | null; // the page's directory; null for the user configuration
   runCwd: string; // where the CLI runs: the page's directory, else the engine's configuration directory
   engine: EngineResolution;
-  servers: readonly CustomizationServer[]; // configured in every scope that applies here (the inventory for `cwd`)
+  configured: ConfiguredServers; // configured in every scope that applies here (the inventory for `cwd`)
+  retryServers(): void; // read them again
 }
 
 export function ConnectorSheet({ request, env, onConfirm, onClose }: { request: PluginsRequest; env: ConnectorSheetEnv; onConfirm(request: PluginsRequest, binary: string): void; onClose(): void }) {
@@ -76,6 +77,25 @@ function Problem({ text, id }: { text: string | null; id: string }) {
   );
 }
 
+// Why Add waits on what is configured here, with Retry where reading again may help; nothing once it is read whole.
+function Configured({ configured, retry }: { configured: ConfiguredServers; retry(): void }) {
+  if (configured.state === 'read') return null;
+  if (configured.state === 'reading')
+    return (
+      <p role="status" className="m-0 text-ui-sm text-fg-muted">
+        {C.serversReading}
+      </p>
+    );
+  return (
+    <div role="alert" data-connector-configured={configured.state} className="flex flex-wrap items-baseline gap-2 text-ui-sm text-danger [overflow-wrap:anywhere]">
+      {configured.state === 'failed' ? C.serversFailed(configured.message) : C.serversPartial}
+      <button type="button" className={SECONDARY} onClick={retry}>
+        {C.retry}
+      </button>
+    </div>
+  );
+}
+
 function AddSheet({ request, env, onConfirm, onClose }: { request: PluginsRequest; env: ConnectorSheetEnv; onConfirm(request: PluginsRequest, binary: string): void; onClose(): void }) {
   const asked = request.input as Add;
   const connector = request.connector;
@@ -87,14 +107,15 @@ function AddSheet({ request, env, onConfirm, onClose }: { request: PluginsReques
   const typed = pattern !== null && options.length === 0; // an instance URL the person enters
   const nameWrong = nameProblem(name);
   const urlWrong = urlProblem(url, pattern);
-  const existing = nameWrong === null ? existingOf(name, env.servers) : null;
+  const servers = env.configured.state === 'read' ? env.configured.servers : null;
+  const existing = nameWrong === null && servers !== null ? existingOf(name, servers) : null;
   const valid = nameWrong === null && urlWrong === null;
   const confirmed: PluginsRequest | null = valid ? ({ ...request, input: { name, url, transport: asked.transport, scope } } as PluginsRequest) : null;
   const engine = env.engine.state === 'ready' ? env.engine.env : null;
   const scopes = scopesFor(env.cwd);
   return (
     <Sheet title={C.addTitle(connector?.name ?? asked.name)} width="w-[min(520px,90vw)]" onClose={onClose} data-plugins-sheet="mcp-add">
-      <SheetForm canSubmit={engine !== null && confirmed !== null && existing === null} onSubmit={() => engine && confirmed && onConfirm(confirmed, engine.binary)} submitLabel={W.submit['mcp-add']} submitClass={PRIMARY}>
+      <SheetForm canSubmit={engine !== null && confirmed !== null && servers !== null && existing === null} onSubmit={() => engine && confirmed && onConfirm(confirmed, engine.binary)} submitLabel={W.submit['mcp-add']} submitClass={PRIMARY}>
         <div data-plugins-sheet-body className="-mx-1 flex max-h-[calc(82vh-8rem)] min-h-0 flex-col gap-3 overflow-y-auto px-1 text-ui-sm">
           {connector && (
             <p data-connector-byline className="m-0 text-fg-muted">
@@ -106,6 +127,7 @@ function AddSheet({ request, env, onConfirm, onClose }: { request: PluginsReques
             <input value={name} onChange={(event) => setName(event.target.value.trim())} aria-invalid={nameWrong !== null || existing !== null} aria-describedby="connector-name-problem" spellCheck={false} className={`${FIELD} font-mono`} />
           </label>
           <Problem id="connector-name-problem" text={nameWrong ?? (existing && C.exists(existing.scope, existing.path))} />
+          <Configured configured={env.configured} retry={env.retryServers} />
           {options.length > 0 ? (
             <fieldset className="m-0 flex flex-col gap-1 border-0 p-0">
               <legend className="mb-1 p-0 text-fg-muted">{C.urlChoice}</legend>
@@ -129,7 +151,6 @@ function AddSheet({ request, env, onConfirm, onClose }: { request: PluginsReques
               <p data-connector-pattern className="m-0 font-mono break-all text-fg-muted">
                 {C.pattern(pattern)}
               </p>
-              {url !== '' && <Problem id="connector-url-problem" text={urlWrong} />}
             </>
           ) : (
             <p className="m-0 flex flex-col gap-0.5">
@@ -139,6 +160,7 @@ function AddSheet({ request, env, onConfirm, onClose }: { request: PluginsReques
               </span>
             </p>
           )}
+          <Problem id="connector-url-problem" text={url === '' && urlWrong === C.urlRequired ? null : urlWrong} />
           <p className="m-0 text-fg-muted">
             {C.transport}: <span className="text-fg">{C.transportName[asked.transport]}</span>
           </p>

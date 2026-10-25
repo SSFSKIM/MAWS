@@ -7,7 +7,7 @@ import { commands, type CommandOutput } from '@shared/ipc/schema';
 import { isBridgedCommandName } from '@shared/ipc/names';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
 import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
-import { INVENTORY_BOUNDS, readCustomizationInventory, registerCustomizationInventory } from './inventory';
+import { INVENTORY_BOUNDS, readCustomizationInventory, readServerEndpoints, registerCustomizationInventory } from './inventory';
 
 let root: string;
 let home: string;
@@ -53,7 +53,7 @@ describe('cold customization inventory', () => {
         { name: 'shared', scope: 'app', path: appFile, transport: 'http' },
         { name: 'process', scope: 'user', path: global, transport: 'stdio' },
         { name: 'shared', scope: 'user', path: global, transport: 'http' },
-      ], warnings: [],
+      ], warnings: [], serversRead: true,
     });
     expect(JSON.stringify(answer)).not.toMatch(/SECRET|Do not return|Authorization|mcpServers|command|args|env|url/);
     expect(await Promise.all([readFile(global, 'utf8'), readFile(appFile, 'utf8'), readFile(path, 'utf8')])).toEqual(before);
@@ -181,6 +181,7 @@ describe('cold customization inventory', () => {
     const answer = await read();
     expect(answer.skills).toEqual([{ name: 'Large', description: 'Prefix only', source: 'user', path, plugin: null }]);
     expect(answer.servers).toEqual([]);
+    expect(answer.serversRead).toBe(false); // the servers it lists are not the whole set
     expect(answer.warnings.join(' ')).toMatch(/could not be read/);
     expect(JSON.stringify(answer)).not.toContain('PRIVATE_BODY');
   });
@@ -200,19 +201,42 @@ describe('cold customization inventory', () => {
   it('retains app configuration when the user environment is unavailable', async () => {
     const path = await json(join(userData, 'settings.json'), { ...SETTINGS_DEFAULTS_V18, engine: { ...SETTINGS_DEFAULTS_V18.engine, mcpServers: [{ name: 'app', type: 'http', url: 'https://app.test/' }] } });
     const answer = await readCustomizationInventory(null, { userData, captureEnv: async () => { throw new Error('CAPTURE_SECRET'); } });
-    expect(answer).toEqual({ skills: [], servers: [{ name: 'app', scope: 'app', path, transport: 'http' }], warnings: ['User configuration environment could not be read.'] });
+    expect(answer).toEqual({ skills: [], servers: [{ name: 'app', scope: 'app', path, transport: 'http' }], warnings: ['User configuration environment could not be read.'], serversRead: false });
   });
 
   it('returns a warning within its deadline even when environment capture never settles', async () => {
     const answer = await readCustomizationInventory(null, { userData, captureEnv: () => new Promise(() => {}), timeoutMs: 5 });
-    expect(answer).toEqual({ skills: [], servers: [], warnings: ['Customization inventory reached its read limit; some configured items are not inventoried.'] });
+    expect(answer).toEqual({ skills: [], servers: [], warnings: ['Customization inventory reached its read limit; some configured items are not inventoried.'], serversRead: false });
+  });
+
+  it('a project .mcp.json it cannot read leaves the servers not wholly read; one that reads clean leaves them read', async () => {
+    await json(join(configHome, '.claude.json'), { mcpServers: {} });
+    const project = join(root, 'project');
+    await file(join(project, '.mcp.json'), '{ not json');
+    expect((await read(project)).serversRead).toBe(false);
+    await json(join(project, '.mcp.json'), { mcpServers: { local: { type: 'http', url: 'https://x.test/mcp' } } });
+    expect(await read(project)).toMatchObject({ servers: [{ name: 'local', scope: 'project' }], serversRead: true });
+  });
+
+  it('main alone reads each configured server with its URL, row for row with the inventory', async () => {
+    const global = join(configHome, '.claude.json');
+    await json(global, { mcpServers: { linear: { type: 'http', url: 'https://mcp.linear.app/mcp?token=QUERY_SECRET' }, process: { command: 'run' } } });
+    await json(join(userData, 'settings.json'), { ...SETTINGS_DEFAULTS_V18, engine: { ...SETTINGS_DEFAULTS_V18.engine, mcpServers: [{ name: 'app', type: 'http', url: 'https://app.test/' }] } });
+    expect(await readServerEndpoints(null, { userData, captureEnv: environment })).toEqual({ servers: [
+      { name: 'app', scope: 'app', url: 'https://app.test/' },
+      { name: 'linear', scope: 'user', url: 'https://mcp.linear.app/mcp?token=QUERY_SECRET' },
+      { name: 'process', scope: 'user', url: null },
+    ] });
+    expect(JSON.stringify(await read())).not.toMatch(/SECRET|linear\.app/);
+    expect(isBridgedCommandName('customization.serverEndpoints')).toBe(false);
+    expect(commands['customization.serverEndpoints'].owner).toBe('engine-host');
   });
 
   it('registers a read-only host command with null-cwd support and strict metadata-only IPC output', async () => {
     const handlers = new Map<string, (input: { cwd: string | null }) => Promise<unknown>>();
     const on: HostOn = (name, handler) => { handlers.set(name, handler as (input: { cwd: string | null }) => Promise<unknown>); };
     registerCustomizationInventory(on, { userData, captureEnv: environment });
-    expect([...handlers.keys()]).toEqual(['customization.inventory']);
+    expect([...handlers.keys()]).toEqual(['customization.inventory', 'customization.serverEndpoints']);
     expect(isBridgedCommandName('customization.inventory')).toBe(true);
     expect(commands['customization.inventory'].owner).toBe('engine-host');
     expect(validateCommandInput('customization.inventory', { cwd: null }).ok).toBe(true);

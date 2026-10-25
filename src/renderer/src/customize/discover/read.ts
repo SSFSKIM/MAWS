@@ -7,7 +7,7 @@
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useState } from 'react';
 import type { CommandInput, CommandName, CommandOutput, MawsBridge } from '@shared/ipc/schema';
-import type { CatalogItem, CatalogPage, CatalogQueryInput, CatalogSourceStatus, CatalogTab } from '@shared/ipc/schema/catalog';
+import type { CatalogPage, CatalogQueryInput, CatalogSourceStatus, CatalogTab } from '@shared/ipc/schema/catalog';
 import { ipc } from '../../ipc/client';
 import { IpcCommandError, queryClient } from '../../ipc/query';
 
@@ -30,6 +30,7 @@ export function catalogChanged(client: QueryClient = queryClient): void {
   void client.invalidateQueries({ queryKey: [...ROOT, 'home'] });
   void client.invalidateQueries({ queryKey: [...ROOT, 'item'] });
   void client.invalidateQueries({ queryKey: [...ROOT, 'sources'] });
+  void client.invalidateQueries({ queryKey: [...ROOT, 'postures'] });
   void client.invalidateQueries({ queryKey: [...ROOT, 'icon'], predicate: (query) => query.state.data === null }); // the misses
 }
 
@@ -102,20 +103,14 @@ export const useCatalogIcon = (url: string | null) =>
     refetchOnWindowFocus: false,
   });
 
-/** P4-AGG M4: the directory's auth posture for a server named `name`, from the catalog reads this window already holds
- * (a home, a query's pages, an item), never a new read: My items must not reach the network to show its list. */
-export function cachedPosture(name: string, client: QueryClient = queryClient): 'auth_required' | 'no_auth' | null {
-  const seen = (item: unknown): 'auth_required' | 'no_auth' | null => {
-    const route = (item as Partial<CatalogItem> | null)?.install;
-    return route?.kind === 'connector' && route.name === name ? route.authPosture : null;
-  };
-  for (const [, data] of client.getQueriesData<unknown>({ queryKey: ROOT })) {
-    const d = data as { featured?: unknown; shelves?: { items: unknown[] }[]; pages?: { items: unknown[] }[] } | null | undefined;
-    const items = [d, d?.featured, ...(d?.shelves ?? []).flatMap((shelf) => shelf.items), ...(d?.pages ?? []).flatMap((page) => page.items)];
-    for (const item of items) {
-      const posture = seen(item);
-      if (posture !== null) return posture;
-    }
-  }
-  return null;
-}
+/** P4-AGG M4: each configured server's sign-in posture, by the directory record its endpoint matches (main's
+ * `catalog.postures`, from the directory copy it holds: My items never reaches the network to show its list). Read again
+ * when what is configured changes, and on `catalog.changed`. */
+export const useCatalogPostures = (cwd: string | null, servers: readonly { name: string; scope: string }[] | undefined) =>
+  useQuery<CommandOutput<'catalog.postures'>, IpcCommandError>({
+    queryKey: [...ROOT, 'postures', { cwd, servers: (servers ?? []).map(({ name, scope }) => `${scope}:${name}`) }],
+    queryFn: () => invoke('catalog.postures', { cwd }),
+    enabled: servers !== undefined && servers.length > 0,
+    refetchOnWindowFocus: false,
+    staleTime: Infinity,
+  });

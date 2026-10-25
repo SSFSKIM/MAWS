@@ -1,22 +1,27 @@
 // What Customize › Connectors says and asks (docs/doperpowers/specs/2026-10-24-plugin-aggregator-design.md, Design
 // "Adding", "Signing in", "Which session", "My items"). Pure: the sheet, My items and the tests read these.
 // - + asks `claude mcp add --transport <http|sse> <name> <url> --scope <scope>`: the directory's name, URL (or the first of
-//   its url_options, or an instance URL the person types, held to the server's url_regex as a whole) and transport, at
-//   user scope by default. A name configured in any scope that applies here is refused with the existing entry.
+//   its url_options, or an instance URL the person types, held to the server's url_regex as the directory writes it, a
+//   pattern JavaScript cannot read refusing every URL) and transport, at user scope by default. A name configured in any
+//   scope that applies here is refused with the existing entry; until every scope's configuration is read, nothing is
+//   added.
 // - Remove asks `claude mcp remove <name> --scope <scope>` at the server's own scope; MAWS's own (`app`) servers are not
 //   the engine's to remove.
 // - Sign in runs in the attached session, else any ready session whose scope includes the server (Decision Log 14): any
 //   session for a user-scope server, a session in the page's directory for a project or local one.
 // - A server's sign-in state: a sign-in under way or its end first, then the attached session's mcp_status, then the
-//   directory's auth posture for a server it lists under that name; no words when MAWS observed nothing, though a remote
-//   server still offers Sign in.
+//   directory's auth posture for the record the server's endpoint matches (main's `catalog.postures`); no words when MAWS
+//   observed nothing, though a remote server still offers Sign in. A success yields to a read taken after it that says
+//   the server needs a sign-in or failed, save a success for new sessions against its own session's read; a sign-in that
+//   did not finish stays said.
 import type { CatalogItem } from '@shared/ipc/schema/catalog';
-import type { ConnectorSignInChanged } from '@shared/ipc/schema/connectors';
 import type { CustomizationServer } from '@shared/ipc/schema/customization';
 import { isMcpName, isMcpUrl, PLUGINS_SCOPES, type PluginsScope } from '@shared/plugins/cli';
+import { patternCheck } from '@shared/plugins/connector-url';
 import { requestFor, type PluginsRequest } from '../../widgets/plugins/present';
 import { trustOf } from '../discover/present';
 import { CONNECTORS as C } from './copy';
+import type { SignInRecord } from './sign-in';
 
 export type AuthPosture = 'auth_required' | 'no_auth';
 
@@ -32,19 +37,13 @@ export function connectorAddOf(item: CatalogItem): PluginsRequest | null {
   );
 }
 
-/** Why the URL cannot be added, or null. The directory's pattern is held to the whole URL; one JavaScript cannot read
- * leaves the scheme check alone (the engine takes any http or https URL). */
+/** Why the URL cannot be added, or null. A pattern JavaScript cannot read refuses every URL, before one is typed. */
 export function urlProblem(url: string, pattern: string | null): string | null {
+  const check = pattern === null ? null : patternCheck(url, pattern);
+  if (check === 'unreadable') return C.urlUnchecked;
   if (url === '') return C.urlRequired;
   if (!isMcpUrl(url)) return C.urlScheme;
-  if (pattern === null) return null;
-  let whole: RegExp;
-  try {
-    whole = new RegExp(`^(?:${pattern})$`);
-  } catch {
-    return null;
-  }
-  return whole.test(url) ? null : C.urlPattern(pattern);
+  return check === 'no_match' ? C.urlPattern(pattern!) : null;
 }
 
 export const nameProblem = (name: string): string | null => (name === '' ? C.nameRequired : isMcpName(name) ? null : C.nameRule);
@@ -52,6 +51,19 @@ export const nameProblem = (name: string): string | null => (name === '' ? C.nam
 /** The entry already configured under this name in a scope that applies in the page's directory (the inventory lists
  * every such scope), or null. */
 export const existingOf = (name: string, servers: readonly CustomizationServer[]): CustomizationServer | null => servers.find((server) => server.name === name) ?? null;
+
+/** What is configured in every scope that applies here, as Add needs it: read whole, or why not. A name is free only
+ * against a whole read, so nothing is added while it is reading, failed, or read in part (`serversRead` false). */
+export type ConfiguredServers =
+  | { state: 'reading' }
+  | { state: 'failed'; message: string }
+  | { state: 'partial' }
+  | { state: 'read'; servers: readonly CustomizationServer[] };
+
+export function configuredOf(read: { data: { servers: readonly CustomizationServer[]; serversRead: boolean } | undefined; error: Error | null }): ConfiguredServers {
+  if (read.data) return read.data.serversRead ? { state: 'read', servers: read.data.servers } : { state: 'partial' };
+  return read.error ? { state: 'failed', message: read.error.message } : { state: 'reading' };
+}
 
 /** The scopes the sheet offers: a project's two need a project, so the user configuration offers user alone. */
 export const scopesFor = (cwd: string | null): PluginsScope[] => (cwd === null ? ['user'] : [...PLUGINS_SCOPES]);
@@ -87,8 +99,9 @@ export function signInSessionOf(scope: CustomizationServer['scope'], ready: read
 
 export interface SignInFacts {
   live: { status: string; error: string | null } | null | undefined; // the attached session's mcp_status entry; null: not listed; undefined: no read
-  posture: AuthPosture | null; // the directory's, for a server it lists under this name
-  last: ConnectorSignInChanged | null; // this server's latest sign-in
+  liveRead: { appSessionId: string; at: number } | null; // the read `live` came from: its session and when (ms)
+  posture: AuthPosture | null; // the directory's, for the record the server's endpoint matches
+  last: SignInRecord | null; // this server's latest sign-in
   transport: string | null; // the configured transport: a local (stdio) server signs in nowhere
 }
 
@@ -102,8 +115,17 @@ export interface SignInView {
 const view = (text: string | null, tone: SignInView['tone'], signIn: boolean, cancel = false): SignInView => ({ text, tone, signIn, cancel });
 const REMOTE: ReadonlySet<string | null> = new Set(['http', 'sse', null]);
 
-export function signInViewOf({ live, posture, last, transport }: SignInFacts): SignInView | null {
-  if (last !== null) {
+// A success the session has since contradicted: a read after it lists the server needing a sign-in or failed. A success
+// for new sessions never claimed the signing session, so that session's read does not contradict it.
+function overtaken({ event, appSessionId, at }: SignInRecord, live: SignInFacts['live'], read: SignInFacts['liveRead']): boolean {
+  if (event.state !== 'done' || !live || read === null || read.at <= at) return false;
+  if (live.status !== 'needs-auth' && live.status !== 'failed') return false;
+  return !(event.where === 'new_sessions' && read.appSessionId === appSessionId);
+}
+
+export function signInViewOf({ live, liveRead, posture, last: record, transport }: SignInFacts): SignInView | null {
+  if (record !== null && !overtaken(record, live, liveRead)) {
+    const last = record.event;
     switch (last.state) {
       case 'done':
         return view(C.signedIn[last.where ?? 'here'], 'success', false);

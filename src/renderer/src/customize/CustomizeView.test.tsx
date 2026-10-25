@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ConnectorSignInChanged } from '@shared/ipc/schema/connectors';
-import { heard, useSignIns } from './connectors/sign-in';
+import { heard, resetSignIns } from './connectors/sign-in';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { ProjectId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
@@ -27,7 +27,7 @@ beforeEach(() => {
   backend = createWidgetBackend({ root: process.cwd(), statuses: [] });
   backend.script('customization.inventory', (input) => { const { cwd } = input as { cwd: string | null }; return ({
     skills: [{ name: cwd === '/one' ? 'review' : 'translate', description: 'A skill read from disk', source: 'project', path: `${cwd}/.claude/skills/review/SKILL.md`, plugin: null }],
-    servers: [{ name: 'notion', scope: 'user', path: '/config/.claude.json', transport: 'http' }], warnings: [],
+    servers: [{ name: 'notion', scope: 'user', path: '/config/.claude.json', transport: 'http' }], warnings: [], serversRead: true,
   }); });
   backend.script('plugins.env', () => ({ binary: null, binaryError: 'Unavailable', configHome: '/config', globalConfig: '/config/.claude.json' }));
   window.maws = backend.bridge();
@@ -174,7 +174,7 @@ it('keeps disk skill names as display metadata without inventing user or plugin 
   backend.script('customization.inventory', () => ({ skills: [
     { name: 'Quarterly Review', description: 'A user skill display name', source: 'user', path: '/config/skills/review/SKILL.md', plugin: null },
     { name: 'Plugin: Quarterly Review', description: 'A plugin skill display name', source: 'plugin', path: '/plugins/reports/skills/review/SKILL.md', plugin: 'reports@market' },
-  ], servers: [], warnings: [] }));
+  ], servers: [], warnings: [], serversRead: true }));
   mount('skills');
   for (const name of ['Quarterly Review', 'Plugin: Quarterly Review']) {
     const open = await screen.findByRole('button', { name: `View ${name}` });
@@ -269,7 +269,7 @@ it('attaches live facts only from a ready session in the selected directory and 
 it.each(['skills', 'mcp'] as const)('shows normal inventory coverage quietly in %s, separately from actionable read warnings', async (section) => {
   const coverage = 'Plugin MCP servers and marketplace-only skill declarations are not inventoried; see Plugins.';
   const unreadable = '/config/settings.json: not valid JSON';
-  backend.script('customization.inventory', () => ({ skills: [], servers: [], warnings: [coverage] }));
+  backend.script('customization.inventory', () => ({ skills: [], servers: [], warnings: [coverage], serversRead: true }));
   mount(section);
   const note = await screen.findByText('Inventory coverage');
   expect(note.closest('details')?.classList.contains('text-fg-muted')).toBe(true);
@@ -277,7 +277,7 @@ it.each(['skills', 'mcp'] as const)('shows normal inventory coverage quietly in 
   fireEvent.click(note);
   expect(screen.getByText(coverage)).toBeTruthy();
 
-  backend.script('customization.inventory', () => ({ skills: [], servers: [], warnings: [coverage, unreadable] }));
+  backend.script('customization.inventory', () => ({ skills: [], servers: [], warnings: [coverage, unreadable], serversRead: false }));
   fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
   const warning = await screen.findByText('Some configuration could not be read');
   expect(warning.closest('details')?.classList.contains('text-warning')).toBe(true);
@@ -297,11 +297,11 @@ it('shows configured servers without inventing connection state or offering a se
 
 // P4-AGG M4: Customize › Connectors (the Discover spec, Design "My items", "Signing in", "Which session").
 describe('Connectors', () => {
-  const posture = (client: QueryClient, name: string, authPosture: 'auth_required' | 'no_auth') =>
-    client.setQueryData(['maws', 'catalog', 'home', { tab: 'connectors', cwd: '/one' }], { featured: { kind: 'connector', install: { kind: 'connector', name, authPosture } }, shelves: [] });
+  // main's posture for each configured server, by the record its endpoint matches; unscripted, it is unknown
+  const posture = (_client: QueryClient, name: string, authPosture: 'auth_required' | 'no_auth', scope = 'user') => backend.script('catalog.postures', () => ({ servers: [{ name, scope, authPosture }] }));
   const mountWith = (client: QueryClient) => render(<QueryClientProvider client={client}><CustomizeView section="mcp" /></QueryClientProvider>);
   const fresh = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  afterEach(() => useSignIns.setState({ byName: new Map() }));
+  afterEach(() => resetSignIns());
 
   it('is the tab named Connectors; a user-scope server signs in from any ready session and shows each step and the result', async () => {
     const elsewhere = { ...status('signer'), cwd: '/two' };
@@ -313,7 +313,7 @@ describe('Connectors', () => {
     mountWith(client);
     expect(screen.getByRole('tab', { name: 'Connectors' })).toBeTruthy();
     const row = (await screen.findByText('notion')).closest('li')!;
-    expect(within(row).getByText('Sign in needed')).toBeTruthy();
+    expect(await within(row).findByText('Sign in needed')).toBeTruthy(); // main's posture, read after the list
     fireEvent.click(within(row).getByRole('button', { name: 'Sign in to notion' }));
     await waitFor(() => expect(backend.calls.filter((call) => call.command === 'connectors.signIn').map((call) => call.input)).toEqual([{ name: 'notion', appSessionId: 'signer' }]));
     const changed = (state: ConnectorSignInChanged['state'], over: Partial<ConnectorSignInChanged> = {}) => act(() => heard({ opId: 'op-1', name: 'notion', state, reason: null, message: null, where: null, ...over }));
@@ -332,7 +332,7 @@ describe('Connectors', () => {
   it('with no ready session whose scope includes the server, Sign in says to open one and does nothing else', async () => {
     const client = fresh();
     posture(client, 'notion', 'auth_required');
-    backend.script('customization.inventory', () => ({ skills: [], servers: [{ name: 'notion', scope: 'local', path: '/config/.claude.json', transport: 'http' }], warnings: [] }));
+    backend.script('customization.inventory', () => ({ skills: [], servers: [{ name: 'notion', scope: 'local', path: '/config/.claude.json', transport: 'http' }], warnings: [], serversRead: true }));
     const elsewhere = { ...status('elsewhere'), cwd: '/two' };
     useSessions.setState({ engine: new Map([[elsewhere.appSessionId, elsewhere]]) });
     mountWith(client);
@@ -347,7 +347,7 @@ describe('Connectors', () => {
     posture(client, 'notion', 'no_auth');
     mountWith(client);
     const row = (await screen.findByText('notion')).closest('li')!;
-    expect(within(row).getByText('No sign-in needed')).toBeTruthy();
+    expect(await within(row).findByText('No sign-in needed')).toBeTruthy();
     expect(within(row).queryByRole('button', { name: 'Sign in to notion' })).toBeNull();
   });
 

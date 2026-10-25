@@ -130,6 +130,12 @@ export const commands = {
   // M3: a card's icon as data, fetched by main only from the directory's own icon routes (the catalog egress rule;
   // Decision Log 7(b)); null for any other URL, which the card draws as a monogram. The renderer fetches nothing.
   'catalog.icon': main(z.strictObject({ url: z.string().max(2048) }), z.strictObject({ dataUrl: z.string().nullable() })),
+  // M4: each configured server's sign-in posture from the directory's copy MAWS holds (no fetch), matched by its endpoint
+  // (the record's URL, one of its url_options, or its url_regex), never by name; null when no record matches
+  'catalog.postures': main(
+    z.strictObject({ cwd: CwdSchema }),
+    z.strictObject({ servers: z.array(z.strictObject({ name: z.string(), scope: z.enum(['app', 'user', 'project', 'local']), authPosture: z.enum(['auth_required', 'no_auth']).nullable() })) }),
+  ),
 } as const satisfies Record<`catalog.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
