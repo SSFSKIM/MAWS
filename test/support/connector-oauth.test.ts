@@ -264,6 +264,39 @@ describe('the engine Keychain custody', () => {
     expect(k.calls.map((args) => args[0])).toEqual(['find-generic-password', 'find-generic-password']);
   });
 
+  // Fail closed: only `security`'s item-not-found status (44) means absent; any other lookup failure, or a deletion
+  // that does not succeed, establishes nothing and fails.
+  it('refuses a claim when the lookup fails other than by not finding the item', () => {
+    const locked = (args: readonly string[]) => (args[0] === 'find-generic-password' ? 51 : 0);
+    const custody = engineKeychainCustody(CONFIG, { security: locked, alive: () => false });
+    expect(() => custody.claim()).toThrow(/could not look up the Keychain item .* \(security exited 51\)/);
+    expect(() => custody.release({ enginePids: [] })).toThrow(/never claimed/);
+  });
+
+  it('fails a release whose verification lookup fails after the deletion', () => {
+    const k = keychain([]);
+    let deleted = false;
+    const flaky = (args: readonly string[]) => {
+      if (args[0] === 'delete-generic-password') deleted = true;
+      if (deleted && args[0] === 'find-generic-password') return 36;
+      return k.security(args);
+    };
+    const custody = engineKeychainCustody(CONFIG, { security: flaky, alive: () => false });
+    custody.claim();
+    k.items.add(SERVICE);
+    expect(() => custody.release({ enginePids: [] })).toThrow(/could not look up the Keychain item .* \(security exited 36\)/);
+  });
+
+  it('fails a release whose deletion fails', () => {
+    const k = keychain([]);
+    const refusing = (args: readonly string[]) => (args[0] === 'delete-generic-password' ? 1 : k.security(args));
+    const custody = engineKeychainCustody(CONFIG, { security: refusing, alive: () => false });
+    custody.claim();
+    k.items.add(SERVICE);
+    expect(() => custody.release({ enginePids: [] })).toThrow(/could not delete the Keychain item .* \(security exited 1\)/);
+    expect(k.items.has(SERVICE)).toBe(true);
+  });
+
   it('fails when the item survives its deletion', () => {
     const k = keychain([]);
     const stuck = (args: readonly string[]) => (args[0] === 'delete-generic-password' ? 0 : k.security(args));

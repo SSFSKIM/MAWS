@@ -267,7 +267,8 @@ export function engineKeychainService(configDir: string, engineEnv: Record<strin
   return `Claude Code-credentials-${createHash('sha256').update(configDir.normalize('NFC')).digest('hex').slice(0, 8)}`;
 }
 
-// `security <verb> -s <service>`'s exit status: 0 found (or deleted), anything else not.
+// `security <verb> -s <service>`'s exit status: 0 found (or deleted), 44 (errSecItemNotFound) not found, anything else
+// a failure that establishes nothing.
 export type SecurityCommand = (args: readonly string[]) => number;
 const systemSecurity: SecurityCommand = (args) => {
   try {
@@ -279,6 +280,8 @@ const systemSecurity: SecurityCommand = (args) => {
     throw error;
   }
 };
+
+const ITEM_NOT_FOUND = 44; // `security`'s exit status for errSecItemNotFound
 
 export interface EngineKeychainCustody {
   readonly service: string;
@@ -293,7 +296,13 @@ export function engineKeychainCustody(configDir: string, options: { engineEnv?: 
   const service = engineKeychainService(configDir, options.engineEnv);
   const security = options.security ?? systemSecurity;
   const alive = options.alive ?? isAlive;
-  const present = () => security(['find-generic-password', '-s', service]) === 0;
+  // Fail closed: only the item-not-found status means absent; any other lookup failure throws.
+  const present = () => {
+    const status = security(['find-generic-password', '-s', service]);
+    if (status === 0) return true;
+    if (status === ITEM_NOT_FOUND) return false;
+    throw new Error(`could not look up the Keychain item "${service}" (security exited ${status})`);
+  };
   let claimed = false;
   return {
     service,
@@ -305,7 +314,8 @@ export function engineKeychainCustody(configDir: string, options: { engineEnv?: 
       if (!claimed) throw new Error(`the Keychain item "${service}" was never claimed by this run`);
       for (const pid of enginePids) if (alive(pid)) throw new Error(`engine ${pid} is still alive; the Keychain item "${service}" is released only after every engine has exited`);
       if (!present()) return { service, found: false, deleted: false };
-      security(['delete-generic-password', '-s', service]);
+      const status = security(['delete-generic-password', '-s', service]);
+      if (status !== 0) throw new Error(`could not delete the Keychain item "${service}" (security exited ${status})`);
       if (present()) throw new Error(`the Keychain item "${service}" is still in the Keychain after its deletion`);
       return { service, found: true, deleted: true };
     },

@@ -23,10 +23,31 @@ home=$root/home
 mkdir -p "$config" "$home"
 item="Claude Code-credentials-$(printf '%s' "$config" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(require("crypto").createHash("sha256").update(s.normalize("NFC")).digest("hex").slice(0,8)))')"
 [[ $item =~ ^Claude\ Code-credentials-[0-9a-f]{8}$ ]] || { echo "refused: $item" >&2; exit 1; }
+# Fail closed: only `security`'s item-not-found status (44) means absent; any other lookup failure, a deletion that
+# fails or an item that survives its deletion stops the probe with a failure.
+lookup() {
+  local status=0
+  security find-generic-password -s "$item" >/dev/null 2>&1 || status=$?
+  case $status in
+    0) state=present ;;
+    44) state=absent ;;
+    *) echo "probe: the lookup of \"$item\" failed (security exited $status)" >&2; exit 1 ;;
+  esac
+}
+remove() {
+  local status=0
+  security delete-generic-password -s "$item" >/dev/null 2>&1 || status=$?
+  (( status == 0 )) || { echo "probe: could not delete \"$item\" (security exited $status)" >&2; exit 1; }
+  lookup
+  [[ $state == absent ]] || { echo "probe: \"$item\" is still in the Keychain after its deletion" >&2; exit 1; }
+}
 created=0
 cleanup() {
-  if (( created )) && security find-generic-password -s "$item" >/dev/null 2>&1; then security delete-generic-password -s "$item" >/dev/null 2>&1 || true; fi
+  local status=$? kept=0
+  if (( created )); then (lookup; if [[ $state == present ]]; then remove; fi) || kept=1; fi
   rm -rf "$root"
+  if (( kept )); then echo "probe: the Keychain item \"$item\" was not cleaned up" >&2; exit 1; fi
+  exit "$status"
 }
 trap cleanup EXIT
 run() { env -i HOME="$home" CLAUDE_CONFIG_DIR="$config" PATH=/usr/bin:/bin DISABLE_AUTOUPDATER=1 TERM=dumb "$engine" "$@" 2>&1; }
@@ -54,16 +75,18 @@ echo "list: $(run plugin list --json --available | count)"
 echo "settings.json: $(tr -d '\n ' <"$config/settings.json")"
 
 echo; echo '== 3. the Keychain service name of this CLAUDE_CONFIG_DIR'
-security find-generic-password -s "$item" >/dev/null 2>&1 && { echo "refused: $item exists before the probe" >&2; exit 1; }
+lookup
+[[ $state == absent ]] || { echo "refused: $item exists before the probe" >&2; exit 1; }
 echo "before: absent"
 created=1
 store() { # $1: the HOME the engine runs under; $2: the server name
   echo "mcp add ($2): $(env -i HOME="$1" CLAUDE_CONFIG_DIR="$config" PATH=/usr/bin:/bin DISABLE_AUTOUPDATER=1 TERM=dumb MCP_CLIENT_SECRET=m1-probe-secret "$engine" mcp add --transport http --client-id m1-probe --client-secret --scope user "$2" http://127.0.0.1:9/mcp 2>&1 | tr '\n' ' ')"
-  if security find-generic-password -s "$item" >/dev/null 2>&1; then echo "  item: present under exactly \"$item\""; else echo "  item: absent"; fi
+  lookup
+  if [[ $state == present ]]; then echo "  item: present under exactly \"$item\""; else echo "  item: absent"; fi
   if [[ -e $config/.credentials.json ]]; then echo "  .credentials.json: present"; else echo "  .credentials.json: absent"; fi
-  if security find-generic-password -s "$item" >/dev/null 2>&1; then
-    security delete-generic-password -s "$item" >/dev/null 2>&1 && echo "  deleted: $item"
-    if security find-generic-password -s "$item" >/dev/null 2>&1; then echo "  gone: NO"; else echo "  gone: yes"; fi
+  if [[ $state == present ]]; then
+    remove
+    echo "  deleted: $item; gone: yes"
   fi
 }
 echo "arm a: HOME=$home (scratch)"; store "$home" m1-scratch-home
