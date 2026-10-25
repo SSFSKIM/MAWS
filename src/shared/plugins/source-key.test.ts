@@ -1,7 +1,7 @@
 // P2-B M2: the key a marketplace entry's source names the plugin's code by (the engine's own fold rule, U3 F5), and
 // Desktop's test for the default Anthropic marketplace.
 import { describe, expect, it } from 'vitest';
-import { isAnthropicDefaultMarketplace, sourceKey } from './source-key';
+import { isAnthropicDefaultMarketplace, repositoryLocation, sourceKey } from './source-key';
 
 const OFFICIAL = { source: 'github', locator: 'anthropics/claude-plugins-official' };
 const subdir = (url: string, path: string | null) => ({ kind: 'git-subdir', url, repo: null, path });
@@ -43,6 +43,10 @@ describe('sourceKey', () => {
     // the engine reads `sha`, never the ref's content: a ref that looks like a sha pins a branch or tag all the same
     // (2.1.292 `Sb`, cli.pretty.js:832443-832447); the host clears a ref a separate sha pins (`cli-result.ts`)
     expect(sourceKey({ ...subdir('https://github.com/a/b', 'p'), ref: 'f'.repeat(40) }, null)).toBeNull();
+    // P4-AGG M2: the host keeps a ref beside a sha (each route's own pin); the engine keys by the sha all the same
+    expect(sourceKey({ ...subdir('https://github.com/a/b', 'p'), ref: 'main', sha: 'a'.repeat(40) }, null)).toBe('github.com/a/b#p');
+    expect(sourceKey({ ...subdir('https://github.com/a/b', 'p'), ref: 'main', sha: 'a'.repeat(39) }, null)).toBeNull();
+    expect(sourceKey({ ...subdir('https://github.com/a/b', 'p'), ref: 'main', sha: null }, null)).toBeNull();
   });
 
   it('refuses a relative entry of a marketplace pinned to a branch or tag; an unpinned one keys as the directory does', () => {
@@ -84,5 +88,16 @@ describe('isAnthropicDefaultMarketplace', () => {
     expect(isAnthropicDefaultMarketplace({ source: 'github', locator: 'someone/claude-plugins-official' })).toBe(false);
     expect(isAnthropicDefaultMarketplace({ source: 'directory', locator: '/tmp/claude-plugins-official' })).toBe(false);
     expect(isAnthropicDefaultMarketplace({ source: 'claudeai', locator: null })).toBe(false);
+  });
+});
+
+// P4-AGG M2: Discover's identity is the same reading without the pins
+describe('repositoryLocation', () => {
+  it('spells a repository and a path as the fold key does, the community manifest’s owner/repo shorthand included', () => {
+    expect(repositoryLocation('https://github.com/42Crunch-AI/claude-plugins.git', 'plugins/api-security-testing')).toBe('github.com/42crunch-ai/claude-plugins#plugins/api-security-testing');
+    expect(repositoryLocation('42Crunch-AI/claude-plugins', './plugins/api-security-testing/')).toBe('github.com/42crunch-ai/claude-plugins#plugins/api-security-testing');
+    expect(repositoryLocation('https://github.com/aisa-one/skill-creator.git', null)).toBe('github.com/aisa-one/skill-creator#');
+    expect(repositoryLocation('/tmp/a-local-marketplace', 'plugins/x')).toBeNull();
+    expect(repositoryLocation('anthropics/skills', '../x')).toBeNull();
   });
 });

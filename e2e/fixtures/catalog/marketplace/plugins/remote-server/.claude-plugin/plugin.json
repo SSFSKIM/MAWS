@@ -1,0 +1,1 @@
+{ "name": "remote-server", "version": "0.1.0", "description": "A plugin carrying a remote (HTTP) MCP server.", "author": { "name": "MAWS e2e servers" } }

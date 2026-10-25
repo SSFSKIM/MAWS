@@ -411,3 +411,29 @@ describe('PluginsRunner reads', () => {
     await expect(runner.read(READ_LINES.marketplaces, cwd)).rejects.toThrow('Claude Code is not installed');
   });
 });
+
+// P4-AGG M4: `claude mcp add|remove` run as operations of the same queue, read from the line the CLI printed, with no
+// session reload (an MCP change takes effect at the next session, fact 2).
+describe('mcp add and remove', () => {
+  it('runs `mcp add` at the named scope and reads its printed line as the outcome', async () => {
+    behave(`echo "Added HTTP MCP server linear with URL: https://mcp.linear.app/mcp to user config"\necho "File modified: /cfg/.claude.json"\n`);
+    const reloadTargets = vi.fn(() => [] as ReloadTarget[]);
+    const { runner: r, events, changes, done } = make({ reloadTargets });
+    const { opId } = await r.start('mcp-add', { name: 'linear', url: 'https://mcp.linear.app/mcp', transport: 'http', scope: 'user' }, cwd, bin);
+    const end = await done(opId);
+    expect(calls()).toEqual(['mcp add --transport http linear https://mcp.linear.app/mcp --scope user']);
+    expect(end).toMatchObject({ action: 'mcp-add', target: 'linear', outcome: { ok: true, result: { command: 'mcp add', message: 'Added HTTP MCP server linear with URL: https://mcp.linear.app/mcp to user config' } } });
+    expect(end.reload).toBeUndefined();
+    expect(events.filter((e) => e.opId === opId).map((e) => e.phase)).toEqual(['started', 'output', 'output', 'done']);
+    expect(reloadTargets).not.toHaveBeenCalled();
+    expect(changes()).toBe(1);
+  });
+
+  it('answers a refusal of `mcp remove` in the engine\'s words', async () => {
+    behave(`echo 'No MCP server named "linear" in user scope' >&2\nexit 1\n`);
+    const { runner: r, done } = make();
+    const { opId } = await r.start('mcp-remove', { name: 'linear', scope: 'user' }, cwd, bin);
+    expect(await done(opId)).toMatchObject({ action: 'mcp-remove', outcome: { ok: false, error: { code: 'cli_failed', message: 'No MCP server named "linear" in user scope' } } });
+    expect(calls()).toEqual(['mcp remove linear --scope user']);
+  });
+});

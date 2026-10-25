@@ -63,9 +63,13 @@
     // P3-HD M4a: test/support/connector-oauth*.test.ts run the toy OAuth fixture's logic, its scene support and fake browser
     "e2e/support/connector-oauth-core.d.mts",
     "e2e/support/connector-oauth.ts",
+    "e2e/support/keychain-guard.ts", // fixB: the custody's keychain prompt guard and engine-environment checks
     "e2e/support/connector-oauth-browser.ts",
     "e2e/support/connector-direct-checks.ts", // P3-HD M4b: test/support/connector-direct-checks.test.ts runs the integrated scenes' pure checks
     "e2e/support/connector-direct-probe.ts", // P3-F W-RD: test/support/connector-direct-probe.test.ts runs the probe's auth-fixture exposure check
+    // P4-AGG M1: test/support/real-engine.test.ts and discover-scratch.test.ts run the Discover group's engine check and scratch
+    "e2e/support/real-engine.ts",
+    "e2e/support/discover-scratch.ts",
     // P2-F S-locale: the transcript model's day words and the agent tools' ages write through the renderer's date
     // formats (D2 widened), and the agent models' tests read the system locale's relative times; listed for the same
     // reason as C8a's

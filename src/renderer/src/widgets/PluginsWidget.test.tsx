@@ -2,25 +2,32 @@
 // three CLI reads, the manifest read (P2-B), the operations' receipts, and `plugins.operation` / `plugins.changed`
 // emitted by the test as the engine host would emit them. Nothing here runs a CLI or touches a config home. P2-B M3:
 // the library (My items' rows by plugin, the row overflow's Turn on or off, Update and Uninstall…, the loaded line);
-// M5: Browse (its catalogue read on its click; cards, Install, the installed join) and the Add menu's two marketplace dialogs.
+// M5: the Add menu's two marketplace dialogs. P4-AGG (Decision Log 10): new plugins are found in Discover, Customize's
+// second view over `catalog.*` (scripted here), which the session's `/plugins` opens with Open Discover.
 import { join } from 'node:path';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppSessionId } from '@shared/graph/ids';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { EventName, MawsBridge } from '@shared/ipc/schema';
 import type { Availability } from '@shared/ipc/schema/session';
 import type { InstalledPlugin, ManifestItemRef, PluginManifestView, PluginsOperationEvent } from '@shared/ipc/schema/plugins';
 import { commandLine } from '@shared/plugins/cli';
-import { digest, record } from '../../../../test/support/builders';
+import { digest, project as projectRecord, record } from '../../../../test/support/builders';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
 import { registerFocusTarget } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
 import { useBuiltInMods, type BuiltInModsState } from './plugins/builtin-mods';
 import { useLibraryStore } from './plugins/library-store';
+import type { CatalogItem } from '@shared/ipc/schema/catalog';
+import { connectCatalogEvents } from '../customize/discover/read';
+import { NO_CHOICES, useDiscoverStore } from '../customize/discover/store';
+import { item } from '../customize/discover/test-items';
+import { useCustomizeProject, useDiscoverRequest } from '../customize/open';
 import { PluginsLibrary, PluginsWidget } from './PluginsWidget';
 import { useReadLoads } from './read';
+import { forgetKeptOperations } from './plugins/operation';
 import { REL } from '../test-support/relative-time';
 
 // P2-C's `mods.list` stood in (X20): no rows unless a case gives some
@@ -39,6 +46,11 @@ let cwd: string;
 let emit: (name: EventName, payload: unknown) => void;
 let installed: InstalledPlugin[];
 let opSeq: number;
+let offers: CatalogItem[];
+const E8_MARKET = '/tmp/e8-scratch/market';
+// A catalog item of the scratch folder marketplace, as main's catalog joins it (P4-AGG M2).
+const offer = (name: string, over: Partial<CatalogItem> = {}): CatalogItem =>
+  item({ id: `local:${E8_MARKET}#plugins/${name}`, name, publisher: 'E8', ownership: 'added', categories: [], sources: ['engine:e8-scratch'], install: { kind: 'plugin', marketplaceSource: E8_MARKET, marketplaceName: 'e8-scratch', pluginName: name, ref: null, present: true }, ...over });
 
 const plugin = (id: string, over: Partial<InstalledPlugin> = {}): InstalledPlugin => {
   const [name, marketplace] = id.split('@');
@@ -78,13 +90,24 @@ function standIn() {
   }));
   for (const command of ['plugins.install', 'plugins.update', 'plugins.uninstall', 'plugins.enable', 'plugins.disable', 'marketplaces.add', 'marketplaces.update', 'marketplaces.remove'] as const) backend.script(command, () => ({ opId: `pop-${++opSeq}` }));
   backend.script('plugins.cancel', () => ({ cancelled: true }));
+  // P4-AGG: the catalog main answers for this cwd: the folder marketplace's plugin the engine offers
+  offers = [offer('e8-other', { description: 'Another' })];
+  backend.script('catalog.home', () => ({ featured: null, shelves: [], categories: [], total: offers.length }));
+  backend.script('catalog.query', () => ({ items: offers, nextCursor: null, total: offers.length, restarted: false }));
+  backend.script('catalog.item', (input) => {
+    const found = offers.find((o) => o.id === (input as { id: string }).id);
+    if (!found) throw new WidgetBackendError({ code: 'invalid_input', message: 'the catalog has no such item' });
+    return found;
+  });
+  backend.script('catalog.sources', () => []);
+  backend.script('catalog.icon', () => ({ dataUrl: null }));
   backend.script('plugins.manifest', (input) => ({ manifests: (input as { items: ManifestItemRef[] }).items.map((key) => manifestOf(key)) }));
   const base = backend.bridge();
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   const bridge: MawsBridge = {
     ...base,
     on(name, listener) {
-      if (!name.startsWith('plugins.')) return base.on(name, listener);
+      if (!name.startsWith('plugins.') && !name.startsWith('catalog.')) return base.on(name, listener);
       const set = listeners.get(name) ?? new Set();
       listeners.set(name, set);
       const entry = listener as (payload: unknown) => void;
@@ -105,7 +128,13 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
-  useSessions.setState({ engine: new Map(), records: new Map(), digests: new Map() });
+  forgetKeptOperations(); // Customize's pages keep their operations past their views; each test is a fresh window
+  connected?.();
+  connected = null;
+  useDiscoverStore.setState({ plugins: NO_CHOICES, skills: NO_CHOICES });
+  useSessions.setState({ engine: new Map(), records: new Map(), digests: new Map(), projects: new Map() });
+  useCustomizeProject.setState({ projectId: undefined });
+  useDiscoverRequest.setState({}, true);
   useReadLoads.setState({ loads: new Map() });
   useLibraryStore.setState(useLibraryStore.getInitialState());
   delete (window as { maws?: MawsBridge }).maws;
@@ -134,9 +163,18 @@ const menuItems = (id: string) => {
   return items;
 };
 const sheet = () => document.querySelector<HTMLElement>('[data-plugins-sheet]')!; // E8's confirm sheet, above a marketplace dialog when one is open
-const argvShown = () => JSON.parse(sheet().querySelector('[data-plugins-argv]')!.getAttribute('data-plugins-argv')!) as string[];
-// Every sheet reads plugins.env again on opening and names its command once that read answered.
-const resolved = () => waitFor(() => expect(sheet().querySelector('[data-plugins-argv]')).toBeTruthy());
+// The commands and the files they write sit behind the sheet's Details (the owner's ruling, 2026-10-25): open it when
+// it is closed. The second sheet has none: its command is in view.
+const openDetails = () => {
+  const details = sheet().querySelector<HTMLElement>('[data-plugins-details]');
+  if (details?.getAttribute('aria-expanded') === 'false') fireEvent.click(details);
+};
+const argvShown = () => {
+  openDetails();
+  return JSON.parse(sheet().querySelector('[data-plugins-argv]')!.getAttribute('data-plugins-argv')!) as string[];
+};
+// Every sheet reads plugins.env again on opening and offers its command (behind Details) once that read answered.
+const resolved = () => waitFor(() => expect(sheet().querySelector('[data-plugins-argv], [data-plugins-details]')).toBeTruthy());
 const event = (over: Partial<PluginsOperationEvent> & Pick<PluginsOperationEvent, 'opId' | 'phase'>): PluginsOperationEvent => ({ action: 'install', target: 'e8-probe@e8-scratch', ...over });
 const ready = async () => {
   useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
@@ -145,12 +183,24 @@ const ready = async () => {
   await waitFor(() => expect(invoked('marketplaces.list').length).toBeGreaterThan(0));
   await act(async () => {}); // its answer drawn
 };
-// P2-B M5: Browse (its catalogue read on its click), its cards, the Add menu and the two marketplace dialogs.
-const toBrowse = async () => {
-  fireEvent.click(screen.getByRole('radio', { name: 'Browse' }));
-  await waitFor(() => expect(section('browse').querySelector('[data-browse-card]')).toBeTruthy());
+// P4-AGG: Discover's cards (All on its home), one per catalog item; + opens E8's install sheet.
+const toDiscover = async () => {
+  fireEvent.click(screen.getByRole('radio', { name: 'Discover' }));
+  await waitFor(() => expect(document.querySelector('[data-catalog-grid] [data-catalog-card]')).toBeTruthy());
 };
-const card = (id: string) => section('browse').querySelector<HTMLElement>(`[data-browse-card="${id}"]`)!;
+const card = (name: string) => document.querySelector<HTMLElement>(`[data-catalog-grid] [data-catalog-card][data-install-name="${name}"]`)!;
+const addOn = (name: string) => fireEvent.click(within(card(name)).getByRole('button', { name: `Add ${name}` }));
+// Customize's library for the stand-in's cwd, Discover beside My items, with the window's catalog.changed listener.
+const discoverLibrary = (client: QueryClient, appSessionId: AppSessionId | null = null) => {
+  connected?.();
+  connected = connectCatalogEvents(window.maws, client);
+  return (
+    <QueryClientProvider client={client}>
+      <PluginsLibrary cwd={cwd} appSessionId={appSessionId} discover={{ cwd }} />
+    </QueryClientProvider>
+  );
+};
+let connected: (() => void) | null = null;
 const openAdd = (item: 'Add marketplace' | 'Manage marketplaces') => {
   fireEvent.keyDown(screen.getByRole('button', { name: 'Add' }), { key: 'Enter' });
   fireEvent.click(screen.getByRole('menuitem', { name: item }));
@@ -168,17 +218,6 @@ const marketItems = (name: string) => {
   fireEvent.keyDown(screen.getAllByRole('menuitem')[0], { key: 'Escape' });
   return items;
 };
-// happy-dom has no layout: give Browse's scroller a viewport so the virtualised grid mounts its rows.
-const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
-beforeAll(() => {
-  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
-    configurable: true,
-    get(this: HTMLElement) {
-      return this.hasAttribute('data-browse-scroller') ? 600 : 0;
-    },
-  });
-});
-afterAll(() => Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offsetHeight));
 
 describe('plugins library: embedded and offline', () => {
   const library = (directory = cwd, appSessionId: AppSessionId | null = null) => (
@@ -217,13 +256,13 @@ describe('plugins library: embedded and offline', () => {
     expect(sessionCalls()).toEqual([]);
   });
 
-  it('offline keeps lazy Browse, plugin install and both marketplace sheets without acquiring a session', async () => {
-    render(library());
+  it('offline keeps Discover’s install and both marketplace sheets without acquiring a session', async () => {
+    render(discoverLibrary(new QueryClient({ defaultOptions: { queries: { retry: false } } })));
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
-    expect(invoked('plugins.available')).toEqual([]);
-    await toBrowse();
-    expect(invoked('plugins.available')).toEqual([{ cwd }]);
-    fireEvent.click(within(card('e8-other@e8-scratch')).getByRole('button', { name: 'Install' }));
+    expect(invoked('catalog.home')).toEqual([]); // My items reads no catalog
+    await toDiscover();
+    expect(invoked('catalog.home')).toEqual([{ tab: 'plugins', cwd }]);
+    addOn('e8-other');
     await resolved();
     fireEvent.click(within(sheet()).getByRole('radio', { name: 'Project' }));
     expect(invoked('plugins.install')).toEqual([]);
@@ -242,10 +281,9 @@ describe('plugins library: embedded and offline', () => {
     await resolved();
     expect(invoked('marketplaces.add')).toEqual([]);
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Add' }));
-    await waitFor(() => expect(invoked('marketplaces.add')).toEqual([{ cwd, binary: BINARY, source: 'example/plugins' }]));
+    await waitFor(() => expect(invoked('marketplaces.add')).toEqual([{ cwd, binary: BINARY, source: 'example/plugins', scope: 'user' }])); // P4-AGG M3: the sheet's scope, user by default
     expect(sessionCalls()).toEqual([]);
   });
-
   it('embedded never takes modal focus or closes on Escape, and only a ready attachment exposes live facts', async () => {
     const focusEditor = vi.fn();
     const off = registerFocusTarget(ID, { focusEditor, focusFrame: () => {}, insertText: () => {} });
@@ -317,16 +355,18 @@ describe('plugins library: embedded and offline', () => {
     expect(sessionCalls()).toEqual([]);
   });
 
-  it('keeps Browse detail and a pending sheet at its chosen scope when the ready attachment changes', async () => {
+  it('keeps Discover’s detail and a pending sheet at its chosen scope when the ready attachment changes', async () => {
     const nextId = 'app-9a1d4262' as AppSessionId;
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const content = (appSessionId: AppSessionId | null) => <QueryClientProvider client={client}><PluginsLibrary cwd={cwd} appSessionId={appSessionId} /></QueryClientProvider>;
+    const content = (appSessionId: AppSessionId | null) => discoverLibrary(client, appSessionId);
     useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
     const view = render(content(ID));
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
-    await toBrowse();
-    fireEvent.click(within(card('e8-other@e8-scratch')).getByRole('button', { name: 'View E8 other' }));
-    fireEvent.click(within(document.querySelector<HTMLElement>('[data-browse-detail]')!).getByRole('button', { name: 'Install' }));
+    await toDiscover();
+    fireEvent.click(within(card('e8-other')).getByRole('button', { name: 'View e8-other' }));
+    const detail = () => document.querySelector<HTMLElement>('[data-catalog-detail]');
+    await waitFor(() => expect(detail()).toBeTruthy());
+    fireEvent.click(within(detail()!).getByRole('button', { name: 'Add' }));
     await resolved();
     fireEvent.click(within(sheet()).getByRole('radio', { name: 'Project' }));
 
@@ -337,19 +377,18 @@ describe('plugins library: embedded and offline', () => {
     view.rerender(content(null));
     act(() => useSessions.setState({ engine: new Map([[nextId, backend.status(nextId)]]) }));
     view.rerender(content(nextId));
-    expect(document.querySelector('[data-browse-detail]')?.getAttribute('data-browse-detail')).toBe('e8-other@e8-scratch');
+    expect(detail()?.getAttribute('data-catalog-detail')).toBe(offers[0].id);
     expect(within(sheet()).getByRole('radio', { name: 'Project' })).toHaveProperty('checked', true);
     expect(within(sheet()).getByText('Reloads plugins in 1 running session')).toBeTruthy();
     expect(invoked('plugins.install')).toEqual([]);
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
     await waitFor(() => expect(invoked('plugins.install')).toEqual([{ cwd, binary: BINARY, plugin: 'e8-other@e8-scratch', scope: 'project' }]));
-    expect(document.querySelector('[data-browse-detail]')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Back to Browse' }));
-    expect(screen.getByRole('radio', { name: 'Browse' }).getAttribute('aria-checked')).toBe('true');
-    expect(invoked('plugins.available')).toEqual([{ cwd }]);
+    expect(detail()).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Discover' }));
+    expect(screen.getByRole('radio', { name: 'Discover' }).getAttribute('aria-checked')).toBe('true');
+    expect(invoked('plugins.available')).toEqual([]); // Discover reads only catalog.*
     expect(sessionCalls()).toEqual([]);
   });
-
   it('changing project dismisses an old confirmation instead of retargeting its write to the new cwd', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const content = (directory: string) => <QueryClientProvider client={client}><PluginsLibrary cwd={directory} appSessionId={null} /></QueryClientProvider>;
@@ -576,8 +615,16 @@ describe('plugins widget: loaded in this session and the reloads', () => {
 });
 
 describe('plugins widget: management', () => {
-  it('lists installed plugins; Browse reads the catalogue only on its click, never on opening, and rereads it on a change only while it shows', async () => {
-    await ready();
+  it('lists installed plugins and reads no catalogue; Open Discover opens Customize › Plugins › Discover for the session’s directory, its project’s page here, and closes', async () => {
+    const close = vi.fn();
+    const project = 'project-e8' as ProjectId;
+    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]), projects: new Map([[project, projectRecord(project, 0, { directory: cwd })]]) });
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <PluginsWidget appSessionId={ID} args="" close={close} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
     const probe = row('e8-probe@e8-scratch');
     expect(probe.getAttribute('data-plugin-scope')).toBe('user');
     expect(probe.closest('[data-plugins-group]')!.getAttribute('data-plugins-group')).toBe('added');
@@ -585,49 +632,59 @@ describe('plugins widget: management', () => {
     expect(probe.textContent).toContain('0.1.0');
     await waitFor(() => expect(probe.textContent).toContain('by E8 · One skill and one command, for the probe'));
     expect(probe.textContent).not.toContain('Disabled');
-    expect(screen.getByRole('radio', { name: 'My items' }).getAttribute('aria-checked')).toBe('true');
-    expect(invoked('plugins.available')).toEqual([]); // never on opening /plugins
-    await toBrowse();
-    expect(invoked('plugins.available')).toEqual([{ cwd }]);
-    // sections: Anthropic & Partners first, then each other marketplace; the installed e8-probe joined back in, Installed
-    expect([...section('browse').querySelectorAll('[data-browse-section]')].map((s) => s.getAttribute('data-browse-section'))).toEqual(['anthropic', 'marketplace:e8-scratch']);
-    expect(card('review@anthropic-plugin-directory').getAttribute('data-section')).toBe('anthropic');
-    expect(within(card('e8-other@e8-scratch')).getByRole('button', { name: 'Install' })).toBeTruthy();
-    expect(within(card('e8-other@e8-scratch')).getByText('from e8-scratch')).toBeTruthy();
-    expect(within(card('e8-probe@e8-scratch')).queryByRole('button', { name: 'Install' })).toBeNull();
-    expect(within(card('e8-probe@e8-scratch')).getByText('Installed')).toBeTruthy();
-    expect(section('browse').querySelector('[data-install-count]')).toBeNull(); // no row carries a count
-    // Browse's own search
-    fireEvent.change(screen.getByRole('searchbox', { name: 'Search plugins' }), { target: { value: 'review' } });
-    expect([...section('browse').querySelectorAll('[data-browse-card]')].map((c) => c.getAttribute('data-browse-card'))).toEqual(['review@anthropic-plugin-directory']);
-    // a change rereads the lists, and the catalogue while Browse shows
+    expect(screen.queryByRole('radio', { name: 'Browse' })).toBeNull(); // Decision Log 10: one discovery surface
     act(() => emit('plugins.changed', {}));
-    await waitFor(() => expect(invoked('plugins.available')).toHaveLength(2));
-    expect(invoked('plugins.list')).toHaveLength(2);
-    expect(invoked('marketplaces.list')).toHaveLength(2);
-    // on My items, the catalogue keeps its answer; the change it missed is read once Browse shows again
-    fireEvent.click(screen.getByRole('radio', { name: 'My items' }));
-    act(() => emit('plugins.changed', {}));
-    await waitFor(() => expect(invoked('plugins.list')).toHaveLength(3));
-    expect(invoked('plugins.available')).toHaveLength(2);
-    fireEvent.click(screen.getByRole('radio', { name: 'Browse' }));
-    await waitFor(() => expect(invoked('plugins.available')).toHaveLength(3));
+    await waitFor(() => expect(invoked('plugins.list')).toHaveLength(2));
+    expect(invoked('plugins.available')).toEqual([]);
+    expect(invoked('catalog.home')).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Open Discover' }));
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(useCustomizeProject.getState()).toEqual({ projectId: project }); // the project whose directory it is
+    expect(useDiscoverRequest.getState()).toEqual({ cwd }); // taken by the library showing that project's page
+    // Customize's library for that page opens on Discover, mounted for the request
+    render(discoverLibrary(new QueryClient({ defaultOptions: { queries: { retry: false } } })));
+    await waitFor(() => expect(document.querySelector('[data-discover="plugins"]')).toBeTruthy());
+    expect(useDiscoverRequest.getState()).toEqual({});
   });
+  // Decision Log 10: Discover for the session's exact directory, never its parent project nor the user configuration
+  for (const [where, directoryOf, owned] of [
+    ['a worktree of its project', (base: string) => join(base, '.claude', 'worktrees', 'feature'), true],
+    ['a directory no project owns', (base: string) => join(base, 'loose'), false],
+  ] as const) {
+    it(`Open Discover from a session in ${where} opens Customize for that directory itself`, () => {
+      const project = 'project-e8' as ProjectId;
+      const here = directoryOf(cwd);
+      useSessions.setState({
+        engine: new Map([[ID, { ...backend.status(ID), cwd: here }]]),
+        records: new Map([[ID, record(ID, { projectId: owned ? project : null, directory: here })]]),
+        projects: new Map([[project, projectRecord(project, 0, { directory: cwd })]]),
+      });
+      render(
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <PluginsWidget appSessionId={ID} args="" close={() => {}} />
+        </QueryClientProvider>,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Open Discover' }));
+      expect(useCustomizeProject.getState()).toEqual({ projectId: null, directory: here });
+      expect(useDiscoverRequest.getState()).toEqual({ cwd: here });
+    });
+  }
+  it('Cancel on the confirm sheet runs nothing; a card’s + runs the argument list the sheet showed, at the scope chosen', async () => {
+    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+    render(discoverLibrary(new QueryClient({ defaultOptions: { queries: { retry: false } } }), ID));
+    await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
+    await toDiscover();
+    const other = () => card('e8-other');
 
-  it('Cancel on the confirm sheet runs nothing; a card’s Install runs the argument list the sheet showed, at the scope chosen', async () => {
-    await ready();
-    await toBrowse();
-    const other = () => card('e8-other@e8-scratch');
-
-    fireEvent.click(within(other()).getByRole('button', { name: 'Install' }));
+    addOn('e8-other');
     expect(sheet().getAttribute('data-plugins-sheet')).toBe('install');
     expect(within(sheet()).getByRole('heading', { name: 'Install e8-other@e8-scratch?' })).toBeTruthy();
-    expect(section('browse').querySelector('[data-browse-detail]')).toBeNull(); // Install keeps its own click
+    expect(document.querySelector('[data-catalog-detail]')).toBeNull(); // + keeps its own click
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(invoked('plugins.install')).toEqual([]);
 
-    fireEvent.click(within(other()).getByRole('button', { name: 'Install' }));
+    addOn('e8-other');
     await resolved();
     expect(argvShown()).toEqual(commandLine('install', { plugin: 'e8-other@e8-scratch', scope: 'user' }));
     expect(within(sheet()).getByText('2.1.290 plugin install e8-other@e8-scratch --scope user --json')).toBeTruthy();
@@ -652,14 +709,12 @@ describe('plugins widget: management', () => {
       emit('plugins.operation', event({ opId: 'pop-1', target: 'e8-other@e8-scratch', phase: 'done', outcome: { ok: true, result: { message: 'Successfully installed plugin: e8-other@e8-scratch (scope: project)' } }, reload: { sessions: [{ appSessionId: ID, outcome: 'reflected', error: null }] } })),
     );
     expect(within(other()).getByRole('status').textContent).toBe('Successfully installed plugin: e8-other@e8-scratch (scope: project) · Reloaded in 1 session · reflected');
-    // the engine's listing leaves it out once installed; the installed identity's card keeps the result
-    installed = [plugin('e8-probe@e8-scratch'), plugin('e8-other@e8-scratch', { scope: 'project', projectPath: cwd, here: true, coversHere: true })];
-    backend.script('plugins.available', () => ({ plugins: [{ pluginId: 'review@anthropic-plugin-directory', name: 'review', marketplaceName: 'anthropic-plugin-directory', description: 'Code review', version: '1.0.0', source: null, installCount: null }] }));
-    act(() => emit('plugins.changed', {}));
+    // the catalog reads it installed here; the card keeps the result
+    offers = [offer('e8-other', { description: 'Another', installed: 'here' })];
+    act(() => emit('catalog.changed', {}));
     await waitFor(() => expect(other().getAttribute('data-installed')).toBe('here'));
     expect(within(other()).getByRole('status').textContent).toBe('Successfully installed plugin: e8-other@e8-scratch (scope: project) · Reloaded in 1 session · reflected');
   });
-
   it('Turn off asks first, and the row stands where the next read puts it, never where the outcome suggests', async () => {
     await ready();
     const disabled = () => within(row('e8-probe@e8-scratch')).queryByText('Disabled') !== null;
@@ -711,6 +766,7 @@ describe('plugins widget: management', () => {
     expect(confirm).toHaveProperty('disabled', true);
     fireEvent.submit(confirm.closest('form')!); // Enter alone never destroys
     expect(invoked('plugins.uninstall')).toEqual([]);
+    openDetails();
     expect(within(sheet()).getByText(`${HOME}/plugins/data/e8-probe@e8-scratch/`)).toBeTruthy();
     fireEvent.click(within(sheet()).getByRole('checkbox', { name: 'I understand' }));
     fireEvent.click(confirm);
@@ -747,12 +803,13 @@ describe('plugins widget: management', () => {
     expect(invoked('layout.pickFiles')).toEqual([{ kind: 'directory', directory: null, multiple: false }]);
     fireEvent.click(within(dialog).getByRole('button', { name: 'Add' }));
     await resolved();
-    expect(argvShown()).toEqual(['plugin', 'marketplace', 'add', '/tmp/e8-does-not-exist', '--json']);
+    expect(argvShown()).toEqual(['plugin', 'marketplace', 'add', '/tmp/e8-does-not-exist', '--scope', 'user', '--json']);
     expect(within(sheet()).getByText('Nothing to reload: an added marketplace loads no plugin')).toBeTruthy();
-    expect(within(sheet()).queryByRole('radio')).toBeNull();
+    // P4-AGG M3: the confirmation offers the scope `plugin marketplace add` takes, user by default
+    expect(within(sheet()).getAllByRole('radio').map((radio) => [radio.getAttribute('value'), (radio as HTMLInputElement).checked])).toEqual([['user', true], ['project', false], ['local', false]]);
     expect(invoked('marketplaces.add')).toEqual([]); // nothing before the sheet's confirm
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Add' }));
-    await waitFor(() => expect(invoked('marketplaces.add')).toEqual([{ cwd, binary: BINARY, source: '/tmp/e8-does-not-exist' }]));
+    await waitFor(() => expect(invoked('marketplaces.add')).toEqual([{ cwd, binary: BINARY, source: '/tmp/e8-does-not-exist', scope: 'user' }]));
     act(() =>
       emit('plugins.operation', event({ opId: 'pop-1', action: 'marketplace-add', target: '/tmp/e8-does-not-exist', phase: 'done', outcome: { ok: false, error: { code: 'cli_failed', message: 'Path does not exist: /tmp/e8-does-not-exist', failureCode: 'invalid_source', shownCommand: null } } })),
     );
@@ -762,26 +819,30 @@ describe('plugins widget: management', () => {
     expect(within(addDialog()).getByRole('button', { name: 'Done' })).toBeTruthy(); // the dialog stays for another source
   });
 
-  it('an install whose plugin left the catalogue keeps the engine’s failure above the grid after its card leaves (M3: the widgets gate)', async () => {
-    await ready();
-    await toBrowse();
-    fireEvent.click(within(card('e8-other@e8-scratch')).getByRole('button', { name: 'Install' }));
+  it('an install whose plugin left the catalog keeps the engine’s failure at Discover’s head after its card leaves (M3: the widgets gate)', async () => {
+    render(discoverLibrary(new QueryClient({ defaultOptions: { queries: { retry: false } } })));
+    await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
+    await toDiscover();
+    addOn('e8-other');
     await resolved();
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
     await waitFor(() => expect(invoked('plugins.install')).toHaveLength(1));
-    // the catalogue read again after the CLI ended no longer offers it (a folder marketplace is read in place)
-    backend.script('plugins.available', () => ({ plugins: [{ pluginId: 'e8-probe@e8-scratch', name: 'e8-probe', marketplaceName: 'e8-scratch', description: 'The probe', version: '0.1.0', source: null, installCount: null }] }));
-    act(() => emit('plugins.changed', {}));
-    await waitFor(() => expect(section('browse').querySelector('[data-browse-card="e8-other@e8-scratch"]')).toBeNull());
+    // the catalog read again after the CLI ended no longer lists it (a folder marketplace is read in place)
+    offers = [];
+    act(() => emit('catalog.changed', {}));
+    await waitFor(() => expect(document.querySelector('[data-catalog-card]')).toBeNull());
     const message = 'Plugin "e8-other" not found in marketplace "e8-scratch". Your local copy may be out of date — try `claude plugin marketplace update e8-scratch`.';
     act(() => emit('plugins.operation', event({ opId: 'pop-1', target: 'e8-other@e8-scratch', phase: 'done', outcome: { ok: false, error: { code: 'cli_failed', message, failureCode: 'not_found', shownCommand: null } } })));
-    const gone = section('browse').querySelector<HTMLElement>('[data-plugin-result="e8-other@e8-scratch"]')!;
-    expect(gone).toBeTruthy();
+    const gone = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>(`[data-catalog-result="${CSS.escape(`local:${E8_MARKET}#plugins/e8-other`)}"]`);
+      if (!el) throw new Error('no result');
+      return el;
+    });
+    expect(gone.textContent).toContain('e8-other');
     const line = within(gone).getByRole('status');
     expect(line.textContent).toBe(`${message} · not_found`);
     expect(line.className).toContain('text-danger');
   });
-
   it('Manage marketplaces: Desktop’s copy, a row per marketplace with its source; Check for updates and Remove… through E8’s sheets; Done', async () => {
     await ready();
     openAdd('Manage marketplaces');
@@ -845,7 +906,8 @@ describe('plugins widget: review fixes', () => {
     await ready();
     menu('e8-probe@e8-scratch', 'Update');
     expect(within(sheet()).getByText('Resolving the engine…')).toBeTruthy();
-    expect(sheet().querySelector('[data-plugins-argv]')).toBeNull(); // no command against a guessed binary
+    expect(sheet().querySelector('[data-plugins-details]')).toBeNull(); // no command against a guessed binary, not even behind Details
+    expect(sheet().querySelector('[data-plugins-argv]')).toBeNull();
     const confirm = within(sheet()).getByRole('button', { name: 'Update' });
     expect(confirm).toHaveProperty('disabled', true);
     fireEvent.submit(confirm.closest('form')!);
@@ -874,6 +936,7 @@ describe('plugins widget: review fixes', () => {
     menu('e8-probe@e8-scratch', 'Update');
     await waitFor(() => expect(within(sheet()).getByRole('alert').textContent).toBe(REFUSAL));
     expect(invoked('plugins.env')).toHaveLength(2); // the opening read it again
+    expect(sheet().querySelector('[data-plugins-details]')).toBeNull();
     expect(sheet().querySelector('[data-plugins-argv]')).toBeNull();
     expect(within(sheet()).queryByRole('list', { name: "The engine's CLI writes:" })).toBeNull();
     const confirm = within(sheet()).getByRole('button', { name: 'Update' });
@@ -946,9 +1009,12 @@ describe('plugins widget: whole-branch review fixes', () => {
     menu('e8-probe@e8-scratch', 'Update');
     await waitFor(() => expect(invoked('plugins.env')).toHaveLength(before + 1));
     expect(within(sheet()).getByText('Resolving the engine…')).toBeTruthy(); // not the answer read before
+    expect(sheet().querySelector('[data-plugins-details]')).toBeNull(); // no command to detail yet
     expect(sheet().querySelector('[data-plugins-argv]')).toBeNull();
     await waitFor(() => expect(held).not.toBeNull());
     act(() => held!({ binary: OTHER, binaryError: null, configHome: HOME, globalConfig: GLOBAL }));
+    await resolved();
+    openDetails();
     await waitFor(() => expect(within(sheet()).getByText('2.1.300 plugin update e8-probe@e8-scratch --scope user --json')).toBeTruthy());
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Update' }));
     await waitFor(() => expect(invoked('plugins.update')).toEqual([{ cwd, binary: OTHER, plugin: 'e8-probe@e8-scratch', scope: 'user' }]));
@@ -1250,8 +1316,10 @@ describe('plugins widget: the detail', () => {
     expect(document.activeElement).toBe(view('e8-probe@e8-scratch'));
   });
 
-  it('the switch, clicked on My items while its detail shows, returns to the list', async () => {
-    await ready();
+  it('the switch (Customize’s), clicked on My items while its detail shows, returns to the list', async () => {
+    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+    render(discoverLibrary(new QueryClient({ defaultOptions: { queries: { retry: false } } }), ID));
+    await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
     fireEvent.click(view('e8-probe@e8-scratch'));
     expect(detail()).toBeTruthy();
     fireEvent.click(screen.getByRole('radio', { name: 'My items' }));
@@ -1456,345 +1524,5 @@ describe('plugins widget: the detail', () => {
     menu('e8-probe@e8-scratch', 'Update');
     await resolved();
     expect(detail()).toBeNull();
-  });
-});
-
-// ---- P2-B M5: Browse ---------------------------------------------------------------------------------------------------
-// The engine's configured sources as the host lists them: the built-in directory, the official marketplace (which alone
-// carries counts), a third party; the installed identities joined back in; the card's detail and its What's inside.
-describe('plugins widget: Browse', () => {
-  const OFFICIAL_LOCATION = '/tmp/e8-scratch/claude-config/plugins/marketplaces/claude-plugins-official';
-  const official = { name: 'claude-plugins-official', source: 'github', locator: 'anthropics/claude-plugins-official', installLocation: OFFICIAL_LOCATION };
-  const directory = (name: string, over: Record<string, unknown> = {}) => ({ pluginId: `${name}@anthropic-plugin-directory`, name, marketplaceName: 'anthropic-plugin-directory', description: `${name} from the directory`, version: null, source: { kind: 'git-subdir', url: 'https://github.com/anthropics/claude-plugins-official', repo: null, path: `plugins/${name}` }, installCount: null, ...over });
-  const offered = (name: string, installCount: number | null) => ({ pluginId: `${name}@claude-plugins-official`, name, marketplaceName: 'claude-plugins-official', description: `${name} from the marketplace`, version: '1.2.0', source: `./plugins/${name}`, installCount });
-  beforeEach(() => {
-    backend.script('marketplaces.list', () => ({ marketplaces: [{ name: 'e8-scratch', source: 'directory', locator: '/tmp/e8-scratch/market', installLocation: '/tmp/e8-scratch/market' }, official] }));
-    backend.script('plugins.available', () => ({
-      plugins: [directory('frontend-design'), offered('frontend-design', 1_290_640), offered('code-simplifier', 3_448), directory('dir-only'), offered('counted-none', null)],
-    }));
-    installed = [
-      plugin('e8-probe@e8-scratch'),
-      plugin('supabase@claude-plugins-official', { scope: 'local', projectPath: '/work/other', enabled: false }), // only another project has it
-      plugin('code-review@claude-plugins-official'), // installed for the user
-    ];
-  });
-
-  it('folds a directory entry with its official twin into one card with the official count; counts only where the engine gives one; Most popular first', async () => {
-    await ready();
-    await toBrowse();
-    const ids = () => [...section('browse').querySelectorAll('[data-browse-card]')].map((c) => c.getAttribute('data-browse-card'));
-    // Anthropic & Partners: counted cards by count, then the rest by name; then e8-scratch
-    expect(ids()).toEqual([
-      'frontend-design@anthropic-plugin-directory',
-      'code-simplifier@claude-plugins-official',
-      'code-review@claude-plugins-official',
-      'counted-none@claude-plugins-official',
-      'dir-only@anthropic-plugin-directory',
-      'supabase@claude-plugins-official',
-      'e8-probe@e8-scratch',
-    ]);
-    expect(card('frontend-design@anthropic-plugin-directory').querySelector('[data-install-count]')!.textContent).toBe('1.3M installs');
-    expect(card('code-simplifier@claude-plugins-official').querySelector('[data-install-count]')!.textContent).toBe('3.4K installs');
-    for (const id of ['dir-only@anthropic-plugin-directory', 'counted-none@claude-plugins-official', 'code-review@claude-plugins-official']) expect(card(id).querySelector('[data-install-count]')).toBeNull();
-    expect(card('code-review@claude-plugins-official').getAttribute('data-installed')).toBe('here');
-    expect(card('supabase@claude-plugins-official').getAttribute('data-installed')).toBe('otherProjects');
-    expect(within(card('supabase@claude-plugins-official')).getByText('Installed in other projects')).toBeTruthy();
-    // Sort by: Most popular is offered, and chosen; Name orders by name
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Sort by' }), { key: 'Enter' });
-    expect(screen.getAllByRole('menuitemradio').map((i) => [i.textContent, i.getAttribute('aria-checked')])).toEqual([
-      ['●Most popular', 'true'],
-      ['Name', 'false'],
-    ]);
-    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Name' }));
-    expect(ids()[0]).toBe('code-review@claude-plugins-official');
-  });
-
-  it('with no count anywhere, Most popular is not offered and Name orders the cards', async () => {
-    backend.script('plugins.available', () => ({ plugins: [directory('zeta'), directory('alpha')] }));
-    await ready();
-    await toBrowse();
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Sort by' }), { key: 'Enter' });
-    expect(screen.getAllByRole('menuitemradio').map((i) => i.textContent)).toEqual(['●Name']);
-  });
-
-  it('Filter: Status keeps one checked; Source narrows to a section; nothing left offers Reset filters', async () => {
-    await ready();
-    await toBrowse();
-    const ids = () => [...section('browse').querySelectorAll('[data-browse-card]')].map((c) => c.getAttribute('data-browse-card'));
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Filter' }), { key: 'Enter' });
-    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Not installed' }));
-    expect(ids()).toEqual(['code-review@claude-plugins-official', 'e8-probe@e8-scratch']); // installed for the user or here
-    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Installed' })); // the last one checked stays
-    expect(screen.getByRole('menuitemcheckbox', { name: 'Installed' }).getAttribute('aria-checked')).toBe('true');
-    fireEvent.click(screen.getByRole('menuitemradio', { name: 'e8-scratch' }));
-    expect(ids()).toEqual(['e8-probe@e8-scratch']);
-    fireEvent.change(screen.getByRole('searchbox', { name: 'Search plugins' }), { target: { value: 'nothing like it' } });
-    expect(within(section('browse')).getByText('Nothing matches these filters.')).toBeTruthy();
-    fireEvent.click(within(section('browse')).getByRole('button', { name: 'Reset filters' }));
-    expect(ids()).toHaveLength(7);
-  });
-
-  it('a card installed only for other projects still offers Install here, at the scope its sheet chooses', async () => {
-    await ready();
-    await toBrowse();
-    fireEvent.click(within(card('supabase@claude-plugins-official')).getByRole('button', { name: 'Install' }));
-    await resolved();
-    fireEvent.click(within(sheet()).getByRole('radio', { name: 'Project' }));
-    expect(argvShown()).toEqual(['plugin', 'install', 'supabase@claude-plugins-official', '--scope', 'project', '--json']);
-    fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
-    await waitFor(() => expect(invoked('plugins.install')).toEqual([{ cwd, binary: BINARY, plugin: 'supabase@claude-plugins-official', scope: 'project' }]));
-  });
-
-  it('a card’s detail: the credit, the count, Also listed in, What’s inside from the marketplace’s clone, and Install; Back returns to the grid', async () => {
-    backend.script('plugins.manifest', (input) => ({
-      manifests: (input as { items: ManifestItemRef[] }).items.map((key) => (key.kind === 'available' && key.pluginId === 'frontend-design@claude-plugins-official' ? { ...manifestOf(key), components: { ...manifestOf(key).components, skills: [{ name: 'frontend-design', description: 'Distinctive interfaces' }] } } : manifestOf(key))),
-    }));
-    await ready();
-    await toBrowse();
-    fireEvent.click(within(card('frontend-design@anthropic-plugin-directory')).getByRole('button', { name: 'View Frontend design' }));
-    const detail = () => document.querySelector<HTMLElement>('[data-browse-detail]')!;
-    expect(detail().getAttribute('data-browse-detail')).toBe('frontend-design@anthropic-plugin-directory');
-    expect(section('browse').className).toContain('hidden'); // the grid stays beneath
-    expect(screen.queryByRole('searchbox')).toBeNull(); // the grid's controls leave with it
-    expect(within(detail()).getByRole('heading', { name: 'Frontend design' })).toBeTruthy();
-    expect(within(detail()).getByText('from anthropic-plugin-directory · 1.2.0 · 1.3M installs')).toBeTruthy();
-    expect(within(detail()).getByText('Also listed in claude-plugins-official')).toBeTruthy();
-    // the directory entry's own source is not on disk; its official twin's files sit in that marketplace's clone
-    await waitFor(() => expect(invoked('plugins.manifest')).toContainEqual({ cwd, items: [{ kind: 'available', pluginId: 'frontend-design@claude-plugins-official' }] }));
-    await waitFor(() => expect(within(detail()).getByRole('button', { name: 'Skills · 1' })).toBeTruthy());
-    fireEvent.click(within(detail()).getByRole('button', { name: 'Install' }));
-    await resolved();
-    expect(argvShown()).toEqual(['plugin', 'install', 'frontend-design@anthropic-plugin-directory', '--scope', 'user', '--json']); // the card's own id
-    fireEvent.click(within(sheet()).getByRole('button', { name: 'Cancel' }));
-    await waitFor(() => expect(document.querySelector('[data-plugins-sheet]')).toBeNull());
-    fireEvent.click(within(detail()).getByRole('button', { name: 'Back to Browse' }));
-    expect(document.querySelector('[data-browse-detail]')).toBeNull();
-    expect(section('browse').className).not.toContain('hidden');
-    expect(document.activeElement?.closest('[data-browse-card]')?.getAttribute('data-browse-card')).toBe('frontend-design@anthropic-plugin-directory');
-  });
-
-  it('a directory-only card says what’s inside is listed once installed, asking nothing; an installed card opens its My items detail, whose Back returns to Browse', async () => {
-    await ready();
-    await toBrowse();
-    const asked = invoked('plugins.manifest').length;
-    fireEvent.click(within(card('dir-only@anthropic-plugin-directory')).getByRole('button', { name: 'View Dir only' }));
-    expect(within(document.querySelector<HTMLElement>('[data-browse-detail]')!).getByText('What’s inside is listed once it is installed.')).toBeTruthy();
-    expect(invoked('plugins.manifest')).toHaveLength(asked);
-    fireEvent.keyDown(document.querySelector<HTMLElement>('[data-browse-detail]')!, { key: '[', metaKey: true });
-    expect(document.querySelector('[data-browse-detail]')).toBeNull();
-    fireEvent.click(within(card('code-review@claude-plugins-official')).getByRole('button', { name: 'View Code review' }));
-    expect(document.querySelector('[data-plugin-detail]')!.getAttribute('data-plugin-detail')).toBe('code-review@claude-plugins-official');
-    fireEvent.click(screen.getByRole('button', { name: 'Back to Browse' }));
-    expect(document.querySelector('[data-plugin-detail]')).toBeNull();
-    expect(screen.getByRole('radio', { name: 'Browse' }).getAttribute('aria-checked')).toBe('true');
-  });
-
-  it('an uninstall from an installed card’s detail keeps its result and Reload again above the grid it returns to (scale review D scalpel-1#2)', async () => {
-    await ready();
-    await toBrowse();
-    fireEvent.click(within(card('code-review@claude-plugins-official')).getByRole('button', { name: 'View Code review' }));
-    const detail = document.querySelector<HTMLElement>('[data-plugin-detail]')!;
-    fireEvent.keyDown(within(detail).getByRole('button', { name: /^More actions for / }), { key: 'Enter' });
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Uninstall…' }));
-    await resolved();
-    fireEvent.click(within(sheet()).getByRole('checkbox', { name: 'I understand' }));
-    fireEvent.click(within(sheet()).getByRole('button', { name: 'Uninstall' }));
-    await waitFor(() => expect(invoked('plugins.uninstall')).toHaveLength(1));
-    installed = installed.filter((p) => p.id !== 'code-review@claude-plugins-official');
-    act(() => emit('plugins.changed', {}));
-    await waitFor(() => expect(document.querySelector('[data-plugin-detail]')).toBeNull());
-    act(() =>
-      emit('plugins.operation', event({ opId: 'pop-1', action: 'uninstall', target: 'code-review@claude-plugins-official', phase: 'done', outcome: { ok: true, result: { message: 'Successfully uninstalled plugin: code-review (scope: user)' } }, reload: { sessions: [{ appSessionId: ID, outcome: 'not_reflected', error: null }] } })),
-    );
-    const gone = section('browse').querySelector<HTMLElement>('[data-plugin-result="code-review@claude-plugins-official"]')!;
-    expect(gone).toBeTruthy();
-    expect(within(gone).getByRole('status').textContent).toContain('Successfully uninstalled plugin: code-review (scope: user)');
-    fireEvent.click(within(gone).getByRole('button', { name: 'Reload again' }));
-    await waitFor(() => expect(backend.calls.filter((c) => c.subtype === 'reload_plugins')).toHaveLength(1));
-  });
-
-  it('a failed marketplace or installed read says so above the grid with its own Retry, never a silent Installed filter (scale review D scalpel-3#1)', async () => {
-    let refuse = true;
-    const markets = () => ({ marketplaces: [{ name: 'e8-scratch', source: 'directory', locator: '/tmp/e8-scratch/market', installLocation: '/tmp/e8-scratch/market' }, official] });
-    backend.script('marketplaces.list', () => {
-      if (refuse) throw new WidgetBackendError({ code: 'internal', message: 'marketplaces unreadable' });
-      return markets();
-    });
-    await ready();
-    await toBrowse();
-    const warnings = () => [...section('browse').querySelectorAll<HTMLElement>('[data-browse-dependency]')];
-    // no marketplace answer: the installed official identities are not joined in, and Browse says why
-    expect(section('browse').querySelector('[data-browse-card="code-review@claude-plugins-official"]')).toBeNull();
-    expect(warnings().map((w) => w.getAttribute('data-browse-dependency'))).toEqual(['marketplaces']);
-    expect(warnings()[0].textContent).toContain("Couldn't load your marketplaces.");
-    expect(warnings()[0].textContent).toContain('marketplaces unreadable');
-    // Installed alone: without the marketplaces the installed identities cannot be joined, so no empty result is claimed
-    // (review round 1)
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Filter' }), { key: 'Enter' });
-    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Not installed' }));
-    fireEvent.keyDown(screen.getAllByRole('menuitemcheckbox')[0], { key: 'Escape' });
-    expect(section('browse').querySelector('[data-browse-card]')).toBeNull();
-    expect(within(section('browse')).queryByText('Nothing matches these filters.')).toBeNull();
-    expect(within(section('browse')).queryByText('Nothing to browse yet. Add a marketplace to see what it offers.')).toBeNull();
-    const unknown = section('browse').querySelector<HTMLElement>('[data-browse-unknown]')!;
-    expect(unknown.textContent).toContain("Can't say what matches until the lists above are read.");
-    refuse = false;
-    const asked = invoked('marketplaces.list').length;
-    fireEvent.click(within(warnings()[0]).getByRole('button', { name: 'Retry' }));
-    await waitFor(() => expect(invoked('marketplaces.list').length).toBe(asked + 1));
-    await waitFor(() => expect(card('code-review@claude-plugins-official')).toBeTruthy());
-    expect(warnings()).toEqual([]);
-    // a later failed installed read keeps the last Installed labels, and says they are the last read's
-    backend.script('plugins.list', () => {
-      throw new WidgetBackendError({ code: 'internal', message: 'Path does not exist: /nope' });
-    });
-    act(() => emit('plugins.changed', {}));
-    await waitFor(() => expect(warnings().map((w) => w.getAttribute('data-browse-dependency'))).toEqual(['installed']));
-    expect(warnings()[0].textContent).toContain('Path does not exist: /nope · showing the last value it reported');
-  });
-
-  it('no cards while the marketplaces are unread is not "nothing to browse": the body says it cannot tell, with Retry (review round 1 of D scalpel-3#1)', async () => {
-    let refuse = true;
-    backend.script('marketplaces.list', () => {
-      if (refuse) throw new WidgetBackendError({ code: 'internal', message: 'marketplaces unreadable' });
-      return { marketplaces: [official] };
-    });
-    backend.script('plugins.available', () => ({ plugins: [] }));
-    await ready();
-    fireEvent.click(screen.getByRole('radio', { name: 'Browse' }));
-    const unknown = await waitFor(() => {
-      const shown = section('browse').querySelector<HTMLElement>('[data-browse-unknown]');
-      expect(shown).toBeTruthy();
-      return shown!;
-    });
-    expect(within(section('browse')).queryByText('Nothing to browse yet. Add a marketplace to see what it offers.')).toBeNull();
-    expect(within(section('browse')).queryByText('Nothing matches these filters.')).toBeNull();
-    refuse = false;
-    fireEvent.click(within(unknown).getByRole('button', { name: 'Retry' }));
-    await waitFor(() => expect(card('code-review@claude-plugins-official')).toBeTruthy());
-    expect(section('browse').querySelector('[data-browse-unknown]')).toBeNull();
-  });
-
-  it('a zero install count is never shown, and Most popular is not offered when 0 is the only count', async () => {
-    backend.script('plugins.available', () => ({ plugins: [offered('zero', 0), directory('alpha')] }));
-    await ready();
-    await toBrowse();
-    expect(card('zero@claude-plugins-official').querySelector('[data-install-count]')).toBeNull();
-    expect(card('zero@claude-plugins-official').textContent).not.toContain('0 installs');
-    fireEvent.click(within(card('zero@claude-plugins-official')).getByRole('button', { name: 'View Zero' }));
-    expect(within(document.querySelector<HTMLElement>('[data-browse-detail]')!).getByText('from claude-plugins-official · 1.2.0')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Back to Browse' }));
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Sort by' }), { key: 'Enter' });
-    expect(screen.getAllByRole('menuitemradio').map((i) => i.textContent)).toEqual(['●Name']);
-  });
-
-  it('a third-party marketplace named anthropic is its own section and Source, apart from Anthropic & Partners', async () => {
-    backend.script('marketplaces.list', () => ({ marketplaces: [{ name: 'anthropic', source: 'github', locator: 'someone/anthropic', installLocation: '/tmp/e8-scratch/claude-config/plugins/marketplaces/anthropic' }, official] }));
-    backend.script('plugins.available', () => ({ plugins: [offered('code-simplifier', 3_448), { pluginId: 'x@anthropic', name: 'x', marketplaceName: 'anthropic', description: 'Not Anthropic’s', version: null, source: './plugins/x', installCount: null }] }));
-    installed = [plugin('e8-probe@e8-scratch')];
-    await ready();
-    await toBrowse();
-    const headings = () => [...section('browse').querySelectorAll('[data-browse-section]')].map((h) => h.getAttribute('aria-label'));
-    const ids = () => [...section('browse').querySelectorAll('[data-browse-card]')].map((c) => c.getAttribute('data-browse-card'));
-    expect(headings()).toEqual(['From Anthropic & Partners', 'anthropic']);
-    expect(card('x@anthropic').getAttribute('data-section')).not.toBe(card('code-simplifier@claude-plugins-official').getAttribute('data-section'));
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Filter' }), { key: 'Enter' });
-    expect(screen.getAllByRole('menuitemradio').map((i) => i.textContent!.replace('●', ''))).toEqual(['All sources', 'From Anthropic & Partners', 'anthropic']);
-    fireEvent.click(screen.getByRole('menuitemradio', { name: 'anthropic' }));
-    expect(ids()).toEqual(['x@anthropic']);
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Filter' }), { key: 'Enter' }); // a radio's choice closes the menu
-    expect(screen.getByRole('menuitemradio', { name: 'anthropic' }).getAttribute('aria-checked')).toBe('true');
-    expect(screen.getByRole('menuitemradio', { name: 'From Anthropic & Partners' }).getAttribute('aria-checked')).toBe('false');
-    fireEvent.click(screen.getByRole('menuitemradio', { name: 'From Anthropic & Partners' }));
-    expect(ids()).toEqual(['code-simplifier@claude-plugins-official']);
-  });
-
-  it('the switch, clicked on the view shown, returns from its detail to its list: Browse’s card detail and an installed card’s', async () => {
-    await ready();
-    await toBrowse();
-    fireEvent.click(within(card('dir-only@anthropic-plugin-directory')).getByRole('button', { name: 'View Dir only' }));
-    expect(document.querySelector('[data-browse-detail]')).toBeTruthy();
-    fireEvent.click(screen.getByRole('radio', { name: 'Browse' }));
-    expect(document.querySelector('[data-browse-detail]')).toBeNull();
-    expect(section('browse').className).not.toContain('hidden');
-    expect(screen.getByRole('radio', { name: 'Browse' }).getAttribute('aria-checked')).toBe('true');
-    fireEvent.click(within(card('code-review@claude-plugins-official')).getByRole('button', { name: 'View Code review' }));
-    expect(document.querySelector('[data-plugin-detail]')).toBeTruthy();
-    fireEvent.click(screen.getByRole('radio', { name: 'Browse' }));
-    expect(document.querySelector('[data-plugin-detail]')).toBeNull();
-    expect(section('browse').className).not.toContain('hidden');
-  });
-
-  it('a card’s detail outlives a change whose catalogue answers before the installed list, and a card the reads no longer list: only Back leaves it', async () => {
-    await ready();
-    await toBrowse();
-    const id = 'counted-none@claude-plugins-official';
-    fireEvent.click(within(card(id)).getByRole('button', { name: 'View Counted none' }));
-    const detail = () => document.querySelector<HTMLElement>('[data-browse-detail]');
-    expect(detail()!.getAttribute('data-browse-detail')).toBe(id);
-    // the install of the card's plugin, as the engine answers it: --available leaves the plugin out at once, and the
-    // installed list that adds it back answers later
-    let listed!: (value: { plugins: InstalledPlugin[] }) => void;
-    backend.script('plugins.list', () => new Promise((resolve) => (listed = resolve)));
-    backend.script('plugins.available', () => ({ plugins: [directory('frontend-design'), offered('frontend-design', 1_290_640), offered('code-simplifier', 3_448), directory('dir-only')] }));
-    const asked = invoked('plugins.available').length;
-    act(() => emit('plugins.changed', {}));
-    await waitFor(() => expect(invoked('plugins.available').length).toBe(asked + 1));
-    await act(async () => {}); // the catalogue's answer drawn, the installed list still in flight
-    expect(detail()?.getAttribute('data-browse-detail')).toBe(id);
-    await act(async () => listed({ plugins: [...installed, plugin(id)] }));
-    expect(detail()?.getAttribute('data-browse-detail')).toBe(id);
-    await waitFor(() => expect(within(detail()!).queryByRole('button', { name: 'Install' })).toBeNull()); // installed here now
-    // uninstalled elsewhere and no longer offered: the detail stays on the card as last read, until Back
-    backend.script('plugins.list', () => ({ plugins: installed }));
-    const lists = invoked('plugins.list').length;
-    act(() => emit('plugins.changed', {}));
-    await waitFor(() => expect(invoked('plugins.list').length).toBe(lists + 1));
-    await act(async () => {});
-    expect(card(id)).toBeNull(); // gone from the grid beneath
-    expect(detail()?.getAttribute('data-browse-detail')).toBe(id);
-    expect(within(detail()!).queryByRole('button', { name: 'Install' })).toBeNull(); // as last read: installed here
-    fireEvent.click(within(detail()!).getByRole('button', { name: 'Back to Browse' }));
-    expect(detail()).toBeNull();
-    expect(section('browse').className).not.toContain('hidden');
-  });
-
-  it('overlapping changes keep a card’s detail while an installed read owed to the second change has not yet run (review, M5 round 2)', async () => {
-    await ready();
-    await toBrowse();
-    const id = 'counted-none@claude-plugins-official';
-    fireEvent.click(within(card(id)).getByRole('button', { name: 'View Counted none' }));
-    const detail = () => document.querySelector<HTMLElement>('[data-browse-detail]');
-    let finishOld!: (value: { plugins: InstalledPlugin[] }) => void;
-    let lists = 0;
-    backend.script('plugins.list', () => (++lists === 1 ? new Promise((resolve) => (finishOld = resolve)) : { plugins: [...installed, plugin(id)] }));
-    const beforeAvailable = invoked('plugins.available').length;
-    act(() => emit('plugins.changed', {}));
-    await waitFor(() => expect(lists).toBe(1));
-    await waitFor(() => expect(invoked('plugins.available').length).toBe(beforeAvailable + 1));
-    await act(async () => {});
-    // a later install completes while the first change's installed listing is still in flight: its reread is owed
-    backend.script('plugins.available', () => ({ plugins: [directory('frontend-design'), offered('frontend-design', 1_290_640), offered('code-simplifier', 3_448), directory('dir-only')] }));
-    act(() => emit('plugins.changed', {}));
-    await waitFor(() => expect(invoked('plugins.available').length).toBe(beforeAvailable + 2));
-    await act(async () => {});
-    expect(detail()?.getAttribute('data-browse-detail')).toBe(id);
-    // the stale listing answers (nothing fetching for a moment), then the owed one adds the card back as installed
-    await act(async () => finishOld({ plugins: installed }));
-    await waitFor(() => expect(lists).toBe(2));
-    await waitFor(() => expect(card(id)?.getAttribute('data-installed')).toBe('here'));
-    expect(detail()?.getAttribute('data-browse-detail')).toBe(id);
-  });
-
-  it('every open starts on My items with no catalogue read, whatever the last open showed', async () => {
-    await ready();
-    await toBrowse();
-    expect(invoked('plugins.available')).toHaveLength(1);
-    cleanup();
-    mount();
-    await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
-    expect(screen.getByRole('radio', { name: 'My items' }).getAttribute('aria-checked')).toBe('true');
-    expect(section('browse')).toBeNull();
-    expect(invoked('plugins.available')).toHaveLength(1);
   });
 });

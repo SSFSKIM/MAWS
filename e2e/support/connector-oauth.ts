@@ -10,14 +10,22 @@
 // tools/call attempts and answers per token generation, registrations, code exchanges, refreshes and revocations.
 // `scanForSecrets` checks texts a scene would retain against what the fixture saw or minted, reporting kinds only; the
 // secrets file itself, like the raw open log (./connector-oauth-browser.ts), is never retained.
-import { spawn } from 'node:child_process';
+// P4-AGG M1 (docs/doperpowers/specs/2026-10-24-plugin-aggregator-design.md): an engine mode, for the engine's own
+// sign-in. `startOAuthFixture({ mode: 'engine' })` starts in the OAuth phase with no engine-PID gate, since the engine is
+// what signs in, and registers the engine's callbacks (`http://localhost:<port>/callback` and the `127.0.0.1` one).
+// `engineKeychainCustody` owns the one Keychain item the engine's secure storage writes for the scene's scratch
+// configuration directory. The MAWS mode above keeps every safeguard it has.
+import { createHash } from 'node:crypto';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import {
   OPEN_CONTROL, parseOAuthControl,
-  type OAuthAdvertise, type OAuthControl, type OAuthLogEntry, type OAuthPhase, type OAuthRoute, type OAuthSecret, type OAuthSecretKind,
+  type OAuthFixtureMode, type OAuthAdvertise, type OAuthControl, type OAuthLogEntry, type OAuthPhase, type OAuthRoute, type OAuthSecret, type OAuthSecretKind,
 } from './connector-oauth-core.mjs';
 import { isAlive } from './processes';
+import { assertEngineKeychainEnv, assertNoKeychainPrompt, SECURITY_MS, securityAgentRunning, type PromptProbe } from './keychain-guard';
 
 export const OAUTH_SERVER = join(__dirname, 'connector-oauth-server.mjs');
 
@@ -33,18 +41,22 @@ export function oauthFixturePaths(root: string, id: string): OAuthFixturePaths {
 }
 
 export interface OAuthFixture extends OAuthFixturePaths {
+  mode: OAuthFixtureMode; // P4-AGG M1
   origin: string; // http://127.0.0.1:<port>, also the issuer
   resourceUrl: string; // <origin>/mcp: the URL a scene configures
   pid: number;
   close(): Promise<void>;
 }
 
-// The fixture process, in the open phase; it lives until `close`, so its grants outlast an app relaunch.
-export async function startOAuthFixture(options: { root: string; id: string; tools?: readonly string[] }): Promise<OAuthFixture> {
+// The fixture process, in the open phase (engine mode: the OAuth phase); it lives until `close`, so its grants outlast
+// an app relaunch.
+export async function startOAuthFixture(options: { root: string; id: string; tools?: readonly string[]; mode?: OAuthFixtureMode }): Promise<OAuthFixture> {
+  const mode = options.mode ?? 'maws'; // P4-AGG M1
   const paths = oauthFixturePaths(options.root, options.id);
-  if (existsSync(paths.control)) enterOpenPhase(paths); // a restart in the same scene opens a new window
+  if (mode === 'engine') writeControl(paths, { ...OPEN_CONTROL, seq: existsSync(paths.control) ? readControl(paths).seq + 1 : 0, phase: 'oauth' }); // P4-AGG M1: the engine signs in, so no gate
+  else if (existsSync(paths.control)) enterOpenPhase(paths); // a restart in the same scene opens a new window
   else writeControl(paths, OPEN_CONTROL);
-  const child = spawn(process.execPath, [OAUTH_SERVER, '--id', paths.id, '--log', paths.log, '--control', paths.control, '--secrets', paths.secrets, '--tools', JSON.stringify(options.tools ?? ['read_series'])], { stdio: ['ignore', 'pipe', 'inherit'] });
+  const child = spawn(process.execPath, [OAUTH_SERVER, '--id', paths.id, '--log', paths.log, '--control', paths.control, '--secrets', paths.secrets, '--tools', JSON.stringify(options.tools ?? ['read_series']), '--mode', mode], { stdio: ['ignore', 'pipe', 'inherit'] });
   const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
   const port = await new Promise<number>((resolve, reject) => {
     child.stdout!.once('data', (chunk: Buffer) => resolve((JSON.parse(chunk.toString('utf8').split('\n')[0]!) as { port: number }).port));
@@ -53,6 +65,7 @@ export async function startOAuthFixture(options: { root: string; id: string; too
   const origin = `http://127.0.0.1:${port}`;
   return {
     ...paths,
+    mode,
     origin,
     resourceUrl: `${origin}/mcp`,
     pid: child.pid!,
@@ -240,4 +253,118 @@ export function scanForSecrets(paths: Pick<OAuthFixturePaths, 'secrets'>, texts:
     for (const kind of kinds) bump(found, kind);
   }
   return { clean: Object.keys(found).length === 0, found };
+}
+
+// ---- P4-AGG M1: the engine's Keychain item ------------------------------------------------------------------------
+
+// The service name of the one Keychain item the engine's secure storage uses for `configDir` (the spec's fact 2,
+// confirmed against 2.1.309: cli.pretty.js 318187 to 318190, `Claude Code${OAUTH_FILE_SUFFIX}-credentials-` and the
+// first 8 hex of sha256 of the config directory, which 1245553 takes from CLAUDE_CONFIG_DIR as given, NFC-normalised).
+// `engineEnv` is the engine's environment: the two variables that would make it name another item are refused.
+export function engineKeychainService(configDir: string, engineEnv: Record<string, string | undefined> = {}): string {
+  return `Claude Code-credentials-${engineKeychainSuffix(configDir, engineEnv)}`;
+}
+
+// fixB (b): the engine's other item for the same directory, its API key (`vj()` without a suffix: 447233, 827443), which
+// it looks up too; claimed absent alongside, so the engine reads no item that existed before the run.
+export function engineApiKeyService(configDir: string, engineEnv: Record<string, string | undefined> = {}): string {
+  return `Claude Code-${engineKeychainSuffix(configDir, engineEnv)}`;
+}
+
+function engineKeychainSuffix(configDir: string, engineEnv: Record<string, string | undefined>): string {
+  if (configDir === '') throw new Error('engineKeychainService: no configuration directory');
+  for (const name of ['CLAUDE_SECURESTORAGE_CONFIG_DIR', 'CLAUDE_CODE_CUSTOM_OAUTH_URL']) {
+    if (engineEnv[name] !== undefined) throw new Error(`engineKeychainService: the engine runs with ${name}, under which it names another item`);
+  }
+  return createHash('sha256').update(configDir.normalize('NFC')).digest('hex').slice(0, 8);
+}
+
+// fixB (a): the only names a custody may ever pass to `security`: an item derived from a scratch directory, never the
+// owner's bare credentials item nor any other.
+const DERIVED = /^Claude Code(-credentials)?-[0-9a-f]{8}$/;
+
+// `security <verb> -s <service>`'s exit status: 0 found (or deleted), 44 (errSecItemNotFound) not found, anything else
+// a failure that establishes nothing. Bounded (fixB (c)): a dialog would hold the call, so it is cut short and fails.
+export type SecurityCommand = (args: readonly string[]) => number;
+const systemSecurity: SecurityCommand = (args) => {
+  try {
+    execFileSync('/usr/bin/security', [...args], { stdio: 'ignore', timeout: SECURITY_MS });
+    return 0;
+  } catch (error) {
+    const status = (error as { status?: number | null }).status;
+    if (typeof status === 'number') return status;
+    throw error;
+  }
+};
+
+const ITEM_NOT_FOUND = 44; // `security`'s exit status for errSecItemNotFound
+
+export interface EngineKeychainCustody {
+  readonly service: string; // the credential item
+  readonly services: readonly string[]; // every item the engine names for the directory: the credential, the API key
+  // Before the engine can store anything: every item must be absent, so whatever is there later is this run's.
+  claim(): void;
+  // After every engine that ran under the directory has exited (their pids; none when none ran): deletes exactly the
+  // claimed items that are there and verifies them gone. Nothing else is ever looked up or removed.
+  release(proof: { enginePids: readonly number[] }): { service: string; found: boolean; deleted: boolean };
+}
+
+export interface EngineKeychainCustodyOptions {
+  scratchRoot: string; // fixB (a): the run's own scratch directory, which `configDir` must lie inside
+  engineEnv: Record<string, string | undefined>; // the engine's environment: it must name `configDir` and nothing else
+  security?: SecurityCommand;
+  alive?: (pid: number) => boolean;
+  promptPending?: PromptProbe; // fixB (c): SecurityAgent by default
+}
+
+export function engineKeychainCustody(configDir: string, options: EngineKeychainCustodyOptions): EngineKeychainCustody {
+  const root = resolve(options.scratchRoot);
+  const inside = relative(root, resolve(configDir));
+  if (inside === '' || inside.startsWith('..') || isAbsolute(inside)) throw new Error(`engineKeychainCustody: ${configDir} is not inside the run's scratch ${options.scratchRoot}`);
+  if (resolve(configDir) === resolve(homedir(), '.claude') || root === resolve(homedir())) throw new Error(`engineKeychainCustody: ${configDir} is the owner's configuration, not a scratch one`);
+  assertEngineKeychainEnv(options.engineEnv, configDir, 'engineKeychainCustody');
+  const service = engineKeychainService(configDir, options.engineEnv);
+  const services = [service, engineApiKeyService(configDir, options.engineEnv)];
+  const run = options.security ?? systemSecurity;
+  const alive = options.alive ?? isAlive;
+  const probe = options.promptPending ?? securityAgentRunning;
+  // fixB (a)(b): every call names one of this directory's derived items, by `-s` alone: an existence lookup (no `-w`, no
+  // `-g`: no password or attribute is printed) or the deletion of a claimed item. (c): no prompt before or after it.
+  const security = (verb: 'find-generic-password' | 'delete-generic-password', name: string) => {
+    if (!services.includes(name) || !DERIVED.test(name)) throw new Error(`engineKeychainCustody: refusing to name "${name}" to security`);
+    assertNoKeychainPrompt(`before security ${verb}`, probe);
+    const status = run([verb, '-s', name]);
+    assertNoKeychainPrompt(`after security ${verb}`, probe);
+    return status;
+  };
+  // Fail closed: only the item-not-found status means absent; any other lookup failure throws.
+  const present = (name: string) => {
+    const status = security('find-generic-password', name);
+    if (status === 0) return true;
+    if (status === ITEM_NOT_FOUND) return false;
+    throw new Error(`could not look up the Keychain item "${name}" (security exited ${status})`);
+  };
+  const remove = (name: string) => {
+    if (!present(name)) return false;
+    const status = security('delete-generic-password', name);
+    if (status !== 0) throw new Error(`could not delete the Keychain item "${name}" (security exited ${status})`);
+    if (present(name)) throw new Error(`the Keychain item "${name}" is still in the Keychain after its deletion`);
+    return true;
+  };
+  let claimed = false;
+  return {
+    service,
+    services,
+    claim() {
+      for (const name of services) if (present(name)) throw new Error(`the Keychain item "${name}" exists before the run; it is not this run's to delete`);
+      claimed = true;
+    },
+    release({ enginePids }) {
+      if (!claimed) throw new Error(`the Keychain item "${service}" was never claimed by this run`);
+      for (const pid of enginePids) if (alive(pid)) throw new Error(`engine ${pid} is still alive; the Keychain item "${service}" is released only after every engine has exited`);
+      const deleted = remove(service);
+      remove(services[1]!);
+      return { service, found: deleted, deleted };
+    },
+  };
 }

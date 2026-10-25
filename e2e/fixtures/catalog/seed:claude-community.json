@@ -1,0 +1,62 @@
+{
+  "key": "seed:claude-community",
+  "recordedAt": "2026-10-25T02:24:15.671Z",
+  "pages": [
+    {
+      "name": "claude-community",
+      "owner": {
+        "name": "Anthropic"
+      },
+      "renames": {
+        "qodo-skills": "qodo",
+        "wordpress-com": "build-with-wordpress",
+        "auth0-sdks": "auth0",
+        "twilio": "twilio-developer-kit"
+      },
+      "plugins": [
+        {
+          "name": "0x",
+          "description": "Guide developers through swapping ERC-20 tokens using the 0x API. Covers standard swaps via AllowanceHolder and Permit2 as well as gasless swaps across 20+ EVM chains — walking through price quotes, approvals, EIP-712 signing, and transaction submission. Also helps integrate 0x swaps directly into your app with code samples.",
+          "source": {
+            "source": "url",
+            "url": "https://github.com/0xProject/0x-ai.git",
+            "sha": "0167bbb411cc972b966127d23c23de801061fa99"
+          },
+          "homepage": "https://github.com/0xProject/0x-ai"
+        },
+        {
+          "name": "10x-shopping",
+          "description": "An AI-powered shopping assistant that connects Claude to Shopify's global product catalog. Browse products, manage carts, and complete purchases through natural conversation",
+          "source": {
+            "source": "url",
+            "url": "https://github.com/qressy/10x-claude-plugin.git",
+            "sha": "5cd3d90ec0cfa99773dd2c075e492bd280b3826a"
+          },
+          "homepage": "https://www.10xgeo.com/"
+        },
+        {
+          "name": "42crunch-api-security-testing",
+          "description": "Automate API security directly in Claude Code with 42Crunch. This plugin enables developers to audit OpenAPI specifications, detect OWASP API vulnerabilities including BOLA and BFLA, run live conformance and authorization tests, and apply AI-assisted fixes, all through natural language.\nDesigned for AI-assisted development workflows, the plugin provides continuous security guardrails across the full lifecycle of your API. It combines static analysis of OpenAPI definitions with dynamic runtime testing to ensure your APIs behave securely in real conditions.\nWith a simple audit to scan to remediate to validate loop, developers can identify issues early, fix them with confidence, and verify that security requirements are met before deployment. The plugin integrates seamlessly into Claude Code, allowing teams to embed API security directly into their development process without switching tools.\nKey capabilities include static security audit of OpenAPI specifications with scored findings, detection of OWASP API Security risks including authorization flaws like BOLA and BFLA, live API scanning for conformance and runtime behavior validation, AI-assisted remediation with user-controlled changes, an end to end security testing pipeline combining audit and scan, and automatic generation of OpenAPI specifications from source code.\nWhether you are working with existing APIs or generating new ones, 42Crunch helps ensure that security is built in from the start and continuously validated throughout development.",
+          "source": {
+            "source": "git-subdir",
+            "url": "42Crunch-AI/claude-plugins",
+            "path": "plugins/api-security-testing",
+            "ref": "v1.0.1",
+            "sha": "30287f5e3f122a646d1ac5ca3ab96e130c52a3ad"
+          },
+          "homepage": "https://docs.42crunch.com"
+        },
+        {
+          "name": "skill-creator",
+          "description": "A complete toolkit for creating, validating, and iterating on Claude Code skills and plugins. Includes scaffolding scripts, validation tools, and best-practice reference guides for progressive disclosure patterns, workflow design, and output formatting. Automatically activates when users ask about creating skills or plugins.",
+          "source": {
+            "source": "url",
+            "url": "https://github.com/aisa-one/skill-creator.git",
+            "sha": "fdd5600fc154187b02af53fbcb10bf50b84a1684"
+          },
+          "homepage": "https://github.com/aisa-one/skill-creator"
+        }
+      ]
+    }
+  ]
+}

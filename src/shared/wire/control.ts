@@ -153,6 +153,9 @@ export interface EndSessionRequest { reason?: string }
 export interface SideQuestionRequest { question: string; history?: { question: string; response: string }[] } // E3 (2026-10-06, E0a Q3): the bridge's shape, accepted by the headless handler (pass3/p1-side-question-session seq 88, 95)
 export interface McpReconnectRequest { serverName: string }
 export interface McpToggleRequest { serverName: string; enabled: boolean }
+// P4-AGG M4: the engine's own MCP sign-in (2.1.309 cli.pretty.js 856438 to 856560; spikes/p4-aggregator/findings-m4.txt)
+export interface McpAuthenticateRequest { serverName: string; redirectUri?: string }
+export interface McpOAuthCallbackUrlRequest { serverName: string; callbackUrl: string }
 export interface GetContextUsageRequest { detail?: 'summary' | 'full' }
 export type EmptyRequest = Record<string, never>;
 
@@ -341,6 +344,19 @@ export type ExportConversationResponse = z.infer<typeof ExportConversationRespon
 export const StatusRowSchema = z.looseObject({ label: z.string().optional(), value: z.string() });
 export const GetStatusResponseSchema = z.looseObject({ sections: z.array(z.looseObject({ title: z.string(), rows: z.array(StatusRowSchema) })) });
 export type GetStatusResponse = z.infer<typeof GetStatusResponseSchema>;
+
+// P4-AGG M4: `mcp_authenticate`'s success (cli.pretty.js 856485): the authorization URL and how its redirect returns
+// (MAWS's own listener for 'custom', the engine's `localhost:<callbackPort>` for 'localhost'), or no URL when the server
+// needs no sign-in (`requiresUserAction: false`).
+export const McpAuthenticateResponseSchema = z.looseObject({
+  authUrl: z.string().optional(),
+  requiresUserAction: z.boolean(),
+  callbackExpected: z.boolean(),
+  redirectScheme: z.enum(['custom', 'localhost']).optional(),
+  state: z.string().optional(),
+  callbackPort: z.number().int().optional(),
+});
+export type McpAuthenticateResponse = z.infer<typeof McpAuthenticateResponseSchema>;
 
 export const McpStatusResponseSchema = z.looseObject({ mcpServers: z.array(z.looseObject({ name: z.string(), status: z.string(), source: z.string().optional() })) });
 export type McpStatusResponse = z.infer<typeof McpStatusResponseSchema>;

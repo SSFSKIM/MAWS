@@ -7,6 +7,7 @@ import { sep } from 'node:path';
 import * as z from 'zod';
 import type { AvailablePlugin, InstalledPlugin, PluginSourceRef, PluginsOutcome } from '@shared/ipc/schema/plugins';
 import type { Marketplace } from '@shared/ipc/schema/marketplaces';
+import type { McpAction, McpActionInputs } from '@shared/plugins/cli';
 
 export interface CliRun {
   stdout: string;
@@ -43,6 +44,18 @@ export function mutationOutcome(run: CliRun): PluginsOutcome {
   const failureCode = str(result.failureCode);
   const shownCommand = failureCode !== null && SHOWN_COMMAND_CODES.has(failureCode) && isRecord(result.shownCommand) ? result.shownCommand : null;
   return { ok: false, error: { code: 'cli_failed', message: str(result.message) ?? `${String(result.command)} failed`, failureCode, shownCommand } };
+}
+
+// P4-AGG M4: `claude mcp add|remove` print a sentence, not JSON (2.1.309): on success the result on stdout's first line
+// ("Added HTTP MCP server linear with URL: … to user config", then "File modified: …"), on a refusal the reason on stderr
+// with exit 1 ("MCP server linear already exists in user config", "No MCP server named "x" in user scope", "Invalid
+// name …"). The result carries the CLI's line as its `message`, as a plugin verb's does.
+export function mcpOutcome<A extends McpAction>(action: A, input: McpActionInputs[A], run: CliRun): PluginsOutcome {
+  const command = action === 'mcp-add' ? 'mcp add' : 'mcp remove';
+  if (run.code === 0) return { ok: true, result: { command, outcome: 'ok', message: lines(run.stdout)[0] ?? `${command} ${input.name}`, name: input.name, scope: input.scope } };
+  const said = lines(run.stderr).at(-1) ?? lines(run.stdout).at(-1);
+  if (said === undefined) return { ok: false, error: { code: 'no_result', message: run.code === null ? 'the CLI ended without a result' : `the CLI exited ${run.code} without a result`, failureCode: null, shownCommand: null } };
+  return { ok: false, error: { code: 'cli_failed', message: said, failureCode: null, shownCommand: null } };
 }
 
 // -- the reads -----------------------------------------------------------------------------------------------------------
@@ -164,14 +177,13 @@ export async function installedOf(rows: readonly PluginListRow[], cwd: string, r
 }
 
 // An entry's source as the marketplace declares it, reduced (P2-B §5.3): the relative path an in-repository entry has,
-// or the object's kind (`source`) and locators; anything else is none. Its `ref` is kept only where it decides the
-// engine's fold key: the engine keys a source pinned to a branch or tag only when a full commit sha pins it as well
-// (2.1.292 `Sb` :832435-832446), so beside such a sha the ref reads as none.
-function sourceRefOf(source: unknown): PluginSourceRef | null {
+// or the object's kind (`source`), its locators and its pins, the branch or tag (`ref`) and the commit (`sha`), both kept
+// (P4-AGG M2: each catalog route keeps its own pin). Whether a pin denies the engine's fold key is source-key.ts's to read
+// (2.1.292 `Sb` :832435-832446: a ref decides it unless a full commit sha pins the code beside it).
+export function sourceRefOf(source: unknown): PluginSourceRef | null {
   if (typeof source === 'string') return source;
   if (!isRecord(source)) return null;
-  const pinnedBySha = typeof source.sha === 'string' && /^[a-f0-9]{40}$/.test(source.sha);
-  return { kind: str(source.source) ?? 'unknown', url: str(source.url), repo: str(source.repo), path: str(source.path), ref: pinnedBySha ? null : str(source.ref) };
+  return { kind: str(source.source) ?? 'unknown', url: str(source.url), repo: str(source.repo), path: str(source.path), ref: str(source.ref), sha: str(source.sha) };
 }
 
 const AvailableSchema = z.looseObject({

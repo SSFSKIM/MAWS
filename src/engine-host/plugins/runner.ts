@@ -17,9 +17,9 @@ import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import type { PluginsOperationEvent, PluginsOutcome } from '@shared/ipc/schema/plugins';
-import { commandLine, PLUGINS_SCOPES, type PluginsAction, type PluginsActionInputs } from '@shared/plugins/cli';
+import { isMcpAction, PLUGINS_SCOPES, runnerCommandLine, type McpAction, type McpActionInputs, type PluginsAction, type RunnerAction, type RunnerActionInputs } from '@shared/plugins/cli';
 import type { BinaryCheck } from '../binary-info';
-import { mutationOutcome, resultOf, type CliRun } from './cli-result';
+import { mcpOutcome, mutationOutcome, resultOf, type CliRun } from './cli-result';
 import { RELOADING_ACTIONS, reloadAfter, SETTLE_MS, type ReloadTarget } from './reload-after';
 
 export { SETTLE_MS };
@@ -70,8 +70,8 @@ type StopReason = 'timeout' | 'cancelled' | 'stopped' | 'overflow' | 'leftover';
 
 interface Operation {
   opId: string;
-  action: PluginsAction;
-  input: PluginsActionInputs[PluginsAction];
+  action: RunnerAction; // P4-AGG M4: the MCP verbs too
+  input: RunnerActionInputs[RunnerAction];
   argv: string[];
   cwd: string;
   target: string;
@@ -195,9 +195,9 @@ export class PluginsRunner {
   }
 
   // Queued behind the running mutation; the receipt answers before any of its events.
-  async start<A extends PluginsAction>(action: A, input: PluginsActionInputs[A], cwd: string, binary: string): Promise<{ opId: string }> {
+  async start<A extends RunnerAction>(action: A, input: RunnerActionInputs[A], cwd: string, binary: string): Promise<{ opId: string }> {
     if (this.closed) throw new Error('the engine host is stopping: no plugin operation starts');
-    const argv = commandLine(action, input);
+    const argv = runnerCommandLine(action, input);
     const i = input as { plugin?: string; source?: string; name?: string };
     const op: Operation = { opId: randomUUID(), action, input, argv, cwd, target: i.plugin ?? i.source ?? i.name ?? '', binary, state: 'queued', abort: null, group: null, latest: null };
     this.operations.set(op.opId, op);
@@ -272,9 +272,11 @@ export class PluginsRunner {
     emit({ phase: 'started' });
     const ended = await this.exec(op.argv, op.cwd, (line) => emit({ phase: 'output', line }), op);
     op.state = 'ended';
-    const outcome: PluginsOutcome = 'failed' in ended ? { ok: false, error: { code: ended.failed, message: ended.message, failureCode: null, shownCommand: null } } : mutationOutcome(ended.run);
+    const read = (run: CliRun): PluginsOutcome => (isMcpAction(op.action) ? mcpOutcome(op.action, op.input as McpActionInputs[McpAction], run) : mutationOutcome(run)); // P4-AGG M4
+    const outcome: PluginsOutcome = 'failed' in ended ? { ok: false, error: { code: ended.failed, message: ended.message, failureCode: null, shownCommand: null } } : read(ended.run);
     this.deps.changed(); // the CLI has ended: the lists may have moved, even after a failure (a refreshed catalogue)
-    if (!outcome.ok || !RELOADING_ACTIONS.has(op.action)) return this.finish(op, outcome);
+    // an MCP change reloads nothing: it takes effect at the next session (fact 2)
+    if (!outcome.ok || isMcpAction(op.action) || !RELOADING_ACTIONS.has(op.action)) return this.finish(op, outcome);
     emit({ phase: 'reloading' });
     const i = op.input as { plugin?: string; scope?: 'user' | 'project' | 'local' };
     const id = typeof outcome.result.pluginId === 'string' ? outcome.result.pluginId : (i.plugin ?? null);
@@ -284,7 +286,7 @@ export class PluginsRunner {
     // auto-detect it; pass3/e8-plugins-reload seq 42, 50); 'user' (install's and uninstall's default) only when it names
     // none, or a pseudo-scope such as `managed`, which applies everywhere as user does
     const named = PLUGINS_SCOPES.find((scope) => scope === outcome.result.scope);
-    const sessions = await reloadAfter({ action: op.action, scope: i.scope ?? named ?? 'user', cwd: op.cwd, plugin, version }, () => this.deps.reloadTargets(), {
+    const sessions = await reloadAfter({ action: op.action as PluginsAction, scope: i.scope ?? named ?? 'user', cwd: op.cwd, plugin, version }, () => this.deps.reloadTargets(), {
       sleep: (ms) => new Promise((resolve) => this.timers.setTimeout(resolve, ms)),
     });
     this.finish(op, outcome, { sessions });

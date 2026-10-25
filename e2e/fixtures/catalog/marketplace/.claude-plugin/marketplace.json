@@ -1,0 +1,11 @@
+{
+  "name": "maws-discover-test",
+  "owner": { "name": "MAWS e2e" },
+  "metadata": { "description": "The local test marketplace of the Discover e2e group: four installable plugins, one per kind of content." },
+  "plugins": [
+    { "name": "hooked", "source": "./plugins/hooked", "description": "A plugin whose one component is a hook.", "version": "0.1.0", "author": { "name": "MAWS e2e hooks" } },
+    { "name": "local-server", "source": "./plugins/local-server", "description": "A plugin carrying a local (stdio) MCP server, a Node script.", "version": "0.1.0", "author": { "name": "MAWS e2e servers" } },
+    { "name": "remote-server", "source": "./plugins/remote-server", "description": "A plugin carrying a remote (HTTP) MCP server.", "version": "0.1.0", "author": { "name": "MAWS e2e servers" } },
+    { "name": "skills-only", "source": "./plugins/skills-only", "description": "A plugin carrying two skills and nothing else.", "version": "0.1.0", "author": { "name": "MAWS e2e skills" } }
+  ]
+}

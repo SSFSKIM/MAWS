@@ -34,6 +34,9 @@ export const commands = [
   'session.recentTurns', // P2-D (2026-10-09): the resume chooser's preview read
 ] as const;
 
+// P4-AGG M4: the engine's own MCP sign-in, main's sign-in operation alone (src/main/connectors/sign-in.ts)
+export const mainOnlyCommands = ['session.mcpAuthenticate', 'session.mcpOAuthCallback'] as const;
+
 export const events = [
   'session.eventBatch', 'session.status', 'session.queue', 'session.brokerItems', 'session.operation',
   'session.forgotten', 'session.changed', 'session.removed', 'session.projects.changed', 'session.replay.progress',

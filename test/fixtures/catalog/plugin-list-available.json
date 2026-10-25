@@ -1,0 +1,98 @@
+{
+  "engine": "2.1.309 (Claude Code)",
+  "argv": [
+    "plugin",
+    "list",
+    "--json",
+    "--available"
+  ],
+  "cwd": "<scratch>/project-a",
+  "output": {
+    "installed": [
+      {
+        "id": "remote-server@maws-discover-test",
+        "version": "0.1.0",
+        "scope": "project",
+        "enabled": true,
+        "installPath": "<scratch>/config/plugins/cache/maws-discover-test/remote-server/0.1.0",
+        "readFromFolder": "<scratch>/maws-discover-test/plugins/remote-server",
+        "folderVersion": "0.1.0",
+        "installedAt": "2026-10-25T02:24:20.320Z",
+        "lastUpdated": "2026-10-25T02:24:20.320Z",
+        "projectPath": "<scratch>/project-a",
+        "mcpServers": {
+          "fixture": {
+            "type": "http",
+            "url": "http://127.0.0.1:9/mcp"
+          }
+        },
+        "projectEnabled": true
+      },
+      {
+        "id": "skills-only@maws-discover-test",
+        "version": "0.1.0",
+        "scope": "user",
+        "enabled": true,
+        "installPath": "<scratch>/config/plugins/cache/maws-discover-test/skills-only/0.1.0",
+        "readFromFolder": "<scratch>/maws-discover-test/plugins/skills-only",
+        "folderVersion": "0.1.0",
+        "installedAt": "2026-10-25T02:24:19.767Z",
+        "lastUpdated": "2026-10-25T02:24:19.767Z",
+        "projectEnabled": false
+      }
+    ],
+    "available": [
+      {
+        "pluginId": "hooked@maws-discover-test",
+        "name": "hooked",
+        "description": "A plugin whose one component is a hook.",
+        "marketplaceName": "maws-discover-test",
+        "version": "0.1.0",
+        "source": "./plugins/hooked"
+      },
+      {
+        "pluginId": "local-server@maws-discover-test",
+        "name": "local-server",
+        "description": "A plugin carrying a local (stdio) MCP server, a Node script.",
+        "marketplaceName": "maws-discover-test",
+        "version": "0.1.0",
+        "source": "./plugins/local-server"
+      },
+      {
+        "pluginId": "expo@maws-recorded-pins",
+        "name": "expo",
+        "description": "A git-subdir entry pinned by ref and sha",
+        "marketplaceName": "maws-recorded-pins",
+        "source": {
+          "source": "git-subdir",
+          "url": "https://github.com/expo/skills.git",
+          "path": "plugins/expo",
+          "ref": "main",
+          "sha": "d4f484024fec15196bfd3c272e953e3f983972cf"
+        }
+      },
+      {
+        "pluginId": "skill-creator@maws-recorded-pins",
+        "name": "skill-creator",
+        "description": "A url entry pinned by sha",
+        "marketplaceName": "maws-recorded-pins",
+        "source": {
+          "source": "url",
+          "url": "https://github.com/aisa-one/skill-creator.git",
+          "sha": "fdd5600fc154187b02af53fbcb10bf50b84a1684"
+        }
+      },
+      {
+        "pluginId": "notion-workspace-plugin@maws-recorded-pins",
+        "name": "notion-workspace-plugin",
+        "description": "A github entry with a ref only",
+        "marketplaceName": "maws-recorded-pins",
+        "source": {
+          "source": "github",
+          "repo": "makenotion/claude-code-notion-plugin",
+          "ref": "main"
+        }
+      }
+    ]
+  }
+}

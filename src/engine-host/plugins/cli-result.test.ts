@@ -1,11 +1,12 @@
 // E8 M1: the CLI's `--json` answers as the runner reads them, in the shapes G0's probe recorded on 2.1.290
 // (`docs/doperpowers/evidence/p1-e8/g0-cli-probe.txt`) and SPEC 30 §25.3a describes.
+import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { sourceKey } from '../../shared/plugins/source-key';
-import { availableOf, installedOf, listing, marketplacesOf, mutationOutcome, pluginRowsOf } from './cli-result';
+import { availableOf, installedOf, listing, marketplacesOf, mutationOutcome, mcpOutcome, pluginRowsOf } from './cli-result';
 
 const INSTALLED = '{"command":"install","outcome":"ok","plugin":"e8-probe@e8-scratch","pluginId":"e8-probe@e8-scratch","scope":"user","message":"Successfully installed plugin: e8-probe@e8-scratch (scope: user)"}';
 const NOT_FOUND = '{"command":"install","outcome":"failed","plugin":"nope@e8-scratch","scope":"user","message":"Plugin \\"nope\\" not found in marketplace \\"e8-scratch\\". Your local copy may be out of date — try `claude plugin marketplace update e8-scratch`.","failureCode":"not_found"}';
@@ -131,16 +132,29 @@ describe('the reads', () => {
     const none = { description: null, version: null };
     expect(availableOf(stdout)).toEqual([
       { pluginId: 'e8-probe@e8-scratch', name: 'e8-probe', marketplaceName: 'e8-scratch', description: 'One skill and one command, for the probe', version: null, source: './plugins/e8-probe', installCount: null },
-      { pluginId: 'figma@anthropic-plugin-directory', name: 'figma', marketplaceName: 'anthropic-plugin-directory', description: 'Figma', version: '2.2.108', source: { kind: 'url', url: 'https://x', repo: null, path: null, ref: null }, installCount: 9 },
-      { pluginId: 'fd@anthropic-plugin-directory', name: 'fd', marketplaceName: 'anthropic-plugin-directory', ...none, source: { kind: 'git-subdir', url: 'https://github.com/anthropics/claude-plugins-official', repo: null, path: 'plugins/frontend-design', ref: 'main' }, installCount: null },
-      { pluginId: 'gh@o', name: 'gh', marketplaceName: 'o', ...none, source: { kind: 'github', url: null, repo: 'a/b', path: null, ref: null }, installCount: 1290640 },
-      // a ref is kept only where it decides the engine's key: a full commit sha beside it pins the code instead
-      { pluginId: 'pinned@o', name: 'pinned', marketplaceName: 'o', ...none, source: { kind: 'github', url: null, repo: 'a/b', path: null, ref: 'v2' }, installCount: null },
-      { pluginId: 'shaed@o', name: 'shaed', marketplaceName: 'o', ...none, source: { kind: 'github', url: null, repo: 'a/b', path: null, ref: null }, installCount: null },
-      { pluginId: 'odd@o', name: 'odd', marketplaceName: 'o', ...none, source: { kind: 'unknown', url: null, repo: null, path: null, ref: null }, installCount: null },
+      { pluginId: 'figma@anthropic-plugin-directory', name: 'figma', marketplaceName: 'anthropic-plugin-directory', description: 'Figma', version: '2.2.108', source: { kind: 'url', url: 'https://x', repo: null, path: null, ref: null, sha: 'f'.repeat(40) }, installCount: 9 },
+      { pluginId: 'fd@anthropic-plugin-directory', name: 'fd', marketplaceName: 'anthropic-plugin-directory', ...none, source: { kind: 'git-subdir', url: 'https://github.com/anthropics/claude-plugins-official', repo: null, path: 'plugins/frontend-design', ref: 'main', sha: null }, installCount: null },
+      { pluginId: 'gh@o', name: 'gh', marketplaceName: 'o', ...none, source: { kind: 'github', url: null, repo: 'a/b', path: null, ref: null, sha: null }, installCount: 1290640 },
+      // P4-AGG M2: the ref and the sha both kept, each route's own pin (the fold key reads the sha beside a ref, source-key.ts)
+      { pluginId: 'pinned@o', name: 'pinned', marketplaceName: 'o', ...none, source: { kind: 'github', url: null, repo: 'a/b', path: null, ref: 'v2', sha: null }, installCount: null },
+      { pluginId: 'shaed@o', name: 'shaed', marketplaceName: 'o', ...none, source: { kind: 'github', url: null, repo: 'a/b', path: null, ref: 'v2', sha: 'a'.repeat(40) }, installCount: null },
+      { pluginId: 'odd@o', name: 'odd', marketplaceName: 'o', ...none, source: { kind: 'unknown', url: null, repo: null, path: null, ref: null, sha: null }, installCount: null },
       { pluginId: 'neg@o', name: 'neg', marketplaceName: 'o', ...none, source: null, installCount: null },
       { pluginId: 'str@o', name: 'str', marketplaceName: 'o', ...none, source: null, installCount: null },
     ]);
+  });
+
+  // P4-AGG M2: the scratch engine's own answer (2.1.309, recorded by scripts/catalog-fixtures.mjs engine)
+  it('keeps each recorded entry’s pin whole: a ref beside a sha, a sha alone, a ref alone', () => {
+    const recorded = JSON.parse(readFileSync(resolve(__dirname, '../../../test/fixtures/catalog/plugin-list-available.json'), 'utf8')) as { output: unknown };
+    const sources = Object.fromEntries(availableOf(JSON.stringify(recorded.output)).map((p) => [p.pluginId, p.source]));
+    expect(sources['hooked@maws-discover-test']).toBe('./plugins/hooked');
+    expect(sources['expo@maws-recorded-pins']).toEqual({ kind: 'git-subdir', url: 'https://github.com/expo/skills.git', repo: null, path: 'plugins/expo', ref: 'main', sha: 'd4f484024fec15196bfd3c272e953e3f983972cf' });
+    expect(sources['skill-creator@maws-recorded-pins']).toEqual({ kind: 'url', url: 'https://github.com/aisa-one/skill-creator.git', repo: null, path: null, ref: null, sha: 'fdd5600fc154187b02af53fbcb10bf50b84a1684' });
+    expect(sources['notion-workspace-plugin@maws-recorded-pins']).toEqual({ kind: 'github', url: null, repo: 'makenotion/claude-code-notion-plugin', path: null, ref: 'main', sha: null });
+    // the engine's fold key is unchanged by keeping the ref: the sha beside it pins the code; a ref alone denies a key
+    expect(sourceKey(sources['expo@maws-recorded-pins']!, null)).toBe('github.com/expo/skills#plugins/expo');
+    expect(sourceKey(sources['notion-workspace-plugin@maws-recorded-pins']!, null)).toBeNull();
   });
 
   it('reduces marketplace list rows to name, source kind, locator, the branch or tag it is pinned to, and install location', () => {
@@ -189,5 +203,27 @@ describe('the reads', () => {
     expect(() => pluginRowsOf('{"installed":[]}')).toThrow(/plugin list --json/);
     expect(() => availableOf('[]')).toThrow(/--available/);
     expect(() => marketplacesOf('{}')).toThrow(/marketplace list --json/);
+  });
+});
+
+// P4-AGG M4: `claude mcp add|remove` print a line, not JSON (2.1.309, measured on a scratch HOME): the success line on
+// stdout with the file it modified after it, a refusal on stderr with exit 1.
+describe('mcpOutcome', () => {
+  it('reads a success from the line the CLI printed', () => {
+    const run = { stdout: 'Added HTTP MCP server linear with URL: https://mcp.linear.app/mcp to user config\nFile modified: /cfg/.claude.json\n', stderr: '', code: 0 };
+    expect(mcpOutcome('mcp-add', { name: 'linear', url: 'https://mcp.linear.app/mcp', transport: 'http', scope: 'user' }, run)).toEqual({
+      ok: true,
+      result: { command: 'mcp add', outcome: 'ok', message: 'Added HTTP MCP server linear with URL: https://mcp.linear.app/mcp to user config', name: 'linear', scope: 'user' },
+    });
+    expect(mcpOutcome('mcp-remove', { name: 'linear', scope: 'user' }, { stdout: 'Removed MCP server linear from user config\nFile modified: /cfg/.claude.json\n', stderr: '', code: 0 })).toMatchObject({ ok: true, result: { command: 'mcp remove', message: 'Removed MCP server linear from user config' } });
+  });
+
+  it('answers a refusal in the engine\'s own words', () => {
+    expect(mcpOutcome('mcp-add', { name: 'linear', url: 'https://mcp.linear.app/mcp', transport: 'http', scope: 'user' }, { stdout: '', stderr: 'MCP server linear already exists in user config\n', code: 1 })).toEqual({
+      ok: false,
+      error: { code: 'cli_failed', message: 'MCP server linear already exists in user config', failureCode: null, shownCommand: null },
+    });
+    expect(mcpOutcome('mcp-remove', { name: 'nosuch', scope: 'local' }, { stdout: '', stderr: 'No MCP server named "nosuch" in local scope', code: 1 })).toMatchObject({ ok: false, error: { message: 'No MCP server named "nosuch" in local scope' } });
+    expect(mcpOutcome('mcp-remove', { name: 'x', scope: 'user' }, { stdout: '', stderr: '', code: null })).toMatchObject({ ok: false, error: { code: 'no_result', message: 'the CLI ended without a result' } });
   });
 });

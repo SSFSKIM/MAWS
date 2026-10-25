@@ -149,7 +149,10 @@ import { registerDashboardExporters } from './dashboard/export'; // E2 M5
 import { startConnectors } from './connectors'; // P3-H H3b
 import { createDirectRoute } from './connectors/direct-route'; // P3-HD: route D, MAWS's own MCP connections
 import { productionConnectorOAuth } from './connectors/oauth-root'; // P3-HD M3c2: MAWS's own OAuth beside route D
+import { listenLoopback } from './connectors/oauth-callback'; // P4-AGG M4
+import { startSignIn } from './connectors/sign-in'; // P4-AGG M4
 import { startDelivery } from './delivery'; // P4-B5: the owner's Send to
+import { startCatalog } from './catalog'; // P4-AGG M2: Discover's catalog
 
 // cua board #97: before any log line, so a launcher's closed pipe or terminal never turns a console call into a crash.
 guardStdio([process.stdout, process.stderr]);
@@ -637,6 +640,18 @@ void startWithProfileLock(app, () => {
   // P3-HD M3c2: with it, MAWS's own OAuth provider (sealed under userData, safeStorage asked only on demand)
   const connectors = startConnectors({ hosts, register: registerMainHandler, index, windowOf: (sender) => BrowserWindow.fromWebContents(sender as WebContents), direct: createDirectRoute, oauth: productionConnectorOAuth });
   shutdown.add('connectors', connectors.stop);
+  // P4-AGG M4: Customize › Connectors' Sign in, the engine's own MCP sign-in in one ready session (its credential is the
+  // engine's, in the engine's keychain item; MAWS's own OAuth store is not involved)
+  const signIn = startSignIn({
+    register: registerMainHandler,
+    emit: (name, payload) => emit(name, payload),
+    host: { call: (name, input) => hosts.dispatch('engine-host', name, input) as never },
+    onSessionStatus: (listener) => hosts.onEvent('session.status', (payload) => listener(payload)),
+    onHostLost: (listener) => hosts.onState('engine-host', (state) => (state.state === 'ready' ? undefined : listener())),
+    open: (url) => openExternalUrl(url),
+    listen: listenLoopback,
+  });
+  shutdown.add('connector sign-in', signIn.stop);
   // P4-B5: the owner's Send to, no Claude turn: Notion through route D (MAWS's own connection), Drive through the gws CLI
   // the owner installed, run with the login shell's environment (the CLI keeps its sign-in; MAWS holds no Google
   // credential); the export is X31's, as the library's
@@ -650,6 +665,19 @@ void startWithProfileLock(app, () => {
     openExternal: (url) => openExternalUrl(url),
   });
   shutdown.add('delivery', delivery.stop);
+  // P4-AGG M2: Discover's catalog (the person's, never an agent's): the seed marketplaces, Anthropic's directory and the
+  // official install counts through the `catalog` egress rule, cached under userData, joined with the engine's reads per
+  // cwd through the host, re-read on its `plugins.changed`
+  const catalog = startCatalog({
+    register: registerMainHandler,
+    emit: (name, payload) => emit(name, payload),
+    call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
+    onPluginsChanged: (listener) => hosts.onEvent('plugins.changed', () => listener()),
+    userData: app.getPath('userData'),
+    env: process.env,
+    userAgent: `MAWS/${app.getVersion()}`,
+  });
+  shutdown.add('catalog', catalog.stop);
   // P3-B: document × md, html, docx, pdf. P3-D (the P3 spec's Decision Log 61): each run handed its governing design system
   const exportAuthors = {
     sessionTitle: (appSessionId: string) => index.sessions.get(appSessionId as AppSessionId)?.title.text,

@@ -1,0 +1,23 @@
+{
+  "key": "seed:canva-skills",
+  "recordedAt": "2026-10-25T02:24:15.671Z",
+  "pages": [
+    {
+      "name": "canva-skills",
+      "owner": {
+        "name": "Canva"
+      },
+      "metadata": {
+        "description": "Canva Skills for AI Agents",
+        "version": "1.0.0"
+      },
+      "plugins": [
+        {
+          "name": "canva",
+          "source": "./plugins/canva",
+          "description": "Create, edit, review, resize, and brand-check Canva designs with the Canva MCP server."
+        }
+      ]
+    }
+  ]
+}

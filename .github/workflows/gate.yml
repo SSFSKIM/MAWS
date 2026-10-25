@@ -80,6 +80,7 @@ env:
     default artifacts library side tools to-human deliverables panel supervisor browser browser-comment browser-import
     settings transcript terminal code agents widgets c7 scm c12 available document document-app presentations
     design-systems browser-cua browser-chrome desk-web design dashboard connectors connectors-direct connectors-oauth delivery
+    discover
   # The groups §3.1's table found green on a Linux runner, the only ones a Linux lane takes (never by default). desk-web
   # (DC5): the desk's web app in a browser, against its DX3 double, which needs no Electron and no Mac.
   LINUX_E2E: library artifacts available tools agents desk-web
@@ -501,6 +502,13 @@ jobs:
           path: ${{ runner.temp }}/maws-e2e-build
       - if: matrix.build
         run: .github/scripts/gate-run.sh 'built in|error' pnpm build
+      # P4-AGG M1 (docs/doperpowers/specs/2026-10-24-plugin-aggregator-design.md): the Discover group runs the real engine
+      # 2.1.309, provisioned here, before its offline test phase: the official build, verified against the checksum
+      # committed in scripts/engine-checksums.txt and cached by version under the runner's user directory; the script
+      # exports MAWS_E2E_ENGINE_BIN to the steps after. e2e/support/real-engine.ts checks the version again at test time,
+      # so a run that skipped this step fails there rather than running another engine.
+      - if: matrix.group == 'discover'
+        run: scripts/provision-engine.sh 2.1.309
       # Decision Log 60(2): beside other e2e groups, `default` runs only the specs none of them collects, derived at this
       # tree from their package scripts through `playwright test --list`; the groups of a `DefaultBeside:` trailer count
       # as beside it (Decision Log 66). Alone, or when the derivation cannot read a script, a named group has no script

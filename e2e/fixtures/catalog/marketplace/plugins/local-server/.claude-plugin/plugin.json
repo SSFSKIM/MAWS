@@ -1,0 +1,1 @@
+{ "name": "local-server", "version": "0.1.0", "description": "A plugin carrying a local (stdio) MCP server, a Node script.", "author": { "name": "MAWS e2e servers" } }

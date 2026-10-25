@@ -68,7 +68,8 @@ import { promptHistory } from './prompt-history';
 // P2-C end
 // P2-B start (2026-10-09)
 import { pluginRowsOf } from './plugins/cli-result';
-import { LastListings, manifestsFor } from './plugins/listings';
+import { LastListings, manifestsFor, marketplaceManifestFor } from './plugins/listings';
+import { directoryProvenance } from './plugins/directory-provenance';
 // P2-B end
 // P2-A start (2026-10-09; X17)
 import { ObservedFactsService } from './observed-facts';
@@ -96,6 +97,7 @@ export const DEADLINE_SHAPES: Record<C3Command, DeadlineShape> = {
   'session.getMemoryDialog': 'bounded', 'session.getSkillsDialog': 'bounded', 'session.getSandboxDialog': 'bounded', 'session.getWorkspaceDiff': 'bounded',
   'session.exportConversation': 'bounded', 'session.getStatus': 'bounded', 'session.mcpStatus': 'bounded', 'session.listModels': 'bounded', 'session.getSessionCost': 'bounded',
   'session.getBinaryVersion': 'bounded',
+  'session.mcpAuthenticate': 'bounded', 'session.mcpOAuthCallback': 'bounded', // P4-AGG M4
 };
 
 // C10 start: C10's engine-host commands (C10 execution document, X2 additions); each handler names its deadline shape
@@ -576,6 +578,21 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   handle('session.exportConversation', read('export_conversation'));
   handle('session.getStatus', read('get_status'));
   handle('session.mcpStatus', async (input) => rendererMcpStatus(await read('mcp_status')(input))); // P3-H: never a header value
+  // P4-AGG M4: the engine's own MCP sign-in, main's sign-in operation alone; an engine refusal answers in its words
+  const refusedOr = async <T>(run: () => Promise<T>): Promise<T | { ok: false; message: string }> => {
+    try {
+      return await run();
+    } catch (error) {
+      if (!(error instanceof ControlError) || error instanceof ControlTimeout) throw error;
+      return { ok: false, message: error.message };
+    }
+  };
+  handle('session.mcpAuthenticate', async ({ appSessionId, serverName, redirectUri }) =>
+    bounded(() => refusedOr(async () => ({ ok: true as const, answer: await controls.mcpAuthenticate(ready(appSessionId).client, { serverName, ...(redirectUri !== null && { redirectUri }) }) }))),
+  );
+  handle('session.mcpOAuthCallback', async ({ appSessionId, serverName, callbackUrl }) =>
+    bounded(() => refusedOr(async () => (await controls.mcpOAuthCallbackUrl(ready(appSessionId).client, { serverName, callbackUrl }), { ok: true as const }))),
+  );
   // C10 start: every list_models answer also refreshes the catalogue cache
   handle('session.listModels', async (input) => {
     const answer = await read('list_models')(input);
@@ -771,6 +788,10 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   on('plugins.enable', async ({ cwd, binary, plugin, scope }) => plugins.start('enable', { plugin, scope }, cwd, binary));
   on('plugins.disable', async ({ cwd, binary, plugin, scope }) => plugins.start('disable', { plugin, scope }, cwd, binary));
   on('plugins.cancel', async ({ opId }) => ({ cancelled: plugins.cancel(opId) }));
+  // P4-AGG M4: Customize › Connectors' add and remove, the engine's `claude mcp add|remove` as operations of the same
+  // runner (completing on `plugins.operation`; `plugins.cancel` stops them)
+  on('connectors.add', async ({ cwd, binary, name, url, transport, scope }) => plugins.start('mcp-add', { name, url, transport, scope }, cwd, binary));
+  on('connectors.remove', async ({ cwd, binary, name, scope }) => plugins.start('mcp-remove', { name, scope }, cwd, binary));
   on('marketplaces.add', async ({ cwd, binary, source, scope }) => plugins.start('marketplace-add', { source, scope }, cwd, binary));
   on('marketplaces.update', async ({ cwd, binary, name }) => plugins.start('marketplace-update', { name }, cwd, binary));
   on('marketplaces.remove', async ({ cwd, binary, name, scope }) => plugins.start('marketplace-remove', { name, scope }, cwd, binary));
@@ -784,6 +805,15 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   // available entries the renderer names, read from files under the folders this host's own last listings for the cwd
   // named (one more listing for an item they do not name), nothing executed or fetched; a read like E8's, one bridge call
   on('plugins.manifest', async ({ cwd, items }) => ({ manifests: await manifestsFor(cwd, items, { listings, listPlugins: () => listPlugins(cwd), listMarketplaces: () => listMarketplaces(cwd) }) }));
+  // P4-AGG M2: one marketplace's clone read whole for Discover's catalog, admitted by the same kept listing
+  on('plugins.marketplaceManifest', ({ cwd, name }) => marketplaceManifestFor(cwd, name, { listings, listMarketplaces: () => listMarketplaces(cwd) }));
+  // P4-AGG M2: the engine's own records of where installed Anthropic Directory plugins came from, in its plugins folder
+  // (the override the engine honours, else <config>/plugins, as session-start-hooks.ts reads it)
+  on('plugins.directoryProvenance', async ({ names }) => {
+    const env = await captureEnv();
+    const pluginsDir = env.CLAUDE_CODE_PLUGIN_CACHE_DIR || join(env.CLAUDE_CONFIG_DIR || join(env.HOME || homedir(), '.claude'), 'plugins');
+    return { pluginsDir, entries: await directoryProvenance(pluginsDir, names) };
+  });
   // P2-B end
 
   // E1 start: the `maws` tool server's commands. A session this host does not hold has no ask and nothing pending;

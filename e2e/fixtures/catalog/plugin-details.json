@@ -1,0 +1,1043 @@
+{
+  "key": "plugin-details",
+  "recordedAt": "2026-10-25T02:24:15.671Z",
+  "pages": [
+    {
+      "generated_at": "2026-10-21T07:42:41.091Z",
+      "marketplace_sha": "d1adba47161a271799de7b548225d929310046bd",
+      "models": [
+        "claude-opus-4-7",
+        "claude-sonnet-4-6"
+      ],
+      "plugins": {
+        "42crunch-api-security-testing@claude-plugins-official": {
+          "plugin": "api-security-testing",
+          "version": "1.5.5",
+          "source": "42crunch-api-security-testing@claude-plugins-official",
+          "sha": "faf5305385de8afed9468904e8639be737aff39e",
+          "tokens": {
+            "claude-opus-4-7": {
+              "always_on": 979,
+              "on_invoke": 16786
+            },
+            "claude-sonnet-4-6": {
+              "always_on": 719,
+              "on_invoke": 12517
+            }
+          },
+          "components": {
+            "commands": [],
+            "agents": [],
+            "skills": [
+              {
+                "name": "42crunch-scan",
+                "chars": {
+                  "always_on": 601,
+                  "on_invoke": 7171
+                }
+              },
+              {
+                "name": "42crunch-setup",
+                "chars": {
+                  "always_on": 554,
+                  "on_invoke": 5792
+                }
+              },
+              {
+                "name": "code-to-oas",
+                "chars": {
+                  "always_on": 558,
+                  "on_invoke": 16542
+                }
+              },
+              {
+                "name": "42crunch-audit",
+                "chars": {
+                  "always_on": 523,
+                  "on_invoke": 3564
+                }
+              },
+              {
+                "name": "42crunch-api-security-testing",
+                "chars": {
+                  "always_on": 548,
+                  "on_invoke": 9546
+                }
+              }
+            ],
+            "hooks": [],
+            "mcpServers": [],
+            "lspServers": []
+          },
+          "source_sha": "faf5305385de8afed9468904e8639be737aff39e",
+          "last_updated": "2026-05-12T09:29:59-07:00",
+          "marketplace_entry": {
+            "name": "42crunch-api-security-testing",
+            "description": "Automate API security directly in Claude Code with 42Crunch - automatically audit OpenAPI specs, detect vulnerabilities aligned with OWASP API Security risks (including BOLA/BFLA), and apply AI-powered fixes. Designed for AI-assisted development workflows, it provides continuous guardrails through an audit->scan->remediate->validate loop, ensuring APIs meet enterprise security standards before deployment.",
+            "author": {
+              "name": "42Crunch"
+            },
+            "category": "security",
+            "source": {
+              "source": "git-subdir",
+              "url": "https://github.com/42Crunch-AI/claude-plugins.git",
+              "path": "plugins/api-security-testing",
+              "ref": "v1.5.5",
+              "sha": "faf5305385de8afed9468904e8639be737aff39e"
+            },
+            "homepage": "https://42crunch.com"
+          },
+          "unique_installs": 3474
+        },
+        "adobe-for-creativity@claude-plugins-official": {
+          "plugin": "adobe-for-creativity",
+          "version": "3.2.0",
+          "source": "adobe-for-creativity@claude-plugins-official",
+          "sha": "0f487c9b1b98d8e62dfc80ee4d28b29f5471261f",
+          "tokens": {
+            "claude-opus-4-7": {
+              "always_on": 4053,
+              "on_invoke": 87773
+            },
+            "claude-sonnet-4-6": {
+              "always_on": 2833,
+              "on_invoke": 65032
+            }
+          },
+          "components": {
+            "commands": [],
+            "agents": [],
+            "skills": [
+              {
+                "name": "adobe-batch-edit-photos",
+                "chars": {
+                  "always_on": 830,
+                  "on_invoke": 39686
+                }
+              },
+              {
+                "name": "adobe-design-from-template",
+                "chars": {
+                  "always_on": 849,
+                  "on_invoke": 15079
+                }
+              },
+              {
+                "name": "adobe-create-pdfs-from-data",
+                "chars": {
+                  "always_on": 757,
+                  "on_invoke": 13642
+                }
+              },
+              {
+                "name": "adobe-fonts",
+                "chars": {
+                  "always_on": 761,
+                  "on_invoke": 13967
+                }
+              },
+              {
+                "name": "adobe-design-to-pdf",
+                "chars": {
+                  "always_on": 701,
+                  "on_invoke": 16831
+                }
+              },
+              {
+                "name": "adobe-edit-quick-cut",
+                "chars": {
+                  "always_on": 663,
+                  "on_invoke": 13268
+                }
+              },
+              {
+                "name": "adobe-anyexcel",
+                "chars": {
+                  "always_on": 663,
+                  "on_invoke": 2744
+                }
+              },
+              {
+                "name": "adobe-retouch-portraits",
+                "chars": {
+                  "always_on": 762,
+                  "on_invoke": 40589
+                }
+              },
+              {
+                "name": "adobe-anydocx",
+                "chars": {
+                  "always_on": 583,
+                  "on_invoke": 2730
+                }
+              },
+              {
+                "name": "adobe-create-social-variations",
+                "chars": {
+                  "always_on": 797,
+                  "on_invoke": 29128
+                }
+              },
+              {
+                "name": "adobe-resize-photos-and-videos",
+                "chars": {
+                  "always_on": 989,
+                  "on_invoke": 17613
+                }
+              },
+              {
+                "name": "adobe-anypdf",
+                "chars": {
+                  "always_on": 963,
+                  "on_invoke": 8463
+                }
+              },
+              {
+                "name": "adobe-anypptx",
+                "chars": {
+                  "always_on": 609,
+                  "on_invoke": 2665
+                }
+              },
+              {
+                "name": "adobe",
+                "chars": {
+                  "always_on": 521,
+                  "on_invoke": 8887
+                }
+              },
+              {
+                "name": "adobe-document-review",
+                "chars": {
+                  "always_on": 786,
+                  "on_invoke": 21197
+                }
+              }
+            ],
+            "hooks": [],
+            "mcpServers": [
+              "Adobe"
+            ],
+            "lspServers": []
+          },
+          "source_sha": "0f487c9b1b98d8e62dfc80ee4d28b29f5471261f",
+          "last_updated": "2026-10-15T11:33:59+02:00",
+          "marketplace_entry": {
+            "name": "adobe-for-creativity",
+            "description": "Harness Adobe's creative AI-powered tools to edit images, automate design workflows, and bring creative visions to life — from background removal to vectorization and professional retouching.",
+            "author": {
+              "name": "Adobe"
+            },
+            "category": "design",
+            "source": {
+              "source": "git-subdir",
+              "url": "https://github.com/adobe/skills.git",
+              "path": "plugins/creative-cloud/adobe-for-creativity",
+              "ref": "main",
+              "sha": "0f487c9b1b98d8e62dfc80ee4d28b29f5471261f"
+            },
+            "homepage": "https://github.com/adobe/skills/tree/main/plugins/creative-cloud/adobe-for-creativity"
+          },
+          "unique_installs": 3986
+        },
+        "claude-md-management@claude-plugins-official": {
+          "plugin": "claude-md-management",
+          "version": "1.0.0",
+          "source": "claude-md-management@claude-plugins-official",
+          "sha": null,
+          "tokens": {
+            "claude-opus-4-7": {
+              "always_on": 180,
+              "on_invoke": 2723
+            },
+            "claude-sonnet-4-6": {
+              "always_on": 121,
+              "on_invoke": 1881
+            }
+          },
+          "components": {
+            "commands": [
+              {
+                "name": "revise-claude-md",
+                "chars": {
+                  "always_on": 87,
+                  "on_invoke": 1252
+                }
+              }
+            ],
+            "agents": [],
+            "skills": [
+              {
+                "name": "claude-md-improver",
+                "chars": {
+                  "always_on": 378,
+                  "on_invoke": 5605
+                }
+              }
+            ],
+            "hooks": [],
+            "mcpServers": [],
+            "lspServers": []
+          },
+          "source_sha": "aecd4c852f10b466245f18383fa6aad8c0b10d57",
+          "last_updated": "2026-02-20T01:06:49Z",
+          "marketplace_entry": {
+            "name": "claude-md-management",
+            "description": "Tools to maintain and improve CLAUDE.md files - audit quality, capture session learnings, and keep project memory current.",
+            "author": {
+              "name": "Anthropic",
+              "email": "support@anthropic.com"
+            },
+            "source": "./plugins/claude-md-management",
+            "category": "productivity",
+            "homepage": "https://github.com/anthropics/claude-plugins-official/tree/main/plugins/claude-md-management"
+          },
+          "unique_installs": 314007
+        },
+        "code-review@claude-plugins-official": {
+          "plugin": "code-review",
+          "source": "code-review@claude-plugins-official",
+          "sha": null,
+          "tokens": {
+            "claude-opus-4-7": {
+              "always_on": 25,
+              "on_invoke": 2489
+            },
+            "claude-sonnet-4-6": {
+              "always_on": 19,
+              "on_invoke": 1854
+            }
+          },
+          "components": {
+            "commands": [
+              {
+                "name": "code-review",
+                "chars": {
+                  "always_on": 50,
+                  "on_invoke": 7170
+                }
+              }
+            ],
+            "agents": [],
+            "skills": [],
+            "hooks": [],
+            "mcpServers": [],
+            "lspServers": []
+          },
+          "source_sha": "aecd4c852f10b466245f18383fa6aad8c0b10d57",
+          "last_updated": "2026-02-20T01:06:49Z",
+          "marketplace_entry": {
+            "name": "code-review",
+            "description": "Automated code review for pull requests using multiple specialized agents with confidence-based scoring to filter false positives",
+            "author": {
+              "name": "Anthropic",
+              "email": "support@anthropic.com"
+            },
+            "source": "./plugins/code-review",
+            "category": "productivity",
+            "homepage": "https://github.com/anthropics/claude-plugins-public/tree/main/plugins/code-review"
+          },
+          "unique_installs": 477558
+        },
+        "code-simplifier@claude-plugins-official": {
+          "plugin": "code-simplifier",
+          "version": "1.0.0",
+          "source": "code-simplifier@claude-plugins-official",
+          "sha": null,
+          "tokens": {
+            "claude-opus-4-7": {
+              "always_on": 69,
+              "on_invoke": 913
+            },
+            "claude-sonnet-4-6": {
+              "always_on": 44,
+              "on_invoke": 608
+            }
+          },
+          "components": {
+            "commands": [],
+            "agents": [
+              {
+                "name": "code-simplifier",
+                "chars": {
+                  "always_on": 188,
+                  "on_invoke": 2899
+                }
+              }
+            ],
+            "skills": [],
+            "hooks": [],
+            "mcpServers": [],
+            "lspServers": []
+          },
+          "source_sha": "aecd4c852f10b466245f18383fa6aad8c0b10d57",
+          "last_updated": "2026-02-20T01:06:49Z",
+          "marketplace_entry": {
+            "name": "code-simplifier",
+            "description": "Agent that simplifies and refines code for clarity, consistency, and maintainability while preserving functionality. Focuses on recently modified code.",
+            "author": {
+              "name": "Anthropic",
+              "email": "support@anthropic.com"
+            },
+            "source": "./plugins/code-simplifier",
+            "category": "productivity",
+            "homepage": "https://github.com/anthropics/claude-plugins-official/tree/main/plugins/code-simplifier"
+          },
+          "unique_installs": 371422
+        },
+        "context7@claude-plugins-official": {
+          "plugin": "context7",
+          "source": "context7@claude-plugins-official",
+          "sha": null,
+          "tokens": {
+            "claude-opus-4-7": {
+              "always_on": 0,
+              "on_invoke": 0
+            },
+            "claude-sonnet-4-6": {
+              "always_on": 0,
+              "on_invoke": 0
+            }
+          },
+          "components": {
+            "commands": [],
+            "agents": [],
+            "skills": [],
+            "hooks": [],
+            "mcpServers": [
+              "context7"
+            ],
+            "lspServers": []
+          },
+          "source_sha": "ab024cdcfa7ca80be204acd4907656ba5a968589",
+          "last_updated": "2026-09-30T16:11:48-04:00",
+          "marketplace_entry": {
+            "name": "context7",
+            "description": "Upstash Context7 MCP server for up-to-date documentation lookup. Connects to Context7's hosted remote MCP server (https://mcp.context7.com/mcp) — no local Node.js or npx required — to pull version-specific documentation and code examples directly from source repositories into your LLM context. Works anonymously out of the box; set CONTEXT7_API_KEY for higher rate limits.",
+            "author": {
+              "name": "Upstash"
+            },
+            "category": "development",
+            "source": "./external_plugins/context7",
+            "homepage": "https://github.com/anthropics/claude-plugins-public/tree/main/external_plugins/context7",
+            "tags": [
+              "community-managed"
+            ]
+          },
+          "unique_installs": 441485
+        },
+        "frontend-design@claude-plugins-official": {
+          "plugin": "frontend-design",
+          "source": "frontend-design@claude-plugins-official",
+          "sha": null,
+          "tokens": {
+            "claude-opus-4-7": {
+              "always_on": 83,
+              "on_invoke": 2747
+            },
+            "claude-sonnet-4-6": {
+              "always_on": 54,
+              "on_invoke": 1992
+            }
+          },
+          "components": {
+            "commands": [],
+            "agents": [],
+            "skills": [
+              {
+                "name": "frontend-design",
+                "chars": {
+                  "always_on": 236,
+                  "on_invoke": 9074
+                }
+              }
+            ],
+            "hooks": [],
+            "mcpServers": [],
+            "lspServers": []
+          },
+          "source_sha": "44490cccaf6d9f82fdeec9416fbf7c9bd72575dc",
+          "last_updated": "2026-09-01T14:23:53-04:00",
+          "marketplace_entry": {
+            "name": "frontend-design",
+            "description": "Create distinctive, production-grade frontend interfaces with high design quality. Generates creative, polished code that avoids generic AI aesthetics.",
+            "author": {
+              "name": "Anthropic",
+              "email": "support@anthropic.com"
+            },
+            "source": "./plugins/frontend-design",
+            "category": "development",
+            "homepage": "https://github.com/anthropics/claude-plugins-public/tree/main/plugins/frontend-design"
+          },
+          "unique_installs": 1266133
+        },
+        "github@claude-plugins-official": {
+          "plugin": "github",
+          "source": "github@claude-plugins-official",
+          "sha": null,
+          "tokens": {
+            "claude-opus-4-7": {
+              "always_on": 0,
+              "on_invoke": 0
+            },
+            "claude-sonnet-4-6": {
+              "always_on": 0,
+              "on_invoke": 0
+            }
+          },
+          "components": {
+            "commands": [],
+            "agents": [],
+            "skills": [],
+            "hooks": [],
+            "mcpServers": [
+              "github"
+            ],
+            "lspServers": []
+          },
+          "source_sha": "22d3def39e4a6ad96d4fffff7fce5fb28c8d6215",
+          "last_updated": "2025-12-01T16:03:02-08:00",
+          "marketplace_entry": {
+            "name": "github",
+            "description": "Official GitHub MCP server for repository management. Create issues, manage pull requests, review code, search repositories, and interact with GitHub's full API directly from Claude Code.",
+            "category": "productivity",
+            "source": "./external_plugins/github",
+            "homepage": "https://github.com/anthropics/claude-plugins-public/tree/main/external_plugins/github"
+          },
+          "unique_installs": 345391
+        },
+        "playwright@claude-plugins-official": {
+          "plugin": "playwright",
+          "source": "playwright@claude-plugins-official",
+          "sha": null,
+          "tokens": {
+            "claude-opus-4-7": {
+              "always_on": 0,
+              "on_invoke": 0
+            },
+            "claude-sonnet-4-6": {
+              "always_on": 0,
+              "on_invoke": 0
+            }
+          },
+          "components": {
+            "commands": [],
+            "agents": [],
+            "skills": [],
+            "hooks": [],
+            "mcpServers": [
+              "playwright"
+            ],
+            "lspServers": []
+          },
+          "source_sha": "22d3def39e4a6ad96d4fffff7fce5fb28c8d6215",
+          "last_updated": "2025-12-01T16:03:02-08:00",
+          "marketplace_entry": {
+            "name": "playwright",
+            "description": "Browser automation and end-to-end testing MCP server by Microsoft. Enables Claude to interact with web pages, take screenshots, fill forms, click elements, and perform automated browser testing workflows.",
+            "category": "testing",
+            "source": "./external_plugins/playwright",
+            "homepage": "https://github.com/anthropics/claude-plugins-public/tree/main/external_plugins/playwright"
+          },
+          "unique_installs": 358117
+        },
+        "skill-creator@claude-plugins-official": {
+          "plugin": "skill-creator",
+          "source": "skill-creator@claude-plugins-official",
+          "sha": null,
+          "tokens": {
+            "claude-opus-4-7": {
+              "always_on": 117,
+              "on_invoke": 10850
+            },
+            "claude-sonnet-4-6": {
+              "always_on": 75,
+              "on_invoke": 7922
+            }
+          },
+          "components": {
+            "commands": [],
+            "agents": [],
+            "skills": [
+              {
+                "name": "skill-creator",
+                "chars": {
+                  "always_on": 347,
+                  "on_invoke": 32624
+                }
+              }
+            ],
+            "hooks": [],
+            "mcpServers": [],
+            "lspServers": []
+          },
+          "source_sha": "2a40fd2e7c52207aa903bd33fc4c65716126966e",
+          "last_updated": "2026-04-23T12:02:26-07:00",
+          "marketplace_entry": {
+            "name": "skill-creator",
+            "description": "Create new skills, improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, update or optimize an existing skill, run evals to test a skill, or benchmark skill performance with variance analysis.",
+            "author": {
+              "name": "Anthropic",
+              "email": "support@anthropic.com"
+            },
+            "source": "./plugins/skill-creator",
+            "category": "development",
+            "homepage": "https://github.com/anthropics/claude-plugins-official/tree/main/plugins/skill-creator"
+          },
+          "unique_installs": 428976
+        },
+        "superpowers@claude-plugins-official": {
+          "plugin": "superpowers",
+          "version": "7.0.0",
+          "source": "superpowers@claude-plugins-official",
+          "sha": "bb92a77741419a4ab5f06e711a283343f1ada0c3",
+          "tokens": {
+            "claude-opus-4-7": {
+              "always_on": 851,
+              "on_invoke": 58198
+            },
+            "claude-sonnet-4-6": {
+              "always_on": 591,
+              "on_invoke": 41722
+            }
+          },
+          "components": {
+            "commands": [],
+            "agents": [],
+            "skills": [
+              {
+                "name": "subagent-driven-development",
+                "chars": {
+                  "always_on": 125,
+                  "on_invoke": 32215
+                }
+              },
+              {
+                "name": "finishing-a-development-branch",
+                "chars": {
+                  "always_on": 144,
+                  "on_invoke": 7567
+                }
+              },
+              {
+                "name": "writing-skills",
+                "chars": {
+                  "always_on": 124,
+                  "on_invoke": 26381
+                }
+              },
+              {
+                "name": "executing-plans",
+                "chars": {
+                  "always_on": 198,
+                  "on_invoke": 20033
+                }
+              },
+              {
+                "name": "requesting-code-review",
+                "chars": {
+                  "always_on": 142,
+                  "on_invoke": 2810
+                }
+              },
+              {
+                "name": "test-driven-development",
+                "chars": {
+                  "always_on": 115,
+                  "on_invoke": 9423
+                }
+              },
+              {
+                "name": "receiving-code-review",
+                "chars": {
+                  "always_on": 268,
+                  "on_invoke": 5879
+                }
+              },
+              {
+                "name": "systematic-debugging",
+                "chars": {
+                  "always_on": 124,
+                  "on_invoke": 9364
+                }
+              },
+              {
+                "name": "using-git-worktrees",
+                "chars": {
+                  "always_on": 228,
+                  "on_invoke": 6557
+                }
+              },
+              {
+                "name": "diagnosing-superpowers",
+                "chars": {
+                  "always_on": 410,
+                  "on_invoke": 6455
+                }
+              },
+              {
+                "name": "using-superpowers",
+                "chars": {
+                  "always_on": 184,
+                  "on_invoke": 2978
+                }
+              },
+              {
+                "name": "brainstorming",
+                "chars": {
+                  "always_on": 239,
+                  "on_invoke": 9814
+                }
+              },
+              {
+                "name": "dispatching-parallel-agents",
+                "chars": {
+                  "always_on": 146,
+                  "on_invoke": 5888
+                }
+              },
+              {
+                "name": "verification-before-completion",
+                "chars": {
+                  "always_on": 268,
+                  "on_invoke": 3312
+                }
+              },
+              {
+                "name": "writing-plans",
+                "chars": {
+                  "always_on": 110,
+                  "on_invoke": 10189
+                }
+              }
+            ],
+            "hooks": [
+              "SessionStart"
+            ],
+            "mcpServers": [],
+            "lspServers": []
+          },
+          "source_sha": "bb92a77741419a4ab5f06e711a283343f1ada0c3",
+          "last_updated": "2026-10-09T17:28:04-07:00",
+          "marketplace_entry": {
+            "name": "superpowers",
+            "description": "Superpowers teaches Claude brainstorming, subagent driven development with built in code review, systematic debugging, and red/green TDD. Additionally, it teaches Claude how to author and test new skills.",
+            "category": "development",
+            "source": {
+              "source": "url",
+              "url": "https://github.com/obra/superpowers.git",
+              "sha": "bb92a77741419a4ab5f06e711a283343f1ada0c3"
+            },
+            "homepage": "https://github.com/obra/superpowers.git"
+          },
+          "unique_installs": 1123984
+        },
+        "vercel@claude-plugins-official": {
+          "plugin": "vercel",
+          "version": "0.50.0",
+          "source": "vercel@claude-plugins-official",
+          "sha": "882e66c2698689324c341b7bb8fd8beb92c27bf6",
+          "tokens": {
+            "claude-opus-4-7": {
+              "always_on": 4222,
+              "on_invoke": 143528
+            },
+            "claude-sonnet-4-6": {
+              "always_on": 2846,
+              "on_invoke": 104178
+            }
+          },
+          "components": {
+            "commands": [],
+            "agents": [],
+            "skills": [
+              {
+                "name": "vercel-functions",
+                "chars": {
+                  "always_on": 331,
+                  "on_invoke": 35475
+                }
+              },
+              {
+                "name": "vercel-sandbox",
+                "chars": {
+                  "always_on": 240,
+                  "on_invoke": 20988
+                }
+              },
+              {
+                "name": "microfrontends",
+                "chars": {
+                  "always_on": 606,
+                  "on_invoke": 3054
+                }
+              },
+              {
+                "name": "vercel-services",
+                "chars": {
+                  "always_on": 339,
+                  "on_invoke": 8503
+                }
+              },
+              {
+                "name": "bootstrap",
+                "chars": {
+                  "always_on": 304,
+                  "on_invoke": 5799
+                }
+              },
+              {
+                "name": "vercel-firewall",
+                "chars": {
+                  "always_on": 331,
+                  "on_invoke": 18951
+                }
+              },
+              {
+                "name": "shadcn",
+                "chars": {
+                  "always_on": 337,
+                  "on_invoke": 18465
+                }
+              },
+              {
+                "name": "vercel-agent",
+                "chars": {
+                  "always_on": 212,
+                  "on_invoke": 2795
+                }
+              },
+              {
+                "name": "cdn-caching",
+                "chars": {
+                  "always_on": 188,
+                  "on_invoke": 18831
+                }
+              },
+              {
+                "name": "build-agents",
+                "chars": {
+                  "always_on": 244,
+                  "on_invoke": 3011
+                }
+              },
+              {
+                "name": "next-upgrade",
+                "chars": {
+                  "always_on": 199,
+                  "on_invoke": 1842
+                }
+              },
+              {
+                "name": "routing-middleware",
+                "chars": {
+                  "always_on": 257,
+                  "on_invoke": 9041
+                }
+              },
+              {
+                "name": "chat-sdk",
+                "chars": {
+                  "always_on": 305,
+                  "on_invoke": 8103
+                }
+              },
+              {
+                "name": "workflow",
+                "chars": {
+                  "always_on": 235,
+                  "on_invoke": 30550
+                }
+              },
+              {
+                "name": "create-a-backend",
+                "chars": {
+                  "always_on": 265,
+                  "on_invoke": 4271
+                }
+              },
+              {
+                "name": "vercel-storage",
+                "chars": {
+                  "always_on": 234,
+                  "on_invoke": 13562
+                }
+              },
+              {
+                "name": "ai-gateway",
+                "chars": {
+                  "always_on": 367,
+                  "on_invoke": 10237
+                }
+              },
+              {
+                "name": "env-vars",
+                "chars": {
+                  "always_on": 176,
+                  "on_invoke": 9112
+                }
+              },
+              {
+                "name": "turbopack",
+                "chars": {
+                  "always_on": 180,
+                  "on_invoke": 9400
+                }
+              },
+              {
+                "name": "access-protected-vercel-deployment",
+                "chars": {
+                  "always_on": 460,
+                  "on_invoke": 4698
+                }
+              },
+              {
+                "name": "verification",
+                "chars": {
+                  "always_on": 223,
+                  "on_invoke": 4930
+                }
+              },
+              {
+                "name": "next-forge",
+                "chars": {
+                  "always_on": 227,
+                  "on_invoke": 5020
+                }
+              },
+              {
+                "name": "next-cache-components",
+                "chars": {
+                  "always_on": 272,
+                  "on_invoke": 9224
+                }
+              },
+              {
+                "name": "react-best-practices",
+                "chars": {
+                  "always_on": 252,
+                  "on_invoke": 6245
+                }
+              },
+              {
+                "name": "vercel-connect",
+                "chars": {
+                  "always_on": 453,
+                  "on_invoke": 15693
+                }
+              },
+              {
+                "name": "vercel-cli",
+                "chars": {
+                  "always_on": 270,
+                  "on_invoke": 7511
+                }
+              },
+              {
+                "name": "flags-sdk",
+                "chars": {
+                  "always_on": 1007,
+                  "on_invoke": 21521
+                }
+              },
+              {
+                "name": "deployments-cicd",
+                "chars": {
+                  "always_on": 208,
+                  "on_invoke": 10333
+                }
+              },
+              {
+                "name": "auth",
+                "chars": {
+                  "always_on": 347,
+                  "on_invoke": 10624
+                }
+              },
+              {
+                "name": "knowledge-update",
+                "chars": {
+                  "always_on": 137,
+                  "on_invoke": 7436
+                }
+              },
+              {
+                "name": "runtime-cache",
+                "chars": {
+                  "always_on": 252,
+                  "on_invoke": 7154
+                }
+              },
+              {
+                "name": "queues",
+                "chars": {
+                  "always_on": 315,
+                  "on_invoke": 6267
+                }
+              },
+              {
+                "name": "custom-metrics",
+                "chars": {
+                  "always_on": 261,
+                  "on_invoke": 4483
+                }
+              },
+              {
+                "name": "nextjs",
+                "chars": {
+                  "always_on": 270,
+                  "on_invoke": 3768
+                }
+              },
+              {
+                "name": "eve",
+                "chars": {
+                  "always_on": 594,
+                  "on_invoke": 1809
+                }
+              },
+              {
+                "name": "ai-sdk",
+                "chars": {
+                  "always_on": 262,
+                  "on_invoke": 4898
+                }
+              },
+              {
+                "name": "marketplace",
+                "chars": {
+                  "always_on": 454,
+                  "on_invoke": 6943
+                }
+              }
+            ],
+            "hooks": [
+              "SessionStart",
+              "PostToolUse",
+              "SessionEnd"
+            ],
+            "mcpServers": [
+              "vercel"
+            ],
+            "lspServers": []
+          },
+          "source_sha": "882e66c2698689324c341b7bb8fd8beb92c27bf6",
+          "last_updated": "2026-09-21T18:53:16+02:00",
+          "marketplace_entry": {
+            "name": "vercel",
+            "description": "Vercel deployment platform integration. Manage deployments, check build status, access logs, configure domains, and control your frontend infrastructure directly from Claude Code.",
+            "category": "deployment",
+            "source": {
+              "source": "url",
+              "url": "https://github.com/vercel/vercel-plugin.git",
+              "sha": "882e66c2698689324c341b7bb8fd8beb92c27bf6"
+            },
+            "homepage": "https://github.com/vercel/vercel-plugin"
+          },
+          "unique_installs": 292985
+        }
+      },
+      "installs_generated_at": "2026-10-16T06:00:26.356387+00:00"
+    }
+  ]
+}

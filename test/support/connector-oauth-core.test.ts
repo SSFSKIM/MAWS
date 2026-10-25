@@ -461,3 +461,50 @@ describe('phase changes and the safe log', () => {
     expect(entries.every((entry) => !entry.path.includes('?'))).toBe(true);
   });
 });
+
+// P4-AGG M1: engine mode, the fixture an engine's own sign-in runs against (the spec's acceptance 9). The engine's
+// callback is `http://localhost:<port>/callback` when it listens itself, or the `127.0.0.1` one a host passes it; both,
+// and only those, register. The MAWS mode above keeps refusing localhost.
+describe('engine mode', () => {
+  const ENGINE_REDIRECTS = ['http://localhost:52000/callback', 'http://127.0.0.1:52000/callback'];
+  const engineCore = () => createOAuthFixtureCore({ id: 'series', origin: ORIGIN, mode: 'engine', now: () => clock, randomToken: () => `tok${String(++minted).padStart(4, '0')}${'x'.repeat(28)}` });
+  const registerFor = (fixture: OAuthFixtureCore, redirectUris: string[]) =>
+    fixture.handle({ method: 'POST', url: '/register', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ redirect_uris: redirectUris, token_endpoint_auth_method: 'none', grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], client_name: 'Claude Code (fixture)' }) }, OAUTH);
+
+  it.each(ENGINE_REDIRECTS)('registers the engine callback %s', (redirect) => {
+    const out = registerFor(engineCore(), [redirect]);
+    expect(out.response.status).toBe(201);
+    expect(json(out).redirect_uris).toEqual([redirect]);
+  });
+
+  it.each([
+    ['another path', 'http://localhost:52000/other'],
+    ['no port', 'http://localhost/callback'],
+    ['https', 'https://localhost:52000/callback'],
+    ['a query', 'http://localhost:52000/callback?x=1'],
+    ['another host', 'http://example.com:52000/callback'],
+    ['another loopback spelling', 'http://127.1:52000/callback'],
+  ])('refuses %s', (_name, redirect) => {
+    const out = registerFor(engineCore(), [redirect]);
+    expect(out.response.status).toBe(400);
+    expect(json(out).error).toBe('invalid_redirect_uri');
+  });
+
+  it('completes a token exchange through a localhost callback', () => {
+    const fixture = engineCore();
+    const redirect = ENGINE_REDIRECTS[0]!;
+    const clientId = json(registerFor(fixture, [redirect])).client_id as string;
+    const params = new URLSearchParams({ response_type: 'code', client_id: clientId, code_challenge: CHALLENGE, code_challenge_method: 'S256', redirect_uri: redirect, state: 'engine-state', resource: RESOURCE });
+    const location = new URL(fixture.handle({ method: 'GET', url: `/authorize?${params}`, headers: {}, body: '' }, OAUTH).response.headers.location!);
+    expect(`${location.origin}${location.pathname}`).toBe(redirect);
+    expect(location.searchParams.get('state')).toBe('engine-state');
+    const body = new URLSearchParams({ grant_type: 'authorization_code', code: location.searchParams.get('code')!, code_verifier: VERIFIER, redirect_uri: redirect, resource: RESOURCE, client_id: clientId }).toString();
+    const out = fixture.handle({ method: 'POST', url: '/token', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body }, OAUTH);
+    expect(out.response.status).toBe(200);
+    expect(json(out)).toMatchObject({ token_type: 'Bearer' });
+  });
+
+  it('is the MAWS mode unless named', () => {
+    expect(json(register({ redirect_uris: ['http://localhost:52000/callback'] })).error).toBe('invalid_redirect_uri');
+  });
+});

@@ -1,0 +1,110 @@
+{
+  "engine": "plugins.marketplaceManifest",
+  "marketplace": "maws-discover-test",
+  "output": {
+    "state": "read",
+    "owner": "MAWS e2e",
+    "plugins": [
+      {
+        "name": "hooked",
+        "author": "MAWS e2e hooks",
+        "description": "A plugin whose one component is a hook.",
+        "source": "./plugins/hooked",
+        "components": {
+          "mcpServers": [],
+          "mcpBundles": 0,
+          "agents": [],
+          "hooks": [
+            {
+              "event": "SessionStart",
+              "matcher": null
+            }
+          ],
+          "hookModules": 0,
+          "monitors": [],
+          "lspServers": [],
+          "commands": [],
+          "skills": []
+        },
+        "partial": false,
+        "problems": []
+      },
+      {
+        "name": "local-server",
+        "author": "MAWS e2e servers",
+        "description": "A plugin carrying a local (stdio) MCP server, a Node script.",
+        "source": "./plugins/local-server",
+        "components": {
+          "mcpServers": [
+            {
+              "name": "echo",
+              "transport": "stdio"
+            }
+          ],
+          "mcpBundles": 0,
+          "agents": [],
+          "hooks": [],
+          "hookModules": 0,
+          "monitors": [],
+          "lspServers": [],
+          "commands": [],
+          "skills": []
+        },
+        "partial": false,
+        "problems": []
+      },
+      {
+        "name": "remote-server",
+        "author": "MAWS e2e servers",
+        "description": "A plugin carrying a remote (HTTP) MCP server.",
+        "source": "./plugins/remote-server",
+        "components": {
+          "mcpServers": [
+            {
+              "name": "fixture",
+              "transport": "http"
+            }
+          ],
+          "mcpBundles": 0,
+          "agents": [],
+          "hooks": [],
+          "hookModules": 0,
+          "monitors": [],
+          "lspServers": [],
+          "commands": [],
+          "skills": []
+        },
+        "partial": false,
+        "problems": []
+      },
+      {
+        "name": "skills-only",
+        "author": "MAWS e2e skills",
+        "description": "A plugin carrying two skills and nothing else.",
+        "source": "./plugins/skills-only",
+        "components": {
+          "mcpServers": [],
+          "mcpBundles": 0,
+          "agents": [],
+          "hooks": [],
+          "hookModules": 0,
+          "monitors": [],
+          "lspServers": [],
+          "commands": [],
+          "skills": [
+            {
+              "name": "greet",
+              "description": "Greets the person by name. A fixture skill of the Discover e2e group."
+            },
+            {
+              "name": "summarize-diff",
+              "description": "Summarises the working tree's diff in one line. A fixture skill of the Discover e2e group."
+            }
+          ]
+        },
+        "partial": false,
+        "problems": []
+      }
+    ]
+  }
+}

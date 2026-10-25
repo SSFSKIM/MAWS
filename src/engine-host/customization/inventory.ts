@@ -10,7 +10,7 @@ import { lstat, open, opendir, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import type { HostOn } from '@shared/host/runtime';
-import type { CustomizationInventory, CustomizationServer, CustomizationSkill } from '@shared/ipc/schema';
+import type { CustomizationEndpoint, CustomizationInventory, CustomizationServer, CustomizationSkill } from '@shared/ipc/schema';
 import { CUSTOMIZATION_INVENTORY_COVERAGE } from '@shared/ipc/schema/customization';
 import { migrateSettings } from '@shared/settings/defaults';
 import { captureLocalKey } from '../connectors/local-key';
@@ -31,20 +31,27 @@ class Stop extends Error {}
 class Reading {
   readonly skills: CustomizationSkill[] = [];
   readonly servers: CustomizationServer[] = [];
+  readonly endpoints: CustomizationEndpoint[] = []; // P4-AGG M4: `servers`, row for row, with each one's URL (main only)
   readonly warnings = new Set<string>();
   stopped = false;
+  serversRead = false; // P4-AGG M4: every MCP configuration that applies was read without a warning
+  private mcpMark = -1;
   private entries = 0;
   private bytes = 0;
 
   check(): void { if (this.stopped) throw new Stop(); }
   tick(): void { this.check(); if (++this.entries > INVENTORY_BOUNDS.entries) throw new Stop(); }
   warn(message: string): void { this.check(); if (this.warnings.size < 64) this.warnings.add(message); }
-  snapshot(): CustomizationInventory { return { skills: [...this.skills], servers: [...this.servers], warnings: [...this.warnings] }; }
+  snapshot(): CustomizationInventory { return { skills: [...this.skills], servers: [...this.servers], warnings: [...this.warnings], serversRead: this.serversRead }; }
+  // An MCP read section: no warning added inside it (and the warning cap not reached), or the servers are not the whole set.
+  mcpStart(): void { this.mcpMark = this.warnings.size; }
+  mcpEnd(): boolean { return this.mcpMark >= 0 && this.warnings.size === this.mcpMark && this.warnings.size < 64; }
   addSkill(row: CustomizationSkill): void {
     this.check(); if (this.skills.length >= INVENTORY_BOUNDS.rows) throw new Stop(); this.skills.push(row);
   }
-  addServer(row: CustomizationServer): void {
+  addServer(row: CustomizationServer, url: string | null): void {
     this.check(); if (this.servers.length >= INVENTORY_BOUNDS.rows) throw new Stop(); this.servers.push(row);
+    this.endpoints.push({ name: row.name, scope: row.scope, path: row.path, transport: row.transport, url: url === null ? null : url.slice(0, 4096) });
   }
 
   async exists(path: string): Promise<boolean> {
@@ -161,7 +168,7 @@ class Reading {
       if (!entry) { this.warn(`${path}: unknown MCP configuration shape`); continue; }
       const type = entry.type === 'streamable-http' ? 'http' : entry.type === undefined && typeof entry.command === 'string' ? 'stdio' : entry.type;
       const transport = (['stdio', 'http', 'sse', 'ws'].includes(type as string) ? type : 'unknown') as CustomizationServer['transport'];
-      this.addServer({ name: name.slice(0, 256), scope, path, transport });
+      this.addServer({ name: name.slice(0, 256), scope, path, transport }, typeof entry.url === 'string' ? entry.url : null);
     }
   }
 }
@@ -216,12 +223,14 @@ async function installedSkills(r: Reading, configHome: string, cwd: string | nul
 
 async function collect(r: Reading, cwd: string | null, deps: InventoryDeps): Promise<void> {
   const appFile = join(deps.userData, 'settings.json');
+  r.mcpStart();
   const app = await r.json(appFile);
   if (app !== undefined) {
     try {
-      for (const { name, type } of migrateSettings(app).engine.mcpServers) r.addServer({ name, scope: 'app', path: appFile, transport: type });
+      for (const { name, type, url } of migrateSettings(app).engine.mcpServers) r.addServer({ name, scope: 'app', path: appFile, transport: type }, url);
     } catch (error) { if (error instanceof Stop) throw error; r.warn(`${appFile}: invalid app settings`); }
   }
+  const appRead = r.mcpEnd();
   let env: Record<string, string>;
   try { env = await deps.captureEnv(); r.check(); }
   catch (error) { if (error instanceof Stop) throw error; r.warn('User configuration environment could not be read.'); return; }
@@ -241,6 +250,7 @@ async function collect(r: Reading, cwd: string | null, deps: InventoryDeps): Pro
   }
   const global = configFileOf(env);
   const legacy = legacyConfigFileOf(env);
+  r.mcpStart();
   if (!global || !legacy || await r.exists(legacy)) r.warn('User and local MCP configuration is not inventoried: its config file could not be identified.');
   else {
     const raw = await r.json(global);
@@ -265,10 +275,20 @@ async function collect(r: Reading, cwd: string | null, deps: InventoryDeps): Pro
       r.serversOf(record(raw)?.mcpServers, 'project', path);
     }
   }
+  r.serversRead = appRead && r.mcpEnd();
   if (isAbsolute(configHome)) await installedSkills(r, configHome, cwd);
 }
 
 export async function readCustomizationInventory(cwd: string | null, deps: InventoryDeps): Promise<CustomizationInventory> {
+  return (await readInventory(cwd, deps)).snapshot();
+}
+
+/** P4-AGG M4: the configured servers with their URLs, for main's catalog alone (`customization.serverEndpoints`). */
+export async function readServerEndpoints(cwd: string | null, deps: InventoryDeps): Promise<{ servers: CustomizationEndpoint[] }> {
+  return { servers: [...(await readInventory(cwd, deps)).endpoints] };
+}
+
+async function readInventory(cwd: string | null, deps: InventoryDeps): Promise<Reading> {
   const r = new Reading();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<void>((settle) => { timer = setTimeout(() => { r.stopped = true; r.warnings.add(LIMIT); settle(); }, deps.timeoutMs ?? INVENTORY_BOUNDS.timeoutMs); });
@@ -276,10 +296,11 @@ export async function readCustomizationInventory(cwd: string | null, deps: Inven
     if (error instanceof Stop) r.warnings.add(LIMIT);
     else r.warnings.add('Customization inventory could not be fully read.');
   });
-  try { await Promise.race([reading, deadline]); return r.snapshot(); }
+  try { await Promise.race([reading, deadline]); return r; }
   finally { clearTimeout(timer); r.stopped = true; }
 }
 
 export function registerCustomizationInventory(on: HostOn, deps: InventoryDeps): void {
   on('customization.inventory', ({ cwd }) => readCustomizationInventory(cwd, deps));
+  on('customization.serverEndpoints', ({ cwd }) => readServerEndpoints(cwd, deps)); // P4-AGG M4
 }

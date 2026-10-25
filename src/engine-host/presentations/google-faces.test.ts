@@ -12,7 +12,7 @@ import type { Actor } from '@shared/artifacts/actor';
 import { ARTIFACT_MAX_BYTES } from '@shared/maws/tools';
 import { openDocuments, type Documents } from '../documents';
 import { registerDesigns } from '../designs';
-import { egressGet, fixtureFetch, GOOGLE_FONTS_EGRESS, type BaseFetch } from '../egress';
+import { egressGet, fixtureFetch, GOOGLE_FONTS_EGRESS, type BaseFetch } from '@shared/net/egress';
 import { registerPresentations } from '.';
 import { fetchFamily, startGoogleFaces, type GoogleFaces } from './google-faces';
 import { googleRequest } from '@artifacts/slides/google-faces';

@@ -779,3 +779,47 @@ test('p4 A2P R-7 (3): the scratch home\'s seeded files are read-only and byte-id
  assert.deepEqual(changes.filter(c=>c.kind!=='added').map(c=>c.path),['.claude.json']); // nothing removed; the one changed file the engine's own state
  assert.deepEqual(changes.filter(c=>c.path.startsWith('plugins/cache/')).map(c=>c.path.split('/').at(-1)),['.in_use','.in_use','.in_use']);
 });
+
+// P4-AGG M4's sign-in spike on the Mac mini (spikes/p4-aggregator/m4-signin-spike.mjs, findings-m4.txt; gate run
+// 40175924834): the control exchanges of the engine's own MCP sign-in against the engine-mode OAuth fixture. Every
+// request answered (or timed out, recorded), no OAuth value retained, and the answers the verdict rests on.
+test('p4/p4-agg-m4-signin: the engine\'s own sign-in over the control protocol, every request answered, no OAuth value', () => {
+ const text = readFileSync(new URL('p4-agg-m4-signin.jsonl', dir4), 'utf8');
+ assert.ok(!/(?:[?&](?:code|state|code_challenge|client_id)=)(?!%5Bredacted%5D)[^&"]/.test(text), 'an OAuth query value');
+ assert.ok(!/access_token|refresh_token/.test(text));
+ // X8 rows (the replay index lists the file as a journal); each question's engine opens with its own `spawn` meta row,
+ // and its frames follow it until the next one
+ let engine = null;
+ const rows = text.trim().split('\n').map(JSON.parse).map((r) => {
+  assert.deepEqual(Object.keys(r).sort(), ['at', 'direction', 'frame', 'seq']);
+  if (r.direction === 'meta' && r.frame.event === 'spawn') engine = r.frame.engine;
+  return { ...r, engine };
+ });
+ const out = rows.filter((r) => r.direction === 'out').map((r) => r.frame);
+ const answers = new Map(rows.filter((r) => r.direction === 'in').map((r) => [r.frame.response.request_id, r.frame.response]));
+ for (const f of out) assert.ok(answers.has(f.request_id), f.request.subtype);
+ const answered = (engine, subtype) => rows.filter((r) => r.engine === engine && r.direction === 'out' && r.frame.request.subtype === subtype).map((r) => answers.get(r.frame.request_id));
+ // custom: MAWS's 127.0.0.1 redirect accepted, the callback URL taken, and mcp_reconnect then reads connected
+ assert.equal(answered('custom', 'mcp_authenticate')[0].response.redirectScheme, 'custom');
+ assert.equal(answered('custom', 'mcp_oauth_callback_url')[0].subtype, 'success');
+ assert.equal(answered('custom', 'mcp_reconnect')[0].subtype, 'success');
+ assert.equal(answered('custom', 'mcp_status').at(-1).response.mcpServers.find((s) => s.name === 'fx-custom').status, 'connected');
+ // localhost: the engine's own listener completes the flow and the status moves without a reconnect
+ const local = answered('localhost', 'mcp_authenticate')[0].response;
+ assert.equal(local.redirectScheme, 'localhost');
+ assert.ok(Number.isInteger(local.callbackPort));
+ assert.equal(answered('localhost', 'mcp_status').at(-1).response.mcpServers.find((s) => s.name === 'fx-localhost').status, 'connected');
+ // pending: a second authenticate starts a new flow; the first flow's callback is then refused
+ assert.equal(answered('pending', 'mcp_authenticate')[1].subtype, 'success');
+ const firstCallback = answered('pending', 'mcp_oauth_callback_url')[0];
+ assert.match(firstCallback.error, /OAuth state mismatch/);
+ // cancel: a retry completes; the abandoned flow's callback after it answers no active flow
+ assert.match(answered('cancel', 'mcp_oauth_callback_url').at(-1).error, /^No active OAuth flow for server: fx-cancel$/);
+ // late: a server added to the file configuration after the start is not in mcp_status, yet mcp_authenticate starts
+ assert.equal(answered('late', 'mcp_authenticate')[0].subtype, 'success');
+ // pathA: mcp_set_servers removes the session's SDK server, whatever it names
+ assert.deepEqual(answered('pathA', 'mcp_set_servers')[0].response.removed, ['spike-sdk']);
+ // next: every server signed in above reads connected in a fresh file-configured session
+ const next = answered('next', 'mcp_status').at(-1).response.mcpServers;
+ for (const name of ['fx-custom', 'fx-localhost', 'fx-pending', 'fx-cancel', 'fx-dynamic']) assert.equal(next.find((s) => s.name === name).status, 'connected', name);
+});

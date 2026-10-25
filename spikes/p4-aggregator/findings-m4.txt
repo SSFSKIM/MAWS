@@ -1,0 +1,65 @@
+P4-AGG M4: can MAWS drive the engine's own MCP sign-in? The spike's findings
+(docs/doperpowers/specs/2026-10-24-plugin-aggregator-design.md, M4 "The spike comes first"; 2026-10-25)
+
+Method. spikes/p4-aggregator/m4-signin-spike.mjs, run on the Mac mini through the gate as an e2e:discover case
+(e2e/discover-connectors.spec.ts "spike: …"; scripts/ci-gate.sh --gates e2e:discover --runner macos --class1a pool
+--evidence, run 40175924834 on 295e97229, green): engine 2.1.309 (the runner's ~/.local/share/claude/versions/2.1.309)
+in stream-json with no prompt, under the runner's HOME and a scratch CLAUDE_CONFIG_DIR, every server `claude mcp add
+--transport http <name> <fixture>/mcp --scope user`; M1's OAuth fixture in engine mode (auto-approving /authorize, so the
+browser step is a GET of the authorization URL followed by hand). Each question in its own engine process over the same
+configuration. The control frames, OAuth query values redacted and initialize answers reduced to their keys:
+spikes/protocol-probe/fixtures/p4/p4-agg-m4-signin.jsonl (pinned by fixtures.test.mjs "p4/p4-agg-m4-signin").
+Keychain custody (e2e/support/connector-oauth.ts engineKeychainCustody): the scratch directory's exact item,
+`Claude Code-credentials-ae335039`, absent before and claimed; after every engine had exited, found, deleted by that
+exact name and verified gone. No `.credentials.json` was written. The fixture logged no refusal (7 registrations, 7
+authorizations, 5 code exchanges).
+
+Which keychain path this measures: the runner's own login keychain, under the runner's HOME (a scratch
+CLAUDE_CONFIG_DIR, so the one item is the exact derived name above). Not a scratch keychain under a scratch HOME.
+
+An incident, recorded so it is not repeated. Before the gate run, the same script was dry-run once on the owner's
+MacBook under a scratch HOME (2026-10-25, 01:10:50 to 01:15:07 PDT), meant to check only its mechanics, against the
+brief, which kept every sign-in on the mini. A scratch HOME on a Mac with a logged-in desktop does not fail silently:
+the engine's token and client-information saves failed with errSecNoDefaultKeychain about 120 times, and each failure
+raised a modal "keychain cannot be found" dialog on the owner's screen (the exchange then answered "Existing OAuth client
+information is required when exchanging an authorization code"). The architect's rule since: every engine sign-in,
+every Keychain write and everything under acceptance 9 runs only in gate jobs on the mini (`--runner macos`), scratch
+keychains included; none of it on the MacBook in any form. Should a run on the mini ever need a keychain under a scratch
+HOME, give that HOME its own: `HOME=$root/home security create-keychain -p '' $root/home/Library/Keychains/login.keychain-db`,
+deleted in teardown.
+
+1. custom scheme. mcp_authenticate {serverName, redirectUri: http://127.0.0.1:<MAWS's port>/callback} answered in 137 ms
+   {authUrl, requiresUserAction: true, callbackExpected: true, redirectScheme: "custom", state} (the client registered
+   for that URI first). The browser step's redirect came to that URI with code and state; mcp_oauth_callback_url
+   {serverName, callbackUrl} answered success in 67 ms, after the token exchange ("Saving tokens", "Tokens after auth:
+   Present"). mcp_status still read needs-auth 30 s later: the engine does not reconnect a server whose callback came
+   through mcp_oauth_callback_url (2.1.309 cli.pretty.js 856500 to 856503: `Pu.has(server)` → no reconnect). An
+   mcp_reconnect then answered success in 62 ms and mcp_status read connected with the fixture's tool. So the custom
+   scheme completes with a reconnect after the callback.
+2. localhost scheme. mcp_authenticate with no redirectUri answered redirectScheme "localhost" with a callbackPort; the
+   redirect delivered to http://localhost:<callbackPort>/callback (the engine's own page, 200) completed the flow, and
+   mcp_status read connected on the next poll, no reconnect needed.
+3. A second mcp_authenticate while one is pending starts a new flow (success, a new state, 62 ms); the first flow's
+   callback is then refused: "Callback URL not accepted: it belongs to a different sign-in attempt (OAuth state mismatch)
+   or carries no authorization code. The sign-in in progress is still waiting; submit the redirect URL from its own
+   browser page." The second flow's callback is accepted. There is no "already authenticating" refusal.
+4. Cancel then retry. A flow MAWS abandons (its listener closed) does not block a retry: a new mcp_authenticate starts
+   and its callback is accepted. The abandoned flow's callback afterwards answers "No active OAuth flow for server:
+   fx-cancel".
+5. A server added to the file configuration after the session started (`claude mcp add … --scope user` while the
+   session ran) never appears in that session's mcp_status (5 s later: absent), but mcp_authenticate for it answered an
+   authUrl (not "Server not found"), and mcp_reconnect for it answered "Server status: needs-auth". The completion of such
+   a sign-in in that session was not measured.
+6. Path A. In a session holding a --mcp-config server and an SDK server (initialize's sdkMcpServers, as MAWS's `maws`),
+   mcp_set_servers {servers: {fx-dynamic}} answered {added: [fx-dynamic], removed: [spike-sdk]}: the call removes the
+   session's SDK server (the --mcp-config server stayed). Naming both servers again removed it as well (an SDK server
+   cannot be named there). The loaded server signed in through the custom scheme (callback success). Path A's first
+   condition fails: in a MAWS session it would drop the `maws` server.
+7. The next session. A fresh session over the file configuration (fx-dynamic added there now, same name and URL) read
+   every server signed in above connected, fx-dynamic included: the engine keys a credential by the server's name and
+   configuration, so a sign-in in any session serves every later session with that entry (P4-R8 finding 2).
+8. mcp_authenticate's latency against the fixture: 134 to 234 ms. The supervisor's 10 s bound is ample, so
+   session.mcpAuthenticate stays a bounded call (M4 Decisions' last item).
+
+Verdict: promote, path B. Sign-in completes through both schemes with the server reported connected (the custom scheme
+after a reconnect). Path A is not taken: mcp_set_servers removes the session's SDK server.

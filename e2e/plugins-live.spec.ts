@@ -2,7 +2,9 @@
 // installed engine behind ClaudeUsage's relay, through Playwright only (no desktop automation), in a scratch root under
 // /tmp whose config home the engine and its plugin CLI write (support/plugins-live.ts). A session is created through
 // "+" on a scratch repository and runs one turn so `system/init` reports its plugins; then, in `/plugins` (P2-B's
-// library: My items, Browse, the Add menu's Add marketplace and Manage marketplaces) and the panel, every management
+// library: My items and the Add menu's Add marketplace and Manage marketplaces), Discover (P4-AGG Decision Log 10:
+// `/plugins`' Open Discover, Customize › Plugins › Discover for the session's directory, where a plugin is found and +
+// installs it through the same sheet) and the panel, every management
 // action runs through its confirm sheet: the scratch folder marketplace added, one repository-source
 // marketplace added from GitHub and removed (network-dependent: a refusal is recorded, the folder case stays the gate),
 // `e8-probe@e8-scratch` installed and reflected in the running session before any new turn, the panel's Reload plugins and
@@ -27,7 +29,7 @@ import { cappedEngine, capWords } from './support/live-budget';
 import { auditOf, manifestOf, untilQuiet, type Manifest, type Tree } from '../test/support/plugins-audit';
 import { pluginsLiveSkipReason, pluginsScratch, trackPluginReads, type PluginReads, type PluginsScratch } from './support/plugins-live';
 import { newChatIn } from './support/sidebar';
-import { unfoldSessionCard } from './support/shell';
+import { mainTab, unfoldSessionCard } from './support/shell';
 
 const skip = pluginsLiveSkipReason();
 test.skip(skip !== null, skip ?? '');
@@ -103,7 +105,7 @@ async function audited(before: Tree, startedAt: number, manifest: Manifest | nul
   expect(audit.unannounced, `${what}: configuration writes the sheet did not announce`).toEqual([]);
   expect(audit.unclassified, `${what}: paths the audit could not classify`).toEqual([]);
 }
-// A listing the widget runs (its opening reads, Browse's first showing), audited as one.
+// A listing the widget runs (its opening reads, Discover's first showing), audited as one.
 async function listing<T>(what: string, run: () => Promise<T>): Promise<T> {
   scratch.log(`--- listing: ${what}`);
   await untilQuiet(reads, { quietMs: QUIET_MS, timeoutMs: 180_000 }); // the baseline after any earlier read has landed
@@ -128,7 +130,7 @@ async function openPlugins(page: Page): Promise<Locator> {
 // rows), and the loaded line under the head counts them.
 const installedRow = (w: Locator, id = PLUGIN) => w.locator(`[data-plugins-section="my-items"] [data-plugin-row="${id}"]`);
 // P2-B M5: the marketplaces live in the Add menu's two dialogs, sheets beside the frame under which E8's confirm sheet
-// stacks; Browse (its `--available` read on the switch's click, audited as a listing) lists cards, one per plugin.
+// stacks.
 async function openDialog(w: Locator, item: 'Add marketplace' | 'Manage marketplaces'): Promise<Locator> {
   await w.getByRole('button', { name: 'Add', exact: true }).click();
   await w.page().getByRole('menuitem', { name: item, exact: true }).click();
@@ -146,7 +148,8 @@ async function marketplaceAction(row: Locator, item: 'Check for updates' | 'Remo
   await row.page().getByRole('menuitem', { name: item, exact: true }).click();
 }
 async function toMyItems(w: Locator): Promise<void> {
-  await w.getByRole('radio', { name: 'My items' }).click();
+  const view = w.getByRole('radio', { name: 'My items' }); // Customize's switch; `/plugins` is My items alone (Decision Log 10)
+  if ((await view.count()) > 0) await view.click();
   await expect(w.locator('[data-plugins-section="my-items"]')).toBeVisible();
 }
 const disabledBadge = (row: Locator) => row.getByText('Disabled', { exact: true });
@@ -183,9 +186,14 @@ async function loadedIds(w: Locator): Promise<string[]> {
   await show(w, 'All plugins');
   return ids;
 }
-// A Browse card's line: on its card (which, once installed, is the installed plugin's), or above the grid once the
-// engine's `--available` stops offering it and nothing installed it.
-const browseLine = (w: Locator, id: string) => w.locator(`[data-plugins-section="browse"] [data-browse-card="${id}"], [data-plugins-section="browse"] [data-plugin-result="${id}"]`);
+// P4-AGG Decision Log 10: Customize's library, Discover beside My items; a card's line is on its card, or at Discover's
+// head once the catalog no longer lists it (the marketplace withdrew it and nothing installed it).
+const discoverLibrary = (page: Page) => page.locator('[data-region="main"] [data-widget="plugins"][data-widget-variant="embedded"]');
+const discoverLine = (page: Page, id: string) => {
+  const [name, marketplace] = id.split('@');
+  const d = discoverLibrary(page);
+  return d.locator(`[data-catalog-results] [data-catalog-card][data-install-name="${name}"][data-install-marketplace="${marketplace}"]`).or(d.locator('[data-catalog-result]').filter({ hasText: name }));
+};
 const sheetOf = (page: Page, action: string) => page.locator(`[data-plugins-sheet="${action}"]`);
 
 // A row's operation once it has ended: its status line neither `Working…` nor `Reloading running sessions…`, and no
@@ -201,20 +209,27 @@ async function ended(scope: Locator, timeout = DONE_TIMEOUT): Promise<{ text: st
     .toBe(true);
   return { text: (await line.innerText()).trim(), failed: ((await line.getAttribute('class')) ?? '').includes('text-danger') };
 }
-// Browse shown (its `plugin list --json --available` read, when it runs, audited as a listing) and one card found by
-// Browse's search: the grid is virtualised and the built-in directory alone lists thousands.
-async function browseCard(w: Locator, id: string): Promise<Locator> {
-  const browse = w.locator('[data-plugins-section="browse"]');
-  if ((await browse.count()) === 0) {
-    await listing('opening Browse (plugin list --json --available)', async () => {
-      await w.getByRole('radio', { name: 'Browse' }).click();
-      await expect(browse.locator('[data-browse-card]').first()).toBeVisible({ timeout: 120_000 }); // the catalogue read lists the built-in directory too
+// Discover shown (from `/plugins`' Open Discover; main's catalog reads, the engine's listings through the host among
+// them, audited as one listing) and one card found by Discover's search, by the plugin's name and the marketplace its
+// route installs from.
+async function discoverCard(page: Page, id: string): Promise<Locator> {
+  const d = discoverLibrary(page);
+  if (!(await d.locator('[data-discover="plugins"]').isVisible())) {
+    const w = await openPlugins(page);
+    await listing('opening Discover (Open Discover; the catalog reads plugin list --json --available among its sources)', async () => {
+      await w.getByRole('button', { name: 'Open Discover', exact: true }).click();
+      await expect(d.locator('[data-discover="plugins"] [data-catalog-card]').first()).toBeVisible({ timeout: 120_000 });
     });
   }
-  await w.getByRole('searchbox', { name: 'Search plugins' }).fill(id);
-  const card = browse.locator(`[data-browse-card="${id}"]`);
+  await d.getByRole('searchbox', { name: 'Search all sources' }).fill(id.split('@')[0]);
+  const card = discoverLine(page, id).first();
   await expect(card).toBeVisible({ timeout: 60_000 });
   return card;
+}
+// Back from Customize to the session, its `/plugins` open again on My items.
+async function backToSession(page: Page): Promise<Locator> {
+  await mainTab(page, /^Customize/).getByRole('button', { name: /^Close / }).click();
+  return openPlugins(page);
 }
 
 // ---- the run ---------------------------------------------------------------------------------------------------
@@ -256,7 +271,9 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
     const before = scratch.tree();
     await open();
     const sheet = sheetOf(page, spec.sheet);
-    await expect(sheet.locator('[data-plugins-argv]')).toBeVisible({ timeout: 30_000 });
+    // the command and the writes sit behind Details, closed as the sheet opens (the owner's ruling, 2026-10-25)
+    await sheet.getByRole('button', { name: 'Details', exact: true }).click({ timeout: 30_000 });
+    await expect(sheet.locator('[data-plugins-argv]')).toBeVisible();
     const argv = await sheet.locator('[data-plugins-argv]').innerText();
     const writes = await sheet.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem').allInnerTexts();
     const then = /Reloads plugins in \d+ running sessions?|No running session to reload|Nothing to reload[^\n]*/.exec(await sheet.innerText())?.[0] ?? null;
@@ -279,7 +296,7 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
 
   try {
     scratch.log(`E8 live run · ${new Date().toISOString()} · engine ${ENGINE_VERSION} · CLAUDE_CONFIG_DIR=${scratch.config} · marketplace ${scratch.market} · repository ${scratch.repo}`);
-    scratch.log('Every CLI run is audited (test/support/plugins-audit.ts): each mutation (the sheet\'s command and writes, the row\'s words once it ended) and each listing (the widget\'s opening reads, Browse\'s catalogue read). The delta covers the config home (config/…) and the project\'s .claude/ (project/…); a file\'s fingerprint is its size, mtime and content hash, so a same-content rewrite shows. Each path is marked [manifest] when writesOf covers it, else [records (D-12)] (a .claude.json bookkeeping key or a .claude.json backup), [catalogue cache (D-12)], [session files] (by name), [unannounced] (a configuration write outside the manifest, any for a listing: fails) or [unclassified] (fails); .claude.json is judged per changed top-level key.');
+    scratch.log('Every CLI run is audited (test/support/plugins-audit.ts): each mutation (the sheet\'s command and writes, the row\'s words once it ended) and each listing (the widget\'s opening reads, Discover\'s catalog reads). The delta covers the config home (config/…) and the project\'s .claude/ (project/…); a file\'s fingerprint is its size, mtime and content hash, so a same-content rewrite shows. Each path is marked [manifest] when writesOf covers it, else [records (D-12)] (a .claude.json bookkeeping key or a .claude.json backup), [catalogue cache (D-12)], [session files] (by name), [unannounced] (a configuration write outside the manifest, any for a listing: fails) or [unclassified] (fails); .claude.json is judged per changed top-level key.');
     await expect(page.locator('[data-region="main"]')).toBeVisible();
     let id = '';
     let builtin = 0; // the plugins the engine loads with an empty home (its own `@builtin` ones)
@@ -357,13 +374,12 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
       await closeDialog(manage);
     });
 
-    await step('install', `Install ${PLUGIN} from its Browse card at user scope: reflected, the Loaded list and the panel before any new turn`, async () => {
-      const w = page.locator('[data-widget="plugins"]');
-      const card = await browseCard(w, PLUGIN);
-      const result = await action({ name: 'install', action: 'install', scope: 'user', source: null, fill: { marketplace: 'e8-scratch', plugin: 'e8-probe', id: PLUGIN }, sheet: 'install', submit: 'Install', line: () => browseLine(w, PLUGIN) }, () => card.getByRole('button', { name: 'Install', exact: true }).click());
+    await step('install', `Install ${PLUGIN} from its Discover card at user scope: reflected, the Loaded list and the panel before any new turn`, async () => {
+      const card = await discoverCard(page, PLUGIN);
+      const result = await action({ name: 'install', action: 'install', scope: 'user', source: null, fill: { marketplace: 'e8-scratch', plugin: 'e8-probe', id: PLUGIN }, sheet: 'install', submit: 'Install', line: () => discoverLine(page, PLUGIN) }, () => card.locator('[data-catalog-add]').click());
       expect(result.text).toBe('Successfully installed plugin: e8-probe@e8-scratch (scope: user) · Reloaded in 1 session · reflected');
       await expect(card).toHaveAttribute('data-installed', 'here'); // the installed plugin's card keeps the result
-      await toMyItems(w);
+      const w = await backToSession(page);
       await expect(installedRow(w)).toHaveAttribute('data-plugin-scope', 'user');
       await expect(disabledBadge(installedRow(w))).toHaveCount(0);
       await expect.poll(() => loadedIds(w), { timeout: 30_000 }).toContain(PLUGIN);
@@ -460,7 +476,7 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
       await expect.poll(() => loadedIds(w), { timeout: 30_000 }).not.toContain(PLUGIN);
     });
 
-    await step('offer-nope', 'the marketplace offers `nope`: Check for updates reads it in, and Browse lists it', async () => {
+    await step('offer-nope', 'the marketplace offers `nope`: Check for updates reads it in, and Discover lists it', async () => {
       const w = page.locator('[data-widget="plugins"]');
       scratch.offerNope(true);
       const manage = await openDialog(w, 'Manage marketplaces');
@@ -470,16 +486,15 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
       );
       expect(result.text).toContain('Successfully updated marketplace: e8-scratch');
       await closeDialog(manage);
-      await browseCard(w, 'nope@e8-scratch');
+      await discoverCard(page, 'nope@e8-scratch');
     });
 
     await step('error', 'install nope@e8-scratch after its marketplace withdrew it: the engine’s words and code', async () => {
-      const w = page.locator('[data-widget="plugins"]');
-      const card = await browseCard(w, 'nope@e8-scratch');
+      const card = await discoverCard(page, 'nope@e8-scratch');
       // the marketplace withdraws it, and the owner installs from the cards they read
       scratch.offerNope(false);
-      const result = await action({ name: 'error', action: 'install', scope: 'user', source: null, fill: { marketplace: 'e8-scratch', plugin: 'nope', id: 'nope@e8-scratch' }, sheet: 'install', submit: 'Install', line: () => browseLine(w, 'nope@e8-scratch') }, () =>
-        card.getByRole('button', { name: 'Install', exact: true }).click(),
+      const result = await action({ name: 'error', action: 'install', scope: 'user', source: null, fill: { marketplace: 'e8-scratch', plugin: 'nope', id: 'nope@e8-scratch' }, sheet: 'install', submit: 'Install', line: () => discoverLine(page, 'nope@e8-scratch') }, () =>
+        card.locator('[data-catalog-add]').click(),
       );
       expect(result.failed).toBe(true);
       expect(result.text).toBe(NOT_FOUND);
@@ -487,11 +502,10 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
     });
 
     await step('reinstall', `Install ${PLUGIN} again, so the marketplace is removed with a plugin still installed`, async () => {
-      const w = page.locator('[data-widget="plugins"]');
-      const card = await browseCard(w, PLUGIN);
-      const result = await action({ name: 'reinstall', action: 'install', scope: 'user', source: null, fill: { marketplace: 'e8-scratch', plugin: 'e8-probe', id: PLUGIN }, sheet: 'install', submit: 'Install', line: () => browseLine(w, PLUGIN) }, () => card.getByRole('button', { name: 'Install', exact: true }).click());
+      const card = await discoverCard(page, PLUGIN);
+      const result = await action({ name: 'reinstall', action: 'install', scope: 'user', source: null, fill: { marketplace: 'e8-scratch', plugin: 'e8-probe', id: PLUGIN }, sheet: 'install', submit: 'Install', line: () => discoverLine(page, PLUGIN) }, () => card.locator('[data-catalog-add]').click());
       expect(result.text).toBe('Successfully installed plugin: e8-probe@e8-scratch (scope: user) · Reloaded in 1 session · reflected');
-      await toMyItems(w);
+      const w = await backToSession(page);
       await expect(installedRow(w)).toHaveAttribute('data-plugin-scope', 'user');
       await expect(disabledBadge(installedRow(w))).toHaveCount(0);
     });

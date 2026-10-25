@@ -4,7 +4,7 @@
 // listing already in flight, whose answer may predate the change). Each runs
 // the engine's CLI, which refreshes its own catalogue cache (D-12), so none refetches on focus, and a harness mounting
 // widgets passively (`WidgetReadPolicyContext`) issues none.
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useCallback, useContext, useEffect, useRef } from 'react';
 import type { CommandOutput } from '@shared/ipc/schema';
 import { ipc } from '../../ipc/client';
@@ -33,6 +33,8 @@ const resultOf = <T,>(data: T | undefined, failed: IpcCommandError | null, isErr
 
 // A read's place in the query client: one per command and directory, whoever reads it.
 export const pluginsReadKey = (command: PluginsRead, cwd: string | null) => ['maws', command, { cwd }] as const;
+// The installed list as it is now, read again (its answer kept for the list's observers): what a confirmation discloses.
+export const readInstalledNow = (client: QueryClient, cwd: string) => client.fetchQuery({ queryKey: pluginsReadKey('plugins.list', cwd), queryFn: () => invokeRead('plugins.list', { cwd }), staleTime: 0 });
 
 // `enabled: false` holds the read (Browse until its first click). `shown: false` keeps the last answer without
 // rereading it on a change (Browse's catalogue while My items shows, P2-B §5.8): a change meanwhile is read once it shows.

@@ -78,4 +78,7 @@ export interface FixtureResponse {
 export interface OAuthFixtureCore {
   handle(request: FixtureRequest, control: OAuthControl): { response: FixtureResponse; entry: OAuthLogEntry; secrets: OAuthSecret[] };
 }
-export function createOAuthFixtureCore(options: { id: string; origin: string; tools?: readonly string[]; now: () => number; randomToken: () => string }): OAuthFixtureCore;
+// mode: 'maws' (the default) registers exact `http://127.0.0.1:<port>/<path>` callbacks; 'engine' (P4-AGG M1) the engine's
+// own, `http://localhost:<port>/callback` and `http://127.0.0.1:<port>/callback`.
+export type OAuthFixtureMode = 'maws' | 'engine';
+export function createOAuthFixtureCore(options: { id: string; origin: string; tools?: readonly string[]; mode?: OAuthFixtureMode; now: () => number; randomToken: () => string }): OAuthFixtureCore;

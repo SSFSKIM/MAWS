@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { commandLine, isPluginsArgument, PLUGINS_ACTIONS, PLUGINS_SCOPES, READ_LINES, writesOf, type PluginsAction, type PluginsActionInputs } from './cli';
+import { commandLine, isMcpAction, isMcpName, isMcpUrl, isPluginsArgument, mcpCommandLine, PLUGINS_ACTIONS, PLUGINS_SCOPES, READ_LINES, RUNNER_ACTIONS, runnerCommandLine, writesOf, type PluginsAction, type PluginsActionInputs } from './cli';
 
 const ROOT = resolve(__dirname, '../../..');
 
@@ -214,5 +214,30 @@ describe('writesOf', () => {
 
   it('knows the three scopes', () => {
     expect(PLUGINS_SCOPES).toEqual(['user', 'project', 'local']);
+  });
+});
+
+// P4-AGG M4: the engine's `claude mcp add|remove` (its printed lines measured against 2.1.309 on a scratch HOME,
+// spikes/p4-aggregator/m4-signin-spike.mjs's adds and the M4 report)
+describe('mcpCommandLine', () => {
+  it('adds a remote server at the chosen scope, the transport and scope always named', () => {
+    expect(mcpCommandLine('mcp-add', { name: 'linear', url: 'https://mcp.linear.app/mcp', transport: 'http', scope: 'user' })).toEqual(['mcp', 'add', '--transport', 'http', 'linear', 'https://mcp.linear.app/mcp', '--scope', 'user']);
+    expect(mcpCommandLine('mcp-add', { name: 'atlassian_sse', url: 'https://mcp.atlassian.com/v1/sse', transport: 'sse', scope: 'project' })).toEqual(['mcp', 'add', '--transport', 'sse', 'atlassian_sse', 'https://mcp.atlassian.com/v1/sse', '--scope', 'project']);
+    expect(runnerCommandLine('mcp-remove', { name: 'linear', scope: 'local' })).toEqual(['mcp', 'remove', 'linear', '--scope', 'local']);
+    expect(runnerCommandLine('install', { plugin: 'p@m' })).toEqual(['plugin', 'install', 'p@m', '--json']);
+  });
+
+  it('refuses a name the engine refuses, or one it would read as an option', () => {
+    for (const name of ['Google Drive', '-y', '', 'a/b', 'é']) expect(() => mcpCommandLine('mcp-remove', { name, scope: 'user' }), name).toThrow(/server name/);
+    expect(isMcpName('google-drive_2')).toBe(true);
+  });
+
+  it('refuses a URL that is not http or https', () => {
+    for (const url of ['ftp://x.example/mcp', '--scope', 'mcp.linear.app/mcp', 'https://', ' https://x.example/mcp']) expect(() => mcpCommandLine('mcp-add', { name: 'x', url, transport: 'http', scope: 'user' }), url).toThrow(/URL/);
+    expect(isMcpUrl('http://127.0.0.1:9/mcp')).toBe(true);
+  });
+
+  it('tells the runner\'s two families apart', () => {
+    expect(RUNNER_ACTIONS.filter(isMcpAction)).toEqual(['mcp-add', 'mcp-remove']);
   });
 });

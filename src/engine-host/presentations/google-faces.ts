@@ -3,7 +3,7 @@
 // names, once, into the artifact's assets, when its licence is OFL; after that every reader draws it offline from the
 // assets (deck.ts's `faceFiles`). The portable rules (the canonical request, the repository directory, METADATA.pb, the
 // CSS2 parser, the record) are src/artifacts/slides/google-faces.ts; the network is the `google-fonts` egress rule
-// (../egress.ts), the only one this module reaches.
+// (src/shared/net/egress.ts), the only one this module reaches.
 //
 // - When. On any commit and on a document's load, for each `href` face of a deck or a design whose canonical request no
 //   host record answers. A link refused by its own shape (another family, several, a `text=` subset) is never fetched:
@@ -42,7 +42,7 @@ import type { Actor } from '@shared/artifacts/actor';
 import type { Documents } from '../documents';
 import { ArtifactStoreError } from '../documents/errors';
 import { mainOf } from '../documents/service';
-import { egressBase, egressGet, EgressError, GOOGLE_FONTS_EGRESS, type EgressGet } from '../egress';
+import { egressBase, egressGet, EgressError, GOOGLE_FONTS_EGRESS, type EgressGet } from '@shared/net/egress';
 
 const KINDS = new Set(['presentation', 'design']);
 const HUMAN: Actor = { kind: 'human' };

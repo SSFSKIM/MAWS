@@ -1,0 +1,53 @@
+P4-AGG M1: what the Discover e2e harness rests on, measured against the engine it pins
+(docs/doperpowers/specs/2026-10-24-plugin-aggregator-design.md, M1 Decisions; 2026-10-25)
+
+Method. spikes/p4-aggregator/m1-engine-probe.sh against ~/.local/share/claude/versions/2.1.309 (sha256 5eadc000…619c, the
+official darwin-arm64 build's), each run in a fresh scratch root under /tmp with `env -i` (HOME and CLAUDE_CONFIG_DIR
+inside the root, PATH=/usr/bin:/bin), the root removed after; the readable bundle ~/claude-code-bundle/2.1.309/cli.pretty.js
+for the lines cited. Run twice on this MacBook (the second added the Keychain's second arm).
+
+1. The engine's Anthropic Directory and its on/off file.
+   - Path confirmed: `<CLAUDE_CONFIG_DIR>/plugins/plugin-directory-marketplace.json`. cli.pretty.js 780384
+     `Ie = "plugin-directory-marketplace.json"`, `Dt = {enabled: boolean?}`; 780391 `_t()` reads it through yJe (60867,
+     `join(<plugins folder>, name)`, 4096 bytes at most, a symlink ignored), `enabled` absent → the flag default
+     (`source: "flag_default"`), present → `source: "user_choice"`.
+   - A fresh configuration: `plugin marketplace list --json` answers `[]` (the directory is not a listed marketplace);
+     `plugin list --json --available` lists 3,597 `anthropic-plugin-directory` entries (the live public set was 3,601:
+     the 4 without a `claude_code` surface are skipped) in about 1 s, and leaves `plugins/plugin-catalog-cache.json` and
+     `plugins/plugin-directory-cache-v2.json` behind.
+   - With the file at `{"enabled": false}`: the same listing answers 0 available entries, and `marketplace list` `[]`.
+2. The local test marketplace, offline. `plugin marketplace add <abs path> --scope user` → "Successfully added
+   marketplace: maws-discover-test (declared in user settings)"; `plugin install skills-only@maws-discover-test --scope
+   user --json` → outcome ok; settings.json then holds `extraKnownMarketplaces.maws-discover-test.source =
+   {source: "directory", path: <the path as given>}` and `enabledPlugins["skills-only@maws-discover-test"] = true`; the
+   available listing then names the other three (an installed plugin leaves `available`).
+3. The Keychain service name of a scratch CLAUDE_CONFIG_DIR (fact 2's derivation, against 2.1.309).
+   - Source: cli.pretty.js 318187 to 318190, `vj(e) = "Claude Code" + OAUTH_FILE_SUFFIX + e + ("-" + sha256(r).hex[0..8]
+     unless no CLAUDE_CONFIG_DIR)`, called as `vj("-credentials")` (413346, 447136 to 447233); `r` is
+     CLAUDE_SECURESTORAGE_CONFIG_DIR when set, else Le() = (CLAUDE_CONFIG_DIR ?? ~/.claude).normalize("NFC")
+     (1245553, chunk-zktvws2c). OAUTH_FILE_SUFFIX is "" in production (898430) and "-custom-oauth" or "-local-oauth" under
+     CLAUDE_CODE_CUSTOM_OAUTH_URL or a local build. So the item is `Claude Code-credentials-<8 hex>` of the directory
+     string as given (no realpath), provided neither CLAUDE_SECURESTORAGE_CONFIG_DIR nor CLAUDE_CODE_CUSTOM_OAUTH_URL is set.
+   - Arm b (HOME the caller's, CLAUDE_CONFIG_DIR scratch): `MCP_CLIENT_SECRET=… claude mcp add --transport http
+     --client-id m1-probe --client-secret --scope user m1-probe http://127.0.0.1:9/mcp` (no session, no network) →
+     "Added HTTP MCP server m1-probe…"; `security find-generic-password -s "Claude Code-credentials-2802fe40"` found the
+     item the probe had derived from `/tmp/maws-agg-m1-probe.PJmU2j/config`, absent before; `<config>/.credentials.json`
+     absent; `security delete-generic-password -s` that exact name removed it; a second find: gone.
+   - Arm a (HOME scratch, the same CLAUDE_CONFIG_DIR): the same command answered "Server added, but the client secret could
+     not be stored. Re-run with --client-secret once secure storage is available."; no item, no `.credentials.json`.
+     Under a scratch HOME `security list-keychains` lists only /Library/Keychains/System.keychain and `security
+     default-keychain` answers "A default keychain could not be found": the login keychain is found through HOME. The
+     engine's secure storage (keychain with a plaintext fallback, 447072 to 447110) takes a failed keychain write as
+     transient and skips the fallback, so nothing is stored anywhere.
+   - Consequence for the harness: a scene whose engine must keep a credential (acceptance 9's sign-in) runs the engine
+     under the runner's HOME with a scratch CLAUDE_CONFIG_DIR, and the custody owns the derived item; under the scratch
+     HOME the plugin flows work and nothing reaches the Keychain. Fact 6's "a scratch run created
+     Claude Code-credentials-8e824fb9" was a scratch CLAUDE_CONFIG_DIR under the owner's HOME (p1-common.mjs scratchRun
+     names the config directory `home`).
+4. The official build and its checksum. The engine's own updater downloads from
+   https://downloads.claude.ai/claude-code-releases (cli.pretty.js 304901, 324527): `<base>/<version>/manifest.json`
+   (signed: `manifest.json.raw-sig.json`, 324691) lists `platforms.<platform>.{checksum, size}`, the binary at
+   `<base>/<version>/<platform>/claude`. 2.1.309's manifest: darwin-arm64 checksum 5eadc0009cdcdbc0d06e58110d7b2baf88ced6
+   088b1c33a60a21217fe410619c, size 275,923,296, which the installed binary hashes to. scripts/provision-engine.sh on a
+   clean cache (MAWS_ENGINE_CACHE=/tmp/maws-agg-engine-cache) downloaded it in 33 s, verified it and its --version
+   (2.1.309), and printed the export.

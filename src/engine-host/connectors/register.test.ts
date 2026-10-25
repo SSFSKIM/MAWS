@@ -13,7 +13,7 @@ import type { StdinFrame } from '@shared/wire/frames';
 import { openDocuments, type Documents } from '../documents';
 import { ControlClient } from '../rpc';
 import type { EngineTransport } from '../transport';
-import { CONNECTORS_DEADLINE_SHAPES, registerConnectors } from './register';
+import { CONNECTORS_DEADLINE_SHAPES, registerConnectors, RUNNER_CONNECTOR_COMMANDS } from './register';
 
 const SESSION = 'app-1';
 const SERVERS = [
@@ -101,7 +101,8 @@ const operationId = '00000000-0000-4000-8000-000000000001';
 
 describe('the engine host’s connectors surface (P3-H H3b)', () => {
   it('handles every connectors command the engine host owns, each in one deadline shape, and owns none of main’s', () => {
-    const owned = Object.entries(commands).filter(([name, spec]) => name.startsWith('connectors.') && spec.owner === 'engine-host').map(([name]) => name);
+    // P4-AGG M4: add and remove are the plugin runner's, registered beside `plugins.*` (ipc.ts)
+    const owned = Object.entries(commands).filter(([name, spec]) => name.startsWith('connectors.') && spec.owner === 'engine-host' && !(RUNNER_CONNECTOR_COMMANDS as readonly string[]).includes(name)).map(([name]) => name);
     expect(Object.keys(CONNECTORS_DEADLINE_SHAPES).sort()).toEqual(owned.sort());
     expect([...handlers.keys()].sort()).toEqual(owned.sort());
     // P4-B5: route E's observation alone is a status read, bounded as `resolve` is

@@ -1,0 +1,51 @@
+{
+  "key": "seed:life-sciences",
+  "recordedAt": "2026-10-25T02:24:15.671Z",
+  "pages": [
+    {
+      "name": "life-sciences",
+      "owner": {
+        "name": "Anthropic",
+        "email": "support@anthropic.com"
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "description": "Skills for life sciences research, data analysis, and discovery"
+      },
+      "plugins": [
+        {
+          "name": "clinical-trial-protocol",
+          "source": "./",
+          "description": "Generate FDA/NIH-compliant clinical trial protocols for medical devices or drugs",
+          "category": "life-sciences",
+          "tags": [
+            "clinical-trials",
+            "fda",
+            "protocol",
+            "regulatory"
+          ],
+          "strict": false,
+          "skills": [
+            "./clinical-trial-protocol-skill"
+          ]
+        },
+        {
+          "name": "scientific-problem-selection",
+          "source": "./",
+          "description": "Systematic framework for scientific problem selection and strategic research decisions based on Fischbach & Walsh methodology",
+          "category": "life-sciences",
+          "tags": [
+            "research-strategy",
+            "problem-selection",
+            "scientific-method",
+            "project-planning"
+          ],
+          "strict": false,
+          "skills": [
+            "./scientific-problem-selection"
+          ]
+        }
+      ]
+    }
+  ]
+}
