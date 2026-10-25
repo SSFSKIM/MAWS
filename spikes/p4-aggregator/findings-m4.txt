@@ -14,10 +14,19 @@ Keychain custody (e2e/support/connector-oauth.ts engineKeychainCustody): the scr
 exact name and verified gone. No `.credentials.json` was written. The fixture logged no refusal (7 registrations, 7
 authorizations, 5 code exchanges).
 
-A dry run of the same script on the MacBook under a scratch HOME (no login keychain reachable; nothing stored in any
-keychain) checked only the script's mechanics: there the engine's secure storage failed ("saveClientInformation persist
-resolved unsuccessful") and the code exchange answered "Existing OAuth client information is required when exchanging
-an authorization code", which is the scratch HOME's missing keychain, not the engine or the fixture.
+Which keychain path this measures: the runner's own login keychain, under the runner's HOME (a scratch
+CLAUDE_CONFIG_DIR, so the one item is the exact derived name above). Not a scratch keychain under a scratch HOME.
+
+An incident, recorded so it is not repeated. Before the gate run, the same script was dry-run once on the owner's
+MacBook under a scratch HOME (2026-10-25, 01:10:50 to 01:15:07 PDT), meant to check only its mechanics, against the
+brief, which kept every sign-in on the mini. A scratch HOME on a Mac with a logged-in desktop does not fail silently:
+the engine's token and client-information saves failed with errSecNoDefaultKeychain about 120 times, and each failure
+raised a modal "keychain cannot be found" dialog on the owner's screen (the exchange then answered "Existing OAuth client
+information is required when exchanging an authorization code"). The architect's rule since: every engine sign-in,
+every Keychain write and everything under acceptance 9 runs only in gate jobs on the mini (`--runner macos`), scratch
+keychains included; none of it on the MacBook in any form. Should a run on the mini ever need a keychain under a scratch
+HOME, give that HOME its own: `HOME=$root/home security create-keychain -p '' $root/home/Library/Keychains/login.keychain-db`,
+deleted in teardown.
 
 1. custom scheme. mcp_authenticate {serverName, redirectUri: http://127.0.0.1:<MAWS's port>/callback} answered in 137 ms
    {authUrl, requiresUserAction: true, callbackExpected: true, redirectScheme: "custom", state} (the client registered
