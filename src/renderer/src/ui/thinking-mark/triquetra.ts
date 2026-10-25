@@ -312,15 +312,29 @@ class SharedRenderer {
 }
 
 let shared: SharedRenderer | null | undefined;
-// The shared renderer, or null where there is no WebGL (a test DOM, a lost context): the mark then draws nothing.
+let retryAt = 0;
+const RETRY_MS = 1000;
+// The shared renderer, or null where it cannot be had: for good where there is no WebGL (a test DOM), and for a
+// moment after a failed build or a lost context (the GPU may be restarting), so a later paint tries again. A mark
+// without a renderer draws nothing; building one never throws.
 function sharedRenderer(): SharedRenderer | null {
   if (shared !== undefined) return shared;
   if (typeof WebGLRenderingContext === 'undefined') return (shared = null);
-  const canvas = document.createElement('canvas');
-  const gl = canvas.getContext('webgl', { antialias: true, alpha: true, premultipliedAlpha: true });
-  if (!gl) return (shared = null);
-  canvas.addEventListener('webglcontextlost', () => (shared = undefined));
-  return (shared = new SharedRenderer(canvas, gl));
+  if (performance.now() < retryAt) return null;
+  try {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl', { antialias: true, alpha: true, premultipliedAlpha: true });
+    if (!gl) throw new Error('thinking mark: no context');
+    const renderer = new SharedRenderer(canvas, gl);
+    if (gl.isContextLost()) throw new Error('thinking mark: context lost');
+    canvas.addEventListener('webglcontextlost', () => {
+      if (shared === renderer) shared = undefined;
+    });
+    return (shared = renderer);
+  } catch {
+    retryAt = performance.now() + RETRY_MS;
+    return null;
+  }
 }
 
 // ---------- the marks on the page ----------
@@ -338,6 +352,7 @@ const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)'
 let colours: MarkColours | null = null;
 let frame = 0;
 let last = 0;
+let retry = 0;
 
 function hex(value: string, fallback: Vec3): Vec3 {
   const m = /^#([0-9a-f]{6})$/i.exec(value.trim());
@@ -356,7 +371,11 @@ function readColours(): MarkColours {
 
 function paint(mark: Mark, pose: { q: Quat; breath: number; pulse: number }, activity: number): void {
   const renderer = sharedRenderer();
-  if (!renderer) return;
+  if (!renderer) {
+    // A transient failure (not the permanent null): look again shortly, so marks painted only at rest recover too.
+    if (shared === undefined && !retry) retry = window.setTimeout(() => ((retry = 0), repaintAtRest()), RETRY_MS);
+    return;
+  }
   colours ??= readColours();
   const px = Math.round(mark.size * window.devicePixelRatio);
   if (mark.canvas.width !== px) mark.canvas.width = mark.canvas.height = px;
