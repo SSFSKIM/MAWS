@@ -3,7 +3,7 @@
 // the engine again; a cwd of null reads the user configuration in the engine's configuration directory; an engine that
 // cannot be read leaves the network's items; the test-source seam makes the local test marketplace discoverable; a read
 // an invalidation overtakes is read again; an outside change to a project's settings invalidates without Refresh.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,7 +11,7 @@ import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@s
 import { commands } from '@shared/ipc/schema';
 import { NETWORK_FIXTURES, PROJECT_A, recordedEngine, SCRATCH, TEST_MARKETPLACE } from '../../../test/support/catalog-inputs';
 import type { HostCall } from './engine-reads';
-import type { WatchFn } from './state-watch';
+import type { PollFn, WatchFn } from './state-watch';
 import { startCatalog } from './index';
 import type { EngineView } from './normalize';
 
@@ -23,7 +23,8 @@ afterEach(() => rmSync(userData, { recursive: true, force: true }));
 
 const CONFIG_HOME = '/scratch-root/config';
 let endpoints: CommandOutput<'customization.serverEndpoints'>['servers'] = [];
-afterEach(() => { endpoints = []; });
+let globalConfig = `${CONFIG_HOME}/.claude.json`;
+afterEach(() => { endpoints = []; globalConfig = `${CONFIG_HOME}/.claude.json`; });
 
 // The engine host as the catalog asks it, answering from a recorded view; counts each command.
 function host(view: (name: CommandName) => Promise<EngineView>, failing = false) {
@@ -35,7 +36,7 @@ function host(view: (name: CommandName) => Promise<EngineView>, failing = false)
     const value = (() => {
       switch (name) {
         case 'plugins.env':
-          return { binary: '/bin/claude', binaryError: null, configHome: CONFIG_HOME, globalConfig: `${CONFIG_HOME}/.claude.json` };
+          return { binary: '/bin/claude', binaryError: null, configHome: CONFIG_HOME, globalConfig };
         case 'plugins.list':
           return { plugins: v.installed };
         case 'plugins.available':
@@ -65,7 +66,7 @@ function host(view: (name: CommandName) => Promise<EngineView>, failing = false)
 // rebuilt can go unreported, so a test lets the watches it just made settle before writing.
 const settled = () => new Promise((resolve) => setTimeout(resolve, 500));
 
-function service(call: HostCall, env: Record<string, string> = {}, watch?: WatchFn) {
+function service(call: HostCall, env: Record<string, string> = {}, watch?: WatchFn, poll?: PollFn) {
   const handlers = new Map<string, (input: unknown) => Promise<unknown>>();
   const emitted: string[] = [];
   const changedListeners = new Set<() => void>();
@@ -79,6 +80,7 @@ function service(call: HostCall, env: Record<string, string> = {}, watch?: Watch
     userAgent: 'MAWS/test',
     log: () => {},
     watch,
+    poll,
   });
   const invoke = <N extends CommandName>(name: N, input: CommandInput<N>) => handlers.get(name)!(input) as Promise<CommandOutput<N>>;
   return { invoke, emitted, catalog, pluginsChanged: () => changedListeners.forEach((l) => l()), handlers };
@@ -233,18 +235,42 @@ describe('the catalog service', () => {
     }
   }, 15_000);
 
+  it('sees an outside change to the engine’s global .claude.json and reads the connectors again without Refresh (scalpel-3#1)', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'maws-agg-home-'));
+    try {
+      globalConfig = join(home, '.claude.json');
+      writeFileSync(globalConfig, JSON.stringify({ numStartups: 1 }));
+      let current = await recordedEngine(PROJECT_A, { servers: [] });
+      const { invoke, emitted, catalog } = service(host(async () => current).call);
+      const linear = async () => (await invoke('catalog.query', { tab: 'connectors', cwd: PROJECT_A, limit: 200 })).items.find((i) => i.name === 'Linear')!;
+      expect((await linear()).installed).toBe('no');
+      current = await recordedEngine(PROJECT_A, { servers: ['linear'] }); // `claude mcp add --scope user` in a terminal
+      endpoints = [{ name: 'linear', scope: 'user', path: globalConfig, transport: 'http', url: 'https://mcp.linear.app/mcp' }];
+      await settled();
+      emitted.length = 0;
+      writeFileSync(`${globalConfig}.tmp`, JSON.stringify({ numStartups: 1, mcpServers: { linear: { type: 'http', url: 'https://mcp.linear.app/mcp' } } }));
+      renameSync(`${globalConfig}.tmp`, globalConfig); // the engine writes it by renaming a new file over it
+      await vi.waitFor(async () => expect((await linear()).installed).toBe('here'), { timeout: 10_000, interval: 100 });
+      expect(emitted).toContain('catalog.changed');
+      catalog.stop();
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 15_000);
+
   it('reads nothing again when an MCP file changed but the configured servers did not (scalpel-3#1)', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
-      const listeners: ((event: string, filename: string | null) => void)[] = [];
-      const watch: WatchFn = (_dir, listener) => (listeners.push(listener), { close: () => {}, on: () => undefined });
+      const polled = new Map<string, () => void>();
+      const poll: PollFn = (path, listener) => (polled.set(path, listener), { close: () => void polled.delete(path) });
+      const watch: WatchFn = () => ({ close: () => {}, on: () => undefined });
       const engine = host(() => recordedEngine(PROJECT_A));
-      const { invoke, emitted } = service(engine.call, {}, watch);
+      const { invoke, emitted } = service(engine.call, {}, watch, poll);
       await invoke('catalog.home', { tab: 'connectors', cwd: PROJECT_A });
       const reads = () => engine.asked.filter((a) => a.name === 'customization.inventory').length;
       const before = reads();
       emitted.length = 0;
-      for (const listener of listeners) listener('change', '.claude.json'); // the engine rewrote its global file: stats, not servers
+      polled.get(`${CONFIG_HOME}/.claude.json`)!(); // the engine rewrote its global file: stats, not servers
       await vi.advanceTimersByTimeAsync(1_100);
       expect(emitted).toEqual([]);
       await invoke('catalog.home', { tab: 'connectors', cwd: PROJECT_A });
