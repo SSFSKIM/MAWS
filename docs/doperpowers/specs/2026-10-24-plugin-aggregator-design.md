@@ -133,8 +133,9 @@ src/main/catalog/                         src/renderer/src/customize/discover/
   sources.ts     seed list; the test-       DiscoverHome.tsx   shelves
                  source seam                DiscoverGrid.tsx   search results, All, See all
   fetch.ts       GitHub, directory,         CatalogCard.tsx    one card, three kinds
-                 plugin-details; the        CatalogDetail.tsx  detail sheet
-                 fixture seam               add.ts             + → existing sheets
+                 plugin-details through     CatalogDetail.tsx  detail sheet
+                 egressGet's `catalog`      add.ts             + → existing sheets
+                 rule; the fixture seam
   engine-reads.ts installed, available,   widgets/plugins/*    install (reused)
                  marketplaces, manifests, widgets/McpWidget    My items for connectors
                  via host
@@ -143,6 +144,7 @@ src/main/catalog/                         src/renderer/src/customize/discover/
   store.ts       disk cache, refresh
   index.ts       catalog.* IPC
 src/main/connectors/sign-in.ts            the sign-in operation (M4)
+src/shared/net/egress.ts                  the guarded GET and EGRESS_RULES, lifted from engine-host/egress.ts (M2)
 engine-host: plugins/cli-result.ts keeps sha, ref and owner; plugins/listings.ts gains the marketplace manifest read
              (M2); plugins/runner.ts gains `mcp add|remove`; session.mcpAuthenticate, session.mcpOAuthCallback and
              session.mcpSetServers beside session.mcpStatus (bounded control calls) (M4)
@@ -166,7 +168,7 @@ e2e/fixtures/catalog/ (M1)
 
 **Fetching.**
 - **Marketplace manifests** of seeds the engine does not have: `https://raw.githubusercontent.com/<owner>/<repo>/HEAD/.claude-plugin/marketplace.json`. Raw URLs need no token and serve the 1.56 MB community manifest, which the Contents API does not. A marketplace the engine has is read from the engine's listing, not fetched: the engine's clone is what installs.
-- **Requests:** GET only, no credentials, a `User-Agent` naming MAWS and its version, `If-None-Match` where an ETag was served.
+- **Requests:** every catalog request goes through MAWS's one guarded GET, `egressGet`, under a new egress rule `catalog` (Decision Log, fourth entry): GET only, no redirect followed, no credentials, a content-type list and a size cap per route, a timeout per rule. Its routes: `raw.githubusercontent.com/<owner>/<repo>/HEAD/.claude-plugin/marketplace.json`, `api.anthropic.com/api/directory/plugins` and `/api/directory/servers` with the queries above, and the plugin-details URL of fact 2; M2 measures each route's content type and size and sets the caps to fit. A `User-Agent` naming MAWS and its version; `If-None-Match` where an ETag was served, if the guarded GET carries it (else a full fetch every 24 h, recorded). Under `MAWS_E2E=1` the network is never reached.
 - **The fixture seam:** when the environment variable `MAWS_CATALOG_FIXTURES` names a directory, `fetch.ts` reads `<dir>/<source-key>.json` instead of the network and reports the source `fresh`; a missing file is the source failing (so a test can make the directory unavailable by leaving its file out). It changes no behaviour above `fetch.ts`. The test-source seam (Sources, 3a) is the only other test hook; neither touches the engine reads.
 
 **Caching.**
@@ -370,7 +372,7 @@ Run against the branch's build in the e2e harness as M1 provides it: the real 2.
 ### Constraints for every milestone
 
 - **The engine is unmodified** (D-1). Mutations go only through its CLI (`plugin …` and `mcp …` via `src/engine-host/plugins/runner.ts`) and its control requests. MAWS never writes the engine's settings files itself. The test harness may write the scratch configuration's on/off file for the engine's directory marketplace; MAWS never does.
-- **Network:** only GET requests, to `raw.githubusercontent.com`, `api.anthropic.com/api/directory/*` and the plugin-details URL of fact 2, with no credentials. Nothing from the catalog is sent anywhere.
+- **Network:** only GET requests, to `raw.githubusercontent.com`, `api.anthropic.com/api/directory/*` and the plugin-details URL of fact 2, with no credentials, and only through `egressGet` under the `catalog` rule (all of MAWS's traffic beyond the model's own goes through the egress rules, charter §19, P4-B2 2026-10-22; Decision Log, fourth entry). Nothing from the catalog is sent anywhere.
 - **IPC:**
   - New IPC follows `src/shared/ipc/names/*` and `src/shared/ipc/schema/*`, with a name list and a zod schema per namespace, pinned by `src/shared/ipc/schema.test.ts`.
   - Only display metadata and install routes cross IPC. A connector's URL crosses, because the person must see it before adding.
@@ -413,6 +415,7 @@ At the end, the main process holds a normalised, joined catalog of the seeds, th
 
 - **Touches:**
   - new `src/main/catalog/` (sources with the test-source seam, fetch, engine-reads, normalize, join, store, index);
+  - `src/engine-host/egress.ts` → `src/shared/net/egress.ts`: the guarded GET, its types and `EGRESS_RULES` move to a module main and the engine host both import, with the `catalog` rule beside `google-fonts`; its tests move with it and keep every guarantee; the source guard (no `fetch(` outside the egress module and route D's transport) extends to `src/main/catalog/`;
   - `src/shared/ipc/names/catalog.ts` and `src/shared/ipc/schema/catalog.ts`;
   - registration in `src/main/` where other namespaces register;
   - `src/engine-host/plugins/cli-result.ts`: `sourceRefOf` keeps `sha` and `ref` both (the fold-key reading stays where the manifest views use it), `marketplacesOf` keeps `owner`; `src/shared/ipc/schema/plugins.ts`: `PluginSourceRefSchema` and `MarketplaceSchema` grow accordingly;
@@ -622,6 +625,10 @@ Test seams (M1):
 - Decision: the second revision, from the buildability review's round 2 on 259658d64 (five gaps, all accepted). A fixture-only test-source seam (`MAWS_CATALOG_TEST_SOURCES`) makes the local test marketplace discoverable before it is added, with the scratch path as its install route; recorded engine output is a unit-test input only, never the CLI's stand-in in acceptance. Keychain custody is by the exact service name derived from the scratch configuration directory, required absent before, recorded as owned, deleted after the engine stops and verified gone; nothing by prefix. M1 provisions the 2.1.309 build on the Mac lane (download, checksum committed in the repo, cached by version, `MAWS_E2E_ENGINE_BIN` exported) before the offline phase, the test-time version check stays, and the `.github/` change is coordinated with CI-opt by the architect. M2 may touch engine-host: `sourceRefOf` keeps `sha` and `ref`, `marketplacesOf` keeps `owner`, and `plugins.marketplaceManifest` reads an added marketplace's plugins' author, skills, hooks and MCP transports from its clone, before normalisation, tested with a marketplace the directory does not know. The terminal fallback launches the resolved absolute engine path through `pty.spawn`'s `shell` and `args` with `CLAUDE_CONFIG_DIR` passed explicitly (the pty host strips `MAWS_` variables), and acceptance 10 verifies the executable and the configuration with `claude` absent from PATH. Acceptance 1, 7, 9 and 10 and the M1, M2 and M4 entries carry the changes.
   Rationale: the round found that the first revision's harness could not discover the test marketplace before the add, could not clean the Keychain as written, never provisioned the binary it asserted, lost the fields an added marketplace's cards need, and would have run a `claude` the terminal cannot find.
   Date/Author: 2026-10-25, the design reviewer, from the architect's rulings.
+
+- Decision: the catalog's network traffic goes through MAWS's egress rules (the architect's binding constraint, relayed 2026-10-25). Every catalog fetch is a GET through `egressGet` under one new rule `catalog` with four routes (the seed manifests' raw URLs, the directory's plugins and servers endpoints, plugin-details), each with the content type and a size cap M2 measures. The guarded GET and `EGRESS_RULES` are lifted from `src/engine-host/egress.ts` into `src/shared/net/egress.ts`, which main and the engine host both import, keeping its guarantees, its tests and the source guard (extended to `src/main/catalog/`). The alternative, fetching through the engine host, lost: every main-to-host call answers within the supervisor's 10 s, the directory's plugins page is 13 MB, and the catalog belongs to main (Design, Parts). The final rule goes into the hand-back; the architect writes its charter §19 line when the branch lands.
+  Rationale: the spec's Fetching section named GET-only, credential-free requests but not the one door every MAWS request already passes through (charter §19, P4-B2 2026-10-22).
+  Date/Author: 2026-10-25, the executing session, from the architect's ruling.
 
 ## Outcomes & Retrospective
 
