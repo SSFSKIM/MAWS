@@ -9,9 +9,9 @@
 // on any unrecorded write, so its reaching the fixture's `meta exit` is the proof nothing else was written.
 // M2 holds the read half of the interactive group and the `reads.jsonl` case; M3 the mutating half and
 // `auto-routed-controls`.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { expect, test as base, type Locator, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
 import type { OperationEvent } from '@shared/engine/operations';
@@ -52,15 +52,31 @@ const stubStart = (market: string): StubState => ({
 
 type BackendLaunch = MawsLaunch & { cli: PluginCliStub; project: string };
 
+// The scenario with READY's project at the launch's scratch project, the copy beside it (its transcripts by absolute
+// path): the product window's Customize shows a project's directory, which the scenario names on a machine long gone,
+// and `/plugins`' Open Discover opens Customize for the project whose directory is the session's (Decision Log 10).
+function scenarioHere(userData: string, project: string): string {
+  const path = join(REPO_ROOT, SCENARIO.slice('stub:'.length));
+  const scenario = JSON.parse(readFileSync(path, 'utf8')) as { projects: { id: string; directory: string }[]; sessions: { appId?: string; projectId?: string }[]; transcripts?: Record<string, string> };
+  const owner = scenario.sessions.find((s) => s.appId === READY)!.projectId;
+  scenario.projects = scenario.projects.map((p) => (p.id === owner ? { ...p, directory: project } : p));
+  if (scenario.transcripts) scenario.transcripts = Object.fromEntries(Object.entries(scenario.transcripts).map(([id, file]) => [id, id.startsWith('_') ? file : resolve(dirname(path), file)]));
+  const copy = join(userData, 'scenario.json');
+  writeFileSync(copy, JSON.stringify(scenario));
+  return `stub:${copy}`;
+}
+
 // The scenario launch with the widget backend and the CLI stub: the harness's window (`harness: '1'`, the widgets page),
-// or the product's (`'0'`, for the panel's summary), from the same harness build.
+// or the product's (`'0'`: the panel's summary, and Customize, whose READY project is the scratch one), from the same
+// harness build.
 async function withBackend(harness: '0' | '1', use: (maws: BackendLaunch) => Promise<void>): Promise<void> {
   const userData = realpathSync(mkdtempSync(join(tmpdir(), 'maws-e2e-')));
   const project = join(userData, 'project');
   mkdirSync(project);
   const cli = writePluginCliStub(userData, stubStart(scratchMarketplace(join(userData, 'market'), { name: MARKET, plugins: MARKET_PLUGINS })));
   try {
-    const maws = await launchMaws({ userData, env: { MAWS_HARNESS: harness, MAWS_SESSION_SOURCE: SCENARIO, MAWS_SCENARIO_CLOCK: 'manual', MAWS_WIDGET_BACKEND: 'fixtures', MAWS_E2E_ENGINE_BIN: cli.bin } });
+    const source = harness === '0' ? scenarioHere(userData, project) : SCENARIO;
+    const maws = await launchMaws({ userData, env: { MAWS_HARNESS: harness, MAWS_SESSION_SOURCE: source, MAWS_SCENARIO_CLOCK: 'manual', MAWS_WIDGET_BACKEND: 'fixtures', MAWS_E2E_ENGINE_BIN: cli.bin } });
     try {
       await use(Object.assign(maws, { cli, project }));
     } finally {
@@ -151,6 +167,20 @@ async function openPlugins(maws: BackendLaunch): Promise<Locator> {
   await expect(w.locator('[data-plugins-section="my-items"]')).toBeVisible(); // P2-B M3: the library's My items
   return w;
 }
+// `/plugins` in the product window, where Open Discover has Customize to open: the session's tab, then the command at its
+// composer.
+async function openSessionPlugins(maws: BackendLaunch): Promise<Locator> {
+  const { page } = maws;
+  await (await sidebarRow(page, { appSessionId: READY })).click();
+  await inProject(maws);
+  await page.locator('[data-region="main"]').getByRole('textbox', { name: 'Message' }).click();
+  await page.keyboard.type('/plugins');
+  await expect(page.getByRole('listbox', { name: 'Commands' }).locator('[role="option"][aria-selected="true"]')).toContainText('/plugins');
+  await page.keyboard.press('Enter');
+  const w = widget(page, 'plugins');
+  await expect(w.locator('[data-plugins-section="my-items"]')).toBeVisible();
+  return w;
+}
 const configHome = (maws: MawsLaunch) => join(maws.userData, 'claude-config');
 // The stub's calls that changed something (no listing), each argv after the binary.
 const mutations = (maws: BackendLaunch) => stubCalls(maws.cli).filter((argv) => argv[0] === 'plugin' && !argv.includes('list'));
@@ -210,8 +240,9 @@ const argvOf = async (sheet: Locator) => JSON.parse((await sheet.locator('[data-
 const lineOf = (row: Locator) => row.getByRole('status');
 // P4-AGG Decision Log 10: `/plugins` finds new plugins through Open Discover, which closes it and opens Customize ›
 // Plugins › Discover for the session's project: main's catalog over the engine's reads (the stub's here; under
-// MAWS_E2E the network sources are offline), whose cards install through E8's sheet. The Add menu's two marketplace
-// dialogs are sheets beside the frame under which E8's confirm sheet stacks.
+// MAWS_E2E the network sources are offline), whose cards install through E8's sheet. Customize is the product window's,
+// so the cases through Discover run there (`appBackend`, `openSessionPlugins`); the harness page has no main area. The
+// Add menu's two marketplace dialogs are sheets beside the frame under which E8's confirm sheet stacks.
 const customizeLibrary = (page: Page) => page.locator('[data-region="main"] [data-widget="plugins"][data-widget-variant="embedded"]');
 const allOf = (w: Locator) => w.locator('[data-discover="plugins"] [data-catalog-results]').last(); // All, on the home
 async function openDiscover(w: Locator): Promise<Locator> {
@@ -972,9 +1003,9 @@ test('P2-C /plugins shows MAWS mods · Built in: To-human with its version, its 
 // parsing are the product's own; the stub keeps its registry in a state file and logs every argv it ran (`calls.log`).
 // The scenario's sessions have no host process, so a change reloads no session (`No running session to reload`).
 test.describe('plugin management (E8)', () => {
-  test('lists the engine’s plugins and marketplaces; the catalogue is read only once Open Discover shows it', async ({ backend }) => {
+  test('lists the engine’s plugins and marketplaces; the catalogue is read only once Open Discover shows it', async ({ appBackend: backend }) => {
     const { page } = backend;
-    const w = await openPlugins(backend);
+    const w = await openSessionPlugins(backend);
     const tools = installedRow(w, 'e8-tools@e8-scratch');
     await expect(tools).toContainText('1.0.0');
     await expect(tools).toContainText('E8 tools');
@@ -1010,9 +1041,9 @@ test.describe('plugin management (E8)', () => {
     expect(backend.consoleErrors()).toEqual([]);
   });
 
-  test('install at user scope from a Discover card: the sheet names the command and the writes; the card shows the CLI’s progress, then its result; the CLI ran the sheet’s argv', async ({ backend }) => {
+  test('install at user scope from a Discover card: the sheet names the command and the writes; the card shows the CLI’s progress, then its result; the CLI ran the sheet’s argv', async ({ appBackend: backend }) => {
     const { page } = backend;
-    const w = await openDiscover(await openPlugins(backend));
+    const w = await openDiscover(await openSessionPlugins(backend));
     const card = cardOf(w, 'e8-probe@e8-scratch');
     await addOn(card);
     const sheet = sheetOf(page, 'install');
@@ -1045,9 +1076,9 @@ test.describe('plugin management (E8)', () => {
   // P4 W2-D (tracker 2026-10-06): the runner's kill path in Electron's utility process (the engine host's default under
   // e2e, src/main/hosts/mode.ts). The CLI and a member it started in its group ignore SIGTERM, so only the SIGKILL at the
   // grace ends them; the run ends only once the group is empty.
-  test('Stop on a CLI that ignores SIGTERM: its whole process group is gone after the SIGKILL grace, and the card reads cancelled', async ({ backend }) => {
+  test('Stop on a CLI that ignores SIGTERM: its whole process group is gone after the SIGKILL grace, and the card reads cancelled', async ({ appBackend: backend }) => {
     const { page } = backend;
-    const w = await openDiscover(await openPlugins(backend));
+    const w = await openDiscover(await openSessionPlugins(backend));
     const card = cardOf(w, 'e8-probe@e8-scratch');
     await addOn(card);
     backend.cli.hold(true);
@@ -1075,9 +1106,9 @@ test.describe('plugin management (E8)', () => {
     }
   });
 
-  test('install at project and at local scope from a card’s detail: the argv carries the scope and the sheet names the project’s settings file', async ({ backend }) => {
+  test('install at project and at local scope from a card’s detail: the argv carries the scope and the sheet names the project’s settings file', async ({ appBackend: backend }) => {
     const { page, project } = backend;
-    const w = await openDiscover(await openPlugins(backend));
+    const w = await openDiscover(await openSessionPlugins(backend));
     const shown: string[][] = [];
     for (const [plugin, scope, label, file] of [
       ['e8-probe', 'project', 'Project', '.claude/settings.json'],
@@ -1172,9 +1203,9 @@ test.describe('plugin management (E8)', () => {
     expect(backend.consoleErrors()).toEqual([]);
   });
 
-  test('an engine error is the engine’s words and code in red; a marketplace-declared command opens a second sheet and Run it accepts it by its sha256, never -y', async ({ backend }) => {
+  test('an engine error is the engine’s words and code in red; a marketplace-declared command opens a second sheet and Run it accepts it by its sha256, never -y', async ({ appBackend: backend }) => {
     const { page } = backend;
-    const w = await openDiscover(await openPlugins(backend));
+    const w = await openDiscover(await openSessionPlugins(backend));
 
     // not_found: the catalog Discover read still lists e8-extra, which the marketplace no longer has
     const state = backend.cli.state();
@@ -1283,12 +1314,12 @@ test.describe('plugin management (E8)', () => {
     expect(backend.consoleErrors()).toEqual([]);
   });
 
-  test('a plugin that declares a dependency installs with it from its card, the sheet announcing the dependency caches; removing the marketplace names the plugins it uninstalls and uninstalls them', async ({ backend }) => {
+  test('a plugin that declares a dependency installs with it from its card, the sheet announcing the dependency caches; removing the marketplace names the plugins it uninstalls and uninstalls them', async ({ appBackend: backend }) => {
     const { page } = backend;
     const home = configHome(backend);
     const state = backend.cli.state();
     backend.cli.setState({ ...state, marketplaces: state.marketplaces.map((m) => ({ ...m, plugins: [...m.plugins, { name: 'e8-deps', version: '0.5.0', description: 'Needs e8-probe', dependencies: ['e8-probe'] }] })) });
-    const w = await openDiscover(await openPlugins(backend));
+    const w = await openDiscover(await openSessionPlugins(backend));
     await addOn(cardOf(w, 'e8-deps@e8-scratch'));
     const install = sheetOf(page, 'install');
     await expect(install.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem')).toHaveText([`${home}/settings.json`, `${home}/plugins/installed_plugins.json`, `${home}/plugins/cache/e8-scratch/e8-deps/<version>/`, `${home}/plugins/cache/<any-marketplace>/<dependency>/`]);
@@ -1414,7 +1445,7 @@ test.describe('plugin management (E8)', () => {
   // P2-B M5 (the execution document §4 items 4 and 5; §6.2), Discover since P4-AGG (Decision Log 10): a registry shaped
   // like the owner's, with the engine's built-in directory listing the twin of an official plugin, a directory-only
   // plugin and the twin of an installed one (which the engine leaves out with it).
-  test('Discover on an owner-shaped registry: one card per plugin, installed ones joined in, Installed in another project still installs here', async ({ backend }) => {
+  test('Discover on an owner-shaped registry: one card per plugin, installed ones joined in, Installed in another project still installs here', async ({ appBackend: backend }) => {
     const { page, project, userData } = backend;
     const owner = ownerShapedState(project, join(userData, 'elsewhere'));
     const twin = (name: string) => ({ name, version: null, description: `${name}, as the directory lists it`, source: { source: 'git-subdir', url: 'https://github.com/anthropics/claude-plugins-official', path: `plugins/${name}` } });
@@ -1423,7 +1454,7 @@ test.describe('plugin management (E8)', () => {
       marketplaces: owner.marketplaces.map((m) => (m.name === 'claude-plugins-official' ? { ...m, plugins: [...m.plugins, { name: 'pr-review-toolkit', version: '1.0.0', description: 'Review pull requests with specialised agents', author: 'Anthropic', installCount: 210_500 }] } : m)),
       directory: [twin('pr-review-toolkit'), twin('code-review'), { name: 'acme-only', version: null, description: 'Listed by the directory alone', source: { source: 'url', url: 'https://github.com/acme/only.git' } }],
     });
-    const w = await openDiscover(await openPlugins(backend));
+    const w = await openDiscover(await openSessionPlugins(backend));
     const o = (name: string) => `${name}@claude-plugins-official`;
     const named = (name: string) => allOf(w).locator(`[data-catalog-grid] [data-catalog-card][data-install-name="${name}"]`);
     // one item per thing: the official plugin and its directory twin are one card, Also listed by the other route
