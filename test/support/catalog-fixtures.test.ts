@@ -27,8 +27,8 @@ const records = () => source('directory:plugins')[0]!.data as DirectoryRecord[];
 const SEEDS = ['claude-plugins-official', 'claude-community', 'anthropic-agent-skills', 'claude-for-financial-services', 'knowledge-work-plugins', 'claude-for-legal', 'life-sciences', 'k12-teacher-skills', 'claude-for-financial-advisors', 'notion-plugin-marketplace', 'canva-skills', 'carta-plugins'];
 
 describe('the recorded catalog sources', () => {
-  it('are one file per network source key, and the local test marketplace', () => {
-    expect(readdirSync(DIR).sort()).toEqual(['directory:plugins.json', 'directory:servers.json', 'marketplace', 'plugin-details.json', ...SEEDS.map((name) => `seed:${name}.json`)].sort());
+  it('are one file per network source key, the local test marketplace and the synthetic icon', () => {
+    expect(readdirSync(DIR).sort()).toEqual(['directory:plugins.json', 'directory:servers.json', 'icons', 'marketplace', 'plugin-details.json', ...SEEDS.map((name) => `seed:${name}.json`)].sort());
     for (const name of SEEDS) expect(manifest(name).name).toBe(name);
   });
 

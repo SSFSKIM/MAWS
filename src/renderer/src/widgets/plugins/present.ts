@@ -6,9 +6,25 @@ import { commandLine, writesOf, type PluginsAction, type PluginsActionInputs, ty
 import type { PluginsOperationEvent } from '@shared/ipc/schema/plugins';
 import { OPERATION, PLUGIN_MANAGEMENT as W } from '../copy';
 
-// What a request knows beyond the CLI's input: for a marketplace removal, the installations it uninstalls.
+// An install asked from Discover (P4-AGG M3; the Discover spec, Design "Adding"): what the sheet shows beside the
+// command, in words the caller already chose (customize/discover/present.ts), and the marketplace the route installs
+// from, which a first step adds at the sheet's scope when the engine does not have it yet.
+export interface CatalogInstall {
+  name: string; // the item's display name
+  marketplace: { name: string; source: string; present: boolean };
+  skills: string[] | null; // asked from Skills: the skills the plugin carries, which the sheet names
+  contents: string[] | null; // what comes with it ("2 skills", "hooks", …); null when no source lists it
+  runsCode: string | null; // the runs-code warning, or the softer one for unknown contents
+  alsoListedBy: string[];
+}
+
+// What a request knows beyond the CLI's input: for a marketplace removal, the installations it uninstalls; for an install
+// from Discover, its catalog words and route; for an install that followed adding its marketplace, that marketplace,
+// which stays added when the install fails.
 export interface RequestContext {
   uninstalls?: PluginsInstallation[];
+  catalog?: CatalogInstall;
+  afterAdd?: { marketplace: string; scope: PluginsScope };
 }
 
 // One mutation as the owner asked for it: the action, the CLI's input, and the marketplace's source kind when known
@@ -18,7 +34,8 @@ export type PluginsRequest = { [A in PluginsAction]: { action: A; input: Plugins
 export const requestFor = <A extends PluginsAction>(action: A, input: PluginsActionInputs[A], source: string | null, context: RequestContext = {}): PluginsRequest => ({ action, input, source, ...context }) as PluginsRequest;
 
 // The actions whose sheet offers a scope, and the two that destroy something (the acknowledgement first).
-export const SCOPED: ReadonlySet<PluginsAction> = new Set(['install', 'update', 'uninstall', 'enable', 'disable']);
+// P4-AGG M3: adding a marketplace takes a scope too (the Discover spec, M3 Decisions), as `plugin marketplace add` does.
+export const SCOPED: ReadonlySet<PluginsAction> = new Set(['install', 'update', 'uninstall', 'enable', 'disable', 'marketplace-add']);
 export const DESTRUCTIVE: ReadonlySet<PluginsAction> = new Set(['uninstall', 'marketplace-remove']);
 
 export const scopeOf = (request: PluginsRequest): PluginsScope => ('scope' in request.input && request.input.scope) || 'user';
@@ -64,6 +81,20 @@ export function writesWords(request: PluginsRequest, where: { configHome: string
     ...manifest.scopeSettings.map(({ project, file }) => `${project ?? where.configHome}/${file}`),
   ];
   return [...new Set(paths)];
+}
+
+// The first step of an install from Discover whose marketplace the engine does not have: adding it at `scope`.
+export function addStepOf(request: PluginsRequest, scope: PluginsScope = scopeOf(request)): PluginsRequest | null {
+  const marketplace = request.action === 'install' ? request.catalog?.marketplace : undefined;
+  if (!marketplace || marketplace.present) return null;
+  return requestFor('marketplace-add', { source: marketplace.source, scope }, sourceKindOfTyped(marketplace.source));
+}
+
+// The install after its marketplace was added: no add step left, and the marketplace named for a failure's words.
+export function afterAddOf(request: PluginsRequest): PluginsRequest {
+  const catalog = request.catalog;
+  if (!catalog) return request;
+  return { ...request, catalog: { ...catalog, marketplace: { ...catalog.marketplace, present: true } }, afterAdd: { marketplace: catalog.marketplace.name, scope: scopeOf(request) } };
 }
 
 // For an install or update, what the `<dependency>` cache entry stands for (null for any other action).

@@ -1222,7 +1222,7 @@ test.describe('plugin management (E8)', () => {
       const sheet = sheetOf(page, 'marketplace-add');
       await expect(sheet.getByRole('heading', { name: `Add marketplace ${source}?` })).toBeVisible();
       const argv = await argvOf(sheet);
-      expect(argv).toEqual(['plugin', 'marketplace', 'add', source, '--json']);
+      expect(argv).toEqual(['plugin', 'marketplace', 'add', source, '--scope', 'user', '--json']); // P4-AGG M3: the confirmation's scope, user by default
       await expect(sheet.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem')).toHaveText(writes);
       await expect(sheet).toContainText('Nothing to reload: an added marketplace loads no plugin');
       shown.push(argv);

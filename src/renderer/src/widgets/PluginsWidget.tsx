@@ -41,6 +41,10 @@ import { usePluginsEnv, usePluginsRead, type PluginsReadResult } from './plugins
 import { useReloads } from './plugins/reload';
 import { SESSION_UNAVAILABLE, type PluginSession } from './plugins/session';
 import { WidgetFrame } from './WidgetFrame';
+import { pluginIdOf } from '../customize/discover/add';
+import { DISCOVER } from '../customize/discover/copy';
+import { DiscoverPane } from '../customize/discover/DiscoverPane';
+import { DiscoverToolbar } from '../customize/discover/DiscoverToolbar';
 
 // The sessions a change reloads: those with a ready process (the host's fan-out targets).
 const readyCount = (engine: ReadonlyMap<AppSessionId, EngineSessionStatus>): number => {
@@ -51,7 +55,7 @@ const readyCount = (engine: ReadonlyMap<AppSessionId, EngineSessionStatus>): num
 
 // `plugins.env`'s read as the sheet takes it: resolved only by an answer that names a binary; an answer
 // without one is the probe's refusal in its own words (`binaryError`), and a failed read is the read's refusal.
-function resolutionOf(env: PluginsReadResult<CommandOutput<'plugins.env'>>): EngineResolution {
+export function resolutionOf(env: PluginsReadResult<CommandOutput<'plugins.env'>>): EngineResolution {
   if (env.data) {
     const { binary, binaryError, configHome, globalConfig } = env.data;
     return binary !== null ? { state: 'ready', env: { binary, configHome, globalConfig } } : { state: 'error', error: binaryError ?? PLUGIN_MANAGEMENT.unresolved };
@@ -63,26 +67,33 @@ const NO_VIEWS: ReadonlyMap<string, PluginManifestView> = new Map();
 
 type LibraryPresentation = { variant: 'embedded'; scope?: ReactNode } | { variant: 'modal'; appSessionId: AppSessionId; close(): void };
 
+// P4-AGG M3: Customize's library shows Discover (the catalog over `catalog.*`, Discover's page cwd: null for the user
+// configuration) in Browse's place; the session's `/plugins` keeps Browse.
+export interface DiscoverOption {
+  cwd: string | null;
+}
+
 export interface PluginsLibraryProps {
   cwd: string;
   appSessionId: AppSessionId | null;
   scope?: ReactNode;
+  discover?: DiscoverOption;
 }
 
 // Customize supplies a real directory and, optionally, a ready session. Runtime hooks are mounted only while that
 // attachment is actually ready; an exit never turns Customize into an engine-start surface. A project change resets
 // details and confirmations, so an old request cannot silently become a change in a different project.
-export function PluginsLibrary({ cwd, appSessionId, scope }: PluginsLibraryProps) {
+export function PluginsLibrary({ cwd, appSessionId, scope, discover }: PluginsLibraryProps) {
   const ready = useSessions((s) => appSessionId !== null && s.engine.get(appSessionId)?.process === 'ready');
-  return <EmbeddedLibrary key={cwd} cwd={cwd} appSessionId={ready ? appSessionId : null} scope={scope} />;
+  return <EmbeddedLibrary key={cwd} cwd={cwd} appSessionId={ready ? appSessionId : null} scope={scope} discover={discover} />;
 }
 
-function EmbeddedLibrary({ cwd, appSessionId, scope }: PluginsLibraryProps) {
+function EmbeddedLibrary({ cwd, appSessionId, scope, discover }: PluginsLibraryProps) {
   const [session, setSession] = useState<PluginSession | null>(null);
   return (
     <>
       {appSessionId !== null && <ReadySession key={appSessionId} appSessionId={appSessionId} onChange={setSession} />}
-      <LibraryBody cwd={cwd} session={session?.appSessionId === appSessionId ? session : null} presentation={{ variant: 'embedded', scope }} />
+      <LibraryBody cwd={cwd} session={session?.appSessionId === appSessionId ? session : null} presentation={{ variant: 'embedded', scope }} discover={discover} />
     </>
   );
 }
@@ -115,7 +126,7 @@ function usePluginSession(appSessionId: AppSessionId, allowAcquire: boolean): Pl
   return { appSessionId, loaded, availability, reloads: ready ? reloads : null, allowAcquire };
 }
 
-function LibraryBody({ cwd, session, presentation }: { cwd: string | null; session: PluginSession | null; presentation: LibraryPresentation }) {
+function LibraryBody({ cwd, session, presentation, discover }: { cwd: string | null; session: PluginSession | null; presentation: LibraryPresentation; discover?: DiscoverOption }) {
   const readySessions = useSessions((s) => readyCount(s.engine));
   const env = usePluginsEnv();
   const { reread } = env;
@@ -143,7 +154,7 @@ function LibraryBody({ cwd, session, presentation }: { cwd: string | null; sessi
   // the view: My items or Browse, this open's own; Browse's catalogue is read from its first click until the dialog closes
   const [tab, setTab] = useState<LibraryTab>('myItems');
   const [browsed, setBrowsed] = useState(false);
-  const available = usePluginsRead('plugins.available', cwd, browsed, tab === 'browse');
+  const available = usePluginsRead('plugins.available', cwd, browsed && !discover, tab === 'browse');
   const offers = available.data?.plugins;
   const cards = useMemo(() => browseCards(offers ?? [], identities, markets ?? []), [offers, identities, markets]);
   const choices = useLibraryStore((s) => s.browse);
@@ -198,14 +209,20 @@ function LibraryBody({ cwd, session, presentation }: { cwd: string | null; sessi
 
   const inDetail = tab === 'myItems' ? showing : browseDetail !== null;
   const add = <AddMenu onOpen={setDialog} />;
-  const toolbar = inDetail ? null : tab === 'myItems' ? <PluginsToolbar add={add} /> : <BrowseToolbar sources={shown.sources} hasCounts={shown.hasCounts} sort={shown.sort} add={add} />;
+  const toolbar = discover && tab === 'browse' ? <DiscoverToolbar tab="plugins" add={add} /> : inDetail ? null : tab === 'myItems' ? <PluginsToolbar add={add} /> : <BrowseToolbar sources={shown.sources} hasCounts={shown.hasCounts} sort={shown.sort} add={add} />;
+  // an item Discover shows installed here opens in My items, its detail when My items lists it under that id
+  const openInstalled = (item: Parameters<typeof pluginIdOf>[0]) => {
+    const id = pluginIdOf(item);
+    setTab('myItems');
+    if (id !== null && identities.some((identity) => identity.id === id)) open(id);
+  };
   const pluginDetail = (identity: NonNullable<typeof detail>, backTo: string, onBack: () => void) => (
     <PluginDetail key={identity.id} appSessionId={appSessionId} availability={session?.availability ?? null} identity={identity} loaded={loaded} loadedIds={loadedIds} reloads={reloads} allowAcquire={session?.allowAcquire ?? false} listManifests={manifests} listError={installed.error} backTo={backTo} onBack={onBack} />
   );
 
   return (
     <ManageProvider value={manage}>
-      <WidgetFrame {...presentation} title={WIDGET_TITLE.plugins} command="plugins" state="ready" error={null} size="library" heading={<LibrarySwitch tab={tab} onChange={switchTo} />} toolbar={toolbar}>
+      <WidgetFrame {...presentation} title={WIDGET_TITLE.plugins} command="plugins" state="ready" error={null} size="library" heading={<LibrarySwitch tab={tab} onChange={switchTo} second={discover ? DISCOVER.discover : undefined} />} toolbar={toolbar}>
         {tab === 'myItems' && (
           <>
             {detail && pluginDetail(detail, L.myItems, () => setSelected(null))}
@@ -238,7 +255,8 @@ function LibraryBody({ cwd, session, presentation }: { cwd: string | null; sessi
             </div>
           </>
         )}
-        {tab === 'browse' && (
+        {tab === 'browse' && discover && <DiscoverPane tab="plugins" cwd={discover.cwd} onOpenInstalled={openInstalled} />}
+        {tab === 'browse' && !discover && (
           <>
             {picked !== null && pickedIdentity !== null && pluginDetail(pickedIdentity, L.browse, () => setPicked(null))}
             {picked !== null && !picked.installed && card !== null && <BrowseDetail key={card.pluginId} card={card} onBack={() => setPicked(null)} />}

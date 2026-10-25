@@ -81,10 +81,16 @@ it('keeps the plugin session picker with its library controls and reloads the se
   expect((await screen.findByText('Reloaded · 2 skills')).getAttribute('role')).toBe('status');
   expect(screen.getByRole('button', { name: 'Reload plugins' })).toBeTruthy();
 
-  fireEvent.click(within(libraryHead).getByRole('radio', { name: 'Browse' }));
-  await waitFor(() => expect(backend.calls.filter((call) => call.command === 'plugins.available').map((call) => call.input)).toEqual([{ cwd: '/one' }]));
+  // P4-AGG M3: Customize's second view is Discover, over the catalog with the page's cwd, not the engine's listing
+  backend.script('catalog.home', () => ({ featured: null, shelves: [], categories: [], total: 0 }));
+  backend.script('catalog.query', () => ({ items: [], nextCursor: null, total: 0, restarted: false }));
+  backend.script('catalog.sources', () => []);
+  fireEvent.click(within(libraryHead).getByRole('radio', { name: 'Discover' }));
+  await waitFor(() => expect(backend.calls.filter((call) => call.command === 'catalog.home').map((call) => call.input)).toEqual([{ tab: 'plugins', cwd: '/one' }]));
+  expect(backend.calls.filter((call) => call.command === 'plugins.available')).toEqual([]);
   expect(within(libraryHead).getByRole('combobox', { name: 'Live session' })).toBe(picker);
-  expect(within(libraryHead).getByRole('button', { name: 'Filter' })).toBeTruthy();
+  expect(within(libraryHead).getByRole('searchbox', { name: 'Search all sources' })).toBeTruthy();
+  expect(within(libraryHead).getByRole('button', { name: 'Sources' })).toBeTruthy();
   expect(backend.calls.filter((call) => call.command === 'session.acquire')).toEqual([]);
 });
 
@@ -152,13 +158,13 @@ it('keeps the visited plugin library mounted when another Customize section is s
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = (section: 'plugins' | 'skills') => <QueryClientProvider client={client}><CustomizeView section={section} /></QueryClientProvider>;
   const mounted = render(view('plugins'));
-  const browse = await screen.findByRole('radio', { name: 'Browse' });
+  const browse = await screen.findByRole('radio', { name: 'Discover' });
   fireEvent.click(browse);
   expect(browse.getAttribute('aria-checked')).toBe('true');
   mounted.rerender(view('skills'));
   await screen.findByRole('button', { name: 'View review' });
   mounted.rerender(view('plugins'));
-  expect(screen.getByRole('radio', { name: 'Browse' })).toBe(browse);
+  expect(screen.getByRole('radio', { name: 'Discover' })).toBe(browse);
   expect(browse.getAttribute('aria-checked')).toBe('true');
 });
 

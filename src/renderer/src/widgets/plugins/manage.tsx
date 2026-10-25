@@ -10,7 +10,8 @@ import { PLUGIN_MANAGEMENT as W } from '../copy';
 import { TextButton } from '../parts';
 import { ConfirmSheet, type Declared, type EngineResolution } from './ConfirmSheet';
 import { usePluginOperations, type PluginOperations } from './operation';
-import { declaredOf, operationWords, scopeOf, type PluginsRequest } from './present';
+import { DISCOVER as D } from '../../customize/discover/copy';
+import { addStepOf, afterAddOf, declaredOf, operationWords, requestFor, scopeOf, type PluginsRequest } from './present';
 
 export interface Manage {
   cwd: string; // the session's directory, where every change runs
@@ -51,9 +52,19 @@ export function useManageState(base: { cwd: string; readySessions: number }, rel
   const ask = useCallback((key: string, request: PluginsRequest) => open(key, request, null), [open]);
   const { run } = ops;
   const { cwd, readySessions } = base;
+  // An install from Discover whose marketplace the engine does not have runs as two CLI steps under one key: the
+  // marketplace's add at the sheet's scope, then, only once it succeeded, the install (P4-AGG M3). A failed add ends
+  // there with the engine's words; a failed install leaves the marketplace added and says so (OperationLine).
   const confirm = useCallback(
-    async (key: string, request: PluginsRequest, binary: string) => {
+    async (key: string, asked: PluginsRequest, binary: string) => {
       setAsking(null);
+      let request = asked;
+      const add = addStepOf(asked);
+      if (add) {
+        const added = await run(key, add, cwd, binary);
+        if (added?.outcome?.ok !== true) return;
+        request = afterAddOf(asked);
+      }
       const done = await run(key, request, cwd, binary);
       const declared = declaredOf(done, request.action);
       if (declared) open(key, { ...request, input: { ...request.input, acceptCommand: declared.sha256 } } as PluginsRequest, declared);
@@ -81,12 +92,16 @@ const titleOf = (appSessionId: string): string => {
 
 // A row's operation: `Working…`, the CLI's progress, the engine's result or failure with the reload report; Stop while
 // the CLI runs, and Reload again when a session did not reflect the change.
+// An install that followed adding its marketplace and failed leaves the marketplace added: the line says so and offers
+// Remove marketplace (its own sheet, at the scope it was added at).
 export function OperationLine({ opKey, label }: { opKey: string; label?: string }) {
-  const { ops, reloadMods } = useManage();
+  const { ops, reloadMods, ask } = useManage();
   const entry = ops.entries.get(opKey);
   const words = entry ? operationWords(entry.state, titleOf, scopeOf(entry.request)) : null;
   if (!entry || words === null) return null;
   const stoppable = entry.state.phase === 'working' && entry.opId !== null && !entry.state.reloading;
+  const added = entry.request.afterAdd;
+  const stays = added && words.failed ? added : null;
   return (
     <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
       <span role="status" aria-label={label} className={`min-w-0 whitespace-pre-line [overflow-wrap:anywhere] ${words.failed ? 'text-danger' : 'text-fg-muted'}`}>
@@ -94,6 +109,12 @@ export function OperationLine({ opKey, label }: { opKey: string; label?: string 
       </span>
       {stoppable && <TextButton onClick={() => ops.cancel(opKey)}>{W.cancel}</TextButton>}
       {words.reloadAgain && reloadMods && <TextButton onClick={reloadMods}>{W.reloadAgain}</TextButton>}
+      {stays && (
+        <span data-marketplace-stays={stays.marketplace} className="flex flex-wrap items-baseline gap-x-2 text-fg-muted">
+          {D.staysAdded(stays.marketplace)}
+          <TextButton onClick={() => ask(opKey, requestFor('marketplace-remove', { name: stays.marketplace, scope: stays.scope }, null))}>{D.removeMarketplace}</TextButton>
+        </span>
+      )}
     </span>
   );
 }

@@ -14,7 +14,10 @@ import { projectLabels } from '../sidebar/project-labels';
 import { displayTitle } from '../sessions/title';
 import { PluginsLibrary } from '../widgets/PluginsWidget';
 import { usePluginsEnv } from '../widgets/plugins/read';
-import { SearchField, Choice } from '../widgets/plugins/LibraryHeader';
+import { SearchField, Choice, LibrarySwitch, type LibraryTab } from '../widgets/plugins/LibraryHeader';
+import { DISCOVER } from './discover/copy';
+import { DiscoverToolbar } from './discover/DiscoverToolbar';
+import { SkillsDiscover } from './discover/SkillsDiscover';
 import { SortIcon } from '../app/IconButton';
 import { SkillsLibrary } from '../widgets/skills/SkillsLibrary';
 import { hasPluginSkills, skillsView, type SkillGroup } from '../widgets/skills/skills';
@@ -84,8 +87,7 @@ export function CustomizeView({ section }: { section: CustomizeSection }) {
       <DirectoryPlugins key={cwd ?? 'user'} cwd={cwd} appSessionId={attached?.appSessionId ?? null} scope={section === 'plugins' ? liveScope : null} />
     </Tabs.Content>
     <Tabs.Content value="skills" className="flex min-h-0 flex-1 flex-col p-3 outline-none data-[state=inactive]:hidden">
-      <InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} refresh={() => void inventory.refetch()} />
-      {inventory.data && <DiskSkills key={cwd ?? 'user'} inventory={inventory.data} refresh={() => void inventory.refetch()} scope={liveScope} />}
+      <SkillsSection key={cwd ?? 'user'} cwd={cwd} inventory={inventory} scope={liveScope} />
     </Tabs.Content>
     <Tabs.Content value="mcp" className="min-h-0 flex-1 overflow-y-auto p-3 outline-none data-[state=inactive]:hidden">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><h2 className="m-0 text-ui font-medium">Configured on disk</h2><button type="button" className={BUTTON} onClick={() => void inventory.refetch()}>Refresh</button></div>
@@ -100,7 +102,7 @@ function DirectoryPlugins({ cwd, appSessionId, scope }: { cwd: string | null; ap
   const env = usePluginsEnv();
   const directory = cwd ?? env.data?.configHome;
   if (!directory) return <InventoryState error={env.error ? new Error(env.error) : null} pending={env.state === 'loading'} refresh={() => void env.reread()} />;
-  return <PluginsLibrary cwd={directory} appSessionId={appSessionId} scope={scope} />;
+  return <PluginsLibrary cwd={directory} appSessionId={appSessionId} scope={scope} discover={{ cwd }} />;
 }
 
 function InventoryState({ error, pending, warnings, refresh }: { error: Error | null; pending: boolean; warnings?: string[]; refresh(): void }) {
@@ -113,7 +115,38 @@ function InventoryState({ error, pending, warnings, refresh }: { error: Error | 
   </>;
 }
 
-function DiskSkills({ inventory, refresh, scope }: { inventory: Inventory; refresh(): void; scope: ReactNode }) {
+// Skills' two views (P4-AGG M3): My items, the skills on disk; Discover, the plugins whose skills are known. An item
+// Discover shows installed here opens My items searched to its plugin.
+function SkillsSection({ cwd, inventory, scope }: { cwd: string | null; inventory: ReturnType<typeof useQuery<Inventory, Error>>; scope: ReactNode }) {
+  const [view, setView] = useState<LibraryTab>('myItems');
+  const switcher = <LibrarySwitch tab={view} onChange={setView} second={DISCOVER.discover} />;
+  const refresh = () => void inventory.refetch();
+  if (view === 'browse')
+    return (
+      <SkillsDiscover
+        cwd={cwd}
+        onOpenInstalled={(item) => {
+          const plugin = item.install.kind === 'plugin' ? item.install.pluginName : item.name;
+          useLibraryStore.setState((state) => ({ skills: { ...state.skills, search: plugin } }));
+          setView('myItems');
+        }}
+      >
+        <div data-customize-toolbar="skills" className="mb-3 flex flex-wrap items-center gap-2 px-2">
+          {switcher}
+          <DiscoverToolbar tab="skills" />
+          {scope && <div className="ml-auto max-w-full shrink-0 @max-sm/customize:ml-0 @max-sm/customize:w-full">{scope}</div>}
+        </div>
+      </SkillsDiscover>
+    );
+  return (
+    <>
+      <InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} refresh={refresh} />
+      {inventory.data ? <DiskSkills inventory={inventory.data} refresh={refresh} scope={scope} switcher={switcher} /> : <div className="mb-3 px-2">{switcher}</div>}
+    </>
+  );
+}
+
+function DiskSkills({ inventory, refresh, scope, switcher }: { inventory: Inventory; refresh(): void; scope: ReactNode; switcher: ReactNode }) {
   const groups = useMemo(() => {
     const result: SkillGroup[] = [];
     for (const [source, group] of [['project', 'here'], ['user', 'yours'], ['plugin', 'added']] as const) {
@@ -129,6 +162,7 @@ function DiskSkills({ inventory, refresh, scope }: { inventory: Inventory; refre
   return <>
     {(!detail || scope) && <div data-customize-toolbar="skills" className="mb-3 flex flex-wrap items-center gap-2 px-2">
       {!detail && <>
+        {switcher}
         <SearchField label={SKILLS_LIBRARY.search} value={view.search} onChange={(search) => useLibraryStore.setState((state) => ({ skills: { ...state.skills, search } }))} />
         {plugins && <Choice label={LIBRARY.sortBy} icon={<SortIcon />} value={view.sort} values={['name', 'plugin'] as const} words={SKILLS_LIBRARY.sort} isDefault={view.sort === 'name'} onChange={(sort) => useLibraryStore.setState((state) => ({ skills: { ...state.skills, sort } }))} />}
         <button type="button" className={BUTTON} onClick={refresh}>Refresh</button>

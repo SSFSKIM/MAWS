@@ -242,7 +242,7 @@ describe('plugins library: embedded and offline', () => {
     await resolved();
     expect(invoked('marketplaces.add')).toEqual([]);
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Add' }));
-    await waitFor(() => expect(invoked('marketplaces.add')).toEqual([{ cwd, binary: BINARY, source: 'example/plugins' }]));
+    await waitFor(() => expect(invoked('marketplaces.add')).toEqual([{ cwd, binary: BINARY, source: 'example/plugins', scope: 'user' }])); // P4-AGG M3: the sheet's scope, user by default
     expect(sessionCalls()).toEqual([]);
   });
 
@@ -747,12 +747,13 @@ describe('plugins widget: management', () => {
     expect(invoked('layout.pickFiles')).toEqual([{ kind: 'directory', directory: null, multiple: false }]);
     fireEvent.click(within(dialog).getByRole('button', { name: 'Add' }));
     await resolved();
-    expect(argvShown()).toEqual(['plugin', 'marketplace', 'add', '/tmp/e8-does-not-exist', '--json']);
+    expect(argvShown()).toEqual(['plugin', 'marketplace', 'add', '/tmp/e8-does-not-exist', '--scope', 'user', '--json']);
     expect(within(sheet()).getByText('Nothing to reload: an added marketplace loads no plugin')).toBeTruthy();
-    expect(within(sheet()).queryByRole('radio')).toBeNull();
+    // P4-AGG M3: the confirmation offers the scope `plugin marketplace add` takes, user by default
+    expect(within(sheet()).getAllByRole('radio').map((radio) => [radio.getAttribute('value'), (radio as HTMLInputElement).checked])).toEqual([['user', true], ['project', false], ['local', false]]);
     expect(invoked('marketplaces.add')).toEqual([]); // nothing before the sheet's confirm
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Add' }));
-    await waitFor(() => expect(invoked('marketplaces.add')).toEqual([{ cwd, binary: BINARY, source: '/tmp/e8-does-not-exist' }]));
+    await waitFor(() => expect(invoked('marketplaces.add')).toEqual([{ cwd, binary: BINARY, source: '/tmp/e8-does-not-exist', scope: 'user' }]));
     act(() =>
       emit('plugins.operation', event({ opId: 'pop-1', action: 'marketplace-add', target: '/tmp/e8-does-not-exist', phase: 'done', outcome: { ok: false, error: { code: 'cli_failed', message: 'Path does not exist: /tmp/e8-does-not-exist', failureCode: 'invalid_source', shownCommand: null } } })),
     );

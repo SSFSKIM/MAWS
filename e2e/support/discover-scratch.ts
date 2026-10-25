@@ -28,6 +28,7 @@ export interface DiscoverScratchOptions {
   projects?: 1 | 2;
   home?: 'scratch' | 'runner';
   remoteServerUrl?: string; // remote-server's MCP URL, e.g. an engine-mode OAuth fixture's `resourceUrl`
+  omitSources?: string[]; // P4-AGG M3: network source keys left out of the recordings, as sources that fail (acceptance 11)
 }
 
 export interface DiscoverScratch {
@@ -68,5 +69,11 @@ export function writeDiscoverScratch(userData: string, configDir: string, option
     mkdirSync(join(userData, 'home'), { recursive: true });
     home = realpathSync(join(userData, 'home'));
   }
-  return { home, configDir, projects, marketplace, testSources, env: { [CATALOG_FIXTURES_ENV]: FIXTURES, [CATALOG_TEST_SOURCES_ENV]: testSources, ...(home !== null && { HOME: home }) } };
+  // the recordings, or a copy of them without the sources a scene leaves out (a missing file is that source failing)
+  let fixtures = FIXTURES;
+  if (options.omitSources?.length) {
+    fixtures = join(userData, 'catalog-fixtures');
+    cpSync(FIXTURES, fixtures, { recursive: true, filter: (path) => !options.omitSources!.some((key) => path === join(FIXTURES, `${key}.json`)) });
+  }
+  return { home, configDir, projects, marketplace, testSources, env: { [CATALOG_FIXTURES_ENV]: fixtures, [CATALOG_TEST_SOURCES_ENV]: testSources, ...(home !== null && { HOME: home }) } };
 }

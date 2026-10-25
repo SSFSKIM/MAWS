@@ -5,12 +5,17 @@
 // marketplace removal. The binary and the paths are `plugins.env`'s: until it answers the default button stays disabled
 // (`Resolving the engine…`, or its refusal). Cancel runs nothing. The second sheet, for a marketplace-declared command the CLI refused to run unseen,
 // shows that command and reruns the request with `--accept-command <sha256>` (never `-y`).
+// P4-AGG M3 (the Discover spec, Design "Adding"): an install asked from Discover also says what gets installed (from
+// Skills, the plugin and its skills), what comes with it, "Also listed by …", and the runs-code warning, or the softer
+// one when its contents are unknown; when the engine does not have its marketplace yet, the sheet shows the first step,
+// `plugin marketplace add` at the same scope, above the install, and announces both steps' writes.
 import { useState } from 'react';
 import { PLUGINS_SCOPES, type PluginsScope } from '@shared/plugins/cli';
 import { Sheet, SheetForm } from '../../sessions/Sheet';
 import { CHOICE, DANGER, PRIMARY } from '../../sessions/ui';
 import { PLUGIN_MANAGEMENT as W } from '../copy';
-import { argvOf, commandWords, dependencyWords, DESTRUCTIVE, overridesWords, SCOPED, scopeOf, targetOf, thenWords, uninstallsWords, writesWords, type PluginsRequest } from './present';
+import { addStepOf, argvOf, commandWords, dependencyWords, DESTRUCTIVE, overridesWords, SCOPED, scopeOf, targetOf, thenWords, uninstallsWords, writesWords, type CatalogInstall, type PluginsRequest } from './present';
+import { DISCOVER as D } from '../../customize/discover/copy';
 
 // A resolved `plugins.env` answer: the binary (the probe's real path; an answer without one is unresolved), the config
 // home the CLI writes and the engine's global config file (inside a `CLAUDE_CONFIG_DIR`, else `~/.claude.json` beside
@@ -51,6 +56,9 @@ export function ConfirmSheet({ request, declared, env, onConfirm, onClose }: { r
   const dependencies = dependencyWords(request.action);
   const overrides = overridesWords(request);
   const uninstalls = uninstallsWords(request);
+  const catalog = declared === null && request.action === 'install' ? (request.catalog ?? null) : null;
+  const addStep = catalog ? addStepOf(asked) : null;
+  const writes = (paths: { configHome: string; cwd: string }) => [...new Set([...(addStep ? writesWords(addStep, paths) : []), ...writesWords(asked, paths)])];
   return (
     <Sheet title={declared ? W.declaredTitle(target) : W.title(W.verb[request.action], target)} width="w-[min(520px,90vw)]" onClose={onClose} data-plugins-sheet={request.action}>
       <SheetForm
@@ -67,6 +75,12 @@ export function ConfirmSheet({ request, declared, env, onConfirm, onClose }: { r
               {declared.command}
             </code>
           </div>
+        )}
+        {catalog && <CatalogSummary catalog={catalog} plugin={target} scope={scope} adds={addStep !== null} />}
+        {addStep && engine && (
+          <code data-plugins-add-argv={JSON.stringify(argvOf(addStep))} title={engine.binary} className="block rounded-sm bg-bg-active px-2 py-1 font-mono text-ui-sm break-all text-fg">
+            {commandWords(engine.binary, argvOf(addStep))}
+          </code>
         )}
         {engine ? (
           <code data-plugins-argv={JSON.stringify(argv)} title={engine.binary} className="block rounded-sm bg-bg-active px-2 py-1 font-mono text-ui-sm break-all text-fg">
@@ -99,7 +113,7 @@ export function ConfirmSheet({ request, declared, env, onConfirm, onClose }: { r
           <div className="flex flex-col gap-0.5 text-ui-sm text-fg-muted">
             <p className="m-0">{W.writes}</p>
             <ul aria-label={W.writes} className="m-0 list-none p-0 font-mono break-all text-fg">
-              {writesWords(asked, { configHome: engine.configHome, cwd }).map((path) => (
+              {writes({ configHome: engine.configHome, cwd }).map((path) => (
                 <li key={path}>{path}</li>
               ))}
             </ul>
@@ -118,5 +132,31 @@ export function ConfirmSheet({ request, declared, env, onConfirm, onClose }: { r
         )}
       </SheetForm>
     </Sheet>
+  );
+}
+
+// What an install from Discover installs: the step line, the contents, the other routes, the runs-code warning.
+function CatalogSummary({ catalog, plugin, scope, adds }: { catalog: CatalogInstall; plugin: string; scope: string; adds: boolean }) {
+  const name = plugin.slice(0, plugin.lastIndexOf('@'));
+  const market = catalog.marketplace.name;
+  const line = catalog.skills !== null ? D.skillPlugin(name, market, catalog.skills) : adds ? D.addsAndInstalls(market, scope, name) : D.installsFrom(name, market);
+  return (
+    <div data-catalog-install className="flex flex-col gap-1 text-ui-sm">
+      <p data-catalog-summary className="m-0 text-fg">
+        {line}
+      </p>
+      {catalog.skills !== null && adds && <p className="m-0 text-fg-muted">{D.addsAndInstalls(market, scope, name)}</p>}
+      {(catalog.contents === null || catalog.contents.length > 0) && (
+        <p data-catalog-contents className="m-0 text-fg-muted">
+          {catalog.contents === null ? D.contentsUnknown : D.comesWith(catalog.contents)}
+        </p>
+      )}
+      {catalog.alsoListedBy.length > 0 && <p className="m-0 text-fg-muted">{D.alsoListedBy(catalog.alsoListedBy)}</p>}
+      {catalog.runsCode && (
+        <p role="note" data-runs-code className="m-0 rounded-sm border border-warning px-2 py-1 text-fg">
+          {catalog.runsCode}
+        </p>
+      )}
+    </div>
   );
 }

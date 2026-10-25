@@ -25,8 +25,9 @@ const LABEL = 'px-2 py-1 text-ui-sm text-fg-muted';
 const set = (patch: Partial<ReturnType<typeof useLibraryStore.getState>['plugins']>) => useLibraryStore.setState((s) => ({ plugins: { ...s.plugins, ...patch } }));
 const setBrowse = (patch: Partial<BrowseChoices>) => useLibraryStore.setState((s) => ({ browse: { ...s.browse, ...patch } }));
 
-// Desktop's segmented switch beside the title: one of two views, each open starting on My items.
-export function LibrarySwitch({ tab, onChange }: { tab: LibraryTab; onChange(tab: LibraryTab): void }) {
+// Desktop's segmented switch beside the title: one of two views, each open starting on My items. Customize names its
+// second view Discover (P4-AGG M3), the session's `/plugins` Browse.
+export function LibrarySwitch({ tab, onChange, second = L.browse }: { tab: LibraryTab; onChange(tab: LibraryTab): void; second?: string }) {
   const item = 'h-6 rounded-sm px-2.5 text-ui text-fg-muted outline-accent hover:text-fg focus-visible:outline-2 data-[state=on]:bg-bg data-[state=on]:text-fg data-[state=on]:ring-1 data-[state=on]:ring-border';
   return (
     <ToggleGroup.Root
@@ -41,7 +42,7 @@ export function LibrarySwitch({ tab, onChange }: { tab: LibraryTab; onChange(tab
         {L.myItems}
       </ToggleGroup.Item>
       <ToggleGroup.Item value="browse" className={item}>
-        {L.browse}
+        {second}
       </ToggleGroup.Item>
     </ToggleGroup.Root>
   );
