@@ -44,6 +44,7 @@ export class CatalogStore {
   private running: Promise<CatalogSourceStatus[]> | null = null;
   private memo: { revision: number; data: NetworkData } | null = null;
   private readonly listeners = new Set<() => void>();
+  private readonly stopping = new AbortController(); // ends every walk in flight (stop)
   private readonly now: () => number;
   private readonly fs: NonNullable<StoreDeps['fs']>;
   revision = 0;
@@ -53,6 +54,11 @@ export class CatalogStore {
   constructor(private readonly deps: StoreDeps) {
     this.now = deps.now ?? Date.now;
     this.fs = deps.fs ?? { readFile, writeFile, rename, mkdir };
+  }
+
+  /** End every walk in flight; a source it ends fails like any other, keeping its copy. */
+  stop(): void {
+    this.stopping.abort();
   }
 
   onChange(listener: () => void): () => void {
@@ -134,7 +140,7 @@ export class CatalogStore {
   private async refreshOne(key: string): Promise<boolean> {
     const at = this.now();
     try {
-      const fetched = await fetchSource(key, this.deps.pages);
+      const fetched = await fetchSource(key, this.deps.pages, { signal: this.stopping.signal });
       this.exchanges.set(key, fetched.exchanges);
       const parsed = parseSource(key, fetched.pages);
       const digest = digestOf(fetched.pages);

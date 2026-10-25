@@ -108,7 +108,8 @@ export class EgressError extends Error {
 
 /** An answer: a 2xx with its bytes and media type, or any other status alone. */
 export type EgressAnswer = { status: number; contentType: string; bytes: Uint8Array } | { status: number; contentType: null; bytes: null };
-export type EgressGet = (url: string, options?: { userAgent?: string; signal?: AbortSignal }) => Promise<EgressAnswer>;
+/** `maxBytes` lowers the route's cap for one request (a walk's remaining budget, fetch.ts); it never raises it. */
+export type EgressGet = (url: string, options?: { userAgent?: string; signal?: AbortSignal; maxBytes?: number }) => Promise<EgressAnswer>;
 /** The fetch underneath, injectable for tests and the e2e. */
 export type BaseFetch = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -154,13 +155,14 @@ export function egressGet(rule: EgressRule, base: BaseFetch = networkFetch): Egr
       await response.body?.cancel().catch(() => {});
       throw new EgressError('contentType', `${url} answered ${contentType || 'no content type'}, not ${route.contentTypes.join(' or ')}`);
     }
+    const max = Math.min(route.maxBytes, options.maxBytes ?? route.maxBytes);
     const declared = Number(response.headers.get('content-length'));
-    if (Number.isFinite(declared) && declared > route.maxBytes) {
+    if (Number.isFinite(declared) && declared > max) {
       await response.body?.cancel().catch(() => {});
-      throw new EgressError('tooLarge', `${url} is ${declared} bytes (over ${route.maxBytes})`);
+      throw new EgressError('tooLarge', `${url} is ${declared} bytes (over ${max})`);
     }
     try {
-      return { status: response.status, contentType, bytes: await bounded(response, route.maxBytes, url) };
+      return { status: response.status, contentType, bytes: await bounded(response, max, url) };
     } catch (error) {
       throw error instanceof EgressError ? error : failed(error, signal, timeout, url);
     }

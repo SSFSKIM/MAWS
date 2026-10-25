@@ -132,6 +132,7 @@ export function startCatalog(deps: CatalogDeps): Catalog {
       offStore();
       offPlugins();
       watch.close();
+      store.stop();
     },
   };
 }

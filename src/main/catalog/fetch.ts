@@ -28,6 +28,11 @@ const offline = (env: Record<string, string | undefined>) => env.MAWS_E2E === '1
 const DIRECTORY = 'https://api.anthropic.com/api/directory';
 const PLUGIN_DETAILS = 'https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/plugin-stats/plugin-details.json';
 const MAX_PAGES = 50; // far past any walk today (the plugins walk is one page, the servers walk three)
+// One source's walk, every page together (scalpel-4#1, #2): the route caps bound one response, these bound the walk. The
+// largest walk measured is the plugins page's 13,149,916 bytes in 1.16 s (2026-10-25); the budget leaves it room to grow
+// about fivefold, and the deadline is one slow 120 s request (the rule's per-request timeout) and half again.
+export const WALK_BUDGET_BYTES = 64 * 1024 * 1024;
+export const WALK_DEADLINE_MS = 180_000;
 
 export const NETWORK_KEYS: readonly string[] = [...SEEDS.map((s) => s.key), 'directory:plugins', 'directory:servers', 'plugin-details'];
 
@@ -67,18 +72,54 @@ export interface Fetched {
   pages: unknown[]; // each page's JSON body, in walk order
   exchanges: Exchange[];
 }
+/** What one page may take of its walk: the walk's one signal (its deadline and its cancellation) and the bytes left. */
+export interface PageLimits {
+  signal: AbortSignal;
+  maxBytes: number;
+}
 /** One page of a source: the first (token null) or the next. */
-export type PageGet = (key: string, token: string | null) => Promise<{ body: unknown; exchange: Exchange }>;
+export type PageGet = (key: string, token: string | null, limits: PageLimits) => Promise<{ body: unknown; exchange: Exchange }>;
+export interface WalkOptions {
+  maxBytes?: number; // WALK_BUDGET_BYTES
+  deadlineMs?: number; // WALK_DEADLINE_MS
+  signal?: AbortSignal; // the caller's cancellation (the store's stop)
+}
 
-/** A source walked whole: its first page, then each page its predecessor names. */
-export async function fetchSource(key: string, get: PageGet): Promise<Fetched> {
+// `promise`, or the signal's end, whichever comes first (a page reader that does not honour the signal still stops the walk).
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    if (signal.aborted) return abort();
+    signal.addEventListener('abort', abort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+  });
+}
+
+/** A source walked whole: its first page, then each page its predecessor names, all of them within one byte budget and
+ * one deadline, under one cancellation. */
+export async function fetchSource(key: string, get: PageGet, options: WalkOptions = {}): Promise<Fetched> {
+  const budget = options.maxBytes ?? WALK_BUDGET_BYTES;
+  const deadlineMs = options.deadlineMs ?? WALK_DEADLINE_MS;
+  const deadline = AbortSignal.timeout(deadlineMs);
+  const signal = options.signal ? AbortSignal.any([options.signal, deadline]) : deadline;
+  const ended = () => new Error(deadline.aborted ? `${key}: the walk passed its ${deadlineMs} ms deadline` : `${key}: the walk was stopped`);
   const pages: unknown[] = [];
   const exchanges: Exchange[] = [];
   const seen = new Set<string>();
+  let spent = 0;
   let token: string | null = null;
   do {
     if (pages.length >= MAX_PAGES) throw new Error(`${key}: more than ${MAX_PAGES} pages`);
-    const { body, exchange } = await get(key, token);
+    if (signal.aborted) throw ended();
+    let page: Awaited<ReturnType<PageGet>>;
+    try {
+      page = await untilAborted(get(key, token, { signal, maxBytes: budget - spent }), signal);
+    } catch (error) {
+      throw signal.aborted ? ended() : error;
+    }
+    const { body, exchange } = page;
+    spent += exchange.bytes;
+    if (spent > budget) throw new Error(`${key}: the walk is over its ${budget} byte budget`);
     pages.push(body);
     exchanges.push(exchange);
     token = nextToken(key, body);
@@ -92,10 +133,10 @@ const decoder = new TextDecoder('utf-8', { fatal: true });
 
 /** The network's pages, through the catalog egress rule. */
 export function networkPages(get: EgressGet, userAgent: string, now: () => number = Date.now): PageGet {
-  return async (key, token) => {
+  return async (key, token, { signal, maxBytes }) => {
     const url = pageUrl(key, token);
     const started = now();
-    const answer = await get(url, { userAgent });
+    const answer = await get(url, { userAgent, signal, maxBytes });
     if (answer.bytes === null) throw new Error(`${url} answered HTTP ${answer.status}`);
     let body: unknown;
     try {
