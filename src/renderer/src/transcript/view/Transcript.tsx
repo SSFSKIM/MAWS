@@ -132,6 +132,8 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
   // 280 px the moment it opens, and the rows below would jump there and back while the disclosure motion starts it
   // from its closed height.
   const measured = useRef(new Map<string, number>());
+  const growthPending = useRef(false); // an observed growth whose follow runs once the observer's delivery is done
+  const followGrowth = useRef<() => void>(() => undefined);
   // New functions invalidate the virtualiser's measurements, so they change only with the rows.
   const getItemKey = useCallback((index: number) => rows[index].id, [rows]);
   const estimateSize = useCallback((index: number) => measured.current.get(rows[index].id) ?? estimateRow(rows[index]), [rows]);
@@ -141,7 +143,19 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     if (scroller && scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= SCROLL_END_THRESHOLD) readScroll(instance.getTotalSize());
     const size = measureElement(element, entry, instance);
     const id = element.getAttribute('data-row-id');
+    const before = id === null ? undefined : measured.current.get(id);
     if (id !== null) measured.current.set(id, size);
+    // A row the observer saw grow while the reader follows is followed once this observer delivery has been measured
+    // whole (a microtask: before the frame paints, and after every row of the delivery is in the virtualiser's total),
+    // not after the sizer's height commits on a re-render a frame or two later, while a streamed answer overflowing it
+    // would sit that far from the end. A shrink is left to the browser's clamp and the content observer, as before.
+    if (entry !== undefined && before !== undefined && size > before && followingRef.current && !growthPending.current) {
+      growthPending.current = true;
+      queueMicrotask(() => {
+        growthPending.current = false;
+        followGrowth.current();
+      });
+    }
     return size;
   }, [readScroll]);
 
@@ -265,6 +279,14 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     const end = committed > size + SCROLL_END_THRESHOLD ? Math.max(0, size - element.clientHeight) : element.scrollHeight;
     virtualizer.scrollToOffset(end, { behavior: 'instant' });
   }, [virtualizer]);
+  // As the content observer below: movement the reader made first (a witnessed key, a reversed scrollbar drag) is read
+  // before the end is followed.
+  useLayoutEffect(() => {
+    followGrowth.current = () => {
+      readScroll(virtualizer.getTotalSize());
+      if (followingRef.current) pinEnd();
+    };
+  }, [pinEnd, readScroll, virtualizer]);
 
   // A transcript opens at its end, and a following reader stays there through every structural change, including a
   // row inserted above the last one (the live answer above its turn's receipt). P4-B3: a carried place
