@@ -27,9 +27,84 @@ it('keeps factual edit titles, counts and inline content when a batch summary ar
   const view = renderRow(rowOf(store.rows(), 'group'), { storeKey: store.key });
   expect(view.container.textContent).toContain('Edited 1 file, created 1 file');
   expect(view.container.textContent).not.toContain('Opaque batch summary');
-  const create = screen.getByRole('button', { name: /Created.*notes.txt.*\+1.*−0/ });
+  const create = screen.getByRole('button', { name: /^Created notes\.txt.*\+1$/ });
+  expect(create.querySelector('.transcript-counts')?.textContent).toBe('+1');
   fireEvent.click(create); view.rerenderRow(rowOf(store.rows(), 'group'));
   expect(view.container.querySelector('[data-diff="add"]')?.textContent).toContain('notes');
+});
+
+it('shows file basenames through the surface wrapper without shortening tooltips, detail chips or model paths', async () => {
+  const b = builder(); b.turn('u');
+  b.toolUse('read', 'Read', { file_path: '/p/docs/readme.md' }); b.result('read', 'Read me');
+  b.toolUse('edit', 'Edit', { file_path: '/p/src/widget.ts', old_string: 'old', new_string: 'new' }); b.result('edit', 'edited');
+  b.toolUse('write', 'Write', { file_path: '/p/docs/notes.txt', content: 'notes\n' });
+  b.result('write', 'created', { structured: { type: 'create', originalFile: null, structuredPatch: [] } });
+  b.toolUse('update', 'Write', { file_path: '/p/docs/existing.txt', content: 'updated\n' });
+  b.result('update', 'written', { structured: { type: 'update', originalFile: 'old\n', structuredPatch: [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ['-old', '+updated'] }] } });
+  b.end(['u']);
+  const store = await storeWith(b.events); useTranscriptStore.getState().expandAll(store.key);
+  const group = rowOf(store.rows(), 'group');
+  const original = structuredClone(group.cells);
+  const view = renderRow(group, { storeKey: store.key });
+  const buttons = [...view.container.querySelectorAll<HTMLButtonElement>('.transcript-cell-line')];
+  expect(buttons.map((button) => button.querySelector('.transcript-cell-label')?.textContent)).toEqual([
+    'Read readme.md', 'Edited widget.ts', 'Created notes.txt', 'Edited existing.txt',
+  ]);
+  expect(buttons.map((button) => button.title)).toEqual(['/p/docs/readme.md', '/p/src/widget.ts', '/p/docs/notes.txt', '/p/docs/existing.txt']);
+  expect(group.cells).toEqual(original);
+  expect(group.cells[1]).toMatchObject({ paths: ['/p/src/widget.ts'], label: 'Edited /p/src/widget.ts +1 −1', detail: { filePath: '/p/src/widget.ts' } });
+  fireEvent.click(buttons[1]); view.rerenderRow(rowOf(store.rows(), 'group'));
+  const file = screen.getByRole('button', { name: '/p/src/widget.ts' });
+  expect(file.textContent).toBe('/p/src/widget.ts');
+  expect(file.title).toBe('/p/src/widget.ts');
+  fireEvent.click(file);
+  expect(view.actions.openFile).toHaveBeenCalledWith('/p/src/widget.ts', undefined);
+});
+
+it('uses each same-basename file’s shortest distinguishing suffix through wrapped group cells', async () => {
+  const b = builder(); b.turn('u');
+  b.toolUse('read', 'Read', { file_path: '/p/a/x/index.ts' }); b.result('read', 'first');
+  b.toolUse('edit', 'Edit', { file_path: '/p/b/x/index.ts', old_string: 'old', new_string: 'new' }); b.result('edit', 'edited');
+  b.toolUse('create', 'Write', { file_path: '/p/c/index.ts', content: 'new\n' });
+  b.result('create', 'created', { structured: { type: 'create', originalFile: null, structuredPatch: [] } });
+  b.toolUse('repeat', 'Read', { file_path: '/p/a/x/index.ts' }); b.result('repeat', 'first again');
+  b.end(['u']);
+  const store = await storeWith(b.events); useTranscriptStore.getState().expandAll(store.key);
+  const view = renderRow(rowOf(store.rows(), 'group'), { storeKey: store.key });
+  const buttons = [...view.container.querySelectorAll<HTMLButtonElement>('.transcript-cell-line')];
+  expect(buttons.map((button) => button.querySelector('.transcript-cell-label')?.textContent)).toEqual([
+    'Read a/x/index.ts', 'Edited b/x/index.ts', 'Created c/index.ts', 'Read a/x/index.ts',
+  ]);
+  expect(buttons.map((button) => button.title)).toEqual(['/p/a/x/index.ts', '/p/b/x/index.ts', '/p/c/index.ts', '/p/a/x/index.ts']);
+});
+
+it('keeps the basename when repeated file references all name the same full path', async () => {
+  const b = builder(); b.turn('u');
+  b.toolUse('read', 'Read', { file_path: '/p/src/index.ts' }); b.result('read', 'old');
+  b.toolUse('edit', 'Edit', { file_path: '/p/src/index.ts', old_string: 'old', new_string: 'new' }); b.result('edit', 'edited');
+  b.toolUse('repeat', 'Read', { file_path: '/p/src/index.ts' }); b.result('repeat', 'new');
+  b.end(['u']);
+  const store = await storeWith(b.events); useTranscriptStore.getState().expandAll(store.key);
+  const view = renderRow(rowOf(store.rows(), 'group'), { storeKey: store.key });
+  expect([...view.container.querySelectorAll('.transcript-cell-label')].map((label) => label.textContent)).toEqual([
+    'Read index.ts', 'Edited index.ts', 'Read index.ts',
+  ]);
+});
+
+it.each([
+  { name: 'additions only', old: '', next: 'new', cellCounts: '+1', groupCounts: '+2' },
+  { name: 'removals only', old: 'old', next: '', cellCounts: '−1', groupCounts: '−2' },
+  { name: 'both sides', old: 'old', next: 'new', cellCounts: '+1 −1', groupCounts: '+2 −2' },
+  { name: 'no changed lines', old: '', next: '', cellCounts: null, groupCounts: null },
+])('shows only nonzero cell and group line counts for $name', async ({ old, next, cellCounts, groupCounts }) => {
+  const b = builder(); b.turn('u');
+  b.toolUse('a', 'Edit', { file_path: '/p/a.ts', old_string: old, new_string: next }); b.result('a', 'done');
+  b.toolUse('b', 'Edit', { file_path: '/p/b.ts', old_string: old, new_string: next }); b.result('b', 'done');
+  b.end(['u']);
+  const store = await storeWith(b.events); useTranscriptStore.getState().expandAll(store.key);
+  const view = renderRow(rowOf(store.rows(), 'group'), { storeKey: store.key });
+  expect([...view.container.querySelectorAll('.transcript-cell-line')].map((line) => line.querySelector('.transcript-counts')?.textContent ?? null)).toEqual([cellCounts, cellCounts]);
+  expect(view.container.querySelector('.transcript-group-summary .transcript-counts')?.textContent ?? null).toBe(groupCounts);
 });
 
 it('shows the latest readable thinking line while retaining the full disclosure', async () => {

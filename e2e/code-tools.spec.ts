@@ -159,7 +159,9 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
     await cell.locator('.transcript-cell-line').click();
     await expect(cell.locator('.transcript-diff-line[data-diff="add"]').first()).toBeVisible();
     await expect(cell.locator('.transcript-diff-line[data-diff="del"]').first()).toBeVisible();
-    await cell.getByRole('button', { name: 'app.ts', exact: true }).click();
+    const file = cell.getByRole('button', { name: '/tmp/maws-synth-edit-and-receipt/src/app.ts', exact: true });
+    await expect(file).toHaveAttribute('title', '/tmp/maws-synth-edit-and-receipt/src/app.ts');
+    await file.click();
     await expect(h.page.locator('[data-file-viewer][data-path="/tmp/maws-synth-edit-and-receipt/src/app.ts"]')).toBeVisible();
     h.expectQuietConsole();
   });
@@ -286,7 +288,9 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
           [
             "Last turn over the tool rows’ hunks",
             async () => {
-              await h.region.locator('[data-chip="turn"]').click();
+              await h.page.locator('[data-code-harness-transcript]').getByRole('button', { name: 'Turn summary' }).click();
+              await h.page.getByRole('button', { name: 'Review changes', exact: true }).click();
+              await expect(h.region.locator('[data-chip="turn"]')).toHaveAttribute('aria-pressed', 'true');
               await expect.poll(async () => (await h.review('panel'))?.scope).toBe('turn');
               await expect(h.region.locator('[data-review-body] tr[data-state="diff"]').first()).toBeVisible();
             },

@@ -30,11 +30,14 @@ export function CodeText({ text }: { text: string }) {
   );
 }
 
-// `+{added} −{removed}` in the diff colours.
+// Nonzero `+{added}` and `−{removed}` sides in the diff colours.
 export function LineCounts({ added, removed }: { added: number; removed: number }) {
+  if (added === 0 && removed === 0) return null;
   return (
     <span className="transcript-counts">
-      <span className="transcript-add">+{added}</span> <span className="transcript-del">−{removed}</span>
+      {added > 0 && <span className="transcript-add">+{added}</span>}
+      {added > 0 && removed > 0 && ' '}
+      {removed > 0 && <span className="transcript-del">−{removed}</span>}
     </span>
   );
 }
