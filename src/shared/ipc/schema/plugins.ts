@@ -41,9 +41,10 @@ export const InstalledPluginSchema = z.strictObject({
 export type InstalledPlugin = z.infer<typeof InstalledPluginSchema>;
 
 // P2-B start (2026-10-09): a marketplace entry's source reduced (P2-B execution document §5.3): the relative path an
-// in-repository entry has, or the object's kind and locators, and the branch or tag it is pinned to where that pin
-// decides the engine's fold key (the architect's ruling, M2's fix wave); nothing else of it crosses
-export const PluginSourceRefSchema = z.union([z.string(), z.strictObject({ kind: z.string(), url: z.string().nullable(), repo: z.string().nullable(), path: z.string().nullable(), ref: z.string().nullable().optional() })]);
+// in-repository entry has, or the object's kind and locators, and its pins: the branch or tag (`ref`) and the commit
+// (`sha`), both kept whatever the other says (P4-AGG M2: each Discover route keeps its own pin; `sourceKey` reads which
+// pin decides the engine's fold key); nothing else of it crosses. Both pins are optional for a producer that names none.
+export const PluginSourceRefSchema = z.union([z.string(), z.strictObject({ kind: z.string(), url: z.string().nullable(), repo: z.string().nullable(), path: z.string().nullable(), ref: z.string().nullable().optional(), sha: z.string().nullable().optional() })]);
 export type PluginSourceRef = z.infer<typeof PluginSourceRefSchema>;
 // P2-B end
 
@@ -123,6 +124,17 @@ export const PluginManifestViewSchema = z.strictObject({
 });
 export type PluginManifestView = z.infer<typeof PluginManifestViewSchema>;
 // P2-B end
+// P4-AGG M2 start: `plugins.marketplaceManifest` (docs/doperpowers/specs/2026-10-24-plugin-aggregator-design.md,
+// Interfaces): one marketplace the engine has, read whole from its clone for Discover's catalog: its owner, and per entry
+// its author, its source with both pins, and its contents where the plugin sits in the clone (`null`: not on disk before
+// install, or not reached before the deadline, then `partial`). A marketplace the engine does not have answers `unknown`.
+export const MarketplaceManifestViewSchema = z.strictObject({
+  state: z.enum(['read', 'missing', 'unknown']),
+  owner: z.string().nullable(),
+  plugins: z.array(z.strictObject({ name: z.string(), author: z.string().nullable(), source: PluginSourceRefSchema.nullable(), components: PluginManifestViewSchema.shape.components.nullable(), partial: z.boolean(), problems: z.array(z.string()) })),
+});
+export type MarketplaceManifestView = z.infer<typeof MarketplaceManifestViewSchema>;
+// P4-AGG M2 end
 
 const cwd = { cwd: PluginsCwdSchema };
 const plugin = { ...cwd, binary: PluginsBinarySchema, plugin: PluginsArgumentSchema, scope: PluginsScopeSchema.optional() };
@@ -142,6 +154,7 @@ export const commands = {
   // P2-B start (2026-10-09): a read of files only, admitted by the host's own last listings for the cwd
   'plugins.manifest': host(z.strictObject({ cwd: PluginsCwdSchema, items: z.array(ManifestItemRefSchema).max(256) }), z.strictObject({ manifests: z.array(PluginManifestViewSchema) })),
   // P2-B end
+  'plugins.marketplaceManifest': host(z.strictObject({ cwd: PluginsCwdSchema, name: PluginsArgumentSchema }), MarketplaceManifestViewSchema), // P4-AGG M2: a read of one marketplace's clone
 } as const satisfies Record<`plugins.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

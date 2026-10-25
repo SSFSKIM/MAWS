@@ -1,0 +1,157 @@
+// P4-AGG M2: the catalog service over `catalog.*` (the Discover spec, M2 Decisions): the engine's reads go through the
+// host and are held per cwd until `plugins.changed`, which also tells the renderer `catalog.changed` once; Refresh reads
+// the engine again; a cwd of null reads the user configuration in the engine's configuration directory; an engine that
+// cannot be read leaves the network's items; the test-source seam makes the local test marketplace discoverable.
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
+import { commands } from '@shared/ipc/schema';
+import { NETWORK_FIXTURES, PROJECT_A, recordedEngine, TEST_MARKETPLACE } from '../../../test/support/catalog-inputs';
+import type { HostCall } from './engine-reads';
+import { startCatalog } from './index';
+import type { EngineView } from './normalize';
+
+let userData: string;
+beforeEach(() => {
+  userData = mkdtempSync(join(tmpdir(), 'maws-agg-service-'));
+});
+afterEach(() => rmSync(userData, { recursive: true, force: true }));
+
+const CONFIG_HOME = '/scratch-root/config';
+
+// The engine host as the catalog asks it, answering from a recorded view; counts each command.
+function host(view: () => Promise<EngineView>, failing = false) {
+  const asked: { name: string; input: unknown }[] = [];
+  const call = (async (name: CommandName, input: unknown): Promise<CommandResult<CommandName>> => {
+    asked.push({ name, input });
+    if (failing) return { ok: false, error: { code: 'host_unavailable', message: 'the engine host is not running' } };
+    const v = await view();
+    const value = (() => {
+      switch (name) {
+        case 'plugins.env':
+          return { binary: '/bin/claude', binaryError: null, configHome: CONFIG_HOME, globalConfig: `${CONFIG_HOME}/.claude.json` };
+        case 'plugins.list':
+          return { plugins: v.installed };
+        case 'plugins.available':
+          return { plugins: v.available };
+        case 'marketplaces.list':
+          return { marketplaces: v.marketplaces };
+        case 'plugins.marketplaceManifest':
+          return v.manifests.get((input as CommandInput<'plugins.marketplaceManifest'>).name) ?? { state: 'unknown', owner: null, plugins: [] };
+        case 'customization.inventory':
+          return { skills: [], servers: (v.servers ?? []).map((n) => ({ name: n, scope: 'user', path: '/x/.claude.json', transport: 'http' })), warnings: [] };
+        default:
+          throw new Error(`unexpected ${name}`);
+      }
+    })();
+    const checked = commands[name].output.safeParse(value); // the host's answers are the contract's shape
+    if (!checked.success) throw new Error(`${name}: ${checked.error.message}`);
+    return { ok: true, value: checked.data } as CommandResult<CommandName>;
+  }) as HostCall;
+  return { asked, call };
+}
+
+function service(call: HostCall, env: Record<string, string> = {}) {
+  const handlers = new Map<string, (input: unknown) => Promise<unknown>>();
+  const emitted: string[] = [];
+  const changedListeners = new Set<() => void>();
+  const catalog = startCatalog({
+    register: ((name: string, handler: (input: unknown) => Promise<unknown>) => handlers.set(name, handler)) as never,
+    emit: (name) => emitted.push(name),
+    call,
+    onPluginsChanged: (listener) => (changedListeners.add(listener), () => changedListeners.delete(listener)),
+    userData,
+    env: { MAWS_CATALOG_FIXTURES: NETWORK_FIXTURES, ...env },
+    userAgent: 'MAWS/test',
+    log: () => {},
+  });
+  const invoke = <N extends CommandName>(name: N, input: CommandInput<N>) => handlers.get(name)!(input) as Promise<CommandOutput<N>>;
+  return { invoke, emitted, catalog, pluginsChanged: () => changedListeners.forEach((l) => l()), handlers };
+}
+
+describe('the catalog service', () => {
+  it('registers exactly the catalog commands', () => {
+    const { handlers } = service(host(() => recordedEngine(PROJECT_A)).call);
+    expect([...handlers.keys()].sort()).toEqual(Object.keys(commands).filter((n) => n.startsWith('catalog.')).sort());
+  });
+
+  it('holds the engine’s reads per cwd until plugins.changed, then reads again and says catalog.changed once', async () => {
+    const engine = host(() => recordedEngine(PROJECT_A));
+    const { invoke, emitted, pluginsChanged } = service(engine.call);
+    const home = await invoke('catalog.home', { tab: 'plugins', cwd: PROJECT_A });
+    expect(home.featured?.name).toBe('frontend-design');
+    await invoke('catalog.query', { tab: 'plugins', cwd: PROJECT_A, text: 'legal' });
+    const lists = () => engine.asked.filter((a) => a.name === 'plugins.list').length;
+    expect(lists()).toBe(1);
+    expect(emitted).toEqual(['catalog.changed']); // the first fetch of the sources changed the catalog
+    emitted.length = 0;
+    expect(engine.asked.filter((a) => a.name === 'plugins.marketplaceManifest').map((a) => a.input)).toEqual([{ cwd: PROJECT_A, name: 'maws-discover-test' }, { cwd: PROJECT_A, name: 'maws-recorded-pins' }]);
+    pluginsChanged();
+    expect(emitted).toEqual(['catalog.changed']);
+    await invoke('catalog.home', { tab: 'plugins', cwd: PROJECT_A });
+    expect(lists()).toBe(2);
+  });
+
+  it('restarts a page whose cursor predates an invalidation', async () => {
+    const { invoke, pluginsChanged } = service(host(() => recordedEngine(PROJECT_A)).call);
+    const first = await invoke('catalog.query', { tab: 'plugins', cwd: PROJECT_A, limit: 10 });
+    expect((await invoke('catalog.query', { tab: 'plugins', cwd: PROJECT_A, limit: 10, cursor: first.nextCursor })).restarted).toBe(false);
+    pluginsChanged();
+    expect(await invoke('catalog.query', { tab: 'plugins', cwd: PROJECT_A, limit: 10, cursor: first.nextCursor })).toMatchObject({ restarted: true, items: first.items });
+  });
+
+  it('reads the user configuration in the engine’s configuration directory', async () => {
+    const engine = host(() => recordedEngine(CONFIG_HOME));
+    const { invoke } = service(engine.call);
+    await invoke('catalog.home', { tab: 'plugins', cwd: null });
+    expect(engine.asked.find((a) => a.name === 'plugins.list')?.input).toEqual({ cwd: CONFIG_HOME });
+    expect(engine.asked.find((a) => a.name === 'customization.inventory')?.input).toEqual({ cwd: null });
+  });
+
+  it('Refresh reads the network sources and the engine again, saying catalog.changed once', async () => {
+    const engine = host(() => recordedEngine(PROJECT_A));
+    const { invoke, emitted } = service(engine.call);
+    await invoke('catalog.home', { tab: 'plugins', cwd: PROJECT_A });
+    emitted.length = 0;
+    const statuses = await invoke('catalog.refresh', {});
+    expect(statuses).toHaveLength(15);
+    expect(statuses.every((s) => s.state === 'fresh' && s.fetchedAt !== null)).toBe(true);
+    expect(emitted).toEqual(['catalog.changed']); // the recordings did not change: the engine's reads did
+    await invoke('catalog.home', { tab: 'plugins', cwd: PROJECT_A });
+    expect(engine.asked.filter((a) => a.name === 'plugins.list')).toHaveLength(2);
+  });
+
+  it('answers the sources’ states, a missing recording unavailable and the rest standing', async () => {
+    const fixtures = mkdtempSync(join(tmpdir(), 'maws-agg-partial-'));
+    try {
+      for (const key of ['seed:claude-plugins-official', 'directory:servers']) writeFileSync(join(fixtures, `${key}.json`), JSON.stringify((await import(join(NETWORK_FIXTURES, `${key}.json`), { with: { type: 'json' } })).default));
+      const { invoke } = service(host(() => recordedEngine(PROJECT_A)).call, { MAWS_CATALOG_FIXTURES: fixtures });
+      expect((await invoke('catalog.home', { tab: 'connectors', cwd: PROJECT_A })).total).toBe(10);
+      const states = Object.fromEntries((await invoke('catalog.sources', {})).map((s) => [s.key, s.state]));
+      expect(states).toMatchObject({ 'seed:claude-plugins-official': 'fresh', 'directory:servers': 'fresh', 'directory:plugins': 'unavailable', 'plugin-details': 'unavailable' });
+    } finally {
+      rmSync(fixtures, { recursive: true, force: true });
+    }
+  });
+
+  it('with the engine host down, still answers the network’s items; an unknown id is refused', async () => {
+    const { invoke } = service(host(() => recordedEngine(PROJECT_A), true).call);
+    const page = await invoke('catalog.query', { tab: 'plugins', cwd: PROJECT_A, limit: 200 });
+    expect(page.total).toBeGreaterThan(60);
+    expect(page.items.find((i) => i.name === 'agentmail' || i.name === 'AgentMail')?.install).toMatchObject({ kind: 'manual', reason: 'Not installable by this engine: its listing could not be read' });
+    await expect(invoke('catalog.item', { id: 'nothing', cwd: PROJECT_A })).rejects.toMatchObject({ error: { code: 'invalid_input' } });
+  });
+
+  it('makes the test source discoverable before the engine has its marketplace', async () => {
+    const descriptor = join(userData, 'catalog-test-sources.json');
+    writeFileSync(descriptor, JSON.stringify([{ key: 'test:maws-discover-test', label: 'MAWS Discover test marketplace', ownership: 'added', marketplaceName: 'maws-discover-test', marketplaceSource: TEST_MARKETPLACE, manifestPath: join(TEST_MARKETPLACE, '.claude-plugin/marketplace.json') }]));
+    const bare = host(() => recordedEngine(PROJECT_A, { marketplaces: [], available: [], installed: [], manifests: new Map() }));
+    const { invoke } = service(bare.call, { MAWS_CATALOG_TEST_SOURCES: descriptor });
+    const added = (await invoke('catalog.home', { tab: 'plugins', cwd: PROJECT_A })).shelves[0]!;
+    expect(added).toMatchObject({ key: 'added', title: 'Your sources', total: 4 });
+    const hooked = await invoke('catalog.item', { id: `local:${TEST_MARKETPLACE}#plugins/hooked`, cwd: PROJECT_A });
+    expect(hooked).toMatchObject({ publisher: 'MAWS e2e hooks', runsOnYourComputer: true, install: { marketplaceSource: TEST_MARKETPLACE, present: false } });
+  });
+});

@@ -66,9 +66,10 @@ import * as presentations from './schema/presentations'; // P3-C M6
 import * as connectors from './schema/connectors'; // P3-H H3b
 import * as delivery from './schema/delivery'; // P4-B5
 import * as customization from './schema/customization'; // UX2-K
+import * as catalog from './schema/catalog'; // P4-AGG M2
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
-const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */, designSystems /* P3-D */, presentations /* P3-C M6 */, connectors /* P3-H H3b */, delivery /* P4-B5 */, customization /* UX2-K */ } satisfies Record<
+const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */, designSystems /* P3-D */, presentations /* P3-C M6 */, connectors /* P3-H H3b */, delivery /* P4-B5 */, customization /* UX2-K */, catalog /* P4-AGG M2 */ } satisfies Record<
   Namespace,
   { commands: object; events: object }
 >;
@@ -604,7 +605,7 @@ describe('ipc schema validates both directions', () => {
       // added since; E2's `deliverables` was too, until P3-L's cutover removed it).
       const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
       for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
-      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */, 'designSystems' /* P3-D */, 'presentations' /* P3-C M6 */, 'connectors' /* P3-H H3b */, 'delivery' /* P4-B5 */, 'customization' /* UX2-K */]);
+      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */, 'designSystems' /* P3-D */, 'presentations' /* P3-C M6 */, 'connectors' /* P3-H H3b */, 'delivery' /* P4-B5 */, 'customization' /* UX2-K */, 'catalog' /* P4-AGG M2 */]);
       for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });
@@ -806,7 +807,7 @@ describe('ipc schema validates both directions', () => {
   describe('E8 entries', () => {
     const cwd = '/r';
     it('adds plugins.* and marketplaces.*, every command owned by the engine host, and session.reloadSkills as an operation', () => {
-      expect(Object.keys(plugins.commands)).toEqual(['plugins.env', 'plugins.list', 'plugins.available', 'plugins.install', 'plugins.update', 'plugins.uninstall', 'plugins.enable', 'plugins.disable', 'plugins.cancel', 'plugins.manifest' /* P2-B */]);
+      expect(Object.keys(plugins.commands)).toEqual(['plugins.env', 'plugins.list', 'plugins.available', 'plugins.install', 'plugins.update', 'plugins.uninstall', 'plugins.enable', 'plugins.disable', 'plugins.cancel', 'plugins.manifest' /* P2-B */, 'plugins.marketplaceManifest' /* P4-AGG M2 */]);
       expect(Object.keys(plugins.events)).toEqual(['plugins.operation', 'plugins.changed']);
       expect(Object.keys(marketplaces.commands)).toEqual(['marketplaces.list', 'marketplaces.add', 'marketplaces.update', 'marketplaces.remove']);
       expect(Object.keys(marketplaces.events)).toEqual([]);
@@ -887,11 +888,29 @@ describe('ipc schema validates both directions', () => {
       const row = { pluginId: 'p@m', name: 'p', marketplaceName: 'm', description: null, version: null };
       expect(validateCommandOutput('plugins.available', { plugins: [{ ...row, source: './plugins/p', installCount: 1290640 }] }).ok).toBe(true);
       expect(validateCommandOutput('plugins.available', { plugins: [{ ...row, source: { kind: 'git-subdir', url: 'https://github.com/a/b', repo: null, path: 'plugins/p' }, installCount: null }] }).ok).toBe(true);
-      expect(validateCommandOutput('plugins.available', { plugins: [{ ...row, source: { kind: 'url', url: 'https://x', repo: null, path: null, sha: 'f' }, installCount: null }] }).ok).toBe(false);
+      expect(validateCommandOutput('plugins.available', { plugins: [{ ...row, source: { kind: 'url', url: 'https://x', repo: null, path: null, sha: 'f' }, installCount: null }] }).ok).toBe(true); // P4-AGG M2: the sha kept
+      expect(validateCommandOutput('plugins.available', { plugins: [{ ...row, source: { kind: 'url', url: 'https://x', repo: null, path: null, ref: 'main', sha: 'f'.repeat(40) }, installCount: null }] }).ok).toBe(true); // both pins
+      expect(validateCommandOutput('plugins.available', { plugins: [{ ...row, source: { kind: 'url', url: 'https://x', repo: null, path: null, sha: 7 }, installCount: null }] }).ok).toBe(false);
+      expect(validateCommandOutput('plugins.available', { plugins: [{ ...row, source: { kind: 'url', url: 'https://x', repo: null, path: null, owner: 'o' }, installCount: null }] }).ok).toBe(false);
       expect(validateCommandOutput('plugins.available', { plugins: [{ ...row, source: { kind: 'github', url: null, repo: 'a/b', path: null, ref: 'v2' }, installCount: null }] }).ok).toBe(true); // the architect's ref
       expect(validateCommandOutput('plugins.available', { plugins: [{ ...row, source: { kind: 'github', url: null, repo: 'a/b', path: null, ref: 7 }, installCount: null }] }).ok).toBe(false);
       expect(validateCommandOutput('plugins.available', { plugins: [{ ...row, source: null, installCount: -1 }] }).ok).toBe(false);
       expect(validateCommandOutput('plugins.available', { plugins: [row] }).ok).toBe(false);
+    });
+
+    // P4-AGG M2: one marketplace's clone read whole for Discover's catalog
+    it('plugins.marketplaceManifest is an engine-host read of a marketplace named, never a path; its entries carry no value', () => {
+      expect(plugins.commands['plugins.marketplaceManifest'].owner).toBe('engine-host');
+      expect(NAMES.plugins.commands).toContain('plugins.marketplaceManifest');
+      expect(validateCommandInput('plugins.marketplaceManifest', { cwd, name: 'maws-discover-test' }).ok).toBe(true);
+      expect(validateCommandInput('plugins.marketplaceManifest', { cwd, name: '--scope' }).ok).toBe(false);
+      expect(validateCommandInput('plugins.marketplaceManifest', { cwd, name: 'm', path: '/etc' }).ok).toBe(false);
+      const components = { mcpServers: [{ name: 's', transport: 'stdio' }], mcpBundles: 0, agents: [], hooks: [], hookModules: 0, monitors: [], lspServers: [], commands: [], skills: [{ name: 'k', description: null }] };
+      const entry = { name: 'p', author: 'A', source: './plugins/p', components, partial: false, problems: [] };
+      expect(validateCommandOutput('plugins.marketplaceManifest', { state: 'read', owner: 'O', plugins: [entry, { ...entry, source: { kind: 'github', url: null, repo: 'a/b', path: null, ref: 'v1', sha: 'b'.repeat(40) }, components: null }] }).ok).toBe(true);
+      expect(validateCommandOutput('plugins.marketplaceManifest', { state: 'unknown', owner: null, plugins: [] }).ok).toBe(true);
+      expect(validateCommandOutput('plugins.marketplaceManifest', { state: 'read', owner: null, plugins: [{ ...entry, components: { ...components, mcpServers: [{ name: 's', transport: 'stdio', command: 'npx' }] } }] }).ok).toBe(false);
+      expect(validateCommandOutput('plugins.marketplaceManifest', { state: 'read', owner: null, plugins: [{ ...entry, url: 'https://x' }] }).ok).toBe(false);
     });
   });
   // P2-B end

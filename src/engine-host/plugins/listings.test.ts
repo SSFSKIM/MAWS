@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import type { Marketplace } from '@shared/ipc/schema/marketplaces';
 import type { ManifestItemRef, PluginManifestView } from '@shared/ipc/schema/plugins';
 import type { PluginListRow } from './cli-result';
-import { LastListings, manifestsFor } from './listings';
+import { LastListings, manifestsFor, marketplaceManifestFor } from './listings';
 import type { ManifestAnchors } from './manifest';
 
 const row = (id: string, over: Partial<PluginListRow> = {}): PluginListRow => ({
@@ -141,5 +141,47 @@ describe('manifestsFor', () => {
     await manifestsFor('/w', [user('b@m'), user('a@m')], { listings, ...lists([[]], [[]]), read, now: () => clock++ });
     expect(seen.map((s) => s.key)).toEqual([user('b@m'), user('a@m')]);
     expect(new Set(seen.map((s) => s.deadline))).toEqual(new Set([1_000 + 2_500]));
+  });
+});
+
+// P4-AGG M2: `plugins.marketplaceManifest`: one marketplace the engine has, read from the clone its listing names.
+describe('marketplaceManifestFor', () => {
+  const answer = { state: 'read' as const, owner: 'o', plugins: [] };
+  const lists = (...answers: Marketplace[][]) => {
+    const calls = { marketplaces: 0 };
+    return { calls, listMarketplaces: async () => answers[calls.marketplaces++] ?? [] };
+  };
+
+  it('reads the clone at the installLocation of the cwd’s kept listing, under the read deadline', async () => {
+    const listings = new LastListings();
+    listings.keepMarketplaces('/w', [market('m', '/clones/m')]);
+    const seen: { root: string; deadline: number | undefined }[] = [];
+    const read = async (root: string, deps?: { deadline?: number }) => (seen.push({ root, deadline: deps?.deadline }), answer);
+    const cli = lists();
+    expect(await marketplaceManifestFor('/w', 'm', { listings, listMarketplaces: cli.listMarketplaces, read, now: () => 5 })).toEqual(answer);
+    expect(seen).toEqual([{ root: '/clones/m', deadline: 5 + 2_500 }]);
+    expect(cli.calls.marketplaces).toBe(0);
+  });
+
+  it('a marketplace the kept listing does not name is listed once more; one the engine does not have answers unknown', async () => {
+    const listings = new LastListings();
+    listings.keepMarketplaces('/w', []);
+    const read = async () => answer;
+    const cli = lists([market('n', '/clones/n')]);
+    expect(await marketplaceManifestFor('/w', 'n', { listings, listMarketplaces: cli.listMarketplaces, read })).toEqual(answer);
+    expect(cli.calls.marketplaces).toBe(1);
+    expect(listings.marketplaces('/w')).toEqual([market('n', '/clones/n')]); // what it listed is kept
+    const again = lists([market('n', '/clones/n')]);
+    expect(await marketplaceManifestFor('/w', 'gone', { listings, listMarketplaces: again.listMarketplaces, read })).toEqual({ state: 'unknown', owner: null, plugins: [] });
+    // the built-in Anthropic Directory is never a marketplace row, and a row with no clone is not read
+    listings.keepMarketplaces('/w', [market('blank', null)]);
+    expect(await marketplaceManifestFor('/w', 'blank', { listings, listMarketplaces: lists().listMarketplaces, read })).toEqual({ state: 'unknown', owner: null, plugins: [] });
+  });
+
+  it('a failing listing answers unknown, never throws', async () => {
+    const failing = async () => {
+      throw new Error('the CLI exited 1');
+    };
+    expect(await marketplaceManifestFor('/x', 'm', { listings: new LastListings(), listMarketplaces: failing, read: async () => answer })).toEqual({ state: 'unknown', owner: null, plugins: [] });
   });
 });

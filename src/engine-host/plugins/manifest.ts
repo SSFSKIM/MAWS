@@ -26,14 +26,15 @@ import { constants } from 'node:fs';
 import * as nodeFs from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import { basename, join, relative, resolve } from 'node:path';
-import type { ManifestItemRef, PluginManifestView } from '@shared/ipc/schema/plugins';
-import { under } from './cli-result';
+import type { ManifestItemRef, MarketplaceManifestView, PluginManifestView } from '@shared/ipc/schema/plugins';
+import { sourceRefOf, under } from './cli-result';
 import { frontMatter } from './front-matter';
 
 export interface ManifestAnchors {
   root: string | null; // the plugin's directory (an installation's `readFromFolder` or `installPath`); null for an available entry
   marketplaceRoot: string | null; // the marketplace row's `installLocation`
   entryName: string; // the plugin's name: its entry in the marketplace's `marketplace.json`
+  entry?: Record<string, unknown> | null; // that entry, already read (`readMarketplaceManifest`): marketplace.json is not read again
 }
 
 export interface ManifestReaderDeps {
@@ -600,8 +601,9 @@ class Inventory {
       if (file !== null) await this.skill(child, file);
     }
   }
-  async skills(declared: Declaration[]): Promise<void> {
-    const dir = await this.at('skills', 'skills');
+  // `defaultFolder` false: the plugin's default `skills/` is not read (an entry at its marketplace's root naming its skills)
+  async skills(declared: Declaration[], defaultFolder = true): Promise<void> {
+    const dir = defaultFolder ? await this.at('skills', 'skills') : null;
     if (dir !== null && (await this.r.kind(dir)) === 'directory') await this.skillsIn(dir);
     for (const { value, by } of declared) {
       if (typeof value !== 'string' && !Array.isArray(value)) {
@@ -622,6 +624,16 @@ class Inventory {
       }
     }
   }
+}
+
+// P4-AGG M2: an entry whose source is its marketplace's root (`./`) and that names its skills loads those skills only:
+// the root's own `skills/` is dropped unless a named path is that folder or the root (2.1.309 cli.pretty.js
+// 740849-740866). anthropics/skills lists five plugins this way, each with its own skills.
+function namesItsSkillsAtRoot(entry: Json | null): boolean {
+  if (entry === null || typeof entry.source !== 'string' || !entry.source.split(/[\\/]/).every((segment) => segment === '' || segment === '.')) return false;
+  const named = entry.skills === undefined ? [] : pathsOf(entry.skills).filter((path): path is string => typeof path === 'string');
+  const folder = (path: string) => path.split(/[\\/]/).filter((segment) => segment !== '' && segment !== '.').join('/');
+  return named.length > 0 && !named.some((path) => ['', 'skills'].includes(folder(path)));
 }
 
 // The entry named after the plugin in its marketplace's `marketplace.json`; null when there is none.
@@ -659,7 +671,7 @@ export async function readManifestView(key: ManifestItemRef, anchors: ManifestAn
       plugin = anchor;
     } else if (marketplace === null || marketplace === 'unknown') return view;
     else if (marketplace === 'missing') return { ...view, state: 'missing' };
-    const entry = typeof marketplace === 'object' && marketplace !== null ? await entryOf(r, marketplace, anchors.entryName) : null;
+    const entry = anchors.entry !== undefined ? anchors.entry : typeof marketplace === 'object' && marketplace !== null ? await entryOf(r, marketplace, anchors.entryName) : null;
     if (key.kind === 'available') {
       if (entry === null || typeof marketplace !== 'object' || marketplace === null) return { ...view, partial: r.partial, problems: r.problems };
       // an entry whose plugin sits in the marketplace's own clone (`./plugins/x`); any other source is not on disk
@@ -707,11 +719,51 @@ export async function readManifestView(key: ManifestItemRef, anchors: ManifestAn
       await inventory.monitors(monitors === undefined ? null : { value: monitors, by: manifestBy, inline: false });
       await inventory.lspServers(declarations(manifest, 'lspServers', manifestBy, false));
       await inventory.commands([...fromFile('commands'), ...fromEntry('commands')], fromFile('commands').length === 0);
-      await inventory.skills([...fromFile('skills'), ...fromEntry('skills')]);
+      await inventory.skills([...fromFile('skills'), ...fromEntry('skills')], !namesItsSkillsAtRoot(entry));
     }
   } catch {
     // a bound (Stop), or anything unforeseen: what was read stands, and no exception's message ever reaches the answer
     r.partial = true;
   }
   return { ...view, components: inventory?.components ?? view.components, partial: r.partial, problems: r.problems };
+}
+
+// P4-AGG M2: `plugins.marketplaceManifest` (the Discover spec, Interfaces): one marketplace's clone read whole for the
+// catalog, under one deadline. marketplace.json is read once; its owner's name; then every named entry, its author and
+// its source with both pins, and, for an entry whose plugin sits in the clone (a relative source), what the plugin says
+// about itself and contains, read as `readManifestView` reads an available entry (the same anchors, bounds and
+// redaction). An entry elsewhere (a repository, a URL) is not on disk before install: its contents are unknown (null).
+// An entry the deadline did not let it read is `partial`, its contents unknown.
+export async function readMarketplaceManifest(root: string, deps: ManifestReaderDeps = {}): Promise<MarketplaceManifestView> {
+  const now = deps.now ?? Date.now;
+  const deadline = deps.deadline ?? Infinity;
+  const none: MarketplaceManifestView = { state: 'unknown', owner: null, plugins: [] };
+  const r = new Reading(deps.fs ?? nodeFs, now, deadline);
+  let manifest: Json;
+  try {
+    const anchor = await r.anchor(root);
+    if (anchor === 'missing') return { ...none, state: 'missing' };
+    if (anchor === 'unknown') return none;
+    const file = await r.find(anchor, MARKETPLACE_JSON, MARKETPLACE_JSON);
+    const json = file === null ? null : await r.json(file, MANIFEST_BOUNDS.marketplaceBytes);
+    if (json === null || !isRecord(json.value) || !Array.isArray(json.value.plugins)) return none;
+    manifest = json.value;
+  } catch {
+    return none; // a bound, or anything unforeseen, before the manifest was read
+  }
+  const owner = isRecord(manifest.owner) ? text(manifest.owner.name) : null;
+  const plugins: MarketplaceManifestView['plugins'] = [];
+  for (const entry of manifest.plugins as unknown[]) {
+    if (!isRecord(entry) || text(entry.name) === null) continue;
+    const name = entry.name as string;
+    const listed = wordsOf(entry).author;
+    const source = sourceRefOf(entry.source);
+    if (typeof entry.source !== 'string') {
+      plugins.push({ name, author: listed, source, components: null, partial: false, problems: [] });
+      continue;
+    }
+    const view = await readManifestView({ kind: 'available', pluginId: name }, { root: null, marketplaceRoot: root, entryName: name, entry }, { fs: deps.fs, now, deadline });
+    plugins.push({ name, author: view.author ?? listed, source, components: view.state === 'read' ? view.components : null, partial: view.partial, problems: view.problems });
+  }
+  return { state: 'read', owner, plugins };
 }

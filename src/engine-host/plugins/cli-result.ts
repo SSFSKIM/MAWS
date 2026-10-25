@@ -164,14 +164,13 @@ export async function installedOf(rows: readonly PluginListRow[], cwd: string, r
 }
 
 // An entry's source as the marketplace declares it, reduced (P2-B §5.3): the relative path an in-repository entry has,
-// or the object's kind (`source`) and locators; anything else is none. Its `ref` is kept only where it decides the
-// engine's fold key: the engine keys a source pinned to a branch or tag only when a full commit sha pins it as well
-// (2.1.292 `Sb` :832435-832446), so beside such a sha the ref reads as none.
-function sourceRefOf(source: unknown): PluginSourceRef | null {
+// or the object's kind (`source`), its locators and its pins, the branch or tag (`ref`) and the commit (`sha`), both kept
+// (P4-AGG M2: each catalog route keeps its own pin). Whether a pin denies the engine's fold key is source-key.ts's to read
+// (2.1.292 `Sb` :832435-832446: a ref decides it unless a full commit sha pins the code beside it).
+export function sourceRefOf(source: unknown): PluginSourceRef | null {
   if (typeof source === 'string') return source;
   if (!isRecord(source)) return null;
-  const pinnedBySha = typeof source.sha === 'string' && /^[a-f0-9]{40}$/.test(source.sha);
-  return { kind: str(source.source) ?? 'unknown', url: str(source.url), repo: str(source.repo), path: str(source.path), ref: pinnedBySha ? null : str(source.ref) };
+  return { kind: str(source.source) ?? 'unknown', url: str(source.url), repo: str(source.repo), path: str(source.path), ref: str(source.ref), sha: str(source.sha) };
 }
 
 const AvailableSchema = z.looseObject({

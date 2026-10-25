@@ -1,12 +1,12 @@
-// P4-B2 D19 (R-8): the host's egress rule as the architect conditioned it: GET only to exactly the three Google Fonts
-// routes; no cookies, credentials or redirects; a timeout, a size cap and a content type per response; the e2e's
-// fixture map in place of the network. And the source guard: no `fetch(` in src/engine-host outside this module and
-// route D's transport.
+// P4-B2 D19 (R-8): MAWS's egress rules as the architect conditioned them: GET only to exactly a rule's routes (the three
+// Google Fonts routes; P4-AGG's four catalog routes); no cookies, credentials or redirects; a timeout, a size cap and a
+// content type per response; the e2e's fixture map in place of the network. And the source guards: no `fetch(` in
+// src/engine-host outside route D's transport, none at all in src/main/catalog (both go through this module).
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { admitted, egressBase, egressGet, EgressError, fixtureFetch, GOOGLE_FONTS_EGRESS, type BaseFetch } from './egress';
+import { admitted, CATALOG_EGRESS, EGRESS_RULES, egressBase, egressGet, EgressError, fixtureFetch, GOOGLE_FONTS_EGRESS, type BaseFetch } from './egress';
 
 const CSS2 = 'https://fonts.googleapis.com/css2?family=Lora:wght@400;700';
 const FILE = 'https://fonts.gstatic.com/s/lora/v37/0QI6MX1D_JOuGQbT0gvTJPa787weuyJD.woff2';
@@ -132,28 +132,113 @@ describe('the e2e’s fixture map (MAWS_E2E=1)', () => {
   });
 });
 
-// The source guard: the host's only doors out are this module's rules and route D's verified transport.
-describe('the engine host’s outbound requests', () => {
-  const root = resolve(__dirname);
-  const sources = (dir: string): string[] =>
-    readdirSync(dir).flatMap((name) => {
-      const path = join(dir, name);
-      if (statSync(path).isDirectory()) return sources(path);
-      return /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name) ? [path] : [];
-    });
-  const code = (path: string) =>
-    readFileSync(path, 'utf8')
-      .split('\n')
-      .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
-      .join('\n');
+// P4-AGG (Decision Log, fourth entry): Discover's catalog reads its four sources through this rule and no other way.
+describe('the catalog egress rule', () => {
+  const RAW = 'https://raw.githubusercontent.com/anthropics/claude-plugins-official/HEAD/.claude-plugin/marketplace.json';
+  const PLUGINS = 'https://api.anthropic.com/api/directory/plugins?visibility=public&limit=5000';
+  const SERVERS = 'https://api.anthropic.com/api/directory/servers?limit=500';
+  const DETAILS = 'https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/plugin-stats/plugin-details.json';
 
-  it('calls fetch only in egress.ts and route D’s transport', () => {
+  it('is declared beside google-fonts', () => {
+    expect(EGRESS_RULES.map((rule) => rule.name)).toEqual(['google-fonts', 'catalog']);
+  });
+
+  it('admits exactly its four routes: a seed manifest, the two directory walks with their page tokens, plugin-details', () => {
+    for (const url of [
+      RAW,
+      'https://raw.githubusercontent.com/canva-sdks/canva-skills/HEAD/.claude-plugin/marketplace.json',
+      'https://raw.githubusercontent.com/makenotion/claude-code-notion-plugin/HEAD/.claude-plugin/marketplace.json',
+      PLUGINS,
+      `${PLUGINS}&page=eyJvZmZzZXQiOjUwMDB9`,
+      `${PLUGINS}&page=abc%3D%3D`,
+      SERVERS,
+      `${SERVERS}&cursor=fixture-page-2`,
+      DETAILS,
+    ])
+      expect(admitted(CATALOG_EGRESS, url), url).not.toBeNull();
+    for (const url of [
+      'http://raw.githubusercontent.com/anthropics/claude-plugins-official/HEAD/.claude-plugin/marketplace.json',
+      'https://raw.githubusercontent.com/anthropics/claude-plugins-official/main/.claude-plugin/marketplace.json',
+      'https://raw.githubusercontent.com/anthropics/claude-plugins-official/HEAD/plugins/x/.claude-plugin/plugin.json',
+      'https://raw.githubusercontent.com/anthropics/claude-plugins-official/HEAD/.claude-plugin/marketplace.json?token=x',
+      'https://raw.githubusercontent.com/a/b/c/HEAD/.claude-plugin/marketplace.json',
+      'https://api.anthropic.com/api/directory/plugins',
+      'https://api.anthropic.com/api/directory/plugins?visibility=commercial,public&limit=5000',
+      'https://api.anthropic.com/api/directory/plugins?visibility=public&limit=5000&q=legal',
+      'https://api.anthropic.com/api/directory/plugins?limit=5000&visibility=public',
+      `${PLUGINS}&page=`,
+      `${PLUGINS}&page=a&page=b`,
+      `${SERVERS}&cursor=a&x=1`,
+      'https://api.anthropic.com/api/directory/servers?limit=5000',
+      'https://api.anthropic.com/api/organizations/x/library/discover/home',
+      'https://api.anthropic.com/v1/messages',
+      `${DETAILS}?alt=media`,
+      'https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases/2.1.309/manifest.json',
+      'https://user:pass@api.anthropic.com/api/directory/servers?limit=500',
+      'https://api.anthropic.com:8443/api/directory/servers?limit=500',
+      'https://api.anthropic.com.evil.example/api/directory/servers?limit=500',
+    ])
+      expect(admitted(CATALOG_EGRESS, url), url).toBeNull();
+  });
+
+  it('checks each route’s content type: a seed manifest is served as text, the directory and plugin-details as JSON', async () => {
+    const get = (type: string) => egressGet(CATALOG_EGRESS, recording(() => answer('{}', { headers: { 'content-type': type } })).base);
+    expect(await get('text/plain; charset=utf-8')(RAW)).toMatchObject({ status: 200, contentType: 'text/plain' });
+    expect(await get('application/json')(PLUGINS)).toMatchObject({ status: 200, contentType: 'application/json' });
+    expect(await get('application/json')(DETAILS)).toMatchObject({ status: 200, contentType: 'application/json' });
+    expect(await failure(get('text/html')(SERVERS))).toBe('contentType');
+    expect(await failure(get('application/json')(RAW))).toBe('contentType');
+  });
+
+  it('caps each route at about three to five times what it served on the live walk (2026-10-25)', () => {
+    const room = (url: string, served: number) => admitted(CATALOG_EGRESS, url)!.maxBytes / served;
+    for (const [url, served] of [[RAW, 1_566_074], [PLUGINS, 13_149_916], [SERVERS, 1_348_270], [DETAILS, 538_696]] as const) {
+      expect(room(url, served), url).toBeGreaterThan(3);
+      expect(room(url, served), url).toBeLessThan(6);
+    }
+  });
+});
+
+// The source guards: the host's only doors out are this module's rules and route D's verified transport; the catalog's
+// only door is this module.
+const sources = (dir: string): string[] =>
+  readdirSync(dir).flatMap((name) => {
+    const path = join(dir, name);
+    if (statSync(path).isDirectory()) return sources(path);
+    return /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name) ? [path] : [];
+  });
+const code = (path: string) =>
+  readFileSync(path, 'utf8')
+    .split('\n')
+    .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+    .join('\n');
+const HTTP_IMPORT = /from\s+'(?:node:)?(?:https?|undici|net|tls)'|require\(\s*'(?:node:)?(?:https?|undici|net|tls)'\s*\)/;
+
+describe('the engine host’s outbound requests', () => {
+  const root = resolve(__dirname, '../../engine-host');
+
+  it('calls fetch only in route D’s transport (the egress module is src/shared/net/egress.ts)', () => {
     const calling = sources(root).filter((path) => /\bfetch\s*\(/.test(code(path)));
-    expect(calling.map((path) => relative(root, path)).sort()).toEqual(['connectors/direct-http.ts', 'egress.ts']);
+    expect(calling.map((path) => relative(root, path)).sort()).toEqual(['connectors/direct-http.ts']);
   });
 
   it('opens HTTP only to the loopback relay (relay-health.ts), never with node:http(s) elsewhere', () => {
     const importing = sources(root).filter((path) => /from\s+'(?:node:)?(?:https?|undici)'|require\(\s*'(?:node:)?(?:https?|undici)'\s*\)/.test(code(path)));
     expect(importing.map((path) => relative(root, path)).sort()).toEqual(['relay-health.ts']);
+  });
+});
+
+describe('the catalog’s outbound requests (P4-AGG)', () => {
+  const root = resolve(__dirname, '../../main/catalog');
+
+  it('never calls fetch nor opens a socket itself: every request is egressGet’s under the catalog rule', () => {
+    const files = sources(root);
+    expect(files.length).toBeGreaterThan(0);
+    expect(files.filter((path) => /\bfetch\s*\(/.test(code(path)) || HTTP_IMPORT.test(code(path))).map((path) => relative(root, path))).toEqual([]);
+  });
+
+  it('names only the catalog rule', () => {
+    const rules = sources(root).flatMap((path) => [...code(path).matchAll(/\b([A-Z_]+)_EGRESS\b/g)].map((m) => m[1]));
+    expect(new Set(rules)).toEqual(new Set(['CATALOG']));
   });
 });

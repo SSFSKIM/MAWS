@@ -3,9 +3,9 @@
 // and the manifest reader reads only under the folders those rows name. The renderer names items, never a path. Each
 // listing replaces the cwd's memory, so an uninstalled plugin's folder stops being readable at the next listing.
 import type { Marketplace } from '@shared/ipc/schema/marketplaces';
-import type { ManifestItemRef, PluginManifestView } from '@shared/ipc/schema/plugins';
+import type { ManifestItemRef, MarketplaceManifestView, PluginManifestView } from '@shared/ipc/schema/plugins';
 import type { PluginListRow } from './cli-result';
-import { readManifestView, type ManifestAnchors, type ManifestReaderDeps } from './manifest';
+import { readManifestView, readMarketplaceManifest, type ManifestAnchors, type ManifestReaderDeps } from './manifest';
 
 const KEPT_DIRECTORIES = 16;
 export const MANIFEST_READ_MS = 2_500; // per call, after any listing, so a call that also had to list fits the bridge's 10 s
@@ -96,4 +96,28 @@ export async function manifestsFor(cwd: string, items: readonly ManifestItemRef[
   const views: PluginManifestView[] = [];
   for (const key of items) views.push(await read(key, anchorsOf(key), { now, deadline }));
   return views;
+}
+
+export interface MarketplaceManifestDeps {
+  listings: LastListings;
+  listMarketplaces: () => Promise<Marketplace[]>; // runs the listing; what it answers is kept
+  read?: (root: string, deps?: ManifestReaderDeps) => Promise<MarketplaceManifestView>;
+  now?: () => number;
+}
+
+// P4-AGG M2: `plugins.marketplaceManifest`: the marketplace `name` as the cwd's kept marketplace listing names it (listed
+// once more when it does not), read whole from the clone at its `installLocation` under one deadline. A marketplace the
+// engine does not have, one with no clone (the built-in Anthropic Directory is never a row), or a listing that fails
+// answers `unknown`.
+export async function marketplaceManifestFor(cwd: string, name: string, deps: MarketplaceManifestDeps): Promise<MarketplaceManifestView> {
+  const unknown: MarketplaceManifestView = { state: 'unknown', owner: null, plugins: [] };
+  let marketplace = marketplaceOf(deps.listings.marketplaces(cwd), name);
+  if (marketplace === null) {
+    const again = await deps.listMarketplaces().catch(() => null);
+    if (again === null) return unknown;
+    marketplace = marketplaceOf(deps.listings.keepMarketplaces(cwd, again), name);
+  }
+  if (!marketplace?.installLocation) return unknown;
+  const now = deps.now ?? Date.now;
+  return (deps.read ?? readMarketplaceManifest)(marketplace.installLocation, { now, deadline: now() + MANIFEST_READ_MS });
 }

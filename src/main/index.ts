@@ -150,6 +150,7 @@ import { startConnectors } from './connectors'; // P3-H H3b
 import { createDirectRoute } from './connectors/direct-route'; // P3-HD: route D, MAWS's own MCP connections
 import { productionConnectorOAuth } from './connectors/oauth-root'; // P3-HD M3c2: MAWS's own OAuth beside route D
 import { startDelivery } from './delivery'; // P4-B5: the owner's Send to
+import { startCatalog } from './catalog'; // P4-AGG M2: Discover's catalog
 
 // cua board #97: before any log line, so a launcher's closed pipe or terminal never turns a console call into a crash.
 guardStdio([process.stdout, process.stderr]);
@@ -650,6 +651,19 @@ void startWithProfileLock(app, () => {
     openExternal: (url) => openExternalUrl(url),
   });
   shutdown.add('delivery', delivery.stop);
+  // P4-AGG M2: Discover's catalog (the person's, never an agent's): the seed marketplaces, Anthropic's directory and the
+  // official install counts through the `catalog` egress rule, cached under userData, joined with the engine's reads per
+  // cwd through the host, re-read on its `plugins.changed`
+  const catalog = startCatalog({
+    register: registerMainHandler,
+    emit: (name, payload) => emit(name, payload),
+    call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
+    onPluginsChanged: (listener) => hosts.onEvent('plugins.changed', () => listener()),
+    userData: app.getPath('userData'),
+    env: process.env,
+    userAgent: `MAWS/${app.getVersion()}`,
+  });
+  shutdown.add('catalog', catalog.stop);
   // P3-B: document × md, html, docx, pdf. P3-D (the P3 spec's Decision Log 61): each run handed its governing design system
   const exportAuthors = {
     sessionTitle: (appSessionId: string) => index.sessions.get(appSessionId as AppSessionId)?.title.text,

@@ -10,14 +10,15 @@
 // relative entry (`./plugins/x`) is resolved against its marketplace's repository (a `github` or `git` marketplace; a
 // folder one has none), and has no key when that marketplace is pinned to a branch or tag. A source pinned to a branch
 // or tag (`ref`) has no key, whatever the ref looks like: the engine excepts only a full commit sha given separately
-// (`sha`), and the host reduces a ref such a sha pins beside it to none (`cli-result.ts`). Anything else has no key,
-// and no key never folds.
+// (`sha`), which pins the code beside the ref (the host keeps both, `cli-result.ts`). Anything else has no key, and no
+// key never folds.
 import type { PluginSourceRef } from '../ipc/schema/plugins';
 
 const GITHUB = 'github.com';
 const SEGMENT = '[A-Za-z0-9._-]+';
 const HOST = '[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*\\.?';
 const UNRESERVED = '[A-Za-z0-9._~-]';
+const FULL_SHA = /^[a-f0-9]{40}$/;
 const SHORTHAND = new RegExp(`^${SEGMENT}/${SEGMENT}$`);
 const SCP = new RegExp(`^git@(${HOST}):(${SEGMENT}(?:/${SEGMENT})*)/?$`);
 const HTTPS = new RegExp(`^https://(?:${UNRESERVED}+(?::${UNRESERVED}*)?@)?(${HOST})(?::[1-9][0-9]{0,4})?((?:/(?:${UNRESERVED}|%[0-9A-Fa-f]{2})*)*)$`);
@@ -71,6 +72,11 @@ function keyOf(locator: string | null, path: string | null): string | null {
   return repository === null || subpath === null ? null : `${repository}#${subpath}`;
 }
 
+// P4-AGG M2: the (repository, path) a locator and a path inside it name, as the fold key spells them, whatever pins
+// either: Discover's identity of a plugin's code (refs are not part of it, the Discover spec's "One item per thing").
+// Null when the locator names no repository the engine would read, or the path climbs out.
+export const repositoryLocation = (locator: string, path: string | null): string | null => keyOf(locator, path);
+
 export function sourceKey(source: PluginSourceRef | null, marketplace: { source: string; locator: string | null; ref?: string | null } | null): string | null {
   if (source === null) return null;
   if (typeof source === 'string') {
@@ -78,7 +84,7 @@ export function sourceKey(source: PluginSourceRef | null, marketplace: { source:
     if (typeof marketplace.ref === 'string') return null; // the marketplace is pinned to a branch or tag
     return keyOf(marketplace.locator, source);
   }
-  if (typeof source.ref === 'string') return null; // pinned to a branch or tag
+  if (typeof source.ref === 'string' && !(typeof source.sha === 'string' && FULL_SHA.test(source.sha))) return null; // pinned to a branch or tag
   switch (source.kind) {
     case 'github':
       return keyOf(source.repo, source.path);

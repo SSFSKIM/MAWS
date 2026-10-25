@@ -68,7 +68,7 @@ import { promptHistory } from './prompt-history';
 // P2-C end
 // P2-B start (2026-10-09)
 import { pluginRowsOf } from './plugins/cli-result';
-import { LastListings, manifestsFor } from './plugins/listings';
+import { LastListings, manifestsFor, marketplaceManifestFor } from './plugins/listings';
 // P2-B end
 // P2-A start (2026-10-09; X17)
 import { ObservedFactsService } from './observed-facts';
@@ -784,6 +784,8 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   // available entries the renderer names, read from files under the folders this host's own last listings for the cwd
   // named (one more listing for an item they do not name), nothing executed or fetched; a read like E8's, one bridge call
   on('plugins.manifest', async ({ cwd, items }) => ({ manifests: await manifestsFor(cwd, items, { listings, listPlugins: () => listPlugins(cwd), listMarketplaces: () => listMarketplaces(cwd) }) }));
+  // P4-AGG M2: one marketplace's clone read whole for Discover's catalog, admitted by the same kept listing
+  on('plugins.marketplaceManifest', ({ cwd, name }) => marketplaceManifestFor(cwd, name, { listings, listMarketplaces: () => listMarketplaces(cwd) }));
   // P2-B end
 
   // E1 start: the `maws` tool server's commands. A session this host does not hold has no ask and nothing pending;

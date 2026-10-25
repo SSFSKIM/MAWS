@@ -1,7 +1,8 @@
-// The engine host's egress rules (P4-B2 D19; the P4 spec's §4.10 R-8): every outbound request the host makes on its
-// own, declared here as data, behind one guarded fetch. Route D's transport (connectors/direct-http.ts) is the other
-// door, scoped to a verified server's own URL; nothing else in src/engine-host calls `fetch` (egress.test.ts guards the
-// source). A rule admits:
+// MAWS's egress rules (P4-B2 D19; the P4 spec's §4.10 R-8; lifted from src/engine-host/egress.ts by P4-AGG, the
+// Discover spec's Decision Log, fourth entry): every outbound request MAWS makes on its own, beyond the model's, declared
+// here as data, behind one guarded GET that the engine host and main both import. Route D's transport
+// (engine-host/connectors/direct-http.ts) is the host's other door, scoped to a verified server's own URL; nothing else in
+// src/engine-host or src/main/catalog calls `fetch` (egress.test.ts guards both sources). A rule admits:
 // - GET only, to exactly the routes it lists (an https origin, a path, the query it may carry); anything else is
 //   refused before the network;
 // - no cookies or credentials (`credentials: 'omit'`, no header but the user agent a caller names), no referrer, no
@@ -9,10 +10,14 @@
 // - per response, a timeout, a size cap read as the body streams, and the content types the route answers with.
 // A 2xx answer comes back with its bytes; any other status comes back alone, its body unread, for the caller to name.
 //
-// `google-fonts` is its only rule: a deck's or a design's named Google Fonts face, fetched once into the artifact's
-// assets when its licence is OFL, never at render (presentations/google-faces.ts). Under MAWS_E2E=1 the network is
-// never reached: MAWS_GOOGLE_FONTS_FIXTURES names a directory whose `map.json` answers URLs from files, and a URL it
-// does not list fails as offline (as every URL does when no directory is named).
+// - `google-fonts`: a deck's or a design's named Google Fonts face, fetched once into the artifact's assets when its
+//   licence is OFL, never at render (engine-host/presentations/google-faces.ts). Under MAWS_E2E=1 the network is never
+//   reached: MAWS_GOOGLE_FONTS_FIXTURES names a directory whose `map.json` answers URLs from files, and a URL it does not
+//   list fails as offline (as every URL does when no directory is named).
+// - `catalog`: Discover's catalog (main/catalog/fetch.ts): the seed marketplaces' manifests, Anthropic's public directory
+//   of plugins and of connectors, and the public install counts of the official marketplace that the engine itself reads.
+//   Read for the person and cached for them; nothing is sent anywhere. Its e2e seam is the catalog's own
+//   (MAWS_CATALOG_FIXTURES, read by fetch.ts in place of this rule); under MAWS_E2E=1 it never reaches the network.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ARTIFACT_MAX_BYTES } from '@shared/maws/tools';
@@ -51,8 +56,34 @@ export const GOOGLE_FONTS_EGRESS: EgressRule = {
   ],
 };
 
-/** Every rule the host declares. */
-export const EGRESS_RULES: readonly EgressRule[] = [GOOGLE_FONTS_EGRESS];
+const MiB = 1024 * 1024;
+// The page tokens the directory hands back (`next_page`, `next_cursor`), as URLSearchParams writes them.
+const TOKEN = '[A-Za-z0-9._~%-]{1,512}';
+
+// Measured by the catalog's live walk on 2026-10-25 (scripts/catalog-summary.mjs; the Discover spec's Surprises &
+// Discoveries): every seed manifest served as text/plain (the largest, claude-community's, 1,566,074 bytes), the
+// directory and plugin-details as application/json (the plugins page 13,149,916 bytes in one page, the servers 1,348,270,
+// 1,268,217 and 22,693 bytes over three pages, plugin-details 538,696 bytes), the whole walk in 1.4 s. Each cap leaves the
+// source room to grow about fourfold (a manifest's matches the engine's own 8 MiB bound on marketplace.json) before a
+// refresh is refused as `tooLarge`, its last copy kept.
+export const CATALOG_EGRESS: EgressRule = {
+  name: 'catalog',
+  purpose: 'Discover’s catalog: seed marketplace manifests, Anthropic’s public plugin and connector directory, the official marketplace’s public install counts; read for the person, never sent anywhere (P4-AGG)',
+  timeoutMs: 120_000, // per request, body included: a background refresh; the 13 MB plugins page over a slow link
+  routes: [
+    // a seed marketplace's manifest, at its default branch (GitHub serves every raw file as text)
+    { origin: 'https://raw.githubusercontent.com', path: /^\/[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}\/HEAD\/\.claude-plugin\/marketplace\.json$/, query: null, contentTypes: ['text/plain'], maxBytes: 8 * MiB },
+    // the directory's public plugins, in pages of 5,000 (one page today)
+    { origin: 'https://api.anthropic.com', path: /^\/api\/directory\/plugins$/, query: new RegExp(`^\\?visibility=public&limit=5000(?:&page=${TOKEN})?$`), contentTypes: ['application/json'], maxBytes: 48 * MiB },
+    // the directory's servers (connectors), in pages of 500
+    { origin: 'https://api.anthropic.com', path: /^\/api\/directory\/servers$/, query: new RegExp(`^\\?limit=500(?:&cursor=${TOKEN})?$`), contentTypes: ['application/json'], maxBytes: 4 * MiB },
+    // the official marketplace's install counts and contents, which the engine reads with no credentials
+    { origin: 'https://storage.googleapis.com', path: /^\/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819\/plugin-stats\/plugin-details\.json$/, query: null, contentTypes: ['application/json'], maxBytes: 2 * MiB },
+  ],
+};
+
+/** Every rule MAWS declares. */
+export const EGRESS_RULES: readonly EgressRule[] = [GOOGLE_FONTS_EGRESS, CATALOG_EGRESS];
 
 /** Why a request was refused or failed; `notAdmitted` and `tooLarge` are the caller's to name, the rest transient. */
 export type EgressFailure = 'notAdmitted' | 'redirect' | 'timeout' | 'network' | 'tooLarge' | 'contentType' | 'aborted';
@@ -179,5 +210,5 @@ export function fixtureFetch(dir: string | null): BaseFetch {
   };
 }
 
-/** The fetch under the host's egress: the e2e's fixtures under MAWS_E2E=1 (never the network), else the network. */
+/** The fetch under the host's google-fonts egress: the e2e's fixtures under MAWS_E2E=1 (never the network), else the network. */
 export const egressBase = (env: Record<string, string | undefined>): BaseFetch => (env.MAWS_E2E === '1' ? fixtureFetch(env.MAWS_GOOGLE_FONTS_FIXTURES || null) : networkFetch);
