@@ -1,6 +1,6 @@
 // The thinking mark: the triquetra engraved on Mjolnir, drawn as a solid bevelled band that weaves over and under
 // itself, turning in 3D while a light travels the strand. The owner chose it from a set of explorations
-// (~/Developer/triquetra-thinking, flow mode at speed 0.85 and a 90% dip). Every mark on the page is drawn through one
+// (~/Developer/triquetra-thinking, flow mode at speed 0.85 and an 85% dip). Every mark on the page is drawn through one
 // shared WebGL context and copied into its own 2D canvas, so any number of live thinking rows costs one context, well
 // under the browser's per-page limit.
 
@@ -165,7 +165,7 @@ const meshFloats = (n: number) => 3 * (n + 1) * VERTS_PER_SAMPLE * FLOATS;
 // ---------- motion ----------
 // One full turn per beat about one axis while the axis glides over the sphere to the next; angular velocity is
 // integrated, so the mark never stops. It surges mid-turn and eases to (1 - DIP) of its peak between turns.
-const BEAT = 1.9, DIP = 0.9, SPEED = 0.85;
+const BEAT = 1.9, DIP = 0.85, SPEED = 0.85;
 // Successive turn axes, spread around the sphere and never close to the view axis (a turn about the view axis reads
 // as a flat spin, not a turn in space).
 const AXES: Vec3[] = (() => {
