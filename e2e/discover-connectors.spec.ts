@@ -10,7 +10,8 @@
 //            the engine under the runner's HOME and a scratch CLAUDE_CONFIG_DIR, the fixture in engine mode, the one
 //            Keychain item that directory names claimed before and released after every engine the probe started has
 //            exited. The test records the answers; the verdict is read from them (it passes whatever they are, once the
-//            Keychain is left as found).
+//            Keychain is left as found). Its verdict is in (spikes/p4-aggregator/findings-m4.txt, gate run 40175924834),
+//            so it runs again only on request: MAWS_SIGNIN_SPIKE=1 beside the group's flag.
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
@@ -77,6 +78,7 @@ test('oauth fixture, engine mode: a localhost-redirect token exchange from a pla
 // eslint-disable-next-line no-empty-pattern -- Playwright requires the fixtures argument to be destructured
 test('spike: the engine\'s own MCP sign-in over the control protocol, against the engine-mode fixture', async ({}, testInfo) => {
   test.skip(process.platform !== 'darwin', 'the sign-in spike runs on the Mac lane alone (Decision Log 6)');
+  test.skip(process.env.MAWS_SIGNIN_SPIKE !== '1', 'the sign-in spike reruns only on request (MAWS_SIGNIN_SPIKE=1)');
   test.setTimeout(600_000);
   const { bin } = realEngine();
   const configDir = join(root, 'claude-config'); // the string the engine is given, so the item's name derives from it as written
