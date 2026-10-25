@@ -16,7 +16,7 @@ import { useGit } from '../../../stores/git';
 import { useTranscriptStore, type TurnActivity, type TurnId } from '../../../transcript';
 import { REVIEW_COPY } from '../copy';
 import { createHeldDiffs, diffKeys, followGitStatus, HELD_DIFF_REFRESH_MS, mapWith, settled, type FileDiff, type ScopeDiff } from './held-diffs';
-import { gitScopeFiles, indexDiffers, receiptOf, turnScopeFiles, type ReviewFile, type ReviewScope } from './review-model';
+import { gitScopeFiles, indexDiffers, dividerOf, turnScopeFiles, type ReviewFile, type ReviewScope } from './review-model';
 
 export type { FileDiff, ScopeDiff } from './held-diffs';
 
@@ -183,20 +183,20 @@ export function useReviewData(input: { appSessionId: AppSessionId; directory: st
   const diff = useReview((s) => (target ? diffOf(s, target) : undefined));
 
   // Last turn: the store key holding the turn, then the turn's activity entry, which C6 keeps while the turn is
-  // unchanged, so another turn streaming recomputes nothing here; the receipt is read with it.
+  // unchanged, so another turn streaming recomputes nothing here; the divider is read with it.
   const turnKey = useTranscriptStore((s) => (scope === 'turn' && turnId !== null ? turnKeyOf(s.entries, appSessionId, turnId) : null));
   const activity = useTranscriptStore((s): TurnActivity | null => (turnKey !== null ? (s.activity(turnKey).find((a) => a.turnId === turnId) ?? null) : null));
   const turn = useMemo(() => {
     if (turnKey === null || turnId === null) return null;
     const entry = useTranscriptStore.getState().entries[turnKey];
-    return entry ? { receipt: receiptOf(entry.rows, turnId), activity } : null;
+    return entry ? { divider: dividerOf(entry.rows, turnId), activity } : null;
   }, [turnKey, turnId, activity]);
 
   const list = useMemo<ReviewList>(() => {
     if (scope === null) return { phase: 'pending' };
     if (scope === 'turn') {
       if (!turn) return { phase: 'unavailable', message: REVIEW_COPY.unavailable(REVIEW_COPY.turnNotLoaded) };
-      return { phase: 'ready', files: turnScopeFiles(turn.receipt?.files ?? [], turn.activity) };
+      return { phase: 'ready', files: turnScopeFiles(turn.divider?.files ?? [], turn.activity) };
     }
     if (!status) {
       if (gitError === NOT_A_REPOSITORY) return { phase: 'unavailable', message: REVIEW_COPY.notRepository };

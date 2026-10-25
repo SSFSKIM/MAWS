@@ -26,6 +26,7 @@
     "denied": 0,
     "endedAt": "2026-09-28T10:30:03.169Z",
     "expanded": true,
+    "files": [],
     "firstDeniedCell": null,
     "id": "divider:turn:u-exploration-and-web-002",
     "kind": "divider",
@@ -187,7 +188,7 @@
         "endedAt": "2026-09-28T10:30:01.183Z",
         "expanded": true,
         "id": "cell:toolu_synth_x_read1",
-        "label": "Read /tmp/maws-synth-exploration-and-web/src/model/derive.ts",
+        "label": "Read derive.ts",
         "paths": [
           "/tmp/maws-synth-exploration-and-web/src/model/derive.ts"
         ],
@@ -226,7 +227,7 @@
         "endedAt": "2026-09-28T10:30:01.243Z",
         "expanded": true,
         "id": "cell:toolu_synth_x_read2",
-        "label": "Read /tmp/maws-synth-exploration-and-web/src/model/reduce.ts",
+        "label": "Read reduce.ts",
         "paths": [
           "/tmp/maws-synth-exploration-and-web/src/model/reduce.ts"
         ],
@@ -262,7 +263,7 @@
         "endedAt": "2026-09-28T10:30:01.303Z",
         "expanded": true,
         "id": "cell:toolu_synth_x_read3",
-        "label": "Read /tmp/maws-synth-exploration-and-web/src/model/rows.ts",
+        "label": "Read rows.ts",
         "paths": [
           "/tmp/maws-synth-exploration-and-web/src/model/rows.ts"
         ],
@@ -298,7 +299,7 @@
         "endedAt": "2026-09-28T10:30:01.363Z",
         "expanded": true,
         "id": "cell:toolu_synth_x_read4",
-        "label": "Read /tmp/maws-synth-exploration-and-web/src/model/keys.ts",
+        "label": "Read keys.ts",
         "paths": [
           "/tmp/maws-synth-exploration-and-web/src/model/keys.ts"
         ],
@@ -334,7 +335,7 @@
         "endedAt": "2026-09-28T10:30:01.423Z",
         "expanded": true,
         "id": "cell:toolu_synth_x_read5",
-        "label": "Read /tmp/maws-synth-exploration-and-web/src/model/copy.ts",
+        "label": "Read copy.ts",
         "paths": [
           "/tmp/maws-synth-exploration-and-web/src/model/copy.ts"
         ],
@@ -370,7 +371,7 @@
         "endedAt": "2026-09-28T10:30:01.483Z",
         "expanded": true,
         "id": "cell:toolu_synth_x_read6",
-        "label": "Read /tmp/maws-synth-exploration-and-web/src/model/time.ts",
+        "label": "Read time.ts",
         "paths": [
           "/tmp/maws-synth-exploration-and-web/src/model/time.ts"
         ],
@@ -580,7 +581,7 @@
         "endedAt": "2026-09-28T10:30:02.819Z",
         "expanded": true,
         "id": "cell:toolu_synth_x_mcp",
-        "label": "Used docs",
+        "label": "Used docs · search",
         "paths": [],
         "startedAt": "2026-09-28T10:30:02.765Z",
         "status": "done",

@@ -59,6 +59,7 @@
     "denied": 0,
     "endedAt": "2026-09-28T10:00:02.080Z",
     "expanded": true,
+    "files": [],
     "firstDeniedCell": null,
     "id": "divider:turn:u-boundaries-016",
     "kind": "divider",

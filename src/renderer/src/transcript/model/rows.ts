@@ -63,7 +63,7 @@ export type Row = RowBase &
     | { kind: 'assistant_text'; messageUuid: MessageUuid | null; blockIndex: number; markdown: string; live: boolean; phase: 'answer' | 'commentary'; forHuman?: boolean; model: string | null }
     | {
         kind: 'divider'; state: 'working' | 'completed' | 'stopped' | 'failed'; cause?: 'crash' /* E11: present when the engine, not the reader, stopped it */; origin: 'human' | 'engine' | 'peer'; startedAt: string; endedAt: string | null;
-        toolCalls: number; denied: number; autoDenied: number; firstDeniedCell: CellId | null; expanded: boolean; summary: TurnSummary;
+        toolCalls: number; denied: number; autoDenied: number; firstDeniedCell: CellId | null; expanded: boolean; summary: TurnSummary; files?: ChangedFile[];
       }
     | { kind: 'group'; state: 'active' | 'completed'; cells: Cell[]; summary: string; activeLabel: string | null; icon: ToolCategory; expanded: boolean }
     | ({ kind: 'cell' } & Cell) // a standalone cell

@@ -272,10 +272,6 @@ function toastCallbacks(say: (text: string) => void, open: (ref: SubagentRef) =>
         say(`rewind.undo ${turn}`);
         return Promise.resolve();
       },
-      reapply: (turn) => {
-        say(`rewind.reapply ${turn}`);
-        return Promise.resolve();
-      },
     },
   };
 }

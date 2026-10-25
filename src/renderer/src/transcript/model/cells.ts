@@ -8,7 +8,7 @@ import { ShowPaneResultSchema } from '@shared/maws/tools'; // E1
 import { ArtifactScreenshotResultSchema } from '@shared/maws/tools'; // E2
 import * as z from 'zod'; // P3-A
 import { classifyTool, MAWS_TOOL_USE, MCP_TOOL, tableRowOf, type ClassifyContext } from './classify';
-import { baseName, cellLabel, hostOf, PANE_CELL, thinkingLabel } from './copy';
+import { baseName, cellLabel, descriptionLabel, hostOf, PANE_CELL, thinkingLabel } from './copy';
 import { ARTIFACT_CELL } from './copy'; // E2
 import { cellId } from './keys';
 import type { Cell, CellDetail, ChangedFile, Hunk, Spill, ToolCategory, Truncation } from './rows';
@@ -126,7 +126,8 @@ function hunksOf(structured: unknown): Hunk[] {
   });
 }
 
-const lineCount = (text: string) => (text.length === 0 ? 0 : text.split('\n').length);
+const textLines = (text: string): string[] => text === '' ? [] : text.replace(/\r?\n$/, '').split(/\r?\n/);
+const lineCount = (text: string) => textLines(text).length;
 
 export function editCounts(toolName: string, input: Record<string, unknown>, structured: unknown): { hunks: Hunk[]; added: number; removed: number; change: ChangedFile['change'] } {
   const hunks = hunksOf(structured);
@@ -150,6 +151,11 @@ export function editCounts(toolName: string, input: Record<string, unknown>, str
   }
   const type = record(structured).type;
   const change: ChangedFile['change'] = toolName === 'Write' && (type === 'create' || record(structured).originalFile === null) ? 'create' : type === 'delete' ? 'delete' : 'update';
+  if (hunks.length === 0 && toolName === 'Write' && change === 'create') {
+    const lines = textLines(str(record(structured).content, str(input.content)));
+    added = lines.length;
+    hunks.push({ oldStart: 0, oldLines: 0, newStart: 1, newLines: added, lines: lines.map((line) => `+${line}`) });
+  }
   return { hunks, added, removed, change };
 }
 
@@ -180,7 +186,7 @@ function detailOf(rec: ToolRecord, status: Cell['status']): CellDetail {
   const mcp = MCP_TOOL.exec(use.toolName);
   if (mcp) return { kind: 'mcp', server: mcp[1], tool: mcp[2], input: use.input, result: result?.content ?? '', structured, spill: spillOf(result) };
   switch (use.toolName) {
-    case 'Bash': case 'BashOutput': case 'KillShell': case 'Monitor': {
+    case 'Bash': case 'PowerShell': case 'BashOutput': case 'KillShell': case 'Monitor': {
       const stdout = typeof s.stdout === 'string' ? s.stdout : text;
       const stderr = str(s.stderr);
       const parsed = EXIT_CODE.exec(text);
@@ -225,6 +231,7 @@ function labelOf(rec: ToolRecord, detail: CellDetail, status: Cell['status'], ca
   if (rec.use.toolName === MAWS_TOOL_USE.show_pane) return paneLabel(rec); // E1
   if (rec.use.toolName === MAWS_TOOL_USE.artifact_list) return artifactListLabel(rec); // E2
   if (rec.use.toolName === MAWS_TOOL_USE.artifact_screenshot) return screenshotLabel(rec); // E2
+  if ((rec.use.toolName === 'Agent' || rec.use.toolName === 'Task') && typeof input.description === 'string') return descriptionLabel(input.description, status);
   switch (detail.kind) {
     case 'shell':
       return cellLabel({ kind: 'shell', command: detail.command, status: status === 'denied' ? 'stopped' : status, durationMs: elapsedMs(rec, turn), background: detail.backgroundTaskId !== null && status === 'running' });

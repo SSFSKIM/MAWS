@@ -26,7 +26,6 @@ import { CellRow } from './Cell';
 import { DividerRow } from './Divider';
 import { ErrorRow } from './Error';
 import { PlanRow } from './Plan';
-import { ReceiptRow } from './Receipt';
 import { RequestSlotRow } from './RequestSlot';
 import { SubagentRow } from './Subagent';
 import { ThinkingRow } from './Thinking';
@@ -42,7 +41,7 @@ function body(row: Row) {
     case 'divider': return <><FoldedAssistantProbes row={row} /><DividerRow row={row} /></>;
     case 'group': return <SurfaceGroupRow row={row} />;
     case 'cell': return <CellRow row={row} />;
-    case 'receipt': return <ReceiptRow row={row} />;
+    case 'receipt': return null; // legacy X3 row; file changes are tool rows now
     case 'subagent': return <SubagentRow row={row} />;
     case 'agent_message': return <AgentMessageRow row={row} />;
     case 'bash': return <BashRow row={row} />;

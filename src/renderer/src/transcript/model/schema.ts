@@ -76,6 +76,7 @@ export const RowSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     ...base, kind: z.literal('divider'), state: z.enum(['working', 'completed', 'stopped', 'failed']), cause: z.literal('crash').optional() /* E11 */, origin: z.enum(['human', 'engine', 'peer']), startedAt: z.string(), endedAt: nullable(z.string()),
     toolCalls: z.number(), denied: z.number(), autoDenied: z.number(), firstDeniedCell: nullable(z.string()), expanded: z.boolean(), summary: TurnSummarySchema,
+    files: z.array(z.strictObject({ path: z.string(), change: z.enum(['create', 'update', 'delete']), added: z.number(), removed: z.number(), cellId: z.string() })).optional(),
   }),
   z.strictObject({ ...base, kind: z.literal('group'), state: z.enum(['active', 'completed']), cells: z.array(CellSchema), summary: z.string(), activeLabel: nullable(z.string()), icon: category, expanded: z.boolean() }),
   z.strictObject({ ...base, kind: z.literal('cell'), ...cellShape }),

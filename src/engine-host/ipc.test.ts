@@ -433,7 +433,7 @@ describe('engine host X2 surface', () => {
     expect(transport.requestsOf('apply_flag_settings').at(-1)!.request).toEqual({ subtype: 'apply_flag_settings', settings: { effortLevel: 'low' } });
     expect(host.ipc.table.get(id)!.status().effort).toBe('low');
     await host.call('session.setThinking', { appSessionId: id, maxThinkingTokens: 4096, display: 'summarized' });
-    expect(transport.requestsOf('set_max_thinking_tokens').at(-1)!.request).toEqual({ subtype: 'set_max_thinking_tokens', max_thinking_tokens: 4096, display: 'summarized' });
+    expect(transport.requestsOf('set_max_thinking_tokens').at(-1)!.request).toEqual({ subtype: 'set_max_thinking_tokens', max_thinking_tokens: 4096, thinking_display: 'summarized' });
     await host.call('session.renameSession', { appSessionId: id, title: 'Named' });
     expect(transport.requestsOf('rename_session').at(-1)!.request).toEqual({ subtype: 'rename_session', title: 'Named', source: 'host' });
     await expect(host.call('session.applyFlagSettings', { appSessionId: id, settings: { dialogExpiry: '5m' } })).rejects.toThrow(/dialogExpiry/);

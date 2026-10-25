@@ -26,6 +26,7 @@
     "denied": 0,
     "endedAt": "2026-09-29T08:19:58.993Z",
     "expanded": true,
+    "files": [],
     "firstDeniedCell": null,
     "id": "divider:turn:191267e2-427d-4767-b5df-22a246f51649",
     "kind": "divider",
@@ -105,7 +106,7 @@
     "expanded": true,
     "id": "cell:toolu_01Lkr3RGCHHGHs9NKsmP1LMV",
     "kind": "cell",
-    "label": "Read /private/tmp/maws-probe3-outside-hdvwZL/outside.txt",
+    "label": "Read outside.txt",
     "paths": [
       "/private/tmp/maws-probe3-outside-hdvwZL/outside.txt"
     ],

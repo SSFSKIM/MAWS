@@ -56,10 +56,10 @@ describe('group phrases', () => {
     expect(groupSummary(input({ readFiles: ['src/a.ts', 'src/b.ts'], searches: ['useSidebarDrag'], mcpServers: ['docs'] }))).toBe('Used docs, read 2 files, searched for `useSidebarDrag`');
   });
 
-  it('names a single file, command, host or skill', () => {
-    expect(groupSummary(input({ editedFiles: ['src/useSidebarDrag.ts'] }))).toBe('Edited useSidebarDrag.ts');
-    expect(groupSummary(input({ readFiles: ['src/app.ts'] }))).toBe('Read app.ts');
-    expect(groupSummary(input({ commands: ['pnpm test'] }))).toBe('Ran `pnpm test`');
+  it('counts even a single file or command, and names a single host or skill', () => {
+    expect(groupSummary(input({ editedFiles: ['src/useSidebarDrag.ts'] }))).toBe('Edited 1 file');
+    expect(groupSummary(input({ readFiles: ['src/app.ts'] }))).toBe('Read 1 file');
+    expect(groupSummary(input({ commands: ['pnpm test'] }))).toBe('Ran 1 command');
     expect(groupSummary(input({ fetchedHosts: ['example.com'] }))).toBe('Fetched example.com');
     expect(groupSummary(input({ fetchedHosts: ['a.com', 'b.com'] }))).toBe('Fetched 2 pages');
     expect(groupSummary(input({ webQueries: ['tanstack virtual chat'] }))).toBe('Searched the web for tanstack virtual chat');
@@ -75,7 +75,7 @@ describe('group phrases', () => {
 
   it('phrases other only when it is the sole category, and falls back to Worked', () => {
     expect(groupSummary(input({ other: 2 }))).toBe('Used 2 tools');
-    expect(groupSummary(input({ other: 2, commands: ['ls'] }))).toBe('Ran `ls`');
+    expect(groupSummary(input({ other: 2, commands: ['ls'] }))).toBe('Ran 1 command');
     expect(groupSummary(input({}))).toBe('Worked');
   });
 
@@ -102,9 +102,9 @@ describe('cell lines', () => {
 
   it('edit, read and the merged read', () => {
     expect(cellLabel({ kind: 'edit', path: 'src/a.ts', change: 'update', added: 3, removed: 1 })).toBe('Edited src/a.ts +3 −1');
-    expect(cellLabel({ kind: 'edit', path: 'src/a.ts', change: 'create', added: 3, removed: 0 })).toBe('Created src/a.ts');
-    expect(cellLabel({ kind: 'edit', path: 'src/a.ts', change: 'delete', added: 0, removed: 3 })).toBe('Deleted src/a.ts');
-    expect(cellLabel({ kind: 'read', paths: ['src/a.ts'] })).toBe('Read src/a.ts');
+    expect(cellLabel({ kind: 'edit', path: 'src/a.ts', change: 'create', added: 3, removed: 0 })).toBe('Created src/a.ts +3 −0');
+    expect(cellLabel({ kind: 'edit', path: 'src/a.ts', change: 'delete', added: 0, removed: 3 })).toBe('Deleted src/a.ts +0 −3');
+    expect(cellLabel({ kind: 'read', paths: ['src/a.ts'] })).toBe('Read a.ts');
     expect(cellLabel({ kind: 'read', paths: ['a', 'b', 'c'] })).toBe('Read 3 files');
   });
 
@@ -118,7 +118,7 @@ describe('cell lines', () => {
   });
 
   it('other cells', () => {
-    expect(cellLabel({ kind: 'generic', toolName: 'mcp__docs__search', category: 'mcp' as ToolCategory })).toBe('Used docs');
+    expect(cellLabel({ kind: 'generic', toolName: 'mcp__docs__search', category: 'mcp' as ToolCategory })).toBe('Used docs · search');
     expect(cellLabel({ kind: 'generic', toolName: 'Skill', category: 'skills', detail: 'tdd' })).toBe('Loaded tdd skill');
     expect(cellLabel({ kind: 'generic', toolName: 'ToolSearch', category: 'skills', detail: '2' })).toBe('Loaded 2 tools');
     expect(cellLabel({ kind: 'generic', toolName: 'Grep', category: 'exploration', detail: 'TODO', scope: 'src' })).toBe('Searched for `TODO` in src');

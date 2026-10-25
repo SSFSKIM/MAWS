@@ -1036,12 +1036,12 @@ describe('rewind adapter', () => {
     const fake = fakeClient();
     const state = turns();
     const rewind = ipcRewindOver(fake.client, APP, () => state);
-    expect(rewind.reapply).toBeNull();
+    expect('reapply' in rewind).toBe(false);
 
     const check = rewind.canUndo(turnId.ofMessage(uuid('u1')));
     expect(fake.calls[0].input).toEqual({ appSessionId: APP, userMessageUuid: 'u1', dryRun: true });
     fake.calls[0].answer({ ok: true, value: OUTCOME });
-    await expect(check).resolves.toEqual({ ok: true, reason: null });
+    await expect(check).resolves.toEqual({ ok: true, reason: null, files: OUTCOME.changedFiles });
 
     const undo = rewind.undo(turnId.ofMessage(uuid('u1')));
     expect(fake.calls[1].input).toEqual({ appSessionId: APP, userMessageUuid: 'u1', dryRun: false });
@@ -1061,7 +1061,7 @@ describe('rewind adapter', () => {
 
     const failed = rewind.canUndo(u1);
     fake.calls[1].answer({ ok: true, value: { ...OUTCOME, ok: false, message: 'No file checkpoint found for this message.' } });
-    await expect(failed).resolves.toEqual({ ok: false, reason: 'No file checkpoint found for this message.' });
+    await expect(failed).resolves.toEqual({ ok: false, reason: 'No file checkpoint found for this message.', files: OUTCOME.changedFiles });
 
     const down = rewind.canUndo(u1);
     fake.calls[2].answer({ ok: false, error: { code: 'host_unavailable', message: 'engine-host is not running' } });

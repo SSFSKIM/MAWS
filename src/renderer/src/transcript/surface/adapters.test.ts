@@ -78,14 +78,23 @@ describe('transcript surface adapters', () => {
     expect(group.cells.flatMap((cell) => toolInputs(cell, turn).map((call) => call.instanceId))).toEqual(['r1', 'r3']);
   });
 
-  it('keeps a tool summary when a mod rewrites only output, but not when it changes the call', () => {
+  it('keeps factual call details through rewrites without reviving an engine batch summary', () => {
     const b = builder(); b.turn('u');
     b.toolUse('bash', 'Bash', { command: 'pwd' }); b.result('bash', '/p');
     b.emit('tool.summary', { toolUseIds: [tool('bash')], summary: 'Checked the working directory' }); b.end(['u']);
     const { rows, turn } = setup(b);
     const input = toolInputs(find(rows, 'cell'), turn)[0];
-    expect(withToolProps(input, { ...input.props, output: '/rewritten' }).summary).toBe('Checked the working directory');
-    expect(withToolProps(input, { ...input.props, input: { command: 'echo changed' } }).summary).toBeUndefined();
+    const rewritten = withToolProps(input, { ...input.props, output: '/rewritten' });
+    expect(rewritten.detail).toMatchObject({ command: 'pwd', stdout: '/rewritten' });
+    expect(rewritten.summary).toBeUndefined();
+    const row = find(rows, 'cell');
+    const { container } = renderRow({ ...row, ...rewritten, id: row.id, expanded: true });
+    expect(container.querySelector('.transcript-cell-label')?.textContent).toBe('Ran Bash');
+    expect(container.querySelector('pre')?.textContent).toBe('/rewritten');
+    expect(container.textContent).not.toContain('Checked the working directory');
+    const changed = withToolProps(input, { ...input.props, input: { command: 'echo changed' } });
+    expect(changed.detail).toMatchObject({ command: 'echo changed', stdout: '/p' });
+    expect(changed.summary).toBeUndefined();
   });
 
   it('withholds the group ask while a member needs approval', () => {
@@ -206,7 +215,7 @@ describe('transcript surface adapters', () => {
     const drawn = withToolProps(input, { ...input.props, tool: 'Read', input: { file_path: '/shown', offset: 2, limit: 3 }, output: 'new file text' });
     expect(drawn).toMatchObject({ toolName: 'Read', paths: ['/shown'], detail: { kind: 'read', files: [{ path: '/shown', range: [2, 4] }], preview: 'new file text' } });
     const { container } = renderRow({ ...row, ...drawn, id: row.id, expanded: true });
-    expect(container.querySelector('.transcript-cell-label')?.textContent).toBe('Read /shown');
+    expect(container.querySelector('.transcript-cell-label')?.textContent).toBe('Read shown');
     expect(container.querySelector('pre')?.textContent).toBe('new file text');
     expect(drawn.classification).toBe(row.classification);
     expect(b.events).toEqual(before);

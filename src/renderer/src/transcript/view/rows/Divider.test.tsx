@@ -92,7 +92,29 @@ describe('divider row', () => {
     const store = await storeWith(deniedTurn().events);
     renderRow(rowOf(store.rows(), 'divider'), { storeKey: store.key });
     fireEvent.click(screen.getByRole('button', { name: 'Turn summary' }));
-    expect(await screen.findByText(/Worked for 2m 14s on claude-test · 2 tool calls: Ran `ls` · 1 denied \(permission-rule\)/)).toBeDefined();
+    expect(await screen.findByText(/Worked for 2m 14s on claude-test · 2 tool calls: Ran 1 command · 1 denied \(permission-rule\)/)).toBeDefined();
+    expect(screen.queryByRole('button', { name: 'Review changes' })).toBeNull();
+  });
+
+  it('reviews the selected older turn from its summary without starting a restore', async () => {
+    const b = builder();
+    for (const id of ['older', 'latest']) {
+      b.turn(id);
+      b.toolUse(`edit-${id}`, 'Edit', { file_path: `/p/${id}.ts`, old_string: 'a', new_string: 'b' });
+      b.result(`edit-${id}`, 'done');
+      b.end([id]);
+    }
+    const store = await storeWith(b.events);
+    const divider = rowOf(store.rows(), 'divider');
+    expect(divider.turnId).toBe('turn:older');
+    const rewind = { canUndo: vi.fn(async () => ({ ok: true, reason: null, files: ['/p/older.ts'] })), undo: vi.fn(async () => {}) };
+    const { actions } = renderRow(divider, { storeKey: store.key, rewind });
+    fireEvent.click(screen.getByRole('button', { name: 'Turn summary' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }));
+    expect(actions.reviewChanges).toHaveBeenCalledExactlyOnceWith('turn:older');
+    expect(rewind.canUndo).not.toHaveBeenCalled();
+    expect(rewind.undo).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
   describe('while the turn works', () => {

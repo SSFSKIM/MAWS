@@ -26,6 +26,7 @@
     "denied": 0,
     "endedAt": null,
     "expanded": true,
+    "files": [],
     "firstDeniedCell": null,
     "id": "divider:turn:u-think-1",
     "kind": "divider",

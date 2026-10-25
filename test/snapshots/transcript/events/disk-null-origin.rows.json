@@ -26,6 +26,7 @@
     "denied": 0,
     "endedAt": "2026-09-27T09:00:10.500Z",
     "expanded": true,
+    "files": [],
     "firstDeniedCell": null,
     "id": "divider:turn:u-disk-1",
     "kind": "divider",

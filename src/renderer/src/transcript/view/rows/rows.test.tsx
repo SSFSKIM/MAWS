@@ -81,7 +81,7 @@ describe('hook notice row (W1)', () => {
 });
 
 describe('thinking row', () => {
-  it('reads Thinking while live from its buffer, then Thought for {t}, and discloses its text', async () => {
+  it('reads the latest live reasoning from its buffer, then Thought for {t}, and discloses its text', async () => {
     const b = builder();
     b.turn('u1');
     const delta = (text: string) =>
@@ -90,10 +90,11 @@ describe('thinking row', () => {
     const store = await storeWith(b.events);
     const live = rowOf(store.rows(), 'thinking');
     const view = renderRow(live, { storeKey: store.key });
-    const toggle = screen.getByRole('button', { name: /^Thinking · \d+s$/ });
+    const toggle = screen.getByRole('button', { name: 'Checking' });
     fireEvent.click(toggle);
     act(() => store.push([delta(' the path')]));
-    expect(view.container.textContent).toContain('Checking the path');
+    expect(screen.getByRole('button', { name: 'Checking the path', expanded: true })).toBeTruthy();
+    expect(view.container.querySelector('.transcript-thinking-text')?.textContent).toBe('Checking the path');
     b.tick(8000);
     b.thinking('m1', 0, 'Checking the path.');
     act(() => store.push([b.events.at(-1)!]));
@@ -113,7 +114,7 @@ describe('live thinking label', () => {
     b.turn('u1');
     const delta = (text: string) =>
       b.emit('assistant.block.delta', { apiMessageId: api('m1'), blockIndex: 0, blockType: 'thinking', textDelta: null, thinkingDelta: text, inputJsonDelta: null, userMessageUuid: null });
-    delta('Checking');
+    delta(''); // With no readable text, the generic label still owns the clock, effort and warmth.
     return { b, delta };
   };
   const shimmer = () => document.querySelector<HTMLElement>('[data-shimmer]')!;
@@ -121,7 +122,8 @@ describe('live thinking label', () => {
   it('reads the tier, the session’s effort and the time the block has run, ticking once a second, and warms from 10 s', async () => {
     const store = await storeWith(streaming().b.events);
     renderRow(rowOf(store.rows(), 'thinking'), { storeKey: store.key, effort: 'xhigh' });
-    expect(screen.getByRole('button').textContent).toBe('Thinking with xhigh effort · 0s');
+    expect(shimmer().textContent).toBe('Thinking with xhigh effort · 0s');
+    expect(screen.queryByRole('button')).toBeNull();
     expect(shimmer().dataset.warmth).toBe('0');
     act(() => vi.advanceTimersByTime(12_000));
     expect(shimmer().textContent).toBe('Still thinking with xhigh effort · 12s');
@@ -140,7 +142,7 @@ describe('live thinking label', () => {
     act(() => vi.advanceTimersByTime(30_000));
     expect(shimmer().textContent).toBe('Thinking · 0s');
     b.tick(21_000);
-    act(() => store.push([delta(' the path')]));
+    act(() => store.push([delta('')]));
     expect(shimmer().textContent).toBe('Thinking more · 21s');
   });
 

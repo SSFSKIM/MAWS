@@ -73,9 +73,8 @@ const NO_PEER_REPLIES: PeerReplies = { subscribe: () => () => {}, get: () => und
 // E7 end
 
 export interface RewindInterface {
-  canUndo(turnId: TurnId): Promise<{ ok: boolean; reason: string | null }>; // dry run; disables the button with the reason as tooltip
+  canUndo(turnId: TurnId): Promise<{ ok: boolean; reason: string | null; files?: string[] | null }>; // dry run; disables the button with the reason as tooltip
   undo(turnId: TurnId): Promise<void>;
-  reapply: ((turnId: TurnId) => Promise<void>) | null; // null hides Reapply
 }
 
 const noop = () => {};

@@ -251,8 +251,8 @@ describe('review model', () => {
     expect(gitScopeFiles({ scope: 'branch', repoRoot: '/repo', files, patch: null, status }).map((r) => r.hunks)).toEqual([null, null, null]);
   });
 
-  it('lists Last turn from the receipt, each file’s hunks from its edited entries joined on the edit’s own path', () => {
-    const receipt: ChangedFile[] = [
+  it('lists Last turn from changed files, each file’s hunks from its edited entries joined on the edit’s own path', () => {
+    const changedFiles: ChangedFile[] = [
       { path: '/p/a.ts', change: 'update', added: 3, removed: 1, cellId: 'c1' as ChangedFile['cellId'] },
       { path: '/p/new.ts', change: 'create', added: 1, removed: 0, cellId: 'c2' as ChangedFile['cellId'] },
       { path: '/p/gone.ts', change: 'delete', added: 0, removed: 2, cellId: 'c3' as ChangedFile['cellId'] },
@@ -266,7 +266,7 @@ describe('review model', () => {
         { path: '/p/new.ts', use: 'edited', at: '', edit: edit('/p/new.ts', ['+n']) },
       ],
     } as unknown as TurnActivity;
-    const rows = turnScopeFiles(receipt, activity);
+    const rows = turnScopeFiles(changedFiles, activity);
     expect(rows.map((r) => [r.path, r.kind, r.added, r.removed, r.openPath])).toEqual([
       ['/p/a.ts', 'modified', 3, 1, '/p/a.ts'],
       ['/p/new.ts', 'added', 1, 0, '/p/new.ts'],
@@ -561,7 +561,11 @@ async function attachTranscript(events: SessionEvent[]) {
   const source: TranscriptSource = { subscribe: () => () => {}, snapshot: () => Promise.resolve(events) };
   await act(() => useTranscriptStore.getState().attach(A, source));
 }
-const receiptRow = () => useTranscriptStore.getState().rows(A).find((row) => row.kind === 'receipt');
+const changedTurn = () => {
+  const divider = useTranscriptStore.getState().rows(A).find((row) => row.kind === 'divider' && row.files?.length);
+  if (divider?.kind !== 'divider' || !divider.files?.length) throw new Error('no changed-file divider');
+  return { ...divider, files: divider.files };
+};
 
 describe('review tool', () => {
   const offs: (() => void)[] = [];
@@ -832,23 +836,27 @@ describe('review tool', () => {
     expect(screen.getByText('Split').getAttribute('aria-pressed')).toBe('true');
   });
 
-  it('shows Last turn from the receipt and C6’s activity, the same with the turn collapsed and expanded', async () => {
+  it('shows Last turn from divider metadata and C6’s activity, the same with the turn collapsed and expanded', async () => {
     main.state.status = statusOf({ dirty: false }); // a clean tree: C8a's git store reads no diff either
     await attachTranscript(journalToEvents(loadSyntheticJournal('edit-and-receipt')));
-    const receipt = receiptRow();
-    if (receipt?.kind !== 'receipt') throw new Error('no receipt');
+    const divider = changedTurn();
+    expect(useTranscriptStore.getState().rows(A).some((row) => row.kind === 'receipt')).toBe(false);
     expect(useTranscriptStore.getState().rows(A).some((row) => row.kind === 'group' || row.kind === 'cell')).toBe(false); // a closed turn collapses
     render(<TestHost />);
-    openReview({ scope: 'turn', turnId: receipt.turnId!, path: receipt.files[1].path });
+    openReview({ scope: 'turn', turnId: divider.turnId!, path: divider.files[1].path });
     await waitFor(() => expect(bodyText()).not.toBeNull());
     expect(chips().map((c) => [c[0], c[2]])).toEqual([
       ['uncommitted', 'false'],
       ['branch', 'false'],
       ['turn', 'true'],
     ]);
-    expect(selectedPath()).toBe(receipt.files[1].path);
-    expect(header()).toBe(`3 files changed · +${receipt.added} −${receipt.removed} · Last turn`);
-    expect(rows().map((r) => r[0])).toEqual(receipt.files.map((f) => f.path));
+    expect(selectedPath()).toBe(divider.files[1].path);
+    expect(header()).toBe('3 files changed · +7 −4 · Last turn');
+    expect(rows().map((r) => r[0])).toEqual([
+      '/tmp/maws-synth-edit-and-receipt/src/app.ts',
+      '/tmp/maws-synth-edit-and-receipt/src/store.ts',
+      '/tmp/maws-synth-edit-and-receipt/src/util/rows.ts',
+    ]);
     const collapsed = { rows: rows(), body: bodyText() };
     expect(collapsed.body).toContain('+'); // an edit's added lines
     act(() => useTranscriptStore.getState().expandAll(A, { cells: true }));
@@ -860,10 +868,9 @@ describe('review tool', () => {
   it('draws a Last turn file whose hunks carry unprefixed context lines (M4: edit-and-receipt’s src/app.ts)', async () => {
     main.state.status = statusOf({ dirty: false });
     await attachTranscript(journalToEvents(loadSyntheticJournal('edit-and-receipt')));
-    const receipt = receiptRow();
-    if (receipt?.kind !== 'receipt') throw new Error('no receipt');
+    const divider = changedTurn();
     render(<TestHost />);
-    openReview({ scope: 'turn', turnId: receipt.turnId!, path: receipt.files[0].path });
+    openReview({ scope: 'turn', turnId: divider.turnId!, path: divider.files[0].path });
     await waitFor(() => expect(bodyText()).toContain("import { store } from './store';"));
     expect(bodyText()).toContain('measureRows');
   });
@@ -915,10 +922,9 @@ describe('review tool', () => {
     b.text('m2', 0, 'Done.');
     b.end(['u1']);
     await attachTranscript(b.events);
-    const receipt = receiptRow();
-    if (receipt?.kind !== 'receipt') throw new Error('no receipt');
+    const divider = changedTurn();
     render(<TestHost />);
-    openReview({ scope: 'turn', turnId: receipt.turnId! });
+    openReview({ scope: 'turn', turnId: divider.turnId! });
     await waitFor(() => expect(bodyText()).toContain('omega'));
     expect(rows()).toEqual([['/repo/child.ts', 'modified', 'child.ts/repo+1 −1']]);
     expect(bodyText()).toContain('alpha');
@@ -943,10 +949,9 @@ describe('review tool', () => {
     b.end(['u1']);
     main.state.status = statusOf({ dirty: false });
     await attachTranscript(b.events);
-    const receipt = receiptRow();
-    if (receipt?.kind !== 'receipt') throw new Error('no receipt');
+    const divider = changedTurn();
     render(<TestHost />);
-    openReview({ scope: 'turn', turnId: receipt.turnId! });
+    openReview({ scope: 'turn', turnId: divider.turnId! });
     await waitFor(() => expect(document.querySelectorAll('[data-review-block]')).toHaveLength(3));
     await waitFor(() => expect(hunkLabel()).toBe('Showing hunk 1 of 3'));
     for (const text of ['+l12', '+EIGHT', '+ABOVE']) expect(bodyText()).toContain(text); // every edit's hunk drawn
@@ -965,11 +970,14 @@ describe('review tool', () => {
     let push: (batch: SessionEvent[]) => void = () => {};
     const events = journalToEvents(loadSyntheticJournal('edit-and-receipt'));
     await act(() => useTranscriptStore.getState().attach(A, { subscribe: (listener) => ((push = listener), () => {}), snapshot: () => Promise.resolve(events) }));
-    const receipt = receiptRow();
-    if (receipt?.kind !== 'receipt') throw new Error('no receipt');
-    const { result } = renderHook(() => useReviewData({ appSessionId: A, directory: '/repo', scope: 'turn', turnId: receipt.turnId! }));
+    const divider = changedTurn();
+    const { result } = renderHook(() => useReviewData({ appSessionId: A, directory: '/repo', scope: 'turn', turnId: divider.turnId! }));
     const before = result.current.list;
-    expect(before.phase).toBe('ready');
+    expect(before).toMatchObject({ phase: 'ready', files: [
+      { path: '/tmp/maws-synth-edit-and-receipt/src/app.ts', kind: 'modified', added: 1, removed: 1 },
+      { path: '/tmp/maws-synth-edit-and-receipt/src/store.ts', kind: 'modified', added: 3, removed: 3 },
+      { path: '/tmp/maws-synth-edit-and-receipt/src/util/rows.ts', kind: 'added', added: 3, removed: 0 },
+    ] });
     const next = builder('2026-09-28T11:00:00.000Z');
     next.turn('u-next');
     act(() => push(next.events)); // another turn starts and streams
@@ -983,10 +991,9 @@ describe('review tool', () => {
     await waitFor(() => expect(document.querySelector('[data-review-unavailable]')?.textContent).toBe('Diff unavailable: the turn is not loaded · Open the session'));
   });
 
-  it('open re-targets: a receipt’s turn and path select both, and an open with no params leaves a selected file alone', async () => {
+  it('open re-targets: a divider’s turn and path select both, and an open with no params leaves a selected file alone', async () => {
     await attachTranscript(journalToEvents(loadSyntheticJournal('edit-and-receipt')));
-    const receipt = receiptRow();
-    if (receipt?.kind !== 'receipt') throw new Error('no receipt');
+    const divider = changedTurn();
     render(<TestHost />);
     openReview();
     await waitFor(() => expect(rows()).toHaveLength(3));
@@ -997,9 +1004,9 @@ describe('review tool', () => {
     expect(selectedPath()).toBe('src/staged.ts');
     expect(document.querySelector('[data-review]')).toBe(shell); // re-targeted in place, never unmounted
     expect(panelOf(A)?.tabs).toHaveLength(1);
-    act(() => codeTranscriptActions.reviewChanges(receipt.turnId!, receipt.files[2].path));
+    act(() => codeTranscriptActions.reviewChanges(divider.turnId!, divider.files[2].path));
     await waitFor(() => expect(chipOf('turn')?.getAttribute('aria-pressed')).toBe('true'));
-    expect(selectedPath()).toBe(receipt.files[2].path);
+    expect(selectedPath()).toBe(divider.files[2].path);
     expect(panelOf(A)?.tabs).toHaveLength(1);
   });
 

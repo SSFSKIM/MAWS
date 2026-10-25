@@ -119,7 +119,7 @@ describe('edit detail', () => {
     expect(lines.map((line) => line.querySelector('[data-line-number]')?.textContent)).toEqual(['42', '43', '43', '44', '45']);
     expect(lines[4].textContent).toContain('return;');
     expect(lines[1].textContent).toContain('setTarget(id);');
-    fireEvent.click(within(cell).getByRole('button', { name: 'drag.ts' }));
+    fireEvent.click(within(cell).getByRole('button', { name: '/p/src/drag.ts' }));
     expect(actions.openFile).toHaveBeenCalledWith('/p/src/drag.ts', 42);
   });
 });

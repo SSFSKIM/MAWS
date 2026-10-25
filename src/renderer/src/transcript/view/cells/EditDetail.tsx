@@ -3,7 +3,7 @@
 // diff component: C8's Review owns that. The diff is bounded like any output: past 64 KB of line text, its head and tail
 // lines around "N lines omitted" and Open full log (a single line past 64 KB is itself capped).
 import { partsTruncationOf } from '../../model/cells';
-import { baseName, DETAIL } from '../../model/copy';
+import { DETAIL } from '../../model/copy';
 import type { Cell, CellDetail, Hunk } from '../../model/rows';
 import { useActions } from '../context';
 import { Omitted, Truncated } from './Truncated';
@@ -97,7 +97,7 @@ export function EditDetail({ cell, detail }: { cell: Cell; detail: Edit }) {
   return (
     <div className="transcript-edit">
       <button type="button" className="transcript-chip" title={detail.filePath} onClick={() => actions.openFile(detail.filePath, detail.hunks[0]?.newStart)}>
-        {baseName(detail.filePath)}
+        {detail.filePath}
       </button>
       {detail.hunks.length === 0 ? <p className="transcript-detail-note">{DETAIL.noDiff}</p> : <EditDiff hunks={detail.hunks} cell={cell} />}
     </div>
