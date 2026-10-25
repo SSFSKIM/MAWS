@@ -9,9 +9,12 @@
 // The test seam: when MAWS_CATALOG_FIXTURES names a directory, `<dir>/<source key>.json` (`{key, recordedAt, pages}`, M1's
 // recordings) answers in place of the network, its pages walked by the same tokens; a missing file is that source failing.
 // Under MAWS_E2E=1 without it, every source fails as offline: the network is never reached.
+// The icons (icons.ts) are fetched the same three ways: the rule's two icon routes on the network, the fixture
+// directory's `icons/<sha256 of the URL>.<png|svg>` under the seam (a missing file is no icon), none under MAWS_E2E=1.
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { CATALOG_EGRESS, egressGet, type EgressGet } from '@shared/net/egress';
+import { admitted, CATALOG_EGRESS, egressGet, ICON_CONTENT_TYPES, type EgressGet } from '@shared/net/egress';
 import { SEEDS, seedOf } from './sources';
 
 export const CATALOG_FIXTURES_ENV = 'MAWS_CATALOG_FIXTURES';
@@ -121,4 +124,42 @@ export function catalogPages(env: Record<string, string | undefined>, userAgent:
       throw new Error(`${key}: offline (MAWS_E2E=1 never reaches the network)`);
     };
   return networkPages(egressGet(CATALOG_EGRESS), userAgent);
+}
+
+// -- icons ---------------------------------------------------------------------------------------------------------
+
+/** One icon's answer: its media type and bytes. */
+export interface IconAnswer {
+  contentType: string;
+  bytes: Uint8Array;
+}
+/** An icon by its URL: the answer, or null when there is none (a non-2xx answer, a missing fixture); throws on a failure. */
+export type IconGet = (url: string) => Promise<IconAnswer | null>;
+
+/** Whether `url` is one of the catalog rule's icon routes (the directory's two Anthropic origins), the only icons fetched. */
+export function isIconUrl(url: string): boolean {
+  const route = admitted(CATALOG_EGRESS, url);
+  return route !== null && route.contentTypes.every((type) => (ICON_CONTENT_TYPES as readonly string[]).includes(type));
+}
+
+/** An icon's file in the fixture directory's `icons/`: the sha256 of its URL and its extension. */
+export const iconsFixtureName = (url: string): string => `${createHash('sha256').update(url).digest('hex')}${url.endsWith('.svg') ? '.svg' : '.png'}`;
+
+/** The icons this environment reads: the fixtures, none under the e2e, else the network through the catalog rule. */
+export function iconGet(env: Record<string, string | undefined>, userAgent: string, get: EgressGet = egressGet(CATALOG_EGRESS)): IconGet {
+  const fixtures = env[CATALOG_FIXTURES_ENV];
+  if (fixtures)
+    return async (url) => {
+      const name = iconsFixtureName(url);
+      try {
+        return { contentType: name.endsWith('.svg') ? 'image/svg+xml' : 'image/png', bytes: new Uint8Array(await readFile(join(fixtures, 'icons', name))) };
+      } catch {
+        return null;
+      }
+    };
+  if (env.MAWS_E2E === '1') return async () => null;
+  return async (url) => {
+    const answer = await get(url, { userAgent });
+    return answer.bytes === null ? null : { contentType: answer.contentType, bytes: answer.bytes };
+  };
 }

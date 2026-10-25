@@ -14,7 +14,8 @@ import { readMarketplaceManifest } from '../../engine-host/plugins/manifest';
 import { CommandFailure, type registerMainHandler } from '../ipc/router';
 import { EngineReads, type HostCall } from './engine-reads';
 import { StateWatch, type WatchFn } from './state-watch';
-import { catalogPages, NETWORK_KEYS } from './fetch';
+import { catalogPages, iconGet, NETWORK_KEYS, type IconGet } from './fetch';
+import { CatalogIcons } from './icons';
 import { buildCatalog } from './join';
 import type { TestSourceData } from './normalize';
 import { homeOf, queryOf } from './query';
@@ -31,6 +32,7 @@ export interface CatalogDeps {
   userAgent: string; // MAWS and its version
   log?: (line: string) => void;
   watch?: WatchFn; // the engine state watch's fs.watch (tests)
+  iconGet?: IconGet; // how icons are read (tests); by default the environment's (fetch.ts)
 }
 
 const READ_ATTEMPTS = 3; // a read overtaken by an invalidation this many times in a row answers what it has, uncached
@@ -45,6 +47,7 @@ export function startCatalog(deps: CatalogDeps): Catalog {
   const log = deps.log ?? ((line: string) => console.log(`[catalog] ${line}`));
   const store = new CatalogStore({ dir: join(deps.userData, 'catalog'), keys: NETWORK_KEYS, pages: catalogPages(deps.env, deps.userAgent), log });
   const reads = new EngineReads(deps.call, log);
+  const icons = new CatalogIcons({ dir: join(deps.userData, 'catalog', 'icons'), get: deps.iconGet ?? iconGet(deps.env, deps.userAgent), log });
   const built = new Map<string, { revision: string; items: CatalogItem[] }>();
   let tests: Promise<TestSourceData[]> | null = null;
   const testData = () =>
@@ -107,6 +110,7 @@ export function startCatalog(deps: CatalogDeps): Catalog {
     if (store.revision === before) changed(); // the engine's reads moved; a network change has already said so
     return statuses;
   });
+  deps.register('catalog.icon', async ({ url }) => ({ dataUrl: await icons.dataUrl(url) }));
   deps.register('catalog.sources', async () => {
     await store.loaded();
     return store.statuses();

@@ -15,8 +15,10 @@
 //   reached: MAWS_GOOGLE_FONTS_FIXTURES names a directory whose `map.json` answers URLs from files, and a URL it does not
 //   list fails as offline (as every URL does when no directory is named).
 // - `catalog`: Discover's catalog (main/catalog/fetch.ts): the seed marketplaces' manifests, Anthropic's public directory
-//   of plugins and of connectors, and the public install counts of the official marketplace that the engine itself reads.
-//   Read for the person and cached for them; nothing is sent anywhere. Its e2e seam is the catalog's own
+//   of plugins and of connectors, the public install counts of the official marketplace that the engine itself reads, and
+//   the icons the directory names on its own two origins (main/catalog/icons.ts; the Discover spec's Decision Log 7(b):
+//   any other icon host, Google's favicon service included, is never asked, and the card draws a monogram). Read for the
+//   person and cached for them; nothing is sent anywhere. Its e2e seam is the catalog's own
 //   (MAWS_CATALOG_FIXTURES, read by fetch.ts in place of this rule); under MAWS_E2E=1 it never reaches the network.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -65,7 +67,11 @@ const TOKEN = '[A-Za-z0-9._~%-]{1,512}';
 // directory and plugin-details as application/json (the plugins page 13,149,916 bytes in one page, the servers 1,348,270,
 // 1,268,217 and 22,693 bytes over three pages, plugin-details 538,696 bytes), the whole walk in 1.4 s. Each cap leaves the
 // source room to grow about fourfold (a manifest's matches the engine's own 8 MiB bound on marketplace.json) before a
-// refresh is refused as `tooLarge`, its last copy kept.
+// refresh is refused as `tooLarge`, its last copy kept. The icons, measured on 2026-10-25 (every Anthropic-origin icon
+// the live directory named, each fetched once): 756 plugin icons, all image/png, 876 to 111,087 bytes (median 13,906);
+// 11 server icons in the directory's own bucket, 4 image/png and 7 image/svg+xml, 447 to 93,026 bytes. Their cap, 512 KiB,
+// is about five times the largest.
+export const ICON_CONTENT_TYPES = ['image/png', 'image/svg+xml'] as const;
 export const CATALOG_EGRESS: EgressRule = {
   name: 'catalog',
   purpose: 'Discover’s catalog: seed marketplace manifests, Anthropic’s public plugin and connector directory, the official marketplace’s public install counts; read for the person, never sent anywhere (P4-AGG)',
@@ -79,6 +85,10 @@ export const CATALOG_EGRESS: EgressRule = {
     { origin: 'https://api.anthropic.com', path: /^\/api\/directory\/servers$/, query: new RegExp(`^\\?limit=500(?:&cursor=${TOKEN})?$`), contentTypes: ['application/json'], maxBytes: 4 * MiB },
     // the official marketplace's install counts and contents, which the engine reads with no credentials
     { origin: 'https://storage.googleapis.com', path: /^\/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819\/plugin-stats\/plugin-details\.json$/, query: null, contentTypes: ['application/json'], maxBytes: 2 * MiB },
+    // a directory plugin's icon (`media.icons[].url`), named by its content's sha256, always the 256-pixel PNG
+    { origin: 'https://api.anthropic.com', path: /^\/api\/directory\/plugin-icons\/[0-9a-f]{64}\/256\.png$/, query: null, contentTypes: ['image/png'], maxBytes: 512 * 1024 },
+    // a directory server's icon (`icon_url`) in the directory's own media bucket
+    { origin: 'https://storage.googleapis.com', path: /^\/media-assets-299d7136-cb52-d546-ee02-34bc1307c35f\/mcp-directory\/icons\/[A-Za-z0-9._-]{1,100}\.(?:png|svg)$/, query: null, contentTypes: ['image/png', 'image/svg+xml'], maxBytes: 512 * 1024 },
   ],
 };
 

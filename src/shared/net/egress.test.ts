@@ -1,5 +1,5 @@
 // P4-B2 D19 (R-8): MAWS's egress rules as the architect conditioned them: GET only to exactly a rule's routes (the three
-// Google Fonts routes; P4-AGG's four catalog routes); no cookies, credentials or redirects; a timeout, a size cap and a
+// Google Fonts routes; P4-AGG’s six catalog routes, four sources and two icon routes); no cookies, credentials or redirects; a timeout, a size cap and a
 // content type per response; the e2e's fixture map in place of the network. And the source guards: no `fetch(` in
 // src/engine-host outside route D's transport, none at all in src/main/catalog (both go through this module).
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -132,18 +132,22 @@ describe('the e2e’s fixture map (MAWS_E2E=1)', () => {
   });
 });
 
-// P4-AGG (Decision Log, fourth entry): Discover's catalog reads its four sources through this rule and no other way.
+// P4-AGG (Decision Log, fourth entry): Discover's catalog reads its four sources and its icons through this rule and no other way.
 describe('the catalog egress rule', () => {
   const RAW = 'https://raw.githubusercontent.com/anthropics/claude-plugins-official/HEAD/.claude-plugin/marketplace.json';
   const PLUGINS = 'https://api.anthropic.com/api/directory/plugins?visibility=public&limit=5000';
   const SERVERS = 'https://api.anthropic.com/api/directory/servers?limit=500';
   const DETAILS = 'https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/plugin-stats/plugin-details.json';
+  // the icons Discover's cards show (Decision Log 7(b)): the directory's plugin icons and its server icons bucket
+  const PLUGIN_ICON = 'https://api.anthropic.com/api/directory/plugin-icons/52b13b65807248f1c7acfb4830807f49447f4aa9b5434681261620e4cd067162/256.png';
+  const SERVER_ICON = 'https://storage.googleapis.com/media-assets-299d7136-cb52-d546-ee02-34bc1307c35f/mcp-directory/icons/chembl.png';
+  const SERVER_SVG = 'https://storage.googleapis.com/media-assets-299d7136-cb52-d546-ee02-34bc1307c35f/mcp-directory/icons/pubmed.svg';
 
   it('is declared beside google-fonts', () => {
     expect(EGRESS_RULES.map((rule) => rule.name)).toEqual(['google-fonts', 'catalog']);
   });
 
-  it('admits exactly its four routes: a seed manifest, the two directory walks with their page tokens, plugin-details', () => {
+  it('admits exactly its six routes: a seed manifest, the two directory walks with their page tokens, plugin-details, the two icon routes', () => {
     for (const url of [
       RAW,
       'https://raw.githubusercontent.com/canva-sdks/canva-skills/HEAD/.claude-plugin/marketplace.json',
@@ -154,6 +158,9 @@ describe('the catalog egress rule', () => {
       SERVERS,
       `${SERVERS}&cursor=fixture-page-2`,
       DETAILS,
+      PLUGIN_ICON,
+      SERVER_ICON,
+      SERVER_SVG,
     ])
       expect(admitted(CATALOG_EGRESS, url), url).not.toBeNull();
     for (const url of [
@@ -177,6 +184,18 @@ describe('the catalog egress rule', () => {
       'https://user:pass@api.anthropic.com/api/directory/servers?limit=500',
       'https://api.anthropic.com:8443/api/directory/servers?limit=500',
       'https://api.anthropic.com.evil.example/api/directory/servers?limit=500',
+      // icons: only the two Anthropic origins, at their exact shapes; Google's favicon service and every vendor host never
+      `${PLUGIN_ICON}?size=64`,
+      'https://api.anthropic.com/api/directory/plugin-icons/52b13b65/256.png',
+      'https://api.anthropic.com/api/directory/plugin-icons/52b13b65807248f1c7acfb4830807f49447f4aa9b5434681261620e4cd067162/512.png',
+      'https://api.anthropic.com/api/directory/plugin-icons/../plugins',
+      'https://storage.googleapis.com/media-assets-00000000-cb52-d546-ee02-34bc1307c35f/mcp-directory/icons/chembl.png',
+      'https://storage.googleapis.com/adspirer-images-v1/brand/adspirer-logo-square.png',
+      'https://storage.googleapis.com/media-assets-299d7136-cb52-d546-ee02-34bc1307c35f/mcp-directory/icons/chembl.html',
+      'https://storage.googleapis.com/media-assets-299d7136-cb52-d546-ee02-34bc1307c35f/mcp-directory/other/chembl.png',
+      'https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://drive.google.com&size=64',
+      'https://claude.ai/api/dxt/extensions/ant.dir.ant.anthropic.filesystem/versions/2026.7.10/icon.png',
+      'https://www.notion.so/images/notion-logo-block-main.svg',
     ])
       expect(admitted(CATALOG_EGRESS, url), url).toBeNull();
   });
@@ -188,11 +207,17 @@ describe('the catalog egress rule', () => {
     expect(await get('application/json')(DETAILS)).toMatchObject({ status: 200, contentType: 'application/json' });
     expect(await failure(get('text/html')(SERVERS))).toBe('contentType');
     expect(await failure(get('application/json')(RAW))).toBe('contentType');
+    expect(await get('image/png')(PLUGIN_ICON)).toMatchObject({ status: 200, contentType: 'image/png' });
+    expect(await failure(get('image/svg+xml')(PLUGIN_ICON))).toBe('contentType');
+    expect(await get('image/png')(SERVER_ICON)).toMatchObject({ status: 200, contentType: 'image/png' });
+    expect(await get('image/svg+xml')(SERVER_SVG)).toMatchObject({ status: 200, contentType: 'image/svg+xml' });
+    expect(await failure(get('text/html')(SERVER_ICON))).toBe('contentType');
   });
 
   it('caps each route at about three to five times what it served on the live walk (2026-10-25)', () => {
     const room = (url: string, served: number) => admitted(CATALOG_EGRESS, url)!.maxBytes / served;
-    for (const [url, served] of [[RAW, 1_566_074], [PLUGINS, 13_149_916], [SERVERS, 1_348_270], [DETAILS, 538_696]] as const) {
+    // the icons: the largest of every Anthropic-origin icon the directory named on 2026-10-25 (756 plugin icons, 11 server icons)
+    for (const [url, served] of [[RAW, 1_566_074], [PLUGINS, 13_149_916], [SERVERS, 1_348_270], [DETAILS, 538_696], [PLUGIN_ICON, 111_087], [SERVER_ICON, 93_026]] as const) {
       expect(room(url, served), url).toBeGreaterThan(3);
       expect(room(url, served), url).toBeLessThan(6);
     }

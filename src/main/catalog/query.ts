@@ -3,6 +3,7 @@
 // - Tabs: Plugins lists every plugin; Skills the plugins whose skills are known; Connectors the directory's servers.
 // - Featured is derived, never editorial: on Plugins and Skills the most-installed item listed by Anthropic that is not
 //   installed here; on Connectors the best-ranked one not configured here.
+// - Categories: every value of the chosen axis in the tab with its count, the Category filter's choices.
 // - Shelves: "Your sources" (marketplaces the person added), one per seed with more than one item in seed order, then the
 //   four largest categories. Community items are on no shelf (the owner's ruling), only in search and All.
 // - Order: installs (rank for connectors) descending, then updated descending, then name, ties by id; or updated, or
@@ -105,7 +106,11 @@ export function homeOf(catalog: readonly CatalogItem[], tab: CatalogTab): Catalo
   for (const item of shelved) for (const category of new Set(item.categories)) counts.set(category, (counts.get(category) ?? 0) + 1);
   const categories = [...counts].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, CATEGORY_SHELVES);
   for (const [category] of categories) shelves.push(shelf(`category:${category}`, 'category', categoryTitle(category), shelved.filter((item) => item.categories.includes(category))));
-  return { featured: featuredOf(items, tab), shelves, total: items.length };
+  // the Category filter's choices: every value in the tab, community items included (the filter applies to All and search)
+  const all = new Map<string, number>();
+  for (const item of items) for (const category of new Set(item.categories)) all.set(category, (all.get(category) ?? 0) + 1);
+  const choices = [...all].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).map(([value, total]) => ({ value, title: categoryTitle(value), total }));
+  return { featured: featuredOf(items, tab), shelves, categories: choices, total: items.length };
 }
 
 // -- the query -----------------------------------------------------------------------------------------------------

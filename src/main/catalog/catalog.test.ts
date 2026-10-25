@@ -294,6 +294,14 @@ describe('the home', () => {
     expect(official.items.slice(0, 3).map((i) => i.name)).toEqual(['frontend-design', 'Superpowers', 'code-review']); // by installs
   });
 
+  it('lists every category of the tab for the Category filter, by count, each with its title and its count over the whole tab', async () => {
+    const items = await catalog();
+    const { categories } = homeOf(items, 'plugins');
+    expect(categories.length).toBeGreaterThan(4);
+    for (const c of categories) expect(c).toEqual({ value: c.value, title: categoryTitle(c.value), total: queryOf(items, { tab: 'plugins', cwd: null, category: c.value, limit: 1 }, 'r').total });
+    expect(categories.map((c) => c.total)).toEqual([...categories.map((c) => c.total)].sort((a, b) => b - a));
+  });
+
   it('on Skills lists only items whose skills are known; on Connectors features the best rank not configured here', async () => {
     const items = await catalog();
     const skills = homeOf(items, 'skills');

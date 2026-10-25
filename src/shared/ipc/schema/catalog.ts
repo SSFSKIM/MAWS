@@ -98,7 +98,10 @@ export const CatalogShelfSchema = z.strictObject({
   total: z.number().int(),
 });
 export type CatalogShelf = z.infer<typeof CatalogShelfSchema>;
-export const CatalogHomeSchema = z.strictObject({ featured: CatalogItemSchema.nullable(), shelves: z.array(CatalogShelfSchema), total: z.number().int() });
+// A category the tab holds: the Category filter's choice (M3: the home carries them, so the filter needs no read of its own)
+export const CatalogCategorySchema = z.strictObject({ value: z.string(), title: z.string(), total: z.number().int() });
+export type CatalogCategory = z.infer<typeof CatalogCategorySchema>;
+export const CatalogHomeSchema = z.strictObject({ featured: CatalogItemSchema.nullable(), shelves: z.array(CatalogShelfSchema), categories: z.array(CatalogCategorySchema), total: z.number().int() });
 export type CatalogHome = z.infer<typeof CatalogHomeSchema>;
 
 export const CatalogQueryInputSchema = z.strictObject({
@@ -124,6 +127,9 @@ export const commands = {
   'catalog.item': main(z.strictObject({ id: z.string().max(4096), cwd: CwdSchema }), CatalogItemSchema),
   'catalog.refresh': main(z.strictObject({}), z.array(CatalogSourceStatusSchema)),
   'catalog.sources': main(z.strictObject({}), z.array(CatalogSourceStatusSchema)),
+  // M3: a card's icon as data, fetched by main only from the directory's own icon routes (the catalog egress rule;
+  // Decision Log 7(b)); null for any other URL, which the card draws as a monogram. The renderer fetches nothing.
+  'catalog.icon': main(z.strictObject({ url: z.string().max(2048) }), z.strictObject({ dataUrl: z.string().nullable() })),
 } as const satisfies Record<`catalog.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
