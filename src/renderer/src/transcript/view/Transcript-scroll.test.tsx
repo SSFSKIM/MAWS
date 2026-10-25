@@ -421,6 +421,36 @@ for (const initialReport of [false, true]) {
   });
 }
 
+// The streamed answer grows inside the last row: its content overflows the sizer at once, but the sizer's height commits
+// only after the virtualizer re-renders, a frame or two later. The end is followed in the observer pass that measured
+// the growth, before that frame paints, never left behind until the sizer commits (e2e: transcript.spec.ts, painted
+// frames while following).
+for (const grow of [24, 182]) {
+  it(`a following list pins a measured ${grow}px growth of the last row before its sizer commits`, async () => {
+    const s = await scene(false, true);
+    s.extendDOMEnd(grow); // the grown row overflows the sizer React has not re-rendered yet
+    s.resizeRow('last', grow);
+    s.extendDOMEnd(0); // the sizer has committed: the row no longer overflows it
+    expect(s.writes.length).toBeGreaterThan(0);
+    expect(s.scroller.scrollHeight - s.scroller.clientHeight - s.scroller.scrollTop).toBe(0);
+    expect(s.handle.current!.following).toBe(true);
+    expect(s.changed.mock.calls).toEqual([]);
+  });
+}
+
+it('a measured growth after reader input leaves the reader where they are', async () => {
+  const s = await scene(false, true);
+  s.readerMove(-200);
+  const held = s.scroller.scrollTop;
+  s.writes.length = 0;
+  s.extendDOMEnd(182);
+  s.resizeRow('last', 182);
+  s.extendDOMEnd(0);
+  expect(s.scroller.scrollTop).toBe(held);
+  expect(s.writes).toEqual([]);
+  expect(s.handle.current!.following).toBe(false);
+});
+
 it('a browser clamp during remeasurement is not reader intent, even before the smaller sizer commits', async () => {
   const s = await scene(true);
   await new Promise((resolve) => setTimeout(resolve, 180)); // the real virtualizer retires its initial scrolling state
