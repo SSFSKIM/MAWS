@@ -82,6 +82,7 @@
     // P4-AGG M3: the live library run formats install counts with Discover's own words
     "src/renderer/src/customize/discover/present.ts",
     "src/renderer/src/customize/discover/copy.ts",
+    "src/renderer/src/customize/connectors/copy.ts", // P4-AGG M4: a connector card's URL line words
     "src/renderer/src/widgets/plugins/catalog-words.ts",
     "src/renderer/src/widgets/plugins/library.ts",
     "test/live/support/live.ts",

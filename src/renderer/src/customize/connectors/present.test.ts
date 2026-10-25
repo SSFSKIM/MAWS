@@ -127,7 +127,7 @@ describe('a server’s sign-in state', () => {
     expect(signInViewOf({ ...none, posture: 'auth_required' })).toEqual({ text: 'Sign in needed', tone: 'muted', signIn: true, cancel: false });
     expect(signInViewOf({ ...none, live: null, posture: 'no_auth' })).toEqual({ text: 'No sign-in needed', tone: 'muted', signIn: false, cancel: false });
     expect(signInViewOf({ ...none, live: { status: 'connected', error: null }, posture: 'no_auth' })).toMatchObject({ text: 'Connected · No sign-in needed', signIn: false });
-    expect(signInViewOf(none)).toBeNull(); // nothing MAWS can observe
+    expect(signInViewOf(none)).toEqual({ text: null, tone: 'muted', signIn: true, cancel: false }); // nothing observed: no words, Sign in offered
     expect(signInViewOf({ ...none, transport: 'stdio', posture: 'auth_required' })).toBeNull(); // a local server signs in nowhere
   });
 

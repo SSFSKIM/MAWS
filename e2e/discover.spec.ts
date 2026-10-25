@@ -18,7 +18,8 @@
 //   projects:  installed at project scope in A reads Installed there and "Installed in another project" in B, + kept;
 //              Not installed (acceptance 4).
 //   offline:   without the directory's and plugin-details' recordings, the manifests' items stay, plainer, with no
-//              counts and no Featured, and the Sources popover says which sources are unavailable (acceptance 11).
+//              counts and no Featured, and the Sources popover says which sources are unavailable; Connectors' Discover
+//              says the directory is unavailable, with Retry (acceptance 11; the Connectors side is M4's).
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -435,4 +436,11 @@ test('offline: without the directory and plugin-details, the manifests’ items 
   await expect(popover.locator('[data-source="directory:plugins"]')).toContainText('Anthropic’s directory: plugins unavailable');
   await expect(popover.locator('[data-source="plugin-details"]')).toHaveAttribute('data-source-state', 'unavailable');
   await expect(popover.locator('[data-source="seed:claude-for-legal"]')).not.toHaveAttribute('data-source-state', 'unavailable');
+  // P4-AGG M4: the Connectors side of acceptance 11: its Discover says the directory is unavailable, with Retry
+  await page.keyboard.press('Escape');
+  await page.getByRole('tab', { name: 'Connectors', exact: true }).click();
+  const connectors = page.getByRole('tabpanel', { name: 'Connectors' });
+  await connectors.getByRole('radio', { name: 'Discover' }).click();
+  await expect(connectors.locator('[data-connectors-unavailable]')).toContainText('Anthropic’s directory is unavailable.');
+  await expect(connectors.locator('[data-connectors-unavailable]').getByRole('button', { name: 'Retry' })).toBeEnabled();
 });

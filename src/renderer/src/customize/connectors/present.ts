@@ -8,7 +8,8 @@
 // - Sign in runs in the attached session, else any ready session whose scope includes the server (Decision Log 14): any
 //   session for a user-scope server, a session in the page's directory for a project or local one.
 // - A server's sign-in state: a sign-in under way or its end first, then the attached session's mcp_status, then the
-//   directory's auth posture for a server it lists under that name; nothing when MAWS observed nothing.
+//   directory's auth posture for a server it lists under that name; no words when MAWS observed nothing, though a remote
+//   server still offers Sign in.
 import type { CatalogItem } from '@shared/ipc/schema/catalog';
 import type { ConnectorSignInChanged } from '@shared/ipc/schema/connectors';
 import type { CustomizationServer } from '@shared/ipc/schema/customization';
@@ -92,13 +93,13 @@ export interface SignInFacts {
 }
 
 export interface SignInView {
-  text: string;
+  text: string | null; // null: MAWS has observed nothing about it
   tone: 'muted' | 'success' | 'danger';
   signIn: boolean; // Sign in is offered (a second press while one runs cancels it and starts again)
   cancel: boolean;
 }
 
-const view = (text: string, tone: SignInView['tone'], signIn: boolean, cancel = false): SignInView => ({ text, tone, signIn, cancel });
+const view = (text: string | null, tone: SignInView['tone'], signIn: boolean, cancel = false): SignInView => ({ text, tone, signIn, cancel });
 const REMOTE: ReadonlySet<string | null> = new Set(['http', 'sse', null]);
 
 export function signInViewOf({ live, posture, last, transport }: SignInFacts): SignInView | null {
@@ -135,5 +136,7 @@ export function signInViewOf({ live, posture, last, transport }: SignInFacts): S
   }
   if (authless) return view(C.noneNeeded, 'muted', false);
   if (posture === 'auth_required') return view(C.needed, 'muted', true);
-  return null;
+  // a remote server nobody describes and no session lists (one added after the session started, Decision Log 14): no
+  // state to claim, but Sign in is offered; an authless server answers it at once
+  return view(null, 'muted', true);
 }

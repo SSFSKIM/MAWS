@@ -179,7 +179,7 @@ function ServerRow({ server, place, session, live }: { server: CustomizationServ
       <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
         <span className="font-medium [overflow-wrap:anywhere]">{server.name}</span>
         <span className="text-ui-sm text-fg-muted">{[C.scopeOf(server.scope), server.transport].filter(Boolean).join(' · ')}</span>
-        {state && (
+        {state?.text && (
           <span data-sign-in-state className={`text-ui-sm ${TONE[state.tone]}`}>
             {state.text}
           </span>
