@@ -10,6 +10,7 @@
 // its line stays, whichever view shows; Customize keeps the section mounted once visited.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { PluginsScope } from '@shared/plugins/cli';
 import type { CatalogItem } from '@shared/ipc/schema/catalog';
 import type { CustomizationServer } from '@shared/ipc/schema/customization';
 import { useSessions } from '../../stores/sessions';
@@ -29,8 +30,8 @@ import { DiscoverToolbar } from '../discover/DiscoverToolbar';
 import { useCatalogPostures, useCatalogRefresh, useCatalogSources } from '../discover/read';
 import { ConnectorSheet } from './ConnectorSheet';
 import { CONNECTORS as C } from './copy';
-import { removeRequestOf, serverKey, signInSessionOf, signInViewOf, type AuthPosture, type ConfiguredServers, type ReadySession, type SignInFacts, type SignInView } from './present';
-import { cancelSignIn, signInKeyOf, startSignIn, useSignIns } from './sign-in';
+import { removeRequestOf, resultFor, serverKey, signInSessionOf, signInViewOf, type AuthPosture, type ConfiguredServers, type ReadySession, type SignInFacts, type SignInView } from './present';
+import { cancelSignIn, forgetSignIn, signInKeyOf, startSignIn, useSignIns } from './sign-in';
 
 const BUTTON = 'rounded-sm px-2 py-1 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint';
 const TONE: Record<SignInView['tone'], string> = { muted: 'text-fg-muted', success: 'text-success', danger: 'text-danger' };
@@ -62,7 +63,9 @@ function useConnectorManage(cwd: string | null, configured: ConfiguredServers, r
       env={{ cwd, runCwd, engine: asking.engine, configured, retryServers }}
       onConfirm={(request, binary) => {
         setAsking(null);
-        void ops.run(asking.key, request, runCwd, binary);
+        // a configuration MAWS removed or replaced: a sign-in's result for that name and scope says nothing about it now
+        const { name, scope } = request.input as { name: string; scope: PluginsScope };
+        void ops.run(asking.key, request, runCwd, binary).then((done) => done?.outcome?.ok && forgetSignIn({ name, scope, cwd }));
       }}
       onClose={() => setAsking(null)}
     />
@@ -70,10 +73,11 @@ function useConnectorManage(cwd: string | null, configured: ConfiguredServers, r
   return { manage, sheet };
 }
 
-export function ConnectorsSection({ cwd, place, servers, configured, inventoryState, refresh, attached, live }: {
+export function ConnectorsSection({ cwd, place, servers, readAt, configured, inventoryState, refresh, attached, live }: {
   cwd: string | null; // the page's directory; null for the user configuration
   place: string | null; // the page's name for "Open a session in <place>"
   servers: readonly CustomizationServer[] | undefined; // the inventory's, once read
+  readAt: number; // when the inventory last answered
   configured: ConfiguredServers; // the same read as Add needs it: whole, or why not
   inventoryState: ReactNode; // reading, failed (with Retry), or the warnings
   refresh(): void;
@@ -103,7 +107,7 @@ export function ConnectorsSection({ cwd, place, servers, configured, inventorySt
             </button>
           </div>
           {inventoryState}
-          {servers && <Configured servers={servers} cwd={cwd} place={place} attached={attached} />}
+          {servers && <Configured servers={servers} readAt={readAt} cwd={cwd} place={place} attached={attached} />}
           {live}
         </div>
       )}
@@ -130,7 +134,7 @@ function ConnectorsDiscover({ cwd, onOpenInstalled }: { cwd: string | null; onOp
 }
 
 // The configured servers, with a removal's result kept at the head once its row has left.
-function Configured({ servers, cwd, place, attached }: { servers: readonly CustomizationServer[]; cwd: string | null; place: string | null; attached: AppSessionId | null }) {
+function Configured({ servers, readAt, cwd, place, attached }: { servers: readonly CustomizationServer[]; readAt: number; cwd: string | null; place: string | null; attached: AppSessionId | null }) {
   const { ops } = useManage();
   const engine = useSessions((s) => s.engine);
   const ready = useMemo<ReadySession[]>(() => [...engine.values()].filter((status) => status.process === 'ready').map((status) => ({ appSessionId: status.appSessionId, cwd: status.cwd })), [engine]);
@@ -141,8 +145,8 @@ function Configured({ servers, cwd, place, attached }: { servers: readonly Custo
     return entry ? { status: entry.status, error: typeof entry.error === 'string' ? entry.error : null } : null;
   };
   const liveRead = attached !== null && read.readAt !== null ? { appSessionId: attached, at: read.readAt } : null; // when its answer arrived
-  const postures = useCatalogPostures(cwd, servers).data?.servers;
-  const postureOf = (server: CustomizationServer) => postures?.find((p) => p.name === server.name && p.scope === server.scope)?.authPosture ?? null;
+  const postures = useCatalogPostures(cwd, servers, readAt).data?.servers;
+  const postureOf = (server: CustomizationServer) => postures?.find((p) => p.name === server.name && p.scope === server.scope) ?? null;
   // a sign-in that ended: the attached session's servers read again
   const ended = useSignIns((s) => [...s.byServer.values()].filter(({ event }) => event.state === 'done' || event.state === 'failed').map(({ event }) => event.opId).join(','));
   const { refetch } = read;
@@ -159,17 +163,17 @@ function Configured({ servers, cwd, place, attached }: { servers: readonly Custo
       ))}
       <ul aria-label={C.configured} className="m-0 list-none p-0">
         {servers.map((server) => (
-          <ServerRow key={serverKey(server)} server={server} cwd={cwd} place={place} session={signInSessionOf(server.scope, ready, attached, cwd)} live={liveOf(server.name)} liveRead={liveRead} posture={postureOf(server)} />
+          <ServerRow key={serverKey(server)} server={server} cwd={cwd} place={place} session={signInSessionOf(server.scope, ready, attached, cwd)} live={liveOf(server.name)} liveRead={liveRead} posture={postureOf(server)?.authPosture ?? null} fingerprint={postureOf(server)?.fingerprint ?? null} />
         ))}
       </ul>
     </>
   );
 }
 
-function ServerRow({ server, cwd, place, session, live, liveRead, posture }: { server: CustomizationServer; cwd: string | null; place: string | null; session: string | null; live: SignInFacts['live']; liveRead: SignInFacts['liveRead']; posture: AuthPosture | null }) {
+function ServerRow({ server, cwd, place, session, live, liveRead, posture, fingerprint }: { server: CustomizationServer; cwd: string | null; place: string | null; session: string | null; live: SignInFacts['live']; liveRead: SignInFacts['liveRead']; posture: AuthPosture | null; fingerprint: string | null }) {
   const { ask, ops } = useManage();
-  const target = { name: server.name, scope: server.scope, cwd };
-  const record = useSignIns((s) => s.byServer.get(signInKeyOf(target)) ?? null);
+  const target = server.scope === 'app' ? null : { name: server.name, scope: server.scope, cwd };
+  const record = resultFor(useSignIns((s) => (target === null ? null : (s.byServer.get(signInKeyOf(target)) ?? null))), fingerprint);
   const last = record?.event ?? null;
   const state = signInViewOf({ live, liveRead, posture, last: record, transport: server.transport });
   const key = serverKey(server);
@@ -193,9 +197,13 @@ function ServerRow({ server, cwd, place, session, live, liveRead, posture }: { s
                 {C.openSession(server.scope === 'user' ? null : place)}
               </span>
             ) : (
-              <button type="button" aria-label={C.signInName(server.name)} className={SECONDARY} onClick={() => void startSignIn(target, session)}>
-                {C.signIn}
-              </button>
+              // offered once main has said which configuration this is, so the result can be tied to it
+              target !== null &&
+              fingerprint !== null && (
+                <button type="button" aria-label={C.signInName(server.name)} className={SECONDARY} onClick={() => void startSignIn(target, fingerprint, session)}>
+                  {C.signIn}
+                </button>
+              )
             ))}
           {remove && (
             <button type="button" aria-label={C.removeName(server.name)} disabled={busy} className={BUTTON} onClick={() => ask(key, remove)}>

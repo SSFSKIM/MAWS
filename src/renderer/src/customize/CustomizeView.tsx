@@ -113,6 +113,7 @@ export function CustomizeView({ section }: { section: CustomizeSection }) {
         cwd={cwd}
         place={project?.name ?? (cwd === null ? null : homeAbbreviated(cwd))}
         servers={inventory.data?.servers}
+        readAt={inventory.dataUpdatedAt}
         configured={configuredOf(inventory)}
         inventoryState={<InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} refresh={() => void inventory.refetch()} />}
         refresh={() => void inventory.refetch()}

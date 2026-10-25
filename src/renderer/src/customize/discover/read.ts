@@ -103,12 +103,13 @@ export const useCatalogIcon = (url: string | null) =>
     refetchOnWindowFocus: false,
   });
 
-/** P4-AGG M4: each configured server's sign-in posture, by the directory record its endpoint matches (main's
- * `catalog.postures`, from the directory copy it holds: My items never reaches the network to show its list). Read again
- * when what is configured changes, and on `catalog.changed`. */
-export const useCatalogPostures = (cwd: string | null, servers: readonly { name: string; scope: string }[] | undefined) =>
+/** P4-AGG M4: each configured server's sign-in posture, by the directory record its endpoint matches, and its
+ * configuration's fingerprint (main's `catalog.postures`, from the directory copy it holds: My items never reaches the
+ * network to show its list). Read again with every read of what is configured (`readAt`: an endpoint can change under
+ * the same name and scope), and on `catalog.changed`. */
+export const useCatalogPostures = (cwd: string | null, servers: readonly { name: string; scope: string }[] | undefined, readAt: number) =>
   useQuery<CommandOutput<'catalog.postures'>, IpcCommandError>({
-    queryKey: [...ROOT, 'postures', { cwd, servers: (servers ?? []).map(({ name, scope }) => `${scope}:${name}`) }],
+    queryKey: [...ROOT, 'postures', { cwd, readAt }],
     queryFn: () => invoke('catalog.postures', { cwd }),
     enabled: servers !== undefined && servers.length > 0,
     refetchOnWindowFocus: false,

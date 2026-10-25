@@ -9,7 +9,7 @@ import { item } from '../discover/test-items';
 import { argvOf } from '../../widgets/plugins/present';
 import { installRequestOf } from '../discover/add';
 import { cardContentsWords } from '../discover/present';
-import { configuredOf, connectorAddOf, existingOf, nameProblem, removeRequestOf, scopesFor, signInSessionOf, signInViewOf, urlProblem, writesFor } from './present';
+import { configuredOf, connectorAddOf, existingOf, resultFor, nameProblem, removeRequestOf, scopesFor, signInSessionOf, signInViewOf, urlProblem, writesFor } from './present';
 
 const linear = (over: Partial<CatalogItem['install']> = {}, item_: Partial<CatalogItem> = {}): CatalogItem =>
   item({
@@ -26,7 +26,7 @@ const linear = (over: Partial<CatalogItem['install']> = {}, item_: Partial<Catal
   });
 
 const server = (over: Partial<CustomizationServer> = {}): CustomizationServer => ({ name: 'linear', scope: 'user', path: '/cfg/.claude.json', transport: 'http', ...over });
-const event = (over: Partial<ConnectorSignInChanged>, at = 1_000, appSessionId = 's1'): SignInRecord => ({ event: { opId: 'op', name: 'linear', state: 'starting', reason: null, message: null, where: null, ...over }, appSessionId, at });
+const event = (over: Partial<ConnectorSignInChanged>, at = 1_000, appSessionId = 's1', fingerprint: string | null = 'print'): SignInRecord => ({ event: { opId: 'op', name: 'linear', state: 'starting', reason: null, message: null, where: null, ...over }, appSessionId, at, fingerprint });
 
 describe('adding a connector', () => {
   it('asks claude mcp add with the directory’s name, URL and transport at user scope, carrying what the sheet shows', () => {
@@ -91,6 +91,8 @@ describe('adding a connector', () => {
     expect(configuredOf({ data: { servers, serversRead: false }, error: null })).toEqual({ state: 'partial' });
     expect(configuredOf({ data: undefined, error: new Error('the engine host is not running') })).toEqual({ state: 'failed', message: 'the engine host is not running' });
     expect(configuredOf({ data: undefined, error: null })).toEqual({ state: 'reading' });
+    // a refresh that failed: the answer kept from before vouches for nothing now
+    expect(configuredOf({ data: { servers: [], serversRead: true }, error: new Error('configuration is unreadable now') })).toEqual({ state: 'failed', message: 'configuration is unreadable now' });
   });
 
   it('offers user scope alone on the user configuration, the three scopes in a project', () => {
@@ -194,5 +196,21 @@ describe('a finished sign-in against what the session reports now', () => {
   it('a sign-in that did not finish stays said, with Sign in, whatever the session reads after it', () => {
     const failed = event({ state: 'failed', reason: 'timeout' }, 1_000);
     expect(signInViewOf(facts(failed, needsAuth, { appSessionId: 's1', at: 2_000 }))).toEqual({ text: 'Sign-in didn’t finish: the browser didn’t return within 5 minutes', tone: 'danger', signIn: true, cancel: false });
+  });
+});
+
+describe('which result a row shows', () => {
+  it('a finished sign-in only for the configuration it was for: its fingerprint, known on both sides', () => {
+    const done = event({ state: 'done', where: 'here' }, 1_000, 's1', 'print-1');
+    expect(resultFor(done, 'print-1')).toBe(done);
+    expect(resultFor(done, 'print-2')).toBeNull(); // removed, and another endpoint added under the name and scope
+    expect(resultFor(done, null)).toBeNull(); // the configuration's fingerprint is not read: nothing is vouched for
+    expect(resultFor(event({ state: 'failed', reason: 'timeout' }, 1_000, 's1', null), null)).toBeNull();
+    expect(resultFor(null, 'print-1')).toBeNull();
+  });
+
+  it('a sign-in under way, whatever the fingerprints say: it is this slot’s one operation, and Cancel must reach it', () => {
+    const running = event({ state: 'waiting_callback' }, 1_000, 's1', null);
+    expect(resultFor(running, 'print-1')).toBe(running);
   });
 });

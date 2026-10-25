@@ -207,20 +207,25 @@ describe('the catalog service', () => {
 
   it('answers each configured server’s posture from the directory record its endpoint matches, from the copy held', async () => {
     endpoints = [
-      { name: 'work-tracker', scope: 'user', url: 'https://mcp.linear.app/mcp' },
-      { name: 'linear', scope: 'project', url: 'https://linear.internal.example/mcp' },
+      { name: 'work-tracker', scope: 'user', transport: 'http', url: 'https://mcp.linear.app/mcp' },
+      { name: 'linear', scope: 'project', transport: 'http', url: 'https://linear.internal.example/mcp' },
     ];
     const engine = host(() => recordedEngine(PROJECT_A));
     const { invoke } = service(engine.call);
-    // nothing held yet: no record is read, so nothing is known
-    expect(await invoke('catalog.postures', { cwd: PROJECT_A })).toEqual({ servers: [
+    // nothing held yet: no record is read, so nothing is known; each configuration's fingerprint is opaque and its own
+    const before = await invoke('catalog.postures', { cwd: PROJECT_A });
+    expect(before.servers.map(({ name, scope, authPosture }) => ({ name, scope, authPosture }))).toEqual([
       { name: 'work-tracker', scope: 'user', authPosture: null },
       { name: 'linear', scope: 'project', authPosture: null },
-    ] });
+    ]);
+    const [tracker, project] = before.servers.map((s) => s.fingerprint);
+    expect(tracker).toMatch(/^[0-9a-f]{32}$/);
+    expect(project).not.toBe(tracker);
+    expect(JSON.stringify(before)).not.toMatch(/linear\.app|internal\.example/);
     await invoke('catalog.home', { tab: 'connectors', cwd: PROJECT_A }); // the directory read once
     expect(await invoke('catalog.postures', { cwd: PROJECT_A })).toEqual({ servers: [
-      { name: 'work-tracker', scope: 'user', authPosture: 'auth_required' },
-      { name: 'linear', scope: 'project', authPosture: null }, // Linear's name, not its endpoint
+      { name: 'work-tracker', scope: 'user', authPosture: 'auth_required', fingerprint: tracker },
+      { name: 'linear', scope: 'project', authPosture: null, fingerprint: project }, // Linear's name, not its endpoint
     ] });
     expect(engine.asked.filter((a) => a.name === 'customization.serverEndpoints').map((a) => a.input)).toEqual([{ cwd: PROJECT_A }, { cwd: PROJECT_A }]);
   });

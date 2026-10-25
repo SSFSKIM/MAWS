@@ -131,10 +131,12 @@ export const commands = {
   // Decision Log 7(b)); null for any other URL, which the card draws as a monogram. The renderer fetches nothing.
   'catalog.icon': main(z.strictObject({ url: z.string().max(2048) }), z.strictObject({ dataUrl: z.string().nullable() })),
   // M4: each configured server's sign-in posture from the directory's copy MAWS holds (no fetch), matched by its endpoint
-  // (the record's URL, one of its url_options, or its url_regex), never by name; null when no record matches
+  // (the record's URL, one of its url_options, or its url_regex), never by name; null when no record matches. With it, an
+  // opaque fingerprint of the configuration (its endpoint and transport, keyed per run in main; null without a URL): a
+  // sign-in's result is shown only for the configuration it was for, and no URL reaches the renderer
   'catalog.postures': main(
     z.strictObject({ cwd: CwdSchema }),
-    z.strictObject({ servers: z.array(z.strictObject({ name: z.string(), scope: z.enum(['app', 'user', 'project', 'local']), authPosture: z.enum(['auth_required', 'no_auth']).nullable() })) }),
+    z.strictObject({ servers: z.array(z.strictObject({ name: z.string(), scope: z.enum(['app', 'user', 'project', 'local']), authPosture: z.enum(['auth_required', 'no_auth']).nullable(), fingerprint: z.string().max(64).nullable() })) }),
   ),
 } as const satisfies Record<`catalog.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 

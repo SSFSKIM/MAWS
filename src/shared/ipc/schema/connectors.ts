@@ -382,7 +382,8 @@ export const commands = {
   // P4-AGG M4 start: Customize › Connectors (above)
   'connectors.add': host(z.strictObject({ ...McpAt, url: McpServerUrlSchema, transport: z.enum(MCP_TRANSPORTS) }), OperationReceiptSchema),
   'connectors.remove': host(z.strictObject(McpAt), OperationReceiptSchema),
-  'connectors.signIn': main(z.strictObject({ name: McpServerNameSchema, appSessionId: AppSessionIdSchema }), OperationReceiptSchema),
+  // the connector is its configuration (name, scope, and the directory for a project or local one): one sign-in at a time
+  'connectors.signIn': main(z.strictObject({ name: McpServerNameSchema, scope: PluginsScopeSchema, cwd: PluginsCwdSchema.nullable(), appSessionId: AppSessionIdSchema }), OperationReceiptSchema),
   'connectors.signInCancel': main(z.strictObject({ opId: z.string() }), z.strictObject({ cancelled: z.boolean() })),
   // P4-AGG M4 end
   // ── the engine host's, main's alone ──

@@ -18,7 +18,7 @@ import { catalogPages, iconGet, NETWORK_KEYS, type IconGet } from './fetch';
 import { CatalogIcons } from './icons';
 import { buildCatalog } from './join';
 import { connectorRoute, type TestSourceData } from './normalize';
-import { posturesOf } from './postures';
+import { configurationFingerprint, posturesOf } from './postures';
 import { homeOf, queryOf } from './query';
 import { testSources } from './sources';
 import { CatalogStore } from './store';
@@ -54,6 +54,7 @@ export function startCatalog(deps: CatalogDeps): Catalog {
   const testData = () =>
     (tests ??= Promise.all(testSources(deps.env).map(async (source) => ({ source, manifest: await readMarketplaceManifest(dirname(dirname(source.manifestPath))) }))));
 
+  const fingerprint = configurationFingerprint(); // M4: one key for main's life
   const changed = () => void deps.emit('catalog.changed', {});
   const offStore = store.onChange(changed);
   const offPlugins = deps.onPluginsChanged(() => {
@@ -118,7 +119,7 @@ export function startCatalog(deps: CatalogDeps): Catalog {
     const endpoints = await deps.call('customization.serverEndpoints', { cwd });
     if (!endpoints.ok) throw new CommandFailure(endpoints.error);
     const routes = (store.data().servers ?? []).flatMap((server) => connectorRoute(server) ?? []);
-    return { servers: posturesOf(endpoints.value.servers, routes) };
+    return { servers: posturesOf(endpoints.value.servers, routes, fingerprint) };
   });
   deps.register('catalog.sources', async () => {
     await store.loaded();

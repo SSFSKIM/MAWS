@@ -61,8 +61,9 @@ export type ConfiguredServers =
   | { state: 'read'; servers: readonly CustomizationServer[] };
 
 export function configuredOf(read: { data: { servers: readonly CustomizationServer[]; serversRead: boolean } | undefined; error: Error | null }): ConfiguredServers {
+  if (read.error) return { state: 'failed', message: read.error.message }; // the latest read failed: an older answer vouches for nothing now
   if (read.data) return read.data.serversRead ? { state: 'read', servers: read.data.servers } : { state: 'partial' };
-  return read.error ? { state: 'failed', message: read.error.message } : { state: 'reading' };
+  return { state: 'reading' };
 }
 
 /** The scopes the sheet offers: a project's two need a project, so the user configuration offers user alone. */
@@ -114,6 +115,14 @@ export interface SignInView {
 
 const view = (text: string | null, tone: SignInView['tone'], signIn: boolean, cancel = false): SignInView => ({ text, tone, signIn, cancel });
 const REMOTE: ReadonlySet<string | null> = new Set(['http', 'sse', null]);
+
+/** The result a row shows: a sign-in under way always (it is the connector's one operation, and Cancel must reach it);
+ * one that ended only for the configuration it was started for, by fingerprint, known on both sides. */
+export function resultFor(record: SignInRecord | null, fingerprint: string | null): SignInRecord | null {
+  if (record === null) return null;
+  const ended = record.event.state === 'done' || record.event.state === 'failed' || record.event.state === 'cancelled';
+  return !ended || (fingerprint !== null && record.fingerprint === fingerprint) ? record : null;
+}
 
 // A success the session has since contradicted: a read after it lists the server needing a sign-in or failed. A success
 // for new sessions never claimed the signing session, so that session's read does not contradict it.

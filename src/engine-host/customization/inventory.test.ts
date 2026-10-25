@@ -223,9 +223,9 @@ describe('cold customization inventory', () => {
     await json(global, { mcpServers: { linear: { type: 'http', url: 'https://mcp.linear.app/mcp?token=QUERY_SECRET' }, process: { command: 'run' } } });
     await json(join(userData, 'settings.json'), { ...SETTINGS_DEFAULTS_V18, engine: { ...SETTINGS_DEFAULTS_V18.engine, mcpServers: [{ name: 'app', type: 'http', url: 'https://app.test/' }] } });
     expect(await readServerEndpoints(null, { userData, captureEnv: environment })).toEqual({ servers: [
-      { name: 'app', scope: 'app', url: 'https://app.test/' },
-      { name: 'linear', scope: 'user', url: 'https://mcp.linear.app/mcp?token=QUERY_SECRET' },
-      { name: 'process', scope: 'user', url: null },
+      { name: 'app', scope: 'app', transport: 'http', url: 'https://app.test/' },
+      { name: 'linear', scope: 'user', transport: 'http', url: 'https://mcp.linear.app/mcp?token=QUERY_SECRET' },
+      { name: 'process', scope: 'user', transport: 'stdio', url: null },
     ] });
     expect(JSON.stringify(await read())).not.toMatch(/SECRET|linear\.app/);
     expect(isBridgedCommandName('customization.serverEndpoints')).toBe(false);

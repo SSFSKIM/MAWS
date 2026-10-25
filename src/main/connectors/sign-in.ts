@@ -20,8 +20,10 @@
 //                    its mcp_status, findings-m4 5; Decision Log 14)
 //   failed           with a reason: no_session, timeout, denied (the callback carried `error`), engine (its words),
 //                    session_exited
-//   cancelled        `connectors.signInCancel`, or a second press for the same server in the same session (one
-//                    operation per session's server: a name is the session's own, not global)
+//   cancelled        `connectors.signInCancel`, or a second press for the same configured connector from any session
+//                    (Decision Log 14: one sign-in per connector at a time, since every session's engine writes the same
+//                    credential). A connector is its configuration: name and scope, and the directory for a project or
+//                    local one; servers that only share a name are separate connectors.
 //
 // The engine's own pending flow is left to lapse; a new `mcp_authenticate` starts a new flow and the engine refuses the
 // old flow's callback (findings-m4 3, 4). No event carries the authorization URL, a code or a state. MAWS's own OAuth
@@ -61,8 +63,17 @@ export interface SignInDeps {
   log?: (line: string) => void;
 }
 
+/** A configured connector: its name and scope, and the directory for a project or local one (a user one is the same
+ * from every directory). */
+export interface ConnectorConfiguration {
+  name: string;
+  scope: 'user' | 'project' | 'local';
+  cwd: string | null;
+}
+export const connectorKey = ({ name, scope, cwd }: ConnectorConfiguration): string => [scope, scope === 'user' ? '' : (cwd ?? ''), name].join('\u0000');
+
 export interface SignIn {
-  start(input: { name: string; appSessionId: string }): { opId: string };
+  start(input: ConnectorConfiguration & { appSessionId: string }): { opId: string };
   cancel(opId: string): boolean;
   stop(): void;
 }
@@ -80,6 +91,7 @@ const PAGE = {
 interface Operation {
   opId: string;
   name: string;
+  connector: string; // connectorKey
   appSessionId: string;
   state: State;
   listener: LoopbackListener | null;
@@ -94,8 +106,7 @@ export function createSignIn(deps: SignInDeps): SignIn {
   const configPollMs = deps.configPollMs ?? CONFIG_POLL_MS;
   const log = deps.log ?? ((line: string) => console.warn(`[connectors] ${line}`));
   const operations = new Map<string, Operation>(); // live ones, by opId
-  const byServer = new Map<string, string>(); // a session's server (serverKey) → its live opId
-  const serverKey = (op: { appSessionId: string; name: string }) => `${op.appSessionId}\u0000${op.name}`;
+  const byConnector = new Map<string, string>(); // a configured connector (connectorKey) → its live opId
 
   const live = (op: Operation) => !TERMINAL.has(op.state);
   const move = (op: Operation, state: State, extra: { reason?: Reason; message?: string | null; where?: 'here' | 'new_sessions' } = {}) => {
@@ -107,7 +118,7 @@ export function createSignIn(deps: SignInDeps): SignIn {
       void op.listener?.close();
       op.listener = null;
       operations.delete(op.opId);
-      if (byServer.get(serverKey(op)) === op.opId) byServer.delete(serverKey(op));
+      if (byConnector.get(op.connector) === op.opId) byConnector.delete(op.connector);
     }
     deps.emit({ opId: op.opId, name: op.name, state, reason: extra.reason ?? null, message: extra.message ?? null, where: extra.where ?? null });
   };
@@ -229,15 +240,16 @@ export function createSignIn(deps: SignInDeps): SignIn {
   });
 
   return {
-    start({ name, appSessionId }) {
-      const previous = byServer.get(serverKey({ appSessionId, name }));
+    start({ name, scope, cwd, appSessionId }) {
+      const connector = connectorKey({ name, scope, cwd });
+      const previous = byConnector.get(connector);
       if (previous !== undefined) {
         const op = operations.get(previous);
         if (op) move(op, 'cancelled');
       }
-      const op: Operation = { opId: randomUUID(), name, appSessionId, state: 'starting', listener: null, timers: new Set() };
+      const op: Operation = { opId: randomUUID(), name, connector, appSessionId, state: 'starting', listener: null, timers: new Set() };
       operations.set(op.opId, op);
-      byServer.set(serverKey(op), op.opId);
+      byConnector.set(connector, op.opId);
       deps.emit({ opId: op.opId, name, state: 'starting', reason: null, message: null, where: null });
       queueMicrotask(() => void run(op).catch((error: unknown) => {
         log(`sign-in to ${name} failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -291,7 +303,7 @@ export function startSignIn(deps: SignInServiceDeps): { stop(): void } {
     ready: (appSessionId) => ready.has(appSessionId),
     onSessionGone: (listener) => (goneListeners.add(listener), () => goneListeners.delete(listener)),
   });
-  deps.register('connectors.signIn', ({ name, appSessionId }) => signIn.start({ name, appSessionId }));
+  deps.register('connectors.signIn', ({ name, scope, cwd, appSessionId }) => signIn.start({ name, scope, cwd, appSessionId }));
   deps.register('connectors.signInCancel', ({ opId }) => ({ cancelled: signIn.cancel(opId) }));
   return {
     stop() {

@@ -298,10 +298,15 @@ it('shows configured servers without inventing connection state or offering a se
 // P4-AGG M4: Customize › Connectors (the Discover spec, Design "My items", "Signing in", "Which session").
 describe('Connectors', () => {
   // main's posture for each configured server, by the record its endpoint matches; unscripted, it is unknown
-  const posture = (_client: QueryClient, name: string, authPosture: 'auth_required' | 'no_auth', scope = 'user') => backend.script('catalog.postures', () => ({ servers: [{ name, scope, authPosture }] }));
+  // with its configuration's fingerprint (`print`, read at each answer: an endpoint replaced under the same name changes it)
+  let print = 'print-1';
+  const posture = (_client: QueryClient, name: string, authPosture: 'auth_required' | 'no_auth', scope = 'user') => backend.script('catalog.postures', () => ({ servers: [{ name, scope, authPosture, fingerprint: print }] }));
   const mountWith = (client: QueryClient) => render(<QueryClientProvider client={client}><CustomizeView section="mcp" /></QueryClientProvider>);
   const fresh = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  afterEach(() => resetSignIns());
+  afterEach(() => {
+    resetSignIns();
+    print = 'print-1';
+  });
 
   it('is the tab named Connectors; a user-scope server signs in from any ready session and shows each step and the result', async () => {
     const elsewhere = { ...status('signer'), cwd: '/two' };
@@ -315,7 +320,7 @@ describe('Connectors', () => {
     const row = (await screen.findByText('notion')).closest('li')!;
     expect(await within(row).findByText('Sign in needed')).toBeTruthy(); // main's posture, read after the list
     fireEvent.click(within(row).getByRole('button', { name: 'Sign in to notion' }));
-    await waitFor(() => expect(backend.calls.filter((call) => call.command === 'connectors.signIn').map((call) => call.input)).toEqual([{ name: 'notion', appSessionId: 'signer' }]));
+    await waitFor(() => expect(backend.calls.filter((call) => call.command === 'connectors.signIn').map((call) => call.input)).toEqual([{ name: 'notion', scope: 'user', cwd: '/one', appSessionId: 'signer' }]));
     const changed = (state: ConnectorSignInChanged['state'], over: Partial<ConnectorSignInChanged> = {}) => act(() => heard({ opId: 'op-1', name: 'notion', state, reason: null, message: null, where: null, ...over }));
     changed('starting');
     changed('waiting_callback');
@@ -327,6 +332,12 @@ describe('Connectors', () => {
     expect(within(row).getByText('Signed in · available in new sessions')).toBeTruthy();
     expect(within(row).queryByRole('button', { name: 'Sign in to notion' })).toBeNull();
     expect(backend.calls.filter((call) => call.command === 'session.acquire')).toEqual([]);
+    // the configuration replaced outside MAWS (another endpoint under the same name and scope): the result was not for it
+    print = 'print-2';
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    expect(await within(row).findByText('Sign in needed')).toBeTruthy();
+    expect(within(row).getByRole('button', { name: 'Sign in to notion' })).toBeTruthy();
+    expect(within(row).queryByText('Signed in · available in new sessions')).toBeNull();
   });
 
   it('with no ready session whose scope includes the server, Sign in says to open one and does nothing else', async () => {
