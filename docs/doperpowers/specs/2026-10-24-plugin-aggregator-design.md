@@ -731,6 +731,17 @@ Test seams (M1):
   Rationale: each verified with a reproduction; each fix has a test that failed before it.
   Date/Author: 2026-10-25, the executing session, from the architect's verification.
 
+- Decision: the owner's ruling of 2026-10-25. The plugin install sheet, the add-then-install sheet and the connector sheet fold the exact engine commands and the files they write behind a "Details" disclosure, closed each time a sheet opens. What stays in view: what installs, what comes with it, the runs-code warning, the scope, and for a connector its URL and transport. The command-hash sheet for a marketplace that declares commands is unchanged, because there the command is the decision (e13b7093d, f7f722010).
+  - `ConfirmSheet` serves every plugin action, so its uninstall, enable, update and marketplace sheets fold the same way. The connector Remove sheet folds too, for consistency.
+  - "The files they write" is the sheet's whole writes block: the file list, the engine's own records line, and the dependency-cache and override notes. "Also uninstalls" and the reload line stay in view, because they are consequences of the action, not files.
+  - While the engine is still resolving, or when it errors, the sheet offers no Details: there is nothing to detail yet.
+  - The 1280×820 screenshots are taken with Details closed: `discover-install-sheet` (the one-step install), `discover-add-then-install-sheet` (new) and `discover-connector-sheet`.
+  Rationale: the owner's taste. The command is the audit, not the decision, except where a marketplace declares one.
+  Date/Author: 2026-10-25, the owner, through the architect; built by the executing session.
+
+- Decision: the merge with master (p4-discover-merge, 2026-10-25). On the merge, the transcript's anchoring case failed twice at "the end stays pinned" (182 px). Traces showed the same follower lag on master: while streaming, the end sat up to 212 px away for two frames at each growth, and the merge's timing landed the test's one sample in that window. Discover's catalog does no work at startup, and the built transcript CSS was byte-identical, so neither was the cause. The fix landed on master separately (p4-transcript-follow, merge 0809ddc2b). This branch merges it.
+  Date/Author: 2026-10-25, the executing session.
+
 ## Outcomes & Retrospective
 
 **2026-10-25, the executing session, at hand-back (before the architect's branch review).**
