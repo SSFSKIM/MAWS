@@ -26,7 +26,7 @@ Discover is for the person. Agents get no catalog, no discovery tool and no sugg
 - [x] (2026-10-25 04:53Z) M2 — the catalog (9e6309756, e711484d7; fixes f56a44c6a, 882a8c838; class 1a run 40163330358 green on 882a8c838; review clean after two fix waves). The connector count after the `url_options` fix is measured by M5's live smoke.
 - [x] (2026-10-25 08:01Z) M3 — Discover for Plugins and Skills (aa428cb2c..594f7291a; fixes cecae1595..5ca41695b, e232a394d; run 40174394148 on e232a394d: class 1a green, e2e:discover 6, widgets 29, layout 14; settings 12 on f2538909d; review clean after two fix waves). Open Discover keeps a session's exact directory, a page for it when no project owns it.
 - [x] (2026-10-25 11:24Z) M4 — Connectors: the spike (promote, path B with the late-server variant; gate run 40175924834), then Discover, add, remove and sign in (295e97229..9eb7f22b3; fixes 5adfffcc6, 45751b733, bc9572458, c542e6362; gate run 40188327848 on c542e6362: class 1a green, e2e:discover 8 passed with the env-gated spike skipped; settings, widgets and layout green earlier; review clean after four fix waves).
-- [ ] M5 — acceptance at 1280 and 1512, whole Mac matrix, branch review.
+- [x] (2026-10-25 13:23Z) M5 — acceptance at 1280 and 1512 and the whole Mac matrix (88f05bd80..788b5bb70, fix b29167822; whole Mac matrix run 40190324774 green on 788b5bb70, every job on attempt 1; e2e:discover and e2e:discover-live 40190325020; e2e:discover 40196923687 on b29167822; review clean). Screenshots in /tmp/p4-discover-evidence/. The branch review is the architect's panel, after hand-back.
 
 ## The owner's rulings (2026-10-24)
 
@@ -702,4 +702,14 @@ Test seams (M1):
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+**2026-10-25, the executing session, at hand-back (before the architect's branch review).**
+
+What shipped: each of Customize's three tabs has My items and Discover; the catalog in main joins twelve seed marketplaces, the engine's own marketplaces and listing, Anthropic's public directory of plugins and servers and the official plugin-details, per `cwd`, behind one egress rule; + installs through the engine's CLI (adding the marketplace first when needed), connectors add and remove through `claude mcp`, and Sign in drives the engine's own OAuth in a ready session, the engine's credential serving every later session. Acceptance 1 to 12 pass together against the real 2.1.309 engine on the Mac mini, and the whole Mac matrix is green on 788b5bb70. Live, the catalog holds about 5,700 items (4,970 plugins in the app, 732 connectors) and the All grid stays responsive at that scale without virtualization.
+
+Against the purpose: the owner can open Customize → Plugins → Discover, search "legal", press +, confirm and find the plugin under My items, and do the same for a connector, signed in without leaving MAWS. Agents see nothing new (acceptance 12, both halves).
+
+What the spec got wrong, and how execution found it: the design rested on several facts that measurement overturned, each folded in place with a dated entry. A scratch `HOME` hides the login keychain (M1; and on a logged-in Mac it raises a dialog per failed write, learned the hard way). `marketplace list` has no owner and `--available` omits installed plugins (M1). One marketplace can list several plugins at one source (M1). The host had no settings watcher (M2). 33 servers use `url_options` (M2). The directory route installs whole-repository bundles (M2). `mcp_authenticate` knows late-added servers, a callback through `mcp_oauth_callback_url` needs a reconnect, and `mcp_set_servers` drops the SDK server (M4). The engine refuses same-scope duplicate names (M4). The publisher count was 9, not 116 (M2).
+
+Lessons: the milestone reviews earned their cost. Every milestone needed one to four fix waves, and each wave's findings were real defects in lifetime, identity or fail-open checks rather than style; the last rounds narrowed to edges (shadowed scopes, nested project files) and stopped there. A worker briefed "never on this machine" still ran a keychain-touching probe locally; a rule whose breach harms the owner needs to be stated as the first line of the brief, with the reason, not as one constraint among many.
+
+Left open (the hand-back's residue and unresolved findings): the held `gate.yml` change awaiting CI-opt, the charter's egress line, conditional GET for the catalog rule, the two converted live plugin specs never run, and the pre-existing `--term-bg` test noise.
