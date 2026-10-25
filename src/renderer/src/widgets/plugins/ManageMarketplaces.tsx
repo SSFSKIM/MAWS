@@ -16,14 +16,12 @@ import { PRIMARY } from '../../sessions/ui';
 import { LIBRARY as L } from '../copy';
 import { MoreIcon } from './icons';
 import { Gone, OperationLine, useManage } from './manage';
-import { requestFor } from './present';
+import { requestFor, uninstallsOf } from './present';
 import type { PluginsReadResult } from './read';
 
 export const MARKETPLACE_PREFIX = 'marketplace:';
 export const marketplaceKey = (name: string) => `${MARKETPLACE_PREFIX}${name}`;
 
-// The installations a removal of `name` uninstalls (the engine uninstalls every plugin installed from it, 2.1.291).
-export const uninstallsOf = (installed: readonly InstalledPlugin[], name: string) => installed.filter((p) => p.marketplace === name).map(({ id, scope, projectPath }) => ({ id, scope, projectPath }));
 
 const ITEM = 'flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover';
 

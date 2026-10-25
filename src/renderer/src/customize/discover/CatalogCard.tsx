@@ -82,14 +82,21 @@ export function CatalogCard({ item, tab, onOpen }: { item: CatalogItem; tab: Cat
           <span className="truncate font-medium text-fg" title={item.installName ?? item.name}>
             {item.name}
           </span>
-          <span className="flex min-w-0 items-center gap-1.5 text-ui-sm text-fg-muted">
-            {item.publisher && <span className="truncate">{D.by(item.publisher)}</span>}
+          {/* the publisher keeps its line: the trust label wraps beneath it when both do not fit, into the room a
+              two-line description leaves above the components (the card's height is fixed) */}
+          <span data-catalog-byline className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-ui-sm text-fg-muted">
+            {item.publisher && (
+              <span data-catalog-publisher title={D.by(item.publisher)} className="max-w-full truncate">
+                {D.by(item.publisher)}
+              </span>
+            )}
             <TrustLabel item={item} />
           </span>
         </div>
         {here ? <InstalledMark /> : addable(item) && <AddButton item={item} tab={tab} />}
       </div>
-      <p className="relative m-0 line-clamp-2 text-ui-sm text-fg-muted [overflow-wrap:anywhere]">{item.description ?? ''}</p>
+      {/* one line when the card also says where it is installed, so a wrapped byline still fits the fixed height */}
+      <p className={`relative m-0 ${item.installed === 'elsewhere' ? 'line-clamp-1' : 'line-clamp-2'} text-ui-sm text-fg-muted [overflow-wrap:anywhere]`}>{item.description ?? ''}</p>
       <p className="relative m-0 mt-auto flex min-w-0 items-center gap-1.5 text-ui-sm text-fg-faint">
         <span data-catalog-components className="truncate">
           {cardContentsWords(item, tab)}

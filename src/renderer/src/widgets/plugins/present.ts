@@ -3,7 +3,7 @@
 // operation line in the engine's own words with the reload report beside it, the marketplace-declared command a
 // refusal carries. Pure: the components and the tests read these.
 import { runnerCommandLine, writesOf, type PluginsAction, type PluginsInstallation, type PluginsScope, type RunnerAction, type RunnerActionInputs } from '@shared/plugins/cli';
-import type { PluginsOperationEvent } from '@shared/ipc/schema/plugins';
+import type { InstalledPlugin, PluginsOperationEvent } from '@shared/ipc/schema/plugins';
 import { OPERATION, PLUGIN_MANAGEMENT as W } from '../copy';
 
 // An install asked from Discover (P4-AGG M3; the Discover spec, Design "Adding"): what the sheet shows beside the
@@ -42,6 +42,9 @@ export interface RequestContext {
 // (`writesOf` announces a clone directory for any source not read in place).
 // P4-AGG M4: the runner's MCP verbs too, which Customize › Connectors asks through the same operations.
 export type PluginsRequest = { [A in RunnerAction]: { action: A; input: RunnerActionInputs[A]; source: string | null } & RequestContext }[RunnerAction];
+
+// The installations a removal of `name` uninstalls (the engine uninstalls every plugin installed from it, 2.1.291).
+export const uninstallsOf = (installed: readonly InstalledPlugin[], name: string) => installed.filter((p) => p.marketplace === name).map(({ id, scope, projectPath }) => ({ id, scope, projectPath }));
 
 export const requestFor = <A extends RunnerAction>(action: A, input: RunnerActionInputs[A], source: string | null, context: RequestContext = {}): PluginsRequest => ({ action, input, source, ...context }) as PluginsRequest;
 

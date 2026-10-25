@@ -17,6 +17,11 @@ import { SkillsDiscover, SkillsManage } from './SkillsDiscover';
 import { connectCatalogEvents } from './read';
 import { NO_CHOICES, useDiscoverStore } from './store';
 import { item } from './test-items';
+import type { ProjectId } from '@shared/graph/ids';
+import { project as projectRecord } from '../../../../../test/support/builders';
+import { useSessions } from '../../stores/sessions';
+import { forgetKeptOperations } from '../../widgets/plugins/operation';
+import { useCustomizeProject } from '../open';
 
 const HOME = '/tmp/discover/config';
 const BINARY = '/opt/claude/2.1.309';
@@ -55,6 +60,7 @@ let restartOnCursor: boolean;
 let held: Map<string, () => void>; // operations whose completion a test releases
 let holding: Set<CommandName>;
 let iconAnswer: (url: string) => string | null; // catalog.icon's data URL for a URL
+let installedToo: { id: string; name: string; marketplace: string }[]; // installations plugins.list answers besides code-review
 
 const emit = (name: EventName, payload: unknown) => listeners.get(name)?.forEach((listener) => listener(payload));
 
@@ -104,7 +110,7 @@ function answer(name: CommandName, input: unknown): unknown {
     case 'plugins.env':
       return { binary: BINARY, binaryError: null, configHome: HOME, globalConfig: `${HOME}/.claude.json` };
     case 'plugins.list':
-      return { plugins: [{ id: 'code-review@claude-plugins-official', name: 'code-review', marketplace: 'claude-plugins-official', version: '1.0.0', scope: 'user', enabled: true, projectPath: null, installPath: `${HOME}/plugins/cache/x`, errors: [], notes: [], installedAt: null, lastUpdated: null, here: false, coversHere: true }] };
+      return { plugins: [{ id: 'code-review@claude-plugins-official', name: 'code-review', marketplace: 'claude-plugins-official' }, ...installedToo].map((p) => ({ ...p, version: '1.0.0', scope: 'user', enabled: true, projectPath: null, installPath: `${HOME}/plugins/cache/x`, errors: [], notes: [], installedAt: null, lastUpdated: null, here: false, coversHere: true, projectEnabled: true })) };
     case 'marketplaces.list':
       return { marketplaces: [] };
     case 'plugins.manifest':
@@ -134,6 +140,7 @@ beforeEach(() => {
   restartOnCursor = false;
   held = new Map();
   holding = new Set();
+  installedToo = [];
   iconAnswer = (url) => (url.includes('plugin-icons') ? 'data:image/png;base64,iVBORw0KGgo=' : null);
   outcome = () => ({ ok: true, result: { message: 'done' } });
   const bridge: MawsBridge = {
@@ -161,6 +168,9 @@ afterEach(() => {
   disconnect = null;
   useLibraryStore.setState(useLibraryStore.getInitialState());
   useDiscoverStore.setState({ plugins: NO_CHOICES, skills: NO_CHOICES });
+  useSessions.setState({ projects: new Map() });
+  useCustomizeProject.setState({ projectId: undefined }, true);
+  forgetKeptOperations();
   delete (window as { maws?: MawsBridge }).maws;
 });
 
@@ -284,6 +294,20 @@ describe('Customize › Plugins › Discover', () => {
     expect(JSON.parse(sheet().querySelector('[data-plugins-argv]')!.getAttribute('data-plugins-argv')!)).toEqual(['plugin', 'marketplace', 'remove', 'maws-discover-test', '--scope', 'user', '--json']); // at the scope it was added at
   });
 
+  it('the recovery’s Remove marketplace names what the removal uninstalls now: a plugin installed from it since the failed install', async () => {
+    outcome = (name) => (name === 'plugins.install' ? { ok: false, error: { code: 'cli_failed', message: 'plugin not found', failureCode: null, shownCommand: null } } : { ok: true, result: {} });
+    mountPlugins();
+    await discover();
+    fireEvent.click(within(card(hooked.id)).getByRole('button', { name: 'Add hooked' }));
+    await waitFor(() => expect(sheet().querySelector('[data-plugins-argv]')).toBeTruthy());
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
+    await waitFor(() => expect(card(hooked.id).querySelector('[data-marketplace-stays]')).toBeTruthy());
+    installedToo = [{ id: 'skills-only@maws-discover-test', name: 'skills-only', marketplace: 'maws-discover-test' }]; // installed since, elsewhere
+    fireEvent.click(within(card(hooked.id)).getByRole('button', { name: 'Remove marketplace' }));
+    await waitFor(() => expect(sheet()?.getAttribute('data-plugins-sheet')).toBe('marketplace-remove'));
+    expect(sheet().textContent).toContain('Also uninstalls 1 plugin: skills-only@maws-discover-test (user)');
+  });
+
   it('a present marketplace’s plugin installs in one step; unknown contents get the softer warning', async () => {
     mountPlugins();
     await discover();
@@ -387,6 +411,19 @@ describe('Customize › Plugins › Discover', () => {
     expect(card(frontend.id).querySelector('img')).toBeNull();
   });
 
+  // Panel taste (1512 wide): "by Anthr…" beside "Listed by Anthropic". The publisher keeps its line, the trust label
+  // wraps beneath it when the two do not fit, into the room under a two-line description (the card's height is fixed).
+  it('a card’s byline gives the publisher its line and wraps the trust label beneath it, the full byline as its title', async () => {
+    mountPlugins();
+    await discover();
+    const byline = card(hooked.id).querySelector<HTMLElement>('[data-catalog-byline]')!;
+    expect(byline.classList.contains('flex-wrap')).toBe(true);
+    const publisher = byline.querySelector<HTMLElement>('[data-catalog-publisher]')!;
+    expect(publisher.textContent).toBe('by MAWS e2e hooks');
+    expect(publisher.title).toBe('by MAWS e2e hooks');
+    expect(byline.lastElementChild!.hasAttribute('data-trust')).toBe(true); // after the publisher, so it is what wraps
+  });
+
   it('the Sources popover says which source is unavailable and counts dropped records', async () => {
     mountPlugins();
     await discover();
@@ -397,6 +434,41 @@ describe('Customize › Plugins › Discover', () => {
     expect(popover.querySelector('[data-source="directory:plugins"]')!.textContent).toContain('Anthropic’s directory: plugins unavailable');
     expect(popover.querySelector('[data-source="plugin-details"]')!.textContent).toContain('2 records could not be read');
   });
+});
+
+// scalpel-5#1: Customize keys each page's library by its directory, so choosing another project unmounts the page an
+// add-then-install was asked on; the operation still finishes (the install after the add) and its line is there on return.
+describe('Customize: an add-then-install outlives a change of the page’s project', () => {
+  const A = 'project-a' as ProjectId;
+  const B = 'project-b' as ProjectId;
+  for (const [section, panel, cardOf, name] of [
+    ['plugins', 'Plugins', hooked, 'hooked'],
+    ['skills', 'Skills', skillsOnly, 'skills-only'],
+  ] as const) {
+    it(`${panel}: the install runs once the add succeeds, with the other project shown, and its line shows on return`, async () => {
+      useSessions.setState({ projects: new Map([[A, projectRecord(A, 0, { directory: PROJECT })], [B, projectRecord(B, 1, { directory: '/tmp/discover/project-b' })]]) });
+      useCustomizeProject.setState({ projectId: A }, true);
+      holding.add('marketplaces.add');
+      render(
+        <QueryClientProvider client={client()}>
+          <CustomizeView section={section} />
+        </QueryClientProvider>,
+      );
+      const tab = () => screen.getByRole('tabpanel', { name: panel });
+      const shelfCard = () => found(`[data-discover="${section}"] [data-shelf] [data-catalog-card="${CSS.escape(cardOf.id)}"]`);
+      fireEvent.click(within(tab()).getByRole('radio', { name: 'Discover' }));
+      fireEvent.click(within(await shelfCard()).getByRole('button', { name: `Add ${name}` }));
+      await waitFor(() => expect(sheet().querySelector('[data-plugins-argv]')).toBeTruthy());
+      fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
+      await waitFor(() => expect(held.has('marketplaces.add')).toBe(true)); // the add runs
+      fireEvent.change(screen.getByRole('combobox', { name: 'Project' }), { target: { value: B } }); // the page leaves
+      act(() => held.get('marketplaces.add')!());
+      await waitFor(() => expect(invoked('plugins.install')).toEqual([expect.objectContaining({ cwd: PROJECT, plugin: `${name}@maws-discover-test` })]));
+      fireEvent.change(screen.getByRole('combobox', { name: 'Project' }), { target: { value: A } });
+      fireEvent.click(within(tab()).getByRole('radio', { name: 'Discover' }));
+      await waitFor(async () => expect(within(await shelfCard()).getByRole('status').textContent).toBe('done'));
+    });
+  }
 });
 
 describe('Customize › Skills › Discover', () => {

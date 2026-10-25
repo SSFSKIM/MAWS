@@ -27,6 +27,7 @@ import { item } from '../customize/discover/test-items';
 import { useCustomizeProject, useDiscoverRequest } from '../customize/open';
 import { PluginsLibrary, PluginsWidget } from './PluginsWidget';
 import { useReadLoads } from './read';
+import { forgetKeptOperations } from './plugins/operation';
 import { REL } from '../test-support/relative-time';
 
 // P2-C's `mods.list` stood in (X20): no rows unless a case gives some
@@ -127,6 +128,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  forgetKeptOperations(); // Customize's pages keep their operations past their views; each test is a fresh window
   connected?.();
   connected = null;
   useDiscoverStore.setState({ plugins: NO_CHOICES, skills: NO_CHOICES });

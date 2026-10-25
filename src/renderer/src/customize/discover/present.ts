@@ -101,4 +101,10 @@ export function metricWords(item: CatalogItem): string | null {
 export const addable = (item: CatalogItem): boolean => item.install.kind !== 'manual' && item.scanBlocked === null;
 
 /** A monogram for an item with no icon: its name's first letter or digit. */
-export const monogramOf = (name: string): string => (name.match(/[\p{L}\p{N}]/u)?.[0] ?? '?').toUpperCase();
+// An icon's stand-in: the name from its first letter or digit; a letter alone, or the first two characters where the
+// name starts with a digit (42crunch reads 42, not 4).
+export const monogramOf = (name: string): string => {
+  const from = name.match(/[\p{L}\p{N}].*/su)?.[0];
+  if (!from) return '?';
+  return (/^\p{N}/u.test(from) ? [...from].slice(0, 2).join('') : [...from][0]!).toUpperCase();
+};

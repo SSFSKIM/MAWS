@@ -136,7 +136,7 @@ function LibraryBody({ cwd, session, presentation, discover }: { cwd: string | n
   // the binary and the paths are the host's answer, never a guess: every sheet reads it again and confirms nothing until
   // it names a binary (M2 review; E8 whole-branch review); the sheet names what the change writes (E11 §2.2)
   const resolveEngine = useCallback(async () => resolutionOf(await reread()), [reread]);
-  const { manage, sheet } = useManageState({ cwd: cwd ?? '', readySessions }, reloads?.reloadMods ?? null, resolveEngine);
+  const { manage, sheet } = useManageState({ cwd: cwd ?? '', readySessions, keep: discover ? `customize:plugins:${discover.cwd ?? 'user'}` : undefined }, reloads?.reloadMods ?? null, resolveEngine); // Customize's page keeps its operations past its views
 
   const plugins = installed.data?.plugins;
   const markets = marketplaces.data?.marketplaces;
