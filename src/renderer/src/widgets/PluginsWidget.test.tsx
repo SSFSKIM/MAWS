@@ -163,9 +163,18 @@ const menuItems = (id: string) => {
   return items;
 };
 const sheet = () => document.querySelector<HTMLElement>('[data-plugins-sheet]')!; // E8's confirm sheet, above a marketplace dialog when one is open
-const argvShown = () => JSON.parse(sheet().querySelector('[data-plugins-argv]')!.getAttribute('data-plugins-argv')!) as string[];
-// Every sheet reads plugins.env again on opening and names its command once that read answered.
-const resolved = () => waitFor(() => expect(sheet().querySelector('[data-plugins-argv]')).toBeTruthy());
+// The commands and the files they write sit behind the sheet's Details (the owner's ruling, 2026-10-25): open it when
+// it is closed. The second sheet has none: its command is in view.
+const openDetails = () => {
+  const details = sheet().querySelector<HTMLElement>('[data-plugins-details]');
+  if (details?.getAttribute('aria-expanded') === 'false') fireEvent.click(details);
+};
+const argvShown = () => {
+  openDetails();
+  return JSON.parse(sheet().querySelector('[data-plugins-argv]')!.getAttribute('data-plugins-argv')!) as string[];
+};
+// Every sheet reads plugins.env again on opening and offers its command (behind Details) once that read answered.
+const resolved = () => waitFor(() => expect(sheet().querySelector('[data-plugins-argv], [data-plugins-details]')).toBeTruthy());
 const event = (over: Partial<PluginsOperationEvent> & Pick<PluginsOperationEvent, 'opId' | 'phase'>): PluginsOperationEvent => ({ action: 'install', target: 'e8-probe@e8-scratch', ...over });
 const ready = async () => {
   useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
@@ -757,6 +766,7 @@ describe('plugins widget: management', () => {
     expect(confirm).toHaveProperty('disabled', true);
     fireEvent.submit(confirm.closest('form')!); // Enter alone never destroys
     expect(invoked('plugins.uninstall')).toEqual([]);
+    openDetails();
     expect(within(sheet()).getByText(`${HOME}/plugins/data/e8-probe@e8-scratch/`)).toBeTruthy();
     fireEvent.click(within(sheet()).getByRole('checkbox', { name: 'I understand' }));
     fireEvent.click(confirm);
@@ -896,7 +906,8 @@ describe('plugins widget: review fixes', () => {
     await ready();
     menu('e8-probe@e8-scratch', 'Update');
     expect(within(sheet()).getByText('Resolving the engine…')).toBeTruthy();
-    expect(sheet().querySelector('[data-plugins-argv]')).toBeNull(); // no command against a guessed binary
+    expect(sheet().querySelector('[data-plugins-details]')).toBeNull(); // no command against a guessed binary, not even behind Details
+    expect(sheet().querySelector('[data-plugins-argv]')).toBeNull();
     const confirm = within(sheet()).getByRole('button', { name: 'Update' });
     expect(confirm).toHaveProperty('disabled', true);
     fireEvent.submit(confirm.closest('form')!);
@@ -925,6 +936,7 @@ describe('plugins widget: review fixes', () => {
     menu('e8-probe@e8-scratch', 'Update');
     await waitFor(() => expect(within(sheet()).getByRole('alert').textContent).toBe(REFUSAL));
     expect(invoked('plugins.env')).toHaveLength(2); // the opening read it again
+    expect(sheet().querySelector('[data-plugins-details]')).toBeNull();
     expect(sheet().querySelector('[data-plugins-argv]')).toBeNull();
     expect(within(sheet()).queryByRole('list', { name: "The engine's CLI writes:" })).toBeNull();
     const confirm = within(sheet()).getByRole('button', { name: 'Update' });
@@ -997,9 +1009,12 @@ describe('plugins widget: whole-branch review fixes', () => {
     menu('e8-probe@e8-scratch', 'Update');
     await waitFor(() => expect(invoked('plugins.env')).toHaveLength(before + 1));
     expect(within(sheet()).getByText('Resolving the engine…')).toBeTruthy(); // not the answer read before
+    expect(sheet().querySelector('[data-plugins-details]')).toBeNull(); // no command to detail yet
     expect(sheet().querySelector('[data-plugins-argv]')).toBeNull();
     await waitFor(() => expect(held).not.toBeNull());
     act(() => held!({ binary: OTHER, binaryError: null, configHome: HOME, globalConfig: GLOBAL }));
+    await resolved();
+    openDetails();
     await waitFor(() => expect(within(sheet()).getByText('2.1.300 plugin update e8-probe@e8-scratch --scope user --json')).toBeTruthy());
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Update' }));
     await waitFor(() => expect(invoked('plugins.update')).toEqual([{ cwd, binary: OTHER, plugin: 'e8-probe@e8-scratch', scope: 'user' }]));

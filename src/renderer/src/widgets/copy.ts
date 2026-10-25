@@ -395,6 +395,7 @@ export const PLUGIN_MANAGEMENT = {
   scope: 'Scope',
   scopeName: { user: 'User', project: 'Project', local: 'Local' } as const,
   inProject: (path: string) => `In ${path}`,
+  details: 'Details', // the disclosure over the exact commands and the files they write (the owner's ruling, 2026-10-25)
   writes: "The engine's CLI writes:",
   records: (globalConfig: string) => `and keeps its own records in ${globalConfig}`, // `plugins.env`'s path, verbatim
   dependencies: 'and the cache directories of any dependencies the marketplace declares, from this or an allowlisted marketplace, each enabled in the settings file above',

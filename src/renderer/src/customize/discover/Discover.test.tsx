@@ -194,6 +194,16 @@ const discover = async () => {
 };
 const card = (id: string) => document.querySelector<HTMLElement>(`[data-shelf] [data-catalog-card="${CSS.escape(id)}"]`)!;
 const sheet = () => document.querySelector<HTMLElement>('[data-plugins-sheet]')!;
+// The sheet offers its commands, behind Details, once plugins.env answered (the owner's ruling, 2026-10-25).
+const resolved = () => waitFor(() => expect(sheet().querySelector('[data-plugins-details]')).toBeTruthy());
+const openDetails = () => {
+  const details = sheet().querySelector<HTMLElement>('[data-plugins-details]')!;
+  if (details.getAttribute('aria-expanded') === 'false') fireEvent.click(details);
+};
+const argvShown = (attribute: 'data-plugins-argv' | 'data-plugins-add-argv' = 'data-plugins-argv') => {
+  openDetails();
+  return JSON.parse(sheet().querySelector(`[${attribute}]`)!.getAttribute(attribute)!) as string[];
+};
 // The element, once it is there (waitFor retries only a callback that throws).
 const found = (selector: string) =>
   waitFor(() => {
@@ -257,16 +267,18 @@ describe('Customize › Plugins › Discover', () => {
     mountPlugins();
     await discover();
     fireEvent.click(within(card(hooked.id)).getByRole('button', { name: 'Add hooked' }));
-    await waitFor(() => expect(sheet().querySelector('[data-plugins-argv]')).toBeTruthy());
+    await resolved();
     expect(sheet().querySelector('[data-catalog-summary]')!.textContent).toBe('Adds the marketplace maws-discover-test (user) and installs hooked');
-    expect(JSON.parse(sheet().querySelector('[data-plugins-add-argv]')!.getAttribute('data-plugins-add-argv')!)).toEqual(['plugin', 'marketplace', 'add', '/tmp/discover/maws-discover-test', '--scope', 'user', '--json']);
-    expect(JSON.parse(sheet().querySelector('[data-plugins-argv]')!.getAttribute('data-plugins-argv')!)).toEqual(['plugin', 'install', 'hooked@maws-discover-test', '--scope', 'user', '--json']);
+    expect(sheet().querySelector('[data-plugins-add-argv]')).toBeNull(); // both commands behind a closed Details
+    expect(sheet().querySelector('[data-plugins-argv]')).toBeNull();
+    expect(argvShown('data-plugins-add-argv')).toEqual(['plugin', 'marketplace', 'add', '/tmp/discover/maws-discover-test', '--scope', 'user', '--json']);
+    expect(argvShown()).toEqual(['plugin', 'install', 'hooked@maws-discover-test', '--scope', 'user', '--json']);
     expect(sheet().querySelector('[data-runs-code]')!.textContent).toBe('Includes components that run code on your computer: hooks.');
     expect(sheet().querySelector('[data-catalog-contents]')!.textContent).toBe('Comes with: hooks');
     // the scope applies to both steps
     fireEvent.click(within(sheet()).getByRole('radio', { name: 'Project' }));
     expect(sheet().querySelector('[data-catalog-summary]')!.textContent).toBe('Adds the marketplace maws-discover-test (project) and installs hooked');
-    expect(JSON.parse(sheet().querySelector('[data-plugins-add-argv]')!.getAttribute('data-plugins-add-argv')!)).toContain('project');
+    expect(argvShown('data-plugins-add-argv')).toContain('project');
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
     await waitFor(() => expect(invoked('plugins.install')).toHaveLength(1));
     expect(invoked('marketplaces.add')).toEqual([{ cwd: PROJECT, binary: BINARY, source: '/tmp/discover/maws-discover-test', scope: 'project' }]);
@@ -279,19 +291,20 @@ describe('Customize › Plugins › Discover', () => {
     mountPlugins();
     await discover();
     fireEvent.click(within(card(hooked.id)).getByRole('button', { name: 'Add hooked' }));
-    await waitFor(() => expect(sheet().querySelector('[data-plugins-argv]')).toBeTruthy());
+    await resolved();
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
     await waitFor(() => expect(card(hooked.id).textContent).toContain('no such directory'));
     expect(invoked('plugins.install')).toEqual([]);
 
     outcome = (name) => (name === 'plugins.install' ? { ok: false, error: { code: 'cli_failed', message: 'plugin not found', failureCode: null, shownCommand: null } } : { ok: true, result: {} });
     fireEvent.click(within(card(hooked.id)).getByRole('button', { name: 'Add hooked' }));
-    await waitFor(() => expect(sheet().querySelector('[data-plugins-argv]')).toBeTruthy());
+    await resolved();
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
     await waitFor(() => expect(card(hooked.id).querySelector('[data-marketplace-stays]')?.textContent).toContain('The marketplace maws-discover-test stays added.'));
     fireEvent.click(within(card(hooked.id)).getByRole('button', { name: 'Remove marketplace' }));
     await waitFor(() => expect(sheet()?.getAttribute('data-plugins-sheet')).toBe('marketplace-remove'));
-    expect(JSON.parse(sheet().querySelector('[data-plugins-argv]')!.getAttribute('data-plugins-argv')!)).toEqual(['plugin', 'marketplace', 'remove', 'maws-discover-test', '--scope', 'user', '--json']); // at the scope it was added at
+    await resolved();
+    expect(argvShown()).toEqual(['plugin', 'marketplace', 'remove', 'maws-discover-test', '--scope', 'user', '--json']); // at the scope it was added at
   });
 
   it('the recovery’s Remove marketplace names what the removal uninstalls now: a plugin installed from it since the failed install', async () => {
@@ -299,7 +312,7 @@ describe('Customize › Plugins › Discover', () => {
     mountPlugins();
     await discover();
     fireEvent.click(within(card(hooked.id)).getByRole('button', { name: 'Add hooked' }));
-    await waitFor(() => expect(sheet().querySelector('[data-plugins-argv]')).toBeTruthy());
+    await resolved();
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
     await waitFor(() => expect(card(hooked.id).querySelector('[data-marketplace-stays]')).toBeTruthy());
     installedToo = [{ id: 'skills-only@maws-discover-test', name: 'skills-only', marketplace: 'maws-discover-test' }]; // installed since, elsewhere
@@ -314,7 +327,9 @@ describe('Customize › Plugins › Discover', () => {
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search all sources' }), { target: { value: 'myst' } });
     const result = await found(`[data-catalog-grid] [data-catalog-card="${CSS.escape(mystery.id)}"]`);
     fireEvent.click(within(result).getByRole('button', { name: 'Add mystery' }));
-    await waitFor(() => expect(sheet().querySelector('[data-plugins-argv]')).toBeTruthy());
+    await resolved();
+    openDetails();
+    expect(sheet().querySelector('[data-plugins-argv]')).toBeTruthy();
     expect(sheet().querySelector('[data-plugins-add-argv]')).toBeNull();
     expect(sheet().querySelector('[data-catalog-summary]')!.textContent).toBe('Installs mystery from claude-community');
     expect(sheet().querySelector('[data-runs-code]')!.textContent).toBe('May include components that run code on your computer; its contents are not known before install.');
@@ -366,7 +381,7 @@ describe('Customize › Plugins › Discover', () => {
     await discover();
     const featured = screen.getByRole('region', { name: 'Featured' });
     fireEvent.click(within(featured).getByRole('button', { name: 'Add' }));
-    await waitFor(() => expect(sheet().querySelector('[data-plugins-argv]')).toBeTruthy());
+    await resolved();
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
     await waitFor(() => expect(within(screen.getByRole('region', { name: 'Featured' })).getByRole('status').textContent).toContain('plugin not found'));
     expect(screen.getByRole('region', { name: 'Featured' }).querySelector('[data-marketplace-stays]')!.textContent).toContain('The marketplace claude-plugins-official stays added.');
@@ -458,7 +473,7 @@ describe('Customize: an add-then-install outlives a change of the page’s proje
       const shelfCard = () => found(`[data-discover="${section}"] [data-shelf] [data-catalog-card="${CSS.escape(cardOf.id)}"]`);
       fireEvent.click(within(tab()).getByRole('radio', { name: 'Discover' }));
       fireEvent.click(within(await shelfCard()).getByRole('button', { name: `Add ${name}` }));
-      await waitFor(() => expect(sheet().querySelector('[data-plugins-argv]')).toBeTruthy());
+      await resolved();
       fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
       await waitFor(() => expect(held.has('marketplaces.add')).toBe(true)); // the add runs
       fireEvent.change(screen.getByRole('combobox', { name: 'Project' }), { target: { value: B } }); // the page leaves
@@ -484,7 +499,7 @@ describe('Customize › Skills › Discover', () => {
     expect(invoked('catalog.home')).toEqual([{ tab: 'skills', cwd: PROJECT }]);
     const shelf = await found(`[data-shelf] [data-catalog-card="${CSS.escape(skillsOnly.id)}"]`);
     fireEvent.click(within(shelf).getByRole('button', { name: 'Add skills-only' }));
-    await waitFor(() => expect(sheet().querySelector('[data-plugins-argv]')).toBeTruthy());
+    await resolved();
     expect(shelf.querySelector('[data-catalog-components]')!.textContent).toBe('greet, summarize-diff'); // a Skills card lists its skills by name
     expect(sheet().querySelector('[data-catalog-summary]')!.textContent).toBe('Installs the plugin skills-only from maws-discover-test, with 2 skills: greet, summarize-diff');
     expect(sheet().textContent).toContain('Adds the marketplace maws-discover-test (user) and installs skills-only');
@@ -503,7 +518,7 @@ describe('Customize › Skills › Discover', () => {
     fireEvent.click(within(skills()).getByRole('radio', { name: 'Discover' }));
     const shelf = await found(`[data-discover="skills"] [data-shelf] [data-catalog-card="${CSS.escape(skillsOnly.id)}"]`);
     fireEvent.click(within(shelf).getByRole('button', { name: 'Add skills-only' }));
-    await waitFor(() => expect(sheet().querySelector('[data-plugins-argv]')).toBeTruthy());
+    await resolved();
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
     await waitFor(() => expect(held.has('marketplaces.add')).toBe(true)); // the add runs
     fireEvent.click(within(skills()).getByRole('radio', { name: 'My items' })); // Discover leaves

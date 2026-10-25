@@ -1,9 +1,11 @@
-// The connector sheet (the Discover spec, Design "Adding", Failure handling's connector rows).
+// The connector sheet (the Discover spec, Design "Adding", Failure handling's connector rows). The owner's ruling of
+// 2026-10-25: the exact command and the file it changes sit behind Details, closed at every opening.
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CatalogItem } from '@shared/ipc/schema/catalog';
 import { item } from '../discover/test-items';
 import { ConnectorSheet, type ConnectorSheetEnv } from './ConnectorSheet';
+import { requestFor } from '../../widgets/plugins/present';
 import { connectorAddOf } from './present';
 
 afterEach(cleanup);
@@ -16,7 +18,15 @@ const open = (catalog: CatalogItem, e = env()) => {
   render(<ConnectorSheet request={connectorAddOf(catalog)!} env={e} onConfirm={onConfirm} onClose={() => {}} />);
   return { sheet: screen.getByRole('dialog', { name: `Add ${catalog.name}?` }), onConfirm };
 };
-const argv = (sheet: HTMLElement) => JSON.parse(sheet.querySelector('[data-plugins-argv]')!.getAttribute('data-plugins-argv')!) as string[];
+const detailsButton = (sheet: HTMLElement) => within(sheet).getByRole('button', { name: 'Details' });
+// Opens Details when it is closed: the command and the file are inside it.
+const openDetails = (sheet: HTMLElement) => {
+  if (detailsButton(sheet).getAttribute('aria-expanded') === 'false') fireEvent.click(detailsButton(sheet));
+};
+const argv = (sheet: HTMLElement) => {
+  openDetails(sheet);
+  return JSON.parse(sheet.querySelector('[data-plugins-argv]')!.getAttribute('data-plugins-argv')!) as string[];
+};
 const add = (sheet: HTMLElement) => within(sheet).getByRole('button', { name: 'Add' }) as HTMLButtonElement;
 
 describe('the connector sheet', () => {
@@ -25,6 +35,7 @@ describe('the connector sheet', () => {
     expect(within(sheet).getByText('by Linear · Partner')).toBeTruthy();
     expect(within(sheet).getByText('https://mcp.linear.app/mcp')).toBeTruthy();
     expect(within(sheet).getByText('HTTP (streamable)')).toBeTruthy();
+    openDetails(sheet);
     expect(within(sheet).getByText('claude mcp add --transport http linear https://mcp.linear.app/mcp --scope user')).toBeTruthy();
     expect(within(sheet).getByText('/cfg/.claude.json')).toBeTruthy();
     fireEvent.click(within(sheet).getByRole('radio', { name: 'Project' }));
@@ -32,6 +43,37 @@ describe('the connector sheet', () => {
     expect(within(sheet).getByText('/p/.mcp.json')).toBeTruthy();
     fireEvent.click(add(sheet));
     expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({ action: 'mcp-add', input: { name: 'linear', url: 'https://mcp.linear.app/mcp', transport: 'http', scope: 'project' } }), '/engine/claude');
+  });
+
+  it('opens with the command and the file behind a closed Details, the name, URL, transport and scope in view; Details shows them', () => {
+    const { sheet } = open(connector());
+    expect(detailsButton(sheet).getAttribute('aria-expanded')).toBe('false');
+    expect(sheet.querySelector('[data-plugins-argv]')).toBeNull();
+    expect(sheet.querySelector('[data-connector-writes]')).toBeNull();
+    expect(sheet.textContent).not.toContain('mcp add');
+    expect(sheet.textContent).not.toContain('/cfg/.claude.json');
+    expect((within(sheet).getByRole('textbox', { name: 'Name' }) as HTMLInputElement).value).toBe('linear');
+    expect(sheet.querySelector('[data-connector-url]')!.textContent).toBe('https://mcp.linear.app/mcp');
+    expect(within(sheet).getByText('HTTP (streamable)')).toBeTruthy();
+    expect((within(sheet).getByRole('radio', { name: 'User' }) as HTMLInputElement).checked).toBe(true);
+    detailsButton(sheet).focus();
+    expect(document.activeElement).toBe(detailsButton(sheet));
+    fireEvent.click(detailsButton(sheet));
+    expect(detailsButton(sheet).getAttribute('aria-expanded')).toBe('true');
+    const region = within(sheet).getByRole('region', { name: 'Details' });
+    expect(detailsButton(sheet).getAttribute('aria-controls')).toBe(region.id);
+    expect(region.querySelector('[data-plugins-argv]')!.textContent).toBe('claude mcp add --transport http linear https://mcp.linear.app/mcp --scope user');
+    expect(region.querySelector('[data-connector-writes]')!.textContent).toBe('/cfg/.claude.json');
+  });
+
+  it('Remove: the command and the file behind a closed Details too, the acknowledgement in view', () => {
+    render(<ConnectorSheet request={requestFor('mcp-remove', { name: 'linear', scope: 'user' }, null)} env={env()} onConfirm={() => {}} onClose={() => {}} />);
+    const sheet = screen.getByRole('dialog', { name: 'Remove linear?' });
+    expect(sheet.querySelector('[data-plugins-argv]')).toBeNull();
+    expect(sheet.querySelector('[data-connector-writes]')).toBeNull();
+    expect(within(sheet).getByRole('checkbox', { name: 'I understand' })).toBeTruthy();
+    expect(argv(sheet)).toEqual(['mcp', 'remove', 'linear', '--scope', 'user']);
+    expect(sheet.querySelector('[data-connector-writes]')!.textContent).toBe('/cfg/.claude.json');
   });
 
   it('lets the name be edited within the engine’s rule', () => {
@@ -106,6 +148,7 @@ describe('the connector sheet', () => {
 
   it('names no command and confirms nothing until the engine is resolved', () => {
     const { sheet } = open(connector(), env({ engine: { state: 'loading' } }));
+    expect(within(sheet).queryByRole('button', { name: 'Details' })).toBeNull(); // nothing to detail yet
     expect(sheet.querySelector('[data-plugins-argv]')).toBeNull();
     expect(add(sheet).disabled).toBe(true);
   });

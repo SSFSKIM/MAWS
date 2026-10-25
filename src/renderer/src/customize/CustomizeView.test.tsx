@@ -421,12 +421,13 @@ describe('Connectors', () => {
     expect(within(row).queryByRole('button', { name: 'Sign in to notion' })).toBeNull();
   });
 
-  it('Remove opens the sheet with the exact command and file, behind the acknowledgement, then runs claude mcp remove', async () => {
+  it('Remove opens the sheet with the exact command and file, behind the acknowledgement and Details, then runs claude mcp remove', async () => {
     backend.script('plugins.env', () => ({ binary: '/engine/claude', binaryError: null, configHome: '/config', globalConfig: '/config/.claude.json' }));
     backend.script('connectors.remove', () => ({ opId: 'remove-1' }));
     mountWith(fresh());
     fireEvent.click(await screen.findByRole('button', { name: 'Remove notion' }));
     const sheet = await screen.findByRole('dialog', { name: 'Remove notion?' });
+    fireEvent.click(await within(sheet).findByRole('button', { name: 'Details' }));
     const argv = await within(sheet).findByText('claude mcp remove notion --scope user');
     expect(JSON.parse(argv.getAttribute('data-plugins-argv')!)).toEqual(['mcp', 'remove', 'notion', '--scope', 'user']);
     expect(within(sheet).getByText('/config/.claude.json')).toBeTruthy();
@@ -444,6 +445,7 @@ describe('Connectors', () => {
     mountWith(fresh());
     fireEvent.click(await screen.findByRole('button', { name: 'Remove notion' }));
     const sheet = await screen.findByRole('dialog', { name: 'Remove notion?' });
+    fireEvent.click(await within(sheet).findByRole('button', { name: 'Details' }));
     await within(sheet).findByText('claude mcp remove notion --scope project');
     expect(within(sheet).getByText('/.mcp.json')).toBeTruthy(); // the file the entry is in, not /one/.mcp.json
     fireEvent.click(within(sheet).getByRole('checkbox'));

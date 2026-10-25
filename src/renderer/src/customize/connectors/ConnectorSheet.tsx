@@ -2,11 +2,12 @@
 // install sheet, widgets/plugins/ConfirmSheet.tsx): nothing runs before it is confirmed. Adding shows the server's name
 // (editable within the engine's rule), publisher, trust label and URL; a choice among the directory's url_options, or a
 // required instance URL held to its url_regex with the pattern shown; the transport; the scope (user by default; a
-// project's two only on a project's page); "No sign-in needed" for an authless server; the exact command; and the file it
-// changes. A name already configured in any scope that applies here is refused, the existing entry shown; until every
-// such scope's configuration is read, Add waits, or says why it cannot, with Retry (M4 fix wave). Removing shows
-// the command and the file, behind the acknowledgement. The binary is `plugins.env`'s, read at every opening: until it
-// answers the sheet names no command and confirms nothing.
+// project's two only on a project's page); "No sign-in needed" for an authless server; and, behind Details (closed at
+// every opening, the owner's ruling of 2026-10-25), the exact command and the file it changes. A name already
+// configured in any scope that applies here is refused, the existing entry shown; until every such scope's
+// configuration is read, Add waits, or says why it cannot, with Retry (M4 fix wave). Removing shows the
+// acknowledgement, with the command and the file behind Details. The binary is `plugins.env`'s, read at every opening:
+// until it answers the sheet names no command and confirms nothing.
 import { useState } from 'react';
 import type { McpActionInputs, PluginsScope } from '@shared/plugins/cli';
 import { Sheet, SheetForm } from '../../sessions/Sheet';
@@ -14,6 +15,7 @@ import { CHOICE, DANGER, FIELD, PRIMARY, SECONDARY } from '../../sessions/ui';
 import { PLUGIN_MANAGEMENT as W } from '../../widgets/copy';
 import type { EngineResolution } from '../../widgets/plugins/ConfirmSheet';
 import { argvOf, commandWords, type PluginsRequest } from '../../widgets/plugins/present';
+import { SheetDetails } from '../../widgets/plugins/SheetDetails';
 import { CONNECTORS as C } from './copy';
 import { existingOf, nameProblem, scopesFor, urlProblem, writesFor, type ConfiguredServers } from './present';
 
@@ -31,7 +33,8 @@ export function ConnectorSheet({ request, env, onConfirm, onClose }: { request: 
   return request.action === 'mcp-add' ? <AddSheet request={request} env={env} onConfirm={onConfirm} onClose={onClose} /> : <RemoveSheet request={request} env={env} onConfirm={onConfirm} onClose={onClose} />;
 }
 
-function Command({ engine, request }: { engine: EngineResolution; request: PluginsRequest | null }) {
+// Until `plugins.env` answers there is no command to detail: the sheet says it is resolving the engine, or why it cannot.
+function Unresolved({ engine }: { engine: EngineResolution }) {
   if (engine.state === 'error')
     return (
       <p role="alert" className="m-0 text-ui-sm text-danger">
@@ -44,28 +47,28 @@ function Command({ engine, request }: { engine: EngineResolution; request: Plugi
         {W.resolving}
       </p>
     );
-  if (request === null) return null;
-  const argv = argvOf(request);
-  return (
-    <code data-plugins-argv={JSON.stringify(argv)} title={engine.env.binary} className="block rounded-sm bg-bg-active px-2 py-1 font-mono text-ui-sm break-all text-fg">
-      {commandWords(engine.env.binary, argv)}
-    </code>
-  );
+  return null;
 }
 
-function Writes({ engine, scope, cwd, then }: { engine: EngineResolution; scope: PluginsScope; cwd: string; then: string }) {
+// The exact command (none while the form is invalid) and the file it changes, behind Details (the owner's ruling of
+// 2026-10-25).
+function Details({ engine, request, scope, cwd }: { engine: EngineResolution; request: PluginsRequest | null; scope: PluginsScope; cwd: string }) {
+  if (engine.state !== 'ready') return null;
+  const argv = request && argvOf(request);
   return (
-    <div className="flex flex-col gap-0.5 text-ui-sm text-fg-muted">
-      {engine.state === 'ready' && (
-        <>
-          <p className="m-0">{C.writes}</p>
-          <p data-connector-writes className="m-0 font-mono break-all text-fg">
-            {writesFor(scope, { globalConfig: engine.env.globalConfig, cwd })}
-          </p>
-        </>
+    <SheetDetails>
+      {argv && (
+        <code data-plugins-argv={JSON.stringify(argv)} title={engine.env.binary} className="block rounded-sm bg-bg-active px-2 py-1 font-mono text-ui-sm break-all text-fg">
+          {commandWords(engine.env.binary, argv)}
+        </code>
       )}
-      <p className="m-0">{then}</p>
-    </div>
+      <div className="flex flex-col gap-0.5 text-ui-sm text-fg-muted">
+        <p className="m-0">{C.writes}</p>
+        <p data-connector-writes className="m-0 font-mono break-all text-fg">
+          {writesFor(scope, { globalConfig: engine.env.globalConfig, cwd })}
+        </p>
+      </div>
+    </SheetDetails>
   );
 }
 
@@ -182,8 +185,9 @@ function AddSheet({ request, env, onConfirm, onClose }: { request: PluginsReques
               {connector.authPosture === 'no_auth' ? C.noSignIn : C.signInAfter}
             </p>
           )}
-          <Command engine={env.engine} request={confirmed} />
-          <Writes engine={env.engine} scope={scope} cwd={env.runCwd} then={C.takesEffect} />
+          <Unresolved engine={env.engine} />
+          <p className="m-0 text-fg-muted">{C.takesEffect}</p>
+          <Details engine={env.engine} request={confirmed} scope={scope} cwd={env.runCwd} />
         </div>
       </SheetForm>
     </Sheet>
@@ -198,12 +202,13 @@ function RemoveSheet({ request, env, onConfirm, onClose }: { request: PluginsReq
     <Sheet title={C.removeTitle(input.name)} width="w-[min(520px,90vw)]" onClose={onClose} data-plugins-sheet="mcp-remove">
       <SheetForm canSubmit={engine !== null && acknowledged} onSubmit={() => engine && onConfirm(request, engine.binary)} submitLabel={W.submit['mcp-remove']} submitClass={DANGER}>
         <div data-plugins-sheet-body className="flex flex-col gap-3 text-ui-sm">
-          <Command engine={env.engine} request={request} />
-          <Writes engine={env.engine} scope={input.scope} cwd={env.runCwd} then={C.removesFrom} />
+          <Unresolved engine={env.engine} />
+          <p className="m-0 text-fg-muted">{C.removesFrom}</p>
           <label className="flex items-center gap-2 text-fg">
             <input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} className={CHOICE} />
             {W.understand}
           </label>
+          <Details engine={env.engine} request={request} scope={input.scope} cwd={env.runCwd} />
         </div>
       </SheetForm>
     </Sheet>
