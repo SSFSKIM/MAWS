@@ -15,7 +15,7 @@ import { Sheet, SheetForm } from '../../sessions/Sheet';
 import { CHOICE, DANGER, PRIMARY } from '../../sessions/ui';
 import { PLUGIN_MANAGEMENT as W } from '../copy';
 import { addStepOf, argvOf, commandWords, dependencyWords, DESTRUCTIVE, overridesWords, SCOPED, scopeOf, targetOf, thenWords, uninstallsWords, writesWords, type CatalogInstall, type PluginsRequest } from './present';
-import { DISCOVER as D } from '../../customize/discover/copy';
+import { CATALOG_INSTALL as D } from './catalog-words';
 
 // A resolved `plugins.env` answer: the binary (the probe's real path; an answer without one is unresolved), the config
 // home the CLI writes and the engine's global config file (inside a `CLAUDE_CONFIG_DIR`, else `~/.claude.json` beside

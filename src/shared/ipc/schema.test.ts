@@ -906,11 +906,12 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('plugins.marketplaceManifest', { cwd, name: '--scope' }).ok).toBe(false);
       expect(validateCommandInput('plugins.marketplaceManifest', { cwd, name: 'm', path: '/etc' }).ok).toBe(false);
       const components = { mcpServers: [{ name: 's', transport: 'stdio' }], mcpBundles: 0, agents: [], hooks: [], hookModules: 0, monitors: [], lspServers: [], commands: [], skills: [{ name: 'k', description: null }] };
-      const entry = { name: 'p', author: 'A', source: './plugins/p', components, partial: false, problems: [] };
+      const entry = { name: 'p', author: 'A', description: 'What p does', source: './plugins/p', components, partial: false, problems: [] };
       expect(validateCommandOutput('plugins.marketplaceManifest', { state: 'read', owner: 'O', plugins: [entry, { ...entry, source: { kind: 'github', url: null, repo: 'a/b', path: null, ref: 'v1', sha: 'b'.repeat(40) }, components: null }] }).ok).toBe(true);
       expect(validateCommandOutput('plugins.marketplaceManifest', { state: 'unknown', owner: null, plugins: [] }).ok).toBe(true);
       expect(validateCommandOutput('plugins.marketplaceManifest', { state: 'read', owner: null, plugins: [{ ...entry, components: { ...components, mcpServers: [{ name: 's', transport: 'stdio', command: 'npx' }] } }] }).ok).toBe(false);
       expect(validateCommandOutput('plugins.marketplaceManifest', { state: 'read', owner: null, plugins: [{ ...entry, url: 'https://x' }] }).ok).toBe(false);
+      expect(validateCommandOutput('plugins.marketplaceManifest', { state: 'read', owner: null, plugins: [{ ...entry, description: null }] }).ok).toBe(true); // P4-AGG M3: the entry's description, else its plugin.json's, else none
     });
 
     it('plugins.directoryProvenance is an engine-host read of entry names, never a path; it answers repository keys', () => {

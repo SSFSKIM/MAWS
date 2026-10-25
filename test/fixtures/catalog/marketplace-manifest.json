@@ -8,6 +8,7 @@
       {
         "name": "hooked",
         "author": "MAWS e2e hooks",
+        "description": "A plugin whose one component is a hook.",
         "source": "./plugins/hooked",
         "components": {
           "mcpServers": [],
@@ -31,6 +32,7 @@
       {
         "name": "local-server",
         "author": "MAWS e2e servers",
+        "description": "A plugin carrying a local (stdio) MCP server, a Node script.",
         "source": "./plugins/local-server",
         "components": {
           "mcpServers": [
@@ -54,6 +56,7 @@
       {
         "name": "remote-server",
         "author": "MAWS e2e servers",
+        "description": "A plugin carrying a remote (HTTP) MCP server.",
         "source": "./plugins/remote-server",
         "components": {
           "mcpServers": [
@@ -77,6 +80,7 @@
       {
         "name": "skills-only",
         "author": "MAWS e2e skills",
+        "description": "A plugin carrying two skills and nothing else.",
         "source": "./plugins/skills-only",
         "components": {
           "mcpServers": [],

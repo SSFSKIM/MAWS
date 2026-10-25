@@ -126,12 +126,12 @@ export type PluginManifestView = z.infer<typeof PluginManifestViewSchema>;
 // P2-B end
 // P4-AGG M2 start: `plugins.marketplaceManifest` (docs/doperpowers/specs/2026-10-24-plugin-aggregator-design.md,
 // Interfaces): one marketplace the engine has, read whole from its clone for Discover's catalog: its owner, and per entry
-// its author, its source with both pins, and its contents where the plugin sits in the clone (`null`: not on disk before
+// its author, its description (P4-AGG M3: the entry's, else its plugin.json's), its source with both pins, and its contents where the plugin sits in the clone (`null`: not on disk before
 // install, or not reached before the deadline, then `partial`). A marketplace the engine does not have answers `unknown`.
 export const MarketplaceManifestViewSchema = z.strictObject({
   state: z.enum(['read', 'missing', 'unknown']),
   owner: z.string().nullable(),
-  plugins: z.array(z.strictObject({ name: z.string(), author: z.string().nullable(), source: PluginSourceRefSchema.nullable(), components: PluginManifestViewSchema.shape.components.nullable(), partial: z.boolean(), problems: z.array(z.string()) })),
+  plugins: z.array(z.strictObject({ name: z.string(), author: z.string().nullable(), description: z.string().nullable(), source: PluginSourceRefSchema.nullable(), components: PluginManifestViewSchema.shape.components.nullable(), partial: z.boolean(), problems: z.array(z.string()) })),
 });
 export type MarketplaceManifestView = z.infer<typeof MarketplaceManifestViewSchema>;
 // `plugins.directoryProvenance`: where the engine recorded each installed Anthropic Directory plugin's code (its

@@ -132,7 +132,7 @@ describe('the catalog over the recorded sources', () => {
     const official = { name: 'claude-plugins-official', source: 'github', locator: 'anthropics/claude-plugins-official', ref: null, installLocation: '/scratch-root/config/plugins/marketplaces/claude-plugins-official' };
     const community = { ...official, name: 'claude-community', locator: 'anthropics/claude-plugins-community', installLocation: '/scratch-root/config/plugins/marketplaces/claude-community' };
     const row = { ...engine.installed![0]!, id: '42crunch-api-security-testing@claude-community', name: '42crunch-api-security-testing', marketplace: 'claude-community', scope: 'user', projectPath: null, here: false, coversHere: false };
-    const read = { state: 'read' as const, owner: 'Anthropic', plugins: [{ name: '42crunch-api-security-testing', author: null, source: { kind: 'git-subdir' as const, url: '42Crunch-AI/claude-plugins', repo: null, path: 'plugins/api-security-testing', ref: 'v1.0.1', sha: '30287f5e3f122a646d1ac5ca3ab96e130c52a3ad' }, components: null, partial: false, problems: [] }] };
+    const read = { state: 'read' as const, owner: 'Anthropic', plugins: [{ name: '42crunch-api-security-testing', author: null, description: null, source: { kind: 'git-subdir' as const, url: '42Crunch-AI/claude-plugins', repo: null, path: 'plugins/api-security-testing', ref: 'v1.0.1', sha: '30287f5e3f122a646d1ac5ca3ab96e130c52a3ad' }, components: null, partial: false, problems: [] }] };
     const items = await catalog({ engine: { ...engine, marketplaces: [...engine.marketplaces!, official, community], manifests: new Map([...engine.manifests, ['claude-community', read]]), installed: [...engine.installed!, row] } });
     expect(named(items, '42crunch-api-security-testing')[0]).toMatchObject({ installed: 'here', install: { marketplaceName: 'claude-community', present: true }, alsoListedBy: ['claude-plugins-official'] });
   });
@@ -178,7 +178,7 @@ describe('the catalog over the recorded sources', () => {
     // so with the engine holding that seed's clone, read by the host
     const engine = await recordedEngine(PROJECT_A);
     const skillsClone = { name: 'anthropic-agent-skills', source: 'github', locator: 'anthropics/skills', ref: null, installLocation: '/scratch-root/config/plugins/marketplaces/anthropic-agent-skills' };
-    const read = { state: 'read' as const, owner: 'Keith Lazuka', plugins: ['document-skills', 'example-skills'].map((name) => ({ name, author: null, source: './', components: null, partial: false, problems: [] })) };
+    const read = { state: 'read' as const, owner: 'Keith Lazuka', plugins: ['document-skills', 'example-skills'].map((name) => ({ name, author: null, description: null, source: './', components: null, partial: false, problems: [] })) };
     const held = await catalog({ engine: { ...engine, marketplaces: [...engine.marketplaces!, skillsClone], manifests: new Map([...engine.manifests, ['anthropic-agent-skills', read]]) } });
     expect(byId(held, 'github.com/anthropics/skills#?entry=example-skills').publisher).toBe('Anthropic');
     // an added marketplace's owner stands in for its own entries
@@ -255,14 +255,14 @@ describe('the catalog over the recorded sources', () => {
 describe('an added marketplace', () => {
   it('that no other source knows yields author, skills and a stdio server’s runsOnYourComputer from the host’s read', async () => {
     const items = await catalog({ tests: false });
-    expect(byId(items, TEST('skills-only'))).toMatchObject({ publisher: 'MAWS e2e skills', ownership: 'added', components: { skills: ['greet', 'summarize-diff'] }, install: { kind: 'plugin', present: true, marketplaceSource: '/scratch-root/maws-discover-test' } });
+    expect(byId(items, TEST('skills-only'))).toMatchObject({ publisher: 'MAWS e2e skills', description: 'A plugin carrying two skills and nothing else.', ownership: 'added', components: { skills: ['greet', 'summarize-diff'] }, install: { kind: 'plugin', present: true, marketplaceSource: '/scratch-root/maws-discover-test' } });
     expect(byId(items, TEST('local-server'))).toMatchObject({ publisher: 'MAWS e2e servers', runsOnYourComputer: true });
   });
 
   it('described by a test source yields the same before the engine has it, with the add step', async () => {
     const engine = await recordedEngine(PROJECT_A, { marketplaces: [], available: [], installed: [], manifests: new Map() });
     const items = await catalog({ engine });
-    expect(byId(items, TEST('skills-only'))).toMatchObject({ publisher: 'MAWS e2e skills', ownership: 'added', components: { skills: ['greet', 'summarize-diff'] }, sources: ['test:maws-discover-test'], install: { kind: 'plugin', marketplaceName: 'maws-discover-test', marketplaceSource: '/scratch-root/maws-discover-test', present: false } });
+    expect(byId(items, TEST('skills-only'))).toMatchObject({ publisher: 'MAWS e2e skills', description: 'A plugin carrying two skills and nothing else.', ownership: 'added', components: { skills: ['greet', 'summarize-diff'] }, sources: ['test:maws-discover-test'], install: { kind: 'plugin', marketplaceName: 'maws-discover-test', marketplaceSource: '/scratch-root/maws-discover-test', present: false } });
     expect(byId(items, TEST('local-server')).runsOnYourComputer).toBe(true);
     expect(homeOf(items, 'plugins').shelves[0]).toMatchObject({ key: 'added', title: 'Your sources', total: 4 });
   });

@@ -41,6 +41,8 @@ import { connectSessions } from './sessions/connect';
 import { SessionDialogs } from './sessions/SessionDialogs';
 import { useSetupIntent } from './sessions/useSetupIntent';
 // C10 end
+// P4-AGG M3
+import { connectCatalogEvents } from './customize/discover/read';
 // C8b start
 import { connectAgentWorkEvents } from './ipc/events';
 import { agentsDevSurface, agentTranscriptActions, registerAgentTools } from './tools/agents';
@@ -172,6 +174,7 @@ export function App() {
   useEffect(() => connectScenarioSessionCreator(), []); // C5: the stub's session creator in launch mode scenario
   useEffect(() => connectVisibility(), []); // C5: which sessions are on screen, for the unread rule
   useEffect(() => connectTranscript(), []); // C6: the transcript slot and its path chips' file tabs
+  useEffect(() => connectCatalogEvents(), []); // P4-AGG M3: Discover's reads stale on catalog.changed, shown or not
   // C8a start: the panel host into C5's slot, and its store-driven transitions (the hydration barrier, reconciliation,
   // the collapse focus). Below `persistLayout` on purpose: the barrier writes inside the hydration notification, and
   // persistence must already be subscribed to hear it.

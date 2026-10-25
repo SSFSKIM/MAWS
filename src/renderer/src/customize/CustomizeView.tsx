@@ -17,7 +17,7 @@ import { usePluginsEnv } from '../widgets/plugins/read';
 import { SearchField, Choice, LibrarySwitch, type LibraryTab } from '../widgets/plugins/LibraryHeader';
 import { DISCOVER } from './discover/copy';
 import { DiscoverToolbar } from './discover/DiscoverToolbar';
-import { SkillsDiscover } from './discover/SkillsDiscover';
+import { SkillsDiscover, SkillsManage } from './discover/SkillsDiscover';
 import { SortIcon } from '../app/IconButton';
 import { SkillsLibrary } from '../widgets/skills/SkillsLibrary';
 import { hasPluginSkills, skillsView, type SkillGroup } from '../widgets/skills/skills';
@@ -35,6 +35,9 @@ export function CustomizeView({ section }: { section: CustomizeSection }) {
   // Once visited, keep cwd-scoped plugin operations and their confirmation sheets alive across section switches.
   const [visitedPlugins, setVisitedPlugins] = useState(section === 'plugins');
   if (section === 'plugins' && !visitedPlugins) setVisitedPlugins(true);
+  // P4-AGG M3: Skills too, since its Discover runs changes (an add, then an install) that must outlive a section switch
+  const [visitedSkills, setVisitedSkills] = useState(section === 'skills');
+  if (section === 'skills' && !visitedSkills) setVisitedSkills(true);
   const projects = useSessions((s) => s.projects);
   const records = useSessions((s) => s.records);
   const engine = useSessions((s) => s.engine);
@@ -86,7 +89,7 @@ export function CustomizeView({ section }: { section: CustomizeSection }) {
     <Tabs.Content value="plugins" forceMount={visitedPlugins ? true : undefined} className="flex min-h-0 flex-1 flex-col px-1 pt-2 outline-none data-[state=inactive]:hidden">
       <DirectoryPlugins key={cwd ?? 'user'} cwd={cwd} appSessionId={attached?.appSessionId ?? null} scope={section === 'plugins' ? liveScope : null} />
     </Tabs.Content>
-    <Tabs.Content value="skills" className="flex min-h-0 flex-1 flex-col p-3 outline-none data-[state=inactive]:hidden">
+    <Tabs.Content value="skills" forceMount={visitedSkills ? true : undefined} className="flex min-h-0 flex-1 flex-col p-3 outline-none data-[state=inactive]:hidden">
       <SkillsSection key={cwd ?? 'user'} cwd={cwd} inventory={inventory} scope={liveScope} />
     </Tabs.Content>
     <Tabs.Content value="mcp" className="min-h-0 flex-1 overflow-y-auto p-3 outline-none data-[state=inactive]:hidden">
@@ -121,28 +124,35 @@ function SkillsSection({ cwd, inventory, scope }: { cwd: string | null; inventor
   const [view, setView] = useState<LibraryTab>('myItems');
   const switcher = <LibrarySwitch tab={view} onChange={setView} second={DISCOVER.discover} />;
   const refresh = () => void inventory.refetch();
-  if (view === 'browse')
-    return (
-      <SkillsDiscover
-        cwd={cwd}
-        onOpenInstalled={(item) => {
-          const plugin = item.install.kind === 'plugin' ? item.install.pluginName : item.name;
-          useLibraryStore.setState((state) => ({ skills: { ...state.skills, search: plugin } }));
-          setView('myItems');
-        }}
-      >
-        <div data-customize-toolbar="skills" className="mb-3 flex flex-wrap items-center gap-2 px-2">
-          {switcher}
-          <DiscoverToolbar tab="skills" />
-          {scope && <div className="ml-auto max-w-full shrink-0 @max-sm/customize:ml-0 @max-sm/customize:w-full">{scope}</div>}
-        </div>
-      </SkillsDiscover>
-    );
+  const toolbar = (
+    <div data-customize-toolbar="skills" className="mb-3 flex flex-wrap items-center gap-2 px-2">
+      {switcher}
+      <DiscoverToolbar tab="skills" />
+      {scope && <div className="ml-auto max-w-full shrink-0 @max-sm/customize:ml-0 @max-sm/customize:w-full">{scope}</div>}
+    </div>
+  );
+  // the management state outlives both views (SkillsManage): a change asked in Discover runs on while My items shows
   return (
-    <>
-      <InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} refresh={refresh} />
-      {inventory.data ? <DiskSkills inventory={inventory.data} refresh={refresh} scope={scope} switcher={switcher} /> : <div className="mb-3 px-2">{switcher}</div>}
-    </>
+    <SkillsManage cwd={cwd}>
+      {view === 'browse' ? (
+        <>
+          {toolbar}
+          <SkillsDiscover
+            cwd={cwd}
+            onOpenInstalled={(item) => {
+              const plugin = item.install.kind === 'plugin' ? item.install.pluginName : item.name;
+              useLibraryStore.setState((state) => ({ skills: { ...state.skills, search: plugin } }));
+              setView('myItems');
+            }}
+          />
+        </>
+      ) : (
+        <>
+          <InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} refresh={refresh} />
+          {inventory.data ? <DiskSkills inventory={inventory.data} refresh={refresh} scope={scope} switcher={switcher} /> : <div className="mb-3 px-2">{switcher}</div>}
+        </>
+      )}
+    </SkillsManage>
   );
 }
 

@@ -4,6 +4,7 @@
 // its scroll and focus. Discover reads only `catalog.*`, with the Customize page's cwd (null: the user configuration).
 // Skills lists the plugins whose skills are known, with a note that the rest are under Plugins. A card installed here
 // opens the item in My items (`onOpenInstalled`). The install sheet and the operations are the library's (`useManage`).
+// `catalog.changed` is heard for the window's life (read.ts's connectCatalogEvents, mounted by App.tsx), not here.
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { CatalogItem, CatalogTab } from '@shared/ipc/schema/catalog';
 import { SECONDARY } from '../../sessions/ui';
@@ -12,13 +13,11 @@ import { DISCOVER as D } from './copy';
 import { QueryGrid, ShelfHeading } from './DiscoverGrid';
 import { DiscoverHome, SortControl } from './DiscoverHome';
 import { FilterRow } from './DiscoverToolbar';
-import { useCatalogChanges } from './read';
 import { filtering, NO_CHOICES, queryOf, setChoices, useDiscoverStore } from './store';
 
 type Tab = Exclude<CatalogTab, 'connectors'>;
 
 export function DiscoverPane({ tab, cwd, onOpenInstalled }: { tab: Tab; cwd: string | null; onOpenInstalled(item: CatalogItem): void }) {
-  useCatalogChanges();
   const choices = useDiscoverStore((s) => s[tab]);
   const [detail, setDetail] = useState<CatalogItem | null>(null);
   const pane = useRef<HTMLDivElement>(null);

@@ -227,7 +227,7 @@ function listingsOf(entries: readonly ListedEntry[], at: MarketplacePlace & { so
 }
 
 const fromManifestRead = (manifest: MarketplaceManifestView, description: (name: string) => string | null): ListedEntry[] =>
-  manifest.plugins.map((p) => ({ name: p.name, source: p.source, description: description(p.name), author: p.author, known: p.components === null ? null : knownFromView(p.components, p.partial || p.problems.length > 0), knownBy: p.components === null ? null : 'host', homepage: null }));
+  manifest.plugins.map((p) => ({ name: p.name, source: p.source, description: description(p.name) ?? p.description, author: p.author, known: p.components === null ? null : knownFromView(p.components, p.partial || p.problems.length > 0), knownBy: p.components === null ? null : 'host', homepage: null }));
 
 // A seed's organisation publishes its own code, wherever the seed is read from (Decision Log 7): never the manifest's
 // `owner`, which names a person on two seeds. A marketplace that is not a seed (same name, another repository) is not.

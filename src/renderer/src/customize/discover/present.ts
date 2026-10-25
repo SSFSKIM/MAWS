@@ -7,7 +7,7 @@
 // - The runs-code warning names hooks, local (stdio) MCP servers and a CLI; an item whose contents are unknown gets
 //   Desktop's softer "may include".
 // - Counts are shown where a source has them and nowhere else: installs for official plugins, a rank for connectors.
-import type { CatalogItem } from '@shared/ipc/schema/catalog';
+import type { CatalogItem, CatalogTab } from '@shared/ipc/schema/catalog';
 import { installCountWords } from '../../widgets/plugins/browse';
 import { DISCOVER as D } from './copy';
 
@@ -60,6 +60,12 @@ export function componentsWords(item: CatalogItem): string {
   const parts = componentParts(item);
   if (parts === null) return D.contentsUnknown;
   return [...parts, ...(item.runsOnYourComputer === true ? [D.runsCode] : [])].join(' · ');
+}
+
+/** A card's contents line: on Skills, the skills by name (the Design's Skills row); elsewhere the components line. */
+export function cardContentsWords(item: CatalogItem, tab: CatalogTab): string {
+  const skills = item.components?.skills ?? [];
+  return tab === 'skills' && skills.length > 0 ? skills.join(', ') : componentsWords(item);
 }
 
 /** The install sheet's and the detail's warning: what runs code, the softer wording for unknown contents, or none. */

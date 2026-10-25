@@ -11,7 +11,7 @@ import { OperationLine, useManage } from '../../widgets/plugins/manage';
 import { catalogKey, installRequestOf } from './add';
 import { CatalogIcon } from './CatalogIcon';
 import { DISCOVER as D } from './copy';
-import { addable, componentsWords, metricWords, trustOf } from './present';
+import { addable, cardContentsWords, metricWords, trustOf } from './present';
 
 export const CARD_HEIGHT = 'h-36';
 
@@ -91,7 +91,7 @@ export function CatalogCard({ item, tab, onOpen }: { item: CatalogItem; tab: Cat
       <p className="relative m-0 line-clamp-2 text-ui-sm text-fg-muted [overflow-wrap:anywhere]">{item.description ?? ''}</p>
       <p className="relative m-0 mt-auto flex min-w-0 items-center gap-1.5 text-ui-sm text-fg-faint">
         <span data-catalog-components className="truncate">
-          {componentsWords(item)}
+          {cardContentsWords(item, tab)}
         </span>
         {metric && (
           <>

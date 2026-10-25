@@ -2,8 +2,10 @@
 // "The trust label", "Adding" and "Failure handling"). Plain and literal; the trust wording never claims more review than
 // the source records (Desktop's wording where it has one, fact 5).
 import type { CatalogChip, CatalogSort } from '@shared/ipc/schema/catalog';
+import { CATALOG_INSTALL } from '../../widgets/plugins/catalog-words';
 
 export const DISCOVER = {
+  ...CATALOG_INSTALL, // the sheet's words, shared with widgets/plugins
   discover: 'Discover',
   search: 'Search all sources',
   refresh: 'Refresh',
@@ -51,7 +53,6 @@ export const DISCOVER = {
   by: (publisher: string) => `by ${publisher}`,
   installs: (n: string) => `${n} installs`,
   rank: (n: number) => `#${n} most popular`,
-  contentsUnknown: 'Contents shown after install',
   runsCode: 'runs code',
   skills: (n: number) => `${n} skill${n === 1 ? '' : 's'}`,
   mcpServers: (n: number) => (n === 1 ? 'MCP server' : `${n} MCP servers`),
@@ -79,7 +80,6 @@ export const DISCOVER = {
   back: 'Back to Discover',
   installName: (name: string) => `Installs as ${name}`,
   from: (marketplace: string) => `From ${marketplace}`,
-  alsoListedBy: (names: readonly string[]) => `Also listed by ${names.join(', ')}`,
   updatedOn: (date: string) => `Updated ${date}`,
   whatsInside: 'What’s inside',
   skillsHeading: 'Skills',
@@ -98,12 +98,6 @@ export const DISCOVER = {
   codeLocalServers: (n: number) => (n === 1 ? 'a local MCP server' : `${n} local MCP servers`),
   codeCli: 'a CLI',
   // the install sheet (Design, "Adding")
-  installsFrom: (plugin: string, marketplace: string) => `Installs ${plugin} from ${marketplace}`,
-  addsAndInstalls: (marketplace: string, scope: string, plugin: string) => `Adds the marketplace ${marketplace} (${scope}) and installs ${plugin}`,
-  skillPlugin: (plugin: string, marketplace: string, skills: readonly string[]) => `Installs the plugin ${plugin} from ${marketplace}, with ${skills.length} skill${skills.length === 1 ? '' : 's'}: ${skills.join(', ')}`,
-  comesWith: (parts: readonly string[]) => `Comes with: ${parts.join(' · ')}`,
   firstStep: 'First',
   thenStep: 'Then',
-  staysAdded: (marketplace: string) => `The marketplace ${marketplace} stays added.`,
-  removeMarketplace: 'Remove marketplace',
 } as const;

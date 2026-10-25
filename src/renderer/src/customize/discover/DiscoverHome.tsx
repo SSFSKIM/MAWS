@@ -8,6 +8,8 @@ import type { CatalogItem, CatalogShelf, CatalogSort, CatalogTab } from '@shared
 import { IconButton, SortIcon } from '../../app/IconButton';
 import { SECONDARY } from '../../sessions/ui';
 import { Choice } from '../../widgets/plugins/LibraryHeader';
+import { OperationLine } from '../../widgets/plugins/manage';
+import { catalogKey } from './add';
 import { AddButton, InstalledMark, TrustLabel } from './CatalogCard';
 import { CatalogIcon } from './CatalogIcon';
 import { DISCOVER as D } from './copy';
@@ -41,6 +43,9 @@ function Featured({ item, tab, onOpen }: { item: CatalogItem; tab: Tab; onOpen(i
           <span aria-hidden>·</span>
           <span className="truncate">{componentsWords(item)}</span>
           <TrustLabel item={item} />
+        </div>
+        <div className="text-ui-sm empty:hidden">
+          <OperationLine opKey={catalogKey(item)} />
         </div>
       </div>
       <span className="relative hidden @md/customize:block">

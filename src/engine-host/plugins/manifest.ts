@@ -756,14 +756,14 @@ export async function readMarketplaceManifest(root: string, deps: ManifestReader
   for (const entry of manifest.plugins as unknown[]) {
     if (!isRecord(entry) || text(entry.name) === null) continue;
     const name = entry.name as string;
-    const listed = wordsOf(entry).author;
+    const listed = wordsOf(entry);
     const source = sourceRefOf(entry.source);
     if (typeof entry.source !== 'string') {
-      plugins.push({ name, author: listed, source, components: null, partial: false, problems: [] });
+      plugins.push({ name, author: listed.author, description: listed.description, source, components: null, partial: false, problems: [] });
       continue;
     }
     const view = await readManifestView({ kind: 'available', pluginId: name }, { root: null, marketplaceRoot: root, entryName: name, entry }, { fs: deps.fs, now, deadline });
-    plugins.push({ name, author: view.author ?? listed, source, components: view.state === 'read' ? view.components : null, partial: view.partial, problems: view.problems });
+    plugins.push({ name, author: view.author ?? listed.author, description: view.description ?? listed.description, source, components: view.state === 'read' ? view.components : null, partial: view.partial, problems: view.problems });
   }
   return { state: 'read', owner, plugins };
 }

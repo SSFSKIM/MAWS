@@ -60,7 +60,7 @@ describe('readMarketplaceManifest', () => {
     expect(answer.owner).toBe('MAWS e2e');
     const byName = Object.fromEntries(answer.plugins.map((p) => [p.name, p]));
     expect(Object.keys(byName)).toEqual(['hooked', 'local-server', 'remote-server', 'skills-only']);
-    expect(byName.hooked).toMatchObject({ author: 'MAWS e2e hooks', source: './plugins/hooked', partial: false, problems: [] });
+    expect(byName.hooked).toMatchObject({ author: 'MAWS e2e hooks', description: 'A plugin whose one component is a hook.', source: './plugins/hooked', partial: false, problems: [] });
     expect(byName.hooked!.components!.hooks).toEqual([{ event: 'SessionStart', matcher: null }]);
     expect(byName['local-server']!.components!.mcpServers).toEqual([{ name: 'echo', transport: 'stdio' }]);
     expect(byName['remote-server']!.components!.mcpServers).toEqual([{ name: 'fixture', transport: 'http' }]);
@@ -75,12 +75,12 @@ describe('readMarketplaceManifest', () => {
     expect(answer.owner).toBe('Scratch Owner');
     const [tooling, remote, docsA, docsB, ...rest] = answer.plugins;
     expect(rest).toEqual([]); // an entry with no name is no plugin
-    expect(tooling).toMatchObject({ name: 'tooling', author: 'Tool Smith', source: './plugins/tooling', partial: false });
+    expect(tooling).toMatchObject({ name: 'tooling', author: 'Tool Smith', description: 'Local tooling', source: './plugins/tooling', partial: false });
     expect(tooling!.components!.mcpServers).toEqual([{ name: 'runner', transport: 'stdio' }]);
     expect(tooling!.components!.skills.map((s) => s.name)).toEqual(['lint']);
     expect(JSON.stringify(answer)).not.toContain('secret'); // redaction holds: names and kinds only
     // a remote entry is not on disk: its contents are unknown until installed, its pins kept whole
-    expect(remote).toEqual({ name: 'remote', author: null, source: { kind: 'github', url: null, repo: 'someone/remote-plugin', path: null, ref: 'v1', sha: 'b'.repeat(40) }, components: null, partial: false, problems: [] });
+    expect(remote).toEqual({ name: 'remote', author: null, description: 'Remote', source: { kind: 'github', url: null, repo: 'someone/remote-plugin', path: null, ref: 'v1', sha: 'b'.repeat(40) }, components: null, partial: false, problems: [] });
     expect(docsA!.components!.skills.map((s) => s.name)).toEqual(['alpha']);
     expect(docsB!.components!.skills.map((s) => s.name)).toEqual(['beta', 'gamma']);
   });

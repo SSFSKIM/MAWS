@@ -4,12 +4,12 @@
 // or the engine's reads invalidated by an install, a marketplace change or an outside edit) reads every one of them
 // again, and a query starts again from its first page, since its cursors belong to the catalog revision they came from.
 // A page that answers `restarted` (its cursor's revision has gone) starts its query again the same way.
-import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useState } from 'react';
-import type { CommandInput, CommandName, CommandOutput } from '@shared/ipc/schema';
+import type { CommandInput, CommandName, CommandOutput, MawsBridge } from '@shared/ipc/schema';
 import type { CatalogPage, CatalogQueryInput, CatalogSourceStatus, CatalogTab } from '@shared/ipc/schema/catalog';
 import { ipc } from '../../ipc/client';
-import { IpcCommandError } from '../../ipc/query';
+import { IpcCommandError, queryClient } from '../../ipc/query';
 
 const ROOT = ['maws', 'catalog'] as const;
 
@@ -19,19 +19,24 @@ async function invoke<N extends CommandName>(name: N, input: CommandInput<N>): P
   return answer.value;
 }
 
-/** Hears `catalog.changed` once for the page: every catalog read again, each query from its first page. */
-export function useCatalogChanges(): void {
-  const client = useQueryClient();
-  useEffect(
-    () =>
-      ipc.on('catalog.changed', () => {
-        void client.resetQueries({ queryKey: [...ROOT, 'query'] });
-        void client.invalidateQueries({ queryKey: [...ROOT, 'home'] });
-        void client.invalidateQueries({ queryKey: [...ROOT, 'item'] });
-        void client.invalidateQueries({ queryKey: [...ROOT, 'sources'] });
-      }),
-    [client],
-  );
+// An icon main could not answer (null) is asked again after this, so main's own retry (5 min) reaches an open window;
+// an icon it answered, after a day, as main refreshes the directory bucket's icons.
+const ICON_MISS_MS = 5 * 60_000;
+const ICON_HIT_MS = 24 * 60 * 60_000;
+
+/** Every catalog read again, each query from its first page: shown reads at once, the others when next shown. */
+export function catalogChanged(client: QueryClient = queryClient): void {
+  void client.resetQueries({ queryKey: [...ROOT, 'query'] });
+  void client.invalidateQueries({ queryKey: [...ROOT, 'home'] });
+  void client.invalidateQueries({ queryKey: [...ROOT, 'item'] });
+  void client.invalidateQueries({ queryKey: [...ROOT, 'sources'] });
+  void client.invalidateQueries({ queryKey: [...ROOT, 'icon'], predicate: (query) => query.state.data === null }); // the misses
+}
+
+/** Hears `catalog.changed` for the window's life (App.tsx), so a change made while Discover is not shown (an uninstall in
+ * My items, an outside edit) is read when it is shown again: never only while it is mounted. */
+export function connectCatalogEvents(bridge: MawsBridge = ipc, client: QueryClient = queryClient): () => void {
+  return bridge.on('catalog.changed', () => catalogChanged(client));
 }
 
 export const useCatalogHome = (tab: CatalogTab, cwd: string | null) =>
@@ -75,13 +80,24 @@ export function useCatalogRefresh(): { refresh(): void; running: boolean } {
   const refresh = useCallback(() => {
     setRunning(true);
     void invoke('catalog.refresh', {})
-      .then((statuses) => client.setQueryData([...ROOT, 'sources'], statuses))
+      .then((statuses) => {
+        client.setQueryData([...ROOT, 'sources'], statuses);
+        void client.invalidateQueries({ queryKey: [...ROOT, 'icon'] }); // every icon asked again: main answers from its cache, a miss retried
+      })
       .catch(() => client.invalidateQueries({ queryKey: [...ROOT, 'sources'] }))
       .finally(() => setRunning(false));
   }, [client]);
   return { refresh, running };
 }
 
-/** A card's icon as data from main (null: a monogram), asked once per URL for the app run. */
+/** A card's icon as data from main (null: a monogram). A miss stays fresh for five minutes, an icon for a day; Refresh and
+ * `catalog.changed` ask the misses again. */
 export const useCatalogIcon = (url: string | null) =>
-  useQuery<string | null, IpcCommandError>({ queryKey: [...ROOT, 'icon', url], queryFn: async () => (await invoke('catalog.icon', { url: url! })).dataUrl, enabled: url !== null, staleTime: Infinity, gcTime: Infinity, refetchOnWindowFocus: false });
+  useQuery<string | null, IpcCommandError>({
+    queryKey: [...ROOT, 'icon', url],
+    queryFn: async () => (await invoke('catalog.icon', { url: url! })).dataUrl,
+    enabled: url !== null,
+    staleTime: (query) => (query.state.data === null ? ICON_MISS_MS : ICON_HIT_MS),
+    gcTime: Infinity,
+    refetchOnWindowFocus: false,
+  });

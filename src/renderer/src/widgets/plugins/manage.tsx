@@ -8,9 +8,9 @@ import { displayTitle } from '../../sessions/title';
 import { useSessions } from '../../stores/sessions';
 import { PLUGIN_MANAGEMENT as W } from '../copy';
 import { TextButton } from '../parts';
+import { CATALOG_INSTALL as D } from './catalog-words';
 import { ConfirmSheet, type Declared, type EngineResolution } from './ConfirmSheet';
 import { usePluginOperations, type PluginOperations } from './operation';
-import { DISCOVER as D } from '../../customize/discover/copy';
 import { addStepOf, afterAddOf, declaredOf, operationWords, requestFor, scopeOf, type PluginsRequest } from './present';
 
 export interface Manage {

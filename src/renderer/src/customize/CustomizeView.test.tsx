@@ -164,7 +164,7 @@ it('keeps the visited plugin library mounted when another Customize section is s
   mounted.rerender(view('skills'));
   await screen.findByRole('button', { name: 'View review' });
   mounted.rerender(view('plugins'));
-  expect(screen.getByRole('radio', { name: 'Discover' })).toBe(browse);
+  expect(within(screen.getByRole('tabpanel', { name: 'Plugins' })).getByRole('radio', { name: 'Discover' })).toBe(browse); // P4-AGG M3: Skills, once visited, stays mounted too
   expect(browse.getAttribute('aria-checked')).toBe('true');
 });
 

@@ -6,9 +6,13 @@ import { useCatalogIcon } from './read';
 
 const SIZES = { md: 'size-10 text-ui rounded-md', lg: 'size-14 text-prose rounded-lg' } as const;
 
+// Decision Log 10: an icon is only ever an <img> of image data (never inline SVG, innerHTML or <object>), the one SVG
+// context in which a script runs nothing and an external reference loads nothing; any other answer is a monogram.
+const IMAGE_DATA = /^data:image\/(?:png|svg\+xml);base64,[A-Za-z0-9+/]+={0,2}$/;
+
 export function CatalogIcon({ item, size }: { item: CatalogItem; size: keyof typeof SIZES }) {
   const icon = useCatalogIcon(item.iconUrl);
-  const data = icon.data ?? null;
+  const data = icon.data && IMAGE_DATA.test(icon.data) ? icon.data : null;
   return (
     <span aria-hidden data-catalog-icon={data ? 'image' : 'monogram'} className={`flex ${SIZES[size]} shrink-0 items-center justify-center overflow-hidden border border-border bg-bg font-medium text-fg-muted`}>
       {data ? <img src={data} alt="" className="size-full object-contain" draggable={false} /> : monogramOf(item.name)}
