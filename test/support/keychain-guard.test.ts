@@ -1,9 +1,12 @@
 // fixB (b)(c): the guard every e2e:discover step that reaches the login keychain runs under (e2e/support/keychain-guard.ts):
 // a pending keychain prompt fails the step at once and stops what it started; an engine environment that would name
 // another keychain item than its scratch configuration's is refused. A fake probe stands in for SecurityAgent.
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { spawn } from 'node:child_process';
-import { assertEngineKeychainEnv, assertNoKeychainPrompt, guardKeychain, killTree, securityAgentRunning, watchKeychainPrompt } from '../../e2e/support/keychain-guard';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { assertEngineKeychainEnv, assertNoKeychainPrompt, guardKeychain, killTree, loginShellEnvironment, securityAgentRunning, watchKeychainPrompt } from '../../e2e/support/keychain-guard';
 
 const never = () => new Promise<never>(() => {});
 
@@ -40,6 +43,17 @@ describe('the keychain prompt guard', () => {
     };
     expect(() => assertNoKeychainPrompt('here', unknown)).toThrow(/pgrep failed/);
     expect(typeof securityAgentRunning()).toBe('boolean'); // the real probe answers on this machine without a prompt
+  });
+
+  it('stops the step when the probe cannot tell during it, then fails (fix-D#2)', async () => {
+    let calls = 0;
+    const probe = () => {
+      if (++calls === 1) return false; // the check before the step answers
+      throw new Error('pgrep timed out');
+    };
+    const onPrompt = vi.fn();
+    await expect(guardKeychain('the sign-in', never, { probe, pollMs: 5, onPrompt })).rejects.toThrow(/pgrep timed out/);
+    expect(onPrompt).toHaveBeenCalledTimes(1); // nothing keeps running unmonitored
   });
 });
 
@@ -84,5 +98,49 @@ describe('the engine’s keychain environment', () => {
     expect(() => assertEngineKeychainEnv({}, '/s/claude-config', 'here')).toThrow(/unset: the owner/);
     expect(() => assertEngineKeychainEnv({ CLAUDE_CONFIG_DIR: '/s/claude-config', CLAUDE_SECURESTORAGE_CONFIG_DIR: '/x' }, '/s/claude-config', 'here')).toThrow(/CLAUDE_SECURESTORAGE_CONFIG_DIR/);
     expect(() => assertEngineKeychainEnv({ CLAUDE_CONFIG_DIR: '/s/claude-config', CLAUDE_CODE_CUSTOM_OAUTH_URL: 'https://x' }, '/s/claude-config', 'here')).toThrow(/CUSTOM_OAUTH_URL/);
+  });
+});
+
+// fix-D#1: the engine host builds the engine's environment from the login shell's capture alone (src/shared/host/shell-env.ts,
+// src/engine-host/launch.ts), so what the guard checks is that capture, read and fallen back on as the host does. Each
+// fake `$SHELL` below is a script run as `<shell> -ilc 'env -0'`.
+describe('the login shell environment the host captures', () => {
+  let dir: string;
+  const shell = (name: string, body: string) => {
+    const path = join(dir, name);
+    writeFileSync(path, `#!/bin/sh\n${body}\n`);
+    chmodSync(path, 0o755);
+    return path;
+  };
+  const app = (SHELL: string) => ({ PATH: process.env.PATH ?? '/usr/bin:/bin', SHELL, CLAUDE_CONFIG_DIR: '/s/claude-config' });
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'maws-login-shell-'));
+  });
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('refuses when the startup files unset the scratch CLAUDE_CONFIG_DIR, which the engine would then run without', () => {
+    const env = app(shell('unsets', 'unset CLAUDE_CONFIG_DIR\nexec env -0'));
+    const captured = loginShellEnvironment(env);
+    expect(captured.CLAUDE_CONFIG_DIR).toBeUndefined();
+    expect(() => assertEngineKeychainEnv(captured, '/s/claude-config', 'here')).toThrow(/unset: the owner/);
+  });
+
+  it('refuses when the startup files point CLAUDE_CONFIG_DIR elsewhere', () => {
+    const env = app(shell('repoints', 'CLAUDE_CONFIG_DIR=/Users/owner/.claude; export CLAUDE_CONFIG_DIR\nexec env -0'));
+    expect(() => assertEngineKeychainEnv(loginShellEnvironment(env), '/s/claude-config', 'here')).toThrow(/CLAUDE_CONFIG_DIR=\/Users\/owner\/.claude/);
+  });
+
+  it('reads the capture as the host does: rc noise before the first pair is skipped', () => {
+    const env = app(shell('chatty', "printf 'welcome\\n'\nexec env -0"));
+    const captured = loginShellEnvironment(env);
+    expect(captured.CLAUDE_CONFIG_DIR).toBe('/s/claude-config');
+    expect(Object.keys(captured).some((key) => key.includes('welcome'))).toBe(false);
+  });
+
+  it('falls back to the app environment, as the host does, when the capture fails or names no PATH', () => {
+    const exits = app(shell('exits', 'exit 3'));
+    expect(loginShellEnvironment(exits)).toEqual(exits);
+    const noPath = app(shell('no-path', 'exec env -i CLAUDE_CONFIG_DIR=/elsewhere /usr/bin/env -0'));
+    expect(loginShellEnvironment(noPath)).toEqual(noPath);
   });
 });

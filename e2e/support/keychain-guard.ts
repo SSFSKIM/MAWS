@@ -8,6 +8,7 @@
 //   engine derives its two items' names from CLAUDE_SECURESTORAGE_CONFIG_DIR, else CLAUDE_CONFIG_DIR (2.1.309
 //   cli.pretty.js 318187, every read and write through `vj`), and CLAUDE_CODE_CUSTOM_OAUTH_URL changes the suffix.
 import { spawnSync } from 'node:child_process';
+import { parseNulSeparatedEnv } from '../../src/shared/host/shell-env';
 
 export const SECURITY_MS = 5_000; // one `security` call: a dialog would hold it, so it is cut short
 export const PROMPT_CHECK_MS = 2_000;
@@ -27,30 +28,29 @@ export function assertNoKeychainPrompt(where: string, probe: PromptProbe = secur
   if (probe()) throw new Error(`a keychain prompt (SecurityAgent) is pending ${where}; no test answers one`);
 }
 
-/** Runs a keychain-touching step: no prompt before; one appearing during it fails the step at once (after `onPrompt`,
- * which stops what the step started, so nothing keeps waiting on the dialog); none after. */
+/** Runs a keychain-touching step: no prompt before; one appearing during it, or a probe that can no longer tell, fails
+ * the step at once (after `onPrompt`, which stops what the step started, so nothing keeps waiting on the dialog or runs
+ * unmonitored); none after. */
 export async function guardKeychain<T>(where: string, step: () => Promise<T>, options: { probe?: PromptProbe; pollMs?: number; onPrompt?: () => unknown } = {}): Promise<T> {
   const probe = options.probe ?? securityAgentRunning;
   assertNoKeychainPrompt(`before ${where}`, probe);
   let timer: ReturnType<typeof setInterval> | undefined;
-  let seen = false; // the poll has already failed the step on a prompt
+  let seen = false; // the poll has already failed the step (a prompt, or no way to tell)
   const prompted = new Promise<never>((_, reject) => {
     timer = setInterval(() => {
-      let pending: boolean;
+      let failure: unknown;
       try {
-        pending = probe();
+        if (!probe()) return;
+        failure = new Error(`a keychain prompt (SecurityAgent) appeared during ${where}; the step was stopped`);
       } catch (error) {
-        clearInterval(timer);
-        reject(error);
-        return;
+        failure = error; // prompt safety can no longer be established: treated as a prompt
       }
-      if (!pending) return;
       seen = true;
       clearInterval(timer);
       void Promise.resolve()
         .then(() => options.onPrompt?.())
         .catch(() => {})
-        .then(() => reject(new Error(`a keychain prompt (SecurityAgent) appeared during ${where}; the step was stopped`)));
+        .then(() => reject(failure));
     }, options.pollMs ?? POLL_MS);
   });
   try {
@@ -122,18 +122,16 @@ export function assertEngineKeychainEnv(env: Record<string, string | undefined>,
   if (env.CLAUDE_CONFIG_DIR !== configDir) throw new Error(`${where}: the engine would run with CLAUDE_CONFIG_DIR=${env.CLAUDE_CONFIG_DIR ?? '(unset: the owner’s ~/.claude)'}, not the scratch ${configDir}`);
 }
 
-/** The environment the engine host builds every engine's from: the login shell's, captured with the app's own
- * environment as `$SHELL -ilc 'env -0'` (src/shared/host/shell-env.ts). Read the same way, bounded, before the app runs. */
+/** The environment the engine host builds every engine's from (src/shared/host/shell-env.ts, src/engine-host/launch.ts):
+ * the login shell's alone, captured as `$SHELL -ilc 'env -0'` by a host that inherits the app's environment, parsed by
+ * the host's own parser and accepted only with a PATH; on any failure the host's own environment, which is the app's.
+ * Read the same way, bounded, before the app runs: what the startup files unset or change is gone from the engine too. */
 export function loginShellEnvironment(env: Record<string, string>): Record<string, string> {
   const shell = env.SHELL || '/bin/zsh';
-  const capture = spawnSync(shell, ['-ilc', 'env -0'], { env, encoding: 'utf8', timeout: SECURITY_MS, stdio: ['ignore', 'pipe', 'ignore'] });
-  if (capture.status !== 0) throw new Error(`the login shell's environment could not be read (${shell}: ${capture.status ?? capture.signal ?? capture.error?.message})`);
-  const out: Record<string, string> = {};
-  for (const entry of capture.stdout.split('\0')) {
-    const at = entry.indexOf('=');
-    if (at > 0) out[entry.slice(0, at)] = entry.slice(at + 1);
-  }
-  return { ...env, ...out };
+  const capture = spawnSync(shell, ['-ilc', 'env -0'], { env, encoding: 'utf8', timeout: SECURITY_MS, killSignal: 'SIGKILL', stdio: ['ignore', 'pipe', 'ignore'] });
+  if (capture.status !== 0) return env;
+  const captured = parseNulSeparatedEnv(capture.stdout);
+  return 'PATH' in captured ? captured : env;
 }
 
 /** The live engine's own environment, from `ps -E` (one's own processes): it names the scratch store and none other. */
