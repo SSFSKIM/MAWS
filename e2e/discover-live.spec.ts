@@ -15,7 +15,7 @@
 //              `all-grid-scale.json`.
 // The app runs the real pinned engine under a scratch HOME and CLAUDE_CONFIG_DIR (support/discover-scratch.ts, `live`).
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { CatalogItem, CatalogTab } from '../src/shared/ipc/schema/catalog';
@@ -107,6 +107,7 @@ test('live: the real sources counted twice; a directory plugin installed and uni
 
   await test.step('the dev-only summary walks the real sources through the catalog’s own code', async () => {
     const out = join(info.outputDir, 'catalog-summary.json');
+    mkdirSync(info.outputDir, { recursive: true });
     execFileSync(process.execPath, [resolve(__dirname, '../scripts/catalog-summary.mjs'), '--out', out], { stdio: ['ignore', 'ignore', 'inherit'], timeout: 600_000 });
     const summary = JSON.parse(readFileSync(out, 'utf8')) as { walkMs: number; statuses: unknown; sources: unknown; catalog: unknown; unshownClaudeCodeRemoteServers: unknown };
     report.summary = { walkMs: summary.walkMs, statuses: summary.statuses, sources: summary.sources, catalog: summary.catalog, unshownClaudeCodeRemoteServers: summary.unshownClaudeCodeRemoteServers };

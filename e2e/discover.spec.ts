@@ -461,8 +461,12 @@ test('projects: installed at project scope in A reads Installed there and Instal
     await searchAfresh(page, 'remote-server');
     await expect(card()).toHaveAttribute('data-installed', 'elsewhere', { timeout: CLI_MS });
     await expect(card()).toContainText('Installed in another project');
-    const s = await sheetFor(page, card(), 'remote-server'); // + still works: B's own install, the marketplace B lacks first
-    await expect(s.locator('[data-catalog-summary]')).toHaveText(`Adds the marketplace ${TEST_MARKETPLACE} (user) and installs remote-server`);
+    // + still works: B's own install. The marketplace A added at project scope is in the engine's own registry
+    // (plugins/known_marketplaces.json, one per configuration), which `plugin marketplace list` reads in B too, so the
+    // engine has it there and the sheet is the install alone (measured on 2.1.309, gate run 40189614848).
+    const s = await sheetFor(page, card(), 'remote-server');
+    await expect(s.locator('[data-catalog-summary]')).toHaveText(`Installs remote-server from ${TEST_MARKETPLACE}`);
+    expect((await argvOf(s, 'data-plugins-argv')).slice(0, 3)).toEqual(['plugin', 'install', `remote-server@${TEST_MARKETPLACE}`]);
     await cancel(s);
   });
 });

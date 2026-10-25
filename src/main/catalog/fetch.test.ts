@@ -6,7 +6,6 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { admitted, CATALOG_EGRESS, egressGet, type BaseFetch } from '@shared/net/egress';
-import { CATALOG_EGRESS, egressGet, type BaseFetch } from '@shared/net/egress';
 import { catalogPages, fetchSource, fixturePages, NETWORK_KEYS, networkPages, pageUrl } from './fetch';
 
 const FIXTURES = resolve(__dirname, '../../../e2e/fixtures/catalog');
