@@ -177,7 +177,7 @@ async function openSessionPlugins(maws: BackendLaunch): Promise<Locator> {
   await page.keyboard.type('/plugins');
   await expect(page.getByRole('listbox', { name: 'Commands' }).locator('[role="option"][aria-selected="true"]')).toContainText('/plugins');
   await page.keyboard.press('Enter');
-  const w = widget(page, 'plugins');
+  const w = widget(page, 'plugins').and(page.locator(':not([data-widget-variant="embedded"])')); // the modal, not Customize's
   await expect(w.locator('[data-plugins-section="my-items"]')).toBeVisible();
   return w;
 }
