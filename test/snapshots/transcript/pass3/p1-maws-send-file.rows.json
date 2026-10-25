@@ -26,6 +26,15 @@
     "denied": 0,
     "endedAt": "2026-10-06T06:35:16.338Z",
     "expanded": true,
+    "files": [
+      {
+        "added": 1,
+        "cellId": "cell:toolu_016SPZGMptYwjDFRxxrnhdA6",
+        "change": "create",
+        "path": "/private/tmp/maws-e1-repo-G8SYJD/hello.txt",
+        "removed": 0
+      }
+    ],
     "firstDeniedCell": null,
     "id": "divider:turn:77b1efd4-ce84-4368-b4ec-767350ff2d60",
     "kind": "divider",
@@ -96,7 +105,17 @@
       "added": 1,
       "change": "create",
       "filePath": "/private/tmp/maws-e1-repo-G8SYJD/hello.txt",
-      "hunks": [],
+      "hunks": [
+        {
+          "lines": [
+            "+HELLO_E1"
+          ],
+          "newLines": 1,
+          "newStart": 1,
+          "oldLines": 0,
+          "oldStart": 0
+        }
+      ],
       "kind": "edit",
       "removed": 0
     },
@@ -104,7 +123,7 @@
     "expanded": true,
     "id": "cell:toolu_016SPZGMptYwjDFRxxrnhdA6",
     "kind": "cell",
-    "label": "Created /private/tmp/maws-e1-repo-G8SYJD/hello.txt",
+    "label": "Created /private/tmp/maws-e1-repo-G8SYJD/hello.txt +1 −0",
     "paths": [
       "/private/tmp/maws-e1-repo-G8SYJD/hello.txt"
     ],
@@ -190,26 +209,6 @@
     "messageUuid": "18041e47-b574-47c7-a9c6-bca0cf266cce",
     "model": "claude-haiku-4-5-20251001",
     "phase": "answer",
-    "turnId": "turn:77b1efd4-ce84-4368-b4ec-767350ff2d60"
-  },
-  {
-    "added": 1,
-    "at": "2026-10-06T06:35:16.338Z",
-    "canReapply": false,
-    "canUndo": false,
-    "files": [
-      {
-        "added": 1,
-        "cellId": "cell:toolu_016SPZGMptYwjDFRxxrnhdA6",
-        "change": "create",
-        "path": "/private/tmp/maws-e1-repo-G8SYJD/hello.txt",
-        "removed": 0
-      }
-    ],
-    "id": "receipt:turn:77b1efd4-ce84-4368-b4ec-767350ff2d60",
-    "kind": "receipt",
-    "removed": 0,
-    "state": "applied",
     "turnId": "turn:77b1efd4-ce84-4368-b4ec-767350ff2d60"
   },
   {

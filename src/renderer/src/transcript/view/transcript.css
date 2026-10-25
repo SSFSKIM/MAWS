@@ -277,9 +277,12 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-cell { flex: none; scroll-margin: 20px; outline: none; }
 .transcript-cell-line { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 26px; color: var(--fg-muted); font-size: var(--text-ui-sm); text-align: left; }
 .transcript-cell-line:hover { color: var(--fg); }
+.transcript-cell-line > .transcript-counts { flex: none; }
 .transcript-cell-line > .transcript-chevron { margin-left: auto; opacity: 0; }
 .transcript-cell-line:hover > .transcript-chevron, .transcript-cell-line:focus-visible > .transcript-chevron, .transcript-cell-line[aria-expanded="true"] > .transcript-chevron { opacity: 1; }
 .transcript-cell-label { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.transcript-file-verb { color: var(--fg-muted); }
+.transcript-file-target { color: var(--fg); }
 .transcript-cell[data-bookkeeping] .transcript-cell-line { opacity: 0.75; }
 /* The status mark is drawn here, so the line's text is its label alone. */
 .transcript-cell-line::before { flex: none; width: 12px; text-align: center; }
@@ -577,3 +580,12 @@ button.transcript-chip[data-chip="anchor"]:hover { background: var(--bg-hover); 
 .transcript-browser-action-note { margin: 0 0 2px 23px; overflow-wrap: anywhere; }
 .transcript-browser-action > .transcript-output { margin: 4px 0 2px 23px; }
 /* E4c end */
+
+/* Code-mode transcript: factual summaries occupy one quiet line; details earn space only when opened. */
+.transcript-group-summary { padding: 3px 0; color: var(--fg-muted); font-size: var(--text-ui-sm); }
+.transcript-thinking .transcript-disclosure { max-width: 100%; }
+.transcript-thinking-summary { display: inline-block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.transcript-restore-dialog { position: fixed; top: 18%; left: 50%; transform: translateX(-50%); z-index: 50; width: min(480px, 90vw); padding: 16px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg-overlay); color: var(--fg); font-size: var(--text-ui); }
+.transcript-restore-dialog ul { max-height: 30vh; overflow: auto; overflow-wrap: anywhere; padding-left: 20px; font-family: var(--font-mono); }
+.transcript-restore-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.transcript-restore-dialog button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

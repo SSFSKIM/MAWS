@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test as base, type Page } from '@playwright/test';
+import { expect, test as base, type Locator, type Page } from '@playwright/test';
 import type { HarnessApi, HarnessMetrics } from '../src/renderer/src/harness/api';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
@@ -553,15 +553,15 @@ test('an answered question reads as one compact receipt that stays in view when 
 // W8 (T1): a streaming thinking block's label in the CLI's words (tier, effort, time) and colour (the warning colour
 // from 20 s), under Codex's shimmer, static under reduced motion. With MAWS_W8_SHOTS=1 it also writes the screenshots
 // the wave hands back (docs/doperpowers/plans/shots/w8-thinking-*.png), in both themes.
-test('a streaming thinking block reads the CLI’s tier, effort and time under the shimmer, warm from 20 s', async ({ harness }) => {
+test('a streaming reasoning summary stays under the shimmer, warm from 20 s', async ({ harness }) => {
   const { page } = harness;
   await harnessReady(page);
   await blockHumanInput(page);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.evaluate(() => (window as unknown as HarnessWindow).__maws_harness.setEffort('xhigh'));
   const cases = [
-    { fixture: 'events/thinking-live', shot: 'deep', text: /^Deep in thought with xhigh effort · (5\ds|1m \d\ds)$/, warm: true }, // 50 s in at load
-    { fixture: 'events/thinking-live-group', shot: 'still', text: /^(Still thinking|Thinking more) with xhigh effort · [12]\ds$/, warm: false }, // 12 s in
+    { fixture: 'events/thinking-live', shot: 'deep', text: 'Weighing where the anchor should sit: the reader’s row keeps their place, the end keeps the stream in view.', warm: true }, // 50 s in at load
+    { fixture: 'events/thinking-live-group', shot: 'still', text: 'It passes. Now, why the reader stays put: the virtualiser anchors to the end only while following.', warm: false }, // 12 s in
   ];
   for (const { fixture, shot, text, warm } of cases) {
     await loadAll(page, fixture);
@@ -829,7 +829,7 @@ test('every fixture renders its whole work area expanded', async ({ harness }) =
   const fixtures = (await fixtureNames(page)).filter((name) => !name.startsWith('synthetic/'));
   expect(fixtures.length).toBeGreaterThan(40);
   test.setTimeout(60_000 + fixtures.length * PER_FIXTURE_MS);
-  const WORK_KINDS = ['group', 'cell', 'receipt', 'subagent', 'agent_message', 'bash', 'plan', 'question', 'boundary', 'error'];
+  const WORK_KINDS = ['group', 'cell', 'subagent', 'agent_message', 'bash', 'plan', 'question', 'boundary', 'error'];
   const seen = new Map<string, number>();
   for (const fixture of fixtures) {
     await loadAll(page, fixture);
@@ -880,6 +880,7 @@ test('every fixture renders its whole work area expanded', async ({ harness }) =
   console.log(`expanded fixtures: ${JSON.stringify(report)}`);
   test.info().annotations.push({ type: 'expanded fixtures', description: JSON.stringify(report) });
   for (const kind of WORK_KINDS) expect(seen.get(kind) ?? 0, `some fixture renders a ${kind} row`).toBeGreaterThan(0);
+  expect(seen.get('receipt') ?? 0, 'no fixture restores the removed files-changed card').toBe(0);
 });
 
 // R1 (charter D-9 as amended 2026-10-01): a mod's toast, log lines and status line, from the pushes R0 recorded on the
@@ -1316,7 +1317,7 @@ test('the report folds work while marked text retains its authored flow and geom
     await expect(pane.getByText('Checked the tree first: it is clean.', { exact: false })).toBeVisible();
     // The tool summary appears immediately; the command remains on demand inside its own detail.
     const tool = pane.locator('[data-cell-id="cell:toolu_01P2cM5Bash01"]');
-    const detailToggle = tool.getByRole('button', { name: 'Check the tree', exact: true });
+    const detailToggle = tool.getByRole('button', { name: 'Checked the tree', exact: true });
     await expect(detailToggle).toBeVisible();
     await expect(detailToggle).toHaveAttribute('aria-expanded', 'false');
     const command = tool.locator('.transcript-shell-command');
@@ -1448,4 +1449,76 @@ for (const { fixture, headers } of sittingReplays) test(`M3 owner sitting preser
       return seen.size;
     })).toBe(3);
   });
+});
+
+// The owner's Code-mode comparison: the existing real-world mixed-tool fixture at the review viewport.
+test('Code-mode transcript rows keep labels, counts and inline diffs without a files-changed card', async ({ harness }, testInfo) => {
+  const { page } = harness;
+  await page.setViewportSize({ width: 1280, height: 820 });
+  await harnessReady(page);
+  const frame = async (target: Locator) => {
+    await page.evaluate(() => document.fonts.ready);
+    await target.scrollIntoViewIfNeeded();
+    await target.evaluate((el) => {
+      const scroller = el.closest<HTMLElement>('[data-transcript-scroller]')!;
+      scroller.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); // stop following the answer
+      scroller.scrollBy({ top: el.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 16, behavior: 'instant' });
+    });
+    await settle(page, 200);
+    await expect(target).toBeInViewport({ ratio: 1 });
+  };
+  await loadAll(page, 'transcript/edit-and-receipt');
+  await page.locator('[data-kind="divider"] button[aria-expanded]').first().click();
+  await expect(page.locator('[data-kind="receipt"]')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Read app.ts', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Ran the unit tests', exact: true })).toBeVisible();
+  const edit = page.getByRole('button', { name: /^Edited.*app.ts.*\+1.*−1/ });
+  await expect(edit.locator('.transcript-file-target')).toHaveText('app.ts');
+  await expect(edit).toHaveAttribute('title', '/tmp/maws-synth-edit-and-receipt/src/app.ts');
+  await expect(edit.locator('.transcript-counts')).toHaveText(/^[+]1\s*−1$/);
+  const colours = await page.evaluate(() => {
+    const probe = document.createElement('span');
+    document.body.append(probe);
+    try {
+      probe.style.color = 'var(--fg)';
+      const primary = getComputedStyle(probe).color;
+      probe.style.color = 'var(--fg-muted)';
+      return { primary, muted: getComputedStyle(probe).color };
+    } finally {
+      probe.remove();
+    }
+  });
+  expect(colours.primary).not.toBe(colours.muted);
+  await expect(edit.locator('.transcript-file-target')).toHaveCSS('color', colours.primary);
+  await expect(edit.locator('.transcript-file-verb')).toHaveCSS('color', colours.muted);
+  const group = page.locator('[data-kind="group"]').filter({ has: edit });
+  await frame(group);
+  await expect(group.locator('.transcript-group-summary')).toBeInViewport({ ratio: 1 });
+  await expect(group.locator('.transcript-tool-block .transcript-cell-line')).toHaveCount(4);
+  await page.screenshot({ path: testInfo.outputPath('transcript-rows-1280x820.png'), animations: 'disabled' });
+  await testInfo.attach('Transcript tool rows', { path: testInfo.outputPath('transcript-rows-1280x820.png'), contentType: 'image/png' });
+  await edit.click();
+  await expect(group.getByRole('button', { name: '/tmp/maws-synth-edit-and-receipt/src/app.ts', exact: true })).toHaveAttribute('title', '/tmp/maws-synth-edit-and-receipt/src/app.ts');
+  await expect(group.locator('.transcript-diff-line[data-diff="add"]').first()).toBeVisible();
+  await frame(group);
+  await expect(group.locator('.transcript-group-summary')).toBeInViewport({ ratio: 1 });
+  await expect(group.locator('.transcript-diff-line').first()).toBeInViewport({ ratio: 1 });
+  await expect(group.locator('.transcript-diff-line').last()).toBeInViewport({ ratio: 1 });
+  await page.screenshot({ path: testInfo.outputPath('transcript-inline-diff-1280x820.png'), animations: 'disabled' });
+  await testInfo.attach('Inline edit diff', { path: testInfo.outputPath('transcript-inline-diff-1280x820.png'), contentType: 'image/png' });
+  await loadAll(page, 'p4/p4-tool-summaries-thinking-edits');
+  const divider = page.locator('[data-kind="divider"] button[aria-expanded]').first();
+  if (await divider.getAttribute('aria-expanded') === 'false') await divider.click();
+  const create = page.getByRole('button', { name: /^Created.*notes\.txt.*\+1$/ });
+  await expect(create.locator('.transcript-file-target')).toHaveText('notes.txt');
+  await expect(create.locator('.transcript-counts')).toHaveText('+1');
+  await expect(create.locator('.transcript-del')).toHaveCount(0);
+  await create.click();
+  await expect(page.locator('.transcript-diff-line[data-diff="add"]')).toContainText('Ready for review.');
+  const createdGroup = page.locator('[data-kind="group"]').filter({ has: create });
+  await frame(divider); // keep the read, commentary and grouped changes together in their authored order
+  await expect(createdGroup.locator('.transcript-group-summary')).toBeInViewport({ ratio: 1 });
+  await expect(createdGroup.locator('.transcript-diff-line[data-diff="add"]')).toBeInViewport({ ratio: 1 });
+  await page.screenshot({ path: testInfo.outputPath('transcript-create-diff-1280x820.png'), animations: 'disabled' });
+  await testInfo.attach('Recorded create diff', { path: testInfo.outputPath('transcript-create-diff-1280x820.png'), contentType: 'image/png' });
 });

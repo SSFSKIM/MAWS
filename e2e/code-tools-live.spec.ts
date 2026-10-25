@@ -4,7 +4,7 @@
 // against what git itself answers; the only write is an untracked probe file, removed after. The second runs a real
 // model turn: a session created with the pinned binary through ClaudeUsage's relay in a scratch clone of this
 // repository, found by C4's real index in a scratch CLAUDE_CONFIG_DIR, resumed by MAWS, and asked to make one edit;
-// its receipt's "Review changes" opens Last turn and `Open file ↗` lands the viewer at the hunk's first changed line.
+// Review’s Last turn scope reads its changed files and `Open file ↗` lands the viewer at the hunk’s first changed line.
 // The owner's ~/.claude and ~/.claude.json are never read for sessions nor written (checked after the turn, read-only).
 // The second case removes its scratch clone and config dir after the run, keeping the turn's journal, unless
 // MAWS_CODE_LIVE_KEEP=1 keeps them too. Run on purpose only:
@@ -279,19 +279,21 @@ test('live: a turn that edits a file opens Review on Last turn and the viewer at
     const status = async () => ((await invoke('session.status', { appSessionId: record!.appId })) as { value?: { process?: string; engineState?: string } }).value;
     await expect.poll(async () => (await status())?.process, { timeout: 60_000 }).toBe('ready');
 
-    // Open the session, so the transcript (C6's slot, with C8c's registered callbacks) shows the turn's receipt. Its row
+    // Open the session so its transcript and Review follow the same turn. Its row
     // by the record's id (W11: its project expanded first), since the title follows the session's prompts.
     await (await sidebarRow(page, { appSessionId: record!.appId })).click();
     const prompt = `Use the Edit tool exactly once on ${target} to change the line "${before[lineNo - 1]}" into "${edited}". Change nothing else and do not run any other tool than Read and Edit. Then reply DONE.`;
     const sent = await invoke('session.send', { appSessionId: record!.appId, content: prompt });
     observed.sent = sent;
     await expect.poll(() => readFileSync(join(clone, target), 'utf8').includes(edited), { timeout: 180_000, message: 'the turn edits the file' }).toBe(true);
-    const receipt = page.locator('.transcript-receipt');
-    await expect(receipt).toBeVisible({ timeout: 120_000 });
-    observed.receipt = await receipt.textContent();
+    const turn = page.locator('[data-kind="divider"]').last();
+    await expect(turn).toContainText('Worked', { timeout: 120_000 });
+    observed.turnSummary = await turn.textContent();
+    await expect(page.locator('.transcript-receipt')).toHaveCount(0);
 
-    await receipt.locator('.transcript-receipt-review').click();
+    await openSurface(page, 'Review');
     const panel = page.locator('[data-region="panel"]');
+    await panel.locator('[data-chip="turn"]').click();
     await expect(panel.locator('[data-chip="turn"]')).toHaveAttribute('aria-pressed', 'true');
     const file = panel.locator(`[role="option"] button[data-path="${join(record!.directory, target)}"]`);
     await expect(file).toBeVisible();

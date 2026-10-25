@@ -26,6 +26,7 @@
     "denied": 0,
     "endedAt": "2026-09-30T00:07:34.702Z",
     "expanded": true,
+    "files": [],
     "firstDeniedCell": null,
     "id": "divider:turn:642951f0-2f1d-41ed-b0a8-83c1ee66e4c2",
     "kind": "divider",
@@ -108,6 +109,7 @@
     "denied": 0,
     "endedAt": "2026-09-30T00:07:48.854Z",
     "expanded": true,
+    "files": [],
     "firstDeniedCell": null,
     "id": "divider:turn:11a82fa5-5f4e-4513-a655-b0e4bc59ec56",
     "kind": "divider",
@@ -187,7 +189,7 @@
     "expanded": true,
     "id": "cell:toolu_017R4JeDZBqqGKPVPGAH26qP",
     "kind": "cell",
-    "label": "Read /private/tmp/maws-w4a-1790726852-repo-IXJjDf/big1.txt",
+    "label": "Read big1.txt",
     "paths": [
       "/private/tmp/maws-w4a-1790726852-repo-IXJjDf/big1.txt"
     ],
@@ -239,6 +241,7 @@
     "denied": 0,
     "endedAt": "2026-09-30T00:07:52.406Z",
     "expanded": true,
+    "files": [],
     "firstDeniedCell": null,
     "id": "divider:turn:55932f34-c1cc-44a6-8a9d-504562ac7ba8",
     "kind": "divider",
@@ -318,7 +321,7 @@
     "expanded": true,
     "id": "cell:toolu_014a1qrD43KaJrz3SBopogJg",
     "kind": "cell",
-    "label": "Read /private/tmp/maws-w4a-1790726852-repo-IXJjDf/big2.txt",
+    "label": "Read big2.txt",
     "paths": [
       "/private/tmp/maws-w4a-1790726852-repo-IXJjDf/big2.txt"
     ],
@@ -370,6 +373,7 @@
     "denied": 0,
     "endedAt": "2026-09-30T00:07:56.759Z",
     "expanded": true,
+    "files": [],
     "firstDeniedCell": null,
     "id": "divider:turn:e0a4fb9c-adc3-4155-80be-fd960a3ed19a",
     "kind": "divider",
@@ -449,7 +453,7 @@
     "expanded": true,
     "id": "cell:toolu_01L7ba8TjzRy4C5VGMoJyCrV",
     "kind": "cell",
-    "label": "Read /private/tmp/maws-w4a-1790726852-repo-IXJjDf/big3.txt",
+    "label": "Read big3.txt",
     "paths": [
       "/private/tmp/maws-w4a-1790726852-repo-IXJjDf/big3.txt"
     ],
@@ -501,6 +505,7 @@
     "denied": 0,
     "endedAt": "2026-09-30T00:08:00.790Z",
     "expanded": true,
+    "files": [],
     "firstDeniedCell": null,
     "id": "divider:turn:563ef4c6-c80b-41c2-b6fb-473424304fd7",
     "kind": "divider",
@@ -580,7 +585,7 @@
     "expanded": true,
     "id": "cell:toolu_01144uNwbLPfGJ2LbuR2gsu1",
     "kind": "cell",
-    "label": "Read /private/tmp/maws-w4a-1790726852-repo-IXJjDf/big4.txt",
+    "label": "Read big4.txt",
     "paths": [
       "/private/tmp/maws-w4a-1790726852-repo-IXJjDf/big4.txt"
     ],

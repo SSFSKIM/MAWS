@@ -82,7 +82,7 @@ const TABLE: Record<string, TableRow> = {
   Read: grouped('exploration'), Glob: grouped('exploration'), LS: grouped('exploration'), LSP: grouped('exploration'), NotebookRead: grouped('exploration'),
   Grep: grouped('exploration'),
   Edit: grouped('files'), MultiEdit: grouped('files'), Write: grouped('files'), NotebookEdit: grouped('files'),
-  Bash: grouped('commands'), BashOutput: grouped('commands'), KillShell: grouped('commands'), Monitor: grouped('commands'),
+  Bash: grouped('commands'), PowerShell: grouped('commands'), BashOutput: grouped('commands'), KillShell: grouped('commands'), Monitor: grouped('commands'),
   WebFetch: grouped('web'), WebSearch: grouped('web'),
   EnterPlanMode: grouped('other', true), EnterWorktree: grouped('other', true), ExitWorktree: grouped('other', true),
   TodoWrite: grouped('other', true), TaskCreate: grouped('other', true), TaskUpdate: grouped('other', true), TaskList: grouped('other', true),

@@ -130,7 +130,7 @@ test("G1: the report over the session's rows — marked turns folded to one reco
   const record = records(view).filter({ hasText: /Working record · \d+ tool calls?/ });
   await scrollUntil(view, view.getByText('Color→blue'), -1);
   await expect(record.last()).toBeVisible();
-  await expect(view).not.toContainText("Write 'blue' to recorded.txt in the current directory");
+  await expect(view).not.toContainText("Wrote 'blue' to recorded.txt in the current directory");
   await scrollUntil(view, view.locator(`[data-row-id^="question:${ASK_CALL}"]`), -1); // the ask mod's async question, a question row
   // Older turns: a marked one (part 23) is its message ink over a closed record, an unmarked one (part 24) whole.
   await scrollUntil(view, view.getByText('Read notes part 23 and tell me what it says.'), -1);
@@ -198,7 +198,7 @@ test('G1: a marked answer streams per block into its folded turn, its record wor
   const uuid = answerRow(recording);
   fm.step(recording.steps.findIndex(isAnswerChunk(uuid, recording)) - fm.played); // up to the answer's first chunk
   await expect(view).toContainText('Color→blue');
-  await expect(view).toContainText("Write 'blue' to recorded.txt in the current directory"); // nothing marked yet: the turn draws whole, its Bash call too
+  await expect(view).toContainText("Wrote 'blue' to recorded.txt in the current directory"); // nothing marked yet: the turn draws whole, its Bash call too
 
   for (let i = 0; i < 40 && !(await streamingRows(view).allTextContents()).join('').includes(ANSWER); i++) {
     fm.step(1);
@@ -207,7 +207,7 @@ test('G1: a marked answer streams per block into its folded turn, its record wor
   // Native MAWS already folds an open mark, but UX1-C leaves its unfinished text literal and without ink.
   await expect(streamingRows(view).last()).toContainText(`<message>${ANSWER}`);
   await expect(streamingRows(view).last().locator('.owner-message-ink')).toHaveCount(0);
-  await expect(view).not.toContainText("Write 'blue' to recorded.txt in the current directory");
+  await expect(view).not.toContainText("Wrote 'blue' to recorded.txt in the current directory");
   await expect(workingDots(records(view))).toHaveCount(1);
   const answerBlock = recording.steps.find((s) => s.k === 'block-row' && s.body.uuid === uuid)!;
   if (answerBlock.k !== 'block-row') throw new Error('no block-row');
@@ -216,7 +216,7 @@ test('G1: a marked answer streams per block into its folded turn, its record wor
   const live = streamingRows(view).last();
   await expect(live.locator('.owner-message-ink')).toContainText(ANSWER);
   await expect(live).not.toContainText('<message>');
-  await expect(view).not.toContainText("Write 'blue' to recorded.txt in the current directory"); // folded into its record while the mark streams
+  await expect(view).not.toContainText("Wrote 'blue' to recorded.txt in the current directory"); // folded into its record while the mark streams
   await expect(workingDots(records(view))).toHaveCount(1); // the record says it works
   expect(fm.depth.rows.get('main')!.some((row) => row.uuid === uuid)).toBe(false); // and its row is not written yet
 

@@ -26,6 +26,7 @@
     "denied": 0,
     "endedAt": "2026-09-29T15:47:23.968Z",
     "expanded": true,
+    "files": [],
     "firstDeniedCell": null,
     "id": "divider:turn:85754b17-c295-4cfd-a516-f72de1de14a1",
     "kind": "divider",
@@ -118,6 +119,7 @@
     "denied": 0,
     "endedAt": "2026-09-29T15:47:33.667Z",
     "expanded": true,
+    "files": [],
     "firstDeniedCell": null,
     "id": "divider:turn:2fb7478b-2a11-4ae1-8e85-588fd92bd1d3",
     "kind": "divider",
@@ -257,6 +259,7 @@
     "denied": 0,
     "endedAt": "2026-09-29T15:48:27.944Z",
     "expanded": true,
+    "files": [],
     "firstDeniedCell": null,
     "id": "divider:turn:973fefba-82be-4059-9266-a70593597680",
     "kind": "divider",
@@ -400,6 +403,15 @@
     "denied": 0,
     "endedAt": "2026-09-29T15:49:22.614Z",
     "expanded": true,
+    "files": [
+      {
+        "added": 3,
+        "cellId": "cell:toolu_01QBbZY1sDgGPGeW7x12tdib",
+        "change": "update",
+        "path": "/private/tmp/maws-probe2-wqNOal/inbox.txt",
+        "removed": 2
+      }
+    ],
     "firstDeniedCell": null,
     "id": "divider:turn:2bd7dd49-6474-4c08-9f1f-8659a3ed8fd8",
     "kind": "divider",
@@ -525,31 +537,12 @@
     "turnId": "turn:2bd7dd49-6474-4c08-9f1f-8659a3ed8fd8"
   },
   {
-    "added": 4,
-    "at": "2026-09-29T15:49:28.289Z",
-    "canReapply": false,
-    "canUndo": false,
-    "files": [
-      {
-        "added": 4,
-        "cellId": "cell:toolu_01QBbZY1sDgGPGeW7x12tdib",
-        "change": "update",
-        "path": "/private/tmp/maws-probe2-wqNOal/inbox.txt",
-        "removed": 3
-      }
-    ],
-    "id": "receipt:turn:2bd7dd49-6474-4c08-9f1f-8659a3ed8fd8",
-    "kind": "receipt",
-    "removed": 3,
-    "state": "applied",
-    "turnId": "turn:2bd7dd49-6474-4c08-9f1f-8659a3ed8fd8"
-  },
-  {
     "at": "2026-09-29T15:49:28.341Z",
     "autoDenied": 0,
     "denied": 0,
     "endedAt": "2026-09-29T15:49:29.841Z",
     "expanded": true,
+    "files": [],
     "firstDeniedCell": null,
     "id": "divider:turn:ereplay:journal:617:1",
     "kind": "divider",
@@ -608,6 +601,7 @@
     "denied": 0,
     "endedAt": "2026-09-29T15:49:33.602Z",
     "expanded": true,
+    "files": [],
     "firstDeniedCell": null,
     "id": "divider:turn:ereplay:journal:641:1",
     "kind": "divider",

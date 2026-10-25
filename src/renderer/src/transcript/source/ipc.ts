@@ -503,7 +503,7 @@ export function ipcRewindOver(client: MawsBridge, appSessionId: AppSessionId, st
     const result = await client.invoke('session.rewindFiles', { appSessionId, userMessageUuid, dryRun });
     if (!result.ok) return { ok: false, reason: result.error.message };
     if (!result.value.enabled) return { ok: false, reason: result.value.message ?? REWIND_REFUSAL.disabled };
-    return { ok: result.value.ok, reason: result.value.ok ? null : (result.value.message ?? REWIND_REFUSAL.failed) };
+    return { ok: result.value.ok, reason: result.value.ok ? null : (result.value.message ?? REWIND_REFUSAL.failed), files: result.value.changedFiles };
   };
   return {
     canUndo: (turnId) => rewind(turnId, true),
@@ -511,7 +511,6 @@ export function ipcRewindOver(client: MawsBridge, appSessionId: AppSessionId, st
       const outcome = await rewind(turnId, false);
       if (!outcome.ok) throw new Error(outcome.reason ?? REWIND_REFUSAL.failed);
     },
-    reapply: null,
   };
 }
 

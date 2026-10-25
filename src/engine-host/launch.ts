@@ -112,6 +112,7 @@ function isAllowed(key: string): boolean {
 export function buildEnvironment(spec: LaunchSpec, captured: Record<string, string>, relayUrl: string, spawnerPid: number): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(captured)) if (isAllowed(key)) env[key] = value;
+  env.CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES = 'false';
   env.CLAUDE_CODE_ENTRYPOINT = 'sdk-ts'; // the probe's identity; every fixture was recorded under it
   env.CLAUDE_CODE_FORK_SUBAGENT = 'true'; // C12: kept (D9, ruled at M5): the terminal's interactive default; probe fixtures pass3/launch-env-{terminal,fork,unset}
   env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING = '1';

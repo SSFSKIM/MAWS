@@ -356,7 +356,7 @@ describe('transcript store', () => {
     expect(store.getState().rows(KEY)).toBe(rows);
   });
 
-  // X3 consumers read the truth: the receipt's undo state and a loaded spill are part of the derived rows.
+  // X3 consumers read the truth: changed files and a loaded spill are part of the derived rows.
   describe('reader state folded into the rows', () => {
     function edit() {
       const b = builder();
@@ -367,29 +367,17 @@ describe('transcript store', () => {
       b.end(['u1']);
       return b.events;
     }
-    const receiptOf = (rows: Row[]) => rows.find((row): row is Extract<Row, { kind: 'receipt' }> => row.kind === 'receipt')!;
-
-    it('a receipt reads applied and not undoable until the dry run answers, then follows undo and reapply', async () => {
+    it('keeps a completed turn’s changed files on its folded divider, without a receipt row', async () => {
       const store = createTranscriptStore();
       await store.getState().attach(KEY, pushSource(edit()).source);
-      const id = receiptOf(store.getState().rows(KEY)).id;
-      expect(receiptOf(store.getState().rows(KEY))).toMatchObject({ state: 'applied', canUndo: false, canReapply: false });
+      const dividerOf = () => store.getState().rows(KEY).find((row) => row.kind === 'divider');
+      const files = [{ path: '/p/a.ts', change: 'create', added: 1, removed: 0, cellId: 'cell:t1' }];
+      expect(dividerOf()).toMatchObject({ state: 'completed', expanded: false, files });
+      expect(kinds(store.getState().rows(KEY))).not.toContain('receipt');
 
-      const before = store.getState().rows(KEY);
-      const uiVersion = store.getState().entries[KEY].state.ui.version;
-      store.getState().setReceipt(KEY, id, { check: { ok: true, reason: null }, reapply: true });
-      expect(receiptOf(store.getState().rows(KEY))).toMatchObject({ state: 'applied', canUndo: true, canReapply: false });
-      // Laid over the derived rows: no re-derivation (the ui version stays), every other turn row keeps its reference
-      // (time separators are rebuilt with the flat list, as on any change).
-      expect(store.getState().entries[KEY].state.ui.version).toBe(uiVersion);
-      expect(store.getState().rows(KEY).filter((row, i) => row !== before[i] && row.kind !== 'time').map((row) => row.kind)).toEqual(['receipt']);
-      store.getState().setReceipt(KEY, id, { state: 'undoing' });
-      expect(receiptOf(store.getState().rows(KEY))).toMatchObject({ state: 'undoing', canUndo: false, canReapply: false });
-      store.getState().setReceipt(KEY, id, { state: 'undone' });
-      expect(receiptOf(store.getState().rows(KEY))).toMatchObject({ state: 'undone', canUndo: false, canReapply: true });
-
-      store.getState().setReceipt(KEY, id, { state: 'applied', check: { ok: false, reason: 'no checkpoint' }, reapply: false });
-      expect(receiptOf(store.getState().rows(KEY))).toMatchObject({ state: 'applied', canUndo: false, canReapply: false });
+      store.getState().expandAll(KEY);
+      expect(dividerOf()).toMatchObject({ state: 'completed', expanded: true, files });
+      expect(kinds(store.getState().rows(KEY))).not.toContain('receipt');
     });
 
     it('a spill loads into its cell detail, and a failure is kept with the reason', async () => {

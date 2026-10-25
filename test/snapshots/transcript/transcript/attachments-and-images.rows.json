@@ -35,6 +35,7 @@
     "denied": 0,
     "endedAt": "2026-09-28T10:50:00.603Z",
     "expanded": true,
+    "files": [],
     "firstDeniedCell": null,
     "id": "divider:turn:u-attachments-and-images-002",
     "kind": "divider",

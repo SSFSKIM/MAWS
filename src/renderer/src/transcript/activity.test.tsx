@@ -86,8 +86,8 @@ describe('turn activity', () => {
     expect(turn.subagents).toEqual([expect.objectContaining({ taskId: 'agent-1', name: 'Look around', status: 'started', glyph: glyphFor(task('agent-1')) })]);
   });
 
-  // C8c (M6): the projection's edited set equals the receipt's file list, so a child agent's completed edit, which the
-  // receipt attributes to the turn, is an edited file of the turn with its own edit detail.
+  // The projection's edited set equals the divider's changed-file metadata, including a child agent's completed edit
+  // attributed to the turn with its own edit detail.
   it('lists a child agent’s completed edit as an edited file of the turn, with its edit detail, expanded or collapsed', async () => {
     const b = builder();
     b.turn('u1');
@@ -104,8 +104,8 @@ describe('turn activity', () => {
     b.end(['u1']);
     const { key, activity } = await attached(b.events);
     const collapsed = activity();
-    const receipt = useTranscriptStore.getState().rows(key).find((row) => row.kind === 'receipt');
-    expect(receipt?.kind === 'receipt' && receipt.files.map((file) => file.path)).toEqual(['/p/child.ts']);
+    const divider = useTranscriptStore.getState().rows(key).find((row) => row.kind === 'divider');
+    expect(divider?.files?.map((file) => file.path)).toEqual(['/p/child.ts']);
     expect(collapsed[0].files).toEqual([
       { path: '/p/child.ts', use: 'edited', at: b.events.find((event) => event.kind === 'tool.use' && event.toolUseId === 'c1')!.at, edit: { kind: 'edit', filePath: '/p/child.ts', change: 'update', hunks: [hunk], added: 1, removed: 1 } },
     ]);

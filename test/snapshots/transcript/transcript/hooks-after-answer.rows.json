@@ -52,6 +52,7 @@
     "denied": 0,
     "endedAt": "2026-09-28T11:40:00.780Z",
     "expanded": true,
+    "files": [],
     "firstDeniedCell": null,
     "id": "divider:turn:u-hooks-answer-027",
     "kind": "divider",

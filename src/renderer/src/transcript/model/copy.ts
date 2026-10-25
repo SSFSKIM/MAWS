@@ -88,6 +88,7 @@ export interface GroupPhraseInput {
   skills: string[];
   toolsLoaded: number;
   editedFiles: string[];
+  createdFiles?: string[];
   readFiles: string[];
   searches: string[];
   commands: string[];
@@ -106,14 +107,13 @@ export function groupSummary(input: GroupPhraseInput): string {
   else if (skills.length > 1) byCategory.skills.push(`loaded ${plural(skills.length, 'skill')}`);
   if (input.toolsLoaded > 0) byCategory.skills.push(`loaded ${plural(input.toolsLoaded, 'tool')}`);
   const edited = [...new Set(input.editedFiles)];
-  if (edited.length === 1) byCategory.files.push(`edited ${baseName(edited[0])}`);
-  else if (edited.length > 1) byCategory.files.push(`edited ${plural(edited.length, 'file')}`);
+  if (edited.length > 0) byCategory.files.push(`edited ${plural(edited.length, 'file')}`);
+  const created = new Set(input.createdFiles ?? []);
+  if (created.size > 0) byCategory.files.push(`created ${plural(created.size, 'file')}`);
   const read = [...new Set(input.readFiles)];
-  if (read.length === 1) byCategory.exploration.push(`read ${baseName(read[0])}`);
-  else if (read.length > 1) byCategory.exploration.push(`read ${plural(read.length, 'file')}`);
+  if (read.length > 0) byCategory.exploration.push(`read ${plural(read.length, 'file')}`);
   for (const pattern of [...new Set(input.searches)]) byCategory.exploration.push(`searched for \`${pattern}\``);
-  if (input.commands.length === 1) byCategory.commands.push(`ran \`${input.commands[0]}\``);
-  else if (input.commands.length > 1) byCategory.commands.push(`ran ${plural(input.commands.length, 'command')}`);
+  if (input.commands.length > 0) byCategory.commands.push(`ran ${plural(input.commands.length, 'command')}`);
   for (const query of input.webQueries) byCategory.web.push(`searched the web for ${query}`);
   const hosts = [...new Set(input.fetchedHosts)];
   if (hosts.length === 1) byCategory.web.push(`fetched ${hosts[0]}`);
@@ -172,11 +172,11 @@ export function cellLabel(input: CellLabelInput): string {
       break;
     }
     case 'edit':
-      if (input.change === 'create') return `Created ${input.path}`;
-      if (input.change === 'delete') return `Deleted ${input.path}`;
+      if (input.change === 'create') return `Created ${input.path} +${input.added} −${input.removed}`;
+      if (input.change === 'delete') return `Deleted ${input.path} +${input.added} −${input.removed}`;
       return `Edited ${input.path} +${input.added} −${input.removed}`;
     case 'read':
-      return input.paths.length === 1 ? `Read ${input.paths[0]}` : `Read ${plural(input.paths.length, 'file')}`;
+      return input.paths.length === 1 ? `Read ${baseName(input.paths[0])}` : `Read ${plural(input.paths.length, 'file')}`;
     case 'denied': {
       const reason = input.reason ? ` · ${input.reason}` : '';
       switch (input.disposition) {
@@ -188,7 +188,7 @@ export function cellLabel(input: CellLabelInput): string {
     }
     case 'generic': {
       const mcp = MCP_TOOL.exec(input.toolName);
-      if (mcp) return `Used ${mcp[1]}`;
+      if (mcp) return `Used ${mcp[1]} · ${mcp[2]}`;
       const detail = input.detail ?? null;
       switch (input.toolName) {
         case 'Skill': return `Loaded ${detail ?? 'a'} skill`;
@@ -711,3 +711,19 @@ export function browserActivityLine(activity: BrowserActivity): string {
   }
 }
 // E13 end
+
+// Inflect only recognized imperative verbs; preserve arbitrary agent-authored phrasing and languages verbatim.
+export function descriptionLabel(description: string, status: string): string {
+  const forms: Record<string, [string, string]> = {
+    read: ['Reading', 'Read'], run: ['Running', 'Ran'], check: ['Checking', 'Checked'],
+    inspect: ['Inspecting', 'Inspected'], list: ['Listing', 'Listed'], find: ['Finding', 'Found'],
+    search: ['Searching', 'Searched'], create: ['Creating', 'Created'], write: ['Writing', 'Wrote'],
+    update: ['Updating', 'Updated'], build: ['Building', 'Built'], test: ['Testing', 'Tested'],
+    verify: ['Verifying', 'Verified'], install: ['Installing', 'Installed'], fetch: ['Fetching', 'Fetched'],
+    compare: ['Comparing', 'Compared'], review: ['Reviewing', 'Reviewed'], fix: ['Fixing', 'Fixed'],
+    print: ['Printing', 'Printed'], remove: ['Removing', 'Removed'], show: ['Showing', 'Showed'],
+  };
+  const text = description.trim().split(/\r?\n/, 1)[0];
+  if (status !== 'running' && status !== 'done') return `${status === 'error' ? 'Failed' : 'Stopped'}: ${text}`;
+  return text.replace(/^([A-Za-z]+)\b/, (word) => forms[word.toLowerCase()]?.[status === 'running' ? 0 : 1] ?? word);
+}

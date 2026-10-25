@@ -94,14 +94,16 @@ export function groupItems(items: WorkItem[], turn: TurnState, ui: TranscriptUi 
 const standaloneRow = (cell: Cell, turnId: TurnId): Row => ({ ...cell, id: rowId.cell(cell.id), turnId, at: cell.startedAt, kind: 'cell', classification: { ...cell.classification, startsGroup: false } });
 
 export function phrasesOf(cells: Cell[]): GroupPhraseInput {
-  const input: GroupPhraseInput = { mcpServers: [], skills: [], toolsLoaded: 0, editedFiles: [], readFiles: [], searches: [], commands: [], webQueries: [], fetchedHosts: [], other: 0 };
+  const input: GroupPhraseInput = { mcpServers: [], skills: [], toolsLoaded: 0, editedFiles: [], createdFiles: [], readFiles: [], searches: [], commands: [], webQueries: [], fetchedHosts: [], other: 0 };
   for (const cell of cells) {
     if (cell.toolName === 'thinking' || cell.classification.hidden) continue;
     const detail = cell.detail;
     if (detail.kind === 'mcp') input.mcpServers.push(detail.server);
     else if (cell.toolName === 'Skill') input.skills.push(cell.label.replace(/^Loaded (.*) skill$/, '$1'));
     else if (cell.toolName === 'ToolSearch') input.toolsLoaded += Number(/(\d+)/.exec(cell.label)?.[1] ?? 0);
-    else if (detail.kind === 'edit') input.editedFiles.push(detail.filePath);
+    else if (detail.kind === 'edit') {
+      if (cell.status === 'done') (detail.change === 'create' ? input.createdFiles! : input.editedFiles).push(detail.filePath);
+    }
     else if (detail.kind === 'read') input.readFiles.push(...detail.files.map((file) => file.path));
     else if (detail.kind === 'search') input.searches.push(detail.query);
     else if (detail.kind === 'shell') input.commands.push(detail.command);

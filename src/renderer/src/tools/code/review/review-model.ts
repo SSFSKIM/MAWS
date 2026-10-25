@@ -1,7 +1,7 @@
 // Review's pure model (C8c execution document, Interfaces *Tools, slots and the open-file seam* and *Review's data*):
 // the scopes and their default, the `diffTab` ref grammar, C4's multi-file patch split per file in the shape
 // `@git-diff-view/react` takes, the first changed line a hunk opens at, the size caps, and the file lists each scope
-// shows (the git scopes from `git.diff` and `git.status`, Last turn from the receipt and C6's disclosure-independent
+// shows (the git scopes from `git.diff` and `git.status`, Last turn from divider metadata and C6's disclosure-independent
 // activity). No I/O and no React here.
 import type { GitDiffFile, GitStatus } from '@shared/ipc/schema/git';
 import type { CellDetail, Row, TurnActivity, TurnId } from '../../../transcript';
@@ -14,7 +14,7 @@ export interface ReviewParams {
 }
 
 // C6's shapes, derived from its public surface (`transcript/index.ts` exports neither by name).
-export type ChangedFile = Extract<Row, { kind: 'receipt' }>['files'][number];
+export type ChangedFile = NonNullable<Extract<Row, { kind: 'divider' }>['files']>[number];
 export type Hunk = Extract<CellDetail, { kind: 'edit' }>['hunks'][number];
 
 // 2,000 rather than 5,000 (R8: split mode past 500 ms beyond it, and where the library stops highlighting).
@@ -268,12 +268,12 @@ export function gitScopeFiles(input: {
   return rows;
 }
 
-const RECEIPT_KIND: Record<ChangedFile['change'], ReviewFileKind> = { create: 'added', update: 'modified', delete: 'deleted' };
+const CHANGE_KIND: Record<ChangedFile['change'], ReviewFileKind> = { create: 'added', update: 'modified', delete: 'deleted' };
 
-// Last turn: the receipt's files, counts and kinds; each file's hunks from the turn's `edited` activity entries joined
-// on the edit's own `filePath` (as the receipt reads it), one block per edit in their order, since each edit's hunks
+// Last turn: the divider's files, counts and kinds; each file's hunks from the turn's `edited` activity entries joined
+// on the edit's own `filePath`, one block per edit in their order, since each edit's hunks
 // are numbered against the file as that edit found it (amended 2026-09-29, M3 review).
-export function turnScopeFiles(receipt: readonly ChangedFile[], activity: TurnActivity | null): ReviewFile[] {
+export function turnScopeFiles(files: readonly ChangedFile[], activity: TurnActivity | null): ReviewFile[] {
   const edits = new Map<string, string[][]>();
   for (const entry of activity?.files ?? []) {
     if (entry.use !== 'edited' || !entry.edit || entry.edit.hunks.length === 0) continue;
@@ -281,8 +281,8 @@ export function turnScopeFiles(receipt: readonly ChangedFile[], activity: TurnAc
     list.push(entry.edit.hunks.map(hunkText));
     edits.set(entry.edit.filePath, list);
   }
-  return receipt.map((file) => {
-    const kind = RECEIPT_KIND[file.change];
+  return files.map((file) => {
+    const kind = CHANGE_KIND[file.change];
     const blocks = edits.get(file.path) ?? [];
     return {
       path: file.path,
@@ -313,10 +313,10 @@ export function blocksOf(hunks: readonly string[], sizes: readonly number[]): st
 export const viewedSignature = (file: Pick<ReviewFile, 'kind' | 'header'>, hunks: readonly string[] | null): string =>
   hunksSignature(file.kind === 'binary' ? [file.header ?? ''] : (hunks ?? []));
 
-// The receipt row of a turn in a transcript's rows.
-export function receiptOf(rows: readonly Row[], turnId: TurnId): Extract<Row, { kind: 'receipt' }> | null {
-  const row = rows.find((candidate) => candidate.kind === 'receipt' && candidate.turnId === turnId);
-  return row?.kind === 'receipt' ? row : null;
+// The divider carrying a turn's changed-file metadata, whether its work area is folded or open.
+export function dividerOf(rows: readonly Row[], turnId: TurnId): Extract<Row, { kind: 'divider' }> | null {
+  const row = rows.find((candidate) => candidate.kind === 'divider' && candidate.turnId === turnId);
+  return row?.kind === 'divider' ? row : null;
 }
 
 export function totals(files: readonly ReviewFile[]): { files: number; added: number; removed: number } {

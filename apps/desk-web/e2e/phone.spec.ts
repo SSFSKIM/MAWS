@@ -345,7 +345,7 @@ test("@layout a session's channel on the phone is its session view: its working 
   const turn = 'turn:10a91e55-0000-4000-8000-000000000001';
   const record = view.locator(`[data-row-id="owner-record:${turn}"]`);
   await expect(record).toContainText('Working record · 3 tool calls');
-  await expect(view).not.toContainText('Run the phone layout cases in WebKit');
+  await expect(view).not.toContainText('Ran the phone layout cases in WebKit');
   await fitsTheWidth(page);
 
   // One record disclosure unfolds directly to the tool summaries; each call's detail stays one tap away.
@@ -360,7 +360,7 @@ test("@layout a session's channel on the phone is its session view: its working 
   await expect(view.locator(`[data-turn-id="${turn}"] .transcript-group-header`)).toHaveCount(0);
   const lines = view.locator(`[data-turn-id="${turn}"] .transcript-cell-line`);
   await expect(lines).toHaveCount(3);
-  const bash = lines.filter({ hasText: 'Run the phone layout cases in WebKit' });
+  const bash = lines.filter({ hasText: 'Ran the phone layout cases in WebKit' });
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 844 });
     await bash.scrollIntoViewIfNeeded();
@@ -393,7 +393,7 @@ test("@layout a session's channel on the phone is its session view: its working 
   await disclosure.click();
   await expect(disclosure).toHaveAttribute('aria-expanded', 'false');
   await expect(record).toContainText('Working record · 3 tool calls');
-  await expect(view).not.toContainText('Run the phone layout cases in WebKit');
+  await expect(view).not.toContainText('Ran the phone layout cases in WebKit');
 });
 
 test('@layout the running turn streams on the phone: the answer draws as it is written, its folded record working', async ({ page, hub }) => {
@@ -413,7 +413,7 @@ test('@layout the running turn streams on the phone: the answer draws as it is w
   await expect(streaming.last()).toContainText('<message>You chose blue');
   await expect(streaming.last().locator('.owner-message-ink')).toHaveCount(0);
   await expect(view.locator('[data-row-id^="owner-record:"] .transcript-working-dots')).toHaveCount(1);
-  await expect(view).not.toContainText("Write 'blue' to recorded.txt in the current directory");
+  await expect(view).not.toContainText("Wrote 'blue' to recorded.txt in the current directory");
   const answerBlock = recording.steps.find((s) => s.k === 'block-row' && s.body.uuid === uuid)!;
   if (answerBlock.k !== 'block-row') throw new Error('no block-row');
   const lastText = recording.steps.findLastIndex((s) => s.k === 'chunk' && s.turnId === answerBlock.body.turnId && s.step === answerBlock.body.step && s.chunk.index === answerBlock.body.index && s.chunk.kind === 'text');

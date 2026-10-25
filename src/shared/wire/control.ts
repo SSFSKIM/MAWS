@@ -138,7 +138,7 @@ export interface InitializeRequest {
 export interface InterruptRequest { reason?: string; cancel_queued?: boolean }
 export interface SetPermissionModeRequest { mode: string }
 export interface SetModelRequest { model: string | null }
-export interface SetMaxThinkingTokensRequest { max_thinking_tokens: number | null; display?: string | null }
+export interface SetMaxThinkingTokensRequest { max_thinking_tokens: number | null; thinking_display?: string | null }
 export interface ApplyFlagSettingsRequest { settings: Record<string, unknown> }
 export interface RenameSessionRequest { title: string; source?: string }
 export interface GenerateSessionTitleRequest { description: string; persist: boolean }

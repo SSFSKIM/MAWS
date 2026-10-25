@@ -1,14 +1,14 @@
 // The work area's rows (C6 M4): groups with their summary, icon and bounded scroller, standalone cells (single-cell
-// unwrap, denied and stopped cells), receipts over the rewind interface, subagent and agent-message rows, and replayed
+// unwrap, denied and stopped cells), subagent and agent-message rows, and replayed
 // bash rows.
-import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadJournal, loadSyntheticJournal } from '../../../../../../test/support/fixtures';
 import { useTranscriptStore } from '../../../stores/transcript';
 import { journalToEvents } from '../../dev/journal';
 import type { Row, TurnId } from '../../model/rows';
 import { BASH_RESULT, builder, parent, task, tool, uuid } from '../../model/test-events';
-import { NO_ACTIONS, type RewindInterface } from '../context';
+import { NO_ACTIONS } from '../context';
 import { renderRow, rowOf, spyActions, storeWith } from './test-support';
 
 afterEach(cleanup);
@@ -105,158 +105,6 @@ describe('standalone cell row', () => {
     });
     expect(hrefs).toEqual(['#cell:toolu_synth_deny_1', '#cell:toolu_synth_deny_2']);
     expect(hrefs).not.toContain(`#${interrupted.id}`);
-  });
-});
-
-describe('receipt row', () => {
-  function edits(n: number) {
-    const b = builder();
-    b.turn('u1');
-    for (let i = 1; i <= n; i += 1) {
-      b.toolUse(`t${i}`, 'Edit', { file_path: `/p/f${i}.ts`, old_string: 'a', new_string: 'b\nc' });
-      b.result(`t${i}`, 'ok');
-    }
-    b.text('m9', 0, 'Done.');
-    b.end(['u1']);
-    return b.events;
-  }
-
-  const rewind = (overrides: Partial<RewindInterface> = {}): RewindInterface => ({
-    canUndo: vi.fn(() => Promise.resolve({ ok: true, reason: null })),
-    undo: vi.fn(() => Promise.resolve()),
-    reapply: vi.fn(() => Promise.resolve()),
-    ...overrides,
-  });
-
-  it('names three files and offers Show 2 more for five, with Review changes per turn and per file', async () => {
-    const store = await storeWith(edits(5));
-    const receipt = rowOf(store.rows(), 'receipt');
-    const { actions } = renderRow(receipt, { storeKey: store.key });
-    const region = screen.getByRole('region', { name: 'Change receipt' });
-    expect(region.textContent).toContain('5 files changed');
-    const files = () => within(region).getAllByRole('button', { name: /\/p\/f\d\.ts/ });
-    expect(files()).toHaveLength(3);
-    fireEvent.click(screen.getByRole('button', { name: 'Show 2 more' }));
-    expect(files()).toHaveLength(5);
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse files' }));
-    await waitFor(() => expect(files()).toHaveLength(3)); // W8: once the 150 ms close has run
-    fireEvent.click(screen.getByRole('button', { name: /Review changes/ }));
-    expect(actions.reviewChanges).toHaveBeenCalledWith(receipt.turnId);
-    fireEvent.click(files()[1]);
-    expect(actions.reviewChanges).toHaveBeenLastCalledWith(receipt.turnId, '/p/f2.ts');
-  });
-
-  // W4: paths read relative to the session's directory (the engine's cwd first, else the record's); ⌘-click opens the
-  // file itself; after 800 ms of hover a popover above the row shows the turn's hunks for that file, every edit of it.
-  it('reads paths relative to the session directory, the engine cwd first; ⌘-click opens the file, a click opens Review at it', async () => {
-    const store = await storeWith(edits(2));
-    const view = renderRow(rowOf(store.rows(), 'receipt'), { storeKey: store.key, sessionDirectory: '/p' });
-    const region = () => screen.getByRole('region', { name: 'Change receipt' });
-    expect(within(region()).getAllByRole('button', { name: /f\d\.ts/ }).map((b) => b.querySelector('.transcript-receipt-path')!.textContent)).toEqual(['f1.ts', 'f2.ts']);
-    const [first] = within(region()).getAllByRole('button', { name: /f\d\.ts/ });
-    expect(first.dataset.path).toBe('/p/f1.ts'); // the row still names the file as recorded
-    fireEvent.click(first, { metaKey: true });
-    expect(view.actions.openFile).toHaveBeenCalledWith('/p/f1.ts');
-    expect(view.actions.reviewChanges).not.toHaveBeenCalled();
-    fireEvent.click(first);
-    expect(view.actions.reviewChanges).toHaveBeenCalledWith(rowOf(store.rows(), 'receipt').turnId, '/p/f1.ts');
-    view.unmount();
-
-    const b = builder();
-    b.emit('session.started', { cwd: '/elsewhere', engineVersion: null, resumedFrom: null, forked: false });
-    const cwd = await storeWith([...b.events, ...edits(1)]);
-    renderRow(rowOf(cwd.rows(), 'receipt'), { storeKey: cwd.key, sessionDirectory: '/p' });
-    expect(region().querySelector('.transcript-receipt-path')!.textContent).toBe('/p/f1.ts'); // outside the engine's cwd: as recorded
-  });
-
-  it('a file row shows the turn’s hunks for that file in a popover after 800 ms of hover, and a click on it opens Review', async () => {
-    const b = builder();
-    b.turn('u1');
-    const patch = (lines: string[], start: number) => ({ filePath: '/p/a.ts', structuredPatch: [{ oldStart: start, oldLines: 1, newStart: start, newLines: 1, lines }], userModified: false });
-    b.toolUse('t1', 'Edit', { file_path: '/p/a.ts', old_string: 'one', new_string: 'uno' });
-    b.result('t1', 'ok', { structured: patch(['-one', '+uno'], 1) });
-    b.toolUse('t2', 'Edit', { file_path: '/p/b.ts', old_string: 'x', new_string: 'y' });
-    b.result('t2', 'ok');
-    b.toolUse('t3', 'Edit', { file_path: '/p/a.ts', old_string: 'two', new_string: 'dos' });
-    b.result('t3', 'ok', { structured: patch(['-two', '+dos'], 9) });
-    b.text('m9', 0, 'Done.');
-    b.end(['u1']);
-    const store = await storeWith(b.events); // a closed turn, folded: its edit cells are not rows
-    const receipt = rowOf(store.rows(), 'receipt');
-    vi.useFakeTimers();
-    try {
-      const { actions } = renderRow(receipt, { storeKey: store.key });
-      const row = within(screen.getByRole('region', { name: 'Change receipt' })).getAllByRole('button', { name: /a\.ts/ })[0];
-      fireEvent.pointerEnter(row, { pointerType: 'mouse' });
-      act(() => vi.advanceTimersByTime(700));
-      expect(document.querySelector('[data-receipt-hover]')).toBeNull();
-      act(() => vi.advanceTimersByTime(150));
-      const hover = document.querySelector<HTMLElement>('[data-receipt-hover="/p/a.ts"]')!;
-      expect(hover).not.toBeNull();
-      const lines = [...hover.querySelectorAll('.transcript-diff-line')].map((line) => line.textContent);
-      expect(lines).toEqual(['1−one', '1+uno', '9−two', '9+dos']); // both edits of the file, none of b.ts
-      fireEvent.click(hover);
-      expect(actions.reviewChanges).toHaveBeenCalledWith(receipt.turnId, '/p/a.ts');
-      fireEvent.pointerLeave(row, { pointerType: 'mouse' });
-      act(() => vi.advanceTimersByTime(300));
-      expect(document.querySelector('[data-receipt-hover]')).toBeNull();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('Undo calls undo(turnId) after canUndo resolved ok, then reads Changes undone and enables Reapply', async () => {
-    const store = await storeWith(edits(1));
-    const receipt = rowOf(store.rows(), 'receipt');
-    const mock = rewind();
-    renderRow(receipt, { storeKey: store.key, rewind: mock });
-    expect(screen.getByText('Changes applied')).toBeDefined();
-    const undo = screen.getByRole('button', { name: 'Undo' }) as HTMLButtonElement;
-    await waitFor(() => expect(undo.disabled).toBe(false));
-    expect(mock.canUndo).toHaveBeenCalledWith(receipt.turnId);
-    const reapply = screen.getByRole('button', { name: 'Reapply' }) as HTMLButtonElement;
-    expect(reapply.disabled).toBe(true);
-    fireEvent.click(undo);
-    await screen.findByText('Changes undone');
-    expect(mock.undo).toHaveBeenCalledWith(receipt.turnId);
-    expect(reapply.disabled).toBe(false);
-    fireEvent.click(reapply);
-    await screen.findByText('Changes applied');
-    expect(mock.reapply).toHaveBeenCalledWith(receipt.turnId);
-  });
-
-  it('checks canUndo once per receipt, across remounts', async () => {
-    const store = await storeWith(edits(1));
-    const receipt = rowOf(store.rows(), 'receipt');
-    const mock = rewind();
-    const first = renderRow(receipt, { storeKey: store.key, rewind: mock });
-    await waitFor(() => expect((screen.getByRole('button', { name: 'Undo' }) as HTMLButtonElement).disabled).toBe(false));
-    first.unmount();
-    renderRow(receipt, { storeKey: store.key, rewind: mock });
-    expect((screen.getByRole('button', { name: 'Undo' }) as HTMLButtonElement).disabled).toBe(false);
-    expect(mock.canUndo).toHaveBeenCalledTimes(1);
-  });
-
-  it('a canUndo answering not ok disables Undo with the reason as tooltip; a null reapply hides Reapply', async () => {
-    const store = await storeWith(edits(1));
-    const mock = rewind({ canUndo: vi.fn(() => Promise.resolve({ ok: false, reason: 'Files changed on disk since' })), reapply: null });
-    renderRow(rowOf(store.rows(), 'receipt'), { storeKey: store.key, rewind: mock });
-    await waitFor(() => expect(mock.canUndo).toHaveBeenCalled());
-    const undo = await waitFor(() => {
-      const button = screen.getByRole('button', { name: 'Undo' }) as HTMLButtonElement;
-      expect(button.parentElement?.tabIndex).toBe(0); // the refusal wraps the disabled button in a focusable tooltip trigger
-      return button;
-    });
-    expect(undo.disabled).toBe(true);
-    expect(screen.queryByRole('button', { name: 'Reapply' })).toBeNull();
-    fireEvent.focus(undo.parentElement!);
-    expect((await screen.findByRole('tooltip')).textContent).toBe('Files changed on disk since');
-  });
-
-  it('without a rewind interface there is no Undo', async () => {
-    const store = await storeWith(edits(1));
-    renderRow(rowOf(store.rows(), 'receipt'), { storeKey: store.key });
-    expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
   });
 });
 

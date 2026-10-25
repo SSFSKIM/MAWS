@@ -52,6 +52,7 @@
     "denied": 0,
     "endedAt": "2026-10-06T11:04:19.123Z",
     "expanded": true,
+    "files": [],
     "firstDeniedCell": null,
     "id": "divider:turn:f0f8bab2-dd91-4659-842b-beee9d2c28ed",
     "kind": "divider",
@@ -194,7 +195,7 @@
     "expanded": true,
     "id": "cell:toolu_01G9njnN9MJQMtX7SWcRafFE",
     "kind": "cell",
-    "label": "Read /private/tmp/maws-e0a-side-thread-wDcmUb/repo-G4yVD7/probe.txt",
+    "label": "Read probe.txt",
     "paths": [
       "/private/tmp/maws-e0a-side-thread-wDcmUb/repo-G4yVD7/probe.txt"
     ],

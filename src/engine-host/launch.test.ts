@@ -457,3 +457,8 @@ describe('the native ask withdrawn where the maws server is offered (P2-C2)', ()
     expect(allowed(buildLaunch(spec({ permissionMode }), CAPTURED, { ...OPTS, sdkMcpServers: ['other'] }).args)).toEqual([]);
   });
 });
+
+it('disables paid tool summaries even when the login shell enables them', () => {
+  const plan = buildLaunch(spec(), { ...CAPTURED, CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES: 'true' }, OPTS);
+  expect(plan.env.CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES).toBe('false');
+});

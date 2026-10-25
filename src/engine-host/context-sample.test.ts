@@ -33,8 +33,11 @@ describe('context.sample once ready and at each turn end', () => {
 
     const outReads = run.journal.rows.filter((r) => r.direction === 'out' && (r.frame as Held).request?.subtype === 'get_context_usage');
     expect(outReads).toHaveLength(3); // ready, then after each of the two turns
-    const meta = run.journal.rows.filter((r) => r.direction === 'meta').map((r) => r.frame as { event: string });
-    expect(meta.filter((m) => m.event === 'replay_mismatch' || m.event === 'replay_unrecorded_read')).toEqual([]);
+    const meta = run.journal.rows.filter((r) => r.direction === 'meta').map((r) => r.frame as { event: string; subtype?: string });
+    // This older replay predates the startup display-only thinking control; no context read may be unrecorded.
+    expect(meta.filter((m) => m.event === 'replay_mismatch' || m.event === 'replay_unrecorded_read').map(({ event, subtype }) => ({ event, subtype }))).toEqual([
+      { event: 'replay_unrecorded_read', subtype: 'set_max_thinking_tokens' },
+    ]);
 
     const samples = run.events.filter((e) => e.kind === 'context.sample');
     expect(samples).toHaveLength(3);
@@ -65,7 +68,7 @@ describe('context.sample once ready and at each turn end', () => {
       else if (frame.request?.subtype !== 'get_context_usage') transport.kill('SIGTERM');
     }, { session: { log: (line) => void logs.push(line) } });
     const meta = run.journal.rows.filter((r) => r.direction === 'meta').map((r) => r.frame as { event: string; subtype?: string });
-    expect(meta.filter((m) => m.event === 'replay_unrecorded_read').map((m) => m.subtype)).toEqual(['get_context_usage']);
+    expect(meta.filter((m) => m.event === 'replay_unrecorded_read').map((m) => m.subtype)).toEqual(['set_max_thinking_tokens', 'get_context_usage']);
     expect(run.events.filter((e) => e.kind === 'context.sample')).toHaveLength(2); // the two turn ends only
     expect(logs.filter((line) => line.includes('get_context_usage'))).toEqual([]);
   });

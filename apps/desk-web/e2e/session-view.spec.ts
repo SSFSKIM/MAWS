@@ -257,7 +257,7 @@ test('a marked response folds its turn and shows its mark while it streams, befo
   const uuid = answerRow(fm);
   fm.step(fm.recording.steps.findIndex(isAnswerChunk(uuid, fm)) - fm.played); // up to the answer's first chunk
   await expect(view).toContainText('Color→blue');
-  await expect(view).toContainText("Write 'blue' to recorded.txt in the current directory"); // nothing marked yet: the turn draws whole, its Bash call too
+  await expect(view).toContainText("Wrote 'blue' to recorded.txt in the current directory"); // nothing marked yet: the turn draws whole, its Bash call too
   await expect(records(view)).toHaveCount(0);
 
   for (let i = 0; i < 40 && !(await streamingRows(view).allTextContents()).join('').includes(ANSWER); i++) {
@@ -268,7 +268,7 @@ test('a marked response folds its turn and shows its mark while it streams, befo
   await expect(streamingRows(view).last().locator('.owner-message-ink')).toHaveCount(0);
   await expect(records(view)).toHaveCount(1); // an open mark folds independently of its closed-only ink
   await expect(records(view).locator('.transcript-working-dots')).toHaveCount(1);
-  await expect(view).not.toContainText("Write 'blue' to recorded.txt in the current directory");
+  await expect(view).not.toContainText("Wrote 'blue' to recorded.txt in the current directory");
   const named = fm.recording.steps.find((s) => s.k === 'block-row' && s.body.uuid === uuid)!;
   if (named.k !== 'block-row') throw new Error('no block-row');
   const lastText = fm.recording.steps.findLastIndex((s) => s.k === 'chunk' && s.turnId === named.body.turnId && s.step === named.body.step && s.chunk.index === named.body.index && s.chunk.kind === 'text');
@@ -277,7 +277,7 @@ test('a marked response folds its turn and shows its mark while it streams, befo
   await expect(live.locator('.owner-message-ink')).toContainText(ANSWER);
   await expect(live).not.toContainText('<message>');
   await expect(records(view)).toHaveCount(1); // the turn folded into its record while the mark streams
-  await expect(view).not.toContainText("Write 'blue' to recorded.txt in the current directory");
+  await expect(view).not.toContainText("Wrote 'blue' to recorded.txt in the current directory");
   expect(fm.depth.rows.get('main')!.some((row) => row.uuid === uuid)).toBe(false); // and its row is not written yet
 
   fm.playThrough();
