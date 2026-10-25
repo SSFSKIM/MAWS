@@ -430,6 +430,7 @@ for (const grow of [24, 182]) {
     const s = await scene(false, true);
     s.extendDOMEnd(grow); // the grown row overflows the sizer React has not re-rendered yet
     s.resizeRow('last', grow);
+    await act(async () => {}); // the observer's delivery is done
     s.extendDOMEnd(0); // the sizer has committed: the row no longer overflows it
     expect(s.writes.length).toBeGreaterThan(0);
     expect(s.scroller.scrollHeight - s.scroller.clientHeight - s.scroller.scrollTop).toBe(0);
@@ -445,10 +446,73 @@ it('a measured growth after reader input leaves the reader where they are', asyn
   s.writes.length = 0;
   s.extendDOMEnd(182);
   s.resizeRow('last', 182);
+  await act(async () => {});
   s.extendDOMEnd(0);
   expect(s.scroller.scrollTop).toBe(held);
   expect(s.writes).toEqual([]);
   expect(s.handle.current!.following).toBe(false);
+});
+
+// Movement the reader made before its native scroll event (a witnessed key, a scrollbar drag reversed after it
+// resumed following) is read before a measured growth is followed: the growth does not overwrite it.
+for (const key of ['PageUp', 'Home']) {
+  it(`${key} movement before its scroll event is kept through a measured growth of the last row`, async () => {
+    const s = await scene(false, true);
+    act(() => { fireEvent.keyDown(s.scroller, { key }); });
+    s.move(-40, false);
+    const held = s.scroller.scrollTop;
+    s.extendDOMEnd(182);
+    s.resizeRow('last', 182);
+    await act(async () => {});
+    s.extendDOMEnd(0);
+    s.reportContentSize();
+    expect(s.handle.current!.following).toBe(false);
+    expect(s.scroller.scrollTop).toBe(held);
+    expect(s.writes).toEqual([]);
+  });
+}
+
+it('a reversed scrollbar drag before its scroll event is kept through a measured growth of the last row', async () => {
+  const s = await scene(false, true);
+  act(() => { fireEvent.pointerDown(s.scroller, { pointerType: 'mouse', button: 0, pointerId: 1 }); });
+  s.move(-20);
+  s.move(20);
+  expect(s.handle.current!.following).toBe(true);
+  s.move(-40, false);
+  const held = s.scroller.scrollTop;
+  s.writes.length = 0;
+  s.extendDOMEnd(182);
+  s.resizeRow('last', 182);
+  await act(async () => {});
+  s.extendDOMEnd(0);
+  s.reportContentSize();
+  expect(s.handle.current!.following).toBe(false);
+  expect(s.scroller.scrollTop).toBe(held);
+  expect(s.writes).toEqual([]);
+});
+
+// One observer delivery that grows a row above the reader and the overflowing last row is followed once, against the
+// whole delivery's total: the iOS compensation for the row above is not retired early by a partial one.
+it('iOS keeps above-reader compensation when the same delivery grows the last row past the old sizer', async () => {
+  const s = await scene(true);
+  s.reportContentSize();
+  act(() => { fireEvent.touchStart(s.scroller, { touches: [{ identifier: 1, clientY: 100 }] }); });
+  let held = 0;
+  // One delivery, its microtasks, and the drag, all before React re-renders the sizer (the outer act holds the render).
+  await act(async () => {
+    s.extendDOMEnd(182);
+    s.resizeRow('first', 40);
+    s.resizeRow('last', 182);
+    await Promise.resolve();
+    fireEvent.touchMove(s.scroller, { touches: [{ identifier: 1, clientY: 120 }] });
+    s.move(-20);
+    held = s.scroller.scrollTop;
+  });
+  s.extendDOMEnd(0);
+  s.reportContentSize();
+  act(() => { fireEvent.touchEnd(s.scroller, { touches: [] }); });
+  await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
+  expect(s.scroller.scrollTop).toBe(held + 40);
 });
 
 it('a browser clamp during remeasurement is not reader intent, even before the smaller sizer commits', async () => {
