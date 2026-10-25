@@ -5,7 +5,7 @@
 // uninstall or a marketplace removal takes its row out of the list at `plugins.changed`, before `done`, and its words
 // must outlive the row. It listens before it asks so no event that outruns its receipt is lost, follows only the opIds
 // it started, and only while mounted. A rejected invoke is the transport branch: nothing ran.
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { CommandName } from '@shared/ipc/schema';
 import type { PluginsOperationEvent } from '@shared/ipc/schema/plugins';
 import type { RunnerAction } from '@shared/plugins/cli';
@@ -47,76 +47,134 @@ function next(state: PluginOpState, event: PluginsOperationEvent): PluginOpState
   return { phase: 'working', opId: event.opId, line, reloading: event.phase === 'reloading' };
 }
 
-export function usePluginOperations(): PluginOperations {
-  const [entries, setEntries] = useState<ReadonlyMap<string, PluginOperationEntry>>(new Map());
-  const keyOf = useRef(new Map<string, string>()); // opId → key
-  const asking = useRef(0); // invokes whose receipt has not come back
-  const early = useRef<PluginsOperationEvent[]>([]); // events that arrived meanwhile
-  const waiting = useRef(new Map<string, (event: PluginsOperationEvent | null) => void>()); // opId → its run's answer
-  const alive = useRef(true);
+// One set of operations and what follows them. A widget's own (the session's `/plugins`) follows only while mounted: its
+// unmount answers every run still waiting with null and forgets its opIds. A kept one (`usePluginOperations(keep)`: a
+// Customize page's, by its section and directory) outlives the views that show it, since the page unmounts whenever
+// another project is shown: it listens while a run waits or a view shows it, so a run's answer (and an add-then-install's
+// second step) arrives with no view mounted, and its entries are there when the page shows again (scalpel-5#1).
+class OperationBook {
+  entries: ReadonlyMap<string, PluginOperationEntry> = new Map();
+  private readonly keyOf = new Map<string, string>(); // opId → key
+  private asking = 0; // invokes whose receipt has not come back
+  private early: PluginsOperationEvent[] = []; // events that arrived meanwhile
+  private readonly waiting = new Map<string, (event: PluginsOperationEvent | null) => void>(); // opId → its run's answer
+  private readonly subscribers = new Set<() => void>();
+  private off: (() => void) | null = null;
+  private views = 0;
+  private alive = true;
 
-  const apply = useCallback((event: PluginsOperationEvent) => {
-    const key = keyOf.current.get(event.opId);
+  constructor(private readonly kept: boolean) {}
+
+  readonly subscribe = (subscriber: () => void): (() => void) => {
+    this.subscribers.add(subscriber);
+    return () => void this.subscribers.delete(subscriber);
+  };
+
+  private set(update: (prior: ReadonlyMap<string, PluginOperationEntry>) => ReadonlyMap<string, PluginOperationEntry>): void {
+    const next = update(this.entries);
+    if (next === this.entries) return;
+    this.entries = next;
+    this.subscribers.forEach((subscriber) => subscriber());
+  }
+
+  private listen(): void {
+    this.off ??= ipc.on('plugins.operation', (event) => {
+      if (this.keyOf.has(event.opId)) this.apply(event);
+      else if (this.asking > 0) this.early.push(event);
+    });
+  }
+
+  private quiet(): void {
+    if (!this.kept || this.views > 0 || this.asking > 0 || this.waiting.size > 0) return;
+    this.off?.();
+    this.off = null;
+  }
+
+  // A view shows the book; the returned function is its leaving.
+  show(): () => void {
+    this.views += 1;
+    this.alive = true;
+    this.listen();
+    return () => {
+      this.views -= 1;
+      if (this.kept) return this.quiet();
+      this.off?.();
+      this.off = null;
+      this.alive = false;
+      this.waiting.forEach((resolve) => resolve(null));
+      this.waiting.clear();
+      this.keyOf.clear();
+    };
+  }
+
+  forget(): void {
+    this.off?.();
+    this.off = null;
+    this.waiting.clear();
+    this.keyOf.clear();
+  }
+
+  private apply(event: PluginsOperationEvent): void {
+    const key = this.keyOf.get(event.opId);
     if (key === undefined) return;
-    setEntries((prior) => {
+    this.set((prior) => {
       const entry = prior.get(key);
       if (!entry || entry.opId !== event.opId) return prior; // a newer operation took the key
       return new Map(prior).set(key, { ...entry, state: next(entry.state, event) });
     });
     if (event.phase === 'done') {
-      waiting.current.get(event.opId)?.(event);
-      waiting.current.delete(event.opId);
-      keyOf.current.delete(event.opId);
+      this.waiting.get(event.opId)?.(event);
+      this.waiting.delete(event.opId);
+      this.keyOf.delete(event.opId);
+      this.quiet();
     }
-  }, []);
+  }
 
-  useEffect(() => {
-    alive.current = true;
-    const keys = keyOf.current; // both maps live as long as the hook; only their entries change
-    const waits = waiting.current;
-    const off = ipc.on('plugins.operation', (event) => {
-      if (keys.has(event.opId)) apply(event);
-      else if (asking.current > 0) early.current.push(event);
-    });
-    return () => {
-      off();
-      alive.current = false;
-      waits.forEach((resolve) => resolve(null));
-      waits.clear();
-      keys.clear();
-    };
-  }, [apply]);
+  readonly run = async (key: string, request: PluginsRequest, cwd: string, binary: string): Promise<PluginsOperationEvent | null> => {
+    this.set((prior) => new Map(prior).set(key, { request, opId: null, state: { phase: 'working', opId: null, line: null, reloading: false } }));
+    if (this.kept) this.listen(); // a kept book listens before it asks, shown or not
+    this.asking += 1;
+    const result = await ipc.invoke(COMMAND_OF[request.action], { cwd, binary, ...request.input } as never);
+    this.asking -= 1;
+    const held = this.early;
+    if (this.asking === 0) this.early = [];
+    if (!this.alive) return null;
+    if (!result.ok) {
+      this.set((prior) => new Map(prior).set(key, { request, opId: null, state: { phase: 'unsent', error: transportWords(result.error) } }));
+      this.quiet();
+      return null;
+    }
+    const { opId } = result.value as { opId: string };
+    this.keyOf.set(opId, key);
+    const completed = new Promise<PluginsOperationEvent | null>((resolve) => this.waiting.set(opId, resolve));
+    this.set((prior) => new Map(prior).set(key, { request, opId, state: { phase: 'working', opId, line: null, reloading: false } }));
+    held.filter((event) => event.opId === opId).forEach((event) => this.apply(event));
+    return completed;
+  };
 
-  const run = useCallback(
-    async (key: string, request: PluginsRequest, cwd: string, binary: string) => {
-      setEntries((prior) => new Map(prior).set(key, { request, opId: null, state: { phase: 'working', opId: null, line: null, reloading: false } }));
-      asking.current += 1;
-      const result = await ipc.invoke(COMMAND_OF[request.action], { cwd, binary, ...request.input } as never);
-      asking.current -= 1;
-      const held = early.current;
-      if (asking.current === 0) early.current = [];
-      if (!alive.current) return null;
-      if (!result.ok) {
-        setEntries((prior) => new Map(prior).set(key, { request, opId: null, state: { phase: 'unsent', error: transportWords(result.error) } }));
-        return null;
-      }
-      const { opId } = result.value as { opId: string };
-      keyOf.current.set(opId, key);
-      const completed = new Promise<PluginsOperationEvent | null>((resolve) => waiting.current.set(opId, resolve));
-      setEntries((prior) => new Map(prior).set(key, { request, opId, state: { phase: 'working', opId, line: null, reloading: false } }));
-      held.filter((event) => event.opId === opId).forEach(apply);
-      return completed;
-    },
-    [apply],
-  );
+  readonly cancel = (key: string): void => {
+    const opId = this.entries.get(key)?.opId;
+    if (opId) void ipc.invoke('plugins.cancel', { opId });
+  };
+}
 
-  const cancel = useCallback(
-    (key: string) => {
-      const opId = entries.get(key)?.opId;
-      if (opId) void ipc.invoke('plugins.cancel', { opId });
-    },
-    [entries],
-  );
+const KEPT = new Map<string, OperationBook>();
+const keptBook = (keep: string): OperationBook => {
+  let book = KEPT.get(keep);
+  if (!book) KEPT.set(keep, (book = new OperationBook(true)));
+  return book;
+};
+/** Tests: forget every kept book (a fresh window). */
+export function forgetKeptOperations(): void {
+  KEPT.forEach((book) => book.forget());
+  KEPT.clear();
+}
 
-  return { entries, run, cancel };
+// The operations a view shows: its own (`keep` undefined), or the kept book named `keep`.
+export function usePluginOperations(keep?: string): PluginOperations {
+  const [own] = useState(() => new OperationBook(false));
+  const book = keep === undefined ? own : keptBook(keep);
+  useEffect(() => book.show(), [book]);
+  const entries = useSyncExternalStore(book.subscribe, () => book.entries);
+  return useMemo(() => ({ entries, run: book.run, cancel: book.cancel }), [entries, book]);
 }

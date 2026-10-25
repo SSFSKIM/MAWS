@@ -19,6 +19,7 @@ import userEvent from '@testing-library/user-event';
 import { SkillsWidget } from '../widgets/SkillsWidget';
 import { resetCatalogStore } from '../stores/catalog';
 import { useReadLoads } from '../widgets/read';
+import { forgetKeptOperations } from '../widgets/plugins/operation';
 
 const P = 'project-one' as ProjectId;
 const Q = 'project-two' as ProjectId;
@@ -36,6 +37,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  forgetKeptOperations(); // Customize's pages keep their operations past their views; each test is a fresh window
   resetCatalogStore();
   useReadLoads.setState({ loads: new Map() });
   useSessions.setState({ projects: new Map(), records: new Map(), engine: new Map() });

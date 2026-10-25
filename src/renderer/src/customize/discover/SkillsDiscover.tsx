@@ -19,7 +19,7 @@ export function SkillsManage({ cwd, children }: { cwd: string | null; children?:
   const readySessions = useSessions((s) => [...s.engine.values()].filter((status) => status.process === 'ready').length);
   const resolveEngine = useCallback(async () => resolutionOf(await reread()), [reread]);
   const directory = cwd ?? env.data?.configHome ?? '';
-  const { manage, sheet } = useManageState({ cwd: directory, readySessions }, null, resolveEngine);
+  const { manage, sheet } = useManageState({ cwd: directory, readySessions, keep: `customize:skills:${cwd ?? 'user'}` }, null, resolveEngine); // the page's own: they outlive its views
   return (
     <ManageProvider value={manage}>
       {children}

@@ -37,8 +37,10 @@ type Asking = { key: string; request: PluginsRequest; declared: Declared | null;
 // The widget's management state and the sheet to draw beside its frame. `resolveEngine` reads `plugins.env` again: every
 // opening of a sheet asks it and the sheet names no binary and confirms nothing until it answered, so a binary chosen in
 // Settings › Engine since the widget opened is the one the sheet shows and the host runs (E8 whole-branch review).
-export function useManageState(base: { cwd: string; readySessions: number }, reloadMods: (() => void) | null, resolveEngine: () => Promise<EngineResolution>): { manage: Manage; sheet: ReactNode } {
-  const ops = usePluginOperations();
+// `keep` names a Customize page's operations (its section and directory), which outlive the page's views: choosing another
+// project unmounts the page, and an add-then-install asked there still installs once the add succeeds (scalpel-5#1).
+export function useManageState(base: { cwd: string; readySessions: number; keep?: string }, reloadMods: (() => void) | null, resolveEngine: () => Promise<EngineResolution>): { manage: Manage; sheet: ReactNode } {
+  const ops = usePluginOperations(base.keep);
   const [asking, setAsking] = useState<Asking | null>(null);
   const openings = useRef(0);
   const open = useCallback(

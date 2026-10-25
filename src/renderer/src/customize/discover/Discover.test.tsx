@@ -17,6 +17,11 @@ import { SkillsDiscover, SkillsManage } from './SkillsDiscover';
 import { connectCatalogEvents } from './read';
 import { NO_CHOICES, useDiscoverStore } from './store';
 import { item } from './test-items';
+import type { ProjectId } from '@shared/graph/ids';
+import { project as projectRecord } from '../../../../../test/support/builders';
+import { useSessions } from '../../stores/sessions';
+import { forgetKeptOperations } from '../../widgets/plugins/operation';
+import { useCustomizeProject } from '../open';
 
 const HOME = '/tmp/discover/config';
 const BINARY = '/opt/claude/2.1.309';
@@ -161,6 +166,9 @@ afterEach(() => {
   disconnect = null;
   useLibraryStore.setState(useLibraryStore.getInitialState());
   useDiscoverStore.setState({ plugins: NO_CHOICES, skills: NO_CHOICES });
+  useSessions.setState({ projects: new Map() });
+  useCustomizeProject.setState({ projectId: undefined }, true);
+  forgetKeptOperations();
   delete (window as { maws?: MawsBridge }).maws;
 });
 
@@ -397,6 +405,41 @@ describe('Customize › Plugins › Discover', () => {
     expect(popover.querySelector('[data-source="directory:plugins"]')!.textContent).toContain('Anthropic’s directory: plugins unavailable');
     expect(popover.querySelector('[data-source="plugin-details"]')!.textContent).toContain('2 records could not be read');
   });
+});
+
+// scalpel-5#1: Customize keys each page's library by its directory, so choosing another project unmounts the page an
+// add-then-install was asked on; the operation still finishes (the install after the add) and its line is there on return.
+describe('Customize: an add-then-install outlives a change of the page’s project', () => {
+  const A = 'project-a' as ProjectId;
+  const B = 'project-b' as ProjectId;
+  for (const [section, panel, cardOf, name] of [
+    ['plugins', 'Plugins', hooked, 'hooked'],
+    ['skills', 'Skills', skillsOnly, 'skills-only'],
+  ] as const) {
+    it(`${panel}: the install runs once the add succeeds, with the other project shown, and its line shows on return`, async () => {
+      useSessions.setState({ projects: new Map([[A, projectRecord(A, 0, { directory: PROJECT })], [B, projectRecord(B, 1, { directory: '/tmp/discover/project-b' })]]) });
+      useCustomizeProject.setState({ projectId: A }, true);
+      holding.add('marketplaces.add');
+      render(
+        <QueryClientProvider client={client()}>
+          <CustomizeView section={section} />
+        </QueryClientProvider>,
+      );
+      const tab = () => screen.getByRole('tabpanel', { name: panel });
+      const shelfCard = () => found(`[data-discover="${section}"] [data-shelf] [data-catalog-card="${CSS.escape(cardOf.id)}"]`);
+      fireEvent.click(within(tab()).getByRole('radio', { name: 'Discover' }));
+      fireEvent.click(within(await shelfCard()).getByRole('button', { name: `Add ${name}` }));
+      await waitFor(() => expect(sheet().querySelector('[data-plugins-argv]')).toBeTruthy());
+      fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
+      await waitFor(() => expect(held.has('marketplaces.add')).toBe(true)); // the add runs
+      fireEvent.change(screen.getByRole('combobox', { name: 'Project' }), { target: { value: B } }); // the page leaves
+      act(() => held.get('marketplaces.add')!());
+      await waitFor(() => expect(invoked('plugins.install')).toEqual([expect.objectContaining({ cwd: PROJECT, plugin: `${name}@maws-discover-test` })]));
+      fireEvent.change(screen.getByRole('combobox', { name: 'Project' }), { target: { value: A } });
+      fireEvent.click(within(tab()).getByRole('radio', { name: 'Discover' }));
+      await waitFor(async () => expect(within(await shelfCard()).getByRole('status').textContent).toBe('done'));
+    });
+  }
 });
 
 describe('Customize › Skills › Discover', () => {
