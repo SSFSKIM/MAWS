@@ -557,6 +557,8 @@ Commands (`src/shared/ipc/names/catalog.ts`); every one takes the Customize page
 - `catalog.item({id, cwd})` returns `CatalogItem`.
 - `catalog.refresh()` returns `CatalogSourceStatus[]`.
 - `catalog.sources()` returns `CatalogSourceStatus[]`.
+- `catalog.icon({url})` returns `{dataUrl: string | null}`: a directory icon fetched by main under the `catalog` rule's icon routes, as a `data:image/(png|svg+xml);base64` URL, or null (a monogram) (M3).
+- `catalog.home`'s answer also carries `categories: {value, title, total}[]`, every category value in the tab, for the Category filter (M3).
 
 Event: `catalog.changed`.
 
@@ -666,6 +668,10 @@ Test seams (M1):
 - Decision: one discovery surface, following the owner's ruling that Discover is the place to find new things (architect, 2026-10-25). The session `/plugins` modal's Browse becomes "Open Discover", which opens Customize → Plugins → Discover for the session's `cwd`; the modal keeps its installed view. Icons (Decision Log 7(b)) are approved on two routes as M3 measured them: `https://api.anthropic.com` `^/api/directory/plugin-icons/[0-9a-f]{64}/256\.png$`, no query, `image/png`, 512 KiB; `https://storage.googleapis.com` `^/media-assets-299d7136-cb52-d546-ee02-34bc1307c35f/mcp-directory/icons/[A-Za-z0-9._-]{1,100}\.(?:png|svg)$`, no query, `image/png` and `image/svg+xml`, 512 KiB. An icon renders only as `<img src="data:…">`, never inline SVG, `innerHTML` or `<object>`, so an SVG's scripts and external references neither run nor load; a test pins it with an SVG carrying a script and an external href.
   Rationale: two discovery surfaces with different data would contradict the ruling; an image element is the one SVG context that runs nothing.
   Date/Author: 2026-10-25, the architect, recorded by the executing session.
+
+- Decision: M3's decisions (2026-10-25). Browse is gone from the plugins library everywhere (Decision Log 10); its view, code and tests are retired and the library's tab value is `discover`. Contract additions: `catalog.icon` and `catalog.home`'s `categories` (Interfaces). Icon cache: content-addressed plugin icons are kept indefinitely, bucket icons refresh after 24 h and keep their copy on failure, a failure is retried after 5 minutes; in the renderer misses stay fresh 5 minutes and hits 24 h, and Refresh asks again; only a `data:image/(png|svg+xml);base64` source renders, else a monogram. The e2e icon fixture is a synthetic PNG named by its URL's sha256 (Anthropic's asset is not republished). Every marketplace add carries `--scope`, user by default, the modal's included. A two-step + runs the add and the install under one operation key, the install only after a successful add; a failed install says the marketplace stays added and offers Remove marketplace, on every entry point including Featured. "Listed by <vendor>" names the item's publisher. A Skills card installed here opens Skills → My items searched to the plugin. `catalog.changed` is connected once for the window's life; Skills' operations are owned above its two views and survive view and section switches. An added marketplace plugin's description comes from the engine's listing, else its `plugin.json`, else the manifest entry. A result whose item has left the catalog stays at Discover's head. The e2e scratch gains `omitSources` for failing sources; the e2e half of acceptance 12 is M5's, M3 adds the source-level guard.
+  Rationale: the M3 task review (three Important findings on view lifetime and feedback, all fixed) and the executor's decisions.
+  Date/Author: 2026-10-25, the executing session.
 
 ## Outcomes & Retrospective
 
