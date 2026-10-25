@@ -8,7 +8,7 @@ import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
 const fake = vi.hoisted(() => {
   const listeners = new Map<string, ((...args: unknown[]) => void)[]>();
   const windows: object[] = [];
-  const hosts = { start: vi.fn(async () => {}), stop: vi.fn(), dispatch: vi.fn(), onState: vi.fn(() => () => {}) /* E3: the dataset holds follow the host's state */ };
+  const hosts = { start: vi.fn(async () => {}), stop: vi.fn(), dispatch: vi.fn(), onState: vi.fn(() => () => {}) /* E3: the dataset holds follow the host's state */, onEvent: vi.fn(() => () => {}) /* P4-AGG M2: the catalog hears plugins.changed */ };
   const appPath = `/tmp/maws-lifecycle-test-app-${process.pid}`;
   const app = {
     on(event: string, listener: (...args: unknown[]) => void) {
@@ -19,6 +19,7 @@ const fake = vi.hoisted(() => {
     requestSingleInstanceLock: () => true,
     hasSingleInstanceLock: () => true,
     getPath: () => '/tmp/maws-lifecycle-test',
+    getVersion: () => '0.0.0-test', // P4-AGG M2: the catalog's user agent
     getAppPath: () => appPath, // E11 F2b: where the development build of main is read from (`out/main/index.js`)
     isPackaged: false,
     setPath: vi.fn(),

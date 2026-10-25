@@ -69,7 +69,7 @@ describe('the plugin CLI stub', () => {
       ['e8-probe@e8-scratch', './plugins/e8-probe', null],
       ['frontend-design@claude-plugins-official', './plugins/frontend-design', 1_290_640],
       ['quiet@claude-plugins-official', './plugins/quiet', null],
-      ['x@third', { kind: 'url', url: 'https://example.com/x.git', repo: null, path: null, ref: null }, null],
+      ['x@third', { kind: 'url', url: 'https://example.com/x.git', repo: null, path: null, ref: null, sha: null }, null],
     ]);
   });
 
@@ -170,7 +170,7 @@ describe('the plugin CLI stub', () => {
       ['acme-only@anthropic-plugin-directory', null],
       ['pr-review@claude-plugins-official', 210_500],
     ]); // supabase is installed somewhere: both its id and its directory twin are left out
-    expect(offered[0].source).toEqual({ kind: 'git-subdir', url: 'https://github.com/anthropics/claude-plugins-official.git', repo: null, path: 'plugins/pr-review', ref: null });
+    expect(offered[0].source).toEqual({ kind: 'git-subdir', url: 'https://github.com/anthropics/claude-plugins-official.git', repo: null, path: 'plugins/pr-review', ref: null, sha: null }); // P4-AGG M2: the host keeps the route's sha beside its ref
     const again = run(['plugin', 'install', 'supabase@claude-plugins-official', '--scope', 'project', '--json'], state);
     expect(again.code).toBe(0);
     expect(again.state.installed.filter((p) => p.id === 'supabase@claude-plugins-official').map((p) => [p.scope, p.projectPath])).toEqual([
