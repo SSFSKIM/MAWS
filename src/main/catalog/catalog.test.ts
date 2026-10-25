@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { CatalogItemSchema, type CatalogItem } from '@shared/ipc/schema/catalog';
 import { PROJECT_A, PROJECT_B, recordedEngine, recordedNetwork, recordedSources, testSourceData } from '../../../test/support/catalog-inputs';
 import { buildCatalog } from './join';
-import { connectorName, type EngineView } from './normalize';
+import { connectorName, knownFromEntry, type EngineView } from './normalize';
 import { categoryTitle, homeOf, queryOf } from './query';
 import { networkData, parseSource, TAXONOMY_AXES } from './records';
 import { axisCoverage } from './summary';
@@ -345,5 +345,53 @@ describe('a connector’s route', () => {
 describe('the recorded sources parse whole', () => {
   it('drops and counts no recorded record', () => {
     for (const [key, source] of recordedSources()) expect(source.dropped, key).toBe(0);
+  });
+});
+
+// The branch review panel's findings on the catalog (panel-discover.json: scalpel-1#1 to #4).
+describe('what a card claims, from the route it installs', () => {
+  const COMPONENTS = { mcpServers: [], mcpBundles: 0, agents: [], hooks: [], hookModules: 0, monitors: [], lspServers: [], commands: [], skills: [{ name: 'frontend-design', description: null }] };
+  const clone = (name: string, locator: string) => ({ name, source: 'github', locator, ref: null, installLocation: `/scratch-root/config/plugins/marketplaces/${name}` });
+
+  it('keeps the hooks and the runs-code warning the selected clone shows, whatever the directory record says (scalpel-1#1)', async () => {
+    const engine = await recordedEngine(PROJECT_A);
+    const read = { state: 'read' as const, owner: 'Anthropic', plugins: [{ name: 'frontend-design', author: null, description: null, source: './plugins/frontend-design', components: { ...COMPONENTS, hooks: [{ event: 'SessionStart', matcher: null }] }, partial: false, problems: [] }] };
+    const items = await catalog({ engine: { ...engine, marketplaces: [...engine.marketplaces!, clone('claude-plugins-official', 'anthropics/claude-plugins-official')], manifests: new Map([...engine.manifests, ['claude-plugins-official', read]]) } });
+    const design = byId(items, OFFICIAL('plugins/frontend-design'));
+    expect(design.install).toMatchObject({ marketplaceName: 'claude-plugins-official', present: true });
+    expect(design).toMatchObject({ runsOnYourComputer: true, components: { hooks: true }, reviewTier: 'anthropic' }); // the record still gives the tier
+  });
+
+  it('gives a seed’s ownership and shelf only to the seed’s own repository (scalpel-1#2)', async () => {
+    const engine = await recordedEngine(PROJECT_A);
+    const read = { state: 'read' as const, owner: 'Acme', plugins: [{ name: 'unrelated', author: null, description: null, source: './plugins/unrelated', components: COMPONENTS, partial: false, problems: [] }] };
+    const items = await catalog({ engine: { ...engine, marketplaces: [...engine.marketplaces!, clone('k12-teacher-skills', 'acme/unrelated')], manifests: new Map([...engine.manifests, ['k12-teacher-skills', read]]) } });
+    const unrelated = byId(items, 'github.com/acme/unrelated#plugins/unrelated');
+    expect(unrelated).toMatchObject({ ownership: 'added', publisher: 'Acme', install: { marketplaceName: 'k12-teacher-skills', present: true } });
+    const ids = (source: string) => queryOf(items, { tab: 'plugins', cwd: null, source, limit: 200 }, 'r').items.map((i) => i.id);
+    expect(ids('added')).toContain(unrelated.id);
+    expect(ids('seed:k12-teacher-skills')).not.toContain(unrelated.id);
+  });
+
+  it('counts array-valued MCP declarations before saying a strict:false entry runs no code (scalpel-1#3)', () => {
+    const entry = (mcpServers: unknown) => ({ name: 'e', description: null, author: null, source: './', strict: false, declared: { skills: undefined, mcpServers, hooks: undefined, commands: undefined, agents: undefined }, homepage: null });
+    expect(knownFromEntry(entry([{ local: { command: 'node' } }, { remote: { type: 'http', url: 'https://x' } }]))).toEqual({ components: expect.objectContaining({ mcpServers: [{ name: 'local', transport: 'stdio' }, { name: 'remote', transport: 'http' }] }), runs: true });
+    expect(knownFromEntry(entry(['./mcp.json']))?.runs).toBe('unknown'); // a configuration file the entry names: unread
+    expect(knownFromEntry(entry([{ remote: { type: 'http', url: 'https://x' } }]))?.runs).toBe(false);
+  });
+
+  it('never names the marketplace as publisher of other publishers’ code, however its source is written (scalpel-1#4)', () => {
+    const network = recordedNetwork();
+    const official = network.seeds.get('seed:claude-plugins-official')!;
+    const vendor = (name: string, source: unknown) => ({ name, description: null, author: null, source, strict: true, declared: { skills: undefined, mcpServers: undefined, hooks: undefined, commands: undefined, agents: undefined }, homepage: null });
+    official.entries.records.push(
+      vendor('vendor-object', { kind: 'github', url: null, repo: 'anthropics/claude-plugins-official', path: 'external_plugins/vendor-object', ref: null, sha: null }) as never,
+      vendor('vendor-dotted', './plugins/../external_plugins/vendor-dotted') as never,
+      vendor('own-object', { kind: 'github', url: null, repo: 'anthropics/claude-plugins-official', path: 'plugins/own-object', ref: null, sha: null }) as never,
+    );
+    const items = buildCatalog({ network, engine: null, tests: [] });
+    expect(byId(items, OFFICIAL('external_plugins/vendor-object')).publisher).toBeNull();
+    expect(byId(items, OFFICIAL('external_plugins/vendor-dotted')).publisher).toBeNull();
+    expect(byId(items, OFFICIAL('plugins/own-object')).publisher).toBe('Anthropic');
   });
 });

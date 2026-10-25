@@ -13,6 +13,7 @@
 //   restarts from the first page and says so.
 import type { CatalogChip, CatalogHome, CatalogItem, CatalogPage, CatalogQueryInput, CatalogShelf, CatalogSort, CatalogTab } from '@shared/ipc/schema/catalog';
 import { CATALOG_PAGE_SIZE } from '@shared/ipc/schema/catalog';
+import { ownershipOfRoute } from './join';
 import { COMMUNITY, ownershipOf, SEEDS } from './sources';
 
 const SHELF_ITEMS = 12; // a shelf's row: as many cards as fit, the renderer decides; See all has the rest
@@ -27,12 +28,14 @@ export function inTab(item: CatalogItem, tab: CatalogTab): boolean {
 export const chipOf = (item: CatalogItem): CatalogChip => item.reviewTier ?? item.ownership;
 const isCommunity = (item: CatalogItem) => chipOf(item) === 'community';
 const marketplacesOf = (item: CatalogItem): string[] => (item.install.kind === 'plugin' ? [item.install.marketplaceName, ...item.alsoListedBy] : []);
+// A route's ownership as the build verified it (a seed's name from another repository is `added`); by name otherwise.
+const ownershipIn = (item: CatalogItem, name: string) => ownershipOfRoute(item, name) ?? ownershipOf(name);
 
 /** Whether an item belongs to a source filter: a seed's source key, or `added` (a marketplace the person added). */
 export function inSource(item: CatalogItem, source: string): boolean {
-  if (source === 'added') return marketplacesOf(item).some((name) => ownershipOf(name) === 'added');
+  if (source === 'added') return marketplacesOf(item).some((name) => ownershipIn(item, name) === 'added');
   const seed = SEEDS.find((s) => s.key === source);
-  return seed !== undefined && marketplacesOf(item).includes(seed.marketplaceName);
+  return seed !== undefined && marketplacesOf(item).some((name) => name === seed.marketplaceName && ownershipIn(item, name) !== 'added');
 }
 
 // -- order ---------------------------------------------------------------------------------------------------------
@@ -88,7 +91,7 @@ export function categoryTitle(value: string): string {
 function featuredOf(items: readonly CatalogItem[], tab: CatalogTab): CatalogItem | null {
   const candidates = items.filter((item) => item.installed !== 'here' && item.scanBlocked === null);
   if (tab === 'connectors') return shelfOrder(candidates.filter((item) => item.rank !== null))[0] ?? null;
-  return shelfOrder(candidates.filter((item) => item.installs !== null && item.install.kind === 'plugin' && marketplacesOf(item).some((name) => ownershipOf(name) === 'anthropic')))[0] ?? null;
+  return shelfOrder(candidates.filter((item) => item.installs !== null && item.install.kind === 'plugin' && marketplacesOf(item).some((name) => ownershipIn(item, name) === 'anthropic')))[0] ?? null;
 }
 
 export function homeOf(catalog: readonly CatalogItem[], tab: CatalogTab): CatalogHome {

@@ -16,11 +16,11 @@
 //   manifest entry, each in route order.
 // - Installed state is the cwd's: `here` when any route is installed in a scope that applies here, `elsewhere` when only
 //   in another project.
-import type { CatalogItem } from '@shared/ipc/schema/catalog';
+import type { CatalogItem, Ownership } from '@shared/ipc/schema/catalog';
 import { repositoryLocation } from '@shared/plugins/source-key';
 import { connectorRoute, directoryEntryName, identityOf, knownFromDetail, knownFromDirectory, pluginListings, type EngineView, type EntryListing, type Known, type TestSourceData } from './normalize';
 import type { DirectoryPlugin, NetworkData, PluginDetail } from './records';
-import { DIRECTORY_MARKETPLACE, OFFICIAL, ownershipOf } from './sources';
+import { DIRECTORY_MARKETPLACE, OFFICIAL } from './sources';
 
 export interface CatalogInput {
   network: NetworkData;
@@ -61,7 +61,9 @@ function knownOf(identity: string, chosen: EntryListing | null, routes: readonly
   const fromRecord = record ? knownFromDirectory(record.components) : null;
   if (chosen === null) return fromRecord;
   if (chosen.route.marketplaceName === DIRECTORY_MARKETPLACE) return fromRecord ?? chosen.known;
-  if (chosen.knownBy === 'entry') return chosen.known;
+  // the chosen route's own revision, read from the clone the engine holds (or the entry's own declaration): what it
+  // installs, hooks and running code included; the directory's record of another revision never overrides it
+  if (chosen.knownBy === 'entry' || chosen.knownBy === 'host') return chosen.known;
   const same = routes.filter((l) => sameBundle(l, chosen));
   const officialDetail = same.some((l) => l.route.marketplaceName === OFFICIAL) && detail?.components ? knownFromDetail(detail.components) : null;
   return (
@@ -71,6 +73,11 @@ function knownOf(identity: string, chosen: EntryListing | null, routes: readonly
     first(same.filter((l) => l.knownBy === 'entry').map((l) => l.known))
   );
 }
+
+// Each built item's routes' ownership by marketplace name (a seed's name from another repository is `added`), for the
+// query's source filters and Featured, which see only names on the item (scalpel-1#2).
+const routeOwnership = new WeakMap<CatalogItem, ReadonlyMap<string, Ownership>>();
+export const ownershipOfRoute = (item: CatalogItem, marketplaceName: string): Ownership | null => routeOwnership.get(item)?.get(marketplaceName) ?? null;
 
 function pluginItem(identity: string, listed: readonly EntryListing[], records: readonly DirectoryPlugin[], input: CatalogInput): CatalogItem {
   const { network, engine } = input;
@@ -84,14 +91,14 @@ function pluginItem(identity: string, listed: readonly EntryListing[], records: 
   const detail = officialRoute ? (network.details?.get(`${officialRoute.route.pluginName}@${OFFICIAL}`) ?? null) : null;
   const known = knownOf(identity, chosen, routes, record, detail);
   const name = record?.name ?? chosen?.entryName ?? identity;
-  return {
+  const item: CatalogItem = {
     id: identity,
     kind: 'plugin',
     name,
     installName: chosen && chosen.route.pluginName !== name ? chosen.route.pluginName : null,
     description: record?.description ?? first(routes.map((l) => l.description)),
     publisher: record?.publisher ?? first(routes.map((l) => l.author)) ?? first(routes.map((l) => l.owner)),
-    ownership: chosen ? ownershipOf(chosen.route.marketplaceName) : 'anthropic',
+    ownership: chosen ? chosen.route.ownership : 'anthropic',
     reviewTier: record?.tier ?? null,
     scanBlocked: record?.scanBlocked ?? null,
     categories: record?.taxonomy.object_acted_on ?? [],
@@ -108,6 +115,8 @@ function pluginItem(identity: string, listed: readonly EntryListing[], records: 
     sources: distinct([...(record ? ['directory:plugins'] : []), ...(detail ? ['plugin-details'] : []), ...ordered.map((l) => l.source)]),
     installed: installedState(new Set(routes.map(routeId)), engine),
   };
+  routeOwnership.set(item, new Map(routes.map((l) => [l.route.marketplaceName, l.route.ownership])));
+  return item;
 }
 
 /** The catalog for one cwd: every plugin and connector, joined. */

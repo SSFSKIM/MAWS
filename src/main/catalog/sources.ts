@@ -54,9 +54,11 @@ export function ownershipOf(marketplaceName: string): Ownership {
 
 // Route precedence (Design, "One item per thing"): routes whose marketplace the engine already has first, so + never
 // adds a marketplace it does not need; within each group claude-plugins-official, the other seeds in table order, the
-// engine's Anthropic Directory, claude-community, then a marketplace the person added. Lower ranks first.
-export function routeRank(marketplaceName: string, present: boolean): number {
+// engine's Anthropic Directory, claude-community, then a marketplace the person added. Lower ranks first. `known` false:
+// the name is a seed's but the repository is not (normalize.ts verifies it).
+export function routeRank(marketplaceName: string, present: boolean, known = true): number {
   const group = present ? 0 : 1_000;
+  if (!known) return group + 300; // a marketplace named like a seed or the directory but not it: one the person added
   if (marketplaceName === OFFICIAL) return group;
   if (marketplaceName === DIRECTORY_MARKETPLACE) return group + 100;
   if (marketplaceName === COMMUNITY) return group + 200;
