@@ -23,7 +23,7 @@ Discover is for the person. Agents get no catalog, no discovery tool and no sugg
 - [x] (2026-10-25 02:30Z) Spec reviews (design, 13 findings; buildability, 7 findings) and the architect's rulings on them folded in (Decision Log, second entry). The facts section was re-measured against the live directory, the 2.1.309 engine and the e2e harness.
 - [x] (2026-10-25 04:10Z) Buildability review, round 2 (five gaps on 259658d64), folded in (Decision Log, third entry): the test-source seam, exact Keychain custody, engine provisioning, the added-marketplace metadata read, the terminal fallback's launch.
 - [x] (2026-10-25 02:59Z) M1 — the real-engine test harness and the catalog fixtures (0df1e2398, fix 95b775f2f; class 1a run 40154912725, e2e:discover run 40154941453 2/2 on the mini's installed 2.1.309; review clean). The `gate.yml` change (the group in CLASS1_E2E, the provisioning step, the default-group pin) is held uncommitted pending CI-opt's clearance.
-- [ ] M2 — the catalog.
+- [x] (2026-10-25 04:53Z) M2 — the catalog (9e6309756, e711484d7; fixes f56a44c6a, 882a8c838; class 1a run 40163330358 green on 882a8c838; review clean after two fix waves). The connector count after the `url_options` fix is measured by M5's live smoke.
 - [ ] M3 — Discover for Plugins and Skills.
 - [ ] M4 — Connectors: the spike, then Discover, add, remove and sign in.
 - [ ] M5 — acceptance at 1280 and 1512, whole Mac matrix, branch review.
