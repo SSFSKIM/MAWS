@@ -17,7 +17,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { OperationEvent } from '@shared/engine/operations';
 import type { WidgetsHarnessApi, WidgetsPane } from '../src/renderer/src/harness/widgets/api';
 import type { WidgetBackend } from '../test/support/widget-backend';
-import { ownerShapedState, scratchMarketplace, stubCalls, writePluginCliStub, type PluginCliStub, type StubState } from '../test/support/plugin-cli-stub';
+import { ownerShapedState, scratchMarketplace, stubCalls, writePluginCliStub, type PluginCliStub, type StubPlugin, type StubState } from '../test/support/plugin-cli-stub';
 import { KILL_GRACE_MS } from '../src/engine-host/plugins/runner';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
@@ -180,6 +180,16 @@ async function openSessionPlugins(maws: BackendLaunch): Promise<Locator> {
   const w = widget(page, 'plugins').and(page.locator(':not([data-widget-variant="embedded"])')); // the modal, not Customize's
   await expect(w.locator('[data-plugins-section="my-items"]')).toBeVisible();
   return w;
+}
+// A change to the scratch marketplace's plugins: the stub's registry and the marketplace's folder, as a real change moves
+// both the engine's listing and the files main's catalog reads (each marketplace's manifest, beside the listing).
+function changeMarket(cli: PluginCliStub, change: (plugins: StubPlugin[]) => StubPlugin[]): void {
+  const state = cli.state();
+  const marketplaces = state.marketplaces.map((m) => (m.name === MARKET ? { ...m, plugins: change(m.plugins) } : m));
+  const market = marketplaces.find((m) => m.name === MARKET)!;
+  if (market.source !== 'directory') throw new Error(`${MARKET} is a folder marketplace`);
+  scratchMarketplace(market.path, { name: MARKET, plugins: market.plugins });
+  cli.setState({ ...state, marketplaces });
 }
 const configHome = (maws: MawsLaunch) => join(maws.userData, 'claude-config');
 // The stub's calls that changed something (no listing), each argv after the binary.
@@ -1208,8 +1218,7 @@ test.describe('plugin management (E8)', () => {
     const w = await openDiscover(await openSessionPlugins(backend));
 
     // not_found: the catalog Discover read still lists e8-extra, which the marketplace no longer has
-    const state = backend.cli.state();
-    backend.cli.setState({ ...state, marketplaces: state.marketplaces.map((m) => ({ ...m, plugins: m.plugins.filter((p) => p.name !== 'e8-extra') })) });
+    changeMarket(backend.cli, (plugins) => plugins.filter((p) => p.name !== 'e8-extra'));
     const extra = cardOf(w, 'e8-extra@e8-scratch');
     await addOn(extra);
     const shown = [await argvOf(sheetOf(page, 'install'))]; // each argv a sheet showed and its confirm ran, in order
@@ -1317,8 +1326,7 @@ test.describe('plugin management (E8)', () => {
   test('a plugin that declares a dependency installs with it from its card, the sheet announcing the dependency caches; removing the marketplace names the plugins it uninstalls and uninstalls them', async ({ appBackend: backend }) => {
     const { page } = backend;
     const home = configHome(backend);
-    const state = backend.cli.state();
-    backend.cli.setState({ ...state, marketplaces: state.marketplaces.map((m) => ({ ...m, plugins: [...m.plugins, { name: 'e8-deps', version: '0.5.0', description: 'Needs e8-probe', dependencies: ['e8-probe'] }] })) });
+    changeMarket(backend.cli, (plugins) => [...plugins, { name: 'e8-deps', version: '0.5.0', description: 'Needs e8-probe', dependencies: ['e8-probe'] }]);
     const w = await openDiscover(await openSessionPlugins(backend));
     await addOn(cardOf(w, 'e8-deps@e8-scratch'));
     const install = sheetOf(page, 'install');
