@@ -11,12 +11,14 @@
 //              boundary lists every item once in both directions (acceptance 1, 6).
 //   labels:    search over both names; the trust labels and their tooltips; one card for a joined pair with "Also
 //              listed by", two for a same-name pair (acceptance 2).
-//   install:   the sheets' warnings; + before the marketplace is added: the add step, the contents and the hook that
-//              runs code; the real CLI adds and installs; settings, the engine's own listing, My items; Skills names the
-//              plugin and its skills; a second marketplace nobody else lists, added while Discover shows, brings its
-//              plugins from the host's read; one removed outside the app brings the add step back (acceptance 3, 5, 7).
-//   projects:  installed at project scope in A reads Installed there and "Installed in another project" in B, + kept;
-//              Not installed (acceptance 4).
+//   install:   the sheets' warnings; the test marketplace added by path from the Add menu while Discover shows makes
+//              its routes present without reopening the page, and removing it from Manage marketplaces brings the add
+//              step back; + before the marketplace is added: the add step, the contents and the hook that runs code; the
+//              real CLI adds and installs; settings, the engine's own listing, My items; Skills names the plugin and its
+//              skills; a second marketplace nobody else lists, added while Discover shows, brings its plugins from the
+//              host's read (acceptance 3, 5, 7).
+//   projects:  installed at project scope in A reads Installed there and "Installed in another project" in B, where
+//              Not installed keeps it and + installs it at B's project scope (acceptance 4).
 //   offline:   without the directory's and plugin-details' recordings, the manifests' items stay, plainer, with no
 //              counts and no Featured, and the Sources popover says which sources are unavailable; Connectors' Discover
 //              says the directory is unavailable, with Retry (acceptance 11; the Connectors side is M4's).
@@ -135,6 +137,37 @@ function compareShelfOrder(a: Ordered, b: Ordered): number {
   return 0;
 }
 
+// The Add menu's marketplace dialogs (Add marketplace, Manage marketplaces), as the person uses them.
+async function addMarketplace(page: Page, source: string, name: string): Promise<void> {
+  await library(page).getByRole('button', { name: 'Add', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Add marketplace', exact: true }).click();
+  const dialog = page.locator('[data-marketplaces-dialog="add"]');
+  await dialog.getByRole('textbox', { name: 'Source' }).fill(source);
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click();
+  const add = page.locator('[data-plugins-sheet="marketplace-add"]');
+  await expect(add.locator('[data-plugins-argv]')).toBeVisible({ timeout: 30_000 });
+  await add.getByRole('button', { name: 'Add', exact: true }).click();
+  await expect(dialog.locator('[data-marketplace-add-line]')).toContainText(`Successfully added marketplace: ${name}`, { timeout: CLI_MS });
+  await dialog.getByRole('button', { name: 'Done' }).click();
+  await expect(dialog).toBeHidden();
+}
+async function removeMarketplace(page: Page, name: string): Promise<void> {
+  await library(page).getByRole('button', { name: 'Add', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Manage marketplaces', exact: true }).click();
+  const manage = page.locator('[data-marketplaces-dialog="manage"]');
+  await manage.locator(`[data-marketplace-row="${name}"]`).getByRole('button', { name: /^More actions for / }).click();
+  await page.getByRole('menuitem', { name: 'Remove…', exact: true }).click();
+  const remove = page.locator('[data-plugins-sheet="marketplace-remove"]');
+  await expect(remove.locator('[data-plugins-argv]')).toBeVisible({ timeout: 30_000 });
+  const acknowledge = remove.getByRole('checkbox', { name: 'I understand' });
+  if ((await acknowledge.count()) > 0) await acknowledge.check();
+  await remove.getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect(manage.locator(`[data-marketplace-result="${name}"]`)).toContainText(`Successfully removed marketplace: ${name}`, { timeout: CLI_MS });
+  await expect(manage.locator(`[data-marketplace-row="${name}"]`)).toHaveCount(0);
+  await manage.getByRole('button', { name: 'Done' }).click();
+  await expect(manage).toBeHidden();
+}
+
 async function shot(page: Page, info: TestInfo, name: string): Promise<void> {
   await info.attach(name, { body: await page.screenshot(), contentType: 'image/png' });
 }
@@ -188,6 +221,12 @@ test('home: Featured, the shelves, All under Installs; the two desktop sizes; Se
     const shelves = pane(page).locator('[data-shelf]');
     await expect.poll(() => shelves.evaluateAll((all) => all.map((s) => s.getAttribute('data-shelf')))).toEqual(home.shelves.map((s) => s.key));
     expect(home.shelves[0]).toMatchObject({ key: 'added', title: 'Your sources', total: 4 });
+    // one shelf per seed with more than one item, in the seed list's order, community never: the recordings list 12
+    // official, 5 skills, 19 financial-services, 6 knowledge-work, 13 legal, 2 life-sciences and 3 Carta entries, one each
+    // for k12, the advisors, Notion and Canva (none of those four gets a shelf), and 4 community entries (no shelf)
+    expect(home.shelves.filter((s) => s.kind === 'source').map((s) => s.key)).toEqual(['seed:claude-plugins-official', 'seed:anthropic-agent-skills', 'seed:claude-for-financial-services', 'seed:knowledge-work-plugins', 'seed:claude-for-legal', 'seed:life-sciences', 'seed:carta-plugins']);
+    const categories = home.shelves.filter((s) => s.kind === 'category').length;
+    expect(home.shelves.map((s) => s.kind)).toEqual(['added', ...Array<string>(7).fill('source'), ...Array<string>(categories).fill('category')]); // Your sources, the seeds, then the categories
     expect(home.shelves.filter((s) => s.kind === 'category').length).toBeLessThanOrEqual(4);
     for (const shelf of home.shelves) {
       const drawn = await pane(page).locator(`[data-shelf="${shelf.key}"] [data-catalog-card]`).evaluateAll((cards) => cards.map((c) => c.getAttribute('data-catalog-card')));
@@ -333,6 +372,31 @@ test('install: + adds the marketplace and installs through the real CLI; warning
     await cancel(unknown);
   });
 
+  await test.step('the test marketplace added by path from the Add menu while Discover shows: its routes present without reopening the page; removed from Manage marketplaces: the add step again', async () => {
+    const id = `local:${marketplace}#plugins/skills-only`;
+    const present = async () => (value(await invoke(page, 'catalog.item', { id, cwd: null })).install as { present?: boolean }).present;
+    const card = () => results(page).locator(`[data-catalog-card="${id}"]`);
+    await searchAfresh(page, 'skills-only');
+    let s = await sheetFor(page, card(), 'skills-only');
+    await expect(s.locator('[data-plugins-add-argv]')).toHaveCount(1);
+    await cancel(s);
+    await addMarketplace(page, marketplace, TEST_MARKETPLACE);
+    await expect.poll(present, { timeout: CLI_MS }).toBe(true);
+    await searchAfresh(page, 'skills-only'); // the same page: Discover was never left
+    s = await sheetFor(page, card(), 'skills-only');
+    await expect(s.locator('[data-plugins-add-argv]')).toHaveCount(0);
+    await expect(s.locator('[data-catalog-summary]')).toHaveText(`Installs skills-only from ${TEST_MARKETPLACE}`);
+    await expect(s.locator('[data-catalog-contents]')).toHaveText('Comes with: 2 skills');
+    await cancel(s);
+    await removeMarketplace(page, TEST_MARKETPLACE);
+    await expect.poll(present, { timeout: CLI_MS }).toBe(false);
+    await searchAfresh(page, 'skills-only');
+    s = await sheetFor(page, card(), 'skills-only');
+    await expect(s.locator('[data-plugins-add-argv]')).toHaveCount(1);
+    await expect(s.locator('[data-catalog-summary]')).toHaveText(`Adds the marketplace ${TEST_MARKETPLACE} (user) and installs skills-only`);
+    await cancel(s);
+  });
+
   await test.step('+ on hooked before its marketplace is added: the add step, its contents, the hook that runs code; installed', async () => {
     await searchAfresh(page, 'hooked');
     const s = await sheetFor(page, byName(results(page), 'hooked'), 'hooked');
@@ -393,16 +457,7 @@ test('install: + adds the marketplace and installs through the real CLI; warning
     const second = realpathSync(copy);
     await searchAfresh(page, 'local-server');
     await expect(byName(results(page), 'local-server')).toHaveCount(1);
-    await library(page).getByRole('button', { name: 'Add', exact: true }).click();
-    await page.getByRole('menuitem', { name: 'Add marketplace', exact: true }).click();
-    const dialog = page.locator('[data-marketplaces-dialog="add"]');
-    await dialog.getByRole('textbox', { name: 'Source' }).fill(second);
-    await dialog.getByRole('button', { name: 'Add', exact: true }).click();
-    const add = page.locator('[data-plugins-sheet="marketplace-add"]');
-    await expect(add.locator('[data-plugins-argv]')).toBeVisible({ timeout: 30_000 });
-    await add.getByRole('button', { name: 'Add', exact: true }).click();
-    await expect(dialog.locator('[data-marketplace-add-line]')).toContainText('Successfully added marketplace: maws-second-test', { timeout: CLI_MS });
-    await dialog.getByRole('button', { name: 'Done' }).click();
+    await addMarketplace(page, second, 'maws-second-test');
     await expect(byName(results(page), 'local-server')).toHaveCount(2, { timeout: CLI_MS }); // without reopening the page
     const theirs = results(page).locator(`[data-catalog-card^="local:${second}"][data-install-name="local-server"]`);
     await expect(theirs).toContainText('by MAWS e2e servers');
@@ -416,23 +471,12 @@ test('install: + adds the marketplace and installs through the real CLI; warning
     await expect(skills.locator('[data-catalog-components]')).toHaveText('2 skills');
     await expect(skills).toContainText('by MAWS e2e skills');
   });
-
-  await test.step('the test marketplace removed outside the app: its route needs the add step again', async () => {
-    const id = `local:${marketplace}#plugins/skills-only`;
-    expect(value(await invoke(page, 'catalog.item', { id, cwd: null })).install).toMatchObject({ kind: 'plugin', present: true });
-    engineCli(maws!, ['plugin', 'marketplace', 'remove', TEST_MARKETPLACE]);
-    await expect.poll(async () => (value(await invoke(page, 'catalog.item', { id, cwd: null })).install as { present?: boolean }).present, { timeout: CLI_MS }).toBe(false);
-    await searchAfresh(page, 'skills-only');
-    const s = await sheetFor(page, results(page).locator(`[data-catalog-card="${id}"]`), 'skills-only');
-    await expect(s.locator('[data-plugins-add-argv]')).toHaveCount(1);
-    await cancel(s);
-  });
 });
 
 test('projects: installed at project scope in A reads Installed there and Installed in another project in B; Not installed', async () => {
   maws = await launchMaws({ realEngine: { projects: 2 } });
   const { page } = maws;
-  const [a] = maws.realEngine!.scratch.projects;
+  const [a, b] = maws.realEngine!.scratch.projects;
   for (const directory of maws.realEngine!.scratch.projects) value(await invoke(page, 'session.projects.add', { directory }));
   await openDiscover(page);
   const card = () => byName(results(page), 'remote-server');
@@ -456,7 +500,7 @@ test('projects: installed at project scope in A reads Installed there and Instal
     await expect(card()).toHaveCount(1);
   });
 
-  await test.step('in B: Installed in another project, + kept', async () => {
+  await test.step('in B: Installed in another project, + kept; Not installed shows it; installed from B at project scope', async () => {
     await chooseProject(page, 'project-b');
     await searchAfresh(page, 'remote-server');
     await expect(card()).toHaveAttribute('data-installed', 'elsewhere', { timeout: CLI_MS });
@@ -464,10 +508,20 @@ test('projects: installed at project scope in A reads Installed there and Instal
     // + still works: B's own install. The marketplace A added at project scope is in the engine's own registry
     // (plugins/known_marketplaces.json, one per configuration), which `plugin marketplace list` reads in B too, so the
     // engine has it there and the sheet is the install alone (measured on 2.1.309, gate run 40189614848).
+    await pane(page).getByRole('checkbox', { name: 'Not installed' }).check(); // not installed here, so B's Not installed keeps it
+    await expect(card()).toHaveCount(1);
+    await expect(card()).toHaveAttribute('data-installed', 'elsewhere');
     const s = await sheetFor(page, card(), 'remote-server');
+    await s.getByRole('radio', { name: 'Project' }).check();
     await expect(s.locator('[data-catalog-summary]')).toHaveText(`Installs remote-server from ${TEST_MARKETPLACE}`);
-    expect((await argvOf(s, 'data-plugins-argv')).slice(0, 3)).toEqual(['plugin', 'install', `remote-server@${TEST_MARKETPLACE}`]);
-    await cancel(s);
+    expect(await argvOf(s, 'data-plugins-argv')).toEqual(expect.arrayContaining(['plugin', 'install', `remote-server@${TEST_MARKETPLACE}`, '--scope', 'project']));
+    await s.getByRole('button', { name: 'Install', exact: true }).click();
+    await expect(s).toBeHidden();
+    await expect(card()).toHaveCount(0, { timeout: 2 * CLI_MS }); // installed here now: Not installed leaves it out in B too
+    await pane(page).getByRole('checkbox', { name: 'Not installed' }).uncheck();
+    await expect(card()).toHaveAttribute('data-installed', 'here', { timeout: CLI_MS });
+    expect(JSON.parse(readFileSync(join(b, '.claude', 'settings.json'), 'utf8')).enabledPlugins?.[`remote-server@${TEST_MARKETPLACE}`]).toBe(true);
+    expect(JSON.parse(readFileSync(join(a, '.claude', 'settings.json'), 'utf8')).enabledPlugins?.[`remote-server@${TEST_MARKETPLACE}`]).toBe(true); // A's own install untouched
   });
 });
 
