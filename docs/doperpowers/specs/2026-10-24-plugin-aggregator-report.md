@@ -16,7 +16,7 @@ DONE_WITH_CONCERNS. All five milestones are built, reviewed clean at their front
 | M4, connectors: spike, add, remove, sign in | 295e97229..9eb7f22b3; fixes 5adfffcc6, 45751b733, bc9572458, c542e6362 | clean after 4 fix waves, each narrower: stale success, name-as-identity, callback deadline, fail-open regex and inventory; then per-session lock, slot reuse, cached error; then same-session wire target; then app-server shadowing, nested project files | spike 40175924834; 40188327848: class 1a, e2e:discover 8 + spike skipped; settings, widgets, layout green earlier |
 | M5, acceptance | 88f05bd80..788b5bb70, fix b29167822 | clean after 1 fix wave (acceptance 4 in project B, acceptance 7 through Manage marketplaces, independent seed-shelf oracle) | whole Mac matrix 40190324774 on 788b5bb70, every job green on attempt 1; e2e:discover and e2e:discover-live 40190325020; e2e:discover 40196923687 on b29167822 |
 
-Commit range: fbeb2ceb6..HEAD (the head is in the hand-back). Every commit after b29167822 touches only the spec and this report.
+Commit range: fbeb2ceb6..HEAD. Every commit after b29167822 touches only the spec and this report. Final gate on 7571af0d9: run 40197525168, with static, unit 1 to 4 of 4, probes and e2e:discover all green. Pull request: https://github.com/SSFSKIM/MAWS/pull/147.
 
 ## The spike's verdict (M4)
 
