@@ -63,6 +63,7 @@
     // P3-HD M4a: test/support/connector-oauth*.test.ts run the toy OAuth fixture's logic, its scene support and fake browser
     "e2e/support/connector-oauth-core.d.mts",
     "e2e/support/connector-oauth.ts",
+    "e2e/support/keychain-guard.ts", // fixB: the custody's keychain prompt guard and engine-environment checks
     "e2e/support/connector-oauth-browser.ts",
     "e2e/support/connector-direct-checks.ts", // P3-HD M4b: test/support/connector-direct-checks.test.ts runs the integrated scenes' pure checks
     "e2e/support/connector-direct-probe.ts", // P3-F W-RD: test/support/connector-direct-probe.test.ts runs the probe's auth-fixture exposure check

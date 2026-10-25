@@ -9,7 +9,7 @@ import { item } from '../discover/test-items';
 import { argvOf } from '../../widgets/plugins/present';
 import { installRequestOf } from '../discover/add';
 import { cardContentsWords } from '../discover/present';
-import { configuredOf, connectorAddOf, existingOf, resultFor, shadowedBy, shadowWords, nameProblem, removeRequestOf, scopesFor, signInSessionOf, signInViewOf, urlProblem, writesFor } from './present';
+import { configuredOf, connectorAddOf, existingOf, resultFor, shadowedBy, shadowWords, nameProblem, removeRequestOf, removalDirectoryOf, scopesFor, signInSessionOf, signInViewOf, urlProblem, writesFor } from './present';
 
 const linear = (over: Partial<CatalogItem['install']> = {}, item_: Partial<CatalogItem> = {}): CatalogItem =>
   item({
@@ -114,6 +114,13 @@ describe('removing a connector', () => {
     expect(argvOf(request)).toEqual(['mcp', 'remove', 'linear', '--scope', 'local']);
     expect(removeRequestOf(server({ scope: 'app' }))).toBeNull();
   });
+
+  it('runs a removal where the entry lives: a project entry in the directory of its own .mcp.json, others where the page is (sweep#2)', () => {
+    expect(removalDirectoryOf(server({ scope: 'project', path: '/repo/.mcp.json' }))).toBe('/repo');
+    expect(removalDirectoryOf(server({ scope: 'project', path: '/.mcp.json' }))).toBe('/');
+    expect(removalDirectoryOf(server({ scope: 'local' }))).toBeNull(); // the page's project key
+    expect(removalDirectoryOf(server({ scope: 'user' }))).toBeNull();
+  });
 });
 
 describe('which session signs in', () => {
@@ -125,6 +132,20 @@ describe('which session signs in', () => {
     expect(signInSessionOf('project', ready, 'a', '/p')).toBe('a');
     expect(signInSessionOf('user', ready, 'a', '/p')).toBe('a');
   });
+  it('signs a user-scope server in from a ready session in the page’s directory first, whose entries the page shows (scalpel-2#1)', () => {
+    const sessions = [{ appSessionId: 'a', cwd: '/p' }, { appSessionId: 'b', cwd: '/q' }];
+    expect(signInSessionOf('user', sessions, null, '/q')).toBe('b');
+    expect(signInSessionOf('user', sessions, null, null)).toBe('a'); // the user configuration's page: main checks the session's own entries
+  });
+
+  it('a server the session already had connected says so, not that a sign-in happened (scalpel-2#3)', () => {
+    expect(signInViewOf({ live: undefined, liveRead: null, posture: null, transport: 'http', last: event({ state: 'done', where: 'here', message: 'already connected' }) })).toEqual({ text: 'Already connected in that session', tone: 'success', signIn: false, cancel: false });
+  });
+
+  it('a session that uses another entry of the name says so', () => {
+    expect(signInViewOf({ live: undefined, liveRead: null, posture: null, transport: 'http', last: event({ state: 'failed', reason: 'other_entry', message: 'that session uses the local entry in /cfg/.claude.json' }) })!.text).toBe('Sign-in didn’t finish: that session uses the local entry in /cfg/.claude.json');
+  });
+
   it('signs a user-scope server in from any ready session, and a project or local one only from a session in that directory', () => {
     expect(signInSessionOf('user', ready, null, null)).toBe('a');
     expect(signInSessionOf('local', ready, null, '/p')).toBe('a');

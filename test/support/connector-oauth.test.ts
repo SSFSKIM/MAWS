@@ -4,14 +4,15 @@
 // started; log lines are produced by the fixture's own request logic.
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createOAuthFixtureCore, OPEN_CONTROL, tokenHash, type OAuthControl } from '../../e2e/support/connector-oauth-core.mjs';
 import {
-  assertOpenPhase, engineKeychainCustody, engineKeychainService, enterOAuthPhase, enterOpenPhase, oauthFixturePaths, readControl, readOAuthLog, scanForSecrets, summarizeOAuthLog, updateOAuthControl,
+  assertOpenPhase, engineApiKeyService, engineKeychainCustody, engineKeychainService, enterOAuthPhase, enterOpenPhase, oauthFixturePaths, readControl, readOAuthLog, scanForSecrets, summarizeOAuthLog, updateOAuthControl,
   type OAuthFixturePaths,
 } from '../../e2e/support/connector-oauth';
+import { SECURITY_MS } from '../../e2e/support/keychain-guard';
 
 let scratch: string;
 let paths: OAuthFixturePaths;
@@ -192,12 +193,21 @@ describe('the secret scan', () => {
 });
 
 
-// P4-AGG M1: the Keychain custody of an engine's sign-in (the spec's acceptance 9, fact 2): the one item the engine's
-// secure storage writes for a scratch CLAUDE_CONFIG_DIR, named exactly, required absent before, deleted by that exact
+// P4-AGG M1: the Keychain custody of an engine's sign-in (the spec's acceptance 9, fact 2): the items the engine's
+// secure storage names for a scratch CLAUDE_CONFIG_DIR, named exactly, required absent before, deleted by that exact
 // name only after every engine is gone, and verified gone. A fake `security` stands in for the Keychain here.
+// fixB: the three keychain conditions the Mac lane runs under (the mini's login keychain holds the owner's real
+// credential): (a) only names derived from the run's own scratch directory are ever deleted, never the bare one;
+// (b) nothing reads an item that existed before the run (existence lookups of the run's own names alone, no password
+// or attribute printed); (c) a keychain prompt fails at once, before or after any `security` call, and calls are bounded.
 describe('the engine Keychain custody', () => {
-  const CONFIG = '/tmp/maws-e2e-abc/claude-config';
-  const SERVICE = `Claude Code-credentials-${createHash('sha256').update(CONFIG.normalize('NFC')).digest('hex').slice(0, 8)}`;
+  const ROOT = '/tmp/maws-e2e-abc';
+  const CONFIG = `${ROOT}/claude-config`;
+  const HASH = createHash('sha256').update(CONFIG.normalize('NFC')).digest('hex').slice(0, 8);
+  const SERVICE = `Claude Code-credentials-${HASH}`;
+  const API_KEY = `Claude Code-${HASH}`;
+  const ENV = { CLAUDE_CONFIG_DIR: CONFIG };
+  const OWNER = 'Claude Code-credentials';
   // A Keychain of service names; `security` exits 0 when it finds (or deletes) the exact name, 44 when it does not.
   function keychain(present: string[]) {
     const items = new Set(present);
@@ -212,10 +222,13 @@ describe('the engine Keychain custody', () => {
     };
     return { items, calls, security };
   }
+  const custodyOf = (k: { security: (args: readonly string[]) => number }, over: Partial<Parameters<typeof engineKeychainCustody>[1]> = {}) =>
+    engineKeychainCustody(CONFIG, { scratchRoot: ROOT, engineEnv: ENV, security: k.security, alive: () => false, promptPending: () => false, ...over });
 
-  it('names the item the engine derives from the configuration directory as given, NFC', () => {
+  it('names the items the engine derives from the configuration directory as given, NFC', () => {
     expect(engineKeychainService(CONFIG)).toBe(SERVICE);
-    expect(engineKeychainService('/tmp/caf\u0065\u0301')).toBe(engineKeychainService('/tmp/caf\u00e9'));
+    expect(engineApiKeyService(CONFIG)).toBe(API_KEY);
+    expect(engineKeychainService('/tmp/café')).toBe(engineKeychainService('/tmp/café'));
     expect(engineKeychainService(CONFIG)).toMatch(/^Claude Code-credentials-[0-9a-f]{8}$/);
   });
 
@@ -223,52 +236,95 @@ describe('the engine Keychain custody', () => {
     expect(() => engineKeychainService(CONFIG, { CLAUDE_SECURESTORAGE_CONFIG_DIR: '/elsewhere' })).toThrow(/CLAUDE_SECURESTORAGE_CONFIG_DIR/);
     expect(() => engineKeychainService(CONFIG, { CLAUDE_CODE_CUSTOM_OAUTH_URL: 'https://claude.fedstart.com' })).toThrow(/CLAUDE_CODE_CUSTOM_OAUTH_URL/);
     expect(() => engineKeychainService('')).toThrow(/configuration directory/);
+    const k = keychain([]);
+    expect(() => custodyOf(k, { engineEnv: { CLAUDE_CONFIG_DIR: CONFIG, CLAUDE_SECURESTORAGE_CONFIG_DIR: '' } })).toThrow(/CLAUDE_SECURESTORAGE_CONFIG_DIR/);
+    expect(() => custodyOf(k, { engineEnv: {} })).toThrow(/CLAUDE_CONFIG_DIR=\(unset/); // the engine would use ~/.claude: the owner's item
+    expect(() => custodyOf(k, { engineEnv: { CLAUDE_CONFIG_DIR: `${ROOT}/other` } })).toThrow(/not the scratch/);
+    expect(k.calls).toEqual([]);
   });
 
-  it('claims the item only when it is absent, so a run never takes another run\'s or the owner\'s', () => {
-    const taken = keychain([SERVICE]);
-    expect(() => engineKeychainCustody(CONFIG, { security: taken.security }).claim()).toThrow(/exists before the run/);
-    expect(taken.items.has(SERVICE)).toBe(true);
-    const free = keychain(['Claude Code-credentials', 'Claude Code-credentials-00000000']);
-    const custody = engineKeychainCustody(CONFIG, { security: free.security });
+  it('(a) takes custody only of a directory inside the run’s own scratch, never the owner’s configuration', () => {
+    const k = keychain([]);
+    expect(() => custodyOf(k, { scratchRoot: '/tmp/maws-e2e-other' })).toThrow(/not inside the run's scratch/);
+    expect(() => custodyOf(k, { scratchRoot: CONFIG })).toThrow(/not inside the run's scratch/); // the root itself
+    const home = homedir();
+    expect(() => engineKeychainCustody(join(home, '.claude'), { scratchRoot: home, engineEnv: { CLAUDE_CONFIG_DIR: join(home, '.claude') }, security: k.security, promptPending: () => false })).toThrow(/owner's configuration/);
+    expect(k.calls).toEqual([]);
+  });
+
+  it('(a)(b) names to security only its own derived items, by -s alone: never the bare owner item, never -w or -g', () => {
+    const k = keychain([OWNER, 'Claude Code-credentials-00000000']);
+    const custody = custodyOf(k);
+    custody.claim();
+    k.items.add(SERVICE); // the engine signed in
+    custody.release({ enginePids: [] });
+    expect(k.items.has(OWNER)).toBe(true);
+    expect(k.calls.length).toBeGreaterThan(0);
+    for (const args of k.calls) {
+      expect(args).toHaveLength(3);
+      expect(['find-generic-password', 'delete-generic-password']).toContain(args[0]);
+      expect(args[1]).toBe('-s');
+      expect([SERVICE, API_KEY]).toContain(args[2]);
+    }
+    expect(k.calls.filter((args) => args[0] === 'delete-generic-password').map((args) => args[2])).toEqual([SERVICE]);
+  });
+
+  it('(b) claims only when every item the engine would read is absent, so the engine never reads one from before the run', () => {
+    for (const before of [SERVICE, API_KEY]) {
+      const taken = keychain([before]);
+      expect(() => custodyOf(taken).claim()).toThrow(/exists before the run/);
+      expect(taken.items.has(before)).toBe(true);
+      expect(taken.calls.filter((args) => args[0] === 'delete-generic-password')).toEqual([]);
+    }
+    const free = keychain([OWNER, 'Claude Code-credentials-00000000']);
+    const custody = custodyOf(free);
     custody.claim();
     expect(custody.service).toBe(SERVICE);
-    expect(free.calls).toEqual([['find-generic-password', '-s', SERVICE]]);
+    expect(custody.services).toEqual([SERVICE, API_KEY]);
+    expect(free.calls).toEqual([['find-generic-password', '-s', SERVICE], ['find-generic-password', '-s', API_KEY]]);
+  });
+
+  it('(c) fails at once when a keychain prompt is pending, before or after a security call, without waiting on it', () => {
+    const k = keychain([]);
+    expect(() => custodyOf(k, { promptPending: () => true }).claim()).toThrow(/keychain prompt \(SecurityAgent\) is pending before security find-generic-password/);
+    expect(k.calls).toEqual([]);
+    let after = false;
+    const raising = (args: readonly string[]) => ((after = true), k.security(args));
+    expect(() => custodyOf({ security: raising }, { promptPending: () => after }).claim()).toThrow(/pending after security find-generic-password/);
+    expect(SECURITY_MS).toBeLessThanOrEqual(5_000);
   });
 
   it('releases only after a claim, and only once every engine that ran is gone', () => {
     const k = keychain([]);
-    expect(() => engineKeychainCustody(CONFIG, { security: k.security }).release({ enginePids: [] })).toThrow(/never claimed/);
-    const custody = engineKeychainCustody(CONFIG, { security: k.security, alive: (pid) => pid === 202 });
+    expect(() => custodyOf(k).release({ enginePids: [] })).toThrow(/never claimed/);
+    const custody = custodyOf(k, { alive: (pid) => pid === 202 });
     custody.claim();
-    k.items.add(SERVICE); // the engine signed in
+    k.items.add(SERVICE);
     expect(() => custody.release({ enginePids: [201, 202] })).toThrow(/engine 202 is still alive/);
     expect(k.items.has(SERVICE)).toBe(true);
   });
 
-  it('deletes exactly its own item and verifies it gone, touching no other', () => {
-    const k = keychain(['Claude Code-credentials', 'Claude Code-credentials-00000000']);
-    const custody = engineKeychainCustody(CONFIG, { security: k.security, alive: () => false });
+  it('deletes exactly its own items and verifies them gone, touching no other', () => {
+    const k = keychain([OWNER, 'Claude Code-credentials-00000000']);
+    const custody = custodyOf(k);
     custody.claim();
     k.items.add(SERVICE);
     expect(custody.release({ enginePids: [201] })).toEqual({ service: SERVICE, found: true, deleted: true });
-    expect([...k.items].sort()).toEqual(['Claude Code-credentials', 'Claude Code-credentials-00000000']);
-    expect(k.calls.every((args) => args[2] === SERVICE)).toBe(true);
+    expect([...k.items].sort()).toEqual([OWNER, 'Claude Code-credentials-00000000']);
   });
 
   it('leaves the Keychain as it was when the engine stored nothing', () => {
-    const k = keychain(['Claude Code-credentials']);
-    const custody = engineKeychainCustody(CONFIG, { security: k.security, alive: () => false });
+    const k = keychain([OWNER]);
+    const custody = custodyOf(k);
     custody.claim();
     expect(custody.release({ enginePids: [] })).toEqual({ service: SERVICE, found: false, deleted: false });
-    expect(k.calls.map((args) => args[0])).toEqual(['find-generic-password', 'find-generic-password']);
+    expect(k.calls.map((args) => args[0])).toEqual(Array(4).fill('find-generic-password'));
   });
 
   // Fail closed: only `security`'s item-not-found status (44) means absent; any other lookup failure, or a deletion
   // that does not succeed, establishes nothing and fails.
   it('refuses a claim when the lookup fails other than by not finding the item', () => {
-    const locked = (args: readonly string[]) => (args[0] === 'find-generic-password' ? 51 : 0);
-    const custody = engineKeychainCustody(CONFIG, { security: locked, alive: () => false });
+    const custody = custodyOf({ security: (args) => (args[0] === 'find-generic-password' ? 51 : 0) });
     expect(() => custody.claim()).toThrow(/could not look up the Keychain item .* \(security exited 51\)/);
     expect(() => custody.release({ enginePids: [] })).toThrow(/never claimed/);
   });
@@ -281,7 +337,7 @@ describe('the engine Keychain custody', () => {
       if (deleted && args[0] === 'find-generic-password') return 36;
       return k.security(args);
     };
-    const custody = engineKeychainCustody(CONFIG, { security: flaky, alive: () => false });
+    const custody = custodyOf({ security: flaky });
     custody.claim();
     k.items.add(SERVICE);
     expect(() => custody.release({ enginePids: [] })).toThrow(/could not look up the Keychain item .* \(security exited 36\)/);
@@ -289,8 +345,7 @@ describe('the engine Keychain custody', () => {
 
   it('fails a release whose deletion fails', () => {
     const k = keychain([]);
-    const refusing = (args: readonly string[]) => (args[0] === 'delete-generic-password' ? 1 : k.security(args));
-    const custody = engineKeychainCustody(CONFIG, { security: refusing, alive: () => false });
+    const custody = custodyOf({ security: (args) => (args[0] === 'delete-generic-password' ? 1 : k.security(args)) });
     custody.claim();
     k.items.add(SERVICE);
     expect(() => custody.release({ enginePids: [] })).toThrow(/could not delete the Keychain item .* \(security exited 1\)/);
@@ -299,8 +354,7 @@ describe('the engine Keychain custody', () => {
 
   it('fails when the item survives its deletion', () => {
     const k = keychain([]);
-    const stuck = (args: readonly string[]) => (args[0] === 'delete-generic-password' ? 0 : k.security(args));
-    const custody = engineKeychainCustody(CONFIG, { security: stuck, alive: () => false });
+    const custody = custodyOf({ security: (args) => (args[0] === 'delete-generic-password' ? 0 : k.security(args)) });
     custody.claim();
     k.items.add(SERVICE);
     expect(() => custody.release({ enginePids: [] })).toThrow(/still in the Keychain/);

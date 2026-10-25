@@ -30,48 +30,53 @@ import { DiscoverToolbar } from '../discover/DiscoverToolbar';
 import { useCatalogPostures, useCatalogRefresh, useCatalogSources } from '../discover/read';
 import { ConnectorSheet } from './ConnectorSheet';
 import { CONNECTORS as C } from './copy';
-import { removeRequestOf, resultFor, serverKey, shadowedBy, shadowWords, signInSessionOf, signInViewOf, type AuthPosture, type ConfiguredServers, type ReadySession, type SignInFacts, type SignInView } from './present';
+import { removalDirectoryOf, removeRequestOf, resultFor, serverKey, shadowedBy, shadowWords, signInSessionOf, signInViewOf, type AuthPosture, type ConfiguredServers, type ReadySession, type SignInFacts, type SignInView } from './present';
 import { cancelSignIn, forgetSignIn, signInKeyOf, startSignIn, useSignIns } from './sign-in';
 
 const BUTTON = 'rounded-sm px-2 py-1 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint';
 const TONE: Record<SignInView['tone'], string> = { muted: 'text-fg-muted', success: 'text-success', danger: 'text-danger' };
 const DIRECTORY_SERVERS = 'directory:servers';
 
-type Asking = { key: string; request: PluginsRequest; engine: EngineResolution; opening: number };
+type Asking = { key: string; request: PluginsRequest; engine: EngineResolution; opening: number; runIn: string | null }; // runIn: a removal's own directory (sweep#2)
 
 // The operations and the connector sheet: every opening reads `plugins.env` again, as the install sheet does.
-function useConnectorManage(cwd: string | null, configured: ConfiguredServers, retryServers: () => void): { manage: Manage; sheet: ReactNode } {
+function useConnectorManage(cwd: string | null, configured: ConfiguredServers, retryServers: () => void): { manage: Manage; sheet: ReactNode; askIn: AskIn } {
   const env = usePluginsEnv();
   const { reread } = env;
   const runCwd = cwd ?? env.data?.configHome ?? '';
   const ops = usePluginOperations();
   const [asking, setAsking] = useState<Asking | null>(null);
   const openings = useRef(0);
-  const ask = useCallback(
-    (key: string, request: PluginsRequest) => {
+  const askIn = useCallback<AskIn>(
+    (key, request, runIn) => {
       const opening = ++openings.current;
-      setAsking({ key, request, engine: { state: 'loading' }, opening });
+      setAsking({ key, request, engine: { state: 'loading' }, opening, runIn });
       void reread().then((read) => setAsking((current) => (current?.opening === opening ? { ...current, engine: resolutionOf(read) } : current)));
     },
     [reread],
   );
+  const ask = useCallback((key: string, request: PluginsRequest) => askIn(key, request, null), [askIn]);
   const manage = useMemo<Manage>(() => ({ cwd: runCwd, ops, ask, reloadMods: null }), [runCwd, ops, ask]);
+  const runIn = asking?.runIn ?? runCwd;
   const sheet = asking && (
     <ConnectorSheet
       key={`${asking.key}:${asking.opening}`}
       request={asking.request}
-      env={{ cwd, runCwd, engine: asking.engine, configured, retryServers }}
+      env={{ cwd, runCwd: runIn, engine: asking.engine, configured, retryServers }}
       onConfirm={(request, binary) => {
         setAsking(null);
         // a configuration MAWS removed or replaced: a sign-in's result for that name and scope says nothing about it now
         const { name, scope } = request.input as { name: string; scope: PluginsScope };
-        void ops.run(asking.key, request, runCwd, binary).then((done) => done?.outcome?.ok && forgetSignIn({ name, scope, cwd }));
+        void ops.run(asking.key, request, runIn, binary).then((done) => done?.outcome?.ok && forgetSignIn({ name, scope, cwd }));
       }}
       onClose={() => setAsking(null)}
     />
   );
-  return { manage, sheet };
+  return { manage, sheet, askIn };
 }
+
+// A confirmation asked for, run in `runIn` when given (a removal from a parent directory's .mcp.json), else the page's.
+type AskIn = (key: string, request: PluginsRequest, runIn: string | null) => void;
 
 export function ConnectorsSection({ cwd, place, servers, readAt, configured, inventoryState, refresh, attached, live }: {
   cwd: string | null; // the page's directory; null for the user configuration
@@ -85,7 +90,7 @@ export function ConnectorsSection({ cwd, place, servers, readAt, configured, inv
   live: ReactNode; // what the attached session has live
 }) {
   const [view, setView] = useState<LibraryTab>('myItems');
-  const { manage, sheet } = useConnectorManage(cwd, configured, refresh);
+  const { manage, sheet, askIn } = useConnectorManage(cwd, configured, refresh);
   const switcher = <LibrarySwitch tab={view} onChange={setView} second={DISCOVER.discover} />;
   return (
     <ManageProvider value={manage}>
@@ -107,7 +112,7 @@ export function ConnectorsSection({ cwd, place, servers, readAt, configured, inv
             </button>
           </div>
           {inventoryState}
-          {servers && <Configured servers={servers} readAt={readAt} cwd={cwd} place={place} attached={attached} />}
+          {servers && <Configured servers={servers} readAt={readAt} cwd={cwd} place={place} attached={attached} askIn={askIn} />}
           {live}
         </div>
       )}
@@ -134,7 +139,7 @@ function ConnectorsDiscover({ cwd, onOpenInstalled }: { cwd: string | null; onOp
 }
 
 // The configured servers, with a removal's result kept at the head once its row has left.
-function Configured({ servers, readAt, cwd, place, attached }: { servers: readonly CustomizationServer[]; readAt: number; cwd: string | null; place: string | null; attached: AppSessionId | null }) {
+function Configured({ servers, readAt, cwd, place, attached, askIn }: { servers: readonly CustomizationServer[]; readAt: number; cwd: string | null; place: string | null; attached: AppSessionId | null; askIn: AskIn }) {
   const { ops } = useManage();
   const engine = useSessions((s) => s.engine);
   const ready = useMemo<ReadySession[]>(() => [...engine.values()].filter((status) => status.process === 'ready').map((status) => ({ appSessionId: status.appSessionId, cwd: status.cwd })), [engine]);
@@ -164,7 +169,7 @@ function Configured({ servers, readAt, cwd, place, attached }: { servers: readon
       ))}
       <ul aria-label={C.configured} className="m-0 list-none p-0">
         {servers.map((server) => (
-          <ServerRow key={`${serverKey(server)}:${server.path}`} server={server} shadow={shadowedBy(server, servers)} cwd={cwd} place={place} session={signInSessionOf(server.scope, ready, attached, cwd)} live={liveOf(server.name)} liveRead={liveRead} posture={postureOf(server)?.authPosture ?? null} fingerprint={postureOf(server)?.fingerprint ?? null} />
+          <ServerRow key={serverKey(server)} server={server} askIn={askIn} shadow={shadowedBy(server, servers)} cwd={cwd} place={place} session={signInSessionOf(server.scope, ready, attached, cwd)} live={liveOf(server.name)} liveRead={liveRead} posture={postureOf(server)?.authPosture ?? null} fingerprint={postureOf(server)?.fingerprint ?? null} />
         ))}
       </ul>
     </>
@@ -174,9 +179,9 @@ function Configured({ servers, readAt, cwd, place, attached }: { servers: readon
 // A row the engine does not use (the same name in a scope it ranks higher, or MAWS's own server of the name; ./present.ts
 // `shadowedBy`) says which entry
 // shadows it and offers no Sign in: the engine signs a name in, so Sign in belongs to the row it uses.
-function ServerRow({ server, shadow, cwd, place, session, live, liveRead, posture, fingerprint }: { server: CustomizationServer; shadow: CustomizationServer['scope'] | null; cwd: string | null; place: string | null; session: string | null; live: SignInFacts['live']; liveRead: SignInFacts['liveRead']; posture: AuthPosture | null; fingerprint: string | null }) {
-  const { ask, ops } = useManage();
-  const target = server.scope === 'app' ? null : { name: server.name, scope: server.scope, cwd };
+function ServerRow({ server, askIn, shadow, cwd, place, session, live, liveRead, posture, fingerprint }: { server: CustomizationServer; askIn: AskIn; shadow: CustomizationServer['scope'] | null; cwd: string | null; place: string | null; session: string | null; live: SignInFacts['live']; liveRead: SignInFacts['liveRead']; posture: AuthPosture | null; fingerprint: string | null }) {
+  const { ops } = useManage();
+  const target = server.scope === 'app' ? null : { name: server.name, scope: server.scope, cwd, path: server.path };
   const record = resultFor(useSignIns((s) => (target === null ? null : (s.byServer.get(signInKeyOf(target)) ?? null))), fingerprint);
   const last = record?.event ?? null;
   const state: SignInView | null = shadow !== null ? { text: shadowWords(shadow, server.name), tone: 'muted', signIn: false, cancel: false } : signInViewOf({ live, liveRead, posture, last: record, transport: server.transport });
@@ -210,7 +215,7 @@ function ServerRow({ server, shadow, cwd, place, session, live, liveRead, postur
               )
             ))}
           {remove && (
-            <button type="button" aria-label={C.removeName(server.name)} disabled={busy} className={BUTTON} onClick={() => ask(key, remove)}>
+            <button type="button" aria-label={C.removeName(server.name)} disabled={busy} className={BUTTON} onClick={() => askIn(key, remove, removalDirectoryOf(server))}>
               {C.remove}
             </button>
           )}

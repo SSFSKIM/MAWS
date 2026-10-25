@@ -24,16 +24,17 @@
 //            delayed by 15 s completes "connected here"; Cancel then a retry; a second press; S2 stopped mid-flow; with
 //            no ready session, the "Open a session" words. The scratch directory's exact Keychain item is claimed before
 //            any engine runs and released after the app and both sessions have exited.
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { openAppDestination } from './support/shell';
 import { engineKeychainCustody, readOAuthLog, startOAuthFixture, summarizeOAuthLog, type OAuthFixture } from './support/connector-oauth';
+import { assertEngineProcessKeychainEnv, guardKeychain, killTree } from './support/keychain-guard';
 import { isAlive } from './support/processes';
 import { realEngine } from './support/real-engine';
 
@@ -54,7 +55,8 @@ test.afterEach(async () => {
 });
 
 test('oauth fixture, engine mode: a localhost-redirect token exchange from a plain client, the Keychain left as found', async () => {
-  const custody = engineKeychainCustody(join(root, 'claude-config'));
+  const configDir = join(root, 'claude-config');
+  const custody = engineKeychainCustody(configDir, { scratchRoot: root, engineEnv: { CLAUDE_CONFIG_DIR: configDir } }); // fixB (a)(b)(c): no engine runs here
   custody.claim();
   fixture = await startOAuthFixture({ root, id: 'engine', mode: 'engine' });
   const { origin, resourceUrl } = fixture;
@@ -105,7 +107,9 @@ test('spike: the engine\'s own MCP sign-in over the control protocol, against th
   mkdirSync(project, { recursive: true });
   writeFileSync(join(configDir, '.claude.json'), `${JSON.stringify({ hasCompletedOnboarding: true, projects: { [project]: { hasTrustDialogAccepted: true, hasCompletedProjectOnboarding: true } } }, null, 2)}\n`);
   const outDir = join(root, 'spike');
-  const custody = engineKeychainCustody(configDir);
+  // fixB: the spike's engines run with CLAUDE_CONFIG_DIR=configDir and without the two variables that rename their items
+  // (m4-signin-spike.mjs, engineEnv), under the runner's HOME: custody of both items, and the prompt guard around it all
+  const custody = engineKeychainCustody(configDir, { scratchRoot: root, engineEnv: { CLAUDE_CONFIG_DIR: configDir } });
   custody.claim();
   const pids = () => (existsSync(join(outDir, 'pids.txt')) ? readFileSync(join(outDir, 'pids.txt'), 'utf8').split('\n').filter(Boolean).map(Number) : []);
   let released: ReturnType<typeof custody.release> | null;
@@ -113,8 +117,15 @@ test('spike: the engine\'s own MCP sign-in over the control protocol, against th
     fixture = await startOAuthFixture({ root, id: 'spike', mode: 'engine' });
     const inputFile = join(root, 'spike-input.json');
     writeFileSync(inputFile, JSON.stringify({ bin, configDir, project, resourceUrl: fixture.resourceUrl, outDir }));
-    const probe = spawnSync(process.execPath, [resolve(__dirname, '../spikes/p4-aggregator/m4-signin-spike.mjs'), inputFile], { encoding: 'utf8', timeout: 540_000 });
-    console.log(`spike probe exit ${probe.status} ${probe.signal ?? ''}\n${probe.stderr.slice(-4000)}`);
+    const child = spawn(process.execPath, [resolve(__dirname, '../spikes/p4-aggregator/m4-signin-spike.mjs'), inputFile], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 540_000 });
+    let stderr = '';
+    child.stderr.on('data', (chunk: Buffer) => (stderr = (stderr + chunk.toString()).slice(-4000)));
+    const stopAll = () => {
+      if (child.pid !== undefined) killTree(child.pid); // the probe, its engines and their `security` children
+      for (const pid of pids()) if (isAlive(pid)) killTree(pid);
+    };
+    const exit = await guardKeychain('the sign-in spike', () => new Promise<{ code: number | null; signal: string | null }>((done) => child.on('exit', (code, signal) => done({ code, signal }))), { onPrompt: stopAll });
+    console.log(`spike probe exit ${exit.code} ${exit.signal ?? ''}\n${stderr}`);
   } finally {
     for (const pid of pids()) if (isAlive(pid)) process.kill(pid, 'SIGKILL');
     const until = Date.now() + 15_000;
@@ -143,11 +154,15 @@ test('spike: the engine\'s own MCP sign-in over the control protocol, against th
 const CLI_MS = 120_000; // one CLI action, the engine's own start included, on a loaded runner
 const LINEAR = 'fa50c30c-9f62-4f94-b851-217868185db6';
 
-// The engine's own CLI against the launch's scratch configuration (and its scratch HOME, or the runner's).
-function engineCli(launch: MawsLaunch, args: string[]): string {
+// The engine's own CLI against the launch's scratch configuration (and its scratch HOME, or the runner's). fixB (c):
+// bounded, and run under the keychain prompt guard, which stops it at once should a prompt appear.
+async function engineCli(launch: MawsLaunch, args: string[]): Promise<string> {
   const engine = launch.realEngine!;
   const home = engine.scratch.home ?? process.env.HOME!;
-  return execFileSync('/usr/bin/env', ['-i', `HOME=${home}`, `CLAUDE_CONFIG_DIR=${engine.scratch.configDir}`, 'PATH=/usr/bin:/bin', 'DISABLE_AUTOUPDATER=1', 'TERM=dumb', engine.bin, ...args], { cwd: engine.scratch.projects[0], encoding: 'utf8', timeout: CLI_MS });
+  let child: ReturnType<typeof execFile> | null = null;
+  return guardKeychain(`claude ${args.join(' ')}`, () => new Promise<string>((done, failed) => {
+    child = execFile('/usr/bin/env', ['-i', `HOME=${home}`, `CLAUDE_CONFIG_DIR=${engine.scratch.configDir}`, 'PATH=/usr/bin:/bin', 'DISABLE_AUTOUPDATER=1', 'TERM=dumb', engine.bin, ...args], { cwd: engine.scratch.projects[0], encoding: 'utf8', timeout: CLI_MS }, (error, stdout) => (error ? failed(error) : done(stdout)));
+  }), { onPrompt: () => child?.pid !== undefined && killTree(child.pid) });
 }
 
 const userServers = (launch: MawsLaunch) => (JSON.parse(readFileSync(join(launch.realEngine!.scratch.configDir, '.claude.json'), 'utf8')) as { mcpServers?: Record<string, { type?: string; url?: string }> }).mcpServers ?? {};
@@ -251,7 +266,7 @@ test('add: Linear from Discover through the connector sheet and the real CLI; th
     await sheet.getByRole('button', { name: 'Remove', exact: true }).click();
     await expect(row(page, 'linear')).toHaveCount(0, { timeout: CLI_MS });
     expect(userServers(maws!).linear).toBeUndefined();
-    expect(engineCli(maws!, ['mcp', 'list'])).not.toContain('linear');
+    expect(await engineCli(maws!, ['mcp', 'list'])).not.toContain('linear');
   });
 });
 
@@ -265,10 +280,14 @@ test('sign-in: S1 then S2, connected here after a delayed consent, Cancel and a 
   const engine = maws.realEngine!;
   const [directory] = engine.scratch.projects;
   // The item the engine names from its CLAUDE_CONFIG_DIR as given (fact 2); the realpath's too, should the host resolve it.
-  const custodies = [...new Set([engine.scratch.configDir, realpathSync(engine.scratch.configDir)])].map((dir) => engineKeychainCustody(dir));
+  // fixB (a)(b): custody of both items each name derives, inside the launch's own scratch profile; the engine's own
+  // environment is checked by launchMaws (the login shell it is built from) and after each session starts (ps -E)
+  const scratchRoot = dirname(engine.scratch.configDir);
+  const custodies = [...new Set([engine.scratch.configDir, realpathSync(engine.scratch.configDir)])].map((dir) => engineKeychainCustody(dir, { scratchRoot: dir === engine.scratch.configDir ? scratchRoot : realpathSync(scratchRoot), engineEnv: { CLAUDE_CONFIG_DIR: dir } }));
   for (const custody of custodies) custody.claim();
   const pids = new Set<number>();
   let released: unknown[];
+  let closing: unknown = null; // a cleanup that failed: thrown once the items are released
   try {
     fixture = await startOAuthFixture({ root, id: 'signin', mode: 'engine' });
     const { resourceUrl } = fixture;
@@ -281,7 +300,10 @@ test('sign-in: S1 then S2, connected here after a delayed consent, Cancel and a 
       expect(start, 'the session starts with no message').toMatchObject({ status: 'starting' });
       await expect.poll(async () => value(await invoke(page, 'engine.sessions', undefined)).find((s) => s.appSessionId === created.appSessionId)?.process, { timeout: 90_000 }).toBe('ready');
       const pid = value(await invoke(page, 'engine.sessions', undefined)).find((s) => s.appSessionId === created.appSessionId)?.pid;
-      if (pid) pids.add(pid);
+      if (pid) {
+        pids.add(pid);
+        assertEngineProcessKeychainEnv(pid, engine.scratch.configDir); // fixB (b): the engine names its scratch items alone
+      }
       return created.appSessionId;
     };
     const stopSession = async (appSessionId: string) => {
@@ -319,7 +341,7 @@ test('sign-in: S1 then S2, connected here after a delayed consent, Cancel and a 
 
     const s1 = await startSession();
     await test.step('(a) with S1 running, a server added and signed in from S1; S2 reads it connected', async () => {
-      addServer('fx-a');
+      await addServer('fx-a');
       await refresh(['fx-a']);
       await consent(await signIn('fx-a'));
       // The result line follows S1's own mcp_status (Decision Log 14). Measured on 2.1.309 (gate run 40180917266): once
@@ -332,7 +354,7 @@ test('sign-in: S1 then S2, connected here after a delayed consent, Cancel and a 
       await test.info().attach('acceptance-9a-s1.json', { body: JSON.stringify({ line: await state('fx-a').innerText(), s1: await statusIn(s1, 'fx-a') }), contentType: 'application/json' });
     });
 
-    for (const name of ['fx-b', 'fx-c', 'fx-d', 'fx-e']) addServer(name);
+    for (const name of ['fx-b', 'fx-c', 'fx-d', 'fx-e']) await addServer(name);
     const s2 = await startSession();
     await test.step('(a) S2, started after the sign-in, reads the server connected', async () => {
       await expect.poll(() => statusIn(s2, 'fx-a'), { timeout: 60_000 }).toBe('connected');
@@ -372,11 +394,14 @@ test('sign-in: S1 then S2, connected here after a delayed consent, Cancel and a 
       await expect(row(page, 'fx-e').getByRole('button', { name: 'Sign in to fx-e' })).toHaveCount(0);
     });
   } finally {
-    await maws?.cleanup(); // the app and every engine it ran have exited before the Keychain item is touched
+    // the app and every engine it ran have exited before the Keychain items are touched; a cleanup that fails (a keychain
+    // prompt the launch's watch stopped the app on) still releases them, then fails the test
+    await maws?.cleanup().catch((error: unknown) => (closing = error));
     maws = null;
     await fixture?.close();
     fixture = null;
     released = custodies.map((custody) => custody.release({ enginePids: [...pids] }));
   }
+  if (closing) throw closing;
   expect(released.some((r) => (r as { found: boolean }).found), 'the sign-in stored the one item its scratch configuration names').toBe(true);
 });

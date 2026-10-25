@@ -12,6 +12,7 @@ import { writeScratchShellHome } from '../../test/support/shell-home';
 import { writeDiscoverScratch, type DiscoverScratch, type DiscoverScratchOptions } from './discover-scratch'; // P4-AGG M1
 import { shellsUnder, untilExited } from './processes';
 import { realEngine, type RealEngine } from './real-engine'; // P4-AGG M1
+import { assertEngineKeychainEnv, assertNoKeychainPrompt, killTree, loginShellEnvironment, watchKeychainPrompt } from './keychain-guard'; // fixB
 import { launchEnvironment } from './scratch-env';
 import { cornerOrigin, windowCorner } from './window-origin';
 
@@ -139,11 +140,19 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   if (discover) Object.assign(env, discover.env);
   Object.assign(env, opts.env); // C3
   if (opts.ownerConfigHome) delete env.CLAUDE_CONFIG_DIR; // P4-A1
+  // fixB keychain conditions (b)(c): a real engine on a Mac can reach the login keychain (under the runner's HOME it is
+  // the owner's). No prompt may be pending before the app starts; under the runner's HOME, the login shell the engine
+  // host builds every engine's environment from must name the scratch store and nothing that renames the engine's items
+  // (keychain-guard.ts); while the app runs, a prompt stops it at once and fails the test at its cleanup.
+  const keychainScene = Boolean(opts.realEngine) && process.platform === 'darwin';
+  let keychainWatch: { stop(): Error | null } | null = null;
 
   let app: ElectronApplication | null = null;
   let child: ReturnType<ElectronApplication['process']> | null = null;
   let closed = false;
   const cleanup = async () => {
+    const prompted = keychainWatch?.stop() ?? null;
+    keychainWatch = null;
     // P3-F (the terminal e2e's ENOTEMPTY, tracker 2026-10-17): a shell the app started saves its history into the shell
     // home as it exits on its terminal's hang-up, which can come after the app has closed, so the removal waits for the
     // shells it found before the close (never signalling one) and retries a directory that filled meanwhile.
@@ -155,9 +164,15 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
       if (left.length > 0) console.error(`[e2e] shells still running ${SHELL_EXIT_MS} ms after the app closed: ${left.map((p) => p.pid).join(', ')}`);
       if (ownsUserData) rmSync(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); // C5: a given profile is the caller's
     }
+    if (prompted) throw prompted;
+    if (keychainScene) assertNoKeychainPrompt('after the app closed');
   };
 
   try {
+    if (keychainScene) {
+      assertNoKeychainPrompt('before the app launches');
+      if (opts.realEngine?.home === 'runner') assertEngineKeychainEnv(loginShellEnvironment(env), env.CLAUDE_CONFIG_DIR!, 'the login shell the engine host captures');
+    }
     opts.prepare?.({ userData, shellHome: shellHome.dir, claudeConfigDir: env.CLAUDE_CONFIG_DIR }); // E6: inside, so a throw still cleans up
     const launchedAt = Date.now();
     const appArgs = opts.lang ? [`--lang=${opts.lang}`] : E2E_APP_ARGS; // P4-W2L
@@ -167,6 +182,7 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
     // Playwright's process() reads its live application channel, which may already be disposed before 'close' arrives.
     // Keep the actual ChildProcess while available, including for cleanup's failed-close fallback.
     child = app.process();
+    if (keychainScene) keychainWatch = watchKeychainPrompt(() => child?.pid !== undefined && killTree(child.pid)); // the app, its hosts, their engines and their `security` children
     launchedHook?.(app); // E4b
     app.on('close', () => (closed = true));
     const page = await app.firstWindow();

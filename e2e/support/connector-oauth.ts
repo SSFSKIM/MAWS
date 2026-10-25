@@ -18,12 +18,14 @@
 import { createHash } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import {
   OPEN_CONTROL, parseOAuthControl,
   type OAuthFixtureMode, type OAuthAdvertise, type OAuthControl, type OAuthLogEntry, type OAuthPhase, type OAuthRoute, type OAuthSecret, type OAuthSecretKind,
 } from './connector-oauth-core.mjs';
 import { isAlive } from './processes';
+import { assertEngineKeychainEnv, assertNoKeychainPrompt, SECURITY_MS, securityAgentRunning, type PromptProbe } from './keychain-guard';
 
 export const OAUTH_SERVER = join(__dirname, 'connector-oauth-server.mjs');
 
@@ -260,19 +262,33 @@ export function scanForSecrets(paths: Pick<OAuthFixturePaths, 'secrets'>, texts:
 // first 8 hex of sha256 of the config directory, which 1245553 takes from CLAUDE_CONFIG_DIR as given, NFC-normalised).
 // `engineEnv` is the engine's environment: the two variables that would make it name another item are refused.
 export function engineKeychainService(configDir: string, engineEnv: Record<string, string | undefined> = {}): string {
+  return `Claude Code-credentials-${engineKeychainSuffix(configDir, engineEnv)}`;
+}
+
+// fixB (b): the engine's other item for the same directory, its API key (`vj()` without a suffix: 447233, 827443), which
+// it looks up too; claimed absent alongside, so the engine reads no item that existed before the run.
+export function engineApiKeyService(configDir: string, engineEnv: Record<string, string | undefined> = {}): string {
+  return `Claude Code-${engineKeychainSuffix(configDir, engineEnv)}`;
+}
+
+function engineKeychainSuffix(configDir: string, engineEnv: Record<string, string | undefined>): string {
   if (configDir === '') throw new Error('engineKeychainService: no configuration directory');
   for (const name of ['CLAUDE_SECURESTORAGE_CONFIG_DIR', 'CLAUDE_CODE_CUSTOM_OAUTH_URL']) {
     if (engineEnv[name] !== undefined) throw new Error(`engineKeychainService: the engine runs with ${name}, under which it names another item`);
   }
-  return `Claude Code-credentials-${createHash('sha256').update(configDir.normalize('NFC')).digest('hex').slice(0, 8)}`;
+  return createHash('sha256').update(configDir.normalize('NFC')).digest('hex').slice(0, 8);
 }
 
+// fixB (a): the only names a custody may ever pass to `security`: an item derived from a scratch directory, never the
+// owner's bare credentials item nor any other.
+const DERIVED = /^Claude Code(-credentials)?-[0-9a-f]{8}$/;
+
 // `security <verb> -s <service>`'s exit status: 0 found (or deleted), 44 (errSecItemNotFound) not found, anything else
-// a failure that establishes nothing.
+// a failure that establishes nothing. Bounded (fixB (c)): a dialog would hold the call, so it is cut short and fails.
 export type SecurityCommand = (args: readonly string[]) => number;
 const systemSecurity: SecurityCommand = (args) => {
   try {
-    execFileSync('/usr/bin/security', [...args], { stdio: 'ignore', timeout: 15_000 });
+    execFileSync('/usr/bin/security', [...args], { stdio: 'ignore', timeout: SECURITY_MS });
     return 0;
   } catch (error) {
     const status = (error as { status?: number | null }).status;
@@ -284,40 +300,71 @@ const systemSecurity: SecurityCommand = (args) => {
 const ITEM_NOT_FOUND = 44; // `security`'s exit status for errSecItemNotFound
 
 export interface EngineKeychainCustody {
-  readonly service: string;
-  // Before the engine can store anything: the item must be absent, so whatever is there later is this run's.
+  readonly service: string; // the credential item
+  readonly services: readonly string[]; // every item the engine names for the directory: the credential, the API key
+  // Before the engine can store anything: every item must be absent, so whatever is there later is this run's.
   claim(): void;
   // After every engine that ran under the directory has exited (their pids; none when none ran): deletes exactly the
-  // claimed item if it is there and verifies it gone. Nothing else is ever looked up or removed.
+  // claimed items that are there and verifies them gone. Nothing else is ever looked up or removed.
   release(proof: { enginePids: readonly number[] }): { service: string; found: boolean; deleted: boolean };
 }
 
-export function engineKeychainCustody(configDir: string, options: { engineEnv?: Record<string, string | undefined>; security?: SecurityCommand; alive?: (pid: number) => boolean } = {}): EngineKeychainCustody {
+export interface EngineKeychainCustodyOptions {
+  scratchRoot: string; // fixB (a): the run's own scratch directory, which `configDir` must lie inside
+  engineEnv: Record<string, string | undefined>; // the engine's environment: it must name `configDir` and nothing else
+  security?: SecurityCommand;
+  alive?: (pid: number) => boolean;
+  promptPending?: PromptProbe; // fixB (c): SecurityAgent by default
+}
+
+export function engineKeychainCustody(configDir: string, options: EngineKeychainCustodyOptions): EngineKeychainCustody {
+  const root = resolve(options.scratchRoot);
+  const inside = relative(root, resolve(configDir));
+  if (inside === '' || inside.startsWith('..') || isAbsolute(inside)) throw new Error(`engineKeychainCustody: ${configDir} is not inside the run's scratch ${options.scratchRoot}`);
+  if (resolve(configDir) === resolve(homedir(), '.claude') || root === resolve(homedir())) throw new Error(`engineKeychainCustody: ${configDir} is the owner's configuration, not a scratch one`);
+  assertEngineKeychainEnv(options.engineEnv, configDir, 'engineKeychainCustody');
   const service = engineKeychainService(configDir, options.engineEnv);
-  const security = options.security ?? systemSecurity;
+  const services = [service, engineApiKeyService(configDir, options.engineEnv)];
+  const run = options.security ?? systemSecurity;
   const alive = options.alive ?? isAlive;
+  const probe = options.promptPending ?? securityAgentRunning;
+  // fixB (a)(b): every call names one of this directory's derived items, by `-s` alone: an existence lookup (no `-w`, no
+  // `-g`: no password or attribute is printed) or the deletion of a claimed item. (c): no prompt before or after it.
+  const security = (verb: 'find-generic-password' | 'delete-generic-password', name: string) => {
+    if (!services.includes(name) || !DERIVED.test(name)) throw new Error(`engineKeychainCustody: refusing to name "${name}" to security`);
+    assertNoKeychainPrompt(`before security ${verb}`, probe);
+    const status = run([verb, '-s', name]);
+    assertNoKeychainPrompt(`after security ${verb}`, probe);
+    return status;
+  };
   // Fail closed: only the item-not-found status means absent; any other lookup failure throws.
-  const present = () => {
-    const status = security(['find-generic-password', '-s', service]);
+  const present = (name: string) => {
+    const status = security('find-generic-password', name);
     if (status === 0) return true;
     if (status === ITEM_NOT_FOUND) return false;
-    throw new Error(`could not look up the Keychain item "${service}" (security exited ${status})`);
+    throw new Error(`could not look up the Keychain item "${name}" (security exited ${status})`);
+  };
+  const remove = (name: string) => {
+    if (!present(name)) return false;
+    const status = security('delete-generic-password', name);
+    if (status !== 0) throw new Error(`could not delete the Keychain item "${name}" (security exited ${status})`);
+    if (present(name)) throw new Error(`the Keychain item "${name}" is still in the Keychain after its deletion`);
+    return true;
   };
   let claimed = false;
   return {
     service,
+    services,
     claim() {
-      if (present()) throw new Error(`the Keychain item "${service}" exists before the run; it is not this run's to delete`);
+      for (const name of services) if (present(name)) throw new Error(`the Keychain item "${name}" exists before the run; it is not this run's to delete`);
       claimed = true;
     },
     release({ enginePids }) {
       if (!claimed) throw new Error(`the Keychain item "${service}" was never claimed by this run`);
       for (const pid of enginePids) if (alive(pid)) throw new Error(`engine ${pid} is still alive; the Keychain item "${service}" is released only after every engine has exited`);
-      if (!present()) return { service, found: false, deleted: false };
-      const status = security(['delete-generic-password', '-s', service]);
-      if (status !== 0) throw new Error(`could not delete the Keychain item "${service}" (security exited ${status})`);
-      if (present()) throw new Error(`the Keychain item "${service}" is still in the Keychain after its deletion`);
-      return { service, found: true, deleted: true };
+      const deleted = remove(service);
+      remove(services[1]!);
+      return { service, found: deleted, deleted };
     },
   };
 }

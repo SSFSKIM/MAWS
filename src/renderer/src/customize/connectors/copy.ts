@@ -62,6 +62,7 @@ export const CONNECTORS = {
     submitting: 'Finishing sign-in…',
     watching_status: 'Waiting for the server to connect…',
   } satisfies Record<Step, string>,
+  alreadyConnected: 'Already connected in that session',
   signedIn: { here: 'Signed in · connected here', new_sessions: 'Signed in · available in new sessions' } as const,
   didntFinish: (why: string) => `Sign-in didn’t finish: ${why}`,
   reason: {
@@ -70,6 +71,7 @@ export const CONNECTORS = {
     denied: 'the sign-in was declined',
     engine: 'the engine refused it',
     session_exited: 'the session ended',
+    other_entry: 'that session uses another entry of this name',
   } satisfies Record<Reason, string>,
   cancelled: 'cancelled',
   // Discover

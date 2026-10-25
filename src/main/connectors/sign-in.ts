@@ -4,7 +4,8 @@
 // at once and the steps arrive as `connectors.signInChanged`, because consent takes as long as the person takes and
 // every call into the engine host must answer within the supervisor's 10 s.
 //
-//   starting         the receipt is issued; MAWS's loopback listener (127.0.0.1, an ephemeral port, /callback) comes up
+//   starting         the receipt is issued; the session's status read first (a server it already has connected ends
+//                    done at once, its message ALREADY_CONNECTED, no flow started: scalpel-2#3); MAWS's loopback listener (127.0.0.1, an ephemeral port, /callback) comes up
 //                    and the engine is asked `mcp_authenticate` with it as the redirect URI (again, for up to CONFIG_MS,
 //                    while it answers "Server not found" for a server added before its config poll read it)
 //   waiting_browser  the engine answered an authorization URL; MAWS opens it in the system browser
@@ -19,7 +20,8 @@
 //                    connected within SETTLE_MS (`'new_sessions'`: a server added after the session started is never in
 //                    its mcp_status, findings-m4 5; Decision Log 14)
 //   failed           with a reason: no_session, timeout, denied (the callback carried `error`), engine (its words),
-//                    session_exited
+//                    session_exited, other_entry (before anything else: the session's engine uses another entry of the
+//                    name than the one asked for, so it would sign that one in; ./sign-in-entry.ts, scalpel-2#1)
 //   cancelled        `connectors.signInCancel`, or a second press for the same configured connector from any session
 //                    (Decision Log 14: one sign-in per connector at a time, since every session's engine writes the same
 //                    credential). A connector is its configuration: name and scope, and the directory for a project or
@@ -33,7 +35,8 @@
 // store (./oauth-store.ts) is not involved. `mcp_set_servers` is never used (it drops the session's SDK server).
 import { randomUUID } from 'node:crypto';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
-import type { ConnectorSignInChanged } from '@shared/ipc/schema/connectors';
+import { CONNECTOR_ALREADY_CONNECTED, type ConnectorSignInChanged } from '@shared/ipc/schema/connectors';
+import { entryRefusal } from './sign-in-entry';
 import { OAUTH_CALLBACK_HOST, type ListenLoopback, type LoopbackListener, type LoopbackReply, type LoopbackRequest } from './oauth-callback';
 
 export const CALLBACK_MS = 5 * 60_000;
@@ -44,9 +47,12 @@ export const SETTLE_MS = 15_000; // after an accepted custom callback: how long 
 export const CONFIG_MS = 10_000;
 const CONFIG_POLL_MS = 1_000;
 const NOT_READ_YET = /^Server not found: /;
+// scalpel-2#3: the end of a sign-in for a server the session already had connected before anything started: no flow is
+// started (no consent page opened), since a connection that was already there is no evidence of one.
+export const ALREADY_CONNECTED = CONNECTOR_ALREADY_CONNECTED;
 const REPLY_FLUSH_MS = 50; // the browser's page written before the listener closes
 
-type SignInCommand = 'session.mcpAuthenticate' | 'session.mcpOAuthCallback' | 'session.mcpReconnect' | 'session.mcpStatus';
+type SignInCommand = 'session.mcpAuthenticate' | 'session.mcpOAuthCallback' | 'session.mcpReconnect' | 'session.mcpStatus' | 'customization.serverEndpoints';
 export interface SignInHost {
   call<N extends SignInCommand & CommandName>(name: N, input: CommandInput<N>): Promise<CommandResult<N>>;
 }
@@ -58,6 +64,7 @@ export interface SignInDeps {
   emit(event: ConnectorSignInChanged): void;
   ready(appSessionId: string): boolean; // the session's process is ready now
   onSessionGone(listener: (appSessionId: string) => void): () => void; // its process left ready
+  check(entry: ConnectorConfiguration & { path: string; appSessionId: string }): Promise<string | null>; // why the session's engine does not use this entry, or null
   callbackMs?: number;
   pollMs?: number;
   settleMs?: number;
@@ -76,7 +83,7 @@ export interface ConnectorConfiguration {
 export const connectorKey = ({ name, scope, cwd }: ConnectorConfiguration): string => [scope, scope === 'user' ? '' : (cwd ?? ''), name].join('\u0000');
 
 export interface SignIn {
-  start(input: ConnectorConfiguration & { appSessionId: string }): { opId: string };
+  start(input: ConnectorConfiguration & { path: string; appSessionId: string }): { opId: string };
   cancel(opId: string): boolean;
   stop(): void;
 }
@@ -95,6 +102,7 @@ interface Operation {
   opId: string;
   name: string;
   connector: string; // connectorKey
+  configuration: ConnectorConfiguration & { path: string }; // the entry asked for
   appSessionId: string;
   state: State;
   listener: LoopbackListener | null;
@@ -112,6 +120,18 @@ export function createSignIn(deps: SignInDeps): SignIn {
   const byConnector = new Map<string, string>(); // a configured connector (connectorKey) → its live opId
   const byFlow = new Map<string, string>(); // the engine's flow (flowKey: the session and the server name) → its live opId
   const flowKey = (op: { appSessionId: string; name: string }) => `${op.appSessionId}\u0000${op.name}`;
+  // scalpel-2#2: the engine's mcp_authenticate sets its flow up after discovery and installs it when done, so a call still
+  // in flight could replace a later call's flow. Each flow's calls go one after another: a replacement's waits for the
+  // cancelled operation's to answer (its answer is then dropped), and a call whose operation ended first is not sent.
+  const authTail = new Map<string, Promise<unknown>>(); // flowKey → the last mcp_authenticate sent or queued for it
+  const authenticateInOrder = (op: Operation, input: CommandInput<'session.mcpAuthenticate'>) => {
+    const key = flowKey(op);
+    const call = (authTail.get(key) ?? Promise.resolve()).then(() => (live(op) ? ask(op, 'session.mcpAuthenticate', input) : null));
+    const tail = call.catch(() => {});
+    authTail.set(key, tail);
+    void tail.then(() => authTail.get(key) === tail && authTail.delete(key));
+    return call;
+  };
 
   const live = (op: Operation) => !TERMINAL.has(op.state);
   const move = (op: Operation, state: State, extra: { reason?: Reason; message?: string | null; where?: 'here' | 'new_sessions' } = {}) => {
@@ -192,6 +212,12 @@ export function createSignIn(deps: SignInDeps): SignIn {
 
   async function run(op: Operation): Promise<void> {
     if (!deps.ready(op.appSessionId)) return fail(op, 'no_session');
+    const refusal = await deps.check({ ...op.configuration, appSessionId: op.appSessionId });
+    if (!live(op)) return;
+    if (refusal !== null) return fail(op, 'other_entry', refusal);
+    const before = await serverOf(op); // the baseline: a connection already there is not this flow's
+    if (before === undefined || !live(op)) return;
+    if (before?.status === 'connected') return move(op, 'done', { where: 'here', message: ALREADY_CONNECTED });
     let expected: string | null = null; // the engine's state, once it answered
     let port = 0;
     let endWait = () => {}; // clears waiting_callback's deadline once the callback is taken
@@ -214,7 +240,7 @@ export function createSignIn(deps: SignInDeps): SignIn {
     }
     if (!live(op)) return void op.listener?.close();
     port = op.listener.port;
-    const authenticate = () => ask(op, 'session.mcpAuthenticate', { appSessionId: op.appSessionId, serverName: op.name, redirectUri: `http://${OAUTH_CALLBACK_HOST}:${port}/callback` });
+    const authenticate = () => authenticateInOrder(op, { appSessionId: op.appSessionId, serverName: op.name, redirectUri: `http://${OAUTH_CALLBACK_HOST}:${port}/callback` });
     const notReadBy = Date.now() + configMs;
     let auth = await authenticate();
     while (auth !== null && !auth.ok && NOT_READ_YET.test(auth.message) && Date.now() < notReadBy) {
@@ -246,14 +272,14 @@ export function createSignIn(deps: SignInDeps): SignIn {
   });
 
   return {
-    start({ name, scope, cwd, appSessionId }) {
+    start({ name, scope, cwd, path, appSessionId }) {
       const connector = connectorKey({ name, scope, cwd });
       // the connector's running sign-in, and the one driving this session's engine flow for the name
       for (const previous of new Set([byConnector.get(connector), byFlow.get(flowKey({ appSessionId, name }))])) {
         const op = previous === undefined ? undefined : operations.get(previous);
         if (op) move(op, 'cancelled');
       }
-      const op: Operation = { opId: randomUUID(), name, connector, appSessionId, state: 'starting', listener: null, timers: new Set() };
+      const op: Operation = { opId: randomUUID(), name, connector, configuration: { name, scope, cwd, path }, appSessionId, state: 'starting', listener: null, timers: new Set() };
       operations.set(op.opId, op);
       byConnector.set(connector, op.opId);
       byFlow.set(flowKey(op), op.opId);
@@ -283,7 +309,7 @@ export interface SignInServiceDeps {
   register: typeof import('../ipc/router').registerMainHandler;
   emit(name: 'connectors.signInChanged', payload: ConnectorSignInChanged): unknown;
   host: SignInHost;
-  onSessionStatus(listener: (payload: { appSessionId: string; status: { process: string } }) => void): () => void;
+  onSessionStatus(listener: (payload: { appSessionId: string; status: { process: string; cwd: string } }) => void): () => void;
   onHostLost(listener: () => void): () => void; // the engine host left ready: every session with it
   open(url: string): boolean;
   listen: ListenLoopback;
@@ -291,17 +317,25 @@ export interface SignInServiceDeps {
 
 // `connectors.signIn` and `connectors.signInCancel`, over the sessions main hears ready from the engine host.
 export function startSignIn(deps: SignInServiceDeps): { stop(): void } {
-  const ready = new Set<string>();
+  const ready = new Map<string, string>(); // a ready session → its directory
   const goneListeners = new Set<(appSessionId: string) => void>();
   const gone = (appSessionId: string) => {
     ready.delete(appSessionId);
     for (const listener of goneListeners) listener(appSessionId);
   };
   const offStatus = deps.onSessionStatus(({ appSessionId, status }) => {
-    if (status.process === 'ready') ready.add(appSessionId);
+    if (status.process === 'ready') ready.set(appSessionId, status.cwd);
     else if (ready.has(appSessionId)) gone(appSessionId);
   });
-  const offHost = deps.onHostLost(() => [...ready].forEach(gone));
+  const offHost = deps.onHostLost(() => [...ready.keys()].forEach(gone));
+  // the entries the session's engine reads, from its own directory, as the inventory reads them (scalpel-2#1)
+  const check: SignInDeps['check'] = async ({ appSessionId, ...requested }) => {
+    const cwd = ready.get(appSessionId);
+    if (cwd === undefined) return 'that session is not ready';
+    const read = await deps.host.call('customization.serverEndpoints', { cwd });
+    if (!read.ok) return `that session’s configuration could not be read: ${read.error.message}`;
+    return entryRefusal(requested, cwd, read.value.servers);
+  };
   const signIn = createSignIn({
     host: deps.host,
     listen: deps.listen,
@@ -309,8 +343,9 @@ export function startSignIn(deps: SignInServiceDeps): { stop(): void } {
     emit: (event) => void deps.emit('connectors.signInChanged', event),
     ready: (appSessionId) => ready.has(appSessionId),
     onSessionGone: (listener) => (goneListeners.add(listener), () => goneListeners.delete(listener)),
+    check,
   });
-  deps.register('connectors.signIn', ({ name, scope, cwd, appSessionId }) => signIn.start({ name, scope, cwd, appSessionId }));
+  deps.register('connectors.signIn', ({ name, scope, cwd, path, appSessionId }) => signIn.start({ name, scope, cwd, path, appSessionId }));
   deps.register('connectors.signInCancel', ({ opId }) => ({ cancelled: signIn.cancel(opId) }));
   return {
     stop() {
