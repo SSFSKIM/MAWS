@@ -735,6 +735,7 @@ Test seams (M1):
   - `ConfirmSheet` serves every plugin action, so its uninstall, enable, update and marketplace sheets fold the same way. The connector Remove sheet folds too, for consistency.
   - "The files they write" is the sheet's whole writes block: the file list, the engine's own records line, and the dependency-cache and override notes. "Also uninstalls" and the reload line stay in view, because they are consequences of the action, not files.
   - While the engine is still resolving, or when it errors, the sheet offers no Details: there is nothing to detail yet.
+  - Where a sheet shows no scope selector but a scope applies, the scope stays in view as a plain line in the selector's words ("Scope: User"). This covers the connector add sheet on the user configuration's page, every connector remove sheet, and a scoped marketplace removal (the review's P2, 7b2725ff5).
   - The 1280×820 screenshots are taken with Details closed: `discover-install-sheet` (the one-step install), `discover-add-then-install-sheet` (new) and `discover-connector-sheet`.
   Rationale: the owner's taste. The command is the audit, not the decision, except where a marketplace declares one.
   Date/Author: 2026-10-25, the owner, through the architect; built by the executing session.
