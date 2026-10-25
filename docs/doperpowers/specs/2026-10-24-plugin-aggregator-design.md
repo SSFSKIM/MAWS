@@ -4,13 +4,14 @@ Parent: `docs/doperpowers/plans/2026-10-19-p4-smoothing.md` (P4, the UX wave), D
 
 ## Purpose
 
-The owner wants a way to find new capabilities for their agents without leaving MAWS. Today Customize can list plugins from marketplaces they have already added, one marketplace at a time. Skills have no discovery at all, and an MCP server is added by editing configuration by hand.
+The owner wants a way to find new capabilities for their agents without leaving MAWS. Today Customize can list plugins from marketplaces they have already added and from the engine's built-in copy of Anthropic's directory, one list at a time. Skills have no discovery at all, and an MCP server is added by editing configuration by hand.
 
 After this work, each of Customize's three tabs (Skills, Connectors, Plugins) has **My items** (what is installed or configured) and **Discover** (what exists). Discover draws from:
 - the sources the owner named: Anthropic's official and community marketplaces, the owner's own doperpowers and cua, and Anthropic's, Notion's, Canva's and Carta's skill and plugin repositories;
-- Anthropic's public directory, which also lists MCP servers such as Linear.
+- Anthropic's public directory, which also lists MCP servers such as Linear;
+- the engine's own built-in copy of that directory, which is what installs a directory plugin.
 
-The owner can search everything at once, see who published each item and how far it was reviewed, and add it with one confirmation. A connector can be signed in to from MAWS.
+The owner can search everything at once, see who published each item, how far it was reviewed and how many people installed it, and add it with one confirmation. A connector can be signed in to from MAWS.
 
 To see it working, open Customize → Plugins → Discover, search "legal", press + on a result, confirm, and find it under My items.
 
@@ -18,12 +19,13 @@ Discover is for the person. Agents get no catalog, no discovery tool and no sugg
 
 ## Progress
 
-- [x] (2026-10-24 23:50Z) Design approved by the owner (four rulings, below). Research hand-back recorded in this spec.
-- [ ] Spec reviews (design and buildability).
-- [ ] M1 — the catalog.
-- [ ] M2 — Discover for Plugins and Skills.
-- [ ] M3 — Connectors: Discover, add, sign in.
-- [ ] M4 — acceptance at 1280 and 1512, whole Mac matrix, branch review.
+- [x] (2026-10-24 23:50Z) Design approved by the owner (six rulings, below). Research hand-back recorded in this spec.
+- [x] (2026-10-25 02:30Z) Spec reviews (design, 13 findings; buildability, 7 findings) and the architect's rulings on them folded in (Decision Log, second entry). The facts section was re-measured against the live directory, the 2.1.309 engine and the e2e harness.
+- [ ] M1 — the real-engine test harness and the catalog fixtures.
+- [ ] M2 — the catalog.
+- [ ] M3 — Discover for Plugins and Skills.
+- [ ] M4 — Connectors: the spike, then Discover, add, remove and sign in.
+- [ ] M5 — acceptance at 1280 and 1512, whole Mac matrix, branch review.
 
 ## The owner's rulings (2026-10-24)
 
@@ -34,227 +36,263 @@ Discover is for the person. Agents get no catalog, no discovery tool and no sugg
 - **Community items are shown and labelled**, in search and in All, but not on the featured shelves. The alternative, hiding them behind a filter, lost because the label carries the risk honestly.
 - **Connectors come from Anthropic's directory.** The official MCP Registry was the alternative; it lost because its listing verifies only who published a server, not whether the server is safe, and it adds thousands of entries.
 
-## What exists today (master c2b54f62b)
+## What exists today (master b51430679)
 
 - `src/renderer/src/customize/CustomizeView.tsx`:
-  - Customize has Plugins, Skills and MCP servers tabs, and a selector for user configuration or a project.
+  - Customize has Plugins, Skills and MCP servers tabs, and a selector for user configuration or a project (its `cwd`).
   - It attaches only to an engine process that is already ready in exactly that directory. Opening it never starts a session.
 - **Plugins** embeds `PluginsLibrary` (`src/renderer/src/widgets/PluginsWidget.tsx`), which already has:
   - My items and Browse;
   - Add marketplace and Manage marketplaces;
-  - an install confirmation (`widgets/plugins/ConfirmSheet.tsx`) with a choice of scope (user, project or local);
-  - the exact command shown;
+  - an install confirmation (`widgets/plugins/ConfirmSheet.tsx`) with a choice of scope (user, project or local) and the exact command;
   - command-hash acceptance for marketplaces that declare commands;
-  - progress, and a reload outcome per session.
-- **Browse lists only what the engine's `claude plugin list --json --available` returns:** the engine's built-in directory plus marketplaces already added. Its items carry the id, name, marketplace, description, version, source and an optional install count (`src/shared/ipc/schema/plugins.ts` `AvailablePluginSchema`), and no publisher, category or review fields.
+  - progress, and a reload outcome per session;
+  - install counts on the cards that have one ("1.3M installs"), from the engine's own number.
+- **Browse lists what the engine's `claude plugin list --json --available` returns:** the marketplaces already added plus the engine's built-in **Anthropic Directory** marketplace, named `anthropic-plugin-directory` (fact 2). Its items carry the id, name, marketplace, description, version, source and an optional install count (`src/shared/ipc/schema/plugins.ts` `AvailablePluginSchema`), and no publisher, category or review fields. `plugins.list`, `plugins.available` and `marketplaces.list` take the Customize page's `cwd`: what counts as installed depends on it.
 - **Engine mutations:**
-  - `src/shared/plugins/cli.ts` builds the `claude plugin … --json` argv.
+  - `src/shared/plugins/cli.ts` builds the `claude plugin … --json` argv; `marketplace-add` already takes a scope.
   - `src/engine-host/plugins/runner.ts` spawns the unmodified engine binary for it.
-  - `src/engine-host/plugins/reload-after.ts` reloads ready sessions afterwards.
+  - `src/engine-host/plugins/reload-after.ts` reloads ready sessions afterwards, after the host's settings watcher has seen the CLI's write.
 - **Skills** reads the disk inventory (`src/engine-host/customization/inventory.ts`) and has no discovery or installer.
 - **MCP servers** shows the servers configured on disk, and separately the live ones in an attached session, through `widgets/McpWidget`. There is no add or remove.
+- **The engine host's bounded session calls:** `session.mcpStatus` (a read), `session.mcpReconnect` and `session.mcpToggle` (operations with a receipt), in `src/shared/ipc/schema/session.ts` and `src/engine-host/operations.ts`. Every call from main to a host answers within the supervisor's 10 s (`REQUEST_TIMEOUT_MS`, `src/main/hosts/supervisor.ts`) or fails with `timeout`.
 - **MAWS's own connector connections:**
-  - `src/main/connectors/*` implements MAWS's own connections, including full OAuth with sealed storage.
+  - `src/main/connectors/*` implements MAWS's own connections, including full OAuth with sealed storage; `oauth-callback.ts` is a loopback listener on 127.0.0.1, port 0, path `/callback`.
   - Those credentials are MAWS's; they do not sign the engine in.
   - `src/engine-host/mcp-call.ts` already recognises the engine's `needs_auth` refusal, which asks for `mcp_authenticate`.
+- **Slash commands never reach the engine from the composer:** `src/renderer/src/composer/editor/controller.ts` intercepts `/<word>` and opens MAWS's own widget, and MAWS's `/mcp` widget only reconnects and toggles. The engine's own `/mcp` TUI is reachable through MAWS's terminal surface (`pty.*`, `src/shared/ipc/names/pty.ts`), which runs `claude` in a project directory.
+- **The e2e harness** (fact 6): its launcher writes a version-only stub engine unless `MAWS_E2E_ENGINE_BIN` names a binary; the OAuth fixture `e2e/support/connector-oauth.ts` serves MAWS alone (it refuses a live engine and admits only `127.0.0.1` callbacks). No e2e group installs a plugin through the real CLI today.
 
-## Facts the design rests on (research, 2026-10-24)
+## Facts the design rests on (research 2026-10-24, re-measured 2026-10-25)
 
-1. **All fourteen named repositories exist and are Claude Code plugin marketplaces** (`.claude-plugin/marketplace.json` at the root), including those described as skill directories.
+1. **All fourteen named repositories exist and are Claude Code plugin marketplaces** (`.claude-plugin/marketplace.json` at the root), including those described as skill directories. Their raw manifests answer with an ETag and `Cache-Control: max-age=300`.
 
-| Repository | Marketplace name | Plugins | Ownership |
+| Repository | Marketplace name | Plugins | Ownership class |
 |---|---|---:|---|
-| anthropics/claude-plugins-official | claude-plugins-official | 315 | Anthropic |
-| anthropics/claude-plugins-community | claude-community | 2,283 | Anthropic (scanned mirror) |
-| SSFSKIM/doperpowers | doperpowers | 5 | owner |
-| SSFSKIM/cua | cua | 1 | owner |
-| anthropics/skills | anthropic-agent-skills | 5 | Anthropic |
-| anthropics/financial-services | claude-for-financial-services | 19 | Anthropic |
-| anthropics/knowledge-work-plugins | knowledge-work-plugins | 123 | Anthropic |
-| anthropics/claude-for-legal | claude-for-legal | 13 | Anthropic |
-| anthropics/life-sciences | life-sciences | 2 | Anthropic |
-| anthropics/k12-teacher-skills | k12-teacher-skills | 1 | Anthropic |
-| anthropics/claude-for-financial-advisors | claude-for-financial-advisors | 1 | Anthropic |
-| makenotion/claude-code-notion-plugin | notion-plugin-marketplace | 1 | Notion |
-| canva-sdks/canva-skills | canva-skills | 1 | Canva |
-| carta/plugins | carta-plugins | 3 | Carta |
+| anthropics/claude-plugins-official | claude-plugins-official | 315 | anthropic |
+| anthropics/claude-plugins-community | claude-community | 2,283 | community (Anthropic's scanned mirror) |
+| SSFSKIM/doperpowers | doperpowers | 5 | added (the owner's; not a seed, fact 1a) |
+| SSFSKIM/cua | cua | 1 | added (the owner's; not a seed) |
+| anthropics/skills | anthropic-agent-skills | 5 | anthropic |
+| anthropics/financial-services | claude-for-financial-services | 19 | anthropic |
+| anthropics/knowledge-work-plugins | knowledge-work-plugins | 123 | anthropic |
+| anthropics/claude-for-legal | claude-for-legal | 13 | anthropic |
+| anthropics/life-sciences | life-sciences | 2 | anthropic |
+| anthropics/k12-teacher-skills | k12-teacher-skills | 1 | anthropic |
+| anthropics/claude-for-financial-advisors | claude-for-financial-advisors | 1 | anthropic |
+| makenotion/claude-code-notion-plugin | notion-plugin-marketplace | 1 | partner |
+| canva-sdks/canva-skills | canva-skills | 1 | partner |
+| carta/plugins | carta-plugins | 3 | partner |
 
-   Entries mix local folders, remote git repositories and pinned subdirectories. An entry's repository is often not the marketplace's.
+   1a. The owner's engine configuration already lists doperpowers and cua as marketplaces (`~/.claude/plugins/known_marketplaces.json`, read once, read-only: claude-community, claude-plugins-official, cua, daily-journal, designer, doperpowers, ptc-tool). They reach Discover as marketplaces the person added, not as built-in seeds.
+   1b. Entries mix local folders, remote git repositories and pinned subdirectories: 2,637 of 2,773 entries pin a sha, tag or branch. 262 of the official marketplace's 315 entries point at third-party repositories (`external_plugins/*` and vendors' own repositories). 216 (repository, path) pairs are listed by more than one of the fourteen, 107 of them at different refs. Only 13 entries declare `skills`; 2 declare `mcpServers`; none declares hooks.
 
 2. **The engine (2.1.309, unmodified).**
-   - **Installing:** `plugin marketplace add <owner/repo|url|path> --scope user|project|local` (default user), then `plugin install <name>@<marketplace> --scope … --json`. A bare skills folder is refused (`manifest_missing`); wrapped in a marketplace entry with `strict:false`, the same skills install and uninstall (scratch probe).
+   - **Installing:** `plugin marketplace add <owner/repo|url|path> --scope user|project|local` (default user, `--json`), then `plugin install <name>@<marketplace> --scope … --json`. A bare skills folder is refused (`manifest_missing`); wrapped in a marketplace entry with `strict:false`, the same skills install and uninstall (scratch probe). The one-step `plugin install <name> --marketplace <source>` always adds the marketplace in user settings, whatever scope was chosen (cli.pretty.js 1136328).
+   - **The built-in Anthropic Directory marketplace.** The engine carries a marketplace named `anthropic-plugin-directory`, displayed "Anthropic Directory" (cli.pretty.js 38626, 38649; module 779797 to 780468). It walks `/api/directory/plugins?visibility=public` itself, caches the walk under the plugins folder (`plugin-directory-cache-v2.json`), turns every listing that has a 40-hex `reviewed_commit`, a `claude_code` surface and a well-formed repository URL into a marketplace entry `{source: 'git-subdir' | 'url', url, path?, sha: reviewed_commit}`, skipping the rest (`other_surface`, `no_pin`, `bad_url`, `bad_path`), and derives each entry's name from the listing's name, path or repository with a suffix on collision (780196 to 780260). `plugin install <entry>@anthropic-plugin-directory` installs it; `--replace` switches a plugin "between Anthropic Directory and Anthropic's official marketplaces". It is on by default (flag default, 565164), can be turned off by an on/off file the engine reads in the plugins folder (`plugin-directory-marketplace.json`, `{"enabled": false}`; M1 confirms the path), and is gated by the organisation policy `allow_plugin_directory_search`. Its entry names are the engine's and are not computable from a directory record; `plugin list --json --available` reports them with each entry's `source`.
+   - **Install counts and contents for the official marketplace:** the engine fetches `https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/plugin-stats/plugin-details.json` with no credentials (730045 to 730146) and caches it 24 h. Today it holds, for the 315 `<name>@claude-plugins-official` ids, `unique_installs` (313 have one), `components` by name (commands, agents, skills, hooks, mcpServers), `last_updated` and `version`. `plugin list --available` reports it as `installCount`, which Browse shows.
    - **Plugin contents:** a plugin's skills, hooks and MCP servers load as parts of the plugin.
    - **Reload limit:** MCP changes from a plugin take effect at the next session (cli.pretty.js around 331433).
-   - **Remote MCP servers:** `claude mcp add --transport http <name> <url> --scope local|user|project` adds one (default **local**).
-   - **Signing in:** the engine signs in to a server through the control requests `mcp_authenticate {serverName, redirectUri}` and `mcp_oauth_callback_url {serverName, callbackUrl}` (cli.pretty.js 412968 and 412974; the handler near 455531).
+   - **Remote MCP servers:** `claude mcp add --transport http|sse <name> <url> --scope local|user|project` (default **local**; 390606 to 390619). It also takes `-H` headers, `--client-id`, `--client-secret` and `--callback-port` for servers that need a pre-registered client. It has no `--json`; it prints `Added <transport> MCP server <name> with URL: <url> to <scope> config` on success. It does not refuse a name already configured (none found in its add path; M4 confirms). A name may hold letters, digits, hyphens and underscores.
+   - **Signing in:** the control request `mcp_authenticate {serverName, redirectUri}` (handler at 856438) resolves the server among the session's loaded clients and its startup configuration; a name it does not know answers "Server not found". For a known server it answers `{authUrl, requiresUserAction, callbackExpected, redirectScheme: 'custom' | 'localhost', state, callbackPort?}` after registering the client, and never opens a browser. It uses the request's `redirectUri` only when the server has no static `clientId`; if the authorization server rejects that URI it retries with its own `localhost:<callbackPort>/callback` listener and answers `redirectScheme: 'localhost'`, in which case the engine receives the callback itself. `mcp_oauth_callback_url {serverName, callbackUrl}` accepts a URL carrying `code` or `error` whose `state` matches the flow in progress; otherwise "No active OAuth flow" or "Callback URL not accepted". `mcp_set_servers {servers}` (856203) loads servers into a running session as dynamic servers. Credentials go to the macOS Keychain under service names of the form `Claude Code-credentials-<hash>` (`spikes/protocol-probe/findings-p4-r8-mcp-servers.txt` 6).
 
-3. **Anthropic's directory.**
-   - **Endpoints:**
-     - `GET https://api.anthropic.com/api/directory/plugins` returns `{data, facets, next_page, omitted}`.
-     - `GET https://api.anthropic.com/api/directory/servers` returns `{servers, total, next_cursor, stale_feeds}`.
-     - Both answer HTTP 200 with no cookies or keys.
-   - **What a plugin record carries:** the publisher, source and repository, components (skills, MCP and others), access implications, review and scan checks, compatibility, install actions, media, taxonomy and optional metrics.
-   - **What a server record carries:** the author, category, tools, documentation, privacy policy, `verified_tier`, and `remote` (URL, transport, auth).
-   - **Where Desktop reads them:** `/Users/new/claude-desktop-re/readable/app-3.6556.2/web/app/v1/c310cdd26-CSnNH8yH.js` 1090 to 1404, and `shared-156-BLTosN8U.js` 16824 to 17285.
-   - **Size:** a full anonymous walk (`?limit=5000&visibility=commercial,public&verified_tier=anthropic,partner,community`) returned 10,854 plugin records.
-   - **Gaps:** none reference SSFSKIM/doperpowers, SSFSKIM/cua or anthropics/k12-teacher-skills, so the directory is Anthropic's curated list, not a federation.
-   - **Metrics:** anonymous records return `metrics: {}`.
+3. **Anthropic's directory, plugins endpoint.** `GET https://api.anthropic.com/api/directory/plugins` answers HTTP 200 with no cookies or keys and returns `{data, facets, next_page, omitted}`; it honours `limit`, `page`, `visibility`, `verified_tier`, `include=launch` and `q=<text>`.
+   - **Visibility decides what a record is.** `visibility=public` returns exactly 3,601 records in one page of 5,000: every one has `source.repository {url, path?, reviewed_commit}` and is a Claude Code plugin; 92 are tier `anthropic`, 344 `partner`, 3,165 `community`. Adding `commercial` adds 7,256 records that are not plugins: 7,124 hosted MCP connectors (`checks.scan.reason: directory_mcp_server`, no repository, a `components[0].endpoint.url`) and 132 desktop extensions (`compatibility.claude_code: does_not_work`).
+   - **What a plugin record carries:** `name`, `summary`, `description`, `verified_tier`, `checks.review {state, by.type}` and `checks.scan {state}`, `compatibility` and `surfaces`, `components` (`skill`, `command`, `agent`, `hook`, `mcp_server`, `cli`, each with `access.type`: `stays_inside_claude`, `runs_on_your_computer`, or `sends_data_to` with a `service`), `source.repository`, `release.version`, `license`, `links`, `media.icons`, `taxonomy` (five axes: `object_acted_on`, `work_department`, `industry`, `life_area`, `subject`; a value is a string or an array), `updated_time`, `metrics` (always `{}` anonymously) and `publisher`.
+   - **What it does not carry:** an install action naming a marketplace (every record's `installation.actions` is `{sign_in: true}`, Claude.ai's own action; `source.marketplace_slug` is `anthropic-plugin-directory` or absent); a publisher for most plugins (null on 3,277 of the 3,286 skill-bearing records, including every anthropic-tier one); a failed scan (scan states are only `not_scanned` and `unavailable`); a launch banner worth showing (one in 10,857, a gated partner beta).
+   - **Names:** the directory's display name differs from the marketplace's install name for 723 of the 1,436 (repository, path) matches ("Adobe" versus `adobe-for-creativity`); the directory's `reviewed_commit` differs from the marketplace's pin for 648 of them.
+   - **Gaps:** nothing references SSFSKIM/doperpowers, SSFSKIM/cua or anthropics/k12-teacher-skills; only 52 of the official marketplace's 315 entries have a directory record, 289 join by (repository, path). The directory is Anthropic's curated list, not a federation.
    - **No published contract:** no third-party API, support or redistribution contract was found. Treat it as an observed public endpoint: cache it for this user, and never republish it.
 
-4. **Desktop's Discover home is not reproducible.** Its featured card and Recommended shelf come from `GET /api/organizations/{org}/library/discover/home` (signed in): editorial blocks, per-organization `install_count`. MAWS has no claude.ai session and does not reproduce it. **MAWS shows no install counts.**
+4. **Anthropic's directory, servers endpoint.** `GET https://api.anthropic.com/api/directory/servers?limit=500[&cursor=…]` returns `{servers, total, next_cursor, stale_feeds}`; 1,011 servers over three pages today, every one tier `partner` (1,001) or `anthropic` (10): **the servers list has no community tier**. 877 are `type: remote` with `remote {url | null, url_regex | null, transport: 'streamable-http' | 'sse', auth_posture: 'auth_required' | 'no_auth', is_authless}`; 123 are `type: local` desktop extensions for Claude Desktop only. 733 remote servers list `claude-code` in `works_with` (723 streamable-http, 10 sse; 646 need auth, 87 do not); 73 of them have `url: null` with a `url_regex` the person's own instance URL must match (Snowflake, Salesforce, NetSuite, n8n, Smartsheet). A record also carries `slug`, `display_name`, `author {name, url}`, `one_liner`, `icon_url`, `tool_names`, `categories` (25 values; 878 of 1,011 have one), `taxonomy`, `documentation`, `privacy_policy`, `support`, `rank`, `popularity_rank`, `trending_rank`, `is_new`, and for some `claude_code_copy_text`, the exact `claude mcp add --transport http <name> <url>` line (Linear: `claude mcp add --transport http linear https://mcp.linear.app/mcp`). 427 names contain spaces or other characters the engine's name rule refuses; 8 names appear twice. Linear is listed: partner, auth required, `https://mcp.linear.app/mcp`, streamable-http.
 
-5. **Linear** documents `https://mcp.linear.app/mcp`, Streamable HTTP, OAuth 2.1 with dynamic client registration. The directory lists it as partner, auth required, with that URL.
+5. **Desktop's trust wording** (`/Users/new/claude-desktop-re/readable/app-3.6556.2/web/app/v1/c80c79f6c-DHtpOo2e.js` 174 to 230). Desktop has three labels: Verified for any tier other than community (`c0d28f116-C3xOyICT.js:14`), Community, and Custom. Its tooltips:
+   - Verified: "Verified — Anthropic has reviewed this plugin for quality and security." (connector: "… this connector …").
+   - Community plugin: "This plugin hasn't been reviewed in depth by Anthropic." Community skill: the same with "skill". Community connector: "This connector passed our automated checks but hasn't been reviewed in depth by Anthropic."
+   - Custom: "You added this connector. Anthropic hasn't reviewed it."
+   Desktop has no partner wording. Its runs-code warning ("The <name> plugin includes components that run code", `c7aca31b8-BKE9xWdm.js:89`) fires on components whose `access.type` is `runs_on_your_computer` and on `cli:` components (`c12456454-DrLqfhYF.js` 1636, 4054 to 4064); when a component's access is unknown it says the plugin "may include components that run code". Desktop's Discover home (the owner's reference) is a signed-in editorial feed (`GET /api/organizations/{org}/library/discover/home`, `shared-52-uHFNjl7C.js:25534`); MAWS has no claude.ai session and does not reproduce its picks. Its counts and ranks, however, are public: fact 2's plugin-details for official plugins, fact 4's ranks for connectors.
 
-6. **Desktop's trust wording** is at `c80c79f6c-DHtpOo2e.js:174`:
-   - Verified: Anthropic reviewed it for quality and security.
-   - Community connector: passed automated checks, not reviewed in depth.
-   - Community plugin: not reviewed in depth.
-   - Custom: added by the person, not reviewed by Anthropic.
-
-   Its warning for executable content is at `c7aca31b8-BKE9xWdm.js:89`. A failed security scan disables Add.
+6. **The e2e harness.**
+   - `e2e/support/launch.ts` writes a version-only replay stub (`test/support/replay-engine.ts`) as the engine unless the run's `MAWS_E2E_ENGINE_BIN` names a binary; `test/support/engine-pin/index.ts` prefers 2.1.283, then the newest installed release. A recorded catalog does not make `plugin marketplace add` or a plugin's download work offline.
+   - `e2e/support/connector-oauth.ts` serves MAWS's own OAuth alone: `enterOAuthPhase` refuses an empty engine-PID proof and a live engine, `e2e/connectors-oauth.spec.ts` stops the engine before the OAuth phase, and registration admits only `http://127.0.0.1:<port>` callbacks. The engine's own callback is `http://localhost:<port>/callback` (fact 2).
+   - A scratch `HOME` and `CLAUDE_CONFIG_DIR` do not keep the engine out of the macOS Keychain: a scratch run created `Claude Code-credentials-8e824fb9` and the scenario removed it by that exact name (`spikes/protocol-probe/findings-p4-r8-mcp-servers.txt` 6).
 
 ## Design
 
 ### Parts and where they live
 
 ```
-main process                         renderer (Customize)
-───────────────                      ─────────────────────
-src/main/catalog/                    src/renderer/src/customize/discover/
-  sources.ts   seed list               DiscoverHome.tsx   shelves
-  fetch.ts     GitHub + directory      DiscoverGrid.tsx   search results and All
-  normalize.ts → CatalogItem           CatalogCard.tsx    one card, three kinds
-  join.ts      one item per thing      CatalogDetail.tsx  detail sheet
-  store.ts     disk cache, refresh     add.ts             + → existing sheets
-  index.ts     catalog.* IPC         widgets/plugins/*    install (reused)
-                                     widgets/McpWidget    My items for connectors
-engine-host: plugins/runner.ts gains `mcp add|remove`; a sign-in driver over the attached session's control client
+main process                              renderer (Customize)
+───────────────                           ─────────────────────
+src/main/catalog/                         src/renderer/src/customize/discover/
+  sources.ts     seed list                  DiscoverHome.tsx   shelves
+  fetch.ts       GitHub, directory,         DiscoverGrid.tsx   search results, All, See all
+                 plugin-details; the        CatalogCard.tsx    one card, three kinds
+                 fixture seam               CatalogDetail.tsx  detail sheet
+  engine-reads.ts installed, available,     add.ts             + → existing sheets
+                 marketplaces, via host   widgets/plugins/*    install (reused)
+  normalize.ts   → CatalogItem             widgets/McpWidget    My items for connectors
+  join.ts        one item per thing
+  store.ts       disk cache, refresh
+  index.ts       catalog.* IPC
+src/main/connectors/sign-in.ts            the sign-in operation (M4)
+engine-host: plugins/runner.ts gains `mcp add|remove`; session.mcpAuthenticate, session.mcpOAuthCallback and
+             session.mcpSetServers beside session.mcpStatus (bounded control calls)
+e2e/support/real-engine.ts, e2e/support/connector-oauth.ts (engine mode), e2e/fixtures/catalog/ (M1)
 ```
 
-- **Why the main process:** the catalog is fetched over the network, cached on disk and shared by every window. It is not engine state, so it does not belong in engine-host. MAWS's main process already owns outbound HTTP for connectors.
-- **Why not via the engine:** the engine's `--available` listing covers only marketplaces already added. Adding fourteen marketplaces to the person's settings just to browse them would write configuration they never chose.
+- **Why the main process:** the catalog is fetched over the network, cached on disk and shared by every window. It is not engine state, so it does not belong in engine-host. MAWS's main process already owns outbound HTTP for connectors. **The boundary:** the catalog's three engine reads (`plugins.list`, `plugins.available`, `marketplaces.list`, each per `cwd`) go through the engine host as the existing commands, from `src/main/catalog/engine-reads.ts`, and their answers are held per `cwd` until `plugins.changed` fires or the host's settings watcher reports a change (the same signals `reload-after.ts` acts on).
+- **Why not only via the engine:** the engine's `--available` listing already covers the whole directory (fact 2) and every marketplace that is added, so it is the install-route source. What it cannot show is a seed marketplace the person has not added: adding thirteen marketplaces to their settings just to browse them would write configuration they never chose. So the manifests of un-added seeds are fetched directly, and the directory is read directly for what the engine's listing lacks (publisher, tier, categories, components, icons). The alternative, the engine only, lost on the un-added seeds; the alternative, the directory without the engine, lost because the engine's entry names are the only install route a directory plugin has.
 
 ### The catalog
 
 **Sources**, in this order:
-1. **The seed list** in `src/main/catalog/sources.ts`: the fourteen repositories above, each with a display name and an ownership class. The owner's two are class `yours`; the rest are `anthropic`, `partner` (Notion, Canva, Carta) or `community` (claude-plugins-community).
-2. **Marketplaces the engine already has** (`marketplaces.list`). One that is not a seed is class `added`.
-3. **Anthropic's directory**: plugin and server records.
+1. **The seed list** in `src/main/catalog/sources.ts`: the twelve general repositories of fact 1 (Anthropic's nine, Notion, Canva, Carta), each with a display name and an ownership class `anthropic`, `partner` or `community`. The owner's doperpowers and cua are not seeds (fact 1a): a seed list in the general base holds only general sources (CLAUDE.md's split). The alternative, hardcoding the owner's two as a `yours` class, lost because every other user would see them as theirs.
+2. **Marketplaces the engine already has** (`marketplaces.list` for the page's `cwd`). One that is not a seed is class `added`. One that is a seed keeps its seed class; the engine's `anthropic-plugin-directory` is always present and is class `anthropic`.
+3. **The engine's available listing** (`plugins.available` for the page's `cwd`): every entry's name, marketplace, `source` and `installCount`. This is the install route for a directory plugin and for any added marketplace's plugin.
+4. **Anthropic's directory, plugins** (`/api/directory/plugins?visibility=public&limit=5000`, paged until `next_page` is empty). A record without `source.repository` is dropped at parse: it is a connector or a desktop extension, not a plugin (fact 3). The alternative, `visibility=commercial,public`, lost because it puts 7,256 non-plugins into the Plugins tab with no install route, and Linear twice.
+5. **Anthropic's directory, servers** (`/api/directory/servers?limit=500`, paged by `cursor` until `next_cursor` is empty). Connectors come from here only (the owner's ruling).
+6. **plugin-details.json** (fact 2): counts, components and `last_updated` for the official marketplace.
 
 **Fetching.**
-- **Marketplace manifests:** fetched from `https://raw.githubusercontent.com/<owner>/<repo>/HEAD/.claude-plugin/marketplace.json`. Raw URLs need no token and serve the 1.56 MB community manifest, which the Contents API does not.
-- **The directory:** paged until done.
-- **Requests:** no credentials, and a `User-Agent` naming MAWS and its version.
+- **Marketplace manifests** of seeds the engine does not have: `https://raw.githubusercontent.com/<owner>/<repo>/HEAD/.claude-plugin/marketplace.json`. Raw URLs need no token and serve the 1.56 MB community manifest, which the Contents API does not. A marketplace the engine has is read from the engine's listing, not fetched: the engine's clone is what installs.
+- **Requests:** GET only, no credentials, a `User-Agent` naming MAWS and its version, `If-None-Match` where an ETag was served.
+- **The fixture seam:** when the environment variable `MAWS_CATALOG_FIXTURES` names a directory, `fetch.ts` reads `<dir>/<source-key>.json` instead of the network and reports the source `fresh`; a missing file is the source failing (so a test can make the directory unavailable by leaving its file out). The seam is the only test hook; it changes no behaviour above `fetch.ts`.
 
 **Caching.**
-- Each source is cached under the app's user-data directory (`catalog/<source-key>.json`, holding the raw response, its fetch time and its ETag where served).
-- Discover refreshes a source when its copy is older than 24 hours, and Discover's Refresh refreshes all of them.
+- Each source is cached under the app's user-data directory (`catalog/<source-key>.json`: the raw response, its fetch time and its ETag where served). Sizes today: plugins 13 MB, servers 2.7 MB, the community manifest 1.6 MB, plugin-details 0.5 MB.
+- Discover refreshes a source when its copy is older than 24 hours, and Discover's Refresh refreshes all of them. Refresh is serialised: one refresh at a time; a second request joins the one running.
 - A failed source keeps its last copy and reports its age. A source never fetched and failing is reported as unavailable. In both cases the other sources still show.
+- The engine reads (sources 2 and 3) are not cached on disk; they are re-read on `plugins.changed`, on the settings watcher's change and when the page's `cwd` changes.
 
 **Parsing.**
-- Every record passes a zod schema at this boundary.
-- A record that fails is dropped and counted; it never stops the source.
-- Unknown fields are ignored.
+- Every record passes a zod schema at this boundary. Taxonomy values may be a string or an array; both are accepted.
+- A record that fails is dropped and counted; it never stops the source. Unknown fields are ignored.
 
 **Normalising.** Every record becomes one `CatalogItem` (shape in Interfaces):
 - **Kind:** `plugin` or `connector`.
-- **Install route:** for a plugin, `{marketplace source, marketplace name, plugin name}`. For a connector, `{name, url, transport}`.
-- **Components:** skills (with their names), MCP servers, hooks, commands, agents, where known.
-- **Who published it**, the ownership class, the directory's review tier and checks, categories, description and icon, and `updatedAt` where known.
+- **Routes:** every way the engine can install the thing, each `{marketplaceSource, marketplaceName, pluginName, ref | null, present}` for a plugin (`present`: the marketplace is already in the engine's list, so no add step is needed), or `{name, url | null, urlPattern | null, transport, authPosture}` for a connector. The chosen route is the first by precedence (below); the others are "Also listed by …".
+- **Components:** skills (with their names), MCP servers (with each one's transport where the manifest or the directory says), hooks, commands, agents, CLI tools, where known; `null` when nothing lists them.
+- **Runs code:** `runsOnYourComputer` is `true` when any component has `access.type: runs_on_your_computer`, is a hook, is a `cli` component, or is an MCP server with transport `stdio`; `false` when every component is known and none of those holds; `'unknown'` when the components are not known.
+- **Who published it** (the publisher chain), the ownership class, the directory's review tier and scan state, categories (one axis, below), description, icon, `installs` and `rank` where a source has them, and `updatedAt` from plugin-details' `last_updated`, else the directory's `updated_time`.
+- **Names:** `name` is the display name (the directory's where it has a record, else the manifest's); `installName` is what the install command uses. Search indexes both; detail shows both when they differ.
 
-**One item per thing.** A directory record and a marketplace entry are the same item when they point at the same source: the same repository, the same path within it, and the same pinned ref where one is pinned.
-- The merged item takes the marketplace's install route, because that is what the engine installs, and the directory's metadata, because that is richer.
-- Names never join items: two sources can both have a "github" plugin.
-- The ownership class comes from the marketplace (seed or added). The review tier comes only from the directory.
-- An item that only the directory has installs through the marketplace its install action names. Typically that is claude-plugins-official or claude-community, which is a seed, so the route is always known. A directory item with no usable install action is shown with its documentation link and no + button.
+**One item per thing.** Two records are the same item when they point at the same source: the same repository (URL normalised: lower-case, `.git` and a trailing slash dropped) and the same path within it. Refs are not part of identity; each route keeps its own ref (fact 1b, fact 3: the directory's `reviewed_commit` and a marketplace's pin differ for 648 of 1,436 matches, and seeds pin the same source at different refs 107 times; identity by ref would show one plugin two or three times). Names never join items: two sources can both have a "github" plugin.
+- **Route precedence** when several sources list the same (repository, path): routes whose marketplace the engine already has come first, so that + never adds a marketplace it does not need; within each group the order is claude-plugins-official, then the other seeds in table order, then `anthropic-plugin-directory`, then claude-community, then a non-seed added marketplace. Ownership follows the chosen route. The alternative, the richest metadata's source, lost because the route is what the engine runs and what My items will show.
+- **Metadata precedence:** the directory's record where one exists (tier, publisher, categories, components, icon), plugin-details for counts, components and `updatedAt` of official plugins, the manifest entry for the rest.
+- **Installed state** is computed per `cwd` against `plugins.list`: `here` when any route to this (repository, path) is installed at a scope that applies in this `cwd` (user, or project/local for this project; `coversHere` in `InstalledPluginSchema`), `elsewhere` when installed only in another project, `no` otherwise. A connector is `here` when its name is configured in a scope that applies in this `cwd`.
+- A directory plugin the engine's listing does not carry (no `reviewed_commit`, 107 today; a surface without `claude_code`, 5; the engine's directory off or blocked by policy) is shown with its documentation link and no + button, with the reason in detail ("Not installable by this engine: no reviewed commit" or "Anthropic Directory is off in this engine").
 
-**Components before install.** When neither source lists an item's components (a remote git entry the directory doesn't know), the card says "Contents shown after install". This is the honest copy that `widgets/plugins/BrowseDetail.tsx` already uses.
+**Publisher chain:** the directory's `publisher.name`, else the manifest entry's `author.name`, else the marketplace's `owner.name`. (The directory names a publisher for 116 of 3,601 plugins; the chain is what makes "by Anthropic" true for claude-for-legal.)
+
+**Categories:** one taxonomy axis, chosen by coverage over the public plugin set and the servers set. Measured today: `object_acted_on` covers 92% of the 3,601 plugins (29 values; code 1,123, files-documents 885, designs-media 442, tickets-tasks 380) and 57% of the 1,011 servers; `work_department` 66% and 30%; the other three axes under 15%. The servers' own `categories` field covers 86% of servers (25 values). The decision: `object_acted_on` for every tab, with a connector falling back to its `categories` when it has no `object_acted_on`. M2 re-measures from the recorded fixtures and the live walk and records the numbers in the Decision Log; if a later axis beats it on both sets, M2 switches and records why.
+
+**Components before install.** When no source lists an item's components (a remote git entry the directory doesn't know: 1,344 manifest entries today, 1,297 of them claude-community's), the card says "Contents shown after install", the honest copy `widgets/plugins/BrowseDetail.tsx` already uses, and the sheet carries Desktop's "may include components that run code".
 
 ### Discover, per tab
 
 | Tab | Discover shows | Add does |
 |---|---|---|
 | Plugins | every plugin item | install the plugin |
-| Skills | plugin items that contain skills, one card per item, its skill names listed | install the plugin that carries them, named as such |
-| Connectors | connector items from the directory whose `remote` transport is HTTP | add the server, then offer sign-in |
+| Skills | plugin items whose skills are known, one card per item, its skill names listed; a one-line note says that items with unknown contents are under Plugins | install the plugin that carries them, named as such |
+| Connectors | servers-endpoint items that are `remote`, list `claude-code` in `works_with`, and have transport `streamable-http` or `sse` (733 today) | add the server, then offer sign-in where `auth_posture` is `auth_required` |
 
-- **Directory servers with no remote URL** (local stdio servers needing a command) are listed with "Set up from its documentation" and a link, and no + button. Running another publisher's install command is out of scope for this work.
+- **Directory servers that are local desktop extensions** or do not work with Claude Code are not shown. A remote server with `url: null` and a `url_regex` is shown; its sheet asks for the instance URL (Adding, below). Running another publisher's install command is out of scope for this work.
 - **A skill card never implies a lone skill install.** Its + sheet says "Installs the plugin <name> from <marketplace>, with N skills: …" and lists the other components that come with it. That is the unit the engine installs; Desktop's Discover does the same with plugins presented as skills.
 
-**The home** (owner's approved preview):
+**The home** (the owner's approved shape; the Featured rule and the sort control are this revision's):
 
 ```
 Discover            [Search all sources      ]   Refresh · updated 3 h ago
-[Anthropic] [Partner] [Community] [Yours]  Category ▾  Not installed ☐
+[Anthropic] [Partner] [Community] [Added by you]  Category ▾  Not installed ☐
 
 ┌ Featured · From Anthropic ───────────────────┐
-│ Legal       Contracts, NDAs, review    [Add] │
+│ Data        Query, chart and explain   [Add] │
+│             2.9M installs                    │
 └──────────────────────────────────────────────┘
 Your sources                              See all
 [doperpowers +] [cua +] [ci-kit +]
 Claude for Financial Services             See all
 [Pitch deck +] [Comps +] [DCF +] …
-Data & analytics                          See all
+Code                                      See all
 [Data +] [Snowflake +] [Hex +] …
-All · 2,961                     Name ▾
+All · 3,912                     Installs ▾
 ```
 
-- **Featured:** the directory's launch banner (`include=launch`, `has(launch.banner)`, c310cdd26 1404) when it has one for this tab's kind. When it has none, no featured card is shown. MAWS invents no editorial picks.
-- **Your sources:** first, items from the `yours` and `added` sources.
+- **Featured:** derived from data MAWS has, never editorial. Plugins and Skills: the item with the most installs among those listed by Anthropic (an `anthropic` route, which plugin-details covers) that is not installed here; on Skills, among items whose skills are known. Connectors: the item with the best `popularity_rank` not configured here. No card when none qualifies. The directory's launch banners are ignored: the one that exists is a gated partner beta (fact 3). The alternative, Desktop's banner, is not reproducible (fact 5).
+- **Your sources:** first, items from `added` marketplaces (doperpowers, cua and whatever else the person added, fact 1a). Empty for a person who added none; then the shelf is not shown.
 - **One shelf per seed source** with more than one item, in the seed order. Community gets no shelf.
-- **Category shelves:** the directory's categories with the most items in this tab, at most four.
-- **All:** every item, sorted by name, or by recently updated where `updatedAt` is known.
-- **Shelf size:** each shelf shows one row, as many cards as fit, plus See all, which opens the grid filtered to that shelf.
-- **Search** covers every source; matches on name rank above matches on description.
-- **Filter chips:** ownership class and review tier together (Anthropic, Partner, Community, Yours), category, and Not installed.
-- **Installed state:** an installed item shows "Installed" in place of +, and its card opens the item in My items.
+- **Category shelves:** the chosen axis's values with the most items in this tab, at most four.
+- **All:** every item, under the sort control: installs or rank (default), updated, or name.
+- **Shelf order** within a shelf: installs or rank descending, then `updatedAt` descending, then name ascending, ties by id. The alternative, alphabetical, lost: it puts `42crunch…` first on a shelf of 315.
+- **Shelf size:** each shelf shows one row, as many cards as fit, plus See all, which opens the grid filtered to that shelf (the source, or the category) with the shelf's chip removable.
+- **Search** covers every source and both names; matches on name rank above matches on description.
+- **Filter chips:** ownership class and review tier together (Anthropic, Partner, Community, Added by you), category, and Not installed.
+- **Installed state:** an item installed here shows "Installed" in place of + and its card opens the item in My items; one installed only in another project shows "Installed in another project" and keeps +.
 
 **A card** shows:
 - the icon, name and one-line description;
 - "by <publisher>";
 - the trust label;
-- the components ("3 skills · MCP server · runs hooks");
+- the components ("3 skills · MCP server · runs code"), or "Contents shown after install";
+- "N installs" where a source has it (official plugins), or "#N most popular" for a connector with a rank;
 - the + button.
 
-It shows no install counts (fact 4).
+Counts are shown where the source has them and nowhere else. The alternative, no counts at all (the first draft's fact 4), lost: Browse already shows the engine's number, and the connector ranks are public (fact 5).
 
-**The trust label** comes from the review tier where the directory has one: Verified · Partner · Community. Otherwise it comes from the ownership class: Anthropic repository · <Vendor> repository · Yours · Added by you. Its tooltip carries Desktop's wording for that class (fact 6), so a label never claims more review than the directory records. A failed security scan in the directory disables + with the reason, as in Desktop.
+**The trust label** comes from the review tier where the directory has one: Verified · Partner · Community. Otherwise it comes from the ownership class: Listed by Anthropic · Listed by <vendor> · Community · Added by you. Tooltips:
+- Verified: Desktop's wording (fact 5), with "plugin" or "connector".
+- Partner: "Anthropic's directory lists the publisher as a partner." No security claim: Desktop folds partner into Verified, and the directory does not say what a partner review covers.
+- Community: Desktop's plugin or connector wording.
+- Listed by Anthropic / Listed by <vendor>: "In the <marketplace> marketplace; Anthropic's directory has no record of it." ("Anthropic repository" was the first draft's label; it lost because 262 of the official marketplace's 315 entries live in other people's repositories.)
+- Added by you: "You added this marketplace. Anthropic hasn't reviewed it." (Desktop's Custom wording, adapted.)
+A failed security scan in the directory disables + with the reason, as in Desktop; no live record fails today (fact 3), so the fixture's failed-scan record is synthetic and marked so. Cards do not advertise "security checks".
 
 ### Adding
 
 **Plugins and skills reuse the existing install sheet.** It gains three things:
-- what gets installed, with the plugin's components;
-- the executable-content warning when the components include hooks or a local MCP server;
-- when the marketplace is not added yet, a first step that adds it at the chosen scope.
+- what gets installed, with the plugin's components, and "Also listed by …" when the item has other routes;
+- the runs-code warning when `runsOnYourComputer` is `true` ("includes components that run code", naming them: hooks, a local MCP server, a CLI), and the softer "may include components that run code" when it is `'unknown'`;
+- when the route's marketplace is not present yet, a first step that adds it at the chosen scope.
 
-Both steps run through the existing runner, as `plugin marketplace add <owner/repo> --scope S` and then `plugin install <name>@<marketplace> --scope S`. If the add succeeds and the install fails, the marketplace stays added, and the sheet says so and offers Remove marketplace.
-
-The engine's one-step `plugin install <name> --marketplace <source>` is not used, because it always adds the marketplace to user settings, whatever scope the person chose.
+Both steps run through the existing runner, as `plugin marketplace add <owner/repo> --scope S` and then `plugin install <name>@<marketplace> --scope S`. If the add succeeds and the install fails, the marketplace stays added, and the sheet says so and offers Remove marketplace. The one-step `--marketplace` form is not used (fact 2: it always writes user settings).
 
 **Connectors** get a new sheet, built like the install sheet. It shows:
 - the server's name, publisher, review tier and URL;
-- the transport;
+- the transport (`http` for streamable-http, `sse` for sse);
+- for a server with a `url_regex` and no URL, a required instance-URL field validated against the regex, with the pattern shown;
 - the scope, defaulting to **user** (the engine's own default is local; user matches how the person thinks of a connector, available in every project);
-- the exact command `claude mcp add --transport http <name> <url> --scope <scope>`.
+- "No sign-in needed" when `auth_posture` is `no_auth`;
+- the exact command `claude mcp add --transport <http|sse> <name> <url> --scope <scope>`.
 
-The runner gains `mcp add` and `mcp remove` beside `plugin`. The name is the directory's server name, normalised the way the engine normalises it (`normalizedMcpName` in `src/engine-host/mcp-call.ts`). If that name is already configured in the chosen scope, the sheet refuses and shows the existing entry, instead of overwriting it.
+The runner gains `mcp add` and `mcp remove` beside `plugin`, their results parsed from the lines the CLI prints (fact 2). **The name** is the directory's `claude_code_copy_text` name when the record has one, else its `slug`, else the display name lower-cased with runs of other characters replaced by one hyphen; the sheet shows it and lets the person edit it within the engine's rule. (`normalizedMcpName` in `src/engine-host/mcp-call.ts` is the engine's tool-prefix rule and would name Google Drive `Google_Drive`; it is not used here.) If that name is already configured in the chosen scope, or in any scope that applies in this `cwd`, the sheet refuses and shows the existing entry: the engine does not refuse a duplicate itself (fact 2).
 
-**Signing in.** A connector whose server needs auth shows "Sign in needed" in My items. Sign in drives the engine's own flow, so the agents' sessions are signed in:
-1. Pick a ready session whose scope includes the connector. Customize's attached session is used when it qualifies.
-2. Send `mcp_authenticate {serverName, redirectUri}`. The redirect URI is a MAWS loopback listener on 127.0.0.1, reusing the callback server pattern of `src/main/connectors/oauth-callback.ts`.
-3. Open the authorization URL the engine returns in the system browser.
-4. Wait for the callback, then send `mcp_oauth_callback_url {serverName, callbackUrl}`.
-5. Show the result from the engine's `mcp_status`.
+**Signing in** drives the engine's own flow, so the agents' sessions are signed in. It is an operation main owns (`src/main/connectors/sign-in.ts`): `connectors.signIn` answers a receipt at once and progress arrives as `connectors.signInChanged` events, because consent takes as long as the person takes and every main-to-host call must answer within 10 s (What exists today: the supervisor). The host exposes three bounded calls main composes: `session.mcpAuthenticate` (`mcp_authenticate`), `session.mcpOAuthCallback` (`mcp_oauth_callback_url`) and the existing `session.mcpStatus`; and, if the spike promotes path A, `session.mcpSetServers` (`mcp_set_servers`). The states and transitions:
 
-With no qualifying ready session, Sign in says "Open a session in <project>, then sign in" and does nothing else. Customize never starts a session (a standing rule of the page). M3's spike settles the exact shape of the exchange; this section is revised from its verdict.
+| State | Entered when | Leaves on |
+|---|---|---|
+| `starting` | the receipt is issued | `session.mcpAuthenticate` answered → `waiting_browser`; error → `failed` (`engine`) |
+| `waiting_browser` | the engine answered an `authUrl`; MAWS opens it in the system browser | `redirectScheme: 'custom'` → `waiting_callback`; `'localhost'` → `watching_status`; `requiresUserAction: false` → `done` |
+| `waiting_callback` | MAWS's loopback listener (127.0.0.1, ephemeral port, path `/callback`, one operation, one `state`) is up | the one request whose `state` matches → `submitting`; another request → answered 400, still waiting; 5 min → `failed` (`timeout`) |
+| `watching_status` | the engine holds its own `localhost:<callbackPort>` listener; MAWS polls `session.mcpStatus` every 2 s | the server reports connected → `done`; `needs-auth` still after 5 min → `failed` (`timeout`); the server reports failed → `failed` (`engine`, its message) |
+| `submitting` | `session.mcpOAuthCallback` is sent with the callback URL | success → `done`; error → `failed` (`denied` when the callback carried `error`, else `engine`) |
+| `done` / `failed` / `cancelled` | terminal | — |
+
+Cancel (`connectors.signInCancel`) closes the listener or stops the poll and ends in `cancelled`; the engine's own pending flow is left to its own timeout, and a retry starts a new operation (the spike records whether the engine refuses a second `mcp_authenticate` while one is pending, and what message Sign in shows then). The attached session exiting in any non-terminal state ends in `failed` (`session_exited`). One operation per server at a time.
+
+**Which session.** A connector added after the attached session started is not loaded there, and `mcp_authenticate` answers "Server not found" (fact 2). The spike decides between two paths, and M4 records the chosen one here:
+- **Path A:** load the server into the attached session with `session.mcpSetServers` for the sign-in, then authenticate; the credential is stored under the server's name and URL, so sessions that read the file configuration find it. Promote only if the spike shows the call does not drop the session's other dynamic servers and the next file-configured session reports the server connected.
+- **Path B:** offer Sign in only in sessions started after the add; until one exists, Sign in says "Open a session in <project>, then sign in" and does nothing else. Customize never starts a session (a standing rule of the page).
+
+**If the spike discards engine-driven sign-in** (neither scheme completes against the fixture for a reason that is the engine's, not the fixture's): add and remove still work, and Sign in hands off to the engine itself. It opens MAWS's terminal surface in the project directory with `claude` running (`pty.spawn`), and tells the person to run `/mcp` there, choose the server and authenticate, with a copy button for `/mcp`. That is the engine's real TUI, sharing the same configuration and Keychain; the composer's `/mcp` is MAWS's own widget and cannot do it (What exists today). The design section is revised with a Decision Log entry either way.
 
 MAWS's own OAuth store (`src/main/connectors/oauth-store.ts`) is not involved: those credentials serve MAWS's own connections, not the engine.
 
 ### My items
 
-My items is as today for Plugins and Skills. Connectors' My items keeps "Configured on disk" and "Live in the attached session", and adds:
+My items is as today for Plugins and Skills, plus "Installed in another project" where that is the case for the page's `cwd`. Connectors' My items keeps "Configured on disk" and "Live in the attached session", and adds:
 - **Remove** for a server configured in a scope MAWS can name. It runs `claude mcp remove <name> --scope <scope>`.
-- **Sign-in state** from the attached session's `mcp_status`: connected, needs sign-in, or failed with the engine's message.
+- **Sign-in state** from the attached session's `mcp_status`: connected, needs sign-in, or failed with the engine's message; "No sign-in needed" for an authless server.
 
 **Installed versus ready.** MAWS claims only what it can observe:
 - an installed plugin whose MCP server the attached session reports failed shows "Installed · its server failed: <engine message>";
@@ -266,7 +304,7 @@ The tab named "MCP servers" becomes **Connectors**, matching Desktop and the own
 
 ### What agents see
 
-Nothing new. The catalog lives in the main process and the renderer. No engine tool, MCP server, prompt text or session context carries it. M4's acceptance checks this.
+Nothing new. The catalog lives in the main process and the renderer. No engine tool, MCP server, prompt text or session context carries it. M5's acceptance checks this.
 
 ### Failure handling
 
@@ -274,139 +312,158 @@ Nothing new. The catalog lives in the main process and the renderer. No engine t
 |---|---|
 | A source unreachable, cached copy exists | Its items, and in Refresh's popover "<source>: offline, from 2 days ago" |
 | A source unreachable, never fetched | "<source> unavailable" in that popover; the other sources show |
-| The directory unreachable | Plugins and skills from marketplaces, with plainer cards: no review tier, categories or connector list. The Connectors Discover says "Anthropic's directory is unavailable" with Retry |
+| The directory unreachable | Plugins and skills from the engine's listing and the manifests, with plainer cards: no review tier, categories or icons. Connectors' Discover says "Anthropic's directory is unavailable" with Retry |
+| plugin-details unreachable | Official cards without counts; Featured on Plugins and Skills absent until a copy exists |
 | A record fails its schema | Dropped; Refresh's popover counts the dropped records per source |
+| The engine's directory is off or blocked by policy | Directory plugins show "Not installable by this engine: <reason>" and no +, as detail explains |
 | The engine refuses an add or install | The engine's own words, as the install sheet shows today |
 | A command-declaring marketplace | The existing second sheet with the command and its hash |
-| Sign-in: no qualifying session | "Open a session in <project>, then sign in" |
-| Sign-in: callback timeout (5 min) or denied | "Sign-in didn't finish"; the engine is told nothing more; Sign in can be pressed again |
+| A connector name already configured here | The sheet refuses and shows the existing entry |
+| An instance URL that does not match the server's pattern | The field says so, with the pattern; + stays disabled |
+| Sign-in: the session does not know the server | Path A loads it; path B: "Open a session in <project>, then sign in" |
+| Sign-in: callback timeout (5 min), denied, cancelled, session exited | "Sign-in didn't finish" with the reason; Sign in can be pressed again |
+| Sign-in: the engine answers "already authenticating" on retry | The engine's words, and the time until its own flow expires if it says |
 
 ## Acceptance
 
-Run against the branch's build in the e2e harness, with a scratch engine configuration (`CLAUDE_CONFIG_DIR` and `HOME` under the test's temporary directory). Catalog sources come from recorded fixtures, so the gate needs no network; the recorded responses live under `e2e/fixtures/catalog/`.
+Run against the branch's build in the e2e harness as M1 provides it: the real 2.1.309 engine (fail, not skip, when it is missing), a scratch `HOME`, `CLAUDE_CONFIG_DIR` and project directories, `MAWS_CATALOG_FIXTURES=e2e/fixtures/catalog` so the catalog's network fetches read recorded files, the local test marketplace (M1) for installs, and the engine's Anthropic Directory turned off in the scratch configuration so `plugin list --available` is deterministic. Gate group: `e2e:discover`. The gate needs no network.
 
 1. **The home.** Customize → Plugins → Discover shows, in order:
-   - the Featured card (the fixture has a launch banner);
-   - "Your sources" with doperpowers and cua;
-   - a shelf per seed source with more than one item;
+   - the Featured card: the fixture's most-installed Anthropic-listed plugin not installed here, with its install count;
+   - "Your sources" with the local test marketplace's plugins (it was added by path, so it is `added`), labelled "Added by you";
+   - a shelf per seed source with more than one item, each shelf ordered by installs, then updated, then name;
    - up to four category shelves;
-   - "All · N", where N equals the fixture's distinct item count after joining.
+   - "All · N", where N equals the fixture's distinct item count after joining, and the sort control on Installs.
 
    Screenshots at 1280×820 and 1512×982 go next to the owner's Discover reference.
-2. **Search and labels.** Searching "legal" lists claude-for-legal's plugins, each "by Anthropic" with its directory label. A claude-community item reads Community, and its tooltip has the community wording.
-3. **Installing, end to end.** Pressing + on a fixture plugin from a not-yet-added seed marketplace opens the sheet:
-   - it shows "Adds the marketplace <name> (user) and installs <plugin>", the plugin's components, and the runs-code warning, since the fixture plugin has hooks;
-   - after confirming, the scratch user `settings.json` lists the marketplace and the plugin enabled;
-   - My items shows it;
-   - its Discover card reads Installed.
-4. **A skill installs its plugin.** In Skills → Discover, the anthropics/skills item's sheet names the plugin and lists its skills.
-5. **Adding a connector.** In Connectors → Discover, Linear is listed: Partner, with its URL. + opens the connector sheet with scope user and the exact command. After confirming, the scratch configuration has `linear` with type http and that URL, and Connectors → My items lists it under Configured on disk.
-6. **Signing in.** Against the fake OAuth MCP server the connectors-oauth e2e group already uses, with an attached ready session, Sign in completes: the browser step is driven by the test, and the engine's `mcp_status` reports the server connected. With no attached session, the button shows the "Open a session" message.
-7. **Without the directory.** With the directory fixture failing, Plugins → Discover still lists marketplace items with no review tier, Refresh's popover says the directory is unavailable, and Connectors → Discover shows the unavailable message with Retry.
-8. **Nothing reaches agents.**
-   - A unit test asserts that no MCP tool name, system-prompt fragment or engine launch argument built by MAWS mentions the catalog.
-   - The fake session's tool list in the e2e run is the same with Discover visited as without.
+2. **Search and labels.** Searching "legal" lists claude-for-legal's plugins, each "by Anthropic" (from the manifest's `author`, the directory record having none) with its directory label. A claude-community item reads Community and its tooltip has the community wording; a partner item reads Partner with the partner tooltip; a joined item (the fixture's official-and-community pair) is one card whose detail reads "Also listed by claude-community"; the same-name pair (two "github" plugins from different repositories) stays two cards; searching the directory's display name "Adobe" and the install name `adobe-for-creativity` both find the item.
+3. **Installing, end to end.** Pressing + on the test marketplace's `hooked` plugin before the marketplace is added opens the sheet:
+   - it shows "Adds the marketplace <name> (user) and installs hooked", the plugin's components, and the runs-code warning naming its hook;
+   - after confirming, the scratch user `settings.json` lists the marketplace and the plugin enabled, `claude plugin list --json` in the scratch configuration lists it, My items shows it, and its Discover card reads Installed;
+   - the `local-server` plugin's sheet warns (stdio MCP server); `skills-only`'s does not; the fixture's unknown-contents item says "may include components that run code".
+4. **Installed here versus elsewhere.** With two scratch projects A and B: installing `remote-server` at project scope in A makes its card read Installed in A and "Installed in another project" in B, where + still works; the Not installed chip hides it in A and shows it in B.
+5. **A skill installs its plugin.** In Skills → Discover, the `skills-only` item's sheet names the plugin and lists its skills, and the tab's note points unknown-contents items to Plugins.
+6. **See all and sorting.** See all on the Claude for Financial Services shelf opens the grid with that source's chip, removable; sorting All by updated across the fixture's page boundary (the fixture has items with equal `updatedAt`) lists every item exactly once in both directions.
+7. **Marketplaces change under Discover.** Adding the test marketplace by path from Manage marketplaces while Discover is open moves its plugins onto "Your sources" without reopening the page; removing it moves them off and their + offers to add it again.
+8. **Adding a connector.** In Connectors → Discover, Linear is listed: Partner, "#N most popular", with its URL. + opens the connector sheet with name `linear`, scope user and the exact command. After confirming, the scratch configuration has `linear` with type http and that URL, and Connectors → My items lists it under Configured on disk with "Sign in needed". The fixture's `url_regex` server requires an instance URL and rejects one that does not match; its authless server reads "No sign-in needed"; pressing + on Linear again is refused with the existing entry shown; Remove removes it.
+9. **Signing in, promoted path.** Against the engine-mode OAuth fixture with a session that knows the server (path A: loaded by Sign in; path B: started after the add): Sign in reaches `done` and `session.mcpStatus` reports the server connected, with the browser step driven by the test; a consent the test delays by 15 s still completes; Cancel ends in `cancelled` and a retry completes; stopping the session mid-flow ends in `failed` (`session_exited`); with no qualifying session, the button shows the "Open a session" message (path B) or loads the server (path A). The engine's Keychain items created by the run are removed by name in teardown.
+10. **Signing in, discarded path.** Sign in opens MAWS's terminal in the project with `claude` running and the `/mcp` instruction with its copy button; add and Remove still pass item 8. Exactly one of items 9 and 10 runs, per the spike's verdict recorded in the Decision Log.
+11. **Without the directory.** With the directory's fixture files absent, Plugins → Discover still lists the engine's and the manifests' items with no review tier, Refresh's popover says the directory is unavailable, and Connectors → Discover shows the unavailable message with Retry; with plugin-details absent, official cards show no count and Featured is absent.
+12. **Nothing reaches agents.**
+    - A unit test asserts that no MCP tool name, system-prompt fragment or engine launch argument built by MAWS mentions the catalog.
+    - The fake session's tool list in the e2e run is the same with Discover visited as without.
+
+**Live smoke, opt-in, not part of the gate** (`MAWS_LIVE_SMOKE=1`, a Mac with network, a scratch configuration): the real sources are walked, the counts are printed and compared with Surprises & Discoveries, `frontend-design@anthropic-plugin-directory` is installed into the scratch configuration through Discover and uninstalled, and Linear is added and removed.
 
 ## Execution
 
 ### Constraints for every milestone
 
-- **The engine is unmodified** (D-1). Mutations go only through its CLI (`plugin …` and `mcp …` via `src/engine-host/plugins/runner.ts`) and its control requests. MAWS never writes the engine's settings files itself.
-- **Network:** only GET requests, to `raw.githubusercontent.com` and `api.anthropic.com/api/directory/*`, with no credentials. Nothing from the catalog is sent anywhere.
+- **The engine is unmodified** (D-1). Mutations go only through its CLI (`plugin …` and `mcp …` via `src/engine-host/plugins/runner.ts`) and its control requests. MAWS never writes the engine's settings files itself. The test harness may write the scratch configuration's on/off file for the engine's directory marketplace; MAWS never does.
+- **Network:** only GET requests, to `raw.githubusercontent.com`, `api.anthropic.com/api/directory/*` and the plugin-details URL of fact 2, with no credentials. Nothing from the catalog is sent anywhere.
 - **IPC:**
   - New IPC follows `src/shared/ipc/names/*` and `src/shared/ipc/schema/*`, with a name list and a zod schema per namespace, pinned by `src/shared/ipc/schema.test.ts`.
   - Only display metadata and install routes cross IPC. A connector's URL crosses, because the person must see it before adding.
 - **Styling:** light theme by default; components use tokens only.
-- **Copy** is plain and literal. Trust wording follows fact 6 and never claims more review than the source records.
+- **Copy** is plain and literal. Trust wording follows the Design's label section and never claims more review than the source records.
 - **Gates:**
   - class 1a through `scripts/ci-gate.sh <worktree> --gates static,unit,probes --class1a pool`;
-  - Mac e2e through `--runner macos --class1a pool`;
-  - the whole Mac matrix at M4, because the work touches shell, layout and settings (P4 Decision Log 78).
+  - Mac e2e through `--gates e2e:discover --runner macos --class1a pool` once M1 registers the group;
+  - the whole Mac matrix at M5, because the work touches shell, layout and settings (P4 Decision Log 78).
   - No e2e runs on the MacBook. Local heavy runs go through `/tmp/maws-review/with-slot.sh`, one focused file at a time.
-- **Off limits:** never touch the owner's running MAWS, its build, its user data, or the owner's `~/.claude`. Probes use scratch configuration directories.
+- **Off limits:** never touch the owner's running MAWS, its build, its user data, the owner's `~/.claude` or the owner's Keychain items. Probes and tests use scratch configuration directories and delete only Keychain items they created, by name.
 
-### M1 — The catalog
+### M1 — The real-engine test harness and the catalog fixtures
 
-At the end, the main process holds a normalised, joined catalog of the fourteen seeds, the engine's added marketplaces and the directory. It is cached on disk and served over the `catalog.*` IPC (Interfaces).
-- A unit test loads the recorded fixtures and checks that the item count and joins are right.
-- A dev-only command prints a summary of the live catalog. The milestone runs it once against the real sources and records the counts in Surprises & Discoveries.
+Today no e2e group runs a real `claude plugin` mutation or an engine-driven OAuth (fact 6). At the end of M1 a gate group exists that launches MAWS with the pinned 2.1.309 engine, a scratch configuration and recorded catalog sources, installs a plugin from a local marketplace through today's Browse and ConfirmSheet, and sees it in `plugins.list`; and the OAuth fixture has an engine mode. Nothing in Discover exists yet; M1's proof is that the harness can prove M3 and M4.
 
 - **Touches:**
-  - new `src/main/catalog/` (sources, fetch, normalize, join, store, index);
-  - `src/shared/ipc/names/catalog.ts` and `src/shared/ipc/schema/catalog.ts`;
-  - registration in `src/main/` where other namespaces register;
-  - `e2e/fixtures/catalog/`, recorded trimmed responses: a slice of each seed's manifest, the doperpowers and cua manifests whole, and two directory pages with a launch banner, Linear, a community item, a failed-scan item and a local-only server.
+  - `e2e/support/real-engine.ts`: resolves the engine as `MAWS_E2E_ENGINE_BIN`, else `~/.local/share/claude/versions/2.1.309`; runs `--version` and fails the run with the install command in the message when it is absent or another version. The pin's replay default (`test/support/engine-pin`) is not changed.
+  - `e2e/support/launch.ts`: a launch option for a real engine with a scratch `HOME`, `CLAUDE_CONFIG_DIR`, one or two scratch project directories, `MAWS_CATALOG_FIXTURES`, and the engine's directory marketplace turned off through its on/off file in the scratch plugins folder (fact 2; confirm the path against the binary and record it).
+  - `e2e/fixtures/catalog/`: recorded, trimmed responses, one file per source key: a slice of each seed's manifest (the official slice includes the official-and-community pair and the two "github" plugins), the manifests whole for the small seeds, the public plugins page trimmed to the records those slices join plus a community item, the synthetic failed-scan item, a record without `reviewed_commit`, and one with unknown contents; the servers pages trimmed to Linear, a `url_regex` server, an authless one, an `sse` one, a local desktop extension and one without `claude-code`; plugin-details trimmed to the official slice with counts and equal `last_updated` on two items; and `plugins.available` as the scratch engine lists it with the test marketplace added.
+  - `e2e/fixtures/catalog/marketplace/`: a local marketplace with four installable plugins, `hooked` (a hook), `local-server` (a stdio MCP server that is a Node script in the fixture), `remote-server` (an HTTP MCP server pointing at the OAuth fixture's origin), `skills-only`; added by absolute path.
+  - `scripts/catalog-fixtures.mjs`: records and trims the network sources, so they can be re-recorded; committed with the fixtures.
+  - `e2e/support/connector-oauth.ts`: an engine mode that accepts `http://localhost:<port>/callback` and `http://127.0.0.1:<port>/callback` redirect URIs, has no engine-PID gate, records the Keychain service names the engine writes during the run (`security find-generic-password` by the `Claude Code-credentials-` prefix, scratch run only) and deletes them in teardown. The existing MAWS-only mode keeps every safeguard it has.
+  - `package.json`: the script `e2e:discover` over `e2e/discover.spec.ts` and `e2e/discover-connectors.spec.ts`; `.github/workflows/gate.yml`: the group, on the macOS lane; `scripts/ci-gate.sh`: nothing, it takes `e2e:<group>` by name.
 - **Decisions:**
-  - Join by source identity (Design, "One item per thing"); the fixture includes a pair that joins and a same-name pair that must not.
+  - Missing prerequisites fail the run; they never skip (B1).
+  - The fixture seam is one environment variable read by `fetch.ts` alone (Design, Fetching).
+  - The live smoke is a separate, opt-in spec (`e2e/discover-live.spec.ts`, `MAWS_LIVE_SMOKE=1`), never collected by the gate.
+- **Does not touch:** `src/` beyond the seam's environment variable name in `src/main/catalog/fetch.ts`, which M2 implements; the renderer.
+- **Proves:** the harness prerequisites of every acceptance item; a smoke spec in the group installs `skills-only` through Browse and ConfirmSheet as they are today and sees it in My items, and the engine-mode OAuth fixture completes a token exchange from a plain HTTP client with a `localhost` redirect.
+
+### M2 — The catalog
+
+At the end, the main process holds a normalised, joined catalog of the seeds, the engine's marketplaces and listing, the directory's plugins and servers, and plugin-details, per `cwd`, cached on disk and served over the `catalog.*` IPC (Interfaces).
+- A unit test loads the recorded fixtures and checks the item count, the joins, the route precedence, installed-here-versus-elsewhere for two `cwd`s, `runsOnYourComputer` for a stdio-only, a remote-only and an unknown item, the publisher chain, the category axis coverage, deterministic pagination across a tie, and the engine-read invalidation on `plugins.changed`.
+- A dev-only command prints a summary of the live catalog. The milestone runs it once against the real sources and records the counts in Surprises & Discoveries beside the 2026-10-25 numbers.
+
+- **Touches:**
+  - new `src/main/catalog/` (sources, fetch, engine-reads, normalize, join, store, index);
+  - `src/shared/ipc/names/catalog.ts` and `src/shared/ipc/schema/catalog.ts`;
+  - registration in `src/main/` where other namespaces register.
+- **Decisions:**
+  - Join by source identity without refs; route precedence as the Design says; the fixture includes a pair that joins, a same-name pair that must not, and a pair at different refs that must.
   - Parse each source independently. One failure never empties the catalog.
-  - The refresh age is 24 h. Refresh is serialised: one refresh at a time; a second request joins the one running.
-  - `catalog.changed` fires once per refresh that changed anything.
-  - Recording the fixtures is a script under `scripts/catalog-fixtures.mjs`, committed with the fixtures, so they can be re-recorded.
+  - The refresh age is 24 h. Refresh is serialised.
+  - `catalog.changed` fires once per refresh that changed anything and once per engine-read invalidation.
+  - The category axis: `object_acted_on`, re-measured here and recorded (Design, Categories).
+  - A cursor encodes the sort, the last item's sort key and id, and the catalog revision; a cursor from another revision restarts the page and says so (`restarted: true`).
 - **Does not touch:** the renderer or engine-host.
-- **Proves:**
-  - acceptance 7's data side (the directory fails, and marketplace items remain);
-  - the join rules;
-  - schema drops counted;
-  - cache reuse when offline.
+- **Proves:** acceptance 11's data side (a source fails and the others remain); the join rules; schema drops counted; cache reuse when offline; acceptance 4's state per `cwd` (the data side).
 
-### M2 — Discover for Plugins and Skills
+### M3 — Discover for Plugins and Skills
 
-At the end, Plugins and Skills each have My items and Discover; Plugins' Browse becomes Discover. The home, search, filters, cards, detail and + work over M1's catalog, and installing runs through the extended sheet.
+At the end, Plugins and Skills each have My items and Discover; Plugins' Browse becomes Discover. The home, search, filters, sort, cards, detail and + work over M2's catalog, and installing runs through the extended sheet.
 
 - **Touches:**
   - new `src/renderer/src/customize/discover/`;
   - `src/renderer/src/customize/CustomizeView.tsx`;
   - `src/renderer/src/widgets/PluginsWidget.tsx` and `widgets/plugins/*`. Browse is replaced by Discover, and the existing BrowsePane, BrowseCard and BrowseDetail are retired where Discover covers them;
-  - `widgets/plugins/ConfirmSheet.tsx` and `present.ts`: the add-then-install route and the contents and warning lines;
-  - `src/shared/plugins/cli.ts`: the scoped marketplace add, already supported by its API;
-  - e2e specs for the Plugins and Skills tabs.
+  - `widgets/plugins/ConfirmSheet.tsx` and `present.ts`: the add-then-install route, the contents, the "Also listed by" line and the two warning wordings;
+  - `e2e/discover.spec.ts`.
 - **Decisions:**
-  - Discover reads only `catalog.*`. Installed state comes from the existing installed-plugins read, matched by install route.
+  - Discover reads only `catalog.*`, always with the page's `cwd`.
   - The Add marketplace dialog gains the scope choice, which its confirmation lacks today.
-  - "See all" opens the grid with the shelf's filter applied, and its chip can be removed.
+  - "See all" opens the grid with the shelf's filter applied (`source` or `category`), and its chip can be removed.
   - Cards are a fixed height, so shelves align. Long descriptions clamp to two lines.
   - Keyboard: shelves are rows of buttons reachable by Tab; arrow keys move within a shelf; Enter opens detail; + is its own focus stop.
 - **Does not touch:** connectors, or MCP add, remove and sign-in.
-- **Proves:** acceptance 1 to 4; acceptance 7's Plugins side.
+- **Proves:** acceptance 1 to 7, 11's Plugins side, 12.
 
-### M3 — Connectors: Discover, add, sign in
+### M4 — Connectors: the spike, then Discover, add, remove and sign in
 
 **The spike comes first.** It is a prototyping step whose deliverable is a verdict.
-- **Question:** does the engine's `mcp_authenticate` / `mcp_oauth_callback_url` exchange, driven over a ready session's control client, sign a remote HTTP server in? And does `mcp_status` then report it connected?
-- **How to run it:** against the fake OAuth MCP server of `e2e/connectors-oauth.spec.ts`, in a scratch configuration, with a session started by a probe script under `spikes/p4-aggregator/`.
-- **Record:**
-  - the request and response frames, as a fixture under `spikes/protocol-probe/fixtures/p4/`;
-  - whether the engine returns the authorization URL or opens a browser itself;
-  - what redirect URIs it accepts.
-- **Promote** if a sign-in completes with a MAWS-chosen loopback redirect. **Otherwise discard:** in that case, Sign in shows the engine's own instruction (run `/mcp` in the session) and the Design section is revised with a Decision Log entry.
+- **Questions:** Over a ready session's control client, against M1's engine-mode OAuth fixture, does `mcp_authenticate` with a MAWS-chosen `http://127.0.0.1:<port>/callback` answer `redirectScheme: 'custom'`, and does `mcp_oauth_callback_url` then make `mcp_status` report the server connected? When the engine answers `'localhost'` instead, does its own listener complete the flow and `mcp_status` change? Does `mcp_set_servers` with the new server keep the session's other dynamic servers and leave a credential the next file-configured session uses (path A)? What does the engine answer to a second `mcp_authenticate` while one is pending, and to one after the session was cancelled mid-flow?
+- **How to run it:** a probe script under `spikes/p4-aggregator/` that starts the engine in a scratch configuration with the server configured at user scope, the fixture in engine mode, and drives the exchange; each failure is classified as the fixture's (the fixture's own log shows a request it refused) or the engine's (the engine answered an error or never called the fixture).
+- **Record:** the request and response frames as a fixture under `spikes/protocol-probe/fixtures/p4/`; the verdict and the Keychain service names seen, in Surprises & Discoveries.
+- **Promote** when a sign-in completes through either scheme with the server reported connected; choose path A if its two conditions hold, else path B; record the choice in the Decision Log and in the Design's "Which session". **Discard** when no sign-in completes for a reason classified as the engine's: implement the terminal hand-off (Design, "If the spike discards"), record a Decision Log entry, and acceptance 10 runs instead of 9.
 
-**At the end**, Connectors has My items and Discover. + adds a remote server at the chosen scope. Remove removes it. Sign in works through the engine as the spike's verdict allows, and My items shows each server's sign-in state.
+**At the end**, Connectors has My items and Discover. + adds a remote server at the chosen scope. Remove removes it. Sign in works as the spike's verdict allows, and My items shows each server's sign-in state.
 
 - **Touches:**
-  - `src/engine-host/plugins/runner.ts` and `src/shared/plugins/cli.ts`: the `mcp add` and `mcp remove` argv, and their results parsed from the CLI's output, since `mcp add` has no `--json`; record what it prints;
-  - a sign-in driver in `src/engine-host/` beside `mcp-call.ts`;
-  - a loopback listener reusing `src/main/connectors/oauth-callback.ts`'s pattern;
+  - `src/engine-host/plugins/runner.ts` and `src/shared/plugins/cli.ts`: the `mcp add` and `mcp remove` argv and their results parsed from the lines the CLI prints;
+  - `src/engine-host/operations.ts`, `src/shared/ipc/schema/session.ts`: `session.mcpAuthenticate`, `session.mcpOAuthCallback`, `session.mcpSetServers` (path A only), each a bounded call under the supervisor's timeout;
+  - `src/main/connectors/sign-in.ts`: the operation, its state table, the loopback listener reusing `oauth-callback.ts`'s pattern, the status poll;
   - `src/renderer/src/widgets/McpWidget*` and `customize/CustomizeView.tsx`;
-  - the IPC for `connectors.add`, `connectors.remove` and `connectors.signIn` (Interfaces);
-  - e2e for the Connectors tab.
+  - the IPC `connectors.add`, `connectors.remove`, `connectors.signIn`, `connectors.signInCancel` and the event `connectors.signInChanged` (Interfaces);
+  - `e2e/discover-connectors.spec.ts`.
 - **Decisions:**
-  - The default scope is user.
-  - Refuse on a name already configured in that scope.
-  - The name is normalised as the engine normalises it.
-  - Sign-in never starts a session.
-  - The callback listener binds 127.0.0.1 on an ephemeral port, accepts exactly one request whose `state` matches, and closes after it or after 5 minutes.
-  - Only remote HTTP servers get +.
-- **Does not touch:** MAWS's own connector store (`src/main/connectors/oauth-store.ts`).
-- **Proves:** acceptance 5 and 6; acceptance 7's Connectors side.
+  - The default scope is user. The name rule and the duplicate refusal are the Design's.
+  - Only remote servers that work with Claude Code get +; `http` and `sse` both.
+  - The listener binds 127.0.0.1 on an ephemeral port, accepts exactly one request whose `state` matches, answers a fixed page, and closes after it or after 5 minutes.
+  - The engine's `mcp_authenticate` registers the client before answering (fact 2); if the spike measures that over 10 s against a slow authorization server, `session.mcpAuthenticate` becomes an operation with a receipt like `session.mcpReconnect`, and the state table's `starting` waits on its completion event.
+- **Does not touch:** MAWS's own connector store (`src/main/connectors/oauth-store.ts`); the composer's slash handling.
+- **Proves:** acceptance 8, 9 or 10, and 11's Connectors side.
 
-### M4 — Acceptance
+### M5 — Acceptance
 
-Run acceptance 1 to 8 as written, then the whole Mac matrix with `--evidence`. Capture the screenshots of acceptance 1 at both sizes, plus the detail sheet, the install sheet and the connector sheet, and put them next to the owner's two references. Hand the branch back for the architect's branch review (Decision Log, verification).
+Run acceptance 1 to 12 as written (9 or 10 per the verdict), then the whole Mac matrix with `--evidence`. Capture the screenshots of acceptance 1 at both sizes, plus the detail sheet, the install sheet and the connector sheet, and put them next to the owner's two references. Run the live smoke once on a Mac with network and record its counts. Hand the branch back for the architect's branch review (Decision Log, verification).
 
 - **Touches:**
-  - the tests that acceptance 8 names;
+  - the tests that acceptance 12 names;
   - fixes the acceptance run exposes.
-- **Proves:** acceptance 1 to 8 together, on one head.
+- **Proves:** acceptance 1 to 12 together, on one head.
 
 ## Interfaces and Dependencies
 
@@ -414,46 +471,85 @@ Run acceptance 1 to 8 as written, then the whole Mac matrix with `--evidence`. C
 
 ```ts
 export const CatalogKindSchema = z.enum(['plugin', 'connector']);
-export const OwnershipSchema = z.enum(['anthropic', 'partner', 'community', 'yours', 'added']);
+export const OwnershipSchema = z.enum(['anthropic', 'partner', 'community', 'added']);
 export const ReviewTierSchema = z.enum(['anthropic', 'partner', 'community']).nullable(); // the directory's verified_tier only
+export const McpTransportSchema = z.enum(['stdio', 'http', 'sse', 'unknown']);
+export const PluginRouteSchema = z.strictObject({
+  kind: z.literal('plugin'),
+  marketplaceSource: z.string(),   // owner/repo, a URL or a path: what `plugin marketplace add` takes
+  marketplaceName: z.string(),     // what `plugin install <name>@<marketplace>` takes
+  pluginName: z.string(),
+  ref: z.string().nullable(),      // this route's pin, if any; not part of identity
+  present: z.boolean(),            // the engine already has this marketplace: no add step
+});
+export const ConnectorRouteSchema = z.strictObject({
+  kind: z.literal('connector'),
+  name: z.string(),                // the engine-legal name the sheet proposes
+  url: z.string().nullable(),      // null when the server takes an instance URL
+  urlPattern: z.string().nullable(), // the directory's url_regex
+  transport: z.enum(['http', 'sse']),
+  authPosture: z.enum(['auth_required', 'no_auth']),
+});
+export const ManualRouteSchema = z.strictObject({ kind: z.literal('manual'), docsUrl: z.string().nullable(), reason: z.string() });
 export const CatalogItemSchema = z.strictObject({
-  id: z.string(),                       // stable: source identity (repo + path + ref) or directory id for connectors
+  id: z.string(),                       // stable: normalised repo url + path for a plugin; the directory's server id for a connector
   kind: CatalogKindSchema,
-  name: z.string(),
+  name: z.string(),                     // the display name
+  installName: z.string().nullable(),   // what the command uses, when it differs
   description: z.string().nullable(),
-  publisher: z.string().nullable(),
-  ownership: OwnershipSchema,
+  publisher: z.string().nullable(),     // the publisher chain's answer
+  ownership: OwnershipSchema,           // the chosen route's
   reviewTier: ReviewTierSchema,
   scanBlocked: z.string().nullable(),   // the directory's reason when a failed scan disables Add
-  categories: z.array(z.string()),
+  categories: z.array(z.string()),      // the chosen axis's values
   iconUrl: z.string().nullable(),
   updatedAt: z.string().nullable(),
-  components: z.strictObject({ skills: z.array(z.string()), mcpServers: z.number().int(), hooks: z.boolean(), commands: z.number().int(), agents: z.number().int() }).nullable(), // null: not known before install
-  install: z.union([
-    z.strictObject({ kind: z.literal('plugin'), marketplaceSource: z.string(), marketplaceName: z.string(), pluginName: z.string() }),
-    z.strictObject({ kind: z.literal('connector'), name: z.string(), url: z.string(), transport: z.literal('http') }),
-    z.strictObject({ kind: z.literal('manual'), docsUrl: z.string().nullable() }),
-  ]),
-  sources: z.array(z.string()),          // source keys that listed it (seed or added marketplace name, 'directory')
+  installs: z.number().int().nullable(),  // plugin-details unique_installs
+  rank: z.number().int().nullable(),      // the servers endpoint's popularity_rank
+  components: z.strictObject({
+    skills: z.array(z.string()),
+    mcpServers: z.array(z.strictObject({ name: z.string(), transport: McpTransportSchema })),
+    hooks: z.boolean(),
+    commands: z.number().int(),
+    agents: z.number().int(),
+    cli: z.boolean(),
+  }).nullable(),                        // null: not known before install
+  runsOnYourComputer: z.union([z.boolean(), z.literal('unknown')]),
+  install: z.union([PluginRouteSchema, ConnectorRouteSchema, ManualRouteSchema]), // the chosen route
+  alsoListedBy: z.array(z.string()),    // the other routes' marketplace names
+  sources: z.array(z.string()),         // source keys that listed it
+  installed: z.enum(['here', 'elsewhere', 'no']), // for the request's cwd
 });
-export const CatalogSourceStatusSchema = z.strictObject({ key: z.string(), label: z.string(), fetchedAt: z.string().nullable(), state: z.enum(['fresh', 'stale', 'offline', 'unavailable']), dropped: z.number().int() });
+export const CatalogSourceStatusSchema = z.strictObject({
+  key: z.string(), label: z.string(), fetchedAt: z.string().nullable(),
+  state: z.enum(['fresh', 'stale', 'offline', 'unavailable']), dropped: z.number().int(),
+});
+export const CatalogSortSchema = z.enum(['installs', 'updated', 'name']); // 'installs' is rank for connectors
 ```
 
-Commands (`src/shared/ipc/names/catalog.ts`):
-- `catalog.home({tab})` returns `{featured: CatalogItem | null, shelves: {key, title, items, total}[], total}`.
-- `catalog.query({tab, text, chips, category, notInstalled, cursor})` returns `{items, nextCursor, total}`.
-- `catalog.item({id})` returns `CatalogItem`.
+Commands (`src/shared/ipc/names/catalog.ts`); every one takes the Customize page's `cwd` (`PluginsCwdSchema`, or `null` for the user configuration), and `tab` is `'plugins' | 'skills' | 'connectors'`:
+- `catalog.home({tab, cwd})` returns `{featured: CatalogItem | null, shelves: {key, kind: 'added' | 'source' | 'category', title, items, total}[], total}`.
+- `catalog.query({tab, cwd, text, chips, category, source, notInstalled, sort, cursor})` returns `{items, nextCursor, total, restarted}`; `source` is a source key or `'added'`; pages are deterministic under one sort, ties broken by id.
+- `catalog.item({id, cwd})` returns `CatalogItem`.
 - `catalog.refresh()` returns `CatalogSourceStatus[]`.
 - `catalog.sources()` returns `CatalogSourceStatus[]`.
 
-Event: `catalog.changed`. `tab` is `'plugins' | 'skills' | 'connectors'`.
+Event: `catalog.changed`.
 
-Connector commands (M3), in the `connectors` namespace beside the existing names:
-- `connectors.add({name, url, scope, cwd})` returns the runner's outcome.
-- `connectors.remove({name, scope, cwd})` returns the runner's outcome.
-- `connectors.signIn({name, appSessionId})` returns `{ok: true, status} | {ok: false, reason: 'no_session' | 'timeout' | 'denied' | 'engine', message}`.
+Connector commands (M4), in the `connectors` namespace beside the existing names (`src/shared/ipc/names/connectors.ts`):
+- `connectors.add({name, url, transport, scope, cwd})` returns the runner's receipt; completes on `plugins.operation` like a plugin verb.
+- `connectors.remove({name, scope, cwd})` likewise.
+- `connectors.signIn({name, appSessionId})` returns `{opId}` at once; `connectors.signInCancel({opId})`.
+- Event `connectors.signInChanged {opId, name, state: 'starting' | 'waiting_browser' | 'waiting_callback' | 'watching_status' | 'submitting' | 'done' | 'failed' | 'cancelled', reason: 'no_session' | 'timeout' | 'denied' | 'engine' | 'session_exited' | null, message: string | null}`.
+
+Host session calls (M4), in `src/shared/ipc/schema/session.ts` beside `session.mcpStatus`:
+- `session.mcpAuthenticate({appSessionId, serverName, redirectUri})` returns the engine's `{authUrl, requiresUserAction, callbackExpected, redirectScheme, state, callbackPort}` or its error;
+- `session.mcpOAuthCallback({appSessionId, serverName, callbackUrl})` returns `{ok: true} | {ok: false, message}`;
+- `session.mcpSetServers({appSessionId, servers})` (path A only) returns the engine's `{added, removed, errors}`.
 
 Plugin installs reuse `plugins.install` and `marketplaces.add` as they are, with `marketplaces.add` given its scope argument.
+
+Test seams (M1): the environment variable `MAWS_CATALOG_FIXTURES` (Design, Fetching); `e2e/fixtures/catalog/<source-key>.json` with the source keys `seed:<marketplace name>`, `directory:plugins`, `directory:servers`, `plugin-details`, `engine:available`; `e2e/fixtures/catalog/marketplace/.claude-plugin/marketplace.json` with the four plugins named above; `e2e/support/real-engine.ts` exporting the resolved binary and version.
 
 ## Surprises & Discoveries
 
@@ -461,12 +557,35 @@ Plugin installs reuse `plugins.install` and `marketplaces.add` as they are, with
   Evidence: `gh api repos/<each>/contents/.claude-plugin/marketplace.json` returned a manifest for all fourteen (2026-10-24).
 - Observation: Desktop's Discover home is a signed-in editorial feed, not the public directory.
   Evidence: `shared-52-uHFNjl7C.js:25534` (`/api/organizations/{org}/library/discover/home`).
+- Observation: the directory's plugin records carry no install action naming a marketplace; the install route for a directory plugin is the engine's own built-in marketplace.
+  Evidence: 10,857 of 10,857 records have `installation.actions == {"sign_in": true}`; `source.marketplace_slug` is `anthropic-plugin-directory` on 3,357, absent on the rest; cli.pretty.js 38626 `bn = "anthropic-plugin-directory"`, 38649 `Or = "Anthropic Directory"`, 780172 `directoryListingSource` (2026-10-25).
+- Observation: `visibility=public` is exactly the installable plugin set; `commercial` adds only connectors and desktop extensions.
+  Evidence: a `visibility=public` walk returned 3,601 records, every one with `source.repository`; the `commercial,public` walk's other 7,256 records are 7,124 with `checks.scan.reason == "directory_mcp_server"` and 132 with a `desktop_extension` component, all `claude_code: does_not_work` (2026-10-25).
+- Observation: install counts and contents for official plugins are public; Desktop's counts are editorial but the engine's are not.
+  Evidence: plugin-details.json (fact 2) answered 200, 539 KB, 315 ids, 313 with `unique_installs` (e.g. `agent-sdk-dev@claude-plugins-official`: 67,988); `PluginsWidget.test.tsx:1496` expects "1.3M installs" from `installCount` (2026-10-25).
+- Observation: identity by pinned ref would split joined items.
+  Evidence: of 1,436 (repository, path) matches between the fourteen manifests and the directory, 648 have a manifest ref unequal to `reviewed_commit`; 216 (repository, path) pairs appear in more than one manifest, 107 at different refs (2026-10-25).
+- Observation: the directory names most plugins by a display name, not the install name, and names almost no publisher.
+  Evidence: 723 of 1,436 matches differ in name ("Adobe" vs `adobe-for-creativity`); `publisher` is null on 3,592 of 10,857 records, including every anthropic-tier GitHub plugin (2026-10-25).
+- Observation: no directory record fails a scan, and one record has a launch banner.
+  Evidence: `checks.scan.state` counts: `not_scanned` 7,256, `unavailable` 3,601; `launch.banner` only on "Sana from Workday" (partner, beta, access-request form) (2026-10-25).
+- Observation: the servers list has no community tier, and 268 of its servers do not work with Claude Code.
+  Evidence: 1,011 servers: `verified_tier` partner 1,001, anthropic 10; `works_with` lacks `claude-code` on 268 (123 local desktop extensions); 73 remote Claude Code servers have `url: null` with a `url_regex` (2026-10-25).
+- Observation: the engine answers `mcp_authenticate` with the authorization URL and a redirect scheme, and falls back to its own localhost listener.
+  Evidence: cli.pretty.js 856485 `{ authUrl, requiresUserAction: !0, callbackExpected: !0, redirectScheme: tn, state, ...callbackPort }`; 856470 to 856480 "AS rejected custom redirectUri … falling back to localhost"; 856441 "Server not found" when the session has no such server (2026-10-25).
+- Observation: the directory's taxonomy has five axes; one covers most of both sets.
+  Evidence: over the 3,601 public plugins, `object_acted_on` 92%, `work_department` 66%, `industry` 13%, `life_area` 12%, `subject` 6%; over 1,011 servers, `object_acted_on` 57%, the servers' own `categories` 86% (2026-10-25).
+- Observation: the engine's own name rule for a connector differs from MAWS's tool-prefix normaliser, and 427 directory server names would not pass it.
+  Evidence: `claude mcp add` accepts letters, digits, hyphens and underscores (`findings-p4-r8-mcp-servers.txt` 7); `normalizedMcpName` maps every other character to `_` (`src/engine-host/mcp-call.ts:16`); 427 of 1,011 server names contain a space or other character; Linear's `claude_code_copy_text` names it `linear` (2026-10-25).
 
 ## Decision Log
 
 - Decision: verification. One design review of this spec (a general-purpose reviewer on the fable model), plus the `doperpowers:adversarial-reviewer` on the execution section, because there are four milestones. Branch review: the doperpowers code-review panel at xhigh on the whole branch. The owner opted into panels for branches of this size in the UX wave.
   Rationale: four milestones across main, engine-host and renderer, with a network boundary and engine mutations.
   Date/Author: 2026-10-24, the architect.
+- Decision: the first revision after review (the architect's rulings on the design review's 13 findings and the buildability review's 7, all accepted; `rulings-round1.md`). The directory's install route is the engine's built-in `anthropic-plugin-directory` marketplace with entry names from `plugin list --available`, not a marketplace the record names (none does). Plugins come from `visibility=public` only and connectors from the servers endpoint only, dropping 7,256 non-plugin records and the duplicate connector cards. Identity is (repository, path) without refs, with route precedence and "Also listed by". Install counts and connector ranks return; official contents and dates come from plugin-details. Featured is derived from installs or rank, never from a banner. Fallback labels say "Listed by", the Partner tooltip makes no security claim, the publisher chain falls back to the manifest. Connector names come from the directory's command text or slug, URLs may be patterns, `sse` is included, `works_with` filters. The owner's two repositories leave the seed list and arrive as marketplaces the engine already has. `runsOnYourComputer` is three-valued from access types, hooks, CLI components and MCP transports; Skills lists only items with known skills. Catalog requests carry `cwd`, "installed" means here, the engine reads go through the host and invalidate on plugin operations and the settings watcher, and queries take a source or shelf filter, a sort and deterministic pagination. Sign-in is a main-owned operation with a receipt, events and a state table over three bounded host calls, branching on the engine's redirect scheme, with path A (`mcp_set_servers`) or path B (sessions started after the add) chosen by the spike and a real discard fallback through the terminal surface. A new first milestone provides a real-engine harness: the pinned binary asserted, scratch configuration, the fixture seam, a local installable marketplace, an engine-mode OAuth fixture with Keychain cleanup, and the gate group `e2e:discover`; the live smoke is opt-in and outside the gate. Milestones are now M1 harness, M2 catalog, M3 Discover, M4 connectors with the spike first, M5 acceptance; acceptance is renumbered 1 to 12.
+  Rationale: the design review measured the live directory and the engine (Surprises & Discoveries, 2026-10-25 entries): the first draft's join, route, counts, Featured and sign-in rested on four facts that were wrong; the buildability review found the e2e harness could not run the acceptance as written. The alternatives rejected are recorded beside each decision in the Design.
+  Date/Author: 2026-10-25, the design reviewer, from the architect's rulings.
 
 ## Outcomes & Retrospective
 
