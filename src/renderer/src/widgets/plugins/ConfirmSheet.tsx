@@ -44,6 +44,16 @@ export interface Declared {
   command: string;
 }
 
+// A scope the sheet offers no choice of, in the selector's words: with the command behind Details, this is where the
+// person reads which configuration the change applies to.
+export function FixedScope({ scope }: { scope: PluginsScope }) {
+  return (
+    <p data-plugins-scope={scope} className="m-0 text-ui-sm text-fg-muted">
+      {W.scope}: <span className="text-fg">{W.scopeName[scope]}</span>
+    </p>
+  );
+}
+
 const withScope = (request: PluginsRequest, scope: PluginsScope): PluginsRequest => ({ ...request, input: { ...request.input, scope } }) as PluginsRequest;
 
 // `onConfirm` hears the request as confirmed and the binary the sheet named, which the host checks before it runs.
@@ -53,6 +63,7 @@ export function ConfirmSheet({ request, declared, env, onConfirm, onClose }: { r
   const scoped = SCOPED.has(request.action) && declared === null; // the second sheet reruns the request as it ran
   const asked = scoped ? withScope(request, scope) : request;
   const destructive = DESTRUCTIVE.has(request.action);
+  const fixedScope = scoped ? null : ((request.input as { scope?: PluginsScope }).scope ?? null); // only a scope the request carries
   const argv = argvOf(asked);
   const target = targetOf(request);
   const engine = env.engine.state === 'ready' ? env.engine.env : null;
@@ -134,6 +145,7 @@ export function ConfirmSheet({ request, declared, env, onConfirm, onClose }: { r
               {scope !== 'user' && <p className="m-0 font-mono text-ui-sm break-all text-fg-muted">{W.inProject(cwd)}</p>}
             </fieldset>
           )}
+          {fixedScope && <FixedScope scope={fixedScope} />}
           {declared && files}
           {uninstalls && <p className="m-0 text-ui-sm text-fg">{uninstalls}</p>}
           <p className="m-0 text-ui-sm text-fg-muted">{thenWords(request.action, env.readySessions)}</p>

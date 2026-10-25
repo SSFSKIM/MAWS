@@ -5,15 +5,16 @@
 // project's two only on a project's page); "No sign-in needed" for an authless server; and, behind Details (closed at
 // every opening, the owner's ruling of 2026-10-25), the exact command and the file it changes. A name already
 // configured in any scope that applies here is refused, the existing entry shown; until every such scope's
-// configuration is read, Add waits, or says why it cannot, with Retry (M4 fix wave). Removing shows the
-// acknowledgement, with the command and the file behind Details. The binary is `plugins.env`'s, read at every opening:
-// until it answers the sheet names no command and confirms nothing.
+// configuration is read, Add waits, or says why it cannot, with Retry (M4 fix wave). Removing shows the scope and the
+// acknowledgement, with the command and the file behind Details. Where no scope is offered to choose (the user
+// configuration's page, a removal), the one scope is a plain line, so it stays in view with the command closed. The
+// binary is `plugins.env`'s, read at every opening: until it answers the sheet names no command and confirms nothing.
 import { useState } from 'react';
 import type { McpActionInputs, PluginsScope } from '@shared/plugins/cli';
 import { Sheet, SheetForm } from '../../sessions/Sheet';
 import { CHOICE, DANGER, FIELD, PRIMARY, SECONDARY } from '../../sessions/ui';
 import { PLUGIN_MANAGEMENT as W } from '../../widgets/copy';
-import type { EngineResolution } from '../../widgets/plugins/ConfirmSheet';
+import { FixedScope, type EngineResolution } from '../../widgets/plugins/ConfirmSheet';
 import { argvOf, commandWords, type PluginsRequest } from '../../widgets/plugins/present';
 import { SheetDetails } from '../../widgets/plugins/SheetDetails';
 import { CONNECTORS as C } from './copy';
@@ -167,7 +168,7 @@ function AddSheet({ request, env, onConfirm, onClose }: { request: PluginsReques
           <p className="m-0 text-fg-muted">
             {C.transport}: <span className="text-fg">{C.transportName[asked.transport]}</span>
           </p>
-          {scopes.length > 1 && (
+          {scopes.length > 1 ? (
             <fieldset className="m-0 flex flex-col gap-1 border-0 p-0">
               <legend className="mb-1 p-0 text-fg-muted">{W.scope}</legend>
               <div className="flex gap-3">
@@ -179,6 +180,8 @@ function AddSheet({ request, env, onConfirm, onClose }: { request: PluginsReques
                 ))}
               </div>
             </fieldset>
+          ) : (
+            <FixedScope scope={scope} />
           )}
           {connector && (
             <p data-connector-auth={connector.authPosture} className="m-0 text-fg">
@@ -202,6 +205,7 @@ function RemoveSheet({ request, env, onConfirm, onClose }: { request: PluginsReq
     <Sheet title={C.removeTitle(input.name)} width="w-[min(520px,90vw)]" onClose={onClose} data-plugins-sheet="mcp-remove">
       <SheetForm canSubmit={engine !== null && acknowledged} onSubmit={() => engine && onConfirm(request, engine.binary)} submitLabel={W.submit['mcp-remove']} submitClass={DANGER}>
         <div data-plugins-sheet-body className="flex flex-col gap-3 text-ui-sm">
+          <FixedScope scope={input.scope} />
           <Unresolved engine={env.engine} />
           <p className="m-0 text-fg-muted">{C.removesFrom}</p>
           <label className="flex items-center gap-2 text-fg">

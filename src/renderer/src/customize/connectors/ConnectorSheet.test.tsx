@@ -66,12 +66,13 @@ describe('the connector sheet', () => {
     expect(region.querySelector('[data-connector-writes]')!.textContent).toBe('/cfg/.claude.json');
   });
 
-  it('Remove: the command and the file behind a closed Details too, the acknowledgement in view', () => {
+  it('Remove: the command and the file behind a closed Details too, the scope and the acknowledgement in view', () => {
     render(<ConnectorSheet request={requestFor('mcp-remove', { name: 'linear', scope: 'user' }, null)} env={env()} onConfirm={() => {}} onClose={() => {}} />);
     const sheet = screen.getByRole('dialog', { name: 'Remove linear?' });
     expect(sheet.querySelector('[data-plugins-argv]')).toBeNull();
     expect(sheet.querySelector('[data-connector-writes]')).toBeNull();
     expect(within(sheet).getByRole('checkbox', { name: 'I understand' })).toBeTruthy();
+    expect(sheet.querySelector('[data-plugins-scope]')!.textContent).toBe('Scope: User'); // which configuration it changes, in view
     expect(argv(sheet)).toEqual(['mcp', 'remove', 'linear', '--scope', 'user']);
     expect(sheet.querySelector('[data-connector-writes]')!.textContent).toBe('/cfg/.claude.json');
   });
@@ -144,6 +145,17 @@ describe('the connector sheet', () => {
     expect(within(sheet).getByText('No sign-in needed')).toBeTruthy();
     expect(argv(sheet).slice(0, 4)).toEqual(['mcp', 'add', '--transport', 'sse']);
     expect(within(sheet).queryByRole('radio', { name: 'Project' })).toBeNull();
+  });
+
+  it('with no scope to choose, the one scope stays in view outside Details, in the selector’s words', () => {
+    const { sheet } = open(connector(), env({ cwd: null, runCwd: '/cfg' }));
+    expect(within(sheet).queryByRole('radio')).toBeNull();
+    expect(detailsButton(sheet).getAttribute('aria-expanded')).toBe('false');
+    expect(sheet.querySelector('[data-plugins-scope]')!.textContent).toBe('Scope: User');
+    cleanup();
+    const project = open(connector()); // a project's page: the selector, no fixed line
+    expect(within(project.sheet).getByRole('radio', { name: 'User' })).toBeTruthy();
+    expect(project.sheet.querySelector('[data-plugins-scope]')).toBeNull();
   });
 
   it('names no command and confirms nothing until the engine is resolved', () => {

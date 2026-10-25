@@ -276,6 +276,7 @@ test('add: Linear from Discover through the connector sheet and the real CLI; th
     await expect(row(page, 'linear').locator('[data-sign-in-state]')).toHaveText('Sign in needed');
     await row(page, 'linear').getByRole('button', { name: 'Remove linear' }).click();
     const sheet = page.locator('[data-plugins-sheet="mcp-remove"]');
+    await expect(sheet.locator('[data-plugins-scope]')).toHaveText('Scope: User'); // in view with Details closed
     await openDetails(sheet);
     await expect(sheet.locator('[data-plugins-argv]')).toHaveAttribute('data-plugins-argv', JSON.stringify(['mcp', 'remove', 'linear', '--scope', 'user']));
     await sheet.getByRole('checkbox').check();

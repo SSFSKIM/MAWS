@@ -105,6 +105,26 @@ describe('the confirm sheet', () => {
     expect(within(sheet).getByRole('alert').textContent).toBe('no engine');
   });
 
+  it('with no scope to choose, a scope the request carries stays in view outside Details; none is invented', () => {
+    // the Discover recovery's Remove marketplace runs at the scope the marketplace was added at
+    render(<ConfirmSheet request={requestFor('marketplace-remove', { name: 'maws-test', scope: 'project' }, 'directory')} declared={null} env={ENV} onConfirm={() => {}} onClose={() => {}} />);
+    let sheet = screen.getByRole('dialog');
+    expect(within(sheet).queryByRole('radio')).toBeNull();
+    expect(detailsButton().getAttribute('aria-expanded')).toBe('false');
+    expect(sheet.querySelector('[data-plugins-scope]')!.textContent).toBe('Scope: Project');
+    cleanup();
+    // Manage marketplaces' removal names no scope: the sheet does not either
+    render(<ConfirmSheet request={requestOf('marketplace-remove')} declared={null} env={ENV} onConfirm={() => {}} onClose={() => {}} />);
+    sheet = screen.getByRole('dialog');
+    expect(sheet.querySelector('[data-plugins-scope]')).toBeNull();
+    cleanup();
+    // a scoped action has its selector and no fixed line
+    render(<ConfirmSheet request={requestOf('install')} declared={null} env={ENV} onConfirm={() => {}} onClose={() => {}} />);
+    sheet = screen.getByRole('dialog');
+    expect(within(sheet).getByRole('radio', { name: 'User' })).toBeTruthy();
+    expect(sheet.querySelector('[data-plugins-scope]')).toBeNull();
+  });
+
   it('Cancel closes without confirming', () => {
     const onConfirm = vi.fn();
     const onClose = vi.fn();
@@ -137,6 +157,7 @@ describe('the confirm sheet', () => {
     expect(screen.getByRole('dialog').querySelector('[data-plugins-declared]')!.textContent).toBe('npx helper');
     expect(within(screen.getByRole('dialog')).queryByRole('radio')).toBeNull();
     expect(within(screen.getByRole('dialog')).queryByRole('button', { name: 'Details' })).toBeNull(); // the command is the decision: in view, no disclosure
+    expect(screen.getByRole('dialog').querySelector('[data-plugins-scope]')!.textContent).toBe('Scope: Local'); // the scope it reruns at, with no selector
     expect(argvShown()).toEqual(['plugin', 'install', 'p@m', '--scope', 'local', '--accept-command', sha, '--json']);
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Run it' }));
     expect(onConfirm).toHaveBeenCalledWith(request, '/opt/claude/2.1.290');
