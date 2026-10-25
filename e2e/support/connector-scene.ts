@@ -381,8 +381,8 @@ export class ConnectorScene {
     info.annotations.push({ type: 'engine', description: this.engine.version });
   }
 
-  // Every app this scene launched is killed, then every process naming its root (supervisors, engines, the fixture
-  // servers), then the files.
+  // Every app this scene launched is killed, then the scratch's argv/cwd owners (including detached engines whose
+  // process title carries no scratch path) are killed and awaited, then the files. Removal retries are only a backstop.
   async cleanup(): Promise<void> {
     for (const run of this.runs) {
       if (run.child.exitCode === null && run.child.signalCode === null) run.child.kill('SIGKILL');
@@ -396,7 +396,7 @@ export class ConnectorScene {
       const dir = tmpSocketDirOf(this.userData, socket);
       if (dir !== null) rmSync(dir, { recursive: true, force: true });
     }
-    rmSync(this.root, { recursive: true, force: true });
+    rmSync(this.root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     if (leftover !== null) throw leftover;
   }
 }

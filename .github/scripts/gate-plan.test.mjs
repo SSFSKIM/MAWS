@@ -288,16 +288,16 @@ const workflowList = (workflow, name) => {
 };
 const placement = (outputs) => Object.fromEntries(JSON.parse(outputs.e2e).map((entry) => [entry.group, [JSON.parse(entry.runner), entry.timeout]]));
 
-// V4 waves 1, 2, 2b, 2c, 2d and 3: only the proven-VM groups leave today's exclusive labels (composer and layout, outside the
+// V4 waves 1, 2, 2b, 2c, 2d, 3 and 4: only the proven-VM groups leave today's exclusive labels (composer and layout, outside the
 // class-1 set, only when a run names them); no group shares the host desktop.
 test("gate.yml's proven-VM groups run on Solo Mac, or the named VM lane alone; every other Mac job keeps today's labels and waits", () => {
   const workflow = readWorkflow();
   const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E'];
   const own = Object.fromEntries(names.map((name) => [name, workflowList(workflow, name)]));
   assert.equal(own.MAC_SHARED_E2E, '');
-  assert.equal(own.MAC_VM_E2E, 'document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations deliverables supervisor browser browser-comment browser-import agents c12 available design-systems browser-chrome composer layout');
+  assert.equal(own.MAC_VM_E2E, 'document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations deliverables supervisor browser browser-comment browser-import agents c12 available design-systems browser-chrome composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct');
   const proven = ['document-app', 'widgets', 'to-human', 'transcript', 'panel', 'c7', 'code', 'scm', 'library', 'document', 'settings', 'tools', 'dashboard', 'side', 'presentations',
-    'deliverables', 'supervisor', 'browser', 'browser-comment', 'browser-import', 'agents', 'c12', 'available', 'design-systems', 'browser-chrome', 'composer', 'layout'];
+    'deliverables', 'supervisor', 'browser', 'browser-comment', 'browser-import', 'agents', 'c12', 'available', 'design-systems', 'browser-chrome', 'composer', 'layout', 'delivery', 'connectors-oauth', 'artifacts', 'browser-cua', 'connectors', 'connectors-direct'];
   // The repository's variables as they stand, and the default set: class 1a on the pool, unit:darwin and every class-1
   // group on the Mac but desk-web.
   const { outputs, summary } = plan({ ...own, GATE_RUNNER: 'pool', GATE_E2E_RUNNER: 'macos', HEAD_MESSAGE: 'ci-gate: test' });
@@ -309,7 +309,7 @@ test("gate.yml's proven-VM groups run on Solo Mac, or the named VM lane alone; e
   assert.equal(outputs.unit_darwin_runner, JSON.stringify(mac));
   assert.deepEqual(JSON.parse(outputs.timeouts), { static: 30, unit: 30, probes: 30, unit_darwin: 40 });
   assert.doesNotMatch(summary, /Shared Mac|MAC_SHARED_E2E|MAC_VM_E2E|Lane/);
-  assert.match(summary, /\. Solo Mac \(the exclusive instance or the guest, whichever is free\): e2e:library, e2e:side, e2e:tools, e2e:to-human, e2e:deliverables, e2e:panel, e2e:supervisor, e2e:browser, e2e:browser-comment, e2e:browser-import, e2e:settings, e2e:transcript, e2e:code, e2e:agents, e2e:widgets, e2e:c7, e2e:scm, e2e:c12, e2e:available, e2e:document, e2e:document-app, e2e:presentations, e2e:design-systems, e2e:browser-chrome, e2e:dashboard\. Out\/ built on the pool \(e2e-build\) for the guest-eligible jobs: harness, plain\.\n$/);
+  assert.match(summary, /\. Solo Mac \(the exclusive instance or the guest, whichever is free\): e2e:artifacts, e2e:library, e2e:side, e2e:tools, e2e:to-human, e2e:deliverables, e2e:panel, e2e:supervisor, e2e:browser, e2e:browser-comment, e2e:browser-import, e2e:settings, e2e:transcript, e2e:code, e2e:agents, e2e:widgets, e2e:c7, e2e:scm, e2e:c12, e2e:available, e2e:document, e2e:document-app, e2e:presentations, e2e:design-systems, e2e:browser-cua, e2e:browser-chrome, e2e:dashboard, e2e:connectors, e2e:connectors-direct, e2e:connectors-oauth, e2e:delivery\. Out\/ built on the pool \(e2e-build\) for the guest-eligible jobs: harness, plain\.\n$/);
   for (const [lane, guest] of [['vm', vmMac], ['vm-trial', vmTrialMac]]) {
     const laned = plan({ ...own, GATE_RUNNER: 'pool', GATE_E2E_RUNNER: 'macos', HEAD_MESSAGE: `ci-gate: test\n\nLane: ${lane}` });
     const expected = Object.fromEntries(groups.map(([group, where]) => [group, proven.includes(group) ? [guest, 30] : where]));
@@ -318,7 +318,7 @@ test("gate.yml's proven-VM groups run on Solo Mac, or the named VM lane alone; e
     assert.deepEqual(JSON.parse(laned.outputs.timeouts), JSON.parse(outputs.timeouts), lane);
     for (const job of ['static', 'unit', 'probes']) assert.equal(laned.outputs[`${job}_runner`], outputs[`${job}_runner`], `${lane} ${job}`);
     assert.doesNotMatch(laned.summary, /Shared Mac|Solo Mac/);
-    assert.match(laned.summary, new RegExp(`\\. Lane: ${lane}, on \\[${guest[0]}\\] alone: e2e:library, e2e:side, e2e:tools, e2e:to-human, e2e:deliverables, e2e:panel, e2e:supervisor, e2e:browser, e2e:browser-comment, e2e:browser-import, e2e:settings, e2e:transcript, e2e:code, e2e:agents, e2e:widgets, e2e:c7, e2e:scm, e2e:c12, e2e:available, e2e:document, e2e:document-app, e2e:presentations, e2e:design-systems, e2e:browser-chrome, e2e:dashboard\\. Out/ built on the pool \\(e2e-build\\) for the guest-eligible jobs: harness, plain\\.\\n$`), lane);
+    assert.match(laned.summary, new RegExp(`\\. Lane: ${lane}, on \\[${guest[0]}\\] alone: e2e:artifacts, e2e:library, e2e:side, e2e:tools, e2e:to-human, e2e:deliverables, e2e:panel, e2e:supervisor, e2e:browser, e2e:browser-comment, e2e:browser-import, e2e:settings, e2e:transcript, e2e:code, e2e:agents, e2e:widgets, e2e:c7, e2e:scm, e2e:c12, e2e:available, e2e:document, e2e:document-app, e2e:presentations, e2e:design-systems, e2e:browser-cua, e2e:browser-chrome, e2e:dashboard, e2e:connectors, e2e:connectors-direct, e2e:connectors-oauth, e2e:delivery\\. Out/ built on the pool \\(e2e-build\\) for the guest-eligible jobs: harness, plain\\.\\n$`), lane);
   }
   // composer and layout, outside the class-1 set, take the guest's labels when a run names them.
   const named = { ...own, GATE_RUNNER: 'pool', GATE_E2E_RUNNER: 'macos' };
@@ -494,14 +494,15 @@ test("gate.yml's proven-VM groups split into e2e_vm with just their build varian
   const workflow = readWorkflow();
   const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E'];
   const own = Object.fromEntries(names.map((name) => [name, workflowList(workflow, name)]));
-  assert.equal(own.MAC_VM_E2E, 'document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations deliverables supervisor browser browser-comment browser-import agents c12 available design-systems browser-chrome composer layout');
+  assert.equal(own.MAC_VM_E2E, 'document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations deliverables supervisor browser browser-comment browser-import agents c12 available design-systems browser-chrome composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct');
   const variants = {
     'document-app': 'plain', widgets: 'harness', 'to-human': 'harness', transcript: 'harness', panel: 'harness',
     c7: 'harness', code: 'harness', scm: 'plain', library: 'plain', document: 'harness',
     settings: 'harness', tools: 'harness', dashboard: 'plain', side: 'harness', presentations: 'plain',
     deliverables: 'harness', supervisor: 'plain', browser: 'harness', 'browser-comment': 'harness', 'browser-import': 'harness',
     agents: 'harness', c12: 'plain', available: 'harness', 'design-systems': 'plain', 'browser-chrome': 'harness',
-    composer: 'harness', layout: 'plain',
+    composer: 'harness', layout: 'plain', delivery: 'plain', 'connectors-oauth': 'plain', artifacts: 'plain',
+    'browser-cua': 'harness', connectors: 'plain', 'connectors-direct': 'plain',
   };
   const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
   for (const [group, variant] of Object.entries(variants)) assert.ok(scripts[`e2e:${group}`].startsWith(`scripts/e2e-build.sh ${variant} && `), group);
@@ -509,8 +510,8 @@ test("gate.yml's proven-VM groups split into e2e_vm with just their build varian
   const linuxGroups = own.LINUX_E2E.split(/\s+/);
   const linuxGates = `Gates: static,unit,probes,${linuxGroups.map((group) => `e2e:${group}`).join(',')}\nRunner: linux`;
   const defaultHost = own.CLASS1_E2E.split(/\s+/).filter((group) => !(group in variants) && (group === 'default' ? 'e2e' : `e2e:${group}`) in scripts).map((group) => [group, undefined, own.POOL_E2E.split(/\s+/).includes(group) ? box : mac]);
-  const defaultGuests = ['library', 'side', 'tools', 'to-human', 'deliverables', 'panel', 'supervisor', 'browser', 'browser-comment', 'browser-import', 'settings', 'transcript', 'code',
-    'agents', 'widgets', 'c7', 'scm', 'c12', 'available', 'document', 'document-app', 'presentations', 'design-systems', 'browser-chrome', 'dashboard'];
+  const defaultGuests = ['artifacts', 'library', 'side', 'tools', 'to-human', 'deliverables', 'panel', 'supervisor', 'browser', 'browser-comment', 'browser-import', 'settings', 'transcript', 'code',
+    'agents', 'widgets', 'c7', 'scm', 'c12', 'available', 'document', 'document-app', 'presentations', 'design-systems', 'browser-cua', 'browser-chrome', 'dashboard', 'connectors', 'connectors-direct', 'connectors-oauth', 'delivery'];
   const runs = [
     ['the default macOS set', 'ci-gate: test', defaultHost, defaultGuests, ['harness', 'plain'], 'true'],
     ['a Linux run', `ci-gate: test\n\n${linuxGates}`, linuxGroups.map((group) => [group, undefined, own.POOL_E2E.split(/\s+/).includes(group) ? box : hosted]), [], [], 'true'],
