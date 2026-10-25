@@ -20,6 +20,11 @@
 //   offline:   without the directory's and plugin-details' recordings, the manifests' items stay, plainer, with no
 //              counts and no Featured, and the Sources popover says which sources are unavailable; Connectors' Discover
 //              says the directory is unavailable, with Retry (acceptance 11; the Connectors side is M4's).
+//   agents:    a session started after Discover was browsed on its three tabs is given the same tools, and sends the
+//              model the same tool list, as one started before; nothing of the catalog reaches the model. Each session
+//              runs one turn against a loopback stand-in for the relay (support/model-stub.ts): no spend (acceptance
+//              12's e2e half, M5; its unit half is src/main/catalog/agents.test.ts).
+// The detail and the install sheet are attached as screenshots beside the home's (M5, for the owner's references).
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -27,6 +32,7 @@ import { expect, test, type Locator, type Page, type TestInfo } from '@playwrigh
 import { invoke, value } from './support/c7-replay';
 import { TEST_MARKETPLACE } from './support/discover-scratch';
 import { launchMaws, type MawsLaunch } from './support/launch';
+import { startModelStub, type ModelRequest } from './support/model-stub';
 import { REAL_ENGINE_VERSION } from './support/real-engine';
 import { openAppDestination } from './support/shell';
 
@@ -106,6 +112,29 @@ async function cancel(s: Locator): Promise<void> {
 
 const argvOf = async (s: Locator, attribute: 'data-plugins-argv' | 'data-plugins-add-argv') => JSON.parse((await s.locator(`[${attribute}]`).getAttribute(attribute))!) as string[];
 
+// Every item of a tab, paged through catalog.query as Discover's All is.
+async function allItems(page: Page, input: { tab: 'plugins' | 'skills' | 'connectors'; cwd: string | null }) {
+  const items: Awaited<ReturnType<typeof queryPage>>['items'] = [];
+  let cursor: string | null = null;
+  do {
+    const page_: Awaited<ReturnType<typeof queryPage>> = await queryPage(page, { ...input, cursor, limit: 200 });
+    items.push(...page_.items);
+    cursor = page_.nextCursor;
+  } while (cursor !== null);
+  return items;
+}
+const queryPage = async (page: Page, input: { tab: 'plugins' | 'skills' | 'connectors'; cwd: string | null; cursor: string | null; limit: number }) => value(await invoke(page, 'catalog.query', input));
+
+// A shelf's order (Design, The home): installs descending, then updated descending, then name, ties by id; a missing
+// count or date after every present one.
+type Ordered = { id: string; name: string; installs: number | null; updatedAt: string | null };
+function compareShelfOrder(a: Ordered, b: Ordered): number {
+  const keys = (i: Ordered) => [i.installs === null ? Infinity : -i.installs, i.updatedAt === null ? Infinity : -Date.parse(i.updatedAt), i.name.toLowerCase(), i.id] as const;
+  const [x, y] = [keys(a), keys(b)];
+  for (let k = 0; k < x.length; k += 1) if (x[k] !== y[k]) return x[k]! < y[k]! ? -1 : 1;
+  return 0;
+}
+
 async function shot(page: Page, info: TestInfo, name: string): Promise<void> {
   await info.attach(name, { body: await page.screenshot(), contentType: 'image/png' });
 }
@@ -149,6 +178,10 @@ test('home: Featured, the shelves, All under Installs; the two desktop sizes; Se
     await expect(featured.locator('[data-catalog-metric]')).toHaveText('1.3M installs');
     await expect(featured.locator('[data-catalog-icon]')).toHaveAttribute('data-catalog-icon', 'image');
     await expect(featured.locator('img')).toHaveAttribute('src', /^data:image\/png;base64,/);
+    // the most installed of every item with a count (plugin-details counts official plugins alone) not installed here
+    const counted = await allItems(page, { tab: 'plugins', cwd: null });
+    const most = Math.max(...counted.filter((i) => i.installs !== null && i.installed !== 'here').map((i) => i.installs!));
+    expect(home.featured!.installs).toBe(most);
   });
 
   await test.step('the shelves in the catalog’s order: Your sources first, the seeds, at most four categories; one row each', async () => {
@@ -160,6 +193,8 @@ test('home: Featured, the shelves, All under Installs; the two desktop sizes; Se
       const drawn = await pane(page).locator(`[data-shelf="${shelf.key}"] [data-catalog-card]`).evaluateAll((cards) => cards.map((c) => c.getAttribute('data-catalog-card')));
       expect(drawn.length, shelf.key).toBeGreaterThan(0);
       expect(drawn, shelf.key).toEqual(shelf.items.slice(0, drawn.length).map((i) => i.id));
+      // installs descending, then updated descending, then name (a missing count or date last), ties by id
+      for (let i = 1; i < shelf.items.length; i += 1) expect(compareShelfOrder(shelf.items[i - 1]!, shelf.items[i]!), `${shelf.key}: ${shelf.items[i - 1]!.id} before ${shelf.items[i]!.id}`).toBeLessThan(0);
     }
   });
 
@@ -179,6 +214,9 @@ test('home: Featured, the shelves, All under Installs; the two desktop sizes; Se
   });
 
   await test.step('All · N, every distinct item after joining, under Installs', async () => {
+    // the recordings' 72 plugins after joining (the engine's directory off, so none of its routes) and the test
+    // marketplace's four
+    expect(home.total).toBe(76);
     await expect(results(page).getByRole('heading', { name: `All · ${home.total}` })).toBeVisible();
     await expect(results(page).locator('[data-sort-shown]')).toHaveText('Installs');
   });
@@ -220,6 +258,7 @@ test('home: Featured, the shelves, All under Installs; the two desktop sizes; Se
 test('labels: search over both names, the trust labels and tooltips, a joined pair and a same-name pair', async () => {
   maws = await launchMaws({ realEngine: { projects: 1 } });
   const { page } = maws;
+  await contentSize(maws, 1280, 820);
   await openDiscover(page);
 
   await test.step('legal: claude-for-legal’s own plugins by Anthropic, Verified; its external partner’s by its publisher, Partner', async () => {
@@ -251,6 +290,7 @@ test('labels: search over both names, the trust labels and tooltips, a joined pa
     await openCard(page, card);
     const detail = pane(page).locator('[data-catalog-detail]');
     await expect(detail.locator('[data-also-listed]')).toHaveText('Also listed by claude-community');
+    await shot(page, test.info(), 'discover-detail-1280x820.png');
     await detail.getByRole('button', { name: 'Back to Discover' }).click();
     await expect(detail).toHaveCount(0);
     await expect(card.locator('[data-card-open]')).toBeFocused(); // Back returns to the list as it was
@@ -273,6 +313,7 @@ test('install: + adds the marketplace and installs through the real CLI; warning
   maws = await launchMaws({ realEngine: { projects: 1 } });
   const { page, userData } = maws;
   const { configDir, marketplace } = maws.realEngine!.scratch;
+  await contentSize(maws, 1280, 820);
   await openDiscover(page);
 
   await test.step('the sheets’ warnings: a stdio server warns, skills only does not, unknown contents may run code', async () => {
@@ -301,6 +342,7 @@ test('install: + adds the marketplace and installs through the real CLI; warning
     expect(await argvOf(s, 'data-plugins-add-argv')).toEqual(expect.arrayContaining(['plugin', 'marketplace', 'add', marketplace, '--scope', 'user']));
     const install = await argvOf(s, 'data-plugins-argv');
     expect(install.slice(0, 3)).toEqual(['plugin', 'install', `hooked@${TEST_MARKETPLACE}`]);
+    await shot(page, test.info(), 'discover-install-sheet-1280x820.png');
     await s.getByRole('button', { name: 'Install', exact: true }).click();
     await expect(s).toBeHidden();
     await expect(byName(results(page), 'hooked')).toHaveAttribute('data-installed', 'here', { timeout: 2 * CLI_MS });
@@ -369,6 +411,10 @@ test('install: + adds the marketplace and installs through the real CLI; warning
     await expect(s.locator('[data-plugins-add-argv]')).toHaveCount(0); // the engine has it now
     await expect(s.locator('[data-runs-code]')).toContainText('a local MCP server');
     await cancel(s);
+    await searchAfresh(page, 'skills-only'); // its skills, from the same read
+    const skills = results(page).locator(`[data-catalog-card^="local:${second}"][data-install-name="skills-only"]`);
+    await expect(skills.locator('[data-catalog-components]')).toHaveText('2 skills');
+    await expect(skills).toContainText('by MAWS e2e skills');
   });
 
   await test.step('the test marketplace removed outside the app: its route needs the add step again', async () => {
@@ -415,7 +461,9 @@ test('projects: installed at project scope in A reads Installed there and Instal
     await searchAfresh(page, 'remote-server');
     await expect(card()).toHaveAttribute('data-installed', 'elsewhere', { timeout: CLI_MS });
     await expect(card()).toContainText('Installed in another project');
-    await expect(card().getByRole('button', { name: 'Add remote-server', exact: true })).toBeEnabled();
+    const s = await sheetFor(page, card(), 'remote-server'); // + still works: B's own install, the marketplace B lacks first
+    await expect(s.locator('[data-catalog-summary]')).toHaveText(`Adds the marketplace ${TEST_MARKETPLACE} (user) and installs remote-server`);
+    await cancel(s);
   });
 });
 
@@ -443,4 +491,83 @@ test('offline: without the directory and plugin-details, the manifests’ items 
   await connectors.getByRole('radio', { name: 'Discover' }).click();
   await expect(connectors.locator('[data-connectors-unavailable]')).toContainText('Anthropic’s directory is unavailable.');
   await expect(connectors.locator('[data-connectors-unavailable]').getByRole('button', { name: 'Retry' })).toBeEnabled();
+});
+
+// Acceptance 12's e2e half (M5). Two sessions in one project, each with one turn, which the engine sends to the loopback
+// stand-in for the relay (MAWS_RELAY_URL; support/model-stub.ts answers "ok", so nothing is spent): the first started
+// before Customize is opened, the second after Discover was browsed on all three tabs (a search, a detail, Skills,
+// Connectors). Each session's system/init (its tools, MCP servers, skills, plugins, commands, agents) and the tool list of
+// its first request to the model are the same; no request the engine made carries anything only the catalog holds.
+test('agents: a session started after Discover was browsed is given the same tools as one started before; nothing of the catalog reaches the model', async () => {
+  test.setTimeout(480_000);
+  const stub = await startModelStub();
+  try {
+    maws = await launchMaws({ realEngine: { projects: 1 }, env: { MAWS_RELAY_URL: stub.url } });
+    const { page } = maws;
+    const [directory] = maws.realEngine!.scratch.projects;
+    const project = value(await invoke(page, 'session.projects.add', { directory }));
+
+    type Frame = { type?: string; subtype?: string; [key: string]: unknown };
+    const turn = async (label: string): Promise<{ request: ModelRequest; init: Frame }> => {
+      const created = value(await invoke(page, 'session.create', { projectId: project.id, location: { kind: 'directory', path: directory } }));
+      const id = created.appSessionId;
+      const message = { content: 'Answer with the word ok.', display: 'Answer with the word ok.' };
+      const asked = stub.main().length;
+      let start = value(await invoke(page, 'session.start', { appSessionId: id, message, options: { gateway: 'gateway' } }));
+      if (start.status === 'needs_trust') start = value(await invoke(page, 'session.start', { appSessionId: id, message, options: { gateway: 'gateway', trust: 'accepted' } }));
+      expect(start, `${label}: the session starts with its message`).toMatchObject({ status: 'starting' });
+      await expect.poll(() => stub.main().length, { timeout: 120_000, message: `${label}: the engine asks the model` }).toBeGreaterThan(asked);
+      const status = async () => value(await invoke(page, 'engine.sessions', undefined)).find((s) => s.appSessionId === id);
+      await expect.poll(async () => { const s = await status(); return s?.process === 'ready' && s.turn === null; }, { timeout: 90_000, message: `${label}: the turn ends` }).toBe(true);
+      const rows = readFileSync((await status())!.journalPath, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as { direction: string; frame: Frame });
+      const init = rows.map((r) => r.frame).find((f) => f.type === 'system' && f.subtype === 'init');
+      expect(init, `${label}: the engine's system/init`).toBeDefined();
+      value(await invoke(page, 'session.stop', { appSessionId: id, reason: 'stop' }));
+      await expect.poll(async () => (await status())?.process ?? 'exited', { timeout: 60_000 }).toBe('exited');
+      return { request: stub.main()[asked]!, init: init! };
+    };
+
+    const before = await turn('before Discover');
+
+    await test.step('Discover browsed on its three tabs, nothing installed', async () => {
+      await openDiscover(page);
+      await search(page, 'legal');
+      await expect(results(page).getByRole('heading', { name: '13 results' })).toBeVisible();
+      await searchAfresh(page, '42crunch');
+      await openCard(page, byName(results(page), '42crunch-api-security-testing'));
+      await expect(pane(page).locator('[data-catalog-detail]')).toBeVisible();
+      await pane(page).getByRole('button', { name: 'Back to Discover' }).click();
+      await openDiscover(page, 'Skills');
+      await page.getByRole('tab', { name: 'Connectors', exact: true }).click();
+      await page.getByRole('tabpanel', { name: 'Connectors' }).getByRole('radio', { name: 'Discover' }).click();
+      await expect(page.locator('[data-discover="connectors"] [data-catalog-card]').first()).toBeVisible();
+    });
+
+    const after = await turn('after Discover');
+
+    await test.step('the same tools, given and sent; the catalog in no request', async () => {
+      const surface = (init: Frame) => ({
+        tools: init.tools,
+        mcpServers: ((init.mcp_servers as { name: string }[] | undefined) ?? []).map((s) => s.name).sort(),
+        skills: init.skills,
+        plugins: init.plugins,
+        slashCommands: init.slash_commands,
+        agents: init.agents,
+      });
+      expect(surface(after.init)).toEqual(surface(before.init));
+      expect((before.init.tools as string[]).length).toBeGreaterThan(0);
+      const sent = (request: ModelRequest) => (request.body.tools as { name: string }[]).map((tool) => tool.name);
+      expect(sent(after.request)).toEqual(sent(before.request));
+      const definitions = (request: ModelRequest) => (request.body.tools as unknown[]).map((tool) => JSON.stringify(tool));
+      expect(definitions(after.request)).toEqual(definitions(before.request));
+      await test.info().attach('agents-tools.json', { body: JSON.stringify({ init: surface(after.init), sent: sent(after.request), requests: stub.requests.length }, null, 2), contentType: 'application/json' });
+      // strings only the catalog holds: a recorded directory item, a partner's plugin, the test marketplace
+      for (const request of stub.requests) for (const marker of ['42crunch', 'cocounsel', TEST_MARKETPLACE]) expect(request.raw, marker).not.toContain(marker);
+      for (const init of [before.init, after.init]) expect(JSON.stringify(init)).not.toMatch(/42crunch|cocounsel|maws-discover-test/);
+    });
+  } finally {
+    await maws?.cleanup(); // the app and its engines first, then the stand-in they talked to
+    maws = null;
+    await stub.close();
+  }
 });

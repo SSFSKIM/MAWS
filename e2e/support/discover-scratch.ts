@@ -10,13 +10,14 @@
 // - the test marketplace (e2e/fixtures/catalog/marketplace) copied in, `remote-server`'s MCP URL pointed where the scene
 //   says, and the catalog's test-source descriptor naming it (src/main/catalog/sources.ts's seam);
 // - the environment: the recorded network sources (src/main/catalog/fetch.ts's seam), the descriptor, and a scratch
-//   HOME. Under a scratch HOME `security` finds no login keychain, so the engine can store no credential (its client-secret
-//   write reports "could not be stored", nothing falls back to a file; spikes/p4-aggregator/findings-m1.txt): a scene
-//   whose engine must sign in to a server keeps the runner's HOME (`home: 'runner'`) and takes custody of the one
-//   Keychain item its scratch CLAUDE_CONFIG_DIR names (connector-oauth.ts's engineKeychainCustody).
+//   HOME (the live smoke, `live`: the real sources and the engine's directory on). Under a scratch HOME `security` finds
+//   no login keychain, so the engine can store no credential (its client-secret write reports "could not be stored",
+//   nothing falls back to a file; spikes/p4-aggregator/findings-m1.txt): a scene whose engine must sign in to a server
+//   keeps the runner's HOME (`home: 'runner'`) and takes custody of the one Keychain item its scratch CLAUDE_CONFIG_DIR
+//   names (connector-oauth.ts's engineKeychainCustody).
 import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { CATALOG_FIXTURES_ENV } from '../../src/main/catalog/fetch';
+import { CATALOG_FIXTURES_ENV, CATALOG_LIVE_ENV } from '../../src/main/catalog/fetch';
 import { CATALOG_TEST_SOURCES_ENV } from '../../src/main/catalog/sources';
 
 const FIXTURES = resolve(__dirname, '../fixtures/catalog');
@@ -29,6 +30,10 @@ export interface DiscoverScratchOptions {
   home?: 'scratch' | 'runner';
   remoteServerUrl?: string; // remote-server's MCP URL, e.g. an engine-mode OAuth fixture's `resourceUrl`
   omitSources?: string[]; // P4-AGG M3: network source keys left out of the recordings, as sources that fail (acceptance 11)
+  // P4-AGG M5, the opt-in live smoke (e2e/discover-live.spec.ts) alone: the real network sources in place of the
+  // recordings (MAWS_CATALOG_LIVE=1, no test-source descriptor), and the engine's Anthropic Directory left on, so a
+  // directory plugin installs as it does for the owner.
+  live?: boolean;
 }
 
 export interface DiscoverScratch {
@@ -42,7 +47,7 @@ export interface DiscoverScratch {
 
 export function writeDiscoverScratch(userData: string, configDir: string, options: DiscoverScratchOptions = {}): DiscoverScratch {
   mkdirSync(join(configDir, 'plugins'), { recursive: true });
-  writeFileSync(join(configDir, 'plugins', 'plugin-directory-marketplace.json'), '{"enabled": false}\n');
+  if (!options.live) writeFileSync(join(configDir, 'plugins', 'plugin-directory-marketplace.json'), '{"enabled": false}\n');
 
   const projects = ['project-a', 'project-b'].slice(0, options.projects ?? 1).map((name) => {
     mkdirSync(join(userData, name), { recursive: true });
@@ -75,5 +80,6 @@ export function writeDiscoverScratch(userData: string, configDir: string, option
     fixtures = join(userData, 'catalog-fixtures');
     cpSync(FIXTURES, fixtures, { recursive: true, filter: (path) => !options.omitSources!.some((key) => path === join(FIXTURES, `${key}.json`)) });
   }
-  return { home, configDir, projects, marketplace, testSources, env: { [CATALOG_FIXTURES_ENV]: fixtures, [CATALOG_TEST_SOURCES_ENV]: testSources, ...(home !== null && { HOME: home }) } };
+  const catalog: Record<string, string> = options.live ? { [CATALOG_LIVE_ENV]: '1' } : { [CATALOG_FIXTURES_ENV]: fixtures, [CATALOG_TEST_SOURCES_ENV]: testSources };
+  return { home, configDir, projects, marketplace, testSources, env: { ...catalog, ...(home !== null && { HOME: home }) } };
 }

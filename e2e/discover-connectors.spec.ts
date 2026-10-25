@@ -180,7 +180,9 @@ async function cancel(sheet: Locator): Promise<void> {
 test('add: Linear from Discover through the connector sheet and the real CLI; the instance URL, authless and duplicate rows; Remove', async () => {
   test.setTimeout(360_000);
   maws = await launchMaws({ realEngine: { projects: 1 } });
-  const { page } = maws;
+  const { page, app } = maws;
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setContentSize(1280, 820));
+  await expect.poll(() => page.evaluate(() => [window.innerWidth, window.innerHeight])).toEqual([1280, 820]);
   const configFile = join(maws.realEngine!.scratch.configDir, '.claude.json');
   await openConnectors(page, 'Discover');
   await expect(pane(page)).toBeVisible();
@@ -198,6 +200,7 @@ test('add: Linear from Discover through the connector sheet and the real CLI; th
     await expect(sheet.getByRole('textbox', { name: 'Name' })).toHaveValue('linear');
     await expect(sheet.locator('[data-plugins-argv]')).toHaveAttribute('data-plugins-argv', JSON.stringify(['mcp', 'add', '--transport', 'http', 'linear', 'https://mcp.linear.app/mcp', '--scope', 'user']));
     await expect(sheet.locator('[data-connector-writes]')).toHaveText(configFile);
+    await test.info().attach('discover-connector-sheet-1280x820.png', { body: await page.screenshot(), contentType: 'image/png' }); // M5: beside the owner's references
     await sheet.getByRole('button', { name: 'Add', exact: true }).click();
     await expect(sheet).toBeHidden();
     await expect(pane(page).locator(`[data-catalog-card="${LINEAR}"]`).first()).toHaveAttribute('data-installed', 'here', { timeout: CLI_MS });

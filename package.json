@@ -51,6 +51,7 @@
     "e2e:delivery": "scripts/e2e-build.sh plain && MAWS_DELIVERY_E2E=1 playwright test e2e/delivery.spec.ts",
     "e2e:connectors-oauth": "scripts/e2e-build.sh plain && MAWS_CONNECTORS_OAUTH_E2E=1 playwright test e2e/connectors-oauth.spec.ts",
     "e2e:discover": "scripts/e2e-build.sh plain && MAWS_DISCOVER_E2E=1 playwright test e2e/discover.spec.ts e2e/discover-connectors.spec.ts",
+    "e2e:discover-live": "scripts/e2e-build.sh plain && MAWS_LIVE_SMOKE=1 playwright test e2e/discover-live.spec.ts",
     "e2e:connectors-soak": "scripts/e2e-build.sh plain && MAWS_CONNECTORS_SOAK=1 playwright test e2e/connectors-soak.spec.ts",
     "e2e:library": "scripts/e2e-build.sh plain && NODE_OPTIONS=--disable-warning=ExperimentalWarning playwright test e2e/library.spec.ts",
     "e2e:design-systems": "scripts/e2e-build.sh plain && NODE_OPTIONS=--disable-warning=ExperimentalWarning playwright test e2e/design-systems.spec.ts",

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { admitted, CATALOG_EGRESS, egressGet, type BaseFetch } from '@shared/net/egress';
+import { CATALOG_EGRESS, egressGet, type BaseFetch } from '@shared/net/egress';
 import { catalogPages, fetchSource, fixturePages, NETWORK_KEYS, networkPages, pageUrl } from './fetch';
 
 const FIXTURES = resolve(__dirname, '../../../e2e/fixtures/catalog');
@@ -65,5 +66,20 @@ describe('the catalog’s requests', () => {
     } finally {
       network.mockRestore();
     }
+  });
+
+  // P4-AGG M5: the live smoke (e2e/discover-live.spec.ts) runs the app under MAWS_E2E=1 against the real sources, so it
+  // names MAWS_CATALOG_LIVE=1, and the walk then goes out through the same guarded GET as outside the harness.
+  it('reaches the network under MAWS_E2E=1 only when MAWS_CATALOG_LIVE=1 names the live smoke, through the catalog rule', async () => {
+    const asked: string[] = [];
+    const base: BaseFetch = async (url) => {
+      asked.push(url);
+      return new Response('{"plugins":{}}', { headers: { 'content-type': 'application/json' } });
+    };
+    const get = egressGet(CATALOG_EGRESS, base);
+    await expect(fetchSource('plugin-details', catalogPages({ MAWS_E2E: '1', MAWS_CATALOG_LIVE: '0' }, 'MAWS', get))).rejects.toThrow('offline');
+    expect(asked).toEqual([]);
+    expect((await fetchSource('plugin-details', catalogPages({ MAWS_E2E: '1', MAWS_CATALOG_LIVE: '1' }, 'MAWS', get))).pages).toEqual([{ plugins: {} }]);
+    expect(asked).toEqual([pageUrl('plugin-details', null)]);
   });
 });

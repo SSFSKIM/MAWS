@@ -8,9 +8,11 @@
 // - `plugin-details`: the official marketplace's install counts and contents, as the engine reads them.
 // The test seam: when MAWS_CATALOG_FIXTURES names a directory, `<dir>/<source key>.json` (`{key, recordedAt, pages}`, M1's
 // recordings) answers in place of the network, its pages walked by the same tokens; a missing file is that source failing.
-// Under MAWS_E2E=1 without it, every source fails as offline: the network is never reached.
+// Under MAWS_E2E=1 without it, every source fails as offline: the network is never reached, unless MAWS_CATALOG_LIVE=1
+// names the opt-in live smoke (e2e/discover-live.spec.ts, M5), whose walk goes out as it does outside the harness.
 // The icons (icons.ts) are fetched the same three ways: the rule's two icon routes on the network, the fixture
-// directory's `icons/<sha256 of the URL>.<png|svg>` under the seam (a missing file is no icon), none under MAWS_E2E=1.
+// directory's `icons/<sha256 of the URL>.<png|svg>` under the seam (a missing file is no icon), none under MAWS_E2E=1
+// but for the live smoke.
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -18,6 +20,10 @@ import { admitted, CATALOG_EGRESS, egressGet, ICON_CONTENT_TYPES, type EgressGet
 import { SEEDS, seedOf } from './sources';
 
 export const CATALOG_FIXTURES_ENV = 'MAWS_CATALOG_FIXTURES';
+export const CATALOG_LIVE_ENV = 'MAWS_CATALOG_LIVE';
+
+/** Whether this environment keeps the catalog off the network: the e2e harness, unless it runs the live smoke. */
+const offline = (env: Record<string, string | undefined>) => env.MAWS_E2E === '1' && env[CATALOG_LIVE_ENV] !== '1';
 
 const DIRECTORY = 'https://api.anthropic.com/api/directory';
 const PLUGIN_DETAILS = 'https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/plugin-stats/plugin-details.json';
@@ -115,15 +121,15 @@ export function fixturePages(dir: string): PageGet {
   };
 }
 
-/** The pages the catalog reads in this environment: the fixtures, none under the e2e, else the network. */
-export function catalogPages(env: Record<string, string | undefined>, userAgent: string): PageGet {
+/** The pages the catalog reads in this environment: the fixtures, none under the e2e (but the live smoke), else the network. */
+export function catalogPages(env: Record<string, string | undefined>, userAgent: string, get: EgressGet = egressGet(CATALOG_EGRESS)): PageGet {
   const fixtures = env[CATALOG_FIXTURES_ENV];
   if (fixtures) return fixturePages(fixtures);
-  if (env.MAWS_E2E === '1')
+  if (offline(env))
     return async (key) => {
       throw new Error(`${key}: offline (MAWS_E2E=1 never reaches the network)`);
     };
-  return networkPages(egressGet(CATALOG_EGRESS), userAgent);
+  return networkPages(get, userAgent);
 }
 
 // -- icons ---------------------------------------------------------------------------------------------------------
@@ -145,7 +151,7 @@ export function isIconUrl(url: string): boolean {
 /** An icon's file in the fixture directory's `icons/`: the sha256 of its URL and its extension. */
 export const iconsFixtureName = (url: string): string => `${createHash('sha256').update(url).digest('hex')}${url.endsWith('.svg') ? '.svg' : '.png'}`;
 
-/** The icons this environment reads: the fixtures, none under the e2e, else the network through the catalog rule. */
+/** The icons this environment reads: the fixtures, none under the e2e (but the live smoke), else the network through the catalog rule. */
 export function iconGet(env: Record<string, string | undefined>, userAgent: string, get: EgressGet = egressGet(CATALOG_EGRESS)): IconGet {
   const fixtures = env[CATALOG_FIXTURES_ENV];
   if (fixtures)
@@ -157,7 +163,7 @@ export function iconGet(env: Record<string, string | undefined>, userAgent: stri
         return null;
       }
     };
-  if (env.MAWS_E2E === '1') return async () => null;
+  if (offline(env)) return async () => null;
   return async (url) => {
     const answer = await get(url, { userAgent });
     return answer.bytes === null ? null : { contentType: answer.contentType, bytes: answer.bytes };

@@ -113,4 +113,17 @@ describe('the icons’ fetch in each environment', () => {
     expect(await iconGet({ MAWS_E2E: '1' }, 'MAWS')(PLUGIN_ICON)).toBeNull();
     expect(existsSync(join(dir, 'icons'))).toBe(false);
   });
+
+  it('fetches under MAWS_E2E=1 only for the live smoke (MAWS_CATALOG_LIVE=1), through the catalog rule', async () => {
+    const asked: string[] = [];
+    const get = egressGet(CATALOG_EGRESS, async (url) => {
+      asked.push(url);
+      return new Response(PNG, { headers: { 'content-type': 'image/png' } });
+    });
+    expect(await iconGet({ MAWS_E2E: '1' }, 'MAWS', get)(PLUGIN_ICON)).toBeNull();
+    expect(asked).toEqual([]);
+    expect(await iconGet({ MAWS_E2E: '1', MAWS_CATALOG_LIVE: '1' }, 'MAWS', get)(PLUGIN_ICON)).toEqual({ contentType: 'image/png', bytes: PNG });
+    await expect(iconGet({ MAWS_E2E: '1', MAWS_CATALOG_LIVE: '1' }, 'MAWS', get)(FAVICON)).rejects.toThrow('does not admit'); // still the rule's routes alone
+    expect(asked).toEqual([PLUGIN_ICON]);
+  });
 });

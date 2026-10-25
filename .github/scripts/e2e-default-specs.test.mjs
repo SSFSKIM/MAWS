@@ -69,7 +69,7 @@ for (const derivation of [whole, relaunch, widened]) derivation.catch(() => {});
 
 test("this tree: beside the macOS lane's other groups, default runs its own specs", async () => {
   const { specs, total } = await whole;
-  assert.equal(total, 92); // P4-AGG M1: e2e/discover.spec.ts and discover-connectors.spec.ts, default's own until gate.yml's CLASS1_E2E names discover (each skips itself without MAWS_DISCOVER_E2E=1). UX2-L: ux2-shell.spec.ts is part of default as well as the focused layout group. // P4-A2 G2.7: e2e/presentations-provisional-live.spec.ts, default's own (a live group); P4-A2 G2.6: presentations-provisional.spec.ts, design-provisional.spec.ts and dashboard-provisional.spec.ts in e2e:presentations, e2e:design and e2e:dashboard; P4-B1: e2e/document-margin.spec.ts in e2e:document-app; P4-B3: e2e/layout-transfer.spec.ts, default's own; P4-B2: e2e/presentations-ime.spec.ts, presentations-ime-live.spec.ts and (M0) presentations-drag.spec.ts in e2e:presentations
+  assert.equal(total, 93); // P4-AGG M5: e2e/discover-live.spec.ts, default's own (the opt-in live smoke, skipped without MAWS_LIVE_SMOKE=1). P4-AGG M1: e2e/discover.spec.ts and discover-connectors.spec.ts, default's own until gate.yml's CLASS1_E2E names discover (each skips itself without MAWS_DISCOVER_E2E=1). UX2-L: ux2-shell.spec.ts is part of default as well as the focused layout group. // P4-A2 G2.7: e2e/presentations-provisional-live.spec.ts, default's own (a live group); P4-A2 G2.6: presentations-provisional.spec.ts, design-provisional.spec.ts and dashboard-provisional.spec.ts in e2e:presentations, e2e:design and e2e:dashboard; P4-B1: e2e/document-margin.spec.ts in e2e:document-app; P4-B3: e2e/layout-transfer.spec.ts, default's own; P4-B2: e2e/presentations-ime.spec.ts, presentations-ime-live.spec.ts and (M0) presentations-drag.spec.ts in e2e:presentations
   assert.deepEqual(specs, [
     'e2e/agent-tools-live.spec.ts',
     'e2e/bench-edit-live.spec.ts',
@@ -89,6 +89,7 @@ test("this tree: beside the macOS lane's other groups, default runs its own spec
     'e2e/design-scale.spec.ts',
     'e2e/design-systems-live.spec.ts',
     'e2e/discover-connectors.spec.ts', // P4-AGG M1, until CLASS1_E2E names discover
+    'e2e/discover-live.spec.ts', // P4-AGG M5, the opt-in live smoke
     'e2e/discover.spec.ts', // P4-AGG M1, likewise
     'e2e/document-live.spec.ts',
     'e2e/document-provisional-live.spec.ts',
@@ -129,7 +130,7 @@ test("this tree: a relaunch of default and two groups, DefaultBeside naming the 
 
 test("this tree: the same relaunch without DefaultBeside still widens default by the specs of the groups it leaves out, read from the job's output", async () => {
   const [all, part] = await Promise.all([whole, widened]);
-  assert.match(part.summary, /^#### e2e:default: its own \d+ of the bare set's 92 specs, beside 2 other e2e groups \(/);
+  assert.match(part.summary, /^#### e2e:default: its own \d+ of the bare set's 93 specs, beside 2 other e2e groups \(/);
   assert.deepEqual(all.specs.filter((spec) => !part.specs.includes(spec)), []);
   assert.ok(part.specs.includes('e2e/artifacts-store.spec.ts'), 'e2e:artifacts, absent from the relaunch, leaves its spec to default');
   assert.ok(!part.specs.includes('e2e/side.spec.ts') && !part.specs.includes('e2e/library.spec.ts'));
