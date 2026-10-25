@@ -9,7 +9,7 @@ const URL_U = 'https://u.example/mcp';
 const user = { name: 'linear', scope: 'user', path: GLOBAL, transport: 'http', url: URL_U } as const;
 const local = { name: 'linear', scope: 'local', path: GLOBAL, transport: 'http', url: 'https://l.example/mcp' } as const;
 const project = (path: string) => ({ name: 'linear', scope: 'project', path, transport: 'http', url: 'https://p.example/mcp' }) as const;
-const DIFFERENT = 'This session uses a different linear; start a new session to sign in';
+const DIFFERENT = 'this session uses a different linear; start a new session to sign in';
 // what 2.1.309's mcp_status reports for a server (cli.pretty.js 1128186): its scope, transport and redacted config
 const live = (scope: string, url: string, transport = 'http') => ({ name: 'linear', status: 'needs-auth', scope, transport, config: { type: transport, url } });
 
@@ -35,6 +35,14 @@ describe('the session’s entry for a sign-in', () => {
   it('is the one the running engine holds: same scope and endpoint, as its mcp_status reports them', () => {
     expect(entryRefusal({ ...user, cwd: null }, '/p', [user], [live('user', URL_U)])).toBeNull();
     expect(entryRefusal({ ...user, cwd: null }, '/p', [user], [])).toBeNull(); // not in its status yet: it reads the files when asked
+  });
+
+  it('reads streamable-http as http on either side, as the engine does (2.1.309 cli.pretty.js 719781)', () => {
+    // an entry typed streamable-http on disk: the inventory reads it as http; the engine may report either spelling
+    expect(entryRefusal({ ...user, cwd: null }, '/p', [user], [live('user', URL_U, 'streamable-http')])).toBeNull();
+    expect(entryRefusal({ ...user, cwd: null }, '/p', [user], [live('user', URL_U, 'http')])).toBeNull();
+    const raw = { ...user, transport: 'streamable-http' } as const;
+    expect(entryRefusal({ ...user, cwd: null }, '/p', [raw], [live('user', URL_U, 'http')])).toBeNull();
   });
 
   it('is not, when the running engine holds another: an app server given at launch and since removed, or a changed endpoint', () => {

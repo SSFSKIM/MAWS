@@ -39,14 +39,16 @@ export function entryRefusal(requested: RequestedEntry, sessionCwd: string, entr
   if (used === null) return `that session has no ${requested.name} entry`;
   if (used.scope !== requested.scope || used.path !== requested.path) return used.scope === 'app' ? `that session uses MAWS’s ${requested.name} server` : `that session uses the ${used.scope} entry in ${used.path}`;
   const held = live.find((server) => server.name === requested.name);
-  if (held !== undefined && !holds(held, used)) return `This session uses a different ${requested.name}; start a new session to sign in`;
+  if (held !== undefined && !holds(held, used)) return `this session uses a different ${requested.name}; start a new session to sign in`;
   return null;
 }
 
 // The running engine's server is the entry: its scope, its transport, and its URL where the entry has one. A URL the
 // file writes with `${…}` the engine expands from its own environment, which MAWS cannot read; scope and transport decide.
+// `streamable-http` is the engine's alias of `http` (2.1.309 cli.pretty.js 719781), and its status may report either.
+const transportOf = (type: unknown) => (type === 'streamable-http' ? 'http' : type);
 function holds(server: LiveServer, entry: EndpointEntry): boolean {
-  if (server.scope !== entry.scope || server.transport !== entry.transport) return false;
+  if (server.scope !== entry.scope || transportOf(server.transport) !== transportOf(entry.transport)) return false;
   if (entry.url === null || entry.url.includes('${')) return true;
   const config = server.config;
   return typeof config === 'object' && config !== null && (config as { url?: unknown }).url === entry.url;

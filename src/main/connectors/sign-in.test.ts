@@ -44,7 +44,7 @@ describe('the sign-in service against the running engine (fix-D#4)', () => {
     statuses.forEach((l) => l({ appSessionId: SESSION, status: { process: 'ready', cwd: '/p' } }));
     const { opId } = handlers.get('connectors.signIn')!({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }) as { opId: string };
     await vi.waitFor(() => expect(['failed', 'done']).toContain(events.filter((e) => e.opId === opId).at(-1)?.state));
-    expect(events.filter((e) => e.opId === opId).at(-1)).toMatchObject({ state: 'failed', reason: 'other_entry', message: 'This session uses a different linear; start a new session to sign in' });
+    expect(events.filter((e) => e.opId === opId).at(-1)).toMatchObject({ state: 'failed', reason: 'other_entry', message: 'this session uses a different linear; start a new session to sign in' });
     expect(host.asked.map((a) => a.name)).not.toContain('session.mcpAuthenticate');
   });
 });
