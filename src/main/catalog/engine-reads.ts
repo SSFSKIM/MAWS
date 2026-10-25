@@ -28,8 +28,16 @@ export interface EngineStatePlaces {
   projects: string[]; // the held cwds (the user configuration's view apart)
 }
 
+/** A held view and the read that produced it: `serial` is new for every read, so a view read anew (after an invalidation
+ * or after the view was evicted) is never mistaken for the one before it. */
+export interface EngineSnapshot {
+  serial: number;
+  view: Promise<EngineView | null>;
+}
+
 export class EngineReads {
-  private readonly views = new Map<string, Promise<EngineView | null>>();
+  private readonly views = new Map<string, EngineSnapshot>();
+  private serials = 0;
   private configHome: string | null = null;
   private pluginsDir: string | null = null;
   /** Moves on every invalidation. */
@@ -42,17 +50,27 @@ export class EngineReads {
 
   /** The engine's reads for `cwd`: held, else read now. Null when even the engine's configuration could not be asked. */
   view(cwd: string | null): Promise<EngineView | null> {
+    return this.snapshot(cwd).view;
+  }
+
+  /** `view`, with the serial of the read behind it. */
+  snapshot(cwd: string | null): EngineSnapshot {
     const key = cwd ?? '';
-    let view = this.views.get(key);
-    if (view === undefined) {
-      view = this.read(cwd);
+    let snapshot = this.views.get(key);
+    if (snapshot === undefined) {
+      snapshot = { serial: (this.serials += 1), view: this.read(cwd) };
       for (const oldest of this.views.keys()) {
         if (this.views.size < KEPT_DIRECTORIES) break;
         this.views.delete(oldest);
       }
     } else this.views.delete(key); // the most recently asked last
-    this.views.set(key, view);
-    return view;
+    this.views.set(key, snapshot);
+    return snapshot;
+  }
+
+  /** Whether `cwd`'s view is held. */
+  holds(cwd: string | null): boolean {
+    return this.views.has(cwd ?? '');
   }
 
   /** Forget every held view, or only `cwd`'s (null: the user configuration's). */

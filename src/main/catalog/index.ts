@@ -65,18 +65,22 @@ export function startCatalog(deps: CatalogDeps): Catalog {
     watch: deps.watch,
   });
 
-  // One cwd's catalog and the revision it was built under: the store's and the engine reads' generation at the time the
-  // view was asked for. A view an invalidation overtook while it was read is read again.
+  // One cwd's catalog and the revision it was built under: the store's revision, the engine reads' generation at the time
+  // the view was asked for, and the serial of the read behind the view (a cwd whose view was evicted and read anew is
+  // built anew, and its old cursors restart). A view an invalidation overtook while it was read is read again. Built
+  // catalogs go with their views.
   async function catalogOf(cwd: string | null): Promise<{ revision: string; items: CatalogItem[] }> {
     await store.ready();
     const key = cwd ?? '';
     for (let attempt = 1; ; attempt += 1) {
       const generation = reads.generation;
-      const [engine, test] = await Promise.all([reads.view(cwd), testData()]);
+      const snapshot = reads.snapshot(cwd);
+      const [engine, test] = await Promise.all([snapshot.view, testData()]);
       const current = generation === reads.generation;
       if (!current && attempt < READ_ATTEMPTS) continue;
       watch.sync(reads.places());
-      const revision = `${store.revision}.${generation}`; // the store's data is read now, synchronously, under this revision
+      for (const held of built.keys()) if (!reads.holds(held === '' ? null : held)) built.delete(held);
+      const revision = `${store.revision}.${generation}.${snapshot.serial}`; // the store's data is read now, synchronously, under this revision
       const kept = built.get(key);
       if (kept?.revision === revision) return kept;
       const fresh = { revision, items: buildCatalog({ network: store.data(), engine, tests: test }) };

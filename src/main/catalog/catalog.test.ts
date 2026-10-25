@@ -66,7 +66,23 @@ describe('the catalog over the recorded sources', () => {
     engine.available = [...engine.available!, { pluginId: 'document-skills@anthropic-plugin-directory', name: 'document-skills', marketplaceName: 'anthropic-plugin-directory', description: null, version: null, source: { kind: 'url', url: 'https://github.com/anthropics/skills.git', repo: null, path: null, ref: null, sha: '3'.repeat(40) }, installCount: null }];
     const withDirectory = await catalog({ engine });
     expect(named(withDirectory, 'document-skills')).toHaveLength(1);
-    expect(byId(withDirectory, 'github.com/anthropics/skills#?entry=document-skills')).toMatchObject({ install: { marketplaceName: 'anthropic-plugin-directory' }, alsoListedBy: ['anthropic-agent-skills'] });
+    const viaDirectory = byId(withDirectory, 'github.com/anthropics/skills#?entry=document-skills');
+    expect(viaDirectory).toMatchObject({ install: { marketplaceName: 'anthropic-plugin-directory' }, alsoListedBy: ['anthropic-agent-skills'] });
+    // the directory's route installs the whole repository: its contents are the directory record's nineteen, never the
+    // seed entry's four borrowed from another route
+    expect(viaDirectory.components?.skills).toHaveLength(19);
+    expect(viaDirectory.components?.skills).toEqual(expect.arrayContaining(['xlsx', 'algorithmic-art', 'webapp-testing']));
+  });
+
+  it('never borrows another route’s contents unless it installs the same bundle', async () => {
+    // claude-for-legal's commercial-legal: the seed's strict entry says nothing of its contents, the directory's record
+    // describes the same place, so the record stands for the route
+    const items = await catalog();
+    const legal = byId(items, 'github.com/anthropics/claude-for-legal#commercial-legal');
+    expect(legal.install).toMatchObject({ marketplaceName: 'claude-for-legal' });
+    expect(legal.components).not.toBeNull();
+    // example-skills, routed through the seed, keeps its own twelve declared skills; no route at the place borrows them
+    expect(byId(items, 'github.com/anthropics/skills#?entry=example-skills').components?.skills).toHaveLength(12);
   });
 
   it('chooses the route the engine already has, then claude-plugins-official, the seeds, the directory, community, an added one', async () => {

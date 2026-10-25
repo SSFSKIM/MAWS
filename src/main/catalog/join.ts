@@ -6,7 +6,11 @@
 //   install through another marketplace would be the same code twice. A directory plugin no route reaches is shown with
 //   its documentation and the reason, never with +.
 // - At an ambiguous place (one source lists several entries there, normalize.ts), a directory record joins the entry of
-//   its engine name, and the contents are the routes' own: the record describes the whole repository.
+//   its engine name.
+// - Contents describe what the chosen route installs: through the engine's Anthropic Directory, the directory record's
+//   (it installs the record's whole place); through a `strict: false` entry, the subset the entry declares; otherwise the
+//   directory record (where the place is the route's alone), plugin-details, then the host's read or the entry's
+//   declaration of a route installing the same bundle (same place and entry name). Never another bundle's list.
 // - Metadata precedence: the directory's record (tier, publisher, categories, components, icon), plugin-details for an
 //   official plugin's counts, contents and date, the host's read of a clone (or a test source's of its folder), then the
 //   manifest entry, each in route order.
@@ -15,7 +19,7 @@
 import type { CatalogItem } from '@shared/ipc/schema/catalog';
 import { repositoryLocation } from '@shared/plugins/source-key';
 import { connectorRoute, directoryEntryName, identityOf, knownFromDetail, knownFromDirectory, pluginListings, type EngineView, type EntryListing, type Known, type TestSourceData } from './normalize';
-import type { DirectoryPlugin, NetworkData } from './records';
+import type { DirectoryPlugin, NetworkData, PluginDetail } from './records';
 import { DIRECTORY_MARKETPLACE, OFFICIAL, ownershipOf } from './sources';
 
 export interface CatalogInput {
@@ -50,6 +54,24 @@ function notInstallable(record: DirectoryPlugin, engine: EngineView | null): str
   return `Not installable by this engine: ${why}`;
 }
 
+const sameBundle = (a: EntryListing, b: EntryListing) => a === b || (a.place !== null && a.place === b.place && a.entryName === b.entryName);
+
+// What the chosen route installs (the header's contents rule).
+function knownOf(identity: string, chosen: EntryListing | null, routes: readonly EntryListing[], record: DirectoryPlugin | null, detail: PluginDetail | null): Known | null {
+  const fromRecord = record ? knownFromDirectory(record.components) : null;
+  if (chosen === null) return fromRecord;
+  if (chosen.route.marketplaceName === DIRECTORY_MARKETPLACE) return fromRecord ?? chosen.known;
+  if (chosen.knownBy === 'entry') return chosen.known;
+  const same = routes.filter((l) => sameBundle(l, chosen));
+  const officialDetail = same.some((l) => l.route.marketplaceName === OFFICIAL) && detail?.components ? knownFromDetail(detail.components) : null;
+  return (
+    (identity.includes('?entry=') ? null : fromRecord) ??
+    officialDetail ??
+    first(same.filter((l) => l.knownBy === 'host').map((l) => l.known)) ??
+    first(same.filter((l) => l.knownBy === 'entry').map((l) => l.known))
+  );
+}
+
 function pluginItem(identity: string, listed: readonly EntryListing[], records: readonly DirectoryPlugin[], input: CatalogInput): CatalogItem {
   const { network, engine } = input;
   const ordered = [...listed].sort((a, b) => a.route.rank - b.route.rank || a.route.marketplaceName.localeCompare(b.route.marketplaceName) || a.route.pluginName.localeCompare(b.route.pluginName));
@@ -60,13 +82,7 @@ function pluginItem(identity: string, listed: readonly EntryListing[], records: 
   const record = records[0] ?? null;
   const officialRoute = routes.find((l) => l.route.marketplaceName === OFFICIAL);
   const detail = officialRoute ? (network.details?.get(`${officialRoute.route.pluginName}@${OFFICIAL}`) ?? null) : null;
-  const own = identity.includes('?entry=') ? (chosen?.known ?? first(routes.map((l) => l.known))) : null;
-  const known: Known | null =
-    own ??
-    (record ? knownFromDirectory(record.components) : null) ??
-    (detail?.components ? knownFromDetail(detail.components) : null) ??
-    first(routes.filter((l) => l.knownBy === 'host').map((l) => l.known)) ??
-    first(routes.filter((l) => l.knownBy === 'entry').map((l) => l.known));
+  const known = knownOf(identity, chosen, routes, record, detail);
   const name = record?.name ?? chosen?.entryName ?? identity;
   return {
     id: identity,

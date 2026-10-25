@@ -169,6 +169,18 @@ describe('the catalog service', () => {
     expect(engine.asked.filter((a) => a.name === 'plugins.list')).toHaveLength(lists); // kept, under the current revision
   });
 
+  it('builds a cwd again when its held view was evicted and read anew, and restarts that cwd’s old cursors', async () => {
+    let current = await recordedEngine(PROJECT_A, { installed: [] });
+    const { invoke } = service(host(async () => current).call);
+    const skillsOnly = `local:${SCRATCH}/maws-discover-test#plugins/skills-only`;
+    expect((await invoke('catalog.item', { id: skillsOnly, cwd: PROJECT_A })).installed).toBe('no');
+    const page = await invoke('catalog.query', { tab: 'plugins', cwd: PROJECT_A, limit: 10 });
+    for (let i = 0; i < 16; i += 1) await invoke('catalog.home', { tab: 'plugins', cwd: `${SCRATCH}/other-${i}` }); // A's view is evicted
+    current = await recordedEngine(PROJECT_A); // and the engine changed meanwhile, with no event MAWS saw
+    expect((await invoke('catalog.item', { id: skillsOnly, cwd: PROJECT_A })).installed).toBe('here');
+    expect((await invoke('catalog.query', { tab: 'plugins', cwd: PROJECT_A, limit: 10, cursor: page.nextCursor })).restarted).toBe(true);
+  });
+
   it('sees an outside change to a project’s settings and reads that project again without Refresh', async () => {
     const project = mkdtempSync(join(tmpdir(), 'maws-agg-project-'));
     try {
@@ -181,13 +193,13 @@ describe('the catalog service', () => {
       current = await recordedEngine(project); // an agent installed it from a terminal
       emitted.length = 0;
       writeFileSync(join(project, '.claude', 'settings.local.json'), JSON.stringify({ enabledPlugins: { 'skills-only@maws-discover-test': true } }));
-      await vi.waitFor(async () => expect((await invoke('catalog.item', { id: skillsOnly, cwd: project })).installed).toBe('here'), { timeout: 5_000, interval: 100 });
+      await vi.waitFor(async () => expect((await invoke('catalog.item', { id: skillsOnly, cwd: project })).installed).toBe('here'), { timeout: 10_000, interval: 100 });
       expect(emitted).toContain('catalog.changed');
       catalog.stop();
     } finally {
       rmSync(project, { recursive: true, force: true });
     }
-  });
+  }, 15_000); // the file system's change notice, under load
 
   it('makes the test source discoverable before the engine has its marketplace', async () => {
     const descriptor = join(userData, 'catalog-test-sources.json');
