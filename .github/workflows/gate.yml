@@ -149,8 +149,17 @@ env:
   # Earlier, wave 2b was 2/3, one run hanging for 180 s at presentations.spec.ts:965; wave 2c was otherwise 3/3 green
   # at c38cfea0c except one presentations-history.spec.ts:137 red, the product race fixed by #141. The :965 hang was
   # 1 in 12 guest runs, never on the host; it stays known debt for the architect to record, not a timeout change here.
+  # Wave 3 (V4, CI-opt): deliverables, supervisor, browser, browser-comment, browser-import, agents, c12, available,
+  # design-systems, browser-chrome, composer and layout were 3/3 green on maws-vm-golden-20261024a in guest runs
+  # 40140642786, 40146601191 and 40157558847. composer and layout are not class-1 groups (default's bare set collects
+  # their specs), so they take the guest only when a run names them. artifacts, browser-cua and terminal were 2/3 there
+  # and stay held; connectors, connectors-direct, connectors-oauth and delivery wait for an image refresh. In the guest,
+  # agents' stop-settle bound, browser's 200 ms palette cover and browser-comment's 200 ms disarm are held to
+  # LOADED_CEILING (test/support/latency-budget.ts), as on a loaded host.
   MAC_VM_E2E: >-
     document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations
+    deliverables supervisor browser browser-comment browser-import agents c12 available design-systems browser-chrome
+    composer layout
 
 defaults:
   run:
