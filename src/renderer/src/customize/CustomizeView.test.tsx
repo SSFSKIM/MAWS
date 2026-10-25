@@ -300,7 +300,7 @@ describe('Connectors', () => {
   // main's posture for each configured server, by the record its endpoint matches; unscripted, it is unknown
   // with its configuration's fingerprint (`print`, read at each answer: an endpoint replaced under the same name changes it)
   let print = 'print-1';
-  const posture = (_client: QueryClient, name: string, authPosture: 'auth_required' | 'no_auth', scope = 'user') => backend.script('catalog.postures', () => ({ servers: [{ name, scope, authPosture, fingerprint: print }] }));
+  const posture = (_client: QueryClient, name: string, authPosture: 'auth_required' | 'no_auth', scope = 'user', path = '/config/.claude.json') => backend.script('catalog.postures', () => ({ servers: [{ name, scope, path, authPosture, fingerprint: print }] }));
   const mountWith = (client: QueryClient) => render(<QueryClientProvider client={client}><CustomizeView section="mcp" /></QueryClientProvider>);
   const fresh = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
   afterEach(() => {
@@ -355,7 +355,7 @@ describe('Connectors', () => {
 
   it('a name configured in two scopes: the entry the engine uses offers Sign in, the other says it is shadowed and offers none', async () => {
     const client = fresh();
-    backend.script('catalog.postures', () => ({ servers: [{ name: 'notion', scope: 'user', authPosture: 'auth_required', fingerprint: 'print-user' }, { name: 'notion', scope: 'local', authPosture: 'auth_required', fingerprint: 'print-local' }] }));
+    backend.script('catalog.postures', () => ({ servers: [{ name: 'notion', scope: 'user', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-user' }, { name: 'notion', scope: 'local', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-local' }] }));
     backend.script('customization.inventory', () => ({ skills: [], servers: [{ name: 'notion', scope: 'user', path: '/config/.claude.json', transport: 'http' }, { name: 'notion', scope: 'local', path: '/config/.claude.json', transport: 'http' }], warnings: [], serversRead: true }));
     const here = { ...status('here'), cwd: '/one' };
     useSessions.setState({ engine: new Map([[here.appSessionId, here]]) });
@@ -365,6 +365,49 @@ describe('Connectors', () => {
     expect(await within(rowOf('local')).findByRole('button', { name: 'Sign in to notion' })).toBeTruthy();
     expect(within(rowOf('user')).getByText('Shadowed by the local entry')).toBeTruthy();
     expect(within(rowOf('user')).queryByRole('button', { name: 'Sign in to notion' })).toBeNull();
+  });
+
+  it('MAWS’s own server of the same name shadows the file entry, which offers no Sign in', async () => {
+    const client = fresh();
+    posture(client, 'notion', 'auth_required');
+    backend.script('customization.inventory', () => ({ skills: [], servers: [{ name: 'notion', scope: 'app', path: '/maws/settings.json', transport: 'http' }, { name: 'notion', scope: 'user', path: '/config/.claude.json', transport: 'http' }], warnings: [], serversRead: true }));
+    const here = { ...status('here'), cwd: '/one' };
+    useSessions.setState({ engine: new Map([[here.appSessionId, here]]) });
+    mountWith(client);
+    await screen.findAllByText('notion');
+    const user = document.querySelector('[data-connector="notion"][data-connector-scope="user"]') as HTMLElement;
+    expect(within(user).getByText('Shadowed by MAWS’s notion server')).toBeTruthy();
+    expect(within(user).queryByRole('button', { name: 'Sign in to notion' })).toBeNull();
+  });
+
+  it('two project files configuring one name: each row reads its own file’s posture and result; the nearer one is used', async () => {
+    const outerFile = '/.mcp.json';
+    const innerFile = '/one/.mcp.json';
+    let innerPrint = 'print-inner';
+    backend.script('catalog.postures', () => ({ servers: [
+      { name: 'notion', scope: 'project', path: outerFile, authPosture: 'no_auth', fingerprint: 'print-outer' },
+      { name: 'notion', scope: 'project', path: innerFile, authPosture: 'auth_required', fingerprint: innerPrint },
+    ] }));
+    backend.script('customization.inventory', () => ({ skills: [], servers: [{ name: 'notion', scope: 'project', path: outerFile, transport: 'http' }, { name: 'notion', scope: 'project', path: innerFile, transport: 'http' }], warnings: [], serversRead: true }));
+    backend.script('connectors.signIn', () => ({ opId: 'op-inner' }));
+    const here = { ...status('here'), cwd: '/one' };
+    useSessions.setState({ engine: new Map([[here.appSessionId, here]]) });
+    mountWith(fresh());
+    await screen.findAllByText('notion');
+    const rows = () => [...document.querySelectorAll('[data-connector="notion"]')] as HTMLElement[];
+    const [outer, inner] = rows();
+    expect(within(outer!).getByText(outerFile)).toBeTruthy();
+    expect(within(outer!).getByText('Shadowed by the project entry')).toBeTruthy();
+    expect(await within(inner!).findByText('Sign in needed')).toBeTruthy(); // the inner file's posture, not the outer one's
+    fireEvent.click(within(inner!).getByRole('button', { name: 'Sign in to notion' }));
+    await waitFor(() => expect(backend.calls.some((call) => call.command === 'connectors.signIn')).toBe(true));
+    act(() => heard({ opId: 'op-inner', name: 'notion', state: 'done', reason: null, message: null, where: 'here' }));
+    expect(await within(rows()[1]!).findByText('Signed in · connected here')).toBeTruthy();
+    // the inner file's endpoint replaced: its result was not for it
+    innerPrint = 'print-inner-2';
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    expect(await within(rows()[1]!).findByText('Sign in needed')).toBeTruthy();
+    expect(within(rows()[1]!).queryByText('Signed in · connected here')).toBeNull();
   });
 
   it('an authless server reads No sign-in needed and offers no sign-in', async () => {

@@ -11,16 +11,16 @@ const LINEAR = route({ name: 'linear', url: 'https://mcp.linear.app/mcp' });
 const OPEN = route({ name: 'open-data', url: 'https://open.example/mcp', authPosture: 'no_auth' });
 const SNOWFLAKE = route({ name: 'snowflake', urlPattern: '^https://[a-z0-9-]+\\.snowflakecomputing\\.com(/|$)' });
 const REGIONAL = route({ name: 'regional', urlOptions: [{ url: 'https://eu.regional.example/mcp', label: 'EU', description: null }] });
-const at = (name: string, scope: CustomizationEndpoint['scope'], url: string | null): CustomizationEndpoint => ({ name, scope, transport: url === null ? 'stdio' : 'http', url });
+const at = (name: string, scope: CustomizationEndpoint['scope'], url: string | null, path = '/cfg/.claude.json'): CustomizationEndpoint => ({ name, scope, path, transport: url === null ? 'stdio' : 'http', url });
 const NO_PRINT = () => null;
 
 describe('connector postures', () => {
   it('matches each configured server by its endpoint: URL, url_options or url_regex', () => {
     expect(posturesOf([at('my-linear', 'user', 'https://mcp.linear.app/mcp/'), at('data', 'project', 'https://open.example/mcp?key=k'), at('sf', 'local', 'https://acme.snowflakecomputing.com/api/mcp'), at('eu', 'user', 'https://eu.regional.example/mcp')], [LINEAR, OPEN, SNOWFLAKE, REGIONAL], NO_PRINT)).toEqual([
-      { name: 'my-linear', scope: 'user', authPosture: 'auth_required', fingerprint: null },
-      { name: 'data', scope: 'project', authPosture: 'no_auth', fingerprint: null },
-      { name: 'sf', scope: 'local', authPosture: 'auth_required', fingerprint: null },
-      { name: 'eu', scope: 'user', authPosture: 'auth_required', fingerprint: null },
+      { name: 'my-linear', scope: 'user', path: '/cfg/.claude.json', authPosture: 'auth_required', fingerprint: null },
+      { name: 'data', scope: 'project', path: '/cfg/.claude.json', authPosture: 'no_auth', fingerprint: null },
+      { name: 'sf', scope: 'local', path: '/cfg/.claude.json', authPosture: 'auth_required', fingerprint: null },
+      { name: 'eu', scope: 'user', path: '/cfg/.claude.json', authPosture: 'auth_required', fingerprint: null },
     ]);
   });
 
@@ -43,8 +43,16 @@ describe('connector postures', () => {
     expect(print({ transport: 'http', url: 'https://other.example/mcp' })).not.toBe(a);
     expect(configurationFingerprint(Buffer.alloc(32, 8))({ transport: 'http', url: secret })).not.toBe(a); // keyed per run
     expect(print({ transport: 'stdio', url: null })).toBeNull();
-    const [posture] = posturesOf([{ name: 'linear', scope: 'user', transport: 'http', url: secret }], [LINEAR], print);
-    expect(posture).toEqual({ name: 'linear', scope: 'user', authPosture: 'auth_required', fingerprint: a });
+    const [posture] = posturesOf([{ name: 'linear', scope: 'user', path: '/cfg/.claude.json', transport: 'http', url: secret }], [LINEAR], print);
+    expect(posture).toEqual({ name: 'linear', scope: 'user', path: '/cfg/.claude.json', authPosture: 'auth_required', fingerprint: a });
     expect(JSON.stringify(posture)).not.toMatch(/SECRET|linear\.app/);
+  });
+
+  it('two project files configuring one name: each answer names its own file, with its own posture and fingerprint', () => {
+    const print = configurationFingerprint(Buffer.alloc(32, 7));
+    const [outer, inner] = posturesOf([at('linear', 'project', 'https://open.example/mcp', '/p/.mcp.json'), at('linear', 'project', 'https://mcp.linear.app/mcp', '/p/app/.mcp.json')], [LINEAR, OPEN], print);
+    expect(outer).toMatchObject({ path: '/p/.mcp.json', authPosture: 'no_auth' });
+    expect(inner).toMatchObject({ path: '/p/app/.mcp.json', authPosture: 'auth_required' });
+    expect(outer!.fingerprint).not.toBe(inner!.fingerprint);
   });
 });

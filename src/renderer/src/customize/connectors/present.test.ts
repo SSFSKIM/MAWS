@@ -9,7 +9,7 @@ import { item } from '../discover/test-items';
 import { argvOf } from '../../widgets/plugins/present';
 import { installRequestOf } from '../discover/add';
 import { cardContentsWords } from '../discover/present';
-import { configuredOf, connectorAddOf, existingOf, resultFor, shadowedBy, nameProblem, removeRequestOf, scopesFor, signInSessionOf, signInViewOf, urlProblem, writesFor } from './present';
+import { configuredOf, connectorAddOf, existingOf, resultFor, shadowedBy, shadowWords, nameProblem, removeRequestOf, scopesFor, signInSessionOf, signInViewOf, urlProblem, writesFor } from './present';
 
 const linear = (over: Partial<CatalogItem['install']> = {}, item_: Partial<CatalogItem> = {}): CatalogItem =>
   item({
@@ -225,16 +225,28 @@ describe('a name configured in more than one scope', () => {
   const app = server({ scope: 'app', path: '/maws/settings.json' });
 
   it('names the entry the engine uses over each other one; the used one is shadowed by none', () => {
-    const all = [app, user, outer, inner, local];
-    expect(shadowedBy(local, all)).toBeNull();
-    expect(shadowedBy(user, all)).toBe('local');
-    expect(shadowedBy(inner, all)).toBe('local');
-    expect(shadowedBy(outer, all)).toBe('local');
+    const files = [user, outer, inner, local];
+    expect(shadowedBy(local, files)).toBeNull();
+    expect(shadowedBy(user, files)).toBe('local');
+    expect(shadowedBy(inner, files)).toBe('local');
+    expect(shadowedBy(outer, files)).toBe('local');
     expect(shadowedBy(user, [user, inner])).toBeNull();
     expect(shadowedBy(inner, [user, inner])).toBe('user');
     expect(shadowedBy(outer, [outer, inner])).toBe('project'); // the nearer .mcp.json
     expect(shadowedBy(inner, [outer, inner])).toBeNull();
     expect(shadowedBy(user, [user, server({ name: 'notion', scope: 'local' })])).toBeNull(); // another name
-    expect(shadowedBy(app, all)).toBeNull(); // MAWS's own servers are not the engine's configuration
+  });
+
+  it('MAWS’s own server of the same name shadows every file entry: the engine loads it as a dynamic server and signs that one in', () => {
+    // 2.1.309 cli.pretty.js 457558 parses --mcp-config as scope "dynamic"; the authentication resolver (853424) prefers a
+    // loaded client's own configuration over the files'
+    for (const row of [user, outer, inner, local]) expect(shadowedBy(row, [app, user, outer, inner, local])).toBe('app');
+    expect(shadowedBy(app, [app, user, local])).toBeNull();
+    expect(shadowedBy(user, [server({ name: 'notion', scope: 'app' }), user])).toBeNull(); // another name
+  });
+
+  it('says what shadows a row: the engine’s entry by scope, or MAWS’s server by name', () => {
+    expect(shadowWords('local', 'linear')).toBe('Shadowed by the local entry');
+    expect(shadowWords('app', 'linear')).toBe('Shadowed by MAWS’s linear server');
   });
 });

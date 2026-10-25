@@ -30,7 +30,7 @@ import { DiscoverToolbar } from '../discover/DiscoverToolbar';
 import { useCatalogPostures, useCatalogRefresh, useCatalogSources } from '../discover/read';
 import { ConnectorSheet } from './ConnectorSheet';
 import { CONNECTORS as C } from './copy';
-import { removeRequestOf, resultFor, serverKey, shadowedBy, signInSessionOf, signInViewOf, type AuthPosture, type ConfiguredServers, type ReadySession, type SignInFacts, type SignInView } from './present';
+import { removeRequestOf, resultFor, serverKey, shadowedBy, shadowWords, signInSessionOf, signInViewOf, type AuthPosture, type ConfiguredServers, type ReadySession, type SignInFacts, type SignInView } from './present';
 import { cancelSignIn, forgetSignIn, signInKeyOf, startSignIn, useSignIns } from './sign-in';
 
 const BUTTON = 'rounded-sm px-2 py-1 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint';
@@ -146,7 +146,8 @@ function Configured({ servers, readAt, cwd, place, attached }: { servers: readon
   };
   const liveRead = attached !== null && read.readAt !== null ? { appSessionId: attached, at: read.readAt } : null; // when its answer arrived
   const postures = useCatalogPostures(cwd, servers, readAt).data?.servers;
-  const postureOf = (server: CustomizationServer) => postures?.find((p) => p.name === server.name && p.scope === server.scope) ?? null;
+  // by the file the entry is in too: two project files may configure one name with different endpoints
+  const postureOf = (server: CustomizationServer) => postures?.find((p) => p.name === server.name && p.scope === server.scope && p.path === server.path) ?? null;
   // a sign-in that ended: the attached session's servers read again
   const ended = useSignIns((s) => [...s.byServer.values()].filter(({ event }) => event.state === 'done' || event.state === 'failed').map(({ event }) => event.opId).join(','));
   const { refetch } = read;
@@ -170,14 +171,15 @@ function Configured({ servers, readAt, cwd, place, attached }: { servers: readon
   );
 }
 
-// A row the engine does not use (the same name in a scope it ranks higher, ./present.ts `shadowedBy`) says which entry
+// A row the engine does not use (the same name in a scope it ranks higher, or MAWS's own server of the name; ./present.ts
+// `shadowedBy`) says which entry
 // shadows it and offers no Sign in: the engine signs a name in, so Sign in belongs to the row it uses.
 function ServerRow({ server, shadow, cwd, place, session, live, liveRead, posture, fingerprint }: { server: CustomizationServer; shadow: CustomizationServer['scope'] | null; cwd: string | null; place: string | null; session: string | null; live: SignInFacts['live']; liveRead: SignInFacts['liveRead']; posture: AuthPosture | null; fingerprint: string | null }) {
   const { ask, ops } = useManage();
   const target = server.scope === 'app' ? null : { name: server.name, scope: server.scope, cwd };
   const record = resultFor(useSignIns((s) => (target === null ? null : (s.byServer.get(signInKeyOf(target)) ?? null))), fingerprint);
   const last = record?.event ?? null;
-  const state: SignInView | null = shadow !== null ? { text: C.shadowed(shadow), tone: 'muted', signIn: false, cancel: false } : signInViewOf({ live, liveRead, posture, last: record, transport: server.transport });
+  const state: SignInView | null = shadow !== null ? { text: shadowWords(shadow, server.name), tone: 'muted', signIn: false, cancel: false } : signInViewOf({ live, liveRead, posture, last: record, transport: server.transport });
   const key = serverKey(server);
   const remove = removeRequestOf(server);
   const busy = ops.entries.get(key)?.state.phase === 'working';

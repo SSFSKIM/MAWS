@@ -20,6 +20,6 @@ export function configurationFingerprint(key: Buffer = randomBytes(32)): Fingerp
 export function posturesOf(endpoints: readonly CustomizationEndpoint[], routes: readonly ConnectorRoute[], fingerprint: Fingerprint): Posture[] {
   return endpoints.map((endpoint) => {
     const found = new Set(routes.filter((route) => endpointMatches(endpoint.url, route)).map((route) => route.authPosture));
-    return { name: endpoint.name, scope: endpoint.scope, authPosture: found.size === 1 ? [...found][0]! : null, fingerprint: fingerprint(endpoint) };
+    return { name: endpoint.name, scope: endpoint.scope, path: endpoint.path, authPosture: found.size === 1 ? [...found][0]! : null, fingerprint: fingerprint(endpoint) };
   });
 }

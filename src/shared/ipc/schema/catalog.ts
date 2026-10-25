@@ -133,10 +133,11 @@ export const commands = {
   // M4: each configured server's sign-in posture from the directory's copy MAWS holds (no fetch), matched by its endpoint
   // (the record's URL, one of its url_options, or its url_regex), never by name; null when no record matches. With it, an
   // opaque fingerprint of the configuration (its endpoint and transport, keyed per run in main; null without a URL): a
-  // sign-in's result is shown only for the configuration it was for, and no URL reaches the renderer
+  // sign-in's result is shown only for the configuration it was for, and no URL reaches the renderer. `path` is the file
+  // the entry is in (the inventory's own), so two project files configuring one name are told apart
   'catalog.postures': main(
     z.strictObject({ cwd: CwdSchema }),
-    z.strictObject({ servers: z.array(z.strictObject({ name: z.string(), scope: z.enum(['app', 'user', 'project', 'local']), authPosture: z.enum(['auth_required', 'no_auth']).nullable(), fingerprint: z.string().max(64).nullable() })) }),
+    z.strictObject({ servers: z.array(z.strictObject({ name: z.string(), scope: z.enum(['app', 'user', 'project', 'local']), path: z.string().max(4096), authPosture: z.enum(['auth_required', 'no_auth']).nullable(), fingerprint: z.string().max(64).nullable() })) }),
   ),
 } as const satisfies Record<`catalog.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 

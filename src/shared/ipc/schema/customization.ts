@@ -15,7 +15,7 @@ export const CustomizationServerSchema = z.strictObject({
 });
 // P4-AGG M4: a configured server's endpoint, main's alone (a configured URL may carry a token, so it never reaches the
 // renderer): the catalog matches it against the directory's connectors for Connectors' sign-in posture.
-export const CustomizationEndpointSchema = z.strictObject({ name: z.string(), scope: z.enum(['app', 'user', 'project', 'local']), transport: CustomizationServerSchema.shape.transport, url: z.string().max(4096).nullable() });
+export const CustomizationEndpointSchema = z.strictObject({ name: z.string(), scope: z.enum(['app', 'user', 'project', 'local']), path: AbsolutePath, transport: CustomizationServerSchema.shape.transport, url: z.string().max(4096).nullable() });
 export const CustomizationInventorySchema = z.strictObject({
   skills: z.array(CustomizationSkillSchema), servers: z.array(CustomizationServerSchema), warnings: z.array(z.string()),
   // P4-AGG M4: every MCP configuration file that applies (app, user, local, each project `.mcp.json`) read without a

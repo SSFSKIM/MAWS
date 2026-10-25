@@ -54,6 +54,7 @@ export const CONNECTORS = {
   failed: (message: string | null) => (message ? `Failed: ${message}` : 'Failed'),
   status: (status: string) => status,
   shadowed: (scope: string) => `Shadowed by the ${scope} entry`,
+  shadowedByMaws: (name: string) => `Shadowed by MAWS’s ${name} server`,
   step: {
     starting: 'Starting sign-in…',
     waiting_browser: 'Opening your browser…',

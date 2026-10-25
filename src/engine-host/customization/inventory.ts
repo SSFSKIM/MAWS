@@ -51,7 +51,7 @@ class Reading {
   }
   addServer(row: CustomizationServer, url: string | null): void {
     this.check(); if (this.servers.length >= INVENTORY_BOUNDS.rows) throw new Stop(); this.servers.push(row);
-    this.endpoints.push({ name: row.name, scope: row.scope, transport: row.transport, url: url === null ? null : url.slice(0, 4096) });
+    this.endpoints.push({ name: row.name, scope: row.scope, path: row.path, transport: row.transport, url: url === null ? null : url.slice(0, 4096) });
   }
 
   async exists(path: string): Promise<boolean> {
