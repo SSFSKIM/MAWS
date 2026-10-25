@@ -68,68 +68,71 @@ export function ConfirmSheet({ request, declared, env, onConfirm, onClose }: { r
         submitClass={destructive ? DANGER : PRIMARY}
         focusSubmit={!destructive}
       >
-        {declared && (
-          <div className="flex flex-col gap-1">
-            <p className="m-0 text-ui-sm text-fg-muted">{W.declared}</p>
-            <code data-plugins-declared className="block rounded-sm bg-bg-active px-2 py-1 font-mono text-ui-sm break-all text-fg">
-              {declared.command}
-            </code>
-          </div>
-        )}
-        {catalog && <CatalogSummary catalog={catalog} plugin={target} scope={scope} adds={addStep !== null} />}
-        {addStep && engine && (
-          <code data-plugins-add-argv={JSON.stringify(argvOf(addStep))} title={engine.binary} className="block rounded-sm bg-bg-active px-2 py-1 font-mono text-ui-sm break-all text-fg">
-            {commandWords(engine.binary, argvOf(addStep))}
-          </code>
-        )}
-        {engine ? (
-          <code data-plugins-argv={JSON.stringify(argv)} title={engine.binary} className="block rounded-sm bg-bg-active px-2 py-1 font-mono text-ui-sm break-all text-fg">
-            {commandWords(engine.binary, argv)}
-          </code>
-        ) : env.engine.state === 'error' ? (
-          <p role="alert" className="m-0 text-ui-sm text-danger">
-            {env.engine.error}
-          </p>
-        ) : (
-          <p role="status" className="m-0 text-ui-sm text-fg-muted">
-            {W.resolving}
-          </p>
-        )}
-        {scoped && (
-          <fieldset className="m-0 flex flex-col gap-1 border-0 p-0">
-            <legend className="mb-1 p-0 text-ui-sm text-fg-muted">{W.scope}</legend>
-            <div className="flex gap-3">
-              {PLUGINS_SCOPES.map((option) => (
-                <label key={option} className="flex items-center gap-1.5 text-ui-sm text-fg">
-                  <input type="radio" name="plugins-scope" value={option} checked={scope === option} onChange={() => setScope(option)} className={CHOICE} />
-                  {W.scopeName[option]}
-                </label>
-              ))}
+        {/* the body scrolls inside the window, so a tall sheet (Discover's two steps and their writes) keeps its buttons in view */}
+        <div data-plugins-sheet-body className="-mx-1 flex max-h-[calc(82vh-8rem)] min-h-0 flex-col gap-3 overflow-y-auto px-1">
+          {declared && (
+            <div className="flex flex-col gap-1">
+              <p className="m-0 text-ui-sm text-fg-muted">{W.declared}</p>
+              <code data-plugins-declared className="block rounded-sm bg-bg-active px-2 py-1 font-mono text-ui-sm break-all text-fg">
+                {declared.command}
+              </code>
             </div>
-            {scope !== 'user' && <p className="m-0 font-mono text-ui-sm break-all text-fg-muted">{W.inProject(cwd)}</p>}
-          </fieldset>
-        )}
-        {engine && (
-          <div className="flex flex-col gap-0.5 text-ui-sm text-fg-muted">
-            <p className="m-0">{W.writes}</p>
-            <ul aria-label={W.writes} className="m-0 list-none p-0 font-mono break-all text-fg">
-              {writes({ configHome: engine.configHome, cwd }).map((path) => (
-                <li key={path}>{path}</li>
-              ))}
-            </ul>
-            {dependencies && <p className="m-0">{dependencies}</p>}
-            {overrides && <p className="m-0">{overrides}</p>}
-            <p className="m-0">{W.records(engine.globalConfig)}</p>
-          </div>
-        )}
-        {uninstalls && <p className="m-0 text-ui-sm text-fg">{uninstalls}</p>}
-        <p className="m-0 text-ui-sm text-fg-muted">{thenWords(request.action, env.readySessions)}</p>
-        {destructive && (
-          <label className="flex items-center gap-2 text-ui-sm text-fg">
-            <input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} className={CHOICE} />
-            {W.understand}
-          </label>
-        )}
+          )}
+          {catalog && <CatalogSummary catalog={catalog} plugin={target} scope={scope} adds={addStep !== null} />}
+          {addStep && engine && (
+            <code data-plugins-add-argv={JSON.stringify(argvOf(addStep))} title={engine.binary} className="block rounded-sm bg-bg-active px-2 py-1 font-mono text-ui-sm break-all text-fg">
+              {commandWords(engine.binary, argvOf(addStep))}
+            </code>
+          )}
+          {engine ? (
+            <code data-plugins-argv={JSON.stringify(argv)} title={engine.binary} className="block rounded-sm bg-bg-active px-2 py-1 font-mono text-ui-sm break-all text-fg">
+              {commandWords(engine.binary, argv)}
+            </code>
+          ) : env.engine.state === 'error' ? (
+            <p role="alert" className="m-0 text-ui-sm text-danger">
+              {env.engine.error}
+            </p>
+          ) : (
+            <p role="status" className="m-0 text-ui-sm text-fg-muted">
+              {W.resolving}
+            </p>
+          )}
+          {scoped && (
+            <fieldset className="m-0 flex flex-col gap-1 border-0 p-0">
+              <legend className="mb-1 p-0 text-ui-sm text-fg-muted">{W.scope}</legend>
+              <div className="flex gap-3">
+                {PLUGINS_SCOPES.map((option) => (
+                  <label key={option} className="flex items-center gap-1.5 text-ui-sm text-fg">
+                    <input type="radio" name="plugins-scope" value={option} checked={scope === option} onChange={() => setScope(option)} className={CHOICE} />
+                    {W.scopeName[option]}
+                  </label>
+                ))}
+              </div>
+              {scope !== 'user' && <p className="m-0 font-mono text-ui-sm break-all text-fg-muted">{W.inProject(cwd)}</p>}
+            </fieldset>
+          )}
+          {engine && (
+            <div className="flex flex-col gap-0.5 text-ui-sm text-fg-muted">
+              <p className="m-0">{W.writes}</p>
+              <ul aria-label={W.writes} className="m-0 list-none p-0 font-mono break-all text-fg">
+                {writes({ configHome: engine.configHome, cwd }).map((path) => (
+                  <li key={path}>{path}</li>
+                ))}
+              </ul>
+              {dependencies && <p className="m-0">{dependencies}</p>}
+              {overrides && <p className="m-0">{overrides}</p>}
+              <p className="m-0">{W.records(engine.globalConfig)}</p>
+            </div>
+          )}
+          {uninstalls && <p className="m-0 text-ui-sm text-fg">{uninstalls}</p>}
+          <p className="m-0 text-ui-sm text-fg-muted">{thenWords(request.action, env.readySessions)}</p>
+          {destructive && (
+            <label className="flex items-center gap-2 text-ui-sm text-fg">
+              <input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} className={CHOICE} />
+              {W.understand}
+            </label>
+          )}
+        </div>
       </SheetForm>
     </Sheet>
   );
