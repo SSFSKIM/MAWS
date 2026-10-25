@@ -157,8 +157,9 @@ env:
   # 200 ms palette cover and browser-comment's 200 ms disarm are held to LOADED_CEILING (test/support/latency-budget.ts),
   # as on a loaded host.
   # Wave 4 (V4, CI-opt): delivery, connectors-oauth, artifacts and browser-cua were 3/3 green on maws-vm-golden-20261025
-  # in guest runs 40200261879, 40212720841 and 40216462062. connectors and connectors-direct join only after three
-  # same-tree guest passes of the scratch-writer cleanup fix (run evidence in the admission PR). None of these six
+  # in guest runs 40200261879, 40212720841 and 40216462062. connectors and connectors-direct joined after the scratch
+  # cleanup fix (detached engines with their cwd in the scratch are killed too, PR #149) passed 3/3 in guest runs
+  # 40224021736, 40229482997 and 40231457492 on the same tree. None of these six
   # reaches the latency-budget helpers or enables a PERF/SCALE switch; artifacts' measured case stays skipped.
   # terminal stays held; design stays host-only.
   MAC_VM_E2E: >-
