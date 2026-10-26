@@ -138,7 +138,11 @@ allows today.
 - [ ] The machine-side wave (Plan of Work, "The machine-side wave"): MW1 reads, MW2
   ops, MW3 scoped allows, MW4 one agent stopped or told, MW5 image and PDF intake. The machine
   halves of M2–M4, cut and widened per that entry.
-  - [ ] MW1 reads (`usage`, `config`, `settings`, `mcp`) and `capabilities.controls`.
+  - [x] (2026-10-26 07:21Z) MW1 reads (`usage`, `config`, `settings`, `mcp`) and
+    `capabilities.controls`: sminos 1.11.0 (doperpowers #395) and the hub's types and
+    fake-machine producer (MAWS #153); the `medium` review over both halves found two
+    measured gaps in the disabled-MCP lookup (a linked worktree's project key, the
+    legacy `.config.json`), fixed and re-reviewed clean; live check on 2.1.310.
   - [ ] MW2 ops: `btw`, compact's `instructions`, `/mcp`'s measured grammar.
   - [ ] MW3 scoped allows.
   - [ ] MW4 `stop-agent` and `tell`.
