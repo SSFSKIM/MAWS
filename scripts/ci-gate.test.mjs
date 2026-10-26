@@ -136,16 +136,17 @@ test('a list of gates goes through as given, live groups with --live too', () =>
   assert.deepEqual(trailers(pooled.message), ['Gates: static,unit,probes', 'Runner: macos', 'Class1a: pool']);
 });
 
-// ci-kit's VM lane: --lane names where the run's MAC_VM_E2E groups go (gate-plan.mjs reads the `Lane:` trailer).
-test('--lane vm or vm-trial goes through as a Lane: trailer; any other value is refused before anything is pushed', () => {
+// ci-kit's VM lane: --lane names where the run's MAC_VM_E2E groups go (gate-plan.mjs reads the `Lane:` trailer); and
+// ci-kit's hosted-Mac spec: `hosted` sends every eligible e2e group to GitHub's hosted Macs, `no-hosted` none.
+test('--lane vm, vm-trial, hosted or no-hosted goes through as a Lane: trailer; any other value is refused before anything is pushed', () => {
   const vm = gate(['--gates', 'e2e:document-app', '--runner', 'macos', '--lane', 'vm']);
   assert.match(vm.stdout, /^ci-gate: [0-9a-f]{40} as ci\/gates-[0-9a-f]{8} \(Gates: e2e:document-app\) \(Runner: macos\) \(Lane: vm\)$/m);
   assert.deepEqual(trailers(vm.message), ['Gates: e2e:document-app', 'Runner: macos', 'Lane: vm']);
-  assert.deepEqual(trailers(gate(['--gates', 'e2e:document-app', '--lane', 'vm-trial']).message), ['Gates: e2e:document-app', 'Lane: vm-trial']);
-  for (const value of ['host', 'VM', 'vm,vm-trial']) {
+  for (const lane of ['vm-trial', 'hosted', 'no-hosted']) assert.deepEqual(trailers(gate(['--gates', 'e2e:document-app', '--lane', lane]).message), ['Gates: e2e:document-app', `Lane: ${lane}`], lane);
+  for (const value of ['host', 'VM', 'vm,vm-trial', 'Hosted', 'nohosted']) {
     const refused = gate(['--gates', 'e2e:document-app', '--lane', value], { alerts: true });
     assert.equal(refused.status, 2, value);
-    assert.equal(refused.stderr, `ci-gate: --lane is vm or vm-trial, not ${value}\n`);
+    assert.equal(refused.stderr, `ci-gate: --lane is vm, vm-trial, hosted or no-hosted, not ${value}\n`);
     assert.deepEqual(refused.calls, []);
     assert.deepEqual(refused.refs, []);
   }

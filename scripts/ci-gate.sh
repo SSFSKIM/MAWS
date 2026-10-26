@@ -2,7 +2,7 @@
 # Runs MAWS's class-1 gates for one tree on GitHub Actions (docs/doperpowers/plans/2026-10-14-gate-offload.md §3.4, §3.6).
 #
 #   scripts/ci-gate.sh <worktree-or-sha> --gates all|static,unit,unit:darwin,probes,e2e:<group>,… [--runner linux|macos]
-#                      [--class1a linux|macos|pool] [--lane vm|vm-trial] [--default-beside <groups>] [--evidence]
+#                      [--class1a linux|macos|pool] [--lane vm|vm-trial|hosted|no-hosted] [--default-beside <groups>] [--evidence]
 #                      [--live] [--affected] [--label <name>] [--keep]
 #
 #   scripts/ci-gate.sh <worktree> --gates static,unit,probes     class 1a alone
@@ -10,7 +10,7 @@
 #
 # Pushes the tree, plus one empty commit, to refs/heads/ci/<label>-<short> (force), waits for the run of
 # .github/workflows/gate.yml on it, prints each job's conclusion, downloads the failed e2e jobs' reports to
-# /tmp/maws-review/gates/ci-<short>/, keeps the whole transcript in /tmp/maws-review/gates/ci-<short>.log, deletes the
+# /tmp/maws-review/gates/ci-<short>/ (a hosted group's from the SSFSKIM/maws-app run its log names), keeps the whole transcript in /tmp/maws-review/gates/ci-<short>.log, deletes the
 # ref (unless --keep) and exits with the run's status (0 green, 1 anything else). A job GCE preempted on ci-kit's pool
 # is rerun alone, once per job per run, and the script reports the run's final attempt: the line before the run's status,
 # `ci-gate: run <id> <conclusion>`, is `ci-gate: run <id> attempt <n>`, and a line before those names each preempted job
@@ -35,8 +35,12 @@
 #                      ([ci-kit-mac-vm]: a group's trial, a re-measurement, a host you know is held), or vm-trial, the
 #                      guest's trial slot ([ci-kit-mac-vm-trial], which only a candidate image's trial clone carries: the
 #                      commit for an image trial, and nothing else). A MEASURED_E2E group keeps the exclusive instance
-#                      whatever this says (ci-kit's mac-lane concurrency spec, The VM lane). Default: none, the listed
-#                      groups on [ci-kit-mac-solo], whichever of the exclusive instance and the guest is free
+#                      whatever this says (ci-kit's mac-lane concurrency spec, The VM lane). Or hosted: every eligible
+#                      e2e group to GitHub's hosted Macs, each a waiter on the pool that runs it through SSFSKIM/maws-app
+#                      (not default, a measured, live or MAC_SECRET_E2E group, nor a POOL_E2E one, which stay where they
+#                      would be; ci-kit's hosted-Mac spec); or no-hosted: none there, every group as before the hosted
+#                      Macs, for diagnosis or a baseline. Default: none, the MAC_VM_E2E groups on [ci-kit-mac-solo],
+#                      whichever of the exclusive instance and the guest is free, and HOSTED_MAC_E2E's on the hosted Macs
 #   --default-beside   e2e groups, a comma list (side,library,…), that e2e:default subtracts the specs of as if they ran
 #                      beside it: a relaunch of part of a set names the whole set's other groups, so its default runs the
 #                      specs the whole set's default ran. A name with no script, or a script the derivation cannot read,
@@ -78,7 +82,8 @@
 # commit's own plan (its gate-plan.mjs on its gate.yml, the trailers below) decides: every Mac job on a label the guest carries
 # (ci-kit-mac-solo, ci-kit-mac-vm, or the trial slot's ci-kit-mac-vm-trial), so only the groups on MAC_VM_E2E, and --lane is
 # read for that; a run with any other Mac job needs a host free of alerts, and so does one the plan cannot be run for. A
-# failed read warns and goes ahead (scripts/ci-gate-alerts.mjs).
+# run whose plan puts no job on a Mac (its e2e groups all hosted) goes ahead. A failed read warns and goes ahead
+# (scripts/ci-gate-alerts.mjs).
 #
 #   MAWS_GATE_IGNORE_ALERTS=1  skip that check, for an alert left open by mistake
 set -uo pipefail
@@ -90,6 +95,9 @@ source "$(dirname "$0")/ci-gate-refusals.sh" || exit 2
 # settle_run: the run's final attempt, a job a spot preemption ended rerun alone, once (Decision Log 70).
 # shellcheck source=scripts/ci-gate-preemptions.sh
 source "$(dirname "$0")/ci-gate-preemptions.sh" || exit 2
+# hosted_reports: a failed hosted group's report, from the SSFSKIM/maws-app run its waiter's log names.
+# shellcheck source=scripts/ci-gate-hosted.sh
+source "$(dirname "$0")/ci-gate-hosted.sh" || exit 2
 usage() {
   awk 'NR > 1 { if (!/^#/) exit; sub(/^# ?/, ""); print }' "$0" >&2
   exit 2
@@ -112,7 +120,7 @@ while (($# > 0)); do
     --gates) gates=${2?--gates needs a list}; shift 2 ;;
     --runner) runner=${2:?--runner needs linux or macos}; shift 2 ;;
     --class1a) class1a=${2:?--class1a needs linux, macos or pool}; shift 2 ;;
-    --lane) lane=${2:?--lane needs vm or vm-trial}; shift 2 ;;
+    --lane) lane=${2:?--lane needs vm, vm-trial, hosted or no-hosted}; shift 2 ;;
     --default-beside) default_beside=${2:?--default-beside needs a list of e2e groups}; shift 2 ;;
     --evidence) evidence=yes; shift ;;
     --live) live=yes; shift ;;
@@ -127,7 +135,7 @@ done
 [[ -n $target ]] || usage
 case $runner in '' | linux | macos) ;; *) echo "ci-gate: --runner is linux or macos, not $runner" >&2; exit 2 ;; esac
 case $class1a in '' | linux | macos | pool) ;; *) echo "ci-gate: --class1a is linux, macos or pool, not $class1a" >&2; exit 2 ;; esac
-case $lane in '' | vm | vm-trial) ;; *) echo "ci-gate: --lane is vm or vm-trial, not $lane" >&2; exit 2 ;; esac
+case $lane in '' | vm | vm-trial | hosted | no-hosted) ;; *) echo "ci-gate: --lane is vm, vm-trial, hosted or no-hosted, not $lane" >&2; exit 2 ;; esac
 # The names land unquoted in a printed relaunch command, so only characters that are inert there pass.
 case $default_beside in *[!A-Za-z0-9._:,\ -]*) echo "ci-gate: --default-beside takes group names of letters, digits, . _ : - separated by commas, not $default_beside" >&2; exit 2 ;; esac
 # The whole set is asked for by name: left implicit, it was queued by calls that meant class 1a alone. A value of commas
@@ -307,6 +315,7 @@ if [[ $conclusion != success ]]; then
   rm -rf "$out/ci-$short"
   if gh -R "$REPO" run download "$run_id" -D "$out/ci-$short" 2>/dev/null; then echo "ci-gate: failed jobs' reports in $out/ci-$short/"; fi
   failed_log=$(gh -R "$REPO" run view "$run_id" --log-failed | perl -pe 's/(\e|\^\[)\[[0-9;]*[A-Za-z]//g')
+  hosted_reports "$failed_log" "$out/ci-$short"
   # The failed steps' last lines, each under its job's name, colours and timestamps stripped.
   printf '%s\n' "$failed_log" | perl -pe 's/^([^\t]*)\t[^\t]*\t\S+ /$1  /' | tail -80
 fi

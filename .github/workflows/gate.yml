@@ -11,7 +11,11 @@
 # trailer (ci-gate.sh --lane vm or vm-trial) sends the run's MAC_VM_E2E groups to ci-kit's macOS guest alone. A job the
 # plan puts on the guest's labels never builds out/, which the guest's 4 GB cannot: the pool's e2e-build job builds the
 # variants those jobs need at the tested sha, and e2e-vm runs them, restoring out/ from its artifacts (ci-kit's mac-lane
-# concurrency spec, Decision Log "out/ is built on the pool").
+# concurrency spec, Decision Log "out/ is built on the pool"). On a macOS lane the eligible groups on HOSTED_MAC_E2E, or
+# every eligible group of a run under `Lane: hosted` (ci-gate.sh --lane hosted; `no-hosted` keeps them all here), run on
+# GitHub's hosted Macs: each is the e2e-hosted job, a waiter on the pool that pushes the run's filtered tree to the public
+# SSFSKIM/maws-app, waits for that group's run there and ends with its verdict (ci-kit's hosted-Mac spec,
+# docs/doperpowers/specs/2026-10-26-maws-hosted-mac-design.md).
 #
 # ci-kit's VM contract (its mac-lane concurrency spec, The VM lane): on a Mac with ci-kit's guest, the exclusive
 # instance's job-started hook reads the workflow a job runs under at its sha, and lets the job run beside a guest only
@@ -57,7 +61,7 @@ on:
         type: boolean
         default: false
       lane:
-        description: "Where the MAC_VM_E2E groups go: vm (ci-kit's guest alone) or vm-trial (its trial slot); empty: either Mac desktop that is free."
+        description: "Where the e2e groups go on a Mac: vm (the MAC_VM_E2E groups to ci-kit's guest alone) or vm-trial (its trial slot); hosted (every eligible group to GitHub's hosted Macs) or no-hosted (none there); empty: either Mac desktop that is free, and HOSTED_MAC_E2E's groups hosted."
         type: string
         default: ''
 
@@ -166,6 +170,15 @@ env:
     document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations
     deliverables supervisor browser browser-comment browser-import agents c12 available design-systems browser-chrome
     composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct
+  # The e2e groups that run on GitHub's hosted Macs on a macOS lane (ci-kit's hosted-Mac spec, Admission): a waiter on the
+  # pool, the e2e-hosted job, runs each through SSFSKIM/maws-app, on macos-26 at 1920x1080@1x. A name joins on 3 of 3
+  # green `Lane: hosted` runs on one tree whose count lines match a `Lane: no-hosted` baseline's, its specs reading neither
+  # the display's scale nor its pixels, as MAC_VM_E2E's do on theirs. The plan refuses a name that is `default`, measured,
+  # live, secret or POOL_E2E. Emptying the list puts every group back on the mini.
+  HOSTED_MAC_E2E: ''
+  # The groups that need a credential or the login keychain's custody, so never go to a hosted Mac, whatever the lane
+  # (maws-app holds no secret): connectors-oauth, and discover, whose custody conditions (a), (b) and (c) stand.
+  MAC_SECRET_E2E: connectors-oauth discover
 
 defaults:
   run:
@@ -207,6 +220,7 @@ jobs:
       e2e_vm: ${{ steps.plan.outputs.e2e_vm }}
       e2e_build: ${{ steps.plan.outputs.e2e_build }}
       e2e_build_runner: ${{ steps.plan.outputs.e2e_build_runner }}
+      e2e_hosted: ${{ steps.plan.outputs.e2e_hosted }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -466,7 +480,38 @@ jobs:
           overwrite: true
           retention-days: 7
 
-  # The e2e groups the plan keeps off the guest's labels (its e2e_host); e2e-vm below runs the rest with these same steps.
+  # The hosted e2e groups (the plan's e2e_hosted), each a waiter on the pool's cpus-2 box under the group's own job name
+  # (ci-kit's hosted-Mac spec, The flow of one hosted group): .github/scripts/hosted-mac.sh pushes this commit's filtered
+  # tree, after a secret scan of what it adds, to SSFSKIM/maws-app over git with the deploy key, waits for the group's run
+  # on a hosted Mac there to write its result, and exits with it. The cleanup cancels a request left without its result
+  # (a cancelled run, a red step) and is best-effort. The deploy key is git access to maws-app and nothing else; no other
+  # job reads it.
+  e2e-hosted:
+    needs: plan
+    if: needs.plan.outputs.e2e_hosted != '[]'
+    name: e2e:${{ matrix.group }}
+    runs-on: ${{ fromJSON(matrix.runner) }}
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.e2e_hosted) }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: the hosted run
+        env:
+          ENTRY: ${{ toJSON(matrix) }}
+          EVIDENCE: ${{ needs.plan.outputs.evidence }}
+          MAWS_APP_DEPLOY_KEY: ${{ secrets.MAWS_APP_DEPLOY_KEY }}
+          # MAWS's compare API, read for the main refresh: is the requested commit on master.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: .github/scripts/hosted-mac.sh
+      - name: cleanup
+        if: always()
+        run: .github/scripts/hosted-mac.sh --cleanup
+
+  # The e2e groups the plan keeps off the guest's labels and off the hosted Macs (its e2e_host); e2e-vm below runs the
+  # guest-eligible ones with these same steps.
   e2e:
     needs: plan
     if: needs.plan.outputs.e2e_host != '[]'

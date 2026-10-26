@@ -106,6 +106,9 @@ const scenarios = [
   ['an affected fallback still counts all unit shards', 'Gates: unit\nSelection: affected\nAffected-Count: 1\nAffected: M\tpackage.json', '8x4'],
   ['the VM lane needs one e2e-build box per variant, not one per guest group', 'Gates: e2e:document-app,e2e:widgets,e2e:to-human\nClass1a: linux\nRunner: macos\nLane: vm', '4x2'],
   ['hosted jobs and a hosted POOL_E2E group ask for no boxes', 'Gates: static,unit,probes,e2e:desk-web\nClass1a: linux\nRunner: linux', 'none'],
+  // ci-kit's hosted-Mac spec: a hosted group's job is a waiter on one cpus-2 box, the code's own count of e2e entries.
+  ['each group on a hosted Mac is one cpus-2 waiter box', 'Gates: e2e:document-app,e2e:transcript\nClass1a: linux\nRunner: macos\nLane: hosted', '2x2'],
+  ['the whole macOS matrix under Lane: hosted: a waiter per eligible group, beside the pool jobs it had', 'Runner: macos\nLane: hosted', '16x1 8x4 4x2 2x33'],
 ];
 for (const [name, trailers, expected] of scenarios) {
   test(name, () => fixture(({ tree, sha, dir }) => {

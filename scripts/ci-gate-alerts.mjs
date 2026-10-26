@@ -8,9 +8,11 @@
 // where each job goes, and a job can take the guest only on the labels the guest carries (ci-kit-mac-solo, ci-kit-mac-vm, or
 // the trial slot's ci-kit-mac-vm-trial). A run with any other Mac job, a host job (packaged, the plan job, a class 1a job, a
 // job on the exclusive instance's or the shared instances' labels), needs a host free of alerts, for the guest cannot take
-// that job and the host's alert would refuse it. Whatever keeps that plan from running (no tree, a refusal, a workflow the
-// reader does not know) leaves the run needing a host; only a failed GitHub read goes ahead with a warning, since the
-// runner's own check still refuses.
+// that job and the host's alert would refuse it. A hosted e2e group (ci-kit's hosted-Mac spec) is a waiter on the pool, so
+// the plan puts it on no Mac: a run whose every Mac job would be one has no Mac job at all and goes ahead past any alert.
+// The run's Mac jobs are always that plan's when it runs, never this checkout's reading of the lists. Whatever keeps the
+// plan from running (no tree, a refusal, a workflow the reader does not know) leaves the run needing a host, its Mac jobs
+// those the flags name; only a failed GitHub read goes ahead with a warning, since the runner's own check still refuses.
 // Usage: node scripts/ci-gate-alerts.mjs --gates <list> --runner <lane> --class1a <runner> --lane <lane> --live <yes>
 // --git-dir <dir> --sha <commit>, ci-gate.sh's own values (empty when not given; its `--gates all` comes as empty, the
 // default set; the directory and the commit are the tested tree). Prints its lines on stdout and exits 2
@@ -71,7 +73,8 @@ export function macJobs({ gates = '', runner = '', class1a = '', variables = {},
 
 // Whether the run goes ahead, and what to print: `alerts` the parsed open alerts (each with its issue `number`),
 // `runners` MAWS's self-hosted runners as { name, status }, `guest` the guest the run's Mac jobs can all run in (guestRun):
-// `vm` (a guest that carries ci-kit-mac-solo or ci-kit-mac-vm), `vm-trial` (the trial slot's), or null, a run that needs a host.
+// `vm` (a guest that carries ci-kit-mac-solo or ci-kit-mac-vm), `vm-trial` (the trial slot's), or null, a run that needs a
+// host.
 export function decide({ jobs, alerts, runners, guest = null }) {
   if (jobs.length === 0 || alerts.length === 0) return { stop: false, lines: [] };
   const blocked = [...new Set(alerts.map((alert) => alert.machine))];
@@ -144,12 +147,13 @@ export function runsOn(json) {
   return 'host';
 }
 
-// The guest a run's Mac jobs can all run in, from the tested commit's own plan: `vm`, `vm-trial`, or null when any job needs
-// a host, no job takes a guest, the plan refuses the run, or anything cannot be read. The commit's .github/scripts,
+// The jobs the tested commit's own plan puts on a Mac, and the guest they can all run in: { jobs, guest }, `guest` being
+// `none` when no job is on a Mac, `vm` or `vm-trial`, or null when a job needs a host. null when the plan job itself is
+// on the host (GATE_RUNNER=macos), the plan refuses the run, or anything cannot be read. The commit's .github/scripts,
 // .github/workflows/gate.yml and package.json are extracted from `sha` in `gitDir` to a temporary directory, and its
 // gate-plan.mjs runs there as the plan job runs it: gate.yml's env, the repository variables, and the trailers ci-gate.sh
 // pushes (`gates`, `runner`, `class1a`, `lane`, `live`).
-export function guestRun({ gitDir, sha, gates = '', runner = '', class1a = '', lane = '', live = '', variables = {} }) {
+export function macPlan({ gitDir, sha, gates = '', runner = '', class1a = '', lane = '', live = '', variables = {} }) {
   if (!gitDir || !sha || (variables.GATE_RUNNER ?? '').toLowerCase() === 'macos') return null; // the plan job itself is on the host
   let dir;
   try {
@@ -175,14 +179,15 @@ export function guestRun({ gitDir, sha, gates = '', runner = '', class1a = '', l
       },
     });
     const out = Object.fromEntries(readFileSync(output, 'utf8').trim().split('\n').map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
-    const kinds = [
-      ...(out.packaged === 'true' ? ['host'] : []), // packaged is always on the exclusive instance (gate.yml)
-      ...['static', 'unit', 'probes'].filter((gate) => out[gate] === 'true').map((gate) => runsOn(out[`${gate}_runner`])),
-      ...(out.unit_darwin === 'true' ? [runsOn(out.unit_darwin_runner)] : []),
-      ...JSON.parse(out.e2e).map((entry) => runsOn(entry.runner)),
-    ].filter((kind) => kind !== 'other');
-    const guests = new Set(kinds);
-    return guests.size === 1 && !guests.has('host') ? kinds[0] : null;
+    const placed = [
+      ...(out.packaged === 'true' ? [['packaged', 'host']] : []), // packaged is always on the exclusive instance (gate.yml)
+      ...['static', 'unit', 'probes'].filter((gate) => out[gate] === 'true').map((gate) => [gate, runsOn(out[`${gate}_runner`])]),
+      ...(out.unit_darwin === 'true' ? [['unit:darwin', runsOn(out.unit_darwin_runner)]] : []),
+      ...JSON.parse(out.e2e).map((entry) => [`e2e:${entry.group}`, runsOn(entry.runner)]),
+    ].filter(([, kind]) => kind !== 'other');
+    const kinds = new Set(placed.map(([, kind]) => kind));
+    const guest = placed.length === 0 ? 'none' : kinds.size === 1 && !kinds.has('host') ? placed[0][1] : null;
+    return { jobs: placed.map(([job]) => job), guest };
   } catch {
     return null;
   } finally {
@@ -194,6 +199,10 @@ export function guestRun({ gitDir, sha, gates = '', runner = '', class1a = '', l
   }
 }
 
+// The guest a run's Mac jobs can all run in (macPlan): `vm`, `vm-trial`, `none` when the plan puts no job on a Mac, or null
+// when a job needs a host or the plan cannot be run.
+export const guestRun = (run) => macPlan(run)?.guest ?? null;
+
 // The reads, through `gh` (args to stdout, throwing on failure), and the decision; any failed read goes ahead with a warning.
 export function check({ gates, runner, class1a, lane, live, gitDir, sha, offMac, gh }) {
   const read = (path, jq) =>
@@ -204,7 +213,10 @@ export function check({ gates, runner, class1a, lane, live, gitDir, sha, offMac,
   let step = "the repository's variables";
   try {
     const variables = Object.fromEntries(read(`repos/${REPO}/actions/variables?per_page=30`, '.variables[] | [.name, .value]'));
-    const jobs = macJobs({ gates, runner, class1a, variables, offMac });
+    // The Mac jobs are the tested commit's plan's (a hosted group is on none), whose lists may differ from this checkout's;
+    // those the flags and this checkout's POOL_E2E name only when that plan cannot be run.
+    const placed = macPlan({ gitDir, sha, gates, runner, class1a, lane, live, variables });
+    const jobs = placed ? placed.jobs : macJobs({ gates, runner, class1a, variables, offMac });
     if (jobs.length === 0) return { stop: false, lines: [] };
     step = `the open ci-kit alerts (${ALERTS})`;
     const alerts = read(`repos/${ALERTS}/issues?labels=ci-kit-alert&state=open&per_page=100`, '.[] | select(.pull_request == null) | {number, title}')
@@ -216,7 +228,7 @@ export function check({ gates, runner, class1a, lane, live, gitDir, sha, offMac,
     if (alerts.length === 0) return { stop: false, lines: [] };
     step = `${REPO}'s runners`;
     const runners = read(`repos/${REPO}/actions/runners?per_page=100`, '.runners[] | {name, status}');
-    return decide({ jobs, alerts, runners, guest: guestRun({ gitDir, sha, gates, runner, class1a, lane, live, variables }) });
+    return decide({ jobs, alerts, runners, guest: placed?.guest ?? null });
   } catch (error) {
     const reason = String(error.stderr ?? '').split('\n').find((line) => line.trim()) ?? error.message;
     return { stop: false, lines: [`ci-gate: warning: could not read ${step} (${reason.trim()}); going ahead without the ci-kit alert check (the runner's job-started check still refuses jobs under a dialog)`] };

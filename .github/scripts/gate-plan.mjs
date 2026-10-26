@@ -55,6 +55,16 @@
 // and e2e-default-specs.mjs read), each guest-eligible entry carrying its `variant`; `e2e_host` and `e2e_vm`, the e2e job's
 // and the e2e-vm job's matrices, without and with a variant; `e2e_build`, the variants e2e-build builds (`[]` for none, so
 // the job does not run), on `e2e_build_runner`, a pool box, for which the pool flag is set too.
+// GitHub's hosted Macs (ci-kit's hosted-Mac spec, docs/doperpowers/specs/2026-10-26-maws-hosted-mac-design.md, Placement):
+// on a macOS lane an eligible e2e group on HOSTED_MAC_E2E is hosted: its job is a waiter on the pool's cpus-2 box
+// (.github/scripts/hosted-mac.sh), which pushes the filtered tree to SSFSKIM/maws-app, waits for that group's run on a
+// hosted Mac there and ends with its verdict. Eligible is none of `default` (its selection is derived from the whole run,
+// which does not cross), MEASURED_E2E, LIVE_E2E or LIVE_GUARD_E2E, MAC_SECRET_E2E (a credential stays on the mini),
+// POOL_E2E; a live run hosts none, nor does a Linux lane. A list naming an ineligible group is refused. `Lane: hosted`
+// hosts every eligible group of the run and names the rest in the summary; `Lane: no-hosted` hosts none; under
+// `Lane: vm` or `vm-trial` a group on both lists goes to the guest. A hosted entry carries `hosted: true`, the waiter's
+// box and timeout and no variant; it stays in `e2e` (default's derivation, the pool-demand hint) and makes `e2e_hosted`,
+// the e2e-hosted job's matrix, and the pool flag; never `e2e_host`, `e2e_vm` or `e2e_build`.
 // Writes the switches, the runners and the e2e matrix to the job's outputs and the set to its summary. Run from the
 // checkout's root.
 import { appendFileSync, readFileSync, realpathSync } from 'node:fs';
@@ -129,10 +139,12 @@ export function planOf(env, scripts) {
   const lane = ((dispatched ? env.INPUT_RUNNER : trailer('Runner')) || env.GATE_E2E_RUNNER || (gateRunner === 'pool' ? '' : gateRunner) || 'linux').toLowerCase();
   if (lane !== 'linux' && lane !== 'macos') refuse(`no such runner: ${lane} (linux or macos; the pool takes class 1a and the POOL_E2E groups, through Class1a: pool)`);
 
-  // Where `Lane:` sends the run's MAC_VM_E2E groups; none keeps them on [ci-kit-mac-solo].
+  // Where `Lane:` sends the run's MAC_VM_E2E groups; none keeps them on [ci-kit-mac-solo]. `hosted` and `no-hosted` move
+  // the run's e2e groups onto GitHub's hosted Macs or off them, and leave the guest's routing as with no lane.
   const LANES = { vm: RUNNERS.macVm, 'vm-trial': RUNNERS.macVmTrial };
-  const vmLane = ((dispatched ? env.INPUT_LANE : trailer('Lane')) || '').toLowerCase();
-  if (vmLane && !Object.hasOwn(LANES, vmLane)) refuse(`no such lane: ${vmLane} (vm or vm-trial, through ci-gate.sh --lane; none for the default routing)`);
+  const laneAsked = ((dispatched ? env.INPUT_LANE : trailer('Lane')) || '').toLowerCase();
+  if (laneAsked && !Object.hasOwn(LANES, laneAsked) && laneAsked !== 'hosted' && laneAsked !== 'no-hosted') refuse(`no such lane: ${laneAsked} (vm, vm-trial, hosted or no-hosted, through ci-gate.sh --lane; none for the default routing)`);
+  const vmLane = Object.hasOwn(LANES, laneAsked) ? laneAsked : '';
 
   const evidence = dispatched ? env.INPUT_EVIDENCE === 'true' : trailer('Evidence')?.toLowerCase() === 'yes';
   const live = dispatched ? env.INPUT_LIVE === 'true' : trailer('Live')?.toLowerCase() === 'yes';
@@ -186,16 +198,36 @@ export function planOf(env, scripts) {
   const macVm = new Set(listedVm.filter((name) => !measured.has(name) && !unbuilt.includes(name)));
   const onMac = (name) => (macVm.has(name) && vmLane ? LANES[vmLane] : macShared.has(name) ? RUNNERS.macShared : macVm.has(name) ? RUNNERS.macSolo : RUNNERS.macos);
   const placed = (group) => (!offMac.has(group) ? (lane === 'macos' ? onMac(group) : RUNNERS[lane]) : class1a === 'pool' ? poolBox(4) : RUNNERS.linux);
+  // The hosted Macs. Why a group never goes there, if it never does: its selection is the whole run's (`default`), its
+  // bounds the mini's (measured), it spends (live), it needs a credential (secret), or it never takes a Mac (pool).
+  const secret = new Set(words(env.MAC_SECRET_E2E));
+  const liveOnes = new Set([...words(env.LIVE_E2E), ...words(env.LIVE_GUARD_E2E)]);
+  const notHosted = (group) =>
+    [group === 'default' && 'default', measured.has(group) && 'measured', liveOnes.has(group) && 'live', secret.has(group) && 'secret', offMac.has(group) && 'pool'].filter(Boolean);
+  const named = (groups, prefix = '') => groups.map((group) => `${prefix}${group} (${notHosted(group).join(', ')})`).join(', ');
+  const listedHosted = words(env.HOSTED_MAC_E2E);
+  const contradictions = listedHosted.filter((group) => notHosted(group).length > 0);
+  if (contradictions.length > 0) refuse(`HOSTED_MAC_E2E names what never goes to a hosted Mac: ${named(contradictions)}`);
+  const hostedOf = (group) =>
+    lane === 'macos' && !live && notHosted(group).length === 0 &&
+    (laneAsked === 'hosted' || (laneAsked !== 'no-hosted' && listedHosted.includes(group) && !(vmLane && listedVm.includes(group))));
+  // The waiter: the pool's smallest box, about $0.0006 a minute while it waits. Its timeout is above the waiter's own
+  // 95-minute deadline and under the pool's 120-minute bound on a box's run.
+  const HOSTED_WAITER = poolBox(2);
+  const HOSTED_TIMEOUT_MINUTES = 100;
   const e2e = [...gates]
     .filter((gate) => gate.startsWith('e2e:'))
     .map((gate) => {
       const group = gate.slice(4);
-      const where = placed(group);
+      const hosted = hostedOf(group);
+      const where = hosted ? HOSTED_WAITER : placed(group);
       const runner = JSON.stringify(where);
       const guest = GUEST.includes(where) ? { variant: variantOf(group) } : {};
-      return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group), measured: measured.has(group), runner, timeout: timeoutOn(where, measured.has(group) ? 45 : 30), ...guest };
+      const timeout = hosted ? HOSTED_TIMEOUT_MINUTES : timeoutOn(where, measured.has(group) ? 45 : 30);
+      return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group), measured: measured.has(group), ...(hosted && { hosted }), runner, timeout, ...guest };
     });
-  const e2eHost = e2e.filter((entry) => entry.variant === undefined);
+  const e2eHosted = e2e.filter((entry) => entry.hosted);
+  const e2eHost = e2e.filter((entry) => entry.variant === undefined && !entry.hosted);
   const e2eVm = e2e.filter((entry) => entry.variant !== undefined);
   const e2eBuild = [...new Set(e2eVm.map((entry) => entry.variant))].sort();
   const unitDarwinRunner = onMac('unit:darwin');
@@ -209,7 +241,7 @@ export function planOf(env, scripts) {
 
   const has = (gate) => String(gates.has(gate));
   const runners = CLASS1A_RUNNERS[class1a];
-  const pool = (class1a === 'pool' && (['static', 'unit', 'probes'].some((gate) => gates.has(gate)) || e2e.some((entry) => offMac.has(entry.group)))) || e2eBuild.length > 0;
+  const pool = (class1a === 'pool' && (['static', 'unit', 'probes'].some((gate) => gates.has(gate)) || e2e.some((entry) => offMac.has(entry.group)))) || e2eBuild.length > 0 || e2eHosted.length > 0;
   // The unit job's matrix: its shards, each with the `--shard` value and the suffix of its JUnit artifact's name
   // (test-results-unit-<k>of<n>-<attempt>, which ci-kit's test-history collector reads as one `unit` report), or the one
   // unsharded job.
@@ -223,6 +255,7 @@ export function planOf(env, scripts) {
     packaged: has('packaged'), evidence: String(evidence), live: String(live), default_beside: JSON.stringify(defaultBeside),
     unit_shards: JSON.stringify(unitShards), unit_darwin_runner: JSON.stringify(unitDarwinRunner), timeouts: JSON.stringify(timeouts),
     e2e_host: JSON.stringify(e2eHost), e2e_vm: JSON.stringify(e2eVm), e2e_build: JSON.stringify(e2eBuild), e2e_build_runner: JSON.stringify(E2E_BUILD_BOX),
+    e2e_hosted: JSON.stringify(e2eHosted),
   };
   const from = words(asked).length > 0 ? (dispatched ? 'the `gates` input' : 'the `Gates:` trailer') : 'the default (class 1a, with unit:darwin and class 1 e2e on a macOS lane)';
   const beside = defaultBeside.length > 0 ? ` Default beside: ${defaultBeside.join(', ')}.` : '';
@@ -235,6 +268,13 @@ export function planOf(env, scripts) {
   const inRun = (groups) => groups.map((group) => `e2e:${group}`).filter((gate) => gates.has(gate));
   const said = (lead, jobs) => (jobs.length > 0 ? ` ${lead}: ${jobs.join(', ')}.` : '');
   const laneJobs = vmLane ? jobsOn(LANES[vmLane]) : [];
+  // The hosted groups, and what a hosted lane left where it was.
+  const keptOffHosted = laneAsked === 'hosted' && lane === 'macos' ? e2e.map((entry) => entry.group).filter((group) => notHosted(group).length > 0) : [];
+  const hostedNote =
+    said('Hosted Mac (SSFSKIM/maws-app, each through a waiter on the pool)', e2eHosted.map((entry) => `e2e:${entry.group}`)) +
+    (keptOffHosted.length > 0 ? ` Lane: hosted, but never on a hosted Mac, so where it would be: ${named(keptOffHosted, 'e2e:')}.` : '') +
+    (laneAsked === 'hosted' && e2eHosted.length === 0 && keptOffHosted.length === 0 ? ' Lane: hosted, but no e2e group of this run is hosted.' : '') +
+    (laneAsked === 'no-hosted' ? ' Lane: no-hosted, so no group of this run is hosted.' : '');
   const laneNote = !vmLane ? '' : laneJobs.length > 0 ? said(`Lane: ${vmLane}, on [${LANES[vmLane]}] alone`, laneJobs) : ` Lane: ${vmLane}, but no job of this run is on MAC_VM_E2E.`;
   const macNote =
     said('Shared Mac instances', jobsOn(RUNNERS.macShared)) +
@@ -243,7 +283,8 @@ export function planOf(env, scripts) {
     laneNote +
     said('On MAC_VM_E2E but measured, so on the exclusive instance', inRun(keptOffVm)) +
     said('On MAC_VM_E2E but not built through scripts/e2e-build.sh, so off the guest', lane === 'macos' ? inRun(unbuilt.filter((group) => !offMac.has(group))) : []) +
-    said('Out/ built on the pool (e2e-build) for the guest-eligible jobs', e2eBuild);
+    said('Out/ built on the pool (e2e-build) for the guest-eligible jobs', e2eBuild) +
+    hostedNote;
   let summary = `### Gates\n\n${[...gates].map((gate) => `- \`${gate}\``).join('\n')}\n\nFrom: ${from}. Class 1a: ${class1a}. E2e lane: ${lane}${pooledNote}.${evidence ? ' Evidence: yes.' : ''}${live ? ' Live: yes (MAWS_LIVE, MAWS_LIBRARY_LIVE, MAWS_LIVE_DOCUMENT at 1).' : ''}${beside}${macNote}\n`;
   let stdout = `${[...gates].join('\n')}\nclass 1a: ${class1a}\nlane: ${lane}${pooledNote}\n${live ? 'live: yes\n' : ''}${defaultBeside.length > 0 ? `default beside: ${defaultBeside.join(' ')}\n` : ''}${macNote ? `${macNote.trim()}\n` : ''}`;
   if (selection) {
