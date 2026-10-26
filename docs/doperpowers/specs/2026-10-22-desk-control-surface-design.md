@@ -2378,6 +2378,19 @@ relays its `op` messages without keeping them for replay; a daemon older than 1.
 refuses `media` `bad-shape` (*no RPC "media"*), the machine presence's `desk.rpcs` names
 it from 1.15.0, and the web offers it where the session's `controls.media` is available.
 
+*2026-10-26, MW5 review fixes (sminos still 1.15.0):* a `name`, `mediaType` or `data` of
+any other JSON type (a list, an object, a number) is `bad-shape`, as an `attachments` that
+is no list is. Every component of the upload's path is walked from `/` without following
+a link, so an ancestor of the working directory's real path that became a link since the
+daemon resolved it refuses the upload (`failed`), and so does a file already there that
+is no regular file (a FIFO never blocks it); a refused save removes only the files this
+upload created or found holding its own bytes, never one it did not make its own. The
+files of an upload the bridge refused, and the sweep's, are removed by the same walk of
+the recorded root from `/`, so a link an ancestor became since leads nowhere. The
+exclude line is written through the same walk of the common dir's real path; a link at
+`info` or `info/exclude`, or an exclude that is no regular file, is logged and the
+upload goes on.
+
 ### The log (owner: doperpowers `sminos/skills/sminos/scripts/sminos.py`; read by the web's projection)
 
 `continued {from, to, reason, confirmed}` (M4), written under the machine's writer when a
@@ -4003,6 +4016,35 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   Open: a session served through the gateway to Codex cannot take a PDF's `document`
   block (Surprises); the web half, or the bridge by the session's model, may have to
   read a PDF by pages there.
+  Date/Author: 2026-10-26, MW5's executor for the desk orchestrator (b4948247).
+- Decision: MW5's review fixes (the high review over both halves; doperpowers
+  `desk-ctl-mw5`, sminos still 1.15.0). Each closes a gap the review reproduced:
+  - **Every walk starts at `/`.** `O_NOFOLLOW` on the base's own open covered its last
+    component only, so a removal days later, reusing the recorded spelling, followed a
+    link an ancestor had become and deleted a file in another tree's matching session
+    directory. Saving, removing and sweeping now open each component from `/` relative
+    to the one before it, following none, and keep the directory descriptors through
+    the cleanup (the session directory's `rmdir` goes through its parent's descriptor,
+    not a reopened path). The daemon's base is still the real path of the live cwd, so
+    a link in the working directory's own path is resolved once, before the walk.
+  - **The exclude goes through the same walk.** The common dir's real path is walked from
+    `/`; `info` is opened (made when missing) and `exclude` opened, made or appended to
+    only as a regular file, never through a link. A refusal is logged as any failure to
+    exclude is, and the upload goes on.
+  - **A refused save rolls back only what it made its own.** The daemon had removed every
+    planned name, a file someone else put there and files the save never reached among
+    them. The save now removes, on its way out, only the files it created or found
+    holding its own bytes (a restart's second save), and the session directory when
+    that empties it; a file it created and could not finish writing goes too.
+  - **A file in the way is opened without blocking.** A collision is opened `O_NONBLOCK |
+    O_NOFOLLOW` and must be a regular file before it is read, so a FIFO at a file's name
+    refuses the upload rather than hold the worker and leave the RPC unanswered.
+  - **Wrong JSON types are `bad-shape`.** `mediaType: []` had raised `TypeError` at the
+    type table's lookup, which `receive` does not catch, so the frame went unanswered.
+  - **The idle wake re-checks after its await.** While the module waits to learn whether
+    a turn runs, a Send can start one, which also marks the turn known; the wake stays
+    armed through the read and is submitted only if still armed (a turn start disarms
+    it), no turn runs and an attachment is pending.
   Date/Author: 2026-10-26, MW5's executor for the desk orchestrator (b4948247).
 
 ## Outcomes & Retrospective
