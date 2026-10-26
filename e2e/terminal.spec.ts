@@ -459,9 +459,13 @@ test('shows terminal lost on host crash and respawns after restart', async ({ ma
   });
 });
 
-// Terminal 1 at a zsh prompt after `seq 1 20000`; Terminal 2 running `top` after a marker line.
+// Terminal 1 at a zsh prompt after `seq 1 20000`; Terminal 2 running `top` after a marker line. The panel is maximized
+// once Terminal exists, as the reload's `load()` leaves it: load's own maximize before the reload finds an empty surface
+// stack, which UX2 docks, and a maximized panel on this page sits below the toolbar, three rows shorter, so a terminal
+// sized before it would lose the oldest lines of a full scrollback when the reload's maximize shrinks it.
 async function reloadScene(h: Harness) {
   const t1 = await h.addTerminal();
+  await h.call('panel', 'maximize', true);
   await h.prompt(t1.id);
   await h.run(t1.id, 'seq 1 20000');
   await h.expectLine(t1.id, '20000');
@@ -504,7 +508,9 @@ test('re-adopts a live pty after reload exactly', async ({ maws }) => {
     expect((await h.tabs()).map((tab) => tab.id).sort(), 'one tab per re-adopted shell, under its label').toEqual([t1.tabId, t2.tabId].sort());
 
     await h.selectTerminalTab(t1.tabId);
+    await h.idle(a1!.id); // a resize or a new prompt would land meanwhile
     const after1 = await h.snap(a1!.id);
+    expect([after1.cols, after1.rows], 'the size it had before the reload').toEqual([before1.cols, before1.rows]);
     expect(after1.count, 'the same lines, and no new prompt drawn').toBe(before1.count);
     expect(after1.first).toBe(before1.first);
     expect(after1.modes).toEqual(before1.modes);
