@@ -135,7 +135,7 @@ allows today.
   machine side of path A's control surface resumes now; the web halves stay paused until
   the owner says MAWS's UX is ready; F1 stands (Decision Log, "Path A's machine side
   resumes").
-- [ ] The machine-side wave (Plan of Work, "The machine-side wave"): MW1 reads, MW2
+- [x] (2026-10-26 14:51Z) The machine-side wave (Plan of Work, "The machine-side wave"): MW1 reads, MW2
   ops, MW3 scoped allows, MW4 one agent stopped or told, MW5 image and PDF intake. The machine
   halves of M2–M4, cut and widened per that entry.
   - [x] (2026-10-26 07:21Z) MW1 reads (`usage`, `config`, `settings`, `mcp`) and
@@ -158,7 +158,11 @@ allows today.
     found a stop that could reach a namesake, a denied TaskStop read as a stop, and the
     note racing a background agent's notification, among seven; two fix waves,
     re-reviewed clean; live check on 2.1.310, background and foreground.
-  - [ ] MW5 image and PDF intake.
+  - [x] (2026-10-26 14:51Z) MW5 image and PDF intake: sminos 1.15.0 (doperpowers #400) and the
+    hub's `media` RPC and `op` (MAWS #174); the `high` review found a cleanup that
+    followed an ancestor link, a rollback reaching files the upload did not own, an
+    exclude through a link, a wake after a Send, a FIFO collision and a shape check
+    that raised, all fixed and re-reviewed clean; live check on 2.1.310, every case.
 - [x] (2026-10-26) Wave 2, measured by remote-architecture on 2.1.310 in isolated
   configs behind a recording stub, zero inference: media intake works (MW5); context
   truncation is blocked on 2.1.310 (Decision Log, "Wave 2 and the lane map").
@@ -4241,3 +4245,33 @@ own unseen receipt identity after reopen. The actual engine inventory likewise
 proved more than a fixture could about grouping, and the rollout's automatic
 updates consumed a fixture the plan expected to keep. The record preserves those
 limits instead of turning merged code or a nearby passing check into acceptance.
+
+**The machine-side wave, MW1–MW5 (2026-10-26).** Path A's machine side is built and
+merged in five pairs, each MAWS half first. That brings sminos from 1.11.0 to 1.15.0, as
+doperpowers #395, #397, #398, #399 and #400 beside MAWS #153, #157, #162, #168 and #174.
+Shipped: the reads of usage, config, settings and MCP; `capabilities.controls`; the
+side question; compact's instructions; `/mcp`'s measured grammar; scoped allows;
+stopping and telling one agent; and image and PDF intake through a synthetic native
+Read. Each MW was built by one executor across both halves and live-checked on 2.1.310
+in an isolated profile behind a recording stub, with no inference spent. Each had
+one review at its named rung over both ranges.
+
+The reviews found their consequential defects where the earlier milestones had: where an
+outcome crosses a reload, a respawn or a restart; and where a check and its action
+are separated by a window. A side question lost its end across a reload. A stop by name
+could reach a namesake spawned after the daemon's check. A denied TaskStop read as a
+stop. A background agent's notification could wake its parent before the note. A
+cleanup reopened a recorded path through an ancestor that had become a link. The
+first-round reviews of MW1, MW2, MW4 and MW5 each reproduced a defect on the installed
+engine that the unit tests had passed. MW3 was clean at first read.
+
+What this leaves:
+- The acceptance items (A15–A28) wait for the web halves.
+- The MCP read names a connected server by its tool spelling, while `/mcp` takes the
+  configured name. That is residue, to decide when the web half lands.
+- A whole PDF fails the next request on a session served through the Codex gateway.
+  It is not measured here.
+
+The lesson is the M0 lesson in a new place. A happy-path test proves the effect. The
+outcome guarantee and the path's safety are proved only by the restart, the race and
+the link, staged on purpose.
