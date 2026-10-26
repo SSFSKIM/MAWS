@@ -1952,6 +1952,23 @@ files:    {root: string, entries: string[], truncated: boolean}    // M5; the pl
 A read error on the sub (DX4 below) is one of `no-bridge`, `unsupported`, `timeout`,
 `busy`, `failed`, with a message.
 
+*2026-10-26, MW1 as built (sminos 1.11.0; the live check on 2.1.310):* `usage` refuses
+any `breakdown` but `summary` and `full` (the read's `failed`, *usage's breakdown is
+summary or full*), and its `rateLimits` is empty off a claude.ai subscription even when
+the responses carry rate-limit headers. A `config` row's `provider` is the engine's
+`Origin` `{plugin, tier}`, a plugin's naming its marketplace (`cfgprobe@inline`); only a
+plugin's `text` row loses its `value`. `settings.bySource` carries all five sources,
+empty lists where a source has none, each rule string parsed as the engine parses it
+(an unparseable one is a `toolName` whole), and a hook's `commands` counts every entry
+of its matcher's `hooks` list. `mcp` names a connected server as its tools spell it
+(`probe server` is `probe_server`), the plugins' `$.tool.register` tools among them
+(`sminos`); the plane's `disabled` servers keep their configured spelling and come from
+`projects[<key>]`, the key being the nearest directory at or above the session's
+launch directory that holds `.git`, else that directory (measured: a session launched
+in `work/sub` had `/mcp disable` write under `work`). The result types are
+`UsageRead`, `ConfigRead`, `SettingsRead` and `McpRead` in MAWS
+`apps/desk-hub/src/protocol/session.ts`, `ControlCapabilities` beside them.
+
 **Events** (the mod's posts):
 
 | type / phase | fields |
@@ -2058,7 +2075,8 @@ rows by data.
 
 ```ts
 SessionPresence = { record: JsonObject | null; bridge: boolean; capabilities?: Capabilities; mode?: { mode: string; at: number } };
-Capabilities = { sminos: string; protocol: number; engine: string; ops: string[]; reads: string[]; routes: { measured: string } };
+Capabilities = { sminos: string; protocol: number; engine: string; ops: string[]; reads: string[]; routes: { measured: string }; controls?: ControlCapabilities };
+ControlCapabilities = Partial<Record<ControlKey, { available: boolean; reason?: string }>>;  // MW1; ControlKey the lane map's 20 names
 MachinePresence = { online; policy; checkouts; desk?: { sminos: string; rpcs: string[]; reads: string[] } };
 
 // subscription kinds (n = 1, 2, …), relayed unread:
@@ -2412,6 +2430,37 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   a synthetic 574-chunk post-join burst delayed receipt visibility past five
   seconds. Doperpowers board #128 tracks measuring and bounding this path; the
   wake decision below records the distinction from snapshot recovery.
+- Observation: `$.session.usage` reports no rate-limit windows to an API-key session,
+  even when every response carries the unified rate-limit headers. 2.1.310's header
+  reader clears its utilization unless the account check passes, so `rateLimits` is
+  present only on a claude.ai subscription (and a gateway's `spend_limit`); the desk's
+  usage panel has to say so rather than draw an empty list as "no limits".
+  Evidence: MW1 live check, `/tmp/dsk-scripts/mw-wave/mw1-live/evidence/c2/`: the stub
+  sent `anthropic-ratelimit-unified-5h-utilization: 0.235` and the 7d pair on the turn's
+  response, and `read usage` after it answered `rateLimits: []`, `cost {usd: 0.0006}`,
+  `context.tokens 100`; `extractQuotaStatusFromHeaders` in 2.1.310's `cli.pretty.js`.
+- Observation: the summary breakdown costs nothing; the full one sent 29 token-count
+  requests in a fresh profile (one per tool and memory file), and each breakdown is
+  about 29 KB of JSON, most of it `gridRows`. The `read usage` answer fits a frame.
+  Evidence: c2's stub log: 0 `count_tokens` requests for `summary`, 29 for `full`.
+- Observation: lane A sees an MCP server only through its tools, under the tool-name
+  spelling: a server configured as `probe server` reads `probe_server`, and the
+  plugins' `$.tool.register` tools form servers of their own (`sminos`, 1 tool). A
+  disabled server keeps its configured name, which the slash grammar needs.
+  Evidence: c2 `read-mcp.json` and `read-mcp-plane.json`.
+- Observation: the engine files a project's `.claude.json` entry under the repository's
+  top level, not the launch directory, so `disabledMcpServers` is read there.
+  Evidence: c2 `projects-disabled.json`: launched in `work/sub`, `/mcp disable plain`
+  run through the bridge's `command` op added `plain` under `work`.
+- Observation: on 2.1.310 the engine's own `text` config rows are `autoUpdatesChannel`
+  and `language`, neither a credential; `apiKey` is a boolean row. A fresh profile's
+  `thinking` row is locked. Evidence: c2 `read-config.json`.
+- Observation: an isolated profile's first launch tries to clone the official plugin
+  marketplace: over HTTPS (refused by the harness's proxy) and then over SSH, which no
+  HTTP proxy covers. `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1` and a
+  failing `GIT_SSH_COMMAND` keep it local; the machine's `/usr/bin/python3` (3.9) is
+  too old for sminos's CLI, which needs 3.10. Evidence: c1's debug log (the clone
+  attempts); c2 with both settings logged none.
 
 ## Decision Log
 
@@ -3161,6 +3210,51 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   range at the same tier.
   Date/Author: 2026-10-26, the wave's executing session (plan-executor for the desk
   orchestrator b4948247).
+
+- Decision: MW1 as built (sminos 1.11.0, doperpowers and MAWS `desk-ctl-mw1`). The
+  gaps the wave's text left, each settled from the shape's purpose:
+  - **Where the reads live.** The four reads and their cuts are a module of their own,
+    `bridge-reads.tsx`, which takes `$` as `bridge-catalog.tsx` does; the controls map
+    is `bridge-controls.tsx`, data alone. `bridge.tsx` (2,100 lines) only routes `read`
+    to them, its `args` now passed through.
+  - **A bad breakdown is refused, not defaulted.** "The summary unless `full` is asked
+    for" covers an absent `breakdown`; any other value answers *usage's breakdown is
+    summary or full*, so a path-neutral consumer never takes a summary for the count
+    it asked for.
+  - **`settings` sends all five sources**, empty lists where one has none, so absence
+    never has to be told from emptiness; rule strings are parsed by 2.1.310's own rule
+    grammar (`Tool(content)`, `\(`, `\)` and `\\` unescaped, an empty or `*`
+    content the bare tool) and an unparseable string is a `toolName` whole, as the
+    engine reads it. Plugins' hooks are not in the settings files and are not counted;
+    `permissionsExact: false` already says the view is the files'.
+  - **`config` copies a row whole** but a plugin's `text` row's `value`; its
+    `provider` is the engine's `Origin` verbatim.
+  - **`mcp`'s disabled list** is read under the engine's own project key, the nearest
+    directory holding `.git` at or above the launch directory (measured, Surprises),
+    names alone, at most 256 of at most 256 characters; a connected server is never
+    named twice. The bridge's view keeps the plugins' tool servers (`sminos`): the
+    model sees them as MCP servers, and `/mcp` is where the person would look for them.
+  - **The controls' reasons.** A control a later MW builds says *not in sminos
+    <version>: a later version of the plugin adds it* (the version the loaded mod's
+    own); the four standing ones say what stops lane A and where the person goes
+    instead (`decide.interrupt`: deny, then Interrupt; `forget`: the resume
+    duplication, an engine fix or a supported cut; `rewind-files`: /rewind in the
+    terminal; `elicitation.answer`: a mod's answer carries no action or content).
+  - **The CLI** gains `sminos read <member> <what> --breakdown full`, so a walk can ask
+    the full count without the hub.
+  - **The fake machine's `mw1` producer** answers the four reads from the live check's
+    recording (`apps/desk-hub/fake-machine/dx4/mw1-reads.json`, its hash in that
+    directory's README), not from hand-written shapes, and keeps M1's engine 2.1.307
+    so its `read status` and its route table stay one engine.
+  - **The hub admits `controls` unchanged**: a presence's `capabilities` is relayed
+    whole and unread, as M0 decided, so no admission change was needed; the types are
+    the one place the shapes are written.
+  Rationale: each follows the shape's path-neutral purpose (a consumer reads what a
+  field says, never infers it from absence) or a measured fact of 2.1.310. Rejected:
+  defaulting a bad `breakdown` to `summary` (a silent wrong answer); filtering the
+  plugin tool servers out of `mcp` (the model and `/mcp` both count them); a
+  hand-written fake answer (it would drift from what the bridge sends).
+  Date/Author: 2026-10-26, MW1's executor for the desk orchestrator (b4948247).
 
 ## Outcomes & Retrospective
 
