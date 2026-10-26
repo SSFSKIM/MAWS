@@ -25,6 +25,8 @@ import type { JsonObject } from '../src/protocol/json';
 import { loadRoutes } from './routes';
 // The MW1 live check's recording (dx4/README.md): imported, as the route table is, for the bundled command.
 import mw1 from './dx4/mw1-reads.json' with { type: 'json' };
+// And MW2's (dx4/README.md).
+import mw2 from './dx4/mw2-ops.json' with { type: 'json' };
 import type { Catalog, Capabilities, ConfigRead, ControlCapabilities, McpRead, SettingsRead, UsageRead, Job, ReadAnswer, SessionBodies, SessionMessage, SessionPresence, StatusRead, Streaming, StreamingBlock, SubagentMeta, SubscriptionKind, Usage } from '../src/protocol/session';
 import { derive, fileFacts, LoopIndex, loopJobs, stopNote, type Body, type BridgeAgent, type Derivation } from './jobs';
 import { answerOutput, type Locate } from './output';
@@ -39,11 +41,12 @@ import type { Recording, Row, Step } from './recording';
  * `desk`, a `read status` is answered on the sub, and a `command` RPC runs (`commands.ts`); an older producer sends
  * neither field and passes `read` by. `m1` adds the pushed catalog; `mw1` (sminos `MW1_SMINOS`, the machine-side wave's
  * MW1) the reads of usage, config, settings and MCP, answered as the MW1 live check recorded them, and
- * `capabilities.controls`.
+ * `capabilities.controls`; `mw2` (sminos `MW2_SMINOS`) the side question (`btw`), answered as the MW2 live check
+ * recorded it, and compact's `instructions`.
  */
-export type Producer = 'dc3' | 'dc8' | 'm0' | 'm1' | 'mw1';
+export type Producer = 'dc3' | 'dc8' | 'm0' | 'm1' | 'mw1' | 'mw2';
 
-const LEVEL: Record<Producer, number> = { dc3: 0, dc8: 1, m0: 2, m1: 3, mw1: 4 };
+const LEVEL: Record<Producer, number> = { dc3: 0, dc8: 1, m0: 2, m1: 3, mw1: 4, mw2: 5 };
 
 /** Whether `producer` does what `level` added. */
 export const producerAtLeast = (producer: Producer, level: Producer): boolean => LEVEL[producer] >= LEVEL[level];
@@ -82,9 +85,28 @@ export const MW1_CAPABILITIES: Capabilities = {
 
 const MW1_KINDS = new Set(['usage', 'config', 'settings', 'mcp']);
 
+/** The sminos version of the machine-side wave's MW2 (the side question, compact's instructions). */
+export const MW2_SMINOS = '1.12.0';
+
+/** What the MW2 live check recorded of a side question (dx4/README.md): the bridge's answers when it was refused
+ * (before the session's first model request) and started, and the `btw` events of the started one, in order. */
+export const MW2_BTW = mw2.btw as unknown as { refused: JsonObject; started: JsonObject; events: JsonObject[]; prompt: string };
+
+/** An MW2 bridge's capabilities: MW1's, its `btw` op, and every control's capability as the MW2 live check's bridge
+ * said them (`btw` available). The engine and the route table stay 2.1.307, as MW1's do: the fake routes a `command`
+ * by the vendored 2.1.307 table. */
+export const MW2_CAPABILITIES: Capabilities = {
+  ...MW1_CAPABILITIES,
+  sminos: MW2_SMINOS,
+  ops: [...MW1_CAPABILITIES.ops, 'btw'],
+  controls: mw2.capabilities.controls as ControlCapabilities,
+};
+
 /** The sminos version, and the bridge's capabilities, that `producer` stands for. */
-export const sminosOf = (producer: Producer): string => (producerAtLeast(producer, 'mw1') ? MW1_SMINOS : producerAtLeast(producer, 'm1') ? M1_SMINOS : M0_SMINOS);
-const capabilitiesOf = (producer: Producer): Capabilities => (producerAtLeast(producer, 'mw1') ? MW1_CAPABILITIES : producerAtLeast(producer, 'm1') ? M1_CAPABILITIES : M0_CAPABILITIES);
+export const sminosOf = (producer: Producer): string =>
+  producerAtLeast(producer, 'mw2') ? MW2_SMINOS : producerAtLeast(producer, 'mw1') ? MW1_SMINOS : producerAtLeast(producer, 'm1') ? M1_SMINOS : M0_SMINOS;
+const capabilitiesOf = (producer: Producer): Capabilities =>
+  producerAtLeast(producer, 'mw2') ? MW2_CAPABILITIES : producerAtLeast(producer, 'mw1') ? MW1_CAPABILITIES : producerAtLeast(producer, 'm1') ? M1_CAPABILITIES : M0_CAPABILITIES;
 
 /** The per-uid temporary root the recordings' engine wrote task outputs under (macOS, uid 501): `<resolved tmp>/claude-<uid>`. */
 export const ENGINE_TMP = '/private/tmp/claude-501';

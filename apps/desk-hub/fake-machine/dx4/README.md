@@ -26,3 +26,12 @@ Code 2.1.310 in an isolated profile behind a recording stub, zero inference) —
 `4581b2405994b7dfb7bbaef3a1735fa6eb0f111750e6370471c224ac8688eb91`). The fake machine's `mw1` producer answers from it
 (`../session.ts`, run by `test/fake-machine/desk-mw1.test.ts`). Never edit it here: a later read's shape change is
 recorded again by that MW's live check, and replaces this file whole.
+
+`mw2-ops.json` is a recording too: what the bridge answered in the machine-side wave's MW2 live check (the desk
+control surface spec, Plan of Work, MW2; doperpowers `desk-ctl-mw2`, sminos 1.12.0, on Claude Code 2.1.310 in an
+isolated profile behind a recording stub that answers the side question with a canned reply, zero inference) — its
+`GET /status` capabilities (`btw` among the ops, `controls.btw` available), and a side question's answers and
+events: refused `nothing-to-fork` before the session's first model request, and `started` when idle, its `btw` start
+and end as the bridge's child relays them (sha256 `45c3de99fec4ddfe4c4464f4ebd5fd830b8d9b12474b2c16efdc45c9cff81c2d`). The fake machine's `mw2` producer answers from it
+(`../session.ts`, `../machine.ts`, run by `test/fake-machine/desk-mw2.test.ts`). Never edit it here: a later
+shape change is recorded again by that MW's live check, and replaces this file whole.

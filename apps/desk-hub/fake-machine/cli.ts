@@ -31,7 +31,8 @@ const USAGE = `usage:
       --keep-times             log events keep their recorded ts (default: when first written)
       --producer <daemon>      dc3 (default) | dc8: DX4's widened subagents body, jobs, MCP names, and output |
                                m0: dc8 and capabilities, read status, command | m1: pushed catalogs and measured prompt commands |
-                               mw1: m1 and the reads of usage, config, settings and MCP, and capabilities.controls
+                               mw1: m1 and the reads of usage, config, settings and MCP, and capabilities.controls |
+                               mw2: mw1 and the side question (btw), and compact's instructions
       --plugin <name>          doperpowers (default) | sminos: the plugin its bridge and ask run in (a rolled machine)`;
 
 function readState(path: string): State {
@@ -91,8 +92,8 @@ export async function main(argv: string[], defaults: { recording: string }): Pro
     console.error('--decisions is recorded or wait');
     return 2;
   }
-  if (values.producer !== 'dc3' && values.producer !== 'dc8' && values.producer !== 'm0' && values.producer !== 'm1' && values.producer !== 'mw1') {
-    console.error('--producer is dc3, dc8, m0, m1 or mw1');
+  if (values.producer !== 'dc3' && values.producer !== 'dc8' && values.producer !== 'm0' && values.producer !== 'm1' && values.producer !== 'mw1' && values.producer !== 'mw2') {
+    console.error('--producer is dc3, dc8, m0, m1, mw1 or mw2');
     return 2;
   }
   if (values.plugin !== 'doperpowers' && values.plugin !== 'sminos') {

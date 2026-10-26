@@ -1,0 +1,142 @@
+{
+  "about": "The MW2 live check (desk control surface spec, Plan of Work, MW2): doperpowers desk-ctl-mw2, sminos 1.12.0, Claude Code 2.1.310, an isolated profile behind a recording stub (zero inference; the stub answers the side question with a canned reply and usage). `capabilities` is the bridge's GET /status; `btw` its /command answers to a side question asked before the first model request (refused) and when idle (started), and the btw events of the latter as the child relays them (the rpc nonce the child added).",
+  "capabilities": {
+    "sminos": "1.12.0",
+    "protocol": 2,
+    "engine": "2.1.310",
+    "ops": [
+      "ping",
+      "steer",
+      "interrupt",
+      "stop",
+      "model",
+      "compact",
+      "deliver",
+      "answer",
+      "read",
+      "command",
+      "btw"
+    ],
+    "reads": [
+      "status",
+      "catalog",
+      "usage",
+      "config",
+      "settings",
+      "mcp"
+    ],
+    "routes": {
+      "measured": "2.1.310"
+    },
+    "controls": {
+      "read.usage": {
+        "available": true
+      },
+      "read.config": {
+        "available": true
+      },
+      "read.settings": {
+        "available": true
+      },
+      "read.mcp": {
+        "available": true
+      },
+      "btw": {
+        "available": true
+      },
+      "compact": {
+        "available": true
+      },
+      "model": {
+        "available": true
+      },
+      "mcp.enable": {
+        "available": true
+      },
+      "mcp.disable": {
+        "available": true
+      },
+      "mcp.reconnect": {
+        "available": true
+      },
+      "decide": {
+        "available": true
+      },
+      "decide.scope": {
+        "available": false,
+        "reason": "not in sminos 1.12.0: a later version of the plugin adds it"
+      },
+      "decide.interrupt": {
+        "available": false,
+        "reason": "a decision is answered once it is queued, so a deny cannot report what stopping the turn left running: deny, then Interrupt"
+      },
+      "decide.addDirectory": {
+        "available": false,
+        "reason": "not in sminos 1.12.0: a later version of the plugin adds it"
+      },
+      "stop-agent": {
+        "available": false,
+        "reason": "not in sminos 1.12.0: a later version of the plugin adds it"
+      },
+      "tell": {
+        "available": false,
+        "reason": "not in sminos 1.12.0: a later version of the plugin adds it"
+      },
+      "media": {
+        "available": false,
+        "reason": "not in sminos 1.12.0: a later version of the plugin adds it"
+      },
+      "forget": {
+        "available": false,
+        "reason": "after --resume the engine brings back what a cut left out (2.1.310): it needs an engine fix or a supported cut"
+      },
+      "rewind-files": {
+        "available": false,
+        "reason": "the mod API has no file rollback: /rewind in the terminal"
+      },
+      "elicitation.answer": {
+        "available": false,
+        "reason": "a mod's answer carries no action or content, so it cannot answer an MCP server's form: answer it in the terminal"
+      }
+    }
+  },
+  "btw": {
+    "refused": {
+      "ok": false,
+      "error": "nothing to fork yet: the session has made no model request since it started or was cleared",
+      "code": "nothing-to-fork"
+    },
+    "started": {
+      "ok": true,
+      "result": {
+        "started": true,
+        "id": "56258e78315641a5b8a803204f80d37b"
+      }
+    },
+    "events": [
+      {
+        "type": "btw",
+        "phase": "start",
+        "id": "56258e78315641a5b8a803204f80d37b",
+        "t": 1793001390823,
+        "rpc": "nonce-btw-1"
+      },
+      {
+        "type": "btw",
+        "phase": "end",
+        "id": "56258e78315641a5b8a803204f80d37b",
+        "text": "BTW stub answer",
+        "usage": {
+          "input": 100,
+          "output": 10,
+          "cacheRead": 50,
+          "cacheWrite": 7
+        },
+        "t": 1793001390823,
+        "rpc": "nonce-btw-1"
+      }
+    ],
+    "prompt": "one line: what is this session doing?",
+    "request_last_user": "Answer the following without using any tools and without continuing your current task; one reply, then stop.\n\none line: what is this session doing?"
+  }
+}
