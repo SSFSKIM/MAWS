@@ -2037,6 +2037,19 @@ task notification (a `<task-notification>` row naming its id, held in the
 carries `noteError?`, the reason, when the note was not kept: the agent is stopped, its
 parent was not told.
 
+*2026-10-26, MW5 as built (sminos 1.15.0; the live check on 2.1.310):* `media` is
+`{upload, root, files, rpc?}`; `upload` is `[A-Za-z0-9_-]{1,128}` (the nonce), `root`
+absolute without a trailing slash, `files` 1 to 4 of `{n, path, name, mediaType}`, `n`
+0 to 3 once each, `name` without a control character or a line separator (the prelude
+and the wake show it), `mediaType` one of the five. Each `path` must be a file that
+lands on itself (`$.fs.stat(…, {resolve: true})`: no link anywhere on the way) inside a
+`root` that is its own real path, else `{ok: false, error}` naming the file; a missing
+file says so. The upload is written to `$.state` (`{plugin: 'sminos', key: 'media'}`)
+before the answer, and an upload the session cannot keep is refused rather than held in
+memory a reload would lose; ended uploads are kept 64 deep, so a repeated nonce is still
+`duplicate`. The child keeps the answer under `rpc` and does not keep the nonce waiting
+for an end: every `media` event carries its upload.
+
 Read results:
 
 ```ts
@@ -2096,7 +2109,7 @@ file). The result types are
 | `run` / `start` | `id, name, args, t`, and for a `reload-plugins` run `child: [inode, pid]`, the child the run left from, added by that child (Decision Log, entry 9) — the lifecycle of a `command` op (the child's own `command {id, op}` event, DX5 Events, is every relayed op's ingress and is unchanged) |
 | `run` / `end` | `id, name, args, settled: {ok: true, text?, context?} \| {ok: false, error}, readback: {how: "text" \| "row" \| "effect" \| "none", text?, uuid?}, t`; `rpc?` added by the child; a replaced `reload-plugins` module cannot emit it (the daemon finishes by effect); an unchanged module kept loaded emits the returned text (Decision 11) |
 | `btw` / `start`, `end` (M2) | `id`; on end `text` (≤ 64 KiB), `usage: {input, output, cacheRead?, cacheWrite?}` or `reason`; `rpc?` added by the child. The lane map's `text: null`, `synthetic?` and `refusalFallback?` are lane B's; lane A's `text` is a string when present |
-| `media` (MW5) | `{upload, n, state: "read" \| "forwarded" \| "aborted" \| "failed", toolUseId?, reason?}` per attachment, as it changes (MW5's state rules): `read` a successful media-bearing Read result; `forwarded` the next main-loop step passed it on through `next`, which a hook beneath may still answer without a model request; `aborted` (a cancelled claim, never retried) and `failed` end it. `saved` is the RPC's answer, not an event. Idempotent by `(upload, n, state)`; `rpc` is `upload` |
+| `media` (MW5) | `{upload, n, state: "read" \| "forwarded" \| "aborted" \| "failed", toolUseId?, reason?}` per attachment, as it changes (MW5's state rules): `read` a successful media-bearing Read result; `forwarded` the next main-loop step passed it on through `next`, which a hook beneath may still answer without a model request; `aborted` (a cancelled claim, never retried) and `failed` end it. `saved` is the RPC's answer, not an event. Idempotent by `(upload, n, state)`; `rpc` is `upload`. *2026-10-26, MW5 as built:* the attachment's index is `index`, not `n` (every line of the child's stream carries its own `n`, its sequence); the event also carries `id` (the upload, so the daemon relays it as every `op`), `phase` (`end` once every attachment of the upload has ended, else `start`), `attachments` (the whole upload as it stands, `pending` and `claimed` included, so the latest is the whole picture) and `t`. It is posted again after every resync until a post the child answered carried it; the child relays it once by `(upload, index, state)`, adds `rpc`, and keeps the `phase: "end"` event beside the answer under the nonce, as a run's end |
 | `catalog` (M1) | `Catalog`: `{fingerprint, skills?: string[], commands: [{name, description, source, plugin?, route: Route, withArgs?: Route}], models: {options: string[], aliases: {[family]: string \| null}}, measured: "2.1.307"}` |
 | `mode` (M3) | `{mode, at}` — the bridge's current reading when it changes: its own decision's mode at once, else the latest classic hook input's `permission_mode`; `at` epoch ms on the machine's clock, when it was read |
 | `continuing` (M4) | `{command: "background", cwd, t}` — emitted just before a `follow` run that leaves the process |
@@ -2247,6 +2260,9 @@ catalog: Catalog                                                            // M
 // session-wide (sub and n null), relayed unread:
 op:      { rpc: string | null; op: 'command' | 'btw' | 'stop-agent' | 'tell' | 'media'; phase: 'start' | 'end'; id: string; [field: string]: JsonValue }
           // MW5: `id` is the upload; its start is the RPC's `queued`, its end the last attachment's `forwarded`, `aborted` or `failed`
+          // MW5 as built (2026-10-26): one message per attachment's change, `index` (not `n`), `state`, `toolUseId?`, `reason?` and
+          // `attachments` (the whole upload) beside `rpc` and `id` (both the upload); `phase` `start` until every attachment
+          // has ended; `MediaOpBody` in session.ts. The hub relays it and does not replay it (`putOp` keeps commands only)
           // MW4: lane A sends none for `stop-agent` or `tell`: their RPC's answer is the outcome (2026-10-26)
 // `end` reasons gain:
 end:     { reason: ... | 'continued'; to?: string; confirmed?: boolean }      // M4
@@ -2336,6 +2352,31 @@ running agent; a name two running agents hold is refused `ambiguous-agent` befor
 claim, the message naming both ids (a new DX6 code). The id it resolved is passed to
 the bridge as `resolvedAgentId`, which acts on that agent alone. `stop-agent`'s result
 gains `noteError?` (present only when the parent's note was not kept).
+
+*2026-10-26, MW5 as built (sminos 1.15.0):* `media`'s shape is checked with the args'
+(check 6, `bad-shape`): `text` present, `delivery` other than `queued-turn`, other than
+1 to 4 attachments, a `name` outside its pattern, a `mediaType` outside the five, `data`
+that is not strict standard base64 (padded, nothing else) or empty, or bytes whose
+signature is not the type. Two attachments may share a name; the stored names are
+`<nonce>.<n>.<ext>` whatever the name says. It needs the session's bridge (`unsupported`
+without one). After the claim: the bridge's `read status` gives the live working
+directory, its real path the base; the root and the file names are kept on the claim
+before anything is written; a component under the base that is a link or not a
+directory, or a file already there with other bytes, fails the RPC `failed` (*the upload
+was not saved: …*) with nothing written through it; a refusal of the bridge's is
+`failed`, its code the message's first word, and the files saved for it are removed.
+The answer's `root` is that directory, `paths` the names in it in order. A claim the
+daemon stopped between save and acceptance finds no answer in the child's kept file and
+is `interrupted` once its window passes (the files go with the sweep); one stopped
+after acceptance is answered `queued` from the child's kept answer and the claim's root,
+and the end the child kept is sent as `op`. The repository's common `info/exclude` gets
+`**/.claude/desk-uploads/` (unanchored, so a session in a subdirectory of the checkout is
+covered too); each root is recorded at `daemon/uploads/<session>.json` before anything
+is written under it and swept, following no link, once the session runs nowhere and has
+been quiet the bridge kept file's day. The hub admits `media` by `RPC_NAMES` alone, and
+relays its `op` messages without keeping them for replay; a daemon older than 1.15.0
+refuses `media` `bad-shape` (*no RPC "media"*), the machine presence's `desk.rpcs` names
+it from 1.15.0, and the web offers it where the session's `controls.media` is available.
 
 ### The log (owner: doperpowers `sminos/skills/sminos/scripts/sminos.py`; read by the web's projection)
 
@@ -2792,6 +2833,46 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   A run with the bridge's hold of the Agent call removed also had the note in time (one
   run, 0.64 s), so the hold guards a race the measurement did not show. Evidence:
   `bg2`, `fg2` and `nohold1` (`stop_by_name`, `stop_by_id`, `stop`).
+- Observation (MW5): the engine refuses to load a hooks module that passes `$` to a
+  name bound to a function expression in another file (*past an import $ is followed
+  only into a function declaration … $ is always spelled $.noun.event(...) at the call
+  site*): the whole sminos module failed to load, so the session had no bridge. The
+  mods' unit tests and `tsc` pass such code; only a live load shows it. The bridge now
+  calls `$` directly where it holds it. Evidence: MW5 live check,
+  `/tmp/dsk-scripts/mw-wave/mw5-live/evidence/idle-1/` and its `debug.log` line
+  `hooks module sminos@inline failed to load`.
+- Observation (MW5): `turn.step`'s input carries no messages (`turnId`, `index`, `model`,
+  `effort`, `messageCount`, `agentId`): a hook that must know what the step follows reads
+  `$.session.messages({as: 'api'})`, as the stand-in beneath the bridge did.
+- Observation (MW5): after a `/cd` away from the upload's root, the bridge's Read of the
+  pinned path raises an ordinary permission request, its one suggestion an `addRules`
+  for that upload directory under `session`; the desk's allow (the daemon's `decide`)
+  let it run and the attachment ended `forwarded`. Inside the working directory, under
+  `.claude/desk-uploads/`, the Read asked nothing in default mode. Evidence:
+  `idle-final` (`/cd between the save and the Read`).
+- Observation (MW5): a reload does not land mid-turn. The plugin-dir watcher defers
+  while a turn runs and `/reload-plugins` queues behind it, so the module a reload
+  replaces has always closed its step (an Esc's `finally`, the turn's end) and ended its
+  claim before the new one loads. A claim left at a reload needs the old module to die
+  between the claim and the step's close; the live check stages it with a probe copy
+  that keeps the claim, then loads the built module back, which ends it `aborted`,
+  `indeterminate after reload`, and never streams it again. Evidence:
+  `reload-claimed-final`.
+- Observation (MW5): `forwarded` is said as the step passes the conversation on through
+  `next`, some milliseconds before the request reaches the API, and the transcript's rows
+  are flushed after that; a reader of either waits for the other. With a stand-in hook
+  beneath the bridge that answers the step after the Read without a request, the
+  attachment ends `forwarded` and no request carries it, as DX5 says. Evidence:
+  `standin-final`, `busy-final3`.
+- Observation (MW5): after an Esc the bridge's wake for a pending attachment is dropped,
+  *the session was stopped and nobody has sent input since*, and the attachment waits
+  for the person's next turn, whose first step reads it. Evidence: `esc-final`.
+- Observation (MW5, open): on a session served through the local gateway to Codex
+  (`sol`), a tool result holding a PDF `document` block fails the next request (*Codex
+  tool results cannot contain PDF/document files*; doperpowers' friction tracker,
+  #304). The bridge reads a PDF whole, as MW5 decided, so a PDF uploaded to such a
+  session would end its turn in that error. Not measured here: the live check runs a
+  dummy-key stub.
 
 ## Decision Log
 
@@ -3848,6 +3929,81 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
     teammate (`worker@team`) for both ops; the fake's `tell` checks that the resolved
     agent still runs, as its stop does, with no fallback to a namesake.
   Date/Author: 2026-10-26, MW4's executor for the desk orchestrator (b4948247).
+
+- Decision: MW5 as built (sminos 1.15.0, doperpowers and MAWS `desk-ctl-mw5`). The
+  gaps the wave's text left, each settled from the shape's purpose:
+  - **Where it lives.** `bridge-media.tsx` holds the upload's state, the claim and the
+    synthetic Read, the events, the wakes and the reload's reconciliation; `bridge.tsx`
+    routes the op and calls it from `turn.start`, `turn.step`, `turn.complete` and
+    `session.append`. The daemon's files are `sminos_media.py` (the shape's byte checks,
+    the walk, the exclude, the records and the sweep), its RPC `sminos_rpc.py`'s
+    `media`, and the child relays the events (`sminos_bridge.py`).
+  - **The attachment's index is `index`.** Every line of the child's stream carries its
+    own `n`, so an event's `n` would be overwritten; DX5 and DX4 say `index`. Each
+    event also carries `id` (the upload), `phase` and the whole upload's states
+    (`attachments`), so the daemon relays it through the path `run` and `btw` take, an
+    end missed while it was stopped is read from the child's kept file, and the latest
+    message is the whole picture.
+  - **The upload is kept before it is answered.** `$.state` (`{plugin: 'sminos', key:
+    'media'}`, `shape: 1`) is written before `queued`; an upload it cannot keep is
+    refused, since a reload would lose it. A claim is written before anything is
+    yielded; one that cannot be written goes back to pending and the step passes on, so
+    nothing is streamed that a reload could not know. Ended uploads are kept 64 deep,
+    so a repeated nonce is still `duplicate`.
+  - **What ends a claim.** A step closed before its stop (an Esc): `aborted`, *its step
+    was cancelled before the Read ran*; a turn that ends with a claim and no result:
+    `aborted`, *the turn ended before its Read ran*; a reload that finds a claim with no
+    result: `aborted`, *indeterminate after reload*. A reload that finds the result
+    advances it (`read`, or `forwarded` when a response follows it in the
+    conversation). A step that claims another attachment forwards nothing; the first
+    step that calls `next` forwards every attachment read.
+  - **`failed`'s reason is the result's text**: a deny's message (the desk's), an
+    error's text, *the Read returned no image or document* for a result without a
+    block, *the file is no longer where it was saved* for a path that left its root.
+  - **The wakes.** One owed at a time, submitted `asUser: true` as the bridge's other
+    wakes; after a reload the idle wake is armed again and, while the module cannot
+    tell whether a turn runs, re-armed every 2 s rather than sent into a running turn.
+  - **The daemon's root is the live one, resolved.** The bridge's `read status` gives
+    `cwd`; its real path is the base, so a link in the working directory's own path is
+    followed once, by the daemon, and nothing below it is. The root and the file names
+    are kept on the claim before anything is written: a restart answers from the
+    child's kept answer with them. A component that is a link or not a directory, or a
+    file there with other bytes, fails the RPC `failed`; the bridge's refusal removes
+    the files, at once or when a restart reconciles it.
+  - **The exclude line is `**/.claude/desk-uploads/`** in the repository's common
+    `info/exclude` (every worktree reads it): git anchors a pattern with an inner slash
+    at the root, so §10's `.claude/desk-uploads/` would miss a session in a
+    subdirectory of the checkout. A failure to write it is logged, not fatal.
+  - **The sweep** keeps each root at `daemon/uploads/<session>.json`, written before the
+    first byte, and removes the roots, following no link, by the bridge kept file's
+    rule (the session runs nowhere here, neither its transcript nor the record touched
+    for a day): the uploads may be read again until then, a transcript naming them.
+  - **The shapes.** `data` is strict standard base64 (it re-encodes to itself), not
+    empty; two attachments may share a name; the stored extension is the signature's.
+  - **The hub** admits `media` by `RPC_NAMES` and relays its `op` messages unread; its
+    replay store keeps commands only (*future op payloads need their own approval*), so
+    a browser that connects mid-upload sees its later states only. The web half decides
+    whether that needs replay.
+  - **The fake machine's `mw5` producer** answers an upload `queued` with the root under
+    the session's live working directory and sends each attachment's states as `op` in
+    the order the live check recorded (`dx4/mw5-media.json`); an older producer refuses
+    `media` `bad-shape`.
+  - **The live check drives the daemon's own path in process**: `sminos_rpc.Rpcs` under a
+    test org key with a stand-in for the uplink's view of the machine, the RPCs sealed
+    as a browser seals them, and `sminos_requests.Requests` relaying the bridge's events
+    as `op`; no hub and no credentials.
+  - **No `/clear` handling.** An upload pending at a `/clear` is read into the new
+    conversation at its next step; nothing in the measurement asked for more.
+  Rationale: each keeps the guarantee MW5 names (one identity, kept before it is
+  answered, never streamed twice, saved where a Read asks nothing) on the engine's
+  measured behaviour. Rejected: `n` beside the stream's own (a collision the child
+  would have to rename); an op start of the daemon's own (the `queued` answer is the
+  start); a whole-path `realpath` check of the saved files in the daemon (a check and a
+  write apart, where the walk is one).
+  Open: a session served through the gateway to Codex cannot take a PDF's `document`
+  block (Surprises); the web half, or the bridge by the session's model, may have to
+  read a PDF by pages there.
+  Date/Author: 2026-10-26, MW5's executor for the desk orchestrator (b4948247).
 
 ## Outcomes & Retrospective
 
