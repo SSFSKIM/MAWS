@@ -153,7 +153,11 @@ allows today.
     `Raised.suggestions?` under the bridge's bound and `decide.scope` (MAWS #162); the
     `high` review over both halves was clean at first read; live check on 2.1.310 with
     the real devcloud guard and a stand-in.
-  - [ ] MW4 `stop-agent` and `tell`.
+  - [x] (2026-10-26 12:46Z) MW4 `stop-agent` and `tell`: sminos 1.14.0 (doperpowers #399) and the
+    hub's RPCs, `unknown-agent` and `ambiguous-agent` (MAWS #168); the `medium` review
+    found a stop that could reach a namesake, a denied TaskStop read as a stop, and the
+    note racing a background agent's notification, among seven; two fix waves,
+    re-reviewed clean; live check on 2.1.310, background and foreground.
   - [ ] MW5 image and PDF intake.
 - [x] (2026-10-26) Wave 2, measured by remote-architecture on 2.1.310 in isolated
   configs behind a recording stub, zero inference: media intake works (MW5); context
