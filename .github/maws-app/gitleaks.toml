@@ -1,0 +1,60 @@
+# The secret scan's configuration (.github/scripts/maws-app-scan.sh, before every push to SSFSKIM/maws-app): gitleaks'
+# default rules, less the known false positives of MAWS's tree, each entry with why its values are not credentials.
+# Built 2026-10-26 from a full scan of the filtered tree of hosted-mac-m1 (filter v2; 3,413 findings in 78 files, of
+# rules generic-api-key, gcp-api-key and curl-auth-header, every one covered below and nothing more). An entry allows
+# a value's shape, or one kind of recorded content by its path; a test's fixed value is allowed by itself.
+# The filter removes this file from the published tree.
+title = "maws-app push scan"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Anthropic API message ids (msg_ and 24 base62 characters) in the engine's recorded streams and the transcript fixtures (api_message_id, apiMessageId): identifiers of messages, not credentials"
+targetRules = ["generic-api-key"]
+regexes = ['''^msg_[0-9A-Za-z]{24}$''']
+
+[[allowlists]]
+description = "The plugin directory's recorded listing (e2e/fixtures/catalog): each entry's `key` is its 32-hex content id"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^e2e/fixtures/catalog/[^/]+\.json$''']
+regexes = ['''^[0-9a-f]{32}$''']
+
+[[allowlists]]
+description = "Third-party pages the browser probe saved (spikes/browser-probe/results): the sites' public browser keys (YouTube's Google API key, reCAPTCHA and hCaptcha site keys) and per-page tokens, which every visitor's copy of the page carries"
+targetRules = ["gcp-api-key", "generic-api-key"]
+paths = ['''^spikes/browser-probe/results/''']
+
+[[allowlists]]
+description = "desk-hub's protocol test vectors (apps/desk-hub/src/protocol/vectors, quoted in the desk provisioning keys report): keys and a token that are the bytes 0x00, 0x01, … and 0xff, 0xfe, … in base64url"
+targetRules = ["generic-api-key"]
+regexes = ['''^AAECAwQFBgcICQoLDA0ODxAREhMUFRYX(GBkaGxwdHh8)?$''', '''^tok___79_Pv6-fj39vX08_Lx8O_u7ezr6uno5-bl5OPi4eA$''']
+
+[[allowlists]]
+description = "RFC 6455's sample Sec-WebSocket-Key (§1.3, 'the sample nonce'), in desk-hub's upgrade tests"
+targetRules = ["generic-api-key"]
+regexes = ['''^dGhlIHNhbXBsZSBub25jZQ==$''']
+
+[[allowlists]]
+description = "RFC 8291's Web Push auth secret (Appendix A's example), in desk-hub's web-push test"
+targetRules = ["generic-api-key"]
+regexes = ['''^BTBZMqHH6r4Tts7J_aSIgg$''']
+
+[[allowlists]]
+description = "Unit tests' made-up values: base64 of the word 'credential' (desk-web's wrap test), two fixed uuids (desk-hub's codes test, the ipc schema test), a sentinel string (the OAuth flow test), a patterned 48-character secret (the direct connector checks) and a fake bearer token in a hook command (the plugin manifest and PluginDetail tests)"
+targetRules = ["generic-api-key", "curl-auth-header"]
+regexes = [
+  '''^Y3JlZGVudGlhbA$''',
+  '''^0d9e8f7a-6b5c-4d3e-a2f1-0e9d8c7b6a59$''',
+  '''^3f2b8c1e-6d4a-4f7b-9a1e-2c5d8e7f6a90$''',
+  '''^raw-body-sentinel-3c9e$''',
+  '''^(AbCdEf0123456789){3}$''',
+  '''^sk-secret-hook$''',
+]
+
+[[allowlists]]
+description = "A sha256 a test pins (PEER_AUTH_SOURCE_SHA256 in the cua peer test): the digest of a source file, which changes with it"
+targetRules = ["generic-api-key"]
+regexTarget = "match"
+regexes = ['''SHA256 = '[0-9a-f]{64}''']
