@@ -193,9 +193,17 @@ env:
   # document (19) in runs 40293256908, 40293322930 and 40295843922. c7 stays off: red in 40290693239 and 40290750401 at
   # composer.spec.ts:772 (the user row's actions at opacity 0 after focus, against 1) and at :871 (a 1512x982 content
   # size clamped to 971 by the Dock, before #159).
+  # Waves 4 and 6 (CI-opt, M3), at master c9803aa1a, each run's count lines those of the shared `Lane: no-hosted` baseline
+  # 40306555606 on the same tree, every job on the host: code (37 passed), scm (8) and agents (23) were 3/3 green under
+  # `Lane: hosted` in runs 40295904022, 40295964453 and 40296543781, no latency bound red; library (7), deliverables (12)
+  # and presentations (38 passed, 10 skipped) in runs 40299148379, 40299211755 and 40299275020. Off: panel, red twice at
+  # panel.spec.ts:1197 (the card at [420, 437], not its minimum [360, 240]); browser, red once at browser.spec.ts:363 (the
+  # cover's placeholder image missing; its 200 ms bound passed); terminal, red 3/3 at terminal.spec.ts:508 (10044 lines
+  # after the reload, not 10047); browser-cua, red at browser-cua.spec.ts:493 (connections 0, not 1) and :186 (innerWidth
+  # 800, not 1280: the override not cleared after detach).
   HOSTED_MAC_E2E: >-
     document-app browser-chrome available artifacts settings connectors connectors-direct delivery to-human widgets side
-    supervisor c12 browser-import document
+    supervisor c12 browser-import document code scm agents library deliverables presentations
   # The groups that need a credential or the login keychain's custody, so never go to a hosted Mac, whatever the lane
   # (maws-app holds no secret): connectors-oauth, and discover, whose custody conditions (a), (b) and (c) stand.
   MAC_SECRET_E2E: connectors-oauth discover
