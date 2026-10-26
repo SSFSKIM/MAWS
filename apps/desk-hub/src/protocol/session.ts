@@ -365,9 +365,41 @@ export type Readback = { how: 'text' | 'row' | 'effect' | 'none'; text?: string;
  * cacheRead, cacheWrite}` — or a `reason`: `nothing-to-fork`, `api-error` (with `status` when the API gave one, and
  * `error`, its kind), `empty-reply`, `aborted`, or `failed` (with `error`); `usage` comes with every reason but
  * `nothing-to-fork` and `failed`. The hub relays it without reading it. Lane A's `stop-agent` and `tell` send none:
- * their RPC's answer is the outcome (MW4); the names stay for a lane whose stop or message settles later.
+ * their RPC's answer is the outcome (MW4); the names stay for a lane whose stop or message settles later. A `media`
+ * upload's (MW5) is `MediaOpBody`, one per attachment's change.
  */
-export type OpBody = { rpc: string | null; op: 'command' | 'btw' | 'stop-agent' | 'tell'; phase: 'start' | 'end'; id: string; [field: string]: JsonValue };
+export type OpBody = { rpc: string | null; op: 'command' | 'btw' | 'stop-agent' | 'tell' | 'media'; phase: 'start' | 'end'; id: string; [field: string]: JsonValue };
+
+/**
+ * An upload's attachment as the bridge can observe it (MW5): `read` a Read result of its tool-use id holding its
+ * `image` or `document` block; `forwarded` the next main-loop step passed the conversation on (a hook beneath the bridge
+ * may still answer that step without a model request, so it does not prove the model received it); `aborted` its claim
+ * was cancelled (an Esc, the turn's end, a reload that found no result: never streamed again); `failed` a denied or
+ * error result, or a file no longer inside its root, with the result's text as `reason`. `pending` and `claimed` are the
+ * bridge's own and appear only in `attachments`.
+ */
+export type MediaState = 'pending' | 'claimed' | 'read' | 'forwarded' | 'aborted' | 'failed';
+
+/**
+ * A `media` op (MW5): one attachment's change, `rpc` and `id` both the upload (the RPC's nonce), `index` the
+ * attachment's (not `n`: every line of the bridge's stream carries its own), `attachments` the whole upload as it stands,
+ * so the latest message is the whole picture. `phase` is `end` once every attachment has ended (`forwarded`, `aborted`
+ * or `failed`); the RPC's `queued` answer is the start, and no `start` precedes the first state. Idempotent by
+ * `(upload, index, state)`.
+ */
+export type MediaOpBody = {
+  rpc: string;
+  op: 'media';
+  phase: 'start' | 'end';
+  id: string;
+  upload: string;
+  index: number;
+  state: Exclude<MediaState, 'pending' | 'claimed'>;
+  toolUseId?: string;
+  reason?: string;
+  attachments: Array<{ index: number; state: MediaState; toolUseId?: string; reason?: string }>;
+  t?: number;
+};
 
 /**
  * A session's context use and cost: the bridge's `usage` event (DX5) verbatim, after each main turn, from the engine's
