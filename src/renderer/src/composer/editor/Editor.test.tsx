@@ -1,5 +1,7 @@
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { closeWidgetDialog, useWidgetDialog } from '../WidgetDialog'; // W3 (C6)
+import type { Transaction } from '@tiptap/pm/state';
+import { EditorView } from '@tiptap/pm/view';
 import { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -181,6 +183,34 @@ describe('the editor mounts over its draft, takes prefills and submits through t
       expect(document.activeElement).toBe(copy);
     } finally {
       raf.mockRestore();
+    }
+  });
+
+  // The review of the focus change: ProseMirror scrolls only to a selection inside the editor, so a caret placed while
+  // another control held the focus (a transcript row's Edit) is scrolled to once the editor has the focus.
+  it('scrolls to a prefill’s caret with the editor focused', async () => {
+    const original = EditorView.prototype.dispatch;
+    const scrolls: boolean[] = []; // for each transaction asking to scroll to the selection: whether the editor had the focus
+    const dispatch = vi.spyOn(EditorView.prototype, 'dispatch').mockImplementation(function (this: EditorView, tr: Transaction) {
+      if (tr.scrolledIntoView) scrolls.push(this.hasFocus());
+      original.call(this, tr);
+    });
+    try {
+      const onPrefill = vi.fn();
+      const { port } = drafts(null);
+      const { container } = render(
+        <>
+          <Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} onPrefill={onPrefill} />
+          <button type="button">Edit</button>
+        </>,
+      );
+      container.querySelector('button')!.focus();
+      act(() => prefillComposer(APP, { text: Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join('\n'), pasted: [] }));
+      await waitFor(() => expect(onPrefill).toHaveBeenCalledTimes(1));
+      expect(contentOf(container).contains(document.activeElement)).toBe(true);
+      expect(scrolls).toContain(true);
+    } finally {
+      dispatch.mockRestore();
     }
   });
 

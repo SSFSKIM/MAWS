@@ -446,9 +446,11 @@ export class EditorController {
       return;
     }
     const at = options.caret === 'start' ? Selection.atStart(editor.state.doc) : Selection.atEnd(editor.state.doc);
-    editor.view.dispatch(editor.state.tr.setSelection(at).scrollIntoView());
+    editor.view.dispatch(editor.state.tr.setSelection(at));
     editor.view.focus();
-    if (!editor.view.hasFocus()) editor.commands.focus(options.caret);
+    // ProseMirror scrolls only to a selection inside the editor, so the caret is scrolled to once the focus is there
+    if (editor.view.hasFocus()) editor.view.dispatch(editor.state.tr.scrollIntoView());
+    else editor.commands.focus(options.caret);
   }
 
   private async refreshHistory(): Promise<void> {
