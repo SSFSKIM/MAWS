@@ -9,8 +9,9 @@ import { URL, fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const script = join(root, '.github/ci-setup.sh');
+const MESLO = 'MesloLGMNerdFontMono-Regular.ttf';
 
-function fixture(t, { platform = 'Darwin', mode = '1777', engine = 'working', download = 0, installed = 0 } = {}) {
+function fixture(t, { platform = 'Darwin', mode = '1777', engine = 'working', download = 0, installed = 0, font = 'present', brew = 0 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'maws-ci-setup-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const bin = join(dir, 'bin'), home = join(dir, 'home'), log = join(dir, 'log');
@@ -25,6 +26,11 @@ function fixture(t, { platform = 'Darwin', mode = '1777', engine = 'working', do
   const installer = join(dir, 'installer');
   executable(installer, `printf '#!/bin/bash\\nexit ${installed}\\n' >"$HOME/.local/bin/claude"\nchmod +x "$HOME/.local/bin/claude"`);
   if (engine !== 'missing') executable(join(home, '.local/bin/claude'), `exit ${engine === 'working' ? 0 : 1}`);
+  // Homebrew's cask install puts the font in the user's Fonts, as font-meslo-lg-nerd-font does.
+  const fonts = join(home, 'Library/Fonts');
+  mkdirSync(fonts, { recursive: true });
+  if (font === 'present') writeFileSync(join(fonts, MESLO), 'a font installed by hand');
+  executable(join(bin, 'brew'), `echo "brew $* (auto update off: \${HOMEBREW_NO_AUTO_UPDATE:-no})" >>"$CALLS"\nif [[ ${brew} != 0 ]]; then exit ${brew}; fi\ntouch '${join(fonts, MESLO)}'`);
   return {
     run: () => spawnSync('/bin/bash', [script], {
       cwd: root,
@@ -87,6 +93,36 @@ for (const mode of ['755', 'missing']) {
 
 test('macOS leaves its own fixture directory alone', (t) => {
   const f = fixture(t, { platform: 'Darwin', mode: '755' });
+  const result = f.run();
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(f.calls(), '');
+});
+
+test('a Mac without the MesloLGM Nerd Font installs its cask once, and then keeps it', (t) => {
+  const f = fixture(t, { font: 'missing' });
+  const first = f.run();
+  assert.equal(first.status, 0, first.stderr);
+  assert.equal(f.calls(), 'brew install --cask font-meslo-lg-nerd-font (auto update off: 1)\n');
+  const second = f.run();
+  assert.equal(second.status, 0, second.stderr);
+  assert.equal(f.calls(), 'brew install --cask font-meslo-lg-nerd-font (auto update off: 1)\n');
+});
+
+test('a Mac whose MesloLGM Nerd Font came outside Homebrew keeps it: no cask install that would refuse to overwrite it', (t) => {
+  const f = fixture(t, { font: 'present' });
+  const result = f.run();
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(f.calls(), '');
+});
+
+test('a font cask install that fails fails setup', (t) => {
+  const f = fixture(t, { font: 'missing', brew: 1 });
+  assert.notEqual(f.run().status, 0);
+  assert.match(f.calls(), /^brew install --cask font-meslo-lg-nerd-font/);
+});
+
+test('Linux never installs the font cask', (t) => {
+  const f = fixture(t, { platform: 'Linux', font: 'missing' });
   const result = f.run();
   assert.equal(result.status, 0, result.stderr);
   assert.equal(f.calls(), '');
