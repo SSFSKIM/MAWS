@@ -1,6 +1,6 @@
 # Build request: widen the bridge mod's control surface for terminal sessions
 
-**Status: sent 2026-10-25.** Addressed to the `desk-sminos-orchestrator` session (doperpowers project), which builds the desk (MAWS desk-hub and desk-web) and the sminos bridge mod. From `remote-architecture` [3502a215] (MAWS #52 research, PR #79), written 2026-10-24.
+**Status: sent and answered 2026-10-25.** The orchestrator folded it into the desk control-surface spec (MAWS #150, merged at `7649bf30c`), with media as MW5, forget recorded as blocked on 2.1.310, and the shared shapes from [lane-b-control-map.md](lane-b-control-map.md) as its Interfaces. Addressed to the `desk-sminos-orchestrator` session (doperpowers project), which builds the desk (MAWS desk-hub and desk-web) and the sminos bridge mod. From `remote-architecture` [3502a215] (MAWS #52 research, PR #79), written 2026-10-24.
 
 ## Why
 
