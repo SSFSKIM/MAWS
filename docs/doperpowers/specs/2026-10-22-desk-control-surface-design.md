@@ -149,7 +149,10 @@ allows today.
     end lost across a reload or a child respawn and line separators in the `/mcp` form,
     fixed and re-reviewed clean; `/mcp disable` of every server refused (Decision Log);
     the configured-name gap is residue; live check on 2.1.310.
-  - [ ] MW3 scoped allows.
+  - [x] (2026-10-26 10:37Z) MW3 scoped allows: sminos 1.13.0 (doperpowers #398) and the hub's
+    `Raised.suggestions?` under the bridge's bound and `decide.scope` (MAWS #162); the
+    `high` review over both halves was clean at first read; live check on 2.1.310 with
+    the real devcloud guard and a stand-in.
   - [ ] MW4 `stop-agent` and `tell`.
   - [ ] MW5 image and PDF intake.
 - [x] (2026-10-26) Wave 2, measured by remote-architecture on 2.1.310 in isolated
