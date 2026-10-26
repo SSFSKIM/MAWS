@@ -216,7 +216,8 @@ All keys are P-256: ECDSA for signatures, ECDH for channel keys. Node, WebCrypto
 |---|---|---|---|
 | **Org root** | The set of admin device keys, plus one offline recovery key (owner decision §10.2) | The admins' devices; the recovery key offline with the owner | Signs the org state (§5.2). |
 | **Member** | No key of its own. A member is the set of its device keys listed in the org state | — | The member id is stable. The email is an attribute, so an email change is an org-state edit. |
-| **Device** | A **channel key** (signs handshakes and routine actions) and a **step-up key** (signs execution-grade actions, with a Touch ID access control) | The Secure Enclave, through a native module in Electron main. Never visible to the renderer | Main signs only a typed request it built and rendered itself (§5.6). |
+| **Device** | A **channel key** (signs handshakes and routine actions) and a **step-up key** (signs execution-grade actions, with a Touch ID access control) | Signed builds: the Secure Enclave, through a native module in Electron main. Unsigned builds, which the first milestones are (owner, 2026-10-26): software P-256 keys in a 0600 file in the app's data directory, with step-up gated by a LocalAuthentication prompt in main. Never visible to the renderer | Main signs only a typed request it built and rendered itself (§5.6). The org state records each device's `keyStorage: 'enclave' \| 'software'`, so a machine can require `enclave` for execution grade once signed builds exist. |
+| **Phone** (web class, §5.10) | A non-extractable WebCrypto P-256 channel key in the browser's storage, plus a passkey for each approval | The phone's browser | Hub-served code can use the key without extracting it. §5.10 bounds what this class may do. |
 | **Machine** | A machine key | The endpoint (§2.3) | Signs channel handshakes, the log events it writes, and attestations about the sessions it hosts (§5.8). |
 
 #### 5.2 The signed org state
@@ -341,9 +342,16 @@ The hub's deployer has the same limits, as long as the app comes from MAWS's sig
 #### 5.10 Client classes
 
 - **The class is part of the identity.** It is in the device's org-state entry and in the channel handshake. The endpoint grants per class.
-- **Phase 1** has one class, `native-mac`, with every grade.
-- **A later web port** is `web`, a weaker class because its code is served by a host. It gets `list`, `view` and `converse`. Its `approve`, `manage`, `spawn` and admin actions need confirmation on a native device.
-- **A phone** is out until a native or web client exists (owner decision §10.4).
+- **Phase 1 has two classes:**
+  - **`native-mac`** is the MAWS app, with every grade.
+  - **`web-cards`** is the phone. The owner kept the phone loop through the Desk Web pause (2026-10-26): desk-web's push notifications, and its question and permission cards, and nothing else. Its grades are:
+    - `list`;
+    - the pending request cards of sessions the member may approve, sealed through a channel like any other subscription;
+    - answering a question;
+    - approving or denying a pending permission request.
+
+    Every answer and approval from this class carries a WebAuthn assertion whose challenge is the action's digest (RL4), verified against the passkey listed for that device. This class's code is served by the hub, so its key can be used without being extracted. The assertion makes such use need the person's biometric gesture at that moment. It proves presence, not intent, since the browser's prompt doesn't show the digest. Accepted residual: a hostile deploy could get a pending request on the member's own sessions approved during a gesture the person made for another card. It can't send, spawn, share or manage.
+- **A later web port of MAWS** is class `web`. It gets `list`, `view` and `converse`. Its `approve`, `manage`, `spawn` and admin actions need confirmation on a native device, or `web-cards`' per-action assertion for approvals.
 
 #### 5.11 The local boundary
 
@@ -407,7 +415,8 @@ Owner decisions are pending for three choices in this section (asked 2026-10-26;
 #### 7.4 Notifications
 
 - **While the app runs,** it raises native notifications from the events on its channels.
-- **When it isn't running,** nothing reaches the person until an Apple Push Notification service (APNs) path exists. That needs the signed app (§11). Desk's Web Push path pauses with Desk Web.
+- **The phone (`web-cards`)** keeps desk's Web Push. The hub sends a notification that says only that a session is waiting ("`maws-45` asks something"). That needs the hub to know a session has a pending request, which is metadata it already sees (§5.9). The card's contents come over the phone's channel.
+- **APNs for the Mac app** needs the signed app (§11). Until then, a Mac app that isn't running gets nothing.
 
 ### 8. Failure and recovery
 
@@ -428,7 +437,11 @@ Owner decisions are pending for three choices in this section (asked 2026-10-26;
 
 1. The merged app sets up the org root on the owner's device. That makes the first signed state, with the existing admin as its member and their existing machines listed as pending.
 2. Each machine upgrades to the endpoint and re-enrolls with a new code (§5.3). Its log is kept.
-3. When the last machine has moved, the shared org key is retired. The hub deletes the wrapped copies, and the endpoint ignores DX1 codes. Until then, events coded with the old key display as *unverified (legacy)*.
+3. The phone's desk-web cards move to the `web-cards` class (§5.10).
+   - The phone registers a device: a WebCrypto channel key plus its passkey, approved from the owner's Mac.
+   - It answers through RL4 actions over a channel instead of DX6 RPCs coded with the org key.
+   - The phone loop must keep working at every step, so the hub serves both paths for a machine until that machine has moved.
+4. When the last machine and the phone have moved, the shared org key is retired. The hub deletes the wrapped copies, and the endpoint ignores DX1 codes. Until then, events coded with the old key display as *unverified (legacy)*.
 
 ### 10. Open owner decisions, with recommendations
 
@@ -437,21 +450,23 @@ Owner decisions are pending for three choices in this section (asked 2026-10-26;
 | 10.1 | Session visibility, share grades, and spawn rights on another member's machine (asked in this session's chat, 2026-10-26) | Org-wide listing with locked contents. Share grades view / converse / approve. Spawning only with the machine owner's grant. | "Own and shared only" when members must not learn of each other's work at all (§6.2's costs apply). |
 | 10.2 | Org root recovery | Admin device keys plus one offline recovery key, made at org setup and kept by the owner. | Accept re-enrolling everything if keeping an offline key is unwanted. |
 | 10.3 | Default policy for agent messages across owners | Deliver as a peer request, marked. The recipient can narrow it or turn it off. | Default off for orgs that mix trust levels. |
-| 10.4 | Lid-closed viewing and the phone | Phase 1 without both. The encrypted tail (§7.3) as the first later child, if lid-closed reading matters. | Pull the tail into phase 1 if the sleeping MacBook stays the main scene. |
+| 10.4 | Lid-closed viewing | Phase 1 without it. The encrypted tail (§7.3) is the first later child, if lid-closed reading matters. The phone loop is decided: kept as `web-cards` (§5.10). | Pull the tail into phase 1 if the sleeping MacBook stays the main scene. |
 | 10.5 | Step-up on routine approvals of your own session | Not required by default. | Required where devices are shared or left unlocked. |
 
 ### 11. Dependencies
 
-- **MAWS release signing, notarization and an updater** (C12 P1-R1..R4, now deferred). Today MAWS is an unsigned or development-signed build from source (`electron-builder.yml`: `identity: null`, `hardenedRuntime: false`). The trust root is therefore merge rights to MAWS master plus the build Mac.
-  - A second member means MAWS must ship to them, which pulls this work into scope.
-  - Notifications through APNs need it too.
-- **Secure Enclave keys from Electron.** This needs a small native module in main. A permanent Enclave key stored in the data-protection keychain needs a keychain-access-group entitlement, which an ad-hoc or unsigned build likely can't have. Spike: whether a key kept as CryptoKit's `dataRepresentation` blob in a 0600 file works without that entitlement (§12).
+- **MAWS release signing, notarization and an updater** (C12 P1-R1..R4).
+  - Today MAWS is an unsigned or development-signed build from source (`electron-builder.yml`: `identity: null`, `hardenedRuntime: false`). The trust root is therefore merge rights to MAWS master plus the build Mac.
+  - The owner will get an Apple Developer ID. The design assumes signed builds. The first milestones run unsigned, with software device keys (§5.1).
+  - The org is the owner alone for the next months (owner, 2026-10-26), so shipping to a second member, and with it C12, is not in the first milestones. The people model is built in from the start anyway, so a second member is an org-state edit, not a redesign.
+  - Notifications through APNs need signing too.
+- **Secure Enclave keys from Electron,** once the build is signed. This needs a small native module in main. A permanent Enclave key in the data-protection keychain needs a keychain-access-group entitlement. Moving a device from `software` to `enclave` keys is a device re-registration: a new device entry, with the old one removed.
 - **The headless Node package** for the endpoint and daemon, on macOS and Linux, versioned apart from the app (§2.2).
 - **Member management in the hub's Registry:** invite, role, removal, email change. None of it exists today.
 
 ### 12. Unknowns to settle by spike or measurement
 
-1. Enclave keys in a development build (§11).
+1. Software device keys in an unsigned build: where main keeps them (a 0600 file, or a keychain item whose access-control list an unsigned app can actually set), and whether LocalAuthentication works there for step-up (§5.1).
 2. The `-p` reaping gate: does `turn.step` hold cron-fired and task-notification turns in a `-p` process, and does SIGTERM drain the same way as in the TUI (holder design §9)?
 3. Native `rewind_conversation` across `--resume`: duplicated or restored content, as the lane A substitute showed (truncation spike).
 4. Hub topology and throughput: app → Machine DO relay of sealed frames, with per-hop latency and the cost per active session (research §8 spike 3).
@@ -526,3 +541,8 @@ These are named here with their binding fields. Byte-level schemas and test vect
 2. **2026-10-26.** The Query stays on the machine. Client-bound tools are capabilities of an attached app, served through MAWS's tool server (§3.1). desk-sminos-orchestrator first proposed moving the Query to the client app, and withdrew that after the critique.
 3. **2026-10-26.** Per-member principals are a phase-1 requirement, not an org-phase deferral. The trust boundary moves into a Node endpoint. sminos becomes local-only (§2.1, §5.7).
 4. **2026-10-26.** Group keys are out of phase 1. Live streams use pairwise channels (§5.4).
+5. **2026-10-26, owner (round 1 through the MAWS architect).**
+   - The org is the owner alone for the next months, with the people model built in from the start.
+   - Signing is planned (an Apple Developer ID), and the first milestones run unsigned with software device keys.
+   - A remote MAWS session's controller is on its machine.
+   - The phone loop stays through the Desk Web pause: push notifications plus question and permission cards, and nothing else. It is the `web-cards` client class (§5.1, §5.10, §7.4, §9, §11).
