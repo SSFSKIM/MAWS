@@ -364,7 +364,8 @@ export type Readback = { how: 'text' | 'row' | 'effect' | 'none'; text?: string;
  * carries the answer — `text` (at most 64 KiB of UTF-8; `truncated: true` when cut) and `usage: {input, output,
  * cacheRead, cacheWrite}` — or a `reason`: `nothing-to-fork`, `api-error` (with `status` when the API gave one, and
  * `error`, its kind), `empty-reply`, `aborted`, or `failed` (with `error`); `usage` comes with every reason but
- * `nothing-to-fork` and `failed`. The hub relays it without reading it.
+ * `nothing-to-fork` and `failed`. The hub relays it without reading it. Lane A's `stop-agent` and `tell` send none:
+ * their RPC's answer is the outcome (MW4); the names stay for a lane whose stop or message settles later.
  */
 export type OpBody = { rpc: string | null; op: 'command' | 'btw' | 'stop-agent' | 'tell'; phase: 'start' | 'end'; id: string; [field: string]: JsonValue };
 

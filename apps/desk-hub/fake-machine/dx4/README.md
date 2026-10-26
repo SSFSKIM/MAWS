@@ -47,3 +47,14 @@ unasked; and a request whose handle the guard beneath restored, raised without s
 `de127f800e7124936f910fac884f7797a0b4f167f73eaf77f017bdf6142da722`). The fake machine's `mw3` producer raises and resolves from it (`../session.ts`, `../machine.ts`,
 run by `test/fake-machine/desk-mw3.test.ts`). Never edit it here: a later shape change is recorded again by that MW's
 live check, and replaces this file whole.
+
+`mw4-agents.json` is a recording too: what the bridge answered in the machine-side wave's MW4 live check (the desk
+control surface spec, Plan of Work, MW4; doperpowers `desk-ctl-mw4`, sminos 1.14.0, on Claude Code 2.1.310 in an
+isolated profile behind a recording stub that scripts the Agent call and keeps the subagent stepping, zero inference) —
+its `GET /status` capabilities (`stop-agent` and `tell` among the ops and available among the controls); the background
+agent's spawn as the bridge's child kept it in the tree; the answers to a stop by the Agent call's name, by an id, and of
+a foreground agent, to a second stop of a stopped one, to a message and to an agent no tree holds; the text the agent
+read at its next step, and the note its parent read at its next request (sha256
+`a2358c441fdc5289037c5d198d5ff2a8ee61c2aace58b0300575221c312b7297`). The fake machine's `mw4` producer stops, tells and spawns from it
+(`../session.ts`, `../machine.ts`, run by `test/fake-machine/desk-mw4.test.ts`). Never edit it here: a later shape
+change is recorded again by that MW's live check, and replaces this file whole.
