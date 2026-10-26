@@ -626,23 +626,28 @@ const ownLists = () => {
   return Object.fromEntries(names.map((name) => [name, workflowList(workflow, name)]));
 };
 
-test('setup skips LibreOffice only on Macs whose group does not need it, including the real hosted plan', () => {
+test('setup skips LibreOffice only on GitHub-hosted Macs whose group does not need it, including the real hosted plan', () => {
   const action = readFileSync(join(root, '.github/actions/setup/action.yml'), 'utf8');
   const setupStep = action.slice(action.indexOf('- uses: SSFSKIM/ci-kit/setup@v1')).split(/\n {4}- /)[0];
   const expression = /\n {8}skip: \$\{\{ (.+) \}\}/.exec(setupStep)?.[1] ?? "''";
   // These expression operators have the same behavior in JavaScript and Actions for the string inputs here.
   const skip = Function('runner', 'inputs', `return (${expression});`);
   for (const os of ['macOS', 'Linux']) {
-    for (const libreoffice of ['true', 'false', '']) {
-      assert.equal(skip({ os }, { libreoffice }), os === 'macOS' && libreoffice !== 'true' ? 'cask:libreoffice' : '', `${os}/${libreoffice}`);
+    for (const environment of ['github-hosted', 'self-hosted']) {
+      for (const libreoffice of ['true', 'false', '']) {
+        const omitted = os === 'macOS' && environment === 'github-hosted' && libreoffice !== 'true';
+        assert.equal(skip({ os, environment }, { libreoffice }), omitted ? 'cask:libreoffice' : '', `${os}/${environment}/${libreoffice}`);
+      }
     }
   }
+  // Non-group callers (packaged and macOS unit) omit this input; a fresh self-hosted Mac must still install the cask.
+  assert.equal(skip({ os: 'macOS', environment: 'self-hosted' }, {}), '');
   const { outputs } = plan({ ...ownLists(), GATE_RUNNER: 'pool', GATE_E2E_RUNNER: 'macos', HEAD_MESSAGE: 'ci-gate: test\n\nLane: hosted' });
   const hosted = JSON.parse(outputs.e2e_hosted);
   assert.deepEqual(hosted.filter((entry) => entry.libreoffice).map((entry) => entry.group).sort(), ['document', 'presentations']);
   assert.equal(hosted.find((entry) => entry.group === 'document-app').libreoffice, false);
   for (const entry of hosted) {
-    assert.equal(skip({ os: 'macOS' }, { libreoffice: String(entry.libreoffice) }),
+    assert.equal(skip({ os: 'macOS', environment: 'github-hosted' }, { libreoffice: String(entry.libreoffice) }),
       ['document', 'presentations'].includes(entry.group) ? '' : 'cask:libreoffice', entry.group);
   }
 });
