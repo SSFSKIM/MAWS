@@ -178,8 +178,10 @@ export function macPlan({ gitDir, sha, gates = '', runner = '', class1a = '', la
   try {
     dir = mkdtempSync(join(tmpdir(), 'maws-ci-gate-alerts-'));
     const top = execFileSync('git', ['-C', gitDir, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-    const archive = execFileSync('git', ['-C', top, 'archive', '--format=tar', sha, '--', '.github/scripts', '.github/workflows/gate.yml', 'package.json'], { maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
-    execFileSync('tar', ['-x', '-C', dir], { input: archive, stdio: ['pipe', 'pipe', 'pipe'] });
+    // bsdtar may exit before consuming git archive's padding; a file avoids EPIPE on its stdin.
+    const archive = join(dir, 'archive.tar');
+    execFileSync('git', ['-C', top, 'archive', '--format=tar', `--output=${archive}`, sha, '--', '.github/scripts', '.github/workflows/gate.yml', 'package.json'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    execFileSync('tar', ['-x', '-f', archive, '-C', dir], { stdio: ['ignore', 'pipe', 'pipe'] });
     const trailers = Object.entries({ Gates: gates, Runner: runner, Class1a: class1a, Lane: lane, Live: live }).filter(([, value]) => value).map(([key, value]) => `${key}: ${value}`);
     const output = join(dir, 'github-output');
     execFileSync(process.execPath, ['.github/scripts/gate-plan.mjs'], {

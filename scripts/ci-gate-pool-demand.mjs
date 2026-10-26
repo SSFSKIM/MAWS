@@ -34,8 +34,10 @@ function targetOutputs(gitDir, sha) {
   const dir = mkdtempSync(join(tmpdir(), 'maws-ci-gate-pool-demand-'));
   try {
     const top = execFileSync('git', ['-C', gitDir, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-    const archive = execFileSync('git', ['-C', top, 'archive', '--format=tar', sha, '--', '.github/scripts', '.github/workflows/gate.yml', 'package.json'], { maxBuffer: 64 * 1024 * 1024, timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] });
-    execFileSync('tar', ['-x', '-C', dir], { input: archive, timeout: 30_000, stdio: ['pipe', 'pipe', 'pipe'] });
+    // bsdtar may exit before consuming git archive's padding; a file avoids EPIPE on its stdin.
+    const archive = join(dir, 'archive.tar');
+    execFileSync('git', ['-C', top, 'archive', '--format=tar', `--output=${archive}`, sha, '--', '.github/scripts', '.github/workflows/gate.yml', 'package.json'], { timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] });
+    execFileSync('tar', ['-x', '-f', archive, '-C', dir], { timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] });
     const { scripts } = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
     const env = {
       ...workflowEnv(readFileSync(join(dir, '.github/workflows/gate.yml'), 'utf8')),
