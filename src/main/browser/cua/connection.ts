@@ -294,6 +294,8 @@ export class CuaConnection {
       owner!.byTarget.add(debuggee.targetId);
       return {};
     }
+    // an attach that waited (below) for a connection that has closed since: nothing is loaded or leased for nobody
+    if (this.closed) fail(ERRORS.cancelled('disconnected'));
     const entry = this.tab(debuggee.tabId);
     const tabId = entry.tab.tabId;
     // a lease still being let go (its undo bounded by RESET_BOUND_MS, the window a host's timeout falls in) is not held:

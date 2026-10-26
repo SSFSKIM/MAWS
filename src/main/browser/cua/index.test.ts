@@ -286,6 +286,7 @@ describe.skipIf(process.platform !== 'darwin')('the agent state reset', () => {
     const at = Date.now();
     await a.request('debugger.detach', { tabId: id }); // the host's detach is answered at the release bound
     expect(Date.now() - at).toBeGreaterThanOrEqual(RESET_BOUND_MS - 20);
+    expect(Date.now() - at).toBeLessThan(UNDO_WAIT_MS);
     expect(h.logs).toEqual([unansweredLine(tab.tab.tabId, 'Fetch.disable')]); // methods and tab ids, never params
     let attached = false;
     const attaching = a.request('debugger.attach', { tabId: id }).then((reply) => ((attached = true), reply));
@@ -318,6 +319,26 @@ describe.skipIf(process.platform !== 'darwin')('the agent state reset', () => {
     expect(h.backend.inspect().sessions.A!.leased).toEqual([tab.tab.tabId]);
   });
 
+  it('an attach whose connection closes while it waits for the undo goes no further: a tab suspended meanwhile is not loaded again', async () => {
+    const h = harness();
+    const tab = h.personTab();
+    await tab.debugger!.attach('focus');
+    const a = await h.host();
+    await a.request('debugger.attach', { tabId: await h.idOf(a, tab) });
+    await a.request('debugger.sendCommand', { debuggee: { tabId: await h.idOf(a, tab) }, method: 'Fetch.enable', params: {} });
+    const answer = h.cdp(tab).defer('Fetch.disable');
+    await a.request('debugger.detach', { tabId: await h.idOf(a, tab) });
+    const b = await h.host();
+    void b.request('debugger.attach', { tabId: await h.idOf(b, tab) }).catch(() => {});
+    await settle();
+    await b.close();
+    await settle();
+    h.store.suspend(tab.tab.tabId);
+    answer();
+    await settle();
+    expect([tab.view, tab.tab.suspended, h.backend.holds(tab.tab.tabId)]).toEqual([null, true, false]);
+  });
+
   it('an undo that never answers holds a later attach only until UNDO_WAIT_MS after the letting go began; past it the tab\'s attaches wait for nothing', async () => {
     const h = harness();
     const tab = h.personTab();
@@ -331,6 +352,7 @@ describe.skipIf(process.platform !== 'darwin')('the agent state reset', () => {
     await settle();
     expect(await a.request('debugger.attach', { tabId: id })).toEqual({ alreadyHeld: false }); // behind the release, then the undo's bound
     expect(Date.now() - at).toBeGreaterThanOrEqual(UNDO_WAIT_MS - 20);
+    expect(Date.now() - at).toBeLessThan(UNDO_WAIT_MS + RESET_BOUND_MS);
     await detaching;
     expect(h.logs).toEqual([
       unansweredLine(tab.tab.tabId, 'Fetch.disable'),
