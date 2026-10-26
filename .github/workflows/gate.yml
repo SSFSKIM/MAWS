@@ -212,10 +212,16 @@ env:
   # Still off: c7, red 3/3 at composer.spec.ts:772 (the user row's actions at opacity 0 after focus, against 1; the :871
   # clamp gone); terminal, red 2/3 at terminal.spec.ts:508 (10044 lines after the reload, not 10047); browser, red 1/3 at
   # browser.spec.ts:363 (the cover's placeholder image missing).
+  # browser-cua (the architect's ruling, after #166, gate-offload Decision Log 114 at a0b729dba): at head 5662a4cda (tree
+  # 2fa9cdcea), with the undo fix in, it was green with 7 passed in three `Lane: hosted` runs, 40316175010, 40316176207
+  # and 40316176658 (waiters on EC2 pool boxes), and in four runs on the mini, 40316186184, 40316186362, 40316177141 and
+  # 40316186658; :186 and :493 passed in all seven. Its wave-6 :186 red was the undo's: Chromium answers
+  # clearDeviceMetricsOverride before the view's restored size reaches the page, and the next attach now waits for it.
+  # :493's earlier red has no cause in the logs; its debt row stays open.
   HOSTED_MAC_E2E: >-
     document-app browser-chrome available artifacts settings connectors connectors-direct delivery to-human widgets side
     supervisor c12 browser-import document code scm agents library deliverables presentations dashboard design
-    design-systems tools panel
+    design-systems tools panel browser-cua
   # The groups that need a credential or the login keychain's custody, so never go to a hosted Mac, whatever the lane
   # (maws-app holds no secret): connectors-oauth, and discover, whose custody conditions (a), (b) and (c) stand.
   MAC_SECRET_E2E: connectors-oauth discover
