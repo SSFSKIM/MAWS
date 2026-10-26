@@ -177,7 +177,13 @@ env:
   # live, secret or POOL_E2E. A run on a reserved final ref (gate-plan.mjs's FINAL_LABELS: ci/h-final-*, ci/e1-final-* and
   # the rest) hosts none, since a final bundle is written only on the runner that ran its group. Emptying the list puts
   # every group back on the mini.
-  HOSTED_MAC_E2E: ''
+  # Wave 1 (CI-opt, the hosted-Mac spec's M3): document-app, browser-chrome, available and artifacts were 3/3 green under
+  # `Lane: hosted` at master c9803aa1a in runs 40289382978, 40289421123 and 40289457942, each run's count lines those of
+  # the `Lane: no-hosted` baseline 40300474330 on the same tree, every job on the host (document-app 20 passed,
+  # browser-chrome 7, available 2, artifacts 4 passed and 1 skipped, its measured case). transcript stays off: red in
+  # 40289382978 (transcript.spec.ts:1299, the sidebar hover card still shown 5 s after the pointer left), green in the
+  # other two and in the baseline.
+  HOSTED_MAC_E2E: document-app browser-chrome available artifacts
   # The groups that need a credential or the login keychain's custody, so never go to a hosted Mac, whatever the lane
   # (maws-app holds no secret): connectors-oauth, and discover, whose custody conditions (a), (b) and (c) stand.
   MAC_SECRET_E2E: connectors-oauth discover
