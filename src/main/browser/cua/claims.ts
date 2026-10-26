@@ -1,11 +1,13 @@
 // Who holds which tab across every cua connection of the app (the in-app browser spec of 2026-10-08, "Socket and
 // lifecycle" and "Debugger leases"): a tab created through a connection (or adopted from such a tab's `window.open`) is
-// *reserved* to it until the connection closes; a tab under a connection's debugger lease is *leased* to it. Both are
-// keyed by MAWS tab id, across app sessions, since a side thread's connection reaches its parent's tabs (P-24).
+// *reserved* to it until the connection closes; a tab under a connection's debugger lease is *leased* to it; a tab whose
+// let-go lease is still being undone has that undo, which its next lease waits for. All are keyed by MAWS tab id,
+// across app sessions, since a side thread's connection reaches its parent's tabs (P-24).
 
 export class TabClaims<Holder> {
   private readonly reserved = new Map<string, Holder>();
   private readonly leased = new Map<string, Holder>();
+  private readonly undoes = new Map<string, Promise<void>>();
   private readonly listeners = new Set<(tabId: string) => void>();
 
   reserve(tabId: string, holder: Holder): void {
@@ -38,9 +40,23 @@ export class TabClaims<Holder> {
     this.changed(tabId);
   }
 
-  // The tab is gone: neither reserved nor leased.
+  // The undo of a let-go lease's agent state, under way on the tab (connection.ts `release`): a new lease, any holder's,
+  // starts only once it settles, which it does by its own bound.
+  undoing(tabId: string, done: Promise<void>): void {
+    this.undoes.set(tabId, done);
+    void done.then(() => {
+      if (this.undoes.get(tabId) === done) this.undoes.delete(tabId);
+    });
+  }
+
+  undoOf(tabId: string): Promise<void> | undefined {
+    return this.undoes.get(tabId);
+  }
+
+  // The tab is gone: neither reserved nor leased, nor anything to wait for.
   forget(tabId: string): void {
     this.reserved.delete(tabId);
+    this.undoes.delete(tabId);
     if (this.leased.delete(tabId)) this.changed(tabId);
   }
 

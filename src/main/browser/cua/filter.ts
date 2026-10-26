@@ -72,6 +72,27 @@ export function undoCommands(toggles: AgentToggles, { mawsFocusEmulation }: { ma
   return out;
 }
 
+// Undoing a device-metrics override is not done at the clear's reply: Chromium answers it before the view's restored size
+// reaches the page (measured 2026-10-26 on Electron 44 / Chromium 152, the mini and the hosted Macs: the page read the
+// override's size for up to 83 ms after the reply), so the undo waits until the page reads its view's size again.
+// A classic (non-overlay) scrollbar's thickness and then some, in DIPs: the layout viewport excludes it.
+const SCROLLBAR_DIP = 24;
+
+// Whether the page's layout viewport (a Page.getLayoutMetrics reply) is its view's size (DIPs), at the page's zoom and
+// with a scrollbar allowed on either side; null when the reply cannot be read or the view has no size to wait for.
+export function readsViewSize(metrics: unknown, view: { width: number; height: number }): boolean | null {
+  const { cssLayoutViewport: layout, cssVisualViewport: visual } = (metrics ?? {}) as { cssLayoutViewport?: { clientWidth?: unknown; clientHeight?: unknown }; cssVisualViewport?: { zoom?: unknown } };
+  const width = layout?.clientWidth;
+  const height = layout?.clientHeight;
+  if (typeof width !== 'number' || typeof height !== 'number' || view.width <= 0 || view.height <= 0) return null;
+  const zoom = typeof visual?.zoom === 'number' && visual.zoom > 0 ? visual.zoom : 1;
+  const fits = (css: number, side: number) => {
+    const gap = side - css * zoom; // a CSS pixel's rounding either way, a scrollbar under the side
+    return gap >= -zoom && gap <= SCROLLBAR_DIP + zoom;
+  };
+  return fits(width, view.width) && fits(height, view.height);
+}
+
 // The takeover gate's classes (the in-app browser spec of 2026-10-08, "Acting and reading commands"): the vendor acts
 // through more than `Input.*` (a select's option is an injected script, locators evaluate through `Runtime.*`), so a
 // command is *reading* only when listed here and *acting* otherwise, `Runtime.evaluate`, `Runtime.callFunctionOn` and

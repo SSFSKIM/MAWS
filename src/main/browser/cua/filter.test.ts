@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { commandClass, methodNotAllowed, noteToggle, routeCommand, undoCommands, type AgentToggles } from './filter';
+import { commandClass, methodNotAllowed, noteToggle, readsViewSize, routeCommand, undoCommands, type AgentToggles } from './filter';
 
 describe('the command filter (E4c bridge boundary, lifted; A-51)', () => {
   it('refuses the browser-wide domains and every Target method but the ones auto-attach and closing a tab need', () => {
@@ -50,6 +50,30 @@ describe('the agent state a lease leaves behind', () => {
     ]);
     expect(undoCommands(all, { mawsFocusEmulation: true }).map(([method]) => method)).not.toContain('Emulation.setFocusEmulationEnabled');
     expect(undoCommands(fresh(), { mawsFocusEmulation: false })).toEqual([]);
+  });
+
+  // Page.getLayoutMetrics' reply, as Chromium 152 shapes it (CSS px; the layout viewport excludes a scrollbar).
+  const metrics = (width: number, height: number, zoom?: number) => ({
+    cssLayoutViewport: { pageX: 0, pageY: 0, clientWidth: width, clientHeight: height },
+    cssVisualViewport: { offsetX: 0, offsetY: 0, pageX: 0, pageY: 0, clientWidth: width, clientHeight: height, scale: 1, ...(zoom === undefined ? {} : { zoom }) },
+  });
+  const parked = { width: 1280, height: 800 };
+
+  it('tells when the page reads its view\'s size again after the override is cleared: a scrollbar and the page\'s zoom allowed, the override\'s size not', () => {
+    expect(readsViewSize(metrics(1280, 800), parked)).toBe(true);
+    expect(readsViewSize(metrics(1265, 785), parked)).toBe(true); // a classic scrollbar on either side
+    expect(readsViewSize(metrics(640, 400, 2), parked)).toBe(true); // zoomed to 200%: CSS px are 2 DIPs
+    expect(readsViewSize(metrics(1164, 727, 1.1), parked)).toBe(true); // a zoom whose CSS size rounds
+    expect(readsViewSize(metrics(800, 600), parked)).toBe(false); // the override's size: not yet
+    expect(readsViewSize(metrics(1920, 1080), parked)).toBe(false); // an override larger than the view
+    expect(readsViewSize(metrics(1280, 600), parked)).toBe(false); // one side still overridden
+    expect(readsViewSize(metrics(1280, 800, 2), parked)).toBe(false);
+  });
+
+  it('cannot tell from a reply it cannot read, nor for a view with no size (nothing to wait for)', () => {
+    expect(readsViewSize({ echoed: 'Page.getLayoutMetrics' }, parked)).toBeNull();
+    expect(readsViewSize(null, parked)).toBeNull();
+    expect(readsViewSize(metrics(800, 600), { width: 0, height: 0 })).toBeNull();
   });
 });
 

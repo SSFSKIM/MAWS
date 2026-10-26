@@ -12,7 +12,9 @@
 // - Each command is held until its reply, and cancelled (`Command cancelled: <why>`) at its deadline, when its tab is
 //   detached, closed or destroyed, or when the connection closes.
 // - Letting go of a lease (detach, the host's timeout detach, disconnect) first undoes every persistent toggle the
-//   connection switched on, so a shared attachment (MAWS's focus emulation) never keeps the agent's state.
+//   connection switched on, so a shared attachment (MAWS's focus emulation) never keeps the agent's state; a cleared
+//   device-metrics override is undone once the page reads its view's size again. The tab's next lease, from any
+//   connection, starts only once that undo is done; both waits are bounded (RESET_BOUND_MS, UNDO_WAIT_MS).
 //
 // - (M3) What the person sees and keeps (presence.ts): an acting command passes the takeover gate before it is sent and
 //   makes the tab the agent's; the cursor follows `cursor.move`; letting go returns the tab to idle and hides the cursor.
@@ -32,7 +34,7 @@ import type { DebuggerLease, TabDebugger } from '../debugger';
 import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
 import type { TabClaims } from './claims';
 import { agentCapture, clickLabel, commandActivity, LABEL_LOOKUP_MS, navigatedUrl, within, type ActivityFeed } from './activity';
-import { commandClass, noteToggle, noToggles, methodNotAllowed, routeCommand, undoCommands, type AgentToggles } from './filter';
+import { commandClass, noteToggle, noToggles, methodNotAllowed, readsViewSize, routeCommand, undoCommands, type AgentToggles } from './filter';
 import { createPeer, frameDecoder, type Peer, type RpcHandler } from './framing';
 import type { AgentPresence } from './presence';
 
@@ -42,6 +44,9 @@ export const MAX_FROM_HOST_BYTES = 1024 * 1024; // cua's MAX_TO_EXTENSION_BYTES
 export const MAX_TO_HOST_BYTES = 64 * 1024 * 1024; // cua's MAX_FROM_EXTENSION_BYTES
 export const DEFAULT_COMMAND_MS = 10_000; // the host's DEFAULT_CDP_TIMEOUT_MS, for a command that carries no deadline
 export const RESET_BOUND_MS = 1_000; // the undo of the agent's toggles never holds a release longer
+export const UNDO_WAIT_MS = 2_000; // nor, counted from the letting go, the tab's next lease: past it nothing waits for it
+const SIZE_POLL_MS = 10; // between two readings of the page's size while it takes its view's size again
+const PAGE_SIZE = 'the page size'; // what the log names while the undo waits for the page's size, not for a method
 export const DEFAULT_GROUP_TITLE = 'cua'; // the host's name for a session's group until the agent names it
 export const AGENT_BADGE = 'agent'; // the panel's badge on an agent tab whose group has no name of its own
 
@@ -289,6 +294,8 @@ export class CuaConnection {
       owner!.byTarget.add(debuggee.targetId);
       return {};
     }
+    // an attach that waited (below) for a connection that has closed since: nothing is loaded or leased for nobody
+    if (this.closed) fail(ERRORS.cancelled('disconnected'));
     const entry = this.tab(debuggee.tabId);
     const tabId = entry.tab.tabId;
     // a lease still being let go (its undo bounded by RESET_BOUND_MS, the window a host's timeout falls in) is not held:
@@ -300,6 +307,13 @@ export class CuaConnection {
     }
     if (this.leases.has(tabId)) return { alreadyHeld: true };
     this.refuseHeld(entry);
+    // the previous lease's undo still under way, this connection's or another's (bounded by UNDO_WAIT_MS): the new lease
+    // starts once it settles, so none of its own toggles is undone and the page reads its own size again
+    const undoing = this.ctx.claims.undoOf(tabId);
+    if (undoing) {
+      await undoing;
+      return this.attach(debuggee);
+    }
     if (!entry.view && entry.tab.url !== '') this.ctx.store.load(tabId, entry.tab.url); // a suspended tab resumes, as Chrome reloads a discarded one
     const dbg = entry.debugger;
     if (!entry.view || !dbg) fail(ERRORS.notLoaded(debuggee.tabId));
@@ -573,19 +587,49 @@ export class CuaConnection {
     return leased.released;
   }
 
+  // The undo holds the release (the host's detach reply) for RESET_BOUND_MS at most; what is still out then goes on, and
+  // the tab's next lease waits for it until UNDO_WAIT_MS from now (TabClaims `undoing`).
   private async release(leased: Leased, why: string): Promise<void> {
     leased.closing = true;
-    this.cancelHeld(leased.entry.tab.tabId, why);
-    const undo = undoCommands(leased.toggles, { mawsFocusEmulation: leased.dbg.heldBy('focus') });
-    if (undo.length > 0 && leased.dbg.attached) {
-      const sends = Promise.allSettled(undo.map(([method, params]) => leased.dbg.send(method, params)));
-      await Promise.race([sends, new Promise((resolve) => setTimeout(resolve, RESET_BOUND_MS))]);
+    const { tabId } = leased.entry.tab;
+    this.cancelHeld(tabId, why);
+    const commands = undoCommands(leased.toggles, { mawsFocusEmulation: leased.dbg.heldBy('focus') });
+    if (commands.length > 0 && leased.dbg.attached) {
+      const undo = this.undo(leased, commands);
+      this.ctx.claims.undoing(tabId, undo.done);
+      if ((await within(undo.done.then(() => true), RESET_BOUND_MS)) === null && undo.out.size > 0) {
+        this.ctx.log(`${this.undoLine(tabId, RESET_BOUND_MS, undo.out)}: its lease is released, and the tab's next lease waits for the undo`);
+      }
     }
-    if (this.leases.get(leased.entry.tab.tabId) !== leased) return; // the attachment ended meanwhile
+    if (this.leases.get(tabId) !== leased) return; // the attachment ended meanwhile
     this.unregister(leased);
     leased.lease.release();
     this.ctx.presence?.released(leased.entry);
     this.ctx.feed?.flush(leased.entry.tab.tabId);
+  }
+
+  // The undo of the agent's toggles, under way: every command's reply, then, when a device-metrics override was cleared,
+  // the page reading its view's size again (filter.ts `readsViewSize`). `done` settles by UNDO_WAIT_MS at the latest and
+  // never rejects; `out` names what is still out, a method or the page's size, for the log.
+  private undo(leased: Leased, commands: [string, Record<string, unknown>][]): { done: Promise<void>; out: Set<string> } {
+    const { entry, dbg } = leased;
+    const until = Date.now() + UNDO_WAIT_MS;
+    const out = new Set(commands.map(([method]) => method));
+    const replies = Promise.allSettled(commands.map(([method, params]) => dbg.send(method, params).finally(() => out.delete(method))));
+    const sized = replies.then(async () => {
+      if (!commands.some(([method]) => method === 'Emulation.clearDeviceMetricsOverride')) return;
+      out.add(PAGE_SIZE);
+      await viewSizeRead(entry, dbg, until);
+      out.delete(PAGE_SIZE);
+    });
+    const done = within(sized, UNDO_WAIT_MS).then(() => {
+      if (out.size > 0) this.ctx.log(`${this.undoLine(entry.tab.tabId, UNDO_WAIT_MS, out)}: the tab's next lease no longer waits for it`);
+    });
+    return { done, out };
+  }
+
+  private undoLine(tabId: string, ms: number, out: Set<string>): string {
+    return `the undo of tab ${tabId}'s agent state on ${this.appSessionId}'s socket was still out after ${ms} ms (${[...out].join(', ')})`;
   }
 
   private unregister(leased: Leased): void {
@@ -699,6 +743,18 @@ export class CuaConnection {
 }
 
 const syntheticTargetId = (entry: TabEntry) => `maws-page-${entry.tab.tabId}`;
+
+// Waits until the page reads its view's size again, polling its layout metrics; gives up at `until`, when the page or
+// its attachment goes (never sending to a detached tab, which would attach it again), or at a reading that cannot tell.
+async function viewSizeRead(entry: TabEntry, dbg: TabDebugger, until: number): Promise<void> {
+  for (;;) {
+    const view = entry.view;
+    if (!view || entry.debugger !== dbg || !dbg.attached || Date.now() >= until) return;
+    const fits = await dbg.send('Page.getLayoutMetrics').then((metrics) => readsViewSize(metrics, view.getBounds()), () => null);
+    if (fits !== false) return;
+    await new Promise((resolve) => setTimeout(resolve, SIZE_POLL_MS));
+  }
+}
 
 // The badge a group's tabs show: the name the agent gave its session, else "agent" (the host's default name means
 // nothing to the person).

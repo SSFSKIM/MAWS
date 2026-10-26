@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { DEFAULT_PARTITION } from '@shared/browser/tab';
 import { connectFakeHost } from '../../../../test/support/cua-fake-host';
 import { TabStore } from '../tabs';
+import { RESET_BOUND_MS, UNDO_WAIT_MS } from './connection';
 import { startCuaBackend } from './index';
 import type { AppSessionId } from '@shared/graph/ids';
 import { A, B, FakeContents, fakeView, harness, S, takeDown, testPeer, tracked } from './server.fake';
@@ -218,6 +219,7 @@ describe.skipIf(process.platform !== 'darwin')('the agent state reset', () => {
       ['Page.setInterceptFileChooserDialog', { enabled: false }],
       ['Fetch.disable', {}],
       ['Emulation.clearDeviceMetricsOverride', {}],
+      ['Page.getLayoutMetrics', undefined], // the cleared override: whether the page reads its view's size again
     ]);
     expect([h.cdp(tab).attached, tab.debugger!.leases]).toEqual([true, 1]);
   });
@@ -237,25 +239,132 @@ describe.skipIf(process.platform !== 'darwin')('the agent state reset', () => {
     await a.close();
     await settle();
     expect(h.backend.inspect().sessions).toMatchObject({ A: { connections: 0, held: 0, leased: [] } });
-    expect(h.cdp(tab).methods()).toEqual(['Target.setAutoAttach', 'Page.setInterceptFileChooserDialog', 'Fetch.disable', 'Emulation.clearDeviceMetricsOverride', 'Emulation.setFocusEmulationEnabled']);
+    expect(h.cdp(tab).methods()).toEqual(['Target.setAutoAttach', 'Page.setInterceptFileChooserDialog', 'Fetch.disable', 'Emulation.clearDeviceMetricsOverride', 'Emulation.setFocusEmulationEnabled', 'Page.getLayoutMetrics']);
     expect([h.cdp(tab).attached, tab.debugger!.leases, h.store.all()]).toEqual([false, 0, [tab]]);
   });
 
-  it('an attach while the previous lease is still being let go (a hung undo) waits for that release, then holds a fresh lease', async () => {
+  // Chromium answers Emulation.clearDeviceMetricsOverride before the restored size reaches the page: measured on the
+  // mini and the hosted Macs (2026-10-26), the page read the override's 800 for up to 83 ms after the reply, with the
+  // undo answered in 0 to 10 ms, far inside RESET_BOUND_MS (e2e:browser-cua :186's red).
+  it('letting go of a device-metrics override waits until the page reads its view\'s size again, after the clear\'s reply, and only then releases', async () => {
+    const h = harness();
+    const tab = h.personTab();
+    tab.view!.setBounds({ x: 0, y: 0, width: 1280, height: 800 }); // the parked size
+    const cdp = h.cdp(tab);
+    const a = await h.host();
+    const id = await h.idOf(a, tab);
+    await a.request('debugger.attach', { tabId: id });
+    await a.request('debugger.sendCommand', { debuggee: { tabId: id }, method: 'Emulation.setDeviceMetricsOverride', params: { width: 800, height: 600, deviceScaleFactor: 1, mobile: false } });
+    cdp.viewport = { width: 800, height: 600 }; // the override applied, and still read after the clear's reply
+    let detached = false;
+    const detaching = a.request('debugger.detach', { tabId: id }).then(() => void (detached = true));
+    await settle();
+    expect(cdp.timeline).toContain('reply Emulation.clearDeviceMetricsOverride');
+    expect(cdp.timeline).toContain('reply Page.getLayoutMetrics');
+    expect([detached, h.backend.holds(tab.tab.tabId), cdp.attached]).toEqual([false, true, true]);
+    cdp.viewport = { width: 1280, height: 800 }; // the restored size reaches the page
+    await detaching;
+    expect([h.backend.holds(tab.tab.tabId), cdp.attached]).toEqual([false, false]); // the attachment ends with the page at its size
+    expect(h.logs).toEqual([]); // within its bound: nothing to tell
+  });
+
+  const unansweredLine = (tabId: string, methods: string) =>
+    `the undo of tab ${tabId}'s agent state on A's socket was still out after ${RESET_BOUND_MS} ms (${methods}): its lease is released, and the tab's next lease waits for the undo`;
+
+  // The E13 row of 2026-10-08: with MAWS's focus emulation on, the attachment outlives the agent's lease, so an undo still
+  // out when the release bound passes would otherwise be overtaken by the next lease's own toggles.
+  it('a lease let go before its undo answered: the log names the tab and the methods, and the next attach on the tab waits for the undo, so its own toggles come after', async () => {
+    const h = harness();
+    const tab = h.personTab();
+    await tab.debugger!.attach('focus');
+    const cdp = h.cdp(tab);
+    const a = await h.host();
+    const id = await h.idOf(a, tab);
+    await a.request('debugger.attach', { tabId: id });
+    await a.request('debugger.sendCommand', { debuggee: { tabId: id }, method: 'Fetch.enable', params: { patterns: [{ urlPattern: '*secret-pattern*' }] } });
+    const answer = cdp.defer('Fetch.disable');
+    const at = Date.now();
+    await a.request('debugger.detach', { tabId: id }); // the host's detach is answered at the release bound
+    expect(Date.now() - at).toBeGreaterThanOrEqual(RESET_BOUND_MS - 20);
+    expect(Date.now() - at).toBeLessThan(UNDO_WAIT_MS);
+    expect(h.logs).toEqual([unansweredLine(tab.tab.tabId, 'Fetch.disable')]); // methods and tab ids, never params
+    let attached = false;
+    const attaching = a.request('debugger.attach', { tabId: id }).then((reply) => ((attached = true), reply));
+    await settle();
+    expect(attached).toBe(false);
+    answer();
+    expect(await attaching).toEqual({ alreadyHeld: false });
+    await a.request('debugger.sendCommand', { debuggee: { tabId: id }, method: 'Fetch.enable', params: {} });
+    expect(cdp.timeline.filter((step) => step.includes(' Fetch.'))).toEqual(['send Fetch.enable', 'reply Fetch.enable', 'send Fetch.disable', 'reply Fetch.disable', 'send Fetch.enable', 'reply Fetch.enable']);
+    expect(h.logs.join('\n')).not.toContain('secret-pattern');
+  });
+
+  it('another connection\'s attach after that release waits for the undo too', async () => {
+    const h = harness();
+    const tab = h.personTab();
+    await tab.debugger!.attach('focus');
+    const cdp = h.cdp(tab);
+    const a = await h.host();
+    await a.request('debugger.attach', { tabId: await h.idOf(a, tab) });
+    await a.request('debugger.sendCommand', { debuggee: { tabId: await h.idOf(a, tab) }, method: 'Fetch.enable', params: {} });
+    const answer = cdp.defer('Fetch.disable');
+    await a.request('debugger.detach', { tabId: await h.idOf(a, tab) });
+    const b = await h.host();
+    let attached = false;
+    const attaching = b.request('debugger.attach', { tabId: await h.idOf(b, tab) }).then((reply) => ((attached = true), reply));
+    await settle();
+    expect(attached).toBe(false);
+    answer();
+    expect(await attaching).toEqual({ alreadyHeld: false });
+    expect(h.backend.inspect().sessions.A!.leased).toEqual([tab.tab.tabId]);
+  });
+
+  it('an attach whose connection closes while it waits for the undo goes no further: a tab suspended meanwhile is not loaded again', async () => {
+    const h = harness();
+    const tab = h.personTab();
+    await tab.debugger!.attach('focus');
+    const a = await h.host();
+    await a.request('debugger.attach', { tabId: await h.idOf(a, tab) });
+    await a.request('debugger.sendCommand', { debuggee: { tabId: await h.idOf(a, tab) }, method: 'Fetch.enable', params: {} });
+    const answer = h.cdp(tab).defer('Fetch.disable');
+    await a.request('debugger.detach', { tabId: await h.idOf(a, tab) });
+    const b = await h.host();
+    void b.request('debugger.attach', { tabId: await h.idOf(b, tab) }).catch(() => {});
+    await settle();
+    await b.close();
+    await settle();
+    h.store.suspend(tab.tab.tabId);
+    answer();
+    await settle();
+    expect([tab.view, tab.tab.suspended, h.backend.holds(tab.tab.tabId)]).toEqual([null, true, false]);
+  });
+
+  it('an undo that never answers holds a later attach only until UNDO_WAIT_MS after the letting go began; past it the tab\'s attaches wait for nothing', async () => {
     const h = harness();
     const tab = h.personTab();
     const a = await h.host();
     const id = await h.idOf(a, tab);
     await a.request('debugger.attach', { tabId: id });
     await a.request('debugger.sendCommand', { debuggee: { tabId: id }, method: 'Fetch.enable', params: {} });
-    h.cdp(tab).hang.add('Fetch.disable'); // the undo never answers: the release waits out its bound
+    h.cdp(tab).hang.add('Fetch.disable');
+    const at = Date.now();
     const detaching = a.request('debugger.detach', { tabId: id });
     await settle();
-    expect(await a.request('debugger.attach', { tabId: id })).toEqual({ alreadyHeld: false });
+    expect(await a.request('debugger.attach', { tabId: id })).toEqual({ alreadyHeld: false }); // behind the release, then the undo's bound
+    expect(Date.now() - at).toBeGreaterThanOrEqual(UNDO_WAIT_MS - 20);
+    expect(Date.now() - at).toBeLessThan(UNDO_WAIT_MS + RESET_BOUND_MS);
     await detaching;
+    expect(h.logs).toEqual([
+      unansweredLine(tab.tab.tabId, 'Fetch.disable'),
+      `the undo of tab ${tab.tab.tabId}'s agent state on A's socket was still out after ${UNDO_WAIT_MS} ms (Fetch.disable): the tab's next lease no longer waits for it`,
+    ]);
     expect(await a.request('debugger.sendCommand', { debuggee: { tabId: id }, method: 'Runtime.evaluate', params: {} })).toEqual({ echoed: 'Runtime.evaluate' });
     expect([tab.debugger!.leases, h.backend.holds(tab.tab.tabId)]).toEqual([1, true]);
-  });
+    await a.request('debugger.detach', { tabId: id }); // nothing switched on: nothing to undo
+    const again = Date.now();
+    expect(await a.request('debugger.attach', { tabId: id })).toEqual({ alreadyHeld: false });
+    expect(Date.now() - again).toBeLessThan(RESET_BOUND_MS);
+  }, 15_000);
 
   it('a held command is cancelled when its deadline passes and when its tab is detached', async () => {
     const h = harness();
