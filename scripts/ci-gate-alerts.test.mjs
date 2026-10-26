@@ -309,7 +309,8 @@ test("the guest decision follows the tested tree's workflow; own-workflow runs t
   assert.equal(ask(listed, 'e2e:side,e2e:tools'), 'vm');
   assert.equal(ask(listed, 'e2e:side,unit:darwin'), 'vm');
   // This checkout admits the wave-2, wave-2b, wave-2c, wave-2d, wave-3 and wave-4 groups, but unit:darwin and other host-only jobs still prevent an all-guest run.
-  const own = tree(readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8'), readFileSync(join(root, 'package.json'), 'utf8'));
+  // The mini's own placement, with no group on HOSTED_MAC_E2E; runs with hosted groups have their own tests below.
+  const own = tree(readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8').replace(/^ {2}HOSTED_MAC_E2E: .*$/m, "  HOSTED_MAC_E2E: ''"), readFileSync(join(root, 'package.json'), 'utf8'));
   const routes = [{}, { runner: 'macos' }, { lane: 'vm' }, { lane: 'vm-trial' }];
   for (const gates of ['e2e:library', 'e2e:library,e2e:document', 'static,unit,e2e:panel', 'e2e:dashboard', 'e2e:panel,e2e:dashboard', 'e2e:side', 'e2e:panel,e2e:side', 'e2e:dashboard,e2e:side', 'e2e:presentations', 'e2e:panel,e2e:presentations', 'e2e:side,e2e:presentations',
     'e2e:browser', 'e2e:agents,e2e:browser-comment', 'e2e:c12,e2e:supervisor', 'e2e:composer,e2e:layout', 'e2e:panel,e2e:browser-chrome', 'e2e:delivery,e2e:connectors-oauth', 'e2e:artifacts,e2e:browser-cua', 'e2e:connectors,e2e:connectors-direct'])

@@ -183,7 +183,11 @@ env:
   # browser-chrome 7, available 2, artifacts 4 passed and 1 skipped, its measured case). transcript stays off: red in
   # 40289382978 (transcript.spec.ts:1299, the sidebar hover card still shown 5 s after the pointer left), green in the
   # other two and in the baseline.
-  HOSTED_MAC_E2E: document-app browser-chrome available artifacts
+  # Wave 5 (CI-opt, M3): settings, connectors, connectors-direct and delivery were 3/3 green under `Lane: hosted` at master
+  # e7ab5da39 (the font, the reserved-final rule and the hosted Dock in place) in runs 40300743480, 40300806384 and
+  # 40300870157, each run's count lines those of the `Lane: no-hosted` baseline 40300686375 on the same tree, every job on
+  # the host (settings 12 passed, its Nerd Font case run on both desktops; connectors 5; connectors-direct 15; delivery 3).
+  HOSTED_MAC_E2E: document-app browser-chrome available artifacts settings connectors connectors-direct delivery
   # The groups that need a credential or the login keychain's custody, so never go to a hosted Mac, whatever the lane
   # (maws-app holds no secret): connectors-oauth, and discover, whose custody conditions (a), (b) and (c) stand.
   MAC_SECRET_E2E: connectors-oauth discover
