@@ -368,6 +368,12 @@ These are intentionally closed through current mod authority. Request a separate
 
 ## 7. Highest-value spikes
 
+**Results, 2026-10-25, on 2.1.310:**
+
+- **Item 3, media intake: works.** See [media-intake-spike.md](media-intake-spike.md).
+- **Item 2, context truncation: blocked.** The active context is cut correctly, but `--resume` duplicates kept assistant blocks and can bring excluded content back. See [truncation-spike.md](truncation-spike.md).
+- **Lane B's control requests** for the same operations are mapped in [lane-b-control-map.md](lane-b-control-map.md).
+
 All spikes should use owned isolated sessions and storage, never the owner's live sessions or daemon. No spike was run here. Use a fake/closed model endpoint for no-inference checks where possible; obtain a separate small spend allowance when a real model response is necessary.
 
 1. **Plan exit and mode update transaction.** Invoke ExitPlanMode from the real bridge transport context; observe whether its PermissionRequest hook runs, approve original input, and inspect resulting mode, prePlanMode, auto activation/rule restoration and next tool behavior. Separately test a harmless read-only carrier for rules/directories and simple mode updates. Measure reentry, stale answers, local cancellation, policy ceilings, and auto/bypass rejection. Success is native behavioral equivalence, not a changed footer label.

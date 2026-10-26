@@ -1,0 +1,89 @@
+{
+  "runs": [
+    {
+      "run": "ordinary",
+      "tmux_live": false,
+      "daemon_socket_present": false,
+      "env_file_present": false
+    },
+    {
+      "run": "queued",
+      "tmux_live": false,
+      "daemon_socket_present": false,
+      "env_file_present": false
+    },
+    {
+      "run": "basic",
+      "tmux_live": false,
+      "daemon_socket_present": false,
+      "env_file_present": false
+    },
+    {
+      "run": "resume-partial",
+      "tmux_live": false,
+      "daemon_socket_present": false,
+      "env_file_present": false
+    },
+    {
+      "run": "resume-pair",
+      "tmux_live": false,
+      "daemon_socket_present": false,
+      "env_file_present": false
+    },
+    {
+      "run": "resume-guard",
+      "tmux_live": false,
+      "daemon_socket_present": false,
+      "env_file_present": false
+    },
+    {
+      "run": "bound-1",
+      "tmux_live": false,
+      "daemon_socket_present": false,
+      "env_file_present": false
+    },
+    {
+      "run": "origin",
+      "tmux_live": false,
+      "daemon_socket_present": false,
+      "env_file_present": false
+    },
+    {
+      "run": "bound-0",
+      "tmux_live": false,
+      "daemon_socket_present": false,
+      "env_file_present": false
+    },
+    {
+      "run": "effects",
+      "tmux_live": false,
+      "daemon_socket_present": false,
+      "env_file_present": false
+    },
+    {
+      "run": "resume-self",
+      "tmux_live": false,
+      "daemon_socket_present": false,
+      "env_file_present": false
+    },
+    {
+      "run": "media",
+      "tmux_live": false,
+      "daemon_socket_present": false,
+      "env_file_present": false
+    },
+    {
+      "run": "pair",
+      "tmux_live": false,
+      "daemon_socket_present": false,
+      "env_file_present": false
+    },
+    {
+      "run": "typing",
+      "tmux_live": false,
+      "daemon_socket_present": false,
+      "env_file_present": false
+    }
+  ],
+  "processes_with_owned_cwd": []
+}
