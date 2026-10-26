@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { agentStopNote, emptyMemory, FakeMachine, loadRecording, MW4_AGENTS, MW4_CAPABILITIES, TWO_SUBAGENTS, type Producer } from '../../fake-machine';
+import { agentStopNote, emptyMemory, FakeMachine, loadRecording, type RpcScript, MW4_AGENTS, MW4_CAPABILITIES, TWO_SUBAGENTS, type Producer } from '../../fake-machine';
 import type { ProjectDown } from '../../src/protocol/browser';
 import { importOrgKey, newNonce, sealRpc } from '../../src/protocol/codes';
 import type { RpcDraft, RpcName } from '../../src/protocol/rpc';
@@ -33,7 +33,7 @@ const newProject = () => `9c3e0a8e-3b2d-4c5e-9f73-${(++count).toString(16).padSt
 /** The two-subagents recording's first agent, unnamed, running once its spawn is played. */
 const ALPHA = 'ad435b3acfda88bfa';
 
-async function setUp(options: { producer?: Producer; readOnly?: boolean; staleSessions?: string[] } = {}) {
+async function setUp(options: { producer?: Producer; readOnly?: boolean; staleSessions?: string[]; script?: RpcScript } = {}) {
   const project = newProject();
   const name = `mw4-${count}`;
   const recording = loadRecording(TWO_SUBAGENTS);
@@ -41,7 +41,7 @@ async function setUp(options: { producer?: Producer; readOnly?: boolean; staleSe
   // Miniflare sees a stream's close only when a write to it fails, so a test that crashes the machine beats often.
   await hub.timing(name, { heartbeatMs: 250, leaseMs: 45_000 });
   const memory = emptyMemory();
-  const make = () => new FakeMachine({ hub: hub.url, machine: name, credentials, orgKey: RAW_KEY, project, recordings: [recording], member, memory, producer: options.producer ?? 'mw4', readOnly: options.readOnly, staleSessions: options.staleSessions });
+  const make = () => new FakeMachine({ hub: hub.url, machine: name, credentials, orgKey: RAW_KEY, project, recordings: [recording], member, memory, producer: options.producer ?? 'mw4', readOnly: options.readOnly, staleSessions: options.staleSessions, script: options.script });
   const fm = make();
   await fm.connect();
   const b = await BrowserClient.open(hub, ADMIN, project);
@@ -182,8 +182,31 @@ describe('the fake machine as the MW4 producer', () => {
     const depth = again.sessions.get(S)!;
     expect(depth.runningAgent('bg-sleeper'), 'stopped as before the crash').toBeNull();
     expect(depth.rows.get('main')!.filter((r) => JSON.stringify(r).includes(agentStopNote('bg-sleeper')))).toHaveLength(1);
+    // A later resync of the tree that still lists it running neither undoes the stop nor writes its note again.
+    const listed = { ...MW4_AGENTS.spawn, running: true };
+    depth.apply({ at: Date.now(), k: 'agents', agents: [listed] });
+    depth.apply({ at: Date.now(), k: 'agent', agentId: MW4_AGENTS.spawn.agentId, spawn: MW4_AGENTS.spawn });
+    expect(depth.runningAgent('bg-sleeper'), 'still stopped after the resync').toBeNull();
+    expect(depth.rows.get('main')!.filter((r) => JSON.stringify(r).includes(agentStopNote('bg-sleeper')))).toHaveLength(1);
     b.close();
     await again.close();
+  });
+
+  it("tells only the agent its check resolved, while it runs: one that ended before the message went is refused, its namesake never told", async () => {
+    let end: (() => void) | undefined;
+    const { fm, b, S, call } = await setUp({ script: { tell: () => (end?.(), undefined) } });
+    await fm.spawnRecordedAgent(S);
+    const depth = fm.sessions.get(S)!;
+    end = () => {
+      depth.apply({ at: Date.now(), k: 'agent-stop', agentId: MW4_AGENTS.spawn.agentId });
+      depth.apply({ at: Date.now(), k: 'agent', agentId: 'a0000000000000new', spawn: MW4_AGENTS.spawn });
+    };
+    const told = (await call('tell', { agentId: 'bg-sleeper', text: 'x' })).outcome;
+    expect(told).toMatchObject({ state: 'failed', error: { code: 'failed' } });
+    expect(JSON.stringify(told)).toContain('unknown-agent');
+    expect(fm.told).toEqual([]);
+    b.close();
+    await fm.close();
   });
 
   it('refuses a malformed stop or message, and one on a read-only machine or a stale session, before anything runs', async () => {

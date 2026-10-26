@@ -971,7 +971,10 @@ export class FakeMachine {
       case 'tell': {
         // The engine's send to the agent's id, under the line saying the person wrote it: queued, its answer the outcome.
         const depth = this.sessions.get(rpc.args.session)!;
-        this.told.push({ session: depth.id, agentId: this.resolvedAgents.get(rpc.nonce)!, text: rpc.args.text });
+        // The agent the check resolved, while it runs: one that ended since is refused, never its namesake told.
+        const id = this.resolvedAgents.get(rpc.nonce)!;
+        if (!depth.isAgentRunning(id)) return fail('failed', `unknown-agent: agent ${id} is not running`);
+        this.told.push({ session: depth.id, agentId: id, text: rpc.args.text });
         return this.traced(rpc, record, depth.id, MW4_AGENTS.tell.answer.result as JsonObject);
       }
       case 'btw': {

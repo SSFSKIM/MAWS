@@ -247,8 +247,8 @@ export class SessionDepth {
   mainTurn: string | null = null;
   /** Stops run before a crash whose TaskStop rows the replay has not reached yet (`restoreStop`). */
   private readonly stopsToRestore = new Set<string>();
-  /** Agent stops run before a crash whose agent the replay has not started yet, by id, with the spelling asked (`restoreAgentStop`). */
-  private readonly agentStopsToRestore = new Map<string, string>();
+  /** Agent stops run before a crash, by id: the spelling asked, and whether the replay has written the note yet (`restoreAgentStop`). */
+  private readonly restoredAgentStops = new Map<string, { asked: string; isNoted: boolean }>();
 
   constructor(
     readonly id: string,
@@ -776,6 +776,11 @@ export class SessionDepth {
     return { code: 'unknown-agent', message: `the session's subagent tree holds no running agent by the id or name ${ref}` };
   }
 
+  /** Whether the agent of this id (no name) is running. */
+  isAgentRunning(agentId: string): boolean {
+    return this.bridgeAgents.get(agentId)?.running === true;
+  }
+
   /** The running agent `ref` resolves to (`resolveAgent`), or null. */
   runningAgent(ref: string): BridgeAgent | null {
     const found = this.resolveAgent(ref);
@@ -792,6 +797,12 @@ export class SessionDepth {
     const agent = this.bridgeAgents.get(agentId);
     if (!agent?.running) return false;
     this.bridgeAgents.set(agentId, { ...agent, running: false });
+    this.writeAgentStopNote(agent, asked);
+    return true;
+  }
+
+  /** A stop's note naming the agent as `asked`, in its parent's loop (main for an agent main spawned). */
+  private writeAgentStopNote(agent: BridgeAgent, asked: string): void {
     const loop = agent.parentAgentId ?? null;
     this.appendRow(loop, {
       type: 'user',
@@ -805,24 +816,29 @@ export class SessionDepth {
       message: { role: 'user', content: [{ type: 'text', text: agentStopNote(asked) }] },
     });
     this.refresh();
-    return true;
   }
 
   /**
-   * An agent stop this machine ran before a crash (its trace): the replay starts again from the recording, so the agent
-   * is stopped again, its note written again, as soon as it is running, as the engine and a transcript on disk would
-   * still hold them.
+   * An agent stop this machine ran before a crash (its trace): the replay starts again from the recording, which knows
+   * nothing of it, so the stop stays over every later update of the replay (a spawn, a resync of the tree), as the
+   * engine would still hold the agent ended, and its note is written once, when the agent first appears, as a
+   * transcript on disk would still hold it.
    */
   restoreAgentStop(agentId: string, asked: string): void {
-    this.agentStopsToRestore.set(agentId, asked);
+    this.restoredAgentStops.set(agentId, { asked, isNoted: false });
   }
 
-  /** Stops again each agent a restored stop names that is running now. */
+  /** Holds each restored stop over the replay: its agent not running, its note written once. */
   private reapplyAgentStops(): void {
-    for (const [agentId, asked] of this.agentStopsToRestore) {
-      if (!this.bridgeAgents.get(agentId)?.running) continue;
-      this.agentStopsToRestore.delete(agentId);
-      this.stopAgent(agentId, asked);
+    for (const [agentId, stop] of this.restoredAgentStops) {
+      const agent = this.bridgeAgents.get(agentId);
+      if (!agent) continue;
+      const wasRunning = agent.running;
+      if (wasRunning) this.bridgeAgents.set(agentId, { ...agent, running: false });
+      if (!stop.isNoted) {
+        stop.isNoted = true;
+        this.writeAgentStopNote(agent, stop.asked); // refreshes
+      } else if (wasRunning) this.refresh();
     }
   }
 
