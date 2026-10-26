@@ -6,14 +6,15 @@ description: >-
   and take pnpm through corepack, never pnpm/action-setup. maws-app's hosted Macs cache nothing (a cache saved on a
   ci/hosted/ branch is that branch's alone), and their setup first sets the display to 1920x1080 at 1x and prints the
   desktop's line.
-  Every lane applies .github/ci-kit.yml. On Linux, e2e jobs also lift Electron's sandbox restriction, and groups that
-  render documents through LibreOffice install it separately.
+  Every lane applies .github/ci-kit.yml; macOS jobs omit its LibreOffice cask unless their group needs it. On Linux,
+  e2e jobs also lift Electron's sandbox restriction, and groups that render documents through LibreOffice install it
+  separately.
 inputs:
   e2e:
     description: Lift the apparmor restriction on unprivileged user namespaces for Electron's sandbox.
     default: 'false'
   libreoffice:
-    description: Install LibreOffice Writer and Impress.
+    description: Install LibreOffice for this group (Writer and Impress on Linux, the declared cask on macOS).
     default: 'false'
   apt:
     description: More apt packages for a Linux runner, space-separated.
@@ -79,7 +80,8 @@ runs:
     - uses: SSFSKIM/ci-kit/setup@v1
       with:
         install: 'true'
-    # Group-specific Linux packages; the declaration supplies every lane's common tools and macOS's LibreOffice.
+        skip: ${{ runner.os == 'macOS' && inputs.libreoffice != 'true' && 'cask:libreoffice' || '' }}
+    # Group-specific Linux packages; macOS uses the declared cask only for groups that need it.
     - if: runner.os == 'Linux' && (inputs.libreoffice == 'true' || inputs.apt != '')
       shell: bash
       env:
