@@ -487,7 +487,13 @@ All of this section's choices are decided (owner, 2026-10-26).
 - Third parties may not route requests through Free, Pro or Max credentials on users' behalf.
 
 The consequences, read by the architect and adopted here:
-- **Every session record names its credential slot** (RL6): `{kind: 'personal', principal}` or `{kind: 'org', id}`.
+- **Every session record names its credential slot, and never carries a token** (RL6).
+  - A slot is either a **login** or a **route**. A login is a Claude Code config dir: the default, or a `CLAUDE_CONFIG_DIR`. A route is a gateway or API settings file, passed with `--settings` as desk spawns already do.
+  - The machine binds each slot to a member, or to the org. The machine owner's login is the owner's. The account identity is read on the machine and goes no further than that binding.
+  - How the slot is known:
+    - lane B: the daemon chose it at spawn;
+    - lane A: sminos reads it from the session's environment and its recorded launch settings.
+  - **Only a route on an org API key admits several drivers.** It gives `converse` and `approve` to every owner or share.
 - **Driving a session on a personal credential is its principal's alone.** `converse` is itself driving: typing into or steering the session uses that person's account. So on a personal slot, anyone other than its principal gets at most `view`, and `converse` and `approve` are refused.
   - Co-owners keep `manage` (share, retire).
   - Everyone's agents may still message the session as peers, which is the owner's cooperation model.
@@ -675,7 +681,7 @@ These are named here with their binding fields. Byte-level schemas and test vect
   - A root transition `{fromVersion, newRootKeys[], issued}` is signed by the recovery key. Machines accept it over any state signed by the old root set.
   - Grants are checked only by the hosting machine (§5.8).
 - **RL6, Session record** (machine-held).
-  - `{machine, session, lane, origin: {kind: 'terminal' | 'maws' | 'sminos-spawn', requester?, spawnerSession?}, credential: {kind: 'personal', principal} | {kind: 'org', id}, project?, owners[], ownersProof[], access: 'private' | 'listed' | 'org-view' | 'org-converse', shares[{member, grade}], created, context}`.
+  - `{machine, session, lane, origin: {kind: 'terminal' | 'maws' | 'sminos-spawn', requester?, spawnerSession?}, credential: {slot, kind: 'login' | 'route', principal: memberId | 'org'}, project?, owners[], ownersProof[], access: 'private' | 'listed' | 'org-view' | 'org-converse', shares[{member, grade}], created, context}`.
   - Owners are copied at spawn and never resolved later through an alias.
   - The listing projection is `{session, revision, issued, fields: {owners, machine, project, lane, state, title}}`, signed by the machine key.
 - **RL7, Capabilities.**
