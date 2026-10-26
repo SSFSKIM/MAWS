@@ -24,8 +24,10 @@ runs:
     # A GitHub-hosted Mac (maws-app's hosted-mac.yml; ci-kit's docs/doperpowers/specs/2026-10-26-maws-hosted-mac-design.md,
     # The three desktops): its one display starts at 1024x768, which clamps the e2e window (1280x820, e2e/support/launch.ts),
     # and offers no scaled mode, so every hosted job runs at its largest, 1920x1080 at 1x, set here rather than found by
-    # each job. The line names the desktop as the app sees it (the main screen's points and backing scale), and any
-    # other display fails the job.
+    # each job. The Dock hides itself there too: a shown Dock takes about 70 points of the 1080, so a window the specs
+    # size to 982 points of content (settings' 1512x982) was clamped short of it. The line names the desktop as the app
+    # sees it (the main screen's points and backing scale, the Dock, the visible frame), and any other display fails the
+    # job.
     - if: runner.environment == 'github-hosted' && runner.os == 'macOS'
       shell: bash
       env:
@@ -35,9 +37,17 @@ runs:
         brew install -q displayplacer >/dev/null
         id=$(displayplacer list | sed -n 's/^Persistent screen id: //p' | head -1)
         displayplacer "id:$id res:1920x1080 hz:60 color_depth:7 scaling:off origin:(0,0) degree:0"
+        defaults write com.apple.dock autohide -bool true
+        killall Dock
         display=$(osascript -l JavaScript -e 'ObjC.import("AppKit"); const s = $.NSScreen.mainScreen; `${s.frame.size.width}x${s.frame.size.height}@${s.backingScaleFactor}x`')
-        echo "ci-kit desktop: $(sw_vers -productVersion) $(sysctl -n machdep.cpu.brand_string) cpus $(sysctl -n hw.ncpu) memory $(($(sysctl -n hw.memsize) / 1073741824)) GiB display $display"
+        echo "ci-kit desktop: $(sw_vers -productVersion) $(sysctl -n machdep.cpu.brand_string) cpus $(sysctl -n hw.ncpu) memory $(($(sysctl -n hw.memsize) / 1073741824)) GiB display $display $(.github/scripts/desktop-dock.sh --wait 15)"
         if [[ $display != 1920x1080@1x ]]; then echo "::error title=ci-kit desktop::the display is $display, not 1920x1080@1x"; exit 1; fi
+    # ci-kit's own Macs (the mini's host and its guest): their display mode is ci-kit's job-started line (`ci-kit desktop
+    # (job-started): … display=…`); beside it, the Dock and the visible frame, read from the job, never set.
+    - if: runner.environment == 'self-hosted' && runner.os == 'macOS'
+      shell: bash
+      run: |
+        echo "MAWS desktop: $(.github/scripts/desktop-dock.sh)"
     - if: runner.environment != 'self-hosted'
       uses: pnpm/action-setup@v6
     - uses: actions/setup-node@v7
