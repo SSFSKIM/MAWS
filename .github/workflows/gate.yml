@@ -187,7 +187,15 @@ env:
   # e7ab5da39 (the font, the reserved-final rule and the hosted Dock in place) in runs 40300743480, 40300806384 and
   # 40300870157, each run's count lines those of the `Lane: no-hosted` baseline 40300686375 on the same tree, every job on
   # the host (settings 12 passed, its Nerd Font case run on both desktops; connectors 5; connectors-direct 15; delivery 3).
-  HOSTED_MAC_E2E: document-app browser-chrome available artifacts settings connectors connectors-direct delivery
+  # Waves 2 and 3 (CI-opt, M3), at master c9803aa1a, each run's count lines those of the shared `Lane: no-hosted` baseline
+  # 40302689449 on the same tree, every job on the host: to-human (2 passed), widgets (29) and side (12) were 3/3 green under
+  # `Lane: hosted` in runs 40290693239, 40290750401 and 40294506903; supervisor (10), c12 (4), browser-import (6) and
+  # document (19) in runs 40293256908, 40293322930 and 40295843922. c7 stays off: red in 40290693239 and 40290750401 at
+  # composer.spec.ts:772 (the user row's actions at opacity 0 after focus, against 1) and at :871 (a 1512x982 content
+  # size clamped to 971 by the Dock, before #159).
+  HOSTED_MAC_E2E: >-
+    document-app browser-chrome available artifacts settings connectors connectors-direct delivery to-human widgets side
+    supervisor c12 browser-import document
   # The groups that need a credential or the login keychain's custody, so never go to a hosted Mac, whatever the lane
   # (maws-app holds no secret): connectors-oauth, and discover, whose custody conditions (a), (b) and (c) stand.
   MAC_SECRET_E2E: connectors-oauth discover
