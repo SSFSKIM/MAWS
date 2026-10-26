@@ -1,0 +1,273 @@
+{
+  "about": "The MW5 live check (desk control surface spec, Plan of Work, MW5): doperpowers desk-ctl-mw5, sminos 1.15.0, Claude Code 2.1.310, an isolated profile behind a recording stub (zero inference), the RPCs run through the daemon's own path (sminos_rpc.Rpcs) and the bridge's events relayed by sminos_requests as DX4 `op`. `capabilities` is the bridge's GET /status; `queued` the outcome of an idle upload of a PNG (`diagram.png`) and a PDF (`brief`); `states` every `op` body that upload sent, in order; `failed` the end of an upload whose Read an ask rule raised and the desk denied; `aborted` the end of an upload whose first attachment Esc stopped mid-step (the second read in the person's next turn); `indeterminate` the end of a claim a reload found without a result; `wake` and `prelude` the bridge's texts.",
+  "capabilities": {
+    "sminos": "1.15.0",
+    "protocol": 2,
+    "engine": "2.1.310",
+    "ops": [
+      "ping",
+      "steer",
+      "interrupt",
+      "stop",
+      "model",
+      "compact",
+      "deliver",
+      "answer",
+      "read",
+      "command",
+      "btw",
+      "stop-agent",
+      "tell",
+      "media"
+    ],
+    "reads": [
+      "status",
+      "catalog",
+      "usage",
+      "config",
+      "settings",
+      "mcp"
+    ],
+    "routes": {
+      "measured": "2.1.310"
+    },
+    "controls": {
+      "read.usage": {
+        "available": true
+      },
+      "read.config": {
+        "available": true
+      },
+      "read.settings": {
+        "available": true
+      },
+      "read.mcp": {
+        "available": true
+      },
+      "btw": {
+        "available": true
+      },
+      "compact": {
+        "available": true
+      },
+      "model": {
+        "available": true
+      },
+      "mcp.enable": {
+        "available": true
+      },
+      "mcp.disable": {
+        "available": true
+      },
+      "mcp.reconnect": {
+        "available": true
+      },
+      "decide": {
+        "available": true
+      },
+      "decide.scope": {
+        "available": true
+      },
+      "decide.interrupt": {
+        "available": false,
+        "reason": "a decision is answered once it is queued, so a deny cannot report what stopping the turn left running: deny, then Interrupt"
+      },
+      "decide.addDirectory": {
+        "available": true
+      },
+      "stop-agent": {
+        "available": true
+      },
+      "tell": {
+        "available": true
+      },
+      "media": {
+        "available": true
+      },
+      "forget": {
+        "available": false,
+        "reason": "after --resume the engine brings back what a cut left out (2.1.310): it needs an engine fix or a supported cut"
+      },
+      "rewind-files": {
+        "available": false,
+        "reason": "the mod API has no file rollback: /rewind in the terminal"
+      },
+      "elicitation.answer": {
+        "available": false,
+        "reason": "a mod's answer carries no action or content, so it cannot answer an MCP server's form: answer it in the terminal"
+      }
+    }
+  },
+  "queued": {
+    "state": "done",
+    "result": {
+      "queued": true,
+      "upload": "rImRqLedi6b1ySbP0RtObQ",
+      "intake": "native-read",
+      "root": "/private/tmp/mw5-live/idle-final/work/.claude/desk-uploads/fe47b444-0ae3-4251-8422-3d7b3aef5758",
+      "paths": [
+        "rImRqLedi6b1ySbP0RtObQ.0.png",
+        "rImRqLedi6b1ySbP0RtObQ.1.pdf"
+      ]
+    }
+  },
+  "states": [
+    {
+      "rpc": "rImRqLedi6b1ySbP0RtObQ",
+      "op": "media",
+      "id": "rImRqLedi6b1ySbP0RtObQ",
+      "upload": "rImRqLedi6b1ySbP0RtObQ",
+      "index": 0,
+      "state": "read",
+      "phase": "start",
+      "toolUseId": "toolu_sminos_dc14ebe10fe4e1ee30bb6dce",
+      "attachments": [
+        {
+          "index": 0,
+          "state": "read",
+          "toolUseId": "toolu_sminos_dc14ebe10fe4e1ee30bb6dce"
+        },
+        {
+          "index": 1,
+          "state": "pending"
+        }
+      ],
+      "t": 1793022125255
+    },
+    {
+      "rpc": "rImRqLedi6b1ySbP0RtObQ",
+      "op": "media",
+      "id": "rImRqLedi6b1ySbP0RtObQ",
+      "upload": "rImRqLedi6b1ySbP0RtObQ",
+      "index": 1,
+      "state": "read",
+      "phase": "start",
+      "toolUseId": "toolu_sminos_8552eea01f1b87e843e11b45",
+      "attachments": [
+        {
+          "index": 0,
+          "state": "read",
+          "toolUseId": "toolu_sminos_dc14ebe10fe4e1ee30bb6dce"
+        },
+        {
+          "index": 1,
+          "state": "read",
+          "toolUseId": "toolu_sminos_8552eea01f1b87e843e11b45"
+        }
+      ],
+      "t": 1793022125420
+    },
+    {
+      "rpc": "rImRqLedi6b1ySbP0RtObQ",
+      "op": "media",
+      "id": "rImRqLedi6b1ySbP0RtObQ",
+      "upload": "rImRqLedi6b1ySbP0RtObQ",
+      "index": 0,
+      "state": "forwarded",
+      "phase": "start",
+      "toolUseId": "toolu_sminos_dc14ebe10fe4e1ee30bb6dce",
+      "attachments": [
+        {
+          "index": 0,
+          "state": "forwarded",
+          "toolUseId": "toolu_sminos_dc14ebe10fe4e1ee30bb6dce"
+        },
+        {
+          "index": 1,
+          "state": "read",
+          "toolUseId": "toolu_sminos_8552eea01f1b87e843e11b45"
+        }
+      ],
+      "t": 1793022125434
+    },
+    {
+      "rpc": "rImRqLedi6b1ySbP0RtObQ",
+      "op": "media",
+      "id": "rImRqLedi6b1ySbP0RtObQ",
+      "upload": "rImRqLedi6b1ySbP0RtObQ",
+      "index": 1,
+      "state": "forwarded",
+      "phase": "end",
+      "toolUseId": "toolu_sminos_8552eea01f1b87e843e11b45",
+      "attachments": [
+        {
+          "index": 0,
+          "state": "forwarded",
+          "toolUseId": "toolu_sminos_dc14ebe10fe4e1ee30bb6dce"
+        },
+        {
+          "index": 1,
+          "state": "forwarded",
+          "toolUseId": "toolu_sminos_8552eea01f1b87e843e11b45"
+        }
+      ],
+      "t": 1793022125434
+    }
+  ],
+  "failed": {
+    "rpc": "n3NLF62XBnekLLKswEFFgw",
+    "op": "media",
+    "id": "n3NLF62XBnekLLKswEFFgw",
+    "upload": "n3NLF62XBnekLLKswEFFgw",
+    "index": 0,
+    "state": "failed",
+    "phase": "end",
+    "toolUseId": "toolu_sminos_2dd07851b13dbc16eecd5ecb",
+    "reason": "not this one",
+    "attachments": [
+      {
+        "index": 0,
+        "state": "failed",
+        "toolUseId": "toolu_sminos_2dd07851b13dbc16eecd5ecb",
+        "reason": "not this one"
+      }
+    ],
+    "t": 1793022157263
+  },
+  "aborted": {
+    "rpc": "kjxjilties1PqjqtL28_Qw",
+    "op": "media",
+    "id": "kjxjilties1PqjqtL28_Qw",
+    "upload": "kjxjilties1PqjqtL28_Qw",
+    "index": 1,
+    "state": "forwarded",
+    "phase": "end",
+    "toolUseId": "toolu_sminos_708ff81adde04ecb5a2d66d4",
+    "attachments": [
+      {
+        "index": 0,
+        "state": "aborted",
+        "toolUseId": "toolu_sminos_123c92bb9201ae3e08fe0258",
+        "reason": "its step was cancelled before the Read ran"
+      },
+      {
+        "index": 1,
+        "state": "forwarded",
+        "toolUseId": "toolu_sminos_708ff81adde04ecb5a2d66d4"
+      }
+    ],
+    "t": 1793022182402
+  },
+  "indeterminate": {
+    "rpc": "JIAVvlzb7m9IWHwBt9PbZA",
+    "op": "media",
+    "id": "JIAVvlzb7m9IWHwBt9PbZA",
+    "upload": "JIAVvlzb7m9IWHwBt9PbZA",
+    "index": 0,
+    "state": "aborted",
+    "phase": "end",
+    "toolUseId": "toolu_sminos_d0e4368ad964287c6c199e87",
+    "reason": "indeterminate after reload",
+    "attachments": [
+      {
+        "index": 0,
+        "state": "aborted",
+        "toolUseId": "toolu_sminos_d0e4368ad964287c6c199e87",
+        "reason": "indeterminate after reload"
+      }
+    ],
+    "t": 1793022199517
+  },
+  "wake": "[sminos bridge]\nThe person attached diagram.png and brief from the desk: the bridge reads them into the conversation now.",
+  "prelude": "[sminos bridge] The person attached diagram.png from the desk: this Read is the bridge's, not your choice."
+}

@@ -16,7 +16,9 @@
 //     as MW4's (`mw4`), stops or tells one subagent its bridge's tree holds as running (`stop-agent`, `tell`), by an id
 //     first, then one running agent's name, refusing any other `unknown-agent` and a shared name `ambiguous-agent` before
 //     the claim, acting on the agent the check resolved, keeping a stop across a crash, and spawns the MW4 live check's
-//     named agent (`spawnRecordedAgent`);
+//     named agent (`spawnRecordedAgent`); as MW5's (`mw5`), takes an upload (`media`), checked as the daemon checks it,
+//     answered `queued` with the root under the session's live working directory, and each attachment's states sent as
+//     `op` notices in the order the MW5 live check recorded them;
 //   - answers RPCs from a script, with a ledger of its own: a nonce is claimed before the effect and its outcome recorded
 //     before the result, and a nonce the ledger knows is never executed again;
 //   - can drop its connection, end a session's process while it stays connected, crash after an RPC's effect and before
@@ -31,8 +33,8 @@ import { decodeEnrollmentCode, type Redeemed } from '../src/protocol/identity';
 import type { JsonObject } from '../src/protocol/json';
 import type { LogEvent, Vector } from '../src/protocol/log';
 import type { DownFrame, OrgFrame, Refusal, RejectionReason, UpFrame } from '../src/protocol/machine';
-import { RPC_FRESHNESS_MS, RPC_NAMES, type Rpc, type RpcError, type RpcName, type RpcOutcome } from '../src/protocol/rpc';
-import type { Delivery, MachinePresence, OpBody, PermissionUpdate, Raised, SessionMessage, Settled } from '../src/protocol/session';
+import { MEDIA_TYPES, RPC_FRESHNESS_MS, RPC_NAMES, type MediaType, type Rpc, type RpcError, type RpcName, type RpcOutcome } from '../src/protocol/rpc';
+import type { Delivery, MachinePresence, MediaOpBody, MediaState, OpBody, PermissionUpdate, Raised, SessionMessage, Settled } from '../src/protocol/session';
 import { Link, LinkError, type Credentials } from './link';
 import { emptyMemory, expireLedger, type Memory } from './memory';
 import type { Recording, Row, Step } from './recording';
@@ -123,11 +125,11 @@ export type FakeMachineOptions = {
 export type RpcRecord = { nonce: string; rpc: RpcName; outcome: RpcOutcome | null; executed: boolean };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const SESSION_RPCS = new Set<RpcName>(['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'retire', 'resume', 'stop', 'command', 'btw', 'stop-agent', 'tell']);
+const SESSION_RPCS = new Set<RpcName>(['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'retire', 'resume', 'stop', 'command', 'btw', 'stop-agent', 'tell', 'media']);
 
 /** The producer that added each RPC after DC7's: the desk control surface's M0 `command`, the machine-side wave's MW2
- * `btw`, MW4 `stop-agent` and `tell`. */
-const ADDED_IN: Partial<Record<RpcName, Producer>> = { command: 'm0', btw: 'mw2', 'stop-agent': 'mw4', tell: 'mw4' };
+ * `btw`, MW4 `stop-agent` and `tell`, MW5 `media`. */
+const ADDED_IN: Partial<Record<RpcName, Producer>> = { command: 'm0', btw: 'mw2', 'stop-agent': 'mw4', tell: 'mw4', media: 'mw5' };
 /** The RPCs a daemon of `producer`'s knows. */
 const rpcsOf = (producer: Producer): RpcName[] => RPC_NAMES.filter((name) => { const added = ADDED_IN[name]; return added === undefined || producerAtLeast(producer, added); });
 /** An agent's id or name as `stop-agent` and `tell` take it (DX6): 1 to 128 characters, not blank, no control character. */
@@ -154,6 +156,9 @@ export class FakeMachine {
   readonly scopedAllows: Array<{ session: string; request: string; rule: PermissionUpdate }> = [];
   /** Each message a `tell` delivered (an `mw4` producer): the agent it went to, by its id, and the text. */
   readonly told: Array<{ session: string; agentId: string; text: string }> = [];
+  /** Each upload a `media` RPC handed the bridge (an `mw5` producer): its session, the upload (the RPC's nonce), the
+   * directory it was saved in, each file's name there and the name the person gave. */
+  readonly uploads: Array<{ session: string; upload: string; root: string; paths: string[]; names: string[] }> = [];
   /** A `stop-agent`'s or a `tell`'s agent as its check resolved it, by the RPC's nonce. */
   private readonly resolvedAgents = new Map<string, string>();
   /** What went wrong without stopping the machine, kept rather than thrown: a POST the hub refused (a stale generation
@@ -813,6 +818,12 @@ export class FakeMachine {
       if (this.options.bridge === false || depth.presence === null) return answer(fail('unsupported', 'the session has no bridge, or has ended'));
       if (!depth.capabilities?.ops.includes('btw')) return answer(fail('unsupported', "the session's bridge takes no side questions: its plugin loaded before the update"));
     }
+    // And an upload, to a bridge that takes it (MW5).
+    if (rpc.rpc === 'media') {
+      const depth = this.sessions.get(rpc.args.session)!;
+      if (this.options.bridge === false || depth.presence === null) return answer(fail('unsupported', 'media needs the session\'s bridge; this session has none, or has ended'));
+      if (!depth.capabilities?.ops.includes('media')) return answer(fail('unsupported', "the session's bridge takes no uploads: its plugin loaded before the update"));
+    }
     // And one agent stopped or told, from a bridge that takes it, then the agent its tree holds as running (MW4).
     if (rpc.rpc === 'stop-agent' || rpc.rpc === 'tell') {
       const depth = this.sessions.get(rpc.args.session)!;
@@ -860,7 +871,7 @@ export class FakeMachine {
     const member = rpc.member;
     if (this.options.bridge === false) {
       if (rpc.rpc === 'steer') return this.traced(rpc, record, rpc.args.session, { row: null });
-      if (['interrupt', 'decide', 'answer', 'model', 'compact', 'btw', 'stop-agent', 'tell'].includes(rpc.rpc)) return fail('unsupported', 'the session has no bridge');
+      if (['interrupt', 'decide', 'answer', 'model', 'compact', 'btw', 'stop-agent', 'tell', 'media'].includes(rpc.rpc)) return fail('unsupported', 'the session has no bridge');
     }
     switch (rpc.rpc) {
       case 'steer': {
@@ -977,6 +988,18 @@ export class FakeMachine {
         this.told.push({ session: depth.id, agentId: id, text: rpc.args.text });
         return this.traced(rpc, record, depth.id, MW4_AGENTS.tell.answer.result as JsonObject);
       }
+      case 'media': {
+        // Saved under the session's live working directory, held by the bridge, answered `queued`; each attachment is read
+        // at the main loop's next step and passed on, its states following as `op` notices, as the MW5 live check
+        // recorded them (no wake here: the fake runs no turn).
+        const depth = this.sessions.get(rpc.args.session)!;
+        const cwd = depth.status.cwd || depth.cwd || '/';
+        const root = `${cwd.replace(/\/$/, '')}/.claude/desk-uploads/${depth.id}`;
+        const paths = rpc.args.attachments.map((a, n) => `${rpc.nonce}.${n}.${MEDIA_EXTENSIONS[a.mediaType]}`);
+        this.uploads.push({ session: depth.id, upload: rpc.nonce, root, paths, names: rpc.args.attachments.map((a) => a.name) });
+        notices.push(() => this.intake(depth.id, rpc.nonce, paths.length));
+        return this.traced(rpc, record, depth.id, { queued: true, upload: rpc.nonce, intake: 'native-read', root, paths });
+      }
       case 'btw': {
         // The bridge answers `started` at once, then the fork's start and end follow as `op` notices: the recorded
         // answer, whether or not a turn runs (a fork does not wait for the turn).
@@ -1024,6 +1047,26 @@ export class FakeMachine {
       // The event's own `type` and `rpc` (the child's) give way to the op's: DX4 `op` names the RPC's nonce.
       const fields = Object.fromEntries(Object.entries(event).filter(([k]) => k !== 'type' && k !== 'rpc' && k !== 'phase'));
       this.sendSessionWide({ ...base, body: { rpc: nonce, op: 'btw', phase: event.phase as OpBody['phase'], ...fields, id, t: Date.now() } });
+    }
+    await this.flush();
+  }
+
+  /**
+   * An upload's states as `op` notices, in the order the MW5 live check recorded them: each attachment `read`, then each
+   * `forwarded`, the last one's `phase: 'end'`; `attachments` the whole upload as it stands, each with its own tool-use id.
+   */
+  private async intake(session: string, upload: string, count: number): Promise<void> {
+    const base = { project: this.project, machine: this.name, session, kind: 'op', sub: null, n: null } as const;
+    const ids = Array.from({ length: count }, () => `toolu_sminos_${randomUUID().replaceAll('-', '').slice(0, 24)}`);
+    const states: MediaState[] = Array.from({ length: count }, () => 'pending');
+    for (const to of ['read', 'forwarded'] as const) {
+      for (let index = 0; index < count; index++) {
+        states[index] = to;
+        const attachments = states.map((state, i) => ({ index: i, state, ...(state !== 'pending' && { toolUseId: ids[i] }) }));
+        const phase = states.every((state) => state === 'forwarded') ? 'end' : 'start';
+        const body: MediaOpBody = { rpc: upload, op: 'media', id: upload, upload, index, state: to, phase, toolUseId: ids[index], attachments, t: Date.now() };
+        this.sendSessionWide({ ...base, body: body as unknown as OpBody });
+      }
     }
     await this.flush();
   }
@@ -1156,6 +1199,8 @@ function argumentProblem(rpc: Rpc): string | null {
       return needs(str('session') && str('text'), '{session, text}');
     case 'compact':
       return needs(str('session') && optStr('instructions') && (a.instructions === undefined || [...(a.instructions as string)].length <= 4096), '{session, instructions?: at most 4,096 characters}');
+    case 'media':
+      return mediaProblem(a);
     case 'btw': {
       const prompt = a.prompt;
       return needs(str('session') && typeof prompt === 'string' && prompt.trim() !== '' && [...prompt].length <= 8192, "{session, prompt}, prompt the question's text, at most 8,192 characters");
@@ -1192,6 +1237,39 @@ function argumentProblem(rpc: Rpc): string | null {
     default:
       return `no RPC ${String((rpc as { rpc: unknown }).rpc)}`;
   }
+}
+
+/** Each media type's stored extension (the daemon's `sminos_media.TYPES`). */
+const MEDIA_EXTENSIONS: Record<MediaType, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'application/pdf': 'pdf' };
+
+/** The media type the bytes' signature names, or null (the daemon's `sminos_media.type_of`). */
+function mediaTypeOf(b: Buffer): MediaType | null {
+  const starts = (sig: number[] | string, at = 0) => (typeof sig === 'string' ? Buffer.from(sig, 'latin1') : Buffer.from(sig)).equals(b.subarray(at, at + sig.length));
+  if (starts([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return 'image/png';
+  if (starts([0xff, 0xd8, 0xff])) return 'image/jpeg';
+  if (starts('GIF87a') || starts('GIF89a')) return 'image/gif';
+  if (b.length >= 12 && starts('RIFF') && starts('WEBP', 8)) return 'image/webp';
+  if (starts('%PDF-')) return 'application/pdf';
+  return null;
+}
+
+/** What is wrong with a `media` RPC's arguments, or null, as the daemon's `shape()` checks them (DX6 `media`). */
+function mediaProblem(a: Record<string, unknown>): string | null {
+  if ('text' in a) return 'media: the words go as a Send, not with the upload';
+  if (a.delivery !== 'queued-turn') return 'media: delivery is queued-turn';
+  const files = a.attachments;
+  if (!Array.isArray(files) || files.length < 1 || files.length > 4) return 'media: attachments is a list of 1-4 files';
+  for (const [i, f] of files.entries()) {
+    const file = f as Record<string, unknown> | null;
+    if (typeof file !== 'object' || file === null || Array.isArray(file)) return `media: attachment ${i} is {name, mediaType, data}`;
+    if (typeof file.name !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(file.name)) return `media: attachment ${i}'s name is [A-Za-z0-9][A-Za-z0-9._-]{0,127}`;
+    if (!(MEDIA_TYPES as readonly string[]).includes(file.mediaType as string)) return `media: attachment ${i}'s mediaType is one of ${MEDIA_TYPES.join(', ')}`;
+    const data = typeof file.data === 'string' ? file.data : '';
+    const bytes = Buffer.from(data, 'base64');
+    if (data === '' || bytes.length === 0 || bytes.toString('base64') !== data) return `media: attachment ${i}'s data is base64 bytes`;
+    if (mediaTypeOf(bytes) !== file.mediaType) return `media: attachment ${i}'s bytes are not ${file.mediaType as string}`;
+  }
+  return null;
 }
 
 /** The ask mod's tool as each plugin it has run in registers it (doperpowers' sminos plugin design, §11). */

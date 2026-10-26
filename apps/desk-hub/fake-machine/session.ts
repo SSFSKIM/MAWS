@@ -31,7 +31,9 @@ import mw2 from './dx4/mw2-ops.json' with { type: 'json' };
 import mw3 from './dx4/mw3-scoped.json' with { type: 'json' };
 // And MW4's (dx4/README.md).
 import mw4 from './dx4/mw4-agents.json' with { type: 'json' };
-import type { Catalog, Capabilities, ConfigRead, ControlCapabilities, McpRead, PermissionUpdate, SettingsRead, UsageRead, Job, ReadAnswer, SessionBodies, SessionMessage, SessionPresence, StatusRead, Streaming, StreamingBlock, SubagentMeta, SubscriptionKind, Usage } from '../src/protocol/session';
+// And MW5's (dx4/README.md).
+import mw5 from './dx4/mw5-media.json' with { type: 'json' };
+import type { Catalog, Capabilities, ConfigRead, MediaOpBody, ControlCapabilities, McpRead, PermissionUpdate, SettingsRead, UsageRead, Job, ReadAnswer, SessionBodies, SessionMessage, SessionPresence, StatusRead, Streaming, StreamingBlock, SubagentMeta, SubscriptionKind, Usage } from '../src/protocol/session';
 import type { SuggestionScope } from '../src/protocol/rpc';
 import { derive, fileFacts, LoopIndex, loopJobs, stopNote, type Body, type BridgeAgent, type Derivation } from './jobs';
 import { answerOutput, type Locate } from './output';
@@ -50,11 +52,13 @@ import type { Recording, Row, Step } from './recording';
  * recorded it, and compact's `instructions`; `mw3` (sminos `MW3_SMINOS`) the scoped allows: a permission request
  * raised with the engine's suggestions, as the MW3 live check recorded them, and `decide`'s `scope` checked and applied
  * as the daemon does; `mw4` (sminos `MW4_SMINOS`) one subagent stopped or told (`stop-agent`, `tell`), checked against
- * the bridge's agent tree as the daemon checks it, the stop leaving the parent the note the MW4 live check recorded.
+ * the bridge's agent tree as the daemon checks it, the stop leaving the parent the note the MW4 live check recorded;
+ * `mw5` (sminos `MW5_SMINOS`) image and PDF intake (`media`), answered `queued` and each attachment's states following as
+ * `op`, as the MW5 live check recorded them.
  */
-export type Producer = 'dc3' | 'dc8' | 'm0' | 'm1' | 'mw1' | 'mw2' | 'mw3' | 'mw4';
+export type Producer = 'dc3' | 'dc8' | 'm0' | 'm1' | 'mw1' | 'mw2' | 'mw3' | 'mw4' | 'mw5';
 
-const LEVEL: Record<Producer, number> = { dc3: 0, dc8: 1, m0: 2, m1: 3, mw1: 4, mw2: 5, mw3: 6, mw4: 7 };
+const LEVEL: Record<Producer, number> = { dc3: 0, dc8: 1, m0: 2, m1: 3, mw1: 4, mw2: 5, mw3: 6, mw4: 7, mw5: 8 };
 
 /** Whether `producer` does what `level` added. */
 export const producerAtLeast = (producer: Producer, level: Producer): boolean => LEVEL[producer] >= LEVEL[level];
@@ -158,11 +162,42 @@ export const MW4_CAPABILITIES: Capabilities = {
   controls: mw4.capabilities.controls as ControlCapabilities,
 };
 
+/** The sminos version of the machine-side wave's MW5 (image and PDF intake). */
+export const MW5_SMINOS = '1.15.0';
+
+/**
+ * What the MW5 live check recorded (dx4/README.md): an idle upload of a PNG and a PDF answered `queued` and every `op`
+ * body it sent, in order (each attachment `read`, then `forwarded`, the last `phase: 'end'`); the ends of an upload whose
+ * Read the desk denied (`failed`), of one whose first attachment Esc stopped mid-step (`aborted`, the second read in the
+ * person's next turn), and of a claim a reload found without a result (`aborted`, `indeterminate after reload`); and the
+ * bridge's wake and prelude.
+ */
+export const MW5_MEDIA = mw5 as unknown as {
+  queued: { state: 'done'; result: { queued: true; upload: string; intake: 'native-read'; root: string; paths: string[] } };
+  states: MediaOpBody[];
+  failed: MediaOpBody;
+  aborted: MediaOpBody;
+  indeterminate: MediaOpBody;
+  wake: string;
+  prelude: string;
+};
+
+/** An MW5 bridge's capabilities: MW4's, its `media` op, and every control's capability as the MW5 live check's bridge
+ * said them (`media` available). The engine and the route table stay 2.1.307. */
+export const MW5_CAPABILITIES: Capabilities = {
+  ...MW4_CAPABILITIES,
+  sminos: MW5_SMINOS,
+  ops: [...MW4_CAPABILITIES.ops, 'media'],
+  controls: mw5.capabilities.controls as ControlCapabilities,
+};
+
 /** The sminos version, and the bridge's capabilities, that `producer` stands for. */
 export const sminosOf = (producer: Producer): string =>
-  producerAtLeast(producer, 'mw4') ? MW4_SMINOS : producerAtLeast(producer, 'mw3') ? MW3_SMINOS : producerAtLeast(producer, 'mw2') ? MW2_SMINOS : producerAtLeast(producer, 'mw1') ? MW1_SMINOS : producerAtLeast(producer, 'm1') ? M1_SMINOS : M0_SMINOS;
+  producerAtLeast(producer, 'mw5') ? MW5_SMINOS : producerAtLeast(producer, 'mw4') ? MW4_SMINOS : producerAtLeast(producer, 'mw3') ? MW3_SMINOS : producerAtLeast(producer, 'mw2') ? MW2_SMINOS : producerAtLeast(producer, 'mw1') ? MW1_SMINOS : producerAtLeast(producer, 'm1') ? M1_SMINOS : M0_SMINOS;
 const capabilitiesOf = (producer: Producer): Capabilities =>
-  producerAtLeast(producer, 'mw4')
+  producerAtLeast(producer, 'mw5')
+    ? MW5_CAPABILITIES
+    : producerAtLeast(producer, 'mw4')
     ? MW4_CAPABILITIES
     : producerAtLeast(producer, 'mw3')
     ? MW3_CAPABILITIES

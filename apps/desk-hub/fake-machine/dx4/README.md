@@ -58,3 +58,15 @@ read at its next step, and the note its parent read at its next request (sha256
 `a2358c441fdc5289037c5d198d5ff2a8ee61c2aace58b0300575221c312b7297`). The fake machine's `mw4` producer stops, tells and spawns from it
 (`../session.ts`, `../machine.ts`, run by `test/fake-machine/desk-mw4.test.ts`). Never edit it here: a later shape
 change is recorded again by that MW's live check, and replaces this file whole.
+
+`mw5-media.json` is a recording too: what the machine answered in the machine-side wave's MW5 live check (the desk
+control surface spec, Plan of Work, MW5; doperpowers `desk-ctl-mw5`, sminos 1.15.0, on Claude Code 2.1.310 in an
+isolated profile behind a recording stub, zero inference, each RPC run through the daemon's own path and the bridge's
+events relayed as DX4 `op`) — its `GET /status` capabilities (`media` among the ops and available among the
+controls); an idle upload of a PNG and a PDF answered `queued` with its root and paths, and every `op` it sent, in
+order (each attachment `read`, then `forwarded`, the last `phase: 'end'`); the ends of an upload whose Read the desk
+denied (`failed`), of one whose first attachment Esc stopped mid-step (`aborted`), and of a claim a reload found
+without a result (`indeterminate after reload`); the bridge's wake and prelude (sha256
+`5c4c4a7d0911fc7c28affdccbb063373971a853bf52721d4806bb39e5808bf61`). The fake machine's `mw5` producer answers and
+reports uploads from it (`../session.ts`, `../machine.ts`, run by `test/fake-machine/desk-mw5.test.ts`). Never edit it
+here: a later shape change is recorded again by that MW's live check, and replaces this file whole.

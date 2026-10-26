@@ -19,6 +19,17 @@ export type Digest = { session: string; request: string; tool: string; input_sha
  */
 export type SuggestionScope = { suggestion: number; sha256: string; destination: 'session' | 'localSettings' };
 
+/** The media an upload takes (MW5): the stored file's extension, and the native Read's image or PDF handling, follow it. */
+export const MEDIA_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf'] as const;
+export type MediaType = (typeof MEDIA_TYPES)[number];
+
+/**
+ * One file of an upload (MW5): `name` for display only, `[A-Za-z0-9][A-Za-z0-9._-]{0,127}` (the stored name is the
+ * daemon's, `<nonce>.<n>.<ext>`, so a missing or mismatched suffix, or the same name twice, is no matter); `mediaType`
+ * one of MEDIA_TYPES and matching the bytes' signature; `data` the bytes in standard base64.
+ */
+export type MediaAttachment = { name: string; mediaType: MediaType; data: string };
+
 export type RpcArgs = {
   /** A user row appended to the running turn, read at the loop's next model request; refused `idle` when no turn runs. */
   steer: { session: string; text: string };
@@ -81,11 +92,20 @@ export type RpcArgs = {
    * name two running agents hold, `ambiguous-agent`.
    */
   tell: { session: string; agentId: string; text: string };
+  /**
+   * Image and PDF intake (the desk control surface spec, MW5): 1 to 4 attachments, all within the RPC's 1 MiB (the hub's
+   * frame bound, not an engine limit). The daemon saves them inside the session's live working directory, under
+   * `.claude/desk-uploads/<session>/`, without following a link, and the bridge reads each into the conversation with a
+   * native Read of its own at the main loop's next step, so the next model request carries it as an `image` block, or a
+   * `document` for a PDF (read whole). `delivery` is `queued-turn`, the one delivery there is: an idle session is woken
+   * for it. Lane A refuses `text` (`bad-shape`): the words go as a Send, the browser's sealed `human` event.
+   */
+  media: { session: string; attachments: MediaAttachment[]; delivery: 'queued-turn' };
 };
 
 export type RpcName = keyof RpcArgs;
 
-export const RPC_NAMES = ['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'spawn', 'retire', 'resume', 'stop', 'command', 'btw', 'stop-agent', 'tell'] as const satisfies readonly RpcName[];
+export const RPC_NAMES = ['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'spawn', 'retire', 'resume', 'stop', 'command', 'btw', 'stop-agent', 'tell', 'media'] as const satisfies readonly RpcName[];
 
 export type RpcResults = {
   /**
@@ -132,6 +152,14 @@ export type RpcResults = {
   'stop-agent': { agentId: string; accepted: true; resolvedAgentId?: string; noteError?: string };
   /** The message is in the agent's queue (not yet read). The answer is the outcome: no `op` follows. */
   tell: { sent: true };
+  /**
+   * Answered once the session's bridge holds the upload (one it already held counts), not when the files are saved:
+   * `upload` is the RPC's nonce, which every `op` of it names (`op: 'media'`, `id` the upload); `root` the absolute
+   * directory the files were saved in, pinned there (a later `/cd` does not move it); `paths` each file's name in `root`,
+   * in the order sent. Each attachment's state then follows as `op` (`MediaOpBody`). A refusal of the bridge's is
+   * `failed`, its code the message's first word, and the files are removed.
+   */
+  media: { queued: true; upload: string; intake: 'native-read'; root: string; paths: string[] };
 };
 
 /**
