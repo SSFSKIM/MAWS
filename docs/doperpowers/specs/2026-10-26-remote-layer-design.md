@@ -65,8 +65,8 @@ The lid closes, and when the MacBook wakes, every subscription resumes from its 
 - **Member.** A person in the org. Identified by a stable member id, not by email.
 - **Device.** One install of the MAWS app on one Mac account, holding that member's device keys. A member has one or more devices.
 - **Machine.** One enrolled OS account on one host. A machine runs sessions as that account, under that account's Claude login. Each machine has exactly one **machine owner**, the member it acts for. A Mac where two people log in is two machines.
-- **Endpoint.** The machine's network-facing service: its only connection to the hub, its key, its trust boundary and its policy (§2).
-- **MAWS machine daemon.** The headless MAWS service on a machine. It holds the lane B Query and MAWS's machine-side services, and runs the engine host as a separate process (§2).
+- **Endpoint module.** The narrow module inside the MAWS machine daemon that is the machine's network-facing side. It holds the machine's only connection to the hub, its key, its trust boundary and its policy (§2.1).
+- **MAWS machine daemon.** The headless MAWS service on a machine. It contains the endpoint module, the lane B Query and MAWS's machine-side services, and runs the engine host as a separate process (§2.1).
 - **Engine host.** MAWS's E10 supervisor, hardened as the holder. It owns lane B `claude -p` processes through one session host per session (holder design §3.1–§3.2).
 - **sminos daemon.** The machine's project-log and delivery daemon. It is local-only in this design.
 - **Bridge mod.** sminos's in-process mod in every Claude Code session. It controls in lane A and only observes in lane B.
@@ -83,21 +83,19 @@ The lid closes, and when the MacBook wakes, every subscription resumes from its 
 ### 1. The shape
 
 ```
- member's Mac (MAWS app)                  hub (Cloudflare: Worker + DOs)            machine (one OS account)
- ┌───────────────────────┐   wss          ┌────────────────────────────┐   wss    ┌──────────────────────────────┐
- │ renderer (no keys)    │ ─────────────▶ │ Registry (org state, list) │ ◀─────── │ endpoint (Node)              │
- │ main: device keys     │  sealed frames │ Machine DO (relay, lease)  │  sealed  │  key · policy · ACL · uplink │
- │  (Secure Enclave)     │ ◀───────────── │ Project DO (log plane)     │ ───────▶ │   │ local sockets (0600)     │
- └───────────────────────┘                └────────────────────────────┘          │   ├─ MAWS machine daemon     │
-        │ local socket, same uid (when the app's Mac is itself a machine)          │   │   Query · tool server ·  │
-        └──────────────────────────────────────────────────────────────▶ endpoint  │   │   files · git · artifacts│
-                                                                                   │   │   └ engine host ─ session│
-                                                                                   │   │        hosts ─ claude -p │
-                                                                                   │   └─ sminos daemon (log,     │
-                                                                                   │       delivery, lane A plane)│
-                                                                                   │         └ bridge mod in each │
-                                                                                   │           terminal claude    │
-                                                                                   └──────────────────────────────┘
+ member's Mac (MAWS app)             hub (Cloudflare: Worker + DOs)        machine (one OS account)
+ ┌──────────────────────┐   wss      ┌─────────────────────────────┐ wss  ┌────────────────────────────────────┐
+ │ renderer (no keys)   │ ─────────▶ │ Registry (org state, list)  │ ◀─── │ MAWS machine daemon (Node)         │
+ │ main: device keys    │   sealed   │ Machine DO (relay, lease)   │      │  ├ endpoint module: key · policy · │
+ │                      │ ◀───────── │ Project DO (log plane)      │ ───▶ │  │   ACL · channels · uplink       │
+ └──────────────────────┘            └─────────────────────────────┘      │  ├ Query · tool server · files ·   │
+        │ same-uid local socket (when the app's own Mac is a machine)      │  │   git · artifacts · settings    │
+        └────────────────────────────────────────────────────────────────▶ │  └ engine host (separate process) │
+                                                                           │      └ session hosts ─ claude -p   │
+                                                                           │ sminos daemon (local only: log,    │
+                                                                           │   delivery, lane A plane) ─ bridge │
+                                                                           │   mod in each terminal claude      │
+                                                                           └────────────────────────────────────┘
 ```
 
 Three rules carry the design:
@@ -111,28 +109,38 @@ Three rules carry the design:
 
 | Process | Duties | Restarts without ending sessions? |
 |---|---|---|
-| **Endpoint** (Node, small, rarely changed) | The only outbound connection to the hub. Holds the machine key and the pinned org root. Verifies the signed org state (§5.2). Terminates channels (§5.4). Enforces policy: read-only mode, the permission-mode ceiling, the session ACL and grades, and freshness of discrete actions. Relays plane subscriptions to their subscribers, each sealed for that subscriber. Signs the log events this machine writes. | Yes. Channels drop and resume by cursor. |
-| **MAWS machine daemon** (Node, headless) | The lane B Query for each session (holder design §3.3). MAWS's in-process MCP tool server and hook callbacks. The machine-side services now in Electron main: session index and read model, launch/fork/acquire, git and scm, files, library index, artifacts and Yjs, settings (research §3.2). It produces lane B's plane. | Yes. The Query re-adopts each session (holder design §3.3). |
+| **MAWS machine daemon** (Node, headless), with the **endpoint module** inside it | **Endpoint module:** <ul><li>the only outbound connection to the hub;</li><li>the machine key and the pinned org root, with verification of the signed org state (§5.2);</li><li>it terminates channels (§5.4);</li><li>policy: read-only mode, the permission-mode ceiling for spawns that come from outside, the session ACL and grades, and freshness of discrete actions;</li><li>it relays plane subscriptions, sealed for each subscriber;</li><li>it signs the log events this machine writes, and verifies arriving events before sminos gets them (RL10).</li></ul> **The rest of the daemon:** <ul><li>the lane B Query for each session (holder design §3.3);</li><li>MAWS's in-process MCP tool server and hook callbacks;</li><li>the machine-side services now in Electron main: session index and read model, launch/fork/acquire, git and scm, files, library index, artifacts and Yjs, settings (research §3.2).</li></ul> It produces lane B's plane. | Yes. Channels drop and resume by cursor, and the Query re-adopts each session (holder design §3.3). |
 | **Engine host** (Node, the hardened E10 supervisor) and its **session hosts** (small static binaries, one per session) | Lane B process ownership: the output seq ring, the stdin offset, the writer fence, roster re-adoption, and the 24-hour reaping fence (holder design §3.1–§3.2). It is a separate process under the daemon. A daemon restart doesn't end its children, which is the lesson from Desktop's helper replacement. | The manager can restart; a session host's death ends its session. |
-| **sminos daemon** (Python, stdlib) | The project log, and delivery into sessions: human words through the bridge, peer messages through the engine's inbox socket. The lane A plane, built from bridge rows. Reached only over local 0600 sockets. It no longer holds the uplink, signs nothing, and does no AEAD. | Yes. |
-| **Bridge mod** (in every Claude Code process) | Lane A: the controller (mod-control-surface; desk control-surface spec MW1–MW5). Lane B: observer only. It supplies subagent deltas and the `turn.step` reaping gate, and refuses control when MAWS's spawn marker is set. | It is part of the session. |
+| **sminos daemon** (Python, stdlib, local only) | **Keeps:** <ul><li>git-mirror sync for projects with a git remote;</li><li>join-on-sight, `derive --all`, and retries of owed deliveries;</li><li>local delivery: peer messages through the engine's inbox socket, human words through the bridge, under §5.7's rule;</li><li>member state and the lane A plane;</li><li>lane A's RPC translation (`sminos_rpc.py`: decide, answer, steer, interrupt, model, compact, btw, media, command, read, stop-agent, tell), with MW4's agent resolution and MW5's media save (`sminos_media.py`);</li><li>request settlement (`sminos_requests.py`).</li></ul> **Hands to the endpoint module:** the uplink (`sminos_uplink.py`), hub enrollment (`sminos_hub.py`), hub log sync (`sminos_hublog.py`), HMAC coding (`sminos_codes.py`), the RPC member check, and the policy gate (`sminos_policy.py`). It talks to the daemon only over RL10, signs nothing, and does no AEAD. | Yes. |
+| **Bridge mod** (in every Claude Code process) | **Lane A:** the controller (mod-control-surface; desk control-surface spec MW1–MW5). **Lane B:** observer only. It supplies subagent deltas and the `turn.step` reaping gate, and refuses control when MAWS's spawn marker is set. The observer mode is new work: `bridge.tsx` has no MAWS marker today. | It is part of the session. |
 
-The endpoint and the MAWS daemon are two processes, not one. The endpoint's job is small and security-critical, and it holds every channel. The daemon is large and changes weekly. Separating them means a MAWS update doesn't drop every channel, and the code that holds keys and enforces policy stays small enough to review. This is the same split as the holder's host and manager. The cost is one local hop. The research measured the bridge hop at milliseconds (`bridge-perf-bench.md`); the endpoint–daemon hop should be measured too (§12).
+**One process, with the endpoint as a module** (the MAWS architect's ruling, 2026-10-26).
+- Under one uid there is no isolation to buy. The daemon could read a 0600 key file anyway, and a headless Node process can't use the Enclave.
+- Reviewability comes from the module boundary. The endpoint is its own package with its own tests, and a lint rule lets only the endpoint module import the key and policy code.
+- Channel drops on a daemon restart are cheap by design, since they resume by cursor, and every hub deploy causes them anyway.
+- The local path is the one MAWS uses most. Today it is app main → engine host → `claude`, and a separate endpoint would add a hop and a second versioned local protocol, kept forever.
+- What gets isolated is what crashes, not what is trusted. If crash data shows a heavy service (Yjs, library indexing, capture) taking the daemon down, that service moves to a worker or child process inside the daemon.
+- The composite carries a budget for local latency, measured against today's path.
+
+**Handing the uplink over.** Once the daemon's endpoint module is enrolled, sminos stops its own DX2 uplink and goes local-only. It does this when the endpoint's RL10 socket exists, or a config flag says so. A machine never runs two uplinks under one name.
+
+**The spawn ceiling.** The permission-mode ceiling bounds only spawns that arrive from outside. A `sminos spawn` from a local session stays unbound, as it is today.
 
 #### 2.2 Install and versions
 
-- The endpoint and the MAWS machine daemon ship as one headless Node package, versioned apart from the Electron app. They install as launchd agents on macOS and user systemd units on Linux.
-- They run on machines with no MAWS app: the Mac mini, devcloud Linux hosts and seats. On Linux the engine host's session hosts run in a user transient scope, with lingering on (holder design §3.1).
-- On a Mac that is also a member's device, the app uses the local endpoint over a same-uid socket and never starts its own copy of the services.
+- The MAWS machine daemon ships as a headless package, versioned apart from the Electron app. It installs as a launchd agent on macOS and a user systemd unit on Linux. Its runtime is either the system's Node or a bundled single-executable build (§11).
+- It runs on machines with no MAWS app: the Mac mini, devcloud Linux hosts and seats. On Linux the engine host's session hosts run in a user transient scope, with lingering on (holder design §3.1).
+- On a Mac that is also a member's device, the app uses the local daemon over a same-uid socket and never starts its own copy of the services.
 - Every hello carries `{protocol, build}`, and features are negotiated through capability lists (§3.3, §5.10), never through matching build ids.
 - **A machine that is not upgraded fails visibly.** One still running desk's phase-1 sminos uplink (DX2 SSE+POST with the shared org key) is shown as *needs upgrade*.
   - It accepts no RPC from the merged app.
   - Its log events are displayed as *unverified (legacy)*.
-  - It never fails silently (§9).
+  - It never fails silently.
+- **The hub serves DX2 and RL1 side by side** for each machine until that machine has moved (§9).
 
 #### 2.3 The machine's identity
 
-- **The machine key.** At enrollment the endpoint generates a P-256 key pair. On macOS the key is kept in the Secure Enclave only when the endpoint runs as a signed helper that may use it. Otherwise, and always on Linux, it is a 0600 file in the endpoint's 0700 state directory. This is acceptable because the machine key protects nothing that code running as that OS account couldn't already do: that account runs the sessions.
+- **The machine key.** At enrollment the endpoint module generates a P-256 key pair and keeps it as a 0600 file in the daemon's 0700 state directory, on every platform. A headless Node daemon can't use the Enclave. This is acceptable because the machine key protects nothing that code running as that OS account couldn't already do: that account runs the sessions.
 - **The machine owner** is recorded in the signed org state (§5.2) when the machine enrolls, as the member whose device approved the enrollment.
 
 ### 3. Sessions: the two lanes
@@ -200,10 +208,23 @@ The contract is the research's §4, adopted whole. The points that bind every im
 5. **Liveness.** Both directions ping the application layer on every hop every 5–7 s, skipped while traffic flows. Two misses make the verdict. The app probes at once on wake, on network change and on focus. "Machine offline" and "hub unreachable" are shown separately.
    - The machine's hub lease, renewed by `hb-ack` and fenced by connection generation, stays as desk built it.
 6. **Retry.** Retries continue through the whole resume window, with jitter, and re-resolve the endpoint each time. A human action resets the backoff. Only an explicit verdict from the machine is a permanent failure.
-7. **Discrete actions are time-bound even inside a channel.** Spawn, send, steer, interrupt, answer, approve and the rest are refused past a 60 s window (the machine's clock against the action's `created`). The channel prevents replay and reordering, but the hub can still hold a frame.
-   - An action whose request is still pending is resealed by the app: new nonce and `created`, the same arguments and request digest.
-   - Anything else past its window shows as *not sent, send again*.
-   - The machine keeps its nonce ledger at least as long as the acceptance window.
+7. **Discrete actions carry a stable operation id and their target, and are time-bound even inside a channel.**
+   - **What every action carries.**
+     - An `opId`, chosen once by the app and kept across every reseal.
+     - The session `context` it targets (§3.5): lane B's binding, or lane A's launch epoch.
+
+     The channel and any step-up or WebAuthn signature cover both.
+   - **The executing side keeps a durable ledger keyed by `opId`.**
+     - The endpoint module records the claim before dispatch. The daemon (lane B) or sminos (lane A) records the result.
+     - A repeated `opId` returns the stored result and never executes twice.
+     - The ledger is kept for a day, as desk's is (`KEPT_S = 86400`).
+   - **The context is checked again at dispatch.** The daemon or engine host (lane B), or the bridge (lane A), rechecks it, not only the endpoint. So an action that arrives after a resume or a `/clear` is refused.
+   - **Freshness.** An action is refused past a 60 s window, measured by the machine's clock against its `created`. The channel prevents replay and reordering, but the hub can still hold a frame.
+   - **Resealing.** An action whose request is still pending is resealed by the app: a new nonce and `created`, the same `opId`, arguments and request digest.
+   - **A lost acknowledgement isn't "not sent".** The app asks `query {opId}` (RL4) and shows *outcome unknown* until the machine answers `done | in-progress | refused | not-received`.
+     - Only `not-received` shows *not sent, send again*.
+     - The machine then tombstones that `opId`, so a late copy is refused.
+     - A resend uses a new `opId`.
 8. **Byte-stream inputs** (MAWS's own `pty.*` terminals, should they be offered remotely) are de-duplicated by offset inside the channel, with no per-frame age check. No web or remote terminal into a Claude Code session exists (F5).
 
 ### 5. Identity and trust
@@ -227,24 +248,49 @@ All keys are P-256: ECDSA for signatures, ECDH for channel keys. Node, WebCrypto
   - A root key signs it.
   - The hub stores it and serves it. It cannot forge it, and it cannot roll it back unnoticed.
 - **How a machine checks it.**
-  - It pins the root at enrollment.
-  - It accepts only a higher version that links to the one it holds.
-  - It refuses a list older than the one it holds.
-  - For execution-grade actions it requires a state no older than a maximum age (default 24 h), refreshed by the hub on every change and daily.
-- **The residual.** Revocation reaches a machine only as fast as the hub delivers the new state. Withholding it can delay a removal, but only up to that maximum age for execution-grade actions.
+  - At enrollment it pins two things: the root key set and the offline recovery key.
+  - It accepts a new state only if it links to the head it holds. It keeps a durable high-water mark and refuses rollback.
+  - When a newer state removes a device, member, delegation or machine, the machine closes every affected channel and subscription at once. That covers every grade, `view` included, not only actions that need step-up.
+- **Revocations are delivered directly, with acknowledgement.**
+  - Besides publishing the new state, the admin device sends each removal to every machine as an RL4 action over that machine's channel.
+  - Each machine acknowledges. The admin's app lists any machine that hasn't applied it yet.
+  - The hub can delay a revocation only by also cutting the admin's channel to that machine, and the admin then sees the revocation as pending.
+  - A pending revocation can be applied on the machine itself, through the same-uid local app or a local command.
+- **There is a backstop age.** Every action, except those from a same-uid app on the machine's own Mac (§5.11), needs a state issued within the last 30 days.
+  - Any running admin app signs a no-change successor weekly.
+  - If no admin device has run for 30 days, remote actions stop and the app says why.
+  - The security clock is the state's authenticated `issued`, never the time the hub delivered it.
 - **Who writes it.**
-  - Admin changes are signed by an admin device: adding or removing a member, changing a role, removing a device, and adding a machine.
+  - Admin changes are signed by an admin device: adding or removing a member, changing a role, removing a device, adding a machine or a delegation.
   - A member adding their own new device needs a signature from one of that member's existing devices, and then an admin's countersignature. The admin's own devices need only an existing admin device.
   - Under a one-person org, that is one press on the owner's other Mac.
+- **Writers are serialized.** The hub accepts a successor only if it links to the current head. A writer whose successor loses retries on the new head. For an org of a few admins that is enough, and it keeps one serialized chain rather than forks.
+- **The residual: a stolen admin key.** It can sign successors, so the backstop doesn't bound its abuse.
+  - What ends it is a root transition signed by the offline recovery key, which every machine accepts over any state signed by the old root set (RL5).
+  - The hub withholding the transition shows the same way as a pending revocation.
+  - In the first milestones, software device keys make this risk larger. The org is one person, and that person's Macs are the admin devices.
 
 #### 5.3 Enrollment
 
-- **A machine.** The app of the member enrolling it makes a one-time code. The code carries the hub URL, a one-time redemption token and the org root's public key. It carries no secret org key; desk's code carried the org key (DX7).
+- **A machine.** The app of the member enrolling it makes a one-time code.
+  - The code carries the hub URL, a one-time redemption token, the org root's public key, the recovery key's public key, and a one-time **pairing secret** `k`.
+  - `k` travels from app to machine by the person's hand and never through the hub. The code carries no secret org key; desk's code carried the org key (DX7).
   1. `sminos hub enroll`, or its successor in the endpoint, reads the code from a hidden prompt or stdin, never from an argument.
   2. It generates the machine key and redeems the token for the machine's Access service token.
-  3. It sends its public key. The member's device then signs the machine into the org state with that member as its owner.
+  3. It sends its public key with `MAC(k, name ‖ machinePub ‖ tokenId)`. The member's device checks the MAC, so a key the hub substituted fails. Only then does it sign the machine into the org state, with its owners set (§6.3): that member by default, or the org.
   4. Until that state version arrives, the machine is *pending* and executes nothing.
-- **A device.** A new MAWS install generates its keys in the Enclave and shows a short code. The member approves it from an existing device, and an admin countersigns when needed (§5.2). The org's first device, at org setup, signs the first state with itself as root.
+- **An unattended machine** (a devcloud VM enrolling at boot) can't get a device signature, so it enrolls through a **delegation**.
+  - An admin signs the delegation into the org state. Today's provisioning key becomes that delegation, and its existing fields fit it: `{id, pub, prefix, expires, maxUses, offlineRevokeS, owners}` (`identity.ts:245-266`).
+  - The provisioning secret store then holds the delegation's private key instead of the org key.
+  - The booting machine generates its key, and signs its own machine certificate with the delegation key, so nothing passes through the hub to be substituted. The name must sit under the prefix.
+  - Uses are counted by the hub, as a courtesy only. A compromised VM holds the delegation key and can mint further machines under the prefix until the delegation expires or is revoked. Revoking the delegation removes them all.
+  - Verifiers accept the certificate while the delegation is live, with the delegation's owners as the machine's owners. No new org-state version is needed per VM.
+  - The hub stores the certificates, and serves them beside the state.
+- **A device.** A new MAWS install generates its keys: in the Enclave on signed builds, as software keys before that (§5.1).
+  - The approving device shows a one-time pairing code, which the person types into the new install. The new device sends its public keys with a MAC under that code, as for a machine.
+  - An admin countersigns when needed (§5.2).
+  - The phone registers its WebCrypto key and its passkey the same way.
+  - The org's first device, at org setup, signs the first state with itself as root, and makes the offline recovery key.
 
 #### 5.4 Channels
 
@@ -277,18 +323,25 @@ All keys are P-256: ECDSA for signatures, ECDH for channel keys. Node, WebCrypto
   - spawning only into checkouts known on that machine;
   - no arbitrary flags, environment or shell.
 - **The hub's checks are courtesy only.** The hub may refuse early to save a round trip, but it never decides.
+- **Every operation maps to a grade at the endpoint module, including indirect paths.** Disabling a control in the UI is not authorization.
+  - `send` carries literal text.
+  - Text that starts with `/` is a command. It is classified by lane A's route table or lane B's command catalog, and graded by its effect:
+    - `/compact`, `/clear`, `/rewind` and `/resume` take `manage`;
+    - a session-only model or effort change takes `converse`;
+    - unknown commands take `manage`.
+  - Lane B's own compact, which is a queued `/compact` user message (lane-b-control-map), is graded the same way.
 
 **Grades**, from lowest to highest. Each includes the ones below it, except where noted.
 
 | Grade | Allows | Default holder |
 |---|---|---|
-| `list` | See the session in listings (§6.2) | Per owner decision §10.1 |
-| `view` | Subscribe to the session's plane: transcript, subagents, diff | Owners; shares at view or above |
-| `converse` | Send, steer, interrupt, answer a question, side question | Owners; shares at converse or above |
-| `approve` | Answer permission requests and dialogs that execute | Owners; shares at approve (if §10.1 allows that grade) |
+| `list` | See the session in listings (§6.2) | Every org member, unless the session's access is `private` |
+| `view` | Subscribe to the session's plane: transcript, subagents, diff | Owners; shares at view or above; every member when access is `org-view` or `org-converse` |
+| `converse` | Send, steer, interrupt, answer a question, side question | The credential's principal. On an org credential also: owners, shares at converse or above, and every member when access is `org-converse` (§6.4) |
+| `approve` | Answer permission requests and dialogs that execute | The credential's principal. On an org credential also: owners and shares at approve. Never org-wide. |
 | `manage` | Change owners and shares, end the session, compact, rewind | Owners |
-| `spawn` (per machine, not per session) | Start a session on this machine | Machine owner; members it has granted (§6.3) |
-| `machine-admin` (per machine) | Read-only mode, ceilings, grants | Machine owner |
+| `spawn` (per machine, not per session) | Start a session on this machine | The machine's owners; members granted it (§6.3) |
+| `machine-admin` (per machine) | Read-only mode, ceilings, grants | The machine's owners; members granted it |
 
 #### 5.6 Step-up
 
@@ -305,37 +358,53 @@ All keys are P-256: ECDSA for signatures, ECDH for channel keys. Node, WebCrypto
 
 - **Every log event carries its writer's signature.** That is a device for a human's words, or the hosting machine for events it writes on behalf of its sessions (§5.8). Machines verify before importing into their logs, and apps verify before drawing.
 - **The endpoint does the cryptography for sminos.** It signs what the machine's sminos daemon wrote as it uploads, and verifies what arrives before handing it to sminos over the local socket. Python stays stdlib-only.
+- **Who may write a person's words.** Today any `human` event is delivered into its session as the owner's words, through the bridge (`sminos.py:145-153`). That holds whether `<machine>/human` or `hub/<member>` wrote it. Under this model, a `human` event is delivered as words only in two cases:
+  - it is signed by a device whose member holds `converse` on the target session;
+  - it is signed by the machine, attesting its owner's words from the owner's own terminal `sminos say`. This is the operator path, run outside any session (RL8).
+
+  Any other `human` event is delivered as a peer message, or refused. Without this rule, a member with no grade on a session could reach it as the owner's words through the log.
+- **The operator path proves less than it looks.** Its guard is only an environment check: an agent can run `env -u CLAUDE_CODE_SESSION_ID sminos say …` (`sminos.py:7817-7833`). So a machine-attested `human` event proves only that something under that OS account wrote it. Such words are delivered as words only into sessions on that same machine whose owners include the machine's owner. Everywhere else they arrive as a peer message. Words into another machine's session need a device signature.
+- **Signatures are made once and kept.** Machines store events unsealed and today seal them at upload, under a nonce derived from the event (`sminos_hublog.py:14-18, 80-97`). The hub refuses a different payload at a stored position as `conflict` (`project.ts:413-418`). ECDSA signatures are randomized, so signing again on a resend would break that.
+  - The endpoint module therefore signs each event once and keeps a ledger keyed by `(project, writer, seq)`. Every resend reuses the stored signature.
+  - The ledger works with Enclave and WebCrypto keys, which can't sign deterministically. That is why it was chosen over RFC 6979.
+- **Load.** Every machine follows every project (`sminos_uplink.py:37-41`), so it verifies every event, a fresh machine's whole backlog included. That's cheap in Node, but it belongs in the endpoint module's benchmark (§12).
 - **Rejected alternative:** having sminos verify through `/usr/bin/openssl`. That can verify signatures but can't carry an AEAD channel, so there would be two trust implementations.
 - **Phase 1 residual:** log contents stay readable by the hub, because the hub routes on `to` and `kind`. Encrypting log bodies needs group keys and is deferred (§7.3).
 
 #### 5.8 Agents acting for their owners
 
-- **What an agent message carries.** When a session `sminos say`s across owners, the hosting machine signs an attestation into the event: `{machine, session, owners, origin}`. A receiving machine accepts the attestation only if:
-  - each claimed owner is entitled on the sending machine, being that machine's owner or holding `spawn` there;
-  - the sending machine is in the current org state.
-- **The limit that leaves.** A compromised machine can still lie about which of its entitled members owns a session. It cannot claim members who have no standing on it.
-- **Delivery at the recipient machine** follows the recipient's policy (owner decision §10.3; recommended: deliver as a peer request).
-  - The message reaches the session as a cross-session message from another agent, marked with the sender's owners, never as the owner's words.
-  - It confers no grade. An agent can't approve, share or spawn on behalf of the person whose agent it messaged.
-  - Human words always come through the bridge, and peer messages through the inbox (sminos today), so the two can't be confused.
+- **Delivery is today's `sminos say`, unchanged** (owner, 2026-10-26: "the same mechanism as today's sminos say, only with each session labelled with who owns it").
+  - Agents in one org message each other as they do now, and a message may wake its recipient.
+  - The only addition is the owner label, carried with the sending session and signed so that it can be trusted.
+  - There is no recipient policy, narrowing or off switch in this initiative.
+  - As today, a peer message never counts as a person's words and never approves anything. Human words come through the bridge and peer messages through the inbox, so the two can't be confused (§5.7).
+- **The label is an attestation.** The hosting machine signs `{machine, session, owners, ownersProof, origin, orgStateVersion}` into the event (RL9). A receiving machine accepts it only if the sending machine is in the current org state, and each claimed owner is one of:
+  - one of the machine's owners, per the org state or its delegation certificate;
+  - proven by `ownersProof`: device signatures from the owners themselves, namely the requester's signed spawn action for a MAWS spawn, and an existing owner's signed `manage` action for each co-owner added (§6.1). A `sminos spawn` child copies its parent's owners and proofs, and records the parent's session id.
+
+  Grants play no part in this check. They bound spawning only at the hosting machine, which holds the current grants and gets revocations directly (§5.2). Owner sets are small, and each proof is a few hundred bytes.
+- **The residual.** A compromised machine can reuse a proof to label another of its sessions with that owner. It can't label a session with a member who never spawned or was never added on that machine.
 - **Default owners** by how a session started (desk-sminos-orchestrator's sminos-side rule):
   - a terminal session: its machine's owner;
-  - a session MAWS spawned: the signed requester;
-  - a session spawned with `sminos spawn`: the spawning session's owners.
+  - a session MAWS spawned: the signed requester. Desk spawns already record `by` as the hub member id (`sminos_rpc.py:618-620`).
+  - a session spawned with `sminos spawn`: the spawning session's owners, **copied into the new record at spawn time**. Today sminos records `by` as the spawner's alias (`caller_alias()`, `sminos.py:7598, 7693`), and aliases change and are reused. sminos must also record the spawner's session id, and never resolve owners later through the alias.
+- **Lane A's session record** is sminos's member record. It has no owners field today, so that field is new. Sessions that predate it default to the machine owner.
 
 #### 5.9 What the hub can and can't do
 
 It can:
 - see routing metadata: org, member ids, machine names, project ids, session ids, sizes, timing;
-- see the listing fields §6.2 allows, and the log plane's contents (§5.7);
+- see the listing fields of sessions that aren't `private`, and the log plane's contents, which are org-readable by design (§5.7, §6.2);
 - delay or drop frames, or deny service;
-- delay revocation up to the maximum age (§5.2).
+- delay a revocation, but only visibly to the admin (§5.2);
+- report presence and pending counts, which the app labels as hub-reported.
 
 It can't:
 - read or alter channel contents (transcripts, diffs, actions);
 - forge an action, a log event or an org-state version;
 - replay an action;
-- make a person approve something other than what the machine holds.
+- make a person approve something other than what the machine holds;
+- fabricate a listing, since listings are machine-signed (§6.2).
 
 The hub's deployer has the same limits, as long as the app comes from MAWS's signed release channel (§11).
 
@@ -346,48 +415,93 @@ The hub's deployer has the same limits, as long as the app comes from MAWS's sig
   - **`native-mac`** is the MAWS app, with every grade.
   - **`web-cards`** is the phone. The owner kept the phone loop through the Desk Web pause (2026-10-26): desk-web's push notifications, and its question and permission cards, and nothing else. Its grades are:
     - `list`;
-    - the pending request cards of sessions the member may approve, sealed through a channel like any other subscription;
+    - the pending request cards of sessions the member **owns**, sealed through a channel like any other subscription;
     - answering a question;
-    - approving or denying a pending permission request.
+    - approving or denying a pending permission request on those sessions. Approvals on a session shared with the member need the native app.
 
-    Every answer and approval from this class carries a WebAuthn assertion whose challenge is the action's digest (RL4), verified against the passkey listed for that device. This class's code is served by the hub, so its key can be used without being extracted. The assertion makes such use need the person's biometric gesture at that moment. It proves presence, not intent, since the browser's prompt doesn't show the digest. Accepted residual: a hostile deploy could get a pending request on the member's own sessions approved during a gesture the person made for another card. It can't send, spawn, share or manage.
+    **Every answer and approval from this class carries a WebAuthn assertion.** Its challenge is SHA-256 of the canonical action (RL4). The machine checks:
+    - the listed passkey's public key, credential id and `rpId`;
+    - the origin;
+    - the user-verification flag;
+    - a monotonic signature counter, where the authenticator keeps one.
+
+    Why it is needed: This class's code is served by the hub, so its key can be used without being extracted. The assertion makes such use need the person's biometric gesture at that moment. It proves presence, not intent, since the browser's prompt doesn't show the digest. Accepted residual: a hostile deploy could get a pending request on the member's own sessions approved during a gesture the person made for another card. It can't send, spawn, share or manage.
 - **A later web port of MAWS** is class `web`. It gets `list`, `view` and `converse`. Its `approve`, `manage`, `spawn` and admin actions need confirmation on a native device, or `web-cards`' per-action assertion for approvals.
 
 #### 5.11 The local boundary
 
-- **Inside one OS account, the trust boundary is the uid**, as now. The endpoint–daemon, endpoint–sminos and bridge sockets live in 0700 directories as 0600 sockets, owner-checked, with symlinks refused (sminos already does this: `sminos_bridge.py:1434-1443`). Authentication comes before any output (holder design §6).
-- **An app on its own machine** talks to the local endpoint over a same-uid socket with the device's identity. The endpoint applies the same grades. In practice that member is the machine's owner.
+- **Inside one OS account, the trust boundary is the uid**, as now. The daemon's RL10 socket, the engine host's socket and the bridge sockets live in 0700 directories as 0600 sockets, and authentication comes before any output (holder design §6). sminos already makes the directory 0700 and binds the socket at a temp name, chmod 0600, then renames it (`sminos_bridge.py:1434-1443`). Checking the socket's owner and refusing symlinks are **new requirements**.
+- **An app on its own machine** talks to the local daemon over a same-uid socket with the device's identity. The endpoint applies the same grades. In practice that member is the machine's owner.
 
 ### 6. Ownership, sharing and visibility (enforcement side)
 
-Owner decisions are pending for three choices in this section (asked 2026-10-26; §10.1). The mechanism below supports every option they offered, and the recommended defaults are marked.
+All of this section's choices are decided (owner, 2026-10-26).
 
 #### 6.1 Owners
 
-- **Default owners** follow §5.8.
-- **More owners.** Adding an owner ("owned by many") is a `manage` action by an existing owner. The machine records it in the session record and attests it from then on.
+- **Default owners** follow §5.8. On a machine owned by several members or by the org (§6.3), a terminal session's owners are the machine's owners.
+- **More owners.** Adding an owner ("owned by many") is a `manage` action signed by an existing owner's device. The machine records the signed action in the session record and carries it in every attestation from then on (`ownersProof`, §5.8). Other machines can then accept a co-owner who has no grant on the hosting machine.
 - **Removal.** An owner can remove themselves. Removing another owner takes `manage` plus step-up. A session always keeps at least one owner.
 
-#### 6.2 Visibility
+#### 6.2 Visibility and access
 
-- **Recommended:** every member sees the listing; contents are locked. The listing fields are owners, machine, project, lane, state and title. The machine publishes them to the hub, which serves them to org members. Transcripts and actions need `view` or higher.
-- **If the owner chooses "own and shared only"**, two changes follow:
-  - Listings are sealed per member: the machine publishes per-member listing frames over channels, not one hub-readable listing.
-  - The hub can no longer serve listings while the machine sleeps.
+**Each session has a general access level**, set by its owners, the way a shared document is. The default is `listed`.
 
-#### 6.3 Machine grants
+| Access | Listing | Contents and actions |
+|---|---|---|
+| `private` | Owners and shares only | Owners and shares only |
+| `listed` (default) | Every org member: owners, machine, project, lane, state, title | Owners and shares only |
+| `org-view` | Every org member | Every member may `view`; owners and shares as granted |
+| `org-converse` | Every org member | Every member may `view` and `converse`; `approve` and `manage` stay with owners and shares |
 
-- **Recommended:** members other than the machine owner spawn only with the machine owner's grant.
-- **Who signs a grant.** The machine owner's device signs the grant `{machine, member, rights: ['spawn'], version}`, and the machine verifies it against the org state. The admin's signature isn't needed, so the machine owner decides about their own machine.
-- **A grant is a delegation.** A session spawned under it runs as the machine's OS account and under its Claude login. Its owner is the member who spawned it.
-- **Alternatives:**
-  - "Org resource" makes `spawn` a role-wide right in the org state.
-  - "Never" removes grants entirely.
+- **Individual shares** add a member at `view`, `converse` or `approve` (§5.5), whatever the general level.
+- **The sidebar.** It shows the member's own sessions first. Other people's sessions sit behind a per-project toggle, each with its owner and machine (owner, 2026-10-26).
+- **Where listings come from.**
+  - The machine publishes the listing fields of every session that isn't `private` to the hub, which serves them to org members.
+  - Each listing record is signed by the machine: `{session, revision, issued, fields}` (RL6). The app verifies it, and labels a cached one with its age when the machine is offline.
+  - A `private` session's listing goes only over channels, to its owners' and shares' devices. The hub learns nothing about a private session except the traffic its machine sends.
 
-#### 6.4 Credentials
+**What travels where.** The hub can't keep content private by filtering the log plane: each writer's seqs are contiguous, so a withheld event becomes a permanent gap. The log plane is therefore org-readable by design, which fits `sminos say` staying as it is (§5.8).
+- **Channels only, sealed to members whose grade allows them:**
+  - transcripts;
+  - pending requests with their tool input;
+  - usage and settings reads;
+  - what a session says to its own person (desk's project chat of `<message>`s).
+- **The log plane:** inter-agent `say` traffic and project-level events.
+- **What this means for `private`.** A `private` session's `say` messages to other agents are still org-readable. The app says so where `private` is set.
+- **Today, with the org as the owner alone,** nothing visible changes. The split matters once a second member joins.
 
-- **One login per machine.** A machine's sessions use that machine's Claude login, and possibly its gateway. Spawning on a granted machine spends the machine owner's subscription. The app says so at spawn.
-- **Per-member credentials on a shared machine** are out of scope. If needed, they would be a separate machine (a separate OS account) per member.
+#### 6.3 Machine owners and grants
+
+- **A machine's owners** are one or more members, or the org itself (owner, 2026-10-26). The org owns shared machines such as devcloud VMs and the mini, if the owner says so. A delegation's machines take the delegation's owners (§5.3).
+- **Per-machine IAM.** The machine's owners grant members rights on it: `spawn` and `machine-admin` (owner, 2026-10-26: "IAM can name each user's rights per machine").
+  - The grant is `{machine, member, rights, version}`, signed by an owner's device, or by an admin device when the org owns the machine. The machine verifies it against the org state.
+  - Without a grant, nobody but the owners can spawn there.
+- **A grant is permission to use the machine, not its login.** A session spawned under a grant runs as the machine's OS account, but under the spawner's own credential slot or an org credential (§6.4). Its owner is the member who spawned it.
+
+#### 6.4 Credentials: the credential follows the principal
+
+**Anthropic's terms bind this** (the MAWS architect's identity research, `identity-prior-art.md` §3):
+- Consumer accounts may not be made "available to anyone else".
+- On Team and Enterprise seats, users "can't route their work through another user's account".
+- Third parties may not route requests through Free, Pro or Max credentials on users' behalf.
+
+The consequences, read by the architect and adopted here:
+- **Every session record names its credential slot** (RL6): `{kind: 'personal', principal}` or `{kind: 'org', id}`.
+- **Driving a session on a personal credential is its principal's alone.** `converse` is itself driving: typing into or steering the session uses that person's account. So on a personal slot, anyone other than its principal gets at most `view`, and `converse` and `approve` are refused.
+  - Co-owners keep `manage` (share, retire).
+  - Everyone's agents may still message the session as peers, which is the owner's cooperation model.
+  - `org-converse`, and shares at `converse` or `approve`, take full effect only on sessions with an org credential (an org API key, or a cloud provider's key). The app says so where the level is set.
+- **A grant to spawn on someone else's machine is not enough.** The session must run on the spawner's own Claude login, in a credential slot of the spawner's own on that machine (a separate OS user, or a `CLAUDE_CONFIG_DIR` of their own), or on an org credential. It never runs on the machine owner's login.
+- **MAWS never stores or relays claude.ai tokens.** Sign-in happens on the machine, through Claude Code's own flow.
+- **One case is still unclear:** A's agent working on a message from B's agent, on A's quota. The owner's model, where agents talk and the label says who owns them, makes that the ordinary case. It goes to the owner with the composite.
+
+
+- **Slots on a machine.** A slot is named in the session record and bound to a member on that machine (or to the org), and never holds or passes a token through MAWS. A machine has its owner's slot by default. Other members add their own slots there, signing in through Claude Code themselves. The org's slot holds an org key.
+- **Per-member credentials on a shared machine** are out of scope for phase 1. Two routes exist if they're needed:
+  - a separate machine (a separate OS account) per member;
+  - routing the session's inference through the spawning member's own credentials, over `ANTHROPIC_UNIX_SOCKET`. The engine already supports this route at launch (the CC SSH-mode note, §3), but MAWS would own the forwarder. An org policy with `allowedProviders` set refuses such sessions.
+- **Open for the composite:** whether several people operating sessions backed by one person's subscription fits Anthropic's terms. This is the identity inventory's item 6.7, raised for the architect.
 
 ### 7. The hub
 
@@ -395,7 +509,7 @@ Owner decisions are pending for three choices in this section (asked 2026-10-26;
 
 - **Registry, one per org.** It holds the org-state chain, members' Access identities (email → member id), enrollment state, and listings (§6.2). Member management is new: today the only member is the bootstrap admin (registry.ts:971).
 - **Machine DO, one per machine.** It terminates the endpoint's WebSocket and holds its lease. It relays channel frames between the endpoint and each attached app's socket, without decrypting them, and keeps presence and pending-request *counts* for badges.
-- **Project DO, one per project.** The log plane: storage, fan-out and signed-event checks (as courtesy).
+- **Project DO, one per project.** The log plane: storage, fan-out and signed-event checks (as courtesy). It no longer carries pending requests and their tool input. Today every browser gets all of them; they move to channels (§6.2).
 - **Human sign-in** stays Cloudflare Access by email, for admission to the hub only. Authority comes from device keys, never from the Access session.
 
 #### 7.2 Constraints that bind
@@ -415,6 +529,7 @@ Owner decisions are pending for three choices in this section (asked 2026-10-26;
 #### 7.4 Notifications
 
 - **While the app runs,** it raises native notifications from the events on its channels.
+- **Pushes go only to the devices of a session's owners and approve-shares.** That needs an owners projection at the hub (from RL6's listing projection, or per-member over channels for `private` sessions), which the hub doesn't have today.
 - **The phone (`web-cards`)** keeps desk's Web Push. The hub sends a notification that says only that a session is waiting ("`maws-45` asks something"). That needs the hub to know a session has a pending request, which is metadata it already sees (§5.9). The card's contents come over the phone's channel.
 - **APNs for the Mac app** needs the signed app (§11). Until then, a Mac app that isn't running gets nothing.
 
@@ -428,29 +543,49 @@ Owner decisions are pending for three choices in this section (asked 2026-10-26;
 | Session host dies | — | The session ends and is shown as ended, with resume offered. |
 | App sleeps or quits | Everything on the machine | Pending requests wait. Client-bound tools answer "no app attached". On wake, resume by cursor. |
 | Machine sleeps | — | Shown as machine offline. Listings stay (if hub-readable). Contents unavailable until the lid-closed tail (§7.3). |
-| Device lost | — | An admin removes the device, or the member removes it from another device. Machines refuse it once the new state arrives (within the maximum age for execution grade). |
+| Device lost | — | An admin removes the device, or the member removes it from another device. The removal goes to every machine directly, and each acknowledges it. The admin's app lists any machine that hasn't (§5.2). |
 | Machine compromised | — | Remove it from the org state. Its past attestations stay in the log, marked by state version. |
-| All admin devices lost | Machines keep working read-only for execution grade after the maximum age | The recovery key signs a new root set (§10.2). Without it, every machine is re-enrolled. |
+| All admin devices lost, or an admin key stolen | Sessions keep running. Remote actions stop after the 30-day backstop if no admin signs | The offline recovery key signs a root transition to a new admin set (§5.2, RL5). |
 | Mixed versions | — | §2.2: not-upgraded machines show *needs upgrade*, execute nothing from the merged app, and their events display as unverified. |
 
 ### 9. Migration from desk phase 1
 
-1. The merged app sets up the org root on the owner's device. That makes the first signed state, with the existing admin as its member and their existing machines listed as pending.
-2. Each machine upgrades to the endpoint and re-enrolls with a new code (§5.3). Its log is kept.
-3. The phone's desk-web cards move to the `web-cards` class (§5.10).
+**Sequencing** (agreed by the MAWS architect and desk-sminos-orchestrator). The protocol is built once.
+- RL1–RL4 go first, with software device keys and a signed org state of one member.
+- Nothing new goes over DX2 or the org key. DX2 stays only for machines and the phone that haven't moved yet.
+
+**Each machine cuts over once and for good.** As soon as a machine's endpoint module is enrolled:
+- It rejects every DX6 RPC.
+- It rejects any DX1-coded input that could cause execution or delivery as words.
+- Legacy-coded events from machines that haven't moved never arrive as a person's words. During the migration window they arrive only as peer messages marked *unverified (legacy)*, and carry no authority, like any peer message.
+- History is imported as inert records.
+
+The hub serves both protocols, but a migrated endpoint accepts only one trust model.
+
+**One ordering this forces.** The phone must keep working (owner), and a migrated endpoint takes no DX6. So `web-cards` (step 4) has to ship no later than the first machine's cutover. Until a machine cuts over, the phone keeps DX6 for that machine.
+
+**Steps.**
+1. **Set up the org root** on the owner's device. That makes the first signed state, with the existing admin as its member, their existing machines listed as pending, and the offline recovery key made (§10.2).
+2. **Upgrade each machine and re-enroll it in place** with a new code (§5.3), keeping its name, as `hub enroll --replace` does today.
+   - Log writers are `<enrolled name>/…`, so a new name would split the log's history.
+   - The mini still runs a pre-MW1 sminos, so upgrading it comes first.
+   - The hub serves DX2 and RL1 side by side for each machine until that machine has moved.
+3. **Re-attest history.** At migration, each machine signs its own past events once. The hub's existing project logs then display as *attested at migration by `<machine>`* instead of *unverified (legacy)* for good.
+4. **Move the phone's cards to `web-cards`** (§5.10), no later than the first machine's cutover (above).
    - The phone registers a device: a WebCrypto channel key plus its passkey, approved from the owner's Mac.
-   - It answers through RL4 actions over a channel instead of DX6 RPCs coded with the org key.
-   - The phone loop must keep working at every step, so the hub serves both paths for a machine until that machine has moved.
-4. When the last machine and the phone have moved, the shared org key is retired. The hub deletes the wrapped copies, and the endpoint ignores DX1 codes. Until then, events coded with the old key display as *unverified (legacy)*.
+   - It answers through RL4 actions over a channel.
+   - This means desk-web implements RL2 in WebCrypto (ECDH, HKDF and AES-GCM are all available there). It is not free.
+   - The phone loop keeps working at every step.
+5. **Retire the shared org key** once the last machine and the phone have moved. The hub deletes the wrapped copies, and the endpoint module ignores DX1 codes.
 
 ### 10. Open owner decisions, with recommendations
 
 | # | Decision | Recommendation | When the alternative is better |
 |---|---|---|---|
-| 10.1 | Session visibility, share grades, and spawn rights on another member's machine (asked in this session's chat, 2026-10-26) | Org-wide listing with locked contents. Share grades view / converse / approve. Spawning only with the machine owner's grant. | "Own and shared only" when members must not learn of each other's work at all (§6.2's costs apply). |
-| 10.2 | Org root recovery | Admin device keys plus one offline recovery key, made at org setup and kept by the owner. | Accept re-enrolling everything if keeping an offline key is unwanted. |
-| 10.3 | Default policy for agent messages across owners | Deliver as a peer request, marked. The recipient can narrow it or turn it off. | Default off for orgs that mix trust levels. |
-| 10.4 | Lid-closed viewing | Phase 1 without it. The encrypted tail (§7.3) is the first later child, if lid-closed reading matters. The phone loop is decided: kept as `web-cards` (§5.10). | Pull the tail into phase 1 if the sleeping MacBook stays the main scene. |
+| 10.1 | Session access, share grades, machine rights | **Decided (owner, 2026-10-26):**<ul><li>a per-session access level of `private`, `listed` (the default), `org-view` or `org-converse`;</li><li>shares at view, converse or approve;</li><li>machines owned by members or by the org, with per-machine IAM grants (§6.2, §6.3).</li></ul> | — |
+| 10.2 | Org root recovery | **Decided (owner, 2026-10-26):** an offline recovery key, made at org setup and kept by the owner, which can sign a new set of admin keys. | — |
+| 10.3 | Agent messages across owners | **Decided (owner, 2026-10-26):** today's `sminos say`, with a signed owner label. A message may wake its recipient. No new policy (§5.8). | — |
+| 10.4 | Lid-closed viewing | **Decided (owner, 2026-10-26):** the encrypted tail (§7.3) is a later child, not in the first release. The phone loop is kept as `web-cards` (§5.10). | — |
 | 10.5 | Step-up on routine approvals of your own session | Not required by default. | Required where devices are shared or left unlocked. |
 
 ### 11. Dependencies
@@ -461,7 +596,7 @@ Owner decisions are pending for three choices in this section (asked 2026-10-26;
   - The org is the owner alone for the next months (owner, 2026-10-26), so shipping to a second member, and with it C12, is not in the first milestones. The people model is built in from the start anyway, so a second member is an org-state edit, not a redesign.
   - Notifications through APNs need signing too.
 - **Secure Enclave keys from Electron,** once the build is signed. This needs a small native module in main. A permanent Enclave key in the data-protection keychain needs a keychain-access-group entitlement. Moving a device from `software` to `enclave` keys is a device re-registration: a new device entry, with the old one removed.
-- **The headless Node package** for the endpoint and daemon, on macOS and Linux, versioned apart from the app (§2.2).
+- **The headless daemon package,** on macOS and Linux, versioned apart from the app (§2.2). Its runtime is a choice to make: either the mini and the devcloud Linux hosts get a system Node, or the package bundles its own runtime as a single-executable build. Which Node those hosts have today hasn't been checked.
 - **Member management in the hub's Registry:** invite, role, removal, email change. None of it exists today.
 
 ### 12. Unknowns to settle by spike or measurement
@@ -470,24 +605,33 @@ Owner decisions are pending for three choices in this section (asked 2026-10-26;
 2. The `-p` reaping gate: does `turn.step` hold cron-fired and task-notification turns in a `-p` process, and does SIGTERM drain the same way as in the TUI (holder design §9)?
 3. Native `rewind_conversation` across `--resume`: duplicated or restored content, as the lane A substitute showed (truncation spike).
 4. Hub topology and throughput: app → Machine DO relay of sealed frames, with per-hop latency and the cost per active session (research §8 spike 3).
-5. The endpoint–daemon local hop's cost (§2.1).
-6. Claude Code's SSH mode in 2.1.311, and the Desktop 3.6556 helper. If either gives MAWS a better process owner or transport without patching the engine, §2.1's engine-host row may change. The notes are in progress.
+5. The budget for local latency: MAWS's own local sessions must not get slower than today's app main → engine host → `claude` path (§2.1).
+6. The Desktop 3.6556 helper (`research/desk-remote/desktop-ssh-helper-3.6556.md`).
+   - Its core contract hasn't changed: seq replay, stdin-offset de-duplication, line-aligned checkpoints.
+   - It changed liveness (how an OpenSSH link is judged silent), adoption and deployment safeguards.
+   - It hardened RPC framing.
+   - It now persists interrupts it couldn't deliver.
+   - The holder design takes these as inputs when it is revised; nothing here changes.
+
+    Claude Code 2.1.311's SSH mode is settled: it offers no session service MAWS could use instead of the engine host. Its parts are an entrypoint marker, Desktop config metadata, a telemetry name, and `ANTHROPIC_UNIX_SOCKET` inference routing (`research/desk-remote/cc-ssh-mode-2.1.311.md`). The engine-host design stands.
+8. The endpoint module's verification load: a fresh machine verifying every project's backlog (§5.7).
 7. Linux transient scope and lingering under `KillUserProcesses`. macOS TCC attribution for `claude` launched by a launchd daemon (holder design §9).
 
 ### 13. Decisions taken here, and alternatives rejected
 
 **Taken:**
-- The endpoint and the MAWS daemon are separate processes (§2.1).
+- The endpoint is a module inside the MAWS machine daemon, and the engine host is a separate process (§2.1, the architect's ruling).
 - One curve, P-256.
 - No group keys in phase 1.
 - Pairwise sealing per subscriber.
 - The 60 s window on discrete actions is kept inside channels.
 - The machine key is a 0600 file where the Enclave isn't available.
 - Grants are signed by the machine owner, not the admin.
-- Listings are hub-readable under the recommended visibility.
+- Listings are hub-readable (§6.2).
 - Access is for admission only.
 
 **Rejected:**
+- *A separate endpoint process* beside the daemon (§2.1). This was the first draft's position. It buys no isolation under one uid, and costs a hop and a second local protocol.
 - *The Query in the client app* (§3.1).
 - *sminos as the trust boundary with an OpenSSL CLI* (§5.7).
 - *Group-keyed live streams* in phase 1 (§5.4).
@@ -516,24 +660,43 @@ These are named here with their binding fields. Byte-level schemas and test vect
   - The answer is `replay | snapshot | missing`.
   - Credit-based flow control, and snapshot paging.
 - **RL4, Discrete action.**
-  - The fields are `{action, session?, args, requestDigest?, nonce, created, stepUp?}`, sealed inside the channel.
+  - The fields are `{opId, action, session?, context?, args, requestDigest?, nonce, created, stepUp?, webauthn?}`, sealed inside the channel.
+  - `context` is mandatory for any action on a session.
   - `stepUp` is the step-up signature over the canonical action.
-  - Refused past 60 s, and refused on a reused nonce.
+  - `webauthn` is `{credentialId, authenticatorData, clientDataJSON, signature}`, whose challenge is SHA-256 of the canonical action.
+  - Refused past 60 s, and refused on a reused nonce. A repeated `opId` returns its stored result.
   - The answer is immediate (`accepted | refused {reason}`). The outcome arrives on the plane.
+  - `query {opId}` answers `done {result} | in-progress | refused | not-received`.
+  - Revocations are RL4 actions too, sent by an admin device to each machine and acknowledged (§5.2).
 - **RL5, Signed org state.**
-  - The fields are `{org, version, prev, issued, members[{id, email, role, devices[{id, class, channelPub, stepUpPub}]}], machines[{name, pub, owner}], projects[...]}`, with signatures by root keys.
-  - Grants are separate records signed by machine owners: `{machine, member, rights, version}`.
+  - The fields are `{org, version, prev, issued, root: {keys[], recoveryPub}, members[{id, email, role, devices[{id, class, keyStorage, channelPub, stepUpPub, passkey?: {credentialId, publicKey, rpId}}]}], machines[{name, pub, owners: memberId[] | 'org'}], delegations[{id, pub, prefix, expires, maxUses, offlineRevokeS, owners}], projects[...]}`, with signatures by root keys.
+  - Grants are separate records signed by a machine owner's device, or by an admin device for org-owned machines: `{machine, member, rights, version}`.
+  - Machine certificates under a delegation are `{machine, pub, delegation, use}`, signed by the delegation key.
+  - A root transition `{fromVersion, newRootKeys[], issued}` is signed by the recovery key. Machines accept it over any state signed by the old root set.
+  - Grants are checked only by the hosting machine (§5.8).
 - **RL6, Session record** (machine-held).
-  - `{machine, session, lane, origin, project?, owners[], shares[{member, grade}], created, context}`.
-  - The listing projection is `{owners, machine, project, lane, state, title}`.
+  - `{machine, session, lane, origin: {kind: 'terminal' | 'maws' | 'sminos-spawn', requester?, spawnerSession?}, credential: {kind: 'personal', principal} | {kind: 'org', id}, project?, owners[], ownersProof[], access: 'private' | 'listed' | 'org-view' | 'org-converse', shares[{member, grade}], created, context}`.
+  - Owners are copied at spawn and never resolved later through an alias.
+  - The listing projection is `{session, revision, issued, fields: {owners, machine, project, lane, state, title}}`, signed by the machine key.
 - **RL7, Capabilities.**
   - Per session: lane-b-control-map's `ControlCapabilities`.
   - Per device: `{grades granted, clientClass}`.
 - **RL8, Log event signature.**
   - The writer is a `device | machine`, signing over the canonical event.
+  - The signature names its signer with a key id, and uses a new domain version (`…-v2`). Today's `mac` is fixed at `{nonce 16 B, value 32 B}`, and nothing names the signer (`log-store.ts:52`, `project.ts:1353, 1428`, `sminos_codes.py:49-50`).
+  - The v1 verification path stays for history, or a signed checkpoint freezes it.
+  - Signatures are made once and reused on every resend (§5.7).
+  - The operator path: a machine-signed `human` event attests its owner's words from the owner's own terminal `sminos say`, outside any session (§5.7).
   - It replaces DX1's HMAC for the merged product.
-- **RL9, Attestation of a cross-owner say.**
-  - `{machine, session, owners, origin, orgStateVersion}`, signed by the machine key, inside the log event.
+- **RL9, Attestation of a session's owners** on a say.
+  - `{machine, session, owners, ownersProof, origin, orgStateVersion}`, signed by the machine key, inside the log event.
+  - `ownersProof` is a list of device-signed actions: the requester's spawn action, and `manage` add-owner actions. Each names the machine.
+- **RL10, Endpoint module ↔ sminos daemon** (local 0600 socket, same uid).
+  - Log events go both ways. Upward events are signed by the endpoint module as they leave; downward events are verified before sminos imports them.
+  - Lane A RPCs come in, already authorized.
+  - The lane A plane goes out.
+  - Member state and listing fields go out.
+  - The socket's presence tells sminos to stay local-only (§2.1).
 
 ## Decision Log
 
@@ -546,3 +709,48 @@ These are named here with their binding fields. Byte-level schemas and test vect
    - Signing is planned (an Apple Developer ID), and the first milestones run unsigned with software device keys.
    - A remote MAWS session's controller is on its machine.
    - The phone loop stays through the Desk Web pause: push notifications plus question and permission cards, and nothing else. It is the `web-cards` client class (§5.1, §5.10, §7.4, §9, §11).
+6. **2026-10-26, the MAWS architect's ruling.** One machine daemon contains the endpoint as a narrow module. The engine host stays a separate process under it. This replaces the first draft's separate endpoint process (§2.1).
+7. **2026-10-26, owner (round 1, part 2).**
+   - Agent messages across owners are today's `sminos say` plus a signed owner label (§5.8).
+   - The sidebar shows the member's own sessions first, and others' behind a per-project toggle (§6.2).
+   - The lid-closed tail is a later child (§7.3).
+   - Recovery is an offline key (§10.2).
+8. **2026-10-26, folded from desk-sminos-orchestrator's code review:**
+   - the duty split against the sminos code, and RL10;
+   - the rule for who may write a person's words (§5.7);
+   - owner provenance on spawns, and co-owners in attestations (§5.8, §6.1);
+   - migration in place, with re-attestation (§9);
+   - the max-age exemption for the local app (§5.2).
+9. **2026-10-26, owner (this session's questions).**
+   - App first, a web surface where possible, and the app connects directly to its own machine's daemon.
+   - Each session has an access level set by its owners, the way a shared document does: `private`, `listed` (the default), `org-view` or `org-converse`.
+   - Shares are at view, converse or approve.
+   - Spawning on another member's machine needs the machine owners' grant. Machines are owned by members or by the org, with per-machine IAM (§6.2, §6.3).
+10. **2026-10-26, folded from desk-sminos-orchestrator's identity inventory:**
+   - RL8 gets a key id and a v2 domain;
+   - a signature ledger keeps re-uploads byte-identical;
+   - unattended machines enroll through admin-signed delegations;
+   - machine-attested human words are delivered as words only on the same machine;
+   - the log plane is org-readable, and content moves to channels;
+   - pushes go only to owners;
+   - verification load joins the benchmark (§5.3, §5.7, §6.2, §7, RL5, RL8).
+11. **2026-10-26, folded from the adversarial review** (doperpowers:adversarial-reviewer, at debf7c879 plus working-copy changes; twelve findings, all adopted):
+   - enrollment bound by a pairing secret the hub never sees;
+   - revocations delivered directly and acknowledged, freshness for every grade, a 30-day backstop instead of a 24 h maximum age that the hub couldn't renew;
+   - root transition by the recovery key, with a stolen admin key stated as a residual;
+   - owners proven by the owners' own device signatures instead of grants;
+   - per-machine cutover with no dual trust;
+   - `opId` and an outcome ledger against duplicate actions;
+   - the session context, mandatory and rechecked at dispatch;
+   - phone approvals only on owned sessions, and the WebAuthn checks spelled out;
+   - commands graded by effect;
+   - machine-signed listings.
+
+   The cutover forces `web-cards` to ship no later than the first machine's cutover (§9).
+12. **2026-10-26, from the MAWS architect's identity research on Anthropic's terms.** The credential follows the principal:
+   - every session names its credential slot;
+   - on a personal credential, only its principal may `converse` or `approve`;
+   - spawning on another member's machine runs under the spawner's own slot or an org credential;
+   - MAWS never relays claude.ai tokens (§5.5, §6.3, §6.4, RL6).
+
+   This narrows the owner's share levels (§6.2) to org credentials for driving. The architect is putting that consequence to the owner.
