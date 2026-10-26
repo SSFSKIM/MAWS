@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The secret scan a push to SSFSKIM/maws-app passes first (ci-kit's docs/doperpowers/specs/2026-10-26-maws-hosted-mac-design.md,
-# The secret scan): gitleaks over a directory, with its default rules and the known false positives of MAWS's tree in
-# .github/maws-app/gitleaks.toml. Fails closed: a finding, or a scanner that cannot be had or cannot run, exits 1 and
+# The secret scan): gitleaks over every file of a directory, with .github/maws-app/gitleaks.toml, which carries the
+# pinned release's default rules (without its exempt paths) and the known false positives of MAWS's tree. Symlinks are
+# not followed. Fails closed: a finding, or a scanner that cannot be had or cannot run, exits 1 and
 # prints `maws-app-scan: refused`. A finding is printed as its file, line and rule, never its value.
 #
 #   .github/scripts/maws-app-scan.sh <dir>

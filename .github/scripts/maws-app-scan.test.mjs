@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import process from 'node:process';
@@ -64,6 +64,47 @@ test('a planted GitHub token, AWS key and private key are found, each named by f
   assert.match(out, /keys\/deploy\.pem:1 private-key/);
   assert.doesNotMatch(out, /README\.md/);
   for (const value of [github, aws, ...pem.split('\n').slice(1, 7)]) assert.ok(!out.includes(value), 'a value was printed');
+});
+
+const githubToken = () => ['gh', 'p_', alnum(36)].join('');
+const googleKey = () => ['AI', 'za', alnum(35, 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-')].join('');
+
+function tree(t, files) {
+  const dir = scratch(t, 'maws-app-scan-tree-');
+  for (const [path, text] of Object.entries(files)) {
+    mkdirSync(dirname(join(dir, path)), { recursive: true });
+    writeFileSync(join(dir, path), text);
+  }
+  return dir;
+}
+
+test("a new Google key beside the browser probe's saved pages, or inside one, is found: only their saved values are allowed", (t) => {
+  const page = 'spikes/browser-probe/results/pass2/youtube-front.html';
+  const dir = tree(t, {
+    [page]: `<script>var cfg = {"INNERTUBE_API_KEY":"${googleKey()}"};</script>\n`,
+    'spikes/browser-probe/results/pass2/.env': `GOOGLE_API_KEY="${googleKey()}"\n`,
+  });
+  const r = scanned(dir);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stdout, new RegExp(`${page.replace(/[./]/g, '\\$&')}:1 gcp-api-key`));
+  assert.match(r.stdout, /spikes\/browser-probe\/results\/pass2\/\.env:1 gcp-api-key/);
+});
+
+test("every published file is scanned: the paths gitleaks' default configuration exempts are not exempt here", (t) => {
+  const exempt = ['pnpm-lock.yaml', 'apps/desk-web/package-lock.json', 'vendor/modules.txt', 'assets/logo.png', 'public/jquery-3.7.1.min.js', 'config/gitleaks.toml'];
+  const dir = tree(t, Object.fromEntries(exempt.map((path) => [path, `resolution: {tarball: https://x-access-token:${githubToken()}@codeload.github.com/o/r/tar.gz/v1}\n`])));
+  const r = scanned(dir);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  for (const path of exempt) assert.match(r.stdout, new RegExp(`maws-app-scan: ${path.replace(/[./]/g, '\\$&')}:1 github-pat`), path);
+});
+
+test('the scan does not follow a symlink out of the scanned directory', (t) => {
+  const outside = tree(t, { 'secret.env': `TOKEN=${githubToken()}\n`, 'dir/secret.env': `TOKEN=${githubToken()}\n` });
+  const dir = tree(t, { 'index.ts': 'export {};\n' });
+  symlinkSync(join(outside, 'secret.env'), join(dir, 'linked.env'));
+  symlinkSync(join(outside, 'dir'), join(dir, 'linked-dir'));
+  const r = scanned(dir);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
 });
 
 test('a directory with no credential is clean', (t) => {
