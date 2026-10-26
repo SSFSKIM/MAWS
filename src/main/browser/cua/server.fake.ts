@@ -26,10 +26,24 @@ export class FakeCdp extends EventEmitter {
   attached = false;
   detachCalls = 0;
   readonly sent: { method: string; params: unknown; sessionId: string | undefined }[] = [];
+  readonly timeline: string[] = []; // `send <method>` and `reply <method>`, in the order they happened
   readonly hang = new Set<string>();
   readonly replies: Record<string, unknown> = {}; // a method's canned reply, else `{echoed: method}`
+  // The size the page's layout viewport reads (CSS px), which Page.getLayoutMetrics answers when set: a case moves it
+  // as Chromium would, the clear's restored size reaching the page after the clear's reply.
+  viewport: { width: number; height: number } | null = null;
+  private readonly deferred = new Map<string, (() => void)[]>();
   constructor(readonly frameId: string) {
     super();
+  }
+  // Holds the method's replies until the returned function answers them.
+  defer(method: string): () => void {
+    this.deferred.set(method, []);
+    return () => {
+      const waiting = this.deferred.get(method) ?? [];
+      this.deferred.delete(method);
+      for (const answer of waiting) answer();
+    };
   }
   attach() {
     if (this.attached) throw new Error('Debugger is already attached to the target');
@@ -46,9 +60,19 @@ export class FakeCdp extends EventEmitter {
     if (!this.attached) return Promise.reject(new Error('No target available'));
     if (method === 'Page.getFrameTree') return Promise.resolve({ frameTree: { frame: { id: this.frameId } } });
     this.sent.push({ method, params, sessionId });
+    this.timeline.push(`send ${method}`);
     if (this.hang.has(method)) return new Promise(() => {});
-    if (Object.hasOwn(this.replies, method)) return Promise.resolve(this.replies[method]);
-    return Promise.resolve({ echoed: method });
+    const reply = () => {
+      this.timeline.push(`reply ${method}`);
+      if (method === 'Page.getLayoutMetrics' && this.viewport) {
+        const { width, height } = this.viewport;
+        return { cssLayoutViewport: { pageX: 0, pageY: 0, clientWidth: width, clientHeight: height }, cssVisualViewport: { clientWidth: width, clientHeight: height, scale: 1, zoom: 1 } };
+      }
+      return Object.hasOwn(this.replies, method) ? this.replies[method] : { echoed: method };
+    };
+    const waiting = this.deferred.get(method);
+    if (waiting) return new Promise((resolve) => waiting.push(() => resolve(reply())));
+    return Promise.resolve(reply());
   }
   methods() {
     return this.sent.map((c) => c.method);
@@ -92,7 +116,11 @@ export class FakeContents extends EventEmitter {
 }
 
 let frames = 0;
-export const fakeView = (contents = new FakeContents(`FRAME-${++frames}`)) => ({ webContents: contents, setBounds() {}, setVisible() {}, getBounds: () => ({ x: 0, y: 0, width: 0, height: 0 }) });
+// The view keeps the bounds it was given (none: 0 x 0, as E4a makes a view before a pane places it).
+export const fakeView = (contents = new FakeContents(`FRAME-${++frames}`)) => {
+  let bounds = { x: 0, y: 0, width: 0, height: 0 };
+  return { webContents: contents, setBounds: (next: typeof bounds) => void (bounds = { ...next }), setVisible() {}, getBounds: () => ({ ...bounds }) };
+};
 
 const roots: string[] = [];
 const backends: CuaBackend[] = [];

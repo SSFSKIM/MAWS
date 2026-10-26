@@ -177,7 +177,7 @@ test('a fake cua host drives a session\'s tabs through its socket: create, navig
     const secondsView = (await second.request<{ id: number; url: string }[]>('tabs.query')).find((t) => t.url.endsWith('/frames.html'))!;
     await expect(second.request('debugger.attach', { tabId: secondsView.id })).rejects.toThrow('Tab is held by another agent session');
 
-    // detach undoes the agent's state, and the attachment ends with the last lease
+    // detach undoes the agent's state (answered once the page reads its parked size again), and the attachment ends with the last lease
     await send('Emulation.setDeviceMetricsOverride', { width: 800, height: 600, deviceScaleFactor: 1, mobile: false });
     expect(await evaluate(send, 'innerWidth')).toBe(800);
     await host.request('debugger.detach', { tabId: created.id });
