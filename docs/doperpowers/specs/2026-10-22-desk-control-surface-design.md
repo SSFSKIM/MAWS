@@ -138,6 +138,11 @@ allows today.
 - [ ] The machine-side wave (Plan of Work, "The machine-side wave"): MW1 reads, MW2
   ops, MW3 scoped allows, MW4 one agent stopped or told, MW5 image and PDF intake. The machine
   halves of M2–M4, cut and widened per that entry.
+  - [ ] MW1 reads (`usage`, `config`, `settings`, `mcp`) and `capabilities.controls`.
+  - [ ] MW2 ops: `btw`, compact's `instructions`, `/mcp`'s measured grammar.
+  - [ ] MW3 scoped allows.
+  - [ ] MW4 `stop-agent` and `tell`.
+  - [ ] MW5 image and PDF intake.
 - [x] (2026-10-26) Wave 2, measured by remote-architecture on 2.1.310 in isolated
   configs behind a recording stub, zero inference: media intake works (MW5); context
   truncation is blocked on 2.1.310 (Decision Log, "Wave 2 and the lane map").
@@ -3132,6 +3137,30 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   resumed would then silently bring excluded content back.
   Date/Author: 2026-10-26, the desk orchestrator, from remote-architecture's
   measurements and map.
+
+- Decision: The wave's pre-flight (MW1–MW5). `capabilities.controls` starts, at MW1,
+  with every key the lane map names. Available at once, because they exist before
+  the wave: `model`, `compact` (MW2 adds `instructions`, not the control), `decide`,
+  and `mcp.enable`, `mcp.disable`, `mcp.reconnect` (M0's `/mcp` row; MW2 widens its
+  grammar, not its availability). Turned available by the MW that builds them:
+  `read.usage`, `read.config`, `read.settings`, `read.mcp` (MW1), `btw` (MW2),
+  `decide.scope` and `decide.addDirectory` (MW3: the lane map's `decide.addDirectory`
+  is the `addDirectories` suggestion through `decide.scope`, not a standalone
+  directory RPC, which stays cut), `stop-agent`, `tell` (MW4), `media` (MW5); until
+  then each says it is not in this sminos version. Unavailable in lane A with a
+  standing reason: `decide.interrupt` (deny, then Interrupt), `forget` (the
+  truncation spike), `rewind-files`, `elicitation.answer`. Each MW is its own pair of
+  branches, `desk-ctl-mw<N>` in both repositories, and one sminos minor (1.11.0 for
+  MW1, from 1.10.1); its review at the rung the MW names, over both halves' ranges at
+  once, is the frontier review and the branch review in one, since the MW merges
+  before the next is built.
+  Rationale: the plan's "those this wave builds turn available … the rest are
+  unavailable" read literally would grey out controls the desk has had since M0; a
+  key reports whether the control works on this bridge, not whether this wave touched
+  it. Rejected: a second, task-level review per MW, which would re-read the same
+  range at the same tier.
+  Date/Author: 2026-10-26, the wave's executing session (plan-executor for the desk
+  orchestrator b4948247).
 
 ## Outcomes & Retrospective
 
