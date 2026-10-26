@@ -58,7 +58,7 @@ test('a run needs a Mac exactly when gate-plan.mjs and gate.yml put one of its j
   const workflow = readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8');
   // The exclusive instance's labels, the shared instances' one (ci-kit's mac-lane concurrency spec, M2), or the VM
   // lane's: solo (the exclusive instance or the guest), the guest alone, its trial slot (V3).
-  const macs = ['["self-hosted","macOS","ARM64"]', '["ci-kit-mac-shared"]', '["ci-kit-mac-solo"]', '["ci-kit-mac-vm"]', '["ci-kit-mac-vm-trial"]'];
+  const macs = ['["self-hosted","macOS","ARM64"]', '["self-hosted","macOS","ARM64","ci-kit-mac-home"]', '["ci-kit-mac-shared"]', '["ci-kit-mac-solo"]', '["ci-kit-mac-vm"]', '["ci-kit-mac-vm-trial"]'];
   // The placements gate-plan.mjs does not write: the plan job on the Mac under GATE_RUNNER=macos; packaged always on
   // the Mac. unit:darwin takes the Mac runner the plan writes for it.
   assert.match(workflow, /\n {2}plan:\n(?: {4}.*\n|\n)*? {4}runs-on: \$\{\{ vars\.GATE_RUNNER == 'macos' && fromJSON\('\["self-hosted","macOS","ARM64"\]'\) \|\| 'ubuntu-slim' \}\}\n/);
@@ -210,6 +210,7 @@ test('a runs-on label set is the guest, the trial slot, no Mac, or a host', () =
     [['ci-kit-mac-vm'], 'vm'],
     [['ci-kit-mac-vm-trial'], 'vm-trial'],
     [['self-hosted', 'macOS', 'ARM64'], 'host'],
+    [['self-hosted', 'macOS', 'ARM64', 'ci-kit-mac-home'], 'host'],
     [['ci-kit-mac-shared'], 'host'],
     [['ci-kit-mac-solo', 'macOS'], 'host'],
     [['ci-kit-mac-other'], 'host'],
@@ -274,6 +275,14 @@ test("the guest decision follows the tested tree's workflow; own-workflow runs t
     'e2e:panel,unit:darwin', 'e2e:panel,packaged', 'e2e:panel,e2e:design', 'e2e:panel,e2e:document-scale'])
     for (const extra of routes) assert.equal(ask(own, gates, extra), null, `${gates} ${JSON.stringify(extra)}`);
   for (const extra of routes) assert.equal(ask(own, 'static,unit,e2e:panel', { ...extra, class1a: 'macos' }), null, `Mac class 1a ${JSON.stringify(extra)}`);
+});
+
+test('home Mac measured and live jobs keep the alert decision on the host, even under a guest lane', () => {
+  const home = tree(envOf('  MEASURED_E2E: perf\n  LIVE_E2E: library tools\n  LIVE_GUARD_E2E: tools\n  MAC_VM_E2E: perf library tools\n'));
+  for (const lane of ['', 'vm', 'vm-trial']) {
+    assert.equal(guestRun({ ...home, gates: 'e2e:perf', lane, variables: today }), null);
+    assert.equal(guestRun({ ...home, gates: 'e2e:library', live: 'yes', lane, variables: today }), null);
+  }
 });
 
 test('a folded MAC_SHARED_E2E keeps its groups on the shared instances, off the guest, unless the run has a Lane:', () => {

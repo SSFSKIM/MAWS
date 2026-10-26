@@ -135,8 +135,8 @@ export function workflowEnv(workflow) {
 
 // What a runs-on label set (the JSON the plan writes) is to a guest: `vm` for [ci-kit-mac-solo] or [ci-kit-mac-vm] (the
 // guest carries both), `vm-trial` for [ci-kit-mac-vm-trial] (the trial slot's identity alone), `other` for what needs no Mac
-// (hosted Linux, the pool), and `host` for anything else, which includes the exclusive instance's labels, the shared
-// instances' [ci-kit-mac-shared] and every label set not known here.
+// (hosted Linux, the pool), and `host` for anything else, which includes the exclusive instances' labels (including
+// ci-kit-mac-home), the shared instances' [ci-kit-mac-shared] and every label set not known here.
 export function runsOn(json) {
   const labels = JSON.parse(json);
   if (typeof labels === 'string') return /^ubuntu-[\d.]+$|^ubuntu-slim$/.test(labels) ? 'other' : 'host';
