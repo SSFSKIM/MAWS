@@ -17,3 +17,12 @@ the parity suite; a case the fake machine fails goes to the composite's writer, 
 (`sminos/hooks/mods/bridge-commands.tsx`), and this fake machine routes a `command` RPC by it (`../routes.ts`, run by
 `test/fake-machine/routes.test.ts`, which checks the hash above). Never edit it here either: when a probe moves a row,
 copy the new file over this one and update the commit and the hash.
+
+`mw1-reads.json` is a recording, not a copy of a doperpowers file: what the bridge answered in the machine-side wave's
+MW1 live check (the desk control surface spec, Plan of Work, MW1; doperpowers `desk-ctl-mw1`, sminos 1.11.0, on Claude
+Code 2.1.310 in an isolated profile behind a recording stub, zero inference) — its `GET /status` capabilities, with
+`controls`, and its answers to `read usage` (summary, and `{breakdown: "full"}`), `read config`, `read settings` and
+`read mcp`, the last with the plane's disabled server added (sha256
+`4581b2405994b7dfb7bbaef3a1735fa6eb0f111750e6370471c224ac8688eb91`). The fake machine's `mw1` producer answers from it
+(`../session.ts`, run by `test/fake-machine/desk-mw1.test.ts`). Never edit it here: a later read's shape change is
+recorded again by that MW's live check, and replaces this file whole.

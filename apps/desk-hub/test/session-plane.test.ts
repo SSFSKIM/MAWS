@@ -611,8 +611,9 @@ describe('the desk control surface (M0): reads, ops, capabilities, command', () 
     const other = await browser(project);
 
     // A presence carrying the bridge's capabilities (a sibling of `bridge`) is kept whole and shown to each browser,
-    // and to a browser that connects later.
-    const capabilities = { sminos: '1.7.0', protocol: 2, engine: '2.1.307', ops: ['ping', 'read', 'command'], reads: ['status'], routes: { measured: '2.1.307' } };
+    // and to a browser that connects later; MW1's `controls` among them, unread.
+    const controls = { 'read.usage': { available: true }, forget: { available: false, reason: 'after --resume the engine brings back what a cut left out' }, 'a-later-key': { available: true } };
+    const capabilities = { sminos: '1.11.0', protocol: 2, engine: '2.1.307', ops: ['ping', 'read', 'command'], reads: ['status', 'usage'], routes: { measured: '2.1.307' }, controls };
     const live = envelope(m, project, 'presence', { ...presence('idle'), capabilities });
     await m.postOk([{ t: 'session', message: live }]);
     expect((await other.next((f) => f.t === 'session' && f.message.kind === 'presence', 'presence')) as { message: SessionMessage }).toMatchObject({ message: { body: { capabilities } } });

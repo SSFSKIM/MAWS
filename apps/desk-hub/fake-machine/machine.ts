@@ -7,7 +7,9 @@
 //   - serves subscriptions (session.ts), and the depth's `rows`, `diff`, and (as DC8's producer) `output`;
 //   - as the desk control surface's M0 producer (`m0`), advertises its sessions' bridge capabilities and its own `desk`,
 //     answers `read status`, and runs `command` RPCs through the vendored route table, answered at once and reported
-//     as `op` messages (commands.ts), a stale session (`staleSessions`, `reload`) kept without capabilities;
+//     as `op` messages (commands.ts), a stale session (`staleSessions`, `reload`) kept without capabilities; as the
+//     machine-side wave's MW1 producer (`mw1`), answers the reads of usage, config, settings and MCP as recorded and
+//     carries each control's capability in `capabilities.controls`;
 //   - answers RPCs from a script, with a ledger of its own: a nonce is claimed before the effect and its outcome recorded
 //     before the result, and a nonce the ledger knows is never executed again;
 //   - can drop its connection, end a session's process while it stays connected, crash after an RPC's effect and before
@@ -28,7 +30,7 @@ import { Link, LinkError, type Credentials } from './link';
 import { emptyMemory, expireLedger, type Memory } from './memory';
 import type { Recording, Row, Step } from './recording';
 import { Commands, opMessages, refusalMessage, type CommandPlan, type CommandScript } from './commands';
-import { M0_SMINOS, M1_SMINOS, producerAtLeast, SessionDepth, type BridgePlugin, type Producer, type SnapshotOptions } from './session';
+import { producerAtLeast, SessionDepth, sminosOf, type BridgePlugin, type Producer, type SnapshotOptions } from './session';
 
 /** What a script answers an RPC with: an outcome, or undefined for the fake machine's own default. */
 export type RpcScript = { [N in RpcName]?: (rpc: Rpc<N>, machine: FakeMachine) => RpcOutcome<N> | undefined | Promise<RpcOutcome<N> | undefined> };
@@ -272,7 +274,7 @@ export class FakeMachine {
   /** The machine's DX4 `machine` presence. */
   presence(): MachinePresence {
     const checkouts = this.options.checkouts ?? [...new Set([...this.sessions.values()].map((s) => s.cwd).filter((c): c is string => c !== null))].map((path) => ({ path, branch: 'main' }));
-    const desk = producerAtLeast(this.producer, 'm0') ? { desk: { sminos: producerAtLeast(this.producer, 'm1') ? M1_SMINOS : M0_SMINOS, rpcs: [...RPC_NAMES], reads: [] } } : {};
+    const desk = producerAtLeast(this.producer, 'm0') ? { desk: { sminos: sminosOf(this.producer), rpcs: [...RPC_NAMES], reads: [] } } : {};
     return { online: true, policy: { read_only: this.options.readOnly === true, ceiling: this.options.ceiling ?? 'default' }, checkouts, ...desk };
   }
 
@@ -968,7 +970,7 @@ export class FakeMachine {
         this.sessions.get(frame.session)?.output(frame.sub, frame.taskId, frame.tail);
         return;
       case 'read':
-        this.sessions.get(frame.session)?.read(frame.sub, frame.id, frame.what);
+        this.sessions.get(frame.session)?.read(frame.sub, frame.id, frame.what, frame.args);
         return;
       default:
         return;

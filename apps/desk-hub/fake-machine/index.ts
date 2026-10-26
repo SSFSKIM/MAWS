@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 export { FakeMachine, type FakeMachineOptions, type RpcRecord, type RpcScript } from './machine';
 export { emptyMemory, type LedgerEntry, type Memory } from './memory';
 export { loadRecording, type LoadOptions, type Recording, type Row, type Step } from './recording';
-export { ENGINE_TMP, M0_CAPABILITIES, M0_SMINOS, M1_CAPABILITIES, M1_SMINOS, producerAtLeast, SessionDepth, SNAPSHOT_ROW_BUDGET, type BridgePlugin, type Producer, type SnapshotOptions } from './session';
+export { ENGINE_TMP, M0_CAPABILITIES, M0_SMINOS, M1_CAPABILITIES, M1_SMINOS, MW1_CAPABILITIES, MW1_READS, MW1_SMINOS, producerAtLeast, SessionDepth, SNAPSHOT_ROW_BUDGET, type BridgePlugin, type Producer, type SnapshotOptions } from './session';
 export { Commands, defaultOutcome, opMessages, refusalMessage, type CommandOutcome, type CommandPlan, type CommandRefusal, type CommandScript } from './commands';
 export { listedOf, loadRoutes, ROUTES_2_1_307, routeOf, type CommandRefusalCode, type Listed, type RouteCheck, type RouteTable } from './routes';
 export { derive, deriveFromRows, LoopIndex, TABLE, type Body, type BridgeAgent } from './jobs';

@@ -23,7 +23,9 @@ import { join, posix } from 'node:path';
 import { isOutputTail, isTaskId } from '../src/protocol/browser';
 import type { JsonObject } from '../src/protocol/json';
 import { loadRoutes } from './routes';
-import type { Catalog, Capabilities, Job, ReadAnswer, SessionBodies, SessionMessage, SessionPresence, StatusRead, Streaming, StreamingBlock, SubagentMeta, SubscriptionKind, Usage } from '../src/protocol/session';
+// The MW1 live check's recording (dx4/README.md): imported, as the route table is, for the bundled command.
+import mw1 from './dx4/mw1-reads.json' with { type: 'json' };
+import type { Catalog, Capabilities, ConfigRead, ControlCapabilities, McpRead, SettingsRead, UsageRead, Job, ReadAnswer, SessionBodies, SessionMessage, SessionPresence, StatusRead, Streaming, StreamingBlock, SubagentMeta, SubscriptionKind, Usage } from '../src/protocol/session';
 import { derive, fileFacts, LoopIndex, loopJobs, stopNote, type Body, type BridgeAgent, type Derivation } from './jobs';
 import { answerOutput, type Locate } from './output';
 import type { Recording, Row, Step } from './recording';
@@ -35,11 +37,13 @@ import type { Recording, Row, Step } from './recording';
  * desk control surface's M0 (sminos `M0_SMINOS`), everything `dc8` does and more: each bridged session's presence
  * carries its `capabilities` (but a stale session's, whose mod loaded before the update), the machine presence its
  * `desk`, a `read status` is answered on the sub, and a `command` RPC runs (`commands.ts`); an older producer sends
- * neither field and passes `read` by.
+ * neither field and passes `read` by. `m1` adds the pushed catalog; `mw1` (sminos `MW1_SMINOS`, the machine-side wave's
+ * MW1) the reads of usage, config, settings and MCP, answered as the MW1 live check recorded them, and
+ * `capabilities.controls`.
  */
-export type Producer = 'dc3' | 'dc8' | 'm0' | 'm1';
+export type Producer = 'dc3' | 'dc8' | 'm0' | 'm1' | 'mw1';
 
-const LEVEL: Record<Producer, number> = { dc3: 0, dc8: 1, m0: 2, m1: 3 };
+const LEVEL: Record<Producer, number> = { dc3: 0, dc8: 1, m0: 2, m1: 3, mw1: 4 };
 
 /** Whether `producer` does what `level` added. */
 export const producerAtLeast = (producer: Producer, level: Producer): boolean => LEVEL[producer] >= LEVEL[level];
@@ -59,6 +63,28 @@ export const M0_CAPABILITIES: Capabilities = {
 };
 
 export const M1_CAPABILITIES: Capabilities = { ...M0_CAPABILITIES, sminos: M1_SMINOS, reads: ['status', 'catalog'] };
+
+/** The sminos version of the machine-side wave's MW1 (the reads, and `capabilities.controls`). */
+export const MW1_SMINOS = '1.11.0';
+
+/** What an MW1 bridge answers its four new reads with, as the MW1 live check recorded them on 2.1.310 (`usage-full` is
+ * the answer to `{breakdown: 'full'}`; `mcp` carries the plane's disabled server). */
+export const MW1_READS = mw1.reads as unknown as { usage: UsageRead; 'usage-full': UsageRead; config: ConfigRead; settings: SettingsRead; mcp: McpRead };
+
+/** An MW1 bridge's capabilities: M1's, its new reads, and every control's capability as the live check's bridge said
+ * them (the engine stays the table's 2.1.307, as the fake's `read status` says). */
+export const MW1_CAPABILITIES: Capabilities = {
+  ...M1_CAPABILITIES,
+  sminos: MW1_SMINOS,
+  reads: [...M1_CAPABILITIES.reads, 'usage', 'config', 'settings', 'mcp'],
+  controls: mw1.capabilities.controls as ControlCapabilities,
+};
+
+const MW1_KINDS = new Set(['usage', 'config', 'settings', 'mcp']);
+
+/** The sminos version, and the bridge's capabilities, that `producer` stands for. */
+export const sminosOf = (producer: Producer): string => (producerAtLeast(producer, 'mw1') ? MW1_SMINOS : producerAtLeast(producer, 'm1') ? M1_SMINOS : M0_SMINOS);
+const capabilitiesOf = (producer: Producer): Capabilities => (producerAtLeast(producer, 'mw1') ? MW1_CAPABILITIES : producerAtLeast(producer, 'm1') ? M1_CAPABILITIES : M0_CAPABILITIES);
 
 /** The per-uid temporary root the recordings' engine wrote task outputs under (macOS, uid 501): `<resolved tmp>/claude-<uid>`. */
 export const ENGINE_TMP = '/private/tmp/claude-501';
@@ -178,7 +204,7 @@ export class SessionDepth {
    * and while the session is `stale` (its mod loaded before its machine's update, until a reload).
    */
   get capabilities(): Capabilities | null {
-    return this.bridge && producerAtLeast(this.producer, 'm0') && !this.stale ? (producerAtLeast(this.producer, 'm1') ? M1_CAPABILITIES : M0_CAPABILITIES) : null;
+    return this.bridge && producerAtLeast(this.producer, 'm0') && !this.stale ? capabilitiesOf(this.producer) : null;
   }
 
   /** The session's DX4 presence body: its record, whether it is bridged, and its bridge's capabilities when held. */
@@ -200,14 +226,22 @@ export class SessionDepth {
 
   /**
    * Answers a browser's `read` on the subscription (an M0 producer; an older one passes it by): `status` from the bridge
-   * on a main-scope subscription, every other kind and scope an `unsupported` error, as the plane answers them.
+   * on a main-scope subscription, `catalog` from an M1 one, `usage` (the full count when `args.breakdown` is `full`),
+   * `config`, `settings` and `mcp` from an MW1 one, every other kind and scope an error, as the plane answers them.
    */
-  read(sub: string, id: string, what: string): void {
+  read(sub: string, id: string, what: string, args?: JsonObject): void {
     const s = this.subs.get(sub);
     if (!s || !producerAtLeast(this.producer, 'm0')) return;
     const answer = (body: Omit<ReadAnswer, 'id' | 'what'>) => this.deliver(sub, s, { kind: 'read', body: { id, what, ...body } });
     if (!this.bridge || this.record === null) return answer({ error: { code: 'no-bridge', message: 'the session has no bridge, or has ended' } });
     if (what === 'catalog' && s.agentId === null && this.catalog) return answer({ result: this.catalog as unknown as JsonObject });
+    if (MW1_KINDS.has(what) && this.capabilities?.reads.includes(what)) {
+      if (s.agentId !== null) return answer({ error: { code: 'unsupported', message: "a read is the session's: ask it on the main loop's subscription" } });
+      const breakdown = args?.breakdown ?? 'summary';
+      if (what === 'usage' && breakdown !== 'summary' && breakdown !== 'full') return answer({ error: { code: 'failed', message: "usage's breakdown is summary or full" } });
+      const result = what === 'usage' ? MW1_READS[breakdown === 'full' ? 'usage-full' : 'usage'] : MW1_READS[what as 'config' | 'settings' | 'mcp'];
+      return answer({ result: result as unknown as JsonObject });
+    }
     if (what !== 'status' || !this.capabilities) return answer({ error: { code: 'unsupported', message: `no read ${what}` } });
     if (s.agentId !== null) return answer({ error: { code: 'unsupported', message: "status is the main transcript's" } });
     const cwd = this.recording?.cwd ?? '';

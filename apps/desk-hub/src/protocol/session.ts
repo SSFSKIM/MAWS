@@ -154,9 +154,37 @@ export type SessionPresence = {
 /**
  * A bridge's capabilities (DX5 `GET /status`): the loaded mod's own plugin version, its protocol, the engine's release
  * base, the ops it answers, the read kinds it serves, and the engine base its route table was measured on (behind
- * `engine` when the engine is newer than every table it carries).
+ * `engine` when the engine is newer than every table it carries). `controls` (sminos 1.11.0, the machine-side wave's
+ * MW1) is each desk control's capability; absent from an older bridge.
  */
-export type Capabilities = { sminos: string; protocol: number; engine: string; ops: string[]; reads: string[]; routes: { measured: string } };
+export type Capabilities = {
+  sminos: string;
+  protocol: number;
+  engine: string;
+  ops: string[];
+  reads: string[];
+  routes: { measured: string };
+  controls?: ControlCapabilities;
+};
+
+/** The desk's controls by the names of remote-architecture's lane map (`lane-b-control-map.md`), path-neutral: a path-B
+ * daemon fills the same keys from the SDK's control requests, and the web greys a control by its key, never by lane. */
+export const CONTROL_KEYS = [
+  'read.usage', 'read.config', 'read.settings', 'read.mcp',
+  'btw', 'compact', 'model',
+  'mcp.enable', 'mcp.disable', 'mcp.reconnect',
+  'decide', 'decide.scope', 'decide.interrupt',
+  'decide.addDirectory', 'stop-agent', 'tell',
+  'media', 'forget', 'rewind-files', 'elicitation.answer',
+] as const;
+export type ControlKey = (typeof CONTROL_KEYS)[number];
+
+/** Whether this session's bridge can do a control, and why not (said to the person). */
+export type ControlCapability = { available: boolean; reason?: string };
+
+/** Each control's capability. A key that is missing (a control a newer desk names) is unavailable. The bridge sends
+ * every key it knows, its unavailable ones with their reasons. */
+export type ControlCapabilities = Partial<Record<ControlKey, ControlCapability>>;
 
 /** A permission mode as the bridge last read it, `at` epoch ms on the machine's clock. */
 export type ModeReading = { mode: string; at: number };
@@ -186,6 +214,90 @@ export type StatusRead = {
   surfaces: string[];
   override: { model: string | null; effort: string | null } | null;
   mode?: ModeReading;
+};
+
+/**
+ * `read usage`'s result (MW1; args `{breakdown?: 'summary' | 'full'}`, the summary unless `full` is asked, which calls
+ * the token-count API): the session's usage, the context window broken down in the SDK's `get_context_usage` shape, and
+ * which count it is. Lane A (the bridge) answers the engine's `$.session.usage`, so `startedAt`, `window`,
+ * `rateLimits` (empty off a claude.ai subscription) and `cost` are always present there; `rateLimitsAvailable` and
+ * `sessionTotals` are a path-B daemon's.
+ */
+export type UsageRead = {
+  startedAt?: number;
+  context: { tokens?: number; window?: number; percent?: number; breakdown?: ContextBreakdown };
+  rateLimits?: Array<{ kind: string; percentUsed?: number; resetsAt?: string }>;
+  cost?: { usd: number };
+  breakdownDetail: 'summary' | 'full';
+  rateLimitsAvailable?: boolean;
+  sessionTotals?: JsonObject;
+};
+
+/** The context window by category as `/context` draws it: the SDK's `get_context_usage` reply (categories, grid rows,
+ * memory files, MCP tools, agents, skills, …), carried as the engine gives it. */
+export type ContextBreakdown = JsonObject;
+
+/** One `/config` row as the engine's `$.config.list()` gives it. A plugin's `text` row has no `value`: a plugin's
+ * `userConfig` field may hold a credential. `isLocked` is the engine's policy lock; the desk writes no config. */
+export type ConfigRow = {
+  key: string;
+  label: string;
+  description?: string;
+  kind: 'boolean' | 'choice' | 'text' | 'number';
+  value?: boolean | string | number | string[];
+  options?: string[];
+  provider: { plugin: string; tier: string };
+  isLocked: boolean;
+};
+
+/** `read config`'s result (MW1): the rows in the engine's order; `readOnly`, the desk's own policy (F1). */
+export type ConfigRead = { rows: ConfigRow[]; readOnly: true };
+
+/** A permission rule as the engine's `PermissionRuleValue` holds it (`Bash(npm test:*)` is `{toolName: 'Bash',
+ * ruleContent: 'npm test:*'}`). */
+export type PermissionRule = { toolName: string; ruleContent?: string };
+export type PermissionRules = { allow: PermissionRule[]; ask: PermissionRule[]; deny: PermissionRule[] };
+
+/**
+ * `read settings`'s result (MW1): the permission rules, merged and by source, and each hook's event, matcher and how
+ * many commands it runs — never a command's text (*terminal: /hooks*), never `env` or any other key. Lane A projects the
+ * settings files, so `permissionsExact` is false there (a session's own allows and the plugins' hooks are not in them);
+ * `livePermissions` is a path-B daemon's native view. Source names are extensible; the engine's `flag` is `cliArg`.
+ */
+export type SettingsRead = {
+  permissionsExact: boolean;
+  permissions: PermissionRules & {
+    additionalDirectories: string[];
+    defaultMode: string | null;
+    /** `user`, `project`, `local`, `policy`, `cliArg`; lane A sends all five. */
+    bySource: Record<string, PermissionRules>;
+  };
+  hooks: Record<string, Array<{ matcher: string | null; commands: number }>>;
+  livePermissions?: JsonObject;
+};
+
+/** An MCP server's state; a status this version does not know is drawn as `unknown`. */
+export type McpServerStatus = 'connected' | 'disabled' | 'pending' | 'failed' | 'needs-auth' | 'unknown';
+
+/**
+ * `read mcp`'s result (MW1): never a server's configuration. Lane A says `exact: false`: the bridge names the servers
+ * whose tools the model has (`connected`, with the count, the name spelled as the tools spell it: `my server` is
+ * `my_server`), and the plane adds those the project disables (`disabled`, the configured name); a server failed,
+ * pending or awaiting sign-in is not seen. A path-B daemon's engine snapshot is `exact: true`, with the other fields.
+ */
+export type McpRead = {
+  exact: boolean;
+  servers: Array<{
+    name: string;
+    status: McpServerStatus;
+    tools?: number;
+    source?: string;
+    scope?: string;
+    transport?: string;
+    serverInfo?: JsonObject;
+    error?: string;
+    errorCode?: string;
+  }>;
 };
 
 /** A command's class in the bridge's route table (the desk control surface spec, §2). */
