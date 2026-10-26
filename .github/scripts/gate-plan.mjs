@@ -62,7 +62,8 @@
 // (.github/scripts/hosted-mac.sh), which pushes the filtered tree to SSFSKIM/maws-app, waits for that group's run on a
 // hosted Mac there and ends with its verdict. Eligible is none of `default` (its selection is derived from the whole run,
 // which does not cross), MEASURED_E2E, LIVE_E2E or LIVE_GUARD_E2E, MAC_SECRET_E2E (a credential stays on the mini),
-// POOL_E2E; a live run hosts none, nor does a Linux lane. A list naming an ineligible group is refused. `Lane: hosted`
+// POOL_E2E; a live run hosts none, nor does a Linux lane, nor a run on a reserved final ref (FINAL_LABELS). A list naming
+// an ineligible group is refused. `Lane: hosted`
 // hosts every eligible group of the run and names the rest in the summary; `Lane: no-hosted` hosts none; under
 // `Lane: vm` or `vm-trial` a group on both lists goes to the guest. A hosted entry carries `hosted: true`, the waiter's
 // box and timeout and no variant; it stays in `e2e` (default's derivation, the pool-demand hint) and makes `e2e_hosted`,
@@ -78,6 +79,12 @@ const words = (text = '') => text.split(/[\s,]+/).filter(Boolean);
 // `default` is the bare `pnpm e2e` set (after `pnpm build`, as `verify` orders them), which the e2e job narrows to the specs
 // no other e2e group of the run collects (e2e-default-specs.mjs, Decision Log 60(2)); every other group is `e2e:<group>`.
 const scriptOf = (group) => (group === 'default' ? 'e2e' : `e2e:${group}`);
+// The reserved final refs' labels: a run whose ref starts `ci/<label>-` is that label's final run, where a final-bundle group
+// writes the build it ran into the run's evidence (e2e/support/final-bundle.ts, which reads the ref the same way:
+// GITHUB_REF or GITHUB_REF_NAME, less `refs/heads/`). The labels are the reporters' own (design's e1-final, dashboard's
+// e2-final and p3f-final, connectors' h-final through MAWS_E2E_FINAL_BUNDLE), which gate-plan.test.mjs keeps equal.
+// A hosted group would run on maws-app's ref and runner, so no bundle could reach the run: a final run hosts no group.
+export const FINAL_LABELS = ['e1-final', 'e2-final', 'h-final', 'p3f-final'];
 const refuse = (message) => {
   throw new Error(message);
 };
@@ -211,9 +218,13 @@ export function planOf(env, scripts) {
   const listedHosted = words(env.HOSTED_MAC_E2E);
   const contradictions = listedHosted.filter((group) => notHosted(group).length > 0);
   if (contradictions.length > 0) refuse(`HOSTED_MAC_E2E names what never goes to a hosted Mac: ${named(contradictions)}`);
-  const hostedOf = (group) =>
+  const hostable = (group) =>
     lane === 'macos' && !live && notHosted(group).length === 0 &&
     (laneAsked === 'hosted' || (laneAsked !== 'no-hosted' && listedHosted.includes(group) && !(vmLane && listedVm.includes(group))));
+  const finalRef = [env.GITHUB_REF, env.GITHUB_REF_NAME]
+    .map((value) => value?.replace(/^refs\/heads\//, ''))
+    .find((ref) => ref !== undefined && FINAL_LABELS.some((label) => ref.startsWith(`ci/${label}-`)));
+  const hostedOf = (group) => finalRef === undefined && hostable(group);
   // The waiter: the pool's smallest box, about $0.0006 a minute while it waits. Its timeout is above the waiter's own
   // 95-minute deadline and under the pool's 120-minute bound on a box's run.
   const HOSTED_WAITER = poolBox(2);
@@ -272,11 +283,13 @@ export function planOf(env, scripts) {
   const said = (lead, jobs) => (jobs.length > 0 ? ` ${lead}: ${jobs.join(', ')}.` : '');
   const laneJobs = vmLane ? jobsOn(LANES[vmLane]) : [];
   // The hosted groups, and what a hosted lane left where it was.
-  const keptOffHosted = laneAsked === 'hosted' && lane === 'macos' ? e2e.map((entry) => entry.group).filter((group) => notHosted(group).length > 0) : [];
+  const keptOffHosted = laneAsked === 'hosted' && lane === 'macos' && finalRef === undefined ? e2e.map((entry) => entry.group).filter((group) => notHosted(group).length > 0) : [];
+  const keptForFinal = finalRef !== undefined && e2e.some((entry) => hostable(entry.group));
   const hostedNote =
+    (keptForFinal ? ` On the reserved final ref ${finalRef}, so no group of this run is hosted: a group's final bundle is written only on the runner that ran it.` : '') +
     said('Hosted Mac (SSFSKIM/maws-app, each through a waiter on the pool)', e2eHosted.map((entry) => `e2e:${entry.group}`)) +
     (keptOffHosted.length > 0 ? ` Lane: hosted, but never on a hosted Mac, so where it would be: ${named(keptOffHosted, 'e2e:')}.` : '') +
-    (laneAsked === 'hosted' && e2eHosted.length === 0 && keptOffHosted.length === 0 ? ' Lane: hosted, but no e2e group of this run is hosted.' : '') +
+    (laneAsked === 'hosted' && e2eHosted.length === 0 && keptOffHosted.length === 0 && !keptForFinal ? ' Lane: hosted, but no e2e group of this run is hosted.' : '') +
     (laneAsked === 'no-hosted' ? ' Lane: no-hosted, so no group of this run is hosted.' : '');
   const laneNote = !vmLane ? '' : laneJobs.length > 0 ? said(`Lane: ${vmLane}, on [${LANES[vmLane]}] alone`, laneJobs) : ` Lane: ${vmLane}, but no job of this run is on MAC_VM_E2E.`;
   const macNote =
