@@ -347,14 +347,35 @@ test('check: a hosted-only run goes ahead past a mini alert; a run with one host
   const runners = [{ name: 'ci-kit-mac-mini', status: 'online' }];
   const hosted = hostedTree();
   const run = (gates, extra = {}) => check({ gates, runner: 'macos', class1a: '', ...hosted, gh: fakeGh({ issues, runners }).gh, ...extra });
-  const ahead = { stop: false, lines: ['ci-gate: ci-kit alert open on mini; going ahead: no job of this run is on a Mac'] };
-  assert.deepEqual(run('e2e:tools'), ahead);
-  assert.deepEqual(run('e2e:side,e2e:library', { lane: 'hosted' }), ahead);
+  // No Mac job, so no alert or runner is read.
+  for (const [gates, extra] of [['e2e:tools', {}], ['e2e:side,e2e:library', { lane: 'hosted' }]]) {
+    const { gh, calls } = fakeGh({ issues, runners });
+    assert.deepEqual(check({ gates, runner: 'macos', class1a: '', ...hosted, gh, ...extra }), { stop: false, lines: [] }, gates);
+    assert.deepEqual(calls, ['repos/SSFSKIM/MAWS/actions/variables?per_page=30'], gates);
+  }
   const mixed = run('e2e:tools,e2e:library');
   assert.equal(mixed.stop, true);
   assert.match(mixed.lines[0], /^ci-gate: not pushing: this run puts jobs on a Mac \(e2e:library\) and no online Mac runner is free/);
   assert.equal(mixed.lines[1], '  mini: SecurityAgent since 2026-10-17T20:06Z (source unknown)');
   assert.equal(run('e2e:tools', { lane: 'no-hosted' }).stop, true);
+});
+
+// The Mac jobs are the tested commit's plan's, not this checkout's reading of the lists: a target whose POOL_E2E differs
+// from the caller's (offMac) is held by the alert when its own plan puts the group on the Mac, and goes ahead when its
+// own plan keeps it off.
+test("check reads the run's Mac jobs from the tested commit's plan, whatever the caller's POOL_E2E says", () => {
+  const issues = [{ number: 12, title: 'ci-kit alert: mini: SecurityAgent since 2026-10-17T20:06Z (source unknown)' }];
+  const runners = [{ name: 'ci-kit-mac-mini', status: 'online' }];
+  const run = (target, offMac) => check({ gates: 'e2e:side', runner: 'macos', class1a: '', ...target, offMac, gh: fakeGh({ issues, runners }).gh });
+  const onTheMac = tree(envOf("  CLASS1_E2E: side\n  POOL_E2E: ''\n"));
+  const result = run(onTheMac, ['side']);
+  assert.equal(result.stop, true);
+  assert.match(result.lines[0], /^ci-gate: not pushing: this run puts jobs on a Mac \(e2e:side\) /);
+  const offTheMac = tree(envOf('  CLASS1_E2E: side\n  LINUX_E2E: side\n  POOL_E2E: side\n'));
+  assert.deepEqual(run(offTheMac, []), { stop: false, lines: [] });
+  // Only a plan that cannot be run falls back to the caller's lists.
+  assert.deepEqual(run({}, ['side']), { stop: false, lines: [] });
+  assert.equal(run({}, []).stop, true);
 });
 
 // The reads, the tree and the decision together, for the runs the architect's ruling names.

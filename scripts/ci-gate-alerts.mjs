@@ -10,9 +10,9 @@
 // job on the exclusive instance's or the shared instances' labels), needs a host free of alerts, for the guest cannot take
 // that job and the host's alert would refuse it. A hosted e2e group (ci-kit's hosted-Mac spec) is a waiter on the pool, so
 // the plan puts it on no Mac: a run whose every Mac job would be one has no Mac job at all and goes ahead past any alert.
-// Whatever keeps that plan from running (no tree, a refusal, a workflow the reader does not know) leaves the run needing
-// a host, its Mac jobs those the flags name; only a failed GitHub read goes ahead with a warning, since the runner's own
-// check still refuses.
+// The run's Mac jobs are always that plan's when it runs, never this checkout's reading of the lists. Whatever keeps the
+// plan from running (no tree, a refusal, a workflow the reader does not know) leaves the run needing a host, its Mac jobs
+// those the flags name; only a failed GitHub read goes ahead with a warning, since the runner's own check still refuses.
 // Usage: node scripts/ci-gate-alerts.mjs --gates <list> --runner <lane> --class1a <runner> --lane <lane> --live <yes>
 // --git-dir <dir> --sha <commit>, ci-gate.sh's own values (empty when not given; its `--gates all` comes as empty, the
 // default set; the directory and the commit are the tested tree). Prints its lines on stdout and exits 2
@@ -73,12 +73,11 @@ export function macJobs({ gates = '', runner = '', class1a = '', variables = {},
 
 // Whether the run goes ahead, and what to print: `alerts` the parsed open alerts (each with its issue `number`),
 // `runners` MAWS's self-hosted runners as { name, status }, `guest` the guest the run's Mac jobs can all run in (guestRun):
-// `vm` (a guest that carries ci-kit-mac-solo or ci-kit-mac-vm), `vm-trial` (the trial slot's), `none` (the plan puts no job
-// on a Mac), or null, a run that needs a host.
+// `vm` (a guest that carries ci-kit-mac-solo or ci-kit-mac-vm), `vm-trial` (the trial slot's), or null, a run that needs a
+// host.
 export function decide({ jobs, alerts, runners, guest = null }) {
   if (jobs.length === 0 || alerts.length === 0) return { stop: false, lines: [] };
   const blocked = [...new Set(alerts.map((alert) => alert.machine))];
-  if (guest === 'none') return { stop: false, lines: [`ci-gate: ci-kit alert open on ${list(blocked)}; going ahead: no job of this run is on a Mac`] };
   const machines = [
     ...new Set(
       runners
@@ -214,7 +213,10 @@ export function check({ gates, runner, class1a, lane, live, gitDir, sha, offMac,
   let step = "the repository's variables";
   try {
     const variables = Object.fromEntries(read(`repos/${REPO}/actions/variables?per_page=30`, '.variables[] | [.name, .value]'));
-    const jobs = macJobs({ gates, runner, class1a, variables, offMac });
+    // The Mac jobs are the tested commit's plan's (a hosted group is on none), whose lists may differ from this checkout's;
+    // those the flags and this checkout's POOL_E2E name only when that plan cannot be run.
+    const placed = macPlan({ gitDir, sha, gates, runner, class1a, lane, live, variables });
+    const jobs = placed ? placed.jobs : macJobs({ gates, runner, class1a, variables, offMac });
     if (jobs.length === 0) return { stop: false, lines: [] };
     step = `the open ci-kit alerts (${ALERTS})`;
     const alerts = read(`repos/${ALERTS}/issues?labels=ci-kit-alert&state=open&per_page=100`, '.[] | select(.pull_request == null) | {number, title}')
@@ -226,9 +228,7 @@ export function check({ gates, runner, class1a, lane, live, gitDir, sha, offMac,
     if (alerts.length === 0) return { stop: false, lines: [] };
     step = `${REPO}'s runners`;
     const runners = read(`repos/${REPO}/actions/runners?per_page=100`, '.runners[] | {name, status}');
-    // The plan's own Mac jobs when it can be run (a hosted group is on none), else those the flags name.
-    const placed = macPlan({ gitDir, sha, gates, runner, class1a, lane, live, variables });
-    return decide({ jobs: placed?.jobs.length > 0 ? placed.jobs : jobs, alerts, runners, guest: placed?.guest ?? null });
+    return decide({ jobs, alerts, runners, guest: placed?.guest ?? null });
   } catch (error) {
     const reason = String(error.stderr ?? '').split('\n').find((line) => line.trim()) ?? error.message;
     return { stop: false, lines: [`ci-gate: warning: could not read ${step} (${reason.trim()}); going ahead without the ci-kit alert check (the runner's job-started check still refuses jobs under a dialog)`] };
