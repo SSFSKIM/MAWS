@@ -1756,26 +1756,76 @@ then `stop` with `stopReason: "tool_use"`, makes the engine run that Read. The n
 request carries the file as an `image` block, or a `document` block for a PDF read
 without `pages`. A returned `toolUses` with no streamed chunks runs nothing.
 
-- **The daemon saves.** The `media` RPC (DX6) is checked: names, types against the
-  bytes' signature, at most 4 attachments, `text` refused. The daemon writes each file
-  to `<cwd>/.claude/desk-uploads/<session>/<nonce>-<name>` (files 0600, directories
-  0700), with §10's `.git/info/exclude` line and sweep. It answers
-  `{queued, id, intake: "native-read", paths}`, then posts the bridge `media` op.
-  `saved` is that answer.
-- **The bridge claims, then streams.** Its upload state lives in `$.state`, scoped to
-  the session, as `sminos.ask`'s does, so a module reload neither loses an upload nor
-  replays one. Each attachment is pending, claimed, read, sent, aborted or failed. At
-  a main-loop `turn.step` with an attachment pending, the hook:
-  1. claims one attachment, recording its generated tool-use id, before it yields
+- **One identity.** The upload id is the sealed RPC's nonce, and attachment `n` of it
+  is `<nonce>.<n>`. The child's command id is only the transport's correlation. The
+  upload id is carried through the daemon's answer, the bridge's state and every
+  `media` event, and it is what deduplication keys on.
+- **The root comes from the live session.** Before saving, the daemon reads the live
+  working directory through the bridge's `status` read (`$.session.cwd()`), not the
+  directory the session joined from. It resolves it, and the upload root is
+  `<cwd>/.claude/desk-uploads/<session>/`. The root is handed to the bridge with the
+  files and kept with each attachment. A later `/cd` does not move it: the Read goes to
+  the pinned absolute path under the engine's ordinary permissions. Outside the new
+  working directory that may raise a request, which goes to the desk like any other.
+  The answer carries the root, so its relative paths can be read.
+- **The daemon saves without following a link.**
+  - The `media` RPC (DX6) is checked first: at most 4 attachments, each type against
+    its bytes' signature, and `text` refused.
+  - Each component under the resolved working directory (`.claude`, `desk-uploads`, the
+    session directory) is walked with `O_NOFOLLOW` and opened relative to the one
+    before it (`dir_fd`). A missing component is created 0700. An existing one that is
+    a symlink, or not a directory, refuses the RPC.
+  - Each file is created `O_CREAT | O_EXCL | O_NOFOLLOW`, mode 0600, under its own name
+    `<nonce>.<n>.<ext>`, the extension derived from the validated type (`png`, `jpg`,
+    `gif`, `webp`, `pdf`), since the native Read chooses image or PDF handling by
+    extension. The supplied name is for display only: the prelude and the events.
+  - Saving is idempotent: a file already there with the same bytes is taken as saved.
+    The §10 `.git/info/exclude` line and the sweep apply.
+  - The tests cover a symlinked directory component, a symlinked leaf, duplicate
+    supplied names, and a missing or mismatched suffix.
+- **Queued only once the bridge holds it.** The daemon posts the bridge `media` op and
+  answers the RPC `{queued, upload, intake: "native-read", root, paths}` only after the
+  bridge has accepted the upload id into its state. A duplicate id counts as accepted.
+  A bridge refusal answers `failed`, and the daemon removes the files it saved for that
+  upload. Saving and acceptance are both idempotent by upload id, so a daemon restart
+  between them is safe whatever its ledger does with an unanswered nonce. Files left
+  by a crash are swept with the session's uploads. The tests restart the daemon
+  between save and acceptance, and between acceptance and the answer, and include a
+  refused op.
+- **The bridge claims, then streams.** Its upload state lives in `$.state`, scoped to the
+  session. Each attachment is `pending`, `claimed`, `read`, `forwarded`, `aborted` or
+  `failed`. At a main-loop `turn.step` with an attachment pending, the hook:
+  1. claims one attachment, recording a generated tool-use id, before it yields
      anything;
-  2. streams the prelude `[sminos bridge] The person attached <name> from the desk:
-     this Read is the bridge's, not your choice.` That is the disclosure the TUI shows
+  2. checks that the attachment's resolved path is still inside its pinned root, else
+     marks it `failed`;
+  3. streams the prelude `[sminos bridge] The person attached <name> from the desk:
+     this Read is the bridge's, not your choice.` This is the disclosure the TUI shows
      and the model reads, since the synthetic rows are model-shaped;
-  3. streams that one Read, with `file_path` the absolute path and no `pages`.
+  4. streams that one Read, with `file_path` the pinned absolute path and no `pages`.
+
   The step after it calls `next` when nothing is pending. Sub-agent loops are never
-  touched. A tool result carrying the generated id makes the attachment `read`, and the
-  next main-loop step that calls `next` makes it `sent`. The bridge emits each change
-  as DX5 `media`.
+  touched.
+- **What each state means.** These are what the bridge can observe, and no more:
+  - `read`: a tool result carrying the generated id that is not an error and holds an
+    `image` or `document` block.
+  - `failed`: a denied or error result, with the result's text as `reason`.
+  - `aborted`: a claim whose step was cancelled.
+  - `forwarded`: the next main-loop step passed the conversation, the attachment
+    included, on through `next`. A hook beneath the bridge can still answer that step
+    without a model request, so `forwarded` does not prove the model received the
+    attachment. DX5 says so, and the live check shows it with a stand-in hook beneath
+    that answers without a request.
+- **A reload reconciles.** On the module's start, for each attachment of this session
+  it holds:
+  - `claimed`, with a tool result for its tool-use id in the transcript: advanced as
+    above;
+  - `claimed`, with none: `aborted` with reason `indeterminate after reload`. It is
+    never streamed again, since that could read the file twice;
+  - `pending`: kept. If the session is idle, the wake is armed again from now, because
+    engine timers die with the module.
+  Every non-terminal state, and every terminal state not yet acknowledged by the child,
+  is emitted again with the resync. Events are idempotent by `(upload, n, state)`.
 - **Wakes.** Intake happens only at a step boundary. Two cases need a turn to start:
   - The bridge accepts uploads while the session is idle. If no turn starts within 2 s,
     it submits one wake. The 2 s gives the person's own Send, which usually follows,
@@ -1789,20 +1839,24 @@ without `pages`. A returned `toolUses` with no streamed chunks runs nothing.
   wake (`stopped`), and an unclaimed attachment waits for the person's next turn. The
   bridge never reaches past the latch through the calls it leaves open (`tool.call`,
   `session.append`).
-- **Permission.** Inside the working directory a Read in default mode asks nothing.
-  The live check confirms this for `.claude/desk-uploads/`. An ask rule that still
-  raises a request goes to the desk like any other; the bridge never allows its own
-  Read.
+- **Permission.** Inside the working directory, a Read in default mode asks nothing. The
+  live check confirms this for `.claude/desk-uploads/`. An ask rule that still raises a
+  request goes to the desk like any other; the bridge never allows its own Read.
 - **The hub.** `media` joins `RPC_NAMES` and the types, and `op` admits `media`.
   `controls.media` turns available.
 - **The live check** re-runs the spike's cases against the built bridge, behind a
-  recording stub:
-  - an idle PNG, and a whole PDF;
+  recording stub, through the real child endpoint and the daemon's RPC path:
+  - an idle PNG and a whole PDF, each ending `forwarded`, with the stub's request
+    holding the block;
   - an upload during a running Bash;
   - an `end_turn` in flight followed by the wake;
-  - Esc mid-step: aborted, not retried;
-  - a duplicate id;
-  - a reload with an attachment pending, and one with an attachment claimed.
+  - Esc mid-step: `aborted`, not retried;
+  - the same RPC twice: one attachment, one Read;
+  - a denied Read: `failed`;
+  - the stand-in hook beneath that answers without a request;
+  - `/cd` before the save, and `/cd` between the save and the Read;
+  - a reload with an attachment pending (it ends `forwarded`), and one with an
+    attachment claimed (it ends `aborted`).
   Large files, malformed PDFs and real models are not covered (the spike's own limits).
 - Review: `high`. Bytes from the hub's side are written onto the machine, and the
   bridge makes tool calls the model did not choose.
@@ -1911,7 +1965,7 @@ to `POST /command?wait=` and the answer it keeps under an RPC nonce carry `code`
 | `command` | `{name, args?, from?, rpc?}` | at once: `{ok: true, result: {queued: true, route: <class>, id}}`; refused: `{ok: false, error, code}` with `code` one of `unknown-builtin`, `panel`, `routed`, `follow`, `drop`, `local`, `bad-args`, `disabled`, `self`, `stopped`, `turn-unknown` |
 | `btw` (M2) | `{prompt, rpc?}` | `{ok: true, result: {started: true, id}}`; `{ok: false, error}` (empty prompt; `nothing-to-fork` known at once) |
 | `stop-agent` (M4, MW4) | `{agentId, from?}` | `{ok: true, result: {agentId, accepted: true, resolvedAgentId?}}` (`agentId` as asked; `resolvedAgentId` the id `$.agent.list()` resolved a name to); `{ok: false, error}` (not a running agent by id or name; TaskStop's error) |
-| `media` (MW5) | `{id, paths: string[]}` (absolute, each inside the session's upload directory) | `{ok: true, result: {queued: true, id}}`, or `{duplicate: true, id}` for an id already held; `{ok: false, error}` (a path outside the directory, a missing file) |
+| `media` (MW5) | `{upload, root, files: [{n, path, name, mediaType}]}`: `upload` the RPC nonce; `root` the resolved upload directory; each `path` absolute, resolving inside `root` | `{ok: true, result: {queued: true, upload}}` once the upload is in the bridge's state, or `{ok: true, result: {duplicate: true, upload}}` for one already held; `{ok: false, error}` (a path outside `root`, a missing file) |
 | `tell` (M4) | `{agentId, text}` | `{ok: true, result: {sent: true}}`; `{ok: false, error}` |
 
 The child keeps `rpc_of[id]` for an op answered `queued` or `started` until the `run` or
@@ -1954,7 +2008,7 @@ A read error on the sub (DX4 below) is one of `no-bridge`, `unsupported`, `timeo
 | `run` / `start` | `id, name, args, t`, and for a `reload-plugins` run `child: [inode, pid]`, the child the run left from, added by that child (Decision Log, entry 9) — the lifecycle of a `command` op (the child's own `command {id, op}` event, DX5 Events, is every relayed op's ingress and is unchanged) |
 | `run` / `end` | `id, name, args, settled: {ok: true, text?, context?} \| {ok: false, error}, readback: {how: "text" \| "row" \| "effect" \| "none", text?, uuid?}, t`; `rpc?` added by the child; a replaced `reload-plugins` module cannot emit it (the daemon finishes by effect); an unchanged module kept loaded emits the returned text (Decision 11) |
 | `btw` / `start`, `end` (M2) | `id`; on end `text` (≤ 64 KiB), `usage: {input, output, cacheRead?, cacheWrite?}` or `reason`; `rpc?` added by the child. The lane map's `text: null`, `synthetic?` and `refusalFallback?` are lane B's; lane A's `text` is a string when present |
-| `media` (MW5) | `{id, state: "saved" \| "read" \| "sent" \| "aborted" \| "failed", path, toolUseId?, reason?}` per attachment, as it changes: `read` when its Read's result settled, `sent` when the next main-loop request carried it; `aborted` (an Esc during its step: never retried) and `failed` end it; `rpc?` added by the child |
+| `media` (MW5) | `{upload, n, state: "read" \| "forwarded" \| "aborted" \| "failed", toolUseId?, reason?}` per attachment, as it changes (MW5's state rules): `read` a successful media-bearing Read result; `forwarded` the next main-loop step passed it on through `next`, which a hook beneath may still answer without a model request; `aborted` (a cancelled claim, never retried) and `failed` end it. `saved` is the RPC's answer, not an event. Idempotent by `(upload, n, state)`; `rpc` is `upload` |
 | `catalog` (M1) | `Catalog`: `{fingerprint, skills?: string[], commands: [{name, description, source, plugin?, route: Route, withArgs?: Route}], models: {options: string[], aliases: {[family]: string \| null}}, measured: "2.1.307"}` |
 | `mode` (M3) | `{mode, at}` — the bridge's current reading when it changes: its own decision's mode at once, else the latest classic hook input's `permission_mode`; `at` epoch ms on the machine's clock, when it was read |
 | `continuing` (M4) | `{command: "background", cwd, t}` — emitted just before a `follow` run that leaves the process |
@@ -2061,7 +2115,7 @@ read:    { id: string; what: string; result?: JsonValue; error?: { code: 'no-bri
 catalog: Catalog                                                            // M1; main subs only; also `snapshot.catalog?`
 // session-wide (sub and n null), relayed unread:
 op:      { rpc: string | null; op: 'command' | 'btw' | 'stop-agent' | 'tell' | 'media'; phase: 'start' | 'end'; id: string; [field: string]: JsonValue }
-          // MW5: a `media` op's start is `saved`, its end the last attachment's `sent`, `aborted` or `failed`; each state change rides it
+          // MW5: `id` is the upload; its start is the RPC's `queued`, its end the last attachment's `forwarded`, `aborted` or `failed`
 // `end` reasons gain:
 end:     { reason: ... | 'continued'; to?: string; confirmed?: boolean }      // M4
 ```
@@ -2095,7 +2149,7 @@ malformed one is `bad-shape`.
 | `tell` | `{session, agentId, text}` | `{sent: true}` | M4 |
 | `fork` | `{session, brief?, worktree?, model?, effort?}` | `{session, alias}` | M4 |
 | `attach` | superseded by `media` (2026-10-26); M5's fallback if the synthetic Read stops working | — | M5 |
-| `media` | `{session, attachments: [{name, mediaType, data}], delivery: "queued-turn"}`: 1–4 attachments, `name` `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`, `mediaType` one of `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `application/pdf` and matching the bytes' signature, `data` base64, all within the RPC's 1 MiB (the hub's frame bound, not an engine limit); lane A refuses `text` (`bad-shape`: the words go as a Send, the browser's sealed `human` event) | `{queued: true, id, intake: "native-read", paths}` (`paths` relative to the working directory); the states follow as `op` | MW5 |
+| `media` | `{session, attachments: [{name, mediaType, data}], delivery: "queued-turn"}`: 1–4 attachments, `name` `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`, `mediaType` one of `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `application/pdf` and matching the bytes' signature (the stored name's extension comes from it; `name` is for display), `data` base64, all within the RPC's 1 MiB (the hub's frame bound, not an engine limit); lane A refuses `text` (`bad-shape`: the words go as a Send, the browser's sealed `human` event) | `{queued: true, upload, intake: "native-read", root, paths}` (`upload` the nonce; `paths` relative to `root`), answered only once the bridge holds the upload; the states follow as `op` | MW5 |
 
 New error codes: `unknown-agent` (M4). Every new RPC is X class: `read-only` before
 execution; `unsupported` without a bridge (`fork` and `attach` need none: the daemon
@@ -3132,6 +3186,20 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   resumed would then silently bring excluded content back.
   Date/Author: 2026-10-26, the desk orchestrator, from remote-architecture's
   measurements and map.
+
+- 2026-10-26: MW5's review (`doperpowers:adversarial-reviewer`) changed it before any
+  build:
+  - uploads are saved through a no-follow walk with exclusive creation, under names
+    whose extension comes from the validated type;
+  - the upload id is the RPC nonce, apart from the child's command id;
+  - `queued` is answered only once the bridge holds the upload;
+  - a reload reconciles each held attachment to an end, and arms the wake again;
+  - the root comes from the live working directory, and a later `/cd` does not move
+    it;
+  - `sent` is now `forwarded`. The bridge can see the step passed on, not that a model
+    request carried it.
+  Rejected: proving delivery by reading the next request from inside the bridge,
+  which a hook beneath it can still answer without one.
 
 ## Outcomes & Retrospective
 
