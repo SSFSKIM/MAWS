@@ -136,11 +136,11 @@ allows today.
   the owner says MAWS's UX is ready; F1 stands (Decision Log, "Path A's machine side
   resumes").
 - [ ] The machine-side wave (Plan of Work, "The machine-side wave"): MW1 reads, MW2
-  ops, MW3 scoped allows, MW4 one agent stopped or told. The machine
+  ops, MW3 scoped allows, MW4 one agent stopped or told, MW5 image and PDF intake. The machine
   halves of M2–M4, cut and widened per that entry.
-- [ ] Wave 2, run by remote-architecture in isolated sessions against a recording
-  stub endpoint: media intake through a synthetic native Read, and context truncation
-  through a compaction hook. Measurements return here before either is designed.
+- [x] (2026-10-26) Wave 2, measured by remote-architecture on 2.1.310 in isolated
+  configs behind a recording stub, zero inference: media intake works (MW5); context
+  truncation is blocked on 2.1.310 (Decision Log, "Wave 2 and the lane map").
 - [ ] The latency table on #52 against the baseline, and the acceptance walk on both
   Macs.
 
@@ -1627,7 +1627,7 @@ or `4` on a prompt the hooks never saw, the rewind picker by position, Esc on a 
 offered only where the capability says `attach`. The spec gains its design and
 milestone then, with a dated line.
 
-### The machine-side wave (2026-10-26): MW1–MW4
+### The machine-side wave (2026-10-26): MW1–MW5
 
 The machine halves of M2–M4, cut and widened by the Decision Log's "Path A's machine
 side resumes". Each MW names the text above it builds from and what differs. The
@@ -1662,16 +1662,18 @@ intake.
   `capabilities.reads`:
   - `usage {breakdown?}`: `$.session.usage`, the summary unless `full` is asked for.
     The answer names which one it is, since `full` calls the token-count API.
-  - `config`: `$.config.list()`, each row normalized to Interfaces' shape. The engine's
-    `provider: Origin` becomes `"engine"` when `Origin.plugin` is `"engine"`, else
-    `{plugin: Origin.plugin}`, and `isLocked` becomes `locked`. A row whose
-    `Origin.plugin` is not `"engine"` and whose kind is `text` goes without its
-    `value`, because a plugin's `userConfig` field may hold a credential. Every row is
-    `writable: false` in lane A (F1). The tests feed engine-shaped `ConfigRow`s (the
-    2.1.310 types), not wire-shaped ones.
+  - `config`: `$.config.list()`, each row as the engine's `ConfigRow`, with
+    `readOnly: true` (F1). A row whose `provider.plugin` is not `"engine"` and whose
+    kind is `text` goes without its `value`, because a plugin's `userConfig` field may
+    hold a credential. The tests feed engine-shaped rows (the 2.1.310 types).
   - `settings`: §11's cut.
   - `mcp`: `$.tool.list()` grouped by server, `exact: false`. The plane adds the
     `disabled` servers from `.claude.json`'s one key.
+  - `settings` and `usage` carry the lane map's `permissionsExact: false` and
+    `breakdownDetail`.
+- `capabilities` gains `controls`, the lane map's per-control map (Interfaces). It
+  starts with every key: those this wave builds turn `available` in the MW that builds
+  them, and the rest are unavailable with their reason.
 - The live check is the inventory's §7 item 6, the probe of settings, usage and MCP
   reads. It covers:
   - the config rows and their locks, and every engine `text` row's value, which must not
@@ -1737,11 +1739,73 @@ intake.
 **MW4 — one agent stopped or told.** M4's increment (a) as written:
 
 - `stop-agent` and `tell` in the bridge, the daemon and the hub, with §9's note row
-  telling the parent not to redo the stopped agent's work;
+  telling the parent not to redo the stopped agent's work. `stop-agent` takes any id or
+  name without a control character (a name may hold a space), and answers with the
+  spelling asked and the id it resolved;
 - the daemon's new `unknown-agent` code.
 
 Not built: the launched workflows held as running, which served increment (c)'s
 `/background` condition, still paused. Review: `medium`.
+
+**MW5 — image and PDF intake.** New, from wave 2's measurement
+(`~/claude-code-bundle/2.1.300/notes/media-intake-spike.md`, 2.1.310, zero inference).
+It replaces M5's `attach`; M5's design (§10, S9: saved in the working directory, the
+model told to read it) stays as the fallback. A main-loop `turn.step` hook that does
+not call `next` and streams `text`, then `tool` and `input` chunks for a native Read,
+then `stop` with `stopReason: "tool_use"`, makes the engine run that Read. The next
+request carries the file as an `image` block, or a `document` block for a PDF read
+without `pages`. A returned `toolUses` with no streamed chunks runs nothing.
+
+- **The daemon saves.** The `media` RPC (DX6) is checked: names, types against the
+  bytes' signature, at most 4 attachments, `text` refused. The daemon writes each file
+  to `<cwd>/.claude/desk-uploads/<session>/<nonce>-<name>` (files 0600, directories
+  0700), with §10's `.git/info/exclude` line and sweep. It answers
+  `{queued, id, intake: "native-read", paths}`, then posts the bridge `media` op.
+  `saved` is that answer.
+- **The bridge claims, then streams.** Its upload state lives in `$.state`, scoped to
+  the session, as `sminos.ask`'s does, so a module reload neither loses an upload nor
+  replays one. Each attachment is pending, claimed, read, sent, aborted or failed. At
+  a main-loop `turn.step` with an attachment pending, the hook:
+  1. claims one attachment, recording its generated tool-use id, before it yields
+     anything;
+  2. streams the prelude `[sminos bridge] The person attached <name> from the desk:
+     this Read is the bridge's, not your choice.` That is the disclosure the TUI shows
+     and the model reads, since the synthetic rows are model-shaped;
+  3. streams that one Read, with `file_path` the absolute path and no `pages`.
+  The step after it calls `next` when nothing is pending. Sub-agent loops are never
+  touched. A tool result carrying the generated id makes the attachment `read`, and the
+  next main-loop step that calls `next` makes it `sent`. The bridge emits each change
+  as DX5 `media`.
+- **Wakes.** Intake happens only at a step boundary. Two cases need a turn to start:
+  - The bridge accepts uploads while the session is idle. If no turn starts within 2 s,
+    it submits one wake. The 2 s gives the person's own Send, which usually follows,
+    the chance to start that turn instead.
+  - A turn ends with an attachment still pending, because its last request ended with
+    `end_turn`. The bridge submits one wake.
+  The wake is `[sminos bridge]` plus a line naming the attachments, through
+  `prompt.submit`, as the bridge's own wakes are. At most one wake is owed at a time.
+- **Esc.** An Esc during the synthetic step leaves the claimed attachment `aborted`. It
+  is never retried, since the person stopped it. After an Esc the engine refuses the
+  wake (`stopped`), and an unclaimed attachment waits for the person's next turn. The
+  bridge never reaches past the latch through the calls it leaves open (`tool.call`,
+  `session.append`).
+- **Permission.** Inside the working directory a Read in default mode asks nothing.
+  The live check confirms this for `.claude/desk-uploads/`. An ask rule that still
+  raises a request goes to the desk like any other; the bridge never allows its own
+  Read.
+- **The hub.** `media` joins `RPC_NAMES` and the types, and `op` admits `media`.
+  `controls.media` turns available.
+- **The live check** re-runs the spike's cases against the built bridge, behind a
+  recording stub:
+  - an idle PNG, and a whole PDF;
+  - an upload during a running Bash;
+  - an `end_turn` in flight followed by the wake;
+  - Esc mid-step: aborted, not retried;
+  - a duplicate id;
+  - a reload with an attachment pending, and one with an attachment claimed.
+  Large files, malformed PDFs and real models are not covered (the spike's own limits).
+- Review: `high`. Bytes from the hub's side are written onto the machine, and the
+  bridge makes tool calls the model did not choose.
 
 ## Concrete Steps
 
@@ -1815,11 +1879,21 @@ wire and absent from an older producer; a consumer treats absence as "the older 
   "engine": "2.1.307",
   "ops": ["ping","steer","interrupt","stop","model","compact","deliver","answer","read","command"],
   "reads": ["status"],
-  "routes": {"measured": "2.1.307"}
+  "routes": {"measured": "2.1.307"},
+  "controls": {"read.usage": {"available": true}, "decide.interrupt": {"available": false, "reason": "…"}}
 },
 "mode": {"mode": "default", "at": 1760000000000}
 ```
-`sminos` is the loaded mod's own plugin version. `ops` and `reads` grow by milestone (M1
+`controls` (MW1 on, 2026-10-26) is the lane map's per-control capability, keyed by its
+names (`ControlCapabilities` in remote-architecture's `lane-b-control-map.md`): `read.usage`,
+`read.config`, `read.settings`, `read.mcp`, `btw`, `compact`, `model`, `mcp.enable`,
+`mcp.disable`, `mcp.reconnect`, `decide`, `decide.scope`, `decide.interrupt`,
+`decide.addDirectory`, `stop-agent`, `tell`, `media`, `forget`, `rewind-files`,
+`elicitation.answer`, each `{available: boolean, reason?: string}`; a missing key is
+unavailable. The bridge sends the whole map, its unavailable keys with their reasons
+(lane A: `decide.interrupt`, `forget`, `rewind-files`, `elicitation.answer`), so a path-B
+daemon fills the same keys and the web greys a control by its key, never by lane. `ops`
+and `reads` stay as M0 wrote them. `sminos` is the loaded mod's own plugin version. `ops` and `reads` grow by milestone (M1
 adds read `catalog`; M2 op `btw`, reads `usage`, `mcp`, `settings`, and MW1 `config`; M4 ops
 `stop-agent`, `tell`; M5 nothing of the bridge's). `mode` (M3) is the bridge's current
 reading — its own decision's mode, else the latest classic hook input's — with `at`,
@@ -1836,7 +1910,8 @@ to `POST /command?wait=` and the answer it keeps under an RPC nonce carry `code`
 | `read` | `{what, args?}` | `{ok: true, result}` per kind below; `{ok: false, error}` for a kind it does not serve (`no read <what>`) or a failed call |
 | `command` | `{name, args?, from?, rpc?}` | at once: `{ok: true, result: {queued: true, route: <class>, id}}`; refused: `{ok: false, error, code}` with `code` one of `unknown-builtin`, `panel`, `routed`, `follow`, `drop`, `local`, `bad-args`, `disabled`, `self`, `stopped`, `turn-unknown` |
 | `btw` (M2) | `{prompt, rpc?}` | `{ok: true, result: {started: true, id}}`; `{ok: false, error}` (empty prompt; `nothing-to-fork` known at once) |
-| `stop-agent` (M4) | `{agentId, from?}` | `{ok: true, result: {agentId}}`; `{ok: false, error}` (not a running agent by id or name; TaskStop's error) |
+| `stop-agent` (M4, MW4) | `{agentId, from?}` | `{ok: true, result: {agentId, accepted: true, resolvedAgentId?}}` (`agentId` as asked; `resolvedAgentId` the id `$.agent.list()` resolved a name to); `{ok: false, error}` (not a running agent by id or name; TaskStop's error) |
+| `media` (MW5) | `{id, paths: string[]}` (absolute, each inside the session's upload directory) | `{ok: true, result: {queued: true, id}}`, or `{duplicate: true, id}` for an id already held; `{ok: false, error}` (a path outside the directory, a missing file) |
 | `tell` (M4) | `{agentId, text}` | `{ok: true, result: {sent: true}}`; `{ok: false, error}` |
 
 The child keeps `rpc_of[id]` for an op answered `queued` or `started` until the `run` or
@@ -1849,16 +1924,21 @@ Read results:
 status:   {version: {version, base?, builtAt?}, model, cwd, root, repo: {remote?, branch?} | null,   // remote without userinfo
            surfaces: string[], override: {model, effort} | null, mode?: {mode: string, at: number}}
 catalog:  Catalog                                                   // below
-usage:    SessionUsage & {context: {breakdown?: ContextBreakdown}, breakdown: "summary" | "full"}  // the engine's shape, `$.session.usage(args)`; args `{breakdown?}`, summary unless `full` is asked (MW1)
-mcp:      {exact: boolean, servers: [{name, status: "connected" | "disabled" | "unknown", tools: number}]}
+usage:    SessionUsage & {context: {breakdown?: ContextBreakdown}, breakdownDetail: "summary" | "full"}
+          // MW1: the engine's shape, `$.session.usage(args)`; args `{breakdown?}`, summary unless `full` is asked;
+          // the lane map's optional `rateLimitsAvailable?`, `sessionTotals?` are lane B's; `startedAt?` lane A's
+mcp:      {exact: boolean, servers: [{name, status: "connected" | "disabled" | "pending" | "failed" | "needs-auth" | "unknown",
+                                      tools?: number, source?, scope?, transport?, serverInfo?, error?, errorCode?}]}
+          // lane A fills name, status ∈ {connected, disabled, unknown} and tools; the rest is lane B's exact snapshot
           // the bridge answers connected servers with counts; the plane adds `disabled` from `.claude.json`;
           // `exact` false in lane A, which infers servers from tools (MW1); a lane with a live status read says true
-config:   {rows: [{key, label, description?, kind: "boolean" | "choice" | "text" | "number", value?: ConfigValue,
-                   options?: string[], provider: "engine" | {plugin: string}, locked: boolean, writable: boolean}]}
-          // MW1: `$.config.list()` in its order, normalized from the engine's ConfigRow: `provider` "engine" when
-          // Origin.plugin is "engine", else {plugin}; `locked` from isLocked; a non-engine `text` row without `value`;
-          // `writable` false in lane A (F1)
-settings: {permissions: {allow: Rule[], ask: Rule[], deny: Rule[], additionalDirectories: string[], defaultMode: string | null,
+config:   {rows: ConfigRow[], readOnly: true}
+          // MW1: `$.config.list()` in its order, each row the engine's ConfigRow (key, label, description?, kind,
+          // value, options?, provider: Origin, isLocked) except that a row whose provider.plugin is not "engine" and
+          // whose kind is "text" has no `value`; `isLocked` is the engine's policy lock; `readOnly` is the desk's (F1)
+settings: {permissionsExact: boolean,                             // MW1: false in lane A, a settings-file projection;
+                                                                   // lane B's `livePermissions?` is its own
+           permissions: {allow: Rule[], ask: Rule[], deny: Rule[], additionalDirectories: string[], defaultMode: string | null,
                          bySource: {[source: "user" | "project" | "local" | "policy" | "cliArg"]: {allow: Rule[], ask: Rule[], deny: Rule[]}}},
            hooks: {[event: string]: [{matcher: string | null, commands: number}]}}       // never a command's text, never `env`
 Rule   =  {toolName: string, ruleContent?: string}                 // the engine's PermissionRuleValue
@@ -1873,7 +1953,8 @@ A read error on the sub (DX4 below) is one of `no-bridge`, `unsupported`, `timeo
 | --- | --- |
 | `run` / `start` | `id, name, args, t`, and for a `reload-plugins` run `child: [inode, pid]`, the child the run left from, added by that child (Decision Log, entry 9) — the lifecycle of a `command` op (the child's own `command {id, op}` event, DX5 Events, is every relayed op's ingress and is unchanged) |
 | `run` / `end` | `id, name, args, settled: {ok: true, text?, context?} \| {ok: false, error}, readback: {how: "text" \| "row" \| "effect" \| "none", text?, uuid?}, t`; `rpc?` added by the child; a replaced `reload-plugins` module cannot emit it (the daemon finishes by effect); an unchanged module kept loaded emits the returned text (Decision 11) |
-| `btw` / `start`, `end` (M2) | `id`; on end `text` (≤ 64 KiB), `usage: {input, output, cacheRead?, cacheWrite?}` or `reason`; `rpc?` added by the child |
+| `btw` / `start`, `end` (M2) | `id`; on end `text` (≤ 64 KiB), `usage: {input, output, cacheRead?, cacheWrite?}` or `reason`; `rpc?` added by the child. The lane map's `text: null`, `synthetic?` and `refusalFallback?` are lane B's; lane A's `text` is a string when present |
+| `media` (MW5) | `{id, state: "saved" \| "read" \| "sent" \| "aborted" \| "failed", path, toolUseId?, reason?}` per attachment, as it changes: `read` when its Read's result settled, `sent` when the next main-loop request carried it; `aborted` (an Esc during its step: never retried) and `failed` end it; `rpc?` added by the child |
 | `catalog` (M1) | `Catalog`: `{fingerprint, skills?: string[], commands: [{name, description, source, plugin?, route: Route, withArgs?: Route}], models: {options: string[], aliases: {[family]: string \| null}}, measured: "2.1.307"}` |
 | `mode` (M3) | `{mode, at}` — the bridge's current reading when it changes: its own decision's mode at once, else the latest classic hook input's `permission_mode`; `at` epoch ms on the machine's clock, when it was read |
 | `continuing` (M4) | `{command: "background", cwd, t}` — emitted just before a `follow` run that leaves the process |
@@ -1979,7 +2060,8 @@ MachinePresence = { online; policy; checkouts; desk?: { sminos: string; rpcs: st
 read:    { id: string; what: string; result?: JsonValue; error?: { code: 'no-bridge' | 'unsupported' | 'timeout' | 'busy' | 'failed'; message: string } }
 catalog: Catalog                                                            // M1; main subs only; also `snapshot.catalog?`
 // session-wide (sub and n null), relayed unread:
-op:      { rpc: string | null; op: 'command' | 'btw' | 'stop-agent' | 'tell'; phase: 'start' | 'end'; id: string; [field: string]: JsonValue }
+op:      { rpc: string | null; op: 'command' | 'btw' | 'stop-agent' | 'tell' | 'media'; phase: 'start' | 'end'; id: string; [field: string]: JsonValue }
+          // MW5: a `media` op's start is `saved`, its end the last attachment's `sent`, `aborted` or `failed`; each state change rides it
 // `end` reasons gain:
 end:     { reason: ... | 'continued'; to?: string; confirmed?: boolean }      // M4
 ```
@@ -2009,10 +2091,11 @@ malformed one is `bad-shape`.
 | `compact` | gains `instructions?` (text ≤ 4,096) | unchanged | M2 |
 | `btw` | `{session, prompt}` (≤ 8,192) | `{started: true, id}`; the answer follows as `op` | M2 |
 | `decide` | gains `scope?: {suggestion: number, sha256: string, destination: 'session' \| 'localSettings'}` on an allow, the suggestion an `addRules` or `addDirectories` one (MW3). `mode?` is cut with plan-mode controls (2026-10-26) | unchanged | M3, MW3 |
-| `stop-agent` | `{session, agentId}` (`[A-Za-z0-9_-]{1,128}`, an id or a name) | `{agentId}` | M4 |
+| `stop-agent` | `{session, agentId}` (an id or a name, 1–128 characters without a control character: an agent's name may hold a space) | `{agentId, accepted: true, resolvedAgentId?}` | M4, MW4 |
 | `tell` | `{session, agentId, text}` | `{sent: true}` | M4 |
 | `fork` | `{session, brief?, worktree?, model?, effort?}` | `{session, alias}` | M4 |
-| `attach` | `{session, name, type, bytes}` (base64; the RPC's 1 MiB bound; `name` `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`) | `{path}` (relative to the working directory) | M5 |
+| `attach` | superseded by `media` (2026-10-26); M5's fallback if the synthetic Read stops working | — | M5 |
+| `media` | `{session, attachments: [{name, mediaType, data}], delivery: "queued-turn"}`: 1–4 attachments, `name` `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`, `mediaType` one of `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `application/pdf` and matching the bytes' signature, `data` base64, all within the RPC's 1 MiB (the hub's frame bound, not an engine limit); lane A refuses `text` (`bad-shape`: the words go as a Send, the browser's sealed `human` event) | `{queued: true, id, intake: "native-read", paths}` (`paths` relative to the working directory); the states follow as `op` | MW5 |
 
 New error codes: `unknown-agent` (M4). Every new RPC is X class: `read-only` before
 execution; `unsupported` without a bridge (`fork` and `attach` need none: the daemon
@@ -3014,6 +3097,41 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   report a Bash left running. Rejected: a correlated outcome event for `decide`, which
   is new protocol for what deny followed by the existing `interrupt` RPC already
   reports.
+
+- Decision: Wave 2 and the lane map. remote-architecture's three notes, in
+  `~/claude-code-bundle/2.1.300/notes/` and MAWS PR #79 at `9104bcc15`, are
+  `media-intake-spike.md`, `truncation-spike.md` and `lane-b-control-map.md`.
+  - **Media builds, as MW5.** The synthetic native Read is measured end to end on
+    2.1.310: the media reaches the next request, a Read inside the working directory
+    asks nothing, and an Esc mid-step cancels it. It replaces M5's `attach`, whose
+    route needs the model to choose the Read and costs one more model response. That
+    route stays the fallback.
+  - **"Forget after this point" is not built.** The bridge's own direct
+    `$.session.compact` skips its own hook. A queued `/compact` does reach the hook, and
+    the live cut is then correct. But after `--resume` the kept assistant and thinking
+    blocks appear twice, and a cut inside a multi-block reply, or between a tool call
+    and its result, brings excluded content back. The cause is resume rejoining rows by
+    API `message.id` across the reminted UUIDs. Lane A advertises `forget` unavailable
+    with that reason. The fix needs Anthropic: an engine fix or a supported cut API.
+  - **The lane map's names are the shapes.** Interfaces now carries:
+    - `capabilities.controls`, the per-control map with reasons;
+    - the read results' `breakdownDetail`, `readOnly`, `permissionsExact`, MCP's
+      `exact` and its wider statuses;
+    - `stop-agent`'s name with a space and its `resolvedAgentId`;
+    - the `media` RPC.
+    Lane B's richer optional fields are named, and lane A leaves them out. What the
+    map found of lane B (`tell` a stub there, `compact` a queued command, `add_directory`
+    no local directory) changes nothing lane A builds.
+  - **Deferred to the web half:** the map's structured MCP mutation (`{action,
+    target}` with per-server results). Lane A keeps `/mcp` through `command`, which M1
+    built, and MW2 widens its grammar. The web's half writes lane A's adapter to the
+    shared op when it lands.
+  Rationale: each change rests on a measured result or on a lane-B difference read
+  from the code, and every new field is optional on the wire. Rejected: building forget
+  on the queued-`/compact` route with a "not after resume" warning. A session that is
+  resumed would then silently bring excluded content back.
+  Date/Author: 2026-10-26, the desk orchestrator, from remote-architecture's
+  measurements and map.
 
 ## Outcomes & Retrospective
 
