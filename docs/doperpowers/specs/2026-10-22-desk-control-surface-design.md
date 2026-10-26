@@ -143,7 +143,12 @@ allows today.
     fake-machine producer (MAWS #153); the `medium` review over both halves found two
     measured gaps in the disabled-MCP lookup (a linked worktree's project key, the
     legacy `.config.json`), fixed and re-reviewed clean; live check on 2.1.310.
-  - [ ] MW2 ops: `btw`, compact's `instructions`, `/mcp`'s measured grammar.
+  - [x] (2026-10-26 09:26Z) MW2 ops: `btw`, compact's `instructions`, `/mcp`'s measured grammar:
+    sminos 1.12.0 (doperpowers #397) and the hub's `btw` RPC, compact's `instructions`
+    and fake-machine producer (MAWS #157); the `medium` review found a side question's
+    end lost across a reload or a child respawn and line separators in the `/mcp` form,
+    fixed and re-reviewed clean; `/mcp disable` of every server refused (Decision Log);
+    the configured-name gap is residue; live check on 2.1.310.
   - [ ] MW3 scoped allows.
   - [ ] MW4 `stop-agent` and `tell`.
   - [ ] MW5 image and PDF intake.
