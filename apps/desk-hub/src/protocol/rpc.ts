@@ -21,8 +21,11 @@ export type RpcArgs = {
    * family alias the session's `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` maps, or `"default"` (the session's own).
    */
   model: { session: string; model?: string; effort?: string };
-  /** Compact now, or at the turn's end when asked during one; the outcome follows as the session's `compact` events. */
-  compact: { session: string };
+  /**
+   * Compact now, or at the turn's end when asked during one; the outcome follows as the session's `compact` events.
+   * `instructions`, at most 4,096 characters, tell the summary what to keep (`/compact <instructions>`).
+   */
+  compact: { session: string; instructions?: string };
   /** A `claude --bg` session in a known checkout of the project on that machine. */
   spawn: { checkout: string; worktree?: string; brief: string; model?: string; effort?: string; permission_mode?: string };
   retire: { session: string };
@@ -40,11 +43,17 @@ export type RpcArgs = {
    * the web never asserts a class.
    */
   command: { session: string; name: string; args?: string };
+  /**
+   * A side question of a bridged session (the desk control surface spec, §9): one tool-less completion over the
+   * session's transcript as the main thread last sent it, nothing written into the conversation. `prompt` is the
+   * person's question, 1 to 8,192 characters and not blank; the bridge frames it.
+   */
+  btw: { session: string; prompt: string };
 };
 
 export type RpcName = keyof RpcArgs;
 
-export const RPC_NAMES = ['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'spawn', 'retire', 'resume', 'stop', 'command'] as const satisfies readonly RpcName[];
+export const RPC_NAMES = ['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'spawn', 'retire', 'resume', 'stop', 'command', 'btw'] as const satisfies readonly RpcName[];
 
 export type RpcResults = {
   /**
@@ -74,6 +83,13 @@ export type RpcResults = {
    * refusal of the bridge's is `failed`, the bridge's code the message's first word and its reason after.
    */
   command: { queued: true; route: string; id: string };
+  /**
+   * Answered at once, whether or not a turn runs: `id` the op's own, which its DX4 `op` start and end name (`op:
+   * 'btw'`). The answer follows as that end: `text` (at most 64 KiB of UTF-8, `truncated: true` when cut) and `usage`,
+   * or a `reason`. A side question asked before the session's first model request (or after `/clear`) is refused at
+   * once: `failed`, its message `nothing-to-fork: …`.
+   */
+  btw: { started: true; id: string };
 };
 
 /**

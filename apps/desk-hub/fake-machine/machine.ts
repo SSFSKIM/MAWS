@@ -9,7 +9,8 @@
 //     answers `read status`, and runs `command` RPCs through the vendored route table, answered at once and reported
 //     as `op` messages (commands.ts), a stale session (`staleSessions`, `reload`) kept without capabilities; as the
 //     machine-side wave's MW1 producer (`mw1`), answers the reads of usage, config, settings and MCP as recorded and
-//     carries each control's capability in `capabilities.controls`;
+//     carries each control's capability in `capabilities.controls`; as MW2's (`mw2`), answers a side question (`btw`)
+//     at once and its answer as `op` notices, as the MW2 live check recorded them, and takes compact's `instructions`;
 //   - answers RPCs from a script, with a ledger of its own: a nonce is claimed before the effect and its outcome recorded
 //     before the result, and a nonce the ledger knows is never executed again;
 //   - can drop its connection, end a session's process while it stays connected, crash after an RPC's effect and before
@@ -25,12 +26,12 @@ import type { JsonObject } from '../src/protocol/json';
 import type { LogEvent, Vector } from '../src/protocol/log';
 import type { DownFrame, OrgFrame, Refusal, RejectionReason, UpFrame } from '../src/protocol/machine';
 import { RPC_FRESHNESS_MS, RPC_NAMES, type Rpc, type RpcError, type RpcName, type RpcOutcome } from '../src/protocol/rpc';
-import type { Delivery, MachinePresence, Raised, SessionMessage, Settled } from '../src/protocol/session';
+import type { Delivery, MachinePresence, OpBody, Raised, SessionMessage, Settled } from '../src/protocol/session';
 import { Link, LinkError, type Credentials } from './link';
 import { emptyMemory, expireLedger, type Memory } from './memory';
 import type { Recording, Row, Step } from './recording';
 import { Commands, opMessages, refusalMessage, type CommandPlan, type CommandScript } from './commands';
-import { producerAtLeast, SessionDepth, sminosOf, type BridgePlugin, type Producer, type SnapshotOptions } from './session';
+import { MW2_BTW, producerAtLeast, SessionDepth, sminosOf, type BridgePlugin, type Producer, type SnapshotOptions } from './session';
 
 /** What a script answers an RPC with: an outcome, or undefined for the fake machine's own default. */
 export type RpcScript = { [N in RpcName]?: (rpc: Rpc<N>, machine: FakeMachine) => RpcOutcome<N> | undefined | Promise<RpcOutcome<N> | undefined> };
@@ -116,7 +117,11 @@ export type FakeMachineOptions = {
 export type RpcRecord = { nonce: string; rpc: RpcName; outcome: RpcOutcome | null; executed: boolean };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const SESSION_RPCS = new Set<RpcName>(['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'retire', 'resume', 'stop', 'command']);
+const SESSION_RPCS = new Set<RpcName>(['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'retire', 'resume', 'stop', 'command', 'btw']);
+
+/** The RPCs a daemon of `producer`'s knows: the desk control surface's M0 added `command`, the machine-side wave's MW2
+ * `btw`. */
+const rpcsOf = (producer: Producer): RpcName[] => RPC_NAMES.filter((name) => name !== 'btw' || producerAtLeast(producer, 'mw2'));
 /** Whether text holds a control character, which a command's name may not (DX6 `command`). */
 const hasControl = (text: string) => [...text].some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f);
 const fail = (code: RpcError['code'], message: string, extra: Partial<RpcError> = {}): RpcOutcome => ({ state: 'failed', error: { code, message, ...extra } });
@@ -274,7 +279,7 @@ export class FakeMachine {
   /** The machine's DX4 `machine` presence. */
   presence(): MachinePresence {
     const checkouts = this.options.checkouts ?? [...new Set([...this.sessions.values()].map((s) => s.cwd).filter((c): c is string => c !== null))].map((path) => ({ path, branch: 'main' }));
-    const desk = producerAtLeast(this.producer, 'm0') ? { desk: { sminos: sminosOf(this.producer), rpcs: [...RPC_NAMES], reads: [] } } : {};
+    const desk = producerAtLeast(this.producer, 'm0') ? { desk: { sminos: sminosOf(this.producer), rpcs: rpcsOf(this.producer), reads: [] } } : {};
     return { online: true, policy: { read_only: this.options.readOnly === true, ceiling: this.options.ceiling ?? 'default' }, checkouts, ...desk };
   }
 
@@ -707,6 +712,8 @@ export class FakeMachine {
     if (rpc.machine !== this.name) return answer(fail('wrong-machine', `this is ${this.name}, not ${rpc.machine}`));
     // A daemon older than the desk control surface's M0 knows no `command`.
     if (rpc.rpc === 'command' && !producerAtLeast(this.producer, 'm0')) return answer(fail('bad-shape', 'no RPC "command"'));
+    // Nor one older than the machine-side wave's MW2 a `btw`.
+    if (rpc.rpc === 'btw' && !producerAtLeast(this.producer, 'mw2')) return answer(fail('bad-shape', 'no RPC "btw"'));
     const malformed = argumentProblem(rpc);
     if (malformed) return answer(fail('bad-shape', malformed));
     const session = (rpc.args as { session?: string }).session;
@@ -741,6 +748,12 @@ export class FakeMachine {
       const depth = this.sessions.get(rpc.args.session)!;
       if (this.options.bridge === false || depth.presence === null) return answer(fail('unsupported', 'the session has no bridge, or has ended'));
       if (!depth.capabilities?.ops.includes('command')) return answer(fail('unsupported', "the session's bridge takes no commands: its plugin loaded before the update"));
+    }
+    // So does a side question, from a bridge that takes it.
+    if (rpc.rpc === 'btw') {
+      const depth = this.sessions.get(rpc.args.session)!;
+      if (this.options.bridge === false || depth.presence === null) return answer(fail('unsupported', 'the session has no bridge, or has ended'));
+      if (!depth.capabilities?.ops.includes('btw')) return answer(fail('unsupported', "the session's bridge takes no side questions: its plugin loaded before the update"));
     }
     this.memory.ledger[rpc.nonce] = { rpc: rpc.rpc, session: session ?? null, claimed: Date.now(), outcome: null };
     this.remember();
@@ -779,7 +792,7 @@ export class FakeMachine {
     const member = rpc.member;
     if (this.options.bridge === false) {
       if (rpc.rpc === 'steer') return this.traced(rpc, record, rpc.args.session, { row: null });
-      if (['interrupt', 'decide', 'answer', 'model', 'compact'].includes(rpc.rpc)) return fail('unsupported', 'the session has no bridge');
+      if (['interrupt', 'decide', 'answer', 'model', 'compact', 'btw'].includes(rpc.rpc)) return fail('unsupported', 'the session has no bridge');
     }
     switch (rpc.rpc) {
       case 'steer': {
@@ -873,6 +886,14 @@ export class FakeMachine {
         await this.flush();
         return this.traced(rpc, record, depth.id, { taskId: rpc.args.taskId });
       }
+      case 'btw': {
+        // The bridge answers `started` at once, then the fork's start and end follow as `op` notices: the recorded
+        // answer, whether or not a turn runs (a fork does not wait for the turn).
+        const depth = this.sessions.get(rpc.args.session)!;
+        const id = randomUUID().replaceAll('-', '');
+        notices.push(() => this.sideQuestion(depth.id, rpc.nonce, id));
+        return this.traced(rpc, record, depth.id, { started: true, id });
+      }
       case 'command': {
         // The bridge's route check, then the op answered at once; its start and end follow as `op` notices.
         const depth = this.sessions.get(rpc.args.session)!;
@@ -901,6 +922,18 @@ export class FakeMachine {
     this.sessions.get(session)?.commandCatalog(plan.name);
     const { title } = plan.outcome;
     if (title !== undefined) await this.write(`rpc:${nonce}:titled`, `${this.name}/${session}`, { kind: 'titled', session, title });
+    await this.flush();
+  }
+
+  /** A side question's `op` start and end, as the daemon relays the bridge's `btw` events: the recorded ones, under
+   * this op's id and the RPC's nonce. */
+  private async sideQuestion(session: string, nonce: string, id: string): Promise<void> {
+    const base = { project: this.project, machine: this.name, session, kind: 'op', sub: null, n: null } as const;
+    for (const event of MW2_BTW.events) {
+      // The event's own `type` and `rpc` (the child's) give way to the op's: DX4 `op` names the RPC's nonce.
+      const fields = Object.fromEntries(Object.entries(event).filter(([k]) => k !== 'type' && k !== 'rpc' && k !== 'phase'));
+      this.sendSessionWide({ ...base, body: { rpc: nonce, op: 'btw', phase: event.phase as OpBody['phase'], ...fields, id, t: Date.now() } });
+    }
     await this.flush();
   }
 
@@ -1030,8 +1063,13 @@ function argumentProblem(rpc: Rpc): string | null {
   switch (rpc.rpc) {
     case 'steer':
       return needs(str('session') && str('text'), '{session, text}');
-    case 'interrupt':
     case 'compact':
+      return needs(str('session') && optStr('instructions') && (a.instructions === undefined || [...(a.instructions as string)].length <= 4096), '{session, instructions?: at most 4,096 characters}');
+    case 'btw': {
+      const prompt = a.prompt;
+      return needs(str('session') && typeof prompt === 'string' && prompt.trim() !== '' && [...prompt].length <= 8192, "{session, prompt}, prompt the question's text, at most 8,192 characters");
+    }
+    case 'interrupt':
     case 'retire':
     case 'resume':
       return needs(str('session'), '{session}');

@@ -47,7 +47,7 @@ const PANEL = "opens a panel in the terminal; it would hold the session's queue"
 /**
  * The route `name` with `args` takes, or why it is refused: the bare route when the trimmed args are empty, else the
  * with-args one (the bare one when there is none); args its `forms` forbid or require, or that miss its pattern, are
- * `bad-args` unless it has an `otherwise`. A non-built-in is `run-prompt` unless it is a plugin exception or the
+ * `bad-args` unless it has an `otherwise`, whose forms are checked in turn. A non-built-in is `run-prompt` unless it is a plugin exception or the
  * bridge's own plugin's. `machine` fills a reason's `<machine>`.
  */
 export function routeOf(table: RouteTable, listed: Listed | null, name: string, args: string, machine: string): RouteCheck {
@@ -62,11 +62,14 @@ export function routeOf(table: RouteTable, listed: Listed | null, name: string, 
   }
   const trimmed = args.trim();
   let route = trimmed === '' ? entry.bare : (entry.withArgs ?? entry.bare);
-  const forms = route.forms;
-  const fits = !forms || ((forms.args !== 'required' || trimmed !== '') && (forms.args !== 'none' || trimmed === '') && (!forms.pattern || trimmed === '' || new RegExp(`^(?:${forms.pattern})$`).test(trimmed)));
-  if (!fits) {
-    if (route.otherwise) route = route.otherwise;
-    else return { ok: false, code: 'bad-args', reason: forms?.hint ?? badArgs(forms!) };
+  // A pattern's miss takes `otherwise`, whose own forms are checked in turn (the bridge's `refusalOf`).
+  for (;;) {
+    const forms = route.forms;
+    if (!forms) break;
+    if ((forms.args === 'required' && trimmed === '') || (forms.args === 'none' && trimmed !== '')) return { ok: false, code: 'bad-args', reason: forms.hint ?? badArgs(forms) };
+    if (!forms.pattern || trimmed === '' || new RegExp(`^(?:${forms.pattern})$`).test(trimmed)) break;
+    if (!route.otherwise) return { ok: false, code: 'bad-args', reason: forms.hint ?? badArgs(forms) };
+    route = route.otherwise;
   }
   const said = (reason: string) => reason.replaceAll('<machine>', machine);
   switch (route.class) {

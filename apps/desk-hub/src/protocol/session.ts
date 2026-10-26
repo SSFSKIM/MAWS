@@ -333,8 +333,11 @@ export type Readback = { how: 'text' | 'row' | 'effect' | 'none'; text?: string;
 /**
  * An async op's outcome, outside any subscription, to every browser of the project (§3): `rpc` the nonce of the DX6 RPC
  * that asked, or null for an op started elsewhere (the CLI). A `command`'s `start` carries `name` and `args`; its `end`
- * adds `settled` (the engine's promise: `{ok: true, text?}` or `{ok: false, error}`) and `readback`. The hub relays it
- * without reading it.
+ * adds `settled` (the engine's promise: `{ok: true, text?}` or `{ok: false, error}`) and `readback`. A `btw`'s `end`
+ * carries the answer — `text` (at most 64 KiB of UTF-8; `truncated: true` when cut) and `usage: {input, output,
+ * cacheRead, cacheWrite}` — or a `reason`: `nothing-to-fork`, `api-error` (with `status` when the API gave one, and
+ * `error`, its kind), `empty-reply`, `aborted`, or `failed` (with `error`); `usage` comes with every reason but
+ * `nothing-to-fork` and `failed`. The hub relays it without reading it.
  */
 export type OpBody = { rpc: string | null; op: 'command' | 'btw' | 'stop-agent' | 'tell'; phase: 'start' | 'end'; id: string; [field: string]: JsonValue };
 

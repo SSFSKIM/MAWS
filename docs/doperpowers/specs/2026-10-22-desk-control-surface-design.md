@@ -143,7 +143,12 @@ allows today.
     fake-machine producer (MAWS #153); the `medium` review over both halves found two
     measured gaps in the disabled-MCP lookup (a linked worktree's project key, the
     legacy `.config.json`), fixed and re-reviewed clean; live check on 2.1.310.
-  - [ ] MW2 ops: `btw`, compact's `instructions`, `/mcp`'s measured grammar.
+  - [x] (2026-10-26 09:26Z) MW2 ops: `btw`, compact's `instructions`, `/mcp`'s measured grammar:
+    sminos 1.12.0 (doperpowers #397) and the hub's `btw` RPC, compact's `instructions`
+    and fake-machine producer (MAWS #157); the `medium` review found a side question's
+    end lost across a reload or a child respawn and line separators in the `/mcp` form,
+    fixed and re-reviewed clean; `/mcp disable` of every server refused (Decision Log);
+    the configured-name gap is residue; live check on 2.1.310.
   - [ ] MW3 scoped allows.
   - [ ] MW4 `stop-agent` and `tell`.
   - [ ] MW5 image and PDF intake.
@@ -1981,6 +1986,23 @@ The child keeps `rpc_of[id]` for an op answered `queued` or `started` until the 
 `btw` event with `phase: "end"` and that `id`, and annotates each such event with `rpc`.
 The bridge runs desk `command` ops one at a time (§6).
 
+*2026-10-26, MW2 as built (sminos 1.12.0; the live check on 2.1.310):* `btw` refuses an
+empty or blank prompt (*a side question is its text*) and leaves its length to the
+daemon's RPC (8,192 characters). "`nothing-to-fork` known at once" is the fork's reason
+arriving within 250 ms of the ask, which the bridge waits before answering `started`:
+`{ok: false, error: "nothing to fork yet: …", code: "nothing-to-fork"}`; one that comes
+later is the end's `reason`. The end's `text` is cut at 65,536 bytes of UTF-8, between
+code points, and marked `truncated: true`; `usage` is `{input, output, cacheRead,
+cacheWrite}`, all four, on every end but `nothing-to-fork` and `failed`; an `api-error`
+end adds `status` (when the API gave one) and `error` (its kind); a fork that rejects
+ends `{reason: "failed", error}`, so every started side question ends. The child keeps
+a `btw` end beside the answer as it keeps a run's, its `text` cut to 4,096 characters
+(`truncated`).
+*2026-10-26, the MW2 review:* a reload's successor module ends, `aborted`, each side
+question its predecessor left open (kept in `$.state` until the child took its end);
+a `run` or `btw` end is posted again after every resync until a post the child
+answered carried it; and the child relays each op's end once, by its `id`.
+
 Read results:
 
 ```ts
@@ -2095,7 +2117,7 @@ milestone that enables it; `—` means the same as the bare route):
 | `color` | `bad-args` | `run`, required, `^[a-z]+$` | — | M0 |
 | `reload-plugins` | `run` (the daemon confirms by effect) | `bad-args` | — | M0 |
 | `reload-skills` | `run` | `bad-args` | — | M0 |
-| `mcp` | `panel`, to `read mcp` | `run`, required, `^(enable\|disable\|reconnect) \S+$` | outlives *saved for this project on <machine>: `.claude.json`* | M0 |
+| `mcp` | `panel`, to `read mcp` | `run`, required, `^(?!disable all$)(enable\|disable\|reconnect) \S+$`; otherwise `drop`, `^disable(?: all)?$` (2026-10-26, the MW2 review: a refusal only, made without measuring 2.1.307 again, so `measured: I`) | outlives *saved for this project on <machine>: `.claude.json`*; the drop's reason *turns off every server, this desk's own tools among them: run it in the terminal* | M0 |
 | `cd` | `bad-args` | `run`, required | the daemon checks the path against the project's known checkouts | M1 |
 | `goal` | `panel` (*the bare form opens a panel*) | `clear`: `run` (hint *a queued clear waits behind a running goal: Interrupt stops it*); otherwise `run-prompt` | — | M1 |
 | `plan` | `routed`, to the mode control (M3 runs it through the command path) | `run-prompt` | — | M1 (args), M3 (bare) |
@@ -2134,6 +2156,28 @@ milestone that enables it; `—` means the same as the bare route):
 Any built-in name not in this table: `unknown-builtin`. The fixture carries each row's
 `measured` mark (`M` from the probe or the spikes, `I` otherwise) so a later probe moves
 rows by data.
+
+*2026-10-26, MW2 as built (sminos 1.12.0; measured on 2.1.310):* the bridge holds one
+table per measured engine (`ROUTE_TABLES` in `bridge-routes.tsx`, written by
+`routes_check.py --write` from every `sminos/tests/routes-<engine>.json`) and takes the
+newest at or below the session's engine. `routes-2.1.310.json` carries 2.1.307's rows
+(`carriedFrom: "2.1.307"`) but those it names under `remeasured` (`["mcp"]`), and
+`routes_check.py` holds the carry to that. Its `mcp` with-args route: `run`, required,
+`^(?:enable|disable|reconnect) (?!all$)[^\s\x00-\x1f\x7f\u2028\u2029][^\x00-\x1f\x7f\u2028\u2029]*$`
+(one server by its configured name, spaces inside it admitted, one space after the
+verb), outlives *saved for this project on <machine>: .claude.json*; its `otherwise`
+`run`, required, `^(?:enable(?: all)?|reconnect all)$`, `confirm`, outlives *every MCP
+server of the session, the plugins' own tool servers among them; enable is saved for
+this project on <machine>: .claude.json*; and that route's `otherwise` `drop`,
+`^disable(?: all)?$`, reason *turns off every server, this desk's own tools among them: run it in the terminal*.
+A bare `reconnect` (it opens the panel), a doubled space, a control character, U+2028
+or U+2029 (the engine's `.` stops at them, so the panel would open) and any other verb
+stay `bad-args`. `otherwise` is on `goal` and now `mcp`, two deep there: the bridge and
+the fake machine check each `otherwise`'s own forms in turn, while the web's
+`formRoute` takes one level without checking it (Residue in MW2's PR). The 2.1.307
+table changed only by that refusal: its form excludes `disable all`, and its
+`otherwise` is the same `drop` (`measured: I`). MAWS's vendored copy is the new file,
+its hash updated; the fake machine still routes by the 2.1.307 table.
 
 ### DX4 (owner: MAWS `apps/desk-hub/src/protocol/session.ts`; producers: the plane and the fake machine)
 
@@ -2190,6 +2234,14 @@ runs them). A `decide` with `scope` is refused `not-pending` (*the suggestions c
 when the hash does not match the suggestion at the index in the request the bridge
 still holds, `bad-shape` for a destination outside the two or a `localSettings` the
 suggestion did not offer or a suggestion of any type but `addRules` and `addDirectories` (MW3; `setMode` is cut with plan-mode controls, so `above-ceiling` has no `decide` case).
+
+*2026-10-26, MW2 as built:* `btw`'s `prompt` is text, not blank, at most 8,192
+characters (the daemon counts code points); a `btw` the bridge refuses fails `failed`,
+its message `<code>: <reason>` as a `command`'s (`nothing-to-fork: nothing to fork yet:
+…`). `compact`'s `instructions` is text of at most 4,096 characters; an empty string is
+passed as none. The hub admits both by `RPC_NAMES` alone, as it does every RPC; a
+daemon older than sminos 1.12.0 refuses `btw` `bad-shape` (*no RPC "btw"*), and the
+machine presence's `desk.rpcs` names it from 1.12.0.
 
 ### The log (owner: doperpowers `sminos/skills/sminos/scripts/sminos.py`; read by the web's projection)
 
@@ -2533,6 +2585,60 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   failing `GIT_SSH_COMMAND` keep it local; the machine's `/usr/bin/python3` (3.9) is
   too old for sminos's CLI, which needs 3.10. Evidence: c1's debug log (the clone
   attempts); c2 with both settings logged none.
+- Observation: `/mcp enable|disable|reconnect <name>` resolves a server by its
+  configured name only, matched exactly. The tool spelling the `mcp` read gives a
+  connected server (`probe_server` for `probe server`) answers *MCP server
+  "probe_server" not found* and changes nothing, settled `ok` with that line as its
+  readback; the configured name with its space works for all three verbs. The usage
+  breakdown's `mcpTools[].serverName` is the tool spelling too, so lane A has no source
+  for a connected server's configured name. A desk action that takes its name from the
+  read therefore misses every server whose configured name holds a character outside
+  `[A-Za-z0-9_-]` (a space, a plugin server's `plugin:<p>:<s>`, a claude.ai connector),
+  and no route pattern can tell a tool spelling from a configured name (`plain` is
+  both). A disabled server keeps its configured name in the read, so enabling one works.
+  Evidence: MW2 live check, `/tmp/dsk-scripts/mw-wave/mw2-live/evidence/g1/` (a
+  measurement copy whose `mcp` form admitted any text) and `r1/` (the built table),
+  `summary.json`'s `forms` and `breakdown_server_names`.
+- Observation: on 2.1.310 a bare `enable` or `disable` means every server, as `all`
+  does, and the plugins' `$.tool.register` tool servers are servers to it: `disable`
+  answered *Disabled 3 MCP server(s)* and wrote `probe server`, `plain` and `sminos` to
+  `disabledMcpServers`; `disable all` wrote all four; `disable sminos` alone works too.
+  A desk "disable all" therefore turns off sminos's own tools (and to-human's, web's)
+  for that project until enabled, which is why the desk refuses it on every engine
+  (the MW2 review's row change); `enable all` and `reconnect all` keep their confirm. `reconnect all` with every server connected answers *No MCP servers need
+  reconnecting*. A bare `reconnect` opens the *Manage MCP servers* panel, which holds the
+  queue until a key at the terminal (its run ended only after Escape). The engine reads
+  the target after `\s*`, so a doubled space resolves; the table refuses it anyway.
+  Evidence: g1 and r1 `summary.json`; g1 `pane-held-reconnect.txt`; 2.1.310's
+  `cli.pretty.js`, the `/mcp` handler (a missing target is `all` for enable and
+  disable; any other verb, or `reconnect` without one, opens the panel).
+- Observation: 2.1.307's `mcp` form `^(enable|disable|reconnect) \S+$` admits `all`,
+  which on 2.1.310 means every server, without a confirm. The MW2 review refused
+  `disable all` there (a refusal needs no measurement); `enable all` and `reconnect all`
+  are still admitted unconfirmed by a session on 2.1.307 to 2.1.309, since 2.1.307 was
+  not measured again.
+- Observation (the MW2 review): 2.1.310 parses `/mcp`'s arguments with
+  `/^(\S+)\s*(.*)$/`, whose `.` stops at U+2028 and U+2029, so a server name holding
+  either falls through to the interactive panel; the one-server form now excludes both.
+- Observation (the MW2 review): a reload of the module aborts a running fork with the
+  environment that holds it, and that environment posts nothing more (its child
+  refuses it, 409), so a `btw` answered `started` lost its end. Before the fix, a live
+  reload left no `btw` end in the stream or in the child's kept answer. After it, the
+  successor ended it `aborted` under the original nonce: the child kept
+  `{phase: "end", reason: "aborted", rpc: "review-btw-pending-reload"}` beside the
+  `started` answer. Evidence: `/tmp/mw2-review-checks/review-reload-*/` (before) and
+  `/tmp/dsk-scripts/mw-wave/mw2-live/evidence/fix-reload-21950/` (after).
+- Observation: a side question's request carries the session's tools (13 in the
+  isolated profile, the main request's count) and its whole prefix: `$.model.fork`
+  sends the main thread's last request so the cache serves it, and "tool-less" is the
+  framing's doing, not the request's. The framed question was the request's last user
+  text, exactly the frame, a blank line and the question. Mid-turn (a main request
+  held 8 s), the answer came 0.01 s after the ask and the turn ended 8.6 s after it.
+  Evidence: MW2 live check, `evidence/b1/summary.json` (`requests`, `checks`).
+- Observation: an `enable` through the bridge once ended with readback `none` although
+  the engine wrote its rows; the same form in another run read back *Enabled 4 MCP
+  server(s)*. Readback is best-effort by design; this is a timing case of it, not a new
+  failure. Evidence: g1 against r1, the `enable` row.
 
 ## Decision Log
 
@@ -3345,6 +3451,93 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   plugin tool servers out of `mcp` (the model and `/mcp` both count them); a
   hand-written fake answer (it would drift from what the bridge sends).
   Date/Author: 2026-10-26, MW1's executor for the desk orchestrator (b4948247).
+
+- Decision: MW2 as built (sminos 1.12.0, doperpowers and MAWS `desk-ctl-mw2`). The
+  gaps the wave's text left, each settled from the shape's purpose:
+  - **Where the side question lives.** `bridge-btw.tsx` holds the frame, the bound, the
+    end's shape and the op; `bridge.tsx` only routes `btw` to it.
+  - **64 KiB is 65,536 bytes of UTF-8**, cut between code points and marked
+    `truncated: true` (the stream's own word for a cut), since the bound guards a frame
+    and the frame is bytes.
+  - **"Known at once" is 250 ms.** The bridge races the fork against 250 ms (the same
+    wait it gives a stopped session's answer) and refuses `nothing-to-fork` with that
+    code when the reason comes within it; later it is the end's `reason`.
+  - **Every started side question ends.** An `api-error` end carries the API's
+    `status` and `error` kind; a fork that rejects ends `{reason: "failed", error}`, so
+    a pane never waits on an op that cannot end.
+  - **One bound per side.** The bridge refuses only an empty or blank prompt; the
+    daemon's RPC bounds it at 8,192 characters (`shape()`), and the hub's types say so.
+  - **The daemon's op path is general**: an op's kind rides on its claim (the RPC that
+    asked), so a restart, a reconcile and a recovered end turn a `btw` event into
+    `op: "btw"` as they turn a `run` into `op: "command"`; one refusal helper serves
+    both RPCs.
+  - **The table records its engine by file.** A re-measure on 2.1.310 is a new fixture
+    carried from 2.1.307 with the rows it re-measured named; 2.1.307's file is left as
+    measured, so a 2.1.307 session keeps refusing what 2.1.310's measurement admits,
+    and MAWS's vendored copy stays byte-identical. `routes_check.py` takes every
+    fixture and checks the carry.
+  - **`/mcp`'s grammar, as measured.** One server by its configured name (spaces
+    admitted, `all` excluded, no control character, one space after the verb); the
+    forms that touch every server (a bare `enable` or `disable`, `all`, `reconnect
+    all`) through `otherwise`, with `confirm` and an outlives that names the plugins'
+    tool servers; a bare `reconnect` refused, since it opens a panel.
+  - **No `sminos btw` verb.** The live check drives the bridge's child directly; the
+    CLI gains none in this MW.
+  - **The fake machine's `mw2` producer** answers from the live check's recording
+    (`apps/desk-hub/fake-machine/dx4/mw2-ops.json`): its capabilities' controls, and a
+    side question's start and end; it keeps 2.1.307's engine and route table, as
+    `mw1` does. It answers mid-turn at once (a fork does not wait for the turn),
+    refuses a stale session's side question `unsupported` as it does a command, and
+    names `btw` in its `desk.rpcs` only from `mw2`.
+  Rationale: each follows a measured fact of 2.1.310 or the op contract's purpose (an
+  op answered at once always ends, under its nonce). Rejected: counting the bound in
+  UTF-16 units (a 21,845-character Hangul answer is 65,535 bytes; 30,000 such
+  characters would pass a unit count and break the bound); widening the 2.1.307 row in
+  place (2.1.307 was not measured again); admitting `all` in the one-server form
+  (every server, with no confirm).
+  Open: the desk acts on MCP servers by the read's names, which are tool spellings
+  (Surprises); a server whose configured name differs cannot be enabled, disabled or
+  reconnected from the desk until the read carries configured names. The plane already
+  reads the engine's config files for the disabled list and could map them; that is a
+  change to the `mcp` read's shape, left to the controller.
+  Date/Author: 2026-10-26, MW2's executor for the desk orchestrator (b4948247).
+
+- Decision: MW2's review wave (sminos stays 1.12.0). The orchestrator's rulings and
+  the medium review's three findings:
+  - **The configured-name gap ships as measured** (the orchestrator, on MW2's open
+    item): MW2 ships as it is, and the gap goes to MW2's PR as Residue, decided when
+    the web half lands. The Residue covers the configured-name mapping for user, local
+    and project servers, and plugin servers (`plugin:<p>:<s>`), which are most of the
+    owner's MCP servers. The web can already send any configured name through the
+    command typeahead, so the gap is only the MCP panel's one-tap actions.
+  - **Disabling every server is refused** (the orchestrator's row change), bare or
+    `all`, in the 2.1.310 row and the 2.1.307 table alike, with the reason
+    *turns off every server, this desk's own tools among them: run it in the terminal*. A confirm is not enough: the write persists in the project's
+    `.claude.json` and turns off the desk's own tool servers (sminos's ask, to-human's
+    message, web). `enable all` and `reconnect all` keep their confirm; a bare
+    `reconnect` stays refused. The refusal sits after the confirmed every-server route
+    in the `otherwise` chain, so the web's one-level `formRoute` still offers `enable
+    all` and `reconnect all` with their confirm; it would send `disable all` after a
+    confirm, and the bridge refuses it with the reason. The fake machine's `routeOf` now
+    checks each `otherwise`'s forms in turn, as the bridge does.
+  - **A started side question survives a reload** (P1). Its id is kept in session-scoped
+    `$.state` (`sminos/btw`, declared in `types/sminos.d.ts`) from before its `started`
+    answer until the child took its end. The module that loads next ends each one it
+    finds there and does not hold itself, `aborted`, and the child names that end by
+    the original nonce from its kept answers. This mirrors how the ask keeps its asks
+    across a reload. Rejected: finishing it in the daemon on the child's replacement,
+    because a child that crashes is replaced too, and there the fork still runs and its
+    real end must win.
+  - **An op's end is kept until the child took it** (P2). A desk command's `run` end and
+    a side question's `btw` end are owed (`emitOwed`) until a post the child answered
+    carried them, and every resync is followed by those still owed. An end that came
+    while no child was there, or whose post failed, reaches the next child once. The
+    child relays each op's end once, by its id (those kept beside an answer count), so
+    an end posted again is dropped there. M0's child test, which expected a second end
+    to be relayed without its nonce, now expects it dropped.
+  - **U+2028 and U+2029 are refused in a server's name** (P2), as the Surprises entry
+    explains.
+  Date/Author: 2026-10-26, MW2's executor for the desk orchestrator (b4948247).
 
 ## Outcomes & Retrospective
 

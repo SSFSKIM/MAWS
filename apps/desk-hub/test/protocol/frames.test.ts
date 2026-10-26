@@ -84,6 +84,8 @@ export const results: { [N in keyof RpcResults]: RpcResults[N] } = {
   stop: { taskId: 'b7k2m9q4x' },
   // Answered at once; the outcome follows as `op`.
   command: { queued: true, route: 'run', id: 'cmd-1' },
+  // Started at once; the answer follows as `op`.
+  btw: { started: true, id: 'b1' },
 };
 
 export const outcomes: RpcOutcome<'interrupt' | 'steer'>[] = [
@@ -118,7 +120,7 @@ export const browserDown: ProjectDown[] = [
 describe("DX2's and DX3's frames", () => {
   it('are pinned by their types', () => {
     expect(up.length + down.length + browserUp.length + browserDown.length).toBe(38);
-    expect(Object.keys(results)).toHaveLength(11);
+    expect(Object.keys(results)).toHaveLength(12);
     expect(outcomes).toHaveLength(8);
   });
 });
