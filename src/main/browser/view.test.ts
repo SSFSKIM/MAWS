@@ -523,6 +523,63 @@ describe('the view manager: the cover\'s still (cua board #90)', () => {
     expect(view.calls.slice(-2)).toEqual(['capture', 'visible false']);
   });
 
+  // Chromium's compositor now and then refuses a copy of a page on screen (capturePage rejects with UnknownVizError; the
+  // hosted Macs, 2026-10-26): the page stays up and is captured again, so the pane gets its still rather than a hole.
+  it('a page on screen whose capture failed is captured again while it stays up, then hidden behind its still', async () => {
+    const h = harness();
+    const { sender } = h.win();
+    const { tabId, view } = h.loaded();
+    h.place(sender, tabId, 'p1', R, true);
+    let captures = 0;
+    view.capture = () => (++captures === 1 ? Promise.reject(new Error('UnknownVizError')) : Promise.resolve(fakeImage(10)));
+    view.calls.length = 0;
+    await h.manager.cover(true, sender);
+    expect(h.covered()).toEqual([{ tabId, placeholder: expect.stringMatching(/^data:image\/jpeg;base64,/) }]);
+    expect(view.calls).toEqual(['capture', 'capture', 'visible false']);
+    expect(view.visible).toBe(false);
+  });
+
+  it('a page whose captures keep failing is hidden without a still after its retries, never left over the layer', async () => {
+    const h = harness();
+    const { sender } = h.win();
+    const { tabId, view } = h.loaded();
+    h.place(sender, tabId, 'p1', R, true);
+    view.capture = () => Promise.reject(new Error('UnknownVizError'));
+    view.calls.length = 0;
+    await h.manager.cover(true, sender);
+    expect(h.covered()).toEqual([{ tabId, placeholder: null }]);
+    expect(view.calls.filter((c) => c === 'capture').length).toBeGreaterThan(1);
+    expect(view.calls.at(-1)).toBe('visible false');
+  });
+
+  it('a still too large for the pane is not taken again: the page hides at once without one', async () => {
+    const h = harness();
+    const { sender } = h.win();
+    const { tabId, view } = h.loaded();
+    h.place(sender, tabId, 'p1', R, true);
+    view.capture = async () => fakeImage(BROWSER_PLACEHOLDER_MAX_BYTES + 1);
+    view.calls.length = 0;
+    await h.manager.cover(true, sender);
+    expect(h.covered()).toEqual([{ tabId, placeholder: null }]);
+    expect(view.calls).toEqual(['capture', 'visible false']);
+  });
+
+  it('a cover lifted between a failed capture and its retry leaves the page up and sends nothing', async () => {
+    const h = harness();
+    const { sender } = h.win();
+    const { tabId, view } = h.loaded();
+    h.place(sender, tabId, 'p1', R, true);
+    let captures = 0;
+    view.capture = () => (++captures === 1 ? Promise.reject(new Error('UnknownVizError')) : Promise.resolve(fakeImage(10)));
+    const pending = h.manager.cover(true, sender);
+    await vi.waitFor(() => expect(captures).toBe(1));
+    await h.manager.cover(false, sender);
+    await pending;
+    expect(captures).toBe(1);
+    expect(h.covered()).toEqual([]);
+    expect(view.visible).toBe(true);
+  });
+
   it('a cover lifted while the still is taken leaves the page up and sends nothing', async () => {
     const h = harness();
     const { sender } = h.win();
