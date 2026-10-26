@@ -2020,8 +2020,9 @@ A stop's note is the parent's next request's: an Agent call's result waits for i
 most INTERRUPT_HOLD_MS.
 
 *2026-10-26, MW4 review fixes:* both ops take `resolvedAgentId?`, the id a caller (the
-daemon) resolved the spelling to: the bridge then acts on that agent alone, refused
-`unknown-agent` once it no longer runs, so an agent that took its name since is never
+daemon) resolved the spelling to, checked by exact membership in `$.agent.list()` (no
+shape of its own: a teammate's id is its `<name>@<team>` address): the bridge then
+acts on that agent alone, refused `unknown-agent` once it no longer runs, so an agent that took its name since is never
 stopped or told in its place; `agentId` stays the spelling the answer and the note use.
 A hook's refusal of TaskStop (`{deny}`) is no stop: refused, no note. The note goes to
 the stopped agent's parent loop (`$.session.append({agentId: parentId})`, main for an
@@ -3835,8 +3836,13 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   - **A note not kept is in the answer** as `noteError`, never retried: a hook's
     refusal is policy, and a loop that ended will not take a retry.
   - **The fake machine keeps an agent's stop across a crash**: the trace names the
-    agent and the spelling, and the machine that comes back stops the agent again, its
-    note once, as soon as its replay has it running, as an ordinary `stop` is restored.
+    agent and the spelling, and the machine that comes back holds the stop over every
+    later replay update (a spawn, a resync of the tree), its note written once when the
+    agent first appears.
+  - *(Second round, 2026-10-26.)* The bridge's `resolvedAgentId` is checked by
+    membership in the list, not a task id's pattern, which had refused a running
+    teammate (`worker@team`) for both ops; the fake's `tell` checks that the resolved
+    agent still runs, as its stop does, with no fallback to a namesake.
   Date/Author: 2026-10-26, MW4's executor for the desk orchestrator (b4948247).
 
 ## Outcomes & Retrospective
