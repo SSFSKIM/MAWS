@@ -13,6 +13,8 @@
 //     at once and its answer as `op` notices, as the MW2 live check recorded them, and takes compact's `instructions`;
 //     as MW3's (`mw3`), raises the MW3 live check's permission requests with the engine's suggestions
 //     (`raiseRecordedScoped`) and takes `decide`'s `scope`, resolved from the request it holds as the daemon resolves it;
+//     as MW4's (`mw4`), stops or tells one subagent its bridge's tree holds as running (`stop-agent`, `tell`), refusing
+//     any other `unknown-agent` before the claim, and spawns the MW4 live check's named agent (`spawnRecordedAgent`);
 //   - answers RPCs from a script, with a ledger of its own: a nonce is claimed before the effect and its outcome recorded
 //     before the result, and a nonce the ledger knows is never executed again;
 //   - can drop its connection, end a session's process while it stays connected, crash after an RPC's effect and before
@@ -33,7 +35,7 @@ import { Link, LinkError, type Credentials } from './link';
 import { emptyMemory, expireLedger, type Memory } from './memory';
 import type { Recording, Row, Step } from './recording';
 import { Commands, opMessages, refusalMessage, type CommandPlan, type CommandScript } from './commands';
-import { MW2_BTW, MW3_SCOPED, producerAtLeast, SessionDepth, sminosOf, type BridgePlugin, type Producer, type SnapshotOptions } from './session';
+import { MW2_BTW, MW3_SCOPED, MW4_AGENTS, producerAtLeast, SessionDepth, sminosOf, type BridgePlugin, type Producer, type SnapshotOptions } from './session';
 
 /** What a script answers an RPC with: an outcome, or undefined for the fake machine's own default. */
 export type RpcScript = { [N in RpcName]?: (rpc: Rpc<N>, machine: FakeMachine) => RpcOutcome<N> | undefined | Promise<RpcOutcome<N> | undefined> };
@@ -119,11 +121,15 @@ export type FakeMachineOptions = {
 export type RpcRecord = { nonce: string; rpc: RpcName; outcome: RpcOutcome | null; executed: boolean };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const SESSION_RPCS = new Set<RpcName>(['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'retire', 'resume', 'stop', 'command', 'btw']);
+const SESSION_RPCS = new Set<RpcName>(['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'retire', 'resume', 'stop', 'command', 'btw', 'stop-agent', 'tell']);
 
-/** The RPCs a daemon of `producer`'s knows: the desk control surface's M0 added `command`, the machine-side wave's MW2
- * `btw`. */
-const rpcsOf = (producer: Producer): RpcName[] => RPC_NAMES.filter((name) => name !== 'btw' || producerAtLeast(producer, 'mw2'));
+/** The producer that added each RPC after DC7's: the desk control surface's M0 `command`, the machine-side wave's MW2
+ * `btw`, MW4 `stop-agent` and `tell`. */
+const ADDED_IN: Partial<Record<RpcName, Producer>> = { command: 'm0', btw: 'mw2', 'stop-agent': 'mw4', tell: 'mw4' };
+/** The RPCs a daemon of `producer`'s knows. */
+const rpcsOf = (producer: Producer): RpcName[] => RPC_NAMES.filter((name) => { const added = ADDED_IN[name]; return added === undefined || producerAtLeast(producer, added); });
+/** An agent's id or name as `stop-agent` and `tell` take it (DX6): 1 to 128 characters, not blank, no control character. */
+const isAgentRef = (ref: unknown): ref is string => typeof ref === 'string' && ref.trim() !== '' && ref.length <= 128 && !hasControl(ref);
 /** Whether text holds a control character, which a command's name may not (DX6 `command`). */
 const hasControl = (text: string) => [...text].some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f);
 const fail = (code: RpcError['code'], message: string, extra: Partial<RpcError> = {}): RpcOutcome => ({ state: 'failed', error: { code, message, ...extra } });
@@ -144,6 +150,8 @@ export class FakeMachine {
   /** Each rule a scoped allow added (an `mw3` producer): the suggestion the daemon resolved, under the scope's
    * destination, as the bridge would hand it to the engine (`updatedPermissions`). */
   readonly scopedAllows: Array<{ session: string; request: string; rule: PermissionUpdate }> = [];
+  /** Each message a `tell` delivered (an `mw4` producer): the agent it went to, by its id, and the text. */
+  readonly told: Array<{ session: string; agentId: string; text: string }> = [];
   /** What went wrong without stopping the machine, kept rather than thrown: a POST the hub refused (a stale generation
    * after a drop, say), a replay step that failed. */
   readonly postErrors: Error[] = [];
@@ -510,6 +518,19 @@ export class FakeMachine {
     return drafts.map((d) => this.pending.get(d.request)!.raised);
   }
 
+  /**
+   * Spawns, on `session` (the first replayed one by default), the MW4 live check's background agent as the bridge's tree
+   * held it: named by its Agent call (`bg-sleeper`), running. An `mw4` producer's.
+   */
+  async spawnRecordedAgent(session = [...this.sessions.keys()][0]): Promise<string> {
+    if (!producerAtLeast(this.producer, 'mw4')) throw new Error('the recorded agent is an mw4 producer’s');
+    if (session === undefined || !this.sessions.has(session)) throw new Error(`no session ${session} on ${this.name}`);
+    const { agentId, ...spawn } = MW4_AGENTS.spawn;
+    this.sessions.get(session)!.apply({ at: Date.now(), k: 'agent', agentId, spawn });
+    await this.flush();
+    return agentId;
+  }
+
   /** The requests pending now. */
   pendingRequests(): Raised[] {
     return [...this.pending.values()].map((p) => p.raised);
@@ -729,10 +750,10 @@ export class FakeMachine {
     if (rpc.project !== this.project) return answer(fail('unknown-project', `${this.name} serves no project ${rpc.project}`));
     if (!(await verifyRpc(this.key, rpc, this.project))) return answer(fail('bad-code', 'the RPC’s code does not verify'));
     if (rpc.machine !== this.name) return answer(fail('wrong-machine', `this is ${this.name}, not ${rpc.machine}`));
-    // A daemon older than the desk control surface's M0 knows no `command`.
-    if (rpc.rpc === 'command' && !producerAtLeast(this.producer, 'm0')) return answer(fail('bad-shape', 'no RPC "command"'));
-    // Nor one older than the machine-side wave's MW2 a `btw`.
-    if (rpc.rpc === 'btw' && !producerAtLeast(this.producer, 'mw2')) return answer(fail('bad-shape', 'no RPC "btw"'));
+    // A daemon older than the desk control surface's M0 knows no `command`; one older than the machine-side wave's MW2
+    // no `btw`, nor one older than MW4 a `stop-agent` or a `tell`.
+    const addedIn = ADDED_IN[rpc.rpc];
+    if (addedIn && !producerAtLeast(this.producer, addedIn)) return answer(fail('bad-shape', `no RPC ${JSON.stringify(rpc.rpc)}`));
     const malformed = argumentProblem(rpc) ?? (rpc.rpc === 'decide' && producerAtLeast(this.producer, 'mw3') ? scopeShapeProblem(rpc as Rpc<'decide'>) : null);
     if (malformed) return answer(fail('bad-shape', malformed));
     const session = (rpc.args as { session?: string }).session;
@@ -780,6 +801,13 @@ export class FakeMachine {
       if (this.options.bridge === false || depth.presence === null) return answer(fail('unsupported', 'the session has no bridge, or has ended'));
       if (!depth.capabilities?.ops.includes('btw')) return answer(fail('unsupported', "the session's bridge takes no side questions: its plugin loaded before the update"));
     }
+    // And one agent stopped or told, from a bridge that takes it, then the agent its tree holds as running (MW4).
+    if (rpc.rpc === 'stop-agent' || rpc.rpc === 'tell') {
+      const depth = this.sessions.get(rpc.args.session)!;
+      if (this.options.bridge === false || depth.presence === null) return answer(fail('unsupported', 'the session has no bridge, or has ended'));
+      if (!depth.capabilities?.ops.includes(rpc.rpc)) return answer(fail('unsupported', "the session's bridge takes no agent's stop or message: its plugin loaded before the update"));
+      if (!depth.runningAgent(rpc.args.agentId)) return answer(fail('unknown-agent', `the session's subagent tree holds no running agent by the id or name ${rpc.args.agentId}`));
+    }
     this.memory.ledger[rpc.nonce] = { rpc: rpc.rpc, session: session ?? null, claimed: Date.now(), outcome: null };
     this.remember();
     // Every effect is complete (and its trace kept) when this returns; only progress notices follow the result.
@@ -817,7 +845,7 @@ export class FakeMachine {
     const member = rpc.member;
     if (this.options.bridge === false) {
       if (rpc.rpc === 'steer') return this.traced(rpc, record, rpc.args.session, { row: null });
-      if (['interrupt', 'decide', 'answer', 'model', 'compact', 'btw'].includes(rpc.rpc)) return fail('unsupported', 'the session has no bridge');
+      if (['interrupt', 'decide', 'answer', 'model', 'compact', 'btw', 'stop-agent', 'tell'].includes(rpc.rpc)) return fail('unsupported', 'the session has no bridge');
     }
     switch (rpc.rpc) {
       case 'steer': {
@@ -914,6 +942,22 @@ export class FakeMachine {
         if (!depth.stopJob(rpc.args.taskId)) return fail('failed', `Task ${rpc.args.taskId} is not running (status: killed)`);
         await this.flush();
         return this.traced(rpc, record, depth.id, { taskId: rpc.args.taskId });
+      }
+      case 'stop-agent': {
+        // TaskStop on the id the bridge resolved, then the parent's note: the answer is the outcome (no `op` follows),
+        // the spelling asked and, for a name, the id it resolved to, as the MW4 live check recorded them.
+        const depth = this.sessions.get(rpc.args.session)!;
+        const asked = rpc.args.agentId;
+        const id = depth.stopAgent(asked);
+        if (id === null) return fail('failed', `unknown-agent: no running agent has the id or name ${asked}`);
+        await this.flush();
+        return this.traced(rpc, record, depth.id, { agentId: asked, accepted: true, ...(id !== asked && { resolvedAgentId: id }) });
+      }
+      case 'tell': {
+        // The engine's send to the agent's id, under the line saying the person wrote it: queued, its answer the outcome.
+        const depth = this.sessions.get(rpc.args.session)!;
+        this.told.push({ session: depth.id, agentId: depth.runningAgent(rpc.args.agentId)!.agentId, text: rpc.args.text });
+        return this.traced(rpc, record, depth.id, MW4_AGENTS.tell.answer.result as JsonObject);
       }
       case 'btw': {
         // The bridge answers `started` at once, then the fork's start and end follow as `op` notices: the recorded
@@ -1116,6 +1160,10 @@ function argumentProblem(rpc: Rpc): string | null {
       return needs(str('session') && optStr('model') && optStr('effort') && (a.model !== undefined || a.effort !== undefined), '{session, model?, effort?} with at least one');
     case 'stop':
       return needs(str('session') && isTaskId(a.taskId), '{session, taskId}, taskId as the engine spells it');
+    case 'stop-agent':
+      return needs(str('session') && isAgentRef(a.agentId), "{session, agentId}, agentId an agent's id or name: 1 to 128 characters, not blank, no control character");
+    case 'tell':
+      return needs(str('session') && isAgentRef(a.agentId) && typeof a.text === 'string' && a.text.trim() !== '', "{session, agentId, text}, agentId as stop-agent's, text not blank");
     case 'spawn':
       return needs(str('checkout') && str('brief') && ['worktree', 'model', 'effort', 'permission_mode'].every(optStr), '{checkout, brief, worktree?, model?, effort?, permission_mode?}');
     case 'command': {

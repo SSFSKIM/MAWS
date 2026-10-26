@@ -1,0 +1,178 @@
+{
+  "about": "The MW4 live check (desk control surface spec, Plan of Work, MW4): doperpowers desk-ctl-mw4, sminos 1.14.0, Claude Code 2.1.310, an isolated profile behind a recording stub (zero inference; the stub scripts the Agent call and keeps the subagent stepping with `sleep 2`). `capabilities` is the bridge's GET /status; `spawn` the background agent's spawn as the bridge's child keeps it in the tree (GET /agents); `stop` the bridge's answers to a stop by the Agent call's name, by an id, and of a foreground agent by name; `tell` its answer and the text the agent read at its next step; `unknown` the refusals of an agent no tree holds; `note` the row the parent read at its next request.",
+  "capabilities": {
+    "sminos": "1.14.0",
+    "protocol": 2,
+    "engine": "2.1.310",
+    "ops": [
+      "ping",
+      "steer",
+      "interrupt",
+      "stop",
+      "model",
+      "compact",
+      "deliver",
+      "answer",
+      "read",
+      "command",
+      "btw",
+      "stop-agent",
+      "tell"
+    ],
+    "reads": [
+      "status",
+      "catalog",
+      "usage",
+      "config",
+      "settings",
+      "mcp"
+    ],
+    "routes": {
+      "measured": "2.1.310"
+    },
+    "controls": {
+      "read.usage": {
+        "available": true
+      },
+      "read.config": {
+        "available": true
+      },
+      "read.settings": {
+        "available": true
+      },
+      "read.mcp": {
+        "available": true
+      },
+      "btw": {
+        "available": true
+      },
+      "compact": {
+        "available": true
+      },
+      "model": {
+        "available": true
+      },
+      "mcp.enable": {
+        "available": true
+      },
+      "mcp.disable": {
+        "available": true
+      },
+      "mcp.reconnect": {
+        "available": true
+      },
+      "decide": {
+        "available": true
+      },
+      "decide.scope": {
+        "available": true
+      },
+      "decide.interrupt": {
+        "available": false,
+        "reason": "a decision is answered once it is queued, so a deny cannot report what stopping the turn left running: deny, then Interrupt"
+      },
+      "decide.addDirectory": {
+        "available": true
+      },
+      "stop-agent": {
+        "available": true
+      },
+      "tell": {
+        "available": true
+      },
+      "media": {
+        "available": false,
+        "reason": "not in sminos 1.14.0: a later version of the plugin adds it"
+      },
+      "forget": {
+        "available": false,
+        "reason": "after --resume the engine brings back what a cut left out (2.1.310): it needs an engine fix or a supported cut"
+      },
+      "rewind-files": {
+        "available": false,
+        "reason": "the mod API has no file rollback: /rewind in the terminal"
+      },
+      "elicitation.answer": {
+        "available": false,
+        "reason": "a mod's answer carries no action or content, so it cannot answer an MCP server's form: answer it in the terminal"
+      }
+    }
+  },
+  "spawn": {
+    "agentId": "a451ec9a617eef373",
+    "parentAgentId": null,
+    "subagentType": "general-purpose",
+    "description": "sleep in the background",
+    "name": "bg-sleeper",
+    "background": true,
+    "model": "claude-opus-5-5",
+    "toolUseId": "toolu_mw4_0002"
+  },
+  "stop": {
+    "byName": {
+      "asked": "bg-sleeper",
+      "answer": {
+        "ok": true,
+        "result": {
+          "agentId": "bg-sleeper",
+          "accepted": true,
+          "resolvedAgentId": "a451ec9a617eef373"
+        }
+      }
+    },
+    "byId": {
+      "asked": "a6a3d3b5eb0281929",
+      "answer": {
+        "ok": true,
+        "result": {
+          "agentId": "a6a3d3b5eb0281929",
+          "accepted": true
+        }
+      }
+    },
+    "foreground": {
+      "asked": "fg-sleeper",
+      "answer": {
+        "ok": true,
+        "result": {
+          "agentId": "fg-sleeper",
+          "accepted": true,
+          "resolvedAgentId": "a4ae73b8a5a91b0ab"
+        }
+      }
+    },
+    "again": {
+      "ok": false,
+      "error": "no running agent has the id or name bg-sleeper",
+      "code": "unknown-agent"
+    }
+  },
+  "tell": {
+    "asked": "bg-sleeper",
+    "answer": {
+      "ok": true,
+      "result": {
+        "sent": true
+      }
+    },
+    "read": "The coordinator sent a message while you were working:\nFrom the person at the desk, not from your coordinator:\nMW4-TELL hello agent: also look at the cache\n\nAddress this before completing your current task."
+  },
+  "unknown": {
+    "stop": {
+      "ok": false,
+      "error": "no running agent has the id or name nobody",
+      "code": "unknown-agent"
+    },
+    "tell": {
+      "ok": false,
+      "error": "no running agent has the id or name nobody",
+      "code": "unknown-agent"
+    },
+    "spaced": {
+      "ok": false,
+      "error": "no running agent has the id or name bg sleeper",
+      "code": "unknown-agent"
+    }
+  },
+  "note": "Agent bg-sleeper was stopped by the person from the desk: it is not running. Do not start it again or redo its task unless the person asks."
+}

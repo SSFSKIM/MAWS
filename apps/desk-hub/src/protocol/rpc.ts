@@ -64,11 +64,25 @@ export type RpcArgs = {
    * person's question, 1 to 8,192 characters and not blank; the bridge frames it.
    */
   btw: { session: string; prompt: string };
+  /**
+   * Stop one running subagent of a bridged session (the desk control surface spec, §9; MW4): `agentId` an agent's id or
+   * the name its Agent call gave it, never its description, 1 to 128 characters, not blank, without a control character
+   * (a path-neutral name may hold a space; 2.1.310's Agent tool admits none). The daemon refuses one the session's
+   * subagent tree does not hold as running, `unknown-agent`, before the claim; the bridge stops it with `TaskStop` and
+   * leaves the parent a note that the person stopped it and it is not to be started again or redone.
+   */
+  'stop-agent': { session: string; agentId: string };
+  /**
+   * A message to one running subagent of a bridged session (§9; MW4): `agentId` as `stop-agent`'s, `text` not blank. The
+   * bridge sends it with the engine's own delivery, under a line saying the person wrote it; the agent reads it at its
+   * next step. An agent the tree does not hold as running is `unknown-agent`: a message would revive one that ended.
+   */
+  tell: { session: string; agentId: string; text: string };
 };
 
 export type RpcName = keyof RpcArgs;
 
-export const RPC_NAMES = ['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'spawn', 'retire', 'resume', 'stop', 'command', 'btw'] as const satisfies readonly RpcName[];
+export const RPC_NAMES = ['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'spawn', 'retire', 'resume', 'stop', 'command', 'btw', 'stop-agent', 'tell'] as const satisfies readonly RpcName[];
 
 export type RpcResults = {
   /**
@@ -105,6 +119,15 @@ export type RpcResults = {
    * once: `failed`, its message `nothing-to-fork: …`.
    */
   btw: { started: true; id: string };
+  /**
+   * The agent stopped: `agentId` the spelling asked, `resolvedAgentId` the id a name resolved to (absent when an id was
+   * asked). The answer is the outcome: `TaskStop` answers at once, so no `op` follows; the agent's end reaches the web in
+   * the session's subagent tree. A refusal of the bridge's after the claim (the agent ended meanwhile) is `failed`, its
+   * code the message's first word.
+   */
+  'stop-agent': { agentId: string; accepted: true; resolvedAgentId?: string };
+  /** The message is in the agent's queue (not yet read). The answer is the outcome: no `op` follows. */
+  tell: { sent: true };
 };
 
 /**
@@ -147,6 +170,7 @@ export type RpcErrorCode =
   | 'session-live'
   | 'idle' // a steer while no turn is running: the web offers Send instead
   | 'unknown-task' // a stop naming a task the session's jobs index does not hold as running (before the claim)
+  | 'unknown-agent' // a stop-agent or tell naming no agent the session's subagent tree holds as running (before the claim)
   // The daemon's, after a claim
   | 'copy-started'
   | 'interrupted'

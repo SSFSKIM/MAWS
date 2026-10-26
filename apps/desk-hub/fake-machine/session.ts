@@ -29,6 +29,8 @@ import mw1 from './dx4/mw1-reads.json' with { type: 'json' };
 import mw2 from './dx4/mw2-ops.json' with { type: 'json' };
 // And MW3's (dx4/README.md).
 import mw3 from './dx4/mw3-scoped.json' with { type: 'json' };
+// And MW4's (dx4/README.md).
+import mw4 from './dx4/mw4-agents.json' with { type: 'json' };
 import type { Catalog, Capabilities, ConfigRead, ControlCapabilities, McpRead, PermissionUpdate, SettingsRead, UsageRead, Job, ReadAnswer, SessionBodies, SessionMessage, SessionPresence, StatusRead, Streaming, StreamingBlock, SubagentMeta, SubscriptionKind, Usage } from '../src/protocol/session';
 import type { SuggestionScope } from '../src/protocol/rpc';
 import { derive, fileFacts, LoopIndex, loopJobs, stopNote, type Body, type BridgeAgent, type Derivation } from './jobs';
@@ -47,11 +49,12 @@ import type { Recording, Row, Step } from './recording';
  * `capabilities.controls`; `mw2` (sminos `MW2_SMINOS`) the side question (`btw`), answered as the MW2 live check
  * recorded it, and compact's `instructions`; `mw3` (sminos `MW3_SMINOS`) the scoped allows: a permission request
  * raised with the engine's suggestions, as the MW3 live check recorded them, and `decide`'s `scope` checked and applied
- * as the daemon does.
+ * as the daemon does; `mw4` (sminos `MW4_SMINOS`) one subagent stopped or told (`stop-agent`, `tell`), checked against
+ * the bridge's agent tree as the daemon checks it, the stop leaving the parent the note the MW4 live check recorded.
  */
-export type Producer = 'dc3' | 'dc8' | 'm0' | 'm1' | 'mw1' | 'mw2' | 'mw3';
+export type Producer = 'dc3' | 'dc8' | 'm0' | 'm1' | 'mw1' | 'mw2' | 'mw3' | 'mw4';
 
-const LEVEL: Record<Producer, number> = { dc3: 0, dc8: 1, m0: 2, m1: 3, mw1: 4, mw2: 5, mw3: 6 };
+const LEVEL: Record<Producer, number> = { dc3: 0, dc8: 1, m0: 2, m1: 3, mw1: 4, mw2: 5, mw3: 6, mw4: 7 };
 
 /** Whether `producer` does what `level` added. */
 export const producerAtLeast = (producer: Producer, level: Producer): boolean => LEVEL[producer] >= LEVEL[level];
@@ -126,11 +129,42 @@ export const MW3_CAPABILITIES: Capabilities = {
   controls: mw3.capabilities.controls as ControlCapabilities,
 };
 
+/** The sminos version of the machine-side wave's MW4 (one subagent stopped or told). */
+export const MW4_SMINOS = '1.14.0';
+
+/**
+ * What the MW4 live check recorded (dx4/README.md): a background agent's spawn as the bridge's child keeps it in the
+ * tree (named by its Agent call, `bg-sleeper`), the bridge's answers to a stop by that name, by an id and of a foreground
+ * agent, to a message, and to an agent no tree holds, the text the agent read, and the note its parent read.
+ */
+export type AgentAnswer = { ok: boolean; result?: JsonObject; error?: string; code?: string };
+export const MW4_AGENTS = mw4 as unknown as {
+  spawn: { agentId: string; parentAgentId: string | null; subagentType: string; description: string; name: string; background: boolean; model: string; toolUseId: string };
+  stop: { byName: { asked: string; answer: AgentAnswer }; byId: { asked: string; answer: AgentAnswer }; foreground: { asked: string; answer: AgentAnswer }; again: AgentAnswer };
+  tell: { asked: string; answer: AgentAnswer; read: string };
+  unknown: { stop: AgentAnswer; tell: AgentAnswer; spaced: AgentAnswer };
+  note: string;
+};
+
+/** The note an MW4 bridge leaves a stopped agent's parent, naming the agent as the person did (§9, as recorded). */
+export const agentStopNote = (asked: string): string => MW4_AGENTS.note.replace(MW4_AGENTS.stop.byName.asked, asked);
+
+/** An MW4 bridge's capabilities: MW3's, its `stop-agent` and `tell` ops, and every control's capability as the MW4 live
+ * check's bridge said them (`stop-agent` and `tell` available). The engine and the route table stay 2.1.307. */
+export const MW4_CAPABILITIES: Capabilities = {
+  ...MW3_CAPABILITIES,
+  sminos: MW4_SMINOS,
+  ops: [...MW3_CAPABILITIES.ops, 'stop-agent', 'tell'],
+  controls: mw4.capabilities.controls as ControlCapabilities,
+};
+
 /** The sminos version, and the bridge's capabilities, that `producer` stands for. */
 export const sminosOf = (producer: Producer): string =>
-  producerAtLeast(producer, 'mw3') ? MW3_SMINOS : producerAtLeast(producer, 'mw2') ? MW2_SMINOS : producerAtLeast(producer, 'mw1') ? MW1_SMINOS : producerAtLeast(producer, 'm1') ? M1_SMINOS : M0_SMINOS;
+  producerAtLeast(producer, 'mw4') ? MW4_SMINOS : producerAtLeast(producer, 'mw3') ? MW3_SMINOS : producerAtLeast(producer, 'mw2') ? MW2_SMINOS : producerAtLeast(producer, 'mw1') ? MW1_SMINOS : producerAtLeast(producer, 'm1') ? M1_SMINOS : M0_SMINOS;
 const capabilitiesOf = (producer: Producer): Capabilities =>
-  producerAtLeast(producer, 'mw3')
+  producerAtLeast(producer, 'mw4')
+    ? MW4_CAPABILITIES
+    : producerAtLeast(producer, 'mw3')
     ? MW3_CAPABILITIES
     : producerAtLeast(producer, 'mw2')
       ? MW2_CAPABILITIES
@@ -722,6 +756,39 @@ export class SessionDepth {
       message: { role: 'user', content: [{ type: 'text', text: stopNote(taskId) }] },
     });
     return true;
+  }
+
+  /**
+   * The agent the bridge's tree holds as running by `ref`, its id first, then its Agent call's name, as the daemon checks
+   * a `stop-agent` or a `tell` before the claim (MW4); null for any other, a description among them.
+   */
+  runningAgent(ref: string): BridgeAgent | null {
+    const running = [...this.bridgeAgents.values()].filter((a) => a.running);
+    return running.find((a) => a.agentId === ref) ?? running.find((a) => a.name === ref) ?? null;
+  }
+
+  /**
+   * What the bridge's `stop-agent` leaves in the session: the agent's stop in the tree (its spawn kept, `running` false,
+   * as the bridge's next read of the engine's list says it), and the note to the parent in the main transcript, a meta
+   * user row with the plugin's origin. The id the stop resolved `ref` to, or null when no running agent has it.
+   */
+  stopAgent(ref: string): string | null {
+    const agent = this.runningAgent(ref);
+    if (!agent) return null;
+    this.bridgeAgents.set(agent.agentId, { ...agent, running: false });
+    this.appendRow(null, {
+      type: 'user',
+      uuid: randomUUID(),
+      parentUuid: this.rows.get('main')?.at(-1)?.uuid ?? null,
+      sessionId: this.id,
+      isSidechain: false,
+      timestamp: new Date().toISOString(),
+      isMeta: true,
+      origin: { kind: 'plugin', name: this.plugin },
+      message: { role: 'user', content: [{ type: 'text', text: agentStopNote(ref) }] },
+    });
+    this.refresh();
+    return agent.agentId;
   }
 
   /** The working tree's diff, on a main-scope subscription. */
