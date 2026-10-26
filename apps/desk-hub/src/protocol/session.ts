@@ -34,8 +34,35 @@ export type Raised = {
   deadline?: string;
   /** An async question of the ask mod's: answered or withdrawn, never denied. */
   async?: true;
+  /**
+   * The engine's `permission_suggestions` for a permission prompt, verbatim (the desk control surface spec, MW3): a
+   * rule, a directory or a mode the engine offers to add with the allow. At most `SUGGESTIONS_MAX`, each at most
+   * `SUGGESTION_BYTES_MAX` bytes as canonical UTF-8 JSON; the bridge leaves a list past either bound out whole, and the
+   * hub refuses a `raised` that carries one. Absent when the engine suggested nothing, when the list broke the bound, or
+   * when the engine's input was not exactly the call the bridge saw (a secrets guard beneath restored a handle, whose
+   * value a Bash rule would carry). A scoped allow (`RpcArgs.decide.scope`) names one by its index and hash. The code
+   * covers it like every other field.
+   */
+  suggestions?: PermissionUpdate[];
   mac: Mac;
 };
+
+/** How many suggestions a `raised` carries at most, and each one's canonical UTF-8 JSON at most: the bridge's bound,
+ * exactly (a `raised` the hub refuses refuses the request with it, and one bad entry a whole pending set). */
+export const SUGGESTIONS_MAX = 8;
+export const SUGGESTION_BYTES_MAX = 2048;
+
+/** Where a permission update applies: `session` saves nothing; the others are settings files. */
+export type PermissionDestination = 'userSettings' | 'projectSettings' | 'localSettings' | 'session' | 'cliArg';
+
+/**
+ * One permission update the engine suggests (the SDK's `PermissionUpdate`), passed through as the engine words it. A
+ * scoped allow takes only an `addRules` or an `addDirectories` one; the others are shown, never applied from the desk.
+ */
+export type PermissionUpdate =
+  | { type: 'addRules' | 'replaceRules' | 'removeRules'; rules: PermissionRule[]; behavior: 'allow' | 'deny' | 'ask'; destination: PermissionDestination }
+  | { type: 'setMode'; mode: string; destination: PermissionDestination }
+  | { type: 'addDirectories' | 'removeDirectories'; directories: string[]; destination: PermissionDestination };
 
 /** `withdrawn`: the request ended with no answer used (the turn aborted, the session ended, the call settled another way). */
 export type SettledOutcome = 'allow' | 'deny' | 'answered' | 'withdrawn';

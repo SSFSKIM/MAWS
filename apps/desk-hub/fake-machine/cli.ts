@@ -10,6 +10,7 @@ import { FakeMachine } from './machine';
 import { emptyMemory, type Memory } from './memory';
 import type { Credentials } from './link';
 import { loadRecording } from './recording';
+import type { Producer } from './session';
 
 type State = { hub: string; machine: string; credentials: Credentials; key: string; memory: Memory };
 
@@ -32,7 +33,9 @@ const USAGE = `usage:
       --producer <daemon>      dc3 (default) | dc8: DX4's widened subagents body, jobs, MCP names, and output |
                                m0: dc8 and capabilities, read status, command | m1: pushed catalogs and measured prompt commands |
                                mw1: m1 and the reads of usage, config, settings and MCP, and capabilities.controls |
-                               mw2: mw1 and the side question (btw), and compact's instructions
+                               mw2: mw1 and the side question (btw), and compact's instructions |
+                               mw3: mw2 and the scoped allows: once played, the MW3 live check's permission requests
+                               raised with the engine's suggestions, and decide's scope
       --plugin <name>          doperpowers (default) | sminos: the plugin its bridge and ask run in (a rolled machine)`;
 
 function readState(path: string): State {
@@ -92,8 +95,8 @@ export async function main(argv: string[], defaults: { recording: string }): Pro
     console.error('--decisions is recorded or wait');
     return 2;
   }
-  if (values.producer !== 'dc3' && values.producer !== 'dc8' && values.producer !== 'm0' && values.producer !== 'm1' && values.producer !== 'mw1' && values.producer !== 'mw2') {
-    console.error('--producer is dc3, dc8, m0, m1, mw1 or mw2');
+  if (!['dc3', 'dc8', 'm0', 'm1', 'mw1', 'mw2', 'mw3'].includes(values.producer)) {
+    console.error('--producer is dc3, dc8, m0, m1, mw1, mw2 or mw3');
     return 2;
   }
   if (values.plugin !== 'doperpowers' && values.plugin !== 'sminos') {
@@ -129,7 +132,7 @@ export async function main(argv: string[], defaults: { recording: string }): Pro
       follow: values.follow,
       retime: !values['keep-times'],
       reconnect: true,
-      producer: values.producer,
+      producer: values.producer as Producer,
       plugin: values.plugin,
     });
     await machine.connect();
@@ -137,6 +140,10 @@ export async function main(argv: string[], defaults: { recording: string }): Pro
     for (const r of recordings) console.log(`  replaying ${r.name} as session ${r.session} (${r.chunks} chunks, ${r.steps.length} steps)`);
     await machine.play({ speed: Number(values.speed) });
     console.log(`  played; ${machine.rpcs.length} RPCs answered so far`);
+    if (values.producer === 'mw3' && round === 0 && recordings.length > 0) {
+      const raised = await machine.raiseRecordedScoped(recordings[0]!.session);
+      console.log(`  raised the MW3 recording's requests: ${raised.map((r) => `${r.request} (${r.suggestions?.length ?? 0} suggestions)`).join(', ')}`);
+    }
     if (!values.loop) break;
     round++;
     await machine.close();

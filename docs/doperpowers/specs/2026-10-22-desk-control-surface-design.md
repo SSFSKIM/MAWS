@@ -149,7 +149,10 @@ allows today.
     end lost across a reload or a child respawn and line separators in the `/mcp` form,
     fixed and re-reviewed clean; `/mcp disable` of every server refused (Decision Log);
     the configured-name gap is residue; live check on 2.1.310.
-  - [ ] MW3 scoped allows.
+  - [x] (2026-10-26 10:37Z) MW3 scoped allows: sminos 1.13.0 (doperpowers #398) and the hub's
+    `Raised.suggestions?` under the bridge's bound and `decide.scope` (MAWS #162); the
+    `high` review over both halves was clean at first read; live check on 2.1.310 with
+    the real devcloud guard and a stand-in.
   - [ ] MW4 `stop-agent` and `tell`.
   - [ ] MW5 image and PDF intake.
 - [x] (2026-10-26) Wave 2, measured by remote-architecture on 2.1.310 in isolated
@@ -2092,6 +2095,26 @@ the engine check the call again and ask again; `bridge-requests.tsx`). *2026-10-
 replaces "`updatedInput: <the request's input>`" written at M3's design, which sminos
 later narrowed to plans.*
 
+*2026-10-26, MW3 as built (sminos 1.13.0; the live check on 2.1.310):* `raised.suggestions`
+is the engine's list verbatim, every type it offers (`setMode` among them: the daemon,
+not the bridge, decides what a scope takes), in the raise and in every resync's
+`pending`. "Exactly the call this module saw" is canonical equality: the engine's
+`tool_input` and the input the bridge's `tool.call` hook was handed, uncut, have one
+RFC 8785 form (keys in any order are the same call; an input the raise cut is not). The
+bound counts each suggestion's canonical JSON in UTF-8 bytes; a list that is not a list
+of objects, or has no canonical form (a lone surrogate), is left out whole like one past
+the bound, and the daemon applies the same bound again before it seals a `raised`. The
+decision POST admits `updatedPermissions` (a list of at most 8 objects) on a
+permission's allow only: 400 on a question, and on a deny (the engine's deny takes no
+rules). The bridge hands the engine a permission's allow as `{behavior: "allow",
+updatedPermissions}` and a plan's as `{behavior: "allow", updatedInput: <its rawInput>,
+updatedPermissions}`; an empty list adds nothing. Measured: such an allow on a call an
+ask rule put to the dialog (`Bash(touch *)` in the project's settings, the call `touch
+s.txt && mkdir -p sdir`) ran the call and added the rule (`session`: the next `mkdir -p
+sdir` ran unasked, no file written; `localSettings`: `.claude/settings.local.json` gained
+`Bash(mkdir -p ldir)`, nothing else written); an `addDirectories` allow made a Read of
+that directory run unasked.
+
 ### The route table (owner: doperpowers `sminos/tests/routes-2.1.307.json`, loaded by `bridge-commands.tsx`; vendored to MAWS `apps/desk-hub/fake-machine/dx4/`)
 
 ```ts
@@ -2242,6 +2265,23 @@ its message `<code>: <reason>` as a `command`'s (`nothing-to-fork: nothing to fo
 passed as none. The hub admits both by `RPC_NAMES` alone, as it does every RPC; a
 daemon older than sminos 1.12.0 refuses `btw` `bad-shape` (*no RPC "btw"*), and the
 machine presence's `desk.rpcs` names it from 1.12.0.
+
+*2026-10-26, MW3 as built (sminos 1.13.0):* `decide.scope` is checked in two steps.
+Its shape with the args' (check 6, `bad-shape`): only on an allow; `suggestion` a
+non-negative integer (a boolean is none); `sha256` 64 lowercase hex characters, the
+SHA-256 of the suggestion's canonical JSON as `input_sha256` is of an input;
+`destination` `session` or `localSettings`. Then with the digest (check 7, before the
+claim), against the request the bridge holds: a question with a scope is `bad-shape`;
+an index past the list, a request raised without suggestions, or another hash is
+`not-pending` (*the suggestions changed: the request no longer offers the one shown*);
+then the type, then a `localSettings` the suggestion does not name, `bad-shape`. The
+rule handed to the bridge is the held suggestion with the scope's destination. A daemon
+older than 1.13.0 does not know `scope` and runs the decision as a plain allow, so the
+web offers a scope only where `controls['decide.scope']` (or `decide.addDirectory` for a
+directory) is available. The hub admits `decide` as before, by `RPC_NAMES` alone, and
+admits `Raised.suggestions` under exactly the bridge's bound (`SUGGESTIONS_MAX`,
+`SUGGESTION_BYTES_MAX` in `session.ts`), refusing the raise, or the whole pending set,
+`bad-shape` past it.
 
 ### The log (owner: doperpowers `sminos/skills/sminos/scripts/sminos.py`; read by the web's projection)
 
@@ -2639,6 +2679,36 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   the engine wrote its rows; the same form in another run read back *Enabled 4 MCP
   server(s)*. Readback is best-effort by design; this is a timing case of it, not a new
   failure. Evidence: g1 against r1, the `enable` row.
+- Observation (MW3): on 2.1.310 the engine's `permission_suggestions` carry nothing
+  for the part of a call an ask rule matched: under `Bash(touch *)`,
+  `touch p2.txt && mkdir -p p2dir` was raised with one `addRules` for `mkdir -p p2dir`
+  alone (`localSettings`). A Read outside the working directory was offered
+  `Read(//<dir>/**)` under `session` with no rule on it and nothing under a `Read` ask
+  rule; a Bash `mkdir` outside offered `addDirectories` for that directory plus a
+  `setMode`, as a Write outside did. A Bash
+  write inside the working directory also offered `addDirectories` for the working
+  directory with `setMode` (`acceptEdits`, both `session`); `ls` outside offered an
+  `addRules` for `Read(//<dir>/**)` under `session`; `python3 -c "print(23)"` offered
+  its exact rule under `localSettings`. So a desk's "always allow" exists only where
+  the engine offers one, and the destination the engine names varies per suggestion:
+  the desk offers `session` always and `localSettings` only where it is named.
+  Evidence: MW3 live check, `/tmp/dsk-scripts/mw-wave/mw3-live/evidence/p2/observed/`
+  and `a1/observed/` (an observer mod beneath the bridge recorded each
+  `PermissionRequest` as the engine handed it).
+- Observation (MW3): the engine hands the `PermissionRequest` hooks the input a
+  guard beneath restored, and builds its suggestions from it: with devcloud's secrets
+  guard loaded, a call written with `[secret:MW3_PROBE]` was suggested as a rule
+  holding the fake secret's value. Raising the suggestions only when the request's
+  input is the one the bridge's own `tool.call` hook saw (canonical JSON, equal) keeps
+  that value off the raise, the pending set and a resync after the child is killed;
+  the real guard and a stand-in mod gave the same result. Evidence: MW3 live check,
+  `evidence/f1/` (devcloud's guard) and `evidence/f2/` (the stand-in, cases `g` and
+  `g2`), on the committed 1.13.0; the earlier runs `a1/` and `b2/` agree.
+- Observation (MW3, harness): an operator session with devcloud's guard loaded
+  scrubs a secret's value out of every tool output it displays, so printing the
+  evidence showed `[redacted:…]` where the engine's own record held the value. A check
+  for a secret's presence is a boolean computed in the file's own process, never a
+  printed field.
 
 ## Decision Log
 
@@ -3538,6 +3608,61 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   - **U+2028 and U+2029 are refused in a server's name** (P2), as the Surprises entry
     explains.
   Date/Author: 2026-10-26, MW2's executor for the desk orchestrator (b4948247).
+
+- Decision: MW3 as built (sminos 1.13.0, doperpowers and MAWS `desk-ctl-mw3`). The
+  gaps the wave's text left, each settled from the shape's purpose:
+  - **Where it lives.** No module of its own: the bound and the "seen" test are
+    `bridge-requests.tsx`'s (`boundedSuggestions`, `claimCheck`'s `isSeen`), the
+    canonical form `bridge-state.tsx`'s (`canonical`, `utf8Bytes`, beside `capped`),
+    the rule on the allow `engineDecision`'s. The daemon's resolution is
+    `sminos_rpc.py`'s `scoped_rule`, called from `check_digest`.
+  - **"Exactly the call this module saw" is canonical equality**, uncut. The bridge
+    compares the RFC 8785 form of the engine's `tool_input` with that of the input its
+    own `tool.call` hook was handed: keys in another order are the same call, a raise
+    whose input was cut never carries suggestions (what it shows is not the engine's
+    input), and the check-matching `claimCheck` already did (exact text, else the same
+    tool in the same loop) is unchanged. The live check showed the two equal on every
+    unguarded call of 2.1.310, so nothing withholds suggestions but a rewrite.
+  - **Verbatim, every type.** The raise carries the engine's list as offered, `setMode`
+    and the rest included; the daemon alone decides what a scope may take. A list that
+    is not a list of objects, or has no canonical form, is left out whole like one past
+    the bound. The daemon applies the bound again before it seals a `raised` (one bound,
+    both sides of the uplink).
+  - **The child refuses rules with a deny**, beside the question the wave named: the
+    engine's deny takes none, and an accepted-then-dropped field would hide a client's
+    mistake.
+  - **The scope's hash is `input_sha256`'s**: the SHA-256 of the suggestion's canonical
+    JSON, the digest the web already computes for an input.
+  - **The scope's order of checks** follows DX6's: its shape with the args' (`bad-shape`,
+    a scope on a deny among them), then after the digest, before the claim, a question
+    (`bad-shape`), the list (an index past it, none raised, another hash:
+    `not-pending`, *the suggestions changed*), the type, the destination (`bad-shape`).
+    Nothing reaches the bridge, and nothing is claimed, until all hold.
+  - **The live check used devcloud's real secrets guard**, loaded from the working copy
+    in the isolated profile with a fake store under the isolated HOME, and a stand-in
+    guard for a value no detector would redact; an observer mod beneath the bridge
+    recorded what the engine handed the hooks, so the evidence shows the engine's
+    suggestion carrying the restored value while the raise, the child's pending set and
+    a resync to a respawned child carry none. The user-tier settings went on the command
+    line (`--settings`), and the ask rule in the throwaway checkout's own
+    `.claude/settings.json`, so no settings file was written outside it.
+  - **The fake machine's `mw3` producer** answers from the live check's recording
+    (`apps/desk-hub/fake-machine/dx4/mw3-scoped.json`): its controls, and the requests
+    the bridge raised. `raiseRecordedScoped` raises them on a session (the CLI does so
+    once played), and a `decide` with `scope` is resolved from the request it holds as
+    the daemon resolves it, each rule kept in `scopedAllows` for a test to read. An
+    older producer, as an older daemon does, ignores `scope`.
+  Rationale: each follows the shape's purpose (the desk never constructs or widens a
+  rule; nothing a guard restored leaves the machine) or a measured fact of 2.1.310.
+  Rejected: comparing the shown and engine inputs by their JSON text (a key order the
+  engine changed would withhold every suggestion); filtering `setMode` out at the
+  bridge (the raise would no longer be what the engine offered, and lane B's would
+  differ); refusing a scoped allow on a daemon older than 1.13.0 from the hub (the hub
+  relays RPCs unread; the web's capability check is where an old daemon is met).
+  Open: a daemon older than sminos 1.13.0 runs a `decide` carrying `scope` as a plain
+  allow, the rule dropped silently. The web half must offer a scope only where the
+  session's `controls['decide.scope']` is available (Interfaces, DX6).
+  Date/Author: 2026-10-26, MW3's executor for the desk orchestrator (b4948247).
 
 ## Outcomes & Retrospective
 

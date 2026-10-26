@@ -10,7 +10,7 @@ import { FRAME_LIMIT, toWire } from '../src/protocol/parts';
 import { importOrgKey, newNonce, seal, sealRpc, verify } from '../src/protocol/codes';
 import type { DownFrame, UpFrame } from '../src/protocol/machine';
 import type { Rpc, RpcDraft } from '../src/protocol/rpc';
-import type { Delivery, Raised, SessionMessage, Settled } from '../src/protocol/session';
+import { SUGGESTION_BYTES_MAX, SUGGESTIONS_MAX, type Delivery, type PermissionUpdate, type Raised, type SessionMessage, type Settled } from '../src/protocol/session';
 import { BrowserClient, enroll, GridClient, MachineClient, waitFor, type Credentials } from './support/clients';
 import { ADMIN, ORG, startLocalHub, type LocalHub } from './support/local';
 import { decrypt, userAgent, vapidClaims } from './support/push';
@@ -767,6 +767,84 @@ describe('the pending set, decisions, and deliveries', () => {
     later.close();
     b.close();
     await m.close();
+  });
+
+  describe("a raise's suggestions (the desk control surface's MW3), under the bridge's bound exactly", () => {
+    const encoder = new TextEncoder();
+    /** A rule suggestion whose canonical JSON (keys sorted, no whitespace) is exactly `bytes` of UTF-8, most of it
+     * three-byte characters, so a bound counted in UTF-16 units would admit what the byte bound refuses. */
+    const sized = (bytes: number): PermissionUpdate => {
+      const canonical = (content: string) => `{"behavior":"allow","destination":"session","rules":[{"ruleContent":"${content}","toolName":"Bash"}],"type":"addRules"}`;
+      const room = bytes - encoder.encode(canonical('')).length;
+      const content = '가'.repeat(Math.floor(room / 3)) + 'a'.repeat(room % 3);
+      expect(encoder.encode(canonical(content)).length).toBe(bytes);
+      return { type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: content }], behavior: 'allow', destination: 'session' };
+    };
+    const RULE: PermissionUpdate = { type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'pnpm e2e' }], behavior: 'allow', destination: 'localSettings' };
+
+    it('eight of 2,048 bytes each are kept, relayed and republished, their code verifying; a raise without them still is', async () => {
+      const project = newProject();
+      const m = await machine(project);
+      const b = await browser(project);
+      const eight = Array.from({ length: SUGGESTIONS_MAX }, () => sized(SUGGESTION_BYTES_MAX));
+      const full = await raised(project, 'toolu_sg8', { suggestions: eight });
+      const plain = await raised(project, 'toolu_sgnone');
+      expect(await verify(await KEY, 'raised', project, full)).toBe(true);
+      expect(await verify(await KEY, 'raised', project, { ...full, suggestions: [RULE] })).toBe(false);
+      await m.postOk([{ t: 'session', message: envelope(m, project, 'raised', full) }, { t: 'session', message: envelope(m, project, 'raised', plain) }]);
+      await waitFor(() => (lastPending(b)?.length === 2 ? true : undefined));
+      expect(lastPending(b)).toEqual([
+        { machine: m.name, raised: full, terminal_only: false },
+        { machine: m.name, raised: plain, terminal_only: false },
+      ]);
+      expect(sessionKinds(b).find((x) => x.kind === 'raised')?.body).toEqual(full);
+      b.close();
+      await m.close();
+    });
+
+    it('a ninth, one of 2,049 bytes, an entry that is no object, or no list at all is refused bad-shape', async () => {
+      const project = newProject();
+      const m = await machine(project);
+      const b = await browser(project);
+      const eight = Array.from({ length: SUGGESTIONS_MAX }, () => sized(SUGGESTION_BYTES_MAX));
+      const cases: Record<string, unknown> = {
+        nine: [...eight, RULE],
+        'one byte over': [RULE, sized(SUGGESTION_BYTES_MAX + 1)],
+        'not an object': [RULE, 'addRules'],
+        'a list in a list': [[RULE]],
+        'not a list': RULE,
+      };
+      for (const [what, suggestions] of Object.entries(cases)) {
+        const from = b.frames.length;
+        const bad = await raised(project, `toolu_sgbad_${what.replaceAll(' ', '_')}`, { suggestions } as Partial<Raised>);
+        await m.postOk([{ t: 'session', message: envelope(m, project, 'raised', bad) }]);
+        expect(await b.next((f) => f.t === 'refused', what, from)).toMatchObject({ refusal: { reason: 'bad-shape' } });
+      }
+      expect(lastPending(b) ?? []).toEqual([]);
+      b.close();
+      await m.close();
+    });
+
+    it('a pending set refreshes whether its requests carry suggestions or not; one past the bound refuses the whole set', async () => {
+      const project = newProject();
+      const m = await machine(project);
+      const b = await browser(project);
+      const plain = await raised(project, 'toolu_set_plain');
+      const scoped = await raised(project, 'toolu_set_scoped', { suggestions: [RULE] });
+      await m.postOk([{ t: 'pending', project, raised: [plain] }]);
+      await waitFor(() => (lastPending(b)?.length === 1 ? true : undefined));
+      expect(lastPending(b)).toEqual([{ machine: m.name, raised: plain, terminal_only: false }]);
+      await m.postOk([{ t: 'pending', project, raised: [plain, scoped] }]);
+      await waitFor(() => (lastPending(b)?.length === 2 ? true : undefined));
+      expect(lastPending(b)!.map((r) => r.raised)).toEqual([plain, scoped]);
+      const from = b.frames.length;
+      const over = await raised(project, 'toolu_set_over', { suggestions: [sized(SUGGESTION_BYTES_MAX + 1)] });
+      await m.postOk([{ t: 'pending', project, raised: [plain, over] }]);
+      expect(await b.next((f) => f.t === 'refused', 'the set refused', from)).toMatchObject({ refusal: { reason: 'bad-shape' } });
+      expect(lastPending(b)!.map((r) => r.raised.request)).toEqual(['toolu_set_plain', 'toolu_set_scoped']);
+      b.close();
+      await m.close();
+    });
   });
 
   it('a delivery recorded for a closed terminal session turns delivered after Resume; uncertain is kept as an outcome', async () => {
