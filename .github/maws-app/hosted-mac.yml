@@ -1,0 +1,219 @@
+# maws-app's one workflow (MAWS's .github/maws-app/hosted-mac.yml, which MAWS's filter writes here): one of MAWS's e2e
+# groups on a GitHub-hosted Mac, for one request. A request is a commit MAWS's waiter pushes to ci/hosted/<suffix>, the
+# filtered tree of one private commit, its trailers naming the group and its package script; the run answers with a
+# result commit on ci/result/<suffix>, which the waiter reads over git (ci-kit's
+# docs/doperpowers/specs/2026-10-26-maws-hosted-mac-design.md, The hosted workflow).
+#
+# It runs only on GitHub's runners, reads no secret, and starts only on a push to ci/hosted/**, its schedule or the
+# owner's dispatch. A cancel is a commit pushed over a request with a `Hosted-Cancel:` trailer: the concurrency group
+# cancels the request's run, and the cancel's own run plans nothing.
+name: hosted-mac
+on:
+  push:
+    branches: ['ci/hosted/**']
+  # The sweep, from main's copy of this file, and the warm-up of main's caches.
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: hosted-${{ github.ref }}
+  cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
+jobs:
+  # The request's trailers, read from the push's message with no checkout. A cancel plans no group, so nothing else runs.
+  plan:
+    if: github.event_name == 'push' && github.event.head_commit != null
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      group: ${{ steps.plan.outputs.group }}
+      script: ${{ steps.plan.outputs.script }}
+      slug: ${{ steps.plan.outputs.slug }}
+      libreoffice: ${{ steps.plan.outputs.libreoffice }}
+      evidence: ${{ steps.plan.outputs.evidence }}
+      deadline: ${{ steps.plan.outputs.deadline }}
+    steps:
+      - id: plan
+        name: the request's trailers
+        env:
+          MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          trailers=$(printf '%s\n' "$MESSAGE" | git interpret-trailers --parse)
+          trailer() { sed -n "s/^$1: //p" <<<"$trailers" | tail -n 1; }
+          if [[ -n $(trailer Hosted-Cancel) ]]; then
+            echo "hosted: cancel ($(trailer Hosted-Cancel)): nothing to run"
+            exit 0
+          fi
+          group=$(trailer Hosted-Group) script=$(trailer Hosted-Script) slug=$(trailer Hosted-Slug)
+          libreoffice=$(trailer Hosted-LibreOffice) evidence=$(trailer Hosted-Evidence) deadline=$(trailer Hosted-Deadline)
+          bad() { echo "::error title=hosted: bad request::$1"; exit 1; }
+          [[ $group =~ ^[a-z0-9][a-z0-9-]*$ ]] || bad "Hosted-Group '$group'"
+          [[ $script =~ ^e2e(:[a-z0-9][a-z0-9:-]*)?$ ]] || bad "Hosted-Script '$script'"
+          [[ $slug =~ ^[a-z0-9][a-z0-9-]*$ ]] || bad "Hosted-Slug '$slug'"
+          [[ $libreoffice == true || $libreoffice == false ]] || bad "Hosted-LibreOffice '$libreoffice'"
+          [[ $evidence == true || $evidence == false ]] || bad "Hosted-Evidence '$evidence'"
+          [[ $deadline =~ ^[0-9]+$ ]] || bad "Hosted-Deadline '$deadline'"
+          echo "hosted: e2e:$group (pnpm $script), deadline $(date -u -d "@$deadline" +%FT%TZ)"
+          printf '%s\n' "group=$group" "script=$script" "slug=$slug" "libreoffice=$libreoffice" "evidence=$evidence" \
+            "deadline=$deadline" >>"$GITHUB_OUTPUT"
+
+  # The group, as the private gate's e2e job runs it: the shared setup, then the group's package script, which builds its
+  # out/ variant first.
+  e2e:
+    needs: plan
+    if: needs.plan.outputs.group != ''
+    name: e2e:${{ needs.plan.outputs.group }}
+    # Pinned, not macos-latest: the nearest to the mini's macOS 27, and an image move would change results unseen.
+    runs-on: macos-26
+    timeout-minutes: 60
+    outputs:
+      summary: ${{ steps.summary.outputs.summary }}
+    env:
+      MAWS_E2E_QUIET: '1'
+      SHELL: /bin/zsh
+      # The private gate's limit: the harness build runs out of Node's default heap.
+      NODE_OPTIONS: --max-old-space-size=5120
+      # gate.yml's count lines.
+      COUNTS: '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)|^e2e-build: |^ +(Test Files|Tests) +[0-9]'
+    steps:
+      # A job that starts after its waiter's deadline, or whose request is no longer its ref's tip (a cancel, a deletion
+      # or a newer request replaced it, whatever order GitHub's queue saw the pushes in), stops here and holds its Mac
+      # for seconds.
+      - name: stale guard
+        env:
+          DEADLINE: ${{ needs.plan.outputs.deadline }}
+          REMOTE: ${{ github.server_url }}/${{ github.repository }}.git
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          stale() { echo "hosted: stale request: $1" | tee "$RUNNER_TEMP/stale"; exit 1; }
+          now=$(date +%s)
+          ((now <= DEADLINE)) || stale "started $(date -u -r "$now" +%FT%TZ), past its deadline $(date -u -r "$DEADLINE" +%FT%TZ)"
+          for try in 1 2 3; do
+            if listed=$(git ls-remote "$REMOTE" "$GITHUB_REF"); then break; fi
+            ((try < 3)) || stale "could not read $GITHUB_REF from $REMOTE"
+            sleep 5
+          done
+          tip=${listed%%$'\t'*}
+          [[ $tip == "$GITHUB_SHA" ]] || stale "$GITHUB_REF is at ${tip:-nothing}, not this run's $GITHUB_SHA"
+          echo "hosted: $GITHUB_REF is this run's $GITHUB_SHA, deadline $(date -u -r "$DEADLINE" +%FT%TZ)"
+      - id: checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # On a GitHub-hosted Mac the setup first sets the display to 1920x1080 at 1x and prints the desktop's line.
+      - uses: ./.github/actions/setup
+        with:
+          e2e: 'true'
+          libreoffice: ${{ needs.plan.outputs.libreoffice }}
+      # A cask Homebrew installs carries the quarantine flag, and a first launch would wait on Gatekeeper's dialog on
+      # this unattended VM.
+      - name: unquarantine
+        run: |
+          for app in /Applications/LibreOffice.app "/Applications/Google Chrome.app"; do
+            if [[ -d $app ]]; then xattr -dr com.apple.quarantine "$app" 2>/dev/null || true; echo "unquarantined $app"; fi
+          done
+      - name: pnpm ${{ needs.plan.outputs.script }}
+        env:
+          SCRIPT: ${{ needs.plan.outputs.script }}
+        run: |
+          export MAWS_E2E_BUILD_CACHE=$RUNNER_TEMP/maws-e2e-build MAWS_E2E_BUILD_KEY=$GITHUB_SHA
+          .github/scripts/gate-run.sh "$COUNTS" pnpm "$SCRIPT" 2>&1 | tee "$RUNNER_TEMP/e2e.log"
+      # The result's body: the count lines and Playwright's numbered failure lines, at most 100.
+      - id: summary
+        name: summary
+        if: always()
+        run: |
+          esc=$'\x1b'
+          {
+            echo 'summary<<HOSTED_SUMMARY_END'
+            if [[ -f $RUNNER_TEMP/stale ]]; then cat "$RUNNER_TEMP/stale"; fi
+            if [[ -f $RUNNER_TEMP/e2e.log ]]; then
+              sed "s/$esc\[[0-9;]*[A-Za-z]//g" "$RUNNER_TEMP/e2e.log" | grep -E "$COUNTS|^ +[0-9]+\) " | sed 's/ ─*$//' | head -n 100 || true
+            fi
+            echo HOSTED_SUMMARY_END
+          } >>"$GITHUB_OUTPUT"
+      - if: (failure() || needs.plan.outputs.evidence == 'true') && steps.checkout.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-${{ needs.plan.outputs.slug }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # The answer: a commit of the request's tree with the request as its only parent, on ci/result/<suffix>, written with
+  # this run's own token.
+  result:
+    needs: [plan, e2e]
+    if: always() && needs.plan.outputs.group != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: the result commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TREE: ${{ github.event.head_commit.tree_id }}
+          GROUP: ${{ needs.plan.outputs.group }}
+          CONCLUSION: ${{ needs.e2e.result }}
+          SUMMARY: ${{ needs.e2e.outputs.summary }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
+        run: |
+          suffix=${GITHUB_REF#refs/heads/ci/hosted/}
+          message="hosted: $CONCLUSION e2e:$GROUP"
+          if [[ -n $SUMMARY ]]; then message+=$'\n\n'"$SUMMARY"; fi
+          message+=$'\n\n'"Hosted-Conclusion: $CONCLUSION"$'\n'"Hosted-Run: $RUN_URL"
+          commit=$(gh api "repos/$REPO/git/commits" -f message="$message" -f tree="$TREE" -f "parents[]=$GITHUB_SHA" --jq .sha)
+          if ! gh api "repos/$REPO/git/refs" -f ref="refs/heads/ci/result/$suffix" -f sha="$commit" --silent 2>/dev/null; then
+            gh api -X PATCH "repos/$REPO/git/refs/heads/ci/result/$suffix" -f sha="$commit" -F force=true --silent
+          fi
+          echo "hosted: result ci/result/$suffix $commit ($CONCLUSION)"
+
+  # The dead refs: ci/hosted/* and ci/result/* whose commit is more than 6 hours old. No waiter lives that long.
+  sweep:
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: sweep
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          cutoff=$(($(date +%s) - 6 * 3600))
+          swept=0 kept=0
+          while read -r ref sha; do
+            [[ $ref == refs/heads/ci/hosted/* || $ref == refs/heads/ci/result/* ]] || continue
+            date=$(gh api "repos/$REPO/git/commits/$sha" --jq .committer.date)
+            if (($(date -d "$date" +%s) < cutoff)); then
+              gh api -X DELETE "repos/$REPO/git/refs/${ref#refs/}" --silent
+              echo "swept $ref ($date)"
+              swept=$((swept + 1))
+            else
+              kept=$((kept + 1))
+            fi
+          done < <(gh api --paginate "repos/$REPO/git/matching-refs/heads/ci/" --jq '.[] | "\(.ref) \(.object.sha)"')
+          echo "hosted: sweep deleted $swept refs, kept $kept"
+
+  # main's caches (the pnpm store, Electron's download), which every request's run restores: a cache saved on a
+  # ci/hosted/ branch is that branch's alone. A hit restores and saves nothing.
+  warm:
+    if: github.event_name != 'push'
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          e2e: 'true'

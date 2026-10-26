@@ -1,9 +1,10 @@
 name: MAWS gate setup
 description: >-
   The shared setup of .github/workflows/gate.yml (docs/doperpowers/plans/2026-10-14-gate-offload.md §3.2), run after
-  the checkout: pnpm from packageManager, Node 22 and the frozen install. Hosted Linux jobs cache the pnpm store and
-  Electron's download by its version; the self-hosted runners (the macOS runner, ci-kit's pool) rely on their own disks
-  and take pnpm through corepack, never pnpm/action-setup.
+  the checkout: pnpm from packageManager, Node 22 and the frozen install. GitHub-hosted jobs (hosted Linux, and
+  maws-app's hosted Macs) cache the pnpm store and Electron's download by its version; the self-hosted runners (the
+  macOS runner, ci-kit's pool) rely on their own disks and take pnpm through corepack, never pnpm/action-setup.
+  On a GitHub-hosted Mac it first sets the display to 1920x1080 at 1x and prints the desktop's line.
   Every lane applies .github/ci-kit.yml. On Linux, e2e jobs also lift Electron's sandbox restriction, and groups that
   render documents through LibreOffice install it separately.
 inputs:
@@ -19,12 +20,29 @@ inputs:
 runs:
   using: composite
   steps:
+    # A GitHub-hosted Mac (maws-app's hosted-mac.yml; ci-kit's docs/doperpowers/specs/2026-10-26-maws-hosted-mac-design.md,
+    # The three desktops): its one display starts at 1024x768, which clamps the e2e window (1280x820, e2e/support/launch.ts),
+    # and offers no scaled mode, so every hosted job runs at its largest, 1920x1080 at 1x, set here rather than found by
+    # each job. The line names the desktop as the app sees it (the main screen's points and backing scale), and any
+    # other display fails the job.
+    - if: runner.environment == 'github-hosted' && runner.os == 'macOS'
+      shell: bash
+      env:
+        HOMEBREW_NO_AUTO_UPDATE: '1'
+        HOMEBREW_NO_INSTALL_CLEANUP: '1'
+      run: |
+        brew install -q displayplacer >/dev/null
+        id=$(displayplacer list | sed -n 's/^Persistent screen id: //p' | head -1)
+        displayplacer "id:$id res:1920x1080 hz:60 color_depth:7 scaling:off origin:(0,0) degree:0"
+        display=$(osascript -l JavaScript -e 'ObjC.import("AppKit"); const s = $.NSScreen.mainScreen; `${s.frame.size.width}x${s.frame.size.height}@${s.backingScaleFactor}x`')
+        echo "ci-kit desktop: $(sw_vers -productVersion) $(sysctl -n machdep.cpu.brand_string) cpus $(sysctl -n hw.ncpu) memory $(($(sysctl -n hw.memsize) / 1073741824)) GiB display $display"
+        if [[ $display != 1920x1080@1x ]]; then echo "::error title=ci-kit desktop::the display is $display, not 1920x1080@1x"; exit 1; fi
     - if: runner.environment != 'self-hosted'
       uses: pnpm/action-setup@v6
     - uses: actions/setup-node@v7
       with:
         node-version: 22
-        cache: ${{ runner.environment == 'github-hosted' && runner.os == 'Linux' && 'pnpm' || '' }}
+        cache: ${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}
     # On a self-hosted runner (ci-kit's pool, Decision Log 35; the macOS runner, Decision Log 42) pnpm comes through
     # corepack at packageManager's version, so no job switches versions: on a pool box, whose pnpm store is shared
     # between jobs, pnpm/action-setup's self-update breaks from the box's second job on; on the Mac the switch (11.19.0
@@ -43,9 +61,9 @@ runs:
       run: echo "version=$(node -p "require('./package.json').devDependencies.electron")" >> "$GITHUB_OUTPUT"
     # The pool's caches are baked into its box and shared, so a restore there would unpack under other jobs.
     - uses: actions/cache@v6
-      if: runner.environment == 'github-hosted' && runner.os == 'Linux'
+      if: runner.environment == 'github-hosted'
       with:
-        path: ~/.cache/electron
+        path: ${{ runner.os == 'macOS' && '~/Library/Caches/electron' || '~/.cache/electron' }}
         key: electron-${{ runner.os }}-${{ runner.arch }}-${{ steps.electron.outputs.version }}
     - uses: SSFSKIM/ci-kit/setup@v1
       with:
