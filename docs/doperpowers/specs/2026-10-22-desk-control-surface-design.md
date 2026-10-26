@@ -2017,9 +2017,15 @@ empty lists where a source has none, each rule string parsed as the engine parse
 of its matcher's `hooks` list. `mcp` names a connected server as its tools spell it
 (`probe server` is `probe_server`), the plugins' `$.tool.register` tools among them
 (`sminos`); the plane's `disabled` servers keep their configured spelling and come from
-`projects[<key>]`, the key being the nearest directory at or above the session's
-launch directory that holds `.git`, else that directory (measured: a session launched
-in `work/sub` had `/mcp disable` write under `work`). The result types are
+`projects[<key>].disabledMcpServers` of the engine's global config, the file and the key
+chosen as 2.1.310 chooses them. The file is the legacy `<config dir>/.config.json` while
+it is a nonempty file (or an empty writable one with no `.claude.json` beside it), else
+`.claude.json` in `CLAUDE_CONFIG_DIR` or the home. The key is the repository's canonical
+root: the nearest directory at or above the session's launch directory that holds
+`.git`, and for a linked worktree its primary checkout; outside a repository, the launch
+directory (measured: launched in `work/sub`, `/mcp disable` wrote under `work`; in a
+linked worktree, under the primary checkout; on a `.config.json` profile, into that
+file). The result types are
 `UsageRead`, `ConfigRead`, `SettingsRead` and `McpRead` in MAWS
 `apps/desk-hub/src/protocol/session.ts`, `ControlCapabilities` beside them.
 
@@ -2503,9 +2509,17 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   disabled server keeps its configured name, which the slash grammar needs.
   Evidence: c2 `read-mcp.json` and `read-mcp-plane.json`.
 - Observation: the engine files a project's `.claude.json` entry under the repository's
-  top level, not the launch directory, so `disabledMcpServers` is read there.
+  canonical root, not the launch directory: the top level, and for a linked worktree
+  the primary checkout. Its global config is the legacy `<config dir>/.config.json`
+  whenever that file is nonempty. MW1's first build read the worktree's own directory
+  and `.claude.json` alone; the medium review reproduced both misses on 2.1.310, and the
+  plane now follows the engine's two rules.
   Evidence: c2 `projects-disabled.json`: launched in `work/sub`, `/mcp disable plain`
-  run through the bridge's `command` op added `plain` under `work`.
+  run through the bridge's `command` op added `plain` under `work`. After the fix,
+  `/tmp/dsk-scripts/mw-wave/mw1-live/evidence/w1/` (launched in `linked/sub`, a
+  linked worktree of `main`: `plain` added under `main`, which the plane read) and
+  `l1/` (a profile with only `.config.json`: the engine read and wrote it, the plane
+  too).
 - Observation: on 2.1.310 the engine's own `text` config rows are `autoUpdatesChannel`
   and `language`, neither a credential; `apiKey` is a boolean row. A fresh profile's
   `thinking` row is locked. Evidence: c2 `read-config.json`.
@@ -3297,10 +3311,14 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
     `permissionsExact: false` already says the view is the files'.
   - **`config` copies a row whole** but a plugin's `text` row's `value`; its
     `provider` is the engine's `Origin` verbatim.
-  - **`mcp`'s disabled list** is read under the engine's own project key, the nearest
-    directory holding `.git` at or above the launch directory (measured, Surprises),
-    names alone, at most 256 of at most 256 characters; a connected server is never
-    named twice. The bridge's view keeps the plugins' tool servers (`sminos`): the
+  - **`mcp`'s disabled list** is read from the engine's own global config file under its
+    own project key, both resolved by 2.1.310's rules (the legacy `.config.json` while
+    nonempty; the canonical git root, a linked worktree's primary checkout), names
+    alone, at most 256 of at most 256 characters; a connected server is never named
+    twice. The first build keyed by the directory holding `.git` and read
+    `.claude.json` alone; the MW1 review found both (reproduced on 2.1.310), and a
+    real `git worktree add` and the legacy file now have tests and a live run each
+    (Surprises). The bridge's view keeps the plugins' tool servers (`sminos`): the
     model sees them as MCP servers, and `/mcp` is where the person would look for them.
   - **The controls' reasons.** A control a later MW builds says *not in sminos
     <version>: a later version of the plugin adds it* (the version the loaded mod's
