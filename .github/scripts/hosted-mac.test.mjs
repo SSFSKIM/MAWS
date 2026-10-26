@@ -5,7 +5,7 @@
 // MAWS repository as the private run's checkout. This file plays the hosted run: it answers a request with the result
 // commit maws-app's workflow writes, or with nothing.
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -30,7 +30,7 @@ const gitIn = (cwd, env = {}) => (...args) =>
   execFileSync('git', ['-c', 'core.autocrlf=false', '-c', 'commit.gpgsign=false', ...args], { cwd, encoding: 'utf8', env: { ...cleanEnv(), ...identity, ...env }, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
 const RUN = '7701';
-const entry = (group = 'document-app') => JSON.stringify({ group, script: `e2e:${group}`, slug: group, build: false, libreoffice: false, measured: false, hosted: true, runner: '["self-hosted","ci-kit-pool","cpus-2"]', timeout: 100 });
+const entry = (group = 'document-app') => JSON.stringify({ group, script: `e2e:${group}`, slug: group, build: false, libreoffice: false, poppler: false, measured: false, hosted: true, runner: '["self-hosted","ci-kit-pool","cpus-2"]', timeout: 100 });
 const alnum = (n) => [...randomBytes(n)].map((b) => 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'[b % 62]).join('');
 
 // maws-app (a bare repository with `main`) and a MAWS checkout whose HEAD is ci-gate's nonce commit over `requested`.
@@ -137,6 +137,40 @@ async function waiter(fx, { attempt = 1, args = [], env = {}, onRequest, group =
 
 const REQUEST_LINE = new RegExp(`^hosted: request ci/hosted/${RUN}-1-document-app ([0-9a-f]{40})$`, 'm');
 
+function overlayPlan(fx, message) {
+  const lines = readFileSync(join(root, '.github/maws-app/hosted-mac.yml'), 'utf8').split('\n');
+  const start = lines.indexOf('        run: |', lines.indexOf("        name: the request's trailers")) + 1;
+  let end = start;
+  while (end < lines.length && (lines[end] === '' || lines[end].startsWith('          '))) end++;
+  const script = lines.slice(start, end).map((line) => line.slice(10)).join('\n');
+  const output = join(fx.dir, 'overlay-output');
+  writeFileSync(output, '');
+  // The plan runs on Ubuntu; its date only formats a diagnostic line. Keep that platform boundary out of this test.
+  const bin = join(fx.dir, 'bin');
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, 'date'), '#!/bin/sh\necho 2030-01-01T00:00:00Z\n', { mode: 0o755 });
+  const run = spawnSync('bash', ['-eo', 'pipefail', '-c', script], { encoding: 'utf8', env: { ...cleanEnv(), PATH: `${bin}:${process.env.PATH}`, MESSAGE: message, GITHUB_OUTPUT: output } });
+  return { ...run, outputs: readFileSync(output, 'utf8') };
+}
+
+for (const poppler of [false, true]) {
+  test(`Poppler ${poppler} survives the waiter trailer and the overlay plan`, async (t) => {
+    const fx = fixture(t);
+    const run = await waiter(fx, { env: { ENTRY: JSON.stringify({ ...JSON.parse(entry()), poppler }) }, onRequest: (request) => answer(fx, `${RUN}-1-document-app`, request, 'success') });
+    assert.equal(run.code, 0, run.out);
+    assert.equal(trailersOf(fx, run.request)['Hosted-Poppler'], String(poppler));
+    const message = fx.appGit('log', '-1', '--format=%B', run.request);
+    const planned = overlayPlan(fx, message);
+    assert.equal(planned.status, 0, planned.stderr);
+    assert.match(planned.outputs, new RegExp(`^poppler=${poppler}$`, 'm'));
+    for (const invalid of ['', 'yes']) {
+      const bad = overlayPlan(fx, message.replace(`Hosted-Poppler: ${poppler}`, `Hosted-Poppler: ${invalid}`));
+      assert.equal(bad.status, 1);
+      assert.match(bad.stdout, /bad request.*Hosted-Poppler/);
+    }
+  });
+}
+
 test('success: the request is the filtered tree on main with the provenance trailers, the verdict is the result, and both refs go', async (t) => {
   const fx = fixture(t);
   const main = refsOf(fx)['refs/heads/main'];
@@ -171,6 +205,7 @@ test('success: the request is the filtered tree on main with the provenance trai
     'Hosted-Script': 'e2e:document-app',
     'Hosted-Slug': 'document-app',
     'Hosted-LibreOffice': 'false',
+    'Hosted-Poppler': 'false',
     'Hosted-Evidence': 'false',
     'Hosted-Deadline': trailers['Hosted-Deadline'],
   });

@@ -43,6 +43,7 @@ function plan(scenarioEnv) {
         LINUX_E2E: '',
         POOL_E2E: '',
         LIBREOFFICE_E2E: '',
+        POPPLER_E2E: '',
         LIVE_E2E: '',
         LIVE_GUARD_E2E: '',
         MEASURED_E2E: '',
@@ -299,7 +300,7 @@ const placement = (outputs) => Object.fromEntries(JSON.parse(outputs.e2e).map((e
 // class-1 set, only when a run names them); no group shares the host desktop.
 test("gate.yml's proven-VM groups run on Solo Mac, or the named VM lane alone; every other Mac job keeps today's labels and waits", () => {
   const workflow = readWorkflow();
-  const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E'];
+  const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'POPPLER_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E'];
   // The mini's own placement, as with no group on HOSTED_MAC_E2E; the list's waiters are pinned by their own test below.
   const own = { ...Object.fromEntries(names.map((name) => [name, workflowList(workflow, name)])), HOSTED_MAC_E2E: '' };
   assert.equal(own.MAC_SHARED_E2E, '');
@@ -530,7 +531,7 @@ test("a MAC_VM_E2E group not built through scripts/e2e-build.sh stays off the gu
 // The workflow's proven-VM groups build only the variants this run needs, even when a solo job lands on the host.
 test("gate.yml's proven-VM groups split into e2e_vm with just their build variants; Linux and class 1a alone build nothing", () => {
   const workflow = readWorkflow();
-  const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E'];
+  const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'POPPLER_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E'];
   // The mini's own placement, as with no group on HOSTED_MAC_E2E; the list's waiters are pinned by their own test below.
   const own = { ...Object.fromEntries(names.map((name) => [name, workflowList(workflow, name)])), HOSTED_MAC_E2E: '' };
   assert.equal(own.MAC_VM_E2E, 'document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations deliverables supervisor browser browser-comment browser-import agents c12 available design-systems browser-chrome composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct');
@@ -622,33 +623,39 @@ const waiter = ['self-hosted', 'ci-kit-pool', 'cpus-2'];
 const hostedNote = (groups) => ` Hosted Mac (SSFSKIM/maws-app, each through a waiter on the pool): ${groups.map((group) => `e2e:${group}`).join(', ')}.`;
 const ownLists = () => {
   const workflow = readWorkflow();
-  const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E'];
+  const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'POPPLER_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E'];
   return Object.fromEntries(names.map((name) => [name, workflowList(workflow, name)]));
 };
 
-test('setup skips LibreOffice only on GitHub-hosted Macs whose group does not need it, including the real hosted plan', () => {
+test('setup skips only unneeded LibreOffice and Poppler on GitHub-hosted Macs, including the real hosted plan', () => {
   const action = readFileSync(join(root, '.github/actions/setup/action.yml'), 'utf8');
   const setupStep = action.slice(action.indexOf('- uses: SSFSKIM/ci-kit/setup@v1')).split(/\n {4}- /)[0];
   const expression = /\n {8}skip: \$\{\{ (.+) \}\}/.exec(setupStep)?.[1] ?? "''";
   // These expression operators have the same behavior in JavaScript and Actions for the string inputs here.
-  const skip = Function('runner', 'inputs', `return (${expression});`);
+  const evaluate = Function('runner', 'inputs', 'format', `return (${expression});`);
+  const format = (template, ...args) => template.replace(/\{(\d+)\}/g, (_, index) => args[Number(index)]);
+  const skip = (runner, inputs) => evaluate(runner, inputs, format).trim().split(/\s+/).filter(Boolean);
   for (const os of ['macOS', 'Linux']) {
     for (const environment of ['github-hosted', 'self-hosted']) {
       for (const libreoffice of ['true', 'false', '']) {
-        const omitted = os === 'macOS' && environment === 'github-hosted' && libreoffice !== 'true';
-        assert.equal(skip({ os, environment }, { libreoffice }), omitted ? 'cask:libreoffice' : '', `${os}/${environment}/${libreoffice}`);
+        for (const poppler of ['true', 'false', '']) {
+          const hostedMac = os === 'macOS' && environment === 'github-hosted';
+          const omitted = [hostedMac && libreoffice !== 'true' && 'cask:libreoffice', hostedMac && poppler !== 'true' && 'brew:poppler'].filter(Boolean);
+          assert.deepEqual(skip({ os, environment }, { libreoffice, poppler }), omitted, `${os}/${environment}/${libreoffice}/${poppler}`);
+        }
       }
     }
   }
   // Non-group callers (packaged and macOS unit) omit this input; a fresh self-hosted Mac must still install the cask.
-  assert.equal(skip({ os: 'macOS', environment: 'self-hosted' }, {}), '');
+  assert.deepEqual(skip({ os: 'macOS', environment: 'self-hosted' }, {}), []);
   const { outputs } = plan({ ...ownLists(), GATE_RUNNER: 'pool', GATE_E2E_RUNNER: 'macos', HEAD_MESSAGE: 'ci-gate: test\n\nLane: hosted' });
   const hosted = JSON.parse(outputs.e2e_hosted);
   assert.deepEqual(hosted.filter((entry) => entry.libreoffice).map((entry) => entry.group).sort(), ['document', 'presentations']);
   assert.equal(hosted.find((entry) => entry.group === 'document-app').libreoffice, false);
+  assert.deepEqual(hosted.filter((entry) => entry.poppler).map((entry) => entry.group).sort(), ['dashboard', 'design', 'presentations']);
   for (const entry of hosted) {
-    assert.equal(skip({ os: 'macOS', environment: 'github-hosted' }, { libreoffice: String(entry.libreoffice) }),
-      ['document', 'presentations'].includes(entry.group) ? '' : 'cask:libreoffice', entry.group);
+    const omitted = [!['document', 'presentations'].includes(entry.group) && 'cask:libreoffice', !['dashboard', 'design', 'presentations'].includes(entry.group) && 'brew:poppler'].filter(Boolean);
+    assert.deepEqual(skip({ os: 'macOS', environment: 'github-hosted' }, { libreoffice: String(entry.libreoffice), poppler: String(entry.poppler) }), omitted, entry.group);
   }
 });
 
@@ -795,8 +802,8 @@ test('a hosted entry is in e2e and e2e_hosted, never in e2e_host, e2e_vm or e2e_
   const lists = { MAC_VM_E2E: 'document-app widgets', LIBREOFFICE_E2E: 'document-app' };
   const { outputs } = plan({ ...lists, HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:document-app,e2e:widgets\nRunner: macos\nClass1a: linux\nLane: hosted' });
   assert.deepEqual(JSON.parse(outputs.e2e), [
-    { group: 'document-app', script: 'e2e:document-app', slug: 'document-app', build: false, libreoffice: true, measured: false, hosted: true, runner: JSON.stringify(waiter), timeout: 100 },
-    { group: 'widgets', script: 'e2e:widgets', slug: 'widgets', build: false, libreoffice: false, measured: false, hosted: true, runner: JSON.stringify(waiter), timeout: 100 },
+    { group: 'document-app', script: 'e2e:document-app', slug: 'document-app', build: false, libreoffice: true, poppler: false, measured: false, hosted: true, runner: JSON.stringify(waiter), timeout: 100 },
+    { group: 'widgets', script: 'e2e:widgets', slug: 'widgets', build: false, libreoffice: false, poppler: false, measured: false, hosted: true, runner: JSON.stringify(waiter), timeout: 100 },
   ]);
   assert.equal(outputs.e2e_hosted, outputs.e2e);
   assert.deepEqual([outputs.e2e_host, outputs.e2e_vm, outputs.e2e_build], ['[]', '[]', '[]']);

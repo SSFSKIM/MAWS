@@ -96,6 +96,9 @@ env:
   POOL_E2E: desk-web
   # The groups that render documents through LibreOffice (P3-B's DOCX-to-PDF case, P3-C's render-and-compare).
   LIBREOFFICE_E2E: document presentations
+  # Poppler CLI users, derived from the specs and their imports by poppler-dependencies.test.mjs.
+  # Keep live/scale users here too: if their placement changes, they still exercise the same PDF path.
+  POPPLER_E2E: dashboard design design-live design-scale presentations
   # The paid live groups, each one spec that skips itself unless its run flag is `1` (MAWS_LIBRARY_LIVE for library-live,
   # MAWS_LIVE_DOCUMENT for document-live and document-provisional-live (P4-A2, the edit seen as it is written on the installed
   # engine), MAWS_LIVE for the rest (presentations-provisional-live among them: P4-A2 G2, a slide's publish seen as it is
@@ -589,6 +592,7 @@ jobs:
         with:
           e2e: 'true'
           libreoffice: ${{ matrix.libreoffice }}
+          poppler: ${{ matrix.poppler }}
       # A guest-eligible group's out/, e2e-build's artifact for its variant at this sha, into this job's temp directory,
       # the build cache its run below restores from.
       - if: matrix.variant
