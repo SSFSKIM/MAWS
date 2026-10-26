@@ -221,10 +221,16 @@ env:
   # 40316186658; :186 and :493 passed in all seven. Its wave-6 :186 red was the undo's: Chromium answers
   # clearDeviceMetricsOverride before the view's restored size reaches the page, and the next attach now waits for it.
   # :493's earlier red has no cause in the logs; its debt row stays open.
+  # terminal, c7, browser and transcript (the architect's ruling, after #172, gate-offload Decision Log 118 at 5529ac3bb):
+  # #172 fixed what the hosted Macs exposed, three product races (composer focus after a send, the browser cover's
+  # refused snapshot, the sidebar hover card's open/close race) and terminal's test comparing two sizes. At head
+  # d894ad360 (tree 5a096f4d1) the three `Lane: hosted` runs 40331386561, 40331422403 and 40331460850 (waiters on EC2
+  # pool boxes) and the mini's run 40331504505 each gave terminal 15 passed, c7 35, browser 11 and transcript 37. That
+  # leaves on the mini only default, the secret groups and browser-comment.
   HOSTED_MAC_E2E: >-
     document-app browser-chrome available artifacts settings connectors connectors-direct delivery to-human widgets side
     supervisor c12 browser-import document code scm agents library deliverables presentations dashboard design
-    design-systems tools panel browser-cua
+    design-systems tools panel browser-cua terminal c7 browser transcript
   # The groups that need a credential or the login keychain's custody, so never go to a hosted Mac, whatever the lane
   # (maws-app holds no secret): connectors-oauth, and discover, whose custody conditions (a), (b) and (c) stand.
   MAC_SECRET_E2E: connectors-oauth discover

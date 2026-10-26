@@ -100,7 +100,7 @@ function scheduledPoolDemand(outputs) {
 
 const scenarios = [
   ['class 1a on the pool counts every unit shard', 'Gates: static,unit,probes\nClass1a: pool', '16x1 8x4 2x1'],
-  ['the whole macOS matrix counts pool e2e, each guest build variant and a waiter per HOSTED_MAC_E2E group, not Mac jobs', 'Runner: macos', '16x1 8x4 4x3 2x28'],
+  ['the whole macOS matrix counts pool e2e, each guest build variant and a waiter per HOSTED_MAC_E2E group, not Mac jobs', 'Runner: macos', '16x1 8x4 4x3 2x32'],
   ['a Mac-only run asks for no pool boxes', 'Gates: static,unit,unit:darwin,probes,packaged\nClass1a: macos\nRunner: macos', 'none'],
   ['affected selection counts the single related-unit job', 'Gates: static,unit,probes\nSelection: affected\nAffected-Count: 1\nAffected: M\tsrc/shared/pool-demand.ts', '16x1 8x1 2x1'],
   ['an affected fallback still counts all unit shards', 'Gates: unit\nSelection: affected\nAffected-Count: 1\nAffected: M\tpackage.json', '8x4'],
@@ -237,7 +237,7 @@ esac
 test('ci-gate pushes exactly one Pool-Demand line from the same trailers and push-time variables', () => {
   for (const [args, expected, affected] of [
     [['--gates', 'static,unit,probes'], '16x1 8x4 2x1', false],
-    [['--gates', 'all', '--runner', 'macos'], '16x1 8x4 4x3 2x28', false],
+    [['--gates', 'all', '--runner', 'macos'], '16x1 8x4 4x3 2x32', false],
     [['--gates', 'unit', '--class1a', 'macos'], 'none', false],
     [['--gates', 'static,unit,probes', '--affected'], '16x1 8x1 2x1', true],
   ]) {
