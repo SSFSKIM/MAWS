@@ -131,6 +131,16 @@ allows today.
   F3). Paused (2026-10-24; Decision Log, convergence with MAWS).
 - [-] M6 — the attach key driver for `--bg` seats: out of this run (F2, the owner's
   choice, 2026-10-22; Decision Log, entry 6).
+- [x] (2026-10-26) The owner's calls on remote-architecture's build request: the
+  machine side of path A's control surface resumes now; the web halves stay paused until
+  the owner says MAWS's UX is ready; F1 stands (Decision Log, "Path A's machine side
+  resumes").
+- [ ] The machine-side wave (Plan of Work, "The machine-side wave"): MW1 reads, MW2
+  ops, MW3 scoped allows, MW4 one agent stopped or told, MW5 image and PDF intake. The machine
+  halves of M2–M4, cut and widened per that entry.
+- [x] (2026-10-26) Wave 2, measured by remote-architecture on 2.1.310 in isolated
+  configs behind a recording stub, zero inference: media intake works (MW5); context
+  truncation is blocked on 2.1.310 (Decision Log, "Wave 2 and the lane map").
 - [ ] The latency table on #52 against the baseline, and the acceptance walk on both
   Macs.
 
@@ -704,6 +714,8 @@ directory), that panel is the second confirmation; the readback itself stays the
 
 ### 7. Requests: scopes, "allow and switch", plan approval, and the mode
 
+*2026-10-26: "allow and switch", a plan approved into a chosen mode, and the mode reading below are cut with plan-mode controls, and a scoped allow takes only an `addRules` or `addDirectories` suggestion (Decision Log, "Path A's machine side resumes"; MW3). The text stays as the record of what was designed and measured.*
+
 S1 measured what an allow from a hook can carry: `addRules`, `addDirectories` and
 `setMode` with destination `session` take effect at once and write no file; `addRules`
 with `localSettings` writes the project's `.claude/settings.local.json`; an ExitPlanMode
@@ -728,7 +740,8 @@ hash differs, and applies the one transformation MAWS's scope radio applies
 (`request-card/scope.ts`): the destination may be replaced by `session`, or kept when
 it is the suggestion's own `localSettings`; every other destination is refused
 `bad-shape` (§11). The decision the bridge hands the engine is `{behavior: "allow",
-updatedInput, updatedPermissions: [that suggestion with that destination]}`. The web
+updatedPermissions: [that suggestion with that destination]}`, with no `updatedInput`
+for an ordinary tool (2026-10-26: Interfaces, the decision POST). The web
 ports the scope radio cut to those two scopes: *Allow for this session* (the first
 `addRules` suggestion with destination `session`; when the engine suggested no rule,
 no session scope is offered — the desk never constructs a rule) and *Always allow … in
@@ -950,7 +963,7 @@ and the widened `decide` are refused `read-only` before execution (after the cod
 name, the machine, project and session, the ledger and the age, in DX6's order), and
 the daemon never trusts a class the web asserts: the bridge's route table decides what a
 `command` runs. `fork` runs under the spawn's ceiling (`admit_spawn`); a `setMode` on a
-decision is checked against the same ceiling; `cd` is limited to the project's known
+decision would have been checked against the same ceiling (cut 2026-10-26: MW3 refuses it); `cd` is limited to the project's known
 checkouts as spawn is, checked in the daemon.
 
 **A scoped allow is bound to what was shown.** The web sends an index and the hash of the
@@ -1614,6 +1627,186 @@ or `4` on a prompt the hooks never saw, the rewind picker by position, Esc on a 
 offered only where the capability says `attach`. The spec gains its design and
 milestone then, with a dated line.
 
+### The machine-side wave (2026-10-26): MW1–MW5
+
+The machine halves of M2–M4, cut and widened by the Decision Log's "Path A's machine
+side resumes". Each MW names the text above it builds from and what differs. The
+web halves of M2–M4 stay paused, and so does all of M5: wave 2's spikes decide media
+intake.
+
+**Binding the wave** (on top of "Binding every milestone", except where it says web):
+
+- Two halves per MW. The machine half is in doperpowers: the bridge mod, its child
+  `sminos_bridge.py`, and the daemon's `sminos_rpc.py`, `sminos_plane.py` and
+  `sminos_requests.py`, with one sminos minor bump per MW. The hub half is in MAWS:
+  `apps/desk-hub/src/protocol/` types, `RPC_NAMES`, what `objects/project.ts` admits,
+  and the fake machine producing every new field. Nothing changes in `apps/desk-web`.
+  §13's order holds: each MW's MAWS PR merges and the orchestrator deploys the hub
+  before the doperpowers PR rolls out. A read kind needs no hub change: DX3 relays any
+  `what`.
+- Proof without a web. Each half has its unit tests and its gates. Each MW also has a
+  live check on the engine installed on the macbook, in an isolated session: its own
+  `HOME` and `SMINOS_HOME`, never the owner's sessions, daemon or `~/.claude/sminos`.
+  The live check drives the bridge child's `/command` directly, and where a model reply
+  is needed it uses a recording stub endpoint behind `ANTHROPIC_BASE_URL`, so no
+  inference is spent. remote-architecture's stub from wave 2 may be reused. The
+  acceptance items (A15–A28) run when the web halves land.
+- Path-neutral shapes. Interfaces carries each shape, with names taken from
+  remote-architecture's lane map, so a path-B daemon can produce the same result from
+  the SDK's control requests. Where lane A cannot fill a field the shape still has it
+  (the MCP read's `exact`), and lane A says so rather than leaving it out.
+
+**MW1 — reads.** Builds from M2's machine half, its reads only.
+
+- The bridge serves four new `read` kinds and advertises them in
+  `capabilities.reads`:
+  - `usage {breakdown?}`: `$.session.usage`, the summary unless `full` is asked for.
+    The answer names which one it is, since `full` calls the token-count API.
+  - `config`: `$.config.list()`, each row as the engine's `ConfigRow`, with
+    `readOnly: true` (F1). A row whose `provider.plugin` is not `"engine"` and whose
+    kind is `text` goes without its `value`, because a plugin's `userConfig` field may
+    hold a credential. The tests feed engine-shaped rows (the 2.1.310 types).
+  - `settings`: §11's cut.
+  - `mcp`: `$.tool.list()` grouped by server, `exact: false`. The plane adds the
+    `disabled` servers from `.claude.json`'s one key.
+  - `settings` and `usage` carry the lane map's `permissionsExact: false` and
+    `breakdownDetail`.
+- `capabilities` gains `controls`, the lane map's per-control map (Interfaces). It
+  starts with every key: those this wave builds turn `available` in the MW that builds
+  them, and the rest are unavailable with their reason.
+- The live check is the inventory's §7 item 6, the probe of settings, usage and MCP
+  reads. It covers:
+  - the config rows and their locks, and every engine `text` row's value, which must not
+    be a credential (cut it as plugin `text` rows are cut if one is);
+  - summary against full, and when the rate limits are present;
+  - a server name with a space, through the `mcp` read.
+- Review: `medium`.
+
+**MW2 — ops.** Builds from M2's machine half, its ops, and §9's side question.
+
+- `btw`, as §9 and M2 have it: the framing prefix, the 64 KiB bound, `started` at once,
+  then the `btw` events relayed as `op`. That is the bridge op, the child's `rpc_of`,
+  the daemon's RPC with its `WANTED`, and the hub's name and types.
+- `compact` gains `instructions`, up to 4,096 characters: `sminos_rpc.py`'s `shape()`
+  and `plan()`, and the hub type. The bridge already takes it.
+- `/mcp`'s grammar. Measure on the installed engine `enable` and `disable` with no
+  target and with `all`, and `reconnect` of a server whose name has a space. Widen the
+  route row's forms to what was measured. A form that was not measured stays refused.
+  How the table records the engine it was measured on follows the table's own
+  convention (`routes_check.py`, `bridge-routes.tsx`).
+- Review: `medium`.
+
+**MW3 — scoped allows.** Builds from M3's machine half, less the mode.
+
+- `raised` gains `suggestions` under two rules, both in Interfaces:
+  - **Only what this module saw.** The engine's `permission_suggestions` are made
+    after every `tool.call` hook beneath the bridge, where a secrets guard restores
+    its handles to the values, and a Bash suggestion can carry the whole command as
+    its `ruleContent`. So a request carries suggestions only when `claimCheck`
+    matched the engine's `tool_input` exactly to the call this module saw, which
+    means nothing beneath restored anything. Otherwise it is raised without them. A
+    test raises a call whose input a stand-in guard restored, and checks that no
+    restored value reaches `raised` or a resync.
+  - **One bound on both sides.** At most 8 suggestions, each at most 2,048 bytes as
+    canonical UTF-8 JSON. A list that breaks either bound is left out whole, and the
+    request is still raised. The hub admits exactly this bound, since a `raised` it
+    refuses refuses the request with it, and one bad entry refuses the whole
+    pending-set refresh. Both sides test the boundary. The hub also tests that a
+    pending set still refreshes when a request carries no suggestions.
+- The decision POST admits `updatedPermissions`. `engineDecision` keeps today's input
+  rule exactly and adds `updatedPermissions` to the allow it already builds:
+  - a question carries its `rawInput` with the answers;
+  - a plan carries its whole `rawInput`;
+  - every other tool's allow carries no `updatedInput`, since an input, even the call's
+    own, makes the engine check the call again and ask again (`bridge-requests.tsx`).
+  The live check covers an ordinary allow carrying `updatedPermissions` and no input,
+  on a call an ask rule put to the dialog: the rule must be added and the call must
+  run.
+- The daemon checks `decide.scope` as §7 has it, with these limits:
+  - only an `addRules` or `addDirectories` suggestion. `setMode`, `replaceRules`,
+    `removeRules` and `removeDirectories` are refused `bad-shape`;
+  - the destination is `session`, or `localSettings` when that is the suggestion's own.
+- Not built:
+  - `decide.mode`, the `mode` event and its pass-through hooks, and `presence.mode`;
+  - a deny that also stops the turn (the engine's `interrupt: true`). `decide` answers
+    when the decision is queued, so it has no way to report a Bash the abort left
+    running. The web, when its half lands, sends a deny and then the existing
+    `interrupt` RPC, whose result already lists what was stopped and what still runs.
+- The hub admits `Raised.suggestions?` in `raisedShapeError` under the bound above,
+  and its types gain `RpcArgs.decide.scope?`.
+- Review: `high`. Rules are written into the checkout's local settings.
+
+**MW4 — one agent stopped or told.** M4's increment (a) as written:
+
+- `stop-agent` and `tell` in the bridge, the daemon and the hub, with §9's note row
+  telling the parent not to redo the stopped agent's work. `stop-agent` takes any id or
+  name without a control character (a name may hold a space), and answers with the
+  spelling asked and the id it resolved;
+- the daemon's new `unknown-agent` code.
+
+Not built: the launched workflows held as running, which served increment (c)'s
+`/background` condition, still paused. Review: `medium`.
+
+**MW5 — image and PDF intake.** New, from wave 2's measurement
+(`~/claude-code-bundle/2.1.300/notes/media-intake-spike.md`, 2.1.310, zero inference).
+It replaces M5's `attach`; M5's design (§10, S9: saved in the working directory, the
+model told to read it) stays as the fallback. A main-loop `turn.step` hook that does
+not call `next` and streams `text`, then `tool` and `input` chunks for a native Read,
+then `stop` with `stopReason: "tool_use"`, makes the engine run that Read. The next
+request carries the file as an `image` block, or a `document` block for a PDF read
+without `pages`. A returned `toolUses` with no streamed chunks runs nothing.
+
+- **The daemon saves.** The `media` RPC (DX6) is checked: names, types against the
+  bytes' signature, at most 4 attachments, `text` refused. The daemon writes each file
+  to `<cwd>/.claude/desk-uploads/<session>/<nonce>-<name>` (files 0600, directories
+  0700), with §10's `.git/info/exclude` line and sweep. It answers
+  `{queued, id, intake: "native-read", paths}`, then posts the bridge `media` op.
+  `saved` is that answer.
+- **The bridge claims, then streams.** Its upload state lives in `$.state`, scoped to
+  the session, as `sminos.ask`'s does, so a module reload neither loses an upload nor
+  replays one. Each attachment is pending, claimed, read, sent, aborted or failed. At
+  a main-loop `turn.step` with an attachment pending, the hook:
+  1. claims one attachment, recording its generated tool-use id, before it yields
+     anything;
+  2. streams the prelude `[sminos bridge] The person attached <name> from the desk:
+     this Read is the bridge's, not your choice.` That is the disclosure the TUI shows
+     and the model reads, since the synthetic rows are model-shaped;
+  3. streams that one Read, with `file_path` the absolute path and no `pages`.
+  The step after it calls `next` when nothing is pending. Sub-agent loops are never
+  touched. A tool result carrying the generated id makes the attachment `read`, and the
+  next main-loop step that calls `next` makes it `sent`. The bridge emits each change
+  as DX5 `media`.
+- **Wakes.** Intake happens only at a step boundary. Two cases need a turn to start:
+  - The bridge accepts uploads while the session is idle. If no turn starts within 2 s,
+    it submits one wake. The 2 s gives the person's own Send, which usually follows,
+    the chance to start that turn instead.
+  - A turn ends with an attachment still pending, because its last request ended with
+    `end_turn`. The bridge submits one wake.
+  The wake is `[sminos bridge]` plus a line naming the attachments, through
+  `prompt.submit`, as the bridge's own wakes are. At most one wake is owed at a time.
+- **Esc.** An Esc during the synthetic step leaves the claimed attachment `aborted`. It
+  is never retried, since the person stopped it. After an Esc the engine refuses the
+  wake (`stopped`), and an unclaimed attachment waits for the person's next turn. The
+  bridge never reaches past the latch through the calls it leaves open (`tool.call`,
+  `session.append`).
+- **Permission.** Inside the working directory a Read in default mode asks nothing.
+  The live check confirms this for `.claude/desk-uploads/`. An ask rule that still
+  raises a request goes to the desk like any other; the bridge never allows its own
+  Read.
+- **The hub.** `media` joins `RPC_NAMES` and the types, and `op` admits `media`.
+  `controls.media` turns available.
+- **The live check** re-runs the spike's cases against the built bridge, behind a
+  recording stub:
+  - an idle PNG, and a whole PDF;
+  - an upload during a running Bash;
+  - an `end_turn` in flight followed by the wake;
+  - Esc mid-step: aborted, not retried;
+  - a duplicate id;
+  - a reload with an attachment pending, and one with an attachment claimed.
+  Large files, malformed PDFs and real models are not covered (the spike's own limits).
+- Review: `high`. Bytes from the hub's side are written onto the machine, and the
+  bridge makes tool calls the model did not choose.
+
 ## Concrete Steps
 
 Working directories: doperpowers at its clone (`sminos/` paths below are the plugin's);
@@ -1686,12 +1879,22 @@ wire and absent from an older producer; a consumer treats absence as "the older 
   "engine": "2.1.307",
   "ops": ["ping","steer","interrupt","stop","model","compact","deliver","answer","read","command"],
   "reads": ["status"],
-  "routes": {"measured": "2.1.307"}
+  "routes": {"measured": "2.1.307"},
+  "controls": {"read.usage": {"available": true}, "decide.interrupt": {"available": false, "reason": "…"}}
 },
 "mode": {"mode": "default", "at": 1760000000000}
 ```
-`sminos` is the loaded mod's own plugin version. `ops` and `reads` grow by milestone (M1
-adds read `catalog`; M2 op `btw`, reads `usage`, `mcp`, `settings`; M4 ops
+`controls` (MW1 on, 2026-10-26) is the lane map's per-control capability, keyed by its
+names (`ControlCapabilities` in remote-architecture's `lane-b-control-map.md`): `read.usage`,
+`read.config`, `read.settings`, `read.mcp`, `btw`, `compact`, `model`, `mcp.enable`,
+`mcp.disable`, `mcp.reconnect`, `decide`, `decide.scope`, `decide.interrupt`,
+`decide.addDirectory`, `stop-agent`, `tell`, `media`, `forget`, `rewind-files`,
+`elicitation.answer`, each `{available: boolean, reason?: string}`; a missing key is
+unavailable. The bridge sends the whole map, its unavailable keys with their reasons
+(lane A: `decide.interrupt`, `forget`, `rewind-files`, `elicitation.answer`), so a path-B
+daemon fills the same keys and the web greys a control by its key, never by lane. `ops`
+and `reads` stay as M0 wrote them. `sminos` is the loaded mod's own plugin version. `ops` and `reads` grow by milestone (M1
+adds read `catalog`; M2 op `btw`, reads `usage`, `mcp`, `settings`, and MW1 `config`; M4 ops
 `stop-agent`, `tell`; M5 nothing of the bridge's). `mode` (M3) is the bridge's current
 reading — its own decision's mode, else the latest classic hook input's — with `at`,
 when it was read (epoch ms, the machine's clock); absent before M3 or before any
@@ -1707,7 +1910,8 @@ to `POST /command?wait=` and the answer it keeps under an RPC nonce carry `code`
 | `read` | `{what, args?}` | `{ok: true, result}` per kind below; `{ok: false, error}` for a kind it does not serve (`no read <what>`) or a failed call |
 | `command` | `{name, args?, from?, rpc?}` | at once: `{ok: true, result: {queued: true, route: <class>, id}}`; refused: `{ok: false, error, code}` with `code` one of `unknown-builtin`, `panel`, `routed`, `follow`, `drop`, `local`, `bad-args`, `disabled`, `self`, `stopped`, `turn-unknown` |
 | `btw` (M2) | `{prompt, rpc?}` | `{ok: true, result: {started: true, id}}`; `{ok: false, error}` (empty prompt; `nothing-to-fork` known at once) |
-| `stop-agent` (M4) | `{agentId, from?}` | `{ok: true, result: {agentId}}`; `{ok: false, error}` (not a running agent by id or name; TaskStop's error) |
+| `stop-agent` (M4, MW4) | `{agentId, from?}` | `{ok: true, result: {agentId, accepted: true, resolvedAgentId?}}` (`agentId` as asked; `resolvedAgentId` the id `$.agent.list()` resolved a name to); `{ok: false, error}` (not a running agent by id or name; TaskStop's error) |
+| `media` (MW5) | `{id, paths: string[]}` (absolute, each inside the session's upload directory) | `{ok: true, result: {queued: true, id}}`, or `{duplicate: true, id}` for an id already held; `{ok: false, error}` (a path outside the directory, a missing file) |
 | `tell` (M4) | `{agentId, text}` | `{ok: true, result: {sent: true}}`; `{ok: false, error}` |
 
 The child keeps `rpc_of[id]` for an op answered `queued` or `started` until the `run` or
@@ -1720,10 +1924,21 @@ Read results:
 status:   {version: {version, base?, builtAt?}, model, cwd, root, repo: {remote?, branch?} | null,   // remote without userinfo
            surfaces: string[], override: {model, effort} | null, mode?: {mode: string, at: number}}
 catalog:  Catalog                                                   // below
-usage:    SessionUsage & {context: {breakdown?: ContextBreakdown}}  // the engine's shape, `$.session.usage(args)`
-mcp:      {servers: [{name, status: "connected" | "disabled" | "unknown", tools: number}]}
-          // the bridge answers connected servers with counts; the plane adds `disabled` from `.claude.json`
-settings: {permissions: {allow: Rule[], ask: Rule[], deny: Rule[], additionalDirectories: string[], defaultMode: string | null,
+usage:    SessionUsage & {context: {breakdown?: ContextBreakdown}, breakdownDetail: "summary" | "full"}
+          // MW1: the engine's shape, `$.session.usage(args)`; args `{breakdown?}`, summary unless `full` is asked;
+          // the lane map's optional `rateLimitsAvailable?`, `sessionTotals?` are lane B's; `startedAt?` lane A's
+mcp:      {exact: boolean, servers: [{name, status: "connected" | "disabled" | "pending" | "failed" | "needs-auth" | "unknown",
+                                      tools?: number, source?, scope?, transport?, serverInfo?, error?, errorCode?}]}
+          // lane A fills name, status ∈ {connected, disabled, unknown} and tools; the rest is lane B's exact snapshot
+          // the bridge answers connected servers with counts; the plane adds `disabled` from `.claude.json`;
+          // `exact` false in lane A, which infers servers from tools (MW1); a lane with a live status read says true
+config:   {rows: ConfigRow[], readOnly: true}
+          // MW1: `$.config.list()` in its order, each row the engine's ConfigRow (key, label, description?, kind,
+          // value, options?, provider: Origin, isLocked) except that a row whose provider.plugin is not "engine" and
+          // whose kind is "text" has no `value`; `isLocked` is the engine's policy lock; `readOnly` is the desk's (F1)
+settings: {permissionsExact: boolean,                             // MW1: false in lane A, a settings-file projection;
+                                                                   // lane B's `livePermissions?` is its own
+           permissions: {allow: Rule[], ask: Rule[], deny: Rule[], additionalDirectories: string[], defaultMode: string | null,
                          bySource: {[source: "user" | "project" | "local" | "policy" | "cliArg"]: {allow: Rule[], ask: Rule[], deny: Rule[]}}},
            hooks: {[event: string]: [{matcher: string | null, commands: number}]}}       // never a command's text, never `env`
 Rule   =  {toolName: string, ruleContent?: string}                 // the engine's PermissionRuleValue
@@ -1738,12 +1953,13 @@ A read error on the sub (DX4 below) is one of `no-bridge`, `unsupported`, `timeo
 | --- | --- |
 | `run` / `start` | `id, name, args, t`, and for a `reload-plugins` run `child: [inode, pid]`, the child the run left from, added by that child (Decision Log, entry 9) — the lifecycle of a `command` op (the child's own `command {id, op}` event, DX5 Events, is every relayed op's ingress and is unchanged) |
 | `run` / `end` | `id, name, args, settled: {ok: true, text?, context?} \| {ok: false, error}, readback: {how: "text" \| "row" \| "effect" \| "none", text?, uuid?}, t`; `rpc?` added by the child; a replaced `reload-plugins` module cannot emit it (the daemon finishes by effect); an unchanged module kept loaded emits the returned text (Decision 11) |
-| `btw` / `start`, `end` (M2) | `id`; on end `text` (≤ 64 KiB), `usage: {input, output, cacheRead?, cacheWrite?}` or `reason`; `rpc?` added by the child |
+| `btw` / `start`, `end` (M2) | `id`; on end `text` (≤ 64 KiB), `usage: {input, output, cacheRead?, cacheWrite?}` or `reason`; `rpc?` added by the child. The lane map's `text: null`, `synthetic?` and `refusalFallback?` are lane B's; lane A's `text` is a string when present |
+| `media` (MW5) | `{id, state: "saved" \| "read" \| "sent" \| "aborted" \| "failed", path, toolUseId?, reason?}` per attachment, as it changes: `read` when its Read's result settled, `sent` when the next main-loop request carried it; `aborted` (an Esc during its step: never retried) and `failed` end it; `rpc?` added by the child |
 | `catalog` (M1) | `Catalog`: `{fingerprint, skills?: string[], commands: [{name, description, source, plugin?, route: Route, withArgs?: Route}], models: {options: string[], aliases: {[family]: string \| null}}, measured: "2.1.307"}` |
 | `mode` (M3) | `{mode, at}` — the bridge's current reading when it changes: its own decision's mode at once, else the latest classic hook input's `permission_mode`; `at` epoch ms on the machine's clock, when it was read |
 | `continuing` (M4) | `{command: "background", cwd, t}` — emitted just before a `follow` run that leaves the process |
 | `session` / `start` (M4) | gains `previous?: {session, reason: "clear" \| "resume" \| "branch" \| "unknown"}` |
-| `raised` (M3) | gains `suggestions?: PermissionUpdate[]` (at most 8; each rule string at most 512 characters; the list is the engine's `permission_suggestions` verbatim within those bounds, or absent) |
+| `raised` (M3, MW3) | gains `suggestions?: PermissionUpdate[]`: the engine's `permission_suggestions` verbatim, at most 8, each at most 2,048 bytes as canonical UTF-8 JSON; absent when the list breaks a bound or when the engine's `tool_input` is not exactly the call this module saw (a guard beneath restored something) |
 
 The child's snapshot line gains `capabilities`, `mode` and `catalog` (the latest of each).
 A catalog command's `route` is its bare form; for non-empty trimmed arguments the
@@ -1759,11 +1975,14 @@ fingerprint. This is the engine's model-context listing, not a complete filesyst
 skill inventory: a `disable-model-invocation: true` skill is absent and keeps the
 previous provenance grouping. No context text or token counts cross the wire.
 
-**`POST /requests/<request>/decision`** (M3) admits `updatedPermissions?:
+**`POST /requests/<request>/decision`** (M3, MW3) admits `updatedPermissions?:
 PermissionUpdate[]` (at most 8) on a permission; refuses it on a question (400). The
-decision the bridge hands the engine for a permission is `{behavior: "allow",
-updatedInput: <the request's input>, updatedPermissions?}` (the `updatedInput` from
-sminos 1.6.3).
+decision the bridge hands the engine for a permission is `engineDecision`'s as it
+stands, with `updatedPermissions` added to the allow: a plan's allow carries its whole
+`rawInput`, and every other permission's allow carries no `updatedInput` (an input makes
+the engine check the call again and ask again; `bridge-requests.tsx`). *2026-10-26: this
+replaces "`updatedInput: <the request's input>`" written at M3's design, which sminos
+later narrowed to plans.*
 
 ### The route table (owner: doperpowers `sminos/tests/routes-2.1.307.json`, loaded by `bridge-commands.tsx`; vendored to MAWS `apps/desk-hub/fake-machine/dx4/`)
 
@@ -1841,7 +2060,8 @@ MachinePresence = { online; policy; checkouts; desk?: { sminos: string; rpcs: st
 read:    { id: string; what: string; result?: JsonValue; error?: { code: 'no-bridge' | 'unsupported' | 'timeout' | 'busy' | 'failed'; message: string } }
 catalog: Catalog                                                            // M1; main subs only; also `snapshot.catalog?`
 // session-wide (sub and n null), relayed unread:
-op:      { rpc: string | null; op: 'command' | 'btw' | 'stop-agent' | 'tell'; phase: 'start' | 'end'; id: string; [field: string]: JsonValue }
+op:      { rpc: string | null; op: 'command' | 'btw' | 'stop-agent' | 'tell' | 'media'; phase: 'start' | 'end'; id: string; [field: string]: JsonValue }
+          // MW5: a `media` op's start is `saved`, its end the last attachment's `sent`, `aborted` or `failed`; each state change rides it
 // `end` reasons gain:
 end:     { reason: ... | 'continued'; to?: string; confirmed?: boolean }      // M4
 ```
@@ -1870,18 +2090,19 @@ malformed one is `bad-shape`.
 | `command` | `{session, name, args?}` — `name` 1–128 characters without control characters, exactly as `$.command.list()` spells it; `args` text ≤ 4,096 | `{queued: true, route, id}`; the outcome follows as `op`; a bridge refusal is `failed` with the message `<code>: <reason>` (the bridge's code, a colon, its reason) | M0 |
 | `compact` | gains `instructions?` (text ≤ 4,096) | unchanged | M2 |
 | `btw` | `{session, prompt}` (≤ 8,192) | `{started: true, id}`; the answer follows as `op` | M2 |
-| `decide` | gains `scope?: {suggestion: number, sha256: string, destination: 'session' \| 'localSettings'}` and `mode?: PermissionMode`; at most one of the two, on an allow only | unchanged | M3 |
-| `stop-agent` | `{session, agentId}` (`[A-Za-z0-9_-]{1,128}`, an id or a name) | `{agentId}` | M4 |
+| `decide` | gains `scope?: {suggestion: number, sha256: string, destination: 'session' \| 'localSettings'}` on an allow, the suggestion an `addRules` or `addDirectories` one (MW3). `mode?` is cut with plan-mode controls (2026-10-26) | unchanged | M3, MW3 |
+| `stop-agent` | `{session, agentId}` (an id or a name, 1–128 characters without a control character: an agent's name may hold a space) | `{agentId, accepted: true, resolvedAgentId?}` | M4, MW4 |
 | `tell` | `{session, agentId, text}` | `{sent: true}` | M4 |
 | `fork` | `{session, brief?, worktree?, model?, effort?}` | `{session, alias}` | M4 |
-| `attach` | `{session, name, type, bytes}` (base64; the RPC's 1 MiB bound; `name` `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`) | `{path}` (relative to the working directory) | M5 |
+| `attach` | superseded by `media` (2026-10-26); M5's fallback if the synthetic Read stops working | — | M5 |
+| `media` | `{session, attachments: [{name, mediaType, data}], delivery: "queued-turn"}`: 1–4 attachments, `name` `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`, `mediaType` one of `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `application/pdf` and matching the bytes' signature, `data` base64, all within the RPC's 1 MiB (the hub's frame bound, not an engine limit); lane A refuses `text` (`bad-shape`: the words go as a Send, the browser's sealed `human` event) | `{queued: true, id, intake: "native-read", paths}` (`paths` relative to the working directory); the states follow as `op` | MW5 |
 
 New error codes: `unknown-agent` (M4). Every new RPC is X class: `read-only` before
 execution; `unsupported` without a bridge (`fork` and `attach` need none: the daemon
 runs them). A `decide` with `scope` is refused `not-pending` (*the suggestions changed*)
 when the hash does not match the suggestion at the index in the request the bridge
 still holds, `bad-shape` for a destination outside the two or a `localSettings` the
-suggestion did not offer, `above-ceiling` for a `setMode` above the machine's.
+suggestion did not offer or a suggestion of any type but `addRules` and `addDirectories` (MW3; `setMode` is cut with plan-mode controls, so `above-ceiling` has no `decide` case).
 
 ### The log (owner: doperpowers `sminos/skills/sminos/scripts/sminos.py`; read by the web's projection)
 
@@ -2813,6 +3034,104 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   be withheld at the machine, in what its daemon publishes to the hub, not merely
   hidden in the UI, so the sharing choice is enforced where data leaves the machine.
   Date/Author: 2026-10-24, the owner's direction, recorded by the desk orchestrator.
+
+- Decision: Path A's machine side resumes; the web halves stay paused. On 2026-10-24
+  the owner settled how terminal-started sessions are controlled (F7 of
+  remote-architecture's session-holder design,
+  `~/claude-code-bundle/2.1.300/notes/session-holder-design.ko.md`; "holder F7" here,
+  since this spec has its own F7). Such a session stays a plain interactive `claude`,
+  controlled remotely only through the bridge mod: no web terminal, no PTY holder, no
+  key injection, no migration to `claude -p`. The limit is accepted, and the mod side is
+  to be made as broad as the public mod API allows. Sessions that MAWS or the web opens
+  are path B, the holder design's, controlled through the SDK. That is the
+  architecture the convergence entry above waited on, for path A. remote-architecture's
+  build request (`~/claude-code-bundle/2.1.300/notes/desk-build-request-mod-surface.md`,
+  on its inventory `mod-control-surface.md`, read from 2.1.309) listed the work. The
+  owner answered on 2026-10-26: the machine side now; the web halves wait until the
+  owner says MAWS's UX is ready; F1 stands.
+  What is built, as the Plan of Work's machine-side wave:
+  - reads of usage (summary unless the full count is asked for), config rows (read
+    only), the settings cut of §11, and MCP servers as a partial view labelled partial;
+  - `btw`, compact with instructions, and `/mcp`'s whole grammar once measured;
+  - scoped allows (rule and directory suggestions, `session` or the suggestion's own
+    `localSettings`);
+  - stopping and telling one agent.
+  Already built, so not in the wave: a subagent's own transcript (DC6 M2's drill-in
+  over an `agentId`-scoped subscription, which the plane serves from the agent's JSONL
+  on disk, uncapped) and a deny with a message (DX6 `decide.message`, which the bridge
+  passes and the request card sends).
+  Cut:
+  - plan-mode controls, at the owner's word: the plan approved into a chosen mode, the
+    mode reading with its four pass-through hooks and its `mode` event, and bare `/plan`,
+    which stays `routed` and disabled. The plan approval sminos 1.6.3 ships stays as it
+    is.
+  - `setMode` suggestions. A hook's mode update sets the mode field without the engine's
+    native transition bookkeeping (the inventory's §3.3).
+  - a directory added outside a pending request. It needs a carrier request nobody has
+    measured.
+  - every config write, the default model among them (F1).
+  The shapes are written path-neutral, so path B's daemon can answer the same reads and
+  RPCs from the SDK's control requests: the field names come from remote-architecture's
+  lane map, the MCP read says whether its status is exact (lane A's never is), and §4's
+  per-session capability list is how the web will grey out what a lane lacks.
+  Rationale: holder F7 makes the bridge path A's only controller, so its machine side
+  is needed whatever the web becomes, and every item has a public mod API, most of them
+  already designed and measured here (S1–S3). Rejected: building the web panels now, by
+  the owner's answer (MAWS's UX is still moving); writing a new spec, when this one holds
+  the design, the spikes and the acceptance for the same controls.
+  Date/Author: 2026-10-26, the owner's answers, recorded by the desk orchestrator
+  (b4948247) from remote-architecture's build request.
+
+- 2026-10-26: The wave's buildability review (`doperpowers:adversarial-reviewer`)
+  changed four things before any build:
+  - Suggestions are published only when the engine's input is exactly the call the
+    bridge saw. The engine makes them after a secrets guard has restored its handles,
+    and a Bash rule can carry the whole command.
+  - Producer and hub share one byte bound on suggestions. Otherwise a list one side
+    admits and the other refuses would lose the whole request.
+  - `engineDecision` keeps sending no input on an ordinary allow. Interfaces had kept
+    M3's "`updatedInput` on every allow", which sminos had already narrowed because it
+    makes the engine ask again.
+  - The config read is normalized from the engine's real `ConfigRow`.
+  Deny-and-stop is cut: `decide` answers when the decision is queued, so it cannot
+  report a Bash left running. Rejected: a correlated outcome event for `decide`, which
+  is new protocol for what deny followed by the existing `interrupt` RPC already
+  reports.
+
+- Decision: Wave 2 and the lane map. remote-architecture's three notes, in
+  `~/claude-code-bundle/2.1.300/notes/` and MAWS PR #79 at `9104bcc15`, are
+  `media-intake-spike.md`, `truncation-spike.md` and `lane-b-control-map.md`.
+  - **Media builds, as MW5.** The synthetic native Read is measured end to end on
+    2.1.310: the media reaches the next request, a Read inside the working directory
+    asks nothing, and an Esc mid-step cancels it. It replaces M5's `attach`, whose
+    route needs the model to choose the Read and costs one more model response. That
+    route stays the fallback.
+  - **"Forget after this point" is not built.** The bridge's own direct
+    `$.session.compact` skips its own hook. A queued `/compact` does reach the hook, and
+    the live cut is then correct. But after `--resume` the kept assistant and thinking
+    blocks appear twice, and a cut inside a multi-block reply, or between a tool call
+    and its result, brings excluded content back. The cause is resume rejoining rows by
+    API `message.id` across the reminted UUIDs. Lane A advertises `forget` unavailable
+    with that reason. The fix needs Anthropic: an engine fix or a supported cut API.
+  - **The lane map's names are the shapes.** Interfaces now carries:
+    - `capabilities.controls`, the per-control map with reasons;
+    - the read results' `breakdownDetail`, `readOnly`, `permissionsExact`, MCP's
+      `exact` and its wider statuses;
+    - `stop-agent`'s name with a space and its `resolvedAgentId`;
+    - the `media` RPC.
+    Lane B's richer optional fields are named, and lane A leaves them out. What the
+    map found of lane B (`tell` a stub there, `compact` a queued command, `add_directory`
+    no local directory) changes nothing lane A builds.
+  - **Deferred to the web half:** the map's structured MCP mutation (`{action,
+    target}` with per-server results). Lane A keeps `/mcp` through `command`, which M1
+    built, and MW2 widens its grammar. The web's half writes lane A's adapter to the
+    shared op when it lands.
+  Rationale: each change rests on a measured result or on a lane-B difference read
+  from the code, and every new field is optional on the wire. Rejected: building forget
+  on the queued-`/compact` route with a "not after resume" warning. A session that is
+  resumed would then silently bring excluded content back.
+  Date/Author: 2026-10-26, the desk orchestrator, from remote-architecture's
+  measurements and map.
 
 ## Outcomes & Retrospective
 
