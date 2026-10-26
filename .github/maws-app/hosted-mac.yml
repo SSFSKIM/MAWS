@@ -11,7 +11,7 @@ name: hosted-mac
 on:
   push:
     branches: ['ci/hosted/**']
-  # The sweep, from main's copy of this file, and the warm-up of main's caches.
+  # The sweep, from main's copy of this file.
   schedule:
     - cron: '23 */6 * * *'
   workflow_dispatch:
@@ -190,30 +190,19 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           cutoff=$(($(date +%s) - 6 * 3600))
+          # The whole listing first: a listing that fails is a red sweep, never an empty green one.
+          refs=$(gh api --paginate "repos/$REPO/git/matching-refs/heads/ci/" --jq '.[] | "\(.ref) \(.object.sha)"') ||
+            { echo "::error title=hosted: sweep::could not list the ci/ refs of $REPO"; exit 1; }
           swept=0 kept=0
           while read -r ref sha; do
             [[ $ref == refs/heads/ci/hosted/* || $ref == refs/heads/ci/result/* ]] || continue
-            date=$(gh api "repos/$REPO/git/commits/$sha" --jq .committer.date)
-            if (($(date -d "$date" +%s) < cutoff)); then
+            committed=$(gh api "repos/$REPO/git/commits/$sha" --jq '.committer.date | fromdateiso8601')
+            if ((committed < cutoff)); then
               gh api -X DELETE "repos/$REPO/git/refs/${ref#refs/}" --silent
-              echo "swept $ref ($date)"
+              echo "swept $ref (committed $(($(date +%s) - committed)) s ago)"
               swept=$((swept + 1))
             else
               kept=$((kept + 1))
             fi
-          done < <(gh api --paginate "repos/$REPO/git/matching-refs/heads/ci/" --jq '.[] | "\(.ref) \(.object.sha)"')
+          done <<<"$refs"
           echo "hosted: sweep deleted $swept refs, kept $kept"
-
-  # main's caches (the pnpm store, Electron's download), which every request's run restores: a cache saved on a
-  # ci/hosted/ branch is that branch's alone. A hit restores and saves nothing.
-  warm:
-    if: github.event_name != 'push'
-    runs-on: macos-26
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-        with:
-          e2e: 'true'

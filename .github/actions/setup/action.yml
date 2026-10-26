@@ -1,10 +1,11 @@
 name: MAWS gate setup
 description: >-
   The shared setup of .github/workflows/gate.yml (docs/doperpowers/plans/2026-10-14-gate-offload.md §3.2), run after
-  the checkout: pnpm from packageManager, Node 22 and the frozen install. GitHub-hosted jobs (hosted Linux, and
-  maws-app's hosted Macs) cache the pnpm store and Electron's download by its version; the self-hosted runners (the
-  macOS runner, ci-kit's pool) rely on their own disks and take pnpm through corepack, never pnpm/action-setup.
-  On a GitHub-hosted Mac it first sets the display to 1920x1080 at 1x and prints the desktop's line.
+  the checkout: pnpm from packageManager, Node 22 and the frozen install. Hosted Linux jobs cache the pnpm store and
+  Electron's download by its version; the self-hosted runners (the macOS runner, ci-kit's pool) rely on their own disks
+  and take pnpm through corepack, never pnpm/action-setup. maws-app's hosted Macs cache nothing (a cache saved on a
+  ci/hosted/ branch is that branch's alone), and their setup first sets the display to 1920x1080 at 1x and prints the
+  desktop's line.
   Every lane applies .github/ci-kit.yml. On Linux, e2e jobs also lift Electron's sandbox restriction, and groups that
   render documents through LibreOffice install it separately.
 inputs:
@@ -42,7 +43,7 @@ runs:
     - uses: actions/setup-node@v7
       with:
         node-version: 22
-        cache: ${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}
+        cache: ${{ runner.environment == 'github-hosted' && runner.os == 'Linux' && 'pnpm' || '' }}
     # On a self-hosted runner (ci-kit's pool, Decision Log 35; the macOS runner, Decision Log 42) pnpm comes through
     # corepack at packageManager's version, so no job switches versions: on a pool box, whose pnpm store is shared
     # between jobs, pnpm/action-setup's self-update breaks from the box's second job on; on the Mac the switch (11.19.0
@@ -61,9 +62,9 @@ runs:
       run: echo "version=$(node -p "require('./package.json').devDependencies.electron")" >> "$GITHUB_OUTPUT"
     # The pool's caches are baked into its box and shared, so a restore there would unpack under other jobs.
     - uses: actions/cache@v6
-      if: runner.environment == 'github-hosted'
+      if: runner.environment == 'github-hosted' && runner.os == 'Linux'
       with:
-        path: ${{ runner.os == 'macOS' && '~/Library/Caches/electron' || '~/.cache/electron' }}
+        path: ~/.cache/electron
         key: electron-${{ runner.os }}-${{ runner.arch }}-${{ steps.electron.outputs.version }}
     - uses: SSFSKIM/ci-kit/setup@v1
       with:

@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import { Buffer } from 'node:buffer';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import process from 'node:process';
@@ -161,6 +161,117 @@ test('refuses an output directory that is not empty, and a commit without the ov
   const bare = run(gitDir, 'HEAD', scratch(t, 'maws-app-tree-out-'));
   assert.notEqual(bare.status, 0);
   assert.match(bare.stderr, /no overlay/);
+});
+
+const commitAll = (dir, message) => {
+  git(dir, 'add', '-A');
+  git(dir, '-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', message);
+  return git(dir, 'rev-parse', 'HEAD');
+};
+
+// A host directory outside the repository, with an address in a file, for the links below to point at.
+function hostDir(t) {
+  const outside = scratch(t, 'maws-app-tree-host-');
+  writeFileSync(join(outside, 'host.txt'), `a host file ${ADDRESSES[0]}\n`);
+  mkdirSync(join(outside, 'c12'));
+  writeFileSync(join(outside, 'c12/kept.txt'), `outside ${ADDRESSES[1]}\n`);
+  return outside;
+}
+
+test('a symlinked overlay file, or a symlink at a directory the filter enters, is refused before anything is written', (t) => {
+  const { dir, gitDir } = fixtureRepo(t);
+  const outside = hostDir(t);
+  rmSync(join(dir, '.github/maws-app/README.md'));
+  symlinkSync(join(outside, 'host.txt'), join(dir, '.github/maws-app/README.md'));
+  const linkedOverlay = commitAll(dir, 'overlay README a link to a host file');
+  const out = scratch(t, 'maws-app-tree-out-');
+  const refused = run(gitDir, linkedOverlay, out);
+  assert.equal(refused.status, 1, refused.stdout + refused.stderr);
+  assert.match(refused.stderr, /no overlay file \.github\/maws-app\/README\.md \(a regular file\)/);
+  assert.deepEqual(readdirSync(out), []);
+
+  git(dir, 'checkout', '-q', 'HEAD~1', '--', '.github/maws-app/README.md');
+  rmSync(join(dir, 'docs/doperpowers/evidence'), { recursive: true });
+  symlinkSync(outside, join(dir, 'docs/doperpowers/evidence'));
+  const linkedEvidence = commitAll(dir, 'the evidence a link to a host directory');
+  const refusedDir = run(gitDir, linkedEvidence, scratch(t, 'maws-app-tree-out-'));
+  assert.equal(refusedDir.status, 1, refusedDir.stdout + refusedDir.stderr);
+  assert.match(refusedDir.stderr, /a symlink at docs\/doperpowers\/evidence/);
+  assert.equal(readFileSync(join(outside, 'host.txt'), 'utf8'), `a host file ${ADDRESSES[0]}\n`);
+  assert.equal(readFileSync(join(outside, 'c12/kept.txt'), 'utf8'), `outside ${ADDRESSES[1]}\n`);
+});
+
+test('a symlink elsewhere in the tree is published as the link, and nothing reads or rewrites through it', (t) => {
+  const { dir, gitDir } = fixtureRepo(t);
+  const outside = hostDir(t);
+  mkdirSync(join(dir, 'links'));
+  symlinkSync(join(outside, 'host.txt'), join(dir, 'links/host-file'));
+  symlinkSync(join(outside, 'c12'), join(dir, 'links/host-dir'));
+  const sha = commitAll(dir, 'links out of the tree');
+  const out = exported(gitDir, sha, scratch(t, 'maws-app-tree-out-'));
+  assert.ok(lstatSync(join(out, 'links/host-file')).isSymbolicLink());
+  assert.equal(readlinkSync(join(out, 'links/host-file')), join(outside, 'host.txt'));
+  assert.ok(lstatSync(join(out, 'links/host-dir')).isSymbolicLink());
+  assert.equal(readFileSync(join(outside, 'host.txt'), 'utf8'), `a host file ${ADDRESSES[0]}\n`);
+  assert.equal(readFileSync(join(outside, 'c12/kept.txt'), 'utf8'), `outside ${ADDRESSES[1]}\n`);
+});
+
+// The sweep step of the overlay's workflow, run as GitHub runs a `shell: bash` step (bash -eo pipefail), against a `gh`
+// that answers from files: the listing (or a failure), each commit's age, and the deletions it was asked for.
+function sweep(t, { listing, ages = {} }) {
+  const yml = readFileSync(join(root, '.github/maws-app/hosted-mac.yml'), 'utf8').split('\n');
+  const step = yml.indexOf('      - name: sweep');
+  const start = yml.indexOf('        run: |', step) + 1;
+  let end = start;
+  while (end < yml.length && (yml[end] === '' || yml[end].startsWith('          '))) end++;
+  const script = yml.slice(start, end).map((l) => l.slice(10)).join('\n');
+  const dir = scratch(t, 'maws-app-sweep-');
+  const now = Math.floor(Date.now() / 1000);
+  writeFileSync(join(dir, 'ages'), Object.entries(ages).map(([sha, hours]) => `${sha} ${now - hours * 3600}\n`).join(''));
+  if (listing !== null) writeFileSync(join(dir, 'listing'), listing.map(([ref, sha]) => `${ref} ${sha}\n`).join(''));
+  writeFileSync(join(dir, 'deleted'), '');
+  mkdirSync(join(dir, 'bin'));
+  const gh = [
+    '#!/usr/bin/env bash',
+    'case "$*" in',
+    "  *--paginate*matching-refs*) [[ -f $FAKE/listing ]] || { echo 'HTTP 502: Bad Gateway' >&2; exit 1; }; cat \"$FAKE/listing\" ;;",
+    '  *git/commits/*) sha=${2##*/}; awk -v s="$sha" \'$1 == s { print $2 }\' "$FAKE/ages" ;;',
+    '  api\\ -X\\ DELETE\\ *) echo "$4" >>"$FAKE/deleted" ;;',
+    '  *) echo "unexpected gh $*" >&2; exit 1 ;;',
+    'esac',
+    '',
+  ];
+  writeFileSync(join(dir, 'bin/gh'), gh.join('\n'));
+  chmodSync(join(dir, 'bin/gh'), 0o755);
+  const r = spawnSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', '-c', script], {
+    encoding: 'utf8',
+    env: { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, FAKE: dir, GH_TOKEN: 'x', REPO: 'SSFSKIM/maws-app' },
+  });
+  return { ...r, deleted: readFileSync(join(dir, 'deleted'), 'utf8').split('\n').filter(Boolean) };
+}
+
+test("the overlay's sweep deletes the ci/hosted/ and ci/result/ refs older than 6 hours, and only those", (t) => {
+  const r = sweep(t, {
+    listing: [['refs/heads/ci/hosted/1-1-a', 'old1'], ['refs/heads/ci/result/1-1-a', 'old2'], ['refs/heads/ci/hosted/2-1-b', 'new1'], ['refs/heads/ci/other', 'old3']],
+    ages: { old1: 7, old2: 30, new1: 1, old3: 50 },
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(r.deleted, ['repos/SSFSKIM/maws-app/git/refs/heads/ci/hosted/1-1-a', 'repos/SSFSKIM/maws-app/git/refs/heads/ci/result/1-1-a']);
+  assert.match(r.stdout, /hosted: sweep deleted 2 refs, kept 1\n$/);
+});
+
+test("the overlay's sweep is red when the listing fails, not an empty green", (t) => {
+  const r = sweep(t, { listing: null });
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  assert.doesNotMatch(r.stdout, /hosted: sweep deleted/);
+  assert.match(r.stdout, /could not list the ci\/ refs/);
+  assert.deepEqual(r.deleted, []);
+});
+
+test("the overlay's sweep with no ci/ refs deletes nothing, green", (t) => {
+  const r = sweep(t, { listing: [] });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /hosted: sweep deleted 0 refs, kept 0\n$/);
 });
 
 // This checkout's HEAD: the tree its requests would publish (acceptance 6).
