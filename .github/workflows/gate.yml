@@ -174,7 +174,9 @@ env:
   # pool, the e2e-hosted job, runs each through SSFSKIM/maws-app, on macos-26 at 1920x1080@1x. A name joins on 3 of 3
   # green `Lane: hosted` runs on one tree whose count lines match a `Lane: no-hosted` baseline's, its specs reading neither
   # the display's scale nor its pixels, as MAC_VM_E2E's do on theirs. The plan refuses a name that is `default`, measured,
-  # live, secret or POOL_E2E. Emptying the list puts every group back on the mini.
+  # live, secret or POOL_E2E. A run on a reserved final ref (gate-plan.mjs's FINAL_LABELS: ci/h-final-*, ci/e1-final-* and
+  # the rest) hosts none, since a final bundle is written only on the runner that ran its group. Emptying the list puts
+  # every group back on the mini.
   HOSTED_MAC_E2E: ''
   # The groups that need a credential or the login keychain's custody, so never go to a hosted Mac, whatever the lane
   # (maws-app holds no secret): connectors-oauth, and discover, whose custody conditions (a), (b) and (c) stand.

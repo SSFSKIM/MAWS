@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
 import test from 'node:test';
 import { URL, fileURLToPath } from 'node:url';
 import { READ_AS_DATA, SOURCE_READERS, affected } from './gate-affected.mjs';
+import { FINAL_LABELS } from './gate-plan.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const scenarios = [
@@ -49,6 +50,9 @@ function plan(scenarioEnv) {
         MAC_VM_E2E: '',
         HOSTED_MAC_E2E: '',
         MAC_SECRET_E2E: '',
+        // The run's ref: a test chooses its own, never the ref the tests themselves run on.
+        GITHUB_REF: '',
+        GITHUB_REF_NAME: '',
         ...scenarioEnv,
         GITHUB_OUTPUT: output,
         GITHUB_STEP_SUMMARY: summary,
@@ -683,6 +687,47 @@ test('HOSTED_MAC_E2E naming a group that never goes to a hosted Mac is refused, 
       assert.equal(stderr, `gate-plan: HOSTED_MAC_E2E names what never goes to a hosted Mac: ${named}\n`);
     }
   }
+});
+
+test('a run on a reserved final ref hosts no group, under Lane: hosted or a listed group, and says why; an ordinary ref still hosts', () => {
+  const lists = { HOSTED_MAC_E2E: 'connectors library', MAC_VM_E2E: 'connectors' };
+  const gates = 'Gates: e2e:connectors,e2e:library\nRunner: macos\nClass1a: linux';
+  const off = plan({ ...lists, HEAD_MESSAGE: `ci-gate: test\n\n${gates}\nLane: no-hosted` }).outputs;
+  assert.equal(off.e2e_hosted, '[]');
+  for (const label of FINAL_LABELS) {
+    for (const ref of [{ GITHUB_REF: `refs/heads/ci/${label}-0123abcd` }, { GITHUB_REF_NAME: `ci/${label}-0123abcd` }]) {
+      for (const trailer of ['', '\nLane: hosted']) {
+        const { outputs, summary } = plan({ ...lists, ...ref, HEAD_MESSAGE: `ci-gate: test\n\n${gates}${trailer}` });
+        const what = `${JSON.stringify(ref)}${trailer}`;
+        assert.deepEqual(outputs, off, what);
+        assert.ok(summary.endsWith(` On the reserved final ref ci/${label}-0123abcd, so no group of this run is hosted: a group's final bundle is written only on the runner that ran it.\n`), summary);
+        assert.doesNotMatch(summary, /Hosted Mac \(|Lane: hosted, but/, what);
+      }
+    }
+  }
+  // An ordinary ref hosts as before, a label that only starts like a reserved one among them.
+  for (const ordinary of ['refs/heads/ci/gate-0123abcd', 'refs/heads/ci/hosted-final-rule-0123abcd', 'refs/heads/ci/h-finalize-0123abcd', 'refs/heads/h-final-0123abcd']) {
+    const { outputs, summary } = plan({ ...lists, GITHUB_REF: ordinary, GITHUB_REF_NAME: ordinary.replace(/^refs\/heads\//, ''), HEAD_MESSAGE: `ci-gate: test\n\n${gates}` });
+    assert.deepEqual(JSON.parse(outputs.e2e_hosted).map((entry) => entry.group), ['connectors', 'library'], ordinary);
+    assert.doesNotMatch(summary, /reserved final ref/, ordinary);
+  }
+  // A final run with nothing to host says nothing of it.
+  assert.doesNotMatch(plan({ GITHUB_REF: 'refs/heads/ci/h-final-0123abcd', HEAD_MESSAGE: `ci-gate: test\n\n${gates}` }).summary, /reserved final ref/);
+});
+
+test("the plan's reserved final labels are the final-bundle reporters' own: each reporter's labels and each MAWS_E2E_FINAL_BUNDLE label", () => {
+  const support = join(root, 'e2e/support');
+  const reporters = readdirSync(support).filter((file) => file.endsWith('-final-reporter.ts'));
+  assert.ok(reporters.length >= 2, reporters.join(', '));
+  const declared = reporters.flatMap((file) => {
+    const list = /\blabels: \[([^\]]*)\]/.exec(readFileSync(join(support, file), 'utf8'));
+    assert.ok(list, `${file} names its labels`);
+    return [...list[1].matchAll(/'([^']+)'/g)].map((match) => match[1]);
+  });
+  const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  const bundled = Object.values(scripts).flatMap((script) => [...script.matchAll(/\bMAWS_E2E_FINAL_BUNDLE=([A-Za-z0-9._-]+):/g)].map((match) => match[1]));
+  assert.ok(bundled.length > 0);
+  assert.deepEqual([...FINAL_LABELS].sort(), [...new Set([...declared, ...bundled])].sort());
 });
 
 test('Lane: no-hosted hosts none and places the rest exactly as a run before the hosted Macs', () => {
