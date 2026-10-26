@@ -1,6 +1,6 @@
 # The remote layer of the merged MAWS: machines, sessions, connection and trust (2026-10-26)
 
-**Status.** This is a design draft for review, not approved for building.
+**Status.** This is a reviewed design draft, not approved for building. desk-sminos-orchestrator reviewed it against the code twice, and an adversarial review ran once; both are folded in (Decision Log 8–14). The owner's decisions are folded in through 2026-10-26.
 - **Author:** the `remote-architecture` session.
 - **Code review:** `desk-sminos-orchestrator`.
 - **Readers:** the MAWS architect's composite spec for the MAWS–Desk merge cites this document and lifts its contracts (the Interfaces section).
@@ -341,8 +341,8 @@ All keys are P-256: ECDSA for signatures, ECDH for channel keys. Node, WebCrypto
 |---|---|---|
 | `list` | See the session in listings (§6.2) | Every org member, unless the session's access is `private` |
 | `view` | Subscribe to the session's plane: transcript, subagents, diff | Owners; shares at view or above; every member when access is `org-view` or `org-converse` |
-| `converse` | Send, steer, interrupt, answer a question, side question | The credential's principal. On an org credential also: owners, shares at converse or above, and every member when access is `org-converse` (§6.4) |
-| `approve` | Answer permission requests and dialogs that execute | The credential's principal. On an org credential also: owners and shares at approve. Never org-wide. |
+| `converse` | Send, steer, interrupt, answer a question, side question | Owners; shares at converse or above; every member when access is `org-converse`. The restriction to the route's principal on personal routes is deferred (§6.4). |
+| `approve` | Answer permission requests and dialogs that execute | Owners; shares at approve. Never org-wide. Deferred like `converse` (§6.4). |
 | `manage` | Change owners and shares, end the session, compact, rewind | Owners |
 | `spawn` (per machine, not per session) | Start a session on this machine | The machine's owners; members granted it (§6.3) |
 | `machine-admin` (per machine) | Read-only mode, ceilings, grants | The machine's owners; members granted it |
@@ -391,7 +391,7 @@ All keys are P-256: ECDSA for signatures, ECDH for channel keys. Node, WebCrypto
 - **Default owners** by how a session started (desk-sminos-orchestrator's sminos-side rule):
   - a terminal session: its machine's owner;
   - a session MAWS spawned: the signed requester. Desk spawns already record `by` as the hub member id (`sminos_rpc.py:618-620`).
-  - a session spawned with `sminos spawn`: the spawning session's owners, **copied into the new record at spawn time**, and **started on the parent's credential slot**, which `sminos spawn` passes explicitly. `claude --bg` gives a seat the bg supervisor's environment, not the spawner's. Without the explicit slot, the child of a session on member B's slot could start on the machine owner's default login. A terminal parent carries no proofs, and its children inherit the machine owner. Today sminos records `by` as the spawner's alias (`caller_alias()`, `sminos.py:7598, 7693`), and aliases change and are reused. sminos must also record the spawner's session id, and never resolve owners later through the alias.
+  - a session spawned with `sminos spawn`: the spawning session's owners, **copied into the new record at spawn time**, and it copies the parent's principal and inference route fields (§6.4). Starting the child on the parent's slot is deferred with account-managed inference: `claude --bg` gives a seat the bg supervisor's environment, not the spawner's. A terminal parent carries no proofs, and its children inherit the machine owner. Today sminos records `by` as the spawner's alias (`caller_alias()`, `sminos.py:7598, 7693`), and aliases change and are reused. sminos must also record the spawner's session id, and never resolve owners later through the alias.
 - **Lane A's session record** is sminos's member record. It has no owners field today, so that field is new. Sessions that predate it default to the machine owner.
 
 #### 5.9 What the hub can and can't do
@@ -481,37 +481,29 @@ All of this section's choices are decided (owner, 2026-10-26).
 - **Per-machine IAM.** The machine's owners grant members rights on it: `spawn` and `machine-admin` (owner, 2026-10-26: "IAM can name each user's rights per machine").
   - The grant is `{machine, member, rights, version}`, signed by an owner's device, or by an admin device when the org owns the machine. The machine verifies it against the org state.
   - Without a grant, nobody but the owners can spawn there.
-- **A grant is permission to use the machine, not its login.** A session spawned under a grant runs as the machine's OS account, but under the spawner's own credential slot or an org credential (§6.4). Its owner is the member who spawned it.
+- **A grant is permission to use the machine.** A session spawned under a grant runs as the machine's OS account. Its owner and principal are the member who spawned it, and its record names its inference route. Running it under the spawner's own slot or route instead of the machine owner's login is deferred to account-managed inference (§6.4).
 
-#### 6.4 Credentials: the credential follows the principal
+#### 6.4 Credentials: the record names the principal and the inference route
 
-**Anthropic's terms bind this** (the MAWS architect's identity research, `identity-prior-art.md` §3):
-- Consumer accounts may not be made "available to anyone else".
-- On Team and Enterprise seats, users "can't route their work through another user's account".
-- Third parties may not route requests through Free, Pro or Max credentials on users' behalf.
+**The owner's ruling** (2026-10-26, through the MAWS architect). Keep what is designed now. A later phase introduces account-managed inference: each account manages its own inference through a server-side gateway, for example the owner's Claude subscriptions, Codex subscriptions and OpenRouter. That phase is how the credential will follow the principal. In this initiative the fields are binding, and enforcement is deferred.
 
-The consequences, read by the architect and adopted here:
-- **Every session record names its credential slot, and never carries a token** (RL6).
-  - A slot is either a **login** or a **route**. A login is a Claude Code config dir: the default, or a `CLAUDE_CONFIG_DIR`. A route is a gateway or API settings file, passed with `--settings` as desk spawns already do.
-  - The machine binds each slot to a member, or to the org. The machine owner's login is the owner's. The account identity is read on the machine and goes no further than that binding.
-  - How the slot is known:
-    - lane B: the daemon chose it at spawn;
-    - lane A: sminos reads it from the session's environment and its recorded launch settings.
-  - **Only a route on an org API key admits several drivers.** It gives `converse` and `approve` to every owner or share.
-- **Driving a session on a personal credential is its principal's alone.** `converse` is itself driving: typing into or steering the session uses that person's account. So on a personal slot, anyone other than its principal gets at most `view`, and `converse` and `approve` are refused.
-  - Co-owners keep `manage` (share, retire).
-  - Everyone's agents may still message the session as peers, which is the owner's cooperation model.
-  - `org-converse`, and shares at `converse` or `approve`, take full effect only on sessions with an org credential (an org API key, or a cloud provider's key). The app says so where the level is set.
-- **A grant to spawn on someone else's machine is not enough.** The session must run on the spawner's own Claude login, in a credential slot of the spawner's own on that machine (a separate OS user, or a `CLAUDE_CONFIG_DIR` of their own), or on an org credential. It never runs on the machine owner's login.
+**Binding now.**
+- **Every session record names its principal and its inference route** (RL6). The route is a slot or a gateway route, never a token.
+  - A slot is a Claude Code config dir: the default, or a `CLAUDE_CONFIG_DIR`.
+  - A gateway or API route is a settings file passed with `--settings`, as desk spawns already do.
+  - The machine binds each slot to a member or to the org; the machine owner's login is the owner's. The account identity is read on the machine and goes no further than that binding.
+- **How it is known.** In lane B the daemon chose it at spawn. In lane A sminos reads it from the session's environment and its recorded launch settings. A `sminos spawn` child copies its parent's principal and route fields (§5.8).
 - **MAWS never stores or relays claude.ai tokens.** Sign-in happens on the machine, through Claude Code's own flow.
-- **One case is still unclear:** A's agent working on a message from B's agent, on A's quota. The owner's model, where agents talk and the label says who owns them, makes that the ordinary case. It goes to the owner with the composite.
 
+**Deferred to account-managed inference** (owner, 2026-10-26).
+- **The multi-person driving rule.** Anthropic's terms bind it: consumer accounts may not be made "available to anyone else", Team seats can't "route their work through another user's account", and third parties may not route requests through Free, Pro or Max credentials (the architect's `identity-prior-art.md` §3).
+  - Typing into, steering or approving in a session on a personal account uses that account.
+  - So once a second person joins, `converse` and `approve` by non-principals on a personal route must be refused, unless the route is an org or gateway route that admits several drivers.
+  - Nothing enforces this in this initiative, because the org is one person. The fields above let the later phase enforce it without a rewrite.
+- **Spawning on another member's machine** under that member's own slot or route, rather than the machine owner's login (§6.3).
+- **Two open questions:** A's agent working on B's agent's message on A's quota, and the identity inventory's item 6.7. The owner's agent-messaging model already makes the first the ordinary case.
 
-- **Slots on a machine.** A slot is named in the session record and bound to a member on that machine (or to the org), and never holds or passes a token through MAWS. A machine has its owner's slot by default. Other members add their own slots there, signing in through Claude Code themselves. The org's slot holds an org key.
-- **Per-member credentials on a shared machine** are out of scope for phase 1. Two routes exist if they're needed:
-  - a separate machine (a separate OS account) per member;
-  - routing the session's inference through the spawning member's own credentials, over `ANTHROPIC_UNIX_SOCKET`. The engine already supports this route at launch (the CC SSH-mode note, §3), but MAWS would own the forwarder. An org policy with `allowedProviders` set refuses such sessions.
-- **Open for the composite:** whether several people operating sessions backed by one person's subscription fits Anthropic's terms. This is the identity inventory's item 6.7, raised for the architect.
+**Per-member credentials on a shared machine, later.** There are two routes: a separate OS account per member, or inference through the member's own gateway route. `ANTHROPIC_UNIX_SOCKET` is one engine-supported transport for the latter (the CC SSH-mode note, §3). An org policy with `allowedProviders` set refuses such sessions.
 
 ### 7. The hub
 
@@ -603,7 +595,7 @@ The hub serves both protocols, but a migrated endpoint accepts only one trust mo
 | 10.2 | Org root recovery | **Decided (owner, 2026-10-26):** an offline recovery key, made at org setup and kept by the owner, which can sign a new set of admin keys. | — |
 | 10.3 | Agent messages across owners | **Decided (owner, 2026-10-26):** today's `sminos say`, with a signed owner label. A message may wake its recipient. No new policy (§5.8). | — |
 | 10.4 | Lid-closed viewing | **Decided (owner, 2026-10-26):** the encrypted tail (§7.3) is a later child, not in the first release. The phone loop is kept as `web-cards` (§5.10). | — |
-| 10.5 | Step-up on routine approvals of your own session | Not required by default. | Required where devices are shared or left unlocked. |
+| 10.5 | Step-up on routine approvals of your own session | **Decided (owner, 2026-10-26):** not required. | — |
 
 ### 11. Dependencies
 
@@ -633,7 +625,7 @@ The hub serves both protocols, but a migrated endpoint accepts only one trust mo
    - **Claude Code 2.1.311's SSH mode is settled.** It offers no session service MAWS could use instead of the engine host. Its parts are an entrypoint marker, Desktop config metadata, a telemetry name, and `ANTHROPIC_UNIX_SOCKET` inference routing (`research/desk-remote/cc-ssh-mode-2.1.311.md`). The engine-host design stands.
 7. **Linux and macOS process attribution.** On Linux: transient scope and lingering under `KillUserProcesses`. On macOS: TCC attribution for `claude` launched by a launchd daemon (holder design §9).
 8. **The endpoint module's verification load:** a fresh machine verifying every project's backlog (§5.7).
-9. **Credential slots for `claude --bg` and for sminos's discovery** (§5.8, §6.4).
+9. **Later phase (account-managed inference): credential slots for `claude --bg` and for sminos's discovery** (§5.8, §6.4).
    - Does `claude --bg` honour a non-default `CLAUDE_CONFIG_DIR` that `sminos spawn` passes explicitly?
    - For the per-member-slot milestone, not phase 1: `sminos.py` never reads `CLAUDE_CONFIG_DIR`; only `sminos_bridge.py:376` and `sminos_plane.py:2200` do. Its session discovery appears to assume the default config dir, so sessions on a second slot would be invisible to join-on-sight.
 
@@ -695,7 +687,7 @@ These are named here with their binding fields. Byte-level schemas and test vect
   - A root transition `{fromVersion, newRootKeys[], issued}` is signed by the recovery key. Machines accept it over any state signed by the old root set.
   - Grants are checked only by the hosting machine (§5.8).
 - **RL6, Session record** (machine-held).
-  - `{machine, session, lane, origin: {kind: 'terminal' | 'maws' | 'sminos-spawn', requester?, spawnerSession?}, credential: {slot, kind: 'login' | 'route', principal: memberId | 'org'}, project?, owners[], ownersProof[], access: 'private' | 'listed' | 'org-view' | 'org-converse', shares[{member, grade}], created, context}`.
+  - `{machine, session, lane, origin: {kind: 'terminal' | 'maws' | 'sminos-spawn', requester?, spawnerSession?}, principal: memberId | 'org', inference: {kind: 'slot', configDir} | {kind: 'route', settingsRef}, project?, owners[], ownersProof[], access: 'private' | 'listed' | 'org-view' | 'org-converse', shares[{member, grade}], created, context}`.
   - Owners are copied at spawn and never resolved later through an alias.
   - The listing projection is `{session, revision, issued, fields: {owners, machine, project, lane, state, title}}`, signed by the machine key.
 - **RL7, Capabilities.**
@@ -783,3 +775,7 @@ These are named here with their binding fields. Byte-level schemas and test vect
    - Outbound dual-coding during migration.
    - `mini-ops` as an operational dependency.
    - The phone ordering relaxed to machines the owner answers from the phone (§4.7, §5.2, §5.8, §9, §12, RL10).
+14. **2026-10-26, owner (through the MAWS architect).**
+   - Keep the current design. A later phase introduces account-managed inference, where each account manages its inference through a server-side gateway.
+   - The principal and inference-route fields are binding now. Enforcement of multi-person driving on personal routes, and per-spawner slots, are **deferred** to that phase (§6.4).
+   - No step-up on routine approvals of your own session (§10.5).
