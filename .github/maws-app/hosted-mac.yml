@@ -34,6 +34,7 @@ jobs:
       script: ${{ steps.plan.outputs.script }}
       slug: ${{ steps.plan.outputs.slug }}
       libreoffice: ${{ steps.plan.outputs.libreoffice }}
+      poppler: ${{ steps.plan.outputs.poppler }}
       evidence: ${{ steps.plan.outputs.evidence }}
       deadline: ${{ steps.plan.outputs.deadline }}
     steps:
@@ -49,16 +50,17 @@ jobs:
             exit 0
           fi
           group=$(trailer Hosted-Group) script=$(trailer Hosted-Script) slug=$(trailer Hosted-Slug)
-          libreoffice=$(trailer Hosted-LibreOffice) evidence=$(trailer Hosted-Evidence) deadline=$(trailer Hosted-Deadline)
+          libreoffice=$(trailer Hosted-LibreOffice) poppler=$(trailer Hosted-Poppler) evidence=$(trailer Hosted-Evidence) deadline=$(trailer Hosted-Deadline)
           bad() { echo "::error title=hosted: bad request::$1"; exit 1; }
           [[ $group =~ ^[a-z0-9][a-z0-9-]*$ ]] || bad "Hosted-Group '$group'"
           [[ $script =~ ^e2e(:[a-z0-9][a-z0-9:-]*)?$ ]] || bad "Hosted-Script '$script'"
           [[ $slug =~ ^[a-z0-9][a-z0-9-]*$ ]] || bad "Hosted-Slug '$slug'"
           [[ $libreoffice == true || $libreoffice == false ]] || bad "Hosted-LibreOffice '$libreoffice'"
+          [[ $poppler == true || $poppler == false ]] || bad "Hosted-Poppler '$poppler'"
           [[ $evidence == true || $evidence == false ]] || bad "Hosted-Evidence '$evidence'"
           [[ $deadline =~ ^[0-9]+$ ]] || bad "Hosted-Deadline '$deadline'"
           echo "hosted: e2e:$group (pnpm $script), deadline $(date -u -d "@$deadline" +%FT%TZ)"
-          printf '%s\n' "group=$group" "script=$script" "slug=$slug" "libreoffice=$libreoffice" "evidence=$evidence" \
+          printf '%s\n' "group=$group" "script=$script" "slug=$slug" "libreoffice=$libreoffice" "poppler=$poppler" "evidence=$evidence" \
             "deadline=$deadline" >>"$GITHUB_OUTPUT"
 
   # The group, as the private gate's e2e job runs it: the shared setup, then the group's package script, which builds its
@@ -109,6 +111,7 @@ jobs:
         with:
           e2e: 'true'
           libreoffice: ${{ needs.plan.outputs.libreoffice }}
+          poppler: ${{ needs.plan.outputs.poppler }}
       # A cask Homebrew installs carries the quarantine flag, and a first launch would wait on Gatekeeper's dialog on
       # this unattended VM.
       - name: unquarantine

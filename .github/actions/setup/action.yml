@@ -6,7 +6,7 @@ description: >-
   and take pnpm through corepack, never pnpm/action-setup. maws-app's hosted Macs cache nothing (a cache saved on a
   ci/hosted/ branch is that branch's alone), and their setup first sets the display to 1920x1080 at 1x and prints the
   desktop's line.
-  Every lane applies .github/ci-kit.yml; GitHub-hosted macOS groups omit its LibreOffice cask unless they need it.
+  Every lane applies .github/ci-kit.yml; GitHub-hosted macOS groups omit LibreOffice and Poppler unless they need them.
   Self-hosted Macs apply the full declaration. On Linux, e2e jobs also lift Electron's sandbox restriction, and groups
   that render documents through LibreOffice install it separately.
 inputs:
@@ -15,6 +15,9 @@ inputs:
     default: 'false'
   libreoffice:
     description: Install LibreOffice for this group on Linux or a hosted Mac (self-hosted Macs always apply the declaration).
+    default: 'false'
+  poppler:
+    description: Install the declared Poppler formula for this hosted Mac group (self-hosted Macs always apply the declaration).
     default: 'false'
   apt:
     description: More apt packages for a Linux runner, space-separated.
@@ -81,8 +84,8 @@ runs:
       with:
         install: 'true'
         # Only hosted per-group jobs have a complete dependency signal here. Self-hosted unit, packaged and default
-        # jobs also need LibreOffice without setting this input, so they keep the declaration's full presence check.
-        skip: ${{ runner.os == 'macOS' && runner.environment == 'github-hosted' && inputs.libreoffice != 'true' && 'cask:libreoffice' || '' }}
+        # jobs can need these tools without setting the per-group inputs, so they keep the declaration's full presence check.
+        skip: ${{ runner.os == 'macOS' && runner.environment == 'github-hosted' && format('{0} {1}', inputs.libreoffice != 'true' && 'cask:libreoffice' || '', inputs.poppler != 'true' && 'brew:poppler' || '') || '' }}
     # Group-specific Linux packages; macOS takes LibreOffice from the declaration.
     - if: runner.os == 'Linux' && (inputs.libreoffice == 'true' || inputs.apt != '')
       shell: bash

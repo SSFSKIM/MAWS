@@ -186,6 +186,7 @@ export function planOf(env, scripts) {
   if (macOnly.length > 0) refuse(`${macOnly.join(', ')} run on the macOS runner (§3.1): ask with Runner: macos (ci-gate.sh --runner macos)`);
 
   const libreoffice = new Set(words(env.LIBREOFFICE_E2E));
+  const poppler = new Set(words(env.POPPLER_E2E));
   // The timing-measured groups: on a Mac their job waits first for the desktop to settle, with a longer timeout.
   const measured = new Set(words(env.MEASURED_E2E));
   // desk-web, the one POOL_E2E group, is one Playwright worker; a cpus-4 box is a c3d-highcpu-4 with 8 GB, where cpus-2's
@@ -238,7 +239,7 @@ export function planOf(env, scripts) {
       const runner = JSON.stringify(where);
       const guest = GUEST.includes(where) ? { variant: variantOf(group) } : {};
       const timeout = hosted ? HOSTED_TIMEOUT_MINUTES : timeoutOn(where, measured.has(group) ? 45 : 30);
-      return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group), measured: measured.has(group), ...(hosted && { hosted }), runner, timeout, ...guest };
+      return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group), poppler: poppler.has(group), measured: measured.has(group), ...(hosted && { hosted }), runner, timeout, ...guest };
     });
   const e2eHosted = e2e.filter((entry) => entry.hosted);
   const e2eHost = e2e.filter((entry) => entry.variant === undefined && !entry.hosted);

@@ -114,11 +114,13 @@ group=$(jq -r '.group // empty' <<<"${ENTRY:-}") || fail 'the entry is not JSON'
 script=$(jq -r '.script // empty' <<<"$ENTRY")
 slug=$(jq -r '.slug // empty' <<<"$ENTRY")
 libreoffice=$(jq -r '.libreoffice' <<<"$ENTRY")
+poppler=$(jq -r '.poppler' <<<"$ENTRY")
 evidence=${EVIDENCE:-false}
 [[ $group =~ ^[a-z0-9][a-z0-9-]*$ ]] || fail "the entry's group '$group' is not one maws-app takes"
 [[ $script =~ ^e2e(:[a-z0-9][a-z0-9:-]*)?$ ]] || fail "the entry's script '$script' is not one maws-app takes"
 [[ $slug =~ ^[a-z0-9][a-z0-9-]*$ ]] || fail "the entry's slug '$slug' is not one maws-app takes"
 [[ $libreoffice == true || $libreoffice == false ]] || fail "the entry's libreoffice '$libreoffice' is not true or false"
+[[ $poppler == true || $poppler == false ]] || fail "the entry's poppler '$poppler' is not true or false"
 [[ $evidence == true || $evidence == false ]] || fail "EVIDENCE '$evidence' is not true or false"
 [[ $GITHUB_RUN_ID =~ ^[0-9]+$ && $GITHUB_RUN_ATTEMPT =~ ^[0-9]+$ ]] || fail 'GITHUB_RUN_ID and GITHUB_RUN_ATTEMPT are not numbers'
 suffix=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$slug
@@ -214,6 +216,7 @@ Hosted-Group: $group
 Hosted-Script: $script
 Hosted-Slug: $slug
 Hosted-LibreOffice: $libreoffice
+Hosted-Poppler: $poppler
 Hosted-Evidence: $evidence
 Hosted-Deadline: $deadline")
 # Written before the push, so a cleanup after a push cut short still finds what to cancel.
