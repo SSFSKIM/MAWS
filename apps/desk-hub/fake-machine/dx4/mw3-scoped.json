@@ -1,0 +1,250 @@
+{
+  "about": "The MW3 live check (the desk control surface spec, Plan of Work, MW3) on Claude Code 2.1.310, isolated, behind a recording stub (zero inference), sminos 1.13.0 and devcloud's secrets guard loaded from the working copy: what the bridge raised, and what a scoped allow handed the engine, resolved by the daemon's own check_digest.",
+  "engine": "2.1.310",
+  "sminos": "1.13.0",
+  "capabilities": {
+    "controls": {
+      "read.usage": {
+        "available": true
+      },
+      "read.config": {
+        "available": true
+      },
+      "read.settings": {
+        "available": true
+      },
+      "read.mcp": {
+        "available": true
+      },
+      "btw": {
+        "available": true
+      },
+      "compact": {
+        "available": true
+      },
+      "model": {
+        "available": true
+      },
+      "mcp.enable": {
+        "available": true
+      },
+      "mcp.disable": {
+        "available": true
+      },
+      "mcp.reconnect": {
+        "available": true
+      },
+      "decide": {
+        "available": true
+      },
+      "decide.scope": {
+        "available": true
+      },
+      "decide.interrupt": {
+        "available": false,
+        "reason": "a decision is answered once it is queued, so a deny cannot report what stopping the turn left running: deny, then Interrupt"
+      },
+      "decide.addDirectory": {
+        "available": true
+      },
+      "stop-agent": {
+        "available": false,
+        "reason": "not in sminos 1.13.0: a later version of the plugin adds it"
+      },
+      "tell": {
+        "available": false,
+        "reason": "not in sminos 1.13.0: a later version of the plugin adds it"
+      },
+      "media": {
+        "available": false,
+        "reason": "not in sminos 1.13.0: a later version of the plugin adds it"
+      },
+      "forget": {
+        "available": false,
+        "reason": "after --resume the engine brings back what a cut left out (2.1.310): it needs an engine fix or a supported cut"
+      },
+      "rewind-files": {
+        "available": false,
+        "reason": "the mod API has no file rollback: /rewind in the terminal"
+      },
+      "elicitation.answer": {
+        "available": false,
+        "reason": "a mod's answer carries no action or content, so it cannot answer an MCP server's form: answer it in the terminal"
+      }
+    }
+  },
+  "scoped": [
+    {
+      "case": "session",
+      "raised": {
+        "request": "toolu_s1",
+        "tool": "Bash",
+        "input": {
+          "command": "touch s.txt && mkdir -p sdir",
+          "description": "mw3 live"
+        },
+        "suggestions": [
+          {
+            "type": "addRules",
+            "rules": [
+              {
+                "toolName": "Bash",
+                "ruleContent": "mkdir -p sdir"
+              }
+            ],
+            "behavior": "allow",
+            "destination": "localSettings"
+          }
+        ]
+      },
+      "scope": {
+        "suggestion": 0,
+        "sha256": "c07c44c4ad5c7a0755980e8a990305dc859d7ca7b0ff4160e5d3ecab36213f51",
+        "destination": "session"
+      },
+      "updatedPermissions": [
+        {
+          "type": "addRules",
+          "rules": [
+            {
+              "toolName": "Bash",
+              "ruleContent": "mkdir -p sdir"
+            }
+          ],
+          "behavior": "allow",
+          "destination": "session"
+        }
+      ],
+      "outcome": {
+        "state": "done",
+        "result": {}
+      },
+      "ran": true,
+      "next_call_raised": false,
+      "settings_local_after": null
+    },
+    {
+      "case": "localSettings",
+      "raised": {
+        "request": "toolu_l1",
+        "tool": "Bash",
+        "input": {
+          "command": "touch l.txt && mkdir -p ldir",
+          "description": "mw3 live"
+        },
+        "suggestions": [
+          {
+            "type": "addRules",
+            "rules": [
+              {
+                "toolName": "Bash",
+                "ruleContent": "mkdir -p ldir"
+              }
+            ],
+            "behavior": "allow",
+            "destination": "localSettings"
+          }
+        ]
+      },
+      "scope": {
+        "suggestion": 0,
+        "sha256": "dd779b06167b1bc16abb7553eb187d2fd750de68dfbe147661ef4357a34f7f77",
+        "destination": "localSettings"
+      },
+      "updatedPermissions": [
+        {
+          "type": "addRules",
+          "rules": [
+            {
+              "toolName": "Bash",
+              "ruleContent": "mkdir -p ldir"
+            }
+          ],
+          "behavior": "allow",
+          "destination": "localSettings"
+        }
+      ],
+      "outcome": {
+        "state": "done",
+        "result": {}
+      },
+      "ran": true,
+      "next_call_raised": false,
+      "settings_local_after": {
+        "permissions": {
+          "allow": [
+            "Bash(mkdir -p ldir)"
+          ]
+        }
+      }
+    },
+    {
+      "case": "addDirectories",
+      "raised": {
+        "request": "toolu_d1",
+        "tool": "Bash",
+        "input": {
+          "command": "mkdir -p /private/tmp/mw3-live/f1/outside/d1",
+          "description": "mw3 live"
+        },
+        "suggestions": [
+          {
+            "type": "addDirectories",
+            "directories": [
+              "/private/tmp/mw3-live/f1/outside"
+            ],
+            "destination": "session"
+          },
+          {
+            "type": "setMode",
+            "mode": "acceptEdits",
+            "destination": "session"
+          }
+        ]
+      },
+      "scope": {
+        "suggestion": 0,
+        "sha256": "119dad8354ac196ea96fe6a9e38ceaa5642ed8784ef8aa44d38fde9ddd7c6610",
+        "destination": "session"
+      },
+      "updatedPermissions": [
+        {
+          "type": "addDirectories",
+          "directories": [
+            "/private/tmp/mw3-live/f1/outside"
+          ],
+          "destination": "session"
+        }
+      ],
+      "outcome": {
+        "state": "done",
+        "result": {}
+      },
+      "ran": true,
+      "next_call_raised": false,
+      "settings_local_after": {
+        "permissions": {
+          "allow": [
+            "Bash(mkdir -p ldir)"
+          ]
+        }
+      }
+    }
+  ],
+  "withheld": {
+    "raised": {
+      "request": "toolu_g1",
+      "tool": "Bash",
+      "input": {
+        "command": "python3 -c \"print(1)\" --token=[secret:MW3_PROBE]",
+        "description": "mw3 live"
+      }
+    },
+    "engine_suggested": 1,
+    "after_respawn": {
+      "suggestions_after": false,
+      "value_in_snapshot": false,
+      "value_in_request": false
+    }
+  }
+}

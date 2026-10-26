@@ -27,7 +27,7 @@ import { HUB_WRITER_PREFIX, hubWriter, isHubPosition, isIsoMillis, LEGACY_WRITER
 import type { DownFrame, RefusedFrame, Refusal, Rejection, UpFrame } from '../protocol/machine';
 import { FRAME_LIMIT, PartAssembler, PartsBudgetError, toWire, type Part } from '../protocol/parts';
 import { RPC_FRESHNESS_MS, RPC_NAMES, type Rpc, type RpcErrorCode, type RpcOutcome } from '../protocol/rpc';
-import { SESSION_WIDE_KINDS, SUBSCRIPTION_KINDS, type Delivery, type MachinePresence, type Raised, type SessionKind, type SessionMessage, type Settled } from '../protocol/session';
+import { SESSION_WIDE_KINDS, SUBSCRIPTION_KINDS, SUGGESTION_BYTES_MAX, SUGGESTIONS_MAX, type Delivery, type MachinePresence, type Raised, type SessionKind, type SessionMessage, type Settled } from '../protocol/session';
 import { BATCH_BYTES, eventShapeError, LogStore, sameEvent, type AuditRow, type Stored } from './log-store';
 import type { SummaryReport } from './registry';
 import { RETRY_ATTEMPTS, RETRY_BASE_MS, retryDelay } from './retry';
@@ -1397,8 +1397,26 @@ function raisedShapeError(raised: unknown): string | null {
   if (raised.agentId !== undefined && !isName(raised.agentId)) return 'agentId names the subagent that asked, when present';
   if (raised.truncated !== undefined && raised.truncated !== true) return 'truncated is true when present';
   if (raised.toolUseId !== undefined && !isName(raised.toolUseId, 512)) return "toolUseId names the transcript's tool call, when present";
+  if (raised.suggestions !== undefined && !suggestionsFit(raised.suggestions)) {
+    return `suggestions are at most ${SUGGESTIONS_MAX} objects, each at most ${SUGGESTION_BYTES_MAX} bytes of canonical UTF-8 JSON, when present`;
+  }
   if (!isMac(raised.mac)) return 'mac is {nonce, value}: 16 and 32 bytes, each in canonical base64url';
   return null;
+}
+
+/** Whether a raise's suggestions keep the bridge's bound exactly (DX5 `raised.suggestions`): a list of at most
+ * SUGGESTIONS_MAX objects, each with a canonical form of at most SUGGESTION_BYTES_MAX bytes of UTF-8. Their shape inside
+ * is the engine's and passes through; the code covers it. */
+function suggestionsFit(suggestions: unknown): boolean {
+  if (!Array.isArray(suggestions) || suggestions.length > SUGGESTIONS_MAX) return false;
+  return suggestions.every((s) => {
+    if (!isObject(s)) return false;
+    try {
+      return encoder.encode(canonicalize(s)).length <= SUGGESTION_BYTES_MAX;
+    } catch {
+      return false;
+    }
+  });
 }
 
 /** Why a browser's RPC is not one the hub can forward (DX6), or null. The daemon checks its code and its arguments. */

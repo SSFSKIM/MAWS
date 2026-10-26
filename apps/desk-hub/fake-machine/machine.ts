@@ -11,6 +11,8 @@
 //     machine-side wave's MW1 producer (`mw1`), answers the reads of usage, config, settings and MCP as recorded and
 //     carries each control's capability in `capabilities.controls`; as MW2's (`mw2`), answers a side question (`btw`)
 //     at once and its answer as `op` notices, as the MW2 live check recorded them, and takes compact's `instructions`;
+//     as MW3's (`mw3`), raises the MW3 live check's permission requests with the engine's suggestions
+//     (`raiseRecordedScoped`) and takes `decide`'s `scope`, resolved from the request it holds as the daemon resolves it;
 //   - answers RPCs from a script, with a ledger of its own: a nonce is claimed before the effect and its outcome recorded
 //     before the result, and a nonce the ledger knows is never executed again;
 //   - can drop its connection, end a session's process while it stays connected, crash after an RPC's effect and before
@@ -26,12 +28,12 @@ import type { JsonObject } from '../src/protocol/json';
 import type { LogEvent, Vector } from '../src/protocol/log';
 import type { DownFrame, OrgFrame, Refusal, RejectionReason, UpFrame } from '../src/protocol/machine';
 import { RPC_FRESHNESS_MS, RPC_NAMES, type Rpc, type RpcError, type RpcName, type RpcOutcome } from '../src/protocol/rpc';
-import type { Delivery, MachinePresence, OpBody, Raised, SessionMessage, Settled } from '../src/protocol/session';
+import type { Delivery, MachinePresence, OpBody, PermissionUpdate, Raised, SessionMessage, Settled } from '../src/protocol/session';
 import { Link, LinkError, type Credentials } from './link';
 import { emptyMemory, expireLedger, type Memory } from './memory';
 import type { Recording, Row, Step } from './recording';
 import { Commands, opMessages, refusalMessage, type CommandPlan, type CommandScript } from './commands';
-import { MW2_BTW, producerAtLeast, SessionDepth, sminosOf, type BridgePlugin, type Producer, type SnapshotOptions } from './session';
+import { MW2_BTW, MW3_SCOPED, producerAtLeast, SessionDepth, sminosOf, type BridgePlugin, type Producer, type SnapshotOptions } from './session';
 
 /** What a script answers an RPC with: an outcome, or undefined for the fake machine's own default. */
 export type RpcScript = { [N in RpcName]?: (rpc: Rpc<N>, machine: FakeMachine) => RpcOutcome<N> | undefined | Promise<RpcOutcome<N> | undefined> };
@@ -139,6 +141,9 @@ export class FakeMachine {
   readonly rejected: Array<{ event: { writer: string; seq: number } | null; reason: RejectionReason }> = [];
   /** Each RPC received, with its outcome and whether this machine ran its effect. */
   readonly rpcs: RpcRecord[] = [];
+  /** Each rule a scoped allow added (an `mw3` producer): the suggestion the daemon resolved, under the scope's
+   * destination, as the bridge would hand it to the engine (`updatedPermissions`). */
+  readonly scopedAllows: Array<{ session: string; request: string; rule: PermissionUpdate }> = [];
   /** What went wrong without stopping the machine, kept rather than thrown: a POST the hub refused (a stale generation
    * after a drop, say), a replay step that failed. */
   readonly postErrors: Error[] = [];
@@ -491,6 +496,20 @@ export class FakeMachine {
     await this.settle(request, { winner: 'terminal', outcome, by: 'terminal' });
   }
 
+  /**
+   * Raises, on `session` (the first replayed one by default), the MW3 live check's permission requests as the bridge
+   * raised them on 2.1.310: three carrying the engine's suggestions (a rule offered for `localSettings`, a directory),
+   * and the one a secrets guard beneath had restored, which carries none. An `mw3` producer's.
+   */
+  async raiseRecordedScoped(session = [...this.sessions.keys()][0]): Promise<Raised[]> {
+    if (!producerAtLeast(this.producer, 'mw3')) throw new Error('the recorded scoped requests are an mw3 producer’s');
+    if (session === undefined || !this.sessions.has(session)) throw new Error(`no session ${session} on ${this.name}`);
+    const drafts = [...MW3_SCOPED.scoped.map((s) => s.raised), MW3_SCOPED.withheld.raised];
+    for (const draft of drafts) await this.raise(session, draft);
+    await this.flush();
+    return drafts.map((d) => this.pending.get(d.request)!.raised);
+  }
+
   /** The requests pending now. */
   pendingRequests(): Raised[] {
     return [...this.pending.values()].map((p) => p.raised);
@@ -714,7 +733,7 @@ export class FakeMachine {
     if (rpc.rpc === 'command' && !producerAtLeast(this.producer, 'm0')) return answer(fail('bad-shape', 'no RPC "command"'));
     // Nor one older than the machine-side wave's MW2 a `btw`.
     if (rpc.rpc === 'btw' && !producerAtLeast(this.producer, 'mw2')) return answer(fail('bad-shape', 'no RPC "btw"'));
-    const malformed = argumentProblem(rpc);
+    const malformed = argumentProblem(rpc) ?? (rpc.rpc === 'decide' && producerAtLeast(this.producer, 'mw3') ? scopeShapeProblem(rpc as Rpc<'decide'>) : null);
     if (malformed) return answer(fail('bad-shape', malformed));
     const session = (rpc.args as { session?: string }).session;
     if (SESSION_RPCS.has(rpc.rpc) && (typeof session !== 'string' || !this.sessions.has(session))) return answer(fail('no-session', `no session ${session} on ${this.name}`));
@@ -735,6 +754,12 @@ export class FakeMachine {
       const held = this.pending.get(rpc.args.digest.request);
       const misfit = held && decisionMisfit(rpc as Rpc<'decide' | 'answer'>, held.raised);
       if (misfit) return answer(misfit);
+      // A scoped allow's rule, resolved from the request held (an `mw3` daemon's; an older one ignores `scope`).
+      const scope = rpc.rpc === 'decide' && producerAtLeast(this.producer, 'mw3') ? rpc.args.scope : undefined;
+      if (held && scope) {
+        const resolved = await scopedRule(held.raised, scope);
+        if ('error' in resolved) return answer(resolved.error);
+      }
     }
     // A stop needs the bridge and a running session, then names a job the session's own jobs index holds as running,
     // or it is refused before the claim, in that order (DC10, the machine half's DX6).
@@ -829,7 +854,11 @@ export class FakeMachine {
           return fail('not-pending', 'the window closed; the terminal answers it', { terminalOnly: true });
         }
         const outcome: Settled['outcome'] = rpc.rpc === 'answer' ? 'answered' : rpc.args.decision;
+        const scope = rpc.rpc === 'decide' && producerAtLeast(this.producer, 'mw3') ? rpc.args.scope : undefined;
+        const resolved = scope ? await scopedRule(raised, scope) : undefined;
+        if (resolved && 'error' in resolved) return resolved.error;
         if (!(await this.settle(digest.request, { winner: 'web', outcome, by: member }))) return notPending();
+        if (resolved) this.scopedAllows.push({ session: raised.session, request: digest.request, rule: resolved.rule });
         return this.traced(rpc, record, raised.session, {});
       }
       case 'model': {
@@ -1103,6 +1132,39 @@ function argumentProblem(rpc: Rpc): string | null {
 const ASK_TOOL_IN: Record<BridgePlugin, string> = { doperpowers: 'mcp__doperpowers__AskUserQuestion', sminos: 'mcp__sminos__AskUserQuestion' };
 const OLD_ASK_TOOL = ASK_TOOL_IN.doperpowers;
 const QUESTION_TOOLS = new Set(['AskUserQuestion', ...Object.values(ASK_TOOL_IN)]);
+
+/** The suggestions a scoped allow takes, and the destinations it may name (the desk control surface spec, §7, §11). */
+const SCOPED_TYPES = new Set(['addRules', 'addDirectories']);
+const SCOPE_DESTINATIONS = new Set(['session', 'localSettings']);
+
+/** A `decide`'s `scope`, as the daemon's `shape()` checks it before anything runs; null when it has none or it fits. */
+function scopeShapeProblem(rpc: Rpc<'decide'>): string | null {
+  const scope = (rpc.args as { scope?: unknown }).scope;
+  if (scope === undefined) return null;
+  if (rpc.args.decision !== 'allow') return 'decide: a scope goes with an allow';
+  const s = scope as Record<string, unknown> | null;
+  if (typeof s !== 'object' || s === null || Array.isArray(s) || !Number.isInteger(s.suggestion) || (s.suggestion as number) < 0) return "decide: scope.suggestion is the index of one of the request's suggestions";
+  if (typeof s.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(s.sha256)) return "decide: scope.sha256 is the lowercase hex SHA-256 of that suggestion's canonical JSON";
+  if (!SCOPE_DESTINATIONS.has(s.destination as string)) return 'decide: scope.destination is session or localSettings: the terminal changes any other settings';
+  return null;
+}
+
+/**
+ * A scoped allow's rule, from the request held, never the browser (sminos_rpc.py's `scoped_rule`): the suggestion at
+ * the index, its hash the one the browser drew (else `not-pending`, the suggestions changed), a rule or a directory,
+ * under `session` or its own `localSettings` (else `bad-shape`).
+ */
+async function scopedRule(raised: Raised, scope: NonNullable<Rpc<'decide'>['args']['scope']>): Promise<{ rule: PermissionUpdate } | { error: RpcOutcome }> {
+  const suggestion = raised.suggestions?.[scope.suggestion];
+  if (!suggestion || (await inputSha256(suggestion as unknown as JsonObject)) !== scope.sha256) {
+    return { error: fail('not-pending', 'the suggestions changed: the request no longer offers the one shown') };
+  }
+  if (!SCOPED_TYPES.has(suggestion.type)) return { error: fail('bad-shape', `decide: a scope takes a rule or a directory the engine suggested (addRules, addDirectories), not ${suggestion.type}`) };
+  if (scope.destination === 'localSettings' && suggestion.destination !== 'localSettings') {
+    return { error: fail('bad-shape', `decide: localSettings only where the engine suggested it; this suggestion is for ${suggestion.destination}`) };
+  }
+  return { rule: { ...suggestion, destination: scope.destination } };
+}
 
 /**
  * Whether a decision or an answer fits the request it names, as the bridge's decision route checks it (DX5): a question

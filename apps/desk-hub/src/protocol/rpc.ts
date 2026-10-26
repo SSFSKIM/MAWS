@@ -7,6 +7,18 @@ export const RPC_FRESHNESS_MS = 60_000;
 /** The request as the browser drew it: `input_sha256` is the lowercase hex SHA-256 of the input's canonical JSON. */
 export type Digest = { session: string; request: string; tool: string; input_sha256: string };
 
+/**
+ * A scoped allow (§7, §11): `suggestion` the index into the pending request's `suggestions` as drawn, `sha256` the
+ * lowercase hex SHA-256 of that suggestion's canonical JSON (as `input_sha256` is of an input), `destination`
+ * `session` (nothing saved, whatever the suggestion named) or `localSettings` (the checkout's
+ * `.claude/settings.local.json`, only where the suggestion itself names it). The daemon resolves the rule from the
+ * request its bridge still holds, never from the browser: a hash that no longer matches is `not-pending` (the
+ * suggestions changed); a suggestion but an `addRules` or `addDirectories` one, or a `localSettings` it did not offer, is
+ * `bad-shape`. A daemon older than sminos 1.13.0 ignores `scope` and allows as asked, so the web offers it only where
+ * the session's `controls['decide.scope']` (or `decide.addDirectory`) is available.
+ */
+export type SuggestionScope = { suggestion: number; sha256: string; destination: 'session' | 'localSettings' };
+
 export type RpcArgs = {
   /** A user row appended to the running turn, read at the loop's next model request; refused `idle` when no turn runs. */
   steer: { session: string; text: string };
@@ -14,8 +26,11 @@ export type RpcArgs = {
   interrupt: { session: string };
   /** Answer a pending question; `answers` maps each question's text to the chosen label (labels joined by ", "). */
   answer: { session: string; digest: Digest; answers: Record<string, string> };
-  /** Allow or deny a pending permission prompt. */
-  decide: { session: string; digest: Digest; decision: 'allow' | 'deny'; message?: string };
+  /**
+   * Allow or deny a pending permission prompt. `scope` (an allow's; sminos 1.13.0, the desk control surface spec's MW3)
+   * also adds one of the request's own suggestions (`Raised.suggestions`).
+   */
+  decide: { session: string; digest: Digest; decision: 'allow' | 'deny'; message?: string; scope?: SuggestionScope };
   /**
    * This session's main-loop model and effort, from its next request on; at least one is set. `model` is a model id, a
    * family alias the session's `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` maps, or `"default"` (the session's own).

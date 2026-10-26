@@ -27,7 +27,10 @@ import { loadRoutes } from './routes';
 import mw1 from './dx4/mw1-reads.json' with { type: 'json' };
 // And MW2's (dx4/README.md).
 import mw2 from './dx4/mw2-ops.json' with { type: 'json' };
-import type { Catalog, Capabilities, ConfigRead, ControlCapabilities, McpRead, SettingsRead, UsageRead, Job, ReadAnswer, SessionBodies, SessionMessage, SessionPresence, StatusRead, Streaming, StreamingBlock, SubagentMeta, SubscriptionKind, Usage } from '../src/protocol/session';
+// And MW3's (dx4/README.md).
+import mw3 from './dx4/mw3-scoped.json' with { type: 'json' };
+import type { Catalog, Capabilities, ConfigRead, ControlCapabilities, McpRead, PermissionUpdate, SettingsRead, UsageRead, Job, ReadAnswer, SessionBodies, SessionMessage, SessionPresence, StatusRead, Streaming, StreamingBlock, SubagentMeta, SubscriptionKind, Usage } from '../src/protocol/session';
+import type { SuggestionScope } from '../src/protocol/rpc';
 import { derive, fileFacts, LoopIndex, loopJobs, stopNote, type Body, type BridgeAgent, type Derivation } from './jobs';
 import { answerOutput, type Locate } from './output';
 import type { Recording, Row, Step } from './recording';
@@ -42,11 +45,13 @@ import type { Recording, Row, Step } from './recording';
  * neither field and passes `read` by. `m1` adds the pushed catalog; `mw1` (sminos `MW1_SMINOS`, the machine-side wave's
  * MW1) the reads of usage, config, settings and MCP, answered as the MW1 live check recorded them, and
  * `capabilities.controls`; `mw2` (sminos `MW2_SMINOS`) the side question (`btw`), answered as the MW2 live check
- * recorded it, and compact's `instructions`.
+ * recorded it, and compact's `instructions`; `mw3` (sminos `MW3_SMINOS`) the scoped allows: a permission request
+ * raised with the engine's suggestions, as the MW3 live check recorded them, and `decide`'s `scope` checked and applied
+ * as the daemon does.
  */
-export type Producer = 'dc3' | 'dc8' | 'm0' | 'm1' | 'mw1' | 'mw2';
+export type Producer = 'dc3' | 'dc8' | 'm0' | 'm1' | 'mw1' | 'mw2' | 'mw3';
 
-const LEVEL: Record<Producer, number> = { dc3: 0, dc8: 1, m0: 2, m1: 3, mw1: 4, mw2: 5 };
+const LEVEL: Record<Producer, number> = { dc3: 0, dc8: 1, m0: 2, m1: 3, mw1: 4, mw2: 5, mw3: 6 };
 
 /** Whether `producer` does what `level` added. */
 export const producerAtLeast = (producer: Producer, level: Producer): boolean => LEVEL[producer] >= LEVEL[level];
@@ -102,11 +107,38 @@ export const MW2_CAPABILITIES: Capabilities = {
   controls: mw2.capabilities.controls as ControlCapabilities,
 };
 
+/** The sminos version of the machine-side wave's MW3 (the scoped allows). */
+export const MW3_SMINOS = '1.13.0';
+
+/**
+ * What the MW3 live check recorded (dx4/README.md): each permission request the bridge raised with the engine's
+ * suggestions, the scope a desk would send for it and the rule the daemon resolved and handed the engine (`session`, the
+ * suggestion's own `localSettings`, a directory), and the request a guard beneath had restored, raised without them.
+ */
+export type ScopedRecording = { raised: { request: string; tool: string; input: JsonObject; suggestions?: PermissionUpdate[] }; scope: SuggestionScope; updatedPermissions: PermissionUpdate[] };
+export const MW3_SCOPED = mw3 as unknown as { scoped: ScopedRecording[]; withheld: { raised: { request: string; tool: string; input: JsonObject } } };
+
+/** An MW3 bridge's capabilities: MW2's, and every control's capability as the MW3 live check's bridge said them
+ * (`decide.scope` and `decide.addDirectory` available). The engine and the route table stay 2.1.307, as MW1's do. */
+export const MW3_CAPABILITIES: Capabilities = {
+  ...MW2_CAPABILITIES,
+  sminos: MW3_SMINOS,
+  controls: mw3.capabilities.controls as ControlCapabilities,
+};
+
 /** The sminos version, and the bridge's capabilities, that `producer` stands for. */
 export const sminosOf = (producer: Producer): string =>
-  producerAtLeast(producer, 'mw2') ? MW2_SMINOS : producerAtLeast(producer, 'mw1') ? MW1_SMINOS : producerAtLeast(producer, 'm1') ? M1_SMINOS : M0_SMINOS;
+  producerAtLeast(producer, 'mw3') ? MW3_SMINOS : producerAtLeast(producer, 'mw2') ? MW2_SMINOS : producerAtLeast(producer, 'mw1') ? MW1_SMINOS : producerAtLeast(producer, 'm1') ? M1_SMINOS : M0_SMINOS;
 const capabilitiesOf = (producer: Producer): Capabilities =>
-  producerAtLeast(producer, 'mw2') ? MW2_CAPABILITIES : producerAtLeast(producer, 'mw1') ? MW1_CAPABILITIES : producerAtLeast(producer, 'm1') ? M1_CAPABILITIES : M0_CAPABILITIES;
+  producerAtLeast(producer, 'mw3')
+    ? MW3_CAPABILITIES
+    : producerAtLeast(producer, 'mw2')
+      ? MW2_CAPABILITIES
+      : producerAtLeast(producer, 'mw1')
+        ? MW1_CAPABILITIES
+        : producerAtLeast(producer, 'm1')
+          ? M1_CAPABILITIES
+          : M0_CAPABILITIES;
 
 /** The per-uid temporary root the recordings' engine wrote task outputs under (macOS, uid 501): `<resolved tmp>/claude-<uid>`. */
 export const ENGINE_TMP = '/private/tmp/claude-501';

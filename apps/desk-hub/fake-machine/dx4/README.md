@@ -35,3 +35,15 @@ events: refused `nothing-to-fork` before the session's first model request, and 
 and end as the bridge's child relays them (sha256 `45c3de99fec4ddfe4c4464f4ebd5fd830b8d9b12474b2c16efdc45c9cff81c2d`). The fake machine's `mw2` producer answers from it
 (`../session.ts`, `../machine.ts`, run by `test/fake-machine/desk-mw2.test.ts`). Never edit it here: a later
 shape change is recorded again by that MW's live check, and replaces this file whole.
+
+`mw3-scoped.json` is a recording too: what the bridge raised, and what a scoped allow handed the engine, in the
+machine-side wave's MW3 live check (the desk control surface spec, Plan of Work, MW3; doperpowers `desk-ctl-mw3`, sminos
+1.13.0, on Claude Code 2.1.310 in an isolated profile behind a recording stub that returns each scripted tool call, zero
+inference, devcloud's secrets guard loaded from the working copy over a fake store) — its `GET /status` controls
+(`decide.scope` and `decide.addDirectory` available); three permission requests as the bridge's child relayed them, each
+with the engine's suggestions, the scope a desk sends for it and the rule the daemon resolved through its own
+`check_digest` (a rule as `session`, a rule as its own `localSettings`, a directory), each call run and the next one
+unasked; and a request whose handle the guard beneath restored, raised without suggestions (sha256
+`de127f800e7124936f910fac884f7797a0b4f167f73eaf77f017bdf6142da722`). The fake machine's `mw3` producer raises and resolves from it (`../session.ts`, `../machine.ts`,
+run by `test/fake-machine/desk-mw3.test.ts`). Never edit it here: a later shape change is recorded again by that MW's
+live check, and replaces this file whole.
