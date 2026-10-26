@@ -664,10 +664,10 @@ test('under Lane: hosted, default, a measured, a live, a secret and a POOL_E2E g
   const gates = 'Gates: e2e:default,e2e:artifacts-perf,e2e:connectors-oauth,e2e:desk-web,e2e:library\nRunner: macos\nClass1a: pool';
   const without = plan({ ...lists, HEAD_MESSAGE: `ci-gate: test\n\n${gates}` }).outputs;
   const { outputs, summary } = plan({ ...lists, HEAD_MESSAGE: `ci-gate: test\n\n${gates}\nLane: hosted` });
-  assert.deepEqual(placement(outputs), { ...placement(without), library: [waiter, 100] });
+  assert.deepEqual(placement(outputs), { ...placement(without), 'artifacts-perf': [homeMac, 55], library: [waiter, 100] });
   assert.ok(summary.endsWith(`${hostedNote(['library'])} Lane: hosted, but never on a hosted Mac, so where it would be: e2e:default (default), e2e:artifacts-perf (measured), e2e:connectors-oauth (secret), e2e:desk-web (pool).\n`), summary);
   const live = plan({ ...lists, HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:library-live\nRunner: macos\nLive: yes\nLane: hosted' });
-  assert.deepEqual(placement(live.outputs), { 'library-live': [mac, 40], 'tool-time-heavy-live': [mac, 55] });
+  assert.deepEqual(placement(live.outputs), { 'library-live': [homeMac, 40], 'tool-time-heavy-live': [homeMac, 55] });
   assert.equal(live.outputs.e2e_hosted, '[]');
   assert.ok(live.summary.endsWith(' Lane: hosted, but never on a hosted Mac, so where it would be: e2e:library-live (live), e2e:tool-time-heavy-live (measured, live).\n'), live.summary);
   // A run with no e2e group says the lane hosted nothing.

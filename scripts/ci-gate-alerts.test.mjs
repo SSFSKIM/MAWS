@@ -419,6 +419,22 @@ test('check: a hosted-only run goes ahead past a mini alert; a run with one host
   assert.equal(run('e2e:tools', { lane: 'no-hosted' }).stop, true);
 });
 
+test('hosted-only runs pass a mini alert, but a home job beside hosted work still needs the home runner', () => {
+  const workflow = tree(envOf('  MEASURED_E2E: perf\n  LIVE_E2E: library tools\n  LIVE_GUARD_E2E: tools\n  HOSTED_MAC_E2E: side\n'));
+  const issues = [{ number: 12, title: 'ci-kit alert: mini: SecurityAgent since 2026-10-17T20:06Z (source unknown)' }];
+  const runners = [labelled('ci-kit-mac-mini', HOME), ec2];
+  const run = (gates, extra = {}) => check({ ...workflow, gates, runner: 'macos', gh: fakeGh({ issues, runners }).gh, ...extra });
+  assert.deepEqual(run('e2e:side'), { stop: false, lines: [] });
+  for (const lane of ['', 'hosted', 'no-hosted']) {
+    const measured = run('e2e:side,e2e:perf', { lane });
+    assert.equal(measured.stop, true, lane);
+    assert.match(measured.lines[0], /home Mac \(e2e:perf\)/, lane);
+    const live = run('e2e:library', { live: 'yes', lane });
+    assert.equal(live.stop, true, lane);
+    assert.match(live.lines[0], /home Mac \(e2e:library, e2e:tools\)/, lane);
+  }
+});
+
 // The Mac jobs are the tested commit's plan's, not this checkout's reading of the lists: a target whose POOL_E2E differs
 // from the caller's (offMac) is held by the alert when its own plan puts the group on the Mac, and goes ahead when its
 // own plan keeps it off.
