@@ -322,6 +322,33 @@ test("main moves to the request, by a fast-forward, only when it is a day old an
   assert.match(run.out, /^hosted: main not moved: /m);
 });
 
+// git runs GIT_SSH_COMMAND through a shell, so the key's and the known hosts' paths, under RUNNER_TEMP, must reach ssh as
+// themselves, whatever they hold. Here maws-app is reached over ssh, a stub that logs its arguments and serves the git
+// command locally, from a RUNNER_TEMP with an apostrophe, a space, a $(...) and backticks in it.
+test('the deploy key and known hosts reach ssh as their own paths, a RUNNER_TEMP with quotes and shell syntax included', async (t) => {
+  const fx = fixture(t);
+  const bin = join(fx.dir, 'bin');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'ssh'), '#!/bin/sh\nfor arg in "$@"; do printf \'%s\\n\' "$arg"; done >>"$SSH_LOG"\necho --- >>"$SSH_LOG"\nfor last; do :; done\nexec sh -c "$last"\n');
+  chmodSync(join(bin, 'ssh'), 0o755);
+  const runnerTemp = join(fx.dir, "runner's temp $(touch pwned) `touch pwned-too`");
+  const log = join(fx.dir, 'ssh-log');
+  const env = { PATH: `${bin}:${process.env.PATH}`, SSH_LOG: log, RUNNER_TEMP: runnerTemp, MAWS_APP_REMOTE: `git@example.invalid:${fx.app}` };
+  const run = await waiter(fx, { env, onRequest: (request) => answer(fx, `${RUN}-1-document-app`, request, 'success') });
+  assert.equal(run.code, 0, run.out);
+  const calls = readFileSync(log, 'utf8').split('---\n').filter(Boolean).map((call) => call.trimEnd().split('\n'));
+  assert.ok(calls.length >= 3, `ssh ran ${calls.length} times`);
+  for (const args of calls) {
+    assert.equal(args[args.indexOf('-i') + 1], join(runnerTemp, 'hosted-mac/key'), args.join(' | '));
+    assert.ok(args.includes(`UserKnownHostsFile=${join(runnerTemp, 'hosted-mac/known_hosts')}`), args.join(' | '));
+    assert.ok(args.includes('IdentitiesOnly=yes') && args.includes('StrictHostKeyChecking=yes'), args.join(' | '));
+  }
+  const ran = execFileSync('find', [fx.dir, '-name', 'pwned*'], { encoding: 'utf8' }).split('\n').filter((path) => path && !path.startsWith(runnerTemp));
+  assert.deepEqual(ran, []);
+  const cleanup = await waiter(fx, { args: ['--cleanup'], env });
+  assert.deepEqual([cleanup.code, cleanup.out], [0, '']);
+});
+
 test('an entry or a run the waiter cannot trust is refused before anything is pushed', async (t) => {
   const fx = fixture(t);
   const before = refsOf(fx);

@@ -57,8 +57,12 @@ tip_of() { # <ref>: its commit on maws-app, empty when it is not there; fails wh
   printf '%s\n' "${listed%%[[:space:]]*}"
 }
 
+# One word for the shell git runs GIT_SSH_COMMAND through, whatever it holds: single-quoted, each ' as '\''.
+shell_word() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
 use_ssh() {
-  export GIT_SSH_COMMAND="ssh -i '$state/key' -o IdentitiesOnly=yes -o UserKnownHostsFile='$state/known_hosts' -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=20"
+  GIT_SSH_COMMAND="ssh -i $(shell_word "$state/key") -o IdentitiesOnly=yes -o UserKnownHostsFile=$(shell_word "$state/known_hosts")"
+  GIT_SSH_COMMAND+=' -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=20'
+  export GIT_SSH_COMMAND
 }
 
 # A commit over <request> on <ref> with a Hosted-Cancel: trailer, pushed only while <ref> is still <request>.
