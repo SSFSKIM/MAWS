@@ -21,7 +21,7 @@ case "$*" in
   *" run list "*) ;;
   *"repos/SSFSKIM/MAWS/actions/variables"*) echo '["GATE_RUNNER","pool"]'; echo '["GATE_E2E_RUNNER","macos"]' ;;
   *"repos/SSFSKIM/ci-kit-sandbox/issues"*) echo '{"number":18,"title":"ci-kit alert: mini: UserNotificationCenter since 2026-10-19T21:08Z"}' ;;
-  *"repos/SSFSKIM/MAWS/actions/runners"*) echo '{"name":"ci-kit-mac-mini","status":"online"}' ;;
+  *"repos/SSFSKIM/MAWS/actions/runners"*) echo '{"name":"ci-kit-mac-mini","status":"online","labels":["self-hosted","macOS","ARM64","ci-kit-mac","ci-kit-mac-solo","ci-kit-mac-home"]}' ;;
   *) echo "fake gh: unexpected call $*" >&2; exit 1 ;;
 esac
 `;
