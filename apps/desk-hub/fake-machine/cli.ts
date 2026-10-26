@@ -30,7 +30,8 @@ const USAGE = `usage:
       --follow                 open the project as a follower (hello.follow): no presence; give it no --recording
       --keep-times             log events keep their recorded ts (default: when first written)
       --producer <daemon>      dc3 (default) | dc8: DX4's widened subagents body, jobs, MCP names, and output |
-                               m0: dc8 and capabilities, read status, command | m1: pushed catalogs and measured prompt commands
+                               m0: dc8 and capabilities, read status, command | m1: pushed catalogs and measured prompt commands |
+                               mw1: m1 and the reads of usage, config, settings and MCP, and capabilities.controls
       --plugin <name>          doperpowers (default) | sminos: the plugin its bridge and ask run in (a rolled machine)`;
 
 function readState(path: string): State {
@@ -90,8 +91,8 @@ export async function main(argv: string[], defaults: { recording: string }): Pro
     console.error('--decisions is recorded or wait');
     return 2;
   }
-  if (values.producer !== 'dc3' && values.producer !== 'dc8' && values.producer !== 'm0' && values.producer !== 'm1') {
-    console.error('--producer is dc3, dc8, m0 or m1');
+  if (values.producer !== 'dc3' && values.producer !== 'dc8' && values.producer !== 'm0' && values.producer !== 'm1' && values.producer !== 'mw1') {
+    console.error('--producer is dc3, dc8, m0, m1 or mw1');
     return 2;
   }
   if (values.plugin !== 'doperpowers' && values.plugin !== 'sminos') {
