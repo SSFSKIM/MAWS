@@ -628,8 +628,8 @@ const ownLists = () => {
 
 test('setup skips LibreOffice only on Macs whose group does not need it, including the real hosted plan', () => {
   const action = readFileSync(join(root, '.github/actions/setup/action.yml'), 'utf8');
-  const setupStep = action.slice(action.indexOf('- uses: SSFSKIM/ci-kit/setup@v1')).split(/\n    - /)[0];
-  const expression = /\n        skip: \$\{\{ (.+) \}\}/.exec(setupStep)?.[1] ?? "''";
+  const setupStep = action.slice(action.indexOf('- uses: SSFSKIM/ci-kit/setup@v1')).split(/\n {4}- /)[0];
+  const expression = /\n {8}skip: \$\{\{ (.+) \}\}/.exec(setupStep)?.[1] ?? "''";
   // These expression operators have the same behavior in JavaScript and Actions for the string inputs here.
   const skip = Function('runner', 'inputs', `return (${expression});`);
   for (const os of ['macOS', 'Linux']) {
