@@ -57,12 +57,10 @@ tip_of() { # <ref>: its commit on maws-app, empty when it is not there; fails wh
   printf '%s\n' "${listed%%[[:space:]]*}"
 }
 
-# One word for the shell git runs GIT_SSH_COMMAND through, whatever it holds: single-quoted, each ' as '\''.
-shell_word() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
+# The paths go into GIT_SSH_COMMAND, which git runs through a shell and whose UserKnownHostsFile OpenSSH splits on
+# whitespace, so the state directory is plain (checked before anything is written there).
 use_ssh() {
-  GIT_SSH_COMMAND="ssh -i $(shell_word "$state/key") -o IdentitiesOnly=yes -o UserKnownHostsFile=$(shell_word "$state/known_hosts")"
-  GIT_SSH_COMMAND+=' -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=20'
-  export GIT_SSH_COMMAND
+  export GIT_SSH_COMMAND="ssh -i $state/key -o IdentitiesOnly=yes -o UserKnownHostsFile=$state/known_hosts -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=20"
 }
 
 # A commit over <request> on <ref> with a Hosted-Cancel: trailer, pushed only while <ref> is still <request>.
@@ -104,6 +102,8 @@ cleanup() {
 }
 [[ ${1:-} != --cleanup ]] || cleanup
 (($# == 0)) || { echo 'usage: hosted-mac.sh [--cleanup]' >&2; exit 2; }
+# A runner's temp directory is a plain path; one with a space, a quote or shell syntax would reach ssh as something else.
+[[ $state =~ ^[A-Za-z0-9/._-]+$ ]] || fail "RUNNER_TEMP must be a plain path (letters, digits and / . _ -) for the deploy key's ssh command: $RUNNER_TEMP"
 
 : "${GITHUB_SHA:?}" "${GITHUB_RUN_ID:?}" "${GITHUB_RUN_ATTEMPT:?}"
 started=$(date +%s)

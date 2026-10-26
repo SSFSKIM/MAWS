@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import process from 'node:process';
@@ -322,31 +322,23 @@ test("main moves to the request, by a fast-forward, only when it is a day old an
   assert.match(run.out, /^hosted: main not moved: /m);
 });
 
-// git runs GIT_SSH_COMMAND through a shell, so the key's and the known hosts' paths, under RUNNER_TEMP, must reach ssh as
-// themselves, whatever they hold. Here maws-app is reached over ssh, a stub that logs its arguments and serves the git
-// command locally, from a RUNNER_TEMP with an apostrophe, a space, a $(...) and backticks in it.
-test('the deploy key and known hosts reach ssh as their own paths, a RUNNER_TEMP with quotes and shell syntax included', async (t) => {
+// git runs GIT_SSH_COMMAND through a shell, and OpenSSH splits UserKnownHostsFile on whitespace, so the key's and the
+// known hosts' paths, under RUNNER_TEMP, reach ssh as themselves only when they are plain. A RUNNER_TEMP with an
+// apostrophe, a space, a $(...) or backticks is refused before the key is written, and nothing in it runs.
+test('a RUNNER_TEMP that is not a plain path is refused before the key is written, and nothing in it runs', async (t) => {
   const fx = fixture(t);
-  const bin = join(fx.dir, 'bin');
-  mkdirSync(bin);
-  writeFileSync(join(bin, 'ssh'), '#!/bin/sh\nfor arg in "$@"; do printf \'%s\\n\' "$arg"; done >>"$SSH_LOG"\necho --- >>"$SSH_LOG"\nfor last; do :; done\nexec sh -c "$last"\n');
-  chmodSync(join(bin, 'ssh'), 0o755);
-  const runnerTemp = join(fx.dir, "runner's temp $(touch pwned) `touch pwned-too`");
-  const log = join(fx.dir, 'ssh-log');
-  const env = { PATH: `${bin}:${process.env.PATH}`, SSH_LOG: log, RUNNER_TEMP: runnerTemp, MAWS_APP_REMOTE: `git@example.invalid:${fx.app}` };
-  const run = await waiter(fx, { env, onRequest: (request) => answer(fx, `${RUN}-1-document-app`, request, 'success') });
-  assert.equal(run.code, 0, run.out);
-  const calls = readFileSync(log, 'utf8').split('---\n').filter(Boolean).map((call) => call.trimEnd().split('\n'));
-  assert.ok(calls.length >= 3, `ssh ran ${calls.length} times`);
-  for (const args of calls) {
-    assert.equal(args[args.indexOf('-i') + 1], join(runnerTemp, 'hosted-mac/key'), args.join(' | '));
-    assert.ok(args.includes(`UserKnownHostsFile=${join(runnerTemp, 'hosted-mac/known_hosts')}`), args.join(' | '));
-    assert.ok(args.includes('IdentitiesOnly=yes') && args.includes('StrictHostKeyChecking=yes'), args.join(' | '));
+  const before = refsOf(fx);
+  for (const name of ["runner's temp $(touch pwned) `touch pwned-too`", 'runner temp', 'runner$(touch pwned)']) {
+    const runnerTemp = join(fx.dir, name);
+    const run = await waiter(fx, { env: { RUNNER_TEMP: runnerTemp } });
+    assert.equal(run.code, 1, `${name}: ${run.out}`);
+    assert.match(run.out, /^hosted: RUNNER_TEMP must be a plain path \(letters, digits and \/ \. _ -\) for the deploy key's ssh command: /m, name);
+    assert.ok(!existsSync(join(runnerTemp, 'hosted-mac')), `${name}: the state directory was made`);
+    const cleanup = await waiter(fx, { args: ['--cleanup'], env: { RUNNER_TEMP: runnerTemp } });
+    assert.deepEqual([cleanup.code, cleanup.out], [0, ''], name);
   }
-  const ran = execFileSync('find', [fx.dir, '-name', 'pwned*'], { encoding: 'utf8' }).split('\n').filter((path) => path && !path.startsWith(runnerTemp));
-  assert.deepEqual(ran, []);
-  const cleanup = await waiter(fx, { args: ['--cleanup'], env });
-  assert.deepEqual([cleanup.code, cleanup.out], [0, '']);
+  assert.deepEqual(execFileSync('find', [fx.dir, '-name', 'pwned*'], { encoding: 'utf8' }), '');
+  assert.deepEqual(refsOf(fx), before);
 });
 
 test('an entry or a run the waiter cannot trust is refused before anything is pushed', async (t) => {
