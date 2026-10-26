@@ -300,7 +300,8 @@ const placement = (outputs) => Object.fromEntries(JSON.parse(outputs.e2e).map((e
 test("gate.yml's proven-VM groups run on Solo Mac, or the named VM lane alone; every other Mac job keeps today's labels and waits", () => {
   const workflow = readWorkflow();
   const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E'];
-  const own = Object.fromEntries(names.map((name) => [name, workflowList(workflow, name)]));
+  // The mini's own placement, as with no group on HOSTED_MAC_E2E; the list's waiters are pinned by their own test below.
+  const own = { ...Object.fromEntries(names.map((name) => [name, workflowList(workflow, name)])), HOSTED_MAC_E2E: '' };
   assert.equal(own.MAC_SHARED_E2E, '');
   assert.equal(own.MAC_VM_E2E, 'document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations deliverables supervisor browser browser-comment browser-import agents c12 available design-systems browser-chrome composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct');
   const proven = ['document-app', 'widgets', 'to-human', 'transcript', 'panel', 'c7', 'code', 'scm', 'library', 'document', 'settings', 'tools', 'dashboard', 'side', 'presentations',
@@ -530,7 +531,8 @@ test("a MAC_VM_E2E group not built through scripts/e2e-build.sh stays off the gu
 test("gate.yml's proven-VM groups split into e2e_vm with just their build variants; Linux and class 1a alone build nothing", () => {
   const workflow = readWorkflow();
   const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E'];
-  const own = Object.fromEntries(names.map((name) => [name, workflowList(workflow, name)]));
+  // The mini's own placement, as with no group on HOSTED_MAC_E2E; the list's waiters are pinned by their own test below.
+  const own = { ...Object.fromEntries(names.map((name) => [name, workflowList(workflow, name)])), HOSTED_MAC_E2E: '' };
   assert.equal(own.MAC_VM_E2E, 'document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations deliverables supervisor browser browser-comment browser-import agents c12 available design-systems browser-chrome composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct');
   const variants = {
     'document-app': 'plain', widgets: 'harness', 'to-human': 'harness', transcript: 'harness', panel: 'harness',
@@ -643,7 +645,6 @@ test('a HOSTED_MAC_E2E group is a waiter on a macOS lane, on the pool with the h
 
 test("Lane: hosted hosts every eligible group of the run, gate.yml's whole default set (--gates all) among them; the rest stay where they would be", () => {
   const own = ownLists();
-  assert.equal(own.HOSTED_MAC_E2E, '');
   assert.equal(own.MAC_SECRET_E2E, 'connectors-oauth discover');
   const today = { ...own, GATE_RUNNER: 'pool', GATE_E2E_RUNNER: 'macos' };
   const before = plan({ ...today, HEAD_MESSAGE: 'ci-gate: test' });
@@ -661,6 +662,16 @@ test("Lane: hosted hosts every eligible group of the run, gate.yml's whole defau
   const hostedGroups = groups.filter((group) => !(group in kept));
   assert.deepEqual(JSON.parse(laned.outputs.e2e_hosted).map((entry) => entry.group), hostedGroups);
   assert.ok(laned.summary.endsWith(`${hostedNote(hostedGroups)} Lane: hosted, but never on a hosted Mac, so where it would be: e2e:default (default), e2e:desk-web (pool), e2e:connectors-oauth (secret), e2e:discover (secret).\n`), laned.summary);
+});
+
+test("gate.yml's HOSTED_MAC_E2E groups are waiters on the default macOS set; every other group is where an empty list puts it", () => {
+  const today = { ...ownLists(), GATE_RUNNER: 'pool', GATE_E2E_RUNNER: 'macos', HEAD_MESSAGE: 'ci-gate: test' };
+  const listed = today.HOSTED_MAC_E2E.split(/\s+/).filter(Boolean);
+  const was = placement(plan({ ...today, HOSTED_MAC_E2E: '' }).outputs);
+  const { outputs, summary } = plan(today);
+  assert.deepEqual(placement(outputs), Object.fromEntries(Object.entries(was).map(([group, where]) => [group, listed.includes(group) ? [waiter, 100] : where])));
+  assert.deepEqual(JSON.parse(outputs.e2e_hosted).map((entry) => entry.group).sort(), [...listed].sort());
+  if (listed.length) assert.match(summary, / Hosted Mac \(SSFSKIM\/maws-app, each through a waiter on the pool\): /);
 });
 
 test('under Lane: hosted, default, a measured, a live, a secret and a POOL_E2E group stay where they are, each named with why; a live run hosts none', () => {
