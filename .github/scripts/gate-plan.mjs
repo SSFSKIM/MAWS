@@ -29,19 +29,21 @@
 // It adds `selection` and `related` (the paths for vitest related as JSON, or empty for the full suite) to the outputs
 // and one line saying which to the summary; a run without the trailer writes neither. Such a run is never landing
 // evidence.
-// The Mac's two kinds of runner (ci-kit's mac-lane concurrency spec, M2): a Mac job asks for today's labels, which only
-// ci-kit's exclusive instance carries, so it runs alone on the desktop, unless it is on MAC_SHARED_E2E, the e2e groups
-// (and `unit:darwin`) a trial showed giving beside a neighbour the results they give alone; those ask for
-// [ci-kit-mac-shared] alone, the label only the instances that run two jobs at a time carry. A MEASURED_E2E group, or a
-// foreground one (its script sets MAWS_E2E_FOREGROUND=1), stays exclusive whatever the list says. Each kind's start may
+// The Mac runners (ci-kit's mac-lane concurrency spec, M2): on the macOS lane a MEASURED_E2E group and every group of a
+// live run (LIVE_E2E and LIVE_GUARD_E2E) ask for [self-hosted, macOS, ARM64, ci-kit-mac-home], the mini's exclusive instance
+// alone: measured bounds were calibrated there, and only it holds the engine login. These stay home whatever the shared
+// and VM lists or Lane: say. Other Mac jobs keep today's labels, carried by the exclusive instances, unless on MAC_SHARED_E2E,
+// the e2e groups (and `unit:darwin`) a trial showed giving beside a neighbour the results they give alone; those ask for
+// [ci-kit-mac-shared] alone, the label only the instances that run two jobs at a time carry. A foreground group (its script
+// sets MAWS_E2E_FOREGROUND=1) stays exclusive whatever the shared list says. Each kind's start may
 // wait in ci-kit's job-started hook, counted against the job's timeout, which carries that bound on top of its own
 // minutes (`timeouts`, and each e2e entry's `timeout`): an exclusive job MAC_EXCLUSIVE_WAIT_MINUTES for the shared
 // instances to stop, a shared one MAC_SHARED_WAIT_MINUTES while an exclusive job holds the desktop.
 // ci-kit's VM lane (the same spec, "The VM lane", V3): a group on MAC_VM_E2E asks for [ci-kit-mac-solo], which the
 // exclusive instance and ci-kit's macOS guest, a second desktop on the Mac, both carry, so it runs on whichever is free;
 // on the exclusive instance its start waits MAC_EXCLUSIVE_WAIT_MINUTES as any exclusive job's does, in the guest nowhere.
-// A MEASURED_E2E group stays on today's labels whatever the list says: the guest runs 1.3-1.7x the host's time on other
-// hardware, and the measured bounds are the host's. A group on both lists runs shared: beside a neighbour it leaves the
+// Measured and live groups stay on the home labels whatever the list says. The guest runs 1.3-1.7x the host's time on other
+// hardware, and the measured bounds are the home Mac's. A group on both lists runs shared: beside a neighbour it leaves the
 // exclusive instance alone, the scarcer of the two. `Lane:` (a push; the `lane` input on a dispatch; ci-gate.sh --lane)
 // moves the run's MAC_VM_E2E groups, shared or not, to the guest alone: `vm`, [ci-kit-mac-vm], for a group's trial, a
 // re-measurement, or a session that knows the host is held; `vm-trial`, [ci-kit-mac-vm-trial], the label only a candidate
@@ -98,6 +100,7 @@ export function planOf(env, scripts) {
   const RUNNERS = {
     linux: 'ubuntu-24.04',
     macos: ['self-hosted', 'macOS', 'ARM64'],
+    macHome: ['self-hosted', 'macOS', 'ARM64', 'ci-kit-mac-home'],
     macShared: ['ci-kit-mac-shared'],
     // ci-kit's VM lane: the exclusive instance or the guest; the guest alone; the guest under the trial slot's identity.
     macSolo: ['ci-kit-mac-solo'],
@@ -110,7 +113,7 @@ export function planOf(env, scripts) {
   const MAC_SHARED_WAIT_MINUTES = 60;
   // A solo job may land on the exclusive instance, so it carries that wait; a job that asks for the guest alone waits nowhere.
   const timeoutOn = (runner, minutes) =>
-    minutes + (runner === RUNNERS.macos || runner === RUNNERS.macSolo ? MAC_EXCLUSIVE_WAIT_MINUTES : runner === RUNNERS.macShared ? MAC_SHARED_WAIT_MINUTES : 0);
+    minutes + (runner === RUNNERS.macos || runner === RUNNERS.macHome || runner === RUNNERS.macSolo ? MAC_EXCLUSIVE_WAIT_MINUTES : runner === RUNNERS.macShared ? MAC_SHARED_WAIT_MINUTES : 0);
   const poolBox = (cpus) => ['self-hosted', 'ci-kit-pool', `cpus-${cpus}`];
   // The guest's labels: a job asking for one of these may run in the guest.
   const GUEST = [RUNNERS.macSolo, RUNNERS.macVm, RUNNERS.macVmTrial];
@@ -197,7 +200,7 @@ export function planOf(env, scripts) {
   const unbuilt = listedVm.filter((name) => name !== 'unit:darwin' && !measured.has(name) && variantOf(name) === undefined);
   const macVm = new Set(listedVm.filter((name) => !measured.has(name) && !unbuilt.includes(name)));
   const onMac = (name) => (macVm.has(name) && vmLane ? LANES[vmLane] : macShared.has(name) ? RUNNERS.macShared : macVm.has(name) ? RUNNERS.macSolo : RUNNERS.macos);
-  const placed = (group) => (!offMac.has(group) ? (lane === 'macos' ? onMac(group) : RUNNERS[lane]) : class1a === 'pool' ? poolBox(4) : RUNNERS.linux);
+  const placed = (group) => (lane === 'macos' && (measured.has(group) || live) ? RUNNERS.macHome : !offMac.has(group) ? (lane === 'macos' ? onMac(group) : RUNNERS[lane]) : class1a === 'pool' ? poolBox(4) : RUNNERS.linux);
   // The hosted Macs. Why a group never goes there, if it never does: its selection is the whole run's (`default`), its
   // bounds the mini's (measured), it spends (live), it needs a credential (secret), or it never takes a Mac (pool).
   const secret = new Set(words(env.MAC_SECRET_E2E));
@@ -277,6 +280,7 @@ export function planOf(env, scripts) {
     (laneAsked === 'no-hosted' ? ' Lane: no-hosted, so no group of this run is hosted.' : '');
   const laneNote = !vmLane ? '' : laneJobs.length > 0 ? said(`Lane: ${vmLane}, on [${LANES[vmLane]}] alone`, laneJobs) : ` Lane: ${vmLane}, but no job of this run is on MAC_VM_E2E.`;
   const macNote =
+    said('Home Mac', jobsOn(RUNNERS.macHome)) +
     said('Shared Mac instances', jobsOn(RUNNERS.macShared)) +
     said('On MAC_SHARED_E2E but measured or foreground, so alone', inRun(keptAlone)) +
     said('Solo Mac (the exclusive instance or the guest, whichever is free)', jobsOn(RUNNERS.macSolo)) +
