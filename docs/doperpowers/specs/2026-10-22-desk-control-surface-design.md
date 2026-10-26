@@ -2006,6 +2006,19 @@ question its predecessor left open (kept in `$.state` until the child took its e
 a `run` or `btw` end is posted again after every resync until a post the child
 answered carried it; and the child relays each op's end once, by its `id`.
 
+*2026-10-26, MW4 as built (sminos 1.14.0; the live check on 2.1.310):* `stop-agent`
+and `tell` take `agentId` as an id or the Agent call's name (1 to 128 characters, not
+blank, no control character), resolved against `$.agent.list()`: an id first, then the
+name of exactly one running agent (a status other than `completed`, `failed`,
+`killed`). Refusals carry `code`: `unknown-agent` (none running by it), `ambiguous-agent`
+(a name two running agents hold, the error naming their ids); TaskStop's own refusal is
+the error in its words. `tell` is `{agentId, text, rpc?}`, sent to the resolved id under
+the first line *From the person at the desk, not from your coordinator:* (the engine's
+envelope credits the coordinator). Both answer when the engine has, so neither posts a
+`run`/`btw`-like outcome; the child keeps the answer under `rpc` as it does a steer's.
+A stop's note is the parent's next request's: an Agent call's result waits for it, at
+most INTERRUPT_HOLD_MS.
+
 Read results:
 
 ```ts
@@ -2216,6 +2229,7 @@ catalog: Catalog                                                            // M
 // session-wide (sub and n null), relayed unread:
 op:      { rpc: string | null; op: 'command' | 'btw' | 'stop-agent' | 'tell' | 'media'; phase: 'start' | 'end'; id: string; [field: string]: JsonValue }
           // MW5: `id` is the upload; its start is the RPC's `queued`, its end the last attachment's `forwarded`, `aborted` or `failed`
+          // MW4: lane A sends none for `stop-agent` or `tell`: their RPC's answer is the outcome (2026-10-26)
 // `end` reasons gain:
 end:     { reason: ... | 'continued'; to?: string; confirmed?: boolean }      // M4
 ```
@@ -2282,6 +2296,21 @@ directory) is available. The hub admits `decide` as before, by `RPC_NAMES` alone
 admits `Raised.suggestions` under exactly the bridge's bound (`SUGGESTIONS_MAX`,
 `SUGGESTION_BYTES_MAX` in `session.ts`), refusing the raise, or the whole pending set,
 `bad-shape` past it.
+
+*2026-10-26, MW4 as built (sminos 1.14.0):* `stop-agent` and `tell` are refused
+`unknown-agent` before the claim when the session's subagent tree, as the bridge's child
+keeps it (`GET /agents`), holds no running agent whose id or Agent-call name is
+`agentId`; `bad-shape` for an `agentId` outside 1 to 128 characters, blank, or holding a
+control character, and a `tell` whose `text` is not text or is blank (no other bound but
+the RPC's frame). *A name may hold a space* stays the shape's (path-neutral), though
+2.1.310's Agent tool admits none (Surprises). The answer is the outcome, no `op`
+following: `stop-agent` `{agentId, accepted: true, resolvedAgentId?}` (`resolvedAgentId`
+only when a name was asked), `tell` `{sent: true}`; a refusal of the bridge's after the
+claim is `failed`, its code the message's first word. A claim the daemon stopped
+between the two is reconciled from the answer the child kept under the nonce. A daemon
+older than 1.14.0 refuses both `bad-shape` (*no RPC "…"*); the machine presence's
+`desk.rpcs` names them from 1.14.0, and the web offers them where the session's
+`controls['stop-agent']` and `controls.tell` are available.
 
 ### The log (owner: doperpowers `sminos/skills/sminos/scripts/sminos.py`; read by the web's projection)
 
@@ -2709,6 +2738,35 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   evidence showed `[redacted:…]` where the engine's own record held the value. A check
   for a secret's presence is a boolean computed in the file's own process, never a
   printed field.
+
+- Observation (MW4): on 2.1.310 the Agent tool refuses a `name` outside
+  `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$` (`InputValidationError`: no space, at most 64), so
+  no Agent call names an agent with a space; the engine's own name for an unnamed
+  background agent is its type (`allocateName(agentType)`) and only under the
+  `tengu_zinc_harbor` gate, off in the isolated profile, where `$.agent.list()` gave an
+  unnamed agent no name at all. The live check could therefore not stage a stop by a
+  name with a space: the bridge took the spelling `bg sleeper` and refused it
+  `unknown-agent` (no agent holds it), and the unit tests cover a spaced name end to end.
+  Evidence: MW4 live check, `/tmp/dsk-scripts/mw-wave/mw4-live/evidence/bg1/`'s first
+  attempt (the stub's `name: "bg sleeper"` answered with that error) and
+  `bg2/summary.json` (`unknown.stop_spaced`, `unnamed`).
+- Observation (MW4): a plugin's `$.session.send({to: {agentId}})` reaches a running
+  subagent at its next step as a system text that credits the agent's coordinator:
+  *The coordinator sent a message while you were working:* … *Address this before
+  completing your current task.* The agent reads it about one step later (1 to 2 s with
+  a `sleep 2` loop), background or foreground. Evidence: `bg2`, `fg2`
+  (`tell_by_name.request_end`, `tell_by_id.request_end`).
+- Observation (MW4): the stop's note reaches the parent's next request ahead of what
+  the engine adds for the stop. A background agent: the `<task-notification>`
+  (`<status>killed</status>`, *Agent "…" was stopped by Claude*) starts a parent turn
+  0.05 s after the stop, and its first request carries the note, then the notification,
+  in one user message. A foreground agent (`CLAUDE_CODE_FORK_SUBAGENT=0`,
+  `forkSubagentDisabled`): the Agent call's result is `[Request interrupted by user for
+  tool use]`, and the parent's next request, 0.06 s on, carries it and the note in one
+  user message. TaskStop answered in 7 to 21 ms; no subagent request followed a stop.
+  A run with the bridge's hold of the Agent call removed also had the note in time (one
+  run, 0.64 s), so the hold guards a race the measurement did not show. Evidence:
+  `bg2`, `fg2` and `nohold1` (`stop_by_name`, `stop_by_id`, `stop`).
 
 ## Decision Log
 
@@ -3663,6 +3721,72 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   allow, the rule dropped silently. The web half must offer a scope only where the
   session's `controls['decide.scope']` is available (Interfaces, DX6).
   Date/Author: 2026-10-26, MW3's executor for the desk orchestrator (b4948247).
+
+- Decision: MW4 as built (sminos 1.14.0, doperpowers and MAWS `desk-ctl-mw4`). The
+  gaps the wave's text left, each settled from the shape's purpose:
+  - **Where it lives.** `bridge-agent-ops.tsx` holds the resolution, the note, the
+    attribution line and both ops; `bridge.tsx` routes `stop-agent` and `tell` to it and
+    holds an Agent call's result for a stop's note. The daemon's check and execution are
+    `sminos_rpc.py`'s `running_agent`, `stop_agent` and `tell`.
+  - **The answer is the outcome; no `op` follows.** TaskStop answers at once (7 to 21
+    ms measured) and the engine's send once the message is queued, so both ops answer
+    within the daemon's wait with what happened, the agent's end reaches the web in the
+    subagent tree as every agent's does, and nothing is left owed across a reload. The
+    guarantee MW2 gave asynchronous ops is kept here by the at-most-once path the
+    synchronous ones already have: each carries its nonce to the bridge, whose child
+    keeps the answer, and a claim the daemon stopped between the two is reconciled from
+    that answer (as a steer's is), else `interrupted` after its window. DX4 `op`
+    keeps the two names for a lane whose stop settles later.
+  - **Running is every live word.** An agent whose `$.agent.list()` status is not
+    `completed`, `failed` or `killed` is running (`pending`, `waiting` and a teammate's
+    `idle` are loops alive, as `bridge-agents.tsx` already reads them); an ended one is
+    refused `unknown-agent` for a stop (nothing to stop) and for a message (a send would
+    revive it from its transcript).
+  - **An id first, then a name, never a guess.** The asked spelling is an id if the
+    list holds that id, else the name of exactly one running agent; a name two running
+    agents hold is refused `ambiguous-agent` naming both ids. TaskStop and the send then
+    go to the resolved id, so the engine's own resolver never meets an ambiguous name.
+  - **`tell` takes an id or a name too**, resolved the same way, and answers
+    `{sent: true}` alone: the desk already holds the id from the tree.
+  - **The message says who wrote it.** The engine's envelope credits a plugin's send to
+    the agent's coordinator, so the bridge sends the text under a first line, *From the
+    person at the desk, not from your coordinator:*. The parent is not told of a
+    message: nothing in it changes what the parent should do.
+  - **The note names the agent as the person did** (the spelling asked), and its source
+    as the stop's note does: *from the desk* for the daemon's RPC, *from outside the
+    terminal* for any other caller.
+  - **An Agent call's result waits for a stop's note**, at most INTERRUPT_HOLD_MS, as a
+    Bash call of an interrupted turn waits for the interrupt's record: the parent's next
+    request is built from the conversation when the result returns, and a foreground
+    parent that read only the interruption re-spawned the agent (S2). One measured run
+    without the hold was in time; the race is structural, so the hold stays.
+  - **The daemon's tree is the child's.** The check reads the bridge's child (`GET
+    /agents`, the tree the plane is fed), a running agent by its id or the name its
+    Agent call gave it; a child that does not answer fails the RPC `failed`, nothing
+    ran. After the claim the bridge has the last word: its refusal (the agent ended
+    between the checks) is `failed`, its code the message's first word, as a command's.
+  - **The shapes.** `agentId` is 1 to 128 characters, not blank, without a control
+    character, in the daemon and the bridge alike; `tell`'s `text` is text, not blank,
+    bounded only by the RPC's frame, as a steer's is.
+  - **The fake machine's `mw4` producer** answers from the live check's recording
+    (`apps/desk-hub/fake-machine/dx4/mw4-agents.json`): its capabilities, the recorded
+    agent spawned on a session once played (`spawnRecordedAgent`, named `bg-sleeper`),
+    the tree check before the claim, a stop's note and its tree entry, and each message
+    kept in `told`; an older producer refuses both RPCs `bad-shape` (*no RPC "…"*).
+  - **No CLI verb.** The live check drives the bridge's child directly, as MW2's did.
+  Rationale: each follows a measured fact of 2.1.310 or the op contract's purpose (the
+  answer says what happened, under the nonce, once). Rejected: `op` start and end for
+  both (a protocol whose end would always arrive with its start); resolving a name to
+  the first of several agents (a stop of the wrong agent); sending to an ended agent
+  (it revives it); the plane's subscription tree for the daemon's check (a session may
+  have no subscription; the child's tree is what feeds it).
+  Open: an agent's name the engine allocates itself (its type, under the
+  `tengu_zinc_harbor` gate) reaches the bridge's resolution through `$.agent.list()` but
+  not the child's tree, which takes names from the Agent call's spawn hook, so the
+  daemon would refuse a stop by such a name `unknown-agent` while the bridge would take
+  it. The desk names agents from the tree it is shown, by id first, so nothing it sends
+  meets this; the bridge could carry the list's name into the tree when the gate ships.
+  Date/Author: 2026-10-26, MW4's executor for the desk orchestrator (b4948247).
 
 ## Outcomes & Retrospective
 
