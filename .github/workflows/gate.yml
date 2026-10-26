@@ -201,9 +201,15 @@ env:
   # cover's placeholder image missing; its 200 ms bound passed); terminal, red 3/3 at terminal.spec.ts:508 (10044 lines
   # after the reload, not 10047); browser-cua, red at browser-cua.spec.ts:493 (connections 0, not 1) and :186 (innerWidth
   # 800, not 1280: the override not cleared after detach).
+  # Wave 7 (CI-opt, M3): dashboard (12 passed), design (19), design-systems (8) and tools (14) were 3/3 green under
+  # `Lane: hosted` at master e7ab5da39 (the font, the reserved-final rule and the hosted Dock in place) in runs 40305202999,
+  # 40305270673 and 40305340291, each run's count lines those of the `Lane: no-hosted` baseline 40300686375 on the same
+  # tree, every job on the host. tools' earlier reds at c9803aa1a were the Dock's clamp (maws-tools.spec.ts:239, 1512x982
+  # to 971), gone with #159. dashboard and design are final-bundle groups: a reserved final run hosts none.
   HOSTED_MAC_E2E: >-
     document-app browser-chrome available artifacts settings connectors connectors-direct delivery to-human widgets side
-    supervisor c12 browser-import document code scm agents library deliverables presentations
+    supervisor c12 browser-import document code scm agents library deliverables presentations dashboard design
+    design-systems tools
   # The groups that need a credential or the login keychain's custody, so never go to a hosted Mac, whatever the lane
   # (maws-app holds no secret): connectors-oauth, and discover, whose custody conditions (a), (b) and (c) stand.
   MAC_SECRET_E2E: connectors-oauth discover
