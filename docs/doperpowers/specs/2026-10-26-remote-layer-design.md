@@ -66,12 +66,12 @@ The lid closes, and when the MacBook wakes, every subscription resumes from its 
 - **Device.** One install of the MAWS app on one Mac account, holding that member's device keys. A member has one or more devices.
 - **Machine.** One enrolled OS account on one host. A machine runs sessions as that account, under that account's Claude login. Each machine has exactly one **machine owner**, the member it acts for. A Mac where two people log in is two machines.
 - **Endpoint module.** The narrow module inside the MAWS machine daemon that is the machine's network-facing side. It holds the machine's only connection to the hub, its key, its trust boundary and its policy (§2.1).
-- **MAWS machine daemon.** The headless MAWS service on a machine. It contains the endpoint module, the lane B Query and MAWS's machine-side services, and runs the engine host as a separate process (§2.1).
-- **Engine host.** MAWS's E10 supervisor, hardened as the holder. It owns lane B `claude -p` processes through one session host per session (holder design §3.1–§3.2).
+- **MAWS machine daemon.** The headless MAWS service on a machine. It contains the endpoint module and MAWS's machine-side services moved out of Electron main. It is the engine host's single client, and runs the engine host as a separate process (§2.1).
+- **Engine host.** MAWS's E10 supervisor, hardened as the holder. It holds each lane B session's Query and MAWS's `maws` tool server, which it serves as an SDK MCP server (`src/shared/engine/initialize.ts:13`). It owns the `claude -p` processes through one session host per session (holder design §3.1–§3.2).
 - **sminos daemon.** The machine's project-log and delivery daemon. It is local-only in this design.
 - **Bridge mod.** sminos's in-process mod in every Claude Code session. It controls in lane A and only observes in lane B.
 - **Lane A.** A session started in a terminal, or an engine `--bg` job. The bridge mod controls it.
-- **Lane B.** A session opened from MAWS. It is `claude -p` stream-json, held by the engine host and controlled by the MAWS daemon's Query.
+- **Lane B.** A session opened from MAWS. It is `claude -p` stream-json, held by the engine host and controlled by the engine host's Query.
 - **Owners.** The members a session acts for. A session has one owner by default and may have several ("A, B and 2 more").
 - **Share.** A grant of a session to a member at a grade (§6).
 - **Channel.** An end-to-end authenticated, encrypted stream between one device and one endpoint. The hub relays it without being able to read it (§5.4).
@@ -88,9 +88,9 @@ The lid closes, and when the MacBook wakes, every subscription resumes from its 
  │ renderer (no keys)   │ ─────────▶ │ Registry (org state, list)  │ ◀─── │ MAWS machine daemon (Node)         │
  │ main: device keys    │   sealed   │ Machine DO (relay, lease)   │      │  ├ endpoint module: key · policy · │
  │                      │ ◀───────── │ Project DO (log plane)      │ ───▶ │  │   ACL · channels · uplink       │
- └──────────────────────┘            └─────────────────────────────┘      │  ├ Query · tool server · files ·   │
-        │ same-uid local socket (when the app's own Mac is a machine)      │  │   git · artifacts · settings    │
-        └────────────────────────────────────────────────────────────────▶ │  └ engine host (separate process) │
+ └──────────────────────┘            └─────────────────────────────┘      │  ├ files · git · artifacts · Yjs · │
+        │ same-uid local socket (when the app's own Mac is a machine)      │  │   settings (from Electron main) │
+        └────────────────────────────────────────────────────────────────▶ │  └ engine host: Query · tool srv. │
                                                                            │      └ session hosts ─ claude -p   │
                                                                            │ sminos daemon (local only: log,    │
                                                                            │   delivery, lane A plane) ─ bridge │
@@ -109,8 +109,8 @@ Three rules carry the design:
 
 | Process | Duties | Restarts without ending sessions? |
 |---|---|---|
-| **MAWS machine daemon** (Node, headless), with the **endpoint module** inside it | **Endpoint module:** <ul><li>the only outbound connection to the hub;</li><li>the machine key and the pinned org root, with verification of the signed org state (§5.2);</li><li>it terminates channels (§5.4);</li><li>policy: read-only mode, the permission-mode ceiling for spawns that come from outside, the session ACL and grades, and freshness of discrete actions;</li><li>it relays plane subscriptions, sealed for each subscriber;</li><li>it signs the log events this machine writes, and verifies arriving events before sminos gets them (RL10).</li></ul> **The rest of the daemon:** <ul><li>the lane B Query for each session (holder design §3.3);</li><li>MAWS's in-process MCP tool server and hook callbacks;</li><li>the machine-side services now in Electron main: session index and read model, launch/fork/acquire, git and scm, files, library index, artifacts and Yjs, settings (research §3.2).</li></ul> It produces lane B's plane. | Yes. Channels drop and resume by cursor, and the Query re-adopts each session (holder design §3.3). |
-| **Engine host** (Node, the hardened E10 supervisor) and its **session hosts** (small static binaries, one per session) | Lane B process ownership: the output seq ring, the stdin offset, the writer fence, roster re-adoption, and the 24-hour reaping fence (holder design §3.1–§3.2). It is a separate process under the daemon. A daemon restart doesn't end its children, which is the lesson from Desktop's helper replacement. | The manager can restart; a session host's death ends its session. |
+| **MAWS machine daemon** (Node, headless), with the **endpoint module** inside it | **Endpoint module:** <ul><li>the only outbound connection to the hub;</li><li>the machine key and the pinned org root, with verification of the signed org state (§5.2);</li><li>it terminates channels (§5.4);</li><li>policy: read-only mode, the permission-mode ceiling for spawns that come from outside, the session ACL and grades, and freshness of discrete actions;</li><li>it relays plane subscriptions, sealed for each subscriber;</li><li>it signs the log events this machine writes, and verifies arriving events before sminos gets them (RL10).</li></ul> **The rest of the daemon:** <ul><li>the machine-side services now in Electron main: session index and read model, launch/fork/acquire, git and scm, files, library index, artifacts and Yjs, settings (research §3.2).</li></ul> It is the engine host's single client. It relays lane B's plane from the engine host to subscribers. | Yes. Channels drop and resume by cursor. Its connection to the engine host drops and reconnects. The Query lives in the engine host, so it is untouched. |
+| **Engine host** (Node, the hardened E10 supervisor) and its **session hosts** (small static binaries, one per session) | The lane B Query for each session, with its output checkpoint and durable request ledger (holder design §3.3). MAWS's `maws` tool server and SDK hook callbacks. Lane B process ownership: the output seq ring, the stdin offset, the writer fence, roster re-adoption, and the 24-hour reaping fence (holder design §3.1–§3.2). It produces lane B's plane. It is a separate process under the daemon (the MAWS architect's survey: today the Query is the engine host's Session). A daemon restart doesn't end its children, which is the lesson from Desktop's helper replacement. | The manager can restart; a session host's death ends its session. |
 | **sminos daemon** (Python, stdlib, local only) | **Keeps:** <ul><li>git-mirror sync for projects with a git remote;</li><li>join-on-sight, `derive --all`, and retries of owed deliveries;</li><li>local delivery: peer messages through the engine's inbox socket, human words through the bridge, under §5.7's rule;</li><li>member state and the lane A plane;</li><li>lane A's RPC translation (`sminos_rpc.py`: decide, answer, steer, interrupt, model, compact, btw, media, command, read, stop-agent, tell), with MW4's agent resolution and MW5's media save (`sminos_media.py`);</li><li>request settlement (`sminos_requests.py`).</li></ul> **Hands to the endpoint module:** the uplink (`sminos_uplink.py`), hub enrollment (`sminos_hub.py`), hub log sync (`sminos_hublog.py`), HMAC coding (`sminos_codes.py`), the RPC member check, and the policy gate (`sminos_policy.py`). It talks to the daemon only over RL10, signs nothing, and does no AEAD. | Yes. |
 | **Bridge mod** (in every Claude Code process) | **Lane A:** the controller (mod-control-surface; desk control-surface spec MW1–MW5). **Lane B:** observer only. It supplies subagent deltas and the `turn.step` reaping gate, and refuses control when MAWS's spawn marker is set. The observer mode is new work: `bridge.tsx` has no MAWS marker today. | It is part of the session. |
 
@@ -148,8 +148,8 @@ Three rules carry the design:
 #### 3.1 Lane B is the first-class lane
 
 - **The chain.**
-  - Output: `claude -p --input-format stream-json --output-format stream-json` → session host (seq ring, stdin offset, writer fence) → the MAWS daemon's Query (output checkpoint before every input, durable request ledger) → X1 events on lane B's plane → endpoint → each subscriber's channel.
-  - Actions go the other way: channel → endpoint (verify, authorize) → daemon → Query → host → stdin.
+  - Output: `claude -p --input-format stream-json --output-format stream-json` → session host (seq ring, stdin offset, writer fence) → the engine host's Query (output checkpoint before every input, durable request ledger) → X1 events on lane B's plane → the daemon's endpoint → each subscriber's channel.
+  - Actions go the other way: channel → endpoint module (verify, authorize) → engine host's Query → session host → stdin.
 - **What it must do.** All of holder design §3.1–§3.3 and §5 is binding here. Two points in particular:
   - a Query restart is not a process restart;
   - pending permission and dialog requests are delivered again on re-initialize and de-duplicated by request id.
@@ -157,7 +157,7 @@ Three rules carry the design:
   1. MAWS's in-process MCP tools and SDK hook callbacks live with the Query, and they must act on the session's machine: its files, git and artifacts.
   2. A client that sleeps would stall every hook callback and tool call of a running session.
   3. Two clients (two of the owner's Macs, or a collaborator) would need the single writer handed between apps. A session's capabilities would then depend on which app happened to hold it.
-- **Tools bound to the client app.** These are the agent-driven in-app browser tab, its screenshots, and the app's notifications. They are served from whichever app is attached, through MAWS's own tool server on the machine:
+- **Tools bound to the client app.** These are the agent-driven in-app browser tab, its screenshots, and the app's notifications. They are served from whichever app is attached, through MAWS's own tool server in the engine host:
   - the tool call is forwarded over the attached owner's channel to that app;
   - with no app attached, the tool answers "no MAWS app is attached" and appears as an unavailable capability.
 
@@ -216,7 +216,7 @@ The contract is the research's §4, adopted whole. The points that bind every im
      The channel and any step-up or WebAuthn signature cover both.
    - **Each executing side keeps one durable ledger keyed by `opId`, holding the claim and the result together.**
      - **Lane A:** sminos's existing RPC ledger, re-keyed from the RPC nonce to `opId`. It already records the claim before the run, answers a known id from the ledger without running it again, and fails closed: while the ledger can't be read, no RPC runs (`sminos_rpc.py:16, 165, 279-401`).
-     - **Lane B:** the daemon's ledger, built the same way.
+     - **Lane B:** the engine host's ledger, beside the Query, built the same way.
      - **The endpoint module keeps no op ledger.** It checks freshness and channel replay. It forwards `query {opId}` and the `not-received` tombstone to the executing side, over RL10 for lane A. Splitting the claim and the result across a process boundary would open two crash windows: a claim whose action never arrives stays `in-progress` forever, and a run whose claim is lost runs again.
      - A repeated `opId` returns the stored result and never executes twice.
      - The ledger is kept for a day, as desk's is (`KEPT_S = 86400`).
@@ -540,8 +540,8 @@ All of this section's choices are decided (owner, 2026-10-26).
 | Event | What survives | Recovery |
 |---|---|---|
 | Hub deploy or DO eviction | Everything on machines | Sockets reconnect. Channels re-handshake. Subscriptions resume by cursor (replay, or snapshot if the ring overflowed). |
-| Endpoint restart | Sessions, the Query, sminos | Channels drop. Apps reconnect, resume by cursor and reseal pending actions. |
-| MAWS daemon restart | Lane B processes and their CLI work | Query re-adoption: checkpoint, `stdinApplied` rebase, pending requests redelivered. In-flight MAWS tool calls are answered "outcome unknown" from the ledger (holder design §3.3). |
+| MAWS daemon restart (the endpoint module with it) | Sessions, the Query and the tool server (in the engine host), sminos | Channels drop, and the daemon's client connection to the engine host drops. Both reconnect, apps resume by cursor and reseal pending actions. |
+| Engine host restart | Lane B processes and their CLI work (session hosts keep them) | Query re-adoption: checkpoint, `stdinApplied` rebase, pending requests redelivered. In-flight MAWS tool calls are answered "outcome unknown" from the ledger (holder design §3.3). |
 | Session host dies | — | The session ends and is shown as ended, with resume offered. |
 | App sleeps or quits | Everything on the machine | Pending requests wait. Client-bound tools answer "no app attached". On wake, resume by cursor. |
 | Machine sleeps | — | Shown as machine offline. Listings stay (if hub-readable). Contents unavailable until the lid-closed tail (§7.3). |
@@ -723,7 +723,7 @@ These are named here with their binding fields. Byte-level schemas and test vect
    - Signing is planned (an Apple Developer ID), and the first milestones run unsigned with software device keys.
    - A remote MAWS session's controller is on its machine.
    - The phone loop stays through the Desk Web pause: push notifications plus question and permission cards, and nothing else. It is the `web-cards` client class (§5.1, §5.10, §7.4, §9, §11).
-6. **2026-10-26, the MAWS architect's ruling.** One machine daemon contains the endpoint as a narrow module. The engine host stays a separate process under it. This replaces the first draft's separate endpoint process (§2.1).
+6. **2026-10-26, the MAWS architect's ruling.** One machine daemon contains the endpoint as a narrow module. The engine host stays a separate process under it. This replaces the first draft's separate endpoint process (§2.1). A correction from the architect's survey against the code (master `c3507722d`): the Query and the `maws` tool server live in the engine host, which is today's E10 Session, and the daemon is its single client.
 7. **2026-10-26, owner (round 1, part 2).**
    - Agent messages across owners are today's `sminos say` plus a signed owner label (§5.8).
    - The sidebar shows the member's own sessions first, and others' behind a per-project toggle (§6.2).
