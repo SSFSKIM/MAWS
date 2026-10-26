@@ -82,7 +82,7 @@ test('a run needs a Mac exactly when gate-plan.mjs and gate.yml put one of its j
       const output = join(dir, `output-${index}`);
       await promisify(execFile)(process.execPath, [join(root, '.github/scripts/gate-plan.mjs')], {
         cwd: root,
-        env: { ...process.env, EVENT: 'push', HEAD_MESSAGE: `ci-gate: test\n\n${trailers}`, GATE_RUNNER, GATE_E2E_RUNNER, CLASS1_E2E: 'library', LINUX_E2E: 'library desk-web', POOL_E2E: 'desk-web', LIBREOFFICE_E2E: '', GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: join(dir, `summary-${index}`) },
+        env: { ...process.env, EVENT: 'push', HEAD_MESSAGE: `ci-gate: test\n\n${trailers}`, GATE_RUNNER, GATE_E2E_RUNNER, CLASS1_E2E: 'library', LINUX_E2E: 'library desk-web', POOL_E2E: 'desk-web', LIBREOFFICE_E2E: '', HOSTED_MAC_E2E: '', GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: join(dir, `summary-${index}`) },
       });
       const out = Object.fromEntries(readFileSync(output, 'utf8').trim().split('\n').map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
       return (
