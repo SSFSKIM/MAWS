@@ -129,7 +129,7 @@ test("a Linux lane's POOL_E2E groups run on the pool when class 1a does; the res
 
   const variable = plan({ ...lists, GATE_RUNNER: 'pool', HEAD_MESSAGE: linuxRun('') });
   assert.deepEqual(runners(variable.outputs), { library: hosted, 'desk-web': box });
-  // No class-1a job asked for, yet the pool serves desk-web: pool-ensure runs.
+  // No class-1a job asked for, yet the pool serves desk-web.
   assert.equal(variable.outputs.pool, 'true');
   assert.match(variable.summary, /E2e lane: linux \(on the pool: desk-web\)\./);
 

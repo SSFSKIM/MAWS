@@ -5,8 +5,8 @@
 // does `packaged` (the unsigned app built once, then its checks; Decision Log 35), which is only ever explicit.
 // Class 1a's runner (static, unit, probes): the `class1a` input or the `Class1a:` trailer (`linux`, `macos` or `pool`),
 // else the repository variable GATE_RUNNER, else `linux`. `pool` is ci-kit's pool, each job in a container of its own
-// size (Decision Log 35; on GCE spot VMs since Decision Log 52); `pool=true` when a job runs there, for the plan job's
-// pool-ensure.
+// size (Decision Log 35; on GCE spot VMs since Decision Log 52); `pool=true` when a job runs there (ci-kit's launcher
+// starts pool VMs from the queued jobs themselves; the plan job's pool-ensure went with ci-kit's Hetzner pool).
 // The e2e lane: the `runner` input or the `Runner:` trailer (`linux` or `macos`), else the repository variable
 // GATE_E2E_RUNNER, else GATE_RUNNER unless it is `pool` (Electron would lose its sandbox in the pool's containers), else
 // `linux`; a Linux lane takes only the groups that run green there (LINUX_E2E). The groups that drive no Electron

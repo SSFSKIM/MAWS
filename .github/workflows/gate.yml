@@ -296,12 +296,6 @@ jobs:
           GATE_RUNNER: ${{ vars.GATE_RUNNER }}
           GATE_E2E_RUNNER: ${{ vars.GATE_E2E_RUNNER }}
         run: node .github/scripts/gate-plan.mjs
-      # ci-kit's pool (Decision Log 35): creates the box when a job runs there and none exists; it does not wait
-      # for the boot, the jobs wait in GitHub's queue.
-      - if: steps.plan.outputs.pool == 'true'
-        uses: SSFSKIM/ci-kit/pool-ensure@v1
-        with:
-          hcloud-token: ${{ secrets.HCLOUD_TOKEN }}
 
   static:
     needs: plan
