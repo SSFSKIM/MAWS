@@ -68,14 +68,17 @@ export type RpcArgs = {
    * Stop one running subagent of a bridged session (the desk control surface spec, §9; MW4): `agentId` an agent's id or
    * the name its Agent call gave it, never its description, 1 to 128 characters, not blank, without a control character
    * (a path-neutral name may hold a space; 2.1.310's Agent tool admits none). The daemon refuses one the session's
-   * subagent tree does not hold as running, `unknown-agent`, before the claim; the bridge stops it with `TaskStop` and
-   * leaves the parent a note that the person stopped it and it is not to be started again or redone.
+   * subagent tree does not hold as running, `unknown-agent`, before the claim, resolving an id first, then the name of
+   * exactly one running agent (a name two running agents hold is `ambiguous-agent`); the bridge stops the agent the
+   * daemon resolved, and no other, with `TaskStop`, and leaves its parent's loop a note that the person stopped it and it
+   * is not to be started again or redone.
    */
   'stop-agent': { session: string; agentId: string };
   /**
    * A message to one running subagent of a bridged session (§9; MW4): `agentId` as `stop-agent`'s, `text` not blank. The
    * bridge sends it with the engine's own delivery, under a line saying the person wrote it; the agent reads it at its
-   * next step. An agent the tree does not hold as running is `unknown-agent`: a message would revive one that ended.
+   * next step. An agent the tree does not hold as running is `unknown-agent`: a message would revive one that ended; a
+   * name two running agents hold, `ambiguous-agent`.
    */
   tell: { session: string; agentId: string; text: string };
 };
@@ -123,9 +126,10 @@ export type RpcResults = {
    * The agent stopped: `agentId` the spelling asked, `resolvedAgentId` the id a name resolved to (absent when an id was
    * asked). The answer is the outcome: `TaskStop` answers at once, so no `op` follows; the agent's end reaches the web in
    * the session's subagent tree. A refusal of the bridge's after the claim (the agent ended meanwhile) is `failed`, its
-   * code the message's first word.
+   * code the message's first word. `noteError`, present only when the parent's note was not kept (a hook refused it, its
+   * loop had ended): the agent is stopped, but its parent was not told, and may start it again.
    */
-  'stop-agent': { agentId: string; accepted: true; resolvedAgentId?: string };
+  'stop-agent': { agentId: string; accepted: true; resolvedAgentId?: string; noteError?: string };
   /** The message is in the agent's queue (not yet read). The answer is the outcome: no `op` follows. */
   tell: { sent: true };
 };
@@ -171,6 +175,7 @@ export type RpcErrorCode =
   | 'idle' // a steer while no turn is running: the web offers Send instead
   | 'unknown-task' // a stop naming a task the session's jobs index does not hold as running (before the claim)
   | 'unknown-agent' // a stop-agent or tell naming no agent the session's subagent tree holds as running (before the claim)
+  | 'ambiguous-agent' // a stop-agent or tell naming by name two agents the session's subagent tree holds as running (before the claim)
   // The daemon's, after a claim
   | 'copy-started'
   | 'interrupted'

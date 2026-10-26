@@ -247,6 +247,8 @@ export class SessionDepth {
   mainTurn: string | null = null;
   /** Stops run before a crash whose TaskStop rows the replay has not reached yet (`restoreStop`). */
   private readonly stopsToRestore = new Set<string>();
+  /** Agent stops run before a crash whose agent the replay has not started yet, by id, with the spelling asked (`restoreAgentStop`). */
+  private readonly agentStopsToRestore = new Map<string, string>();
 
   constructor(
     readonly id: string,
@@ -470,6 +472,7 @@ export class SessionDepth {
         if (step.spawn) this.bridgeAgents.set(step.agentId, { agentId: step.agentId, ...step.spawn, running: true });
         if (this.widens) this.refresh();
         else this.fanOut(null, { kind: 'subagents', body: { subagents: this.subagents() } }, false);
+        this.reapplyAgentStops();
         return;
       }
       case 'agent-stop': {
@@ -485,6 +488,7 @@ export class SessionDepth {
           if (this.widens) this.joinTree(a.agentId);
         }
         this.refresh();
+        this.reapplyAgentStops();
         return;
       case 'usage':
         this.usage = step.body;
@@ -759,36 +763,67 @@ export class SessionDepth {
   }
 
   /**
-   * The agent the bridge's tree holds as running by `ref`, its id first, then its Agent call's name, as the daemon checks
-   * a `stop-agent` or a `tell` before the claim (MW4); null for any other, a description among them.
+   * The agent the bridge's tree names by `ref`, as the daemon resolves a `stop-agent` or a `tell` before the claim
+   * (MW4): an id the tree holds first, running or not, then the Agent call's name of exactly one running agent; else
+   * `unknown-agent` (none running by it, a description among them) or `ambiguous-agent` (a name two running agents hold).
    */
+  resolveAgent(ref: string): { agent: BridgeAgent } | { code: 'unknown-agent' | 'ambiguous-agent'; message: string } {
+    const byId = this.bridgeAgents.get(ref);
+    if (byId) return byId.running ? { agent: byId } : { code: 'unknown-agent', message: `agent ${ref} is not running` };
+    const named = [...this.bridgeAgents.values()].filter((a) => a.running && a.name === ref);
+    if (named.length === 1) return { agent: named[0] };
+    if (named.length > 1) return { code: 'ambiguous-agent', message: `${named.length} running agents are named ${ref} (${named.map((a) => a.agentId).join(', ')}): name one by its id` };
+    return { code: 'unknown-agent', message: `the session's subagent tree holds no running agent by the id or name ${ref}` };
+  }
+
+  /** The running agent `ref` resolves to (`resolveAgent`), or null. */
   runningAgent(ref: string): BridgeAgent | null {
-    const running = [...this.bridgeAgents.values()].filter((a) => a.running);
-    return running.find((a) => a.agentId === ref) ?? running.find((a) => a.name === ref) ?? null;
+    const found = this.resolveAgent(ref);
+    return 'agent' in found ? found.agent : null;
   }
 
   /**
-   * What the bridge's `stop-agent` leaves in the session: the agent's stop in the tree (its spawn kept, `running` false,
-   * as the bridge's next read of the engine's list says it), and the note to the parent in the main transcript, a meta
-   * user row with the plugin's origin. The id the stop resolved `ref` to, or null when no running agent has it.
+   * What the bridge's `stop-agent` leaves in the session: the agent `agentId` (the one the daemon resolved, never another
+   * by its name) stopped in the tree (its spawn kept, `running` false, as the bridge's next read of the engine's list says
+   * it), and the note naming it as `asked` in its parent's loop (main for an agent main spawned), a meta user row with
+   * the plugin's origin. False, and nothing written, when that agent is not running.
    */
-  stopAgent(ref: string): string | null {
-    const agent = this.runningAgent(ref);
-    if (!agent) return null;
-    this.bridgeAgents.set(agent.agentId, { ...agent, running: false });
-    this.appendRow(null, {
+  stopAgent(agentId: string, asked: string): boolean {
+    const agent = this.bridgeAgents.get(agentId);
+    if (!agent?.running) return false;
+    this.bridgeAgents.set(agentId, { ...agent, running: false });
+    const loop = agent.parentAgentId ?? null;
+    this.appendRow(loop, {
       type: 'user',
       uuid: randomUUID(),
-      parentUuid: this.rows.get('main')?.at(-1)?.uuid ?? null,
+      parentUuid: this.rows.get(loop ?? 'main')?.at(-1)?.uuid ?? null,
       sessionId: this.id,
-      isSidechain: false,
+      isSidechain: loop !== null,
       timestamp: new Date().toISOString(),
       isMeta: true,
       origin: { kind: 'plugin', name: this.plugin },
-      message: { role: 'user', content: [{ type: 'text', text: agentStopNote(ref) }] },
+      message: { role: 'user', content: [{ type: 'text', text: agentStopNote(asked) }] },
     });
     this.refresh();
-    return agent.agentId;
+    return true;
+  }
+
+  /**
+   * An agent stop this machine ran before a crash (its trace): the replay starts again from the recording, so the agent
+   * is stopped again, its note written again, as soon as it is running, as the engine and a transcript on disk would
+   * still hold them.
+   */
+  restoreAgentStop(agentId: string, asked: string): void {
+    this.agentStopsToRestore.set(agentId, asked);
+  }
+
+  /** Stops again each agent a restored stop names that is running now. */
+  private reapplyAgentStops(): void {
+    for (const [agentId, asked] of this.agentStopsToRestore) {
+      if (!this.bridgeAgents.get(agentId)?.running) continue;
+      this.agentStopsToRestore.delete(agentId);
+      this.stopAgent(agentId, asked);
+    }
   }
 
   /** The working tree's diff, on a main-scope subscription. */

@@ -13,8 +13,10 @@
 //     at once and its answer as `op` notices, as the MW2 live check recorded them, and takes compact's `instructions`;
 //     as MW3's (`mw3`), raises the MW3 live check's permission requests with the engine's suggestions
 //     (`raiseRecordedScoped`) and takes `decide`'s `scope`, resolved from the request it holds as the daemon resolves it;
-//     as MW4's (`mw4`), stops or tells one subagent its bridge's tree holds as running (`stop-agent`, `tell`), refusing
-//     any other `unknown-agent` before the claim, and spawns the MW4 live check's named agent (`spawnRecordedAgent`);
+//     as MW4's (`mw4`), stops or tells one subagent its bridge's tree holds as running (`stop-agent`, `tell`), by an id
+//     first, then one running agent's name, refusing any other `unknown-agent` and a shared name `ambiguous-agent` before
+//     the claim, acting on the agent the check resolved, keeping a stop across a crash, and spawns the MW4 live check's
+//     named agent (`spawnRecordedAgent`);
 //   - answers RPCs from a script, with a ledger of its own: a nonce is claimed before the effect and its outcome recorded
 //     before the result, and a nonce the ledger knows is never executed again;
 //   - can drop its connection, end a session's process while it stays connected, crash after an RPC's effect and before
@@ -152,6 +154,8 @@ export class FakeMachine {
   readonly scopedAllows: Array<{ session: string; request: string; rule: PermissionUpdate }> = [];
   /** Each message a `tell` delivered (an `mw4` producer): the agent it went to, by its id, and the text. */
   readonly told: Array<{ session: string; agentId: string; text: string }> = [];
+  /** A `stop-agent`'s or a `tell`'s agent as its check resolved it, by the RPC's nonce. */
+  private readonly resolvedAgents = new Map<string, string>();
   /** What went wrong without stopping the machine, kept rather than thrown: a POST the hub refused (a stale generation
    * after a drop, say), a replay step that failed. */
   readonly postErrors: Error[] = [];
@@ -201,10 +205,15 @@ export class FakeMachine {
       for (const step of recording.steps) this.timeline.push({ session: depth, step });
     }
     this.timeline.sort((a, b) => a.step.at - b.step.at);
-    // A steer the machine ran before a crash left its row in the transcript, and a stop its TaskStop rows (DX6's trace).
+    // A steer the machine ran before a crash left its row in the transcript, a stop its TaskStop rows, and an agent's stop
+    // the agent stopped and its note (DX6's trace).
     for (const trace of Object.values(this.memory.trace)) {
       if (trace.rpc === 'steer' && trace.row && trace.session) this.sessions.get(trace.session)?.appendRow(null, trace.row as Row);
       else if (trace.rpc === 'stop' && trace.session && typeof trace.result.taskId === 'string') this.sessions.get(trace.session)?.restoreStop(trace.result.taskId);
+      else if (trace.rpc === 'stop-agent' && trace.session && typeof trace.result.agentId === 'string') {
+        const asked = trace.result.agentId;
+        this.sessions.get(trace.session)?.restoreAgentStop(typeof trace.result.resolvedAgentId === 'string' ? trace.result.resolvedAgentId : asked, asked);
+      }
       else if (trace.rpc === 'spawn' && trace.session && !this.sessions.has(trace.session)) this.sessions.set(trace.session, new SessionDepth(trace.session, null, (m) => this.queue({ t: 'session', message: m }), where, true, this.diffBase(trace.session), this.producer, this.plugin));
     }
   }
@@ -520,12 +529,15 @@ export class FakeMachine {
 
   /**
    * Spawns, on `session` (the first replayed one by default), the MW4 live check's background agent as the bridge's tree
-   * held it: named by its Agent call (`bg-sleeper`), running. An `mw4` producer's.
+   * held it: named by its Agent call (`bg-sleeper`), running; `as` gives it another id or name (two agents sharing a
+   * name). An `mw4` producer's.
    */
-  async spawnRecordedAgent(session = [...this.sessions.keys()][0]): Promise<string> {
+  async spawnRecordedAgent(session = [...this.sessions.keys()][0], as: { agentId?: string; name?: string } = {}): Promise<string> {
     if (!producerAtLeast(this.producer, 'mw4')) throw new Error('the recorded agent is an mw4 producer’s');
     if (session === undefined || !this.sessions.has(session)) throw new Error(`no session ${session} on ${this.name}`);
-    const { agentId, ...spawn } = MW4_AGENTS.spawn;
+    const { agentId: recorded, ...rest } = MW4_AGENTS.spawn;
+    const agentId = as.agentId ?? recorded;
+    const spawn = { ...rest, ...(as.name !== undefined && { name: as.name }) };
     this.sessions.get(session)!.apply({ at: Date.now(), k: 'agent', agentId, spawn });
     await this.flush();
     return agentId;
@@ -806,7 +818,10 @@ export class FakeMachine {
       const depth = this.sessions.get(rpc.args.session)!;
       if (this.options.bridge === false || depth.presence === null) return answer(fail('unsupported', 'the session has no bridge, or has ended'));
       if (!depth.capabilities?.ops.includes(rpc.rpc)) return answer(fail('unsupported', "the session's bridge takes no agent's stop or message: its plugin loaded before the update"));
-      if (!depth.runningAgent(rpc.args.agentId)) return answer(fail('unknown-agent', `the session's subagent tree holds no running agent by the id or name ${rpc.args.agentId}`));
+      const found = depth.resolveAgent(rpc.args.agentId);
+      if ('code' in found) return answer(fail(found.code, found.message));
+      // The id the check resolved is the one the bridge acts on, never a later namesake (the daemon's `resolvedAgentId`).
+      this.resolvedAgents.set(rpc.nonce, found.agent.agentId);
     }
     this.memory.ledger[rpc.nonce] = { rpc: rpc.rpc, session: session ?? null, claimed: Date.now(), outcome: null };
     this.remember();
@@ -948,15 +963,15 @@ export class FakeMachine {
         // the spelling asked and, for a name, the id it resolved to, as the MW4 live check recorded them.
         const depth = this.sessions.get(rpc.args.session)!;
         const asked = rpc.args.agentId;
-        const id = depth.stopAgent(asked);
-        if (id === null) return fail('failed', `unknown-agent: no running agent has the id or name ${asked}`);
+        const id = this.resolvedAgents.get(rpc.nonce)!;
+        if (!depth.stopAgent(id, asked)) return fail('failed', `unknown-agent: agent ${id} is not running`);
         await this.flush();
         return this.traced(rpc, record, depth.id, { agentId: asked, accepted: true, ...(id !== asked && { resolvedAgentId: id }) });
       }
       case 'tell': {
         // The engine's send to the agent's id, under the line saying the person wrote it: queued, its answer the outcome.
         const depth = this.sessions.get(rpc.args.session)!;
-        this.told.push({ session: depth.id, agentId: depth.runningAgent(rpc.args.agentId)!.agentId, text: rpc.args.text });
+        this.told.push({ session: depth.id, agentId: this.resolvedAgents.get(rpc.nonce)!, text: rpc.args.text });
         return this.traced(rpc, record, depth.id, MW4_AGENTS.tell.answer.result as JsonObject);
       }
       case 'btw': {

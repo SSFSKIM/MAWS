@@ -2019,6 +2019,19 @@ envelope credits the coordinator). Both answer when the engine has, so neither p
 A stop's note is the parent's next request's: an Agent call's result waits for it, at
 most INTERRUPT_HOLD_MS.
 
+*2026-10-26, MW4 review fixes:* both ops take `resolvedAgentId?`, the id a caller (the
+daemon) resolved the spelling to: the bridge then acts on that agent alone, refused
+`unknown-agent` once it no longer runs, so an agent that took its name since is never
+stopped or told in its place; `agentId` stays the spelling the answer and the note use.
+A hook's refusal of TaskStop (`{deny}`) is no stop: refused, no note. The note goes to
+the stopped agent's parent loop (`$.session.append({agentId: parentId})`, main for an
+agent main spawned), and what the stop hands that parent waits for it, at most
+INTERRUPT_HOLD_MS: a foreground agent's Agent call result, and a background agent's
+task notification (a `<task-notification>` row naming its id, held in the
+`session.append` hook before it is kept; the queue's record is not). The stop's result
+carries `noteError?`, the reason, when the note was not kept: the agent is stopped, its
+parent was not told.
+
 Read results:
 
 ```ts
@@ -2311,6 +2324,13 @@ between the two is reconciled from the answer the child kept under the nonce. A 
 older than 1.14.0 refuses both `bad-shape` (*no RPC "…"*); the machine presence's
 `desk.rpcs` names them from 1.14.0, and the web offers them where the session's
 `controls['stop-agent']` and `controls.tell` are available.
+
+*2026-10-26, MW4 review fixes:* the check resolves `agentId` as the bridge does, an id
+the tree holds first (one that ended is `unknown-agent`), then the name of exactly one
+running agent; a name two running agents hold is refused `ambiguous-agent` before the
+claim, the message naming both ids (a new DX6 code). The id it resolved is passed to
+the bridge as `resolvedAgentId`, which acts on that agent alone. `stop-agent`'s result
+gains `noteError?` (present only when the parent's note was not kept).
 
 ### The log (owner: doperpowers `sminos/skills/sminos/scripts/sminos.py`; read by the web's projection)
 
@@ -3786,6 +3806,37 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   daemon would refuse a stop by such a name `unknown-agent` while the bridge would take
   it. The desk names agents from the tree it is shown, by id first, so nothing it sends
   meets this; the bridge could carry the list's name into the tree when the gate ships.
+  Date/Author: 2026-10-26, MW4's executor for the desk orchestrator (b4948247).
+
+- Decision: MW4's review fixes (the medium review over both halves; doperpowers and
+  MAWS `desk-ctl-mw4`, sminos still 1.14.0). Each closes a gap the review reproduced on
+  2.1.310 or read in the code:
+  - **The agent the check resolved is the one stopped or told.** The daemon resolves the
+    spelling to an id against the child's tree and passes it as `resolvedAgentId`; the
+    bridge acts on that id alone. A probe that spawned a second agent under the first's
+    name between check and execution had seen the second killed and the first left
+    running, answered `accepted`. Rejected: re-resolving the name at the bridge (the
+    race itself), refusing names altogether (the desk shows names).
+  - **A shared name is `ambiguous-agent` at the daemon too**, a DX6 code, before the
+    claim; the fake machine resolves as both do.
+  - **A denied TaskStop is no stop.** A hook's `{deny}` carries no `isError`, so it had
+    read as success: a false note and `accepted`.
+  - **The note reaches a background agent's parent in time.** TaskStop queues the
+    task notification, which can start the parent's next request before the note is
+    kept (a probe delaying the note 750 ms saw the request at 52 ms without it). The
+    bridge's `session.append` hook holds the `<task-notification>` row naming the
+    stopped agent until the note is in, at most INTERRUPT_HOLD_MS; measured on 2.1.310
+    with the same 750 ms delay, the parent's first request came at 0.79 s carrying the
+    note, then the notification. Rejected: appending the note before TaskStop (it would
+    announce a stop that may not happen); gating `turn.step` (a request's messages are
+    pinned when it is made).
+  - **The note goes to the parent's own loop** (`parentId`), so a nested agent's
+    coordinator reads it; main keeps the notes of agents main spawned.
+  - **A note not kept is in the answer** as `noteError`, never retried: a hook's
+    refusal is policy, and a loop that ended will not take a retry.
+  - **The fake machine keeps an agent's stop across a crash**: the trace names the
+    agent and the spelling, and the machine that comes back stops the agent again, its
+    note once, as soon as its replay has it running, as an ordinary `stop` is restored.
   Date/Author: 2026-10-26, MW4's executor for the desk orchestrator (b4948247).
 
 ## Outcomes & Retrospective
