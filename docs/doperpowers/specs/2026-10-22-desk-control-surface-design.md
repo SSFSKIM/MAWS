@@ -136,7 +136,7 @@ allows today.
   the owner says MAWS's UX is ready; F1 stands (Decision Log, "Path A's machine side
   resumes").
 - [ ] The machine-side wave (Plan of Work, "The machine-side wave"): MW1 reads, MW2
-  ops, MW3 scoped allows and deny-and-stop, MW4 one agent stopped or told. The machine
+  ops, MW3 scoped allows, MW4 one agent stopped or told. The machine
   halves of M2–M4, cut and widened per that entry.
 - [ ] Wave 2, run by remote-architecture in isolated sessions against a recording
   stub endpoint: media intake through a synthetic native Read, and context truncation
@@ -740,7 +740,8 @@ hash differs, and applies the one transformation MAWS's scope radio applies
 (`request-card/scope.ts`): the destination may be replaced by `session`, or kept when
 it is the suggestion's own `localSettings`; every other destination is refused
 `bad-shape` (§11). The decision the bridge hands the engine is `{behavior: "allow",
-updatedInput, updatedPermissions: [that suggestion with that destination]}`. The web
+updatedPermissions: [that suggestion with that destination]}`, with no `updatedInput`
+for an ordinary tool (2026-10-26: Interfaces, the decision POST). The web
 ports the scope radio cut to those two scopes: *Allow for this session* (the first
 `addRules` suggestion with destination `session`; when the engine suggested no rule,
 no session scope is offered — the desk never constructs a rule) and *Always allow … in
@@ -1661,9 +1662,13 @@ intake.
   `capabilities.reads`:
   - `usage {breakdown?}`: `$.session.usage`, the summary unless `full` is asked for.
     The answer names which one it is, since `full` calls the token-count API.
-  - `config`: `$.config.list()`. An engine row goes out whole. A plugin's `text` row
-    goes without its `value`, because a plugin's `userConfig` field may hold a
-    credential. Every row is `writable: false` in lane A (F1).
+  - `config`: `$.config.list()`, each row normalized to Interfaces' shape. The engine's
+    `provider: Origin` becomes `"engine"` when `Origin.plugin` is `"engine"`, else
+    `{plugin: Origin.plugin}`, and `isLocked` becomes `locked`. A row whose
+    `Origin.plugin` is not `"engine"` and whose kind is `text` goes without its
+    `value`, because a plugin's `userConfig` field may hold a credential. Every row is
+    `writable: false` in lane A (F1). The tests feed engine-shaped `ConfigRow`s (the
+    2.1.310 types), not wire-shaped ones.
   - `settings`: §11's cut.
   - `mcp`: `$.tool.list()` grouped by server, `exact: false`. The plane adds the
     `disabled` servers from `.claude.json`'s one key.
@@ -1689,26 +1694,44 @@ intake.
   convention (`routes_check.py`, `bridge-routes.tsx`).
 - Review: `medium`.
 
-**MW3 — scoped allows, and deny-and-stop.** Builds from M3's machine half, less the
-mode.
+**MW3 — scoped allows.** Builds from M3's machine half, less the mode.
 
-- `raised` gains `suggestions`, within Interfaces' bounds. The decision POST admits
-  `updatedPermissions`, and `engineDecision` passes it on.
+- `raised` gains `suggestions` under two rules, both in Interfaces:
+  - **Only what this module saw.** The engine's `permission_suggestions` are made
+    after every `tool.call` hook beneath the bridge, where a secrets guard restores
+    its handles to the values, and a Bash suggestion can carry the whole command as
+    its `ruleContent`. So a request carries suggestions only when `claimCheck`
+    matched the engine's `tool_input` exactly to the call this module saw, which
+    means nothing beneath restored anything. Otherwise it is raised without them. A
+    test raises a call whose input a stand-in guard restored, and checks that no
+    restored value reaches `raised` or a resync.
+  - **One bound on both sides.** At most 8 suggestions, each at most 2,048 bytes as
+    canonical UTF-8 JSON. A list that breaks either bound is left out whole, and the
+    request is still raised. The hub admits exactly this bound, since a `raised` it
+    refuses refuses the request with it, and one bad entry refuses the whole
+    pending-set refresh. Both sides test the boundary. The hub also tests that a
+    pending set still refreshes when a request carries no suggestions.
+- The decision POST admits `updatedPermissions`. `engineDecision` keeps today's input
+  rule exactly and adds `updatedPermissions` to the allow it already builds:
+  - a question carries its `rawInput` with the answers;
+  - a plan carries its whole `rawInput`;
+  - every other tool's allow carries no `updatedInput`, since an input, even the call's
+    own, makes the engine check the call again and ask again (`bridge-requests.tsx`).
+  The live check covers an ordinary allow carrying `updatedPermissions` and no input,
+  on a call an ask rule put to the dialog: the rule must be added and the call must
+  run.
 - The daemon checks `decide.scope` as §7 has it, with these limits:
   - only an `addRules` or `addDirectories` suggestion. `setMode`, `replaceRules`,
     `removeRules` and `removeDirectories` are refused `bad-shape`;
   - the destination is `session`, or `localSettings` when that is the suggestion's own.
-- Deny-and-stop: `decide {decision: "deny", message?, interrupt: true}` hands the engine
-  `{behavior: "deny", message, interrupt: true}`. First measure what the engine does
-  with it on the installed engine: whether the turn ends, what becomes of other tools
-  running at that moment (a Bash moved to the background), and what rows it writes.
-  Then give it the interrupt op's guarantees (`interrupt` in `bridge.tsx`, DC1 item 4): every Bash the abort
-  moved to the background is stopped, and a note row names it. If one of them cannot
-  hold, the result says which.
-- Not built: `decide.mode`, the `mode` event and its pass-through hooks, and
-  `presence.mode`.
-- The hub admits `Raised.suggestions?` in `raisedShapeError` (at most 8 objects, each
-  at most 2 KiB), and its types gain `RpcArgs.decide.scope?` and `.interrupt?`.
+- Not built:
+  - `decide.mode`, the `mode` event and its pass-through hooks, and `presence.mode`;
+  - a deny that also stops the turn (the engine's `interrupt: true`). `decide` answers
+    when the decision is queued, so it has no way to report a Bash the abort left
+    running. The web, when its half lands, sends a deny and then the existing
+    `interrupt` RPC, whose result already lists what was stopped and what still runs.
+- The hub admits `Raised.suggestions?` in `raisedShapeError` under the bound above,
+  and its types gain `RpcArgs.decide.scope?`.
 - Review: `high`. Rules are written into the checkout's local settings.
 
 **MW4 — one agent stopped or told.** M4's increment (a) as written:
@@ -1832,7 +1855,9 @@ mcp:      {exact: boolean, servers: [{name, status: "connected" | "disabled" | "
           // `exact` false in lane A, which infers servers from tools (MW1); a lane with a live status read says true
 config:   {rows: [{key, label, description?, kind: "boolean" | "choice" | "text" | "number", value?: ConfigValue,
                    options?: string[], provider: "engine" | {plugin: string}, locked: boolean, writable: boolean}]}
-          // MW1: `$.config.list()` in its order; a plugin's `text` row without `value`; `writable` false in lane A (F1)
+          // MW1: `$.config.list()` in its order, normalized from the engine's ConfigRow: `provider` "engine" when
+          // Origin.plugin is "engine", else {plugin}; `locked` from isLocked; a non-engine `text` row without `value`;
+          // `writable` false in lane A (F1)
 settings: {permissions: {allow: Rule[], ask: Rule[], deny: Rule[], additionalDirectories: string[], defaultMode: string | null,
                          bySource: {[source: "user" | "project" | "local" | "policy" | "cliArg"]: {allow: Rule[], ask: Rule[], deny: Rule[]}}},
            hooks: {[event: string]: [{matcher: string | null, commands: number}]}}       // never a command's text, never `env`
@@ -1853,7 +1878,7 @@ A read error on the sub (DX4 below) is one of `no-bridge`, `unsupported`, `timeo
 | `mode` (M3) | `{mode, at}` — the bridge's current reading when it changes: its own decision's mode at once, else the latest classic hook input's `permission_mode`; `at` epoch ms on the machine's clock, when it was read |
 | `continuing` (M4) | `{command: "background", cwd, t}` — emitted just before a `follow` run that leaves the process |
 | `session` / `start` (M4) | gains `previous?: {session, reason: "clear" \| "resume" \| "branch" \| "unknown"}` |
-| `raised` (M3) | gains `suggestions?: PermissionUpdate[]` (at most 8; each rule string at most 512 characters; the list is the engine's `permission_suggestions` verbatim within those bounds, or absent) |
+| `raised` (M3, MW3) | gains `suggestions?: PermissionUpdate[]`: the engine's `permission_suggestions` verbatim, at most 8, each at most 2,048 bytes as canonical UTF-8 JSON; absent when the list breaks a bound or when the engine's `tool_input` is not exactly the call this module saw (a guard beneath restored something) |
 
 The child's snapshot line gains `capabilities`, `mode` and `catalog` (the latest of each).
 A catalog command's `route` is its bare form; for non-empty trimmed arguments the
@@ -1869,11 +1894,14 @@ fingerprint. This is the engine's model-context listing, not a complete filesyst
 skill inventory: a `disable-model-invocation: true` skill is absent and keeps the
 previous provenance grouping. No context text or token counts cross the wire.
 
-**`POST /requests/<request>/decision`** (M3) admits `updatedPermissions?:
+**`POST /requests/<request>/decision`** (M3, MW3) admits `updatedPermissions?:
 PermissionUpdate[]` (at most 8) on a permission; refuses it on a question (400). The
-decision the bridge hands the engine for a permission is `{behavior: "allow",
-updatedInput: <the request's input>, updatedPermissions?}` (the `updatedInput` from
-sminos 1.6.3).
+decision the bridge hands the engine for a permission is `engineDecision`'s as it
+stands, with `updatedPermissions` added to the allow: a plan's allow carries its whole
+`rawInput`, and every other permission's allow carries no `updatedInput` (an input makes
+the engine check the call again and ask again; `bridge-requests.tsx`). *2026-10-26: this
+replaces "`updatedInput: <the request's input>`" written at M3's design, which sminos
+later narrowed to plans.*
 
 ### The route table (owner: doperpowers `sminos/tests/routes-2.1.307.json`, loaded by `bridge-commands.tsx`; vendored to MAWS `apps/desk-hub/fake-machine/dx4/`)
 
@@ -1980,7 +2008,7 @@ malformed one is `bad-shape`.
 | `command` | `{session, name, args?}` — `name` 1–128 characters without control characters, exactly as `$.command.list()` spells it; `args` text ≤ 4,096 | `{queued: true, route, id}`; the outcome follows as `op`; a bridge refusal is `failed` with the message `<code>: <reason>` (the bridge's code, a colon, its reason) | M0 |
 | `compact` | gains `instructions?` (text ≤ 4,096) | unchanged | M2 |
 | `btw` | `{session, prompt}` (≤ 8,192) | `{started: true, id}`; the answer follows as `op` | M2 |
-| `decide` | gains `scope?: {suggestion: number, sha256: string, destination: 'session' \| 'localSettings'}` on an allow, the suggestion an `addRules` or `addDirectories` one (MW3); `interrupt?: true` on a deny (MW3). `mode?` is cut with plan-mode controls (2026-10-26) | unchanged | M3, MW3 |
+| `decide` | gains `scope?: {suggestion: number, sha256: string, destination: 'session' \| 'localSettings'}` on an allow, the suggestion an `addRules` or `addDirectories` one (MW3). `mode?` is cut with plan-mode controls (2026-10-26) | unchanged | M3, MW3 |
 | `stop-agent` | `{session, agentId}` (`[A-Za-z0-9_-]{1,128}`, an id or a name) | `{agentId}` | M4 |
 | `tell` | `{session, agentId, text}` | `{sent: true}` | M4 |
 | `fork` | `{session, brief?, worktree?, model?, effort?}` | `{session, alias}` | M4 |
@@ -2943,7 +2971,7 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
     only), the settings cut of §11, and MCP servers as a partial view labelled partial;
   - `btw`, compact with instructions, and `/mcp`'s whole grammar once measured;
   - scoped allows (rule and directory suggestions, `session` or the suggestion's own
-    `localSettings`) and deny-and-stop;
+    `localSettings`);
   - stopping and telling one agent.
   Already built, so not in the wave: a subagent's own transcript (DC6 M2's drill-in
   over an `agentId`-scoped subscription, which the plane serves from the agent's JSONL
@@ -2970,6 +2998,22 @@ useCatalog(session): { catalog: Catalog | null; stale: boolean; asOf: number | n
   the design, the spikes and the acceptance for the same controls.
   Date/Author: 2026-10-26, the owner's answers, recorded by the desk orchestrator
   (b4948247) from remote-architecture's build request.
+
+- 2026-10-26: The wave's buildability review (`doperpowers:adversarial-reviewer`)
+  changed four things before any build:
+  - Suggestions are published only when the engine's input is exactly the call the
+    bridge saw. The engine makes them after a secrets guard has restored its handles,
+    and a Bash rule can carry the whole command.
+  - Producer and hub share one byte bound on suggestions. Otherwise a list one side
+    admits and the other refuses would lose the whole request.
+  - `engineDecision` keeps sending no input on an ordinary allow. Interfaces had kept
+    M3's "`updatedInput` on every allow", which sminos had already narrowed because it
+    makes the engine ask again.
+  - The config read is normalized from the engine's real `ConfigRow`.
+  Deny-and-stop is cut: `decide` answers when the decision is queued, so it cannot
+  report a Bash left running. Rejected: a correlated outcome event for `decide`, which
+  is new protocol for what deny followed by the existing `interrupt` RPC already
+  reports.
 
 ## Outcomes & Retrospective
 
