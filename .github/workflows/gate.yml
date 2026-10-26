@@ -206,10 +206,16 @@ env:
   # 40305270673 and 40305340291, each run's count lines those of the `Lane: no-hosted` baseline 40300686375 on the same
   # tree, every job on the host. tools' earlier reds at c9803aa1a were the Dock's clamp (maws-tools.spec.ts:239, 1512x982
   # to 971), gone with #159. dashboard and design are final-bundle groups: a reserved final run hosts none.
+  # Wave 8 (CI-opt, M3; the set-asides again after #159): panel (27 passed) was 3/3 green under `Lane: hosted` at master
+  # 70a2eff1a in runs 40312341344, 40312436985 and 40312502469, each run's count lines those of the `Lane: no-hosted`
+  # baseline 40312170276 on the same tree, every job on the host; its wave-4 reds at panel.spec.ts:1197 did not recur.
+  # Still off: c7, red 3/3 at composer.spec.ts:772 (the user row's actions at opacity 0 after focus, against 1; the :871
+  # clamp gone); terminal, red 2/3 at terminal.spec.ts:508 (10044 lines after the reload, not 10047); browser, red 1/3 at
+  # browser.spec.ts:363 (the cover's placeholder image missing).
   HOSTED_MAC_E2E: >-
     document-app browser-chrome available artifacts settings connectors connectors-direct delivery to-human widgets side
     supervisor c12 browser-import document code scm agents library deliverables presentations dashboard design
-    design-systems tools
+    design-systems tools panel
   # The groups that need a credential or the login keychain's custody, so never go to a hosted Mac, whatever the lane
   # (maws-app holds no secret): connectors-oauth, and discover, whose custody conditions (a), (b) and (c) stand.
   MAC_SECRET_E2E: connectors-oauth discover
