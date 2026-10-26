@@ -626,6 +626,32 @@ const ownLists = () => {
   return Object.fromEntries(names.map((name) => [name, workflowList(workflow, name)]));
 };
 
+test('setup skips LibreOffice only on GitHub-hosted Macs whose group does not need it, including the real hosted plan', () => {
+  const action = readFileSync(join(root, '.github/actions/setup/action.yml'), 'utf8');
+  const setupStep = action.slice(action.indexOf('- uses: SSFSKIM/ci-kit/setup@v1')).split(/\n {4}- /)[0];
+  const expression = /\n {8}skip: \$\{\{ (.+) \}\}/.exec(setupStep)?.[1] ?? "''";
+  // These expression operators have the same behavior in JavaScript and Actions for the string inputs here.
+  const skip = Function('runner', 'inputs', `return (${expression});`);
+  for (const os of ['macOS', 'Linux']) {
+    for (const environment of ['github-hosted', 'self-hosted']) {
+      for (const libreoffice of ['true', 'false', '']) {
+        const omitted = os === 'macOS' && environment === 'github-hosted' && libreoffice !== 'true';
+        assert.equal(skip({ os, environment }, { libreoffice }), omitted ? 'cask:libreoffice' : '', `${os}/${environment}/${libreoffice}`);
+      }
+    }
+  }
+  // Non-group callers (packaged and macOS unit) omit this input; a fresh self-hosted Mac must still install the cask.
+  assert.equal(skip({ os: 'macOS', environment: 'self-hosted' }, {}), '');
+  const { outputs } = plan({ ...ownLists(), GATE_RUNNER: 'pool', GATE_E2E_RUNNER: 'macos', HEAD_MESSAGE: 'ci-gate: test\n\nLane: hosted' });
+  const hosted = JSON.parse(outputs.e2e_hosted);
+  assert.deepEqual(hosted.filter((entry) => entry.libreoffice).map((entry) => entry.group).sort(), ['document', 'presentations']);
+  assert.equal(hosted.find((entry) => entry.group === 'document-app').libreoffice, false);
+  for (const entry of hosted) {
+    assert.equal(skip({ os: 'macOS', environment: 'github-hosted' }, { libreoffice: String(entry.libreoffice) }),
+      ['document', 'presentations'].includes(entry.group) ? '' : 'cask:libreoffice', entry.group);
+  }
+});
+
 test('a HOSTED_MAC_E2E group is a waiter on a macOS lane, on the pool with the hosted timeout, and keeps its runner on a Linux lane', () => {
   const lists = { HOSTED_MAC_E2E: 'library document-app', LINUX_E2E: 'library', MAC_VM_E2E: 'document-app' };
   const { outputs, summary } = plan({ ...lists, HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:library,e2e:document-app,e2e:side\nRunner: macos\nClass1a: linux' });
