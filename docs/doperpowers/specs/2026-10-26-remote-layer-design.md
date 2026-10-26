@@ -214,10 +214,13 @@ The contract is the research's §4, adopted whole. The points that bind every im
      - The session `context` it targets (§3.5): lane B's binding, or lane A's launch epoch.
 
      The channel and any step-up or WebAuthn signature cover both.
-   - **The executing side keeps a durable ledger keyed by `opId`.**
-     - The endpoint module records the claim before dispatch. The daemon (lane B) or sminos (lane A) records the result.
+   - **Each executing side keeps one durable ledger keyed by `opId`, holding the claim and the result together.**
+     - **Lane A:** sminos's existing RPC ledger, re-keyed from the RPC nonce to `opId`. It already records the claim before the run, answers a known id from the ledger without running it again, and fails closed: while the ledger can't be read, no RPC runs (`sminos_rpc.py:16, 165, 279-401`).
+     - **Lane B:** the daemon's ledger, built the same way.
+     - **The endpoint module keeps no op ledger.** It checks freshness and channel replay. It forwards `query {opId}` and the `not-received` tombstone to the executing side, over RL10 for lane A. Splitting the claim and the result across a process boundary would open two crash windows: a claim whose action never arrives stays `in-progress` forever, and a run whose claim is lost runs again.
      - A repeated `opId` returns the stored result and never executes twice.
      - The ledger is kept for a day, as desk's is (`KEPT_S = 86400`).
+     - MW5 made the upload id the RPC nonce. A reseal changes the nonce, so the upload id moves to `opId`.
    - **The context is checked again at dispatch.** The daemon or engine host (lane B), or the bridge (lane A), rechecks it, not only the endpoint. So an action that arrives after a resume or a `/clear` is refused.
    - **Freshness.** An action is refused past a 60 s window, measured by the machine's clock against its `created`. The channel prevents replay and reordering, but the hub can still hold a frame.
    - **Resealing.** An action whose request is still pending is resealed by the app: a new nonce and `created`, the same `opId`, arguments and request digest.
@@ -253,7 +256,8 @@ All keys are P-256: ECDSA for signatures, ECDH for channel keys. Node, WebCrypto
   - When a newer state removes a device, member, delegation or machine, the machine closes every affected channel and subscription at once. That covers every grade, `view` included, not only actions that need step-up.
 - **Revocations are delivered directly, with acknowledgement.**
   - Besides publishing the new state, the admin device sends each removal to every machine as an RL4 action over that machine's channel.
-  - Each machine acknowledges. The admin's app lists any machine that hasn't applied it yet.
+  - Each machine acknowledges, but only after the removal is durable. The admin's app lists any machine that hasn't applied it yet.
+  - The endpoint module passes revocations down to sminos over RL10. sminos holds owed deliveries and retries them for up to 60 ticks (`sminos_owed.py`). So every delivery checks its signer against the current state when it is delivered, not only when it was imported. Words a revoked device wrote before its removal are then never delivered afterwards.
   - The hub can delay a revocation only by also cutting the admin's channel to that machine, and the admin then sees the revocation as pending.
   - A pending revocation can be applied on the machine itself, through the same-uid local app or a local command.
 - **There is a backstop age.** Every action, except those from a same-uid app on the machine's own Mac (§5.11), needs a state issued within the last 30 days.
@@ -387,7 +391,7 @@ All keys are P-256: ECDSA for signatures, ECDH for channel keys. Node, WebCrypto
 - **Default owners** by how a session started (desk-sminos-orchestrator's sminos-side rule):
   - a terminal session: its machine's owner;
   - a session MAWS spawned: the signed requester. Desk spawns already record `by` as the hub member id (`sminos_rpc.py:618-620`).
-  - a session spawned with `sminos spawn`: the spawning session's owners, **copied into the new record at spawn time**. Today sminos records `by` as the spawner's alias (`caller_alias()`, `sminos.py:7598, 7693`), and aliases change and are reused. sminos must also record the spawner's session id, and never resolve owners later through the alias.
+  - a session spawned with `sminos spawn`: the spawning session's owners, **copied into the new record at spawn time**, and **started on the parent's credential slot**, which `sminos spawn` passes explicitly. `claude --bg` gives a seat the bg supervisor's environment, not the spawner's. Without the explicit slot, the child of a session on member B's slot could start on the machine owner's default login. A terminal parent carries no proofs, and its children inherit the machine owner. Today sminos records `by` as the spawner's alias (`caller_alias()`, `sminos.py:7598, 7693`), and aliases change and are reused. sminos must also record the spawner's session id, and never resolve owners later through the alias.
 - **Lane A's session record** is sminos's member record. It has no owners field today, so that field is new. Sessions that predate it default to the machine owner.
 
 #### 5.9 What the hub can and can't do
@@ -568,16 +572,23 @@ The consequences, read by the architect and adopted here:
 
 The hub serves both protocols, but a migrated endpoint accepts only one trust model.
 
-**One ordering this forces.** The phone must keep working (owner), and a migrated endpoint takes no DX6. So `web-cards` (step 4) has to ship no later than the first machine's cutover. Until a machine cuts over, the phone keeps DX6 for that machine.
+**The other direction.** An unmigrated machine verifies only DX1 HMAC. Without help, its sessions would stop receiving messages from migrated machines, and the owner's words from MAWS.
+- So until the org key retires, the migrated endpoint module codes everything it sends twice: RL8 v2 and the legacy HMAC. The MAWS app does the same for the owner's words, unwrapping the org key the way desk-web does today.
+- This dual-coding is outbound only. The migrated side still accepts no DX1 input. The hub accepts an event that carries both codes.
+- This is preferred over migrating every machine in one window, because the mini runs the owner's unattended seats (journal, Telegram).
+
+**One ordering this forces.** The phone must keep working (owner), and a migrated endpoint takes no DX6. So `web-cards` (step 4) ships no later than the first cutover of a machine whose sessions the owner answers from the phone.
+- The first cutover can be a devcloud acceptance VM the phone never answers for. That proves RL1–RL4 before `web-cards` exists, and keeps desk-web's RL2 work off the critical path.
+- Until a machine cuts over, the phone keeps DX6 for that machine.
 
 **Steps.**
 1. **Set up the org root** on the owner's device. That makes the first signed state, with the existing admin as its member, their existing machines listed as pending, and the offline recovery key made (§10.2).
 2. **Upgrade each machine and re-enroll it in place** with a new code (§5.3), keeping its name, as `hub enroll --replace` does today.
    - Log writers are `<enrolled name>/…`, so a new name would split the log's history.
-   - The mini still runs a pre-MW1 sminos, so upgrading it comes first.
+   - The mini still runs a pre-MW1 sminos, so upgrading it comes first. The upgrade goes through `mini-ops`, a session on the mini, at the owner's request. The owner's standing rule forbids driving `claude` over ssh there, and that covers both the sminos upgrade and installing the daemon. This is an operational dependency.
    - The hub serves DX2 and RL1 side by side for each machine until that machine has moved.
 3. **Re-attest history.** At migration, each machine signs its own past events once. The hub's existing project logs then display as *attested at migration by `<machine>`* instead of *unverified (legacy)* for good.
-4. **Move the phone's cards to `web-cards`** (§5.10), no later than the first machine's cutover (above).
+4. **Move the phone's cards to `web-cards`** (§5.10), no later than the first cutover of a machine the owner answers from the phone (above).
    - The phone registers a device: a WebCrypto channel key plus its passkey, approved from the owner's Mac.
    - It answers through RL4 actions over a channel.
    - This means desk-web implements RL2 in WebCrypto (ECDH, HKDF and AES-GCM are all available there). It is not free.
@@ -612,16 +623,19 @@ The hub serves both protocols, but a migrated endpoint accepts only one trust mo
 3. Native `rewind_conversation` across `--resume`: duplicated or restored content, as the lane A substitute showed (truncation spike).
 4. Hub topology and throughput: app → Machine DO relay of sealed frames, with per-hop latency and the cost per active session (research §8 spike 3).
 5. The budget for local latency: MAWS's own local sessions must not get slower than today's app main → engine host → `claude` path (§2.1).
-6. The Desktop 3.6556 helper (`research/desk-remote/desktop-ssh-helper-3.6556.md`).
+6. **The Desktop 3.6556 helper** (`research/desk-remote/desktop-ssh-helper-3.6556.md`).
    - Its core contract hasn't changed: seq replay, stdin-offset de-duplication, line-aligned checkpoints.
-   - It changed liveness (how an OpenSSH link is judged silent), adoption and deployment safeguards.
-   - It hardened RPC framing.
-   - It now persists interrupts it couldn't deliver.
+   - What changed:
+     - liveness (how an OpenSSH link is judged silent), adoption and deployment safeguards;
+     - hardened RPC framing;
+     - interrupts it couldn't deliver are now persisted.
    - The holder design takes these as inputs when it is revised; nothing here changes.
-
-    Claude Code 2.1.311's SSH mode is settled: it offers no session service MAWS could use instead of the engine host. Its parts are an entrypoint marker, Desktop config metadata, a telemetry name, and `ANTHROPIC_UNIX_SOCKET` inference routing (`research/desk-remote/cc-ssh-mode-2.1.311.md`). The engine-host design stands.
-8. The endpoint module's verification load: a fresh machine verifying every project's backlog (§5.7).
-7. Linux transient scope and lingering under `KillUserProcesses`. macOS TCC attribution for `claude` launched by a launchd daemon (holder design §9).
+   - **Claude Code 2.1.311's SSH mode is settled.** It offers no session service MAWS could use instead of the engine host. Its parts are an entrypoint marker, Desktop config metadata, a telemetry name, and `ANTHROPIC_UNIX_SOCKET` inference routing (`research/desk-remote/cc-ssh-mode-2.1.311.md`). The engine-host design stands.
+7. **Linux and macOS process attribution.** On Linux: transient scope and lingering under `KillUserProcesses`. On macOS: TCC attribution for `claude` launched by a launchd daemon (holder design §9).
+8. **The endpoint module's verification load:** a fresh machine verifying every project's backlog (§5.7).
+9. **Credential slots for `claude --bg` and for sminos's discovery** (§5.8, §6.4).
+   - Does `claude --bg` honour a non-default `CLAUDE_CONFIG_DIR` that `sminos spawn` passes explicitly?
+   - For the per-member-slot milestone, not phase 1: `sminos.py` never reads `CLAUDE_CONFIG_DIR`; only `sminos_bridge.py:376` and `sminos_plane.py:2200` do. Its session discovery appears to assume the default config dir, so sessions on a second slot would be invisible to join-on-sight.
 
 ### 13. Decisions taken here, and alternatives rejected
 
@@ -672,7 +686,7 @@ These are named here with their binding fields. Byte-level schemas and test vect
   - `webauthn` is `{credentialId, authenticatorData, clientDataJSON, signature}`, whose challenge is SHA-256 of the canonical action.
   - Refused past 60 s, and refused on a reused nonce. A repeated `opId` returns its stored result.
   - The answer is immediate (`accepted | refused {reason}`). The outcome arrives on the plane.
-  - `query {opId}` answers `done {result} | in-progress | refused | not-received`.
+  - `query {opId}` answers `done {result} | in-progress | refused | not-received`. The executing side's ledger answers it; the endpoint module only forwards it (§4.7).
   - Revocations are RL4 actions too, sent by an admin device to each machine and acknowledged (§5.2).
 - **RL5, Signed org state.**
   - The fields are `{org, version, prev, issued, root: {keys[], recoveryPub}, members[{id, email, role, devices[{id, class, keyStorage, channelPub, stepUpPub, passkey?: {credentialId, publicKey, rpId}}]}], machines[{name, pub, owners: memberId[] | 'org'}], delegations[{id, pub, prefix, expires, maxUses, offlineRevokeS, owners}], projects[...]}`, with signatures by root keys.
@@ -702,6 +716,8 @@ These are named here with their binding fields. Byte-level schemas and test vect
   - Lane A RPCs come in, already authorized.
   - The lane A plane goes out.
   - Member state and listing fields go out.
+  - `query {opId}` and `not-received` tombstones come down to sminos's ledger.
+  - Revocations come down, and sminos applies them to owed deliveries (§5.2).
   - The socket's presence tells sminos to stay local-only (§2.1).
 
 ## Decision Log
@@ -752,7 +768,7 @@ These are named here with their binding fields. Byte-level schemas and test vect
    - commands graded by effect;
    - machine-signed listings.
 
-   The cutover forces `web-cards` to ship no later than the first machine's cutover (§9).
+   The cutover forces an ordering: `web-cards` ships before the phone's machines cut over (§9; relaxed in entry 13).
 12. **2026-10-26, from the MAWS architect's identity research on Anthropic's terms.** The credential follows the principal:
    - every session names its credential slot;
    - on a personal credential, only its principal may `converse` or `approve`;
@@ -760,3 +776,10 @@ These are named here with their binding fields. Byte-level schemas and test vect
    - MAWS never relays claude.ai tokens (§5.5, §6.3, §6.4, RL6).
 
    This narrows the owner's share levels (§6.2) to org credentials for driving. The architect is putting that consequence to the owner.
+13. **2026-10-26, desk-sminos-orchestrator's re-review against the code.**
+   - One op ledger per executing side (sminos's for lane A, re-keyed to `opId`), with no claim in the endpoint module.
+   - Revocations acknowledged once durable, and re-checked at delivery.
+   - A `sminos spawn` child starts on its parent's credential slot.
+   - Outbound dual-coding during migration.
+   - `mini-ops` as an operational dependency.
+   - The phone ordering relaxed to machines the owner answers from the phone (§4.7, §5.2, §5.8, §9, §12, RL10).
