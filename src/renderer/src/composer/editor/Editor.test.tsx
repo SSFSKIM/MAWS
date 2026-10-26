@@ -1,5 +1,7 @@
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { closeWidgetDialog, useWidgetDialog } from '../WidgetDialog'; // W3 (C6)
+import type { Transaction } from '@tiptap/pm/state';
+import { EditorView } from '@tiptap/pm/view';
 import { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -81,6 +83,135 @@ describe('the editor mounts over its draft, takes prefills and submits through t
     expect(onSubmit.mock.calls[0][0]).toMatchObject({ mode: 'send', content: 'hello', display: 'hello' });
     await waitFor(() => expect(content.textContent).toBe(''));
     expect(saved).toEqual([null]);
+  });
+
+  // The hosted Macs, 2026-10-26 (c7's W2): the host's answer to a send can come after the person moved on. The editor
+  // held the focus at the send, took it back when the answer came, and Tiptap's own focus a frame later took it again,
+  // from the transcript row's Copy the person had focused meanwhile.
+  it('leaves a focus moved elsewhere while the send was in flight where it is', async () => {
+    let answer!: (accepted: boolean) => void;
+    const onSubmit = vi.fn(() => new Promise<boolean>((resolve) => (answer = resolve)));
+    const { port } = drafts({ doc: docOf([paragraph(textNode('hello'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+    const { container } = render(
+      <>
+        <Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} />
+        <button type="button">Copy</button>
+      </>,
+    );
+    const content = contentOf(container);
+    await waitFor(() => expect(content.textContent).toBe('hello'));
+    content.focus();
+    await act(async () => {
+      content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true }));
+    });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const copy = container.querySelector('button')!;
+    copy.focus();
+    await act(async () => answer(true));
+    await waitFor(() => expect(content.textContent).toBe(''));
+    await new Promise((resolve) => requestAnimationFrame(resolve)); // past Tiptap's deferred focus
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(document.activeElement).toBe(copy);
+  });
+
+  it('keeps the caret in an editor that held the focus through the send', async () => {
+    let answer!: (accepted: boolean) => void;
+    const onSubmit = vi.fn(() => new Promise<boolean>((resolve) => (answer = resolve)));
+    const { port } = drafts({ doc: docOf([paragraph(textNode('hello'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} />);
+    const content = contentOf(container);
+    await waitFor(() => expect(content.textContent).toBe('hello'));
+    content.focus();
+    await act(async () => {
+      content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true }));
+    });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    await act(async () => answer(true));
+    await waitFor(() => expect(content.textContent).toBe(''));
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(content.contains(document.activeElement)).toBe(true);
+  });
+
+  it('takes the focus back when going read-only for the send left it on the page', async () => {
+    let answer!: (accepted: boolean) => void;
+    const onSubmit = vi.fn(() => new Promise<boolean>((resolve) => (answer = resolve)));
+    const { port } = drafts({ doc: docOf([paragraph(textNode('hello'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} />);
+    const content = contentOf(container);
+    await waitFor(() => expect(content.textContent).toBe('hello'));
+    content.focus();
+    await act(async () => {
+      content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true }));
+    });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    content.blur(); // Chromium moves the focus off a contenteditable that stops being editable
+    expect(document.activeElement).toBe(document.body);
+    await act(async () => answer(true));
+    await waitFor(() => expect(content.textContent).toBe(''));
+    expect(content.contains(document.activeElement)).toBe(true);
+  });
+
+  // The hosted Macs' sequence: the caret came back at once, and Tiptap's deferred focus, a frame that came 223 ms later,
+  // took the focus back from the Copy the person had focused in between.
+  it('leaves a focus moved in the frame after the caret came back where it is', async () => {
+    let answer!: (accepted: boolean) => void;
+    const onSubmit = vi.fn(() => new Promise<boolean>((resolve) => (answer = resolve)));
+    const { port } = drafts({ doc: docOf([paragraph(textNode('hello'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+    const { container } = render(
+      <>
+        <Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} />
+        <button type="button">Copy</button>
+      </>,
+    );
+    const content = contentOf(container);
+    await waitFor(() => expect(content.textContent).toBe('hello'));
+    content.focus();
+    await act(async () => {
+      content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true }));
+    });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    content.blur();
+    const frames: FrameRequestCallback[] = []; // the next frame waits until the test runs it
+    const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => frames.push(cb));
+    try {
+      await act(async () => answer(true));
+      await waitFor(() => expect(content.textContent).toBe(''));
+      expect(content.contains(document.activeElement)).toBe(true); // the caret is back at once
+      const copy = container.querySelector('button')!;
+      copy.focus(); // before the next frame
+      for (const frame of frames.splice(0)) frame(performance.now());
+      expect(document.activeElement).toBe(copy);
+    } finally {
+      raf.mockRestore();
+    }
+  });
+
+  // The review of the focus change: ProseMirror scrolls only to a selection inside the editor, so a caret placed while
+  // another control held the focus (a transcript row's Edit) is scrolled to once the editor has the focus.
+  it('scrolls to a prefill’s caret with the editor focused', async () => {
+    const original = EditorView.prototype.dispatch;
+    const scrolls: boolean[] = []; // for each transaction asking to scroll to the selection: whether the editor had the focus
+    const dispatch = vi.spyOn(EditorView.prototype, 'dispatch').mockImplementation(function (this: EditorView, tr: Transaction) {
+      if (tr.scrolledIntoView) scrolls.push(this.hasFocus());
+      original.call(this, tr);
+    });
+    try {
+      const onPrefill = vi.fn();
+      const { port } = drafts(null);
+      const { container } = render(
+        <>
+          <Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} onPrefill={onPrefill} />
+          <button type="button">Edit</button>
+        </>,
+      );
+      container.querySelector('button')!.focus();
+      act(() => prefillComposer(APP, { text: Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join('\n'), pasted: [] }));
+      await waitFor(() => expect(onPrefill).toHaveBeenCalledTimes(1));
+      expect(contentOf(container).contains(document.activeElement)).toBe(true);
+      expect(scrolls).toContain(true);
+    } finally {
+      dispatch.mockRestore();
+    }
   });
 
   it('keeps the text when the submission is refused', async () => {

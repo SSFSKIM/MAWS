@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { REL } from '../test-support/relative-time';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
@@ -16,6 +16,7 @@ import { projectList } from './derive';
 import { RequestPreview } from './RequestPreview';
 import { useLayout } from '../stores/layout';
 import { Sidebar } from './Sidebar';
+import { SidebarHoverCard } from './HoverCard';
 import { formatAgo } from '@shared/app/date-format';
 import { registerSlot, resetSlots } from '../app/slots';
 import { RequestCard } from '../request-card/RequestCard';
@@ -529,5 +530,52 @@ describe('a hover card with its reply focused', () => {
     await openWithReplyFocused();
     fireEvent.pointerDown(document.body);
     await closed();
+  });
+});
+
+// The hosted Macs, 2026-10-26: the pointer left a row in the frame after its card's open delay ran out, before the open
+// had rendered. Radix's controlled HoverCard checks a change against the `open` it last rendered, so the close that leave
+// scheduled read the card as closed already and the card stayed open; a pointer back as a close lands is the same race
+// the other way. Each change renders at once.
+describe('a card the pointer crosses as it opens or closes', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('closes after its delay', async () => {
+    vi.useFakeTimers();
+    render(
+      <SidebarHoverCard label="Row card" content={<p>card body</p>}>
+        <a href="#row">row</a>
+      </SidebarHoverCard>,
+    );
+    const row = screen.getByText('row');
+    fireEvent.pointerEnter(row, { pointerType: 'mouse' });
+    vi.advanceTimersByTime(300); // the open delay runs out, outside React's act: nothing renders the open yet
+    fireEvent.pointerLeave(row, { pointerType: 'mouse' }); // the pointer leaves in that frame
+    await act(async () => {
+      vi.advanceTimersByTime(200); // past the close delay
+    });
+    expect(screen.queryByRole('dialog', { name: 'Row card' })).toBeNull();
+  });
+
+  it('opens again for a pointer back on its row as it closes', async () => {
+    vi.useFakeTimers();
+    render(
+      <SidebarHoverCard label="Row card" content={<p>card body</p>}>
+        <a href="#row">row</a>
+      </SidebarHoverCard>,
+    );
+    const row = screen.getByText('row');
+    fireEvent.pointerEnter(row, { pointerType: 'mouse' });
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(screen.getByRole('dialog', { name: 'Row card' })).toBeTruthy();
+    fireEvent.pointerLeave(row, { pointerType: 'mouse' });
+    vi.advanceTimersByTime(150); // the close delay runs out, its render not done yet
+    fireEvent.pointerEnter(row, { pointerType: 'mouse' }); // and the pointer is back
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(screen.getByRole('dialog', { name: 'Row card' })).toBeTruthy();
   });
 });

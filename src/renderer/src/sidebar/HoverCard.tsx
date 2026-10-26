@@ -10,6 +10,7 @@
 // card is `ProjectHoverCard.tsx`.
 import { HoverCard as Radix } from 'radix-ui';
 import { useCallback, useContext, useEffect, useRef, useState, type FocusEvent, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 import { QuickReply, useQuickReply, type QuickReplyState } from './QuickReply';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -50,12 +51,17 @@ export function SidebarHoverCard({ label, children, content, open, onOpenChange 
   const restoring = useRef(false); // focus handed back to the trigger, which opens nothing
   // The pointer leaving (and the trigger's blur as focus moves into the card) closes the card after its delay; a field
   // in the card that holds focus (the quick reply being typed) keeps it open through that. An explicit dismissal closes.
+  // The change renders at once: Radix's controlled HoverCard checks each change against the `open` it last rendered, so
+  // a pointer leaving between an open and its render scheduled a close that found the card closed already, and the
+  // card stayed open (the hosted Macs, 2026-10-26).
   const changeOpen = (next: boolean) => {
     const explicit = dismissing.current;
     dismissing.current = false;
     if (!next && !explicit && contentRef.current?.contains(document.activeElement)) return;
-    setInternalOpen(next);
-    onOpenChange?.(next);
+    flushSync(() => {
+      setInternalOpen(next);
+      onOpenChange?.(next);
+    });
   };
   const dismiss = () => {
     dismissing.current = true;

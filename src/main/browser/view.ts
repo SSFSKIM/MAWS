@@ -250,7 +250,14 @@ export class ViewManager {
       entry.view === view &&
       entry.placement?.window === win; // not moved to another window meanwhile
     const keptUp = () => this.capturing.get(entry) === generation; // a later cover's mark is that cover's own
-    let placeholder = await placeholderOf(view);
+    // Chromium's compositor now and then refuses a copy of a page on screen (capturePage rejects with UnknownVizError, seen
+    // on the hosted Macs); the page is still up, so it is copied again a frame later rather than hidden over an empty pane.
+    let still = await placeholderOf(view);
+    for (let retry = 0; still === REFUSED && retry < STILL_RETRIES && keptUp() && current(); retry++) {
+      await delay(STILL_RETRY_MS);
+      if (keptUp() && current()) still = await placeholderOf(view);
+    }
+    let placeholder = still === REFUSED ? null : still;
     if (placeholder === null && !keptUp() && current()) placeholder = await this.stagedCapture(entry, view);
     if (current()) this.deps.emit('browser.view.covered', { tabId: entry.tab.tabId, placeholder });
     if (!keptUp()) return;
@@ -282,7 +289,8 @@ export class ViewManager {
       view.setVisible(true);
       for (let attempt = 0; placeholder === null && attempt < STAGED_ATTEMPTS && !view.webContents.isDestroyed(); attempt++) {
         await delay(STAGED_PAINT_MS);
-        placeholder = await placeholderOf(view);
+        const still = await placeholderOf(view);
+        placeholder = still === REFUSED ? null : still;
       }
     } finally {
       this.staged.delete(entry);
@@ -408,12 +416,23 @@ const STILL_SETTLE_MS = 34;
 // after 50 ms); a capture is tried every STAGED_PAINT_MS, STAGED_ATTEMPTS times.
 const STAGED_PAINT_MS = 50;
 const STAGED_ATTEMPTS = 6;
+// A page on screen whose copy was refused is copied again every frame, at most this many times, so the hide stays within
+// the cover's 200 ms (a refusal answers at once; a copy took 27 to 88 ms on the hosted Macs).
+const STILL_RETRY_MS = 16;
+const STILL_RETRIES = 4;
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-// The covered page's picture at the view's CSS size, as JPEG; null when the capture fails, is empty, or is too large.
-async function placeholderOf(view: WebContentsView): Promise<string | null> {
+// The covered page's picture at the view's CSS size, as JPEG; null when the capture is empty or too large, REFUSED when
+// Chromium refused the copy (capturePage rejected), which a later copy can get past.
+const REFUSED = 'refused';
+async function placeholderOf(view: WebContentsView): Promise<string | null | typeof REFUSED> {
+  let image: NativeImage;
   try {
-    const image: NativeImage = await view.webContents.capturePage();
+    image = await view.webContents.capturePage();
+  } catch {
+    return REFUSED;
+  }
+  try {
     if (image.isEmpty()) return null;
     const { width, height } = view.getBounds();
     const jpeg = image.resize({ width, height }).toJPEG(PLACEHOLDER_JPEG_QUALITY);

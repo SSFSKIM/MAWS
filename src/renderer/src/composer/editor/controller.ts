@@ -2,7 +2,7 @@
 // draft's restore and debounced write, history navigation, pasted and dropped files, the prefill intake, submission,
 // and the imperative handle the Composer drives. One controller per mounted Editor, created once; the component hands
 // it the latest props after every render, so the handlers Tiptap captured at creation always act on the current ones.
-import type { Transaction } from '@tiptap/pm/state';
+import { Selection, type Transaction } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
 import type { Editor as TiptapEditor } from '@tiptap/react';
 import type { HistoryEntry } from '@shared/composer/history-entry';
@@ -133,6 +133,8 @@ export function ipcDrafts(client: MawsBridge, appSessionId: AppSessionId): Draft
   };
 }
 
+// Nothing holds the keyboard: the page's body has it (or no element does).
+const focusIsOnThePage = () => document.activeElement === null || document.activeElement === document.body;
 // R2: plain text as a document (one paragraph a line) and as inline content (lines joined by hard breaks).
 const textDoc = (text: string): ComposerDoc => docOf(text.split('\n').map((line) => paragraph(...(line ? [textNode(line)] : []))));
 const inlineContent = (text: string) => text.split('\n').flatMap((line, i) => [...(i > 0 ? [hardBreak()] : []), ...(line ? [textNode(line)] : [])]);
@@ -411,15 +413,22 @@ export class EditorController {
     if (accepted) {
       this.inputs.onSuggestionTaken?.();
       this.nav = { index: null, draft: null };
-      this.setDoc(emptyDoc(), { silently: true, caret: focused ? 'end' : null });
+      // The caret comes back only if the focus has not gone elsewhere since the send: going read-only for the flight
+      // drops it to the page in Chromium, and then the editor takes it again; an editor that kept it keeps it (an empty
+      // document has one caret place); a focus the person moved meanwhile, to a transcript row's Copy or another pane,
+      // stays where they put it.
+      const back = focused && !this.editor?.isFocused && focusIsOnThePage();
+      this.setDoc(emptyDoc(), { silently: true, caret: back ? 'end' : null });
       void this.refreshHistory();
     }
     this.takePrefill();
     drainComposerAttachments(this.inputs.appSessionId); // P3-G: what the queue held while this composer was busy, after a prefill (it adds to the document)
   }
 
-  // Replaces the document; with a caret, also takes focus there at once (Tiptap's own focus waits a frame, and a key
-  // pressed in that frame would land outside the editor).
+  // Replaces the document; with a caret, also places it and focuses the editor at once. Tiptap's focus command waits a
+  // frame, so a key pressed in that frame would land outside the editor, and then takes the focus from wherever it went
+  // meanwhile (on the hosted Macs that frame came 223 ms later, after a transcript row's Copy had taken the focus); it
+  // is kept for an editor the focus did not reach at once (one not on the page yet).
   private setDoc(doc: ComposerDoc, options: { silently: boolean; caret: 'start' | 'end' | null }): void {
     const editor = this.editor;
     if (!editor) return;
@@ -436,8 +445,12 @@ export class EditorController {
       if (!editor.isFocused) this.caretLeft = false; // a document set behind the human's back has no caret of theirs
       return;
     }
-    editor.commands.focus(options.caret);
+    const at = options.caret === 'start' ? Selection.atStart(editor.state.doc) : Selection.atEnd(editor.state.doc);
+    editor.view.dispatch(editor.state.tr.setSelection(at));
     editor.view.focus();
+    // ProseMirror scrolls only to a selection inside the editor, so the caret is scrolled to once the focus is there
+    if (editor.view.hasFocus()) editor.view.dispatch(editor.state.tr.scrollIntoView());
+    else editor.commands.focus(options.caret);
   }
 
   private async refreshHistory(): Promise<void> {
