@@ -63,8 +63,8 @@ jobs:
           printf '%s\n' "group=$group" "script=$script" "slug=$slug" "libreoffice=$libreoffice" "poppler=$poppler" "evidence=$evidence" \
             "deadline=$deadline" >>"$GITHUB_OUTPUT"
 
-  # The group, as the private gate's e2e job runs it: the shared setup, then the group's package script, which builds its
-  # out/ variant first.
+  # The group, as the private gate's e2e job runs it: shared setup, a tree/variant build reused inside maws-app when
+  # available, then the group's package script (whose build call restores the same local cache).
   e2e:
     needs: plan
     if: needs.plan.outputs.group != ''
@@ -72,6 +72,9 @@ jobs:
     # Pinned, not macos-latest: the nearest to the mini's macOS 27, and an image move would change results unseen.
     runs-on: macos-26
     timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read
     outputs:
       summary: ${{ steps.summary.outputs.summary }}
     env:
@@ -119,11 +122,44 @@ jobs:
           for app in /Applications/LibreOffice.app "/Applications/Google Chrome.app"; do
             if [[ -d $app ]]; then xattr -dr com.apple.quarantine "$app" 2>/dev/null || true; echo "unquarantined $app"; fi
           done
+      - id: build-cache
+        name: find a reusable out/ build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SCRIPT: ${{ needs.plan.outputs.script }}
+        run: node .github/scripts/hosted-build.mjs prepare
+      - id: build-download
+        if: steps.build-cache.outputs.artifact-id != ''
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          artifact-ids: ${{ steps.build-cache.outputs.artifact-id }}
+          run-id: ${{ steps.build-cache.outputs.run-id }}
+          github-token: ${{ github.token }}
+          path: ${{ steps.build-cache.outputs.staging }}
+      - id: build
+        name: out/ build (${{ steps.build-cache.outputs.variant }})
+        env:
+          DOWNLOAD_OUTCOME: ${{ steps.build-download.outcome }}
+        run: node .github/scripts/hosted-build.mjs build
+      # Publish before tests: a sibling can restore even while this group's tests run. The job's token has no added
+      # write permission; upload-artifact uses the Actions artifact service. A cache is best effort in both directions.
+      - id: build-upload
+        if: steps.build.outputs.built == 'true'
+        uses: actions/upload-artifact@v7
+        continue-on-error: true
+        with:
+          name: ${{ steps.build-cache.outputs.name }}
+          path: ${{ steps.build-cache.outputs.entry }}
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+      - if: steps.build-upload.outcome == 'failure'
+        run: echo 'hosted-build upload failed; tests use the local build'
       - name: pnpm ${{ needs.plan.outputs.script }}
         env:
           SCRIPT: ${{ needs.plan.outputs.script }}
         run: |
-          export MAWS_E2E_BUILD_CACHE=$RUNNER_TEMP/maws-e2e-build MAWS_E2E_BUILD_KEY=$GITHUB_SHA
           .github/scripts/gate-run.sh "$COUNTS" pnpm "$SCRIPT" 2>&1 | tee "$RUNNER_TEMP/e2e.log"
       # The result's body: the count lines and Playwright's numbered failure lines, at most 100.
       - id: summary
