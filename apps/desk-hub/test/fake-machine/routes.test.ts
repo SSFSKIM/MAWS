@@ -38,6 +38,13 @@ describe('routeOf', () => {
     expect(check('mcp', 'restart github')).toMatchObject({ ok: false, code: 'bad-args' });
   });
 
+  it('refuses disabling every MCP server, saying why, through the route a pattern miss takes; a miss past it is bad-args', () => {
+    for (const args of ['disable all', 'disable']) {
+      expect(check('mcp', args)).toEqual({ ok: false, code: 'drop', reason: "turns off every server, this desk's own tools among them: run it in the terminal" });
+    }
+    expect(check('mcp', 'remove github')).toMatchObject({ ok: false, code: 'bad-args' });
+  });
+
   it('refuses each other class with its reason (A4)', () => {
     expect(check('usage')).toEqual({ ok: false, code: 'panel', reason: "opens a panel in the terminal; it would hold the session's queue" });
     expect(check('mcp')).toMatchObject({ ok: false, code: 'panel' });

@@ -12,8 +12,8 @@ the parity suite; a case the fake machine fails goes to the composite's writer, 
 
 `routes-2.1.307.json` is a verbatim copy of the bridge's route table for engine 2.1.307 (the desk control surface spec,
 `docs/doperpowers/specs/2026-10-22-desk-control-surface-design.md`, Interfaces, "The route table"), from doperpowers
-`sminos/tests/routes-2.1.307.json` on `desk-ctl-m1` (M1 catalog and form routes) (sha256
-`ebd8089a5e54678da33d8aab4d5d0d568780f0f8d3b9c8d1cda850ff2579054c`). doperpowers owns it: its bridge loads it
+`sminos/tests/routes-2.1.307.json` on `desk-ctl-mw2` (M1's catalog and form routes, and the MW2 review's refusal of
+disabling every MCP server) (sha256 `45db152835659ed8d8db6625aee7f9b0d672a6337fd3f72e620bfc40695bf218`). doperpowers owns it: its bridge loads it
 (`sminos/hooks/mods/bridge-commands.tsx`), and this fake machine routes a `command` RPC by it (`../routes.ts`, run by
 `test/fake-machine/routes.test.ts`, which checks the hash above). Never edit it here either: when a probe moves a row,
 copy the new file over this one and update the commit and the hash.
