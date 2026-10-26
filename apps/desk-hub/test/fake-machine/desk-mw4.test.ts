@@ -193,11 +193,12 @@ describe('the fake machine as the MW4 producer', () => {
   });
 
   it("tells only the agent its check resolved, while it runs: one that ended before the message went is refused, its namesake never told", async () => {
-    let end: (() => void) | undefined;
-    const { fm, b, S, call } = await setUp({ script: { tell: () => (end?.(), undefined) } });
+    // What happens at the script's boundary, set once the agent is spawned.
+    const boundary: { run?: () => void } = {};
+    const { fm, b, S, call } = await setUp({ script: { tell: () => (boundary.run?.(), undefined) } });
     await fm.spawnRecordedAgent(S);
     const depth = fm.sessions.get(S)!;
-    end = () => {
+    boundary.run = () => {
       depth.apply({ at: Date.now(), k: 'agent-stop', agentId: MW4_AGENTS.spawn.agentId });
       depth.apply({ at: Date.now(), k: 'agent', agentId: 'a0000000000000new', spawn: MW4_AGENTS.spawn });
     };
