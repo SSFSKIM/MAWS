@@ -58,19 +58,24 @@ export function readOrMintMachineRef(profileDir: string): MachineRef {
 
   const ref = MachineRefSchema.parse(randomBytes(16).toString('base64url'));
   const temporary = join(profileDir, `${IDENTITY_FILE}.${process.pid}.${randomBytes(6).toString('base64url')}`);
+  const content = Buffer.from(`${JSON.stringify({ version: 1, ref, mintedAt: new Date().toISOString() })}\n`);
   const fd = fs.openSync(temporary, 'wx', 0o600);
   try {
-    fs.writeSync(fd, `${JSON.stringify({ version: 1, ref, mintedAt: new Date().toISOString() })}\n`);
-    fs.fsyncSync(fd);
+    try {
+      // writeSync may write less than it was given: loop until the whole identity is on disk, so a short write never
+      // publishes a truncated file that every later start would refuse.
+      for (let written = 0; written < content.length; ) written += fs.writeSync(fd, content, written, content.length - written);
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    try {
+      fs.linkSync(temporary, join(profileDir, IDENTITY_FILE));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    }
   } finally {
-    fs.closeSync(fd);
-  }
-  try {
-    fs.linkSync(temporary, join(profileDir, IDENTITY_FILE));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-  } finally {
-    fs.rmSync(temporary, { force: true });
+    fs.rmSync(temporary, { force: true }); // whether the write, the link or nothing failed
   }
   const published = readMachineRef(profileDir);
   if (!published) throw new Error(`${join(profileDir, IDENTITY_FILE)} vanished right after it was published.`);
