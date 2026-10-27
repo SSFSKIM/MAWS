@@ -215,13 +215,15 @@ export class Subscriptions {
     this.#report(channel);
   }
 
-  /** The gate refused it: it ends with the reason. */
+  /**
+   * The gate refused it: it ends with the reason. A `sub` already replaced by a newer one of its id, or unsubscribed,
+   * is answered nothing: an `ended` under its id would end the newer one at the device.
+   */
   refused(channel: RemoteChannel, m: SubMessage, reason: string): void {
     const sub = this.#channels.get(channel)?.get(m.sub);
-    if (sub !== undefined && sub.message === m) {
-      this.#channels.get(channel)?.delete(m.sub);
-      sub.close();
-    }
+    if (sub === undefined || sub.message !== m) return;
+    this.#channels.get(channel)?.delete(m.sub);
+    sub.close();
     if (!channel.closed) channel.send({ t: 'ended', sub: m.sub, reason });
   }
 
