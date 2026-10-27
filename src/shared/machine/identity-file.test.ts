@@ -8,6 +8,9 @@ import { MachineRefSchema } from './ref';
 // The minter's pause point: the identity file is published by `link`, so a hook run just before the real link stands for
 // a first run paused after writing its temporary file and before linking it.
 const beforeLink = vi.hoisted(() => ({ hook: null as null | (() => void) }));
+// The write stage's faults: `chunk` caps the bytes each writeSync call writes (a short write), and `fail` makes the next
+// call throw (a full disk).
+const writes = vi.hoisted(() => ({ chunk: null as number | null, fail: null as NodeJS.ErrnoException | null, calls: 0 }));
 vi.mock('node:fs', async (importOriginal) => {
   const fs = await importOriginal<typeof import('node:fs')>();
   const linkSync: typeof fs.linkSync = (existing, created) => {
@@ -16,7 +19,12 @@ vi.mock('node:fs', async (importOriginal) => {
     hook?.();
     fs.linkSync(existing, created);
   };
-  return { ...fs, default: { ...fs, linkSync }, linkSync };
+  const writeSync = ((fd: number, buffer: NodeJS.ArrayBufferView, offset = 0, length = buffer.byteLength - offset) => {
+    writes.calls++;
+    if (writes.fail) throw writes.fail;
+    return fs.writeSync(fd, buffer, offset, writes.chunk === null ? length : Math.min(length, writes.chunk));
+  }) as typeof fs.writeSync;
+  return { ...fs, default: { ...fs, linkSync, writeSync }, linkSync, writeSync };
 });
 
 let profile: string;
@@ -25,6 +33,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   beforeLink.hook = null;
+  Object.assign(writes, { chunk: null, fail: null, calls: 0 });
   actualFs.rmSync(profile, { recursive: true, force: true });
 });
 
@@ -81,6 +90,23 @@ describe('readOrMintMachineRef', () => {
     expect(JSON.parse(actualFs.readFileSync(identityPath(), 'utf8')).ref).toBe(first);
     expect(seenBySecond).toHaveLength(1); // the paused run's fresh temporary file survived the second run's sweep
     expect(leftovers()).toEqual([]); // and each run removed its own
+  });
+
+  it('writes the whole identity through short writes before it links it', () => {
+    writes.chunk = 7;
+    const ref = readOrMintMachineRef(profile);
+    expect(writes.calls).toBeGreaterThan(1);
+    expect(JSON.parse(actualFs.readFileSync(identityPath(), 'utf8'))).toEqual({ version: 1, ref, mintedAt: expect.any(String) });
+    expect(leftovers()).toEqual([]);
+  });
+
+  it('publishes nothing and removes its temporary file when the write fails, so the next start mints afresh', () => {
+    writes.fail = Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' });
+    expect(() => readOrMintMachineRef(profile)).toThrow('ENOSPC');
+    expect(actualFs.readdirSync(profile)).toEqual([]);
+    writes.fail = null;
+    expect(readMachineRef(profile)).toBeNull();
+    expect(readOrMintMachineRef(profile)).toMatch(/^[A-Za-z0-9_-]{22}$/);
   });
 
   it('removes a stray temporary file older than a minute at the next start, and keeps a fresh one (a racing minter)', () => {
