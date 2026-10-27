@@ -1,9 +1,13 @@
-// The endpoint's channels as its own standing changes (O10 M4's review): a new head that no longer lets this machine
-// speak for its ref (its entry removed, its key rotated or revoked; for a certificate machine, its delegation dropped or
-// its certificate's key revoked, RL §5.2) closes every channel `removed`, refuses new handshakes and shows the
-// enrollment `hub-confirmed`; a `--replace` closes the channels authenticated under the old key with `restart`. An
-// enrolled endpoint with no hub (its hub address refuses), its direct listener on a fake table listened on at loopback.
+// The endpoint's channels as its own standing changes (O10 M4's review). Standing is derived from the durable head and
+// certificate set: one that no longer lets this machine speak for its ref (its entry removed, its key rotated or
+// revoked; for a certificate machine, its delegation dropped, its certificate's key revoked, its certificate retired by
+// its delegation, or its ref contested, RL §5.2) closes every channel `removed`, refuses new handshakes and shows the
+// enrollment `hub-confirmed`, whether it arrives with a new head, with a new certificate set under the same head, or is
+// found at start. A `--replace` closes the channels authenticated under the old key with `restart`. An enrolled
+// endpoint with no hub (its hub address refuses; a hub's answer is handed to the org view's `sync` directly), its direct
+// listener on a fake table listened on at loopback.
 import type { Server } from 'node:http';
+import type { OrgStateView } from 'desk-hub/protocol';
 import type { AddressInfo } from 'node:net';
 import { generateSigningKey, keyId, memoryOrgView, NO_CERTIFICATES, signRecord, SIGNING_DOMAINS, type Certificates, type Channel, type MachineCert, type OrgState, type Signed, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -40,8 +44,12 @@ afterEach(async () => {
   }
 });
 
-/** A started endpoint enrolled in ORG and listed (by its entry, or under `delegated` by its certificate), owned by A. */
-async function enrolled(options: { delegated?: boolean } = {}): Promise<Fixture> {
+/**
+ * A started endpoint enrolled in ORG and listed (by its entry, or under `delegated` by its certificate), owned by A.
+ * `crashedAfter` adopts one more head before the start, as a run that wrote it and stopped before anything else did:
+ * the enrollment still says `org-listed`.
+ */
+async function enrolled(options: { delegated?: boolean; crashedAfter?: (s: OrgState, key: SigningKey, ref: string) => void | Promise<void> } = {}): Promise<Fixture> {
   const A = memberId();
   const a1 = await newDevice('a1');
   const recovery = await generateSigningKey();
@@ -71,7 +79,14 @@ async function enrolled(options: { delegated?: boolean } = {}): Promise<Fixture>
   // The hub's address refuses (port 9): nothing here reaches a hub.
   state.setEnrollment({ version: 1, state: 'org-listed', name, ref, org: ORG, hub: 'http://127.0.0.1:9', enrollment: 'e'.repeat(32), credentials: { clientId: 'id', clientSecret: 'secret' }, at: new Date().toISOString(), ...(cert === undefined ? {} : { cert }) });
   state.setOrg({ version: 1, org: ORG, pinned: { roots: s1.state.root.keys, recoveryPub: recovery.pub }, head: null, chain: [], hashes: [], certificates, acceptedTransitions: [], highWater: 0 });
+  const chain = [s1, s2];
   await new EndpointOrg(state, { log: () => {} }).adopt([s1, s2], []);
+  if (options.crashedAfter !== undefined) {
+    const edit = options.crashedAfter;
+    const s3 = await successor(s2, [a1], (s) => edit(s, key, ref));
+    expect((await new EndpointOrg(state, { log: () => {} }).adopt([s3], [])).adopted).toBe(1);
+    chain.push(s3);
+  }
   let port = 0;
   const listen = (server: Server) =>
     new Promise<number>((resolve, reject) => {
@@ -80,9 +95,9 @@ async function enrolled(options: { delegated?: boolean } = {}): Promise<Fixture>
     });
   const endpoint = createEndpoint({ sleep: (ms) => sleep(Math.min(ms, 50)), env: { MAWS_ENDPOINT_DIRECT: '1' }, direct: { interfaces: () => ({ utun4: [{ address: TAILNET, family: 'IPv4', internal: false, netmask: '255.255.255.255', mac: '00:00:00:00:00:00', cidr: null }] }), listen } });
   await endpoint.start(services);
-  const f: Fixture = { endpoint, services, ref, key, a1, A, chain: [s1, s2], certificates, port: () => port, ...(cert === undefined ? {} : { delegation: { id: delegationId, key: delegationKey, cert } }) };
+  const f: Fixture = { endpoint, services, ref, key, a1, A, chain, certificates, port: () => port, ...(cert === undefined ? {} : { delegation: { id: delegationId, key: delegationKey, cert } }) };
   started.push(f);
-  for (let i = 0; port === 0; i++) {
+  for (let i = 0; port === 0 && options.crashedAfter === undefined; i++) {
     if (i > 200) throw new Error('the direct listener never bound');
     await sleep(10);
   }
@@ -100,6 +115,21 @@ async function deliver(f: Fixture, edit: (s: OrgState) => void | Promise<void>):
   const answer = await f.endpoint.cli('revoke', ['-'], JSON.stringify(next));
   expect(answer.code, answer.out).toBe(0);
   f.chain.push(next);
+}
+
+/** Hands the org view what a hub's sync would answer: `chain` past the head, the head it serves, and `certificates`. */
+async function synced(f: Fixture, chain: SignedOrgState[], certificates: Certificates): Promise<void> {
+  const view: OrgStateView = { head: chain.length > 0 ? chain[chain.length - 1] : f.chain[f.chain.length - 1], chain, transitions: [], certificates, more: false };
+  const read = await f.endpoint.parts!.org.sync(() => Promise.resolve(view));
+  expect(read.refused).toBeUndefined();
+  f.chain.push(...chain);
+  f.certificates = certificates;
+}
+
+/** The machine's certificate from its delegation, for `pub` and `use`. */
+function certify(f: Fixture, pub: string, use: number): Promise<Signed<MachineCert>> {
+  const { id, key } = f.delegation!;
+  return signRecord(SIGNING_DOMAINS.machineCert, { org: ORG, machine: f.ref, name: 'vm-one', pub, delegation: id, use, issued: new Date().toISOString() }, key.privateKey, key.pub);
 }
 
 /** The channel's close, and whether it was told anything after the delivery. */
@@ -163,6 +193,43 @@ describe('a head that takes the machine’s own standing away', () => {
     expect(channel.closed).toBe(false);
     expect(f.endpoint.status().enrollment).toBe('org-listed');
     expect(f.endpoint.status().channels.direct).toBe(1);
+  });
+});
+
+describe('a certificate set that takes the machine’s own standing away (only the signed records show it)', () => {
+  it('stands down when a new head arrives with the delegation’s retirement of the machine’s certificate', async () => {
+    const f = await enrolled({ delegated: true });
+    const { closed } = watched(await open(f));
+    const { key } = f.delegation!;
+    const retirement = await signRecord(SIGNING_DOMAINS.certRetire, { org: ORG, keyId: await keyId(f.key.pub), notAfter: new Date().toISOString() }, key.privateKey, key.pub);
+    const next = await successor(f.chain[f.chain.length - 1], [f.a1], () => {});
+    await synced(f, [next], { certs: f.certificates.certs, retirements: [retirement] });
+    await expectStoodDown(f, closed);
+  });
+
+  it('stands down when a sync under the same head brings a second live certificate that contests the ref', async () => {
+    const f = await enrolled({ delegated: true });
+    const { closed } = watched(await open(f));
+    const rival = await certify(f, (await generateSigningKey()).pub, 2);
+    await synced(f, [], { certs: [...f.certificates.certs, rival], retirements: [] });
+    await expectStoodDown(f, closed);
+  });
+});
+
+describe('a start whose head already took the standing away (a crash before the enrollment followed it)', () => {
+  it('never serves a channel, and shows `hub-confirmed`', async () => {
+    const f = await enrolled({
+      crashedAfter: async (s, key, ref) => {
+        s.machines = s.machines.filter((m) => m.ref !== ref);
+        s.revoked.push({ keyId: await keyId(key.pub), holder: { machine: ref } });
+      },
+    });
+    expect(f.endpoint.status().enrollment).toBe('hub-confirmed');
+    expect(f.services.lines.some((l) => l.includes('no longer lets mini speak for its ref'))).toBe(true);
+    // The listener binds only for a machine that can serve: nothing ever listened, so no device reaches it.
+    await sleep(200);
+    expect(f.port()).toBe(0);
+    expect(f.endpoint.status().channels).toEqual({ relayed: 0, direct: 0 });
   });
 });
 

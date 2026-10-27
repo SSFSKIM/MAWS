@@ -187,21 +187,27 @@ export async function promoteIfListed(ctx: Pick<EnrollContext, 'state' | 'org' |
   if (enrollment === null || machineKey === null || !ctx.org.ready) return false;
   if (enrollment.state === 'org-listed') return true;
   if (!(await speaksFor(ctx.org.head(), ctx.org.certificates(), enrollment, machineKey.keyId, new Date(ctx.deps.now())))) return false;
+  // What was written while this was judged (a re-enrollment, the endpoint's own reconciliation) stands as written.
+  if (ctx.state.enrollment !== enrollment || ctx.state.machineKey !== machineKey) return ctx.state.enrollment?.state === 'org-listed';
   ctx.state.setEnrollment({ ...enrollment, state: 'org-listed' });
   ctx.log(`endpoint: ${enrollment.name} is listed in the org state at version ${ctx.org.head().state.version}`);
   return true;
 }
 
 /**
- * Whether the key on disk speaks for the machine's ref in `head`, as a device judges it at the handshake: the head lists
- * the ref with that key (attended) or accepts its certificate (delegated, its delegation present and unexpired), the key
- * is neither revoked nor retired, and no live certificate contests the ref. Losing it takes the machine off the org: its
- * channels close and it is `hub-confirmed` again (M4).
+ * Whether the key on disk speaks for the machine's ref in `head` and `certificates`, as a device judges it at the
+ * handshake: the head lists the ref with that key (attended) or accepts its certificate (delegated, its delegation
+ * present and unexpired), the key is neither revoked nor retired, and it is among the ref's live, uncontested keys
+ * (`machineKeys`: a certificate its delegation retired, or one a rival certificate contests, is not). Losing it takes
+ * the machine off the org: its channels close and it is `hub-confirmed` again (M4).
  */
 export async function speaksFor(head: SignedOrgState, certificates: Certificates, enrollment: EnrollmentFile, machineKey: string, now: Date): Promise<boolean> {
   if (head.state.revoked.some((r) => r.keyId === machineKey) || head.state.retired.some((r) => r.keyId === machineKey)) return false;
   if (!(await listedIn(head, enrollment, machineKey, now))) return false;
-  return !(await machineKeys(head.state, enrollment.ref, certificates, now)).contested;
+  const { keys, contested } = await machineKeys(head.state, enrollment.ref, certificates, now);
+  if (contested) return false;
+  for (const pub of keys) if ((await keyId(pub)) === machineKey) return true;
+  return false;
 }
 
 async function listedIn(head: SignedOrgState, enrollment: EnrollmentFile, machineKey: string, now: Date): Promise<boolean> {
