@@ -50,6 +50,7 @@ export type Refused = { ok: false; status: number; error: string; message?: stri
 type Outcome<T> = { ok: true; value: T } | Refused;
 const refused = (status: number, error: string, message?: string): Refused => ({ ok: false, status, error, ...(message ? { message } : {}) });
 const iso = (ms: number) => new Date(ms).toISOString();
+const notMember = () => refused(403, 'not-a-member', 'the org state no longer lists you');
 
 /** What an accepted state changed beyond the chain: its version, and the members it dropped. */
 export type Accepted = { version: number; removed: MemberId[] };
@@ -116,21 +117,22 @@ export class OrgChain {
       if (genesis.state.members.find((m) => m.email.toLowerCase() === email)?.id !== id) {
         return refused(409, 'genesis-member', `the genesis must list ${email} as the member ${id ?? '(none)'}, the id the hub's logs already carry`);
       }
-      return this.commit(0, genesis);
+      return this.commit(0, genesis, poster);
     }
     const verdict = await verifySuccessor(head, body as SignedOrgState, this.transitions());
     if (!verdict.ok) return this.refusedAgainst(head.state.version, verdict.code);
-    return this.commit(head.state.version, body as SignedOrgState);
+    return this.commit(head.state.version, body as SignedOrgState, poster);
   }
 
   /** A root transition the recovery key signed against the head, kept beside the chain (once). */
-  async submitTransition(body: unknown): Promise<Outcome<{ fromVersion: number }>> {
+  async submitTransition(body: unknown, poster: MemberRecord): Promise<Outcome<{ fromVersion: number }>> {
     const head = this.head();
     if (head === null) return refused(409, 'no-state', 'the org has no state to transition from');
     const verdict = await verifyTransition(head, body as Signed<RootTransition>, head.state.root.recoveryPub);
     if (!verdict.ok) return this.refusedAgainst(head.state.version, verdict.code);
     const t = body as Signed<RootTransition>;
     return this.storage.transactionSync(() => {
+      if (!this.holds(poster)) return notMember();
       if (this.headVersion() !== head.state.version) return this.refusedAgainst(this.headVersion(), 'rollback');
       this.sql.exec('INSERT OR IGNORE INTO org_transitions (body, from_version, accepted) VALUES (?, ?, ?)', canonicalize(t), t.body.fromVersion, iso(Date.now()));
       return { ok: true as const, value: { fromVersion: t.body.fromVersion } };
@@ -142,9 +144,18 @@ export class OrgChain {
     return refused(409, code);
   }
 
-  /** Stores `s` as the version after `expected`, unless the head moved meanwhile, and rebuilds the projections. */
-  private commit(expected: number, s: SignedOrgState): Outcome<Accepted> {
+  /** Whether `poster` is still a member: verification awaited, and a state accepted meanwhile may have removed them. */
+  private holds(poster: MemberRecord): boolean {
+    return this.sql.exec('SELECT 1 FROM members WHERE id = ?', poster.id).toArray().length > 0;
+  }
+
+  /**
+   * Stores `s` as the version after `expected`, unless the head moved meanwhile or its poster is no longer a member,
+   * and rebuilds the projections.
+   */
+  private commit(expected: number, s: SignedOrgState, poster: MemberRecord): Outcome<Accepted> {
     return this.storage.transactionSync(() => {
+      if (!this.holds(poster)) return notMember();
       const current = this.headVersion();
       if (current !== expected) return this.refusedAgainst(current, 'not-head');
       const now = iso(Date.now());

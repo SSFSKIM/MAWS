@@ -28,10 +28,11 @@ export function retryDelay(attempt: number, baseMs: number, error: unknown): num
 }
 
 /**
- * True when a call failed because the callee's code lacks `method`: during a rollout the object called may still run
- * the code from before the method was added, and workerd refuses the call ("The RPC receiver does not implement the
- * method "<method>"."). A caller that has a fallback for older code takes it instead of retrying.
+ * True when a call failed because the callee's code lacks `method` (any method, when none is named): during a rollout
+ * the object called may still run the code from before the method was added, and workerd refuses the call ("The RPC
+ * receiver does not implement the method "<method>"."). A caller that has a fallback for older code takes it instead of
+ * retrying.
  */
-export function lacksMethod(error: unknown, method: string): boolean {
-  return error instanceof Error && error.message.includes(`does not implement the method "${method}"`);
+export function lacksMethod(error: unknown, method?: string): boolean {
+  return error instanceof Error && error.message.includes(method === undefined ? 'does not implement the method' : `does not implement the method "${method}"`);
 }

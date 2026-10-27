@@ -62,6 +62,8 @@ import {
   MISSING_METHOD_PATH,
   REGISTRY_HEAD_FAULT_PATH,
   PROJECT_STATE_CACHE_PATH,
+  AS_MEMBER_PATH,
+  LACKS_PATH,
 } from './send-fault';
 
 const require = createRequire(import.meta.url);
@@ -473,6 +475,14 @@ export async function startLocalHub() {
      * the org-state head (the suites' Worker only). */
     async stateCache(project: string, change: { ahead?: number; hold?: boolean; readTimeoutMs?: number } = {}): Promise<{ reads: number }> {
       return JSON.parse(await seam('PROJECT', project, PROJECT_STATE_CACHE_PATH, change));
+    },
+    /** Makes the Registry refuse calls of `method` as one on older code would (null: as deployed). */
+    async registryLacks(method: string | null) {
+      await seam('REGISTRY', ORG, LACKS_PATH, { method });
+    },
+    /** Calls the Registry's `call` for `member` as given (a record the Worker resolved earlier), with `args`; its answer. */
+    async asMember(call: string, member: unknown, ...args: unknown[]): Promise<unknown> {
+      return JSON.parse(await seam('REGISTRY', ORG, AS_MEMBER_PATH, { call, member, args }));
     },
     /** Whether the Registry takes workerd's own refusal of a method a callee lacks for one on older code. */
     async missingMethod(): Promise<{ lacks: boolean; message: string }> {
