@@ -67,8 +67,9 @@ export interface ConnectorOwnerDeps {
 
 export interface ConnectorOwner {
   servers(artifactId: string, tools: readonly ConnectorToolRef[], viewer: ClientRef): Promise<ConnectorServers>;
-  connect(artifactId: string, sourceHandle: string): ConnectorOwnerAck;
-  reconnect(artifactId: string, sourceHandle: string): ConnectorOwnerAck;
+  // `client`: who asked, the client the consent opens on (P5 O1 M3)
+  connect(artifactId: string, sourceHandle: string, client: ClientRef | null): ConnectorOwnerAck;
+  reconnect(artifactId: string, sourceHandle: string, client: ClientRef | null): ConnectorOwnerAck;
   disconnect(connectionId: string): ConnectorOwnerAck;
   hostLost(): void; // main's attachment to the engine host ended: running actions end, rows are read again
   hostStreaming(): void; // P3-F F-connectors 9: the engine host's connection streams again: rows are read again
@@ -358,7 +359,7 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
 
   // ── actions ──
 
-  function start(kind: Action['kind'], artifactId: string, sourceHandle: string): ConnectorOwnerAck {
+  function start(kind: Action['kind'], artifactId: string, sourceHandle: string, client: ClientRef | null): ConnectorOwnerAck {
     if (stopped) return { accepted: false, why: 'stopped' };
     const handle = handles.get(sourceHandle);
     if (!handle || handle.artifactId !== artifactId) return { accepted: false, why: 'stale' };
@@ -380,7 +381,7 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
     const tools = [...handle.tools];
     // the action ends when its lifetime does, whether or not what it awaits has answered (told by the same signal)
     const cancelled: Last = { action: kind, ok: false, why: 'cancelled' };
-    const work = run(kind, artifactId, handle.key, handle.server, tools, controller.signal).catch((): Last => ({ action: kind, ok: false, why: 'failed' }));
+    const work = run(kind, artifactId, handle.key, handle.server, tools, controller.signal, client).catch((): Last => ({ action: kind, ok: false, why: 'failed' }));
     void within(work, controller.signal, cancelled)
       .then((last) => {
         const ended: Last = controller.signal.aborted ? { action: kind, ok: false, why: timedOut ? 'timeout' : 'cancelled' } : last;
@@ -415,7 +416,7 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
     return { last: { action: kind, ok: true, tools: Math.min(names.size, 1_024), credential }, unauthorized: false };
   }
 
-  async function run(kind: Action['kind'], artifactId: string, key: string, server: string, tools: string[], signal: AbortSignal): Promise<Last> {
+  async function run(kind: Action['kind'], artifactId: string, key: string, server: string, tools: string[], signal: AbortSignal, client: ClientRef | null): Promise<Last> {
     const fail = (why: ConnectorOwnerFailure): Last => ({ action: kind, ok: false, why });
     const sources = await members(artifactId, key, tools, server, signal);
     if (signal.aborted) return fail('cancelled');
@@ -425,7 +426,7 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
     if (!identity || !oauth) return (await discoverAll(kind, sources, signal, 'none')).last;
     if (kind === 'reconnect') {
       if (signal.aborted) return fail('cancelled'); // P3-HD M3c2 correction: a newer Disconnect wins
-      const replaced = await oauth.reconnect(first, signal);
+      const replaced = await oauth.reconnect(first, signal, client);
       if (!replaced.ok) return fail(failure(replaced.why));
       return (await discoverAll(kind, sources, signal, 'maws')).last;
     }
@@ -450,7 +451,7 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
         break;
     }
     if (signal.aborted) return fail('cancelled'); // P3-HD M3c2 correction: a newer Disconnect wins
-    const connected = await oauth.connect(first, signal);
+    const connected = await oauth.connect(first, signal, client);
     if (!connected.ok) return fail(failure(connected.why));
     return (await discoverAll(kind, sources, signal, 'maws')).last;
   }
@@ -496,8 +497,8 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
 
   return {
     servers,
-    connect: (artifactId, sourceHandle) => start('connect', artifactId, sourceHandle),
-    reconnect: (artifactId, sourceHandle) => start('reconnect', artifactId, sourceHandle),
+    connect: (artifactId, sourceHandle, client) => start('connect', artifactId, sourceHandle, client),
+    reconnect: (artifactId, sourceHandle, client) => start('reconnect', artifactId, sourceHandle, client),
     disconnect,
     hostLost() {
       for (const action of actions.values()) action.controller.abort();

@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { app, safeStorage } from 'electron';
 import { isNoClient, NO_CLIENT_REASON, type ClientPort } from '@shared/client/port';
+import type { ClientRef } from '@shared/ipc/client';
 import { listenLoopback } from './oauth-callback';
 import { createConnectorOAuthFlow } from './oauth-flow';
 import { createConnectorOAuthProvider, type ConnectorOAuthProvider, type ConnectorOAuthProviderDeps } from './oauth-provider';
@@ -63,10 +64,11 @@ export function guardE2ECustody(sealer: ConnectorOAuthSealer, facts: E2ECustodyF
   };
 }
 
-// The owner's Connect or Reconnect opens the browser through the client port. The flow is the connector identity's, not
-// one page's (a second Connect joins it), so no client is named: Electron's port opens the system browser either way.
-export async function openOwnerBrowser(port: Pick<ClientPort, 'openExternal'>, url: string): Promise<void> {
-  const answer = await port.openExternal(null, { url });
+// The owner's Connect or Reconnect opens the browser through the client port, on the client that asked. A flow has one
+// asker (a concurrent Connect is busy); an asker gone by the hand-off is still the one named, so mawsd's port answers
+// noClient and the flow fails as not opened, rather than opening consent on a screen no live request came from.
+export async function openOwnerBrowser(port: Pick<ClientPort, 'openExternal'>, url: string, client: ClientRef | null): Promise<void> {
+  const answer = await port.openExternal(client, { url });
   if (isNoClient(answer) || !answer.opened) throw new Error(`the authorization URL was not opened: ${isNoClient(answer) ? NO_CLIENT_REASON : answer.reason}`);
 }
 
@@ -79,6 +81,6 @@ export function productionConnectorOAuth(deps: Pick<ConnectorOAuthProviderDeps, 
     tmp: tmpdir,
   });
   const store = createConnectorOAuthStore({ directory: join(app.getPath('userData'), 'connectors', 'oauth'), sealer });
-  const flow = createConnectorOAuthFlow({ fetch: (url, init) => fetch(url, init), listen: listenLoopback, openBrowser: (url) => openOwnerBrowser(deps.port, url) });
+  const flow = createConnectorOAuthFlow({ fetch: (url, init) => fetch(url, init), listen: listenLoopback, openBrowser: (url, client) => openOwnerBrowser(deps.port, url, client) });
   return createConnectorOAuthProvider({ store, flow, closeHost: deps.closeHost, ...(deps.log && { log: deps.log }) });
 }

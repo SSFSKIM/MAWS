@@ -46,6 +46,7 @@ class Harness {
   handle: ((request: LoopbackRequest) => LoopbackReply) | null = null;
   closed = 0;
   opened: string[] = [];
+  openedFor: unknown[] = []; // P5 O1 M3: the client each browser hand-off named
   openFails = false;
   openHangs = false; // the opener never answers
   listenGate: Promise<void> | null = null; // binding answers only once this settles
@@ -84,8 +85,9 @@ class Harness {
       this.handle = handle;
       return { port: 53_100, close: async () => { this.closed += 1; this.events.push('close'); this.handle = null; } };
     },
-    openBrowser: async (url) => {
+    openBrowser: async (url, client) => {
       this.events.push('browser');
+      this.openedFor.push(client);
       if (this.openFails) throw new Error('no browser');
       if (this.openHangs) return new Promise<void>(() => {});
       this.opened.push(url);
@@ -146,6 +148,18 @@ describe('connect', () => {
       tokens: { accessToken: 'at-1', refreshToken: 'rt-1', tokenType: 'Bearer', grantedScope: 'metrics:read', expiresAt: NOW + 60_000, obtainedAt: NOW },
     });
     expect(JSON.stringify(grant)).not.toContain('mcp.example.com/mcp'); // the request URL is the identity's, never the grant's resource
+    expect(h.openedFor).toEqual([null]); // no client named: none asked
+  });
+
+  // P5 O1 M3: the consent opens on the client whose Connect started the flow
+  it('hands the browser the client that asked', async () => {
+    const h = new Harness();
+    const asker = { id: 'page:1.1', onGone: () => () => {} } as never;
+    const pending = h.flow.connect({ requestUrl: REQUEST_URL, signal: new AbortController().signal, client: asker });
+    await h.browserOpened();
+    expect(h.openedFor).toEqual([asker]);
+    h.deliver('/callback?code=code-1&state=state-abc');
+    await pending;
   });
 
   it('compares the issuer as an exact string: a pathless PRM issuer is not the slash-suffixed metadata issuer', async () => {

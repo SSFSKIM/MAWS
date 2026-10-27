@@ -11,6 +11,7 @@ import type { SessionServiceDeps } from '../sessions/context';
 import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
 import type { Settings } from '@shared/ipc/schema';
 import type { ConnectorsDeps } from '.';
+import { captureConsole } from '../../../test/support/console-capture';
 
 const state = vi.hoisted(() => ({
   root: '', shellConfig: '', ready: null as null | (() => unknown),
@@ -86,10 +87,18 @@ describe('the application root’s connector composition', () => {
       on: (name, listener) => { events.on(name, listener); return () => { events.off(name, listener); }; },
       emit: (name, ...args) => events.emit(name, ...args),
     };
+    // the real startup's expected diagnostics: its build line, and the doubled index's unavailability as two services report it
+    const banner = captureConsole('log', /^\[main\] MAWS /);
+    const unavailable = captureConsole('warn', /^\[(owner|library)\] /);
     await import('../index');
     await state.ready!();
+    expect(banner.lines()).toHaveLength(1);
+    expect(unavailable.lines()).toEqual([
+      "[owner] the owner channel's marks are not kept: index unavailable: test",
+      '[library] the index is unavailable (test); the library answers empty and follows no host change this run',
+    ]);
   });
-  afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); rmSync(state.root, { recursive: true, force: true }); });
+  afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.restoreAllMocks(); rmSync(state.root, { recursive: true, force: true }); });
 
   it('supplies route D’s real factory to the connector service, beside the index and the window lookup', async () => {
     const { createDirectRoute } = await import('./direct-route'); // the instance the root imported (modules were reset)

@@ -120,6 +120,34 @@ describe('the sign-in operation', () => {
     expect(t.last(opId)).toMatchObject({ state: 'failed', reason: 'engine', message: 'the authorization URL was not opened: only http, https and mailto links open outside MAWS' });
   });
 
+  // A port that answers late (mawsd's asks a remote client): the browser's return can come before its answer, and the
+  // answer, whatever it says, does not undo what the callback already advanced.
+  it.each([{ opened: true as const }, { opened: false as const, reason: 'the client answered late' }])('takes a callback that comes back before a slow port answers $opened, and keeps it', async (late) => {
+    let answer: (value: typeof late) => void = () => {};
+    const opened: string[] = [];
+    const t = make({ port: { openExternal: (_client, target) => (opened.push((target as { url: string }).url), new Promise((resolve) => (answer = resolve))) } });
+    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null);
+    await t.until(() => opened.length === 1, 'the hand-off');
+    expect(t.last(opId).state).toBe('waiting_callback'); // ready before the port has answered
+    const redirect = new URL(new URL(opened[0]!).searchParams.get('redirect_uri')!);
+    const page = await fetch(`${redirect.origin}/callback?code=the-code&state=engine-state`);
+    expect(page.status).toBe(200);
+    answer(late);
+    await t.ended(opId);
+    expect(t.states(opId)).toEqual(['starting', 'waiting_browser', 'waiting_callback', 'submitting', 'watching_status', 'done']);
+  });
+
+  it('a cancel while the port has not answered stands when it answers', async () => {
+    let answer: (value: { opened: false; reason: string }) => void = () => {};
+    const t = make({ port: { openExternal: () => new Promise((resolve) => (answer = resolve)) } });
+    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null);
+    await t.until(() => t.last(opId)?.state === 'waiting_callback', 'waiting_callback');
+    t.signIn.cancel(opId);
+    answer({ opened: false, reason: 'late' });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(t.states(opId)).toEqual(['starting', 'waiting_browser', 'waiting_callback', 'cancelled']);
+  });
+
   it('custom scheme: MAWS listens, opens the engine\'s URL, takes the one matching callback, submits it, reconnects, and ends connected here', async () => {
     const t = make();
     const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null);

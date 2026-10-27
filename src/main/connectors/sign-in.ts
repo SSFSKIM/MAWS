@@ -257,22 +257,24 @@ export function createSignIn(deps: SignInDeps): SignIn {
     const { authUrl, requiresUserAction, redirectScheme, state } = auth.answer;
     if (authUrl === undefined || requiresUserAction === false) return move(op, 'done', { where: 'here' });
     move(op, 'waiting_browser');
-    // Electron's port answers as the URL is handed off, before the browser can call back; a port that answers later
-    // (mawsd's, O3) must not let the callback arrive before waiting_callback, which refuses it until then
-    const opened = await deps.port.openExternal(op.client, { url: authUrl });
-    if (!live(op)) return;
-    if (isNoClient(opened) || !opened.opened) return fail(op, 'engine', `the authorization URL was not opened: ${isNoClient(opened) ? NO_CLIENT_REASON : opened.reason}`);
+    // Ready for the browser's return before asking the port to open it: the browser can finish before the port answers.
+    let waiting: State;
     if (redirectScheme === 'custom' && typeof state === 'string') {
       expected = state;
-      move(op, 'waiting_callback');
+      move(op, (waiting = 'waiting_callback'));
       endWait = later(op, callbackMs, () => fail(op, 'timeout'));
-      return;
+    } else {
+      // the engine's own listener receives the redirect; MAWS's is not needed
+      void op.listener?.close();
+      op.listener = null;
+      move(op, (waiting = 'watching_status'));
+      watch(op, Date.now() + callbackMs, false);
     }
-    // the engine's own listener receives the redirect; MAWS's is not needed
-    void op.listener?.close();
-    op.listener = null;
-    move(op, 'watching_status');
-    watch(op, Date.now() + callbackMs, false);
+    const opened = await deps.port.openExternal(op.client, { url: authUrl });
+    if (isNoClient(opened) || !opened.opened) {
+      // only an operation still waiting on that browser fails: a callback, a cancel or an end meanwhile stands
+      if (live(op) && op.state === waiting) fail(op, 'engine', `the authorization URL was not opened: ${isNoClient(opened) ? NO_CLIENT_REASON : opened.reason}`);
+    }
   }
 
   const unsubscribe = deps.onSessionGone((appSessionId) => {

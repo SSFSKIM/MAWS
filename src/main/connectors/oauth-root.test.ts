@@ -114,9 +114,10 @@ describe('the production root', () => {
 
   it('opens the owner’s browser through the client port, and fails with its reason when the port did not open it', async () => {
     const openExternal = vi.fn<ClientPort['openExternal']>(async () => ({ opened: true }));
-    await openOwnerBrowser({ openExternal }, 'http://127.0.0.1:4000/authorize?state=s');
-    expect(openExternal).toHaveBeenCalledExactlyOnceWith(null, { url: 'http://127.0.0.1:4000/authorize?state=s' });
+    const asker = { id: 'page:1.1', onGone: () => () => {} } as never;
+    await openOwnerBrowser({ openExternal }, 'http://127.0.0.1:4000/authorize?state=s', asker);
+    expect(openExternal).toHaveBeenCalledExactlyOnceWith(asker, { url: 'http://127.0.0.1:4000/authorize?state=s' });
     openExternal.mockResolvedValueOnce({ opened: false, reason: 'only http, https and mailto links open outside MAWS' });
-    await expect(openOwnerBrowser({ openExternal }, 'file:///etc/passwd')).rejects.toThrow('the authorization URL was not opened: only http, https and mailto links open outside MAWS');
+    await expect(openOwnerBrowser({ openExternal }, 'file:///etc/passwd', asker)).rejects.toThrow('the authorization URL was not opened: only http, https and mailto links open outside MAWS');
   });
 });

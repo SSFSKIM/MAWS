@@ -198,7 +198,7 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
         const found = await sourceFor(source, artifactId, signal);
         if (found === 'unknown') return { ok: false, why: 'source' };
         if (!found) return { ok: false, why: signal.aborted ? 'cancelled' : 'none' };
-        const made = await deps.connectors.connect(directOf(found), signal);
+        const made = await deps.connectors.connect(directOf(found), signal, client);
         if (made.ok) return { ok: true };
         if (made.why === 'cancelled') return { ok: false, why: 'cancelled' };
         if (made.why === 'timeout') return { ok: false, why: 'timeout' };

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FILES_READ_MAX_LENGTH } from '@shared/ipc/schema/files';
 import type { ClientPort } from '@shared/client/port';
 import type { AllowlistRecord } from './allowlist';
+import { captureConsole } from '../../../test/support/console-capture';
 
 // Electron is faked as in the git handlers' test: one recorded ipcMain handler per channel, one app window.
 const electron = vi.hoisted(() => ({
@@ -61,9 +62,12 @@ describe('main answers files.* through the router', () => {
     return { files, emit, openExternal, followed: files.followed };
   }
   const invoke = (name: string, input?: unknown) => electron.handlers.get(`maws:cmd:${name}`)!(event, input) as Promise<Result>;
+  // the router reports each failed command on the console (`[ipc] <name> failed`); a test expecting failures asserts them
+  const ipcFailures = () => captureConsole('error', /^\[ipc\] /);
 
   it('lists the roots, reads a file, and refuses a path outside as internal with the refusal', async () => {
     await install();
+    const failures = ipcFailures();
     expect(await invoke('files.list', { appSessionId: 'A' })).toMatchObject({
       ok: true,
       value: { root: null, path: '', entries: [{ name: 'repo', path: join(root, 'repo'), kind: 'dir' }], truncated: false },
@@ -74,11 +78,13 @@ describe('main answers files.* through the router', () => {
     });
     expect(await invoke('files.read', { appSessionId: 'A', path: '/etc/hosts' })).toEqual({ ok: false, error: { code: 'internal', message: OUT } });
     expect(await invoke('files.list', { appSessionId: 'nope' })).toEqual({ ok: false, error: { code: 'internal', message: 'unknown app session: nope' } });
+    expect(failures.lines()).toEqual(['[ipc] files.read failed', '[ipc] files.list failed']);
   });
 
   // E5: the hash-checked save through the router, its answers validated by the output schema.
   it('writes a file over its hash, answers conflict over a stale one, and refuses a path outside', async () => {
     await install();
+    const failures = ipcFailures();
     const path = join(root, 'repo', 'src', 'a.ts');
     const hashOf = (text: string) => createHash('sha256').update(text).digest('hex');
     expect(await invoke('files.read', { appSessionId: 'A', path, hash: true })).toMatchObject({ ok: true, value: { hash: hashOf('export {};\n') } });
@@ -93,6 +99,7 @@ describe('main answers files.* through the router', () => {
     });
     expect(await invoke('files.write', { appSessionId: 'A', path: '/etc/hosts', content: '', expectedHash: hashOf('') })).toEqual({ ok: false, error: { code: 'internal', message: OUT } });
     expect(await invoke('files.write', { appSessionId: 'A', path, content: '' })).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+    expect(failures.lines()).toEqual(['[ipc] files.write failed']); // the refusal; invalid input never reaches the service
   });
 
   it('fails invalid_input for a length above the ceiling, before the service is reached', async () => {
@@ -134,6 +141,7 @@ describe('main answers files.* through the router', () => {
   it('opens an allowed file through the asking client’s port and answers its reason', async () => {
     const openPath = vi.fn<ClientPort['openExternal']>(async () => ({ opened: false, reason: 'no application' }));
     await install(openPath);
+    const failures = ipcFailures();
     writeFileSync(join(root, 'repo', 'doc.pdf'), '%PDF-1.4\n');
     expect(await invoke('files.openExternal', { appSessionId: 'A', path: join(root, 'repo', 'doc.pdf') })).toEqual({
       ok: true,
@@ -146,6 +154,7 @@ describe('main answers files.* through the router', () => {
     });
     expect(await invoke('files.openExternal', { appSessionId: 'A', path: '/etc/hosts' })).toEqual({ ok: false, error: { code: 'internal', message: OUT } });
     expect(openPath).toHaveBeenCalledTimes(1);
+    expect(failures.lines()).toEqual(['[ipc] files.openExternal failed', '[ipc] files.openExternal failed']);
   });
 
   // E1: Reveal in Finder for a delivered file; a refusal is an answer, not an error

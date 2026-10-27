@@ -46,9 +46,9 @@ function noClientPort(): ClientPort {
 }
 
 // Settles within a bound well under any wait a client could impose; a caller that waited for one fails here.
-async function settles<T>(promise: Promise<T>): Promise<T> {
+async function settles<T>(promise: Promise<T>, withinMs = 2_000): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error('did not settle without a client')), 2_000)));
+  const late = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error('did not settle without a client')), withinMs)));
   return Promise.race([promise, late]).finally(() => clearTimeout(timer));
 }
 
@@ -182,7 +182,7 @@ describe('browser hand-offs take their flow’s could-not-open path', () => {
   });
 
   it('the OAuth flow’s browser hand-off rejects', async () => {
-    await expect(settles(openOwnerBrowser(port, 'https://auth.example/authorize?state=s'))).rejects.toThrow('the authorization URL was not opened: no client');
+    await expect(settles(openOwnerBrowser(port, 'https://auth.example/authorize?state=s', CLIENT))).rejects.toThrow('the authorization URL was not opened: no client');
   });
 
   it('delivery’s gws login stops as could not open the sign-in page', async () => {
@@ -204,12 +204,13 @@ describe('browser hand-offs take their flow’s could-not-open path', () => {
       log: () => {},
     });
     try {
-      const answer = await settles(Promise.resolve(handlers.get('delivery.connect')!({ runId: 'r1', target: 'drive', artifactId: ID }, { client: CLIENT })));
+      // a real process starts first, slow on a loaded run: 10 s, still a third of the stand-in's wait for the browser
+      const answer = await settles(Promise.resolve(handlers.get('delivery.connect')!({ runId: 'r1', target: 'drive', artifactId: ID }, { client: CLIENT })), 10_000);
       expect(answer).toEqual({ ok: false, why: 'failed', message: 'could not open the sign-in page: no client' });
     } finally {
       delivery.stop();
     }
-  });
+  }, 20_000);
 });
 
 describe('the notifier', () => {

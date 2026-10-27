@@ -193,8 +193,8 @@ export function startConnectors({ hosts, register, index, realpath = canonical, 
   const owner = direct ? createConnectorOwner({ direct, oauth, grants: grants.list, log }) : null;
   if (owner) {
     register('connectors.servers', ({ artifactId, tools }, { client }) => owner.servers(artifactId, tools, client));
-    register('connectors.connect', ({ artifactId, sourceHandle }) => owner.connect(artifactId, sourceHandle));
-    register('connectors.reconnect', ({ artifactId, sourceHandle }) => owner.reconnect(artifactId, sourceHandle));
+    register('connectors.connect', ({ artifactId, sourceHandle }, { client }) => owner.connect(artifactId, sourceHandle, client));
+    register('connectors.reconnect', ({ artifactId, sourceHandle }, { client }) => owner.reconnect(artifactId, sourceHandle, client));
     register('connectors.disconnect', ({ connectionId }) => owner.disconnect(connectionId));
   }
 

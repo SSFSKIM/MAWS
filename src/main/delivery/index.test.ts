@@ -233,6 +233,7 @@ describe('the Notion target', () => {
     const status = (await call('delivery.status', { target: 'notion', artifactId: ART })) as { source: { key: string } };
     expect(await call('delivery.connect', { runId: RUN(), target: 'notion', artifactId: ART, source: status.source.key })).toEqual({ ok: true });
     expect(connectors.connect.mock.calls[0]![0]).toEqual(source);
+    expect(connectors.connect.mock.calls[0]![2]).toBe(CLIENT); // P5 O1 M3: the consent opens on the asking client
     connectors.connect.mockResolvedValueOnce({ ok: false, why: 'denied' });
     expect(await call('delivery.connect', { runId: RUN(), target: 'notion', artifactId: ART, source: status.source.key })).toEqual({ ok: false, why: 'denied' });
   });

@@ -82,19 +82,20 @@ describe('the owner’s delivery over route D (main)', () => {
 
   it('Connect tries the server open first and opens no browser when it answers', async () => {
     const { delivery, deps } = scene({ state: { state: 'disconnected' }, discover: [{ ok: true, tools: [] }] });
-    expect(await delivery.connect(source(), signal())).toEqual({ ok: true });
+    expect(await delivery.connect(source(), signal(), null)).toEqual({ ok: true });
     expect(deps.oauth!.connect).not.toHaveBeenCalled();
   });
 
   it('Connect runs the provider’s sign-in on a refusal and proves it with a listing; Reconnect for a record that needs it', async () => {
     const refused = scene({ state: { state: 'disconnected' }, discover: [{ ok: false, failure: 'unavailable', reason: 'unauthorized' }, { ok: true, tools: [] }] });
-    expect(await refused.delivery.connect(source(), signal())).toEqual({ ok: true });
-    expect(refused.deps.oauth!.connect).toHaveBeenCalledTimes(1);
+    const asker = { id: 'page:1.1', onGone: () => () => {} } as never;
+    expect(await refused.delivery.connect(source(), signal(), asker)).toEqual({ ok: true });
+    expect(refused.deps.oauth!.connect).toHaveBeenCalledExactlyOnceWith(source(), expect.anything(), asker); // P5 O1 M3: the consent's client
     const stale = scene({ state: { state: 'needsReconnect', connectionId: 'c' } });
-    expect(await stale.delivery.connect(source(), signal())).toEqual({ ok: true });
-    expect(stale.deps.oauth!.reconnect).toHaveBeenCalledTimes(1);
+    expect(await stale.delivery.connect(source(), signal(), asker)).toEqual({ ok: true });
+    expect(stale.deps.oauth!.reconnect).toHaveBeenCalledExactlyOnceWith(source(), expect.anything(), asker);
     const rejected = scene({ state: { state: 'needsConnect' }, discover: [{ ok: false, failure: 'unavailable', reason: 'unauthorized' }] });
-    expect(await rejected.delivery.connect(source(), signal())).toEqual({ ok: false, why: 'refused' });
+    expect(await rejected.delivery.connect(source(), signal(), null)).toEqual({ ok: false, why: 'refused' });
   });
 
   // P4-B5 review: the record store's read (safeStorage) takes no signal, so it is raced against the caller's
@@ -107,7 +108,7 @@ describe('the owner’s delivery over route D (main)', () => {
     deadline.abort();
     expect((await finding)?.sources.map((entry) => entry.connection)).toEqual(['unavailable']);
     const cancel = new AbortController();
-    const connecting = delivery.connect(source(), cancel.signal);
+    const connecting = delivery.connect(source(), cancel.signal, null);
     await vi.waitFor(() => expect(deps.oauth!.state).toHaveBeenCalledTimes(2));
     cancel.abort();
     expect(await connecting).toEqual({ ok: false, why: 'cancelled' });
