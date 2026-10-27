@@ -32,7 +32,7 @@ After O6:
 - [x] M1: machine identity and the address codec (2026-10-27T10:11Z; commits `ece0eb80a`..`ae671bfd0`, task review clean after two fix rounds; class 1a GREEN, run 40486094807)
 - [x] M2: addresses across the boundary, one machine (2026-10-27; commits `8362f2d74`..`849b08ae5`, task review clean after one fix round; class 1a GREEN 40520987967; hosted e2e GREEN 40501648644, 40503154665, 40506863633; mini e2e:default GREEN 40518812172; OX7 bench within budget 40507512064)
 - [x] M3: machine links and the second-profile stand-in (2026-10-27; commits `98d55f9cf`..`4cc3aa1fc`, task review clean after two fix rounds; class 1a with e2e:cross-build GREEN 40537654843; hosted e2e:supervisor GREEN 40527949745 and self-hosted e2e:machines GREEN 40527965726, both at `f7672566b`, before the manager-only fixes)
-- [ ] M4: per-machine stores, the shell per machine, explicit machines for paths
+- [x] M4: per-machine stores, the shell per machine, explicit machines for paths (2026-10-27; commits `6370e06ec`..`3d385c4cb`, task review clean after one fix round; class 1a GREEN 40573698654; at `4b59cd5f5`, before the fix wave: hosted GREEN 40559770099, mini e2e:machines with M4's scene and e2e:default GREEN 40559769024, OX7 bench within budget 40563723819. Owed at the fix head: the mini's e2e:machines, e2e:default and e2e:cross-build, blocked by the mini's loginwindow alert (ci-kit-sandbox#59), and hosted e2e:layout's `shell.spec.ts:367`, red at the pre-fix head too, 40577605822)
 - [ ] M5: org projects and the sidebar
 - [ ] M6: acceptance
 
@@ -1052,6 +1052,12 @@ No new dependency. zod 4, Node's `crypto`, the peer-auth addon already in the tr
     - `useHosts` forgets another machine's hosts only on a generation change it has itself seen.
   - Typing: the two generic wrappers over addressed commands (`widgets/read.ts`, `widgets/operation.ts`) use an `AddressedInvoke` cast, because TypeScript defers `InvokeRest<N>` over a generic `N`. Every other generic wrapper forwards `...opts: InvokeRest<N>`.
   - M2's two M4 items: transcript chips pass the row's session to `openFile` and `loadSpill`, so a file tab takes its session's machine. `shell/transfer.ts` compares the record's machine through `panelShows`; `panelRecordOf`, the strip's drag payload, is unchanged.
+  - The task review's round:
+    - The first roster the page learns reconciles every machine: a machine first seen not `up` forgets its statuses, and the first generation learned counts as new, so it resets that partition's counters and drops its queue.
+    - Reveal (`widgets/parts.tsx`'s `RevealButton`) takes a required machine, the one whose path it shows.
+    - Customize and the plugin widgets list only this machine's projects and live sessions. `/plugins` shows a one-line notice for another machine's session, and `/skills` lists no plugins for it (O4).
+    - A non-local session's or project's artifact list is never read (`library/store.ts`'s `watchLibraryList`; O7), so an artifact listed on B can't open as A's artifact of the same id. Rejected: carrying the machine into the artifact tab, whose reads are machine-wide and would all need routing.
+    - SCM's mutation guard and re-read key by machine, checkout and path, and stage and discard take the checkout from their callers.
   - Tests and e2e: `resetShellStores` calls `resetMachine(TEST_MACHINE)`. `sidebarRow(page, match, machine?)` builds the row's address on that machine. M4's scene sits inside M3's two-profile test, before B quits.
   Date/Author: 2026-10-27, O6's executor (controller), from M4's executor.
 
