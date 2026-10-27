@@ -191,6 +191,24 @@ describe('a head read', () => {
     expect(await checked).toMatchObject({ ok: false, reason: 'bad-signature', message: expect.stringContaining('revoked') });
   });
 
+  it('for an unknown signer that cannot complete refuses state-unavailable, not bad-signature', async () => {
+    expect(await events.check(CTX, await words(d1))).toEqual({ ok: true });
+    const d3 = await newDevice('d3');
+    registry.head = await next(v1, (s) => s.members[0].devices.push(d3.device));
+    clock += UNKNOWN_SIGNER_READ_MS;
+    registry.hold(); // the re-read stalls past the bound
+    expect(await events.check(CTX, await words(d3))).toEqual({ ok: false, reason: 'state-unavailable', message: expect.any(String) });
+    registry.reachable = false; // or fails outright
+    registry.release();
+    clock += UNKNOWN_SIGNER_READ_MS;
+    expect(await events.check(CTX, await words(d3))).toMatchObject({ ok: false, reason: 'state-unavailable' });
+    // A head read that completes and still lacks the signer refuses the signature.
+    registry.reachable = true;
+    registry.head = v1;
+    clock += UNKNOWN_SIGNER_READ_MS;
+    expect(await events.check(CTX, await words(d3))).toMatchObject({ ok: false, reason: 'bad-signature', message: expect.stringContaining('unknown-signer') });
+  });
+
   it('that stalls fails closed within the bound, and the next check reads again', async () => {
     expect(await events.check(CTX, await words(d1))).toEqual({ ok: true });
     clock += STATE_MAX_AGE_MS + 1;

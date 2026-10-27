@@ -88,9 +88,10 @@ export class SignedEvents {
     if (!held) return { check: STATE_UNAVAILABLE };
     let verdict = await this.verify(ctx, held, event);
     if (!verdict.ok && verdict.code === 'unknown-signer' && this.now() - this.lastRead >= UNKNOWN_SIGNER_READ_MS) {
-      // Unread, the refusal stands: it fails closed.
+      // A re-read that cannot complete leaves the signer undecided, not refused: the sender retries.
       const fresher = await this.readAnnounced();
-      if (fresher) [held, verdict] = [fresher, await this.verify(ctx, fresher, event)];
+      if (!fresher) return { check: STATE_UNAVAILABLE };
+      [held, verdict] = [fresher, await this.verify(ctx, fresher, event)];
     }
     if (verdict.ok) return { check: verdict, version: held.version };
     return { check: { ok: false, reason: 'bad-signature', message: `the v2 signature does not verify against the org state (${verdict.code})` }, version: held.version };
