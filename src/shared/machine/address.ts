@@ -12,9 +12,10 @@
 // object properties and catchalls, array and tuple elements, record keys and values, the optional, nullable, default,
 // prefault, nonoptional, readonly and catch wrappers, a pipe's input side for lowering and its output side for lifting,
 // `lazy` (a recursive schema compiles to a cyclic plan), discriminated unions (dispatched by the discriminator) and plain
-// unions. A plain union's options are merged: a key is rewritten at a path when every option that has it there says it is
-// one of the four kinds, and options that disagree (an id in one, a plain string in another) throw at compile, naming the
-// path. Any other construct that would hide an id (an intersection, a map, a set, a promise, a transform the walk cannot
+// unions. A plain union's options are merged: a key is rewritten at a path when every option that applies there (an
+// object's property or else its catchall, a record's value, a tuple's item or else its rest, an array's element) says it
+// is one of the four kinds, and options that disagree (an id in one, a plain string or an opaque unknown in another) throw
+// at compile, naming the path. Any other construct that would hide an id (an intersection, a map, a set, a promise, a transform the walk cannot
 // see through) throws at compile too, so nothing is skipped quietly.
 import type * as z from 'zod';
 import { AppSessionIdSchema, AttentionIdSchema, LooseAppSessionIdSchema, ProjectIdSchema } from '../graph/ids';
@@ -94,6 +95,8 @@ const WRAPPERS = new Set(['optional', 'nullable', 'default', 'prefault', 'nonopt
 const STRINGISH = new Set(['string', 'enum', 'literal', 'template_literal']);
 const UNWALKED = new Set(['intersection', 'map', 'set', 'promise']);
 const STRUCTURAL = new Set([...STRINGISH, 'object', 'record', 'array', 'tuple', 'union']);
+const OPAQUE = new Set(['unknown', 'any', 'custom']);
+const isOpaque = (schema: z.ZodType): boolean => OPAQUE.has(defOf(schema).type);
 
 // The schemas directly under `schema`, for the reachability pass (a pipe's both sides: an id behind an opaque side must
 // still be seen, to be refused).
@@ -219,17 +222,22 @@ class Compiler {
   }
 
   private build(schemas: readonly z.ZodType[], path: string): Plan | null {
+    const expanded = this.expand(schemas, path);
+    let opaque = expanded.some(isOpaque);
     // A member that is no string, object or array (a null, a number) holds no id, and leaves a lone discriminated union
     // beside it dispatched.
-    const expanded = this.expand(schemas, path).filter((schema) => KIND_OF.has(schema) || STRUCTURAL.has(defOf(schema).type));
-    if (expanded.length === 1 && defOf(expanded[0]).type === 'union') return this.dispatched(expanded[0], path);
+    const structural = expanded.filter((schema) => KIND_OF.has(schema) || STRUCTURAL.has(defOf(schema).type));
+    if (!opaque && structural.length === 1 && defOf(structural[0]).type === 'union') return this.dispatched(structural[0], path);
     // Beside other members, a discriminated union's options join the plain merge.
     const members: z.ZodType[] = [];
     const flatten = (schema: z.ZodType): void => {
       if (defOf(schema).type === 'union') this.expand(defOf(schema).options as z.ZodType[], path).forEach(flatten);
+      else if (isOpaque(schema)) opaque = true;
       else members.push(schema);
     };
-    expanded.forEach(flatten);
+    structural.forEach(flatten);
+    // An unknown, any or custom member accepts what another says is an id, and says nothing itself: no agreement.
+    if (opaque && members.some(carriesId)) throw new Error(`${shown(path)}: a union's options disagree, an id in one and an opaque value (unknown, any or custom) in another`);
 
     const kinds = new Set<AddressedKind>();
     let plainString = false;
@@ -249,14 +257,8 @@ class Compiler {
     }
     if (kinds.size > 0 && plainString) throw new Error(`${shown(path)}: a union's options disagree, an id in one and a plain string in another`);
     const string: Plan | null = kinds.size > 0 ? { k: 'id', path, kinds: [...kinds].sort() } : null;
-    const object = this.objectPlan(objects, path);
-    const record = this.recordPlan(records, path);
-    if (object && record) throw new Error(`${shown(path)}: a union of an object and a record, both carrying ids, cannot be told apart`);
-    const array = this.arrayPlan(arrays, path);
-    const tuple = this.tuplePlan(tuples, path);
-    if (array && tuple) throw new Error(`${shown(path)}: a union of an array and a tuple, both carrying ids, cannot be told apart`);
-    const objectLike = object ?? record;
-    const arrayLike = array ?? tuple;
+    const objectLike = this.objectLikePlan(objects, records, path);
+    const arrayLike = this.arrayLikePlan(arrays, tuples, path);
     const present = [string, objectLike, arrayLike].filter((plan) => plan !== null);
     if (present.length === 0) return null;
     if (present.length === 1) return present[0];
@@ -277,64 +279,55 @@ class Compiler {
     return any ? { k: 'dunion', discriminator, options } : null;
   }
 
-  private objectPlan(objects: readonly z.ZodType[], path: string): Plan | null {
-    if (objects.length === 0) return null;
-    const byKey = new Map<string, z.ZodType[]>();
-    const catchalls: z.ZodType[] = [];
-    for (const object of objects) {
-      const def = defOf(object);
-      for (const [key, schema] of Object.entries(def.shape as Record<string, z.ZodType>)) {
-        const list = byKey.get(key);
-        if (list) list.push(schema);
-        else byKey.set(key, [schema]);
-      }
-      if (def.catchall) catchalls.push(def.catchall as z.ZodType);
-    }
-    const props: [string, Plan][] = [];
-    for (const [key, schemas] of byKey) {
-      const plan = this.plan(schemas, `${path}.${key}`);
-      if (plan) props.push([key, plan]);
-    }
-    const catchall = this.plan(catchalls, `${path}.*`);
-    if (props.length === 0 && !catchall) return null;
-    return { k: 'object', props, known: new Set(byKey.keys()), catchall };
-  }
-
-  private recordPlan(records: readonly z.ZodType[], path: string): Plan | null {
-    if (records.length === 0) return null;
-    const key = this.plan(
-      records.map((record) => defOf(record).keyType as z.ZodType),
-      `${path}{key}`,
-    );
+  // Objects and records alike are plain objects at run time, so every option that applies at a key is compared there: an
+  // object's declared property, else its catchall (a strict object's `never` applies nowhere), and every record's value.
+  // A record keyed by ids beside an object cannot be told from it, since the object's property names are no ids.
+  private objectLikePlan(objects: readonly z.ZodType[], records: readonly z.ZodType[], path: string): Plan | null {
+    if (objects.length === 0 && records.length === 0) return null;
+    const key = records.length === 0 ? null : this.plan(records.map((record) => defOf(record).keyType as z.ZodType), `${path}{key}`);
     if (key && key.k !== 'id') throw new Error(`${shown(path)}: a record key that is not a plain id`);
-    const value = this.plan(
-      records.map((record) => defOf(record).valueType as z.ZodType),
-      `${path}{}`,
-    );
-    return key || value ? { k: 'record', key, value } : null;
+    const values = records.map((record) => defOf(record).valueType as z.ZodType);
+    if (objects.length === 0) {
+      const value = this.plan(values, `${path}{}`);
+      return key || value ? { k: 'record', key, value } : null;
+    }
+    if (key) throw new Error(`${shown(path)}: a union's options disagree, a record keyed by ids in one and an object, whose property names are no ids, in another`);
+    const shapeOf = (object: z.ZodType) => defOf(object).shape as Record<string, z.ZodType>;
+    const catchallOf = (object: z.ZodType): z.ZodType[] => {
+      const catchall = defOf(object).catchall as z.ZodType | undefined;
+      return catchall && defOf(catchall).type !== 'never' ? [catchall] : [];
+    };
+    const keys = new Set(objects.flatMap((object) => Object.keys(shapeOf(object))));
+    const props: [string, Plan][] = [];
+    for (const name of keys) {
+      const applying = [...objects.flatMap((object) => (Object.hasOwn(shapeOf(object), name) ? [shapeOf(object)[name]] : catchallOf(object))), ...values];
+      const plan = this.plan(applying, `${path}.${name}`);
+      if (plan) props.push([name, plan]);
+    }
+    const catchall = this.plan([...objects.flatMap(catchallOf), ...values], `${path}.*`);
+    if (props.length === 0 && !catchall) return null;
+    return { k: 'object', props, known: keys, catchall };
   }
 
-  private arrayPlan(arrays: readonly z.ZodType[], path: string): Plan | null {
-    if (arrays.length === 0) return null;
-    const element = this.plan(
-      arrays.map((array) => defOf(array).element as z.ZodType),
-      `${path}[]`,
-    );
-    return element ? { k: 'array', element } : null;
-  }
-
-  private tuplePlan(tuples: readonly z.ZodType[], path: string): Plan | null {
-    if (tuples.length === 0) return null;
+  // Arrays and tuples alike are arrays at run time: at each index every option that applies is compared, a tuple's item
+  // there, else its rest, and every array's element.
+  private arrayLikePlan(arrays: readonly z.ZodType[], tuples: readonly z.ZodType[], path: string): Plan | null {
+    if (arrays.length === 0 && tuples.length === 0) return null;
+    const restOf = (tuple: z.ZodType): z.ZodType[] => (defOf(tuple).rest ? [defOf(tuple).rest as z.ZodType] : []);
+    const elements = arrays.map((array) => defOf(array).element as z.ZodType);
+    const rests = [...elements, ...tuples.flatMap(restOf)];
+    if (tuples.length === 0) {
+      const element = this.plan(rests, `${path}[]`);
+      return element ? { k: 'array', element } : null;
+    }
     const itemsOf = (tuple: z.ZodType) => defOf(tuple).items as z.ZodType[];
     const width = Math.max(...tuples.map((tuple) => itemsOf(tuple).length));
     const items: (Plan | null)[] = [];
     for (let index = 0; index < width; index++) {
-      items.push(this.plan(tuples.flatMap((tuple) => itemsOf(tuple)[index] ?? []), `${path}[${index}]`));
+      const applying = [...tuples.flatMap((tuple) => (index < itemsOf(tuple).length ? [itemsOf(tuple)[index]] : restOf(tuple))), ...elements];
+      items.push(this.plan(applying, `${path}[${index}]`));
     }
-    const rest = this.plan(
-      tuples.flatMap((tuple) => (defOf(tuple).rest as z.ZodType | null) ?? []),
-      `${path}[...]`,
-    );
+    const rest = this.plan(rests, `${path}[...]`);
     return items.some((item) => item !== null) || rest ? { k: 'tuple', items, rest } : null;
   }
 }
@@ -413,7 +406,8 @@ function addressingOver(liftPlan: Plan | null, lowerPlan: Plan | null): Addressi
       if (!REF.test(machine)) throw new Error(`lift: not a machine ref: ${JSON.stringify(machine)}`);
       return run(liftPlan, value, (id, plan) => {
         if (isAddress(id)) throw new Error(`lift: ${shown(plan.path)} already holds an address, ${JSON.stringify(id)}`);
-        return `${machine}${ADDRESS_SEPARATOR}${id}`;
+        if (id.length === 0) throw new Error(`lift: ${shown(plan.path)} holds an empty id, which no address can carry`);
+        return addressOf(machine, id);
       }) as T;
     },
     lower<T>(value: T): { value: T; machines: ReadonlySet<MachineRef> } {

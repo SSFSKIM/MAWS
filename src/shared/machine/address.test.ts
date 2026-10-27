@@ -207,6 +207,42 @@ describe('each construct the compile step walks', () => {
     expect(() => compileAddressing(literal)).toThrow("the value itself: a union's options disagree");
   });
 
+  // The task review's four overlaps, each a plain string (or an unknown) that a lift would otherwise rewrite, or an id it
+  // would miss.
+  it("compares an object's property with a record's value beside it", () => {
+    const schema = z.union([z.strictObject({ a: AppSessionIdSchema }), z.record(z.string(), z.string())]);
+    expect(() => compileAddressing(schema)).toThrow(".a: a union's options disagree, an id in one and a plain string in another");
+    const agreeing = z.union([z.strictObject({ a: AppSessionIdSchema }), z.record(z.string(), AppSessionIdSchema)]);
+    roundTrip(agreeing, { a: 'a1', b: 'a2' }, { a: at(A, 'a1'), b: at(A, 'a2') });
+  });
+
+  it("compares a tuple's item with another tuple's rest, and with an array's element", () => {
+    const withRest = z.union([z.tuple([AppSessionIdSchema]), z.tuple([], z.string())]);
+    expect(() => compileAddressing(withRest)).toThrow("[0]: a union's options disagree, an id in one and a plain string in another");
+    const withArray = z.union([z.tuple([AppSessionIdSchema, z.number()]), z.array(z.string())]);
+    expect(() => compileAddressing(withArray)).toThrow("[0]: a union's options disagree");
+    const agreeing = z.union([z.tuple([AppSessionIdSchema]), z.array(AppSessionIdSchema)]);
+    roundTrip(agreeing, ['a1', 'a2'], [at(A, 'a1'), at(A, 'a2')]);
+  });
+
+  it("compares an id catchall with a property another option declares a plain string", () => {
+    const schema = z.union([z.object({}).catchall(AppSessionIdSchema), z.strictObject({ a: z.string() })]);
+    expect(() => compileAddressing(schema)).toThrow(".a: a union's options disagree, an id in one and a plain string in another");
+    const strictBeside = z.union([z.strictObject({ b: z.number() }), z.strictObject({ a: AppSessionIdSchema })]); // a strict object's catchall applies nowhere
+    roundTrip(strictBeside, { a: 'a1' }, { a: at(A, 'a1') });
+  });
+
+  it('refuses an id beside an opaque unknown, any or custom, which cannot agree', () => {
+    expect(() => compileAddressing(z.union([AppSessionIdSchema, z.unknown()]))).toThrow("the value itself: a union's options disagree, an id in one and an opaque value");
+    expect(() => compileAddressing(z.strictObject({ x: z.union([z.strictObject({ a: PtyIdSchema }), z.any()]) }))).toThrow(".x: a union's options disagree");
+    expect(() => compileAddressing(z.union([z.strictObject({ a: AppSessionIdSchema }), z.looseObject({})]))).toThrow(".a: a union's options disagree, an id in one and an opaque value");
+    expect(() => compileAddressing(z.union([z.string(), z.unknown()]))).not.toThrow(); // no id: nothing to agree on
+  });
+
+  it('refuses a record keyed by ids beside an object, whose property names are no ids', () => {
+    expect(() => compileAddressing(z.union([z.record(AppSessionIdSchema, z.number()), z.strictObject({ n: z.number() })]))).toThrow("the value itself: a union's options disagree, a record keyed by ids");
+  });
+
   it('an id-free schema is the identity: the very value comes back', () => {
     const codec = compileAddressing(z.strictObject({ name: z.string(), items: z.array(z.strictObject({ n: z.number() })) }));
     const value = { name: 'x', items: [{ n: 1 }] };
@@ -244,6 +280,13 @@ describe('lowering and lifting refuse the wrong form', () => {
 
   it('throws on a bare id met while lowering, naming the path', () => {
     expect(() => compileAddressing(schema).lower({ a: at(A, 'a1'), list: [{ p: 'p1' }] })).toThrow('lower: .list[].p holds a bare id where an address belongs, "p1"');
+  });
+
+  it('throws on lifting an empty loose id, which no address can carry', () => {
+    const loose = compileAddressing(z.strictObject({ id: LooseAppSessionIdSchema, pty: PtyIdSchema.optional() }));
+    expect(() => loose.lift({ id: '' }, A)).toThrow('lift: .id holds an empty id');
+    expect(() => loose.lift({ id: 'a1', pty: '' }, A)).toThrow('lift: .pty holds an empty id');
+    expect(loose.lift({ id: 'a1' }, A)).toEqual({ id: at(A, 'a1') });
   });
 
   it('refuses to lift with a machine that is not a ref', () => {
