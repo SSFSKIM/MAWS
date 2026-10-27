@@ -932,6 +932,9 @@ const LIVENESS_BOUNDS = {
   'e2e/document-provisional.spec.ts': {
     "expect(Date.now() - composingAt, 'the batch landed inside the hold’s cap').toBeLessThan(4_500);": 'the hold\'s own cap, a timer of the product\'s',
   },
+  'e2e/machines.spec.ts': {
+    "expect(Date.parse(down.since) - exitedAt, 'B down within 2 s of its exit').toBeLessThanOrEqual(2_000);": 'the link\'s close when the far app\'s process ends: a signal, against acceptance 6\'s 2 s (P5 O6)',
+  },
   'e2e/engine-replay.spec.ts': {
     'expect(ms).toBeLessThan(10_000);': 'the host\'s own 8 s deadline, read before the router\'s 10 s',
   },
