@@ -51,6 +51,7 @@ function plan(scenarioEnv) {
         MAC_VM_E2E: '',
         HOSTED_MAC_E2E: '',
         MAC_SECRET_E2E: '',
+        MAC_HOME_E2E: '',
         // The run's ref: a test chooses its own, never the ref the tests themselves run on.
         GITHUB_REF: '',
         GITHUB_REF_NAME: '',
@@ -300,7 +301,7 @@ const placement = (outputs) => Object.fromEntries(JSON.parse(outputs.e2e).map((e
 // class-1 set, only when a run names them); no group shares the host desktop.
 test("gate.yml's proven-VM groups run on Solo Mac, or the named VM lane alone; every other Mac job keeps today's labels and waits", () => {
   const workflow = readWorkflow();
-  const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'POPPLER_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E'];
+  const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'POPPLER_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E', 'MAC_HOME_E2E'];
   // The mini's own placement, as with no group on HOSTED_MAC_E2E; the list's waiters are pinned by their own test below.
   const own = { ...Object.fromEntries(names.map((name) => [name, workflowList(workflow, name)])), HOSTED_MAC_E2E: '' };
   assert.equal(own.MAC_SHARED_E2E, '');
@@ -311,9 +312,11 @@ test("gate.yml's proven-VM groups run on Solo Mac, or the named VM lane alone; e
   // group on the Mac but desk-web.
   const { outputs, summary } = plan({ ...own, GATE_RUNNER: 'pool', GATE_E2E_RUNNER: 'macos', HEAD_MESSAGE: 'ci-gate: test' });
   const offMac = own.POOL_E2E.split(/\s+/);
+  const home = own.MAC_HOME_E2E.split(/\s+/);
+  assert.deepEqual(home, ['discover']);
   const groups = Object.entries(placement(outputs));
   assert.ok(groups.length > 30, `the class-1 set (${groups.length} groups)`);
-  for (const [group, where] of groups) assert.deepEqual(where, offMac.includes(group) ? [box, 30] : proven.includes(group) ? [soloMac, 40] : [mac, 40], group);
+  for (const [group, where] of groups) assert.deepEqual(where, offMac.includes(group) ? [box, 30] : home.includes(group) ? [homeMac, 40] : proven.includes(group) ? [soloMac, 40] : [mac, 40], group);
   assert.equal(outputs.unit_darwin, 'true');
   assert.equal(outputs.unit_darwin_runner, JSON.stringify(mac));
   assert.deepEqual(JSON.parse(outputs.timeouts), { static: 30, unit: 30, probes: 30, unit_darwin: 40 });
@@ -339,17 +342,20 @@ test("gate.yml's proven-VM groups run on Solo Mac, or the named VM lane alone; e
   assert.deepEqual(JSON.parse(measured.timeouts), { static: 40, unit: 40, probes: 40, unit_darwin: 40 });
 });
 
-test('only measured and live e2e jobs ask for the home Mac; other placements keep their labels', () => {
+test('only measured, MAC_HOME_E2E and live e2e jobs ask for the home Mac; other placements keep their labels', () => {
+  // discover is on MAC_HOME_E2E and MAC_VM_E2E here: home outranks the guest, under a Lane: too.
   const ordinary = plan({
-    MEASURED_E2E: 'artifacts-perf', MAC_SHARED_E2E: 'library', MAC_VM_E2E: 'side',
-    HEAD_MESSAGE: 'Gates: unit:darwin,packaged,e2e:default,e2e:design,e2e:library,e2e:side,e2e:artifacts-perf\nRunner: macos',
+    MEASURED_E2E: 'artifacts-perf', MAC_SHARED_E2E: 'library', MAC_VM_E2E: 'side discover', MAC_HOME_E2E: 'discover',
+    HEAD_MESSAGE: 'Gates: unit:darwin,packaged,e2e:default,e2e:design,e2e:library,e2e:side,e2e:artifacts-perf,e2e:discover\nRunner: macos',
   });
   assert.deepEqual(placement(ordinary.outputs), {
-    default: [mac, 40], design: [mac, 40], library: [sharedMac, 90], side: [soloMac, 40], 'artifacts-perf': [homeMac, 55],
+    default: [mac, 40], design: [mac, 40], library: [sharedMac, 90], side: [soloMac, 40], 'artifacts-perf': [homeMac, 55], discover: [homeMac, 40],
   });
   assert.equal(ordinary.outputs.unit_darwin_runner, JSON.stringify(mac));
   assert.equal(ordinary.outputs.packaged, 'true'); // gate.yml's fixed default labels are checked below.
-  for (const text of [ordinary.summary, ordinary.stdout]) assert.match(text, /Home Mac: e2e:artifacts-perf\./);
+  for (const text of [ordinary.summary, ordinary.stdout]) assert.match(text, /Home Mac: e2e:artifacts-perf, e2e:discover\./);
+  const vmLane = plan({ MAC_VM_E2E: 'side discover', MAC_HOME_E2E: 'discover', HEAD_MESSAGE: 'Gates: e2e:side,e2e:discover\nRunner: macos\nLane: vm' });
+  assert.deepEqual(placement(vmLane.outputs).discover, [homeMac, 40]);
   for (const lane of ['', 'vm', 'vm-trial']) {
     for (const event of [
       { HEAD_MESSAGE: `Gates: e2e:library-live\nLive: yes\nLane: ${lane}` },
@@ -531,7 +537,7 @@ test("a MAC_VM_E2E group not built through scripts/e2e-build.sh stays off the gu
 // The workflow's proven-VM groups build only the variants this run needs, even when a solo job lands on the host.
 test("gate.yml's proven-VM groups split into e2e_vm with just their build variants; Linux and class 1a alone build nothing", () => {
   const workflow = readWorkflow();
-  const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'POPPLER_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E'];
+  const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'POPPLER_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E', 'MAC_HOME_E2E'];
   // The mini's own placement, as with no group on HOSTED_MAC_E2E; the list's waiters are pinned by their own test below.
   const own = { ...Object.fromEntries(names.map((name) => [name, workflowList(workflow, name)])), HOSTED_MAC_E2E: '' };
   assert.equal(own.MAC_VM_E2E, 'document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations deliverables supervisor browser browser-comment browser-import agents c12 available design-systems browser-chrome composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct');
@@ -549,7 +555,7 @@ test("gate.yml's proven-VM groups split into e2e_vm with just their build varian
   const today = { ...own, GATE_RUNNER: 'pool', GATE_E2E_RUNNER: 'macos' };
   const linuxGroups = own.LINUX_E2E.split(/\s+/);
   const linuxGates = `Gates: static,unit,probes,${linuxGroups.map((group) => `e2e:${group}`).join(',')}\nRunner: linux`;
-  const defaultHost = own.CLASS1_E2E.split(/\s+/).filter((group) => !(group in variants) && (group === 'default' ? 'e2e' : `e2e:${group}`) in scripts).map((group) => [group, undefined, own.POOL_E2E.split(/\s+/).includes(group) ? box : mac]);
+  const defaultHost = own.CLASS1_E2E.split(/\s+/).filter((group) => !(group in variants) && (group === 'default' ? 'e2e' : `e2e:${group}`) in scripts).map((group) => [group, undefined, own.POOL_E2E.split(/\s+/).includes(group) ? box : own.MAC_HOME_E2E.split(/\s+/).includes(group) ? homeMac : mac]);
   const defaultGuests = ['artifacts', 'library', 'side', 'tools', 'to-human', 'deliverables', 'panel', 'supervisor', 'browser', 'browser-comment', 'browser-import', 'settings', 'transcript', 'code',
     'agents', 'widgets', 'c7', 'scm', 'c12', 'available', 'document', 'document-app', 'presentations', 'design-systems', 'browser-cua', 'browser-chrome', 'dashboard', 'connectors', 'connectors-direct', 'connectors-oauth', 'delivery'];
   const runs = [
@@ -623,7 +629,7 @@ const waiter = ['self-hosted', 'ci-kit-pool', 'cpus-2'];
 const hostedNote = (groups) => ` Hosted Mac (SSFSKIM/maws-app, each through a waiter on the pool): ${groups.map((group) => `e2e:${group}`).join(', ')}.`;
 const ownLists = () => {
   const workflow = readWorkflow();
-  const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'POPPLER_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E'];
+  const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'POPPLER_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E', 'MAC_HOME_E2E'];
   return Object.fromEntries(names.map((name) => [name, workflowList(workflow, name)]));
 };
 
@@ -682,7 +688,7 @@ test("Lane: hosted hosts every eligible group of the run, gate.yml's whole defau
   const today = { ...own, GATE_RUNNER: 'pool', GATE_E2E_RUNNER: 'macos' };
   const before = plan({ ...today, HEAD_MESSAGE: 'ci-gate: test' });
   const laned = plan({ ...today, HEAD_MESSAGE: 'ci-gate: test\n\nLane: hosted' });
-  const kept = { default: 'default', 'desk-web': 'pool', 'connectors-oauth': 'secret', discover: 'secret' };
+  const kept = { default: 'default', 'desk-web': 'pool', 'connectors-oauth': 'secret', discover: 'secret, home' };
   const was = placement(before.outputs);
   const groups = Object.keys(was);
   assert.ok(groups.length > 30, `the class-1 set (${groups.length} groups)`);
@@ -694,7 +700,7 @@ test("Lane: hosted hosts every eligible group of the run, gate.yml's whole defau
   assert.deepEqual(JSON.parse(laned.outputs.e2e_build), ['plain']);
   const hostedGroups = groups.filter((group) => !(group in kept));
   assert.deepEqual(JSON.parse(laned.outputs.e2e_hosted).map((entry) => entry.group), hostedGroups);
-  assert.ok(laned.summary.endsWith(`${hostedNote(hostedGroups)} Lane: hosted, but never on a hosted Mac, so where it would be: e2e:default (default), e2e:desk-web (pool), e2e:connectors-oauth (secret), e2e:discover (secret).\n`), laned.summary);
+  assert.ok(laned.summary.endsWith(`${hostedNote(hostedGroups)} Lane: hosted, but never on a hosted Mac, so where it would be: e2e:default (default), e2e:desk-web (pool), e2e:connectors-oauth (secret), e2e:discover (secret, home).\n`), laned.summary);
 });
 
 test("gate.yml's HOSTED_MAC_E2E groups are waiters on the default macOS set; every other group is where an empty list puts it", () => {
@@ -723,8 +729,8 @@ test('under Lane: hosted, default, a measured, a live, a secret and a POOL_E2E g
 });
 
 test('HOSTED_MAC_E2E naming a group that never goes to a hosted Mac is refused, naming the group and why, whatever the run', () => {
-  const lists = { MEASURED_E2E: 'artifacts-perf tool-time-heavy-live', LIVE_E2E: 'library-live tool-time-heavy-live', LIVE_GUARD_E2E: 'tool-time-heavy-live', MAC_SECRET_E2E: 'connectors-oauth', POOL_E2E: 'desk-web' };
-  for (const [listed, named] of [['default', 'default (default)'], ['library artifacts-perf', 'artifacts-perf (measured)'], ['library-live', 'library-live (live)'], ['tool-time-heavy-live', 'tool-time-heavy-live (measured, live)'], ['connectors-oauth', 'connectors-oauth (secret)'], ['desk-web side default', 'desk-web (pool), default (default)']]) {
+  const lists = { MEASURED_E2E: 'artifacts-perf tool-time-heavy-live', LIVE_E2E: 'library-live tool-time-heavy-live', LIVE_GUARD_E2E: 'tool-time-heavy-live', MAC_SECRET_E2E: 'connectors-oauth discover', MAC_HOME_E2E: 'discover', POOL_E2E: 'desk-web' };
+  for (const [listed, named] of [['default', 'default (default)'], ['library artifacts-perf', 'artifacts-perf (measured)'], ['library-live', 'library-live (live)'], ['tool-time-heavy-live', 'tool-time-heavy-live (measured, live)'], ['connectors-oauth', 'connectors-oauth (secret)'], ['discover', 'discover (secret, home)'], ['desk-web side default', 'desk-web (pool), default (default)']]) {
     for (const message of ['ci-gate: test\n\nGates: e2e:library\nRunner: macos', 'ci-gate: test\n\nGates: static\nClass1a: pool']) {
       const { status, stderr } = refusal({ ...lists, HOSTED_MAC_E2E: listed, HEAD_MESSAGE: message });
       assert.equal(status, 1, listed);
