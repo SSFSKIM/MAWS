@@ -1559,7 +1559,7 @@ test("gate.yml lists e2e:cross-build as its peer group, and its e2e job builds t
     const body = jobBody(workflow, job);
     assert.match(body, /\n {6}- id: peer\n {8}if: matrix\.peer\n {8}env:\n {10}PEER: \$\{\{ matrix\.peer \}\}\n {8}run: \.github\/scripts\/gate-run\.sh '[^']*' \.github\/scripts\/gate-peer\.sh prepare "\$PEER" "\$RUNNER_TEMP\/maws-peer"\n/, job);
     assert.match(body, /\n {10}MAWS_E2E_PEER_ROOT: \$\{\{ matrix\.peer && format\('\{0\}\/maws-peer', runner\.temp\) \|\| '' \}\}\n/, job);
-    assert.match(body, /\n {6}- if: always\(\) && \(steps\.peer\.outcome == 'success' \|\| steps\.peer\.outcome == 'failure'\)\n {8}run: \.github\/scripts\/gate-peer\.sh stop "\$RUNNER_TEMP\/maws-peer"\n/, job);
+    assert.match(body, /\n {6}- if: always\(\) && matrix\.peer && steps\.checkout\.outcome == 'success'\n {8}run: \.github\/scripts\/gate-peer\.sh stop "\$RUNNER_TEMP\/maws-peer"\n/, job);
     // in that order: the peer before the run, the stop after it
     assert.ok(body.indexOf('gate-peer.sh prepare') < body.indexOf('MAWS_E2E_PEER_ROOT: ') && body.indexOf('MAWS_E2E_PEER_ROOT: ') < body.indexOf('gate-peer.sh stop'), job);
   }

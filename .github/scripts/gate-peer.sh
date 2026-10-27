@@ -24,8 +24,9 @@ case ${1:-} in
     (($# == 3)) && [[ $2 =~ ^[0-9a-f]{40}$ ]] || usage
     sha=$2 dir=$3
     git fetch --quiet --depth=1 --no-tags origin "$sha"
-    git worktree prune
+    # a previous job's checkout, registered or not: its directory, then its registration
     rm -rf "$dir"
+    git worktree prune
     git worktree add --quiet --detach "$dir" "$sha"
     echo "gate-peer: $sha checked out at $dir"
     cd "$dir"

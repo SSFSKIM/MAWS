@@ -675,7 +675,8 @@ jobs:
       # The peer's supervisors and this tree's outlive their apps by design (detached, each in a process group of its own),
       # so whatever the run did, every one of either build is stopped here, with the peer's apps and checkout: nothing the
       # job started is left to the next job on this Mac.
-      - if: always() && (steps.peer.outcome == 'success' || steps.peer.outcome == 'failure')
+      # Any job of a peer group that checked out, so a prepare cancelled midway is undone too.
+      - if: always() && matrix.peer && steps.checkout.outcome == 'success'
         run: .github/scripts/gate-peer.sh stop "$RUNNER_TEMP/maws-peer"
       # Only after this job's own checkout: on the Mac the workspace persists between jobs and only the checkout's clean
       # clears the last job's reports, so a job that failed before it (a refused measured group) would upload another's.

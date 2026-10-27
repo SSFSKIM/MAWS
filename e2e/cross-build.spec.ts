@@ -21,7 +21,7 @@
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
 // WIRE_MINOR (.github/scripts/gate-plan.mjs).
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
@@ -46,6 +46,7 @@ interface Build {
   label: string;
   root: string | undefined; // launch.ts's `root`: undefined for this checkout
   manifest: WireManifest; // its src/shared/ipc/wire-manifest.json, which its wire.test.ts holds its code to
+  mainOnly: Set<string>; // the commands its windows cannot send: its preload bridges only the others
 }
 const wireOf = (build: Build) => `${build.manifest.major}.${build.manifest.minor}`;
 type CommandEntry = { owner: string; input: unknown };
@@ -54,7 +55,20 @@ const commandOf = (build: Build, name: string) => build.manifest.entries[`comman
 function buildAt(root: string, label: string): Build {
   const path = join(root, 'src/shared/ipc/wire-manifest.json');
   if (!existsSync(path)) throw new Error(`${label} at ${root} has no ${path}: a build before protocol 3 has no minor to cross`);
-  return { label, root: root === REPO_ROOT ? undefined : root, manifest: JSON.parse(readFileSync(path, 'utf8')) as WireManifest };
+  return { label, root: root === REPO_ROOT ? undefined : root, manifest: JSON.parse(readFileSync(path, 'utf8')) as WireManifest, mainOnly: mainOnlyOf(root) };
+}
+
+// Every `mainOnlyCommands` list of a build's src/shared/ipc/names/*.ts (its schema.ts pins them, with the bridged lists,
+// to its registry's keys), read from its source with the comments dropped.
+function mainOnlyOf(root: string): Set<string> {
+  const dir = join(root, 'src/shared/ipc/names');
+  const names = new Set<string>();
+  for (const file of readdirSync(dir).filter((f) => f.endsWith('.ts'))) {
+    const source = readFileSync(join(dir, file), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    for (const [, list] of source.matchAll(/mainOnlyCommands\s*=\s*\[([^\]]*)\]/g)) for (const [, name] of list!.matchAll(/'([^']+)'/g)) names.add(name!);
+  }
+  if (!names.has('host.configure')) throw new Error(`${dir} names no main-only command the check can read (host.configure is one)`);
+  return names;
 }
 
 function builds(): { older: Build; newer: Build } {
@@ -115,10 +129,10 @@ const INPUTS: Record<string, unknown> = {};
 type Answer = { ok: true } | { ok: false; code: string; message: string };
 const answerOf = (result: { ok: boolean; error?: { code: string; message: string } }): Answer => (result.ok ? { ok: true } : { ok: false, code: result.error!.code, message: result.error!.message });
 
-// Each command `newer` added, invoked from a window of `newer`'s app with its sample input.
+// Each command `newer` added that its windows can send, invoked from one of `newer`'s app with its sample input.
 async function probe(page: Page, newer: Build, older: Build): Promise<Map<string, Answer>> {
   const answers = new Map<string, Answer>();
-  for (const name of addedCommands(newer, older)) {
+  for (const name of addedCommands(newer, older).filter((name) => !newer.mainOnly.has(name))) {
     const input = name in INPUTS ? INPUTS[name] : sampleOf(commandOf(newer, name)!.input);
     answers.set(name, answerOf(await page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name, input] as const)));
   }
@@ -139,8 +153,9 @@ const banner = (page: Page, text: string) => page.locator('[data-banner-host]').
 
 // What a receiver logs when it refuses what the other build sent (src/main/hosts/supervisor.ts; src/shared/host/runtime.ts
 // and socket-server.ts). A key or an event a build lacks is dropped and logged as such (DROPPED), which is no refusal.
-const MAIN_REFUSES = /\[hosts\] (?:dropped a malformed message from engine-host|dropped engine-host's invalid |engine-host answered \S+ with an invalid output|dropped engine-host's response to unknown request)/;
-const HOST_REFUSES = /dropped a malformed message from main|closed the client: |closed a connection: |refused to emit /;
+// A handler's own output its registry refuses is logged too (`produced an invalid output`): a wire fault either way.
+const MAIN_REFUSES = /\[hosts\] (?:dropped a malformed message from engine-host|dropped engine-host's invalid |engine-host answered \S+ with an invalid output|dropped engine-host's response to unknown request)|\[ipc\] \S+ produced an invalid output/;
+const HOST_REFUSES = /dropped a malformed message from main|closed the client: |closed a connection: |refused to emit |\[host\] \S+ produced an invalid output/;
 const DROPPED = /dropped \S+ from .*, a field this build does not know|dropped engine-host's event \S+: not in this build's event registry/;
 
 async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer: Build; older: Build } | null): Promise<string[]> {
@@ -230,9 +245,8 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
       const onOwn = after.get(name)!;
       const { owner } = commandOf(gap.newer, name)!;
       expect(onOwn.ok || onOwn.code !== 'invalid_input', `${name}: its sample input is refused (${onOwn.ok ? '' : onOwn.message}); give it one in INPUTS`).toBe(true);
-      if (owner === 'engine-host' && !onOwn.ok && onOwn.code === 'unknown_command') {
-        said.push(`  gap: ${name} (engine-host) is main-only, out of a window's reach on either supervisor; the scenes' own traffic is its check`);
-      } else if (owner === 'engine-host') {
+      if (owner === 'engine-host') {
+        expect(onOwn, `${name} is served by its own build's supervisor`).not.toMatchObject({ ok: false, code: 'unknown_command' });
         expect(onOlder, `${name}, which the older supervisor lacks`).toMatchObject({ ok: false, code: 'unknown_command' });
         said.push(`  gap: ${name} (engine-host) answers unknown_command from the older supervisor and ${onOwn.ok ? 'ok' : onOwn.code} from its own`);
       } else {
@@ -240,7 +254,8 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
         said.push(`  gap: ${name} (${owner}) answers ${onOwn.ok ? 'ok' : onOwn.code} on either supervisor`);
       }
     }
-    if (before.size === 0) said.push(`  gap: ${gap.newer.label} adds no command to ${gap.older.label}'s wire`);
+    for (const name of addedCommands(gap.newer, gap.older).filter((name) => gap.newer.mainOnly.has(name))) said.push(`  gap: ${name} is main-only, out of a window's reach; the scenes' own traffic is its check`);
+    if (addedCommands(gap.newer, gap.older).length === 0) said.push(`  gap: ${gap.newer.label} adds no command to ${gap.older.label}'s wire`);
   }
 
   // neither end refused what the other build sent; what either dropped as unknown is named

@@ -45,8 +45,9 @@ test('prepare fetches the one commit, checks it out as a worktree, installs it a
   chmodSync(join(dir, 'bin/pnpm'), 0o755);
   const calls = join(dir, 'calls');
   const into = join(dir, 'runner-temp/maws-peer');
-  mkdirSync(into, { recursive: true });
-  writeFileSync(join(into, 'stale'), ''); // a previous job's leftover goes
+  // a previous job's peer, left registered and on disk by a job that never reached its stop, goes
+  git('-C', checkout, 'worktree', 'add', '--quiet', '--detach', into);
+  writeFileSync(join(into, 'stale'), '');
   // set in the job's environment by the e2e lane; the peer's build must not read or write that cache
   const run = spawnSync('bash', [script, 'prepare', peer, into], { cwd: checkout, encoding: 'utf8', env: { ...env, CALLS: calls, MAWS_E2E_BUILD_CACHE: join(dir, 'cache'), MAWS_E2E_BUILD_KEY: peer } });
   assert.equal(run.status, 0, run.stdout + run.stderr);
