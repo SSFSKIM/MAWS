@@ -106,9 +106,9 @@ function start(loadAssets: (key: string) => Promise<DefaultAsset[]> = async () =
     cleanups.push(() => artifacts.close());
     registerLibraryReads(on, documents, { afterImport: (store) => importSettledWithin(store, 8_000) });
     systems = registerDesignSystems({ on, documents, loadAssets, log: (line) => { logs.push(line); } });
-    const observed: HostOn = (name, handler) => on(name, async (input) => {
+    const observed: HostOn = (name, handler) => on(name, async (input, ctx) => {
       if (name === 'session.launch') launches++;
-      return handler(input);
+      return handler(input, ctx);
     });
     engine = registerEngineIpc(observed, emit, { userData: dir, replayEnabled: false, artifacts: () => documents.store, log: () => {} });
     on('engine.ping', async () => hostPing('test'));

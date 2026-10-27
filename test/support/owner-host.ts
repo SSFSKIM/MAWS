@@ -168,7 +168,8 @@ export class OwnerHostSim {
   }
 
   // The engine host's side of main's dispatch for the commands the owner channel sends.
-  readonly dispatch = async (_owner: string, name: CommandName, input: unknown): Promise<CommandResult<CommandName>> => {
+  readonly dispatch = async (_owner: string, command: string, input: unknown): Promise<CommandResult<CommandName>> => {
+    const name = command as CommandName; // P5 O1 M5: the dispatch takes any registry's name
     this.commands.push({ name, input });
     const fail = (message: string) => ({ ok: false as const, error: { code: 'internal' as const, message } });
     if (this.failCommand === name) return fail(`${name} failed`);

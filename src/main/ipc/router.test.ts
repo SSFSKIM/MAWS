@@ -249,6 +249,21 @@ describe('main ipc router', () => {
     expect(() => router.registerMainHandler('settings.get', () => LIGHT)).toThrow('already registered');
   });
 
+  // P5 O1 M5: the router reads "bridged" as the registry's commands less `mainOnly`; for production that is exactly the
+  // preload's bridged set
+  it('treats as bridged exactly the names the preload bridges', async () => {
+    const { REGISTRY } = await import('@shared/ipc/registry');
+    const { isBridgedCommandName } = await import('@shared/ipc/names');
+    const bridged = Object.keys(REGISTRY.commands).filter((name) => !REGISTRY.mainOnly.has(name));
+    expect(bridged.sort()).toEqual(Object.keys(REGISTRY.commands).filter(isBridgedCommandName).sort());
+  });
+
+  // P5 O1 M5: no production namespace is `machine`-owned in O1 (machine-forward.test.ts drives a fixture one)
+  it('refuses a machine handler for a command not owned by machine', () => {
+    expect(() => router.registerMachineHandler('settings.get', () => LIGHT)).toThrow('settings.get is owned by main, not machine');
+    expect(() => router.registerMachineHandler('engine.ping', () => ({}) as never)).toThrow('engine.ping is owned by engine-host, not machine');
+  });
+
   describe('interceptCommand (C5 stub source seam)', () => {
     it('is consulted before the main handler for exactly the intercepted name, and removed by its disposer', async () => {
       const main = vi.fn(() => ({ digests: [] }));

@@ -6,7 +6,7 @@ import { mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node
 import { createServer, type Server, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createHostRuntime, type HostEmit, type HostRegister } from '@shared/host/runtime';
+import { createHostRuntime, type HostEmit, type HostRegister, type HostRuntime } from '@shared/host/runtime';
 import { serveSocketClients, type SocketClients } from '@shared/host/socket-server';
 import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
@@ -66,6 +66,9 @@ export interface FakeSupervisorOptions {
   token?: string;
   counts?: { liveSessions: number; rows: number };
   register?: HostRegister;
+  // P5 O1 M5: a runtime the test built (over its own registry) to serve in place of this fake's engine host; `register`
+  // and `emit` then go unused
+  runtime?: HostRuntime;
   docHighWater?: number; // P3-A M5: the document channels' reset mark
   // What `exit {when: 'now'}` does; by default the supervisor exits at once (its files removed, its pid dead).
   onExitNow?: (supervisor: FakeSupervisor) => void;
@@ -120,11 +123,13 @@ export class FakeSupervisor {
     });
     if ((this.options.answer ?? 'serve') === 'serve') {
       this.clients = serveSocketClients(server, {
-        runtime: createHostRuntime((on, emit, client) => {
-          this.emit = emit;
-          on('engine.ping', async () => ({ pid: this.pid, uptimeMs: 1, hostVersion: 'fake' }));
-          this.options.register?.(on, emit, client);
-        }),
+        runtime:
+          this.options.runtime ??
+          createHostRuntime((on, emit, client) => {
+            this.emit = emit;
+            on('engine.ping', async () => ({ pid: this.pid, uptimeMs: 1, hostVersion: 'fake' }));
+            this.options.register?.(on, emit, client);
+          }),
         identity: () => ({
           protocol: this.options.protocol ?? SOCKET_PROTOCOL,
           buildId: this.options.buildId ?? buildIdOf(this.profile.modulePath),

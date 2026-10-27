@@ -13,3 +13,38 @@ export interface ClientRef {
 export interface HandlerContext {
   readonly client: ClientRef;
 }
+
+// A ClientRef its owner ends (P5 O1 M5): main's page instances (src/main/ipc/clients.ts) and a host's remote clients
+// (src/shared/host/client-refs.ts) alike. `end` runs every listener once, each isolated from the others' failures; a
+// listener added after the end runs at once.
+export interface EndableClientRef extends ClientRef {
+  end(): void;
+}
+
+export function endableClientRef(id: string): EndableClientRef {
+  let listeners: Set<() => void> | null = new Set();
+  return {
+    id: id as ClientId,
+    onGone(listener) {
+      if (!listeners) {
+        listener();
+        return () => {};
+      }
+      const entry = () => listener(); // its own identity, so one function added twice unsubscribes each
+      listeners.add(entry);
+      return () => void listeners?.delete(entry);
+    },
+    end() {
+      if (!listeners) return;
+      const ending = [...listeners];
+      listeners = null;
+      for (const listener of ending) {
+        try {
+          listener();
+        } catch (error) {
+          console.error(`[client] a gone listener of ${id} failed`, error); // the others still release
+        }
+      }
+    },
+  };
+}

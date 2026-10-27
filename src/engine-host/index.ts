@@ -76,7 +76,7 @@ let documents: Documents | null = null; // P3-A: the artifact store (M4's IPC an
 
 const register: HostRegister = (untimedOn, emit, client) => {
   // P4-R6: each request's synchronous part recorded as the host's work while a scale seam watches (documents/host-work.ts)
-  const on: HostOn = (name, handler) => untimedOn(name, (input) => timed('request', () => handler(input), () => name));
+  const on: HostOn = (name, handler) => untimedOn(name, (input, ctx) => timed('request', () => handler(input, ctx), () => name));
   on('engine.ping', async () => hostPing(HOST_VERSION));
   // C4 start: the filesystem state service (fs.*) over the engine's store, read-only; C3's `session.events` answers an
   // app session with no process here from it (`diskEvents` below).

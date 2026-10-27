@@ -1128,7 +1128,8 @@ function inProcessHost(configHome: string) {
   };
   let service: FsService | null = null;
   const host: SourceHost = {
-    dispatch: async (_owner, name, input) => {
+    dispatch: async (_owner, command, input) => {
+      const name = command as CommandName; // P5 O1 M5: the dispatch takes any registry's name
       calls.push({ name, input });
       try {
         return validateCommandOutput(name, await handlers.get(name)!(input));
