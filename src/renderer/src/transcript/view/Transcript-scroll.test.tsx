@@ -415,6 +415,20 @@ it('a clamped compensation from the end is not re-issued over a reader who scrol
   expect(s.scroller.scrollTop).toBe(held);
 });
 
+it('a released reader near the end keeps a clamped anchor correction through a later release', async () => {
+  const s = await scene(false, true);
+  s.readerMove(-199);
+  s.readerMove(1); // a forward direction lets the virtualizer anchor a re-measured row above the reader
+  const at = s.scroller.scrollTop;
+  s.freezeDOMSize();
+  s.resizeRow('first', 400); // more than the distance to the old end: the anchoring write clamps there
+  act(() => { fireEvent.pointerDown(s.scroller, { pointerType: 'mouse', button: 0, pointerId: 3 }); }); // a press, no drag yet
+  s.commitDOMSize();
+  s.stream();
+  expect(s.scroller.scrollTop).toBe(at + 400);
+  expect(s.handle.current!.following).toBe(false);
+});
+
 it('a reader reaching the bottom is noticed before a pending measurement moves that bottom again', async () => {
   const s = await scene(true);
   s.readerMove(-200);
