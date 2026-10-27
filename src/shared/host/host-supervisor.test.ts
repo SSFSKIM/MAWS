@@ -523,6 +523,18 @@ describe('what mawsd reflects and takes back (P5 O2 M5)', () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
+  it('onParked tells each park and each leaving of it', async () => {
+    const parks: [HostOwner, boolean][] = [];
+    const supervisor = makeSupervisor({ 'engine-host': { onDemand: true } }, { onParked: (owner, parked) => void parks.push([owner, parked]) });
+    await supervisor.start();
+    expect(parks).toEqual([['engine-host', true]]);
+    await expect(ping(supervisor)).resolves.toMatchObject({ ok: true });
+    expect(parks).toEqual([['engine-host', true], ['engine-host', false]]);
+    expect(supervisor.exitSupervisor('now')).toBe(true);
+    await until(() => parks.length === 3);
+    expect(parks.at(-1)).toEqual(['engine-host', true]);
+  });
+
   it('onReplaced tells a relay its host was taken by another client', async () => {
     await startFake();
     const replaced: HostOwner[] = [];

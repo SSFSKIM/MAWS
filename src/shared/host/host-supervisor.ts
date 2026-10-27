@@ -27,8 +27,9 @@
 // each, as the utility path does; a quiet loss (the pid lives, the link closed) says nothing, since the shells live on.
 //
 // P5 O2 M5: what `mawsd`'s relay reflects and takes back: the served welcome's facts (`welcome`), an exit-when-idle it
-// asked and takes back by command (`disarmExit`), the loss to another client told apart (`onReplaced`), and a document
-// channel's end with its reason (doc-relay.ts's `closedBy`).
+// asked and takes back by command (`disarmExit`), the loss to another client told apart (`onReplaced`), a park told
+// (`onParked`, since it is no HostState transition), and a document channel's end with its reason (doc-relay.ts's
+// `closedBy`).
 import { ipcError } from '../ipc/errors';
 import type { ClientRef } from '../ipc/client'; // P5 O1 M5
 import { HostToMainSchema, type HostDoc, type HostMessage, type HostResponse } from '../ipc/host-protocol';
@@ -97,6 +98,7 @@ export interface HostSupervisorOptions {
   packaged(): boolean;
   // P5 O2 M3 end
   onReplaced?(owner: HostOwner): void; // P5 O2 M5: another client took a detached host (it is crashed for good)
+  onParked?(owner: HostOwner, parked: boolean): void; // P5 O2 M5: an on-demand host parked, or left its park
 }
 
 // E10: what main pulls from a host between its connect and its `ready` line (X13: the host emits nothing before it).
@@ -347,6 +349,13 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
     if (next.state === 'ready' || next.state === 'crashed') settle(host); // P5 O2 M3: a recycle's end
   }
 
+  // P5 O2 M3: an on-demand host parks or leaves its park (P5 O2 M5: told, since a park is no HostState transition)
+  function park(host: Host, parked: boolean): void {
+    if (host.parked === parked) return;
+    host.parked = parked;
+    options.onParked?.(host.owner, parked);
+  }
+
   // P5 O2 M3: what waits for the host's next ready or crashed (a recycle)
   function settle(host: Host): void {
     const waiting = [...host.settled];
@@ -355,7 +364,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
   }
 
   function launch(host: Host): void {
-    host.parked = false; // P5 O2 M3
+    park(host, false); // P5 O2 M3
     if (host.transport) return host.transport.launch(); // E10: a detached host is reached by its transport
     let link: UtilityLink;
     try {
@@ -566,7 +575,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
     // P5 O2 M3: a deliberate exit parks an on-demand host, unless a request is already held for it
     const deliberate = () => {
       if (host.spec.onDemand && !holdsAny(host)) {
-        host.parked = true;
+        park(host, true);
         return;
       }
       launch(host);
@@ -574,7 +583,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
     return {
       connected(link: HostLink, welcome) {
         if (stopped) return link.close();
-        host.parked = false; // P5 O2 M3: an adoption, or a launch, reached it
+        park(host, false); // P5 O2 M3: an adoption, or a launch, reached it
         host.port = link;
         host.peer = welcome.peer; // P5 O1 M6
         host.welcome = welcome; // P5 O2 M5
@@ -738,7 +747,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
     const incompatible = host.reason === 'incompatible';
     host.exits = []; // asked for: the crash window starts afresh
     transition(host, { state: 'restarting', pid: null, restarts: host.state.restarts });
-    host.parked = false; // P5 O2 M3
+    park(host, false); // P5 O2 M3
     if (incompatible) transport.replaceIncompatible();
     else transport.launch();
     return restarted;
@@ -824,7 +833,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
               };
               // P5 O2 M3: an on-demand host waits for a wake, a request or an adoption
               if (host.spec.onDemand) {
-                host.parked = true;
+                park(host, true);
                 return host.settleFirstLaunch();
               }
               launch(host);
