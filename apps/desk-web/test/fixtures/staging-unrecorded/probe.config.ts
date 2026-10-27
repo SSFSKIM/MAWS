@@ -1,7 +1,7 @@
 import { defineConfig } from '@playwright/test';
 
-// The staging check's Playwright run, its recording settings as playwright.staging.config.ts sets them, around a test
-// that fails while its page shows a secret (test/staging-recording.test.ts runs it).
+// The staging check's Playwright run, its recording settings as playwright.staging.config.ts sets them, around tests
+// that fail (fails.spec.ts; test/staging-recording.test.ts runs them).
 export default defineConfig({
   testDir: '.',
   workers: 1,

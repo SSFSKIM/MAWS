@@ -42,22 +42,37 @@ const filesUnder = (dir: string): string[] => readdirSync(dir, { recursive: true
 describe('a failing staging check', () => {
   // Playwright writes error-context.md for a failed test, with an accessibility snapshot of the page, whatever the
   // configuration's trace, video and screenshot say; the page may be showing the Machines dialog's enrollment code,
-  // which holds the org key. The check's `test` (e2e-staging/unrecorded.ts) writes nothing of the kind: run here in
-  // Playwright's own Chromium, a test failing while its page shows a secret.
-  it('leaves no error context, page snapshot or failure screenshot, and nothing holding what the page showed', () => {
+  // which holds the org key. The check's `test` (e2e-staging/unrecorded.ts) writes nothing of the kind. Run here in
+  // Playwright itself, through that `test`: the files a failed test leaves in the output directory.
+  const probe = (test: string) => {
     const secret = `smns-enroll-v1.${randomUUID()}`;
     const out = mkdtempSync(join(tmpdir(), 'staging-unrecorded-'));
     const cli = createRequire(import.meta.url).resolve('@playwright/test/cli');
-    const run = spawnSync(process.execPath, [cli, 'test', '-c', join(import.meta.dirname, 'fixtures/staging-unrecorded/probe.config.ts')], {
+    const run = spawnSync(process.execPath, [cli, 'test', '-c', join(import.meta.dirname, 'fixtures/staging-unrecorded/probe.config.ts'), '--grep', test], {
       cwd: join(import.meta.dirname, '..'),
       encoding: 'utf8',
       env: { PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: tmpdir(), PROBE_SECRET: secret, PROBE_OUT: out },
       timeout: 90_000,
     });
-    expect(run.status, run.stdout + run.stderr).toBe(1);
+    const written = filesUnder(out).filter((f) => !f.endsWith('.last-run.json'));
+    return { run, output: run.stdout + run.stderr, written, holding: filesUnder(out).filter((f) => readFileSync(f, 'utf8').includes(secret)) };
+  };
+
+  it('leaves no error context', () => {
+    const { run, output, written } = probe('fails without a page');
+    expect(run.status, output).toBe(1);
     expect(run.stdout).toMatch(/1 failed/);
-    const written = filesUnder(out);
-    expect(written.filter((f) => !f.endsWith('.last-run.json'))).toEqual([]);
-    expect(written.filter((f) => readFileSync(f, 'utf8').includes(secret))).toEqual([]);
+    expect(written).toEqual([]);
+  }, 120_000);
+
+  // Needs Playwright's Chromium (`pnpm --filter desk-web exec playwright install chromium`), which the staging check
+  // runs in; skipped where it is not installed.
+  it('leaves nothing holding what the page showed: no page snapshot, no failure screenshot', (context) => {
+    const { run, output, written, holding } = probe('secret on the page');
+    if (/Executable doesn't exist/.test(output)) context.skip();
+    expect(run.status, output).toBe(1);
+    expect(run.stdout).toMatch(/1 failed/);
+    expect(written).toEqual([]);
+    expect(holding).toEqual([]);
   }, 120_000);
 });
