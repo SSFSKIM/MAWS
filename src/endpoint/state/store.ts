@@ -92,9 +92,13 @@ const ListingsSchema = z.record(
 
 /**
  * The sessions whose pending count the hub was last told above 0 (notify.ts), with their project: after a restart, a
- * pending set that leaves one out is told `settled 0`, which the hub would otherwise never hear.
+ * pending set that leaves one out is told `settled 0`, which the hub would otherwise never hear. `owed`: the session was
+ * withdrawn while no connection was up, and its `settled 0` goes at the next welcome.
  */
-const NotifiedSchema = z.record(z.string().min(1), z.strictObject({ project: z.string().min(1), pending: z.number().int().positive() }));
+const NotifiedSchema = z.record(
+  z.string().min(1),
+  z.strictObject({ project: z.string().min(1), pending: z.number().int().positive(), owed: z.literal(true).optional() }),
+);
 
 export type MachineKeyFile = z.infer<typeof MachineKeySchema>;
 export type LedgerFile = z.infer<typeof LedgerSchema>;

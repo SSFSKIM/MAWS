@@ -9,7 +9,9 @@
 // pushes nothing. The hub is told each change once: what it was last told is kept, and a change made while no connection
 // was up is told at the next welcome. A count above 0 the hub was told is kept on disk (`notified.json`), so after a
 // restart the first pending set that leaves its session out still tells it `settled 0`; the hub keeps a count until it
-// is told otherwise. Any other session's first count after a restart is told as it is (`settled 0` clears a badge left
+// is told otherwise. A session withdrawn while no connection is up owes its `settled 0`, kept there too and paid at the
+// next welcome, though the session is no longer listed. A `wrote` carries the last count told when sminos hasn't
+// restated one yet, and what it carries is what the hub was told. Any other session's first count after a restart is told as it is (`settled 0` clears a badge left
 // from before).
 //
 // `wrote` is a to-human message: a session-lane `host` message sent outside any subscription whose event is a
@@ -45,6 +47,8 @@ export class Notifier {
   readonly #counts = new Map<string, number>();
   /** What the hub was last told of each session; read from the store at first use (the store opens at the module's start). */
   #toldNow: Map<string, number> | null = null;
+  /** Withdrawn sessions whose `settled 0` no connection carried yet, with their project (on disk as `owed`). */
+  readonly #owed = new Map<string, string>();
   readonly #inProject = new Map<string, Set<string>>();
   readonly #seen = new Set<string>();
   /** Sessions owed a `wrote`, oldest first. */
@@ -75,15 +79,21 @@ export class Notifier {
    * count the hub was told is settled to 0 now, and nothing held for it goes later.
    */
   withdrawn(session: string, project: string): void {
-    if ((this.#told.get(session) ?? 0) > 0) this.#ctx.send({ t: 'notify', session, project, kind: 'settled', pending: 0 });
-    this.#setTold(session, project, undefined);
+    const told = this.#told.get(session) ?? 0;
     this.#held = this.#held.filter((held) => held !== session);
+    if (told > 0 && !this.#ctx.send({ t: 'notify', session, project, kind: 'settled', pending: 0 })) {
+      this.#told.delete(session);
+      this.#owed.set(session, project);
+      this.#ctx.store.write({ ...this.#ctx.store.read(), [session]: { project, pending: told, owed: true } });
+      return;
+    }
+    this.#setTold(session, project, undefined);
   }
 
-  /** A session left the machine. */
+  /** A session left the machine; a `settled 0` it still owes the hub stays owed. */
   forget(session: string): void {
     this.#counts.delete(session);
-    this.#setTold(session, '', undefined);
+    if (!this.#owed.has(session)) this.#setTold(session, '', undefined);
   }
 
   /** A session-lane message: a to-human `host` message outside any subscription is a `wrote`, once per event. */
@@ -111,6 +121,13 @@ export class Notifier {
 
   /** A connection was welcomed: every count the hub wasn't told goes now, then the held `wrote`s. */
   welcome(): void {
+    this.#restore();
+    for (const [session, project] of this.#owed) {
+      // Listed again since: its own count is told below, as it is now.
+      if (this.#ctx.listed(session) === null && !this.#ctx.send({ t: 'notify', session, project, kind: 'settled', pending: 0 })) continue;
+      this.#owed.delete(session);
+      this.#setTold(session, project, undefined);
+    }
     for (const session of this.#counts.keys()) this.#tell(session);
     this.#flush(null, true);
   }
@@ -128,7 +145,9 @@ export class Notifier {
         if (!dropUnlisted) kept.push(session);
         continue;
       }
-      if (!this.#ctx.send({ t: 'notify', session, project: listed.project, kind: 'wrote', pending: this.#counts.get(session) ?? 0 })) kept.push(session);
+      const pending = this.#counts.get(session) ?? this.#told.get(session) ?? 0;
+      if (this.#ctx.send({ t: 'notify', session, project: listed.project, kind: 'wrote', pending })) this.#setTold(session, listed.project, pending);
+      else kept.push(session);
     }
     this.#held = kept;
   }
@@ -151,7 +170,11 @@ export class Notifier {
   #restore(): Map<string, number> {
     if (this.#toldNow !== null) return this.#toldNow;
     this.#toldNow = new Map();
-    for (const [session, { project, pending }] of Object.entries(this.#ctx.store.read())) {
+    for (const [session, { project, pending, owed }] of Object.entries(this.#ctx.store.read())) {
+      if (owed === true) {
+        this.#owed.set(session, project);
+        continue;
+      }
       this.#toldNow.set(session, pending);
       this.#inProject.set(project, new Set([...(this.#inProject.get(project) ?? []), session]));
     }
@@ -162,10 +185,11 @@ export class Notifier {
   #setTold(session: string, project: string, count: number | undefined): void {
     if (count === undefined) this.#told.delete(session);
     else this.#told.set(session, count);
+    this.#owed.delete(session);
     const file = this.#ctx.store.read();
     const kept = count !== undefined && count > 0;
     if (!kept && !(session in file)) return;
-    if (kept && file[session]?.project === project && file[session]?.pending === count) return;
+    if (kept && file[session]?.project === project && file[session]?.pending === count && file[session]?.owed === undefined) return;
     const next = { ...file };
     if (kept) next[session] = { project, pending: count };
     else delete next[session];

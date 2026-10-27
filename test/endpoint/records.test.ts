@@ -409,6 +409,53 @@ describe('notify', () => {
     expect(file()).toEqual({});
   });
 
+  it('owes a withdrawn session’s `settled 0` while no connection is up, across a restart, and pays it at the welcome though the session is unlisted (round 2 finding 1)', () => {
+    const { notifier, sent, listed, ctx, file, up } = setup();
+    notifier.pendingSet('p1', [{ session: 's1' }, { session: 's2' }]);
+    up(false);
+    listed.delete('s1');
+    listed.delete('s2');
+    notifier.withdrawn('s1', 'p1');
+    notifier.withdrawn('s2', 'p1');
+    expect(sent).toHaveLength(2);
+    up(true);
+    // The same process reconnects: both are paid.
+    notifier.welcome();
+    expect(sent.slice(2)).toEqual([notify('s1', 'settled', 0), notify('s2', 'settled', 0)]);
+    notifier.welcome();
+    expect(sent).toHaveLength(4);
+    expect(file()).toEqual({});
+
+    // Owed across a restart: kept on disk until it is sent.
+    listed.add('s2');
+    notifier.pendingSet('p1', [{ session: 's2' }]);
+    expect(sent.slice(4)).toEqual([notify('s2', 'waiting', 1)]);
+    listed.delete('s2');
+    up(false);
+    notifier.withdrawn('s2', 'p1');
+    const restarted = new Notifier(ctx);
+    up(true);
+    restarted.welcome();
+    expect(sent.slice(5)).toEqual([notify('s2', 'settled', 0)]);
+    expect(file()).toEqual({});
+  });
+
+  it('carries the count it last told in a `wrote` after a restart, before sminos restates the set, and keeps what it told (round 2 finding 2)', () => {
+    const { notifier, sent, ctx, file } = setup();
+    const host = (seq: number) => ({ kind: 'host', session: 's1', project: 'p1', sub: null, body: { event: { kind: 'message', writer: 'mini/host', seq } } });
+    notifier.pendingSet('p1', [{ session: 's1' }]);
+    const restarted = new Notifier(ctx);
+    restarted.hostMessage(host(1));
+    restarted.pendingSet('p1', [{ session: 's1' }]);
+    expect(sent).toEqual([notify('s1', 'waiting', 1), notify('s1', 'wrote', 1)]);
+    // A `wrote` with a count the hub wasn't told is bookkept like any other notify: the set restating it tells nothing.
+    restarted.pending('s1', 2);
+    restarted.hostMessage(host(2));
+    restarted.pendingSet('p1', [{ session: 's1' }]);
+    expect(sent.slice(2)).toEqual([notify('s1', 'waiting', 2), notify('s1', 'wrote', 2), notify('s1', 'settled', 1)]);
+    expect(file()).toEqual({ s1: { project: 'p1', pending: 1 } });
+  });
+
   it('settles a withdrawn session’s count at the hub, then tells it nothing more', () => {
     const { notifier, sent, listed } = setup();
     notifier.pendingSet('p1', [{ session: 's1' }, { session: 's1' }]);
