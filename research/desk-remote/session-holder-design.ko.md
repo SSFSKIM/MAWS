@@ -1,6 +1,6 @@
 # 기계 쪽 세션 holder 설계 (MAWS·웹 세션의 프로세스를 쥐는 구조)
 
-2026-10-26 판. 설계 문서다. 구현을 승인한 것이 아니다. MAWS #52의 연구 결과
+2026-10-27 판. 설계 문서다. 구현을 승인한 것이 아니다. MAWS #52의 연구 결과
 [web-maws-remote-research.ko.md](web-maws-remote-research.ko.md)
 §3.2, §3.7 위에 선다.
 
@@ -14,6 +14,9 @@
   - **Query의 자리.** Query는 MAWS 데몬이 아니라 engine host 안에 있다. MAWS architect가 코드로 확인했다(오늘의 E10 Session, `src/shared/engine/initialize.ts:13`). 기계 데몬(mawsd)은 engine host의 유일한 클라이언트다.
   - **Claude Desktop 3.6556.2의 helper 변경.** 미룬 interrupt의 영속, 첫 시작의 session id, 확인된 입양, 보류 입력의 한 번 시작을 반영했다([desktop-ssh-helper-3.6556.md](desktop-ssh-helper-3.6556.md)).
   - 원격 계층 전체(endpoint, 채널, 신원)는 MAWS PR #183의 `docs/doperpowers/specs/2026-10-26-remote-layer-design.md`가 정한다.
+- 2026-10-27: P5(`docs/doperpowers/plans/2026-10-27-p5-org.md` §2)의 정리 규칙을 반영했다. 시간은 기계의 역할을 따르고, 정리는
+  엄격하다(§1의 5). 일 상태는 task와 cron을 원천별로 따로 읽는다(§3.2). task는 지금 engine host가 이미 읽는 수준 신호를 쓰고,
+  cron은 Stop hook에서 새로 읽는다.
 
 사실의 근거가 되는 측정 노트(Claude Code 2.1.304–2.1.308):
 - [desktop-ssh-helper-protocol.md](desktop-ssh-helper-protocol.md): claude-ssh의 전송·재입양 계약(이 설계의 기준)
@@ -57,8 +60,11 @@ Monitor·MCP 작업은 끊기지 않는다. 다시 열면 놓친 출력을 받�
    경로 B로 옮기지 않는다. 대신 mod 쪽 제어 표면을 최대한 넓힌다(F7, 2026-10-24).
 3. 웹 터미널 창은 두지 않는다. 조작성은 좋지만 기존 sminos·MAWS 구조를 깨기 때문이다(F5, 2026-10-23).
 4. 경로 B의 프로세스는 우리가 만든 holder가 claude-ssh 방식으로 쥔다. 엔진 supervisor는 참고만 한다(2026-10-22).
-5. 클라이언트가 없고, 턴이 돌지 않고, 백그라운드 일과 cron이 없는 상태로 24시간이 지난 세션은 끝낸다. transcript로
-   다시 연다. 시간은 설정이다(F2, 2026-10-22; 지금은 경로 B에만 적용).
+5. 클라이언트가 없고, 턴이 돌지 않고, 백그라운드 일과 cron이 없는 상태로 정해진 시간이 지난 세션은 끝낸다. transcript로
+   다시 연다. 시간은 기계의 역할을 따른다. MacBook은 마지막 관심 뒤 10분(지금 규칙), 서버(mini, VM)는 24시간이다(F2,
+   2026-10-22; P5 §2, 2026-10-27). 정리는 어느 기계에서든 엄격하다. 백그라운드 Bash, 서브에이전트, Monitor, MCP task,
+   workflow, session cron 중 하나라도 있거나 일 상태를 읽을 수 없으면 끝내지 않는다(2026-10-27). ambient task는 세지 않는다
+   (§3.2). 지금은 경로 B에만 적용한다.
 6. holder는 MAWS engine host로 흡수한다. 지금 엔진 프로세스를 쥐는 E10 supervisor를 claude-ssh 방식으로 강화한 것이
    holder다(F3, 2026-10-24 개정).
 
@@ -131,17 +137,32 @@ host가 죽으면 pipe가 닫혀 세션이 끝난다. 그래서 host는 가능�
   - host의 실시간 descendant 검사에 일의 흔적이 없다.
 
   **일 상태.** `unknown | nonempty | verified-empty`를 `(processEpoch, engineSessionId, activity generation)`에 묶는다.
-  - 최신 turn start 뒤에 발생한 Stop의 `background_tasks`와 `session_crons`가 모두 명시적으로 비어 있을 때만
-    `verified-empty`다. 목록이 없으면 unknown이다
-    ([Stop 입력](/Users/new/claude-code-bundle/2.1.307/modules/claude-code.d.ts-2706c2b1.txt#L12912)). 사용자 interrupt나
-    API error에는 Stop이 없고 StopFailure에는 일 목록이 없으므로 그 경로는 unknown으로 남는다
-    ([StopFailure](/Users/new/claude-code-bundle/2.1.307/modules/claude-code.d.ts-2706c2b1.txt#L12895)).
-  - 모든 origin의 turn start, background tool launch, Query 재접속, id 변경은 verified-empty를 무효화한다. unknown은 절대
-    정리하지 않는다.
+  task와 cron은 원천이 달라 따로 읽는다. 둘 다 비었다고 알려졌을 때만 `verified-empty`다. 하나라도 unknown이면 unknown이고,
+  unknown은 절대 정리하지 않는다.
+  - **task** (백그라운드 Bash, 서브에이전트, Monitor, MCP task, workflow). stream의 `background_tasks_changed`가 원천이다
+    ([SDK 0.3.259](/Users/new/claude-code-bundle/agent-sdk-0.3.259/sdk.d.ts#L3359)). 집합이 바뀔 때마다 전체를 보내는 수준
+    신호라서, Stop이 없는 interrupt나 API error 뒤에도 task 쪽은 알려진 채로 남는다. 지금 engine host가 이미 이것을 읽어 예산과
+    E10 idle 정리의 hard reason으로 쓴다(`src/engine-host/budget.ts`의 `hardReasons`).
+    - `ambient` task는 지금 코드처럼 세지 않는다. 엔진이 사용자 일이 아니라고 표시한 정리용 task(skip_transcript task, 자동으로
+      시작된 watcher)이고, 세면 watcher 하나가 세션을 끝없이 붙잡는다.
+    - 프로세스가 시작될 때는 아무것도 오지 않으므로 빈 집합에서 출발한다.
+    - 재입양한 프로세스는 snapshot이나 다음 변경이 올 때까지 unknown이다. SDK는 다시 `initialize`하면 지금 집합을 보낸다고
+      적지만, 2.1.311 reprint에서 찾은 snapshot은 Remote Control attach 경로뿐이다
+      ([L506648](/Users/new/claude-code-bundle/2.1.311/cli.pretty.js#L506648)). 잰다(§9).
+  - **cron** (CronCreate, ScheduleWakeup, `/loop`). stream에는 대응하는 신호가 없고 Stop의 `session_crons`만 원천이다
+    ([Stop 입력](/Users/new/claude-code-bundle/2.1.307/modules/claude-code.d.ts-2706c2b1.txt#L12912)). 지금 engine host는 이것을
+    읽지 않으므로 Stop hook callback을 더한다.
+    - Stop 없이 끝난 턴(사용자 interrupt, API error. StopFailure에는 일 목록이 없다:
+      [StopFailure](/Users/new/claude-code-bundle/2.1.307/modules/claude-code.d.ts-2706c2b1.txt#L12895))은 마지막 Stop 뒤로 stream에
+      cron 도구 호출(서브에이전트의 것 포함)이 없었으면 마지막으로 안 집합을 그대로 쓴다. cron은 도구 호출로만 생기므로 그
+      집합은 실제보다 작지 않고, 틀려도 정리를 더 막는 쪽으로만 틀린다. cron 도구 호출이 있었으면 다음 Stop까지 unknown이다.
+    - 새로 띄운 프로세스와 정리 뒤 `--resume`한 프로세스는 빈 집합에서 출발한다(정리는 cron이 없을 때만 한다). 그 밖의
+      재시작(engine host 고장, major 업그레이드) 뒤의 `--resume`은 durable cron이 되살아날 수 있으므로 첫 Stop까지 unknown이다.
+  - 모든 origin의 turn start, background tool launch, Query 재접속, id 변경은 verified-empty를 무효화한다.
   - host가 claude의 descendant를 실시간으로 검사한다. pid로 등록한 기반 프로세스(관찰 bridge child, MCP·LSP 서버)
     외에는 모두 일로 세어 정리를 막는다. 자식이 있다는 것은 veto일 뿐, 없다는 것은 일이 비었다는 증거가 아니다.
 
-  24시간 뒤에는 host가 다음 상태 기계를 집행한다.
+  정해진 시간(§1의 5)이 지나면 host가 다음 상태 기계를 집행한다.
   1. reap fence를 먼저 arm한다. arm 확인 전에는 신호를 보내지 않는다. 문을 쥔 쪽이 건강하지 않으면 arm하지 않고 일
      상태를 unknown으로 둔다.
   2. 문은 세션 안 관찰 전용 bridge mod의 `turn.step` hook이다. TUI에서는 이 hook이 `!` 셸 모드 완료와 queue에서 꺼낸
@@ -271,7 +292,8 @@ host가 죽으면 pipe가 닫혀 세션이 끝난다. 그래서 host는 가능�
   없다. 터미널 세션은 plain과 같이 창을 닫으면 끝난다.
 - **F2. 클라이언트 없는 세션의 수명 (2026-10-22).** 정함: 24시간 정리(§3.2). Claude Code 프로세스 하나가 수백 MB를 쓴다(이
   MacBook에서 24개 평균 281 MB, 최대 549 MB RSS, 2026-10-22). 처음에는 detach된 TUI 세션을 위한 것이었고, F7 뒤로는 경로 B
-  세션에 적용한다. 버린 대안: 절대 스스로 끝내지 않는다.
+  세션에 적용한다. 버린 대안: 절대 스스로 끝내지 않는다. 2026-10-27: P5가 기계 역할별 시간(MacBook 10분, 서버 24시간)과
+  엄격한 정리를 정했다(§1의 5).
 - **F3. holder는 어느 제품에 속하는가 (2026-10-22 정함, 10-24 개정).** 정함: MAWS engine host로 흡수한다. 지금 엔진
   프로세스를 쥐는 E10 supervisor를 claude-ssh 방식으로 강화하는 것이고, 연구 문서 §3.2가 원래 권한 길이다.
   - 처음 정했던 것: 독립된 작은 서비스(`apps/session-holder`)로 두고 sminos 데몬과 MAWS 데몬이 둘 다 클라이언트가 된다.
@@ -319,6 +341,8 @@ host가 죽으면 pipe가 닫혀 세션이 끝난다. 그래서 host는 가능�
   그 노트 §7의 spike(plan 나가기와 모드 전환, compaction으로 잘라 내기, 합성 Read로 미디어 넣기, model 확인 경로,
   elicitation 계약, panel 없는 설정·사용량·MCP 읽기)가 남은 일이다.
 - **`--await-initialize`.** 2.1.310 reprint에 이 인자가 있다([L580881](/Users/new/claude-code-bundle/2.1.310/cli.pretty.js#L580881)). `initialize` 전에 턴이 시작되는 것을 막는지는 잰다(§3.3).
+- **task snapshot과 durable cron.** 다시 `initialize`한 `-p` 프로세스가 `background_tasks_changed` snapshot을 보내는지,
+  durable cron이 `--resume`에서 되살아나 첫 Stop 전에도 걸려 있는지 잰다(§3.2).
 - **session host 소켓 경로 길이.** Desktop의 새 helper는 긴 Unix socket 경로를 위해 descriptor와 디렉터리 상대 경로로 붙는다.
   우리 경로를 짧게 두거나 같은 대비를 한다.
 - **Linux scope와 lingering.** user transient scope가 logind session cgroup과 분리되고, KillUserProcesses와 로그아웃에서
