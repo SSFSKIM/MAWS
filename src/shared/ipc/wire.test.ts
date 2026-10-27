@@ -162,6 +162,7 @@ describe('the pty host on the wire (P5 O2 M4)', () => {
     const ptyCommands = Object.keys(REGISTRY.commands).filter((name) => REGISTRY.commands[name as keyof typeof REGISTRY.commands].owner === 'pty-host');
     expect(ptyCommands.length).toBeGreaterThan(0);
     for (const name of ptyCommands) expect(manifest.entries).toHaveProperty([`commands.${name}`]);
+    expect(manifest.entries).toHaveProperty(['commands.pty.recaptureEnv']); // main's and mawsd's, additive under M2's minor
     expect(manifest.entries).not.toHaveProperty(['commands.pty.hostState']);
     expect(manifest.entries).not.toHaveProperty(['commands.pty.openLink']);
     expect(REGISTRY.ptyHostEvents).toEqual(['pty.data', 'pty.exit']);

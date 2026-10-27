@@ -20,7 +20,9 @@
 //
 // P5 O2 M4 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md): an attach with `credit: false` (a remote viewer's, which
 // `mawsd` forces) answers as any attach does but leaves the flow untouched, so the reader that holds the credit keeps it;
-// `shutdown` ends every live pty through the kill ladder, for the socket mode's exit order.
+// `shutdown` ends every live pty through the kill ladder, for the socket mode's exit order; from its start every spawn is
+// refused, before and after its wait on the environment, so none outlives it. `setEnvironment` (pty.recaptureEnv) swaps
+// in a fresh capture once it resolves; a spawn already waiting keeps the environment it awaited.
 import { randomUUID } from 'node:crypto';
 import * as nodePty from 'node-pty';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -80,12 +82,19 @@ export interface PtyTable {
   list(): CommandOutput<'pty.list'>;
   foreground(input: CommandInput<'pty.foreground'>): Promise<CommandOutput<'pty.foreground'>>;
   shutdown(): Promise<void>; // P5 O2 M4: every live pty killed, each through its ladder; resolves once all have settled
+  setEnvironment(next: Promise<Record<string, string>>): void; // P5 O2 M4: the spawns after it resolves start with it
   // tests: the flow state, the ring's oldest offset, and node-pty's reads and bytes read (flushed or pending)
   inspect(ptyId: string): { flow: Flow; ringStart: number; reads: number; read: number };
 }
 
-export function createPtyTable({ emit, environment }: PtyTableOptions): PtyTable {
+export function createPtyTable({ emit, environment: initial }: PtyTableOptions): PtyTable {
   const entries = new Map<string, PtyEntry>();
+  let environment = initial; // P5 O2 M4: what a spawn waits on; replaced once a recapture resolves
+  let latestCapture: Promise<Record<string, string>> | null = null; // the newest recapture, which alone may replace it
+  let closing = false; // P5 O2 M4: shutdown began; no spawn starts a pty
+  const refuseWhileClosing = () => {
+    if (closing) throw new Error('the pty host is shutting down');
+  };
 
   const get = (ptyId: string): PtyEntry => {
     const entry = entries.get(ptyId);
@@ -145,7 +154,9 @@ export function createPtyTable({ emit, environment }: PtyTableOptions): PtyTable
 
   return {
     async spawn({ appSessionId, label, cwd, cols, rows, shell, args, command }) {
+      refuseWhileClosing();
       const env = await environment;
+      refuseWhileClosing(); // nothing has been made yet: the rest of the spawn runs without yielding
       for (const [id, entry] of entries) {
         if (entry.info.appSessionId !== appSessionId || entry.info.label !== label) continue;
         if (entry.info.alive) throw new Error(`session ${appSessionId} already has a live pty labelled ${label}`);
@@ -275,9 +286,17 @@ export function createPtyTable({ emit, environment }: PtyTableOptions): PtyTable
     },
 
     async shutdown() {
+      closing = true;
       const live = [...entries.values()].filter((entry) => entry.info.alive);
       const ended = await Promise.allSettled(live.map((entry) => end(entry.info.ptyId, entry, 'SIGHUP')));
       for (const [i, result] of ended.entries()) if (result.status === 'rejected') console.error(`[pty-host] ${live[i]!.info.ptyId} did not end at shutdown`, result.reason);
+    },
+
+    setEnvironment(next) {
+      latestCapture = next;
+      void next.then((env) => {
+        if (latestCapture === next) environment = Promise.resolve(env);
+      });
     },
 
     inspect(ptyId) {
