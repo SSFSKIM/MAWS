@@ -41,6 +41,7 @@ const TIMING_NODE_TESTS = [
   'test/endpoint/enroll.test.ts', // P5 O10 M2: enrolls against desk-hub's local runner, a wrangler dev child process
   'test/endpoint/hub-link.test.ts', // P5 O10 M3: reconnects on the hub link's backoff, timed against a stand-in hub
   'test/endpoint/hub-link.local.test.ts', // P5 O10 M3: RL1 against desk-hub's Worker in Miniflare (cuts, redeploys, leases)
+  'test/endpoint/channels.local.test.ts', // P5 O10 M4: RL2 over the hub's multiplex (desk-hub's Worker in Miniflare) and the direct listener
 ];
 const TIMING_RENDERER_TESTS = [
   'src/renderer/src/App.test.tsx',

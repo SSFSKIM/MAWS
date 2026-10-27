@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { bundleHub } from '../../apps/desk-hub/test/support/bundle';
 import { startLocalHub, type LocalHub } from '../../apps/desk-hub/test/support/local';
 
-export { ADMIN, ORG, type LocalHub } from '../../apps/desk-hub/test/support/local';
+export { ADMIN, credentials, ORG, type LocalHub } from '../../apps/desk-hub/test/support/local';
 
 /** The hub, and its bundle's removal after it stops. */
 export async function startMiniflareHub(): Promise<{ hub: LocalHub; stop(): Promise<void> }> {
