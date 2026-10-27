@@ -16,8 +16,8 @@ import type {
   MachineEntry,
   MachineName,
   RetiredKey,
+  RevokedKey,
   CertRetirement,
-  CertRevocation,
   Certificates,
   Member,
   OrgState,
@@ -97,6 +97,9 @@ function isMachineEntry(value: unknown): value is MachineEntry {
   return fields(value, ['name', 'ref', 'pub', 'owners']) && isName(value.name) && isMachineRef(value.ref) && isPublicKey(value.pub) && isOwners(value.owners);
 }
 
+/** A delegation's id: 32 lowercase hex digits, the provisioning key's id (no `_`, which ends it in a certificate's ref). */
+const isDelegationId = (id: unknown) => typeof id === 'string' && /^[0-9a-f]{32}$/.test(id);
+
 function isNameRecord(value: unknown): value is MachineName {
   return fields(value, ['name', 'ref']) && isName(value.name) && isMachineRef(value.ref);
 }
@@ -104,7 +107,7 @@ function isNameRecord(value: unknown): value is MachineName {
 function isDelegation(value: unknown): value is Delegation {
   return (
     fields(value, ['id', 'pub', 'prefix', 'expires', 'maxUses', 'offlineRevokeS', 'owners']) &&
-    isText(value.id) &&
+    isDelegationId(value.id) &&
     isPublicKey(value.pub) &&
     typeof value.prefix === 'string' &&
     isMachineName(value.prefix) &&
@@ -119,21 +122,30 @@ function isProjectEntry(value: unknown): value is ProjectEntry {
   return fields(value, ['id', 'name']) && isText(value.id) && isText(value.name);
 }
 
-function isRetiredKey(value: unknown): value is RetiredKey {
-  if (!fields(value, ['keyId', 'pub', 'notAfter', 'holder'])) return false;
-  const h = value.holder;
-  const holder =
+function isKeyHolder(h: unknown): boolean {
+  return (
     (fields(h, ['machine']) && isMachineRef(h.machine)) ||
     (fields(h, ['member', 'device', 'class', 'key']) &&
       isMemberIdText(h.member) &&
       isText(h.device) &&
       isOneOf(h.class, ['native-mac', 'web-cards'] as const) &&
-      isOneOf(h.key, ['channel', 'step-up'] as const));
-  return holder && isBase64urlOf(value.keyId, 16) && isPublicKey(value.pub) && isIsoMillis(value.notAfter);
+      isOneOf(h.key, ['channel', 'step-up'] as const))
+  );
+}
+
+function isRetiredKey(value: unknown): value is RetiredKey {
+  if (!fields(value, ['keyId', 'pub', 'notAfter', 'holder'])) return false;
+  return isKeyHolder(value.holder) && isBase64urlOf(value.keyId, 16) && isPublicKey(value.pub) && isIsoMillis(value.notAfter);
+}
+
+function isRevokedKey(value: unknown): value is RevokedKey {
+  if (!fields(value, ['keyId', 'holder'])) return false;
+  const h = value.holder;
+  return (isKeyHolder(h) || (fields(h, ['delegation']) && isDelegationId(h.delegation))) && isBase64urlOf(value.keyId, 16);
 }
 
 export function isOrgState(value: unknown): value is OrgState {
-  if (!fields(value, ['org', 'version', 'prev', 'issued', 'root', 'members', 'machines', 'machineNames', 'retired', 'delegations', 'projects'])) return false;
+  if (!fields(value, ['org', 'version', 'prev', 'issued', 'root', 'members', 'machines', 'machineNames', 'retired', 'revoked', 'delegations', 'projects'])) return false;
   const root = value.root;
   return (
     isText(value.org) &&
@@ -147,6 +159,7 @@ export function isOrgState(value: unknown): value is OrgState {
     isList(value.machines, isMachineEntry) &&
     isList(value.machineNames, isNameRecord) &&
     isList(value.retired, isRetiredKey) &&
+    isList(value.revoked, isRevokedKey) &&
     isList(value.delegations, isDelegation) &&
     isList(value.projects, isProjectEntry)
   );
@@ -174,9 +187,10 @@ export function isRootTransition(value: unknown): value is RootTransition {
 
 export function isGrant(value: unknown): value is Grant {
   return (
-    fields(value, ['org', 'machine', 'member', 'rights', 'version', 'issued']) &&
+    fields(value, ['org', 'machine', 'machineKey', 'member', 'rights', 'version', 'issued']) &&
     isText(value.org) &&
     isMachineRef(value.machine) &&
+    isBase64urlOf(value.machineKey, 16) &&
     isMemberIdText(value.member) &&
     isList(value.rights, (r): r is Grant['rights'][number] => isOneOf(r, ['spawn', 'machine-admin', 'shell'] as const)) &&
     unique(value.rights) &&
@@ -192,7 +206,7 @@ export function isMachineCert(value: unknown): value is MachineCert {
     isMachineRef(value.machine) &&
     isName(value.name) &&
     isPublicKey(value.pub) &&
-    isText(value.delegation) &&
+    isDelegationId(value.delegation) &&
     isCount(value.use, 1) &&
     isIsoMillis(value.issued)
   );
@@ -232,11 +246,7 @@ export function isCertRetirement(value: unknown): value is CertRetirement {
   return fields(value, ['org', 'keyId', 'notAfter']) && isText(value.org) && isBase64urlOf(value.keyId, 16) && isIsoMillis(value.notAfter);
 }
 
-export function isCertRevocation(value: unknown): value is CertRevocation {
-  return fields(value, ['org', 'keyId']) && isText(value.org) && isBase64urlOf(value.keyId, 16);
-}
-
-/** The bundle's three lists are lists; their items are judged one by one where they are used. */
+/** The bundle's two lists are lists; their items are judged one by one where they are used. */
 export function isCertificates(value: unknown): value is Certificates {
-  return fields(value, ['certs', 'retirements', 'revocations']) && Array.isArray(value.certs) && Array.isArray(value.retirements) && Array.isArray(value.revocations);
+  return fields(value, ['certs', 'retirements']) && Array.isArray(value.certs) && Array.isArray(value.retirements);
 }

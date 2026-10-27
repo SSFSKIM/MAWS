@@ -13,7 +13,7 @@
 //   bad-link            the link is broken outright: another org, or a genesis with a `prev`
 //   endorsement-missing a device new to a member who had devices carries no endorsement
 //   unknown-signer      the kid names no key allowed to sign this (a device of another member, a key not in the state,
-//                       a delegation signing for a name outside its prefix or a listed machine's, a `legacy/` writer)
+//                       a delegation signing for a name outside its prefix or a ref outside its id, a `legacy/` writer)
 //   expired             a delegation past its `expires`, a certificate past its `maxUses`, or an event stamped after
 //                       its retired key's `notAfter` (or its certificate's delegation's `expires`)
 //   not-listed          the machine, delegation or member the record names is not in the state
@@ -21,9 +21,10 @@
 //   contested           a machine's identity claimed twice: a certificate for a ref a state entry holds, a ref two
 //                       live certificates claim with different keys, or a name two live certificates claim under
 //                       different refs; refused for every claimant (`contestedRefs` names the refs)
-//   revoked             a successor that makes current again a key the caller's set says was revoked (RL DL 23)
-//   name-retired        a machine name some version gave another ref, given again (to an entry or a certificate), or
-//                       a successor that drops a name from `machineNames`
+//   revoked             a key the state lists in `revoked` (RL DL 24): a successor holding one as current, or a record
+//                       or event it signed, a certificate's under a revoked delegation included
+//   name-retired        a machine name some version gave another ref, given again, or a successor that drops a name
+//                       from `machineNames`
 export type VerdictCode =
   | 'malformed'
   | 'bad-signature'

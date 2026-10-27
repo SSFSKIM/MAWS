@@ -6,7 +6,7 @@ import { enrollmentMac, enrollmentMacInput, verifyEnrollmentMac } from '../src/e
 import { generateSigningKey, importPublicKey, importSigningKey, isPublicKey, isSig, keyId } from '../src/keys.ts';
 import { contestedRefs, NO_CERTIFICATES } from '../src/records.ts';
 import type { OrgState } from '../src/types.ts';
-import { ORG, PROJECT, REF_VM1, REF_VM_BUILD, VECTORS } from '../vectors/index.ts';
+import { ORG, PROJECT, REF_VM1, VECTORS } from '../vectors/index.ts';
 
 const ctx = { org: ORG, project: PROJECT };
 const event = { writer: 'mini/67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b', seq: 1, ts: '2026-10-27T00:00:00.000Z', kind: 'say', text: 'hi' };
@@ -68,14 +68,14 @@ describe('the enrollment MAC', () => {
 describe('contestedRefs', () => {
   it('names the refs claimed twice, by an entry and a certificate or by two keys', async () => {
     const state = (VECTORS.fixtures.v2 as { state: OrgState }).state;
+    const enrolled = (VECTORS.fixtures['v3 vm-1 enrolled'] as { state: OrgState }).state;
     const now = new Date('2026-10-28T00:00:00.000Z');
     const cert = VECTORS.fixtures['cert vm-1'] as Parameters<typeof contestedRefs>[1]['certs'][number];
     const rival = VECTORS.fixtures['cert vm-1 rival'] as typeof cert;
-    const onEntry = VECTORS.fixtures['a machine certificate for a ref a state entry holds'] as typeof cert;
-    const set = (...certs: (typeof cert)[]) => ({ certs, retirements: [], revocations: [] });
+    const set = (...certs: (typeof cert)[]) => ({ certs, retirements: [] });
     expect(await contestedRefs(state, set(cert), now)).toEqual([]);
     expect(await contestedRefs(state, set(cert, rival), now)).toEqual([REF_VM1]);
-    expect(await contestedRefs(state, set(cert, onEntry), now)).toEqual([REF_VM_BUILD]);
+    expect(await contestedRefs(enrolled, set(cert), now)).toEqual([REF_VM1]);
   });
 });
 

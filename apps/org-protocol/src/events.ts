@@ -14,19 +14,20 @@
 //     still verify as its own and never as a newcomer's;
 //   - `hub/<member>` is signed by the channel key of one of that member's devices, a `web-cards` device excepted: that
 //     class only answers cards (RL §5.10), and its key is used by hub-served code; or by a retired channel key of
-//     theirs;
+//     theirs, which outlives their membership;
 //   - `legacy/…` is v1-only and never v2-verified.
 // A retired key signs only events stamped at or before its `notAfter`, by the signer's own timestamp: a machine's `ts`,
-// which its signature covers, or a device's `created`, since the `ts` of a `hub/` event is the hub's. A revoked key (one
-// the state dropped without retiring it, or a certificate an admin revoked) is in no list, and signs nothing.
+// which its signature covers, or a device's `created`, since the `ts` of a `hub/` event is the hub's. A revoked key
+// signs nothing, and its events read `revoked` rather than `unknown-signer`: a key the state lists in `revoked`, or a
+// certificate's under a revoked delegation.
 //
 // Dual coding: `signEvent` first, then DX1's `seal`, whose `mac` then covers `sig` (DX1 covers everything but the mac's
 // value), so old sminos and desk-web verify the event unchanged. `signEvent` refuses an event that already has a `mac`.
 import { canonicalize } from './canonical.ts';
 import { isSig, keyId, signInput, utf8, verifyInput, type B64, type Sig } from './keys.ts';
-import { isHubPosition, isHubWriter, isIsoMillis, LEGACY_WRITER_PREFIX, writerMachine } from './names.ts';
+import { HUB_WRITER_PREFIX, isHubPosition, isHubWriter, isIsoMillis, LEGACY_WRITER_PREFIX, writerMachine } from './names.ts';
 import { machineSigners } from './records.ts';
-import { isCertificates } from './shapes.ts';
+import { isCertificates, isMachineCert, isSigned } from './shapes.ts';
 import { SIGNING_DOMAINS, type Certificates, type EventContext, type LogEventV2, type OrgState, type Signer } from './types.ts';
 import { accept, refuse, type Verdict } from './verdict.ts';
 
@@ -68,17 +69,28 @@ export async function signEvent<T extends object>(ctx: EventContext, event: T, k
 export async function signerFor(state: OrgState, writer: string, certs: Certificates, now: Date): Promise<Signer[]> {
   if (typeof writer !== 'string' || !isCertificates(certs)) return [];
   if (isHubWriter(writer)) {
-    const member = state.members.find((m) => `hub/${m.id}` === writer);
-    if (member === undefined) return [];
-    const current = member.devices.filter((d) => d.class !== 'web-cards').map((d) => ({ pub: d.channelPub, notAfter: null }));
+    const id = writer.slice(HUB_WRITER_PREFIX.length);
+    const devices = state.members.find((m) => m.id === id)?.devices ?? [];
+    const current = devices.filter((d) => d.class !== 'web-cards').map((d) => ({ pub: d.channelPub, notAfter: null }));
     const retired = state.retired.flatMap((r) =>
-      'member' in r.holder && r.holder.member === member.id && r.holder.key === 'channel' && r.holder.class !== 'web-cards' ? [{ pub: r.pub, notAfter: r.notAfter }] : [],
+      'member' in r.holder && r.holder.member === id && r.holder.key === 'channel' && r.holder.class !== 'web-cards' ? [{ pub: r.pub, notAfter: r.notAfter }] : [],
     );
     return [...current, ...retired];
   }
   if (writer.startsWith(LEGACY_WRITER_PREFIX)) return [];
   const machine = writerMachine(writer);
   return machine === null ? [] : machineSigners(state, machine, certs, now);
+}
+
+/**
+ * Whether `kid` names a revoked key: one the state lists in `revoked`, or the key of a certificate in `certs` under a
+ * delegation the state revoked (its id a revoked holder), which the state can no longer authenticate.
+ */
+async function signsRevoked(state: OrgState, certs: Certificates, kid: string): Promise<boolean> {
+  if (state.revoked.some((r) => r.keyId === kid)) return true;
+  const gone = new Set(state.revoked.flatMap((r) => ('delegation' in r.holder ? [r.holder.delegation] : [])));
+  for (const c of certs.certs) if (isSigned(c, isMachineCert) && gone.has(c.body.delegation) && (await keyId(c.body.pub)) === kid) return true;
+  return false;
 }
 
 /**
@@ -92,8 +104,10 @@ function anchor(event: LogEventV2): string | null {
 
 /**
  * A stored or positioned v2 event, verified for `ctx` against `state`: its `sig` names a key `signerFor` allows,
- * current or retired no earlier than the event's own timestamp, and verifies. A `hub/` event's position is checked by
- * shape as DX1's `verify` checks it, since the signature leaves it out. The `mac` of a dual-coded event is DX1's.
+ * current or retired no earlier than the event's own timestamp, and verifies. A key `signerFor` allows more than once
+ * (a certificate and its renewal) is judged by the most lenient: `expired` only when every one has ended. A `hub/`
+ * event's position is checked by shape as DX1's `verify` checks it, since the signature leaves it out. The `mac` of a
+ * dual-coded event is DX1's.
  */
 export async function verifyEvent(ctx: EventContext, state: OrgState, event: LogEventV2, certs: Certificates, now: Date): Promise<Verdict> {
   if (typeof event !== 'object' || event === null || typeof event.writer !== 'string' || !isSig(event.sig) || !isContext(ctx) || !isCertificates(certs)) return refuse('malformed');
@@ -106,13 +120,12 @@ export async function verifyEvent(ctx: EventContext, state: OrgState, event: Log
   } catch {
     return refuse('malformed'); // not JSON: a value RFC 8785 cannot write
   }
-  for (const signer of await signerFor(state, event.writer, certs, now)) {
-    if ((await keyId(signer.pub)) !== event.sig.kid) continue;
-    if (signer.notAfter !== null) {
-      const stamp = anchor(event);
-      if (stamp === null || stamp > signer.notAfter) return refuse('expired');
-    }
-    return (await verifyInput(input, event.sig, signer.pub)) ? accept() : refuse('bad-signature');
-  }
-  return refuse('unknown-signer');
+  const named: Signer[] = [];
+  for (const signer of await signerFor(state, event.writer, certs, now)) if ((await keyId(signer.pub)) === event.sig.kid) named.push(signer);
+  if (named.length === 0) return refuse((await signsRevoked(state, certs, event.sig.kid)) ? 'revoked' : 'unknown-signer');
+  const stamp = anchor(event);
+  const timely = named.filter((s) => s.notAfter === null || (stamp !== null && stamp <= s.notAfter));
+  if (timely.length === 0) return refuse('expired');
+  for (const signer of timely) if (await verifyInput(input, event.sig, signer.pub)) return accept();
+  return refuse('bad-signature');
 }
