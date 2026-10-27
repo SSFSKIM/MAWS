@@ -403,6 +403,18 @@ it('a downward gesture observes a newly grown end rather than resuming at the ob
   expect(s.handle.current!.following).toBe(true);
 });
 
+it('a clamped compensation from the end is not re-issued over a reader who scrolled away before their scroll event', async () => {
+  const s = await scene(false, true);
+  s.freezeDOMSize();
+  s.resizeRow('first', 40); // above the reader at the end: the virtualizer's compensation clamps at the frozen end
+  s.readerMove(-200, false); // the reader leaves; the browser has not delivered the scroll event yet
+  const held = s.scroller.scrollTop;
+  s.commitDOMSize(); // a commit lands first and grows the sizer the clamped write was waiting for
+  s.stream();
+  expect(s.handle.current!.following).toBe(false);
+  expect(s.scroller.scrollTop).toBe(held);
+});
+
 it('a reader reaching the bottom is noticed before a pending measurement moves that bottom again', async () => {
   const s = await scene(true);
   s.readerMove(-200);

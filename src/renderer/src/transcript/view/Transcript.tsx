@@ -188,8 +188,18 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
       remember();
     },
   });
-
-  const releaseFollow = useCallback(() => changeFollow(false), [changeFollow]);
+  // A compensation for a row resizing above a reader at the end clamps there, and virtual-core re-issues its absolute
+  // target once the sizer grows, cancelling it only on a later scroll event away from that end (#1258). A reader
+  // leaving the end makes it obsolete: a commit landing after they scroll away but before their scroll event would
+  // put them back on the end. virtual-core has no public cancel (3.17: `_clampedAdjustment`); the scroll tests'
+  // "clamped compensation" case fails if that changes.
+  const dropEndCompensation = useCallback(() => {
+    (virtualizer as unknown as { _clampedAdjustment: unknown })._clampedAdjustment = null;
+  }, [virtualizer]);
+  const releaseFollow = useCallback(() => {
+    dropEndCompensation();
+    changeFollow(false);
+  }, [changeFollow, dropEndCompensation]);
 
   // Release on intent, before the native scroll event: a streamed render can otherwise win that race. Capture the
   // scroll itself too, before the virtualiser's listener can synchronously render/measure against the old follow mode.
