@@ -105,6 +105,15 @@ export interface GrantSnapshot {
 }
 export const GrantSnapshotSchema = z.strictObject({ allow: z.array(z.string()) });
 
+// P5 O2 M2 (P5 Decision Log 49): a session's cron knowledge as its engine host last had it (src/engine-host/work-state.ts):
+// the session-only crons the last Stop listed, and whether a cron tool ran (or a Stop was unreadable) since. A resume
+// that does not follow a release starts its crons known and empty only when this shows none listed and no tool since.
+export const CronRecordSchema = z.object({
+  sessionCrons: z.array(z.object({ id: z.string(), schedule: z.string(), recurring: z.boolean(), prompt: z.string() }).strip()),
+  toolSinceStop: z.boolean(),
+}).strip();
+export type CronRecord = z.infer<typeof CronRecordSchema>;
+
 export interface SessionStateStore {
   exists(appSessionId: AppSessionId): Promise<boolean>; // a state file exists for the id (C10's ask: `session.queue.list` for an unreserved id)
   loadQueue(appSessionId: AppSessionId): Promise<StoredQueue>; // reads only: the recovery transitions happen in MessageQueue
@@ -122,4 +131,7 @@ export interface SessionStateStore {
   // against (src/engine-host/durable-crons.ts); empty when never saved
   loadEngineSessionIds(appSessionId: AppSessionId): Promise<string[]>;
   saveEngineSessionIds(appSessionId: AppSessionId, ids: string[]): Promise<void>;
+  // P5 O2 M2 (P5 Decision Log 49): the cron record; null when never written or of a shape this build cannot read
+  loadCronRecord(appSessionId: AppSessionId): Promise<CronRecord | null>;
+  saveCronRecord(appSessionId: AppSessionId, record: CronRecord): Promise<void>;
 }

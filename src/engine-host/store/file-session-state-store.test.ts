@@ -235,3 +235,23 @@ describe('FileSessionStateStore: the keep mark and the engine session ids (P5 O2
     expect((await after.loadQueue(ID)).entries).toEqual([entry()]);
   });
 });
+
+describe('FileSessionStateStore: the cron record (P5 O2 M2, P5 Decision Log 49)', () => {
+  const record = { sessionCrons: [{ id: 'c1', schedule: '0 3 * * *', recurring: true, prompt: 'nightly' }], toolSinceStop: false };
+  it('round-trips through a new instance; never written, it is null', async () => {
+    const store = new FileSessionStateStore(userData);
+    expect(await store.loadCronRecord(ID)).toBeNull();
+    await store.saveCronRecord(ID, record);
+    expect(await new FileSessionStateStore(userData).loadCronRecord(ID)).toEqual(record);
+  });
+
+  it('a record of a shape this build cannot read is null, and the rest of the file still loads', async () => {
+    const dir = join(userData, 'engine-host', 'state');
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, `${ID}.json`), JSON.stringify({ version: 1, queue: { entries: [entry()], paused: false }, grants: { allow: ['Bash(ls)'] }, launchSpec: null, cronRecord: { sessionCrons: 'none' } }));
+    const store = new FileSessionStateStore(userData);
+    expect(await store.loadCronRecord(ID)).toBeNull();
+    expect(await store.loadGrants(ID)).toEqual({ allow: ['Bash(ls)'] });
+    expect((await store.loadQueue(ID)).entries).toEqual([entry()]);
+  });
+});

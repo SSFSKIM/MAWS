@@ -6,6 +6,8 @@ import { parsePsTree, ProcessTable } from './process-table';
 import { endableClientRef } from '@shared/ipc/client'; // P5 O2 M2
 import { evaluate, isIdleRow } from './budget'; // P5 O2 M2
 import { SERVER_RELEASE_MS } from './supervision'; // P5 O2 M2
+import { MemorySessionStateStore } from './store/memory-session-state-store'; // P5 O2 M2
+import type { CronRecord } from '@shared/engine/session-state-store'; // P5 O2 M2
 import { EngineSession } from './session';
 import type { LiveRow } from './live-ledger'; // E10
 // C12 start
@@ -1049,6 +1051,55 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     await humanTurn(s.a!, [stop([])]);
     await vi.advanceTimersByTimeAsync(IDLE_MS);
     expect(lifecycle(s.a!)).toBe('exiting');
+  });
+
+  // P5 Decision Log 49: the cron record in the state file bounds a resume's unknown
+  it('each Stop and each cron tool writes the cron record to the state file', async () => {
+    const store = new MemorySessionStateStore();
+    const { s } = await releaseTable(['a'], () => ({ session: { store } }));
+    await humanTurn(s.a!, [assistantTool('CronCreate')]); // interrupted: no Stop
+    expect(await store.loadCronRecord('a' as AppSessionId)).toEqual({ sessionCrons: [], toolSinceStop: true });
+    await humanTurn(s.a!, [stop([cron])]);
+    expect(await store.loadCronRecord('a' as AppSessionId)).toEqual({ sessionCrons: [cron], toolSinceStop: false });
+  });
+
+  const resumeWithRecord = (record: CronRecord | null) => () => {
+    const store = new MemorySessionStateStore();
+    if (record !== null) void store.saveCronRecord('a' as AppSessionId, record);
+    return { spec: { resume: { sessionId: RESUMED as never, fork: false }, sessionId: null }, session: { store } };
+  };
+
+  it('a resume whose record shows no listed cron and no cron tool since starts known and empty, and is released', async () => {
+    const { table, s } = await releaseTable(['a'], resumeWithRecord({ sessionCrons: [], toolSinceStop: false }));
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: null });
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('exiting');
+  });
+
+  it.each([
+    ['a listed session cron', { sessionCrons: [cron], toolSinceStop: false }],
+    ['a cron tool since the Stop', { sessionCrons: [], toolSinceStop: true }],
+    ['no record', null],
+  ] as const)('a resume whose record shows %s holds the session until its first Stop', async (_case, record) => {
+    const { table, s } = await releaseTable(['a'], resumeWithRecord(record));
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'resumed' });
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('ready');
+  });
+
+  it('a record the state file cannot give (an unreadable file) holds the session too', async () => {
+    const store = new MemorySessionStateStore();
+    store.loadCronRecord = async () => {
+      throw new Error('state file unreadable');
+    };
+    const { table, s } = await releaseTable(['a'], () => ({ spec: { resume: { sessionId: RESUMED as never, fork: false }, sessionId: null }, session: { store } }));
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'resumed' });
+    expect(s.a!.logs).toContainEqual(expect.stringContaining('cron record not loaded'));
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('ready');
   });
 
   it('an adopted process holds the session until a task snapshot and a Stop have both arrived', async () => {

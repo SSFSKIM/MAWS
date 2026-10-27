@@ -15,7 +15,7 @@ import type { AppSessionId, MessageUuid, RequestId } from '@shared/graph/ids';
 import type { AutoModeRefusalCode, PermissionMode } from '@shared/graph/enums';
 import type { RequestAnswer } from '@shared/engine/answers';
 import type { Effort, LaunchSpec } from '@shared/engine/launch-spec';
-import type { QueueEntry, QueueState, SendContent, SessionStateStore } from '@shared/engine/session-state-store';
+import type { CronRecord, QueueEntry, QueueState, SendContent, SessionStateStore } from '@shared/engine/session-state-store';
 import type { RelayHealth } from '@shared/engine/relay-health';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SurfaceAnswer } from '@shared/engine/surface'; // R2
@@ -236,7 +236,10 @@ export class EngineSession {
       loadLineage: () => this.store.loadEngineSessionIds(this.spec.appSessionId),
       saveLineage: (ids) => this.storeWrite(this.store.saveEngineSessionIds(this.spec.appSessionId, ids), 'engine session ids'),
     });
-    this.tracker = new SessionStatusTracker(opts.spec, () => this.touch(), { launchKind: opts.launchKind, durableCrons: () => this.durableCrons.read(), log: this.log }); // P5 O2 M2: the work state's start
+    this.tracker = new SessionStatusTracker(opts.spec, () => this.touch(), { // P5 O2 M2: the work state's start and sources
+      launchKind: opts.launchKind, durableCrons: () => this.durableCrons.read(), log: this.log,
+      onCronRecord: (record) => this.storeWrite(this.store.saveCronRecord(this.spec.appSessionId, record), 'cron record'), // P5 Decision Log 49
+    });
     // P5 O2 M2: the Stop callback, every launch's (host-hooks.ts): its `session_crons` into the work state, answered at once
     registerStopHook(this.hooks, (input) => {
       this.tracker.stopped(input);
@@ -802,8 +805,14 @@ export class EngineSession {
     } catch (error) {
       this.log(`keep mark not loaded: ${messageOf(error)}`);
     }
-    await this.durableCrons.load(); // P5 O2 M2: the lineage, then a resume's read of the durable crons
-    this.tracker.launched();
+    await this.durableCrons.load(); // P5 O2 M2: the lineage, then a resume's cron record and read of the durable crons
+    let cronRecord: CronRecord | null = null;
+    try {
+      cronRecord = await this.store.loadCronRecord(this.spec.appSessionId); // P5 Decision Log 49
+    } catch (error) {
+      this.log(`cron record not loaded: ${messageOf(error)}`);
+    }
+    this.tracker.launched(cronRecord);
     if (this.opts.grants === undefined) {
       try {
         this.grants = await this.store.loadGrants(this.spec.appSessionId);

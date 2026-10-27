@@ -13,7 +13,12 @@
 // session-only cron and it can fire before that Stop (the Stop-hook probe, question 4); an adopted process (O16's)
 // starts unknown in both parts. The durable crons, which no Stop lists, are read from the project's scheduled-tasks
 // file (durable-crons.ts) at each Stop and at a resume's launch; a file that exists but cannot be read is unknown.
-// Unknown is work, conservatively.
+// Unknown is work, conservatively. P5 Decision Log 49 bounds the resume's unknown: the engine host keeps each session's
+// cron record in its state file (`cronRecord`, written at each Stop and each cron tool), and a resume that does not
+// follow a release starts known and empty when the record shows no listed session cron and no cron tool since its Stop;
+// a record that is missing or unreadable keeps the unknown.
+import type { CronRecord } from '@shared/engine/session-state-store';
+
 export type LaunchKind = 'fresh' | 'resumed_after_release' | 'resumed' | 'adopted';
 export interface SessionCron { id: string; schedule: string; recurring: boolean; prompt: string }
 export type CronRead = SessionCron[] | 'unreadable';
@@ -40,6 +45,17 @@ export class WorkState {
 
   cronTool(): void {
     if (this.crons.state !== 'unknown') this.crons = { state: 'dirty', list: this.crons.list };
+  }
+
+  // A `resumed` launch's state-file record (P5 Decision Log 49), before its first Stop: clean, it starts known and empty.
+  resumedWith(record: CronRecord | null): void {
+    const clean = record !== null && !record.toolSinceStop && record.sessionCrons.length === 0;
+    if (clean && this.crons.state === 'unknown' && this.crons.why === 'resumed') this.crons = { state: 'known', list: [] };
+  }
+
+  // What the state file keeps, written at each Stop and each cron tool.
+  cronRecord(): CronRecord {
+    return { sessionCrons: copy(this.crons.list), toolSinceStop: this.crons.state !== 'known' };
   }
 
   turnStarted(): void {

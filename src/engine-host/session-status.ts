@@ -11,6 +11,7 @@ import type { EventId, TaskId } from '@shared/graph/ids';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { InitializeResponse, ReloadPluginsResponse } from '@shared/wire/control';
+import type { CronRecord } from '@shared/engine/session-state-store'; // P5 O2 M2
 import { CRON_TOOLS, sessionCronsOf, WorkState, type CronRead, type LaunchKind } from './work-state'; // P5 O2 M2
 
 export const HELD_PEER_MESSAGE_TTL_MS = 5 * 60_000;
@@ -80,18 +81,22 @@ export class SessionStatusTracker {
   private readonly work: WorkState;
   private readonly launchKind: LaunchKind;
   private readonly durableCrons: () => CronRead;
+  private readonly onCronRecord: (record: CronRecord) => void;
+  private recorded: string | null = null; // the cron record last handed to onCronRecord, as JSON
   private readonly log: (line: string) => void;
 
   constructor(
     private readonly spec: LaunchSpec,
     private readonly onChange: () => void, // a held peer message expired
-    opts: { launchKind?: LaunchKind; durableCrons?: () => CronRead; log?: (line: string) => void } = {}, // P5 O2 M2
+    // P5 O2 M2: `onCronRecord` persists the cron record (P5 Decision Log 49), handed over at each Stop and cron tool
+    opts: { launchKind?: LaunchKind; durableCrons?: () => CronRead; onCronRecord?: (record: CronRecord) => void; log?: (line: string) => void } = {},
   ) {
     this.requestedMode = spec.permissionMode ?? 'default';
     this.effectiveMode = this.requestedMode;
     this.launchKind = opts.launchKind ?? (spec.resume === null ? 'fresh' : 'resumed');
     this.work = new WorkState(this.launchKind);
     this.durableCrons = opts.durableCrons ?? (() => []);
+    this.onCronRecord = opts.onCronRecord ?? (() => {});
     this.log = opts.log ?? (() => {});
   }
 
@@ -150,9 +155,11 @@ export class SessionStatusTracker {
     this.work.turnStarted();
   }
 
-  // P5 O2 M2 start: the launch's state loaded (a resume reads the durable crons then), the main lane's turn.ended (an
-  // echo receipt is no turn), and the Stop callback's input with the durable crons read at it
-  launched(): void {
+  // P5 O2 M2 start: the launch's state loaded (a `resumed` launch reads its cron record, P5 Decision Log 49, and any
+  // non-fresh one the durable crons), the main lane's turn.ended (an echo receipt is no turn), and the Stop callback's
+  // input with the durable crons read at it
+  launched(record: CronRecord | null): void {
+    if (this.launchKind === 'resumed') this.work.resumedWith(record);
     if (this.launchKind !== 'fresh') this.work.durableRead(this.durableCrons());
   }
 
@@ -162,12 +169,25 @@ export class SessionStatusTracker {
 
   stopped(input: Record<string, unknown>): void {
     this.work.stopped(sessionCronsOf(input, this.log), this.durableCrons());
+    this.record();
+  }
+
+  // The cron record, handed over when it changed
+  private record(): void {
+    const record = this.work.cronRecord();
+    const json = JSON.stringify(record);
+    if (json === this.recorded) return;
+    this.recorded = json;
+    this.onCronRecord(record);
   }
 
   // A cron tool's tool_use block in an assistant frame, the main lane's or a subagent's
   private observeCronTools(frame: Frame): void {
     const content = (frame.message as { content?: unknown } | undefined)?.content;
-    if (list(content).some((block) => block.type === 'tool_use' && typeof block.name === 'string' && CRON_TOOLS.has(block.name))) this.work.cronTool();
+    if (list(content).some((block) => block.type === 'tool_use' && typeof block.name === 'string' && CRON_TOOLS.has(block.name))) {
+      this.work.cronTool();
+      this.record();
+    }
   }
   // P5 O2 M2 end
 

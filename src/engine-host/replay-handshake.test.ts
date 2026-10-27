@@ -3,7 +3,7 @@ import type { StdinFrame } from '@shared/wire/frames';
 import type { JournalRow } from '@shared/wire/journal';
 import { appInitialize } from '@shared/engine/initialize';
 import { MAWS_SERVER_NAME } from '@shared/maws/tools'; // E1
-import { loadJournal } from '../../test/support/fixtures';
+import { loadJournal, loadP5Journal } from '../../test/support/fixtures';
 import { appHostHooks } from './host-hooks'; // P5 O2 M2
 import { appReplayHandshake } from './replay-handshake';
 import { replayEngine } from './replay-transport';
@@ -58,4 +58,15 @@ it("projects the app's own hooks, the Stop callback, onto a recorded initialize 
   void transport.write({ type: 'control_request', request_id: 'minted', request: { subtype: 'initialize', ...appInitialize(), hooks: appHostHooks() } } as StdinFrame);
   const next = await transport.frames[Symbol.asyncIterator]().next();
   expect(next.value).toMatchObject({ frame: after.frame, error: null }); // matched: the replay played on past the row
+});
+
+// P5 O2 M2: the Stop-hook probe's recordings were made with the Stop callback registered; their initialize projects to
+// the app's own (the hooks among its launch-owned fields), so the session's write matches them
+it.each(['main', 'durable', 'durable-resume', 'session', 'session-resume'])('projects the recorded Stop hook of p5-o2-stop-crons-%s onto the app\'s own initialize', (name) => {
+  const rows = loadP5Journal(`p5-o2-stop-crons-${name}`);
+  const isInit = (row: JournalRow) => row.direction === 'out' && (row.frame as { request?: { subtype?: string } }).request?.subtype === 'initialize';
+  const recorded = (rows.find(isInit)!.frame as { request: { hooks?: unknown } }).request;
+  expect(recorded.hooks).toEqual(appHostHooks()); // the probe registered the same callback the app does
+  const projected = (appReplayHandshake(rows, null).find(isInit)!.frame as { request: Record<string, unknown> }).request;
+  expect(projected).toEqual({ subtype: 'initialize', ...appInitialize(), hooks: appHostHooks() });
 });

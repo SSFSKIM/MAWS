@@ -189,6 +189,46 @@ describe('the durable crons', () => {
   });
 });
 
+// P5 Decision Log 49: the cron record the state file keeps, which bounds a resume's unknown
+describe('the cron record', () => {
+  it('is the last Stop\'s list, clean after a Stop and not after a cron tool or an unreadable Stop', () => {
+    const work = state();
+    expect(work.cronRecord()).toEqual({ sessionCrons: [], toolSinceStop: false });
+    turn(work, (w) => {
+      w.cronTool();
+      expect(w.cronRecord()).toEqual({ sessionCrons: [], toolSinceStop: true });
+      w.stopped([cron('a')], [cron('durable')]);
+    });
+    expect(work.cronRecord()).toEqual({ sessionCrons: [cron('a')], toolSinceStop: false }); // the durable jobs are the file's
+    turn(work, (w) => w.stopped('unreadable', []));
+    expect(work.cronRecord().toolSinceStop).toBe(true);
+  });
+
+  it('a resume whose record is clean starts known and empty', () => {
+    const work = state('resumed');
+    work.resumedWith({ sessionCrons: [], toolSinceStop: false });
+    expect(work.snapshot()).toEqual({ crons: [], unknown: null });
+  });
+
+  it.each([
+    ['a listed session cron', { sessionCrons: [cron('a')], toolSinceStop: false }],
+    ['a cron tool since the Stop', { sessionCrons: [], toolSinceStop: true }],
+    ['no record (missing, unreadable, or an older build\'s)', null],
+  ])('a resume with %s stays unknown until its first Stop', (_case, record) => {
+    const work = state('resumed');
+    work.resumedWith(record);
+    expect(work.snapshot().unknown).toBe('resumed');
+    turn(work, (w) => w.stopped([], []));
+    expect(work.snapshot().unknown).toBeNull();
+  });
+
+  it('only a resume reads it: an adopted process stays unknown', () => {
+    const work = state('adopted');
+    work.resumedWith({ sessionCrons: [], toolSinceStop: false });
+    expect(work.snapshot().unknown).toBe('adopted');
+  });
+});
+
 describe('the Stop input, read leniently', () => {
   it('reads session_crons, dropping an entry of the wrong shape with a log line', () => {
     const dropped: string[] = [];
