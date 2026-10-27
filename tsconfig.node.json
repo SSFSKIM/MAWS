@@ -19,6 +19,20 @@
     "apps/org-protocol/src/**/*.ts", // P5-O10 M9: the remote layer's protocol package, which main's device keys sign with
     "apps/org-protocol/types/node-runtime.d.ts", // its WebCrypto type names under Node's declarations
     "apps/org-protocol/test-support/tamper-relay.ts", // its in-memory carrier, for main's device-key handshake test
+    // P5 O10 start: the endpoint module, which mawsd bundles (its suites are test/endpoint, under test/** below). It
+    // imports desk-hub's protocol module (the DX-era vocabulary); its suites' local-hub harness imports the member's side
+    // from desk-hub's deploy tools
+    "src/endpoint/**/*",
+    "apps/desk-hub/src/protocol/**/*.ts",
+    "apps/desk-hub/deploy/access.ts",
+    "apps/desk-hub/deploy/config.ts",
+    "apps/desk-hub/deploy/hub.ts",
+    "apps/desk-hub/deploy/org-admin.ts",
+    "apps/desk-hub/deploy/proof.ts",
+    "apps/desk-hub/fake-machine/json-file.ts",
+    "apps/desk-hub/fake-machine/link.ts",
+    "apps/desk-hub/fake-machine/org.ts",
+    // P5 O10 end
     "test/**/*",
     // C8a start: test/support/panel-child-fixture.ts measures its fixture through C6's pure model (createState,
     // applyEvents, rowsOf) and journalToEvents; the project is composite (tsconfig.base.json), which refuses a file the
@@ -99,7 +113,6 @@
   // tsconfig.web.json. P3-D M4: the design system's React and DOM (the apply API's scopes, the page), likewise. P3-C M4:
   // the slide canvas and the deck editor, likewise (M9: `canvas/css.ts` stays in, since the exporters in main write it).
   "exclude": [
-    "test/endpoint/**/*", // P5 O10: the endpoint's suites, typechecked with the module by tsconfig.endpoint.json
     "src/main/artifacts/*.dom.test.tsx",
     "src/artifacts/ui/**/*", // portable React/DOM helpers are typechecked by tsconfig.web.json
     "src/artifacts/document/editor/**/*",
