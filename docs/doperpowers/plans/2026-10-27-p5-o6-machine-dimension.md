@@ -966,6 +966,10 @@ No new dependency. zod 4, Node's `crypto`, the peer-auth addon already in the tr
   Evidence: `coverage.test.ts`'s first RED run (M1).
 - Observation: the registry's only pipes are in `src/shared/engine/answers.ts`, and neither carries an id. The layout's preprocessed schemas (`StoredMainSchema` and friends) are outside the registry, so M2's migration happens in their readers, not through the codec.
 - Observation: `test/support/builders.ts`'s attention `item()` writes `att-<appSessionId>-…`, unlike the broker's `<appSessionId>:<requestId>`. Tests that rely on the prefix pass the broker's form.
+- Observation: the lowerer's bare-id refusal finds wrong sends, but not an id-shaped field typed `z.string()`, and the coverage snapshot cannot flag a field the schema does not type as one of the four. M2's adaptation found four such crossings, each silent with one machine: `session.takeOver.paneId` (a plain string carrying the address `session.takeOverPane` answered, so the pause-first takeover never suspended the CLI); mark ids and engine event ids, which embed main's bare session id but were built or compared on the page's address (Mark read matched nothing; a side thread's later summaries were dropped); and session ids written inside an artifact's content (a dashboard label read "by Claude"). Expect more of this class in M3 and M4: string fields carrying an id a lifted output produced, and compound ids embedding one.
+  Evidence: e2e:terminal, e2e:side test 2 and e2e:default's dashboard cases, each red before M2's fixes (`task-2-report.md`, M2's workspace).
+- Observation: a transcript path chip opens its file tab with `appSessionId: null` (pre-O6), so `machineFor(null)` gives the local machine even for another machine's transcript; and `shell/transfer.ts`'s `panelRecordOf` compares artifact ids only. Both hold with one machine and are M4's to carry the machine through.
+- Observation: OX7's bench at M2's head (`f9e802d2a`, run 40507512064, load 5.5) read delta to frame p50 25.8 / p95 37.7 ms and round trip 1.0 / 1.3 ms, against ceilings of 26.45 / 42.56 and 2.9 / 6.3 ms. The p50 margin is 0.65 ms at that load; an earlier M2 run at load 2.3 (`c76459b4b`, 40501668478) read 24.3 ms. Later milestones add work on the delta path only through the stores, so the head's bench is the one to watch.
 
 ## Decision Log
 
@@ -1001,6 +1005,20 @@ No new dependency. zod 4, Node's `crypto`, the peer-auth addon already in the tr
   - `machine.identity`'s grade, as the O1 rubric line for the architect: "`list`: a listing read of the machine's ref, display name and own project, none of a session's content, like `session.list`" (`src/shared/ipc/grades/machine.ts`).
   - `eslint.config.js`'s `MACHINE_BOUND` glob gains `machine`, so `src/main/machine/**` stays Electron-free like the other services that move to `mawsd` (a file outside M1's Touches).
   Date/Author: 2026-10-27, O6's executor (controller), from M1's executor.
+
+- Decision: M2's executor's calls, folded at M2.
+  - The bridge types:
+    - `PreloadBridge` is typed by command name (`invoke<N>(name, input, machine?)`, `on<N>(name, (payload, machine) => …)`), not `(string, unknown)`, so e2e specs and harness pages stay type-checked.
+    - `PathMachineRequired = false` in `src/shared/ipc/schema.ts` is the one switch M4 flips; the required form (`MachineOptions<N>`) is already defined and pinned by `routes.test-d.ts`.
+  - The route classes: engine-`SessionId`-only commands are `path`, by `ENGINE_SESSION_KEYS` (`sessionId`, `sessionIds`, `engineSessionId`, `engineSessionIds`). The computed classes are committed as `src/shared/ipc/routes.json`, pinned against the registry.
+  - The router: `RouterOptions.local` is required. A `main` handler and an interceptor receive `MainContext` (with `target`); a `machine` handler keeps `HandlerContext`, since a host runtime runs the same code. `emit` sends no machine while none is bound (unit tests, very early startup), which the client reads as local.
+  - The client: every refusal answers `invalid_input` with one `console.error`, and nothing is sent; a lift failure on an output is `invalid_output`. Ids the renderer mints use `ipc.localMachine`.
+  - Query keys gain `{ machine }` only for a non-local machine, so local reads keep their pre-O6 keys and exact-key invalidations. `useEngineRead` and `useOperation` take no machine option, since their inputs are addressed and their keys already name the machine. This departs from M2's "the wrappers forward `opts`" for those two; M4 adds the option to any of them a `path` command uses.
+  - The layout: lifting is total and idempotent (an address in place is kept). A bare `panel.<id>` read at hydrate moves to `panel.<address>` and the bare key is deleted; one whose state is invalid or whose session is unknown is left, and main's removed-session drop deletes both forms. `layout.set(key, null)` deletes the key. `regions` and `panelTools.surfaces` are written back when their read migrated. Main's layout readers take the local ref as an argument.
+  - Tab machines: file and artifact tabs take `machineFor(appSessionId)`, the session's machine, else local. Artifact tabs, and the Artifacts tool's record (`{ target, machine }`), are local while the library is machine-wide.
+  - Compound ids: mark ids and engine event ids stay main's, built on the bare session id, and the page compares them through `bareOf`. A session id inside a local artifact's content reads as the local machine's (`storedSessionOnPage`, `src/renderer/src/ipc/machine.ts`) until O7 gives artifacts a machine. Rejected: lifting them as a fifth kind, since they are compounds like tab ids.
+  - Tests: a fake installed as `window.maws` stands for main (bare ids, `localMachine: TEST_MACHINE`); store fixtures hold `at(id)` (`test/support/machine.ts`); `fillStores` lifts its scenario once. The upgrade scene runs over indexed sessions, because the stub scenario keeps drafts in memory.
+  Date/Author: 2026-10-27, O6's executor (controller), from M2's executor.
 
 - Decision: the verification.
   - This document gets one `doperpowers:adversarial-reviewer` buildability review before execution (P5 Decision Log 12).
