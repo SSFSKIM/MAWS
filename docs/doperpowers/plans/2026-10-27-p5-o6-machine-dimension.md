@@ -30,7 +30,7 @@ After O6:
 ## Progress
 
 - [x] M1: machine identity and the address codec (2026-10-27T10:11Z; commits `ece0eb80a`..`ae671bfd0`, task review clean after two fix rounds; class 1a GREEN, run 40486094807)
-- [ ] M2: addresses across the boundary, one machine
+- [x] M2: addresses across the boundary, one machine (2026-10-27; commits `8362f2d74`..`849b08ae5`, task review clean after one fix round; class 1a GREEN 40520987967; hosted e2e GREEN 40501648644, 40503154665, 40506863633; mini e2e:default GREEN 40518812172; OX7 bench within budget 40507512064)
 - [ ] M3: machine links and the second-profile stand-in
 - [ ] M4: per-machine stores, the shell per machine, explicit machines for paths
 - [ ] M5: org projects and the sidebar
@@ -1018,6 +1018,8 @@ No new dependency. zod 4, Node's `crypto`, the peer-auth addon already in the tr
   - Tab machines: file and artifact tabs take `machineFor(appSessionId)`, the session's machine, else local. Artifact tabs, and the Artifacts tool's record (`{ target, machine }`), are local while the library is machine-wide.
   - Compound ids: mark ids and engine event ids stay main's, built on the bare session id, and the page compares them through `bareOf`. A session id inside a local artifact's content reads as the local machine's (`storedSessionOnPage`, `src/renderer/src/ipc/machine.ts`) until O7 gives artifacts a machine. Rejected: lifting them as a fifth kind, since they are compounds like tab ids.
   - Tests: a fake installed as `window.maws` stands for main (bare ids, `localMachine: TEST_MACHINE`); store fixtures hold `at(id)` (`test/support/machine.ts`); `fillStores` lifts its scenario once. The upgrade scene runs over indexed sessions, because the stub scenario keeps drafts in memory.
+  - The task review's round: a unit test per synthetic pty owner follows it from its producer, through the real Terminal tool and registry where it goes through them, to the bare owner and local machine `pty.spawn` reaches (`src/renderer/src/terminal/synthetic-owners.test.ts`).
+  - Side case 11 ("pinned under the heading after the Reload") failed in the mini's e2e:default at M2's head and passed at the base (run 40514243088). The trace showed the document bridge measuring the anchor before the reloaded page's viewport had a width. The bridge (`src/main/artifacts/bridge-script.ts`) now waits for a sized viewport and measures again on resize. It is a latent race outside M2's area; why M2's head exposed it under load was not shown.
   Date/Author: 2026-10-27, O6's executor (controller), from M2's executor.
 
 - Decision: the verification.
