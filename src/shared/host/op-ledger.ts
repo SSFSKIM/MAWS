@@ -67,7 +67,7 @@ export class OpLedger {
     this.#log = options.log ?? (() => {});
   }
 
-  /** The ledger `dir/name`, read and compacted; `dir` is created (0700) when absent. */
+  /** The ledger `dir/name`, read and compacted; nothing is created until the first record (then `dir` too, 0700). */
   static open(dir: string, name: string, options: { now?(): number; log?(line: string): void } = {}): OpLedger {
     const ledger = new OpLedger(dir, name, options);
     ledger.#load();
@@ -157,7 +157,6 @@ export class OpLedger {
   #load(): void {
     let text: string;
     try {
-      fs.mkdirSync(this.#dir, { recursive: true, mode: 0o700 });
       const stat = lstatOrNull(this.#path);
       if (stat === null) return;
       if (stat.isSymbolicLink() || !stat.isFile() || stat.uid !== process.getuid?.() || (stat.mode & 0o077) !== 0) throw new Error('is not a private regular file of this user');
@@ -242,6 +241,7 @@ export class OpLedger {
   }
 
   #append(record: object): void {
+    fs.mkdirSync(this.#dir, { recursive: true, mode: 0o700 });
     const created = lstatOrNull(this.#path) === null;
     writeAll(this.#path, 'a', `${JSON.stringify(record)}\n`);
     if (created) syncDirectory(this.#dir);

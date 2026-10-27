@@ -118,6 +118,16 @@ describe('a query', () => {
 });
 
 describe('the file', () => {
+  it('creates nothing until its first record, then its directory 0700 and the file 0600', () => {
+    const inner = join(dir, 'supervisor');
+    const ledger = OpLedger.open(inner, 'ops.jsonl', { now: () => now });
+    expect(ledger.query(OP, iso(now), false)).toEqual({ state: 'not-received' });
+    expect(fs.existsSync(inner)).toBe(false);
+    ledger.begin(OP, iso(now), claim(), () => null);
+    expect(fs.statSync(inner).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(join(inner, 'ops.jsonl')).mode & 0o777).toBe(0o600);
+  });
+
   it('drops entries older than KEPT_S at open, and rewrites what it keeps', () => {
     let ledger = open();
     ledger.begin(OP, iso(now), claim(), () => null);
