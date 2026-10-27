@@ -6,7 +6,7 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { _electron, test as base, type ElectronApplication, type Page } from '@playwright/test';
 import { writeReplayEngine } from '../../test/support/replay-engine';
 import { writeScratchShellHome } from '../../test/support/shell-home';
@@ -118,8 +118,12 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   const main = join(root, 'out/main/index.js');
   if (!executable && !existsSync(main)) throw new Error(`${main} does not exist (run pnpm build)`);
   if (executable && opts.requireFirst) throw new Error('requireFirst needs the built app, not MAWS_E2E_EXECUTABLE');
-  // the other checkout's own Electron, as its `electron` package names it (the path its install wrote)
+  // the other checkout's own Electron, as its `electron` package names it (the path its install wrote). Playwright requires
+  // its loader only into the Electron it resolves itself, so it is required into this one by hand: the other build's app
+  // then starts as this checkout's does, its `ready` held until Playwright has attached (so main's first lines are read)
+  // and Playwright's Chromium switches on.
   const electron = opts.root === undefined ? undefined : (createRequire(join(root, 'package.json'))('electron') as string);
+  const loader = electron === undefined ? [] : ['-r', join(dirname(createRequire(join(REPO_ROOT, 'package.json')).resolve('playwright-core/package.json')), 'lib/server/electron/loader.js')];
 
   const ownsUserData = opts.userData === undefined; // C5
   const userData = opts.userData ?? mkdtempSync(join(tmpdir(), 'maws-e2e-')); // C5: an existing profile when given
@@ -187,7 +191,7 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
     const appArgs = opts.lang ? [`--lang=${opts.lang}`] : E2E_APP_ARGS; // P4-W2L
     app = executable
       ? await _electron.launch({ executablePath: executable, args: appArgs, env, cwd: REPO_ROOT })
-      : await _electron.launch({ ...(electron !== undefined && { executablePath: electron }), args: [...(opts.requireFirst ? ['-r', opts.requireFirst] : []), ...appArgs, main], env, cwd: root });
+      : await _electron.launch({ ...(electron !== undefined && { executablePath: electron }), args: [...loader, ...(opts.requireFirst ? ['-r', opts.requireFirst] : []), ...appArgs, main], env, cwd: root });
     // Playwright's process() reads its live application channel, which may already be disposed before 'close' arrives.
     // Keep the actual ChildProcess while available, including for cleanup's failed-close fallback.
     child = app.process();

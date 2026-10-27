@@ -1524,7 +1524,8 @@ test('a peer group asked for takes the peer at any wire, and without a Peer: tra
   const lists = { PEER_E2E: 'cross-build' };
   const asked = (trailers) => JSON.parse(plan({ ...lists, HEAD_MESSAGE: `ci-gate: test\n\nGates: e2e:cross-build${trailers}` }).outputs.e2e);
   assert.deepEqual(asked(`\n${peerTrailers('3.1', '3.1')}`), [peerEntry]);
-  const { peer: _, ...unpaired } = peerEntry;
+  const unpaired = { ...peerEntry };
+  delete unpaired.peer;
   assert.deepEqual(asked(''), [unpaired]);
   assert.deepEqual(JSON.parse(plan({ ...lists, EVENT: 'workflow_dispatch', INPUT_GATES: 'e2e:cross-build' }).outputs.e2e), [unpaired]);
   for (const [trailers, stderr] of [
