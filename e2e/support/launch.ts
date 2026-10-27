@@ -4,6 +4,7 @@
 // shell home, so nothing depends on or touches a real profile or the owner's shell history.
 // Later children's end-to-end tests start from here, through the `maws` fixture of `test`.
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { _electron, test as base, type ElectronApplication, type Page } from '@playwright/test';
@@ -84,6 +85,10 @@ export interface ShellLaunchOptions extends MawsLaunchOptions {
   // marketplace and its test-source descriptor, the recorded catalog sources, and a scratch HOME unless `home: 'runner'`.
   // The engine store stays the launch's own `claude-config`.
   realEngine?: DiscoverScratchOptions;
+  // The two-build check (e2e/cross-build.spec.ts): the root of another checkout, a build of its own (its out/ and its
+  // node_modules), whose app runs in this one's place: its out/main/index.js under its own Electron, from its root, as
+  // this checkout's runs from here. Its supervisor is then that build's, spawned from its own bundle.
+  root?: string;
 }
 // C5 end
 
@@ -108,9 +113,13 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   const engine = opts.realEngine ? realEngine() : null;
   const executable = process.env.MAWS_E2E_EXECUTABLE ? resolve(REPO_ROOT, process.env.MAWS_E2E_EXECUTABLE) : null;
   if (executable && !existsSync(executable)) throw new Error(`MAWS_E2E_EXECUTABLE does not exist: ${executable} (run pnpm build:app)`);
-  const main = join(REPO_ROOT, 'out/main/index.js');
+  if (executable && opts.root !== undefined) throw new Error('root names a built checkout, not MAWS_E2E_EXECUTABLE');
+  const root = opts.root ?? REPO_ROOT; // the two-build check's other checkout, or this one
+  const main = join(root, 'out/main/index.js');
   if (!executable && !existsSync(main)) throw new Error(`${main} does not exist (run pnpm build)`);
   if (executable && opts.requireFirst) throw new Error('requireFirst needs the built app, not MAWS_E2E_EXECUTABLE');
+  // the other checkout's own Electron, as its `electron` package names it (the path its install wrote)
+  const electron = opts.root === undefined ? undefined : (createRequire(join(root, 'package.json'))('electron') as string);
 
   const ownsUserData = opts.userData === undefined; // C5
   const userData = opts.userData ?? mkdtempSync(join(tmpdir(), 'maws-e2e-')); // C5: an existing profile when given
@@ -178,7 +187,7 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
     const appArgs = opts.lang ? [`--lang=${opts.lang}`] : E2E_APP_ARGS; // P4-W2L
     app = executable
       ? await _electron.launch({ executablePath: executable, args: appArgs, env, cwd: REPO_ROOT })
-      : await _electron.launch({ args: [...(opts.requireFirst ? ['-r', opts.requireFirst] : []), ...appArgs, main], env, cwd: REPO_ROOT });
+      : await _electron.launch({ ...(electron !== undefined && { executablePath: electron }), args: [...(opts.requireFirst ? ['-r', opts.requireFirst] : []), ...appArgs, main], env, cwd: root });
     // Playwright's process() reads its live application channel, which may already be disposed before 'close' arrives.
     // Keep the actual ChildProcess while available, including for cleanup's failed-close fallback.
     child = app.process();

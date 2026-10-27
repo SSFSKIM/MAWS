@@ -69,6 +69,15 @@
 // `Lane: vm` or `vm-trial` a group on both lists goes to the guest. A hosted entry carries `hosted: true`, the waiter's
 // box and timeout and no variant; it stays in `e2e` (default's derivation, the pool-demand hint) and makes `e2e_hosted`,
 // the e2e-hosted job's matrix, and the pool flag; never `e2e_host`, `e2e_vm` or `e2e_build`.
+// The peer groups (PEER_E2E; the two-build check, e2e/cross-build.spec.ts): each runs this tree's app against another
+// build's supervisor on one profile, and the reverse. The other build is the commit of the `Peer:` trailer (a push only),
+// which scripts/ci-gate.sh resolves (the merge base with master, unless its --peer names another) beside each tree's
+// wire as its manifest records it, `Peer-Wire:` and `Wire:` (major.minor). Whenever the two are a minor apart within one
+// major the plan adds the peer groups itself, so every WIRE_MINOR bump is checked without anyone asking; not to a live
+// run (its live groups alone) nor a `Selection: affected` one (never landing evidence). A peer group's job fetches the
+// peer's one commit and builds it beside this tree (gate.yml), so it takes the Mac's exclusive instance whatever the lane:
+// never a hosted Mac (maws-app holds one filtered tree and no history to fetch a peer from), the shared instances or the
+// guest. Its entry carries the `peer` sha; asked for without a Peer: trailer it has none, and its spec runs nothing.
 // Writes the switches, the runners and the e2e matrix to the job's outputs and the set to its summary. Run from the
 // checkout's root.
 import { appendFileSync, readFileSync, realpathSync } from 'node:fs';
@@ -165,6 +174,20 @@ export function planOf(env, scripts) {
   // P4-A2 (X34): a live run takes the tool-time guard's heavy-case fixture beside the live groups it names (LIVE_GUARD_E2E,
   // LIVE_E2E groups that spend nothing), so every gate that runs live specs holds the heaviest known cases under the bound.
   if (live) for (const group of words(env.LIVE_GUARD_E2E)) gates.add(`e2e:${group}`);
+  // The peer groups, and the trailers that name their peer: a full sha (it reaches the job's `git fetch`) and two wires.
+  const peerGroups = new Set(words(env.PEER_E2E));
+  const peer = (dispatched ? '' : trailer('Peer')) || '';
+  if (peer && !/^[0-9a-f]{40}$/.test(peer)) refuse(`no such peer: ${peer} (a commit's full sha, as ci-gate.sh writes it)`);
+  const wireOf = (key) => {
+    const value = dispatched ? undefined : trailer(key);
+    if (!value) return null;
+    const [, major, minor] = /^(\d+)\.(\d+)$/.exec(value) ?? refuse(`no such wire: ${key}: ${value} (major.minor, as ci-gate.sh writes it)`);
+    return { major: Number(major), minor: Number(minor), text: value };
+  };
+  const [treeWire, peerWire] = [wireOf('Wire'), wireOf('Peer-Wire')];
+  const minorApart = peer !== '' && treeWire !== null && peerWire !== null && treeWire.major === peerWire.major && treeWire.minor !== peerWire.minor;
+  const peerJoined = minorApart && !live && !trailer('Selection') ? [...peerGroups].filter((group) => scriptOf(group) in scripts && !gates.has(`e2e:${group}`)) : [];
+  for (const group of peerJoined) gates.add(`e2e:${group}`);
 
   const unknown = [...gates].filter((gate) => !['static', 'unit', 'unit:darwin', 'probes', 'packaged'].includes(gate) && !(gate.startsWith('e2e:') && scriptOf(gate.slice(4)) in scripts));
   if (unknown.length > 0) refuse(`no such gate: ${unknown.join(', ')} (static, unit, unit:darwin, probes, packaged, e2e:default or e2e:<group> with a package.json script)`);
@@ -183,7 +206,7 @@ export function planOf(env, scripts) {
   // A Linux lane runs only the groups §3.1's table found green there; the rest are macOS work, refused here rather than
   // scheduled to fail.
   const linux = new Set(words(env.LINUX_E2E));
-  const macOnly = lane === 'linux' ? [...gates].filter((gate) => gate.startsWith('e2e:') && !linux.has(gate.slice(4))) : [];
+  const macOnly = lane === 'linux' ? [...gates].filter((gate) => gate.startsWith('e2e:') && !linux.has(gate.slice(4)) && !peerGroups.has(gate.slice(4))) : [];
   if (macOnly.length > 0) refuse(`${macOnly.join(', ')} run on the macOS runner (§3.1): ask with Runner: macos (ci-gate.sh --runner macos)`);
 
   const libreoffice = new Set(words(env.LIBREOFFICE_E2E));
@@ -211,14 +234,14 @@ export function planOf(env, scripts) {
   const unbuilt = listedVm.filter((name) => name !== 'unit:darwin' && !measured.has(name) && variantOf(name) === undefined);
   const macVm = new Set(listedVm.filter((name) => !measured.has(name) && !unbuilt.includes(name)));
   const onMac = (name) => (macVm.has(name) && vmLane ? LANES[vmLane] : macShared.has(name) ? RUNNERS.macShared : macVm.has(name) ? RUNNERS.macSolo : RUNNERS.macos);
-  const placed = (group) => (lane === 'macos' && (measured.has(group) || home.has(group) || live) ? RUNNERS.macHome : !offMac.has(group) ? (lane === 'macos' ? onMac(group) : RUNNERS[lane]) : class1a === 'pool' ? poolBox(4) : RUNNERS.linux);
+  const placed = (group) => (peerGroups.has(group) ? RUNNERS.macos : lane === 'macos' && (measured.has(group) || home.has(group) || live) ? RUNNERS.macHome : !offMac.has(group) ? (lane === 'macos' ? onMac(group) : RUNNERS[lane]) : class1a === 'pool' ? poolBox(4) : RUNNERS.linux);
   // The hosted Macs. Why a group never goes there, if it never does: its selection is the whole run's (`default`), its
   // bounds the mini's (measured), it spends (live), it needs a credential (secret), it needs the mini (home), or it never
   // takes a Mac (pool).
   const secret = new Set(words(env.MAC_SECRET_E2E));
   const liveOnes = new Set([...words(env.LIVE_E2E), ...words(env.LIVE_GUARD_E2E)]);
   const notHosted = (group) =>
-    [group === 'default' && 'default', measured.has(group) && 'measured', liveOnes.has(group) && 'live', secret.has(group) && 'secret', home.has(group) && 'home', offMac.has(group) && 'pool'].filter(Boolean);
+    [group === 'default' && 'default', measured.has(group) && 'measured', liveOnes.has(group) && 'live', secret.has(group) && 'secret', home.has(group) && 'home', offMac.has(group) && 'pool', peerGroups.has(group) && 'peer'].filter(Boolean);
   const named = (groups, prefix = '') => groups.map((group) => `${prefix}${group} (${notHosted(group).join(', ')})`).join(', ');
   const listedHosted = words(env.HOSTED_MAC_E2E);
   const contradictions = listedHosted.filter((group) => notHosted(group).length > 0);
@@ -234,6 +257,8 @@ export function planOf(env, scripts) {
   // 95-minute deadline and under the pool's 120-minute bound on a box's run.
   const HOSTED_WAITER = poolBox(2);
   const HOSTED_TIMEOUT_MINUTES = 100;
+  // A peer group's minutes: the peer's install and build beside this tree's build, and its spec's two crossings.
+  const PEER_MINUTES = 40;
   const e2e = [...gates]
     .filter((gate) => gate.startsWith('e2e:'))
     .map((gate) => {
@@ -242,8 +267,8 @@ export function planOf(env, scripts) {
       const where = hosted ? HOSTED_WAITER : placed(group);
       const runner = JSON.stringify(where);
       const guest = GUEST.includes(where) ? { variant: variantOf(group) } : {};
-      const timeout = hosted ? HOSTED_TIMEOUT_MINUTES : timeoutOn(where, measured.has(group) ? 45 : 30);
-      return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group), poppler: poppler.has(group), measured: measured.has(group), ...(hosted && { hosted }), runner, timeout, ...guest };
+      const timeout = hosted ? HOSTED_TIMEOUT_MINUTES : timeoutOn(where, measured.has(group) ? 45 : peerGroups.has(group) ? PEER_MINUTES : 30);
+      return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group), poppler: poppler.has(group), measured: measured.has(group), ...(hosted && { hosted }), runner, timeout, ...guest, ...(peerGroups.has(group) && peer && { peer }) };
     });
   const e2eHosted = e2e.filter((entry) => entry.hosted);
   const e2eHost = e2e.filter((entry) => entry.variant === undefined && !entry.hosted);
@@ -307,8 +332,10 @@ export function planOf(env, scripts) {
     said('On MAC_VM_E2E but not built through scripts/e2e-build.sh, so off the guest', lane === 'macos' ? inRun(unbuilt.filter((group) => !offMac.has(group))) : []) +
     said('Out/ built on the pool (e2e-build) for the guest-eligible jobs', e2eBuild) +
     hostedNote;
-  let summary = `### Gates\n\n${[...gates].map((gate) => `- \`${gate}\``).join('\n')}\n\nFrom: ${from}. Class 1a: ${class1a}. E2e lane: ${lane}${pooledNote}.${evidence ? ' Evidence: yes.' : ''}${live ? ' Live: yes (MAWS_LIVE, MAWS_LIBRARY_LIVE, MAWS_LIVE_DOCUMENT at 1).' : ''}${beside}${macNote}\n`;
-  let stdout = `${[...gates].join('\n')}\nclass 1a: ${class1a}\nlane: ${lane}${pooledNote}\n${live ? 'live: yes\n' : ''}${defaultBeside.length > 0 ? `default beside: ${defaultBeside.join(' ')}\n` : ''}${macNote ? `${macNote.trim()}\n` : ''}`;
+  // The peer, when a trailer names one, and the groups its minor brought in.
+  const peerLine = peer === '' ? '' : `Peer: ${peer.slice(0, 8)}${peerWire ? `, wire ${peerWire.text}` : ''}${treeWire ? `; this tree's ${treeWire.text}` : ''}${peerJoined.length > 0 ? `, a minor apart, so ${peerJoined.map((group) => `e2e:${group}`).join(', ')} joined` : ''}.`;
+  let summary = `### Gates\n\n${[...gates].map((gate) => `- \`${gate}\``).join('\n')}\n\nFrom: ${from}. Class 1a: ${class1a}. E2e lane: ${lane}${pooledNote}.${evidence ? ' Evidence: yes.' : ''}${live ? ' Live: yes (MAWS_LIVE, MAWS_LIBRARY_LIVE, MAWS_LIVE_DOCUMENT at 1).' : ''}${beside}${macNote}${peerLine && ` ${peerLine}`}\n`;
+  let stdout = `${[...gates].join('\n')}\nclass 1a: ${class1a}\nlane: ${lane}${pooledNote}\n${live ? 'live: yes\n' : ''}${defaultBeside.length > 0 ? `default beside: ${defaultBeside.join(' ')}\n` : ''}${macNote ? `${macNote.trim()}\n` : ''}${peerLine && `${peerLine}\n`}`;
   if (selection) {
     const line = selection.related
       ? `Selection: affected — ${selection.paths} paths, unit runs vitest related`

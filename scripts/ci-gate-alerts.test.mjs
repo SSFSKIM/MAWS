@@ -336,6 +336,17 @@ test("the tested tree's plan names its home Mac jobs, the measured and live ones
   assert.equal(macPlan({ gates: 'e2e:perf', variables: today }), null);
 });
 
+// The peer's trailers (ci-gate-peer.mjs, through ci-gate.sh's --trailers) reach the tested plan, so a run they add a peer
+// group to needs a host free of alerts, though its gates ask for no Mac job and the group is on MAC_VM_E2E.
+test("the peer's trailers reach the tested plan: a tree a minor from its peer puts its peer group on the host", () => {
+  const peered = tree(envOf('  PEER_E2E: side\n  MAC_VM_E2E: side tools\n'));
+  const trailers = (wire) => `Peer: ${'f'.repeat(40)}\nPeer-Wire: 3.0\nWire: ${wire}`;
+  assert.deepEqual(macPlan({ ...peered, gates: 'static,unit,probes', class1a: 'pool', trailers: trailers('3.1'), variables: today }), { jobs: ['e2e:side'], guest: null, home: [] });
+  assert.deepEqual(macPlan({ ...peered, gates: 'e2e:tools', trailers: trailers('3.1'), variables: today }), { jobs: ['e2e:tools', 'e2e:side'], guest: null, home: [] });
+  assert.deepEqual(macPlan({ ...peered, gates: 'static,unit,probes', class1a: 'pool', trailers: trailers('3.0'), variables: today }), { jobs: [], guest: 'none', home: [] });
+  assert.deepEqual(macPlan({ ...peered, gates: 'static,unit,probes', class1a: 'pool', variables: today }), { jobs: [], guest: 'none', home: [] });
+});
+
 test('a folded MAC_SHARED_E2E keeps its groups on the shared instances, off the guest, unless the run has a Lane:', () => {
   const folded = tree(envOf('  CLASS1_E2E: side tools\n  MAC_SHARED_E2E: >-\n    tools\n    side\n  MAC_VM_E2E: >-\n    side\n    tools\n'));
   const ask = (gates, lane) => guestRun({ ...folded, gates, lane, variables: today });
