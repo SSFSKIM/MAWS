@@ -2,9 +2,11 @@
 // the chain after a version it can hand a peer that is behind, and an `advance` that verifies and adopts successors a
 // peer carried. The endpoint's view writes each new head to disk before it adopts it (M2); a device's, and the suites',
 // is `memoryOrgView`. Either way the verification is `advanceHead`, the package's.
+import { keyId, signingInput, verifyInput, type B64 } from './keys.ts';
 import { NO_CERTIFICATES } from './records.ts';
-import { verifySuccessor, verifyTransition } from './org-state.ts';
-import type { Certificates, RootTransition, Signed, SignedOrgState } from './types.ts';
+import { verifyGenesis, verifySuccessor, verifyTransition } from './org-state.ts';
+import { SIGNING_DOMAINS, type Certificates, type RootTransition, type Signed, type SignedOrgState } from './types.ts';
+import type { VerdictCode } from './verdict.ts';
 
 export interface OrgView {
   head(): SignedOrgState;
@@ -52,6 +54,55 @@ export async function advanceHead(
     current = next;
   }
   return { head: current, adopted, transitions: took };
+}
+
+/** What a machine pins at enrollment (RL §5.2), from its code: the root key ids of the head then, and the recovery key. */
+export type OrgPins = { roots: string[]; recoveryPub: B64 };
+
+/**
+ * A machine's first sync (O10 M2): the org's chain from its genesis, as the hub serves it to a machine that holds no
+ * state yet, verified as one run (the genesis, then `advanceHead` over the rest) and anchored to the pins. The genesis
+ * names the pinned recovery key, which no successor may change; and some state of the run carries a valid signature by
+ * a pinned root key, the key's point found among that state's admin devices or its predecessor's (a kid is a hash of
+ * its point). A state a pinned key signed is the org the enrolling member's app named, and its `prev` binds every state
+ * before it, so a hub can't make up an org around the owner's public keys. The run is adopted up to the last state that
+ * verifies, when that prefix is anchored; `transitions` are every one that authorized a state of it, which `verifyRewind`
+ * needs as its `accepted` from the first sync on. `bad-link` for another recovery key, `not-root-signed` for a run no
+ * pinned key signed.
+ */
+export async function verifyPinnedChain(
+  chain: unknown,
+  transitions: unknown,
+  pins: OrgPins,
+): Promise<{ ok: true; head: SignedOrgState; adopted: SignedOrgState[]; transitions: Signed<RootTransition>[] } | { ok: false; code: VerdictCode }> {
+  if (!Array.isArray(chain) || chain.length === 0) return { ok: false, code: 'malformed' };
+  const genesis = chain[0] as SignedOrgState;
+  const first = await verifyGenesis(genesis);
+  if (!first.ok) return first;
+  if (genesis.state.root.recoveryPub !== pins.recoveryPub) return { ok: false, code: 'bad-link' };
+  const run = await advanceHead(genesis, chain.slice(1), transitions);
+  const adopted = [genesis, ...run.adopted];
+  const roots = new Set(pins.roots);
+  for (let i = 0; i < adopted.length; i++) {
+    if (await signedByPinned(adopted[i], adopted[i - 1], roots)) return { ok: true, head: run.head, adopted, transitions: run.transitions };
+  }
+  return { ok: false, code: 'not-root-signed' };
+}
+
+async function signedByPinned(s: SignedOrgState, before: SignedOrgState | undefined, roots: Set<string>): Promise<boolean> {
+  const points = new Map<string, B64>();
+  for (const holder of [s, before]) {
+    for (const member of holder?.state.members ?? []) {
+      if (member.role !== 'admin') continue;
+      for (const d of member.devices) if (d.stepUpPub !== undefined) points.set(await keyId(d.stepUpPub), d.stepUpPub);
+    }
+  }
+  const input = signingInput(SIGNING_DOMAINS.orgState, s.state);
+  for (const sig of s.sigs) {
+    const pub = points.get(sig.kid);
+    if (roots.has(sig.kid) && pub !== undefined && (await verifyInput(input, sig, pub))) return true;
+  }
+  return false;
 }
 
 /** The transition among `held` that authorized `next` on `current`, or null when the old root set signed it. */
