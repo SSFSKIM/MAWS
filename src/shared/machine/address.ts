@@ -14,9 +14,9 @@
 // `lazy` (a recursive schema compiles to a cyclic plan), discriminated unions (dispatched by the discriminator) and plain
 // unions. A plain union's options are merged: a key is rewritten at a path when every option that applies there (an
 // object's property or else its catchall, a record's value, a tuple's item or else its rest, an array's element) says it
-// is one of the four kinds, and options that disagree (an id in one, a plain string or an opaque unknown in another) throw
-// at compile, naming the path. Any other construct that would hide an id (an intersection, a map, a set, a promise, a transform the walk cannot
-// see through) throws at compile too, so nothing is skipped quietly.
+// is one of the four kinds, and options that disagree (an id in one; a plain string, or any value the walk cannot classify,
+// in another) throw at compile, naming the path. Any other construct that would hide an id (an intersection, a map, a set,
+// a promise, a transform the walk cannot see through) throws at compile too, so nothing is skipped quietly.
 import type * as z from 'zod';
 import { AppSessionIdSchema, AttentionIdSchema, LooseAppSessionIdSchema, ProjectIdSchema } from '../graph/ids';
 import type { WireRegistry } from '../ipc/registry';
@@ -95,8 +95,12 @@ const WRAPPERS = new Set(['optional', 'nullable', 'default', 'prefault', 'nonopt
 const STRINGISH = new Set(['string', 'enum', 'literal', 'template_literal']);
 const UNWALKED = new Set(['intersection', 'map', 'set', 'promise']);
 const STRUCTURAL = new Set([...STRINGISH, 'object', 'record', 'array', 'tuple', 'union']);
-const OPAQUE = new Set(['unknown', 'any', 'custom']);
-const isOpaque = (schema: z.ZodType): boolean => OPAQUE.has(defOf(schema).type);
+// Values that are never a string, an object or an array at run time: beside an id they can be told apart by type.
+const PRIMITIVE = new Set(['null', 'undefined', 'void', 'never', 'number', 'int', 'boolean', 'bigint', 'symbol', 'nan']);
+// Opaque: every member the walk does not classify (unknown, any, custom, a transform, an id-free intersection, map, set,
+// promise, date, file...). Inside a plain union that carries an id, it may accept what another option says is an id, and
+// says nothing itself, so agreement cannot be established.
+const isOpaque = (schema: z.ZodType): boolean => !KIND_OF.has(schema) && !STRUCTURAL.has(defOf(schema).type) && !PRIMITIVE.has(defOf(schema).type);
 
 // The schemas directly under `schema`, for the reachability pass (a pipe's both sides: an id behind an opaque side must
 // still be seen, to be refused).
@@ -237,7 +241,7 @@ class Compiler {
     };
     structural.forEach(flatten);
     // An unknown, any or custom member accepts what another says is an id, and says nothing itself: no agreement.
-    if (opaque && members.some(carriesId)) throw new Error(`${shown(path)}: a union's options disagree, an id in one and an opaque value (unknown, any or custom) in another`);
+    if (opaque && members.some(carriesId)) throw new Error(`${shown(path)}: a union's options disagree, an id in one and an opaque value, which the walk cannot see into, in another`);
 
     const kinds = new Set<AddressedKind>();
     let plainString = false;

@@ -217,8 +217,8 @@ describe('each construct the compile step walks', () => {
   });
 
   it("compares a tuple's item with another tuple's rest, and with an array's element", () => {
-    const withRest = z.union([z.tuple([AppSessionIdSchema]), z.tuple([], z.string())]);
-    expect(() => compileAddressing(withRest)).toThrow("[0]: a union's options disagree, an id in one and a plain string in another");
+    const withRest = z.union([z.tuple([z.number(), AppSessionIdSchema]), z.tuple([z.number()], z.string())]); // index 1: an id, or the rest's plain string
+    expect(() => compileAddressing(withRest)).toThrow("[1]: a union's options disagree, an id in one and a plain string in another");
     const withArray = z.union([z.tuple([AppSessionIdSchema, z.number()]), z.array(z.string())]);
     expect(() => compileAddressing(withArray)).toThrow("[0]: a union's options disagree");
     const agreeing = z.union([z.tuple([AppSessionIdSchema]), z.array(AppSessionIdSchema)]);
@@ -237,6 +237,23 @@ describe('each construct the compile step walks', () => {
     expect(() => compileAddressing(z.strictObject({ x: z.union([z.strictObject({ a: PtyIdSchema }), z.any()]) }))).toThrow(".x: a union's options disagree");
     expect(() => compileAddressing(z.union([z.strictObject({ a: AppSessionIdSchema }), z.looseObject({})]))).toThrow(".a: a union's options disagree, an id in one and an opaque value");
     expect(() => compileAddressing(z.union([z.string(), z.unknown()]))).not.toThrow(); // no id: nothing to agree on
+  });
+
+  it('refuses an id beside any member the walk cannot classify, an id-free intersection among them', () => {
+    const opaque: [string, z.ZodType][] = [
+      ['intersection', z.intersection(z.string(), z.string())],
+      ['map', z.map(z.string(), z.string())],
+      ['set', z.set(z.string())],
+      ['transform', z.string().transform((value) => value)],
+      ['lazy intersection', z.lazy(() => z.intersection(z.string(), z.string()))],
+      ['date', z.date()],
+    ];
+    for (const [name, member] of opaque) {
+      expect(() => compileAddressing(z.union([AppSessionIdSchema, member])), name).toThrow("the value itself: a union's options disagree, an id in one and an opaque value, which the walk cannot see into");
+      expect(() => compileAddressing(z.union([z.string(), member])), name).not.toThrow(); // no id: nothing to agree on
+    }
+    // primitives that are never strings, objects or arrays stay beside an id
+    roundTrip(z.union([AppSessionIdSchema, z.null(), z.number(), z.boolean(), z.undefined()]), 'a1', at(A, 'a1'));
   });
 
   it('refuses a record keyed by ids beside an object, whose property names are no ids', () => {
