@@ -48,7 +48,7 @@ Each item is checked by the command Concrete Steps names. Paths are repository-r
    - The first launch of a profile writes `<userData>/machine.json` holding one `MachineRef`. A relaunch reads the same ref, and a second profile gets a different one.
    - `machine.identity` answers `{ ref, name, project }`.
    - `src/main/machine/identity.test.ts` pins:
-     - exclusive creation: two racing first runs read one ref;
+     - atomic publication. A first run paused after writing its temporary file and before linking it, with a second run starting meanwhile, leaves both reading one complete ref. A stray temporary file is removed at the next start;
      - a malformed file is refused loudly, never re-minted;
      - the format is RL5's: `[A-Za-z0-9_-]{16,64}`, from at least 128 random bits.
 3. **Addresses.**
@@ -104,13 +104,14 @@ Each item is checked by the command Concrete Steps names. Paths are repository-r
     - every contract field named `machine` carries the ref, never the name.
   - **OX3** binds as Decision Log 21 states it:
     - every checkout yields a project;
-    - only sessions with no checkout go to their machine's project;
+    - only sessions with no checkout go to their machine's project, where a checkout is a project someone opened (M5);
     - persisted keys survive enrollment.
   - **OX7** binds at M2 and at the head.
   - Where this document narrows or extends a contract, the Decision Log says so.
 - **The wire.**
   - O6 adds one `machine`-owned command, `machine.identity`, and so bumps `WIRE_MINOR` once and rewrites the manifest with `pnpm wire:manifest` (O1 M6; **needs O1**).
   - It changes no engine-host schema: `wireFingerprint()` must not move.
+  - If O6's bump is the first on master (`git log -S WIRE_MINOR origin/master -- src/shared/ipc/wire.ts`), message the architect when M1 lands. O1's real two-build cross-minor check, which waits for the first bump (O1 Decision Log; P5 Decision Log 20), is then due, and its mechanism is not O6's (Decision Log, residue 38).
   - It adds no `IpcError` code. `IPC_ERROR_CODES` is an enum inside the envelope's `res`, and under O1's rule an added enum member is breaking (O1 M6).
   - Main-owned schemas cross the stand-in link without the minor discipline. So the stand-in is a link between two profiles of one build, and the link says so in its log at connect. Cross-build machine links come when O3 brings the moved namespaces into the manifest.
 - **Out of scope, each with its owner.** Name the owner in a comment where code stops at the edge.
@@ -193,7 +194,7 @@ The order is M1, M2, M3, M4, M5, M6.
 
 **Touches.**
 - `src/shared/machine/ref.ts` (new: `MachineRefSchema`, `MachineRef`);
-- `src/shared/machine/address.ts`, `address.test.ts`, `coverage.test.ts` (new);
+- `src/shared/machine/address.ts`, `address.test.ts`, `coverage.test.ts`, `address-paths.json` (new);
 - `src/main/machine/identity.ts`, `identity.test.ts` (new);
 - `src/shared/ipc/schema/machine.ts`, `src/shared/ipc/names/machine.ts`, `src/shared/ipc/grades/machine.ts` (new), and their composition into `src/shared/ipc/schema.ts`, `names.ts` and `grades.ts`;
 - `src/shared/ipc/wire.ts` (`WIRE_MINOR` + 1) and `src/shared/ipc/wire-manifest.json` (rewritten);
@@ -207,8 +208,13 @@ The order is M1, M2, M3, M4, M5, M6.
     - That is 128 bits, inside RL5's `[A-Za-z0-9_-]{16,64}`.
     - `MachineRefSchema` accepts the whole RL5 range, so a ref another daemon minted reads here.
   - The file is `<userData>/machine.json`, holding `{ "version": 1, "ref": "<ref>", "mintedAt": "<ISO time>" }`.
-    - It is created with an exclusive create (`wx`, mode 0600). A process that loses the race reads the winner's file.
-    - A file that exists but does not parse, or whose ref breaks the format, stops startup with an error naming the path. Re-minting would silently re-address everything persisted under the old ref.
+    - It is published atomically and never replaced:
+      1. The minter writes the complete JSON to a same-directory temporary file (`machine.json.<pid>.<random>`, mode 0600) and `fsync`s it.
+      2. It publishes the file with `link(temp, machine.json)`, which fails with `EEXIST` when an identity already exists.
+      3. It unlinks the temporary file either way.
+    - So a reader never sees a partial file. A process that loses the race reads the winner's complete file. A crash before the link leaves only a stray temporary file, which the next start deletes (any `machine.json.*` older than a minute).
+    - Rejected: `open(…, 'wx')` then write. That exposes an empty or partial file to a racing reader, and leaves a profile unable to start after a crash mid-write.
+    - A `machine.json` that exists but does not parse, or whose ref breaks the format, stops startup with an error naming the path. Re-minting would silently re-address everything persisted under the old ref.
     - Nothing ever rewrites the file.
   - The interface O2 honours. This file, its shape and these rules are how a profile's identity survives O2 and O3:
     - O2's `mawsd`, minting for a profile at its first run, reads this file when it exists and creates it under these rules when it does not;
@@ -256,8 +262,12 @@ The order is M1, M2, M3, M4, M5, M6.
 - **Coverage** (P5 Decision Log 21's condition). `coverage.test.ts` walks every command's input and output and every event payload in `REGISTRY` (**needs O1**). It fails on:
   - an object key named like a machine-bound id whose schema is not one of the four. The key names are `appSessionId(s)`, `appId`, `parentAppSessionId`, `projectId(s)`, `ptyId(s)`, `attentionId(s)`, and any key ending in `AppSessionId`, `ProjectId`, `PtyId` or `AttentionId`;
   - a `z.record` whose key schema is a plain string, unless `REVIEWED_STRING_RECORDS` lists its path with what its keys are. A record keyed by session ids, such as `browser.tabs.list`'s `selected`, gets a branded key schema instead;
-  - a plain union whose options disagree.
-  - A test against a fixture schema shows that an unbranded `appSessionId` field fails it.
+  - a plain union whose options disagree;
+  - any difference from the committed snapshot of addressed paths, `src/shared/machine/address-paths.json`. It lists, per command input, command output and event, every path at which one of the four kinds is lifted, as the compile step found them.
+    - The name rule cannot see a machine id held in a field named `id` or by its role. Examples are `ProjectRecord.id`, `AttentionItem.id` and `LaunchSpec.inheritGrantsFrom`. If such a field were re-typed as a plain string, its path would vanish from the snapshot, and the test would fail.
+    - A change that adds an addressed path shows it in the snapshot's diff for review. The snapshot is rewritten only with `MAWS_ADDRESS_PATHS_WRITE=1`.
+  - Tests against fixture schemas show that an unbranded `appSessionId` field fails the name rule.
+  - Three mutations show that the snapshot catches the role-named and `id` escapes (Concrete Steps 9). Each re-types one field as a plain `z.string()`: `ProjectRecordSchema.id`, `AttentionItemSchema.id` or `inheritGrantsFrom`.
 - **Fixing what coverage finds, with no wire change.** Every field and record key the test names is re-typed in M1, so the test is green at M1's end.
   - The canonical schemas check `min(1)` (`AppSessionIdSchema` and the other two from `brandedId`). A field that is a plain `z.string()` today is re-typed with a loose alias instead: `LooseAppSessionIdSchema = z.string().brand<'AppSessionId'>()` beside the canonical one in `src/shared/graph/ids.ts`, and likewise for the others it needs. `PtyIdSchema` is already loose.
   - A brand is type-only, so the alias renders the same JSON Schema as the plain string. `wireFingerprint()` and the manifest do not move (Concrete Steps 8).
@@ -363,7 +373,15 @@ The order is M1, M2, M3, M4, M5, M6.
   - `session.drafts.get` and `session.drafts.set` are `addressed`, so a draft is read and written in its session's machine's index, keyed there by the bare id. Nothing migrates on disk.
   - This is OX2's "drafts key by it": the draft is addressed by `{machine, id}`, and the machine keeps it under its own id.
   - Rejected: moving drafts into the client keyed by address. It would split a draft from the record its store checks (`DraftStore.requireSession`), migrate rows out of `index.sqlite`, and lose a draft typed on one device and continued on another.
-- **Ids the renderer mints.** It mints none, but for the scenario creator's `app-new-<uuid>`, which becomes `<localRef>/app-new-<uuid>`, and the harness pages' fixtures, which mint addresses through `addressOf`.
+- **Ids the renderer mints.** Every id the renderer mints for itself is an address of the local machine, built with `addressOf(window.maws.localMachine, …)` once at module initialisation. The lowerer throws on a bare id, so a missed one breaks its feature even with one machine. At the base these are:
+  - the scenario creator's `app-new-<uuid>`;
+  - the synthetic pty owners, which reach `pty.spawn.appSessionId` through the terminal registry or directly:
+    - `ENGINE_UPDATE_OWNER` (`src/renderer/src/settings-tab/engine-update.ts`);
+    - `GWS_OWNER` (`src/renderer/src/delivery/SendToSheet.tsx`);
+    - `DIAGNOSTICS_SESSION` (`src/renderer/src/stores/echo.ts`);
+  - the harness pages' fixtures (`PROBE_SESSION`, `REGISTRY_SESSION`, the document harness's two).
+  - Find the full set with `rg "'[^']+' as (AppSessionId|ProjectId|PtyId|AttentionId)" src/renderer/src`, excluding tests. A literal that never crosses IPC, such as `transcript/dev/journal.ts`'s local normaliser, stays as it is, with a comment saying so.
+  - The engine update terminal, the Drive setup terminal and the pty echo diagnostics each keep their spawn path working: a unit test per owner through the terminal registry, and `e2e:settings` for the engine update.
 - **The e2e adaptation.**
   - `e2e/support/address.ts` exports two helpers:
     - `localRef(page)`, read once per launch through `window.maws.invoke('machine.identity')`;
@@ -453,9 +471,14 @@ The order is M1, M2, M3, M4, M5, M6.
     - A uid other than `process.getuid()` is destroyed.
     - No addon means every peer is refused. It fails closed, and logs once.
     - The check enters O1's socket server as an `admit(socket): boolean` option, consulted on `connection` before the hello timer starts. The supervisor passes none.
-  - **What it serves.** It runs `createHostRuntime` over the link surface's registry (**needs O1**).
-    - Each command's handler calls `router.dispatchLocal(name, input, { client, target: localRef })`. This is the router's route minus the sender check, with the runtime's remote `ClientRef`. Add `dispatchLocal` to `Router` for this.
-    - Each link event is tapped with `onEmitted` and sent with `runtime.emit`.
+  - **What it serves.** It runs `createHostRuntime` over the link surface's registry (**needs O1**). Its register callback receives `on` and `emit`, as `HostRegister` does at the base (`src/shared/host/runtime.ts`), and the adapter keeps both.
+    - Each command is registered with `on(name, handler)`. The handler awaits `router.dispatchLocal(name, input, { client: ctx.client, target: localRef })`, which is the router's route minus the sender check, with the runtime's remote `ClientRef`. Add `dispatchLocal` to `Router` for this.
+    - `dispatchLocal` answers a `CommandResult` envelope, but a host handler must answer the bare output and fail by throwing (O1 M5's `HostOn<R>`). So the handler returns `result.value` on success, and on failure throws `new HostCommandError(result.error)`, keeping the `IpcError` whole (O1 M5: one typed failure for both roots).
+    - Each link event is tapped with `onEmitted` and sent with the kept `emit`. The runtime object itself exposes no `emit`.
+    - `serve-standin.test.ts` drives the real adapter, over a real socket, against a router that has a main handler registered. It checks:
+      - a success's output;
+      - a typed failure (`CommandFailure` with `timeout`) arriving at A's link with the same `IpcError`;
+      - an emitted event reaching the link.
     - The server's `onExit` ignores `exit`: a client never stops this machine.
     - One client at a time, as O1's server does. Two clients are O3's RL3.
     - The welcome's `liveSessions` and `rows` are B's supervisor's counts, or 0 when its host is utility.
@@ -510,24 +533,37 @@ The order is M1, M2, M3, M4, M5, M6.
   - the attention store's `beginSnapshot(machine)` and `applySnapshot(items, machine)` buffer and replace per machine;
   - `useHosts` keeps one `{ engine, pty }` per machine. `supervisor` (`host.status`) stays the local machine's.
 - **Membership is never parsed from id strings.** The store records the machine each id was written for, from the call that wrote it.
+- **Each link generation starts its counters afresh.** A machine's counters belong to its process: the index counter starts at 0 in every main (`src/main/index/index.ts`, `stamped = 0`), and so do the read model's digest revisions. So B restarted answers revision 5 where A's partition remembers 900, and would be refused for good.
+  - Every `up` of a non-local machine opens a new **generation**. `MachineState.generation` is incremented by main's connection manager on each welcome, and is sent in `machines.changed` before any event of the new connection is relayed. Electron delivers one window's IPC messages in order.
+  - On a new generation, the partition resets everything it reconciles by:
+    - `recordRevs` and the tombstones;
+    - `listRevision` and `projectsRevision`;
+    - the digest revisions and `forgottenDigestRevs`;
+    - the attention snapshot's buffer;
+    - `connectShell`'s queued events for that machine, which are dropped.
+  - It keeps its records, digests and attention for display, and the generation's first snapshot then replaces them authoritatively: what the snapshot does not list goes. Events of the new generation that race that snapshot are reconciled against the fresh counters, as today.
+  - The local machine's generation never changes: its services share the app's process.
+  - Rejected: keeping counters across reconnects. A restarted machine's lower counters would freeze its rows.
 - **The API change.** Every apply method that needs a machine takes it explicitly, and the tests name one.
 - **Rejected for the partitioning:** a store instance per machine with a merged view, which would make each of about 145 consumer files choose a partition.
-- **`useMachines`** holds `{ ref, name, local, state: 'connecting' | 'up' | 'down', loaded }` per machine. It is fed by `machines.list` and `machines.changed`.
+- **`useMachines`** holds `{ ref, name, local, state: 'connecting' | 'up' | 'down', generation, loaded }` per machine. It is fed by `machines.list` and `machines.changed`.
   - A machine whose state is not `up` is offline.
   - Its records, digests and attention stay as last known.
   - Its statuses are forgotten as on a host departure: a down link took its host along (E10's rule).
-  - Its `loaded` is false until its first snapshot of this run.
+  - Its `loaded` is false until its first snapshot of this run. A new generation keeps `loaded` true, since its records are still displayed.
 - **`connectShell` per machine.**
   - The event subscriptions are made once and route each event to its machine's partition through the listener's `from.machine`.
   - For each machine, on `up`, it runs the snapshot reads, `ipc.invoke(name, input, { machine })` for `session.list`, `session.projects.list`, `session.digests`, `attention.list` and `engine.sessions`, under today's ordering rule (subscribed first, then the snapshot reconciled with the events that raced it).
   - Each machine's reads have their own freshness stamp, so a reply from a link that has since gone down applies nothing.
   - `engine.hostState` from machine *m* forgets *m*'s statuses only, and re-reads *m*'s `engine.sessions` on regaining ready. That ends survey §7.11's blanking.
   - A non-local machine's `engine.hostState` is unknown until its first event, and counts as ready while its link is `up`.
-- **The layout across machines.** Hydration still waits for the local machine's snapshot. `known(address)` decides each tab:
+- **The layout across machines.** Hydration waits for two things: the local machine's snapshot, and the first answer to `machines.list` (the roster). `known(address)` then decides each tab:
   - the local machine's: as today;
-  - a known machine that has not loaded this run: kept;
-  - a machine not in `machines.list`: dropped, because it is no longer configured.
-  - `settleMachine(machine)` (new) runs after a machine's first snapshot of the run. It drops that machine's tabs and `panel.<address>` keys whose session it does not list, unless the registered tab retention keeps them.
+  - a machine in the roster that has not loaded this run: kept;
+  - a machine absent from an answered roster: dropped, because it is no longer configured.
+  - **The roster has three states:** not yet read, answered, or failed. A failed or missing roster is never an absence: every non-local tab is kept until a roster answers.
+  - Rejected: reading the roster independently of hydration. The local reads can finish first, and a persisted machine that is down would then look unconfigured and lose its tabs.
+  - `settleMachine(machine)` (new) runs after the first snapshot of each of a machine's generations. It drops that machine's tabs and `panel.<address>` keys whose session it does not list, unless the registered tab retention keeps them.
   - Removals during the run arrive as events and drop tabs as today, and the renderer deletes a non-local `panel.<address>` key on its removal.
 - **Path-keyed stores.**
   - `useGit`, `useFiles`, `useViewer` and `useGitDiagnostics` key by `checkoutKey(machine, path)`, which is the codec's `addressOf(machine, path)`: the codec owns this join too. Their watch, unwatch and diff calls pass the machine.
@@ -555,7 +591,8 @@ The order is M1, M2, M3, M4, M5, M6.
   - an event routed by `from.machine`;
   - a down link leaving the records and dropping the statuses;
   - an up link re-snapshotting with no duplicate.
-- `layout.test.ts` pins the three `known` cases and `settleMachine`.
+- `sessions.test.ts`, `attention.test.ts` and `events.test.ts` also pin B restarting. B comes back as a new generation with lower counters, one record changed and one deleted. The new snapshot replaces B's partition: the changed record is shown, the deleted one is gone, and a queued event of the old generation is dropped.
+- `layout.test.ts` pins the three `known` cases, `settleMachine`, and the roster barrier. In that case the roster answers after the local snapshot and the layout reads, B is down, and its persisted tab survives. A failed roster keeps it too.
 - `git.test.ts` keeps two machines' identical paths apart.
 - `e2e/machines.spec.ts` gains a scene: B's seeded session in A's sidebar, and opening it in A showing B's transcript and B's panel branch.
 
@@ -580,7 +617,7 @@ The order is M1, M2, M3, M4, M5, M6.
 - `src/renderer/src/sidebar/derive.ts`, `Sidebar.tsx`, `SessionRow.tsx`, `ProjectRow.tsx`, `HoverCard.tsx`, `ProjectHoverCard.tsx`, `menus.tsx`, `tree.ts`, `project-actions.ts`;
 - `src/renderer/src/projects/ProjectsView.tsx`, `src/renderer/src/sidebar/project-groups.ts`;
 - `src/renderer/src/keymap/actions-runtime.ts` (`focusedProject`, `unstartedProjectOf`);
-- `src/renderer/src/stores/layout.ts` (`setOfTab` by org key);
+- `src/renderer/src/stores/layout.ts` (`setOfTab` by org key; running `rekeySets`), `src/renderer/src/stores/layout-model.ts` (`rekeySets`);
 - their tests.
 
 **Decisions.**
@@ -614,24 +651,42 @@ The order is M1, M2, M3, M4, M5, M6.
     - A change emits `session.projects.changed`.
     - A `.smns` added or a remote changed mid-run shows at the next launch. Rejected: watching `.smns` and git config for a rare event.
   - **`ProjectRecord.org`** is optional (`ProjectOrg`, Interfaces). A row not yet derived is drawn as its own folder-like project until its derivation arrives.
-- **Which sessions sit under their machine's project** (P5 Decision Log 21's condition). A session sits under the org project of its checkout's key when that org project is **listed**, else under its machine's project. An org project is listed when at least one of its checkouts, on any machine, is a sidebar project: `origin: 'user'` and not hidden. So the machine row holds:
-  - sessions started in the home directory, in `/tmp`, or in any folder nobody added. Discovery made a project for each of these, but it is not listed and its key has no listed checkout elsewhere;
-  - sessions whose directory no longer exists (no project);
-  - sessions whose checkout is discovered while the same repository is added on another machine, which join that repository's row instead, since it is listed.
-
-  This is today's "Other sessions", per machine, and it picks out real rows: a folder the owner added is listed, so it is never in the machine row.
+- **What a checkout is.** OX3 says that only sessions with no checkout go to their machine's project. The architect's condition for Decision Log 21 names the cases: "a session started in the home directory, in /tmp, or in a folder nobody opened". So **a checkout is a project someone opened on that machine**: a `ProjectRecord` with `origin: 'user'`.
+  - A directory the index only discovered is not a checkout, even though it has a `ProjectRecord` and a key.
+  - `OrgProject.checkouts` lists checkouts only.
+  - This is the reading O6 builds. P5's OX3 text says "checkout" without defining it, so the architect records the definition in P5.
+- **Which sessions sit under their machine's project.** A session sits under the org project of its directory's key when that org project is **listed**, else under its machine's project.
+  - An org project is listed when at least one of its checkouts, on any machine, is not hidden.
+  - A discovered directory's sessions join the row of the org project their key names, when that project is listed. That is one repository, opened on another machine.
+  - Otherwise they have no checkout, and sit under the machine. So the machine row holds:
+    - sessions started in the home directory, in `/tmp`, or in any folder nobody opened. Discovery made a `ProjectRecord` for each of these, but no machine has a checkout under its key;
+    - sessions whose directory no longer exists, which have no `ProjectRecord`.
+  - It never holds a session in a discovered clone of a repository opened on another machine, which joins that repository's row.
+  - This is today's "Other sessions", per machine, and it picks out real rows: a folder the owner opened is a checkout, so its sessions are never in the machine row.
 - **Hiding.** It stays per checkout.
   - A hidden checkout's sessions show nowhere, as today.
   - An org project's row shows while one of its checkouts is listed.
   - "Remove from sidebar" on an org row sends `session.projects.update { hidden: true }` for every checkout of it on every machine that is `up`. A checkout on an offline machine stays listed, and re-shows the row when that machine returns. "Hidden projects…" lists hidden checkouts with their machine.
-- **The tree's keys.**
-  - `ProjectKey` becomes the org project key. The machine rows' keys are `machine:<ref>`, which replace `'other'`.
-  - `regions.sidebar.expandedProjects` entries and `main.tabs.sets` keys are refiled at hydrate:
-    - a project address migrated in M2 maps to its project's org key, found from that machine's `ProjectRecord.org`;
-    - `'other'` maps to `machine:<localRef>`;
-    - an entry whose project is unknown now is kept until its machine has loaded, then dropped.
-  - The `'none'` set stays for tabs of no session and for an unfiled New chat. A session of a machine project files into its machine row's set through `setOfTab`, which is W12's `refileTabs` rule.
-  - No version bump: `TabSetKeySchema` and `ProjectKeySchema` already accept these strings. A test pins the refile from an M2 version-3 layout.
+- **The tree's keys.** `ProjectKey` becomes the org project key. The machine rows' keys are `machine:<ref>`, which replace `'other'`. An org key is never an address: its prefix holds a `:`, which a `MachineRef` cannot. So **any persisted project key that is an address is a pre-M5 key, still to migrate.** That makes the migration resumable, without a version, across machines that load late.
+- **Migrating project-keyed state: `layout-model.ts`'s `rekeySets` (new), run at hydrate and again after each machine's projects arrive.** It is a whole-set migration, not W12's per-tab refile. `refileTabs` moves only session tabs, so it would strand a set's file and artifact tabs under an obsolete key.
+  - **`main.tabs.sets`.** Each address key `<m>/<projectId>` whose machine's projects are known maps to that project's `org.key`.
+    - Sets that map to one key merge into a single set. Its panes are pane 0 and pane 1 of the set that was `current`, else of the first set in key order. The other sets' tabs are appended to its focused pane, in their order, with no duplicate tab id. Focus and split ratio come from that base set.
+    - `current` follows its set's new key.
+    - An address key whose machine has loaded but no longer has that project is re-homed. Its session tabs go where `setOfTab` files them, and its sessionless tabs (file, artifact, diff) go to the `'none'` set. Nothing is dropped.
+    - An address key whose machine has not loaded is left as it is until it loads.
+  - **`regions.sidebar.expandedProjects`.**
+    - An address entry maps to its org key and is deduplicated.
+    - An entry whose project is gone on a loaded machine is dropped: losing an expanded state costs nothing.
+    - `'other'` maps to `machine:<localRef>`.
+  - **`panelTools.surfaces.contexts`**, keyed by project and read through `main.current`, is rekeyed by the same map. On a merge it keeps the entry of the set that was `current`, else the first.
+  - **The `'none'` set** stays for tabs of no session and for an unfiled New chat. A session of a machine project files into its machine row's set through `setOfTab`, and W12's `refileTabs` keeps moving session tabs as before.
+  - **No version bump.** `TabSetKeySchema` and `ProjectKeySchema` already accept these strings.
+  - **Fixtures in `layout-model.test.ts`**, each starting from an M2 version-3 layout:
+    - two checkout sets mapping to one key (a merge, `current` among them);
+    - a set holding only file tabs;
+    - a set whose project is gone;
+    - a set of a machine that loads later, migrated on its arrival;
+    - `contexts` across a merge.
   - Rejected: a tab set per (machine, local project). The strip would not follow the sidebar's row.
 - **Assembly** (`stores/org-projects.ts`). `selectOrgProjects` groups every machine's `ProjectRecord`s by `org.key` into `OrgProject`s.
   - The name is the local machine's checkout's derived name when it has one, else that of the first machine in ref order.
@@ -664,7 +719,7 @@ The order is M1, M2, M3, M4, M5, M6.
   - a folder project's row;
   - greying;
   - hiding across checkouts.
-- `layout.test.ts` pins the refile.
+- `layout-model.test.ts` pins `rekeySets` on the fixtures above, and `layout.test.ts` pins its runs at hydrate and on a machine's arrival.
 
 ### M6 — Acceptance
 
@@ -686,7 +741,10 @@ The order is M1, M2, M3, M4, M5, M6.
    - A's folder has its own row.
    - A `standin-b` row holds B's unadded-folder session.
 3. **The draft.** Open B's `shared` session in A, check its transcript (acceptance 8), and type a draft.
-4. **The departure.** Close B. Within 2 s B's rows and the tab grey, and A's rows and statuses are as they were. Relaunch B over its profile, and within 5 s the rows are live with no duplicate.
+4. **The departure.** Close B. Within 2 s B's rows and the tab grey, and A's rows and statuses are as they were.
+   - While B is down, seed one more session into B's config.
+   - Relaunch B over its profile. Within 5 s the rows are live with no duplicate, and the new session is listed.
+   - The new session proves the generation reset: B's restarted index numbers it from a counter that starts again at zero.
 5. **The relaunches.** Quit A and relaunch it over its profile with B up: the tab and the draft are back. Quit and relaunch A again with B closed: the tab is kept, greyed.
 
 The migration of acceptance 4 is the shell spec's, from M2. The stand-in's boundaries (acceptance 9) are unit tests. If the bench misses OX7's budget at the head, run it twice more. A miss in two of three runs is a finding: record the numbers, suspect the codec's lifters on `session.eventBatch` and `pty.data` first, and message the architect.
@@ -741,7 +799,8 @@ Run from the worktree root unless a line starts with `cd /tmp &&`. `W` is the wo
 9. **The mutations.** Make each change, see it fail as stated, then revert. Commit none of them.
    - Change `browser.tabs.list`'s `selected` key back to `z.string()`. `pnpm vitest run src/shared/machine/coverage.test.ts` fails, naming the record's path.
    - Add a field `parentAppSessionId: z.string().optional()` to `SessionRecordSchema` (`src/shared/graph/session.ts`). The same test fails, naming the key.
-   - Call `git.watch` without `{ machine }` in `src/renderer/src/stores/git.ts`. `pnpm typecheck` fails at that call.
+   - Re-type `ProjectRecordSchema.id`, then `AttentionItemSchema.id`, then `LaunchSpec`'s `inheritGrantsFrom` as a plain `z.string()`, one at a time. The same test fails each time on the snapshot of addressed paths, naming the vanished path.
+   - Call `git.watch` without `{ machine }` in `src/renderer/src/stores/git.ts` (from M4). `pnpm typecheck` fails at that call, and only there.
 
 ### Interfaces and Dependencies
 
@@ -771,8 +830,10 @@ No new dependency. zod 4, Node's `crypto`, the peer-auth addon already in the tr
 
     export type RouteClass = 'client' | 'addressed' | 'path' | 'machine-wide';
     export function routeOf(name: CommandName): RouteClass;
-    export const PATH_COMMANDS: readonly CommandName[];                             // zod-free const, pinned equal to the computed class
+    export const PATH_COMMANDS = ['git.watch', /* …every `path` command, pinned equal to the computed class */] as const satisfies readonly CommandName[]; // a literal tuple, so its element union is the subset
     export type PathCommandName = (typeof PATH_COMMANDS)[number];
+
+`src/shared/ipc/routes.test-d.ts` asserts three things: a `path` command invoked without `{ machine }` is a type error; an `addressed` command without options compiles; and a `machine-wide` command without options compiles. A `readonly CommandName[]` annotation would widen `PathCommandName` to every command.
 
 **The bridge types** (`src/shared/ipc/schema.ts`, M2):
 
@@ -797,7 +858,7 @@ No new dependency. zod 4, Node's `crypto`, the peer-auth addon already in the tr
     export const MachineProjectSchema = z.strictObject({ key: z.string().min(1), name: z.string(), smnsId: z.string().nullable() });
     export const MachineIdentitySchema = z.strictObject({ ref: MachineRefSchema, name: z.string(), project: MachineProjectSchema });
     'machine.identity': { input: z.void(), output: MachineIdentitySchema, owner: 'machine' }
-    export const MachineStateSchema = z.strictObject({ ref: MachineRefSchema, name: z.string(), local: z.boolean(), state: z.enum(['connecting', 'up', 'down']), since: z.string() });
+    export const MachineStateSchema = z.strictObject({ ref: MachineRefSchema, name: z.string(), local: z.boolean(), state: z.enum(['connecting', 'up', 'down']), since: z.string(), generation: z.number().int().nonnegative() }); // generation: +1 per welcome (M4)
     'machines.list': { input: z.void(), output: z.strictObject({ machines: z.array(MachineStateSchema) }), owner: 'main' }
     'machines.changed': z.strictObject({ machines: z.array(MachineStateSchema) })   // event; the whole list
 
@@ -818,7 +879,7 @@ No new dependency. zod 4, Node's `crypto`, the peer-auth addon already in the tr
       name: string;
       kind: 'project' | 'machine';
       smnsId: string | null;
-      checkouts: { machine: MachineRef; path: string; projectId: ProjectId }[];      // projectId is an address; none for a machine project
+      checkouts: { machine: MachineRef; path: string; projectId: ProjectId }[];      // opened projects only (origin 'user'); projectId is an address; none for a machine project
     }
 
 **The connection manager** (`src/main/machines/manager.ts`, M3):
@@ -842,7 +903,7 @@ No new dependency. zod 4, Node's `crypto`, the peer-auth addon already in the tr
 
     export type MainContext = HandlerContext & { readonly target: MachineRef };
     // Router<R> gains:
-    dispatchLocal(name: NameOf<R>, input: unknown, ctx: MainContext): Promise<CommandResult<CommandName>>; // the route minus the sender check; the stand-in's entry
+    dispatchLocal(name: NameOf<R>, input: unknown, ctx: MainContext): Promise<CommandResult<CommandName>>; // the route minus the sender check; the stand-in's entry, which unwraps it for HostOn (M3)
     // src/main/ipc/events.ts gains:
     export function emitFrom<N extends EventName>(machine: MachineRef, name: N, payload: EventPayload<N>): boolean; // windows only, no taps
 
@@ -876,6 +937,8 @@ No new dependency. zod 4, Node's `crypto`, the peer-auth addon already in the tr
   Evidence: in `src/shared/ipc/schema/session.ts`, `'session.list'`, `'session.projects.list'`, `'session.digests'`, `'session.drafts.get'` and `'session.drafts.set'` are all `owner: 'main'`, as is `'attention.list'` in `attention.ts`. And `src/shared/host/runtime.ts` throws "a host cannot serve it" for any main-owned command.
 - Observation: an id schema checks only `min(1)`, so an address validates wherever a bare id does. That makes lifting schema-compatible with no schema change.
   Evidence: `src/shared/graph/ids.ts`: `const brandedId = <B extends string>() => z.string().min(1).brand<B>();`. `PtyIdSchema = z.string().brand<'PtyId'>()`.
+- Observation: on the pinned zod (4.6.5), `.brand()` returns the same schema instance, and wrappers expose it, so identity finds ids through them. A loose branded string renders the same JSON Schema as a plain one, and a canonical id does not.
+  Evidence: a scratch check printed `brand returns same instance: true`, then `plain vs loose JSON equal: true` and `record plain vs loose key JSON equal: true`, then `nullable inner is the instance: true array element is the instance: true`. The canonical id rendered with `"minLength":1`.
 - Observation: `IpcErrorSchema.code` is a `z.enum` inside the envelope, so under O1's rule a new error code would take a major.
   Evidence: `src/shared/ipc/errors.ts`, `IPC_ERROR_CODES`. O1 M6: "a changed type, `const`, `enum` or union member set (an added enum member included…)" is breaking.
 - Observation: the renderer scan at this base matches the survey's exactly. The 75 path-only sites split into 5 `client` commands and 63 machine-bound sites.
@@ -905,6 +968,22 @@ No new dependency. zod 4, Node's `crypto`, the peer-auth addon already in the tr
   - Every checkout yields a project. The machine row's membership is said concretely, and keys survive enrollment (M5).
   Date/Author: 2026-10-27, O6's planner, on the architect's messages.
 
+- Decision: the buildability review's round, folded in. Nine of its ten findings were adopted; the tenth was handed to the architect. Each was checked against the code first: `Index`'s `stamped = 0`; the three synthetic owners; `HostRegister`'s `emit`; `inheritGrantsFrom: AppSessionIdSchema`.
+  - M4:
+    - a generation reset on each link `up`, because a restarted machine's counters start at zero;
+    - a roster barrier before hydration, with an unanswered roster dropping nothing.
+  - M5:
+    - a lossless, resumable whole-set migration of project-keyed layout state (`rekeySets`), with merge and re-home rules and `contexts` included;
+    - "checkout" defined, per the architect's condition, as a project someone opened, for P5 to record.
+  - M1:
+    - a committed snapshot of addressed paths, for the `id` and role-named fields the name rule cannot see;
+    - atomic publication of `machine.json` by link.
+  - M2: the synthetic pty owners addressed.
+  - Interfaces: `PATH_COMMANDS` as a literal tuple with type assertions.
+  - M3: the stand-in adapter unwrapping `dispatchLocal`'s envelope for `HostOn`, and keeping the register callback's `emit`.
+  - Handed to the architect: the two-build cross-minor check, inherited if O6's bump is first (residue 38).
+  Date/Author: 2026-10-27, O6's planner, on doperpowers:adversarial-reviewer's findings (three P1, seven P2).
+
 Residue decisions O6's section leaves open, made above, for the architect to record in P5. Each line names the alternative rejected. **[x]** marks one that extends or narrows a P5 contract.
 
 1. **The stand-in is a second profile's app serving its embedded root over a same-uid socket** (M3; Decision Log 21). Rejected: blocking O6 on O3.
@@ -931,7 +1010,7 @@ Residue decisions O6's section leaves open, made above, for the architect to rec
 21. **The layout keeps tabs of known machines not yet loaded, and settles each machine's tabs after its first snapshot** (M4). Rejected: dropping non-local tabs until their machine connects.
 22. **[x] An org project's persisted identity is its key (`smns:`, `remote:`, `repo:`, `folder:`, `machine:`). sminos's id is an attribute, `smnsId`, for joins. `OrgProject.id` is the key, and it gains `kind` and `smnsId`** (M5; Decision Log 21's condition). Rejected: persisting sminos's ids, or migrating at enrollment.
 23. **[x] Every checkout yields a project. A repository with no remote, and a folder with no repository, key by their machine** (M5; Decision Log 21). Rejected: sminos's `local-<name>` while unenrolled.
-24. **A session sits under its machine's project when its checkout's org project has no listed checkout on any machine, or when it has no checkout** (M5; Decision Log 21's condition). Rejected: any session not in a user-added folder.
+24. **[x] A checkout is a project someone opened (`origin: 'user'`). A session sits under its machine's project when its directory's org project has no checkout on any machine that is not hidden, or when it has no project at all** (M5; Decision Log 21's condition). Rejected: counting every discovered directory as a checkout, which would make a row for the home directory and `/tmp`. For the architect: P5's OX3 should define "checkout".
 25. **The derivation runs machine-side, is persisted in four nullable project columns, and is refreshed asynchronously at each index start** (M5). Rejected: watching `.smns` and git config.
 26. **Remotes are read with `git config --file <common>/config --no-includes`** (M5). Rejected: porting sminos's config parser.
 27. **sminos 1.15.0's two vector files are vendored with their provenance and sha256** (M5). Rejected: reading them from the plugin cache at test time, which the gate's runners lack.
@@ -939,6 +1018,13 @@ Residue decisions O6's section leaves open, made above, for the architect to rec
 29. **Hiding stays per checkout. "Remove from sidebar" on an org row hides every reachable checkout** (M5). Rejected: an org-level hidden flag with no machine to keep it.
 30. **Tab sets and expanded rows key by org key, through W12's refile, with no version bump** (M5). Rejected: sets per (machine, local project).
 31. **Notifications, the dock badge and ⌘⇧J stay the local machine's in O6** (Constraints). Rejected: feeding remote events to main's notifier before O3's mirror exists.
+32. **The identity file is published with a link from a complete temporary file** (M1). Rejected: `wx` and then write.
+33. **Every `up` of a non-local link is a new generation that resets that machine's reconciliation counters. Its records stay displayed until the generation's first snapshot replaces them** (M4). Rejected: counters kept across reconnects.
+34. **Hydration waits for the roster as well as the local snapshot. A missing or failed roster drops nothing** (M4). Rejected: an independent roster read.
+35. **Project-keyed layout state migrates by whole set in `rekeySets`, resumably, keyed on "an address key is a pre-M5 key". Sets merge, and sessionless tabs re-home to `'none'`** (M5). Rejected: W12's per-tab refile alone.
+36. **A committed snapshot of addressed paths guards the `id` and role-named fields that the name rule cannot see** (M1). Rejected: the name rule alone.
+37. **The ids the renderer mints, its synthetic pty owners among them, are local addresses** (M2). Rejected: an exemption for synthetic owners in the lowerer.
+38. **O1's deferred two-build cross-minor check is not built by O6.** O6's `machine.identity` may be the first `WIRE_MINOR` bump on master. If it is, the executor messages the architect when M1 lands, so the check (`docs/tech-debt-tracker.md`'s row) is scheduled with its mechanism: a gate job that builds a second commit. Rejected: building that mechanism inside O6, whose purpose it is not.
 
 ## Outcomes & Retrospective
 
