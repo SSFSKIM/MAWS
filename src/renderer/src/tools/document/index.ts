@@ -13,6 +13,7 @@ import { DocumentPanel } from './DocumentPanel';
 import { DocumentTabState, type DocumentTabDeps } from './tab-state';
 import { registerCommentsViewActions } from './comments-view'; // P4-B1
 import { handCommentCardOver } from './comments'; // P4-B3
+import { storedSessionOnPage } from '../../ipc/machine';
 
 // P3-E (E2 M3; E's Decision Log 19): exported, so the dashboard's DocumentTabState is made with the same window's deps
 export const documentWindowDeps = (): DocumentTabDeps => ({
@@ -21,7 +22,7 @@ export const documentWindowDeps = (): DocumentTabDeps => ({
   log: (line) => console.warn(`[document] ${line}`),
   confirm: (message) => window.confirm(message),
   sessionTitle: (appSessionId) => {
-    const record = useSessions.getState().records.get(appSessionId as AppSessionId);
+    const record = useSessions.getState().records.get(storedSessionOnPage(appSessionId)); // P5 O6 M2: the artifact holds main's bare id
     return record ? displayTitle(record) : undefined;
   },
   sessions: () =>

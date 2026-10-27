@@ -15,13 +15,14 @@ import { handCommentCardOver } from '../document/comments'; // P4-B2
 import { DesignMain, DesignPanel } from './DesignBody';
 import { installDesignSeam } from './e2e-seam';
 import { DesignTabState, type DesignTabDeps } from './tab-state';
+import { storedSessionOnPage } from '../../ipc/machine';
 
 const windowDeps = (): DesignTabDeps => ({
   host: artifactHost(),
   log: (line) => console.warn(`[design] ${line}`),
   ipc,
   sessionTitle: (appSessionId) => {
-    const record = useSessions.getState().records.get(appSessionId as AppSessionId);
+    const record = useSessions.getState().records.get(storedSessionOnPage(appSessionId)); // P5 O6 M2: the artifact holds main's bare id
     return record ? displayTitle(record) : undefined;
   },
   confirmDiscard: (title, about) =>

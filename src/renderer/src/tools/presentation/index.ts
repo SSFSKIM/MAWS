@@ -12,13 +12,14 @@ import { confirm } from '../../sessions/dialogs';
 import { handCommentCardOver } from '../document/comments'; // P4-B2
 import { DeckMain, DeckPanel } from './DeckBody';
 import { DeckTabState, type DeckTabDeps } from './tab-state';
+import { storedSessionOnPage } from '../../ipc/machine';
 
 const windowDeps = (): DeckTabDeps => ({
   host: artifactHost(),
   log: (line) => console.warn(`[presentation] ${line}`),
   ipc, // M8: the deck's history
   sessionTitle: (appSessionId) => {
-    const record = useSessions.getState().records.get(appSessionId as AppSessionId);
+    const record = useSessions.getState().records.get(storedSessionOnPage(appSessionId)); // P5 O6 M2: the artifact holds main's bare id
     return record ? displayTitle(record) : undefined;
   },
   confirmDiscard: (title, about) =>
