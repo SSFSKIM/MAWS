@@ -71,9 +71,9 @@ afterAll(async () => {
 type Listed = { endpoint: Endpoint; services: FakeServices; ref: string; name: string; credentials: { clientId: string; clientSecret: string } };
 
 /** A started endpoint, enrolled through its command line and listed by the admin; resolves once its link is welcomed. */
-async function listedEndpoint(name: string, before?: (ref: string) => Promise<void>): Promise<Listed> {
+async function listedEndpoint(name: string, before?: (ref: string) => Promise<void>, fetchVia?: typeof fetch): Promise<Listed> {
   const services = fakeServices();
-  const endpoint = createEndpoint({ build: 'm3-suite', sleep: (ms) => sleep(Math.min(ms, 50)) });
+  const endpoint = createEndpoint({ build: 'm3-suite', sleep: (ms) => sleep(Math.min(ms, 50)), fetch: fetchVia });
   await endpoint.start(services);
   started.push({ endpoint, services });
   const ref = services.machine.ref;
@@ -148,6 +148,25 @@ describe('the connection', () => {
     await hub.restart();
     await until(() => (listed.endpoint.hub.generation ?? 0) > second, 'a reconnect after the redeploy', 30_000);
     expect(listed.endpoint.status().refusing).toBeUndefined();
+  });
+
+  it('stays stopped when a read of the org state in flight at its stop ends after it (review finding 3)', async () => {
+    let held: Promise<void> | null = null;
+    const listed = await listedEndpoint('m3-stop', undefined, async (input, init) => {
+      await held;
+      return fetch(input, init);
+    });
+    await listed.endpoint.syncNow();
+    let release!: () => void;
+    held = new Promise<void>((resolve) => (release = resolve));
+    const syncing = listed.endpoint.syncNow();
+    await listed.endpoint.stop();
+    expect(listed.endpoint.hub.running).toBe(false);
+    release();
+    await syncing;
+    await sleep(300);
+    expect(listed.endpoint.hub.running).toBe(false);
+    expect(listed.endpoint.hub.connected).toBe(false);
   });
 });
 

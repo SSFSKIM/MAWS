@@ -1,13 +1,15 @@
 // The machine's records and notices at the hub (O10 M3), on a fake connection: a listing signed again only when a field
 // changes, sent again byte for byte at each welcome, re-signed under a new key, its revision rising across a lost
-// file; the endpoint record issued later each time; and `notify`'s counts, told once each, reconciled at a welcome,
-// with `wrote` once per event and held while no connection is up.
+// file; withdrawn by a signed `gone` revision (or dropped, if no connection carried it); naming no session for a notify
+// while its listing is judged again; a record refused for now tried again with the backoff; the endpoint record issued
+// later each time; and `notify`'s counts, told once each, reconciled at a welcome and across a restart, with `wrote`
+// once per event and held while no connection is up.
 import { generateSigningKey, keyId, NO_CERTIFICATES, verifyListing, type Listing, type OrgState, type Signed, type SigningKey } from 'org-protocol';
 import { describe, expect, it } from 'vitest';
 import type { HubUpFrame } from '../../src/endpoint/hub-link';
-import { EndpointRecords, Listings, resolveOwners, type RecordsContext } from '../../src/endpoint/listings';
-import { Notifier } from '../../src/endpoint/notify';
-import type { ListingsFile } from '../../src/endpoint/state/store';
+import { EndpointRecords, Listings, RecordRetries, resolveOwners, type RecordsContext } from '../../src/endpoint/listings';
+import { Notifier, type NotifyContext } from '../../src/endpoint/notify';
+import type { ListingsFile, NotifiedFile } from '../../src/endpoint/state/store';
 import { mintRef } from './fake-services';
 import { genesis, memberId, newDevice, successor } from './org-fixtures';
 
@@ -237,6 +239,21 @@ describe('withdrawing a listing (RL6’s `gone`; the remote layer’s Decision L
     expect(resigned.body.revision).toBeGreaterThan(left.body.revision);
   });
 
+  it('drops, rather than withdraws, a listing no connection carried: nothing of a session made private reaches the hub, after a restart too', async () => {
+    const w = await world();
+    w.connect(false);
+    const listings = new Listings(w.ctx);
+    await listings.report(report);
+    await listings.report({ ...report, session: 's2' });
+    await listings.report({ ...report, access: 'private' });
+    expect(listings.listed('s2')).toBeNull();
+    await listings.gone('s2');
+    expect(w.file).toEqual({});
+    w.connect(true);
+    await new Listings(w.ctx).welcome();
+    expect(w.sent).toEqual([]);
+  });
+
   it('tells the hub before the tombstone that a withdrawn session holds nothing pending', async () => {
     const w = await world();
     const order: string[] = [];
@@ -244,6 +261,74 @@ describe('withdrawing a listing (RL6’s `gone`; the remote layer’s Decision L
     await listings.report(report);
     await listings.gone('s1');
     expect(order).toEqual(['listing', 'withdrawing s1 in p1', 'listing']);
+  });
+});
+
+describe('a listing in the making (review finding 2)', () => {
+  it('names no session for a notify while its listing is being judged again, and says when it is current', async () => {
+    const w = await world();
+    const current: string[] = [];
+    const listings = new Listings({ ...w.ctx, listedNow: (session) => void current.push(session) });
+    await listings.report(report);
+    expect(current).toEqual(['s1']);
+    // The machine's owners change: until the listing naming them is sent, a notify would push the old owners.
+    await w.amend((s) => void (s.machines.find((m) => m.ref === w.ref)!.owners = [w.admin, w.other]));
+    const refreshing = listings.refresh();
+    expect(listings.listed('s1')).toBeNull();
+    await refreshing;
+    expect(w.listings().at(-1)!.record.body.fields.owners).toEqual([w.admin, w.other]);
+    expect(listings.listed('s1')).toEqual({ project: 'p1' });
+    expect(current).toEqual(['s1', 's1']);
+    // Judged again and unchanged: current again, with nothing signed.
+    const again = listings.report(report);
+    expect(listings.listed('s1')).toBeNull();
+    await again;
+    expect(listings.listed('s1')).toEqual({ project: 'p1' });
+    expect(current).toEqual(['s1', 's1', 's1']);
+    expect(w.listings()).toHaveLength(2);
+  });
+});
+
+describe('a record the hub refused for now (review finding 5)', () => {
+  it('sends a listing again byte for byte while it is still the session’s latest, and nothing for one replaced since', async () => {
+    const w = await world();
+    const listings = new Listings(w.ctx);
+    await listings.report(report);
+    const first = w.file.s1.record;
+    expect(await listings.resend('s1', first.body.revision)).toBe(true);
+    expect(w.listings().at(-1)!.record).toBe(first);
+    w.tick();
+    await listings.report({ ...report, state: 'idle' });
+    const before = w.sent.length;
+    expect(await listings.resend('s1', first.body.revision)).toBe(false);
+    expect(await listings.resend('never-listed', 1)).toBe(false);
+    expect(w.sent.length).toBe(before);
+  });
+
+  it('tries each refused record again with the link’s backoff, one timer per record, all dropped when the connection ends', () => {
+    const timers: { ms: number; run: () => void; cleared: boolean }[] = [];
+    const retries = new RecordRetries({
+      random: () => 1,
+      setTimer: (run, ms) => {
+        const timer = { ms, run, cleared: false };
+        timers.push(timer);
+        return () => void (timer.cleared = true);
+      },
+    });
+    const ran: string[] = [];
+    retries.retry('listing s1 5', () => void ran.push('s1'));
+    retries.retry('listing s1 5', () => void ran.push('s1 twice'));
+    retries.retry('endpoint', () => void ran.push('endpoint'));
+    expect(timers.map((t) => t.ms)).toEqual([1000, 1000]);
+    timers[0].run();
+    expect(ran).toEqual(['s1']);
+    // Refused again: the next wait doubles.
+    retries.retry('listing s1 5', () => void ran.push('s1'));
+    expect(timers.at(-1)!.ms).toBe(2000);
+    retries.clear();
+    expect(timers.slice(1).every((t) => t.cleared)).toBe(true);
+    retries.retry('listing s1 5', () => {});
+    expect(timers.at(-1)!.ms).toBe(1000);
   });
 });
 
@@ -267,12 +352,15 @@ describe('notify', () => {
     const sent: unknown[] = [];
     let up = true;
     const listed = new Set(['s1', 's2']);
-    const notifier = new Notifier({
+    let file: NotifiedFile = {};
+    const ctx: NotifyContext = {
       send: (frame) => up && (sent.push({ ...frame }), true),
       listed: (session) => (listed.has(session) ? { project: 'p1' } : null),
+      store: { read: () => file, write: (next) => void (file = next) },
       log: () => {},
-    });
-    return { notifier, sent, listed, up: (on: boolean) => void (up = on) };
+    };
+    const notifier = new Notifier(ctx);
+    return { notifier, sent, listed, ctx, file: () => file, up: (on: boolean) => void (up = on) };
   };
   const notify = (session: string, kind: string, pending: number) => ({ t: 'notify', session, project: 'p1', kind, pending });
 
@@ -307,6 +395,18 @@ describe('notify', () => {
     listed.add('private');
     notifier.listed('private');
     expect(sent).toHaveLength(2);
+  });
+
+  it('after a restart, settles a count it told before it when the first pending set leaves the session out (review finding 4)', () => {
+    const { notifier, sent, ctx, file } = setup();
+    notifier.pendingSet('p1', [{ session: 's1' }, { session: 's2' }]);
+    notifier.pendingSet('p1', [{ session: 's1' }]);
+    expect(file()).toEqual({ s1: { project: 'p1', pending: 1 } });
+    const restarted = new Notifier(ctx);
+    restarted.pendingSet('p2', []);
+    restarted.pendingSet('p1', []);
+    expect(sent.slice(3)).toEqual([notify('s1', 'settled', 0)]);
+    expect(file()).toEqual({});
   });
 
   it('settles a withdrawn session’s count at the hub, then tells it nothing more', () => {

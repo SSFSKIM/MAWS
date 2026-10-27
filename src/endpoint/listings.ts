@@ -17,7 +17,17 @@
 // A listed session that leaves, or becomes `private`, is withdrawn (RL6; the remote layer's Decision Log 27): one last
 // revision whose `state` is `LISTING_GONE`, with `owners`, `project` and `title` empty, kept and resent like any other,
 // so the hub's revision rule still refuses a replay of an earlier one and every app that cached the session drops it.
-// Reported again, it is listed at a higher revision. A session never listed, or withdrawn already, signs nothing.
+// Reported again, it is listed at a higher revision. A session never listed, or withdrawn already, signs nothing; one
+// whose listing no connection carried yet in this run is dropped from the file instead, so nothing of it, not even its
+// id, reaches the hub.
+//
+// While a session's listing is being judged again (a report, a new head), it names no project for a notify: the hub
+// pushes to the owners its listing names, so a notify must follow the listing that names the owners now. Once judged,
+// `listedNow` lets what was held for it go.
+//
+// A record the hub refused for now (`503`: the Registry busy or unreachable, with RL1 still open) is tried again with
+// the link's backoff while the connection lasts (`RecordRetries`), a listing byte for byte while it is still its
+// session's latest; the next welcome sends everything again anyway.
 //
 // The endpoint record (`{org, machine, addresses, issued}`) names the machine's direct carriers (M4's listener on the
 // tailnet); an empty list is a relay-only machine. It is signed at each welcome and whenever the addresses change.
@@ -37,7 +47,7 @@ import {
   type Signed,
   type SigningKey,
 } from 'org-protocol';
-import type { HubUpFrame } from './hub-link';
+import { reconnectDelay, type HubUpFrame } from './hub-link';
 import type { ListingsFile } from './state/store';
 
 /** The owner token for the machine's own owners (RL §5.8), resolved here and never sent. */
@@ -70,8 +80,8 @@ export type RecordsContext = {
   relays(project: string): boolean;
   store: { read(): ListingsFile; write(file: ListingsFile): void };
   log(line: string): void;
-  /** A session's listing was just signed and sent: a notify held for its listing may follow it now. */
-  signed?(session: string): void;
+  /** A session's listing is current (just signed and sent, or judged unchanged): a notify held for it may follow it now. */
+  listedNow?(session: string): void;
   /** A listed session of `project` is about to be withdrawn: what the hub was told of it (its pending count) is settled
    * first, while the hub still holds its owners. */
   withdrawing?(session: string, project: string): void;
@@ -93,6 +103,10 @@ export class Listings {
   readonly #reports = new Map<string, SessionReport>();
   /** Sessions that left whose withdrawal is still to be signed (no key or head when they left). */
   readonly #leaving = new Set<string>();
+  /** Sessions whose listing no connection carried in this run, nor any earlier one (the file held none at its signing). */
+  readonly #unheard = new Set<string>();
+  /** How many judgments of each session are queued or running: while any is, `listed()` names nothing. */
+  readonly #judging = new Map<string, number>();
   #queue: Promise<unknown> = Promise.resolve();
 
   constructor(ctx: RecordsContext) {
@@ -103,7 +117,7 @@ export class Listings {
   report(report: SessionReport): Promise<void> {
     this.#reports.set(report.session, report);
     this.#leaving.delete(report.session);
-    return this.#serial(() => this.#evaluate(report.session));
+    return this.#judge([report.session]);
   }
 
   /** A session that left the machine: withdrawn, if it is listed. */
@@ -115,10 +129,10 @@ export class Listings {
 
   /** Every reported session judged again (a new head, a project opened), and every withdrawal still owed signed. */
   refresh(): Promise<void> {
+    const judged = this.#judge([...this.#reports.keys()]);
     return this.#serial(async () => {
-      for (const session of this.#reports.keys()) await this.#evaluate(session);
       for (const session of this.#leaving) await this.#withdraw(session);
-    });
+    }).then(() => judged);
   }
 
   /** A connection was welcomed: every listing held goes again, signed anew where the key or the org it was made under
@@ -128,24 +142,62 @@ export class Listings {
       for (const [session, entry] of Object.entries(this.#ctx.store.read())) {
         const report = this.#reports.get(session);
         if (isListingGone(entry.record.body)) {
-          if (this.#current(entry.record)) this.#ctx.send({ t: 'listing', record: entry.record });
+          if (this.#current(entry.record)) this.#send(session, entry.record);
           else if (report === undefined || !this.#qualifies(report)) await this.#sign(session, entry.record.body.fields);
           else await this.#evaluate(session);
         } else if (this.#leaving.has(session) || report?.access === 'private') await this.#withdraw(session);
         else if (report !== undefined && !this.#qualifies(report)) continue;
-        else if (this.#current(entry.record)) this.#ctx.send({ t: 'listing', record: entry.record });
+        else if (this.#current(entry.record)) this.#send(session, entry.record);
         // Made under another key or org: signed again from its report; one not reported yet waits for sminos's.
         else if (report !== undefined) await this.#evaluate(session);
       }
     });
   }
 
-  /** The project of a session listed now, or null: what `notify` may name (a session the hub holds no listing of pushes to no one). */
+  /** The project of a session listed now, its listing current and carried to the hub, or null: what `notify` may name
+   * (a session the hub holds no listing of pushes to no one, and one being listed again would push to the owners of its
+   * last listing). */
   listed(session: string): { project: string } | null {
     const report = this.#reports.get(session);
     const held = this.#ctx.store.read()[session];
-    if (report === undefined || !this.#qualifies(report) || held === undefined || isListingGone(held.record.body)) return null;
+    if (report === undefined || !this.#qualifies(report) || held === undefined || isListingGone(held.record.body) || this.#judging.has(session) || this.#unheard.has(session)) return null;
     return { project: report.project };
+  }
+
+  /** Sends the session's listing at `revision` again, byte for byte, if it is still the latest held and made under the
+   * key in force (the hub refused it for now); whether it was sent. */
+  resend(session: string, revision: number): Promise<boolean> {
+    let sent = false;
+    return this.#serial(async () => {
+      const entry = this.#ctx.store.read()[session];
+      if (entry?.revision === revision && this.#current(entry.record)) sent = this.#send(session, entry.record);
+    }).then(() => sent);
+  }
+
+  /** Judges each of `sessions` again, `listed()` naming none of them until its judgment is done. */
+  #judge(sessions: string[]): Promise<void> {
+    for (const session of sessions) this.#judging.set(session, (this.#judging.get(session) ?? 0) + 1);
+    return this.#serial(async () => {
+      for (const session of sessions) {
+        try {
+          await this.#evaluate(session);
+        } catch (error) {
+          this.#ctx.log(`endpoint: a listing could not be made: ${(error as Error).message}`);
+        } finally {
+          const left = (this.#judging.get(session) ?? 1) - 1;
+          if (left > 0) this.#judging.set(session, left);
+          else this.#judging.delete(session);
+          if (left <= 0 && this.listed(session) !== null) this.#ctx.listedNow?.(session);
+        }
+      }
+    });
+  }
+
+  /** Sends a listing; a session's that reaches a connection is no longer unheard. */
+  #send(session: string, record: Signed<Listing>): boolean {
+    const sent = this.#ctx.send({ t: 'listing', record });
+    if (sent) this.#unheard.delete(session);
+    return sent;
   }
 
   #qualifies(report: SessionReport): boolean {
@@ -168,13 +220,22 @@ export class Listings {
     const fields: Listing['fields'] = { owners, project: report.project, lane: report.lane, state: report.state, title: report.title };
     const held = this.#ctx.store.read()[session];
     if (held !== undefined && held.hash === hashOf(fields) && this.#current(held.record)) return;
-    if (await this.#sign(session, fields)) this.#ctx.signed?.(session);
+    await this.#sign(session, fields);
   }
 
   /** The last revision of a session listed now: `LISTING_GONE`, every field but its lane empty. */
   async #withdraw(session: string): Promise<void> {
     const held = this.#ctx.store.read()[session];
     if (held === undefined || isListingGone(held.record.body)) {
+      this.#leaving.delete(session);
+      return;
+    }
+    if (this.#unheard.has(session)) {
+      // No connection carried it: the hub has nothing of the session, and gets nothing.
+      const rest = { ...this.#ctx.store.read() };
+      delete rest[session];
+      this.#ctx.store.write(rest);
+      this.#unheard.delete(session);
       this.#leaving.delete(session);
       return;
     }
@@ -190,6 +251,7 @@ export class Listings {
     const head = this.#ctx.head();
     if (key === null || head === null) return false;
     const file = this.#ctx.store.read();
+    const unheard = file[session] === undefined || this.#unheard.has(session);
     const now = this.#ctx.now();
     const revision = Math.max((file[session]?.revision ?? 0) + 1, now);
     const issued = new Date(now).toISOString();
@@ -197,7 +259,7 @@ export class Listings {
     const record = await signRecord(SIGNING_DOMAINS.listing, body, key.key.privateKey, key.key.pub);
     this.#ctx.store.write({ ...this.#ctx.store.read(), [session]: { revision, issued, hash: hashOf(fields), record } });
     // Sent now if a connection is up; else the next welcome sends what the file holds.
-    this.#ctx.send({ t: 'listing', record });
+    if (!this.#send(session, record) && unheard) this.#unheard.add(session);
     return true;
   }
 
@@ -247,6 +309,49 @@ export class EndpointRecords {
     const next = this.#queue.then(run).catch((error: unknown) => this.#ctx.log(`endpoint: the endpoint record could not be made: ${(error as Error).message}`));
     this.#queue = next;
     return next;
+  }
+}
+
+/**
+ * The records the hub refused for now, each tried again after the link's backoff (`reconnectDelay`, 1 s doubling to
+ * 30 s, jittered), one timer per record, its wait growing with each refusal; `clear()` when the connection ends, since
+ * the next welcome sends every record again.
+ */
+export class RecordRetries {
+  readonly #random: () => number;
+  readonly #setTimer: (run: () => void, ms: number) => () => void;
+  readonly #timers = new Map<string, () => void>();
+  readonly #attempts = new Map<string, number>();
+
+  constructor(options: { random?(): number; setTimer?(run: () => void, ms: number): () => void } = {}) {
+    this.#random = options.random ?? Math.random;
+    this.#setTimer =
+      options.setTimer ??
+      ((run, ms) => {
+        const timer = setTimeout(run, ms);
+        timer.unref?.();
+        return () => clearTimeout(timer);
+      });
+  }
+
+  /** `run` again after the backoff, unless a retry of `key` is waiting already. */
+  retry(key: string, run: () => void): void {
+    if (this.#timers.has(key)) return;
+    const attempt = this.#attempts.get(key) ?? 0;
+    this.#attempts.set(key, attempt + 1);
+    this.#timers.set(
+      key,
+      this.#setTimer(() => {
+        this.#timers.delete(key);
+        run();
+      }, reconnectDelay(attempt, this.#random)),
+    );
+  }
+
+  clear(): void {
+    for (const cancel of this.#timers.values()) cancel();
+    this.#timers.clear();
+    this.#attempts.clear();
   }
 }
 
