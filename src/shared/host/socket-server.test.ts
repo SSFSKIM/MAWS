@@ -27,7 +27,18 @@ afterEach(async () => {
   temp = null;
 });
 
-async function start(options: { helloTimeoutMs?: number; hooks?: (() => void)[]; onDocPort?: DocPortHandler; docHighWater?: number } = {}) {
+// P5 O2 M3: `badToken`, the many-clients mode (a runtime per connection, from `runtimeFor`) and a half-open server
+interface StartOptions {
+  helloTimeoutMs?: number;
+  hooks?: (() => void)[];
+  onDocPort?: DocPortHandler;
+  docHighWater?: number;
+  badToken?: 'refuse' | 'close';
+  many?: { runtimeFor(): HostRuntime };
+  halfOpen?: boolean;
+}
+
+async function start(options: StartOptions = {}) {
   let emit!: HostEmit;
   const runtime: HostRuntime = createHostRuntime((on, e, client) => {
     on('engine.ping', async () => ({ pid: 4242, uptimeMs: 1, hostVersion: 'test' }));
@@ -37,10 +48,13 @@ async function start(options: { helloTimeoutMs?: number; hooks?: (() => void)[];
   for (const hook of options.hooks ?? []) runtime.onConnect(hook);
   const exits: string[] = [];
   const changes: boolean[] = [];
+  const ends: number[] = [];
   const log = vi.fn<(line: string) => void>();
-  const server = createServer();
+  const server = createServer({ allowHalfOpen: options.halfOpen ?? false });
   const served: SocketClients = serveSocketClients(server, {
-    runtime,
+    ...(options.many ? { many: options.many } : { runtime }),
+    badToken: options.badToken,
+    onClientEnd: () => void ends.push(Date.now()),
     identity: () => IDENTITY,
     counts: () => ({ liveSessions: 2, rows: 3 }),
     token: () => TOKEN,
@@ -80,7 +94,7 @@ async function start(options: { helloTimeoutMs?: number; hooks?: (() => void)[];
     port.start();
     return { socket, port, lines, frames };
   };
-  return { runtime, emit: () => emit('session.brokerItems', ITEMS as never), exits, changes, log, served, connect, connectPort };
+  return { runtime, emit: () => emit('session.brokerItems', ITEMS as never), exits, changes, ends, log, served, connect, connectPort };
 }
 
 describe('the socket layer handshake (server side)', () => {
@@ -267,6 +281,83 @@ describe('the socket layer handshake (server side)', () => {
     await garbage.closed;
     expect(host.changes).toEqual([]);
     expect([...silent.lines, ...wrong.lines, ...garbage.lines]).toEqual([]);
+  });
+
+  // P5 O2 M3 (acceptance 9): `mawsd`'s sockets and the pty host's write nothing before a token checks out
+  it('with badToken close, ends a wrong or missing token’s connection with no byte written', async () => {
+    const host = await start({ badToken: 'close' });
+    const wrong = await host.connect();
+    const bytes: Buffer[] = [];
+    wrong.socket.on('data', (chunk: Buffer) => void bytes.push(chunk));
+    wrong.sendRaw(`${JSON.stringify(hello({ token: 'b'.repeat(64) }))}\n${JSON.stringify({ t: 'exit', when: 'now' })}\n`);
+    await wrong.closed;
+    const missing = await host.connect();
+    missing.socket.on('data', (chunk: Buffer) => void bytes.push(chunk));
+    const noToken: Record<string, unknown> = hello();
+    delete noToken.token;
+    missing.send(noToken);
+    await missing.closed;
+    await settle();
+    expect(bytes).toEqual([]);
+    expect(host.exits).toEqual([]);
+    expect(host.served.connected()).toBe(false);
+    expect(host.log).toHaveBeenCalledWith('closed a hello with a wrong or missing token, writing nothing');
+    const right = await host.connect(); // the right token is still welcomed
+    right.send(hello());
+    expect(await right.next()).toMatchObject({ t: 'welcome' });
+  });
+
+  it('many clients: each is welcomed and served by its own runtime at once, none replaced', async () => {
+    const runtimes: HostRuntime[] = [];
+    const runtimeFor = () => {
+      const pid = runtimes.length + 1; // which runtime answered
+      const made = createHostRuntime((on) => on('engine.ping', async () => ({ pid, uptimeMs: 1, hostVersion: 'test' })));
+      runtimes.push(made);
+      return made;
+    };
+    const host = await start({ many: { runtimeFor } });
+    const first = await host.connect();
+    first.send(hello());
+    expect(await first.next()).toMatchObject({ t: 'welcome' });
+    const second = await host.connect();
+    second.send(hello({ appPid: 8 }));
+    expect(await second.next()).toMatchObject({ t: 'welcome' });
+    first.send({ t: 'req', id: '1', name: 'engine.ping', input: undefined });
+    second.send({ t: 'req', id: '1', name: 'engine.ping', input: undefined });
+    const answer = (id: string) => (line: unknown) => (line as { t: string; id?: string }).t === 'res' && (line as { id: string }).id === id;
+    expect(await first.next(answer('1'))).toMatchObject({ ok: true, value: { pid: 1 } });
+    expect(await second.next(answer('1'))).toMatchObject({ ok: true, value: { pid: 2 } });
+    expect(runtimes).toHaveLength(2);
+    expect(first.lines.some((line) => (line as { reason?: string }).reason === 'replaced')).toBe(false);
+    expect(host.served.count()).toBe(2);
+    expect(host.changes).toEqual([true, true]);
+    first.socket.end();
+    await first.closed;
+    await until(() => host.served.count() === 1);
+    expect(host.changes).toEqual([true, true, false]);
+    second.send({ t: 'req', id: '2', name: 'engine.ping', input: undefined });
+    expect(await second.next(answer('2'))).toMatchObject({ ok: true }); // the other client is still served
+    host.served.closeClient(); // every client
+    await second.closed;
+    await until(() => host.served.count() === 0);
+  });
+
+  it('onClientEnd: a welcomed client’s FIN on a half-open server, before its close; not for an unwelcomed one', async () => {
+    const host = await start({ halfOpen: true });
+    const stranger = await host.connect();
+    stranger.socket.end();
+    await settle();
+    expect(host.ends).toHaveLength(0);
+    stranger.socket.destroy();
+    const client = await host.connect();
+    client.send(hello());
+    await client.next();
+    client.socket.end(); // the draining close's FIN: it keeps reading
+    await until(() => host.ends.length === 1);
+    expect(host.served.connected()).toBe(true); // half-open: the server's side is still up
+    expect(client.isClosed()).toBe(false);
+    host.served.closeClient();
+    await client.closed;
   });
 
   it('closeClient closes the connected client', async () => {

@@ -58,10 +58,10 @@ export interface LockDeps {
 
 const errnoOf = (error: unknown) => (error as NodeJS.ErrnoException).code;
 
-// The lock as written, or null when it is absent or unparseable.
-export function readLock(dir: string, fs: Pick<typeof nodeFs, 'readFileSync'> = nodeFs): LockFile | null {
+// The lock as written, or null when it is absent or unparseable. P5 O2 M3: `name` for another host's lock (`mawsd`'s).
+export function readLock(dir: string, fs: Pick<typeof nodeFs, 'readFileSync'> = nodeFs, name: string = SUPERVISOR_FILES.lock): LockFile | null {
   try {
-    return parseLock(fs.readFileSync(join(dir, SUPERVISOR_FILES.lock), 'utf8'));
+    return parseLock(fs.readFileSync(join(dir, name), 'utf8'));
   } catch {
     return null;
   }

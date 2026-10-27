@@ -12,15 +12,14 @@ import { WIRE_MINOR } from '@shared/ipc/wire';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { SocketPort } from '@shared/host/socket-port';
 import { buildIdOf, SUPERVISOR_FILES } from '../../engine-host/supervisor-files';
-import { engineHostSettled } from '../sessions/service-register';
+import { engineHostSettled } from '../../main/sessions/service-register';
 import { supervisorEnv, type DetachedTransportOptions } from './detached-transport';
 import { appIdentity } from './identity';
 
-// supervisor.ts imports electron for its utility transport; these tests run the engine host detached only.
+// engineHostSettled's module reaches main's router, which imports electron; the supervisor itself no longer does (P5 O2 M3).
 vi.mock('electron', () => ({ app: { isPackaged: false, getPath: () => '/nonexistent' }, utilityProcess: {}, MessageChannelMain: class {} }));
 
-import { createHostSupervisor, type HostSupervisor, type HostSpec } from './supervisor';
-import type { HostDispatch, HostOwner } from '../ipc/router';
+import { createHostSupervisor, type HostDispatch, type HostOwner, type HostSupervisor, type HostSpec } from './host-supervisor';
 
 // Short clocks: the state table is the same, the waits are not.
 const TIMING = { connectTimeoutMs: 200, helloTimeoutMs: 150, startTimeoutMs: 1_200, pidPollMs: 20, waitRetryMs: 80, killGraceMs: 60 };
@@ -91,6 +90,8 @@ function makeSupervisor(packaged = false, timing: Partial<typeof TIMING> = {}, e
     hosts: { 'engine-host': { modulePath: profile.modulePath, serviceName: 'maws-engine-host', transport: 'detached' } } as Record<HostOwner, HostSpec>,
     emit,
     restartBackoffMs: BACKOFF,
+    userData: () => profile.userData, // P5 O2 M3: the core's own, which the transport options below override
+    packaged: () => packaged,
     detached: {
       userData: () => profile.userData,
       packaged: () => packaged,

@@ -12,6 +12,10 @@
 // lines (queued with them until `start()`), and `postDoc` writes one, under the same rules as a line (nothing once
 // closing, draining or closed; a write that stalls the peer past the cap closes the connection). A line carries a
 // Uint8Array as base64 (json-bytes.ts), so a message's bytes cross as they do over a MessagePort.
+//
+// P5 O2 M3: `onEnd` reports the peer's FIN apart from the close. On a socket that allows half-open (a relay's server,
+// docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md M5) this end stays writable after it, so a relay can still forward
+// what it owes a draining peer; elsewhere Node ends this side at once and the close follows.
 import type { Socket } from 'node:net';
 import type { HostPort } from './runtime';
 import { decodeJsonLine, encodeJsonLine } from './json-bytes';
@@ -34,6 +38,7 @@ export class SocketPort implements HostPort {
   private readonly listeners: MessageListener[] = [];
   private readonly closeListeners: ((hadError: boolean) => void)[] = [];
   private readonly docListeners: DocListener[] = []; // P3-A M5
+  private readonly endListeners: (() => void)[] = []; // P5 O2 M3
   private queue: (() => void)[] | null = []; // the deliveries waiting for start(), lines and frames in arrival order; null once started
   private dead = false; // closing or closed: nothing more is delivered or written
   private draining = false; // a draining close: nothing more is written, what arrives is still delivered (E11)
@@ -60,6 +65,9 @@ export class SocketPort implements HostPort {
     );
     socket.on('data', (chunk: Buffer) => splitter.push(chunk));
     socket.on('error', (error) => this.log(`socket error: ${error.message}`));
+    socket.on('end', () => {
+      if (!this.dead) for (const listener of this.endListeners) listener(); // P5 O2 M3
+    });
     socket.on('close', (hadError) => {
       this.dead = true;
       this.closedWith = hadError;
@@ -113,6 +121,11 @@ export class SocketPort implements HostPort {
     const closedWith = this.closedWith;
     if (closedWith === null) this.closeListeners.push(listener);
     else queueMicrotask(() => listener(closedWith));
+  }
+
+  // P5 O2 M3: the peer's FIN (above), unless this end is closing or closed
+  onEnd(listener: () => void): void {
+    this.endListeners.push(listener);
   }
 
   close(options: { drain?: boolean } = {}): void {

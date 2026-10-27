@@ -4,7 +4,7 @@
 // and reaches it through the router. Under MAWS_E2E=1 the e2e's seam `globalThis.__maws_documents` opens a further app
 // window (the store's e2e syncs one document across two windows).
 //
-// P3-A M5: in detached mode main relays the document ports (hosts/doc-relay.ts), ending a window's channels when it
+// P3-A M5: in detached mode main relays the document ports (@shared/host/doc-relay.ts), ending a window's channels when it
 // closes or navigates; and each time the engine host's connection starts streaming (either mode), main announces
 // `artifacts.resync`, since the store's events of a span with no ready client are not replayed.
 //

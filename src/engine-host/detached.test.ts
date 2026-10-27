@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -96,8 +96,6 @@ async function connect(): Promise<LineClient> {
 
 describe('the detached entry', () => {
   it('takes the lock, writes the token, listens, and serves a client end to end', async () => {
-    mkdirSync(dir, { mode: 0o755 });
-    chmodSync(dir, 0o755); // a directory left too open is corrected
     const host = harness();
     host.counts.liveSessions = 1;
     host.counts.rows = 2;
@@ -122,6 +120,22 @@ describe('the detached entry', () => {
     expect(host.exit).not.toHaveBeenCalled();
   });
 
+  // P5 O2 M3 (acceptance 9): a directory another process could have touched is refused, not corrected
+  it('refuses a supervisor directory more open than 0700, or a symlink, before the lock, naming the path (runDetached: fatal, exit 1)', async () => {
+    mkdirSync(dir, { mode: 0o700 });
+    chmodSync(dir, 0o755);
+    const host = harness();
+    await expect(host.start()).rejects.toThrow(`${dir} is mode 0755, more open than 0700`);
+    expect(existsSync(join(dir, 'host.lock'))).toBe(false);
+    expect(statSync(dir).mode & 0o777).toBe(0o755); // never corrected
+    rmSync(dir, { recursive: true });
+    const target = mkdtempSync(join(tmpdir(), 'maws-det-target-'));
+    symlinkSync(target, dir);
+    await expect(harness().start()).rejects.toThrow(`${dir} is a symlink`);
+    expect(readdirSync(target)).toEqual([]);
+    rmSync(target, { recursive: true });
+  });
+
   it('exits 3 when a live supervisor holds the lock, touching none of its files', async () => {
     const first = harness();
     await first.start();
@@ -137,7 +151,7 @@ describe('the detached entry', () => {
   });
 
   it('takes over from a SIGKILLed supervisor: a dead pid’s lock and its leftover socket file', async () => {
-    mkdirSync(dir, { recursive: true });
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
     writeFileSync(join(dir, 'host.lock'), JSON.stringify({ pid: 999_999, procStart: 'gone', protocol: 1, buildId: 'old', socketPath: join(dir, 'host.sock'), startedAt: 'then' }));
     writeFileSync(join(dir, 'host.sock'), ''); // the kernel never removes a socket file
     const host = harness();
@@ -264,7 +278,8 @@ describe('the detached entry', () => {
 
   it('a socket that cannot be created is fatal: exit 1 with the reason logged', async () => {
     const host = harness();
-    mkdirSync(join(dir, 'host.sock'), { recursive: true }); // a directory where the socket must go
+    mkdirSync(dir, { mode: 0o700 });
+    mkdirSync(join(dir, 'host.sock')); // a directory where the socket must go
     writeFileSync(join(dir, 'host.sock', 'keep'), '');
     expect(await host.start()).toBeNull();
     expect(host.exit).toHaveBeenCalledExactlyOnceWith(1);
@@ -389,7 +404,7 @@ describe('the detached entry', () => {
       children.push(child);
       await new Promise((resolve) => child.stdout!.once('data', resolve));
       const orphan = { appSessionId: 'app-orphan', pid: child.pid!, procStart: procStartOf(child.pid!)!, launchId: 'L-old' };
-      mkdirSync(dir, { recursive: true });
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
       writeLive(dir, { pid: 999_999, procStart: 'gone' }, [orphan]);
       const host = harness();
       await host.start();
@@ -405,7 +420,7 @@ describe('the detached entry', () => {
     });
 
     it('a ledger whose owner is alive is left alone and swept of nothing', async () => {
-      mkdirSync(dir, { recursive: true });
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
       const living = { pid: process.pid, procStart: 'this test process, as a predecessor' };
       vi.mocked(procStartOf).mockReturnValue(null); // an unreadable start time never makes a live owner dead
       try {
@@ -424,7 +439,7 @@ describe('the detached entry', () => {
       const child = spawn('/bin/sh', ['-c', 'echo up; exec sleep 30'], { detached: true, stdio: ['ignore', 'pipe', 'ignore'] });
       children.push(child);
       await new Promise((resolve) => child.stdout!.once('data', resolve));
-      mkdirSync(dir, { recursive: true });
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
       writeLive(dir, { pid: 999_999, procStart: 'gone' }, [{ appSessionId: 'app-orphan', pid: child.pid!, procStart: procStartOf(child.pid!)!, launchId: 'L-old' }]);
       const host = harness();
       const supervisor = (await host.start())!; // the sweep has sent its SIGTERM and waits for the orphan's end

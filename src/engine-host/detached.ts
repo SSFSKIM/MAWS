@@ -15,12 +15,17 @@
 // Task 2.5: after listen the orphan sweep reads the predecessor's ledger (live.json) and, when that supervisor is dead,
 // stops the engines it left; once the sweep has ended the engine host's table records this supervisor's own ledger
 // (`life.orphansSwept`). A welcomed client drops the cached login-shell capture, so the next launch captures again.
+//
+// P5 O2 M3 (RL §5.11): the directory and the socket's directory are created 0700 when missing and checked before the
+// lock, the token and the listen (@shared/host/private-path): a symlink, another owner or a mode wider than 0700 stops
+// the start (exit 1, the log naming the path). One that exists is no longer corrected to 0700.
 import { randomBytes } from 'node:crypto';
 import * as fs from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { format } from 'node:util';
+import { assertPrivateDirectory } from '@shared/host/private-path'; // P5 O2 M3
 import { createHostRuntime, type HostRegister } from '@shared/host/runtime';
 import { invalidateShellEnvironment } from '@shared/host/shell-env';
 import { serveSocketClients } from '@shared/host/socket-server';
@@ -212,9 +217,15 @@ export async function startSupervisor(hostVersion: string, register: HostRegiste
   return { socketPath, stop };
 }
 
+// P5 O2 M3: created 0700 when missing; one that exists is checked, never corrected (above)
 function privateDirectory(path: string): void {
-  fs.mkdirSync(path, { recursive: true, mode: 0o700 });
-  fs.chmodSync(path, 0o700); // a pre-existing directory is corrected too
+  try {
+    fs.lstatSync(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    fs.mkdirSync(path, { recursive: true, mode: 0o700 });
+  }
+  assertPrivateDirectory(path);
 }
 
 // 32 random bytes as hex, written through a temporary file so a reader never sees half a token.

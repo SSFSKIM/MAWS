@@ -9,11 +9,12 @@
 // handler registered with `registerMachine` here, `host` forwards it with the asker's `ClientRef` to the `machine` host
 // (src/main/hosts/supervisor.ts), which runs the same handler code in its own runtime. O1 binds production embedded.
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
+import type { HostDispatch, HostOwner } from '@shared/host/host-supervisor'; // P5 O2 M3
 import { HostCommandError, thrownError } from '@shared/host/runtime';
-import type { ClientRef, HandlerContext } from '@shared/ipc/client';
+import type { HandlerContext } from '@shared/ipc/client';
 import { ipcError, type IpcError } from '@shared/ipc/errors';
 import { REGISTRY, type InputOf, type NameOf, type OutputOf, type WireRegistry } from '@shared/ipc/registry';
-import { commandChannel, type CommandInput, type CommandName, type CommandOutput, type CommandResult, type Owner } from '@shared/ipc/schema';
+import { commandChannel, type CommandInput, type CommandName, type CommandOutput, type CommandResult } from '@shared/ipc/schema';
 import { codecOf } from '@shared/ipc/validate';
 import { clientOf } from './clients';
 
@@ -24,10 +25,10 @@ export { emit } from './events';
 // it with `pageOf(client)` (./clients).
 export type MainContext = HandlerContext;
 export type MainHandler<N extends CommandName> = (input: CommandInput<N>, context: MainContext) => CommandOutput<N> | Promise<CommandOutput<N>>;
-export type HostOwner = Exclude<Owner, 'main'>;
 // The supervisor interface M4 implements (`HostSupervisor.dispatch`): forward to the owning host, answer its result.
-// P5 O1 M5: `client` is the asker, passed for a `machine`-owned command only (the host binding).
-export type HostDispatch = (owner: HostOwner, name: string, input: unknown, client?: ClientRef) => Promise<CommandResult<CommandName>>;
+// P5 O1 M5: `client` is the asker, passed for a `machine`-owned command only (the host binding). P5 O2 M3: both types
+// moved with the host supervisor to @shared/host/host-supervisor.
+export type { HostDispatch, HostOwner };
 export type MachineBinding = { kind: 'embedded' } | { kind: 'host' };
 
 // A handler over registry R, for `main` or `machine` alike: the same signature in main and in a host runtime.

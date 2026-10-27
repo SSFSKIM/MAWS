@@ -133,6 +133,33 @@ describe('SocketPort', () => {
     expect(atClient).toEqual([1, 2, 3].map((n) => ({ t: 'evt', name: 'x', payload: n })));
   });
 
+  // P5 O2 M3: a relay whose server is half-open hears the departing peer's end before the close, and can still write
+  it('onEnd reports the peer’s FIN before close; on a half-open server a line written after it still reaches the draining peer', async () => {
+    let accept!: (socket: Socket) => void;
+    const accepted = new Promise<Socket>((resolve) => (accept = resolve));
+    temp = await listenTemp(createServer({ allowHalfOpen: true }, (socket) => accept(socket)));
+    const client = createConnection(temp.path);
+    await new Promise((resolve) => client.once('connect', resolve));
+    const relayPort = new SocketPort(await accepted, Buffer.alloc(0), { log: () => {} });
+    const appPort = new SocketPort(client, Buffer.alloc(0));
+    const atApp = receiving(appPort);
+    const order: string[] = [];
+    relayPort.onEnd(() => void order.push('end'));
+    relayPort.onClose(() => void order.push('close'));
+    relayPort.start();
+    appPort.start();
+    const appClosed = new Promise((resolve) => appPort.onClose(resolve));
+    appPort.close({ drain: true });
+    await until(() => order.includes('end'));
+    expect(order).toEqual(['end']); // the FIN, and the relay's side is still open
+    expect(relayPort.postMessage({ t: 'evt', name: 'x', payload: 'after the end' })).toBe(true);
+    relayPort.close();
+    await appClosed;
+    await until(() => order.includes('close'));
+    expect(order).toEqual(['end', 'close']);
+    expect(atApp).toEqual([{ t: 'evt', name: 'x', payload: 'after the end' }]);
+  });
+
   it('serves the host protocol through createHostRuntime: req and res, and evt once the client is ready', async () => {
     const { server, client } = await pair();
     let emit!: HostEmit;

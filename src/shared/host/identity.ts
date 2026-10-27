@@ -10,7 +10,6 @@ import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import { WIRE_CAPABILITIES, WIRE_MINOR } from '@shared/ipc/wire';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { buildIdOf } from '../../engine-host/supervisor-files';
-import type { HostMode } from './mode';
 
 export interface AppIdentity {
   buildId(): string;
@@ -21,7 +20,8 @@ export interface AppIdentity {
   startedOwn(): void; // this app run started a supervisor of its own
 }
 
-export function appIdentity(modulePath: string, env: NodeJS.ProcessEnv, mode: HostMode = 'detached'): AppIdentity {
+// `mode`: the engine host's transport, main's HostMode (src/main/hosts/mode.ts); the seams apply to `detached` only.
+export function appIdentity(modulePath: string, env: NodeJS.ProcessEnv, mode: 'utility' | 'detached' = 'detached'): AppIdentity {
   const e2e = mode === 'detached' && env.MAWS_E2E === '1';
   let buildId = (e2e && env.MAWS_E2E_BUILD_ID) || null;
   let major = (e2e && Number.parseInt(env.MAWS_E2E_WIRE_MAJOR ?? '', 10)) || null;

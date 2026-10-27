@@ -94,7 +94,7 @@ test('packaged: the supervisor is the app binary run as Node, named maws-supervi
     expect(maws.consoleErrors()).toEqual([]);
 
     // a same-user SIGUSR1 opens no Node inspector in the supervisor (closed 2026-10-10: the socket peer authentication
-    // spec's SIGUSR1 route; `--disable-sigusr1` at the spawn, src/main/hosts/detached-transport.ts, and the entry's
+    // spec's SIGUSR1 route; `--disable-sigusr1` at the spawn, src/shared/host/detached-transport.ts, and the entry's
     // listener, src/engine-host/detached.ts): it stays alive, listens on no new TCP address and its log (its stderr)
     // holds no inspector line; with 9229 taken an inspector could not bind, so the port must be free first
     expect(command, 'the supervisor starts with --disable-sigusr1').toMatch(/^maws-supervisor --disable-sigusr1 /);

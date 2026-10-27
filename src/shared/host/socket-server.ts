@@ -17,6 +17,12 @@
 // `documents.close`) and sends their frames; each client has its own channel table (doc-channels.ts), whose ends reach
 // the runtime's document handler as a utility host's ports do, and which ends with the client (its close, or its
 // replacement).
+//
+// P5 O2 M3 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md; RL §5.11): `badToken: 'close'` ends a connection whose
+// token is wrong or missing with nothing written (the sockets `mawsd` and the pty host create; the engine host keeps
+// E10's `refuse token`). `many` serves every welcomed client at once, each through its own runtime from `runtimeFor`,
+// with no replacement (`mawsd`'s machine.sock). `onClientEnd` reports a welcomed client's FIN apart from its close, for a
+// server made with `allowHalfOpen`, whose side then stays writable until it closes the client.
 import { timingSafeEqual } from 'node:crypto';
 import type { Server, Socket } from 'node:net';
 import { HostClientGoneSchema, HostReadySchema, HostRequestSchema } from '../ipc/host-protocol';
@@ -56,12 +62,15 @@ export interface SupervisorIdentity {
 }
 
 export interface SocketServerOptions {
-  runtime: HostRuntime;
+  runtime?: HostRuntime; // the one client's; with `many`, none
+  many?: { runtimeFor(): HostRuntime }; // P5 O2 M3: a runtime per welcomed client, none replaced
+  badToken?: 'refuse' | 'close'; // P5 O2 M3: 'refuse' (E10's line) unless said otherwise
+  onClientEnd?(): void; // P5 O2 M3: a welcomed client's FIN (above)
   identity(): SupervisorIdentity;
   counts(): { liveSessions: number; rows: number };
   token(): string;
   onExit(when: 'now' | 'idle'): void; // an `exit` line on a connection whose token checked out
-  onClient?(connected: boolean): void; // a client was welcomed, or the client left (not called for a replaced one)
+  onClient?(connected: boolean): void; // a client was welcomed, or a client left (not called for a replaced one)
   log(line: string): void;
   helloTimeoutMs?: number;
   lineCap?: number;
@@ -69,22 +78,25 @@ export interface SocketServerOptions {
 }
 
 export interface SocketClients {
-  connected(): boolean; // a welcomed client holds the connection
-  peer(): WirePeer | null; // P5 O1 M6: what the connected client's hello said of it (a protocol-2 one: major 2, minor 0, no capabilities)
-  closeClient(): void;
+  connected(): boolean; // a welcomed client holds the connection (with `many`, any)
+  peer(): WirePeer | null; // P5 O1 M6: what the connected client's hello said of it (a protocol-2 one: major 2, minor 0, no capabilities); with `many`, the latest's
+  count(): number; // P5 O2 M3: the welcomed clients
+  closeClient(): void; // with `many`, every client
 }
 
 interface Client {
   socket: Socket;
   port: SocketPort;
+  runtime: HostRuntime; // P5 O2 M3: the one runtime, or this client's own
   documents: HostDocChannels; // P3-A M5
   peer: WirePeer; // P5 O1 M6
 }
 
 export function serveSocketClients(server: Server, options: SocketServerOptions): SocketClients {
-  const { runtime, log } = options;
+  const { log, many } = options;
+  if (!many && !options.runtime) throw new Error('serveSocketClients needs a runtime, or `many`');
   const lineCap = options.lineCap ?? LINE_CAP;
-  let current: Client | null = null;
+  const clients = new Set<Client>(); // P5 O2 M3: the welcomed ones; at most one without `many`
   const logDropped = tolerantLog(log); // P5 O1 M6
 
   server.on('connection', (socket) => accept(socket));
@@ -160,10 +172,16 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
       if (record?.t !== 'hello') return drop('its first line is not a hello');
       // (1) the token, before anything else is believed or read
       if (!tokenMatches(record.token, options.token())) {
-        log('refused a hello with a wrong or missing token');
-        refuse('token');
         phase = 'done';
         socket.off('data', onData);
+        // P5 O2 M3: nothing at all is written to a peer that has not authenticated
+        if (options.badToken === 'close') {
+          log('closed a hello with a wrong or missing token, writing nothing');
+          socket.destroy();
+          return 'stop';
+        }
+        log('refused a hello with a wrong or missing token');
+        refuse('token');
         socket.end();
         return 'stop';
       }
@@ -219,26 +237,30 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
       phase = 'done';
       socket.off('data', onData);
       welcome = () => {
-        if (current) {
-          const replaced = current;
-          current = null;
-          log('replaced the connected client');
-          refuse('replaced', replaced.socket);
-          replaced.port.close();
+        if (!many) {
+          for (const replaced of clients) {
+            clients.delete(replaced);
+            log('replaced the connected client');
+            refuse('replaced', replaced.socket);
+            replaced.port.close();
+          }
         }
         const { liveSessions, rows } = options.counts();
         socket.write(`${JSON.stringify(line({ liveSessions, rows }))}\n`);
         const port = new SocketPort(socket, splitter.rest(), { lineCap, log });
+        const runtime = many ? many.runtimeFor() : options.runtime!; // P5 O2 M3
         const documents = new HostDocChannels(port, (message, end) => runtime.docPort(message, end), { highWater: options.docHighWater, log }); // P3-A M5
-        const client: Client = { socket, port, documents, peer };
-        current = client;
+        const client: Client = { socket, port, runtime, documents, peer };
+        clients.add(client);
         port.onDoc((channel, frame) => {
-          if (current === client) documents.deliver(channel, frame); // P3-A M5: a replaced client's frames are dropped
+          if (clients.has(client)) documents.deliver(channel, frame); // P3-A M5: a replaced client's frames are dropped
+        });
+        port.onEnd(() => {
+          if (clients.has(client)) options.onClientEnd?.(); // P5 O2 M3
         });
         port.onClose(() => {
           documents.endAll(); // P3-A M5: a replaced client's channels end too
-          if (current !== client) return;
-          current = null;
+          if (!clients.delete(client)) return;
           runtime.detach();
           log('client disconnected');
           options.onClient?.(false);
@@ -260,7 +282,7 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
       start: () => port.start(),
       on: (_event: 'message', listener: (event: { data: unknown }) => void) =>
         port.on('message', (event) => {
-          if (current !== client) return;
+          if (!clients.has(client)) return;
           const exit = readTolerant(ClientExitSchema, event.data);
           if (exit.ok) {
             logDropped('socket exit', exit.dropped);
@@ -291,10 +313,11 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
   }
 
   return {
-    connected: () => current !== null,
-    peer: () => current?.peer ?? null, // P5 O1 M6
+    connected: () => clients.size > 0,
+    peer: () => [...clients].at(-1)?.peer ?? null, // P5 O1 M6
+    count: () => clients.size, // P5 O2 M3
     closeClient() {
-      current?.port.close();
+      for (const client of clients) client.port.close();
     },
   };
 }

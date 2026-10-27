@@ -10,7 +10,7 @@ import ptyHostPath from '../../pty-host/index?modulePath';
 import { SUPERVISOR_FILES } from '../../engine-host/supervisor-files';
 import { emit } from '../ipc/events';
 import { registerMainHandler } from '../ipc/router';
-import { appIdentity } from './identity';
+import { appIdentity } from '@shared/host/identity';
 import type { MainBuild } from '@shared/ipc/schema/host'; // E11 §2.7
 import { hostModeFromEnv } from './mode';
 import { startHostStatus } from './status';
