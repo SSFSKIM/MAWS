@@ -73,6 +73,9 @@ const parsed = <T>(rows: Array<{ body: string }>) => rows.map((r) => JSON.parse(
 
 /** The posting machine, as the Worker resolved it: its name, and how it enrolled. */
 export type Poster = { name: string; delegation: string | null; use: number | null };
+/** Whether the one posting still stands (a member still listed, a machine still enrolled): a failure refuses the post. */
+export type Authority = () => Result<unknown>;
+const always: Authority = () => ({ ok: true, value: null });
 
 /** A record's refusal by the package's verdict: `400 malformed`, `409` for a contest, `403` for any other key failure. */
 function refusedRecord(code: VerdictCode): Result<never> {
@@ -128,9 +131,9 @@ export class OrgRecords {
    * A delegated machine's certificate, for its own name under the delegation it enrolled through, at the use its
    * redemption counted: kept only on a clean `verifyMachineCert`, and never when it would contest a live certificate
    * (`409 contested`, naming each and the remedies). `201` kept, `200` the same again, `409 conflict` another for a
-   * key a kept one certifies.
+   * key a kept one certifies. `held` re-checks the poster's standing in the commit's synchronous step.
    */
-  async storeCert(poster: Poster, body: unknown): Promise<Result<{ stored: boolean }>> {
+  async storeCert(poster: Poster, body: unknown, held: Authority = always): Promise<Result<{ stored: boolean }>> {
     if (!isSigned(body, isMachineCert)) return fail(400, 'malformed', 'the body is a delegation-signed MachineCert, {body, sig}');
     const cert = body.body;
     if (machineNameKey(cert.name) !== machineNameKey(poster.name) || cert.delegation !== poster.delegation) {
@@ -138,7 +141,7 @@ export class OrgRecords {
     }
     if (poster.use !== null && cert.use !== poster.use) return fail(409, 'wrong-use', `this machine's enrollment was use ${poster.use} of its provisioning key`);
     const kid = await keyId(cert.pub);
-    return this.underHead<{ stored: boolean }>(async (state, certs, now) => {
+    return this.underHead<{ stored: boolean }>(held, async (state, certs, now) => {
       const verdict = await verifyMachineCert(state, body, now);
       if (!verdict.ok) {
         if (verdict.code !== 'contested') return fail(409, verdict.code);
@@ -168,10 +171,10 @@ export class OrgRecords {
     });
   }
 
-  /** A certificate's retirement signed by its own delegation's key (`verifyCertRetirement`), kept once. */
-  async storeRetirement(body: unknown): Promise<Result<{ stored: boolean }>> {
+  /** A certificate's retirement signed by its own delegation's key (`verifyCertRetirement`), kept once; `held` as `storeCert`'s. */
+  async storeRetirement(body: unknown, held: Authority = always): Promise<Result<{ stored: boolean }>> {
     if (!isSigned(body, isCertRetirement)) return fail(400, 'malformed', 'the body is a delegation-signed CertRetirement, {body, sig}');
-    return this.underHead<{ stored: boolean }>(async (state, certs) => {
+    return this.underHead<{ stored: boolean }>(held, async (state, certs) => {
       const verdict = await verifyCertRetirement(state, body, certs.certs);
       if (!verdict.ok) return fail(409, verdict.code);
       return ok(() => {
@@ -230,7 +233,7 @@ export class OrgRecords {
     record: Signed<T>,
     keep: () => Result<{ stored: boolean }>,
   ): Promise<Result<{ stored: boolean }>> {
-    return this.underHead<{ stored: boolean }>(async (state, certs, now) => {
+    return this.underHead<{ stored: boolean }>(always, async (state, certs, now) => {
       const verdict = await verify(state, record, certs, now);
       return verdict.ok ? ok(keep) : refusedRecord(verdict.code);
     });
@@ -293,9 +296,10 @@ export class OrgRecords {
    * Runs `judge` against the head and the certificates as they stand, and runs the commit it answers only while
    * neither moved during its awaits; otherwise it judges again. The commit runs in one synchronous transaction and may
    * still refuse: a check against what is kept (a listing's revision, say) belongs there, since another submission can
-   * commit during this one's awaits. `409 no-state` before any state.
+   * commit during this one's awaits. `held` runs in that same synchronous step, so a poster removed during the awaits
+   * is refused there. `409 no-state` before any state.
    */
-  private async underHead<T>(judge: (state: OrgState, certs: Certificates, now: Date) => Promise<Result<() => Result<T>>>): Promise<Result<T>> {
+  private async underHead<T>(held: Authority, judge: (state: OrgState, certs: Certificates, now: Date) => Promise<Result<() => Result<T>>>): Promise<Result<T>> {
     for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
       const head = this.chain.head();
       if (head === null) return fail(409, 'no-state', 'the org has no signed state yet');
@@ -303,6 +307,8 @@ export class OrgRecords {
       const judged = await judge(head.state, this.certificates(), new Date());
       if (!judged.ok) return judged;
       if (this.chain.head()?.state.version === head.state.version && (this.storage.kv.get<number>(CERTS_VERSION) ?? 0) === certsVersion) {
+        const standing = held();
+        if (!standing.ok) return standing;
         return this.storage.transactionSync(judged.value);
       }
     }

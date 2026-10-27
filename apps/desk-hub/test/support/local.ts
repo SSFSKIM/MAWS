@@ -61,6 +61,8 @@ import {
   PROJECT_STATE_FAULT_PATH,
   MISSING_METHOD_PATH,
   REGISTRY_RPC_PATH,
+  AS_MEMBER_PATH,
+  LACKS_PATH,
 } from './send-fault';
 
 const require = createRequire(import.meta.url);
@@ -472,6 +474,14 @@ export async function startLocalHub() {
     /** Calls the Registry's RPC methods all at once, as several objects would, and answers each one's result in order. */
     async registryRpcs<T>(calls: Array<{ method: 'storeListing' | 'storeEndpoint'; args: unknown[] }>): Promise<T[]> {
       return JSON.parse(await seam('REGISTRY', ORG, REGISTRY_RPC_PATH, { concurrent: calls })) as T[];
+    },
+    /** Makes the Registry refuse calls of `method` as one on older code would (null: as deployed). */
+    async registryLacks(method: string | null) {
+      await seam('REGISTRY', ORG, LACKS_PATH, { method });
+    },
+    /** Calls the Registry's `call` for `member` as given (a record the Worker resolved earlier), with `args`; its answer. */
+    async asMember(call: string, member: unknown, ...args: unknown[]): Promise<unknown> {
+      return JSON.parse(await seam('REGISTRY', ORG, AS_MEMBER_PATH, { call, member, args }));
     },
     /** Whether the Registry takes workerd's own refusal of a method a callee lacks for one on older code. */
     async missingMethod(): Promise<{ lacks: boolean; message: string }> {

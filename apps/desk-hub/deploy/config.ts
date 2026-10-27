@@ -19,9 +19,21 @@ export type DeployConfig = {
   sessionDuration: string;
   /** The org the Registry makes from configuration on first use. Its id is written into each project's `.smns`. */
   org: { id: string; name: string };
+  /**
+   * The org's genesis, once the org is set up: `stateHash` of the genesis OrgState (base64url SHA-256 of its canonical
+   * form, the `prev` its version 2 carries), as the admin's device that signed it holds it. `access-sync` trusts no
+   * chain whose genesis is another (deploy/access-sync.ts).
+   */
+  orgGenesis?: string;
 };
 
 export const CF_API_URL = 'https://api.cloudflare.com/client/v4';
+
+/** Throws unless the config's host is its Worker's (`<worker>.<subdomain>.workers.dev`): a config that names one
+ * Worker's host and another's name would act on the other Worker, or on its Access objects. */
+export function checkTarget(config: DeployConfig, refusing: string): void {
+  if (config.host.split('.')[0] !== config.worker) throw new Error(`the config's host ${config.host} is not the Worker ${config.worker}'s: refusing to ${refusing}`);
+}
 
 export function readDeployConfig(path: string): DeployConfig {
   return JSON.parse(readFileSync(path, 'utf8')) as DeployConfig;
