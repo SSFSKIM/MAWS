@@ -32,7 +32,7 @@ vi.mock('@shared/host/shell-env', () => ({ captureShellEnvironment: async () => 
 vi.mock('../hosts', () => ({ createHosts: () => ({ start: vi.fn(), stop: vi.fn(), onState: vi.fn(() => () => {}) /* E3 (merge): the dataset holds follow the host's state */, onEvent: vi.fn(() => () => {}) /* P4-AGG M2: the catalog hears plugins.changed */ }) }));
 vi.mock('../settings', () => ({ startSettings: () => ({ state: () => ({ settings: state.settings, resolvedTheme: 'light' }), onChange: vi.fn(() => vi.fn()) }) }));
 vi.mock('../window', () => ({ installContentSecurityPolicy: vi.fn(), appUrl: '', createWindow: vi.fn() }));
-vi.mock('../index/index', () => ({ Index: class { unavailable = 'test'; sessions = { get: () => null, list: () => [] }; projects = { list: () => [] }; } }));
+vi.mock('../index/index', () => ({ Index: class { unavailable = 'test'; sessions = { get: () => null, list: () => [] }; projects = { list: () => [] }; refreshOrgProjects = async () => {}; } }));
 vi.mock('../index/source', () => ({ IndexSessionSource: class { onScanned = () => () => {}; discoveryCurrent = () => false; } }));
 vi.mock('../index/attention-service', () => ({ startIndexAttention: () => ({ stop: vi.fn() }) }));
 vi.mock('../index/register', () => ({ registerIndexHandlers: vi.fn() }));

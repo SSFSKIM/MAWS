@@ -63,7 +63,7 @@ vi.mock('./settings', () => ({ startSettings: () => ({ state: () => ({ settings:
 vi.mock('./window', () => ({ appUrl: 'file:///index.html', createWindow: fake.createWindow, installContentSecurityPolicy: vi.fn() }));
 // C4: the index and its session source are replaced too; the lifecycle only has to open, start and close them.
 const c4 = vi.hoisted(() => ({ close: vi.fn(), stopSource: vi.fn(), stopAttention: vi.fn(), started: 0 }));
-vi.mock('./index/index', () => ({ Index: class { close = c4.close; } }));
+vi.mock('./index/index', () => ({ Index: class { close = c4.close; refreshOrgProjects = async () => {}; } }));
 vi.mock('./index/register', () => ({ registerIndexHandlers: vi.fn() }));
 vi.mock('./index/source', () => ({ IndexSessionSource: class { start = () => ((c4.started += 1), c4.stopSource); onScanned = () => () => {}; discoveryCurrent = () => false; } }));
 vi.mock('./index/attention-service', () => ({ startIndexAttention: () => ({ stop: c4.stopAttention }) })); // C3's service over the index
