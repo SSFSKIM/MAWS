@@ -25,8 +25,8 @@ What someone can see after the first phase:
 ## Progress
 
 Phase 1 (dispatchable now; P5's item 1, item 4, and item 7's refusals):
-- [ ] M1 — The session record (item 1)
-- [x] M2 — The opId ledger (item 4). Reviewed clean (doperpowers:reviewer-medium, one P2 fixed), landed as doperpowers PR #401 (`bdd39e50`, sminos 1.17.0), 2026-10-27T03:00Z.
+- [x] M1 — The session record (item 1). Reviewed clean after three doperpowers:reviewer-high rounds (one P2 carried as an unresolved finding), landed as doperpowers PR #402 (`40cb5721`, sminos 1.18.0), 2026-10-27T03:10Z.
+- [x] M2 — The opId ledger (item 4). Reviewed clean (doperpowers:reviewer-medium, one P2 fixed), landed as doperpowers PR #401 (`bdd39e50`, sminos 1.17.0), 2026-10-27T02:05Z.
 - [ ] M3 — The lane B observer: marker and refusals (item 7, first part)
 
 Blocked (P5's edges):
@@ -62,7 +62,7 @@ P5's O12 acceptance items 1, 4 and 7 are this phase's acceptance, checked as fol
 
 - **RL6 is the record's contract.** The shape is in Interfaces. P5's O12 text says `credential {slot, kind, principal}`, but RL6, revised after it with the owner's co-owner ruling (RL Decision Log, 2026-10-26), splits that into `principal` and `inference`, and RL6 binds. This is recorded as residue in this document's Decision Log.
 - **What stays on the machine.** `principal`, `inference`, `controller` and `source` never leave it: they appear in no log event, no hub frame and no `--org` output. `owners`, `ownersProof` and `origin` are listing material and may ride on `joined` (RL §6.2), except the token `@machine`, which never leaves the machine (RL6, remote layer Decision Log 17): owners holding it stay off the event.
-- **Older readers and writers coexist.** The long-running daemon keeps running old code until it restarts, and older sminos versions on other machines read the same logs. Every field is additive. Owners are read the way `by` is read today: from the first `joined` along the lineage that carries them, never from the latest one. A later event without them never erases them.
+- **Older readers and writers coexist.** The long-running daemon keeps running old code until it restarts, and older sminos versions on other machines read the same logs. Every field is additive. Owners are read from the latest *publishing* `joined` along the lineage (one carrying `origin` or `owners`), so a correction reaches other machines. An older writer's `joined` publishes nothing, so a later event without them never erases them. Every `joined` takes its `owners` and `origin` from the record under the writer file's lock, never from the caller, so a paused writer can't append provenance older than a publication made since.
 - **No secret in a record.** `inference.settingsRef` names a file path, never inline settings content. Gateway settings carry environment, which may hold tokens. Inline `--settings` JSON is referenced by the merged launch file sminos already writes (`$SMINOS_HOME/settings/<sha16>.json`).
 - **Tests run against isolated homes.** Every test sets `HOME` and `SMINOS_HOME` to temporary directories. Running a working-copy sminos against the real `~/.claude/sminos` performs a one-way import and is forbidden. The suites are `sminos/tests/run-sminos-tests.sh` (parts `core` and `suites`), `sminos/tests/test_rpcs.py`, `sminos/tests/mods/run.sh` and `tests/mods/typecheck.sh`. Verify on CI with `ci-gate` in each repository.
 - **Every change bumps the sminos plugin's version** in the same commit, with `scripts/bump-version.sh --plugin sminos`. The marketplace updates by number alone.
@@ -95,7 +95,7 @@ P5's O12 acceptance items 1, 4 and 7 are this phase's acceptance, checked as fol
   - it always writes the merged launch settings file, even under the default home where `launch_settings` returns the raw settings today, with `env.SMINOS_LAUNCH=<launch-id>` beside `env.SMINOS_HOME`;
   - the child's first `record_session` claims the pending file by an atomic rename to `<session>.json`, with `source: 'launch'`.
 
-  The claim is the first thing `record_session` does on the child's SessionStart. It runs before any of its early returns (an engine registry not yet holding the session, a missing transcript) and needs only the hook's own session id. SessionStart completes before the session runs any tool. So the seat claims before anything it starts can run, and any later claimant, such as a `claude` launched directly from the seat's Bash with the inherited variable, finds the file gone. A claim is also refused unless the claiming session is new: no record for its id, and the hook's `source` is `startup`. `launch_env` drops `SMINOS_LAUNCH` from the environments sminos builds. A pending file unclaimed after a day is removed by the daemon's sweep. The spawner exiting before `poll_uuid` changes nothing, since the child claims for itself. Rejected: passing `--session-id` through `claude --bg`, which isn't measured to work for background launches.
+  The claim is the first thing `record_session` does on the child's SessionStart. It runs before any of its early returns (an engine registry not yet holding the session, a missing transcript) and needs only the hook's own session id. The first `startup` SessionStart that sees `SMINOS_LAUNCH` binds the launch to its own session id with a lock-free atomic create (`pending/<launch-id>.session`), before taking any lock; every later claim (a retried hook, the spawner after `poll_uuid`) is honoured only for the bound session. So a claim that fails open (a record lock past the hook's deadline) still can't be taken by a later claimant, such as a `claude` launched from the seat's Bash with the inherited variable. A claim is also refused unless the claiming session is new: no record for its id, and the hook's `source` is `startup`. `launch_env` drops `SMINOS_LAUNCH` from the environments sminos builds. A pending file unclaimed after a day is removed by the daemon's sweep. The spawner exiting before `poll_uuid` changes nothing, since the child claims for itself. Rejected: passing `--session-id` through `claude --bg`, which isn't measured to work for background launches.
 - **What each path writes.**
   - **A `sminos spawn`** copies `owners`, `ownersProof`, `principal` and `inference` from the caller's record when the caller is a session (`CLAUDE_CODE_SESSION_ID`). Its `origin` is `{kind: 'sminos-spawn', spawnerSession}`. A seat whose `settings` are non-empty gets `inference: {kind: 'route', settingsRef: <the merged launch file's path>}` in place of the parent's.
   - **A desk-RPC spawn** (`sminos_rpc.spawn`, `SMINOS_DESK_MEMBER` set) writes `owners: [<member>]`, `principal: <member>` and `origin: {kind: 'maws', requester: <member>}`. It is the predecessor of a MAWS remote spawn on a lane-A machine (RL §3.4).
@@ -111,6 +111,8 @@ P5's O12 acceptance items 1, 4 and 7 are this phase's acceptance, checked as fol
   4. only then the defaults: `owners: ["@machine"]`, `principal: "@machine"`, origin `terminal`, the default slot (`source: 'default'`).
 
   A `default` record is provisional, and it stays provisional when it is inherited. A continuation or spawn that copies a provisional record keeps `source: 'default'`. Only a record whose evidence chain reaches a launch claim or the hook's own environment is final. A provisional record is replaced when such evidence appears, for instance after an older daemon's `hand_off` that copied no record. The record file wins over the log when both exist locally.
+
+  Replacement is strictly upward by the evidence's strength, recorded as the record's local `basis`: launch > lineage > hook > default, final over provisional at the same basis. Equal or weaker evidence never replaces a record, so two hooks or two lineage reads can't flip it. Hook evidence never replaces a launch-claimed record, provisional or not, and is held back while the session's own launch is bound and still pending. Lineage evidence comes only from predecessors, the first final record along the chain winning over provisional ones, and never from the session's own publication; a lost record falls back to predecessors, then to provisional defaults. Every change after the first `joined` republishes one more `joined`, and publication is checked on every pass, so a lost append is repaired.
 - **The controller is current state, not provenance.** RL §3.2 lets an ended lane-A conversation reopen as lane B under the same session id. So `controller {lane, since}` is updated at each launch by the bridge's verdict (M3), relayed by its child, and never copied as provenance. Desk Resume reads `controller.lane`.
 - **`@machine`** stands for "this machine's owners", as RL6 now allows (remote layer Decision Log 17, PR #185). Nothing on a machine knows its owner's member id until the org state exists (O10, O11). RL10's endpoint resolves it against the current state:
   - for grades, at dispatch;
@@ -302,7 +304,8 @@ A live check of M3 runs zero inference against an isolated config dir: start a `
   "inference": { "kind": "slot", "configDir": "<path>" } | { "kind": "route", "settingsRef": "<path>" | "base-url:<scheme>://<host>[:<port>]" },
   "controller": { "lane": "A" | "B", "since": "<ISO 8601>" },
   "created": "<ISO 8601>",
-  "former": ["<uuid>", "..."]
+  "former": ["<uuid>", "..."],
+  "basis": "launch" | "lineage" | "hook" | "default"
 }
 ```
 
@@ -424,6 +427,20 @@ OP_HORIZON = KEPT_S - 3600
   - `rpc-query` reads the ledger file directly, runs before migration, and takes `--created`. DX4 `compact` and `op` bodies carry the op in `rpc`; the seat stamp keeps its name `rpc_nonce`.
   Rationale: each fills a silence in M2 or RL4 in the direction of "an id runs at most once and always has one answer".
   Date/Author: 2026-10-26, M2's executor, accepted by O12's executor (desk-sminos-orchestrator).
+
+- Decision: M3's sminos side is cut from M1's branch (`p5-o12-m3` at `72e67f77`) while M1's review finishes, rather than from `main` after M1 lands, and merges `main` in once M1 does. Its MAWS marker landed first, as MAWS PR #194 (`0de73723e`, P5 Decision Log 26).
+  Rationale: M3 consumes only M1's reader and controller writer, whose shape the review rounds don't move; most of M3 is the bridge mod, which M1 doesn't touch.
+  Date/Author: 2026-10-27, O12's executor (desk-sminos-orchestrator).
+
+- Decision: M1's review rounds (doperpowers:reviewer-high, three rounds) revised the record's model, as stated in M1's Decisions and the Constraints:
+  - the launch is bound to the first startup SessionStart's id by a lock-free atomic create, replacing the ordering argument that SessionStart runs before tools;
+  - evidence precedence is launch > lineage > hook > default, strictly upward, with every change republished (the orchestrator's three conditions: republish per change, never equal or weaker, nothing local caches authority from a first `joined` — none was found);
+  - readers take the latest publishing `joined`, and `lifecycle` writes every `joined`'s provenance from the record under the writer file's lock;
+  - lineage evidence comes only from predecessors, never a record's own publication;
+  - `list --org --json` carries no `principal`, `inference` or `controller` (`--machine`, `--project` and `--here` still show them on local rows);
+  - the publication check runs from a one-pass log index.
+  Rationale: each round found a path to a wrong owner or a regressed publication. Round 3 found no P1; its one P2 (a machine rename mid-write in a git-mirrored project can append a stale publication under the former writer name, repaired at the next publication pass) is carried as an unresolved review finding.
+  Date/Author: 2026-10-27, O12's executor (desk-sminos-orchestrator), the orchestrator ruling on the binding and the precedence.
 
 ## Outcomes & Retrospective
 
