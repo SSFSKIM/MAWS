@@ -6,6 +6,7 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
+import { at } from '../../../../../test/support/machine';
 import type { PanelToolContext } from '../../panel/tool';
 import { browserTab, T1, T2 } from '../../test-support/browser';
 import { installFakeMain, ok } from '../../test-support/code';
@@ -14,8 +15,11 @@ import { BrowserTab } from './BrowserTab';
 import { BROWSER_COPY } from './copy';
 import { browser, resetBrowser } from './store';
 
-const A = 'app-a' as AppSessionId;
-const B = 'app-b' as AppSessionId;
+// P5 O6 M2: the page's ids are addresses; main (installFakeMain) is asked and answers with the bare MAIN_A and MAIN_B.
+const MAIN_A = 'app-a' as AppSessionId;
+const MAIN_B = 'app-b' as AppSessionId;
+const A = at(MAIN_A);
+const B = at(MAIN_B);
 
 const ctxOf = (appSessionId: AppSessionId | null): PanelToolContext => ({
   appSessionId,
@@ -78,7 +82,7 @@ describe('the tool and the main tab', () => {
   beforeEach(() => {
     resetBrowser();
     main = installFakeMain((name, input) => {
-      if (name === 'browser.tabs.list') return ok({ tabs: input.appSessionId === A ? [browserTab(T1, A)] : [], selected: { [String(input.appSessionId)]: input.appSessionId === A ? T1 : null } });
+      if (name === 'browser.tabs.list') return ok({ tabs: input.appSessionId === MAIN_A ? [browserTab(T1, MAIN_A)] : [], selected: { [String(input.appSessionId)]: input.appSessionId === MAIN_A ? T1 : null } });
       return ok();
     });
   });
@@ -100,11 +104,11 @@ describe('the tool and the main tab', () => {
     const state = new BrowserHandle(A, undefined);
     const { rerender } = render(<Body state={state} ctx={ctxOf(A)} />);
     await act(async () => {});
-    expect(main.callsOf('browser.tabs.list')).toEqual([{ appSessionId: A }]);
+    expect(main.callsOf('browser.tabs.list')).toEqual([{ appSessionId: MAIN_A }]);
     expect(browser.getState().sessions.get(A)?.selected).toBe(T1);
     rerender(<Body state={state} ctx={ctxOf(B)} />);
     await act(async () => {});
-    expect(main.callsOf('browser.tabs.list')).toEqual([{ appSessionId: A }, { appSessionId: B }]);
+    expect(main.callsOf('browser.tabs.list')).toEqual([{ appSessionId: MAIN_A }, { appSessionId: MAIN_B }]);
   });
 
   it('a main tab whose tab is gone is headed “That tab was closed”; one that exists is not', async () => {

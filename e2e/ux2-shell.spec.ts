@@ -155,7 +155,7 @@ test('Chrome measurements: document, deck and live Customize at both desktop siz
           await disclosure.click();
         }
         await sidebar(page).getByRole('button', { name: 'Customize', exact: true }).click();
-        await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption('proj-harness');
+        await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption(await addressed(page, 'proj-harness')); // P5 O6 M2: the option's value is the project's address
         await expect(page.getByRole('combobox', { name: 'Live session', exact: true })).toBeVisible();
         await expect(page.locator('[data-plugin-row="chrome-review@chrome-tools"]')).toBeVisible({ timeout: 15_000 });
         await capture('customize-live-plugins', { header: '[data-region="main"] header', sections: '[aria-label="Customize sections"]', project: 'select[aria-label="Project"]', live: 'select[aria-label="Live session"]', library: '[data-widget-variant="embedded"] > header', loaded: '[data-plugins-loaded]', firstPlugin: '[data-plugin-row="chrome-review@chrome-tools"]' });
@@ -187,7 +187,7 @@ test('Chrome: live Customize keeps scopes on its two control rows and loaded fee
       const { page } = maws;
       await openSession(page);
       await sidebar(page).getByRole('button', { name: 'Customize', exact: true }).click();
-      await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption('proj-harness');
+      await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption(await addressed(page, 'proj-harness')); // P5 O6 M2: the option's value is the project's address
       const header = main(page).locator('[data-customize-header]');
       const library = page.locator('[data-widget="plugins"][data-widget-variant="embedded"] > header');
       await expect(library.getByRole('combobox', { name: 'Live session', exact: true })).toBeVisible();
@@ -256,7 +256,7 @@ test('UX2: plain-click stacking, same-tool tabs, and overflow icon pinning', asy
   await expect(environment).toContainText('/tmp/maws-harness/a');
   await expect(environment.getByText('…', { exact: true })).toHaveCount(0); // git watch has answered
   await expect(connectors.getByText('Connector status not reported', { exact: true })).toBeVisible();
-  await expect(artifacts.getByRole('combobox', { name: 'Artifacts project', exact: true })).toHaveValue('proj-harness');
+  await expect(artifacts.getByRole('combobox', { name: 'Artifacts project', exact: true })).toHaveValue(await addressed(page, 'proj-harness'));
   await expect(artifacts.getByText('No artifacts in this project yet', { exact: true })).toBeVisible();
   for (const { width, height } of SIZES) {
     await size(maws, width, height);

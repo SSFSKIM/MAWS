@@ -11,10 +11,13 @@ import { anchoredMessage } from '@shared/anchor/message';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { Lineage } from '@shared/graph/session';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { tabId } from '@shared/ipc/schema/layout';
 import { deliverableUrl } from '@shared/maws/deliverable';
+import { bareOf } from '@shared/machine/address';
 import { item, record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
+import { at } from '../../../../../test/support/machine';
 import { editAndResubmitRow, editPromptRow } from '../../composer/resubmit-seam';
 import { sendHumanPrompt } from '../../composer/submit/send-human-prompt';
 import { useSetup } from '../../sessions/store';
@@ -45,7 +48,7 @@ vi.mock('../../composer/submit/send-human-prompt', async (original) => ({ ...(aw
 
 const PARENT = A;
 const RECORD = '00000000-0000-4000-8000-0000000000e1';
-const ANCHOR: Anchor = { kind: 'artifact-element', locator: '#hero', label: 'Dashboard v1 › h1#hero “Sales overview”', pageUrl: deliverableUrl(PARENT, RECORD, 1) }; // P3-L M6b: a legacy anchor, the artifact's page
+const ANCHOR: Anchor = { kind: 'artifact-element', locator: '#hero', label: 'Dashboard v1 › h1#hero “Sales overview”', pageUrl: deliverableUrl(bareOf(PARENT), RECORD, 1) }; // P3-L M6b: a legacy anchor, the artifact's page (P5 O6 M2: its URL names main's bare id)
 const COMMENT = 'Make the heading larger';
 const REPLY = 'Done: the heading is now 48 px.';
 const HOST_BOX = { width: 600, height: 800 };
@@ -72,7 +75,8 @@ afterAll(() => {
 });
 
 let fake: FakeClient;
-let child: AppSessionId;
+let childId: AppSessionId; // P5 O6 M2: main answers the bare id
+let child: AppSessionId; // the page holds its address
 let snapshot: SessionEvent[];
 let queue: unknown;
 let serial = 0;
@@ -88,18 +92,19 @@ beforeEach(() => {
   useAttention.setState({ bySession: new Map() });
   registerSidePane();
   offs.push(registerCommentComposer(openComment));
-  child = `c5555555-5555-4555-8555-${String(++serial).padStart(12, '0')}` as AppSessionId;
+  childId = `c5555555-5555-4555-8555-${String(++serial).padStart(12, '0')}` as AppSessionId;
+  child = at(childId);
   snapshot = [];
   queue = EMPTY_QUEUE;
   seam.mockReset();
   showVersion.mockClear();
   fake = fakeClient({
-    'side.thread.open': { status: 'starting', appSessionId: child },
+    'side.thread.open': { status: 'starting', appSessionId: childId },
     'session.intent.get': null,
     'session.events': () => ({ events: snapshot, lastSeq: snapshot.length, complete: true }),
     'session.queue.list': () => queue,
   });
-  window.maws = fake.client;
+  window.maws = fake.client as unknown as PreloadBridge;
 });
 afterEach(() => {
   cleanup();
@@ -122,7 +127,7 @@ const card = () => document.querySelector<HTMLElement>('[data-comment-card]');
 const lineage = (): Lineage => ({ kind: 'side-thread', parentAppSessionId: PARENT, parentEngineSessionId: null, anchor: ANCHOR, openedBy: 'comment' });
 const withRecord = () => act(() => useSessions.setState({ records: new Map(useSessions.getState().records).set(child, { ...record(child), lineage: lineage() }) }));
 const replyField = () => screen.getByRole('textbox', { name: 'Reply' }) as HTMLTextAreaElement;
-const push = (events: SessionEvent[]) => act(() => fake.event('session.eventBatch', { appSessionId: child, events }));
+const push = (events: SessionEvent[]) => act(() => fake.event('session.eventBatch', { appSessionId: childId, events }));
 
 // Pick, type the comment, Enter: the fork answers at once and the card turns into the thread.
 async function intoThread(frame?: CardFrame) {
@@ -191,12 +196,12 @@ describe('the card becomes the thread', () => {
 
   it('a Side thread send answered after the card closed reveals the thread as the sheet does', async () => {
     fake = fakeClient({ 'session.intent.get': null });
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     mount();
     act(() => openCommentComposer(ANCHOR, { appSessionId: PARENT, placement: { kind: 'card', host: 'artifact-page', hostId: 'h1' } }));
     await userEvent.type(screen.getByRole('textbox', { name: 'Comment' }), `${COMMENT}{Enter}`);
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));
-    await act(() => fake.reply('side.thread.open', { status: 'starting', appSessionId: child }));
+    await act(() => fake.reply('side.thread.open', { status: 'starting', appSessionId: childId }));
     expect(sidePaneOf(useSidePane.getState(), PARENT).view).toEqual({ kind: 'thread', childAppSessionId: child });
     expect(panelOf(PARENT)?.tabs.some((t) => t.toolId === SIDE_TOOL_ID)).toBe(true);
     expect(useCommentCard.getState().open).toBeNull();
@@ -282,9 +287,9 @@ describe('Reply through the human send seam', () => {
 
   it('queued: the host queue’s held bubble at the thread’s tail, replaced by the user row once the host submits it', async () => {
     await ready();
-    const held = { queueId: 'q1', appSessionId: child, content: 'Also the subtitle', createdAt: new Date().toISOString(), state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false };
+    const held = { queueId: 'q1', appSessionId: childId, content: 'Also the subtitle', createdAt: new Date().toISOString(), state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false };
     seam.mockImplementationOnce(async () => {
-      fake.event('session.queue', { appSessionId: child, ...EMPTY_QUEUE, entries: [held] });
+      fake.event('session.queue', { appSessionId: childId, ...EMPTY_QUEUE, entries: [held] });
       return { disposition: 'queued', started: false, queueId: 'q1' };
     });
     await userEvent.type(replyField(), 'Also the subtitle{Enter}');
@@ -293,7 +298,7 @@ describe('Reply through the human send seam', () => {
 
     const b = threadTurn();
     b.turn('t2', 'Also the subtitle');
-    act(() => fake.event('session.queue', { appSessionId: child, ...EMPTY_QUEUE }));
+    act(() => fake.event('session.queue', { appSessionId: childId, ...EMPTY_QUEUE }));
     push(b.events);
     await waitFor(() => expect(heldBubble()).toBeNull());
     expect(within(card()!).getAllByRole('region', { name: 'Your message' }).at(-1)!.textContent).toContain('Also the subtitle');
@@ -349,8 +354,8 @@ describe('Reply through the human send seam', () => {
     seam.mockResolvedValueOnce({ disposition: 'queued', started: true, queueId: 'q2' });
     await userEvent.type(replyField(), 'Wake up and do it{Enter}');
     await waitFor(() => expect(replyField().value).toBe(''));
-    const held = { queueId: 'q2', appSessionId: child, content: 'Wake up and do it', createdAt: new Date().toISOString(), state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false };
-    act(() => fake.event('session.queue', { appSessionId: child, ...EMPTY_QUEUE, paused: true, pauseReason: 'user', entries: [held] }));
+    const held = { queueId: 'q2', appSessionId: childId, content: 'Wake up and do it', createdAt: new Date().toISOString(), state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false };
+    act(() => fake.event('session.queue', { appSessionId: childId, ...EMPTY_QUEUE, paused: true, pauseReason: 'user', entries: [held] }));
     await waitFor(() => expect(card()!.querySelector('[data-pending="held"]')?.textContent).toContain('Wake up and do it'));
     expect(replyField().disabled).toBe(false);
   });
@@ -470,7 +475,7 @@ describe('needs you', () => {
     expect(strip.textContent).toContain(trustState().directory);
     expect(within(strip).getByRole('button', { name: 'Start without trusting' })).toBeTruthy();
     await userEvent.click(within(strip).getByRole('button', { name: 'Trust and start' }));
-    await waitFor(() => expect(fake.invoked('session.start')).toContainEqual({ appSessionId: child, message: null, options: { trust: 'accepted' } }));
+    await waitFor(() => expect(fake.invoked('session.start')).toContainEqual({ appSessionId: childId, message: null, options: { trust: 'accepted' } }));
     expect(card()).not.toBeNull();
   });
 
@@ -534,9 +539,10 @@ describe('where the thread is drawn', () => {
     expect(useCommentCard.getState().open).toBeNull();
 
     act(() => useSidePane.setState({ panes: new Map() }));
-    child = `c5555555-5555-4555-8555-${String(++serial).padStart(12, '0')}` as AppSessionId;
-    fake = fakeClient({ 'side.thread.open': { status: 'starting', appSessionId: child }, 'session.intent.get': null });
-    window.maws = fake.client;
+    childId = `c5555555-5555-4555-8555-${String(++serial).padStart(12, '0')}` as AppSessionId;
+    child = at(childId);
+    fake = fakeClient({ 'side.thread.open': { status: 'starting', appSessionId: childId }, 'session.intent.get': null });
+    window.maws = fake.client as unknown as PreloadBridge;
     cleanup();
     await intoThread();
     act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: child }));

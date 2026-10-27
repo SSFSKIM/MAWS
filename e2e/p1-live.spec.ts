@@ -618,7 +618,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
       const record = value(await invoke(l.page, 'session.get', { appSessionId: child }));
       const anchor = record?.lineage?.anchor;
       expect(record?.lineage).toMatchObject({ kind: 'side-thread', parentAppSessionId: parent, openedBy: 'comment', anchor: { kind: 'artifact-element', locator: '#title' } });
-      await expect(card.locator(`[data-card-thread="${child}"]`), 'the card draws the thread').toBeVisible();
+      await expect(card.locator(`[data-card-thread="${await addressed(l.page, child)}"]`), 'the card draws the thread').toBeVisible();
       await expect(card.locator('[data-chip="anchor"]').first(), 'the comment under its anchor chip').toHaveAttribute('data-anchor-kind', 'artifact-element');
       await expect(l.panel.locator(`[data-side-thread-view="${await addressed(l.page, child)}"]`), 'no Side pane on the thread').toHaveCount(0);
       await expect(surface(l.page, 'artifacts'), 'the Artifacts surface stays open').toBeVisible();
@@ -737,7 +737,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
     // charged before it is asked: its answer comes as a control response, with no result frame to receipt it
     charge(note, { key: 's3-btw', case: 's3', label: 'the /btw side question (reserved: answered with no result frame)', usd: BTW_RESERVATION_USD, sideQuestionOf: parent });
     await sendFromComposer(l, parent, `/btw ${PROMPTS.btw}`, { typed: true });
-    const view = l.panel.locator(`[data-side-btw-view="${parent}"]`);
+    const view = l.panel.locator(`[data-side-btw-view="${await addressed(l.page, parent)}"]`);
     await expect(view).toBeVisible({ timeout: 30_000 });
     const answered = view.locator('[data-side-exchange="answered"]').first();
     await expect(answered).toBeVisible({ timeout: 120_000 });

@@ -300,7 +300,7 @@ async function answerDialog(page: Page, pane: Locator, appSessionId: string, n: 
       message: `${appSessionId}: main's attention item for request ${requestId}`,
     })
     .toBeDefined();
-  const cardSelector = `[data-request-card="${itemId}"]`;
+  const cardSelector = `[data-request-card="${await addressed(page, itemId!)}"]`; // P5 O6 M2: the page renders the item's address
   const frame = pane.locator('[data-docked-frame]').filter({ has: page.locator(cardSelector) }); // `has` is relative to the frame
   const button = frame.locator(cardSelector).getByRole('button', { name: control, exact: true });
   const answered = async () => (await resolved(page, appSessionId, 'dialog.resolved')).some((e) => e.requestId === requestId);

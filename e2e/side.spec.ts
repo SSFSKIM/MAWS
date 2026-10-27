@@ -349,7 +349,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await threadPane.getByRole('textbox', { name: 'Message' }).click();
     await page.keyboard.type(`/btw ${SIDE_QUESTION}`);
     await page.keyboard.press('Enter');
-    const inline = threadPane.locator(`[data-side-btw-view="${child}"]`);
+    const inline = threadPane.locator(`[data-side-btw-view="${await addressed(page, child)}"]`);
     await expect(inline.locator('[data-side-exchange="answered"]').first()).toContainText('ZEBRA', { timeout: 20_000 });
     await expect(threadPane.getByRole('button', { name: 'Side questions' })).toHaveAttribute('aria-pressed', 'true');
     expect(writtenControls(maws, child, 'side_question').map((r) => r.frame.request)).toEqual([{ subtype: 'side_question', question: SIDE_QUESTION }]);
@@ -381,11 +381,11 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
 
     // away to the question view, then back through the parent's row
     await panel.locator('[data-side-chip="btw"]').click();
-    await expect(panel.locator(`[data-side-btw-view="${parent}"]`)).toBeVisible();
+    await expect(panel.locator(`[data-side-btw-view="${await addressed(page, parent)}"]`)).toBeVisible();
     await expect(thread).toHaveCount(0);
     await mainRegion(page).locator(`[data-side-thread="${await addressed(page, child)}"]`).getByRole('button', { name: 'Open' }).click();
     await expect(thread).toBeVisible();
-    await expect(panel.locator(`[data-side-chip="${child}"]`)).toHaveAttribute('aria-current', 'true');
+    await expect(panel.locator(`[data-side-chip="${await addressed(page, child)}"]`)).toHaveAttribute('aria-current', 'true');
 
     // Open as tab: the main area shows the thread; the pane says so instead of drawing a second one
     await thread.getByRole('button', { name: 'Open as tab' }).click();
@@ -517,7 +517,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await page.keyboard.type(`/btw ${SIDE_QUESTION}`);
     await page.keyboard.press('Enter');
     await expect(composer).toHaveText('');
-    const view = panelRegion(page).locator(`[data-side-btw-view="${parent}"]`);
+    const view = panelRegion(page).locator(`[data-side-btw-view="${await addressed(page, parent)}"]`);
     await expect(view).toBeVisible();
     await expect(view.locator('[data-side-exchange]').first()).toContainText(SIDE_QUESTION);
     await expect(view.locator('[data-side-exchange="answered"]').first()).toContainText('ZEBRA');
@@ -724,7 +724,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
 
       // the parent: its transcript, the pane on its thread, the question view, the sidebar
       await showSession(page, parent);
-      await panel.locator(`[data-side-chip="${child}"]`).click();
+      await panel.locator(`[data-side-chip="${await addressed(page, child)}"]`).click();
       await expect(panel.locator(`[data-side-thread-view="${await addressed(page, child)}"]`).getByText(CHILD_REPLY)).toBeVisible();
       await shoot(panel, 'side-pane-thread');
       await main.locator(`[data-side-thread="${await addressed(page, child)}"]`).scrollIntoViewIfNeeded();
@@ -911,7 +911,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     const viewer = panelRegion(page).locator('[data-artifact-viewer]');
     const redocked = viewer.locator('[data-comment-card]');
     await expect(redocked).toHaveAttribute('data-card-phase', 'thread');
-    await expect(redocked.locator(`[data-card-thread="${child}"]`)).toBeVisible();
+    await expect(redocked.locator(`[data-card-thread="${await addressed(page, child)}"]`)).toBeVisible();
     await expect(redocked.getByText(CARD_REPLY)).toBeVisible({ timeout: 20_000 });
     await expect(redocked).toHaveAttribute('data-placement', 'below');
     const hero = viewer.frameLocator('[data-artifact-frame="html"]').locator('#hero');

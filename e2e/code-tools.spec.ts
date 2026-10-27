@@ -136,7 +136,7 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
     // The column's Transcript renders over the loaded HarnessSession's own keyed source (never an unkeyed `source:`),
     // and Review read the turn under 'A', where C8a's loadTranscript attached the same player.
     const key = await h.code('transcriptKey');
-    expect(key).toMatch(/^harness:\d+$/);
+    expect(key).toMatch(/^[^/]+\/harness:\d+$/); // P5 O6 M2: an address of the local machine
     const keys = await h.code('storeKeys');
     const a = await addressed(h.page, 'A'); // the page keys A's transcript by its address
     expect(keys).toEqual(expect.arrayContaining([a, key!]));

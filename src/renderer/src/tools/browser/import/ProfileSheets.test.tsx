@@ -3,7 +3,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
 import { useSettings } from '../../../stores/settings';
 import { importBridge, RECORD, type ImportBridge } from '../../../test-support/browser-import';
@@ -39,7 +39,7 @@ afterEach(() => {
   disconnect();
   resetBrowserImport();
   useSettings.setState({ state: null });
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 describe('ProfileSheets', () => {

@@ -6,12 +6,14 @@ import { join } from 'node:path';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { EngineSessionStatus } from '@shared/engine/status';
+import { EngineSessionStatusSchema, type EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { MawsBridge, Settings } from '@shared/ipc/schema';
+import type { PreloadBridge, Settings } from '@shared/ipc/schema';
+import { compileAddressing } from '@shared/machine/address';
 import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
 import type { UsageSnapshot } from '@shared/usage/types';
 import { digest } from '../../../../../test/support/builders';
+import { at, TEST_MACHINE } from '../../../../../test/support/machine';
 import { useReadLoads } from '../../widgets/read';
 import { loadScenario } from '../../../../../test/support/scenario';
 import { createWidgetBackend, fixtureLine, RESPONSES, type WidgetBackend } from '../../../../../test/support/widget-backend';
@@ -21,6 +23,7 @@ import { panelHost } from '../../panel/host';
 import { useSetup } from '../../sessions/store';
 import { useSettings } from '../../stores/settings';
 import { intent } from '../../test-support/setup-intents';
+import { pageScenario } from '../../test-support/shell-stores';
 import type { PanelToolContext } from '../../panel/tool';
 import { rememberListedModels, useComposerStore, type ListedModel } from '../../stores/composer';
 import { useSessions } from '../../stores/sessions';
@@ -38,10 +41,13 @@ import { REL } from '../../test-support/relative-time';
 // E4a end
 
 const ROOT = join(__dirname, '../../../../..');
-const READY = 'app-7412a115' as AppSessionId; // Settings idle probe: ready, idle, routed, auto
+const READY_BARE = 'app-7412a115' as AppSessionId; // Settings idle probe: ready, idle, routed, auto
+const READY = at(READY_BARE); // the page's
 const scenario = loadScenario(join(ROOT, 'test/fixtures/shell/nine-sessions.json'));
-const record = scenario.sessions.find((r) => r.appId === READY)!;
+const record = pageScenario(scenario).sessions.find((r) => r.appId === READY)!;
 let backend: WidgetBackend;
+// the backend's status of the session (main's, bare) as the page's store holds it
+const pageStatus = (): EngineSessionStatus => compileAddressing(EngineSessionStatusSchema).lift(backend.status(READY_BARE), TEST_MACHINE) as EngineSessionStatus;
 
 const snapshot: UsageSnapshot = {
   available: true, dataDir: '/x', readAt: '2026-09-29T07:36:17Z', error: null, drainTarget: 'u3', drainTargetIsManual: false,
@@ -55,7 +61,7 @@ const snapshot: UsageSnapshot = {
 beforeEach(() => {
   backend = createWidgetBackend({ root: ROOT, statuses: scenario.engine });
   window.maws = backend.bridge();
-  useSessions.setState({ engine: new Map([[READY, backend.status(READY)]]), records: new Map([[READY, record]]), digests: new Map() });
+  useSessions.setState({ engine: new Map([[READY, pageStatus()]]), records: new Map([[READY, record]]), digests: new Map() });
   useUsage.getState().applySnapshot(snapshot);
 });
 afterEach(() => {
@@ -65,7 +71,7 @@ afterEach(() => {
   useSetup.setState({ intents: new Map(), phases: new Map(), invoking: new Set() }); // W2
   useSettings.setState({ state: null }); // W2
   useReadLoads.setState({ loads: new Map() }); // P2-A
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 const ctxOf = (appSessionId: AppSessionId | null, visible = true): PanelToolContext => ({
@@ -126,7 +132,7 @@ describe('session info renders the six sections', () => {
   it('names the requested model as pending until an init frame resolves it, agreeing with the lane', async () => {
     const catalogue = (fixtureLine(ROOT, RESPONSES.list_models) as { models: ListedModel[] }).models;
     rememberListedModels(READY, catalogue);
-    const status = backend.status(READY);
+    const status = pageStatus();
     useSessions.setState({ engine: new Map([[READY, { ...status, model: { requested: 'claude/astra', resolved: 'claude-sonnet-5[1m]' } }]]) });
     mount(ctxOf(READY));
     expect(valueOf('Main')).toMatch(/^claude\/astra( · \w+)? · set · the next init frame confirms it$/);
@@ -159,7 +165,7 @@ describe('session info renders the six sections', () => {
     it.each(cases)('$name', ({ held, model, main, pending }) => {
       const catalogue = (fixtureLine(ROOT, RESPONSES.list_models) as { models: ListedModel[] }).models;
       rememberListedModels(READY, catalogue);
-      const status = { ...backend.status(READY), model };
+      const status = { ...pageStatus(), model };
       useSessions.setState({ engine: new Map([[READY, status]]) });
       if (held) useModelRequests.setState({ model: new Map([[READY, held]]) });
       mount(ctxOf(READY));
@@ -190,14 +196,14 @@ describe('session info renders the six sections', () => {
   });
 
   it('names the overrides when the launch passed some, and the subagent model chosen at launch', () => {
-    useSessions.setState({ engine: new Map([[READY, { ...backend.status(READY), subagentModel: 'haiku', modelOverrides: { ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-5-5' } }]]) });
+    useSessions.setState({ engine: new Map([[READY, { ...pageStatus(), subagentModel: 'haiku', modelOverrides: { ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-5-5' } }]]) });
     mount(ctxOf(READY));
     expect(valueOf('Subagents')).toBe('haiku · CLAUDE_CODE_SUBAGENT_MODEL, chosen at launch');
     expect(valueOf('Overrides')).toBe('ANTHROPIC_DEFAULT_OPUS_MODEL → claude-opus-5-5 · passed through from your shell');
   });
 
   it("a direct session reads the engine's own login from its get_status (routing-flag-override seq 12)", async () => {
-    const direct: EngineSessionStatus = { ...backend.status(READY), gateway: { mode: 'direct', baseUrl: null, verified: 'direct', autoModeServer: 'enabled', localLane: null } };
+    const direct: EngineSessionStatus = { ...pageStatus(), gateway: { mode: 'direct', baseUrl: null, verified: 'direct', autoModeServer: 'enabled', localLane: null } };
     useSessions.setState({ engine: new Map([[READY, direct]]) });
     backend.script('session.getStatus', () => fixtureLine(ROOT, 'pass2/routing-flag-override#12'));
     mount(ctxOf(READY));
@@ -224,7 +230,7 @@ describe('session info renders the six sections', () => {
 describe('session info of a session with no live process', () => {
   const ago = (ms: number) => new Date(Date.now() - ms - 60_000).toISOString();
   const facts = (over: Record<string, unknown>) => ({
-    version: 1, appSessionId: READY, engineSessionId: null, writtenAt: ago(0), source: 'journal', launches: ['L1'],
+    version: 1, appSessionId: READY_BARE, engineSessionId: null, writtenAt: ago(0), source: 'journal', launches: ['L1'],
     engineVersion: null, model: null, effort: null, mode: null, outputStyle: null, plugins: null, contextUsage: null, complete: true, ...over,
   });
   const offline = () => useSessions.setState({ engine: new Map(), records: new Map([[READY, record]]), digests: new Map() });
@@ -268,7 +274,7 @@ describe('session info of a session with no live process', () => {
     const acquires = () => backend.calls.filter((c) => c.command === 'session.acquire').map((c) => c.input);
     expect(acquires()).toEqual([]);
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
-    await waitFor(() => expect(acquires()).toEqual([{ appSessionId: READY, reason: 'read' }]));
+    await waitFor(() => expect(acquires()).toEqual([{ appSessionId: READY_BARE, reason: 'read' }]));
   });
 
   // M3 review (§10 Q7, acceptance 6): a terminal holding the session: its facts read-only, the holder's actions in place of Refresh
@@ -335,7 +341,7 @@ describe('the route switch and the Direct poll, re-homed from the status line', 
   });
 
   it('a Direct session’s get_usage is read while the tab is shown, and not while it is hidden', async () => {
-    const direct: EngineSessionStatus = { ...backend.status(READY), gateway: { mode: 'direct', baseUrl: null, verified: 'direct', autoModeServer: 'enabled', localLane: null } };
+    const direct: EngineSessionStatus = { ...pageStatus(), gateway: { mode: 'direct', baseUrl: null, verified: 'direct', autoModeServer: 'enabled', localLane: null } };
     useSessions.setState({ engine: new Map([[READY, direct]]) });
     mount(ctxOf(READY, false));
     await new Promise((r) => setTimeout(r, 30));
@@ -356,7 +362,7 @@ describe('session info names the browser’s loaded pages', () => {
     mount(ctxOf(READY));
     expect(valueOf('Browser tabs')).toBe('No tabs loaded');
     cleanup();
-    const other = 'app-other' as AppSessionId;
+    const other = at('app-other' as AppSessionId);
     browser.setState({
       sessions: new Map([
         [READY, { tabs: [browserTab(T1, READY, { memoryKiB: 300 * 1024 }), browserTab(T2, READY, { suspended: true, memoryKiB: null })], selected: T1 }],

@@ -4,7 +4,9 @@
 // commented tab lives; a URL the browser refuses is said, not opened.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
+import { bareOf } from '@shared/machine/address';
 import { record } from '../../../../../../test/support/builders';
+import { at } from '../../../../../../test/support/machine';
 import { registerPanelTool } from '../../../panel/host';
 import { useLayout } from '../../../stores/layout';
 import { activeTab, sessionOfTab } from '../../../stores/layout-model';
@@ -21,7 +23,7 @@ import { browserSessionOf, openBrowserUrl } from './actions';
 import { COMMENT_COPY } from './copy';
 
 const URL = 'http://127.0.0.1:4000/comment.html';
-const THREAD = 'side-thread' as AppSessionId;
+const THREAD = at('side-thread' as AppSessionId);
 
 let main: ReturnType<typeof installFakeMain>;
 const browserTabs = (id: AppSessionId) => (panelOf(id)?.tabs ?? []).filter((t) => t.toolId === browserTool.id);
@@ -44,14 +46,14 @@ describe('browserSessionOf', () => {
   it('answers the parent for a side thread and the session itself otherwise', () => {
     expect(browserSessionOf(THREAD)).toBe(B);
     expect(browserSessionOf(A)).toBe(A);
-    expect(browserSessionOf('unknown' as AppSessionId)).toBe('unknown');
+    expect(browserSessionOf(at('unknown' as AppSessionId))).toBe(at('unknown'));
   });
 });
 
 describe('openBrowserUrl', () => {
   it('on the shown session, opens the Browser tool on the URL through main’s reuse path, activated, without a toast', () => {
     openBrowserUrl(A, URL);
-    expect(main.callsOf('browser.tabs.open')).toEqual([{ appSessionId: A, url: URL, select: true, reuse: 'url' }]);
+    expect(main.callsOf('browser.tabs.open')).toEqual([{ appSessionId: bareOf(A), url: URL, select: true, reuse: 'url' }]);
     expect(browserTabs(A)).toHaveLength(1);
     expect(panelOf(A)!.activeTabId).toBe(browserTabs(A)[0]!.id);
     expect(toasts()).toEqual([]);
@@ -62,14 +64,14 @@ describe('openBrowserUrl', () => {
     openBrowserUrl(A, URL);
     expect(browserTabs(A)).toHaveLength(1);
     expect(main.callsOf('browser.tabs.open')).toEqual([
-      { appSessionId: A, url: URL, select: true, reuse: 'url' },
-      { appSessionId: A, url: URL, select: true, reuse: 'url' },
+      { appSessionId: bareOf(A), url: URL, select: true, reuse: 'url' },
+      { appSessionId: bareOf(A), url: URL, select: true, reuse: 'url' },
     ]);
   });
 
   it('on a session that is not shown, adds the tool to that session’s panel without activating it, and says where', () => {
     openBrowserUrl(C, URL);
-    expect(main.callsOf('browser.tabs.open')).toEqual([{ appSessionId: C, url: URL, select: true, reuse: 'url' }]);
+    expect(main.callsOf('browser.tabs.open')).toEqual([{ appSessionId: bareOf(C), url: URL, select: true, reuse: 'url' }]);
     expect(browserTabs(C)).toHaveLength(1);
     expect(panelOf(C)!.activeTabId).not.toBe(browserTabs(C)[0]!.id);
     expect(sessionOfTab(activeTab(useLayout.getState().main))).toBe(A); // the panel rule: the main view stays where it was
@@ -78,7 +80,7 @@ describe('openBrowserUrl', () => {
 
   it('a side thread’s page opens in its parent’s browser', () => {
     openBrowserUrl(THREAD, URL);
-    expect(main.callsOf('browser.tabs.open')).toEqual([{ appSessionId: B, url: URL, select: true, reuse: 'url' }]);
+    expect(main.callsOf('browser.tabs.open')).toEqual([{ appSessionId: bareOf(B), url: URL, select: true, reuse: 'url' }]);
     expect(browserTabs(THREAD)).toEqual([]);
     expect(browserTabs(B)).toHaveLength(1);
   });

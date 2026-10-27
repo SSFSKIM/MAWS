@@ -3,9 +3,10 @@
 // `loadSpill` over `fs.readSpill`, and the receipt's rewind interface over `session.rewindFiles`.
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, EventId, ParentToolUseId, TaskId } from '@shared/graph/ids';
-import type { CommandName, CommandResult, EventName, EventPayload, MawsBridge } from '@shared/ipc/schema';
+import type { CommandName, CommandResult, EventName, EventPayload, EventSource, MawsBridge } from '@shared/ipc/schema';
 import { act, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { at, TEST_MACHINE } from '../../../../../test/support/machine';
 import { useTranscriptStore } from '../../stores/transcript';
 import { rowsOf } from '../model/derive';
 import { turnId } from '../model/keys';
@@ -18,21 +19,22 @@ import { Transcript } from '../view/Transcript';
 import { ipcLoadSpillOver, ipcRewindOver, ipcSourceOver, KNOWN_WAIT_MS } from './ipc';
 import type { TranscriptSource } from './types';
 
-const APP = 'app-1' as AppSessionId;
+const APP = at('app-1' as AppSessionId); // the page's: the sources run behind the client, over addresses
 const AGENT = 'agent-7' as AgentId;
 
-// A fake X2 client: every invoke waits for the test to answer it, but for main's `session.appEvents`, answered at once
+// A fake X2 client (the page's side, on `TEST_MACHINE`): every invoke waits for the test to answer it, but for main's `session.appEvents`, answered at once
 // from `appEvents` (what main's read model keeps); events are pushed by name.
 function fakeClient() {
-  const listeners = new Map<string, Set<(payload: unknown) => void>>();
+  const listeners = new Map<string, Set<(payload: unknown, from: EventSource) => void>>();
   const calls: { name: string; input: unknown; answer: (result: CommandResult<CommandName>) => void; answered?: boolean }[] = [];
   const appEvents = new Map<AppSessionId, SessionEvent[]>();
   const client: MawsBridge = {
+    localMachine: TEST_MACHINE,
     invoke: ((name: CommandName, input: unknown) =>
       name === 'session.appEvents'
         ? Promise.resolve({ ok: true, value: { events: appEvents.get((input as { appSessionId: AppSessionId }).appSessionId) ?? [] } })
         : new Promise((resolve) => calls.push({ name, input, answer: resolve as never }))) as MawsBridge['invoke'],
-    on: ((name: EventName, listener: (payload: unknown) => void) => {
+    on: ((name: EventName, listener: (payload: unknown, from: EventSource) => void) => {
       const set = listeners.get(name) ?? new Set();
       set.add(listener);
       listeners.set(name, set);
@@ -41,7 +43,7 @@ function fakeClient() {
     pathForFile: () => '', // C7: MawsBridge gained pathForFile
   };
   const emit = <N extends EventName>(name: N, payload: EventPayload<N>) => {
-    for (const listener of listeners.get(name) ?? []) listener(payload);
+    for (const listener of listeners.get(name) ?? []) listener(payload, { machine: TEST_MACHINE });
   };
   return { client, calls, emit, listeners, appEvents };
 }
@@ -110,7 +112,7 @@ describe('ipcSource', () => {
 
     fake.emit('session.eventBatch', batch(all.slice(2, 4))); // before the snapshot: buffered; the snapshot carries both
     fake.emit('session.eventBatch', batch([...all.slice(4, 6), ...all.slice(6, 8)])); // half overlaps the snapshot's seq-null tail
-    fake.emit('session.eventBatch', batch(all.slice(0, 12), 'app-other' as AppSessionId)); // another session: ignored
+    fake.emit('session.eventBatch', batch(all.slice(0, 12), at('app-other' as AppSessionId))); // another session: ignored
     expect(useTranscriptStore.getState().entries[APP].phase).toBe('hydrating');
     expect(rowsOf(useTranscriptStore.getState().entries[APP].state)).toEqual([]);
 
@@ -297,7 +299,7 @@ describe('ipcSource', () => {
       await settle();
       expect(fake.calls).toHaveLength(1);
       expect(useTranscriptStore.getState().entries[APP]).toMatchObject({ phase: 'hydrating', error: null });
-      fake.emit('session.status', { appSessionId: 'another' as AppSessionId, status: {} as never });
+      fake.emit('session.status', { appSessionId: at('another' as AppSessionId), status: {} as never });
       await settle();
       expect(fake.calls, 'another session’s sign wakes nothing').toHaveLength(1);
       fake.emit('session.status', { appSessionId: APP, status: {} as never });
@@ -565,7 +567,7 @@ describe('child source provenance', () => {
     await flush();
     expect([...useTranscriptStore.getState().entries[CHILD_KEY].state.seen]).toEqual(disk.map((e) => e.id));
     fake.emit('fs.followState', { ...followState('stopped'), agentId: null });
-    fake.emit('fs.followState', { ...followState('stopped'), appSessionId: 'another' as AppSessionId });
+    fake.emit('fs.followState', { ...followState('stopped'), appSessionId: at('another' as AppSessionId) });
     await flush();
     expect(fake.calls.filter((c) => c.name === 'fs.agentEvents')).toHaveLength(3);
     useTranscriptStore.getState().detach(CHILD_KEY);
@@ -958,7 +960,7 @@ describe('child source provenance', () => {
     });
     fake.emit('engine.hostState', { state: 'restarting' } as never);
     fake.emit('engine.hostState', { state: 'ready' } as never);
-    answer(fake, 'engine.sessions', [{ appSessionId: 'other' as AppSessionId }]);
+    answer(fake, 'engine.sessions', [{ appSessionId: at('other' as AppSessionId) }]);
     await flush();
     off();
     expect(seen[0]).toMatchObject({ phase: 'live', divider: { state: 'stopped', cause: 'crash' } }); // in the live state, before the reset
@@ -1169,7 +1171,7 @@ describe('ipcSource after the engine host is lost (E10)', () => {
     fake.emit('engine.hostState', { state: 'restarting' } as never);
     fake.emit('engine.hostState', { state: 'ready' } as never);
     expect(fake.calls.map((call) => call.name)).toEqual(['session.events', 'engine.sessions']);
-    table(fake, ['other' as AppSessionId]);
+    table(fake, [at('other' as AppSessionId)]);
     await flush();
     expect(divider().state).toBe('stopped');
     expect(useTranscriptStore.getState().entries[APP].working).toBe(false);

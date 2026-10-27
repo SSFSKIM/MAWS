@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 import type { AccountUsage, UsageSnapshot, UsageWindow } from '@shared/usage/types';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { useNotices } from '../stores/notices';
 import { useUsage } from '../stores/usage';
@@ -30,7 +31,7 @@ const MIXED = snapshot([
 ]);
 
 it('keeps shared usage live without posting banners or reading/writing their retired layout key', async () => {
-  const fake = fakeClient({ 'layout.get': { value: [] } }); window.maws = fake.client;
+  const fake = fakeClient({ 'layout.get': { value: [] } }); window.maws = fake.client as unknown as PreloadBridge; // P5 O6 M2: installed as main's side
   useNotices.setState({ notices: [] });
   const off = connectStatusLine();
   try {

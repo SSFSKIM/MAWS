@@ -3,7 +3,9 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, RequestId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
+import { bareOf } from '@shared/machine/address';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { resetSlots, useSlot } from '../app/slots';
 import { useAttention } from '../stores/attention';
 import { markDocked, resetComposerStore } from '../stores/composer';
@@ -13,12 +15,12 @@ import { builder, request, tool } from '../transcript/model/test-events';
 import { connectRequestCard, renderInlineRequest, RequestCard } from './index';
 import { itemFor, permission, type RequestEvent } from './test-requests';
 
-const APP = 'app-inline' as AppSessionId;
+const APP = at('app-inline' as AppSessionId);
 const bash = permission({ requestId: request('r1'), toolUseId: tool('b1'), toolName: 'Bash', displayName: 'Bash', input: { command: 'git status' } });
 const read = permission({ requestId: request('r2'), toolUseId: tool('c1'), toolName: 'Read', displayName: 'Read', input: { file_path: '/p/a.ts' } });
 // Another session's request carrying the same recorded id (a second replay of one fixture), for another tool use.
 const twin = permission({ requestId: request('r1'), toolUseId: tool('other'), toolName: 'Edit', displayName: 'Edit', input: { file_path: '/p/b.ts' } });
-const TWIN = 'app-twin' as AppSessionId;
+const TWIN = at('app-twin' as AppSessionId);
 
 // One turn with two pending requests, as C3 would stream them: each gets a request_slot row.
 function history(): SessionEvent[] {
@@ -59,10 +61,10 @@ beforeEach(() => {
         : name === 'session.appEvents'
           ? { ok: true, value: { events: [] } }
           : name === 'attention.request'
-          ? { ok: true, value: { event: { ...(input.appSessionId === TWIN ? twin : input.requestId === 'r1' ? bash : read), sessionId: events[0].sessionId } } }
+          ? { ok: true, value: { event: { ...(input.appSessionId === bareOf(TWIN) ? twin : input.requestId === 'r1' ? bash : read), sessionId: events[0].sessionId } } }
           : { ok: false, error: { code: 'internal', message: `unexpected ${name}` } },
     );
-  (window as { maws?: MawsBridge }).maws = { invoke, on: () => () => {} } as unknown as MawsBridge;
+  window.maws = { localMachine: TEST_MACHINE, invoke, on: () => () => {} } as unknown as PreloadBridge;
   const items: AttentionItem[] = [itemFor(bash, APP), itemFor(read, APP)];
   useAttention.getState().applySnapshot(items);
 });
@@ -71,7 +73,7 @@ afterEach(() => {
   resetSlots();
   cleanup();
   for (const key of Object.keys(useTranscriptStore.getState().entries)) useTranscriptStore.getState().drop(key);
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 const slot = (requestId: string) => document.querySelector<HTMLElement>(`[data-kind="request_slot"] [data-request-id="${requestId}"]`) ?? document.querySelector<HTMLElement>(`[data-request-id="${requestId}"]`);
@@ -155,7 +157,7 @@ describe("request renderer registers through C6's seam", () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Bash' })).toBeTruthy());
     expect(screen.queryByText(/answer below/)).toBeNull();
     undock();
-    const other = render(<>{renderInlineRequest('app-other' as AppSessionId)(slotRow)}</>); // another session holds no such item
+    const other = render(<>{renderInlineRequest(at('app-other' as AppSessionId))(slotRow)}</>); // another session holds no such item
     expect(other.container.innerHTML).toBe('');
   });
 });

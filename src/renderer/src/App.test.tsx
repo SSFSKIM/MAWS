@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { HostState, MawsBridge, SettingsState } from '@shared/ipc/schema';
+import type { HostState, PreloadBridge, SettingsState } from '@shared/ipc/schema';
+import { TEST_MACHINE } from '../../../test/support/machine';
 import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
 import { SUPERVISOR_NOTICES } from './app/copy';
 import { updatedStatus } from './test-support/host-status';
@@ -150,7 +151,8 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       listeners.get(name)!.add(listener);
       return () => listeners.get(name)!.delete(listener);
     }),
-  } as unknown as MawsBridge;
+    localMachine: TEST_MACHINE,
+  } as unknown as PreloadBridge;
   current = { send };
   return { send, echoed, answerEcho };
 }
@@ -163,7 +165,7 @@ let current: { send(name: string, payload: unknown): void } | null = null;
 beforeAll(async () => {
   fakeMain('light');
   await import('./App');
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 }, 300_000);
 
 // The strip lives in the Diagnostics tab (C5 M4): the app opens, then Help › Diagnostics arrives from the menu.
@@ -181,7 +183,7 @@ describe('theme in the page', () => {
   });
   afterEach(() => {
     cleanup();
-    delete (window as { maws?: MawsBridge }).maws;
+    delete (window as { maws?: PreloadBridge }).maws;
   });
 
   it('mirrors the persisted theme onto <html data-theme>', async () => {
@@ -196,7 +198,7 @@ describe('theme in the page', () => {
     await renderApp();
     expect(document.documentElement.dataset.theme).toBe('light');
     await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Dark' })));
-    expect(window.maws.invoke).toHaveBeenCalledWith('settings.set', { theme: 'dark' });
+    expect(window.maws.invoke).toHaveBeenCalledWith('settings.set', { theme: 'dark' }, TEST_MACHINE);
     expect(document.documentElement.dataset.theme).toBe('dark');
     expect(screen.getByRole('button', { name: 'Light' }).getAttribute('aria-pressed')).toBe('false');
   });
@@ -212,7 +214,7 @@ describe('theme in the page', () => {
 describe('hosts in the diagnostics strip', () => {
   afterEach(() => {
     cleanup();
-    delete (window as { maws?: MawsBridge }).maws;
+    delete (window as { maws?: PreloadBridge }).maws;
   });
 
   it('reads both hosts ready with their pids from the snapshots', async () => {
@@ -265,7 +267,7 @@ describe('hosts in the diagnostics strip', () => {
       main.answerEcho();
       await main.echoed;
     });
-    expect(window.maws.invoke).toHaveBeenCalledWith('pty.spawn', expect.objectContaining({ shell: '/bin/sh' }));
+    expect(window.maws.invoke).toHaveBeenCalledWith('pty.spawn', expect.objectContaining({ shell: '/bin/sh' }), TEST_MACHINE);
     expect(echo()).toBe('MAWS_ECHO_OK · shell pid 3333');
   });
 });
@@ -273,7 +275,7 @@ describe('hosts in the diagnostics strip', () => {
 describe('store section of the diagnostics strip', () => {
   afterEach(() => {
     cleanup();
-    delete (window as { maws?: MawsBridge }).maws;
+    delete (window as { maws?: PreloadBridge }).maws;
   });
 
   it('shows the watched config home, the counts (projects from the index), and each record with its title, source, directory, pin and holder badge', async () => {
@@ -323,14 +325,14 @@ describe('store section of the diagnostics strip', () => {
     // Git (M6): the row's Git button watches its directory; the detail reads branch, ahead/behind and the dirty count,
     // lists the files, and follows git.changed.
     await act(async () => void fireEvent.click(within(row).getByRole('button', { name: 'Git' })));
-    expect(window.maws.invoke).toHaveBeenCalledWith('git.watch', { directory: '/private/tmp/maws-accept' });
+    expect(window.maws.invoke).toHaveBeenCalledWith('git.watch', { directory: '/private/tmp/maws-accept' }, TEST_MACHINE);
     expect(screen.getByRole('status', { name: 'git status' }).textContent).toBe('main · ahead 1 / behind 0 · dirty · 1 file');
     const untracked = { path: '.c4-accept', oldPath: null, index: '?', worktree: '?', untracked: true };
     act(() => main.send('git.changed', { repoRoot: GIT_STATUS.repoRoot, status: { ...GIT_STATUS, files: [...GIT_STATUS.files, untracked] }, reason: 'worktree' }));
     expect(screen.getByRole('status', { name: 'git status' }).textContent).toBe('main · ahead 1 / behind 0 · dirty · 2 files');
     expect(within(screen.getByRole('list', { name: 'Changed files' })).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['.M src/a.ts', '?? .c4-accept']);
     await act(async () => void fireEvent.click(within(row).getByRole('button', { name: 'Git' })));
-    expect(window.maws.invoke).toHaveBeenCalledWith('git.unwatch', { directory: '/private/tmp/maws-accept' });
+    expect(window.maws.invoke).toHaveBeenCalledWith('git.unwatch', { directory: '/private/tmp/maws-accept' }, TEST_MACHINE);
     expect(screen.queryByRole('status', { name: 'git status' })).toBeNull();
   });
 });
@@ -339,7 +341,7 @@ describe('store section of the diagnostics strip', () => {
 describe("C7's registrations from the app", () => {
   afterEach(() => {
     cleanup();
-    delete (window as { maws?: MawsBridge }).maws;
+    delete (window as { maws?: PreloadBridge }).maws;
   });
 
   it("registers the composer's edit-and-resubmit adapter as the transcript's editAndResubmit", async () => {
@@ -357,7 +359,7 @@ describe("C7's registrations from the app", () => {
 describe('host actions from the app', () => {
   afterEach(() => {
     cleanup();
-    delete (window as { maws?: MawsBridge }).maws;
+    delete (window as { maws?: PreloadBridge }).maws;
   });
 
   it("gives a Markdown surface outside any Transcript an artifact chip whose click opens the artifact's main tab", async () => {

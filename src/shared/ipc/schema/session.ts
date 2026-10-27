@@ -40,6 +40,7 @@ import {
 // (AppSessionIdSchema and MessageUuidSchema come with C3's imports above.)
 import { ProjectIdSchema, SessionIdSchema } from '@shared/graph/ids';
 import { ForeignHolderSchema, SessionRecordSchema } from '@shared/graph/session';
+import { PtyIdSchema } from './pty'; // P5 O6 M2: session.takeOver's paneId
 // C4 end
 // C7 start: the composer's prompt history shapes (C7 execution document, Interfaces "X2 additions")
 import { HistoryEntrySchema, PastedContentSchema } from '../../composer/history-entry';
@@ -490,7 +491,7 @@ const c10Commands = {
   // job, SIGTERM to an interactive holder's verified pid) and waits for the registry to clear; on `released` the
   // renderer resumes the record with `session.start`
   'session.takeOverPane': { input: z.strictObject({ pid: z.number().int().positive() }), output: z.strictObject({ ptyId: PtyIdSchema, label: z.string() }).nullable(), owner: 'main' },
-  'session.takeOver': { input: z.strictObject({ appSessionId: AppSessionIdSchema, holder: ForeignHolderSchema, paneId: z.string().nullable().optional() }), output: TakeOverOutcomeSchema, owner: 'main' },
+  'session.takeOver': { input: z.strictObject({ appSessionId: AppSessionIdSchema, holder: ForeignHolderSchema, paneId: PtyIdSchema.nullable().optional() }), output: TakeOverOutcomeSchema, owner: 'main' }, // P5 O6 M2: the pane `session.takeOverPane` answered, a PtyId (lowered like any)
   'session.delete': { input: z.strictObject({ appSessionId: AppSessionIdSchema, stopIfLive: z.boolean() }), output: DeleteOutcomeSchema, owner: 'main' },
   // validators never transform: the service trims; a title that is only whitespace is refused here
   'session.rename': {

@@ -1,7 +1,8 @@
 // Code tools tests (C8c): main as a fake X2 bridge the suite scripts per command, recording every call, with `emit`
 // for pushed events. Installed as `window.maws`, so the stores' `ipc` client validates both directions as in the app.
-// Imported only by happy-dom suites.
-import type { CommandName, EventName, EventPayload, MawsBridge } from '@shared/ipc/schema';
+// Imported only by happy-dom suites. P5 O6 M2: main's side, so it is asked and answers with bare ids, on `TEST_MACHINE`.
+import type { CommandName, EventName, EventPayload, PreloadBridge } from '@shared/ipc/schema';
+import { TEST_MACHINE } from '../../../../test/support/machine';
 
 type Answer = { ok: true; value: unknown } | { ok: false; error: { code: string; message: string } };
 export type Handler = (name: CommandName, input: Record<string, unknown>) => Answer | Promise<Answer>;
@@ -13,6 +14,7 @@ export function installFakeMain(handler: Handler) {
   const calls: { name: CommandName; input: Record<string, unknown> }[] = [];
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   const bridge = {
+    localMachine: TEST_MACHINE,
     async invoke(name: CommandName, input: Record<string, unknown>) {
       calls.push({ name, input });
       return handler(name, input);
@@ -23,7 +25,7 @@ export function installFakeMain(handler: Handler) {
       set.add(listener);
       return () => set.delete(listener);
     },
-  } as unknown as MawsBridge;
+  } as unknown as PreloadBridge;
   window.maws = bridge;
   return {
     bridge,

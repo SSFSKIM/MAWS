@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { EMPTY_TAB_SET } from '@shared/ipc/schema/layout';
 import { digest, item, project, record, status } from '../../../../test/support/builders';
-import { fakeClient } from '../../../../test/support/fake-client';
+import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { at } from '../../../../test/support/machine';
+import { createClient } from './client';
 import { registerTabRetention } from '../keymap/actions-runtime';
 import { createAttentionStore } from '../stores/attention';
 import { createLayoutStore } from '../stores/layout';
@@ -10,7 +13,10 @@ import { allTabs } from '../stores/layout-model';
 import { createSessionsStore } from '../stores/sessions';
 import { connectShell } from './events';
 
-const A = 'a' as AppSessionId;
+// P5 O6 M2: `fake` stands for main (its answers, events and the saved layout hold bare ids); the shell connects through
+// the page's client over it, so the stores hold addresses (`A`, `at(id)`), and a saved layout from before O6 reads lifted.
+const A = at('a' as AppSessionId);
+const pageClient = (fake: FakeClient) => createClient(() => fake.client as unknown as PreloadBridge);
 
 function setup(batchMs = 0) {
   const fake = fakeClient({ 'layout.list': { keys: ['main.tabs'] } , 'layout.get': ({ key }: { key: string }) => ({
@@ -19,7 +25,7 @@ function setup(batchMs = 0) {
       : null,
   }) });
   const stores = { sessions: createSessionsStore(), attention: createAttentionStore(), layout: createLayoutStore() };
-  const disconnect = connectShell(fake.client, stores, { batchMs });
+  const disconnect = connectShell(pageClient(fake), stores, { batchMs });
   return { fake, stores, disconnect };
 }
 
@@ -54,7 +60,7 @@ describe('shell event subscription', () => {
     expect(stores.sessions.getState().records.has(A)).toBe(true);
     expect(stores.attention.getState().loaded).toBe(true);
     await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
-    expect(tabIds(stores)).toEqual(['session:a']);
+    expect(tabIds(stores)).toEqual([`session:${A}`]);
   });
 
   it('feeds events to the stores, buffering attention changes until its snapshot lands', async () => {
@@ -83,12 +89,12 @@ describe('shell event subscription', () => {
     await fake.reply('session.projects.list', { projects: [project('p1', 0), project('p2', 1)], revision: 1 });
     await fake.reply('session.digests', { digests: [digest('a')] });
     await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
-    expect(stores.layout.getState().main.current).toBe('p1');
-    expect(Object.keys(stores.layout.getState().main.sets)).toEqual(['p1']);
+    expect(stores.layout.getState().main.current).toBe(at('p1'));
+    expect(Object.keys(stores.layout.getState().main.sets)).toEqual([at('p1')]);
     fake.event('session.changed', { record: record('a', { projectId: 'p2' as ProjectId }), cause: 'update', revision: 2 });
-    expect(stores.layout.getState().main.current).toBe('p2');
-    expect(Object.keys(stores.layout.getState().main.sets)).toEqual(['p2']);
-    expect(tabIds(stores)).toEqual(['session:a']);
+    expect(stores.layout.getState().main.current).toBe(at('p2'));
+    expect(Object.keys(stores.layout.getState().main.sets)).toEqual([at('p2')]);
+    expect(tabIds(stores)).toEqual([`session:${A}`]);
   });
 
   // The review's F3: the records change of a removal reaches the layout before the removal closes the tab; a session no
@@ -99,12 +105,12 @@ describe('shell event subscription', () => {
     await fake.reply('session.projects.list', { projects: [project('p1', 0)], revision: 1 });
     await fake.reply('session.digests', { digests: [] });
     await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
-    stores.layout.getState().openSession('c' as AppSessionId, { how: 'tab' });
-    stores.layout.getState().activateTab('session:a');
+    stores.layout.getState().openSession(at('c' as AppSessionId), { how: 'tab' });
+    stores.layout.getState().activateTab(`session:${A}`);
     fake.event('session.removed', { appSessionId: 'a', revision: 2 });
-    expect(stores.layout.getState().main.current).toBe('p1');
-    expect(Object.keys(stores.layout.getState().main.sets)).toEqual(['p1']);
-    expect(tabIds(stores)).toEqual(['session:c']);
+    expect(stores.layout.getState().main.current).toBe(at('p1'));
+    expect(Object.keys(stores.layout.getState().main.sets)).toEqual([at('p1')]);
+    expect(tabIds(stores)).toEqual([`session:${at('c')}`]);
   });
 
   it('keeps a session’s tabs when its removal is older than what the store knows', async () => {
@@ -114,7 +120,7 @@ describe('shell event subscription', () => {
     fake.event('session.changed', { record: record('a'), cause: 'update', revision: 4 });
     fake.event('session.removed', { appSessionId: 'a', revision: 3 });
     expect(stores.sessions.getState().records.has(A)).toBe(true);
-    expect(tabIds(stores)).toEqual(['session:a']);
+    expect(tabIds(stores)).toEqual([`session:${A}`]);
   });
 
   // l1-sessions-13 review: the project command and the inactivity sweep archive in main, past the renderer's own archive
@@ -126,12 +132,12 @@ describe('shell event subscription', () => {
     const archived = { ...record('a'), archived: true };
     fake.event('session.changed', { record: archived, cause: 'facts', revision: 2 }); // its transcript went from disk
     await vi.waitFor(() => expect(stores.sessions.getState().records.get(A)?.archived).toBe(true));
-    expect(tabIds(stores)).toEqual(['session:a']);
+    expect(tabIds(stores)).toEqual([`session:${A}`]);
     fake.event('session.changed', { record: record('a'), cause: 'facts', revision: 3 }); // and came back
     fake.event('session.changed', { record: archived, cause: 'update', revision: 2 }); // stale: the store knows newer
     await new Promise((resolve) => setTimeout(resolve, batchMs + 5));
     expect(stores.sessions.getState().records.get(A)?.archived).toBe(false);
-    expect(tabIds(stores)).toEqual(['session:a']);
+    expect(tabIds(stores)).toEqual([`session:${A}`]);
     fake.event('session.changed', { record: archived, cause: 'update', revision: 4 });
     await vi.waitFor(() => expect(tabIds(stores)).toEqual([]));
     expect(stores.sessions.getState().records.get(A)?.archived).toBe(true); // the record stays, archived
@@ -155,14 +161,14 @@ describe('shell event subscription', () => {
       const { fake, stores } = setup();
       await answerSnapshots(fake);
       await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
-      expect(tabIds(stores)).toEqual(['session:a']);
+      expect(tabIds(stores)).toEqual([`session:${A}`]);
       fake.event('session.removed', { appSessionId: 'a', revision: 2 });
       expect(tabIds(stores)).toEqual([]);
     });
 
     it('hydration waits for ready, then keeps a record-less tab the retention retains', async () => {
       let ready!: () => void;
-      const retains = vi.fn((id: string) => id === 'gone');
+      const retains = vi.fn((id: string) => id === at('gone'));
       retentions.push(registerTabRetention({ ready: new Promise<void>((resolve) => (ready = resolve)), retains }));
       const { fake, stores } = setup();
       await answerSnapshots(fake);
@@ -170,17 +176,17 @@ describe('shell event subscription', () => {
       expect(stores.layout.getState().hydrated).toBe(false); // still waiting on the intent snapshot
       ready();
       await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
-      expect(tabIds(stores)).toEqual(['session:a', 'session:gone']);
+      expect(tabIds(stores)).toEqual([`session:${A}`, `session:${at('gone')}`]);
     });
 
     it('a removal leaves a retained session’s tab open, and closes one it does not retain', async () => {
-      retentions.push(registerTabRetention({ ready: Promise.resolve(), retains: (id) => id === 'a' }));
+      retentions.push(registerTabRetention({ ready: Promise.resolve(), retains: (id) => id === A }));
       const { fake, stores } = setup();
       await answerSnapshots(fake);
       await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
       fake.event('session.removed', { appSessionId: 'a', revision: 2 });
       expect(stores.sessions.getState().records.has(A)).toBe(false);
-      expect(tabIds(stores)).toEqual(['session:a']);
+      expect(tabIds(stores)).toEqual([`session:${A}`]);
       retentions.splice(0).forEach((off) => off());
       retentions.push(registerTabRetention({ ready: Promise.resolve(), retains: () => false }));
       fake.event('session.changed', { record: record('a'), cause: 'update', revision: 3 });
@@ -202,7 +208,7 @@ describe('shell event subscription', () => {
     expect(stores.sessions.getState().engine.has(A)).toBe(false);
     await fake.reply('engine.sessions', [status('a'), status('b', { process: 'exited' })]);
     expect(stores.sessions.getState().engine.get(A)).toMatchObject({ process: 'ready', engineState: 'idle' });
-    expect(stores.sessions.getState().engine.get('b' as AppSessionId)?.process).toBe('exited');
+    expect(stores.sessions.getState().engine.get(at('b' as AppSessionId))?.process).toBe('exited');
   });
 
   it('the engine table overwrites the statuses it lists and keeps the others; a later event wins over it', async () => {
@@ -211,7 +217,7 @@ describe('shell event subscription', () => {
     fake.event('session.status', { appSessionId: 'c', status: status('c') });
     await fake.reply('engine.sessions', [status('a')]); // read after those events, so newer
     expect(stores.sessions.getState().engine.get(A)?.engineState).toBe('idle');
-    expect(stores.sessions.getState().engine.has('c' as AppSessionId)).toBe(true);
+    expect(stores.sessions.getState().engine.has(at('c' as AppSessionId))).toBe(true);
     fake.event('session.status', { appSessionId: 'a', status: status('a', { process: 'exited' }) });
     expect(stores.sessions.getState().engine.get(A)?.process).toBe('exited');
   });
@@ -230,7 +236,7 @@ describe('shell event subscription', () => {
     fake.event('engine.hostState', { state: 'ready', pid: 4242, restarts: 0, revision: 4 }); // no transition
     expect(reads()).toBe(2);
     await fake.reply('engine.sessions', [status('b')]);
-    expect(stores.sessions.getState().engine.get('b' as AppSessionId)?.process).toBe('ready');
+    expect(stores.sessions.getState().engine.get(at('b' as AppSessionId))?.process).toBe('ready');
     fake.event('engine.hostState', { state: 'crashed', pid: null, restarts: 1, revision: 5 });
     fake.event('engine.hostState', { state: 'ready', pid: 4343, restarts: 1, revision: 6 });
     expect(reads()).toBe(3);
@@ -273,7 +279,7 @@ describe('shell event subscription', () => {
     expect(stores.sessions.getState().engine.has(A)).toBe(false);
     fake.event('engine.hostState', READY);
     await fake.reply('engine.sessions', [status('b')]);
-    expect([...stores.sessions.getState().engine.keys()]).toEqual(['b']);
+    expect([...stores.sessions.getState().engine.keys()]).toEqual([at('b')]);
   });
 
   it('applies no re-read answer that lands after disconnect', async () => {
@@ -315,13 +321,13 @@ describe('shell event subscription', () => {
       fake.event('session.removed', { appSessionId: 's7', revision: 500 });
       fake.event('session.changed', { record: record('s7'), cause: 'facts', revision: 499 }); // older than the removal
       expect(writes).not.toHaveBeenCalled();
-      expect(stores.sessions.getState().records.has('s0' as AppSessionId)).toBe(false);
+      expect(stores.sessions.getState().records.has(at('s0' as AppSessionId))).toBe(false);
 
       vi.advanceTimersByTime(16);
       const state = stores.sessions.getState();
       expect(state.records.size).toBe(1 + 200 - 1); // `a`, the 200, less the removed s7
-      expect(state.records.has('s7' as AppSessionId)).toBe(false);
-      expect(state.digests.get('s199' as AppSessionId)?.phase).toBe('exited');
+      expect(state.records.has(at('s7' as AppSessionId))).toBe(false);
+      expect(state.digests.get(at('s199' as AppSessionId))?.phase).toBe('exited');
       expect(state.indexing).toEqual({ scanned: 0, total: 300 });
       expect(writes.mock.calls.length).toBeLessThanOrEqual(5); // progress, changes, digests, the removal (the stale change writes nothing)
 
@@ -335,7 +341,7 @@ describe('shell event subscription', () => {
       const fake = fakeClient();
       const stores = { sessions: createSessionsStore(), attention: createAttentionStore(), layout: createLayoutStore() };
       stores.layout.setState({ hydrated: false });
-      connectShell(fake.client, stores, { batchMs: 60_000 }); // a window that never closes by itself in the test
+      connectShell(pageClient(fake), stores, { batchMs: 60_000 }); // a window that never closes by itself in the test
       await fake.reply('session.list', { sessions: sessions.map((id) => record(id)), revision: 1 });
       await fake.reply('session.projects.list', { projects: [project('p1', 0)], revision: 1 });
       await fake.reply('session.digests', { digests: [] });
@@ -353,7 +359,7 @@ describe('shell event subscription', () => {
       fake.event('session.changed', { record: record('a'), cause: 'discovered', revision: 2 });
       await answerLayout(['a']);
       expect(stores.layout.getState().hydrated).toBe(true);
-      expect(tabIds(stores)).toEqual(['session:a']);
+      expect(tabIds(stores)).toEqual([`session:${A}`]);
     });
 
     it('a removal drained by hydration is replayed with the early changes: a session opened during hydration and then removed has no tab', async () => {
@@ -374,7 +380,7 @@ describe('shell event subscription', () => {
       await fake.reply('session.digests', { digests: [] });
       await fake.reply('attention.list', []);
       await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
-      expect(tabIds(stores)).toEqual(['session:a']);
+      expect(tabIds(stores)).toEqual([`session:${A}`]);
       expect(stores.sessions.getState().records.has(A)).toBe(true);
     });
 
@@ -386,7 +392,7 @@ describe('shell event subscription', () => {
       fake.event('session.changed', { record: record('late'), cause: 'discovered', revision: 5 });
       disconnect();
       vi.advanceTimersByTime(50);
-      expect(stores.sessions.getState().records.has('late' as AppSessionId)).toBe(false);
+      expect(stores.sessions.getState().records.has(at('late' as AppSessionId))).toBe(false);
     });
   });
 

@@ -11,7 +11,7 @@ import { createDocument } from '@artifacts/document/tabs';
 import { FILES_ROOT } from '@artifacts/files';
 import type { ArtifactHost, DatasetPage } from '@artifacts/host';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { CommandName, CommandOutput, MawsBridge } from '@shared/ipc/schema';
+import type { CommandName, CommandOutput, MawsBridge, PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../../test/support/fake-client';
 import { artifactEditorFor, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors } from '../../artifacts/registry';
 import { resetMarkupSurfaces } from '../../markup/surface';
@@ -45,7 +45,7 @@ beforeEach(() => {
   resetEditorHosts();
   resetMarkupSurfaces();
   resetArtifactEditors();
-  window.maws = fakeClient({ 'session.intent.get': null }).client;
+  window.maws = fakeClient({ 'session.intent.get': null }).client as unknown as PreloadBridge;
   memory = new MemoryDocumentHost();
   readDataset = vi.fn(async () => PAGE);
   fileChecks = vi.fn<(input: unknown) => Promise<CommandOutput<'artifacts.datasetFiles'>>>().mockResolvedValue({ revision: 12, files: [] });

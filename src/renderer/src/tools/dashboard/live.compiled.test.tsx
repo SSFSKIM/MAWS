@@ -13,7 +13,7 @@ import { schemaFor } from '@artifacts/document/schema';
 import { createDocument } from '@artifacts/document/tabs';
 import type { ArtifactHost, DatasetPage } from '@artifacts/host';
 import type { ConnectorCallOutcome } from '@shared/artifacts/connectors';
-import type { CommandName, MawsBridge } from '@shared/ipc/schema';
+import type { CommandName, MawsBridge, PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
 import { NO_SESSION_CONTEXT } from '../../artifacts/session-context';
 import { artifactEditorFor, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors } from '../../artifacts/registry';
@@ -49,7 +49,7 @@ beforeEach(() => {
   resetMarkupSurfaces();
   resetArtifactEditors();
   client = fakeClient({ 'session.intent.get': null, 'library.get': { row: null }, 'library.spaces': { spaces: [] } });
-  window.maws = client.client;
+  window.maws = client.client as unknown as PreloadBridge;
   memory = new MemoryDocumentHost();
   surface = fakeSurface();
   holds = [];

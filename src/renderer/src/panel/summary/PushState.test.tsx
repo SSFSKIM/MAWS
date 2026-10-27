@@ -6,10 +6,12 @@ import { useEffect } from 'react';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CommandName } from '@shared/ipc/schema';
+import type { CommandName, PreloadBridge } from '@shared/ipc/schema';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import type { ScmGhState, ScmPrState, ScmPrStateInput, ScmStatus } from '@shared/ipc/schema/scm';
+import { bareOf } from '@shared/machine/address';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
+import { ipc } from '../../ipc/client';
 import { connectPanelEvents } from '../../ipc/events';
 import { queryClient } from '../../ipc/query';
 import { A, probeTool, resetPanelStores } from '../../test-support/panel';
@@ -18,7 +20,8 @@ import { connectScmRunEnds } from '../../tools/scm/store';
 import { panelHost, registerPanelTool } from '../host';
 import { PushState } from './PushState';
 
-const DIR = '/work/app-a'; // A's directory in the builders' record
+const DIR = `/work/${A}`; // A's directory in the builders' record (P5 O6 M2: built from A's address)
+const MAIN_A = bareOf(A); // P5 O6 M2: A as main (the fake bridge) is asked and speaks of it
 const GIT: GitStatus = {
   repoRoot: DIR, gitDir: `${DIR}/.git`, commonDir: `${DIR}/.git`, isWorktree: false, branch: 'feature', head: 'abcdef1234567', upstream: 'origin/feature',
   remoteUrl: 'git@github.com:o/r.git', ahead: 0, behind: 0, dirty: false, stashCount: 0, checkedAt: '2026-10-06T10:00:00.000Z', files: [],
@@ -48,10 +51,10 @@ function bridge(over: Partial<Record<CommandName, unknown>> = {}) {
     'scm.pr.state': (input: ScmPrStateInput) => (input.refresh ? PASSED : PR),
     ...over,
   });
-  window.maws = fake.client;
+  window.maws = fake.client as unknown as PreloadBridge;
   queryClient.clear(); // a case that mounts again starts from main's new answers
   offPanel();
-  offPanel = connectPanelEvents(fake.client); // as App.tsx connects it: C4's changes into the git store, and the scm queries' re-reads
+  offPanel = connectPanelEvents(ipc); // as App.tsx connects it: C4's changes into the git store, and the scm queries' re-reads
 }
 
 const settle = () => act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)));
@@ -88,8 +91,8 @@ describe('push state row shows PR state, install and sign-in states and opens th
     const user = userEvent.setup();
     await mount();
     await lineReads('PR #12 Open · 2 passed, 1 pending');
-    expect(fake.invoked('scm.status')).toEqual([{ appSessionId: A }]);
-    expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: A, refresh: false }]);
+    expect(fake.invoked('scm.status')).toEqual([{ appSessionId: MAIN_A }]);
+    expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: MAIN_A, refresh: false }]);
     await user.click(within(push()).getByRole('button', { name: 'PR #12' }));
     expect(fake.invoked('layout.openExternal')).toEqual([{ url: 'https://github.com/o/r/pull/12' }]);
   });
@@ -102,8 +105,8 @@ describe('push state row shows PR state, install and sign-in states and opens th
     expect(refresh.getAttribute('title')).toMatch(/^Checked /);
     await user.click(refresh);
     await lineReads('PR #12 Open · 3 passed');
-    expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: A, refresh: false }, { appSessionId: A, refresh: true }]);
-    await waitFor(() => expect(fake.invoked('scm.status')).toEqual([{ appSessionId: A }, { appSessionId: A }]));
+    expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: MAIN_A, refresh: false }, { appSessionId: MAIN_A, refresh: true }]);
+    await waitFor(() => expect(fake.invoked('scm.status')).toEqual([{ appSessionId: MAIN_A }, { appSessionId: MAIN_A }]));
   });
 
   it('says No PR for the branch, and why the PR state is unavailable', async () => {
@@ -194,10 +197,10 @@ describe('push state row shows PR state, install and sign-in states and opens th
       await mount();
       await lineReads('No PR for feature');
       answer = PR; // main now answers the PR the run created
-      act(() => fake.event('scm.remote.output', { appSessionId: A, token: '6f1c2e0a-0000-4000-8000-000000000001', seq: 1, kind: 'stdout', text: 'https://github.com/o/r/pull/12\n' }));
+      act(() => fake.event('scm.remote.output', { appSessionId: MAIN_A, token: '6f1c2e0a-0000-4000-8000-000000000001', seq: 1, kind: 'stdout', text: 'https://github.com/o/r/pull/12\n' }));
       await settle();
       expect(prLine()?.textContent).toBe('No PR for feature');
-      act(() => fake.event('scm.remote.output', { appSessionId: A, token: '6f1c2e0a-0000-4000-8000-000000000001', seq: 2, kind: 'exit', exitCode: 0, signal: null }));
+      act(() => fake.event('scm.remote.output', { appSessionId: MAIN_A, token: '6f1c2e0a-0000-4000-8000-000000000001', seq: 2, kind: 'exit', exitCode: 0, signal: null }));
       await lineReads('PR #12 Open · 2 passed, 1 pending');
     } finally {
       disconnect();
@@ -238,7 +241,7 @@ describe('push state row shows PR state, install and sign-in states and opens th
       setStatus(OTHER); // no surface mounted: the shared query keeps feature's answer, still fresh
       await mount();
       await lineReads('No PR for other');
-      expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: A, refresh: false }, { appSessionId: A, refresh: false }]);
+      expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: MAIN_A, refresh: false }, { appSessionId: MAIN_A, refresh: false }]);
     });
 
     it('hides on a detached head, and back on another branch shows no PR of the branch it left', async () => {
@@ -280,10 +283,10 @@ describe('push state row shows PR state, install and sign-in states and opens th
     await settle();
     await lineReads('Trust this folder to see PR state');
     scm = { ...SCM, checkedAt: '2026-10-06T10:02:00.000Z' }; // main records the trust in the `trusting` phase
-    act(() => fake.event('session.setup', { appSessionId: A, phase: 'trusting', detail: null, outcome: null }));
+    act(() => fake.event('session.setup', { appSessionId: MAIN_A, phase: 'trusting', detail: null, outcome: null }));
     for (let i = 0; i < 4; i++) await settle();
     await lineReads('PR #12 Open · 2 passed, 1 pending');
-    expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: A, refresh: false }]);
+    expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: MAIN_A, refresh: false }]);
   });
 
   it('asks the PR state again when scm.status found gh ready after the PR state found it signed out', async () => {
@@ -292,7 +295,7 @@ describe('push state row shows PR state, install and sign-in states and opens th
     bridge({ 'scm.pr.state': () => answers.shift() ?? PR });
     await mount();
     await lineReads('PR #12 Open · 2 passed, 1 pending');
-    expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: A, refresh: false }, { appSessionId: A, refresh: false }]);
+    expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: MAIN_A, refresh: false }, { appSessionId: MAIN_A, refresh: false }]);
   });
 
   it('polls the PR state every 2 minutes while the row is shown, and not at all once it is gone', async () => {

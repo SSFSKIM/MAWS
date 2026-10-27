@@ -6,6 +6,7 @@
 // which carries the editor's state, so the tab's own guard is not asked.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { TEST_MACHINE } from '../../../../test/support/machine';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, tabId, type LayoutMain, type TabRef } from '@shared/ipc/schema/layout';
 import { resetSlots } from '../app/slots';
 import type { LibraryRow } from '@shared/ipc/schema/library';
@@ -22,7 +23,7 @@ import { MainArea } from './MainArea';
 import { SHOW_IN_PANEL_COPY } from './Tab';
 
 const DECK = '00000000-0000-4000-8000-000000000001';
-const ARTIFACT: TabRef = { id: tabId({ kind: 'artifact', artifactId: DECK }), kind: 'artifact', artifactId: DECK, pinned: false };
+const ARTIFACT: TabRef = { id: tabId({ kind: 'artifact', artifactId: DECK, machine: TEST_MACHINE }), kind: 'artifact', artifactId: DECK, machine: TEST_MACHINE, pinned: false };
 const offs: (() => void)[] = [];
 const metadata: LibraryRow = { id: DECK, kind: 'presentation', title: 'Launch deck', createdBy: { kind: 'human' }, createdAt: 0, updatedAt: 0, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 1, lastEditor: { kind: 'human' }, lastEditedAt: 0, sessions: [] };
 
@@ -64,7 +65,7 @@ describe('Show in panel on an artifact tab', () => {
     const own = panelOf(A);
     expect(own?.tabs.map((t) => t.toolId)).toEqual([ARTIFACTS_TOOL_ID]);
     expect(own?.activeTabId).toBe(own?.tabs[0]?.id);
-    expect(viewOf(own?.tabs[0]?.id)).toEqual({ kind: 'record', artifactId: DECK });
+    expect(viewOf(own?.tabs[0]?.id)).toEqual({ kind: 'record', artifactId: DECK, machine: TEST_MACHINE });
   });
 
   it('with no project session, stays disabled even with a pinned Artifacts tab', async () => {
@@ -103,7 +104,7 @@ describe('Show in panel on an artifact tab', () => {
     fireEvent.click(await menuItem());
     await waitFor(() => expect(artifactTabOpen()).toBe(false));
     expect(closeGuard).not.toHaveBeenCalled();
-    expect(viewOf(panelOf(A)?.tabs[0]?.id)).toEqual({ kind: 'record', artifactId: DECK });
+    expect(viewOf(panelOf(A)?.tabs[0]?.id)).toEqual({ kind: 'record', artifactId: DECK, machine: TEST_MACHINE });
   });
 
   // P3-F wave S (F16 review): the Artifacts tab the artifact lands in may show another one, whose guard can keep it. That
@@ -115,7 +116,7 @@ describe('Show in panel on an artifact tab', () => {
     beforeEach(() => {
       asks = 0;
       useLayout.setState({ main: showing(sessionTab(A), ARTIFACT) });
-      act(() => void (dest = panelHost.addTool(ARTIFACTS_TOOL_ID, { appSessionId: A, params: { target: 'other-1' }, activate: false })));
+      act(() => void (dest = panelHost.addTool(ARTIFACTS_TOOL_ID, { appSessionId: A, params: { target: 'other-1', machine: TEST_MACHINE }, activate: false })));
       const closeGuard = async () => {
         asks += 1;
         return allow;
@@ -129,7 +130,7 @@ describe('Show in panel on an artifact tab', () => {
       fireEvent.click(await menuItem());
       await act(async () => {});
       expect(artifactTabOpen()).toBe(true);
-      expect(viewOf(dest)).toEqual({ kind: 'record', artifactId: 'other-1' });
+      expect(viewOf(dest)).toEqual({ kind: 'record', artifactId: 'other-1', machine: TEST_MACHINE });
       expect(asks).toBe(1);
     });
 
@@ -138,7 +139,7 @@ describe('Show in panel on an artifact tab', () => {
       render(<MainArea />);
       fireEvent.click(await menuItem());
       await waitFor(() => expect(artifactTabOpen()).toBe(false));
-      expect(viewOf(dest)).toEqual({ kind: 'record', artifactId: DECK });
+      expect(viewOf(dest)).toEqual({ kind: 'record', artifactId: DECK, machine: TEST_MACHINE });
       expect(asks).toBe(1);
     });
   });

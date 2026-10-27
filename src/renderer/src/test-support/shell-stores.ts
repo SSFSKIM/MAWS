@@ -1,7 +1,12 @@
 // Renderer component tests: fill the shell's stores from a scenario file as `ipc/events.ts` would after its snapshots,
 // and reset them between tests. Imported only by happy-dom suites.
 import { join } from 'node:path';
-import type { SessionDigest } from '@shared/ipc/schema';
+import * as z from 'zod';
+import { EngineSessionStatusSchema } from '@shared/engine/status';
+import { AttentionItemSchema } from '@shared/graph/attention';
+import { SessionRecordSchema } from '@shared/graph/session';
+import { ProjectRecordSchema, SessionDigestSchema, type SessionDigest } from '@shared/ipc/schema';
+import { compileAddressing } from '@shared/machine/address';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { projectReveal } from '../sidebar/reveal';
 import { useAttention } from '../stores/attention';
@@ -10,14 +15,32 @@ import { NO_PROJECT_OF, useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { TEST_FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { loadScenario, type Scenario } from '../../../../test/support/scenario';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 
 export function scenarioFile(name: 'nine-sessions' | 'empty' | 'many-sessions'): Scenario {
   return loadScenario(join(TEST_FIXTURE_DIR, `shell/${name}.json`));
 }
 
-// Everything the scenario holds at load, with both snapshots loaded; `attention` overrides the scenario's lists.
-export function fillStores(scenario: Scenario, opts: { loaded?: boolean } = {}): void {
+// P5 O6 M2 (OX2): the scenario as the page holds it, every id an address on `TEST_MACHINE`, lifted through the records'
+// own schemas as the client lifts main's answers. A scenario file is main's (bare ids); a test that looks an id up to
+// find it in a store or the DOM looks it up here.
+const liftAll = <S extends z.ZodType>(schema: S, values: unknown[]) => compileAddressing(z.array(schema)).lift(values, TEST_MACHINE);
+export function pageScenario(scenario: Scenario): Scenario {
+  return {
+    ...scenario,
+    projects: liftAll(ProjectRecordSchema, scenario.projects) as Scenario['projects'],
+    sessions: liftAll(SessionRecordSchema, scenario.sessions) as Scenario['sessions'],
+    digests: liftAll(SessionDigestSchema.partial(), scenario.digests) as Scenario['digests'],
+    engine: liftAll(EngineSessionStatusSchema, scenario.engine) as Scenario['engine'],
+    attention: scenario.attention.map((a) => ({ ...a, appSessionId: at(a.appSessionId), items: liftAll(AttentionItemSchema, a.items) as typeof a.items })),
+  };
+}
+
+// Everything the scenario holds at load, with both snapshots loaded; `attention` overrides the scenario's lists. The
+// scenario is given as its file holds it (bare); the stores get it as the page would (`pageScenario`).
+export function fillStores(bare: Scenario, opts: { loaded?: boolean } = {}): void {
   const loaded = opts.loaded ?? true;
+  const scenario = pageScenario(bare);
   const s = useSessions.getState();
   useSessions.setState({
     loaded,
@@ -53,7 +76,7 @@ export function resetShellStores(): void {
     panelBySession: new Map(),
     panelActiveNoSession: null,
     panelParams: {}, // P4-B3
-    panelSurfaces: { version: 1, stacks: {}, pinnedTools: [], contexts: {} },
+    panelSurfaces: { version: 2, stacks: {}, pinnedTools: [], contexts: {} },
     knownSession: () => true,
     dragging: null, // P4-B3
     hydrated: true,

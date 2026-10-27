@@ -3,9 +3,12 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { REL } from '../test-support/relative-time';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
-import type { MawsBridge, ProjectRecord } from '@shared/ipc/schema';
+import { ProjectRecordSchema, type PreloadBridge, type ProjectRecord } from '@shared/ipc/schema';
+import { SessionRecordSchema, type SessionRecord } from '@shared/graph/session';
+import { compileAddressing } from '@shared/machine/address';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { registerSessionAction } from '../app/session-actions';
 import { registerSessionCreator } from '../keymap/actions-runtime';
 import { closeDialog, useDialogs } from '../sessions/dialogs';
@@ -18,7 +21,7 @@ import { useLayout } from '../stores/layout';
 import { useNotices } from '../stores/notices';
 import { activeTab, currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
-import { fileTabsByProject, fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
+import { fileTabsByProject, fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import type { ProjectKey } from './derive';
 import { registerProjectAction } from './project-actions';
 import { useResumeChooser } from '../resume/host'; // P2-D
@@ -28,8 +31,17 @@ import { Sidebar } from './Sidebar';
 import { formatClock } from '@shared/app/date-format'; // L129
 import { togglePalette, usePalette } from '../palette/CommandPalette';
 
+// P5 O6 M2: a scenario file is main's (bare ids), which `fillStores` and the fake `window.maws` take; the page holds it
+// lifted (`page`), so a test finds a store's, the layout's or the DOM's id through `idOf` or `at`, and main's through
+// `bareIdOf`
 const nine = scenarioFile('nine-sessions');
-const idOf = (title: string) => nine.sessions.find((r) => r.title.text === title)!.appId;
+const page = pageScenario(nine);
+const idOf = (title: string) => page.sessions.find((r) => r.title.text === title)!.appId;
+const bareIdOf = (title: string) => nine.sessions.find((r) => r.title.text === title)!.appId;
+const recordOnPage = (record: SessionRecord) => compileAddressing(SessionRecordSchema).lift(record, TEST_MACHINE) as SessionRecord;
+const recordAsMain = (record: SessionRecord) => compileAddressing(SessionRecordSchema).lower(record).value;
+const projectOnPage = (project: ProjectRecord) => compileAddressing(ProjectRecordSchema).lift(project, TEST_MACHINE) as ProjectRecord;
+const pageItem = (...args: Parameters<typeof item>) => { const bare = item(...args); return { ...bare, id: at(bare.id), appSessionId: at(bare.appSessionId) }; };
 const offs: (() => void)[] = [];
 
 const projectsTree = () => screen.getByRole('tree', { name: 'Projects' });
@@ -41,7 +53,7 @@ const sessionRows = (el: HTMLElement) =>
     .queryAllByRole('treeitem')
     .filter((t) => t.dataset.kind === 'session')
     .map(label);
-const expand = (...keys: string[]) => act(() => useLayout.getState().setSidebar({ expandedProjects: keys as ProjectKey[] }));
+const expand = (...keys: string[]) => act(() => useLayout.getState().setSidebar({ expandedProjects: keys.map((key) => (key === 'other' ? key : at(key))) as ProjectKey[] })); // bare keys, as the scenario names them
 const expanded = () => useLayout.getState().regions.sidebar.expandedProjects;
 const toggle = (user: ReturnType<typeof userEvent.setup>, name: string) => user.click(within(row(name)).getAllByText(name)[0]);
 
@@ -51,7 +63,7 @@ afterEach(() => {
   closeDialog();
   useResumeChooser.setState({ open: null }); // P2-D
   offs.splice(0).forEach((off) => off());
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 describe('sidebar destination search', () => {
@@ -107,7 +119,7 @@ describe('sidebar action stability', () => {
     expand(alpha.id);
     return render(<><Sidebar /><button>Outside</button></>);
   };
-  const working = (id: AppSessionId) => act(() => useSessions.getState().applyDigest(digest(id, { phase: 'working', turnStartedAt: id === elsewhere.appId ? '2026-10-24T13:00:00Z' : '2026-10-24T12:00:00Z' })));
+  const working = (id: AppSessionId) => act(() => useSessions.getState().applyDigest(digest(at(id), { phase: 'working', turnStartedAt: id === elsewhere.appId ? '2026-10-24T13:00:00Z' : '2026-10-24T12:00:00Z' })));
 
   it.each(['pointer', 'keyboard'] as const)('holds both project and session ranks for the %s, while statuses stay live, then applies the latest ranks on leaving', (input) => {
     start();
@@ -184,7 +196,7 @@ describe('sidebar action stability', () => {
     fireEvent.pointerEnter(row('first'));
     working(elsewhere.appId);
     expect(projectRows()).toEqual(['alpha', 'beta']);
-    act(() => useSessions.getState().applyRemoved({ appSessionId: first.appId, revision: useSessions.getState().revision + 1 }));
+    act(() => useSessions.getState().applyRemoved({ appSessionId: at(first.appId), revision: useSessions.getState().revision + 1 }));
     expect(projectRows()).toEqual(['beta', 'alpha']);
   });
 
@@ -193,17 +205,17 @@ describe('sidebar action stability', () => {
     act(() => row('first').focus());
     working(elsewhere.appId);
     expect(projectRows()).toEqual(['alpha', 'beta']);
-    act(() => useSessions.getState().applyRemoved({ appSessionId: first.appId, revision: useSessions.getState().revision + 1 }));
+    act(() => useSessions.getState().applyRemoved({ appSessionId: at(first.appId), revision: useSessions.getState().revision + 1 }));
     expect(document.activeElement).toBe(document.body);
     expect(projectRows()).toEqual(['beta', 'alpha']);
     // Later live data does not need another focus/blur event to resume ordering.
-    act(() => useSessions.getState().applyDigest(digest(second.appId, { phase: 'working', turnStartedAt: '2026-10-24T14:00:00Z', revision: 2 })));
+    act(() => useSessions.getState().applyDigest(digest(at(second.appId), { phase: 'working', turnStartedAt: '2026-10-24T14:00:00Z', revision: 2 })));
     expect(projectRows()).toEqual(['alpha', 'beta']);
   });
 
   it('lets an explicit sort change take effect while keyboard focus remains in the sidebar', async () => {
     start();
-    act(() => useSessions.getState().applyDigest(digest(second.appId, { phase: 'working', turnStartedAt: '2026-10-24T07:00:00Z' })));
+    act(() => useSessions.getState().applyDigest(digest(at(second.appId), { phase: 'working', turnStartedAt: '2026-10-24T07:00:00Z' })));
     expect(sessionRows(row('alpha'))).toEqual(['second', 'first']);
     act(() => row('second').focus());
     act(() => useLayout.getState().setSidebar({ sort: 'recency' }));
@@ -222,11 +234,11 @@ describe('sidebar recovery routes', () => {
       'session.list': () => ({ sessions: [archived, elsewhere], revision: 1 }),
       'session.update': () => {
         archived.archived = false;
-        useSessions.getState().applyChanged({ record: archived, cause: 'update', revision: useSessions.getState().revision + 1 });
+        useSessions.getState().applyChanged({ record: recordOnPage(archived), cause: 'update', revision: useSessions.getState().revision + 1 });
         return archived;
       },
     });
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     render(<><Sidebar /><SessionDialogs /></>);
     if (route === 'footer') {
       expect(screen.queryByRole('treeitem', { name: 'Other sessions' })).toBeNull();
@@ -252,13 +264,13 @@ describe('sidebar recovery routes', () => {
     fillStores({ ...nine, projects: nine.projects.map((p) => ({ ...p, hidden: p.id === project.id })) });
     useLayout.getState().setSidebar({ collapsed: true });
     const fake = fakeClient();
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     render(<Sidebar />);
-    act(() => revealProject(project.id));
+    act(() => revealProject(at(project.id)));
     await act(() => fake.fail('session.projects.add', 'Directory no longer exists'));
     expect(screen.queryByRole('treeitem', { name: 'MAWS' })).toBeNull();
     expect(useLayout.getState().regions.sidebar.collapsed).toBe(true);
-    expect(expanded()).not.toContain(project.id);
+    expect(expanded()).not.toContain(at(project.id));
     expect(useNotices.getState().notices.at(-1)).toMatchObject({ level: 'danger', text: 'Directory no longer exists' });
   });
 
@@ -266,10 +278,10 @@ describe('sidebar recovery routes', () => {
   it('the title bar chip’s Show in sidebar restores a hidden project before revealing and focusing its sidebar row', async () => {
     const project = nine.projects.find((p) => p.name === 'MAWS')!;
     fillStores({ ...nine, projects: nine.projects.map((p) => ({ ...p, hidden: p.id === project.id })) });
-    useLayout.getState().setCurrentProject(project.id);
+    useLayout.getState().setCurrentProject(at(project.id));
     useLayout.getState().setSidebar({ collapsed: true });
     const fake = fakeClient();
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     render(<><Sidebar /><Toolbar /></>);
     const chip = document.querySelector<HTMLElement>('[data-toolbar-project]')!;
     const menuItem = async () => {
@@ -284,7 +296,7 @@ describe('sidebar recovery routes', () => {
     expect(useLayout.getState().regions.sidebar.collapsed).toBe(true);
     await act(() => fake.reply('session.projects.add', { ...project, hidden: false }));
     // Main's project event may arrive after its command response.
-    act(() => useSessions.getState().applyProjects({ projects: nine.projects, revision: 10 }));
+    act(() => useSessions.getState().applyProjects({ projects: page.projects, revision: 10 }));
     await waitFor(() => expect(document.activeElement).toBe(row('MAWS')));
     expect(row('MAWS').getAttribute('aria-expanded')).toBe('true');
     expect(useLayout.getState().regions.sidebar.collapsed).toBe(false);
@@ -318,7 +330,7 @@ describe('Needs you across projects', () => {
     fillStores(nine);
     fileTabsByProject();
     const fake = fakeClient({ 'attention.request': () => ({ event: null }) });
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     const user = userEvent.setup();
     render(<Sidebar />);
     const search = screen.getByRole('searchbox');
@@ -333,7 +345,7 @@ describe('Needs you across projects', () => {
     await user.keyboard('{End}{ArrowUp}{Home}{ArrowDown}{Enter}');
     expect(document.activeElement).toBe(buttons()[1]);
     expect(activeTab(useLayout.getState().main)).toMatchObject({ appSessionId: idOf('Sidebar interaction pass') });
-    expect(useLayout.getState().main.current).toBe('proj-maws');
+    expect(useLayout.getState().main.current).toBe(at('proj-maws'));
     expect(fake.invoked('session.answer')).toEqual([]);
     await user.tab();
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Filter projects' }));
@@ -349,7 +361,7 @@ describe('Needs you across projects', () => {
     act(() => useAttention.getState().applyChanged({ appSessionId: idOf('Fix sidebar drag'), items: [] }));
     expect(document.activeElement).toBe(buttons()[0]);
     act(() => {
-      for (const entry of nine.attention) useAttention.getState().applyChanged({ appSessionId: entry.appSessionId, items: [] });
+      for (const entry of page.attention) useAttention.getState().applyChanged({ appSessionId: entry.appSessionId, items: [] });
     });
     expect(document.activeElement).toBe(screen.getByRole('searchbox'));
   });
@@ -374,7 +386,7 @@ describe('Needs you across projects', () => {
     const id = idOf('Fix sidebar drag');
     const focused = buttons()[0];
     act(() => focused.focus());
-    act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [item(id, 'interrupted', '2026-10-03T10:00:00Z')] }));
+    act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [pageItem(bareIdOf('Fix sidebar drag'), 'interrupted', '2026-10-03T10:00:00Z')] }));
     expect(document.activeElement).toBe(focused);
     expect(buttons().at(-1)).toBe(focused);
     act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [] }));
@@ -393,7 +405,7 @@ describe('Needs you across projects', () => {
     act(() => useAttention.getState().applyChanged({ appSessionId: idOf('Fix sidebar drag'), items: [] }));
     expect(document.activeElement).toBe(target);
     act(() => {
-      for (const entry of nine.attention) useAttention.getState().applyChanged({ appSessionId: entry.appSessionId, items: [] });
+      for (const entry of page.attention) useAttention.getState().applyChanged({ appSessionId: entry.appSessionId, items: [] });
     });
     expect(document.activeElement).toBe(target);
   });
@@ -402,14 +414,14 @@ describe('Needs you across projects', () => {
     fillStores(nine);
     render(<Sidebar />);
     const id = idOf('Fix sidebar drag');
-    act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [item(id, 'interrupted', '2026-10-03T10:00:00Z')] }));
+    act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [pageItem(bareIdOf('Fix sidebar drag'), 'interrupted', '2026-10-03T10:00:00Z')] }));
     expect(buttons().at(-1)?.getAttribute('aria-label')).toBe('MAWS · Fix sidebar drag · Interrupted');
-    act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [item(id, 'error', '2026-09-01T10:00:00Z')] }));
+    act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [pageItem(bareIdOf('Fix sidebar drag'), 'error', '2026-09-01T10:00:00Z')] }));
     expect(buttons()[0].getAttribute('aria-label')).toBe('MAWS · Fix sidebar drag · Error');
     act(() => useSessions.getState().applyChanged({ record: { ...useSessions.getState().records.get(id)!, archived: true }, cause: 'update', revision: useSessions.getState().revision + 1 }));
     expect(buttons()).toHaveLength(2);
     act(() => {
-      for (const entry of nine.attention) useAttention.getState().applyChanged({ appSessionId: entry.appSessionId, items: [] });
+      for (const entry of page.attention) useAttention.getState().applyChanged({ appSessionId: entry.appSessionId, items: [] });
     });
     expect(screen.queryByRole('list', { name: 'Needs you' })).toBeNull();
     expect(screen.queryByRole('heading', { name: /Needs you/ })).toBeNull();
@@ -445,14 +457,14 @@ describe('the project list', () => {
     const user = userEvent.setup();
     render(<Sidebar />);
     await toggle(user, 'MAWS');
-    expect(expanded()).toEqual(['proj-maws']);
+    expect(expanded()).toEqual([at('proj-maws')]);
     expect(row('MAWS').getAttribute('aria-expanded')).toBe('true');
     expect(sessionRows(row('MAWS'))).toEqual(['Workstation north star', 'Fix sidebar drag', 'Sidebar interaction pass', 'Charter + research']);
     expect(within(row('MAWS')).getByRole('group', { name: 'MAWS' })).toBeTruthy();
     await toggle(user, 'codex_somersault');
-    expect(expanded()).toEqual(['proj-maws', 'proj-codex-somersault']);
+    expect(expanded()).toEqual([at('proj-maws'), at('proj-codex-somersault')]);
     await toggle(user, 'MAWS');
-    expect(expanded()).toEqual(['proj-codex-somersault']);
+    expect(expanded()).toEqual([at('proj-codex-somersault')]);
     expect(row('MAWS').getAttribute('aria-expanded')).toBe('false');
     await waitFor(() => expect(sessionRows(row('MAWS'))).toEqual([])); // once the close has run
   });
@@ -462,11 +474,11 @@ describe('the project list', () => {
     act(() => useLayout.setState({ hydrated: false }));
     render(<Sidebar />);
     await toggle(user, 'MAWS');
-    expect(expanded()).toEqual(['proj-maws']);
-    const saved = { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, expandedProjects: ['proj-codex-somersault'] } };
+    expect(expanded()).toEqual([at('proj-maws')]);
+    const saved = { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, expandedProjects: [at('proj-codex-somersault')] } };
     const client = fakeClient({ 'layout.list': { keys: ['regions'] }, 'layout.get': ({ key }: { key: string }) => ({ value: key === 'regions' ? saved : null }), 'layout.set': undefined }).client;
     await act(() => useLayout.getState().hydrate(client, () => true));
-    expect(expanded()).toEqual(['proj-codex-somersault', 'proj-maws']);
+    expect(expanded()).toEqual([at('proj-codex-somersault'), at('proj-maws')]);
   });
 
   it('opens what the layout says, and passes over a project that is gone', () => {
@@ -520,7 +532,7 @@ describe('removing a project from the sidebar', () => {
     const remove = vi.fn();
     offs.push(registerProjectAction('removeProject', remove));
     await user.click(within(row('MAWS')).getByRole('button', { name: 'Remove MAWS from sidebar' }));
-    expect(remove).toHaveBeenCalledWith('proj-maws');
+    expect(remove).toHaveBeenCalledWith(at('proj-maws'));
     expect(expanded()).toEqual([]); // the click does not toggle the row
     const buttons = within(row('MAWS')).getAllByRole('button').map((b) => b.getAttribute('aria-label'));
     expect(buttons.indexOf('Remove MAWS from sidebar')).toBe(buttons.indexOf('New chat in MAWS') - 1);
@@ -582,13 +594,13 @@ describe('an expanded project', () => {
 
   it('marks a worktree session with its ⎇ branch in one flat list, with no groups and no git call', () => {
     const fake = fakeClient();
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     fillStores({
       ...nine,
       sessions: nine.sessions.map((r) =>
-        r.appId === idOf('Fix sidebar drag')
+        r.appId === bareIdOf('Fix sidebar drag')
           ? { ...r, worktree: { path: '/Users/new/Developer/GitHub/MAWS/.claude/worktrees/accept-one', branch: 'worktree-accept-one' } }
-          : r.appId === idOf('Charter + research')
+          : r.appId === bareIdOf('Charter + research')
             ? { ...r, worktree: { path: '/Users/new/Developer/GitHub/MAWS-detached', branch: null }, branch: null }
             : r,
       ),
@@ -618,11 +630,11 @@ describe('an expanded project', () => {
     const pin = vi.fn();
     offs.push(registerSessionAction('pin', pin));
     const fake = fakeClient({ 'session.update': ({ appSessionId, patch }: { appSessionId: AppSessionId; patch: { unread: boolean } }) => {
-      const record = { ...useSessions.getState().records.get(appSessionId)!, ...patch };
+      const record = { ...useSessions.getState().records.get(at(appSessionId))!, ...patch };
       useSessions.getState().applyChanged({ record, cause: 'update', revision: useSessions.getState().revision + 1 });
-      return record;
+      return recordAsMain(record);
     } });
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     expand('proj-maws');
     render(<Sidebar />);
     const session = row('Fix sidebar drag');
@@ -632,12 +644,12 @@ describe('an expanded project', () => {
     const overflow = within(session).getByRole('button', { name: 'Actions for Fix sidebar drag' });
     expect(toggle).not.toBe(overflow); // distinct actions; the real-window regression checks their hit targets
     await user.click(within(session).getByRole('button', { name: 'Mark read' }));
-    expect(fake.invoked('session.update')).toEqual([{ appSessionId: idOf('Fix sidebar drag'), patch: { unread: false } }]);
+    expect(fake.invoked('session.update')).toEqual([{ appSessionId: bareIdOf('Fix sidebar drag'), patch: { unread: false } }]);
     expect(within(session).queryByRole('img', { name: 'Unread' })).toBeNull();
     await user.click(within(session).getByRole('button', { name: 'Mark unread' }));
     expect(fake.invoked('session.update')).toEqual([
-      { appSessionId: idOf('Fix sidebar drag'), patch: { unread: false } },
-      { appSessionId: idOf('Fix sidebar drag'), patch: { unread: true } },
+      { appSessionId: bareIdOf('Fix sidebar drag'), patch: { unread: false } },
+      { appSessionId: bareIdOf('Fix sidebar drag'), patch: { unread: true } },
     ]);
     expect(within(session).getByRole('img', { name: 'Unread' })).toBeTruthy();
     expect(activeTab(useLayout.getState().main)).toBeNull();
@@ -679,15 +691,15 @@ describe('an expanded project', () => {
   });
 
   it('"Mark all read" on a project row marks the project’s unread sessions read through session.update', async () => {
-    const fake = fakeClient({ 'session.update': ({ appSessionId }: { appSessionId: AppSessionId }) => useSessions.getState().records.get(appSessionId) });
-    window.maws = fake.client;
+    const fake = fakeClient({ 'session.update': ({ appSessionId }: { appSessionId: AppSessionId }) => recordAsMain(useSessions.getState().records.get(at(appSessionId))!) });
+    window.maws = fake.client as unknown as PreloadBridge;
     render(<Sidebar />);
     fireEvent.contextMenu(row('MAWS'));
     const menu = await screen.findByRole('menu');
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Mark all read' }));
     await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
     expect(fake.invoked('session.update')).toEqual([
-      { appSessionId: idOf('Fix sidebar drag'), patch: { unread: false, lastSeen: { messageUuid: null, at: expect.any(String) } } },
+      { appSessionId: bareIdOf('Fix sidebar drag'), patch: { unread: false, lastSeen: { messageUuid: null, at: expect.any(String) } } },
     ]);
   });
 
@@ -711,7 +723,7 @@ describe('an expanded project', () => {
     fillStores(scenarioFile('many-sessions'));
     render(<Sidebar />);
     await userEvent.type(screen.getByRole('searchbox'), 'MAWS');
-    const expected = [...useSessions.getState().records.values()].filter((r) => r.projectId === 'proj-maws' && !r.archived);
+    const expected = [...useSessions.getState().records.values()].filter((r) => r.projectId === at('proj-maws') && !r.archived);
     expect(expected.length).toBeGreaterThan(8);
     expect(sessionRows(row('MAWS'))).toHaveLength(expected.length);
     expect(within(row('MAWS')).getByLabelText(`${expected.length} matching sessions`)).toBeTruthy();
@@ -747,7 +759,7 @@ describe('the resume chooser from the sidebar', () => {
       'git.worktree.list': { repoRoot: maws.directory, commonDir: `${maws.directory}/.git`, worktrees: [{ repoRoot: maws.directory, path: maws.directory, branch: 'master', head: 'abc', isMain: true, locked: false, prunable: false, managed: false }] },
       'session.recentTurns': TURNS,
     });
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
   });
   const picker = () => screen.getByRole('dialog', { name: 'Resume session' });
   const options = () => within(picker()).queryAllByRole('option').map((o) => o.querySelector('[data-title]')!.textContent);
@@ -912,10 +924,10 @@ describe('a freshly launched session', () => {
   beforeEach(() => fillStores(nine));
 
   it('its row reads its first prompt, and a record without a title reads "New chat"', () => {
-    const base = nine.sessions.find((r) => r.projectId === 'proj-maws')!;
+    const base = page.sessions.find((r) => r.projectId === at('proj-maws'))!;
     const now = new Date().toISOString();
-    const launched = { ...base, appId: '11111111-1111-4111-8111-111111111111' as AppSessionId, engineSessionId: null, title: { text: 'Fix the drag handle', source: 'none' as const }, pinned: false, unread: false, createdAt: now, updatedAt: now };
-    const blank = { ...launched, appId: '22222222-2222-4222-8222-222222222222' as AppSessionId, title: { text: '', source: 'none' as const } };
+    const launched = { ...base, appId: at('11111111-1111-4111-8111-111111111111' as AppSessionId), engineSessionId: null, title: { text: 'Fix the drag handle', source: 'none' as const }, pinned: false, unread: false, createdAt: now, updatedAt: now };
+    const blank = { ...launched, appId: at('22222222-2222-4222-8222-222222222222' as AppSessionId), title: { text: '', source: 'none' as const } };
     act(() => {
       useSessions.getState().applyChanged({ record: launched, cause: 'live', revision: 1000 });
       useSessions.getState().applyChanged({ record: blank, cause: 'live', revision: 1001 });
@@ -942,8 +954,8 @@ describe('sidebar keyboard', () => {
     await user.keyboard('{End}');
     expect(document.activeElement).toBe(row('Other sessions'));
     await user.keyboard('{ArrowUp}{Enter}');
-    expect(expanded()).toEqual(['proj-maws']);
-    expect(useLayout.getState().main.current, 'W12: Enter shows the project’s tab set, as a click does').toBe('proj-maws');
+    expect(expanded()).toEqual([at('proj-maws')]);
+    expect(useLayout.getState().main.current, 'W12: Enter shows the project’s tab set, as a click does').toBe(at('proj-maws'));
     expect(document.activeElement).toBe(row('MAWS'));
     await user.keyboard('{ArrowRight}');
     expect(document.activeElement).toBe(row('Workstation north star'));
@@ -965,7 +977,7 @@ describe('sidebar keyboard', () => {
     await user.keyboard('{ArrowLeft}');
     expect(expanded()).toEqual([]);
     await user.keyboard(' ');
-    expect(expanded()).toEqual(['proj-maws']);
+    expect(expanded()).toEqual([at('proj-maws')]);
   });
 
   // W12 (I3) on W11's tree: a project's activation is one path for the pointer and the keys, and it shows the project's
@@ -976,19 +988,19 @@ describe('sidebar keyboard', () => {
     act(() => useLayout.getState().openSession(idOf('Fix sidebar drag')));
     const current = () => useLayout.getState().main.current;
     const shown = () => activeTab(useLayout.getState().main);
-    expect(current()).toBe('proj-maws');
+    expect(current()).toBe(at('proj-maws'));
     render(<Sidebar />);
     await toggle(user, 'codex_somersault');
-    expect(current()).toBe('proj-codex-somersault');
+    expect(current()).toBe(at('proj-codex-somersault'));
     expect(shown(), 'the other project’s set is empty').toBeNull();
     row('MAWS').focus();
     await user.keyboard('{Enter}');
-    expect(current()).toBe('proj-maws');
+    expect(current()).toBe(at('proj-maws'));
     expect(shown()).toMatchObject({ kind: 'session', appSessionId: idOf('Fix sidebar drag') });
     row('claude-usage-menubar').focus();
     await user.keyboard('{ArrowRight}');
-    expect(current()).toBe('proj-claude-usage-menubar');
-    expect(expanded()).toEqual(['proj-codex-somersault', 'proj-maws', 'proj-claude-usage-menubar']);
+    expect(current()).toBe(at('proj-claude-usage-menubar'));
+    expect(expanded()).toEqual([at('proj-codex-somersault'), at('proj-maws'), at('proj-claude-usage-menubar')]);
     row('Other sessions').focus();
     await user.keyboard(' ');
     expect(current()).toBe('none');
@@ -1023,14 +1035,14 @@ describe('new sessions from the sidebar', () => {
 
   it('with a creator, a project row’s "+" opens an unstarted session tab in that project without expanding it, and the sidebar does not list it', async () => {
     const user = userEvent.setup();
-    const creator = vi.fn(async () => 'app-new-1' as AppSessionId);
+    const creator = vi.fn(async () => at('app-new-1' as AppSessionId));
     offs.push(registerSessionCreator(creator));
     render(<Sidebar />);
     await user.click(within(row('MAWS')).getByRole('button', { name: 'New chat in MAWS' }));
-    expect(creator).toHaveBeenCalledWith('proj-maws');
+    expect(creator).toHaveBeenCalledWith(at('proj-maws'));
     expect(expanded()).toEqual([]);
-    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: 'app-new-1' });
-    expect(useSessions.getState().unstarted.get('app-new-1' as AppSessionId)?.projectId).toBe('proj-maws');
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: at('app-new-1') });
+    expect(useSessions.getState().unstarted.get(at('app-new-1' as AppSessionId))?.projectId).toBe(at('proj-maws'));
     expand('proj-maws');
     expect(sessionRows(row('MAWS'))).toHaveLength(4);
   });
@@ -1051,7 +1063,7 @@ describe('sidebar states', () => {
     const extra = (n: number): ProjectRecord => ({ ...nine.projects[0], id: `proj-x${n}` as ProjectId, name: `extra-${n}`, directory: `/x/extra-${n}`, order: 10 + n, createdAt: `2026-08-0${n}T00:00:00.000Z` });
     fillStores({ ...nine, projects: [...nine.projects, extra(1), extra(2), extra(3), extra(4)] }, { loaded: false });
     render(<Sidebar />);
-    act(() => revealProject('proj-x2' as ProjectId)); // the sixth project: folded under "Show more" on a plain load
+    act(() => revealProject(at('proj-x2' as ProjectId))); // the sixth project: folded under "Show more" on a plain load
     act(() => {
       useSessions.setState({ loaded: true });
       useAttention.setState({ loaded: true });
@@ -1069,12 +1081,12 @@ describe('sidebar states', () => {
     expect((screen.getByRole('button', { name: 'Add project' }) as HTMLButtonElement).disabled).toBe(false);
     const create = screen.getByRole('button', { name: 'New chat' }) as HTMLButtonElement;
     expect(create.disabled).toBe(true);
-    offs.push(registerSessionCreator(async () => 'app-new-2' as AppSessionId));
+    offs.push(registerSessionCreator(async () => at('app-new-2' as AppSessionId)));
     rerender(<Sidebar />);
     expect(create.disabled).toBe(false);
     await userEvent.setup().click(create);
-    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: 'app-new-2' });
-    expect(useSessions.getState().unstarted.get('app-new-2' as AppSessionId)?.projectId).toBeNull();
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: at('app-new-2') });
+    expect(useSessions.getState().unstarted.get(at('app-new-2' as AppSessionId))?.projectId).toBeNull();
   });
 });
 
@@ -1119,18 +1131,18 @@ describe('the footer gear', () => {
 describe('a released session’s row', () => {
   beforeEach(() => {
     fillStores(nine);
-    window.maws = fakeClient().client;
+    window.maws = fakeClient().client as unknown as PreloadBridge;
   });
 
   it('reads idle with the muted word released, and says when and why in its title', () => {
     const id = idOf('Settings idle probe');
-    const at = new Date(2026, 8, 29, 14, 2).toISOString();
+    const when = new Date(2026, 8, 29, 14, 2).toISOString();
     const digest = useSessions.getState().digests.get(id)!;
-    act(() => useSessions.getState().applyDigest({ ...digest, released: { at, reason: 'budget', limitKiB: 8 * 1024 * 1024 }, revision: digest.revision + 1 }));
+    act(() => useSessions.getState().applyDigest({ ...digest, released: { at: when, reason: 'budget', limitKiB: 8 * 1024 * 1024 }, revision: digest.revision + 1 }));
     expand('proj-claude-usage-menubar');
     render(<Sidebar />);
     const mark = within(row('Settings idle probe')).getByText('released');
-    expect(mark.getAttribute('title')).toBe(`Released at ${formatClock(Date.parse(at))} to stay under the 8 GB memory budget · Send resumes it`);
+    expect(mark.getAttribute('title')).toBe(`Released at ${formatClock(Date.parse(when))} to stay under the 8 GB memory budget · Send resumes it`);
     expect(within(row('Settings idle probe')).getByRole('img', { name: 'Idle' }).textContent).toBe('○'); // the idle glyph, unchanged
     expect(within(row('Settings idle probe')).queryByLabelText('Unread')).toBeNull();
     expect(screen.getAllByText('released')).toHaveLength(1);
@@ -1194,10 +1206,10 @@ describe('deliberately selected projects', () => {
     fillStores({ ...nine, projects: nine.projects.map((p) => ({ ...p, discovered: p.name === 'MAWS' })), sessions: nine.sessions.map((r) => r.projectId === 'proj-maws' ? { ...r, pinned: false, holder: { kind: 'none' as const } } : r), digests: [], engine: [], attention: nine.attention.filter((a) => !nine.sessions.some((r) => r.appId === a.appSessionId && r.projectId === 'proj-maws')) });
     const fake = fakeClient({ 'session.projects.add': ({ directory }: { directory: string }) => {
       const projects = nine.projects.map((p) => ({ ...p, ...(p.directory === directory ? { discovered: false } : {}) }));
-      useSessions.getState().applyProjects({ projects, revision: useSessions.getState().revision + 1 });
+      useSessions.getState().applyProjects({ projects: projects.map(projectOnPage), revision: useSessions.getState().revision + 1 });
       return projects.find((p) => p.directory === directory)!;
     } });
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     render(<Sidebar />);
     expect(screen.queryByRole('treeitem', { name: 'MAWS' })).toBeNull();
     expect(within(screen.getByRole('list', { name: 'Needs you' })).getByRole('button', { name: /Quota reset recovery/ })).toBeTruthy();
@@ -1213,7 +1225,7 @@ it('keeps a discovered project with pinned, running or waiting work, but explici
   fillStores({ ...nine, projects: nine.projects.map((p) => ({ ...p, discovered: true })) });
   render(<Sidebar />);
   expect(screen.getByRole('treeitem', { name: 'MAWS' })).toBeTruthy();
-  act(() => useSessions.getState().applyProjects({ projects: nine.projects.map((p) => ({ ...p, discovered: true, hidden: p.name === 'MAWS' })), revision: useSessions.getState().revision + 1 }));
+  act(() => useSessions.getState().applyProjects({ projects: page.projects.map((p) => ({ ...p, discovered: true, hidden: p.name === 'MAWS' })), revision: useSessions.getState().revision + 1 }));
   expect(screen.queryByRole('treeitem', { name: 'MAWS' })).toBeNull();
   expect(within(screen.getByRole('list', { name: 'Needs you' })).getByRole('button', { name: /Fix sidebar drag/ })).toBeTruthy();
 });

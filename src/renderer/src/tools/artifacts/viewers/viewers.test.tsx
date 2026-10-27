@@ -11,6 +11,7 @@ import type { ArtifactVersion } from '@shared/artifacts/version';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { LibraryRow } from '@shared/ipc/schema/library';
 import { record as sessionRecord } from '../../../../../../test/support/builders';
+import { at } from '../../../../../../test/support/machine';
 import { resetArtifactEditors, type ArtifactEditor } from '../../../artifacts/registry';
 import { resetExportFormats } from '../../../library/export';
 import { connectLibrary, resetLibrary } from '../../../library/store';
@@ -40,7 +41,8 @@ vi.mock('../../../side/card/CardHost', async (importOriginal) => {
 });
 
 const ID = '00000000-0000-4000-8000-0000000000a1';
-const P = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
+const P = 'a1111111-1111-4111-8111-111111111111' as AppSessionId; // main's id, in its rows and calls
+const PAGE_P = at(P); // P5 O6 M2: the page's address of it
 const SCOPE: EditorHostScope = { surface: 'panel', tabId: 'artifacts:test' };
 const version = (id: number, seq: number): ArtifactVersion => ({ id, seq, at: seq, actor: { kind: 'human' }, kind: 'auto', assetRefs: [] });
 
@@ -83,7 +85,7 @@ beforeEach(() => {
   cardFrames.length = 0;
   useViewer.getState().reset();
   useCommentCard.setState({ open: null });
-  useSessions.setState({ records: new Map([[P, sessionRecord(P, { directory: '/repo' })]]) });
+  useSessions.setState({ records: new Map([[PAGE_P, sessionRecord(PAGE_P, { directory: '/repo' })]]) });
   row = rowOf('html');
   versions = [version(1, 4), version(2, 9)];
   names = { 4: 'index.html', 9: 'index.html' };
@@ -467,7 +469,7 @@ describe('Comment on an HTML page', () => {
     post(picked, frame('html')!.contentWindow);
     expect(opened).toHaveLength(1);
     expect(opened[0]!.anchor).toEqual({ kind: 'artifact-element', locator: '#hero', label: 'Dashboard v2 › h1#hero “Sales overview”', pageUrl: artifactUrl(ID, 9, 'index.html') });
-    expect(opened[0]!.context).toMatchObject({ appSessionId: P, placement: { kind: 'card', host: 'artifact-page', rect: picked.rect } });
+    expect(opened[0]!.context).toMatchObject({ appSessionId: PAGE_P, placement: { kind: 'card', host: 'artifact-page', rect: picked.rect } });
     expect(document.querySelector('[data-card-host="artifact-page"] [data-comment-card]')).not.toBeNull();
     expect(useCommentCard.getState().open?.target).toEqual({ kind: 'artifact-page', artifactId: ID, revision: 9 });
     expect(action('Comment').pressed).toBe(false); // one pick per Comment
@@ -508,7 +510,7 @@ describe('Comment on an HTML page', () => {
     mount('html');
     await waitFor(() => expect(frame('html')).not.toBeNull());
     const anchor = { kind: 'artifact-element' as const, locator: '#hero', label: 'Dashboard v2 › h1#hero', pageUrl: artifactUrl(ID, 9, 'index.html') };
-    act(() => openCard(anchor, { appSessionId: P, claimMode: 'panel' }));
+    act(() => openCard(anchor, { appSessionId: PAGE_P, claimMode: 'panel' }));
     await waitFor(() => expect(useCommentCard.getState().open?.hostId).not.toBeNull());
     expect(document.querySelector('[data-card-host="artifact-page"] [data-comment-card]')).not.toBeNull();
   });

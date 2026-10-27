@@ -2,10 +2,11 @@ import { act, cleanup, render, screen, waitFor, within } from '@testing-library/
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import type { WorktreeStatus } from '@shared/sessions/worktree';
 import { project, record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { at } from '../../../../test/support/machine';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { REPO, resetSetupStore } from '../test-support/setup-intents';
@@ -20,12 +21,14 @@ import { currentSet } from '../stores/layout-model';
 const WT = `${REPO}/.claude/worktrees/accept-one`;
 const HEAD = 'a'.repeat(40);
 const ids = ['a1111111-1111-4111-8111-111111111111', 'a2222222-2222-4222-8222-222222222222', 'a3333333-3333-4333-8333-333333333333', 'a4444444-4444-4444-8444-444444444444'] as AppSessionId[];
-const [IDLE1, IDLE2, LIVE, TERM] = ids as [AppSessionId, AppSessionId, AppSessionId, AppSessionId];
+// P5 O6 M2: the page holds addresses; the fake `window.maws` (main) is asked and answers with the bare ids
+const [BARE_IDLE1, BARE_IDLE2, BARE_LIVE, BARE_TERM] = ids as [AppSessionId, AppSessionId, AppSessionId, AppSessionId];
+const [IDLE1, IDLE2, LIVE, TERM] = [BARE_IDLE1, BARE_IDLE2, BARE_LIVE, BARE_TERM].map(at) as [AppSessionId, AppSessionId, AppSessionId, AppSessionId];
 
 let fake: FakeClient;
 function withMain(auto: NonNullable<Parameters<typeof fakeClient>[0]>) {
   fake = fakeClient(Object.fromEntries(Object.entries(auto).filter(([, answer]) => answer !== undefined)));
-  window.maws = fake.client;
+  window.maws = fake.client as unknown as PreloadBridge;
 }
 
 function worktreeStatus(over: Partial<WorktreeStatus> = {}): WorktreeStatus {
@@ -66,17 +69,17 @@ beforeEach(() => {
 afterEach(() => {
   act(() => closeDialog());
   cleanup();
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 describe('cleanup dialog archives idle only', () => {
   it('counts the idle sessions, names every live one as skipped, archives only the idle ones, and names a skipped_live answer', async () => {
-    const busy = worktreeStatus({ state: 'busy', occupancy: { self: 1, foreign: 1, unbound: 0, idle: 2, archived: 0, idleAppSessionIds: [IDLE1, IDLE2], liveAppSessionIds: [LIVE, TERM] } });
+    const busy = worktreeStatus({ state: 'busy', occupancy: { self: 1, foreign: 1, unbound: 0, idle: 2, archived: 0, idleAppSessionIds: [BARE_IDLE1, BARE_IDLE2], liveAppSessionIds: [BARE_LIVE, BARE_TERM] } });
     withMain({
       'git.worktree.list': () => listed,
       'git.worktree.status': () => busy,
       'git.worktree.branch': () => branchStatus(),
-      'session.archive': ({ appSessionId }: { appSessionId: AppSessionId }) => (appSessionId === IDLE2 ? { status: 'skipped_live', holder: { kind: 'terminal', pid: 5151 } } : { archived: true }),
+      'session.archive': ({ appSessionId }: { appSessionId: AppSessionId }) => (appSessionId === BARE_IDLE2 ? { status: 'skipped_live', holder: { kind: 'terminal', pid: 5151 } } : { archived: true }),
     });
     render(<SessionDialogs />);
     act(() => openDialog({ kind: 'cleanup', target: { repoRoot: REPO, path: WT, branch: 'worktree-accept-one' } }));
@@ -93,8 +96,8 @@ describe('cleanup dialog archives idle only', () => {
     await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Archive sessions' }));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Archive 2' }));
     await waitFor(() => expect(fake.invoked('session.archive')).toEqual([
-      { appSessionId: IDLE1, onlyIfIdle: true },
-      { appSessionId: IDLE2, onlyIfIdle: true },
+      { appSessionId: BARE_IDLE1, onlyIfIdle: true },
+      { appSessionId: BARE_IDLE2, onlyIfIdle: true },
     ]));
     await waitFor(() =>
       expect(within(within(dialog).getByRole('list', { name: 'Not archived' })).getAllByRole('listitem').map((li) => li.textContent)).toContain('Idle two · terminal · 5151'),
@@ -245,7 +248,7 @@ describe('dialogs', () => {
   it('the fork sheet validates the name as the intent does, and a refusal keeps the sheet with the reason', async () => {
     withMain({
       'git.branches': () => ({ current: 'main', branches: [{ name: 'main', upstream: null, isCurrent: true }] }),
-      'session.fork': () => ({ status: 'invalid', appSessionId: IDLE1, field: 'location', message: 'worktree path exists' }),
+      'session.fork': () => ({ status: 'invalid', appSessionId: BARE_IDLE1, field: 'location', message: 'worktree path exists' }),
     });
     render(<SessionDialogs />);
     act(() => openDialog({ kind: 'fork', appSessionId: IDLE1 }));
@@ -259,7 +262,7 @@ describe('dialogs', () => {
     await userEvent.clear(name);
     await userEvent.type(name, 'accept-fork{Enter}');
     await waitFor(() => expect(fake.invoked('session.fork')).toEqual([
-      { appSessionId: IDLE1, target: { kind: 'newWorktree', name: 'accept-fork', branch: { kind: 'new', name: 'worktree-accept-fork', base: 'HEAD' } }, message: null, rewindTo: null },
+      { appSessionId: BARE_IDLE1, target: { kind: 'newWorktree', name: 'accept-fork', branch: { kind: 'new', name: 'worktree-accept-fork', base: 'HEAD' } }, message: null, rewindTo: null },
     ]));
     expect(await within(dialog).findByText('worktree path exists')).toBeTruthy();
     // the branch radios paint with the accent token, not the system accent colour
@@ -267,7 +270,7 @@ describe('dialogs', () => {
   });
 
   it('rename routes through session.rename and states whose act named the title', async () => {
-    withMain({ 'session.rename': () => ({ record: record(IDLE1), via: 'override' }) });
+    withMain({ 'session.rename': () => ({ record: record(BARE_IDLE1), via: 'override' }) });
     render(<SessionDialogs />);
     act(() => openDialog({ kind: 'rename', appSessionId: IDLE1 }));
     const dialog = await screen.findByRole('dialog', { name: 'Rename' });
@@ -275,7 +278,7 @@ describe('dialogs', () => {
     const field = within(dialog).getByRole('textbox', { name: 'Title' });
     await userEvent.clear(field);
     await userEvent.type(field, 'C10 override{Enter}');
-    await waitFor(() => expect(fake.invoked('session.rename')).toEqual([{ appSessionId: IDLE1, title: 'C10 override' }]));
+    await waitFor(() => expect(fake.invoked('session.rename')).toEqual([{ appSessionId: BARE_IDLE1, title: 'C10 override' }]));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
@@ -283,7 +286,7 @@ describe('dialogs', () => {
     withMain({
       'session.deletions.preview': () => ({ transcript: `${REPO}/x.jsonl`, subagents: 2, recordings: 1, paths: 5, store: '/private/tmp/scratch/config' }),
       'session.delete': () => ({ status: 'partial', trashed: ['/a.cast'], failed: { path: '/b.json', error: 'EPERM' } }),
-      'session.deletions.list': () => ({ manifests: [{ appSessionId: IDLE1, engineSessionId: null, paths: ['/a.cast', '/b.json'], trashed: ['/a.cast'], createdAt: '2026-09-29T10:00:00.000Z' }] }),
+      'session.deletions.list': () => ({ manifests: [{ appSessionId: BARE_IDLE1, engineSessionId: null, paths: ['/a.cast', '/b.json'], trashed: ['/a.cast'], createdAt: '2026-09-29T10:00:00.000Z' }] }),
     });
     render(<SessionDialogs />);
     act(() => openDialog({ kind: 'delete', appSessionId: IDLE1 }));
@@ -295,7 +298,7 @@ describe('dialogs', () => {
     await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Move the transcript to the Trash' }));
     await userEvent.click(button);
     expect(await within(dialog).findByText(/Moved 1 to the Trash; \/b.json could not be moved \(EPERM\)/)).toBeTruthy();
-    expect(fake.invoked('session.delete')).toEqual([{ appSessionId: IDLE1, stopIfLive: false }]);
+    expect(fake.invoked('session.delete')).toEqual([{ appSessionId: BARE_IDLE1, stopIfLive: false }]);
     await waitFor(() => expect(useSetup.getState().deletions.has(IDLE1)).toBe(true));
   });
 
@@ -308,7 +311,7 @@ describe('dialogs', () => {
     await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Move the transcript to the Trash' }));
     expect(await within(dialog).findByText(/^Removes what is left of the conversation from ~\/.claude to the Trash/)).toBeTruthy();
     await userEvent.click(within(dialog).getByRole('button', { name: 'Stop and delete' }));
-    await waitFor(() => expect(fake.invoked('session.delete')).toEqual([{ appSessionId: LIVE, stopIfLive: true }]));
+    await waitFor(() => expect(fake.invoked('session.delete')).toEqual([{ appSessionId: BARE_LIVE, stopIfLive: true }]));
     await waitFor(() => expect(currentSet(useLayout.getState().main).panes[0].tabs.some((t) => t.kind === 'session' && t.appSessionId === LIVE)).toBe(false));
   });
 
@@ -326,29 +329,29 @@ describe('dialogs', () => {
     // the config home is the engine's (CLAUDE_CONFIG_DIR may move it), so the copy names none
     expect(dialog.textContent).toContain('The transcript stays where Claude Code keeps it; resume it from Archived sessions or with claude --resume in the terminal.');
     await userEvent.keyboard('{Enter}');
-    await waitFor(() => expect(fake.invoked('session.archive')).toEqual([{ appSessionId: LIVE }]));
+    await waitFor(() => expect(fake.invoked('session.archive')).toEqual([{ appSessionId: BARE_LIVE }]));
     expect(await screen.findByRole('dialog', { name: 'Clean up worktree accept-one' })).toBeTruthy();
   });
 
   it('the archived sessions list unarchives through session.update', async () => {
-    const P = 'p1' as ProjectId;
-    const archived = record(IDLE1, { projectId: P, archived: true, title: { text: 'Old work', source: 'user' } });
+    const P = at('p1' as ProjectId);
+    const archived = record(BARE_IDLE1, { projectId: 'p1' as ProjectId, archived: true, title: { text: 'Old work', source: 'user' } }); // as main answers it
     withMain({ 'session.list': () => ({ sessions: [archived], revision: 3 }), 'session.update': () => ({ ...archived, archived: false }) });
-    useSessions.setState({ projects: new Map([[P, project('p1', 0, { name: 'maws' })]]) });
+    useSessions.setState({ projects: new Map([[P, project(P, 0, { name: 'maws' })]]) });
     render(<SessionDialogs />);
     act(() => openDialog({ kind: 'archived', projectId: P }));
     const dialog = await screen.findByRole('dialog', { name: 'Archived sessions · maws' });
     const row = await within(dialog).findByRole('listitem', { name: 'Old work' });
     await userEvent.click(within(row).getByRole('button', { name: 'Unarchive' }));
-    expect(fake.invoked('session.update')).toEqual([{ appSessionId: IDLE1, patch: { archived: false } }]);
+    expect(fake.invoked('session.update')).toEqual([{ appSessionId: BARE_IDLE1, patch: { archived: false } }]);
     expect(fake.invoked('session.list')[0]).toEqual({ includeArchived: true });
   });
 
   // W11 (I5): the projects removed from the sidebar, each shown again by adding its directory
   it('the hidden projects list shows a project again through session.projects.add', async () => {
-    const hidden = project('p2', 1, { name: 'old-repo', directory: '/Users/someone/work/old-repo', hidden: true });
-    withMain({ 'session.projects.add': () => ({ ...hidden, hidden: undefined }) });
-    useSessions.setState({ projects: new Map([[hidden.id, hidden], ['p1' as ProjectId, project('p1', 0, { name: 'maws' })]]), projectsVersion: useSessions.getState().projectsVersion + 1 });
+    const hidden = project(at('p2'), 1, { name: 'old-repo', directory: '/Users/someone/work/old-repo', hidden: true });
+    withMain({ 'session.projects.add': () => ({ ...hidden, id: 'p2', hidden: undefined }) }); // main answers the bare id
+    useSessions.setState({ projects: new Map([[hidden.id, hidden], [at('p1' as ProjectId), project(at('p1'), 0, { name: 'maws' })]]), projectsVersion: useSessions.getState().projectsVersion + 1 });
     render(<SessionDialogs />);
     act(() => openDialog({ kind: 'hiddenProjects' }));
     const dialog = await screen.findByRole('dialog', { name: 'Hidden projects' });
@@ -365,7 +368,7 @@ describe('dialogs', () => {
     expect(screen.getByText('Deleting this conversation stopped part-way: 1 of 3 files moved to the Trash.')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Finish deleting' })).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: 'Keep' }));
-    expect(fake.invoked('session.deletions.keep')).toEqual([{ appSessionId: IDLE1 }]);
+    expect(fake.invoked('session.deletions.keep')).toEqual([{ appSessionId: BARE_IDLE1 }]);
     await waitFor(() => expect(screen.queryByRole('note')).toBeNull());
   });
 });

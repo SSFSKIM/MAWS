@@ -80,9 +80,8 @@ describe('layout value shapes', () => {
     };
     expect(StoredMainSchema.parse(v2)).toEqual(v3);
     expect(StoredMainSchema.parse(v3)).toEqual(v3); // idempotent: version 3 reads as it is
-    for (const tab of [lifted(1), ...v3.sets[at('proj-x')]!.panes.flatMap((pane) => pane.tabs), ...v3.sets.none!.panes[0]!.tabs]) {
-      expect(tabId(TabRefSchema.parse(tab)), tab.id).toBe(tab.id);
-    }
+    const tabs: { id: string }[] = [lifted(1), ...v3.sets[at('proj-x')]!.panes.flatMap((pane): { id: string }[] => pane.tabs), ...v3.sets.none!.panes[0]!.tabs];
+    for (const tab of tabs) expect(tabId(TabRefSchema.parse(tab)), tab.id).toBe(tab.id);
   });
 
   // W11: version 3's expanded projects replace version 2's open page and version 1's collapsed lists; an earlier value

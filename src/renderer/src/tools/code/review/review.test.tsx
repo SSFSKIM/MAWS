@@ -10,6 +10,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import { record } from '../../../../../../test/support/builders';
 import { loadSyntheticJournal } from '../../../../../../test/support/fixtures';
+import { createClient } from '../../../ipc/client';
 import { connectPanelEvents } from '../../../ipc/events';
 import { panelHost, registerPanelTool } from '../../../panel/host';
 import { FloatingSummary } from '../../../panel/summary/Summary';
@@ -307,7 +308,7 @@ describe('review store', () => {
 
   it('reads one diff per (directory, scope) however many hold it, with the input each scope takes', async () => {
     const main = diffMain();
-    const store = createReviewStore(main.bridge);
+    const store = createReviewStore(createClient(() => main.bridge));
     const offs = [
       store.getState().hold({ directory: DIR, scope: 'uncommitted', base: null }),
       store.getState().hold({ directory: DIR, scope: 'uncommitted', base: null }),
@@ -335,7 +336,7 @@ describe('review store', () => {
       if (gate.held) await new Promise<void>((resolve) => (gate.release = resolve));
       return ok({ patch: APP_PATCH, files: APP_FILES });
     });
-    const store = createReviewStore(main.bridge);
+    const store = createReviewStore(createClient(() => main.bridge));
     const off = store.getState().hold({ directory: DIR, scope: 'uncommitted', base: null });
     await vi.advanceTimersByTimeAsync(0);
     expect(main.callsOf('git.diff')).toHaveLength(1);
@@ -363,7 +364,7 @@ describe('review store', () => {
   it('keeps the last answer while a re-read runs, and says why a read failed', async () => {
     let fails = false;
     const main = installFakeMain((name) => (name === 'git.diff' ? (fails ? fail('unknown revision') : ok({ patch: APP_PATCH, files: APP_FILES })) : ok()));
-    const store = createReviewStore(main.bridge);
+    const store = createReviewStore(createClient(() => main.bridge));
     const target = { directory: DIR, scope: 'uncommitted', base: null } as const;
     const off = store.getState().hold(target);
     await tick();
@@ -385,7 +386,7 @@ describe('review store', () => {
       const patch = await new Promise<string>((resolve) => reads.push(resolve));
       return ok({ patch, files: APP_FILES });
     });
-    const store = createReviewStore(main.bridge);
+    const store = createReviewStore(createClient(() => main.bridge));
     const target = { directory: DIR, scope: 'uncommitted', base: null } as const;
     const off = store.getState().hold(target);
     await tick();
@@ -406,7 +407,7 @@ describe('review store', () => {
   it('past the scope cap keeps the file list only and fetches a file on selection', async () => {
     const big = APP_PATCH + 'x'.repeat(REVIEW_SCOPE_BYTES_CAP);
     const main = diffMain((input) => (input.path ? { patch: APP_PATCH, files: APP_FILES } : { patch: big, files: APP_FILES }));
-    const store = createReviewStore(main.bridge);
+    const store = createReviewStore(createClient(() => main.bridge));
     const target = { directory: DIR, scope: 'uncommitted', base: null } as const;
     const off = store.getState().hold(target);
     await tick();
@@ -427,7 +428,7 @@ describe('review store', () => {
         ? ok(input.branch === 'unborn' ? null : { repoRoot: input.repoRoot, branch: input.branch, head: 'abc', checkedOutAt: null, base: 'HEAD', ahead: 0, merged: true })
         : ok(),
     );
-    const store = createReviewStore(main.bridge);
+    const store = createReviewStore(createClient(() => main.bridge));
     store.getState().lookupBase('/repo', 'unborn'); // HEAD's branch with no commits: `rev-parse --verify refs/heads/unborn` fails
     store.getState().lookupBase('/repo', 'feature');
     await tick();
@@ -440,7 +441,7 @@ describe('review store', () => {
     const main = installFakeMain((name, input) =>
       name === 'git.worktree.branch' ? (fails ? fail('git busy') : ok({ repoRoot: input.repoRoot, branch: input.branch, head: 'abc', checkedOutAt: null, base: 'main', ahead: 1, merged: false })) : ok(),
     );
-    const store = createReviewStore(main.bridge);
+    const store = createReviewStore(createClient(() => main.bridge));
     store.getState().lookupBase('/repo', 'feature');
     await tick();
     expect(baseOf(store.getState(), '/repo', 'feature')).toEqual({ status: 'unavailable', reason: 'git busy', failed: true });
@@ -455,7 +456,7 @@ describe('review store', () => {
     const main = installFakeMain((name, input) =>
       name === 'git.worktree.branch' ? ok({ repoRoot: input.repoRoot, branch: input.branch, head: 'abc', checkedOutAt: null, base: 'main', ahead: 2, merged: false }) : ok(),
     );
-    const store = createReviewStore(main.bridge);
+    const store = createReviewStore(createClient(() => main.bridge));
     store.getState().lookupBase('/repo', 'feature');
     store.getState().lookupBase('/repo', 'feature');
     store.getState().lookupBase('/repo', 'main');

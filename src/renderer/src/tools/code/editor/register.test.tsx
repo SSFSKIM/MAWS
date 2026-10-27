@@ -7,6 +7,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS, type TabRef } from '@shared/ipc/schema/layout';
+import { at, TEST_MACHINE } from '../../../../../../test/support/machine';
 import { connectCodeEvents } from '../../../ipc/events';
 import { replaceVerdict, requestCloseTab, runAction } from '../../../keymap/actions-runtime';
 import { Tab } from '../../../main/Tab';
@@ -20,11 +21,11 @@ import { useViewer } from '../viewer/viewer-store';
 import { EditorDialogs, useEditorDialog } from './EditorDialogs';
 import { registerEditor } from './register';
 
-const A = 'app-a' as AppSessionId;
+const A = at('app-a' as AppSessionId); // P5 O6 M2: the page's address
 const APP = '/r/app.ts';
-const ID = `file:${APP}`;
+const ID = `file:${TEST_MACHINE}:${APP}`;
 
-const fileTab = (path = APP): Extract<TabRef, { kind: 'file' }> => ({ id: `file:${path}`, kind: 'file', path, line: null, appSessionId: A, pinned: false });
+const fileTab = (path = APP): Extract<TabRef, { kind: 'file' }> => ({ id: `file:${TEST_MACHINE}:${path}`, kind: 'file', path, line: null, appSessionId: A, machine: TEST_MACHINE, pinned: false });
 const entry = () => useViewer.getState().entries.get(ID)!;
 const view = () => EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement)!;
 const type = (text: string) => act(() => view().dispatch({ changes: { from: 0, insert: text }, userEvent: 'input.type', annotations: isolateHistory.of('full') }));

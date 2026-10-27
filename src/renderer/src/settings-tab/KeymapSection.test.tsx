@@ -3,7 +3,7 @@
 // the whole override map as one field; Reset to defaults clears it after a confirm.
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
 import { useSettings } from '../stores/settings';
 import { settingsBridge, type SettingsBridge } from '../test-support/settings-bridge';
@@ -29,7 +29,7 @@ const record = (title: string) => {
 afterEach(() => {
   cleanup();
   useSettings.setState({ state: null });
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 describe('keymap capture records, refuses conflicts and unbinds', () => {

@@ -203,7 +203,7 @@
 "commands.session.steer.input":[".appSessionId AppSessionId"],
 "commands.session.stop.input":[".appSessionId AppSessionId"],
 "commands.session.stopTask.input":[".appSessionId AppSessionId"],
-"commands.session.takeOver.input":[".appSessionId AppSessionId"],
+"commands.session.takeOver.input":[".appSessionId AppSessionId",".paneId PtyId"],
 "commands.session.takeOverPane.output":[".ptyId PtyId"],
 "commands.session.ui.answer.input":[".appSessionId AppSessionId"],
 "commands.session.ui.close.input":[".appSessionId AppSessionId"],
