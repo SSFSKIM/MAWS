@@ -1,0 +1,1 @@
+{ "name": "cmdprobe", "version": "0.1.0", "description": "Probe: runs $.command.run and session reads from a file bus, logging each result." }

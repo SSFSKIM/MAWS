@@ -1,0 +1,8 @@
+import runpy,json,os,time
+p=runpy.run_path('/private/tmp/holder-tui/scripts/plain_probe.py');Env=p['Env'];host=p['host'];manager=p['manager'];client=p['client'];ctrl=p['ctrl'];detach=p['detach']
+e=Env('configured');r={}
+args=['--model','haiku','--permission-mode','plan','-n','configured-holder','--add-dir',e.root+'/extra'];json.dump(args,open(e.root+'/launch-args.json','w'));h=host(e,'1');m=manager(e);client(e,'first');e.wait(lambda:len(os.listdir(e.bus+'/events'))>0);ctrl(e,'jiggle');e.wait(lambda:'plan mode on' in e.pane('first'));e.snap('configured-first',name='first')
+r['env']=e.call('env');r['model']=e.call('model');r['check_add_dir']=e.call('check',tool='Read',input={'file_path':e.root+'/extra/file.txt'});r['session']=e.call('id');r['cwd']=e.call('root');e.text('Reply with only OK.',name='first');assert e.wait(lambda:'OK' in e.pane('first'),timeout=25);time.sleep(1);e.snap('configured-answer',name='first');sid=r['session']['value'];e.text('/exit',name='first');assert e.wait(lambda:not os.path.exists(e.root+'/host.sock'));r['exit_rc']=h.wait(timeout=5)
+for flag,name in [(['--resume',sid],'resume'),(['--continue'],'continue')]:
+ args=['--model','haiku','--permission-mode','default',*flag];json.dump(args,open(e.root+'/launch-args.json','w'));h=host(e,'1');client(e,name);ctrl(e,'jiggle');assert e.wait(lambda:'❯' in e.pane(name));time.sleep(.3);r[name]={'id':e.call('id'),'model':e.call('model')};e.snap(name,name=name);e.text('/exit',name=name);assert e.wait(lambda:not os.path.exists(e.root+'/host.sock'));r[name]['exit_rc']=h.wait(timeout=5)
+e.save('configured-results',r);print(json.dumps(r,indent=2))

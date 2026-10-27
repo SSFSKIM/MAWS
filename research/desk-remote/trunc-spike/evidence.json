@@ -1,0 +1,414 @@
+{
+  "basic_active": {
+    "file": "request-006.json",
+    "kept": true,
+    "dropped_beta": false,
+    "dropped_gamma": false
+  },
+  "basic_resumed": {
+    "file": "request-007.json",
+    "kept": true,
+    "dropped_beta": false,
+    "dropped_gamma": false,
+    "assistant_blocks": [
+      [
+        {
+          "type": "text",
+          "text": "STUB_REPLY_1"
+        },
+        {
+          "type": "text",
+          "text": "STUB_REPLY_1"
+        }
+      ],
+      [
+        {
+          "type": "text",
+          "text": "STUB_REPLY_6"
+        }
+      ]
+    ]
+  },
+  "media_thinking": {
+    "before": "request-004.json",
+    "after": "request-006.json",
+    "equal": true,
+    "count": 1,
+    "before_sha256": "bfde4891e3d76e27c23fa29b2026e50375292a4e0e08a871e4063f55662ef7b0",
+    "after_sha256": "bfde4891e3d76e27c23fa29b2026e50375292a4e0e08a871e4063f55662ef7b0"
+  },
+  "media_image": {
+    "before": "request-004.json",
+    "after": "request-006.json",
+    "equal": true,
+    "count": 1,
+    "before_sha256": "c47adef9216f97333641895e50aa2a57be210420a77c76720eeefd83c16367e2",
+    "after_sha256": "c47adef9216f97333641895e50aa2a57be210420a77c76720eeefd83c16367e2"
+  },
+  "resume_guard": {
+    "active": "request-005.json",
+    "resumed": "request-006.json",
+    "active_thinking_count": 1,
+    "resumed_thinking_count": 2,
+    "active_text_count": 1,
+    "resumed_text_count": 2
+  },
+  "resume_self": {
+    "active": "request-005.json",
+    "resumed": "request-006.json",
+    "active_thinking_count": 1,
+    "resumed_thinking_count": 2,
+    "active_text_count": 1,
+    "resumed_text_count": 2
+  },
+  "basic_compact_hooks": [
+    {
+      "event": "guard.compact",
+      "trigger": "plugin",
+      "instructions": "CUT:guard:2"
+    }
+  ],
+  "basic_classic_compact_hooks": [
+    {
+      "session_id": "5910aa54-ce07-489b-8fb9-52c1feb36b83",
+      "transcript_path": "/private/tmp/wave2-trunc/basic/home/.claude/projects/-private-tmp-wave2-trunc-basic-work/5910aa54-ce07-489b-8fb9-52c1feb36b83.jsonl",
+      "cwd": "/private/tmp/wave2-trunc/basic/work",
+      "prompt_id": "b0407498-4738-4f29-b87d-1a8840b928b9",
+      "hook_event_name": "PostCompact",
+      "trigger": "manual",
+      "compact_summary": ""
+    },
+    {
+      "session_id": "5910aa54-ce07-489b-8fb9-52c1feb36b83",
+      "transcript_path": "/private/tmp/wave2-trunc/basic/home/.claude/projects/-private-tmp-wave2-trunc-basic-work/5910aa54-ce07-489b-8fb9-52c1feb36b83.jsonl",
+      "cwd": "/private/tmp/wave2-trunc/basic/work",
+      "prompt_id": "b0407498-4738-4f29-b87d-1a8840b928b9",
+      "hook_event_name": "SessionStart",
+      "source": "compact",
+      "model": "claude-opus-5-5"
+    }
+  ],
+  "bound-0_compact_hooks": [
+    {
+      "event": "self.compact",
+      "trigger": "manual",
+      "instructions": "CUT:self:0"
+    },
+    {
+      "event": "guard.compact",
+      "trigger": "manual",
+      "instructions": "CUT:self:0"
+    }
+  ],
+  "bound-0_classic_compact_hooks": [
+    {
+      "session_id": "f28f0ec7-e3d1-48bf-b602-6a8b025fb979",
+      "transcript_path": "/private/tmp/wave2-trunc/bound-0/home/.claude/projects/-private-tmp-wave2-trunc-bound-0-work/f28f0ec7-e3d1-48bf-b602-6a8b025fb979.jsonl",
+      "cwd": "/private/tmp/wave2-trunc/bound-0/work",
+      "prompt_id": "e157fa6e-30d4-440d-bb24-62b664e11001",
+      "hook_event_name": "PreCompact",
+      "trigger": "manual",
+      "custom_instructions": "CUT:self:0"
+    },
+    {
+      "session_id": "f28f0ec7-e3d1-48bf-b602-6a8b025fb979",
+      "transcript_path": "/private/tmp/wave2-trunc/bound-0/home/.claude/projects/-private-tmp-wave2-trunc-bound-0-work/f28f0ec7-e3d1-48bf-b602-6a8b025fb979.jsonl",
+      "cwd": "/private/tmp/wave2-trunc/bound-0/work",
+      "prompt_id": "e157fa6e-30d4-440d-bb24-62b664e11001",
+      "hook_event_name": "SessionStart",
+      "source": "compact",
+      "model": "claude-opus-5-5"
+    },
+    {
+      "session_id": "f28f0ec7-e3d1-48bf-b602-6a8b025fb979",
+      "transcript_path": "/private/tmp/wave2-trunc/bound-0/home/.claude/projects/-private-tmp-wave2-trunc-bound-0-work/f28f0ec7-e3d1-48bf-b602-6a8b025fb979.jsonl",
+      "cwd": "/private/tmp/wave2-trunc/bound-0/work",
+      "prompt_id": "e157fa6e-30d4-440d-bb24-62b664e11001",
+      "hook_event_name": "PostCompact",
+      "trigger": "manual",
+      "compact_summary": "STUB_REPLY_4"
+    }
+  ],
+  "bound-1_compact_hooks": [
+    {
+      "event": "self.compact",
+      "trigger": "manual",
+      "instructions": "CUT:self:1"
+    }
+  ],
+  "bound-1_classic_compact_hooks": [
+    {
+      "session_id": "75ca214e-b462-45ec-bb83-25f126a88ca2",
+      "transcript_path": "/private/tmp/wave2-trunc/bound-1/home/.claude/projects/-private-tmp-wave2-trunc-bound-1-work/75ca214e-b462-45ec-bb83-25f126a88ca2.jsonl",
+      "cwd": "/private/tmp/wave2-trunc/bound-1/work",
+      "prompt_id": "6a35f00b-01da-4ed9-9fe5-ced4db25ebdc",
+      "hook_event_name": "PostCompact",
+      "trigger": "manual",
+      "compact_summary": ""
+    },
+    {
+      "session_id": "75ca214e-b462-45ec-bb83-25f126a88ca2",
+      "transcript_path": "/private/tmp/wave2-trunc/bound-1/home/.claude/projects/-private-tmp-wave2-trunc-bound-1-work/75ca214e-b462-45ec-bb83-25f126a88ca2.jsonl",
+      "cwd": "/private/tmp/wave2-trunc/bound-1/work",
+      "prompt_id": "6a35f00b-01da-4ed9-9fe5-ced4db25ebdc",
+      "hook_event_name": "SessionStart",
+      "source": "compact",
+      "model": "claude-opus-5-5"
+    }
+  ],
+  "media_compact_hooks": [
+    {
+      "event": "guard.compact",
+      "trigger": "plugin",
+      "instructions": "CUT:guard:5"
+    }
+  ],
+  "media_classic_compact_hooks": [
+    {
+      "session_id": "3b3e6633-ec63-4059-ac4c-20b5f524153c",
+      "transcript_path": "/private/tmp/wave2-trunc/media/home/.claude/projects/-private-tmp-wave2-trunc-media-work/3b3e6633-ec63-4059-ac4c-20b5f524153c.jsonl",
+      "cwd": "/private/tmp/wave2-trunc/media/work",
+      "prompt_id": "08cf899b-8e7d-46e2-932a-36e1f40c43fb",
+      "hook_event_name": "PostCompact",
+      "trigger": "manual",
+      "compact_summary": ""
+    },
+    {
+      "session_id": "3b3e6633-ec63-4059-ac4c-20b5f524153c",
+      "transcript_path": "/private/tmp/wave2-trunc/media/home/.claude/projects/-private-tmp-wave2-trunc-media-work/3b3e6633-ec63-4059-ac4c-20b5f524153c.jsonl",
+      "cwd": "/private/tmp/wave2-trunc/media/work",
+      "prompt_id": "08cf899b-8e7d-46e2-932a-36e1f40c43fb",
+      "hook_event_name": "SessionStart",
+      "source": "compact",
+      "model": "claude-opus-5-5"
+    }
+  ],
+  "pair_compact_hooks": [
+    {
+      "event": "guard.compact",
+      "trigger": "plugin",
+      "instructions": "CUT:guard:2"
+    }
+  ],
+  "pair_classic_compact_hooks": [
+    {
+      "session_id": "50f7658c-b90e-42cd-8064-aaedb6cb862d",
+      "transcript_path": "/private/tmp/wave2-trunc/pair/home/.claude/projects/-private-tmp-wave2-trunc-pair-work/50f7658c-b90e-42cd-8064-aaedb6cb862d.jsonl",
+      "cwd": "/private/tmp/wave2-trunc/pair/work",
+      "prompt_id": "cb7e17bd-595c-4633-89c4-9970a87d6eeb",
+      "hook_event_name": "PostCompact",
+      "trigger": "manual",
+      "compact_summary": ""
+    },
+    {
+      "session_id": "50f7658c-b90e-42cd-8064-aaedb6cb862d",
+      "transcript_path": "/private/tmp/wave2-trunc/pair/home/.claude/projects/-private-tmp-wave2-trunc-pair-work/50f7658c-b90e-42cd-8064-aaedb6cb862d.jsonl",
+      "cwd": "/private/tmp/wave2-trunc/pair/work",
+      "prompt_id": "cb7e17bd-595c-4633-89c4-9970a87d6eeb",
+      "hook_event_name": "SessionStart",
+      "source": "compact",
+      "model": "claude-opus-5-5"
+    }
+  ],
+  "queued_compact_hooks": [
+    {
+      "event": "self.compact",
+      "trigger": "manual",
+      "instructions": "CUT:self:2"
+    }
+  ],
+  "queued_classic_compact_hooks": [
+    {
+      "session_id": "ac619513-a7d8-43be-9e3b-85121cf2c82f",
+      "transcript_path": "/private/tmp/wave2-trunc/queued/home/.claude/projects/-private-tmp-wave2-trunc-queued-work/ac619513-a7d8-43be-9e3b-85121cf2c82f.jsonl",
+      "cwd": "/private/tmp/wave2-trunc/queued/work",
+      "prompt_id": "b92f9f9f-51c7-4a9a-bce6-b885c4ac1e22",
+      "hook_event_name": "PostCompact",
+      "trigger": "manual",
+      "compact_summary": ""
+    },
+    {
+      "session_id": "ac619513-a7d8-43be-9e3b-85121cf2c82f",
+      "transcript_path": "/private/tmp/wave2-trunc/queued/home/.claude/projects/-private-tmp-wave2-trunc-queued-work/ac619513-a7d8-43be-9e3b-85121cf2c82f.jsonl",
+      "cwd": "/private/tmp/wave2-trunc/queued/work",
+      "prompt_id": "b92f9f9f-51c7-4a9a-bce6-b885c4ac1e22",
+      "hook_event_name": "SessionStart",
+      "source": "compact",
+      "model": "claude-opus-5-5"
+    }
+  ],
+  "effects_compact_hooks": [
+    {
+      "event": "guard.compact",
+      "trigger": "plugin",
+      "instructions": "CUT:guard:1"
+    }
+  ],
+  "effects_classic_compact_hooks": [
+    {
+      "session_id": "f3770fde-c793-4292-9b38-9eaad39ca771",
+      "transcript_path": "/private/tmp/wave2-trunc/effects/home/.claude/projects/-private-tmp-wave2-trunc-effects-work/f3770fde-c793-4292-9b38-9eaad39ca771.jsonl",
+      "cwd": "/private/tmp/wave2-trunc/effects/work",
+      "prompt_id": "1f9424df-6704-49fa-847f-38dceceb6f05",
+      "hook_event_name": "PostCompact",
+      "trigger": "manual",
+      "compact_summary": ""
+    },
+    {
+      "session_id": "f3770fde-c793-4292-9b38-9eaad39ca771",
+      "transcript_path": "/private/tmp/wave2-trunc/effects/home/.claude/projects/-private-tmp-wave2-trunc-effects-work/f3770fde-c793-4292-9b38-9eaad39ca771.jsonl",
+      "cwd": "/private/tmp/wave2-trunc/effects/work",
+      "prompt_id": "1f9424df-6704-49fa-847f-38dceceb6f05",
+      "hook_event_name": "SessionStart",
+      "source": "compact",
+      "model": "claude-opus-5-5"
+    }
+  ],
+  "ordinary_compact_hooks": [
+    {
+      "event": "self.compact",
+      "trigger": "manual",
+      "instructions": "NORMAL_COMPACT"
+    },
+    {
+      "event": "guard.compact",
+      "trigger": "manual",
+      "instructions": "NORMAL_COMPACT"
+    },
+    {
+      "event": "self.compact",
+      "trigger": "auto",
+      "instructions": null
+    },
+    {
+      "event": "guard.compact",
+      "trigger": "auto",
+      "instructions": null
+    }
+  ],
+  "ordinary_classic_compact_hooks": [
+    {
+      "session_id": "76cc6ac2-c76b-4965-bc5e-c4ce86a701cc",
+      "transcript_path": "/private/tmp/wave2-trunc/ordinary/home/.claude/projects/-private-tmp-wave2-trunc-ordinary-work/76cc6ac2-c76b-4965-bc5e-c4ce86a701cc.jsonl",
+      "cwd": "/private/tmp/wave2-trunc/ordinary/work",
+      "prompt_id": "1c3f0ea6-436a-4b45-8d53-9c47d66f19a8",
+      "hook_event_name": "PreCompact",
+      "trigger": "manual",
+      "custom_instructions": "NORMAL_COMPACT"
+    },
+    {
+      "session_id": "76cc6ac2-c76b-4965-bc5e-c4ce86a701cc",
+      "transcript_path": "/private/tmp/wave2-trunc/ordinary/home/.claude/projects/-private-tmp-wave2-trunc-ordinary-work/76cc6ac2-c76b-4965-bc5e-c4ce86a701cc.jsonl",
+      "cwd": "/private/tmp/wave2-trunc/ordinary/work",
+      "prompt_id": "1c3f0ea6-436a-4b45-8d53-9c47d66f19a8",
+      "hook_event_name": "SessionStart",
+      "source": "compact",
+      "model": "claude-opus-5-5"
+    },
+    {
+      "session_id": "76cc6ac2-c76b-4965-bc5e-c4ce86a701cc",
+      "transcript_path": "/private/tmp/wave2-trunc/ordinary/home/.claude/projects/-private-tmp-wave2-trunc-ordinary-work/76cc6ac2-c76b-4965-bc5e-c4ce86a701cc.jsonl",
+      "cwd": "/private/tmp/wave2-trunc/ordinary/work",
+      "prompt_id": "1c3f0ea6-436a-4b45-8d53-9c47d66f19a8",
+      "hook_event_name": "PostCompact",
+      "trigger": "manual",
+      "compact_summary": "STUB_REPLY_6"
+    },
+    {
+      "session_id": "76cc6ac2-c76b-4965-bc5e-c4ce86a701cc",
+      "transcript_path": "/private/tmp/wave2-trunc/ordinary/home/.claude/projects/-private-tmp-wave2-trunc-ordinary-work/76cc6ac2-c76b-4965-bc5e-c4ce86a701cc.jsonl",
+      "cwd": "/private/tmp/wave2-trunc/ordinary/work",
+      "prompt_id": "d0eb7018-598e-4ddd-9028-51edcbbf38e1",
+      "hook_event_name": "PreCompact",
+      "trigger": "auto",
+      "custom_instructions": null
+    },
+    {
+      "session_id": "76cc6ac2-c76b-4965-bc5e-c4ce86a701cc",
+      "transcript_path": "/private/tmp/wave2-trunc/ordinary/home/.claude/projects/-private-tmp-wave2-trunc-ordinary-work/76cc6ac2-c76b-4965-bc5e-c4ce86a701cc.jsonl",
+      "cwd": "/private/tmp/wave2-trunc/ordinary/work",
+      "prompt_id": "d0eb7018-598e-4ddd-9028-51edcbbf38e1",
+      "hook_event_name": "SessionStart",
+      "source": "compact",
+      "model": "claude-opus-5-5"
+    },
+    {
+      "session_id": "76cc6ac2-c76b-4965-bc5e-c4ce86a701cc",
+      "transcript_path": "/private/tmp/wave2-trunc/ordinary/home/.claude/projects/-private-tmp-wave2-trunc-ordinary-work/76cc6ac2-c76b-4965-bc5e-c4ce86a701cc.jsonl",
+      "cwd": "/private/tmp/wave2-trunc/ordinary/work",
+      "prompt_id": "d0eb7018-598e-4ddd-9028-51edcbbf38e1",
+      "hook_event_name": "PostCompact",
+      "trigger": "auto",
+      "compact_summary": "STUB_REPLY_10"
+    }
+  ],
+  "pair_last_request": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_pair",
+          "content": "[Tool result missing due to internal error]",
+          "is_error": true
+        },
+        {
+          "type": "text",
+          "text": "NEXT_MID_PAIR"
+        }
+      ]
+    },
+    {
+      "role": "system",
+      "content": [
+        {
+          "type": "text",
+          "text": "<total_tokens>15000000 tokens left</total_tokens>",
+          "cache_control": {
+            "type": "ephemeral"
+          }
+        }
+      ]
+    }
+  ],
+  "background_requests": [
+    {
+      "file": "request-001.json",
+      "contains_done": false,
+      "contains_task_notification": false
+    },
+    {
+      "file": "request-002.json",
+      "contains_done": false,
+      "contains_task_notification": false
+    },
+    {
+      "file": "request-003.json",
+      "contains_done": false,
+      "contains_task_notification": false
+    },
+    {
+      "file": "request-005.json",
+      "contains_done": false,
+      "contains_task_notification": false
+    }
+  ],
+  "resume-partial": {
+    "active_file": "request-005.json",
+    "resumed_file": "request-006.json",
+    "marker_in_active": false,
+    "marker_in_resumed": true
+  },
+  "resume-pair": {
+    "active_file": "request-006.json",
+    "resumed_file": "request-007.json",
+    "marker_in_active": false,
+    "marker_in_resumed": true
+  },
+  "typing": {
+    "request_file": "request-005.json",
+    "draft_present_in_pane": true,
+    "draft_submitted_in_next_request": true,
+    "dropped_tail_absent": true
+  }
+}

@@ -1,0 +1,106 @@
+{
+  "build": "2.1.310",
+  "passed": 30,
+  "checks": [
+    {
+      "check": "png native content is present and byte-exact",
+      "request": "/private/tmp/wave2-media/formats1/request-001.json",
+      "sha256": "5503ff8fef5a4d87e1fe0bdc07254b11153a86debfa97500641c7abbf93357ef",
+      "bytes": 80
+    },
+    {
+      "check": "pdf native content is present and byte-exact",
+      "request": "/private/tmp/wave2-media/formats1/request-002.json",
+      "sha256": "06deff590ffe5dd63592d19e7e0da0b3609cb725fd81ce4bab5ee013ac48c93e",
+      "bytes": 599
+    },
+    {
+      "check": "PDF pages renders JPEG instead of document"
+    },
+    {
+      "check": "duplicate upload ID executes exactly once"
+    },
+    {
+      "check": "step re-enters after every synthetic Read"
+    },
+    {
+      "check": "cwd media reads need no permission dialog"
+    },
+    {
+      "check": "synthetic assistant provenance stamps"
+    },
+    {
+      "check": "text prelude is visible"
+    },
+    {
+      "check": "user note has plugin origin"
+    },
+    {
+      "check": "user note enters request; system note does not"
+    },
+    {
+      "check": "neither append note is visible in ordinary TUI"
+    },
+    {
+      "check": "system note is persisted"
+    },
+    {
+      "check": "outside cwd asks in default mode"
+    },
+    {
+      "check": "same plugin permission hook allows engine Read"
+    },
+    {
+      "check": "detached direct call skips same plugin permission hook"
+    },
+    {
+      "check": "plugin prompt really has detached origin"
+    },
+    {
+      "check": "result-only toolUses executes nothing"
+    },
+    {
+      "check": "literal @path does not attach media"
+    },
+    {
+      "check": "mid-tool waits until Bash completes and uses same turn",
+      "queue_to_claim_ms": 3201,
+      "bash_result_to_claim_ms": 112,
+      "queue_to_wire_ms": 3538.4
+    },
+    {
+      "check": "inflight end-turn response leaves upload pending"
+    },
+    {
+      "check": "inflight tool-use response resumes into intake"
+    },
+    {
+      "check": "esc-step1 cancels incomplete synthetic response"
+    },
+    {
+      "check": "esc-step-chunks1 cancels incomplete synthetic response"
+    },
+    {
+      "check": "esc-step-chunks1 latch blocks prompt but not read-only call or note"
+    },
+    {
+      "check": "esc-model2 latch blocks prompt but not read-only call or note"
+    },
+    {
+      "check": "Esc following model request keeps media for resumed turn"
+    },
+    {
+      "check": "fallback first request text only; cooperative Read supplies same PNG and PDF"
+    },
+    {
+      "check": "no spike process remains"
+    },
+    {
+      "check": "no isolated env files remain",
+      "runs": 19
+    },
+    {
+      "check": "no isolated daemon socket remains"
+    }
+  ]
+}
