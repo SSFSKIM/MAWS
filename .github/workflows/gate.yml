@@ -127,10 +127,12 @@ env:
   # that republish through the host, the class-1 drag case under MAWS_PRESENTATIONS_PERF=1.
   # local-latency (P5 O1, OX7) is the local path's latency bench: a stub-engine session's delta to frame and command round
   # trip in detached mode, held to the baseline test/support/local-latency.ts records from three runs on the mini.
+  # daemon-idle (P5 O2, acceptance 14) is the idle cost of what stays behind with the app quit: the detached supervisor's
+  # RSS and CPU holding one kept idle session over 600 s, the baseline test/support/daemon-idle.ts records and bounds.
   # A group with a timing bound turns its timed cases on with a switch, MAWS_<name>_PERF or MAWS_<name>_SCALE set to 1 in
   # its package script, each such spec skipping without it or asserting its bounds only under it (presentations-drag's
   # one class-1 trial in e2e:presentations logs its p95), and is on this list: ci-kit's VM contract above rests on it.
-  MEASURED_E2E: artifacts-perf dashboard-scale design-scale document-scale document-scale-repeat local-latency presentations-drag presentations-scale tool-time-heavy-live
+  MEASURED_E2E: artifacts-perf daemon-idle dashboard-scale design-scale document-scale document-scale-repeat local-latency presentations-drag presentations-scale tool-time-heavy-live
   # The Mac jobs that may run beside another: e2e groups, and `unit:darwin`, that ask for ci-kit's shared instances
   # ([ci-kit-mac-shared], their only label), which run two jobs at a time on the mini's one desktop (ci-kit's mac-lane
   # concurrency spec, SSFSKIM/ci-kit docs/doperpowers/specs/2026-10-21-mac-lane-concurrency-design.md). Every other Mac

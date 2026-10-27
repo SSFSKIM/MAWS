@@ -1,0 +1,192 @@
+// The idle cost of what stays behind when the app has quit (P5 O2, M1; docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md,
+// acceptance 7; P5 acceptance 14): the resident memory and CPU time of today's detached supervisor holding one kept
+// idle session, which is the laptop's costly steady state (with no live session the supervisor exits after its idle
+// time and costs nothing). The numbers, the validity rule, the baseline and the bound are test/support/daemon-idle.ts.
+//
+// The scene: the built app in detached mode over C3's replay transport, on a scratch profile whose settings.json sets
+// `supervisor.idleExitMinutes: null`, so neither the idle release nor the supervisor's idle exit fires. One replayed
+// session plays the permission round trip, paced, and holds at its request; the request is answered and, while the
+// rest of the turn plays, the app quits with the keep answer (an unbusy quit is never asked and stops the supervisor,
+// so the quit is made mid-turn). The turn ends with no app connected and the session holds at its next prompt. Then a
+// 120 s settle, and a 600 s window: every 30 s each measured process's `ps -o rss=` (summed per sample) and the 1-minute
+// load, and `ps -o time=` at the window's start and end. The measured processes are those of the profile whose argv0 is
+// `maws-supervisor` (M9 adds the daemon shape's); the replay has no `claude` child, and a real one is the session's
+// cost, not the daemon's.
+//
+// A run is valid when the load stays under 5 throughout the window, every measured process lives through it, and the
+// kept session is still held at its end; an invalid run fails, saying why. It prints one line, adds it as an annotation,
+// and writes the samples to test-results/daemon-idle.json. Until M9 it records only: no bound is asserted.
+//
+// A measured group (gate.yml's MEASURED_E2E): `pnpm e2e:daemon-idle` sets MAWS_DAEMON_IDLE_PERF=1, and the gate runs it
+// only when named, on the mini's exclusive instance behind the measured-job guard. It spends nothing and touches no
+// keychain: a replay runs no engine.
+import { randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { loadavg, tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { expect, test } from '@playwright/test';
+import type { SessionEvent } from '@shared/graph/events';
+import type { AppSessionId } from '@shared/graph/ids';
+import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
+import { cpuSeconds, IDLE_RUN, idleLine, invalidReasons, measured, median, type MeasuredProcess } from '../test/support/daemon-idle';
+import { invoke, launchReady, value } from './support/c7-replay';
+import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { isAlive, killScratchProcesses, processesNaming, ps } from './support/processes';
+import { tmpSocketDirOf } from './support/supervisor-socket';
+
+test.skip(process.env.MAWS_DAEMON_IDLE_PERF !== '1', 'the idle-cost measurement runs under pnpm e2e:daemon-idle (MAWS_DAEMON_IDLE_PERF=1)');
+test.describe.configure({ timeout: 20 * 60_000 }); // about 13 minutes: the scene, the settle and the window
+
+// C3's permission round trip: a prompt, ~44 rows, a Bash `can_use_tool` (seq 49) the replay holds at until it is
+// answered, ~44 more rows to the turn's result (seq 93), then a hold at the next prompt (seq 94, an `out` row).
+const PERMISSION = 'spikes/protocol-probe/fixtures/permission-roundtrip.jsonl';
+const ROW_MS = '500'; // about 22 s from the answer to the result: the quit lands mid-turn
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+interface JournalRow { seq: number; direction: string; frame: Record<string, unknown> }
+interface Sample { atS: number; load: number; rssKiB: Record<number, number | null> }
+
+function firstPrompt(): string {
+  for (const line of readFileSync(join(REPO_ROOT, PERMISSION), 'utf8').split('\n')) {
+    if (!line) continue;
+    const row = JSON.parse(line) as { direction: string; frame: { type: string; message?: { content: string } } };
+    if (row.direction === 'out' && row.frame.type === 'user') return row.frame.message!.content;
+  }
+  throw new Error(`${PERMISSION} records no prompt`);
+}
+
+// Every journal row of the session's launches, oldest file first.
+function journal(userData: string, id: string): JournalRow[] {
+  const dir = join(userData, 'engine-host', 'journal', id);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).filter((f) => f.endsWith('.jsonl')).sort()
+    .flatMap((f) => readFileSync(join(dir, f), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as JournalRow));
+}
+const turnEnded = (rows: JournalRow[]) => rows.some((r) => r.direction === 'in' && r.frame.type === 'result');
+const launchEnded = (rows: JournalRow[]) => rows.some((r) => r.direction === 'meta' && r.frame.event === 'exit');
+
+const lockOf = (userData: string): { pid: number; socketPath: string } | null => {
+  try {
+    return JSON.parse(readFileSync(join(userData, 'supervisor', 'host.lock'), 'utf8')) as { pid: number; socketPath: string };
+  } catch {
+    return null;
+  }
+};
+
+test('daemon idle: the RSS and CPU of the detached supervisor holding one kept idle session after the app has quit', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-di-')));
+  const userData = join(root, 'ud');
+  const repo = join(root, 'repo');
+  mkdirSync(repo, { recursive: true });
+  // No idle release and no idle exit (null: never), so the kept session holds through the window.
+  mkdirSync(userData, { recursive: true });
+  writeFileSync(join(userData, 'settings.json'), JSON.stringify({ ...SETTINGS_DEFAULTS_V18, supervisor: { ...SETTINGS_DEFAULTS_V18.supervisor, idleExitMinutes: null } }));
+  // A session C4 files from a transcript in the engine store, so the replayed launch has a record (as e2e/supervisor.spec.ts does).
+  const engineId = randomUUID();
+  const project = join(userData, 'claude-config', 'projects', repo.replace(/[^a-zA-Z0-9]/g, '-'));
+  mkdirSync(project, { recursive: true });
+  const seeded = { parentUuid: null, isSidechain: false, type: 'user', message: { role: 'user', content: 'daemon idle session' }, uuid: randomUUID(), timestamp: '2026-10-27T10:00:00.000Z', cwd: repo, sessionId: engineId, version: '2.1.283' };
+  writeFileSync(join(project, `${engineId}.jsonl`), `${JSON.stringify(seeded)}\n`);
+
+  let maws: MawsLaunch | null = null;
+  let supervisor: number | null = null;
+  let leftover: unknown;
+  try {
+    maws = await launchMaws({
+      userData, keepConfigHome: true,
+      env: { MAWS_HARNESS: '0', MAWS_HOST_MODE: 'detached', MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_ROW_MS: ROW_MS, MAWS_E2E_QUIT_ANSWER: 'keep' },
+    });
+    const { page, app } = maws;
+    const child = app.process();
+    let output = '';
+    child.stdout?.on('data', (chunk) => (output += String(chunk)));
+    child.stderr?.on('data', (chunk) => (output += String(chunk)));
+    const exited = new Promise<void>((resolve) => (child.exitCode !== null || child.signalCode !== null ? resolve() : child.once('exit', () => resolve())));
+
+    await expect.poll(async () => {
+      const status = await invoke(page, 'host.status', undefined);
+      return status.ok && status.value.state === 'ready' && status.value.supervisor?.mode === 'detached' ? status.value.supervisor.pid : null;
+    }, { timeout: 30_000, message: 'main is connected to a detached supervisor' }).not.toBeNull();
+    supervisor = lockOf(userData)!.pid;
+    let id = '' as AppSessionId;
+    await expect.poll(async () => (id = (value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === engineId)?.appId ?? '') as AppSessionId), { timeout: 20_000, message: 'the seeded session has a record' }).not.toBe('');
+
+    // The session holds at its request; the answer is given, and the app quits with the keep answer mid-turn.
+    await launchReady(page, id, PERMISSION, { cwd: repo });
+    value(await invoke(page, 'session.send', { appSessionId: id, content: firstPrompt() }));
+    let requested: SessionEvent | undefined;
+    await expect.poll(async () => (requested = value(await invoke(page, 'session.events', { appSessionId: id, afterSeq: null, limit: null })).events.find((e) => e.kind === 'permission.requested')) !== undefined, { timeout: 60_000, message: 'the request is pending' }).toBe(true);
+    const { requestId } = requested as Extract<SessionEvent, { kind: 'permission.requested' }>;
+    value(await invoke(page, 'session.answer', { appSessionId: id, requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } }));
+    await app.evaluate(({ app: electron }) => electron.quit());
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error(`MAWS did not quit; it said ${JSON.stringify(output.split('\n').filter((l) => l.startsWith('quit-guard:')))}`)), 20_000)));
+    await Promise.race([exited, late]).finally(() => clearTimeout(timer));
+    expect(output.split('\n'), 'the quit was asked mid-turn and answered keep').toContain('quit-guard: 1 mid-turn, auto-answered keep, 1 session kept');
+    expect(isAlive(supervisor), 'the supervisor outlives the app').toBe(true);
+    await expect.poll(() => turnEnded(journal(userData, id)), { timeout: 60_000, message: 'the turn ends with no app connected' }).toBe(true);
+    expect(launchEnded(journal(userData, id)), 'the kept session holds at its next prompt').toBe(false);
+
+    await sleep(IDLE_RUN.settleS * 1_000);
+
+    // The window: the measured processes and their start times, then a sample every 30 s on a fixed schedule.
+    const procs: MeasuredProcess[] = measured(processesNaming(root), root);
+    expect(procs.map((p) => p.pid), "the profile's supervisor is what is measured").toContain(supervisor);
+    const started = new Map(procs.map((p) => [p.pid, ps(p.pid, 'lstart')]));
+    const cpuAtStart = new Map(procs.map((p) => [p.pid, cpuSeconds(ps(p.pid, 'time'))]));
+    const cpuAtEnd = new Map<number, number>();
+    const samples: Sample[] = [];
+    const lost: { pid: number; argv0: string; atS: number }[] = [];
+    const windowStart = Date.now();
+    for (let k = 0; k < IDLE_RUN.samples; k += 1) {
+      await sleep(Math.max(0, windowStart + k * IDLE_RUN.everyS * 1_000 - Date.now()));
+      const atS = Math.round((Date.now() - windowStart) / 1_000);
+      const rssKiB: Record<number, number | null> = {};
+      for (const p of procs) {
+        const live = ps(p.pid, 'lstart') === started.get(p.pid);
+        rssKiB[p.pid] = live ? Number(ps(p.pid, 'rss')) : null;
+        if (!live && !lost.some((l) => l.pid === p.pid)) lost.push({ pid: p.pid, argv0: p.argv0, atS });
+        if (live && k === IDLE_RUN.samples - 1) cpuAtEnd.set(p.pid, cpuSeconds(ps(p.pid, 'time')));
+      }
+      samples.push({ atS, load: loadavg()[0]!, rssKiB });
+    }
+    const sessionEnded = launchEnded(journal(userData, id));
+
+    const names = [...new Set(procs.map((p) => p.argv0))];
+    const reasons = invalidReasons({ loads: samples.map((s) => s.load), measured: names, lost, sessionEnded });
+    const whole = samples.filter((s) => procs.every((p) => s.rssKiB[p.pid] !== null));
+    const rssKiB = whole.length === 0 ? null : median(whole.map((s) => procs.reduce((sum, p) => sum + s.rssKiB[p.pid]!, 0)));
+    const cpuS = lost.length > 0 ? null : Math.round(procs.reduce((sum, p) => sum + cpuAtEnd.get(p.pid)! - cpuAtStart.get(p.pid)!, 0) * 100) / 100;
+    const load = Math.max(...samples.map((s) => s.load));
+    const line = rssKiB === null || cpuS === null ? null : idleLine({ rssKiB, samples: whole.length, cpuS, measured: names, load });
+    const info = test.info();
+    mkdirSync(info.project.outputDir, { recursive: true });
+    writeFileSync(join(info.project.outputDir, 'daemon-idle.json'), `${JSON.stringify({
+      line, valid: reasons.length === 0, reasons, sha: process.env.GITHUB_SHA ?? null, runId: process.env.GITHUB_RUN_ID ?? null,
+      shape: 'detached', run: IDLE_RUN, rssKiB, cpuS, load,
+      processes: procs.map((p) => ({ ...p, started: started.get(p.pid), cpuStartS: cpuAtStart.get(p.pid), cpuEndS: cpuAtEnd.get(p.pid) ?? null })),
+      lost, sessionEnded, samples,
+    }, null, 2)}\n`);
+    if (line !== null) {
+      console.log(line);
+      info.annotations.push({ type: 'daemon-idle', description: line });
+    }
+    expect(reasons, 'the run is valid').toEqual([]);
+  } finally {
+    leftover = await removeScratch(root, userData, maws, supervisor);
+  }
+  if (leftover !== null) throw leftover; // the body passed: a process of the scratch outliving it is the case's failure
+});
+
+// The app closed if it is still open, then every process of the scratch killed (the supervisor by its lock's pid too),
+// then the supervisor's socket directory and the scratch removed. A survivor is answered, after the files are removed.
+async function removeScratch(root: string, userData: string, maws: MawsLaunch | null, supervisor: number | null): Promise<unknown> {
+  const lock = lockOf(userData);
+  await maws?.cleanup().catch((error: unknown) => console.error(error));
+  let leftover: unknown = null;
+  await killScratchProcesses(root, [lock?.pid, supervisor].filter((pid): pid is number => typeof pid === 'number')).catch((error: unknown) => (leftover = error));
+  const socketDir = lock ? tmpSocketDirOf(userData, lock.socketPath) : null;
+  if (socketDir !== null) rmSync(socketDir, { recursive: true, force: true });
+  rmSync(root, { recursive: true, force: true });
+  return leftover;
+}

@@ -91,6 +91,7 @@
     "test/support/builders.ts",
     "test/support/chrome-profile.ts",
     "test/support/claude-env.ts",
+    "test/support/daemon-idle.ts", // P5 O2 M1: the idle-cost measurement's statistics, baseline and bound
     "test/support/cua-fake-host.ts",
     "test/support/engine-pin/index.ts",
     "test/support/file-lock.ts",
