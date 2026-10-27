@@ -777,6 +777,10 @@ These are named here with their binding fields. Byte-level schemas and test vect
   - `{machine, session, lane, origin: {kind: 'terminal' | 'maws' | 'sminos-spawn', requester?, spawnerSession?}, principal: memberId | 'org' | '@machine', inference: {kind: 'slot', configDir} | {kind: 'route', settingsRef}, project?, owners: (memberId | '@machine')[], ownersProof[], access: 'private' | 'listed' | 'org-view' | 'org-converse', shares[{member, grade}], created, context}`.
   - Owners are copied at spawn and never resolved later through an alias. `@machine` isn't an alias: the endpoint module resolves it against signed org state, and it never leaves the machine (§5.8).
   - The listing projection is `{session, revision, issued, fields: {owners, machine, project, lane, state, title}}`, signed by the machine key. The app shows the machine's name from the org state, so a rename re-issues no listing.
+  - **Withdrawing a listing** (p5-desk-track-owner, O10 M3; Decision Log 27). A session that stops being listed, because it becomes `private` or its record is removed, gets one last revision whose `state` is `gone`, signed like any other, with `owners`, `project` and `title` empty.
+    - The Registry keeps it, so its high-water mark still refuses a replay of an earlier revision.
+    - It leaves gone records out of the listings it serves, except in a feed of changes since a member's cursor, so an app that cached the session drops it.
+    - Listing the session again is a new, higher revision.
   - The machine's endpoint record is `{machine, addresses[], issued}`, signed by the machine key. It carries the direct RL2 addresses (§4.1).
 - **RL7, Capabilities.**
   - Per session: lane-b-control-map's `ControlCapabilities`.
@@ -938,3 +942,7 @@ These are named here with their binding fields. Byte-level schemas and test vect
    - In the step that drops a delegation, every `retired` entry whose holder ref starts with its id and `_` moves into `revoked`, checked against the predecessor. Rejected: a derived rule that such keys count as revoked. With the explicit move, `revoked` stays the one place that says a signature is revoked.
    - An enrolled machine's ref never starts with `<id>_` for a delegation id the state holds, live or revoked.
    - Cost: a devcloud prefix that was revoked can't come back, so the next delegation takes a new prefix.
+27. **2026-10-27, withdrawing a listing** (p5-desk-track-owner, from building O10 M3).
+   - RL1 had no way to withdraw a listing. The Registry keeps each one at its highest revision, so a session that left the listing or went `private` stayed visible with its title and owners.
+   - RL6's `state` gains `gone`: a last signed revision with `owners`, `project` and `title` empty. The Registry keeps it for its high-water mark, and serves it only in change feeds.
+   - Its owners are emptied too, so from then on a `private` session's owners stay off the hub, as §6.2 has it. Pushes for a private session already take their owners per member over channels (§7.4).
