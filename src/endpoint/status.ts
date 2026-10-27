@@ -1,0 +1,41 @@
+// `status()` (O10 M2): what `daemon.status` reports as `endpoint.detail`, to the local app whole and to a remote caller as
+// it stands. So it holds no path, no address, no key material and no credential: the enrollment's name and org, the
+// head's version and its public hash, and the module's links. Why the state is refused is a reason word; the log line
+// names the path.
+import type { EndpointState } from './state/store';
+
+export type EndpointStatus = {
+  enrollment: 'none' | 'hub-confirmed' | 'org-listed';
+  name?: string;
+  org?: string;
+  stateVersion?: number;
+  headHash?: string;
+  hub: { connected: boolean; generation?: number };
+  channels: { relayed: number; direct: number };
+  rl10: { connected: boolean };
+  listener: { bound: boolean };
+  legacyKey: boolean;
+  refusing?: string;
+};
+
+/** The module's links, which M3 (the hub), M4 (channels and the listener) and M6 (RL10) keep current. */
+export type EndpointLinks = Pick<EndpointStatus, 'hub' | 'channels' | 'rl10' | 'listener'> & { refusing?: string };
+
+export const NO_LINKS: EndpointLinks = { hub: { connected: false }, channels: { relayed: 0, direct: 0 }, rl10: { connected: false }, listener: { bound: false } };
+
+export function endpointStatus(state: EndpointState | null, headHash: string | null, links: EndpointLinks): EndpointStatus {
+  const enrollment = state?.enrolled ? state.enrollment : null;
+  const head = enrollment !== null ? (state?.org?.head ?? null) : null;
+  const refusing = state?.refusing ?? (state?.stale && !state.enrolled ? 'stale-state' : links.refusing);
+  return {
+    enrollment: enrollment?.state ?? 'none',
+    ...(enrollment === null ? {} : { name: enrollment.name, org: enrollment.org }),
+    ...(head === null ? {} : { stateVersion: head.state.version, ...(headHash === null ? {} : { headHash }) }),
+    hub: { ...links.hub },
+    channels: { ...links.channels },
+    rl10: { ...links.rl10 },
+    listener: { ...links.listener },
+    legacyKey: state?.legacy ?? false,
+    ...(refusing === undefined ? {} : { refusing }),
+  };
+}

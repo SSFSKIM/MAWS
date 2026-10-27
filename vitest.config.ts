@@ -38,6 +38,7 @@ const TIMING_NODE_TESTS = [
   'src/engine-host/documents/sigkill.test.ts', // P3-A: bundles and forks a writer, kills it mid-stream, reopens the store
   'test/artifacts/one-schema.test.ts', // P3-B: the portability test's pattern, for the one-schema rule
   'test/one-locale.test.ts', // the same pattern, for the one-locale rule over src/ and the desk's web app
+  'test/endpoint/enroll.test.ts', // P5 O10 M2: enrolls against desk-hub's local runner, a wrangler dev child process
 ];
 const TIMING_RENDERER_TESTS = [
   'src/renderer/src/App.test.tsx',
@@ -114,7 +115,7 @@ export default defineConfig({
         test: {
           name: 'node',
           environment: 'node',
-          include: ['src/{shared,main,preload,engine-host,pty-host}/**/*.test.ts', 'test/**/*.test.ts', RENDERER_NODE_TESTS],
+          include: ['src/{shared,main,preload,engine-host,pty-host,endpoint}/**/*.test.ts', 'test/**/*.test.ts', RENDERER_NODE_TESTS], // P5 O10: src/endpoint (its suites live in test/endpoint)
           exclude: ['**/node_modules/**', 'test/live/**/*.live.test.ts', ...TIMING_NODE_TESTS, ...DISPLAY_NODE_TESTS], // C3: live cases run only in the `live` project; their support's own tests run here
           css: { include: [/\/design_system\/defaults\/.+\.css/] }, // P3-D: the defaults' `document.css` as text (`?raw`) for the host's and main's tests, as in `artifacts`
           // The compile-time suites (`src/**/*.test-d.ts`) are checked by `pnpm typecheck` alone, tsconfig.node.json

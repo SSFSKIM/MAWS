@@ -43,6 +43,13 @@ const MACHINE_BOUND_ALLOWED = [
 // `.` stands for the slash, as above
 const CLIENT_PORT_DYNAMIC = { selector: 'ImportExpression[source.value=/^(?:electron|.*.open-external)$/]', message: CLIENT_PORT };
 // P5 O1 M3 end
+// P5 O10 start (docs/doperpowers/plans/2026-10-27-p5-o10-endpoint.md, Constraints, "The module"): the endpoint module is
+// its own directory with one entry. Its machine key, grant ledger, policy and state code are reached by nothing outside
+// it but through src/endpoint/index.ts; its own suites (test/endpoint/) are the module's and reach inside. It imports no
+// Electron, O1's rule with no exception (its block below).
+const ENDPOINT = 'The endpoint module (src/endpoint/) is reached only through its entry, src/endpoint/index.ts (P5 O10): its key, policy and state code stay inside it.';
+const ENDPOINT_PATTERNS = [{ regex: '(?:^|/)endpoint/(?!index(?:\\.ts)?$)', message: ENDPOINT }];
+// P5 O10 end
 // P3-B start: schema parity (D4 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md). The document's ProseMirror
 // schema is built in one module, src/artifacts/document/schema.ts, so the host's writer and every editor derive the same
 // Yjs storage keys from it; a second `getSchema` or a mark or node created elsewhere is a second schema. The composer's
@@ -146,16 +153,16 @@ module.exports = defineConfig(
   {
     files: ['src/**/*.{ts,tsx}'],
     ignores: ['src/artifacts/**'],
-    rules: { 'no-restricted-imports': ['error', { patterns: YJS_PATTERNS }] },
+    rules: { 'no-restricted-imports': ['error', { patterns: [...YJS_PATTERNS, ...ENDPOINT_PATTERNS] }] }, // P5 O10: ENDPOINT_PATTERNS
   },
   {
     files: ['src/artifacts/**/*.{ts,tsx}'],
     ignores: ['src/artifacts/yjs/**'],
-    rules: { 'no-restricted-imports': ['error', { paths: PORTABLE_PATHS, patterns: [...PORTABLE_PATTERNS, ...YJS_PATTERNS] }] },
+    rules: { 'no-restricted-imports': ['error', { paths: PORTABLE_PATHS, patterns: [...PORTABLE_PATTERNS, ...YJS_PATTERNS, ...ENDPOINT_PATTERNS] }] }, // P5 O10: ENDPOINT_PATTERNS
   },
   {
     files: ['src/artifacts/yjs/**/*.{ts,tsx}'],
-    rules: { 'no-restricted-imports': ['error', { paths: PORTABLE_PATHS, patterns: PORTABLE_PATTERNS }] },
+    rules: { 'no-restricted-imports': ['error', { paths: PORTABLE_PATHS, patterns: [...PORTABLE_PATTERNS, ...ENDPOINT_PATTERNS] }] }, // P5 O10: ENDPOINT_PATTERNS
   },
   {
     files: ['src/artifacts/**/*.{ts,tsx}'],
@@ -184,10 +191,26 @@ module.exports = defineConfig(
     files: MACHINE_BOUND,
     ignores: MACHINE_BOUND_ALLOWED,
     rules: {
+      'no-restricted-imports': ['error', { paths: [{ name: 'electron', message: CLIENT_PORT }], patterns: [{ group: ['**/open-external'], message: CLIENT_PORT }, ...YJS_PATTERNS, ...ENDPOINT_PATTERNS] }], // P5 O10: ENDPOINT_PATTERNS
+      'no-restricted-syntax': ['error', CLIENT_PORT_DYNAMIC, YJS_DYNAMIC],
+    },
+  },
+  // P5 O10 start: the endpoint module imports no Electron, O1's rule with no exception; its files' one block of each
+  // rule, so it restates src/'s Yjs rules, and leaves out ENDPOINT_PATTERNS, which its own files are free of.
+  {
+    files: ['src/endpoint/**/*.{ts,tsx}'],
+    rules: {
       'no-restricted-imports': ['error', { paths: [{ name: 'electron', message: CLIENT_PORT }], patterns: [{ group: ['**/open-external'], message: CLIENT_PORT }, ...YJS_PATTERNS] }],
       'no-restricted-syntax': ['error', CLIENT_PORT_DYNAMIC, YJS_DYNAMIC],
     },
   },
+  // Outside src/: the suites (but the module's own) and the e2e specs reach the module through its entry too.
+  {
+    files: ['test/**/*.{ts,tsx}', 'e2e/**/*.ts'],
+    ignores: ['test/endpoint/**'],
+    rules: { 'no-restricted-imports': ['error', { patterns: ENDPOINT_PATTERNS }] },
+  },
+  // P5 O10 end
   // P3-B start: the one-schema rule (above).
   {
     files: ['src/**/*.{ts,tsx}'],
