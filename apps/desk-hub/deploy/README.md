@@ -351,8 +351,9 @@ What they read, at run time, never printed or passed as an argument:
   that hands it to the command;
 - the owner's staging Access token, from `cloudflared access token -app=https://desk-hub-staging.opencognita-platform.workers.dev`
   (the owner's `cloudflared access login` once; a step without it stops with nothing changed). It reaches a command on
-  its stdin and curl as a configuration through a pipe (`printf … | curl -K -`), never a here-string, which zsh spools
-  to a temporary file;
+  its stdin and curl as a configuration through a pipe (`printf … | curl -q -K -`), never a here-string, which zsh
+  spools to a temporary file; every curl call puts `-q` first, so the user's `~/.curlrc` (a `verbose` or `trace` there
+  would print or keep the token) is never read;
 - `DESK_STAGING_DEVICE` (default `$DESK_STAGING_DIR/device`): `keys.json`, the admin device's keys (the org-state
   commands above), and `machine.json`, `{"DESK_MACHINE_CLIENT_ID": …, "DESK_MACHINE_CLIENT_SECRET": …}` for
   `access-sync`.

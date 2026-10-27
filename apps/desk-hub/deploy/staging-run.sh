@@ -55,7 +55,7 @@ stamp() { date -u +%Y%m%dT%H%M%SZ; }
 filter() { perl -ne 'print if /^wrangler target / || !/token|secret|bearer|eyJ/i'; }
 # A deployment's X-Desk-Build, credential-free; stops the script unless it names a hub build.
 header() {
-  local h=$(curl -sI --max-time 30 -X POST $1/machine/enroll | /usr/bin/grep -i '^x-desk-build:' | tr -d '\r')
+  local h=$(curl -q -sI --max-time 30 -X POST $1/machine/enroll | /usr/bin/grep -i '^x-desk-build:' | tr -d '\r')
   [[ $h =~ '^[Xx]-[Dd]esk-[Bb]uild: hub@[0-9a-f]{8}' ]] || { print -r -- "no valid X-Desk-Build from $1 (read: '${h}'): stop"; exit 3; }
   print -r -- $h
 }
@@ -160,8 +160,9 @@ case $step in
       swept=${pipestatus[2]}; say "sweep exit $swept"
       zsh $HERE/staging-deploy.sh --checkout $W 2>&1 | filter | tail -6 | tee -a $LOG
       restored=${pipestatus[1]}
-      # Which org staging serves now: curl's configuration (the token) through a pipe, never an argument or a file.
-      served=$(printf 'header = "cf-access-token: %s"\nurl = "%s/api/me"\n' "$T" "$URL" | curl -sf --max-time 30 -K - | python3 -B -I -c 'import json,sys; print(json.load(sys.stdin)["org"]["id"])' 2>/dev/null)
+      # Which org staging serves now: curl's configuration (the token) through a pipe, never an argument or a file, and
+      # no ~/.curlrc (-q, first), whose verbose or trace options would print or keep the token.
+      served=$(printf 'header = "cf-access-token: %s"\nurl = "%s/api/me"\n' "$T" "$URL" | curl -q -sf --max-time 30 -K - | python3 -B -I -c 'import json,sys; print(json.load(sys.stdin)["org"]["id"])' 2>/dev/null)
       unset T
       say "restore exit $restored; staging serves org: ${served:-unknown}; log $LOG"
       [[ -n $served ]] || say "restore check failed: /api/me gave no org within 30 s (no answer, an error status or an unreadable body)"
