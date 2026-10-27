@@ -7,11 +7,16 @@
 // - the default profile (its real path is the platform default): a packaged app installs or repairs the LaunchAgent so it
 //   runs this bundle, before the hosts start; an unpackaged run uses an installed and loaded unit and never writes one,
 //   and otherwise runs embedded for the launch, saying why (the log, Diagnostics). A unit the system refuses (MAWS turned
-//   off in Login Items) also runs embedded, with the reason. `mawsd`'s canonical label refuses an unpackaged program
-//   before it writes anything (M6), so an unpackaged run never asks;
+//   off in Login Items) also runs embedded, with the reason, and so does a loaded unit that does not start `mawsd`: the
+//   unit is asked to start and `mawsd`'s lock must name a live process within UNIT_READY_MS (a rejected kickstart, or a
+//   job whose program is gone, never gets there). `mawsd`'s canonical label refuses an unpackaged program before it
+//   writes anything (M6), so an unpackaged run never asks;
 // - the embedded shape on the default profile of a packaged app uninstalls a LaunchAgent it finds before the hosts
-//   start (which ends `mawsd`, whose hosts keep running), then ends the socket-mode pty host, whose terminals end as an
-//   embedded app's do at its quit, and connects to the engine host directly, with its sessions.
+//   start (which ends `mawsd`, whose hosts keep running);
+// - an embedded launch of any profile that finds the daemon shape's processes named in its `mawsd/` directory leaves
+//   the shape before its hosts start: it ends that profile's `mawsd` (its hosts keep running), then the socket-mode pty
+//   host, whose terminals end as an embedded app's do at its quit, and connects to the engine host directly, with its
+//   sessions. A launch that runs embedded only because the daemon was unavailable leaves them as they are.
 //
 // Main's hosts on the daemon shape are three detached transports over `mawsd`'s file set, one per relay socket
 // (engine-host.sock, pty-host.sock, machine.sock). Each starts `mawsd` the profile's way (the lock arbitrates their race:
@@ -22,8 +27,10 @@
 // The build check: at the `machine` host's first `ready` of a launch, main reads `daemon.status`; a daemon of another
 // build than this app's out/main/mawsd.js that runs this app's files (a private daemon, or a unit whose program is this
 // bundle) is asked `daemon.restart` once for the launch. Its hosts, and so the sessions, keep running.
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { daemonHostFiles, daemonPaths, type DaemonPaths, type DaemonSocket } from '@shared/daemon/files';
+import { DAEMON_FILES, daemonHostFiles, daemonPaths, type DaemonPaths, type DaemonSocket } from '@shared/daemon/files';
 import { START_TIMEOUT_MS, supervisorEnv, type DetachedTransportOptions, type StartStrategy } from '@shared/host/detached-transport';
 import type { HostOwner, HostSpec, HostSupervisor } from '@shared/host/host-supervisor';
 import { appIdentity } from '@shared/host/identity';
@@ -54,6 +61,7 @@ export const UNAVAILABLE = {
   noUnit: 'no LaunchAgent is installed for the default profile, and a development build never installs one',
   notLoaded: 'the LaunchAgent is installed but not loaded (MAWS may be turned off in Login Items)',
   refused: (why: string) => `the LaunchAgent could not be installed: ${why}`,
+  notStarted: (why: string) => `the LaunchAgent did not start mawsd: ${why}`,
 } as const;
 
 export function planShape({ mode, shape, packaged, defaultProfile, unit }: ShapeFacts): ShapePlan {
@@ -73,29 +81,36 @@ export interface LaunchShape {
 
 export interface PrepareDeps {
   install(): Promise<unknown>; // the default profile's unit, written or repaired to run this bundle, and loaded
+  startUnit(): Promise<unknown>; // the unit asked to start, and its `mawsd` up; rejects saying why not
   uninstall(): Promise<unknown>;
-  endPtyHost(): Promise<void>; // the socket-mode pty host of the profile, if one runs
+  daemonLeft(): boolean; // the profile's `mawsd/` directory has a lock of `mawsd` or of a socket-mode pty host
+  leaveDaemon(): Promise<void>; // the profile's `mawsd`, then its socket-mode pty host, ended where they run
   log(line: string): void;
 }
 
 // The unit work the plan names, before any host exists; synchronous when there is none (every profile but the default
-// one), so a scratch profile's launch starts as it always has.
+// one, with no daemon-shape locks), so a scratch profile's launch starts as it always has.
 export function prepareShape(plan: ShapePlan, deps: PrepareDeps): LaunchShape | Promise<LaunchShape> {
   if (plan.mode === 'daemon') {
-    if (plan.daemon === 'private' || !plan.install) return settled({ mode: 'daemon', daemon: plan.daemon, unavailable: null }, deps);
-    return deps.install().then(
-      () => settled({ mode: 'daemon', daemon: 'unit', unavailable: null }, deps),
-      (error: unknown) => settled({ mode: 'detached', daemon: null, unavailable: UNAVAILABLE.refused(messageOf(error)) }, deps),
-    );
+    if (plan.daemon === 'private') return settled({ mode: 'daemon', daemon: 'private', unavailable: null }, deps);
+    const embedded = (why: string) => settled({ mode: 'detached', daemon: null, unavailable: why }, deps);
+    const start = () =>
+      deps.startUnit().then(
+        () => settled({ mode: 'daemon', daemon: 'unit', unavailable: null }, deps),
+        (error: unknown) => embedded(UNAVAILABLE.notStarted(messageOf(error))),
+      );
+    if (!plan.install) return start();
+    return deps.install().then(start, (error: unknown) => embedded(UNAVAILABLE.refused(messageOf(error))));
   }
   const embedded: LaunchShape = { mode: plan.mode, daemon: null, unavailable: plan.unavailable };
-  if (!plan.uninstall) return settled(embedded, deps);
-  deps.log('[hosts] the embedded shape: uninstalling the LaunchAgent before the hosts start');
-  return deps
-    .uninstall()
-    .catch((error: unknown) => deps.log(`[hosts] the LaunchAgent could not be uninstalled: ${messageOf(error)}`))
-    .then(() => deps.endPtyHost())
-    .then(() => settled(embedded, deps));
+  // the daemon shape left by choice (the setting, the environment), not a launch the daemon was unavailable to
+  if (!plan.uninstall && !(plan.unavailable === null && deps.daemonLeft())) return settled(embedded, deps);
+  let uninstalled: Promise<unknown> = Promise.resolve();
+  if (plan.uninstall) {
+    deps.log('[hosts] the embedded shape: uninstalling the LaunchAgent before the hosts start');
+    uninstalled = deps.uninstall().catch((error: unknown) => deps.log(`[hosts] the LaunchAgent could not be uninstalled: ${messageOf(error)}`));
+  }
+  return uninstalled.then(() => deps.leaveDaemon()).then(() => settled(embedded, deps));
 }
 
 function settled(launch: LaunchShape, deps: PrepareDeps): LaunchShape {
@@ -117,7 +132,8 @@ export interface LaunchInput {
 }
 
 export interface LaunchDeps extends InstallDeps {
-  endPtyHost?(dir: string): Promise<void>; // endSocketPtyHost unless a test brings its own
+  leaveDaemon?(paths: DaemonPaths): Promise<void>; // leaveDaemonShape unless a test brings its own
+  awaitDaemon?(paths: DaemonPaths): Promise<void>; // awaitDaemonLock unless a test brings its own
   log(line: string): void;
 }
 
@@ -138,12 +154,40 @@ export function resolveLaunch(input: LaunchInput, deps: LaunchDeps): LaunchShape
   const unit = defaultProfile ? defaultUnit(deps) : null;
   const plan = planShape({ mode, shape: input.shape, packaged: input.packaged, defaultProfile, unit: unit?.state() ?? { installed: false, loaded: false } });
   const target = { profileDir: input.profileDir, label: DEFAULT_LABEL };
+  const paths = daemonPaths(input.profileDir);
   return prepareShape(plan, {
     install: () => installDaemon({ ...target, program: input.program }, deps),
+    startUnit: async () => {
+      unit!.start(); // throws launchctl's answer when the system will not start the job
+      await (deps.awaitDaemon ?? ((p) => awaitDaemonLock(p, { readLock, isAlive, procStartOf, sleep: deps.sleep })))(paths);
+    },
     uninstall: () => uninstallDaemon(target, deps),
-    endPtyHost: () => (deps.endPtyHost ?? endSocketPtyHost)(daemonPaths(input.profileDir).ptyHost),
+    daemonLeft: () => existsSync(join(paths.dir, DAEMON_FILES.lock)) || existsSync(join(paths.ptyHost, PTY_HOST_FILES.lock)),
+    leaveDaemon: () => (deps.leaveDaemon ?? leaveDaemonShape)(paths),
     log: deps.log,
   });
+}
+
+// ---- the unit's daemon, up ----------------------------------------------------------------------------------------------
+
+export const UNIT_READY_MS = 10_000; // a started job's `mawsd` takes its lock within a second; past this it is not starting
+const READY_POLL_MS = 100;
+
+export interface AwaitDaemonDeps {
+  readLock: typeof readLock;
+  isAlive(pid: number): boolean;
+  procStartOf(pid: number): string | null;
+  sleep(ms: number): Promise<unknown>;
+}
+
+// `mawsd`'s lock naming a live process (the one it records) within `budgetMs`; rejects past it.
+export async function awaitDaemonLock(paths: DaemonPaths, deps: AwaitDaemonDeps, budgetMs = UNIT_READY_MS): Promise<void> {
+  for (let waited = 0; ; waited += READY_POLL_MS) {
+    const lock = deps.readLock(paths.dir, undefined, DAEMON_FILES.lock);
+    if (lock && isSameProcess(lock, deps)) return;
+    if (waited >= budgetMs) throw new Error(`no mawsd took its lock within ${budgetMs / 1000} s of the unit's start`);
+    await deps.sleep(READY_POLL_MS);
+  }
 }
 
 // Whether the default profile's unit runs this bundle: its file is the one this app would write.
@@ -152,9 +196,17 @@ export function unitRunsThisApp(input: Pick<LaunchInput, 'profileDir' | 'program
   return unit !== null && readIfPresent(unit.file) === unit.render({ label: DEFAULT_LABEL, profileDir: input.profileDir, program: input.program });
 }
 
-// ---- the socket-mode pty host, ended when the profile leaves the daemon shape -------------------------------------------
+// ---- the daemon shape's processes, ended when the profile leaves it -----------------------------------------------------
 
 export const PTY_HOST_END_MS = 5_000; // its kill ladders end every pty; past this the app starts without waiting longer
+export const DAEMON_END_MS = 5_000; // its endpoint's stop is bounded at 2.5 s (M5); past this the app starts anyway
+
+// The profile's `mawsd` first, so it wakes no pty host again (its hosts keep running, the engine host's sessions with
+// them), then its socket-mode pty host, whose terminals end with it.
+export async function leaveDaemonShape(paths: DaemonPaths, deps: EndPtyHostDeps = DEFAULT_END_DEPS): Promise<void> {
+  await endLockHolder(paths.dir, DAEMON_FILES.lock, 'mawsd', DAEMON_END_MS, deps);
+  await endSocketPtyHost(paths.ptyHost, deps);
+}
 
 export interface EndPtyHostDeps {
   readLock: typeof readLock;
@@ -167,22 +219,29 @@ export interface EndPtyHostDeps {
 
 const END_POLL_MS = 100;
 
-// SIGTERM to the pty host its lock names, when that is still the process it records (a pid is believed only with its
-// start time), then a bounded wait for it to go: its exit order ends every pty through the kill ladder.
-export async function endSocketPtyHost(dir: string, deps: EndPtyHostDeps = { readLock, isAlive, procStartOf, kill: (pid, signal) => process.kill(pid, signal), sleep, log: console.log }): Promise<void> {
-  const lock = deps.readLock(dir, undefined, PTY_HOST_FILES.lock);
+const DEFAULT_END_DEPS: EndPtyHostDeps = { readLock, isAlive, procStartOf, kill: (pid, signal) => process.kill(pid, signal), sleep, log: console.log };
+
+// The socket-mode pty host: its exit order ends every pty through the kill ladder.
+export function endSocketPtyHost(dir: string, deps: EndPtyHostDeps = DEFAULT_END_DEPS): Promise<void> {
+  return endLockHolder(dir, PTY_HOST_FILES.lock, 'the socket-mode pty host', PTY_HOST_END_MS, deps);
+}
+
+// SIGTERM to the process a lock names, when that is still the process it records (a pid is believed only with its start
+// time), then a wait of at most `boundMs` for it to go.
+async function endLockHolder(dir: string, lockName: string, what: string, boundMs: number, deps: EndPtyHostDeps): Promise<void> {
+  const lock = deps.readLock(dir, undefined, lockName);
   if (!lock || !isSameProcess(lock, deps)) return;
-  deps.log(`[hosts] ending the socket-mode pty host, pid ${lock.pid}, whose terminals end with it`);
+  deps.log(`[hosts] ending ${what}, pid ${lock.pid}, as the profile leaves the daemon shape`);
   try {
     deps.kill(lock.pid, 'SIGTERM');
   } catch (error) {
-    return deps.log(`[hosts] the pty host could not be signalled: ${messageOf(error)}`);
+    return deps.log(`[hosts] ${what} could not be signalled: ${messageOf(error)}`);
   }
-  for (let waited = 0; waited < PTY_HOST_END_MS; waited += END_POLL_MS) {
+  for (let waited = 0; waited < boundMs; waited += END_POLL_MS) {
     if (!isSameProcess(lock, deps)) return;
     await deps.sleep(END_POLL_MS);
   }
-  deps.log(`[hosts] the pty host, pid ${lock.pid}, is still running ${PTY_HOST_END_MS / 1000} s after its SIGTERM; starting anyway`);
+  deps.log(`[hosts] ${what}, pid ${lock.pid}, is still running ${boundMs / 1000} s after its SIGTERM; starting anyway`);
 }
 
 // ---- main's hosts on the daemon shape ----------------------------------------------------------------------------------

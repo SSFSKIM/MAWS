@@ -3,22 +3,26 @@
 // installed unit, through the real installer and fake unit managers in a scratch home; the switch to embedded changing
 // nothing in the running launch and the next embedded launch uninstalling the unit before its hosts exist; how main's
 // three transports start and reach `mawsd`; the build check.
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { daemonPaths } from '@shared/daemon/files';
 import type { HostState } from '@shared/ipc/schema';
 import { daemonStatus } from '../../../test/support/builders';
 import { FakeManagers } from '../../../test/support/fake-units';
+import { isAlive, procStartOf, readLock } from '../../engine-host/supervisor-files';
 import type { HostMode } from './mode';
 import {
+  awaitDaemonLock,
   daemonHostSpecs,
   daemonStart,
   endSocketPtyHost,
   prepareShape,
   resolveLaunch,
   UNAVAILABLE,
+  UNIT_READY_MS,
   unitRunsThisApp,
   watchDaemon,
   type LaunchDeps,
@@ -50,11 +54,14 @@ const deps = (over: Partial<LaunchDeps> = {}): LaunchDeps => ({
   uid: 501,
   user: 'u',
   sleep: async () => {},
-  endPtyHost: async () => void logs.push('pty host ended'),
+  leaveDaemon: async () => void logs.push('left the daemon shape'),
+  awaitDaemon: async () => {}, // the unit's mawsd up at once, unless a test says otherwise
   log: (line) => void logs.push(line),
   ...over,
 });
 const settle = async (launch: LaunchShape | Promise<LaunchShape>) => await launch;
+// a lock as takeLock writes it, naming `pid` with its start time
+const writeLock = (path: string, pid: number, procStart: string) => writeFileSync(path, JSON.stringify({ pid, procStart, protocol: 3, buildId: 'b', socketPath: `${path}.sock`, startedAt: new Date().toISOString() }));
 
 // The facts the installer knows of: the default profile's LaunchAgent written by a packaged app, loaded in launchd.
 async function installUnit(): Promise<void> {
@@ -91,12 +98,13 @@ describe('the mode table', () => {
                 const want = expected(asked, Object.keys(harness).length > 0, shape, packaged, isDefault, unit);
                 expect(launch).toEqual(want.launch);
                 const changes = managers.changes();
-                if (want.install && !unit) expect(changes).toEqual([`launchctl bootstrap gui/501 ${plistPath()}`]);
-                else if (want.install) expect(changes, 'a repair of a unit already running this bundle changes nothing').toEqual([]);
+                const started = want.launch.daemon === 'unit' ? [`launchctl kickstart gui/501/${LABEL}`] : []; // and its mawsd awaited
+                if (want.install && !unit) expect(changes).toEqual([`launchctl bootstrap gui/501 ${plistPath()}`, ...started]);
+                else if (want.install) expect(changes, 'a repair of a unit already running this bundle changes nothing').toEqual(started);
                 else if (want.uninstall) expect(changes).toEqual([`launchctl bootout gui/501/${LABEL}`]);
-                else expect(changes, 'no unit is written, loaded or removed').toEqual([]);
+                else expect(changes, 'no unit is written, loaded or removed').toEqual(started);
                 expect(existsSync(plistPath())).toBe(want.uninstall ? false : unit || want.install);
-                expect(logs.includes('pty host ended')).toBe(want.uninstall);
+                expect(logs.includes('left the daemon shape')).toBe(want.uninstall);
               });
             }
 });
@@ -107,7 +115,7 @@ describe('the default profile’s unit', () => {
     const moved = { runtime: '/Applications/MAWS 2.app/Contents/MacOS/MAWS', entry: '/Applications/MAWS 2.app/Contents/Resources/app.asar/out/main/mawsd.js' };
     expect(unitRunsThisApp({ profileDir: defaultProfile(), program: moved }, deps())).toBe(false);
     await settle(resolveLaunch({ env: {}, shape: 'daemon', packaged: true, profileDir: defaultProfile(), program: moved }, deps()));
-    expect(managers.changes()).toEqual([`launchctl bootout gui/501/${LABEL}`, `launchctl bootstrap gui/501 ${plistPath()}`]);
+    expect(managers.changes()).toEqual([`launchctl bootout gui/501/${LABEL}`, `launchctl bootstrap gui/501 ${plistPath()}`, `launchctl kickstart gui/501/${LABEL}`]);
     expect(readFileSync(plistPath(), 'utf8')).toContain('/Applications/MAWS 2.app/Contents/Resources/app.asar/out/main/mawsd.js');
     expect(unitRunsThisApp({ profileDir: defaultProfile(), program: moved }, deps())).toBe(true);
   });
@@ -128,6 +136,37 @@ describe('the default profile’s unit', () => {
     expect(managers.changes()).toEqual([]);
   });
 
+  // M7 review I1: a loaded unit is used only once it starts `mawsd`; one the system will not start runs the launch
+  // embedded, with the reason
+  it('a kickstart the system rejects runs the launch embedded, with launchctl’s answer, packaged or not', async () => {
+    await installUnit();
+    for (const [packaged, program] of [[false, CHECKOUT], [true, PACKAGED]] as const) {
+      managers.script('launchctl kickstart', { status: 5, stderr: 'Could not kickstart service "dev.maws.mawsd": 5: Input/output error' });
+      const launch = await settle(resolveLaunch({ env: {}, shape: 'daemon', packaged, profileDir: defaultProfile(), program }, deps()));
+      expect(launch, packaged ? 'packaged' : 'unpackaged').toEqual({ mode: 'detached', daemon: null, unavailable: expect.stringMatching(/^the LaunchAgent did not start mawsd: .*5: Input\/output error/) });
+    }
+    expect(logs).toContainEqual(expect.stringMatching(/^\[hosts\] the daemon shape does not run this launch: the LaunchAgent did not start mawsd: .*; running embedded$/));
+  });
+
+  it('a loaded unit whose mawsd never takes its lock (a program gone) runs the launch embedded within the bound', async () => {
+    await installUnit();
+    let slept = 0;
+    const launch = await settle(resolveLaunch({ env: {}, shape: 'daemon', packaged: false, profileDir: defaultProfile(), program: CHECKOUT }, deps({ awaitDaemon: undefined, sleep: async (ms) => void (slept += ms) })));
+    expect(launch).toEqual({ mode: 'detached', daemon: null, unavailable: `the LaunchAgent did not start mawsd: no mawsd took its lock within ${UNIT_READY_MS / 1000} s of the unit's start` });
+    expect(slept, 'it waited the bound, and no longer').toBe(UNIT_READY_MS);
+    expect(managers.changes()).toEqual([`launchctl kickstart gui/501/${LABEL}`]);
+  });
+
+  it('awaits mawsd’s lock naming a live process, and never believes a lock whose process is gone', async () => {
+    const paths = daemonPaths(defaultProfile());
+    mkdirSync(paths.dir, { recursive: true });
+    const real = { readLock, isAlive, procStartOf, sleep: async () => {} };
+    writeLock(join(paths.dir, 'mawsd.lock'), process.pid, procStartOf(process.pid) ?? '');
+    await expect(awaitDaemonLock(paths, real, 1_000)).resolves.toBeUndefined();
+    writeLock(join(paths.dir, 'mawsd.lock'), process.pid, 'Thu Jan  1 00:00:00 1970'); // the pid reused by another process
+    await expect(awaitDaemonLock(paths, real, 1_000)).rejects.toThrow('no mawsd took its lock within 1 s');
+  });
+
   it('is never written by an unpackaged run, whatever the shape', async () => {
     for (const shape of ['daemon', 'embedded'] as const) await settle(resolveLaunch({ env: {}, shape, packaged: false, profileDir: defaultProfile(), program: CHECKOUT }, deps()));
     expect(managers.calls.filter((call) => !call.startsWith('launchctl print'))).toEqual([]);
@@ -144,7 +183,7 @@ describe('switching the shape', () => {
         if (args[0] !== 'print') order.push(`${command} ${args[0]}`);
         return managers.run(command, args);
       };
-      const launch = await settle(resolveLaunch({ env: {}, shape: setting, packaged: true, profileDir: defaultProfile(), program: PACKAGED }, deps({ run, endPtyHost: async () => void order.push('pty host ended'), log: () => {} })));
+      const launch = await settle(resolveLaunch({ env: {}, shape: setting, packaged: true, profileDir: defaultProfile(), program: PACKAGED }, deps({ run, leaveDaemon: async () => void order.push('left the daemon shape'), log: () => {} })));
       order.push(`hosts created (${launch.mode})`);
       managers.calls.length = 0;
       return launch;
@@ -154,10 +193,10 @@ describe('switching the shape', () => {
     expect(managers.calls, 'nothing is asked of launchd').toEqual([]);
     expect(managers.loaded.has(LABEL)).toBe(true);
     expect(await launchApp()).toEqual({ mode: 'detached', daemon: null, unavailable: null });
-    expect(order).toEqual(['launchctl bootstrap', 'hosts created (daemon)', 'launchctl bootout', 'pty host ended', 'hosts created (detached)']);
+    expect(order).toEqual(['launchctl bootstrap', 'launchctl kickstart', 'hosts created (daemon)', 'launchctl bootout', 'left the daemon shape', 'hosts created (detached)']);
     expect(existsSync(plistPath())).toBe(false);
     expect(await launchApp(), 'and after it, nothing is left to remove').toEqual({ mode: 'detached', daemon: null, unavailable: null });
-    expect(order.slice(5)).toEqual(['hosts created (detached)']);
+    expect(order.slice(6)).toEqual(['hosts created (detached)']);
   });
 
   it('settles synchronously when there is no unit work, so a scratch profile starts as it always has', () => {
@@ -168,10 +207,62 @@ describe('switching the shape', () => {
 
   it('ends the pty host even when the uninstall fails', async () => {
     const launch = await settle(
-      prepareShape({ mode: 'detached', uninstall: true, unavailable: null }, { install: async () => {}, uninstall: async () => Promise.reject(new Error('bootout failed')), endPtyHost: async () => void logs.push('pty host ended'), log: (l) => void logs.push(l) }),
+      prepareShape(
+        { mode: 'detached', uninstall: true, unavailable: null },
+        { install: async () => {}, startUnit: async () => {}, uninstall: async () => Promise.reject(new Error('bootout failed')), daemonLeft: () => false, leaveDaemon: async () => void logs.push('left the daemon shape'), log: (l) => void logs.push(l) },
+      ),
     );
     expect(launch).toEqual({ mode: 'detached', daemon: null, unavailable: null });
-    expect(logs.slice(1)).toEqual(['[hosts] the LaunchAgent could not be uninstalled: bootout failed', 'pty host ended']);
+    expect(logs.slice(1)).toEqual(['[hosts] the LaunchAgent could not be uninstalled: bootout failed', 'left the daemon shape']);
+  });
+});
+
+// M7 review I2: any profile, not only the default one, leaves the daemon shape at its next embedded launch: its
+// `mawsd` (a private one here) is ended first, then its socket-mode pty host; the engine host, whose sessions carry over
+// to the embedded app, is left running. Real processes stand in for the three, each recording its SIGTERM.
+describe('a profile leaving the daemon shape', () => {
+  const standIns: ChildProcess[] = [];
+  afterEach(() => {
+    for (const child of standIns.splice(0)) child.kill('SIGKILL');
+  });
+  // a process that appends `name` to `record` at its SIGTERM and exits, its lock written once its handler is in place
+  const standIn = async (name: string, lockPath: string, record: string): Promise<ChildProcess> => {
+    const child = spawn(process.execPath, ['-e', `process.on('SIGTERM', () => { require('node:fs').appendFileSync(${JSON.stringify(record)}, ${JSON.stringify(`${name}\n`)}); process.exit(0); }); setInterval(() => {}, 1000); process.stdout.write('ready');`], { stdio: ['ignore', 'pipe', 'ignore'] });
+    standIns.push(child);
+    await new Promise((resolve) => child.stdout!.once('data', resolve)); // its SIGTERM handler is in place
+    let start: string | null = null;
+    for (let i = 0; i < 50 && (start = procStartOf(child.pid!)) === null; i++) await new Promise((r) => setTimeout(r, 20));
+    mkdirSync(dirname(lockPath), { recursive: true });
+    writeLock(lockPath, child.pid!, start ?? '');
+    return child;
+  };
+  const exited = (child: ChildProcess) => new Promise<void>((resolve) => (child.exitCode !== null || child.signalCode !== null ? resolve() : child.once('exit', () => resolve())));
+
+  it('ends a scratch profile’s private mawsd, then its socket-mode pty host, and leaves the engine host, before an embedded launch’s hosts exist', async () => {
+    const profile = scratchProfile();
+    const paths = daemonPaths(profile);
+    const record = join(home, 'sigterms');
+    const mawsd = await standIn('mawsd', join(paths.dir, 'mawsd.lock'), record);
+    const ptyHost = await standIn('pty host', join(paths.ptyHost, 'host.lock'), record);
+    const engine = await standIn('engine host', join(profile, 'supervisor', 'host.lock'), record);
+    const launch = resolveLaunch({ env: {}, shape: 'embedded', packaged: false, profileDir: profile, program: CHECKOUT }, deps({ leaveDaemon: undefined }));
+    expect(launch, 'the teardown is waited for before the hosts are created').toBeInstanceOf(Promise);
+    expect(await launch).toEqual({ mode: 'detached', daemon: null, unavailable: null });
+    await Promise.all([exited(mawsd), exited(ptyHost)]);
+    expect(readFileSync(record, 'utf8')).toBe('mawsd\npty host\n');
+    expect(engine.exitCode, 'the engine host keeps running, its sessions with it').toBeNull();
+    expect(managers.calls, 'no unit of the default profile is touched').toEqual([]);
+  });
+
+  it('leaves them alone on a launch the daemon was unavailable to, and on a profile with no daemon-shape locks', async () => {
+    const profile = defaultProfile(); // an unpackaged run asking for the daemon with no unit: embedded, saying why
+    const record = join(home, 'sigterms');
+    const ptyHost = await standIn('pty host', join(daemonPaths(profile).ptyHost, 'host.lock'), record);
+    expect(await settle(resolveLaunch({ env: {}, shape: 'daemon', packaged: false, profileDir: profile, program: CHECKOUT }, deps({ leaveDaemon: undefined })))).toEqual({ mode: 'detached', daemon: null, unavailable: UNAVAILABLE.noUnit });
+    expect(ptyHost.exitCode).toBeNull();
+    expect(existsSync(record)).toBe(false);
+    const fresh = resolveLaunch({ env: {}, shape: 'embedded', packaged: false, profileDir: join(home, 'fresh'), program: CHECKOUT }, deps());
+    expect(fresh, 'synchronous, with nothing to end').toEqual({ mode: 'detached', daemon: null, unavailable: null });
   });
 });
 
