@@ -373,8 +373,8 @@ The order is M1, M2, M3, M4, M5, M6.
   - `session.drafts.get` and `session.drafts.set` are `addressed`, so a draft is read and written in its session's machine's index, keyed there by the bare id. Nothing migrates on disk.
   - This is OX2's "drafts key by it": the draft is addressed by `{machine, id}`, and the machine keeps it under its own id.
   - Rejected: moving drafts into the client keyed by address. It would split a draft from the record its store checks (`DraftStore.requireSession`), migrate rows out of `index.sqlite`, and lose a draft typed on one device and continued on another.
-- **Ids the renderer mints.** Every id the renderer mints for itself is an address of the local machine, built with `addressOf(window.maws.localMachine, …)` once at module initialisation. The lowerer throws on a bare id, so a missed one breaks its feature even with one machine. At the base these are:
-  - the scenario creator's `app-new-<uuid>`;
+- **Ids the renderer mints.** Every id the renderer mints for itself is an address of the local machine, built with `addressOf(window.maws.localMachine, …)`. Fixed ids are built once at module initialisation. An id drawn per use is built where it is drawn. The lowerer throws on a bare id, so a missed one breaks its feature even with one machine. At the base these are:
+  - the scenario creator's `app-new-<uuid>`. Its UUID is still drawn inside the creation callback, once per new session, and addressed there. A test creates two in a row and expects two distinct addresses;
   - the synthetic pty owners, which reach `pty.spawn.appSessionId` through the terminal registry or directly:
     - `ENGINE_UPDATE_OWNER` (`src/renderer/src/settings-tab/engine-update.ts`);
     - `GWS_OWNER` (`src/renderer/src/delivery/SendToSheet.tsx`);
