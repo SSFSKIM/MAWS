@@ -29,7 +29,7 @@ import { deployArgs, readSecrets } from './deploy';
 import { Person } from './hub';
 import { connection, delegation, events, frames, lingering, members, push, Report, type Context, type Fixture } from './acceptance-items';
 import { loadAdminDevice, OrgAdmin, type AdminDevice, type OrgScope } from './org-admin';
-import { Cleanup, testOrgArg } from './proof';
+import { Cleanup, isTestTarget, testOrgArg } from './proof';
 import { httpPushSink, type PushSink } from './push-sink';
 import { connectEndpoint, echoingEndpoint } from './rl1';
 
@@ -99,6 +99,7 @@ export async function main(argv: string[]): Promise<number> {
     'push-url': { type: 'string' },
     'push-port': { type: 'string' },
   });
+  if (!isTestTarget(config)) return 2;
   const items = (values.items as string).split(',').map((item) => item.trim());
   const frameCount = Number(values.frames);
   const port = values['push-port'] === undefined ? undefined : Number(values['push-port']);

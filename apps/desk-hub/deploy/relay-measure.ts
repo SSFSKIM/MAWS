@@ -22,7 +22,7 @@ import { readDeployConfig } from './config';
 import { deployArgs, readSecrets } from './deploy';
 import { Person } from './hub';
 import { loadAdminDevice, OrgAdmin, type AdminDevice, type OrgScope } from './org-admin';
-import { Cleanup, testOrgArg } from './proof';
+import { Cleanup, isTestTarget, testOrgArg } from './proof';
 import { connectEndpoint, EchoReader, echoingEndpoint, frameSeq, openedChannel, SEALED_OVERHEAD, sameBytes, sealedFrame } from './rl1';
 
 export const KIB = 1024;
@@ -171,6 +171,7 @@ export async function main(argv: string[]): Promise<number> {
     seconds: { type: 'string', default: '10' },
     window: { type: 'string', default: '4' },
   });
+  if (!isTestTarget(config)) return 2;
   const options = { samples: Number(values.samples), seconds: Number(values.seconds), window: Number(values.window) };
   if (!Object.values(options).every((n) => Number.isSafeInteger(n) && n > 0)) {
     console.error('--samples, --seconds and --window are positive integers');

@@ -17,18 +17,20 @@
 // --seconds (the writing's length, default 420), --redeploy-at (default 15) and --device-keys (the admin device's keys
 // file, org-admin.ts; without it a device made for the run signs the throwaway org's genesis, which needs an org with no
 // state yet). It revokes the machines however it ends, and takes the v2 one out of the org state.
-// The redeploy is `deployHub`'s own, so it acts on `--config`'s Worker alone, under the same target check as `deploy`.
+// The redeploy is `deployHub`'s own, so it acts on `--config`'s Worker alone, under the same target check as `deploy`;
+// and since the leg writes org state, the run is refused before anything else on any Worker but a staging one
+// (config.ts, checkTestTarget): never production.
 import { randomUUID } from 'node:crypto';
 import { loadavg } from 'node:os';
 import { FakeMachine } from '../fake-machine/machine';
 import { importOrgKey, newNonce, seal } from '../src/protocol/codes';
 import type { HumanDraft, LogEvent } from '../src/protocol/log';
 import { join } from 'node:path';
-import { readDeployConfig } from './config';
+import { checkTestHub, readDeployConfig } from './config';
 import { deployArgs, deployHub, readSecrets, type DeployOptions } from './deploy';
 import { enroll, LogFollower, newOrgKey, Person, sleep, STOP_WAIT_MS } from './hub';
 import { loadAdminDevice, newAdminDevice, OrgAdmin, type AdminDevice } from './org-admin';
-import { Cleanup, revoke, servesOrg, TEST_ORG_OPTION, testOrgArg } from './proof';
+import { Cleanup, isTestTarget, revoke, servesOrg, TEST_ORG_OPTION, testOrgArg } from './proof';
 import { Rl1Watch } from './rl1-reconnect';
 
 async function until<T>(read: () => Promise<T | undefined>, what: string, ms: number): Promise<T> {
@@ -48,6 +50,7 @@ export async function main(argv: string[]): Promise<number> {
     'device-keys': { type: 'string' },
     ...TEST_ORG_OPTION,
   });
+  if (!isTestTarget(config)) return 2;
   const org = testOrgArg(values['test-org'] as string | undefined, readDeployConfig((values.config as string | undefined) ?? join(process.env.DESK_HUB_APP!, 'deploy', 'config.json')).org.id);
   if (!org) return 2;
   // The redeploy keeps the deployment on the throwaway org it serves.
@@ -96,6 +99,8 @@ export async function redeployCheck(
   redeploy: () => Promise<void>,
   device: AdminDevice,
 ): Promise<number> {
+  // Its RL1 leg writes org state: a staging hub, never production, checked before the first enrollment.
+  checkTestHub(owner.hub, 'enroll machines and write org state');
   const hub = owner.hub;
   const me = await owner.json<{ org: { id: string }; member: { id: string } }>('/api/me');
   const tag = Math.random().toString(36).slice(2, 7);

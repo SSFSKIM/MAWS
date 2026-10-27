@@ -3,6 +3,7 @@
 // - it runs only in a throwaway org, named with `--test-org`, never the configuration's own (`--config`'s), and only
 //   while the deployment serves that org, checked before anything is enrolled or written;
 // - it cleans up what it enrolled or minted, each step attempted whatever happened before, and fails when one fails.
+import { checkTestTarget, type DeployConfig } from './config';
 import type { Person } from './hub';
 
 export const TEST_ORG_OPTION = { 'test-org': { type: 'string' } } as const;
@@ -30,6 +31,18 @@ export async function assertServesOrg(person: Person, org: string): Promise<void
 export async function servesOrg(person: Person, org: string): Promise<boolean> {
   try {
     await assertServesOrg(person, org);
+    return true;
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    return false;
+  }
+}
+
+/** `checkTestTarget` for a command that writes org state: false, with why on stderr, where it would throw. Checked
+ * before a credential is read or anything is asked of the hub. */
+export function isTestTarget(config: DeployConfig): boolean {
+  try {
+    checkTestTarget(config, 'write org state for a test');
     return true;
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));

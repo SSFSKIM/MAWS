@@ -3,12 +3,12 @@
 // signing. It signs successors with its device's step-up key (a root key of the head), enrolls v2 machines with a code
 // it builds and checks the MAC each machine posts, lists them, and takes them out again.
 //
-// Where it may write is held to two cases, checked before anything is written:
+// Where it may write is held, before anything is asked of the hub, to a staging hub or the suites' local one, never
+// production, which is refused by name (config.ts, checkTestHub), and within it to two cases:
 // - the deployment's own org, only when it serves a chain whose genesis is the one the configuration pins
 //   (`orgGenesis`, the operator's anchor): a successor, never a genesis. A configuration without a pin (production's)
 //   is refused, so a test device can never root an org nor sign into one it was not set up for;
 // - a throwaway org (`--test-org`, proof.ts's rule): a genesis when it has no state yet, signed by this device.
-import { readFileSync } from 'node:fs';
 import {
   base64urlEncode,
   generateSigningKey,
@@ -22,8 +22,10 @@ import {
   type SignedOrgState,
   type SigningKey,
 } from 'org-protocol';
+import { readJsonFile } from '../fake-machine/json-file';
 import { enrollV2, type V2Machine } from '../fake-machine/org';
 import { encodeEnrollmentCodeV2, ORG_STATE_PATH, type EnrollmentIssued, type EnrollmentKey, type OrgStateView } from '../src/protocol/identity';
+import { checkTestHub } from './config';
 import type { Person } from './hub';
 import { revoke, type Cleanup } from './proof';
 
@@ -35,10 +37,10 @@ export type AdminDevice = { id: string; channel: SigningKey; stepUp: SigningKey;
 
 /**
  * The device in a keys file as the staging test device keeps it (`{keys: {"<id>.channel": jwk, "<id>.stepUp": jwk,
- * "recovery": jwk}}`, private JWKs, mode 0600): read here and nowhere printed.
+ * "recovery": jwk}}`, private JWKs, mode 0600): read here and nowhere printed, a malformed one included (readJsonFile).
  */
 export async function loadAdminDevice(file: string, id = 'a1'): Promise<AdminDevice> {
-  const { keys = {} } = JSON.parse(readFileSync(file, 'utf8')) as { keys?: Record<string, JsonWebKey> };
+  const { keys = {} } = readJsonFile<{ keys?: Record<string, JsonWebKey> } | null>(file, "an admin device's keys") ?? {};
   const jwk = (name: string) => {
     if (!keys[name]) throw new Error(`${file} holds no "${name}" key`);
     return keys[name];
@@ -89,6 +91,7 @@ export class OrgAdmin {
    * posts the genesis first.
    */
   static async open(person: Person, scope: OrgScope, device: AdminDevice, log: (line: string) => void = console.log): Promise<OrgAdmin> {
+    checkTestHub(person.hub, 'write its org state');
     const me = await person.json<{ org: { id: string }; member: { id: string; email: string } }>('/api/me');
     if (me.org.id !== scope.org) throw new Error(`the deployment serves the org ${me.org.id}, not ${scope.org}: refusing to write its state`);
     const first = await person.json<OrgStateView>(`${ORG_STATE_PATH}?since=0`);
