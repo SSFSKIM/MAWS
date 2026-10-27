@@ -17,25 +17,29 @@
 // (`restart`) before the hub link.
 //
 // Every request a channel carries is decided by the authorizer (M5) before its executor sees it (`gate`), from the offer
-// table, O1's grades, the session's record and the known checkouts (two sources M6 fills from RL10; empty until then),
-// the machine's grants and policy, and the device's class.
+// table, O1's grades, the session's record and the known checkouts (two sources RL10 fills), the machine's grants and
+// policy, and the device's class.
+//
+// RL10 (M6), the sminos daemon's local socket, is served while the machine speaks for its ref and is `org-listed`, and
+// not once the hub link stops for good with `re-enroll` or `revoked`: `rl10.json` and the socket exist only then.
 import { homedir, networkInterfaces } from 'node:os';
-import { importSigningKey, stateHash, type MachineIdentity, type OrgState, type Right, type Rl1Refusal, type SignedOrgState, type SigningKey } from 'org-protocol';
+import { importSigningKey, isListingGone, stateHash, type MachineIdentity, type OrgState, type Right, type Rl1Refusal, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { Authorizer, type AuthorizeContext } from './authorize';
 import { Channels } from './channels';
 import { DirectListener, type DirectListenerOptions } from './direct-listener';
 import { runCli } from './cli';
 import { enrollDelegatedInto, speaksFor, syncAndPromote, type DelegatedInput, type EnrollContext, type EnrollmentState } from './enroll';
 import { Gate } from './gate';
-import { dropRevokedGrants, machineRights } from './grants';
+import { dropRevokedGrants, machineOwnerMembers, machineRights } from './grants';
 import type { HubDeps } from './hub-http';
 import { HubLink } from './hub-link';
 import { EndpointRecords, Listings, RecordRetries, type RecordsContext } from './listings';
 import { Notifier } from './notify';
 import { EndpointOrg, type OrgChange } from './org-sync';
 import { EndpointPolicy, settingsDefaultMode } from './policy';
+import { Rl10 } from './rl10/link';
 import type { EndpointModule, EndpointServices } from './services';
-import { NO_CHECKOUTS, NO_RECORDS, type CheckoutSource, type RecordSource } from './sources';
+import type { CheckoutSource, RecordSource } from './sources';
 import { EndpointState } from './state/store';
 import { endpointStatus, NO_LINKS, type EndpointLinks, type EndpointStatus } from './status';
 import { directPort, type InterfaceTable } from './tailnet';
@@ -45,8 +49,8 @@ import { directPort, type InterfaceTable } from './tailnet';
  * `fetch` and `sleep` are the suites' seams for faults and fast retries; `env` is where `MAWS_ENDPOINT_DIRECT` and
  * `MAWS_ENDPOINT_PORT` are read (the process's); `pingMs` and `direct` are the suites' seams for channel liveness and
  * the listener (its interface table, how it listens, its limits). `authorization` holds the sources authorization reads
- * (M6 fills them from RL10; empty until then) and the machine's `defaultMode` (read from the user's settings), and the
- * suites' seams for another offer table, grade declaration or registry.
+ * (RL10's members and presences unless a suite gives others) and the machine's `defaultMode` (read from the user's
+ * settings), and the suites' seams for another offer table, grade declaration or registry.
  */
 export type EndpointOptions = {
   build?: string;
@@ -83,6 +87,8 @@ export class Endpoint implements EndpointModule {
   readonly authorizer: Authorizer;
   /** The channel's `call`, `act` and `sub` routes behind the authorizer; M7 and M8 set its executors. */
   readonly gate: Gate;
+  /** RL10 (M6): the sminos daemon's socket; its members are the records and checkouts authorization reads. */
+  readonly rl10: Rl10;
   readonly #options: EndpointOptions;
   #direct: DirectListener | null = null;
   #directStarted = false;
@@ -122,6 +128,7 @@ export class Endpoint implements EndpointModule {
       hooks: {
         welcome: ({ generation }) => {
           this.links.hub = { connected: true, generation };
+          this.rl10.hubWelcomed();
           void this.syncNow();
           void this.endpointRecords.issue();
           void this.listings.welcome().then(() => this.notifier.welcome());
@@ -131,6 +138,7 @@ export class Endpoint implements EndpointModule {
           this.#retries.clear();
         },
         state: (version) => void this.#syncTo(version),
+        stopped: () => this.#syncRl10(),
         refusal: (refusal) => {
           log(`endpoint: the hub refused a \`${refusal.frame}\` frame: ${refusal.status} ${refusal.error}`);
           this.#refused(refusal);
@@ -157,6 +165,41 @@ export class Endpoint implements EndpointModule {
       store: { read: () => this.#state?.notified ?? {}, write: (file) => this.#state?.setNotified(file) },
       log,
     });
+    this.rl10 = new Rl10({
+      stateDir: () => {
+        if (this.#services === null) throw new Error('the endpoint has not started');
+        return this.#services.machine.stateDir;
+      },
+      build: options.build ?? 'unknown',
+      state: () => this.#state,
+      head: () => (this.#org?.ready ? { state: this.#org.head().state, certificates: this.#org.certificates() } : null),
+      identity: () => {
+        const enrollment = this.#state?.enrolled ? this.#state.enrollment : null;
+        if (enrollment?.state !== 'org-listed' || this.#services === null) return null;
+        return { org: enrollment.org, hub: enrollment.hub, name: enrollment.name, ref: this.#services.machine.ref, enrolled: enrollment.at };
+      },
+      key: () => records.key(),
+      policy: this.policy,
+      hub: this.hub,
+      listings: {
+        report: (report) => this.listings.report(report),
+        gone: (session) => this.listings.gone(session),
+        refresh: () => this.listings.refresh(),
+        listedSessions: () => Object.entries(this.#state?.listings ?? {}).flatMap(([session, entry]) => (isListingGone(entry.record.body) ? [] : [session])),
+      },
+      notifier: this.notifier,
+      machineOwners: () => {
+        const org = this.#org;
+        if (!org?.ready || this.#services === null) return Promise.resolve([]);
+        return machineOwnerMembers(org.head().state, org.certificates(), this.#services.machine.ref, new Date(this.deps.now()));
+      },
+      dispatch: (owner, name, input) => {
+        if (this.#services === null) return Promise.reject(new Error('the endpoint has not started'));
+        return this.#services.dispatch(owner, name, input);
+      },
+      now: this.deps.now,
+      log,
+    });
     this.channels = new Channels({
       identity: () => this.#identity(),
       org: () => (this.#identity() === null ? null : this.#org),
@@ -179,8 +222,8 @@ export class Endpoint implements EndpointModule {
       rights: (member) => this.#rights(member),
       policy: () => this.policy.current(),
       settingsMode: authorization.settingsMode ?? (() => settingsDefaultMode(homedir())),
-      records: authorization.records ?? NO_RECORDS,
-      checkouts: authorization.checkouts ?? NO_CHECKOUTS,
+      records: authorization.records ?? this.rl10.members,
+      checkouts: authorization.checkouts ?? this.rl10.members,
       dispatch: (owner, name, input) => {
         if (this.#services === null) return Promise.reject(new Error('the endpoint has not started'));
         return this.#services.dispatch(owner, name, input);
@@ -205,7 +248,10 @@ export class Endpoint implements EndpointModule {
     const state = EndpointState.open(services.machine.stateDir, { log, now: this.deps.now });
     const org = new EndpointOrg(state, { log, now: this.deps.now });
     org.onAdopted((change) => this.#adopted(change));
-    org.onCertificates(() => void this.#judge());
+    org.onCertificates(() => {
+      void this.#judge();
+      void this.rl10.adopted();
+    });
     this.#state = state;
     this.#org = org;
     this.notifier.restore();
@@ -241,6 +287,8 @@ export class Endpoint implements EndpointModule {
     await this.channels.closeAll('restart');
     await this.#direct?.stop();
     this.links.listener = { bound: false };
+    this.rl10.members.stop();
+    await this.rl10.unserve();
     await this.hub.stop();
   }
 
@@ -250,6 +298,7 @@ export class Endpoint implements EndpointModule {
   }
 
   status(): EndpointStatus {
+    this.links.rl10 = { connected: this.rl10.connected };
     const stopped = this.hub.stopped;
     return endpointStatus(this.#state, this.#headHash, this.links.refusing === undefined && stopped !== null ? { ...this.links, refusing: stopped } : this.links);
   }
@@ -284,6 +333,7 @@ export class Endpoint implements EndpointModule {
         // devices meeting the new key once the head lists it.
         this.#judgments++;
         this.#speaks = false;
+        this.#syncRl10();
         this.channels.keyReplaced(key.pub);
         void this.#judge();
         // New credentials: the link under the old ones ends, and a stop it came to is cleared; it opens again once the
@@ -416,6 +466,8 @@ export class Endpoint implements EndpointModule {
     void this.#judge();
     // The machine's owners or the admins may have changed: `@machine` listings are re-issued.
     void this.listings.refresh();
+    // sminos hears the head's revocation set and directory where they changed.
+    void this.rl10.adopted();
   }
 
   /**
@@ -470,6 +522,19 @@ export class Endpoint implements EndpointModule {
     }
     if (speaks) this.#ensureLink();
     else if (was) void this.channels.closeAll('removed');
+    this.#syncRl10();
+  }
+
+  /**
+   * RL10 served exactly while the machine speaks for its ref, is `org-listed`, its state sound, and the hub link has not
+   * stopped for good on a verdict that the machine is no longer enrolled (`re-enroll`, `revoked`).
+   */
+  #syncRl10(): void {
+    const enrollment = this.#state?.enrolled ? this.#state.enrollment : null;
+    const stopped = this.hub.stopped;
+    const serve = !this.#stopped && this.#speaks && enrollment?.state === 'org-listed' && this.#state?.refusing === null && stopped !== 're-enroll' && stopped !== 'revoked';
+    if (serve && !this.rl10.serving) void this.rl10.serve();
+    else if (!serve && this.rl10.serving) void this.rl10.unserve();
   }
 
   #endRevokedGrants(head: OrgState, log: (line: string) => void): void {

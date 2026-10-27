@@ -86,3 +86,39 @@ export function syncDirectory(dir: string): void {
 export function sweepTemporaries(dir: string): void {
   for (const entry of fs.readdirSync(dir)) if (TEMPORARY.test(entry)) fs.rmSync(join(dir, entry), { force: true });
 }
+
+/**
+ * Appends `lines` (each without its newline) to `dir/name`, created 0600 when absent, and fsyncs the file before it
+ * returns: an append-only record (the signature ledger, the inbound index) is on disk before anything it vouches for
+ * leaves. A file that isn't private is refused (checkPrivateFile).
+ */
+export function appendLines(dir: string, name: string, lines: readonly string[]): void {
+  const path = join(dir, name);
+  const created = !checkPrivateFile(path);
+  const fd = fs.openSync(path, 'a', 0o600);
+  try {
+    const bytes = Buffer.from(lines.map((line) => `${line}\n`).join(''), 'utf8');
+    let at = 0;
+    while (at < bytes.length) at += fs.writeSync(fd, bytes, at, bytes.length - at);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  if (created) syncDirectory(dir);
+}
+
+/** The JSON lines of `dir/name` (none when it is absent); a line that doesn't parse (a torn last write) is left out. */
+export function readLines(dir: string, name: string): unknown[] {
+  const text = readPrivateText(join(dir, name));
+  if (text === null) return [];
+  const out: unknown[] = [];
+  for (const line of text.split('\n')) {
+    if (line === '') continue;
+    try {
+      out.push(JSON.parse(line));
+    } catch {
+      // a torn write: the line is not taken
+    }
+  }
+  return out;
+}
