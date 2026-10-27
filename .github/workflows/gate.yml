@@ -508,10 +508,20 @@ jobs:
         env:
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/supervisor-packaged
         run: .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)' pnpm e2e:supervisor:packaged
+      # P5 O2 M7: the daemon shape's packaged check, a private mawsd of a scratch profile (no LaunchAgent: the spec fails if
+      # the account's canonical dev.maws.mawsd plist appears or changes)
+      - if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        env:
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/supervisor-daemon-packaged
+        run: .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)' pnpm e2e:supervisor-daemon:packaged
       - if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         env:
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/voice-packaged
         run: .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)' pnpm e2e:voice:packaged
+      # As the e2e job's after e2e:daemon-unit: whatever the daemon-shape check did (it loads no agent), every
+      # `dev.maws.mawsd.e2e-*` agent and plist in this Mac's account is booted out and removed, and one left loaded fails.
+      - if: always() && steps.build.outcome == 'success'
+        run: .github/scripts/launchd-sweep.sh
       # Each run's HTML report keeps its screenshots and traces; test-results/ holds the last run's alone.
       - if: failure() || needs.plan.outputs.evidence == 'true'
         uses: actions/upload-artifact@v7

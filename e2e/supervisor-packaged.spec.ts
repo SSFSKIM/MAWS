@@ -8,13 +8,14 @@
 // nor `pnpm e2e:supervisor` (which names its own spec) runs it:
 //   pnpm build:app && pnpm e2e:supervisor:packaged
 // P5 O2 M7 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M7 "The suites"): under `MAWS_HOST_MODE=daemon`
-// (`pnpm e2e:supervisor-daemon:packaged`, not a gate group) the daemon shape's check runs instead: the private `mawsd`
-// of a scratch profile is the app binary run as Node, named `mawsd`, its entry inside `app.asar`, and the engine host
-// it starts is the app binary named `maws-supervisor` as above.
+// (`pnpm e2e:supervisor-daemon:packaged`, a step of the gate's packaged job) the daemon shape's check runs instead: the
+// private `mawsd` of a scratch profile is the app binary run as Node, named `mawsd`, its entry inside `app.asar`, and
+// the engine host it starts is the app binary named `maws-supervisor` as above. It installs no LaunchAgent, and fails
+// if the account's canonical `dev.maws.mawsd` plist appears or changes.
 //   pnpm build:app && pnpm e2e:supervisor-daemon:packaged
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { expect, test } from '@playwright/test';
 import type { HostStatus } from '@shared/ipc/schema/host';
@@ -170,6 +171,11 @@ test('packaged, the daemon shape: mawsd is the app binary run as Node, named maw
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-o2-packaged-')));
   const userData = join(root, 'ud'); // not the default profile: a private mawsd, never the LaunchAgent
   mkdirSync(userData);
+  // The account's canonical LaunchAgent is never written, even by a packaged app: the gate's Mac runs the owner's real
+  // one once its account is cut over, so the check fails if the plist appears, changes or goes.
+  const canonical = join(homedir(), 'Library', 'LaunchAgents', 'dev.maws.mawsd.plist');
+  const canonicalNow = () => (existsSync(canonical) ? { text: readFileSync(canonical, 'utf8'), mtimeMs: statSync(canonical).mtimeMs } : null);
+  const canonicalBefore = canonicalNow();
   let maws: MawsLaunch | null = null;
   const pids: number[] = [];
   let leftover: unknown = null;
@@ -211,6 +217,7 @@ test('packaged, the daemon shape: mawsd is the app binary run as Node, named maw
     await app.evaluate(({ app: electronApp }) => electronApp.quit());
     await exited;
     await expect.poll(() => isAlive(enginePid), { timeout: 10_000, message: 'the unbusy quit parks the engine host' }).toBe(false);
+    expect(canonicalNow(), `the account's ${canonical} is untouched`).toEqual(canonicalBefore);
   } finally {
     if (maws) await maws.cleanup().catch((error: unknown) => console.error(error));
     await killScratchProcesses(root, pids).catch((error: unknown) => (leftover = error));
