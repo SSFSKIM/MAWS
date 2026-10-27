@@ -48,9 +48,10 @@ export type KeyHolder = { machine: string } | { member: MemberId; device: string
 export type RetiredKey = { keyId: string; pub: B64; notAfter: string; holder: KeyHolder };
 /**
  * A revoked key (RL §5.2, RL DL 24): nothing it signed verifies, ever, and it is never current, retired or a live
- * certificate's again. A delegation's key is held by the delegation's id; revoking it revokes every certificate under it.
+ * certificate's again. A delegation's key is held by the delegation's id and prefix, both reserved for the life of the
+ * org (RL DL 26); revoking it revokes every certificate under it.
  */
-export type RevokedKey = { keyId: string; holder: KeyHolder | { delegation: string } };
+export type RevokedKey = { keyId: string; holder: KeyHolder | { delegation: string; prefix: string } };
 export type Delegation = { id: string; pub: B64; prefix: string; expires: string; maxUses: number; offlineRevokeS: number; owners: Owners };
 export type ProjectEntry = { id: string; name: string };
 

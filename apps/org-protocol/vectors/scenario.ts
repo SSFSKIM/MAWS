@@ -5,8 +5,8 @@
 import { base64urlEncode } from '../src/base64url.ts';
 import { canonicalize } from '../src/canonical.ts';
 import { enrollmentMac, enrollmentMacInput } from '../src/enrollment.ts';
-import { signEvent } from '../src/events.ts';
-import { keyId, type B64, type SigningKey } from '../src/keys.ts';
+import { eventSigningInput, signEvent } from '../src/events.ts';
+import { keyId, signInput, type B64, type SigningKey } from '../src/keys.ts';
 import { endorseDevice, signOrgState, signTransition, stateHash } from '../src/org-state.ts';
 import { signRecord } from '../src/records.ts';
 import { SIGNING_DOMAINS, type Signer, type Device, type RevokedKey, type EndpointRecord, type Grant, type Listing, type MachineCert, type OrgState, type RootTransition, type Signed, type SignedOrgState } from '../src/types.ts';
@@ -471,7 +471,7 @@ export async function buildScenario(k: Keys): Promise<VectorSet> {
 
   // Delegations: id, key and prefix never change; `expires` moves only while both values lie ahead; one leaves the state
   // only by its key's revocation, which frees its prefix.
-  const dlgRevoked = { keyId: await kid('delegation'), holder: { delegation: DLG_VM } };
+  const dlgRevoked = { keyId: await kid('delegation'), holder: { delegation: DLG_VM, prefix: 'vm-' } };
   await successorCase("a successor changing a delegation's key", await next(v2, (s) => (s.delegations[0].pub = k.delegationB.pub), 2), ['a1StepUp'], no('malformed'));
   await successorCase("a successor changing a delegation's prefix", await next(v2, (s) => (s.delegations[0].prefix = 'vmx-'), 2), ['a1StepUp'], no('malformed'));
   await successorCase('a successor renewing a live delegation', await next(v2, (s) => (s.delegations[0].expires = LATER), 2), ['a1StepUp'], ok());
@@ -484,7 +484,11 @@ export async function buildScenario(k: Keys): Promise<VectorSet> {
   await successorCase('a successor revoking a delegation it keeps', await next(v2, (s) => s.revoked.push(dlgRevoked), 2), ['a1StepUp'], no('revoked'));
   await successorCase('a successor revoking a delegation under another id', await next(v2, (s) => {
     s.delegations = [];
-    s.revoked.push({ ...dlgRevoked, holder: { delegation: DLG_OTHER } });
+    s.revoked.push({ ...dlgRevoked, holder: { delegation: DLG_OTHER, prefix: 'vm-' } });
+  }, 2), ['a1StepUp'], no('malformed'));
+  await successorCase("a successor revoking a delegation under another prefix", await next(v2, (s) => {
+    s.delegations = [];
+    s.revoked.push({ ...dlgRevoked, holder: { delegation: DLG_VM, prefix: 'other-' } });
   }, 2), ['a1StepUp'], no('malformed'));
   const noDelegation = await sign(await next(v2, (s) => {
     s.delegations = [];
@@ -492,7 +496,28 @@ export async function buildScenario(k: Keys): Promise<VectorSet> {
   }, 2), 'a1StepUp');
   keep('v2 without the delegation', noDelegation);
   cases.push({ name: 'a successor dropping a delegation, its key revoked', call: 'verifySuccessor', args: [signed('v2'), signed('v2 without the delegation'), []], expect: ok() });
-  await successorCase("then a delegation taking the revoked one's prefix", await next(noDelegation, (s) => s.delegations.push({ ...dlgB, prefix: 'vm-' }), 3), ['a1StepUp'], ok(), 'v2 without the delegation');
+  // A revoked delegation's prefix and id stay reserved for the life of the org (RL DL 26), and no enrolled ref takes the
+  // `<id>_` shape of a delegation the state knows: so no later delegation or entry reopens the revoked one's history.
+  await successorCase("then a delegation taking the revoked one's prefix", await next(noDelegation, (s) => s.delegations.push({ ...dlgB, prefix: 'vm-' }), 3), ['a1StepUp'], no('malformed'), 'v2 without the delegation');
+  await successorCase("then a delegation whose prefix holds the revoked one's", await next(noDelegation, (s) => s.delegations.push({ ...dlgB, prefix: 'v' }), 3), ['a1StepUp'], no('malformed'), 'v2 without the delegation');
+  await successorCase("then a delegation taking the revoked one's id", await next(noDelegation, (s) => s.delegations.push({ ...dlgB, id: DLG_VM, prefix: 'zz-' }), 3), ['a1StepUp'], no('malformed'), 'v2 without the delegation');
+  await successorCase("then a machine named under the revoked prefix", await next(noDelegation, (s) => {
+    s.machines.push({ name: 'vm-7', ref: REF_NEWCOMER, pub: k.newcomer.pub, owners: [A] });
+    s.machineNames.push({ name: 'vm-7', ref: REF_NEWCOMER });
+  }, 3), ['a1StepUp'], no('malformed'), 'v2 without the delegation');
+  await successorCase("then a machine enrolled under a ref of the revoked delegation's shape", await next(noDelegation, (s) => {
+    s.machines.push({ name: 'host-9', ref: `${DLG_VM}_hostAAAAAAAAAAAAAAAAAA`, pub: k.newcomer.pub, owners: [A] });
+    s.machineNames.push({ name: 'host-9', ref: `${DLG_VM}_hostAAAAAAAAAAAAAAAAAA` });
+  }, 3), ['a1StepUp'], no('malformed'), 'v2 without the delegation');
+  await successorCase("a successor enrolling a machine under a ref of a live delegation's shape", await next(v2, (s) => {
+    s.machines.push({ name: 'host-9', ref: `${DLG_VM}_hostAAAAAAAAAAAAAAAAAA`, pub: k.newcomer.pub, owners: [A] });
+    s.machineNames.push({ name: 'host-9', ref: `${DLG_VM}_hostAAAAAAAAAAAAAAAAAA` });
+  }, 2), ['a1StepUp'], no('malformed'));
+  await successorCase("a successor adding a delegation whose id shapes an enrolled machine's ref", await next(v2, (s) => {
+    s.machines.push({ name: 'host-9', ref: `${DLG_B}_hostAAAAAAAAAAAAAAAAAA`, pub: k.newcomer.pub, owners: [A] });
+    s.machineNames.push({ name: 'host-9', ref: `${DLG_B}_hostAAAAAAAAAAAAAAAAAA` });
+    s.delegations.push(dlgB);
+  }, 2), ['a1StepUp'], no('malformed'));
   await successorCase("then a delegation taking the revoked one's key", await next(noDelegation, (s) => s.delegations.push({ ...dlgB, pub: k.delegation.pub }), 3), ['a1StepUp'], no('revoked'), 'v2 without the delegation');
   await successorCase('a successor whose record gains a name no machine has', await next(v2, (s) => s.machineNames.push({ name: 'spare', ref: REF_NEWCOMER }), 2), ['a1StepUp'], no('malformed'));
 
@@ -710,7 +735,7 @@ export async function buildScenario(k: Keys): Promise<VectorSet> {
   }
   // Log events in PROJECT, against v2.
   const ctx = { org: ORG, project: PROJECT };
-  const say = { ts: at(4).replace(':00.000Z', ':01.234Z'), writer: 'mini/67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b', seq: 42, kind: 'say', from: 'maws-45', to: '*', text: 'the build is green' };
+  const say = { ts: at(4).replace(':00.000Z', ':01.234Z'), created: at(4).replace(':00.000Z', ':01.000Z'), writer: 'mini/67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b', seq: 42, kind: 'say', from: 'maws-45', to: '*', text: 'the build is green' };
   const eventCase = async (name: string, event: unknown, expect: Verdict, at: { org?: string; project?: string; state?: string; certs?: Arg } = {}) => {
     keep(name, event);
     cases.push({ name, call: 'verifyEvent', args: [{ org: at.org ?? ORG, project: at.project ?? PROJECT }, stateOf(at.state ?? 'v2'), fixture(name), at.certs ?? bundle(), NOW], expect });
@@ -760,10 +785,29 @@ export async function buildScenario(k: Keys): Promise<VectorSet> {
   await eventCase("a retired machine key's event stamped before its notAfter", machineSay, ok(), { state: 'v3 mini retired' });
   await eventCase(
     "a retired machine key's event stamped after its notAfter",
-    await signEvent(ctx, { ...say, ts: LATE, seq: 43 }, k.mini.privateKey, k.mini.pub),
+    await signEvent(ctx, { ...say, ts: LATE, created: LATE, seq: 43 }, k.mini.privateKey, k.mini.pub),
     no('expired'),
     { state: 'v3 mini retired' },
   );
+  await eventCase(
+    "a retired machine key's event created before its notAfter, its ts after",
+    await signEvent(ctx, { ...say, ts: LATE, seq: 44 }, k.mini.privateKey, k.mini.pub),
+    ok(),
+    { state: 'v3 mini retired' },
+  );
+  await eventCase(
+    "a retired machine key's event created after its notAfter, its ts before",
+    await signEvent(ctx, { ...say, created: LATE, seq: 45 }, k.mini.privateKey, k.mini.pub),
+    no('expired'),
+    { state: 'v3 mini retired' },
+  );
+  {
+    const bare: Record<string, unknown> = { ...say, seq: 46 };
+    delete bare.created;
+    // Signed below `signEvent`, which refuses to sign it: the signature is good, and only the missing `created` refuses.
+    await eventCase("a machine's event without created", { ...bare, sig: await signInput(eventSigningInput(ctx, bare), k.mini.privateKey, k.mini.pub) }, no('malformed'));
+    await eventCase("a machine's event whose created is not a time", { ...machineSay, created: 'yesterday' }, no('malformed'));
+  }
   await eventCase("a revoked machine key's event", machineSay, no('revoked'), { state: "a successor rotating a machine's key and revoking the old one" });
   await listingCase("a revoked machine key's listing", mini, no('revoked'), bundle(), "a successor rotating a machine's key and revoking the old one");
   {
@@ -814,6 +858,19 @@ export async function buildScenario(k: Keys): Promise<VectorSet> {
     await successorCase("a successor retiring a certificate's key", await next(v2, (s) => s.retired.push(vm1Retired), 2), ['a1StepUp'], ok());
     keep('v3 vm-1 retired by an admin', fixtures["a successor retiring a certificate's key"]);
     await certCase("a machine certificate whose key the state retired", cert, no('expired'), NOW, 'v3 vm-1 retired by an admin');
+    const adminRetired = fixtures["a successor retiring a certificate's key"] as SignedOrgState;
+    await successorCase("then its delegation revoked, the certificate's key left retired", await next(adminRetired, (s) => {
+      s.delegations = [];
+      s.revoked.push(dlgRevoked);
+    }, 3), ['a1StepUp'], no('malformed'), 'v3 vm-1 retired by an admin');
+    await successorCase("then its delegation revoked, the certificate's key revoked with it", await next(adminRetired, (s) => {
+      s.delegations = [];
+      s.retired = [];
+      s.revoked.push(dlgRevoked, vm1Revoked);
+    }, 3), ['a1StepUp'], ok(), 'v3 vm-1 retired by an admin');
+    keep('v4 vm-1 and its delegation revoked', fixtures["then its delegation revoked, the certificate's key revoked with it"]);
+    await eventCase("an admin-retired certificate's event after its delegation is revoked", vmSay, no('revoked'), { state: 'v4 vm-1 and its delegation revoked', certs });
+    await successorCase("then a delegation reissuing the old VM's key under the revoked prefix", await next(fixtures['v4 vm-1 and its delegation revoked'] as SignedOrgState, (s) => s.delegations.push({ ...dlgB, prefix: 'vm-' }), 4), ['a1StepUp'], no('malformed'), 'v4 vm-1 and its delegation revoked');
     await certCase("a machine certificate whose key the state revoked", cert, no('revoked'), NOW, 'v3 vm-1 revoked');
     await successorCase('a successor retiring an unknown key under a device', await next(v2, (s) => s.retired.push({ ...vm1Retired, holder: { member: A, device: 'dev-gone', class: 'native-mac', key: 'channel' } }), 2), ['a1StepUp'], no('malformed'));
     await successorCase("a successor revoking an unknown key under a device", await next(v2, (s) => s.revoked.push({ ...vm1Revoked, holder: { member: A, device: 'dev-gone', class: 'native-mac', key: 'channel' } }), 2), ['a1StepUp'], no('malformed'));
@@ -822,7 +879,7 @@ export async function buildScenario(k: Keys): Promise<VectorSet> {
     await eventCase("a retired certificate's event stamped before its notAfter", vmSay, ok(), { certs: retired });
     await eventCase(
       "a retired certificate's event stamped after its notAfter",
-      await signEvent(ctx, { ...say, writer: vmSay.writer, ts: LATE, seq: 43 }, k.vm1.privateKey, k.vm1.pub),
+      await signEvent(ctx, { ...say, writer: vmSay.writer, ts: LATE, created: LATE, seq: 43 }, k.vm1.privateKey, k.vm1.pub),
       no('expired'),
       { certs: retired },
     );
@@ -831,11 +888,11 @@ export async function buildScenario(k: Keys): Promise<VectorSet> {
     await eventCase("a revoked certificate's event beside its delegation's retirement", vmSay, no('revoked'), { state: 'v3 vm-1 revoked', certs: retired });
     await listingCase("a revoked certificate's listing", await signRecord(SIGNING_DOMAINS.listing, vmListing, k.vm1.privateKey, k.vm1.pub), no('revoked'), certs, 'v3 vm-1 revoked');
     await eventCase("an admin-retired certificate's event stamped before its notAfter", vmSay, ok(), { state: 'v3 vm-1 retired by an admin', certs });
-    await eventCase("an admin-retired certificate's event stamped after its notAfter", await signEvent(ctx, { ...say, writer: vmSay.writer, ts: LATE, seq: 43 }, k.vm1.privateKey, k.vm1.pub), no('expired'), { state: 'v3 vm-1 retired by an admin', certs });
+    await eventCase("an admin-retired certificate's event stamped after its notAfter", await signEvent(ctx, { ...say, writer: vmSay.writer, ts: LATE, created: LATE, seq: 43 }, k.vm1.privateKey, k.vm1.pub), no('expired'), { state: 'v3 vm-1 retired by an admin', certs });
     keep('vm-1 retired late by its delegation', await signRecord(SIGNING_DOMAINS.certRetire, { ...retirement, notAfter: LATER }, k.delegation.privateKey, k.delegation.pub));
     await eventCase(
       "an admin-retired certificate's late event beside a later retirement by its delegation",
-      await signEvent(ctx, { ...say, writer: vmSay.writer, ts: LATE, seq: 43 }, k.vm1.privateKey, k.vm1.pub),
+      await signEvent(ctx, { ...say, writer: vmSay.writer, ts: LATE, created: LATE, seq: 43 }, k.vm1.privateKey, k.vm1.pub),
       no('expired'),
       { state: 'v3 vm-1 retired by an admin', certs: bundle([fixture('cert vm-1')], [fixture('vm-1 retired late by its delegation')]) },
     );
@@ -847,7 +904,7 @@ export async function buildScenario(k: Keys): Promise<VectorSet> {
     await listingCase("a recreated VM's listing beside its unretired predecessor", nextListing, no('contested'), bundle([fixture('cert vm-1'), fixture('cert vm-1 next')]));
 
     const vmListingSigned = await signRecord(SIGNING_DOMAINS.listing, vmListing, k.vm1.privateKey, k.vm1.pub);
-    const lateVmSay = await signEvent(ctx, { ...say, writer: vmSay.writer, ts: LATE, seq: 43 }, k.vm1.privateKey, k.vm1.pub);
+    const lateVmSay = await signEvent(ctx, { ...say, writer: vmSay.writer, ts: LATE, created: LATE, seq: 43 }, k.vm1.privateKey, k.vm1.pub);
 
     // A retirement binds to the certificates of its own signer's delegation: delegation B's holder can't retire vm-1,
     // certified under the first, by a certificate-shaped object or a certificate of its own carrying vm-1's key.
@@ -900,14 +957,16 @@ export async function buildScenario(k: Keys): Promise<VectorSet> {
     );
 
     // A ref an entry holds, claimed by a live certificate, is contested for every claimant, the entry included; only
-    // an authenticated, live certificate contests. vm-1 enrolls natively under its certificate's ref.
+    // an authenticated, live certificate contests. vm-1 enrolling natively under its certificate's ref is refused (RL
+    // DL 26: no entry's ref takes a known delegation's `<id>_` shape), so these vectors judge a state no valid chain
+    // reaches, and show the record and event rules hold regardless.
     const vm1Host = { name: 'host-1', ref: REF_VM1, pub: k.newcomer.pub, owners: [A] };
     const hosted = await sign(await next(v2, (s) => {
       s.machines.push(vm1Host);
       s.machineNames.push({ name: 'host-1', ref: REF_VM1 });
     }, 2), 'a1StepUp');
     keep('v3 vm-1 enrolled', hosted);
-    cases.push({ name: "a successor enrolling a VM under its certificate's ref", call: 'verifySuccessor', args: [signed('v2'), signed('v3 vm-1 enrolled'), []], expect: ok() });
+    cases.push({ name: "a successor enrolling a VM under its certificate's ref", call: 'verifySuccessor', args: [signed('v2'), signed('v3 vm-1 enrolled'), []], expect: no('malformed') });
     keep('v4 vm-1 enrolled, its certificate revoked', await sign(await next(hosted, (s) => s.revoked.push(vm1Revoked), 3), 'a1StepUp'));
     keep('a forged cert vm-1', { body: certBody, sig: (await signRecord(SIGNING_DOMAINS.machineCert, certBody, k.stranger.privateKey, k.stranger.pub)).sig });
     const host = 'v3 vm-1 enrolled';

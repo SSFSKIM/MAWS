@@ -16,8 +16,8 @@
 //     class only answers cards (RL §5.10), and its key is used by hub-served code; or by a retired channel key of
 //     theirs, which outlives their membership;
 //   - `legacy/…` is v1-only and never v2-verified.
-// A retired key signs only events stamped at or before its `notAfter`, by the signer's own timestamp: a machine's `ts`,
-// which its signature covers, or a device's `created`, since the `ts` of a `hub/` event is the hub's. A revoked key
+// A retired key signs only events stamped at or before its `notAfter`, by the event's signed `created`, never its `ts`,
+// for machine and device events alike (RL §5.2): every v2 event carries `created`, and one without is refused. A revoked key
 // signs nothing, and its events read `revoked` rather than `unknown-signer`: a key the state lists in `revoked`, or a
 // certificate's under a revoked delegation.
 //
@@ -59,6 +59,7 @@ export function eventSigningInput(ctx: EventContext, event: object): Uint8Array<
 export async function signEvent<T extends object>(ctx: EventContext, event: T, key: CryptoKey, pub: B64): Promise<T & { sig: Sig }> {
   if ('mac' in event) throw new TypeError('sign before sealing: the v1 mac covers the v2 sig');
   if ('sig' in event) throw new TypeError('the event is already signed');
+  if (!isIsoMillis((event as { created?: unknown }).created)) throw new TypeError('a v2 event carries its signed `created`');
   return { ...event, sig: await signInput(eventSigningInput(ctx, event), key, pub) };
 }
 
@@ -93,18 +94,10 @@ async function signsRevoked(state: OrgState, certs: Certificates, kid: string): 
   return false;
 }
 
-/**
- * The timestamp a retired key's event is judged by: the signer's own. A machine's `ts` is inside its signature; a
- * `hub/` event's `ts` is the hub's, outside it, so a device's event is judged by its own `created`.
- */
-function anchor(event: LogEventV2): string | null {
-  const stamp = isHubWriter(event.writer) ? event.created : event.ts;
-  return isIsoMillis(stamp) ? stamp : null;
-}
 
 /**
  * A stored or positioned v2 event, verified for `ctx` against `state`: its `sig` names a key `signerFor` allows,
- * current or retired no earlier than the event's own timestamp, and verifies. A key `signerFor` allows more than once
+ * current or retired no earlier than the event's signed `created`, and verifies. A key `signerFor` allows more than once
  * (a certificate and its renewal) is judged by the most lenient: `expired` only when every one has ended. A `hub/`
  * event's position is checked by shape as DX1's `verify` checks it, since the signature leaves it out. The `mac` of a
  * dual-coded event is DX1's.
@@ -114,6 +107,9 @@ export async function verifyEvent(ctx: EventContext, state: OrgState, event: Log
   // The state judges keys for its own org only: another org's state would lend its keys to this org's events.
   if (ctx.org !== state.org) return refuse('malformed');
   if (isHubWriter(event.writer) && !isHubPosition(event)) return refuse('malformed');
+  // The signer's own time, inside its signature: a retired key's events are judged by it (RL §5.2).
+  const created = event.created;
+  if (!isIsoMillis(created)) return refuse('malformed');
   let input: Uint8Array<ArrayBuffer>;
   try {
     input = eventSigningInput(ctx, event);
@@ -123,8 +119,7 @@ export async function verifyEvent(ctx: EventContext, state: OrgState, event: Log
   const named: Signer[] = [];
   for (const signer of await signerFor(state, event.writer, certs, now)) if ((await keyId(signer.pub)) === event.sig.kid) named.push(signer);
   if (named.length === 0) return refuse((await signsRevoked(state, certs, event.sig.kid)) ? 'revoked' : 'unknown-signer');
-  const stamp = anchor(event);
-  const timely = named.filter((s) => s.notAfter === null || (stamp !== null && stamp <= s.notAfter));
+  const timely = named.filter((s) => s.notAfter === null || created <= s.notAfter);
   if (timely.length === 0) return refuse('expired');
   for (const signer of timely) if (await verifyInput(input, event.sig, signer.pub)) return accept();
   return refuse('bad-signature');
