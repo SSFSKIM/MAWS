@@ -6,7 +6,7 @@
 //
 // A generation is a name's: a machine renamed in the org state keeps its ref, so connections of two names, each counted
 // by its own name's object, meet here. Connections here are numbered by this object (`conn`), the newest installed one
-// is current whatever its name, and each name has a fence (`fence:<name key>`): the lowest generation of that name that
+// is current whatever its name, and each name has a fence (`fence:<name>`): the lowest generation of that name that
 // may still install. Installing a connection raises its name's fence to its generation, and a connection replaced,
 // superseded by a DX2 stream, or revoked raises its name's fence past its own, so a claim the name's object granted
 // before any of these and that arrives after them is refused, never installed (`endpoint`), and a connection under the
@@ -33,7 +33,6 @@
 // reconnects, and the endpoint's next connection takes a higher generation.
 import {
   CHANNEL_CLOSE,
-  machineNameKey,
   decodeChannelFrame,
   encodeChannelFrame,
   isEndpointHello,
@@ -77,7 +76,9 @@ const json = (status: number, body: unknown) => Response.json(body, { status });
 type Frame = { t: string } & Record<string, unknown>;
 const isFrame = (value: unknown): value is Frame => typeof value === 'object' && value !== null && !Array.isArray(value) && typeof (value as { t?: unknown }).t === 'string';
 const projectsKey = (conn: number) => `rl1-projects:${conn}`;
-const fenceKey = (name: string) => `fence:${machineNameKey(name)}`;
+/** A name's fence, keyed by the exact name its generation counter's object is addressed by (`<org>:<name>`): names
+ * that differ only in case are two counters, and never compared. */
+const fenceKey = (name: string) => `fence:${name}`;
 
 function note(line: Record<string, unknown>): void {
   console.log(JSON.stringify({ desk: 'machine-stream', transport: 'rl1', ...line }));

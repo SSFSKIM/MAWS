@@ -114,6 +114,9 @@ const revokedKey = (clientId: string) => `revoked:${clientId}`;
  * and the credential it opened with. */
 type Rl1Claim = { org: string; name: string; ref: string; generation: number; client: string };
 const RL1_KEY = 'rl1';
+/** Each credential's newest RL1 claim, by its client id: a revocation fences the revoked credential's connections in
+ * their ref's object even while another credential holds the newest claim, which it leaves alone. */
+const RL1_CLAIMS_KEY = 'rl1-claims';
 
 /** What a write to the machine became: a session-plane frame for an RL1 connection is `not-on-rl1` (relay.ts). */
 export type Sent = 'written' | 'offline' | 'not-on-rl1';
@@ -202,7 +205,9 @@ export class Machine extends DurableObject<Env> {
     const generation = (this.ctx.storage.kv.get<number>('generation') ?? 0) + 1;
     this.ctx.storage.kv.put('generation', generation);
     const before = this.rl1();
-    this.ctx.storage.kv.put(RL1_KEY, { org, name, ref, generation, client } satisfies Rl1Claim);
+    const claim: Rl1Claim = { org, name, ref, generation, client };
+    this.ctx.storage.kv.put(RL1_KEY, claim);
+    this.ctx.storage.kv.put(RL1_CLAIMS_KEY, { ...this.claims(), [client]: claim });
     this.end(this.stream, 'newer-socket');
     // A connection under another ref (the machine enrolled again with a new one) ends; the same ref's object ends its
     // own older connection as it installs the new one.
@@ -222,6 +227,10 @@ export class Machine extends DurableObject<Env> {
 
   private rl1(): Rl1Claim | undefined {
     return this.ctx.storage.kv.get<Rl1Claim>(RL1_KEY);
+  }
+
+  private claims(): Record<string, Rl1Claim> {
+    return this.ctx.storage.kv.get<Record<string, Rl1Claim>>(RL1_CLAIMS_KEY) ?? {};
   }
 
   private relayOf(claim: { org: string; ref: string }): DurableObjectStub<Machine> {
@@ -334,11 +343,15 @@ export class Machine extends DurableObject<Env> {
     if (clientId) this.ctx.storage.kv.put(revokedKey(clientId), true);
     this.end(this.stream, 'revoked');
     const rl1 = this.rl1();
-    if (rl1 && (clientId === null || rl1.client === clientId)) {
-      this.ctx.storage.kv.delete(RL1_KEY);
-      // Its connection ends, and a claim of it still in flight is refused when it arrives; until the ref's object takes
-      // the fence, its heartbeats find the credential revoked here too (`rl1Check`).
-      await this.owe('revoke', rl1, rl1.generation);
+    if (rl1 && (clientId === null || rl1.client === clientId)) this.ctx.storage.kv.delete(RL1_KEY);
+    // The revoked credential's RL1 connections end, up to its newest claim, whether or not another credential's claim
+    // followed it, and a claim of it still in flight is refused when it arrives; until the ref's object takes the fence,
+    // its heartbeats find the credential revoked here too (`rl1Check`). A newer credential's claim stays above it.
+    const claims = this.claims();
+    const revoked = clientId === null ? Object.values(claims) : claims[clientId] ? [claims[clientId]] : [];
+    if (revoked.length > 0) {
+      this.ctx.storage.kv.put(RL1_CLAIMS_KEY, Object.fromEntries(Object.entries(claims).filter(([client]) => clientId !== null && client !== clientId)));
+      await Promise.all(revoked.map((claim) => this.owe('revoke', claim, claim.generation)));
     }
     return this.ctx.storage.kv.get<number>('generation') ?? 0;
   }

@@ -106,6 +106,7 @@ import {
   CLAIM_HELD_PATH,
   CLAIM_RELEASE_PATH,
   RELAY_FAULT_PATH,
+  CLAIM_PATH,
 } from './send-fault';
 import { lacksMethod } from '../../src/objects/retry';
 
@@ -341,6 +342,10 @@ export class Machine extends DeployedMachine {
       this.claimRelease = undefined;
       release?.();
       return new Response(release ? 'released' : 'none');
+    }
+    if (url.pathname === CLAIM_PATH) {
+      const { org, name, ref, client } = (await request.json()) as { org: string; name: string; ref: string; client: string };
+      return Response.json(await this.claimGeneration(org, name, ref, client));
     }
     if (url.pathname === RELAY_FAULT_PATH) {
       const { method, times } = (await request.json()) as { method: string; times: number };
