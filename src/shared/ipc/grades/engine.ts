@@ -6,10 +6,10 @@ export const grades = {
   'engine.hostState': 'client', // main's own link to the engine host, as pty.hostState (survey §2)
   'engine.binaryInfo': 'spawn', // which engine a launch runs
   'engine.relayHealth': 'spawn', // the route a launch takes
-  'engine.sessions': 'list',
+  'engine.sessions': 'view', // every live session's full status (pending plan, task descriptions): kept to the sessions the caller views
   'engine.shutdown': 'machine-admin', // every session of the machine
   'engine.models': 'spawn',
-  'engine.budget': 'list',
+  'engine.budget': 'list', // totals, and session ids with keep-alive reasons only: kept to the sessions the caller lists
   // main-only
   'engine.configure': 'internal',
   'engine.policy.set': 'internal',

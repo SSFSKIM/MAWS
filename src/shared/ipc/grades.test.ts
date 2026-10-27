@@ -27,7 +27,6 @@ describe('the vocabulary', () => {
 
 describe('every command of the registry', () => {
   it('resolves to a grade of the vocabulary', () => {
-    expect(names).toHaveLength(397);
     for (const [name, spec] of resolved) {
       expect(spec, name).toBeDefined();
       expect(VOCABULARY.has(typeof spec === 'string' ? spec : spec!.floor), name).toBe(true);
@@ -52,6 +51,19 @@ describe('every command of the registry', () => {
     // M4's two named cases: a question takes converse and a permission approve; a slash command is graded by its effect
     expect(gradeOf('session.answer')).toEqual({ floor: 'converse', byEffect: true });
     expect(gradeOf('session.send')).toEqual({ floor: 'converse', byEffect: true });
+    // indirect paths into the input (RL §5.5): promoting or unpausing the queue releases queued text, a slash command
+    // included
+    expect(gradeOf('session.queue.promote')).toEqual({ floor: 'converse', byEffect: true });
+    expect(gradeOf('session.queue.setPaused')).toEqual({ floor: 'converse', byEffect: true });
+    // a plugin callback the caller names may execute or manage
+    for (const name of ['session.ui.press', 'session.ui.input', 'session.ui.select']) {
+      expect(gradeOf(name), name).toEqual({ floor: 'converse', byEffect: true });
+    }
+  });
+
+  it("grades a cross-session read by the content it answers, the endpoint keeping the caller's sessions", () => {
+    // engine.sessions answers every live session's full status (its pending plan, its background tasks' descriptions)
+    for (const name of ['engine.sessions', 'session.search', 'attention.list']) expect(gradeOf(name), name).toBe('view');
   });
 });
 

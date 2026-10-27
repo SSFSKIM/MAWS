@@ -1,7 +1,8 @@
 // OX9 grades of `session.*` (`../grades.ts`; M4's rubric in docs/doperpowers/plans/2026-10-27-p5-o1-seams.md).
 import type { CommandGrades, GradeSpec } from '../grades';
 
-// Text written into the session's input: a slash command is graded by its effect (RL §5.5, indirect paths included).
+// Text written into the session's input, or released into it from the queue: a slash command is graded by its effect
+// (RL §5.5, indirect paths included).
 const words = { floor: 'converse', byEffect: true } as const satisfies GradeSpec;
 
 export const grades = {
@@ -19,8 +20,8 @@ export const grades = {
   'session.queue.list': 'view',
   'session.queue.edit': words,
   'session.queue.remove': 'converse',
-  'session.queue.promote': 'converse',
-  'session.queue.setPaused': 'converse',
+  'session.queue.promote': words, // writes a queued entry as a user message
+  'session.queue.setPaused': words, // unpausing releases the queued entries
   'session.interrupt': 'converse',
   'session.answer': { floor: 'converse', byEffect: true }, // a question takes converse, a permission approve
   'session.bash': 'shell', // `!`: a shell command run on the machine (RL §5.5's policy: no arbitrary shell)
@@ -103,9 +104,11 @@ export const grades = {
   'session.deletions.preview': 'manage',
   // R2: the engine's remote surface
   'session.ui.render': 'view',
-  'session.ui.press': 'converse',
-  'session.ui.input': 'converse',
-  'session.ui.select': 'converse',
+  // press, input and select run the plugin callback the caller names, a submission included, which may execute or
+  // manage: the endpoint classifies the target or refuses it
+  'session.ui.press': { floor: 'converse', byEffect: true },
+  'session.ui.input': { floor: 'converse', byEffect: true },
+  'session.ui.select': { floor: 'converse', byEffect: true },
   'session.ui.focus': 'view',
   'session.ui.scroll': 'view',
   'session.ui.panes': 'view',
@@ -113,7 +116,7 @@ export const grades = {
   'session.ui.paneFocus': 'converse',
   'session.ui.close': 'converse',
   'session.ui.promptEdit': 'converse',
-  'session.ui.answer': { floor: 'converse', byEffect: true }, // a dialog that executes takes approve (RL §5.5)
+  'session.ui.answer': 'converse', // the attached surface's copy and prompt read, fill and suggest answers; nothing executes
   'session.reloadSkills': 'manage',
   'session.steer.cancel': 'converse',
   'session.promptHistory': 'view',
