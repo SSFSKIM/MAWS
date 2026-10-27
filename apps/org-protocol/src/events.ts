@@ -17,8 +17,9 @@
 //     theirs, which outlives their membership;
 //   - `legacy/…` is v1-only and never v2-verified.
 // A retired key signs only events stamped at or before its `notAfter`, by the signer's own timestamp: a machine's `ts`,
-// which its signature covers, or a device's `created`, since the `ts` of a `hub/` event is the hub's. A revoked key (one
-// the state dropped without retiring it, or a certificate an admin revoked) is in no list, and signs nothing.
+// which its signature covers, or a device's `created`, since the `ts` of a `hub/` event is the hub's. A revoked key
+// signs nothing, and its events read `revoked` rather than `unknown-signer`: a key the state lists in `revoked`, or a
+// certificate's under a revoked delegation.
 //
 // Dual coding: `signEvent` first, then DX1's `seal`, whose `mac` then covers `sig` (DX1 covers everything but the mac's
 // value), so old sminos and desk-web verify the event unchanged. `signEvent` refuses an event that already has a `mac`.
@@ -26,7 +27,7 @@ import { canonicalize } from './canonical.ts';
 import { isSig, keyId, signInput, utf8, verifyInput, type B64, type Sig } from './keys.ts';
 import { HUB_WRITER_PREFIX, isHubPosition, isHubWriter, isIsoMillis, LEGACY_WRITER_PREFIX, writerMachine } from './names.ts';
 import { machineSigners } from './records.ts';
-import { isCertificates } from './shapes.ts';
+import { isCertificates, isMachineCert, isSigned } from './shapes.ts';
 import { SIGNING_DOMAINS, type Certificates, type EventContext, type LogEventV2, type OrgState, type Signer } from './types.ts';
 import { accept, refuse, type Verdict } from './verdict.ts';
 
@@ -82,6 +83,17 @@ export async function signerFor(state: OrgState, writer: string, certs: Certific
 }
 
 /**
+ * Whether `kid` names a revoked key: one the state lists in `revoked`, or the key of a certificate in `certs` under a
+ * delegation the state revoked (its id a revoked holder), which the state can no longer authenticate.
+ */
+async function signsRevoked(state: OrgState, certs: Certificates, kid: string): Promise<boolean> {
+  if (state.revoked.some((r) => r.keyId === kid)) return true;
+  const gone = new Set(state.revoked.flatMap((r) => ('delegation' in r.holder ? [r.holder.delegation] : [])));
+  for (const c of certs.certs) if (isSigned(c, isMachineCert) && gone.has(c.body.delegation) && (await keyId(c.body.pub)) === kid) return true;
+  return false;
+}
+
+/**
  * The timestamp a retired key's event is judged by: the signer's own. A machine's `ts` is inside its signature; a
  * `hub/` event's `ts` is the hub's, outside it, so a device's event is judged by its own `created`.
  */
@@ -110,7 +122,7 @@ export async function verifyEvent(ctx: EventContext, state: OrgState, event: Log
   }
   const named: Signer[] = [];
   for (const signer of await signerFor(state, event.writer, certs, now)) if ((await keyId(signer.pub)) === event.sig.kid) named.push(signer);
-  if (named.length === 0) return refuse('unknown-signer');
+  if (named.length === 0) return refuse((await signsRevoked(state, certs, event.sig.kid)) ? 'revoked' : 'unknown-signer');
   const stamp = anchor(event);
   const timely = named.filter((s) => s.notAfter === null || (stamp !== null && stamp <= s.notAfter));
   if (timely.length === 0) return refuse('expired');

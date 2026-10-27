@@ -11,6 +11,6 @@ export * from './keys.ts';
 export * from './names.ts';
 export * from './org-state.ts';
 export * from './records.ts';
-export { isCertRetirement, isCertRevocation, isCertificates, isDevice, isEndpointRecord, isGrant, isListing, isMachineCert, isOrgState, isRootTransition, isSigned, isSignedOrgState } from './shapes.ts';
+export { isCertRetirement, isCertificates, isDevice, isEndpointRecord, isGrant, isListing, isMachineCert, isOrgState, isRootTransition, isSigned, isSignedOrgState } from './shapes.ts';
 export * from './types.ts';
 export * from './verdict.ts';
