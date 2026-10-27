@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { base64urlDecode, base64urlEncode } from '../src/protocol/base64url';
 import { FakeMachine } from './machine';
+import { relayMain } from './relay-cli';
 import { emptyMemory, type Memory } from './memory';
 import type { Credentials } from './link';
 import { loadRecording } from './recording';
@@ -15,6 +16,7 @@ import type { Producer } from './session';
 type State = { hub: string; machine: string; credentials: Credentials; key: string; memory: Memory };
 
 const USAGE = `usage:
+  fake-machine enroll-v2 | endpoint | relay-check …   RL1's fake endpoint (O11 M6): run one with no options for its usage
   fake-machine enroll --state <file>
       reads an enrollment code on stdin (the web app's "Enroll a machine"; never an argument, since it carries the org
       key), redeems it at the hub it names, and writes the state file (0600)
@@ -61,6 +63,8 @@ async function stdin(): Promise<string> {
 
 export async function main(argv: string[], defaults: { recording: string }): Promise<number> {
   const [command, ...rest] = argv;
+  // RL1's commands (O11 M6): a v2 enrollment, the fake endpoint, and an app's echo check through it.
+  if (command === 'enroll-v2' || command === 'endpoint' || command === 'relay-check') return relayMain(command, rest);
   const { values } = parseArgs({
     args: rest,
     options: {

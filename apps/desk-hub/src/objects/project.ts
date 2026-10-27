@@ -31,8 +31,9 @@ import type { JsonObject } from '../protocol/json';
 import { HUB_WRITER_PREFIX, hubWriter, isHubPosition, isIsoMillis, LEGACY_WRITER_PREFIX, questionEffect, withoutPosition, writerMachine, type LogEvent, type Vector } from '../protocol/log';
 import type { DownFrame, RefusedFrame, Refusal, Rejection, UpFrame } from '../protocol/machine';
 import { FRAME_LIMIT, PartAssembler, PartsBudgetError, toWire, type Part } from '../protocol/parts';
-import { RPC_FRESHNESS_MS, RPC_NAMES, type Rpc, type RpcErrorCode, type RpcOutcome } from '../protocol/rpc';
+import { RPC_FRESHNESS_MS, RPC_NAMES, type Rpc, type RpcError, type RpcErrorCode, type RpcOutcome } from '../protocol/rpc';
 import { SESSION_WIDE_KINDS, SUBSCRIPTION_KINDS, SUGGESTION_BYTES_MAX, SUGGESTIONS_MAX, type Delivery, type MachinePresence, type Raised, type SessionKind, type SessionMessage, type Settled } from '../protocol/session';
+import type { Sent } from './machine';
 import { BATCH_BYTES, eventShapeError, LogStore, resendNonce, sameEvent, type AuditRow, type Stored } from './log-store';
 import type { SummaryReport } from './registry';
 import { RETRY_ATTEMPTS, RETRY_BASE_MS, retryDelay } from './retry';
@@ -59,8 +60,8 @@ export const VISIBLE_MS = 90_000;
 /** Who sent a machine's frame: its org, the project it names, the machine and the credential its stream was opened
  * with, the stream the POST belongs to, how long a renewal on that stream keeps the machine online, and how long the
  * lease holds after that stream closes (`graceMs`; absent from a `Machine` of an older deploy, whose closes lapse at
- * once as before). */
-export type MachineContext = { org: string; project: string; machine: string; client: string; generation: number; leaseMs: number; graceMs?: number };
+ * once as before). `transport` is `rl1` for a frame off a machine's RL1 socket (O11 M6), absent for DX2's stream. */
+export type MachineContext = { org: string; project: string; machine: string; client: string; generation: number; leaseMs: number; graceMs?: number; transport?: 'rl1' };
 
 /** The `kv` key of the newest org state announced to this project and the member ids it holds (`stateAdvanced`). */
 const STATE_MEMBERS = 'state-members';
@@ -441,7 +442,7 @@ export class Project extends DurableObject<Env> {
       const refusal: Refusal = { reason: 'bad-shape', message: 'events is a list' };
       return { owed: [this.refusal(ctx, refusal)], refused: refusal };
     }
-    const owed: Promise<'written' | 'offline'>[] = [];
+    const owed: Promise<Sent>[] = [];
     const refuse = (refusal: Refusal) => void owed.push(this.refusal(ctx, refusal));
     let archive: string | null | undefined;
     if (events.some((e) => typeof e?.writer === 'string' && e.writer.startsWith(LEGACY_WRITER_PREFIX))) {
@@ -498,7 +499,9 @@ export class Project extends DurableObject<Env> {
     // An async question opened, answered, or ended with its session: the grid's `waiting` may move (owner, 2026-10-18).
     if (accepted.some(({ event }) => questionEffect(event) !== null)) this.reportSummary();
     const now = Date.now();
-    for (const { event } of accepted) {
+    // A machine on RL1 pushes through its own `notify` (O11 M6): it knows a private session from a listed one, and its
+    // requests wait in channels the log never sees. The log plane pushes nothing for it, so nothing is pushed twice.
+    for (const { event } of ctx.transport === 'rl1' ? [] : accepted) {
       if ((event.kind !== 'message' && event.kind !== 'question') || !(now - Date.parse(event.ts) <= PUSH_FRESH_MS)) continue;
       const session = event.writer.slice(event.writer.indexOf('/') + 1);
       // An async ask (2026-10-18): its `question` event is the one signal of an ask nothing raises (MAWS's own), and a
@@ -778,18 +781,22 @@ export class Project extends DurableObject<Env> {
 
   /** Writes a forwarded RPC to the stream its record names. A send that finds no stream fails it `machine-offline`; but a
    * `retry` of an uncertain one stays uncertain, since a retry the hub could not deliver says nothing of what the first
-   * forward did. */
+   * forward did, whatever the transport answers. An RL1 connection carries no RPC (O11 M6): a first forward to one fails
+   * `unsupported`, since it was never sent; a retry stays uncertain, since an earlier stream may have run it. */
   private send(record: RpcRecord, retry = false): void {
     const { rpc, generation } = record;
-    const unsent = (undelivered: 'failed' | 'uncertain') => {
+    const unsent = (undelivered: 'failed' | 'uncertain', error: RpcError = { code: 'machine-offline', message: `${rpc.machine} is offline` }) => {
       const state = retry ? 'uncertain' : undelivered;
       const now = this.plane.rpc(rpc.nonce);
       if (now?.state !== 'forwarded' || now.generation !== generation) return;
-      const outcome: RpcOutcome | null = state === 'failed' ? { state: 'failed', error: { code: 'machine-offline', message: `${rpc.machine} is offline` } } : null;
+      const outcome: RpcOutcome | null = state === 'failed' ? { state: 'failed', error } : null;
       this.updateRpc({ ...now, state, outcome });
     };
     this.toMachine(rpc.machine, generation, { t: 'rpc', rpc }, 'control').then(
-      (sent) => sent === 'offline' && unsent('failed'),
+      (sent) => {
+        if (sent === 'offline') unsent('failed');
+        else if (sent === 'not-on-rl1') unsent('failed', { code: 'unsupported', message: `${rpc.machine} takes RPCs in its own channel, not through the hub (RL1)` });
+      },
       () => unsent('uncertain'),
     );
   }
@@ -825,7 +832,11 @@ export class Project extends DurableObject<Env> {
   /** Carries a subscription to the stream of its route; one the stream cannot take ends. */
   private carry(route: Route): void {
     this.toMachine(route.machine, route.generation, { t: 'subscribe', project: this.projectId, session: route.session, agentId: route.agentId, sub: route.sub }, 'control').then(
-      (sent) => sent === 'offline' && this.endSub(route, 'machine-offline'),
+      (sent) => {
+        if (sent === 'offline') this.endSub(route, 'machine-offline');
+        // Not `machine-offline`, which a browser answers by subscribing again: an RL1 machine is read in its own channel.
+        else if (sent === 'not-on-rl1') this.endSub(route, 'error', `${route.machine} serves its sessions in its own channel, not through the hub (RL1)`);
+      },
       () => this.endSub(route, 'machine-offline'),
     );
   }
@@ -1266,7 +1277,7 @@ export class Project extends DurableObject<Env> {
   }
 
   /** A refusal sent to the machine and recorded; by default one a log frame's POST owes the machine (the replies lane). */
-  private refusal(ctx: MachineContext, refusal: Refusal, lane: Lane = 'replies'): Promise<'written' | 'offline'> {
+  private refusal(ctx: MachineContext, refusal: Refusal, lane: Lane = 'replies'): Promise<Sent> {
     const sent = this.toMachine(ctx.machine, ctx.generation, { t: 'refused', project: ctx.project, refusal }, lane);
     this.broadcast(this.audited(this.log.record('refused', { ...refusal, machine: ctx.machine })));
     return sent;
@@ -1310,11 +1321,11 @@ export class Project extends DurableObject<Env> {
   }
 
   /** Ends a subscription the hub can no longer serve: an `end` with the next `n` the browser expects. */
-  private endSub(route: Route, reason: 'machine-offline'): void {
+  private endSub(route: Route, reason: 'machine-offline' | 'error', message?: string): void {
     const socket = this.socketById(route.socket);
     if (socket && this.routes.get(route.sub) === route) {
       const n = this.attachment(socket).subs[route.sub] ?? 0;
-      this.toSocket(socket, { t: 'session', message: { project: this.projectId, machine: route.machine, session: route.session, kind: 'end', sub: route.sub, n, body: { reason } } });
+      this.toSocket(socket, { t: 'session', message: { project: this.projectId, machine: route.machine, session: route.session, kind: 'end', sub: route.sub, n, body: { reason, ...(message ? { message } : {}) } } });
     }
     this.dropRoute(route, socket);
   }
@@ -1352,13 +1363,13 @@ export class Project extends DurableObject<Env> {
    * missed. The lane stays failed from then on: nothing more is sent on it, and everything queued behind the failure
    * answers it, until the machine's next stream starts lanes of its own.
    */
-  protected toMachine(name: string, generation: number, frame: DownFrame, lane: Lane): Promise<'written' | 'offline'> {
+  protected toMachine(name: string, generation: number, frame: DownFrame, lane: Lane): Promise<Sent> {
     return this.toMachineAll(name, generation, [frame], lane);
   }
 
   /** `toMachine` for several frames in one place of the lane, each taken from `frames` once the one before it is
    * written, and none after one that found the stream gone. */
-  private toMachineAll(name: string, generation: number, frames: Iterable<DownFrame>, lane: Lane): Promise<'written' | 'offline'> {
+  private toMachineAll(name: string, generation: number, frames: Iterable<DownFrame>, lane: Lane): Promise<Sent> {
     const key = queueKey(name, generation, lane);
     // An older stream's lanes go; a newer one's stay (a reply on a retired stream can still be queued).
     for (const other of this.queues.keys()) {
@@ -1367,16 +1378,17 @@ export class Project extends DurableObject<Env> {
     }
     const machine = this.env.MACHINE.get(this.env.MACHINE.idFromName(`${this.orgId}:${name}`));
     const sent = (this.queues.get(key) ?? Promise.resolve()).then(async () => {
-      let result: 'written' | 'offline' = 'written';
+      let result: Sent = 'written';
       let frame: DownFrame | undefined;
       try {
-        for (frame of frames) if ((result = await machine.send(frame, generation)) === 'offline') break;
+        for (frame of frames) if ((result = await machine.send(frame, generation)) !== 'written') break;
       } catch (error) {
         logged({ event: 'send-failed', machine: name, generation, lane, frame: frame?.t ?? null, error: described(error) });
         this.leaveFanOut(name, generation);
         void machine.close(generation).catch(() => {});
         throw error;
       }
+      // A session-plane frame an RL1 connection does not carry (`not-on-rl1`) leaves the connection in the fan-out.
       if (result === 'offline') this.leaveFanOut(name, generation);
       return result;
     });
@@ -1453,7 +1465,7 @@ type Lane = 'replies' | 'control';
 
 /** What one frame from a machine came to (`fromMachineFrame`): the replies its POST owes the machine, and the refusal
  * when the frame was refused whole. */
-type Taken = { owed: Promise<'written' | 'offline'>[]; refused?: Refusal };
+type Taken = { owed: Promise<Sent>[]; refused?: Refusal };
 
 const queueKey = (machine: string, generation: number, lane: Lane) => `${machine}#${generation}#${lane}`;
 

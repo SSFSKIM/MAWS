@@ -24,3 +24,5 @@ export const TWO_SUBAGENTS = fileURLToPath(new URL('./recordings/two-subagents',
  * of the ask mod answered from the web, MCP servers added and removed, the session's end, and a send recorded
  * undelivered. Replay it with `producer: 'dc8'`. */
 export const SESSION_VIEW = fileURLToPath(new URL('./recordings/session-view', import.meta.url));
+export { FakeEndpoint, type ChannelHandler, type EndpointDown, type FakeEndpointOptions } from './endpoint';
+export { echoCheck, echoPayloads, RelayApp, type EchoCheck } from './relay-app';

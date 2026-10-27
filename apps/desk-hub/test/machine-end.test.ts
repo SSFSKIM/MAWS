@@ -18,6 +18,7 @@ const { CLIENT_HEADER, MACHINE_HEADER, ORG_HEADER } = await import('../src/env')
 const { GENERATION_HEADER } = await import('../src/protocol/machine');
 type DownFrame = import('../src/protocol/machine').DownFrame;
 type UpFrame = import('../src/protocol/machine').UpFrame;
+type Sent = import('../src/objects/machine').Sent;
 
 const directory = async () => ({ frame: { t: 'org', projects: [], machines: [] }, version: 0 });
 
@@ -34,7 +35,7 @@ const open = (machine: InstanceType<typeof Machine>, client = 'client-1') =>
   machine.fetch(new Request('https://machine/stream', { headers: { [ORG_HEADER]: 'org', [MACHINE_HEADER]: 'm', [CLIENT_HEADER]: client } }));
 
 /** What became of a send within `ms`: its answer, or 'pending'. */
-const within = (send: Promise<'written' | 'offline'>, ms = 1000) => Promise.race([send, new Promise<'pending'>((resolve) => setTimeout(() => resolve('pending'), ms))]);
+const within = (send: Promise<Sent>, ms = 1000) => Promise.race([send, new Promise<'pending'>((resolve) => setTimeout(() => resolve('pending'), ms))]);
 
 describe("a stream nobody reads, ended", () => {
   it('by a newer stream: the stalled write answers offline', async () => {
