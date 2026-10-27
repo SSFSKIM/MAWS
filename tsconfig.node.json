@@ -2,7 +2,10 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2023"],
-    "types": ["node"]
+    "types": ["node"],
+    // P5-O10 M9: main imports apps/org-protocol, whose relative imports carry `.ts` extensions (Node's type stripping
+    // loads it unbundled); this option admits them, and rewrites them on emit, where nothing here emits
+    "rewriteRelativeImportExtensions": true
   },
   "include": [
     "electron.vite.config.ts",
@@ -13,6 +16,9 @@
     "src/pty-host/**/*",
     "src/shared/**/*",
     "src/artifacts/**/*", // P3-A: the portable artifact layer, typechecked as the host will import it
+    "apps/org-protocol/src/**/*.ts", // P5-O10 M9: the remote layer's protocol package, which main's device keys sign with
+    "apps/org-protocol/types/node-runtime.d.ts", // its WebCrypto type names under Node's declarations
+    "apps/org-protocol/test-support/tamper-relay.ts", // its in-memory carrier, for main's device-key handshake test
     "test/**/*",
     // C8a start: test/support/panel-child-fixture.ts measures its fixture through C6's pure model (createState,
     // applyEvents, rowsOf) and journalToEvents; the project is composite (tsconfig.base.json), which refuses a file the
