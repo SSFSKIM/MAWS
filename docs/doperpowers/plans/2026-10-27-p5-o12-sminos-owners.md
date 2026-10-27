@@ -1069,6 +1069,18 @@ The joint review's second round (`9be0bc941`), 2026-10-27, two P1s, both reprodu
   Rationale: each keeps the cutover once-and-for-good and the DX2 path untouched where the document was silent; the probe is how the owner's guard keeps a machine's DX2 uplink up beside an unenrolled endpoint.
   Date/Author: 2026-10-27, M5's first executor, accepted by O12's phase 2 executor.
 
+- Decision: M5's second half's gaps and its review round, settled in building it.
+  - **The own echo.** For this machine's writers (its name and every former name), `same_uncoded` strips `created`, `mac`, `sig` and `attest` from both the held and the arriving copy, so an own event once restored from an echo stays `present` when the echo returns; `verified` is stripped from both copies for every writer.
+  - **Uploads strip `verified` alone**; a stored `mac` (a DX2-era restore, the `legacy/` archive writers) goes as stored.
+  - **`verified.owners` is stored only when the endpoint sent it**, as a list of `{id, email}` objects kept as sent (P5 Decision Log 51 and 52); anything else under `owners` is `bad-shape`. A refused wrapper spends its event's position and is reported by the inner `{writer, seq}`.
+  - **`malformed` stops an own writer's upload on RL10**, as `conflict` does on DX2.
+  - **The entry's RL10 fields are gated on the mode**: `member`, `device`, `fingerprint`, `context`, `proof` and the derived `target` (which overwrites any `target` the frame carries) are kept only on RL10, so DX2 entries are unchanged. An RL10 RPC naming no project is refused loose `bad-shape`, logged only. `rpc-result`'s `opId` is null for a nonce-keyed op; `rpc-ack` falls back to `opId` only when the ledger holds no op under the nonce. A `query` or `tombstone` whose `opId` fails the shape guard is logged and not answered.
+  - **A renaming welcome keeps one owner of the RPCs and the requests** (reviewer-high, round 1, P1, reproduced as one op run twice): `Rpcs` and `Requests` are renamed in place, re-addressing what they still owe under the new name, never replaced while their workers run.
+  - **Settlements a DX2 uplink left owed go as drafts on RL10** (round 1, P2): `Requests.restore` with no key strips `mac` and takes the current name.
+  - **Acceptance 4's "both modes"** is met by the RL10 sections of `test_rl10.py`, `test-uplink.sh` and `test-hub.sh` beside the DX2 suites run unchanged (`test_rpcs.py`, `test_session_plane.py`, `test_policy_requests.py`, `codes_parity.py`, the bridge suites); no RL10 section is added inside `test_rpcs.py` or `test_session_plane.py`.
+  Rationale: each keeps the DX2 path byte-for-byte where the mode does not turn it, and the ledger's run-once and latest-nonce guarantees across a rename.
+  Date/Author: 2026-10-27, M5's second executor and doperpowers:reviewer-high, accepted by O12's phase 2 executor.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
