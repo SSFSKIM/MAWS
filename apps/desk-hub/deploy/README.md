@@ -132,7 +132,21 @@ refuses the new one until this runs, so no person could read the head. The hub
 is then its only witness, so the tool reads the chain from its genesis (which
 must be this deployment's org) and verifies every step with the protocol
 package before it uses the head. It upserts the policy by name, reads it back
-through the Access API and prints what Access now admits. A member the state
+through the Access API and prints what Access now admits.
+
+Being the only witness, the hub is trusted no further than two anchors the
+operator holds:
+- **`orgGenesis`** in the deployment's configuration: the org's genesis hash
+  (`stateHash` of the genesis OrgState, the `prev` its version 2 carries), as
+  the admin's device that signed it holds it. Add it once the org is set up.
+  Without it only "no state yet" is taken; with it, a chain whose genesis is
+  another is refused, however well it verifies.
+- **A checkpoint** of the last head a run accepted, `{org, version, hash}`, in
+  `~/.local/state/desk-hub/<worker>.json` (`DESK_HUB_STATE_DIR` moves the
+  directory). Each run's chain must hold that version under that hash, so an
+  older state served as the head, or "no state" once the org is set up, is
+  refused. It moves to the new head once Access reads back what was written.
+  Delete it only on purpose, after checking the head another way. A member the state
 admits, or an email it changes, reaches the hub only after this runs; one it
 removes is refused by the Registry at once, and by Access once this runs.
 

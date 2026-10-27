@@ -1,77 +1,142 @@
-// `access-sync` against the local hub (O11 M3's review): it reads the org state through the machine route, with an
-// enrolled machine's service token, so no member's email has to pass Access for the policy to be brought to the head.
-// An email change of the org's only member leaves no email both in the head and in the policy: the old email is
-// refused by the Registry from the change on, and the new one by Access until the policy lists it. Since the route
-// is then the only reader, the chain it serves is verified from its genesis with the protocol package.
-import { generateSigningKey, type OrgState, type SignedOrgState } from 'org-protocol';
+// `access-sync` against the local hub (O11 M3's reviews). It reads the org state through the machine route, with an
+// enrolled machine's service token, so no member's email has to pass Access for the policy to be brought to the head:
+// an email change of the org's only member leaves no email both in the head and in the policy. The hub is then the only
+// witness, so what it serves is trusted only as far as the operator's own anchors carry it: the genesis hash the
+// deployment's config pins (`orgGenesis`), and the checkpoint of the last head a run accepted, kept beside the
+// operator's state (here in a temporary directory), which each run must extend.
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { generateSigningKey, stateHash, type OrgState, type SignedOrgState } from 'org-protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { readVerifiedState, syncAccess } from '../deploy/access-sync';
+import { accessSync, readCheckpoint, readVerifiedState, type HubRead } from '../deploy/access-sync';
 import { accessPlan, reconcileAccess } from '../deploy/access';
 import type { DeployConfig } from '../deploy/config';
 import { enroll, type Credentials } from './support/clients';
 import { fakeAccessApi } from './support/access-api';
 import { ADMIN, ORG, startLocalHub, type LocalHub } from './support/local';
-import { genesis, newDevice, next, signedBy, type TestDevice } from './support/org';
+import { genesis, memberId, newDevice, next, signedBy, type TestDevice } from './support/org';
 
 let hub: LocalHub;
 let a1: TestDevice;
 let head: SignedOrgState;
 let machine: Credentials;
+let dir: string;
+let checkpointFile: string;
+/** The deployment's config before its org was set up (no `orgGenesis`), and after (`anchored`). */
 const config: DeployConfig = { account: 'acct', worker: 'desk-hub-test', host: 'desk-hub-test.example.workers.dev', ownerEmail: ADMIN, sessionDuration: '24h', org: { id: ORG, name: 'Org' } };
-const asMachine = (path: string) => hub.fetchAs(machine, path);
+let anchored: DeployConfig;
+const asMachine: HubRead = (path) => hub.fetchAs(machine, path);
 
 async function accept(state: OrgState) {
   const s = await signedBy(state, a1);
-  const response = await hub.fetchAs(ADMIN, '/api/org/state', { body: s });
+  // Posted as the only member, under the email the head holds for them.
+  const response = await hub.fetchAs(head.state.members[0].email.toLowerCase(), '/api/org/state', { body: s });
   expect(response.status, await response.text()).toBe(201);
   head = s;
 }
+type Page = { head: SignedOrgState | null; chain: SignedOrgState[]; more: boolean };
+/** A served page, rewritten: as a hub that lies would serve it. */
+const rewritten =
+  (change: (page: Page) => void): HubRead =>
+  async (path) => {
+    const page = (await (await asMachine(path)).json()) as Page;
+    change(page);
+    return Response.json(page);
+  };
+/** Runs access-sync against a fresh fake Access API holding the policy a deploy made; the API's calls (and its writes
+ * alone), and the run's outcome: its result, or its error. */
+async function run(read: HubRead, deployment: DeployConfig = anchored) {
+  const access = fakeAccessApi();
+  await reconcileAccess(access.api, accessPlan({ name: config.worker, host: config.host, ownerEmail: ADMIN, sessionDuration: '24h' }));
+  access.calls.length = 0;
+  const outcome = await accessSync({ read, api: access.api, checkpointFile }, deployment).catch((error: unknown) => error as Error);
+  return { outcome, writes: access.calls.filter((c) => !c.startsWith('GET')), calls: access.calls };
+}
+const failure = (outcome: unknown) => (outcome instanceof Error ? outcome.message : `no error: ${JSON.stringify(outcome)}`);
 
 beforeAll(async () => {
   hub = await startLocalHub();
   a1 = await newDevice('a1');
   machine = await enroll(hub, ADMIN, 'reader');
+  dir = mkdtempSync(join(tmpdir(), 'desk-hub-checkpoints-'));
+  checkpointFile = join(dir, `${config.worker}.json`);
 });
-afterAll(() => hub?.close());
+afterAll(async () => {
+  await hub?.close();
+  if (dir) rmSync(dir, { recursive: true, force: true });
+});
 
 describe('access-sync', () => {
-  it('lists the owner alone before any state', async () => {
-    const access = fakeAccessApi();
-    const synced = await syncAccess(access.api, config, await readVerifiedState(asMachine, ORG));
-    expect(synced.readBack).toEqual([ADMIN]);
+  it('lists the owner alone while the hub serves no state and the deployment pins none', async () => {
+    const { outcome } = await run(asMachine, config);
+    expect(outcome).toMatchObject({ readBack: [ADMIN] });
+    expect(readCheckpoint(checkpointFile)).toBeNull();
   });
 
-  it('brings the policy to the head after the only member’s email changes, though no email overlaps', async () => {
+  it('writes nothing once the hub serves a chain, until the deployment pins its genesis', async () => {
     const A = ((await (await hub.fetchAs(ADMIN, '/api/me')).json()) as { member: { id: string } }).member.id;
-    head = await signedBy(await genesis(ORG, A, ADMIN, a1, await generateSigningKey()), a1);
+    const g = await genesis(ORG, A, ADMIN, a1, await generateSigningKey());
+    head = await signedBy(g, a1);
     expect((await hub.fetchAs(ADMIN, '/api/org/state', { body: head })).status).toBe(201);
+    anchored = { ...config, orgGenesis: await stateHash(g) };
+    const { outcome, calls } = await run(asMachine, config);
+    expect(failure(outcome)).toMatch(/orgGenesis/);
+    expect(calls).toEqual([]);
+  });
+
+  it('brings the policy to the head after the only member’s email changes, though no email overlaps, and checkpoints it', async () => {
     for (let i = 0; i < 3; i++) await accept(await next(head, (s) => s.projects.push({ id: `p${i}`, name: `P${i}` })));
-    const access = fakeAccessApi();
-    await reconcileAccess(access.api, accessPlan({ name: config.worker, host: config.host, ownerEmail: ADMIN, sessionDuration: '24h' }));
     await accept(await next(head, (s) => (s.members[0].email = 'owner-new@example.com')));
     // The old email reads nothing from here (and Access would not let the new one in yet).
     expect((await hub.fetchAs(ADMIN, '/api/org/state')).status).toBe(403);
-    const view = await readVerifiedState(asMachine, ORG);
-    expect(view.head).toEqual(head);
+    const { outcome } = await run(asMachine);
+    expect(outcome).toMatchObject({ readBack: ['owner-new@example.com'] });
+    expect(readCheckpoint(checkpointFile)).toEqual({ org: ORG, version: head.state.version, hash: await stateHash(head.state) });
     // The same, read a state per page, as a chain over the hub's page size comes.
-    const paged = async (path: string) => {
-      const page = (await (await asMachine(path)).json()) as { chain: SignedOrgState[]; more: boolean };
-      return Response.json({ ...page, chain: page.chain.slice(0, 1), more: page.chain.length > 1 });
-    };
-    expect(await readVerifiedState(paged, ORG)).toEqual(view);
-    const synced = await syncAccess(access.api, config, view);
-    expect(synced.readBack).toEqual(['owner-new@example.com']);
+    const paged = rewritten((page) => {
+      page.more = page.chain.length > 1;
+      page.chain = page.chain.slice(0, 1);
+    });
+    expect((await readVerifiedState(paged, anchored, null)).view).toEqual((await readVerifiedState(asMachine, anchored, null)).view);
   });
 
-  it('refuses a chain the hub altered, and one of another org', async () => {
-    const altered = async (path: string) => {
-      const view = (await (await asMachine(path)).json()) as { chain?: SignedOrgState[]; head: SignedOrgState };
-      const last = view.chain?.at(-1);
+  it('writes nothing for a self-consistent chain the hub made up under the org’s id', async () => {
+    const forger = await newDevice('forger');
+    const forged = await signedBy(await genesis(ORG, memberId(), 'intruder@example.com', forger, await generateSigningKey()), forger);
+    const { outcome, writes } = await run(async () => Response.json({ head: forged, chain: [forged], more: false, transitions: [], certificates: { certs: [], retirements: [] } }));
+    expect(failure(outcome)).toMatch(/genesis/);
+    expect(writes).toEqual([]);
+  });
+
+  it('writes nothing for an authentic older prefix served as the head, nor for no state at all, once checkpointed past it', async () => {
+    const prefix = rewritten((page) => {
+      page.chain = page.chain.slice(0, -1);
+      page.head = page.chain.at(-1) ?? null;
+    });
+    const older = await run(prefix);
+    expect(failure(older.outcome)).toMatch(/checkpoint/);
+    expect(older.writes).toEqual([]);
+    const none = await run(async () => Response.json({ head: null, chain: [], more: false, transitions: [], certificates: { certs: [], retirements: [] } }));
+    expect(failure(none.outcome)).toMatch(/serves no state/);
+    expect(none.writes).toEqual([]);
+  });
+
+  it('refuses a chain the hub altered, and moves the checkpoint with each run that extends it', async () => {
+    const altered = rewritten((page) => {
+      const last = page.chain.at(-1);
       if (last) last.state.members[0].email = 'intruder@example.com';
-      view.head.state.members[0].email = 'intruder@example.com';
-      return Response.json(view);
-    };
-    await expect(readVerifiedState(altered, ORG)).rejects.toThrow(/bad-signature/);
-    await expect(readVerifiedState(asMachine, 'another-org')).rejects.toThrow(/another org/);
+      if (page.head) page.head.state.members[0].email = 'intruder@example.com';
+    });
+    expect(failure((await run(altered)).outcome)).toMatch(/bad-signature/);
+    await accept(await next(head, (s) => s.projects.push({ id: 'later', name: 'Later' })));
+    expect((await run(asMachine)).outcome).toMatchObject({ readBack: ['owner-new@example.com'] });
+    expect(readCheckpoint(checkpointFile)).toMatchObject({ version: head.state.version });
+  });
+
+  it('refuses a checkpoint kept for another org', async () => {
+    const { outcome, writes } = await run(asMachine, { ...anchored, org: { id: 'another-org', name: 'Other' } });
+    expect(failure(outcome)).toMatch(/checkpoint .* another-org|another-org .* checkpoint|org/);
+    expect(writes).toEqual([]);
   });
 });

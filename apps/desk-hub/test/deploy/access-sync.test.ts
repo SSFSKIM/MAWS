@@ -2,7 +2,7 @@
 // the hub serves, or the owner alone while it serves none, upserted by name and read back through the Access API. Run
 // here against the fake Access API; test/org-members.test.ts feeds it the local hub's own answer.
 import { describe, expect, it } from 'vitest';
-import { admittedEmails, syncAccess } from '../../deploy/access-sync.ts';
+import { admittedEmails, checkpointFile, syncAccess } from '../../deploy/access-sync.ts';
 import type { DeployConfig } from '../../deploy/config.ts';
 import type { OrgStateView } from '../../src/protocol/identity.ts';
 import { fakeAccessApi } from '../support/access-api.ts';
@@ -49,5 +49,12 @@ describe('the target', () => {
     const stale: DeployConfig = { ...config, worker: 'desk-hub' };
     await expect(syncAccess(access.api, stale, viewOf(['owner@example.com']))).rejects.toThrow(/not the Worker desk-hub/);
     expect(access.calls).toEqual([]);
+  });
+});
+
+describe('the checkpoint file', () => {
+  it('is kept per Worker under ~/.local/state/desk-hub, or under DESK_HUB_STATE_DIR', () => {
+    expect(checkpointFile('desk-hub-staging', { HOME: '/home/x' })).toBe('/home/x/.local/state/desk-hub/desk-hub-staging.json');
+    expect(checkpointFile('desk-hub', { HOME: '/home/x', DESK_HUB_STATE_DIR: '/tmp/state' })).toBe('/tmp/state/desk-hub.json');
   });
 });

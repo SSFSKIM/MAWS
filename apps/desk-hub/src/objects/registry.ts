@@ -762,10 +762,16 @@ export class Registry extends DurableObject<Env> {
     return ok({ deleted: this.sql.exec('DELETE FROM push_subscriptions WHERE endpoint = ? AND member = ?', endpoint, member.id).rowsWritten > 0 });
   }
 
-  pushSubscriptions(member: MemberRecord): Result<{ subscriptions: PushSubscriptionRecord[] }> {
+  /** The member's subscriptions, unchecked: the contract a Worker on the code before `memberPushSubscriptions` calls. */
+  pushSubscriptions(member: MemberRecord): { subscriptions: PushSubscriptionRecord[] } {
+    return { subscriptions: this.subscriptionsOf([member.id]) };
+  }
+
+  /** The member's subscriptions, while the org state still lists them (`current`). */
+  memberPushSubscriptions(member: MemberRecord): Result<{ subscriptions: PushSubscriptionRecord[] }> {
     const held = this.current(member);
     if (!held.ok) return held;
-    return ok({ subscriptions: this.subscriptionsOf([member.id]) });
+    return ok(this.pushSubscriptions(member));
   }
 
   /**

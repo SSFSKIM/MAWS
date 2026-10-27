@@ -50,6 +50,26 @@ const adminCalls: Array<[string, ...unknown[]]> = [
 ];
 const refusal = (error: string) => expect.objectContaining({ ok: false, status: 403, error });
 
+describe('the push subscription list', () => {
+  it('keeps its RPC contract for a Worker on older code, and the Worker falls back to it from a Registry on older code', async () => {
+    expect(await hub.asMember('pushSubscriptions', fresh)).toEqual({ subscriptions: [] });
+    await hub.registryLacks('memberPushSubscriptions');
+    const response = await hub.fetchAs(ADMIN, '/api/push/subscriptions');
+    await hub.registryLacks(null);
+    expect([response.status, await response.json()]).toEqual([200, { subscriptions: [] }]);
+    expect(await (await hub.fetchAs(ADMIN, '/api/push/subscriptions')).json()).toEqual({ subscriptions: [] });
+  });
+});
+
+describe('a route this code added', () => {
+  it('answers 503 hub-updating from a Registry still on the code before it', async () => {
+    await hub.registryLacks('orgState');
+    const response = await hub.fetchAs(ADMIN, '/api/org/state');
+    await hub.registryLacks(null);
+    expect([response.status, ((await response.json()) as { error: string }).error]).toEqual([503, 'hub-updating']);
+  });
+});
+
 describe('a member resolved before a state', () => {
   it('that demoted them is refused every admin-only change', async () => {
     await accept(await next(head, (s) => (s.members.find((m) => m.id === B)!.role = 'member')));
@@ -67,7 +87,7 @@ describe('a member resolved before a state', () => {
       ...adminCalls,
       ['keepPushSubscription', subscription],
       ['deletePushSubscription', { endpoint: subscription.endpoint }],
-      ['pushSubscriptions'],
+      ['memberPushSubscriptions'],
       ['keepPendingDevice', pending],
       ['pendingDevices'],
       ['submitState', await signedBy(await next(head, (s) => s.projects.push({ id: 'by-b', name: 'B' })), a1)],

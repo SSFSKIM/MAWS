@@ -33,7 +33,7 @@
 //     machine's credential and asking for its revocation would be;
 //   - a `Registry` whose unfinished offline revocations wait less than a minute before they are tried again;
 //   - a `Registry` that runs a method for a member record the suite gives, as one the Worker resolved before a state
-//     changed it;
+//     changed it, and one that lacks a method, as a Registry on older code;
 //   - a `Registry` that answers its projection of the org state, moves a pending
 //     device's expiry back, and calls a method no `Project` has, saying whether it takes the refusal for older code;
 //   - a `Project` armed to throw from its next state announcements, as a reset object's call fails or as a project on
@@ -96,6 +96,7 @@ import {
   PROJECT_STATE_FAULT_PATH,
   MISSING_METHOD_PATH,
   AS_MEMBER_PATH,
+  LACKS_PATH,
 } from './send-fault';
 import { lacksMethod } from '../../src/objects/retry';
 
@@ -128,6 +129,18 @@ export class Registry extends DeployedRegistry {
       await new Promise<void>((resolve) => (this.leaveRelease = resolve));
     }
     return super.leave(machine);
+  }
+
+  /** Armed, refused as a Registry on the code before the org state would refuse it. */
+  orgState(since: string | null): ReturnType<DeployedRegistry['orgState']> {
+    if (this.ctx.storage.kv.get<string>('lacks') === 'orgState') throw new TypeError('The RPC receiver does not implement the method "orgState".');
+    return super.orgState(since);
+  }
+
+  /** Armed, refused as a Registry on the code before the checked list would refuse it. */
+  memberPushSubscriptions(member: MemberRecord): ReturnType<DeployedRegistry['memberPushSubscriptions']> {
+    if (this.ctx.storage.kv.get<string>('lacks') === 'memberPushSubscriptions') throw new TypeError('The RPC receiver does not implement the method "memberPushSubscriptions".');
+    return super.memberPushSubscriptions(member);
   }
 
   /** Armed, the next report is taken as the version before `live` took it, once: its counts stored without `live`, and
@@ -234,6 +247,12 @@ export class Registry extends DeployedRegistry {
           .toArray()
           .map((m) => ({ ...m, owners: JSON.parse(m.owners) as unknown })),
       });
+    }
+    if (url.pathname === LACKS_PATH) {
+      const { method } = (await request.json()) as { method: string | null };
+      if (method === null) this.ctx.storage.kv.delete('lacks');
+      else this.ctx.storage.kv.put('lacks', method);
+      return new Response('armed');
     }
     if (url.pathname === AS_MEMBER_PATH) {
       const { call, member, args } = (await request.json()) as { call: string; member: MemberRecord; args: unknown[] };
