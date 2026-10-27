@@ -8,7 +8,7 @@
 //   CF_ACCESS_SETUP_TOKEN       Access: apps and policies edit, service tokens edit, organizations read
 //   CF_DESK_HUB_SERVICE_TOKENS  service tokens edit only; becomes the Worker's CF_API_TOKEN secret
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { parseArgs, type ParseArgsOptionsConfig } from 'node:util';
@@ -43,14 +43,28 @@ export const SECRET_NAMES = ['CF_ACCESS_SETUP_TOKEN', 'CF_DESK_HUB_SERVICE_TOKEN
 /** A wrangler call: its stdout, `input` written to its stdin, `env` added to its environment. */
 export type WranglerRun = (args: string[], input?: string, env?: Record<string, string>) => Promise<string>;
 
-/** Runs wrangler from the app's directory. */
+/** What wrangler inherits from the tool's environment: what locates the system, the login and the network. Wrangler
+ * reads much else from its environment (wrangler 4.151): WRANGLER_CI_OVERRIDE_NAME renames the Worker outright,
+ * CLOUDFLARE_ENV picks a config section, CLOUDFLARE_ACCOUNT_ID / _API_TOKEN / _API_BASE_URL and WRANGLER_API_ENVIRONMENT
+ * another account, credential or API, WRANGLER_LOG_* where and how its logs go; none of it is passed on. */
+const INHERITED_ENV = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'LANG', 'LC_ALL', 'TERM', 'XDG_CONFIG_HOME', 'HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY', 'https_proxy', 'http_proxy', 'no_proxy', 'NODE_EXTRA_CA_CERTS'];
+
+/** Wrangler's environment: the allow-listed part of `inherited`, then `set`, then what is never left to either. A
+ * `secret put` carries a credential in its request, so logs stay sanitized and none is written to disk. */
+export function wranglerEnv(inherited: Record<string, string | undefined>, set: Record<string, string> = {}): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const name of INHERITED_ENV) if (inherited[name] !== undefined) env[name] = inherited[name]!;
+  return { ...env, ...set, WRANGLER_SEND_METRICS: 'false', WRANGLER_LOG_SANITIZE: 'true', WRANGLER_WRITE_LOGS: 'false' };
+}
+
+/** Runs wrangler from the app's directory, in `wranglerEnv`. */
 export const wrangler: WranglerRun = (args, input, env) => {
   return new Promise((resolve, reject) => {
     const bin = join(dirname(createRequire(join(appDir(), 'package.json')).resolve('wrangler/package.json')), 'bin', 'wrangler.js');
     const child = spawn(process.execPath, [bin, ...args], {
       cwd: appDir(),
       stdio: ['pipe', 'pipe', 'inherit'],
-      env: { ...process.env, ...env, WRANGLER_SEND_METRICS: 'false', CF_ACCESS_SETUP_TOKEN: '', CF_DESK_HUB_SERVICE_TOKENS: '' },
+      env: wranglerEnv(process.env, env),
     });
     let out = '';
     child.stdout.on('data', (chunk: Buffer) => (out += chunk.toString()));
@@ -60,23 +74,37 @@ export const wrangler: WranglerRun = (args, input, env) => {
   });
 };
 
-/** The flags with which a wrangler call would choose its Worker itself: its name, an environment (which suffixes a
- * secret command's name), another wrangler config. */
-const TARGET_FLAGS = ['--name', '--env', '-e', '--config', '-c'];
+/** The flags with which a wrangler call would choose its Worker, configuration or login itself: its name, an
+ * environment (which suffixes a secret command's name), another wrangler config, directory or .env file, another auth
+ * profile. */
+const TARGET_FLAGS = ['--name', '--env', '-e', '--config', '-c', '--cwd', '--env-file', '--profile'];
+
+/** A build tool's redirect, beside wrangler.jsonc, which hands wrangler another configuration. */
+const DEPLOY_REDIRECT = join('.wrangler', 'deploy', 'config.json');
 
 /**
- * Wrangler, held to the config's Worker. Every call is given `--name <config.worker>` and the config's account, and is
- * refused, unrun, when the target wrangler would read from it is anything else: a call bringing its own target flag,
- * or a config whose Worker is not the one its host names (`<worker>.<subdomain>.workers.dev`), which would deploy one
- * Worker under another's Access. Without this a staging config pushes its variables onto the Worker wrangler.jsonc
- * names, the production `desk-hub`. Each call prints the target it checked.
+ * Wrangler, held to the config's Worker and account. Every call is given `--name <config.worker>`, wrangler.jsonc by
+ * path, an empty .env (`--env-file /dev/null`: wrangler otherwise loads .env and .env.local from its directory into
+ * its environment) and, through `wranglerEnv`, the config's account and nothing inherited that could name another.
+ * Refused, before anything runs:
+ * - a config whose Worker is not the one its host names (`<worker>.<subdomain>.workers.dev`), which would deploy one
+ *   Worker under another's Access;
+ * - an app whose wrangler.jsonc sets another `account_id` (wrangler prefers it to CLOUDFLARE_ACCOUNT_ID) or that holds
+ *   a deploy redirect;
+ * - a call bringing its own target flag.
+ * Without this a staging config pushes its variables onto the Worker wrangler.jsonc names, the production `desk-hub`.
+ * Each call prints the target it checked.
  */
 export function workerWrangler(config: DeployConfig, run: WranglerRun = wrangler, print: (line: string) => void = console.log) {
   if (config.host.split('.')[0] !== config.worker) throw new Error(`the config's host ${config.host} is not the Worker ${config.worker}'s: refusing to deploy`);
+  const wranglerConfig = join(appDir(), 'wrangler.jsonc');
+  const { account_id: account } = JSON.parse(readFileSync(wranglerConfig, 'utf8').replace(/^\s*\/\/.*$/gm, '')) as { account_id?: string };
+  if (account !== undefined && account !== config.account) throw new Error(`wrangler.jsonc sets account_id ${account}, not ${config.account}: refusing to deploy`);
+  if (existsSync(join(appDir(), DEPLOY_REDIRECT))) throw new Error(`${join(appDir(), DEPLOY_REDIRECT)} would redirect wrangler to another configuration: refusing to deploy`);
   return (args: string[], input?: string): Promise<string> => {
     const chooser = args.find((arg) => TARGET_FLAGS.includes(arg.split('=')[0]));
     if (chooser) return Promise.reject(new Error(`wrangler ${args[0]}: ${chooser} would choose the Worker; the config names it (${config.worker})`));
-    const named = [...args, '--name', config.worker];
+    const named = [...args, '--name', config.worker, '--config', wranglerConfig, '--env-file', '/dev/null'];
     const target = named[named.lastIndexOf('--name') + 1];
     if (target !== config.worker) return Promise.reject(new Error(`wrangler ${args[0]} would act on ${target}, not ${config.worker}`));
     print(`wrangler target ${target} (config worker ${config.worker}, account ${config.account}): ${args.slice(0, args[0] === 'secret' ? 3 : 1).join(' ')}`);
@@ -105,17 +133,21 @@ export function buildName(options: DeployOptions): string {
 
 /** Parses the options every command that deploys shares: the config, the org, the web build. */
 export function deployArgs(argv: string[], extra: ParseArgsOptionsConfig = {}) {
-  const values = parseArgs({
+  const parsed = parseArgs({
     args: argv,
     options: {
-      config: { type: 'string', default: join(appDir(), 'deploy', 'config.json') },
+      config: { type: 'string', multiple: true, default: [join(appDir(), 'deploy', 'config.json')] },
       'org-id': { type: 'string' },
       'org-name': { type: 'string' },
       assets: { type: 'string' },
       web: { type: 'string' },
       ...extra,
     },
-  }).values as Record<string, string | boolean | undefined>;
+  }).values as Record<string, string | string[] | boolean | undefined>;
+  // parseArgs keeps the last of a repeated option; a deploy names its deployment once.
+  const configs = parsed.config as string[];
+  if (configs.length > 1) throw new Error(`--config given ${configs.length} times (${configs.join(', ')}): name one deployment`);
+  const values = { ...parsed, config: configs[0] } as Record<string, string | boolean | undefined>;
   const config = readDeployConfig(values.config as string);
   if (values['org-id']) config.org.id = values['org-id'] as string;
   if (values['org-name']) config.org.name = values['org-name'] as string;

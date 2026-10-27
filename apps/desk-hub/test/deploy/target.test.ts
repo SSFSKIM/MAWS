@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { readDeployConfig, type DeployConfig } from '../../deploy/config.ts';
-import { deployHub, workerWrangler, type WranglerRun } from '../../deploy/deploy.ts';
+import { deployArgs, deployHub, workerWrangler, type WranglerRun } from '../../deploy/deploy.ts';
 import { serviceTokenName } from '../../src/protocol/identity.ts';
 
 process.env.DESK_HUB_APP ??= join(import.meta.dirname, '../..');
@@ -67,6 +67,9 @@ function fakeAccount() {
   return { fetcher, calls, policies, apps, unchanged: () => production() === before };
 }
 
+/** What the guard appends to every call: the Worker, wrangler.jsonc by path, and no .env. */
+const pinned = (worker: string) => ['--name', worker, '--config', join(process.env.DESK_HUB_APP!, 'wrangler.jsonc'), '--env-file', '/dev/null'];
+
 const SECRETS = { CF_ACCESS_SETUP_TOKEN: 'setup-token', CF_DESK_HUB_SERVICE_TOKENS: 'service-tokens' };
 
 /** The `--name` a wrangler argv carries: what wrangler takes as the Worker. */
@@ -122,8 +125,8 @@ describe("deploying with production's configuration", () => {
     expect(deploy.slice(0, 4)).toEqual(['deploy', '--assets', assets, '--define']);
     expect(deploy).toContain('ORG_ID:ssfskim');
     expect(deploy).toContain('ACCESS_AUD:aud-desk-hub');
-    expect(deploy.slice(-2)).toEqual(['--name', 'desk-hub']);
-    expect(list).toEqual(['secret', 'list', '--format', 'json', '--name', 'desk-hub']);
+    expect(deploy.slice(-6)).toEqual(pinned('desk-hub'));
+    expect(list).toEqual(['secret', 'list', '--format', 'json', ...pinned('desk-hub')]);
     // Its own Access objects updated in place, nothing new made.
     expect(account.calls.filter((c) => c.startsWith('POST'))).toEqual([]);
   });
@@ -131,7 +134,7 @@ describe("deploying with production's configuration", () => {
   it('puts a missing secret on desk-hub alone, its value on stdin', async () => {
     const wrangler = fakeWrangler(['VAPID_KEY']);
     await deployHub(production, SECRETS, { assets, quiet: true }, { wrangler: wrangler.run, fetch: fakeAccount().fetcher });
-    expect(wrangler.calls[2]).toMatchObject({ args: ['secret', 'put', 'CF_API_TOKEN', '--name', 'desk-hub'], input: 'service-tokens' });
+    expect(wrangler.calls[2]).toMatchObject({ args: ['secret', 'put', 'CF_API_TOKEN', ...pinned('desk-hub')], input: 'service-tokens' });
   });
 });
 
@@ -151,7 +154,7 @@ describe('the target guard', () => {
   it('refuses a call that would choose its own target, and runs nothing', async () => {
     const wrangler = fakeWrangler();
     const run = workerWrangler(staging, wrangler.run, () => {});
-    for (const flag of [['--name', 'desk-hub'], ['--name=desk-hub'], ['--env', 'production'], ['-e', 'x'], ['--config', 'other.jsonc'], ['-c', 'x']]) {
+    for (const flag of [['--name', 'desk-hub'], ['--name=desk-hub'], ['--env', 'production'], ['-e', 'x'], ['--config', 'other.jsonc'], ['-c', 'x'], ['--cwd', '/'], ['--env-file', '.env'], ['--profile', 'other']]) {
       await expect(run(['secret', 'put', 'VAPID_KEY', ...flag], 'v')).rejects.toThrow(/would choose the Worker/);
     }
     expect(wrangler.calls).toEqual([]);
@@ -179,5 +182,16 @@ describe('the suites have no network', () => {
     const wrangler = fakeWrangler();
     await expect(deployHub(staging, SECRETS, { assets, quiet: true }, { wrangler: wrangler.run, fetch })).rejects.toThrow(/no network in tests/);
     expect(wrangler.calls).toEqual([]);
+  });
+});
+
+describe('the options of a command that deploys', () => {
+  it('refuses a second --config, which would silently win over the first', () => {
+    expect(() => deployArgs(['--config', 'deploy/staging.json', '--config', 'deploy/config.json'])).toThrow(/--config given 2 times/);
+  });
+
+  it('takes one --config, or the default', () => {
+    expect(deployArgs(['--config', join(import.meta.dirname, '../../deploy/staging.json')]).config.worker).toBe('desk-hub-staging');
+    expect(deployArgs([]).config.worker).toBe('desk-hub');
   });
 });

@@ -21,13 +21,22 @@ command). Below, `$HUB` stands for that deployment's `https://<host>`.
 
 Every wrangler call the tool makes names its Worker with `--name <worker>`
 and its account with `CLOUDFLARE_ACCOUNT_ID`, both from the configuration;
-wrangler.jsonc's own `name` (`desk-hub`) is never relied on. Before anything
-changes, `deploy` refuses a configuration whose `host` is not its `worker`'s
-(`<worker>.<subdomain>.workers.dev`), and it refuses any call that would pick
-its Worker another way (`--name`, `--env`, `--config`). Each call prints the
-target it checked, as `wrangler target <worker> (config worker <worker>,
-account <id>): <command>`. `redeploy-check`'s redeploy is `deploy`'s own and
-takes the same check.
+wrangler.jsonc's own `name` (`desk-hub`) is never relied on. Wrangler also
+takes its Worker, account, API and logging from its environment
+(`WRANGLER_CI_OVERRIDE_NAME` renames the Worker outright) and from `.env`
+files beside wrangler.jsonc, so it runs with an allow-listed environment
+(what locates the system, the login and the network; no inherited
+`WRANGLER_*` or `CLOUDFLARE_*`), `--env-file /dev/null`, wrangler.jsonc named
+by path, sanitized logs and no log written to disk (a `secret put` carries a
+credential). Before anything changes, `deploy` refuses:
+- a configuration whose `host` is not its `worker`'s (`<worker>.<subdomain>.workers.dev`);
+- a wrangler.jsonc whose `account_id` is another account, and a build tool's redirect (`.wrangler/deploy/config.json`);
+- any call that would pick its Worker, configuration or login another way (`--name`, `--env`, `--config`, `--cwd`, `--env-file`, `--profile`);
+- `--config` given twice (the last would win).
+
+Each call prints the target it checked, as `wrangler target <worker> (config
+worker <worker>, account <id>): <command>`. `redeploy-check`'s redeploy is
+`deploy`'s own and takes the same check.
 
 Staging is its own Worker, so its own Durable Objects, Access applications,
 policies and secrets (its own `VAPID_KEY`; `CF_API_TOKEN` is the same
