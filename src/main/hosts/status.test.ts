@@ -83,10 +83,14 @@ describe('host.status', () => {
     expect(h.emitted.at(-1)).toMatchObject({ supervisor: supervisorStatus(), matches: 'same' });
     h.status(supervisorStatus({ buildId: 'older', liveSessions: 1 }));
     expect(h.emitted.at(-1)).toMatchObject({ supervisor: { liveSessions: 1 }, matches: 'build' });
+    // P5 O1 M6: a supervisor that sends its status was welcomed, so another minor (its own fingerprint) or a protocol-2
+    // supervisor through the window is another build, not another wire
+    h.status(supervisorStatus({ buildId: 'older', wire: 'other' }));
+    expect(h.emitted.at(-1)?.matches).toBe('build');
+    h.status(supervisorStatus({ buildId: 'pre-o1', protocol: 2 }));
+    expect(h.emitted.at(-1)?.matches).toBe('build');
     h.status(supervisorStatus({ wire: 'other' }));
-    expect(h.emitted.at(-1)?.matches).toBe('wire');
-    h.status(supervisorStatus({ protocol: SOCKET_PROTOCOL + 1 }));
-    expect(h.emitted.at(-1)?.matches).toBe('protocol');
+    expect(h.emitted.at(-1)?.matches).toBe('same');
     for (const status of h.emitted) expect(validateEventPayload('host.status', status).ok).toBe(true);
   });
 

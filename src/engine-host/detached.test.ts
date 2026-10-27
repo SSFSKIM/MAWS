@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HostEmit } from '@shared/host/runtime';
 import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
+import { WIRE_CAPABILITIES, WIRE_MINOR } from '@shared/ipc/wire';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { connectLines, type LineClient } from '../../test/support/socket-lines';
 import { START_EXIT_ABORTED, START_EXIT_HELD, startSupervisor, type DetachedOptions, type RunningSupervisor, type SupervisorLife } from './detached';
@@ -89,7 +90,7 @@ async function connect(): Promise<LineClient> {
   const lock = readLock(dir)!;
   const client = await connectLines(lock.socketPath);
   clients.push(client);
-  client.send({ t: 'hello', protocol: SOCKET_PROTOCOL, token: readFileSync(join(dir, 'host.token'), 'utf8'), buildId: buildIdOf(modulePath), wire: wireFingerprint(), appPid: 4321 });
+  client.send({ t: 'hello', protocol: SOCKET_PROTOCOL, token: readFileSync(join(dir, 'host.token'), 'utf8'), minor: WIRE_MINOR, build: buildIdOf(modulePath), capabilities: [], appPid: 4321 });
   return client;
 }
 
@@ -111,7 +112,7 @@ describe('the detached entry', () => {
     expect(statSync(lock.socketPath).mode & 0o777).toBe(0o600);
 
     const client = await connect();
-    expect(await client.next()).toEqual({ t: 'welcome', protocol: SOCKET_PROTOCOL, buildId: lock.buildId, wire: wireFingerprint(), pid: process.pid, startedAt: lock.startedAt, liveSessions: 1, rows: 2 });
+    expect(await client.next()).toEqual({ t: 'welcome', protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, build: lock.buildId, capabilities: [...WIRE_CAPABILITIES], pid: process.pid, startedAt: lock.startedAt, liveSessions: 1, rows: 2 });
     client.send({ t: 'req', id: '1', name: 'engine.ping', input: undefined });
     expect(await client.next((line) => (line as { t: string }).t === 'res')).toMatchObject({ id: '1', ok: true, value: { pid: process.pid } });
     client.send({ t: 'ready' });
@@ -355,7 +356,7 @@ describe('the detached entry', () => {
     vi.mocked(invalidateShellEnvironment).mockClear();
     const stranger = await connectLines(readLock(dir)!.socketPath); // a connection whose token does not check out is never a client
     clients.push(stranger);
-    stranger.send({ t: 'hello', protocol: SOCKET_PROTOCOL, token: 'not the token', buildId: buildIdOf(modulePath), wire: wireFingerprint(), appPid: 1 });
+    stranger.send({ t: 'hello', protocol: SOCKET_PROTOCOL, token: 'not the token', minor: WIRE_MINOR, build: buildIdOf(modulePath), capabilities: [], appPid: 1 });
     expect(await stranger.next()).toMatchObject({ t: 'refuse', reason: 'token' });
     await stranger.closed;
     expect(invalidateShellEnvironment).not.toHaveBeenCalled();

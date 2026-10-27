@@ -8,12 +8,17 @@
 // non-main owner of it, `machine` included. Every handler is handed a `HandlerContext`: a request naming its client gets
 // that client's remote `ClientRef`, and one naming none the connection's own (client-refs.ts). Engine-host and pty-host
 // handlers ignore it.
+//
+// P5 O1 M6 (OX1): main may be another build of the wire's major, so the runtime reads the envelope and every command's
+// input tolerantly (tolerant.ts): an object key this build does not know is dropped, logged once per message and field,
+// and the rest is validated strictly. What it answers and emits it still validates strictly against its own registry.
 import type { MessagePortMain } from 'electron';
 import type { HandlerContext } from '../ipc/client';
 import { ipcError, IpcErrorSchema, type IpcError } from '../ipc/errors';
 import { HostClientGoneSchema, HostDocSchema, HostHelloSchema, HostReadySchema, HostRequestSchema, type HostDoc, type HostMessage, type HostRequest } from '../ipc/host-protocol';
 import { REGISTRY, type EventNameOf, type InputOf, type NameOf, type OutputOf, type PayloadOf, type WireRegistry } from '../ipc/registry';
 import type { HostPing, Owner } from '../ipc/schema';
+import { readTolerant, tolerantLog } from '../ipc/tolerant';
 import { codecOf } from '../ipc/validate';
 import { remoteClients, type RemoteClients } from './client-refs';
 
@@ -75,7 +80,8 @@ export interface HostRuntime {
 export function createHostRuntime<R extends WireRegistry = typeof REGISTRY>(register: HostRegister<R>, options: { registry?: R } = {}): HostRuntime {
   const registry: WireRegistry = options.registry ?? REGISTRY;
   const { commands } = registry;
-  const { isCommandName, validateCommandInput, validateCommandOutput, validateEventPayload } = codecOf(registry);
+  const { isCommandName, readCommandInput, validateCommandOutput, validateEventPayload } = codecOf(registry);
+  const logDropped = tolerantLog((line) => console.warn(`[host] ${line}`)); // P5 O1 M6
   const handlers = new Map<string, (input: unknown, ctx: HandlerContext) => Promise<unknown>>();
   let port: HostPort | null = null;
   // P5 O1 M5: the served connection's clients, numbered per serve; it ends when the connection is replaced or detached,
@@ -210,22 +216,28 @@ export function createHostRuntime<R extends WireRegistry = typeof REGISTRY>(regi
       if (replaced) clientGone(); // E4c
       p.on('message', ({ data }) => {
         // E10: the client's ready line; one from a port this runtime no longer serves is stale and ignored
-        if (HostReadySchema.safeParse(data).success) {
+        const ready = readTolerant(HostReadySchema, data); // P5 O1 M6: this and the envelope below read tolerantly
+        if (ready.ok) {
+          logDropped('envelope ready', ready.dropped);
           if (port === p) setReady();
           return;
         }
         // P5 O1 M5: a client a request named has ended; an id the connection never saw (or an ended connection's) is ignored
-        const gone = HostClientGoneSchema.safeParse(data);
-        if (gone.success) return served.gone(gone.data.client);
-        const request = HostRequestSchema.safeParse(data);
-        if (!request.success) {
+        const gone = readTolerant(HostClientGoneSchema, data);
+        if (gone.ok) {
+          logDropped('envelope clientGone', gone.dropped);
+          return served.gone(gone.value.client);
+        }
+        const request = readTolerant(HostRequestSchema, data);
+        if (!request.ok) {
           console.error('[host] dropped a malformed message from main', request.error.issues);
           return;
         }
+        logDropped('envelope req', request.dropped);
         // P5 O1 M5: the ref is taken at receipt, in arrival order, so a clientGone that follows this request ends it even
         // while the request waits for admission
-        const ctx: HandlerContext = { client: served.refFor(request.data.client) };
-        void answer(request.data, ctx, p).then((response) => { if (response) p.postMessage(response); });
+        const ctx: HandlerContext = { client: served.refFor(request.value.client) };
+        void answer(request.value, ctx, p).then((response) => { if (response) p.postMessage(response); });
       });
       p.start();
     },
@@ -253,8 +265,9 @@ export function createHostRuntime<R extends WireRegistry = typeof REGISTRY>(regi
     if (!isCommandName(name)) return { t: 'res', id, ok: false, error: ipcError('unknown_command', `unknown command: ${name}`) };
     const handler = handlers.get(name);
     if (!handler) return { t: 'res', id, ok: false, error: ipcError('internal', `this host has no handler for ${name}`) };
-    const checkedInput = validateCommandInput(name, input);
+    const checkedInput = readCommandInput(name, input); // P5 O1 M6: tolerant, as main may be a newer minor
     if (!checkedInput.ok) return { t: 'res', id, ok: false, error: checkedInput.error };
+    logDropped(`the input of ${name}`, checkedInput.dropped);
 
     let value: unknown;
     try {

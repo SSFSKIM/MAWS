@@ -26,6 +26,7 @@ import { invalidateShellEnvironment } from '@shared/host/shell-env';
 import { serveSocketClients } from '@shared/host/socket-server';
 import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
+import { WIRE_CAPABILITIES, WIRE_MINOR } from '@shared/ipc/wire'; // P5 O1 M6
 import { clearLive, signalOrphan, sweepOrphans, writeLive, type LiveRow, type Owner } from './live-ledger';
 import { buildIdOf, isAlive, procStartOf, readLock, socketPathFor, START_EXIT_HELD, SUPERVISOR_FILES, takeLock } from './supervisor-files';
 import type { SupervisorExit, SupervisorIdentity } from './supervision';
@@ -150,7 +151,7 @@ export async function startSupervisor(hostVersion: string, register: HostRegiste
 
   const clients = serveSocketClients(server, {
     runtime,
-    identity: () => ({ protocol: SOCKET_PROTOCOL, buildId, wire: wireFingerprint(), pid, startedAt }),
+    identity: () => ({ protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, buildId, capabilities: WIRE_CAPABILITIES, wire: wireFingerprint(), pid, startedAt }), // P5 O1 M6: the major, minor and capabilities (OX1)
     counts: () => opts.counts(),
     token: () => token,
     onExit: (when) => {

@@ -18,6 +18,7 @@
     "lint": "eslint .",
     "test": "NODE_OPTIONS=\"$NODE_OPTIONS --disable-warning=ExperimentalWarning\" vitest run",
     "test:probes": "node --test spikes/protocol-probe/*.test.mjs",
+    "wire:manifest": "MAWS_WIRE_MANIFEST_WRITE=${MAWS_WIRE_MANIFEST_WRITE:-1} vitest run src/shared/ipc/wire.test.ts",
     "test:live": "MAWS_LIVE=1 vitest run --project live --silent=false",
     "e2e": "MAWS_E2E_FOREGROUND=1 playwright test",
     "e2e:packaged": "MAWS_E2E_EXECUTABLE=${MAWS_E2E_EXECUTABLE:-dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS} playwright test",

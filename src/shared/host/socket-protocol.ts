@@ -12,10 +12,19 @@
 // socket layer gains three message types of its own, outside C1's envelope and the X2 registry (so the wire fingerprint
 // never sees them): `documents.open` and `documents.close` from the client, `documents.closed` from the host. A
 // protocol-1 peer is refused `protocol` at the hello, before any frame is written, and replaced by the existing path.
+//
+// Protocol 3 (P5 O1 M6, OX1; docs/doperpowers/plans/2026-10-27-p5-o1-seams.md): `protocol` is the wire's major
+// (WIRE_MAJOR, src/shared/ipc/wire.ts), and the hello and welcome carry the `minor`, the `build` and the `capabilities`
+// in place of protocol 2's exact `buildId` and `wire` fingerprint. Peers of one major interoperate: a change within it is
+// additive (src/shared/ipc/wire-manifest.json holds the code to that), and each receiver reads tolerantly
+// (src/shared/ipc/tolerant.ts). Protocol 2's hello and welcome are kept, unchanged, for one major (the protocol-2
+// window): a client refused by a protocol-2 supervisor whose fingerprint equals its own speaks protocol 2 to it, and a
+// server answers a protocol-2 hello as protocol 2 did. They go when major 4 lands.
 import * as z from 'zod';
 import { ActorSchema } from '../artifacts/actor';
 
-export const SOCKET_PROTOCOL = 2;
+export const SOCKET_PROTOCOL = 3;
+export const SOCKET_PROTOCOL_V2 = 2; // the previous major, still spoken through the protocol-2 window
 export const LINE_CAP = 64 * 1024 * 1024; // bytes per line, both ends (the engine transport's cap)
 export const WRITABLE_CAP = 256 * 1024 * 1024; // a peer this far behind is stalled and is closed
 
@@ -23,13 +32,34 @@ export const ClientHelloSchema = z.strictObject({
   t: z.literal('hello'),
   protocol: z.number().int(),
   token: z.string(),
-  buildId: z.string(),
-  wire: z.string(),
+  minor: z.number().int().nonnegative(),
+  build: z.string(),
+  capabilities: z.array(z.string()),
   appPid: z.number().int(),
 });
 // What a server of any version reads from a hello before it checks the rest: the promised-stable fields only.
 export const HelloPreambleSchema = z.looseObject({ t: z.literal('hello'), protocol: z.number().int(), token: z.string() });
 export const ServerWelcomeSchema = z.strictObject({
+  t: z.literal('welcome'),
+  protocol: z.number().int(),
+  minor: z.number().int().nonnegative(),
+  build: z.string(),
+  capabilities: z.array(z.string()),
+  pid: z.number().int(),
+  startedAt: z.string(),
+  liveSessions: z.number().int().nonnegative(),
+  rows: z.number().int().nonnegative(),
+});
+// Protocol 2's hello and welcome, exactly as a pre-O1 build writes and reads them: the protocol-2 window's form.
+export const ClientHelloV2Schema = z.strictObject({
+  t: z.literal('hello'),
+  protocol: z.number().int(),
+  token: z.string(),
+  buildId: z.string(),
+  wire: z.string(),
+  appPid: z.number().int(),
+});
+export const ServerWelcomeV2Schema = z.strictObject({
   t: z.literal('welcome'),
   protocol: z.number().int(),
   buildId: z.string(),
@@ -39,6 +69,7 @@ export const ServerWelcomeSchema = z.strictObject({
   liveSessions: z.number().int().nonnegative(),
   rows: z.number().int().nonnegative(),
 });
+// Unchanged since protocol 1 and read alike by every major: `buildId` is the build, `wire` the wire fingerprint.
 export const ServerRefuseSchema = z.strictObject({
   t: z.literal('refuse'),
   reason: z.enum(['token', 'protocol', 'wire', 'replaced']),
@@ -53,6 +84,8 @@ export const SocketLineSchema = z.union([ClientHelloSchema, ServerWelcomeSchema,
 
 export type ClientHello = z.infer<typeof ClientHelloSchema>;
 export type ServerWelcome = z.infer<typeof ServerWelcomeSchema>;
+export type ClientHelloV2 = z.infer<typeof ClientHelloV2Schema>;
+export type ServerWelcomeV2 = z.infer<typeof ServerWelcomeV2Schema>;
 export type ServerRefuse = z.infer<typeof ServerRefuseSchema>;
 export type RefuseReason = ServerRefuse['reason'];
 export type ClientExit = z.infer<typeof ClientExitSchema>;

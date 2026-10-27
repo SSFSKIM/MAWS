@@ -7,6 +7,7 @@ import { connectLines } from '../../../test/support/socket-lines';
 import { fakeProfile, FakeProcesses, FakeSupervisor, type FakeProfile, type FakeSupervisorOptions } from '../../../test/support/fake-supervisor';
 import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import type { HostState } from '@shared/ipc/schema';
+import { WIRE_MINOR } from '@shared/ipc/wire';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { SocketPort } from '@shared/host/socket-port';
 import { buildIdOf, SUPERVISOR_FILES } from '../../engine-host/supervisor-files';
@@ -379,7 +380,7 @@ describe('the detached transport: a served connection ends', () => {
     const fake = await startFake();
     await supervisor.start();
     const other = await connectLines(profile.socketPath);
-    other.send({ t: 'hello', protocol: SOCKET_PROTOCOL, token: fake.token, buildId: buildIdOf(profile.modulePath), wire: wireFingerprint(), appPid: 1 });
+    other.send({ t: 'hello', protocol: SOCKET_PROTOCOL, token: fake.token, minor: WIRE_MINOR, build: buildIdOf(profile.modulePath), capabilities: [], appPid: 1 });
     await other.next((line) => (line as { t: string }).t === 'welcome');
     await until(() => state().state === 'crashed');
     await sleep(BACKOFF[2] + TIMING.pidPollMs * 5);
@@ -417,7 +418,7 @@ describe('the detached transport: a served connection ends', () => {
     await expect(ping()).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
     // it still serves: another client is welcomed
     const next = await connectLines(profile.socketPath);
-    next.send({ t: 'hello', protocol: SOCKET_PROTOCOL, token: fake.token, buildId: buildIdOf(profile.modulePath), wire: wireFingerprint(), appPid: 2 });
+    next.send({ t: 'hello', protocol: SOCKET_PROTOCOL, token: fake.token, minor: WIRE_MINOR, build: buildIdOf(profile.modulePath), capabilities: [], appPid: 2 });
     await expect(next.next()).resolves.toMatchObject({ t: 'welcome', pid: fake.pid });
     next.socket.destroy();
   });
@@ -522,7 +523,7 @@ describe('the detached transport: early exits and the crash ladder', () => {
   });
 });
 
-describe('the detached transport: the build and wire handshake (§Design 6’s table)', () => {
+describe('the detached transport: the build and wire handshake (§Design 6’s table; P5 O1 M6: a wire refusal is the protocol-2 window’s)', () => {
   const live = (liveSessions: number) => ({ counts: { liveSessions, rows: liveSessions } });
 
   it('same protocol, wire and build: served, nothing asked of it', async () => {
@@ -560,8 +561,8 @@ describe('the detached transport: the build and wire handshake (§Design 6’s t
     expect(errors.mock.calls.flat().join(' ')).not.toContain('unexpectedly');
   });
 
-  it('a refused wire with nothing live: exit now on the refused connection, then a fresh supervisor once the old pid is dead', async () => {
-    const old = await startFake({ wire: 'other-wire' });
+  it('a protocol-2 supervisor of another wire (refused on the wire) with nothing live: exit now on the refused connection, then a fresh supervisor once the old pid is dead', async () => {
+    const old = await startFake({ speaks: 'protocol-2', wire: 'other-wire' });
     await supervisor.start();
     expect(old.exits).toEqual(['now']);
     expect(processes.alive.has(old.pid)).toBe(false);
@@ -575,8 +576,8 @@ describe('the detached transport: the build and wire handshake (§Design 6’s t
     expect(state()).toMatchObject({ state: 'ready', pid: candidates[0].pid });
   });
 
-  it('a refused wire with sessions live: exit when idle asked once on a refused connection, waiting (crashed), session commands unavailable, retried until it is gone', async () => {
-    const old = await startFake({ wire: 'other-wire', ...live(2) });
+  it('a protocol-2 supervisor of another wire with sessions live: exit when idle asked once on a refused connection, waiting (crashed), session commands unavailable, retried until it is gone', async () => {
+    const old = await startFake({ speaks: 'protocol-2', wire: 'other-wire', ...live(2) });
     await supervisor.start();
     expect(state().state).toBe('crashed');
     expect(supervisor.facts('engine-host')).toMatchObject({ reason: 'incompatible', refused: 'wire', waitingLiveSessions: 2 });
@@ -609,7 +610,7 @@ describe('the detached transport: the build and wire handshake (§Design 6’s t
   // the arming cannot be remembered by pid; it is still written at each retry (idempotent in the supervisor, and the
   // process behind the socket may have changed), but logged once per wait
   it('an incompatible supervisor with no readable lock: exit when idle written at each retry, logged once per wait', async () => {
-    const old = await startFake({ wire: 'other-wire', ...live(2) });
+    const old = await startFake({ speaks: 'protocol-2', wire: 'other-wire', ...live(2) });
     writeFileSync(join(profile.dir, SUPERVISOR_FILES.lock), '{ not json');
     await supervisor.start();
     expect(supervisor.facts('engine-host')).toMatchObject({ reason: 'incompatible', refused: 'wire', waitingLiveSessions: 2 });
@@ -641,7 +642,7 @@ describe('the detached transport: the build and wire handshake (§Design 6’s t
     await first.die({ keepLock: true }); // a crash: restarting, then the attempt finds an incompatible one
     await until(() => state().state === 'restarting');
     const settled = engineHostSettled(supervisor);
-    await startFake({ wire: 'other-wire', ...live(2) });
+    await startFake({ speaks: 'protocol-2', wire: 'other-wire', ...live(2) });
     await expect(settled).resolves.toBeUndefined();
     expect(state().state).toBe('crashed');
     expect(supervisor.facts('engine-host').reason).toBe('incompatible');
@@ -649,7 +650,7 @@ describe('the detached transport: the build and wire handshake (§Design 6’s t
   });
 
   it('host.restart while waiting: exit now on a refused connection, then a fresh supervisor once the old pid is dead, with no crash count', async () => {
-    const old = await startFake({ wire: 'other-wire', ...live(2) });
+    const old = await startFake({ speaks: 'protocol-2', wire: 'other-wire', ...live(2) });
     await supervisor.start();
     expect(state().state).toBe('crashed');
     await expect(supervisor.restartSupervisor({ stopSessions: true })).resolves.toEqual({ ok: true, value: undefined });
@@ -666,7 +667,7 @@ describe('the detached transport: the build and wire handshake (§Design 6’s t
     onSpawn = (candidate) => {
       candidate.exit(1);
       // between the second early exit and the next attempt, an incompatible supervisor appears
-      if (candidates.length === 2) void startFake({ wire: 'other-wire', ...live(2) });
+      if (candidates.length === 2) void startFake({ speaks: 'protocol-2', wire: 'other-wire', ...live(2) });
     };
     await supervisor.start();
     expect(supervisor.facts('engine-host').reason).toBe('incompatible');
@@ -676,7 +677,66 @@ describe('the detached transport: the build and wire handshake (§Design 6’s t
   });
 });
 
-describe('the detached transport: MAWS_E2E_BUILD_ID and MAWS_E2E_WIRE', () => {
+// P5 O1 M6 (OX1): the wire's major. Any minor of it is served; through the protocol-2 window a supervisor a pre-O1 app
+// left running is served when its fingerprint is this app's, and waited for (as before) when it is not.
+describe('the detached transport: the wire major and the protocol-2 window (P5 O1 M6)', () => {
+  const live = (liveSessions: number) => ({ counts: { liveSessions, rows: liveSessions } });
+
+  it('serves a supervisor of another minor, keeping what its welcome said (peer) and logging it at connect', async () => {
+    const fake = await startFake({ minor: 7, capabilities: ['probe.extra'] });
+    await supervisor.start();
+    expect(state()).toMatchObject({ state: 'ready', pid: fake.pid });
+    expect(supervisor.peer('engine-host')).toEqual({ major: 3, minor: 7, build: buildIdOf(profile.modulePath), capabilities: ['probe.extra'] });
+    expect(logs).toContain(`connected to supervisor pid ${fake.pid} build ${buildIdOf(profile.modulePath)} wire 3.7 capabilities [probe.extra] (0 live of 0 rows)`);
+    expect(fake.peer()).toEqual({ major: 3, minor: WIRE_MINOR, build: buildIdOf(profile.modulePath), capabilities: [] });
+    fake.dropClient();
+    await until(() => state().state === 'restarting');
+    expect(supervisor.peer('engine-host')).toBeNull();
+  });
+
+  it('a protocol-2 supervisor of this fingerprint with sessions live is served as protocol 2, another build, asked to exit when idle', async () => {
+    const old = await startFake({ speaks: 'protocol-2', buildId: 'pre-o1-build', ...live(1) });
+    await supervisor.start();
+    expect(state()).toMatchObject({ state: 'ready', pid: old.pid });
+    expect(old.logs).toContain('refused protocol 3 (this supervisor speaks 2)');
+    expect(logs).toContain(`supervisor pid ${old.pid} speaks protocol 2 with this app's wire ${wireFingerprint()}; speaking protocol 2 to it`);
+    expect(supervisor.peer('engine-host')).toEqual({ major: 2, minor: 0, build: 'pre-o1-build', capabilities: [] });
+    await until(() => old.exits.length === 1);
+    expect(old.exits).toEqual(['idle']); // the other-build path: served until its sessions are idle
+    await expect(ping()).resolves.toEqual({ ok: true, value: { pid: old.pid, uptimeMs: 1, hostVersion: 'fake' } });
+    await until(() => old.emit('session.brokerItems', { appSessionId: 'app-1', items: [] } as never));
+    await until(() => emit.mock.calls.some(([name]) => name === 'session.brokerItems'));
+    await sleep(30);
+    expect(old.connected()).toBe(true); // nothing protocol 2's strict envelope refuses was sent
+    expect(old.logs.filter((line) => line.startsWith('closed the client'))).toEqual([]);
+    expect(supervisor.facts('engine-host')).toMatchObject({ reason: null, refused: null });
+  });
+
+  it('a protocol-2 supervisor of this fingerprint with nothing live is replaced, as another build is', async () => {
+    const old = await startFake({ speaks: 'protocol-2', buildId: 'pre-o1-build' });
+    await supervisor.start();
+    expect(old.exits).toEqual(['now']);
+    expect(state()).toMatchObject({ state: 'ready', pid: candidates[0].pid });
+  });
+
+  it('a protocol-2 supervisor of another fingerprint is never sent protocol 2’s hello: main waits, refused on the wire', async () => {
+    const old = await startFake({ speaks: 'protocol-2', wire: 'other-wire', ...live(1) });
+    await supervisor.start();
+    expect(supervisor.facts('engine-host')).toMatchObject({ reason: 'incompatible', refused: 'wire', waitingLiveSessions: 1 });
+    expect(old.logs.some((line) => line.startsWith('refused wire'))).toBe(false);
+    expect(logs.some((line) => line.includes('speaking protocol 2'))).toBe(false);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('a supervisor of another major refuses `protocol`, and main waits on it as before', async () => {
+    const old = await startFake({ protocol: SOCKET_PROTOCOL + 1, ...live(1) });
+    await supervisor.start();
+    expect(supervisor.facts('engine-host')).toMatchObject({ reason: 'incompatible', refused: 'protocol', waitingLiveSessions: 1 });
+    expect(old.logs.join('\n')).toContain(`refused protocol ${SOCKET_PROTOCOL}`);
+  });
+});
+
+describe('the detached transport: MAWS_E2E_BUILD_ID and MAWS_E2E_WIRE_MAJOR', () => {
   const withIdentity = (env: NodeJS.ProcessEnv) => {
     supervisor.stop();
     supervisor = makeSupervisor(false, {}, { identity: appIdentity(profile.modulePath, { MAWS_E2E: '1', ...env }) });
@@ -697,12 +757,12 @@ describe('the detached transport: MAWS_E2E_BUILD_ID and MAWS_E2E_WIRE', () => {
     expect(fakes.at(-1)!.exits).toEqual([]);
   });
 
-  it('a wire override makes the running supervisor incompatible (waiting); after Restart now main serves the one it starts', async () => {
-    withIdentity({ MAWS_E2E_WIRE: 'other' });
+  it('a major override makes the running supervisor incompatible (waiting); after Restart now main serves the one it starts', async () => {
+    withIdentity({ MAWS_E2E_WIRE_MAJOR: '4' });
     const old = await startFake({ counts: { liveSessions: 2, rows: 2 } });
     await supervisor.start();
-    expect(supervisor.facts('engine-host')).toMatchObject({ reason: 'incompatible', refused: 'wire', waitingLiveSessions: 2 });
-    expect(old.logs.join('\n')).toContain('refused wire other');
+    expect(supervisor.facts('engine-host')).toMatchObject({ reason: 'incompatible', refused: 'protocol', waitingLiveSessions: 2 });
+    expect(old.logs.join('\n')).toContain('refused protocol 4');
     await supervisor.restartSupervisor({ stopSessions: false });
     await until(() => state().state === 'ready');
     await sleep(50);
@@ -851,7 +911,7 @@ describe('the detached transport: deliberate stops, restarts and the quit', () =
     const fake = await startFake();
     await supervisor.start();
     const other = await connectLines(profile.socketPath);
-    other.send({ t: 'hello', protocol: SOCKET_PROTOCOL, token: fake.token, buildId: buildIdOf(profile.modulePath), wire: wireFingerprint(), appPid: 1 });
+    other.send({ t: 'hello', protocol: SOCKET_PROTOCOL, token: fake.token, minor: WIRE_MINOR, build: buildIdOf(profile.modulePath), capabilities: [], appPid: 1 });
     await until(() => state().state === 'crashed');
     await supervisor.stopAllForQuit(5_000);
     expect(processes.kills).toEqual([]);
@@ -924,7 +984,7 @@ describe('the detached transport: deliberate stops, restarts and the quit', () =
   });
 
   it('an incompatible supervisor with sessions live: the reason is incompatible, and what it refused', async () => {
-    await startFake({ wire: 'other-wire', counts: { liveSessions: 2, rows: 2 } });
+    await startFake({ speaks: 'protocol-2', wire: 'other-wire', counts: { liveSessions: 2, rows: 2 } });
     await supervisor.start();
     expect(supervisor.facts('engine-host')).toMatchObject({ reason: 'incompatible', refused: 'wire' });
   });
@@ -933,7 +993,7 @@ describe('the detached transport: deliberate stops, restarts and the quit', () =
     const fake = await startFake();
     await supervisor.start();
     const other = await connectLines(profile.socketPath);
-    other.send({ t: 'hello', protocol: SOCKET_PROTOCOL, token: fake.token, buildId: buildIdOf(profile.modulePath), wire: wireFingerprint(), appPid: 1 });
+    other.send({ t: 'hello', protocol: SOCKET_PROTOCOL, token: fake.token, minor: WIRE_MINOR, build: buildIdOf(profile.modulePath), capabilities: [], appPid: 1 });
     await until(() => state().state === 'crashed');
     expect(supervisor.facts('engine-host')).toMatchObject({ reason: null, lastExit: null });
     other.socket.destroy();

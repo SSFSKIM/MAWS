@@ -9,6 +9,10 @@
 // P5 O1 M5: a `machine` host is reached the same way, and a request for a `machine`-owned command carries its asker's
 // client id; each link relays, once per client it carried, that client's end (`clientGone`, @shared/host/client-refs).
 // No production `machine` host runs in O1: a dispatch to an owner with no host answers `host_unavailable`.
+// P5 O1 M6 (OX1): a detached host may be another build of the wire's major, so what a host sends is read tolerantly
+// (@shared/ipc/tolerant): the envelope, each output and each event lose the object keys this build does not know, logged
+// once per message and field, and an event this build does not know is dropped with one line per name. What reaches the
+// renderer has then passed this build's schemas. The supervisor keeps what each welcome said of its peer (`peer`).
 import { createInterface } from 'node:readline';
 import { app, MessageChannelMain, utilityProcess, type MessagePortMain, type UtilityProcess } from 'electron';
 import { ipcError } from '@shared/ipc/errors';
@@ -18,7 +22,9 @@ import { HostToMainSchema, type HostDoc, type HostMessage, type HostResponse } f
 import { REGISTRY, type WireRegistry } from '@shared/ipc/registry'; // P5 O1 M5
 import type { CommandName, CommandResult, EventName, EventPayload, HostState, PtyId } from '@shared/ipc/schema';
 import type { HostStatus } from '@shared/ipc/schema/host'; // E10
+import { readTolerant, tolerantLog } from '@shared/ipc/tolerant'; // P5 O1 M6
 import { codecOf } from '@shared/ipc/validate';
+import type { WirePeer } from '@shared/ipc/wire'; // P5 O1 M6
 import type { HostDispatch, HostOwner } from '../ipc/router';
 // E10 start
 import { createDetachedTransport, type DetachedEvents, type DetachedTransport, type DetachedTransportOptions, type ExitInfo, type HostLink } from './detached-transport';
@@ -105,6 +111,9 @@ export interface HostSupervisor {
   // P3-A M5: the client ended (its page closed, reloaded or crashed): the channels main relays for it end (a utility
   // host's ports, entangled with the page's directly, end by themselves).
   closeDocPorts(owner: string): void;
+  // P5 O1 M6: what the served supervisor's welcome said of it (major, minor, build, capabilities), so a caller can gate a
+  // behaviour an older peer lacks; null while none is served, and for a utility host (always this build)
+  peer(owner: HostOwner): WirePeer | null;
 }
 
 export const REQUEST_TIMEOUT_MS = 10_000;
@@ -162,10 +171,14 @@ interface Host {
   // E10 end
   relay: MainDocRelay | null; // P3-A M5: a detached host's document channels
   gone: ClientGoneRelay | null; // P5 O1 M5: the current link's clientGone relay
+  peer: WirePeer | null; // P5 O1 M6: the served link's welcome, until it detaches
 }
 
 export function createHostSupervisor({ hosts: specs, emit, detached, restartBackoffMs = RESTART_BACKOFF_MS, registry = REGISTRY }: HostSupervisorOptions): HostSupervisor {
-  const { isEventName, validateCommandOutput } = codecOf(registry); // P5 O1 M5
+  const { isEventName, readCommandOutput, readEventPayload } = codecOf(registry); // P5 O1 M5; M6: the tolerant readers
+  // P5 O1 M6: one line per dropped field, and one per event name this build does not know
+  const logDropped = tolerantLog((line) => console.warn(`[hosts] ${line}`));
+  const unknownEvents = new Set<string>();
   const hosts: Partial<Record<HostOwner, Host>> = {};
   // P5 O1 M5: for the calls that name a host this app runs (every caller names engine-host or pty-host)
   const hostOf = (owner: HostOwner): Host => {
@@ -199,6 +212,7 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
       utilityRestart: null,
       relay: null, // P3-A M5
       gone: null, // P5 O1 M5
+      peer: null, // P5 O1 M6
     };
     // E10: a detached host's transport, reporting into the same state, ladder and requests as a utility host's
     if (host.spec.transport === 'detached') {
@@ -330,6 +344,7 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
     host.relay?.disconnect(); // P3-A M5: every relayed window port ends with the connection
     host.gone?.close(); // P5 O1 M5: the host ends this link's remote clients by itself
     host.gone = null;
+    host.peer = null; // P5 O1 M6
     host.child = null;
     host.port?.close();
     host.port = null;
@@ -419,6 +434,7 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
       connected(link: HostLink, welcome) {
         if (stopped) return link.close();
         host.port = link;
+        host.peer = welcome.peer; // P5 O1 M6
         host.gone?.close(); // P5 O1 M5: a link's relay never outlives it
         host.gone = clientGoneRelay((message) => link.postMessage(message));
         // P3-A M5: the document channels' frames and the host's `documents.closed` go to the relay, not the envelope
@@ -481,23 +497,34 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
   }
 
   function receive(host: Host, data: unknown): void {
-    const message = HostToMainSchema.safeParse(data);
-    if (!message.success) {
+    const message = readTolerant(HostToMainSchema, data); // P5 O1 M6: this and the readers below are tolerant
+    if (!message.ok) {
       console.error(`[hosts] dropped a malformed message from ${host.owner}`, message.error.issues);
       return;
     }
-    if (message.data.t === 'evt') {
-      const { name, payload } = message.data;
+    logDropped(`envelope ${message.value.t}`, message.dropped);
+    if (message.value.t === 'evt') {
+      const { name } = message.value;
       if (!isEventName(name)) {
-        console.error(`[hosts] dropped ${host.owner}'s event ${name}: not in the event registry`);
+        // P5 O1 M6: an event a newer build emits and this one does not know
+        if (unknownEvents.has(name)) return;
+        unknownEvents.add(name);
+        console.warn(`[hosts] dropped ${host.owner}'s event ${name}: not in this build's event registry (logged once per name)`);
         return;
       }
+      const read = readEventPayload(name, message.value.payload);
+      if (!read.ok) {
+        console.error(`[hosts] dropped ${host.owner}'s invalid ${name}`, read.issues);
+        return;
+      }
+      logDropped(`event ${name}`, read.dropped);
+      const payload = read.value;
       const relayed = emit(name as EventName, payload as never);
       if (relayed && name === 'pty.exit') host.ptys.delete((payload as { ptyId: string }).ptyId);
       if (relayed) notifyEvent(name as EventName, payload); // C3: emit validated it, and validators never transform
       return;
     }
-    answer(host, message.data);
+    answer(host, message.value);
   }
 
   function answer(host: Host, response: HostResponse): void {
@@ -512,14 +539,15 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
       pending.resolve({ ok: false, error: response.error });
       return;
     }
-    const output = validateCommandOutput(pending.name, response.value);
+    const output = readCommandOutput(pending.name, response.value); // P5 O1 M6: tolerant
     if (!output.ok) {
       console.error(`[hosts] ${host.owner} answered ${pending.name} with an invalid output`, output.error.issues);
       pending.resolve({ ok: false, error: ipcError('internal', output.error.message, output.error.issues) });
       return;
     }
+    logDropped(`the output of ${pending.name}`, output.dropped);
     if (pending.name === 'pty.spawn') host.ptys.add((output.value as { ptyId: string }).ptyId);
-    pending.resolve(output as CommandResult<CommandName>);
+    pending.resolve({ ok: true, value: output.value } as CommandResult<CommandName>);
   }
 
   // E10 start: host.restart and the quit's stop-all (Task 2.3b)
@@ -718,6 +746,7 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
       hosts['engine-host']?.relay?.closeOwner(owner); // P3-A M5
     },
     // P3-A M4 end
+    peer: (owner) => hosts[owner]?.peer ?? null, // P5 O1 M6
   };
 }
 

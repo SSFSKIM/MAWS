@@ -142,6 +142,22 @@ describe('host runtime speaks the host protocol', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
+  // P5 O1 M6: main may be a newer minor
+  it('reads the envelope and the input tolerantly: a key this build does not know is dropped, logged once per message and field', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fake = fakePort();
+    const handler = vi.fn<(input: unknown) => Promise<undefined>>(async () => undefined);
+    createHostRuntime((on) => on('pty.write', handler)).serve(fake.port);
+    await fake.deliver({ t: 'req', id: '4', name: 'pty.write', input: { ptyId: 'p', data: 'x', newer: true }, newerEnvelope: 1 });
+    await fake.deliver({ t: 'req', id: '5', name: 'pty.write', input: { ptyId: 'p', data: 'y', newer: false } });
+    expect(handler.mock.calls.map(([input]) => input)).toEqual([{ ptyId: 'p', data: 'x' }, { ptyId: 'p', data: 'y' }]);
+    expect(fake.posted).toEqual([{ t: 'res', id: '4', ok: true }, { t: 'res', id: '5', ok: true }]);
+    expect(warn.mock.calls.map(([line]) => line)).toEqual([
+      '[host] dropped newerEnvelope from envelope req, a field this build does not know (logged once per message and field)',
+      '[host] dropped newer from the input of pty.write, a field this build does not know (logged once per message and field)',
+    ]);
+  });
+
   it('turns a throwing handler into internal carrying its message', async () => {
     const fake = fakePort();
     createHostRuntime((on) =>

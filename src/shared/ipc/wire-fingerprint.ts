@@ -4,6 +4,9 @@
 // differ, which is what lets an app serve an older supervisor's kept sessions; one changed `strictObject` on the wire
 // changes it. Main-owned commands and main-emitted events are left out, or every settings bump would strand kept
 // sessions. Main and the supervisor each compute it once, at the first handshake.
+// P5 O1 M6 (OX1): protocol 3 replaced the exact match with the wire's major and minor (wire.ts). The fingerprint stays
+// for the protocol-2 window alone (socket-protocol.ts): a pre-O1 supervisor is spoken to as protocol 2 only when its
+// fingerprint equals this build's, and `refuse` and host.status's `appWire` keep carrying it. It goes with the window.
 import { createHash } from 'node:crypto';
 import * as z from 'zod';
 import { commands, events, HOST_EVENTS } from './schema';
