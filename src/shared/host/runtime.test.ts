@@ -649,14 +649,21 @@ describe('host runtime: the handler context (P5 O1 M5)', () => {
     await fake.deliver({ t: 'clientGone', client: 'page:7.1' });
     expect(seven).toHaveBeenCalledOnce();
     expect(eight).not.toHaveBeenCalled();
-    await fake.deliver(echo('e', 'page:7.1')); // a later request of the same id is a fresh ref
-    expect(seen[4]).not.toBe(seen[0]);
+    // an ended client stays ended on this connection: a later request naming it (a held one flushed after a restart) is
+    // answered, and its handler gets a ref already gone
+    await fake.deliver(echo('e', 'page:7.1'));
+    expect(fake.posted.at(-1)).toEqual({ t: 'res', id: 'e', ok: true, value: { text: 'e', client: '1/page:7.1' } });
+    const revived = vi.fn();
+    seen[4]!.onGone(revived);
+    expect(revived).toHaveBeenCalledOnce();
+    await fake.deliver({ t: 'clientGone', client: 'page:7.1' }); // a second clientGone for it changes nothing
+    expect(seven).toHaveBeenCalledOnce();
     runtime.detach();
     expect(eight).toHaveBeenCalledOnce();
     expect(own).toHaveBeenCalledOnce();
     expect(seven).toHaveBeenCalledOnce();
     const late = vi.fn();
-    seen[4]!.onGone(late);
+    seen[2]!.onGone(late);
     expect(late).toHaveBeenCalledOnce(); // gone with its connection, so at once
   });
 
