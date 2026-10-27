@@ -141,7 +141,7 @@ P5's O12 acceptance items 1, 4 and 7 are this phase's acceptance, checked as fol
 
 **What exists at its end.** The daemon's RPC ledger (`sminos_rpc.py`'s `Ledger`) is keyed by an operation id: the RPC's `opId` when present, else its nonce, so every DX6 RPC is keyed exactly as today.
 - Claiming and tombstoning are one serialized transition. A tombstoned id never runs, and a claimed one can't be tombstoned.
-- The daemon's `query(opId, opCreated?)` answers `done | refused | in-progress | not-received | expired | failed`.
+- The daemon's `query(opId, opCreated?)` answers `done | refused | in-progress | not-received | expired | unavailable`.
 - An id older than the replay horizon is refused `expired`, so pruning the ledger never reopens an id.
 - A `sminos rpc-query <opId>` verb prints the ledger's view for diagnosis. RL10 carries the daemon's `query` in Phase 2.
 
@@ -380,6 +380,10 @@ OP_HORIZON = KEPT_S - 3600
   Also: the unreadable-ledger answer is named `unavailable`, after RL4. M1 now gets doperpowers:reviewer-high, as M3 does, because its ownership rules took two review rounds to settle. The document isn't sent for a third round: the remaining risk is implementation detail, which those reviews and the pinned tests cover.
   Rationale: each finding was a real path to a wrong owner, a wrong controller or a replayed action (doperpowers:adversarial-reviewer, round 2, 2026-10-27).
   Date/Author: 2026-10-27, desk-sminos-orchestrator.
+
+- Decision: Phase 1's execution layout. M1 and M2 are built in parallel, each on its own doperpowers branch cut from `main` (`p5-o12-m1`, `p5-o12-m2`), and each merges on its own once reviewed clean and green; the second to merge takes `main` in and re-bumps the sminos version above it. M3's doperpowers side (`p5-o12-m3`) is cut from `main` after M1 merges, since it writes M1's record (`controller`) and reads it (desk Resume). M3's MAWS marker is built and reviewed at once and lands first. The query's unreadable-ledger answer is `unavailable` everywhere: M2's opening list said `failed`, a leftover of the rename recorded in the second-round entry.
+  Rationale: M2 consumes nothing M1 produces, and their one shared function (`sminos_rpc.spawn`) is a small merge. M3 consumes M1's record.
+  Date/Author: 2026-10-26, O12's executor (desk-sminos-orchestrator).
 
 ## Outcomes & Retrospective
 
