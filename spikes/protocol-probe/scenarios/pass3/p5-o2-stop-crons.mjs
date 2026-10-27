@@ -43,13 +43,15 @@ const tool=(name,input)=>toolTurn(null,name,input);
 const PLANS={
  CREATE:()=>[search(CRON_TOOLS),tool('CronCreate',{cron:'0 3 * * *',prompt:'nightly report job',recurring:true}),textTurn('Created the nightly job.')],
  DELETE:()=>[s=>tool('CronDelete',{id:s.ids['nightly report job']}),textTurn('Deleted it.')],
+ // a subagent as the model launches one by default (in the background), and one in the foreground
  SUB:()=>[s=>tool(s.agentTool,{description:'Schedule a job',prompt:'[[P5O2:SUBTASK]] Schedule the weekly job.',subagent_type:'general-purpose'}),textTurn('The subagent is done.')],
+ SUBFG:()=>[s=>tool(s.agentTool,{description:'Schedule a job',prompt:'[[P5O2:SUBTASK]] Schedule the weekly job.',subagent_type:'general-purpose',run_in_background:false}),textTurn('The foreground subagent is done.')],
  SUBTASK:()=>[search(['CronCreate','CronList']),tool('CronCreate',{cron:'0 4 * * 1',prompt:'subagent weekly job',recurring:true}),textTurn('Scheduled the weekly job.')],
  LIST:()=>[tool('CronList',{}),textTurn('Listed.')],
  INT:()=>[tool('CronCreate',{cron:'0 5 * * *',prompt:'interrupted turn job',recurring:true}),tool('Bash',{command:'sleep 45',description:'Wait'}),textTurn('(not reached: the turn is interrupted in the Bash call)')],
  PLAIN:()=>[textTurn('OK.')],
  // the dynamic /loop: the first turn schedules a wakeup; its tick (the same prompt, fired) ends without one
- LOOP:occ=>occ===0?[tool('ScheduleWakeup',{delaySeconds:60,prompt:LOOP_PROMPT,reason:'probe: one tick'}),textTurn('Scheduled the next tick.')]:[textTurn('Tick done; not rescheduling.')],
+ LOOP:occ=>occ===0?[tool('ScheduleWakeup',{delaySeconds:60,prompt:LOOP_PROMPT,reason:'probe: one tick',noop:false}),textTurn('Scheduled the next tick.')]:[textTurn('Tick done; not rescheduling.')],
  HOLD_DURABLE:()=>[search(['CronCreate','CronList']),tool('CronCreate',{cron:'* * * * *',prompt:'[[P5O2:FIRE]] durable minute job',recurring:true,durable:true}),textTurn('Created the durable job.')],
  HOLD_SESSION:()=>[search(['CronCreate','CronList']),tool('CronCreate',{cron:'* * * * *',prompt:'[[P5O2:FIRE]] session minute job',recurring:true}),textTurn('Created the session job.')],
  RESUMED_LIST:()=>[search(['CronList']),tool('CronList',{}),textTurn('Listed.')],
@@ -163,6 +165,7 @@ async function mainArm(){
    await step(p,api,'create','[[P5O2:CREATE]] Schedule the nightly report.');
    await step(p,api,'delete','[[P5O2:DELETE]] Cancel the nightly report.');
    await step(p,api,'subagent','[[P5O2:SUB]] Have a subagent schedule the weekly job.');
+   await step(p,api,'subagent-foreground','[[P5O2:SUBFG]] Have a foreground subagent schedule the weekly job.');
    await step(p,api,'list-after-subagent','[[P5O2:LIST]] List the jobs.');
    // the interrupted turn: a CronCreate, then a Bash call interrupted while it runs
    await step(p,api,'interrupt','[[P5O2:INT]] Schedule a job, then wait.',{waitFor:async from=>{
