@@ -10,8 +10,9 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { generateSigningKey, keyId, memoryOrgView, NO_CERTIFICATES, OP_HORIZON_S, signRecord, SIGNING_DOMAINS, type Action, type Channel, type ChannelMessage, type Grant, type SignedOrgState, type SigningKey } from 'org-protocol';
+import { base64urlEncode, generateSigningKey, keyId, memoryOrgView, NO_CERTIFICATES, OP_HORIZON_S, signRecord, SIGNING_DOMAINS, type Action, type Channel, type ChannelMessage, type Grant, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { SoftwareAuthenticator } from '../../apps/org-protocol/test-support/authenticator.ts';
 import { TestDevice as Device } from '../../apps/org-protocol/test-support/test-device.ts';
 import type { SessionEvent } from '@shared/graph/events';
 import type { HandlerContext } from '@shared/ipc/client';
@@ -28,7 +29,7 @@ import type { SessionRecord, SessionTarget } from '../../src/endpoint/sources';
 import { EndpointState } from '../../src/endpoint/state/store';
 import { dialDirect } from './carriers';
 import { fakeServices, type FakeServices } from './fake-services';
-import { genesis, iso, memberId, newDevice, successor, type TestDevice } from './org-fixtures';
+import { endorsed, genesis, iso, memberId, newDevice, revokedDevice, successor, type TestDevice } from './org-fixtures';
 import { FakeSminos, type Frame } from './rl10/fake-sminos';
 
 const ORG = 'org-m7';
@@ -550,6 +551,36 @@ describe('lane A, through sminos’s ledger over RL10', () => {
     expect(q).toEqual({ t: 'query', opId: spawn.opId, opCreated: spawn.opCreated });
     s.send({ t: 'queried', opId: spawn.opId, state: 'done', outcome: { state: 'done', result: { session: 'la-new' } }, member: A, device: 'a1', fingerprint: rpc.fingerprint, target: { kind: 'machine' } });
     expect(await asked).toEqual({ state: 'done', outcome: { state: 'done', result: { session: 'la-new' } } });
+  });
+
+  it('refuses a web-cards asker a lane A session op `grade`: the binding names no operation, and its device id may once have been another class’s', async () => {
+    const f = await start();
+    const s = await sminos(f);
+    s.send({ t: 'member', session: 'la-b', alias: 'bob', project: PROJECT, lane: 'A', state: 'idle', title: 'bob', cwd: CHECKOUT, launch: 'LB', owners: [B], ownersProof: [], origin: { kind: 'terminal' } });
+    await until(() => f.endpoint.rl10.members.get('la-b') !== null, 'Bob’s lane A member');
+    const b = await open(f, b1, B);
+    const steer = b.device.action({ machine: f.ref, action: 'sminos.steer', session: 'la-b', context: { lane: 'A', session: 'la-b', launch: 'LB' }, args: { session: 'la-b', text: 'private' } });
+    expect(await act(b, steer)).toBe('ok');
+    const rpc = (await s.next((x) => x.t === 'rpc', 'the steer rpc')).rpc as Record<string, unknown>;
+    // B's Mac is replaced by newly endorsed web-cards keys under the same device id: a successor the org accepts.
+    const phone = await newDevice('b1', 'web-cards');
+    const passkey = new SoftwareAuthenticator(await generateSigningKey(), base64urlEncode(crypto.getRandomValues(new Uint8Array(16))), 'hub.example');
+    const card = { ...phone.device, passkey: passkey.passkey };
+    delete card.stepUpPub;
+    const bw = await endorsed(ORG, B, { ...phone, device: card }, b1);
+    const gone = await revokedDevice(B, b1.device);
+    const next = await successor(f.chain[f.chain.length - 1], [a1], (st) => {
+      st.members.find((m) => m.id === B)!.devices = [bw.device];
+      st.revoked.push(...gone);
+    });
+    const out = await f.endpoint.cli('revoke', ['-'], JSON.stringify(next));
+    expect(out.code, out.out).toBe(0);
+    f.chain.push(next);
+    const w = await open(f, bw, B);
+    const asked = query(w, steer.opId, steer.opCreated, 'sminos');
+    await s.next((x) => x.t === 'query' && x.opId === steer.opId, 'the query');
+    s.send({ t: 'queried', opId: steer.opId, state: 'done', outcome: { state: 'done', result: { secret: 'steered' } }, member: B, device: 'b1', fingerprint: rpc.fingerprint, target: { kind: 'session', session: 'la-b' } });
+    expect(await asked).toEqual({ state: 'refused', reason: 'grade' });
   });
 
   it('answers `not-received` only after sminos’s tombstone took; one that fails returns the claim’s state; no binding reveals nothing', async () => {

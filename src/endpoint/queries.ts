@@ -8,7 +8,8 @@
 // What a state reveals decides whether it needs the binding: `done`, `refused` (the op's own refusal) and `in-progress`
 // say an operation under this id exists, so they go only through the check, and one with no binding (an entry from
 // before RL10, which can't be checked against the asker) is `refused {reason: 'grade'}`; `not-received`, `expired` and
-// `unavailable` say nothing of anyone's operation.
+// `unavailable` say nothing of anyone's operation. sminos's binding names no operation, so a web-cards asker of a lane A
+// session's op is refused `grade` too (`sminosBinding`).
 //
 // `not-received` is said only once the executing side has tombstoned the id, so the original, released late, is refused
 // and never runs: the engine host and the endpoint's own ledger look and tombstone under one turn (`host.opQuery
@@ -61,7 +62,7 @@ export class Queries {
     const queried = (fields: Omit<QueriedMessage, 't' | 'opId'>): QueriedMessage => ({ t: 'queried', opId, ...fields });
     if (this.ctx.now() - Date.parse(opCreated) > OP_HORIZON_S * 1000) return queried({ state: 'expired' });
     const who: Who = { member: channel.member, device: channel.device, clientClass: channel.clientClass };
-    const answer = m.executor === 'engine-host' ? await this.#engineHost(opId, opCreated) : m.executor === 'endpoint' ? this.#own(opId, opCreated) : await this.#sminos(opId, opCreated, who.device, who.clientClass);
+    const answer = m.executor === 'engine-host' ? await this.#engineHost(opId, opCreated) : m.executor === 'endpoint' ? this.#own(opId, opCreated) : await this.#sminos(opId, opCreated, who.clientClass);
     if (SILENT.has(answer.state)) return queried({ state: answer.state as QueriedMessage['state'] });
     if (!REVEALING.has(answer.state)) return queried({ state: 'unavailable' });
     if (answer.binding === 'unplaceable') return queried({ state: 'unavailable' });
@@ -98,7 +99,7 @@ export class Queries {
   }
 
   /** sminos's ledger (lane A) over RL10: `query`, then `tombstone` for an op it holds nothing of. */
-  async #sminos(opId: string, opCreated: string, device: string, clientClass: DeviceClass): Promise<Answer> {
+  async #sminos(opId: string, opCreated: string, clientClass: DeviceClass): Promise<Answer> {
     let answer: QueryAnswer = await this.ctx.rl10.query(opId, opCreated);
     if (answer.state === 'not-received') {
       const stone = await this.ctx.rl10.tombstone(opId, opCreated);
@@ -107,21 +108,22 @@ export class Queries {
       // since a failed tombstone carries no outcome.
       answer = stone.state === 'done' || stone.state === 'refused' ? await this.ctx.rl10.query(opId, opCreated) : stone;
     }
-    return { state: answer.state, ...(answer.outcome === undefined ? {} : { outcome: answer.outcome }), binding: sminosBinding(answer, device, clientClass) };
+    return { state: answer.state, ...(answer.outcome === undefined ? {} : { outcome: answer.outcome }), binding: sminosBinding(answer, clientClass) };
   }
 }
 
 /**
  * sminos's binding: `member`, and its `target`, `{kind: 'machine'}` for a spawn, else `{kind: 'session', session}`.
- * sminos names no RPC with it, so the name a query is authorized under is `sminos.spawn` for the machine; for a session,
- * a web-cards asker's own device's operation can only have been one its class may send (an answer or a decision), and
- * any other operation is no web-cards device's to hear of.
+ * sminos names no RPC with it, so the name a query is authorized under is `sminos.spawn` for the machine, and for a
+ * session one that grades it at `view`. A web-cards asker is told nothing of a session's op (`grade`, as for no
+ * binding): M5 lets that class hear only of an answer or a decision, which the binding can't show this op was, and its
+ * device id proves nothing, since the org may have replaced another class's device with web-cards keys under the same
+ * id. Carrying the RPC's name in the binding is O12's contract to change.
  */
-function sminosBinding(answer: QueryAnswer, device: string, clientClass: DeviceClass): Answer['binding'] {
+function sminosBinding(answer: QueryAnswer, clientClass: DeviceClass): Answer['binding'] {
   const { member, target } = answer;
   if (!isText(member) || !isObject(target)) return null;
   if (target.kind === 'machine') return { member, target: null, name: 'sminos.spawn' };
-  if (target.kind !== 'session' || !isText(target.session)) return null;
-  const name = clientClass === 'web-cards' && answer.device === device ? 'sminos.decide' : 'sminos.steer';
-  return { member, target: { lane: 'A', session: target.session }, name };
+  if (target.kind !== 'session' || !isText(target.session) || clientClass === 'web-cards') return null;
+  return { member, target: { lane: 'A', session: target.session }, name: 'sminos.steer' };
 }
