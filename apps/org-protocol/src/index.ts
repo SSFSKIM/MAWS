@@ -5,6 +5,7 @@
 // to types/neutral-runtime.d.ts).
 export * from './base64url.ts';
 export * from './canonical.ts';
+export * from './enrollment.ts';
 export * from './events.ts';
 export * from './keys.ts';
 export * from './names.ts';

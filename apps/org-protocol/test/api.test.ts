@@ -2,9 +2,11 @@
 import { describe, expect, it } from 'vitest';
 import { base64urlDecode, base64urlEncode } from '../src/base64url.ts';
 import { eventSigningInput, signEvent, verifyEvent } from '../src/events.ts';
+import { enrollmentMac, enrollmentMacInput, verifyEnrollmentMac } from '../src/enrollment.ts';
 import { generateSigningKey, importPublicKey, importSigningKey, isPublicKey, isSig, keyId } from '../src/keys.ts';
+import { contestedRefs } from '../src/records.ts';
 import type { OrgState } from '../src/types.ts';
-import { ORG, PROJECT, VECTORS } from '../vectors/index.ts';
+import { ORG, PROJECT, REF_VM1, REF_VM_BUILD, VECTORS } from '../vectors/index.ts';
 
 const ctx = { org: ORG, project: PROJECT };
 const event = { writer: 'mini/67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b', seq: 1, ts: '2026-10-27T00:00:00.000Z', kind: 'say', text: 'hi' };
@@ -45,6 +47,34 @@ describe('verifyEvent', () => {
     const state = (VECTORS.fixtures.v2 as { state: OrgState }).state;
     const signed = VECTORS.fixtures["a machine's event signed by its key"] as Parameters<typeof verifyEvent>[2];
     expect(await verifyEvent(ctx, state, { ...signed, size: Number.NaN }, [], new Date('2026-10-28T00:00:00.000Z'))).toEqual({ ok: false, code: 'malformed' });
+  });
+});
+
+describe('the enrollment MAC', () => {
+  const fields = { name: 'mini', machinePub: '', ref: 'mref-mini-0000001', tokenId: 'enroll-1' };
+  const k = new Uint8Array(32).fill(5);
+
+  it('verifies its own MAC and refuses one over a changed ref, or a field out of grammar', async () => {
+    const f = { ...fields, machinePub: (await generateSigningKey()).pub };
+    const mac = await enrollmentMac(k, f);
+    expect(await verifyEnrollmentMac(k, f, mac)).toBe(true);
+    expect(await verifyEnrollmentMac(k, { ...f, ref: 'mref-mini-0000002' }, mac)).toBe(false);
+    expect(await verifyEnrollmentMac(k, { ...f, ref: 'short' }, mac)).toBe(false);
+    expect(() => enrollmentMacInput({ ...f, name: 'hub' })).toThrow(TypeError);
+    await expect(enrollmentMac(new Uint8Array(8), f)).rejects.toThrow(TypeError);
+  });
+});
+
+describe('contestedRefs', () => {
+  it('names the refs claimed twice, by an entry and a certificate or by two keys', async () => {
+    const state = (VECTORS.fixtures.v2 as { state: OrgState }).state;
+    const now = new Date('2026-10-28T00:00:00.000Z');
+    const cert = VECTORS.fixtures['cert vm-1'] as Parameters<typeof contestedRefs>[1][number];
+    const rival = VECTORS.fixtures['cert vm-1 rival'] as typeof cert;
+    const onEntry = VECTORS.fixtures['a machine certificate for a ref a state entry holds'] as typeof cert;
+    expect(await contestedRefs(state, [cert], now)).toEqual([]);
+    expect(await contestedRefs(state, [cert, rival], now)).toEqual([REF_VM1]);
+    expect(await contestedRefs(state, [cert, onEntry], now)).toEqual([REF_VM_BUILD]);
   });
 });
 

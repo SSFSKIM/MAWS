@@ -1,6 +1,8 @@
 // Replays a vector set through the package and returns what failed, one line each; an empty list is a pass. Every
 // consumer's suite runs it in its own runtime and bundle (`replayVectors(VECTORS)`), so a hub, a machine and an app
 // judge every case the same way. Runtime-neutral, as the package is.
+import { base64urlDecode, base64urlEncode } from '../src/base64url.ts';
+import { enrollmentMac, enrollmentMacInput } from '../src/enrollment.ts';
 import { verifyEvent, signerFor } from '../src/events.ts';
 import { keyId, signingInput } from '../src/keys.ts';
 import { stateHash, verifyGenesis, verifySuccessor, verifyTransition } from '../src/org-state.ts';
@@ -8,7 +10,7 @@ import { verifyEndpointRecord, verifyGrant, verifyListing, verifyMachineCert } f
 import type { OrgState, SignedOrgState } from '../src/types.ts';
 import type { Case, VectorSet } from './scenario.ts';
 
-export type { Case, DualCase, VectorSet } from './scenario.ts';
+export type { Case, DualCase, EnrollmentCase, VectorSet } from './scenario.ts';
 
 /** Resolves `{$signed}`, `{$state}` and `{$fixture}` references against the set's fixtures, at any depth. */
 function resolve(set: VectorSet, arg: unknown): unknown {
@@ -67,5 +69,11 @@ export async function replayVectors(set: VectorSet): Promise<string[]> {
   for (const { domain, body, input } of set.encodings.inputs) {
     if (new TextDecoder().decode(signingInput(domain, body)) !== input) failures.push(`signing input of ${domain}`);
   }
+  for (const e of set.enrollment) {
+    const fields = { name: e.name, machinePub: e.machinePub, ref: e.ref, tokenId: e.tokenId };
+    if (base64urlEncode(enrollmentMacInput(fields)) !== e.input) failures.push(`enrollment input of ${e.name}/${e.ref}/${e.tokenId}`);
+    if ((await enrollmentMac(base64urlDecode(e.k), fields)) !== e.mac) failures.push(`enrollment mac of ${e.name}/${e.ref}/${e.tokenId}`);
+  }
+  if (new Set(set.enrollment.map((e) => e.input)).size !== set.enrollment.length) failures.push('two enrollments encode alike');
   return failures;
 }

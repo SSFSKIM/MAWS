@@ -8,8 +8,10 @@
 // words into another project or org.
 //
 // The writer-to-signer rule:
-//   - `<machine>/…` is signed by that machine's key in the state, or by a machine certificate of a live delegation
-//     whose prefix covers the name;
+//   - `<name>/…` (DX2's grammar, kept by RL1) is signed by the key of the ref `machineNames` gave that name, whether a
+//     state entry holds the ref or live, uncontested certificates claim it; a name no version gave resolves through the
+//     live certificates bearing it, when they agree on one ref. Since a name is never given to another ref, a renamed
+//     machine's old events still verify as its own and never as a newcomer's;
 //   - `hub/<member>` is signed by the channel key of one of that member's devices, a `web-cards` device excepted: that
 //     class only answers cards (RL §5.10), and its key is used by hub-served code;
 //   - `legacy/…` is v1-only and never v2-verified.
@@ -19,7 +21,7 @@
 import { canonicalize } from './canonical.ts';
 import { isSig, keyId, signInput, utf8, verifyInput, type B64, type Sig } from './keys.ts';
 import { isHubPosition, isHubWriter, LEGACY_WRITER_PREFIX, writerMachine } from './names.ts';
-import { machineKeys } from './records.ts';
+import { machineKeysByName } from './records.ts';
 import { SIGNING_DOMAINS, type EventContext, type LogEventV2, type MachineCert, type OrgState, type Signed } from './types.ts';
 import { accept, refuse, type Verdict } from './verdict.ts';
 
@@ -62,7 +64,7 @@ export async function signerFor(state: OrgState, writer: string, certs: Signed<M
   }
   if (writer.startsWith(LEGACY_WRITER_PREFIX)) return [];
   const machine = writerMachine(writer);
-  return machine === null ? [] : machineKeys(state, machine, certs, now);
+  return machine === null ? [] : machineKeysByName(state, machine, certs, now);
 }
 
 /**
@@ -72,6 +74,8 @@ export async function signerFor(state: OrgState, writer: string, certs: Signed<M
  */
 export async function verifyEvent(ctx: EventContext, state: OrgState, event: LogEventV2, certs: Signed<MachineCert>[], now: Date): Promise<Verdict> {
   if (typeof event !== 'object' || event === null || typeof event.writer !== 'string' || !isSig(event.sig) || !isContext(ctx)) return refuse('malformed');
+  // The state judges keys for its own org only: another org's state would lend its keys to this org's events.
+  if (ctx.org !== state.org) return refuse('malformed');
   if (isHubWriter(event.writer) && !isHubPosition(event)) return refuse('malformed');
   let input: Uint8Array<ArrayBuffer>;
   try {

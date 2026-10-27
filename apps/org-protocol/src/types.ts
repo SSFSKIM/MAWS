@@ -33,7 +33,10 @@ export type DeviceEndorsement = { org: string; member: MemberId; device: Omit<De
 export type Role = 'admin' | 'member';
 export type Member = { id: MemberId; email: string; role: Role; devices: Device[] };
 export type Owners = MemberId[] | 'org';
-export type MachineEntry = { name: string; pub: B64; owners: Owners };
+/** `ref` is the machine's identity (RL §2.3): set at enrollment, never changed, unique in the org. */
+export type MachineEntry = { name: string; ref: string; pub: B64; owners: Owners };
+/** A name some version of the state has given a machine ref; a name is never given to another ref after. */
+export type MachineName = { name: string; ref: string };
 export type Delegation = { id: string; pub: B64; prefix: string; expires: string; maxUses: number; offlineRevokeS: number; owners: Owners };
 export type ProjectEntry = { id: string; name: string };
 
@@ -48,6 +51,11 @@ export type OrgState = {
   root: { keys: string[]; recoveryPub: B64 };
   members: Member[];
   machines: MachineEntry[];
+  /**
+   * Every (name, ref) pair any version has held, append-only: a name, compared without case, is never given to another
+   * ref in the org, so a log writer's `<name>/…` means one machine over the whole chain.
+   */
+  machineNames: MachineName[];
   delegations: Delegation[];
   projects: ProjectEntry[];
 };
@@ -59,7 +67,9 @@ export type Signed<T> = { body: T; sig: Sig };
 export type RootTransition = { org: string; fromVersion: number; newRootKeys: B64[]; issued: string };
 export type Right = 'spawn' | 'machine-admin' | 'shell';
 export type Grant = { org: string; machine: string; member: MemberId; rights: Right[]; version: number; issued: string };
-export type MachineCert = { org: string; machine: string; pub: B64; delegation: string; use: number; issued: string };
+/** `machine` is the certified machine's ref; `name`, its name, sits under the delegation's prefix. */
+export type MachineCert = { org: string; machine: string; name: string; pub: B64; delegation: string; use: number; issued: string };
+// Every field named `machine` below, and in Grant and MachineCert above, carries the machine's ref, never its name.
 export type Listing = {
   org: string;
   machine: string;

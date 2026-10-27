@@ -17,6 +17,10 @@
 //   expired             a delegation past its `expires`, or a certificate past its `maxUses`
 //   not-listed          the machine, delegation or member the record names is not in the state
 //   stale-listing       a listing whose revision is not above the stored one (the hub's own check, beside these)
+//   contested-ref       a machine ref claimed twice: a certificate for a ref a state entry holds, or a ref two live
+//                       certificates claim with different keys; refused for every claimant (`contestedRefs` names them)
+//   name-retired        a machine name some version gave another ref, given again (to an entry or a certificate), or
+//                       a successor that drops a name from `machineNames`
 export type VerdictCode =
   | 'malformed'
   | 'bad-signature'
@@ -28,7 +32,9 @@ export type VerdictCode =
   | 'unknown-signer'
   | 'expired'
   | 'not-listed'
-  | 'stale-listing';
+  | 'stale-listing'
+  | 'contested-ref'
+  | 'name-retired';
 
 export type Verdict = { ok: true } | { ok: false; code: VerdictCode };
 

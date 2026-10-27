@@ -76,6 +76,18 @@ describe('the encodings, by a second implementation', () => {
     expect(verifies(`smns-hub-log-v2\norg-vectors\nproj-1\n${jcs(draft)}`, humanSig)).toBe(true);
   });
 
+  it('length-prefix each enrollment field under the domain, and MAC it with HMAC-SHA-256', () => {
+    for (const e of VECTORS.enrollment) {
+      const parts = ['smns-enroll-mac-v1', e.name, e.machinePub, e.ref, e.tokenId].map((s) => Buffer.from(s, 'utf8'));
+      const input = Buffer.concat(parts.flatMap((p) => [Buffer.from([p.length >>> 24, (p.length >>> 16) & 255, (p.length >>> 8) & 255, p.length & 255]), p]));
+      expect(b64(input)).toBe(e.input);
+      expect(b64(createHmac('sha256', Buffer.from(e.k, 'base64url')).update(input).digest())).toBe(e.mac);
+    }
+    const [ab, a] = VECTORS.enrollment;
+    expect([ab.name, ab.ref, a.name, a.ref]).toEqual(['ab', 'cdeeeeeeeeeeeeee', 'a', 'bcdeeeeeeeeeeeeee']);
+    expect(ab.mac).not.toBe(a.mac);
+  });
+
   it("dual-code an event: DX1's mac covers the v2 sig, and the v2 sig leaves the mac out", () => {
     for (const { project, orgKey, event } of VECTORS.dual) {
       const { mac, ...rest } = event as { mac: { nonce: string; value: string } } & Record<string, unknown>;

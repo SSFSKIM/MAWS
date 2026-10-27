@@ -14,6 +14,12 @@ const MACHINE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/;
 
 export const machineNameKey = (name: string) => name.toLowerCase();
 
+/**
+ * A MachineRef (RL §2.3, RL DL 19): the opaque id a machine's daemon mints at its first run, from at least 128 random
+ * bits, and keeps for good. Every contract field named `machine` carries it; the name is a display attribute.
+ */
+export const isMachineRef = (ref: unknown): ref is string => typeof ref === 'string' && /^[A-Za-z0-9_-]{16,64}$/.test(ref);
+
 export function isMachineName(name: string): boolean {
   return MACHINE_NAME.test(name) && !(RESERVED_MACHINE_NAMES as readonly string[]).includes(machineNameKey(name));
 }

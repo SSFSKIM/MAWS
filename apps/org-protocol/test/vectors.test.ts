@@ -19,6 +19,21 @@ describe('the committed vectors', () => {
       'a rollback after a transition',
       'a fork at the head: another state of the head version',
       'an older version than the head',
+      "an event judged against another org's state",
+      'a successor taking the second of two held transitions, the second listed first',
+      'a successor taking the second of two held transitions, the first listed first',
+      'genesis pinning a recovery key off the curve',
+      'a successor whose root set is a key off the curve',
+      'genesis with a lone surrogate',
+      'a listing with a lone surrogate',
+      'a successor with two machines of one ref',
+      "a successor changing a machine's ref under its key",
+      'then the old name given to a new machine',
+      'then the machine renamed back to its old name',
+      "a machine's event under its renamed machine's old name",
+      "a machine's event under a name the record gives another ref",
+      'a listing of a contested ref',
+      'a machine certificate for a ref a state entry holds',
     ]) {
       expect(names, name).toContain(name);
     }

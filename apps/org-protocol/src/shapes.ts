@@ -3,8 +3,9 @@
 // for type and encoding here; what needs the whole state (unique ids, owners that are members, the root set) is
 // org-state.ts's `stateInvariants`.
 import { isBase64urlOf } from './base64url.ts';
+import { canonicalize } from './canonical.ts';
 import { isPublicKey, isSig } from './keys.ts';
-import { isIsoMillis, isMachineName, isMemberId, type MemberId } from './names.ts';
+import { isIsoMillis, isMachineName, isMachineRef, isMemberId, type MemberId } from './names.ts';
 import type {
   Delegation,
   Device,
@@ -13,6 +14,7 @@ import type {
   Listing,
   MachineCert,
   MachineEntry,
+  MachineName,
   Member,
   OrgState,
   Passkey,
@@ -40,6 +42,16 @@ const isOneOf = <T extends string>(value: unknown, options: readonly T[]): value
 const unique = (items: readonly string[]) => new Set(items).size === items.length;
 const isList = <T>(value: unknown, item: (v: unknown) => v is T): value is T[] => Array.isArray(value) && value.every((v) => item(v));
 const isMemberIdText = (value: unknown): value is string => typeof value === 'string' && isMemberId(value);
+
+/** True when RFC 8785 can write `value`: no lone surrogate in any string or key, no non-finite number. */
+function canonicalizable(value: unknown): boolean {
+  try {
+    canonicalize(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** Member ids, at least one and none twice, or `'org'`. */
 export const isOwners = (value: unknown): value is MemberId[] | 'org' =>
@@ -75,8 +87,14 @@ function isMember(value: unknown): value is Member {
   );
 }
 
+const isName = (value: unknown): value is string => typeof value === 'string' && isMachineName(value);
+
 function isMachineEntry(value: unknown): value is MachineEntry {
-  return fields(value, ['name', 'pub', 'owners']) && typeof value.name === 'string' && isMachineName(value.name) && isPublicKey(value.pub) && isOwners(value.owners);
+  return fields(value, ['name', 'ref', 'pub', 'owners']) && isName(value.name) && isMachineRef(value.ref) && isPublicKey(value.pub) && isOwners(value.owners);
+}
+
+function isNameRecord(value: unknown): value is MachineName {
+  return fields(value, ['name', 'ref']) && isName(value.name) && isMachineRef(value.ref);
 }
 
 function isDelegation(value: unknown): value is Delegation {
@@ -98,7 +116,7 @@ function isProjectEntry(value: unknown): value is ProjectEntry {
 }
 
 export function isOrgState(value: unknown): value is OrgState {
-  if (!fields(value, ['org', 'version', 'prev', 'issued', 'root', 'members', 'machines', 'delegations', 'projects'])) return false;
+  if (!fields(value, ['org', 'version', 'prev', 'issued', 'root', 'members', 'machines', 'machineNames', 'delegations', 'projects'])) return false;
   const root = value.root;
   return (
     isText(value.org) &&
@@ -110,17 +128,18 @@ export function isOrgState(value: unknown): value is OrgState {
     isPublicKey(root.recoveryPub) &&
     isList(value.members, isMember) &&
     isList(value.machines, isMachineEntry) &&
+    isList(value.machineNames, isNameRecord) &&
     isList(value.delegations, isDelegation) &&
     isList(value.projects, isProjectEntry)
   );
 }
 
 export function isSignedOrgState(value: unknown): value is SignedOrgState {
-  return fields(value, ['state', 'sigs']) && isOrgState(value.state) && isList(value.sigs, isSig) && value.sigs.length > 0;
+  return fields(value, ['state', 'sigs']) && isOrgState(value.state) && isList(value.sigs, isSig) && value.sigs.length > 0 && canonicalizable(value.state);
 }
 
 export function isSigned<T>(value: unknown, body: (v: unknown) => v is T): value is Signed<T> {
-  return fields(value, ['body', 'sig']) && body(value.body) && isSig(value.sig);
+  return fields(value, ['body', 'sig']) && body(value.body) && isSig(value.sig) && canonicalizable(value.body);
 }
 
 export function isRootTransition(value: unknown): value is RootTransition {
@@ -139,8 +158,7 @@ export function isGrant(value: unknown): value is Grant {
   return (
     fields(value, ['org', 'machine', 'member', 'rights', 'version', 'issued']) &&
     isText(value.org) &&
-    typeof value.machine === 'string' &&
-    isMachineName(value.machine) &&
+    isMachineRef(value.machine) &&
     isMemberIdText(value.member) &&
     isList(value.rights, (r): r is Grant['rights'][number] => isOneOf(r, ['spawn', 'machine-admin', 'shell'] as const)) &&
     unique(value.rights) &&
@@ -151,10 +169,10 @@ export function isGrant(value: unknown): value is Grant {
 
 export function isMachineCert(value: unknown): value is MachineCert {
   return (
-    fields(value, ['org', 'machine', 'pub', 'delegation', 'use', 'issued']) &&
+    fields(value, ['org', 'machine', 'name', 'pub', 'delegation', 'use', 'issued']) &&
     isText(value.org) &&
-    typeof value.machine === 'string' &&
-    isMachineName(value.machine) &&
+    isMachineRef(value.machine) &&
+    isName(value.name) &&
     isPublicKey(value.pub) &&
     isText(value.delegation) &&
     isCount(value.use, 1) &&
@@ -167,8 +185,7 @@ export function isListing(value: unknown): value is Listing {
   const f = value.fields;
   return (
     isText(value.org) &&
-    typeof value.machine === 'string' &&
-    isMachineName(value.machine) &&
+    isMachineRef(value.machine) &&
     isText(value.session) &&
     isCount(value.revision, 1) &&
     isIsoMillis(value.issued) &&
@@ -187,8 +204,7 @@ export function isEndpointRecord(value: unknown): value is EndpointRecord {
   return (
     fields(value, ['org', 'machine', 'addresses', 'issued']) &&
     isText(value.org) &&
-    typeof value.machine === 'string' &&
-    isMachineName(value.machine) &&
+    isMachineRef(value.machine) &&
     isList(value.addresses, isText) &&
     isIsoMillis(value.issued)
   );
