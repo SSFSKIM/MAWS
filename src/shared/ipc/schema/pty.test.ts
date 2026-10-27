@@ -35,6 +35,7 @@ describe('pty schema validates and rejects', () => {
       'pty.list': 'pty-host',
       'pty.foreground': 'pty-host',
       'pty.openLink': 'main',
+      'pty.recaptureEnv': 'pty-host', // P5 O2 M4: main-only
     });
     expect(Object.keys(events).filter((name) => name.startsWith('pty.')).sort()).toEqual(['pty.data', 'pty.exit', 'pty.hostState']);
   });
