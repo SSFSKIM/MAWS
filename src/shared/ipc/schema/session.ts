@@ -52,6 +52,7 @@ import { AcquireOutcomeSchema, SetupEventSchema, SetupResourcesSchema, StartOutc
 import { TrustStateSchema } from '../../sessions/trust';
 // C10 end
 import type { CommandSpec } from './common';
+import { PtyIdSchema } from './pty'; // P5 O6 M1: takeOverPane's ptyId, branded for the address codec (loose, so its JSON Schema is the plain string's)
 // P2-C start (2026-10-09)
 import { PromptHistoryEventSchema } from '../../graph/events';
 // P2-C end
@@ -488,7 +489,7 @@ const c10Commands = {
   // W7 (D-12 as amended 2026-10-01): "Take over here": ends the holder the owner confirmed (`claude stop` for a `--bg`
   // job, SIGTERM to an interactive holder's verified pid) and waits for the registry to clear; on `released` the
   // renderer resumes the record with `session.start`
-  'session.takeOverPane': { input: z.strictObject({ pid: z.number().int().positive() }), output: z.strictObject({ ptyId: z.string(), label: z.string() }).nullable(), owner: 'main' },
+  'session.takeOverPane': { input: z.strictObject({ pid: z.number().int().positive() }), output: z.strictObject({ ptyId: PtyIdSchema, label: z.string() }).nullable(), owner: 'main' },
   'session.takeOver': { input: z.strictObject({ appSessionId: AppSessionIdSchema, holder: ForeignHolderSchema, paneId: z.string().nullable().optional() }), output: TakeOverOutcomeSchema, owner: 'main' },
   'session.delete': { input: z.strictObject({ appSessionId: AppSessionIdSchema, stopIfLive: z.boolean() }), output: DeleteOutcomeSchema, owner: 'main' },
   // validators never transform: the service trims; a title that is only whitespace is refused here
