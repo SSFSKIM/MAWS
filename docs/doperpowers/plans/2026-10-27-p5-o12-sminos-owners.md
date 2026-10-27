@@ -1057,6 +1057,18 @@ The joint review's second round (`9be0bc941`), 2026-10-27, two P1s, both reprodu
   Rationale: once O2 and O10 M10 land, the owner's own MAWS runs `mawsd` with an unenrolled endpoint on the owner's machines; if that endpoint ever wrote `rl10.json` and welcomed, an auto-updated sminos would cut the real machine over, local-only and off the desk hub, long before O14. O10 is amended so the endpoint serves RL10 only once its enrollment is org-listed; this is sminos's defence in depth. Raised by the O12 executor's O14 note, ruled by the spec's owner.
   Date/Author: 2026-10-27, p5-desk-track-owner (ruling), built by O12's phase 2 executor in M5.
 
+- Decision: M5's first half's gaps, settled in building it.
+  - **The probe.** Before cutover, `daemon run`'s supervisor keeps the DX2 child exactly as before and, whenever `rl10.json` names an endpoint, runs a short-lived `sminos daemon probe` beside it: it dials, sends `hello`, and reads the welcome. Only a whole welcome writes `identity.json` (and exits 0); anything else (an incomplete identity, a wrong token, a `refuse`, a dial failure, a timeout) writes nothing. Probes back off 1 s to 60 s and start again from 1 s when `rl10.json`'s content changes. The supervisor sees `identity.json` within its 0.2 s pass, stops the DX2 child, and only then starts the RL10 child, so two uplinks never serve at once. Acceptance 4's first bullet therefore reads: the probe's hello and welcome first, then one RL10 child. Rejected: running the RL10 child beside DX2 until its welcome, which would serve RL10 frames while DX2 is live and contend for `uplink.lock`.
+  - **A whole identity includes `hub`**, beside `org`, `name`, `ref` and `enrolled`, since a cut-over `enrollment()` takes the hub's URL from the identity. The RL10 child applies the same check at every later welcome and backs off on an incomplete one.
+  - **Who says what.** An absent `rl10.json` is never said (every DX2 machine's state). A present but bad one is said once, by `daemon run` alone; the probe and the RL10 child check silently.
+  - **The revocation set.** The first set after each welcome replaces `revoked.json` whole; later frames are merged and raise the version; an older version is ignored and said once. A present but unreadable file raises (fail-closed for M6) until the endpoint's next set replaces it.
+  - **The policy mirror.** `policy.json` keeps the endpoint's last word under an additive `endpoint` key; a local change the endpoint has not answered goes up as `policy-set` and is never overwritten by a welcome's older policy.
+  - **`legacy-key?`** is answered only after a welcome, on that connection, with a 32-byte base64url key; an ask for another org is logged and not answered (§D has no refusal frame).
+  - **`hub check`** is refused on a cut-over machine with `enroll` and `leave`; `project init --hub` reads the identity.
+  - **`rl10.json`'s `pid` and `build`** are passed through, not required.
+  Rationale: each keeps the cutover once-and-for-good and the DX2 path untouched where the document was silent; the probe is how the owner's guard keeps a machine's DX2 uplink up beside an unenrolled endpoint.
+  Date/Author: 2026-10-27, M5's first executor, accepted by O12's phase 2 executor.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
