@@ -700,12 +700,12 @@ The order is M1, M2, M3, M4, M5, M6.
   - keeps its waiting count, which is as last known.
   - A session's hover card always names its machine. For an offline machine it also says when the machine was last seen (`useMachines`' `since`).
 
-**Taste decisions for the owner.** O6 does not settle these. Each is built in the provisional form stated: the smallest form acceptance needs, made of existing tokens and components. The architect relays the owner's answer, and an answer that differs is built before M5's review closes, or lands as a follow-up recorded in Outcomes.
-- **T1, the machine chip.** What it shows (the name, `@name`, an icon), where it sits on a session row, whether it shows on rows of the local machine, and whether it shows while only one machine is known. Provisional: `@<name>` in the row's secondary text style, after the title, on every row, shown only while more than one machine is known.
-- **T2, an offline machine's rows.** The grey treatment, where "machine offline" appears, and whether the rows sort down. Provisional: the disabled text token on the row, "machine offline" in the chip's place, sort unchanged.
-- **T3, the machine project row.** Its label and its place. Provisional: the machine's name, as the last rows.
-- **T4, an org row whose checkouts span machines.** Whether the project row itself shows its machines. Provisional: it does not.
-- **T5, a kept tab of an offline machine.** How the tab and its content say so. Provisional: the tab's title in the disabled token, and the content replaced by one line, "<name> is offline".
+**Taste decisions, settled by the owner on 2026-10-27 (P5 Decision Log 28).** Build each as answered, with existing tokens and components.
+- **T1, the machine chip.** `@<name>` in the row's secondary text style, after the title, on rows of other machines only. The local machine's rows look as they do today. (This replaces the provisional form, which put it on every row.)
+- **T2, an offline machine's rows.** They grey in place: the disabled text token on the row, "offline" in the chip's place, sort unchanged.
+- **T3, the machine project row.** The machine's name, as the last rows, one per machine.
+- **T4, an org row whose checkouts span machines.** The project row shows no machines; each session row shows its own (T1).
+- **T5, a kept tab of an offline machine.** The tab's title in the disabled token, and the content replaced by one line, "<name> is offline".
 - **T6, the toggle for other people's sessions,** which P5 §8 names, is O8's and is not built here.
 
 **Does not touch.** The per-project toggle for other people's sessions, owners and visibility (O8). The "+ Session" machine picker (O7). The hub's listings (OX8).
