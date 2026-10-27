@@ -92,6 +92,11 @@ describe('a member resolved before a state', () => {
       ['pendingDevices'],
       ['submitState', await signedBy(await next(head, (s) => s.projects.push({ id: 'by-b', name: 'B' })), a1)],
       ['submitTransition', await transition(head, [a1], recovery)],
+      // Hub v2's (O11 M4): a machine's key for its enrolling member, a certificate's retirement, the listings.
+      ['enrollmentKey', '0'.repeat(32)],
+      ['memberRetiresCert', {}],
+      ['listings', null],
+      ['machineEndpoint', 'mini'],
     ];
     for (const [call, ...args] of memberCalls) expect(await hub.asMember(call, staleB, ...args), call).toEqual(refusal('not-a-member'));
   });

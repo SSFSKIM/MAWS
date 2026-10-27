@@ -3,6 +3,11 @@ import { base64urlEncode } from '../../src/protocol/base64url';
 import {
   decodeCode,
   decodeEnrollmentCode,
+  decodeEnrollmentCodeV2,
+  delegationFor,
+  encodeEnrollmentCodeV2,
+  NEVER_OFFLINE,
+  NO_USE_CAP,
   decodeProvisioningCode,
   encodeEnrollmentCode,
   encodeProvisioningCode,
@@ -11,6 +16,7 @@ import {
   machineProjectId,
   serviceTokenName,
   type EnrollmentCode,
+  type EnrollmentCodeV2,
   type ProvisioningCode,
 } from '../../src/protocol/identity';
 import machineProjects from '../../src/protocol/vectors/machine-project.json';
@@ -153,5 +159,59 @@ describe("a machine's project id (the committed vectors, written by generate-mac
   it('is a version 5 uuid of the URL namespace, and a .smns project id', () => {
     expect(machineProjects.namespace).toBe('6ba7b811-9dad-11d1-80b4-00c04fd430c8');
     for (const { id } of machineProjects.vectors) expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  });
+});
+
+const codeV2 = (): EnrollmentCodeV2 => ({
+  hub: 'https://desk-hub.example.workers.dev',
+  token: 'tok_abc',
+  roots: [base64urlEncode(new Uint8Array(16).fill(1))],
+  recoveryPub: base64urlEncode(Uint8Array.from({ length: 65 }, (_, i) => (i === 0 ? 4 : i))),
+  k: base64urlEncode(new Uint8Array(32).fill(3)),
+});
+const v2Text = (body: unknown) => `smns-enroll-v2.${base64urlEncode(new TextEncoder().encode(JSON.stringify(body)))}`;
+
+describe('the v2 enrollment code (RL §5.3: the org’s trust anchors and a pairing secret, no org key)', () => {
+  it('round-trips, with or without the machine it re-enrolls', () => {
+    const text = encodeEnrollmentCodeV2(codeV2());
+    expect(text.startsWith('smns-enroll-v2.')).toBe(true);
+    expect(text).toMatch(/^[A-Za-z0-9._-]+$/);
+    expect(decodeEnrollmentCodeV2(text)).toEqual(codeV2());
+    expect(decodeEnrollmentCodeV2(encodeEnrollmentCodeV2({ ...codeV2(), machine: 'mini' }))).toEqual({ ...codeV2(), machine: 'mini' });
+  });
+
+  it('carries no org key, and is refused by the v1 decoder at its prefix', () => {
+    expect(Object.keys(decodeEnrollmentCodeV2(encodeEnrollmentCodeV2(codeV2()))).sort()).toEqual(['hub', 'k', 'recoveryPub', 'roots', 'token']);
+    expect(() => decodeEnrollmentCode(encodeEnrollmentCodeV2(codeV2()))).toThrow(new TypeError('enrollment code: not smns-enroll-v1'));
+    expect(() => decodeCode(encodeEnrollmentCodeV2(codeV2()))).toThrow(TypeError);
+  });
+
+  it.each([
+    ['a v1 prefix', encodeEnrollmentCode(code()), 'enrollment code: not smns-enroll-v2'],
+    ['a damaged body', encodeEnrollmentCodeV2(codeV2()).slice(0, -4), 'enrollment code: damaged'],
+    ['no token', v2Text({ ...codeV2(), token: '' }), 'enrollment code: no token'],
+    ['a hub that is not https', v2Text({ ...codeV2(), hub: 'http://hub.example.com' }), 'enrollment code: the hub is not https'],
+    ['no roots', v2Text({ ...codeV2(), roots: [] }), 'enrollment code: the roots are not key ids'],
+    ['a root that is not a key id', v2Text({ ...codeV2(), roots: [base64urlEncode(new Uint8Array(32))] }), 'enrollment code: the roots are not key ids'],
+    ['a recovery key that is not a point', v2Text({ ...codeV2(), recoveryPub: base64urlEncode(new Uint8Array(65)) }), 'enrollment code: the recovery key is not a public key'],
+    ['a pairing secret under 128 bits', v2Text({ ...codeV2(), k: base64urlEncode(new Uint8Array(15)) }), 'enrollment code: the pairing secret is not 128 to 512 bits'],
+    ['a machine name that is not admitted', v2Text({ ...codeV2(), machine: 'hub' }), 'enrollment code: the machine name is not admitted'],
+    ['an org key', v2Text({ ...codeV2(), key: base64urlEncode(new Uint8Array(32)) }), 'enrollment code: unknown field key'],
+  ])('refuses %s', (_label, text, message) => {
+    expect(() => decodeEnrollmentCodeV2(text)).toThrow(new TypeError(message));
+  });
+});
+
+describe('a provisioning key re-issued as a delegation (RL §5.3)', () => {
+  const key = { id: 'a'.repeat(32), prefix: 'dc-', expires: '2027-01-01T00:00:00.000Z', max_uses: 5, offline_revoke_s: 21_600 };
+
+  it('carries the key’s id, prefix, expiry and terms, with the admin’s pub and owners', () => {
+    expect(delegationFor(key, 'PUB', 'org')).toEqual({ id: key.id, pub: 'PUB', prefix: 'dc-', expires: key.expires, maxUses: 5, offlineRevokeS: 21_600, owners: 'org' });
+  });
+
+  it('maps "no cap" and "never" to the numbers RL5 requires', () => {
+    expect(delegationFor({ ...key, max_uses: null, offline_revoke_s: null }, 'PUB', ['m'])).toMatchObject({ maxUses: NO_USE_CAP, offlineRevokeS: NEVER_OFFLINE });
+    expect(NO_USE_CAP).toBe(Number.MAX_SAFE_INTEGER);
+    expect(NEVER_OFFLINE).toBe(0);
   });
 });
