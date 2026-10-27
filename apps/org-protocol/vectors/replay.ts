@@ -6,7 +6,7 @@ import { enrollmentMac, enrollmentMacInput } from '../src/enrollment.ts';
 import { verifyEvent, signerFor } from '../src/events.ts';
 import { keyId, signingInput } from '../src/keys.ts';
 import { stateHash, verifyGenesis, verifySuccessor, verifyTransition } from '../src/org-state.ts';
-import { verifyEndpointRecord, verifyGrant, verifyListing, verifyMachineCert } from '../src/records.ts';
+import { verifyCertRetirement, verifyCertRevocation, verifyEndpointRecord, verifyGrant, verifyListing, verifyMachineCert } from '../src/records.ts';
 import type { OrgState, SignedOrgState } from '../src/types.ts';
 import type { Case, VectorSet } from './scenario.ts';
 
@@ -18,7 +18,9 @@ function resolve(set: VectorSet, arg: unknown): unknown {
   if (typeof arg !== 'object' || arg === null) return arg;
   const ref = arg as Record<string, unknown>;
   const name = ref.$signed ?? ref.$state ?? ref.$fixture;
-  if (typeof name !== 'string' || Object.keys(ref).length !== 1) return arg;
+  if (typeof name !== 'string' || Object.keys(ref).length !== 1) {
+    return Object.fromEntries(Object.entries(ref).map(([key, value]) => [key, resolve(set, value)]));
+  }
   if (!(name in set.fixtures)) throw new Error(`no fixture ${name}`);
   const value = set.fixtures[name];
   return '$state' in ref ? (value as SignedOrgState).state : value;
@@ -46,7 +48,11 @@ async function run(set: VectorSet, c: Case): Promise<unknown> {
     case 'verifyEvent':
       return verifyEvent(a[0], a[1], a[2], a[3], date(a[4]));
     case 'signerFor':
-      return { keys: await signerFor(a[0], a[1], a[2], date(a[3])) };
+      return { signers: await signerFor(a[0], a[1], a[2], date(a[3])) };
+    case 'verifyCertRetirement':
+      return verifyCertRetirement(a[0], a[1], a[2]);
+    case 'verifyCertRevocation':
+      return verifyCertRevocation(a[0], a[1]);
   }
 }
 

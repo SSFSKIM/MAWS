@@ -34,6 +34,16 @@ describe('the committed vectors', () => {
       "a machine's event under a name the record gives another ref",
       'a listing of a contested ref',
       'a machine certificate for a ref a state entry holds',
+      "a retired machine key's event stamped before its notAfter",
+      "a retired machine key's event stamped after its notAfter",
+      "a retired device key's words, created before its notAfter though the hub stamped them after",
+      "a revoked machine key's event",
+      "a recreated VM's listing under its predecessor's retired name",
+      "a revoked certificate's event",
+      "a certificate's retirement signed by its delegation key",
+      "a certificate's revocation signed by its delegation key",
+      'then the retirement moved later',
+      'then a revoked key retired after all',
     ]) {
       expect(names, name).toContain(name);
     }

@@ -12,6 +12,9 @@
 //     a changed key is a new device. New devices of a member who had devices carry an endorsement by the `stepUpPub`
 //     of one of that member's devices in the head. The successor that a root transition authorizes may add the
 //     transition's new root devices without one: the recovery key vouches for them, and the old devices may be lost.
+//   - `retired` holds keys that left honestly, each with its point and holder, and none still held. A successor keeps
+//     each entry unchanged or drops it (the key is then revoked), and adds only keys the head held under that holder,
+//     so a revoked key never returns and a `notAfter` never moves. Genesis retires nothing.
 //   - A root transition is issued against the head (`fromVersion` = head's version). While one is held for the head,
 //     the successor must be signed by one of its new root keys, not the old root set, and take its keys as `root.keys`.
 import { canonicalize } from './canonical.ts';
@@ -76,9 +79,42 @@ async function stateInvariants(state: OrgState): Promise<boolean> {
   if (!distinct(state.delegations.map((d) => d.id)) || !distinct(state.projects.map((p) => p.id))) return false;
   if (!state.machines.every((m) => ownersKnown(m.owners)) || !state.delegations.every((d) => ownersKnown(d.owners))) return false;
   if (state.root.keys.length === 0 || !distinct(state.root.keys)) return false;
+  if (!(await retiredApart(state))) return false;
   const root = await rootKeys(state);
   // Real points, not only encodings: a root set or a recovery key off the curve could never sign again.
   return root.size === state.root.keys.length && (await allOnCurve([...root.values(), state.root.recoveryPub]));
+}
+
+/** Retired keys: each named by its own kid, once, and none of them still a key the state holds. */
+async function retiredApart(state: OrgState): Promise<boolean> {
+  const held = new Set<B64>([
+    state.root.recoveryPub,
+    ...state.members.flatMap((m) => m.devices.flatMap((d) => [d.channelPub, ...(d.stepUpPub === undefined ? [] : [d.stepUpPub])])),
+    ...state.machines.map((m) => m.pub),
+    ...state.delegations.map((d) => d.pub),
+  ]);
+  const kids = new Set<string>();
+  for (const r of state.retired) {
+    if (kids.has(r.keyId) || held.has(r.pub) || (await keyId(r.pub)) !== r.keyId) return false;
+    kids.add(r.keyId);
+  }
+  return true;
+}
+
+/**
+ * `retired` across a successor: an entry is the head's own, unchanged, or a key the head held under exactly that
+ * holder. An entry may leave (the key is then revoked: a retirement can turn out to have been a compromise), but a key
+ * revoked never comes back as retired, and a `notAfter` never moves.
+ */
+function retiredKept(head: OrgState, next: OrgState): boolean {
+  const kept = new Set(head.retired.map((r) => canonicalize(r)));
+  return next.retired.every((r) => {
+    if (kept.has(canonicalize(r))) return true;
+    const h = r.holder;
+    if ('machine' in h) return head.machines.some((m) => m.ref === h.machine && m.pub === r.pub);
+    const device = head.members.find((m) => m.id === h.member)?.devices.find((d) => d.id === h.device);
+    return device !== undefined && device.class === h.class && (h.key === 'channel' ? device.channelPub : device.stepUpPub) === r.pub;
+  });
 }
 
 /** Every key is a P-256 point WebCrypto takes. */
@@ -137,6 +173,7 @@ export async function verifyGenesis(s: SignedOrgState): Promise<Verdict> {
   if (!(await wellFormed(s))) return refuse('malformed');
   if (s.state.version !== 1) return refuse('malformed');
   if (s.state.prev !== null) return refuse('bad-link');
+  if (s.state.retired.length > 0) return refuse('malformed');
   const names = machineNamesKept(null, s.state);
   if (!names.ok) return names;
   return rootSigned(s.state, s.sigs, await rootKeys(s.state));
@@ -174,6 +211,7 @@ export async function verifySuccessor(head: SignedOrgState, next: SignedOrgState
   const names = machineNamesKept(before, after);
   if (!names.ok) return names;
   if (after.machines.some((m) => before.machines.some((h) => h.pub === m.pub && h.ref !== m.ref))) return refuse('malformed');
+  if (!retiredKept(before, after)) return refuse('malformed');
 
   const held: RootTransition[] = [];
   for (const t of transitions) {

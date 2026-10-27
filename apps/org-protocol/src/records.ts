@@ -1,18 +1,37 @@
-// The records signed beside the org state (RL5, RL6): grants, delegation-signed machine certificates, machine-signed
-// listings and endpoint records. Every `machine` field carries the machine's ref (RL §2.3), never its name.
+// The records signed beside the org state (RL5, RL6): grants, delegation-signed machine certificates with their
+// retirements and revocations, machine-signed listings and endpoint records. Every `machine` field carries the
+// machine's ref (RL §2.3), never its name.
 //
-// A machine's key is found by ref: the state entry holding the ref, or else the live certificates claiming it. A
-// certificate is live while its delegation is in the state and unexpired, its use within `maxUses`, its name under the
-// prefix, and neither its name nor its ref the state's own: a delegation never speaks for a listed machine, nor
-// takes a name `machineNames` gave another ref. A ref is unique across entries and live certificates: one an entry
-// holds, or two live certificates claim with different keys, is contested and refused for every claimant.
+// A certificate stands when its delegation is in the state, its use is within `maxUses`, its name sits under the
+// prefix, neither its ref nor its name is the state's own (a delegation never speaks for an entry, nor takes a name
+// `machineNames` gave another ref), and its delegation's key signed it. A standing certificate is
+//   - revoked when an admin device revoked its key: nothing it signed counts, ever;
+//   - retired when its delegation key or an admin device retired its key: it signs nothing new, and its events stamped
+//     at or before the retirement's `notAfter` (and its delegation's `expires`) still verify;
+//   - live otherwise, while its delegation is unexpired.
+// Among live certificates a ref claimed with two keys, or a name claimed under two refs, is contested, and refused
+// for every claimant. A retired certificate contests nothing, so a recreated VM can take its old name.
 import { keyId, signBody, signingInput, verifyInput, type B64 } from './keys.ts';
 import { machineNameKey } from './names.ts';
-import { isEndpointRecord, isGrant, isListing, isMachineCert, isSigned } from './shapes.ts';
-import { SIGNING_DOMAINS, type EndpointRecord, type Grant, type Listing, type MachineCert, type OrgState, type Signed } from './types.ts';
+import { isCertRetirement, isCertRevocation, isCertificates, isEndpointRecord, isGrant, isListing, isMachineCert, isSigned } from './shapes.ts';
+import {
+  SIGNING_DOMAINS,
+  type CertRetirement,
+  type CertRevocation,
+  type Certificates,
+  type EndpointRecord,
+  type Grant,
+  type Listing,
+  type MachineCert,
+  type OrgState,
+  type Signed,
+} from './types.ts';
 import { accept, refuse, type Verdict } from './verdict.ts';
 
 type Domain = (typeof SIGNING_DOMAINS)[keyof typeof SIGNING_DOMAINS];
+
+/** No delegated machines: what a verifier passes when it holds no certificates. */
+export const NO_CERTIFICATES: Certificates = { certs: [], retirements: [], revocations: [] };
 
 /** Signs a record under its kind's domain. */
 export async function signRecord<T>(domain: Domain, body: T, key: CryptoKey, pub: B64): Promise<Signed<T>> {
@@ -31,12 +50,13 @@ async function signedBy(domain: Domain, record: Signed<unknown>, allowed: Iterab
 const entryByRef = (state: OrgState, ref: string) => state.machines.find((m) => m.ref === ref);
 const entryByName = (state: OrgState, name: string) => state.machines.find((m) => machineNameKey(m.name) === machineNameKey(name));
 /** The ref `machineNames` gave `name`, if any version did. */
-const refOfName = (state: OrgState, name: string) => state.machineNames.find((p) => machineNameKey(p.name) === machineNameKey(name))?.ref;
+export const refOfName = (state: OrgState, name: string) => state.machineNames.find((p) => machineNameKey(p.name) === machineNameKey(name))?.ref;
 
 /** The `stepUpPub` of each device of `members` (machine-admin is a step-up action, RL §5.6). */
 function stepUpKeys(state: OrgState, members: (id: string, role: string) => boolean): B64[] {
   return state.members.filter((m) => members(m.id, m.role)).flatMap((m) => m.devices.flatMap((d) => (d.stepUpPub === undefined ? [] : [d.stepUpPub])));
 }
+const adminKeys = (state: OrgState) => stepUpKeys(state, (_, role) => role === 'admin');
 
 /**
  * A grant on a listed machine (by ref), signed by a device of one of its owners, or of an admin when the org owns it.
@@ -47,85 +67,146 @@ export async function verifyGrant(state: OrgState, g: Signed<Grant>): Promise<Ve
   const machine = entryByRef(state, g.body.machine);
   if (machine === undefined || !state.members.some((m) => m.id === g.body.member)) return refuse('not-listed');
   const owners = machine.owners;
-  const signers = stepUpKeys(state, (id, role) => (owners === 'org' ? role === 'admin' : owners.includes(id)));
-  return signedBy(SIGNING_DOMAINS.grant, g, signers);
+  return signedBy(SIGNING_DOMAINS.grant, g, stepUpKeys(state, (id, role) => (owners === 'org' ? role === 'admin' : owners.includes(id))));
 }
 
-/**
- * One machine certificate, signed by its delegation's key (see the header). It is judged alone: whether another live
- * certificate contests its ref is `contestedRefs`'s, and the listing, endpoint and writer checks apply it.
- */
-export async function verifyMachineCert(state: OrgState, c: Signed<MachineCert>, now: Date): Promise<Verdict> {
+/** Whether a certificate stands (see the header), its liveness aside. */
+async function certStanding(state: OrgState, c: Signed<MachineCert>): Promise<Verdict> {
   if (!isSigned(c, isMachineCert) || c.body.org !== state.org) return refuse('malformed');
   const delegation = state.delegations.find((d) => d.id === c.body.delegation);
   if (delegation === undefined) return refuse('not-listed');
-  if (now.getTime() >= Date.parse(delegation.expires) || c.body.use > delegation.maxUses) return refuse('expired');
-  if (entryByRef(state, c.body.machine) !== undefined) return refuse('contested-ref');
-  const retiredTo = refOfName(state, c.body.name);
-  if (retiredTo !== undefined && retiredTo !== c.body.machine) return refuse('name-retired');
+  if (c.body.use > delegation.maxUses) return refuse('expired');
+  if (entryByRef(state, c.body.machine) !== undefined) return refuse('contested');
+  const given = refOfName(state, c.body.name);
+  if (given !== undefined && given !== c.body.machine) return refuse('name-retired');
   if (!machineNameKey(c.body.name).startsWith(machineNameKey(delegation.prefix)) || entryByName(state, c.body.name) !== undefined) return refuse('unknown-signer');
   return signedBy(SIGNING_DOMAINS.machineCert, c, [delegation.pub]);
 }
 
-/** The bodies of the certificates among `certs` that are live at `now`, judged one by one. */
-async function liveCerts(state: OrgState, certs: unknown, now: Date): Promise<MachineCert[]> {
-  if (!Array.isArray(certs)) return [];
-  const out: MachineCert[] = [];
-  for (const c of certs) if (isSigned(c, isMachineCert) && (await verifyMachineCert(state, c, now)).ok) out.push(c.body);
-  return out;
+/**
+ * One machine certificate, signed by its delegation's key and unexpired at `now` (see the header). It is judged alone:
+ * retirements, revocations and contests among certificates are the set's, which the listing, endpoint and writer
+ * checks apply.
+ */
+export async function verifyMachineCert(state: OrgState, c: Signed<MachineCert>, now: Date): Promise<Verdict> {
+  const standing = await certStanding(state, c);
+  if (!standing.ok) return standing;
+  const delegation = state.delegations.find((d) => d.id === c.body.delegation);
+  return delegation !== undefined && now.getTime() < Date.parse(delegation.expires) ? accept() : refuse('expired');
+}
+
+/** A certificate's retirement: signed by the delegation key of a certificate with that key, or an admin device. */
+export async function verifyCertRetirement(state: OrgState, r: Signed<CertRetirement>, certs: Signed<MachineCert>[]): Promise<Verdict> {
+  if (!isSigned(r, isCertRetirement) || r.body.org !== state.org || !Array.isArray(certs)) return refuse('malformed');
+  const delegations = new Set<B64>();
+  for (const c of certs) {
+    if (!isSigned(c, isMachineCert) || (await keyId(c.body.pub)) !== r.body.keyId) continue;
+    const delegation = state.delegations.find((d) => d.id === c.body.delegation);
+    if (delegation !== undefined) delegations.add(delegation.pub);
+  }
+  return signedBy(SIGNING_DOMAINS.certRetire, r, [...delegations, ...adminKeys(state)]);
+}
+
+/** A certificate's revocation: retroactive, so an admin device signs it, never a delegation key. */
+export async function verifyCertRevocation(state: OrgState, r: Signed<CertRevocation>): Promise<Verdict> {
+  if (!isSigned(r, isCertRevocation) || r.body.org !== state.org) return refuse('malformed');
+  return signedBy(SIGNING_DOMAINS.certRevoke, r, adminKeys(state));
+}
+
+/** A standing, unrevoked certificate as the set judges it at `now`. */
+type CertView = {
+  body: MachineCert;
+  live: boolean;
+  /** The latest timestamp its events may carry: its delegation's `expires`, or the retirement's `notAfter` if sooner. */
+  notAfter: string;
+  contested: boolean;
+};
+
+async function certViews(state: OrgState, set: Certificates, now: Date): Promise<CertView[]> {
+  const revoked = new Set<string>();
+  for (const r of set.revocations) if ((await verifyCertRevocation(state, r)).ok) revoked.add(r.body.keyId);
+  const retired = new Map<string, string>();
+  for (const r of set.retirements) {
+    if (!(await verifyCertRetirement(state, r, set.certs)).ok) continue;
+    const held = retired.get(r.body.keyId);
+    if (held === undefined || r.body.notAfter < held) retired.set(r.body.keyId, r.body.notAfter);
+  }
+  const views: CertView[] = [];
+  for (const c of set.certs) {
+    if (!(await certStanding(state, c)).ok) continue;
+    const kid = await keyId(c.body.pub);
+    if (revoked.has(kid)) continue;
+    const expires = state.delegations.find((d) => d.id === c.body.delegation)?.expires as string;
+    const retiredAt = retired.get(kid);
+    const live = retiredAt === undefined && now.getTime() < Date.parse(expires);
+    views.push({ body: c.body, live, notAfter: retiredAt !== undefined && retiredAt < expires ? retiredAt : expires, contested: false });
+  }
+  const live = views.filter((v) => v.live);
+  for (const v of live) {
+    v.contested = live.some(
+      (w) => (w.body.machine === v.body.machine && w.body.pub !== v.body.pub) || (machineNameKey(w.body.name) === machineNameKey(v.body.name) && w.body.machine !== v.body.machine),
+    );
+  }
+  return views;
 }
 
 /**
- * The refs that are contested at `now`, sorted: each claimed by a certificate among `certs` while a state entry holds
- * it, or claimed by live certificates with different keys. The hub names these in its refusal.
+ * The refs that are contested at `now`, sorted: each claimed by a certificate while a state entry holds it, or by live
+ * certificates with two keys, or by a live certificate whose name another live one claims under another ref. The hub
+ * names these in its refusal.
  */
-export async function contestedRefs(state: OrgState, certs: Signed<MachineCert>[], now: Date): Promise<string[]> {
+export async function contestedRefs(state: OrgState, set: Certificates, now: Date): Promise<string[]> {
+  if (!isCertificates(set)) return [];
   const out = new Set<string>();
-  if (Array.isArray(certs)) {
-    for (const c of certs) if (isSigned(c, isMachineCert) && c.body.org === state.org && entryByRef(state, c.body.machine) !== undefined) out.add(c.body.machine);
-  }
-  const pubs = new Map<string, Set<B64>>();
-  for (const c of await liveCerts(state, certs, now)) pubs.set(c.machine, (pubs.get(c.machine) ?? new Set()).add(c.pub));
-  for (const [ref, keys] of pubs) if (keys.size > 1) out.add(ref);
+  for (const c of set.certs) if (isSigned(c, isMachineCert) && c.body.org === state.org && entryByRef(state, c.body.machine) !== undefined) out.add(c.body.machine);
+  for (const v of await certViews(state, set, now)) if (v.contested) out.add(v.body.machine);
   return [...out].sort();
 }
 
-/**
- * The key that speaks for machine `ref`: the state entry's, or else that of the live certificates claiming it, unless
- * they claim it with different keys.
- */
-export async function machineKeys(state: OrgState, ref: string, certs: Signed<MachineCert>[], now: Date): Promise<{ keys: B64[]; contested: boolean }> {
+/** The key that speaks now for machine `ref`: the state entry's, or else its one live, uncontested certificate's. */
+export async function machineKeys(state: OrgState, ref: string, set: Certificates, now: Date): Promise<{ keys: B64[]; contested: boolean }> {
   const entry = entryByRef(state, ref);
   if (entry !== undefined) return { keys: [entry.pub], contested: false };
-  const keys = [...new Set((await liveCerts(state, certs, now)).filter((c) => c.machine === ref).map((c) => c.pub))];
-  return keys.length > 1 ? { keys: [], contested: true } : { keys, contested: false };
+  const live = (await certViews(state, set, now)).filter((v) => v.live && v.body.machine === ref);
+  if (live.some((v) => v.contested)) return { keys: [], contested: true };
+  return { keys: [...new Set(live.map((v) => v.body.pub))], contested: false };
 }
 
 /**
- * The key that speaks for the machine a log writer's `<name>/…` names: the ref `machineNames` gave the name, then that
- * ref's key; or, for a name no version gave, the live, uncontested certificates bearing it, when they agree on one ref.
+ * The keys allowed to sign as a machine writer `<name>/…` (RL8): those of the ref `machineNames` gives the name — its
+ * entry's current key, and its retired keys — and those of every uncontested certificate bearing the name, live or
+ * retired, each bound to its own ref by its own certificate.
  */
-export async function machineKeysByName(state: OrgState, name: string, certs: Signed<MachineCert>[], now: Date): Promise<B64[]> {
+export async function machineSigners(state: OrgState, name: string, set: Certificates, now: Date): Promise<Array<{ pub: B64; notAfter: string | null }>> {
+  const out: Array<{ pub: B64; notAfter: string | null }> = [];
   const given = refOfName(state, name);
-  if (given !== undefined) return (await machineKeys(state, given, certs, now)).keys;
-  const refs = new Set((await liveCerts(state, certs, now)).filter((c) => machineNameKey(c.name) === machineNameKey(name)).map((c) => c.machine));
-  return refs.size === 1 ? (await machineKeys(state, [...refs][0], certs, now)).keys : [];
+  if (given !== undefined) {
+    const entry = entryByRef(state, given);
+    if (entry !== undefined) out.push({ pub: entry.pub, notAfter: null });
+    for (const r of state.retired) if ('machine' in r.holder && r.holder.machine === given) out.push({ pub: r.pub, notAfter: r.notAfter });
+  }
+  for (const v of await certViews(state, set, now)) {
+    if (machineNameKey(v.body.name) !== machineNameKey(name) || v.contested) continue;
+    if (given !== undefined && v.body.machine !== given) continue;
+    out.push({ pub: v.body.pub, notAfter: v.notAfter });
+  }
+  return out;
 }
 
-async function machineSigned(domain: Domain, state: OrgState, record: Signed<{ machine: string }>, certs: Signed<MachineCert>[], now: Date): Promise<Verdict> {
-  const { keys, contested } = await machineKeys(state, record.body.machine, certs, now);
-  if (contested) return refuse('contested-ref');
+async function machineSigned(domain: Domain, state: OrgState, record: Signed<{ machine: string }>, set: Certificates, now: Date): Promise<Verdict> {
+  const { keys, contested } = await machineKeys(state, record.body.machine, set, now);
+  if (contested) return refuse('contested');
   return keys.length === 0 ? refuse('not-listed') : signedBy(domain, record, keys);
 }
 
 /** A session's listing (RL6's projection), signed by its machine's key. The hub's revision rule is `stale-listing`. */
-export async function verifyListing(state: OrgState, l: Signed<Listing>, certs: Signed<MachineCert>[], now: Date): Promise<Verdict> {
-  if (!isSigned(l, isListing) || l.body.org !== state.org || !Array.isArray(certs)) return refuse('malformed');
+export async function verifyListing(state: OrgState, l: Signed<Listing>, certs: Certificates, now: Date): Promise<Verdict> {
+  if (!isSigned(l, isListing) || l.body.org !== state.org || !isCertificates(certs)) return refuse('malformed');
   return machineSigned(SIGNING_DOMAINS.listing, state, l, certs, now);
 }
 
 /** A machine's endpoint record (RL6: its direct RL2 carriers), signed by its machine's key. */
-export async function verifyEndpointRecord(state: OrgState, r: Signed<EndpointRecord>, certs: Signed<MachineCert>[], now: Date): Promise<Verdict> {
-  if (!isSigned(r, isEndpointRecord) || r.body.org !== state.org || !Array.isArray(certs)) return refuse('malformed');
+export async function verifyEndpointRecord(state: OrgState, r: Signed<EndpointRecord>, certs: Certificates, now: Date): Promise<Verdict> {
+  if (!isSigned(r, isEndpointRecord) || r.body.org !== state.org || !isCertificates(certs)) return refuse('malformed');
   return machineSigned(SIGNING_DOMAINS.endpoint, state, r, certs, now);
 }

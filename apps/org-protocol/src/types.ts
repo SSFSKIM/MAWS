@@ -10,6 +10,8 @@ export const SIGNING_DOMAINS = {
   machineCert: 'smns-machine-cert-v1',
   deviceEndorse: 'smns-device-endorse-v1',
   listing: 'smns-listing-v1',
+  certRetire: 'smns-cert-retire-v1',
+  certRevoke: 'smns-cert-revoke-v1',
   endpoint: 'smns-endpoint-v1',
   log: 'smns-hub-log-v2',
 } as const;
@@ -37,6 +39,17 @@ export type Owners = MemberId[] | 'org';
 export type MachineEntry = { name: string; ref: string; pub: B64; owners: Owners };
 /** A name some version of the state has given a machine ref; a name is never given to another ref after. */
 export type MachineName = { name: string; ref: string };
+/**
+ * A key that left honestly (RL §5.2): what it signed with its own timestamp at or before `notAfter` verifies for good.
+ * A key removed from the state without an entry here is revoked, and nothing it signed verifies. The entry keeps the
+ * point and its holder, so a verifier holding only the head can still verify the key's past events.
+ */
+export type RetiredKey = {
+  keyId: string;
+  pub: B64;
+  notAfter: string;
+  holder: { machine: string } | { member: MemberId; device: string; class: DeviceClass; key: 'channel' | 'step-up' };
+};
 export type Delegation = { id: string; pub: B64; prefix: string; expires: string; maxUses: number; offlineRevokeS: number; owners: Owners };
 export type ProjectEntry = { id: string; name: string };
 
@@ -56,6 +69,7 @@ export type OrgState = {
    * ref in the org, so a log writer's `<name>/…` means one machine over the whole chain.
    */
   machineNames: MachineName[];
+  retired: RetiredKey[];
   delegations: Delegation[];
   projects: ProjectEntry[];
 };
@@ -69,6 +83,13 @@ export type Right = 'spawn' | 'machine-admin' | 'shell';
 export type Grant = { org: string; machine: string; member: MemberId; rights: Right[]; version: number; issued: string };
 /** `machine` is the certified machine's ref; `name`, its name, sits under the delegation's prefix. */
 export type MachineCert = { org: string; machine: string; name: string; pub: B64; delegation: string; use: number; issued: string };
+/** A delegation certificate's retirement, signed by its delegation's key or an admin device's step-up key. */
+export type CertRetirement = { org: string; keyId: string; notAfter: string };
+/** A delegation certificate's revocation, signed by an admin device's step-up key only (it is retroactive). */
+export type CertRevocation = { org: string; keyId: string };
+/** What the hub serves beside the state for delegated machines: their certificates, retirements and revocations. */
+export type Certificates = { certs: Signed<MachineCert>[]; retirements: Signed<CertRetirement>[]; revocations: Signed<CertRevocation>[] };
+
 // Every field named `machine` below, and in Grant and MachineCert above, carries the machine's ref, never its name.
 export type Listing = {
   org: string;
@@ -80,6 +101,12 @@ export type Listing = {
 };
 /** RL §4.1's direct carriers. */
 export type EndpointRecord = { org: string; machine: string; addresses: string[]; issued: string };
+
+/**
+ * A key allowed to sign as a writer: `notAfter` null for a current key; else the latest timestamp its events may carry
+ * (a retired key's `notAfter`, or a certificate's delegation `expires`).
+ */
+export type Signer = { pub: B64; notAfter: string | null };
 
 /** A log event carrying RL8's signature. Every other field passes through, as DX1's events do. */
 export type LogEventV2 = { writer: string; sig: Sig; [field: string]: unknown };

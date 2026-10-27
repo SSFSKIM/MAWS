@@ -14,11 +14,13 @@
 //   endorsement-missing a device new to a member who had devices carries no endorsement
 //   unknown-signer      the kid names no key allowed to sign this (a device of another member, a key not in the state,
 //                       a delegation signing for a name outside its prefix or a listed machine's, a `legacy/` writer)
-//   expired             a delegation past its `expires`, or a certificate past its `maxUses`
+//   expired             a delegation past its `expires`, a certificate past its `maxUses`, or an event stamped after
+//                       its retired key's `notAfter` (or its certificate's delegation's `expires`)
 //   not-listed          the machine, delegation or member the record names is not in the state
 //   stale-listing       a listing whose revision is not above the stored one (the hub's own check, beside these)
-//   contested-ref       a machine ref claimed twice: a certificate for a ref a state entry holds, or a ref two live
-//                       certificates claim with different keys; refused for every claimant (`contestedRefs` names them)
+//   contested           a machine's identity claimed twice: a certificate for a ref a state entry holds, a ref two
+//                       live certificates claim with different keys, or a name two live certificates claim under
+//                       different refs; refused for every claimant (`contestedRefs` names the refs)
 //   name-retired        a machine name some version gave another ref, given again (to an entry or a certificate), or
 //                       a successor that drops a name from `machineNames`
 export type VerdictCode =
@@ -33,7 +35,7 @@ export type VerdictCode =
   | 'expired'
   | 'not-listed'
   | 'stale-listing'
-  | 'contested-ref'
+  | 'contested'
   | 'name-retired';
 
 export type Verdict = { ok: true } | { ok: false; code: VerdictCode };
