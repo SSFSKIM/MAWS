@@ -23,34 +23,45 @@ describe('the bench statistics (P5 O1, M1)', () => {
   });
 
   it('calls a run invalid below 95% of its markers, for a turn missing a marker, a failed clock check or a negative sample, saying which', () => {
-    const clock = { ok: true, widthMs: 0.4, offsetMs: 0.1 };
+    const clock = { ok: true, widthMs: 0.4, offsetMs: 0.1, offsetRangeMs: [-0.1, 0.3] as [number, number] };
     const expected = BENCH.markersPerTurn * (BENCH.turns - BENCH.warmupTurns);
     expect(expected).toBe(600);
     const samples = (n: number) => Array.from({ length: n }, () => 5);
     expect(invalidReasons({ samples: samples(570), expected, missing: [], clock })).toEqual([]);
     expect(invalidReasons({ samples: samples(569), expected, missing: [], clock })).toEqual(['569 samples of 600, under the floor of 570 (95%)']);
     expect(invalidReasons({ samples: samples(600), expected, missing: [{ turn: 3, markers: ['⟦t3:12⟧', '⟦t3:300⟧'] }], clock })).toEqual(['turn 3 lacks 2 of its markers after it completed (⟦t3:12⟧, ⟦t3:300⟧)']);
-    expect(invalidReasons({ samples: samples(600), expected, missing: [], clock: { ok: false, widthMs: 0.5, offsetMs: 1.7 } })).toEqual([
-      "the renderer's clock is 1.7 ms off the runner's (tightest bracket 0.5 ms; the check allows ±1 ms)",
+    expect(invalidReasons({ samples: samples(600), expected, missing: [], clock: { ok: false, widthMs: 0.5, offsetMs: 1.75, offsetRangeMs: [1.5, 2] } })).toEqual([
+      "the renderer's clock is not shown within ±1 ms of the runner's: its offset lies in [1.5, 2] ms (tightest bracket 0.5 ms)",
     ]);
     expect(invalidReasons({ samples: [...samples(599), -0.3], expected, missing: [], clock })).toEqual(['1 negative sample']);
   });
 });
 
 describe('the clock check', () => {
-  it('places the renderer within ±1 ms of the runner by its tightest bracket', () => {
+  it('reads the tightest bracket, and passes when every offset it allows is within ±1 ms', () => {
     const brackets = [
       { before: 1_000, renderer: 1_003.5, after: 1_004 }, // width 4
-      { before: 2_000, renderer: 2_000.6, after: 2_000.8 }, // width 0.8, the tightest: midpoint 2000.4, offset 0.2
+      { before: 2_000, renderer: 2_000.5, after: 2_000.75 }, // width 0.75, the tightest: offsets [-0.25, 0.5]
       { before: 3_000, renderer: 3_001, after: 3_002 },
     ];
-    const check = clockCheck(brackets);
-    expect(check.ok).toBe(true);
-    expect(check.widthMs).toBeCloseTo(0.8);
-    expect(check.offsetMs).toBeCloseTo(0.2);
-    // The renderer read 1.5 ms after the runner's later read: outside the bracket by more than the tolerance.
-    expect(clockCheck([{ before: 10, renderer: 12.5, after: 11 }])).toMatchObject({ ok: false, offsetMs: 2 });
-    expect(clockCheck([{ before: 10, renderer: 9.2, after: 10.4 }]).ok).toBe(true); // 0.8 ms before the bracket
+    expect(clockCheck(brackets)).toEqual({ ok: true, widthMs: 0.75, offsetMs: 0.125, offsetRangeMs: [-0.25, 0.5] });
+    expect(clockCheck([{ before: 10, renderer: 9.25, after: 10.25 }])).toMatchObject({ ok: true, offsetRangeMs: [-1, -0.75] }); // read before the bracket, within the tolerance
+  });
+
+  it('fails a bracket whose possible offsets leave ±1 ms, so a wide bracket is inconclusive whatever the renderer read', () => {
+    // inside the bracket, yet the true offset could be anywhere from -2 to +8 ms
+    expect(clockCheck([{ before: 100, renderer: 108, after: 110 }])).toMatchObject({ ok: false, offsetRangeMs: [-2, 8] });
+    // a 2.5 ms bracket read at its midpoint still allows ±1.25 ms
+    expect(clockCheck([{ before: 0, renderer: 1.25, after: 2.5 }])).toMatchObject({ ok: false, offsetRangeMs: [-1.25, 1.25] });
+    // read 1.5 ms after the runner's later read
+    expect(clockCheck([{ before: 10, renderer: 12.5, after: 11 }])).toMatchObject({ ok: false, offsetRangeMs: [1.5, 2.5] });
+  });
+
+  it('holds its boundaries: an offset range ending at exactly ±1 ms passes, one a little past it fails', () => {
+    expect(clockCheck([{ before: 0, renderer: 1, after: 2 }])).toMatchObject({ ok: true, offsetRangeMs: [-1, 1] }); // a 2 ms bracket, read at its midpoint
+    expect(clockCheck([{ before: 0, renderer: 1.0625, after: 2 }])).toMatchObject({ ok: false, offsetRangeMs: [-0.9375, 1.0625] });
+    expect(clockCheck([{ before: 5, renderer: 6, after: 5 }])).toMatchObject({ ok: true, offsetRangeMs: [1, 1] }); // a zero-width bracket
+    expect(clockCheck([{ before: 5, renderer: 3.9375, after: 5 }])).toMatchObject({ ok: false, offsetRangeMs: [-1.0625, -1.0625] });
   });
 });
 
@@ -61,9 +72,27 @@ describe('the budget (OX7)', () => {
     roundTrip: { p50: 2, p95: 3, n: 200, spreadP50: 0.1, spreadP95: 0.3 },
   };
 
-  it('is 2 ms at p50 and 5 ms at p95 over the baseline, recorded once the baseline is', () => {
+  it('is 2 ms at p50 and 5 ms at p95 over the baseline', () => {
     expect(OX7_BUDGET_MS).toEqual({ p50: 2, p95: 5 });
-    expect(LOCAL_LATENCY_BASELINE).toBeNull(); // the three runs at M1's commit fill it in
+  });
+
+  // Holds before the baseline is recorded (null: nothing asserted) and after, when the commit that records it touches only
+  // local-latency.ts.
+  it('a recorded baseline is three runs of the whole bench at the app of c3507722d, each metric ranked and its spread non-negative', () => {
+    if (LOCAL_LATENCY_BASELINE === null) return;
+    const { commit, appTree, runs, deltaToFrame, roundTrip } = LOCAL_LATENCY_BASELINE;
+    expect(commit).toMatch(/^[0-9a-f]{7,40}$/);
+    expect(appTree).toBe('c3507722d');
+    expect(runs).toHaveLength(3);
+    expect(new Set(runs).size).toBe(3);
+    expect(deltaToFrame.n).toBeGreaterThanOrEqual(Math.ceil(BENCH.markersPerTurn * (BENCH.turns - BENCH.warmupTurns) * BENCH.sampleFloor));
+    expect(roundTrip.n).toBe(BENCH.roundTrips - BENCH.roundTripWarmup);
+    for (const metric of [deltaToFrame, roundTrip]) {
+      expect(metric.p50).toBeGreaterThanOrEqual(0);
+      expect(metric.p95).toBeGreaterThanOrEqual(metric.p50);
+      expect(metric.spreadP50).toBeGreaterThanOrEqual(0);
+      expect(metric.spreadP95).toBeGreaterThanOrEqual(0);
+    }
   });
 
   it('names each metric over its budget and passes one exactly at it', () => {

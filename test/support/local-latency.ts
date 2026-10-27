@@ -52,13 +52,17 @@ export interface ClockCheck {
   ok: boolean;
   widthMs: number; // the tightest bracket's width
   offsetMs: number; // the renderer's read less the tightest bracket's midpoint
+  offsetRangeMs: [number, number]; // every offset the tightest bracket allows: [renderer − after, renderer − before]
 }
 
-// The tightest bracket places the renderer's clock: within the bracket widened by the tolerance on each side.
+// The tightest bracket places the renderer's clock: the renderer read at some runner time inside it, so its offset from
+// the runner's clock is somewhere in [renderer − after, renderer − before]. The check passes only when that whole range
+// lies within ±1 ms; a bracket too wide to say so (over 2 ms) fails as inconclusive.
 export function clockCheck(brackets: readonly ClockBracket[]): ClockCheck {
   const tightest = [...brackets].sort((a, b) => a.after - a.before - (b.after - b.before))[0]!;
-  const ok = tightest.renderer >= tightest.before - BENCH.clockToleranceMs && tightest.renderer <= tightest.after + BENCH.clockToleranceMs;
-  return { ok, widthMs: tightest.after - tightest.before, offsetMs: tightest.renderer - (tightest.before + tightest.after) / 2 };
+  const offsetRangeMs: [number, number] = [tightest.renderer - tightest.after, tightest.renderer - tightest.before];
+  const ok = offsetRangeMs[0] >= -BENCH.clockToleranceMs && offsetRangeMs[1] <= BENCH.clockToleranceMs;
+  return { ok, widthMs: tightest.after - tightest.before, offsetMs: tightest.renderer - (tightest.before + tightest.after) / 2, offsetRangeMs };
 }
 
 const ms = (value: number) => Number(value.toFixed(1));
@@ -69,7 +73,10 @@ export function invalidReasons(run: { samples: readonly number[]; expected: numb
   const floor = Math.ceil(run.expected * BENCH.sampleFloor);
   if (run.samples.length < floor) reasons.push(`${run.samples.length} samples of ${run.expected}, under the floor of ${floor} (${BENCH.sampleFloor * 100}%)`);
   for (const { turn, markers } of run.missing) reasons.push(`turn ${turn} lacks ${markers.length} of its markers after it completed (${markers.slice(0, 5).join(', ')}${markers.length > 5 ? ', …' : ''})`);
-  if (!run.clock.ok) reasons.push(`the renderer's clock is ${ms(Math.abs(run.clock.offsetMs))} ms off the runner's (tightest bracket ${ms(run.clock.widthMs)} ms; the check allows ±${BENCH.clockToleranceMs} ms)`);
+  if (!run.clock.ok) {
+    const [low, high] = run.clock.offsetRangeMs.map(ms);
+    reasons.push(`the renderer's clock is not shown within ±${BENCH.clockToleranceMs} ms of the runner's: its offset lies in [${low}, ${high}] ms (tightest bracket ${ms(run.clock.widthMs)} ms)`);
+  }
   const negative = run.samples.filter((sample) => sample < 0).length;
   if (negative > 0) reasons.push(`${negative} negative sample${negative === 1 ? '' : 's'}`);
   return reasons;

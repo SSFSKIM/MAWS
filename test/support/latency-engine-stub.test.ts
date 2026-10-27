@@ -59,52 +59,73 @@ describe('the latency engine stub', () => {
     const session = new EngineSession({ spec, plan, spawn: (p) => spawnEngine(p, { maxLineChars: MAX_LINE_CHARS }), journal, log: (m) => logs.push(m), sessionStartHookMs: () => Promise.resolve(SESSION_START_HOOK_MS) });
     const events: SessionEvent[] = [];
     session.on('events', (batch: SessionEvent[]) => events.push(...batch));
-    const until = (done: () => boolean) => new Promise<void>((resolve) => {
-      const check = () => (done() ? resolve() : setTimeout(check, 20));
+    // A poll every 20 ms until `done`, failing after `ms` or when the case ends first (its `finally` aborts every poll).
+    const polls = new AbortController();
+    const until = (label: string, done: () => boolean, ms = 20_000) => new Promise<void>((resolve, reject) => {
+      const deadline = Date.now() + ms;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const settle = (error: Error | null) => {
+        clearTimeout(timer);
+        polls.signal.removeEventListener('abort', cancel);
+        if (error) reject(error);
+        else resolve();
+      };
+      const cancel = () => settle(new Error(`cancelled while waiting for ${label}`));
+      polls.signal.addEventListener('abort', cancel, { once: true });
+      const check = () => {
+        if (done()) settle(null);
+        else if (Date.now() > deadline) settle(new Error(`timed out after ${ms} ms waiting for ${label}`));
+        else timer = setTimeout(check, 20);
+      };
       check();
     });
     const meta = () => journal.rows.filter((r) => r.direction === 'meta').map((r) => r.frame as { event: string; verified?: string });
     const statusChecks = () => meta().filter((m) => m.event === 'status_check').map((m) => m.verified);
 
-    await session.start();
-    expect(session.lifecycle).toBe('ready');
-    const usage = await getContextUsage(session.control!, { detail: 'summary' });
-    expect(usage.totalTokens).toBeGreaterThan(0);
+    try {
+      await session.start();
+      expect(session.lifecycle).toBe('ready');
+      const usage = await getContextUsage(session.control!, { detail: 'summary' });
+      expect(usage.totalTokens).toBeGreaterThan(0);
 
-    for (const turn of [1, 2]) {
-      await session.send(`latency bench turn ${turn}`);
-      await until(() => events.filter((e) => e.kind === 'turn.ended').length >= turn);
+      for (const turn of [1, 2]) {
+        await session.send(`latency bench turn ${turn}`);
+        await until(`turn ${turn}'s end`, () => events.filter((e) => e.kind === 'turn.ended').length >= turn);
+      }
+      await until('the third gateway check', () => statusChecks().length >= 3); // the check after the last turn's result answers after it
+
+      const subtypes = journal.rows.filter((r) => r.direction === 'out' && (r.frame as { type?: string }).type === 'control_request').map((r) => (r.frame as { request: { subtype: string } }).request.subtype);
+      expect(new Set(subtypes)).toEqual(new Set(['initialize', 'set_max_thinking_tokens', 'get_status', 'get_context_usage']));
+      expect(meta().map((m) => m.event)).not.toContain('parse_error');
+      expect(statusChecks()).toEqual(['direct', 'direct', 'direct']); // at ready and after each human turn
+      expect(events.filter((e) => e.kind === 'frame.unknown' || e.kind === 'error.raised' || e.kind === 'notice.posted')).toEqual([]);
+      expect(session.status()).toMatchObject({ process: 'ready', engineSessionId: spec.sessionId, cwd: root, gateway: { verified: 'direct' }, turn: null });
+
+      const messageIds = new Set<string>();
+      for (const turn of [1, 2]) {
+        const markers = Array.from({ length: 300 }, (_, k) => markerOf(turn, k + 1));
+        const userUuid = (events.filter((e) => e.kind === 'turn.started')[turn - 1] as Extract<SessionEvent, { kind: 'turn.started' }>).userMessageUuid;
+        const deltas = events.filter((e): e is Extract<SessionEvent, { kind: 'assistant.block.delta' }> => e.kind === 'assistant.block.delta' && e.userMessageUuid === userUuid);
+        expect(deltas.map((e) => e.textDelta)).toEqual(markers);
+        const complete = events.filter((e): e is Extract<SessionEvent, { kind: 'assistant.block.complete' }> => e.kind === 'assistant.block.complete' && e.userMessageUuids.includes(userUuid!));
+        expect(complete).toHaveLength(1);
+        expect(complete[0]!.block).toEqual({ type: 'text', text: markers.join('') }); // the completion keeps every streamed marker
+        messageIds.add(complete[0]!.apiMessageId);
+        const result = events.filter((e): e is Extract<SessionEvent, { kind: 'turn.ended' }> => e.kind === 'turn.ended')[turn - 1]!;
+        expect(result).toMatchObject({ result: 'success', isError: false, resultText: markers.join(''), userMessageUuids: [userUuid] });
+        const rows = samplesOf(samples).filter((s) => s.turn === turn);
+        expect(rows.map((s) => s.k)).toEqual(markers.map((_, k) => k + 1));
+        expect(rows.at(-1)!.writtenAt - rows[0]!.writtenAt).toBeGreaterThanOrEqual(299 * LATENCY_STUB_PACE_MS - 5); // paced (Node's timers keep whole milliseconds)
+      }
+      expect(messageIds.size).toBe(2); // each turn its own message
+
+      const stopped = await session.stop('stop');
+      expect(stopped).toMatchObject({ exited: true });
+      expect(session.status().exit).toMatchObject({ code: 0 });
+      expect(logs.filter((line) => /failed|not handled/.test(line))).toEqual([]);
+    } finally {
+      polls.abort();
+      if (session.lifecycle !== 'exited') await session.stop('stop'); // a failed case still ends its engine
     }
-    await until(() => statusChecks().length >= 3); // the gateway check after the last turn's result answers after it
-
-    const subtypes = journal.rows.filter((r) => r.direction === 'out' && (r.frame as { type?: string }).type === 'control_request').map((r) => (r.frame as { request: { subtype: string } }).request.subtype);
-    expect(new Set(subtypes)).toEqual(new Set(['initialize', 'set_max_thinking_tokens', 'get_status', 'get_context_usage']));
-    expect(meta().map((m) => m.event)).not.toContain('parse_error');
-    expect(statusChecks()).toEqual(['direct', 'direct', 'direct']); // at ready and after each human turn
-    expect(events.filter((e) => e.kind === 'frame.unknown' || e.kind === 'error.raised' || e.kind === 'notice.posted')).toEqual([]);
-    expect(session.status()).toMatchObject({ process: 'ready', engineSessionId: spec.sessionId, cwd: root, gateway: { verified: 'direct' }, turn: null });
-
-    const messageIds = new Set<string>();
-    for (const turn of [1, 2]) {
-      const markers = Array.from({ length: 300 }, (_, k) => markerOf(turn, k + 1));
-      const userUuid = (events.filter((e) => e.kind === 'turn.started')[turn - 1] as Extract<SessionEvent, { kind: 'turn.started' }>).userMessageUuid;
-      const deltas = events.filter((e): e is Extract<SessionEvent, { kind: 'assistant.block.delta' }> => e.kind === 'assistant.block.delta' && e.userMessageUuid === userUuid);
-      expect(deltas.map((e) => e.textDelta)).toEqual(markers);
-      const complete = events.filter((e): e is Extract<SessionEvent, { kind: 'assistant.block.complete' }> => e.kind === 'assistant.block.complete' && e.userMessageUuids.includes(userUuid!));
-      expect(complete).toHaveLength(1);
-      expect(complete[0]!.block).toEqual({ type: 'text', text: markers.join('') }); // the completion keeps every streamed marker
-      messageIds.add(complete[0]!.apiMessageId);
-      const result = events.filter((e): e is Extract<SessionEvent, { kind: 'turn.ended' }> => e.kind === 'turn.ended')[turn - 1]!;
-      expect(result).toMatchObject({ result: 'success', isError: false, resultText: markers.join(''), userMessageUuids: [userUuid] });
-      const rows = samplesOf(samples).filter((s) => s.turn === turn);
-      expect(rows.map((s) => s.k)).toEqual(markers.map((_, k) => k + 1));
-      expect(rows.at(-1)!.writtenAt - rows[0]!.writtenAt).toBeGreaterThanOrEqual(299 * LATENCY_STUB_PACE_MS - 5); // paced (Node's timers keep whole milliseconds)
-    }
-    expect(messageIds.size).toBe(2); // each turn its own message
-
-    const stopped = await session.stop('stop');
-    expect(stopped).toMatchObject({ exited: true });
-    expect(session.status().exit).toMatchObject({ code: 0 });
-    expect(logs.filter((line) => /failed|not handled/.test(line))).toEqual([]);
   });
 });
