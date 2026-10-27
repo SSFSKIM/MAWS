@@ -14,10 +14,15 @@ declare module 'vitest' {
 }
 
 export default async function setup(project: TestProject) {
+  const dir = mkdtempSync(join(tmpdir(), 'desk-hub-test-'));
+  project.provide('hubScript', await bundleHub(join(dir, 'worker.js')));
+  return () => rmSync(dir, { recursive: true, force: true });
+}
+
+/** Bundles the suites' Worker to `outfile` and answers its path (O10's endpoint suites call it for their own hub). */
+export async function bundleHub(outfile: string): Promise<string> {
   // wrangler refuses a configured assets directory that does not exist; the web app (DC5) may not be built.
   mkdirSync(resolve(import.meta.dirname, '../../../desk-web/dist'), { recursive: true });
-  const dir = mkdtempSync(join(tmpdir(), 'desk-hub-test-'));
-  const outfile = join(dir, 'worker.js');
   await build({
     entryPoints: [resolve(import.meta.dirname, 'worker-under-test.ts')],
     outfile,
@@ -29,6 +34,5 @@ export default async function setup(project: TestProject) {
     external: ['cloudflare:*'],
     logLevel: 'error',
   });
-  project.provide('hubScript', outfile);
-  return () => rmSync(dir, { recursive: true, force: true });
+  return outfile;
 }

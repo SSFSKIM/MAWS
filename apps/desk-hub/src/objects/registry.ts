@@ -42,7 +42,7 @@ import type { AccessIdentity } from '../identity/access';
 import { ServiceTokenApiError, serviceTokens } from '../identity/service-tokens';
 import { importVapidKey, pushRequest, type VapidKey } from '../push/web-push';
 import { base64urlDecode, base64urlEncode, isBase64urlOf } from '../protocol/base64url';
-import { LISTINGS_PAGE_BYTES, REGISTRY_APP_PARAM, type Delegation, type Listing, type RegistryAppFrame, type Signed } from 'org-protocol';
+import { isListingGone, LISTINGS_PAGE_BYTES, REGISTRY_APP_PARAM, type Delegation, type Listing, type RegistryAppFrame, type Signed } from 'org-protocol';
 import type { GridDown, MachineSummary, ProjectSummary, PushNotice, RegistryDown } from '../protocol/browser';
 import type { OrgFrame } from '../protocol/machine';
 import { toWire } from '../protocol/parts';
@@ -1494,9 +1494,13 @@ export class Registry extends DurableObject<Env> {
   /** A machine-signed listing (RL1's `listing`, through M6's Machine DO). */
   async storeListing(record: unknown): Promise<Result<{ stored: boolean }>> {
     const kept = await this.records.storeListing(record);
-    // Relayed to the members' app sockets as it is stored (OX8; O11 M7); one held already, or refused, is not.
-    if (kept.ok && kept.value.stored) this.toApps({ t: 'listing', record: record as Signed<Listing> });
-    return kept;
+    if (!kept.ok) return kept;
+    // Relayed to the members' app sockets as it is stored (OX8; O11 M7); one held already is not. A withdrawn one
+    // (`LISTING_GONE`) goes to the apps that could see the revision it replaced: every app, since every member sees
+    // every live listing, when that revision was live; none when the session was withdrawn already or never listed.
+    const listing = record as Signed<Listing>;
+    if (kept.value.stored && (!isListingGone(listing.body) || kept.value.replacedLive)) this.toApps({ t: 'listing', record: listing });
+    return { ok: true, value: { stored: kept.value.stored } };
   }
 
   /** A machine-signed endpoint record (RL1's `endpoint`, through M6's Machine DO). */

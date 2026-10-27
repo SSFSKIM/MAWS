@@ -32,6 +32,16 @@
     "apps/desk-hub/fake-machine/json-file.ts",
     "apps/desk-hub/fake-machine/link.ts",
     "apps/desk-hub/fake-machine/org.ts",
+    // M3: the RL1 suite runs desk-hub's own suites' hub (its Worker bundled, in Miniflare, behind the stand-in) and reads
+    // its pushes as a device would
+    "apps/desk-hub/test/support/bundle.ts",
+    "apps/desk-hub/test/support/local.ts",
+    "apps/desk-hub/test/support/send-fault.ts",
+    "apps/desk-hub/test/support/push.ts",
+    "apps/desk-hub/local/helpers.ts",
+    "apps/desk-hub/local/proxy.ts",
+    "apps/desk-hub/local/standin.ts",
+    "apps/desk-hub/src/push/web-push.ts",
     // P5 O10 end
     "test/**/*",
     // C8a start: test/support/panel-child-fixture.ts measures its fixture through C6's pure model (createState,
