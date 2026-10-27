@@ -10,6 +10,11 @@
 // only a stray temporary file, which a later start deletes once it is a minute old (a fresher one may be a racing
 // minter's). A file that exists and does not hold a valid ref is refused, naming its path: re-minting would silently
 // re-address everything persisted under the old ref. Nothing rewrites the file.
+//
+// P5 O2 M5 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md; RL5 and the remote layer's Decision Log 25): a machine that
+// enrolls through a devcloud delegation mints its ref with the delegation's id as a prefix, `<prefix>_<22 base64url>`
+// (55 characters, inside RL5's 64). An unprefixed ref is 22 characters, so it can never take a delegation's shape. The
+// prefix is refused unless it is 32 lower-case hex digits, and ignored when the file already exists.
 import { randomBytes } from 'node:crypto';
 import * as fs from 'node:fs';
 import { join } from 'node:path';
@@ -25,6 +30,7 @@ const IdentityFileSchema = z.object({ version: z.number().int().positive(), ref:
 // `machine.json.<pid>.<random>`, the minter's temporary files.
 const TEMPORARY = /^machine\.json\.\d+\.[A-Za-z0-9_-]+$/;
 const STRAY_AFTER_MS = 60_000;
+const DELEGATION_PREFIX = /^[0-9a-f]{32}$/; // P5 O2 M5
 
 // null when absent; throws naming the path on a malformed file.
 export function readMachineRef(profileDir: string): MachineRef | null {
@@ -49,14 +55,17 @@ export function readMachineRef(profileDir: string): MachineRef | null {
   return parsed.data.ref;
 }
 
-// The profile's ref, minted and published by link when it has none.
-export function readOrMintMachineRef(profileDir: string): MachineRef {
+// The profile's ref, minted and published by link when it has none (P5 O2 M5: with `prefix` when it is minted here).
+export function readOrMintMachineRef(profileDir: string, options: { prefix?: string } = {}): MachineRef {
+  const { prefix } = options;
+  if (prefix !== undefined && !DELEGATION_PREFIX.test(prefix)) throw new Error(`a machine ref's prefix is a delegation id, 32 lower-case hex digits; refusing ${JSON.stringify(prefix)}`);
   fs.mkdirSync(profileDir, { recursive: true });
   removeStrayTemporaries(profileDir);
   const existing = readMachineRef(profileDir);
   if (existing) return existing;
 
-  const ref = MachineRefSchema.parse(randomBytes(16).toString('base64url'));
+  const random = randomBytes(16).toString('base64url');
+  const ref = MachineRefSchema.parse(prefix === undefined ? random : `${prefix}_${random}`);
   const temporary = join(profileDir, `${IDENTITY_FILE}.${process.pid}.${randomBytes(6).toString('base64url')}`);
   const content = Buffer.from(`${JSON.stringify({ version: 1, ref, mintedAt: new Date().toISOString() })}\n`);
   const fd = fs.openSync(temporary, 'wx', 0o600);
