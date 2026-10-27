@@ -123,7 +123,7 @@ export function gwsStateFromStatus(stdout: string): GwsState {
 export async function gwsLogin(
   bin: string,
   env: Readonly<Record<string, string>>,
-  opts: { scopes?: readonly string[]; openUrl(url: string): void; signal: AbortSignal; deadlineMs?: number },
+  opts: { scopes?: readonly string[]; openUrl(url: string): void | Promise<void>; signal: AbortSignal; deadlineMs?: number },
 ): Promise<GwsLoginResult> {
   if (opts.signal.aborted) return { ok: false, why: 'cancelled' };
   const args = ['auth', 'login', ...(opts.scopes === undefined ? ['-s', 'drive'] : ['--scopes', opts.scopes.join(',')])];
@@ -137,11 +137,10 @@ export async function gwsLogin(
       const url = googleUrl(text);
       if (url === null) return;
       opened = true;
-      try {
-        opts.openUrl(url);
-      } catch (error) {
-        stop(bounded(`could not open the sign-in page: ${messageOf(error)}`));
-      }
+      // a throw or a rejection alike: the page did not open, and the login stops saying so
+      void Promise.resolve()
+        .then(() => opts.openUrl(url))
+        .catch((error: unknown) => stop(bounded(`could not open the sign-in page: ${messageOf(error)}`)));
     },
   });
   switch (run.end.kind) {

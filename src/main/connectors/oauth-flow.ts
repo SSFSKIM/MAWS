@@ -31,6 +31,7 @@ import {
 } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { AuthorizationServerMetadata, OAuthClientInformationFull, OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js';
 import { checkResourceAllowed, resourceUrlFromServerUrl } from '@modelcontextprotocol/sdk/shared/auth-utils.js';
+import type { ClientRef } from '@shared/ipc/client';
 import * as z from 'zod';
 import { OAUTH_CALLBACK_HOST, type ListenLoopback, type LoopbackReply, type LoopbackRequest } from './oauth-callback';
 import { boundedOAuthFetch, isPermittedOAuthUrl, OAuthTransportError, type OAuthFetch } from './oauth-http';
@@ -58,7 +59,7 @@ export class ConnectorOAuthError extends Error {
 export interface ConnectorOAuthFlowDeps {
   fetch: (url: string | URL | Request, init?: RequestInit) => Promise<Response>;
   listen: ListenLoopback;
-  openBrowser(url: string): Promise<void>; // only ever an owner's Connect or Reconnect
+  openBrowser(url: string, client: ClientRef | null): Promise<void>; // only ever an owner's Connect or Reconnect, on the client that asked
   now?: () => number;
   randomState?: () => string;
 }
@@ -66,7 +67,7 @@ export interface ConnectorOAuthFlowDeps {
 export interface ConnectorOAuthFlow {
   // The owner's Connect or Reconnect: a fresh registration and grant for the request URL. The caller binds the result
   // to its identity and saves it under its own claim.
-  connect(input: { requestUrl: string; signal: AbortSignal }): Promise<ConnectorOAuthGrant>;
+  connect(input: { requestUrl: string; signal: AbortSignal; client?: ClientRef | null }): Promise<ConnectorOAuthGrant>;
   // The rotated tokens (the old refresh token kept when none was returned). Saving them is the caller's.
   refresh(grant: ConnectorOAuthGrant, signal: AbortSignal): Promise<ConnectorOAuthTokens>;
   revoke(grant: ConnectorOAuthGrant, signal: AbortSignal): Promise<'revoked' | 'unsupported' | 'failed'>;
@@ -303,7 +304,7 @@ export function createConnectorOAuthFlow(deps: ConnectorOAuthFlowDeps): Connecto
   }
 
   return {
-    async connect({ requestUrl, signal }) {
+    async connect({ requestUrl, signal, client: asker = null }) { // asker: the ClientRef whose Connect this is (P5 O1 M3)
       if (!isPermittedOAuthUrl(requestUrl)) throw fail('insecure');
       const fetchFn = boundedOAuthFetch(deps.fetch, signal);
       const { resource, server, metadata, scope, issRequired } = await discover(requestUrl, signal, fetchFn);
@@ -331,7 +332,7 @@ export function createConnectorOAuthFlow(deps: ConnectorOAuthFlowDeps): Connecto
           const { authorizationUrl, codeVerifier } = await step(flow, 'unsupported', () => startAuthorization(server, { metadata, clientInformation: client, redirectUrl: redirectUri, ...(scope !== undefined && { scope }), state, resource }));
           if (!isPermittedOAuthUrl(authorizationUrl)) throw fail('insecure');
           callback.arm(state);
-          await step(flow, 'browser', () => untilEnded(() => deps.openBrowser(authorizationUrl.href), flow));
+          await step(flow, 'browser', () => untilEnded(() => deps.openBrowser(authorizationUrl.href, asker), flow));
           const code = await callback.wait(flow);
           const raw = await step(flow, 'exchange', () => exchangeAuthorization(server, { metadata, clientInformation: client, authorizationCode: code, codeVerifier, redirectUri, resource, addClientAuthentication: tokenClientAuthentication(client, metadata), fetchFn: flowFetch }));
           return { issuer: metadata.issuer, resource, redirectUri, authorizationServer: metadata, client, tokens: acceptTokens(raw, now()) };

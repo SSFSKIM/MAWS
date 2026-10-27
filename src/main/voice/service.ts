@@ -1,31 +1,18 @@
-// Main's `voice.*` service (E9 execution document, Design §2): the one capture app-wide (one microphone), the window that
-// owns it, and the gate every backend event passes before it reaches the renderer as `voice.event`.
+// Main's `voice.*` service (E9 execution document, Design §2): the one capture app-wide (one microphone), the client (the
+// page instance) that owns it, and the gate every backend event passes before it reaches the renderer as `voice.event`.
 //
 // The reservation is synchronous: `start` records the capture before its first await, so two invokes racing through
 // the router see each other and the second answers `busy`. `cancel` clears the capture at once whatever its phase; a
 // `start` still awaiting its backend then answers `cancelled`, and every later event of that id is dropped. Events are
 // forwarded only while their id is the active capture's and its phase admits them; a `final`, `cancelled` or `error`
 // ends the capture.
+import type { ClientId, ClientRef } from '@shared/ipc/client';
 import type { VoiceEvent, VoicePrivacyPane, VoiceStartInput, VoiceStartResult, VoiceStatus } from '@shared/ipc/schema/voice';
 import type { HelperEvent, VoiceBackend } from './backend';
 import { voiceScriptLog } from './scripted-backend';
 
-// The window an invoke came from: its id, and the ends of the page that holds a capture. A closed window, a crashed
-// renderer or a reload (a main-frame document navigation) leaves no composer to send the capture's cancel.
-export interface VoiceSender {
-  readonly id: number;
-  on(event: 'destroyed', listener: () => void): unknown;
-  on(event: 'render-process-gone', listener: () => void): unknown;
-  on(event: 'did-start-navigation', listener: (details: NavigationDetails) => void): unknown;
-  removeListener(event: 'destroyed', listener: () => void): unknown;
-  removeListener(event: 'render-process-gone', listener: () => void): unknown;
-  removeListener(event: 'did-start-navigation', listener: (details: NavigationDetails) => void): unknown;
-}
-
-interface NavigationDetails {
-  isMainFrame: boolean;
-  isSameDocument: boolean;
-}
+// The client an invoke came from is the page that holds a capture. Its end (a closed window, a crashed renderer or a
+// reload) leaves no composer to send the capture's cancel.
 
 export interface VoiceServiceDeps {
   emit(event: VoiceEvent): void;
@@ -40,8 +27,9 @@ const PRIVACY_PANES: Record<VoicePrivacyPane, string> = {
 
 interface Capture {
   captureId: string;
-  senderId: number;
+  clientId: ClientId;
   phase: 'starting' | 'listening' | 'stopping';
+  asked: boolean; // the backend was asked to start it, so only then has it anything to cancel
   unfollow(): void; // stops watching the owning page's end
 }
 
@@ -57,11 +45,14 @@ export class VoiceService {
     return this.backend.probe(locale);
   }
 
-  async start({ captureId, locale }: VoiceStartInput, sender: VoiceSender): Promise<VoiceStartResult> {
+  async start({ captureId, locale }: VoiceStartInput, client: ClientRef): Promise<VoiceStartResult> {
     if (this.active) return { accepted: false, reason: 'busy', path: null };
-    const capture: Capture = { captureId, senderId: sender.id, phase: 'starting', unfollow: () => {} };
+    const capture: Capture = { captureId, clientId: client.id, phase: 'starting', asked: false, unfollow: () => {} };
     this.active = capture;
-    this.follow(capture, sender);
+    this.follow(capture, client);
+    // A client that had already ended released the capture as it was followed: no composer is left to own a recording.
+    if (this.active !== capture) return { accepted: false, reason: 'cancelled', path: null };
+    capture.asked = true;
     let result: VoiceStartResult;
     try {
       result = await this.backend.start(captureId, locale, (event) => this.forward(capture, event));
@@ -74,15 +65,15 @@ export class VoiceService {
     return result;
   }
 
-  stop({ captureId }: { captureId: string }, sender: VoiceSender): void {
-    const capture = this.owned(captureId, sender, 'stop');
+  stop({ captureId }: { captureId: string }, client: ClientRef): void {
+    const capture = this.owned(captureId, client, 'stop');
     if (!capture || capture.phase === 'stopping') return; // a second stop waits for the final already on its way
     capture.phase = 'stopping';
     this.backend.stop(captureId);
   }
 
-  cancel({ captureId }: { captureId: string }, sender: VoiceSender): void {
-    const capture = this.owned(captureId, sender, 'cancel');
+  cancel({ captureId }: { captureId: string }, client: ClientRef): void {
+    const capture = this.owned(captureId, client, 'cancel');
     if (!capture) return;
     this.release(capture);
     this.backend.cancel(captureId);
@@ -101,37 +92,26 @@ export class VoiceService {
     this.backend.dispose();
   }
 
-  // The active capture when it is `captureId` and `sender` owns it. A capture that already ended answers nothing (the
-  // renderer's release can race its final); another window's command is ignored with a warning.
-  private owned(captureId: string, sender: VoiceSender, command: string): Capture | null {
+  // The active capture when it is `captureId` and `client` owns it. A capture that already ended answers nothing (the
+  // renderer's release can race its final); another client's command is ignored with a warning.
+  private owned(captureId: string, client: ClientRef, command: string): Capture | null {
     const capture = this.active;
     if (!capture || capture.captureId !== captureId) return null;
-    if (capture.senderId !== sender.id) {
-      console.warn(`[voice] ignored ${command} of capture ${captureId} from window ${sender.id}; window ${capture.senderId} owns it`);
+    if (capture.clientId !== client.id) {
+      console.warn(`[voice] ignored ${command} of capture ${captureId} from client ${client.id}; client ${capture.clientId} owns it`);
       return null;
     }
     return capture;
   }
 
-  // Watches the owning page for as long as `capture` lives: its end cancels the capture (the helper would otherwise
+  // Watches the owning client for as long as `capture` lives: its end cancels the capture (the helper would otherwise
   // keep recording for a composer that is gone, and every later start answer `busy`). Released captures unfollow.
-  private follow(capture: Capture, sender: VoiceSender): void {
-    const gone = () => {
+  private follow(capture: Capture, client: ClientRef): void {
+    capture.unfollow = client.onGone(() => {
       if (this.active !== capture) return;
       this.release(capture);
-      this.backend.cancel(capture.captureId);
-    };
-    const navigating = (details: NavigationDetails) => {
-      if (details.isMainFrame && !details.isSameDocument) gone();
-    };
-    sender.on('destroyed', gone);
-    sender.on('render-process-gone', gone);
-    sender.on('did-start-navigation', navigating);
-    capture.unfollow = () => {
-      sender.removeListener('destroyed', gone);
-      sender.removeListener('render-process-gone', gone);
-      sender.removeListener('did-start-navigation', navigating);
-    };
+      if (capture.asked) this.backend.cancel(capture.captureId);
+    });
   }
 
   private release(capture: Capture): void {

@@ -24,7 +24,8 @@ function harness(holder: SessionRecord['holder'], answers: Partial<Record<Comman
     return () => set.delete(listener);
   }) as HostEvents;
   const stop = startYield({
-    dispatch: vi.fn(async (_owner, name: CommandName, input: unknown) => {
+    dispatch: vi.fn(async (_owner, command: string, input: unknown) => {
+      const name = command as CommandName; // P5 O1 M5: the dispatch takes any registry's name
       calls.push({ name, input });
       return { ok: true, value: answers[name] ?? (name === 'session.stop' ? { exited: true, code: 0, signal: null } : undefined) } as CommandResult<CommandName>;
     }),

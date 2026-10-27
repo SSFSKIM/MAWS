@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ClientExitSchema,
   ClientHelloSchema,
+  ClientHelloV2Schema,
   DOC_FRAME_CAP,
   DocumentsCloseSchema,
   DocumentsClosedSchema,
@@ -11,7 +12,9 @@ import {
   LINE_CAP,
   ServerRefuseSchema,
   ServerWelcomeSchema,
+  ServerWelcomeV2Schema,
   SOCKET_PROTOCOL,
+  SOCKET_PROTOCOL_V2,
   SocketLineSchema,
   splitLines,
   splitRecords,
@@ -100,11 +103,21 @@ describe('splitLines', () => {
 });
 
 describe('the socket layer schemas', () => {
-  const hello = { t: 'hello', protocol: SOCKET_PROTOCOL, token: 'ab', buildId: 'b', wire: 'w', appPid: 7 };
+  const hello = { t: 'hello', protocol: SOCKET_PROTOCOL, token: 'ab', minor: 0, build: 'b', capabilities: [], appPid: 7 };
+
+  it('speaks protocol 3, the wire’s major, and keeps protocol 2’s hello and welcome as they were (P5 O1 M6)', () => {
+    expect([SOCKET_PROTOCOL, SOCKET_PROTOCOL_V2]).toEqual([3, 2]);
+    const v2 = { t: 'hello', protocol: 2, token: 'ab', buildId: 'b', wire: 'w', appPid: 7 };
+    expect(ClientHelloV2Schema.parse(v2)).toEqual(v2);
+    expect(ClientHelloSchema.safeParse(v2).success).toBe(false);
+    const welcomeV2 = { t: 'welcome', protocol: 2, buildId: 'b', wire: 'w', pid: 9, startedAt: '2026-10-06T00:00:00.000Z', liveSessions: 0, rows: 0 };
+    expect(ServerWelcomeV2Schema.parse(welcomeV2)).toEqual(welcomeV2);
+    expect(ServerWelcomeSchema.safeParse(welcomeV2).success).toBe(false);
+  });
 
   it('parses each line kind and refuses unknown ones', () => {
     expect(SocketLineSchema.parse(hello)).toEqual(hello);
-    const welcome = { t: 'welcome', protocol: 1, buildId: 'b', wire: 'w', pid: 9, startedAt: '2026-10-06T00:00:00.000Z', liveSessions: 0, rows: 0 };
+    const welcome = { t: 'welcome', protocol: 3, minor: 1, build: 'b', capabilities: ['area.feature'], pid: 9, startedAt: '2026-10-06T00:00:00.000Z', liveSessions: 0, rows: 0 };
     expect(ServerWelcomeSchema.parse(welcome)).toEqual(welcome);
     for (const reason of ['token', 'protocol', 'wire', 'replaced'] as const) {
       expect(ServerRefuseSchema.parse({ t: 'refuse', reason, protocol: 1, buildId: 'b', wire: 'w', liveSessions: 2 }).reason).toBe(reason);
@@ -169,8 +182,8 @@ const EXPECTED: Record_[] = [
 ];
 
 describe('socket protocol 2: document frames beside the JSON lines (P3-A M5)', () => {
-  it('is protocol 2', () => {
-    expect(SOCKET_PROTOCOL).toBe(2);
+  it('came with protocol 2, which protocol 3 keeps (P5 O1 M6)', () => {
+    expect(SOCKET_PROTOCOL_V2).toBe(2);
   });
 
   it('encodes a frame as the mark, the length of channel and payload, the channel and the payload', () => {

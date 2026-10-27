@@ -28,6 +28,21 @@ const YJS_PATTERNS = [
 const YJS_DYNAMIC = { selector: 'ImportExpression[source.value=/^@y.(?:y|prosemirror)(?:\\W.*)?$/]', message: YJS_PATTERNS[0].message };
 const PORTABLE_DYNAMIC_SYNTAX = { selector: `ImportExpression[source.value=/${PORTABLE_DYNAMIC.source}/]`, message: PORTABLE };
 // P3-A end
+// P5 O1 M3 start (docs/doperpowers/plans/2026-10-27-p5-o1-seams.md, M3): the machine-bound services, the ones P5 moves
+// to mawsd (survey §2 items 1-7 and 12), import no Electron (value, type or dynamic) and not main's open-external (an
+// Electron effect): every client-only effect goes through the injected client port (OX4). Four files are allowed, each
+// with its reason below. The imports that reach Electron through main's router, events and windows are O3's to cut.
+const CLIENT_PORT = "A machine-bound service (P5 OX4) imports no Electron and not main's open-external: reach the person's screen through the injected ClientPort (src/shared/client/port.ts).";
+const MACHINE_BOUND = ['src/main/{index,sessions,side,history,attention,owner,git,scm,files,library,connectors,delivery,catalog,settings,usage,gateway}/**/*.{ts,tsx}'];
+const MACHINE_BOUND_ALLOWED = [
+  'src/main/attention/index.ts', // the client half: it reads page viewing and window focus
+  'src/main/connectors/oauth-root.ts', // safeStorage, O4's to replace (U7)
+  'src/main/settings/index.ts', // nativeTheme, client state until O3 splits settings
+  'src/main/settings/capture-chords.ts', // the menu's chord capture
+];
+// `.` stands for the slash, as above
+const CLIENT_PORT_DYNAMIC = { selector: 'ImportExpression[source.value=/^(?:electron|.*.open-external)$/]', message: CLIENT_PORT };
+// P5 O1 M3 end
 // P3-B start: schema parity (D4 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md). The document's ProseMirror
 // schema is built in one module, src/artifacts/document/schema.ts, so the host's writer and every editor derive the same
 // Yjs storage keys from it; a second `getSchema` or a mark or node created elsewhere is a second schema. The composer's
@@ -163,6 +178,16 @@ module.exports = defineConfig(
     },
   },
   // P3-A end
+  // P5 O1 M3: the no-Electron rule over the machine-bound services (above). This is those files' one block of each rule,
+  // so it restates src/'s Yjs rules.
+  {
+    files: MACHINE_BOUND,
+    ignores: MACHINE_BOUND_ALLOWED,
+    rules: {
+      'no-restricted-imports': ['error', { paths: [{ name: 'electron', message: CLIENT_PORT }], patterns: [{ group: ['**/open-external'], message: CLIENT_PORT }, ...YJS_PATTERNS] }],
+      'no-restricted-syntax': ['error', CLIENT_PORT_DYNAMIC, YJS_DYNAMIC],
+    },
+  },
   // P3-B start: the one-schema rule (above).
   {
     files: ['src/**/*.{ts,tsx}'],

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { createHostRuntime, HostCommandError, type HostEmit, type HostPort } from '@shared/host/runtime';
+import { captureConsole } from '../../../test/support/console-capture';
 
 // Electron is faked. A fork returns a child that spawns when the test says so; a MessageChannelMain is a pair of
 // ports delivering to each other on a microtask, like the real ones. The real host runtime serves the port a child
@@ -247,15 +248,48 @@ describe('host supervisor', () => {
     await expect(reply).resolves.toMatchObject({ ok: false, error: { code: 'timeout' } });
   });
 
-  it('relays host events to the renderer and drops events outside the registry', async () => {
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+  // P5 O1 M6: an event outside the registry is a newer build's, dropped with one line per name
+  it('relays host events to the renderer and drops events outside the registry, logged once per name', async () => {
+    const error = vi.spyOn(console, 'error');
+    const warn = captureConsole('warn', /^\[hosts\] dropped pty-host's event/);
     const { pty } = await startReady();
     const data = new Uint8Array([104, 105]);
     fromHost(pty, { t: 'evt', name: 'pty.data', payload: { ptyId: 'p1', offset: 0, data } });
     fromHost(pty, { t: 'evt', name: 'nope.thing', payload: {} });
+    fromHost(pty, { t: 'evt', name: 'nope.thing', payload: {} });
     await flush();
     expect(emit).toHaveBeenCalledExactlyOnceWith('pty.data', { ptyId: 'p1', offset: 0, data });
-    expect(log).toHaveBeenCalledOnce();
+    expect(warn.lines()).toEqual(["[hosts] dropped pty-host's event nope.thing: not in this build's event registry (logged once per name)"]);
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  // P5 O1 M6: what a host sends is read tolerantly, so a newer build's fields are dropped before the renderer sees them
+  it('drops the fields this build does not know from an event, an output and the envelope, each logged once', async () => {
+    const warn = captureConsole('warn', /^\[hosts\] dropped /);
+    void supervisor.start();
+    const pty = latest('maws-pty-host'); // played by hand: a newer build's runtime would answer what this one refuses
+    const requests: { t: string; id: string }[] = [];
+    pty.hello!.port.on('message', ({ data }) => void requests.push(data as { t: string; id: string }));
+    pty.spawn(202);
+    await flush();
+    const data = new Uint8Array([104, 105]);
+    fromHost(pty, { t: 'evt', name: 'pty.data', payload: { ptyId: 'p1', offset: 0, data, newer: 1 }, newerEnvelope: true });
+    fromHost(pty, { t: 'evt', name: 'pty.data', payload: { ptyId: 'p1', offset: 2, data, newer: 2 } });
+    await flush();
+    expect(emit.mock.calls).toEqual([
+      ['pty.data', { ptyId: 'p1', offset: 0, data }],
+      ['pty.data', { ptyId: 'p1', offset: 2, data }],
+    ]);
+    const reply = supervisor.dispatch('pty-host', 'pty.ping', undefined);
+    await flush();
+    const request = requests.find((message) => message.t === 'req')!;
+    fromHost(pty, { t: 'res', id: request.id, ok: true, value: { ...PING(202), newerOutput: 'x' } });
+    await expect(reply).resolves.toEqual({ ok: true, value: PING(202) });
+    expect(warn.lines()).toEqual([
+      '[hosts] dropped newerEnvelope from envelope evt, a field this build does not know (logged once per message and path)',
+      '[hosts] dropped newer from event pty.data, a field this build does not know (logged once per message and path)',
+      '[hosts] dropped newerOutput from the output of pty.ping, a field this build does not know (logged once per message and path)',
+    ]);
   });
 
   // E10: a host emits nothing before main's ready line (X13); main says it on the port right after its hello
@@ -512,15 +546,19 @@ describe('host supervisor', () => {
     supervisor.onEvent('pty.data', () => {
       throw new Error('a faulty listener');
     });
-    emit.mockImplementation((name, payload) => (payload as { data?: unknown }).data !== 'invalid'); // main's emit refuses what fails X2
-    fromHost(pty, { t: 'evt', name: 'pty.data', payload: { ptyId: 'p1', data: 'hi' } });
-    fromHost(pty, { t: 'evt', name: 'pty.data', payload: { ptyId: 'p1', data: 'invalid' } });
+    const hi = { ptyId: 'p1', offset: 0, data: new Uint8Array([104, 105]) };
+    emit.mockImplementation((_name, payload) => (payload as { offset: number }).offset !== 1); // main's emit refusing one
+    fromHost(pty, { t: 'evt', name: 'pty.data', payload: hi });
+    fromHost(pty, { t: 'evt', name: 'pty.data', payload: { ...hi, offset: 1 } });
+    fromHost(pty, { t: 'evt', name: 'pty.data', payload: { ptyId: 'p1', data: 'invalid' } }); // P5 O1 M6: refused by the supervisor's own read
     await flush();
-    expect(seen).toEqual([{ ptyId: 'p1', data: 'hi' }]);
+    expect(seen).toEqual([hi]);
     expect(exits).toEqual([]);
+    expect(emit).toHaveBeenCalledTimes(2);
     expect(log).toHaveBeenCalledWith(expect.stringContaining('pty.data'), expect.any(Error));
+    expect(log).toHaveBeenCalledWith("[hosts] dropped pty-host's invalid pty.data", expect.any(Array));
     off();
-    fromHost(pty, { t: 'evt', name: 'pty.data', payload: { ptyId: 'p1', data: 'again' } });
+    fromHost(pty, { t: 'evt', name: 'pty.data', payload: { ...hi, offset: 2 } });
     await flush();
     expect(seen).toHaveLength(1);
   });

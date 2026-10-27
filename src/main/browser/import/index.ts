@@ -11,7 +11,7 @@
 import { BrowserWindow, dialog, nativeImage } from 'electron';
 import type { ImportedProfile } from '@shared/browser/profiles';
 import type { BrowserSettings } from '@shared/ipc/schema/settings';
-import { openDialogFor } from '../../files/e2e-pick';
+import { openDialogFor } from '../../client/e2e-pick';
 import type { Index } from '../../index/index';
 import type { registerMainHandler } from '../../ipc/router';
 import { registerBookmarkHandlers } from '../bookmarks/register';
@@ -170,7 +170,7 @@ export function startBrowserImport({ userData, settings, index, register, emit, 
 function nativeChooser(env: NodeJS.ProcessEnv): ChooseDirectory {
   return (sender, options) =>
     openDialogFor(env, (dialogOptions) => {
-      const win = BrowserWindow.fromWebContents(sender);
+      const win = sender && BrowserWindow.fromWebContents(sender);
       return win ? dialog.showOpenDialog(win, dialogOptions) : dialog.showOpenDialog(dialogOptions);
     })(options);
 }

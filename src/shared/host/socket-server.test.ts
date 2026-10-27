@@ -7,8 +7,12 @@ import { splitLines } from './socket-protocol';
 import { serveSocketClients, type SocketClients } from './socket-server';
 
 const TOKEN = 'a'.repeat(64);
-const IDENTITY = { protocol: 1, buildId: 'build-1', wire: 'wire-1', pid: 4242, startedAt: '2026-10-06T10:00:00.000Z' };
-const hello = (over: Record<string, unknown> = {}) => ({ t: 'hello', protocol: 1, token: TOKEN, buildId: 'build-1', wire: 'wire-1', appPid: 7, ...over });
+const IDENTITY = { protocol: 3, minor: 2, buildId: 'build-1', capabilities: ['area.feature'], wire: 'wire-1', pid: 4242, startedAt: '2026-10-06T10:00:00.000Z' };
+const hello = (over: Record<string, unknown> = {}) => ({ t: 'hello', protocol: 3, token: TOKEN, minor: 2, build: 'build-1', capabilities: [], appPid: 7, ...over });
+// P5 O1 M6: protocol 2's hello, as a pre-O1 app sends it (the protocol-2 window)
+const helloV2 = (over: Record<string, unknown> = {}) => ({ t: 'hello', protocol: 2, token: TOKEN, buildId: 'build-0', wire: 'wire-1', appPid: 6, ...over });
+const WELCOME = { t: 'welcome', protocol: 3, minor: 2, build: 'build-1', capabilities: ['area.feature'], pid: 4242, startedAt: IDENTITY.startedAt, liveSessions: 2, rows: 3 };
+const refusal = (reason: string) => ({ t: 'refuse', reason, protocol: 3, buildId: 'build-1', wire: 'wire-1', liveSessions: 2 });
 const ITEMS = { appSessionId: 'app-1', items: [] };
 const until = (check: () => boolean) => vi.waitFor(() => expect(check()).toBe(true), { timeout: 3_000, interval: 5 });
 const settle = () => new Promise((resolve) => setTimeout(resolve, 40));
@@ -85,7 +89,7 @@ describe('the socket layer handshake (server side)', () => {
     const host = await start({ hooks: [() => void order.push('hook')] });
     const client = await host.connect();
     client.send(hello());
-    expect(await client.next()).toEqual({ t: 'welcome', ...IDENTITY, liveSessions: 2, rows: 3 });
+    expect(await client.next()).toEqual(WELCOME);
     expect(host.served.connected()).toBe(true);
     expect(host.changes).toEqual([true]);
     expect(host.log).toHaveBeenCalledWith(expect.stringContaining('appPid 7'));
@@ -115,7 +119,7 @@ describe('the socket layer handshake (server side)', () => {
     const host = await start();
     const client = await host.connect();
     client.sendRaw(`${JSON.stringify(hello({ token: 'b'.repeat(64) }))}\n${JSON.stringify({ t: 'exit', when: 'now' })}\n`);
-    expect(await client.next()).toEqual({ t: 'refuse', reason: 'token', protocol: 1, buildId: 'build-1', wire: 'wire-1', liveSessions: 2 });
+    expect(await client.next()).toEqual(refusal('token'));
     await client.closed;
     await settle();
     expect(host.exits).toEqual([]);
@@ -137,8 +141,8 @@ describe('the socket layer handshake (server side)', () => {
   it('refuses another protocol but keeps the connection for one exit, and honours it', async () => {
     const host = await start();
     const client = await host.connect();
-    client.send({ t: 'hello', protocol: 2, token: TOKEN, somethingNew: true }); // a later protocol's hello: only the preamble is read
-    expect(await client.next()).toEqual({ t: 'refuse', reason: 'protocol', protocol: 1, buildId: 'build-1', wire: 'wire-1', liveSessions: 2 });
+    client.send({ t: 'hello', protocol: 4, token: TOKEN, somethingNew: true }); // a later protocol's hello: only the preamble is read
+    expect(await client.next()).toEqual(refusal('protocol'));
     await settle();
     expect(client.isClosed()).toBe(false);
     client.send({ t: 'exit', when: 'now' });
@@ -147,17 +151,17 @@ describe('the socket layer handshake (server side)', () => {
     expect(host.served.connected()).toBe(false);
   });
 
-  it('refuses another wire fingerprint, keeps the connection for one exit, and closes it on anything else', async () => {
+  it('refuses a protocol-2 hello of another wire fingerprint, keeps the connection for one exit, and closes it on anything else', async () => {
     const host = await start();
     const armed = await host.connect();
-    armed.send(hello({ wire: 'wire-2' }));
+    armed.send(helloV2({ wire: 'wire-2' }));
     expect(await armed.next()).toMatchObject({ t: 'refuse', reason: 'wire' });
     armed.send({ t: 'exit', when: 'idle' });
     await until(() => host.exits.length === 1);
     expect(host.exits).toEqual(['idle']);
 
     const chatty = await host.connect();
-    chatty.send(hello({ wire: 'wire-2' }));
+    chatty.send(helloV2({ wire: 'wire-2' }));
     await chatty.next();
     chatty.send({ t: 'req', id: '1', name: 'engine.ping', input: undefined });
     await chatty.closed;
@@ -177,7 +181,7 @@ describe('the socket layer handshake (server side)', () => {
     badToken.send(hello({ token: 'c'.repeat(64) }));
     await badToken.closed;
     const badWire = await host.connect();
-    badWire.send(hello({ wire: 'other' }));
+    badWire.send(helloV2({ wire: 'other' }));
     await badWire.next();
     await settle();
     expect(first.isClosed()).toBe(false);
@@ -186,7 +190,7 @@ describe('the socket layer handshake (server side)', () => {
     const second = await host.connect();
     second.send(hello({ appPid: 8 }));
     expect(await second.next()).toMatchObject({ t: 'welcome' });
-    expect(await first.next((line) => (line as { t: string }).t === 'refuse')).toEqual({ t: 'refuse', reason: 'replaced', protocol: 1, buildId: 'build-1', wire: 'wire-1', liveSessions: 2 });
+    expect(await first.next((line) => (line as { t: string }).t === 'refuse')).toEqual(refusal('replaced'));
     await first.closed;
     expect(host.runtime.hasClient()).toBe(false); // the new client is served, not yet ready
     expect(host.served.connected()).toBe(true);
@@ -237,12 +241,12 @@ describe('the socket layer handshake (server side)', () => {
   it('closes a refused connection that sends no exit within the hello deadline, and keeps one that sends it in time', async () => {
     const host = await start({ helloTimeoutMs: 80 });
     const silent = await host.connect();
-    silent.send(hello({ wire: 'wire-2' }));
+    silent.send(helloV2({ wire: 'wire-2' }));
     expect(await silent.next()).toMatchObject({ t: 'refuse', reason: 'wire' });
     await silent.closed;
     expect(host.log).toHaveBeenCalledWith('closed a refused connection that sent no exit within 80 ms');
     const late = await host.connect();
-    late.send({ t: 'hello', protocol: 2, token: TOKEN });
+    late.send({ t: 'hello', protocol: 1, token: TOKEN });
     expect(await late.next()).toMatchObject({ t: 'refuse', reason: 'protocol' });
     late.send({ t: 'exit', when: 'idle' });
     await until(() => host.exits.length === 1);
@@ -273,6 +277,67 @@ describe('the socket layer handshake (server side)', () => {
     host.served.closeClient();
     await client.closed;
     await until(() => !host.served.connected());
+  });
+});
+
+// P5 O1 M6 (OX1): the major, the tolerant reads and the protocol-2 window, server side.
+describe('the socket layer’s wire major (server side, P5 O1 M6)', () => {
+  it('welcomes any minor of its major with its own minor and capabilities, and keeps what the hello said of the client', async () => {
+    const host = await start();
+    const client = await host.connect();
+    client.send(hello({ minor: 9, build: 'build-9', capabilities: ['probe.extra'] }));
+    expect(await client.next()).toEqual(WELCOME);
+    expect(host.served.peer()).toEqual({ major: 3, minor: 9, build: 'build-9', capabilities: ['probe.extra'] });
+    expect(host.log).toHaveBeenCalledWith('client connected: appPid 7 build build-9 wire 3.9 capabilities [probe.extra]');
+    client.socket.destroy();
+    await until(() => !host.served.connected());
+    expect(host.served.peer()).toBeNull();
+  });
+
+  it('reads a hello and the envelope tolerantly: a key a newer minor added is dropped and logged once', async () => {
+    const host = await start();
+    const client = await host.connect();
+    client.send(hello({ newerField: true }));
+    expect(await client.next()).toEqual(WELCOME);
+    expect(host.log).toHaveBeenCalledWith('dropped newerField from socket hello, a field this build does not know (logged once per message and path)');
+    client.send({ t: 'req', id: '1', name: 'engine.ping', input: undefined, newerEnvelope: 1 });
+    expect(await client.next((line) => (line as { t: string }).t === 'res')).toMatchObject({ id: '1', ok: true });
+    client.send({ t: 'ready', newerEnvelope: 1 });
+    await until(() => host.runtime.hasClient());
+    client.send({ t: 'exit', when: 'idle', newerExit: 1 });
+    await until(() => host.exits.length === 1);
+    expect(host.served.connected()).toBe(true);
+  });
+
+  it('closes a hello of its major that is malformed beyond unknown keys', async () => {
+    const host = await start();
+    const client = await host.connect();
+    client.send(hello({ minor: -1 }));
+    await client.closed;
+    expect(client.lines).toEqual([]);
+    expect(host.log).toHaveBeenCalledWith('closed a connection: a malformed hello');
+  });
+
+  it('the protocol-2 window: welcomes a protocol-2 hello whose fingerprint is its own with protocol 2’s welcome, and serves it', async () => {
+    const host = await start();
+    const client = await host.connect();
+    client.send(helloV2());
+    expect(await client.next()).toEqual({ t: 'welcome', protocol: 2, buildId: 'build-1', wire: 'wire-1', pid: 4242, startedAt: IDENTITY.startedAt, liveSessions: 2, rows: 3 });
+    expect(host.served.peer()).toEqual({ major: 2, minor: 0, build: 'build-0', capabilities: [] });
+    expect(host.log).toHaveBeenCalledWith('client connected: appPid 6 build build-0 wire 2.0 capabilities []');
+    client.send({ t: 'req', id: '1', name: 'engine.ping', input: undefined });
+    expect(await client.next((line) => (line as { t: string }).t === 'res')).toMatchObject({ id: '1', ok: true });
+  });
+
+  it('refuses every protocol but its own and 2 (`protocol`), naming its own in the refusal', async () => {
+    const host = await start();
+    for (const protocol of [1, 4]) {
+      const client = await host.connect();
+      client.send(hello({ protocol }));
+      expect(await client.next()).toEqual(refusal('protocol'));
+    }
+    expect(host.log).toHaveBeenCalledWith('refused protocol 4 (this supervisor speaks 3, and 2 through its window)');
+    expect(host.changes).toEqual([]);
   });
 });
 

@@ -8,24 +8,17 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ClientPort } from '@shared/client/port';
 import type { ConnectorOAuthSealer } from './oauth-store';
 
 const electron = vi.hoisted(() => ({
   userData: '',
   safeStorage: { isAsyncEncryptionAvailable: vi.fn(async () => true), encryptStringAsync: vi.fn(async (text: string) => Buffer.from(text)), decryptStringAsync: vi.fn(async (sealed: Buffer) => ({ result: sealed.toString(), shouldReEncrypt: false })) },
   hasSwitch: vi.fn(() => true),
-  opened: [] as string[],
-  openAnswer: true,
 }));
 vi.mock('electron', () => ({
   app: { getPath: () => electron.userData, whenReady: async () => {}, commandLine: { hasSwitch: electron.hasSwitch } },
   safeStorage: electron.safeStorage,
-}));
-vi.mock('../open-external', () => ({
-  openExternalUrl: (url: string) => {
-    electron.opened.push(url);
-    return electron.openAnswer;
-  },
 }));
 
 const { guardE2ECustody, openOwnerBrowser, productionConnectorOAuth } = await import('./oauth-root');
@@ -33,8 +26,6 @@ const { guardE2ECustody, openOwnerBrowser, productionConnectorOAuth } = await im
 let root: string;
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'maws-oauth-root-'));
-  electron.opened = [];
-  electron.openAnswer = true;
   electron.hasSwitch.mockReturnValue(true);
   for (const fn of Object.values(electron.safeStorage)) fn.mockClear();
 });
@@ -102,7 +93,7 @@ describe('the E2E custody guard', () => {
 describe('the production root', () => {
   it('composes lazily: a provider whose listing of an empty store touches no safeStorage', async () => {
     electron.userData = join(root, 'userData');
-    const provider = productionConnectorOAuth({ closeHost: async () => true, log: () => {} });
+    const provider = productionConnectorOAuth({ closeHost: async () => true, log: () => {}, port: { openExternal: vi.fn() } });
     expect(await provider.saved()).toEqual([]);
     for (const fn of Object.values(electron.safeStorage)) expect(fn).not.toHaveBeenCalled();
     provider.stop();
@@ -115,16 +106,18 @@ describe('the production root', () => {
     mkdirSync(join(electron.userData, 'connectors', 'oauth'), { recursive: true });
     const { writeFileSync } = await import('node:fs');
     writeFileSync(join(electron.userData, 'connectors', 'oauth', '33333333-3333-4333-8333-333333333333.sealed'), 'maws-connector-oauth/1\nAAAA\n');
-    const provider = productionConnectorOAuth({ closeHost: async () => true, log: () => {} });
+    const provider = productionConnectorOAuth({ closeHost: async () => true, log: () => {}, port: { openExternal: vi.fn() } });
     expect(await provider.saved()).toEqual([{ state: 'unreadable', connectionId: '33333333-3333-4333-8333-333333333333' }]); // ids only: forgettable
     for (const fn of Object.values(electron.safeStorage)) expect(fn).not.toHaveBeenCalled();
     provider.stop();
   });
 
-  it('opens the owner’s browser through the scheme-checked seam, and fails when it refuses', async () => {
-    await openOwnerBrowser('http://127.0.0.1:4000/authorize?state=s');
-    expect(electron.opened).toEqual(['http://127.0.0.1:4000/authorize?state=s']);
-    electron.openAnswer = false;
-    await expect(openOwnerBrowser('file:///etc/passwd')).rejects.toThrow();
+  it('opens the owner’s browser through the client port, and fails with its reason when the port did not open it', async () => {
+    const openExternal = vi.fn<ClientPort['openExternal']>(async () => ({ opened: true }));
+    const asker = { id: 'page:1.1', onGone: () => () => {} } as never;
+    await openOwnerBrowser({ openExternal }, 'http://127.0.0.1:4000/authorize?state=s', asker);
+    expect(openExternal).toHaveBeenCalledExactlyOnceWith(asker, { url: 'http://127.0.0.1:4000/authorize?state=s' });
+    openExternal.mockResolvedValueOnce({ opened: false, reason: 'only http, https and mailto links open outside MAWS' });
+    await expect(openOwnerBrowser({ openExternal }, 'file:///etc/passwd', asker)).rejects.toThrow('the authorization URL was not opened: only http, https and mailto links open outside MAWS');
   });
 });

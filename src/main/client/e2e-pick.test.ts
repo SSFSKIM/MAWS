@@ -2,8 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { openDialogFor } from './e2e-pick';
-import { pickFiles, type OpenDialog } from './pick';
+import { openDialogFor, type OpenDialog } from './e2e-pick';
 
 let dir: string;
 beforeEach(() => {
@@ -27,7 +26,6 @@ describe('the e2e seam for layout.pickFiles', () => {
     const panel = native();
     const open = openDialogFor({ MAWS_E2E: '1' }, panel);
     expect(await open({ properties: ['openDirectory'] })).toEqual({ canceled: true, filePaths: [] });
-    expect(await pickFiles({ kind: 'directory', directory: null, multiple: false }, { showOpenDialog: open })).toEqual({ files: [] });
     expect(openDialogFor({ MAWS_E2E: '1', MAWS_E2E_PICK_PATHS: '' }, panel)).not.toBe(panel);
     expect(await openDialogFor({ MAWS_E2E: '1', MAWS_E2E_PICK_PATHS: '' }, panel)({ properties: ['openFile'] })).toEqual({ canceled: true, filePaths: [] });
     expect(panel).not.toHaveBeenCalled();
@@ -43,11 +41,9 @@ describe('the e2e seam for layout.pickFiles', () => {
     const panel = native();
     const env: NodeJS.ProcessEnv = { MAWS_E2E: '1', MAWS_E2E_PICK_PATHS: project };
     const open = openDialogFor(env, panel);
-    expect(await pickFiles({ kind: 'directory', directory: null, multiple: false }, { showOpenDialog: open })).toEqual({
-      files: [{ path: project, name: 'project', bytes: 0, mediaType: 'inode/directory', data: null }],
-    });
+    expect(await open({ properties: ['openDirectory', 'createDirectory'] })).toEqual({ canceled: false, filePaths: [project] });
     env.MAWS_E2E_PICK_PATHS = [a, b].join(delimiter); // a driver sets the next pick's answer
-    expect((await pickFiles({ kind: 'files', directory: null, multiple: true }, { showOpenDialog: open })).files.map((f) => f.path)).toEqual([a, b]);
+    expect(await open({ properties: ['openFile', 'multiSelections'] })).toEqual({ canceled: false, filePaths: [a, b] });
     expect(panel).not.toHaveBeenCalled();
   });
 

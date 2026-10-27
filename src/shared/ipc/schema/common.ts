@@ -1,7 +1,9 @@
 // X2 pieces several namespaces share. Imported through `@shared/ipc/schema`, never directly.
 import * as z from 'zod';
 
-export type Owner = 'main' | 'engine-host' | 'pty-host';
+// P5 O1 M5: `machine` is a machine-bound service's namespace, answered either by handlers inside main (the embedded
+// binding) or by another process (the host binding), with the asker's `ClientRef` carried across (src/main/ipc/router.ts).
+export type Owner = 'main' | 'machine' | 'engine-host' | 'pty-host';
 export interface CommandSpec<I extends z.ZodType, O extends z.ZodType> {
   input: I;
   output: O;

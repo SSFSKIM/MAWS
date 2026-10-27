@@ -18,6 +18,8 @@
 import { randomUUID } from 'node:crypto';
 import { readFile, rm } from 'node:fs/promises';
 import { extname } from 'node:path';
+import { isNoClient, NO_CLIENT_REASON, type ClientPort } from '@shared/client/port';
+import type { ClientRef } from '@shared/ipc/client';
 import type { ArtifactExportFormat } from '@shared/maws/tools';
 import type { CommandInput, CommandOutput, CommandResult, EventPayload } from '@shared/ipc/schema';
 import type { DirectSource } from '@shared/ipc/schema/connectors';
@@ -60,7 +62,7 @@ export interface DeliveryDeps {
   call(name: 'artifacts.get', input: CommandInput<'artifacts.get'>): Promise<CommandResult<'artifacts.get'>>; // the engine host's
   connectors: OwnerDelivery | null; // route D's owner delivery; null: no route D
   shellEnv(): Promise<Record<string, string>>; // the owner's login-shell environment (the one capture main makes)
-  openExternal(url: string): boolean; // the scheme-checked opener
+  port: Pick<ClientPort, 'openExternal'>; // the client port (OX4): gws's sign-in page, in the asking client's browser
   gws?: GwsDriver; // tests
   readFile?: (path: string) => Promise<string>; // tests: the Notion export's read
   now?: () => number;
@@ -186,7 +188,7 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
   }
   const signalOf = (run: Run) => AbortSignal.any([run.controller.signal, stopping.signal]);
 
-  async function connect({ runId, target, artifactId, source }: CommandInput<'delivery.connect'>): Promise<DeliveryConnectAnswer> {
+  async function connect({ runId, target, artifactId, source }: CommandInput<'delivery.connect'>, client: ClientRef | null): Promise<DeliveryConnectAnswer> {
     const run = begin(runId);
     if (!run) return { ok: false, why: 'busy' };
     const signal = signalOf(run);
@@ -196,7 +198,7 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
         const found = await sourceFor(source, artifactId, signal);
         if (found === 'unknown') return { ok: false, why: 'source' };
         if (!found) return { ok: false, why: signal.aborted ? 'cancelled' : 'none' };
-        const made = await deps.connectors.connect(directOf(found), signal);
+        const made = await deps.connectors.connect(directOf(found), signal, client);
         if (made.ok) return { ok: true };
         if (made.why === 'cancelled') return { ok: false, why: 'cancelled' };
         if (made.why === 'timeout') return { ok: false, why: 'timeout' };
@@ -210,7 +212,12 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
       if (state.state === 'needsSetup') return { ok: false, why: 'needsSetup' };
       // a sign-in that lacks Drive keeps what it had and adds Drive; a first one asks for Drive alone
       const scopes = state.state === 'noDrive' ? [...new Set([...state.scopes, DRIVE_SCOPE])] : undefined;
-      const login = await gws.login(bin, env, { ...(scopes && { scopes }), openUrl: (url) => void deps.openExternal(url), signal });
+      // a page the port did not open fails the login as the CLI's could-not-open (./gws.ts)
+      const openUrl = async (url: string) => {
+        const answer = await deps.port.openExternal(client, { url });
+        if (isNoClient(answer) || !answer.opened) throw new Error(isNoClient(answer) ? NO_CLIENT_REASON : answer.reason);
+      };
+      const login = await gws.login(bin, env, { ...(scopes && { scopes }), openUrl, signal });
       if (login.ok) return { ok: true };
       return { ok: false, why: login.why, ...(login.message && { message: login.message.slice(0, WORDS_MAX) }) };
     } catch (error) {
@@ -325,7 +332,7 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
       return { target: 'drive', state: 'failed', message: words(error) };
     }
   });
-  deps.register('delivery.connect', (input) => connect(input));
+  deps.register('delivery.connect', (input, { client }) => connect(input, client));
   deps.register('delivery.send', (input) => send(input));
   deps.register('delivery.cancel', ({ runId }) => {
     const run = runs.get(runId);

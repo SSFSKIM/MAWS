@@ -89,14 +89,14 @@ class FakeSealer implements ConnectorOAuthSealer {
 
 // The SDK requests and the browser, answered by the test.
 class FakeFlow implements ConnectorOAuthFlow {
-  readonly connects: { requestUrl: string; signal: AbortSignal; answer: Deferred<ConnectorOAuthGrant> }[] = [];
+  readonly connects: { requestUrl: string; signal: AbortSignal; client: unknown; answer: Deferred<ConnectorOAuthGrant> }[] = [];
   readonly refreshes: { grant: ConnectorOAuthGrant; signal: AbortSignal; answer: Deferred<ConnectorOAuthTokens> }[] = [];
   readonly revokes: ConnectorOAuthGrant[] = [];
   revokeAnswer: 'revoked' | 'unsupported' | 'failed' = 'revoked';
-  connect: ConnectorOAuthFlow['connect'] = ({ requestUrl, signal }) => {
+  connect: ConnectorOAuthFlow['connect'] = ({ requestUrl, signal, client = null }) => {
     events.push('consent');
     const answer = deferred<ConnectorOAuthGrant>();
-    this.connects.push({ requestUrl, signal, answer });
+    this.connects.push({ requestUrl, signal, client, answer });
     return answer.promise;
   };
   refresh: ConnectorOAuthFlow['refresh'] = (grantNow, signal) => {
@@ -386,6 +386,22 @@ describe('unauthorized answers', () => {
 });
 
 describe('owner Connect and Reconnect', () => {
+  // P5 O1 M3: the consent opens on the client that asked; a Connect while it runs is busy, so the flow has one asker
+  it('hands the flow the asking client, for Connect and for Reconnect', async () => {
+    const asker = { id: 'page:1.1', onGone: () => () => {} } as never;
+    const connecting = provider.connect(source(), undefined, asker);
+    await vi.waitFor(() => expect(flow.connects).toHaveLength(1));
+    expect(flow.connects[0]!.client).toBe(asker);
+    expect(await provider.connect(source(), undefined, { id: 'page:2.1', onGone: () => () => {} } as never)).toEqual({ ok: false, why: 'busy' });
+    flow.connects[0]!.answer.resolve(grant(tokens(5)));
+    await connecting;
+    const replacing = provider.reconnect(source(), undefined, asker);
+    await vi.waitFor(() => expect(flow.connects).toHaveLength(2));
+    expect(flow.connects[1]!.client).toBe(asker);
+    flow.connects[1]!.answer.resolve(grant(tokens(6)));
+    await replacing;
+  });
+
   it('runs one flow for the exact request URL under a connection id known while connecting, then saves and delivers it', async () => {
     const connecting = provider.connect(source());
     await vi.waitFor(() => expect(flow.connects).toHaveLength(1));

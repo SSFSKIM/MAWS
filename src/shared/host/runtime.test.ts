@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as z from 'zod';
+import type { ClientRef } from '../ipc/client';
+import type { WireRegistry } from '../ipc/registry';
 import { createHostRuntime, HostCommandError, parentPortListener, type HostEmit, type HostPort } from './runtime';
 
 // A fake MessagePortMain: what the runtime posts is recorded; `deliver` plays main posting a message to the host.
@@ -137,6 +140,22 @@ describe('host runtime speaks the host protocol', () => {
     await fake.deliver({ t: 'req', id: '3', name: 'pty.write', input: { ptyId: 'p', data: 5 } });
     expect(fake.posted).toEqual([{ t: 'res', id: '3', ok: false, error: expect.objectContaining({ code: 'invalid_input' }) }]);
     expect(handler).not.toHaveBeenCalled();
+  });
+
+  // P5 O1 M6: main may be a newer minor
+  it('reads the envelope and the input tolerantly: a key this build does not know is dropped, logged once per message and path', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fake = fakePort();
+    const handler = vi.fn<(input: unknown) => Promise<undefined>>(async () => undefined);
+    createHostRuntime((on) => on('pty.write', handler)).serve(fake.port);
+    await fake.deliver({ t: 'req', id: '4', name: 'pty.write', input: { ptyId: 'p', data: 'x', newer: true }, newerEnvelope: 1 });
+    await fake.deliver({ t: 'req', id: '5', name: 'pty.write', input: { ptyId: 'p', data: 'y', newer: false } });
+    expect(handler.mock.calls.map(([input]) => input)).toEqual([{ ptyId: 'p', data: 'x' }, { ptyId: 'p', data: 'y' }]);
+    expect(fake.posted).toEqual([{ t: 'res', id: '4', ok: true }, { t: 'res', id: '5', ok: true }]);
+    expect(warn.mock.calls.map(([line]) => line)).toEqual([
+      '[host] dropped newerEnvelope from envelope req, a field this build does not know (logged once per message and path)',
+      '[host] dropped newer from the input of pty.write, a field this build does not know (logged once per message and path)',
+    ]);
   });
 
   it('turns a throwing handler into internal carrying its message', async () => {
@@ -575,3 +594,103 @@ describe('host runtime: document ports on the parent port (P3-A M4)', () => {
   });
 });
 // P3-A M4 end
+
+// P5 O1 M5: who asked, on the host side. Every handler is handed a `HandlerContext`. A request that names its client gets
+// that client's remote `ClientRef`, one per (served connection, client id), ended by `clientGone` or by the connection's
+// end; a request that names none gets the connection's own ref.
+describe('host runtime: the handler context (P5 O1 M5)', () => {
+  beforeEach(() => vi.restoreAllMocks());
+
+  const PROBE = {
+    commands: {
+      'probe.echo': { owner: 'machine', input: z.strictObject({ text: z.string() }), output: z.strictObject({ text: z.string(), client: z.string() }) },
+    },
+    events: {},
+    hostEvents: [],
+    mainOnly: new Set<string>(),
+  } as const satisfies WireRegistry;
+  const echo = (id: string, client?: string) => ({ t: 'req', id, name: 'probe.echo', input: { text: id }, ...(client ? { client } : {}) });
+
+  it('hands an engine-host handler the connection’s own ref, which ends with the connection', async () => {
+    const seen: ClientRef[] = [];
+    const runtime = createHostRuntime((on) =>
+      on('engine.ping', async (_input, { client }) => {
+        seen.push(client);
+        return PING;
+      }),
+    );
+    const first = fakePort();
+    runtime.serve(first.port);
+    await first.deliver({ t: 'req', id: '1', name: 'engine.ping', input: undefined });
+    await first.deliver({ t: 'req', id: '2', name: 'engine.ping', input: undefined });
+    expect(seen.map((client) => client.id)).toEqual(['1', '1']);
+    expect(seen[1]).toBe(seen[0]);
+    const gone = vi.fn();
+    seen[0]!.onGone(gone);
+    const second = fakePort();
+    runtime.serve(second.port); // the first connection is replaced
+    expect(gone).toHaveBeenCalledOnce();
+    await second.deliver({ t: 'req', id: '3', name: 'engine.ping', input: undefined });
+    expect(seen[2]!.id).toBe('2');
+  });
+
+  it('admits a machine registration and hands it one remote ref per client of the connection, ended by clientGone or the connection', async () => {
+    const seen: ClientRef[] = [];
+    const runtime = createHostRuntime<typeof PROBE>(
+      (on) =>
+        on('probe.echo', async ({ text }, { client }) => {
+          seen.push(client);
+          return { text, client: client.id };
+        }),
+      { registry: PROBE },
+    );
+    const fake = fakePort();
+    runtime.serve(fake.port);
+    await fake.deliver(echo('a', 'page:7.1'));
+    await fake.deliver(echo('b', 'page:7.1'));
+    await fake.deliver(echo('c', 'page:8.1'));
+    await fake.deliver(echo('d'));
+    expect(fake.posted).toEqual([
+      { t: 'res', id: 'a', ok: true, value: { text: 'a', client: '1/page:7.1' } },
+      { t: 'res', id: 'b', ok: true, value: { text: 'b', client: '1/page:7.1' } },
+      { t: 'res', id: 'c', ok: true, value: { text: 'c', client: '1/page:8.1' } },
+      { t: 'res', id: 'd', ok: true, value: { text: 'd', client: '1' } }, // no client: the connection's own
+    ]);
+    expect(seen[1]).toBe(seen[0]);
+    const [seven, , eight, own] = seen.map((client) => {
+      const gone = vi.fn();
+      client.onGone(gone);
+      return gone;
+    });
+    await fake.deliver({ t: 'clientGone', client: 'page:7.1' });
+    expect(seven).toHaveBeenCalledOnce();
+    expect(eight).not.toHaveBeenCalled();
+    // an ended client stays ended on this connection: a later request naming it (a held one flushed after a restart) is
+    // answered, and its handler gets a ref already gone
+    await fake.deliver(echo('e', 'page:7.1'));
+    expect(fake.posted.at(-1)).toEqual({ t: 'res', id: 'e', ok: true, value: { text: 'e', client: '1/page:7.1' } });
+    const revived = vi.fn();
+    seen[4]!.onGone(revived);
+    expect(revived).toHaveBeenCalledOnce();
+    await fake.deliver({ t: 'clientGone', client: 'page:7.1' }); // a second clientGone for it changes nothing
+    expect(seven).toHaveBeenCalledOnce();
+    runtime.detach();
+    expect(eight).toHaveBeenCalledOnce();
+    expect(own).toHaveBeenCalledOnce();
+    expect(seven).toHaveBeenCalledOnce();
+    const late = vi.fn();
+    seen[2]!.onGone(late);
+    expect(late).toHaveBeenCalledOnce(); // gone with its connection, so at once
+  });
+
+  it('ignores a clientGone for an id it does not hold, and keeps serving', async () => {
+    const error = vi.spyOn(console, 'error');
+    const runtime = createHostRuntime<typeof PROBE>((on) => on('probe.echo', async ({ text }, { client }) => ({ text, client: client.id })), { registry: PROBE });
+    const fake = fakePort();
+    runtime.serve(fake.port);
+    await fake.deliver({ t: 'clientGone', client: 'page:404.1' });
+    await fake.deliver(echo('a', 'page:7.1'));
+    expect(fake.posted).toEqual([{ t: 'res', id: 'a', ok: true, value: { text: 'a', client: '1/page:7.1' } }]);
+    expect(error).not.toHaveBeenCalled();
+  });
+});

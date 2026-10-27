@@ -41,6 +41,7 @@ export interface HarnessOptions {
   exitWaitMs?: number; // P2-A: how long an acquisition waits out a process still exiting
   takeOver?: SessionServiceDeps['takeOver']; // P2-A: the take-over's seams (`claude stop`, the registry wait)
   readModel?: SessionReadModel; // P2-A M3: main's read model, fed by the index source and the service's acquisition memory (its digests carry availability)
+  port?: SessionServiceDeps['port']; // P5 O1 M3: the client port's reveal (default: revealed)
 }
 
 export class SessionHarness {
@@ -114,7 +115,7 @@ export class SessionHarness {
         rmSync(path, { recursive: true, force: true });
         this.trashed.push(path);
       },
-      reveal: () => {},
+      port: this.opts.port ?? { reveal: async () => ({ revealed: true }) },
       replay: this.opts.replay ?? null,
       settings: this.opts.settings,
       launchGate: this.opts.launchGate, // C12

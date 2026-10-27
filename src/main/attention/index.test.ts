@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { clientOf } from '../ipc/clients';
 import { emit } from '../ipc/events';
 import { registerMainHandler } from '../ipc/router';
 import { appWindows } from '../windows';
@@ -9,6 +10,7 @@ import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
 import { digest, item, record } from '../../../test/support/builders';
 import { SessionReadModel } from '../sessions/read-model';
 import { PERSIST_RETRY_MS, startAttentionService } from './service';
+import { electronClientPort } from '../client/electron-port';
 import { startAttention } from './index';
 
 const electron = vi.hoisted(() => ({ shown: vi.fn(), badge: vi.fn(), bounce: vi.fn(), notices: [] as { fire(event: string, ...args: unknown[]): void }[] }));
@@ -44,9 +46,9 @@ describe('attention startup', () => {
       observe = (items) => writer.observeAttention(id, items);
       return () => {};
     } });
-    const stop = startAttention(model, { restoredIds: new Set(), settings: () => SETTINGS_DEFAULTS_V18, openWindow: () => { throw new Error('already open'); } });
+    const stop = startAttention(model, { restoredIds: new Set(), settings: () => SETTINGS_DEFAULTS_V18, port: electronClientPort({ env: {}, openWindow: () => { throw new Error('already open'); } }) });
     const handler = vi.mocked(registerMainHandler).mock.calls.find(([name]) => name === 'attention.viewing')![1] as (input: { appSessionId: AppSessionId }, context: unknown) => void;
-    const view = () => handler({ appSessionId: id }, { sender });
+    const view = () => handler({ appSessionId: id }, { client: clientOf(sender as never) });
     try {
       view();
       sender.emit('did-start-loading'); // also fires for an iframe
@@ -58,13 +60,11 @@ describe('attention startup', () => {
       expect(emit).not.toHaveBeenCalled();
       for (let n = 0; n < 3; n++) {
         sender.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
-        expect(sender.listenerCount('did-start-navigation')).toBe(1); // only followAppPages remains
         view();
-        expect(sender.listenerCount('did-start-navigation')).toBe(2);
+        expect(sender.listenerCount('did-start-navigation')).toBe(2); // followAppPages and the page's ClientRef, however many pages
         expect(sender.listenerCount('destroyed')).toBe(1);
       }
       sender.emit('render-process-gone');
-      expect(sender.listenerCount('destroyed')).toBe(0);
       observe([item(id, 'question', '2026-10-23T02:00:00Z')]);
       expect(emit).toHaveBeenCalledWith('attention.notified', expect.objectContaining({ appSessionId: id, delivery: 'in-app' }));
     } finally { stop(); }
@@ -77,7 +77,7 @@ describe('attention startup', () => {
     model.register({ start: (w) => { writer = w; w.observeRecord(record(id)); return () => {}; } });
     const win = { isMinimized: () => false, show: vi.fn(), focus: vi.fn() };
     const openWindow = vi.fn(() => win as never);
-    const stop = startAttention(model, { restoredIds: new Set(), settings: () => SETTINGS_DEFAULTS_V18, openWindow,
+    const stop = startAttention(model, { restoredIds: new Set(), settings: () => SETTINGS_DEFAULTS_V18, port: electronClientPort({ env: {}, openWindow }),
       actions: { reply: vi.fn().mockRejectedValue(new Error('Host unavailable')), canAllow: vi.fn(), allow: vi.fn() } });
     try {
       writer.setDigest(digest(id, { phase: 'working' }));
@@ -110,7 +110,7 @@ describe('attention startup', () => {
       emit: (name, payload) => { if (name === 'attention.changed') observe((payload as { items: AttentionItem[] }).items); },
       store: { list: () => new Promise((resolve) => { loaded = resolve; }), replaceForSession: async () => {}, retireForSession: async () => {} },
     });
-    const stop = startAttention(model, { restoredIds: service.restoredIds, settings: () => SETTINGS_DEFAULTS_V18, openWindow: () => { throw new Error('not clicked'); } });
+    const stop = startAttention(model, { restoredIds: service.restoredIds, settings: () => SETTINGS_DEFAULTS_V18, port: electronClientPort({ env: {}, openWindow: () => { throw new Error('not clicked'); } }) });
     const old = item(id, 'error', '2026-10-01T00:00:00Z');
     loaded([old]); // window still hidden/unfocused while the persisted table arrives
     await service.ready;
@@ -142,7 +142,7 @@ describe('attention startup', () => {
       emit: (name, payload) => { if (name === 'attention.changed') { const change = payload as { appSessionId: AppSessionId; items: AttentionItem[] }; observe(change.appSessionId, change.items); } },
       store: { list, replaceForSession: async () => {}, retireForSession: async () => {} },
     });
-    const stop = startAttention(model, { restoredIds: service.restoredIds, settings: () => SETTINGS_DEFAULTS_V18, openWindow: () => { throw new Error('not clicked'); } });
+    const stop = startAttention(model, { restoredIds: service.restoredIds, settings: () => SETTINGS_DEFAULTS_V18, port: electronClientPort({ env: {}, openWindow: () => { throw new Error('not clicked'); } }) });
     try {
       await vi.advanceTimersByTimeAsync(0);
       expect(list).toHaveBeenCalledTimes(2);

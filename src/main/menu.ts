@@ -11,6 +11,7 @@ import { appWindows } from './windows'; // E2
 import type { Settings, ThemeSetting } from '@shared/ipc/schema';
 import type { EditOp } from '@shared/ipc/schema/layout'; // P4-B2 K6
 import { ACTIONS, ACTION_IDS, type ActionId, type ActionSpec, type KeymapOverrides } from '@shared/keymap/actions';
+import { pageOf } from './ipc/clients';
 import type { emit as emitEvent } from './ipc/events';
 import { emitTo, onEmitted } from './ipc/events';
 import { registerMainHandler } from './ipc/router';
@@ -206,5 +207,5 @@ export function startMenu(deps: { settings(): Settings; emit: Emit }): AppMenu {
 export function registerMenuHandlers(menu: AppMenu): void {
   registerMainHandler('layout.setEnabledActions', ({ actions }) => menu.setEnabled(actions));
   // P4-B2 K6: an Edit ▸ Undo or Redo the asking page's editors did not claim, run natively in that page (its focused frame)
-  registerMainHandler('layout.nativeEdit', ({ op }, { sender }) => void sender[op]());
+  registerMainHandler('layout.nativeEdit', ({ op }, { client }) => void pageOf(client)?.[op]());
 }

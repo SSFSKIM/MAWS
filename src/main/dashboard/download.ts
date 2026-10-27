@@ -2,14 +2,15 @@
 // renderer-callable `artifacts.downloadAsset {artifactId, ref, name?}`. The asset is the artifact's own: main resolves
 // it through the engine host's `artifacts.content` (main's alone to send), which answers a ref only from that
 // artifact's assets, so an unowned ref is refused before any dialog; the renderer never fetches the bytes, and the
-// store scheme's download ban (src/main/artifacts/policies.ts `shouldCancelDownload`) and the CSP stand. The Save
-// dialog opens under Downloads with the displayed descriptor's source name cut to a basename (same-bytes CSV and TSV
-// share one ref, never one extension); the copy lands whole through a temporary file beside it. Under MAWS_E2E=1,
-// MAWS_E2E_SAVE_PATH is the folder a save lands in without the dialog (the library's Save as seam).
+// store scheme's download ban (src/main/artifacts/policies.ts `shouldCancelDownload`) and the CSP stand. The client
+// port's Save dialog (OX4) opens under Downloads with the displayed descriptor's source name cut to a basename
+// (same-bytes CSV and TSV share one ref, never one extension); the copy lands whole through a temporary file beside it.
+// Under MAWS_E2E=1, MAWS_E2E_SAVE_PATH is the folder a save lands in without the dialog (the library's Save as seam).
 import { copyFile, rename, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { SaveDialogOptions, WebContents } from 'electron';
+import type { ClientPort } from '@shared/client/port';
+import type { ClientRef } from '@shared/ipc/client';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import { CommandFailure, type registerMainHandler } from '../ipc/router';
 
@@ -19,7 +20,7 @@ export interface AssetDownloadDeps {
   // the path and the dialog and kept through the copy (holds.ts `holdAsset` in the app), whatever the sheet does meanwhile
   hold?: (artifactId: string, ref: string) => Promise<{ release(): Promise<void> }>;
   downloads(): string; // app.getPath('downloads')
-  showSaveDialog(options: SaveDialogOptions, sender: WebContents | undefined): Promise<{ canceled: boolean; filePath?: string }>;
+  port: Pick<ClientPort, 'save'>;
   env: NodeJS.ProcessEnv;
 }
 
@@ -45,19 +46,20 @@ export function safeDownloadName(suggested: string | undefined, stored: string):
 }
 
 export function createAssetDownload(deps: AssetDownloadDeps) {
-  const destination = async (name: string, sender: WebContents | undefined): Promise<string | null> => {
+  // the e2e seam's folder, else the dialog's choice (null when cancelled or no client could ask)
+  const destination = async (name: string, client: ClientRef | null): Promise<string | null> => {
     const seamDir = deps.env.MAWS_E2E === '1' ? deps.env.MAWS_E2E_SAVE_PATH : undefined;
     if (seamDir) return join(seamDir, name);
-    const { canceled, filePath } = await deps.showSaveDialog({ defaultPath: join(deps.downloads(), name) }, sender);
-    return canceled || !filePath ? null : filePath;
+    const answer = await deps.port.save(client, { defaultPath: join(deps.downloads(), name) });
+    return 'path' in answer ? answer.path : null;
   };
   return {
-    async downloadAsset({ artifactId, ref, name }: CommandInput<'artifacts.downloadAsset'>, sender?: WebContents): Promise<CommandOutput<'artifacts.downloadAsset'>> {
+    async downloadAsset({ artifactId, ref, name }: CommandInput<'artifacts.downloadAsset'>, client: ClientRef | null): Promise<CommandOutput<'artifacts.downloadAsset'>> {
       const held = await deps.hold?.(artifactId, ref); // E3: before anything else, released however the Download ends
       try {
         const found = await deps.call('artifacts.content', { artifactId, path: ref });
         if (!found.ok) throw new CommandFailure(found.error);
-        const to = await destination(safeDownloadName(name, found.value.name), sender);
+        const to = await destination(safeDownloadName(name, found.value.name), client);
         if (to === null) return { path: null };
         const temp = join(dirname(to), `.${randomUUID()}.tmp`);
         try {
@@ -77,5 +79,5 @@ export function createAssetDownload(deps: AssetDownloadDeps) {
 
 export function registerAssetDownload(register: typeof registerMainHandler, deps: AssetDownloadDeps): void {
   const download = createAssetDownload(deps);
-  register('artifacts.downloadAsset', (input, { sender }) => download.downloadAsset(input, sender));
+  register('artifacts.downloadAsset', (input, { client }) => download.downloadAsset(input, client));
 }

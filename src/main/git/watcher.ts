@@ -17,6 +17,7 @@ import { constants, watch as fsWatch } from 'node:fs';
 import { access, readdir, readFile, readlink, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { GitChangeReason, GitChanged, GitStatus } from '@shared/ipc/schema/git';
+import { ReleaseFences } from '../release-fences';
 import { GitTimeoutError } from './runner';
 
 export type WatchFn = (
@@ -173,8 +174,8 @@ function under(path: string, dir: string): boolean {
   return path === dir || path.startsWith(`${dir}/`);
 }
 
-// Who holds a watch: main passes the requesting window's `webContents.id`; 0 is a caller without a window.
-export type WatchOwner = number;
+// Who holds a watch: main passes the requesting client's id (`ClientRef.id`); '' is a caller without a client.
+export type WatchOwner = string;
 
 interface Root {
   root: string;
@@ -200,7 +201,7 @@ interface Root {
 export class GitWatcher {
   private readonly roots = new Map<string, Root>();
   private readonly owners = new Map<WatchOwner, Map<string, { root: string; count: number }>>(); // by directory
-  private readonly generations = new Map<WatchOwner, number>(); // bumped by each release of the owner
+  private readonly releases = new ReleaseFences<WatchOwner>(); // a watch in flight across its owner's release holds nothing
   private readonly watchFn: WatchFn;
   private readonly statFile: (path: string) => Promise<FileFacts | null>;
   private readonly linkedWorktrees: (commonDir: string) => Promise<string[]>;
@@ -217,11 +218,18 @@ export class GitWatcher {
   // on its root, opening the root's watches when it is the first.
   // A watch whose owner was released while its status was being read (the window navigated or closed meanwhile) answers
   // the status and holds nothing: its page is gone and could never unwatch.
-  async watch(directory: string, owner: WatchOwner = 0): Promise<GitStatus> {
-    const generation = this.generations.get(owner) ?? 0;
-    const status = await this.deps.status(directory);
-    const [projection, nested] = await Promise.all([this.project(status, new Map()), this.nestedUnder(status)]);
-    if ((this.generations.get(owner) ?? 0) !== generation) return status;
+  // The owner's release fence is taken at once, before the first await (registerGitHandlers relies on it).
+  watch(directory: string, owner: WatchOwner = ''): Promise<GitStatus> {
+    return this.releases.hold(owner, async (released) => {
+      const status = await this.deps.status(directory);
+      const [projection, nested] = await Promise.all([this.project(status, new Map()), this.nestedUnder(status)]);
+      if (released()) return status;
+      this.adopt(directory, owner, status, projection, nested);
+      return status;
+    });
+  }
+
+  private adopt(directory: string, owner: WatchOwner, status: GitStatus, projection: string, nested: string[]): void {
     let root = this.roots.get(status.repoRoot);
     if (!root) {
       root = this.open(status, projection, nested);
@@ -232,12 +240,11 @@ export class GitWatcher {
     if (!directories) this.owners.set(owner, (directories = new Map()));
     const entry = directories.get(directory);
     directories.set(directory, { root: status.repoRoot, count: (entry?.count ?? 0) + 1 });
-    return status;
   }
 
   // One watcher fewer for the directory's root; the last closes the root's watches. A directory the owner never
   // watched, or already released as often as it watched it, is a no-op.
-  unwatch(directory: string, owner: WatchOwner = 0): void {
+  unwatch(directory: string, owner: WatchOwner = ''): void {
     const directories = this.owners.get(owner);
     const entry = directories?.get(directory);
     if (!directories || !entry) return;
@@ -247,7 +254,7 @@ export class GitWatcher {
 
   // Everything the owner still holds (its window closed or reloaded without unwatching).
   release(owner: WatchOwner): void {
-    this.generations.set(owner, (this.generations.get(owner) ?? 0) + 1);
+    this.releases.release(owner);
     const directories = this.owners.get(owner);
     this.owners.delete(owner);
     for (const entry of directories?.values() ?? []) this.drop(entry.root, entry.count);

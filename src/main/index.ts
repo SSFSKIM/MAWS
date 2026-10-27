@@ -5,9 +5,11 @@ import { isActionable as archiveActionable, isOpen as archiveOpen } from '@share
 import { guardStdio } from './stdio-guard'; // cua board #97
 import { disableChromiumFeatures, STARTUP_DISABLED_FEATURES } from './chromium-features'; // P3-F1 fix 3
 import { statSync } from 'node:fs'; // E11 F2b: the bundle on disk
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import { totalmem } from 'node:os'; // C12: the default memory budget
-import { app, BrowserWindow, dialog, screen, type MessageBoxOptions, type WebContents } from 'electron';
+import { app, BrowserWindow, dialog, screen } from 'electron';
+import type { ClientRef } from '@shared/ipc/client';
+import { pageOf } from './ipc/clients';
 import { createHosts } from './hosts';
 import { installRouter } from './ipc/router';
 import { startSettings } from './settings';
@@ -37,7 +39,9 @@ import { LayoutFileStore } from './layout/store';
 import { registerChatPanels } from './sessions/panel-lifetime';
 import { askToQuit, installQuitGuard, listProcesses } from './lifecycle/quit-guard';
 import { registerMenuHandlers, startMenu } from './menu';
-import { openExternalUrl, registerOpenExternal } from './open-external'; // P4-B5: openExternalUrl
+import { registerOpenExternal } from './open-external';
+import { electronClientPort } from './client/electron-port'; // P5 O1 M3
+import { electronWindowShown } from './client/window-shown'; // P5 O1 M3
 import { startSessions } from './sessions';
 import { registerObservedFacts } from './sessions/observed'; // P2-A
 import { startYield } from './sessions/yield'; // W7
@@ -66,7 +70,6 @@ import { registerWorktreeHandlers } from './git/worktrees-register';
 import { BootstrapNotes, FileIntentStore } from './sessions/intents';
 import { ReplaySeam } from './sessions/replay-seam';
 import { trashFor } from './sessions/e2e-trash';
-import { openDialogFor } from './files/e2e-pick';
 import { SessionService } from './sessions/service';
 import { startOwnerChannel } from './owner/register'; // P2-C (2026-10-09)
 import { engineHostSettled, registerSessionServiceHandlers } from './sessions/service-register';
@@ -185,6 +188,11 @@ const MAIN_BUILD: MainBuild = { version: __MAWS_VERSION__, ...__MAWS_BUILD__ };
 console.log(`[main] ${describeMainBuild(MAIN_BUILD)} · pid ${process.pid}`);
 let bringForward: () => BrowserWindow | null = () => null; // the started app's window, shown and focused (or opened)
 const OLDER = { quit: 'Quit MAWS', keep: 'Keep running' };
+// The window showing a client's page while the page lives (a dialog's parent, the connectors' veto); null once it ended.
+const windowOfClient = (client: ClientRef): BrowserWindow | null => {
+  const page = pageOf(client);
+  return page && BrowserWindow.fromWebContents(page);
+};
 function offerQuit(win: BrowserWindow, notice: string): void {
   const options = { type: 'info' as const, message: notice, buttons: [OLDER.quit, OLDER.keep], defaultId: 0, cancelId: 1 };
   void dialog.showMessageBox(win, options).then(({ response }) => {
@@ -231,6 +239,9 @@ void startWithProfileLock(app, () => {
   // C9 block end
   const hosts = createHosts(MAIN_BUILD); // E11 §2.7: main's build for host.status
   installRouter({ appUrl, dispatchToHost: hosts.dispatch });
+  // P5 O1 M3 (OX4): the client port, the one way a machine-bound service reaches the person's screen: dialogs, the
+  // Replace question, Finder, the browser, notifications, the badge and focus. `openWindow` is read when a focus needs it.
+  const clientPort = electronClientPort({ env: process.env, openWindow: () => openWindow() });
   const settings = startSettings(join(app.getPath('userData'), 'settings.json'));
   // E11: every will-quit step below joins one ordered list behind one listener (tracker row E10 "14 will-quit listeners");
   // a step's promise (the hosts' draining close of a kept supervisor's socket) holds the exit, bounded by the port's grace;
@@ -377,15 +388,8 @@ void startWithProfileLock(app, () => {
   const files = new FileLister({ run: createGitRunner(), roots });
   for (const name of ['session.changed', 'session.removed', 'session.projects.changed', 'session.intent.changed'] as const) onEmitted(name, () => files.invalidateRoots());
   registerMainHandler('git.lsFiles', (input) => files.list(input));
-  registerMainHandler('layout.pickFiles', (input, { sender }) =>
-    pickFiles(input, {
-      // C10: the e2e seam (MAWS_E2E=1 never opens the native panel; MAWS_E2E_PICK_PATHS or cancelled), else the panel
-      showOpenDialog: openDialogFor(process.env, (options) => {
-        const win = BrowserWindow.fromWebContents(sender);
-        return win ? dialog.showOpenDialog(win, options) : dialog.showOpenDialog(options);
-      }),
-    }),
-  );
+  // C10: the port's pick answers through the e2e seam under MAWS_E2E=1 (MAWS_E2E_PICK_PATHS or cancelled), else the panel
+  registerMainHandler('layout.pickFiles', (input, { client }) => pickFiles(input, client, { port: clientPort }));
   shutdown.add('usage', () => usage.stop());
   // C7 end
   // C8c start: files.* over each session's own directories (the allowlist is read from the read model, which C4's index
@@ -393,8 +397,7 @@ void startWithProfileLock(app, () => {
   // E11: an unstarted session (a New chat before its first send) reads its setup intent's location
   const filesService = registerFilesHandlers(allowlistOf(sessions.model, intents), {
     emit: (payload) => void emit('files.changed', payload),
-    openPath: (path) => shell.openPath(path),
-    showItemInFolder: (path) => shell.showItemInFolder(path), // E1: files.reveal
+    port: clientPort, // files.openExternal; E1: files.reveal
     admitted: fileAdmission(index.unavailable === null ? index.library : null), // E2; P3-L M6b: a File artifact's file outside the roots, from the library's index
   });
   shutdown.add('files', () => filesService.dispose());
@@ -436,7 +439,7 @@ void startWithProfileLock(app, () => {
     env: engineEnv,
     emit,
     trash: trashFor(process.env, (path) => shell.trashItem(path)), // the e2e seam (MAWS_E2E_TRASH_DIR) or the Trash
-    reveal: (path) => shell.showItemInFolder(path),
+    port: clientPort, // session.revealPath
     replay: ReplaySeam.fromEnv(process.env, process.cwd()), // the e2e seam (MAWS_E2E_REPLAY_FIXTURES)
     settings: () => sessionSettingsOf(settings.state().settings), // C11: the route, the relay policy and the subagent model from settings v3
     userDefaults, // W3: the user's defaultMode seeds a new intent's mode (read only)
@@ -545,21 +548,16 @@ void startWithProfileLock(app, () => {
   registerMainHandler('settings.usageAction', (action) => usageControl.act(action));
   registerMainHandler('settings.userEngineDefaults', userDefaults); // W3: read only
   const sessionDirectories = () => knownSessionDirectories(sessions.model, index);
-  registerMainHandler('settings.reveal', ({ path }) =>
-    revealPath(path, { configHome: () => claudeConfigDir(process.env, home), sessionDirectories, showItemInFolder: (p) => shell.showItemInFolder(p) }),
+  registerMainHandler('settings.reveal', ({ path }, { client }) =>
+    revealPath(path, client, { configHome: () => claudeConfigDir(process.env, home), sessionDirectories, port: clientPort }),
   );
   registerMainHandler('layout.captureChords', captureChords); // the Settings tab's chord capture sets the menu aside (M5 fix wave)
   // P3-G (§D4.1): Mark-up's still of a region the sender's window draws
-  registerMainHandler('layout.captureRegion', (input, { sender }) => captureRegion(input, sender, BrowserWindow.fromWebContents(sender)));
-  registerMainHandler('layout.saveTextFile', (input, { sender }) =>
-    saveTextFile(input, {
-      downloads: app.getPath('downloads'),
-      showSaveDialog: (options) => {
-        const win = BrowserWindow.fromWebContents(sender);
-        return win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options);
-      },
-    }),
-  );
+  registerMainHandler('layout.captureRegion', async (input, { client }) => {
+    const page = pageOf(client);
+    return page ? captureRegion(input, page, BrowserWindow.fromWebContents(page)) : { image: null }; // a page gone is a window closed meanwhile
+  });
+  registerMainHandler('layout.saveTextFile', (input, { client }) => saveTextFile(input, client, { downloads: app.getPath('downloads'), port: clientPort }));
   // The widget e2e's engine stand-in: under MAWS_WIDGET_BACKEND=fixtures in launch mode scenario only (M2).
   const stopWidgetBackend = installWidgetBackend({ env: process.env, packaged: app.isPackaged, appRoot: process.cwd(), intercept: interceptCommand, emit, fail: (error) => new CommandFailure(error) });
   if (stopWidgetBackend) shutdown.add('widget backend', stopWidgetBackend);
@@ -638,7 +636,18 @@ void startWithProfileLock(app, () => {
   // P3-H H4: a page's owner window, read by main, vetoes its pages while hidden or minimized (P3 Decision Log 89)
   // P3-HD (Decision Log 14): the root supplies route D, which the service composes after route E; the engine stays preferred.
   // P3-HD M3c2: with it, MAWS's own OAuth provider (sealed under userData, safeStorage asked only on demand)
-  const connectors = startConnectors({ hosts, register: registerMainHandler, index, windowOf: (sender) => BrowserWindow.fromWebContents(sender as WebContents), direct: createDirectRoute, oauth: productionConnectorOAuth });
+  const connectors = startConnectors({
+    hosts,
+    register: registerMainHandler,
+    index,
+    windowShown: (client) => {
+      const win = windowOfClient(client);
+      return win && electronWindowShown(win);
+    },
+    port: clientPort,
+    direct: createDirectRoute,
+    oauth: productionConnectorOAuth,
+  });
   shutdown.add('connectors', connectors.stop);
   // P4-AGG M4: Customize › Connectors' Sign in, the engine's own MCP sign-in in one ready session (its credential is the
   // engine's, in the engine's keychain item; MAWS's own OAuth store is not involved)
@@ -648,7 +657,7 @@ void startWithProfileLock(app, () => {
     host: { call: (name, input) => hosts.dispatch('engine-host', name, input) as never },
     onSessionStatus: (listener) => hosts.onEvent('session.status', (payload) => listener(payload)),
     onHostLost: (listener) => hosts.onState('engine-host', (state) => (state.state === 'ready' ? undefined : listener())),
-    open: (url) => openExternalUrl(url),
+    port: clientPort,
     listen: listenLoopback,
   });
   shutdown.add('connector sign-in', signIn.stop);
@@ -662,7 +671,7 @@ void startWithProfileLock(app, () => {
     call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
     connectors: connectors.delivery ?? null,
     shellEnv: () => engineEnv,
-    openExternal: (url) => openExternalUrl(url),
+    port: clientPort,
   });
   shutdown.add('delivery', delivery.stop);
   // P4-AGG M2: Discover's catalog (the person's, never an agent's): the seed marketplaces, Anthropic's directory and the
@@ -709,26 +718,7 @@ void startWithProfileLock(app, () => {
       exporters: artifacts.exporters,
       root: join(app.getPath('userData'), 'artifacts'),
       downloads: () => app.getPath('downloads'),
-      showSaveDialog: (options, sender) => {
-        const win = sender ? BrowserWindow.fromWebContents(sender) : null;
-        return win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options);
-      },
-      confirmReplaceFolder: async (path, sender) => {
-        const win = sender ? BrowserWindow.fromWebContents(sender) : null;
-        const options: MessageBoxOptions = {
-          type: 'warning',
-          message: `Replace “${basename(path)}”?`,
-          detail: `The folder at ${path} and everything in it will be replaced with the exported slides.`,
-          buttons: ['Replace', 'Cancel'],
-          defaultId: 1,
-          cancelId: 1,
-          noLink: true,
-        };
-        const { response } = await (win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options));
-        return response === 0;
-      },
-      openPath: (path) => shell.openPath(path),
-      showItemInFolder: (path) => shell.showItemInFolder(path),
+      port: clientPort, // Save as…, the Replace question, Open externally, Reveal
       readFile: (input) => filesService.readResolved(input), // M6b fix wave 2: `library.read`
       env: process.env,
     },
@@ -740,10 +730,7 @@ void startWithProfileLock(app, () => {
     call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
     hold: (artifactId, ref) => holdAsset((name, input) => hosts.dispatch('engine-host', name, input) as never, artifactId, ref), // E3: its own hold through the dialog and the copy
     downloads: () => app.getPath('downloads'),
-    showSaveDialog: (options, sender) => {
-      const win = sender ? BrowserWindow.fromWebContents(sender) : null;
-      return win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options);
-    },
+    port: clientPort,
     env: process.env,
   });
   // P3-E end
@@ -762,12 +749,12 @@ void startWithProfileLock(app, () => {
   // whole dirty set, forgotten when the window navigates or closes; the question's Save all asks every window to save
   // and waits for the answers of the windows that hold files.
   const unsavedFiles = trackUnsavedFiles();
-  registerMainHandler('layout.unsavedFiles', ({ paths }, { sender }) => unsavedFiles.update(sender, paths));
-  registerMainHandler('layout.saveAllDone', ({ requestId, failed }, { sender }) => unsavedFiles.done(sender, requestId, failed));
+  registerMainHandler('layout.unsavedFiles', ({ paths }, { client }) => unsavedFiles.update(client, paths));
+  registerMainHandler('layout.saveAllDone', ({ requestId, failed }, { client }) => unsavedFiles.done(client, requestId, failed));
   // E5 end
 
   // ---- C5: notifications, dock badge and the quit guard ----
-  startAttention(sessions.model, { actions: notificationActions({ dispatch: hosts.dispatch, acquire: (id, reason) => sessionService.acquire(id, reason), pending: (id, attentionId) => sessions.model.attention(id).find((item) => item.id === attentionId) }), restoredIds: attention.restoredIds, settings: () => settings.state().settings, openWindow });
+  startAttention(sessions.model, { actions: notificationActions({ dispatch: hosts.dispatch, acquire: (id, reason) => sessionService.acquire(id, reason), pending: (id, attentionId) => sessions.model.attention(id).find((item) => item.id === attentionId) }), restoredIds: attention.restoredIds, settings: () => settings.state().settings, port: clientPort });
   // C12: the busy report asks C9's pty host (read only: pty.list and pty.foreground) and publishes Quit when idle's wait
   const quitGuard = installQuitGuard(sessions.model, {
     // C12 start

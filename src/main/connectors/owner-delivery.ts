@@ -18,6 +18,7 @@
 // - Sending is route D's `send`: one tools/call, never retried, its credential prepared inside the operation.
 // - The record store's read (a safeStorage decrypt that can stall, taking no signal) is raced against the caller's
 //   signal: `find` ends within its deadline (that source `unavailable`), and a cancelled `connect` answers `cancelled`.
+import type { ClientRef } from '@shared/ipc/client';
 import type { CommandInput, CommandResult } from '@shared/ipc/schema';
 import type { DirectSource } from '@shared/ipc/schema/connectors';
 import type { DirectRoute, DirectSendAnswer } from './direct-route';
@@ -45,7 +46,7 @@ export interface OwnerDelivery {
   // The verified sources that can take `tool` (a report lists it, or an HTTP server on one of `urlHosts`), each with its
   // connection, the usable first, and how many live sessions there were to read; null when the host could not be asked.
   find(request: { tool: string; urlHosts: readonly string[]; artifactId?: string }, signal: AbortSignal): Promise<{ sources: DeliverySource[]; live: number } | null>;
-  connect(source: DirectSource, signal: AbortSignal): Promise<DeliveryConnectResult>;
+  connect(source: DirectSource, signal: AbortSignal, client: ClientRef | null): Promise<DeliveryConnectResult>; // `client`: the consent's
   send(source: DirectSource, request: { artifactId: string; tool: string; arguments: Record<string, unknown> }, signal: AbortSignal): Promise<DirectSendAnswer>;
 }
 
@@ -141,7 +142,7 @@ export function createOwnerDelivery(deps: OwnerDeliveryDeps): OwnerDelivery {
       const found = await Promise.all(unique.map(async (source) => ({ source, connection: await connectionOf(source, signal) })));
       return { sources: found.sort((a, b) => RANK[a.connection] - RANK[b.connection]), live: live ?? 0 };
     },
-    async connect(source, signal) {
+    async connect(source, signal, client) {
       if (source.transport !== 'http') return { ok: true };
       const identity = oauthIdentityOf(source);
       if (!identity || !deps.oauth) return { ok: false, why: 'notHttp' };
@@ -155,7 +156,7 @@ export function createOwnerDelivery(deps: OwnerDeliveryDeps): OwnerDelivery {
         if (open.reason !== 'unauthorized') return { ok: false, why: 'listing' };
       }
       if (signal.aborted) return { ok: false, why: 'cancelled' };
-      const made = state.state === 'needsReconnect' ? await deps.oauth.reconnect(source, signal) : await deps.oauth.connect(source, signal);
+      const made = state.state === 'needsReconnect' ? await deps.oauth.reconnect(source, signal, client) : await deps.oauth.connect(source, signal, client);
       if (!made.ok) return { ok: false, why: made.why };
       const listed = await deps.direct.discover(source, signal);
       if (listed.ok) return { ok: true };

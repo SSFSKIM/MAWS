@@ -353,6 +353,11 @@ describe('the gws driver against the fake CLI', { timeout: 60_000 }, () => {
       expect(result).toEqual({ ok: false, why: 'failed', message: 'could not open the sign-in page: no browser' });
     });
 
+    it('an openUrl that rejects stops the login', async () => {
+      const result = await gwsLogin(bin, env, { openUrl: async () => Promise.reject(new Error('no client')), signal: new AbortController().signal });
+      expect(result).toEqual({ ok: false, why: 'failed', message: 'could not open the sign-in page: no client' });
+    });
+
     it('an already-aborted signal starts nothing', async () => {
       const controller = new AbortController();
       controller.abort();

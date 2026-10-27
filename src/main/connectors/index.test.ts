@@ -7,8 +7,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectorCallOutcome } from '@shared/artifacts/connectors';
 import { eventChannel, type CommandName, type EventName, type HostState } from '@shared/ipc/schema';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
+import { clientOf, pageOf } from '../ipc/clients';
 import type { MainContext } from '../ipc/router';
-import { startConnectors, WINDOW_RECHECK_MS, type ConnectorSender, type ConnectorWindow } from '.';
+import { startConnectors, WINDOW_RECHECK_MS } from '.';
+import { electronWindowShown } from '../client/window-shown';
 import { CONNECTOR_OPERATION_DEADLINE_MS } from './engine-route';
 
 const ART = '11111111-1111-4111-8111-111111111111';
@@ -193,7 +195,11 @@ beforeEach(() => {
     register: ((name: string, handler: (input: unknown, context: MainContext) => unknown) => void handlers.set(name, handler)) as never,
     index: { sessions: { get: (id) => records.get(id) ?? null }, projects: { list: () => [{ id: 'proj', directory: '/repo' }] } },
     realpath: (path) => path,
-    windowOf: (sender) => (windows.get(sender.id) ?? null) as ConnectorWindow | null,
+    windowShown: (client) => {
+      const win = windows.get(pageOf(client)?.id ?? -1);
+      return win ? electronWindowShown(win as never) : null;
+    },
+    port: { openExternal: vi.fn() },
     log: (line) => void logged.push(line),
   });
 });
@@ -207,7 +213,7 @@ afterEach(() => {
 async function invoke(name: CommandName, input: unknown, sender: FakeSender = me): Promise<unknown> {
   const checked = validateCommandInput(name, input);
   if (!checked.ok) throw new Error(`invalid input for ${name}`);
-  const value = await handlers.get(name)!(checked.value, { sender: sender as unknown as MainContext['sender'] });
+  const value = await handlers.get(name)!(checked.value, { client: clientOf(sender as never) });
   expect(validateCommandOutput(name, value).ok, `${name} output: ${JSON.stringify(value)}`).toBe(true);
   return value;
 }
@@ -306,15 +312,15 @@ describe('main’s connector service (P3-H H3b)', () => {
     expect(await invoke('connectors.call', { leaseId, request: ROWS }, them)).toEqual({ ok: false, state: 'invalid', reason: 'lease' });
   });
 
-  for (const ending of ['destroyed', 'did-navigate', 'render-process-gone'] as const) {
-    it(`ends a window’s leases and watches when it is ${ending === 'destroyed' ? 'closed' : ending}`, async () => {
+  for (const ending of ['destroyed', 'did-start-navigation', 'render-process-gone'] as const) {
+    it(`ends a page’s leases and watches when it is ${ending === 'destroyed' ? 'closed' : ending}`, async () => {
       fake.grants.set(JSON.stringify(['fixture', 'rows']), 'read');
       fake.endAtStart = true;
       const leaseId = await visiblePage();
       await invoke('connectors.watch', { leaseId, request: { ...ROWS, intervalMs: 30_000 } });
       await settle();
       const starts = fake.started().length;
-      me.emit(ending);
+      me.emit(ending, { isMainFrame: true, isSameDocument: false });
       await vi.advanceTimersByTimeAsync(10 * 60_000);
       expect(fake.started()).toHaveLength(starts);
       expect(await invoke('connectors.call', { leaseId, request: ROWS })).toEqual({ ok: false, state: 'invalid', reason: 'lease' });
@@ -497,7 +503,7 @@ describe('main’s connector service (P3-H H3b)', () => {
     expect(await answering).toEqual({ ok: false, state: 'paused', reason: 'closed' });
     await settle();
     expect(fake.dispatched.filter((entry) => entry.name === 'connectors.cancel').map((entry) => entry.input)).toEqual([{ operationId }]);
-    expect(() => handlers.get('connectors.open')!({ artifactId: ART }, { sender: me as unknown as MainContext['sender'] })).toThrow();
+    expect(() => handlers.get('connectors.open')!({ artifactId: ART }, { client: clientOf(me as never) })).toThrow();
   });
 });
 
@@ -618,10 +624,10 @@ describe('the owner window’s native visibility (P3-H H4)', () => {
     expect(await answering).toEqual({ ok: false, state: 'paused', reason: 'hidden' });
   });
 
-  it('keeps the window’s state across a reload of its page, following it once', async () => {
+  it('reads the window afresh for a reloaded page, following it once', async () => {
     win().hide();
     await visiblePage();
-    me.emit('did-navigate');
+    me.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
     const reloaded = await visiblePage();
     expect(await invoke('connectors.call', { leaseId: reloaded, request: ROWS })).toEqual({ ok: false, state: 'paused', reason: 'hidden' });
     expect(win().listeners_()).toBe(4);
@@ -663,11 +669,8 @@ describe('the owner window’s native visibility (P3-H H4)', () => {
     expect([win().listeners_(), windows.get(8)!.listeners_(), vi.getTimerCount()]).toEqual([0, 0, 0]);
     const late = new FakeSender(9); // a window first heard from after the stop is never followed
     windows.set(9, new FakeWindow());
-    expect(() => handlers.get('connectors.open')!({ artifactId: ART }, { sender: late as unknown as MainContext['sender'] })).toThrow();
-    expect([windows.get(9)!.listeners_(), late.listenerCount('destroyed')]).toEqual([0, 0]);
+    expect(() => handlers.get('connectors.open')!({ artifactId: ART }, { client: clientOf(late as never) })).toThrow();
+    expect(windows.get(9)!.listeners_()).toBe(0);
   });
 });
 
-// the type the service exports for its senders is the subset of WebContents it touches
-const _sender: ConnectorSender = new FakeSender(1) as unknown as ConnectorSender;
-void _sender;

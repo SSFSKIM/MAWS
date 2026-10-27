@@ -4,9 +4,11 @@
 import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import JSZip from 'jszip';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ArtifactKind } from '@shared/artifacts/entity';
+import type { ConfirmRequest } from '@shared/client/port';
+import type { ClientId, ClientRef } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
 import { artifactExportName, type ArtifactExportFormat } from '@shared/maws/tools';
@@ -50,7 +52,24 @@ interface Stored {
   files: Record<number, { name: string; path: string }>; // by revision; the highest is the latest
 }
 
-function deps(stored: Stored, over: Partial<LibraryFilesDeps> = {}): LibraryFilesDeps {
+// The OS as the client port reaches it, as fakes a test reads: the save panel, the Replace question, open and reveal.
+interface Os {
+  showSaveDialog(options: { defaultPath: string }, client: ClientRef | null): Promise<{ canceled: boolean; filePath?: string }>;
+  confirmReplaceFolder(request: ConfirmRequest, client: ClientRef | null): Promise<boolean>;
+  openPath(path: string): Promise<string>; // '' on success, else the error text
+  showItemInFolder(path: string): void;
+}
+const CLIENT: ClientRef = { id: 'page:1.1' as ClientId, onGone: () => () => {} };
+// The question the library asks before replacing a slide folder at `path`.
+const replaceQuestion = (path: string): ConfirmRequest => ({
+  kind: 'warning',
+  message: `Replace “${basename(path)}”?`,
+  detail: `The folder at ${path} and everything in it will be replaced with the exported slides.`,
+  confirm: 'Replace',
+  cancel: 'Cancel',
+});
+
+function deps(stored: Stored, over: Partial<Omit<LibraryFilesDeps, 'port'> & Os> = {}): LibraryFilesDeps & Os {
   const call = async <N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandResult<N>> => {
     if (name === 'artifacts.get') return { ok: true, value: { artifact: { id: ID, kind: stored.kind, title: stored.title, revision: 3 } } } as never;
     if (name === 'artifacts.content') {
@@ -62,7 +81,7 @@ function deps(stored: Stored, over: Partial<LibraryFilesDeps> = {}): LibraryFile
     }
     throw new Error(`unexpected ${name}`);
   };
-  return {
+  const all: Omit<LibraryFilesDeps, 'port'> & Os = {
     call,
     exporters: { get: (kind: ArtifactKind, format: ArtifactExportFormat) => (kind === 'html' && (format === 'pdf' || format === 'png') ? ({} as never) : undefined) },
     root: join(dir, 'artifacts'),
@@ -75,6 +94,19 @@ function deps(stored: Stored, over: Partial<LibraryFilesDeps> = {}): LibraryFile
     env: {},
     ...over,
   };
+  const port: LibraryFilesDeps['port'] = {
+    save: async (client, request) => {
+      const { canceled, filePath } = await all.showSaveDialog(request, client);
+      return canceled || !filePath ? { cancelled: true } : { path: filePath };
+    },
+    confirm: async (client, request) => ({ confirmed: await all.confirmReplaceFolder(request, client) }),
+    openExternal: async (_client, target) => {
+      const message = await all.openPath((target as { path: string }).path);
+      return message === '' ? { opened: true } : { opened: false, reason: message };
+    },
+    reveal: async (_client, path) => (all.showItemInFolder(path), { revealed: true }),
+  };
+  return { ...all, port };
 }
 
 function put(name: string, text: string): string {
@@ -124,16 +156,16 @@ describe('library files', () => {
     const pdf = put('report.pdf', '%PDF-1.4');
     const opened = deps({ kind: 'file', title: 'report.pdf', files: { 2: { name: 'report.pdf', path: pdf } } });
     const files = createLibraryFiles(opened);
-    await expect(files.openExternally({ artifactId: ID })).resolves.toEqual({ opened: true, message: null });
+    await expect(files.openExternally({ artifactId: ID }, null)).resolves.toEqual({ opened: true, message: null });
     expect(opened.openPath).toHaveBeenCalledWith(pdf);
-    await expect(files.reveal({ artifactId: ID })).resolves.toEqual({ revealed: true, message: null });
+    await expect(files.reveal({ artifactId: ID }, null)).resolves.toEqual({ revealed: true, message: null });
     expect(opened.showItemInFolder).toHaveBeenCalledWith(pdf);
 
     const log = join(dir, 'open.log');
     const seamed = deps({ kind: 'file', title: 'report.pdf', files: { 2: { name: 'report.pdf', path: pdf } } }, { env: { MAWS_E2E: '1', MAWS_E2E_OPEN_LOG: log } });
     const seam = createLibraryFiles(seamed);
-    await seam.openExternally({ artifactId: ID });
-    await seam.reveal({ artifactId: ID });
+    await seam.openExternally({ artifactId: ID }, null);
+    await seam.reveal({ artifactId: ID }, null);
     expect(readFileSync(log, 'utf8')).toBe(`${pdf}\nreveal ${pdf}\n`);
     expect(seamed.openPath).not.toHaveBeenCalled();
   });
@@ -143,9 +175,9 @@ describe('library files', () => {
     const tool = put('tool.html', '<p>x</p>');
     chmodSync(tool, 0o755);
     const sh = deps({ kind: 'file', title: 'run.sh', files: { 1: { name: 'run.sh', path: script } } });
-    await expect(createLibraryFiles(sh).openExternally({ artifactId: ID })).resolves.toEqual({ opened: false, message: 'Not opened outside MAWS: run.sh' });
+    await expect(createLibraryFiles(sh).openExternally({ artifactId: ID }, null)).resolves.toEqual({ opened: false, message: 'Not opened outside MAWS: run.sh' });
     const exec = deps({ kind: 'file', title: 'tool.html', files: { 1: { name: 'tool.html', path: tool } } });
-    await expect(createLibraryFiles(exec).openExternally({ artifactId: ID })).resolves.toEqual({ opened: false, message: 'Not opened outside MAWS: tool.html' });
+    await expect(createLibraryFiles(exec).openExternally({ artifactId: ID }, null)).resolves.toEqual({ opened: false, message: 'Not opened outside MAWS: tool.html' });
     expect(sh.openPath).not.toHaveBeenCalled();
     expect(exec.openPath).not.toHaveBeenCalled();
   });
@@ -158,21 +190,21 @@ describe('library files', () => {
     const chosen = join(parent, 'Quarterly slides');
     mkdirSync(chosen, { recursive: true });
     writeFileSync(join(chosen, 'old.png'), 'old');
-    const showSaveDialog = vi.fn<LibraryFilesDeps['showSaveDialog']>(async () => ({ canceled: false, filePath: chosen }));
+    const showSaveDialog = vi.fn<Os['showSaveDialog']>(async () => ({ canceled: false, filePath: chosen }));
     const confirmReplaceFolder = vi.fn(async () => {
       expect(readdirSync(chosen)).toEqual(['old.png']);
       expect(readFileSync(join(chosen, 'old.png'), 'utf8')).toBe('old');
       return true;
     });
     const files = createLibraryFiles(deps({ kind: 'presentation', title: 'Quarterly', files: {} }, { showSaveDialog, confirmReplaceFolder }));
-    await expect(files.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pngs' } } })).resolves.toEqual({ saved: true, path: chosen });
-    expect(confirmReplaceFolder).toHaveBeenCalledExactlyOnceWith(chosen, undefined);
+    await expect(files.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pngs' } } }, null)).resolves.toEqual({ saved: true, path: chosen });
+    expect(confirmReplaceFolder).toHaveBeenCalledExactlyOnceWith(replaceQuestion(chosen), null);
     expect(readdirSync(chosen)).toEqual(['slide-01.png', 'slide-02.png']);
     expect([...readFileSync(join(chosen, 'slide-01.png'))]).toEqual([1, 2]);
     expect([...readFileSync(join(chosen, 'slide-02.png'))]).toEqual([3, 4]);
     expect(showSaveDialog.mock.calls[0]![0]).toMatchObject({ defaultPath: join(dir, 'Downloads', 'Quarterly slides') });
     showSaveDialog.mockResolvedValueOnce({ canceled: true, filePath: chosen });
-    await expect(files.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pngs' } } })).resolves.toEqual({ saved: false });
+    await expect(files.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pngs' } } }, null)).resolves.toEqual({ saved: false });
     expect(showSaveDialog.mock.calls[1]![0]).toMatchObject({ defaultPath: chosen });
     expect(readdirSync(parent)).toEqual(['Quarterly slides']);
   });
@@ -196,7 +228,7 @@ describe('library files', () => {
       showSaveDialog: async () => ({ canceled: cancelAt === 'save dialog', filePath: chosen }),
       confirmReplaceFolder,
     }));
-    await expect(files.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pngs', exportId } } })).resolves.toEqual({ saved: false });
+    await expect(files.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pngs', exportId } } }, null)).resolves.toEqual({ saved: false });
     expect(confirmReplaceFolder).toHaveBeenCalledTimes(cancelAt === 'save dialog' ? 0 : 1);
     expect(readdirSync(parent)).toEqual(['Quarterly slides']);
     expect(readdirSync(chosen)).toEqual(['nested', 'old.png']);
@@ -213,7 +245,7 @@ describe('library files', () => {
     const files = createLibraryFiles(deps({ kind: 'presentation', title: 'Quarterly', files: {} }, {
       showSaveDialog: async () => ({ canceled: false, filePath: chosen }), confirmReplaceFolder,
     }));
-    await expect(files.saveAs(input)).resolves.toEqual({ saved: true, path: chosen });
+    await expect(files.saveAs(input, null)).resolves.toEqual({ saved: true, path: chosen });
     expect(confirmReplaceFolder).not.toHaveBeenCalled();
     expect(readdirSync(chosen)).toEqual(['slide-01.png', 'slide-02.png']);
     expect([...readFileSync(join(chosen, 'slide-01.png'))]).toEqual([1, 2]);
@@ -232,7 +264,7 @@ describe('library files', () => {
     const files = createLibraryFiles(deps({ kind: 'presentation', title: 'Quarterly', files: {} }, {
       showSaveDialog: async () => ({ canceled: false, filePath: chosen }), confirmReplaceFolder,
     }));
-    await expect(files.saveAs(input)).rejects.toThrow(/folder/i);
+    await expect(files.saveAs(input, null)).rejects.toThrow(/folder/i);
     expect(confirmReplaceFolder).not.toHaveBeenCalled();
     expect(readFileSync(target, 'utf8')).toBe('Keep this');
     expect(readFileSync(chosen, 'utf8')).toBe(kind === 'file' ? 'Original file' : 'Keep this');
@@ -250,7 +282,7 @@ describe('library files', () => {
       writeFileSync(join(chosen, 'important.txt'), 'Created while staging');
       return zip;
     });
-    const sender = {} as Parameters<LibraryFilesDeps['showSaveDialog']>[1];
+    const sender = CLIENT;
     const confirmReplaceFolder = vi.fn(async () => {
       expect(readFileSync(join(chosen, 'important.txt'), 'utf8')).toBe('Created while staging');
       return replace;
@@ -259,7 +291,7 @@ describe('library files', () => {
       showSaveDialog: async () => ({ canceled: false, filePath: chosen }), confirmReplaceFolder,
     }));
     await expect(files.saveAs(input, sender)).resolves.toEqual(replace ? { saved: true, path: chosen } : { saved: false });
-    expect(confirmReplaceFolder).toHaveBeenCalledExactlyOnceWith(chosen, sender);
+    expect(confirmReplaceFolder).toHaveBeenCalledExactlyOnceWith(replaceQuestion(chosen), sender);
     if (replace) {
       expect(readdirSync(chosen)).toEqual(['slide-01.png', 'slide-02.png']);
       expect([...readFileSync(join(chosen, 'slide-01.png'))]).toEqual([1, 2]);
@@ -289,7 +321,7 @@ describe('library files', () => {
     const files = createLibraryFiles(deps({ kind: 'presentation', title: 'Quarterly', files: {} }, {
       showSaveDialog: async () => ({ canceled: false, filePath: chosen }), confirmReplaceFolder,
     }));
-    await expect(files.saveAs(input)).rejects.toThrow(/changed/i);
+    await expect(files.saveAs(input, null)).rejects.toThrow(/changed/i);
     expect(readFileSync(join(chosen, 'important.txt'), 'utf8')).toBe('Not approved');
     expect(lstatSync(chosen).isSymbolicLink()).toBe(replacement === 'symbolic link');
     expect(readFileSync(join(original, 'old.png'), 'utf8')).toBe('Original');
@@ -309,7 +341,7 @@ describe('library files', () => {
     const files = createLibraryFiles(deps({ kind: 'presentation', title: 'Quarterly', files: {} }, {
       showSaveDialog: async () => ({ canceled: false, filePath: chosen }), confirmReplaceFolder,
     }));
-    await expect(files.saveAs(input)).rejects.toThrow(/changed/i);
+    await expect(files.saveAs(input, null)).rejects.toThrow(/changed/i);
     expect(confirmReplaceFolder).not.toHaveBeenCalled();
     expect(readdirSync(chosen)).toEqual(['important.txt']);
     expect(readFileSync(join(chosen, 'important.txt'), 'utf8')).toBe('Not approved');
@@ -332,7 +364,7 @@ describe('library files', () => {
     const files = createLibraryFiles(deps({ kind: 'presentation', title: 'Quarterly', files: {} }, {
       showSaveDialog: async () => ({ canceled: false, filePath: chosen }), confirmReplaceFolder: async () => true,
     }));
-    await expect(files.saveAs(input)).rejects.toThrow(/changed/i);
+    await expect(files.saveAs(input, null)).rejects.toThrow(/changed/i);
     expect(readFileSync(join(chosen, 'important.txt'), 'utf8')).toBe('Not approved');
     expect(readFileSync(join(original, 'old.png'), 'utf8')).toBe('Original');
     expect(readdirSync(parent)).toEqual(['Quarterly slides', 'original']);
@@ -356,7 +388,7 @@ describe('library files', () => {
     const files = createLibraryFiles(deps({ kind: 'presentation', title: 'Quarterly', files: {} }, {
       showSaveDialog: async () => ({ canceled: false, filePath: chosen }), confirmReplaceFolder: async () => true,
     }));
-    const saving = files.saveAs(input);
+    const saving = files.saveAs(input, null);
     await expect(saving).rejects.toThrow(/changed/i);
     await expect(saving).rejects.toThrow(backup);
     expect(lstatSync(chosen).ino).toBe(incomingInode);
@@ -385,7 +417,7 @@ describe('library files', () => {
     const files = createLibraryFiles(deps({ kind: 'presentation', title: 'Quarterly', files: {} }, {
       showSaveDialog: async () => ({ canceled: false, filePath: chosen }), confirmReplaceFolder: async () => true,
     }));
-    await expect(files.saveAs(input)).rejects.toThrow(/changed/i);
+    await expect(files.saveAs(input, null)).rejects.toThrow(/changed/i);
     expect(readFileSync(join(backup, 'important.txt'), 'utf8')).toBe('Not approved');
     expect(readFileSync(join(original, 'old.png'), 'utf8')).toBe('Original');
     expect(readdirSync(chosen)).toEqual(['slide-01.png', 'slide-02.png']);
@@ -411,7 +443,7 @@ describe('library files', () => {
     const files = createLibraryFiles(deps({ kind: 'presentation', title: 'Quarterly', files: {} }, {
       showSaveDialog: async () => ({ canceled: false, filePath: chosen }), confirmReplaceFolder: async () => true,
     }));
-    await expect(files.saveAs(input)).rejects.toThrow(/Publication failed/);
+    await expect(files.saveAs(input, null)).rejects.toThrow(/Publication failed/);
     if (concurrentCreator) {
       expect(lstatSync(chosen).ino).toBe(incomingInode);
       expect(readdirSync(chosen)).toEqual([]);
@@ -432,7 +464,7 @@ describe('library files', () => {
     mkdirSync(chosen);
     writeFileSync(join(chosen, 'keep.txt'), 'Keep this');
     const files = createLibraryFiles(deps({ kind: 'presentation', title: 'Quarterly', files: {} }, { showSaveDialog: async () => ({ canceled: false, filePath: chosen }) }));
-    await expect(files.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pngs' } } })).rejects.toThrow();
+    await expect(files.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pngs' } } }, null)).rejects.toThrow();
     expect(readFileSync(join(chosen, 'keep.txt'), 'utf8')).toBe('Keep this');
   });
 
@@ -441,15 +473,15 @@ describe('library files', () => {
     mkdirSync(join(dir, 'artifacts', ID, 'exports'), { recursive: true });
     writeFileSync(exported, '%PDF-1.7 export');
     const chosen = join(dir, 'chosen.pdf');
-    const showSaveDialog = vi.fn<LibraryFilesDeps['showSaveDialog']>(async () => ({ canceled: false, filePath: chosen }));
+    const showSaveDialog = vi.fn<Os['showSaveDialog']>(async () => ({ canceled: false, filePath: chosen }));
     const files = createLibraryFiles(deps({ kind: 'html', title: 'Q3: plans / review', files: {} }, { showSaveDialog }));
-    await expect(files.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pdf' } } })).resolves.toEqual({ saved: true, path: chosen });
-    expect(showSaveDialog).toHaveBeenCalledWith({ defaultPath: join(dir, 'Downloads', 'Q3- plans - review.pdf') }, undefined);
+    await expect(files.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pdf' } } }, null)).resolves.toEqual({ saved: true, path: chosen });
+    expect(showSaveDialog).toHaveBeenCalledWith({ defaultPath: join(dir, 'Downloads', 'Q3- plans - review.pdf') }, null);
     expect(readFileSync(chosen, 'utf8')).toBe('%PDF-1.7 export');
 
     const cancelled = createLibraryFiles(deps({ kind: 'html', title: 'Page', files: {} }));
-    await expect(cancelled.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pdf' } } })).resolves.toEqual({ saved: false });
-    await expect(cancelled.saveAs({ artifactId: ID, source: { export: { revision: 8, format: 'pdf' } } })).rejects.toThrow(/no export/);
+    await expect(cancelled.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pdf' } } }, null)).resolves.toEqual({ saved: false });
+    await expect(cancelled.saveAs({ artifactId: ID, source: { export: { revision: 8, format: 'pdf' } } }, null)).rejects.toThrow(/no export/);
   });
 
   // P4 (W1, tracker 2026-10-19 L302): an export of its own file is found by its id, whatever another export of the same
@@ -465,14 +497,14 @@ describe('library files', () => {
     writeFileSync(cached, '%PDF a4, the agent’s'); // the interleaved export of the same revision and format
     const chosen = join(dir, 'chosen.pdf');
     const files = createLibraryFiles(deps({ kind: 'document', title: 'Plan', files: {} }, { showSaveDialog: vi.fn(async () => ({ canceled: false, filePath: chosen })) }));
-    await expect(files.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pdf', exportId: OWN } } })).resolves.toEqual({ saved: true, path: chosen });
+    await expect(files.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pdf', exportId: OWN } } }, null)).resolves.toEqual({ saved: true, path: chosen });
     expect(readFileSync(chosen, 'utf8')).toBe('%PDF letter');
     expect(readdirSync(exports)).toEqual([artifactExportName(7, 'pdf')]);
 
     writeFileSync(own, '%PDF letter again');
     const cancelled = createLibraryFiles(deps({ kind: 'document', title: 'Plan', files: {} }));
-    await expect(cancelled.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pdf', exportId: OWN } } })).resolves.toEqual({ saved: false });
-    await expect(cancelled.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pdf' } } })).resolves.toEqual({ saved: false });
+    await expect(cancelled.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pdf', exportId: OWN } } }, null)).resolves.toEqual({ saved: false });
+    await expect(cancelled.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pdf' } } }, null)).resolves.toEqual({ saved: false });
     expect(readdirSync(exports)).toEqual([artifactExportName(7, 'pdf')]);
   });
 
@@ -482,7 +514,7 @@ describe('library files', () => {
     mkdirSync(into);
     const seamed = deps({ kind: 'file', title: 'Budget', files: { 3: { name: 'budget.csv', path: csv } } }, { env: { MAWS_E2E: '1', MAWS_E2E_SAVE_PATH: into } });
     const files = createLibraryFiles(seamed);
-    await expect(files.saveAs({ artifactId: ID, source: { content: {} } })).resolves.toEqual({ saved: true, path: join(into, 'budget.csv') });
+    await expect(files.saveAs({ artifactId: ID, source: { content: {} } }, null)).resolves.toEqual({ saved: true, path: join(into, 'budget.csv') });
     expect(readFileSync(join(into, 'budget.csv'), 'utf8')).toBe('month,amount\n');
     expect(seamed.showSaveDialog).not.toHaveBeenCalled();
   });

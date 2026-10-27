@@ -10,6 +10,7 @@ import type { CommandName } from '@shared/ipc/schema';
 import type { BrowserWindow, WebContents } from 'electron';
 import type { BrowserBookmarksStore } from '../index/browser-bookmarks';
 import type { BrowserHistoryStore, BrowserSuggestion } from '../index/browser-history';
+import { pageOf } from '../ipc/clients';
 import { CommandFailure, type MainHandler, type registerMainHandler } from '../ipc/router';
 import type { Navigator } from './navigation';
 import type { Downloads } from './downloads';
@@ -101,17 +102,22 @@ export function registerBrowserHandlers({ store, views, navigator, downloads, hi
   // view manager settles it, every shown page's still sent and the page hidden (P3-F L128), so the renderer's
   // `coverAcknowledged` is a full barrier: Mark up never draws its overlay while the live page can still draw over it.
   // A failed cover is logged and still answered.
-  register('browser.view.place', knownTabs((input, { sender }) => views.place(input, sender)));
-  register('browser.view.cover', ({ covered }, { sender }) =>
-    views.cover(covered, sender).catch((error: unknown) => console.error('[browser] the cover failed:', error)),
-  );
+  register('browser.view.place', knownTabs((input, { client }) => {
+    const page = pageOf(client);
+    if (page) views.place(input, page);
+  }));
+  register('browser.view.cover', async ({ covered }, { client }) => {
+    const page = pageOf(client);
+    if (page) await views.cover(covered, page).catch((error: unknown) => console.error('[browser] the cover failed:', error));
+  });
   // P3-G (§D4.1): Mark-up's still of the page, for the window the tab is placed in only (capture.ts)
   register(
     'browser.view.capture',
-    knownTabs(({ tabId }, { sender }) => {
+    knownTabs(({ tabId }, { client }) => {
       const entry = store.require(tabId);
       const contents = entry.view?.webContents ?? null;
-      return captureTabView({ tabId, window: entry.placement?.window ?? null, shown: shown(entry), contents }, windowOf(sender));
+      const page = pageOf(client);
+      return captureTabView({ tabId, window: entry.placement?.window ?? null, shown: shown(entry), contents }, page && windowOf(page));
     }),
   );
   // The chrome's Hand back: the page returns to idle from any state (E4c moves it everywhere else).
@@ -120,8 +126,9 @@ export function registerBrowserHandlers({ store, views, navigator, downloads, hi
   register('browser.bookmarks.open', knownTabs(({ tabId, nodeId, how }) => bar.open(tabId, nodeId, how)));
   register(
     'browser.bookmarks.menu',
-    knownTabs(({ tabId, request, anchor }, { sender }) => {
-      const window = windowOf(sender);
+    knownTabs(({ tabId, request, anchor }, { client }) => {
+      const page = pageOf(client);
+      const window = page && windowOf(page);
       if (window) bar.menu(tabId, request, anchor, window);
     }),
   );

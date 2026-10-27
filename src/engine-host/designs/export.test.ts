@@ -133,13 +133,15 @@ function libraryFiles(dialog: () => Promise<string>) {
     exporters: { get: () => undefined },
     root: join(userData, 'artifacts'),
     downloads: () => userData,
-    showSaveDialog: async () => ({ canceled: false, filePath: await dialog() }),
-    confirmReplaceFolder: async () => false,
-    openPath: async () => '',
+    port: {
+      save: async () => ({ path: await dialog() }),
+      confirm: async () => ({ confirmed: false }),
+      openExternal: async () => ({ opened: true }),
+      reveal: async () => ({ revealed: true }),
+    },
     readFile: async () => {
       throw new Error('not read here');
     },
-    showItemInFolder: () => {},
     env: {},
   });
 }
@@ -237,7 +239,7 @@ describe('a retained version of a design whose live legacy state cannot migrate 
     const revision = await row();
     asked.length = 0;
     const to = join(userData, 'saved-version.png');
-    const saved = await libraryFiles(async () => to).saveAs({ artifactId: id, source: { export: { revision: exported.revision, format: 'png', exportId: exported.exportId! } } });
+    const saved = await libraryFiles(async () => to).saveAs({ artifactId: id, source: { export: { revision: exported.revision, format: 'png', exportId: exported.exportId! } } }, null);
     expect(saved).toEqual({ saved: true, path: to });
     expect(readFileSync(to, 'utf8')).toBe('png:phone');
     expect(asked).toEqual([['artifacts.get', { artifactId: id, prepare: false }]]);
@@ -257,7 +259,7 @@ describe('managed export files (Decision Log 33)', () => {
     let release!: (path: string) => void;
     const held = new Promise<string>((resolve) => (release = resolve));
     const files = libraryFiles(() => held);
-    const saving = files.saveAs({ artifactId: id, source: { export: { revision: first.revision, format: 'png', exportId: first.exportId! } } });
+    const saving = files.saveAs({ artifactId: id, source: { export: { revision: first.revision, format: 'png', exportId: first.exportId! } } }, null);
     await vi.waitFor(() => expect(asked.some(([name]) => name === 'artifacts.get')).toBe(true));
     const second = await service.exportForLibrary({ artifactId: id, format: 'png', board: 'poster', scale: 0.9102 });
     expect(second.revision).toBe(first.revision);
@@ -267,7 +269,7 @@ describe('managed export files (Decision Log 33)', () => {
     expect(await saving).toEqual({ saved: true, path: firstTo });
     expect(readFileSync(firstTo, 'utf8')).toBe('png:phone');
     const secondTo = join(userData, 'second.png');
-    await libraryFiles(async () => secondTo).saveAs({ artifactId: id, source: { export: { revision: second.revision, format: 'png', exportId: second.exportId! } } });
+    await libraryFiles(async () => secondTo).saveAs({ artifactId: id, source: { export: { revision: second.revision, format: 'png', exportId: second.exportId! } } }, null);
     expect(readFileSync(secondTo, 'utf8')).toBe('png:poster');
     expect([existsSync(first.path), existsSync(second.path)]).toEqual([false, false]); // P4 (W1, L302): each save removed its own file
   });
@@ -288,7 +290,7 @@ describe('managed export files (Decision Log 33)', () => {
     const refused = await service.exportForLibrary({ artifactId: id, format: 'png', board: 'poster', ownFile: true }).catch((error: unknown) => error);
     expect((refused as InstanceType<typeof CommandFailure>).error.issues).toMatchObject({ reason: 'exportTooLarge', data: { board: 'poster', maxScale: 0.9102 } });
     const to = join(userData, 'sent.png');
-    await libraryFiles(async () => to).saveAs({ artifactId: id, source: { export: { revision: sent.revision, format: 'png', exportId: sent.exportId! } } });
+    await libraryFiles(async () => to).saveAs({ artifactId: id, source: { export: { revision: sent.revision, format: 'png', exportId: sent.exportId! } } }, null);
     expect(readFileSync(to, 'utf8')).toBe('png:poster');
   });
 
@@ -299,8 +301,8 @@ describe('managed export files (Decision Log 33)', () => {
     for (const exportId of ['../../store.sqlite', `${exported.exportId}/../x`, 'not-an-id']) expect(input.safeParse({ artifactId: id, source: { export: { revision: exported.revision, format: 'png', exportId } } }).success).toBe(false);
     expect(input.safeParse({ artifactId: id, source: { export: { revision: exported.revision, format: 'png', exportId: exported.exportId } } }).success).toBe(true);
     const unknown = '00000000-0000-4000-8000-00000000abcd';
-    await expect(libraryFiles(async () => join(userData, 'x.png')).saveAs({ artifactId: id, source: { export: { revision: exported.revision, format: 'png', exportId: unknown } } })).rejects.toThrow(/no export/);
+    await expect(libraryFiles(async () => join(userData, 'x.png')).saveAs({ artifactId: id, source: { export: { revision: exported.revision, format: 'png', exportId: unknown } } }, null)).rejects.toThrow(/no export/);
     // without its id the shared name is not the design's file
-    await expect(libraryFiles(async () => join(userData, 'y.png')).saveAs({ artifactId: id, source: { export: { revision: exported.revision, format: 'png' } } })).rejects.toThrow(/no export/);
+    await expect(libraryFiles(async () => join(userData, 'y.png')).saveAs({ artifactId: id, source: { export: { revision: exported.revision, format: 'png' } } }, null)).rejects.toThrow(/no export/);
   });
 });

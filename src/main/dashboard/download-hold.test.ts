@@ -44,11 +44,13 @@ function world(over: Partial<AssetDownloadDeps> = {}) {
     call,
     hold: (artifactId, ref) => holdAsset(call, artifactId, ref),
     downloads: () => join(dir, 'Downloads'),
-    showSaveDialog: vi.fn(async (options: { defaultPath?: string }) => {
-      log.push(`dialog (held ${held})`);
-      await new Promise<void>((resolve) => (dialogOpen = resolve));
-      return { canceled: false, filePath: options.defaultPath };
-    }),
+    port: {
+      save: vi.fn(async (_client: unknown, options: { defaultPath: string }) => {
+        log.push(`dialog (held ${held})`);
+        await new Promise<void>((resolve) => (dialogOpen = resolve));
+        return { path: options.defaultPath };
+      }),
+    },
     env: {},
     ...over,
   };
@@ -62,7 +64,7 @@ const until = async (check: () => boolean) => {
 describe('the Download’s hold (E3)', () => {
   it('is taken before the path and the dialog and kept through the copy, then released', async () => {
     const w = world();
-    const saving = createAssetDownload(w.deps).downloadAsset({ artifactId: ID, ref: 'assets/query-1.json', name: 'live.json' });
+    const saving = createAssetDownload(w.deps).downloadAsset({ artifactId: ID, ref: 'assets/query-1.json', name: 'live.json' }, null);
     await until(() => w.log.some((entry) => entry.startsWith('dialog')));
     expect(w.log).toEqual(['artifacts.holdAssets', 'artifacts.content', 'dialog (held 1)']);
     expect(w.held()).toBe(1); // whatever the sheet does meanwhile (it may close), the Download holds its own
@@ -74,18 +76,18 @@ describe('the Download’s hold (E3)', () => {
   });
 
   it('is released when the owner cancels, and when the copy fails', async () => {
-    const cancel = world({ showSaveDialog: vi.fn(async () => ({ canceled: true })) });
-    expect(await createAssetDownload(cancel.deps).downloadAsset({ artifactId: ID, ref: 'assets/query-1.json' })).toEqual({ path: null });
+    const cancel = world({ port: { save: vi.fn(async () => ({ cancelled: true as const })) } });
+    expect(await createAssetDownload(cancel.deps).downloadAsset({ artifactId: ID, ref: 'assets/query-1.json' }, null)).toEqual({ path: null });
     await until(() => cancel.held() === 0);
-    const failing = world({ showSaveDialog: vi.fn(async () => ({ canceled: false, filePath: join(dir, 'missing-folder', 'x.json') })) });
-    await expect(createAssetDownload(failing.deps).downloadAsset({ artifactId: ID, ref: 'assets/query-1.json' })).rejects.toThrow();
+    const failing = world({ port: { save: vi.fn(async () => ({ path: join(dir, 'missing-folder', 'x.json') })) } });
+    await expect(createAssetDownload(failing.deps).downloadAsset({ artifactId: ID, ref: 'assets/query-1.json' }, null)).rejects.toThrow();
     await until(() => failing.held() === 0);
   });
 
   it('refuses a snapshot already unavailable before any dialog', async () => {
     const w = world();
-    await expect(createAssetDownload(w.deps).downloadAsset({ artifactId: ID, ref: 'assets/gone.json' })).rejects.toMatchObject({ error: { issues: { data: { snapshotUnavailable: true } } } });
+    await expect(createAssetDownload(w.deps).downloadAsset({ artifactId: ID, ref: 'assets/gone.json' }, null)).rejects.toMatchObject({ error: { issues: { data: { snapshotUnavailable: true } } } });
     expect(w.log).toEqual(['artifacts.holdAssets']);
-    expect(w.deps.showSaveDialog).not.toHaveBeenCalled();
+    expect(w.deps.port.save).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,7 @@
+import { EventEmitter } from 'node:events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
-import type { HostDispatch } from './router';
+import type { HostDispatch, MainContext } from './router';
 
 // Electron is faked: `ipcMain.handle` records one handler per channel, and each fake window is the one whose
 // webContents the fake event names as its sender.
@@ -22,9 +23,11 @@ vi.mock('electron', () => ({
 
 const DEV_URL = 'http://localhost:5173/';
 
+// An app window's webContents: an EventEmitter with an id, as the router's ClientRef needs it (./clients.ts).
+let pageIds = 0;
 function appWindow(url = DEV_URL) {
   const mainFrame = { url, parent: null };
-  const webContents = { mainFrame };
+  const webContents = Object.assign(new EventEmitter(), { id: ++pageIds, mainFrame, isDestroyed: () => false });
   electron.windows.set(webContents, { webContents });
   return { sender: webContents, senderFrame: mainFrame };
 }
@@ -65,7 +68,26 @@ describe('main ipc router', () => {
     router.registerMainHandler('settings.get', handler);
     const event = appWindow();
     await expect(invoke(event, 'settings.get')).resolves.toEqual({ ok: true, value: LIGHT });
-    expect(handler).toHaveBeenCalledWith(undefined, { sender: event.sender }); // the requesting window, for per-window state
+    expect(handler).toHaveBeenCalledWith(undefined, { client: expect.objectContaining({ id: `page:${event.sender.id}.1` }) }); // who asked, for per-client state
+  });
+
+  it('hands a handler the asking page instance’s ClientRef: the same one per page, a new one after a reload', async () => {
+    const { pageOf } = await import('./clients');
+    const handler = vi.fn<(input: unknown, context: MainContext) => typeof LIGHT>(() => LIGHT);
+    router.registerMainHandler('settings.get', handler);
+    const event = appWindow();
+    await invoke(event, 'settings.get');
+    await invoke(event, 'settings.get');
+    const [first, second] = handler.mock.calls.map(([, context]) => context.client);
+    expect(second).toBe(first);
+    expect(pageOf(first!)).toBe(event.sender);
+    const gone = vi.fn();
+    first!.onGone(gone);
+    event.sender.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
+    expect(gone).toHaveBeenCalledOnce();
+    await invoke(event, 'settings.get');
+    expect(handler.mock.calls[2]![1].client.id).toBe(`page:${event.sender.id}.2`);
+    expect(handler).not.toHaveBeenCalledWith(undefined, expect.objectContaining({ sender: expect.anything() })); // never the WebContents itself
   });
 
   it('answers settings.set({ theme: "sepia" }) with invalid_input and never calls the handler', async () => {
@@ -227,6 +249,21 @@ describe('main ipc router', () => {
     expect(() => router.registerMainHandler('settings.get', () => LIGHT)).toThrow('already registered');
   });
 
+  // P5 O1 M5: the router reads "bridged" as the registry's commands less `mainOnly`; for production that is exactly the
+  // preload's bridged set
+  it('treats as bridged exactly the names the preload bridges', async () => {
+    const { REGISTRY } = await import('@shared/ipc/registry');
+    const { isBridgedCommandName } = await import('@shared/ipc/names');
+    const bridged = Object.keys(REGISTRY.commands).filter((name) => !REGISTRY.mainOnly.has(name));
+    expect(bridged.sort()).toEqual(Object.keys(REGISTRY.commands).filter(isBridgedCommandName).sort());
+  });
+
+  // P5 O1 M5: no production namespace is `machine`-owned in O1 (machine-forward.test.ts drives a fixture one)
+  it('refuses a machine handler for a command not owned by machine', () => {
+    expect(() => router.registerMachineHandler('settings.get', () => LIGHT)).toThrow('settings.get is owned by main, not machine');
+    expect(() => router.registerMachineHandler('engine.ping', () => ({}) as never)).toThrow('engine.ping is owned by engine-host, not machine');
+  });
+
   describe('interceptCommand (C5 stub source seam)', () => {
     it('is consulted before the main handler for exactly the intercepted name, and removed by its disposer', async () => {
       const main = vi.fn(() => ({ digests: [] }));
@@ -235,7 +272,7 @@ describe('main ipc router', () => {
       const dispose = router.interceptCommand('session.list', stub);
       await expect(invoke(appWindow(), 'session.list', {})).resolves.toEqual({ ok: true, value: { sessions: [], revision: 7 } });
       await expect(invoke(appWindow(), 'session.digests')).resolves.toEqual({ ok: true, value: { digests: [] } });
-      expect(stub).toHaveBeenCalledWith({}, { sender: expect.anything() });
+      expect(stub).toHaveBeenCalledWith({}, { client: expect.objectContaining({ id: expect.stringMatching(/^page:\d+\.1$/) }) });
       dispose();
       await expect(invoke(appWindow(), 'session.list', {})).resolves.toMatchObject({ ok: false, error: { code: 'internal' } });
     });

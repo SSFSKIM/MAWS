@@ -22,7 +22,6 @@
 import { constants } from 'node:fs';
 import { chmod, mkdir, open, readdir, stat, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { SafeStorage } from 'electron';
 import * as z from 'zod';
 import { OAuthClientInformationFullSchema, OAuthMetadataSchema, OpenIdProviderDiscoveryMetadataSchema } from '@modelcontextprotocol/sdk/shared/auth.js';
 import { atomicWriteFile } from '../files/atomic-write';
@@ -34,10 +33,18 @@ export interface ConnectorOAuthSealer {
   open(sealed: Buffer): Promise<{ text: string; reseal: boolean }>;
 }
 
+// Electron's safeStorage's asynchronous API, as far as the sealer calls it (a local interface, so this module stays free
+// of Electron; O4 replaces the store's custody).
+export interface AsyncSafeStorage {
+  isAsyncEncryptionAvailable(): Promise<boolean>;
+  encryptStringAsync(plainText: string): Promise<Buffer>;
+  decryptStringAsync(encrypted: Buffer): Promise<{ result: string; shouldReEncrypt: boolean }>;
+}
+
 // Electron's safeStorage through its asynchronous API only, each call after app readiness: the synchronous methods
 // can block main's event loop on a keychain prompt.
 export function electronOAuthSealer(
-  safeStorage: Pick<SafeStorage, 'isAsyncEncryptionAvailable' | 'encryptStringAsync' | 'decryptStringAsync'>,
+  safeStorage: AsyncSafeStorage,
   ready: () => Promise<unknown>,
 ): ConnectorOAuthSealer {
   return {

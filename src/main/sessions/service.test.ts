@@ -914,8 +914,8 @@ describe('session service', () => {
       symlinkSync(h.work, link);
       expect(await h.service.trustCheck(link)).toMatchObject({ trustKey: h.work, trusted: true, configPath: join(h.trust.configHome, '.claude.json') });
       h.index.projects.add(h.work);
-      await expect(h.service.revealPath(h.work)).resolves.toBeUndefined();
-      await expect(h.service.revealPath(h.root)).rejects.toThrow('not a project');
+      await expect(h.service.revealPath(h.work, null)).resolves.toBeUndefined();
+      await expect(h.service.revealPath(h.root, null)).rejects.toThrow('not a project');
     });
   });
 });

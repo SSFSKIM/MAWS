@@ -2,6 +2,7 @@ import type { WebContentsView } from 'electron';
 import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName, EventName } from '@shared/ipc/schema';
+import { contextOf, fakePage } from '../../../../test/support/fake-page';
 import type { LoadedAction } from './actions';
 
 vi.mock('electron', () => ({ ipcMain: { handle: () => {} }, WebContentsView: class {}, Menu: {} }));
@@ -51,7 +52,7 @@ function setup() {
     emit: (name, payload) => void emitted.push({ name, payload }),
     register: (name, handler) => void handlers.set(name, handler as (input: unknown) => unknown),
   });
-  const call = (name: CommandName, input: unknown) => handlers.get(name)!(input, { sender: {} });
+  const call = (name: CommandName, input: unknown) => handlers.get(name)!(input, contextOf(fakePage()));
   const tabId = store.open({ appSessionId: A, url: 'https://a.test/', select: true }).tab.tabId;
   const reveals = () => emitted.filter((e) => e.name === 'browser.extensions.reveal').map((e) => e.payload);
   return { store, actions, popups, pages, menus, call, tabId, reveals, optionsTab };

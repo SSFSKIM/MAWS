@@ -4,7 +4,6 @@
 // last unexpected exit),
 // answered as a command and emitted on every SupervisorStatus and every transition of the engine host; and the two
 // actions behind the Settings and Diagnostics rows and the banners, `host.restart` and `host.openLog`.
-import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import { ipcError } from '@shared/ipc/errors';
 import type { HostStatus, MainBuild, SupervisorStatus } from '@shared/ipc/schema/host';
 import { CommandFailure, type registerMainHandler } from '../ipc/router';
@@ -31,11 +30,9 @@ export function startHostStatus(deps: HostStatusDeps): HostStatusService {
   let liveAtLastStatus = 0; // what a crash interrupted: the rows live at the last status any supervisor sent
   let lastExit: HostStatus['lastExit'] = null;
 
-  const matchesOf = (status: SupervisorStatus): NonNullable<HostStatus['matches']> => {
-    if (status.protocol !== SOCKET_PROTOCOL) return 'protocol';
-    if (status.wire !== deps.appWire()) return 'wire';
-    return status.buildId !== deps.appBuildId() ? 'build' : 'same';
-  };
+  // P5 O1 M6 (OX1): a supervisor that sends its status was welcomed, so it shares the wire's major or (the protocol-2
+  // window) the fingerprint, and differs at most by build; what an incompatible one refused comes from the transport
+  const matchesOf = (status: SupervisorStatus): NonNullable<HostStatus['matches']> => (status.buildId !== deps.appBuildId() ? 'build' : 'same');
 
   const status = (): HostStatus => {
     const facts = deps.hosts.facts('engine-host');

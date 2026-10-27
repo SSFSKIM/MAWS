@@ -9,6 +9,7 @@ import type { ConnectorGrant } from '@shared/artifacts/connectors';
 import { eventChannel } from '@shared/ipc/schema';
 import type { ConnectorServers, DirectDiscoverAnswer, DirectSource } from '@shared/ipc/schema/connectors';
 import { validateCommandOutput } from '@shared/ipc/validate';
+import { clientOf } from '../ipc/clients';
 import type { ConnectorOAuthProvider, ConnectorOAuthState } from './oauth-provider';
 import type { ConnectorOAuthSaved } from './oauth-store';
 import { createConnectorOwner, OWNER_ACTION_DEADLINE_MS, OWNER_QUERY_DEADLINE_MS, type ConnectorOwner, type ConnectorOwnerDeps } from './owner';
@@ -125,7 +126,7 @@ afterEach(() => {
 });
 
 async function rows(artifactId = ART, tools = [{ server: 'notes', tool: 'search' }], from: Viewer = viewer): Promise<ConnectorServers> {
-  const answer = owner.servers(artifactId, tools, from as never);
+  const answer = owner.servers(artifactId, tools, clientOf(from as never));
   await settle();
   const value = await answer;
   expect(validateCommandOutput('connectors.servers', value).ok, JSON.stringify(value)).toBe(true);
@@ -183,9 +184,10 @@ describe('the owner’s server rows', () => {
     states.set('notes', { state: 'needsConnect' });
     const answer = await rows();
     expect(answer.servers).toMatchObject([{ kind: 'source', path: '/Users/me/space/.claude.json' }]);
-    expect(owner.connect(ART, handleOf(answer, 'notes'))).toEqual({ accepted: true });
+    const asker = { id: 'page:1.1', onGone: () => () => {} } as never;
+    expect(owner.connect(ART, handleOf(answer, 'notes'), asker)).toEqual({ accepted: true });
     await settle();
-    expect(provider.connect).toHaveBeenCalledWith(expect.objectContaining({ sourceId: SRC_B }), expect.any(AbortSignal));
+    expect(provider.connect).toHaveBeenCalledWith(expect.objectContaining({ sourceId: SRC_B }), expect.any(AbortSignal), asker); // P5 O1 M3: the consent's client
     expect(discovered).toEqual([{ sourceId: SRC_B, directory: '/space' }]);
   });
 
@@ -214,7 +216,7 @@ describe('the owner’s server rows', () => {
       return new Promise((resolve) => signal.addEventListener('abort', () => resolve({ ok: false, why: 'unavailable' }), { once: true }));
     });
     provider.state.mockImplementation(() => new Promise(() => {}));
-    const answer = owner.servers(ART, [{ server: 'notes', tool: 'search' }], viewer as never);
+    const answer = owner.servers(ART, [{ server: 'notes', tool: 'search' }], clientOf(viewer as never));
     await settle();
     expect(seen!.aborted).toBe(false);
     await vi.advanceTimersByTimeAsync(OWNER_QUERY_DEADLINE_MS);
@@ -231,13 +233,13 @@ describe('the owner’s server rows', () => {
       void promise.then(() => (done = true));
       return () => done;
     };
-    const bounded = owner.servers(ART, [{ server: 'notes', tool: 'search' }], viewer as never);
+    const bounded = owner.servers(ART, [{ server: 'notes', tool: 'search' }], clientOf(viewer as never));
     const boundedDone = answered(bounded);
     await vi.advanceTimersByTimeAsync(OWNER_QUERY_DEADLINE_MS);
     await settle();
     expect(boundedDone()).toBe(true);
     expect((await bounded).servers).toEqual([{ kind: 'engineOnly', server: 'notes', why: 'unavailable', tools: ['search'] }]);
-    const stopped = owner.servers(ART, [{ server: 'notes', tool: 'search' }], viewer as never);
+    const stopped = owner.servers(ART, [{ server: 'notes', tool: 'search' }], clientOf(viewer as never));
     const stoppedDone = answered(stopped);
     await settle();
     owner.stop();
@@ -253,7 +255,7 @@ describe('the owner’s Connect', () => {
     const listing = deferred<DirectDiscoverAnswer>();
     discoveries.set(SRC_S, () => listing.promise);
     const answer = await rows(ART, [{ server: 'files', tool: 'read' }]);
-    expect(owner.connect(ART, handleOf(answer, 'files'))).toEqual({ accepted: true });
+    expect(owner.connect(ART, handleOf(answer, 'files'), null)).toEqual({ accepted: true });
     await settle();
     expect(viewer.sent).toEqual([{ artifactId: ART }]); // started
     expect(discovered).toEqual([{ sourceId: SRC_S, directory: '/repo' }]);
@@ -268,17 +270,17 @@ describe('the owner’s Connect', () => {
     selections.set(key('files', 'read'), ok(stdio(SRC_S, '/repo'), known));
     const answer = await rows(ART, [{ server: 'files', tool: 'read' }]);
     selections.set(key('files', 'read'), ok(stdio(SRC_A, '/other'), known));
-    owner.connect(ART, handleOf(answer, 'files'));
+    owner.connect(ART, handleOf(answer, 'files'), null);
     await settle();
     expect(discovered).toEqual([]);
-    expect(owner.connect(OTHER_ART, handleOf(answer, 'files'))).toEqual({ accepted: false, why: 'stale' }); // another artifact's handle
+    expect(owner.connect(OTHER_ART, handleOf(answer, 'files'), null)).toEqual({ accepted: false, why: 'stale' }); // another artifact's handle
     expect((await rows(ART, [{ server: 'files', tool: 'read' }])).servers[0]).not.toHaveProperty('last'); // the new source's row, no outcome of its own
   });
 
   it('open HTTP: a listing without credentials succeeds, so no OAuth flow ever starts', async () => {
     selections.set(key('notes', 'search'), ok(http(SRC_A, '/repo')));
     const answer = await rows();
-    owner.connect(ART, handleOf(answer, 'notes'));
+    owner.connect(ART, handleOf(answer, 'notes'), null);
     await settle();
     expect(discovered).toEqual([{ sourceId: SRC_A, directory: '/repo' }]);
     expect(provider.connect).not.toHaveBeenCalled();
@@ -295,7 +297,7 @@ describe('the owner’s Connect', () => {
       return { ok: true, connectionId: CONN, reused: false };
     });
     const answer = await rows(ART, [{ server: 'notes', tool: 'search' }, { server: 'notes', tool: 'pages' }]);
-    owner.connect(ART, handleOf(answer, 'notes'));
+    owner.connect(ART, handleOf(answer, 'notes'), null);
     await settle();
     expect(provider.connect).toHaveBeenCalledTimes(1);
     expect(discovered.map((entry) => entry.sourceId).sort()).toEqual([SRC_A, SRC_A, SRC_B, SRC_B].sort());
@@ -308,14 +310,14 @@ describe('the owner’s Connect', () => {
   it('a usable saved sign-in is used without a browser; a parked or withdrawn one asks the provider’s Connect', async () => {
     selections.set(key('notes', 'search'), ok(http(SRC_A, '/repo')));
     states.set('notes', { state: 'connected', connectionId: CONN, refreshable: true });
-    owner.connect(ART, handleOf(await rows(), 'notes'));
+    owner.connect(ART, handleOf(await rows(), 'notes'), null);
     await settle();
     expect(provider.connect).not.toHaveBeenCalled();
     expect(discovered).toHaveLength(1);
     for (const state of [{ state: 'needsConnect' }, { state: 'withdrawn' }] as const) {
       states.set('notes', state);
       provider.connect.mockClear();
-      owner.connect(ART, handleOf(await rows(), 'notes'));
+      owner.connect(ART, handleOf(await rows(), 'notes'), null);
       await settle();
       expect(provider.connect, state.state).toHaveBeenCalledTimes(1);
     }
@@ -324,13 +326,13 @@ describe('the owner’s Connect', () => {
   it('an unusable saved sign-in asks for Reconnect rather than starting a new consent; Reconnect replaces it explicitly', async () => {
     selections.set(key('notes', 'search'), ok(http(SRC_A, '/repo')));
     states.set('notes', { state: 'needsReconnect', connectionId: CONN });
-    owner.connect(ART, handleOf(await rows(), 'notes'));
+    owner.connect(ART, handleOf(await rows(), 'notes'), null);
     await settle();
     expect(provider.connect).not.toHaveBeenCalled();
     expect((await rows()).servers[0]).toMatchObject({ connection: { state: 'needsReconnect' }, last: { action: 'connect', ok: false, why: 'needsReconnect' } });
-    expect(owner.reconnect(ART, handleOf(await rows(), 'notes'))).toEqual({ accepted: true });
+    expect(owner.reconnect(ART, handleOf(await rows(), 'notes'), null)).toEqual({ accepted: true });
     await settle();
-    expect(provider.reconnect).toHaveBeenCalledWith(expect.objectContaining({ sourceId: SRC_A }), expect.any(AbortSignal));
+    expect(provider.reconnect).toHaveBeenCalledWith(expect.objectContaining({ sourceId: SRC_A }), expect.any(AbortSignal), null);
     expect(discovered).toHaveLength(1);
   });
 
@@ -338,7 +340,7 @@ describe('the owner’s Connect', () => {
     selections.set(key('notes', 'search'), ok(http(SRC_A, '/repo')));
     states.set('notes', { state: 'needsConnect' });
     discoveries.set(SRC_A, async () => ({ ok: false, failure: 'unavailable', reason: 'connection' }));
-    owner.connect(ART, handleOf(await rows(), 'notes'));
+    owner.connect(ART, handleOf(await rows(), 'notes'), null);
     await settle();
     states.set('notes', { state: 'connected', connectionId: CONN, refreshable: true });
     expect((await rows()).servers[0]).toMatchObject({ connection: { state: 'connected' }, last: { action: 'connect', ok: false, why: 'connection' } });
@@ -349,9 +351,9 @@ describe('the owner’s Connect', () => {
     states.set('notes', { state: 'needsConnect' });
     provider.connect.mockImplementation(() => new Promise(() => {}));
     const handle = handleOf(await rows(), 'notes');
-    expect(owner.connect(ART, handle)).toEqual({ accepted: true });
+    expect(owner.connect(ART, handle, null)).toEqual({ accepted: true });
     await settle();
-    expect(owner.reconnect(ART, handle)).toEqual({ accepted: false, why: 'busy' });
+    expect(owner.reconnect(ART, handle, null)).toEqual({ accepted: false, why: 'busy' });
     expect((await rows()).servers[0]).toMatchObject({ action: 'connecting' });
   });
 
@@ -363,12 +365,12 @@ describe('the owner’s Connect', () => {
       signal = given;
       return new Promise((resolve) => given.addEventListener('abort', () => resolve({ ok: false, why: 'cancelled' }), { once: true }));
     });
-    owner.connect(ART, handleOf(await rows(), 'notes'));
+    owner.connect(ART, handleOf(await rows(), 'notes'), null);
     await settle();
     await vi.advanceTimersByTimeAsync(OWNER_ACTION_DEADLINE_MS);
     expect(signal!.aborted).toBe(true);
     expect((await rows()).servers[0]).toMatchObject({ last: { action: 'connect', ok: false, why: 'timeout' } });
-    expect(owner.connect(ART, handleOf(await rows(), 'notes'))).toEqual({ accepted: true }); // the row is free again
+    expect(owner.connect(ART, handleOf(await rows(), 'notes'), null)).toEqual({ accepted: true }); // the row is free again
   });
 
   it('the host’s loss and main’s stop end running actions; after stop nothing is accepted', async () => {
@@ -380,17 +382,17 @@ describe('the owner’s Connect', () => {
       return new Promise(() => {});
     });
     const handle = handleOf(await rows(), 'notes');
-    owner.connect(ART, handle);
+    owner.connect(ART, handle, null);
     await settle();
     viewer.sent.length = 0;
     owner.hostLost();
     expect(signals[0]!.aborted).toBe(true);
     expect(viewer.sent).toContainEqual({ artifactId: ART });
-    owner.connect(ART, handle);
+    owner.connect(ART, handle, null);
     await settle();
     owner.stop();
     expect(signals[1]!.aborted).toBe(true);
-    expect(owner.connect(ART, handle)).toEqual({ accepted: false, why: 'stopped' });
+    expect(owner.connect(ART, handle, null)).toEqual({ accepted: false, why: 'stopped' });
     expect(owner.disconnect(CONN)).toEqual({ accepted: false, why: 'stopped' });
   });
 });
@@ -430,7 +432,7 @@ describe('the owner’s Disconnect', () => {
   it('keeps a Reconnect’s unconfirmed retirement of the replaced connection visible and retryable', async () => {
     selections.set(key('notes', 'search'), ok(http(SRC_A, '/repo')));
     states.set('notes', { state: 'needsReconnect', connectionId: CONN_OLD });
-    owner.reconnect(ART, handleOf(await rows(), 'notes'));
+    owner.reconnect(ART, handleOf(await rows(), 'notes'), null);
     await settle();
     expect(provider.reconnect).toHaveBeenCalledTimes(1);
     states.set('notes', { state: 'connected', connectionId: CONN, refreshable: true });
@@ -488,7 +490,7 @@ describe('the owner’s Disconnect against older actions', () => {
     const handle = handleOf(await rows(), 'notes');
     selections.set(key('notes', 'search'), () => resolving.promise); // the action's revalidation pauses here
     states.set('notes', { state: 'needsConnect' });
-    expect(owner.connect(ART, handle)).toEqual({ accepted: true });
+    expect(owner.connect(ART, handle, null)).toEqual({ accepted: true });
     await settle();
     expect(owner.disconnect(CONN)).toEqual({ accepted: true }); // another window's
     resolving.resolve(ok(http(SRC_A, '/repo')));
@@ -507,8 +509,8 @@ describe('the owner’s Disconnect against older actions', () => {
     selections.set(key('notes', 'search'), () => resolving.promise);
     selections.set(key('files', 'read'), () => stdioResolving.promise);
     states.set('notes', { state: 'needsConnect' });
-    owner.connect(ART, handleOf(answer, 'notes'));
-    owner.connect(ART, handleOf(answer, 'files'));
+    owner.connect(ART, handleOf(answer, 'notes'), null);
+    owner.connect(ART, handleOf(answer, 'files'), null);
     await settle();
     owner.disconnect(CONN_OLD); // never listed: whose it is is unknown
     resolving.resolve(ok(http(SRC_A, '/repo')));
@@ -529,7 +531,7 @@ describe('the owner’s Disconnect against older actions', () => {
       signals.push(given);
       return new Promise(() => {});
     });
-    owner.connect(ART, handleOf(answer, 'web'));
+    owner.connect(ART, handleOf(answer, 'web'), null);
     await settle();
     owner.disconnect(CONN);
     expect(signals[0]!.aborted).toBe(false);

@@ -1,9 +1,11 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ClientId, ClientRef } from '@shared/ipc/client';
 import type { VoiceEvent, VoiceStartResult, VoiceStatus } from '@shared/ipc/schema/voice';
 import type { HelperEvent, VoiceBackend } from './backend';
+import { clientOf } from '../ipc/clients';
 import { voiceScriptLog } from './scripted-backend';
-import { VoiceService, type VoiceSender } from './service';
+import { VoiceService } from './service';
 
 const A = '11111111-1111-4111-8111-111111111111';
 const B = '22222222-2222-4222-8222-222222222222';
@@ -23,7 +25,13 @@ function fakeBackend() {
   return { backend, starts };
 }
 
-const sender = (id: number) => Object.assign(new EventEmitter(), { id }) satisfies VoiceSender;
+// A page and its live ClientRef, as the router hands it at each invoke: the page's end (destroyed, crashed, reloaded)
+// ends the client, and the page's next invoke comes from a new one.
+type Page = EventEmitter & { id: number; readonly client: ClientRef };
+const sender = (id: number): Page => {
+  const page = Object.assign(new EventEmitter(), { id, isDestroyed: () => false });
+  return Object.defineProperty(page, 'client', { get: () => clientOf(page as never) }) as unknown as Page;
+};
 
 let warn: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
@@ -44,7 +52,7 @@ function setup(e2e = false) {
 
 // A capture that the backend accepted and that reported `started`.
 async function listening(h: ReturnType<typeof setup>, captureId = A, from = sender(1)) {
-  const answer = h.service.start({ captureId, locale: 'en-US' }, from);
+  const answer = h.service.start({ captureId, locale: 'en-US' }, from.client);
   h.starts.at(-1)!.answer({ accepted: true });
   await expect(answer).resolves.toEqual({ accepted: true });
   h.starts.at(-1)!.sink({ type: 'permission', id: captureId, microphone: 'authorized', speech: 'authorized' });
@@ -55,9 +63,9 @@ async function listening(h: ReturnType<typeof setup>, captureId = A, from = send
 describe('voice service owns one capture and drops late events', () => {
   it('accepts one start and answers busy to a second from any sender while the first still awaits its backend', async () => {
     const h = setup();
-    const first = h.service.start({ captureId: A, locale: null }, sender(1));
-    await expect(h.service.start({ captureId: B, locale: null }, sender(1))).resolves.toEqual({ accepted: false, reason: 'busy', path: null });
-    await expect(h.service.start({ captureId: B, locale: null }, sender(2))).resolves.toEqual({ accepted: false, reason: 'busy', path: null });
+    const first = h.service.start({ captureId: A, locale: null }, sender(1).client);
+    await expect(h.service.start({ captureId: B, locale: null }, sender(1).client)).resolves.toEqual({ accepted: false, reason: 'busy', path: null });
+    await expect(h.service.start({ captureId: B, locale: null }, sender(2).client)).resolves.toEqual({ accepted: false, reason: 'busy', path: null });
     expect(h.backend.start).toHaveBeenCalledOnce();
     expect(h.starts[0]).toMatchObject({ captureId: A, locale: null });
     h.starts[0]!.answer({ accepted: true });
@@ -75,7 +83,7 @@ describe('voice service owns one capture and drops late events', () => {
       { kind: 'partial', captureId: A, text: 'hello' },
       { kind: 'final', captureId: A, text: 'Hello.', timedOut: false },
     ]);
-    const next = h.service.start({ captureId: B, locale: null }, sender(1));
+    const next = h.service.start({ captureId: B, locale: null }, sender(1).client);
     expect(h.backend.start).toHaveBeenCalledTimes(2);
     h.starts[1]!.answer({ accepted: true });
     await expect(next).resolves.toEqual({ accepted: true });
@@ -97,7 +105,7 @@ describe('voice service owns one capture and drops late events', () => {
     sink({ type: 'final', id: A, text: '', timedOut: false }); // Apple ended the task on its own
     expect(h.emitted.at(-1)).toEqual({ kind: 'final', captureId: A, text: '', timedOut: false });
     const second = await listening(h, B, from);
-    h.service.stop({ captureId: B }, from);
+    h.service.stop({ captureId: B }, from.client);
     second.sink({ type: 'partial', id: B, text: 'hello world' });
     second.sink({ type: 'final', id: B, text: 'Hello world.', timedOut: true });
     expect(h.emitted.slice(-2)).toEqual([
@@ -115,13 +123,13 @@ describe('voice service owns one capture and drops late events', () => {
     sink(event);
     sink({ type: 'partial', id: A, text: 'late' });
     expect(h.emitted.at(-1)).toEqual(forwarded);
-    h.service.start({ captureId: B, locale: null }, sender(1));
+    h.service.start({ captureId: B, locale: null }, sender(1).client);
     expect(h.backend.start).toHaveBeenCalledTimes(2);
   });
 
   it('forwards a denial as permission then the error, with no started', async () => {
     const h = setup();
-    const answer = h.service.start({ captureId: A, locale: null }, sender(1));
+    const answer = h.service.start({ captureId: A, locale: null }, sender(1).client);
     h.starts[0]!.answer({ accepted: true });
     await answer;
     h.starts[0]!.sink({ type: 'permission', id: A, microphone: 'denied', speech: 'notDetermined' });
@@ -131,26 +139,26 @@ describe('voice service owns one capture and drops late events', () => {
 
   it('frees the microphone when the backend refuses the start, and answers its reason', async () => {
     const h = setup();
-    const answer = h.service.start({ captureId: A, locale: null }, sender(1));
+    const answer = h.service.start({ captureId: A, locale: null }, sender(1).client);
     h.starts[0]!.answer({ accepted: false, reason: 'helper_missing', path: '/h' });
     await expect(answer).resolves.toEqual({ accepted: false, reason: 'helper_missing', path: '/h' });
-    h.service.start({ captureId: B, locale: null }, sender(1));
+    h.service.start({ captureId: B, locale: null }, sender(1).client);
     expect(h.backend.start).toHaveBeenCalledTimes(2);
   });
 
   it('frees the microphone when the backend throws, and lets the failure through', async () => {
     const h = setup();
     h.backend.start.mockRejectedValueOnce(new Error('MAWS_E2E_VOICE is not JSON'));
-    await expect(h.service.start({ captureId: A, locale: null }, sender(1))).rejects.toThrow('MAWS_E2E_VOICE is not JSON');
-    h.service.start({ captureId: B, locale: null }, sender(1));
+    await expect(h.service.start({ captureId: A, locale: null }, sender(1).client)).rejects.toThrow('MAWS_E2E_VOICE is not JSON');
+    h.service.start({ captureId: B, locale: null }, sender(1).client);
     expect(h.backend.start).toHaveBeenCalledTimes(2);
   });
 
   it('cancels a start still awaiting its backend: the backend hears it, the start answers cancelled and a later started is dropped', async () => {
     const h = setup();
     const from = sender(1);
-    const answer = h.service.start({ captureId: A, locale: null }, from);
-    h.service.cancel({ captureId: A }, from);
+    const answer = h.service.start({ captureId: A, locale: null }, from.client);
+    h.service.cancel({ captureId: A }, from.client);
     expect(h.backend.cancel).toHaveBeenCalledExactlyOnceWith(A);
     h.starts[0]!.answer({ accepted: true });
     await expect(answer).resolves.toEqual({ accepted: false, reason: 'cancelled', path: null });
@@ -161,8 +169,8 @@ describe('voice service owns one capture and drops late events', () => {
   it('cancels the capture whatever its phase, at once, and drops whatever its backend says afterwards', async () => {
     const h = setup();
     const { sink, from } = await listening(h);
-    h.service.stop({ captureId: A }, from);
-    h.service.cancel({ captureId: A }, from);
+    h.service.stop({ captureId: A }, from.client);
+    h.service.cancel({ captureId: A }, from.client);
     expect(h.backend.cancel).toHaveBeenCalledExactlyOnceWith(A);
     sink({ type: 'final', id: A, text: 'Hello.', timedOut: false });
     sink({ type: 'cancelled', id: A });
@@ -172,8 +180,8 @@ describe('voice service owns one capture and drops late events', () => {
   it('stops once: a second stop waits for the final already on its way', async () => {
     const h = setup();
     const { from } = await listening(h);
-    h.service.stop({ captureId: A }, from);
-    h.service.stop({ captureId: A }, from);
+    h.service.stop({ captureId: A }, from.client);
+    h.service.stop({ captureId: A }, from.client);
     expect(h.backend.stop).toHaveBeenCalledExactlyOnceWith(A);
   });
 
@@ -181,9 +189,9 @@ describe('voice service owns one capture and drops late events', () => {
     const h = setup();
     const { sink, from } = await listening(h);
     sink({ type: 'final', id: A, text: 'Hello.', timedOut: false });
-    h.service.stop({ captureId: A }, from);
-    h.service.cancel({ captureId: A }, from);
-    h.service.cancel({ captureId: B }, from);
+    h.service.stop({ captureId: A }, from.client);
+    h.service.cancel({ captureId: A }, from.client);
+    h.service.cancel({ captureId: B }, from.client);
     expect(h.backend.stop).not.toHaveBeenCalled();
     expect(h.backend.cancel).not.toHaveBeenCalled();
     expect(warn).not.toHaveBeenCalled();
@@ -192,8 +200,8 @@ describe('voice service owns one capture and drops late events', () => {
   it('ignores stop and cancel from another window, with a warning', async () => {
     const h = setup();
     await listening(h, A, sender(1));
-    h.service.stop({ captureId: A }, sender(2));
-    h.service.cancel({ captureId: A }, sender(2));
+    h.service.stop({ captureId: A }, sender(2).client);
+    h.service.cancel({ captureId: A }, sender(2).client);
     expect(h.backend.stop).not.toHaveBeenCalled();
     expect(h.backend.cancel).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledTimes(2);
@@ -208,7 +216,7 @@ describe('voice service owns one capture and drops late events', () => {
     expect(from.listenerCount('destroyed')).toBe(1);
     from.emit('destroyed');
     expect(h.backend.cancel).toHaveBeenCalledExactlyOnceWith(B);
-    h.service.start({ captureId: A, locale: null }, sender(2));
+    h.service.start({ captureId: A, locale: null }, sender(2).client);
     expect(h.backend.start).toHaveBeenCalledTimes(3);
   });
 
@@ -223,7 +231,7 @@ describe('voice service owns one capture and drops late events', () => {
     expect(h.backend.cancel).toHaveBeenCalledExactlyOnceWith(A);
     sink({ type: 'partial', id: A, text: 'late' });
     expect(h.emitted.map((event) => event.kind)).toEqual(['permission', 'started']);
-    const next = h.service.start({ captureId: B, locale: null }, from);
+    const next = h.service.start({ captureId: B, locale: null }, from.client);
     h.starts.at(-1)!.answer({ accepted: true });
     await expect(next).resolves.toEqual({ accepted: true });
   });
@@ -237,24 +245,24 @@ describe('voice service owns one capture and drops late events', () => {
     await listening(h, A, from);
     from.emit('did-start-navigation', details);
     expect(h.backend.cancel).not.toHaveBeenCalled();
-    await expect(h.service.start({ captureId: B, locale: null }, sender(2))).resolves.toEqual({ accepted: false, reason: 'busy', path: null });
+    await expect(h.service.start({ captureId: B, locale: null }, sender(2).client)).resolves.toEqual({ accepted: false, reason: 'busy', path: null });
   });
 
-  it('stops following the window once its capture ends, whichever way it ends', async () => {
+  it('stops following the client once its capture ends, whichever way it ends', async () => {
     const h = setup();
-    const from = sender(1);
-    const watched = () => ['destroyed', 'render-process-gone', 'did-start-navigation'].map((event) => from.listenerCount(event));
+    // A client that counts its gone listeners, so a capture that ended is seen to leave none behind.
+    const listeners = new Set<() => void>();
+    const client = { id: 'page:1.1' as ClientId, onGone: (listener: () => void) => (listeners.add(listener), () => void listeners.delete(listener)) };
+    const from = Object.assign(new EventEmitter(), { id: 1, client }) as Page;
     const { sink } = await listening(h, A, from);
-    expect(watched()).toEqual([1, 1, 1]);
+    expect(listeners.size).toBe(1);
     sink({ type: 'final', id: A, text: '', timedOut: false });
-    expect(watched()).toEqual([0, 0, 0]);
+    expect(listeners.size).toBe(0);
     await listening(h, B, from);
-    h.service.cancel({ captureId: B }, from);
-    expect(watched()).toEqual([0, 0, 0]);
+    h.service.cancel({ captureId: B }, from.client);
+    expect(listeners.size).toBe(0);
     await listening(h, A, from);
-    from.emit('render-process-gone', {}, { reason: 'crashed', exitCode: 1 });
-    expect(watched()).toEqual([0, 0, 0]);
-    from.emit('destroyed');
+    for (const listener of [...listeners]) listener(); // the client ends
     expect(h.backend.cancel.mock.calls).toEqual([[B], [A]]);
   });
 
@@ -263,9 +271,22 @@ describe('voice service owns one capture and drops late events', () => {
     const owner = sender(1);
     await listening(h, A, owner);
     const other = sender(2);
-    h.service.start({ captureId: B, locale: null }, other); // busy, but the window is followed
+    h.service.start({ captureId: B, locale: null }, other.client); // busy, but the window is followed
     other.emit('destroyed');
     expect(h.backend.cancel).not.toHaveBeenCalled();
+  });
+
+  it('starts nothing for a client that has already ended, and a live client can start afterwards', async () => {
+    const h = setup();
+    const gone = sender(1);
+    const ended = gone.client;
+    gone.emit('destroyed'); // the page went before its start reached the service
+    await expect(h.service.start({ captureId: A, locale: null }, ended)).resolves.toEqual({ accepted: false, reason: 'cancelled', path: null });
+    expect(h.backend.start).not.toHaveBeenCalled();
+    expect(h.backend.cancel).not.toHaveBeenCalled(); // nothing was started, so nothing is cancelled
+    const next = h.service.start({ captureId: B, locale: null }, sender(2).client);
+    h.starts.at(-1)!.answer({ accepted: true });
+    await expect(next).resolves.toEqual({ accepted: true });
   });
 
   it('answers voice.status from the backend probe for the locale asked', async () => {

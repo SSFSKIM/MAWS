@@ -28,7 +28,7 @@ export interface RelayLink {
 
 interface Relayed {
   port: RelayPort;
-  owner: number | null; // the window's webContents id
+  owner: string | null; // the asking client's id (`ClientRef.id`)
 }
 
 export class MainDocRelay {
@@ -52,7 +52,7 @@ export class MainDocRelay {
   }
 
   // False (nothing asked, the port untouched) when no connection is served.
-  open({ channel, artifactId, actor, doc }: HostDoc, port: RelayPort, owner: number | null): boolean {
+  open({ channel, artifactId, actor, doc }: HostDoc, port: RelayPort, owner: string | null): boolean {
     const link = this.link;
     if (!link) return false;
     this.forget(channel)?.port.close(); // a number main reused: the stale port goes with it
@@ -80,8 +80,8 @@ export class MainDocRelay {
     this.forget(channel)?.port.close();
   }
 
-  // The window closed or reloaded: its channels end on both sides.
-  closeOwner(owner: number): void {
+  // The client ended (its page closed, reloaded or crashed): its channels end on both sides.
+  closeOwner(owner: string): void {
     for (const [channel, entry] of [...this.channels]) {
       if (entry.owner !== owner) continue;
       this.channels.delete(channel);

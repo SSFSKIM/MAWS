@@ -9,7 +9,8 @@ import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
 import { commands } from '@shared/ipc/schema/artifacts';
 import { CommandFailure } from '../ipc/router';
-import { createDatasetHolds, type HoldOwner } from './holds';
+import { clientOf } from '../ipc/clients';
+import { createDatasetHolds } from './holds';
 
 const ID = '00000000-0000-4000-8000-0000000000d1';
 
@@ -26,7 +27,7 @@ class Window extends EventEmitter {
     this.emit('destroyed');
   }
 }
-const owner = (window: Window) => window as unknown as HoldOwner;
+const owner = (window: Window) => clientOf(window as never); // the router's ClientRef for the window's page
 
 function host() {
   const held = new Set<string>();
@@ -78,13 +79,13 @@ describe('a window’s dataset holds (E3)', () => {
   it('releases every hold of a window that closes, navigates or crashes, its page never asking', async () => {
     const h = host();
     const holds = createDatasetHolds({ call: h.call as never });
-    for (const [k, end] of (['destroyed', 'did-navigate', 'render-process-gone'] as const).entries()) {
+    for (const [k, end] of (['destroyed', 'did-start-navigation', 'render-process-gone'] as const).entries()) {
       const window = new Window(10 + k);
       await holds.hold({ artifactId: ID, refs: ['assets/a.json'] }, owner(window));
       const { holdId } = await holds.hold({ artifactId: ID, refs: ['assets/b.json'] }, owner(window));
       expect(h.held.size).toBe(2);
       if (end === 'destroyed') window.destroy();
-      else window.emit(end);
+      else window.emit(end, { isMainFrame: true, isSameDocument: false });
       await vi.waitFor(() => expect(h.held.size).toBe(0));
       expect(await holds.release({ holdId }, owner(window))).toEqual({ released: false });
     }
@@ -95,7 +96,7 @@ describe('a window’s dataset holds (E3)', () => {
     const holds = createDatasetHolds({ call: h.call as never });
     const window = new Window(3);
     await holds.hold({ artifactId: ID, refs: ['assets/a.json'] }, owner(window));
-    window.emit('did-navigate');
+    window.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
     const { holdId } = await holds.hold({ artifactId: ID, refs: ['assets/c.json'] }, owner(window));
     await vi.waitFor(() => expect(h.held.size).toBe(1));
     expect(await holds.release({ holdId }, owner(window))).toEqual({ released: true });

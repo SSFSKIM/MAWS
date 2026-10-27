@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
+import { clientOf } from '../ipc/clients';
 import type { MainContext } from '../ipc/router';
 import type { AppSessionId } from '@shared/graph/ids';
 import { item } from '../../../test/support/builders';
@@ -19,6 +20,10 @@ vi.mock('../ipc/router', () => ({
 
 import { emittedAppEventsSource, startSessions } from '.';
 
+// A fake page: Electron's WebContents is an EventEmitter with an id; the router hands a handler its ClientRef.
+let pageIds = 0;
+const fakePage = () => Object.assign(new EventEmitter(), { id: ++pageIds, isDestroyed: () => false }) as unknown as Parameters<typeof clientOf>[0];
+
 // The source is real: after the renderer disappears, a disk advance must stay unread.
 describe('visibility belongs to the reporting renderer', () => {
   afterEach(() => { handlers.clear(); interceptors.clear(); });
@@ -34,15 +39,15 @@ describe('visibility belongs to the reporting renderer', () => {
       snapshot: () => ({ state: 'starting', pid: null, restarts: 0, revision: 1 }),
     }, { emit: () => true, warmLinkedWorktrees: async () => {} });
     const sessions = startSessions({ env: {}, packaged: false, appRoot: process.cwd(), hosts, indexSource: source });
-    const sender = Object.assign(new EventEmitter(), { isDestroyed: () => false }) as unknown as MainContext['sender'];
+    const sender = fakePage();
     const visible = handlers.get('session.setVisible')!;
     try {
-      visible({ appSessionId: appId, visible: true }, { sender });
+      visible({ appSessionId: appId, visible: true }, { client: clientOf(sender) });
       sender.emit(event, { url: 'file:///index.html', isMainFrame: true, isSameDocument: false, frame: null });
       listeners.get('fs.sessionChanged')!({ summary: { ...disk, size: disk.size + 100, leafUuid: 'new-leaf', lastRecordAt: '2026-10-02T12:00:00Z' } });
       await new Promise((resolve) => setImmediate(resolve)); // E11: discoveries apply at the end of the burst's turn
       expect(index.sessions.get(appId)?.unread).toBe(true);
-      visible({ appSessionId: appId, visible: true }, { sender });
+      visible({ appSessionId: appId, visible: true }, { client: clientOf(sender) });
       expect(index.sessions.get(appId)?.unread).toBe(false);
     } finally { sessions.stop(); index.close(); dir.dispose(); }
   });
@@ -53,9 +58,9 @@ describe('visibility belongs to the reporting renderer', () => {
   ])('retains visibility during $name navigation and loading', ({ isMainFrame, isSameDocument }) => {
     const visibility = vi.fn();
     const sessions = startSessions({ env: {}, packaged: false, appRoot: process.cwd(), hosts, indexSource: { start: () => () => {}, onSetVisible: visibility } });
-    const sender = Object.assign(new EventEmitter(), { isDestroyed: () => false }) as unknown as MainContext['sender'];
+    const sender = fakePage();
     try {
-      handlers.get('session.setVisible')!({ appSessionId: 'app', visible: true }, { sender });
+      handlers.get('session.setVisible')!({ appSessionId: 'app', visible: true }, { client: clientOf(sender) });
       sender.emit('did-start-navigation', { url: 'file:///index.html#preview', isMainFrame, isSameDocument, frame: null });
       sender.emit('did-start-loading');
       expect(visibility.mock.calls).toEqual([['app', true]]);
@@ -65,12 +70,12 @@ describe('visibility belongs to the reporting renderer', () => {
   it('does not let one window hide a session still visible in another', () => {
     const visibility = vi.fn();
     const sessions = startSessions({ env: {}, packaged: false, appRoot: process.cwd(), hosts, indexSource: { start: () => () => {}, onSetVisible: visibility } });
-    const a = Object.assign(new EventEmitter(), { isDestroyed: () => false }) as unknown as MainContext['sender'];
-    const b = Object.assign(new EventEmitter(), { isDestroyed: () => false }) as unknown as MainContext['sender'];
+    const a = fakePage();
+    const b = fakePage();
     const set = handlers.get('session.setVisible')!;
-    set({ appSessionId: 'app', visible: true }, { sender: a });
-    set({ appSessionId: 'app', visible: true }, { sender: b });
-    set({ appSessionId: 'app', visible: false }, { sender: a });
+    set({ appSessionId: 'app', visible: true }, { client: clientOf(a) });
+    set({ appSessionId: 'app', visible: true }, { client: clientOf(b) });
+    set({ appSessionId: 'app', visible: false }, { client: clientOf(a) });
     expect(visibility.mock.calls).toEqual([['app', true]]);
     b.emit('destroyed');
     expect(visibility.mock.calls).toEqual([['app', true], ['app', false]]);

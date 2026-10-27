@@ -38,6 +38,7 @@ import { randomUUID } from 'node:crypto'; // E5
 import { basename } from 'node:path'; // E5
 import { app, type MessageBoxOptions } from 'electron';
 import type { EngineSessionStatus } from '@shared/engine/status';
+import type { ClientId, ClientRef } from '@shared/ipc/client';
 import type { SessionReadModel } from '../sessions/read-model';
 import { QUIT_KEEP } from './copy'; // E10
 
@@ -428,9 +429,9 @@ export function installQuitGuard(model: Pick<SessionReadModel, 'midTurnCount' | 
 // C12 end
 
 // E5 start: the unsaved files each window pushed, and Save all's round trip. A window's set is its whole dirty set, sent
-// on every change of it (`layout.unsavedFiles`); main trusts it as the window's last word and never reads the disk for
-// it, and forgets it when the window navigates (a reload starts from an empty viewer), its renderer crashes (E11) or
-// it closes, as `files.*` releases a window's watches. Save all sends one request to every window and waits for an answer to it from each window that
+// on every change of it (`layout.unsavedFiles`) by its page's client; main trusts it as the client's last word and never
+// reads the disk for it, and forgets it when the client ends: its page navigates (a reload starts from an empty
+// viewer), its renderer crashes (E11) or it closes, as `files.*` releases a client's watches. Save all sends one request to every window and waits for an answer to it from each window that
 // held files when it was sent; a window that closes or navigates meanwhile is not waited on, and one that never
 // answers is waited on for SAVE_ALL_BOUND_MS. It settles with that request's answers' failures by path, which the
 // question asked next names; an answer to another request (one already settled) records none. A window's saves push
@@ -438,55 +439,48 @@ export function installQuitGuard(model: Pick<SessionReadModel, 'midTurnCount' | 
 // all is current.
 export const SAVE_ALL_BOUND_MS = 10_000;
 
-// A window's webContents, as far as the tracker needs one
-export interface UnsavedFilesSender {
-  readonly id: number;
-  once(event: 'destroyed', listener: () => void): unknown;
-  on(event: 'did-navigate', listener: () => void): unknown;
-  on(event: 'render-process-gone', listener: () => void): unknown; // E11
-}
-
 export interface UnsavedFiles {
-  update(sender: UnsavedFilesSender, paths: readonly string[]): void; // `layout.unsavedFiles`
-  done(sender: UnsavedFilesSender, requestId: string, failed: readonly { path: string; message: string }[]): void; // `layout.saveAllDone`
+  update(client: ClientRef, paths: readonly string[]): void; // `layout.unsavedFiles`
+  done(client: ClientRef, requestId: string, failed: readonly { path: string; message: string }[]): void; // `layout.saveAllDone`
   paths(): string[]; // every window's, once each, sorted
   onChange(listener: () => void): () => void; // E11: after each push and each window forgotten
   saveAll(send: (requestId: string) => void): Promise<ReadonlyMap<string, string>>; // `send` emits `layout.saveAll` to every window
 }
 
 export function trackUnsavedFiles(): UnsavedFiles {
-  const sets = new Map<number, readonly string[]>();
-  const followed = new WeakSet<UnsavedFilesSender>();
-  const waits = new Map<string, { windows: Set<number>; failed: Map<string, string>; finish(): void }>();
+  const sets = new Map<ClientId, readonly string[]>();
+  const followed = new Set<ClientId>();
+  const waits = new Map<string, { windows: Set<ClientId>; failed: Map<string, string>; finish(): void }>();
   const listeners = new Set<() => void>(); // E11
   const changed = () => {
     for (const listener of [...listeners]) listener();
   };
-  const answered = (requestId: string, windowId: number) => {
+  const answered = (requestId: string, clientId: ClientId) => {
     const wait = waits.get(requestId);
-    if (wait?.windows.delete(windowId) && wait.windows.size === 0) wait.finish();
+    if (wait?.windows.delete(clientId) && wait.windows.size === 0) wait.finish();
   };
-  const forget = (windowId: number) => {
-    if (sets.delete(windowId)) changed(); // E11
-    for (const requestId of [...waits.keys()]) answered(requestId, windowId); // it will not answer now
+  const forget = (clientId: ClientId) => {
+    if (sets.delete(clientId)) changed(); // E11
+    for (const requestId of [...waits.keys()]) answered(requestId, clientId); // it will not answer now
   };
   return {
-    update(sender, paths) {
-      const id = sender.id; // read now: a destroyed webContents' properties may no longer answer
-      if (!followed.has(sender)) {
-        followed.add(sender);
-        sender.once('destroyed', () => forget(id));
-        sender.on('did-navigate', () => forget(id));
-        sender.on('render-process-gone', () => forget(id)); // E11: a crashed renderer's edits are gone; Save all waits for none
-      }
+    update(client, paths) {
+      const { id } = client;
       sets.set(id, [...paths]);
       changed(); // E11
+      if (followed.has(id)) return;
+      followed.add(id);
+      client.onGone(() => {
+        // E11: a crashed renderer's edits are gone too; Save all waits for none. At once for a client already gone.
+        followed.delete(id);
+        forget(id);
+      });
     },
-    done(sender, requestId, failed) {
+    done(client, requestId, failed) {
       for (const { path, message } of failed) console.warn(`[quit-guard] could not save ${path}: ${message}`);
       const wait = waits.get(requestId);
       if (wait) for (const { path, message } of failed) wait.failed.set(path, message);
-      answered(requestId, sender.id);
+      answered(requestId, client.id);
     },
     paths: () => [...new Set([...sets.values()].flat())].sort(),
     onChange(listener) {

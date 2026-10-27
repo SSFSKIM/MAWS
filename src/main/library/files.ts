@@ -5,16 +5,18 @@
 // where the owner chose). Every path is resolved here from the artifact's id through the engine host's
 // `artifacts.content` (main's alone to send) or the export service's own naming rule, never taken from the window, so
 // a window reaches the files of the store and of the exports and nothing beside them. Open externally hands the OS a
-// document kind only, never a program (the files service's rule). Under MAWS_E2E=1 the seams the rest of the app
-// uses stand in for the OS: MAWS_E2E_OPEN_LOG takes an open or a reveal as a line, MAWS_E2E_SAVE_PATH is the folder a
-// save lands in without the dialog.
+// document kind only, never a program (the files service's rule). The dialogs, the Replace question, the open and the
+// reveal go through the client port (OX4), asked through the requesting client. Under MAWS_E2E=1 the seams the rest
+// of the app uses stand in for the OS: MAWS_E2E_OPEN_LOG takes an open or a reveal as a line, MAWS_E2E_SAVE_PATH is
+// the folder a save lands in without the dialog.
 import { appendFile, copyFile, lstat, mkdir, mkdtemp, readFile, rename, rm, rmdir, writeFile } from 'node:fs/promises';
 import type { BigIntStats } from 'node:fs';
 import JSZip from 'jszip';
 import { basename, dirname, extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { SaveDialogOptions, WebContents } from 'electron';
 import type { ArtifactKind } from '@shared/artifacts/entity';
+import { isNoClient, NO_CLIENT_REASON, type ClientPort } from '@shared/client/port';
+import type { ClientRef } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import { opensExternally } from '@shared/ipc/schema/files';
@@ -26,11 +28,8 @@ export interface LibraryFilesDeps {
   exporters: { get(kind: ArtifactKind, format: ArtifactExportFormat): unknown }; // startArtifacts().exporters
   root: string; // `<userData>/artifacts`, where the export service writes the library's exports
   downloads(): string; // app.getPath('downloads')
-  showSaveDialog(options: SaveDialogOptions, sender: WebContents | undefined): Promise<{ canceled: boolean; filePath?: string }>;
-  confirmReplaceFolder(path: string, sender: WebContents | undefined): Promise<boolean>;
-  openPath(path: string): Promise<string>; // shell.openPath: '' on success, else the error text
+  port: Pick<ClientPort, 'save' | 'confirm' | 'openExternal' | 'reveal'>; // Save as…, Replace?, Open externally, Reveal
   readFile(input: Omit<CommandInput<'files.read'>, 'appSessionId'>): Promise<CommandOutput<'files.read'>>; // M6b fix wave 2: the files service's `readResolved`
-  showItemInFolder(path: string): void;
   env: NodeJS.ProcessEnv;
 }
 
@@ -64,12 +63,23 @@ export function createLibraryFiles(deps: LibraryFilesDeps) {
 
   let lastExportDirectory: string | null = null;
 
-  // Where the copy goes: the e2e seam's folder, else the dialog's choice (null when cancelled).
-  const destination = async (defaultName: string, sender: WebContents | undefined): Promise<string | null> => {
+  // Where the copy goes: the e2e seam's folder, else the dialog's choice (null when cancelled or no client could ask).
+  const destination = async (defaultName: string, client: ClientRef | null): Promise<string | null> => {
     const seamDir = deps.env.MAWS_E2E === '1' ? deps.env.MAWS_E2E_SAVE_PATH : undefined;
     if (seamDir) return join(seamDir, defaultName);
-    const { canceled, filePath } = await deps.showSaveDialog({ defaultPath: join(lastExportDirectory ?? deps.downloads(), defaultName) }, sender);
-    return canceled || !filePath ? null : filePath;
+    const answer = await deps.port.save(client, { defaultPath: join(lastExportDirectory ?? deps.downloads(), defaultName) });
+    return 'path' in answer ? answer.path : null;
+  };
+  // The owner's Replace for a slide folder already at the destination; no client to ask is no.
+  const confirmReplaceFolder = async (path: string, client: ClientRef | null): Promise<boolean> => {
+    const answer = await deps.port.confirm(client, {
+      kind: 'warning',
+      message: `Replace “${basename(path)}”?`,
+      detail: `The folder at ${path} and everything in it will be replaced with the exported slides.`,
+      confirm: 'Replace',
+      cancel: 'Cancel',
+    });
+    return !isNoClient(answer) && answer.confirmed;
   };
 
   return {
@@ -87,29 +97,29 @@ export function createLibraryFiles(deps: LibraryFilesDeps) {
       return deps.readFile({ path: found.path, ...chunk });
     },
 
-    async openExternally(input: CommandInput<'library.openExternally'>): Out<'library.openExternally'> {
+    async openExternally(input: CommandInput<'library.openExternally'>, client: ClientRef | null): Out<'library.openExternally'> {
       const { name, path } = await content(input);
       if (!(await openable(path, name))) return { opened: false, message: `Not opened outside MAWS: ${name}` };
       if (seamLog) {
         await appendFile(seamLog, `${path}\n`);
         return { opened: true, message: null };
       }
-      const message = await deps.openPath(path);
-      return message === '' ? { opened: true, message: null } : { opened: false, message };
+      const answer = await deps.port.openExternal(client, { path });
+      if (isNoClient(answer)) return { opened: false, message: NO_CLIENT_REASON };
+      return answer.opened ? { opened: true, message: null } : { opened: false, message: answer.reason };
     },
 
-    async reveal(input: CommandInput<'library.reveal'>): Out<'library.reveal'> {
+    async reveal(input: CommandInput<'library.reveal'>, client: ClientRef | null): Out<'library.reveal'> {
       const { path } = await content(input);
       if (!(await lstat(path).catch(() => null))?.isFile()) return { revealed: false, message: `Not on disk any more: ${basename(path)}` };
       if (seamLog) {
         await appendFile(seamLog, `reveal ${path}\n`);
         return { revealed: true, message: null };
       }
-      deps.showItemInFolder(path);
-      return { revealed: true, message: null };
+      return isNoClient(await deps.port.reveal(client, path)) ? { revealed: false, message: NO_CLIENT_REASON } : { revealed: true, message: null };
     },
 
-    async saveAs({ artifactId, source }: CommandInput<'library.saveAs'>, sender?: WebContents): Out<'library.saveAs'> {
+    async saveAs({ artifactId, source }: CommandInput<'library.saveAs'>, client: ClientRef | null): Out<'library.saveAs'> {
       // P3-E (E1 M5; Decision Log 33): an export's save reads the row alone (`prepare: false`, Decision Log 22), so a
       // retained version's file saves whatever the live document's state
       const { artifact } = await required('artifacts.get', { artifactId, ...('export' in source && { prepare: false }) });
@@ -131,10 +141,10 @@ export function createLibraryFiles(deps: LibraryFilesDeps) {
       // directory, so it goes once the save is done with it, copied, declined or failed; the cache name's never does
       const own = 'export' in source && source.export.exportId !== undefined ? from : null;
       try {
-        const to = await destination(defaultName, sender);
+        const to = await destination(defaultName, client);
         if (to === null) return { saved: false };
         if ('export' in source && source.export.format === 'pngs') {
-          if (!(await savePngFolder(from, to, () => deps.confirmReplaceFolder(to, sender)))) return { saved: false };
+          if (!(await savePngFolder(from, to, () => confirmReplaceFolder(to, client)))) return { saved: false };
         } else {
           const temp = join(dirname(to), `.${randomUUID()}.tmp`);
           try {
@@ -223,7 +233,7 @@ export function registerLibraryFiles(register: typeof registerMainHandler, deps:
   register('library.exportFormats', files.exportFormats);
   register('library.content', files.content);
   register('library.read', files.read); // M6b fix wave 2
-  register('library.openExternally', files.openExternally);
-  register('library.reveal', files.reveal);
-  register('library.saveAs', (input, { sender }) => files.saveAs(input, sender));
+  register('library.openExternally', (input, { client }) => files.openExternally(input, client));
+  register('library.reveal', (input, { client }) => files.reveal(input, client));
+  register('library.saveAs', (input, { client }) => files.saveAs(input, client));
 }

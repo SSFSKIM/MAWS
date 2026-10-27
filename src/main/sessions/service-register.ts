@@ -37,7 +37,7 @@ export function registerSessionServiceHandlers(service: SessionService): void {
   registerMainHandler('session.takeOver', ({ appSessionId, holder, paneId }) => service.takeOver(id(appSessionId), holder, paneId)); // W7
   registerMainHandler('session.delete', ({ appSessionId, stopIfLive }) => service.remove(id(appSessionId), stopIfLive));
   registerMainHandler('session.rename', ({ appSessionId, title }) => service.rename(id(appSessionId), title));
-  registerMainHandler('session.revealPath', ({ path }) => service.revealPath(path));
+  registerMainHandler('session.revealPath', ({ path }, { client }) => service.revealPath(path, client));
   registerMainHandler('session.deletions.list', async () => ({ manifests: await service.listDeletions() }));
   registerMainHandler('session.deletions.keep', ({ appSessionId }) => service.keepDeletion(id(appSessionId)));
   registerMainHandler('session.deletions.preview', ({ appSessionId }) => service.previewDeletion(id(appSessionId)));

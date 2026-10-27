@@ -20,7 +20,7 @@ interface FakeHost extends SignInHost {
 
 describe('the sign-in service against the running engine (fix-D#4)', () => {
   it('refuses when the session holds another server of the name than the row, and neither signs in nor reports it connected', async () => {
-    const handlers = new Map<string, (input: unknown) => unknown>();
+    const handlers = new Map<string, (input: unknown, ctx: unknown) => unknown>();
     const events: ConnectorSignInChanged[] = [];
     const statuses = new Set<(payload: { appSessionId: string; status: { process: string; cwd: string } }) => void>();
     const host = fakeHost();
@@ -32,17 +32,17 @@ describe('the sign-in service against the running engine (fix-D#4)', () => {
       return call(name as never, input as never);
     }) as never;
     const service = startSignIn({
-      register: ((name: string, handler: (input: unknown) => unknown) => handlers.set(name, handler)) as never,
+      register: ((name: string, handler: (input: unknown, ctx: unknown) => unknown) => handlers.set(name, handler)) as never,
       emit: (_name, event) => events.push(event),
       host,
       onSessionStatus: (listener) => (statuses.add(listener), () => statuses.delete(listener)),
       onHostLost: () => () => {},
-      open: () => true,
+      port: { openExternal: async () => ({ opened: true }) },
       listen: listenLoopback,
     });
     stop = () => service.stop();
     statuses.forEach((l) => l({ appSessionId: SESSION, status: { process: 'ready', cwd: '/p' } }));
-    const { opId } = handlers.get('connectors.signIn')!({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }) as { opId: string };
+    const { opId } = handlers.get('connectors.signIn')!({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, { client: null }) as { opId: string };
     await vi.waitFor(() => expect(['failed', 'done']).toContain(events.filter((e) => e.opId === opId).at(-1)?.state));
     expect(events.filter((e) => e.opId === opId).at(-1)).toMatchObject({ state: 'failed', reason: 'other_entry', message: 'this session uses a different linear; start a new session to sign in' });
     expect(host.asked.map((a) => a.name)).not.toContain('session.mcpAuthenticate');
@@ -88,7 +88,7 @@ function make(overrides: Partial<SignInDeps> = {}) {
   const signIn = createSignIn({
     host,
     listen: listenLoopback,
-    open: (url) => (opened.push(url), true),
+    port: { openExternal: async (_client, target) => (opened.push((target as { url: string }).url), { opened: true }) },
     emit: (event) => events.push(event),
     ready: (appSessionId) => appSessionId === SESSION,
     onSessionGone: (listener) => (exits.add(listener), () => exits.delete(listener)),
@@ -110,9 +110,60 @@ function make(overrides: Partial<SignInDeps> = {}) {
 }
 
 describe('the sign-in operation', () => {
+  it('opens the engine’s URL through the asking client’s port, and fails when the port did not open it', async () => {
+    const asked: unknown[] = [];
+    const t = make({ port: { openExternal: async (client) => (asked.push(client), { opened: false, reason: 'only http, https and mailto links open outside MAWS' }) } });
+    const client = { id: 'page:1.1', onGone: () => () => {} } as never;
+    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, client);
+    await t.ended(opId);
+    expect(asked).toEqual([client]);
+    expect(t.last(opId)).toMatchObject({ state: 'failed', reason: 'engine', message: 'the authorization URL was not opened: only http, https and mailto links open outside MAWS' });
+  });
+
+  it('fails as not opened when the hand-off throws while it still waits on that browser', async () => {
+    const t = make({ port: { openExternal: async () => Promise.reject(new Error('the client went away')) } });
+    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null);
+    await t.ended(opId);
+    expect(t.last(opId)).toMatchObject({ state: 'failed', reason: 'engine', message: 'the authorization URL was not opened: the client went away' });
+  });
+
+  // A port that answers late (mawsd's asks a remote client): the browser's return can come before its answer, and the
+  // answer, whatever it says or a rejection, does not undo what the callback already advanced.
+  type Late = { opened: true } | { opened: false; reason: string };
+  it.each<{ late: string; settle: (answer: (value: Late) => void, reject: (error: Error) => void) => void }>([
+    { late: 'opened', settle: (answer) => answer({ opened: true }) },
+    { late: 'not opened', settle: (answer) => answer({ opened: false, reason: 'the client answered late' }) },
+    { late: 'a rejection', settle: (_answer, reject) => reject(new Error('the client went away')) },
+  ])('takes a callback that comes back before a slow port answers $late, and keeps it', async ({ settle }) => {
+    let answer: (value: Late) => void = () => {};
+    let reject: (error: Error) => void = () => {};
+    const opened: string[] = [];
+    const t = make({ port: { openExternal: (_client, target) => (opened.push((target as { url: string }).url), new Promise((resolve, rejected) => ((answer = resolve), (reject = rejected)))) } });
+    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null);
+    await t.until(() => opened.length === 1, 'the hand-off');
+    expect(t.last(opId).state).toBe('waiting_callback'); // ready before the port has answered
+    const redirect = new URL(new URL(opened[0]!).searchParams.get('redirect_uri')!);
+    const page = await fetch(`${redirect.origin}/callback?code=the-code&state=engine-state`);
+    expect(page.status).toBe(200);
+    settle(answer, reject);
+    await t.ended(opId);
+    expect(t.states(opId)).toEqual(['starting', 'waiting_browser', 'waiting_callback', 'submitting', 'watching_status', 'done']);
+  });
+
+  it('a cancel while the port has not answered stands when it answers', async () => {
+    let answer: (value: { opened: false; reason: string }) => void = () => {};
+    const t = make({ port: { openExternal: () => new Promise((resolve) => (answer = resolve)) } });
+    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null);
+    await t.until(() => t.last(opId)?.state === 'waiting_callback', 'waiting_callback');
+    t.signIn.cancel(opId);
+    answer({ opened: false, reason: 'late' });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(t.states(opId)).toEqual(['starting', 'waiting_browser', 'waiting_callback', 'cancelled']);
+  });
+
   it('custom scheme: MAWS listens, opens the engine\'s URL, takes the one matching callback, submits it, reconnects, and ends connected here', async () => {
     const t = make();
-    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION });
+    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null);
     await t.until(() => t.last(opId)?.state === 'waiting_callback', 'waiting_callback');
     const redirect = t.redirectOf();
     expect(redirect.hostname).toBe('127.0.0.1');
@@ -140,7 +191,7 @@ describe('the sign-in operation', () => {
   it('a server the signing session does not list (added after it started) ends signed in for new sessions', async () => {
     const t = make();
     t.host.status.clear();
-    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION });
+    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null);
     await t.until(() => t.last(opId)?.state === 'waiting_callback', 'waiting_callback');
     await fetch(`${t.redirectOf().origin}/callback?code=c&state=engine-state`);
     await t.ended(opId);
@@ -150,7 +201,7 @@ describe('the sign-in operation', () => {
   it('localhost scheme (the engine\'s own listener): watches the status until connected', async () => {
     const t = make();
     t.host.authenticate = () => ({ ok: true, answer: { authUrl: AUTH(null), requiresUserAction: true, callbackExpected: true, redirectScheme: 'localhost', state: 's', callbackPort: 5555 } });
-    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION });
+    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null);
     await t.until(() => t.last(opId)?.state === 'watching_status', 'watching_status');
     t.host.status.set('linear', 'connected');
     await t.ended(opId);
@@ -163,7 +214,7 @@ describe('the sign-in operation', () => {
     const t = make();
     t.host.status.set('linear', 'connected'); // connected before the press
     t.host.authenticate = () => ({ ok: true, answer: { authUrl: AUTH(null), requiresUserAction: true, callbackExpected: true, redirectScheme: 'localhost', state: 's', callbackPort: 5555 } });
-    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION });
+    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null);
     await t.ended(opId);
     expect(t.states(opId)).toEqual(['starting', 'done']);
     expect(t.last(opId)).toMatchObject({ state: 'done', where: 'here', message: ALREADY_CONNECTED });
@@ -177,7 +228,7 @@ describe('the sign-in operation', () => {
     const host = t.host;
     const call = host.call.bind(host);
     host.call = (async (name: string, input: unknown) => (name === 'session.mcpStatus' ? { ok: true, value: { mcpServers: [{ name: 'linear', status: 'failed', error: 'token refused' }] } } : call(name as never, input as never))) as never;
-    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION });
+    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null);
     await t.ended(opId);
     expect(t.last(opId)).toMatchObject({ state: 'failed', reason: 'engine', message: 'token refused' });
   });
@@ -185,7 +236,7 @@ describe('the sign-in operation', () => {
   it('a server that needs no sign-in ends done at once', async () => {
     const t = make();
     t.host.authenticate = () => ({ ok: true, answer: { requiresUserAction: false, callbackExpected: false } });
-    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION });
+    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null);
     await t.ended(opId);
     expect(t.states(opId)).toEqual(['starting', 'done']);
     expect(t.opened).toEqual([]);
@@ -194,7 +245,7 @@ describe('the sign-in operation', () => {
   it('the engine refusing the authentication ends failed (engine) with its words, the listener closed', async () => {
     const t = make();
     t.host.authenticate = () => ({ ok: false, message: 'MCP server linear is blocked by enterprise managed policy' });
-    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION });
+    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null);
     await t.ended(opId);
     expect(t.last(opId)).toMatchObject({ state: 'failed', reason: 'engine', message: 'MCP server linear is blocked by enterprise managed policy' });
     expect(t.host.asked.filter((a) => a.name === 'session.mcpAuthenticate')).toHaveLength(1); // asked once: only "not found" is asked again
@@ -203,7 +254,7 @@ describe('the sign-in operation', () => {
   it('a callback carrying an error is submitted, and the engine\'s refusal reads denied', async () => {
     const t = make();
     t.host.callback = () => ({ ok: false, message: 'OAuth authentication failed: access_denied' });
-    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION });
+    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null);
     await t.until(() => t.last(opId)?.state === 'waiting_callback', 'waiting_callback');
     await fetch(`${t.redirectOf().origin}/callback?error=access_denied&state=engine-state`);
     await t.ended(opId);
@@ -213,7 +264,7 @@ describe('the sign-in operation', () => {
   it('a callback the engine refuses otherwise reads engine', async () => {
     const t = make();
     t.host.callback = () => ({ ok: false, message: 'Callback URL not accepted: it belongs to a different sign-in attempt (OAuth state mismatch)' });
-    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION });
+    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null);
     await t.until(() => t.last(opId)?.state === 'waiting_callback', 'waiting_callback');
     await fetch(`${t.redirectOf().origin}/callback?code=c&state=engine-state`);
     await t.ended(opId);
@@ -224,7 +275,7 @@ describe('the sign-in operation', () => {
     const t = make({ configMs: 200, configPollMs: 10 });
     let refusals = 3; // the engine re-reads its global config file about once a second (2.1.309: fs.watchFile, 1000 ms)
     t.host.authenticate = (i) => (refusals-- > 0 ? { ok: false, message: 'Server not found: linear' } : { ok: true, answer: { authUrl: AUTH(i.redirectUri), requiresUserAction: true, callbackExpected: true, redirectScheme: 'custom', state: 'engine-state' } });
-    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION });
+    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null);
     await t.until(() => t.last(opId)?.state === 'waiting_callback', 'waiting_callback');
     expect(t.host.asked.filter((a) => a.name === 'session.mcpAuthenticate')).toHaveLength(4);
     await fetch(`${t.redirectOf().origin}/callback?code=c&state=engine-state`);
@@ -235,7 +286,7 @@ describe('the sign-in operation', () => {
   it('a server the engine still does not know after the config window fails with the engine’s words', async () => {
     const t = make({ configMs: 50, configPollMs: 10 });
     t.host.authenticate = () => ({ ok: false, message: 'Server not found: linear' });
-    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION });
+    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null);
     await t.ended(opId);
     expect(t.last(opId)).toMatchObject({ state: 'failed', reason: 'engine', message: 'Server not found: linear' });
     expect(t.opened).toEqual([]);
@@ -243,14 +294,14 @@ describe('the sign-in operation', () => {
 
   it('Cancel closes the listener and ends cancelled; a retry starts a new operation that completes', async () => {
     const t = make();
-    const first = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }).opId;
+    const first = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null).opId;
     await t.until(() => t.last(first)?.state === 'waiting_callback', 'waiting_callback');
     const abandoned = t.redirectOf();
     expect(t.signIn.cancel(first)).toBe(true);
     expect(t.last(first)).toMatchObject({ state: 'cancelled', reason: null });
     await expect(fetch(`${abandoned.origin}/callback?code=c&state=engine-state`)).rejects.toThrow();
     expect(t.signIn.cancel(first)).toBe(false);
-    const retry = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }).opId;
+    const retry = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null).opId;
     expect(retry).not.toBe(first);
     await t.until(() => t.last(retry)?.state === 'waiting_callback', 'retry waiting');
     await fetch(`${t.redirectOf().origin}/callback?code=c&state=engine-state`);
@@ -260,9 +311,9 @@ describe('the sign-in operation', () => {
 
   it('a second press for the same server cancels the first operation', async () => {
     const t = make();
-    const first = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }).opId;
+    const first = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null).opId;
     await t.until(() => t.last(first)?.state === 'waiting_callback', 'first waiting');
-    const second = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }).opId;
+    const second = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null).opId;
     expect(t.last(first).state).toBe('cancelled');
     await t.until(() => t.last(second)?.state === 'waiting_callback', 'second waiting');
     await fetch(`${t.redirectOf().origin}/callback?code=c&state=engine-state`);
@@ -272,14 +323,14 @@ describe('the sign-in operation', () => {
 
   it('one sign-in per configured connector: a press from another session cancels the first; one that only shares the name, in another session, is its own', async () => {
     const t = make({ ready: () => true });
-    const first = t.signIn.start({ name: 'linear', scope: 'user', cwd: '/a', path: GLOBAL, appSessionId: SESSION }).opId;
+    const first = t.signIn.start({ name: 'linear', scope: 'user', cwd: '/a', path: GLOBAL, appSessionId: SESSION }, null).opId;
     await t.until(() => t.last(first)?.state === 'waiting_callback', 'first waiting');
-    const second = t.signIn.start({ name: 'linear', scope: 'user', cwd: '/b', path: GLOBAL, appSessionId: 'app-session-2' }).opId; // user scope: the directory is not part of it
+    const second = t.signIn.start({ name: 'linear', scope: 'user', cwd: '/b', path: GLOBAL, appSessionId: 'app-session-2' }, null).opId; // user scope: the directory is not part of it
     expect(t.last(first).state).toBe('cancelled');
     await t.until(() => t.last(second)?.state === 'waiting_callback', 'second waiting');
     // project servers of one name in two projects, signed in from two sessions: two configurations on two engine flows
-    const inA = t.signIn.start({ name: 'linear', scope: 'project', cwd: '/a', path: `/a/.mcp.json`, appSessionId: 'app-session-3' }).opId;
-    const inB = t.signIn.start({ name: 'linear', scope: 'project', cwd: '/b', path: `/b/.mcp.json`, appSessionId: 'app-session-4' }).opId;
+    const inA = t.signIn.start({ name: 'linear', scope: 'project', cwd: '/a', path: `/a/.mcp.json`, appSessionId: 'app-session-3' }, null).opId;
+    const inB = t.signIn.start({ name: 'linear', scope: 'project', cwd: '/b', path: `/b/.mcp.json`, appSessionId: 'app-session-4' }, null).opId;
     await t.until(() => t.last(inA)?.state === 'waiting_callback' && t.last(inB)?.state === 'waiting_callback', 'both waiting');
     expect(t.last(second).state).toBe('waiting_callback');
     for (const opId of [second, inA, inB]) expect(t.signIn.cancel(opId)).toBe(true);
@@ -287,12 +338,12 @@ describe('the sign-in operation', () => {
 
   it('one engine flow per session and server name: configurations of one name in one session cancel each other, since the engine knows only the name', async () => {
     const t = make({ ready: () => true });
-    const user = t.signIn.start({ name: 'linear', scope: 'user', cwd: '/a', path: GLOBAL, appSessionId: SESSION }).opId;
+    const user = t.signIn.start({ name: 'linear', scope: 'user', cwd: '/a', path: GLOBAL, appSessionId: SESSION }, null).opId;
     await t.until(() => t.last(user)?.state === 'waiting_callback', 'user waiting');
-    const project = t.signIn.start({ name: 'linear', scope: 'project', cwd: '/a', path: `/a/.mcp.json`, appSessionId: SESSION }).opId;
+    const project = t.signIn.start({ name: 'linear', scope: 'project', cwd: '/a', path: `/a/.mcp.json`, appSessionId: SESSION }, null).opId;
     expect(t.last(user).state).toBe('cancelled');
     await t.until(() => t.last(project)?.state === 'waiting_callback', 'project waiting');
-    const local = t.signIn.start({ name: 'linear', scope: 'local', cwd: '/a', path: GLOBAL, appSessionId: SESSION }).opId;
+    const local = t.signIn.start({ name: 'linear', scope: 'local', cwd: '/a', path: GLOBAL, appSessionId: SESSION }, null).opId;
     expect(t.last(project).state).toBe('cancelled');
     await t.until(() => t.last(local)?.state === 'waiting_callback', 'local waiting');
     // the one left is the session's flow: its callback completes
@@ -305,17 +356,17 @@ describe('the sign-in operation', () => {
   it('the same configured connector keeps one sign-in when the signing session changes (fake timers)', async () => {
     vi.useFakeTimers();
     const t = make({ ready: () => true, listen: async () => ({ port: 54321, close: async () => {} }) });
-    const first = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: 's1' }).opId;
+    const first = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: 's1' }, null).opId;
     await vi.advanceTimersByTimeAsync(0);
     expect(t.last(first).state).toBe('waiting_callback');
-    t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: 's2' });
+    t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: 's2' }, null);
     await vi.advanceTimersByTimeAsync(0);
     expect(t.last(first).state).toBe('cancelled');
   });
 
   it('the session exiting mid-flow ends failed (session_exited)', async () => {
     const t = make();
-    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION });
+    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null);
     await t.until(() => t.last(opId)?.state === 'waiting_callback', 'waiting_callback');
     const redirect = t.redirectOf();
     t.exit('another-session');
@@ -328,7 +379,7 @@ describe('the sign-in operation', () => {
   it('a session whose engine uses another entry of the name is refused before the engine is asked (scalpel-2#1)', async () => {
     const asked: unknown[] = [];
     const t = make({ check: async (entry) => (asked.push(entry), 'that session uses the local entry in /cfg/.claude.json') });
-    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION });
+    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null);
     await t.ended(opId);
     expect(t.last(opId)).toMatchObject({ state: 'failed', reason: 'other_entry', message: 'that session uses the local entry in /cfg/.claude.json' });
     expect(asked).toEqual([{ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }]);
@@ -345,9 +396,9 @@ describe('the sign-in operation', () => {
       if (name === 'session.mcpAuthenticate' && ++sent === 1) await new Promise<void>((resolve) => (release = resolve)); // the first flow's setup is slow
       return call(name as never, input as never);
     }) as never;
-    const first = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }).opId;
+    const first = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null).opId;
     await t.until(() => release !== null, 'the first authenticate in flight');
-    const second = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }).opId;
+    const second = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null).opId;
     expect(t.last(first).state).toBe('cancelled');
     await new Promise((r) => setTimeout(r, 50));
     expect(sent).toBe(1); // the replacement waits
@@ -361,7 +412,7 @@ describe('the sign-in operation', () => {
 
   it('no ready session: failed (no_session) without asking the engine', async () => {
     const t = make();
-    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: 'not-ready' });
+    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: 'not-ready' }, null);
     await t.ended(opId);
     expect(t.last(opId)).toMatchObject({ state: 'failed', reason: 'no_session' });
     expect(t.host.asked).toEqual([]);
@@ -370,7 +421,7 @@ describe('the sign-in operation', () => {
   it('times out after five minutes without the callback', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const t = make({ callbackMs: 300_000 });
-    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION });
+    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null);
     await vi.waitFor(() => expect(t.last(opId)?.state).toBe('waiting_callback'));
     await vi.advanceTimersByTimeAsync(300_000);
     expect(t.last(opId)).toMatchObject({ state: 'failed', reason: 'timeout' });
@@ -380,7 +431,7 @@ describe('the sign-in operation', () => {
     vi.useFakeTimers();
     let handle: ((request: { method: string; url: string }) => { status: number }) | null = null;
     const t = make({ callbackMs: 300_000, listen: async (h) => ((handle = h), { port: 54321, close: async () => {} }) });
-    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION });
+    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null);
     await vi.advanceTimersByTimeAsync(0);
     expect(t.last(opId).state).toBe('waiting_callback');
     await vi.advanceTimersByTimeAsync(299_990);
@@ -394,7 +445,7 @@ describe('the sign-in operation', () => {
 // main's wiring: the session's own directory is read for its entries before the engine is asked (scalpel-2#1)
 describe('the sign-in service', () => {
   it('refuses a user entry in a session whose directory overrides it locally, reading that directory’s entries', async () => {
-    const handlers = new Map<string, (input: unknown) => unknown>();
+    const handlers = new Map<string, (input: unknown, ctx: unknown) => unknown>();
     const events: ConnectorSignInChanged[] = [];
     const statuses = new Set<(payload: { appSessionId: string; status: { process: string; cwd: string } }) => void>();
     const reads: unknown[] = [];
@@ -406,17 +457,17 @@ describe('the sign-in service', () => {
       return { ok: true, value: { servers: [{ name: 'linear', scope: 'user', path: GLOBAL, transport: 'http', url: 'https://u.example/mcp' }, { name: 'linear', scope: 'local', path: GLOBAL, transport: 'http', url: 'https://l.example/mcp' }] } };
     }) as never;
     const service = startSignIn({
-      register: ((name: string, handler: (input: unknown) => unknown) => handlers.set(name, handler)) as never,
+      register: ((name: string, handler: (input: unknown, ctx: unknown) => unknown) => handlers.set(name, handler)) as never,
       emit: (_name, event) => events.push(event),
       host,
       onSessionStatus: (listener) => (statuses.add(listener), () => statuses.delete(listener)),
       onHostLost: () => () => {},
-      open: () => true,
+      port: { openExternal: async () => ({ opened: true }) },
       listen: listenLoopback,
     });
     stop = () => service.stop();
     statuses.forEach((l) => l({ appSessionId: SESSION, status: { process: 'ready', cwd: '/p' } }));
-    const { opId } = handlers.get('connectors.signIn')!({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }) as { opId: string };
+    const { opId } = handlers.get('connectors.signIn')!({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, { client: null }) as { opId: string };
     await vi.waitFor(() => expect(events.filter((e) => e.opId === opId).at(-1)?.state).toBe('failed'));
     expect(events.filter((e) => e.opId === opId).at(-1)).toMatchObject({ reason: 'other_entry', message: `that session uses the local entry in ${GLOBAL}` });
     expect(reads).toEqual([{ cwd: '/p' }]);

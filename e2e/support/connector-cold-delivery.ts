@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { expect, type TestInfo } from '@playwright/test';
 import type { CommandInput, CommandName, CommandOutput } from '@shared/ipc/schema';
 import { HostResponseSchema, type HostResponse } from '@shared/ipc/host-protocol';
-import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
+import { WIRE_MINOR } from '@shared/ipc/wire';
 import { validateCommandOutput } from '@shared/ipc/validate';
 import { SOCKET_PROTOCOL, splitLines } from '@shared/host/socket-protocol';
 import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
@@ -44,7 +44,7 @@ async function connectHost(userData: string, lock: Lock) {
   try {
     await once(socket, 'connect');
     const token = readFileSync(join(userData, 'supervisor', 'host.token'), 'utf8').trim();
-    socket.write(`${JSON.stringify({ t: 'hello', protocol: SOCKET_PROTOCOL, token, buildId: lock.buildId, wire: wireFingerprint(), appPid: process.pid })}\n`);
+    socket.write(`${JSON.stringify({ t: 'hello', protocol: SOCKET_PROTOCOL, token, minor: WIRE_MINOR, build: lock.buildId, capabilities: [], appPid: process.pid })}\n`);
     await expect.poll(() => { if (fault) throw new Error(fault); return welcome; }, { timeout: 10_000, message: 'the cold built host welcomes the scratch client' }).toMatchObject({ liveSessions: 0, rows: 0 });
     socket.write(`${JSON.stringify({ t: 'ready' })}\n`);
   } catch (error) {

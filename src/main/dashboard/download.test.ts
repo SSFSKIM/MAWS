@@ -34,14 +34,14 @@ function deps(over: Partial<AssetDownloadDeps> = {}): AssetDownloadDeps & { aske
     if (content.artifactId !== ID || content.path !== 'assets/sales.csv') return { ok: false, error: ipcError('invalid_input', `no asset ${content.path} in ${content.artifactId}`, { reason: 'notFound', data: {} }) } as never;
     return { ok: true, value: { revision: 4, kind: 'dashboard', name: 'sales.csv', size: BYTES.length, sha256: 'x', path: blob } } as never;
   };
-  return { call, downloads: () => join(dir, 'Downloads'), showSaveDialog: vi.fn(async (options: { defaultPath?: string }) => ({ canceled: false, filePath: options.defaultPath })), env: {}, asked, ...over };
+  return { call, downloads: () => join(dir, 'Downloads'), port: { save: vi.fn(async (_client: unknown, options: { defaultPath: string }) => ({ path: options.defaultPath })) }, env: {}, asked, ...over };
 }
 
 describe('downloadAsset', () => {
   it('saves the artifact\'s own asset byte for byte where the owner chose, suggesting the descriptor\'s name under Downloads', async () => {
     const d = deps();
-    const { path } = await createAssetDownload(d).downloadAsset({ artifactId: ID, ref: 'assets/sales.csv', name: 'sales.tsv' });
-    expect(d.showSaveDialog).toHaveBeenCalledWith({ defaultPath: join(dir, 'Downloads', 'sales.tsv') }, undefined);
+    const { path } = await createAssetDownload(d).downloadAsset({ artifactId: ID, ref: 'assets/sales.csv', name: 'sales.tsv' }, null);
+    expect(d.port.save).toHaveBeenCalledWith(null, { defaultPath: join(dir, 'Downloads', 'sales.tsv') });
     expect(path).toBe(join(dir, 'Downloads', 'sales.tsv'));
     expect(new Uint8Array(readFileSync(path!))).toEqual(BYTES);
     expect(readdirSync(join(dir, 'Downloads'))).toEqual(['sales.tsv']); // no temporary file left beside it
@@ -50,29 +50,29 @@ describe('downloadAsset', () => {
 
   it('takes the stored asset\'s name when none is suggested', async () => {
     const d = deps();
-    await createAssetDownload(d).downloadAsset({ artifactId: ID, ref: 'assets/sales.csv' });
-    expect(d.showSaveDialog).toHaveBeenCalledWith({ defaultPath: join(dir, 'Downloads', 'sales.csv') }, undefined);
+    await createAssetDownload(d).downloadAsset({ artifactId: ID, ref: 'assets/sales.csv' }, null);
+    expect(d.port.save).toHaveBeenCalledWith(null, { defaultPath: join(dir, 'Downloads', 'sales.csv') });
   });
 
   it('answers null and writes nothing when the owner cancels', async () => {
-    const d = deps({ showSaveDialog: vi.fn(async () => ({ canceled: true })) });
-    expect(await createAssetDownload(d).downloadAsset({ artifactId: ID, ref: 'assets/sales.csv', name: 'sales.csv' })).toEqual({ path: null });
+    const d = deps({ port: { save: vi.fn(async () => ({ cancelled: true as const })) } });
+    expect(await createAssetDownload(d).downloadAsset({ artifactId: ID, ref: 'assets/sales.csv', name: 'sales.csv' }, null)).toEqual({ path: null });
     expect(readdirSync(join(dir, 'Downloads'))).toEqual([]);
   });
 
   it('refuses a ref the artifact does not hold before any dialog', async () => {
     const d = deps();
-    await expect(createAssetDownload(d).downloadAsset({ artifactId: OTHER, ref: 'assets/sales.csv' })).rejects.toThrow(/no asset/);
-    await expect(createAssetDownload(d).downloadAsset({ artifactId: ID, ref: 'assets/other.csv' })).rejects.toThrow(/no asset/);
-    expect(d.showSaveDialog).not.toHaveBeenCalled();
+    await expect(createAssetDownload(d).downloadAsset({ artifactId: OTHER, ref: 'assets/sales.csv' }, null)).rejects.toThrow(/no asset/);
+    await expect(createAssetDownload(d).downloadAsset({ artifactId: ID, ref: 'assets/other.csv' }, null)).rejects.toThrow(/no asset/);
+    expect(d.port.save).not.toHaveBeenCalled();
   });
 
   it('saves into the e2e seam\'s folder without a dialog under MAWS_E2E', async () => {
     mkdirSync(join(dir, 'seam'));
     const d = deps({ env: { MAWS_E2E: '1', MAWS_E2E_SAVE_PATH: join(dir, 'seam') } });
-    const { path } = await createAssetDownload(d).downloadAsset({ artifactId: ID, ref: 'assets/sales.csv', name: 'sales.csv' });
+    const { path } = await createAssetDownload(d).downloadAsset({ artifactId: ID, ref: 'assets/sales.csv', name: 'sales.csv' }, null);
     expect(path).toBe(join(dir, 'seam', 'sales.csv'));
-    expect(d.showSaveDialog).not.toHaveBeenCalled();
+    expect(d.port.save).not.toHaveBeenCalled();
     expect(new Uint8Array(readFileSync(path!))).toEqual(BYTES);
   });
 });

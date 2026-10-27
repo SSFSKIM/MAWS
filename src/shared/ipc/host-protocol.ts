@@ -10,7 +10,11 @@ import type { CommandName, EventName } from './schema';
 export type HostMessage =
   | { t: 'hello' } // main → host, carries the MessagePort in `ports`
   | { t: 'ready' } // main → host, on the port (E10): main has pulled what it needs; the host emits no event before it
-  | { t: 'req'; id: string; name: CommandName; input: unknown } // main → host
+  // main → host; P5 O1 M5: `client` names the asking ClientRef, set by main only on a `machine`-owned command's request,
+  // so the engine host (whose pre-O1 supervisor reads this envelope strictly) never receives it
+  | { t: 'req'; id: string; name: CommandName; input: unknown; client?: string }
+  // P5 O1 M5: main → host, once per client a request carried on this link, the first time that client ends
+  | { t: 'clientGone'; client: string }
   | { t: 'res'; id: string; ok: true; value: unknown } // host → main
   | { t: 'res'; id: string; ok: false; error: IpcError }
   | { t: 'evt'; name: EventName; payload: unknown } // host → main, re-emitted to the renderer after validation
@@ -29,7 +33,10 @@ export const HostReadySchema = z.strictObject({ t: z.literal('ready') }); // E10
 // for the artifact's suggestion doc
 export const HostDocSchema = z.strictObject({ t: z.literal('doc'), channel: z.number().int().nonnegative().max(0xffff_ffff), artifactId: z.uuid(), actor: ActorSchema, doc: z.enum(['suggestions']).optional() });
 export type HostDoc = z.infer<typeof HostDocSchema>;
-export const HostRequestSchema = z.strictObject({ t: z.literal('req'), id, name: z.string(), input: z.unknown() });
+export const HostRequestSchema = z.strictObject({ t: z.literal('req'), id, name: z.string(), input: z.unknown(), client: z.string().min(1).optional() });
+// P5 O1 M6: a request as a pre-O1 supervisor reads it, the protocol-2 window's form (wire.ts freezes it): no `client`
+export const HostRequestV2Schema = z.strictObject({ t: z.literal('req'), id, name: z.string(), input: z.unknown() });
+export const HostClientGoneSchema = z.strictObject({ t: z.literal('clientGone'), client: z.string().min(1) }); // P5 O1 M5
 export const HostResponseSchema = z.union([
   z.strictObject({ t: z.literal('res'), id, ok: z.literal(true), value: z.unknown() }),
   z.strictObject({ t: z.literal('res'), id, ok: z.literal(false), error: IpcErrorSchema }),

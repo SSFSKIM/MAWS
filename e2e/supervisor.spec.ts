@@ -12,7 +12,7 @@
 //   (d) G3: Settings' Stop all: the old supervisor exits, a fresh one starts and launches;
 //   (e) G3: the idle release (`idle`) and the supervisor's own idle exit, after a keep-quit and after a kill -9 of the app;
 //   (f) an update (another build id): the banner, Restart now, a new pid;
-//   (g) an incompatible update (another wire): the banner, launches refused, Restart now, a new pid;
+//   (g) an incompatible update (another wire major, P5 O1 M6): the banner, launches refused, Restart now, a new pid;
 //   (h) G4: a restored terminal after a keep-quit says its shell closed; a new one does not;
 //   (i) P3-A M5: a document a session (the test writer standing in for an agent) edits while no window and no main
 //       exist; the next launch lists it at its new revision and opens it through main's relay over the socket's
@@ -38,7 +38,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { HostStatus } from '@shared/ipc/schema/host';
 import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol'; // P3-A M5
-import { wireFingerprint } from '@shared/ipc/wire-fingerprint'; // P3-A M5
+import { WIRE_MINOR } from '@shared/ipc/wire'; // P3-A M5; P5 O1 M6: the hello's minor
 import { invoke, launchReady, replaySpec, turnsJournal, value } from './support/c7-replay';
 import { menu, otherThemeColours } from './support/code-product';
 import { ownTitles } from './support/library'; // P3-L M7
@@ -816,7 +816,7 @@ test('(f) an update that changed no wire shape: the banner names the kept sessio
 test('(g) an incompatible update: the banner, launches answer host_unavailable, Restart now moves to a new supervisor', async () => {
   await withScratch('incompatible', async (s) => {
     const { pid } = await keptMidTurn(s);
-    const run = await s.launch({ MAWS_E2E_WIRE: 'other' });
+    const run = await s.launch({ MAWS_E2E_WIRE_MAJOR: '4' }); // P5 O1 M6: another wire major (OX1), which no hello of this one's crosses
     await expect
       .poll(async () => {
         const answer = await invoke(run.page, 'host.status', undefined);
@@ -902,7 +902,7 @@ async function askWithNoApp(s: Scratch, name: string, input: unknown): Promise<u
         buffered = buffered.slice(at + 1);
       }
     });
-    socket.write(`${JSON.stringify({ t: 'hello', protocol: SOCKET_PROTOCOL, token, buildId: 'e2e-session-stand-in', wire: wireFingerprint(), appPid: process.pid })}\n`);
+    socket.write(`${JSON.stringify({ t: 'hello', protocol: SOCKET_PROTOCOL, token, minor: WIRE_MINOR, build: 'e2e-session-stand-in', capabilities: [], appPid: process.pid })}\n`);
     await expect.poll(() => lines[0]?.t, { message: 'the supervisor welcomes a client with no app running' }).toBe('welcome');
     socket.write(`${JSON.stringify({ t: 'req', id: 'm5', name, input })}\n`);
     await expect.poll(() => lines.some((line) => line.t === 'res' && line.id === 'm5'), { message: `${name} is answered` }).toBe(true);

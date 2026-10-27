@@ -1,12 +1,14 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { HandlerContext } from '@shared/ipc/client';
 import type { CommandName } from '@shared/ipc/schema';
+import { clientOf } from '../ipc/clients';
 import { startVoice } from './register';
 
 const A = '11111111-1111-4111-8111-111111111111';
 const MISSING = '/nonexistent/maws-voice-helper';
 
-type Handler = (input: unknown, context: { sender: unknown }) => unknown;
+type Handler = (input: unknown, context: HandlerContext) => unknown;
 
 function launch(env: NodeJS.ProcessEnv) {
   const handlers = new Map<CommandName, Handler>();
@@ -21,8 +23,8 @@ function launch(env: NodeJS.ProcessEnv) {
     openExternal,
     register: (name, handler) => void handlers.set(name, handler as Handler),
   });
-  const sender = Object.assign(new EventEmitter(), { id: 1 });
-  const invoke = (name: CommandName, input: unknown) => handlers.get(name)!(input, { sender });
+  const client = clientOf(Object.assign(new EventEmitter(), { id: 1, isDestroyed: () => false }) as never);
+  const invoke = (name: CommandName, input: unknown) => handlers.get(name)!(input, { client });
   return { voice, handlers, emit, openExternal, invoke };
 }
 

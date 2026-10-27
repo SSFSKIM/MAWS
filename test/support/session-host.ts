@@ -133,7 +133,8 @@ export class FakeEngineHost {
     this.batch(appSessionId, [{ kind: 'process.exited', code: null, signal: 'SIGKILL', reason: 'stop', lostAttentionCount: 0, budget: null /* C12 */ }]);
   }
 
-  readonly dispatch: HostDispatch = async (owner, name, input) => {
+  readonly dispatch: HostDispatch = async (owner, command, input) => {
+    const name = command as CommandName; // P5 O1 M5: the dispatch takes any registry's name
     if (owner === 'pty-host' && this.ptyHost !== null) return { ok: true, value: (await this.ptyHost(name, input)) as never };
     if (owner !== 'engine-host') throw new Error(`unexpected owner ${owner}`);
     this.calls.push({ name, input });

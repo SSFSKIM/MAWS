@@ -11,6 +11,13 @@
 // attempt gave up (`crashed`); `waiting` when an incompatible supervisor still runs sessions (it retries by itself).
 // E10 Task 2.3b: what main asks of a supervisor beside `exit` (a stop-all whose close is deliberate, the quit after which
 // nothing reconnects, the kill of a holder that never answers).
+//
+// P5 O1 M6 (OX1): the hello presents the wire's major (`protocol`), minor and capabilities, and any welcome of that major
+// is served, whatever its minor; another build within it takes the other-build path below. The protocol-2 window: a
+// supervisor that speaks only protocol 2 (a pre-O1 app left it running) refuses that hello `protocol`; when its
+// refusal's fingerprint equals this app's, main reconnects with protocol 2's hello and serves it as protocol 2, which
+// carries nothing protocol 2 lacks (main sends a request `client` and `clientGone` only to a `machine` host). Every
+// other refusal takes the path it always did. The answers are read tolerantly (@shared/ipc/tolerant).
 import { spawn as spawnProcess, type SpawnOptions } from 'node:child_process';
 import * as fs from 'node:fs';
 import { createConnection, type Socket } from 'node:net';
@@ -21,16 +28,19 @@ import { HELLO_TIMEOUT_MS } from '@shared/host/socket-server';
 import {
   ServerRefuseSchema,
   ServerWelcomeSchema,
-  SOCKET_PROTOCOL,
+  ServerWelcomeV2Schema,
+  SOCKET_PROTOCOL_V2,
   splitLines,
   type ClientExit,
   type ClientHello,
+  type ClientHelloV2,
   type DocumentsClose,
   type DocumentsOpen,
   type ServerRefuse,
-  type ServerWelcome,
 } from '@shared/host/socket-protocol';
 import type { HostMessage } from '@shared/ipc/host-protocol';
+import { readTolerant, tolerantLog } from '@shared/ipc/tolerant'; // P5 O1 M6
+import type { WirePeer } from '@shared/ipc/wire'; // P5 O1 M6
 import {
   isAlive,
   isSameProcess,
@@ -86,7 +96,7 @@ export interface DetachedTransportOptions {
   procStartOf?(pid: number): string | null;
   kill?(pid: number, signal: NodeJS.Signals): void;
   // E10 Task 2.4: the build id and wire main presents in its hello and compares a welcome with (identity.ts; the bundle's
-  // own and the wire fingerprint unless the e2e seams stand in); told when this run starts a supervisor of its own
+  // own and the wire's unless the e2e seams stand in); told when this run starts a supervisor of its own
   identity?: AppIdentity;
   timing?: Partial<DetachedTiming>;
   log?(line: string): void;
@@ -116,12 +126,23 @@ export type DetachedLoss = 'quiet' | 'deliberate' | 'replaced' | { crash: ExitIn
 // Why an attempt gave up: a live process holds the lock and never answered, or something else (logged).
 export type DetachedFailure = 'held_lock' | 'other';
 
+// P5 O1 M6: a served supervisor as its welcome described it, in either protocol (protocol 2's: major 2, minor 0, no
+// capabilities).
+export interface Welcomed {
+  pid: number;
+  liveSessions: number;
+  rows: number;
+  peer: WirePeer;
+}
+
 export interface DetachedEvents {
-  connected(link: HostLink, welcome: ServerWelcome): void;
+  connected(link: HostLink, welcome: Welcomed): void;
   disconnected(): void;
   lost(loss: DetachedLoss): void;
   exited(exit: ExitInfo): void;
   failed(reason: DetachedFailure, message: string): void;
+  // P5 O1 M6: `wire` when the protocol-2 window was refused on the fingerprint (a protocol-2 supervisor of another
+  // fingerprint), `protocol` for any other major
   waiting(liveSessions: number, refused: 'wire' | 'protocol'): void;
 }
 
@@ -161,7 +182,9 @@ interface Served {
   replaced: boolean;
 }
 
-type Answer = { kind: 'welcome'; welcome: ServerWelcome; leftover: Buffer } | { kind: 'refuse'; refuse: ServerRefuse } | { kind: 'failed'; why: string };
+// P5 O1 M6: the hello main sends, protocol 3 (the wire's major) or protocol 2 (the window's form)
+type Form = 'current' | 'v2';
+type Answer = { kind: 'welcome'; welcome: Welcomed; leftover: Buffer } | { kind: 'refuse'; refuse: ServerRefuse } | { kind: 'failed'; why: string };
 
 export function createDetachedTransport(options: DetachedTransportOptions, events: DetachedEvents): DetachedTransport {
   const timing: DetachedTiming = { ...DETACHED_TIMING, ...options.timing };
@@ -171,6 +194,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
   const log = options.log ?? ((line: string) => console.log(`[hosts] engine-host: ${line}`));
   const sameProcess = (proc: Proc) => isSameProcess(proc, processes);
   const identity = options.identity ?? appIdentity(options.modulePath, {});
+  const logDropped = tolerantLog(log); // P5 O1 M6
 
   let stopped = false;
   let quitting = false; // E10 Task 2.3b: the quit asked; the served connection's close is terminal
@@ -277,7 +301,9 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       connect(lock?.socketPath ?? defaultSocket, (socket) => handshaking(socket, lock), () => step(timing.pidPollMs, awaitCandidate));
     }
 
-    function handshaking(socket: Socket, lock: LockFile | null): void {
+    // P5 O1 M6: `form` is the hello sent: the wire's major, or (once a protocol-2 supervisor of this fingerprint refused
+    // that) protocol 2's
+    function handshaking(socket: Socket, lock: LockFile | null, form: Form = 'current'): void {
       let token: string;
       try {
         token = fs.readFileSync(join(dir, SUPERVISOR_FILES.token), 'utf8').trim();
@@ -285,16 +311,19 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
         socket.destroy();
         return unanswered(lock, 'no token to present');
       }
-      readAnswer(socket, (answer) => {
+      readAnswer(socket, form, (answer) => {
         if (!current()) return void socket.destroy();
         if (answer.kind === 'failed') {
           socket.destroy();
           return unanswered(lock, answer.why);
         }
         if (answer.kind === 'welcome') return welcomed(socket, answer.welcome, answer.leftover, lock);
-        refused(socket, answer.refuse, lock);
+        refused(socket, answer.refuse, lock, form);
       });
-      const hello: ClientHello = { t: 'hello', protocol: SOCKET_PROTOCOL, token, buildId: identity.buildId(), wire: identity.wire(), appPid: process.pid };
+      const hello: ClientHello | ClientHelloV2 =
+        form === 'v2'
+          ? { t: 'hello', protocol: SOCKET_PROTOCOL_V2, token, buildId: identity.buildId(), wire: identity.wire(), appPid: process.pid }
+          : { t: 'hello', protocol: identity.major(), token, minor: identity.minor(), build: identity.buildId(), capabilities: [...identity.capabilities()], appPid: process.pid };
       socket.write(`${JSON.stringify(hello)}\n`);
     }
 
@@ -309,14 +338,14 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       spawning();
     }
 
-    function welcomed(socket: Socket, welcome: ServerWelcome, leftover: Buffer, lock: LockFile | null): void {
+    function welcomed(socket: Socket, welcome: Welcomed, leftover: Buffer, lock: LockFile | null): void {
       const proc: Proc = { pid: welcome.pid, procStart: lock?.pid === welcome.pid ? lock.procStart : (processes.procStartOf(welcome.pid) ?? '') };
-      // §6: another build with the same wire is replaced at once, unseen, when nothing is live; with sessions live it is
-      // served and asked to exit when idle (the update banner reads `matches: 'build'` from its status), so the app
-      // moves to its own build once they are idle.
-      const otherBuild = welcome.buildId !== identity.buildId();
+      // §6: another build of the wire's major (P5 O1 M6; through the protocol-2 window, one of the same fingerprint) is
+      // replaced at once, unseen, when nothing is live; with sessions live it is served and asked to exit when idle (the
+      // update banner reads `matches: 'build'` from its status), so the app moves to its own build once they are idle.
+      const otherBuild = welcome.peer.build !== identity.buildId();
       if (otherBuild && welcome.liveSessions === 0) {
-        log(`supervisor pid ${welcome.pid} runs build ${welcome.buildId} with nothing live; replacing it`);
+        log(`supervisor pid ${welcome.pid} runs build ${welcome.peer.build} with nothing live; replacing it`);
         return replace(socket, proc);
       }
       attemptSockets.delete(socket);
@@ -324,7 +353,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       serve(socket, leftover, proc, welcome, otherBuild);
     }
 
-    function refused(socket: Socket, refuse: ServerRefuse, lock: LockFile | null): void {
+    function refused(socket: Socket, refuse: ServerRefuse, lock: LockFile | null, form: Form): void {
       if (refuse.reason === 'token') {
         socket.destroy();
         if (tokenRetried) return fail('other', 'the supervisor refused the token twice');
@@ -335,11 +364,21 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
         socket.destroy();
         return unanswered(lock, 'a refusal no hello asks for');
       }
+      // P5 O1 M6: the protocol-2 window. A protocol-2 supervisor whose fingerprint is this app's serves its sessions to
+      // protocol 2's hello on a fresh connection (the refused one is good for an exit only).
+      const protocol2 = refuse.reason === 'protocol' && refuse.protocol === SOCKET_PROTOCOL_V2;
+      if (form === 'current' && protocol2 && refuse.wire === identity.wire()) {
+        log(`supervisor ${lock ? `pid ${lock.pid} ` : ''}speaks protocol ${SOCKET_PROTOCOL_V2} with this app's wire ${refuse.wire}; speaking protocol ${SOCKET_PROTOCOL_V2} to it`);
+        socket.destroy();
+        return connect(lock?.socketPath ?? defaultSocket, (next) => handshaking(next, lock, 'v2'), () => unanswered(lock, 'the protocol-2 supervisor closed its socket'));
+      }
       // §6: another protocol or wire. With nothing live (or at the owner's Restart now) the old supervisor is asked to
       // exit now and a fresh one started once it is gone; with sessions live it is left to run them, asked once per
       // process to exit when idle (Decision Log b2e4a1b1: the banner's Wait only acknowledges), and main waits.
+      // P5 O1 M6: a protocol-2 supervisor of another fingerprint is refused on its wire, as protocol 2 refused it.
+      const on: 'wire' | 'protocol' = refuse.reason === 'wire' || protocol2 ? 'wire' : 'protocol';
       const holder = readLock(dir) ?? lock;
-      const speaks = refuse.reason === 'wire' ? `wire ${refuse.wire}` : `protocol ${refuse.protocol}`;
+      const speaks = on === 'wire' ? `wire ${refuse.wire}` : `protocol ${refuse.protocol}`;
       if (refuse.liveSessions === 0 || replaceRefused) {
         log(`supervisor ${holder ? `pid ${holder.pid} ` : ''}speaks ${speaks} with ${refuse.liveSessions === 0 ? 'nothing live' : `${refuse.liveSessions} sessions live, restarted as asked`}; replacing it`);
         return replace(socket, holder ? { pid: holder.pid, procStart: holder.procStart } : null);
@@ -359,8 +398,8 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       finish();
       if (waitingFor !== refuse.liveSessions) {
         waitingFor = refuse.liveSessions;
-        log(`supervisor ${holder ? `pid ${holder.pid} ` : ''}is incompatible (${refuse.reason}) and runs ${refuse.liveSessions} sessions; waiting`);
-        events.waiting(refuse.liveSessions, refuse.reason);
+        log(`supervisor ${holder ? `pid ${holder.pid} ` : ''}is incompatible (${on}) and runs ${refuse.liveSessions} sessions; waiting`);
+        events.waiting(refuse.liveSessions, on);
       }
       after(timing.waitRetryMs, launch);
     }
@@ -433,12 +472,12 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       }
     }
 
-    function readAnswer(socket: Socket, onAnswer: (answer: Answer) => void): void {
+    function readAnswer(socket: Socket, form: Form, onAnswer: (answer: Answer) => void): void {
       let answered: Answer | null = null;
       let done = false;
       const splitter = splitLines(
         (line) => {
-          answered = parseAnswer(line);
+          answered = parseAnswer(line, form, form === 'v2' ? SOCKET_PROTOCOL_V2 : identity.major(), logDropped);
           return 'stop';
         },
         () => (answered = { kind: 'failed', why: 'an answer over the line cap' }),
@@ -466,7 +505,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
 
   // The welcomed connection: C1's envelope through a SocketPort; the layer's own `refuse replaced` is read here.
   // `otherBuild`: a supervisor of another build still running sessions, asked to exit when idle unless already asked.
-  function serve(socket: Socket, leftover: Buffer, proc: Proc, welcome: ServerWelcome, otherBuild: boolean): void {
+  function serve(socket: Socket, leftover: Buffer, proc: Proc, welcome: Welcomed, otherBuild: boolean): void {
     const port = new SocketPort(socket, leftover, { log: (line) => log(`socket: ${line}`) });
     if (idleArmed && !(idleArmed.pid === proc.pid && idleArmed.procStart === proc.procStart)) idleArmed = null;
     const connection: Served = { port, proc, exitAsked: idleArmed ? 'idle' : null, replaced: false };
@@ -474,20 +513,22 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     unserved = null;
     waitingFor = null;
     if (otherBuild && connection.exitAsked === null) {
-      log(`supervisor pid ${welcome.pid} runs build ${welcome.buildId} with ${welcome.liveSessions} sessions live; serving it until they are idle`);
+      log(`supervisor pid ${welcome.pid} runs build ${welcome.peer.build} with ${welcome.liveSessions} sessions live; serving it until they are idle`);
       askExit(connection, 'idle');
     }
     const listeners: ((data: unknown) => void)[] = [];
     port.on('message', ({ data }) => {
-      const refuse = ServerRefuseSchema.safeParse(data);
-      if (refuse.success) {
-        if (refuse.data.reason === 'replaced') connection.replaced = true;
+      const refuse = readTolerant(ServerRefuseSchema, data);
+      if (refuse.ok) {
+        logDropped('socket refuse', refuse.dropped);
+        if (refuse.value.reason === 'replaced') connection.replaced = true;
         return;
       }
       for (const listener of listeners) listener(data);
     });
     port.onClose(() => closed(connection));
-    log(`connected to supervisor pid ${welcome.pid} build ${welcome.buildId} (${welcome.liveSessions} live of ${welcome.rows} rows)`);
+    const { peer } = welcome;
+    log(`connected to supervisor pid ${welcome.pid} build ${peer.build} wire ${peer.major}.${peer.minor} capabilities [${peer.capabilities.join(', ')}] (${welcome.liveSessions} live of ${welcome.rows} rows)`);
     events.connected(
       {
         postMessage: (message) => void port.postMessage(message),
@@ -656,16 +697,35 @@ function privateDirectory(path: string): void {
   fs.chmodSync(path, 0o700);
 }
 
-function parseAnswer(line: string): Answer {
+// P5 O1 M6: a welcome in the hello's own form and of its major (`major`), read tolerantly.
+function parseAnswer(line: string, form: Form, major: number, logDropped: (message: string, dropped: readonly string[]) => void): Answer {
   let data: unknown;
   try {
     data = JSON.parse(line);
   } catch {
     return { kind: 'failed', why: 'an answer that is not JSON' };
   }
-  const welcome = ServerWelcomeSchema.safeParse(data);
-  if (welcome.success) return { kind: 'welcome', welcome: welcome.data, leftover: Buffer.alloc(0) };
-  const refuse = ServerRefuseSchema.safeParse(data);
-  if (refuse.success) return { kind: 'refuse', refuse: refuse.data };
+  const welcome = (welcomed: Welcomed): Answer =>
+    welcomed.peer.major === major ? { kind: 'welcome', welcome: welcomed, leftover: Buffer.alloc(0) } : { kind: 'failed', why: `a welcome of protocol ${welcomed.peer.major} to a hello of ${major}` };
+  if (form === 'v2') {
+    const v2 = readTolerant(ServerWelcomeV2Schema, data);
+    if (v2.ok) {
+      logDropped('socket v2.welcome', v2.dropped);
+      const { pid, liveSessions, rows, protocol, buildId } = v2.value;
+      return welcome({ pid, liveSessions, rows, peer: { major: protocol, minor: 0, build: buildId, capabilities: [] } });
+    }
+  } else {
+    const current = readTolerant(ServerWelcomeSchema, data);
+    if (current.ok) {
+      logDropped('socket welcome', current.dropped);
+      const { pid, liveSessions, rows, protocol, minor, build, capabilities } = current.value;
+      return welcome({ pid, liveSessions, rows, peer: { major: protocol, minor, build, capabilities } });
+    }
+  }
+  const refuse = readTolerant(ServerRefuseSchema, data);
+  if (refuse.ok) {
+    logDropped('socket refuse', refuse.dropped);
+    return { kind: 'refuse', refuse: refuse.value };
+  }
   return { kind: 'failed', why: 'an answer that is neither welcome nor refuse' };
 }

@@ -98,6 +98,8 @@
     "test/support/git-env.ts",
     "test/support/git-fixture.ts",
     "test/support/latency-budget.ts",
+    "test/support/latency-engine.ts", // P5 O1 M1: the local-latency bench's engine wrapper and markers
+    "test/support/local-latency.ts", // P5 O1 M1: the local-latency bench's statistics, baseline and budget
     "test/support/live-seed.ts",
     "test/support/owner-file.ts",
     "test/support/panel-child-tail.ts",

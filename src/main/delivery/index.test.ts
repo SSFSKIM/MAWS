@@ -8,6 +8,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ClientId } from '@shared/ipc/client';
 import type { CommandName } from '@shared/ipc/schema';
 import type { DirectSource } from '@shared/ipc/schema/connectors';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
@@ -16,11 +17,12 @@ import { DELIVERY_SOURCE_LIMIT, startDelivery, type DeliveryDeps, type GwsDriver
 
 const ART = '11111111-1111-4111-8111-111111111111';
 const RUN = () => crypto.randomUUID();
+const CLIENT = { id: 'page:1.1' as ClientId, onGone: () => () => {} }; // the page asking
 const source: DirectSource = { directory: '/repo', sourceId: '22222222-2222-4222-8222-222222222222', generation: 1, server: 'notion', scope: 'user', transport: 'http', path: '/h/.claude.json', entryPath: ['mcpServers', 'notion'], observedAt: '2026-10-19T00:00:00.000Z', resourceUrl: 'https://mcp.notion.com/mcp' };
 const PAGE = { content: [{ type: 'text', text: JSON.stringify({ pages: [{ id: 'abc', url: 'https://www.notion.so/Quarterly-memo-0123456789abcdef0123456789abcdef', properties: { title: 'Quarterly memo' } }] }) }] };
 
 let dir: string;
-let handlers: Map<string, (input: unknown) => unknown>;
+let handlers: Map<string, (input: unknown, ctx: unknown) => unknown>;
 let emitted: unknown[];
 let exported: { input: Record<string, unknown>; options?: { dialect?: string }; path: string }[];
 let connectors: { [K in keyof OwnerDelivery]: ReturnType<typeof vi.fn> };
@@ -31,7 +33,7 @@ let artifact: { title: string } | null;
 function start(overrides: Partial<DeliveryDeps> = {}) {
   handlers = new Map();
   stop = startDelivery({
-    register: ((name: string, handler: (input: unknown) => unknown) => void handlers.set(name, handler)) as never,
+    register: ((name: string, handler: (input: unknown, ctx: unknown) => unknown) => void handlers.set(name, handler)) as never,
     emit: (name, payload) => (emitted.push({ name, payload }), true),
     exportArtifact: async (input, options) => {
       const path = join(dir, `1-${input.format}-${crypto.randomUUID()}.${input.format}`);
@@ -42,7 +44,7 @@ function start(overrides: Partial<DeliveryDeps> = {}) {
     call: (async () => ({ ok: true, value: { artifact } })) as never,
     connectors: connectors as unknown as OwnerDelivery,
     shellEnv: async () => ({ PATH: '/scratch/bin', HOME: '/scratch/home' }),
-    openExternal: vi.fn(() => true),
+    port: { openExternal: vi.fn(async () => ({ opened: true as const })) },
     gws: gws as unknown as GwsDriver,
     now: () => 1_000,
     log: () => {},
@@ -53,7 +55,7 @@ function start(overrides: Partial<DeliveryDeps> = {}) {
 async function call(name: CommandName, input: unknown): Promise<unknown> {
   const checked = validateCommandInput(name, input);
   if (!checked.ok) throw new Error(`invalid input for ${name}: ${JSON.stringify(checked.error)}`);
-  const value = await handlers.get(name)!(checked.value);
+  const value = await handlers.get(name)!(checked.value, { client: CLIENT });
   const output = validateCommandOutput(name, value);
   if (!output.ok) throw new Error(`invalid output of ${name}: ${JSON.stringify(output.error.issues).slice(0, 400)}`);
   return output.value;
@@ -231,6 +233,7 @@ describe('the Notion target', () => {
     const status = (await call('delivery.status', { target: 'notion', artifactId: ART })) as { source: { key: string } };
     expect(await call('delivery.connect', { runId: RUN(), target: 'notion', artifactId: ART, source: status.source.key })).toEqual({ ok: true });
     expect(connectors.connect.mock.calls[0]![0]).toEqual(source);
+    expect(connectors.connect.mock.calls[0]![2]).toBe(CLIENT); // P5 O1 M3: the consent opens on the asking client
     connectors.connect.mockResolvedValueOnce({ ok: false, why: 'denied' });
     expect(await call('delivery.connect', { runId: RUN(), target: 'notion', artifactId: ART, source: status.source.key })).toEqual({ ok: false, why: 'denied' });
   });
@@ -265,10 +268,10 @@ describe('the Drive target (gws)', () => {
       opts.openUrl('https://accounts.google.com/o/oauth2/auth?x=1');
       return { ok: false, why: 'refused', message: 'OAuth flow failed: access_denied' };
     });
-    const openExternal = vi.fn(() => true);
-    start({ openExternal });
+    const openExternal = vi.fn(async () => ({ opened: true as const }));
+    start({ port: { openExternal } });
     expect(await call('delivery.connect', { runId: RUN(), target: 'drive', artifactId: ART })).toEqual({ ok: false, why: 'refused', message: 'OAuth flow failed: access_denied' });
-    expect(openExternal).toHaveBeenCalledWith('https://accounts.google.com/o/oauth2/auth?x=1');
+    expect(openExternal).toHaveBeenCalledWith(CLIENT, { url: 'https://accounts.google.com/o/oauth2/auth?x=1' }); // the asking client's browser
     expect(gws.login.mock.calls[0]![2]).not.toHaveProperty('scopes'); // a first sign-in asks for Drive alone (-s drive)
   });
 

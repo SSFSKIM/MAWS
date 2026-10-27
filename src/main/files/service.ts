@@ -33,6 +33,8 @@ import { createHash } from 'node:crypto';
 import fs, { type BigIntStats } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, normalize, sep } from 'node:path';
+import { isNoClient, NO_CLIENT_REASON, type ClientPort } from '@shared/client/port';
+import type { ClientRef } from '@shared/ipc/client';
 import type { AppSessionId } from '@shared/graph/ids';
 import {
   BINARY_SNIFF_BYTES,
@@ -51,6 +53,7 @@ import {
   type FilesWriteOutput,
   type FilesRevealOutput, // E1
 } from '@shared/ipc/schema/files';
+import { ReleaseFences } from '../release-fences';
 import { rootsOf, under, type AllowlistRecord } from './allowlist';
 import { fileMime, isTextMime } from './mime';
 import { sameIdentity, WatchTable, type Identity, type Installation } from './watch';
@@ -66,8 +69,7 @@ export interface FilesServiceOptions {
   records: (appSessionId: AppSessionId) => AllowlistRecord | null; // `SessionReadModel.record` in the product
   hooks?: BoundaryHooks;
   emit?: (payload: FilesChanged) => void; // files.changed
-  openPath?: (path: string) => Promise<string>; // Electron's shell.openPath: '' on success, else the error text
-  showItemInFolder?: (path: string) => void; // E1: Electron's shell.showItemInFolder, which reports nothing
+  port?: Pick<ClientPort, 'openExternal' | 'reveal'>; // the client port (OX4): open a file in its viewer; E1: show it in Finder
   env?: NodeJS.ProcessEnv; // MAWS_E2E and MAWS_E2E_OPEN_LOG, the e2e's openExternal (and E1's reveal) seam
   // E2: whether the session's deliverable records name this realpath (main's `DeliverableReader.admitted`), consulted for
   // a path outside the roots by `read`, `openExternal` and `reveal` only (Design §3, Decision Log 18)
@@ -91,11 +93,11 @@ export interface FilesService {
   // session and no roots: the caller's resolution is the admission, and a window never names the path.
   readResolved(input: Omit<FilesReadInput, 'appSessionId'>): Promise<FilesReadOutput>;
   write(input: FilesWriteInput): Promise<FilesWriteOutput>; // E5
-  watch(appSessionId: AppSessionId, path: string, owner: number): Promise<void>;
-  unwatch(appSessionId: AppSessionId, path: string, owner: number): Promise<void>;
-  openExternal(appSessionId: AppSessionId, path: string): Promise<FilesOpenExternalOutput>;
-  reveal(appSessionId: AppSessionId, path: string): Promise<FilesRevealOutput>; // E1
-  release(owner: number): void; // everything a window holds, when it closes or navigates
+  watch(appSessionId: AppSessionId, path: string, owner: string): Promise<void>;
+  unwatch(appSessionId: AppSessionId, path: string, owner: string): Promise<void>;
+  openExternal(appSessionId: AppSessionId, path: string, client: ClientRef | null): Promise<FilesOpenExternalOutput>;
+  reveal(appSessionId: AppSessionId, path: string, client: ClientRef | null): Promise<FilesRevealOutput>; // E1
+  release(owner: string): void; // everything a client holds, when it ends
   watching(): string[];
   dispose(): void;
 }
@@ -133,7 +135,7 @@ interface Confirmed {
   roots: string[];
 }
 
-export function createFilesService({ records, hooks, emit = () => {}, openPath, showItemInFolder, env = process.env, admitted /* E2 */ }: FilesServiceOptions): FilesService {
+export function createFilesService({ records, hooks, emit = () => {}, port, env = process.env, admitted /* E2 */ }: FilesServiceOptions): FilesService {
   const at = async (point: BoundaryPoint, path: string) => {
     await hooks?.at?.(point, path);
   };
@@ -141,7 +143,7 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
   // Per confirmed file identity (`dev:ino`), the tail of its writes' chain: two writes of one file (two tabs, two
   // sessions, a hard-link alias) compare and write one after the other. Removed when its chain drains.
   const writing = new Map<string, Promise<void>>();
-  const releases = new Map<number, number>(); // per window, how many times its holds were released (files.unwatch)
+  const releases = new ReleaseFences<string>(); // per client: an unwatch in flight across its release drops nothing
 
   // Step 1: absolute, already normal (a `..` is refused before the disk is touched, since the kernel resolves `/X/..`
   // only when `/X` exists) and with no trailing separator (under which `lstat` follows a final-component symlink, so
@@ -345,7 +347,7 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
     }
   }
 
-  async function watch(appSessionId: AppSessionId, path: string, owner: number): Promise<void> {
+  async function watch(appSessionId: AppSessionId, path: string, owner: string): Promise<void> {
     const { handle, stat, real, roots } = await openConfirmed(appSessionId, path, 'dir');
     const holder = { owner, appSessionId, path };
     try {
@@ -379,7 +381,7 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
     }
   }
 
-  async function openExternal(appSessionId: AppSessionId, path: string): Promise<FilesOpenExternalOutput> {
+  async function openExternal(appSessionId: AppSessionId, path: string, client: ClientRef | null): Promise<FilesOpenExternalOutput> {
     const { real0 } = await precheck(appSessionId, path, DELIVERED_TOO); // E2: a delivered file opens outside wherever it lives
     // "Open externally" shows a document in its viewer; it never runs a program an agent wrote into the tree. The
     // object is in-root (step 1), so naming it in the message leaks nothing.
@@ -391,13 +393,14 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
       await fs.promises.appendFile(env.MAWS_E2E_OPEN_LOG, `${real0}\n`);
       return { opened: true, message: null };
     }
-    if (!openPath) throw new Error('files.openExternal has no opener');
-    const message = await openPath(real0);
-    return message === '' ? { opened: true, message: null } : { opened: false, message };
+    if (!port) throw new Error('files.openExternal has no opener');
+    const answer = await port.openExternal(client, { path: real0 });
+    if (isNoClient(answer)) return { opened: false, message: NO_CLIENT_REASON };
+    return answer.opened ? { opened: true, message: null } : { opened: false, message: answer.reason };
   }
 
   // E1 start: Reveal in Finder for a delivered file. A refusal is an answer (`revealed: false` and why), not a thrown error.
-  async function reveal(appSessionId: AppSessionId, path: string): Promise<FilesRevealOutput> {
+  async function reveal(appSessionId: AppSessionId, path: string, client: ClientRef | null): Promise<FilesRevealOutput> {
     let real0: string;
     try {
       ({ real0 } = await precheck(appSessionId, path, DELIVERED_TOO)); // E2
@@ -410,9 +413,8 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
       await fs.promises.appendFile(env.MAWS_E2E_OPEN_LOG, `reveal ${real0}\n`);
       return { revealed: true, message: null };
     }
-    if (!showItemInFolder) throw new Error('files.reveal has no Finder');
-    showItemInFolder(real0);
-    return { revealed: true, message: null };
+    if (!port) throw new Error('files.reveal has no Finder');
+    return isNoClient(await port.reveal(client, real0)) ? { revealed: false, message: NO_CLIENT_REASON } : { revealed: true, message: null };
   }
   // E1 end
 
@@ -425,16 +427,16 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
     // the hold on the directory the path names now (the realpath a watch of it would be keyed by), else the first found;
     // a release of the window meanwhile (a navigation) took the page's holds, and a hold under the same key is the new
     // page's, so an unwatch that straddled it drops nothing
-    unwatch: async (appSessionId, path, owner) => {
-      const generation = releases.get(owner) ?? 0;
-      const real = isAbsolute(path) ? await fs.promises.realpath(path).catch(() => null) : null;
-      if ((releases.get(owner) ?? 0) !== generation) return;
-      watches.unwatch({ owner, appSessionId, path }, real);
-    },
+    unwatch: (appSessionId, path, owner) =>
+      releases.hold(owner, async (released) => {
+        const real = isAbsolute(path) ? await fs.promises.realpath(path).catch(() => null) : null;
+        if (released()) return;
+        watches.unwatch({ owner, appSessionId, path }, real);
+      }),
     openExternal,
     reveal, // E1
     release: (owner) => {
-      releases.set(owner, (releases.get(owner) ?? 0) + 1);
+      releases.release(owner);
       watches.release(owner);
     },
     watching: () => watches.watching(),

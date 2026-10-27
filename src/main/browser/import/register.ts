@@ -8,6 +8,7 @@ import type { OpenDialogOptions, WebContents } from 'electron';
 import { CHROME_PROFILE_DIR, EXTENSION_ID } from '@shared/browser/import';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandName } from '@shared/ipc/schema';
+import { pageOf } from '../../ipc/clients';
 import { CommandFailure, type MainHandler, type registerMainHandler } from '../../ipc/router';
 import type { BrowserEmit } from '../tabs';
 import { defaultChromeUserDataDir, readChromeProfiles } from './chrome/local-state';
@@ -17,7 +18,7 @@ import type { ImportedProfiles } from './profiles';
 import type { Removed } from './remove';
 import { ImportRefused, type BrowserImportService } from './service';
 
-export type ChooseDirectory = (sender: WebContents, options: OpenDialogOptions) => Promise<{ canceled: boolean; filePaths: string[] }>;
+export type ChooseDirectory = (sender: WebContents | null, options: OpenDialogOptions) => Promise<{ canceled: boolean; filePaths: string[] }>; // null: the page is gone, so the dialog is the app's
 
 export interface ImportHandlerDeps {
   service: Pick<BrowserImportService, 'inspect' | 'discard' | 'start' | 'cancel' | 'running'>;
@@ -48,8 +49,8 @@ export function registerBrowserImportHandlers({ service, profiles, extensions, r
     if (dir === null) return { userDataDir: defaultChromeUserDataDir({}, home)!, found: false, chromeRunning: false, profiles: [], error: null };
     return readChromeProfiles(dir, isImported);
   });
-  handle('browser.import.chooseUserData', async (_input, { sender }) => {
-    const { canceled, filePaths } = await chooseDirectory(sender, {
+  handle('browser.import.chooseUserData', async (_input, { client }) => {
+    const { canceled, filePaths } = await chooseDirectory(pageOf(client), {
       properties: ['openDirectory'],
       defaultPath: defaultChromeUserDataDir(env, home) ?? undefined,
       message: 'Choose the Chrome folder that holds “Local State”',

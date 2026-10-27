@@ -1,5 +1,5 @@
 // Main's `voice.*` handlers and the backend choice (E9 execution document, Design §3). The backend is chosen once, at
-// startup, gated as the other end-to-end seams are (`src/main/files/e2e-pick.ts`, `src/main/sessions/e2e-trash.ts`):
+// startup, gated as the other end-to-end seams are (`src/main/client/e2e-pick.ts`, `src/main/sessions/e2e-trash.ts`):
 // under `MAWS_E2E=1` with `MAWS_E2E_VOICE` set, the scripted backend; under `MAWS_E2E=1` without it, the real helper in
 // probe-only mode (its reads never prompt, and `start` is refused), so the packaged run proves the bundled helper
 // launches without ever opening the microphone; otherwise the real helper. Outside the harness `MAWS_E2E_VOICE` means
@@ -16,9 +16,9 @@ type Register = <N extends CommandName>(name: N, handler: MainHandler<N>) => voi
 
 export function registerVoiceHandlers(service: VoiceService, register: Register): void {
   register('voice.status', ({ locale }) => service.status(locale));
-  register('voice.start', (input, { sender }) => service.start(input, sender));
-  register('voice.stop', (input, { sender }) => service.stop(input, sender));
-  register('voice.cancel', (input, { sender }) => service.cancel(input, sender));
+  register('voice.start', (input, { client }) => service.start(input, client));
+  register('voice.stop', (input, { client }) => service.stop(input, client));
+  register('voice.cancel', (input, { client }) => service.cancel(input, client));
   register('voice.openPrivacySettings', ({ pane }) => service.openPrivacySettings(pane));
 }
 

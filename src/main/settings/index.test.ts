@@ -39,9 +39,11 @@ const electron = vi.hoisted(() => {
       this.backgrounds.push(colour);
     },
     webContents: {
+      id: 1,
       mainFrame,
       send: (...args: unknown[]) => void win.sent.push(args),
       isDestroyed: () => false,
+      on: () => {}, // the router follows the page's end for its ClientRef
     },
   };
   return { theme, win, handlers: new Map<string, (event: unknown, input: unknown) => Promise<unknown>>() };

@@ -352,17 +352,17 @@ describe('the repository watcher debounces, coalesces and backs off', () => {
   it('counts each owner apart and releases everything an owner still holds at once', async () => {
     const fake = fakeWatch();
     const watcher = new GitWatcher({ status: async () => status(), emit: () => {}, watch: fake.watch, statFile: async () => null });
-    await watcher.watch(ROOT, 1);
-    await watcher.watch(`${ROOT}/src`, 1);
-    await watcher.watch(ROOT, 2);
-    watcher.unwatch(`${ROOT}/src`, 2); // not owner 2's: a no-op
-    watcher.release(1); // window 1 closed or reloaded holding two
+    await watcher.watch(ROOT, 'p1');
+    await watcher.watch(`${ROOT}/src`, 'p1');
+    await watcher.watch(ROOT, 'p2');
+    watcher.unwatch(`${ROOT}/src`, 'p2'); // not owner 2's: a no-op
+    watcher.release('p1'); // window 1 closed or reloaded holding two
     expect(fake.opened[0].closed).toBe(false);
-    watcher.unwatch(ROOT, 1); // already released
+    watcher.unwatch(ROOT, 'p1'); // already released
     expect(fake.opened[0].closed).toBe(false);
-    watcher.release(2);
+    watcher.release('p2');
     expect(fake.opened[0].closed).toBe(true);
-    await watcher.watch(ROOT, 1); // a reloaded window watches afresh
+    await watcher.watch(ROOT, 'p1'); // a reloaded window watches afresh
     expect(fake.opened.filter((w) => !w.closed)).toHaveLength(1);
     watcher.dispose();
   });
@@ -372,16 +372,16 @@ describe('the repository watcher debounces, coalesces and backs off', () => {
     let answer!: (s: GitStatus) => void;
     const read = vi.fn(() => new Promise<GitStatus>((resolve) => (answer = resolve)));
     const watcher = new GitWatcher({ status: read, emit: () => {}, watch: fake.watch, statFile: async () => null });
-    const pending = watcher.watch(ROOT, 1);
-    watcher.release(1); // did-navigate while git status runs
+    const pending = watcher.watch(ROOT, 'p1');
+    watcher.release('p1'); // did-navigate while git status runs
     answer(status());
     expect(await pending).toEqual(status());
     expect(fake.opened).toEqual([]); // no root opened, no count left behind
-    const again = watcher.watch(ROOT, 1); // the reloaded page watches afresh
+    const again = watcher.watch(ROOT, 'p1'); // the reloaded page watches afresh
     answer(status());
     await again;
     expect(fake.opened.map((w) => w.closed)).toEqual([false]);
-    watcher.release(1);
+    watcher.release('p1');
     expect(fake.opened.map((w) => w.closed)).toEqual([true]);
     watcher.dispose();
   });

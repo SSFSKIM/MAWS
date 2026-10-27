@@ -1,8 +1,9 @@
 // P3-HD M3c2: the production composition of MAWS's own OAuth (docs/doperpowers/plans/2026-10-17-p3-hd-direct-route.md,
 // M3 and Decision Log 14, 20, 25 and 28), supplied by the application's root to the connector service beside route D.
 // The sealed store under `<userData>/connectors/oauth/` over Electron's asynchronous safeStorage, the explicit flow over
-// main's fetch, the 127.0.0.1 loopback listener and the one scheme-checked browser seam (`openExternalUrl`, whose
-// MAWS_E2E open log the fixture's fake browser follows), and the provider over the host's `connectors.directClose`.
+// main's fetch, the 127.0.0.1 loopback listener and the client port's browser hand-off (OX4; in Electron the one
+// scheme-checked seam, `openExternalUrl`, whose MAWS_E2E open log the fixture's fake browser follows), and the provider
+// over the host's `connectors.directClose`.
 //
 // No route-support switch: under MAWS_E2E the only difference is the custody guard (Decision Log 28), which stands
 // before every real safeStorage operation. The E2E launch runs Chromium on its mock keychain (src/main/index.ts); the
@@ -14,7 +15,8 @@ import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { app, safeStorage } from 'electron';
-import { openExternalUrl } from '../open-external';
+import { isNoClient, NO_CLIENT_REASON, type ClientPort } from '@shared/client/port';
+import type { ClientRef } from '@shared/ipc/client';
 import { listenLoopback } from './oauth-callback';
 import { createConnectorOAuthFlow } from './oauth-flow';
 import { createConnectorOAuthProvider, type ConnectorOAuthProvider, type ConnectorOAuthProviderDeps } from './oauth-provider';
@@ -62,12 +64,15 @@ export function guardE2ECustody(sealer: ConnectorOAuthSealer, facts: E2ECustodyF
   };
 }
 
-// The owner's Connect or Reconnect opens the system browser (the E2E open log instead) through the one checked seam.
-export async function openOwnerBrowser(url: string): Promise<void> {
-  if (!openExternalUrl(url)) throw new Error('the browser seam refused the authorization URL');
+// The owner's Connect or Reconnect opens the browser through the client port, on the client that asked. A flow has one
+// asker (a concurrent Connect is busy); an asker gone by the hand-off is still the one named, so mawsd's port answers
+// noClient and the flow fails as not opened, rather than opening consent on a screen no live request came from.
+export async function openOwnerBrowser(port: Pick<ClientPort, 'openExternal'>, url: string, client: ClientRef | null): Promise<void> {
+  const answer = await port.openExternal(client, { url });
+  if (isNoClient(answer) || !answer.opened) throw new Error(`the authorization URL was not opened: ${isNoClient(answer) ? NO_CLIENT_REASON : answer.reason}`);
 }
 
-export function productionConnectorOAuth(deps: Pick<ConnectorOAuthProviderDeps, 'closeHost' | 'log'>): ConnectorOAuthProvider {
+export function productionConnectorOAuth(deps: Pick<ConnectorOAuthProviderDeps, 'closeHost' | 'log'> & { port: Pick<ClientPort, 'openExternal'> }): ConnectorOAuthProvider {
   const sealer = guardE2ECustody(electronOAuthSealer(safeStorage, () => app.whenReady()), {
     e2e: Boolean(process.env.MAWS_E2E),
     mockKeychain: () => app.commandLine.hasSwitch('use-mock-keychain'),
@@ -76,6 +81,6 @@ export function productionConnectorOAuth(deps: Pick<ConnectorOAuthProviderDeps, 
     tmp: tmpdir,
   });
   const store = createConnectorOAuthStore({ directory: join(app.getPath('userData'), 'connectors', 'oauth'), sealer });
-  const flow = createConnectorOAuthFlow({ fetch: (url, init) => fetch(url, init), listen: listenLoopback, openBrowser: openOwnerBrowser });
+  const flow = createConnectorOAuthFlow({ fetch: (url, init) => fetch(url, init), listen: listenLoopback, openBrowser: (url, client) => openOwnerBrowser(deps.port, url, client) });
   return createConnectorOAuthProvider({ store, flow, closeHost: deps.closeHost, ...(deps.log && { log: deps.log }) });
 }
