@@ -2,6 +2,7 @@
 // channels through the hub, sends their data, and keeps what each received, in order. The bytes are whatever the caller
 // gives: RL2's sealed frames are O10's, and the hub cannot tell random bytes from them.
 import { closeReasonName, decodeChannelFrame, encodeChannelFrame, openTag, CHANNEL_CLOSE, type ChannelCloseReason, type RelayPresence } from '../src/relay.ts';
+import { newSocket, opened, socketUrl } from './socket.ts';
 
 export const machineSocketPath = (machine: string) => `/api/machines/${encodeURIComponent(machine)}/socket`;
 
@@ -27,19 +28,14 @@ export class RelayApp {
     this.socket = socket;
   }
 
-  /** Opens the socket with `headers` (a member's Access credentials) and resolves once it is open. */
-  static async open(hub: string, machine: string, headers: Record<string, string>): Promise<RelayApp> {
-    const url = `${hub.replace(/\/$/, '').replace(/^http/, 'ws')}${machineSocketPath(machine)}`;
-    // Node's WebSocket (undici) takes headers in place of the protocols argument.
-    const socket = new WebSocket(url, { headers } as unknown as string[]);
-    socket.binaryType = 'arraybuffer';
+  /** Opens the socket with `headers` (a member's Access credentials) and resolves once it is open (`openMs` at most; an
+   * upgrade unanswered past it is dropped). */
+  static async open(hub: string, machine: string, headers: Record<string, string>, openMs = 10_000): Promise<RelayApp> {
+    const socket = newSocket(socketUrl(hub, machineSocketPath(machine)), headers);
     const app = new RelayApp(socket);
     socket.addEventListener('message', (event) => app.receive(event.data as string | ArrayBuffer));
     socket.addEventListener('close', (event) => (app.ended = { code: event.code, reason: event.reason }));
-    await new Promise<void>((resolve, reject) => {
-      socket.addEventListener('open', () => resolve());
-      socket.addEventListener('error', () => reject(new Error(`the app socket to ${machine} was refused`)));
-    });
+    await opened(socket, `Machine ${machine}`, openMs);
     return app;
   }
 
