@@ -1,12 +1,15 @@
-// The deployment's configuration (deploy/config.json): where the hub runs and for whom. The Worker's variables are set
-// from it at each deploy (`wrangler deploy --var`), never from wrangler.jsonc, whose variables stay empty so that a
-// deploy made any other way answers 503 to everything rather than run half-configured.
+// A deployment's configuration: where the hub runs and for whom. deploy/config.json is production's (`desk-hub`, the
+// default of every command), deploy/staging.json staging's (`desk-hub-staging`, O11's live tests); a command takes
+// another with `--config`. The Worker's variables are set from it at each deploy (`wrangler deploy --var`), never from
+// wrangler.jsonc, whose variables stay empty so that a deploy made any other way answers 503 to everything rather than
+// run half-configured.
 import { readFileSync } from 'node:fs';
 
 export type DeployConfig = {
   /** The Cloudflare account the hub, its Access applications, and the machines' service tokens live in. */
   account: string;
-  /** The Worker's name, as wrangler.jsonc has it. */
+  /** The Worker's name. Every wrangler call names it (`--name`, deploy.ts's `workerWrangler`); wrangler.jsonc's own
+   * `name` is production's, and is never relied on. */
   worker: string;
   /** `<worker>.<subdomain>.workers.dev`, the host Access fronts. */
   host: string;
