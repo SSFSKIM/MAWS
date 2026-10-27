@@ -68,9 +68,10 @@ describe('status()', () => {
     const A = memberId();
     const first = await genesis('org-local', A, a1, recovery);
     // The head lists the machine: the standing the enrollment's `org-listed` claims is judged from it at start.
+    const ref = services.machine.ref;
     const head = await successor(first, [a1], (s) => {
-      s.machines.push({ name: 'mini', ref: services.machine.ref, pub: key.pub, owners: [A] });
-      s.machineNames.push({ name: 'mini', ref: services.machine.ref });
+      s.machines.push({ name: 'mini', ref, pub: key.pub, owners: [A] });
+      s.machineNames.push({ name: 'mini', ref });
     });
     state.setOrg({ version: 1, org: 'org-local', pinned: { roots: first.state.root.keys, recoveryPub: recovery.pub }, head: null, chain: [], hashes: [], certificates: NO_CERTIFICATES, acceptedTransitions: [], highWater: 0 });
     await new EndpointOrg(state, { log: () => {} }).adopt([first, head], []);
