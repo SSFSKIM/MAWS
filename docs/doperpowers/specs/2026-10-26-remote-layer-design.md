@@ -157,7 +157,11 @@ Three rules carry the design:
   1. MAWS's in-process MCP tools and SDK hook callbacks live with the Query, and they must act on the session's machine: its files, git and artifacts.
   2. A client that sleeps would stall every hook callback and tool call of a running session.
   3. Two clients (two of the owner's Macs, or a collaborator) would need the single writer handed between apps. A session's capabilities would then depend on which app happened to hold it.
-- **Tools bound to the client app.** These are the agent-driven in-app browser tab, its screenshots, and the app's notifications. They are served from whichever app is attached, through MAWS's own tool server in the engine host:
+- **Tools bound to the client app** are `show_pane` and notifications. They are served from whichever app is attached, through MAWS's own tool server in the engine host.
+  - This draft first also listed the agent's in-app browser tab and its screenshots. The composite moves capture, export and screenshots onto the machine's render service, because the attached client's fonts and artifact copy aren't the machine's.
+  - It also recommends the agent's tab engine on the session's machine, because the tab must reach that machine's localhost. Where the tab finally lives follows the composite's spike U3.
+
+  How a client-bound tool call works:
   - the tool call is forwarded over the attached owner's channel to that app;
   - with no app attached, the tool answers "no MAWS app is attached" and appears as an unavailable capability.
 
@@ -200,6 +204,11 @@ Three rules carry the design:
 The contract is the research's §4, adopted whole. The points that bind every implementation:
 
 1. **One outbound WebSocket per endpoint, and one WebSocket per app to each hub object it uses.** Desk's SSE+POST uplink is retired. Python's lack of a WebSocket client was its reason, and the endpoint is Node.
+   - **RL2 has two carriers.** It travels either in RL1's `{channel, seq, bytes}` multiplex through the hub, or over a **direct WebSocket to the endpoint module**, where the app can reach it. Every machine in the acceptance set is on the owner's tailnet (the MAWS architect's design constraint, 2026-10-26).
+     - The endpoint advertises its reachable addresses in a machine-signed record (RL6). The app tries direct first, with a short timeout, and falls back to the hub. The composite's measurement U2 (in O11) picks the default.
+     - The direct listener binds only to the tailnet interface. It carries nothing but RL2, with the handshake before any output and the same grades, freshness and policy. So a direct connection gains no authority the relayed one lacks. This keeps desk's binding that the machine decides what it executes: the hub still never connects into a machine, and a direct peer is just another RL2 client.
+     - Switching carriers means a new handshake, and subscriptions resume by cursor.
+     - The hub stays for discovery, listings, the log plane, the phone, and anything off the tailnet.
    - The app connects directly to the Machine DO of each machine it is using, so a session frame crosses one hub object, not two (research §3.3).
    - Spike 3 still has to measure this topology.
 2. **Every frame stays under 1 MiB at the hub.** Channel frames carry at most 256 KiB of plaintext. Larger payloads are split by the protocol, and snapshots are paged.
@@ -661,7 +670,7 @@ These are named here with their binding fields. Byte-level schemas and test vect
   - The hello is `{protocol, build, machine, leaseGeneration}`, authenticated by the Access service token.
   - The hub multiplexes channel frames as `{channel, seq, bytes}` opaque to the hub.
   - Lease and `hb`/`hb-ack` as in DX2. Frames are under 1 MiB.
-- **RL2, Channel.**
+- **RL2, Channel.** It is carried either in RL1's multiplex or over a direct WebSocket to the endpoint module (§4.1). The bytes and handshake are the same on both.
   - The SIGMA-I handshake over P-256, carrying `{deviceId, machine, clientClass, orgStateVersion}`.
   - HKDF-SHA-256 per direction.
   - AES-256-GCM frames carrying a 64-bit sequence number and at most 256 KiB of plaintext.
@@ -690,6 +699,7 @@ These are named here with their binding fields. Byte-level schemas and test vect
   - `{machine, session, lane, origin: {kind: 'terminal' | 'maws' | 'sminos-spawn', requester?, spawnerSession?}, principal: memberId | 'org', inference: {kind: 'slot', configDir} | {kind: 'route', settingsRef}, project?, owners[], ownersProof[], access: 'private' | 'listed' | 'org-view' | 'org-converse', shares[{member, grade}], created, context}`.
   - Owners are copied at spawn and never resolved later through an alias.
   - The listing projection is `{session, revision, issued, fields: {owners, machine, project, lane, state, title}}`, signed by the machine key.
+  - The machine's endpoint record is `{machine, addresses[], issued}`, signed by the machine key. It carries the direct RL2 addresses (§4.1).
 - **RL7, Capabilities.**
   - Per session: lane-b-control-map's `ControlCapabilities`.
   - Per device: `{grades granted, clientClass}`.
@@ -723,7 +733,7 @@ These are named here with their binding fields. Byte-level schemas and test vect
    - Signing is planned (an Apple Developer ID), and the first milestones run unsigned with software device keys.
    - A remote MAWS session's controller is on its machine.
    - The phone loop stays through the Desk Web pause: push notifications plus question and permission cards, and nothing else. It is the `web-cards` client class (§5.1, §5.10, §7.4, §9, §11).
-6. **2026-10-26, the MAWS architect's ruling.** One machine daemon contains the endpoint as a narrow module. The engine host stays a separate process under it. This replaces the first draft's separate endpoint process (§2.1). A correction from the architect's survey against the code (master `c3507722d`): the Query and the `maws` tool server live in the engine host, which is today's E10 Session, and the daemon is its single client.
+6. **2026-10-26, the MAWS architect's ruling.** One machine daemon contains the endpoint as a narrow module. The engine host stays a separate process under it. This replaces the first draft's separate endpoint process (§2.1).
 7. **2026-10-26, owner (round 1, part 2).**
    - Agent messages across owners are today's `sminos say` plus a signed owner label (§5.8).
    - The sidebar shows the member's own sessions first, and others' behind a per-project toggle (§6.2).
@@ -779,3 +789,10 @@ These are named here with their binding fields. Byte-level schemas and test vect
    - Keep the current design. A later phase introduces account-managed inference, where each account manages its inference through a server-side gateway.
    - The principal and inference-route fields are binding now. Enforcement of multi-person driving on personal routes, and per-spawner slots, are **deferred** to that phase (§6.4).
    - No step-up on routine approvals of your own session (§10.5).
+15. **2026-10-26, the Query's placement, corrected** (the MAWS architect's code survey at master `c3507722d`, `src/shared/engine/initialize.ts:13`).
+   - The lane B Query, the `maws` tool server and the SDK hook callbacks live in the **engine host**, which is today's E10 Session. The machine daemon (the endpoint module plus main's moved services) is the engine host's single client.
+   - Revisions before `9575f58c4` put the Query in the daemon. Don't build from them.
+   - A daemon restart leaves the Query untouched. Only an engine host restart triggers re-adoption (§2.1, §3.1, §8).
+16. **2026-10-26, from the composite's critique** (through the MAWS architect).
+   - RL2 also runs over a direct tailnet WebSocket to the endpoint module, which advertises its addresses in a machine-signed record. The app tries direct first, and U2 picks the default (§4.1, RL6).
+   - The client-bound tools are `show_pane` and notifications. Capture, export and screenshots move to the machine's render service, and the browser tab's home follows U3 (§3.1).
