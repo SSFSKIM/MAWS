@@ -34,6 +34,8 @@ export const HostReadySchema = z.strictObject({ t: z.literal('ready') }); // E10
 export const HostDocSchema = z.strictObject({ t: z.literal('doc'), channel: z.number().int().nonnegative().max(0xffff_ffff), artifactId: z.uuid(), actor: ActorSchema, doc: z.enum(['suggestions']).optional() });
 export type HostDoc = z.infer<typeof HostDocSchema>;
 export const HostRequestSchema = z.strictObject({ t: z.literal('req'), id, name: z.string(), input: z.unknown(), client: z.string().min(1).optional() });
+// P5 O1 M6: a request as a pre-O1 supervisor reads it, the protocol-2 window's form (wire.ts freezes it): no `client`
+export const HostRequestV2Schema = z.strictObject({ t: z.literal('req'), id, name: z.string(), input: z.unknown() });
 export const HostClientGoneSchema = z.strictObject({ t: z.literal('clientGone'), client: z.string().min(1) }); // P5 O1 M5
 export const HostResponseSchema = z.union([
   z.strictObject({ t: z.literal('res'), id, ok: z.literal(true), value: z.unknown() }),

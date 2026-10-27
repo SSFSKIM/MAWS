@@ -6,7 +6,8 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import * as z from 'zod';
 import { describe, expect, it } from 'vitest';
-import { SOCKET_PROTOCOL } from '../host/socket-protocol';
+import { ClientHelloV2Schema, ServerWelcomeV2Schema, SOCKET_PROTOCOL } from '../host/socket-protocol';
+import { HostRequestSchema, HostRequestV2Schema } from './host-protocol';
 import { REGISTRY, type WireRegistry } from './registry';
 import { classifyWireChange, WIRE_CAPABILITIES, WIRE_MAJOR, WIRE_MINOR, wireManifestOf, type WireManifest } from './wire';
 
@@ -142,7 +143,8 @@ describe('wireManifestOf', () => {
         'commands.probe.machine',
         'events.probe.hostEvent',
         ...['clientGone', 'doc', 'evt', 'ready', 'req', 'res'].map((t) => `envelope.${t}`),
-        ...['documents.close', 'documents.closed', 'documents.open', 'exit', 'hello', 'refuse', 'v2.hello', 'v2.welcome', 'welcome'].map((t) => `socket.${t}`),
+        ...['documents.close', 'documents.closed', 'documents.open', 'exit', 'hello', 'refuse', 'welcome'].map((t) => `socket.${t}`),
+        ...['documents.close', 'documents.closed', 'documents.open', 'evt', 'exit', 'hello', 'ready', 'refuse', 'req', 'res', 'welcome'].map((t) => `socket.v2.${t}`),
       ].sort(),
     );
     expect(manifest.entries['commands.probe.host']).toEqual({ owner: 'engine-host', input: z.toJSONSchema(fixture.commands['probe.host'].input, { unrepresentable: 'any' }), output: { $schema: 'https://json-schema.org/draft/2020-12/schema' } });
@@ -220,5 +222,24 @@ describe('classifyWireChange', () => {
   it('an added capability is additive; a removed one is breaking', () => {
     expect(classifyWireChange(manifest({}, ['a.kept']), manifest({}, ['a.kept', 'b.added']))).toEqual({ additive: ['capabilities.b.added'], breaking: [] });
     expect(classifyWireChange(manifest({}, ['a.kept', 'b.gone']), manifest({}, ['a.kept']))).toEqual({ additive: [], breaking: ['capabilities.b.gone'] });
+  });
+
+  it('a protocol-2 form is frozen: an optional field added to v2.hello or v2.welcome is breaking; an annotation is not', () => {
+    const frozen = (name: string, was: z.ZodType, now: z.ZodType) => classifyWireChange(manifest({ [name]: render(was) }), manifest({ [name]: render(now) }));
+    const extra = { extra: z.string().optional() };
+    expect(frozen('socket.v2.hello', ClientHelloV2Schema, ClientHelloV2Schema.extend(extra))).toEqual({ additive: [], breaking: ['socket.v2.hello.properties.extra'] });
+    expect(frozen('socket.v2.welcome', ServerWelcomeV2Schema, ServerWelcomeV2Schema.extend(extra))).toEqual({ additive: [], breaking: ['socket.v2.welcome.properties.extra'] });
+    expect(frozen('socket.v2.hello', ClientHelloV2Schema, ClientHelloV2Schema.describe('protocol 2’s hello'))).toEqual({ additive: [], breaking: [] });
+    expect(frozen('socket.v2.welcome', ServerWelcomeV2Schema, ServerWelcomeV2Schema.describe('protocol 2’s welcome'))).toEqual({ additive: [], breaking: [] });
+  });
+});
+
+describe('the protocol-2 link’s lines', () => {
+  // A v2 form split from its current form (so the current one can grow) is the current form less the fields its writer
+  // keeps off a protocol-2 link. A field added to the current form fails this until its writer keeps it off too.
+  it('a request differs from its v2 form only in `client`, which main sets only on a `machine` host’s link', () => {
+    const current = z.toJSONSchema(HostRequestSchema, { unrepresentable: 'any' }) as { properties: Record<string, unknown> };
+    delete current.properties.client;
+    expect(current).toEqual(z.toJSONSchema(HostRequestV2Schema, { unrepresentable: 'any' }));
   });
 });

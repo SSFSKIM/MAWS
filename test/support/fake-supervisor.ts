@@ -11,8 +11,7 @@ import { mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node
 import { createServer, type Server, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import * as z from 'zod';
-import { HostReadySchema } from '@shared/ipc/host-protocol';
+import { HostReadySchema, HostRequestV2Schema } from '@shared/ipc/host-protocol';
 import { createHostRuntime, type HostEmit, type HostRegister, type HostRuntime } from '@shared/host/runtime';
 import { SocketPort } from '@shared/host/socket-port';
 import { serveSocketClients, type SocketClients } from '@shared/host/socket-server';
@@ -20,9 +19,6 @@ import { ClientExitSchema, ClientHelloV2Schema, HelloPreambleSchema, SOCKET_PROT
 import { WIRE_CAPABILITIES, WIRE_MINOR } from '@shared/ipc/wire';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { buildIdOf, socketPathFor, SUPERVISOR_FILES, type LockFile } from '../../src/engine-host/supervisor-files';
-
-// Protocol 2's envelope from main, exactly as a pre-O1 supervisor read it: no request `client`, no `clientGone`.
-const V2_REQUEST = z.strictObject({ t: z.literal('req'), id: z.string().min(1), name: z.string(), input: z.unknown() });
 
 // The fake process table: pid → start time, for the pids the test says are alive.
 export class FakeProcesses {
@@ -267,7 +263,8 @@ export class FakeSupervisor {
             port.on('message', (event) => {
               const asked = ClientExitSchema.safeParse(event.data);
               if (asked.success) return exit(asked.data.when);
-              if (V2_REQUEST.safeParse(event.data).success || HostReadySchema.safeParse(event.data).success) return listener(event);
+              // protocol 2's envelope from main, in the forms the manifest freezes: no request `client`, no `clientGone`
+              if (HostRequestV2Schema.safeParse(event.data).success || HostReadySchema.safeParse(event.data).success) return listener(event);
               this.logs.push(`closed the client: a line protocol 2 refuses: ${JSON.stringify(event.data)}`);
               port.close();
             }),
