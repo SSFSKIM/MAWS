@@ -10,6 +10,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
+import { URL } from 'node:url';
 import { closure, pack } from './mawsd-pack.mjs';
 
 let dir;

@@ -11,7 +11,7 @@ const helper = 'node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper';
 if (existsSync(helper)) chmodSync(helper, statSync(helper).mode | 0o111);
 
 if (process.env.ELECTRON_SKIP_BINARY_DOWNLOAD === '1') {
-  console.log('postinstall: ELECTRON_SKIP_BINARY_DOWNLOAD=1, so no Electron binary is installed');
+  process.stdout.write('postinstall: ELECTRON_SKIP_BINARY_DOWNLOAD=1, so no Electron binary is installed\n');
   process.exit(0);
 }
 

@@ -12,6 +12,7 @@
 //
 // A mismatch, a failed smoke check or a missing dependency refuses the pack and leaves none. The pack's path is the one
 // line printed on stdout; the build's output goes to stderr. Options: --out <dir> (default dist/mawsd), --no-build.
+import { Buffer } from 'node:buffer';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -63,7 +64,7 @@ function commitOf(root) {
 const sha256Of = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
 
 async function fetchTo(url, to) {
-  const response = await fetch(url);
+  const response = await globalThis.fetch(url);
   if (!response.ok) throw new Error(`${url}: ${response.status} ${response.statusText}`);
   writeFileSync(to, Buffer.from(await response.arrayBuffer()));
 }
