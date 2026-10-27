@@ -234,6 +234,11 @@ env:
   # The groups that need a credential or the login keychain's custody, so never go to a hosted Mac, whatever the lane
   # (maws-app holds no secret): connectors-oauth, and discover, whose custody conditions (a), (b) and (c) stand.
   MAC_SECRET_E2E: connectors-oauth discover
+  # The e2e groups that need what only the mini's exclusive instance has, so ask for [ci-kit-mac-home] whatever the lane
+  # and never go to a hosted Mac: discover, whose sign-in case starts a real engine session through ClaudeUsage's relay on
+  # 127.0.0.1:8641, which the mini runs and the EC2 Mac does not (there it answered `relay_unreachable` in runs
+  # 40429551303 and 40432481369).
+  MAC_HOME_E2E: discover
 
 defaults:
   run:
