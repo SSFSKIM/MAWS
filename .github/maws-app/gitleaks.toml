@@ -52,6 +52,13 @@ targetRules = ["generic-api-key"]
 regexes = ['''^AAECAwQFBgcICQoLDA0ODxAREhMUFRYX(GBkaGxwdHh8)?$''', '''^tok___79_Pv6-fj39vX08_Lx8O_u7ezr6uno5-bl5OPi4eA$''']
 
 [[allowlists]]
+description = "The protocol package's vectors (apps/org-protocol/vectors/vectors.json): a grant's `machineKey` is a key id, the base64url of 16 bytes of SHA-256 over a public key, drawn fresh each time the generator runs"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^apps/org-protocol/vectors/vectors\.json$''']
+regexes = ['''^[A-Za-z0-9_-]{22}$''']
+
+[[allowlists]]
 description = "RFC 6455's sample Sec-WebSocket-Key (§1.3, 'the sample nonce'), in desk-hub's upgrade tests"
 targetRules = ["generic-api-key"]
 regexes = ['''^dGhlIHNhbXBsZSBub25jZQ==$''']

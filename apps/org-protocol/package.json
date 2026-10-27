@@ -1,0 +1,23 @@
+{
+  "name": "org-protocol",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The remote layer's one protocol package: RL5's signed org state and RL8's signed log events, with their vectors (docs/doperpowers/plans/2026-10-27-p5-o11-hub-v2.md, Interfaces §A)",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./vectors": "./vectors/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run",
+    "vectors": "node --experimental-strip-types --disable-warning=ExperimentalWarning vectors/generate.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "esbuild": "0.28.2",
+    "miniflare": "5.20261012.0-beta",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.2"
+  }
+}

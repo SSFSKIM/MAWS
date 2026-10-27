@@ -10,6 +10,8 @@
     "types": ["@cloudflare/workers-types"],
     "strict": true,
     "isolatedModules": true,
+    // The protocol package (apps/org-protocol) imports with `.ts` extensions, so Node loads it unbundled.
+    "allowImportingTsExtensions": true,
     "noEmit": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true

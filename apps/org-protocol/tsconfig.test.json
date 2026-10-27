@@ -1,0 +1,9 @@
+{
+  // The suites, the vector generator and the config, under Node.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM"],
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "vectors/**/*.ts", "test/**/*.ts", "vitest.config.ts"]
+}

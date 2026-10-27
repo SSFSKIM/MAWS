@@ -362,6 +362,10 @@ importers:
         version: 5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.7.0(react@19.3.0))
 
   apps/desk-hub:
+    dependencies:
+      org-protocol:
+        specifier: workspace:*
+        version: link:../org-protocol
     devDependencies:
       '@cloudflare/workers-types':
         specifier: 5.20261012.1
@@ -454,6 +458,24 @@ importers:
       ws:
         specifier: 8.22.0
         version: 8.22.0
+
+  apps/org-protocol:
+    devDependencies:
+      '@types/node':
+        specifier: ^24
+        version: 24.19.0
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
+      miniflare:
+        specifier: 5.20261012.0-beta
+        version: 5.20261012.0-beta(@types/node@24.19.0)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^5.0.2
+        version: 5.0.2(@types/node@24.19.0)(happy-dom@20.14.5)(vite@7.3.6(@types/node@24.19.0)(jiti@2.7.0)(lightningcss@1.32.0))
 
 packages:
 
