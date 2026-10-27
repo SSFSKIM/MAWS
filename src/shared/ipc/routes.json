@@ -59,6 +59,7 @@
   "layout.setEnabledActions",
   "layout.unsavedFiles",
   "library.saveAs",
+  "machines.list",
   "presentations.present",
   "pty.hostState",
   "pty.openLink",

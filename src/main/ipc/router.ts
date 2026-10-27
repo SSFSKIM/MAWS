@@ -13,8 +13,13 @@
 // the machine it goes to (the IPC message's last argument; none is the local machine), validated as a `MachineRef`, and a
 // handler learns it as `ctx.target`. A command graded `client` (O1 M4) is the local app's own: for another machine's ids it
 // is refused `host_unavailable` before any handler runs, since an app effect has no app to run in there, except
-// `attention.viewing`, answered with no effect (its only effect is the local notifier's). Any other command for another
-// machine answers `host_unavailable` until the connection manager (M3) reaches it.
+// `attention.viewing`, answered with no effect (its only effect is the local notifier's).
+//
+// P5 O6 M3 ("Machine links"): any other command for another machine, its input validated here, goes to the connection
+// manager (`RouterOptions.remote`, src/main/machines/manager.ts), which answers it through that machine's link, or
+// `host_unavailable` while the machine is not up; with no manager it answers `host_unavailable` itself. `dispatchLocal` is
+// the route minus the sender check, the entry by which another profile's app reaches this machine's services through the
+// stand-in (src/main/machines/serve-standin.ts).
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
 import { HostCommandError, thrownError } from '@shared/host/runtime';
 import type { ClientRef, HandlerContext } from '@shared/ipc/client';
@@ -40,6 +45,8 @@ export type HostOwner = Exclude<Owner, 'main'>;
 // P5 O1 M5: `client` is the asker, passed for a `machine`-owned command only (the host binding).
 export type HostDispatch = (owner: HostOwner, name: string, input: unknown, client?: ClientRef) => Promise<CommandResult<CommandName>>;
 export type MachineBinding = { kind: 'embedded' } | { kind: 'host' };
+// P5 O6 M3: the connection manager's dispatch, for a command whose target is another machine (its input validated).
+export type RemoteDispatch = (machine: MachineRef, name: CommandName, input: unknown, ctx: MainContext) => Promise<CommandResult<CommandName>>;
 
 // A handler over registry R, for `main` or `machine` alike: the same signature in main and in a host runtime.
 export type RegistryHandler<R extends WireRegistry, N extends NameOf<R>> = (input: InputOf<R, N>, ctx: HandlerContext) => OutputOf<R, N> | Promise<OutputOf<R, N>>;
@@ -52,6 +59,8 @@ export interface Router<R extends WireRegistry> {
   registerMain<N extends NameOf<R>>(name: N, handler: MainRegistryHandler<R, N>): void; // refuses a name R does not give to `main`
   registerMachine<N extends NameOf<R>>(name: N, handler: RegistryHandler<R, N>): void; // refuses a name R does not give to `machine`
   intercept<N extends NameOf<R>>(name: N, handler: MainRegistryHandler<R, N>): () => void;
+  // P5 O6 M3: the route minus the sender check, for the client and machine `ctx` names; `internal` before `install`
+  dispatchLocal(name: NameOf<R>, input: unknown, ctx: MainContext): Promise<CommandResult<CommandName>>;
 }
 
 export interface RouterOptions {
@@ -60,6 +69,7 @@ export interface RouterOptions {
   local: MachineRef; // P5 O6 M2: this main's own machine (src/main/machine/local.ts), which a command naming none goes to
   dispatchToHost?: HostDispatch;
   machine?: MachineBinding; // P5 O1 M5: `embedded` unless said otherwise
+  remote?: RemoteDispatch; // P5 O6 M3: the connection manager; none answers every other machine `host_unavailable`
 }
 
 // C4: a main handler that fails with a specific IpcError (session.replay.start relaying the host dispatch's `timeout` or
@@ -82,6 +92,7 @@ type AnyHandler = (input: unknown, context: MainContext) => unknown;
 
 // A router's handler tables, which take registrations before or after `install` (main's startup registers both ways).
 function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'install'> & { install(options: RouterOptions): void } {
+  let installed: RouterOptions | null = null; // P5 O6 M3: what dispatchLocal routes with
   const { commands, mainOnly } = registry;
   const codec = codecOf<WireRegistry>(registry);
   const mainHandlers = new Map<string, AnyHandler>();
@@ -101,36 +112,49 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
     table.set(name, handler);
   };
 
-  async function route(
-    event: IpcMainInvokeEvent,
-    name: string,
-    rawInput: unknown,
-    rawMachine: unknown,
-    { appUrl, local, dispatchToHost = hostsNotStarted, machine = { kind: 'embedded' } }: RouterOptions,
-  ): Promise<CommandResult<CommandName>> {
-    if (!isAppSender(event, appUrl)) {
+  const mainOnlyRefusal = (name: string): CommandResult<CommandName> => ({ ok: false, error: ipcError('forbidden_sender', `${name} may only be invoked by main`) });
+
+  async function route(event: IpcMainInvokeEvent, name: string, rawInput: unknown, rawMachine: unknown, options: RouterOptions): Promise<CommandResult<CommandName>> {
+    if (!isAppSender(event, options.appUrl)) {
       console.warn(`[ipc] refused ${name} from ${event.senderFrame?.url ?? 'a detached frame'}`);
       return { ok: false, error: ipcError('forbidden_sender', `${name} may only be invoked by the app window`) };
     }
-    if (mainOnly.has(name)) {
-      return { ok: false, error: ipcError('forbidden_sender', `${name} may only be invoked by main`) };
-    }
-    let target = local;
+    if (mainOnly.has(name)) return mainOnlyRefusal(name);
+    let target = options.local;
     if (rawMachine !== undefined) {
       const parsed = MachineRefSchema.safeParse(rawMachine);
       if (!parsed.success) return { ok: false, error: ipcError('invalid_input', `${name}: not a machine: ${JSON.stringify(rawMachine)}`, parsed.error.issues) };
       target = parsed.data;
     }
+    return dispatch(name, rawInput, { client: clientOf(event.sender), target }, options);
+  }
+
+  // Everything after the sender check and the machine's parse: `route`'s rest, and (P5 O6 M3) `dispatchLocal`.
+  async function dispatch(
+    name: string,
+    rawInput: unknown,
+    context: MainContext,
+    { local, dispatchToHost = hostsNotStarted, machine = { kind: 'embedded' }, remote }: RouterOptions,
+  ): Promise<CommandResult<CommandName>> {
+    if (mainOnly.has(name)) return mainOnlyRefusal(name);
+    const { target } = context;
     const input = codec.validateCommandInput(name, rawInput);
     if (!input.ok) return input;
     if (target !== local) {
-      if (gradeOf(name) !== 'client') return { ok: false, error: ipcError('host_unavailable', `${name}: machine ${target} is not connected`) }; // M3: the connection manager
-      if (name === 'attention.viewing') return { ok: true, value: undefined as CommandOutput<CommandName> };
-      return { ok: false, error: ipcError('host_unavailable', `${name}: not available for a session on another machine yet`) };
+      if (gradeOf(name) === 'client') {
+        if (name === 'attention.viewing') return { ok: true, value: undefined as CommandOutput<CommandName> };
+        return { ok: false, error: ipcError('host_unavailable', `${name}: not available for a session on another machine yet`) };
+      }
+      if (!remote) return { ok: false, error: ipcError('host_unavailable', `${name}: machine ${target} is not connected`) };
+      try {
+        return await remote(target, name as CommandName, input.value, context); // P5 O6 M3: the connection manager
+      } catch (error) {
+        console.error(`[ipc] ${name} for machine ${target} failed`, error);
+        return { ok: false, error: ipcError('internal', error instanceof Error ? error.message : String(error)) };
+      }
     }
 
     const { owner } = commands[name];
-    const context: MainContext = { client: clientOf(event.sender), target };
     const run = (handler: AnyHandler) => async () => ({ ok: true, value: (await handler(input.value, context)) as CommandOutput<CommandName> }) as const;
     // P5 O1 M5: an embedded machine handler's output is checked against the registry, as a host runtime checks it before
     // answering, so a handler answers the same in either root.
@@ -172,6 +196,7 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
 
   return {
     install(options) {
+      installed = options;
       for (const name of Object.keys(commands)) {
         ipcMain.handle(commandChannel(name as CommandName), (event, input: unknown, machine: unknown) => route(event, name, input, machine, options));
       }
@@ -185,6 +210,10 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
         if (interceptors.get(name) === handler) interceptors.delete(name);
       };
     }) as Router<R>['intercept'],
+    async dispatchLocal(name, input, ctx) {
+      if (!installed) return { ok: false, error: ipcError('internal', `${name}: the router is not installed yet`) };
+      return dispatch(name, input, ctx, installed);
+    },
   };
 }
 
@@ -207,6 +236,8 @@ export const registerMainHandler: <N extends CommandName>(name: N, handler: Main
 export const registerMachineHandler: <N extends CommandName>(name: N, handler: MachineHandler<N>) => void = production.registerMachine;
 // C5: the stub source's seam (above).
 export const interceptCommand: <N extends CommandName>(name: N, handler: MainHandler<N>) => () => void = production.intercept;
+// P5 O6 M3: the stand-in's entry to this machine's services (src/main/machines/serve-standin.ts), and the local link's.
+export const dispatchLocal: (name: CommandName, input: unknown, ctx: MainContext) => Promise<CommandResult<CommandName>> = production.dispatchLocal;
 
 // The sender must be the top frame of an app window (not a subframe, not a webContents without a window) and its
 // URL must be at the app's origin: `file:` for the built app, the dev server's origin under `pnpm dev`.

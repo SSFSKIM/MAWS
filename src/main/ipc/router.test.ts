@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
 import type { MachineRef } from '@shared/machine/ref';
-import type { HostDispatch, MainContext } from './router';
+import type { HostDispatch, MainContext, RemoteDispatch } from './router';
 
 const LOCAL = 'LocalMachineRef0000000' as MachineRef;
 const OTHER = 'OtherMachineRef0000000' as MachineRef;
@@ -39,13 +39,13 @@ function appWindow(url = DEV_URL) {
 type Router = typeof import('./router');
 let router: Router;
 
-async function load(appUrl = DEV_URL, dispatchToHost?: Parameters<Router['installRouter']>[0]['dispatchToHost']) {
+async function load(appUrl = DEV_URL, dispatchToHost?: Parameters<Router['installRouter']>[0]['dispatchToHost'], remote?: RemoteDispatch) {
   vi.resetModules();
   electron.handlers.clear();
   electron.windows.clear();
   electron.opened.length = 0;
   router = await import('./router');
-  router.installRouter({ appUrl, local: LOCAL, dispatchToHost });
+  router.installRouter({ appUrl, local: LOCAL, dispatchToHost, remote });
 }
 
 // P5 O6 M2: the preload sends the machine as the invoke's last argument; none is the local machine.
@@ -115,11 +115,66 @@ describe('main ipc router', () => {
       expect(handler.mock.calls.map(([, context]) => context.target)).toEqual([LOCAL]);
     });
 
+    // P5 O6 M3: the connection manager reaches another machine
+    it('hands a command for another machine to the connection manager, validated, with the asker and the target, and answers what it answers', async () => {
+      const handler = vi.fn(() => ({ sessions: [], revision: 0 }));
+      const remote = vi.fn<RemoteDispatch>(async () => ({ ok: true, value: { sessions: [], revision: 7 } }));
+      await load(DEV_URL, undefined, remote);
+      router.registerMainHandler('session.list', handler);
+      const event = appWindow();
+      await expect(invoke(event, 'session.list', {}, OTHER)).resolves.toEqual({ ok: true, value: { sessions: [], revision: 7 } });
+      expect(remote).toHaveBeenCalledWith(OTHER, 'session.list', {}, { client: expect.objectContaining({ id: `page:${event.sender.id}.1` }), target: OTHER });
+      expect(handler).not.toHaveBeenCalled();
+      await expect(invoke(event, 'session.list', { includeArchived: 'yes' }, OTHER)).resolves.toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+      expect(remote).toHaveBeenCalledOnce(); // an invalid input never leaves this machine
+      await invoke(event, 'session.list', {}, LOCAL);
+      expect(handler).toHaveBeenCalledOnce(); // the local machine's stays local
+    });
+
+    it('answers internal when the connection manager rejects, and still refuses a client command for another machine itself', async () => {
+      const remote = vi.fn<RemoteDispatch>(async () => {
+        throw new Error('the manager broke');
+      });
+      await load(DEV_URL, undefined, remote);
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      await expect(invoke(appWindow(), 'session.list', {}, OTHER)).resolves.toMatchObject({ ok: false, error: { code: 'internal', message: 'the manager broke' } });
+      await expect(invoke(appWindow(), 'attention.pendingNavigate', undefined, OTHER)).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+      expect(remote).toHaveBeenCalledOnce();
+    });
+
     it('answers attention.viewing for another machine with no effect', async () => {
       const handler = vi.fn(() => undefined);
       router.registerMainHandler('attention.viewing', handler);
       await expect(invoke(appWindow(), 'attention.viewing', { appSessionId: 'app-1' }, OTHER)).resolves.toEqual({ ok: true, value: undefined });
       expect(handler).not.toHaveBeenCalled();
+    });
+  });
+
+  // P5 O6 M3: the stand-in's entry (src/main/machines/serve-standin.ts): the route minus the sender check
+  describe('dispatchLocal', () => {
+    const remoteClient = { id: 'remote:1/page:3.1', onGone: () => () => {} } as unknown as MainContext['client'];
+
+    it('validates and dispatches with no sender, handing the given client and target to the handler', async () => {
+      const handler = vi.fn<(input: unknown, context: MainContext) => { sessions: never[]; revision: number }>(() => ({ sessions: [], revision: 3 }));
+      router.registerMainHandler('session.list', handler);
+      await expect(router.dispatchLocal('session.list', {}, { client: remoteClient, target: LOCAL })).resolves.toEqual({ ok: true, value: { sessions: [], revision: 3 } });
+      expect(handler).toHaveBeenCalledWith({}, { client: remoteClient, target: LOCAL });
+      await expect(router.dispatchLocal('session.list', { includeArchived: 1 }, { client: remoteClient, target: LOCAL })).resolves.toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+      expect(handler).toHaveBeenCalledOnce();
+    });
+
+    it('answers a handler’s CommandFailure with its IpcError, and refuses a main-only command', async () => {
+      router.registerMainHandler('session.list', () => {
+        throw new router.CommandFailure({ code: 'timeout', message: 'too slow' });
+      });
+      await expect(router.dispatchLocal('session.list', {}, { client: remoteClient, target: LOCAL })).resolves.toEqual({ ok: false, error: { code: 'timeout', message: 'too slow' } });
+      await expect(router.dispatchLocal('host.configure' as never, {}, { client: remoteClient, target: LOCAL })).resolves.toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
+    });
+
+    it('answers internal before the router is installed', async () => {
+      vi.resetModules();
+      const fresh = await import('./router');
+      await expect(fresh.dispatchLocal('session.list', {}, { client: remoteClient, target: LOCAL })).resolves.toMatchObject({ ok: false, error: { code: 'internal' } });
     });
   });
 
