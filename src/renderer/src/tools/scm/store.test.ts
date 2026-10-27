@@ -283,15 +283,17 @@ describe('source control store: diffs', () => {
     vi.useFakeTimers();
     const here: ScmDiffTarget = { machine: TEST_MACHINE, directory: DIR, scope: 'untracked', path: 'untracked.txt' };
     const there: ScmDiffTarget = { ...here, machine: OTHER_MACHINE };
-    const main = installFakeMain((name) => {
+    const diffsAsked: (string | undefined)[] = [];
+    const main = installFakeMain((name, _input, machine) => {
       if (name === 'scm.stage') return ok({ ok: true, status: statusOf({ files: [] }), output: '' });
+      if (name === 'git.diff') diffsAsked.push(machine);
       return name === 'git.diff' ? ok({ patch: untrackedPatch, files: [{ path: 'untracked.txt', oldPath: null, insertions: 2, deletions: 0, binary: false }] }) : ok();
     });
     const store = createScmStore(validated(main.bridge));
     const ui = createScmUi({ session: at(A) });
     const offs = [store.getState().hold(here), store.getState().hold(there)];
     await vi.advanceTimersByTimeAsync(0);
-    const diffsOn = (machine: string) => main.calls.filter((c) => c.name === 'git.diff' && c.machine === machine).length;
+    const diffsOn = (machine: string) => diffsAsked.filter((m) => m === machine).length;
     expect([diffsOn(TEST_MACHINE), diffsOn(OTHER_MACHINE)]).toEqual([1, 1]);
     await store.getState().stage(ui, at(A), DIR, ['untracked.txt']);
     await vi.advanceTimersByTimeAsync(SCM_REFRESH_MS);
