@@ -102,3 +102,19 @@ export const REPORT_RETRY_PATH = '/__test/report-retry';
 export const LEAVE_HELD_PATH = '/__test/leave-held';
 /** Where the suites' `Registry` releases a held `leave`: answers `released`, or `none` while none is held. */
 export const LEAVE_RELEASE_PATH = '/__test/leave-release';
+/** Where the suites' `Registry` answers its projection of the org state (`{members, devices, machines}`). */
+export const PROJECTION_PATH = '/__test/projection';
+/** Where the suites' `Project` is armed (`{times, missing?}`) to throw from its next `times` state announcements, as a
+ * call to an object a code update reset fails, or (`missing`) as a project on the code before the announcement refuses
+ * a method it lacks (0 disarms); every request there answers `{remaining, calls, announced}`: the throws still armed,
+ * the calls taken since it was last armed, and the newest version announced to it. */
+export const PROJECT_STATE_FAULT_PATH = '/__test/state-fault';
+/** Where the suites' `Registry` calls a method no `Project` has, and answers `{lacks, message}`: whether the Registry
+ * takes workerd's refusal for a callee on older code. */
+export const MISSING_METHOD_PATH = '/__test/missing-method';
+/** Where the suites' `Registry` calls one of its methods that take a member (`{call, member, args}`) with the member
+ * record given, as the Worker would with one it resolved before a state removed or demoted them; answers the result. */
+export const AS_MEMBER_PATH = '/__test/as-member';
+/** Where the suites' `Registry` is armed (`{method}`, or `{method: null}` to disarm) to refuse calls of one of its
+ * methods as a Registry on the code before the method refuses them (workerd's missing-method error). */
+export const LACKS_PATH = '/__test/lacks';
