@@ -960,6 +960,12 @@ No new dependency. zod 4, Node's `crypto`, the peer-auth addon already in the tr
 - Observation: `WIRE_MINOR` is 0 on master, and the only commit that touched it is O1's M6. O6's bump is master's first unless O2 lands its own first.
   Evidence: `git log -S WIRE_MINOR origin/master -- src/shared/ipc/wire.ts` lists `dbd9ee9b7` alone.
 - Observation: the peer-auth helpers are where M3 cites them: `peerAddonPath`, `loadPeerAddon` and `socketFd` in `src/main/browser/cua/peer.ts`.
+- Observation: no plain union in the registry carries an id. All 28 unions that carry one are discriminated (by `kind` or `status`), so the plain-union rule is exercised only by fixtures today.
+  Evidence: M1's scratch survey over `REGISTRY`.
+- Observation: only two id-named fields were unbranded at the base: `session.takeOverPane`'s output `ptyId` and `plugins.operation`'s `reload.sessions[].appSessionId`. The registry has 47 plain-string-keyed records, none keyed by a machine-bound id; `browser.tabs.list`'s `selected` was already `z.record(AppSessionIdSchema, …)`, so Concrete Steps 9's first mutation re-types it back.
+  Evidence: `coverage.test.ts`'s first RED run (M1).
+- Observation: the registry's only pipes are in `src/shared/engine/answers.ts`, and neither carries an id. The layout's preprocessed schemas (`StoredMainSchema` and friends) are outside the registry, so M2's migration happens in their readers, not through the codec.
+- Observation: `test/support/builders.ts`'s attention `item()` writes `att-<appSessionId>-…`, unlike the broker's `<appSessionId>:<requestId>`. Tests that rely on the prefix pass the broker's form.
 
 ## Decision Log
 
@@ -974,6 +980,24 @@ No new dependency. zod 4, Node's `crypto`, the peer-auth addon already in the tr
   - So M1 commits those two modules and their tests in a commit of their own, touching no other file. The file-level tests live beside the module in `src/shared/machine/identity-file.test.ts` (and `ref.test.ts`), not in `src/main/machine/identity.test.ts`, and acceptance 2 is reworded to say so. `src/main/machine/identity.test.ts` pins main's part: the startup mint into `<userData>`, the name, and `machine.identity`.
   - Rejected: keeping the race and format tests in main's test file, which would ship the shared module to O2 without its tests.
   Date/Author: 2026-10-27, O6's executor (controller).
+
+- Decision: M1's executor's calls, folded at M1.
+  - The identity file:
+    - `readMachineRef` reads the `ref` of a file of any positive integer `version`, so an older build keeps a newer build's identity; a bad or missing `ref` stays fatal. The minter writes version 1.
+    - The stray sweep removes only files of the minter's own shape, `machine.json.<digits>.<base64url>`, older than 60 s, so an owner's `machine.json.bak` is never touched. It runs in `readOrMintMachineRef` only.
+    - `readOrMintMachineRef` creates the profile directory, since O2's `mawsd` may run first in a fresh profile.
+    - The race test pauses the first minter inside a mocked `linkSync` and runs the second minter there. Rejected: a real multi-process race, which is nondeterministic.
+    - A malformed file stops startup with a `[machine]` log line, `dialog.showErrorBox` and `app.exit(1)`. The mint is the first step inside `startWithProfileLock`, before any host or window.
+  - The codec:
+    - The plain-union rule is made concrete by run-time shape: an id beside a plain string, enum or literal throws; objects merge by key; an object and a record both carrying ids, or an array and a tuple both carrying ids, throw; null, number and boolean members are ignored, so `union([dunion, null])` stays dispatched.
+    - Constructs the walker cannot see through throw at compile when they would hide an id: an intersection, a map, a set, a promise, or a transform on the chosen side of a pipe.
+    - `addressOf` refuses an empty bare id.
+    - It exports `addressedKindOf` and `addressedPaths(schema, direction)` beyond the Interfaces block, so the coverage test reads the compile step's own findings.
+    - The snapshot records command inputs as lowered and outputs and events as lifted, one `<path> <Kind>` line each.
+  - Coverage: one loose alias, `LooseAppSessionIdSchema`, was needed; the `ptyId` fix reuses `PtyIdSchema`, which is already loose. `REVIEWED_STRING_RECORDS` lists all 47 plain-string records, and a stale entry fails the test.
+  - `machine.identity`'s grade, as the O1 rubric line for the architect: "`list`: a listing read of the machine's ref, display name and own project, none of a session's content, like `session.list`" (`src/shared/ipc/grades/machine.ts`).
+  - `eslint.config.js`'s `MACHINE_BOUND` glob gains `machine`, so `src/main/machine/**` stays Electron-free like the other services that move to `mawsd` (a file outside M1's Touches).
+  Date/Author: 2026-10-27, O6's executor (controller), from M1's executor.
 
 - Decision: the verification.
   - This document gets one `doperpowers:adversarial-reviewer` buildability review before execution (P5 Decision Log 12).
