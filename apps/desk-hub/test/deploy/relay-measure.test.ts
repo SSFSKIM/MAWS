@@ -68,10 +68,13 @@ describe('relay-measure', () => {
       [1024, 1024 + SEALED_OVERHEAD, 10],
       [65536, 65536 + SEALED_OVERHEAD, 20],
     ]);
-    for (const t of measured.roundTrips) expect(t.p50).toBeLessThanOrEqual(t.p95);
+    for (const t of measured.roundTrips) {
+      expect(t.p50).toBeLessThanOrEqual(t.p95);
+      expect(t.p95).toBeLessThanOrEqual(t.p99);
+    }
     expect(measured.throughput).toMatchObject({ plaintext: 262144, window: 2 });
     expect(measured.throughput.frames).toBeGreaterThan(2);
-    expect(lines.join('\n')).toMatch(/round trip, 1 KiB frames \(1048 B sealed\): 10 samples, p50 [\d.]+ ms, p95 [\d.]+ ms/);
+    expect(lines.join('\n')).toMatch(/round trip, 1 KiB frames \(1048 B sealed\): 10 samples, p50 [\d.]+ ms, p95 [\d.]+ ms, p99 [\d.]+ ms/);
     expect(lines.join('\n')).toMatch(/round trip, 64 KiB frames \(65560 B sealed\): 20 samples/);
     expect(lines.join('\n')).toMatch(/throughput, 256 KiB frames \(262168 B sealed\), 2 in flight/);
     expect(lines.at(-1)).toMatch(/^tailnet verdict: /);

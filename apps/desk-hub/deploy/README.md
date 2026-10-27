@@ -227,7 +227,7 @@ signal stops the run, gives a request in flight 5 s to land, runs the cleanup (e
 - `relay-measure` (U2): a machine `m8-rm-<tag>` whose endpoint echoes, and the reference client's Machine socket to it,
   both run here. Every frame is synthetic and RL2-sized: a 64-bit sequence number, random bytes for the ciphertext and a
   16-byte tag, which the hub cannot tell from a sealed frame. It prints a channel's opening, the round trip app → Machine
-  DO → endpoint → back at 1 KiB and 64 KiB of plaintext (p50, p95, one frame in flight, `--samples`, default 200), and
+  DO → endpoint → back at 1 KiB and 64 KiB of plaintext (p50, p95, p99, one frame in flight, `--samples`, default 200), and
   the sustained throughput of 256 KiB frames (`--seconds`, default 10, `--window` in flight, default 4), every echo
   checked byte for byte; then the tailnet verdict (over 150 ms of p95 at 1 KiB, the direct tailnet carrier becomes
   O10's default).
