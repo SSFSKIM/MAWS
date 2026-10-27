@@ -22,7 +22,16 @@ export interface LocalLatencyBaseline {
   deltaToFrame: LatencySummary & { spreadP50: number; spreadP95: number };
   roundTrip: LatencySummary & { spreadP50: number; spreadP95: number };
 }
-export const LOCAL_LATENCY_BASELINE: LocalLatencyBaseline | null = null;
+// Recorded 2026-10-27 from three valid runs at M1's commit 12bd0b3b2 on the mini (each 600 of 600 markers, 200 round
+// trips): delta to frame p50 24.56 / 24.45 / 24.23 ms and p95 37.56 / 37.78 / 37.07 ms; round trip p50 0.9 / 0.9 /
+// 0.9 ms and p95 1.2 / 1.3 / 1.3 ms. Each value is the median of the three, n the smallest run's.
+export const LOCAL_LATENCY_BASELINE: LocalLatencyBaseline | null = {
+  commit: '12bd0b3b2',
+  appTree: 'c3507722d',
+  runs: ['40440185564', '40440764482', '40441045572'],
+  deltaToFrame: { p50: 24.45, p95: 37.56, n: 600, spreadP50: 0.33, spreadP95: 0.71 },
+  roundTrip: { p50: 0.9, p95: 1.3, n: 200, spreadP50: 0, spreadP95: 0.1 },
+};
 
 // The run's shape: three turns of 300 deltas, the first a warm-up; 220 round trips, the first 20 a warm-up. A run with
 // fewer than 95% of the kept markers as samples is invalid, as is a renderer clock more than 1 ms off the runner's.
