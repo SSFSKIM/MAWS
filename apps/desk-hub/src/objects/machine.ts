@@ -177,10 +177,11 @@ export class Machine extends DurableObject<Env> {
     await this.relay.message(ws, message);
   }
 
-  async webSocketClose(ws: WebSocket): Promise<void> {
-    this.relay.closed(ws);
+  async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
+    this.relay.closed(ws, code, reason);
   }
 
+  /** A failed socket has no close to answer. */
   async webSocketError(ws: WebSocket): Promise<void> {
     this.relay.closed(ws);
   }

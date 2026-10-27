@@ -80,6 +80,9 @@ type Installed = { name: string; arrival: number };
  * were lost to an eviction (send it again), either kind's for a message over 1 MiB, or for a frame out of order. */
 const CLOSE = { replaced: 4409, revoked: 4403, partsLost: 4412, protocol: 4400, tooLarge: 1009, failed: 1011 } as const;
 
+/** Codes a close reports but no close frame may carry (no status, abnormal closure, TLS failure): answered 1000. */
+const ECHOLESS = new Set([1005, 1006, 1015]);
+
 const json = (status: number, body: unknown) => Response.json(body, { status });
 type Frame = { t: string } & Record<string, unknown>;
 const isFrame = (value: unknown): value is Frame => typeof value === 'object' && value !== null && !Array.isArray(value) && typeof (value as { t?: unknown }).t === 'string';
@@ -232,8 +235,12 @@ export class Relay {
     return this.fromEndpointBinary(ws, message);
   }
 
-  /** A socket closed or failed: an endpoint's ends its connection, an app's its channels. */
-  closed(ws: WebSocket): void {
+  /** A socket closed (`code` its other end's) or failed: an endpoint's ends its connection, an app's its channels. A
+   * close is answered first, with the code and reason it came with (RFC 6455 §5.5.1: a close frame is answered by
+   * one, its code typically echoed), so the closing end is not left to time out, and the endpoint's code is not
+   * replaced by a server error's. */
+  closed(ws: WebSocket, code?: number, reason = ''): void {
+    if (code !== undefined) this.closeSocket(ws, ECHOLESS.has(code) ? 1000 : code, reason);
     this.gone(ws, ws.deserializeAttachment() as Attachment);
   }
 

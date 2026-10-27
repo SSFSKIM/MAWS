@@ -312,6 +312,25 @@ describe('channels (acceptance 3)', () => {
     endpoint.close();
   });
 
+  it('answers either end’s close at once with a close carrying its code, an app with channels or without', async () => {
+    const endpoint = endpointOf(mini);
+    await endpoint.connect();
+    const idle = await appOf('mini');
+    const busy = await appOf('mini');
+    const channel = await busy.openChannel();
+    await waitFor(() => (endpoint.channels.has(channel) ? true : undefined));
+    idle.close();
+    busy.close();
+    // Unanswered, Node's client gives up after its own timeout (10 to 15 s) and reports 1006.
+    for (const app of [idle, busy]) await app.until(() => app.ended, 'the app’s close answered', 3000);
+    expect(idle.ended).toEqual({ code: 1000, reason: 'done' });
+    expect(busy.ended).toEqual({ code: 1000, reason: 'done' });
+    await waitFor(() => (endpoint.channels.has(channel) ? undefined : true));
+    endpoint.drop(4000, 'going away');
+    await waitFor(() => (endpoint.ends.length > 0 ? true : undefined), 3000);
+    expect(endpoint.ends[0]).toMatchObject({ code: 4000, reason: 'going away' });
+  });
+
   it('after an eviction with both socket kinds open, delivers frames both ways on the right channels', async () => {
     const endpoint = endpointOf(mini);
     await endpoint.connect();
