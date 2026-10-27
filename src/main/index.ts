@@ -6,7 +6,7 @@ import { guardStdio } from './stdio-guard'; // cua board #97
 import { disableChromiumFeatures, STARTUP_DISABLED_FEATURES } from './chromium-features'; // P3-F1 fix 3
 import { statSync } from 'node:fs'; // E11 F2b: the bundle on disk
 import { join } from 'node:path';
-import { totalmem } from 'node:os'; // C12: the default memory budget
+import { hostname, totalmem } from 'node:os'; // C12: the default memory budget; P5 O6 M1: the machine's name
 import { app, BrowserWindow, dialog, screen } from 'electron';
 import type { ClientRef } from '@shared/ipc/client';
 import { pageOf } from './ipc/clients';
@@ -20,7 +20,8 @@ import { registerPtyOpenLink } from './pty-links'; // C9
 import { appUrl, createWindow, installContentSecurityPolicy, prepareHarness } from './window'; // C9: prepareHarness
 // C3 start (the attention service's imports moved with its start into C4's block: src/main/index/attention-service.ts)
 import { emit } from './ipc/events';
-import { registerMainHandler } from './ipc/router';
+import { registerMachineHandler, registerMainHandler } from './ipc/router'; // P5 O6 M1: registerMachineHandler
+import { startMachineIdentity } from './machine/identity'; // P5 O6 M1
 // C3 end
 // C4 start (emit comes with C3's imports)
 import { startIndexAttention } from './index/attention-service';
@@ -232,6 +233,18 @@ function answerSecondLaunch(launched: MainBuild | null): void {
 }
 
 void startWithProfileLock(app, () => {
+  // P5 O6 M1 (OX2): the profile's MachineRef, minted at its first start into <userData>/machine.json and read ever after,
+  // before anything starts or any window opens. A malformed file stops startup, naming its path: a fresh ref would
+  // re-address everything kept under the old one.
+  try {
+    startMachineIdentity({ userData: app.getPath('userData'), env: process.env, hostname: hostname(), register: registerMachineHandler });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[machine] ${message}`);
+    dialog.showErrorBox('MAWS cannot start', message);
+    app.exit(1);
+    return;
+  }
   installContentSecurityPolicy();
   // C9 block begin: the harness's fake session directories; a terminal's links open through pty.openLink
   if (process.env.MAWS_HARNESS === '1') prepareHarness();

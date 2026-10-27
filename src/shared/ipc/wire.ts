@@ -32,7 +32,7 @@ import { HostClientGoneSchema, HostDocSchema, HostEventSchema, HostReadySchema, 
 import type { WireRegistry } from './registry';
 
 export const WIRE_MAJOR: number = SOCKET_PROTOCOL;
-export const WIRE_MINOR: number = 0;
+export const WIRE_MINOR: number = 1; // P5 O6 M1: machine.identity
 export const WIRE_CAPABILITIES: readonly string[] = [];
 
 // What a peer said of itself at the handshake.
