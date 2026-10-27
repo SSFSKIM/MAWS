@@ -5,7 +5,7 @@ import { base64urlDecode, base64urlEncode } from '../src/base64url.ts';
 import { enrollmentMac, enrollmentMacInput } from '../src/enrollment.ts';
 import { verifyEvent, signerFor } from '../src/events.ts';
 import { keyId, signingInput } from '../src/keys.ts';
-import { stateHash, verifyGenesis, verifySuccessor, verifyTransition } from '../src/org-state.ts';
+import { revokedBy, stateHash, verifyGenesis, verifySuccessor, verifyTransition } from '../src/org-state.ts';
 import { verifyCertRetirement, verifyCertRevocation, verifyEndpointRecord, verifyGrant, verifyListing, verifyMachineCert } from '../src/records.ts';
 import type { OrgState, SignedOrgState } from '../src/types.ts';
 import type { Case, VectorSet } from './scenario.ts';
@@ -34,7 +34,9 @@ async function run(set: VectorSet, c: Case): Promise<unknown> {
     case 'verifyGenesis':
       return verifyGenesis(a[0]);
     case 'verifySuccessor':
-      return verifySuccessor(a[0], a[1], a[2]);
+      return verifySuccessor(a[0], a[1], a[2], a[3]);
+    case 'revokedBy':
+      return { keyIds: await revokedBy(a[0], a[1]) };
     case 'verifyTransition':
       return verifyTransition(a[0], a[1], a[2]);
     case 'verifyGrant':

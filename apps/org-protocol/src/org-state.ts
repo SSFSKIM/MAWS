@@ -13,8 +13,9 @@
 //     of one of that member's devices in the head. The successor that a root transition authorizes may add the
 //     transition's new root devices without one: the recovery key vouches for them, and the old devices may be lost.
 //   - `retired` holds keys that left honestly, each with its point and holder, and none still held. A successor keeps
-//     each entry unchanged or drops it (the key is then revoked), and adds only keys the head held under that holder,
-//     so a revoked key never returns and a `notAfter` never moves. Genesis retires nothing.
+//     each entry unchanged or drops it (the key is then revoked), and adds a key only in the step it stops being
+//     current, under the holder the head held it by; so a revoked key never re-enters `retired` and a `notAfter` never moves.
+//     Genesis retires nothing.
 //   - A root transition is issued against the head (`fromVersion` = head's version). While one is held for the head,
 //     the successor must be signed by one of its new root keys, not the old root set, and take its keys as `root.keys`.
 import { canonicalize } from './canonical.ts';
@@ -102,9 +103,11 @@ async function retiredApart(state: OrgState): Promise<boolean> {
 }
 
 /**
- * `retired` across a successor: an entry is the head's own, unchanged, or a key the head held under exactly that
- * holder. An entry may leave (the key is then revoked: a retirement can turn out to have been a compromise), but a key
- * revoked never comes back as retired, and a `notAfter` never moves.
+ * `retired` across a successor (RL DL 22): an entry is the head's own, unchanged, or a key that stops being current in
+ * this very step — held by the head under exactly that holder, and (by `retiredApart`) held nowhere in the successor:
+ * a device that leaves its member, a machine entry whose `pub` changes. So every step is checked against its
+ * predecessor alone, and a key dropped earlier (revoked) can never be retired later. An entry may leave (the key is then
+ * revoked: a retirement can turn out to have been a compromise); a `notAfter` never moves.
  */
 function retiredKept(head: OrgState, next: OrgState): boolean {
   const kept = new Set(head.retired.map((r) => canonicalize(r)));
@@ -193,13 +196,34 @@ export async function verifyTransition(head: SignedOrgState, t: Signed<RootTrans
   return accept();
 }
 
+/** The keys a state holds as current: devices' channel and step-up keys, and machine entries' keys. */
+const currentKeys = (state: OrgState): B64[] => [
+  ...state.members.flatMap((m) => m.devices.flatMap((d) => [d.channelPub, ...(d.stepUpPub === undefined ? [] : [d.stepUpPub])])),
+  ...state.machines.map((m) => m.pub),
+];
+
+/**
+ * The key ids a step revokes (RL DL 23), sorted: device and machine keys current or retired in `prev` and neither
+ * current nor retired in `next`. A verifier keeps their union over the chain and passes it to `verifySuccessor`, so a
+ * revoked key never becomes current again; a step alone cannot see a key revoked several steps back.
+ */
+export async function revokedBy(prev: OrgState, next: OrgState): Promise<string[]> {
+  const kept = new Set<B64>([...currentKeys(next), ...next.retired.map((r) => r.pub)]);
+  const gone = new Set<B64>([...currentKeys(prev), ...prev.retired.map((r) => r.pub)].filter((pub) => !kept.has(pub)));
+  return (await Promise.all([...gone].map((pub) => keyId(pub)))).sort();
+}
+
+/** What a verifier carries beside the chain: the key ids revoked at any step so far (`revokedBy`'s union). */
+export type SuccessorOptions = { revokedKeyIds?: Iterable<string> };
+
 /**
  * A successor of `head`: it links to the head, is root-signed (by the head's root set, or by the new root keys of a
  * transition in `transitions` held for the head), and every device new to a member who had devices is endorsed by one
  * of that member's devices in the head. `transitions` may hold every transition the verifier keeps; those for other
- * versions, and any that fail to verify, are passed over.
+ * versions, and any that fail to verify, are passed over. `options.revokedKeyIds`, the caller's record of revoked keys,
+ * refuses a successor that makes one current again (`revoked`).
  */
-export async function verifySuccessor(head: SignedOrgState, next: SignedOrgState, transitions: Signed<RootTransition>[]): Promise<Verdict> {
+export async function verifySuccessor(head: SignedOrgState, next: SignedOrgState, transitions: Signed<RootTransition>[], options: SuccessorOptions = {}): Promise<Verdict> {
   if (!(await wellFormed(next)) || !Array.isArray(transitions)) return refuse('malformed');
   const before = head.state;
   const after = next.state;
@@ -212,6 +236,10 @@ export async function verifySuccessor(head: SignedOrgState, next: SignedOrgState
   if (!names.ok) return names;
   if (after.machines.some((m) => before.machines.some((h) => h.pub === m.pub && h.ref !== m.ref))) return refuse('malformed');
   if (!retiredKept(before, after)) return refuse('malformed');
+  if (options.revokedKeyIds !== undefined) {
+    const revoked = new Set(options.revokedKeyIds);
+    for (const pub of currentKeys(after)) if (revoked.has(await keyId(pub))) return refuse('revoked');
+  }
 
   const held: RootTransition[] = [];
   for (const t of transitions) {

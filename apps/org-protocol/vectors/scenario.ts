@@ -38,6 +38,7 @@ export type Case = {
   call:
     | 'verifyGenesis'
     | 'verifySuccessor'
+    | 'revokedBy'
     | 'verifyTransition'
     | 'verifyGrant'
     | 'verifyMachineCert'
@@ -48,7 +49,7 @@ export type Case = {
     | 'verifyEvent'
     | 'signerFor';
   args: Arg[];
-  expect: Verdict | { signers: Signer[] };
+  expect: Verdict | { signers: Signer[] } | { keyIds: string[] };
 };
 export type DualCase = { name: string; org: string; project: string; orgKey: string; event: Record<string, unknown> };
 export type Encodings = {
@@ -429,7 +430,12 @@ export async function buildScenario(k: Keys): Promise<VectorSet> {
     s.retired.push({ ...miniRetired, keyId: strangerKid });
   }, 2), ['a1StepUp'], no('malformed'));
   await successorCase('then the retirement moved later', await next(rotatedRetired, (s) => (s.retired[0].notAfter = LATE), 3), ['a1StepUp'], no('malformed'), 'v3 mini retired');
-  await successorCase('then the retirement dropped: the key is revoked', await next(rotatedRetired, (s) => (s.retired = []), 3), ['a1StepUp'], ok(), 'v3 mini retired');
+  const dropped = await sign(await next(rotatedRetired, (s) => (s.retired = []), 3), 'a1StepUp');
+  keep('v4 mini retirement dropped', dropped);
+  cases.push({ name: 'then the retirement dropped: the key is revoked', call: 'verifySuccessor', args: [signed('v3 mini retired'), signed('v4 mini retirement dropped'), []], expect: ok() });
+  cases.push({ name: 'the keys a dropped retirement revokes', call: 'revokedBy', args: [stateOf('v3 mini retired'), stateOf('v4 mini retirement dropped')], expect: { keyIds: [await kid('mini')] } });
+  cases.push({ name: 'the keys a plain retirement revokes: none', call: 'revokedBy', args: [stateOf('v2'), stateOf('v3 mini retired')], expect: { keyIds: [] } });
+  await successorCase('then the dropped retirement added back', await next(dropped, (s) => s.retired.push(miniRetired), 4), ['a1StepUp'], no('malformed'), 'v4 mini retirement dropped');
   {
     const revoked = fixtures["a successor rotating a machine's key, keeping its ref"] as SignedOrgState;
     await successorCase('then a revoked key retired after all', await next(revoked, (s) => s.retired.push(miniRetired), 3), ['a1StepUp'], no('malformed'), "a successor rotating a machine's key, keeping its ref");
@@ -443,8 +449,21 @@ export async function buildScenario(k: Keys): Promise<VectorSet> {
       s.retired.push(b1Retired);
     }, 3), 'a1StepUp'));
     cases.push({ name: "a successor retiring a member's device", call: 'verifySuccessor', args: [signed('v3'), signed('v4 b1 retired'), []], expect: ok() });
-    keep('v4 b1 revoked', await sign(await next(v3, (s) => (s.members[1].devices = s.members[1].devices.filter((d) => d.id !== 'dev-b1')), 3), 'a1StepUp'));
+    const b1Revoked = await sign(await next(v3, (s) => (s.members[1].devices = s.members[1].devices.filter((d) => d.id !== 'dev-b1')), 3), 'a1StepUp');
+    keep('v4 b1 revoked', b1Revoked);
     cases.push({ name: "a successor revoking a member's device", call: 'verifySuccessor', args: [signed('v3'), signed('v4 b1 revoked'), []], expect: ok() });
+    // A key enters `retired` only in the step it stops being current: dropped at v4, it can't be retired at v6.
+    const quiet = await sign(await next(b1Revoked, (s) => s.projects.push({ id: 'proj-quiet', name: 'quiet' }), 4), 'a1StepUp');
+    keep('v5 after b1 revoked', quiet);
+    // A revoked key never becomes current again (RL DL 23): the guard is the caller's record of revoked key ids.
+    const b1Back: Device = { ...b1, endorsement: await endorseDevice(ORG, B, b1, k.b2StepUp.privateKey, k.b2StepUp.pub) };
+    const readded = await next(b1Revoked, (s) => s.members[1].devices.push(b1Back), 4);
+    keep('v5 b1 re-added', await sign(readded, 'a1StepUp'));
+    const b1Kids = [await kid('b1Channel'), await kid('b1StepUp')].sort();
+    cases.push({ name: 'a revoked device key made current again, the revoked set passed', call: 'verifySuccessor', args: [signed('v4 b1 revoked'), signed('v5 b1 re-added'), [], { revokedKeyIds: b1Kids }], expect: no('revoked') });
+    cases.push({ name: 'a revoked device key made current again, no revoked set passed', call: 'verifySuccessor', args: [signed('v4 b1 revoked'), signed('v5 b1 re-added'), []], expect: ok() });
+    cases.push({ name: 'the keys a device removal revokes', call: 'revokedBy', args: [stateOf('v3'), stateOf('v4 b1 revoked')], expect: { keyIds: b1Kids } });
+    await successorCase('a device key dropped two steps before, retired now', await next(quiet, (s) => s.retired.push(b1Retired), 5), ['a1StepUp'], no('malformed'), 'v5 after b1 revoked');
     await successorCase("a successor retiring a device's channel key as its step-up key", await next(v3, (s) => {
       s.members[1].devices = s.members[1].devices.filter((d) => d.id !== 'dev-b1');
       s.retired.push({ ...b1Retired, holder: { ...b1Retired.holder, key: 'step-up' } });

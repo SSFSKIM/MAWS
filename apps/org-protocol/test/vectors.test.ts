@@ -44,6 +44,15 @@ describe('the committed vectors', () => {
       "a certificate's revocation signed by its delegation key",
       'then the retirement moved later',
       'then a revoked key retired after all',
+      'then the dropped retirement added back',
+      'a revoked device key made current again, the revoked set passed',
+      'a revoked device key made current again, no revoked set passed',
+      'the keys a device removal revokes',
+      'the keys a dropped retirement revokes',
+      'the keys a plain retirement revokes: none',
+      'a device key dropped two steps before, retired now',
+      "a successor retiring a member's device",
+      "a successor rotating a machine's key and retiring the old one",
     ]) {
       expect(names, name).toContain(name);
     }

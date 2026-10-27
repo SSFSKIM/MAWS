@@ -21,6 +21,7 @@
 //   contested           a machine's identity claimed twice: a certificate for a ref a state entry holds, a ref two
 //                       live certificates claim with different keys, or a name two live certificates claim under
 //                       different refs; refused for every claimant (`contestedRefs` names the refs)
+//   revoked             a successor that makes current again a key the caller's set says was revoked (RL DL 23)
 //   name-retired        a machine name some version gave another ref, given again (to an entry or a certificate), or
 //                       a successor that drops a name from `machineNames`
 export type VerdictCode =
@@ -36,7 +37,8 @@ export type VerdictCode =
   | 'not-listed'
   | 'stale-listing'
   | 'contested'
-  | 'name-retired';
+  | 'name-retired'
+  | 'revoked';
 
 export type Verdict = { ok: true } | { ok: false; code: VerdictCode };
 
