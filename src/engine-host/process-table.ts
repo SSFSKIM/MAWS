@@ -21,12 +21,11 @@
 // The exited-row cap is hygiene and holds either way.
 //
 // E10: the supervisor's idle-row release (E10 execution document, §Design 1 "Idle exit, and idle rows"; charter §4.4 as
-// amended by A-29). While no app is connected, or under an armed exit-when-idle (the policy's `active`, which the
-// supervisor sets), a ready row that has held no hard reason for the idle time is stopped with reason `idle`: a release
-// like the budget's (kept in the released set, resumed from disk at its next use), whether or not the budget is on,
-// since its reason is that no app is there to use the process, not memory. A row's clock starts at the later of the
-// moment its last hard reason cleared and the moment the release became active; one timer serves every row, and each
-// row is read again when it fires.
+// amended by A-29), re-keyed by P5 O2 M2 from "no client connected" to "no interest" (idle-release.ts, which holds the
+// rule): a ready row nobody holds interest in, kept by nobody and holding no hard reason, is stopped with reason `idle`
+// once its clock reaches the idle time Supervision sets (the machine role's): a release like the budget's (kept in the
+// released set, resumed from disk at its next use), whether or not the budget is on, since its reason is that nobody
+// is using the process, not memory.
 //
 // E10: the orphan ledger (§Design 1 "The orphan ledger and sweep"). Once the supervisor records (`recordLive`, after
 // its predecessor's orphans are swept), every change of the live rows that have a process (a launch's pid known, an
@@ -37,7 +36,9 @@ import { totalmem } from 'node:os';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { BudgetState } from '@shared/ipc/schema/engine';
-import { defaultBudgetKiB, evaluate, EXITED_ROWS_MAX, isIdleRow, type BudgetPolicy, type BudgetVerdict } from './budget';
+import type { ClientRef } from '@shared/ipc/client'; // P5 O2 M2
+import { defaultBudgetKiB, evaluate, EXITED_ROWS_MAX, type BudgetPolicy, type BudgetVerdict } from './budget';
+import { IdleRelease, type IdleReleasePolicy } from './idle-release'; // P5 O2 M2
 import type { LiveRow } from './live-ledger'; // E10
 import type { EngineSession } from './session';
 import { procStartOf as psProcStart } from './supervisor-files'; // E10
@@ -105,10 +106,8 @@ export class ProcessTable {
   private readonly dropListeners = new Set<(appSessionId: AppSessionId) => void>();
   private readonly exitsSeen = new WeakSet<EngineSession>();
   // C12 end
-  // E10 start: the idle-row release and the row set's listeners
-  private idlePolicy: { idleMs: number | null; activeSince: number | null } = { idleMs: null, activeSince: null };
-  private readonly idleSince = new Map<EngineSession, number>(); // ready rows with no hard reason, since when
-  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  // E10 start: the idle-row release (P5 O2 M2: its rule in idle-release.ts) and the row set's listeners
+  private readonly idle: IdleRelease;
   private readonly rowsListeners = new Set<() => void>();
   private readonly procStartOf: (pid: number) => string | null;
   private liveLedger: ((rows: LiveRow[]) => void) | null = null; // the orphan ledger's writer, once recording
@@ -128,6 +127,7 @@ export class ProcessTable {
     this.budgetSignature = signatureOf(this.budget);
     this.exitedRowsMax = opts.exitedRowsMax ?? EXITED_ROWS_MAX;
     // C12 end
+    this.idle = new IdleRelease({ current: (session) => this.currentStatus(session), stateful: () => this.stateful, log: (line) => this.log(line) }); // P5 O2 M2
   }
 
   private readonly log: (message: string) => void;
@@ -144,7 +144,7 @@ export class ProcessTable {
     this.rows.set(appSessionId, session);
     session.on('status', (status) => {
       if (status.process === 'exited') this.exitedRow(session, status); // C12
-      this.trackIdle(session, status); // E10
+      this.idle.track(session, this.rows.get(status.appSessionId) === session ? status : null); // E10; P5 O2 M2
       this.trackLive(session, status); // E10
       for (const listener of this.listeners) listener(status);
     });
@@ -222,51 +222,19 @@ export class ProcessTable {
     }
   }
 
-  // The idle-row release's policy, set by the supervisor on every change: `idleMs` null is never; `active` while no
-  // client is connected or exit-when-idle is armed. An activation keeps its start across a new idle time.
-  setIdleRelease(policy: { idleMs: number | null; active: boolean }): void {
-    this.idlePolicy = { idleMs: policy.idleMs, activeSince: policy.active ? (this.idlePolicy.activeSince ?? Date.now()) : null };
-    this.scheduleIdleRelease();
+  // The idle release's policy, set by the supervisor on every change (idle-release.ts): `idleMs` null is never.
+  setIdleRelease(policy: IdleReleasePolicy): void {
+    this.idle.setPolicy(policy);
   }
 
-  // Each status of a row's own process: an idle row's clock starts when it becomes idle and stops when it is not.
-  private trackIdle(session: EngineSession, status: EngineSessionStatus): void {
-    const idle = this.rows.get(status.appSessionId) === session && isIdleRow(status, this.stateful);
-    if (idle === this.idleSince.has(session)) return;
-    if (idle) this.idleSince.set(session, Date.now());
-    else this.idleSince.delete(session);
-    this.scheduleIdleRelease();
+  // P5 O2 M2: `host.interest`, a client connection's full set of the sessions it holds interest in
+  setInterest(holder: ClientRef, sessions: readonly AppSessionId[]): void {
+    this.idle.setInterest(holder, sessions);
   }
 
-  private scheduleIdleRelease(): void {
-    if (this.idleTimer !== null) clearTimeout(this.idleTimer);
-    this.idleTimer = null;
-    const { idleMs, activeSince } = this.idlePolicy;
-    if (idleMs === null || activeSince === null || this.shuttingDown || this.idleSince.size === 0) return;
-    const due = Math.min(...[...this.idleSince.values()].map((since) => Math.max(since, activeSince) + idleMs));
-    this.idleTimer = setTimeout(() => this.releaseIdleRows(), Math.max(0, due - Date.now()));
-    (this.idleTimer as { unref?: () => void }).unref?.();
-  }
-
-  // The timer fired: every row whose clock has run out is read again and, still idle, stopped as `idle`, in the same
-  // synchronous step as the read (as the budget's release), so no event can land between the verdict and the stop.
-  private releaseIdleRows(): void {
-    this.idleTimer = null;
-    const { idleMs, activeSince } = this.idlePolicy;
-    if (idleMs === null || activeSince === null || this.shuttingDown) return;
-    const now = Date.now();
-    for (const [session, since] of [...this.idleSince]) {
-      const status = session.status();
-      if (this.rows.get(status.appSessionId) !== session || !isIdleRow(status, this.stateful)) {
-        this.idleSince.delete(session);
-        continue;
-      }
-      if (now < Math.max(since, activeSince) + idleMs) continue;
-      this.idleSince.delete(session);
-      this.log(`idle release of ${status.appSessionId}: no hard reason for ${idleMs} ms with no app connected or exit-when-idle armed`);
-      session.stop('idle').catch((error: unknown) => this.log(`idle release of ${status.appSessionId} failed: ${error instanceof Error ? error.message : String(error)}`));
-    }
-    this.scheduleIdleRelease();
+  private currentStatus(session: EngineSession): EngineSessionStatus | null {
+    const status = session.status();
+    return this.rows.get(status.appSessionId) === session ? status : null;
   }
   // E10 end -----------------------------------------------------------------------------------------------------------
 
@@ -451,7 +419,7 @@ export class ProcessTable {
   // counts in neither, one already in its ladder is awaited on that ladder.
   async shutdown(opts: { graceMs: number }): Promise<{ stopped: number; forced: number }> {
     this.shuttingDown = true; // close admission synchronously, before any stop yields
-    this.scheduleIdleRelease(); // E10: clears the idle clock; the ladder below stops every row as `quit`
+    this.idle.close(); // E10: clears the idle clock; the ladder below stops every row as `quit`
     const live = this.list().filter((s) => s.status().process !== 'exited');
     const results = await Promise.all(live.map(async (session) => ({ session, result: await session.stop('quit', { graceMs: opts.graceMs }) })));
     let stopped = 0;

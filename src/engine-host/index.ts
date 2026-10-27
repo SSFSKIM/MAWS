@@ -22,6 +22,7 @@ import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { runDetached } from './detached';
 import { Supervision } from './supervision';
+import { readMachineRole } from './role'; // P5 O2 M2
 import { buildIdOf } from './supervisor-files';
 import { openSupervisorLog } from './supervisor-log';
 // E10 end
@@ -144,6 +145,7 @@ const register: HostRegister = (untimedOn, emit, client) => {
     mode,
     identity: { pid: process.pid, startedAt: new Date().toISOString(), buildId: buildIdOf(entryFile), protocol: SOCKET_PROTOCOL, wire: wireFingerprint(), socketPath: null, logPath: null },
     table, plugins: ipc.plugins, shutdown: ipc.shutdown,
+    role: readMachineRole(), // P5 O2 M2: read once, at the start
     emit: (status) => emit('host.supervisorStatus', status),
     log: (line) => console.log(`[supervisor] ${line}`),
   });

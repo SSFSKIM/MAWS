@@ -16,7 +16,7 @@ import { HostCommandError, type HostEmit, type HostOn } from '@shared/host/runti
 import { captureShellEnvironment, SHELL_CAPTURE_GRACE_MS, SHELL_CAPTURE_TIMEOUT_MS } from '@shared/host/shell-env';
 import type { CommandInput, CommandName, CommandOutput } from '@shared/ipc/schema';
 import type { C3_ENGINE_COMMANDS } from '@shared/ipc/schema/engine';
-import type { C3_SESSION_COMMANDS, E8_SESSION_COMMANDS, P2C_SESSION_COMMANDS /* P2-C */, R2_SESSION_COMMANDS } from '@shared/ipc/schema/session';
+import type { C3_SESSION_COMMANDS, E8_SESSION_COMMANDS, P2C_SESSION_COMMANDS /* P2-C */, P5O2_SESSION_COMMANDS /* P5 O2 M2 */, R2_SESSION_COMMANDS } from '@shared/ipc/schema/session';
 import { SURFACE_CLIENT_ID } from '@shared/engine/surface'; // R2
 import { createBinaryProbe, PROBE_BOUND_MS, type BinaryCheck } from './binary-info';
 import { TESTED_ENGINE_VERSION } from './engine-compat'; // W13
@@ -117,6 +117,8 @@ export const E8_DEADLINE_SHAPES: Record<(typeof E8_SESSION_COMMANDS)[number], De
 // P2-C start (2026-10-09): the steer cancel is one `cancel_async_message` round trip, bounded as `session.queue.hold`
 // is; the prompt record's read answers from the host's own journals on disk, as `session.events` does past its ring
 export const P2C_DEADLINE_SHAPES: Record<(typeof P2C_SESSION_COMMANDS)[number], DeadlineShape> = { 'session.steer.cancel': 'bounded', 'session.promptHistory': 'immediate' };
+// P5 O2 M2: the keep mark, one state-file write
+export const P5O2_DEADLINE_SHAPES: Record<(typeof P5O2_SESSION_COMMANDS)[number], DeadlineShape> = { 'session.setKeep': 'immediate' };
 // P2-C end
 // E1: the `maws` tool server's commands (P1 ledger §5), each immediate: answered from the host's table or at the
 // answer's flushed write
@@ -128,7 +130,7 @@ export const SIDE_DEADLINE_SHAPES: Record<SideHostCommand, DeadlineShape> = { 's
 // E11: the supervisor's own commands (E10; registered by Supervision.register): three answer at once, `host.stopAll` is
 // engine.shutdown's body (the ladder's cap and the plugin runner's kill), bounded as engine.shutdown is
 type HostHostCommand = { [N in keyof typeof HostCommands]: (typeof HostCommands)[N]['owner'] extends 'engine-host' ? N : never }[keyof typeof HostCommands];
-export const HOST_DEADLINE_SHAPES: Record<HostHostCommand, DeadlineShape> = { 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate' };
+export const HOST_DEADLINE_SHAPES: Record<HostHostCommand, DeadlineShape> = { 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate', 'host.interest': 'immediate' /* P5 O2 M2 */ };
 // P2-A (2026-10-09; X17): the observed-facts read, bounded: a file read, or a journal recovery under its 5 s reading
 // budget (observed-facts.ts), inside the bridge's 10 s
 export const P2A_DEADLINE_SHAPES: Record<'engine.observedFacts', DeadlineShape> = { 'engine.observedFacts': 'bounded' };
@@ -665,6 +667,19 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     emit('session.forgotten', { appSessionId: id });
   });
   // C10 end -------------------------------------------------------------------------------------------------------------
+
+  // P5 O2 M2: the owner's Keep running mark, persisted first (the state file, so it holds across launches), then on the
+  // row the host holds for the session, live or exited, whose status reports it. A session the host has neither a row
+  // nor a state file for is unknown.
+  on('session.setKeep', async ({ appSessionId, keep }) => {
+    const id = appSessionId as AppSessionId;
+    const session = table.get(id);
+    if (!session && !(await store.exists(id))) throw unknownSession(appSessionId);
+    await store.saveKeep(id, keep);
+    table.get(id)?.setKept(keep);
+    log(`${id}: keep running ${keep ? 'set' : 'cleared'}`);
+    return { kept: keep };
+  });
 
   // P2-A start (2026-10-09; X17) ---------------------------------------------------------------------------------------
   // What the engine last reported for a session: a row in the table (live or exited) answers its recorder's facts;

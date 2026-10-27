@@ -32,6 +32,7 @@ export const commands = [
   'session.acquire',
   // P2-A end
   'session.recentTurns', // P2-D (2026-10-09): the resume chooser's preview read
+  'session.setKeep', // P5 O2 M2: the owner's Keep running mark
 ] as const;
 
 // P4-AGG M4: the engine's own MCP sign-in, main's sign-in operation alone (src/main/connectors/sign-in.ts)

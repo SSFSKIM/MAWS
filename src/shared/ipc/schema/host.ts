@@ -1,10 +1,11 @@
 // X2 `host.*` (P1 interface ledger §5; E10 execution document, Interfaces "X2 additions"): the supervisor. The engine
-// host owns its own facts (`host.supervisorStatus`, command and event on every change) and the three levers main pulls
-// on it (`host.configure`, `host.stopAll`, `host.exitWhenIdle`), which only main may send: main's transport must know
+// host owns its own facts (`host.supervisorStatus`, command and event on every change) and the levers main pulls on it
+// (`host.configure`, `host.stopAll`, `host.exitWhenIdle`; P5 O2 M2: `host.interest`), which only main may send: main's transport must know
 // a stop it asked for from a crash. Main owns what the app shows (`host.status`, the last SupervisorStatus composed with
 // main's own facts) and the two actions behind the Settings and Diagnostics rows and the banners (`host.restart`,
 // `host.openLog`). The main-owned half never crosses the socket, so only the engine-host half is in the wire fingerprint.
 import * as z from 'zod';
+import { AppSessionIdSchema } from '../../graph/ids';
 import { HostStateSchema, type CommandSpec } from './common';
 import { MAX_IDLE_MINUTES } from './settings';
 
@@ -28,6 +29,9 @@ export const SupervisorStatusSchema = z.strictObject({
   socketPath: z.string().nullable(), // null in utility mode
   logPath: z.string().nullable(), // null in utility mode
   orphansKilled: z.number().int(), // engines of a dead predecessor this supervisor stopped at its start
+  // P5 O2 M2 (additive): the idle release's role and idle time (a laptop's the idle exit's, null for never; a server's
+  // 24 hours); optional for an older supervisor
+  release: z.strictObject({ role: z.enum(['laptop', 'server']), idleMs: z.number().int().positive().nullable() }).optional(),
 });
 export type SupervisorStatus = z.infer<typeof SupervisorStatusSchema>;
 
@@ -61,6 +65,9 @@ export const commands = {
   // the supervisor exits after answering; a utility host answers engine.shutdown's body and main forks a fresh one
   'host.stopAll': host(z.strictObject({ graceMs: z.number().int().nonnegative() }), z.strictObject({ stopped: z.number().int(), forced: z.number().int() })),
   'host.exitWhenIdle': host(z.strictObject({ armed: z.boolean() }), z.void()),
+  // P5 O2 M2: the sessions the asking connection holds interest in (main's: open session tabs and on-screen sessions),
+  // the full set, replacing its last; it ends with the connection. Main-only (a remote viewer's arrives through mawsd).
+  'host.interest': host(z.strictObject({ sessions: z.array(AppSessionIdSchema).max(10_000) }), z.void()),
   'host.status': main(z.void(), HostStatusSchema),
   'host.restart': main(z.strictObject({ stopSessions: z.boolean() }), z.void()), // the banner's Restart now and Settings' Stop all
   'host.openLog': main(z.void(), z.void()), // shell.openPath on host.log

@@ -8,17 +8,27 @@
 //   resets whenever one stops holding; it is checked again when it fires.
 // - Exit-when-idle (the socket layer's `exit {when: 'idle'}` or `host.exitWhenIdle`): once armed the supervisor exits
 //   as soon as no row is live and the runner holds nothing, client or not.
-// - The idle-row release (the process table's): active while no client is connected or exit-when-idle is armed, with
-//   the same idle time, so kept idle sessions end and with them the supervisor.
+// - The idle release (the process table's, idle-release.ts; P5 O2 M2): keyed on interest, which each client reports
+//   (`host.interest`), with a keep mark, and strict; in every mode, client connected or not (RELEASE_WHILE_CONNECTED).
+//   Its idle time is the machine role's (role.ts): a laptop's is the idle exit's, a server's 24 hours. Under an armed
+//   exit-when-idle interest is ignored, so an old supervisor still serving empties unless the owner kept a session.
 // - `host.stopAll`: engine.shutdown's body, answered, then the exit (a host that ran it can never launch again).
 import type { HostClientHooks, HostOn } from '@shared/host/runtime';
 import { HostCommandError } from '@shared/host/runtime';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { SupervisorStatus } from '@shared/ipc/schema/host';
 import type { PluginsRunner } from './plugins/runner';
 import type { ProcessTable } from './process-table';
+import type { MachineRole } from './role';
 import type { EngineSession } from './session';
 
 export const DEFAULT_IDLE_EXIT_MS = 10 * 60_000; // until main's first host.configure
+export const SERVER_RELEASE_MS = 24 * 60 * 60_000; // P5 O2 M2: a server's idle release, by wall clock
+
+// P5 O2 M2 (P5 §2, Decision Logs 29 and 44): the idle release runs while a client is connected too, so a session with
+// no tab is released after the idle time while MAWS is open. The owner's answer on keeping E10's rule (released only
+// once no client is connected, or under an armed exit-when-idle) is open; that reversal is this one constant, `false`.
+export const RELEASE_WHILE_CONNECTED = true;
 
 export type SupervisorExit = 'idle' | 'stopAll' | 'exitWhenIdle';
 
@@ -28,7 +38,8 @@ export type SupervisorIdentity = Pick<SupervisorStatus, 'pid' | 'startedAt' | 'b
 export interface SupervisionDeps {
   mode: 'utility' | 'detached';
   identity: SupervisorIdentity;
-  table: Pick<ProcessTable, 'onChange' | 'onRowsChanged' | 'setIdleRelease'> & { list(): readonly Pick<EngineSession, 'lifecycle'>[] };
+  table: Pick<ProcessTable, 'onChange' | 'onRowsChanged' | 'setIdleRelease' | 'setInterest'> & { list(): readonly Pick<EngineSession, 'lifecycle'>[] };
+  role: MachineRole; // P5 O2 M2: read once at the engine host's start (role.ts)
   plugins: Pick<PluginsRunner, 'busy' | 'onIdle'>;
   shutdown(graceMs: number): Promise<{ stopped: number; forced: number }>; // engine.shutdown's body
   emit(status: SupervisorStatus): boolean; // host.supervisorStatus
@@ -45,7 +56,7 @@ export class Supervision {
   private idleSince: number | null = null; // when the idle exit's conditions last came true
   private idleDue: number | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
-  private release: { idleMs: number | null; active: boolean } | null = null; // the idle-row release's policy as last set
+  private release: { idleMs: number | null; active: boolean; ignoreInterest: boolean } | null = null; // the idle release's policy as last set
   private published = '';
   private orphansKilled = 0; // the engines of a dead predecessor the start-up sweep stopped (Task 2.5)
 
@@ -69,6 +80,11 @@ export class Supervision {
     on('host.exitWhenIdle', async ({ armed }) => {
       if (this.deps.mode !== 'detached') throw new HostCommandError({ code: 'internal', message: 'exit-when-idle is the detached supervisor’s; a utility host ends with the app' });
       this.armExitWhenIdle(armed);
+    });
+    // P5 O2 M2: the asking connection's full set (main-only; `mawsd` will send the union of its clients'); it ends with
+    // the connection, ready or not (the connection's own ClientRef, which the runtime ends at a detach or a new serve)
+    on('host.interest', async ({ sessions }, { client: holder }) => {
+      this.deps.table.setInterest(holder, sessions as AppSessionId[]);
     });
     on('host.stopAll', async ({ graceMs }) => {
       const exits = this.exit !== null && this.leaving === null;
@@ -119,6 +135,7 @@ export class Supervision {
       liveSessions: rows.filter((row) => row.lifecycle !== 'exited').length, rows: rows.length,
       idleExitMs: this.idleExitMs, idleExitAt: this.idleDue === null ? null : new Date(this.idleDue).toISOString(),
       exitWhenIdle: this.exitWhenIdle, orphansKilled: this.orphansKilled,
+      release: { role: this.deps.role, idleMs: this.releaseIdleMs() }, // P5 O2 M2
     };
   }
 
@@ -126,9 +143,10 @@ export class Supervision {
   // a configuration. Cheap: it reads the table's rows and compares.
   private refresh(): void {
     const live = this.deps.table.list().some((row) => row.lifecycle !== 'exited');
-    const active = this.deps.mode === 'detached' && (!this.connected || this.exitWhenIdle);
-    if (this.release === null || this.release.idleMs !== this.idleExitMs || this.release.active !== active) {
-      this.release = { idleMs: this.idleExitMs, active };
+    const active = RELEASE_WHILE_CONNECTED || (this.deps.mode === 'detached' && (!this.connected || this.exitWhenIdle));
+    const idleMs = this.releaseIdleMs();
+    if (this.release === null || this.release.idleMs !== idleMs || this.release.active !== active || this.release.ignoreInterest !== this.exitWhenIdle) {
+      this.release = { idleMs, active, ignoreInterest: this.exitWhenIdle };
       this.deps.table.setIdleRelease(this.release);
     }
     if (this.exit !== null && this.leaving === null) {
@@ -138,6 +156,11 @@ export class Supervision {
       else this.clearIdle();
     }
     this.publish(false);
+  }
+
+  // P5 O2 M2: a laptop releases after the idle exit's time (the app's setting, null for never), a server after 24 hours
+  private releaseIdleMs(): number | null {
+    return this.deps.role === 'server' ? SERVER_RELEASE_MS : this.idleExitMs;
   }
 
   private armIdle(idleExitMs: number): void {

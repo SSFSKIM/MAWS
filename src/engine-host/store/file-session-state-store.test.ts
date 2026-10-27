@@ -218,3 +218,20 @@ describe('the owner channel’s launch-spec keys are not stored (P2-C)', () => {
   });
 });
 // P2-C end
+
+describe('FileSessionStateStore: the keep mark and the engine session ids (P5 O2 M2)', () => {
+  it('round-trips both through a new instance beside the queue, keeps them across the other saves, and reads an older file without them', async () => {
+    const dir = join(userData, 'engine-host', 'state');
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, `${ID}.json`), JSON.stringify({ version: 1, queue: { entries: [], paused: false }, grants: { allow: [] }, launchSpec: null }));
+    const older = new FileSessionStateStore(userData);
+    expect(await older.loadKeep(ID)).toBe(false);
+    expect(await older.loadEngineSessionIds(ID)).toEqual([]);
+
+    await Promise.all([older.saveKeep(ID, true), older.saveEngineSessionIds(ID, ['e-1', 'e-2']), older.saveQueue(ID, { entries: [entry()], paused: false }), older.saveLaunchSpec(ID, spec)]);
+    const after = new FileSessionStateStore(userData);
+    expect(await after.loadKeep(ID)).toBe(true);
+    expect(await after.loadEngineSessionIds(ID)).toEqual(['e-1', 'e-2']);
+    expect((await after.loadQueue(ID)).entries).toEqual([entry()]);
+  });
+});

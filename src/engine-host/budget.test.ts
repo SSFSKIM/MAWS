@@ -46,6 +46,16 @@ describe('hard reasons', () => {
     expect(hardReasons(row('a', { mcpServers: [{ name: 'c12-kernel', status: 'connected', source: 'project' }] }), new Set(['c12-kernel']))).toEqual(['stateful_mcp']);
   });
 
+  // P5 O2 M2: crons and unreadable work are background work, named as the one hard reason (no new HardReason member)
+  it('names background_tasks for a cron the last Stop listed, or for work it cannot read, and not for a known empty state', () => {
+    const cron = { id: 'c1', schedule: '*/5 * * * *', recurring: true, prompt: 'check' };
+    expect(hardReasons(row('a', { work: { crons: [cron], unknown: null } }), NONE)).toEqual(['background_tasks']);
+    for (const unknown of ['resumed', 'adopted', 'dirty', 'turn_ended_without_stop', 'stop_unreadable', 'durable_unreadable']) expect(hardReasons(row('a', { work: { crons: [], unknown } }), NONE), unknown).toEqual(['background_tasks']);
+    expect(hardReasons(row('a', { work: { crons: [], unknown: null } }), NONE)).toEqual([]);
+    expect(hardReasons(row('a', { work: { crons: [cron], unknown: null }, backgroundTasks: [{ taskId: 't1' as never, taskType: 'local_bash', description: 'x', ambient: false }] }), NONE)).toEqual(['background_tasks']); // once
+    expect(hardReasons(row('a', { kept: true }), NONE)).toEqual([]); // the keep mark exempts the idle release only, and is no hard reason
+  });
+
   it('names every reason a process holds, in a fixed order', () => {
     const all = row('a', {
       turn: TURN, busy: true, pendingRequests: 2, queue: { length: 1, paused: true },

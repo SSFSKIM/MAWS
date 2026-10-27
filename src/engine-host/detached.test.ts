@@ -316,7 +316,7 @@ describe('the detached entry', () => {
       await host.start(undefined, (on, emit, client) => {
         supervision = new Supervision({
           mode: 'detached', identity: { pid: process.pid, startedAt: 'now', buildId: 'b', protocol: SOCKET_PROTOCOL, wire: 'w', socketPath: null, logPath: null },
-          table: { list: () => rows, onChange: () => () => {}, onRowsChanged: () => () => {}, setIdleRelease: () => {} } as never,
+          table: { list: () => rows, onChange: () => () => {}, onRowsChanged: () => () => {}, setIdleRelease: () => {}, setInterest: () => {} } as never, role: 'laptop',
           plugins: { busy: () => false, onIdle: () => () => {} },
           shutdown: async () => {
             for (const row of rows) row.lifecycle = 'exited';

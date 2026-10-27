@@ -1,6 +1,7 @@
 // The P0 SessionStateStore (charter §4.4 as amended 2026-09-28; C3 execution document, Interfaces "Queue, steer,
 // interrupt"): one JSON file per app session at `<userData>/engine-host/state/<appSessionId>.json` holding
-// `{ version: 1, queue, grants, launchSpec }`, written to a temp file and renamed so a crash leaves the old file or the
+// `{ version: 1, queue, grants, launchSpec, keep?, engineSessionIds? }` (P5 O2 M2: `keep`, the owner's Keep running mark,
+// and `engineSessionIds`, the ids the session has had, each absent when never set; an older build's reader strips them), written to a temp file and renamed so a crash leaves the old file or the
 // new one, never half of either. Operations on one session run strictly in the order they were issued (one chain per
 // session, loads included), so a save issued at a process's exit is visible to the load of the resume that follows.
 import { assertSafeAppSessionId } from '@shared/engine/app-session-id';
@@ -30,7 +31,7 @@ const StoredQueueStateSchema = QueueStateSchema.extend({
 // P2-0 (X6): ignore a later build's state/spec keys on read, rather than moving its queue and grants aside. Strip,
 // not passthrough: an update still writes only this build's shape; saveQueue, saveGrants and saveLaunchSpec keep the
 // strict IPC/write schemas.
-const StateFileSchema = z.object({ version: z.literal(1), queue: StoredQueueStateSchema, grants: GrantSnapshotSchema.strip(), launchSpec: StoredLaunchSpecSchema.nullable() /* C10 */ });
+const StateFileSchema = z.object({ version: z.literal(1), queue: StoredQueueStateSchema, grants: GrantSnapshotSchema.strip(), launchSpec: StoredLaunchSpecSchema.nullable() /* C10 */, keep: z.boolean().optional() /* P5 O2 M2 */, engineSessionIds: z.array(z.string()).optional() /* P5 O2 M2 */ });
 type StateFile = z.infer<typeof StateFileSchema>;
 
 const empty = (): StateFile => ({ version: 1, queue: { entries: [], paused: false }, grants: { allow: [] }, launchSpec: null });
@@ -93,6 +94,24 @@ export class FileSessionStateStore implements SessionStateStore {
       void _snapshot;
       return { ...file, launchSpec: stored };
     });
+  }
+
+  // P5 O2 M2: the keep mark, in the state file beside the queue, so it holds across launches and an archive
+  loadKeep(id: AppSessionId): Promise<boolean> {
+    return this.run(id, async () => (await this.read(id)).keep === true);
+  }
+
+  saveKeep(id: AppSessionId, keep: boolean): Promise<void> {
+    return this.update(id, (file) => ({ ...file, keep }));
+  }
+
+  // P5 O2 M2 (P5 Decision Log 46): the engine session ids the session has had, which its durable crons are matched against
+  loadEngineSessionIds(id: AppSessionId): Promise<string[]> {
+    return this.run(id, async () => (await this.read(id)).engineSessionIds ?? []);
+  }
+
+  saveEngineSessionIds(id: AppSessionId, ids: string[]): Promise<void> {
+    return this.update(id, (file) => ({ ...file, engineSessionIds: [...ids] }));
   }
 
   // Archive: the session's journal directory only. The state file with the queue and the grant snapshot survives, so an

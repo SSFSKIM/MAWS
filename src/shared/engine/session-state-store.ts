@@ -115,4 +115,11 @@ export interface SessionStateStore {
   saveLaunchSpec(appSessionId: AppSessionId, spec: LaunchSpec): Promise<void>;
   forgetJournal(appSessionId: AppSessionId): Promise<void>; // archive (charter §12 C10): the journal only; the state file with the queue and grants survives
   forget(appSessionId: AppSessionId): Promise<void>; // the whole erase, state file and journal (C10's delete conversation)
+  // P5 O2 M2: the owner's Keep running mark (`session.setKeep`), false when never set
+  loadKeep(appSessionId: AppSessionId): Promise<boolean>;
+  saveKeep(appSessionId: AppSessionId, keep: boolean): Promise<void>;
+  // P5 O2 M2 (P5 Decision Log 46): every engine session id the app session has had, which its durable crons are matched
+  // against (src/engine-host/durable-crons.ts); empty when never saved
+  loadEngineSessionIds(appSessionId: AppSessionId): Promise<string[]>;
+  saveEngineSessionIds(appSessionId: AppSessionId, ids: string[]): Promise<void>;
 }

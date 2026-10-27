@@ -75,13 +75,14 @@ export function scriptedSession(opts: { spec?: Partial<LaunchSpec>; responder?: 
 // author itself (its own `initialize` and prelude-answered `get_status` never reach it); it issues the row's frame
 // through the session (after `ctx.ready()` for anything that needs a ready session; a row held during the handshake,
 // such as `grant-reapply-resume`'s `list_permission_rules`, is issued at once), or kills the replay to end it there.
+// P5 O2 M2: `load` reads the journal from elsewhere (a synthetic one under test/fixtures/engine), `pass/name` naming it.
 export async function replayedSession(
   pass: FixturePass,
   name: string,
   drive: (row: JournalRow, ctx: { session: EngineSession; transport: ReplayTransport; fixture: JournalRow[]; ready: () => Promise<void> }) => void,
-  opts: { spec?: Partial<LaunchSpec>; session?: Partial<EngineSessionOptions>; beforeStart?: (o: Observed) => void; wrap?: (t: ReplayTransport) => EngineTransport; edit?: (rows: JournalRow[]) => JournalRow[] } = {},
+  opts: { spec?: Partial<LaunchSpec>; session?: Partial<EngineSessionOptions>; beforeStart?: (o: Observed) => void; wrap?: (t: ReplayTransport) => EngineTransport; edit?: (rows: JournalRow[]) => JournalRow[]; load?: () => JournalRow[] } = {},
 ): Promise<Observed & { fixture: JournalRow[]; transport: () => ReplayTransport }> {
-  const fixture = (opts.edit ?? ((rows: JournalRow[]) => rows))(loadJournal(pass, name)); // `edit`: a test that extends a recording says so in its name
+  const fixture = (opts.edit ?? ((rows: JournalRow[]) => rows))(opts.load ? opts.load() : loadJournal(pass, name)); // `edit`: a test that extends a recording says so in its name
   const spec = launchSpec({ appSessionId: `replay-${name}` as LaunchSpec['appSessionId'], sessionId: null, model: null, replay: `${pass}/${name}`, ...opts.spec });
   const plan = buildLaunch(spec, { PATH: '/usr/bin', HOME: '/Users/x' }, { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: FIXTURE_ENGINE_VERSION, spawnerPid: HARNESS_SPAWNER_PID });
   const journal = new MemoryJournal();

@@ -70,4 +70,11 @@ describe('toSessionRecordPatch', () => {
     expect(() => EngineSessionStatusSchema.parse({ ...s, exit: { code: 0, signal: null, reason: 'stop', at: '2026-09-29T10:00:00.000Z' } })).toThrow(); // release is required (null when not a release)
   });
   // C12 end
+
+  it('P5 O2 M2: the status may carry the work the engine reports and the keep mark; work.unknown names why work is unreadable', () => {
+    const s = status({ work: { crons: [{ id: 'c1', schedule: '*/5 * * * *', recurring: true, prompt: 'check' }], unknown: null }, kept: true });
+    expect(EngineSessionStatusSchema.parse(s)).toEqual(s);
+    expect(EngineSessionStatusSchema.parse(status({ work: { crons: [], unknown: 'resumed' }, kept: false })).work).toEqual({ crons: [], unknown: 'resumed' });
+    expect(EngineSessionStatusSchema.parse(status()).work).toBeUndefined(); // additive: an older host's status still reads
+  });
 });

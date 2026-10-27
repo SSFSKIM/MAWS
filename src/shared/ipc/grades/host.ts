@@ -10,4 +10,5 @@ export const grades = {
   'host.configure': 'internal',
   'host.stopAll': 'internal',
   'host.exitWhenIdle': 'internal',
+  'host.interest': 'internal', // P5 O2 M2: main's; a remote viewer's interest arrives through mawsd's seam
 } as const satisfies CommandGrades<'host'>;

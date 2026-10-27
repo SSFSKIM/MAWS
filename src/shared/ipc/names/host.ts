@@ -4,5 +4,6 @@ export const commands = ['host.supervisorStatus', 'host.status', 'host.restart',
 
 export const events = ['host.supervisorStatus', 'host.status'] as const;
 
-// Only main configures, stops or arms the supervisor (E10): its transport tells a stop it asked for from a crash.
-export const mainOnlyCommands = ['host.configure', 'host.stopAll', 'host.exitWhenIdle'] as const;
+// Only main configures, stops or arms the supervisor (E10): its transport tells a stop it asked for from a crash. P5 O2
+// M2: and reports its interest, which the renderer never sends.
+export const mainOnlyCommands = ['host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.interest' /* P5 O2 M2 */] as const;

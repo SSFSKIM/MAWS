@@ -1148,16 +1148,30 @@ describe('ipc schema validates both directions', () => {
     const status = { transport: 'detached', state: 'ready', supervisor, appBuildId: '0123456789abcdef', appWire: 'fedcba9876543210', mainBuild: { version: '0.0.0', commit: 'ac8724a6', builtAt: '2026-10-08T09:05:53.000Z' }, matches: 'same', reason: null, waitingLiveSessions: null, lastExit: null };
 
     it('adds the host namespace: four engine-host commands (three main-only senders), three main-owned, one event each side', () => {
-      expect(Object.keys(host.commands)).toEqual(['host.supervisorStatus', 'host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.status', 'host.restart', 'host.openLog']);
+      // P5 O2 M2 adds host.interest (main-only, below)
+      expect(Object.keys(host.commands)).toEqual(['host.supervisorStatus', 'host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.interest', 'host.status', 'host.restart', 'host.openLog']);
       const owners = Object.fromEntries(Object.entries(host.commands).map(([name, spec]) => [name, spec.owner]));
       expect(owners).toEqual({
-        'host.supervisorStatus': 'engine-host', 'host.configure': 'engine-host', 'host.stopAll': 'engine-host', 'host.exitWhenIdle': 'engine-host',
+        'host.supervisorStatus': 'engine-host', 'host.configure': 'engine-host', 'host.stopAll': 'engine-host', 'host.exitWhenIdle': 'engine-host', 'host.interest': 'engine-host',
         'host.status': 'main', 'host.restart': 'main', 'host.openLog': 'main',
       });
       expect(Object.keys(host.events)).toEqual(['host.supervisorStatus', 'host.status']);
       // only main stops, configures or arms the supervisor: a renderer's stopAll would read as a crash to main's transport
       expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['host.configure', 'host.stopAll', 'host.exitWhenIdle']));
       expect([...NAMES.host.commands]).toEqual(['host.supervisorStatus', 'host.status', 'host.restart', 'host.openLog']);
+    });
+
+    it('P5 O2 M2: host.interest carries a client\'s full interest set, main-only; the status names the release', () => {
+      expect(MAIN_ONLY_COMMANDS).toContain('host.interest');
+      expect([...NAMES.host.commands]).not.toContain('host.interest');
+      expect(validateCommandInput('host.interest', { sessions: [] }).ok).toBe(true);
+      expect(validateCommandInput('host.interest', { sessions: ['a', 'b'] }).ok).toBe(true);
+      expect(validateCommandInput('host.interest', { sessions: [''] }).ok).toBe(false);
+      expect(validateCommandInput('host.interest', { sessions: ['a'], extra: 1 }).ok).toBe(false);
+      expect(validateCommandInput('host.interest', { sessions: Array.from({ length: 10_001 }, (_, i) => `s${i}`) }).ok).toBe(false);
+      expect(validateEventPayload('host.supervisorStatus', { ...supervisor, release: { role: 'server', idleMs: 86_400_000 } }).ok).toBe(true);
+      expect(validateEventPayload('host.supervisorStatus', { ...supervisor, release: { role: 'laptop', idleMs: null } }).ok).toBe(true);
+      expect(validateEventPayload('host.supervisorStatus', { ...supervisor, release: { role: 'desktop', idleMs: null } }).ok).toBe(false);
     });
 
     it('validates the supervisor status, its commands and the app-side status', () => {

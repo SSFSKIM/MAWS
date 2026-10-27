@@ -19,6 +19,13 @@ import { browserCallOf, browserToolResultSchemaOf, isBrowserToolName, parseBrows
 // E4c end
 import type { ControlRequestFrame, ControlResponseFrame } from '@shared/wire/frames';
 import { compact, stringOrNull, type Attribution, type EventSink } from './normalizer-support';
+import { isStopCallbackId } from './host-hooks'; // P5 O2 M2
+
+function withoutLastMessage(input: Record<string, unknown>): Record<string, unknown> {
+  const rest = { ...input };
+  delete rest.last_assistant_message;
+  return rest;
+}
 
 // One inbound request awaiting our answer, kept so the answer (whose envelope carries no subtype) resolves to the right kind.
 export type InboundKind = 'permission' | 'question' | 'plan' | 'hook' | 'elicitation' | 'dialog' | 'mcp' /* E1 */;
@@ -93,7 +100,9 @@ export function mapInboundRequest(inbound: InboundTable, frame: ControlRequestFr
       const req = HookCallbackRequestSchema.parse(request);
       const toolUseId = (req.tool_use_id ?? req.input.tool_use_id ?? null) as ToolUseId | null;
       remember({ kind: 'hook', toolUseId, callbackId: req.callback_id });
-      out.emit({ kind: 'hook.callback_requested', requestId, callbackId: req.callback_id, hookEvent: req.input.hook_event_name, toolUseId, input: req.input }, attribution);
+      // P5 O2 M2: the host's own Stop callback's input goes without the turn's last assistant message (the journal keeps it)
+      const input = isStopCallbackId(req.callback_id) ? withoutLastMessage(req.input) : req.input;
+      out.emit({ kind: 'hook.callback_requested', requestId, callbackId: req.callback_id, hookEvent: req.input.hook_event_name, toolUseId, input }, attribution);
       return;
     }
     case 'elicitation': {
