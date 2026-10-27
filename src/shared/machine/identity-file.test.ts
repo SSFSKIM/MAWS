@@ -155,3 +155,38 @@ describe('readMachineRef', () => {
     expect(readMachineRef(profile)).toBe(ref);
   });
 });
+
+// P5 O2 M5 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md; the remote layer's Decision Log 25): a devcloud
+// delegation's ref begins with the delegation's id.
+describe('readOrMintMachineRef with a prefix', () => {
+  const delegation = '0123456789abcdef0123456789abcdef';
+
+  it("mints `<prefix>_<22 base64url>`, 55 characters inside RL5's format", () => {
+    const ref = readOrMintMachineRef(profile, { prefix: delegation });
+    expect(ref).toHaveLength(55);
+    expect(ref.startsWith(`${delegation}_`)).toBe(true);
+    expect(MachineRefSchema.safeParse(ref).success).toBe(true);
+    expect(Buffer.from(ref.slice(33), 'base64url')).toHaveLength(16);
+    expect(JSON.parse(actualFs.readFileSync(identityPath(), 'utf8'))).toEqual({ version: 1, ref, mintedAt: expect.any(String) });
+    expect(readOrMintMachineRef(profile, { prefix: delegation })).toBe(ref);
+  });
+
+  it.each([
+    ['upper-case hex', '0123456789ABCDEF0123456789ABCDEF'],
+    ['too short', '0123456789abcdef'],
+    ['too long', `${delegation}0`],
+    ['not hex', 'g123456789abcdef0123456789abcdef'],
+    ['empty', ''],
+    ['an underscore', '0123456789abcdef_123456789abcdef'],
+  ])('refuses a prefix that is not 32 lower-case hex digits (%s), minting nothing', (_, prefix) => {
+    expect(() => readOrMintMachineRef(profile, { prefix })).toThrow(/prefix/);
+    expect(actualFs.readdirSync(profile)).toEqual([]);
+  });
+
+  it('leaves an existing file as it is, prefix or not', () => {
+    const ref = readOrMintMachineRef(profile);
+    const written = actualFs.readFileSync(identityPath(), 'utf8');
+    expect(readOrMintMachineRef(profile, { prefix: delegation })).toBe(ref);
+    expect(actualFs.readFileSync(identityPath(), 'utf8')).toBe(written);
+  });
+});
