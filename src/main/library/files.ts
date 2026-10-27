@@ -19,6 +19,7 @@ import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import { opensExternally } from '@shared/ipc/schema/files';
 import { ARTIFACT_EXPORT_FORMATS, artifactExportName, type ArtifactExportFormat } from '@shared/maws/tools';
+import { pageOf } from '../ipc/clients';
 import { CommandFailure, type registerMainHandler } from '../ipc/router';
 
 export interface LibraryFilesDeps {
@@ -225,5 +226,5 @@ export function registerLibraryFiles(register: typeof registerMainHandler, deps:
   register('library.read', files.read); // M6b fix wave 2
   register('library.openExternally', files.openExternally);
   register('library.reveal', files.reveal);
-  register('library.saveAs', (input, { sender }) => files.saveAs(input, sender));
+  register('library.saveAs', (input, { client }) => files.saveAs(input, pageOf(client) ?? undefined)); // M3 moves the dialogs to the client port
 }

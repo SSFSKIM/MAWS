@@ -9,6 +9,7 @@ import type { ConnectorGrant } from '@shared/artifacts/connectors';
 import { eventChannel } from '@shared/ipc/schema';
 import type { ConnectorServers, DirectDiscoverAnswer, DirectSource } from '@shared/ipc/schema/connectors';
 import { validateCommandOutput } from '@shared/ipc/validate';
+import { clientOf } from '../ipc/clients';
 import type { ConnectorOAuthProvider, ConnectorOAuthState } from './oauth-provider';
 import type { ConnectorOAuthSaved } from './oauth-store';
 import { createConnectorOwner, OWNER_ACTION_DEADLINE_MS, OWNER_QUERY_DEADLINE_MS, type ConnectorOwner, type ConnectorOwnerDeps } from './owner';
@@ -125,7 +126,7 @@ afterEach(() => {
 });
 
 async function rows(artifactId = ART, tools = [{ server: 'notes', tool: 'search' }], from: Viewer = viewer): Promise<ConnectorServers> {
-  const answer = owner.servers(artifactId, tools, from as never);
+  const answer = owner.servers(artifactId, tools, clientOf(from as never));
   await settle();
   const value = await answer;
   expect(validateCommandOutput('connectors.servers', value).ok, JSON.stringify(value)).toBe(true);
@@ -214,7 +215,7 @@ describe('the owner’s server rows', () => {
       return new Promise((resolve) => signal.addEventListener('abort', () => resolve({ ok: false, why: 'unavailable' }), { once: true }));
     });
     provider.state.mockImplementation(() => new Promise(() => {}));
-    const answer = owner.servers(ART, [{ server: 'notes', tool: 'search' }], viewer as never);
+    const answer = owner.servers(ART, [{ server: 'notes', tool: 'search' }], clientOf(viewer as never));
     await settle();
     expect(seen!.aborted).toBe(false);
     await vi.advanceTimersByTimeAsync(OWNER_QUERY_DEADLINE_MS);
@@ -231,13 +232,13 @@ describe('the owner’s server rows', () => {
       void promise.then(() => (done = true));
       return () => done;
     };
-    const bounded = owner.servers(ART, [{ server: 'notes', tool: 'search' }], viewer as never);
+    const bounded = owner.servers(ART, [{ server: 'notes', tool: 'search' }], clientOf(viewer as never));
     const boundedDone = answered(bounded);
     await vi.advanceTimersByTimeAsync(OWNER_QUERY_DEADLINE_MS);
     await settle();
     expect(boundedDone()).toBe(true);
     expect((await bounded).servers).toEqual([{ kind: 'engineOnly', server: 'notes', why: 'unavailable', tools: ['search'] }]);
-    const stopped = owner.servers(ART, [{ server: 'notes', tool: 'search' }], viewer as never);
+    const stopped = owner.servers(ART, [{ server: 'notes', tool: 'search' }], clientOf(viewer as never));
     const stoppedDone = answered(stopped);
     await settle();
     owner.stop();

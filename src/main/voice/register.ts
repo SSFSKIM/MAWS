@@ -16,9 +16,9 @@ type Register = <N extends CommandName>(name: N, handler: MainHandler<N>) => voi
 
 export function registerVoiceHandlers(service: VoiceService, register: Register): void {
   register('voice.status', ({ locale }) => service.status(locale));
-  register('voice.start', (input, { sender }) => service.start(input, sender));
-  register('voice.stop', (input, { sender }) => service.stop(input, sender));
-  register('voice.cancel', (input, { sender }) => service.cancel(input, sender));
+  register('voice.start', (input, { client }) => service.start(input, client));
+  register('voice.stop', (input, { client }) => service.stop(input, client));
+  register('voice.cancel', (input, { client }) => service.cancel(input, client));
   register('voice.openPrivacySettings', ({ pane }) => service.openPrivacySettings(pane));
 }
 

@@ -20,7 +20,7 @@ vi.mock('electron', () => ({
 
 const APP_URL = 'http://localhost:5173/';
 const mainFrame = { url: APP_URL, parent: null };
-const sender = Object.assign(new EventEmitter(), { id: 7, mainFrame });
+const sender = Object.assign(new EventEmitter(), { id: 7, mainFrame, isDestroyed: () => false });
 const event = { sender, senderFrame: mainFrame };
 
 type Result = { ok: boolean; value?: unknown; error?: { code: string; message: string } };

@@ -166,7 +166,7 @@ describe('files service boundary', () => {
       symlinkSync(outside, inRoot('out'));
       const files = service();
       await expect(files.list({ appSessionId: A, path: inRoot('out') })).rejects.toThrow(OUT);
-      await expect(files.watch(A, inRoot('out'), 1)).rejects.toThrow(OUT);
+      await expect(files.watch(A, inRoot('out'), 'p1')).rejects.toThrow(OUT);
     });
   });
 
@@ -351,10 +351,10 @@ describe('files service boundary', () => {
     expect(await files.read({ appSessionId: A, path: inRoot('alias', 'a.ts') })).toMatchObject({ content: 'export const a = 1;\n' });
     await expect(files.read({ appSessionId: A, path: inRoot('readme-link') })).rejects.toThrow(OUT);
     await expect(files.list({ appSessionId: A, path: inRoot('alias') })).rejects.toThrow(OUT); // a directory link too: shown, not opened
-    await expect(files.watch(A, inRoot('alias'), 1)).rejects.toThrow(OUT);
+    await expect(files.watch(A, inRoot('alias'), 'p1')).rejects.toThrow(OUT);
     // Spelled with a trailing slash, lstat follows the link (the path names the target directory): refused all the same.
     await expect(files.list({ appSessionId: A, path: `${inRoot('alias')}/` })).rejects.toThrow(OUT);
-    await expect(files.watch(A, `${inRoot('alias')}/`, 1)).rejects.toThrow(OUT);
+    await expect(files.watch(A, `${inRoot('alias')}/`, 'p1')).rejects.toThrow(OUT);
     expect(files.watching()).toEqual([]);
   });
 
@@ -391,7 +391,7 @@ describe('files service boundary', () => {
         rmSync(path, { recursive: true });
         throw enoent('watch', path);
       }) as unknown as typeof fs.watch);
-      await expect(files.watch(A, inRoot('a', 'sub'), 1)).rejects.toThrow(new Error(`not found: ${inRoot('a', 'sub')}`));
+      await expect(files.watch(A, inRoot('a', 'sub'), 'p1')).rejects.toThrow(new Error(`not found: ${inRoot('a', 'sub')}`));
       expect(files.watching()).toEqual([]);
     });
   });
@@ -399,7 +399,7 @@ describe('files service boundary', () => {
   it('answers not a regular file for an in-root directory, and the refusal for a watch of a regular file', async () => {
     const files = service();
     await expect(files.read({ appSessionId: A, path: inRoot('src') })).rejects.toThrow(`not a regular file: ${inRoot('src')}`);
-    await expect(files.watch(A, inRoot('src', 'a.ts'), 1)).rejects.toThrow(OUT);
+    await expect(files.watch(A, inRoot('src', 'a.ts'), 'p1')).rejects.toThrow(OUT);
     await expect(files.list({ appSessionId: A, path: inRoot('src', 'a.ts') })).rejects.toThrow(OUT);
   });
 });
@@ -435,7 +435,7 @@ describe('files service late confirmation', { timeout: 20_000 }, () => {
       return watcher;
     }) as typeof fs.watch);
     points['after-watch-install'] = swapAncestor;
-    await expect(service().watch(A, inRoot('a', 'sub'), 1)).rejects.toThrow(OUT);
+    await expect(service().watch(A, inRoot('a', 'sub'), 'p1')).rejects.toThrow(OUT);
     expect(closes).toHaveLength(1);
     expect(closes[0]).toHaveBeenCalled();
     writeFileSync(join(outside, 'a', 'sub', 'new.txt'), 'outside write');
@@ -455,8 +455,8 @@ describe('files service late confirmation', { timeout: 20_000 }, () => {
     }) as typeof fs.watch);
     const files = service();
     const dir = inRoot('a', 'sub');
-    await files.watch(A, dir, 1);
-    await files.watch(B, dir, 1);
+    await files.watch(A, dir, 'p1');
+    await files.watch(B, dir, 'p1');
     expect(closes).toHaveLength(1); // one watcher for both holders
     // FSEvents replays the fixture's own writes just after an install; let that batch pass before arming the swap
     await new Promise((resolve) => setTimeout(resolve, 700));
@@ -473,10 +473,10 @@ describe('files service late confirmation', { timeout: 20_000 }, () => {
     expect(closes[0]).toHaveBeenCalled();
     expect(files.watching()).toEqual([]);
 
-    await expect(files.watch(A, dir, 1)).rejects.toThrow(OUT); // refused at step 1 while the swap stands
+    await expect(files.watch(A, dir, 'p1')).rejects.toThrow(OUT); // refused at step 1 while the swap stands
     restore(inRoot('a'));
     emitted.length = 0;
-    await files.watch(A, dir, 1);
+    await files.watch(A, dir, 'p1');
     await new Promise((resolve) => setTimeout(resolve, 700)); // past the FSEvents stream restart the new watcher causes
     expect(closes).toHaveLength(2); // a new watcher
     writeFileSync(join(dir, 'after.txt'), 'restored');
@@ -1073,7 +1073,7 @@ describe('files admission of delivered files', () => {
     await expect(files.write({ appSessionId: A, path: join(outside, 'notes.md'), content: 'changed', expectedHash: hash! })).rejects.toThrow(OUT);
     expect(readFileSync(join(outside, 'notes.md'), 'utf8')).toBe('# delivered notes\n');
     await expect(files.list({ appSessionId: A, path: outside })).rejects.toThrow(OUT);
-    await expect(files.watch(A, outside, 1)).rejects.toThrow(OUT);
+    await expect(files.watch(A, outside, 'p1')).rejects.toThrow(OUT);
     await expect(files.read({ appSessionId: A, path: join(outside, 'secret.txt') })).rejects.toThrow(OUT); // a sibling it does not name
   });
 

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { DEFAULT_PARTITION } from '@shared/browser/tab';
 import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
+import { contextOf } from '../../../test/support/fake-page';
 
 const prepared = vi.hoisted(() => [] as string[]); // what each opened partition was given, in order
 
@@ -55,7 +56,7 @@ const fakes = await vi.hoisted(async () => {
   }
   const win = Object.assign(new EventEmitter(), {
     id: 1,
-    webContents: Object.assign(new EventEmitter(), { getURL: () => 'app://index.html', focus: () => {} }),
+    webContents: Object.assign(new EventEmitter(), { id: 1, isDestroyed: () => false, getURL: () => 'app://index.html', focus: () => {} }),
     contentView: { addChildView: () => {}, removeChildView: () => {} },
     isDestroyed: () => false,
     isVisible: () => true,
@@ -285,7 +286,7 @@ describe('startBrowser (E4a Design §2, G4)', () => {
     expect(fakes.cdp).toEqual(['attach']); // at view creation
     emulated.wc.emit('did-navigate', {}, 'https://a.test/', 200, 'OK');
     const rect = { x: 0, y: 0, width: 300, height: 200 };
-    handlers.get('browser.view.place')!({ tabId: emulated.tab.tabId, paneId: 'p', surface: 'panel', rect, claim: true }, { sender: fakes.win.webContents });
+    handlers.get('browser.view.place')!({ tabId: emulated.tab.tabId, paneId: 'p', surface: 'panel', rect, claim: true }, contextOf(fakes.win.webContents));
     await settle();
     expect(fakes.cdp).toContainEqual(['Emulation.setFocusEmulationEnabled', { enabled: true }]); // the hook sends through the debugger
     on.stop();

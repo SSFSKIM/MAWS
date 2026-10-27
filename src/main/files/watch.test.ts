@@ -75,9 +75,9 @@ describe('files watch', { timeout: 20_000 }, () => {
   });
 
   it('shares one watcher between two holders and emits once per holder session', async () => {
-    await files.watch(A, dir, 1);
-    await files.watch(B, dir, 2);
-    await files.watch(A, dir, 3); // a second window for the same session
+    await files.watch(A, dir, 'p1');
+    await files.watch(B, dir, 'p2');
+    await files.watch(A, dir, 'p3'); // a second window for the same session
     await quiet();
     expect(watchers).toHaveLength(1);
     expect(files.watching()).toEqual([dir]);
@@ -93,7 +93,7 @@ describe('files watch', { timeout: 20_000 }, () => {
   // macOS: `changed` needs an aged file, and APFS moves a file's birth time back to an earlier mtime set through utimes
   // (`age`); ext4 keeps the real birth time.
   it.skipIf(process.platform !== 'darwin')('reports created, changed and removed', async () => {
-    await files.watch(A, dir, 1);
+    await files.watch(A, dir, 'p1');
     await quiet();
     writeFileSync(join(dir, 'fresh.txt'), 'fresh');
     await vi.waitFor(() => expect(emitted).toContainEqual({ appSessionId: A, path: join(dir, 'fresh.txt'), kind: 'created' }), { timeout: 6000 });
@@ -107,7 +107,7 @@ describe('files watch', { timeout: 20_000 }, () => {
     const twin = join(dir, 'dir'); // the parent's own basename, which FSEvents also uses for the parent's own events
     writeFileSync(twin, 'twin');
     age(twin);
-    await files.watch(A, dir, 1);
+    await files.watch(A, dir, 'p1');
     await quiet();
     unlinkSync(twin);
     await vi.waitFor(() => expect(emitted).toContainEqual({ appSessionId: A, path: twin, kind: 'removed' }), { timeout: 6000 });
@@ -117,7 +117,7 @@ describe('files watch', { timeout: 20_000 }, () => {
   // macOS: `changed` needs an aged file, and APFS moves a file's birth time back to an earlier mtime set through utimes
   // (`age`); ext4 keeps the real birth time.
   it.skipIf(process.platform !== 'darwin')('coalesces a burst of events per filename into one batch', async () => {
-    await files.watch(A, dir, 1);
+    await files.watch(A, dir, 'p1');
     await quiet();
     for (let i = 0; i < 5; i++) appendFileSync(join(dir, 'old.txt'), `${i}`);
     writeFileSync(join(dir, 'burst.txt'), 'b');
@@ -130,7 +130,7 @@ describe('files watch', { timeout: 20_000 }, () => {
   });
 
   it('confirms a batch before it forwards it', async () => {
-    await files.watch(A, dir, 1);
+    await files.watch(A, dir, 'p1');
     await quiet();
     writeFileSync(join(dir, 'x.txt'), 'x');
     await vi.waitFor(() => expect(emitted).toHaveLength(1), { timeout: 6000 });
@@ -138,20 +138,20 @@ describe('files watch', { timeout: 20_000 }, () => {
   });
 
   it('closes the watcher when the last holder unwatches, and not before', async () => {
-    await files.watch(A, dir, 1);
-    await files.watch(A, dir, 1); // ref-counted: the same holder twice
-    await files.watch(B, dir, 1);
-    await files.unwatch(A, dir, 1);
-    await files.unwatch(B, dir, 1);
+    await files.watch(A, dir, 'p1');
+    await files.watch(A, dir, 'p1'); // ref-counted: the same holder twice
+    await files.watch(B, dir, 'p1');
+    await files.unwatch(A, dir, 'p1');
+    await files.unwatch(B, dir, 'p1');
     expect(watchers[0].close).not.toHaveBeenCalled();
-    await files.unwatch(A, dir, 1);
+    await files.unwatch(A, dir, 'p1');
     expect(watchers[0].close).toHaveBeenCalledTimes(1);
     expect(files.watching()).toEqual([]);
-    await files.unwatch(A, dir, 1); // an unknown hold is a no-op
+    await files.unwatch(A, dir, 'p1'); // an unknown hold is a no-op
   });
 
   it('an unwatch in flight across its window’s release leaves the next page’s hold under the same key', async () => {
-    await files.watch(A, dir, 1);
+    await files.watch(A, dir, 'p1');
     let resume!: () => void;
     const gate = new Promise<void>((resolve) => (resume = resolve));
     const realpath = fs.promises.realpath.bind(fs.promises);
@@ -159,13 +159,13 @@ describe('files watch', { timeout: 20_000 }, () => {
       await gate;
       return realpath(path);
     }) as typeof fs.promises.realpath);
-    const stale = files.unwatch(A, dir, 1); // the old page's, held at its realpath
-    files.release(1); // the window navigates
-    await files.watch(A, dir, 1); // the new page's hold, under the same (owner, session, path)
+    const stale = files.unwatch(A, dir, 'p1'); // the old page's, held at its realpath
+    files.release('p1'); // the window navigates
+    await files.watch(A, dir, 'p1'); // the new page's hold, under the same (owner, session, path)
     resume();
     await stale;
     expect(files.watching()).toEqual([dir]);
-    await files.unwatch(A, dir, 1); // the new page's own unwatch still drops it
+    await files.unwatch(A, dir, 'p1'); // the new page's own unwatch still drops it
     expect(files.watching()).toEqual([]);
   });
 
@@ -174,36 +174,36 @@ describe('files watch', { timeout: 20_000 }, () => {
   it.skipIf(process.platform !== 'darwin')('unwatch drops the hold on the directory the path names now when its realpath moved between two watches', async () => {
     const asked = join(root, 'Case'); // APFS is case-insensitive: a case-only rename moves the realpath under the same path
     mkdirSync(asked);
-    await files.watch(A, asked, 1); // keyed by …/Case
+    await files.watch(A, asked, 'p1'); // keyed by …/Case
     renameSync(asked, join(root, 'case'));
     expect(realpathSync.native(asked)).toBe(join(root, 'case')); // the volume this suite relies on (realpath(3), as fs.promises)
-    await files.watch(A, asked, 1); // the same holder, now keyed by …/case
+    await files.watch(A, asked, 'p1'); // the same holder, now keyed by …/case
     expect(files.watching().sort()).toEqual([asked, join(root, 'case')].sort());
-    await files.unwatch(A, asked, 1);
+    await files.unwatch(A, asked, 'p1');
     expect(files.watching()).toEqual([asked]); // the newer hold, on the directory the path names now, went
-    await files.unwatch(A, asked, 1);
+    await files.unwatch(A, asked, 'p1');
     expect(files.watching()).toEqual([]);
   });
 
   it('releases every hold of a window that closes or navigates', async () => {
-    await files.watch(A, dir, 1);
-    await files.watch(B, dir, 2);
+    await files.watch(A, dir, 'p1');
+    await files.watch(B, dir, 'p2');
     await quiet();
-    files.release(1);
+    files.release('p1');
     expect(watchers[0].close).not.toHaveBeenCalled();
     writeFileSync(join(dir, 'y.txt'), 'y');
     await vi.waitFor(() => expect(emitted).toHaveLength(1), { timeout: 6000 });
     expect(emitted[0].appSessionId).toBe(B); // the released holder's session is no longer told
-    files.release(2);
+    files.release('p2');
     expect(watchers[0].close).toHaveBeenCalled();
     expect(files.watching()).toEqual([]);
   });
 
   it('invalidates a stale entry when a second holder opens a different directory at the same realpath, and installs anew', async () => {
-    await files.watch(A, dir, 1);
+    await files.watch(A, dir, 'p1');
     renameSync(dir, join(root, 'moved'));
     mkdirSync(dir);
-    await files.watch(B, dir, 2);
+    await files.watch(B, dir, 'p2');
     expect(emitted).toEqual([{ appSessionId: A, path: dir, kind: 'invalidated' }]);
     expect(watchers).toHaveLength(2);
     expect(watchers[0].close).toHaveBeenCalled();
@@ -214,13 +214,13 @@ describe('files watch', { timeout: 20_000 }, () => {
   });
 
   it('invalidates a watch whose directory is removed, and a fresh watch after it is back installs a new watcher', async () => {
-    await files.watch(A, dir, 1);
+    await files.watch(A, dir, 'p1');
     await settle(); // past the stream restart (above)
     rmSync(dir, { recursive: true });
     await vi.waitFor(() => expect(emitted).toContainEqual({ appSessionId: A, path: dir, kind: 'invalidated' }), { timeout: 6000 });
     expect(files.watching()).toEqual([]);
     mkdirSync(dir);
-    await files.watch(A, dir, 1);
+    await files.watch(A, dir, 'p1');
     expect(watchers).toHaveLength(2);
     expect(files.watching()).toEqual([dir]);
   });

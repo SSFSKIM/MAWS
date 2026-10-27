@@ -173,8 +173,8 @@ function under(path: string, dir: string): boolean {
   return path === dir || path.startsWith(`${dir}/`);
 }
 
-// Who holds a watch: main passes the requesting window's `webContents.id`; 0 is a caller without a window.
-export type WatchOwner = number;
+// Who holds a watch: main passes the requesting client's id (`ClientRef.id`); '' is a caller without a client.
+export type WatchOwner = string;
 
 interface Root {
   root: string;
@@ -217,7 +217,7 @@ export class GitWatcher {
   // on its root, opening the root's watches when it is the first.
   // A watch whose owner was released while its status was being read (the window navigated or closed meanwhile) answers
   // the status and holds nothing: its page is gone and could never unwatch.
-  async watch(directory: string, owner: WatchOwner = 0): Promise<GitStatus> {
+  async watch(directory: string, owner: WatchOwner = ''): Promise<GitStatus> {
     const generation = this.generations.get(owner) ?? 0;
     const status = await this.deps.status(directory);
     const [projection, nested] = await Promise.all([this.project(status, new Map()), this.nestedUnder(status)]);
@@ -237,7 +237,7 @@ export class GitWatcher {
 
   // One watcher fewer for the directory's root; the last closes the root's watches. A directory the owner never
   // watched, or already released as often as it watched it, is a no-op.
-  unwatch(directory: string, owner: WatchOwner = 0): void {
+  unwatch(directory: string, owner: WatchOwner = ''): void {
     const directories = this.owners.get(owner);
     const entry = directories?.get(directory);
     if (!directories || !entry) return;

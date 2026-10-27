@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { DEFAULT_PARTITION } from '@shared/browser/tab';
 import type { CommandName } from '@shared/ipc/schema';
+import { contextOf, fakePage } from '../../../test/support/fake-page';
 
 vi.mock('electron', () => ({ ipcMain: { handle: () => {} }, BrowserWindow: { fromWebContents: () => null }, WebContentsView: class {} }));
 
@@ -55,7 +56,7 @@ function setup(makeViews?: (store: InstanceType<typeof TabStore>) => Views) {
     avatars: new ProfileAvatars(join(tmpdir(), 'maws-cua90-no-such-user-data')), // cua #90: no avatar.png anywhere
     register: (name, handler) => void handlers.set(name, handler as (input: unknown) => unknown),
   });
-  const call = (name: CommandName, input: unknown) => handlers.get(name)!(input, { sender: {} });
+  const call = (name: CommandName, input: unknown) => handlers.get(name)!(input, contextOf(fakePage()));
   return { store, views, navigator, downloads, history, bookmarks, bar, favicons, window, windowOf, handlers, call };
 }
 
@@ -168,7 +169,7 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
       ['browser.tabs.devtools', { tabId }],
     ];
     for (const [name, input] of inputs) {
-      const thrown = failure(() => handlers.get(name)!(input, { sender: {} }));
+      const thrown = failure(() => handlers.get(name)!(input, contextOf(fakePage())));
       expect(thrown, name).toBeInstanceOf(CommandFailure);
       expect(thrown?.error, name).toMatchObject({ code: 'invalid_input', message: 'unknown browser tab' });
     }
@@ -242,11 +243,11 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
 
   it('hands placement and cover to the view manager with the sender', () => {
     const { views, handlers } = setup();
-    const sender = {};
+    const sender = fakePage();
     const place = { tabId: 'b_aaaaaaaaaaaa', paneId: 'p', surface: 'panel', rect: null, claim: true };
-    handlers.get('browser.view.place')!(place, { sender });
+    handlers.get('browser.view.place')!(place, contextOf(sender));
     expect(views.place).toHaveBeenCalledWith(place, sender);
-    void handlers.get('browser.view.cover')!({ covered: true }, { sender });
+    void handlers.get('browser.view.cover')!({ covered: true }, contextOf(sender));
     expect(views.cover).toHaveBeenCalledWith(true, sender);
   });
 
@@ -257,7 +258,7 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
     const cover = vi.fn(() => new Promise<void>((resolve) => void (hidden = resolve)));
     const { handlers } = setup(() => ({ place: vi.fn(), cover }));
     let answered = false;
-    const answer = Promise.resolve(handlers.get('browser.view.cover')!({ covered: true }, { sender: {} })).then(() => void (answered = true));
+    const answer = Promise.resolve(handlers.get('browser.view.cover')!({ covered: true }, contextOf(fakePage()))).then(() => void (answered = true));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(cover).toHaveBeenCalledTimes(1);
     expect(answered).toBe(false);
@@ -289,7 +290,7 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
     const { handlers } = setup(() => ({ place: vi.fn(), cover: vi.fn(async () => Promise.reject(failing)) }));
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
-      await handlers.get('browser.view.cover')!({ covered: true }, { sender: {} }); // still answered, after the failure
+      await handlers.get('browser.view.cover')!({ covered: true }, contextOf(fakePage())); // still answered, after the failure
       expect(logged).toHaveBeenCalledWith('[browser] the cover failed:', failing);
     } finally {
       logged.mockRestore();

@@ -91,11 +91,11 @@ export interface FilesService {
   // session and no roots: the caller's resolution is the admission, and a window never names the path.
   readResolved(input: Omit<FilesReadInput, 'appSessionId'>): Promise<FilesReadOutput>;
   write(input: FilesWriteInput): Promise<FilesWriteOutput>; // E5
-  watch(appSessionId: AppSessionId, path: string, owner: number): Promise<void>;
-  unwatch(appSessionId: AppSessionId, path: string, owner: number): Promise<void>;
+  watch(appSessionId: AppSessionId, path: string, owner: string): Promise<void>;
+  unwatch(appSessionId: AppSessionId, path: string, owner: string): Promise<void>;
   openExternal(appSessionId: AppSessionId, path: string): Promise<FilesOpenExternalOutput>;
   reveal(appSessionId: AppSessionId, path: string): Promise<FilesRevealOutput>; // E1
-  release(owner: number): void; // everything a window holds, when it closes or navigates
+  release(owner: string): void; // everything a client holds, when it ends
   watching(): string[];
   dispose(): void;
 }
@@ -141,7 +141,7 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
   // Per confirmed file identity (`dev:ino`), the tail of its writes' chain: two writes of one file (two tabs, two
   // sessions, a hard-link alias) compare and write one after the other. Removed when its chain drains.
   const writing = new Map<string, Promise<void>>();
-  const releases = new Map<number, number>(); // per window, how many times its holds were released (files.unwatch)
+  const releases = new Map<string, number>(); // per client, how many times its holds were released (files.unwatch)
 
   // Step 1: absolute, already normal (a `..` is refused before the disk is touched, since the kernel resolves `/X/..`
   // only when `/X` exists) and with no trailing separator (under which `lstat` follows a final-component symlink, so
@@ -345,7 +345,7 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
     }
   }
 
-  async function watch(appSessionId: AppSessionId, path: string, owner: number): Promise<void> {
+  async function watch(appSessionId: AppSessionId, path: string, owner: string): Promise<void> {
     const { handle, stat, real, roots } = await openConfirmed(appSessionId, path, 'dir');
     const holder = { owner, appSessionId, path };
     try {

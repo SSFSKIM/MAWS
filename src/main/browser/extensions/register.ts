@@ -7,6 +7,7 @@ import type { BrowserWindow, WebContents } from 'electron';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandName } from '@shared/ipc/schema';
 import type { MenuPresenter } from '../bookmarks/menu';
+import { pageOf } from '../../ipc/clients';
 import { CommandFailure, type MainHandler, type registerMainHandler } from '../../ipc/router';
 import { UnknownTabError, type BrowserEmit, type TabEntry, type TabStore } from '../tabs';
 import type { ExtensionActions } from './actions';
@@ -81,17 +82,19 @@ export function registerExtensionHandlers({ store, actions, popups, pages, menus
   );
   register(
     'browser.extensions.action.menu',
-    known(({ tabId, extensionId, anchor }, { sender }) => {
+    known(({ tabId, extensionId, anchor }, { client }) => {
       const action = loaded(store.require(tabId), extensionId);
-      const window = windowOf(sender);
+      const page = pageOf(client);
+      const window = page && windowOf(page);
       if (window) menus.present(actionMenu(action, menuActions(tabId, { ...anchor, width: 0, height: 0 })), { window, x: anchor.x, y: anchor.y });
     }),
   );
   register(
     'browser.extensions.puzzle',
-    known(({ tabId, anchor }, { sender }) => {
+    known(({ tabId, anchor }, { client }) => {
       const entry = store.require(tabId);
-      const window = windowOf(sender);
+      const page = pageOf(client);
+      const window = page && windowOf(page);
       if (window) menus.present(puzzleMenu(actions.entries(entry.tab.partition), menuActions(tabId, anchor)), { window, x: anchor.x, y: anchor.y + anchor.height });
     }),
   );

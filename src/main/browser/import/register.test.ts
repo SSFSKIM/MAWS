@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { ImportedExtension } from '@shared/browser/import';
 import type { CommandName } from '@shared/ipc/schema';
 import { buildChromeUserData, type ChromeUserData } from '../../../../test/support/chrome-profile';
+import { contextOf, fakePage } from '../../../../test/support/fake-page';
 
 vi.mock('electron', () => ({ ipcMain: { handle: () => {} }, BrowserWindow: { fromWebContents: () => null } }));
 
@@ -27,7 +28,7 @@ afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 function setup(env: NodeJS.ProcessEnv = { MAWS_E2E: '1', MAWS_E2E_CHROME_USER_DATA: fixture.dir }) {
   const handlers = new Map<CommandName, (input: unknown, context: unknown) => Promise<unknown>>();
-  const sender = {} as WebContents;
+  const sender = fakePage() as unknown as WebContents;
   const service = {
     inspect: vi.fn(async () => ({ inspectionId: INSPECTION_ID })),
     discard: vi.fn(async () => {}),
@@ -53,7 +54,7 @@ function setup(env: NodeJS.ProcessEnv = { MAWS_E2E: '1', MAWS_E2E_CHROME_USER_DA
     home: '/Users/someone',
     register: (name, handler) => void handlers.set(name, handler as never),
   });
-  const call = (name: CommandName, input?: unknown) => handlers.get(name)!(input, { sender });
+  const call = (name: CommandName, input?: unknown) => handlers.get(name)!(input, contextOf(sender));
   const failure = async (name: CommandName, input?: unknown) => {
     const error = await call(name, input).then(() => null, (thrown: unknown) => thrown);
     expect(error).toBeInstanceOf(CommandFailure);

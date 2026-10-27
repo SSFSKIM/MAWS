@@ -56,7 +56,7 @@ export function installStorePolicies(env: NodeJS.ProcessEnv, appUrl: string): vo
 // P4-B5: `exports`, the export service itself (X31), for main's delivery (Send to), which exports as the library does
 export function startArtifacts({ hosts, register, emit, settings, onSettingsChanged, env, openWindow, root }: ArtifactsDeps): { stop(): void; exporters: ExporterRegistry; exports: Pick<ReturnType<typeof startExportService>, 'exportForLibrary'> } {
   const deps = { dispatch: hosts.dispatch, postDocPort: hosts.postDocPort, closeDocPorts: hosts.closeDocPorts, channel: () => new MessageChannelMain() };
-  register('artifacts.open', ({ artifactId, doc }, { sender }) => openDocument(deps, artifactId, sender, doc));
+  register('artifacts.open', ({ artifactId, doc }, { client }) => openDocument(deps, artifactId, client, doc));
   // P3-A M7: the scheme and the export service
   const call = <N extends CommandName>(name: N, input: CommandInput<N>) => hosts.dispatch('engine-host', name, input) as Promise<CommandResult<N>>;
   const content: ContentLookup = (input) => call('artifacts.content', input);

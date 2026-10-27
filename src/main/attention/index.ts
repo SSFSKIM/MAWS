@@ -5,7 +5,9 @@
 // un-announced again.
 import { app, type App, type BrowserWindow, type WebContentsDidStartNavigationEventParams } from 'electron';
 import type { AppSessionId, AttentionId } from '@shared/graph/ids';
+import type { ClientId } from '@shared/ipc/client';
 import type { Settings } from '@shared/ipc/schema';
+import { clientOf } from '../ipc/clients';
 import { emit } from '../ipc/events';
 import { registerMainHandler } from '../ipc/router';
 import type { SessionReadModel } from '../sessions/read-model';
@@ -15,29 +17,28 @@ import type { NotificationActions } from './actions';
 import { startNotifier } from './notifier';
 
 export function startAttention(model: SessionReadModel, deps: { actions?: NotificationActions; restoredIds: ReadonlySet<AttentionId>; settings(): Settings; openWindow(): BrowserWindow }): () => void {
-  const viewing = new Map<number, { appSessionId: AppSessionId | null; release(): void }>();
-  registerMainHandler('attention.viewing', ({ appSessionId }, { sender }) => {
-    if (sender.isDestroyed()) return;
-    let page = viewing.get(sender.id);
+  const viewing = new Map<ClientId, { appSessionId: AppSessionId | null; release(): void }>();
+  registerMainHandler('attention.viewing', ({ appSessionId }, { client }) => {
+    let page = viewing.get(client.id);
     if (!page) {
-      const release = () => {
-        viewing.delete(sender.id);
-        sender.removeListener('destroyed', release);
-        sender.removeListener('render-process-gone', release);
-        sender.removeListener('did-start-navigation', navigating);
+      const entry = {
+        appSessionId: null as AppSessionId | null,
+        unfollow: () => {},
+        release() {
+          if (viewing.get(client.id) !== entry) return;
+          viewing.delete(client.id);
+          entry.unfollow();
+        },
       };
-      const navigating = (details: WebContentsDidStartNavigationEventParams) => {
-        if (details.isMainFrame && !details.isSameDocument) release();
-      };
-      page = { appSessionId: null, release };
-      viewing.set(sender.id, page);
-      sender.on('destroyed', release);
-      sender.on('render-process-gone', release);
-      sender.on('did-start-navigation', navigating);
+      viewing.set(client.id, entry);
+      entry.unfollow = client.onGone(entry.release); // at once for a client already gone, which then views nothing
+      if (!viewing.has(client.id)) return;
+      page = entry;
     }
     page.appSessionId = appSessionId as AppSessionId | null;
   });
-  const isViewing = (id: AppSessionId) => appWindows().some((win) => win.isFocused() && viewing.get(win.webContents.id)?.appSessionId === id);
+  // A window's page views what its live client last reported; a page that has not reported since it loaded views nothing.
+  const isViewing = (id: AppSessionId) => appWindows().some((win) => win.isFocused() && viewing.get(clientOf(win.webContents).id)?.appSessionId === id);
   const relay = createNavigationRelay(emit);
   registerMainHandler('attention.pendingNavigate', () => ({ navigate: relay.take() }));
   followAppPages(app, relay.pageGone);

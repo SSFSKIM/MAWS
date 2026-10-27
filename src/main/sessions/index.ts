@@ -3,9 +3,9 @@
 // `index` those are C4's `IndexSessionSource` (created in C4's block of src/main/index.ts, started here) and the engine
 // host's event feed below; in mode `scenario` only the stub source, and the read model refuses C4's source unstarted,
 // so the index never scans.
-import type { WebContents, WebContentsDidStartNavigationEventParams } from 'electron';
 import type { SessionEvent } from '@shared/graph/events'; // E3
 import type { AppSessionId } from '@shared/graph/ids';
+import type { ClientId } from '@shared/ipc/client';
 import type { CommandOutput, EventName, EventPayload } from '@shared/ipc/schema';
 import { isAppSynthesised } from '@shared/sessions/app-events';
 import type { HostSupervisor } from '../hosts/supervisor';
@@ -110,30 +110,28 @@ export function startSessions({ env, packaged, appRoot, hosts, indexSource, appE
   registerMainHandler('session.digests', () => ({ digests: model.digests() }));
   registerMainHandler('session.launchMode', () => ({ mode }));
   registerMainHandler('session.appEvents', ({ appSessionId }) => ({ events: appEventsOf(model, appSessionId as AppSessionId, appEventsExtra) })); // debt wave 5; E3: the extra
-  // Visibility is the union of the pages displaying a session, not a sticky app-wide flag.
-  const pages = new Map<WebContents, { ids: Set<AppSessionId>; release(): void }>();
+  // Visibility is the union of the clients displaying a session, not a sticky app-wide flag.
+  const pages = new Map<ClientId, { ids: Set<AppSessionId>; release(): void }>();
   const refreshVisibility = (id: AppSessionId) => model.setVisible(id, [...pages.values()].some((page) => page.ids.has(id)));
-  registerMainHandler('session.setVisible', ({ appSessionId, visible }, { sender }) => {
-    if (sender.isDestroyed()) return;
-    let page = pages.get(sender);
+  registerMainHandler('session.setVisible', ({ appSessionId, visible }, { client }) => {
+    let page = pages.get(client.id);
     if (!page) {
       if (!visible) return;
       const ids = new Set<AppSessionId>();
-      const release = () => {
-        pages.delete(sender);
-        sender.removeListener('destroyed', release);
-        sender.removeListener('render-process-gone', release);
-        sender.removeListener('did-start-navigation', navigating);
-        for (const id of ids) refreshVisibility(id);
+      const entry = {
+        ids,
+        unfollow: () => {},
+        release() {
+          if (pages.get(client.id) !== entry) return;
+          pages.delete(client.id);
+          entry.unfollow();
+          for (const id of ids) refreshVisibility(id);
+        },
       };
-      const navigating = (details: WebContentsDidStartNavigationEventParams) => {
-        if (details.isMainFrame && !details.isSameDocument) release();
-      };
-      page = { ids, release };
-      pages.set(sender, page);
-      sender.on('destroyed', release);
-      sender.on('render-process-gone', release);
-      sender.on('did-start-navigation', navigating);
+      pages.set(client.id, entry);
+      entry.unfollow = client.onGone(entry.release); // at once for a client already gone, which then holds nothing
+      if (!pages.has(client.id)) return;
+      page = entry;
     }
     const id = appSessionId as AppSessionId;
     if (visible) page.ids.add(id);

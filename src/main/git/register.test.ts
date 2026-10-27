@@ -17,7 +17,7 @@ vi.mock('electron', () => ({
 
 const APP_URL = 'http://localhost:5173/';
 const mainFrame = { url: APP_URL, parent: null };
-const sender = Object.assign(new EventEmitter(), { id: 7, mainFrame }); // the app window's webContents
+const sender = Object.assign(new EventEmitter(), { id: 7, mainFrame, isDestroyed: () => false }); // the app window's webContents
 const event = { sender, senderFrame: mainFrame };
 
 type Result = { ok: boolean; value?: unknown; error?: { code: string; message: string } };
@@ -63,17 +63,20 @@ describe('main answers git.* through the router', () => {
     expect(await invoke('git.unwatch', { directory: '/never/watched' })).toEqual({ ok: true, value: undefined });
   });
 
-  it('holds watches for the requesting window and releases them when it navigates or closes', async () => {
+  it('holds watches for the requesting client and releases them when its page navigates or closes', async () => {
     const service = await install();
     const release = vi.spyOn(service, 'release');
     const watch = vi.spyOn(service, 'watch');
     await invoke('git.watch', { directory: repo.root });
     await invoke('git.watch', { directory: repo.root });
-    expect(watch.mock.calls.map((call) => call[1])).toEqual([7, 7]);
-    expect(sender.listenerCount('did-navigate')).toBe(1); // followed once, however many watches
-    sender.emit('did-navigate'); // a reload: the new page watches afresh
-    expect(release).toHaveBeenCalledWith(7);
+    expect(watch.mock.calls.map((call) => call[1])).toEqual(['page:7.1', 'page:7.1']);
+    sender.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false }); // a reload: the new page watches afresh
+    expect(release).toHaveBeenCalledWith('page:7.1');
+    expect(release).toHaveBeenCalledTimes(1); // followed once, however many watches
+    await invoke('git.watch', { directory: repo.root });
+    expect(watch.mock.calls[2][1]).toBe('page:7.2');
     sender.emit('destroyed');
+    expect(release).toHaveBeenLastCalledWith('page:7.2');
     expect(release).toHaveBeenCalledTimes(2);
   });
 

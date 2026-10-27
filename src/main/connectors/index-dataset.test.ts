@@ -8,6 +8,7 @@ import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandName, EventName } from '@shared/ipc/schema';
 import { validateCommandInput, validateCommandOutput, validateEventPayload } from '@shared/ipc/validate';
+import { clientOf } from '../ipc/clients';
 import type { MainContext } from '../ipc/router';
 import { startConnectors, type ConnectorWindow } from '.';
 
@@ -125,7 +126,7 @@ afterEach(() => {
 async function invoke(name: CommandName, input: unknown): Promise<unknown> {
   const checked = validateCommandInput(name, input);
   if (!checked.ok) throw new Error(`invalid input for ${name}`);
-  const value = await handlers.get(name)!(checked.value, { sender: sender as unknown as MainContext['sender'] });
+  const value = await handlers.get(name)!(checked.value, { client: clientOf(sender as never) });
   expect(validateCommandOutput(name, value).ok, `${name} output: ${JSON.stringify(value)}`).toBe(true);
   return value;
 }

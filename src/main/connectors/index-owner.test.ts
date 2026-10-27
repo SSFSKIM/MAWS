@@ -8,6 +8,7 @@ import type { CommandName, EventName, HostState } from '@shared/ipc/schema';
 import { eventChannel } from '@shared/ipc/schema';
 import type { DirectOperationOutcome, DirectSource } from '@shared/ipc/schema/connectors';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
+import { clientOf } from '../ipc/clients';
 import type { MainContext } from '../ipc/router';
 import { startConnectors, type ConnectorWindow, type ConnectorsDeps } from '.';
 import { createDirectRoute, type DirectRouteDeps } from './direct-route';
@@ -146,7 +147,7 @@ afterEach(() => {
 async function invoke(name: CommandName, input: unknown): Promise<unknown> {
   const checked = validateCommandInput(name, input);
   if (!checked.ok) throw new Error(`invalid input for ${name}`);
-  const answer = handlers.get(name)!(checked.value, { sender: me as unknown as MainContext['sender'] });
+  const answer = handlers.get(name)!(checked.value, { client: clientOf(me as never) });
   for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(0);
   const value = await answer;
   expect(validateCommandOutput(name, value).ok, `${name} output ${JSON.stringify(value)}`).toBe(true);

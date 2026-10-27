@@ -7,7 +7,9 @@ import { disableChromiumFeatures, STARTUP_DISABLED_FEATURES } from './chromium-f
 import { statSync } from 'node:fs'; // E11 F2b: the bundle on disk
 import { basename, join } from 'node:path';
 import { totalmem } from 'node:os'; // C12: the default memory budget
-import { app, BrowserWindow, dialog, screen, type MessageBoxOptions, type WebContents } from 'electron';
+import { app, BrowserWindow, dialog, screen, type MessageBoxOptions } from 'electron';
+import type { ClientRef } from '@shared/ipc/client';
+import { pageOf } from './ipc/clients';
 import { createHosts } from './hosts';
 import { installRouter } from './ipc/router';
 import { startSettings } from './settings';
@@ -185,6 +187,11 @@ const MAIN_BUILD: MainBuild = { version: __MAWS_VERSION__, ...__MAWS_BUILD__ };
 console.log(`[main] ${describeMainBuild(MAIN_BUILD)} · pid ${process.pid}`);
 let bringForward: () => BrowserWindow | null = () => null; // the started app's window, shown and focused (or opened)
 const OLDER = { quit: 'Quit MAWS', keep: 'Keep running' };
+// The window showing a client's page while the page lives (a dialog's parent, the connectors' veto); null once it ended.
+const windowOfClient = (client: ClientRef): BrowserWindow | null => {
+  const page = pageOf(client);
+  return page && BrowserWindow.fromWebContents(page);
+};
 function offerQuit(win: BrowserWindow, notice: string): void {
   const options = { type: 'info' as const, message: notice, buttons: [OLDER.quit, OLDER.keep], defaultId: 0, cancelId: 1 };
   void dialog.showMessageBox(win, options).then(({ response }) => {
@@ -377,11 +384,11 @@ void startWithProfileLock(app, () => {
   const files = new FileLister({ run: createGitRunner(), roots });
   for (const name of ['session.changed', 'session.removed', 'session.projects.changed', 'session.intent.changed'] as const) onEmitted(name, () => files.invalidateRoots());
   registerMainHandler('git.lsFiles', (input) => files.list(input));
-  registerMainHandler('layout.pickFiles', (input, { sender }) =>
+  registerMainHandler('layout.pickFiles', (input, { client }) =>
     pickFiles(input, {
       // C10: the e2e seam (MAWS_E2E=1 never opens the native panel; MAWS_E2E_PICK_PATHS or cancelled), else the panel
       showOpenDialog: openDialogFor(process.env, (options) => {
-        const win = BrowserWindow.fromWebContents(sender);
+        const win = windowOfClient(client);
         return win ? dialog.showOpenDialog(win, options) : dialog.showOpenDialog(options);
       }),
     }),
@@ -550,12 +557,15 @@ void startWithProfileLock(app, () => {
   );
   registerMainHandler('layout.captureChords', captureChords); // the Settings tab's chord capture sets the menu aside (M5 fix wave)
   // P3-G (§D4.1): Mark-up's still of a region the sender's window draws
-  registerMainHandler('layout.captureRegion', (input, { sender }) => captureRegion(input, sender, BrowserWindow.fromWebContents(sender)));
-  registerMainHandler('layout.saveTextFile', (input, { sender }) =>
+  registerMainHandler('layout.captureRegion', async (input, { client }) => {
+    const page = pageOf(client);
+    return page ? captureRegion(input, page, BrowserWindow.fromWebContents(page)) : { image: null }; // a page gone is a window closed meanwhile
+  });
+  registerMainHandler('layout.saveTextFile', (input, { client }) =>
     saveTextFile(input, {
       downloads: app.getPath('downloads'),
       showSaveDialog: (options) => {
-        const win = BrowserWindow.fromWebContents(sender);
+        const win = windowOfClient(client);
         return win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options);
       },
     }),
@@ -638,7 +648,7 @@ void startWithProfileLock(app, () => {
   // P3-H H4: a page's owner window, read by main, vetoes its pages while hidden or minimized (P3 Decision Log 89)
   // P3-HD (Decision Log 14): the root supplies route D, which the service composes after route E; the engine stays preferred.
   // P3-HD M3c2: with it, MAWS's own OAuth provider (sealed under userData, safeStorage asked only on demand)
-  const connectors = startConnectors({ hosts, register: registerMainHandler, index, windowOf: (sender) => BrowserWindow.fromWebContents(sender as WebContents), direct: createDirectRoute, oauth: productionConnectorOAuth });
+  const connectors = startConnectors({ hosts, register: registerMainHandler, index, windowOf: windowOfClient, direct: createDirectRoute, oauth: productionConnectorOAuth });
   shutdown.add('connectors', connectors.stop);
   // P4-AGG M4: Customize › Connectors' Sign in, the engine's own MCP sign-in in one ready session (its credential is the
   // engine's, in the engine's keychain item; MAWS's own OAuth store is not involved)
@@ -762,8 +772,8 @@ void startWithProfileLock(app, () => {
   // whole dirty set, forgotten when the window navigates or closes; the question's Save all asks every window to save
   // and waits for the answers of the windows that hold files.
   const unsavedFiles = trackUnsavedFiles();
-  registerMainHandler('layout.unsavedFiles', ({ paths }, { sender }) => unsavedFiles.update(sender, paths));
-  registerMainHandler('layout.saveAllDone', ({ requestId, failed }, { sender }) => unsavedFiles.done(sender, requestId, failed));
+  registerMainHandler('layout.unsavedFiles', ({ paths }, { client }) => unsavedFiles.update(client, paths));
+  registerMainHandler('layout.saveAllDone', ({ requestId, failed }, { client }) => unsavedFiles.done(client, requestId, failed));
   // E5 end
 
   // ---- C5: notifications, dock badge and the quit guard ----

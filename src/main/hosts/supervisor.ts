@@ -93,11 +93,11 @@ export interface HostSupervisor {
   // P3-A M4 (its Decision Log 13): hands one end of a document's channel to the engine host on its parent port, when it
   // runs as a utility process and is ready; false (nothing posted, the caller still holds the port) otherwise.
   // P3-A M5: a detached host's end is kept by main and relayed over a channel of the supervisor's socket (doc-relay.ts),
-  // under `owner` (the asking window's webContents id), while a connection is served and ready.
-  postDocPort(message: HostDoc, port: MessagePortMain, owner?: number): boolean;
-  // P3-A M5: the window closed or reloaded: the channels main relays for it end (a utility host's ports, entangled with
-  // the window's directly, end by themselves).
-  closeDocPorts(owner: number): void;
+  // under `owner` (the asking client's id, `ClientRef.id`), while a connection is served and ready.
+  postDocPort(message: HostDoc, port: MessagePortMain, owner?: string): boolean;
+  // P3-A M5: the client ended (its page closed, reloaded or crashed): the channels main relays for it end (a utility
+  // host's ports, entangled with the page's directly, end by themselves).
+  closeDocPorts(owner: string): void;
 }
 
 export const REQUEST_TIMEOUT_MS = 10_000;

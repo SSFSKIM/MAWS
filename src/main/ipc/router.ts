@@ -3,7 +3,8 @@
 // window's top frame at the app's origin), input validation, then dispatch by the registry entry's `owner`, to a
 // handler registered here for `main` or to the host dispatcher for a utility process. Every outcome is a
 // `CommandResult`; nothing is thrown across the boundary.
-import { BrowserWindow, ipcMain, type IpcMainInvokeEvent, type WebContents } from 'electron';
+import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
+import type { HandlerContext } from '@shared/ipc/client';
 import { ipcError, type IpcError } from '@shared/ipc/errors';
 import {
   commandChannel,
@@ -16,13 +17,14 @@ import {
 } from '@shared/ipc/schema';
 import { isBridgedCommandName } from '@shared/ipc/names';
 import { validateCommandInput } from '@shared/ipc/validate';
+import { clientOf } from './clients';
 
 export { emit } from './events';
 
-// The invoke's origin, for a handler whose effect is held per window (git.watch's counts): the app window's webContents.
-export interface MainContext {
-  sender: WebContents;
-}
+// Who asked (P5 O1 M2): the asking page instance's `ClientRef`, for a handler whose state is held per client (git.watch's
+// counts), keyed by `client.id` and released on `client.onGone`. A client-shell handler that acts on the page itself gets
+// it with `pageOf(client)` (./clients).
+export type MainContext = HandlerContext;
 export type MainHandler<N extends CommandName> = (input: CommandInput<N>, context: MainContext) => CommandOutput<N> | Promise<CommandOutput<N>>;
 export type HostOwner = Exclude<Owner, 'main'>;
 // The supervisor interface M4 implements (`HostSupervisor.dispatch`): forward to the owning host, answer its result.
@@ -101,7 +103,7 @@ async function route(
   if (!input.ok) return input;
 
   const { owner } = commands[name];
-  const context: MainContext = { sender: event.sender };
+  const context: MainContext = { client: clientOf(event.sender) };
   let answer: () => Promise<CommandResult<CommandName>>;
   const interceptor = interceptors.get(name); // C5: the stub source's seam, above
   if (interceptor) {

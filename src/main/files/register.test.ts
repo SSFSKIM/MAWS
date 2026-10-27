@@ -23,6 +23,7 @@ const APP_URL = 'http://localhost:5173/';
 const mainFrame = { url: APP_URL, parent: null };
 const sender = Object.assign(new EventEmitter(), { id: 7, mainFrame, destroyed: false, isDestroyed: () => sender.destroyed });
 const event = { sender, senderFrame: mainFrame };
+const navigate = () => sender.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false }); // a reload
 const OUT = "path outside the session's directories";
 
 type Result = { ok: boolean; value?: unknown; error?: { code: string; message: string } };
@@ -55,7 +56,7 @@ describe('main answers files.* through the router', () => {
     const files = registerFilesHandlers((id) => records.get(id) ?? null, { emit, openPath, showItemInFolder, env: {} });
     dispose = () => files.dispose();
     installRouter({ appUrl: APP_URL });
-    return { files, emit, openPath, epochs: files.epochs };
+    return { files, emit, openPath, followed: files.followed };
   }
   const invoke = (name: string, input?: unknown) => electron.handlers.get(`maws:cmd:${name}`)!(event, input) as Promise<Result>;
 
@@ -98,26 +99,29 @@ describe('main answers files.* through the router', () => {
     expect(result).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
   });
 
-  it('holds watches for the requesting window and releases them when it navigates or closes', async () => {
+  it('holds watches for the requesting client and releases them when its page navigates or closes', async () => {
     const { files } = await install();
     const release = vi.spyOn(files, 'release');
     expect(await invoke('files.watch', { appSessionId: 'A', path: join(root, 'repo', 'src') })).toEqual({ ok: true, value: undefined });
     await invoke('files.watch', { appSessionId: 'A', path: join(root, 'repo') });
     expect(files.watching().sort()).toEqual([join(root, 'repo'), join(root, 'repo', 'src')]);
-    expect(sender.listenerCount('did-navigate')).toBe(1); // followed once, however many watches
     expect(await invoke('files.unwatch', { appSessionId: 'A', path: join(root, 'repo') })).toEqual({ ok: true, value: undefined });
     expect(files.watching()).toEqual([join(root, 'repo', 'src')]);
-    sender.emit('did-navigate');
-    expect(release).toHaveBeenCalledWith(7);
+    navigate();
+    expect(release).toHaveBeenCalledWith('page:7.1');
+    expect(release).toHaveBeenCalledTimes(1); // followed once, however many watches
     expect(files.watching()).toEqual([]);
+    await invoke('files.watch', { appSessionId: 'A', path: join(root, 'repo', 'src') }); // the reloaded page's
     sender.emit('destroyed');
+    expect(release).toHaveBeenLastCalledWith('page:7.2');
     expect(release).toHaveBeenCalledTimes(2);
+    expect(files.watching()).toEqual([]);
   });
 
   it('releases a watch still in flight when its window navigates, instead of adopting it after the release', async () => {
     const { files } = await install();
     const answer = invoke('files.watch', { appSessionId: 'A', path: join(root, 'repo', 'src') }); // in flight: its first step awaits the disk
-    sender.emit('did-navigate'); // the reload releases this window's holds before the watch is adopted
+    navigate(); // the reload releases this page's holds before the watch is adopted
     expect(await answer).toEqual({ ok: true, value: undefined });
     expect(files.watching()).toEqual([]);
     // a watch issued after the navigation (the reloaded page's) is kept
@@ -152,23 +156,23 @@ describe('main answers files.* through the router', () => {
     expect(showItemInFolder).toHaveBeenCalledTimes(1);
   });
 
-  it('forgets a closed window: its epoch is pruned on destroyed', async () => {
-    const { files, epochs } = await install();
+  it('forgets an ended client: it is no longer followed once its page closes', async () => {
+    const { files, followed } = await install();
     await invoke('files.watch', { appSessionId: 'A', path: join(root, 'repo', 'src') });
-    sender.emit('did-navigate');
-    expect(epochs.has(7)).toBe(true); // a live window keeps its epoch, so a watch in flight across the reload is caught
+    expect([...followed]).toEqual(['page:7.1']);
+    sender.destroyed = true;
     sender.emit('destroyed');
-    expect(epochs.has(7)).toBe(false);
+    expect(followed.size).toBe(0);
     expect(files.watching()).toEqual([]);
   });
 
-  it('drops a watch still in flight when its window closes, though the pruned epoch reads as before', async () => {
-    const { files, epochs } = await install();
+  it('drops a watch still in flight when its window closes', async () => {
+    const { files, followed } = await install();
     const answer = invoke('files.watch', { appSessionId: 'A', path: join(root, 'repo', 'src') });
     sender.destroyed = true;
     sender.emit('destroyed');
     await answer;
-    expect(epochs.has(7)).toBe(false);
+    expect(followed.size).toBe(0);
     expect(files.watching()).toEqual([]);
   });
 });

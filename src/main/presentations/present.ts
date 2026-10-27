@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { BrowserWindow, screen, type Rectangle, type WebContents } from 'electron';
 import type { PresentInput, PresentOutput } from '@shared/ipc/schema/presentations';
 import { guardFrames, type SeamEnv } from '../artifacts/policies';
+import { pageOf } from '../ipc/clients';
 import type { registerMainHandler } from '../ipc/router';
 import { showAppWindow } from '../window-show';
 
@@ -128,6 +129,6 @@ export function registerPresenter({ register, appUrl, env }: { register: typeof 
     },
     open: (spec) => openPresentWindow(spec, appUrl, env),
   });
-  register('presentations.present', (input, { sender }) => presenter.present(input, sender));
+  register('presentations.present', (input, { client }) => presenter.present(input, pageOf(client)));
   return presenter;
 }

@@ -170,7 +170,7 @@ export function startBrowserImport({ userData, settings, index, register, emit, 
 function nativeChooser(env: NodeJS.ProcessEnv): ChooseDirectory {
   return (sender, options) =>
     openDialogFor(env, (dialogOptions) => {
-      const win = BrowserWindow.fromWebContents(sender);
+      const win = sender && BrowserWindow.fromWebContents(sender);
       return win ? dialog.showOpenDialog(win, dialogOptions) : dialog.showOpenDialog(dialogOptions);
     })(options);
 }

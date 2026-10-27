@@ -17,7 +17,7 @@ vi.mock('electron', () => ({
 
 const APP_URL = 'http://localhost:5173/';
 const mainFrame = { url: APP_URL, parent: null };
-const sender = Object.assign(new EventEmitter(), { id: 7, mainFrame });
+const sender = Object.assign(new EventEmitter(), { id: 7, mainFrame, isDestroyed: () => false });
 const event = { sender, senderFrame: mainFrame };
 const appSessionId = 'a1111111-1111-4111-8111-111111111111';
 

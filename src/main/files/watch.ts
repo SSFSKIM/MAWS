@@ -16,9 +16,9 @@ export interface Identity {
 }
 export const sameIdentity = (a: Identity, b: Identity) => a.dev === b.dev && a.ino === b.ino;
 
-// A holder of a watch: the requesting window (`sender.id`), the session it asked for, and the path it named.
+// A holder of a watch: the requesting client (`ClientRef.id`), the session it asked for, and the path it named.
 export interface Holder {
-  owner: number;
+  owner: string;
   appSessionId: AppSessionId;
   path: string;
 }
@@ -122,8 +122,8 @@ export class WatchTable {
     }
   }
 
-  // Everything a window held: its page can no longer unwatch, and a reloaded page watches afresh.
-  release(owner: number): void {
+  // Everything a client held: its page can no longer unwatch, and a reloaded page watches afresh.
+  release(owner: string): void {
     for (const entry of [...this.entries.values()]) {
       for (const [key, held] of entry.holders) if (held.owner === owner) entry.holders.delete(key);
       if (entry.holders.size === 0) this.close(entry);

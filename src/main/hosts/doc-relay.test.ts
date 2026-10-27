@@ -53,7 +53,7 @@ describe('MainDocRelay', () => {
   it('opens nothing while no connection is served', () => {
     const relay = new MainDocRelay();
     const port = new FakePort();
-    expect(relay.open(doc(1), port, 7)).toBe(false);
+    expect(relay.open(doc(1), port, 'page:7.1')).toBe(false);
     expect(port.started).toBe(false);
   });
 
@@ -62,7 +62,7 @@ describe('MainDocRelay', () => {
     const l = link();
     relay.connect(l.value);
     const port = new FakePort();
-    expect(relay.open(doc(4), port, 7)).toBe(true);
+    expect(relay.open(doc(4), port, 'page:7.1')).toBe(true);
     expect(port.started).toBe(true);
     expect(l.lines).toEqual([{ t: 'documents.open', channel: 4, artifactId: ID, actor: { kind: 'human' } }]);
     port.fromWindow(Uint8Array.from([1, 2]));
@@ -72,7 +72,7 @@ describe('MainDocRelay', () => {
     relay.deliver(5, Uint8Array.from([9])); // a channel main does not know: in flight across a close
     expect(port.posted).toEqual([Uint8Array.from([3])]);
     // P3-A M8: a suggestion doc's channel names it to the host
-    expect(relay.open({ ...doc(6), doc: 'suggestions' }, new FakePort(), 7)).toBe(true);
+    expect(relay.open({ ...doc(6), doc: 'suggestions' }, new FakePort(), 'page:7.1')).toBe(true);
     expect(l.lines.at(-1)).toEqual({ t: 'documents.open', channel: 6, artifactId: ID, actor: { kind: 'human' }, doc: 'suggestions' });
   });
 
@@ -81,7 +81,7 @@ describe('MainDocRelay', () => {
     const l = link();
     relay.connect(l.value);
     const port = new FakePort();
-    relay.open(doc(4), port, 7);
+    relay.open(doc(4), port, 'page:7.1');
     port.closeFromWindow();
     port.closeFromWindow();
     expect(l.lines.slice(1)).toEqual([{ t: 'documents.close', channel: 4 }]);
@@ -93,7 +93,7 @@ describe('MainDocRelay', () => {
     const l = link();
     relay.connect(l.value);
     const port = new FakePort();
-    relay.open(doc(4), port, 7);
+    relay.open(doc(4), port, 'page:7.1');
     relay.closed(4);
     expect(port.closed).toBe(true);
     expect(l.lines).toHaveLength(1);
@@ -106,10 +106,10 @@ describe('MainDocRelay', () => {
     const l = link();
     relay.connect(l.value);
     const [a1, a2, b] = [new FakePort(), new FakePort(), new FakePort()];
-    relay.open(doc(1), a1, 7);
-    relay.open(doc(2), a2, 7);
-    relay.open(doc(3), b, 8);
-    relay.closeOwner(7);
+    relay.open(doc(1), a1, 'page:7.1');
+    relay.open(doc(2), a2, 'page:7.1');
+    relay.open(doc(3), b, 'page:8.1');
+    relay.closeOwner('page:7.1');
     expect([a1.closed, a2.closed, b.closed]).toEqual([true, true, false]);
     expect(l.lines.slice(3)).toEqual([{ t: 'documents.close', channel: 1 }, { t: 'documents.close', channel: 2 }]);
     expect(relay.size).toBe(1);
@@ -120,18 +120,18 @@ describe('MainDocRelay', () => {
     const first = link();
     relay.connect(first.value);
     const [a, b] = [new FakePort(), new FakePort()];
-    relay.open(doc(1), a, 7);
-    relay.open(doc(2), b, 8);
+    relay.open(doc(1), a, 'page:7.1');
+    relay.open(doc(2), b, 'page:8.1');
     relay.disconnect();
     expect([a.closed, b.closed]).toEqual([true, true]);
     expect(first.lines).toHaveLength(2); // nothing is said on a connection that is gone
     a.fromWindow(Uint8Array.from([1]));
     expect(first.frames).toEqual([]);
-    expect(relay.open(doc(3), new FakePort(), 7)).toBe(false);
+    expect(relay.open(doc(3), new FakePort(), 'page:7.1')).toBe(false);
 
     const second = link();
     relay.connect(second.value);
-    expect(relay.open(doc(3), new FakePort(), 7)).toBe(true);
+    expect(relay.open(doc(3), new FakePort(), 'page:7.1')).toBe(true);
     expect(second.lines).toEqual([{ t: 'documents.open', channel: 3, artifactId: ID, actor: { kind: 'human' } }]);
   });
 });

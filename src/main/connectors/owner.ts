@@ -32,11 +32,13 @@
 //   coalesced; the unattributed withdrawal is the provider's own flag.
 import { randomUUID } from 'node:crypto';
 import type { ConnectorGrant, ConnectorToolRef } from '@shared/artifacts/connectors';
+import type { ClientId, ClientRef } from '@shared/ipc/client';
 import { eventChannel } from '@shared/ipc/schema';
 import {
   CONNECTOR_OWNER_FAILURES, type ConnectorOwnerAck, type ConnectorOwnerFailure, type ConnectorServerRow, type ConnectorServers, type DirectDiscoverAnswer, type DirectReason, type DirectSource,
 } from '@shared/ipc/schema/connectors';
 import { validateEventPayload } from '@shared/ipc/validate';
+import { pageOf } from '../ipc/clients';
 import type { DirectRoute } from './direct-route';
 import type { ConnectorOAuthConnectFailure, ConnectorOAuthProvider, ConnectorOAuthState } from './oauth-provider';
 import type { ConnectorOAuthSaved } from './oauth-store';
@@ -56,13 +58,6 @@ const HANDLE_LIMIT = 1_024;
 const MEMORY_LIMIT = 1_024; // last outcomes and retirements remembered
 const VIEWER_ARTIFACT_LIMIT = 64;
 
-export interface ConnectorOwnerViewer {
-  readonly id: number;
-  isDestroyed(): boolean;
-  send(channel: string, payload: unknown): void;
-  once(event: 'destroyed', listener: () => void): unknown;
-}
-
 export interface ConnectorOwnerDeps {
   direct: Pick<DirectRoute, 'resolveSource' | 'discover'>;
   oauth: Pick<ConnectorOAuthProvider, 'state' | 'saved' | 'connect' | 'reconnect' | 'disconnect' | 'disconnecting' | 'retirements' | 'onChange' | 'withdrawnUnattributed'> | null; // null: no OAuth of MAWS's own
@@ -71,7 +66,7 @@ export interface ConnectorOwnerDeps {
 }
 
 export interface ConnectorOwner {
-  servers(artifactId: string, tools: readonly ConnectorToolRef[], viewer: ConnectorOwnerViewer): Promise<ConnectorServers>;
+  servers(artifactId: string, tools: readonly ConnectorToolRef[], viewer: ClientRef): Promise<ConnectorServers>;
   connect(artifactId: string, sourceHandle: string): ConnectorOwnerAck;
   reconnect(artifactId: string, sourceHandle: string): ConnectorOwnerAck;
   disconnect(connectionId: string): ConnectorOwnerAck;
@@ -167,20 +162,19 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
   const labels = new Map<string, Origin | 'unreadable'>(); // what a listing last showed for a connection id
   const retiring = new Map<string, Origin | null>(); // connections being retired (the owner's or the provider's), by id
   const disconnects = new Set<string>(); // in flight
-  const viewers = new Map<number, { viewer: ConnectorOwnerViewer; artifacts: Set<string> }>();
+  const viewers = new Map<ClientId, { viewer: ClientRef; artifacts: Set<string> }>(); // until the client ends
   const queries = new Set<AbortController>();
   const connectionRows = new Map<string, string>(); // P3-HD M3c2 correction: connection id → the HTTP row key a listing tied it to
   let stopped = false;
 
   // ── invalidation, to the windows that read rows ──
 
-  function listen(viewer: ConnectorOwnerViewer, artifactId: string): void {
+  function listen(viewer: ClientRef, artifactId: string): void {
     let entry = viewers.get(viewer.id);
     if (!entry) {
-      if (viewer.isDestroyed()) return;
       entry = { viewer, artifacts: new Set() };
       viewers.set(viewer.id, entry);
-      viewer.once('destroyed', () => viewers.delete(viewer.id));
+      viewer.onGone(() => viewers.delete(viewer.id)); // at once for a client already gone, which then hears nothing
     }
     entry.artifacts.delete(artifactId);
     entry.artifacts.add(artifactId);
@@ -189,14 +183,12 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
 
   // A saved connection is one identity shared by every artifact naming it, so any change reaches every row read.
   function changed(): void {
-    for (const [id, { viewer, artifacts }] of viewers) {
-      if (viewer.isDestroyed()) {
-        viewers.delete(id);
-        continue;
-      }
+    for (const { viewer, artifacts } of viewers.values()) {
+      const page = pageOf(viewer); // O3 replaces this with an emit to one client through the root's events
+      if (!page || page.isDestroyed()) continue;
       for (const artifactId of artifacts) {
         const checked = validateEventPayload('connectors.serversChanged', { artifactId });
-        if (checked.ok) viewer.send(eventChannel('connectors.serversChanged'), checked.value);
+        if (checked.ok) page.send(eventChannel('connectors.serversChanged'), checked.value);
       }
     }
   }
@@ -249,7 +241,7 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
 
   // ── the rows ──
 
-  async function servers(artifactId: string, asked: readonly ConnectorToolRef[], viewer: ConnectorOwnerViewer): Promise<ConnectorServers> {
+  async function servers(artifactId: string, asked: readonly ConnectorToolRef[], viewer: ClientRef): Promise<ConnectorServers> {
     if (stopped) throw new Error('the connector service has stopped');
     listen(viewer, artifactId);
     const query = new AbortController();

@@ -4,6 +4,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults'; // P2-F L113
 import { humanTurn, record, status } from '../../../test/support/builders';
+import { clientOf } from '../ipc/clients'; // E5: the page's ClientRef, as the router hands it
 
 // Electron's `app` as the guard sees it: `before-quit` listeners, and `quit()` firing `before-quit` again, as it does.
 const electron = vi.hoisted(() => {
@@ -371,16 +372,16 @@ describe('quit when idle', () => {
     vi.useFakeTimers();
     try {
       const files = trackUnsavedFiles();
-      const window = Object.assign(new EventEmitter(), { id: 1 });
+      const window = Object.assign(new EventEmitter(), { id: 1, isDestroyed: () => false });
       const publish = vi.fn();
       guardDeps(modelWith([bg('a')]), { publish, ask: async () => 'when_idle', unsavedFiles: () => files.paths(), onUnsavedFiles: (listener) => files.onChange(listener) });
       electron.app.attempt();
       await vi.advanceTimersByTimeAsync(0);
       expect(publish).toHaveBeenLastCalledWith({ midTurn: 0, backgroundWork: 1, busyTerminals: 0, terminalsUnknown: false, unsavedFiles: [] });
-      files.update(window, ['/r/a.ts']); // dirtied during the wait
+      files.update(clientOf(window as never), ['/r/a.ts']); // dirtied during the wait
       await vi.advanceTimersByTimeAsync(0);
       expect(publish).toHaveBeenLastCalledWith({ midTurn: 0, backgroundWork: 1, busyTerminals: 0, terminalsUnknown: false, unsavedFiles: ['/r/a.ts'] });
-      files.update(window, []); // saved
+      files.update(clientOf(window as never), []); // saved
       await vi.advanceTimersByTimeAsync(0);
       expect(publish).toHaveBeenLastCalledWith({ midTurn: 0, backgroundWork: 1, busyTerminals: 0, terminalsUnknown: false, unsavedFiles: [] });
       expect(publish).toHaveBeenCalledTimes(3);
@@ -391,14 +392,14 @@ describe('quit when idle', () => {
 
   it('stops hearing the pushes when the wait ends', async () => {
     const files = trackUnsavedFiles();
-    const window = Object.assign(new EventEmitter(), { id: 1 });
+    const window = Object.assign(new EventEmitter(), { id: 1, isDestroyed: () => false });
     const publish = vi.fn();
     const control = guardDeps(modelWith([bg('a')]), { publish, ask: async () => 'when_idle', unsavedFiles: () => files.paths(), onUnsavedFiles: (listener) => files.onChange(listener) });
     electron.app.attempt();
     await settle();
     control.cancelWait();
     publish.mockClear();
-    files.update(window, ['/r/a.ts']);
+    files.update(clientOf(window as never), ['/r/a.ts']);
     await settle();
     expect(publish).not.toHaveBeenCalled();
   });
@@ -916,15 +917,15 @@ describe('unsaved files in the quit question', () => {
 
   it('the guard asks each question with its round and the reasons of the Save all before it', async () => {
     const files = trackUnsavedFiles();
-    const window = Object.assign(new EventEmitter(), { id: 1 });
-    files.update(window, ['/r/app.ts', '/r/b.ts']);
+    const window = Object.assign(new EventEmitter(), { id: 1, isDestroyed: () => false });
+    files.update(clientOf(window as never), ['/r/app.ts', '/r/b.ts']);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const show = vi.fn().mockResolvedValueOnce({ response: 0 }).mockResolvedValueOnce({ response: 2 }); // Save all, then Cancel
     const ask = vi.fn((report: Parameters<typeof askToQuit>[0], asked: Parameters<typeof askToQuit>[2]) => askToQuit(report, { env: {}, show }, asked));
     guard(modelWith([]), {
       unsavedFiles: () => files.paths(),
       // the window answers app.ts with the conflict its tab now shows, and b.ts not at all (typed into during the save, say)
-      saveAll: () => files.saveAll((requestId) => setTimeout(() => files.done(window, requestId, [{ path: '/r/app.ts', message: 'Changed on disk since you opened it' }]))),
+      saveAll: () => files.saveAll((requestId) => setTimeout(() => files.done(clientOf(window as never), requestId, [{ path: '/r/app.ts', message: 'Changed on disk since you opened it' }]))),
       ask,
     });
     electron.app.attempt();
@@ -1008,26 +1009,26 @@ describe('unsaved files in the quit question', () => {
 });
 
 describe('the unsaved files each window pushes', () => {
-  const windowOf = (id: number) => Object.assign(new EventEmitter(), { id });
+  const windowOf = (id: number) => Object.assign(new EventEmitter(), { id, isDestroyed: () => false });
 
   it('keeps each window’s whole set, reports their union sorted, and forgets a window that navigates or closes', () => {
     const files = trackUnsavedFiles();
     const one = windowOf(1);
     const two = windowOf(2);
-    files.update(one, ['/r/b.ts', '/r/a.ts']);
-    files.update(two, ['/r/c.ts', '/r/a.ts']);
+    files.update(clientOf(one as never), ['/r/b.ts', '/r/a.ts']);
+    files.update(clientOf(two as never), ['/r/c.ts', '/r/a.ts']);
     expect(files.paths()).toEqual(['/r/a.ts', '/r/b.ts', '/r/c.ts']);
-    files.update(one, ['/r/b.ts']); // the window's last word replaces its earlier one
+    files.update(clientOf(one as never), ['/r/b.ts']); // the window's last word replaces its earlier one
     expect(files.paths()).toEqual(['/r/a.ts', '/r/b.ts', '/r/c.ts']);
-    files.update(two, []);
+    files.update(clientOf(two as never), []);
     expect(files.paths()).toEqual(['/r/b.ts']);
-    files.update(two, ['/r/c.ts']);
-    two.emit('did-navigate'); // a reload starts from an empty viewer
+    files.update(clientOf(two as never), ['/r/c.ts']);
+    two.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false }); // a reload starts from an empty viewer
     expect(files.paths()).toEqual(['/r/b.ts']);
     one.emit('destroyed');
     expect(files.paths()).toEqual([]);
-    files.update(two, ['/r/a.ts']); // listeners are attached once per window
-    expect(two.listenerCount('did-navigate')).toBe(1);
+    files.update(clientOf(two as never), ['/r/a.ts']); // listeners are attached once per window
+    expect(two.listenerCount('did-start-navigation')).toBe(1);
     expect(two.listenerCount('destroyed')).toBe(1);
   });
 
@@ -1035,15 +1036,15 @@ describe('the unsaved files each window pushes', () => {
     const files = trackUnsavedFiles();
     const one = windowOf(1);
     const two = windowOf(2);
-    files.update(one, ['/r/a.ts']);
-    files.update(two, ['/r/b.ts']);
+    files.update(clientOf(one as never), ['/r/a.ts']);
+    files.update(clientOf(two as never), ['/r/b.ts']);
     const send = vi.fn();
     const done = files.saveAll(send);
     one.emit('render-process-gone', {}, { reason: 'crashed', exitCode: 133 });
     expect(files.paths()).toEqual(['/r/b.ts']);
-    files.done(two, send.mock.calls[0]![0] as string, []);
+    files.done(clientOf(two as never), send.mock.calls[0]![0] as string, []);
     await done; // settles without the crashed window's answer, well inside SAVE_ALL_BOUND_MS
-    files.update(one, ['/r/a.ts']); // a reloaded renderer pushes again; listeners stay attached once
+    files.update(clientOf(one as never), ['/r/a.ts']); // a reloaded renderer pushes again; listeners stay attached once
     expect(files.paths()).toEqual(['/r/a.ts', '/r/b.ts']);
     expect(one.listenerCount('render-process-gone')).toBe(1);
   });
@@ -1053,22 +1054,22 @@ describe('the unsaved files each window pushes', () => {
     const one = windowOf(1);
     const two = windowOf(2);
     const idle = windowOf(3);
-    files.update(one, ['/r/a.ts']);
-    files.update(two, ['/r/b.ts']);
-    files.update(idle, []);
+    files.update(clientOf(one as never), ['/r/a.ts']);
+    files.update(clientOf(two as never), ['/r/b.ts']);
+    files.update(clientOf(idle as never), []);
     const sent: string[] = [];
     let settled = false;
     const done = files.saveAll((requestId) => sent.push(requestId)).then((reasons) => ((settled = true), reasons));
     expect(sent).toHaveLength(1);
     const requestId = sent[0]!;
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    files.update(one, []);
-    files.done(one, requestId, []);
-    files.done(idle, requestId, []); // a window without files answers too; it was not waited on
-    files.done(two, 'an-earlier-request', [{ path: '/r/z.ts', message: 'Saving…' }]); // not this request's
+    files.update(clientOf(one as never), []);
+    files.done(clientOf(one as never), requestId, []);
+    files.done(clientOf(idle as never), requestId, []); // a window without files answers too; it was not waited on
+    files.done(clientOf(two as never), 'an-earlier-request', [{ path: '/r/z.ts', message: 'Saving…' }]); // not this request's
     await settle();
     expect(settled).toBe(false);
-    files.done(two, requestId, [{ path: '/r/b.ts', message: 'Changed on disk since you opened it' }]);
+    files.done(clientOf(two as never), requestId, [{ path: '/r/b.ts', message: 'Changed on disk since you opened it' }]);
     expect(await done).toEqual(new Map([['/r/b.ts', 'Changed on disk since you opened it']])); // main keeps them by path
     expect(warn).toHaveBeenCalledWith('[quit-guard] could not save /r/b.ts: Changed on disk since you opened it');
     warn.mockRestore();
@@ -1082,11 +1083,11 @@ describe('the unsaved files each window pushes', () => {
     expect(send).not.toHaveBeenCalled();
     const one = windowOf(1);
     const two = windowOf(2);
-    files.update(one, ['/r/a.ts']);
-    files.update(two, ['/r/b.ts']);
+    files.update(clientOf(one as never), ['/r/a.ts']);
+    files.update(clientOf(two as never), ['/r/b.ts']);
     const done = files.saveAll(send);
     one.emit('destroyed');
-    two.emit('did-navigate');
+    two.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
     await done;
     expect(send).toHaveBeenCalledOnce();
   });
@@ -1096,7 +1097,7 @@ describe('the unsaved files each window pushes', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const files = trackUnsavedFiles();
-      files.update(windowOf(1), ['/r/a.ts']);
+      files.update(clientOf(windowOf(1) as never), ['/r/a.ts']);
       let settled = false;
       void files.saveAll(() => {}).then(() => (settled = true));
       await vi.advanceTimersByTimeAsync(SAVE_ALL_BOUND_MS - 1);

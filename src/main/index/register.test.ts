@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -20,7 +21,7 @@ vi.mock('electron', () => ({
 
 const APP_URL = 'http://localhost:5173/';
 const mainFrame = { url: APP_URL, parent: null };
-const sender = { mainFrame };
+const sender = Object.assign(new EventEmitter(), { id: 7, mainFrame, isDestroyed: () => false }); // the app window's webContents
 const event = { sender, senderFrame: mainFrame };
 
 type IndexModule = typeof import('./index');

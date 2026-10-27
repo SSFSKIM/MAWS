@@ -11,6 +11,7 @@ import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { SaveDialogOptions, WebContents } from 'electron';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
+import { pageOf } from '../ipc/clients';
 import { CommandFailure, type registerMainHandler } from '../ipc/router';
 
 export interface AssetDownloadDeps {
@@ -77,5 +78,5 @@ export function createAssetDownload(deps: AssetDownloadDeps) {
 
 export function registerAssetDownload(register: typeof registerMainHandler, deps: AssetDownloadDeps): void {
   const download = createAssetDownload(deps);
-  register('artifacts.downloadAsset', (input, { sender }) => download.downloadAsset(input, sender));
+  register('artifacts.downloadAsset', (input, { client }) => download.downloadAsset(input, pageOf(client) ?? undefined)); // M3 moves the dialog to the client port
 }

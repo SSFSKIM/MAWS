@@ -9,6 +9,7 @@ import type { CommandName, EventName, HostState } from '@shared/ipc/schema';
 import { eventChannel } from '@shared/ipc/schema';
 import type { DirectOperationOutcome } from '@shared/ipc/schema/connectors';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
+import { clientOf } from '../ipc/clients';
 import type { MainContext } from '../ipc/router';
 import { startConnectors, type ConnectorWindow } from '.';
 import { createDirectRoute } from './direct-route';
@@ -178,7 +179,7 @@ afterEach(() => {
 async function invoke(name: CommandName, input: unknown): Promise<unknown> {
   const checked = validateCommandInput(name, input);
   if (!checked.ok) throw new Error(`invalid input for ${name}`);
-  return handlers.get(name)!(checked.value, { sender: me as unknown as MainContext['sender'] });
+  return handlers.get(name)!(checked.value, { client: clientOf(me as never) });
 }
 const settle = async () => {
   for (let i = 0; i < 6; i++) await vi.advanceTimersByTimeAsync(0);

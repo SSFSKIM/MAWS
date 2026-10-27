@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { clientOf } from '../ipc/clients';
 import { emit } from '../ipc/events';
 import { registerMainHandler } from '../ipc/router';
 import { appWindows } from '../windows';
@@ -46,7 +47,7 @@ describe('attention startup', () => {
     } });
     const stop = startAttention(model, { restoredIds: new Set(), settings: () => SETTINGS_DEFAULTS_V18, openWindow: () => { throw new Error('already open'); } });
     const handler = vi.mocked(registerMainHandler).mock.calls.find(([name]) => name === 'attention.viewing')![1] as (input: { appSessionId: AppSessionId }, context: unknown) => void;
-    const view = () => handler({ appSessionId: id }, { sender });
+    const view = () => handler({ appSessionId: id }, { client: clientOf(sender as never) });
     try {
       view();
       sender.emit('did-start-loading'); // also fires for an iframe
@@ -58,13 +59,11 @@ describe('attention startup', () => {
       expect(emit).not.toHaveBeenCalled();
       for (let n = 0; n < 3; n++) {
         sender.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
-        expect(sender.listenerCount('did-start-navigation')).toBe(1); // only followAppPages remains
         view();
-        expect(sender.listenerCount('did-start-navigation')).toBe(2);
+        expect(sender.listenerCount('did-start-navigation')).toBe(2); // followAppPages and the page's ClientRef, however many pages
         expect(sender.listenerCount('destroyed')).toBe(1);
       }
       sender.emit('render-process-gone');
-      expect(sender.listenerCount('destroyed')).toBe(0);
       observe([item(id, 'question', '2026-10-23T02:00:00Z')]);
       expect(emit).toHaveBeenCalledWith('attention.notified', expect.objectContaining({ appSessionId: id, delivery: 'in-app' }));
     } finally { stop(); }

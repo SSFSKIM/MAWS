@@ -2,8 +2,10 @@
 // artifact is a live document kind, makes one channel per open, hands one end to the engine host on its parent port with
 // the human as actor and posts the other to the asking window on `maws:doc-port`, and answers the channel number the
 // window awaits its port by. Nothing is posted anywhere when the host is not there to take its end.
+import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import type { CommandResult } from '@shared/ipc/schema';
+import { clientOf } from '../ipc/clients';
 import { CommandFailure } from '../ipc/router';
 import { DOC_PORT_CHANNEL, openDocument, type DocOpenDeps } from './open';
 
@@ -34,34 +36,26 @@ function harness(answer: CommandResult<'artifacts.get'>, posted = true) {
   return { deps, dispatch, postDocPort, closeDocPorts, sender, ports };
 }
 
-// P3-A M5: a window's webContents as open.ts uses it, with the lifecycle events it listens to.
+// P3-A M5: a window's webContents as open.ts reaches it through its ClientRef, with the lifecycle events that end it.
 let nextWindow = 1;
 function fakeWindow(id: number) {
-  const handlers = new Map<string, (() => void)[]>();
-  const add = (event: string, handler: () => void) => void handlers.set(event, [...(handlers.get(event) ?? []), handler]);
-  return {
-    id,
-    postMessage: vi.fn(),
-    isDestroyed: () => false,
-    on: vi.fn((event: string, handler: () => void) => add(event, handler)),
-    once: vi.fn((event: string, handler: () => void) => add(event, handler)),
-    fire: (event: string) => (handlers.get(event) ?? []).forEach((handler) => handler()),
-  };
+  return Object.assign(new EventEmitter(), { id, postMessage: vi.fn(), destroyed: false, isDestroyed(this: { destroyed: boolean }) { return this.destroyed; } });
 }
+const clientFor = (window: ReturnType<typeof fakeWindow>) => clientOf(window as never);
 
 describe('artifacts.open (main)', () => {
   it('hands the host its end with the human as actor and the window the other, under a fresh channel each time', async () => {
     const h = harness({ ok: true, value: { artifact: row('document') as never } });
-    const first = await openDocument(h.deps, ID, h.sender as never);
-    const second = await openDocument(h.deps, ID, h.sender as never);
+    const first = await openDocument(h.deps, ID, clientFor(h.sender));
+    const second = await openDocument(h.deps, ID, clientFor(h.sender));
     expect(first.channel).not.toBe(second.channel);
     expect(h.dispatch).toHaveBeenCalledWith('engine-host', 'artifacts.get', { artifactId: ID });
-    expect(h.postDocPort).toHaveBeenNthCalledWith(1, { t: 'doc', channel: first.channel, artifactId: ID, actor: { kind: 'human' } }, h.ports[0], h.sender.id);
+    expect(h.postDocPort).toHaveBeenNthCalledWith(1, { t: 'doc', channel: first.channel, artifactId: ID, actor: { kind: 'human' } }, h.ports[0], `page:${h.sender.id}.1`);
     expect(h.sender.postMessage).toHaveBeenNthCalledWith(1, DOC_PORT_CHANNEL, { channel: first.channel, artifactId: ID }, [h.ports[1]]);
     expect(h.ports.every((p) => !p.closed)).toBe(true);
     // P3-A M8: the suggestion doc travels as `doc` on the host's message, after the same check
-    const third = await openDocument(h.deps, ID, h.sender as never, 'suggestions');
-    expect(h.postDocPort).toHaveBeenLastCalledWith({ t: 'doc', channel: third.channel, artifactId: ID, actor: { kind: 'human' }, doc: 'suggestions' }, h.ports[4], h.sender.id);
+    const third = await openDocument(h.deps, ID, clientFor(h.sender), 'suggestions');
+    expect(h.postDocPort).toHaveBeenLastCalledWith({ t: 'doc', channel: third.channel, artifactId: ID, actor: { kind: 'human' }, doc: 'suggestions' }, h.ports[4], `page:${h.sender.id}.1`);
   });
 
   it('refuses a byte kind as invalid and a missing artifact as notFound, opening no channel', async () => {
@@ -70,7 +64,7 @@ describe('artifacts.open (main)', () => {
       [{ ok: true, value: { artifact: null } }, 'notFound'],
     ] as const) {
       const h = harness(answer as never);
-      const error = await openDocument(h.deps, ID, h.sender as never).catch((e: unknown) => e);
+      const error = await openDocument(h.deps, ID, clientFor(h.sender)).catch((e: unknown) => e);
       expect(error).toBeInstanceOf(CommandFailure);
       expect((error as CommandFailure).error).toMatchObject({ code: 'invalid_input', issues: { reason } });
       expect(h.ports).toEqual([]);
@@ -80,13 +74,13 @@ describe('artifacts.open (main)', () => {
 
   it('relays the host’s own refusal of the lookup as it came', async () => {
     const h = harness({ ok: false, error: { code: 'host_unavailable', message: 'engine-host is restarting' } });
-    const error = (await openDocument(h.deps, ID, h.sender as never).catch((e: unknown) => e)) as CommandFailure;
+    const error = (await openDocument(h.deps, ID, clientFor(h.sender)).catch((e: unknown) => e)) as CommandFailure;
     expect(error.error).toEqual({ code: 'host_unavailable', message: 'engine-host is restarting' });
   });
 
   it('closes both ends and answers host_unavailable when the host cannot take its end, posting nothing to the window', async () => {
     const h = harness({ ok: true, value: { artifact: row('document') as never } }, false);
-    const error = (await openDocument(h.deps, ID, h.sender as never).catch((e: unknown) => e)) as CommandFailure;
+    const error = (await openDocument(h.deps, ID, clientFor(h.sender)).catch((e: unknown) => e)) as CommandFailure;
     expect(error.error.code).toBe('host_unavailable');
     expect(h.ports.map((p) => p.closed)).toEqual([true, true]);
     expect(h.sender.postMessage).not.toHaveBeenCalled();
@@ -94,8 +88,12 @@ describe('artifacts.open (main)', () => {
 
   it('opens nothing for a window that went while the lookup was in flight', async () => {
     const h = harness({ ok: true, value: { artifact: row('document') as never } });
-    const gone = { ...fakeWindow(99), isDestroyed: () => true };
-    await expect(openDocument(h.deps, ID, gone as never)).rejects.toBeInstanceOf(CommandFailure);
+    const gone = fakeWindow(99);
+    const client = clientFor(gone);
+    const opening = openDocument(h.deps, ID, client);
+    gone.destroyed = true;
+    gone.emit('destroyed');
+    await expect(opening).rejects.toBeInstanceOf(CommandFailure);
     expect(h.postDocPort).not.toHaveBeenCalled();
   });
 });
@@ -103,15 +101,15 @@ describe('artifacts.open (main)', () => {
 // P3-A M5 (Decision Log 34b): a detached host's ports are relayed by main, which ends a window's channels when it closes
 // or reloads; open.ts names the window and watches it.
 describe('artifacts.open: the window’s channels (P3-A M5)', () => {
-  it('ends the window’s relayed channels when it closes or navigates, watching each window once', async () => {
+  it('ends the client’s relayed channels when its page navigates or closes, watching each client once', async () => {
     const h = harness({ ok: true, value: { artifact: row('document') as never } });
-    await openDocument(h.deps, ID, h.sender as never);
-    await openDocument(h.deps, ID, h.sender as never);
-    expect(h.sender.once).toHaveBeenCalledTimes(1);
-    expect(h.sender.on).toHaveBeenCalledTimes(1);
-    h.sender.fire('did-navigate');
-    expect(h.closeDocPorts).toHaveBeenCalledWith(h.sender.id);
-    h.sender.fire('destroyed');
+    await openDocument(h.deps, ID, clientFor(h.sender));
+    await openDocument(h.deps, ID, clientFor(h.sender));
+    h.sender.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
+    expect(h.closeDocPorts).toHaveBeenCalledExactlyOnceWith(`page:${h.sender.id}.1`);
+    await openDocument(h.deps, ID, clientFor(h.sender)); // the reloaded page's
+    h.sender.emit('destroyed');
+    expect(h.closeDocPorts).toHaveBeenLastCalledWith(`page:${h.sender.id}.2`);
     expect(h.closeDocPorts).toHaveBeenCalledTimes(2);
   });
 });
