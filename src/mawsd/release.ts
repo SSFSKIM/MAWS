@@ -6,7 +6,10 @@
 // them); older ones are pruned.
 //
 // A running daemon is unaffected by a flip: Node runs the real path of its entry and `process.execPath` is the real
-// runtime, so it and the hosts it spawned keep their release's files until the unit restarts it (install.ts).
+// runtime, so it and the hosts it spawned keep their release's files until the unit restarts it (install.ts). A host
+// can outlive several releases (an engine host of an unchanged build is adopted by every later `mawsd`, never
+// replaced) and reads its release's files while it runs (its design systems' `?asset` files), so a release any running
+// process runs from is never pruned, however old.
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, utimesSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { UnitError, type UnitProgram } from './units/unit';
@@ -44,6 +47,11 @@ export function packOf(entry: string): Pack | null {
   return { root, release, runtime: existsSync(join(root, 'runtime', 'bin', 'node')) };
 }
 
+export interface ReleaseDeps {
+  now?: () => number;
+  commandLines?: () => string[]; // every running process's command line (default: Linux's /proc)
+}
+
 export interface InstalledRelease {
   release: string;
   previous: string | null; // the release current named before, if any
@@ -53,7 +61,7 @@ export interface InstalledRelease {
 
 // Copies `pack` into releases/<release> (unless it is that directory), flips current to it, marks it the most recently
 // installed, and prunes all but the two previous releases. A copy is staged beside its target and renamed into place.
-export function installRelease(pack: Pack, home: string, now: () => number = Date.now): InstalledRelease {
+export function installRelease(pack: Pack, home: string, { now = Date.now, commandLines = procCommandLines }: ReleaseDeps = {}): InstalledRelease {
   if (!pack.runtime) throw new UnitError(`the release ${pack.release} at ${pack.root} has no runtime/bin/node (pnpm mawsd:pack adds it on Linux)`);
   const base = releasesRoot(home);
   const dir = join(base, 'releases');
@@ -90,9 +98,29 @@ export function installRelease(pack: Pack, home: string, now: () => number = Dat
     .filter((name) => !name.startsWith('.') && name !== pack.release)
     .map((name) => ({ name, at: statSync(join(dir, name)).mtimeMs }))
     .sort((a, b) => b.at - a.at || b.name.localeCompare(a.name));
-  const pruned = others.slice(KEEP_PREVIOUS).map(({ name }) => name);
+  const running = commandLines();
+  const inUse = (name: string) => running.some((line) => line.includes(`${join(dir, name)}/`));
+  const pruned = others.slice(KEEP_PREVIOUS).map(({ name }) => name).filter((name) => !inUse(name)).sort();
   for (const name of pruned) rmSync(join(dir, name), { recursive: true, force: true });
   return { release: pack.release, previous, flipped, pruned };
+}
+
+function procCommandLines(): string[] {
+  let pids: string[];
+  try {
+    pids = readdirSync('/proc').filter((name) => /^\d+$/.test(name));
+  } catch {
+    return []; // no /proc: not Linux
+  }
+  const lines: string[] = [];
+  for (const pid of pids) {
+    try {
+      lines.push(readFileSync(join('/proc', pid, 'cmdline'), 'utf8').replace(/\0/g, ' '));
+    } catch {
+      // gone, or another user's
+    }
+  }
+  return lines;
 }
 
 // The release `link` names (`releases/<release>`), or null when there is no link.
