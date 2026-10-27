@@ -291,6 +291,9 @@ All keys are P-256: ECDSA for signatures, ECDH for channel keys. Node, WebCrypto
   - **Retirement** is for a key that leaves honestly: a deleted VM, a Mac that is wiped and decommissioned, a device replaced by a new one, a machine key rotated with no suspicion. It records `{keyId, notAfter}`. Events whose own timestamp is at or before `notAfter` verify for good, and later ones are refused.
     - The anchor is the signer's own timestamp, so retirement trusts the key not to sign backdated events. That holds when the key has been destroyed, or was never at risk; otherwise, revoke.
     - `notAfter` is set once the key is gone, with a margin for clock skew, since nothing can sign with it after that.
+    - The timestamp compared is the event's signed `created`, never the hub's `ts`, which no signer covers. So every v2 event carries `created` inside its signature (RL8).
+    - **A retirement can still become a revocation.** Dropping a retired key from the state revokes it, as removal does everywhere in RL5, and it is delivered like any other revocation. A key enters `retired` only in the step where it stops being current. So a dropped key can't come back, and the rule is checkable against the predecessor alone. `notAfter` never moves.
+    - **A delegation's expiry retires its certificates** at its `expires`, with the same trust: a VM under it that may be compromised calls for revoking the delegation.
     - A log position would be a stronger anchor, but each session is its own writer, so the anchor would need a high-water mark per writer. The positions also come from the hub, which isn't trusted.
   - **Who signs it.** Retiring a device or an enrolled machine's key is an admin-signed state change.
     - A delegation certificate's retirement is a record signed by its delegation key or an admin device, which the hub stores and serves beside the certificates. So `devcloud vm delete` can retire its VM's certificate unattended.
@@ -318,7 +321,7 @@ All keys are P-256: ECDSA for signatures, ECDH for channel keys. Node, WebCrypto
   - `k` travels from app to machine by the person's hand and never through the hub. The code carries no secret org key; desk's code carried the org key (DX7).
   1. `sminos hub enroll`, or its successor in the endpoint, reads the code from a hidden prompt or stdin, never from an argument.
   2. It generates the machine key and redeems the token for the machine's Access service token.
-  3. It sends its public key and its ref with `MAC(k, name ‖ machinePub ‖ ref ‖ tokenId)`. Each field is length-prefixed, so no two inputs encode alike. The member's device checks the MAC, so a key or ref the hub substituted fails. Only then does it sign the machine into the org state, with its owners set (§6.3): that member by default, or the org.
+  3. It sends its public key and its ref with `MAC(k, name ‖ machinePub ‖ ref ‖ tokenId)`. Each field is length-prefixed, so no two inputs encode alike: HMAC-SHA-256 under domain `smns-enroll-mac-v1`, a u32 big-endian length before each field, and `k` of at least 16 bytes, with a test vector in the protocol package (O11 M1). The member's device checks the MAC, so a key or ref the hub substituted fails. Only then does it sign the machine into the org state, with its owners set (§6.3): that member by default, or the org.
      - A ref the state already holds is a re-enrollment of that machine. The app says so, and the new state replaces the entry's key and keeps its owners unless the member changes them.
   4. Until that state version arrives, the machine is *pending* and executes nothing.
 - **An unattended machine** (a devcloud VM enrolling at boot) can't get a device signature, so it enrolls through a **delegation**.
@@ -739,7 +742,7 @@ These are named here with their binding fields. Byte-level schemas and test vect
   - `ref` is immutable and unique across the state's entries and the live certificates (§2.3, §5.3).
   - `machineNames: {name, ref}[]` is append-only (desk-sminos-orchestrator's O11 M1). A successor keeps every pair its predecessor holds, and adds the pair of each new or renamed entry. No name is ever held under two refs. Each step checks against its predecessor alone, so by induction the rule holds over the whole chain, and machines verify it as the hub does.
   - A live certificate whose name `machineNames` holds under another ref is refused, as is one whose name another live certificate claims under a different ref.
-  - `retired: {keyId, notAfter}[]` holds retired device and machine keys. A delegation certificate's retirement `{keyId, notAfter}` is a separate record, signed by its delegation key or an admin device; its revocation `{keyId}` is signed by an admin device only. Both are served beside the certificates. A certificate that is retired, revoked, or under a revoked delegation isn't live (§5.2).
+  - `retired: {keyId, pub, notAfter, holder}[]` holds retired device and machine keys. `holder` names whose key it was: a machine's ref, or a member and device id. The `pub` lets a verifier holding only the head check past events after the holder's current key has changed. An entry is added only in the step where its key stops being current, and its `notAfter` never changes. Dropping it revokes the key (§5.2). A delegation certificate's retirement `{keyId, notAfter}` is a separate record, signed by its delegation key or an admin device; its revocation `{keyId}` is signed by an admin device only. Both are served beside the certificates. A certificate that is retired, revoked, or under a revoked delegation isn't live (§5.2).
   - A root transition `{fromVersion, newRootKeys[], issued}` is signed by the recovery key. Machines accept it over any state signed by the old root set.
   - Grants are checked only by the hosting machine (§5.8).
 - **RL6, Session record** (machine-held).
@@ -754,6 +757,8 @@ These are named here with their binding fields. Byte-level schemas and test vect
   - The writer is a `device | machine`, signing over the canonical event.
   - A machine's writer prefix is its name (§2.3). A verifier accepts the event only if `machineNames`, or the signer's certificate, binds that name to the signer's ref, and the key id names a key of that ref that is current, or retired at a `notAfter` no earlier than the event's timestamp.
   - A revoked key's events never verify (§5.2).
+  - Every v2 event carries its signer's `created` inside the signature, and retirement compares against that, never against the hub's `ts`. That covers a device's `hub/<member>` events.
+  - The refusal verdicts include `contested`, naming the refs that claim a name, and `name-retired` (O11 M1).
   - The signature names its signer with a key id, and uses a new domain version (`…-v2`). Today's `mac` is fixed at `{nonce 16 B, value 32 B}`, and nothing names the signer (`log-store.ts:52`, `project.ts:1353, 1428`, `sminos_codes.py:49-50`).
   - The v1 verification path stays for history, or a signed checkpoint freezes it.
   - Signatures are made once and reused on every resend (§5.7).
@@ -872,3 +877,10 @@ These are named here with their binding fields. Byte-level schemas and test vect
    - A delegation certificate's retirement can be signed by its delegation key, so `devcloud vm delete` retires its VM unattended. A retired certificate no longer contests its name, so a recreated VM can reuse it.
    - The anchor is the signer's own timestamp, trusted because a retired key is destroyed or was never at risk. Rejected: a log position as the anchor, which would need a high-water mark per writer (each session is its own writer) taken from the untrusted hub. Rejected: trusting the hub's verdict stored at ingest.
    - Freeing an enrolled machine's name is still deferred (P5 Decision Log 23).
+22. **2026-10-27, desk-sminos-orchestrator's O11 M1 refinements of Decision Log 21, adopted.**
+   - A retired entry is `{keyId, pub, notAfter, holder}`, so a verifier holding only the head can check past events.
+   - Dropping a retired key revokes it. An entry is added only in the step where its key stops being current, so a dropped key can't come back, and that is checkable against the predecessor alone. `notAfter` never moves.
+   - Every v2 event signs its `created`, and retirement compares against it, never against the hub's `ts`.
+   - A delegation's expiry retires its certificates at `expires`.
+   - The enrollment MAC is HMAC-SHA-256 under `smns-enroll-mac-v1`, with u32 big-endian lengths and `k` of at least 16 bytes.
+   - Verdicts include `contested` and `name-retired` (§5.2, §5.3, RL5, RL8).
