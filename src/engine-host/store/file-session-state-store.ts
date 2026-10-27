@@ -1,12 +1,13 @@
 // The P0 SessionStateStore (charter §4.4 as amended 2026-09-28; C3 execution document, Interfaces "Queue, steer,
 // interrupt"): one JSON file per app session at `<userData>/engine-host/state/<appSessionId>.json` holding
-// `{ version: 1, queue, grants, launchSpec, keep?, engineSessionIds?, cronRecord? }` (P5 O2 M2: `keep`, the owner's Keep
-// running mark, `engineSessionIds`, the ids the session has had, and `cronRecord`, its cron knowledge, each absent when
-// never set; an older build's reader strips them), written to a temp file and renamed so a crash leaves the old file or the
-// new one, never half of either. Operations on one session run strictly in the order they were issued (one chain per
-// session, loads included), so a save issued at a process's exit is visible to the load of the resume that follows.
+// `{ version: 1, queue, grants, launchSpec, keep?, engineSessionIds? }` (P5 O2 M2: `keep`, the owner's Keep running mark,
+// and `engineSessionIds`, the ids the session has had, each absent when never set; an older build's reader strips them),
+// written to a temp file and renamed so a crash leaves the old file or the new one, never half of either. The session's
+// cron record (P5 O2 M2, P5 Decision Log 49) is its own file beside it, `<appSessionId>.cron.json`, written the same way.
+// Operations on one session run strictly in the order they were issued (one chain per session, loads included), so a
+// save issued at a process's exit is visible to the load of the resume that follows.
 import { assertSafeAppSessionId } from '@shared/engine/app-session-id';
-import { access, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as z from 'zod';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -32,13 +33,13 @@ const StoredQueueStateSchema = QueueStateSchema.extend({
 // P2-0 (X6): ignore a later build's state/spec keys on read, rather than moving its queue and grants aside. Strip,
 // not passthrough: an update still writes only this build's shape; saveQueue, saveGrants and saveLaunchSpec keep the
 // strict IPC/write schemas.
-const StateFileSchema = z.object({ version: z.literal(1), queue: StoredQueueStateSchema, grants: GrantSnapshotSchema.strip(), launchSpec: StoredLaunchSpecSchema.nullable() /* C10 */, keep: z.boolean().optional() /* P5 O2 M2 */, engineSessionIds: z.array(z.string()).optional() /* P5 O2 M2 */, cronRecord: z.unknown().optional() /* P5 O2 M2: read leniently below */ });
+const StateFileSchema = z.object({ version: z.literal(1), queue: StoredQueueStateSchema, grants: GrantSnapshotSchema.strip(), launchSpec: StoredLaunchSpecSchema.nullable() /* C10 */, keep: z.boolean().optional() /* P5 O2 M2 */, engineSessionIds: z.array(z.string()).optional() /* P5 O2 M2 */ });
 type StateFile = z.infer<typeof StateFileSchema>;
 
 const empty = (): StateFile => ({ version: 1, queue: { entries: [], paused: false }, grants: { allow: [] }, launchSpec: null });
 
 export class FileSessionStateStore implements SessionStateStore {
-  private readonly staleCronRecords = new Set<AppSessionId>(); // P5 O2 M2: ids whose last cron record save failed
+  private readonly unremovedCronRecords = new Set<AppSessionId>(); // P5 O2 M2: a failed save whose older record could not be unlinked
   private readonly stateDir: string;
   private readonly journalDir: string;
   private readonly chains = new Map<AppSessionId, Promise<unknown>>();
@@ -116,26 +117,45 @@ export class FileSessionStateStore implements SessionStateStore {
     return this.update(id, (file) => ({ ...file, engineSessionIds: [...ids] }));
   }
 
-  // P5 O2 M2 (P5 Decision Log 49): the cron record, read on its own so a record of a shape this build cannot read is
-  // only a missing record (the resume stays unknown), never an unreadable state file. A save that failed leaves the file
-  // holding an older record, which may be cleaner than the truth, so until a later save of the id succeeds the record
-  // reads as missing too (fail closed).
+  // P5 O2 M2 (P5 Decision Log 49): the cron record, in its own file so a record this build cannot read is only a missing
+  // record (the resume stays unknown), never an unreadable state file. A missing record reads as unknown at resume, so a
+  // failed save unlinks the file rather than leave an older record that may be cleaner than the truth: unlink needs no
+  // free blocks, so this holds under ENOSPC and across a restart of the engine host. If the unlink fails too (EACCES,
+  // EROFS) it is logged and this store reads the record as missing until a save succeeds; a store after a restart would
+  // read the older record (the residual the P5 tech-debt row names).
   loadCronRecord(id: AppSessionId): Promise<CronRecord | null> {
     return this.run(id, async () => {
-      if (this.staleCronRecords.has(id)) return null;
-      const parsed = CronRecordSchema.safeParse((await this.read(id)).cronRecord);
-      return parsed.success ? parsed.data : null;
+      if (this.unremovedCronRecords.has(id)) return null;
+      let text: string;
+      try {
+        text = await readFile(this.cronFileOf(id), 'utf8');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+        throw error;
+      }
+      try {
+        const parsed = CronRecordSchema.safeParse(JSON.parse(text));
+        return parsed.success ? parsed.data : null;
+      } catch {
+        return null;
+      }
     });
   }
 
-  async saveCronRecord(id: AppSessionId, record: CronRecord): Promise<void> {
-    try {
-      await this.update(id, (file) => ({ ...file, cronRecord: CronRecordSchema.parse(record) }));
-    } catch (error) {
-      this.staleCronRecords.add(id);
-      throw error;
-    }
-    this.staleCronRecords.delete(id);
+  saveCronRecord(id: AppSessionId, record: CronRecord): Promise<void> {
+    return this.run(id, async () => {
+      try {
+        await this.writeCronFile(id, `${JSON.stringify(CronRecordSchema.parse(record))}\n`);
+      } catch (error) {
+        await unlink(this.cronFileOf(id)).catch((unlinkError: NodeJS.ErrnoException) => {
+          if (unlinkError.code === 'ENOENT') return;
+          this.unremovedCronRecords.add(id);
+          this.warn(`cron record for ${id} was not saved and its older record could not be removed (${unlinkError.message}); a restart before a save succeeds would read it`);
+        });
+        throw error;
+      }
+      this.unremovedCronRecords.delete(id);
+    });
   }
 
   // Archive: the session's journal directory only. The state file with the queue and the grant snapshot survives, so an
@@ -148,6 +168,7 @@ export class FileSessionStateStore implements SessionStateStore {
   forget(id: AppSessionId): Promise<void> {
     return this.run(id, async () => {
       await rm(this.fileOf(id), { force: true });
+      await rm(this.cronFileOf(id), { force: true });
       await this.removeJournal(id);
     });
   }
@@ -160,6 +181,18 @@ export class FileSessionStateStore implements SessionStateStore {
   private fileOf(id: AppSessionId): string {
     assertSafeAppSessionId(id);
     return join(this.stateDir, `${id}.json`);
+  }
+
+  private cronFileOf(id: AppSessionId): string {
+    assertSafeAppSessionId(id);
+    return join(this.stateDir, `${id}.cron.json`);
+  }
+
+  private async writeCronFile(id: AppSessionId, text: string): Promise<void> {
+    await mkdir(this.stateDir, { recursive: true });
+    const temp = `${this.cronFileOf(id)}.${process.pid}.tmp`;
+    await writeFile(temp, text);
+    await rename(temp, this.cronFileOf(id));
   }
 
   // Every operation passes here first: an id that is not one plain path component never reaches the filesystem (M5 review).

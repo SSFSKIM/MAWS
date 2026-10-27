@@ -1053,8 +1053,8 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     expect(lifecycle(s.a!)).toBe('exiting');
   });
 
-  // P5 Decision Log 49: the cron record in the state file bounds a resume's unknown
-  it('each Stop and each cron tool writes the cron record to the state file', async () => {
+  // P5 Decision Log 49: the cron record beside the state file bounds a resume's unknown
+  it('each Stop and each cron tool writes the cron record', async () => {
     const store = new MemorySessionStateStore();
     const { s } = await releaseTable(['a'], () => ({ session: { store } }));
     await humanTurn(s.a!, [assistantTool('CronCreate')]); // interrupted: no Stop
@@ -1071,8 +1071,7 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     store.cronRecordWriteError = Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' });
     await humanTurn(s.a!, [assistantTool('CronCreate'), stop([cron])]);
     expect(s.a!.logs.filter((line) => line.includes('cron record not saved'))).toHaveLength(2); // the tool's and the Stop's
-    expect(store.cronRecords.get('a' as AppSessionId)).toEqual({ sessionCrons: [], toolSinceStop: false }); // the older, cleaner record
-    expect(await store.loadCronRecord('a' as AppSessionId)).toBeNull(); // which is never admitted
+    expect(await store.loadCronRecord('a' as AppSessionId)).toBeNull(); // the older, cleaner record was removed
     // a resume while the record is unconfirmed is unknown, not known-empty
     const resumed = await releaseTable(['a'], () => ({ spec: { resume: { sessionId: RESUMED as never, fork: false }, sessionId: null }, session: { store } }));
     expect(resumed.s.a!.session.status().work).toEqual({ crons: [], unknown: 'resumed' });

@@ -132,7 +132,8 @@ export interface SessionStateStore {
   loadEngineSessionIds(appSessionId: AppSessionId): Promise<string[]>;
   saveEngineSessionIds(appSessionId: AppSessionId, ids: string[]): Promise<void>;
   // P5 O2 M2 (P5 Decision Log 49): the cron record; null when never written, of a shape this build cannot read, or
-  // when this store's last save of it failed (the record on disk may then be cleaner than the truth)
+  // after a save of it failed (a failed save removes the older record, which may be cleaner than the truth, so the
+  // record stays missing across a restart until a save succeeds)
   loadCronRecord(appSessionId: AppSessionId): Promise<CronRecord | null>;
   saveCronRecord(appSessionId: AppSessionId, record: CronRecord): Promise<void>;
 }
