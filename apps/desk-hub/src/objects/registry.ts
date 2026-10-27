@@ -1199,7 +1199,46 @@ export class Registry extends DurableObject<Env> {
     }
     const members = this.sql.exec<{ id: string }>('SELECT id FROM members ORDER BY id').toArray().map((m) => m.id);
     for (const { id } of this.sql.exec<{ id: string }>('SELECT id FROM projects').toArray()) this.announce(org.id, id, version, members, 1);
+    for (const { name } of this.sql.exec<{ name: string }>("SELECT name FROM machines WHERE state = 'active'").toArray()) this.announceToMachine(org.id, name, version, members, 1);
     return ok({ version });
+  }
+
+  /**
+   * Tells a machine's object the org state advanced to `version`, holding `members` (`Machine.stateAdvanced`): an RL1
+   * endpoint is sent RL1's `state` notice, and a removed member's app sockets close (O11 M6); a DX2 machine's object
+   * passes it by. Retried as `announce` is; an object on the code before the notice lacks the method and is passed by.
+   */
+  private announceToMachine(org: string, name: string, version: number, members: string[], attempt: number): void {
+    void this.env.MACHINE.get(this.env.MACHINE.idFromName(`${org}:${name}`))
+      .stateAdvanced(version, members)
+      .catch((error: unknown) => {
+        if (lacksMethod(error, 'stateAdvanced')) return;
+        const wait = attempt < RETRY_ATTEMPTS ? retryDelay(attempt, this.retryBaseMs(), error) : null;
+        console.log(JSON.stringify({ desk: 'registry', event: 'machine-announce-failed', machine: name, version, attempt, error: described(error), retry_ms: wait === null ? null : Math.round(wait) }));
+        if (wait !== null) setTimeout(() => this.announceToMachine(org, name, version, members, attempt + 1), wait);
+      });
+  }
+
+  /** The head's version, or null before any state: RL1's `state` notice on an endpoint's welcome (O11 M6). */
+  stateVersion(): number | null {
+    return this.chain.head()?.state.version ?? null;
+  }
+
+  /**
+   * The ref a machine's RL1 socket is addressed by (O11 M6): the one the head's `machineNames` binds its name to, else
+   * that of the certificate kept under its name, else the one its enrollment posted with its key; null for a machine
+   * that has none (a DX2 machine). Never taken from the client, so no machine reaches another's object.
+   */
+  machineRefOf(machine: MachineRecord): string | null {
+    return this.records.refOf(machine.name) ?? this.records.machineKey(machine.enrollment)?.ref ?? null;
+  }
+
+  /** The ref an app's socket to a machine names (O11 M6): a ref the hub holds, or a machine's name (its ref as
+   * `machineRefOf` finds it); null for neither. */
+  machineRefNamed(machine: string): string | null {
+    if (this.records.holdsRef(machine)) return machine;
+    const row = this.sql.exec<MachineRecord>(`SELECT ${MACHINE_COLUMNS} FROM machines WHERE name_key = ? AND state = 'active'`, machineNameKey(machine)).toArray()[0];
+    return this.records.refOf(machine) ?? (row ? this.machineRefOf(row) : null);
   }
 
   /**

@@ -75,3 +75,6 @@ export const MACHINE_HEADER = 'X-Desk-Machine';
 /** The service token's client id the Worker resolved a machine's request from: its `Machine` object refuses one whose
  * credential was revoked, though the Worker admitted the request before the revocation. */
 export const CLIENT_HEADER = 'X-Desk-Client';
+/** The machine's ref (RL DL 19) the Worker resolved for an RL1 socket or an app's socket to the machine (O11 M6): the
+ * ref-addressed `Machine` object keeps it as its own. */
+export const REF_HEADER = 'X-Desk-Machine-Ref';

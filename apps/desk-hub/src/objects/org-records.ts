@@ -272,6 +272,18 @@ export class OrgRecords {
     );
   }
 
+  /** Whether `ref` is a machine's the hub knows: in the head's machines or `machineNames`, a kept certificate's, or one a
+   * machine posted with its key. */
+  holdsRef(ref: string): boolean {
+    if (!isMachineRef(ref)) return false;
+    const head = this.chain.head();
+    if (head && (head.state.machines.some((m) => m.ref === ref) || head.state.machineNames.some((m) => m.ref === ref))) return true;
+    return (
+      this.sql.exec('SELECT 1 FROM machine_certs WHERE ref = ? LIMIT 1', ref).toArray().length > 0 ||
+      this.sql.exec('SELECT 1 FROM machine_keys WHERE ref = ? LIMIT 1', ref).toArray().length > 0
+    );
+  }
+
   /** The owners a session's listing names, or null when the machine listed none for it. */
   ownersOf(machine: string, session: string): MemberId[] | null {
     const row = this.sql.exec<{ owners: string }>('SELECT owners FROM listings WHERE machine = ? AND session = ?', machine, session).toArray()[0];

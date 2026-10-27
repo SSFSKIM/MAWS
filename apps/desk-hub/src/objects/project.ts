@@ -53,8 +53,8 @@ export const VISIBLE_MS = 90_000;
 /** Who sent a machine's frame: its org, the project it names, the machine and the credential its stream was opened
  * with, the stream the POST belongs to, how long a renewal on that stream keeps the machine online, and how long the
  * lease holds after that stream closes (`graceMs`; absent from a `Machine` of an older deploy, whose closes lapse at
- * once as before). */
-export type MachineContext = { org: string; project: string; machine: string; client: string; generation: number; leaseMs: number; graceMs?: number };
+ * once as before). `transport` is `rl1` for a frame off a machine's RL1 socket (O11 M6), absent for DX2's stream. */
+export type MachineContext = { org: string; project: string; machine: string; client: string; generation: number; leaseMs: number; graceMs?: number; transport?: 'rl1' };
 
 /** The `kv` key of the newest org state announced to this project and the member ids it holds (`stateAdvanced`). */
 const STATE_MEMBERS = 'state-members';
@@ -463,7 +463,9 @@ export class Project extends DurableObject<Env> {
     // An async question opened, answered, or ended with its session: the grid's `waiting` may move (owner, 2026-10-18).
     if (accepted.some(({ event }) => questionEffect(event) !== null)) this.reportSummary();
     const now = Date.now();
-    for (const { event } of accepted) {
+    // A machine on RL1 pushes through its own `notify` (O11 M6): it knows a private session from a listed one, and its
+    // requests wait in channels the log never sees. The log plane pushes nothing for it, so nothing is pushed twice.
+    for (const { event } of ctx.transport === 'rl1' ? [] : accepted) {
       if ((event.kind !== 'message' && event.kind !== 'question') || !(now - Date.parse(event.ts) <= PUSH_FRESH_MS)) continue;
       const session = event.writer.slice(event.writer.indexOf('/') + 1);
       // An async ask (2026-10-18): its `question` event is the one signal of an ask nothing raises (MAWS's own), and a

@@ -26,6 +26,13 @@
 // A revocation is a fence: the revoked credential's client id is kept, and a request carrying it is refused here, so
 // one the Worker admitted before the revocation and delivered after it opens nothing, and the name enrolled again (a
 // new credential) is served.
+//
+// RL1 (O11 M6): a machine's RL1 sockets are held by another object of this class, addressed by the machine's ref
+// (relay.ts). This object, addressed by the name, stays the machine's one generation counter and fence for both
+// transports: an RL1 connection draws its generation here (`claimGeneration`), which ends a DX2 stream, and a DX2
+// stream opened here ends the RL1 connection (`relaySupersede`). It is also where the machine's projects reach it
+// (`send`, `close`), and where a revocation and the org state's notice arrive (`revoke`, `stateAdvanced`): each goes on
+// to the ref's object while an RL1 connection holds the newest generation (`kv` `rl1`).
 import { DurableObject } from 'cloudflare:workers';
 import { readLimited } from '../drain';
 import { CLIENT_HEADER, heartbeatMs, MACHINE_HEADER, ORG_HEADER, type Env } from '../env';
@@ -33,9 +40,10 @@ import { GENERATION_HEADER, LEASE_PERIODS, POST_LIMIT, type DownFrame, type OrgF
 import { FRAME_LIMIT, PartAssembler, PartsBudgetError, toWire, type Part } from '../protocol/parts';
 import { SESSION_KINDS } from '../protocol/session';
 import { described, PROJECT_ID, type MachineContext } from './project';
+import { Relay, relayObjectName } from './relay';
 
 /** Why a stream ended, as its log line says. */
-type EndCause = 'newer-stream' | 'client-closed' | 'write-failed' | 'write-stalled' | 'undeliverable' | 'directory' | 'revoked' | 'replaced';
+type EndCause = 'newer-stream' | 'newer-socket' | 'client-closed' | 'write-failed' | 'write-stalled' | 'undeliverable' | 'directory' | 'revoked' | 'replaced';
 
 export type Stream = {
   org: string;
@@ -99,6 +107,12 @@ function sse(frame: DownFrame): Uint8Array {
 
 const revokedKey = (clientId: string) => `revoked:${clientId}`;
 
+/** The RL1 connection that holds the machine's newest generation: its ref's object, and the credential it opened with. */
+type Rl1Claim = { org: string; ref: string; generation: number; client: string };
+const RL1_KEY = 'rl1';
+/** The ref's object of the machine's last RL1 connection, kept after the connection ends: app sockets may stay there. */
+const RL1_OBJECT_KEY = 'rl1-object';
+
 /** One log line of a stream's life (`wrangler tail`, or the Worker's logs once observability is on): how often the hub
  * loses a machine's stream and why, the hub's half of the reconnect count each machine's daemon.log keeps. */
 function note(line: Record<string, unknown>): void {
@@ -121,6 +135,13 @@ export class Machine extends DurableObject<Env> {
   private stream: Stream | undefined;
   /** This instance's id: a successor Cloudflare routes new requests to is another instance, with another id. */
   protected readonly life = crypto.randomUUID();
+  private relayInstance: Relay | undefined;
+
+  /** The RL1 sockets, in the object addressed by the machine's ref; made on first use, so a DX2 machine's object never
+   * makes it. */
+  private get relay(): Relay {
+    return (this.relayInstance ??= new Relay(this.ctx, this.env, () => this.timing()));
+  }
 
   /** Which instance of the object answers: a stream's probe asks this through the object's own id. */
   instance(): string {
@@ -134,15 +155,104 @@ export class Machine extends DurableObject<Env> {
     const url = new URL(request.url);
     if (url.pathname === '/stream' && request.method === 'GET') return this.open(request);
     if (url.pathname === '/frames' && request.method === 'POST') return this.frames(request);
+    if (url.pathname === '/socket' && request.method === 'GET') return this.relay.endpoint(request);
+    if (url.pathname === '/app' && request.method === 'GET') return this.relay.app(request);
     return new Response('not found', { status: 404 });
   }
 
-  /** Writes a frame to the machine's current stream; "offline" when it has none, or when `generation` names an older
-   * one (a project's frame for a stream the machine has since replaced). */
+  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    await this.relay.message(ws, message);
+  }
+
+  async webSocketClose(ws: WebSocket): Promise<void> {
+    this.relay.closed(ws);
+  }
+
+  async webSocketError(ws: WebSocket): Promise<void> {
+    this.relay.closed(ws);
+  }
+
+  /** Writes a frame to the machine's current stream, or to its RL1 connection's when that holds the newest generation;
+   * "offline" when neither does, or when `generation` names an older one (a project's frame for a stream or connection
+   * the machine has since replaced). */
   async send(frame: DownFrame, generation?: number): Promise<'written' | 'offline'> {
     const stream = this.stream;
-    if (!stream || (generation !== undefined && generation !== stream.generation)) return 'offline';
-    return (await this.write(stream, frame)) ? 'written' : 'offline';
+    if (stream && (generation === undefined || generation === stream.generation)) return (await this.write(stream, frame)) ? 'written' : 'offline';
+    const rl1 = this.rl1();
+    if (!stream && rl1 && (generation === undefined || generation === rl1.generation)) return this.relayOf(rl1).relaySend(frame, rl1.generation);
+    return 'offline';
+  }
+
+  // ---- RL1: the generation and the fence for the ref's object (relay.ts) ----------------------------------------
+
+  /** An RL1 connection of the machine opens: the next generation, which ends the DX2 stream and any older RL1
+   * connection; refused for a revoked credential. */
+  claimGeneration(org: string, ref: string, client: string): { generation: number } | { refused: 'revoked' } {
+    if (this.ctx.storage.kv.get(revokedKey(client))) return { refused: 'revoked' };
+    const generation = (this.ctx.storage.kv.get<number>('generation') ?? 0) + 1;
+    this.ctx.storage.kv.put('generation', generation);
+    const before = this.rl1();
+    this.ctx.storage.kv.put(RL1_KEY, { org, ref, generation, client } satisfies Rl1Claim);
+    this.ctx.storage.kv.put(RL1_OBJECT_KEY, { org, ref });
+    this.end(this.stream, 'newer-socket');
+    // A connection under another ref (the machine enrolled again with a new one) ends; the same ref's object ends its
+    // own older connection as it accepts the new one.
+    if (before && before.ref !== ref) this.supersede(before, generation);
+    note({ event: 'claim', ref, generation });
+    return { generation };
+  }
+
+  /** Whether the RL1 connection of `generation` still holds the machine's newest generation (`current`), was replaced
+   * by a newer connection of either kind, or carries a revoked credential: its object asks at each heartbeat, so a
+   * replacement or a revocation it was not told of ends it within one. */
+  rl1Check(ref: string, generation: number, client: string): 'current' | 'replaced' | 'revoked' {
+    if (this.ctx.storage.kv.get(revokedKey(client))) return 'revoked';
+    const rl1 = this.rl1();
+    return rl1?.ref === ref && rl1.generation === generation ? 'current' : 'replaced';
+  }
+
+  /** The org state advanced to `version`, holding `members`: the ref's object sends its endpoint the `state` notice and
+   * closes the app sockets of members the state no longer holds. */
+  async stateAdvanced(version: number, members?: string[]): Promise<void> {
+    const object = this.ctx.storage.kv.get<{ org: string; ref: string }>(RL1_OBJECT_KEY);
+    if (object) await this.relayOf(object).relayState(version, members);
+  }
+
+  private rl1(): Rl1Claim | undefined {
+    return this.ctx.storage.kv.get<Rl1Claim>(RL1_KEY);
+  }
+
+  private relayOf(claim: { org: string; ref: string }): DurableObjectStub<Machine> {
+    return this.env.MACHINE.get(this.env.MACHINE.idFromName(relayObjectName(claim.org, claim.ref)));
+  }
+
+  /** Ends the RL1 connection `claim` names, a newer generation having been taken. */
+  private supersede(claim: Rl1Claim, generation: number): void {
+    void this.relayOf(claim)
+      .relaySupersede(generation)
+      .catch((error: unknown) => note({ event: 'supersede-failed', ref: claim.ref, generation, error: described(error) }));
+  }
+
+  // ---- RL1: the ref's object's own calls, from the object above --------------------------------------------------
+
+  relaySend(frame: DownFrame, generation: number): 'written' | 'offline' {
+    return this.relay.relaySend(frame, generation);
+  }
+
+  relayClose(generation: number): void {
+    this.relay.relayClose(generation);
+  }
+
+  relaySupersede(generation: number): void {
+    this.relay.relaySupersede(generation);
+  }
+
+  relayRevoke(client: string | null): void {
+    this.relay.relayRevoke(client);
+  }
+
+  relayState(version: number, members?: string[]): void {
+    this.relay.relayState(version, members);
   }
 
   /** Writes the org's directory to the machine's current stream, unless it wrote that version or a later one already;
@@ -157,9 +267,12 @@ export class Machine extends DurableObject<Env> {
     return (await this.write(stream, frame, false)) ? 'written' : 'offline';
   }
 
-  /** Ends the stream of this generation, if it is still the current one (a project could not deliver to it). */
-  close(generation: number): void {
-    if (this.stream?.generation === generation) this.end(this.stream, 'undeliverable');
+  /** Ends the stream of this generation, or the RL1 connection, if it is still the current one (a project could not
+   * deliver to it). */
+  async close(generation: number): Promise<void> {
+    if (this.stream?.generation === generation) return this.end(this.stream, 'undeliverable');
+    const rl1 = this.rl1();
+    if (rl1?.generation === generation) await this.relayOf(rl1).relayClose(generation);
   }
 
   /** The machine was revoked: its stream ends now, and a request with the revoked credential is refused from here on,
@@ -168,6 +281,14 @@ export class Machine extends DurableObject<Env> {
   async revoke(clientId: string | null): Promise<number> {
     if (clientId) this.ctx.storage.kv.put(revokedKey(clientId), true);
     this.end(this.stream, 'revoked');
+    const rl1 = this.rl1();
+    if (rl1 && (clientId === null || rl1.client === clientId)) {
+      this.ctx.storage.kv.delete(RL1_KEY);
+      // Its connection ends now; should the call fail, its next heartbeat finds the credential revoked (`rl1Check`).
+      await this.relayOf(rl1)
+        .relayRevoke(clientId)
+        .catch((error: unknown) => note({ event: 'revoke-relay-failed', ref: rl1.ref, error: described(error) }));
+    }
     return this.ctx.storage.kv.get<number>('generation') ?? 0;
   }
 
@@ -215,6 +336,12 @@ export class Machine extends DurableObject<Env> {
     const generation = (this.ctx.storage.kv.get<number>('generation') ?? 0) + 1;
     this.ctx.storage.kv.put('generation', generation);
     this.end(this.stream, 'newer-stream');
+    // The DX2 stream takes the generation from an RL1 connection: that one ends.
+    const rl1 = this.rl1();
+    if (rl1) {
+      this.ctx.storage.kv.delete(RL1_KEY);
+      this.supersede(rl1, generation);
+    }
 
     const { heartbeatMs, probeMs, writeTimeoutMs } = this.timing();
     let fail!: (reason: Error) => void;

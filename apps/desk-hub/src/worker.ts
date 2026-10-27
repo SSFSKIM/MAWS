@@ -4,9 +4,11 @@
 // a provisioning key's secret, does. Every path it answers is under `/api/*` or `/machine/*`, the routes wrangler.jsonc runs it first for; the web
 // app's assets answer the rest.
 import { drain, readLimited } from './drain';
-import { CLIENT_HEADER, hubConfig, MACHINE_HEADER, MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, type Env } from './env';
+import { CLIENT_HEADER, hubConfig, MACHINE_HEADER, MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, REF_HEADER, type Env } from './env';
 import { AccessError, certsKeySource, verifyAccessAssertion, type KeySource } from './identity/access';
 import type { Principal, Registry, Result } from './objects/registry';
+import { relayObjectName } from './objects/relay';
+import { lacksMethod } from './objects/retry';
 import {
   CERT_RETIREMENTS_PATH,
   ENROLLMENT_KEY_PATH,
@@ -27,7 +29,7 @@ import {
   REDEEM_PATH,
   type MachineSelf,
 } from './protocol/identity';
-import { POST_LIMIT } from './protocol/machine';
+import { APP_SOCKET_PATH, MACHINE_SOCKET_PATH, POST_LIMIT } from './protocol/machine';
 import { FRAME_LIMIT } from './protocol/parts';
 
 export { Machine } from './objects/machine';
@@ -85,9 +87,22 @@ async function body(request: Request, limit = BODY_LIMIT): Promise<unknown> {
  * client sent; it keeps the client's signal, so the object sees the client go. */
 function forward(request: Request, url: string, identity: Record<string, string>): Request {
   const forwarded = new Request(url, request);
-  for (const header of [MEMBER_HEADER, PROJECT_HEADER, ORG_HEADER, MACHINE_HEADER, CLIENT_HEADER]) forwarded.headers.delete(header);
+  for (const header of [MEMBER_HEADER, PROJECT_HEADER, ORG_HEADER, MACHINE_HEADER, CLIENT_HEADER, REF_HEADER]) forwarded.headers.delete(header);
   for (const [header, value] of Object.entries(identity)) forwarded.headers.set(header, value);
   return forwarded;
+}
+
+/**
+ * A ref the Registry resolved, or the answer when it could not: a Registry still on the code before RL1 (a deploy's
+ * first minutes) lacks the method, and the client connects again.
+ */
+async function refFrom(lookup: () => Promise<string | null>): Promise<{ ref: string | null } | Response> {
+  try {
+    return { ref: await lookup() };
+  } catch (error) {
+    if (lacksMethod(error, 'machineRefOf') || lacksMethod(error, 'machineRefNamed')) return json(503, { error: 'hub-updating', message: 'connect again' });
+    throw error;
+  }
 }
 
 // The build, named by the deploy (`wrangler deploy --define DESK_BUILD:'"…"'`; deploy/deploy.ts names the hub's commit and
@@ -192,6 +207,15 @@ async function member(request: Request, url: URL, env: Env, registry: DurableObj
   if (pathname === '/api/registry/socket' && method === 'GET') {
     return registry.fetch(forward(request, 'https://registry/grid', { [MEMBER_HEADER]: you.id, [ORG_HEADER]: principal.org.id }));
   }
+  // An app's socket to a machine (O11 M6): channels, relayed by the object its ref addresses.
+  const appSocket = APP_SOCKET_PATH.exec(pathname);
+  if (appSocket && method === 'GET') {
+    const found = await refFrom(() => registry.machineRefNamed(decodeURIComponent(appSocket[1])));
+    if (found instanceof Response) return found;
+    if (found.ref === null) return json(404, { error: 'unknown-machine' });
+    const stub = env.MACHINE.get(env.MACHINE.idFromName(relayObjectName(principal.org.id, found.ref)));
+    return stub.fetch(forward(request, 'https://machine/app', { [MEMBER_HEADER]: you.id, [ORG_HEADER]: principal.org.id, [REF_HEADER]: found.ref }));
+  }
   const socket = PROJECT_SOCKET.exec(pathname);
   if (socket && method === 'GET') {
     const project = socket[1];
@@ -219,8 +243,17 @@ async function machine(request: Request, url: URL, env: Env, registry: DurableOb
   if (request.method === 'POST' && url.pathname === MACHINE_KEY_PATH) return kept(await registry.keepMachineKey(principal.machine, await body(request)));
   if (request.method === 'POST' && url.pathname === MACHINE_CERT_PATH) return kept(await registry.storeCert(principal.machine, await body(request)));
   if (request.method === 'POST' && url.pathname === MACHINE_CERT_RETIREMENTS_PATH) return kept(await registry.retireCert(await body(request)));
-  const stub = env.MACHINE.get(env.MACHINE.idFromName(`${principal.org.id}:${principal.machine.name}`));
   const identity = { [ORG_HEADER]: principal.org.id, [MACHINE_HEADER]: principal.machine.name, [CLIENT_HEADER]: principal.machine.client_id ?? '' };
+  // RL1 (O11 M6): the endpoint's one socket, held by the object its ref addresses; its ref is the hub's own record of
+  // this machine, never the client's word.
+  if (url.pathname === MACHINE_SOCKET_PATH && request.method === 'GET') {
+    const found = await refFrom(() => registry.machineRefOf(principal.machine));
+    if (found instanceof Response) return found;
+    if (found.ref === null) return json(409, { error: 'no-ref', message: 'RL1 needs the machine’s ref: post its key (POST /machine/key) or its certificate (POST /machine/cert) first' });
+    const relay = env.MACHINE.get(env.MACHINE.idFromName(relayObjectName(principal.org.id, found.ref)));
+    return relay.fetch(forward(request, 'https://machine/socket', { ...identity, [REF_HEADER]: found.ref }));
+  }
+  const stub = env.MACHINE.get(env.MACHINE.idFromName(`${principal.org.id}:${principal.machine.name}`));
   if (url.pathname === '/machine/stream' && request.method === 'GET') return stub.fetch(forward(request, 'https://machine/stream', identity));
   if (url.pathname === '/machine/frames' && request.method === 'POST') {
     if (Number(request.headers.get('Content-Length') ?? 0) > POST_LIMIT) return json(413, { error: 'too-large' });

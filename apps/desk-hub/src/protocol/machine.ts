@@ -171,3 +171,23 @@ export type UpFrame =
   /** The machine's complete pending set for the project, sent after every reconnect; anything missing is dropped. */
   | { t: 'pending'; project: string; raised: Raised[] }
   | Part;
+
+// ---- RL1 (O11 M6; Interfaces §C, whose own frames are org-protocol's relay.ts) ------------------------------------------
+
+/** The endpoint's one WebSocket (RL1), with its Access service token as DX2's stream. */
+export const MACHINE_SOCKET_PATH = '/machine/socket';
+/** A member's (or device's) WebSocket to a machine's object, for channels; `<machine>` is its ref or its name. */
+export const APP_SOCKET_PATH = /^\/api\/machines\/([^/]+)\/socket$/;
+
+/**
+ * The DX2 frames RL1 carries up, beside its own: the log plane alone. RL1 machines send no DX4/DX6 session-plane frame
+ * (`session`, `pending`, `rpc-result`), which travel in channels; the hub refuses one `422 not-on-rl1`.
+ */
+export type Rl1LogUp = Extract<UpFrame, { t: 'hello' | 'events' | 'rejected' }> | Part;
+/** The DX2 frames RL1 carries down: the log plane's answers and fan-out. A project's session-plane frame for a machine
+ * on RL1 is not sent to it. */
+export type Rl1LogDown = Extract<DownFrame, { t: 'have' | 'events' | 'resend' | 'refused' }>;
+export const RL1_LOG_DOWN: ReadonlySet<string> = new Set<Rl1LogDown['t']>(['have', 'events', 'resend', 'refused']);
+export const RL1_LOG_UP: ReadonlySet<string> = new Set<Rl1LogUp['t']>(['hello', 'events', 'rejected', 'part']);
+/** DX2's up frames that are not RL1's: refused on RL1 `422 not-on-rl1`. */
+export const NOT_ON_RL1: ReadonlySet<string> = new Set<UpFrame['t'] | 'hb-ack'>(['session', 'pending', 'rpc-result', 'hb-ack']);
