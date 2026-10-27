@@ -41,11 +41,17 @@ function repository(t, { master = {}, branch = {} } = {}) {
   write(branch);
   git('commit', '--quiet', '--allow-empty', '-m', 'branch');
   const [base, head] = [git('rev-parse', 'HEAD~1'), git('rev-parse', 'HEAD')];
-  const peerAt = (sha, ...args) => {
-    const run = spawnSync(process.execPath, [script, '--git-dir', tree, '--sha', sha, ...args], { encoding: 'utf8', env });
+  // `at`: another checkout of the origin to run in (a shallow or single-branch clone)
+  const peerAt = (sha, args = [], at = tree) => {
+    const run = spawnSync(process.execPath, [script, '--git-dir', at, '--sha', sha, ...args], { encoding: 'utf8', env });
     return { status: run.status, trailers: run.stdout.split('\n').filter(Boolean), notes: run.stderr.split('\n').filter(Boolean) };
   };
-  return { git, base, head, peerAt, peer: (...args) => peerAt(head, ...args) };
+  const clone = (...args) => {
+    const at = join(dir, `clone-${args.join('-').replace(/\W+/g, '')}`);
+    execFileSync('git', ['clone', '--quiet', ...args, `file://${join(dir, 'origin.git')}`, at], { env });
+    return at;
+  };
+  return { git, base, head, peerAt, clone, peer: (...args) => peerAt(head, args) };
 }
 
 test("a branch a minor past master's wire names the merge base, both wires, and says they are a minor apart", (t) => {
@@ -83,4 +89,23 @@ test("no peer for a tree with no manifest, master's own tree, or a master with n
   const first = repository(t, { branch: { [MANIFEST]: manifest(3, 0) } });
   assert.deepEqual(first.peer(), { status: 0, trailers: [], notes: [`ci-gate: the peer ${first.base.slice(0, 8)} (the merge base with origin/master) has no ${MANIFEST}, so no peer`] });
   assert.deepEqual(repository(t, { branch: { 'src/a.ts': 'a\n' } }).peer('--peer', 'HEAD~1').status, 2, 'an asked-for peer of a tree with no manifest');
+});
+
+// A checkout that cannot find the merge base would drop the check a bump needs without a word: it is refused, naming
+// --peer, while master's own tree (its own merge base) stays quiet.
+test('a shallow checkout, a single-branch one and a tree with no merge base are refused, naming --peer; --peer still works there', (t) => {
+  const { git, head, peerAt, clone } = repository(t, { master: { [MANIFEST]: manifest(3, 0) }, branch: { [MANIFEST]: manifest(3, 1) } });
+  git('push', '--quiet', 'origin', 'HEAD:refs/heads/branch');
+  const advice = 'so this tree\'s peer cannot be found: pass --peer <ref> (the build to check it against) or --peer none';
+  const shallow = clone('--depth=1', '--branch', 'branch');
+  assert.deepEqual(peerAt(head, [], shallow), { status: 2, trailers: [], notes: [`ci-gate: this checkout is shallow, and its merge base with origin/master may lie past its history, ${advice}`] });
+  assert.equal(peerAt(head, ['--peer', 'none'], shallow).status, 0);
+  assert.deepEqual(peerAt(head, ['--peer', 'HEAD'], shallow).notes, ['ci-gate: the peer would be the tested commit itself (--peer HEAD), so no peer']);
+  const single = clone('--single-branch', '--branch', 'branch');
+  assert.deepEqual(peerAt(head, [], single), { status: 2, trailers: [], notes: [`ci-gate: ${head.slice(0, 8)} has no merge base with origin/master (none fetched, or a single-branch checkout), ${advice}`] });
+  git('checkout', '--quiet', '--orphan', 'unrelated');
+  git('commit', '--quiet', '-m', 'unrelated');
+  const unrelated = git('rev-parse', 'HEAD');
+  assert.equal(peerAt(unrelated).status, 2);
+  assert.match(peerAt(unrelated).notes.at(-1), /has no merge base with origin\/master .*pass --peer <ref>/);
 });

@@ -243,7 +243,8 @@ env:
   MAC_HOME_E2E: discover
   # The groups that check this tree against another build, its peer (the two-build check, e2e/cross-build.spec.ts):
   # scripts/ci-gate.sh names the peer in a `Peer:` trailer (the merge base with master, unless its --peer names another)
-  # beside both trees' wires, and the plan adds these groups whenever the two are a minor apart. Their job fetches that one
+  # beside both trees' wires, and the plan adds these groups to a run with unit or an e2e group whenever the two are a
+  # minor apart (gate-plan.mjs). Their job fetches that one
   # commit, checks it out under RUNNER_TEMP with an install of its own and builds its out/ (.github/scripts/gate-peer.sh),
   # and stops every supervisor of either build whatever happened. Always the Mac's exclusive instance, never hosted.
   PEER_E2E: cross-build

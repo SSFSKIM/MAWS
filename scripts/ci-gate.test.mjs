@@ -238,3 +238,17 @@ test('a --peer that names no commit is refused with exit 2 before the alert chec
   assert.deepEqual(result.calls, []);
   assert.deepEqual(result.refs, []);
 });
+
+// The alert check plans the tested tree with the peer's trailers and an iteration run's Selection, as the run's plan
+// will: a bump tree's class 1a gains a Mac job the mini's alert holds, its --affected iteration does not.
+test('the alert check sees the peer group a bump adds, and none for an --affected run, which goes ahead past an alert', () => {
+  const own = (path) => readFileSync(join(root, path), 'utf8');
+  const planned = { ...bump, base: { ...bump.base, '.github/scripts/gate-plan.mjs': own('.github/scripts/gate-plan.mjs'), '.github/scripts/gate-affected.mjs': own('.github/scripts/gate-affected.mjs'), '.github/workflows/gate.yml': own('.github/workflows/gate.yml'), 'package.json': own('package.json') }, alerts: true };
+  const held = gate(['--gates', 'static,unit,probes', '--class1a', 'pool'], planned);
+  assert.equal(held.status, 2, held.stdout + held.stderr);
+  assert.match(held.stderr, /^ci-gate: not pushing: this run puts jobs on a Mac \(e2e:cross-build\) /);
+  assert.deepEqual(held.refs, []);
+  const iteration = gate(['--gates', 'unit', '--class1a', 'pool', '--affected'], planned);
+  assert.equal(iteration.status, 1, iteration.stdout + iteration.stderr); // pushed; the fake gh finds no run
+  assert.match(trailers(iteration.message).join('\n'), /^Selection: affected$/m);
+});

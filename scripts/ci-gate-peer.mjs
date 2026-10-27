@@ -4,8 +4,9 @@
 // first; a failed fetch takes the local origin/master), and each tree's wire is its src/shared/ipc/wire-manifest.json's
 // major and minor. Prints the trailers, `Peer: <sha>`, `Peer-Wire: <major>.<minor>` and `Wire: <major>.<minor>`, one per
 // line, from which gate-plan.mjs adds the peer groups to a run whose two wires are a minor apart; nothing when the tested
-// tree has no manifest, is its own peer (master's own tree), has no merge base, or its peer has no manifest. `--peer none`
-// prints nothing. What it decided is said on stderr. Exits 2 when an asked-for peer cannot be used, else 0.
+// tree has no manifest, is its own peer (master's own tree), or its peer has no manifest. `--peer none` prints nothing.
+// What it decided is said on stderr. Exits 2 when an asked-for peer cannot be used, and when the merge base cannot be
+// found (a shallow checkout, or one with no merge base with origin/master), naming --peer for either; else 0.
 // Usage: node scripts/ci-gate-peer.mjs --git-dir <dir> --sha <commit> [--peer <ref>|none]
 import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
@@ -50,6 +51,12 @@ export function resolvePeer({ git, sha, peer }) {
     }
     how = `--peer ${peer}`;
   } else {
+    // A checkout that cannot find the merge base would silently drop the check a bump needs: it is refused instead.
+    const refused = (why) => {
+      say(`${why}, so this tree's peer cannot be found: pass --peer <ref> (the build to check it against) or --peer none`);
+      return { trailers: [], notes, status: 2 };
+    };
+    if (git('rev-parse', '--is-shallow-repository') === 'true') return refused('this checkout is shallow, and its merge base with origin/master may lie past its history');
     try {
       git('fetch', '--quiet', 'origin', 'master');
     } catch {
@@ -58,8 +65,7 @@ export function resolvePeer({ git, sha, peer }) {
     try {
       base = git('merge-base', 'origin/master', sha);
     } catch {
-      say(`no merge base of ${sha.slice(0, 8)} with origin/master, so no peer`);
-      return { trailers: [], notes, status: 0 };
+      return refused(`${sha.slice(0, 8)} has no merge base with origin/master (none fetched, or a single-branch checkout)`);
     }
     how = 'the merge base with origin/master';
   }

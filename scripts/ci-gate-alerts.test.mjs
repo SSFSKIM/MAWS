@@ -345,6 +345,9 @@ test("the peer's trailers reach the tested plan: a tree a minor from its peer pu
   assert.deepEqual(macPlan({ ...peered, gates: 'e2e:tools', trailers: trailers('3.1'), variables: today }), { jobs: ['e2e:tools', 'e2e:side'], guest: null, home: [] });
   assert.deepEqual(macPlan({ ...peered, gates: 'static,unit,probes', class1a: 'pool', trailers: trailers('3.0'), variables: today }), { jobs: [], guest: 'none', home: [] });
   assert.deepEqual(macPlan({ ...peered, gates: 'static,unit,probes', class1a: 'pool', variables: today }), { jobs: [], guest: 'none', home: [] });
+  // an iteration run (ci-gate.sh --affected passes its Selection) and a static check take no peer group, so no Mac
+  assert.deepEqual(macPlan({ ...peered, gates: 'unit', class1a: 'pool', trailers: `${trailers('3.1')}\nSelection: affected`, variables: today }), { jobs: [], guest: 'none', home: [] });
+  assert.deepEqual(macPlan({ ...peered, gates: 'static', class1a: 'pool', trailers: trailers('3.1'), variables: today }), { jobs: [], guest: 'none', home: [] });
 });
 
 test('a folded MAC_SHARED_E2E keeps its groups on the shared instances, off the guest, unless the run has a Lane:', () => {

@@ -1478,10 +1478,12 @@ const PEER = '0123456789abcdef0123456789abcdef01234567';
 const peerTrailers = (peerWire, wire) => `Peer: ${PEER}\nPeer-Wire: ${peerWire}\nWire: ${wire}`;
 const peerEntry = { group: 'cross-build', script: 'e2e:cross-build', slug: 'cross-build', build: false, libreoffice: false, poppler: false, measured: false, runner: JSON.stringify(mac), timeout: 25, peer: PEER };
 
-test("a tree a minor from its peer takes the peer groups, on the Mac's exclusive instance with the peer, whatever the lane and the gates asked", () => {
+test("a tree a minor from its peer takes the peer groups into any run that tests code, on the Mac's exclusive instance with the peer, whatever the lane", () => {
   const lists = { PEER_E2E: 'cross-build', LINUX_E2E: 'library', MAC_VM_E2E: 'cross-build side' };
   for (const [asked, others] of [
     ['Gates: static,unit,probes\nClass1a: pool', []], // class 1a alone, on a Linux lane
+    ['Gates: unit', []],
+    ['Gates: static,unit:darwin\nRunner: macos', []],
     ['Gates: e2e:library', ['library']], // a Linux lane's group
     ['Gates: e2e:side\nRunner: macos', ['side']],
     ['Gates: e2e:side\nRunner: macos\nLane: vm', ['side']], // the guest's lane: never the peer's
@@ -1503,10 +1505,10 @@ test("a tree a minor from its peer takes the peer groups, on the Mac's exclusive
 test('the peer groups stay out of a run whose tree and peer share a minor, are a major apart, or has no peer, and of a live or affected run', () => {
   const lists = { PEER_E2E: 'cross-build', LIVE_E2E: 'library-live' };
   for (const message of [
-    `Gates: static\n${peerTrailers('3.1', '3.1')}`,
-    `Gates: static\n${peerTrailers('3.2', '4.0')}`,
-    'Gates: static\nPeer-Wire: 3.0\nWire: 3.1',
-    `Gates: static\nPeer: ${PEER}\nWire: 3.1`,
+    `Gates: static,unit,probes\n${peerTrailers('3.1', '3.1')}`,
+    `Gates: static,unit,probes\n${peerTrailers('3.2', '4.0')}`,
+    'Gates: static,unit,probes\nPeer-Wire: 3.0\nWire: 3.1',
+    `Gates: static,unit,probes\nPeer: ${PEER}\nWire: 3.1`,
     `Gates: e2e:library-live\nRunner: macos\nLive: yes\n${peerTrailers('3.0', '3.1')}`,
     `Gates: unit\nClass1a: pool\nSelection: affected\nAffected-Count: 0\n${peerTrailers('3.0', '3.1')}`,
   ]) {
@@ -1515,9 +1517,20 @@ test('the peer groups stay out of a run whose tree and peer share a minor, are a
     assert.doesNotMatch(summary, /joined/, message);
   }
   // a dispatch has no trailers to read
-  assert.equal(plan({ ...lists, EVENT: 'workflow_dispatch', INPUT_GATES: 'static', HEAD_MESSAGE: peerTrailers('3.0', '3.1') }).outputs.e2e, '[]');
+  assert.equal(plan({ ...lists, EVENT: 'workflow_dispatch', INPUT_GATES: 'static,unit,probes', HEAD_MESSAGE: peerTrailers('3.0', '3.1') }).outputs.e2e, '[]');
   // the same minor still names the peer in the summary
   assert.match(plan({ ...lists, HEAD_MESSAGE: `ci-gate: test\n\nGates: static\n${peerTrailers('3.1', '3.1')}` }).summary, / Peer: 01234567, wire 3\.1; this tree's 3\.1\.\n$/);
+});
+
+test('a static or probes check of a tree a minor from its peer stays quick: the peer groups join only a run with unit or an e2e group', () => {
+  const lists = { PEER_E2E: 'cross-build' };
+  for (const gates of ['static', 'probes', 'static,probes', 'packaged']) {
+    const { outputs, summary, stdout } = plan({ ...lists, HEAD_MESSAGE: `ci-gate: test\n\nGates: ${gates}\nClass1a: pool\n${peerTrailers('3.0', '3.1')}` });
+    assert.equal(outputs.e2e, '[]', gates);
+    const line = "Peer: 01234567, wire 3.0; this tree's 3.1, a minor apart, but the peer groups join only a run with unit or an e2e group.";
+    assert.ok(summary.trimEnd().endsWith(` ${line}`), summary);
+    assert.ok(stdout.endsWith(`${line}\n`), stdout);
+  }
 });
 
 test('a peer group asked for takes the peer at any wire, and without a Peer: trailer has none; a malformed peer or wire is refused', () => {

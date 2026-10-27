@@ -65,9 +65,12 @@
 #                      against, a ref this checkout resolves, or `none`. Default: the merge base with origin/master,
 #                      fetched first. The commit goes in a `Peer:` trailer beside both trees' wires (`Peer-Wire:`, `Wire:`,
 #                      each the major.minor of its src/shared/ipc/wire-manifest.json), and the plan adds those groups to a
-#                      run whose two wires are a minor apart, so a WIRE_MINOR bump is checked whatever --gates says,
-#                      unless the run is --live or --affected. No trailer when the tree has no manifest, is its own merge
-#                      base, or with `none`; a --peer that names no commit, or one with no manifest, is refused (exit 2)
+#                      run whose two wires are a minor apart and whose gates hold unit, unit:darwin or an e2e group (so
+#                      class 1a and --gates all do, a static or probes check does not), unless the run is --live or
+#                      --affected. No trailer when the tree has no manifest, is its own merge base, or with `none`. Refused
+#                      (exit 2), naming --peer: a --peer that names no commit or one with no manifest, and a checkout that
+#                      cannot find its merge base (shallow, or with none with origin/master). A refused run's relaunch
+#                      line carries the peer as resolved, its sha or `none`
 #   --label            the ref's name before the short sha (default: the worktree's branch, else `gate`)
 #   --keep             leave the ci/ ref in place
 #
@@ -185,13 +188,19 @@ if ((peer_status != 0)); then
   printf '%s\n' "${peer_said:-ci-gate: the peer could not be resolved}" >&2
   exit 2
 fi
+# A relaunch (ci-gate-refusals.sh) checks the same pair: the peer as resolved, or none.
+relaunch_peer=$(printf '%s\n' "$peer_trailers" | sed -n 's/^Peer: //p')
+relaunch_peer=${relaunch_peer:-none}
 
 # ci-kit's alert watcher: while no online Mac runner is free of an open alert, a run with Mac jobs is not pushed, its jobs
 # would only be refused. Exit 2, as for the script's other refusals; anything else from the check goes ahead.
 if [[ ${MAWS_GATE_IGNORE_ALERTS:-} == 1 ]]; then
   alert_check='ci-gate: MAWS_GATE_IGNORE_ALERTS=1, the ci-kit alert check skipped'
 else
-  alert_check=$(node "$(dirname "$0")/ci-gate-alerts.mjs" --gates "$gates_trailer" --runner "$runner" --class1a "$class1a" --lane "$lane" --live "$live" --trailers "$peer_trailers" --git-dir "$git_dir" --sha "$sha")
+  # the peer's trailers, and an iteration run's Selection, which keeps the peer groups off the run
+  alert_trailers=$peer_trailers
+  [[ -n $affected ]] && alert_trailers+=$'\n'"Selection: affected"
+  alert_check=$(node "$(dirname "$0")/ci-gate-alerts.mjs" --gates "$gates_trailer" --runner "$runner" --class1a "$class1a" --lane "$lane" --live "$live" --trailers "$alert_trailers" --git-dir "$git_dir" --sha "$sha")
   case $? in
     0) ;;
     2)
