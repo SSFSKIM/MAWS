@@ -112,3 +112,9 @@ export const PROJECT_STATE_FAULT_PATH = '/__test/state-fault';
 /** Where the suites' `Registry` calls a method no `Project` has, and answers `{lacks, message}`: whether the Registry
  * takes workerd's refusal for a callee on older code. */
 export const MISSING_METHOD_PATH = '/__test/missing-method';
+/** Where the suites' `Registry` is armed (`{fail: boolean}`) to throw from every `head()` until disarmed, as an
+ * unreachable Registry would answer a `Project` checking a v2 event. */
+export const REGISTRY_HEAD_FAULT_PATH = '/__test/head-fault';
+/** Where the suites' `Project` moves its clock on by `{ahead}` ms (cumulative), so its cached org state ages within a
+ * test; every request there answers `{reads}`, how many times the project read the org-state head. */
+export const PROJECT_STATE_CACHE_PATH = '/__test/state-cache';

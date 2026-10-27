@@ -21,6 +21,8 @@
 //   - a `Project` that holds its archive lookups, lists its send queues and the machine streams it fans out to, and
 //     queues a frame for any generation;
 //   - a `Project` armed to fail its next `forget`, as a failed RPC from the Registry would;
+//   - a `Project` whose clock is moved on, so the org state it cached ages, and a `Registry` armed to fail `head()`, as
+//     an unreachable one would (O11 M5);
 //   - a `Registry` whose org record can be rewritten, as an object still on a deploy's previous version would make it;
 //   - a `Registry` that takes a member, so a suite has a member who is not an admin, and projects by the thousand;
 //   - a `Registry` that drops a project's row, as a hub from before machine projects lacks a machine's, and takes a
@@ -93,6 +95,8 @@ import {
   PROJECTION_PATH,
   PROJECT_STATE_FAULT_PATH,
   MISSING_METHOD_PATH,
+  REGISTRY_HEAD_FAULT_PATH,
+  PROJECT_STATE_CACHE_PATH,
 } from './send-fault';
 import { lacksMethod } from '../../src/objects/retry';
 
@@ -107,6 +111,12 @@ type StateFault = Fault & { missing?: boolean };
 export class Registry extends DeployedRegistry {
   private asPrevious = false;
   private leaveRelease: (() => void) | undefined;
+
+  /** Armed, the org-state head a `Project` reads to check a v2 event fails, as an unreachable Registry's would. */
+  head(): ReturnType<DeployedRegistry['head']> {
+    if (this.ctx.storage.kv.get<boolean>('head-fault')) throw new Error('a failure the suite injected into head');
+    return super.head();
+  }
 
   /** A suite's wait before an unfinished offline revocation is tried again, over the deployed minute. */
   protected offlineRetryMs(): number {
@@ -149,6 +159,10 @@ export class Registry extends DeployedRegistry {
       else this.ctx.storage.kv.put('offline-retry-ms', ms);
       await this.ctx.storage.setAlarm(Date.now() + 100);
       return new Response('set');
+    }
+    if (url.pathname === REGISTRY_HEAD_FAULT_PATH) {
+      this.ctx.storage.kv.put('head-fault', ((await request.json()) as { fail: boolean }).fail);
+      return new Response('armed');
     }
     if (url.pathname === LEAVE_HOLD_PATH) {
       this.ctx.storage.kv.put('leave-hold', true);
@@ -411,6 +425,17 @@ export class Project extends DeployedProject {
     return this.ctx.storage.kv.get<number>('visible-window') ?? super.visibleMs();
   }
 
+  /** The deployed clock, moved on by what the suite asked (`PROJECT_STATE_CACHE_PATH`). */
+  protected now(): number {
+    return super.now() + (this.ctx.storage.kv.get<number>('clock-ahead') ?? 0);
+  }
+
+  /** The org-state head as deployed, each read counted. */
+  protected readOrgState(): ReturnType<DeployedProject['readOrgState']> {
+    this.ctx.storage.kv.put('state-reads', (this.ctx.storage.kv.get<number>('state-reads') ?? 0) + 1);
+    return super.readOrgState();
+  }
+
   /** A suite's first wait before a failed summary report is sent again, over the deployed second. */
   protected retryBaseMs(): number {
     return this.ctx.storage.kv.get<number>('retry-base-ms') ?? super.retryBaseMs();
@@ -499,6 +524,11 @@ export class Project extends DeployedProject {
       if (times !== undefined) this.ctx.storage.kv.put('state-fault', { remaining: times, calls: 0, missing });
       const fault = this.ctx.storage.kv.get<StateFault>('state-fault') ?? { remaining: 0, calls: 0 };
       return Response.json({ remaining: fault.remaining, calls: fault.calls, announced: this.ctx.storage.kv.get<number>('announced') ?? null });
+    }
+    if (url.pathname === PROJECT_STATE_CACHE_PATH) {
+      const { ahead = 0 } = (await request.json()) as { ahead?: number };
+      this.ctx.storage.kv.put('clock-ahead', (this.ctx.storage.kv.get<number>('clock-ahead') ?? 0) + ahead);
+      return Response.json({ reads: this.ctx.storage.kv.get<number>('state-reads') ?? 0 });
     }
     if (url.pathname === PROJECT_FORGET_FAULT_PATH) {
       this.ctx.storage.kv.put('forget-fault', true);

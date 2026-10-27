@@ -60,6 +60,8 @@ import {
   PROJECTION_PATH,
   PROJECT_STATE_FAULT_PATH,
   MISSING_METHOD_PATH,
+  REGISTRY_HEAD_FAULT_PATH,
+  PROJECT_STATE_CACHE_PATH,
 } from './send-fault';
 
 const require = createRequire(import.meta.url);
@@ -461,6 +463,15 @@ export async function startLocalHub() {
      * Answers the throws still armed, the calls taken since, and the newest version announced (the suites' Worker only). */
     async stateFault(project: string, arm: { times?: number; missing?: boolean } = {}): Promise<{ remaining: number; calls: number; announced: number | null }> {
       return JSON.parse(await seam('PROJECT', project, PROJECT_STATE_FAULT_PATH, arm));
+    },
+    /** Makes every `Registry.head()` fail from now on (`true`), or answer again (`false`) (the suites' Worker only). */
+    async headFault(fail: boolean) {
+      await seam('REGISTRY', ORG, REGISTRY_HEAD_FAULT_PATH, { fail });
+    },
+    /** Moves a project's clock on by `ahead` ms, so the org state it cached ages; answers how many times the project
+     * read the org-state head (the suites' Worker only). */
+    async stateCache(project: string, ahead = 0): Promise<{ reads: number }> {
+      return JSON.parse(await seam('PROJECT', project, PROJECT_STATE_CACHE_PATH, { ahead }));
     },
     /** Whether the Registry takes workerd's own refusal of a method a callee lacks for one on older code. */
     async missingMethod(): Promise<{ lacks: boolean; message: string }> {
