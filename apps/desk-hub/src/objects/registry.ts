@@ -22,6 +22,13 @@
 // revocation (`revokeMachine`), each bound to the enrollment it read, so a name enrolled anew between two of its
 // caller's steps is never revoked in the old one's place.
 //
+// Hub v2 (O11 M4) keeps the signed records beside the state (`OrgRecords`, org-records.ts): a v2 machine posts its own
+// key and ref with its pairing MAC once redeemed, and is shown listed once the head lists that key, apart from its hub
+// confirmation; a machine enrolled through a provisioning key re-issued as a delegation posts its delegation-signed
+// certificate, at the use its redemption counted; machines' listings and endpoint records are kept at their newest. An
+// active machine re-enrolls in place under a token that names it. A push goes to a session's listed owners alone, when
+// a listing names them, to the devices of theirs the head still lists.
+//
 // The org's signed state (RL5; O11 M3) is kept beside all this (`OrgChain`, org-chain.ts): once a genesis is accepted,
 // `members` is the head's projection, and member management is a signed successor, never a route of the hub's own. A
 // member a state drops is refused from then on, their grid sockets here and their project sockets (through each
@@ -33,6 +40,7 @@ import type { AccessIdentity } from '../identity/access';
 import { ServiceTokenApiError, serviceTokens } from '../identity/service-tokens';
 import { importVapidKey, pushRequest, type VapidKey } from '../push/web-push';
 import { base64urlDecode, base64urlEncode, isBase64urlOf } from '../protocol/base64url';
+import type { Delegation } from 'org-protocol';
 import type { GridDown, MachineSummary, ProjectSummary, PushNotice } from '../protocol/browser';
 import type { OrgFrame } from '../protocol/machine';
 import { toWire } from '../protocol/parts';
@@ -63,8 +71,15 @@ import {
   type PushSubscriptionRecord,
   type Redeemed,
   type WrappedKeyRemoved,
+  type CertConflict,
+  type EnrollmentKey,
+  type Listings,
+  type MachineEndpoint,
+  type MachineView,
+  type OwnerNotice,
 } from '../protocol/identity';
 import { OrgChain } from './org-chain';
+import { OrgRecords } from './org-records';
 import { OrgKeys, type StoredKey } from './org-keys';
 import { described } from './project';
 import { checkRequest, ProvisioningKeys, type KeyRow } from './provisioning-keys';
@@ -73,7 +88,7 @@ import { lacksMethod, RETRY_ATTEMPTS, RETRY_BASE_MS, retryDelay } from './retry'
 export type Principal = { kind: 'member'; org: OrgRecord; member: MemberRecord } | { kind: 'machine'; org: OrgRecord; machine: MachineRecord };
 
 /** An answer for the Worker to send: a value, or an HTTP status with DX7's `{error, message?}`. */
-export type Result<T> = { ok: true; value: T } | { ok: false; status: number; error: string; message?: string };
+export type Result<T> = { ok: true; value: T } | { ok: false; status: number; error: string; message?: string; conflicts?: CertConflict[] };
 
 const ok = <T>(value: T): Result<T> => ({ ok: true, value });
 const fail = (status: number, error: string, message?: string): Result<never> => ({ ok: false, status, error, ...(message ? { message } : {}) });
@@ -88,14 +103,14 @@ CREATE TABLE IF NOT EXISTS machines (
   online INTEGER NOT NULL DEFAULT 0, seen TEXT);
 CREATE TABLE IF NOT EXISTS enrollments (
   id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, created_by TEXT NOT NULL, created TEXT NOT NULL,
-  expires TEXT NOT NULL, ttl_s INTEGER NOT NULL, state TEXT NOT NULL, machine TEXT, key TEXT);
+  expires TEXT NOT NULL, ttl_s INTEGER NOT NULL, state TEXT NOT NULL, machine TEXT, key TEXT, use INTEGER, replaces TEXT);
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, registered_by TEXT NOT NULL, created TEXT NOT NULL, archive_machine TEXT,
   kind TEXT NOT NULL DEFAULT 'hub', machine TEXT, retired INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS orphans (token_name TEXT PRIMARY KEY, since TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS revocations (machine TEXT NOT NULL, project TEXT NOT NULL, generation INTEGER NOT NULL, PRIMARY KEY (machine, project));
 CREATE TABLE IF NOT EXISTS push_subscriptions (
-  endpoint TEXT PRIMARY KEY, member TEXT NOT NULL, p256dh TEXT NOT NULL, auth TEXT NOT NULL, created TEXT NOT NULL);
+  endpoint TEXT PRIMARY KEY, member TEXT NOT NULL, p256dh TEXT NOT NULL, auth TEXT NOT NULL, created TEXT NOT NULL, device TEXT);
 CREATE TABLE IF NOT EXISTS summaries (
   project TEXT PRIMARY KEY, machines INTEGER NOT NULL, machines_online INTEGER NOT NULL, working INTEGER NOT NULL,
   waiting INTEGER NOT NULL, report_seq INTEGER, live INTEGER NOT NULL DEFAULT 0);
@@ -108,8 +123,11 @@ CREATE TABLE IF NOT EXISTS machine_states (
 const ADDED_COLUMNS: Record<string, string[]> = {
   org: ['key_check TEXT', 'key_auth TEXT'],
   machines: ['online INTEGER NOT NULL DEFAULT 0', 'seen TEXT'],
-  // The provisioning key an enrollment was made through; null for a one-time token's.
-  enrollments: ['key TEXT'],
+  // The provisioning key an enrollment was made through, and which of its uses it was (O11 M4); null for a one-time
+  // token's. `replaces`: the active machine a re-enrollment's token names (O11 M4).
+  enrollments: ['key TEXT', 'use INTEGER', 'replaces TEXT'],
+  // The member's device a subscription is bound to (O11 M4); null for one bound to the member alone.
+  push_subscriptions: ['device TEXT'],
   projects: ["kind TEXT NOT NULL DEFAULT 'hub'", 'machine TEXT', 'retired INTEGER NOT NULL DEFAULT 0'],
   summaries: ['report_seq INTEGER', 'live INTEGER NOT NULL DEFAULT 0'],
 };
@@ -117,6 +135,10 @@ const ADDED_COLUMNS: Record<string, string[]> = {
 /** A member's devices: enough for a person's phones, tablets, and browsers, and a bound on what one member can store. */
 const MAX_PUSH_SUBSCRIPTIONS = 20;
 const MAX_ENDPOINT = 2048;
+/** A device id as the org state's pairing exchange bounds it (org-chain.ts). */
+const MAX_DEVICE_ID = 128;
+/** What a push did, for the suites and the logs. */
+type Pushed = { sent: number; gone: number; failed: number };
 type Counts = Pick<ProjectSummary, 'machines' | 'machines_online' | 'working' | 'waiting' | 'live'>;
 
 /**
@@ -130,7 +152,7 @@ type Counts = Pick<ProjectSummary, 'machines' | 'machines_online' | 'working' | 
 export type SummaryReport = Omit<Counts, 'live'> & { live?: number; seq?: number; machines_state?: Array<{ name: string; online: boolean; client: string }> };
 
 const MACHINE_COLUMNS = 'name, client_id, token_name, state, enrollment, created, confirmed';
-const ENROLLMENT_COLUMNS = 'id, created_by, created, expires, state, machine, ttl_s, key';
+const ENROLLMENT_COLUMNS = 'id, created_by, created, expires, state, machine, ttl_s, key, use, replaces';
 const PROJECT_COLUMNS = 'id, name, registered_by, created, archive_machine, kind, retired';
 type ProjectRow = Omit<ProjectRecord, 'retired'> & { retired: number };
 const projectOf = (row: ProjectRow): ProjectRecord => ({ ...row, retired: row.retired === 1 });
@@ -146,7 +168,7 @@ const sha256 = async (text: string) => hex(new Uint8Array(await crypto.subtle.di
 const iso = (ms: number) => new Date(ms).toISOString();
 const lapsed = (enrollment: { expires: string }, now = Date.now()) => Date.parse(enrollment.expires) <= now;
 
-type EnrollmentRow = EnrollmentRecord & { ttl_s: number; key: string | null };
+type EnrollmentRow = EnrollmentRecord & { ttl_s: number; key: string | null; use: number | null; replaces: string | null };
 
 export class Registry extends DurableObject<Env> {
   /** Enrollments whose mint is in flight in this object's life. */
@@ -157,6 +179,7 @@ export class Registry extends DurableObject<Env> {
   private readonly keys: OrgKeys;
   private readonly provisioning: ProvisioningKeys;
   private readonly chain: OrgChain;
+  private readonly records: OrgRecords;
   /** Per enrollment, an offline revocation the sweep began and has not seen complete, and when it last began: its fence
    * may be placed, so it is tried again until it completes, whatever the machine's online state or offline deadline
    * reads since (an object restart forgets it). */
@@ -178,6 +201,7 @@ export class Registry extends DurableObject<Env> {
     this.keys = new OrgKeys(ctx.storage);
     this.provisioning = new ProvisioningKeys(ctx.storage);
     this.chain = new OrgChain(ctx.storage);
+    this.records = new OrgRecords(ctx.storage, this.chain);
   }
 
   private get config(): HubConfig {
@@ -204,6 +228,15 @@ export class Registry extends DurableObject<Env> {
     // a machine.
     const machine = this.sql.exec<MachineRecord>(`SELECT ${MACHINE_COLUMNS} FROM machines WHERE client_id = ?`, identity.clientId).toArray()[0];
     if (!machine) return null;
+    if (machine.state === 'active' && machine.confirmed === null) {
+      // A machine re-enrolled in place, on its new credential's first request.
+      const confirmed = iso(Date.now());
+      this.ctx.storage.transactionSync(() => {
+        this.sql.exec('UPDATE machines SET confirmed = ? WHERE name = ?', confirmed, machine.name);
+        this.sql.exec("UPDATE enrollments SET state = 'confirmed' WHERE id = ? AND state = 'pending'", machine.enrollment);
+      });
+      return { kind: 'machine', org, machine: { ...machine, confirmed } };
+    }
     if (machine.state === 'pending') {
       const enrollment = this.enrollmentById(machine.enrollment);
       if (!enrollment || enrollment.state !== 'pending' || lapsed(enrollment)) return null;
@@ -221,25 +254,33 @@ export class Registry extends DurableObject<Env> {
     return { kind: 'machine', org, machine };
   }
 
-  /** A one-time token for an admin to build an enrollment code from; the hub keeps only its hash. */
+  /** A one-time token for an admin to build an enrollment code from; the hub keeps only its hash. With `machine`, an
+   * active machine's name, the token re-enrolls that machine in place (O11 M4). */
   async createEnrollment(member: MemberRecord, body: unknown): Promise<Result<EnrollmentIssued>> {
     if (member.role !== 'admin') return fail(403, 'not-admin');
     const ttl = typeof body === 'object' && body !== null ? ((body as { ttl_s?: unknown }).ttl_s ?? ENROLLMENT_TTL_S) : undefined;
-    if (typeof ttl !== 'number' || !Number.isInteger(ttl) || ttl < 1 || ttl > MAX_ENROLLMENT_TTL_S) {
-      return fail(400, 'bad-shape', `the body is {ttl_s?}, a whole number of seconds from 1 to ${MAX_ENROLLMENT_TTL_S}`);
+    const names = typeof body === 'object' && body !== null ? (body as { machine?: unknown }).machine : undefined;
+    if (typeof ttl !== 'number' || !Number.isInteger(ttl) || ttl < 1 || ttl > MAX_ENROLLMENT_TTL_S || !(names === undefined || (typeof names === 'string' && isMachineName(names)))) {
+      return fail(400, 'bad-shape', `the body is {ttl_s?, machine?}: a whole number of seconds from 1 to ${MAX_ENROLLMENT_TTL_S}, and an active machine's name to re-enroll it`);
+    }
+    let replaces: string | null = null;
+    if (names !== undefined) {
+      replaces = this.sql.exec<{ name: string }>("SELECT name FROM machines WHERE name_key = ? AND state = 'active'", machineNameKey(names)).toArray()[0]?.name ?? null;
+      if (replaces === null) return fail(409, 'unknown-machine', `no active machine is named "${names}"`);
     }
     const token = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
     const hash = await sha256(token);
     const now = Date.now();
     const enrollment: EnrollmentRecord = { id: newId(), created_by: member.id, created: iso(now), expires: iso(now + ttl * 1000), state: 'open', machine: null };
     this.sql.exec(
-      "INSERT INTO enrollments (id, token_hash, created_by, created, expires, ttl_s, state, machine) VALUES (?, ?, ?, ?, ?, ?, 'open', NULL)",
+      "INSERT INTO enrollments (id, token_hash, created_by, created, expires, ttl_s, state, machine, replaces) VALUES (?, ?, ?, ?, ?, ?, 'open', NULL, ?)",
       enrollment.id,
       hash,
       enrollment.created_by,
       enrollment.created,
       enrollment.expires,
       ttl,
+      replaces,
     );
     await this.scheduleAlarm();
     return ok({ enrollment, token });
@@ -255,8 +296,13 @@ export class Registry extends DurableObject<Env> {
     return ok({ key, token });
   }
 
+  /** Every provisioning key, each re-issued as a delegation with the head's key and owners for it (O11 M4). */
   provisioningKeys(): ProvisioningKeyRecord[] {
-    return this.provisioning.list();
+    const delegations = new Map<string, Delegation>((this.chain.head()?.state.delegations ?? []).map((d) => [d.id, d]));
+    return this.provisioning.list().map((key) => {
+      const delegation = delegations.get(key.id);
+      return delegation ? { ...key, delegation: { pub: delegation.pub, owners: delegation.owners } } : key;
+    });
   }
 
   /** Stops new enrollments through the key; the machines it enrolled stay. A second revocation keeps the first's time. */
@@ -295,6 +341,7 @@ export class Registry extends DurableObject<Env> {
     const tokenName = serviceTokenName(org.id, machine);
     const expires = iso(Date.now() + enrollment.ttl_s * 1000);
     const id = enrollment.id;
+    if (enrollment.state === 'open' && enrollment.replaces !== null) return this.reenroll(enrollment, machine, expires, org.id);
     if (enrollment.state === 'open') {
       const taken = this.sql.exec<{ name: string }>('SELECT name FROM machines WHERE name_key = ?', machineNameKey(machine)).toArray()[0];
       if (taken) {
@@ -309,6 +356,34 @@ export class Registry extends DurableObject<Env> {
       this.rotate(id, machine, expires);
     }
     return this.mint(id, machine, tokenName, org.id);
+  }
+
+  /**
+   * A re-enrollment in place (O11 M4): the token names an active machine, which redeems it under that name. Its record
+   * passes to this enrollment with no credential, in the redemption's synchronous step, so the old credential is refused
+   * at the hub at once; its stream at its `Machine` object is ended; then the new credential is minted, which deletes
+   * the old one at Cloudflare. The machine keeps its name, project and history; its new credential's first request
+   * confirms it (`resolve`), and a v2 machine posts its new key under this enrollment.
+   */
+  private async reenroll(enrollment: EnrollmentRow, machine: string, expires: string, org: string): Promise<Result<Redeemed>> {
+    if (machineNameKey(machine) !== machineNameKey(enrollment.replaces!)) return fail(409, 'token-used', `this token re-enrolls the machine "${enrollment.replaces}"`);
+    const held = this.sql.exec<MachineRecord>(`SELECT ${MACHINE_COLUMNS} FROM machines WHERE name_key = ?`, machineNameKey(machine)).toArray()[0];
+    if (held?.state !== 'active') return fail(409, 'not-active', `"${enrollment.replaces}" is no longer an active machine; ask for an enrollment of a new one`);
+    const id = enrollment.id;
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec("UPDATE enrollments SET state = 'pending', machine = ?, expires = ? WHERE id = ?", held.name, expires, id);
+      this.sql.exec('UPDATE machines SET enrollment = ?, client_id = NULL, confirmed = NULL WHERE name = ?', id, held.name);
+    });
+    this.busy.add(id);
+    try {
+      await this.env.MACHINE.get(this.env.MACHINE.idFromName(`${org}:${held.name}`)).revoke(held.client_id);
+    } catch (error) {
+      // The old credential is refused at the hub already, and the mint deletes it at Cloudflare: only its stream lingers.
+      console.log(JSON.stringify({ desk: 'registry', event: 'reenroll-fence-failed', machine: held.name, error: described(error) }));
+    } finally {
+      this.busy.delete(id);
+    }
+    return this.mint(id, held.name, serviceTokenName(org, held.name), org);
   }
 
   /**
@@ -351,7 +426,7 @@ export class Registry extends DurableObject<Env> {
         key.id,
       );
       this.reserve(machine, tokenName, id, iso(now));
-      this.provisioning.use(key.id);
+      this.sql.exec('UPDATE enrollments SET use = ? WHERE id = ?', this.provisioning.use(key.id), id);
     });
     return this.mint(id, machine, tokenName, org);
   }
@@ -398,7 +473,8 @@ export class Registry extends DurableObject<Env> {
           return fail(410, 'expired', 'the enrollment ended while its token was minted');
         }
         this.sql.exec('UPDATE machines SET client_id = ? WHERE name = ?', minted.client_id, machine);
-        return ok({ org, machine, client_id: minted.client_id, client_secret: minted.client_secret });
+        const use = this.enrollmentById(id)?.use ?? null;
+        return ok({ org, machine, client_id: minted.client_id, client_secret: minted.client_secret, enrollment: id, ...(use === null ? {} : { use }) });
       });
     } catch (error) {
       if (error instanceof ServiceTokenApiError) return fail(502, 'mint-failed', `${error.message}; redeem again`);
@@ -479,8 +555,17 @@ export class Registry extends DurableObject<Env> {
     return { revoked: revoked.name };
   }
 
-  machines(): MachineRecord[] {
-    return this.sql.exec<MachineRecord>(`SELECT ${MACHINE_COLUMNS} FROM machines ORDER BY name`).toArray();
+  /** Every machine, a v2 one with the key it posted and whether the head lists that key for its ref (O11 M4). */
+  machines(): MachineView[] {
+    return this.sql
+      .exec<MachineRecord>(`SELECT ${MACHINE_COLUMNS} FROM machines ORDER BY name`)
+      .toArray()
+      .map((machine) => {
+        const key = this.records.machineKey(machine.enrollment);
+        if (!key) return machine;
+        const listed = this.sql.exec('SELECT 1 FROM state_machines WHERE ref = ? AND pub = ?', key.ref, key.pub).toArray().length > 0;
+        return { ...machine, key: { ref: key.ref, pub: key.pub, listed } };
+      });
   }
 
   projects(): ProjectRecord[] {
@@ -716,9 +801,10 @@ export class Registry extends DurableObject<Env> {
     return { key: (await this.vapidKey()).publicKey };
   }
 
-  /** Keeps a member device's subscription, keyed by its endpoint (a device subscribing again replaces its keys). */
+  /** Keeps a member device's subscription, keyed by its endpoint (a device subscribing again replaces its keys); with
+   * `device`, bound to that device of the member's in the head (O11 M4). */
   keepPushSubscription(member: MemberRecord, body: unknown): Result<{ subscription: PushSubscriptionRecord }> {
-    const b = (typeof body === 'object' && body !== null ? body : {}) as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } };
+    const b = (typeof body === 'object' && body !== null ? body : {}) as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown }; device?: unknown };
     const endpoint = b.endpoint;
     let url: URL | undefined;
     try {
@@ -727,18 +813,30 @@ export class Registry extends DurableObject<Env> {
       url = undefined;
     }
     if (url?.protocol !== 'https:' || !isBase64urlOf(b.keys?.p256dh, 65) || !isBase64urlOf(b.keys?.auth, 16)) {
-      return fail(400, 'bad-shape', 'the body is {endpoint: an https URL, keys: {p256dh: 65 bytes, auth: 16 bytes}}, base64url as PushSubscription.toJSON() gives them');
+      return fail(400, 'bad-shape', 'the body is {endpoint: an https URL, keys: {p256dh: 65 bytes, auth: 16 bytes}, device?}, base64url as PushSubscription.toJSON() gives them');
+    }
+    const device = b.device;
+    if (device !== undefined && (typeof device !== 'string' || device === '' || device.length > MAX_DEVICE_ID)) return fail(400, 'bad-shape', 'device is one of your devices’ ids in the org state');
+    if (device !== undefined && this.sql.exec('SELECT 1 FROM devices WHERE id = ? AND member = ?', device, member.id).toArray().length === 0) {
+      return fail(409, 'unknown-device', `the org state lists no device "${device}" of yours`);
     }
     const kept = this.sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM push_subscriptions WHERE member = ? AND endpoint != ?', member.id, endpoint as string).one().n;
     if (kept >= MAX_PUSH_SUBSCRIPTIONS) return fail(409, 'too-many', `a member keeps at most ${MAX_PUSH_SUBSCRIPTIONS} devices; delete one first`);
-    const record: PushSubscriptionRecord = { member: member.id, endpoint: endpoint as string, keys: { p256dh: b.keys!.p256dh as string, auth: b.keys!.auth as string }, created: iso(Date.now()) };
+    const record: PushSubscriptionRecord = {
+      member: member.id,
+      endpoint: endpoint as string,
+      keys: { p256dh: b.keys!.p256dh as string, auth: b.keys!.auth as string },
+      created: iso(Date.now()),
+      ...(device === undefined ? {} : { device }),
+    };
     this.sql.exec(
-      'INSERT OR REPLACE INTO push_subscriptions (endpoint, member, p256dh, auth, created) VALUES (?, ?, ?, ?, ?)',
+      'INSERT OR REPLACE INTO push_subscriptions (endpoint, member, p256dh, auth, created, device) VALUES (?, ?, ?, ?, ?, ?)',
       record.endpoint,
       record.member,
       record.keys.p256dh,
       record.keys.auth,
       record.created,
+      device ?? null,
     );
     return ok({ subscription: record });
   }
@@ -755,17 +853,46 @@ export class Registry extends DurableObject<Env> {
   }
 
   /**
-   * One push of `notice` to each subscribed device of every member not in `looking` (those with a browser showing the
-   * project). A push service that answers 404 or 410 has dropped the subscription, so the hub does too. Answers what
-   * happened, for the suites and the logs.
+   * Sends `notice` (DX7's, from a `Project`) to the members not `looking` (those with a browser showing the project),
+   * with the project's `name` as the grid shows it, and `waiting` the org's: the pushing project's own count as of the
+   * push (its summary may not have reached here yet) and every other project's as last reported. A session some
+   * machine listed (RL6) goes to its listed owners alone (O11 M4); an unlisted one, as every DX2 machine's is, to every
+   * member. Answers what happened, for the suites and the logs.
    */
-  /** Sends `notice` to the members not `looking`, with the project's `name` as the grid shows it, and `waiting` the org's: the pushing project's own count as of the
-   * push (its summary may not have reached here yet) and every other project's as last reported. */
-  async push(notice: Omit<PushNotice, 'name' | 'waiting'>, looking: string[], projectWaiting: number): Promise<{ sent: number; gone: number; failed: number }> {
+  async push(notice: Omit<PushNotice, 'name' | 'waiting'>, looking: string[], projectWaiting: number): Promise<Pushed> {
     const others = this.sql.exec<{ n: number | null }>('SELECT SUM(waiting) AS n FROM summaries WHERE project != ?', notice.project).one().n ?? 0;
     const { v, project, ...rest } = notice;
     const full: PushNotice = { v, project, name: this.project(project)?.name ?? '', ...rest, waiting: others + projectWaiting };
-    const members = this.sql.exec<{ id: string }>('SELECT id FROM members').toArray().map((m) => m.id).filter((id) => !looking.includes(id));
+    const members = this.sql.exec<{ id: string }>('SELECT id FROM members').toArray().map((m) => m.id);
+    const owners = this.records.ownersOfSession(notice.session);
+    return this.sendPush(members.filter((id) => (owners === null || owners.includes(id)) && !looking.includes(id)), full);
+  }
+
+  /**
+   * A v2 notice (RL1's `notify`, through M6's Machine DO): a session of the machine `machine` (its ref) is waiting or
+   * wrote. It goes to the devices of the owners the session's listing names, members still and not `looking`, and
+   * carries only `{project, machine, session, kind}`. A session the machine listed nothing for (a `private` one, whose
+   * owners the hub cannot know, RL §6.2) is pushed to no one.
+   */
+  async notify(machine: string, notice: { project: string; session: string; kind: OwnerNotice['kind'] }, looking: string[] = []): Promise<Pushed> {
+    if (typeof machine !== 'string' || typeof notice?.project !== 'string' || typeof notice.session !== 'string' || !['waiting', 'wrote'].includes(notice.kind)) {
+      throw new TypeError('notify takes a machine ref and {project, session, kind: waiting | wrote}');
+    }
+    const owners = this.records.ownersOf(machine, notice.session);
+    if (owners === null) return { sent: 0, gone: 0, failed: 0 };
+    const members = new Set(this.sql.exec<{ id: string }>('SELECT id FROM members').toArray().map((m) => m.id));
+    const payload: OwnerNotice = { project: notice.project, machine, session: notice.session, kind: notice.kind };
+    return this.sendPush(owners.filter((id) => members.has(id) && !looking.includes(id)), payload);
+  }
+
+  /** The owners a machine's listing of a session names, or null when it listed none (M6). */
+  ownersOf(machine: string, session: string): string[] | null {
+    return this.records.ownersOf(machine, session);
+  }
+
+  /** One push of `payload` to each deliverable subscription of `members`. A push service that answers 404 or 410 has
+   * dropped the subscription, so the hub does too. */
+  private async sendPush(members: string[], payload: PushNotice | OwnerNotice): Promise<Pushed> {
     const targets = this.subscriptionsOf(members);
     if (targets.length === 0) return { sent: 0, gone: 0, failed: 0 };
     const vapid = await this.vapidKey();
@@ -773,7 +900,7 @@ export class Registry extends DurableObject<Env> {
     const outcomes = await Promise.all(
       targets.map(async (target): Promise<'sent' | 'gone' | 'failed'> => {
         try {
-          const response = await fetch(await pushRequest(vapid, subject, target, full));
+          const response = await fetch(await pushRequest(vapid, subject, target, payload));
           await response.arrayBuffer().catch(() => {});
           if (response.status === 404 || response.status === 410) {
             this.sql.exec('DELETE FROM push_subscriptions WHERE endpoint = ?', target.endpoint);
@@ -788,15 +915,16 @@ export class Registry extends DurableObject<Env> {
     return { sent: outcomes.filter((o) => o === 'sent').length, gone: outcomes.filter((o) => o === 'gone').length, failed: outcomes.filter((o) => o === 'failed').length };
   }
 
+  /** The subscriptions of `members`, but one bound to a device the head no longer lists for its member. */
   private subscriptionsOf(members: string[]): PushSubscriptionRecord[] {
     if (members.length === 0) return [];
     return this.sql
-      .exec<{ endpoint: string; member: string; p256dh: string; auth: string; created: string }>(
-        `SELECT endpoint, member, p256dh, auth, created FROM push_subscriptions WHERE member IN (${members.map(() => '?').join(', ')}) ORDER BY created, endpoint`,
+      .exec<{ endpoint: string; member: string; p256dh: string; auth: string; created: string; device: string | null }>(
+        `SELECT endpoint, member, p256dh, auth, created, device FROM push_subscriptions s WHERE member IN (${members.map(() => '?').join(', ')}) AND (device IS NULL OR EXISTS (SELECT 1 FROM devices d WHERE d.id = s.device AND d.member = s.member)) ORDER BY created, endpoint`,
         ...members,
       )
       .toArray()
-      .map((row) => ({ member: row.member, endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth }, created: row.created }));
+      .map((row) => ({ member: row.member, endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth }, created: row.created, ...(row.device === null ? {} : { device: row.device }) }));
   }
 
   /** Names the one machine that writes the project's git archive (DX2's `have.archive` tells it at its next `hello`), or
@@ -999,15 +1127,20 @@ export class Registry extends DurableObject<Env> {
   /** The head, the transitions and the certificates; with `since` (a version, as the query gives it), the chain after it. */
   orgState(since: string | null): Result<OrgStateView> {
     this.ensureOrg();
-    if (since === null) return ok(this.chain.view());
+    if (since === null) return ok(this.stateView());
     if (!/^(0|[1-9][0-9]{0,15})$/.test(since) || !Number.isSafeInteger(Number(since))) return fail(400, 'bad-shape', '?since= is a version: a whole number from 0');
-    return ok(this.chain.view(Number(since)));
+    return ok(this.stateView(Number(since)));
+  }
+
+  /** The chain's view, with the machine certificates and retirements kept beside it (O11 M4). */
+  private stateView(since?: number): OrgStateView {
+    return { ...this.chain.view(since), certificates: this.records.certificates() };
   }
 
   /** The head as `GET /api/org/state` answers it, for a `Project` verifying v2 events (M5) to cache. */
   head(): OrgStateView {
     this.ensureOrg();
-    return this.chain.view();
+    return this.stateView();
   }
 
   /**
@@ -1064,6 +1197,54 @@ export class Registry extends DurableObject<Env> {
   /** The member's pairing entries, for their devices to approve. */
   pendingDevices(member: MemberRecord): PendingDevices {
     return { pending: this.chain.pending(member.id) };
+  }
+
+  // ---- Hub v2's signed records (O11 M4; RL §5.3, RL6) -----------------------------------------------------------
+
+  /** A v2 machine's key, ref and pairing MAC, posted once redeemed (`OrgRecords.keepMachineKey`). */
+  keepMachineKey(machine: MachineRecord, body: unknown): Result<{ key: EnrollmentKey; kept: boolean }> {
+    return this.records.keepMachineKey(machine, body);
+  }
+
+  /** The key a machine posted under an enrollment, for the member who made the enrollment. */
+  enrollmentKey(member: MemberRecord, id: string): Result<EnrollmentKey> {
+    const enrollment = this.enrollmentById(id);
+    if (!enrollment) return fail(404, 'unknown-enrollment');
+    if (enrollment.created_by !== member.id) return fail(403, 'not-yours', 'only the member who made the enrollment fetches its machine’s key');
+    const key = this.records.machineKey(id);
+    return key ? ok(key) : fail(404, 'no-key', 'the machine has not posted its key yet');
+  }
+
+  /** A delegated machine's certificate (`OrgRecords.storeCert`), for its own name under the key it enrolled through. */
+  async storeCert(machine: MachineRecord, body: unknown): Promise<Result<{ stored: boolean }>> {
+    const enrollment = this.enrollmentById(machine.enrollment);
+    return this.records.storeCert({ name: machine.name, delegation: enrollment?.key ?? null, use: enrollment?.use ?? null }, body);
+  }
+
+  /** A certificate's retirement by its delegation's key (`OrgRecords.storeRetirement`). */
+  retireCert(body: unknown): Promise<Result<{ stored: boolean }>> {
+    return this.records.storeRetirement(body);
+  }
+
+  /** A machine-signed listing (RL1's `listing`, through M6's Machine DO). */
+  storeListing(record: unknown): Promise<Result<{ stored: boolean }>> {
+    return this.records.storeListing(record);
+  }
+
+  /** A machine-signed endpoint record (RL1's `endpoint`, through M6's Machine DO). */
+  storeEndpoint(record: unknown): Promise<Result<{ stored: boolean }>> {
+    return this.records.storeEndpoint(record);
+  }
+
+  /** The listings kept, a project's alone when named, with their machines' endpoint records. */
+  listings(project: string | null): Listings {
+    return this.records.listings(project);
+  }
+
+  /** A machine's endpoint record, by its ref or its name. */
+  machineEndpoint(machine: string): Result<MachineEndpoint> {
+    const record = this.records.endpoint(machine);
+    return record ? ok({ record }) : fail(404, 'no-endpoint', `no endpoint record is kept for "${machine}"`);
   }
 
   // ---- The org key's wrapped copies (DX7) ----------------------------------------------------------------------

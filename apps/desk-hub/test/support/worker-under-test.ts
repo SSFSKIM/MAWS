@@ -93,6 +93,7 @@ import {
   PROJECTION_PATH,
   PROJECT_STATE_FAULT_PATH,
   MISSING_METHOD_PATH,
+  REGISTRY_RPC_PATH,
 } from './send-fault';
 import { lacksMethod } from '../../src/objects/retry';
 
@@ -102,6 +103,9 @@ export { default } from '../../src/worker';
 type Fault = { remaining: number; calls: number };
 /** An armed fault of state announcements: `missing` throws workerd's refusal of a method the callee lacks. */
 type StateFault = Fault & { missing?: boolean };
+
+/** The Registry's RPC methods a suite calls as an object would (REGISTRY_RPC_PATH). */
+const REGISTRY_RPCS = ['storeListing', 'storeEndpoint', 'notify', 'ownersOf', 'push'] as const;
 
 /** The org's registry, which can also take a member (the hub has no endpoint for that before the org phase). */
 export class Registry extends DeployedRegistry {
@@ -231,6 +235,12 @@ export class Registry extends DeployedRegistry {
           .toArray()
           .map((m) => ({ ...m, owners: JSON.parse(m.owners) as unknown })),
       });
+    }
+    if (url.pathname === REGISTRY_RPC_PATH) {
+      const { method, args } = (await request.json()) as { method: (typeof REGISTRY_RPCS)[number]; args: unknown[] };
+      if (!REGISTRY_RPCS.includes(method)) return new Response(`no RPC ${method}`, { status: 400 });
+      const call = this[method] as (...a: unknown[]) => unknown;
+      return Response.json((await call.apply(this, args)) ?? null);
     }
     if (url.pathname === MISSING_METHOD_PATH) {
       const stub = this.env.PROJECT.get(this.env.PROJECT.idFromName('missing-method')) as unknown as { noSuchMethod(): Promise<void> };

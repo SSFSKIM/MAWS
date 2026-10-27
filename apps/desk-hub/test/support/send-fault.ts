@@ -112,3 +112,6 @@ export const PROJECT_STATE_FAULT_PATH = '/__test/state-fault';
 /** Where the suites' `Registry` calls a method no `Project` has, and answers `{lacks, message}`: whether the Registry
  * takes workerd's refusal for a callee on older code. */
 export const MISSING_METHOD_PATH = '/__test/missing-method';
+/** Where the suites' `Registry` takes a call of one of its RPC methods (`{method, args}`) as an object calling it would
+ * (M6's Machine DO, Project), and answers its result: `storeListing`, `storeEndpoint`, `notify`, `ownersOf`, `push`. */
+export const REGISTRY_RPC_PATH = '/__test/registry-rpc';
