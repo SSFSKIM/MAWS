@@ -189,11 +189,11 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     },
   });
   // A compensation for a row resizing above a follower clamps at the end, and virtual-core re-issues its absolute
-  // target once the sizer grows, cancelling it only on a later scroll event away from that end (#1258). The follower
-  // leaving makes it obsolete: a commit landing after they scroll away but before their scroll event would put them
-  // back on the end. Only that departure drops it; a reader already released near the end keeps a clamped anchor
-  // correction, which is ordinary anchoring. virtual-core has no public cancel (3.17: `_clampedAdjustment`); the
-  // scroll tests' "clamped compensation" case fails if that changes.
+  // target once the sizer grows, cancelling it only on a later scroll event away from that end (TanStack Virtual issue
+  // 1258). The follower leaving makes it obsolete: a commit landing after they scroll away but before their scroll
+  // event would put them back on the end. Only that departure drops it; a reader already released near the end keeps
+  // a clamped anchor correction, which is ordinary anchoring. virtual-core has no public cancel (3.17:
+  // `_clampedAdjustment`); the scroll tests' "clamped compensation" case fails if that changes.
   const releaseFollow = useCallback(() => {
     if (followingRef.current) (virtualizer as unknown as { _clampedAdjustment: unknown })._clampedAdjustment = null;
     changeFollow(false);
