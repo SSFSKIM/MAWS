@@ -20,8 +20,8 @@
 // prints one line, adds it as an annotation, and writes the samples to test-results/daemon-idle.json. Until M9 it
 // records only: no bound is asserted.
 //
-// The second case is the runtime floor (P5 Decision Log 54), the footprint of the bare runtime `mawsd` runs on, which
-// sets `mawsd`'s own memory bound; it writes test-results/daemon-idle-floor.json.
+// The second case is the runtime floor, the footprint of the bare runtime `mawsd` runs on, a diagnostic outside the
+// bound (P5 Decision Logs 54 and 57); it writes test-results/daemon-idle-floor.json.
 //
 // Two measured groups (gate.yml's MEASURED_E2E), one case each, chosen by title: `pnpm e2e:daemon-idle` (the supervisor)
 // and `pnpm e2e:daemon-idle-floor` (the floor, which needs no build). Each sets MAWS_DAEMON_IDLE_PERF=1, and the gate
@@ -154,7 +154,7 @@ test('daemon idle: the physical footprint and CPU of the detached supervisor hol
   if (leftover !== null) throw leftover; // the body passed: a process of the scratch outliving it is the case's failure
 });
 
-// The runtime floor (P5 Decision Log 54): what `mawsd` runs on, before any of its code. The Electron binary the engine
+// The runtime floor (P5 Decision Logs 54 and 57, a diagnostic): what `mawsd` runs on, before any of its code. The Electron binary the engine
 // host runs, as Node (ELECTRON_RUN_AS_NODE=1, `--disable-sigusr1` as the supervisor is spawned), on an empty script that
 // stays alive, with an environment of its own (no NODE_OPTIONS or loader from the test runner). Its argv names the
 // scratch root, so the window finds it and the cleanup kills it. The same settle, window, readers and load rule.

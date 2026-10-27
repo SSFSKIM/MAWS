@@ -10,11 +10,11 @@
 // footprint keeps compressed pages and leaves shared clean ones out. RSS stays in the line and the JSON as a diagnostic.
 //
 // The baseline is three runs of the supervisor's scene on the mini at M1's `src/`: the median of their footprint
-// medians and the median of their CPU times, with the run ids and the commit. The runtime floor (P5 Decision Log 54) is
-// three runs of the floor's scene, the bare Electron binary as Node holding an empty script alive, which is what `mawsd`
-// runs on: the median of their footprint medians, with the Electron version, since it measures the runtime and not
-// `src/`. Each is written by a recording commit touching only this file; the bound is derived from both, so it is null
-// while the floor is pending.
+// medians and the median of their CPU times, with the run ids and the commit. The bound is derived from it alone (P5
+// Decision Log 57). The runtime floor is a diagnostic: three runs of the floor's scene, the bare Electron binary as
+// Node holding an empty script alive, which is what `mawsd` runs on, recorded as the median of their footprint medians
+// with the Electron version, since it measures the runtime and not `src/`. It tells how much of a footprint is the
+// runtime's, and enters no bound. Each record is written by a recording commit touching only this file.
 import { execFileSync } from 'node:child_process';
 
 export const IDLE_RUN = { settleS: 120, windowS: 600, everyS: 30, samples: 21, maxLoad: 5 } as const;
@@ -37,34 +37,32 @@ export interface DaemonIdleRuntimeFloor extends IdleRecord {
 // Log 54): footprints 64481, 66033 and 63969 KiB, CPU 0.12, 0.11 and 0.11 s, load 3.3, 3.0 and 2.7.
 export const DAEMON_IDLE_BASELINE: DaemonIdleBaseline = { commit: 'd14e92991', runs: ['40490756731', '40492851056', '40495339208'], footprintKiB: 64481, cpuS: 0.11 };
 
-// Recorded from three valid e2e:daemon-idle-floor runs on the mini at 36704c984 (P5 Decision Log 54): footprints 12689,
-// 13153 and 13185 KiB (1.04x), CPU 0.00 s each, load 2.9, 4.3 and 3.3; a fourth run (40502284016, 12657 KiB) was
-// invalid on the load rule (7.7).
-export const DAEMON_IDLE_RUNTIME_FLOOR: DaemonIdleRuntimeFloor | null = { commit: '36704c984', runs: ['40498387866', '40500435129', '40504203813'], footprintKiB: 13153, electron: '44.4.5' };
+// A diagnostic (P5 Decision Log 57), recorded from three valid e2e:daemon-idle-floor runs on the mini at 36704c984:
+// footprints 12689, 13153 and 13185 KiB (1.04x), CPU 0.00 s each, load 2.9, 4.3 and 3.3; a fourth run (40502284016,
+// 12657 KiB) was invalid on the load rule (7.7).
+export const DAEMON_IDLE_RUNTIME_FLOOR: DaemonIdleRuntimeFloor = { commit: '36704c984', runs: ['40498387866', '40500435129', '40504203813'], footprintKiB: 13153, electron: '44.4.5' };
 
 export interface DaemonIdleBound {
-  engineHostFootprintKiB: number;
-  mawsdFootprintKiB: number;
+  footprintKiB: number; // the daemon shape's processes together
   cpuS: number; // the daemon shape's processes together, over IDLE_RUN.windowS
 }
 
 export const FOOTPRINT_FACTOR = 1.5;
 export const CPU_ALLOWANCE_S_PER_600 = 1.0;
 
-// The memory bound is per process (P5 Decision Log 54): the engine host within 1.5 times the supervisor's baseline
-// footprint, and `mawsd` within 1.5 times the footprint of the bare runtime it runs on, each in whole KiB, never above
-// 1.5x. A combined 1.5x would leave `mawsd` less than its runtime alone costs, judging the shape P5 chose rather than a
-// regression in either process. The CPU bound is combined: the baseline's CPU time plus 1.0 s per 600 s of window (in
-// centiseconds, ps's resolution), since the shape adds no periodic work.
-export function idleBound(baseline: DaemonIdleBaseline, floor: DaemonIdleRuntimeFloor, windowS: number = IDLE_RUN.windowS): DaemonIdleBound {
+// The daemon shape's processes together (`mawsd` and the engine host, and the pty host if it runs) stay within 1.5
+// times today's supervisor's footprint, in whole KiB and never above 1.5x, and within its CPU time plus 1.0 s per 600 s
+// of window, in centiseconds (ps's resolution). That is acceptance 14's statement to the owner: the daemon shape costs
+// the laptop at most half again what today's supervisor does (P5 Decision Log 57, reversing 54's per-process rule: the
+// bare runtime is 13 MiB, so 1.5x of it would fail `mawsd` by construction).
+export function idleBound(baseline: DaemonIdleBaseline, windowS: number = IDLE_RUN.windowS): DaemonIdleBound {
   return {
-    engineHostFootprintKiB: Math.floor(baseline.footprintKiB * FOOTPRINT_FACTOR),
-    mawsdFootprintKiB: Math.floor(floor.footprintKiB * FOOTPRINT_FACTOR),
+    footprintKiB: Math.floor(baseline.footprintKiB * FOOTPRINT_FACTOR),
     cpuS: Math.round((baseline.cpuS + (CPU_ALLOWANCE_S_PER_600 * windowS) / 600) * 100) / 100,
   };
 }
 
-export const DAEMON_IDLE_BOUND: DaemonIdleBound | null = DAEMON_IDLE_RUNTIME_FLOOR === null ? null : idleBound(DAEMON_IDLE_BASELINE, DAEMON_IDLE_RUNTIME_FLOOR);
+export const DAEMON_IDLE_BOUND: DaemonIdleBound = idleBound(DAEMON_IDLE_BASELINE);
 
 // What is wrong with a recorded baseline or runtime floor, each one line; empty when it is well formed, and for none
 // recorded yet.
