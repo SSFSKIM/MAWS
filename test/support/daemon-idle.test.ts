@@ -10,6 +10,8 @@ import {
   IDLE_RUN,
   idleBound,
   idleLine,
+  MAWSD_HEADROOM_KIB,
+  mawsdLine,
   invalidReasons,
   measured,
   median,
@@ -197,5 +199,14 @@ describe('the printed line', () => {
     expect(floorLine({ footprintKiB: 20_480.4, rssKiB: 41_000, samples: 21, cpuS: 0.03, electron: '44.4.5', load: 2.71 })).toBe(
       '[daemon-idle] runtime floor footprint 20480 KiB (median of 21) · rss 41000 KiB · cpu 0.03 s · electron 44.4.5 · load 2.7',
     );
+  });
+
+  // P5 O2 M5: Decision Log 57's early check
+  it("reads mawsd's line against what the combined bound leaves it beside the engine host's baseline", () => {
+    expect(MAWSD_HEADROOM_KIB).toBe(96_721 - 64_481);
+    expect(mawsdLine({ footprintKiB: 24_000.6, rssKiB: 52_000, samples: 21, cpuS: 0.02, load: 3.04 })).toBe(
+      "[daemon-idle] mawsd footprint 24001 KiB (median of 21) · rss 52000 KiB · cpu 0.02 s over 600 s · within the 32240 KiB the bound leaves it beside the engine host's 64481 KiB · load 3.0",
+    );
+    expect(mawsdLine({ footprintKiB: 40_000, rssKiB: 60_000, samples: 21, cpuS: 0.02, load: 3 })).toContain('· over the 32240 KiB');
   });
 });

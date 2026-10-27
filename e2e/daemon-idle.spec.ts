@@ -21,12 +21,14 @@
 // records only: no bound is asserted.
 //
 // The second case is the runtime floor, the footprint of the bare runtime `mawsd` runs on, a diagnostic outside the
-// bound (P5 Decision Logs 54 and 57); it writes test-results/daemon-idle-floor.json.
+// bound (P5 Decision Logs 54 and 57); it writes test-results/daemon-idle-floor.json. The third (P5 O2 M5, Decision Log
+// 57's early check) is `mawsd` alone, idle with no hosts and no app; it writes test-results/daemon-idle-mawsd.json.
 //
-// Two measured groups (gate.yml's MEASURED_E2E), one case each, chosen by title: `pnpm e2e:daemon-idle` (the supervisor)
-// and `pnpm e2e:daemon-idle-floor` (the floor, which needs no build). Each sets MAWS_DAEMON_IDLE_PERF=1, and the gate
-// runs it only when named, on the mini's exclusive instance behind the measured-job guard. Neither spends anything or
-// touches a keychain: a replay runs no engine.
+// Three measured groups (gate.yml's MEASURED_E2E), one case each, chosen by title: `pnpm e2e:daemon-idle` (the
+// supervisor), `pnpm e2e:daemon-idle-floor` (the floor, which needs no build) and `pnpm e2e:daemon-idle-mawsd` (mawsd
+// alone). Each sets MAWS_DAEMON_IDLE_PERF=1, and the gate runs it only when named, on the mini's exclusive instance
+// behind the measured-job guard. None spends anything or touches a keychain: a replay runs no engine, and mawsd alone
+// wakes no host.
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -36,7 +38,7 @@ import { expect, test } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
-import { cpuSeconds, floorLine, IDLE_RUN, idleLine, invalidReasons, measured, median, readerMismatches, readFootprints, readTopMem, type MeasuredProcess, type TopMem } from '../test/support/daemon-idle';
+import { cpuSeconds, floorLine, IDLE_RUN, idleLine, invalidReasons, mawsdLine, measured, median, readerMismatches, readFootprints, readTopMem, type MeasuredProcess, type TopMem } from '../test/support/daemon-idle';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { isAlive, killScratchProcesses, processesNaming, ps } from './support/processes';
@@ -50,6 +52,7 @@ test.describe.configure({ timeout: 20 * 60_000 }); // about 13 minutes: the scen
 const PERMISSION = 'spikes/protocol-probe/fixtures/permission-roundtrip.jsonl';
 const ROW_MS = '500'; // about 22 s from the answer to the result: the quit lands mid-turn
 const FLOOR_ARGV0 = 'maws-runtime-floor';
+const MAWSD_ARGV0 = 'mawsd'; // P5 O2 M5
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 interface JournalRow { seq: number; direction: string; frame: Record<string, unknown> }
@@ -182,6 +185,42 @@ test('daemon idle runtime floor: the physical footprint and CPU of the bare Elec
   } finally {
     floor?.kill('SIGKILL');
     await killScratchProcesses(root, floor?.pid === undefined ? [] : [floor.pid]).catch((error: unknown) => (leftover = error));
+    rmSync(root, { recursive: true, force: true });
+  }
+  if (leftover !== null) throw leftover;
+});
+
+// P5 O2 M5, Decision Log 57's early check: `mawsd` alone, idle, with no hosts and no app, as the unit runs it (a unit
+// mawsd never exits by itself; a private one would after its 10 minutes). The built out/main/mawsd.js under the same
+// Electron binary as Node, `--disable-sigusr1`, argv0 `mawsd`, on a scratch profile with an environment of its own; no
+// client ever connects, so neither host is woken. The same settle, window, readers and load rule; it writes
+// test-results/daemon-idle-mawsd.json. `pnpm e2e:daemon-idle-mawsd` runs this case alone (it needs the plain build).
+test('daemon idle mawsd alone: the physical footprint and CPU of mawsd idle with no hosts and no app', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-dim-')));
+  const profile = join(root, 'ud');
+  mkdirSync(profile, { recursive: true });
+  const script = join(REPO_ROOT, 'out', 'main', 'mawsd.js');
+  expect(existsSync(script), 'the build has out/main/mawsd.js (scripts/e2e-build.sh plain)').toBe(true);
+  const binary = join(REPO_ROOT, 'node_modules', 'electron', 'dist', readFileSync(join(REPO_ROOT, 'node_modules', 'electron', 'path.txt'), 'utf8').trim());
+  const env = { ELECTRON_RUN_AS_NODE: '1', PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: root, MAWS_USER_DATA: profile };
+  const log = () => (existsSync(join(profile, 'mawsd', 'mawsd.log')) ? readFileSync(join(profile, 'mawsd', 'mawsd.log'), 'utf8') : '');
+  let mawsd: ChildProcess | null = null;
+  let leftover: unknown = null;
+  try {
+    mawsd = spawn(binary, ['--disable-sigusr1', script, 'run', '--unit', '--dir', join(profile, 'mawsd')], { env, stdio: 'ignore', argv0: MAWSD_ARGV0 });
+    await expect.poll(() => log().includes(' serving; engine host parked, pty host parked'), { timeout: 20_000, message: `mawsd serves with both hosts parked:\n${log()}` }).toBe(true);
+    await sleep(IDLE_RUN.settleS * 1_000);
+    const procs = measured(processesNaming(root), root, [MAWSD_ARGV0]);
+    expect(procs.map((p) => p.pid), 'mawsd alone is what is measured (no host woken)').toEqual([mawsd.pid]);
+    const measurement = await measureWindow(procs);
+
+    const reasons = invalidReasons({ loads: measurement.samples.map((s) => s.load), measured: measurement.names, lost: measurement.lost, sessionEnded: false, mismatches: measurement.mismatches });
+    const { footprintKiB, rssKiB, cpuS, load } = measurement;
+    const line = footprintKiB === null || rssKiB === null || cpuS === null ? null : mawsdLine({ footprintKiB, rssKiB, samples: measurement.whole, cpuS, load });
+    report('daemon-idle-mawsd.json', line, reasons, { shape: 'mawsd alone', ...measurement.record });
+  } finally {
+    mawsd?.kill('SIGTERM');
+    await killScratchProcesses(root, mawsd?.pid === undefined ? [] : [mawsd.pid]).catch((error: unknown) => (leftover = error));
     rmSync(root, { recursive: true, force: true });
   }
   if (leftover !== null) throw leftover;

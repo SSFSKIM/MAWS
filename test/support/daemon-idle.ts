@@ -223,3 +223,13 @@ export function floorLine(run: { footprintKiB: number; rssKiB: number; samples: 
 export function idleLine(run: { footprintKiB: number; rssKiB: number; samples: number; cpuS: number; measured: readonly string[]; load: number }): string {
   return `[daemon-idle] footprint ${Math.round(run.footprintKiB)} KiB (median of ${run.samples}) · rss ${Math.round(run.rssKiB)} KiB · cpu ${run.cpuS.toFixed(2)} s over ${IDLE_RUN.windowS} s · processes ${run.measured.join(', ')} · load ${run.load.toFixed(1)}`;
 }
+
+// P5 O2 M5 (P5 Decision Log 57's early check): `mawsd` alone, idle, with no hosts and no app. The line names its
+// footprint beside what the combined bound leaves it once the engine host's baseline is counted: the bound less the
+// baseline's footprint. A miss is no failure here; it reaches the architect as a P5 §10 finding.
+export const MAWSD_HEADROOM_KIB = DAEMON_IDLE_BOUND.footprintKiB - DAEMON_IDLE_BASELINE.footprintKiB;
+
+export function mawsdLine(run: { footprintKiB: number; rssKiB: number; samples: number; cpuS: number; load: number }): string {
+  const fits = run.footprintKiB <= MAWSD_HEADROOM_KIB ? 'within' : 'over';
+  return `[daemon-idle] mawsd footprint ${Math.round(run.footprintKiB)} KiB (median of ${run.samples}) · rss ${Math.round(run.rssKiB)} KiB · cpu ${run.cpuS.toFixed(2)} s over ${IDLE_RUN.windowS} s · ${fits} the ${MAWSD_HEADROOM_KIB} KiB the bound leaves it beside the engine host's ${DAEMON_IDLE_BASELINE.footprintKiB} KiB · load ${run.load.toFixed(1)}`;
+}
