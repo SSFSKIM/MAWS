@@ -56,7 +56,8 @@ describe('every command of the registry', () => {
     expect(gradeOf('session.queue.promote')).toEqual({ floor: 'converse', byEffect: true });
     expect(gradeOf('session.queue.setPaused')).toEqual({ floor: 'converse', byEffect: true });
     // a plugin callback the caller names may execute or manage
-    for (const name of ['session.ui.press', 'session.ui.input', 'session.ui.select']) {
+    // and a keyed prompt edit is forwarded with what it triggers unknown
+    for (const name of ['session.ui.press', 'session.ui.input', 'session.ui.select', 'session.ui.promptEdit']) {
       expect(gradeOf(name), name).toEqual({ floor: 'converse', byEffect: true });
     }
   });

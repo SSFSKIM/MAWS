@@ -115,7 +115,7 @@ export const grades = {
   'session.ui.paneShow': 'converse',
   'session.ui.paneFocus': 'converse',
   'session.ui.close': 'converse',
-  'session.ui.promptEdit': 'converse',
+  'session.ui.promptEdit': { floor: 'converse', byEffect: true }, // a text edit at the floor; a keyed edit is forwarded with what it triggers unknown
   'session.ui.answer': 'converse', // the attached surface's copy and prompt read, fill and suggest answers; nothing executes
   'session.reloadSkills': 'manage',
   'session.steer.cancel': 'converse',
