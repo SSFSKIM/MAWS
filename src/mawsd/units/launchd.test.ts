@@ -140,6 +140,51 @@ describe('the LaunchAgent through a fake launchctl', () => {
     await expect(unit.apply(launchdPlist(SPEC))).rejects.toThrow(/still loaded .* after its bootout/);
   });
 
+  it('retries a bootstrap that fails with 5 after the bootout, once print no longer finds the job', async () => {
+    const unit = launchdUnit(SPEC.label, deps());
+    await unit.apply(launchdPlist({ ...SPEC, program: { runtime: '/old', entry: '/old.js' } }));
+    managers.calls.length = 0;
+    managers.script('launchctl bootstrap', { status: 5, stderr: 'Bootstrap failed: 5: Input/output error' }, 2);
+    await expect(unit.apply(launchdPlist(SPEC))).resolves.toBe('updated');
+    expect(managers.changes()).toEqual(['launchctl bootout gui/501/dev.maws.mawsd', ...Array(3).fill(`launchctl bootstrap gui/501 ${plistPath()}`)]);
+    expect(managers.loaded.has(SPEC.label)).toBe(true);
+  });
+
+  it('gives up on a bootstrap that keeps failing with 5, keeping launchctl’s last answer, and does not retry other failures', async () => {
+    const unit = launchdUnit(SPEC.label, deps());
+    managers.script('launchctl bootstrap', { status: 5, stderr: 'Bootstrap failed: 5: Input/output error' }, 100);
+    await expect(unit.apply(launchdPlist(SPEC))).rejects.toThrow(/after 6 attempts \(5\): Bootstrap failed: 5: Input\/output error/);
+    expect(managers.calls.filter((call) => call.startsWith('launchctl bootstrap'))).toHaveLength(6);
+
+    const other = new FakeManagers();
+    other.script('launchctl bootstrap', { status: 125, stderr: 'Bootstrap failed: 125: Domain does not support specified action' });
+    await expect(launchdUnit(SPEC.label, { ...deps(), run: other.run }).apply(launchdPlist(SPEC))).rejects.toThrow(/\(125\)/);
+    expect(other.calls.filter((call) => call.startsWith('launchctl bootstrap'))).toHaveLength(1);
+  });
+
+  it('a failed update leaves the old file, so the retry completes it rather than reading it as unchanged', async () => {
+    const old = launchdPlist({ ...SPEC, program: { runtime: '/old', entry: '/old.js' } });
+    const unit = launchdUnit(SPEC.label, deps());
+    await unit.apply(old);
+    managers.script('launchctl bootstrap', { status: 1, stderr: 'Bootstrap failed: 1: Operation not permitted' });
+    await expect(unit.apply(launchdPlist(SPEC))).rejects.toThrow(/Operation not permitted/);
+    expect(readFileSync(plistPath(), 'utf8')).toBe(old);
+    expect(managers.loaded.has(SPEC.label)).toBe(false); // the bootout happened
+
+    managers.calls.length = 0;
+    await expect(unit.apply(launchdPlist(SPEC))).resolves.toBe('loaded');
+    expect(readFileSync(plistPath(), 'utf8')).toBe(PLIST);
+    expect(managers.changes()).toEqual([`launchctl bootstrap gui/501 ${plistPath()}`]);
+  });
+
+  it('a failed first install leaves no file behind', async () => {
+    const unit = launchdUnit(SPEC.label, deps());
+    managers.script('launchctl bootstrap', { status: 1, stderr: 'nope' });
+    await expect(unit.apply(launchdPlist(SPEC))).rejects.toThrow(/nope/);
+    expect(existsSync(plistPath())).toBe(false);
+    await expect(unit.apply(launchdPlist(SPEC))).resolves.toBe('loaded');
+  });
+
   it('removes: bootout and the file; a second remove does nothing', async () => {
     const unit = launchdUnit(SPEC.label, deps());
     await unit.apply(launchdPlist(SPEC));

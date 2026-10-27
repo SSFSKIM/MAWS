@@ -2,7 +2,7 @@
 // daemon in this process (test/support/mawsd-scene.ts: stand-in hosts on real sockets) over its real `machine.sock`, and
 // fake unit managers (test/support/fake-units.ts) in a scratch home: what each command prints and exits with, the daemon
 // up and down, and the enrollment code's path (stdin or a prompt, never argv; sent as `secret`; never logged or printed).
-import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
 import { readOrMintMachineRef } from '@shared/machine/identity-file';
@@ -173,6 +173,38 @@ describe('mawsd logs', () => {
     expect((await cli(['logs', '--host', 'kernel'])).code).toBe(1);
   });
 
+  it('a log that cannot be read (not one that is missing) is named with its error, and logs exits 1', async () => {
+    const daemonLog = join(scene.root, 'mawsd', 'mawsd.log');
+    const engineLog = join(scene.root, 'supervisor', 'host.log');
+    mkdirSync(daemonLog, { recursive: true }); // EISDIR, which even root cannot read past
+    write(engineLog, 'engine line\n');
+    const one = await cli(['logs', '--host', 'daemon']);
+    expect(one.code).toBe(1);
+    expect(one.err).toMatch(new RegExp(`^cannot read ${daemonLog}: .*EISDIR`));
+    const all = await cli(['logs']);
+    expect(all.code).toBe(1);
+    expect(all.out).toContain(`==> ${daemonLog} (unreadable) <==\n`);
+    expect(all.out).toContain('engine line\n');
+    expect(all.out).not.toContain(`${daemonLog} (no log yet)`);
+  });
+
+  it('--follow ends with exit 1, naming the file, when the file it follows becomes unreadable', async () => {
+    const daemonLog = join(scene.root, 'mawsd', 'mawsd.log');
+    write(daemonLog, 'first\n');
+    let out = '';
+    const following = cli(['logs', '--host', 'daemon', '--follow'], {
+      out: (text) => void (out += text),
+      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, Math.min(ms, 10))),
+      follow: { intervalMs: 10, signal: new AbortController().signal },
+    });
+    await until(() => out === 'first\n', 2_000, 'the first line');
+    rmSync(daemonLog);
+    mkdirSync(join(daemonLog, 'inside'), { recursive: true }); // a new inode with a size: read from its start, EISDIR
+    const ended = await following;
+    expect(ended.code).toBe(1);
+    expect(ended.err).toMatch(new RegExp(`cannot read ${daemonLog}: .*EISDIR`));
+  });
+
   it('--follow prints what is appended until it is stopped', async () => {
     const daemonLog = join(scene.root, 'mawsd', 'mawsd.log');
     write(daemonLog, 'first\n');
@@ -307,6 +339,19 @@ describe('mawsd install and uninstall', () => {
     expect(malformed.code).toBe(1);
     expect(malformed.err).toContain('delegation id');
     expect(managers.calls).toEqual([]);
+  });
+
+  it('refuses to install the default profile’s unit for a build that is not packaged, writing nothing', async () => {
+    const refused = await cli(['install'], { env: {} }); // the default profile, so dev.maws.mawsd; this CLI runs from /opt/maws/out
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("/opt/maws/out/main/mawsd.js is not inside a packaged app's app.asar");
+    expect(managers.calls).toEqual([]);
+    const packaged = await cli(['install'], { env: {}, self: { runtime: '/Applications/MAWS.app/Contents/MacOS/MAWS', entry: '/Applications/MAWS.app/Contents/Resources/app.asar/out/main/mawsd.js' } });
+    expect(packaged.code).toBe(0);
+    expect(packaged.out).toContain('unit dev.maws.mawsd loaded');
+    const linux = await cli(['install'], { env: {}, platform: 'linux' }); // not the release directory's current, and not named
+    expect(linux.code).toBe(1);
+    expect(linux.err).toContain('/opt/maws/out/main/mawsd.js is not in the release directory');
   });
 
   it('is not available where there is no unit manager', async () => {

@@ -23,6 +23,12 @@ export class FakeManagers {
   lingerNeedsSudo = false;
   sudoAllowed = true;
 
+  // Scripted answers: a call beginning with `prefix` gets `result`, `times` times, before the fake's own logic answers it.
+  private readonly scripted: { prefix: string; result: CommandResult; left: number }[] = [];
+  script(prefix: string, result: Partial<CommandResult> & { status: number }, times = 1): void {
+    this.scripted.push({ prefix, result: { stdout: '', stderr: '', ...result }, left: times });
+  }
+
   // what the calls that change something were, in order
   changes(): string[] {
     const queries = [/^launchctl print /, / is-enabled /, / is-active /, / show-environment$/, /^loginctl show-user /];
@@ -30,7 +36,13 @@ export class FakeManagers {
   }
 
   readonly run: CommandRunner = (command, args) => {
-    this.calls.push([command, ...args].join(' '));
+    const call = [command, ...args].join(' ');
+    this.calls.push(call);
+    const scripted = this.scripted.find((entry) => entry.left > 0 && call.startsWith(entry.prefix));
+    if (scripted) {
+      scripted.left -= 1;
+      return scripted.result;
+    }
     if (command === 'launchctl') return this.launchctl(args);
     if (command === 'systemctl') return this.systemctl(args);
     if (command === 'loginctl') return this.loginctl(args, false);

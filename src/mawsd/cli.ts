@@ -277,20 +277,41 @@ async function logs(context: Context, args: readonly string[]): Promise<number> 
   const files = host === undefined ? Object.values(all) : [all[host as keyof typeof all]];
   const headed = files.length > 1;
   const sections: string[] = [];
+  let unreadable = false;
   for (const file of files) {
-    const text = [`${file}.1`, file].map(readOrNull).filter((part) => part !== null).map((part) => (part.endsWith('\n') || part === '' ? part : `${part}\n`)).join('');
-    const present = readOrNull(file) !== null || readOrNull(`${file}.1`) !== null;
+    let parts: (string | null)[];
+    try {
+      parts = [readLog(`${file}.1`), readLog(file)];
+    } catch (error) {
+      deps.err(`${cannotRead(file, error)}\n`);
+      unreadable = true;
+      if (headed) sections.push(`==> ${file} (unreadable) <==\n`);
+      continue;
+    }
+    const present = parts.some((part) => part !== null);
+    const text = parts
+      .filter((part): part is string => part !== null)
+      .map((part) => (part.endsWith('\n') || part === '' ? part : `${part}\n`))
+      .join('');
     if (headed) sections.push(`==> ${file}${present ? '' : ' (no log yet)'} <==\n${text}`);
     else if (present) sections.push(text);
     else deps.err(`no log yet at ${file}\n`);
   }
   deps.out(sections.join('\n'));
-  if (given.has('--follow')) await follow(files, headed, deps);
+  if (unreadable) return EXIT.failed;
+  if (given.has('--follow')) {
+    try {
+      await follow(files, headed, deps);
+    } catch (error) {
+      return failed(deps, error instanceof Error ? error.message : String(error));
+    }
+  }
   return EXIT.done;
 }
 
 // Prints what is appended to each file, from where the print above ended, until `follow.signal` ends it (the user's
-// interrupt); a rotation (a new file at the path) is read from its start.
+// interrupt); a rotation (a new file at the path) is read from its start. A file that cannot be read (anything but its
+// absence) ends the follow with an error naming it.
 async function follow(files: readonly string[], headed: boolean, deps: CliDeps): Promise<void> {
   const at = new Map(files.map((file) => [file, position(file)]));
   let last = files.at(-1);
@@ -304,42 +325,60 @@ async function follow(files: readonly string[], headed: boolean, deps: CliDeps):
       const from = now.ino !== was.ino || now.size < was.size ? 0 : was.size;
       if (now.size > from) {
         const text = readRange(file, from, now.size);
-        if (headed && last !== file) deps.out(`\n==> ${file} <==\n`);
-        deps.out(text);
-        last = file;
+        if (text !== '') {
+          if (headed && last !== file) deps.out(`\n==> ${file} <==\n`);
+          deps.out(text);
+          last = file;
+        }
       }
       at.set(file, now);
     }
   }
 }
 
+const absent = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT';
+const cannotRead = (file: string, error: unknown) => `cannot read ${file}: ${error instanceof Error ? error.message : String(error)}`;
+
+// Where a file ends: an absent one reads as empty (a rotation, or a log not written yet); any other failure throws,
+// naming the file.
 function position(file: string): { ino: number; size: number } {
   try {
     const stat = statSync(file);
     return { ino: stat.ino, size: stat.size };
-  } catch {
-    return { ino: -1, size: 0 };
+  } catch (error) {
+    if (absent(error)) return { ino: -1, size: 0 };
+    throw new Error(cannotRead(file, error), { cause: error });
   }
 }
 
 function readRange(file: string, from: number, to: number): string {
-  const fd = openSync(file, 'r');
+  let fd: number;
+  try {
+    fd = openSync(file, 'r');
+  } catch (error) {
+    if (absent(error)) return ''; // rotated away between the stat and the open: the next poll reads the new file
+    throw new Error(cannotRead(file, error), { cause: error });
+  }
   try {
     const length = Math.min(to, fstatSync(fd).size) - from;
     if (length <= 0) return '';
     const buffer = Buffer.alloc(length);
     const read = readSync(fd, buffer, 0, length, from);
     return buffer.subarray(0, read).toString('utf8');
+  } catch (error) {
+    throw new Error(cannotRead(file, error), { cause: error });
   } finally {
     closeSync(fd);
   }
 }
 
-function readOrNull(file: string): string | null {
+// A log's text, or null when it does not exist; any other failure throws.
+function readLog(file: string): string | null {
   try {
     return readFileSync(file, 'utf8');
-  } catch {
-    return null;
+  } catch (error) {
+    if (absent(error)) return null;
+    throw error;
   }
 }
 
@@ -428,7 +467,8 @@ async function install(context: Context, args: readonly string[]): Promise<numbe
   const program = { runtime: path('--runtime', deps.self.runtime), entry: path('--entry', deps.self.entry) };
   const delegation = given.get('--delegation-id');
   const label = requiredLabel(context);
-  const result = await installDaemon({ profileDir, label, program, ...(typeof delegation === 'string' && { delegationId: delegation }) }, installDeps(deps));
+  const programGiven = given.has('--runtime') && given.has('--entry');
+  const result = await installDaemon({ profileDir, label, program, programGiven, ...(typeof delegation === 'string' && { delegationId: delegation }) }, installDeps(deps));
   const change = { loaded: 'loaded', unchanged: 'unchanged', updated: 'updated and restarted' }[result.change];
   const linked = result.linked === null ? '' : result.linked === 'other' ? ` · ${join(deps.home, '.local', 'bin', 'mawsd')} is another mawsd, left as it is` : ` · linked from ${result.linked}`;
   deps.out([`unit ${result.unit.name} ${change} (${result.unit.file})`, `wrapper ${result.wrapper}${linked}`, ...(result.ref ? [`machine ${result.ref}`] : []), ''].join('\n'));

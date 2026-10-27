@@ -3,7 +3,8 @@
 // systemd user unit on Linux (units/), with its runners, home and paths injected, so a test drives fakes in a scratch
 // home and the app (M7) and the Linux package (M8) call the same code with their own program.
 //
-// An install, in order: the delegation id checked; the profile's `mawsd/` directory made private (a symlink, another
+// An install, in order: the delegation id checked; under the default label, the program checked to be a packaged build
+// (residue 21: never a checkout); the profile's `mawsd/` directory made private (a symlink, another
 // owner or a wider mode refuses the install, writing no unit); with `--delegation-id`, the profile's machine ref minted
 // with the delegation's id as its prefix when it has none (before the unit's first start, so the daemon reads it); the
 // wrapper `<profile>/mawsd/bin/mawsd` and, for the default profile, its link `~/.local/bin/mawsd`; then the unit applied
@@ -87,7 +88,23 @@ export interface InstallOptions {
   profileDir: string;
   label: string;
   program: UnitProgram;
+  programGiven?: boolean; // the caller named the runtime and the entry itself (the CLI's --runtime and --entry)
   delegationId?: string;
+}
+
+// The Linux release directory's current release (M8 installs it; residue 21).
+export const linuxReleaseCurrent = (home: string): string => join(home, '.local', 'share', 'maws', 'mawsd', 'current');
+
+// Residue 21: the canonical unit never runs code from a working checkout. Under the default profile's label, a Mac's
+// program is a packaged app (its entry inside an `app.asar`), and a Linux one is the release directory's `current`, or a
+// program the caller named itself (until M8's release directory exists, the only way M8's install can say where it is).
+// Any other label (a scratch profile, every test) may run an unpackaged build.
+export function unpackagedProgram({ label, program }: UnitSpec, platform: NodeJS.Platform, home: string, given: boolean): string | null {
+  if (label !== DEFAULT_LABEL) return null;
+  if (platform === 'darwin') return /\.asar[/\\]/.test(program.entry) ? null : `${program.entry} is not inside a packaged app's app.asar`;
+  const current = `${linuxReleaseCurrent(home)}/`;
+  if (given || (program.entry.startsWith(current) && program.runtime.startsWith(current))) return null;
+  return `${program.entry} is not in the release directory ${current} (name --runtime and --entry to install another)`;
 }
 
 export interface InstallResult {
@@ -103,6 +120,8 @@ export async function installDaemon(options: InstallOptions, deps: InstallDeps):
   if (delegationId !== undefined && !DELEGATION_ID.test(delegationId)) throw new UnitError(`a delegation id is 32 lower-case hex digits; refusing ${JSON.stringify(delegationId)}`);
   const unit = unitFor(label, deps);
   const spec: UnitSpec = { label, profileDir, program };
+  const unpackaged = unpackagedProgram(spec, deps.platform, deps.home, options.programGiven === true);
+  if (unpackaged !== null) throw new UnitError(`refusing to install ${unit.name} for a build that is not packaged: ${unpackaged}`);
 
   mkdirSync(profileDir, { recursive: true, mode: 0o700 });
   makePrivateDirectory(join(profileDir, DAEMON_FILES.dir));

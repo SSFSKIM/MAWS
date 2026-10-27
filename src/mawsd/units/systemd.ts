@@ -10,7 +10,7 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { DAEMON_FILES } from '@shared/daemon/files';
 import { configHome } from '@shared/daemon/profile';
-import { DEFAULT_LABEL, must, readIfPresent, UnitError, writeWhole, type Unit, type UnitDeps, type UnitSpec } from './unit';
+import { DEFAULT_LABEL, must, readIfPresent, restoreFile, UnitError, writeWhole, type Unit, type UnitDeps, type UnitSpec } from './unit';
 
 export function systemdUnitName(label: string): string {
   return label === DEFAULT_LABEL ? 'mawsd.service' : `${label}.service`;
@@ -75,11 +75,20 @@ export function systemdUnit(label: string, deps: UnitDeps): Unit {
       if (changed) {
         mkdirSync(dirname(file), { recursive: true });
         writeWhole(file, text); // its temporary name never ends in `.service`, so systemd never reads it
-        must(deps.run, 'systemctl', ['--user', 'daemon-reload']);
       }
-      if (!wasEnabled || !wasActive) must(deps.run, 'systemctl', ['--user', 'enable', '--now', name]);
-      if (changed && wasActive) must(deps.run, 'systemctl', ['--user', 'restart', name]);
-      linger();
+      try {
+        if (changed) must(deps.run, 'systemctl', ['--user', 'daemon-reload']);
+        if (!wasEnabled || !wasActive) must(deps.run, 'systemctl', ['--user', 'enable', '--now', name]);
+        if (changed && wasActive) must(deps.run, 'systemctl', ['--user', 'restart', name]);
+      } catch (error) {
+        if (changed) {
+          // so a retry sees the change and completes it; the manager reloads the file as it was, best effort
+          restoreFile(file, before);
+          deps.run('systemctl', ['--user', 'daemon-reload']);
+        }
+        throw error;
+      }
+      linger(); // checked at every apply, so a failure here is retried by the next
       if (changed) return before === null || !wasActive ? 'loaded' : 'updated';
       return wasEnabled && wasActive ? 'unchanged' : 'loaded';
     },

@@ -88,6 +88,31 @@ describe('the systemd user unit through fake managers', () => {
     expect(managers.changes()).toEqual(['systemctl --user daemon-reload', 'systemctl --user restart mawsd.service']);
   });
 
+  it('a failed restart puts the old file back and reloads it, so the retry completes the update', async () => {
+    const old = systemdUnitText({ ...SPEC, program: { runtime: '/old/node', entry: '/old/mawsd.js' } });
+    const unit = systemdUnit(SPEC.label, deps());
+    await unit.apply(old);
+    managers.calls.length = 0;
+    managers.script('systemctl --user restart', { status: 1, stderr: 'Job for mawsd.service failed' });
+    await expect(unit.apply(systemdUnitText(SPEC))).rejects.toThrow(/Job for mawsd.service failed/);
+    expect(readFileSync(unitPath(), 'utf8')).toBe(old);
+    expect(managers.changes()).toEqual(['systemctl --user daemon-reload', 'systemctl --user restart mawsd.service', 'systemctl --user daemon-reload']);
+
+    managers.calls.length = 0;
+    await expect(unit.apply(systemdUnitText(SPEC))).resolves.toBe('updated');
+    expect(readFileSync(unitPath(), 'utf8')).toBe(UNIT);
+    expect(managers.changes()).toEqual(['systemctl --user daemon-reload', 'systemctl --user restart mawsd.service']);
+  });
+
+  it('a failed reload of a first install leaves no file, and the retry installs it', async () => {
+    const unit = systemdUnit(SPEC.label, deps());
+    managers.script('systemctl --user daemon-reload', { status: 1, stderr: 'Failed to reload daemon' });
+    await expect(unit.apply(systemdUnitText(SPEC))).rejects.toThrow(/Failed to reload daemon/);
+    expect(existsSync(unitPath())).toBe(false);
+    await expect(unit.apply(systemdUnitText(SPEC))).resolves.toBe('loaded');
+    expect(readFileSync(unitPath(), 'utf8')).toBe(UNIT);
+  });
+
   it('enables lingering through sudo -n when the plain call is refused, and fails when neither may', async () => {
     managers.lingerNeedsSudo = true;
     const unit = systemdUnit(SPEC.label, deps());

@@ -86,6 +86,13 @@ export function writeWhole(path: string, text: string, mode = 0o644): void {
   fs.renameSync(temporary, path);
 }
 
+// A file put back as it was before a transition that failed (`before` null: it was not there), so the next apply sees
+// the change again and completes it, instead of reading matching text as nothing to do.
+export function restoreFile(path: string, before: string | null): void {
+  if (before === null) fs.rmSync(path, { force: true });
+  else writeWhole(path, before);
+}
+
 // A bounded wait for `done`, polled every `everyMs`; false when the budget ran out.
 export async function within(budgetMs: number, everyMs: number, sleep: UnitDeps['sleep'], done: () => boolean): Promise<boolean> {
   for (let waited = 0; ; waited += everyMs) {
