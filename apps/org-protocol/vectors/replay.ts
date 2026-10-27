@@ -1,13 +1,17 @@
 // Replays a vector set through the package and returns what failed, one line each; an empty list is a pass. Every
 // consumer's suite runs it in its own runtime and bundle (`replayVectors(VECTORS)`), so a hub, a machine and an app
 // judge every case the same way. Runtime-neutral, as the package is.
+import { actionDigest, actionFingerprint, actionSigningInput, isAction, verifyStepUp } from '../src/action.ts';
+import { verifyAttestation } from '../src/attest.ts';
 import { base64urlDecode, base64urlEncode } from '../src/base64url.ts';
 import { enrollmentMac, enrollmentMacInput } from '../src/enrollment.ts';
 import { verifyEvent, signerFor } from '../src/events.ts';
 import { keyId, signingInput } from '../src/keys.ts';
-import { stateHash, verifyGenesis, verifySuccessor, verifyTransition } from '../src/org-state.ts';
+import { stateHash, verifyGenesis, verifyRewind, verifySuccessor, verifyTransition } from '../src/org-state.ts';
 import { contestedRefs, machineKeys, verifyCertRetirement, verifyEndpointRecord, verifyGrant, verifyListing, verifyMachineCert } from '../src/records.ts';
 import type { OrgState, SignedOrgState } from '../src/types.ts';
+import { verifyWebAuthn } from '../src/webauthn.ts';
+import { replayChannel } from './replay-channel.ts';
 import type { Case, VectorSet } from './scenario.ts';
 
 export type { Case, DualCase, EnrollmentCase, VectorSet } from './scenario.ts';
@@ -38,7 +42,7 @@ async function run(set: VectorSet, c: Case): Promise<unknown> {
     case 'verifyTransition':
       return verifyTransition(a[0], a[1], a[2]);
     case 'verifyGrant':
-      return verifyGrant(a[0], a[1]);
+      return a.length > 2 ? verifyGrant(a[0], a[1], a[2], date(a[3])) : verifyGrant(a[0], a[1]);
     case 'verifyMachineCert':
       return verifyMachineCert(a[0], a[1], date(a[2]));
     case 'verifyListing':
@@ -55,6 +59,16 @@ async function run(set: VectorSet, c: Case): Promise<unknown> {
       return { refs: await contestedRefs(a[0], a[1], date(a[2])) };
     case 'machineKeys':
       return machineKeys(a[0], a[1], a[2], date(a[3]));
+    case 'verifyRewind':
+      return verifyRewind(a[0], a[1], a[2], a[3]);
+    case 'verifyAttestation':
+      return verifyAttestation(a[0], a[1], a[2]);
+    case 'verifyStepUp':
+      return verifyStepUp(a[0], a[1]);
+    case 'verifyWebAuthn':
+      return verifyWebAuthn(a[0], a[1], a[2], a[3]);
+    case 'isAction':
+      return { valid: isAction(a[0]) };
   }
 }
 
@@ -83,5 +97,11 @@ export async function replayVectors(set: VectorSet): Promise<string[]> {
     if ((await enrollmentMac(base64urlDecode(e.k), fields)) !== e.mac) failures.push(`enrollment mac of ${e.name}/${e.ref}/${e.tokenId}`);
   }
   if (new Set(set.enrollment.map((e) => e.input)).size !== set.enrollment.length) failures.push('two enrollments encode alike');
+  for (const { name, action, input, digest, fingerprint } of set.encodings.actions) {
+    if (new TextDecoder().decode(actionSigningInput(action)) !== input) failures.push(`action input of ${name}`);
+    if (base64urlEncode(await actionDigest(action)) !== digest) failures.push(`action digest of ${name}`);
+    if ((await actionFingerprint(action)) !== fingerprint) failures.push(`action fingerprint of ${name}`);
+  }
+  failures.push(...(await replayChannel(set.channel, set.fixtures)));
   return failures;
 }

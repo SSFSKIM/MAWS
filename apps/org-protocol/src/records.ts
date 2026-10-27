@@ -18,7 +18,7 @@
 // nothing, so a recreated VM under the same delegation can take its old name, and its history stands whatever the state
 // enrolls later. The hub serving only certificates `verifyMachineCert` accepted on arrival (M4) is defence in depth.
 import { keyId, signBody, signingInput, verifyInput, type B64 } from './keys.ts';
-import { machineNameKey } from './names.ts';
+import { machineNameKey, type MemberId } from './names.ts';
 import { isCertRetirement, isCertificates, isEndpointRecord, isGrant, isListing, isMachineCert, isSigned } from './shapes.ts';
 import {
   SIGNING_DOMAINS,
@@ -29,6 +29,7 @@ import {
   type Listing,
   type MachineCert,
   type OrgState,
+  type Owners,
   type Signed,
 } from './types.ts';
 import { accept, refuse, type Verdict } from './verdict.ts';
@@ -69,17 +70,58 @@ async function signedByIn(state: OrgState, domain: Domain, record: Signed<unknow
 }
 
 /**
- * A grant on a listed machine (by ref) for its current key (`machineKey`, by id), signed by a device of one of its
- * owners, or of an admin when the org owns it. Grants are checked only by the hosting machine (RL §5.8); `version`
- * orders a member's grants there, and its ledger (O10) keeps the keys it has held.
+ * A grant on a machine (by ref) for the key that speaks for it now (`machineKey`, by id): an enrolled machine's
+ * current key, or its one live certificate's (`machineKeys`, judged at `now`). It is signed by a device of one of the
+ * machine's owners, or of an admin when the org owns it; a certified machine's owners are its delegation's. Grants are
+ * checked only by the hosting machine (RL §5.8); `version` orders a member's grants there, and its ledger (O10) keeps
+ * the keys it has held.
  */
-export async function verifyGrant(state: OrgState, g: Signed<Grant>): Promise<Verdict> {
-  if (!isSigned(g, isGrant) || g.body.org !== state.org) return refuse('malformed');
-  const machine = entryByRef(state, g.body.machine);
-  if (machine === undefined || !state.members.some((m) => m.id === g.body.member)) return refuse('not-listed');
-  if ((await keyId(machine.pub)) !== g.body.machineKey) return refuse('not-listed');
-  const owners = machine.owners;
+export async function verifyGrant(state: OrgState, g: Signed<Grant>, certs: Certificates = NO_CERTIFICATES, now: Date = new Date()): Promise<Verdict> {
+  if (!isSigned(g, isGrant) || g.body.org !== state.org || !isCertificates(certs)) return refuse('malformed');
+  if (!state.members.some((m) => m.id === g.body.member)) return refuse('not-listed');
+  const { keys, contested } = await machineKeys(state, g.body.machine, certs, now);
+  if (contested) return refuse('contested');
+  let speaking = false;
+  for (const pub of keys) if ((await keyId(pub)) === g.body.machineKey) speaking = true;
+  if (!speaking) return refuse('not-listed');
+  const owners = await machineOwners(state, g.body.machine, certs, now);
+  if (owners === null) return refuse('not-listed');
   return signedByIn(state, SIGNING_DOMAINS.grant, g, stepUpKeys(state, (id, role) => (owners === 'org' ? role === 'admin' : owners.includes(id))));
+}
+
+/** The member ids `owners` names in `state`: its admins for `'org'`. */
+export function ownerMembers(state: OrgState, owners: Owners): MemberId[] {
+  return owners === 'org' ? state.members.filter((m) => m.role === 'admin').map((m) => m.id) : [...owners];
+}
+
+/**
+ * Whose machine `ref` is at `now`: its state entry's owners, or else its delegation's, through an authentic,
+ * unrevoked and uncontested certificate for the ref (live or retired: its history keeps its owners); null for none.
+ */
+export async function machineOwners(state: OrgState, ref: string, set: Certificates, now: Date): Promise<Owners | null> {
+  const entry = entryByRef(state, ref);
+  if (entry !== undefined) return entry.owners;
+  const view = (await certViews(state, set, now)).find((v) => v.body.machine === ref && !v.contested);
+  return view === undefined ? null : (delegationOf(state, view.body)?.owners ?? null);
+}
+
+/**
+ * The machine that key `kid` speaks for as writer name `name` (RL8's rule, `machineSigners`): the ref `machineNames`
+ * gives the name, by its entry's current key or one of the ref's retired keys, or an uncontested certificate bearing
+ * the name with that key. Its owners are its entry's or its delegation's, none for a ref the state no longer lists.
+ */
+export async function machineOfSigner(state: OrgState, name: string, kid: string, set: Certificates, now: Date): Promise<{ ref: string; owners: Owners } | null> {
+  const given = refOfName(state, name);
+  if (given !== undefined) {
+    const entry = entryByRef(state, given);
+    if (entry !== undefined && (await keyId(entry.pub)) === kid) return { ref: given, owners: entry.owners };
+    if (state.retired.some((r) => 'machine' in r.holder && r.holder.machine === given && r.keyId === kid)) return { ref: given, owners: entry?.owners ?? [] };
+  }
+  for (const v of await certViews(state, set, now)) {
+    if (v.contested || machineNameKey(v.body.name) !== machineNameKey(name) || (await keyId(v.body.pub)) !== kid) continue;
+    return { ref: v.body.machine, owners: delegationOf(state, v.body)?.owners ?? [] };
+  }
+  return null;
 }
 
 const delegationOf = (state: OrgState, cert: MachineCert) => state.delegations.find((d) => d.id === cert.delegation);
