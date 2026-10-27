@@ -1,12 +1,52 @@
 # Deploying the hub
 
-The hub runs on the owner's Cloudflare account as the Worker `desk-hub`, at
-`https://desk-hub.opencognita-platform.workers.dev`, behind Cloudflare Access
-(DC3's plan, M5; the composite's DX7). `config.json` names the account, the
-host, the owner, and the org. Everything here goes through one command, run
-from the MAWS worktree root:
+The hub runs on the owner's Cloudflare account behind Cloudflare Access (DC3's
+plan, M5; the composite's DX7), as two deployments. Each has a configuration
+naming its account, Worker, host, owner and org:
 
-    pnpm --filter desk-hub deployment <deploy|probe|fake-check|redeploy-check|measure|frame-cost|counts> [options]
+| Configuration | Worker | Host | Org | What it is |
+| --- | --- | --- | --- | --- |
+| `config.json` (the default) | `desk-hub` | `desk-hub.opencognita-platform.workers.dev` | `ssfskim` | Production: the owner's machines and phone |
+| `staging.json` | `desk-hub-staging` | `desk-hub-staging.opencognita-platform.workers.dev` | `staging-ssfskim` | Staging, for live tests (P5 O11's M2); agents deploy here and nowhere else |
+
+Everything here goes through one command, run from the MAWS worktree root:
+
+    pnpm --filter desk-hub deployment <deploy|probe|fake-check|redeploy-check|measure|frame-cost|counts> [--config deploy/<file>.json] [options]
+
+Each command acts on the deployment `--config` names, `config.json` when it
+names none (the path resolves from `apps/desk-hub`, where pnpm runs the
+command). Below, `$HUB` stands for that deployment's `https://<host>`.
+
+## The target
+
+Every wrangler call the tool makes names its Worker with `--name <worker>`
+and its account with `CLOUDFLARE_ACCOUNT_ID`, both from the configuration;
+wrangler.jsonc's own `name` (`desk-hub`) is never relied on. Wrangler also
+takes its Worker, account, API and logging from its environment
+(`WRANGLER_CI_OVERRIDE_NAME` renames the Worker outright) and from `.env`
+files beside wrangler.jsonc, so it runs with an allow-listed environment
+(what locates the system, the login and the network; no inherited
+`WRANGLER_*` or `CLOUDFLARE_*`), `--env-file /dev/null`, wrangler.jsonc named
+by path, sanitized logs and no log written to disk (a `secret put` carries a
+credential). Before anything changes, `deploy` refuses:
+- a configuration whose `host` is not its `worker`'s (`<worker>.<subdomain>.workers.dev`);
+- a wrangler.jsonc whose `account_id` is another account, and a build tool's redirect (`.wrangler/deploy/config.json`);
+- any call that would pick its Worker, configuration or login another way (`--name`, `--env`, `--config`, `--cwd`, `--env-file`, `--profile`);
+- `--config` given twice (the last would win).
+
+Each call prints the target it checked, as `wrangler target <worker> (config
+worker <worker>, account <id>): <command>`. `redeploy-check`'s redeploy is
+`deploy`'s own and takes the same check.
+
+Staging is its own Worker, so its own Durable Objects, Access applications,
+policies and secrets (its own `VAPID_KEY`; `CF_API_TOKEN` is the same
+service-token API token as production's). Its org id is `staging-ssfskim`:
+a machine's service token is named `desk-<org>-<machine>` in the account-wide
+namespace, and redemption deletes every token of that name first. A staging org
+named `ssfskim` would delete production machines' credentials, and so would one
+that extends it (`ssfskim-staging` with machine `x` is `desk-ssfskim-staging-x`,
+production's name for a machine `staging-x`). No production token name starts
+`desk-staging-`.
 
 ## Credentials
 
@@ -18,7 +58,7 @@ repository:
 | --- | --- | --- |
 | `CF_ACCESS_SETUP_TOKEN` | An API token with Access: Apps and Policies Edit, Service Tokens Edit, Organizations Read | `deploy`, `redeploy-check` |
 | `CF_DESK_HUB_SERVICE_TOKENS` | An API token with Access: Service Tokens Edit only. It becomes the Worker's `CF_API_TOKEN` secret, with which the hub mints and deletes machines' service tokens | `deploy`, `probe`, `redeploy-check` |
-| `DESK_ACCESS_TOKEN` | A person's Access session as an app token: `cloudflared access login https://desk-hub.opencognita-platform.workers.dev` once (a browser sign-in), then `cloudflared access token -app=https://desk-hub.opencognita-platform.workers.dev` | `probe`, `fake-check`, `redeploy-check`, `measure` |
+| `DESK_ACCESS_TOKEN` | A person's Access session as an app token for one deployment: `cloudflared access login $HUB` once (a browser sign-in), then `cloudflared access token -app=$HUB` | `probe`, `fake-check`, `redeploy-check`, `measure`, `counts` |
 
 The owner keeps the two API tokens under
 `~/.config/claude-secrets/projects/-Users-new-Developer-GitHub-doperpowers/`.
@@ -26,7 +66,9 @@ For example:
 
     S=~/.config/claude-secrets/projects/-Users-new-Developer-GitHub-doperpowers
     printf '%s\n' "CF_ACCESS_SETUP_TOKEN=$(cat $S/CF_ACCESS_SETUP_TOKEN)" "CF_DESK_HUB_SERVICE_TOKENS=$(cat $S/CF_DESK_HUB_SERVICE_TOKENS)" \
-      | pnpm --filter desk-hub deployment deploy --assets "$PWD/apps/desk-web/dist"
+      | pnpm --filter desk-hub deployment deploy --config deploy/staging.json --assets "$PWD/apps/desk-web/dist"
+
+(without `--config`, the same deploys production.)
 
 The logged-in wrangler (`wrangler login`) does the Worker's own upload. Its
 OAuth token carries no Access scopes, which is why the setup token exists.
@@ -37,16 +79,19 @@ OAuth token carries no Access scopes, which is why the setup token exists.
 
 1. **Access.** It reads the team domain (`GET /accounts/<id>/access/organizations`,
    `auth_domain`), then creates or updates by name, in place:
+   three reusable policies and two self-hosted applications, each named after
+   the Worker (`<worker>` below: `desk-hub` or `desk-hub-staging`), so the two
+   deployments' Access objects never meet:
    - three reusable policies:
-     - `desk-hub owner`: Allow, the owner's email;
-     - `desk-hub machines`: Service Auth, any Access service token;
-     - `desk-hub public paths`: Bypass, everyone;
+     - `<worker> owner`: Allow, the owner's email;
+     - `<worker> machines`: Service Auth, any Access service token;
+     - `<worker> public paths`: Bypass, everyone;
    - two self-hosted applications:
-     - `desk-hub`: the whole workers.dev host, with owner and machines, a 30-day session (`720h`, the owner's choice of 2026-10-18: a 24 h session left the phone signed out each day), and 401 for a failed service token in place of a redirect;
-     - `desk-hub public paths`: `/machine/enroll`, `/manifest.webmanifest`, and `/icons/*` on the same host, Bypass. It is more specific, so it takes precedence.
+     - `<worker>`: the whole workers.dev host, with owner and machines, a 30-day session (`720h`, the owner's choice of 2026-10-18: a 24 h session left the phone signed out each day), and 401 for a failed service token in place of a redirect;
+     - `<worker> public paths`: `/machine/enroll`, `/manifest.webmanifest`, and `/icons/*` on the same host, Bypass. It is more specific, so it takes precedence.
 
    A hostname-level application is used, not the Worker's own Access toggle, which refuses WebSocket upgrades. Access admits any service token of the account; the hub's Registry refuses a client id it never enrolled (`403 not-enrolled`).
-2. **The Worker** (`wrangler deploy`), with its variables on the command line (`--var`): `ORG_ID`, `ORG_NAME`, `ORG_ADMIN_EMAIL`, `ACCESS_ISSUER`, `ACCESS_AUD` (the `desk-hub` application's AUD), `ACCESS_CERTS_URL`, `CF_API_URL`, `CF_ACCOUNT_ID`. `wrangler.jsonc` keeps them empty on purpose. A deploy made any other way (a plain `wrangler deploy`) resets them, and the hub then answers `503 not-configured` to everything until `deploy` runs again. `--assets <dir>` serves the web app's build from `<dir>` (default `apps/desk-web/dist`). Pass it on every deploy once the web app is live: a deploy without it uploads whatever `apps/desk-web/dist` holds, possibly nothing. Give it absolute: pnpm runs the command in `apps/desk-hub`, where a relative `<dir>` would resolve.
+2. **The Worker** (`wrangler deploy --name <worker>`), with its variables on the command line (`--var`): `ORG_ID`, `ORG_NAME`, `ORG_ADMIN_EMAIL`, `ACCESS_ISSUER`, `ACCESS_AUD` (the `<worker>` application's AUD), `ACCESS_CERTS_URL`, `CF_API_URL`, `CF_ACCOUNT_ID`. `wrangler.jsonc` keeps them empty on purpose. A deploy made any other way (a plain `wrangler deploy`) resets them, and the hub then answers `503 not-configured` to everything until `deploy` runs again. `--assets <dir>` serves the web app's build from `<dir>` (default `apps/desk-web/dist`). Pass it on every deploy once the web app is live: a deploy without it uploads whatever `apps/desk-web/dist` holds, possibly nothing. Give it absolute: pnpm runs the command in `apps/desk-hub`, where a relative `<dir>` would resolve.
 3. **The secrets**, each put only when the Worker lacks it:
    - `CF_API_TOKEN`, from `CF_DESK_HUB_SERVICE_TOKENS` (`--put-api-token` rotates it);
    - `VAPID_KEY`, generated once. Browsers' push subscriptions are bound to it, so it is never regenerated, and it exists nowhere but the Worker.
@@ -56,11 +101,12 @@ stream, carries `X-Desk-Build`. The value names the build:
 - `hub@<commit>`, where the commit is the hub's, with `+dirty` when its tree differed;
 - `web@<label>` when `--web <label>` named the web build (`--web smns-erb-web.0fa05392`, say).
 
-So `curl -sI -X POST https://desk-hub.opencognita-platform.workers.dev/machine/enroll`
-shows what is deployed, without credentials.
+So `curl -sI -X POST $HUB/machine/enroll` shows what is deployed, without
+credentials.
 
 Options:
-- `--org-id`, `--org-name`: override `config.json`'s org. The proofs ran under a throwaway org, `dc3-m5-test`.
+- `--config <file>`: the deployment (default `config.json`).
+- `--org-id`, `--org-name`: override the configuration's org. The proofs ran under a throwaway org, `dc3-m5-test`.
 - `--web <label>`: what the web build is, for `X-Desk-Build`.
 - `--access-only`: set up Access and stop.
 
@@ -70,9 +116,10 @@ means enrolling every machine again.
 
 ## After the first deploy (the owner)
 
-1. Open the hub in a browser and sign in ("Sign in with Cloudflare"; the team allows account members, and the policy the owner's email).
+1. Open `$HUB` in a browser and sign in ("Sign in with Cloudflare"; the team allows account members, and the policy the owner's email).
 2. Set up the org key first (the web app's first unlock method, DX7). An org whose key someone else set up first cannot be unlocked by the owner.
 3. Enroll machines from the web app's "Enroll a machine" (`sminos hub enroll` on each, the code pasted at its hidden prompt).
+4. Run `cloudflared access login $HUB` once, so the commands that need `DESK_ACCESS_TOKEN` can be given one.
 
 ## `counts` (read-only; the owner's org)
 
@@ -80,7 +127,7 @@ The composite's Parent-Level Acceptance 10 compares, writer by writer, each
 machine's log files with the hub's log. `counts` reads the hub's half through a
 project socket as the person whose `DESK_ACCESS_TOKEN` it is given: it resumes
 the log from offset 0 to `caught-up` and sends nothing else (no visibility, no
-`human`, no RPC, no subscription), so it runs against `config.json`'s org.
+`human`, no RPC, no subscription), so it runs against the configuration's own org.
 `machine-counts.py` reads a machine's half from its log files
 (`$SMINOS_HOME/projects/<id>/log/`) and its enrolled and former names (from
 `daemon/hub.json`, nothing else of it), standard library only, so a machine with
@@ -88,7 +135,7 @@ no MAWS checkout runs it over ssh:
 
     python3 apps/desk-hub/deploy/machine-counts.py --dir <checkout> > /tmp/sk.json
     ssh mini python3 - --dir <checkout on the mini> < apps/desk-hub/deploy/machine-counts.py > /tmp/mini.json
-    printf 'DESK_ACCESS_TOKEN=%s\n' "$(cloudflared access token -app=https://desk-hub.opencognita-platform.workers.dev)" \
+    printf 'DESK_ACCESS_TOKEN=%s\n' "$(cloudflared access token -app=$HUB)" \
       | pnpm --filter desk-hub deployment counts --project <id> --machine /tmp/sk.json --machine /tmp/mini.json [--audit]
 
 Per writer it prints the count and last seq on each side and a verdict:
@@ -125,9 +172,9 @@ touches the org key, and it refuses to run against any project but the one in
 ## The checks (DC3.G2, G4, G6)
 
 Each runs against the deployment through Access and enrolls throwaway
-machines. Each requires `--test-org <id>`: a throwaway org, never
-`config.json`'s, which the deployment must be serving (`deploy --org-id <id>`
-first). Before enrolling or writing anything, each checks that `/api/me` names
+machines. Each requires `--test-org <id>`: a throwaway org, never the
+configuration's own (staging's `staging-ssfskim` included), which the
+deployment must be serving (`deploy --config <file> --org-id <id>` first). Before enrolling or writing anything, each checks that `/api/me` names
 that org, and refuses otherwise. Their projects and events outlive the machines'
 revocation, and their events are sealed with a throwaway org key.
 

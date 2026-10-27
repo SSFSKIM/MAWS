@@ -1,7 +1,7 @@
 // What every proof command (probe, fake-check, redeploy-check, measure, frame-cost) holds to, since each enrolls
 // machines and registers a project, and a project and its events outlive the machine's revocation:
-// - it runs only in a throwaway org, named with `--test-org`, never the owner's (`config.json`'s), and only while the
-//   deployment serves that org, checked before anything is enrolled or written;
+// - it runs only in a throwaway org, named with `--test-org`, never the configuration's own (`--config`'s), and only
+//   while the deployment serves that org, checked before anything is enrolled or written;
 // - it cleans up what it enrolled or minted, each step attempted whatever happened before, and fails when one fails.
 import type { Person } from './hub';
 
@@ -14,7 +14,7 @@ export function testOrgArg(value: string | undefined, ownersOrg: string): string
     return null;
   }
   if (value === ownersOrg) {
-    console.error(`--test-org ${value} is the owner's org (deploy/config.json): the proofs run only in a throwaway org`);
+    console.error(`--test-org ${value} is the configuration's own org: the proofs run only in a throwaway org`);
     return null;
   }
   return value;

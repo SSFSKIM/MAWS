@@ -142,6 +142,17 @@ Three rules carry the design:
 
 - **The machine key.** At enrollment the endpoint module generates a P-256 key pair and keeps it as a 0600 file in the daemon's 0700 state directory, on every platform. A headless Node daemon can't use the Enclave. This is acceptable because the machine key protects nothing that code running as that OS account couldn't already do: that account runs the sessions.
 - **The machine owner** is recorded in the signed org state (§5.2) when the machine enrolls, as the member whose device approved the enrollment.
+- **The machine's ref** (P5 OX2; Decision Log 19). The daemon mints a `MachineRef` at its first run, before any enrollment, and never changes it. It is an opaque string, `[A-Za-z0-9_-]{16,64}`, drawn from at least 128 random bits.
+  - **It is the machine's identity in every contract here.** Each field named `machine` carries it. The name is a display attribute of the org-state entry, which an admin may change. A rename re-issues nothing.
+  - **Log writers are the one exception.** They stay `<name>/…`, as DX2's log plane has them (RL8), so moving them to refs doesn't fork the Project DO's writer rule. That costs two things:
+    - A name is bound to one ref for the life of the org. RL5's append-only `machineNames` makes this checkable, and a name once used never passes to another machine. A replacement machine takes a new name.
+    - A rename starts a new writer, so the machine's log history splits at the rename. Events under the old name still verify, through the same binding.
+  - **RL5's machine entry carries it as `ref`,** set at enrollment and immutable after. Verifiers (the hub's Registry, apps and machines) refuse a state that changes an entry's ref, or holds two entries with one ref.
+  - **A key change keeps the ref.** Re-enrolling the machine or rotating its key is an admin-signed state change of the entry's `pub`, and the entry's identity across it is its ref.
+    - Channels pinned to the old key close.
+    - The machine re-issues its listings and endpoint record under the new key.
+    - The old key is retired, or revoked if the change is for a compromise (§5.2). Its events then verify, or don't, by that rule (RL8's key id).
+  - **Why not the key's fingerprint.** It would change at enrollment and orphan every address the app persisted while the machine was signed out, and again at every rotation. The machine key stays a 0600 file (above), so the Enclave move concerns device keys, unless U4 makes `mawsd` a signed Electron process.
 
 ### 3. Sessions: the two lanes
 
@@ -275,6 +286,20 @@ All keys are P-256: ECDSA for signatures, ECDH for channel keys. Node, WebCrypto
   - The endpoint module passes revocations down to sminos over RL10. sminos holds owed deliveries and retries them for up to 60 ticks (`sminos_owed.py`). So every delivery checks its signer against the current state when it is delivered, not only when it was imported. Words a revoked device wrote before its removal are then never delivered afterwards.
   - The hub can delay a revocation only by also cutting the admin's channel to that machine, and the admin then sees the revocation as pending.
   - A pending revocation can be applied on the machine itself, through the same-uid local app or a local command.
+- **Retiring a key is not revoking it** (desk-sminos-orchestrator, 2026-10-27). Both stop a key from signing anything new. They differ in what happens to what it signed before.
+  - **Revocation** is for a key that may be compromised: a lost device, a stolen machine key. It is retroactive. Nothing the key signed is delivered afterwards (above), and readers show its past events as *signed by a revoked key*, never as verified. A key whose fate is unknown is revoked.
+  - **Retirement** is for a key that leaves honestly: a deleted VM, a Mac that is wiped and decommissioned, a device replaced by a new one, a machine key rotated with no suspicion. It records `{keyId, notAfter}`. Events whose own timestamp is at or before `notAfter` verify for good, and later ones are refused.
+    - The anchor is the signer's own timestamp, so retirement trusts the key not to sign backdated events. That holds when the key has been destroyed, or was never at risk; otherwise, revoke.
+    - `notAfter` is set once the key is gone, with a margin for clock skew, since nothing can sign with it after that.
+    - The timestamp compared is the event's signed `created`, never the hub's `ts`, which no signer covers. So every v2 event carries `created` inside its signature (RL8).
+    - **A retirement can still become a revocation.** Dropping a retired key from the state revokes it, as removal does everywhere in RL5, and it is delivered like any other revocation. A key enters `retired` only in the step where it stops being current. So a dropped key can't come back, and the rule is checkable against the predecessor alone. `notAfter` never moves.
+    - **A delegation's expiry retires its certificates** at its `expires`, with the same trust: a VM under it that may be compromised calls for revoking the delegation.
+    - A log position would be a stronger anchor, but each session is its own writer, so the anchor would need a high-water mark per writer. The positions also come from the hub, which isn't trusted.
+  - **Who signs it.** Retiring a device or an enrolled machine's key is an admin-signed state change.
+    - A delegation certificate's retirement is a record signed by its delegation key or an admin device, which the hub stores and serves beside the certificates. So `devcloud vm delete` can retire its VM's certificate unattended.
+    - A compromised VM holding the delegation key could retire its siblings. Their history still verifies, so that is only a denial of service, which the delegation key can already cause.
+    - Revoking a single certificate takes an admin device, because revocation is retroactive: a delegation key that could revoke would discredit its siblings' history.
+  - **A retired certificate stops being live**, so it no longer contests its name (§5.3), and a recreated VM can take the old name. Freeing a retired entry's name in `machineNames` is deferred (P5 Decision Log 23). Nothing in this initiative retires an enrolled machine's entry.
 - **There is a backstop age.** Every action, except those from a same-uid app on the machine's own Mac (§5.11), needs a state issued within the last 30 days.
   - Any running admin app signs a no-change successor weekly.
   - If no admin device has run for 30 days, remote actions stop and the app says why.
@@ -296,12 +321,14 @@ All keys are P-256: ECDSA for signatures, ECDH for channel keys. Node, WebCrypto
   - `k` travels from app to machine by the person's hand and never through the hub. The code carries no secret org key; desk's code carried the org key (DX7).
   1. `sminos hub enroll`, or its successor in the endpoint, reads the code from a hidden prompt or stdin, never from an argument.
   2. It generates the machine key and redeems the token for the machine's Access service token.
-  3. It sends its public key with `MAC(k, name ‖ machinePub ‖ tokenId)`. The member's device checks the MAC, so a key the hub substituted fails. Only then does it sign the machine into the org state, with its owners set (§6.3): that member by default, or the org.
+  3. It sends its public key and its ref with `MAC(k, name ‖ machinePub ‖ ref ‖ tokenId)`. Each field is length-prefixed, so no two inputs encode alike: HMAC-SHA-256 under domain `smns-enroll-mac-v1`, a u32 big-endian length before each field, and `k` of at least 16 bytes, with a test vector in the protocol package (O11 M1). The member's device checks the MAC, so a key or ref the hub substituted fails. Only then does it sign the machine into the org state, with its owners set (§6.3): that member by default, or the org.
+     - A ref the state already holds is a re-enrollment of that machine. The app says so, and the new state replaces the entry's key and keeps its owners unless the member changes them.
   4. Until that state version arrives, the machine is *pending* and executes nothing.
 - **An unattended machine** (a devcloud VM enrolling at boot) can't get a device signature, so it enrolls through a **delegation**.
   - An admin signs the delegation into the org state. Today's provisioning key becomes that delegation, and its existing fields fit it: `{id, pub, prefix, expires, maxUses, offlineRevokeS, owners}` (`identity.ts:245-266`).
   - The provisioning secret store then holds the delegation's private key instead of the org key.
   - The booting machine generates its key, and signs its own machine certificate with the delegation key, so nothing passes through the hub to be substituted. The name must sit under the prefix.
+  - The certificate carries the machine's ref. A ref already held by an org-state entry, or claimed by two live certificates, makes verifiers refuse every certificate that claims it, and the admin's app shows the conflict. So a compromised VM can deny another VM its ref, but can't take it.
   - Uses are counted by the hub, as a courtesy only. A compromised VM holds the delegation key and can mint further machines under the prefix until the delegation expires or is revoked. Revoking the delegation removes them all.
   - Verifiers accept the certificate while the delegation is live, with the delegation's owners as the machine's owners. No new org-state version is needed per VM.
   - The hub stores the certificates, and serves them beside the state.
@@ -317,7 +344,7 @@ All keys are P-256: ECDSA for signatures, ECDH for channel keys. Node, WebCrypto
 - **The handshake.**
   - Ephemeral P-256 ECDH on both sides.
   - Each side signs the transcript with its long-term key: the device's channel key and the machine key.
-  - The transcript includes the org-state version each side holds, the device id, the machine name and the client class.
+  - The transcript includes the org-state version each side holds, the device id, the machine's ref and the client class.
   - The pattern is SIGMA-I (sign-and-MAC). The exact construction and its test vectors belong to the Interfaces (RL2).
 - **After the handshake.**
   - Frames are AES-256-GCM, with keys from HKDF per direction and a 64-bit sequence number in each nonce.
@@ -423,7 +450,7 @@ All keys are P-256: ECDSA for signatures, ECDH for channel keys. Node, WebCrypto
 #### 5.9 What the hub can and can't do
 
 It can:
-- see routing metadata: org, member ids, machine names, project ids, session ids, sizes, timing;
+- see routing metadata: org, member ids, machine refs and names, project ids, session ids, sizes, timing;
 - see the listing fields of sessions that aren't `private`, and the log plane's contents, which are org-readable by design (§5.7, §6.2);
 - delay or drop frames, or deny service;
 - delay a revocation, but only visibly to the admin (§5.2);
@@ -680,7 +707,7 @@ The hub serves both protocols, but a migrated endpoint accepts only one trust mo
 
 ## Interfaces (the contracts the composite lifts)
 
-These are named here with their binding fields. Byte-level schemas and test vectors are written by the child that builds each, against this list.
+These are named here with their binding fields. Byte-level schemas and test vectors are written by the child that builds each, against this list. Every field named `machine` carries the machine's ref (§2.3), never its name. RL8's writer prefix is the exception: it is the name, bound to one ref by RL5's `machineNames`.
 
 - **RL1, Endpoint ↔ hub.**
   - One WebSocket.
@@ -709,21 +736,32 @@ These are named here with their binding fields. Byte-level schemas and test vect
   - `query {opId, opCreated}` answers `done {result} | in-progress | refused | not-received | expired | unavailable`. The executing side's ledger answers it; the endpoint module only forwards it (§4.7). `opCreated` is required: without it, a pruned id would answer `not-received`, and the resend that follows could run an action twice.
   - Revocations are RL4 actions too, sent by an admin device to each machine and acknowledged (§5.2).
 - **RL5, Signed org state.**
-  - The fields are `{org, version, prev, issued, root: {keys[], recoveryPub}, members[{id, email, role, devices[{id, class, keyStorage, channelPub, stepUpPub, passkey?: {credentialId, publicKey, rpId}}]}], machines[{name, pub, owners: memberId[] | 'org'}], delegations[{id, pub, prefix, expires, maxUses, offlineRevokeS, owners}], projects[...]}`, with signatures by root keys.
+  - The fields are `{org, version, prev, issued, root: {keys[], recoveryPub}, members[{id, email, role, devices[{id, class, keyStorage, channelPub, stepUpPub, passkey?: {credentialId, publicKey, rpId}}]}], machines[{ref, name, pub, owners: memberId[] | 'org'}], delegations[{id, pub, prefix, expires, maxUses, offlineRevokeS, owners}], projects[...]}`, with signatures by root keys.
   - Grants are separate records signed by a machine owner's device, or by an admin device for org-owned machines: `{machine, member, rights, version}`.
-  - Machine certificates under a delegation are `{machine, pub, delegation, use}`, signed by the delegation key.
+  - Machine certificates under a delegation are `{machine, name, pub, delegation, use}`, signed by the delegation key.
+  - `ref` is immutable and unique across the state's entries and the live certificates (§2.3, §5.3).
+  - `machineNames: {name, ref}[]` is append-only (desk-sminos-orchestrator's O11 M1). A successor keeps every pair its predecessor holds, and adds the pair of each new or renamed entry. No name is ever held under two refs. Each step checks against its predecessor alone, so by induction the rule holds over the whole chain, and machines verify it as the hub does.
+  - A live certificate whose name `machineNames` holds under another ref is refused, as is one whose name another live certificate claims under a different ref.
+  - `retired: {keyId, pub, notAfter, holder}[]` holds retired device and machine keys. `holder` names whose key it was: a machine's ref, or a member and device id. The `pub` lets a verifier holding only the head check past events after the holder's current key has changed. An entry is added only in the step where its key stops being current, and its `notAfter` never changes. Dropping it revokes the key (§5.2).
+  - A revoked key never becomes current again, for example as a re-added device carrying the key it had before. Its old events would read as verified again. A check against the predecessor alone can't see this, so it is placed where the history is:
+    - the admin's app (O8, the Org page that edits and signs the org state) holds the whole chain and refuses to sign such a state;
+    - the hub's Registry, and any machine that has seen the revocation, refuse it from their own record of revoked key ids. A delegation certificate's retirement `{keyId, notAfter}` is a separate record, signed by its delegation key or an admin device; its revocation `{keyId}` is signed by an admin device only. Both are served beside the certificates. A certificate that is retired, revoked, or under a revoked delegation isn't live (§5.2).
   - A root transition `{fromVersion, newRootKeys[], issued}` is signed by the recovery key. Machines accept it over any state signed by the old root set.
   - Grants are checked only by the hosting machine (§5.8).
 - **RL6, Session record** (machine-held).
   - `{machine, session, lane, origin: {kind: 'terminal' | 'maws' | 'sminos-spawn', requester?, spawnerSession?}, principal: memberId | 'org' | '@machine', inference: {kind: 'slot', configDir} | {kind: 'route', settingsRef}, project?, owners: (memberId | '@machine')[], ownersProof[], access: 'private' | 'listed' | 'org-view' | 'org-converse', shares[{member, grade}], created, context}`.
   - Owners are copied at spawn and never resolved later through an alias. `@machine` isn't an alias: the endpoint module resolves it against signed org state, and it never leaves the machine (§5.8).
-  - The listing projection is `{session, revision, issued, fields: {owners, machine, project, lane, state, title}}`, signed by the machine key.
+  - The listing projection is `{session, revision, issued, fields: {owners, machine, project, lane, state, title}}`, signed by the machine key. The app shows the machine's name from the org state, so a rename re-issues no listing.
   - The machine's endpoint record is `{machine, addresses[], issued}`, signed by the machine key. It carries the direct RL2 addresses (§4.1).
 - **RL7, Capabilities.**
   - Per session: lane-b-control-map's `ControlCapabilities`.
   - Per device: `{grades granted, clientClass}`.
 - **RL8, Log event signature.**
   - The writer is a `device | machine`, signing over the canonical event.
+  - A machine's writer prefix is its name (§2.3). A verifier accepts the event only if `machineNames`, or the signer's certificate, binds that name to the signer's ref, and the key id names a key of that ref that is current, or retired at a `notAfter` no earlier than the event's timestamp.
+  - A revoked key's events never verify (§5.2).
+  - Every v2 event carries its signer's `created` inside the signature, and retirement compares against that, never against the hub's `ts`. That covers a device's `hub/<member>` events.
+  - The refusal verdicts include `contested`, naming the refs that claim a name, and `name-retired` (O11 M1).
   - The signature names its signer with a key id, and uses a new domain version (`…-v2`). Today's `mac` is fixed at `{nonce 16 B, value 32 B}`, and nothing names the signer (`log-store.ts:52`, `project.ts:1353, 1428`, `sminos_codes.py:49-50`).
   - The v1 verification path stays for history, or a signed checkpoint freezes it.
   - Signatures are made once and reused on every resend (§5.7).
@@ -825,3 +863,28 @@ These are named here with their binding fields. Byte-level schemas and test vect
    - An op older than `OP_HORIZON = KEPT_S − 3600` s is refused `expired`, and `query` answers `expired` for it, so pruning the ledger never reopens an id.
    - An `opCreated` later than `created` by more than the freshness window is malformed. That bounds clock skew, so the hour's margin holds.
    - `query` carries `opCreated` (required), and gains `expired` and `unavailable` (the ledger can't be read; O12 calls it `failed`) (§4.7, RL4).
+19. **2026-10-27, the machine ref** (P5 Decision Log 21, through the MAWS architect; the format from desk-sminos-orchestrator's O11 M1).
+   - RL5's machine entry gains `ref`: the `MachineRef` the daemon mints at its first run, `[A-Za-z0-9_-]{16,64}` from at least 128 random bits, set at enrollment, immutable, and unique across entries and live certificates.
+   - Every contract field named `machine` carries the ref. The name is a display attribute, and a rename re-issues nothing.
+   - A key change keeps the ref. It is an admin-signed change of the entry's `pub`, and old signatures verify against the versions that held the old key.
+   - The enrollment MAC covers the ref, with length-prefixed fields. A delegation's certificate carries it, and a contested ref is refused, never resolved in either claimant's favour (§2.3, §5.3, RL5, RL6).
+   - Rejected: the key's fingerprint. It would change at enrollment and at every rotation.
+20. **2026-10-27, log writers stay name-based** (desk-sminos-orchestrator, O11 M1).
+   - Decision Log 19's "every field named `machine`" covers the contracts' identity fields, not RL8's writer prefix. Writers stay `<name>/…`, which keeps DX2's log-plane vocabulary and the Project DO's writer rule.
+   - RL5 gains an append-only `machineNames: {name, ref}[]`. A name is held under one ref for the life of the org, so the writer prefix maps to one ref over the whole chain, checkable by induction from each predecessor.
+   - Without it, a renamed machine, plus a new machine taking its old name, would let one machine write as the other.
+   - Costs: a used name never passes to another machine, and a rename splits the machine's log history.
+   - Rejected: ref-keyed writers, which drop the guard but fork the log plane's writer rule during the migration.
+21. **2026-10-27, retirement is not revocation** (desk-sminos-orchestrator's question about Decision Log 20's "live certificate"; the MAWS architect's note on reusing names).
+   - Revocation is for a key that may be compromised, and it is retroactive. Retirement is for a key that leaves honestly, and it records `{keyId, notAfter}`; events stamped at or before `notAfter` verify for good (§5.2).
+   - A delegation certificate's retirement can be signed by its delegation key, so `devcloud vm delete` retires its VM unattended. A retired certificate no longer contests its name, so a recreated VM can reuse it.
+   - The anchor is the signer's own timestamp, trusted because a retired key is destroyed or was never at risk. Rejected: a log position as the anchor, which would need a high-water mark per writer (each session is its own writer) taken from the untrusted hub. Rejected: trusting the hub's verdict stored at ingest.
+   - Freeing an enrolled machine's name is still deferred (P5 Decision Log 23).
+22. **2026-10-27, desk-sminos-orchestrator's O11 M1 refinements of Decision Log 21, adopted.**
+   - A retired entry is `{keyId, pub, notAfter, holder}`, so a verifier holding only the head can check past events.
+   - Dropping a retired key revokes it. An entry is added only in the step where its key stops being current, so a dropped key can't come back, and that is checkable against the predecessor alone. `notAfter` never moves.
+   - Every v2 event signs its `created`, and retirement compares against it, never against the hub's `ts`.
+   - A delegation's expiry retires its certificates at `expires`.
+   - The enrollment MAC is HMAC-SHA-256 under `smns-enroll-mac-v1`, with u32 big-endian lengths and `k` of at least 16 bytes.
+   - Verdicts include `contested` and `name-retired` (§5.2, §5.3, RL5, RL8).
+23. **2026-10-27, a revoked key never becomes current again** (desk-sminos-orchestrator's residue on Decision Log 22). A check against the predecessor alone can't see a revoked key come back as a current one. So the admin's app (O8, the org interface; corrected from O7), which holds the whole chain, refuses to sign such a state, and the hub and any machine that saw the revocation refuse it from their own record (RL5).

@@ -10,6 +10,7 @@
 // CF_DESK_HUB_SERVICE_TOKENS (the redeploy is `deployment deploy`'s own). Options: --test-org (required, the throwaway
 // org the deployment serves and is redeployed under, proof.ts), --org-name, --assets and --web as `deploy` takes them,
 // --seconds (the writing's length, default 420) and --redeploy-at (default 15). It revokes the machines however it ends.
+// The redeploy is `deployHub`'s own, so it acts on `--config`'s Worker alone, under the same target check as `deploy`.
 import { randomUUID } from 'node:crypto';
 import { loadavg } from 'node:os';
 import { FakeMachine } from '../fake-machine/machine';
