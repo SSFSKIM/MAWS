@@ -23,8 +23,9 @@ export interface DaemonIdleBaseline {
   cpuS: number; // the median of the runs' CPU seconds over the window, summed across the measured processes
 }
 
-// PENDING: recorded from three e2e:daemon-idle runs at M1's commit on the mini (Concrete Steps 7).
-export const DAEMON_IDLE_BASELINE: DaemonIdleBaseline | null = null;
+// Recorded from three e2e:daemon-idle runs on the mini at d14e92991, the footprint reader on M1's `src/` (P5 Decision
+// Log 54): footprints 64481, 66033 and 63969 KiB, CPU 0.12, 0.11 and 0.11 s, load 3.3, 3.0 and 2.7.
+export const DAEMON_IDLE_BASELINE: DaemonIdleBaseline | null = { commit: 'd14e92991', runs: ['40490756731', '40492851056', '40495339208'], footprintKiB: 64481, cpuS: 0.11 };
 
 export interface DaemonIdleBound {
   footprintKiB: number;
