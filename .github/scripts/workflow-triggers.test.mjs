@@ -17,11 +17,17 @@ const workflows = join(root, '.github/workflows');
 
 // The triggers only the repository's writers can set off.
 const OWN_TRIGGERS = new Set(['push', 'workflow_dispatch', 'schedule']);
-// GitHub's hosted images (ubuntu-latest, ubuntu-24.04-arm, macos-15, windows-latest, …). Any other label can be one a
-// self-hosted runner carries: a runner takes a job when it has every label the job asks for, whether or not the job
-// names `self-hosted` (gate-plan.mjs asks for `[ci-kit-mac-shared]` alone), so the Macs' default `macOS` and `ARM64`
-// and the pool's `cpus-<n>` reach them as surely as ci-kit's own names do.
-const hostedLabel = (label) => typeof label === 'string' && /^(?:ubuntu|windows|macos)-[\w.-]+$/i.test(label);
+// The labels of GitHub's hosted images, in the shapes GitHub gives them (actions/runner-images' table, and the hosted
+// and larger-runner references of docs.github.com): ubuntu-latest, -slim and -<yy.mm>[-arm]; windows-latest,
+// -<yyyy>[-vs<yyyy>] and -11[-vs<yyyy>]-arm; macos-latest[-large|-xlarge] and -<nn>[-large|-xlarge|-intel];
+// xcode-<nn>[-xlarge]. Any other label can be one a self-hosted runner carries, a name that only starts like an
+// image's (ubuntu-ci-pool) and a larger Linux or Windows runner's, which its owner names, among them: a runner takes a
+// job when it has every label the job asks for, whether or not the job names `self-hosted` (gate-plan.mjs asks for
+// `[ci-kit-mac-shared]` alone), so the Macs' default `macOS` and `ARM64` and the pool's `cpus-<n>` reach them as
+// surely as ci-kit's own names do.
+const HOSTED_LABEL =
+  /^(?:ubuntu-(?:latest|slim|\d{2}\.\d{2}(?:-arm)?)|windows-(?:latest|\d{4}(?:-vs\d{4})?|11(?:-vs\d{4})?-arm)|macos-(?:latest(?:-large|-xlarge)?|\d{2}(?:-large|-xlarge|-intel)?)|xcode-\d{2}(?:-xlarge)?)$/i;
+const hostedLabel = (label) => typeof label === 'string' && HOSTED_LABEL.test(label);
 // A runs-on as GitHub reads it: a label, a list of labels, or a mapping of a runner group and labels. Only a literal
 // hosted label, or a non-empty list of them, stays off self-hosted runners; an expression, a group (which can hold
 // self-hosted runners) and any form the check cannot read reach them.
@@ -64,6 +70,14 @@ const violations = (text) => {
 
 test('a workflow on GitHub-hosted runners alone may trigger on anything', () => {
   assert.deepEqual(violations('on: [pull_request, issue_comment]\njobs:\n  a:\n    runs-on: ubuntu-latest\n  b:\n    runs-on: [macos-15, windows-latest]\n'), []);
+  // Every label of actions/runner-images' table and GitHub's hosted and larger-runner references, 2026-10-27.
+  const hosted = [
+    'ubuntu-latest', 'ubuntu-slim', 'ubuntu-26.04', 'ubuntu-24.04', 'ubuntu-22.04', 'ubuntu-26.04-arm', 'ubuntu-24.04-arm', 'ubuntu-22.04-arm',
+    'windows-latest', 'windows-2025', 'windows-2025-vs2026', 'windows-2022', 'windows-11-arm', 'windows-11-vs2026-arm',
+    'macos-latest', 'macos-26', 'macos-15', 'macos-14', 'macos-26-intel', 'macos-15-intel', 'macos-latest-large', 'macos-26-large', 'macos-15-large',
+    'macos-14-large', 'macos-latest-xlarge', 'macos-26-xlarge', 'macos-15-xlarge', 'macos-14-xlarge', 'xcode-27', 'xcode-27-xlarge',
+  ];
+  for (const label of hosted) assert.deepEqual(violations(`on: pull_request\njobs:\n  build:\n    runs-on: ${label}\n`), [], label);
 });
 
 test('a self-hosted workflow triggered only by push, workflow_dispatch or schedule passes, in every form of `on`', () => {
@@ -87,6 +101,20 @@ test('every form of runs-on that can reach a self-hosted runner fails beside an 
     '[Linux, X64]',
     'cpus-16',
     '[ubuntu-latest, self-hosted]',
+    // A custom label that only starts like a hosted image's is any runner's to carry, as are a larger Linux or Windows
+    // runner's names, which the organization chooses.
+    'ubuntu-ci-pool',
+    'macos-builder',
+    'windows-private',
+    'ubuntu-latest-gpu',
+    'ubuntu-24.04-large',
+    'ubuntu-slim-2',
+    'macos-latest-intel',
+    'macos-15-mini',
+    'windows-2025-arm',
+    'windows-11',
+    'xcode-builder',
+    '[ubuntu-latest, ubuntu-ci-pool]',
     '${{ matrix.os }}',
     "${{ vars.GATE_RUNNER == 'macos' && 'self-hosted' || 'ubuntu-latest' }}",
     'ubuntu-${{ matrix.version }}',
