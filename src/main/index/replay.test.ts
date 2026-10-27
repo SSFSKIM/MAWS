@@ -47,8 +47,9 @@ function bridged(readSource?: SourceReader) {
     'session.replay.control': async (input) => replays.control(input),
   };
   const host: ReplayHostPort = {
-    dispatch: (_owner, name, input) =>
+    dispatch: (_owner, command, input) =>
       new Promise<CommandResult<CommandName>>((resolve) => {
+        const name = command as CommandName; // P5 O1 M5: the dispatch takes any registry's name
         calls.push({ name, input });
         const checked = validateCommandInput(name, input);
         if (!checked.ok) return resolve(checked);

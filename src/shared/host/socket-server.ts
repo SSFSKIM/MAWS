@@ -16,7 +16,7 @@
 // replacement).
 import { timingSafeEqual } from 'node:crypto';
 import type { Server, Socket } from 'node:net';
-import { HostReadySchema, HostRequestSchema } from '../ipc/host-protocol';
+import { HostClientGoneSchema, HostReadySchema, HostRequestSchema } from '../ipc/host-protocol';
 import { HostDocChannels } from './doc-channels';
 import type { HostPort, HostRuntime } from './runtime';
 import { SocketPort } from './socket-port';
@@ -211,8 +211,8 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
     }
   }
 
-  // The runtime sees requests and ready lines only; `exit` and (P3-A M5) the document channels' lines are this layer's,
-  // and anything else closes the client.
+  // The runtime sees requests, ready lines and (P5 O1 M5) clientGone lines only; `exit` and (P3-A M5) the document
+  // channels' lines are this layer's, and anything else closes the client.
   function envelopeOnly(port: SocketPort, client: Client): HostPort {
     return {
       postMessage: (message: unknown) => port.postMessage(message),
@@ -226,7 +226,7 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
             options.onExit(exit.data.when);
             return;
           }
-          if (HostRequestSchema.safeParse(event.data).success || HostReadySchema.safeParse(event.data).success) {
+          if (HostRequestSchema.safeParse(event.data).success || HostReadySchema.safeParse(event.data).success || HostClientGoneSchema.safeParse(event.data).success) {
             listener(event);
             return;
           }
@@ -236,7 +236,7 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
           const close = DocumentsCloseSchema.safeParse(event.data);
           if (close.success) return client.documents.close(close.data.channel);
           // P3-A M5 end
-          log('closed the client: a line that is neither a request, ready, exit nor a document channel’s');
+          log('closed the client: a line that is neither a request, ready, clientGone, exit nor a document channel’s');
           port.close();
         }),
     };

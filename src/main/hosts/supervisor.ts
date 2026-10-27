@@ -6,13 +6,19 @@
 // as a supervisor process that outlives the app, over a Unix socket (detached-transport.ts). Both say the host
 // protocol's `ready` line after the host's resync (if one is registered), and hold requests made while the host is
 // starting or restarting until it is ready.
+// P5 O1 M5: a `machine` host is reached the same way, and a request for a `machine`-owned command carries its asker's
+// client id; each link relays, once per client it carried, that client's end (`clientGone`, @shared/host/client-refs).
+// No production `machine` host runs in O1: a dispatch to an owner with no host answers `host_unavailable`.
 import { createInterface } from 'node:readline';
 import { app, MessageChannelMain, utilityProcess, type MessagePortMain, type UtilityProcess } from 'electron';
 import { ipcError } from '@shared/ipc/errors';
+import { clientGoneRelay, type ClientGoneRelay } from '@shared/host/client-refs'; // P5 O1 M5
+import type { ClientRef } from '@shared/ipc/client'; // P5 O1 M5
 import { HostToMainSchema, type HostDoc, type HostMessage, type HostResponse } from '@shared/ipc/host-protocol';
+import { REGISTRY, type WireRegistry } from '@shared/ipc/registry'; // P5 O1 M5
 import type { CommandName, CommandResult, EventName, EventPayload, HostState, PtyId } from '@shared/ipc/schema';
 import type { HostStatus } from '@shared/ipc/schema/host'; // E10
-import { isEventName, validateCommandOutput } from '@shared/ipc/validate';
+import { codecOf } from '@shared/ipc/validate';
 import type { HostDispatch, HostOwner } from '../ipc/router';
 // E10 start
 import { createDetachedTransport, type DetachedEvents, type DetachedTransport, type DetachedTransportOptions, type ExitInfo, type HostLink } from './detached-transport';
@@ -27,13 +33,14 @@ export interface HostSpec {
 }
 
 export interface HostSupervisorOptions {
-  hosts: Record<HostOwner, HostSpec>;
+  hosts: Partial<Record<HostOwner, HostSpec>>; // P5 O1 M5: the hosts this app runs (no `machine` host in O1)
   emit: <N extends EventName>(name: N, payload: EventPayload<N>) => boolean; // relays host events to the renderer
   // E10 start
   // The detached transport's facts and seams; userData and packaged default to Electron's.
   detached?: Partial<Omit<DetachedTransportOptions, 'modulePath'>>;
   restartBackoffMs?: readonly number[]; // RESTART_BACKOFF_MS unless a test shortens it
   // E10 end
+  registry?: WireRegistry; // P5 O1 M5: what outputs and events are read against; REGISTRY unless a test brings its own
 }
 
 // E10: what main pulls from a host between its connect and its `ready` line (X13: the host emits nothing before it).
@@ -112,11 +119,12 @@ export const RESYNC_BOUND_MS = 30_000;
 export const STOP_ALL_GRACE_MS = 5_000;
 
 interface Pending {
-  name: CommandName;
+  name: string;
   resolve: (result: CommandResult<CommandName>) => void;
   timer: ReturnType<typeof setTimeout>;
   request: HostMessage; // E10: kept until it is sent: a request made while the host starts is held
   sent: boolean;
+  client: ClientRef | null; // P5 O1 M5: the asker a `machine` request names, whose end the link relays once it is sent
 }
 
 // E10: the port a host is spoken to through, a MessagePortMain or the detached transport's socket link.
@@ -153,14 +161,22 @@ interface Host {
   utilityRestart: Promise<CommandResult<'host.restart'>> | null; // a utility restart under way, until it forks the successor
   // E10 end
   relay: MainDocRelay | null; // P3-A M5: a detached host's document channels
+  gone: ClientGoneRelay | null; // P5 O1 M5: the current link's clientGone relay
 }
 
-export function createHostSupervisor({ hosts: specs, emit, detached, restartBackoffMs = RESTART_BACKOFF_MS }: HostSupervisorOptions): HostSupervisor {
-  const hosts = {} as Record<HostOwner, Host>;
-  for (const owner of Object.keys(specs) as HostOwner[]) {
+export function createHostSupervisor({ hosts: specs, emit, detached, restartBackoffMs = RESTART_BACKOFF_MS, registry = REGISTRY }: HostSupervisorOptions): HostSupervisor {
+  const { isEventName, validateCommandOutput } = codecOf(registry); // P5 O1 M5
+  const hosts: Partial<Record<HostOwner, Host>> = {};
+  // P5 O1 M5: for the calls that name a host this app runs (every caller names engine-host or pty-host)
+  const hostOf = (owner: HostOwner): Host => {
+    const host = hosts[owner];
+    if (!host) throw new Error(`no ${owner} host runs in this app`);
+    return host;
+  };
+  for (const [owner, spec] of Object.entries(specs) as [HostOwner, HostSpec][]) {
     const host: Host = {
       owner,
-      spec: specs[owner],
+      spec,
       state: { state: 'starting', pid: null, restarts: 0, revision: 0 },
       child: null,
       port: null,
@@ -182,6 +198,7 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
       quitting: false,
       utilityRestart: null,
       relay: null, // P3-A M5
+      gone: null, // P5 O1 M5
     };
     // E10: a detached host's transport, reporting into the same state, ladder and requests as a utility host's
     if (host.spec.transport === 'detached') {
@@ -232,6 +249,7 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
     }
     host.child = child;
     host.port = port2;
+    host.gone = clientGoneRelay((message) => port2.postMessage(message)); // P5 O1 M5
     sendHeld(host); // E10: what was asked while the host was restarting goes out on the new port
     forwardOutput(host.owner, child);
 
@@ -310,6 +328,8 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
   // Fails the requests the host was sent; E10: the ones still held wait for the next connect.
   function detach(host: Host, reason: string): void {
     host.relay?.disconnect(); // P3-A M5: every relayed window port ends with the connection
+    host.gone?.close(); // P5 O1 M5: the host ends this link's remote clients by itself
+    host.gone = null;
     host.child = null;
     host.port?.close();
     host.port = null;
@@ -338,6 +358,7 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
   function send(host: Host, pending: Pending): void {
     pending.sent = true;
     host.port!.postMessage(pending.request);
+    if (pending.client) host.gone?.carry(pending.client); // P5 O1 M5: after the request, so a gone client's line follows it
   }
 
   function sendHeld(host: Host): void {
@@ -398,6 +419,8 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
       connected(link: HostLink, welcome) {
         if (stopped) return link.close();
         host.port = link;
+        host.gone?.close(); // P5 O1 M5: a link's relay never outlives it
+        host.gone = clientGoneRelay((message) => link.postMessage(message));
         // P3-A M5: the document channels' frames and the host's `documents.closed` go to the relay, not the envelope
         host.relay?.connect(link);
         link.onDoc((channel, frame) => host.relay?.deliver(channel, frame));
@@ -469,9 +492,9 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
         console.error(`[hosts] dropped ${host.owner}'s event ${name}: not in the event registry`);
         return;
       }
-      const relayed = emit(name, payload as never);
+      const relayed = emit(name as EventName, payload as never);
       if (relayed && name === 'pty.exit') host.ptys.delete((payload as { ptyId: string }).ptyId);
-      if (relayed) notifyEvent(name, payload); // C3: emit validated it, and validators never transform
+      if (relayed) notifyEvent(name as EventName, payload); // C3: emit validated it, and validators never transform
       return;
     }
     answer(host, message.data);
@@ -496,7 +519,7 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
       return;
     }
     if (pending.name === 'pty.spawn') host.ptys.add((output.value as { ptyId: string }).ptyId);
-    pending.resolve(output);
+    pending.resolve(output as CommandResult<CommandName>);
   }
 
   // E10 start: host.restart and the quit's stop-all (Task 2.3b)
@@ -563,8 +586,9 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
   }
   // E10 end
 
-  const dispatch: HostDispatch = (owner, name, input) => {
+  const dispatch: HostDispatch = (owner, name, input, client) => {
     const host = hosts[owner];
+    if (!host) return Promise.resolve({ ok: false, error: ipcError('host_unavailable', `no ${owner} host runs in this app; cannot answer ${name}`) }); // P5 O1 M5
     // E10: once started, a request made while the host starts or restarts is held and sent when it is ready
     const holds = started !== null && !stopped && !host.quitting && (host.state.state === 'starting' || host.state.state === 'restarting');
     if (!host.port && !holds) {
@@ -576,7 +600,11 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
         host.pending.delete(id);
         resolve({ ok: false, error: ipcError('timeout', `${owner} did not answer ${name} within ${REQUEST_TIMEOUT_MS / 1000} s`) });
       }, REQUEST_TIMEOUT_MS);
-      const pending: Pending = { name, resolve, timer, request: { t: 'req', id, name, input }, sent: false };
+      // P5 O1 M5: the client rides on a `machine` request only, so the engine host's envelope (which a pre-O1 supervisor
+      // reads strictly) never carries it
+      const asker = owner === 'machine' && client ? client : null;
+      const request: HostMessage = asker ? { t: 'req', id, name: name as CommandName, input, client: asker.id } : { t: 'req', id, name: name as CommandName, input };
+      const pending: Pending = { name, resolve, timer, request, sent: false, client: asker };
       host.pending.set(id, pending);
       if (host.port) send(host, pending);
     });
@@ -619,10 +647,11 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
       return drains.length === 0 ? undefined : Promise.all(drains).then(() => undefined);
     },
     dispatch,
-    snapshot: (owner) => hosts[owner].state,
+    snapshot: (owner) => hostOf(owner).state,
     onState(owner, listener) {
-      hosts[owner].listeners.add(listener);
-      return () => hosts[owner].listeners.delete(listener);
+      const { listeners } = hostOf(owner);
+      listeners.add(listener);
+      return () => listeners.delete(listener);
     },
     // C3 start
     onEvent(name, listener) {
@@ -636,22 +665,23 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
     // C3 end
     // E10 start
     setResync(owner, resync) {
-      hosts[owner].resync = resync;
+      hostOf(owner).resync = resync;
     },
     onStreaming(owner, listener) {
-      hosts[owner].streamingListeners.add(listener);
-      return () => hosts[owner].streamingListeners.delete(listener);
+      const { streamingListeners } = hostOf(owner);
+      streamingListeners.add(listener);
+      return () => streamingListeners.delete(listener);
     },
-    streaming: (owner) => hosts[owner].streaming,
+    streaming: (owner) => hostOf(owner).streaming,
     exitSupervisor(when) {
       return hosts['engine-host']?.transport?.exit(when) ?? false;
     },
     facts(owner) {
-      const host = hosts[owner];
+      const host = hostOf(owner);
       return { transport: host.transport ? 'detached' : 'utility', reason: host.reason, refused: host.refused, waitingLiveSessions: host.waitingLiveSessions, lastExit: host.lastExit };
     },
     restartSupervisor({ stopSessions }) {
-      const host = hosts['engine-host'];
+      const host = hostOf('engine-host');
       if (stopped || host.quitting) return Promise.resolve(notRestartable(host, 'is stopping with the app'));
       return host.transport ? restartDetached(host, host.transport, stopSessions) : restartUtility(host);
     },
@@ -659,7 +689,7 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
       return hosts['engine-host']?.transport?.killHeld() ?? Promise.resolve(false);
     },
     async stopAllForQuit(graceMs) {
-      const host = hosts['engine-host'];
+      const host = hostOf('engine-host');
       if (stopped) return;
       if (!host.transport) {
         const result = await dispatch(host.owner, 'engine.shutdown', { graceMs });
@@ -676,7 +706,7 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
     // E10 end
     // P3-A M4 start
     postDocPort(message, port, owner) {
-      const host = hosts['engine-host'];
+      const host = hostOf('engine-host');
       if (stopped || host.state.state !== 'ready') return false;
       // P3-A M5: detached, main keeps the host's end and relays it
       if (host.transport) return host.port !== null && (host.relay?.open(message, port, owner ?? null) ?? false);

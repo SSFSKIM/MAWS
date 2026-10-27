@@ -3,31 +3,32 @@
 // `hello` on `process.parentPort`, then serves requests on the port that came with it. Every request is validated
 // (envelope, name, input) before a handler runs, and every answer and event is validated before it is posted, so a
 // host can neither be fed nor emit anything outside X2. Nothing is thrown across the port: failures are `res` errors.
+//
+// P5 O1 M5: the runtime is built over a registry (production's `REGISTRY` unless told otherwise) and serves any one
+// non-main owner of it, `machine` included. Every handler is handed a `HandlerContext`: a request naming its client gets
+// that client's remote `ClientRef`, and one naming none the connection's own (client-refs.ts). Engine-host and pty-host
+// handlers ignore it.
 import type { MessagePortMain } from 'electron';
+import type { HandlerContext } from '../ipc/client';
 import { ipcError, IpcErrorSchema, type IpcError } from '../ipc/errors';
-import { HostDocSchema, HostHelloSchema, HostReadySchema, HostRequestSchema, type HostDoc, type HostMessage, type HostRequest } from '../ipc/host-protocol';
-import {
-  commands,
-  HOST_EVENTS,
-  type CommandInput,
-  type CommandName,
-  type CommandOutput,
-  type EventName,
-  type EventPayload,
-  type HostPing,
-  type Owner,
-} from '../ipc/schema';
-import { isCommandName, validateCommandInput, validateCommandOutput, validateEventPayload } from '../ipc/validate';
+import { HostClientGoneSchema, HostDocSchema, HostHelloSchema, HostReadySchema, HostRequestSchema, type HostDoc, type HostMessage, type HostRequest } from '../ipc/host-protocol';
+import { REGISTRY, type EventNameOf, type InputOf, type NameOf, type OutputOf, type PayloadOf, type WireRegistry } from '../ipc/registry';
+import type { HostPing, Owner } from '../ipc/schema';
+import { codecOf } from '../ipc/validate';
+import { remoteClients, type RemoteClients } from './client-refs';
 
-export type HostOn = <N extends CommandName>(name: N, handler: (input: CommandInput<N>) => Promise<CommandOutput<N>>) => void;
+export type HostOn<R extends WireRegistry = typeof REGISTRY> = <N extends NameOf<R>>(
+  name: N,
+  handler: (input: InputOf<R, N>, ctx: HandlerContext) => Promise<OutputOf<R, N>>,
+) => void;
 // E10: true when the event was written to a connected, ready client; false when it was refused or dropped.
-export type HostEmit = <N extends EventName>(name: N, payload: EventPayload<N>) => boolean;
+export type HostEmit<R extends WireRegistry = typeof REGISTRY> = <N extends EventNameOf<R>>(name: N, payload: PayloadOf<R, N>) => boolean;
 // E10: a register is handed the runtime's client hooks too (the engine host's connect burst, its bridges' fail-fast)
 // E4c: and the client's going (the browser bridge settles its pending requests on it)
 // P3-A M4: and the document ports main posts on the parent port (`onDocPort`)
 export type HostClientHooks = Pick<HostRuntime, 'onConnect' | 'hasClient' | 'onClientGone' /* E4c */ | 'onDocPort' /* P3-A M4 */>;
 // Registration is synchronous; an optional returned startup promise holds request admission, not the handshake.
-export type HostRegister = (on: HostOn, emit: HostEmit, client: HostClientHooks) => void | Promise<void>;
+export type HostRegister<R extends WireRegistry = typeof REGISTRY> = (on: HostOn<R>, emit: HostEmit<R>, client: HostClientHooks) => void | Promise<void>;
 
 // The part of MessagePortMain the runtime uses, so tests can drive it with a fake.
 // E10: `postMessage` may answer `false` when it wrote nothing (a socket port already closing); a MessagePort answers
@@ -48,7 +49,8 @@ export class HostCommandError extends Error {
   }
 }
 
-function thrownError(error: unknown): IpcError {
+// P5 O1 M5: exported for main's router, which answers a `machine` handler's throw in the embedded binding the same way.
+export function thrownError(error: unknown): IpcError {
   if (error instanceof HostCommandError) {
     const typed = IpcErrorSchema.safeParse(error.ipcError);
     if (typed.success) return typed.data;
@@ -70,9 +72,20 @@ export interface HostRuntime {
 }
 
 // Registers the handlers now (so a registration mistake fails the host at load, loudly) and serves once given a port.
-export function createHostRuntime(register: HostRegister): HostRuntime {
-  const handlers = new Map<CommandName, (input: unknown) => Promise<unknown>>();
+export function createHostRuntime<R extends WireRegistry = typeof REGISTRY>(register: HostRegister<R>, options: { registry?: R } = {}): HostRuntime {
+  const registry: WireRegistry = options.registry ?? REGISTRY;
+  const { commands } = registry;
+  const { isCommandName, validateCommandInput, validateCommandOutput, validateEventPayload } = codecOf(registry);
+  const handlers = new Map<string, (input: unknown, ctx: HandlerContext) => Promise<unknown>>();
   let port: HostPort | null = null;
+  // P5 O1 M5: the served connection's clients, numbered per serve; it ends when the connection is replaced or detached,
+  // or when a write to it fails (the client is gone, as E4c says below)
+  let connections = 0;
+  let clients: RemoteClients | null = null;
+  const endClients = () => {
+    clients?.end();
+    clients = null;
+  };
   // E10 start
   let ready = false;
   const connectHooks: (() => void)[] = [];
@@ -99,7 +112,7 @@ export function createHostRuntime(register: HostRegister): HostRuntime {
   // routes each command to its registry owner.
   let servedOwner: Owner | null = null;
 
-  const on: HostOn = (name, handler) => {
+  const on = (name: string, handler: (input: unknown, ctx: HandlerContext) => Promise<unknown>) => {
     const { owner } = commands[name];
     if (owner === 'main') throw new Error(`${name} is owned by main; a host cannot serve it`);
     if (servedOwner !== null && owner !== servedOwner) {
@@ -107,12 +120,12 @@ export function createHostRuntime(register: HostRegister): HostRuntime {
     }
     servedOwner = owner;
     if (handlers.has(name)) throw new Error(`a handler for ${name} is already registered`);
-    handlers.set(name, handler as (input: unknown) => Promise<unknown>);
+    handlers.set(name, handler);
   };
 
-  const emit: HostEmit = (name, payload) => {
+  const emit = (name: string, payload: unknown): boolean => {
     // E10: the engine host emits only what HOST_EVENTS lists, so the wire fingerprint covers every event it sends
-    if (servedOwner === 'engine-host' && !(HOST_EVENTS as readonly EventName[]).includes(name)) {
+    if (servedOwner === 'engine-host' && !registry.hostEvents.includes(name)) {
       console.error(`[host] refused to emit ${name}: ${name} is not in HOST_EVENTS`);
       return false;
     }
@@ -125,11 +138,12 @@ export function createHostRuntime(register: HostRegister): HostRuntime {
       if (dropped++ === 0) console.info(`[host] dropping events until a client is ready (first: ${name})`); // E11: the rule with no client, not a failure
       return false;
     }
-    if (port.postMessage({ t: 'evt', name, payload: checked.value } satisfies HostMessage) !== false) return true;
+    if (port.postMessage({ t: 'evt', name, payload: checked.value }) !== false) return true;
     // E10: a port that wrote nothing is closing, closed or stalled, and never writes again: the client is gone (the
     // caller's detach follows at the close), so hasClient() after a false tells a gone client from a refused payload
     ready = false;
     port = null; // definitively gone: queued startup requests from this source must never reach a handler
+    endClients(); // P5 O1 M5
     console.info(`[host] the client stopped taking events (at ${name}); dropping until a client is ready`); // E11: a client leaving, as a keep-quit does
     dropped += 1;
     clientGone(); // E4c
@@ -157,7 +171,7 @@ export function createHostRuntime(register: HostRegister): HostRuntime {
     }
   };
   // P3-A M4 end
-  const startup = register(on, emit, { onConnect, hasClient, onClientGone /* E4c */, onDocPort /* P3-A M4 */ });
+  const startup = register(on as HostOn<R>, emit as HostEmit<R>, { onConnect, hasClient, onClientGone /* E4c */, onDocPort /* P3-A M4 */ });
   // One shared admission hold. The register owns its bound and logging; even rejection must not wedge the host.
   // Clearing it restores synchronous handler admission instead of awaiting a fulfilled promise on every request.
   let admission: Promise<void> | null = null;
@@ -191,6 +205,8 @@ export function createHostRuntime(register: HostRegister): HostRuntime {
       const replaced = ready; // E4c: a ready client this one replaces is gone
       port = p;
       ready = false; // E10
+      endClients(); // P5 O1 M5: the replaced connection's clients end with it
+      const served = (clients = remoteClients(++connections));
       if (replaced) clientGone(); // E4c
       p.on('message', ({ data }) => {
         // E10: the client's ready line; one from a port this runtime no longer serves is stale and ignored
@@ -198,12 +214,18 @@ export function createHostRuntime(register: HostRegister): HostRuntime {
           if (port === p) setReady();
           return;
         }
+        // P5 O1 M5: a client a request named has ended; an id the connection never saw (or an ended connection's) is ignored
+        const gone = HostClientGoneSchema.safeParse(data);
+        if (gone.success) return served.gone(gone.data.client);
         const request = HostRequestSchema.safeParse(data);
         if (!request.success) {
           console.error('[host] dropped a malformed message from main', request.error.issues);
           return;
         }
-        void answer(request.data, p).then((response) => { if (response) p.postMessage(response); });
+        // P5 O1 M5: the ref is taken at receipt, in arrival order, so a clientGone that follows this request ends it even
+        // while the request waits for admission
+        const ctx: HandlerContext = { client: served.refFor(request.data.client) };
+        void answer(request.data, ctx, p).then((response) => { if (response) p.postMessage(response); });
       });
       p.start();
     },
@@ -212,6 +234,7 @@ export function createHostRuntime(register: HostRegister): HostRuntime {
       const wasReady = ready; // E4c
       port = null;
       ready = false;
+      endClients(); // P5 O1 M5
       if (wasReady) clientGone(); // E4c
     },
     setReady,
@@ -223,7 +246,7 @@ export function createHostRuntime(register: HostRegister): HostRuntime {
     docPort, // P3-A M4
   };
 
-  async function answer({ id, name, input }: HostRequest, source: HostPort): Promise<HostMessage | undefined> {
+  async function answer({ id, name, input }: HostRequest, ctx: HandlerContext, source: HostPort): Promise<HostMessage | undefined> {
     // Promise continuations share arrival order on the one served port (renderer windows multiplex through main).
     if (admission) await admission;
     if (port !== source) return; // detached/replaced while waiting: do not invoke a vanished caller's handler
@@ -235,7 +258,7 @@ export function createHostRuntime(register: HostRegister): HostRuntime {
 
     let value: unknown;
     try {
-      value = await handler(checkedInput.value);
+      value = await handler(checkedInput.value, ctx);
     } catch (error) {
       return { t: 'res', id, ok: false, error: thrownError(error) }; // C3: typed errors keep their code
     }
