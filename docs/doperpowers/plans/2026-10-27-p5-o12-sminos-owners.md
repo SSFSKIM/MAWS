@@ -27,7 +27,7 @@ What someone can see after the first phase:
 Phase 1 (dispatchable now; P5's item 1, item 4, and item 7's refusals):
 - [x] M1 — The session record (item 1). Reviewed clean after three doperpowers:reviewer-high rounds (one P2 carried as an unresolved finding), landed as doperpowers PR #402 (`40cb5721`, sminos 1.18.0), 2026-10-27T03:10Z.
 - [x] M2 — The opId ledger (item 4). Reviewed clean (doperpowers:reviewer-medium, one P2 fixed), landed as doperpowers PR #401 (`bdd39e50`, sminos 1.17.0), 2026-10-27T02:05Z.
-- [ ] M3 — The lane B observer: marker and refusals (item 7, first part)
+- [x] M3 — The lane B observer: marker and refusals (item 7, first part). The marker landed first as MAWS PR #194 (`0de73723e`). The sminos side was reviewed by doperpowers:reviewer-high over several rounds (three found issues), every finding fixed with a regression test, and landed as doperpowers PR #403 (`8f79b741`, sminos 1.19.0), 2026-10-27. A zero-inference live check passed: a `claude -p` with the marker read `lane: match`, no ops and every control `MAWS controls this session`, and `sminos steer` at it exited 1, `lane-b`. Phase 1 is complete.
 
 Blocked (P5's edges):
 - [ ] M4 — The reaping gate (item 7, rest). Blocked by U6's measurement (in O3) and by OX10's agreement with O16's author.
@@ -353,6 +353,16 @@ OP_HORIZON = KEPT_S - 3600
   Evidence: M1's executor, 2026-10-26.
 - Observation: `sminos_bridge.py` treats `rpc` and `upload` as opaque strings, so M2's re-keying needed no change there.
   Evidence: M2's executor, 2026-10-26.
+- Observation: a `claude -p` (stream-json in and out) writes its registry record, `<CLAUDE_CONFIG_DIR>/sessions/<pid>.json`, naming its session. The bridge child's parent is the claude process itself, and the hook records a marked session as `origin: {kind: maws}`, `source: hook`.
+  Evidence: M3's live check, 2026-10-27 (claude 2.1.311; the child's ppid was claude's pid).
+- Observation: a session outside any sminos project gets no record, so no controller is ever written for it, and desk Resume has nothing to refuse it by. A desk Resume needs the session joined anyway.
+  Evidence: M3's first live run, in a bare directory: `session record: absent`.
+- Observation: on this machine `claude` on PATH is the cmux shim, and a minimal PATH that puts `/usr/bin` first gives Python 3.9, which sminos refuses, so neither the CLI nor the bridge child runs. A live check runs the native binary (`~/.local/bin/claude`) with a 3.10+ interpreter first on PATH.
+  Evidence: M3's first live attempt, 2026-10-27.
+- Observation: MAWS's hub `RpcErrorCode` union doesn't name `lane-b` either. DX6 carries any string, so nothing breaks, but the type is stale (the architect tracks it).
+  Evidence: M3's executor, 2026-10-27.
+- Observation: in a shell test on Linux, `sleep 600 & pid=$!; kill $pid; wait $pid` can stall for the sleep's whole 600 s: the kill lands right after the fork, before the exec, and doesn't end it. That held `test-bridge-control.sh` for 10 minutes and cancelled `sminos-suites` at its job limit. macOS didn't show it. A test now uses a process that exits on its own for a gone pid, and kills and reaps each process it starts in the case that started it.
+  Evidence: doperpowers CI run 40448721720, 04:16:18 → 04:26:21 on one case.
 
 ## Decision Log
 
@@ -441,6 +451,23 @@ OP_HORIZON = KEPT_S - 3600
   - the publication check runs from a one-pass log index.
   Rationale: each round found a path to a wrong owner or a regressed publication. Round 3 found no P1; its one P2 (a machine rename mid-write in a git-mirrored project can append a stale publication under the former writer name, repaired at the next publication pass) is carried as an unresolved review finding.
   Date/Author: 2026-10-27, O12's executor (desk-sminos-orchestrator), the orchestrator ruling on the binding and the precedence.
+
+- Decision: M3's gaps and its review rounds, settled in building it.
+  - **The verdict** is the bridge child's, made on one observation of the session's parent (the child's own parent, whose registry record must name the session):
+    - `match` when that parent is the SMNS_MEMBER pid;
+    - `mismatch` only on positive evidence of another spawner: no valid mark at all, or the mark's process running (alive, and not a zombie, Z or X), started in an earlier whole second than the session, and not its parent (a `claude` a lane B session's Bash started);
+    - `unresolved` for everything else: no registry record yet, `ps` failing, an unreadable state or start time, a host started in the session's own second, a dead host (the engine re-parented to PID 1 or a subreaper), or a mark pid reused by a younger process.
+    The strict earlier-second rule loses no real case. A Bash-started `claude` exists only after the host spawned the engine, the engine booted, ran a model turn and called Bash, which is seconds at least. If one ever were that quick, it would be held an observer, the safe side.
+  - **The verdict is the process's and sticky.** The mod adopts one only while none is resolved, keeps it in `$.state` (`sminos.lane`) for a reload, and passes it to every later child it starts (`sminos bridge --lane <verdict>`). That child uses it for its decision route and its controller relay, so a replacement child after the host exited can't recompute `mismatch`.
+  - **The child's lines are its own.** A verdict resolved after the hello arrives as `{op: "lane", lane}` with no command id. The child's `/command` refuses `hello` and `lane` from a client, and the mod ignores a `lane` line that carries an id. A change of observing pushes a resync, which carries the new capabilities.
+  - **The observer.** Every control op is refused `{code: lane-b}`, while `ping` and `read` still answer. `ops` is `[]` and `reads` stays advertised. Nothing is raised, and `turn.step` claims nothing and rewrites nothing. An upload's wake is never submitted.
+  - **The controller relay.** Each launch's child writes its lane to the record: B for `match`, A for `mismatch` or an unmarked session, nothing while unresolved. It retries until the record exists, and keeps `since` when the lane hasn't changed.
+  - **The daemon answers `lane-b` itself.** A bridged control RPC the bridge refuses `lane-b`, and the decision route's 409 `lane-b`, are answered with that code, not a generic `failed`. A `lane-b` upload's saved files are removed, as for any definite refusal.
+  - **Desk Resume's order.** The record's `controller.lane == "B"` check runs in `plan`, before `session-live` and before the claim.
+  - **Test environments.** `MAWS_LANE` is scrubbed from the hermetic test environments (the bridge, core and session-plane suites), and `launch_env` drops it from every `claude --bg` launch.
+  - **An M2 follow-up.** `sminos rpc-query` takes the op id after `--` (`sminos rpc-query [--created T] -- <opId>`), since a base64url id starts with `-` one time in 64. M2's tests pass ids that way, which ends their ~5% flake, and a fixed `-`-leading id is pinned.
+  Rationale: where evidence is ambiguous the answer is `unresolved`, which keeps the session an observer. Two controllers on one MAWS session is the failure M3 removes. Each review round that found issues (doperpowers:reviewer-high, three of them) found a path back to it, and each was closed with a regression test.
+  Date/Author: 2026-10-27, M3's executor, the rulings the orchestrator's (p5-desk-track-owner).
 
 ## Outcomes & Retrospective
 
