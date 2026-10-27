@@ -97,11 +97,16 @@ import {
   PROJECTION_PATH,
   PROJECT_STATE_FAULT_PATH,
   MISSING_METHOD_PATH,
+  REGISTRY_RPC_PATH,
   REGISTRY_HEAD_FAULT_PATH,
   PROJECT_STATE_CACHE_PATH,
-  REGISTRY_RPC_PATH,
   AS_MEMBER_PATH,
   LACKS_PATH,
+  CLAIM_HOLD_PATH,
+  CLAIM_HELD_PATH,
+  CLAIM_RELEASE_PATH,
+  RELAY_FAULT_PATH,
+  CLAIM_PATH,
 } from './send-fault';
 import { lacksMethod } from '../../src/objects/retry';
 
@@ -309,6 +314,8 @@ export class Registry extends DeployedRegistry {
 
 export class Machine extends DeployedMachine {
   private release: (() => void) | undefined;
+  private claimHeld = false;
+  private claimRelease: (() => void) | undefined;
   private replacedArmed = false;
   private revokeRelease: (() => void) | undefined;
 
@@ -324,6 +331,26 @@ export class Machine extends DeployedMachine {
       this.revokeRelease = undefined;
       release?.();
       return new Response(release ? 'released' : 'none');
+    }
+    if (url.pathname === CLAIM_HOLD_PATH) {
+      this.claimHeld = true;
+      return new Response('armed');
+    }
+    if (url.pathname === CLAIM_HELD_PATH) return new Response(this.claimRelease ? 'held' : 'none');
+    if (url.pathname === CLAIM_RELEASE_PATH) {
+      const release = this.claimRelease;
+      this.claimRelease = undefined;
+      release?.();
+      return new Response(release ? 'released' : 'none');
+    }
+    if (url.pathname === CLAIM_PATH) {
+      const { org, name, ref, client } = (await request.json()) as { org: string; name: string; ref: string; client: string };
+      return Response.json(await this.claimGeneration(org, name, ref, client));
+    }
+    if (url.pathname === RELAY_FAULT_PATH) {
+      const { method, times } = (await request.json()) as { method: string; times: number };
+      this.ctx.storage.kv.put(`relay-fault:${method}`, times);
+      return new Response('armed');
     }
     if (url.pathname === SEND_HOLD_PATH) {
       this.ctx.storage.kv.put('send-hold', url.searchParams.get('kind') ?? '');
@@ -418,7 +445,35 @@ export class Machine extends DeployedMachine {
     return super.directory(frame, version);
   }
 
-  async send(frame: DownFrame, generation?: number): Promise<'written' | 'offline'> {
+  /** Armed, the next claim is granted and stored, and its answer held until the suite releases it: a claim in flight. */
+  async claimGeneration(...args: Parameters<DeployedMachine['claimGeneration']>): ReturnType<DeployedMachine['claimGeneration']> {
+    const claimed = await super.claimGeneration(...args);
+    if (this.claimHeld) {
+      this.claimHeld = false;
+      await new Promise<void>((resolve) => (this.claimRelease = resolve));
+    }
+    return claimed;
+  }
+
+  /** Throws from a relay method while the suite's fault for it has throws left. */
+  private relayFault(method: string): void {
+    const left = this.ctx.storage.kv.get<number>(`relay-fault:${method}`) ?? 0;
+    if (left <= 0) return;
+    this.ctx.storage.kv.put(`relay-fault:${method}`, left - 1);
+    throw new Error(`a failure the suite injected into ${method}`);
+  }
+
+  relayRevoke(...args: Parameters<DeployedMachine['relayRevoke']>): ReturnType<DeployedMachine['relayRevoke']> {
+    this.relayFault('relayRevoke');
+    return super.relayRevoke(...args);
+  }
+
+  relayState(...args: Parameters<DeployedMachine['relayState']>): ReturnType<DeployedMachine['relayState']> {
+    this.relayFault('relayState');
+    return super.relayState(...args);
+  }
+
+  async send(frame: DownFrame, generation?: number): ReturnType<DeployedMachine['send']> {
     if (this.ctx.storage.kv.get<string>('send-fault') === frame.t) {
       this.ctx.storage.kv.delete('send-fault');
       throw new Error(`a failure the suite injected into the send of ${frame.t}`);

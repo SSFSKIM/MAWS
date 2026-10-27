@@ -6,21 +6,38 @@
 // events written, each writer's seqs 1..N once, with distinct rising offsets, and the redeploy must have cut each
 // machine's stream (otherwise the run proved nothing and fails "not exercised").
 //
+// Beside them runs RL1's leg (O11 M8, rl1-reconnect.ts; acceptance 3's deploy clause): a v2 machine, listed in the
+// throwaway org's state by an admin device (a genesis first when the org has none), holds RL1 through its endpoint, and
+// an app holds a channel to it. A socket the redeploy drops must come back, the endpoint under a higher generation and
+// the app through a new channel; it reports when each dropped and how long each took. Whether the redeploy cuts RL1
+// within the window is Cloudflare's (phase B saw it in one run of three), so once the writing stops the leg cuts both
+// sockets from the client's end, twice in a row, and each time both must come back (`rl1: forced cut <n>: …`). Those
+// prove the reconnect, not the deploy's cut: only a run whose redeploy cut both RL1 sockets, both back, and whose forced
+// cuts came back is a PASS; one whose redeploy left an RL1 socket uncut, all else passing, ends `INCONCLUSIVE: deploy
+// cut: not exercised …` with status 3 (REDEPLOY_INCONCLUSIVE).
+//
 // stdin (deploy.ts, readSecrets): DESK_ACCESS_TOKEN (the owner's Access app token), CF_ACCESS_SETUP_TOKEN and
 // CF_DESK_HUB_SERVICE_TOKENS (the redeploy is `deployment deploy`'s own). Options: --test-org (required, the throwaway
 // org the deployment serves and is redeployed under, proof.ts), --org-name, --assets and --web as `deploy` takes them,
-// --seconds (the writing's length, default 420) and --redeploy-at (default 15). It revokes the machines however it ends.
-// The redeploy is `deployHub`'s own, so it acts on `--config`'s Worker alone, under the same target check as `deploy`.
+// --seconds (the writing's length, default 420), --redeploy-at (default 15) and --device-keys (the admin device's keys
+// file, org-admin.ts; without it a device made for the run signs the throwaway org's genesis, which needs an org with no
+// state yet). It revokes the machines however it ends, a SIGINT or SIGTERM included, and takes the v2 one out of the org
+// state.
+// The redeploy is `deployHub`'s own, so it acts on `--config`'s Worker alone, under the same target check as `deploy`;
+// and since the leg writes org state, the run is refused before anything else on any Worker but a staging one
+// (config.ts, checkTestTarget): never production.
 import { randomUUID } from 'node:crypto';
 import { loadavg } from 'node:os';
 import { FakeMachine } from '../fake-machine/machine';
 import { importOrgKey, newNonce, seal } from '../src/protocol/codes';
 import type { HumanDraft, LogEvent } from '../src/protocol/log';
 import { join } from 'node:path';
-import { readDeployConfig, type DeployConfig } from './config';
+import { checkTestHub, readDeployConfig } from './config';
 import { deployArgs, deployHub, readSecrets, type DeployOptions } from './deploy';
 import { enroll, LogFollower, newOrgKey, Person, sleep, STOP_WAIT_MS } from './hub';
-import { Cleanup, revoke, servesOrg, TEST_ORG_OPTION, testOrgArg } from './proof';
+import { loadAdminDevice, newAdminDevice, OrgAdmin, type AdminDevice } from './org-admin';
+import { Cleanup, interruptible, isTestTarget, revoke, servesOrg, TEST_ORG_OPTION, testOrgArg } from './proof';
+import { Rl1Watch } from './rl1-reconnect';
 
 async function until<T>(read: () => Promise<T | undefined>, what: string, ms: number): Promise<T> {
   const deadline = Date.now() + ms;
@@ -32,8 +49,18 @@ async function until<T>(read: () => Promise<T | undefined>, what: string, ms: nu
   }
 }
 
+/** The status of a run that lost nothing and whose forced cuts came back, but whose redeploy left an RL1 socket uncut:
+ * not a PASS (acceptance 3 is the deploy's cut), not a FAIL. */
+export const REDEPLOY_INCONCLUSIVE = 3;
+
 export async function main(argv: string[]): Promise<number> {
-  const { config, values } = deployArgs(argv, { seconds: { type: 'string', default: '420' }, 'redeploy-at': { type: 'string', default: '15' }, ...TEST_ORG_OPTION });
+  const { config, values } = deployArgs(argv, {
+    seconds: { type: 'string', default: '420' },
+    'redeploy-at': { type: 'string', default: '15' },
+    'device-keys': { type: 'string' },
+    ...TEST_ORG_OPTION,
+  });
+  if (!isTestTarget(config)) return 2;
   const org = testOrgArg(values['test-org'] as string | undefined, readDeployConfig((values.config as string | undefined) ?? join(process.env.DESK_HUB_APP!, 'deploy', 'config.json')).org.id);
   if (!org) return 2;
   // The redeploy keeps the deployment on the throwaway org it serves.
@@ -43,26 +70,45 @@ export async function main(argv: string[]): Promise<number> {
     console.error('DESK_ACCESS_TOKEN, CF_ACCESS_SETUP_TOKEN, and CF_DESK_HUB_SERVICE_TOKENS on stdin');
     return 2;
   }
-  const owner = new Person(`https://${config.host}`, secrets.DESK_ACCESS_TOKEN);
-  if (!(await servesOrg(owner, org))) return 2;
   const cleanup = new Cleanup();
-  let code: number;
-  try {
-    code = await check(owner, config, secrets, values, cleanup);
-  } catch (error) {
-    console.error(`FAIL: ${error instanceof Error ? error.message : String(error)}`);
-    code = 1;
-  }
-  return (await cleanup.run()).length ? 1 : code;
+  const owner = new Person(`https://${config.host}`, secrets.DESK_ACCESS_TOKEN, () => cleanup.check());
+  if (!(await servesOrg(owner, org))) return 2;
+  const device = values['device-keys'] ? await loadAdminDevice(values['device-keys'] as string) : await newAdminDevice();
+  // Durable Objects restart for new code, not for the same code redeployed or new variables (M5: neither cut a stream
+  // in minutes), so this redeploy is a new version of the code, as a real one is: its build's name is new.
+  const redeploy = async () => {
+    const before = (await owner.fetch('/api/me')).headers.get('X-Desk-Build');
+    const options: DeployOptions = { assets: values.assets as string | undefined, web: values.web as string | undefined, quiet: true };
+    await deployHub(config, secrets, { ...options, buildSuffix: `redeploy@${new Date().toISOString()}` });
+    const after = await until(async () => {
+      const build = (await owner.fetch('/api/me')).headers.get('X-Desk-Build');
+      return build !== before ? build : undefined;
+    }, 'the new build answering', 60_000);
+    console.log(`the new build answers: "${after}" (was "${before}")`);
+  };
+  // However it ends, a SIGINT or SIGTERM included (proof.ts), the machines are revoked and the v2 one leaves the state.
+  return interruptible(
+    cleanup,
+    () => redeployCheck(owner, org, values, cleanup, redeploy, device),
+    async (status) => ((await cleanup.run()).length ? 1 : status),
+  );
 }
 
-async function check(
+/**
+ * The check against the deployment `owner` reaches, serving the throwaway `org`: `redeploy` puts new code on it and
+ * resolves once the new build answers (main's is `deployHub`'s; the suites restart the local runtime). Everything it
+ * makes is undone through `cleanup`, which the caller runs.
+ */
+export async function redeployCheck(
   owner: Person,
-  config: DeployConfig,
-  secrets: Record<string, string | undefined>,
+  org: string,
   values: Record<string, string | boolean | undefined>,
   cleanup: Cleanup,
+  redeploy: () => Promise<void>,
+  device: AdminDevice,
 ): Promise<number> {
+  // Its RL1 leg writes org state: a staging hub, never production, checked before the first enrollment.
+  checkTestHub(owner.hub, 'enroll machines and write org state');
   const hub = owner.hub;
   const me = await owner.json<{ org: { id: string }; member: { id: string } }>('/api/me');
   const tag = Math.random().toString(36).slice(2, 7);
@@ -92,6 +138,10 @@ async function check(
     machines.push(fm);
   }
   console.log(`machines ${names.join(', ')} connected; project ${project}`);
+
+  // RL1's leg: a v2 machine listed in the throwaway org's state, its endpoint and an app's channel to it.
+  const admin = await OrgAdmin.open(owner, { org, throwaway: true }, device);
+  const rl1 = await Rl1Watch.start(owner, admin, `rd-ep-${tag}`, cleanup);
 
   // The browser: follows the log, writes a `human` each second, and on a cut reopens and resumes after the last offset
   // it holds, resending every `human` not acknowledged (the hub answers a known nonce from its record).
@@ -157,6 +207,7 @@ async function check(
   const generations = machines.map((fm) => fm.generation);
   console.log(`redeploying at ${redeployAt} s; generations ${generations.join(', ')}; written ${JSON.stringify(Object.fromEntries(written))}`);
   const redeployStart = Date.now();
+  rl1.mark(redeployStart);
   // When each connection was cut and came back, relative to the redeploy's start.
   const cuts: string[] = [];
   const cut = (what: string) => {
@@ -174,16 +225,7 @@ async function check(
       socketSeen = browser.socket;
     }
   }, 250);
-  // Durable Objects restart for new code, not for the same code redeployed or new variables (M5: neither cut a stream
-  // in minutes), so this redeploy is a new version of the code, as a real one is: its build's name is new.
-  const before = (await owner.fetch('/api/me')).headers.get('X-Desk-Build');
-  const options: DeployOptions = { assets: values.assets as string | undefined, web: values.web as string | undefined, quiet: true };
-  await deployHub(config, secrets, { ...options, buildSuffix: `redeploy@${new Date().toISOString()}` });
-  const after = await until(async () => {
-    const build = (await owner.fetch('/api/me')).headers.get('X-Desk-Build');
-    return build !== before ? build : undefined;
-  }, 'the new build answering', 60_000);
-  console.log(`the new build answers: "${after}" (was "${before}")`);
+  await redeploy();
   console.log(`redeployed in ${((Date.now() - redeployStart) / 1000).toFixed(1)} s`);
   await sleep(Math.max(0, seconds * 1000 - (Date.now() - started)));
   writing = false;
@@ -232,6 +274,14 @@ async function check(
     if (fm.rejected.length) problems.push(`${fm.name} rejected: ${JSON.stringify(fm.rejected.slice(0, 3))}`);
   }
   if (!complete(browserVector())) problems.push(`the live browser holds ${JSON.stringify(browserVector())}`);
+  // RL1: a socket the redeploy dropped must be back, the endpoint under a higher generation, a channel re-opened. A
+  // redeploy need not cut RL1 within the window (phase B's runs B and C saw no cut), so the leg then cuts both sockets
+  // itself, twice in a row, on the code the redeploy put up: that proves the reconnect, not the deploy's cut, so a
+  // redeploy that left an RL1 socket uncut makes the run inconclusive at best (below).
+  problems.push(...(await rl1.settle(Date.now() + 60_000, { cutRequired: false })));
+  for (const line of rl1.report()) console.log(line);
+  const uncut = rl1.uncut();
+  problems.push(...(await rl1.forceCuts(2)));
   // The proof needs the redeploy to have cut the machines' streams; one that cut nothing proved nothing.
   machines.forEach((fm, i) => {
     if (fm.generation === generations[i]) problems.push(`the redeploy never cut ${fm.name}'s stream (still generation ${fm.generation}): not exercised`);
@@ -248,6 +298,11 @@ async function check(
   if (problems.length) {
     console.log(`FAIL\n  ${problems.join('\n  ')}`);
     return 1;
+  }
+  if (uncut.length) {
+    const which = uncut.length === 2 ? 'neither RL1 socket' : uncut[0] === 'endpoint' ? "only the app's socket, not the endpoint's" : "only the endpoint's socket, not the app's";
+    console.log(`INCONCLUSIVE: deploy cut: not exercised (the redeploy cut ${which}); nothing lost or duplicated, and the leg's own cuts came back`);
+    return REDEPLOY_INCONCLUSIVE;
   }
   console.log('PASS: nothing lost, nothing duplicated across the redeploy');
   return 0;

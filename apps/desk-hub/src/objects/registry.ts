@@ -34,15 +34,16 @@
 // `members` is the head's projection, and member management is a signed successor, never a route of the hub's own. A
 // member a state drops is refused from then on, their grid sockets here and their project sockets (through each
 // project's announcement of the state, `Project.stateAdvanced`, which carries the head's member ids) closing `4403
-// removed`, and a socket the Worker admitted just before is refused at its accept, here and at the project.
+// removed`, and a socket the Worker admitted just before is refused at its accept, here and at the project. Each RL1
+// relay's object is announced the state the same way from its first socket on (`relays`; O11 M6), for its app sockets.
 import { DurableObject } from 'cloudflare:workers';
 import { hubConfig, MEMBER_HEADER, type Env, type HubConfig } from '../env';
 import type { AccessIdentity } from '../identity/access';
 import { ServiceTokenApiError, serviceTokens } from '../identity/service-tokens';
 import { importVapidKey, pushRequest, type VapidKey } from '../push/web-push';
 import { base64urlDecode, base64urlEncode, isBase64urlOf } from '../protocol/base64url';
-import type { Delegation } from 'org-protocol';
-import type { GridDown, MachineSummary, ProjectSummary, PushNotice } from '../protocol/browser';
+import { LISTINGS_PAGE_BYTES, REGISTRY_APP_PARAM, type Delegation, type Listing, type RegistryAppFrame, type Signed } from 'org-protocol';
+import type { GridDown, MachineSummary, ProjectSummary, PushNotice, RegistryDown } from '../protocol/browser';
 import type { OrgFrame } from '../protocol/machine';
 import { toWire } from '../protocol/parts';
 import {
@@ -83,6 +84,7 @@ import { OrgChain } from './org-chain';
 import { OrgRecords } from './org-records';
 import { OrgKeys, type StoredKey } from './org-keys';
 import { described } from './project';
+import { relayObjectName } from './relay';
 import { checkRequest, ProvisioningKeys, type KeyRow } from './provisioning-keys';
 import { lacksMethod, RETRY_ATTEMPTS, RETRY_BASE_MS, RETRY_CAP_MS, retryDelay } from './retry';
 
@@ -117,6 +119,7 @@ CREATE TABLE IF NOT EXISTS summaries (
   waiting INTEGER NOT NULL, report_seq INTEGER, live INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS announcements (
   project TEXT PRIMARY KEY, version INTEGER NOT NULL, members TEXT NOT NULL, attempts INTEGER NOT NULL, due INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS relays (ref TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS machine_states (
   project TEXT NOT NULL, name_key TEXT NOT NULL, client TEXT NOT NULL, online INTEGER NOT NULL,
   PRIMARY KEY (project, name_key, client));
@@ -140,6 +143,8 @@ const MAX_PUSH_SUBSCRIPTIONS = 20;
 const MAX_ENDPOINT = 2048;
 /** A device id as the org state's pairing exchange bounds it (org-chain.ts). */
 const MAX_DEVICE_ID = 128;
+/** A registry socket's hibernation attachment: its member, and `app` when it was opened as an app's (O11 M7). */
+type RegistrySocketAttachment = { member: string; app?: true };
 /** What a push did, for the suites and the logs. */
 type Pushed = { sent: number; gone: number; failed: number };
 type Counts = Pick<ProjectSummary, 'machines' | 'machines_online' | 'working' | 'waiting' | 'live'>;
@@ -163,6 +168,10 @@ const projectOf = (row: ProjectRow): ProjectRecord => ({ ...row, retired: row.re
 const DIRECTORY_VERSION = 'directory-version';
 /** How soon a failed orphan deletion, or a revocation a project has not taken, is tried again. */
 const RETRY_MS = 60_000;
+/** An announcement owed to a relay's object (O11 M6) is kept under `ref:<ref>` in `announcements` beside the projects'
+ * (keyed by their ids, which hold no `:`). */
+const RELAY_TARGET = 'ref:';
+const relayTarget = (ref: string) => `${RELAY_TARGET}${ref}`;
 
 const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 /** 128 random bits as lowercase hex (DX7's member id; also an enrollment's id). */
@@ -739,19 +748,33 @@ export class Registry extends DurableObject<Env> {
     if (offline) void this.scheduleAlarm().catch(() => {});
   }
 
-  // ---- The grid (DX3's registry socket) ------------------------------------------------------------------------
+  // ---- The grid (DX3's registry socket) and the app's frames on it (OX8; O11 M7) -------------------------------
 
-  /** A member's grid socket (the Worker sends only a member's): every project's summary, then each change. */
+  /**
+   * A member's registry socket (the Worker sends only a member's): every project's summary, then each change. An app's
+   * (`?app=1`, OX8; O11 M7) gets after the grid the org state's head version and every listing held, in pages of at
+   * most `LISTINGS_PAGE_BYTES`, the last marked, then a `state` notice at each accepted state and each listing as it is
+   * stored. A socket without the query, desk-web's grid, gets none of it: listings are no use to it, every phone's
+   * reconnect would carry them all, and a snapshot past its parts bound would close it into a reconnect loop.
+   */
   async fetch(request: Request): Promise<Response> {
-    if (new URL(request.url).pathname !== '/grid') return new Response('not found', { status: 404 });
+    const url = new URL(request.url);
+    if (url.pathname !== '/grid') return new Response('not found', { status: 404 });
     if (request.headers.get('Upgrade') !== 'websocket') return new Response('expected a WebSocket', { status: 426 });
     // Resolved before a state that dropped the member, and reaching here after it.
     const member = request.headers.get(MEMBER_HEADER) ?? '';
     if (this.sql.exec('SELECT 1 FROM members WHERE id = ?', member).toArray().length === 0) return Response.json({ error: 'removed' }, { status: 403 });
     const [client, server] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({ member });
+    const app = url.searchParams.get(REGISTRY_APP_PARAM) === '1';
+    server.serializeAttachment({ member, ...(app ? { app } : {}) } satisfies RegistrySocketAttachment);
     this.send(server, this.gridFrame());
+    if (app) {
+      const version = this.chain.head()?.state.version;
+      if (version !== undefined) this.send(server, { t: 'state', version });
+      const pages = this.records.listingPages(LISTINGS_PAGE_BYTES);
+      pages.forEach((records, i) => this.send(server, { t: 'listings', records, last: i === pages.length - 1 }));
+    }
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -817,8 +840,15 @@ export class Registry extends DurableObject<Env> {
     for (const socket of this.ctx.getWebSockets()) this.send(socket, frame);
   }
 
+  /** A frame of the app's connection, to the sockets opened as an app's alone. */
+  private toApps(frame: RegistryAppFrame): void {
+    for (const socket of this.ctx.getWebSockets()) {
+      if ((socket.deserializeAttachment() as RegistrySocketAttachment | null)?.app === true) this.send(socket, frame);
+    }
+  }
+
   /** A frame above `FRAME_LIMIT` (a grid of many projects) goes in numbered parts, as on a project socket. */
-  private send(socket: WebSocket, frame: GridDown): void {
+  private send(socket: WebSocket, frame: RegistryDown): void {
     try {
       for (const line of toWire(frame)) socket.send(line);
     } catch {
@@ -1219,7 +1249,8 @@ export class Registry extends DurableObject<Env> {
 
   /**
    * A genesis or a successor (`OrgChain.submit`). Once one is accepted, the members it dropped are refused here at once,
-   * their grid sockets close `4403 removed`, and every project is told the new version and the members it holds.
+   * their grid sockets close `4403 removed`, every project is told the new version and the members it holds, and every
+   * app's registry socket is sent its `state` notice (O11 M7).
    */
   async submitState(member: MemberRecord, body: unknown): Promise<Result<OrgStateAccepted>> {
     if (body === undefined) return fail(400, 'bad-shape', 'the body is a SignedOrgState, {state, sigs}');
@@ -1237,25 +1268,78 @@ export class Registry extends DurableObject<Env> {
     }
     // Stored in the step that accepted the state (no await between), so a reset never loses one; a project still owed
     // an older version is owed this one instead, which carries everything the older one did.
-    const members = JSON.stringify(this.sql.exec<{ id: string }>('SELECT id FROM members ORDER BY id').toArray().map((m) => m.id));
-    const due = Date.now() + this.retryBaseMs();
-    const projects = this.sql.exec<{ id: string }>('SELECT id FROM projects').toArray();
-    for (const { id } of projects) {
-      this.sql.exec(
-        'INSERT INTO announcements (project, version, members, attempts, due) VALUES (?, ?, ?, 0, ?) ON CONFLICT (project) DO UPDATE SET version = excluded.version, members = excluded.members, attempts = 0, due = excluded.due WHERE excluded.version > announcements.version',
-        id,
-        version,
-        members,
-        due,
-      );
-    }
-    for (const { id } of projects) void this.announce(org.id, { project: id, version, members });
+    // Every relay's object (O11 M6) is owed it too, by the same table: its endpoint's `state` notice, and its removed
+    // members' app sockets closed.
+    const members = this.memberIds();
+    const targets = [
+      ...this.sql.exec<{ id: string }>('SELECT id FROM projects').toArray().map((p) => p.id),
+      ...this.sql.exec<{ ref: string }>('SELECT ref FROM relays').toArray().map((r) => relayTarget(r.ref)),
+    ];
+    for (const target of targets) this.owe(target, version, members);
+    for (const target of targets) void this.announce(org.id, { project: target, version, members });
+    this.toApps({ t: 'state', version });
     await this.scheduleAlarm();
     return ok({ version });
   }
 
+  /** The head's member ids, as an announcement carries them. */
+  private memberIds(): string {
+    return JSON.stringify(this.sql.exec<{ id: string }>('SELECT id FROM members ORDER BY id').toArray().map((m) => m.id));
+  }
+
+  /** Stores the announcement of `version` owed to `target`; one still owed an older version is owed this one instead,
+   * which carries everything the older one did. */
+  private owe(target: string, version: number, members: string): void {
+    this.sql.exec(
+      'INSERT INTO announcements (project, version, members, attempts, due) VALUES (?, ?, ?, 0, ?) ON CONFLICT (project) DO UPDATE SET version = excluded.version, members = excluded.members, attempts = 0, due = excluded.due WHERE excluded.version > announcements.version',
+      target,
+      version,
+      members,
+      Date.now() + this.retryBaseMs(),
+    );
+  }
+
+  /** The head's version, or null before any state: RL1's `state` notice on an endpoint's welcome (O11 M6). */
+  stateVersion(): number | null {
+    return this.chain.head()?.state.version ?? null;
+  }
+
   /**
-   * Tells a project the org state advanced to `version`, holding `members` (`Project.stateAdvanced`). The announcement
+   * The ref a machine's RL1 socket is addressed by (O11 M6): the one a signed record binds its name to, the head's live
+   * `machines` entry or a kept certificate (`OrgRecords.boundRef`). A ref the machine posted with its key alone binds
+   * nothing (any enrollment can post any ref): such a machine is `not-listed` until the head lists it, and one that
+   * posted none has `no-ref`. Never taken from the client, so no machine reaches another's object.
+   */
+  machineRefOf(machine: MachineRecord): { ref: string } | { error: 'no-ref' | 'not-listed' } {
+    const ref = this.records.boundRef(machine.name);
+    if (ref === null) return { error: this.records.machineKey(machine.enrollment) ? 'not-listed' : 'no-ref' };
+    this.relayed(ref);
+    return { ref };
+  }
+
+  /** The ref an app's socket to a machine names (O11 M6): a ref a signed record binds, or a machine name such a record
+   * binds to one (`machineRefOf`'s); null for neither. */
+  machineRefNamed(machine: string): string | null {
+    const ref = this.records.refBound(machine) ? machine : this.records.boundRef(machine);
+    if (ref !== null) this.relayed(ref);
+    return ref;
+  }
+
+  /** A relay's object, kept from its first socket on: it is owed every state from then (`submitState`), and the head
+   * now, so the members it admits are the head's though no state has been accepted since. */
+  private relayed(ref: string): void {
+    if (this.sql.exec('INSERT OR IGNORE INTO relays (ref) VALUES (?)', ref).rowsWritten === 0) return;
+    const version = this.chain.head()?.state.version;
+    if (version === undefined) return;
+    const members = this.memberIds();
+    this.owe(relayTarget(ref), version, members);
+    void this.announce(this.ensureOrg().id, { project: relayTarget(ref), version, members });
+    void this.scheduleAlarm().catch(() => {});
+  }
+
+  /**
+   * Tells a project the org state advanced to `version`, holding `members` (`Project.stateAdvanced`), or a relay's
+   * object (`ref:<ref>`, `Machine.relayState`) likewise. The announcement
    * stays stored until the project answers, or a newer one replaces it; one that fails is sent again by the alarm, its
    * wait growing as retry.ts's does, up to a minute, for as long as it takes: a project that never hears of a removal
    * would keep serving the removed member. A project still on the code before the announcement lacks the method: it
@@ -1263,11 +1347,14 @@ export class Registry extends DurableObject<Env> {
    */
   private async announce(org: string, owed: { project: string; version: number; members: string }): Promise<void> {
     const { project, version } = owed;
+    const members = JSON.parse(owed.members) as string[];
+    const ref = project.startsWith(RELAY_TARGET) ? project.slice(RELAY_TARGET.length) : null;
     let failure: { error: unknown } | null = null;
     try {
-      await this.env.PROJECT.get(this.env.PROJECT.idFromName(`${org}:${project}`)).stateAdvanced(version, JSON.parse(owed.members) as string[]);
+      if (ref === null) await this.env.PROJECT.get(this.env.PROJECT.idFromName(`${org}:${project}`)).stateAdvanced(version, members);
+      else await this.env.MACHINE.get(this.env.MACHINE.idFromName(relayObjectName(org, ref))).relayState(version, members);
     } catch (error) {
-      if (!lacksMethod(error, 'stateAdvanced')) failure = { error };
+      if (!lacksMethod(error, ref === null ? 'stateAdvanced' : 'relayState')) failure = { error };
     }
     if (failure === null) {
       this.sql.exec('DELETE FROM announcements WHERE project = ? AND version = ?', project, version);
@@ -1381,8 +1468,11 @@ export class Registry extends DurableObject<Env> {
   }
 
   /** A machine-signed listing (RL1's `listing`, through M6's Machine DO). */
-  storeListing(record: unknown): Promise<Result<{ stored: boolean }>> {
-    return this.records.storeListing(record);
+  async storeListing(record: unknown): Promise<Result<{ stored: boolean }>> {
+    const kept = await this.records.storeListing(record);
+    // Relayed to the members' app sockets as it is stored (OX8; O11 M7); one held already, or refused, is not.
+    if (kept.ok && kept.value.stored) this.toApps({ t: 'listing', record: record as Signed<Listing> });
+    return kept;
   }
 
   /** A machine-signed endpoint record (RL1's `endpoint`, through M6's Machine DO). */

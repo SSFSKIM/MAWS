@@ -140,6 +140,11 @@ export class PartAssembler {
     return JSON.parse(set.slices.join(''));
   }
 
+  /** Whether a set of this id is being joined. */
+  holds(id: string): boolean {
+    return this.sets.has(id);
+  }
+
   private drop(id: string, set: PartSet): void {
     this.sets.delete(id);
     this.held -= set.bytes;

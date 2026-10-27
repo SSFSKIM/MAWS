@@ -63,11 +63,27 @@ const ok = async (response: Response, what: string) => {
 };
 
 /**
+ * `machineFetch` with a credential minted a moment ago: a deployed hub's Access refuses a fresh service token (401) until
+ * it reaches the edge, a few seconds to a minute later (O11 M3, M7), so a 401 is tried again every 2 s for up to
+ * `admitMs` (0, the default, tries once: the local hub admits at once).
+ */
+async function freshFetch(hub: string, credentials: Credentials, path: string, body: unknown, admitMs: number): Promise<Response> {
+  const deadline = Date.now() + admitMs;
+  for (;;) {
+    const response = await machineFetch(hub, credentials, path, body);
+    if (response.status !== 401 || Date.now() >= deadline) return response;
+    await response.body?.cancel();
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+}
+
+/**
  * Enrolls with a v2 code (`smns-enroll-v2.`) under `name` (the code's own when it names one): redeems its token, then
  * posts the machine's key and ref with the MAC under the code's `k` and the enrollment's id. The ref and key are minted
- * here unless given (a re-enrollment keeps its ref).
+ * here unless given (a re-enrollment keeps its ref). Against a deployed hub, `admitMs` waits out Access's refusal of the
+ * fresh service token (`freshFetch`).
  */
-export async function enrollV2(code: string, name?: string, keep: { ref?: string; key?: SigningKey } = {}): Promise<V2Machine> {
+export async function enrollV2(code: string, name?: string, keep: { ref?: string; key?: SigningKey } = {}, admitMs = 0): Promise<V2Machine> {
   const decoded = decodeEnrollmentCodeV2(code);
   const machine = name ?? decoded.machine;
   if (machine === undefined) throw new Error('the code names no machine: give its name');
@@ -76,7 +92,7 @@ export async function enrollV2(code: string, name?: string, keep: { ref?: string
   const ref = keep.ref ?? mintRef();
   const credentials = { clientId: redeemed.client_id, clientSecret: redeemed.client_secret };
   const mac = await enrollmentMac(base64urlDecode(decoded.k), { name: redeemed.machine, machinePub: key.pub, ref, tokenId: redeemed.enrollment! });
-  await ok(await machineFetch(decoded.hub, credentials, MACHINE_KEY_PATH, { pub: key.pub, ref, mac }), 'the key was refused');
+  await ok(await freshFetch(decoded.hub, credentials, MACHINE_KEY_PATH, { pub: key.pub, ref, mac }, admitMs), 'the key was refused');
   return { hub: decoded.hub, org: redeemed.org, name: redeemed.machine, ref, key, credentials, enrollment: redeemed.enrollment! };
 }
 
@@ -97,17 +113,18 @@ export async function redeemDelegated(hub: string, token: string, name: string, 
 }
 
 /** Boots a VM under a delegation (`redeemDelegated`) and posts the certificate it signs with the delegation's key; the
- * hub's refusal is thrown with its answer. */
+ * hub's refusal is thrown with its answer. `admitMs` as `enrollV2`'s. */
 export async function enrollDelegated(
   hub: string,
   token: string,
   name: string,
   delegation: DelegationKey,
   keep: { ref?: string; key?: SigningKey } = {},
+  admitMs = 0,
 ): Promise<V2Machine & { cert: Signed<MachineCert> }> {
   const machine = await redeemDelegated(hub, token, name, delegation, keep);
   const cert = await certify(machine, delegation);
-  await ok(await machineFetch(hub, machine.credentials, MACHINE_CERT_PATH, cert), 'the certificate was refused');
+  await ok(await freshFetch(hub, machine.credentials, MACHINE_CERT_PATH, cert, admitMs), 'the certificate was refused');
   return { ...machine, cert };
 }
 

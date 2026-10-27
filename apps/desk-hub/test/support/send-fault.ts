@@ -114,6 +114,10 @@ export const PROJECT_STATE_FAULT_PATH = '/__test/state-fault';
 /** Where the suites' `Registry` calls a method no `Project` has, and answers `{lacks, message}`: whether the Registry
  * takes workerd's refusal for a callee on older code. */
 export const MISSING_METHOD_PATH = '/__test/missing-method';
+/** Where the suites' `Registry` takes a call of one of its RPC methods (`{method, args}`) as an object calling it would
+ * (M6's Machine DO, Project), and answers its result: `storeListing`, `storeEndpoint`, `notify`, `ownersOf`, `push`;
+ * with `{concurrent: [{method, args}…]}`, all at once, answering each one's result in order. */
+export const REGISTRY_RPC_PATH = '/__test/registry-rpc';
 /** Where the suites' `Registry` is armed (`{fail: boolean}`) to throw from every `head()` until disarmed, as an
  * unreachable Registry would answer a `Project` checking a v2 event. */
 export const REGISTRY_HEAD_FAULT_PATH = '/__test/head-fault';
@@ -122,13 +126,21 @@ export const REGISTRY_HEAD_FAULT_PATH = '/__test/head-fault';
  * would, and bounds those reads by `{readTimeoutMs}`; every request there answers `{reads}`, how many times the project
  * read the org-state head. */
 export const PROJECT_STATE_CACHE_PATH = '/__test/state-cache';
-/** Where the suites' `Registry` takes a call of one of its RPC methods (`{method, args}`) as an object calling it would
- * (M6's Machine DO, Project), and answers its result: `storeListing`, `storeEndpoint`, `notify`, `ownersOf`, `push`;
- * with `{concurrent: [{method, args}…]}`, all at once, answering each one's result in order. */
-export const REGISTRY_RPC_PATH = '/__test/registry-rpc';
 /** Where the suites' `Registry` calls one of its methods that take a member (`{call, member, args}`) with the member
  * record given, as the Worker would with one it resolved before a state removed or demoted them; answers the result. */
 export const AS_MEMBER_PATH = '/__test/as-member';
 /** Where the suites' `Registry` is armed (`{method}`, or `{method: null}` to disarm) to refuse calls of one of its
  * methods as a Registry on the code before the method refuses them (workerd's missing-method error). */
 export const LACKS_PATH = '/__test/lacks';
+/** Where the suites' `Machine` (a name's) holds its next RL1 generation claim's answer until it is released (O11 M6). */
+export const CLAIM_HOLD_PATH = '/__test/claim-hold';
+/** Where the suites' `Machine` says whether a claim's answer is held (`held` or `none`). */
+export const CLAIM_HELD_PATH = '/__test/claim-held';
+/** Where the suites' `Machine` releases a held claim's answer: `released`, or `none` while none is held. */
+export const CLAIM_RELEASE_PATH = '/__test/claim-release';
+/** Where the suites' `Machine` (a ref's) is armed to throw from its next `times` calls of a relay method
+ * (`{method, times}`), as a call to an object a reset or an overload failed. */
+export const RELAY_FAULT_PATH = '/__test/relay-fault';
+/** Where the suites' `Machine` (a name's) grants an RL1 generation claim (`{org, name, ref, client}`) no socket follows: a
+ * claim of another credential that never installs. */
+export const CLAIM_PATH = '/__test/claim';

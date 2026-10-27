@@ -6,12 +6,14 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./vectors": "./vectors/index.ts"
+    "./vectors": "./vectors/index.ts",
+    "./test-support": "./test-support/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
-    "vectors": "node --experimental-strip-types --disable-warning=ExperimentalWarning vectors/generate.ts"
+    "vectors": "node --experimental-strip-types --disable-warning=ExperimentalWarning vectors/generate.ts",
+    "reference-client": "node --experimental-strip-types --disable-warning=ExperimentalWarning test-support/cli.ts"
   },
   "devDependencies": {
     "@types/node": "^24",

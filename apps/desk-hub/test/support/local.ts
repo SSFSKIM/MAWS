@@ -60,11 +60,16 @@ import {
   PROJECTION_PATH,
   PROJECT_STATE_FAULT_PATH,
   MISSING_METHOD_PATH,
+  REGISTRY_RPC_PATH,
   REGISTRY_HEAD_FAULT_PATH,
   PROJECT_STATE_CACHE_PATH,
-  REGISTRY_RPC_PATH,
   AS_MEMBER_PATH,
   LACKS_PATH,
+  CLAIM_HOLD_PATH,
+  CLAIM_HELD_PATH,
+  CLAIM_RELEASE_PATH,
+  RELAY_FAULT_PATH,
+  CLAIM_PATH,
 } from './send-fault';
 
 const require = createRequire(import.meta.url);
@@ -468,6 +473,15 @@ export async function startLocalHub() {
     async stateFault(project: string, arm: { times?: number; missing?: boolean } = {}): Promise<{ remaining: number; calls: number; announced: number | null }> {
       return JSON.parse(await seam('PROJECT', project, PROJECT_STATE_FAULT_PATH, arm));
     },
+    /** Calls one of the Registry's RPC methods as another object would (M6's Machine DO; a `Project`'s push), and
+     * answers its result (the suites' Worker only). */
+    async registryRpc<T>(method: 'storeListing' | 'storeEndpoint' | 'notify' | 'ownersOf' | 'push', ...args: unknown[]): Promise<T> {
+      return JSON.parse(await seam('REGISTRY', ORG, REGISTRY_RPC_PATH, { method, args })) as T;
+    },
+    /** Calls the Registry's RPC methods all at once, as several objects would, and answers each one's result in order. */
+    async registryRpcs<T>(calls: Array<{ method: 'storeListing' | 'storeEndpoint'; args: unknown[] }>): Promise<T[]> {
+      return JSON.parse(await seam('REGISTRY', ORG, REGISTRY_RPC_PATH, { concurrent: calls })) as T[];
+    },
     /** Makes every `Registry.head()` fail from now on (`true`), or answer again (`false`) (the suites' Worker only). */
     async headFault(fail: boolean) {
       await seam('REGISTRY', ORG, REGISTRY_HEAD_FAULT_PATH, { fail });
@@ -477,15 +491,6 @@ export async function startLocalHub() {
      * the org-state head (the suites' Worker only). */
     async stateCache(project: string, change: { ahead?: number; hold?: boolean; readTimeoutMs?: number } = {}): Promise<{ reads: number }> {
       return JSON.parse(await seam('PROJECT', project, PROJECT_STATE_CACHE_PATH, change));
-    },
-    /** Calls one of the Registry's RPC methods as another object would (M6's Machine DO; a `Project`'s push), and
-     * answers its result (the suites' Worker only). */
-    async registryRpc<T>(method: 'storeListing' | 'storeEndpoint' | 'notify' | 'ownersOf' | 'push', ...args: unknown[]): Promise<T> {
-      return JSON.parse(await seam('REGISTRY', ORG, REGISTRY_RPC_PATH, { method, args })) as T;
-    },
-    /** Calls the Registry's RPC methods all at once, as several objects would, and answers each one's result in order. */
-    async registryRpcs<T>(calls: Array<{ method: 'storeListing' | 'storeEndpoint'; args: unknown[] }>): Promise<T[]> {
-      return JSON.parse(await seam('REGISTRY', ORG, REGISTRY_RPC_PATH, { concurrent: calls })) as T[];
     },
     /** Makes the Registry refuse calls of `method` as one on older code would (null: as deployed). */
     async registryLacks(method: string | null) {
@@ -498,6 +503,39 @@ export async function startLocalHub() {
     /** Whether the Registry takes workerd's own refusal of a method a callee lacks for one on older code. */
     async missingMethod(): Promise<{ lacks: boolean; message: string }> {
       return JSON.parse(await seam('REGISTRY', ORG, MISSING_METHOD_PATH));
+    },
+    /** Holds the answer to a machine's next RL1 generation claim (its name's object) until `releaseClaim`. */
+    async holdClaim(machine: string) {
+      await seam('MACHINE', machine, CLAIM_HOLD_PATH);
+    },
+    /** Whether a claim's answer is held. */
+    async claimHeld(machine: string): Promise<boolean> {
+      return (await seam('MACHINE', machine, CLAIM_HELD_PATH)) === 'held';
+    },
+    async releaseClaim(machine: string) {
+      if ((await seam('MACHINE', machine, CLAIM_RELEASE_PATH)) !== 'released') throw new Error(`no claim of ${machine} was held`);
+    },
+    /** A generation claim of `machine`'s under another credential, granted by its name's object, that no socket follows. */
+    async claimAs(machine: string, ref: string, client: string): Promise<unknown> {
+      return JSON.parse(await seam('MACHINE', machine, CLAIM_PATH, { org: ORG, name: machine, ref, client }));
+    },
+    /** Makes a machine's ref object throw from its next `times` calls of `method` (`relayRevoke`, `relayState`). */
+    async relayFault(ref: string, method: 'relayRevoke' | 'relayState', times: number) {
+      await seam('MACHINE', `ref:${ref}`, RELAY_FAULT_PATH, { method, times });
+    },
+    /** A member's app-socket upgrade straight to a machine's ref object, as the Worker forwards one it resolved: how an
+     * upgrade admitted just before a removal reaches the object late. Answers the status; an accepted socket is closed. */
+    async relayUpgrade(ref: string, member: string): Promise<number> {
+      const namespace = await mf.getDurableObjectNamespace('MACHINE');
+      const response = await namespace
+        .get(namespace.idFromName(`${ORG}:ref:${ref}`))
+        .fetch('https://machine/app', { headers: { Upgrade: 'websocket', 'X-Desk-Member': member, 'X-Desk-Org': ORG, 'X-Desk-Machine-Ref': ref } });
+      const socket = response.webSocket;
+      if (socket) {
+        socket.accept();
+        socket.close(1000, 'done');
+      } else await response.body?.cancel();
+      return response.status;
     },
     /** Takes workerd's log lines matching `pattern` out of the output, kept in `runtimeLogs` for the suite to assert. */
     expectRuntimeLog(pattern: RegExp) {

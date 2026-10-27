@@ -2,11 +2,13 @@
 // project of the hub — the local stand-in's or a deployment's — and stay connected, serving subscriptions and answering
 // RPCs, until interrupted. Its state file (0600) holds the machine's service token, the org key, and the memory a
 // restart needs (the RPC ledger above all), so a run after a crash answers a retried nonce without running it again.
-import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, renameSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { base64urlDecode, base64urlEncode } from '../src/protocol/base64url';
+import { readJsonFile } from './json-file';
 import { FakeMachine } from './machine';
+import { relayMain } from './relay-cli';
 import { emptyMemory, type Memory } from './memory';
 import type { Credentials } from './link';
 import { loadRecording } from './recording';
@@ -15,6 +17,7 @@ import type { Producer } from './session';
 type State = { hub: string; machine: string; credentials: Credentials; key: string; memory: Memory };
 
 const USAGE = `usage:
+  fake-machine enroll-v2 | endpoint | relay-check …   RL1's fake endpoint (O11 M6): run one with no options for its usage
   fake-machine enroll --state <file>
       reads an enrollment code on stdin (the web app's "Enroll a machine"; never an argument, since it carries the org
       key), redeems it at the hub it names, and writes the state file (0600)
@@ -43,7 +46,7 @@ const USAGE = `usage:
       --plugin <name>          doperpowers (default) | sminos: the plugin its bridge and ask run in (a rolled machine)`;
 
 function readState(path: string): State {
-  return JSON.parse(readFileSync(path, 'utf8')) as State;
+  return readJsonFile<State>(path, "a fake machine's state");
 }
 
 function writeState(path: string, state: State): void {
@@ -61,6 +64,8 @@ async function stdin(): Promise<string> {
 
 export async function main(argv: string[], defaults: { recording: string }): Promise<number> {
   const [command, ...rest] = argv;
+  // RL1's commands (O11 M6): a v2 enrollment, the fake endpoint, and an app's echo check through it.
+  if (command === 'enroll-v2' || command === 'endpoint' || command === 'relay-check') return relayMain(command, rest);
   const { values } = parseArgs({
     args: rest,
     options: {
