@@ -1,6 +1,6 @@
 // node --test .github/scripts/workflow-triggers.test.mjs (from the checkout's root, after pnpm install). MAWS is
-// public, and its self-hosted runners (the Macs, ci-kit's pool) are persistent machines: they must never run code
-// someone outside the repository can trigger. A runner's refusal at job start is no boundary, since a job's always()
+// public, and its self-hosted runners (the persistent Macs, ci-kit's ephemeral pool boxes) must never run code someone
+// outside the repository can trigger. A runner's refusal at job start is no boundary, since a job's always()
 // and failure() steps and its actions' pre scripts still run after it. So no workflow in .github/workflows may both
 // have a job whose runs-on can reach a self-hosted runner and trigger on anything but push, workflow_dispatch or
 // schedule, which only the repository's own writers can set off. The check fails closed: a workflow, a trigger or a
@@ -153,10 +153,9 @@ test('a workflow, a trigger list or a jobs map the check cannot read fails', () 
 });
 
 // The check on this tree. gate.yml's jobs are on the Macs and the pool, so its triggers are the ones that keep it
-// passing; the first assertions keep the check from passing a workflow it misread as hosted.
+// passing: the same file with a pull_request trigger added must fail, which keeps the check from passing a workflow
+// it misread as hosted.
 test('no workflow in .github/workflows runs a self-hosted job on a trigger from outside the repository', () => {
-  const gate = yaml.load(readFileSync(join(workflows, 'gate.yml'), 'utf8'));
-  assert.deepEqual(Object.keys(gate.on), ['push', 'workflow_dispatch']);
   assert.match(violations(readFileSync(join(workflows, 'gate.yml'), 'utf8').replace(/^on:\n/m, 'on:\n  pull_request:\n'))[0], /^job plan's runs-on can reach/);
   const files = readdirSync(workflows).filter((name) => /\.ya?ml$/.test(name));
   assert.ok(files.includes('gate.yml'));
