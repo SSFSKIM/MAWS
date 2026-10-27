@@ -234,7 +234,12 @@ test.describe('fractional browser geometry', () => {
     await scroller.evaluate((el) => { el.style.height = '463.25px'; });
     await expect.poll(() => bottomGap(scroller)).toBeLessThanOrEqual(1);
     await scroller.dispatchEvent('wheel', { deltaY: -200 }); // the reader owns this move; the clamp below tests geometry
-    await scroller.evaluate((el) => { el.scrollTop -= 200; });
+    // Wait for the browser to deliver that move. A return in the same frame coalesces into one scroll event at the
+    // offset the list last knew, which is no movement at all, so the released reader rightly stays released.
+    await scroller.evaluate((el) => new Promise<void>((resolve) => {
+      el.addEventListener('scroll', () => resolve(), { once: true, capture: true });
+      el.scrollTop -= 200;
+    }));
     const jump = view.getByRole('button', { name: 'Jump to latest' });
     await expect(jump).toBeVisible();
     // Clamp once to the real maximum; let the scroll/measurement handlers resume following before reading the end.

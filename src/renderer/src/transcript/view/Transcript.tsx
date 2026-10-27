@@ -32,9 +32,15 @@ import { liveMarkedRowIds, reportRows, reportViewOf } from '../../owner/report/p
 // P2-C end
 import './transcript.css';
 
-// Fractional scroll positions can round by a pixel. A larger near-end band traps small finger/trackpad movements:
-// a streamed update pins them back before successive deltas can ever leave that band.
+// Leaving the end, and the logical end (the virtualiser's total against the committed sizer), are read within a pixel:
+// an animated key scroll's first frames move only 2-3px, and a wider band would pin them back to a grown end.
 export const SCROLL_END_THRESHOLD = 1;
+// Returning is read within a wider slack. scrollHeight and clientHeight are integers while the offset the browser lets a
+// reader reach is not, so at a zoom other than 100% a reader at the very bottom can sit short of
+// scrollHeight - clientHeight: measured in Chrome up to 1.73px at 110%, 2px at 80% and 50%, 2.09px at 33%. Only a
+// downward move resumes (upward intent re-bases it below), so the slack cannot pull back a reader turning away.
+const DOM_END_SLACK = 3;
+const domEndGap = (element: HTMLElement, scrollHeight = element.scrollHeight) => scrollHeight - element.clientHeight - element.scrollTop;
 export const OVERSCAN = 6;
 // Native key/scrollbar motion can finish after its input event; read that tail before retiring its short witness.
 const INPUT_SCROLL_SETTLE_MS = 250;
@@ -111,7 +117,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     const element = scrollRef.current;
     // A measurement can shrink the logical list before React commits its smaller sizer. The old DOM scrollHeight
     // must not turn the browser's clamp to that new end into an apparent scroll away from it.
-    const away = element !== null && Math.min(element.scrollHeight, measuredSize) - element.clientHeight - element.scrollTop > SCROLL_END_THRESHOLD;
+    const away = element !== null && domEndGap(element, Math.min(element.scrollHeight, measuredSize)) > SCROLL_END_THRESHOLD;
     if (away) changeFollow(false);
     return away;
   }, [changeFollow]);
@@ -122,7 +128,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     if (!element) return;
     if ((scrollbarPointer.current !== null || movementWitness.current) && element.scrollTop < known.current.offset) leaveIfAway(measuredSize);
     const movedDown = element.scrollTop > known.current.offset;
-    const reachedEnd = element.scrollTop >= Math.min(known.current.end, Math.max(0, element.scrollHeight - element.clientHeight)) - SCROLL_END_THRESHOLD;
+    const reachedEnd = element.scrollTop >= Math.min(known.current.end, Math.max(0, element.scrollHeight - element.clientHeight)) - DOM_END_SLACK;
     remember();
     if (movedDown && reachedEnd) changeFollow(true);
   }, [changeFollow, leaveIfAway, remember]);
@@ -140,7 +146,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
   const measure = useCallback((element: Element, entry: ResizeObserverEntry | undefined, instance: Parameters<typeof measureElement>[2]) => {
     // Notice a return or browser clamp to the DOM end before measurement moves it or anchoring replaces the offset.
     const scroller = scrollRef.current;
-    if (scroller && scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= SCROLL_END_THRESHOLD) readScroll(instance.getTotalSize());
+    if (scroller && domEndGap(scroller) <= DOM_END_SLACK) readScroll(instance.getTotalSize());
     const size = measureElement(element, entry, instance);
     const id = element.getAttribute('data-row-id');
     const before = id === null ? undefined : measured.current.get(id);
@@ -182,8 +188,16 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
       remember();
     },
   });
-
-  const releaseFollow = useCallback(() => changeFollow(false), [changeFollow]);
+  // A compensation for a row resizing above a follower clamps at the end, and virtual-core re-issues its absolute
+  // target once the sizer grows, cancelling it only on a later scroll event away from that end (TanStack Virtual issue
+  // 1258). The follower leaving makes it obsolete: a commit landing after they scroll away but before their scroll
+  // event would put them back on the end. Only that departure drops it; a reader already released near the end keeps
+  // a clamped anchor correction, which is ordinary anchoring. virtual-core has no public cancel (3.17:
+  // `_clampedAdjustment`); the scroll tests' "clamped compensation" case fails if that changes.
+  const releaseFollow = useCallback(() => {
+    if (followingRef.current) (virtualizer as unknown as { _clampedAdjustment: unknown })._clampedAdjustment = null;
+    changeFollow(false);
+  }, [changeFollow, virtualizer]);
 
   // Release on intent, before the native scroll event: a streamed render can otherwise win that race. Capture the
   // scroll itself too, before the virtualiser's listener can synchronously render/measure against the old follow mode.
@@ -217,16 +231,22 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
       readScroll(virtualizer.getTotalSize());
       scrollbarPointer.current = null;
     };
+    // Upward intent is the latest movement: a return to the end not yet read as a scroll event must not resume
+    // following once the reader has turned back up, so the movement baseline is where the intent found them.
+    const releaseUpward = () => {
+      known.current.offset = element.scrollTop;
+      releaseFollow();
+    };
     const wheel = (event: WheelEvent) => {
       observeEnd();
-      if (event.deltaY < 0 && !nestedScrollerOwnsUp(event.target, element)) releaseFollow();
+      if (event.deltaY < 0 && !nestedScrollerOwnsUp(event.target, element)) releaseUpward();
     };
     let touchY: number | null = null;
     const touchStart = (event: TouchEvent) => { observeEnd(); touchY = event.touches.length === 1 ? event.touches[0].clientY : null; };
     const touchMove = (event: TouchEvent) => {
       observeEnd();
       const next = event.touches.length === 1 ? event.touches[0].clientY : null;
-      if (next !== null && touchY !== null && next > touchY && !nestedScrollerOwnsUp(event.target, element)) releaseFollow();
+      if (next !== null && touchY !== null && next > touchY && !nestedScrollerOwnsUp(event.target, element)) releaseUpward();
       touchY = next;
     };
     const key = (event: KeyboardEvent) => {
