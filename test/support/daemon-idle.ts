@@ -37,8 +37,10 @@ export interface DaemonIdleRuntimeFloor extends IdleRecord {
 // Log 54): footprints 64481, 66033 and 63969 KiB, CPU 0.12, 0.11 and 0.11 s, load 3.3, 3.0 and 2.7.
 export const DAEMON_IDLE_BASELINE: DaemonIdleBaseline = { commit: 'd14e92991', runs: ['40490756731', '40492851056', '40495339208'], footprintKiB: 64481, cpuS: 0.11 };
 
-// PENDING: recorded from three e2e:daemon-idle-floor runs on the mini (P5 Decision Log 54).
-export const DAEMON_IDLE_RUNTIME_FLOOR: DaemonIdleRuntimeFloor | null = null;
+// Recorded from three valid e2e:daemon-idle-floor runs on the mini at 36704c984 (P5 Decision Log 54): footprints 12689,
+// 13153 and 13185 KiB (1.04x), CPU 0.00 s each, load 2.9, 4.3 and 3.3; a fourth run (40502284016, 12657 KiB) was
+// invalid on the load rule (7.7).
+export const DAEMON_IDLE_RUNTIME_FLOOR: DaemonIdleRuntimeFloor | null = { commit: '36704c984', runs: ['40498387866', '40500435129', '40504203813'], footprintKiB: 13153, electron: '44.4.5' };
 
 export interface DaemonIdleBound {
   engineHostFootprintKiB: number;
