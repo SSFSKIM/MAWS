@@ -43,6 +43,7 @@ Phase 2 (written 2026-10-27 against O10's M6 and Interfaces §D, whose landing P
 - [x] M6 — Members, words and the label (items 2 and 3). Built by two executors in sequence on one branch (member frames, receipts, revocation marks and the label; then the words pass and every deliverer), merged with M8 and re-bumped, reviewed by doperpowers:reviewer-high over two rounds (round 1: two P1 revocation bypasses and one P2 missing send-frame label, each reproduced and fixed with a regression test; round 2 clean), landed as doperpowers PR #407 (`15e60f18`, sminos 1.24.0), 2026-10-27.
 - [x] M7 — Lane A actions with remote context (item 4's rest; Decision Log 45's fence, binding and proof). Reviewed clean by doperpowers:reviewer-high in one round (no findings), landed as doperpowers PR #408 (`00f6bfd5`, sminos 1.25.0), 2026-10-27.
 - [x] M8 — To-human off the hub (item 6). Reviewed by doperpowers:reviewer-medium over three rounds (round 1: a cutover race leaving a copy in each store, and an unbounded host batch; round 2: a clock rollback stranding seqs behind the cursor, introduced by the bounded passes; each reproduced and fixed with a regression test; round 3 clean), landed as doperpowers PR #406 (`5463fe8c`, sminos 1.23.0), 2026-10-27.
+- [ ] M7b — RL10's three joint frames and the conformance replay (O10 M6's findings, ruled 2026-10-27). After O10 M6 lands with them in its §D and `conversation.json`; reviewed by doperpowers:reviewer-high; a minor version bump.
 - [ ] M9 — The mini (item 8). After M5–M8, and after O14's brief cuts the mini over.
 
 M7a consumes nothing and lands first. M6 and M8 consume only M5 and may run on parallel branches cut from `main` once M5 lands; M7 is cut from `main` after M6 lands. Each re-bumps the sminos version above the one before it (phase 1's rule). The phase closes with a doperpowers:review-code high pass over its range, as phase 1 did.
@@ -501,6 +502,22 @@ It builds on M7a (the nonce-on-claim rule) and on M6 (whose `member` frames it e
 - `member.launch` follows the presence and changes on a relaunch;
 - a desk spawn's proof in the child's record, absent from the launch settings' env, and a session's spawn copying it;
 - `queried` and `tombstoned` carry the binding; an older entry answers without one.
+
+### M7b — RL10's three joint frames and the conformance replay
+
+**What exists at its end.** sminos speaks the three frames O10 M6 found RL10 needed, as O10's §D and `conversation.json` carry them on M6's PR, and replays that fixture:
+- **`spent {project, writer, seq, reason}`** (endpoint → sminos): the endpoint's final verdict on an arriving event it rejected. sminos records it as a spent position exactly as it records one it refused itself in `take`: later events of that writer are no longer held behind a gap, the vector moves past it, and an own writer goes through `spend_own`. Every spent position the endpoint reports is visible here: one daemon.log line per position naming its project, writer, seq and reason, and a count of spent positions in `sminos daemon status` (per project where the layout allows). Without it a forged or replayed hub event is skipped and leaves no trace on the machine.
+- **`words?` carries a required `project`** beside `id`, `session` and `event`.
+- **`restated {}`** (sminos → endpoint): sent once after the whole post-welcome restatement (the session lane's presence, the member set, each project's pending set, the unacknowledged `rpc-result`s, and M8's host resend), so the endpoint knows when what it holds from the earlier connection may be replaced.
+- **The conformance replay** (M5's decision, deferred until the fixture existed): `rl10_conformance.py` over `rl10-conversation.json`, O10's `test/endpoint/rl10/conversation.json` copied with its MAWS sha in the header, in `run-sminos-tests.sh`'s `suites` part, including the case M5 pins beyond the fixture (a real `_append` event through upload, resend, echo and `words?`, and the same with a whole-second `ts`). A line the replay fails is either a sminos bug or an O10 amendment, and the PR says which.
+
+**What it touches.** `sminos_uplink.py` (`on_spent`, `ask_words`'s frame, the welcome's restatement and `restated`), `sminos_hublog.py` (the spent position, as `take` records its own), `sminos_daemon.py` (`cmd_status`'s spent count), `sminos/tests/endpoint_standin.py`, `test_rl10.py`, `test_words.py`, and the new `rl10_conformance.py` and `rl10-conversation.json`.
+
+**Interfaces.** Consumes O10's §D as amended on its M6 PR. Changes §D' by the three frames.
+
+**Not touched.** The DX2 path: the three frames are RL10's alone, and a machine not cut over runs as before.
+
+**Proves.** Acceptance 4's conformance bullet. Tests also pin: a `spent` frame unblocks the writer's later events and moves the vector, an own writer's through `spend_own`, with its daemon.log line and the status count; `words?` carries `project`; `restated` follows the last restatement frame after each welcome and nothing of the restatement after it.
 
 ### M8 — To-human off the hub
 
@@ -1130,6 +1147,10 @@ The joint review's second round (`9be0bc941`), 2026-10-27, two P1s, both reprodu
   - `Link.members` probes the bridge of every local member, so `member.launch` is right for sessions of projects not open on the stream.
   Rationale: each fences a remote action at its effect and binds it to its sender while leaving the DX2 path, the bridge's local callers and the hub's presence shape as they were. Reviewed clean by doperpowers:reviewer-high in one round.
   Date/Author: 2026-10-27, M7's executor, accepted by O12's phase 2 executor.
+
+- Decision: M7b is added for RL10's three joint frames that O10 M6 found it needed (`spent`, `words?`'s `project`, `restated`), with the conformance replay that was waiting on M6's fixture; O10 carries them in §D and `conversation.json` on M6's PR, and sminos builds its side once M6 lands. Every spent position the endpoint reports is logged and counted in `daemon status` (the architect's addition).
+  Rationale: each is a gap in RL10's contract found by building the endpoint against sminos's frames; one milestone keeps the frames and the replay that pins them together. The visibility rule keeps a forged or replayed hub event the endpoint rejected from vanishing without a trace on the machine.
+  Date/Author: 2026-10-27, p5-desk-track-owner (the rulings, with the architect), recorded by O12's phase 2 executor.
 
 ## Outcomes & Retrospective
 
