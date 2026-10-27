@@ -1,14 +1,11 @@
 // The hub's projection of the org state (O11 M3; RL §5.2, §7.1): members are admitted by Access as the head lists
 // them, by email, with the head's role; a member the head drops loses admission at once, and every socket the hub can
 // close goes with it; each accepted state is announced to every project, retried, and taken as told by a project on
-// the code before the announcement; the device pairing exchange; and `access-sync` reading the head the hub serves.
+// the code before the announcement; and the device pairing exchange. (`access-sync` reading it: org-access-sync.test.ts.)
 import { generateSigningKey, type OrgState, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { syncAccess } from '../deploy/access-sync';
-import type { DeployConfig } from '../deploy/config';
-import type { OrgStateView, PendingDevice } from '../src/protocol/identity';
+import type { PendingDevice } from '../src/protocol/identity';
 import { waitFor } from './support/clients';
-import { fakeAccessApi } from './support/access-api';
 import { ADMIN, ORG, startLocalHub, credentials, type LocalHub, type Who } from './support/local';
 import { endorsed, fakeMac, genesis, memberId, newDevice, next, signedBy, type TestDevice } from './support/org';
 
@@ -164,6 +161,20 @@ describe('each accepted state', () => {
     await hub.stateFault(PROJECT, { times: 0 });
   });
 
+  it('that failed is sent again after the Registry resets, and the project refuses the removed member', async () => {
+    const G = memberId();
+    await accept(await next(head, (s) => s.members.push({ id: G, email: 'g@example.com', role: 'member', devices: [] })), a1);
+    // The first retry waits long enough for the reset to come first: only what the Registry stored can send it.
+    await hub.retryBase('registry', 2000);
+    await hub.stateFault(PROJECT, { times: 1 });
+    await accept(await next(head, without(G)), a1);
+    await waitFor(async () => ((await hub.stateFault(PROJECT)).calls >= 1 ? true : undefined));
+    await hub.restart();
+    await waitFor(async () => ((await hub.stateFault(PROJECT)).announced === head.state.version ? true : undefined), 15_000);
+    expect(await hub.socketUpgrade({ project: PROJECT }, G)).toBe(403);
+    await hub.retryBase('registry', 50);
+  });
+
   it('a missing method is recognized as workerd refuses it', async () => {
     expect(await hub.missingMethod()).toEqual({ lacks: true, message: expect.stringContaining('does not implement the method') });
   });
@@ -215,18 +226,5 @@ describe('the pairing exchange', () => {
     const d2Endorsed = await endorsed(ORG, D, d2, d1);
     await accept(await next(head, (s) => s.members.find((m) => m.id === D)!.devices.push(d2Endorsed.device)), a1);
     expect(await listedNow()).not.toContain('d2');
-  });
-});
-
-describe('access-sync', () => {
-  it('makes the people policy exactly the emails of the head the hub serves', async () => {
-    const config: DeployConfig = { account: 'acct', worker: 'desk-hub-test', host: 'desk-hub-test.example.workers.dev', ownerEmail: ADMIN, sessionDuration: '24h', org: { id: ORG, name: 'Org' } };
-    const view = (await (await hub.fetchAs(ADMIN, '/api/org/state')).json()) as OrgStateView;
-    const access = fakeAccessApi();
-    const synced = await syncAccess(access.api, config, view);
-    const emails = view.head!.state.members.map((m) => m.email.toLowerCase()).sort();
-    expect(synced.emails).toEqual(emails);
-    expect(synced.readBack).toEqual(emails);
-    expect([...access.policies.values()].find((p) => p.name === 'desk-hub-test owner')!.include).toEqual(emails.map((email) => ({ email: { email } })));
   });
 });

@@ -117,3 +117,9 @@ export const MISSING_METHOD_PATH = '/__test/missing-method';
  * (M6's Machine DO, Project), and answers its result: `storeListing`, `storeEndpoint`, `notify`, `ownersOf`, `push`;
  * with `{concurrent: [{method, args}…]}`, all at once, answering each one's result in order. */
 export const REGISTRY_RPC_PATH = '/__test/registry-rpc';
+/** Where the suites' `Registry` calls one of its methods that take a member (`{call, member, args}`) with the member
+ * record given, as the Worker would with one it resolved before a state removed or demoted them; answers the result. */
+export const AS_MEMBER_PATH = '/__test/as-member';
+/** Where the suites' `Registry` is armed (`{method}`, or `{method: null}` to disarm) to refuse calls of one of its
+ * methods as a Registry on the code before the method refuses them (workerd's missing-method error). */
+export const LACKS_PATH = '/__test/lacks';

@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path';
 import { parseArgs, type ParseArgsOptionsConfig } from 'node:util';
 import { generateVapidKey } from '../src/push/web-push';
 import { accessPlan, cfApi, reconcileAccess } from './access';
-import { deployVars, readDeployConfig, type DeployConfig } from './config';
+import { checkTarget, deployVars, readDeployConfig, type DeployConfig } from './config';
 
 /** The app's directory, which bin.ts defines for the bundle it runs (read when used, so a suite can set it). */
 const appDir = () => process.env.DESK_HUB_APP!;
@@ -37,8 +37,9 @@ export async function readSecrets(): Promise<Record<string, string | undefined>>
   return out;
 }
 
-/** The setup token, the hub's service-token API token, and a person's Access token (`cloudflared access token`). */
-export const SECRET_NAMES = ['CF_ACCESS_SETUP_TOKEN', 'CF_DESK_HUB_SERVICE_TOKENS', 'DESK_ACCESS_TOKEN'];
+/** The setup token, the hub's service-token API token, a person's Access token (`cloudflared access token`), and an
+ * enrolled machine's service token (`access-sync` reads the org state as a machine). */
+export const SECRET_NAMES = ['CF_ACCESS_SETUP_TOKEN', 'CF_DESK_HUB_SERVICE_TOKENS', 'DESK_ACCESS_TOKEN', 'DESK_MACHINE_CLIENT_ID', 'DESK_MACHINE_CLIENT_SECRET'];
 
 /** A wrangler call: its stdout, `input` written to its stdin, `env` added to its environment. */
 export type WranglerRun = (args: string[], input?: string, env?: Record<string, string>) => Promise<string>;
@@ -96,7 +97,7 @@ const DEPLOY_REDIRECT = join('.wrangler', 'deploy', 'config.json');
  * Each call prints the target it checked.
  */
 export function workerWrangler(config: DeployConfig, run: WranglerRun = wrangler, print: (line: string) => void = console.log) {
-  if (config.host.split('.')[0] !== config.worker) throw new Error(`the config's host ${config.host} is not the Worker ${config.worker}'s: refusing to deploy`);
+  checkTarget(config, 'deploy');
   const wranglerConfig = join(appDir(), 'wrangler.jsonc');
   const { account_id: account } = JSON.parse(readFileSync(wranglerConfig, 'utf8').replace(/^\s*\/\/.*$/gm, '')) as { account_id?: string };
   if (account !== undefined && account !== config.account) throw new Error(`wrangler.jsonc sets account_id ${account}, not ${config.account}: refusing to deploy`);

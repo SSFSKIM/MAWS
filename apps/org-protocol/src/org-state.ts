@@ -12,6 +12,9 @@
 //     a changed key is a new device. New devices of a member who had devices carry an endorsement by the `stepUpPub`
 //     of one of that member's devices in the head. The successor that a root transition authorizes may add the
 //     transition's new root devices without one: the recovery key vouches for them, and the old devices may be lost.
+//   - One holder per key: a state holds no key under two holders (two devices, a device's channel and step-up, a machine
+//     and a delegation, the recovery key and any other), and a key the successor holds only under another holder has
+//     left its own.
 //   - Where a key goes (RL DL 24). A device's or machine's key the head holds and the successor doesn't enters `retired`
 //     or `revoked` in that step, under the holder the head held it by; a delegation's key enters `revoked` only. A
 //     `retired` entry stays as it is or moves to `revoked`; `revoked` is append-only. A key the state never held enters
@@ -19,9 +22,11 @@
 //     (`revoked`), nor retired, so a `notAfter` never moves and a revoked key never returns. Each rule needs the state
 //     and its predecessor alone. Genesis retires and revokes nothing.
 //   - Delegations: `id`, `pub` and `prefix` never change; `expires` changes only while both values are later than the
-//     successor's `issued`. Dropping one is revoking its key, which frees its prefix.
-//   - Name namespaces (RL DL 25), by the lower-cased key names compare by: no `machineNames` name starts with a
-//     delegation's prefix, and no prefix equals another's or starts with it.
+//     successor's `issued`. Dropping one is revoking its key (held by its id and prefix), and moves every `retired`
+//     entry of its certificates (a ref `<id>_…`) into `revoked`. Its id and prefix stay reserved (RL DL 26).
+//   - Name namespaces (RL DL 25, 26), by the lower-cased key names compare by: no `machineNames` name starts with a
+//     delegation's prefix, live or revoked, and no such prefix equals another's or starts with it; no two delegations,
+//     live or revoked, share an id, and no entry's ref (nor any in `machineNames`) starts with a known id and `_`.
 //   - A root transition is issued against the head (`fromVersion` = head's version). While one is held for the head,
 //     the successor must be signed by one of its new root keys, not the old root set, and take its keys as `root.keys`.
 import { canonicalize } from './canonical.ts';
@@ -86,11 +91,20 @@ async function stateInvariants(state: OrgState): Promise<boolean> {
   if (!distinct(state.delegations.map((d) => d.id)) || !distinct(state.projects.map((p) => p.id))) return false;
   if (!state.machines.every((m) => ownersKnown(m.owners)) || !state.delegations.every((d) => ownersKnown(d.owners))) return false;
   if (state.root.keys.length === 0 || !distinct(state.root.keys)) return false;
+  // One holder per key: no key is two devices', a device's two, a machine's and a delegation's, or the recovery key too.
+  if (!distinct([...heldKeys(state).map((k) => k.pub), state.root.recoveryPub])) return false;
   // Name namespaces: a certificate's name, under its delegation's prefix, never meets an enrolled name or another
-  // delegation's.
-  const prefixes = state.delegations.map((d) => machineNameKey(d.prefix));
+  // delegation's. A revoked delegation's prefix and id stay reserved (RL DL 26), so nothing reopens its history: no
+  // later delegation takes them, and no entry takes the `<id>_` ref shape of a delegation the state knows.
+  const gone = state.revoked.flatMap((r) => ('delegation' in r.holder ? [r.holder] : []));
+  const prefixes = [...state.delegations.map((d) => d.prefix), ...gone.map((d) => d.prefix)].map(machineNameKey);
   if (prefixes.some((p, i) => prefixes.some((q, j) => i !== j && q.startsWith(p)))) return false;
   if ([...state.machineNames, ...state.machines].some((n) => prefixes.some((p) => machineNameKey(n.name).startsWith(p)))) return false;
+  const ids = [...state.delegations.map((d) => d.id), ...gone.map((d) => d.delegation)];
+  if (!distinct(ids) || [...state.machineNames, ...state.machines].some((m) => ids.some((id) => m.ref.startsWith(`${id}_`)))) return false;
+  // A revoked delegation's certificates are revoked with it, history included: none keeps a `retired` entry.
+  const goneIds = gone.map((d) => d.delegation);
+  if (state.retired.some((r) => 'machine' in r.holder && goneIds.some((id) => (r.holder as { machine: string }).machine.startsWith(`${id}_`)))) return false;
   if (!(await retiredApart(state))) return false;
   const revoked = state.revoked.map((r) => r.keyId);
   if (!distinct(revoked) || state.retired.some((r) => revoked.includes(r.keyId))) return false;
@@ -128,7 +142,7 @@ function heldKeys(state: OrgState): Array<{ pub: B64; holder: Holder }> {
       ]),
     ),
     ...state.machines.map((m) => ({ pub: m.pub, holder: { machine: m.ref } })),
-    ...state.delegations.map((d) => ({ pub: d.pub, holder: { delegation: d.id } })),
+    ...state.delegations.map((d) => ({ pub: d.pub, holder: { delegation: d.id, prefix: d.prefix } })),
   ];
 }
 
@@ -157,12 +171,13 @@ async function keysAccounted(head: OrgState, next: OrgState): Promise<boolean> {
   for (const r of head.retired) if (!retiredNext.has(canonicalize(r)) && !intoRevoked(r.keyId, r.holder)) return false;
 
   const held = heldKeys(head);
-  const stillHeld = new Set(heldKeys(next).map((k) => k.pub));
+  // A key counts as kept only under the same holder: one that reappears under another has left its own.
+  const stillHeld = new Set(heldKeys(next).map((k) => canonicalize(k)));
   const heldByKid = new Map<string, Holder>();
   for (const { pub, holder } of held) {
     const kid = await keyId(pub);
     heldByKid.set(kid, holder);
-    if (stillHeld.has(pub)) continue;
+    if (stillHeld.has(canonicalize({ pub, holder }))) continue;
     const retiredNow = !('delegation' in holder) && next.retired.some((r) => r.pub === pub && same(r.holder, holder));
     if (!retiredNow && !intoRevoked(kid, holder)) return false;
   }
@@ -276,18 +291,20 @@ export async function verifyTransition(head: SignedOrgState, t: Signed<RootTrans
  * the revocations a verifier drops on accepting it are only those of the superseded states, which `head` never held.
  */
 export async function verifySuccessor(head: SignedOrgState, next: SignedOrgState, transitions: Signed<RootTransition>[]): Promise<Verdict> {
-  if (!(await wellFormed(next)) || !Array.isArray(transitions)) return refuse('malformed');
+  if (!isSignedOrgState(next) || !Array.isArray(transitions)) return refuse('malformed');
   const before = head.state;
   const after = next.state;
   if (after.org !== before.org) return refuse('bad-link');
   if (after.version < before.version) return refuse('rollback');
   if (after.version !== before.version + 1 || after.prev !== (await stateHash(before))) return refuse('not-head');
+  // A revival reads `revoked` before the whole-state rules it also breaks (a delegation kept beside its own revocation).
+  if (await revivesRevoked(before, after)) return refuse('revoked');
+  if (!(await stateInvariants(after))) return refuse('malformed');
   if (after.issued < before.issued || after.root.recoveryPub !== before.root.recoveryPub) return refuse('malformed');
 
   const names = machineNamesKept(before, after);
   if (!names.ok) return names;
   if (after.machines.some((m) => before.machines.some((h) => h.pub === m.pub && h.ref !== m.ref))) return refuse('malformed');
-  if (await revivesRevoked(before, after)) return refuse('revoked');
   if (!(await keysAccounted(before, after))) return refuse('malformed');
 
   const held: RootTransition[] = [];
