@@ -167,6 +167,17 @@ describe('each construct the compile step walks', () => {
     expect(addressedPaths(schema, 'lift')).toEqual(['<kind=child>.childAppSessionId AppSessionId']);
   });
 
+  it('a discriminated union in a plain union with null is still dispatched', () => {
+    const union = z.discriminatedUnion('kind', [
+      z.strictObject({ kind: z.literal('child'), ref: AppSessionIdSchema }),
+      z.strictObject({ kind: z.literal('note'), ref: z.string() }),
+    ]);
+    const schema = z.strictObject({ last: z.union([union, z.null()]) });
+    roundTrip(schema, { last: { kind: 'child', ref: 'a1' } }, { last: { kind: 'child', ref: at(A, 'a1') } });
+    roundTrip(schema, { last: { kind: 'note', ref: 'plain' } }, { last: { kind: 'note', ref: 'plain' } });
+    roundTrip(schema, { last: null }, { last: null });
+  });
+
   it('a nested discriminated union', () => {
     const inner = z.discriminatedUnion('kind', [z.strictObject({ kind: z.literal('a'), id: PtyIdSchema }), z.strictObject({ kind: z.literal('b') })]);
     const outer = z.discriminatedUnion('kind', [inner, z.strictObject({ kind: z.literal('c'), id: ProjectIdSchema })]);

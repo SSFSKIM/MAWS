@@ -93,6 +93,7 @@ const shown = (path: string) => (path === '' ? 'the value itself' : path);
 const WRAPPERS = new Set(['optional', 'nullable', 'default', 'prefault', 'nonoptional', 'readonly', 'catch']);
 const STRINGISH = new Set(['string', 'enum', 'literal', 'template_literal']);
 const UNWALKED = new Set(['intersection', 'map', 'set', 'promise']);
+const STRUCTURAL = new Set([...STRINGISH, 'object', 'record', 'array', 'tuple', 'union']);
 
 // The schemas directly under `schema`, for the reachability pass (a pipe's both sides: an id behind an opaque side must
 // still be seen, to be refused).
@@ -218,7 +219,9 @@ class Compiler {
   }
 
   private build(schemas: readonly z.ZodType[], path: string): Plan | null {
-    const expanded = this.expand(schemas, path);
+    // A member that is no string, object or array (a null, a number) holds no id, and leaves a lone discriminated union
+    // beside it dispatched.
+    const expanded = this.expand(schemas, path).filter((schema) => KIND_OF.has(schema) || STRUCTURAL.has(defOf(schema).type));
     if (expanded.length === 1 && defOf(expanded[0]).type === 'union') return this.dispatched(expanded[0], path);
     // Beside other members, a discriminated union's options join the plain merge.
     const members: z.ZodType[] = [];
