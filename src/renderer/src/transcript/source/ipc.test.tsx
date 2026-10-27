@@ -7,6 +7,7 @@ import type { CommandName, CommandResult, EventName, EventPayload, EventSource, 
 import { act, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { at, TEST_MACHINE } from '../../../../../test/support/machine';
+import { bareOf } from '@shared/machine/address';
 import { useTranscriptStore } from '../../stores/transcript';
 import { rowsOf } from '../model/derive';
 import { turnId } from '../model/keys';
@@ -20,6 +21,7 @@ import { ipcLoadSpillOver, ipcRewindOver, ipcSourceOver, KNOWN_WAIT_MS } from '.
 import type { TranscriptSource } from './types';
 
 const APP = at('app-1' as AppSessionId); // the page's: the sources run behind the client, over addresses
+const MAIN_APP = bareOf(APP); // P5 O6 M2: an event id is main's, under the bare app id
 const AGENT = 'agent-7' as AgentId;
 
 // A fake X2 client (the page's side, on `TEST_MACHINE`): every invoke waits for the test to answer it, but for main's `session.appEvents`, answered at once
@@ -148,9 +150,9 @@ describe('ipcSource', () => {
     r.turn('u2');
     r.text('m2', 0, 'After the resume.');
     r.end(['u2']);
-    const liveForm = r.events.map((event, i) => ({ ...event, id: `${APP}:launch-2:${i + 1}:0` as EventId, seq: i + 1 }));
+    const liveForm = r.events.map((event, i) => ({ ...event, id: `${MAIN_APP}:launch-2:${i + 1}:0` as EventId, seq: i + 1 }));
     const diskForm = r.events.map((event) => ({ ...event, id: `disk:${event.id}` as EventId, seq: null }));
-    const notice = { ...r.emit('notice.posted', { level: 'warning', key: 'relay:direct_fallback', text: 'Direct route.' }), id: `${APP}:c10:relay-fallback:1` as EventId, seq: null };
+    const notice = { ...r.emit('notice.posted', { level: 'warning', key: 'relay:direct_fallback', text: 'Direct route.' }), id: `${MAIN_APP}:c10:relay-fallback:1` as EventId, seq: null };
 
     const fake = fakeClient();
     const source = ipcSourceOver(fake.client, APP);
@@ -188,7 +190,7 @@ describe('ipcSource', () => {
     b.turn('u1');
     b.text('m1', 0, 'Reply.');
     b.end(['u1']);
-    const liveForm = b.events.map((event, i) => ({ ...event, id: `${APP}:launch-1:${i + 1}:0` as EventId, seq: i + 1 }));
+    const liveForm = b.events.map((event, i) => ({ ...event, id: `${MAIN_APP}:launch-1:${i + 1}:0` as EventId, seq: i + 1 }));
     const diskForm = b.events.map((event) => ({ ...event, id: `disk:${event.id}` as EventId, seq: null }));
     const fake = fakeClient();
     const subject = ipcSourceOver(fake.client, APP);
@@ -259,7 +261,7 @@ describe('ipcSource', () => {
     b.end(['u1']);
     const noticeAt = new Date(Date.parse(b.events[0].at) - 50).toISOString(); // posted between the launch and the first send
     const notice = {
-      id: `${APP}:c10:relay-fallback:1` as EventId, sessionId: 'unknown', at: noticeAt, seq: null, agentId: null, parentToolUseId: null,
+      id: `${MAIN_APP}:c10:relay-fallback:1` as EventId, sessionId: 'unknown', at: noticeAt, seq: null, agentId: null, parentToolUseId: null,
       kind: 'notice.posted', level: 'warning', key: 'relay:direct_fallback', text: 'The relay was unreachable, so this session started on the direct route.',
     } as unknown as SessionEvent;
     fake.appEvents.set(APP, [notice]); // posted before this page loaded: main has it, the page never heard it
@@ -1087,7 +1089,7 @@ describe('ipcSource after MAWS yields to a foreign holder (W7)', () => {
     b.text('m1', 0, 'MAWS wrote this.');
     b.end(['u1']);
     const mine = b.events.length;
-    const liveForm = b.events.map((event, i) => ({ ...event, id: `${APP}:launch-1:${i + 1}:0` as EventId, seq: i + 1 }));
+    const liveForm = b.events.map((event, i) => ({ ...event, id: `${MAIN_APP}:launch-1:${i + 1}:0` as EventId, seq: i + 1 }));
     b.turn('t1');
     b.text('m2', 0, 'The terminal wrote this.');
     b.end(['t1']);
@@ -1121,7 +1123,7 @@ describe('ipcSource after MAWS yields to a foreign holder (W7)', () => {
     b.turn('u1');
     b.text('m1', 0, 'MAWS wrote this.');
     b.end(['u1']);
-    const liveForm = b.events.map((event, i) => ({ ...event, id: `${APP}:launch-1:${i + 1}:0` as EventId, seq: i + 1 }));
+    const liveForm = b.events.map((event, i) => ({ ...event, id: `${MAIN_APP}:launch-1:${i + 1}:0` as EventId, seq: i + 1 }));
     const fake = fakeClient();
     const source = ipcSourceOver(fake.client, APP);
     const store = useTranscriptStore.getState();
@@ -1139,7 +1141,7 @@ describe('ipcSource after MAWS yields to a foreign holder (W7)', () => {
 // E10 (Task 4.1's crash screenshot): a host that dies takes its engine processes along and sends no exit for them, and
 // a successor that never ran the session never will. The session's source closes what its live stream left running.
 describe('ipcSource after the engine host is lost (E10)', () => {
-  const liveIds = (events: SessionEvent[]) => events.map((event, i) => ({ ...event, id: `${APP}:launch-1:${i + 1}:0` as EventId, seq: i + 1 }));
+  const liveIds = (events: SessionEvent[]) => events.map((event, i) => ({ ...event, id: `${MAIN_APP}:launch-1:${i + 1}:0` as EventId, seq: i + 1 }));
   // A turn mid-tool, as a supervisor's kill -9 leaves it: started, a Bash call with no result, no end.
   const midTurn = () => {
     const b = builder();

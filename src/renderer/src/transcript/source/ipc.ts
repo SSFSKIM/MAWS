@@ -5,6 +5,7 @@
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, EventId, MessageUuid } from '@shared/graph/ids';
 import type { CommandName, CommandOutput, CommandResult, MawsBridge } from '@shared/ipc/schema';
+import { bareOf } from '@shared/machine/address';
 import { isAppSynthesised } from '@shared/sessions/app-events';
 import { ipc } from '../../ipc/client';
 import { useTranscriptStore } from '../../stores/transcript';
@@ -130,7 +131,8 @@ function onHostLoss(client: MawsBridge, appSessionId: AppSessionId, running: () 
       const last = running();
       if (asked !== heard || !result.ok || last === null || result.value.some((status) => status.appSessionId === appSessionId)) return;
       lost({
-        id: `${appSessionId}:host-lost:${at}` as EventId, sessionId: last.sessionId, at, seq: null, agentId: null, parentToolUseId: null,
+        // P5 O6 M2: under the bare app id, as main's synthesised ids are
+        id: `${bareOf(appSessionId)}:host-lost:${at}` as EventId, sessionId: last.sessionId, at, seq: null, agentId: null, parentToolUseId: null,
         kind: 'process.exited', code: null, signal: null, reason: 'crash', lostAttentionCount: 0, budget: null,
       });
     });
@@ -151,7 +153,8 @@ function onHostLoss(client: MawsBridge, appSessionId: AppSessionId, running: () 
 // which C3 then answers (src/engine-host/ipc.ts), followed read-only from there.
 function sessionSource(client: MawsBridge, appSessionId: AppSessionId): TranscriptSource {
   const liveForm = (event: SessionEvent) => event.seq !== null;
-  const diskForm = (event: SessionEvent) => event.seq === null && !isAppSynthesised(appSessionId, event);
+  // P5 O6 M2: an event id is its machine's, under the bare app id (main's synthesised ones and C3's live ones alike)
+  const diskForm = (event: SessionEvent) => event.seq === null && !isAppSynthesised(bareOf(appSessionId), event);
   // Per subscription (the store subscribes once per attachment, then snapshots): whether it has seen the live form, the
   // batches that arrived before its snapshot answered, and its filter. A snapshot serves the subscription made just
   // before it, so a second subscription or a stale snapshot never delivers into another's listener.
