@@ -216,7 +216,7 @@ export async function until<T>(read: () => T | undefined, what: string, ms = 15_
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Waits for `promise` to settle, at most `ms`, leaving no timer behind. */
-async function settledWithin(promise: Promise<unknown>, ms: number): Promise<void> {
+export async function settledWithin(promise: Promise<unknown>, ms: number): Promise<void> {
   if (ms <= 0) return;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const settled = promise.then(

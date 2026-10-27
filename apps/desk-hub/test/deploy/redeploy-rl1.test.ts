@@ -4,11 +4,13 @@
 // each dropped and how long each took; then the whole command, DX2's machines and browser beside the leg, passes across
 // the restart and undoes what it made.
 import { type SignedOrgState } from 'org-protocol';
+import { RelayApp } from 'org-protocol/test-support';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { sleep, until } from '../../deploy/hub.ts';
 import { OrgAdmin, type AdminDevice } from '../../deploy/org-admin.ts';
 import { Cleanup } from '../../deploy/proof.ts';
 import { redeployCheck } from '../../deploy/redeploy-check.ts';
-import { Rl1Watch } from '../../deploy/rl1-reconnect.ts';
+import { Rl1Watch, type AppOpener } from '../../deploy/rl1-reconnect.ts';
 import { ORG, startLocalHub, type LocalHub } from '../support/local';
 import { adminKeysFile, LocalPerson } from '../support/local-person';
 
@@ -78,4 +80,28 @@ describe('redeploy-check', () => {
     expect(names.filter((n) => n.startsWith('rd-'))).toEqual([]);
     expect((await head()).machines).toEqual([]);
   }, 180_000);
+});
+
+describe('stopping the RL1 leg', () => {
+  it('is bounded while a reopened socket’s upgrade stalls, and closes that socket when it opens late', async () => {
+    const cleanup = new Cleanup();
+    const admin = await OrgAdmin.open(person, { org: ORG, throwaway: true }, device, () => {});
+    let first: RelayApp | undefined;
+    let stalled: ((app: RelayApp) => void) | undefined;
+    // The first socket opens; every later upgrade stalls until the test lets it through.
+    const open: AppOpener = async (hub, ref, headers) => (first ? new Promise<RelayApp>((resolve) => (stalled = resolve)) : (first = await RelayApp.open(hub, ref, headers)));
+    const watch = await Rl1Watch.start(person, admin, 'rd-ep-stall', cleanup, () => {}, open);
+    first!.close();
+    await until(() => stalled, 'the reopen, stalled');
+
+    const stopped = await Promise.race([watch.stop(500).then(() => 'stopped'), sleep(3000).then(() => 'still waiting on the stalled upgrade')]);
+    expect(stopped).toBe('stopped');
+
+    const late = { ended: undefined, closed: false, close: () => void (late.closed = true) };
+    stalled!(late as unknown as RelayApp);
+    await until(() => (late.closed ? true : undefined), 'the late socket closed', 2000);
+    // The cleanup's own stop of the leg returns at once now: the wait was spent by the first stop.
+    expect(await cleanup.run()).toEqual([]);
+    expect(await machines()).not.toContain('rd-ep-stall');
+  });
 });
