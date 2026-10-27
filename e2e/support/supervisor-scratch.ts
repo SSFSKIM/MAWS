@@ -4,6 +4,10 @@
 // true})`), and every supervisor it starts is killed and its files removed in the case's cleanup, whatever happened.
 // A launch may run another checkout's built app on the same profile (`root`, launch.ts), so a case can keep a session on
 // one build's supervisor and attach another build's app to it.
+// P5 O2 M7 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md): under `MAWS_HOST_MODE=daemon` (`e2e:supervisor-daemon`)
+// every launch runs on the daemon shape: main reaches the engine host through a private `mawsd` on the profile, whose
+// lock and sockets are under `<profile>/mawsd/`; the engine host keeps the supervisor's files. `ready` then waits for
+// main to know the daemon too, and every `mawsd` the case saw is killed with the supervisors.
 import { type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -13,6 +17,7 @@ import { expect, type ElectronApplication, type Page } from '@playwright/test';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
+import { DAEMON_FILES, daemonPaths } from '@shared/daemon/files';
 import type { HostStatus } from '@shared/ipc/schema/host';
 import { invoke, launchReady, value } from './c7-replay';
 import { launchMaws, onLaunched, REPO_ROOT, type MawsLaunch } from './launch';
@@ -24,7 +29,7 @@ import { tmpSocketDirOf } from './supervisor-socket';
 // the request for as long as nobody answers it, which is how the cases keep a session mid-turn.
 export const PERMISSION = 'spikes/protocol-probe/fixtures/permission-roundtrip.jsonl';
 
-function firstPrompt(fixture: string): string {
+export function firstPrompt(fixture: string): string {
   for (const line of readFileSync(join(REPO_ROOT, fixture), 'utf8').split('\n')) {
     if (!line) continue;
     const row = JSON.parse(line) as { direction: string; frame: { type: string; message?: { content: string } } };
@@ -51,6 +56,10 @@ export function tailFixture(dir: string): string {
 }
 
 export interface Lock { pid: number; procStart: string; socketPath: string; buildId: string }
+
+// The shape the suite runs on: the daemon's under `e2e:supervisor-daemon`, else the embedded shape's detached supervisor.
+export const HOST_MODE = process.env.MAWS_HOST_MODE === 'daemon' ? 'daemon' : 'detached';
+export const DAEMON = HOST_MODE === 'daemon';
 export interface JournalRow { seq: number; direction: string; at: string; frame: Record<string, unknown> }
 export const isRequestRow = (r: JournalRow) => r.direction === 'in' && (r.frame.request as { subtype?: string } | undefined)?.subtype === 'can_use_tool';
 export const isTaskFailureRow = (r: JournalRow) => r.direction === 'in' && r.frame.type === 'system' && r.frame.subtype === 'task_notification';
@@ -72,6 +81,7 @@ export class Scratch {
   readonly repo: string;
   readonly engineId = randomUUID();
   readonly supervisors = new Set<number>(); // every supervisor pid this case saw
+  readonly daemons = new Set<number>(); // every `mawsd` pid this case saw (the daemon shape)
   private readonly runs: Run[] = [];
   private readonly sockets = new Set<string>();
 
@@ -108,6 +118,29 @@ export class Scratch {
     return existsSync(this.file('host.log')) ? readFileSync(this.file('host.log'), 'utf8') : '';
   }
 
+  // The daemon shape's `mawsd`: its directory, files, lock and log.
+  get daemonDir(): string {
+    return join(this.userData, DAEMON_FILES.dir);
+  }
+  daemonFile(name: string): string {
+    return join(this.daemonDir, name);
+  }
+  daemonSockets(): Record<'engine-host' | 'pty-host' | 'machine', string> {
+    return daemonPaths(this.userData).sockets;
+  }
+  daemonLock(): Lock | null {
+    try {
+      const lock = JSON.parse(readFileSync(this.daemonFile(DAEMON_FILES.lock), 'utf8')) as Lock;
+      this.daemons.add(lock.pid);
+      return lock;
+    } catch {
+      return null;
+    }
+  }
+  daemonLog(): string {
+    return existsSync(this.daemonFile(DAEMON_FILES.log)) ? readFileSync(this.daemonFile(DAEMON_FILES.log), 'utf8') : '';
+  }
+
   // `root`: another checkout whose built app runs on this profile instead of this one's (launch.ts). The app's output is
   // read from the moment the launch resolves (`onLaunched`), so main's lines from its start (its first connect) are kept.
   async launch(env: Record<string, string> = {}, root?: string): Promise<Run> {
@@ -116,7 +149,7 @@ export class Scratch {
       app.process().stdout?.on('data', (chunk) => (text += String(chunk)));
       app.process().stderr?.on('data', (chunk) => (text += String(chunk)));
     };
-    const maws = await onLaunched(read, () => launchMaws({ userData: this.userData, keepConfigHome: true, root, env: { MAWS_HARNESS: '0', MAWS_HOST_MODE: 'detached', MAWS_ENGINE_REPLAY: '1', ...env } }));
+    const maws = await onLaunched(read, () => launchMaws({ userData: this.userData, keepConfigHome: true, root, env: { MAWS_HARNESS: '0', MAWS_HOST_MODE: HOST_MODE, MAWS_ENGINE_REPLAY: '1', ...env } }));
     const child = maws.app.process(); // Playwright drops app.process() once the app closes; the cleanup still needs it
     const exited = new Promise<void>((resolve) => (child.exitCode !== null || child.signalCode !== null ? resolve() : child.once('exit', () => resolve())));
     const run: Run = { maws, page: maws.page, child, output: () => text, quitLines: () => text.split('\n').filter((l) => l.startsWith('quit-guard:')), exited };
@@ -124,18 +157,19 @@ export class Scratch {
     return run;
   }
 
-  // The connected supervisor as main reports it, once main is ready with one.
+  // The connected supervisor as main reports it, once main is ready with one (on the daemon shape, and knows the daemon).
   async ready(page: Page, match: (s: HostStatus) => boolean = () => true, timeout = 30_000): Promise<HostStatus> {
     let status: HostStatus | null = null;
     await expect
       .poll(async () => {
         const answer = await invoke(page, 'host.status', undefined);
         status = answer.ok ? answer.value : null;
-        return status !== null && status.state === 'ready' && status.supervisor !== null && match(status);
-      }, { timeout, message: 'main is connected to a supervisor' })
+        return status !== null && status.state === 'ready' && status.supervisor !== null && (!DAEMON || status.daemon !== null) && match(status);
+      }, { timeout, message: DAEMON ? 'main is connected to a supervisor through mawsd' : 'main is connected to a supervisor' })
       .toBe(true);
     const s = status as unknown as HostStatus;
     this.supervisors.add(s.supervisor!.pid);
+    if (s.daemon) this.daemons.add(s.daemon.pid);
     return s;
   }
 
@@ -177,12 +211,15 @@ export class Scratch {
       await run.maws.cleanup().catch(() => {}); // the app is gone; a given profile is left to this cleanup
     }
     this.lock();
+    this.daemonLock();
     let leftover: unknown = null; // a survivor is reported, after the files are removed all the same
-    await killScratchProcesses(this.root, this.supervisors).catch((error: unknown) => (leftover = error));
+    await killScratchProcesses(this.root, [...this.supervisors, ...this.daemons]).catch((error: unknown) => (leftover = error));
     for (const socket of this.sockets) {
       const dir = tmpSocketDirOf(this.userData, socket); // a socket under root goes with it
       if (dir !== null) rmSync(dir, { recursive: true, force: true });
     }
+    const { socketDir } = daemonPaths(this.userData); // `mawsd`'s sockets' $TMPDIR fallback, when they took it
+    if (!socketDir.startsWith(this.root)) rmSync(socketDir, { recursive: true, force: true });
     rmSync(this.root, { recursive: true, force: true });
     if (leftover !== null) throw leftover;
   }

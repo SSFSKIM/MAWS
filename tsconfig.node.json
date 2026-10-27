@@ -95,6 +95,7 @@
     "e2e/support/packaged-resolution.ts", // P3-F: test/support/packaged-resolution.test.ts checks packaged resolution
     // P3-HD M4a: test/support/connector-oauth*.test.ts run the toy OAuth fixture's logic, its scene support and fake browser
     "e2e/support/connector-oauth-core.d.mts",
+    "e2e/support/daemon-unit-guard.d.mts", // P5 O2 M7: test/support/daemon-unit-guard.test.ts runs e2e:daemon-unit's CI guard and labels
     "e2e/support/connector-oauth.ts",
     "e2e/support/keychain-guard.ts", // fixB: the custody's keychain prompt guard and engine-environment checks
     "e2e/support/connector-oauth-browser.ts",

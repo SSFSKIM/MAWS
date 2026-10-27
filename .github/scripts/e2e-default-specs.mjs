@@ -25,13 +25,15 @@ const say = (line) => process.stderr.write(`e2e-default: ${line}\n`);
 
 // A package script's selection as `playwright test --list` can repeat it: { env, args }; { elsewhere } for a script run
 // in another workspace package, which collects nothing under this root's e2e/; null for any shape it cannot read.
-// Readable: an optional `scripts/e2e-build.sh <variant> &&`, then NAME=value assignments, then `playwright test` with spec
-// arguments, --config, and the options that select nothing (--forbid-only, --reporter, --add-reporter). Anything else,
-// a quote, an expansion, another command, --grep or any other option, is unreadable.
+// Readable: an optional `scripts/e2e-build.sh <variant> &&`, then any guard steps `node <file>.mjs &&` (a check that
+// passes or refuses and selects nothing, as e2e:daemon-unit's CI guard), then NAME=value assignments, then `playwright
+// test` with spec arguments, --config, and the options that select nothing (--forbid-only, --reporter, --add-reporter).
+// Anything else, a quote, an expansion, another command, --grep or any other option, is unreadable.
 export function readScript(script, rootName) {
   let rest = script.trim();
   const built = /^scripts\/e2e-build\.sh (?:harness|plain) && (.*)$/.exec(rest);
   if (built) rest = built[1];
+  for (let guard = /^node [\w./-]+\.mjs && (.*)$/.exec(rest); guard; guard = /^node [\w./-]+\.mjs && (.*)$/.exec(rest)) rest = guard[1];
   if (!/^[\w\s./:=,@+-]*$/.test(rest)) return null;
   const tokens = rest.split(/\s+/).filter(Boolean);
   if (!built && tokens.length === 4 && tokens[0] === 'pnpm' && tokens[1] === '--filter' && tokens[2] !== rootName) return { elsewhere: tokens[2] };

@@ -156,10 +156,11 @@ function daemonText(status: HostStatus | null): string {
   return d === null ? SUPERVISOR.daemonConnecting : SUPERVISOR.daemonLine(d.kind, d.pid, d.machine);
 }
 
+// A plain line, not a second status: the group's one live line is the supervisor's
 function DaemonLine({ status }: { status: HostStatus | null }) {
   return (
     <Setting label={SUPERVISOR.daemon}>
-      <span role="status" className="min-w-0 text-ui-sm text-fg tabular-nums">
+      <span data-daemon-line className="min-w-0 text-ui-sm text-fg tabular-nums">
         {daemonText(status)}
       </span>
     </Setting>

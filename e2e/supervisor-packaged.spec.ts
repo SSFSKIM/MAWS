@@ -7,6 +7,11 @@
 // Runs only over a packaged executable with the supervisor gate on, so neither the plain smoke, nor `pnpm e2e:packaged`,
 // nor `pnpm e2e:supervisor` (which names its own spec) runs it:
 //   pnpm build:app && pnpm e2e:supervisor:packaged
+// P5 O2 M7 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M7 "The suites"): under `MAWS_HOST_MODE=daemon`
+// (`pnpm e2e:supervisor-daemon:packaged`, not a gate group) the daemon shape's check runs instead: the private `mawsd`
+// of a scratch profile is the app binary run as Node, named `mawsd`, its entry inside `app.asar`, and the engine host
+// it starts is the app binary named `maws-supervisor` as above.
+//   pnpm build:app && pnpm e2e:supervisor-daemon:packaged
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -22,6 +27,7 @@ const EXECUTABLE = process.env.MAWS_E2E_EXECUTABLE ? realpathOr(resolve(REPO_ROO
 test.skip(process.env.MAWS_SUPERVISOR_E2E !== '1' || EXECUTABLE === null, 'the packaged supervisor check runs under pnpm e2e:supervisor:packaged (a packaged MAWS_E2E_EXECUTABLE and MAWS_SUPERVISOR_E2E=1)');
 
 const EVIDENCE = process.env.MAWS_E10_SHOTS === '1' ? join(REPO_ROOT, 'docs/doperpowers/evidence/p1-e10') : null;
+const DAEMON = process.env.MAWS_HOST_MODE === 'daemon';
 
 function realpathOr(path: string): string {
   try {
@@ -40,6 +46,7 @@ function executableOf(pid: number): string {
 }
 
 test('packaged: the supervisor is the app binary run as Node, named maws-supervisor, its chunk inside app.asar', async () => {
+  test.skip(DAEMON, 'the embedded shape’s check (pnpm e2e:supervisor:packaged)');
   test.setTimeout(120_000);
   const exe = EXECUTABLE!;
   const macOS = dirname(exe); // …/MAWS.app/Contents/MacOS
@@ -149,6 +156,64 @@ test('packaged: the supervisor is the app binary run as Node, named maws-supervi
     await killScratchProcesses(root, supervisorPid !== null ? [supervisorPid] : []).catch((error: unknown) => (leftover = error));
     const tmpSocketDir = socketPath !== null ? tmpSocketDirOf(userData, socketPath) : null; // a socket under root goes with it
     if (tmpSocketDir !== null) rmSync(tmpSocketDir, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+  if (leftover !== null) throw leftover;
+});
+
+test('packaged, the daemon shape: mawsd is the app binary run as Node, named mawsd, its entry inside app.asar', async () => {
+  test.skip(!DAEMON, 'the daemon shape’s check (pnpm e2e:supervisor-daemon:packaged)');
+  test.setTimeout(120_000);
+  const exe = EXECUTABLE!;
+  const macOS = dirname(exe);
+  const bundle = resolve(macOS, '../..');
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-o2-packaged-')));
+  const userData = join(root, 'ud'); // not the default profile: a private mawsd, never the LaunchAgent
+  mkdirSync(userData);
+  let maws: MawsLaunch | null = null;
+  const pids: number[] = [];
+  let leftover: unknown = null;
+  try {
+    maws = await launchMaws({ userData, env: { MAWS_HARNESS: '0', MAWS_HOST_MODE: 'daemon' } });
+    const app = maws.app;
+    const exited = new Promise<void>((done) => app.process().once('exit', () => done()));
+    let status: HostStatus | null = null;
+    await expect
+      .poll(async () => {
+        const answer = await invoke(maws!.page, 'host.status', undefined);
+        status = answer.ok ? answer.value : null;
+        return status !== null && status.state === 'ready' && status.supervisor !== null && status.daemon !== null;
+      }, { timeout: 30_000, message: 'main is connected to the engine host through mawsd' })
+      .toBe(true);
+    const s = status as unknown as HostStatus;
+    expect(s.transport).toBe('daemon');
+    expect(s.daemon!.kind).toBe('private');
+    const daemonPid = s.daemon!.pid;
+    const enginePid = s.supervisor!.pid;
+    pids.push(daemonPid, enginePid);
+    const lock = JSON.parse(readFileSync(join(userData, 'mawsd', 'mawsd.lock'), 'utf8')) as { pid: number };
+    expect(lock.pid, 'the lock names the daemon main reports').toBe(daemonPid);
+
+    const command = ps(daemonPid, 'command');
+    expect(command.split(' ')[0], 'argv0').toBe('mawsd');
+    expect(command, 'the entry is read from inside the asar').toContain(`${bundle}/Contents/Resources/app.asar/out/main/mawsd.js run --private --dir ${join(userData, 'mawsd')}`);
+    expect(command, 'mawsd starts with --disable-sigusr1').toMatch(/^mawsd --disable-sigusr1 /);
+    expect(realpathOr(executableOf(daemonPid)), 'mawsd runs the app binary itself').toBe(exe);
+    expect(Number(ps(daemonPid, 'pgid')), 'mawsd leads its own process group').toBe(daemonPid);
+    // the engine host it started: the app binary as Node too, from the same asar
+    const engine = ps(enginePid, 'command');
+    expect(engine.split(' ')[0]).toBe('maws-supervisor');
+    expect(engine).toContain(`${bundle}/Contents/Resources/app.asar/`);
+    expect(realpathOr(executableOf(enginePid))).toBe(exe);
+    expect(maws.consoleErrors()).toEqual([]);
+
+    // an unbusy quit parks the engine host; mawsd stays for its idle time
+    await app.evaluate(({ app: electronApp }) => electronApp.quit());
+    await exited;
+    await expect.poll(() => isAlive(enginePid), { timeout: 10_000, message: 'the unbusy quit parks the engine host' }).toBe(false);
+  } finally {
+    if (maws) await maws.cleanup().catch((error: unknown) => console.error(error));
+    await killScratchProcesses(root, pids).catch((error: unknown) => (leftover = error));
     rmSync(root, { recursive: true, force: true });
   }
   if (leftover !== null) throw leftover;

@@ -230,7 +230,7 @@ describe('the quit default', () => {
 // host.status: the daemon's kind, pid and machine ref, or why the launch runs without it.
 describe('the machine daemon', () => {
   const machineDaemon = () => screen.getByRole('switch', { name: 'Run sessions under the machine daemon' });
-  const daemonLine = () => within(row('Machine daemon')).getByRole('status');
+  const daemonLine = () => row('Machine daemon').querySelector('[data-daemon-line]')!;
   const daemon = {
     pid: 4100, startedAt: STARTED, kind: 'unit' as const,
     build: { version: '0.0.0', commit: 'ac8724a6', builtAt: STARTED, buildId: 'a1b2c3d4e5f60718', engineHostBuildId: 'b' },
@@ -245,6 +245,8 @@ describe('the machine daemon', () => {
     expect(machineDaemon().getAttribute('aria-checked')).toBe('true');
     expect(within(row('Run sessions under the machine daemon')).getByText(/Applies at the next launch/)).toBeTruthy();
     expect(daemonLine().textContent).toBe('At login · pid 4100 · machine mRef0123456789abcdefAB');
+    // the group's one status stays the supervisor's (its live line, which the e2e suites and the owner's reader read)
+    expect(within(screen.getByRole('group', { name: 'Background supervisor' })).getAllByRole('status')).toHaveLength(1);
     fireEvent.click(machineDaemon());
     await vi.waitFor(() => expect(b.sets).toEqual([{ supervisor: { shape: 'embedded' } }]));
     expect(machineDaemon().getAttribute('aria-checked')).toBe('false');

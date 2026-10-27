@@ -3,7 +3,7 @@
 // installed unit, through the real installer and fake unit managers in a scratch home; the switch to embedded changing
 // nothing in the running launch and the next embedded launch uninstalling the unit before its hosts exist; how main's
 // three transports start and reach `mawsd`; the build check.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,7 +16,6 @@ import {
   daemonHostSpecs,
   daemonStart,
   endSocketPtyHost,
-  planShape,
   prepareShape,
   resolveLaunch,
   UNAVAILABLE,
