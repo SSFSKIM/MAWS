@@ -39,6 +39,8 @@ import {
   type GroupKind,
 } from './model';
 import { useRecentTurns } from './preview';
+import { machineOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 
 // Rows drawn at first, and how many more a scroll near the list's end (within NEAR_END px) or an ArrowDown past the last
 // row adds; a new search or scope starts at the first page again (Desktop's picker, cc43287c9-ua-2O55p.js:34271-34273,
@@ -56,19 +58,19 @@ export interface ResumeChooserProps {
 
 // The branch the project's own checkout has out, as git lists it; null until it answers, and for a folder git does not
 // know (Current branch then keeps nothing).
-function useCurrentBranch(directory: string | null): string | null {
+function useCurrentBranch(machine: MachineRef, directory: string | null): string | null {
   const [answer, setAnswer] = useState<{ directory: string; branch: string | null } | null>(null);
   useEffect(() => {
     if (directory === null) return;
     let live = true;
-    void ipc.invoke('git.worktree.list', { repoRoot: directory }).then(
+    void ipc.invoke('git.worktree.list', { repoRoot: directory }, { machine }).then(
       (result) => live && setAnswer({ directory, branch: result.ok ? (result.value.worktrees.find((w) => w.isMain)?.branch ?? null) : null }),
       () => live && setAnswer({ directory, branch: null }),
     );
     return () => {
       live = false;
     };
-  }, [directory]);
+  }, [machine, directory]);
   return answer?.directory === directory ? answer.branch : null;
 }
 
@@ -88,7 +90,7 @@ export function ResumeChooser({ context, close }: ResumeChooserProps) {
   const digests = useSessions((s) => s.digests);
   const projects = useSessions((s) => s.projects);
   const project = context.projectId === null ? null : (projects.get(context.projectId) ?? null);
-  const branch = useCurrentBranch(project?.directory ?? null);
+  const branch = useCurrentBranch(project === null ? ipc.localMachine : machineOf(project.id), project?.directory ?? null);
   const [query, setQuery] = useState('');
   const [toggles, setToggles] = useState<ChooserToggles>(() => initialToggles(context));
   const [picked, setPicked] = useState<AppSessionId | null>(null);

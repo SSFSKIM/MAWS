@@ -67,7 +67,7 @@ describe('renderer ipc client', () => {
   it('passes main’s own errors through', async () => {
     const error = { code: 'invalid_input', message: 'invalid input for settings.set', issues: [{ path: ['theme'] }] };
     const { bridge } = fakeBridge({ ok: false, error });
-    await expect(createClient(() => bridge).invoke('settings.set', { theme: 'dark' })).resolves.toEqual({ ok: false, error });
+    await expect(createClient(() => bridge).invoke('settings.set', { theme: 'dark' }, { machine: LOCAL })).resolves.toEqual({ ok: false, error });
   });
 
   // E10: what reacts to a refusal app-wide (a launch refused while an incompatible supervisor is waited for).
@@ -135,16 +135,26 @@ describe('renderer ipc client', () => {
       expect(bridge.invoke).toHaveBeenCalledWith('session.get', { appSessionId: 'app-1' }, LOCAL);
     });
 
-    it('sends a path command to the machine its options name, else to the local machine', async () => {
+    it('sends a path command to the machine its options name', async () => {
       const status = { ok: true, value: { repoRoot: null } };
       const { bridge } = fakeBridge(status);
       const client = createClient(() => bridge);
       await client.invoke('git.watch', { directory: '/work/a' }, { machine: OTHER });
-      await client.invoke('git.watch', { directory: '/work/a' });
+      await client.invoke('git.watch', { directory: '/work/a' }, { machine: LOCAL });
       expect(bridge.invoke.mock.calls).toEqual([
         ['git.watch', { directory: '/work/a' }, OTHER],
         ['git.watch', { directory: '/work/a' }, LOCAL],
       ]);
+    });
+
+    // M4: a path is no machine's by itself.
+    it('refuses a path command that names no machine, and sends nothing', async () => {
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const { bridge } = fakeBridge({ ok: true, value: { repoRoot: null } });
+      const invoke = createClient(() => bridge).invoke as (name: string, input: unknown) => Promise<unknown>; // the type refuses this call
+      await expect(invoke('git.watch', { directory: '/work/a' })).resolves.toMatchObject({ ok: false, error: { code: 'invalid_input', message: expect.stringContaining('names no machine') } });
+      expect(bridge.invoke).not.toHaveBeenCalled();
+      expect(logged).toHaveBeenCalledOnce();
     });
 
     it('sends a machine-wide command to the local machine unless its options name another', async () => {

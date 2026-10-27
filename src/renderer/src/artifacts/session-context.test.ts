@@ -7,7 +7,7 @@ import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { MawsBridge, PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { record, status } from '../../../../test/support/builders';
-import { at } from '../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { continueSetup } from '../sessions/setup-actions';
 import { useSetup } from '../sessions/store';
 import { resetComposerStore, useComposerStore } from '../stores/composer';
@@ -19,7 +19,7 @@ import { artifactSessionContext, startArtifactSession, type ArtifactSessionStart
 const MAIN_OWN = 'own-session' as AppSessionId;
 const OWN = at(MAIN_OWN);
 const LINKED = at('linked-session' as AppSessionId);
-const P1 = 'p1' as ProjectId;
+const P1 = at('p1') as ProjectId; // the page holds addresses; the project's machine is read off it
 const P2 = 'p2' as ProjectId;
 const SPACE = '55555555-5555-4555-8555-555555555555';
 
@@ -71,7 +71,7 @@ type Invoked = [string, unknown];
 // first, say). Events reach what `on` subscribed.
 function client(answers: Record<string, unknown>, during: Record<string, () => void> = {}) {
   const calls: Invoked[] = [];
-  const listeners = new Map<string, Set<(payload: unknown) => void>>();
+  const listeners = new Map<string, Set<(payload: unknown, from: { machine: typeof TEST_MACHINE }) => void>>();
   const bridge = {
     invoke: vi.fn(async (name: string, input: unknown) => {
       calls.push([name, input]);
@@ -79,14 +79,14 @@ function client(answers: Record<string, unknown>, during: Record<string, () => v
       const value = answers[name];
       return value instanceof Error ? { ok: false, error: { code: 'internal', message: value.message } } : { ok: true, value };
     }),
-    on: vi.fn((name: string, listener: (payload: unknown) => void) => {
+    on: vi.fn((name: string, listener: (payload: unknown, from: { machine: typeof TEST_MACHINE }) => void) => {
       const set = listeners.get(name) ?? new Set();
       set.add(listener);
       listeners.set(name, set);
       return () => set.delete(listener);
     }),
   };
-  const emit = (name: string, payload: unknown) => listeners.get(name)?.forEach((listener) => listener(payload));
+  const emit = (name: string, payload: unknown) => listeners.get(name)?.forEach((listener) => listener(payload, { machine: TEST_MACHINE }));
   const listening = (name: string) => listeners.get(name)?.size ?? 0;
   return { bridge: bridge as unknown as MawsBridge, calls, emit, listening };
 }
@@ -230,7 +230,7 @@ describe('the owner’s Start', () => {
       await expect(startArtifactSession({ kind: 'session', appSessionId: OWN }, null, comment.bridge, 'accepted')).resolves.toEqual({ status: 'ready', appSessionId: OWN });
       expect(useSetup.getState().cards.get(OWN), 'the continuation’s card').toMatchObject({ kind: 'trust', message });
 
-      useSessions.getState().applyStatus({ appSessionId: OWN, status: status(OWN) });
+      useSessions.getState().applyStatus({ appSessionId: OWN, status: status(OWN) }, TEST_MACHINE);
       await composer.reply('session.acquire', { ...ready, appSessionId: MAIN_OWN });
       await expect(continuing).resolves.toEqual({ ok: true });
       expect(composer.invoked('session.send')).toEqual([{ appSessionId: MAIN_OWN, content: message.content }]);

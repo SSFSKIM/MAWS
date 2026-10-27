@@ -21,9 +21,13 @@ export interface PluginsReadResult<T> {
   error: string | null; // the refusal in words; with data, that the list shown is the last one read
 }
 
-// P5 O6 M2 (OX2): a directory is a machine's; none names the local machine.
+// P5 O6 M2 (OX2): a directory is a machine's; none names the local machine. P5 O6 M4: every plugin surface names none, so
+// they are all this machine's, inside a session as well as outside it: a plugin operation's progress and `plugins.changed`
+// are this app's events, which no machine link carries (the link surface, src/main/machines/link-surface.ts), so an
+// operation on another machine could not be followed. Plugins across machines are O4's.
 async function invokeRead<N extends PluginsRead | 'plugins.env'>(command: N, input: N extends 'plugins.env' ? Record<string, never> : { cwd: string }, machine?: MachineRef): Promise<CommandOutput<N>> {
-  const result = await ipc.invoke(command, input as never, machine === undefined ? undefined : { machine });
+  // P5 O6 M4: every read here but `plugins.env` is a `path` command; the cast names that set (`plugins.env` takes the option too).
+  const result = await ipc.invoke(command as PluginsRead, input as never, { machine: machine ?? ipc.localMachine });
   if (!result.ok) throw new IpcCommandError(result.error);
   return result.value as CommandOutput<N>;
 }

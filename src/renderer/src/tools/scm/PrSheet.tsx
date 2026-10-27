@@ -21,6 +21,7 @@ import { PlanCommand, plannedOf, PlanProblem, PlanRow, PlanRows, SheetNote, useR
 import { prTitleDefault } from './remote-actions';
 import { openLink, settled } from './store';
 import type { ScmUi } from './view-state';
+import { machineFor } from '../../ipc/machine';
 
 export const PR_REPLAN_MS = 300;
 
@@ -40,6 +41,7 @@ interface Answered {
 export function PrSheet({ appSessionId, ui, status, scm, directory }: { appSessionId: AppSessionId; ui: StoreApi<ScmUi>; status: GitStatus; scm: ScmStatus | undefined; directory: string }) {
   const branch = status.branch ?? ''; // the header opens the sheet only on a branch; main refuses a detached head
   const repoRoot = status.repoRoot;
+  const machine = machineFor(appSessionId); // P5 O6 M4: the checkout's
   const defaultBase = scm?.defaultBase ?? null;
   const [fields, setFields] = useState<Fields | null>(null); // null until the title's default is read
   const [answered, setAnswered] = useState<Answered | null>(null);
@@ -52,8 +54,8 @@ export function PrSheet({ appSessionId, ui, status, scm, directory }: { appSessi
   useEffect(() => {
     let live = true;
     void Promise.all([
-      settled(ipc.invoke('git.log', { directory, limit: 1 })),
-      branch === '' ? null : settled(ipc.invoke('git.worktree.branch', { repoRoot, branch })),
+      settled(ipc.invoke('git.log', { directory, limit: 1 }, { machine })),
+      branch === '' ? null : settled(ipc.invoke('git.worktree.branch', { repoRoot, branch }, { machine })),
     ]).then(([log, distance]) => {
       if (!live) return;
       const subject = log.ok ? (log.value.commits[0]?.subject ?? null) : null;
@@ -63,7 +65,7 @@ export function PrSheet({ appSessionId, ui, status, scm, directory }: { appSessi
     return () => {
       live = false;
     };
-  }, [directory, repoRoot, branch, defaultBase]);
+  }, [machine, directory, repoRoot, branch, defaultBase]);
 
   const plan = useCallback(
     async (asking: Fields) => {

@@ -6,7 +6,7 @@ import type { PreloadBridge } from '@shared/ipc/schema';
 import type { WorktreeInfo, WorktreeStatus } from '@shared/sessions/worktree';
 import { project, record } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { at as addressed } from '../../../../test/support/machine';
+import { at as addressed, TEST_MACHINE } from '../../../../test/support/machine';
 import { registerSessionCreator } from '../keymap/actions-runtime';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
@@ -114,7 +114,7 @@ describe('Worktrees… dialog', () => {
     const row = await rowNamed(await open(), 'orphan');
     await userEvent.click(within(row).getByRole('button', { name: 'Remove…' }));
     const cleanupSheet = await screen.findByRole('dialog', { name: 'Clean up worktree orphan' });
-    expect(useDialogs.getState().open).toMatchObject({ kind: 'cleanup', target: { repoRoot: REPO, path: at('orphan'), branch: 'worktree-orphan' }, returnTo: { kind: 'worktrees', projectId: P } });
+    expect(useDialogs.getState().open).toMatchObject({ kind: 'cleanup', target: { machine: TEST_MACHINE, repoRoot: REPO, path: at('orphan'), branch: 'worktree-orphan' }, returnTo: { kind: 'worktrees', projectId: P } });
     await userEvent.click(within(cleanupSheet).getByRole('button', { name: 'Cancel' }));
     await screen.findByRole('dialog', { name: 'Worktrees · repo' });
     await waitFor(() => expect(fake.invoked('git.worktree.list').length).toBe(3)); // the list, the cleanup's identity read, the list again
@@ -130,7 +130,7 @@ describe('Worktrees… dialog', () => {
   });
 
   it('a cleanup opened elsewhere closes to nothing', () => {
-    act(() => openDialog({ kind: 'cleanup', target: { repoRoot: REPO, path: at('orphan'), branch: null } }));
+    act(() => openDialog({ kind: 'cleanup', target: { machine: TEST_MACHINE, repoRoot: REPO, path: at('orphan'), branch: null } }));
     act(() => closeDialog());
     expect(useDialogs.getState().open).toBeNull();
   });

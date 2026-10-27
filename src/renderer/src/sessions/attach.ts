@@ -28,6 +28,7 @@ import { terminals, type TerminalId } from '../terminal/registry';
 import { openTerminal } from '../tools/terminal';
 import { toastHeld } from './holder-words';
 import { startNoticeId } from './store'; // P2-A
+import { machineOf } from '@shared/machine/address';
 
 export const ATTACH_TABS_KEY = 'sessions.attachTabs';
 
@@ -149,7 +150,7 @@ async function typeCommand(terminalId: TerminalId, command: string): Promise<str
 
 async function jobOf(record: SessionRecord, known: KnownJob | null): Promise<{ jobId: string; cwd: string } | { error: string }> {
   if (record.engineSessionId !== null) {
-    const read = await ipc.invoke('fs.holders', { sessionIds: [record.engineSessionId], directories: null });
+    const read = await ipc.invoke('fs.holders', { sessionIds: [record.engineSessionId], directories: null }, { machine: machineOf(record.appId) });
     if (!read.ok && known === null) return { error: read.error.message };
     for (const { sessionId, holder, cwd } of read.ok ? read.value.holders : []) {
       if (sessionId === record.engineSessionId && holder.kind === 'background_job' && holder.jobId !== null) return { jobId: holder.jobId, cwd: cwd ?? record.directory };

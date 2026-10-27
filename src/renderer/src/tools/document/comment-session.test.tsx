@@ -12,7 +12,6 @@ import type { CommentOverlayProps } from '@artifacts/document/editor/comments/su
 import { addThread } from '@artifacts/document/threads';
 import { newDoc } from '@artifacts/yjs';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
-import type { PreloadBridge } from '@shared/ipc/schema';
 import type { LibraryRow } from '@shared/ipc/schema/library';
 import { bareOf } from '@shared/machine/address';
 import { project, record } from '../../../../../test/support/builders';
@@ -31,6 +30,7 @@ import { resetShellStores } from '../../test-support/shell-stores';
 import { registerCommentComposer, openCommentComposer } from '../code/anchor/anchor';
 import { startCommentSession, useArtifactCommentTarget, usePendingComment } from './comment-session'; // P3-F F4 review B 3: startCommentSession, usePendingComment
 import { useDocumentComments } from './comments';
+import { preloadOf } from '../../test-support/preload-of';
 
 // the page's ids are addresses; the fake bridge, standing for main, is asked and answers with `bare` ones
 const SHOWN = at('a1111111-1111-4111-8111-111111111111' as AppSessionId);
@@ -61,7 +61,7 @@ beforeEach(() => {
   resetLibrary();
   useSetup.setState({ intents: new Map(), cards: new Map() });
   fake = fakeClient({ 'session.intent.get': null });
-  window.maws = fake.client as unknown as PreloadBridge;
+  window.maws = preloadOf(fake);
   offComposer = registerCommentComposer(openComment);
   const s = useSessions.getState();
   useSessions.setState({

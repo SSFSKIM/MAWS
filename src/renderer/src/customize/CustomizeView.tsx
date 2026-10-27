@@ -69,7 +69,8 @@ export function CustomizeView({ section }: { section: CustomizeSection }) {
   const inventory = useQuery({
     queryKey: ['maws', 'customization.inventory', { cwd }],
     queryFn: async () => {
-      const answer = await ipc.invoke('customization.inventory', { cwd });
+      // P5 O6 M4: Customize is this machine's, as its plugin and connector actions are, until O4 spans machines.
+      const answer = await ipc.invoke('customization.inventory', { cwd }, { machine: ipc.localMachine });
       if (!answer.ok) throw new IpcCommandError(answer.error);
       return answer.value;
     },

@@ -22,7 +22,7 @@ import { ARTIFACTS_TOOL_ID, artifactsTool, type ArtifactsHandle } from '../tools
 import { TRANSFER_COPY } from '../tools/artifacts/copy';
 import { requestArtifactOpen, resetOpenRequests, useOpenRequest } from '../tools/artifacts/viewers/requests'; // P4-B4 renamed the version request the open request
 import { recordTranscriptScroll, takeTranscriptCarry } from '../transcript/view/scroll-carry'; // P4-B3 M5
-import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { dragAccepted, moveArtifactToPanel, moveArtifactToTab, transferRefusal, useTransferRefusal } from './transfer';
 
 const DOC = 'doc-1';
@@ -250,6 +250,19 @@ describe('main → panel', () => {
     expect(heldArtifactEditorState(panelScope(dest)), 'no remount').toBe(panelHold);
     expect(editor.dispose).toHaveBeenCalledExactlyOnceWith(mainHold.state);
     expect(viewsOf(DOC), 'one view fewer').toBe(1);
+  });
+
+  // P5 O6 M4: an artifact id names no machine, so the panel shows the moved artifact only when the machines agree too.
+  it('a panel showing another machine’s artifact of the same id is not T5: its record goes Back and the moved one shows', async () => {
+    const onOther: TabRef = { id: tabId({ kind: 'artifact', artifactId: DOC, machine: OTHER_MACHINE }), kind: 'artifact', artifactId: DOC, machine: OTHER_MACHINE, pinned: false };
+    useLayout.setState({ main: panes([sessionTab(A), onOther]) });
+    const dest = addArtifacts(A, DOC);
+    expect(recordOf(dest)).toEqual({ kind: 'record', artifactId: DOC, machine: TEST_MACHINE });
+    const asked = guard(panelScope(dest), () => true);
+    expect(await move(() => moveArtifactToPanel(onOther.id))).toBe(true);
+    expect(asked).toHaveBeenCalledTimes(1);
+    expect(recordOf(dest)).toEqual({ kind: 'record', artifactId: DOC, machine: OTHER_MACHINE });
+    expect(allTabs(useLayout.getState().main).some((t) => t.id === onOther.id)).toBe(false);
   });
 
   it('T5 with the tab’s guard refusing (C4) changes nothing', async () => {

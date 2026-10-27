@@ -319,7 +319,7 @@ describe('subagents lists', () => {
   it('badges an agent with an open request of its own: waiting and Approval needed', async () => {
     await mount({ events: [started('a1', 1), started('a2', 2)] });
     act(() =>
-      useAttention.getState().applySnapshot([item(A, 'permission', T, { request: { requestId: 'r1' as RequestId, toolUseId: null, taskId: null, agentId: 'a1' as AgentId } })]),
+      useAttention.getState().applySnapshot([item(A, 'permission', T, { request: { requestId: 'r1' as RequestId, toolUseId: null, taskId: null, agentId: 'a1' as AgentId } })], TEST_MACHINE),
     );
     expect(rowsOf('agents').map((r) => [r.id, r.waiting])).toEqual([['a1', true], ['a2', false]]);
     expect(row('a1').querySelector('[data-part="waiting"]')?.textContent).toBe('waiting');
@@ -459,7 +459,7 @@ describe('drill-in', () => {
     b.emit('permission.requested', { requestId, toolUseId, toolName, displayName, input, description, decisionReasonType, suggestions, blockedPath });
     installBridge(parentStream(child, b.events), { 'attention.request': { event: { ...perm, sessionId: b.events[0].sessionId } } });
     await mount({ events: [started(child, 1)], params: { agentId: child } });
-    act(() => useAttention.getState().applySnapshot([itemFor(perm, A)]));
+    act(() => useAttention.getState().applySnapshot([itemFor(perm, A)], TEST_MACHINE));
     const drill = document.querySelector<HTMLElement>('[data-view="agent"]')!;
     await waitFor(() => expect(within(drill).getByRole('heading', { name: 'Bash' })).toBeTruthy());
     expect(within(drill).getAllByRole('button').some((button) => /Allow/.test(button.textContent ?? ''))).toBe(true);
@@ -467,7 +467,7 @@ describe('drill-in', () => {
     const openFile = vi.fn();
     const off = registerTranscriptActions({ openFile });
     fireEvent.click(await within(drill).findByTitle('src/a.ts'));
-    expect(openFile).toHaveBeenCalledWith('src/a.ts', undefined);
+    expect(openFile).toHaveBeenCalledWith('src/a.ts', undefined, A);
     off();
   });
 

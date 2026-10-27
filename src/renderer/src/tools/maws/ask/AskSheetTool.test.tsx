@@ -23,7 +23,7 @@ import { applyAskEvents, askSheet, resetAskSheets } from './store';
 const holder: { client: FakeClient['client'] | null } = { client: null };
 vi.mock('../../../ipc/client', () => ({
   ipc: {
-    invoke: (...args: Parameters<FakeClient['client']['invoke']>) => holder.client!.invoke(...args),
+    invoke: (...args: Parameters<FakeClient['client']['invoke']>) => (holder.client!.invoke as unknown as (...a: unknown[]) => unknown)(...args),
     on: (...args: Parameters<FakeClient['client']['on']>) => holder.client!.on(...args),
   },
 }));

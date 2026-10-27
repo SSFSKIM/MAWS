@@ -75,12 +75,12 @@ describe('useDeliveredReplies', () => {
       let failed = 0;
       return {
         ...fake.client,
-        invoke: ((name: CommandName, input: unknown) => {
+        invoke: ((name: CommandName, input: unknown, ...rest: unknown[]) => {
           if (name === 'session.events' && failed < failures) {
             failed += 1;
             return Promise.resolve({ ok: false, error: { code: 'internal', message: 'down' } });
           }
-          return fake.client.invoke(name as never, input as never);
+          return (fake.client.invoke as unknown as (...a: unknown[]) => Promise<never>)(name, input, ...rest);
         }) as MawsBridge['invoke'],
       };
     }
@@ -130,8 +130,8 @@ describe('useDeliveredReplies', () => {
       let down = false; // the events read fails while set
       const client = spied({
         ...fake.client,
-        invoke: ((name: CommandName, input: unknown) =>
-          name === 'session.events' && down ? Promise.resolve({ ok: false, error: { code: 'internal', message: 'down' } }) : fake.client.invoke(name as never, input as never)) as MawsBridge['invoke'],
+        invoke: ((name: CommandName, input: unknown, ...rest: unknown[]) =>
+          name === 'session.events' && down ? Promise.resolve({ ok: false, error: { code: 'internal', message: 'down' } }) : (fake.client.invoke as unknown as (...a: unknown[]) => Promise<never>)(name, input, ...rest)) as MawsBridge['invoke'],
       });
       const subscriptions = () => fake.calls.filter((c) => c === 'on session.eventBatch').length;
       const { result } = renderHook(() => useDeliveredReplies(CHILD, client));

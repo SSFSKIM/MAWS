@@ -175,12 +175,12 @@ describe('mounted surfaces on exited sessions start nothing (G5)', () => {
   it('a mounted session the budget released is not relaunched by its widgets, nor by Session info’s 30 s refetch', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const ready = { ...liftStatus(backend.status(BARE_ID)), process: 'ready' as const };
-    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: ready }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: ready }, TEST_MACHINE));
     mount(ID);
     await settle();
     const reads = backend.calls.length;
     expect(reads).toBeGreaterThan(0); // live: the widgets read
-    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...ready, process: 'exited', exit: { code: 0, signal: null, reason: 'budget', at: ready.launchedAt, release: { limitKiB: 1, totalKiB: 2 } } } }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...ready, process: 'exited', exit: { code: 0, signal: null, reason: 'budget', at: ready.launchedAt, release: { limitKiB: 1, totalKiB: 2 } } } }, TEST_MACHINE));
     await act(async () => void vi.advanceTimersByTime(INFO_REFRESH_MS * 2 + 1_000));
     await settle();
     expect(starts()).toEqual([]);

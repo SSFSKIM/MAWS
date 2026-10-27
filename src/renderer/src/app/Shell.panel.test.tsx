@@ -42,7 +42,7 @@ const connect = () => offs.push(connectPanelHost());
 // As connectShell does on session.removed (each removal a newer revision: the sessions store keeps a tombstone per id).
 let revision = 1000;
 const removeA = () => {
-  if (useSessions.getState().applyRemoved({ appSessionId: A, revision: (revision += 1) })) useLayout.getState().dropSession(A);
+  if (useSessions.getState().applyRemoved({ appSessionId: A, revision: (revision += 1) }, TEST_MACHINE)) useLayout.getState().dropSession(A);
 };
 const settle = () => act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 

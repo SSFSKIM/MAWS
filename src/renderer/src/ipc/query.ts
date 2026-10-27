@@ -4,7 +4,7 @@
 // through `ipc.invoke` (or a store action built on it, like `useSettings().setTheme`). Pushed state (events) lives in
 // Zustand stores; see `stores/settings.ts`.
 import { QueryClient, useQuery, type UseQueryOptions } from '@tanstack/react-query';
-import type { CommandInput, CommandName, CommandOutput, InvokeOptions, IpcError } from '@shared/ipc/schema';
+import type { CommandInput, CommandName, CommandOutput, InvokeOptions, InvokeRest, IpcError } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from './client';
 
@@ -91,12 +91,12 @@ export function useCommand<N extends QueryCommand>(
   name: N,
   input: CommandInput<N>,
   options?: Omit<UseQueryOptions<CommandOutput<N>, IpcCommandError>, 'queryKey' | 'queryFn'>,
-  opts?: InvokeOptions,
+  ...opts: InvokeRest<N> // P5 O6 M4: a path command's machine
 ) {
   return useQuery<CommandOutput<N>, IpcCommandError>({
-    queryKey: ['maws', name, input, ...machineKey(opts?.machine)],
+    queryKey: ['maws', name, input, ...machineKey((opts[0] as InvokeOptions | undefined)?.machine)],
     queryFn: async () => {
-      const result = await ipc.invoke(name, input, opts);
+      const result = await ipc.invoke(name, input, ...opts);
       if (!result.ok) throw new IpcCommandError(result.error);
       return result.value;
     },

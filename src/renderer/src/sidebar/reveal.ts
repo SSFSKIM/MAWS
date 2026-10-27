@@ -9,6 +9,7 @@ import { ipc } from '../ipc/client';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { useLayout } from '../stores/layout';
+import { machineOf } from '@shared/machine/address';
 
 let revealer: ((projectId: ProjectId) => void) | null = null;
 export const projectReveal = createStore<{ pending: ProjectId | null }>(() => ({ pending: null }));
@@ -32,7 +33,7 @@ export function revealProject(projectId: ProjectId): void {
   if (project && (project.hidden || project.discovered)) {
     // The same restore as Hidden projects: main persists visibility and publishes the project list.
     // A response arriving before that event is safe: the sidebar keeps its pending focus until the row mounts.
-    void ipc.invoke('session.projects.add', { directory: project.directory }).then((result) => {
+    void ipc.invoke('session.projects.add', { directory: project.directory }, { machine: machineOf(projectId) }).then((result) => {
       if (!result.ok) {
         toast({ level: 'danger', text: result.error.message, actions: [], dismissible: true });
         return;

@@ -39,7 +39,7 @@ beforeEach(() => {
   backend = createWidgetBackend({ root: ROOT, statuses: loadScenario(join(ROOT, 'test/fixtures/shell/nine-sessions.json')).engine });
   window.maws = backend.bridge();
   useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
-  offs = [ipc.on('session.status', (event) => useSessions.getState().applyStatus(event))];
+  offs = [ipc.on('session.status', (event) => useSessions.getState().applyStatus(event, TEST_MACHINE))];
 });
 afterEach(() => {
   cleanup();

@@ -118,10 +118,10 @@ function StubCard({ appSessionId, onAccept }: { appSessionId: AppSessionId; onAc
 const failSend = new Set<string>();
 const composerClient: MawsBridge = {
   ...ipc,
-  invoke: ((name, input) => {
+  invoke: ((name, input, ...opts) => {
     const appSessionId = (input as { appSessionId?: string } | undefined)?.appSessionId;
     if (name === 'session.send' && appSessionId !== undefined && failSend.delete(appSessionId)) return Promise.resolve({ ok: false, error: { code: 'internal', message: 'write_failed: injected by the harness' } });
-    return ipc.invoke(name, input);
+    return ipc.invoke(name, input, ...opts);
   }) as MawsBridge['invoke'],
 };
 

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { at } from '../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { registerSlot, resetSlots } from '../app/slots';
 import { PluginBand } from '../composer/frame/PluginSites';
@@ -66,7 +66,7 @@ it('passes the measured docked pane viewport, not merely bodyColumns props', asy
   const disconnect = connectPluginPanes(fake.client);
   try {
     render(<TestHost />);
-    await act(async () => useSessions.getState().applyStatus({ appSessionId: A, status: { ...status(A), uiSurface: { clientId: 'maws-main' } } }));
+    await act(async () => useSessions.getState().applyStatus({ appSessionId: A, status: { ...status(A), uiSurface: { clientId: 'maws-main' } } }, TEST_MACHINE));
     resize(); await frame();
     expect(asks().filter((ask) => ask.component === 'Pane').at(-1)?.viewport).toEqual({ columns: 60, rows: 20, isFullscreen: true });
   } finally { disconnect(); }

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
-import { at } from '../../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../../test/support/machine';
 import { loadJournal } from '../../../../../test/support/fixtures';
 import { resetSurfaceRegistry, useSpinnerText } from '../../engine-surface';
 import { useSessions } from '../../stores/sessions';
@@ -31,7 +31,7 @@ function recorded(): Record<string, unknown> {
 const ANSWERS = recorded();
 
 let fake: FakeClient;
-const attach = () => act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...status(BARE), appSessionId: ID, uiSurface: { clientId: 'maws-main' } } }));
+const attach = () => act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...status(BARE), appSessionId: ID, uiSurface: { clientId: 'maws-main' } } }, TEST_MACHINE));
 beforeEach(() => {
   resetSurfaceRegistry();
   useSessions.setState({ engine: new Map() });

@@ -34,7 +34,7 @@ export function createSettingsStore(client: MawsBridge) {
     },
     async setTheme(theme) {
       const fresh = freshness.stamp();
-      const result = await client.invoke('settings.set', { theme });
+      const result = await client.invoke('settings.set', { theme }, { machine: client.localMachine }); // P5 O6 M4: this machine's settings (O3)
       if (!result.ok) console.error('[settings] settings.set failed', result.error);
       else if (fresh()) set({ state: result.value });
     },

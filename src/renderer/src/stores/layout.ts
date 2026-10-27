@@ -30,7 +30,8 @@ import {
   type TabSetKey,
   type TabTarget,
 } from '@shared/ipc/schema/layout';
-import { addressOf, isAddress } from '@shared/machine/address';
+import { addressOf, isAddress, machineOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 import type * as z from 'zod';
 import * as model from './layout-model';
 import { normalizeSurfaceStack, rememberSurfaceContext, stackAfterSelection, surfaceRefs, surfaceScope, surfaceSession, surfaceTabs } from '../panel/surface-model';
@@ -94,6 +95,11 @@ export interface LayoutState {
   floatSplit(sessionTabId: string, opts?: { foldPanel?: boolean }): void;
   dockSplit(): void;
   dropSession(appSessionId: AppSessionId): void; // session.removed
+  // P5 O6 M4 ("The layout across machines"): run after the first snapshot of each of a machine's link generations. The
+  // machine's tabs and panel states whose session `knownSession` (hydration's) no longer knows go, as hydration drops a
+  // local one's: what that machine does not list, unless the registered retention keeps it. Before hydration, nothing:
+  // hydration judges every tab against what is known then.
+  settleMachine(machine: MachineRef): void;
   // A patch, or an updater for a change that depends on the sidebar it lands on (an early one is replayed over the
   // hydrated value, not the default it was made against).
   setSidebar(patch: Partial<LayoutRegions['sidebar']> | ((sidebar: LayoutRegions['sidebar']) => Partial<LayoutRegions['sidebar']>)): void;
@@ -520,6 +526,13 @@ export function createLayoutStore() {
           set({ panelBySession });
         }
       },
+      settleMachine(machine) {
+        const { hydrated, knownSession, main: current, panelBySession } = get();
+        if (!hydrated) return;
+        const sessions = new Set<AppSessionId>(panelBySession.keys());
+        for (const tab of [...model.allTabs(current), ...current.closedTabs]) if (tab.kind === 'session' || tab.kind === 'agent') sessions.add(tab.appSessionId);
+        for (const id of sessions) if (machineOf(id) === machine && !knownSession(id)) get().dropSession(id);
+      },
 
       setSidebar: (patch) => regions((r) => ({ ...r, sidebar: { ...r.sidebar, ...(typeof patch === 'function' ? patch(r.sidebar) : patch) } })),
       setPanel: (patch) => regions((r) => ({ ...r, panel: panelAfter(r.panel, patch) })),
@@ -638,6 +651,12 @@ function persistedKeys(state: LayoutState): Map<LayoutKey, unknown> {
 const openSessionsOf = (main: LayoutMain): AppSessionId[] =>
   model.allTabs(main).flatMap((tab) => (tab.kind === 'session' || tab.kind === 'agent' ? [tab.appSessionId] : []));
 
+// A session's panel key whose session is another machine's than `local`.
+function otherMachinePanelKey(key: LayoutKey, local: MachineRef): boolean {
+  const id = PANEL_KEY.exec(key)?.[1];
+  return id !== undefined && key !== 'panel.pinned' && isAddress(id) && machineOf(id) !== local;
+}
+
 function storedValue(key: LayoutKey, slice: unknown): unknown {
   if (key === 'panelTools.params') return { version: 1, params: slice };
   if (key === 'panelTools.activeNoSession') return { version: 1, activeTabId: slice };
@@ -697,6 +716,8 @@ export function persistLayout(client: MawsBridge, store = useLayout): () => void
       clearTimeout(timer);
       pending.delete(key);
     }
+    // P5 O6 M4: main deletes the panel key of its own removed session, never another machine's, so the page deletes that.
+    for (const key of written?.keys() ?? []) if (!now.has(key) && otherMachinePanelKey(key, client.localMachine)) write(key, null);
     written = now;
   });
   window.addEventListener('beforeunload', flush);

@@ -7,7 +7,7 @@ import { BUILTIN_MODELS, GATEWAY_AUTO_NOTE } from '@shared/sessions/models';
 import type { StartOutcome } from '@shared/sessions/setup';
 import { record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { at } from '../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { ipc } from '../ipc/client';
 import { useUnstartedTitle } from '../keymap/actions-runtime';
 import { useNotices } from '../stores/notices';
@@ -20,6 +20,7 @@ import { connectSessions, createUnstartedSession, retainsTab, unstartedTitle } f
 import { connectSetup, useSetup } from './store';
 import { modelsOf, projectFacts, useSetupIntent, worktreeNameFor } from './useSetupIntent';
 import type { UseSetupIntent } from '../composer/setup-intent';
+import { preloadOf } from '../test-support/preload-of';
 
 const CATALOGUE: ModelCatalogue = {
   source: 'cached',
@@ -56,7 +57,7 @@ function withMain(auto: Parameters<typeof fakeClient>[0] = {}) {
     ...auto,
   };
   fake = fakeClient(Object.fromEntries(Object.entries(answers).filter(([, answer]) => answer !== undefined)));
-  window.maws = fake.client as unknown as PreloadBridge;
+  window.maws = preloadOf(fake);
 }
 
 beforeEach(() => {
@@ -339,7 +340,7 @@ describe('close guard', () => {
     expect(notice?.text).toBe(`Worktree ${path} was kept`);
     expect(notice?.actions.map((a) => a.label)).toEqual(['Remove worktree…']);
     act(() => notice!.actions[0]!.run());
-    expect(useDialogs.getState().open).toEqual({ kind: 'cleanup', target: { repoRoot: REPO, path, branch: 'worktree-accept-fail' } });
+    expect(useDialogs.getState().open).toEqual({ kind: 'cleanup', target: { machine: TEST_MACHINE, repoRoot: REPO, path, branch: 'worktree-accept-fail' } });
   });
 });
 

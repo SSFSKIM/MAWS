@@ -42,9 +42,10 @@ export const ShellTranscript: Slots['transcript'] = ({ appSessionId, agentId }) 
   return <TranscriptSlot appSessionId={appSessionId} agentId={agentId ?? undefined} className="h-full" />;
 };
 
-// A path chip: C5's file tab at that line. The chip's session is not known to a registered action, and a file tab's
-// identity is its path and machine (C5's `tabId`; P5 O6 M2), so the tab carries none, on the local machine.
-export const openFileInTab = (path: string, line?: number) => useLayout.getState().openTab({ kind: 'file', path, line: line ?? null, appSessionId: null, machine: machineFor(null) });
+// A path chip: C5's file tab at that line. A file tab's identity is its path and machine (C5's `tabId`; P5 O6 M2), so the
+// tab carries no session; its machine is the chip's row's session's (P5 O6 M4), else the local one.
+export const openFileInTab = (path: string, line?: number, appSessionId: AppSessionId | null = null) =>
+  useLayout.getState().openTab({ kind: 'file', path, line: line ?? null, appSessionId: null, machine: machineFor(appSessionId) });
 
 export function connectTranscript(): () => void {
   registerSlot('transcript', ShellTranscript);

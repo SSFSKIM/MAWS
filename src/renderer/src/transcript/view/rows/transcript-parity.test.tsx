@@ -58,7 +58,7 @@ it('shows file basenames through the surface wrapper without shortening tooltips
   expect(file.textContent).toBe('/p/src/widget.ts');
   expect(file.title).toBe('/p/src/widget.ts');
   fireEvent.click(file);
-  expect(view.actions.openFile).toHaveBeenCalledWith('/p/src/widget.ts', undefined);
+  expect(view.actions.openFile).toHaveBeenCalledWith('/p/src/widget.ts', undefined, store.key);
 });
 
 it('uses each same-basename file’s shortest distinguishing suffix through wrapped group cells', async () => {

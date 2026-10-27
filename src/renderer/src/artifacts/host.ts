@@ -19,7 +19,7 @@ import { newDoc, newSuggestionDoc, type Doc } from '@artifacts/yjs';
 import { actorDisplay, type Actor } from '@shared/artifacts/actor';
 import type { ArtifactProvisional } from '@shared/artifacts/provisional'; // P4-A2
 import { artifactUrl } from '@shared/artifacts/scheme';
-import type { CommandInput, CommandName, CommandOutput, MawsBridge } from '@shared/ipc/schema';
+import type { CommandInput, CommandName, CommandOutput, InvokeRest, MawsBridge } from '@shared/ipc/schema';
 import { artifactRefusalOf } from '@shared/ipc/schema/artifacts';
 import { ArtifactCommandError } from './command-error';
 import { createConnectorHost } from './connectors';
@@ -50,8 +50,8 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
   let hostRevision = -1; // the engine host's state revision last heard; a consumer keeps the higher (HostState)
   let hostIsReady = false; // what that state said
 
-  const call = async <N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandOutput<N>> => {
-    const result = await ipc.invoke(name, input);
+  const call = async <N extends CommandName>(name: N, input: CommandInput<N>, ...opts: InvokeRest<N>): Promise<CommandOutput<N>> => {
+    const result = await ipc.invoke(name, input, ...opts);
     if (!result.ok) throw new ArtifactCommandError(result.error);
     return result.value;
   };

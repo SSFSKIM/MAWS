@@ -3,15 +3,18 @@
 // on it; the two stores' own suites cover the rest of the cache through their stores.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
+import type { MachineRef } from '@shared/machine/ref';
+import { TEST_MACHINE } from '../../../../../../test/support/machine';
 import { createHeldDiffs, diffKeys, type HeldDiffState } from './held-diffs';
 import { deferred, installFakeMain, ok } from '../../../test-support/code';
 import { createClient } from '../../../ipc/client';
 
 interface Target {
+  machine: MachineRef;
   directory: string;
   scope: 'worktree';
 }
-const TARGET: Target = { directory: '/repo', scope: 'worktree' };
+const TARGET: Target = { machine: TEST_MACHINE, directory: '/repo', scope: 'worktree' };
 const keys = diffKeys<Target>((t) => `${t.directory}\0${t.scope}`, '\0');
 const listing = (path: string) => ({ patch: '', files: [{ path, oldPath: null, insertions: 1, deletions: 0, binary: false }] });
 

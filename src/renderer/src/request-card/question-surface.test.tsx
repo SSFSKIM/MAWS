@@ -6,7 +6,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { bareOf } from '@shared/machine/address';
 import { status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { at } from '../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { invalidateSession, resetSurfaceRegistry } from '../engine-surface/registry';
 import { connectKeys } from '../keymap/dispatcher';
 import { useSessions } from '../stores/sessions';
@@ -35,7 +35,7 @@ beforeEach(() => {
   drawing = { tree: { type: 'engine', ref: 0 }, props: {}, rewritten: false, hooked: false };
   fake = fakeClient({ 'session.ui.render': () => drawing, 'session.answer': () => ({ outcome: 'delivered' }) });
   window.maws = fake.client as unknown as PreloadBridge;
-  useSessions.getState().applyStatus({ appSessionId: APP, status: { ...status(APP), uiSurface: { clientId: 'maws-main' } } });
+  useSessions.getState().applyStatus({ appSessionId: APP, status: { ...status(APP), uiSurface: { clientId: 'maws-main' } } }, TEST_MACHINE);
   disconnect = connectKeys();
 });
 afterEach(() => {
@@ -156,7 +156,7 @@ it('a hover preview never registers an interactive question surface', async () =
 });
 
 it('a detached session uses the native card without asking for a surface', async () => {
-  useSessions.getState().applyStatus({ appSessionId: APP, status: status(APP, { process: 'exited' }) });
+  useSessions.getState().applyStatus({ appSessionId: APP, status: status(APP, { process: 'exited' }) }, TEST_MACHINE);
   mount();
   await act(async () => {});
   expect(asks()).toEqual([]);

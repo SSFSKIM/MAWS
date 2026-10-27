@@ -66,7 +66,7 @@ beforeEach(() => {
     );
   window.maws = { localMachine: TEST_MACHINE, invoke, on: () => () => {} } as unknown as PreloadBridge;
   const items: AttentionItem[] = [itemFor(bash, APP), itemFor(read, APP)];
-  useAttention.getState().applySnapshot(items);
+  useAttention.getState().applySnapshot(items, TEST_MACHINE);
 });
 afterEach(() => {
   disposeRenderer();
@@ -98,7 +98,7 @@ describe("request renderer registers through C6's seam", () => {
     act(() => undock());
     expect(slot('r1')?.querySelector('h3')?.textContent).toBe('Bash');
 
-    act(() => useAttention.getState().applyChanged({ appSessionId: APP, items: [itemFor(read, APP)] })); // r1 retired
+    act(() => useAttention.getState().applyChanged({ appSessionId: APP, items: [itemFor(read, APP)] }, TEST_MACHINE)); // r1 retired
     expect(slot('r1')?.textContent).toBe('');
 
     act(() => disposeRenderer());
@@ -119,7 +119,7 @@ describe("request renderer registers through C6's seam", () => {
   });
 
   it('a request id two sessions share (two replays of one fixture) resolves to the item of the slot’s tool use', async () => {
-    act(() => useAttention.getState().applySnapshot([itemFor(twin, TWIN), itemFor(bash, APP)])); // the twin's session is listed first
+    act(() => useAttention.getState().applySnapshot([itemFor(twin, TWIN), itemFor(bash, APP)], TEST_MACHINE)); // the twin's session is listed first
     const slotRow = { id: 'slot:r1', turnId: null, at: bash.at, kind: 'request_slot', requestId: 'r1', toolUseId: 'b1', requestKind: 'permission', toolName: 'Bash', requestedAt: bash.at } as never;
     const { renderSessionRequest } = await import('./inline');
     render(<>{renderSessionRequest(slotRow)}</>);

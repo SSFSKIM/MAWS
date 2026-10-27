@@ -8,7 +8,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, type WidgetBackend } from '../../../../test/support/widget-backend';
-import { at } from '../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { ipc } from '../ipc/client';
 import { useComposerStore } from '../stores/composer';
 import { useNotices } from '../stores/notices';
@@ -28,7 +28,7 @@ beforeEach(() => {
   window.maws = backend.bridge();
   // the sessions store follows the backend's statuses, as connectShell does in the app
   useSessions.setState({ engine: new Map([[READY, lifted(backend.status(READY_ID))]]) });
-  ipc.on('session.status', (event) => useSessions.getState().applyStatus(event));
+  ipc.on('session.status', (event) => useSessions.getState().applyStatus(event, TEST_MACHINE));
 });
 afterEach(() => {
   delete (window as { maws?: unknown }).maws;

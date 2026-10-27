@@ -5,7 +5,7 @@ import type { PreloadBridge } from '@shared/ipc/schema';
 import type { StartOutcome } from '@shared/sessions/setup';
 import { TRUST_GATES } from '@shared/sessions/trust';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { at } from '../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { ipc } from '../ipc/client';
 import { useNotices } from '../stores/notices';
 import { closeDialog, useDialogs } from './dialogs';
@@ -37,6 +37,7 @@ import { GatewayDialogs } from '../gateway/SwitchSheet';
 import { registerAction } from '../keymap/actions-runtime';
 import { useSettings } from '../stores/settings';
 import { REL } from '../test-support/relative-time';
+import { preloadOf } from '../test-support/preload-of';
 // C11 end
 
 // P5 O6 M2: the page holds the session's id as an address (`ID`, and its intents through `intent`); the fake
@@ -62,7 +63,7 @@ const dockedIds = () => screen.getByTestId('docked').dataset.cards;
 
 function withMain(auto: Parameters<typeof fakeClient>[0] = {}) {
   fake = fakeClient(auto);
-  window.maws = fake.client as unknown as PreloadBridge;
+  window.maws = preloadOf(fake);
 }
 
 beforeEach(() => {
@@ -412,7 +413,7 @@ describe('failure card', () => {
     expect(kept?.text).toBe('Worktree accept-fail kept as this session’s location');
     expect(kept?.actions.map((a) => a.label)).toEqual(['Remove worktree…']);
     act(() => kept!.actions[0]!.run());
-    expect(useDialogs.getState().open).toEqual({ kind: 'cleanup', target: { repoRoot: REPO, path, branch: 'worktree-accept-fail' } });
+    expect(useDialogs.getState().open).toEqual({ kind: 'cleanup', target: { machine: TEST_MACHINE, repoRoot: REPO, path, branch: 'worktree-accept-fail' } });
     act(() => closeDialog());
     await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(fake.invoked('session.start')).toEqual([{ appSessionId: BARE_ID, message: null, options: {} }]);
@@ -683,7 +684,7 @@ describe('a record’s trust card and its continuation', () => {
     const first = continueSetup(ID, { trust: 'accepted' }, MESSAGE);
     const rowResume = resumeSession(ID);
     await waitFor(() => expect(fake.pending('session.acquire')).toBe(2));
-    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }, TEST_MACHINE));
     await act(() => fake.reply('session.acquire', ACCEPTED));
     await act(() => fake.reply('session.acquire', READY_AGAIN));
     expect(await rowResume).toBe(true);
@@ -716,7 +717,7 @@ describe('a record’s trust card and its continuation', () => {
       await act(() => vi.advanceTimersByTimeAsync(RELAY_POLL_MS * 2)); // the poll finds the relay up while Run direct is in flight
       expect(fake.pending('session.acquire'), 'the poll started no second continuation').toBe(1);
       expect(fake.invoked('session.acquire')[1]).toEqual({ appSessionId: BARE_ID, reason: 'send', options: { gateway: 'direct' } });
-      act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }));
+      act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }, TEST_MACHINE));
       await act(() => fake.reply('session.acquire', ACCEPTED));
       await waitFor(() => expect(dockedIds()).toBe(''));
       expect(fake.invoked('session.acquire')).toHaveLength(2);
@@ -736,7 +737,7 @@ describe('a record’s trust card and its continuation', () => {
     await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(useSetup.getState().cards.has(ID)).toBe(false);
-    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }, TEST_MACHINE));
     await act(() => fake.reply('session.acquire', ACCEPTED));
     await waitFor(() => expect(isContinuing(ID)).toBe(false));
     expect(fake.invoked('session.send')).toEqual([]);
@@ -791,7 +792,7 @@ describe('a record’s trust card and its continuation', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Run direct' }));
     await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }, TEST_MACHINE));
     await act(() => fake.reply('session.acquire', ACCEPTED));
     await waitFor(() => expect(isContinuing(ID)).toBe(false));
     expect(fake.invoked('session.send')).toEqual([]);
@@ -801,7 +802,7 @@ describe('a record’s trust card and its continuation', () => {
   it('a card cancelled while its message is being sent leaves the draft alone', async () => {
     withMain({ 'session.queue.list': { entries: [], paused: false } });
     act(() => useSetup.getState().dock(ID, { kind: 'trust', trust: trustState(), message: MESSAGE }));
-    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }, TEST_MACHINE));
     render(<Docked />);
     await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
     await act(() => fake.reply('session.acquire', ACCEPTED));
@@ -835,7 +836,7 @@ describe('a record’s trust card and its continuation', () => {
   it('a card cancelled while the seam reads the queue sends nothing', async () => {
     withMain({ 'session.send': { messageUuid: '22222222-2222-4222-8222-222222222222', disposition: 'sent', queueId: 'q1' } });
     act(() => useSetup.getState().dock(ID, { kind: 'trust', trust: trustState(), message: MESSAGE }));
-    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }, TEST_MACHINE));
     render(<Docked />);
     await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
     await act(() => fake.reply('session.acquire', ACCEPTED));

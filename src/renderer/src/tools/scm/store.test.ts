@@ -10,8 +10,9 @@ import type { PreloadBridge } from '@shared/ipc/schema';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import type { ScmRemoteOutput } from '@shared/ipc/schema/scm';
 import { isolatedGitEnv } from '../../../../../test/support/git-env';
-import { at } from '../../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../../test/support/machine';
 import { createClient } from '../../ipc/client';
+import { checkoutKey } from '../../ipc/machine';
 import { queryClient } from '../../ipc/query';
 import { createGitStore } from '../../stores/git';
 import { fail, installFakeMain, ok, type Handler } from '../../test-support/code';
@@ -89,8 +90,8 @@ describe('splitPatch on a real untracked patch (task 1’s deferred proof)', () 
 
 const APP_PATCH = 'diff --git a/src/app.ts b/src/app.ts\nindex 1..2 100644\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-old\n+new\n';
 const APP_FILES = [{ path: 'src/app.ts', oldPath: null, insertions: 1, deletions: 1, binary: false }];
-const STAGED: ScmDiffTarget = { directory: DIR, scope: 'staged' };
-const WORKTREE: ScmDiffTarget = { directory: DIR, scope: 'worktree' };
+const STAGED: ScmDiffTarget = { machine: TEST_MACHINE, directory: DIR, scope: 'staged' };
+const WORKTREE: ScmDiffTarget = { machine: TEST_MACHINE, directory: DIR, scope: 'worktree' };
 
 function scmMain(extra: Handler = () => ok(), status: GitStatus = statusOf()) {
   return installFakeMain((name, input) => {
@@ -128,7 +129,7 @@ describe('source control store: diffs', () => {
     const offs = [store.getState().hold(STAGED), store.getState().hold(WORKTREE)];
     await tick();
     expect(main.callsOf('git.diff').filter((input) => input.scope === 'untracked')).toEqual([]);
-    const target: ScmDiffTarget = { directory: DIR, scope: 'untracked', path: 'untracked.txt' };
+    const target: ScmDiffTarget = { machine: TEST_MACHINE, directory: DIR, scope: 'untracked', path: 'untracked.txt' };
     const off = store.getState().hold(target);
     await tick();
     expect(main.callsOf('git.diff').filter((input) => input.scope === 'untracked')).toEqual([{ directory: DIR, scope: 'untracked', path: 'untracked.txt' }]);
@@ -160,12 +161,12 @@ describe('source control store: diffs', () => {
     const main = scmMain();
     const git = createGitStore(validated(main.bridge), { diffDelayMs: 10_000 });
     const store = createScmStore(validated(main.bridge), { git });
-    const unwatch = git.getState().watch(DIR);
-    const offs = [store.getState().hold(STAGED), store.getState().hold({ directory: DIR, scope: 'untracked', path: 'untracked.txt' }), store.getState().hold({ directory: '/other', scope: 'staged' })];
+    const unwatch = git.getState().watch(TEST_MACHINE, DIR);
+    const offs = [store.getState().hold(STAGED), store.getState().hold({ machine: TEST_MACHINE, directory: DIR, scope: 'untracked', path: 'untracked.txt' }), store.getState().hold({ machine: TEST_MACHINE, directory: '/other', scope: 'staged' })];
     const scmDiffs = () => main.callsOf('git.diff').filter((input) => input.scope !== 'all'); // the git store's own sum aside
     await vi.advanceTimersByTimeAsync(0);
     expect(scmDiffs()).toHaveLength(3);
-    git.getState().applyChanged({ repoRoot: DIR, status: statusOf({ checkedAt: '2026-10-06T10:00:01.000Z' }), reason: 'index' });
+    git.getState().applyChanged({ repoRoot: DIR, status: statusOf({ checkedAt: '2026-10-06T10:00:01.000Z' }), reason: 'index' }, TEST_MACHINE);
     await vi.advanceTimersByTimeAsync(SCM_REFRESH_MS - 1);
     expect(scmDiffs()).toHaveLength(3);
     await vi.advanceTimersByTimeAsync(1);
@@ -239,7 +240,7 @@ describe('source control store: diffs', () => {
   // answered after it says nothing about the file, so the "No diff for this entry" flash before git.changed is gone
   it('drops an untracked answer when a stage or discard of the file went out since the read was asked, and reads again after it', async () => {
     vi.useFakeTimers();
-    const target: ScmDiffTarget = { directory: DIR, scope: 'untracked', path: 'untracked.txt' };
+    const target: ScmDiffTarget = { machine: TEST_MACHINE, directory: DIR, scope: 'untracked', path: 'untracked.txt' };
     const reads: ((answer: 'patch' | 'gone') => void)[] = [];
     const main = installFakeMain(async (name, input) => {
       if (name === 'scm.stage' || name === 'scm.discard') return ok({ ok: true, status: statusOf({ files: [] }), output: '' });
@@ -256,7 +257,7 @@ describe('source control store: diffs', () => {
     expect(diffOf(store.getState(), target)).toMatchObject({ status: 'ok' });
 
     for (const [i, mutate] of [() => store.getState().stage(ui, at(A), ['untracked.txt']), () => store.getState().discard(ui, at(A), [{ path: 'untracked.txt', group: 'untracked' }])].entries()) {
-      store.getState().statusChanged(DIR); // a re-read, in flight when the mutation goes out
+      store.getState().statusChanged(checkoutKey(TEST_MACHINE, DIR)); // a re-read, in flight when the mutation goes out
       await vi.advanceTimersByTimeAsync(SCM_REFRESH_MS);
       await mutate();
       reads[1 + 2 * i]!('gone'); // main staged it first: C4 no longer lists it as untracked
@@ -268,7 +269,7 @@ describe('source control store: diffs', () => {
       await vi.advanceTimersByTimeAsync(0);
     }
 
-    store.getState().statusChanged(DIR); // with no mutation since it was asked, a refusal is the answer
+    store.getState().statusChanged(checkoutKey(TEST_MACHINE, DIR)); // with no mutation since it was asked, a refusal is the answer
     await vi.advanceTimersByTimeAsync(SCM_REFRESH_MS);
     reads[5]!('gone');
     await vi.advanceTimersByTimeAsync(0);
@@ -279,7 +280,7 @@ describe('source control store: diffs', () => {
   it('says why a read failed', async () => {
     const main = installFakeMain((name) => (name === 'git.diff' ? fail('not an untracked file: udir/') : ok()));
     const store = createScmStore(validated(main.bridge));
-    const target: ScmDiffTarget = { directory: DIR, scope: 'untracked', path: 'udir/' };
+    const target: ScmDiffTarget = { machine: TEST_MACHINE, directory: DIR, scope: 'untracked', path: 'udir/' };
     const off = store.getState().hold(target);
     await tick();
     expect(diffOf(store.getState(), target)).toEqual({ status: 'error', message: 'not an untracked file: udir/' });
@@ -294,7 +295,7 @@ describe('source control store applies no status of its own and resumes a run fr
     const main = scmMain((name) => (name === 'scm.stage' || name === 'scm.unstage' ? ok({ ok: true, status: statusOf({ files: [] }), output: '' }) : ok()));
     const git = createGitStore(validated(main.bridge));
     const store = createScmStore(validated(main.bridge), { git });
-    const unwatch = git.getState().watch(DIR);
+    const unwatch = git.getState().watch(TEST_MACHINE, DIR);
     await tick();
     const entries = git.getState().entries;
     const ui = createScmUi({ session: at(A) });

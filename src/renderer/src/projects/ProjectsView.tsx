@@ -7,6 +7,7 @@ import { isSidebarProject, projectGroups } from '../sidebar/project-groups';
 import { runAddProject, runProjectAction, useAddProjectEnabled, useProjectActionEnabled } from '../sidebar/project-actions';
 import { useSessions } from '../stores/sessions';
 import { SearchField } from '../widgets/plugins/LibraryHeader';
+import { machineOf } from '@shared/machine/address';
 
 // UX2-K: UX1's Add-project chooser as an app destination. Discovery is a choice, not sidebar membership;
 // only the add command promotes it. Removal and the native chooser keep the shell's existing action paths.
@@ -28,7 +29,7 @@ export function ProjectsView() {
     setBusy(true);
     setError(null);
     try {
-      const result = await ipc.invoke('session.projects.add', { directory: project.directory });
+      const result = await ipc.invoke('session.projects.add', { directory: project.directory }, { machine: machineOf(project.id) });
       if (!result.ok) setError(result.error.message);
       // The revisioned project-list event updates membership, never this unrevisioned response.
     } finally { setBusy(false); }

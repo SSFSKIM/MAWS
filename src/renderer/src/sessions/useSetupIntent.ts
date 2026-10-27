@@ -16,6 +16,8 @@ import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings'; // W3
 import { patchIntent, startIntent, type HookResult } from './setup-actions';
 import { useSetup } from './store';
+import { machineOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 
 // C7's `ModelInfo`: the catalogue fills `value`, `displayName`, the two capability flags and `supportedEffortLevels`
 // when the entry lists them, and leaves `description` absent (an entry without levels offers every effort level).
@@ -176,12 +178,13 @@ interface RepositoryFacts {
 
 const BUILTIN_FALLBACK: ModelCatalogue = { models: [...BUILTIN_MODELS], source: 'builtin', at: null };
 
-async function readRepository(directory: string): Promise<RepositoryFacts> {
-  const trust = await ipc.invoke('session.trust.check', { directory });
+// P5 O6 M4: an intent is read on its session's machine, the one its address names (this machine's until O7's picker).
+async function readRepository(machine: MachineRef, directory: string): Promise<RepositoryFacts> {
+  const trust = await ipc.invoke('session.trust.check', { directory }, { machine });
   if (!trust.ok) return { directory, repoRoot: null, worktrees: [], trustError: trust.error.message };
   if (trust.value.keyKind !== 'repo') return { directory, repoRoot: null, worktrees: [], trustError: null };
   const repoRoot = trust.value.trustKey; // a repository's trust key is its main worktree's root
-  const listed = await ipc.invoke('git.worktree.list', { repoRoot });
+  const listed = await ipc.invoke('git.worktree.list', { repoRoot }, { machine });
   return { directory, repoRoot, worktrees: listed.ok ? listed.value.worktrees : [], trustError: null };
 }
 
@@ -190,8 +193,8 @@ async function readRepository(directory: string): Promise<RepositoryFacts> {
 // so each new tab sees what the host knows now for the route it would launch on, not the most recently updated route's.
 // A failed read shows the built-in list the host itself answers before any launch. The directory it names is the one
 // the launch would read settings from, which may set a model environment of its own (debt wave 5).
-async function readCatalogue(gateway: SetupIntent['gateway'], cwd: string | null): Promise<ModelCatalogue> {
-  const result = await ipc.invoke('engine.models', cwd === null ? { refresh: false, gateway } : { refresh: false, gateway, cwd });
+async function readCatalogue(machine: MachineRef, gateway: SetupIntent['gateway'], cwd: string | null): Promise<ModelCatalogue> {
+  const result = await ipc.invoke('engine.models', cwd === null ? { refresh: false, gateway } : { refresh: false, gateway, cwd }, { machine });
   if (result.ok) return result.value;
   console.warn('[sessions] engine.models unavailable', result.error);
   return BUILTIN_FALLBACK;
@@ -206,6 +209,7 @@ function useSetupOptions(
   const [facts, setFacts] = useState<RepositoryFacts | null>(null);
   const [catalogue, setCatalogue] = useState<ModelCatalogue>(BUILTIN_FALLBACK);
   const fallback = useSettings((s) => s.state?.settings.permissions.autoFallback) ?? 'acceptEdits'; // W3
+  const machine = machineOf(appSessionId);
 
   // Only an unstarted session reads it: C7 calls this hook from every composer, and a started session's has no intent.
   const route = intent?.gateway ?? null;
@@ -213,11 +217,11 @@ function useSetupOptions(
   useEffect(() => {
     if (route === null) return;
     let live = true;
-    void readCatalogue(route, settingsDirectory).then((c) => live && setCatalogue(c));
+    void readCatalogue(machine, route, settingsDirectory).then((c) => live && setCatalogue(c));
     return () => {
       live = false;
     };
-  }, [route, settingsDirectory]);
+  }, [machine, route, settingsDirectory]);
 
   // The repository is read again only when the base directory moves to another repository or out of one; a move
   // between two locations of one repository keeps what was read.
@@ -225,11 +229,11 @@ function useSetupOptions(
   useEffect(() => {
     if (base === null || known) return;
     let live = true;
-    void readRepository(base).then((f) => live && setFacts(f));
+    void readRepository(machine, base).then((f) => live && setFacts(f));
     return () => {
       live = false;
     };
-  }, [appSessionId, base, known]);
+  }, [machine, base, known]);
 
   const options = useMemo((): SetupIntentOptions => {
     if (intent === null) return { models: [], autoModeNote: null };
@@ -239,10 +243,10 @@ function useSetupOptions(
   // check still fails.
   const recheck = useCallback(async () => {
     if (base === null) return null;
-    const read = await readRepository(base);
+    const read = await readRepository(machine, base);
     setFacts(read);
     return read.trustError;
-  }, [base]);
+  }, [machine, base]);
   // facts answer the current base only (a project change reads the new one; meanwhile the row shows no branch)
   const current = facts !== null && known ? facts : null;
   return { options, facts: current, trustError: current?.trustError ?? null, recheck };
@@ -257,7 +261,7 @@ async function newProject(appSessionId: AppSessionId): Promise<HookResult> {
   if (!picked.ok) return { ok: false, error: picked.error.message };
   const directory = picked.value.files[0]?.path;
   if (directory === undefined) return { ok: true };
-  const added = await ipc.invoke('session.projects.addFolder', { directory });
+  const added = await ipc.invoke('session.projects.addFolder', { directory }, { machine: machineOf(appSessionId) });
   if (!added.ok) return { ok: false, error: added.error.message };
   return patchIntent(appSessionId, { projectId: added.value.project.id, location: added.value.location });
 }

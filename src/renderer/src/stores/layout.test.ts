@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type LayoutMainV1 } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
-import { at, TEST_MACHINE as M } from '../../../../test/support/machine';
+import { addressOf } from '@shared/machine/address';
+import { at, OTHER_MACHINE, TEST_MACHINE as M } from '../../../../test/support/machine';
 import { createLayoutStore, registerReplaceGuard, type ReplaceVerdict } from './layout';
 import { currentSet } from './layout-model';
 
@@ -625,5 +626,36 @@ describe('region changes before hydration', () => {
     for (const key of ['regions', 'main.tabs', 'panel.pinned']) await fake.reply('layout.get', { value: key === 'regions' ? saved : null });
     await hydrating;
     expect(store.getState().regions.sidebar.expandedProjects).toEqual(['proj-a', 'proj-b']);
+  });
+});
+
+// P5 O6 M4 ("The layout across machines"): a machine's first snapshot of the run settles its tabs, as hydration settles
+// this machine's.
+describe('settling a machine’s tabs', () => {
+  const onB = (id: string) => addressOf(OTHER_MACHINE, id as AppSessionId);
+  const main = (...ids: string[]) => ({
+    version: 3,
+    current: NO_PROJECT,
+    sets: { [NO_PROJECT]: { panes: [{ tabs: ids.map(session), activeTabId: `session:${ids[0]}` }], focusedPane: 0, splitRatio: 0.5 } },
+    closedTabs: [],
+  });
+  const tabIds = (store: ReturnType<typeof createLayoutStore>) => shown(store).panes.flatMap((p) => p.tabs.map((t) => t.id));
+
+  it('drops that machine’s tabs it does not list, and no other machine’s', async () => {
+    let loaded = false; // B's snapshot: until it is in, B's tabs are kept
+    const { store } = await hydrate({ 'main.tabs': main(A, onB('b1'), onB('b9')) }, (id) => id === A || id === onB('b1') || !loaded);
+    expect(tabIds(store)).toEqual([`session:${A}`, `session:${onB('b1')}`, `session:${onB('b9')}`]);
+    loaded = true;
+    store.getState().settleMachine(M);
+    expect(tabIds(store)).toHaveLength(3); // this machine's settle judges only its own tabs
+    store.getState().settleMachine(OTHER_MACHINE);
+    expect(tabIds(store)).toEqual([`session:${A}`, `session:${onB('b1')}`]);
+  });
+
+  it('does nothing before hydration', () => {
+    const store = createLayoutStore();
+    store.getState().openSession(onB('b9'), { how: 'tab' });
+    store.getState().settleMachine(OTHER_MACHINE);
+    expect(tabIds(store)).toEqual([`session:${onB('b9')}`]);
   });
 });

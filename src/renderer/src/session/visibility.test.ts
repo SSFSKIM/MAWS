@@ -157,7 +157,7 @@ describe('session visibility', () => {
     const NEW = at('app-new' as AppSessionId);
     useLayout.getState().openSession(NEW);
     expect(sent()).toEqual([]);
-    useSessions.getState().applyChanged({ record: record(NEW), cause: 'live', revision: 5 } as never);
+    useSessions.getState().applyChanged({ record: record(NEW), cause: 'live', revision: 5 } as never, TEST_MACHINE);
     expect(sent()).toEqual([{ appSessionId: NEW, visible: true }]);
   });
 

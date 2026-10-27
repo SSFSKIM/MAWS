@@ -20,7 +20,9 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
 import type { GitDiffInput } from '@shared/ipc/schema/git';
 import type { RemotePlan, ScmDiscardInput, ScmMutation, ScmRemoteOutput } from '@shared/ipc/schema/scm';
+import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../../ipc/client';
+import { checkoutKey } from '../../ipc/machine';
 import { queryClient } from '../../ipc/query';
 import { useGit } from '../../stores/git';
 import {
@@ -42,7 +44,8 @@ export { settled };
 
 export const SCM_REFRESH_MS = HELD_DIFF_REFRESH_MS; // trailing, as Review's
 
-export type ScmDiffTarget = { directory: string; scope: 'staged' | 'worktree' } | { directory: string; scope: 'untracked'; path: string };
+// P5 O6 M4: the directory is its session's machine's.
+export type ScmDiffTarget = { machine: MachineRef; directory: string } & ({ scope: 'staged' | 'worktree' } | { scope: 'untracked'; path: string });
 export type ScmMutationResult = CommandResult<'scm.stage'>; // every mutation answers ScmMutation
 
 export interface ScmStore {
@@ -50,7 +53,7 @@ export interface ScmStore {
   files: ReadonlyMap<string, FileDiff>; // by fileKey: one file of a scope past its cap
   runs: ReadonlyMap<AppSessionId, RemoteRun | null>; // while a body resumes the session: null when main holds no run
   hold(target: ScmDiffTarget): () => void; // ref-counted; the first reads, the last forgets
-  statusChanged(directory: string): void; // a new status for the directory: every held diff of it re-reads, trailing
+  statusChanged(checkout: string): void; // a new status for the git store's checkout: every held diff of it re-reads, trailing
   loadFile(target: ScmDiffTarget, path: string): void; // a staged or worktree scope past its cap; an untracked diff is whole
   stage(ui: StoreApi<ScmUi>, appSessionId: AppSessionId, paths: string[]): Promise<ScmMutationResult>;
   unstage(ui: StoreApi<ScmUi>, appSessionId: AppSessionId, paths: string[]): Promise<ScmMutationResult>;
@@ -61,7 +64,7 @@ export interface ScmStore {
   reset(): void; // tests
 }
 
-const keys = diffKeys<ScmDiffTarget>((t) => `${t.directory}\0${t.scope}${t.scope === 'untracked' ? `\0${t.path}` : ''}`, '\0\0');
+const keys = diffKeys<ScmDiffTarget>((t) => `${checkoutKey(t.machine, t.directory)}\0${t.scope}${t.scope === 'untracked' ? `\0${t.path}` : ''}`, '\0\0');
 
 export const diffOf = (s: Pick<ScmStore, 'diffs'>, t: ScmDiffTarget) => s.diffs.get(keys.diff(t));
 export const fileDiffOf = (s: Pick<ScmStore, 'files'>, t: ScmDiffTarget, path: string) => s.files.get(keys.file(t, path));
@@ -145,8 +148,8 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
 
       hold: heldDiffs.hold,
 
-      statusChanged(directory) {
-        heldDiffs.reread((t) => t.directory === directory);
+      statusChanged(checkout) {
+        heldDiffs.reread((t) => checkoutKey(t.machine, t.directory) === checkout);
       },
 
       loadFile(target, path) {
@@ -231,7 +234,7 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
   });
 
   // A new status C8a's store took for a directory re-reads the diffs held over that directory.
-  if (options.git) followGitStatus(options.git, (directory) => store.getState().statusChanged(directory));
+  if (options.git) followGitStatus(options.git, (checkout) => store.getState().statusChanged(checkout));
   return store;
 }
 

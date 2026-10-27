@@ -12,6 +12,7 @@
 // `invalid_input` with one `console.error`, and nothing is sent.
 import { CommandResultEnvelopeSchema, ipcError } from '@shared/ipc/errors';
 import { REGISTRY } from '@shared/ipc/registry';
+import { routeOf } from '@shared/ipc/routes';
 import type { CommandName, CommandResult, IpcError, MawsBridge, PreloadBridge } from '@shared/ipc/schema';
 import { validateCommandOutput, validateEventPayload } from '@shared/ipc/validate';
 import { addressingOf } from '@shared/machine/address';
@@ -54,7 +55,8 @@ export function createClient(bridge: () => PreloadBridge): MawsBridge {
       if (explicit !== undefined && named.length === 1 && named[0] !== explicit) {
         return refused(`${name}: its input names machine ${named[0]} but it was sent to ${explicit}`) as CommandResult<typeof name>;
       }
-      // M4: a `path` command that names no machine is refused `invalid_input` "names no machine"; until then it is local's.
+      // M4: a `path` command whose input holds no address names its machine explicitly; a path is no machine's by itself.
+      if (named.length === 0 && explicit === undefined && routeOf(name) === 'path') return refused(`${name}: its input names no machine`) as CommandResult<typeof name>;
       const machine = named[0] ?? explicit ?? bridge().localMachine;
       const envelope = CommandResultEnvelopeSchema.safeParse(await bridge().invoke(name, lowered.value as never, machine));
       if (!envelope.success) {

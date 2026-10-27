@@ -90,6 +90,13 @@ export function panelRecordOf(panelTabId: string): string | null {
   return panelRecord(panelTabId)?.artifactId ?? null;
 }
 
+// P5 O6 M4: whether a panel tab shows this machine's artifact. An artifact id names no machine (it is not lifted), so a
+// comparison of records takes the record's machine as well: two machines' artifacts may share an id.
+function panelShows(panelTabId: string, artifactId: string, machine: MachineRef): boolean {
+  const shown = panelRecord(panelTabId);
+  return shown !== null && shown.artifactId === artifactId && shown.machine === machine;
+}
+
 // Whether `openArtifactInPanel` has a panel to show the artifact in (P3-F wave S, F16): a session's panel, or with none
 // a pinned Artifacts tab, while a build registers the tool.
 export const canShowArtifactInPanel = (
@@ -101,11 +108,10 @@ export const canShowArtifactInPanel = (
 // P3-F wave S (F16 review): before an artifact moves in from elsewhere, the Artifacts tab it would land in lets go of
 // another artifact it shows, through that record's guard, so a guard keeping it refuses the move before the source lets
 // go. True when the tab is free (or there is none yet).
-export function freePanelFor(appSessionId: AppSessionId | null, artifactId: string): Promise<boolean> {
+export function freePanelFor(appSessionId: AppSessionId | null, artifactId: string, machine: MachineRef): Promise<boolean> {
   const ref = artifactsTabOf(appSessionId);
   const handle = ref ? artifactsHandleOf(ref.id) : null;
-  const shown = ref ? panelRecordOf(ref.id) : null;
-  if (!handle || shown === null || shown === artifactId) return Promise.resolve(true);
+  if (!ref || !handle || panelRecordOf(ref.id) === null || panelShows(ref.id, artifactId, machine)) return Promise.resolve(true);
   return handle.backAsked();
 }
 
@@ -166,28 +172,27 @@ export async function moveArtifactToPanel(mainTabId: string): Promise<boolean> {
   const { artifactId, machine } = tab;
   const session = panelSessionForArtifact(mainTabId);
   const dest = artifactsTabOf(session);
-  if (dest && panelRecordOf(dest.id) === artifactId) {
+  if (dest && panelShows(dest.id, artifactId, machine)) {
     // T5: the panel shows it already. That view is activated, unmounted nothing, and the tab closes through its guard,
     // its unsent comment handed to the panel's view as it closes.
     const source: EditorHostScope = { surface: 'main', tabId: mainTabId };
     const held = heldArtifactEditorState(source);
     if (!(await movingGuardAllows(source))) return false;
-    if (transferRefusal({ to: 'panel', mainTabId }) !== null || panelSessionForArtifact(mainTabId) !== session || panelRecordOf(dest.id) !== artifactId || heldArtifactEditorState(source) !== held) return false;
+    if (transferRefusal({ to: 'panel', mainTabId }) !== null || panelSessionForArtifact(mainTabId) !== session || !panelShows(dest.id, artifactId, machine) || heldArtifactEditorState(source) !== held) return false;
     handArtifactViewOver(source, { surface: 'panel', tabId: dest.id }); // synchronous from here to the close
     layout().closeTab(mainTabId, { remember: false }); // a move is not a close (Decision Log 32): no ⌘⇧T entry
     layout().activateTab(mainTabIdOf({ kind: 'session', appSessionId: session! }));
     panelHost.selectTab(dest.id);
     return true;
   }
-  if (!(await freePanelFor(session, artifactId))) return false;
+  if (!(await freePanelFor(session, artifactId, machine))) return false;
   // After the guard: the panel the tab would land in is the one shown now (it may have changed while the guard asked).
   if (transferRefusal({ to: 'panel', mainTabId }) !== null) return false;
   const now = panelSessionForArtifact(mainTabId);
   if (now === null) return false;
   const there = artifactsTabOf(now);
-  const shown = there ? panelRecordOf(there.id) : null;
-  if (shown === artifactId) return moveArtifactToPanel(mainTabId); // it came to show the artifact meanwhile: T5
-  if (shown !== null) return false; // it came to show another one: nothing moved
+  if (there && panelShows(there.id, artifactId, machine)) return moveArtifactToPanel(mainTabId); // it came to show the artifact meanwhile: T5
+  if (there && panelRecordOf(there.id) !== null) return false; // it came to show another one: nothing moved
   // The hand-off, synchronous from here to the adoption.
   stageArtifactEditorState({ surface: 'main', tabId: mainTabId });
   layout().closeTab(mainTabId, { remember: false });
@@ -214,7 +219,7 @@ export async function moveArtifactToTab(panelTabId: string, at: TabPlace = {}): 
     const source: EditorHostScope = { surface: 'panel', tabId: panelTabId };
     const held = heldArtifactEditorState(source);
     if (!(await movingGuardAllows(source))) return false;
-    if (transferRefusal(request) !== null || panelRecordOf(panelTabId) !== artifactId || heldArtifactEditorState(source) !== held) return false;
+    if (transferRefusal(request) !== null || !panelShows(panelTabId, artifactId, machine) || heldArtifactEditorState(source) !== held) return false;
     if (locateTab(layout().main, mainTabId)) {
       handArtifactViewOver(source, { surface: 'main', tabId: mainTabId }); // synchronous from here to the Back
       handle.handOff(); // the guard was asked: the record's state is given back

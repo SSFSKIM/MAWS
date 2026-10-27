@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentId, AppSessionId, ProjectId } from '@shared/graph/ids';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type LayoutMain, type LayoutRegions, type PanelSurfaces, type TabRef } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
-import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { addressOf } from '@shared/machine/address';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { createLayoutStore, LAYOUT_WRITE_DELAY_MS, persistLayout, type ProjectOf } from './layout';
 import { currentSet } from './layout-model';
 
@@ -264,7 +265,7 @@ describe('layout persistence', () => {
   it('a key that failed to read is not overwritten with its default', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const fake = fakeClient({ 'layout.list': { keys: [] }, 'layout.get': ({ key }: { key: string }) => ({ value: key === 'regions' ? LAYOUT_DEFAULTS.regions : [] }), 'layout.set': undefined });
-    const failing = { ...fake.client, invoke: (name: never, input: never) => (name === 'layout.get' && (input as { key: string }).key === 'main.tabs' ? Promise.resolve({ ok: false, error: { code: 'internal', message: 'x' } }) : fake.client.invoke(name, input)) } as typeof fake.client;
+    const failing = { ...fake.client, invoke: (name: never, input: never, ...rest: unknown[]) => (name === 'layout.get' && (input as { key: string }).key === 'main.tabs' ? Promise.resolve({ ok: false, error: { code: 'internal', message: 'x' } }) : (fake.client.invoke as unknown as (...a: unknown[]) => Promise<never>)(name, input, ...rest)) } as typeof fake.client;
     const store = createLayoutStore();
     await store.getState().hydrate(failing, () => true);
     expect(fake.invoked('layout.set')).toEqual([]);
@@ -655,5 +656,26 @@ describe('panel tabs of a session not on screen', () => {
     store.getState().updatePanelTabs(A, (refs) => refs.filter((t) => t.id !== 'p2'));
     expect(store.getState().panelPinned.map((t) => t.id)).toEqual(['p1', 'p3']);
     expect(store.getState().panelActiveNoSession).toBe('p3');
+  });
+});
+
+// P5 O6 M4: main deletes the panel key of its own removed session; another machine's session's key is the page's to delete.
+describe('the panel keys of another machine’s sessions', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    running.splice(0).forEach((stop) => stop());
+    vi.useRealTimers();
+  });
+  const own = { id: 'files:1', toolId: 'files', pinned: false };
+
+  it('deletes another machine’s session’s key once the session leaves the layout, and leaves this machine’s to main', async () => {
+    const onB = addressOf(OTHER_MACHINE, 'app-b' as AppSessionId);
+    const { store, hydrate, sets } = setup({ [`panel.${A}`]: { tabs: [own], activeTabId: own.id }, [`panel.${onB}`]: { tabs: [own], activeTabId: own.id } });
+    await hydrate();
+    expect(store.getState().panelBySession.has(onB)).toBe(true);
+    store.getState().dropSession(onB);
+    store.getState().dropSession(A);
+    vi.advanceTimersByTime(LAYOUT_WRITE_DELAY_MS);
+    expect(sets().filter((s) => s.key.startsWith('panel.') && s.key !== 'panel.pinned')).toEqual([{ key: `panel.${onB}`, value: null }]);
   });
 });

@@ -2,7 +2,6 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { PreloadBridge } from '@shared/ipc/schema';
 import { bareOf } from '@shared/machine/address';
 import { status } from '../../../../../test/support/builders';
 import { fakeClient } from '../../../../../test/support/fake-client';
@@ -16,6 +15,7 @@ import { api, builder } from '../model/test-events';
 import { Disclosures, TranscriptProvider, NO_ACTIONS } from '../view/context';
 import { RowView } from '../view/rows/Row';
 import type { TranscriptSource } from '../source/types';
+import { preloadOf } from '../../test-support/preload-of';
 
 afterEach(() => { cleanup(); resetSurfaceRegistry(); });
 
@@ -41,7 +41,7 @@ it('keeps the first expanded commentary drawing mounted when ink promotes it to 
   b.text('last', 0, 'Answer'); b.end(['u']);
   const store = await sessionStoreWith(b.events); const id = store.key as AppSessionId;
   useTranscriptStore.getState().expandAll(store.key);
-  const fake = fakeClient(); window.maws = fake.client as unknown as PreloadBridge;
+  const fake = fakeClient(); window.maws = preloadOf(fake);
   useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: { clientId: 'maws-main' } }]]) });
   render(<Transcript storeKey={store.key} />);
   expect(screen.getByText('Update').closest('.transcript-commentary')).not.toBeNull();
@@ -61,7 +61,7 @@ it.each([false, true])('probes folded assistant text, preserves ink in order at 
   b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', '/tmp');
   b.text('last', 0, 'Answer'); b.end(['u']);
   const store = await sessionStoreWith(b.events); const id = store.key as AppSessionId;
-  const fake = fakeClient(); window.maws = fake.client as unknown as PreloadBridge;
+  const fake = fakeClient(); window.maws = preloadOf(fake);
   useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: { clientId: 'maws-main' } }]]) });
   const off = connectEngineSurface(fake.client);
   render(<Transcript storeKey={store.key} />);
@@ -94,7 +94,7 @@ it.each([{ hooked: false, expanded: false }, { hooked: true, expanded: false }, 
   b.text('last', 0, 'Answer'); b.end(['u']);
   const store = await sessionStoreWith(b.events); const id = store.key as AppSessionId;
   if (expanded) useTranscriptStore.getState().expandAll(store.key);
-  const fake = fakeClient({ 'session.ui.press': { handled: true } }); window.maws = fake.client as unknown as PreloadBridge;
+  const fake = fakeClient({ 'session.ui.press': { handled: true } }); window.maws = preloadOf(fake);
   useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: { clientId: 'maws-main' } }]]) });
   render(<Transcript storeKey={store.key} />);
   const asks = fake.invoked('session.ui.render') as { component: string; props: { text?: string } }[];
@@ -124,7 +124,7 @@ it('hands presentation back to the folded probe when a pressed row virtualizes a
   b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', '/tmp');
   b.text('last', 0, 'Answer'); b.end(['u']);
   const store = await sessionStoreWith(b.events); const id = store.key as AppSessionId;
-  const fake = fakeClient(); window.maws = fake.client as unknown as PreloadBridge;
+  const fake = fakeClient(); window.maws = preloadOf(fake);
   useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: { clientId: 'maws-main' } }]]) });
   const view = render(<Transcript storeKey={store.key} />);
   const asks = fake.invoked('session.ui.render') as { component: string; props: { text?: string } }[];
@@ -173,7 +173,7 @@ it.each([false, true])('does not derive large folded history during live token b
   b.turn('live');
   b.emit('assistant.block.delta', { apiMessageId: api('live'), blockIndex: 0, blockType: 'text', textDelta: 'start', thinkingDelta: null, inputJsonDelta: null, userMessageUuid: null });
   const store = await sessionStoreWith(b.events.slice()); const id = store.key as AppSessionId;
-  const fake = fakeClient(); window.maws = fake.client as unknown as PreloadBridge;
+  const fake = fakeClient(); window.maws = preloadOf(fake);
   useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: attached ? { clientId: 'maws-main' } : undefined }]]) });
   const view = render(<Transcript storeKey={store.key} />);
   const before = turnDerivations.count;
@@ -194,7 +194,7 @@ it.each(['session', 'child'] as const)('R4 presents detached marked commentary o
   b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', '/tmp');
   b.text('last', 0, 'Answer'); b.end(['u']);
   const store = await sessionStoreWith(b.events);
-  const fake = fakeClient(); window.maws = fake.client as unknown as PreloadBridge; useSessions.setState({ engine: new Map() });
+  const fake = fakeClient(); window.maws = preloadOf(fake); useSessions.setState({ engine: new Map() });
   const view = render(<Transcript storeKey={store.key} variant={variant} />);
   expect(screen.getByText('Report.').closest('.transcript-answer')).not.toBeNull();
   expect(store.rows().find((r) => r.kind === 'assistant_text' && r.markdown.includes('Report.'))).toMatchObject({ forHuman: true });
@@ -230,7 +230,7 @@ it.each([false, true])('R4 retains local promotion through resume with its divid
   b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', '/tmp');
   b.text('last', 0, 'Native answer'); b.end(['u']);
   const store = await sessionStoreWith(b.events); const id = store.key as AppSessionId;
-  const fake = fakeClient(); window.maws = fake.client as unknown as PreloadBridge; useSessions.setState({ engine: new Map() });
+  const fake = fakeClient(); window.maws = preloadOf(fake); useSessions.setState({ engine: new Map() });
   const off = connectEngineSurface(fake.client);
   try {
     const view = render(<Transcript storeKey={store.key} />);
@@ -273,7 +273,7 @@ it.each([
   b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', '/tmp');
   b.text('last', 0, 'Native answer'); b.end(['u']);
   const store = await sessionStoreWith(b.events); const id = store.key as AppSessionId;
-  const fake = fakeClient(); window.maws = fake.client as unknown as PreloadBridge;
+  const fake = fakeClient(); window.maws = preloadOf(fake);
   useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: { clientId: 'maws-main' } }]]) });
   const off = connectEngineSurface(fake.client);
   try {
@@ -307,7 +307,7 @@ it('R4 yields exclusively to an attached surface, including native fallback, and
   b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', '/tmp');
   b.text('last', 0, 'Native answer'); b.end(['u']);
   const store = await sessionStoreWith(b.events); const id = store.key as AppSessionId;
-  const fake = fakeClient(); window.maws = fake.client as unknown as PreloadBridge; useSessions.setState({ engine: new Map() });
+  const fake = fakeClient(); window.maws = preloadOf(fake); useSessions.setState({ engine: new Map() });
   const view = render(<Transcript storeKey={store.key} />);
   expect(screen.getByText('Local report.')).toBeTruthy();
   act(() => useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: { clientId: 'maws-main' } }]]) }));

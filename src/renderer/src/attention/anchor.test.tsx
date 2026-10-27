@@ -27,6 +27,8 @@ import { BASH_RESULT, builder, uuid } from '../transcript/model/test-events';
 import type { TranscriptSource } from '../transcript/source/types';
 import { openAnchor } from './anchor';
 import { connectAttention } from './navigation';
+import { TEST_MACHINE } from '../../../../test/support/machine';
+import { preloadOf } from '../test-support/preload-of';
 
 // P5 O6 M2: `file` is the scenario as main holds it (bare), which `fillStores` lifts into the stores; `nine` is the page's
 // view of it, whose ids are addresses. `fake`, installed as `window.maws`, stands for main and is asked, and speaks, with bare ids.
@@ -64,7 +66,7 @@ beforeEach(() => {
   resetShellStores();
   fillStores(file);
   fake = fakeClient({ 'attention.pendingNavigate': { navigate: null }, 'attention.request': () => ({ event: null }), 'ownerChannel.markRead': undefined });
-  window.maws = fake.client as unknown as PreloadBridge;
+  window.maws = preloadOf(fake);
   disconnect = connectAttention(ipc);
 });
 afterEach(() => {
@@ -112,7 +114,7 @@ describe('opening an owner-channel item at its mark', () => {
     await useTranscriptStore.getState().attach(APP, laterSourceNow(history()));
     useTranscriptStore.getState().setOwnerLane(APP, true);
     const question = owner('async_input', 'Question — Which backend?');
-    act(() => useAttention.getState().applyChanged({ appSessionId: APP, items: [question] }));
+    act(() => useAttention.getState().applyChanged({ appSessionId: APP, items: [question] }, TEST_MACHINE));
     fake.event('attention.navigate', { appSessionId: bareOf(APP), attentionId: bareOf(question.id), source: 'notification' });
     expect(active()).toMatchObject({ appSessionId: APP });
     expect(useTranscriptStore.getState().entries[APP]!.jump).toMatchObject({ rowId: expect.stringContaining('m2') });
@@ -125,7 +127,7 @@ describe('the surfaces', () => {
   it('the Needs-you row reads the item’s summary and opens at its mark', async () => {
     await useTranscriptStore.getState().attach(APP, laterSourceNow(history()));
     useTranscriptStore.getState().setOwnerLane(APP, true);
-    act(() => useAttention.getState().applyChanged({ appSessionId: APP, items: [owner('essential_unread', 'Must read — The README is unverified.')] }));
+    act(() => useAttention.getState().applyChanged({ appSessionId: APP, items: [owner('essential_unread', 'Must read — The README is unverified.')] }, TEST_MACHINE));
     render(<Sidebar />);
     const row = within(screen.getByRole('list', { name: 'Needs you' })).getAllByRole('button').find((b) => b.dataset.needsYou === APP)!;
     expect(row.getAttribute('aria-label')).toContain('Must read — The README is unverified.');
@@ -144,7 +146,7 @@ describe('the surfaces', () => {
     act(() => useLayout.getState().openSession(other));
     await useTranscriptStore.getState().attach(APP, laterSourceNow(history()));
     useTranscriptStore.getState().setOwnerLane(APP, true);
-    act(() => useAttention.getState().applyChanged({ appSessionId: APP, items: [owner('async_input', 'Question — Which backend?')] }));
+    act(() => useAttention.getState().applyChanged({ appSessionId: APP, items: [owner('async_input', 'Question — Which backend?')] }, TEST_MACHINE));
     render(<Sidebar />);
     activate(within(screen.getByRole('list', { name: 'Needs you' })).getAllByRole('button').find((b) => b.dataset.needsYou === APP)!);
     expect(active()).toMatchObject({ appSessionId: APP });
@@ -166,8 +168,8 @@ describe('the surfaces', () => {
   it.each(['envelope', 'reject'] as const)('the Overview card’s Mark read that failed says so on the card, which keeps it (%s)', async (how) => {
     window.maws = {
       ...fake.client,
-      invoke: (name: string, input: unknown) =>
-        name !== 'ownerChannel.markRead' ? fake.client.invoke(name as never, input as never)
+      invoke: (name: string, input: unknown, ...rest: unknown[]) =>
+        name !== 'ownerChannel.markRead' ? (fake.client.invoke as unknown as (...a: unknown[]) => Promise<never>)(name, input, ...rest)
           : how === 'reject' ? Promise.reject(new Error('the bridge is gone')) : Promise.resolve({ ok: false, error: { code: 'internal', message: 'the bridge is gone' } }),
     } as unknown as PreloadBridge;
     render(<RequestCard item={owner('essential_unread', 'Must read — Mind the migration.')} request={null} placement="card" paneIndex={0} />);

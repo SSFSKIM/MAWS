@@ -6,19 +6,22 @@ import { useEffect } from 'react';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CommandName, PreloadBridge } from '@shared/ipc/schema';
+import type { CommandName } from '@shared/ipc/schema';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import type { ScmGhState, ScmPrState, ScmPrStateInput, ScmStatus } from '@shared/ipc/schema/scm';
 import { bareOf } from '@shared/machine/address';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
 import { ipc } from '../../ipc/client';
 import { connectPanelEvents } from '../../ipc/events';
+import { checkoutKey } from '../../ipc/machine';
 import { queryClient } from '../../ipc/query';
 import { A, probeTool, resetPanelStores } from '../../test-support/panel';
 import { useGit } from '../../stores/git';
 import { connectScmRunEnds } from '../../tools/scm/store';
 import { panelHost, registerPanelTool } from '../host';
 import { PushState } from './PushState';
+import { TEST_MACHINE } from '../../../../../test/support/machine';
+import { preloadOf } from '../../test-support/preload-of';
 
 const DIR = `/work/${A}`; // A's directory in the builders' record (P5 O6 M2: built from A's address)
 const MAIN_A = bareOf(A); // P5 O6 M2: A as main (the fake bridge) is asked and speaks of it
@@ -51,7 +54,7 @@ function bridge(over: Partial<Record<CommandName, unknown>> = {}) {
     'scm.pr.state': (input: ScmPrStateInput) => (input.refresh ? PASSED : PR),
     ...over,
   });
-  window.maws = fake.client as unknown as PreloadBridge;
+  window.maws = preloadOf(fake);
   queryClient.clear(); // a case that mounts again starts from main's new answers
   offPanel();
   offPanel = connectPanelEvents(ipc); // as App.tsx connects it: C4's changes into the git store, and the scm queries' re-reads
@@ -64,7 +67,7 @@ const prLine = () => within(push()).queryByTestId('pr-line');
 const lineReads = (text: string) => waitFor(() => expect(prLine()?.textContent).toBe(text));
 
 function PushFixture() {
-  useEffect(() => useGit.getState().watch(DIR), []);
+  useEffect(() => useGit.getState().watch(TEST_MACHINE, DIR), []);
   return <QueryClientProvider client={queryClient}><PushState directory={DIR} appSessionId={A} /></QueryClientProvider>;
 }
 
@@ -210,7 +213,7 @@ describe('push state row shows PR state, install and sign-in states and opens th
   // Main answers per branch; the query is the session's (E6 final review, finding 3).
   describe('an answer for another branch is no answer', () => {
     const setStatus = (status: GitStatus) =>
-      act(() => useGit.setState((s) => ({ entries: new Map(s.entries).set(DIR, { ...s.entries.get(DIR)!, status }) })));
+      act(() => useGit.setState((s) => ({ entries: new Map(s.entries).set(checkoutKey(TEST_MACHINE, DIR), { ...s.entries.get(checkoutKey(TEST_MACHINE, DIR))!, status }) })));
     const OTHER: GitStatus = { ...GIT, branch: 'other', upstream: 'origin/other', head: '1234567abcdef' };
 
     it('after a switch, says nothing of the old branch’s PR until the new branch’s answer', async () => {
@@ -320,7 +323,7 @@ describe('push state row shows PR state, install and sign-in states and opens th
     const user = userEvent.setup();
     const addTool = vi.spyOn(panelHost, 'addTool');
     registerPanelTool(probeTool('source-control', { multiInstance: false }).tool);
-    useGit.setState({ entries: new Map([[DIR, { root: DIR, status: GIT, uncommitted: null, error: null }]]) });
+    useGit.setState({ entries: new Map([[checkoutKey(TEST_MACHINE, DIR), { root: DIR, status: GIT, uncommitted: null, error: null }]]) });
     const before = fake.calls.length;
     render(
       <QueryClientProvider client={queryClient}>

@@ -21,6 +21,7 @@ import { useSessions } from '../stores/sessions';
 import type { TerminalInfo } from '../terminal/registry';
 import { resetPanelStores } from '../test-support/panel';
 import { resetSetupStore } from '../test-support/setup-intents';
+import { preloadOf } from '../test-support/preload-of';
 
 const registry = vi.hoisted(() => {
   let infos: TerminalInfo[] = [];
@@ -113,7 +114,7 @@ function answerWith(over: Parameters<typeof fakeClient>[0] = {}): void {
   };
   for (const [name, answer] of Object.entries(over)) if (answer === null) delete answers[name as keyof typeof answers];
   fake = fakeClient(answers);
-  window.maws = fake.client as unknown as PreloadBridge;
+  window.maws = preloadOf(fake);
 }
 const renderNotice = (r: SessionRecord) => render(<HolderNotice appSessionId={A} holder={r.holder as Extract<SessionRecord['holder'], { kind: 'terminal' | 'background_job' }>} />);
 const opened = () => registry.terminals.open.mock.calls.map(([init]) => init);

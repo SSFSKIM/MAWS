@@ -13,7 +13,7 @@
 import { useEffect } from 'react';
 import { useStore } from 'zustand';
 import { createStore } from 'zustand/vanilla';
-import type { CommandName, CommandResult, MawsBridge } from '@shared/ipc/schema';
+import type { CommandName, CommandResult, InvokeRest, MawsBridge } from '@shared/ipc/schema';
 import type { LibraryCounts, LibraryFilter, LibraryRow, LibrarySpace } from '@shared/ipc/schema/library';
 import { ipc } from '../ipc/client';
 
@@ -114,9 +114,9 @@ function watch(key: string, reader: Reader, client: MawsBridge): () => void {
 }
 
 const ask =
-  <N extends CommandName>(name: N, input: unknown): Reader =>
+  <N extends CommandName>(name: N, input: unknown, ...opts: InvokeRest<N>): Reader =>
   (client) =>
-    client.invoke(name, input as never) as Promise<CommandResult<N>>;
+    client.invoke(name, input as never, ...opts) as Promise<CommandResult<N>>;
 
 export const watchLibraryList = (filter?: LibraryFilter, client: MawsBridge = ipc): (() => void) => {
   const normalized = normalize(filter);

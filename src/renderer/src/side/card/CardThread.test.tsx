@@ -11,7 +11,6 @@ import { anchoredMessage } from '@shared/anchor/message';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { Lineage } from '@shared/graph/session';
-import type { PreloadBridge } from '@shared/ipc/schema';
 import { tabId } from '@shared/ipc/schema/layout';
 import { deliverableUrl } from '@shared/maws/deliverable';
 import { bareOf } from '@shared/machine/address';
@@ -38,6 +37,7 @@ import { openComment, registerSidePane } from '../register';
 import { showSideChild, sidePaneOf, useSidePane } from '../store';
 import { CommentCardHost, type CardFrame } from './CardHost';
 import { useCommentCard } from './store';
+import { preloadOf } from '../../test-support/preload-of';
 
 // One spy for every run of the mock's factory (P2-F S): vitest caches an async factory's exports only once it resolves,
 // so an importer arriving meanwhile runs the factory again. The transcript's lazy chunks, started at module evaluation,
@@ -104,7 +104,7 @@ beforeEach(() => {
     'session.events': () => ({ events: snapshot, lastSeq: snapshot.length, complete: true }),
     'session.queue.list': () => queue,
   });
-  window.maws = fake.client as unknown as PreloadBridge;
+  window.maws = preloadOf(fake);
 });
 afterEach(() => {
   cleanup();
@@ -196,7 +196,7 @@ describe('the card becomes the thread', () => {
 
   it('a Side thread send answered after the card closed reveals the thread as the sheet does', async () => {
     fake = fakeClient({ 'session.intent.get': null });
-    window.maws = fake.client as unknown as PreloadBridge;
+    window.maws = preloadOf(fake);
     mount();
     act(() => openCommentComposer(ANCHOR, { appSessionId: PARENT, placement: { kind: 'card', host: 'artifact-page', hostId: 'h1' } }));
     await userEvent.type(screen.getByRole('textbox', { name: 'Comment' }), `${COMMENT}{Enter}`);
@@ -542,7 +542,7 @@ describe('where the thread is drawn', () => {
     childId = `c5555555-5555-4555-8555-${String(++serial).padStart(12, '0')}` as AppSessionId;
     child = at(childId);
     fake = fakeClient({ 'side.thread.open': { status: 'starting', appSessionId: childId }, 'session.intent.get': null });
-    window.maws = fake.client as unknown as PreloadBridge;
+    window.maws = preloadOf(fake);
     cleanup();
     await intoThread();
     act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: child }));

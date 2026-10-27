@@ -164,7 +164,7 @@ describe('the fallback toast', () => {
   it('counts an Ask sheet in either slot rather than any open panel', () => {
     const fix = nine.attention.find((a) => a.appSessionId === idOf('Fix sidebar drag'))!.items[0];
     const question: AttentionItem = { ...fix, id: at('att-stacked-ask' as AttentionId), kind: 'question', request: { ...fix.request, requestId: 'req-stacked' as RequestId } };
-    act(() => useAttention.getState().applyChanged({ appSessionId: fix.appSessionId, items: [question] }));
+    act(() => useAttention.getState().applyChanged({ appSessionId: fix.appSessionId, items: [question] }, TEST_MACHINE));
     applyAskEvents(fix.appSessionId, [askOpened('req-stacked')]);
     useLayout.getState().openSession(fix.appSessionId);
     showSurface(fix.appSessionId, ASK_SHEET_TOOL_ID);
@@ -227,7 +227,7 @@ describe('the fallback toast', () => {
   it('counts the panel: a maximized one hides the session tab’s card; an open one shows the shown session’s Question sheet', () => {
     const fix = nine.attention.find((a) => a.appSessionId === idOf('Fix sidebar drag'))!.items[0];
     const question: AttentionItem = { ...fix, id: at('att-ask' as AttentionId), kind: 'question', request: { ...fix.request, requestId: 'req-ask' as RequestId } };
-    act(() => useAttention.getState().applyChanged({ appSessionId: fix.appSessionId, items: [fix, question] }));
+    act(() => useAttention.getState().applyChanged({ appSessionId: fix.appSessionId, items: [fix, question] }, TEST_MACHINE));
     applyAskEvents(fix.appSessionId, [askOpened('req-ask')]); // a maws ask: the Question sheet's store holds it
     const notify = (item: AttentionItem) => fake.event('attention.notified', { appSessionId: item.appSessionId, attentionId: item.id, delivery: 'fallback', at: item.createdAt });
     const toasted = () => useNotices.getState().notices.map((n) => n.id);
@@ -256,7 +256,7 @@ describe('the fallback toast', () => {
     const fix = nine.attention.find((a) => a.appSessionId === idOf('Fix sidebar drag'))!.items[0];
     const engineAsk: AttentionItem = { ...fix, id: at('att-auq' as AttentionId), kind: 'question', request: { ...fix.request, requestId: 'req-auq' as RequestId } };
     const mawsAsk: AttentionItem = { ...fix, id: at('att-maws' as AttentionId), kind: 'question', request: { ...fix.request, requestId: 'req-maws' as RequestId } };
-    act(() => useAttention.getState().applyChanged({ appSessionId: fix.appSessionId, items: [fix, engineAsk, mawsAsk] }));
+    act(() => useAttention.getState().applyChanged({ appSessionId: fix.appSessionId, items: [fix, engineAsk, mawsAsk] }, TEST_MACHINE));
     useAttention.setState({ requests: new Map([[engineAsk.id, { ...askOpened('req-auq'), kind: 'question.requested' } as unknown as SessionEvent], [mawsAsk.id, askOpened('req-maws')]]) });
     const notify = (item: AttentionItem) => fake.event('attention.notified', { appSessionId: item.appSessionId, attentionId: item.id, delivery: 'fallback', at: item.createdAt });
     useLayout.getState().openSession(fix.appSessionId);
@@ -331,9 +331,9 @@ describe('the fallback toast', () => {
       expect(item.kind).toBe('permission');
       notify(item);
       expect(toasted()).toEqual([`attention:${item.id}`]);
-      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [{ ...item, state: 'delivered' }] }));
+      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [{ ...item, state: 'delivered' }] }, TEST_MACHINE));
       expect(toasted()).toEqual([`attention:${item.id}`]); // delivered is still open
-      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [] })); // answered: main lists it no more
+      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [] }, TEST_MACHINE)); // answered: main lists it no more
       expect(toasted()).toEqual([]);
     });
 
@@ -342,26 +342,26 @@ describe('the fallback toast', () => {
       const plan = nine.attention.find((a) => a.appSessionId === idOf('Quota reset recovery'))!.items[0];
       notify(item);
       notify(plan);
-      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [] }));
+      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [] }, TEST_MACHINE));
       expect(toasted()).toEqual([`attention:${plan.id}`]);
-      act(() => useAttention.getState().applyChanged({ appSessionId: plan.appSessionId, items: [{ ...plan, state: 'retired' }] }));
+      act(() => useAttention.getState().applyChanged({ appSessionId: plan.appSessionId, items: [{ ...plan, state: 'retired' }] }, TEST_MACHINE));
       expect(toasted()).toEqual([]);
     });
 
     it('an item the page’s list does not hold yet keeps its toast until it has been seen open and then leaves', () => {
       const item = { ...fix(), id: at('att-late' as AttentionId) };
       notify(item);
-      act(() => useAttention.getState().applyChanged({ appSessionId: idOf('Quota reset recovery'), items: [] })); // another session's change
+      act(() => useAttention.getState().applyChanged({ appSessionId: idOf('Quota reset recovery'), items: [] }, TEST_MACHINE)); // another session's change
       expect(toasted()).toEqual([`attention:${item.id}`]);
-      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [fix(), item] }));
+      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [fix(), item] }, TEST_MACHINE));
       expect(toasted()).toEqual([`attention:${item.id}`]);
-      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [fix()] }));
+      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [fix()] }, TEST_MACHINE));
       expect(toasted()).toEqual([]);
     });
 
     it('an item already settled when its notice arrives raises no toast', () => {
       const item = fix();
-      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [{ ...item, state: 'retired' }] }));
+      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [{ ...item, state: 'retired' }] }, TEST_MACHINE));
       notify(item);
       expect(toasted()).toEqual([]);
     });

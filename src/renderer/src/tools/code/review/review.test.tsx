@@ -10,7 +10,9 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import { record } from '../../../../../../test/support/builders';
 import { loadSyntheticJournal } from '../../../../../../test/support/fixtures';
+import { TEST_MACHINE } from '../../../../../../test/support/machine';
 import { createClient } from '../../../ipc/client';
+import { checkoutKey } from '../../../ipc/machine';
 import { connectPanelEvents } from '../../../ipc/events';
 import { panelHost, registerPanelTool } from '../../../panel/host';
 import { FloatingSummary } from '../../../panel/summary/Summary';
@@ -310,10 +312,10 @@ describe('review store', () => {
     const main = diffMain();
     const store = createReviewStore(createClient(() => main.bridge));
     const offs = [
-      store.getState().hold({ directory: DIR, scope: 'uncommitted', base: null }),
-      store.getState().hold({ directory: DIR, scope: 'uncommitted', base: null }),
-      store.getState().hold({ directory: DIR, scope: 'staged', base: null }),
-      store.getState().hold({ directory: DIR, scope: 'branch', base: 'main' }),
+      store.getState().hold({ machine: TEST_MACHINE, directory: DIR, scope: 'uncommitted', base: null }),
+      store.getState().hold({ machine: TEST_MACHINE, directory: DIR, scope: 'uncommitted', base: null }),
+      store.getState().hold({ machine: TEST_MACHINE, directory: DIR, scope: 'staged', base: null }),
+      store.getState().hold({ machine: TEST_MACHINE, directory: DIR, scope: 'branch', base: 'main' }),
     ];
     await tick();
     expect(main.callsOf('git.diff')).toEqual([
@@ -321,11 +323,11 @@ describe('review store', () => {
       { directory: DIR, scope: 'staged' },
       { directory: DIR, scope: 'all', base: 'main' },
     ]);
-    const slice = diffOf(store.getState(), { directory: DIR, scope: 'uncommitted', base: null });
+    const slice = diffOf(store.getState(), { machine: TEST_MACHINE, directory: DIR, scope: 'uncommitted', base: null });
     expect(slice?.status).toBe('ok');
     expect(slice?.status === 'ok' && [...slice.patch!.keys()]).toEqual(['src/app.ts']);
     offs.forEach((off) => off());
-    expect(diffOf(store.getState(), { directory: DIR, scope: 'uncommitted', base: null })).toBeUndefined();
+    expect(diffOf(store.getState(), { machine: TEST_MACHINE, directory: DIR, scope: 'uncommitted', base: null })).toBeUndefined();
   });
 
   it('re-reads a held scope once, 250 ms after the last new status for its directory, and once more for a change during a read', async () => {
@@ -337,18 +339,18 @@ describe('review store', () => {
       return ok({ patch: APP_PATCH, files: APP_FILES });
     });
     const store = createReviewStore(createClient(() => main.bridge));
-    const off = store.getState().hold({ directory: DIR, scope: 'uncommitted', base: null });
+    const off = store.getState().hold({ machine: TEST_MACHINE, directory: DIR, scope: 'uncommitted', base: null });
     await vi.advanceTimersByTimeAsync(0);
     expect(main.callsOf('git.diff')).toHaveLength(1);
-    store.getState().statusChanged(DIR);
+    store.getState().statusChanged(checkoutKey(TEST_MACHINE, DIR));
     await vi.advanceTimersByTimeAsync(100);
-    store.getState().statusChanged(DIR);
+    store.getState().statusChanged(checkoutKey(TEST_MACHINE, DIR));
     await vi.advanceTimersByTimeAsync(REVIEW_REFRESH_MS - 1);
     expect(main.callsOf('git.diff')).toHaveLength(1); // trailing: the second change restarted the wait
     gate.held = true;
     await vi.advanceTimersByTimeAsync(1);
     expect(main.callsOf('git.diff')).toHaveLength(2);
-    store.getState().statusChanged(DIR); // during the read
+    store.getState().statusChanged(checkoutKey(TEST_MACHINE, DIR)); // during the read
     await vi.advanceTimersByTimeAsync(REVIEW_REFRESH_MS);
     expect(main.callsOf('git.diff')).toHaveLength(2); // one in flight per (directory, scope)
     gate.held = false;
@@ -356,7 +358,7 @@ describe('review store', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(main.callsOf('git.diff')).toHaveLength(3);
     off();
-    store.getState().statusChanged(DIR);
+    store.getState().statusChanged(checkoutKey(TEST_MACHINE, DIR));
     await vi.advanceTimersByTimeAsync(REVIEW_REFRESH_MS * 2);
     expect(main.callsOf('git.diff')).toHaveLength(3); // released: nothing more
   });
@@ -365,7 +367,7 @@ describe('review store', () => {
     let fails = false;
     const main = installFakeMain((name) => (name === 'git.diff' ? (fails ? fail('unknown revision') : ok({ patch: APP_PATCH, files: APP_FILES })) : ok()));
     const store = createReviewStore(createClient(() => main.bridge));
-    const target = { directory: DIR, scope: 'uncommitted', base: null } as const;
+    const target = { machine: TEST_MACHINE, directory: DIR, scope: 'uncommitted', base: null } as const;
     const off = store.getState().hold(target);
     await tick();
     store.getState().refresh(target);
@@ -387,7 +389,7 @@ describe('review store', () => {
       return ok({ patch, files: APP_FILES });
     });
     const store = createReviewStore(createClient(() => main.bridge));
-    const target = { directory: DIR, scope: 'uncommitted', base: null } as const;
+    const target = { machine: TEST_MACHINE, directory: DIR, scope: 'uncommitted', base: null } as const;
     const off = store.getState().hold(target);
     await tick();
     store.getState().loadFile(target, 'src/app.ts');
@@ -408,7 +410,7 @@ describe('review store', () => {
     const big = APP_PATCH + 'x'.repeat(REVIEW_SCOPE_BYTES_CAP);
     const main = diffMain((input) => (input.path ? { patch: APP_PATCH, files: APP_FILES } : { patch: big, files: APP_FILES }));
     const store = createReviewStore(createClient(() => main.bridge));
-    const target = { directory: DIR, scope: 'uncommitted', base: null } as const;
+    const target = { machine: TEST_MACHINE, directory: DIR, scope: 'uncommitted', base: null } as const;
     const off = store.getState().hold(target);
     await tick();
     const slice = diffOf(store.getState(), target);
@@ -429,11 +431,11 @@ describe('review store', () => {
         : ok(),
     );
     const store = createReviewStore(createClient(() => main.bridge));
-    store.getState().lookupBase('/repo', 'unborn'); // HEAD's branch with no commits: `rev-parse --verify refs/heads/unborn` fails
-    store.getState().lookupBase('/repo', 'feature');
+    store.getState().lookupBase(TEST_MACHINE, '/repo', 'unborn'); // HEAD's branch with no commits: `rev-parse --verify refs/heads/unborn` fails
+    store.getState().lookupBase(TEST_MACHINE, '/repo', 'feature');
     await tick();
-    expect(baseOf(store.getState(), '/repo', 'unborn')).toEqual({ status: 'unavailable', reason: 'No commits on unborn yet' });
-    expect(baseOf(store.getState(), '/repo', 'feature')).toEqual({ status: 'unavailable', reason: 'The main worktree has no branch' });
+    expect(baseOf(store.getState(), TEST_MACHINE, '/repo', 'unborn')).toEqual({ status: 'unavailable', reason: 'No commits on unborn yet' });
+    expect(baseOf(store.getState(), TEST_MACHINE, '/repo', 'feature')).toEqual({ status: 'unavailable', reason: 'The main worktree has no branch' });
   });
 
   it('asks git.worktree.branch again after a failed lookup, rather than keeping the failure', async () => {
@@ -442,14 +444,14 @@ describe('review store', () => {
       name === 'git.worktree.branch' ? (fails ? fail('git busy') : ok({ repoRoot: input.repoRoot, branch: input.branch, head: 'abc', checkedOutAt: null, base: 'main', ahead: 1, merged: false })) : ok(),
     );
     const store = createReviewStore(createClient(() => main.bridge));
-    store.getState().lookupBase('/repo', 'feature');
+    store.getState().lookupBase(TEST_MACHINE, '/repo', 'feature');
     await tick();
-    expect(baseOf(store.getState(), '/repo', 'feature')).toEqual({ status: 'unavailable', reason: 'git busy', failed: true });
+    expect(baseOf(store.getState(), TEST_MACHINE, '/repo', 'feature')).toEqual({ status: 'unavailable', reason: 'git busy', failed: true });
     fails = false;
-    store.getState().lookupBase('/repo', 'feature');
+    store.getState().lookupBase(TEST_MACHINE, '/repo', 'feature');
     await tick();
     expect(main.calls).toHaveLength(2);
-    expect(baseOf(store.getState(), '/repo', 'feature')).toEqual({ status: 'ok', base: 'main' });
+    expect(baseOf(store.getState(), TEST_MACHINE, '/repo', 'feature')).toEqual({ status: 'ok', base: 'main' });
   });
 
   it('asks git.worktree.branch for the base once the command exists, and refuses the main worktree’s own branch', async () => {
@@ -457,17 +459,17 @@ describe('review store', () => {
       name === 'git.worktree.branch' ? ok({ repoRoot: input.repoRoot, branch: input.branch, head: 'abc', checkedOutAt: null, base: 'main', ahead: 2, merged: false }) : ok(),
     );
     const store = createReviewStore(createClient(() => main.bridge));
-    store.getState().lookupBase('/repo', 'feature');
-    store.getState().lookupBase('/repo', 'feature');
-    store.getState().lookupBase('/repo', 'main');
-    expect(baseOf(store.getState(), '/repo', 'feature')).toEqual({ status: 'loading' });
+    store.getState().lookupBase(TEST_MACHINE, '/repo', 'feature');
+    store.getState().lookupBase(TEST_MACHINE, '/repo', 'feature');
+    store.getState().lookupBase(TEST_MACHINE, '/repo', 'main');
+    expect(baseOf(store.getState(), TEST_MACHINE, '/repo', 'feature')).toEqual({ status: 'loading' });
     await tick();
     expect(main.calls.map((c) => [c.name, c.input])).toEqual([
       ['git.worktree.branch', { repoRoot: '/repo', branch: 'feature' }],
       ['git.worktree.branch', { repoRoot: '/repo', branch: 'main' }],
     ]);
-    expect(baseOf(store.getState(), '/repo', 'feature')).toEqual({ status: 'ok', base: 'main' });
-    expect(baseOf(store.getState(), '/repo', 'main')).toEqual({ status: 'unavailable', reason: "Session runs on main, the main worktree's branch" });
+    expect(baseOf(store.getState(), TEST_MACHINE, '/repo', 'feature')).toEqual({ status: 'ok', base: 'main' });
+    expect(baseOf(store.getState(), TEST_MACHINE, '/repo', 'main')).toEqual({ status: 'unavailable', reason: "Session runs on main, the main worktree's branch" });
   });
 });
 

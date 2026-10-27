@@ -23,6 +23,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
+import { machineOf } from '@shared/machine/address';
 import type { Draft } from '@shared/ipc/schema/session';
 import { ipc } from '../ipc/client';
 import { useCommand } from '../ipc/query';
@@ -78,7 +79,7 @@ function useSessionStatus(appSessionId: AppSessionId, client: MawsBridge) {
     if (useSessions.getState().engine.has(appSessionId)) return;
     let live = true;
     void client.invoke('session.status', { appSessionId }).then((result) => {
-      if (live && result.ok && !useSessions.getState().engine.has(appSessionId)) useSessions.getState().applyStatus({ appSessionId, status: result.value });
+      if (live && result.ok && !useSessions.getState().engine.has(appSessionId)) useSessions.getState().applyStatus({ appSessionId, status: result.value }, machineOf(appSessionId));
     });
     return () => void (live = false);
   }, [appSessionId, client]);
@@ -122,7 +123,7 @@ function useLiveReads(
 ) {
   const ready = status?.process === 'ready';
   const models = useListModels(appSessionId, want.models);
-  const modelNames = useModelCatalogue(route, ready, directory);
+  const modelNames = useModelCatalogue(machineOf(appSessionId), route, ready, directory);
   const effort = useEffectiveEffort(appSessionId, status, client); // W3: get_settings once per ready and per change
   const rules = useCommand('session.listPermissionRules', { appSessionId }, { enabled: want.rules, staleTime: 10_000 });
   const asked = useModelRequests((s) => heldModel(s, appSessionId, status)) ?? null; // P2-F S chip (review): the selector's request
@@ -163,7 +164,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // ---- what the frame binds to ------------------------------------------------------------------------------------
   const location = setup?.intent.location ?? null; // New chat: null until a project is chosen
   const cwd = setup ? (location === null ? '' : locationPath(location)) : (status?.cwd ?? record?.directory ?? '');
-  const repo = useGitWatch(setup ? null : cwd || null, client);
+  const repo = useGitWatch(machineOf(appSessionId), setup ? null : cwd || null, client);
   const [opened, setOpened] = useState({ models: false, rules: false });
   const ready = status?.process === 'ready';
   const reads = useLiveReads(appSessionId, { models: ready && opened.models, rules: ready && opened.rules }, setup ? null : cwd || null, repo, routeOf(status, record), status, client);

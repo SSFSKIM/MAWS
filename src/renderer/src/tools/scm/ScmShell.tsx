@@ -12,6 +12,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import type { ScmStatus } from '@shared/ipc/schema/scm';
 import { NOT_A_REPOSITORY } from '../../sessions/branch-label';
+import { checkoutKey, machineFor } from '../../ipc/machine';
 import { useGit } from '../../stores/git';
 import { openFile } from '../code/open-file';
 import { CommitForm } from './CommitForm';
@@ -42,9 +43,10 @@ const Message = ({ children, role }: { children: string; role?: 'status' }) => (
 );
 
 export function ScmShell({ appSessionId, directory, ui }: ScmShellProps) {
-  useEffect(() => useGit.getState().watch(directory), [directory]);
+  const machine = machineFor(appSessionId);
+  useEffect(() => useGit.getState().watch(machine, directory), [machine, directory]);
   useEffect(() => useScm.getState().resume(appSessionId), [appSessionId]);
-  const entry = useGit((s) => s.entries.get(directory));
+  const entry = useGit((s) => s.entries.get(checkoutKey(machine, directory)));
   const status = entry?.status ?? null;
   const gitError = status === null ? (entry?.error ?? null) : null;
   const scm = useScmStatus(appSessionId);

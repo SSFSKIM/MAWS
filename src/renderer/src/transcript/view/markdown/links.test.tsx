@@ -34,9 +34,9 @@ describe.each([false, true])('markdown links and images (live: %s)', (live) => {
   it('a scheme-less link is a path chip that opens the file, with a line when the path names one', () => {
     const { actions } = renderWith('Open [x.ts](src/renderer/x.ts) and [y](src/y.ts#L42).', live);
     fireEvent.click(screen.getByRole('button', { name: 'x.ts' }));
-    expect(actions.openFile).toHaveBeenCalledWith('src/renderer/x.ts', undefined);
+    expect(actions.openFile).toHaveBeenCalledWith('src/renderer/x.ts', undefined, null);
     fireEvent.click(screen.getByRole('button', { name: 'y' }));
-    expect(actions.openFile).toHaveBeenCalledWith('src/y.ts', 42);
+    expect(actions.openFile).toHaveBeenCalledWith('src/y.ts', 42, null);
   });
 
   it('an image that is not inline data is a chip naming its alt text and source, and loads nothing', () => {

@@ -4,7 +4,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { record } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
-import { at } from '../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { registerSlot, resetSlots } from '../app/slots';
 import { useSessions } from '../stores/sessions';
 import { useUsage } from '../stores/usage';
@@ -111,7 +111,7 @@ describe('session pane', () => {
     const NEW = at('app-new-3' as AppSessionId);
     render(<SessionPane appSessionId={NEW} paneIndex={0} />);
     expect(screen.queryByText('Transcript unavailable')).toBeNull();
-    act(() => void useSessions.getState().applyChanged({ record: record(NEW), cause: 'live', revision: 7 } as never));
+    act(() => void useSessions.getState().applyChanged({ record: record(NEW), cause: 'live', revision: 7 } as never, TEST_MACHINE));
     expect(screen.getByText('Transcript unavailable')).toBeTruthy();
     expect(screen.queryByRole('group', { name: 'Session status' })).toBeNull();
   });

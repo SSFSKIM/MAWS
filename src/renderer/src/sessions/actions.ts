@@ -16,6 +16,7 @@ import { confirm, openDialog } from './dialogs';
 import { archiveSession, forkInPlace } from './record-ops';
 import { resumeSession } from './setup-actions';
 import { displayTitle } from './title';
+import { machineOf } from '@shared/machine/address';
 
 const fail = (text: string) => toast({ level: 'danger', text, actions: [], dismissible: true });
 
@@ -65,7 +66,7 @@ async function archiveProjectSessions(projectId: ProjectId): Promise<void> {
 async function revealProject(projectId: ProjectId): Promise<void> {
   const project = useSessions.getState().projects.get(projectId);
   if (!project) return;
-  const result = await ipc.invoke('session.revealPath', { path: project.directory });
+  const result = await ipc.invoke('session.revealPath', { path: project.directory }, { machine: machineOf(projectId) }); // the project's machine's Finder (the stand-in's: B's)
   if (!result.ok) fail(result.error.message);
 }
 
@@ -78,7 +79,7 @@ async function addProject(): Promise<void> {
   }
   const directory = picked.value.files[0]?.path;
   if (directory === undefined) return;
-  const added = await ipc.invoke('session.projects.add', { directory });
+  const added = await ipc.invoke('session.projects.add', { directory }, { machine: ipc.localMachine }); // P5 O6 M4: this Mac's chooser, this machine's folder
   if (!added.ok) fail(added.error.message);
 }
 

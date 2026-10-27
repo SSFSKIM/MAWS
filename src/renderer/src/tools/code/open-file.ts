@@ -55,5 +55,5 @@ export const codeTranscriptActions: Pick<TranscriptActions, 'reviewChanges' | 'o
     if (appSessionId === null) return;
     panelHost.addTool('review', { appSessionId, params: { scope: 'turn', turnId, ...(path ? { path } : {}) } });
   },
-  openFile: (path, line) => openFile(shownSession(), path, line),
+  openFile: (path, line, appSessionId) => openFile(appSessionId ?? shownSession(), path, line),
 };

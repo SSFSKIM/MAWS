@@ -12,7 +12,7 @@ import type { InstalledPlugin } from '@shared/ipc/schema/plugins';
 import { digest, record } from '../../../../test/support/builders';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
-import { at } from '../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { registerFocusTarget, resetComposerStore } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
 import { useLibraryStore } from './plugins/library-store';
@@ -243,7 +243,7 @@ describe('skills widget: states', () => {
     useSessions.setState({ engine: new Map([[ID, { ...lifted(backend.status(BARE)), process: 'exited' }]]), records: new Map([[ID, record(ID, { directory: cwd })]]), digests: new Map([[ID, digest(ID, { availability: 'resumable' })]]) });
     backend.script('session.getSkillsDialog', () => DIALOG);
     backend.script('session.acquire', () => {
-      act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: lifted(backend.status(BARE)) }));
+      act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: lifted(backend.status(BARE)) }, TEST_MACHINE));
       return { status: 'ready', appSessionId: BARE, launched: true, joined: false };
     });
     mount();

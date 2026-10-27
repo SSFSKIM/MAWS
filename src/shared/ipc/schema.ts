@@ -266,12 +266,14 @@ export type CommandResult<N extends CommandName> = { ok: true; value: CommandOut
 export interface InvokeOptions {
   machine?: MachineRef;
 }
-// A `path` command's options name its machine (`src/shared/ipc/routes.ts`): `MachineOptions` is that required form, which
-// M4 switches on (`PathMachineRequired`) together with the call sites that pass it; until then every command's options
-// are optional, and a `path` command that names no machine goes to the local one.
-type PathMachineRequired = false;
+// A `path` command's options name its machine (`src/shared/ipc/routes.ts`; M4 required it): a path is no machine's by
+// itself, so every call site names the machine of the session or project it is about. Every other command's options are
+// optional: its addresses name its machine, else it is the local machine's.
 export type MachineOptions<N extends CommandName> = N extends PathCommandName ? [opts: { machine: MachineRef }] : [opts?: InvokeOptions];
-export type InvokeRest<N extends CommandName> = PathMachineRequired extends true ? MachineOptions<N> : [opts?: InvokeOptions];
+export type InvokeRest<N extends CommandName> = MachineOptions<N>;
+// `invoke` as seen by a wrapper generic over commands whose every input carries an address (a session read, a session
+// operation), which names the machine: TypeScript defers `InvokeRest` over a generic name, so such a wrapper calls this.
+export type AddressedInvoke = <N extends CommandName>(name: N, input: CommandInput<N>) => Promise<CommandResult<N>>;
 export interface EventSource {
   machine: MachineRef;
 }

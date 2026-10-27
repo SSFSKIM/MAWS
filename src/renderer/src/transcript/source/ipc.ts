@@ -5,7 +5,7 @@
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, EventId, MessageUuid } from '@shared/graph/ids';
 import type { CommandName, CommandOutput, CommandResult, MawsBridge } from '@shared/ipc/schema';
-import { bareOf } from '@shared/machine/address';
+import { bareOf, machineOf } from '@shared/machine/address';
 import { isAppSynthesised } from '@shared/sessions/app-events';
 import { ipc } from '../../ipc/client';
 import { useTranscriptStore } from '../../stores/transcript';
@@ -469,8 +469,9 @@ export const ipcSource = (appSessionId: AppSessionId, agentId?: AgentId): Transc
 const truncatedSpills = new Set<string>();
 export const spillWasTruncated = (path: string) => truncatedSpills.has(path);
 
-export const ipcLoadSpillOver = (client: MawsBridge) => async (spill: Spill): Promise<string> => {
-  const read = valueOf(await client.invoke('fs.readSpill', { path: spill.path, length: SPILL_READ_BYTES }));
+export const ipcLoadSpillOver = (client: MawsBridge) => async (spill: Spill, appSessionId: AppSessionId | null = null): Promise<string> => {
+  const machine = appSessionId === null ? client.localMachine : machineOf(appSessionId); // P5 O6 M4: the row's session's machine holds the file
+  const read = valueOf(await client.invoke('fs.readSpill', { path: spill.path, length: SPILL_READ_BYTES }, { machine }));
   if (read.truncated) truncatedSpills.add(spill.path);
   else truncatedSpills.delete(spill.path);
   return read.content;

@@ -57,7 +57,9 @@ const expand = (...keys: string[]) => act(() => useLayout.getState().setSidebar(
 const expanded = () => useLayout.getState().regions.sidebar.expandedProjects;
 const toggle = (user: ReturnType<typeof userEvent.setup>, name: string) => user.click(within(row(name)).getAllByText(name)[0]);
 
-beforeEach(() => resetShellStores());
+beforeEach(() => {
+  resetShellStores();
+});
 afterEach(() => {
   cleanup();
   closeDialog();
@@ -119,7 +121,7 @@ describe('sidebar action stability', () => {
     expand(alpha.id);
     return render(<><Sidebar /><button>Outside</button></>);
   };
-  const working = (id: AppSessionId) => act(() => useSessions.getState().applyDigest(digest(at(id), { phase: 'working', turnStartedAt: id === elsewhere.appId ? '2026-10-24T13:00:00Z' : '2026-10-24T12:00:00Z' })));
+  const working = (id: AppSessionId) => act(() => useSessions.getState().applyDigest(digest(at(id), { phase: 'working', turnStartedAt: id === elsewhere.appId ? '2026-10-24T13:00:00Z' : '2026-10-24T12:00:00Z' }), TEST_MACHINE));
 
   it.each(['pointer', 'keyboard'] as const)('holds both project and session ranks for the %s, while statuses stay live, then applies the latest ranks on leaving', (input) => {
     start();
@@ -196,7 +198,7 @@ describe('sidebar action stability', () => {
     fireEvent.pointerEnter(row('first'));
     working(elsewhere.appId);
     expect(projectRows()).toEqual(['alpha', 'beta']);
-    act(() => useSessions.getState().applyRemoved({ appSessionId: at(first.appId), revision: useSessions.getState().revision + 1 }));
+    act(() => useSessions.getState().applyRemoved({ appSessionId: at(first.appId), revision: useSessions.getState().revision + 1 }, TEST_MACHINE));
     expect(projectRows()).toEqual(['beta', 'alpha']);
   });
 
@@ -205,17 +207,17 @@ describe('sidebar action stability', () => {
     act(() => row('first').focus());
     working(elsewhere.appId);
     expect(projectRows()).toEqual(['alpha', 'beta']);
-    act(() => useSessions.getState().applyRemoved({ appSessionId: at(first.appId), revision: useSessions.getState().revision + 1 }));
+    act(() => useSessions.getState().applyRemoved({ appSessionId: at(first.appId), revision: useSessions.getState().revision + 1 }, TEST_MACHINE));
     expect(document.activeElement).toBe(document.body);
     expect(projectRows()).toEqual(['beta', 'alpha']);
     // Later live data does not need another focus/blur event to resume ordering.
-    act(() => useSessions.getState().applyDigest(digest(at(second.appId), { phase: 'working', turnStartedAt: '2026-10-24T14:00:00Z', revision: 2 })));
+    act(() => useSessions.getState().applyDigest(digest(at(second.appId), { phase: 'working', turnStartedAt: '2026-10-24T14:00:00Z', revision: 2 }), TEST_MACHINE));
     expect(projectRows()).toEqual(['alpha', 'beta']);
   });
 
   it('lets an explicit sort change take effect while keyboard focus remains in the sidebar', async () => {
     start();
-    act(() => useSessions.getState().applyDigest(digest(at(second.appId), { phase: 'working', turnStartedAt: '2026-10-24T07:00:00Z' })));
+    act(() => useSessions.getState().applyDigest(digest(at(second.appId), { phase: 'working', turnStartedAt: '2026-10-24T07:00:00Z' }), TEST_MACHINE));
     expect(sessionRows(row('alpha'))).toEqual(['second', 'first']);
     act(() => row('second').focus());
     act(() => useLayout.getState().setSidebar({ sort: 'recency' }));
@@ -234,7 +236,7 @@ describe('sidebar recovery routes', () => {
       'session.list': () => ({ sessions: [archived, elsewhere], revision: 1 }),
       'session.update': () => {
         archived.archived = false;
-        useSessions.getState().applyChanged({ record: recordOnPage(archived), cause: 'update', revision: useSessions.getState().revision + 1 });
+        useSessions.getState().applyChanged({ record: recordOnPage(archived), cause: 'update', revision: useSessions.getState().revision + 1 }, TEST_MACHINE);
         return archived;
       },
     });
@@ -296,7 +298,7 @@ describe('sidebar recovery routes', () => {
     expect(useLayout.getState().regions.sidebar.collapsed).toBe(true);
     await act(() => fake.reply('session.projects.add', { ...project, hidden: false }));
     // Main's project event may arrive after its command response.
-    act(() => useSessions.getState().applyProjects({ projects: page.projects, revision: 10 }));
+    act(() => useSessions.getState().applyProjects({ projects: page.projects, revision: 10 }, TEST_MACHINE));
     await waitFor(() => expect(document.activeElement).toBe(row('MAWS')));
     expect(row('MAWS').getAttribute('aria-expanded')).toBe('true');
     expect(useLayout.getState().regions.sidebar.collapsed).toBe(false);
@@ -358,10 +360,10 @@ describe('Needs you across projects', () => {
     fillStores(nine);
     render(<Sidebar />);
     act(() => buttons()[0].focus());
-    act(() => useAttention.getState().applyChanged({ appSessionId: idOf('Fix sidebar drag'), items: [] }));
+    act(() => useAttention.getState().applyChanged({ appSessionId: idOf('Fix sidebar drag'), items: [] }, TEST_MACHINE));
     expect(document.activeElement).toBe(buttons()[0]);
     act(() => {
-      for (const entry of page.attention) useAttention.getState().applyChanged({ appSessionId: entry.appSessionId, items: [] });
+      for (const entry of page.attention) useAttention.getState().applyChanged({ appSessionId: entry.appSessionId, items: [] }, TEST_MACHINE);
     });
     expect(document.activeElement).toBe(screen.getByRole('searchbox'));
   });
@@ -373,7 +375,7 @@ describe('Needs you across projects', () => {
     fillStores(nine);
     render(<Sidebar />);
     act(() => buttons().find((b) => b.dataset.needsYou === idOf(retired))!.focus());
-    act(() => useAttention.getState().applyChanged({ appSessionId: idOf(retired), items: [] }));
+    act(() => useAttention.getState().applyChanged({ appSessionId: idOf(retired), items: [] }, TEST_MACHINE));
     const survivor = buttons().find((b) => b.dataset.needsYou === idOf(neighbour))!;
     expect(document.activeElement).toBe(survivor);
     expect(survivor.tabIndex).toBe(0);
@@ -386,10 +388,10 @@ describe('Needs you across projects', () => {
     const id = idOf('Fix sidebar drag');
     const focused = buttons()[0];
     act(() => focused.focus());
-    act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [pageItem(bareIdOf('Fix sidebar drag'), 'interrupted', '2026-10-03T10:00:00Z')] }));
+    act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [pageItem(bareIdOf('Fix sidebar drag'), 'interrupted', '2026-10-03T10:00:00Z')] }, TEST_MACHINE));
     expect(document.activeElement).toBe(focused);
     expect(buttons().at(-1)).toBe(focused);
-    act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [] }));
+    act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [] }, TEST_MACHINE));
     expect(document.activeElement).toBe(buttons().at(-1));
   });
 
@@ -402,10 +404,10 @@ describe('Needs you across projects', () => {
       : place === 'project tree' ? row('MAWS')
       : screen.getByRole('button', { name: 'Sort sessions' });
     act(() => target.focus());
-    act(() => useAttention.getState().applyChanged({ appSessionId: idOf('Fix sidebar drag'), items: [] }));
+    act(() => useAttention.getState().applyChanged({ appSessionId: idOf('Fix sidebar drag'), items: [] }, TEST_MACHINE));
     expect(document.activeElement).toBe(target);
     act(() => {
-      for (const entry of page.attention) useAttention.getState().applyChanged({ appSessionId: entry.appSessionId, items: [] });
+      for (const entry of page.attention) useAttention.getState().applyChanged({ appSessionId: entry.appSessionId, items: [] }, TEST_MACHINE);
     });
     expect(document.activeElement).toBe(target);
   });
@@ -414,14 +416,14 @@ describe('Needs you across projects', () => {
     fillStores(nine);
     render(<Sidebar />);
     const id = idOf('Fix sidebar drag');
-    act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [pageItem(bareIdOf('Fix sidebar drag'), 'interrupted', '2026-10-03T10:00:00Z')] }));
+    act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [pageItem(bareIdOf('Fix sidebar drag'), 'interrupted', '2026-10-03T10:00:00Z')] }, TEST_MACHINE));
     expect(buttons().at(-1)?.getAttribute('aria-label')).toBe('MAWS · Fix sidebar drag · Interrupted');
-    act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [pageItem(bareIdOf('Fix sidebar drag'), 'error', '2026-09-01T10:00:00Z')] }));
+    act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [pageItem(bareIdOf('Fix sidebar drag'), 'error', '2026-09-01T10:00:00Z')] }, TEST_MACHINE));
     expect(buttons()[0].getAttribute('aria-label')).toBe('MAWS · Fix sidebar drag · Error');
-    act(() => useSessions.getState().applyChanged({ record: { ...useSessions.getState().records.get(id)!, archived: true }, cause: 'update', revision: useSessions.getState().revision + 1 }));
+    act(() => useSessions.getState().applyChanged({ record: { ...useSessions.getState().records.get(id)!, archived: true }, cause: 'update', revision: useSessions.getState().revision + 1 }, TEST_MACHINE));
     expect(buttons()).toHaveLength(2);
     act(() => {
-      for (const entry of page.attention) useAttention.getState().applyChanged({ appSessionId: entry.appSessionId, items: [] });
+      for (const entry of page.attention) useAttention.getState().applyChanged({ appSessionId: entry.appSessionId, items: [] }, TEST_MACHINE);
     });
     expect(screen.queryByRole('list', { name: 'Needs you' })).toBeNull();
     expect(screen.queryByRole('heading', { name: /Needs you/ })).toBeNull();
@@ -631,7 +633,7 @@ describe('an expanded project', () => {
     offs.push(registerSessionAction('pin', pin));
     const fake = fakeClient({ 'session.update': ({ appSessionId, patch }: { appSessionId: AppSessionId; patch: { unread: boolean } }) => {
       const record = { ...useSessions.getState().records.get(at(appSessionId))!, ...patch };
-      useSessions.getState().applyChanged({ record, cause: 'update', revision: useSessions.getState().revision + 1 });
+      useSessions.getState().applyChanged({ record, cause: 'update', revision: useSessions.getState().revision + 1 }, TEST_MACHINE);
       return recordAsMain(record);
     } });
     window.maws = fake.client as unknown as PreloadBridge;
@@ -929,8 +931,8 @@ describe('a freshly launched session', () => {
     const launched = { ...base, appId: at('11111111-1111-4111-8111-111111111111' as AppSessionId), engineSessionId: null, title: { text: 'Fix the drag handle', source: 'none' as const }, pinned: false, unread: false, createdAt: now, updatedAt: now };
     const blank = { ...launched, appId: at('22222222-2222-4222-8222-222222222222' as AppSessionId), title: { text: '', source: 'none' as const } };
     act(() => {
-      useSessions.getState().applyChanged({ record: launched, cause: 'live', revision: 1000 });
-      useSessions.getState().applyChanged({ record: blank, cause: 'live', revision: 1001 });
+      useSessions.getState().applyChanged({ record: launched, cause: 'live', revision: 1000 }, TEST_MACHINE);
+      useSessions.getState().applyChanged({ record: blank, cause: 'live', revision: 1001 }, TEST_MACHINE);
     });
     expand('proj-maws');
     act(() => useLayout.getState().setSidebar({ sort: 'recency' })); // the newest two, among the five shown
@@ -1138,7 +1140,7 @@ describe('a released session’s row', () => {
     const id = idOf('Settings idle probe');
     const when = new Date(2026, 8, 29, 14, 2).toISOString();
     const digest = useSessions.getState().digests.get(id)!;
-    act(() => useSessions.getState().applyDigest({ ...digest, released: { at: when, reason: 'budget', limitKiB: 8 * 1024 * 1024 }, revision: digest.revision + 1 }));
+    act(() => useSessions.getState().applyDigest({ ...digest, released: { at: when, reason: 'budget', limitKiB: 8 * 1024 * 1024 }, revision: digest.revision + 1 }, TEST_MACHINE));
     expand('proj-claude-usage-menubar');
     render(<Sidebar />);
     const mark = within(row('Settings idle probe')).getByText('released');
@@ -1206,7 +1208,7 @@ describe('deliberately selected projects', () => {
     fillStores({ ...nine, projects: nine.projects.map((p) => ({ ...p, discovered: p.name === 'MAWS' })), sessions: nine.sessions.map((r) => r.projectId === 'proj-maws' ? { ...r, pinned: false, holder: { kind: 'none' as const } } : r), digests: [], engine: [], attention: nine.attention.filter((a) => !nine.sessions.some((r) => r.appId === a.appSessionId && r.projectId === 'proj-maws')) });
     const fake = fakeClient({ 'session.projects.add': ({ directory }: { directory: string }) => {
       const projects = nine.projects.map((p) => ({ ...p, ...(p.directory === directory ? { discovered: false } : {}) }));
-      useSessions.getState().applyProjects({ projects: projects.map(projectOnPage), revision: useSessions.getState().revision + 1 });
+      useSessions.getState().applyProjects({ projects: projects.map(projectOnPage), revision: useSessions.getState().revision + 1 }, TEST_MACHINE);
       return projects.find((p) => p.directory === directory)!;
     } });
     window.maws = fake.client as unknown as PreloadBridge;
@@ -1225,7 +1227,7 @@ it('keeps a discovered project with pinned, running or waiting work, but explici
   fillStores({ ...nine, projects: nine.projects.map((p) => ({ ...p, discovered: true })) });
   render(<Sidebar />);
   expect(screen.getByRole('treeitem', { name: 'MAWS' })).toBeTruthy();
-  act(() => useSessions.getState().applyProjects({ projects: page.projects.map((p) => ({ ...p, discovered: true, hidden: p.name === 'MAWS' })), revision: useSessions.getState().revision + 1 }));
+  act(() => useSessions.getState().applyProjects({ projects: page.projects.map((p) => ({ ...p, discovered: true, hidden: p.name === 'MAWS' })), revision: useSessions.getState().revision + 1 }, TEST_MACHINE));
   expect(screen.queryByRole('treeitem', { name: 'MAWS' })).toBeNull();
   expect(within(screen.getByRole('list', { name: 'Needs you' })).getByRole('button', { name: /Fix sidebar drag/ })).toBeTruthy();
 });

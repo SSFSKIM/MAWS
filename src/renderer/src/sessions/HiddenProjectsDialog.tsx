@@ -8,6 +8,7 @@ import { ipc } from '../ipc/client';
 import { selectHiddenProjects, useSessions } from '../stores/sessions';
 import { Sheet } from './Sheet';
 import { SECONDARY } from './ui';
+import { machineOf } from '@shared/machine/address';
 
 export function HiddenProjectsDialog() {
   const hidden = useSessions(selectHiddenProjects);
@@ -17,7 +18,7 @@ export function HiddenProjectsDialog() {
   const showAgain = async (id: ProjectId, directory: string) => {
     setBusy(id);
     setError(null);
-    const result = await ipc.invoke('session.projects.add', { directory });
+    const result = await ipc.invoke('session.projects.add', { directory }, { machine: machineOf(id) }); // P5 O6 M4: the project's machine
     setBusy(null);
     if (!result.ok) setError(result.error.message);
   };

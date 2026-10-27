@@ -1,30 +1,43 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
-import { EMPTY_TAB_SET } from '@shared/ipc/schema/layout';
+import { EMPTY_TAB_SET, NO_PROJECT } from '@shared/ipc/schema/layout';
+import type { MachineState } from '@shared/ipc/schema/machines';
+import { addressOf } from '@shared/machine/address';
 import { digest, item, project, record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { at } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
+import { preloadOf } from '../test-support/preload-of';
 import { createClient } from './client';
 import { registerTabRetention } from '../keymap/actions-runtime';
 import { createAttentionStore } from '../stores/attention';
 import { createLayoutStore } from '../stores/layout';
 import { allTabs } from '../stores/layout-model';
+import { createMachinesStore, selectOffline } from '../stores/machines';
 import { createSessionsStore } from '../stores/sessions';
 import { connectShell } from './events';
 
 // P5 O6 M2: `fake` stands for main (its answers, events and the saved layout hold bare ids); the shell connects through
 // the page's client over it, so the stores hold addresses (`A`, `at(id)`), and a saved layout from before O6 reads lifted.
 const A = at('a' as AppSessionId);
-const pageClient = (fake: FakeClient) => createClient(() => fake.client as unknown as PreloadBridge);
+// P5 O6 M4: events reach the page from the machine the fake names (`TEST_MACHINE` unless a test names another).
+const pageClient = (fake: FakeClient) => createClient((): PreloadBridge => preloadOf(fake));
 
-function setup(batchMs = 0) {
-  const fake = fakeClient({ 'layout.list': { keys: ['main.tabs'] } , 'layout.get': ({ key }: { key: string }) => ({
-    value: key === 'main.tabs'
-      ? { version: 1, ...EMPTY_TAB_SET, panes: [{ tabs: [{ id: 'session:a', kind: 'session', appSessionId: 'a', pinned: false }, { id: 'session:gone', kind: 'session', appSessionId: 'gone', pinned: false }], activeTabId: 'session:a' }], closedTabs: [] }
-      : null,
-  }) });
-  const stores = { sessions: createSessionsStore(), attention: createAttentionStore(), layout: createLayoutStore() };
+// The roster (`machines.list`): this machine only, unless a test adds another; null leaves it unanswered.
+const SINCE = '2026-10-27T10:00:00.000Z';
+const LOCAL_ENTRY: MachineState = { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: SINCE, generation: 0 };
+const other = (state: MachineState['state'], generation: number): MachineState => ({ ref: OTHER_MACHINE, name: 'Studio', local: false, state, since: SINCE, generation });
+const SAVED_TABS = { version: 1, ...EMPTY_TAB_SET, panes: [{ tabs: [{ id: 'session:a', kind: 'session', appSessionId: 'a', pinned: false }, { id: 'session:gone', kind: 'session', appSessionId: 'gone', pinned: false }], activeTabId: 'session:a' }], closedTabs: [] };
+
+const newStores = () => ({ sessions: createSessionsStore(), attention: createAttentionStore(), layout: createLayoutStore(), machines: createMachinesStore() });
+
+function setup(batchMs = 0, { machines = [LOCAL_ENTRY], tabs = SAVED_TABS }: { machines?: MachineState[] | null; tabs?: unknown } = {}) {
+  const fake = fakeClient({
+    'layout.list': { keys: ['main.tabs'] },
+    'layout.get': ({ key }: { key: string }) => ({ value: key === 'main.tabs' ? tabs : null }),
+    ...(machines === null ? {} : { 'machines.list': { machines } }),
+  });
+  const stores = newStores();
   const disconnect = connectShell(pageClient(fake), stores, { batchMs });
   return { fake, stores, disconnect };
 }
@@ -46,7 +59,7 @@ describe('shell event subscription', () => {
     const subscriptions = fake.calls.slice(0, firstInvoke);
     expect(subscriptions.sort()).toEqual(
       [
-        'attention.changed', 'attention.notified', 'engine.hostState', 'fs.scanProgress', 'session.changed', 'session.digest', 'session.projects.changed', 'session.removed', 'session.status',
+        'attention.changed', 'attention.notified', 'engine.hostState', 'fs.scanProgress', 'machines.changed', 'session.changed', 'session.digest', 'session.projects.changed', 'session.removed', 'session.status',
       ].map((n) => `on ${n}`),
     );
     expect(fake.calls.slice(firstInvoke).filter((c) => c.startsWith('on'))).toEqual([]);
@@ -338,8 +351,8 @@ describe('shell event subscription', () => {
 
     // The layout's reads held open, so events can land while hydration waits for them.
     async function heldLayout(sessions: string[]) {
-      const fake = fakeClient();
-      const stores = { sessions: createSessionsStore(), attention: createAttentionStore(), layout: createLayoutStore() };
+      const fake = fakeClient({ 'machines.list': { machines: [LOCAL_ENTRY] } });
+      const stores = newStores();
       stores.layout.setState({ hydrated: false });
       connectShell(pageClient(fake), stores, { batchMs: 60_000 }); // a window that never closes by itself in the test
       await fake.reply('session.list', { sessions: sessions.map((id) => record(id)), revision: 1 });
@@ -407,5 +420,116 @@ describe('shell event subscription', () => {
     expect(stores.attention.getState().loaded).toBe(true);
     expect(warn.mock.calls.map(([line]) => line)).toEqual(['[shell] session.list unavailable; starting empty', '[shell] attention.list unavailable; starting empty']);
     warn.mockRestore();
+  });
+});
+
+// P5 O6 M4 (docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md, "`connectShell` per machine"; OX2): one
+// subscription per event, each event applied to the partition of the machine it came from, and each machine's snapshots
+// taken when its link comes up and again for each new generation of it.
+describe('the shell per machine', () => {
+  const onB = (id: string) => addressOf(OTHER_MACHINE, id as AppSessionId);
+  const titledB = (id: string, text: string) => record(id, { title: { text, source: 'user' } });
+  const recordIds = (stores: ReturnType<typeof setup>['stores']) => [...stores.sessions.getState().records.keys()].sort();
+  const sessionTabs = (...ids: string[]) => ({
+    version: 3,
+    current: NO_PROJECT,
+    sets: { [NO_PROJECT]: { panes: [{ tabs: ids.map((id) => ({ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false })), activeTabId: `session:${ids[0]}` }], focusedPane: 0, splitRatio: 0.5 } },
+    closedTabs: [],
+  });
+  // B's snapshots, answered after this machine's (the fake answers the oldest invocation of each command first).
+  async function answerOther(fake: FakeClient, sessions: ReturnType<typeof record>[], revision: number, items: ReturnType<typeof item>[] = []) {
+    await fake.reply('session.list', { sessions, revision });
+    await fake.reply('session.projects.list', { projects: [], revision });
+    await fake.reply('session.digests', { digests: [] });
+    await fake.reply('attention.list', items);
+  }
+
+  it('takes another machine’s snapshots on that machine when its link comes up, and keeps each machine’s events in its partition', async () => {
+    const { fake, stores } = setup(0, { machines: [LOCAL_ENTRY, other('connecting', 0)] });
+    await answerSnapshots(fake);
+    expect(fake.machines('session.list')).toEqual([TEST_MACHINE]);
+    expect(selectOffline(stores.machines.getState(), OTHER_MACHINE)).toBe(true);
+    fake.event('machines.changed', { machines: [LOCAL_ENTRY, other('up', 1)] });
+    for (const name of ['session.list', 'session.projects.list', 'session.digests', 'attention.list', 'engine.sessions'] as const) expect(fake.machines(name)).toEqual([TEST_MACHINE, OTHER_MACHINE]);
+    expect(stores.machines.getState().loaded.has(OTHER_MACHINE)).toBe(false);
+    await answerOther(fake, [record('b1')], 5);
+    expect(stores.machines.getState().loaded.has(OTHER_MACHINE)).toBe(true);
+    expect(recordIds(stores)).toEqual([A, onB('b1')].sort());
+    fake.event('session.changed', { record: record('b2'), cause: 'discovered', revision: 6 }, OTHER_MACHINE);
+    fake.event('session.changed', { record: record('b3'), cause: 'discovered', revision: 2 }, OTHER_MACHINE); // older than B's list
+    fake.event('session.changed', { record: record('a3'), cause: 'discovered', revision: 2 }); // newer than this machine's
+    expect(recordIds(stores)).toEqual([A, at('a3'), onB('b1'), onB('b2')].sort());
+  });
+
+  it('a machine going down keeps its records and attention and forgets its statuses; up again, it is read again into the same records', async () => {
+    const { fake, stores } = setup(0, { machines: [LOCAL_ENTRY, other('up', 1)] });
+    await answerSnapshots(fake);
+    await answerOther(fake, [record('b1'), record('b2')], 5, [item('b1', 'permission', '2026-09-28T10:00:00Z')]);
+    fake.event('session.status', { appSessionId: 'a', status: status('a') });
+    fake.event('session.status', { appSessionId: 'b1', status: status('b1') }, OTHER_MACHINE);
+    expect(stores.sessions.getState().engine.has(onB('b1'))).toBe(true);
+
+    fake.event('machines.changed', { machines: [LOCAL_ENTRY, other('down', 1)] });
+    expect(stores.sessions.getState().engine.has(onB('b1'))).toBe(false);
+    expect(stores.sessions.getState().engine.has(A)).toBe(true);
+    expect(recordIds(stores)).toEqual([A, onB('b1'), onB('b2')].sort());
+    expect(stores.attention.getState().bySession.get(onB('b1'))).toHaveLength(1);
+    expect(selectOffline(stores.machines.getState(), OTHER_MACHINE)).toBe(true);
+
+    fake.event('machines.changed', { machines: [LOCAL_ENTRY, other('up', 2)] }); // a restarted machine: its counters start afresh
+    expect(fake.machines('session.list')).toEqual([TEST_MACHINE, OTHER_MACHINE, OTHER_MACHINE]);
+    await answerOther(fake, [titledB('b1', 'read again')], 1); // b1 changed and b2 deleted meanwhile
+    expect(recordIds(stores)).toEqual([A, onB('b1')].sort());
+    expect(stores.sessions.getState().records.get(onB('b1'))?.title.text).toBe('read again');
+    fake.event('session.changed', { record: titledB('b1', 'renamed'), cause: 'update', revision: 2 }, OTHER_MACHINE);
+    expect(stores.sessions.getState().records.get(onB('b1'))?.title.text).toBe('renamed');
+  });
+
+  it('a new generation drops the events still queued from the generation before', async () => {
+    const { fake, stores } = setup(60_000, { machines: [LOCAL_ENTRY, other('up', 1)] }); // a window that never closes by itself
+    await answerSnapshots(fake);
+    await answerOther(fake, [record('b1')], 5);
+    fake.event('session.changed', { record: titledB('b1', 'from the generation before'), cause: 'update', revision: 50 }, OTHER_MACHINE);
+    fake.event('session.changed', { record: record('a4'), cause: 'discovered', revision: 9 }); // this machine's stays queued
+    fake.event('machines.changed', { machines: [LOCAL_ENTRY, other('up', 2)] });
+    await answerOther(fake, [titledB('b1', 'after the restart')], 1); // its reply applies the window first
+    expect(stores.sessions.getState().records.get(onB('b1'))?.title.text).toBe('after the restart');
+    expect(stores.sessions.getState().records.has(at('a4' as AppSessionId))).toBe(true);
+  });
+
+  it('keeps another machine’s tabs until that machine has loaded, then drops the ones it does not list', async () => {
+    const { fake, stores } = setup(0, { machines: [LOCAL_ENTRY, other('connecting', 0)], tabs: sessionTabs(A, onB('b1'), onB('b9')) });
+    await answerSnapshots(fake);
+    await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
+    expect(tabIds(stores)).toEqual([`session:${A}`, `session:${onB('b1')}`, `session:${onB('b9')}`]);
+    fake.event('machines.changed', { machines: [LOCAL_ENTRY, other('up', 1)] });
+    await answerOther(fake, [record('b1')], 5);
+    expect(tabIds(stores)).toEqual([`session:${A}`, `session:${onB('b1')}`]);
+  });
+
+  it('hydrates once the roster has answered or failed: a down machine’s tab and a failed roster’s are kept, a machine no longer listed loses its tabs', async () => {
+    const down = setup(0, { machines: null, tabs: sessionTabs(A, onB('b9')) });
+    await answerSnapshots(down.fake);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(down.stores.layout.getState().hydrated).toBe(false); // the roster answers after the local snapshot and the layout reads
+    await down.fake.reply('machines.list', { machines: [LOCAL_ENTRY, other('down', 3)] });
+    await vi.waitFor(() => expect(down.stores.layout.getState().hydrated).toBe(true));
+    expect(tabIds(down.stores)).toEqual([`session:${A}`, `session:${onB('b9')}`]);
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const failed = setup(0, { machines: null, tabs: sessionTabs(A, onB('b9')) });
+    await answerSnapshots(failed.fake);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(failed.stores.layout.getState().hydrated).toBe(false); // the roster is still unread
+    await failed.fake.fail('machines.list', 'no main handler registered for machines.list');
+    await vi.waitFor(() => expect(failed.stores.layout.getState().hydrated).toBe(true));
+    expect(tabIds(failed.stores)).toEqual([`session:${A}`, `session:${onB('b9')}`]);
+    expect(warn.mock.calls.map(([line]) => line)).toEqual(['[shell] machines.list unavailable; keeping every other machine’s tabs']);
+    warn.mockRestore();
+
+    const answered = setup(0, { machines: [LOCAL_ENTRY], tabs: sessionTabs(A, onB('b9')) });
+    await answerSnapshots(answered.fake);
+    await vi.waitFor(() => expect(answered.stores.layout.getState().hydrated).toBe(true));
+    expect(tabIds(answered.stores)).toEqual([`session:${A}`]);
   });
 });

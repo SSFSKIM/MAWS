@@ -89,7 +89,7 @@ export const Mono = ({ children }: { children: ReactNode }) => <code className="
 export function RevealButton({ path, children }: { path: string; children: ReactNode }) {
   const [refused, setRefused] = useState(false);
   const reveal = async () => {
-    const result = await ipc.invoke('settings.reveal', { path });
+    const result = await ipc.invoke('settings.reveal', { path }, { machine: ipc.localMachine }); // P5 O6 M4: this machine's config home and Finder
     setRefused(!result.ok || !result.value.revealed);
   };
   return (

@@ -17,7 +17,7 @@ import { commandLine } from '@shared/plugins/cli';
 import { digest, project as projectRecord, record } from '../../../../test/support/builders';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
-import { at } from '../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { ipc } from '../ipc/client';
 import { registerFocusTarget } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
@@ -493,7 +493,7 @@ describe('plugins widget: loaded in this session and the reloads', () => {
   it('Refresh on an exited session acquires it for a read, then reloads its plugins: the line reads Loaded now', async () => {
     exited();
     backend.script('session.acquire', () => {
-      setTimeout(() => act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: lifted(backend.status(BARE)) })), 0);
+      setTimeout(() => act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: lifted(backend.status(BARE)) }, TEST_MACHINE)), 0);
       return new Promise((resolve) => setTimeout(() => resolve({ status: 'ready', appSessionId: BARE, launched: true, joined: false }), 5));
     });
     mount();
@@ -509,7 +509,7 @@ describe('plugins widget: loaded in this session and the reloads', () => {
   it('Refresh says a reload the host refused, and a reload that failed after the start, on the line', async () => {
     const acquireReady = () =>
       backend.script('session.acquire', () => {
-        act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: lifted(backend.status(BARE)) }));
+        act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: lifted(backend.status(BARE)) }, TEST_MACHINE));
         return { status: 'ready', appSessionId: BARE, launched: true, joined: false };
       });
     exited();

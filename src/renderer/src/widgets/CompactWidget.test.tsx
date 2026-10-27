@@ -6,7 +6,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
-import { at } from '../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { resetQueueStore } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
 import { registerFocusTarget } from '../stores/composer';
@@ -122,7 +122,7 @@ describe('compact widget', () => {
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('The engine did not answer · the command may still run; check the transcript before sending again'));
     expect(compactNow()).toHaveProperty('disabled', true); // no immediate second /compact
     expect(close).not.toHaveBeenCalled();
-    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: lifted(backend.emitStatus(BARE, { engineState: 'running' })) }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: lifted(backend.emitStatus(BARE, { engineState: 'running' })) }, TEST_MACHINE));
     await waitFor(() => expect(compactNow()).toHaveProperty('disabled', false));
   });
 

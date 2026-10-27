@@ -69,6 +69,9 @@ export function resetShellStores(): void {
   projectReveal.setState({ pending: null });
   fillStores({ projects: [], sessions: [], digests: [], engine: [], attention: [], timeline: [] }, { loaded: false });
   useSessions.setState({ indexing: null });
+  // P5 O6 M4: the store's per-machine reconciliation (revisions, tombstones) is no state `setState` reaches, and a
+  // suite's earlier writes would refuse a later one's lower revisions.
+  useSessions.getState().resetMachine(TEST_MACHINE);
   useLayout.setState({
     regions: LAYOUT_DEFAULTS.regions,
     main: LAYOUT_DEFAULTS.main,

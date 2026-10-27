@@ -83,12 +83,12 @@ describe('the transcript slot', () => {
     const view = render(<ShellTranscript appSessionId={APP} agentId={null} paneIndex={0} />);
     expect(live(APP)).toBe(false); // no digest: no live process known
     for (const [phase, expected] of [['working', true], ['waiting', true], ['idle', true], ['starting', true], ['exited', false], ['failed', false], ['foreign', false]] as const) {
-      act(() => useSessions.getState().applyDigest(digest(APP, { phase, revision: (useSessions.getState().digests.get(APP)?.revision ?? 0) + 1 })));
+      act(() => useSessions.getState().applyDigest(digest(APP, { phase, revision: (useSessions.getState().digests.get(APP)?.revision ?? 0) + 1 }), TEST_MACHINE));
       expect(live(APP), phase).toBe(expected);
     }
     view.unmount();
     // A child agent runs in its parent's process.
-    act(() => useSessions.getState().applyDigest(digest(APP, { phase: 'working', revision: 100 })));
+    act(() => useSessions.getState().applyDigest(digest(APP, { phase: 'working', revision: 100 }), TEST_MACHINE));
     render(<ShellTranscript appSessionId={APP} agentId={CHILD} paneIndex={0} />);
     expect(live(`${APP}:${CHILD}`)).toBe(true);
   });

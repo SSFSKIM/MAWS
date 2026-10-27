@@ -41,6 +41,7 @@ import { registerSlashWidget } from './mentions/widgets'; // W3
 import { closeWidgetDialog, openWidgetDialog, useWidgetDialog, WidgetDialogHost } from './WidgetDialog'; // W3; P2-B M6: the host and its open
 import { registerSetupIntentHook, type HookResult, type SetupIntentHook, type SetupIntentPatch } from './setup-intent';
 import { currentSet } from '../stores/layout-model';
+import { preloadOf } from '../test-support/preload-of';
 import { useSetup } from '../sessions/store'; // P2-A
 import { trustState } from '../test-support/setup-intents'; // P2-A
 import { DictationKeys } from './dictation/DictationKeys'; // E9
@@ -104,7 +105,7 @@ beforeEach(() => {
     'layout.pickFiles': { files: [{ path: '/work/picked', name: 'picked', bytes: 0, mediaType: 'inode/directory', data: null }] },
     'session.setPermissionMode': { effective: 'default', refusal: 'auto_mode_model', error: 'model does not support auto' },
   });
-  window.maws = fake.client as unknown as PreloadBridge;
+  window.maws = preloadOf(fake);
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   disconnect = connectKeys();
 });
@@ -1092,8 +1093,8 @@ describe('Send on a session with a record and no ready process', () => {
   it('an archived session and a foreign-held one refuse Send with their words', () => {
     exitedBy(A, 'stop');
     live(B, { status: { process: 'exited' }, record: { holder: { kind: 'terminal', pid: 42 } } });
-    useSessions.getState().applyDigest(digest(A, { phase: 'exited', availability: 'archived' }));
-    useSessions.getState().applyDigest(digest(B, { phase: 'foreign', availability: 'foreign_held' }));
+    useSessions.getState().applyDigest(digest(A, { phase: 'exited', availability: 'archived' }), TEST_MACHINE);
+    useSessions.getState().applyDigest(digest(B, { phase: 'foreign', availability: 'foreign_held' }), TEST_MACHINE);
     mount([{ index: 0, id: A }, { index: 1, id: B }]);
     for (const [pane, words] of [[0, 'Archived · unarchive it to continue'], [1, 'Held by terminal · 42']] as const) {
       expect(primary(pane).title).toBe(words);
@@ -1103,7 +1104,7 @@ describe('Send on a session with a record and no ready process', () => {
 
   it('a start in flight reads Starting… and Send stays enabled to join it', async () => {
     exitedBy(A, 'stop');
-    useSessions.getState().applyDigest(digest(A, { phase: 'exited', availability: 'starting' }));
+    useSessions.getState().applyDigest(digest(A, { phase: 'exited', availability: 'starting' }), TEST_MACHINE);
     mount([{ index: 0, id: A }]);
     await type('carry on');
     await waitFor(() => expect(primary().disabled).toBe(false));
@@ -1409,7 +1410,7 @@ describe('P3-G: a mark-up attached to the session’s draft', () => {
     );
     stored = { doc: { ...docOf([paragraph(textNode('keep this thought'))]), attrs: { attachments: [shot] } }, attachments: [], updatedAt: '2026-10-13T00:00:00.000Z' };
     sendAnswer = null;
-    const base = fake.client as unknown as PreloadBridge; // main's side
+    const base = preloadOf(fake); // main's side
     window.maws = {
       ...base,
       pathForFile: () => '',

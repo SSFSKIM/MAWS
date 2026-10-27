@@ -7,7 +7,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, fixtureLine, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
-import { at } from '../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { useSessions } from '../stores/sessions';
 import { digest, record } from '../../../../test/support/builders';
 import { trustState } from '../test-support/setup-intents';
@@ -59,7 +59,7 @@ describe('useEngineRead', () => {
     await new Promise((r) => setTimeout(r, 60));
     expect(reads('session.getSandboxDialog')).toBe(0);
     expect(result.current.state).toBe('loading');
-    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...lifted(backend.status(BARE)), engineState: 'running' } }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...lifted(backend.status(BARE)), engineState: 'running' } }, TEST_MACHINE));
     await new Promise((r) => setTimeout(r, 10));
     expect(reads('session.getSandboxDialog'), 'a status move while held reads nothing').toBe(0);
     enabled = true;
@@ -84,7 +84,7 @@ describe('useEngineRead', () => {
     expect(reads('session.getSandboxDialog'), 'nothing moved: the fresh answer serves').toBe(1);
     again.unmount();
     // a turn came and went: the facts MOVES_READS compares are where they were, the event seq is not
-    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...lifted(backend.status(BARE)), lastEventSeq: lifted(backend.status(BARE)).lastEventSeq + 12 } }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...lifted(backend.status(BARE)), lastEventSeq: lifted(backend.status(BARE)).lastEventSeq + 12 } }, TEST_MACHINE));
     renderHook(() => useEngineRead('session.getSandboxDialog', { appSessionId: ID }), { wrapper: wrapper() });
     await waitFor(() => expect(reads('session.getSandboxDialog')).toBe(2));
   });
@@ -102,7 +102,7 @@ describe('useEngineRead', () => {
     useSessions.setState({ engine: new Map([[ID, { ...lifted(backend.status(BARE)), process: 'initializing' }]]), records: new Map([[ID, record(ID)]]) });
     const { result } = renderHook(() => useEngineRead('session.getSandboxDialog', { appSessionId: ID }), { wrapper: wrapper() });
     expect(result.current.state).toBe('starting'); // P2-A: a launch in flight
-    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: lifted(backend.status(BARE)) }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: lifted(backend.status(BARE)) }, TEST_MACHINE));
     await waitFor(() => expect(result.current.state).toBe('ready'));
     await new Promise((r) => setTimeout(r, 10));
     expect(reads('session.getSandboxDialog')).toBe(1);
@@ -115,7 +115,7 @@ describe('useEngineRead', () => {
     backend.script('session.getWorkspaceDiff', () => new Promise((resolve) => answers.push(resolve)));
     const move = () => {
       backend.emitTurnStarted(BARE);
-      act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: lifted(backend.status(BARE)) }));
+      act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: lifted(backend.status(BARE)) }, TEST_MACHINE));
     };
     move(); // the first move refetches
     await waitFor(() => expect(reads('session.getWorkspaceDiff')).toBe(2));
@@ -129,11 +129,11 @@ describe('useEngineRead', () => {
   it('refetches when the session status moves, not when an unrelated field changes', async () => {
     const { result } = renderHook(() => useEngineRead('session.getWorkspaceDiff', { appSessionId: ID }), { wrapper: wrapper() });
     await waitFor(() => expect(result.current.state).toBe('ready'));
-    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...lifted(backend.status(BARE)), memory: { rssKiB: 1, treeRssKiB: 2, sampledAt: 'x' } } }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...lifted(backend.status(BARE)), memory: { rssKiB: 1, treeRssKiB: 2, sampledAt: 'x' } } }, TEST_MACHINE));
     await new Promise((r) => setTimeout(r, 10));
     expect(reads('session.getWorkspaceDiff')).toBe(1);
     const turnId = backend.emitTurnStarted(BARE);
-    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: lifted(backend.status(BARE)) }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: lifted(backend.status(BARE)) }, TEST_MACHINE));
     await waitFor(() => expect(reads('session.getWorkspaceDiff')).toBe(2));
     expect(turnId).toBeTruthy();
   });
@@ -186,7 +186,7 @@ describe('useEngineRead', () => {
   it('in passive mode issues nothing and renders what the harness read into the cache under its key', async () => {
     const { result } = renderHook(() => useEngineRead('session.getContextUsage', { appSessionId: ID, detail: 'full' }), { wrapper: wrapper({ mode: 'passive' }) });
     await new Promise((r) => setTimeout(r, 10));
-    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...lifted(backend.status(BARE)), engineState: 'running' } }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...lifted(backend.status(BARE)), engineState: 'running' } }, TEST_MACHINE));
     await new Promise((r) => setTimeout(r, 10));
     expect(reads('session.getContextUsage')).toBe(0);
     expect(result.current.state).toBe('loading');
@@ -208,7 +208,7 @@ describe('useEngineRead', () => {
       await waitFor(() => expect(result.current.state).toBe('ready'));
       const readAt = result.current.readAt;
       expect(typeof readAt).toBe('number');
-      act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: exited() }));
+      act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: exited() }, TEST_MACHINE));
       expect(result.current.state).toBe('dormant');
       expect(result.current.data).toBeDefined();
       expect(result.current.readAt).toBe(readAt);
@@ -233,7 +233,7 @@ describe('useEngineRead', () => {
       expect(result.current.state).toBe('starting');
       expect(acquires().map((c) => c.input)).toEqual([{ appSessionId: BARE, reason: 'read' }]);
       await act(async () => {
-        useSessions.getState().applyStatus({ appSessionId: ID, status: lifted(backend.status(BARE)) });
+        useSessions.getState().applyStatus({ appSessionId: ID, status: lifted(backend.status(BARE)) }, TEST_MACHINE);
         answer({ status: 'ready', appSessionId: BARE, launched: true, joined: false });
         await loaded;
       });

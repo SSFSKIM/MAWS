@@ -13,12 +13,13 @@ import type { EventsSnapshot } from '@shared/ipc/schema/session';
 import type { FilesChanged, FilesReadInput, FilesReadOutput } from '@shared/ipc/schema/files'; // E7
 import type { PersistedTask } from '@shared/wire/store';
 import { ipc } from '../../ipc/client';
+import type { MachineRef } from '@shared/machine/ref';
 
 export interface AgentWorkClient {
   subagents(appSessionId: AppSessionId): Promise<SubagentEntry[]>;
   workflows(appSessionId: AppSessionId): Promise<WorkflowRun[]>;
-  tasks(listId: string): Promise<PersistedTask[]>;
-  readSpill(input: FsReadSpillInput): Promise<FsReadSpillOutput>;
+  tasks(machine: MachineRef, listId: string): Promise<PersistedTask[]>; // P5 O6 M4: a list id names no machine; the session's names it
+  readSpill(machine: MachineRef, input: FsReadSpillInput): Promise<FsReadSpillOutput>; // P5 O6 M4: the machine whose disk holds it
   events(appSessionId: AppSessionId, afterSeq: number | null): Promise<EventsSnapshot>; // session.events { afterSeq, limit: null }
   agentEvents(appSessionId: AppSessionId, agentId: AgentId): Promise<SessionEvent[]>; // fs.agentEvents: a child's transcript so far, following it (later events on session.eventBatch); debt wave 4, the relay's receipt
   unfollowAgent(appSessionId: AppSessionId, agentId: AgentId): Promise<void>; // fs.unfollow for that child only: releases the follow agentEvents started
@@ -47,8 +48,8 @@ export function createAgentWorkClient(bridge: MawsBridge): AgentWorkClient {
   return {
     subagents: async (appSessionId) => valueOf(await bridge.invoke('fs.subagents', { appSessionId })).agents,
     workflows: async (appSessionId) => valueOf(await bridge.invoke('fs.workflows', { appSessionId })).runs,
-    tasks: async (listId) => valueOf(await bridge.invoke('fs.tasks', { listId })).tasks,
-    readSpill: async (input) => valueOf(await bridge.invoke('fs.readSpill', input)),
+    tasks: async (machine, listId) => valueOf(await bridge.invoke('fs.tasks', { listId }, { machine })).tasks,
+    readSpill: async (machine, input) => valueOf(await bridge.invoke('fs.readSpill', input, { machine })),
     events: async (appSessionId, afterSeq) => valueOf(await bridge.invoke('session.events', { appSessionId, afterSeq, limit: null })),
     agentEvents: async (appSessionId, agentId) => valueOf(await bridge.invoke('fs.agentEvents', { appSessionId, agentId })).events,
     unfollowAgent: async (appSessionId, agentId) => valueOf(await bridge.invoke('fs.unfollow', { appSessionId, agentId })),

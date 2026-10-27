@@ -2,7 +2,6 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PreloadBridge } from '@shared/ipc/schema';
 import type { ProjectId } from '@shared/graph/ids';
 import type { LibraryRow } from '@shared/ipc/schema/library';
 import type { GitStatus } from '@shared/ipc/schema/git';
@@ -23,6 +22,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import { A, B, probeTool, resetPanelStores } from '../../test-support/panel';
 import { panelHost, registerPanelTool } from '../host';
 import { Summary } from './Summary';
+import { preloadOf } from '../../test-support/preload-of';
 
 const P = at('project-a' as ProjectId);
 const Q = at('project-b' as ProjectId);
@@ -56,7 +56,7 @@ beforeEach(() => {
     'library.list': { rows: [artifact], counts: { document: 1, presentation: 0, design: 0, design_system: 0, dashboard: 0, html: 0, file: 0 } },
     'session.observedFacts': { version: 1, appSessionId: MAIN.A, engineSessionId: null, writtenAt: '2026-10-01T00:00:00Z', source: 'journal', launches: [], engineVersion: null, model: null, effort: null, mode: null, outputStyle: null, plugins: null, contextUsage: null, complete: true },
   });
-  window.maws = fake.client as unknown as PreloadBridge;
+  window.maws = preloadOf(fake);
 });
 afterEach(() => {
   cleanup();

@@ -9,7 +9,7 @@ import type { PreloadBridge } from '@shared/ipc/schema';
 import { item, status, humanTurn } from '../../../../test/support/builders';
 import { ev } from '../../../../test/support/events';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { at } from '../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { useAttention } from '../stores/attention';
 import { useSessions } from '../stores/sessions';
 import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
@@ -53,7 +53,7 @@ beforeEach(() => {
   resetShellStores();
   fillStores(nine);
   useLayout.getState().setSidebar({ expandedProjects: [at('proj-maws' as ProjectId)] });
-  act(() => useAttention.getState().applyChanged({ appSessionId: readAttention.appSessionId, items: readAttention.items }));
+  act(() => useAttention.getState().applyChanged({ appSessionId: readAttention.appSessionId, items: readAttention.items }, TEST_MACHINE));
 });
 afterEach(() => {
   cleanup();
@@ -154,7 +154,7 @@ describe('a session row’s hover card', () => {
     withMain();
     useLayout.getState().setSidebar({ expandedProjects: [at('proj-claude-usage-menubar' as ProjectId)] });
     const digest = useSessions.getState().digests.get(idOf('Usage reset countdown'))!;
-    act(() => useSessions.getState().applyDigest({ ...digest, context: { percent: 41.4, totalTokens: 414_000, maxTokens: 1_000_000, autoCompactThreshold: null }, revision: digest.revision + 1 }));
+    act(() => useSessions.getState().applyDigest({ ...digest, context: { percent: 41.4, totalTokens: 414_000, maxTokens: 1_000_000, autoCompactThreshold: null }, revision: digest.revision + 1 }, TEST_MACHINE));
     render(<Sidebar />);
     const card = await open('Usage reset countdown');
     expect(within(card).getByRole('heading', { name: 'Usage reset countdown' })).toBeTruthy();
@@ -349,8 +349,8 @@ describe('answering a waiting question from the hover card', () => {
   beforeEach(() => {
     resetAskSheets();
     registerSlot('requestCard', RequestCard);
-    useAttention.getState().applyChanged({ appSessionId: id, items: [attention] });
-    useSessions.getState().applyStatus({ appSessionId: id, status: status(id, { turn: humanTurn }) });
+    useAttention.getState().applyChanged({ appSessionId: id, items: [attention] }, TEST_MACHINE);
+    useSessions.getState().applyStatus({ appSessionId: id, status: status(id, { turn: humanTurn }) }, TEST_MACHINE);
     fake = fakeClient({
       'attention.request': { event },
       'maws.asks.list': { asks: [{ askId: event.askId, toolUseId: event.toolUseId, requestId: event.requestId, title: event.title, context: event.context, blocking: event.blocking, questions: event.questions, openedAt: event.at }] },
@@ -435,7 +435,7 @@ describe('hover quick reply', () => {
       'session.steer': { messageUuid: '11111111-1111-4111-8111-111111111111' },
     });
     window.maws = fake.client as unknown as PreloadBridge;
-    useSessions.getState().applyStatus({ appSessionId: id, status: status(id, { turn: busy ? humanTurn : null }) });
+    useSessions.getState().applyStatus({ appSessionId: id, status: status(id, { turn: busy ? humanTurn : null }) }, TEST_MACHINE);
     render(<Sidebar />);
     await userEvent.hover(needsRow('Charter + research'));
     const card = await screen.findByRole('dialog', { name: 'Charter + research' });
@@ -454,7 +454,7 @@ it('keeps a refused hover reply for correction and retry, including across closi
   const id = idOf('Charter + research');
   fake = fakeClient({ 'attention.request': { event: null }, 'session.queue.list': { entries: [], paused: false } });
   window.maws = fake.client as unknown as PreloadBridge;
-  useSessions.getState().applyStatus({ appSessionId: id, status: status(id) });
+  useSessions.getState().applyStatus({ appSessionId: id, status: status(id) }, TEST_MACHINE);
   render(<Sidebar />);
   await userEvent.hover(needsRow('Charter + research'));
   let card = await screen.findByRole('dialog', { name: 'Charter + research' });
@@ -475,7 +475,7 @@ it('a reply still sending when the card closes is still sending when it reopens:
   const id = idOf('Charter + research');
   fake = fakeClient({ 'attention.request': { event: null }, 'session.queue.list': { entries: [], paused: false } });
   window.maws = fake.client as unknown as PreloadBridge;
-  useSessions.getState().applyStatus({ appSessionId: id, status: status(id) });
+  useSessions.getState().applyStatus({ appSessionId: id, status: status(id) }, TEST_MACHINE);
   render(<Sidebar />);
   await userEvent.hover(needsRow('Charter + research'));
   let card = await screen.findByRole('dialog', { name: 'Charter + research' });
@@ -505,7 +505,7 @@ describe('a hover card with its reply focused', () => {
     fake = fakeClient({ 'attention.request': { event: null }, 'session.queue.list': { entries: [], paused: false } });
     window.maws = fake.client as unknown as PreloadBridge;
     const id = idOf('Charter + research');
-    useSessions.getState().applyStatus({ appSessionId: id, status: status(id) });
+    useSessions.getState().applyStatus({ appSessionId: id, status: status(id) }, TEST_MACHINE);
     render(<Sidebar />);
     const user = userEvent.setup();
     await user.hover(needsRow('Charter + research'));

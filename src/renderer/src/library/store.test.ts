@@ -2,13 +2,13 @@
 // window watches, read on first watch and read again on every `library.changed`; a failed read keeps the last good
 // answer; an answer a newer read superseded is dropped; what nobody watches is not refreshed and is forgotten past a cap.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { PreloadBridge } from '@shared/ipc/schema';
 import type { LibraryRow, LibrarySpace } from '@shared/ipc/schema/library';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import {
   connectLibrary, library, libraryList, libraryRow, librarySpaces, listKey, refreshLibrary, resetLibrary, UNWATCHED_KEPT, watchLibraryList,
   watchLibraryRow, watchLibrarySpaces,
 } from './store';
+import { preloadOf } from '../test-support/preload-of';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const COUNTS = { document: 0, presentation: 0, design: 0, design_system: 0, dashboard: 0, html: 0, file: 0 };
@@ -41,7 +41,7 @@ const offs: (() => void)[] = [];
 beforeEach(() => {
   resetLibrary();
   fake = fakeClient();
-  window.maws = fake.client as unknown as PreloadBridge; // P5 O6 M2: main's side
+  window.maws = preloadOf(fake); // P5 O6 M2: main's side
   disconnect = connectLibrary();
 });
 afterEach(() => {

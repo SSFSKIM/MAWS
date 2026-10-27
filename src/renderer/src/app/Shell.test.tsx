@@ -35,6 +35,7 @@ import { probeTool, ref, resetPanelStores } from '../test-support/panel';
 import { registerPanelTool } from '../panel/host';
 import { PanelHost } from '../panel/PanelHost';
 import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
+import { preloadOf } from '../test-support/preload-of';
 
 vi.mock('./Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
 
@@ -667,7 +668,7 @@ it('Delete on an arrow-focused inactive draft tab restores focus after the real 
   resetSetupStore();
   const previousBridge = window.maws;
   const fake = fakeClient({ 'session.intent.discard': { leftover: null } });
-  window.maws = fake.client as unknown as PreloadBridge; // P5 O6 M2: main's side, asked with the bare id
+  window.maws = preloadOf(fake); // P5 O6 M2: main's side, asked with the bare id
   offs.push(() => { window.maws = previousBridge; closeDialog(); resetSetupStore(); });
   offs.push(registerCloseGuard('session', async (ref) => ref.kind === 'session' && await beforeCloseUnstarted(ref.appSessionId) === 'closed'));
   putIntent(intent({ appSessionId: at(ID), draft: { doc: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'keep my draft' }] }] }, attachments: [], updatedAt: '2026-09-29T10:00:00.000Z' } }));

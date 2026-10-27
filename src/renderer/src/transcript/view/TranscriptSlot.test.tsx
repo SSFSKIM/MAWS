@@ -116,7 +116,7 @@ describe('TranscriptSlot', () => {
     fireEvent.click(screen.getByTitle('Edit here · Send rewinds this session to this message'));
     expect(editAndResubmit).toHaveBeenCalledTimes(1);
     fireEvent.click(document.querySelector<HTMLElement>('[data-chip="path"]')!);
-    expect(openFile).toHaveBeenCalledWith('src/a.ts', undefined);
+    expect(openFile).toHaveBeenCalledWith('src/a.ts', undefined, APP);
 
     const again = vi.fn();
     let dispose = () => {};
@@ -355,7 +355,7 @@ describe('TranscriptSlot', () => {
     expect(document.body.textContent).not.toContain('The parent’s copied');
     expect(document.querySelector('.owner-message-ink')).not.toBeNull(); // the local presenter
     fireEvent.click(document.querySelector<HTMLElement>('[data-chip="path"]')!);
-    expect(override).toHaveBeenCalledWith('src/a.ts', undefined);
+    expect(override).toHaveBeenCalledWith('src/a.ts', undefined, id);
     expect(registered).not.toHaveBeenCalled();
 
     view.rerender(<TranscriptSlot appSessionId={id} />); // inert by default: every row, the registered action

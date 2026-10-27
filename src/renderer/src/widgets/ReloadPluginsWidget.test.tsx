@@ -9,7 +9,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, type WidgetBackend } from '../../../../test/support/widget-backend';
-import { at } from '../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { record } from '../../../../test/support/builders';
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
@@ -57,7 +57,7 @@ describe('/reload-plugins', () => {
 
   // P2-A (2026-10-09; the execution document §5.6): no ready process offers Load now; opening starts and asks nothing
   it('without a ready process offers Load now and asks nothing of the engine; Load now starts it, then the reload runs', async () => {
-    const offStatus = ipc.on('session.status', (event) => useSessions.getState().applyStatus(event));
+    const offStatus = ipc.on('session.status', (event) => useSessions.getState().applyStatus(event, TEST_MACHINE));
     useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]), records: new Map([[ID, record(ID)]]) });
     act(() => void backend.emitStatus(BARE, { process: 'exited' })); // the backend's engine and the store alike
     mount();

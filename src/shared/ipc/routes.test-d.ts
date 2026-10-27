@@ -1,5 +1,5 @@
-// Compile-time suite (P5 O6 M2): a `path` command names its machine in the bridge's required form, an `addressed` or a
-// `machine-wide` one needs no options; until M4 switches the required form on, the client's invoke takes it optionally.
+// Compile-time suite (P5 O6 M2, M4): a `path` command names its machine in the bridge's required form, an `addressed` or a
+// `machine-wide` one needs no options; the client's invoke takes that form since M4.
 import { describe, expectTypeOf, it } from 'vitest';
 import type { AppSessionId } from '../graph/ids';
 import type { MachineRef } from '../machine/ref';
@@ -26,9 +26,13 @@ describe('the machine an invoke names', () => {
     expectTypeOf<'session.get'>().not.toMatchTypeOf<PathCommandName>();
   });
 
-  it('takes it optionally on the client until M4', () => {
-    expectTypeOf<InvokeRest<'git.watch'>>().toEqualTypeOf<[opts?: InvokeOptions]>();
+  it('requires it of a path command on the client, and of no other (M4)', () => {
+    expectTypeOf<InvokeRest<'git.watch'>>().toEqualTypeOf<[opts: { machine: MachineRef }]>();
+    expectTypeOf<InvokeRest<'session.get'>>().toEqualTypeOf<[opts?: InvokeOptions]>();
+    // @ts-expect-error a path command names its machine
     void bridge.invoke('git.watch', { directory: '/work' });
+    void bridge.invoke('git.watch', { directory: '/work' }, { machine });
     void bridge.invoke('session.get', { appSessionId: id });
+    void bridge.invoke('settings.get', undefined);
   });
 });

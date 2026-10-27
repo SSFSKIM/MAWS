@@ -10,6 +10,7 @@ import { activeTab, currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { Overview } from './Overview';
+import { TEST_MACHINE } from '../../../../test/support/machine';
 import { formatClock } from '@shared/app/date-format'; // L129
 
 const nine = scenarioFile('nine-sessions');
@@ -179,7 +180,7 @@ describe('a released session’s card', () => {
   it('stays on the board, idle, with the muted word released', () => {
     const id = idOf('Settings idle probe');
     const digest = useSessions.getState().digests.get(id)!;
-    act(() => useSessions.getState().applyDigest({ ...digest, released: { at: AT_RELEASE, reason: 'budget', limitKiB: 8 * 1024 * 1024 }, revision: digest.revision + 1 }));
+    act(() => useSessions.getState().applyDigest({ ...digest, released: { at: AT_RELEASE, reason: 'budget', limitKiB: 8 * 1024 * 1024 }, revision: digest.revision + 1 }, TEST_MACHINE));
     render(<Overview paneIndex={0} />);
     const released = card('Settings idle probe');
     expect(within(released).getByTestId('card-activity').textContent).toBe('Idle');

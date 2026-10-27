@@ -6,7 +6,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, fixtureLine, RESPONSES, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
-import { at } from '../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
 import { PermissionsWidget } from './PermissionsWidget';
@@ -85,7 +85,7 @@ describe('permissions widget shows effective mode and rules with sources', () =>
 });
 
 describe('permissions widget: the mode segment (C7’s mode menu) over session.setPermissionMode', () => {
-  const follow = () => ipc.on('session.status', (event) => useSessions.getState().applyStatus(event)); // C3's status events, as the shell applies them
+  const follow = () => ipc.on('session.status', (event) => useSessions.getState().applyStatus(event, TEST_MACHINE)); // C3's status events, as the shell applies them
   const checked = () => screen.getByRole('menuitemradio', { checked: true }).textContent ?? '';
   const choose = (mode: string) => fireEvent.click(screen.getAllByRole('menuitemradio').find((item) => item.textContent?.startsWith(mode))!);
 

@@ -10,6 +10,12 @@ export function machineFor(appSessionId: AppSessionId | null): MachineRef {
   return appSessionId === null ? ipc.localMachine : machineOf(appSessionId);
 }
 
+// P5 O6 M4 ("Path-keyed stores"): the key of a directory or file on a machine, since the same path on two machines is two
+// checkouts. It is the codec's join, as an address is.
+export function checkoutKey(machine: MachineRef, path: string): string {
+  return addressOf(machine, path);
+}
+
 // A session id an artifact's own content holds (an author, an actor, a thread's session), as main wrote it: the bare id
 // of the machine that holds the artifact, this one's while the library is local. An address already is one.
 export function storedSessionOnPage(appSessionId: string): AppSessionId {
