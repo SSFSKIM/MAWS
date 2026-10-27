@@ -142,6 +142,14 @@ Three rules carry the design:
 
 - **The machine key.** At enrollment the endpoint module generates a P-256 key pair and keeps it as a 0600 file in the daemon's 0700 state directory, on every platform. A headless Node daemon can't use the Enclave. This is acceptable because the machine key protects nothing that code running as that OS account couldn't already do: that account runs the sessions.
 - **The machine owner** is recorded in the signed org state (§5.2) when the machine enrolls, as the member whose device approved the enrollment.
+- **The machine's ref** (P5 OX2; Decision Log 19). The daemon mints a `MachineRef` at its first run, before any enrollment, and never changes it. It is an opaque string, `[A-Za-z0-9_-]{16,64}`, drawn from at least 128 random bits.
+  - **It is the machine's identity in every contract here.** Each field named `machine` carries it. The name is a display attribute of the org-state entry, which an admin may change. A rename re-issues nothing.
+  - **RL5's machine entry carries it as `ref`,** set at enrollment and immutable after. Verifiers (the hub's Registry, apps and machines) refuse a state that changes an entry's ref, or holds two entries with one ref.
+  - **A key change keeps the ref.** Re-enrolling the machine or rotating its key is an admin-signed state change of the entry's `pub`, and the entry's identity across it is its ref.
+    - Channels pinned to the old key close.
+    - The machine re-issues its listings and endpoint record under the new key.
+    - Log events it signed with the old key still verify against the state versions that held it (RL8's key id).
+  - **Why not the key's fingerprint.** It would change at enrollment and orphan every address the app persisted while the machine was signed out, and again at every rotation. The machine key stays a 0600 file (above), so the Enclave move concerns device keys, unless U4 makes `mawsd` a signed Electron process.
 
 ### 3. Sessions: the two lanes
 
@@ -296,12 +304,14 @@ All keys are P-256: ECDSA for signatures, ECDH for channel keys. Node, WebCrypto
   - `k` travels from app to machine by the person's hand and never through the hub. The code carries no secret org key; desk's code carried the org key (DX7).
   1. `sminos hub enroll`, or its successor in the endpoint, reads the code from a hidden prompt or stdin, never from an argument.
   2. It generates the machine key and redeems the token for the machine's Access service token.
-  3. It sends its public key with `MAC(k, name ‖ machinePub ‖ tokenId)`. The member's device checks the MAC, so a key the hub substituted fails. Only then does it sign the machine into the org state, with its owners set (§6.3): that member by default, or the org.
+  3. It sends its public key and its ref with `MAC(k, name ‖ machinePub ‖ ref ‖ tokenId)`. Each field is length-prefixed, so no two inputs encode alike. The member's device checks the MAC, so a key or ref the hub substituted fails. Only then does it sign the machine into the org state, with its owners set (§6.3): that member by default, or the org.
+     - A ref the state already holds is a re-enrollment of that machine. The app says so, and the new state replaces the entry's key and keeps its owners unless the member changes them.
   4. Until that state version arrives, the machine is *pending* and executes nothing.
 - **An unattended machine** (a devcloud VM enrolling at boot) can't get a device signature, so it enrolls through a **delegation**.
   - An admin signs the delegation into the org state. Today's provisioning key becomes that delegation, and its existing fields fit it: `{id, pub, prefix, expires, maxUses, offlineRevokeS, owners}` (`identity.ts:245-266`).
   - The provisioning secret store then holds the delegation's private key instead of the org key.
   - The booting machine generates its key, and signs its own machine certificate with the delegation key, so nothing passes through the hub to be substituted. The name must sit under the prefix.
+  - The certificate carries the machine's ref. A ref already held by an org-state entry, or claimed by two live certificates, makes verifiers refuse every certificate that claims it, and the admin's app shows the conflict. So a compromised VM can deny another VM its ref, but can't take it.
   - Uses are counted by the hub, as a courtesy only. A compromised VM holds the delegation key and can mint further machines under the prefix until the delegation expires or is revoked. Revoking the delegation removes them all.
   - Verifiers accept the certificate while the delegation is live, with the delegation's owners as the machine's owners. No new org-state version is needed per VM.
   - The hub stores the certificates, and serves them beside the state.
@@ -317,7 +327,7 @@ All keys are P-256: ECDSA for signatures, ECDH for channel keys. Node, WebCrypto
 - **The handshake.**
   - Ephemeral P-256 ECDH on both sides.
   - Each side signs the transcript with its long-term key: the device's channel key and the machine key.
-  - The transcript includes the org-state version each side holds, the device id, the machine name and the client class.
+  - The transcript includes the org-state version each side holds, the device id, the machine's ref and the client class.
   - The pattern is SIGMA-I (sign-and-MAC). The exact construction and its test vectors belong to the Interfaces (RL2).
 - **After the handshake.**
   - Frames are AES-256-GCM, with keys from HKDF per direction and a 64-bit sequence number in each nonce.
@@ -423,7 +433,7 @@ All keys are P-256: ECDSA for signatures, ECDH for channel keys. Node, WebCrypto
 #### 5.9 What the hub can and can't do
 
 It can:
-- see routing metadata: org, member ids, machine names, project ids, session ids, sizes, timing;
+- see routing metadata: org, member ids, machine refs and names, project ids, session ids, sizes, timing;
 - see the listing fields of sessions that aren't `private`, and the log plane's contents, which are org-readable by design (§5.7, §6.2);
 - delay or drop frames, or deny service;
 - delay a revocation, but only visibly to the admin (§5.2);
@@ -680,7 +690,7 @@ The hub serves both protocols, but a migrated endpoint accepts only one trust mo
 
 ## Interfaces (the contracts the composite lifts)
 
-These are named here with their binding fields. Byte-level schemas and test vectors are written by the child that builds each, against this list.
+These are named here with their binding fields. Byte-level schemas and test vectors are written by the child that builds each, against this list. Every field named `machine` carries the machine's ref (§2.3), never its name.
 
 - **RL1, Endpoint ↔ hub.**
   - One WebSocket.
@@ -709,15 +719,16 @@ These are named here with their binding fields. Byte-level schemas and test vect
   - `query {opId, opCreated}` answers `done {result} | in-progress | refused | not-received | expired | unavailable`. The executing side's ledger answers it; the endpoint module only forwards it (§4.7). `opCreated` is required: without it, a pruned id would answer `not-received`, and the resend that follows could run an action twice.
   - Revocations are RL4 actions too, sent by an admin device to each machine and acknowledged (§5.2).
 - **RL5, Signed org state.**
-  - The fields are `{org, version, prev, issued, root: {keys[], recoveryPub}, members[{id, email, role, devices[{id, class, keyStorage, channelPub, stepUpPub, passkey?: {credentialId, publicKey, rpId}}]}], machines[{name, pub, owners: memberId[] | 'org'}], delegations[{id, pub, prefix, expires, maxUses, offlineRevokeS, owners}], projects[...]}`, with signatures by root keys.
+  - The fields are `{org, version, prev, issued, root: {keys[], recoveryPub}, members[{id, email, role, devices[{id, class, keyStorage, channelPub, stepUpPub, passkey?: {credentialId, publicKey, rpId}}]}], machines[{ref, name, pub, owners: memberId[] | 'org'}], delegations[{id, pub, prefix, expires, maxUses, offlineRevokeS, owners}], projects[...]}`, with signatures by root keys.
   - Grants are separate records signed by a machine owner's device, or by an admin device for org-owned machines: `{machine, member, rights, version}`.
-  - Machine certificates under a delegation are `{machine, pub, delegation, use}`, signed by the delegation key.
+  - Machine certificates under a delegation are `{machine, name, pub, delegation, use}`, signed by the delegation key.
+  - `ref` is immutable and unique across the state's entries and the live certificates (§2.3, §5.3).
   - A root transition `{fromVersion, newRootKeys[], issued}` is signed by the recovery key. Machines accept it over any state signed by the old root set.
   - Grants are checked only by the hosting machine (§5.8).
 - **RL6, Session record** (machine-held).
   - `{machine, session, lane, origin: {kind: 'terminal' | 'maws' | 'sminos-spawn', requester?, spawnerSession?}, principal: memberId | 'org' | '@machine', inference: {kind: 'slot', configDir} | {kind: 'route', settingsRef}, project?, owners: (memberId | '@machine')[], ownersProof[], access: 'private' | 'listed' | 'org-view' | 'org-converse', shares[{member, grade}], created, context}`.
   - Owners are copied at spawn and never resolved later through an alias. `@machine` isn't an alias: the endpoint module resolves it against signed org state, and it never leaves the machine (§5.8).
-  - The listing projection is `{session, revision, issued, fields: {owners, machine, project, lane, state, title}}`, signed by the machine key.
+  - The listing projection is `{session, revision, issued, fields: {owners, machine, project, lane, state, title}}`, signed by the machine key. The app shows the machine's name from the org state, so a rename re-issues no listing.
   - The machine's endpoint record is `{machine, addresses[], issued}`, signed by the machine key. It carries the direct RL2 addresses (§4.1).
 - **RL7, Capabilities.**
   - Per session: lane-b-control-map's `ControlCapabilities`.
@@ -825,3 +836,9 @@ These are named here with their binding fields. Byte-level schemas and test vect
    - An op older than `OP_HORIZON = KEPT_S − 3600` s is refused `expired`, and `query` answers `expired` for it, so pruning the ledger never reopens an id.
    - An `opCreated` later than `created` by more than the freshness window is malformed. That bounds clock skew, so the hour's margin holds.
    - `query` carries `opCreated` (required), and gains `expired` and `unavailable` (the ledger can't be read; O12 calls it `failed`) (§4.7, RL4).
+19. **2026-10-27, the machine ref** (P5 Decision Log 21, through the MAWS architect; the format from desk-sminos-orchestrator's O11 M1).
+   - RL5's machine entry gains `ref`: the `MachineRef` the daemon mints at its first run, `[A-Za-z0-9_-]{16,64}` from at least 128 random bits, set at enrollment, immutable, and unique across entries and live certificates.
+   - Every contract field named `machine` carries the ref. The name is a display attribute, and a rename re-issues nothing.
+   - A key change keeps the ref. It is an admin-signed change of the entry's `pub`, and old signatures verify against the versions that held the old key.
+   - The enrollment MAC covers the ref, with length-prefixed fields. A delegation's certificate carries it, and a contested ref is refused, never resolved in either claimant's favour (§2.3, §5.3, RL5, RL6).
+   - Rejected: the key's fingerprint. It would change at enrollment and at every rotation.
