@@ -1471,3 +1471,109 @@ test("gate.yml runs the unit job over the plan's shards: its name, its --shard (
   assert.match(body, /pnpm test --maxWorkers="\$cores" --fsModuleCache \$\{SHARD:\+--shard="\$SHARD"\}\n/);
   assert.match(body, /\n {10}name: test-results-unit\$\{\{ matrix\.slug \}\}-\$\{\{ github\.run_attempt \}\}\n/);
 });
+
+// The peer groups (PEER_E2E; the two-build check, e2e/cross-build.spec.ts): the trailers scripts/ci-gate.sh writes for a
+// tree and its peer, and the e2e:cross-build entry the plan makes of them.
+const PEER = '0123456789abcdef0123456789abcdef01234567';
+const peerTrailers = (peerWire, wire) => `Peer: ${PEER}\nPeer-Wire: ${peerWire}\nWire: ${wire}`;
+const peerEntry = { group: 'cross-build', script: 'e2e:cross-build', slug: 'cross-build', build: false, libreoffice: false, poppler: false, measured: false, runner: JSON.stringify(mac), timeout: 25, peer: PEER };
+
+test("a tree a minor from its peer takes the peer groups into any run that tests code, on the Mac's exclusive instance with the peer, whatever the lane", () => {
+  const lists = { PEER_E2E: 'cross-build', LINUX_E2E: 'library', MAC_VM_E2E: 'cross-build side' };
+  for (const [asked, others] of [
+    ['Gates: static,unit,probes\nClass1a: pool', []], // class 1a alone, on a Linux lane
+    ['Gates: unit', []],
+    ['Gates: static,unit:darwin\nRunner: macos', []],
+    ['Gates: e2e:library', ['library']], // a Linux lane's group
+    ['Gates: e2e:side\nRunner: macos', ['side']],
+    ['Gates: e2e:side\nRunner: macos\nLane: vm', ['side']], // the guest's lane: never the peer's
+    ['Runner: macos', null], // the default set
+  ]) {
+    for (const [peerWire, wire] of [['3.0', '3.1'], ['3.2', '3.1']]) {
+      const { outputs, summary, stdout } = plan({ ...lists, CLASS1_E2E: 'side', HEAD_MESSAGE: `ci-gate: test\n\n${asked}\n${peerTrailers(peerWire, wire)}` });
+      const e2e = JSON.parse(outputs.e2e);
+      if (others) assert.deepEqual(e2e.map((entry) => entry.group), [...others, 'cross-build'], asked);
+      assert.deepEqual(e2e.find((entry) => entry.group === 'cross-build'), peerEntry, asked);
+      assert.ok(JSON.parse(outputs.e2e_host).some((entry) => entry.group === 'cross-build'), asked);
+      const line = `Peer: 01234567, wire ${peerWire}; this tree's ${wire}, a minor apart, so e2e:cross-build joined.`;
+      assert.ok(summary.trimEnd().endsWith(` ${line}`), summary);
+      assert.ok(stdout.endsWith(`${line}\n`), stdout);
+    }
+  }
+});
+
+test('the peer groups stay out of a run whose tree and peer share a minor, are a major apart, or has no peer, and of a live or affected run', () => {
+  const lists = { PEER_E2E: 'cross-build', LIVE_E2E: 'library-live' };
+  for (const message of [
+    `Gates: static,unit,probes\n${peerTrailers('3.1', '3.1')}`,
+    `Gates: static,unit,probes\n${peerTrailers('3.2', '4.0')}`,
+    'Gates: static,unit,probes\nPeer-Wire: 3.0\nWire: 3.1',
+    `Gates: static,unit,probes\nPeer: ${PEER}\nWire: 3.1`,
+    `Gates: e2e:library-live\nRunner: macos\nLive: yes\n${peerTrailers('3.0', '3.1')}`,
+    `Gates: unit\nClass1a: pool\nSelection: affected\nAffected-Count: 0\n${peerTrailers('3.0', '3.1')}`,
+  ]) {
+    const { outputs, summary } = plan({ ...lists, HEAD_MESSAGE: `ci-gate: test\n\n${message}` });
+    assert.ok(!JSON.parse(outputs.e2e).some((entry) => entry.group === 'cross-build'), message);
+    assert.doesNotMatch(summary, /joined/, message);
+  }
+  // a dispatch has no trailers to read
+  assert.equal(plan({ ...lists, EVENT: 'workflow_dispatch', INPUT_GATES: 'static,unit,probes', HEAD_MESSAGE: peerTrailers('3.0', '3.1') }).outputs.e2e, '[]');
+  // the same minor still names the peer in the summary
+  assert.match(plan({ ...lists, HEAD_MESSAGE: `ci-gate: test\n\nGates: static\n${peerTrailers('3.1', '3.1')}` }).summary, / Peer: 01234567, wire 3\.1; this tree's 3\.1\.\n$/);
+});
+
+test('a static or probes check of a tree a minor from its peer stays quick: the peer groups join only a run with unit or an e2e group', () => {
+  const lists = { PEER_E2E: 'cross-build' };
+  for (const gates of ['static', 'probes', 'static,probes', 'packaged']) {
+    const { outputs, summary, stdout } = plan({ ...lists, HEAD_MESSAGE: `ci-gate: test\n\nGates: ${gates}\nClass1a: pool\n${peerTrailers('3.0', '3.1')}` });
+    assert.equal(outputs.e2e, '[]', gates);
+    const line = "Peer: 01234567, wire 3.0; this tree's 3.1, a minor apart, but the peer groups join only a run with unit or an e2e group.";
+    assert.ok(summary.trimEnd().endsWith(` ${line}`), summary);
+    assert.ok(stdout.endsWith(`${line}\n`), stdout);
+  }
+});
+
+test('a peer group asked for takes the peer at any wire, and without a Peer: trailer has none; a malformed peer or wire is refused', () => {
+  const lists = { PEER_E2E: 'cross-build' };
+  const asked = (trailers) => JSON.parse(plan({ ...lists, HEAD_MESSAGE: `ci-gate: test\n\nGates: e2e:cross-build${trailers}` }).outputs.e2e);
+  assert.deepEqual(asked(`\n${peerTrailers('3.1', '3.1')}`), [peerEntry]);
+  const unpaired = { ...peerEntry };
+  delete unpaired.peer;
+  assert.deepEqual(asked(''), [unpaired]);
+  assert.deepEqual(JSON.parse(plan({ ...lists, EVENT: 'workflow_dispatch', INPUT_GATES: 'e2e:cross-build' }).outputs.e2e), [unpaired]);
+  for (const [trailers, stderr] of [
+    ['Peer: abc123', "no such peer: abc123 (a commit's full sha, as ci-gate.sh writes it)"],
+    [`Peer: ${PEER}; rm -rf /`, `no such peer: ${PEER}; rm -rf / (a commit's full sha, as ci-gate.sh writes it)`],
+    [`Peer: ${PEER}\nPeer-Wire: 3`, 'no such wire: Peer-Wire: 3 (major.minor, as ci-gate.sh writes it)'],
+    [`Peer: ${PEER}\nWire: three.one`, 'no such wire: Wire: three.one (major.minor, as ci-gate.sh writes it)'],
+  ]) {
+    const refused = refusal({ ...lists, HEAD_MESSAGE: `ci-gate: test\n\nGates: static\n${trailers}` });
+    assert.equal(refused.status, 1, trailers);
+    assert.equal(refused.stderr, `gate-plan: ${stderr}\n`);
+  }
+});
+
+test('a peer group never goes to a hosted Mac: Lane: hosted names it with its reason, and HOSTED_MAC_E2E naming it is refused', () => {
+  const lists = { PEER_E2E: 'cross-build', HOSTED_MAC_E2E: 'library' };
+  const { outputs, summary } = plan({ ...lists, HEAD_MESSAGE: `ci-gate: test\n\nGates: e2e:library\nRunner: macos\nLane: hosted\n${peerTrailers('3.0', '3.1')}` });
+  assert.deepEqual(placement(outputs), { library: [waiter, 100], 'cross-build': [mac, 25] });
+  assert.match(summary, / Lane: hosted, but never on a hosted Mac, so where it would be: e2e:cross-build \(peer\)\./);
+  const refused = refusal({ ...lists, HOSTED_MAC_E2E: 'library cross-build', HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:library\nRunner: macos' });
+  assert.equal(refused.stderr, 'gate-plan: HOSTED_MAC_E2E names what never goes to a hosted Mac: cross-build (peer)\n');
+});
+
+test("gate.yml lists e2e:cross-build as its peer group, and its e2e job builds the peer, hands the spec its root and stops both builds' supervisors", () => {
+  const workflow = readWorkflow();
+  assert.equal(workflowList(workflow, 'PEER_E2E'), 'cross-build');
+  const scripts = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts;
+  assert.match(scripts['e2e:cross-build'], /^scripts\/e2e-build\.sh plain && MAWS_CROSS_BUILD_E2E=1 .*playwright test e2e\/cross-build\.spec\.ts$/);
+  for (const list of ['CLASS1_E2E', 'MAC_VM_E2E', 'MAC_SHARED_E2E', 'HOSTED_MAC_E2E']) assert.ok(!workflowList(workflow, list).split(/\s+/).includes('cross-build'), list);
+  for (const job of ['e2e', 'e2e-vm']) {
+    const body = jobBody(workflow, job);
+    assert.match(body, /\n {6}- id: peer\n {8}if: matrix\.peer\n {8}env:\n {10}PEER: \$\{\{ matrix\.peer \}\}\n {8}run: \.github\/scripts\/gate-run\.sh '[^']*' \.github\/scripts\/gate-peer\.sh prepare "\$PEER" "\$RUNNER_TEMP\/maws-peer"\n/, job);
+    assert.match(body, /\n {10}MAWS_E2E_PEER_ROOT: \$\{\{ matrix\.peer && format\('\{0\}\/maws-peer', runner\.temp\) \|\| '' \}\}\n/, job);
+    assert.match(body, /\n {6}- if: always\(\) && matrix\.peer && steps\.checkout\.outcome == 'success'\n {8}run: \.github\/scripts\/gate-peer\.sh stop "\$RUNNER_TEMP\/maws-peer"\n/, job);
+    // in that order: the peer before the run, the stop after it
+    assert.ok(body.indexOf('gate-peer.sh prepare') < body.indexOf('MAWS_E2E_PEER_ROOT: ') && body.indexOf('MAWS_E2E_PEER_ROOT: ') < body.indexOf('gate-peer.sh stop'), job);
+  }
+});
