@@ -2,9 +2,11 @@
 // machines and registers a project, and a project and its events outlive the machine's revocation:
 // - it runs only in a throwaway org, named with `--test-org`, never the configuration's own (`--config`'s), and only
 //   while the deployment serves that org, checked before anything is enrolled or written;
-// - it cleans up what it enrolled or minted, each step attempted whatever happened before, and fails when one fails.
+// - it cleans up what it enrolled or minted, each step attempted whatever happened before, and fails when one fails;
+//   a command run under `interruptible` does so however it ends, a SIGINT or SIGTERM included.
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { checkTestTarget, type DeployConfig } from './config';
-import type { Person } from './hub';
+import { settledWithin, type Person } from './hub';
 
 export const TEST_ORG_OPTION = { 'test-org': { type: 'string' } } as const;
 
@@ -50,26 +52,125 @@ export function isTestTarget(config: DeployConfig): boolean {
   }
 }
 
-/** Cleanup steps, registered as soon as there is something to undo and run last first, every one of them. */
+/** How long one cleanup step may take before the steps after it run anyway (a request to a stalled hub, say). */
+export const STEP_MS = 30_000;
+/** How long an interrupted run's work has to settle — a request it has in flight landing — before the cleanup runs. */
+export const SETTLE_MS = 5_000;
+
+/** Set while a cleanup runs: its requests pass `Cleanup.check` once the work's are refused. */
+const cleaning = new AsyncLocalStorage<true>();
+
+/**
+ * Cleanup steps, registered as soon as there is something to undo and run last first, every one of them, each within
+ * `stepMs`. Its `signal` and `check` stop the work when the run is interrupted (`interruptible`).
+ */
 export class Cleanup {
   private readonly steps: Array<{ what: string; run: () => Promise<void> }> = [];
+  private running: string | undefined;
+  private readonly interruption = new AbortController();
+  /** Aborted when the run is interrupted: the work stops at its next step. */
+  readonly signal = this.interruption.signal;
+
+  constructor(private readonly stepMs = STEP_MS) {}
 
   add(what: string, run: () => Promise<void>): void {
     this.steps.push({ what, run });
   }
 
-  /** Runs every step, each whatever the others did; what failed, as `<what>: <why>`. */
-  async run(): Promise<string[]> {
-    const failures: string[] = [];
-    for (const step of this.steps.splice(0).reverse()) {
-      try {
-        await step.run();
-      } catch (error) {
-        failures.push(`${step.what}: ${error instanceof Error ? error.message : String(error)}`);
+  /** Stops the work: `signal` aborts, and `check` throws from now on everywhere but in the cleanup. */
+  interrupt(why: string): void {
+    if (!this.signal.aborted) this.interruption.abort(new Error(why));
+  }
+
+  /** Throws once the run is interrupted, unless called from the cleanup: what the work's requests pass first. */
+  check(): void {
+    if (this.signal.aborted && !cleaning.getStore()) throw this.signal.reason as Error;
+  }
+
+  /** What is not yet undone: the step running, then those still to run, in the order they will. */
+  get pending(): string[] {
+    return [...(this.running === undefined ? [] : [this.running]), ...this.steps.map((s) => s.what).reverse()];
+  }
+
+  /** Runs every step, each whatever the others did, a step registered meanwhile included; what failed, as
+   * `<what>: <why>`. A step past `stepMs` is given up (it may still finish) and counts as failed. */
+  run(): Promise<string[]> {
+    return cleaning.run(true, async () => {
+      const failures: string[] = [];
+      for (let step = this.steps.pop(); step; step = this.steps.pop()) {
+        this.running = step.what;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          const late = new Promise<'late'>((resolve) => (timer = setTimeout(() => resolve('late'), this.stepMs)));
+          if ((await Promise.race([step.run(), late])) === 'late') failures.push(`${step.what}: not done within ${this.stepMs / 1000} s; the steps after it ran anyway`);
+        } catch (error) {
+          failures.push(`${step.what}: ${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+          clearTimeout(timer);
+        }
       }
-    }
-    for (const failure of failures) console.error(`cleanup failed: ${failure}`);
-    return failures;
+      this.running = undefined;
+      for (const failure of failures) console.error(`cleanup failed: ${failure}`);
+      return failures;
+    });
+  }
+}
+
+/** The signals that end a run early — an operator's Ctrl-C, a timeout's kill — and the status each leaves. */
+const SIGNAL_STATUS = { SIGINT: 130, SIGTERM: 143 } as const;
+type EndingSignal = keyof typeof SIGNAL_STATUS;
+
+export type InterruptOptions = {
+  /** How long the work has, once interrupted, to settle before the cleanup runs (default SETTLE_MS). */
+  settleMs?: number;
+  /** Where the signals come from: the process, or a suite's emitter. */
+  signals?: Pick<NodeJS.EventEmitter, 'on' | 'off'>;
+  /** Ends the process at a second signal: `process.exit`, or a suite's spy. */
+  exit?: (status: number) => void;
+};
+
+/**
+ * A command's run: `work` (its status; a throw is a FAIL, status 1), then `finish` (its cleanup and what it reports
+ * after, given the status and answering the command's), however the run ends. A SIGINT or SIGTERM interrupts it: the
+ * work is stopped (`cleanup.interrupt`: its requests refused from then on), given `settleMs` for what it has in
+ * flight, and `finish` runs; the status is then 130 or 143. A second signal exits at once, naming the cleanup steps not
+ * yet done.
+ */
+export async function interruptible(
+  cleanup: Cleanup,
+  work: () => Promise<number>,
+  finish: (status: number) => Promise<number>,
+  { settleMs = SETTLE_MS, signals = process, exit = (status) => process.exit(status) }: InterruptOptions = {},
+): Promise<number> {
+  let caught: EndingSignal | undefined;
+  let interrupted!: () => void;
+  const interruption = new Promise<undefined>((resolve) => (interrupted = () => resolve(undefined)));
+  const handlers = (Object.keys(SIGNAL_STATUS) as EndingSignal[]).map((signal) => {
+    const handler = () => {
+      if (caught) {
+        const left = cleanup.pending;
+        console.error(`${signal} again: exiting now; ${left.length ? `possibly left behind, not yet undone: ${left.join('; ')}` : 'nothing was left to undo'}`);
+        return exit(SIGNAL_STATUS[signal]);
+      }
+      caught = signal;
+      console.error(`${signal}: stopping the run, then undoing what it made (a second ${signal} exits at once, leaving what is not yet undone)`);
+      cleanup.interrupt(`interrupted by ${signal}`);
+      interrupted();
+    };
+    signals.on(signal, handler);
+    return { signal, handler };
+  });
+  try {
+    const running = work().catch((error: unknown) => {
+      console.error(`FAIL: ${error instanceof Error ? error.message : String(error)}`);
+      return 1;
+    });
+    const status = await Promise.race([running, interruption]);
+    if (caught) await settledWithin(running, settleMs);
+    const finished = await cleaning.run(true, () => finish(caught ? SIGNAL_STATUS[caught] : status!));
+    return caught ? SIGNAL_STATUS[caught] : finished;
+  } finally {
+    for (const { signal, handler } of handlers) signals.off(signal, handler);
   }
 }
 

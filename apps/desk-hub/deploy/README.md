@@ -207,8 +207,11 @@ hub's half alone.
 
 These act as the org's admin, through a test device's keys: `--device-keys <file>`, a JSON file
 `{"keys": {"a1.channel": <JWK>, "a1.stepUp": <JWK>, "recovery": <JWK>}}` of private keys (keep it 0600; it is read and
-never printed). The device's step-up key signs the successors they post, so it must be a root key of the head. They
-write the state only where an operator's anchor allows:
+never printed, nor quoted when it does not parse). The device's step-up key signs the successors they post, so it must
+be a root key of the head. They act only on a staging Worker (`desk-hub-staging`, or one named `desk-hub-staging-…`):
+production's host and Worker are refused by name before a credential is read or the hub asked anything, whatever the
+configuration's org, its `orgGenesis` or `--test-org` say (`redeploy-check`, whose RL1 leg writes the state, likewise).
+Within that, they write the state only where an operator's anchor allows:
 - in the configuration's own org, only when it serves a chain whose genesis is the configuration's `orgGenesis`
   (staging's is pinned; production's config pins none, so they refuse it), and never a genesis;
 - in a throwaway org named with `--test-org` (proof.ts's rule), where they post the genesis when it has none.
@@ -216,6 +219,10 @@ write the state only where an operator's anchor allows:
 Each machine they enroll is listed by a signed successor, owned by the device's member, and taken out again by another (its key retired, an honest departure, so what it signed keeps verifying), and
 revoked, which deletes its service token. A service token Access has just minted is refused for up to about a minute,
 so they wait it out.
+
+They undo what they made however they end, an operator's Ctrl-C (SIGINT) or a timeout's kill (SIGTERM) included: the
+signal stops the run, gives a request in flight 5 s to land, runs the cleanup (each step within 30 s) and exits 130 or
+143. A second signal exits at once, printing the cleanup steps not yet done — what may be left on the deployment.
 
 - `relay-measure` (U2): a machine `m8-rm-<tag>` whose endpoint echoes, and the reference client's Machine socket to it,
   both run here. Every frame is synthetic and RL2-sized: a 64-bit sequence number, random bytes for the ciphertext and a

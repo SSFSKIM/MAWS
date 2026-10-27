@@ -11,10 +11,11 @@
 //   6  the reference client holds the Registry, Project and Machine sockets as the device's member.
 // Items 3–6 share one v2 machine the admin enrolls and lists, whose endpoint holds RL1 and opens one project.
 //
-// What it changes in the org state is undone by signed successors before it ends, however it ends: the machines leave
-// the state (their keys retired) and are revoked, the delegation is dropped (its key revoked; its id and prefix stay
-// reserved for good, RL DL 26), the provisioning key revoked, the push subscription deleted; then the head is read back
-// to show none of it current. What outlives the run is named in deploy/README.md.
+// What it changes in the org state is undone by signed successors before it ends, however it ends, a SIGINT or SIGTERM
+// included (proof.ts, interruptible): the machines leave the state (their keys retired) and are revoked, the delegation
+// is dropped (its key revoked; its id and prefix stay reserved for good, RL DL 26), the provisioning key revoked, the
+// push subscription deleted; then the head is read back to show none of it current. What outlives the run is named in
+// deploy/README.md.
 //
 // stdin (readSecrets): DESK_ACCESS_TOKEN, the owner's Access app token. Options: --device-keys <file> (required: the
 // admin device, whose channel key also signs the device's words and binds the push), --items (default 2,3,4,5,6),
@@ -29,7 +30,7 @@ import { deployArgs, readSecrets } from './deploy';
 import { Person } from './hub';
 import { connection, delegation, events, frames, lingering, members, push, Report, type Context, type Fixture } from './acceptance-items';
 import { loadAdminDevice, OrgAdmin, type AdminDevice, type OrgScope } from './org-admin';
-import { Cleanup, isTestTarget, testOrgArg } from './proof';
+import { Cleanup, interruptible, isTestTarget, testOrgArg, type InterruptOptions } from './proof';
 import { httpPushSink, type PushSink } from './push-sink';
 import { connectEndpoint, echoingEndpoint } from './rl1';
 
@@ -54,9 +55,16 @@ async function fixture(ctx: Context): Promise<Fixture> {
  * The run: the items asked for, in order, each check reported as it ends. Everything it makes is undone through
  * `cleanup`, which the caller runs; `made` names it for the check after.
  */
-export async function acceptance(person: Person, scope: OrgScope, device: AdminDevice, options: AcceptanceOptions, cleanup: Cleanup, print: (line: string) => void = console.log): Promise<{ report: Report; made: Context['made'] }> {
-  const report = new Report(print);
-  const made: Context['made'] = { machines: [], delegations: [], provisioningKeys: [], members: [] };
+export async function acceptance(
+  person: Person,
+  scope: OrgScope,
+  device: AdminDevice,
+  options: AcceptanceOptions,
+  cleanup: Cleanup,
+  print: (line: string) => void = console.log,
+  made: Context['made'] = { machines: [], delegations: [], provisioningKeys: [], members: [] },
+): Promise<{ report: Report; made: Context['made'] }> {
+  const report = new Report(print, cleanup.signal);
   const admin = await OrgAdmin.open(person, scope, device, print);
   const ctx: Context = { person, admin, cleanup, report, tag: Math.random().toString(36).slice(2, 7), made };
   print(`acceptance: ${person.hub}, org ${admin.org} at head version ${admin.head.state.version}, device ${device.id} of ${admin.member}; items ${options.items.join(', ')}`);
@@ -88,6 +96,38 @@ export async function afterCleanup(person: Person, made: Context['made']): Promi
   const { keys } = await person.json<{ keys: Array<{ id: string; revoked?: string | null }> }>('/api/provisioning-keys');
   problems.push(...keys.filter((k) => made.provisioningKeys.includes(k.id) && !k.revoked).map((k) => `the provisioning key ${k.id} is not revoked`));
   return problems;
+}
+
+/**
+ * The acceptance run as the command makes it, under `interruptible`: the items, then however the run ends (a signal
+ * included) the cleanup, the push sink closed, and the head and the hub's lists read back for anything of the run's
+ * still current. The command's status. `person`'s requests should pass `cleanup.check`, so an interrupted run's stop.
+ */
+export function runAcceptance(
+  person: Person,
+  scope: OrgScope,
+  device: AdminDevice,
+  options: AcceptanceOptions,
+  cleanup: Cleanup,
+  print: (line: string) => void = console.log,
+  interrupt: InterruptOptions = {},
+): Promise<number> {
+  const made: Context['made'] = { machines: [], delegations: [], provisioningKeys: [], members: [] };
+  return interruptible(
+    cleanup,
+    async () => ((await acceptance(person, scope, device, options, cleanup, print, made)).report.ok ? 0 : 1),
+    async (status) => {
+      const failed = await cleanup.run();
+      await options.sink?.close();
+      const left = await afterCleanup(person, made).catch((error: unknown) => [`the check after cleanup failed: ${error instanceof Error ? error.message : String(error)}`]);
+      for (const line of left) print(`LEFT ${line}`);
+      if (left.length === 0) print('cleanup: the head lists none of the run’s members, machines or delegations, the hub holds none of its machines, and its provisioning key is revoked');
+      const code = failed.length || left.length ? 1 : status;
+      print(`acceptance: ${code === 0 ? 'PASS' : 'FAIL'}`);
+      return code;
+    },
+    interrupt,
+  );
 }
 
 export async function main(argv: string[]): Promise<number> {
@@ -127,26 +167,8 @@ export async function main(argv: string[]): Promise<number> {
     return 2;
   }
   const device = await loadAdminDevice(values['device-keys'] as string);
-  const person = new Person(`https://${config.host}`, secrets.DESK_ACCESS_TOKEN);
-  const sink = port === undefined ? undefined : await httpPushSink(port, values['push-url'] as string);
   const cleanup = new Cleanup();
-  let code = 1;
-  let made: Context['made'] | undefined;
-  try {
-    const run = await acceptance(person, scope, device, { items, frames: frameCount, sink }, cleanup);
-    made = run.made;
-    code = run.report.ok ? 0 : 1;
-  } catch (error) {
-    console.error(`FAIL: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  const failed = await cleanup.run();
-  await sink?.close();
-  if (made) {
-    const left = await afterCleanup(person, made).catch((error: unknown) => [`the check after cleanup failed: ${error instanceof Error ? error.message : String(error)}`]);
-    for (const line of left) console.log(`LEFT ${line}`);
-    if (left.length === 0) console.log('cleanup: the head lists none of the run’s members, machines or delegations, the hub holds none of its machines, and its provisioning key is revoked');
-    if (left.length) code = 1;
-  }
-  console.log(`acceptance: ${code === 0 && failed.length === 0 ? 'PASS' : 'FAIL'}`);
-  return failed.length ? 1 : code;
+  const person = new Person(`https://${config.host}`, secrets.DESK_ACCESS_TOKEN, () => cleanup.check());
+  const sink = port === undefined ? undefined : await httpPushSink(port, values['push-url'] as string);
+  return runAcceptance(person, scope, device, { items, frames: frameCount, sink }, cleanup);
 }
