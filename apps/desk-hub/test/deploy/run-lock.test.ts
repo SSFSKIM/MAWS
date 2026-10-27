@@ -1,7 +1,7 @@
 // The lock a deployment tool holds for a whole run (O11 M3's reviews: two access-sync runs that overlap, an operator's
 // retry beside a slow run, could each read the checkpoint, and the older could finish last). A file beside the state it
-// guards, created only if absent, naming the process that holds it; a lock whose process is gone on this host is taken
-// over, any other refuses the run before it starts. Run in a temporary directory.
+// guards, created only if absent, naming the process that holds it; any lock already there, its process gone or not,
+// refuses the run before it starts, until the operator removes it. Run in a temporary directory.
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
@@ -53,8 +53,14 @@ describe('the run lock', () => {
     expect(JSON.parse(readFileSync(lock, 'utf8'))).toMatchObject({ pid: process.ppid, token: 'theirs' });
   });
 
-  it('takes over a lock whose process is gone', async () => {
-    heldBy({ pid: exited(), host: hostname() });
+  it('refuses a lock whose process is gone, naming its holder, until the operator removes it', async () => {
+    const gone = exited();
+    heldBy({ pid: gone, host: hostname() });
+    let ran = false;
+    await expect(withRunLock(lock, async () => (ran = true))).rejects.toThrow(new RegExp(`another run holds ${lock.replaceAll('.', '\\.')} \\(pid ${gone} on ${hostname()}, since `));
+    expect(ran).toBe(false);
+    expect(JSON.parse(readFileSync(lock, 'utf8'))).toMatchObject({ pid: gone, token: 'theirs' });
+    rmSync(lock);
     expect(await withRunLock(lock, async () => JSON.parse(readFileSync(lock, 'utf8')) as { pid: number })).toMatchObject({ pid: process.pid });
     expect(existsSync(lock)).toBe(false);
   });

@@ -151,9 +151,9 @@ operator holds:
   it only on purpose, after checking the head another way.
 - **A lock**, `<worker>.json.lock` beside the checkpoint, held for the whole
   run, so two runs (a retry beside a slow run, in another terminal) never
-  overlap: the second is refused, naming the first's pid. A lock whose process
-  is gone from this host is taken over; one from another host, or one whose
-  process still runs, is the operator's to remove. A member the state
+  overlap: the second is refused before it reads anything, naming the lock's
+  pid, host and start time. A lock is never taken over, even one whose run
+  died: remove it by hand once you have checked that no run is going. A member the state
 admits, or an email it changes, reaches the hub only after this runs; one it
 removes is refused by the Registry at once, and by Access once this runs.
 
