@@ -223,7 +223,7 @@ describe('enroll --wait', () => {
 describe('the rest', () => {
   it('retires the legacy key once', async () => {
     const { endpoint } = await enrolled();
-    fs.writeFileSync(join(services.machine.stateDir, 'legacy.json'), '{}', { mode: 0o600 });
+    fs.writeFileSync(join(services.machine.stateDir, 'legacy.json'), JSON.stringify({ org: 'org-local', key: 'k'.repeat(43) }), { mode: 0o600 });
     const again = createEndpoint();
     await again.start(services);
     expect(again.status()).toMatchObject({ legacyKey: true });

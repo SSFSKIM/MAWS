@@ -41,6 +41,8 @@ type Fixture = {
   requested: string[];
   /** Each advertised address's loopback port: what the suite dials in its place. */
   ports: Map<string, number>;
+  /** The server last listened for each address. */
+  servers: Map<string, Server>;
   reports: string[][];
   log: string[];
   table: { current: InterfaceTable };
@@ -57,11 +59,12 @@ afterEach(async () => {
 });
 
 /** Listens on 127.0.0.1 in the address's place: the fake table's tailnet addresses aren't this machine's. */
-function loopback(requested: string[], ports: Map<string, number>, failing: Set<string>): NonNullable<DirectListenerOptions['listen']> {
+function loopback(requested: string[], ports: Map<string, number>, servers: Map<string, Server>, failing: Set<string>): NonNullable<DirectListenerOptions['listen']> {
   return (server: Server, address: string) =>
     new Promise<number>((resolve, reject) => {
       requested.push(address);
       if (failing.delete(address)) return reject(Object.assign(new Error(`listen EADDRNOTAVAIL ${address}`), { code: 'EADDRNOTAVAIL' }));
+      servers.set(address, server);
       server.once('error', reject);
       server.listen(0, '127.0.0.1', () => {
         const port = (server.address() as AddressInfo).port;
@@ -74,6 +77,7 @@ function loopback(requested: string[], ports: Map<string, number>, failing: Set<
 async function fixture(options: { table?: InterfaceTable; limits?: DirectListenerOptions['limits']; failing?: string[] } = {}): Promise<Fixture> {
   const requested: string[] = [];
   const ports = new Map<string, number>();
+  const servers = new Map<string, Server>();
   const reports: string[][] = [];
   const log: string[] = [];
   const table = { current: options.table ?? { utun4: [v4('100.101.102.103'), v6('fd7a:115c:a1e0::abcd')], en0: [v4('192.168.1.20')], lo0: [v4('127.0.0.1')] } };
@@ -94,13 +98,13 @@ async function fixture(options: { table?: InterfaceTable; limits?: DirectListene
       reads.count++;
       return table.current;
     },
-    listen: loopback(requested, ports, new Set(options.failing)),
+    listen: loopback(requested, ports, servers, new Set(options.failing)),
     connection: (io) => void channels.accept('direct', io, { deadlineMs: 10_000 }),
     addresses: (urls) => void reports.push(urls),
     log: (line) => void log.push(line),
     limits: options.limits,
   });
-  const f = { listener, requested, ports, reports, log, table, reads, channels };
+  const f = { listener, requested, ports, servers, reports, log, table, reads, channels };
   fixtures.push(f);
   await listener.start();
   return f;
@@ -112,6 +116,25 @@ function raw(f: Fixture, address = '100.101.102.103'): WebSocket {
 }
 
 const opened = (socket: WebSocket) => new Promise<void>((resolve, reject) => socket.once('open', () => resolve()).once('error', reject));
+/**
+ * Dials the loopback port `address` had and answers whether the server the listener had there took the connection.
+ * The kernel may give a freed port to another server at once (a parallel suite's, or this listener's next bind), which
+ * then answers the dial: the let-go server's own connections are what is judged, not whether the dial opened.
+ */
+async function reachesLetGo(f: Fixture, address: string): Promise<boolean> {
+  const server = f.servers.get(address)!;
+  let reached = false;
+  const seen = () => void (reached = true);
+  server.on('connection', seen);
+  const socket = new WebSocket(`ws://127.0.0.1:${f.ports.get(address)}`);
+  await opened(socket).then(
+    () => socket.terminate(),
+    () => {},
+  );
+  server.off('connection', seen);
+  return reached;
+}
+
 const closedOf = (socket: WebSocket) => new Promise<number>((resolve) => socket.once('close', (code) => resolve(code)));
 
 /** The device's carrier over a WebSocket. */
@@ -160,8 +183,9 @@ describe('binding', () => {
     await f.listener.rescan();
     expect(f.requested.slice(2)).toEqual(['100.90.1.2']);
     expect(f.reports.at(-1)).toEqual([`ws://100.101.102.103:${oldPort}`, `ws://100.90.1.2:${f.ports.get('100.90.1.2')}`]);
-    const gone = new WebSocket(`ws://127.0.0.1:${f.ports.get('fd7a:115c:a1e0::abcd')}`);
-    await expect(opened(gone)).rejects.toThrow();
+    // The address let go takes no connection: its server listens no more, and a dial to its port never reaches it.
+    expect(f.servers.get('fd7a:115c:a1e0::abcd')!.listening).toBe(false);
+    expect(await reachesLetGo(f, 'fd7a:115c:a1e0::abcd')).toBe(false);
     await f.listener.rescan();
     expect(f.reports).toHaveLength(2);
     expect(f.requested).toHaveLength(3);
@@ -196,10 +220,12 @@ describe('binding', () => {
 
   it('stops listening at stop()', async () => {
     const f = await fixture();
-    const port = f.ports.get('100.101.102.103');
     await f.listener.stop();
     expect(f.listener.bound).toBe(false);
-    await expect(opened(new WebSocket(`ws://127.0.0.1:${port}`))).rejects.toThrow();
+    for (const address of ['100.101.102.103', 'fd7a:115c:a1e0::abcd']) {
+      expect(f.servers.get(address)!.listening).toBe(false);
+      expect(await reachesLetGo(f, address)).toBe(false);
+    }
   });
 });
 

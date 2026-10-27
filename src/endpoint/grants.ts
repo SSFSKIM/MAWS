@@ -21,10 +21,18 @@ export const MACHINE_RIGHTS: readonly Right[] = ['spawn', 'shell', 'machine-admi
  * device these in `caps`; M5's authorization reads the same.
  */
 export async function machineRights(state: EndpointState, head: OrgState, certificates: Certificates, ref: string, member: string, now: Date): Promise<Right[]> {
-  const owners = await machineOwners(head, ref, certificates, now);
-  if (owners !== null && ownerMembers(head, owners).includes(member)) return [...MACHINE_RIGHTS];
+  if ((await machineOwnerMembers(head, certificates, ref, now)).includes(member)) return [...MACHINE_RIGHTS];
   const rights = state.ledger?.grants[member]?.body.rights ?? [];
   return MACHINE_RIGHTS.filter((r) => rights.includes(r));
+}
+
+/**
+ * The machine's owners as members (RL §6.3, §5.8's `@machine`): its entry's member owners, the admins of an org-owned
+ * machine, or a certificate machine's delegation's owners; none for a ref the head doesn't place.
+ */
+export async function machineOwnerMembers(head: OrgState, certificates: Certificates, ref: string, now: Date): Promise<string[]> {
+  const owners = await machineOwners(head, ref, certificates, now);
+  return owners === null ? [] : ownerMembers(head, owners);
 }
 
 export type GrantIntake = { ok: true; grant: Signed<Grant> } | { ok: false; reason: string };
