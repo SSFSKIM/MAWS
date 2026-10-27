@@ -18,6 +18,7 @@ import { fixtureIdentity } from '../test/support/fixture-session-id';
 import { runGit } from '../test/support/git-fixture';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
+import { addressed } from './support/address';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { slashPaletteMovesNothing } from './support/palette-geometry';
 import { mainTabs } from './support/shell';
@@ -154,7 +155,7 @@ async function startDirect(page: Page, id: string, patch: CommandInput<'session.
 }
 
 // A session's row in the sidebar (W11: inside its expanded project).
-const row = (page: Page, id: string) => page.locator(`[data-region="sidebar"] [role="treeitem"][data-menu="session:${id}"]`);
+const row = async (page: Page, id: string) => page.locator(`[data-region="sidebar"] [role="treeitem"][data-menu="session:${await addressed(page, id)}"]`);
 
 // Every text a transcript's load-failure alert showed (the alert stays until Retry), from before the first start: a
 // session started through "+" hydrates once the engine host knows it, never failing on an id not yet launched or bound.
@@ -238,7 +239,7 @@ test.describe('sessions', () => {
     const repo = trustedRepos[0]!;
     const project = await addProject(page, repo.root);
     const id = await plus(page, project.name);
-    await expect(row(page, id), 'an unstarted session has no sidebar row').toHaveCount(0);
+    await expect(await row(page, id), 'an unstarted session has no sidebar row').toHaveCount(0);
     await routeDirect(page, id);
     const name = await checkWorktree(page, id, repo.root);
     await collectTurns(page);
@@ -259,7 +260,7 @@ test.describe('sessions', () => {
     expect(spawnRow(maws, id).cwd).toBe(worktree);
     expect(initializeRequest(maws, id).workspaceTrust, 'a trusted key attests nothing').toBeUndefined();
     await expect(page.getByRole('group', { name: 'Trust this folder?' }), 'no trust card for a trusted repository').toHaveCount(0);
-    await expect(row(page, id)).toBeVisible();
+    await expect(await row(page, id)).toBeVisible();
     await turnEnded(page, id);
     expect(value(await invoke(page, 'session.intent.get', { appSessionId: id })), 'bound: the intent is gone').toBeNull();
     const main = page.locator('[data-region="main"]');
@@ -289,7 +290,7 @@ test.describe('sessions', () => {
     expect(events.filter((e) => e.phase === 'trusting').map((e) => e.detail)).toEqual([`Trusting ${repo.root}`, `Trust recorded for ${repo.root} (bootstrap ${bootstrapId})`]);
     expect(events.at(-1)!.outcome).toEqual({ kind: 'ready', engineSessionId: fixtureIdentity(AUTO_ROUTED).sessionId, firstTurn: 'sent' });
     expect(bootstrapId).not.toBe(fixtureIdentity(AUTO_ROUTED).sessionId);
-    await expect(row(page, id)).toBeVisible();
+    await expect(await row(page, id)).toBeVisible();
     await expect(page.getByRole('heading', { name: `New chat in ${project.name}` }), 'the tab became the session').toHaveCount(0);
     await turnEnded(page, id);
     expect(value(await invoke(page, 'session.queue.list', { appSessionId: id })).entries).toEqual([]);
@@ -310,7 +311,7 @@ test.describe('sessions', () => {
     await startDirect(page, source, {}, { content: prompt.content as string, display: prompt.display });
     await untilPhase(page, source, 'ready');
     await turnEnded(page, source);
-    await expect(row(page, source)).toBeVisible();
+    await expect(await row(page, source)).toBeVisible();
 
     await menu(page, source, 'Fork');
     const fork = await forkOf(page, source);
@@ -368,7 +369,7 @@ test.describe('sessions', () => {
     const sheet = page.getByRole('dialog', { name: /^Archive “/ });
     await expect(sheet).toBeVisible();
     await page.keyboard.press('Enter');
-    await expect(row(page, id)).toHaveCount(0);
+    await expect(await row(page, id)).toHaveCount(0);
     expect(value(await invoke(page, 'session.list', { includeArchived: true })).sessions.find((r) => r.appId === id)).toMatchObject({ archived: true });
     // the process stopped: C3's table lists it exited, or no longer at all
     await expect.poll(async () => value(await invoke(page, 'engine.sessions', undefined)).find((s) => s.appSessionId === id)?.process ?? 'gone').toMatch(/^(exited|gone)$/);
@@ -381,7 +382,7 @@ test.describe('sessions', () => {
     await expect(archived.getByText('No archived sessions.')).toBeVisible();
     await page.keyboard.press('Escape');
     await openProject(page, project.name);
-    await expect(row(page, id)).toBeVisible();
+    await expect(await row(page, id)).toBeVisible();
   });
 
   test('delete and rename on discovered sessions: rename sets the override, delete moves the transcript away and the row goes', async () => {
@@ -407,7 +408,7 @@ test.describe('sessions', () => {
     await rename.getByRole('textbox', { name: 'Title' }).fill('C10 override');
     await page.keyboard.press('Enter');
     await expect(rename).toHaveCount(0);
-    await expect(row(page, renamed.appId)).toHaveAttribute('aria-label', 'C10 override');
+    await expect(await row(page, renamed.appId)).toHaveAttribute('aria-label', 'C10 override');
     expect(value(await invoke(page, 'session.get', { appSessionId: renamed.appId }))!.title).toEqual({ text: 'C10 override', source: 'user' });
 
     const gone = await recordOf(doomed);
@@ -419,7 +420,7 @@ test.describe('sessions', () => {
     await sheet.getByRole('checkbox', { name: 'Move the transcript to the Trash' }).check();
     await sheet.getByRole('button', { name: 'Delete' }).click();
     await expect(sheet).toHaveCount(0);
-    await expect(row(page, gone.appId)).toHaveCount(0);
+    await expect(await row(page, gone.appId)).toHaveCount(0);
     expect(existsSync(transcript), 'moved out of the store').toBe(false);
     expect(readdirSync(launched.trash).sort(), 'the transcript and its sidecar arrived in the e2e Trash').toEqual([doomed, `${doomed}.jsonl`].sort());
     expect(readdirSync(join(launched.trash, doomed, 'subagents'))).toEqual(['agent-a1.jsonl']);
@@ -536,7 +537,7 @@ test.describe('sessions', () => {
     await (await sidebarRow(page, { appSessionId: id })).click({ button: 'right' }); // W11: in its expanded project
     await expect(page.getByRole('menuitem')).toHaveText(['Open', 'Open in new tab', 'Attach in a terminal tab']); // W12 I2: Open in new tab beside Open
     await page.keyboard.press('Escape');
-    await row(page, id).click();
+    await (await row(page, id)).click();
     const notice = page.locator('[data-region="main"]').getByRole('note');
     await expect(notice).toContainText(`Live as background job · pid ${pid} · read-only`);
     await notice.getByRole('button', { name: 'Attach in a terminal tab' }).click();
@@ -545,14 +546,14 @@ test.describe('sessions', () => {
     const ptys = async () => value(await invoke(page, 'pty.list', undefined)).ptys.filter((p) => p.appSessionId === id && p.alive);
     const [pty] = await ptys();
     // the panel's list as C5 persists it (written a moment after the change)
-    const panel = async () => value(await invoke(page, 'layout.get', { key: `panel.${id}` })).value as { tabs: { id: string; toolId: string }[]; activeTabId: string | null } | null;
+    const panel = async () => value(await invoke(page, 'layout.get', { key: `panel.${await addressed(page, id)}` })).value as { tabs: { id: string; toolId: string }[]; activeTabId: string | null } | null;
     await expect.poll(panel, { message: 'one Terminal tab, selected, whose id is the pty’s label' }).toEqual({ tabs: [{ id: pty!.label, toolId: 'terminal', pinned: false }], activeTabId: pty!.label });
     // the shell is at its prompt (the attach was left): a second Attach runs it again in the same tab
     await notice.getByRole('button', { name: 'Attach in a terminal tab' }).click();
     await expect.poll(reachedShell, { timeout: 10_000 }).toBe(`${realpathSync(jobDir)}\n${command}\n${command}\n`);
     expect((await ptys()).map((p) => p.ptyId), 'no second pty').toEqual([pty!.ptyId]);
     // a reload keeps the tab and its shell (C9 re-adopts it under the tab id) and the layout remembers whose attach it is
-    await expect.poll(async () => value(await invoke(page, 'layout.get', { key: 'sessions.attachTabs' })).value).toEqual({ version: 1, tabs: [{ tabId: pty!.label, appSessionId: id, jobId: 'e6dcd828' }] });
+    await expect.poll(async () => value(await invoke(page, 'layout.get', { key: 'sessions.attachTabs' })).value).toEqual({ version: 2, tabs: [{ tabId: pty!.label, appSessionId: await addressed(page, id), jobId: 'e6dcd828' }] });
     await page.reload();
     await notice.getByRole('button', { name: 'Attach in a terminal tab' }).click();
     await expect.poll(reachedShell, { timeout: 10_000 }).toBe(`${realpathSync(jobDir)}\n${command}\n${command}\n${command}\n`);
@@ -788,7 +789,7 @@ test.describe('sessions', () => {
 
     // W5: the session's row (in its project, expanded by the "+" helper) waits with the approval glyph; its hover card holds
     // C7's X4 card in C5's hover placement (registered in C5's requestCard slot), the tool as its heading.
-    const entry = row(page, id);
+    const entry = await row(page, id);
     await expect(entry.getByRole('img', { name: 'Needs approval' })).toBeVisible({ timeout: 20_000 });
     const card = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: 'Read' }) });
     await expect(async () => {

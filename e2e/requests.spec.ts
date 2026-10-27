@@ -15,6 +15,7 @@ import { join, resolve } from 'node:path';
 import { expect, test as base, type Locator, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
 import type { CardsHarnessApi, HarnessPane } from '../src/renderer/src/harness/composer/api';
+import { addressed } from './support/address';
 import { invoke, launchReady, queueInterruptJournal, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
@@ -463,9 +464,9 @@ test('the real composer gives way to the card and returns with focus in the edit
     await expect(message(left)).toBeVisible();
     await openRow(countingId, { newTab: true });
     await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('pane.split')?.click());
-    await expect(right.locator(`[data-composer="${countingId}"]`)).toBeVisible();
+    await expect(right.locator(`[data-composer="${await addressed(page, countingId)}"]`)).toBeVisible();
     await openRow(permissionId);
-    await expect(left.locator(`[data-composer="${permissionId}"]`)).toBeVisible();
+    await expect(left.locator(`[data-composer="${await addressed(page, permissionId)}"]`)).toBeVisible();
 
     // the right pane's session is busy with a slow turn
     await message(right).click();

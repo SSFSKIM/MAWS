@@ -17,7 +17,7 @@
 // shell has ended, gives way to a new one.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import { AttachTabsSchema, type AttachTab } from '@shared/ipc/schema/layout';
+import { storedAttachTabsSchema, type AttachTab } from '@shared/ipc/schema/layout';
 import { attachCommand } from '@shared/sessions/attach';
 import { ipc } from '../ipc/client';
 import { panelHost, shownSession } from '../panel/host';
@@ -53,7 +53,7 @@ function rememberedTabs(): Promise<AttachTab[] | null> {
       console.error(`[sessions] layout.get ${ATTACH_TABS_KEY} failed`, result.error);
       return null;
     }
-    const parsed = result.value.value === null ? null : AttachTabsSchema.safeParse(result.value.value);
+    const parsed = result.value.value === null ? null : storedAttachTabsSchema(ipc.localMachine).safeParse(result.value.value); // P5 O6 M2: version 1 reads lifted
     if (parsed && !parsed.success) console.warn(`[sessions] ${ATTACH_TABS_KEY} is not a valid value; no attach tabs remembered`);
     remembered = parsed?.success ? parsed.data.tabs : [];
     return remembered;
@@ -75,7 +75,7 @@ function remember(entry: AttachTab): Promise<void> {
     if (current === null) return; // logged by the read
     const tabs = [...current.filter((t) => (t.appSessionId !== entry.appSessionId || t.jobId !== entry.jobId) && tabListed(t.tabId, t.appSessionId as AppSessionId)), entry];
     remembered = tabs;
-    const written = await ipc.invoke('layout.set', { key: ATTACH_TABS_KEY, value: { version: 1, tabs } });
+    const written = await ipc.invoke('layout.set', { key: ATTACH_TABS_KEY, value: { version: 2, tabs } });
     if (!written.ok) console.error(`[sessions] layout.set ${ATTACH_TABS_KEY} failed`, written.error);
   });
   writes = run.catch(() => {});

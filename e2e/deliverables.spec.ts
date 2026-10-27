@@ -23,6 +23,7 @@
 // under docs/doperpowers/evidence/p1-e2/ (`e2-<surface>-<theme>.png`).
 // Runs under `pnpm e2e:deliverables` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); each launch
 // passes MAWS_HARNESS=0, so the window is the product app.
+import { addressed } from './support/address';
 import { surface, surfaceRow, mainTabs as shellMainTabs } from './support/shell';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -987,7 +988,7 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
     await expect(comment).toHaveAttribute('aria-pressed', 'false');
     await expect(viewer).toHaveAttribute('data-artifact-viewer', record.id);
     await expect(artifactsSurface).toBeVisible();
-    await expect(s.pane.locator(`[data-composer="${id}"]`)).toBeVisible();
+    await expect(s.pane.locator(`[data-composer="${await addressed(s.page, id)}"]`)).toBeVisible();
 
     // with the console popover open over a picking viewer, one Escape closes the popover alone
     await comment.click();

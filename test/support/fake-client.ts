@@ -1,6 +1,7 @@
-// A `MawsBridge` for renderer store tests: records the order of subscriptions and invocations, lets a test answer each
+// A `MawsBridge` for renderer store tests (P5 O6 M2: on `TEST_MACHINE`, so the ids it carries are addresses on it): records the order of subscriptions and invocations, lets a test answer each
 // command when it chooses (so snapshot/event races can be staged in either order), and delivers events by name.
 import type { CommandName, CommandResult, EventName, MawsBridge } from '../../src/shared/ipc/schema';
+import { TEST_MACHINE } from './machine';
 
 export interface FakeClient {
   client: MawsBridge;
@@ -25,6 +26,7 @@ export function fakeClient(given: Partial<Record<CommandName, unknown>> = {}): F
   const inputs = new Map<string, unknown[]>();
   const calls: string[] = [];
   const client = {
+    localMachine: TEST_MACHINE,
     invoke(name: CommandName, input: unknown) {
       calls.push(`invoke ${name}`);
       inputs.set(name, [...(inputs.get(name) ?? []), input]);

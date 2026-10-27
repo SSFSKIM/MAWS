@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppSessionId, PtyId } from '@shared/graph/ids';
+import type { AppSessionId } from '@shared/graph/ids';
+import type { PtyId } from '@shared/ipc/schema/pty';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { addressOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';

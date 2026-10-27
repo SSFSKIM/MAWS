@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { MachineRef } from '../machine/ref'; // P5 O6 M2
 import { IpcErrorSchema } from './errors';
 import { NAMES, MAIN_ONLY_COMMANDS } from './names';
 import { commandChannel, commands, eventChannel, events, HOST_EVENTS, NAMESPACES, type Namespace } from './schema';
@@ -589,11 +590,16 @@ describe('ipc schema validates both directions', () => {
   // C10 start: the attach tabs' layout key (C10 execution document, M5)
   describe('C10 layout entries', () => {
     it('takes sessions.attachTabs as a layout key, outside the panel namespace, and holds its value to its shape', () => {
-      const value = { version: 1, tabs: [{ tabId: 'terminal:abc', appSessionId: 'a1111111-1111-4111-8111-111111111111', jobId: 'e6dcd828' }] };
+      // P5 O6 M2: version 2 holds addresses; version 1, from before O6, reads lifted with the local machine
+      const local = 'LocalMachineRef0000000' as MachineRef;
+      const bare = { tabId: 'terminal:abc', appSessionId: 'a1111111-1111-4111-8111-111111111111', jobId: 'e6dcd828' };
+      const value = { version: 2, tabs: [{ ...bare, appSessionId: `${local}/${bare.appSessionId}` }] };
       expect(validateCommandInput('layout.set', { key: 'sessions.attachTabs', value })).toEqual({ ok: true, value: { key: 'sessions.attachTabs', value } });
       expect(layout.AttachTabsSchema.safeParse(value).success).toBe(true);
-      expect(layout.AttachTabsSchema.safeParse({ version: 1, tabs: [{ ...value.tabs[0], command: 'x' }] }).success).toBe(false);
-      expect(layout.AttachTabsSchema.safeParse({ version: 2, tabs: [] }).success).toBe(false);
+      expect(layout.AttachTabsSchema.safeParse({ version: 2, tabs: [{ ...value.tabs[0], command: 'x' }] }).success).toBe(false);
+      expect(layout.AttachTabsSchema.safeParse({ version: 3, tabs: [] }).success).toBe(false);
+      expect(layout.storedAttachTabsSchema(local).parse({ version: 1, tabs: [bare] })).toEqual(value);
+      expect(layout.storedAttachTabsSchema(local).parse(value)).toEqual(value);
     });
   });
   // C10 end

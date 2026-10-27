@@ -534,5 +534,5 @@ export function fromV1(v1: LayoutMainV1, setOf: SetOfTab): LayoutMain {
     });
     sets[key] = asSet(withPanes(view, panes, v1.focusedPane));
   }
-  return tidy({ version: 2, current, sets, closedTabs: v1.closedTabs });
+  return tidy({ version: 3, current, sets, closedTabs: v1.closedTabs });
 }

@@ -2,11 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type LayoutMainV1 } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
+import { at, TEST_MACHINE as M } from '../../../../test/support/machine';
 import { createLayoutStore, registerReplaceGuard, type ReplaceVerdict } from './layout';
 import { currentSet } from './layout-model';
 
-const A = 'app-a' as AppSessionId;
+const A = at('app-a' as AppSessionId);
+// A session's tab as a layout from before O6 holds it (bare: P5 O6 M2), and as it reads, lifted to the local machine.
 const session = (id: string) => ({ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false });
+const lifted = (id: string) => session(at(id));
 // Saved before W12: version 1, one pane layout.
 const persistedMain: LayoutMainV1 = {
   version: 1,
@@ -30,8 +33,8 @@ describe('layout and settings migrate', () => {
   it('hydrating a persisted layout whose session tab names an unknown appSessionId drops the tab', async () => {
     const { store } = await hydrate({ 'main.tabs': persistedMain });
     expect(store.getState().hydrated).toBe(true);
-    expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual(['session:app-a']);
-    expect(shown(store).panes[0].activeTabId).toBe('session:app-a');
+    expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual([`session:${A}`]);
+    expect(shown(store).panes[0].activeTabId).toBe(`session:${A}`);
   });
 
   // W5: every layout saved before the floating Overview holds the Overview's tab, usually first and active. Reading it must
@@ -41,7 +44,7 @@ describe('layout and settings migrate', () => {
     const overview = { id: 'overview', kind: 'overview', pinned: true };
     const saved = { ...persistedMain, panes: [{ tabs: [overview, session('app-a'), session('b')], activeTabId: 'overview' }], closedTabs: [overview] };
     const { store } = await hydrate({ 'main.tabs': saved }, () => true);
-    expect(store.getState().main).toEqual({ ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [session('app-a'), session('b')], activeTabId: 'session:app-a' }] } } });
+    expect(store.getState().main).toEqual({ ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [lifted('app-a'), lifted('b')], activeTabId: `session:${A}` }] } } });
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
   });
@@ -71,9 +74,9 @@ describe('layout and settings migrate', () => {
     const saved = { ...persistedMain, panes: [{ tabs: [session('gone'), file('/r/saved.ts')], activeTabId: 'session:gone' }] };
     const fake = fakeClient({ 'layout.list': { keys: ['main.tabs'] }, 'layout.get': ({ key }: { key: string }) => ({ value: key === 'main.tabs' ? saved : null }) });
     const store = createLayoutStore();
-    store.getState().openTab({ kind: 'file', path: '/r/early.ts', line: null, appSessionId: 'gone' as AppSessionId });
+    store.getState().openTab({ kind: 'file', path: '/r/early.ts', line: null, appSessionId: at('gone' as AppSessionId), machine: M });
     await store.getState().hydrate(fake.client, () => false);
-    expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual(['file:/r/saved.ts', 'file:/r/early.ts']);
+    expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual([`file:${M}:/r/saved.ts`, `file:${M}:/r/early.ts`]);
   });
 
   it('falls back to the default for a malformed main.tabs (a null pane or tab) and still hydrates', async () => {
@@ -95,9 +98,9 @@ describe('layout store actions', () => {
     s().openSession('c' as AppSessionId, { how: 'tab' });
     s().activateTab('session:b');
     s().closeTab('session:b');
-    expect(currentSet(s().main).panes[0].tabs.map((t) => t.id)).toEqual(['session:app-a', 'session:c']);
+    expect(currentSet(s().main).panes[0].tabs.map((t) => t.id)).toEqual([`session:${A}`, 'session:c']);
     s().reopenClosed();
-    expect(currentSet(s().main).panes[0].tabs.map((t) => t.id)).toEqual(['session:app-a', 'session:b', 'session:c']);
+    expect(currentSet(s().main).panes[0].tabs.map((t) => t.id)).toEqual([`session:${A}`, 'session:b', 'session:c']);
     s().dropSession(A);
     expect(currentSet(s().main).panes[0].tabs.map((t) => t.id)).toEqual(['session:b', 'session:c']);
   });
@@ -383,7 +386,7 @@ describe('replacing an unstarted tab', () => {
 describe('replacing a tab of any kind', () => {
   const NEW = 'new-1' as AppSessionId;
   const B = 'b' as AppSessionId;
-  const FILE = { kind: 'file', path: '/r/a.ts', line: null, appSessionId: A } as const;
+  const FILE = { kind: 'file', path: '/r/a.ts', line: null, appSessionId: A, machine: M } as const;
   const tabs = (store: ReturnType<typeof createLayoutStore>) => shown(store).panes[0].tabs.map((t) => t.id);
 
   function guarded(verdicts: Record<string, ReplaceVerdict>) {
@@ -412,16 +415,16 @@ describe('replacing a tab of any kind', () => {
   });
 
   it('a file with unsaved changes stays open and says why; the session opens beside it', () => {
-    const { announce, off } = guarded({ 'file:/r/a.ts': { keep: 'a.ts has unsaved changes' } });
+    const { announce, off } = guarded({ [`file:${M}:/r/a.ts`]: { keep: 'a.ts has unsaved changes' } });
     try {
       const store = createLayoutStore();
       store.getState().openSession(A);
       store.getState().openTab(FILE);
       store.getState().openSession(B);
-      expect(tabs(store)).toEqual([`session:${A}`, 'file:/r/a.ts', 'session:b']);
+      expect(tabs(store)).toEqual([`session:${A}`, `file:${M}:/r/a.ts`, 'session:b']);
       expect(shown(store).panes[0].activeTabId).toBe('session:b');
       expect(store.getState().main.closedTabs).toEqual([]);
-      expect(announce).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'file:/r/a.ts' }), { keep: 'a.ts has unsaved changes' });
+      expect(announce).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: `file:${M}:/r/a.ts` }), { keep: 'a.ts has unsaved changes' });
     } finally {
       off();
     }
@@ -449,9 +452,9 @@ describe('replacing a tab of any kind', () => {
       const store = createLayoutStore();
       store.getState().openSession(A);
       store.getState().openTab(FILE);
-      store.getState().togglePinned('file:/r/a.ts');
+      store.getState().togglePinned(`file:${M}:/r/a.ts`);
       store.getState().openSession(B);
-      expect(tabs(store)).toEqual(['file:/r/a.ts', 'session:b', `session:${A}`]); // the pinned tab first, the session after it
+      expect(tabs(store)).toEqual([`file:${M}:/r/a.ts`, 'session:b', `session:${A}`]); // the pinned tab first, the session after it
       expect(announce).not.toHaveBeenCalled();
     } finally {
       off();
@@ -573,10 +576,10 @@ describe('tab changes before hydration', () => {
     expect(fake.pending('layout.get')).toBe(3);
     for (const key of ['regions', 'main.tabs', 'panel.pinned']) await fake.reply('layout.get', { value: key === 'main.tabs' ? persistedMain : null });
     await hydrating;
-    expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual(['session:app-a', 'session:b']); // after the hydrated active tab
+    expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual([`session:${A}`, 'session:b']); // after the hydrated active tab
     expect(shown(store).panes[0].activeTabId).toBe('session:b');
     store.getState().openSession(A); // after hydration a change applies once, as before
-    expect(shown(store).panes[0].activeTabId).toBe('session:app-a');
+    expect(shown(store).panes[0].activeTabId).toBe(`session:${A}`);
   });
 });
 

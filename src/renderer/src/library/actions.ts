@@ -55,5 +55,5 @@ export function openArtifactTab(artifactId: string, location?: ArtifactLocation)
   if (location !== undefined) requestArtifactOpen(artifactId, 'latest', 'main', location);
   const layout = useLayout.getState();
   layout.revealMain();
-  layout.openTab({ kind: 'artifact', artifactId });
+  layout.openTab({ kind: 'artifact', artifactId, machine: ipc.localMachine }); // P5 O6 M2: the library is this machine's
 }

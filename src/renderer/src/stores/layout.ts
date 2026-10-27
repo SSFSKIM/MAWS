@@ -14,10 +14,11 @@ import {
   PanelActiveNoSessionSchema,
   PanelParamsSchema,
   PanelPinnedSchema,
+  MAIN_CARD_PREFIX,
   PanelSessionStateSchema,
-  PanelSurfacesSchema,
-  StoredMainSchema,
-  StoredRegionsSchema,
+  storedMainSchema,
+  storedPanelSurfacesSchema,
+  storedRegionsSchema,
   type FloatingCardSize,
   type LayoutKey,
   type LayoutMain,
@@ -29,6 +30,7 @@ import {
   type TabSetKey,
   type TabTarget,
 } from '@shared/ipc/schema/layout';
+import { addressOf, isAddress } from '@shared/machine/address';
 import type * as z from 'zod';
 import * as model from './layout-model';
 import { normalizeSurfaceStack, rememberSurfaceContext, stackAfterSelection, surfaceRefs, surfaceScope, surfaceSession, surfaceTabs } from '../panel/surface-model';
@@ -129,6 +131,7 @@ export interface LayoutState {
 }
 
 const PANEL_KEY = /^panel\.([^.]+)$/;
+const NO_SURFACES: PanelSurfaces = { version: 2, stacks: {}, pinnedTools: [], contexts: {} };
 
 // A session's project, null for none; undefined when the session is not known now (no record, no unstarted intent):
 // its tabs stay where they are.
@@ -194,7 +197,7 @@ export const FLOATING_CARD_SIZES_MAX = 64;
 export const SUMMARY_CARD_KEY = 'summary';
 // P4-B3 (its Decision Log 10): the key of the split card's size over a main tab (the pane beside the card), pruned with
 // the open main tabs as a panel tab's key is with the panel lists.
-export const mainCardKey = (tabId: string): string => `main:${tabId}`;
+export const mainCardKey = (tabId: string): string => `${MAIN_CARD_PREFIX}${tabId}`;
 
 const samePins = (a: PanelTabRef[], b: PanelTabRef[]) =>
   a.length === b.length && a.every((t, i) => t.id === b[i].id && t.toolId === b[i].toolId && t.pinned === b[i].pinned);
@@ -290,7 +293,7 @@ export function createLayoutStore() {
       panelBySession: new Map(),
       panelActiveNoSession: null,
       panelParams: {},
-      panelSurfaces: { version: 1, stacks: {}, pinnedTools: [], contexts: {} },
+      panelSurfaces: NO_SURFACES,
       knownSession: () => true,
       hydrated: false,
       dragging: null,
@@ -321,26 +324,34 @@ export function createLayoutStore() {
         // costs no read.
         const held = new Set<string>(listed.ok ? listed.value.keys : []);
         const readHeld = <T>(key: LayoutKey, schema: z.ZodType<T>, fallback: T): Promise<T> => (held.has(key) ? read(key, schema, fallback) : Promise.resolve(fallback));
-        const panelIds = listed.ok
+        // P5 O6 M2 (OX2): a session's panel key is its address's; a bare one is from before O6, the local machine's, renamed
+        // below once read. Every other key from before O6 reads lifted with the local machine (`storedMainSchema` and the rest).
+        const local = client.localMachine;
+        const panelKeys = listed.ok
           ? listed.value.keys.flatMap((key) => {
               const match = PANEL_KEY.exec(key);
-              return match && key !== 'panel.pinned' ? [match[1] as AppSessionId] : [];
+              if (!match || key === 'panel.pinned') return [];
+              const stored = match[1] as AppSessionId;
+              return [{ key: key as LayoutKey, id: isAddress(stored) ? stored : addressOf(local, stored), bare: !isAddress(stored) }];
             })
           : [];
         const [persistedRegions, persistedMain, panelPinned, storedParams, storedNoSession, storedSurfaces, ...panels] = await Promise.all([
-          read('regions', StoredRegionsSchema, LAYOUT_DEFAULTS.regions), // W5: a version-1 value is migrated
-          read('main.tabs', StoredMainSchema, LAYOUT_DEFAULTS.main), // W5: an Overview tab is dropped; W12: version 1 is filed by project
+          read('regions', storedRegionsSchema(local), LAYOUT_DEFAULTS.regions), // W5: a version-1 value is migrated
+          read('main.tabs', storedMainSchema(local), LAYOUT_DEFAULTS.main), // W5: an Overview tab is dropped; W12: version 1 is filed by project
           read('panel.pinned', PanelPinnedSchema, LAYOUT_DEFAULTS.panelPinned),
           readHeld('panelTools.params', PanelParamsSchema, { version: 1, params: {} }),
           readHeld('panelTools.activeNoSession', PanelActiveNoSessionSchema, { version: 1, activeTabId: null }),
-          readHeld('panelTools.surfaces', PanelSurfacesSchema, { version: 1, stacks: {}, pinnedTools: [], contexts: {} }),
-          ...panelIds.map((id) => read(`panel.${id}`, PanelSessionStateSchema.nullable(), null)),
+          readHeld('panelTools.surfaces', storedPanelSurfacesSchema(local), NO_SURFACES),
+          ...panelKeys.map(({ key }) => read(key, PanelSessionStateSchema.nullable(), null)),
         ]);
         opts.settle?.();
         const panelBySession = new Map<AppSessionId, PanelSessionState>();
-        panelIds.forEach((id, i) => {
+        const renamedPanels: LayoutKey[] = []; // bare panel keys whose state moved to the address's key
+        panelKeys.forEach(({ key, id, bare }, i) => {
           const state = panels[i];
-          if (state && known(id)) panelBySession.set(id, state);
+          if (!state || !known(id)) return;
+          panelBySession.set(id, state);
+          if (bare) renamedPanels.push(key);
         });
         const replayed = early.splice(0);
         // W12: a session whose project changed while the app was closed has its tabs moved to that project's set.
@@ -387,13 +398,24 @@ export function createLayoutStore() {
         // reader drops would reopen a panel the owner has since closed).
         const unfolded = model.foldOf(stored) !== null && model.foldOf(hydratedMain) === null;
         if (persistedMain.version === 1 || rewritten || unfolded || (replayed.length > 0 && JSON.stringify(hydratedMain) !== JSON.stringify(persistedMain))) unsaved.add('main.tabs');
-        if (regions !== persistedRegions) unsaved.add('regions');
-        if (!sameJson(panelSurfaces, storedSurfaces)) unsaved.add('panelTools.surfaces');
+        if (regions !== persistedRegions || (readAs.has('regions') && !sameJson(readAs.get('regions'), persistedRegions))) unsaved.add('regions'); // P5 O6 M2: a migrated version too
+        if (!sameJson(panelSurfaces, storedSurfaces) || (readAs.has('panelTools.surfaces') && !sameJson(readAs.get('panelTools.surfaces'), storedSurfaces))) unsaved.add('panelTools.surfaces');
         const values: Partial<Record<LayoutKey, unknown>> = { regions, 'main.tabs': get().main, 'panel.pinned': panelPinned, 'panelTools.surfaces': panelSurfaces };
         for (const key of unsaved) {
           if (!(key in values)) continue;
           void client.invoke('layout.set', { key, value: values[key] }).then((result) => {
             if (!result.ok) console.error(`[layout] layout.set ${key} failed`, result.error);
+          });
+        }
+        // P5 O6 M2: a bare panel key is written under its address, then deleted, so layout.json keeps one key per session.
+        for (const bare of renamedPanels) {
+          const id = panelKeys.find((entry) => entry.key === bare)!.id;
+          const state = panelBySession.get(id);
+          if (state === undefined) continue;
+          void client.invoke('layout.set', { key: `panel.${id}`, value: state }).then(async (written) => {
+            if (!written.ok) return console.error(`[layout] layout.set panel.${id} failed`, written.error);
+            const deleted = await client.invoke('layout.set', { key: bare, value: null });
+            if (!deleted.ok) console.error(`[layout] cannot drop ${bare}`, deleted.error);
           });
         }
       },

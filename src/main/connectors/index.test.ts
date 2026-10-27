@@ -8,6 +8,7 @@ import type { ConnectorCallOutcome } from '@shared/artifacts/connectors';
 import { eventChannel, type CommandName, type EventName, type HostState } from '@shared/ipc/schema';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
 import { clientOf, pageOf } from '../ipc/clients';
+import { TEST_MACHINE } from '../../../test/support/machine'; // P5 O6 M2: a main handler's ctx names its target
 import type { MainContext } from '../ipc/router';
 import { startConnectors, WINDOW_RECHECK_MS } from '.';
 import { electronWindowShown } from '../client/window-shown';
@@ -213,7 +214,7 @@ afterEach(() => {
 async function invoke(name: CommandName, input: unknown, sender: FakeSender = me): Promise<unknown> {
   const checked = validateCommandInput(name, input);
   if (!checked.ok) throw new Error(`invalid input for ${name}`);
-  const value = await handlers.get(name)!(checked.value, { client: clientOf(sender as never) });
+  const value = await handlers.get(name)!(checked.value, { client: clientOf(sender as never), target: TEST_MACHINE });
   expect(validateCommandOutput(name, value).ok, `${name} output: ${JSON.stringify(value)}`).toBe(true);
   return value;
 }
@@ -503,7 +504,7 @@ describe('main’s connector service (P3-H H3b)', () => {
     expect(await answering).toEqual({ ok: false, state: 'paused', reason: 'closed' });
     await settle();
     expect(fake.dispatched.filter((entry) => entry.name === 'connectors.cancel').map((entry) => entry.input)).toEqual([{ operationId }]);
-    expect(() => handlers.get('connectors.open')!({ artifactId: ART }, { client: clientOf(me as never) })).toThrow();
+    expect(() => handlers.get('connectors.open')!({ artifactId: ART }, { client: clientOf(me as never), target: TEST_MACHINE })).toThrow();
   });
 });
 
@@ -669,7 +670,7 @@ describe('the owner window’s native visibility (P3-H H4)', () => {
     expect([win().listeners_(), windows.get(8)!.listeners_(), vi.getTimerCount()]).toEqual([0, 0, 0]);
     const late = new FakeSender(9); // a window first heard from after the stop is never followed
     windows.set(9, new FakeWindow());
-    expect(() => handlers.get('connectors.open')!({ artifactId: ART }, { client: clientOf(late as never) })).toThrow();
+    expect(() => handlers.get('connectors.open')!({ artifactId: ART }, { client: clientOf(late as never), target: TEST_MACHINE })).toThrow();
     expect(windows.get(9)!.listeners_()).toBe(0);
   });
 });

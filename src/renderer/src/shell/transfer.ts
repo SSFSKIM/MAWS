@@ -20,6 +20,7 @@
 import { useSyncExternalStore, type DragEvent } from 'react';
 import { library, libraryRow } from '../library/store';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { MachineRef } from '@shared/machine/ref';
 import { tabId as mainTabIdOf, type PanelTabRef, type TabRef } from '@shared/ipc/schema/layout';
 import { ARTIFACTS_TOOL_ID } from '@shared/maws/panes';
 import { adoptStagedArtifactEditorState, handArtifactViewOver, heldArtifactEditorState, stageArtifactEditorState } from '../artifacts/registry';
@@ -77,10 +78,16 @@ const artifactsHandleOf = (panelTabId: string): ArtifactsHandle | null => {
   return instance?.tool.id === ARTIFACTS_TOOL_ID ? (instance.state as ArtifactsHandle) : null;
 };
 
+// The record a panel tab's Artifacts instance shows (its artifact and, P5 O6 M2, the artifact's machine); null for the
+// list, any other tool or no instance.
+const panelRecord = (panelTabId: string) => {
+  const view = artifactsHandleOf(panelTabId)?.snapshot().view;
+  return view?.kind === 'record' ? view : null;
+};
+
 // The artifact a panel tab's Artifacts instance shows as a record; null for the list, any other tool or no instance.
 export function panelRecordOf(panelTabId: string): string | null {
-  const view = artifactsHandleOf(panelTabId)?.snapshot().view;
-  return view?.kind === 'record' ? view.artifactId : null;
+  return panelRecord(panelTabId)?.artifactId ?? null;
 }
 
 // Whether `openArtifactInPanel` has a panel to show the artifact in (P3-F wave S, F16): a session's panel, or with none
@@ -156,7 +163,7 @@ async function movingGuardAllows(source: EditorHostScope): Promise<boolean> {
 export async function moveArtifactToPanel(mainTabId: string): Promise<boolean> {
   if (transferRefusal({ to: 'panel', mainTabId }) !== null) return false;
   const tab = allTabs(layout().main).find((t) => t.id === mainTabId) as Extract<TabRef, { kind: 'artifact' }>;
-  const { artifactId } = tab;
+  const { artifactId, machine } = tab;
   const session = panelSessionForArtifact(mainTabId);
   const dest = artifactsTabOf(session);
   if (dest && panelRecordOf(dest.id) === artifactId) {
@@ -186,7 +193,7 @@ export async function moveArtifactToPanel(mainTabId: string): Promise<boolean> {
   layout().closeTab(mainTabId, { remember: false });
   layout().activateTab(mainTabIdOf({ kind: 'session', appSessionId: now }));
   // `carried`: the editor's state comes with it, so the record asks its viewer for no version (it keeps the one it shows).
-  const panelTabId = panelHost.addTool(ARTIFACTS_TOOL_ID, { appSessionId: now, params: { target: artifactId, carried: true }, activate: true });
+  const panelTabId = panelHost.addTool(ARTIFACTS_TOOL_ID, { appSessionId: now, params: { target: artifactId, machine, carried: true }, activate: true });
   // A tab reserved before the layout is read has no instance yet (its id may change at the barrier): the staged state
   // is then left to the sweep, and the record makes its own.
   if (instanceOf(panelTabId)) adoptStagedArtifactEditorState(artifactId, { surface: 'panel', tabId: panelTabId });
@@ -199,8 +206,8 @@ export async function moveArtifactToTab(panelTabId: string, at: TabPlace = {}): 
   const request: TransferRequest = { to: 'tab', panelTabId, ...at };
   if (transferRefusal(request) !== null) return false;
   const handle = artifactsHandleOf(panelTabId)!;
-  const artifactId = panelRecordOf(panelTabId)!;
-  const mainTabId = mainTabIdOf({ kind: 'artifact', artifactId });
+  const { artifactId, machine } = panelRecord(panelTabId)!;
+  const mainTabId = mainTabIdOf({ kind: 'artifact', artifactId, machine });
   if (locateTab(layout().main, mainTabId)) {
     // T8: main shows it already. That tab is placed and activated; the record goes Back through its guard, its unsent
     // comment handed to main's view as it goes.
@@ -211,7 +218,7 @@ export async function moveArtifactToTab(panelTabId: string, at: TabPlace = {}): 
     if (locateTab(layout().main, mainTabId)) {
       handArtifactViewOver(source, { surface: 'main', tabId: mainTabId }); // synchronous from here to the Back
       handle.handOff(); // the guard was asked: the record's state is given back
-      placeInMain(artifactId, at);
+      placeInMain(artifactId, machine, at);
       return true;
     }
     // Main lost its tab while the guard asked: the record moves after all, its comment with its state.
@@ -222,7 +229,7 @@ export async function moveArtifactToTab(panelTabId: string, at: TabPlace = {}): 
     adoptStagedArtifactEditorState(artifactId, { surface: 'panel', tabId: panelTabId });
     return false;
   }
-  placeInMain(artifactId, at);
+  placeInMain(artifactId, machine, at);
   adoptStagedArtifactEditorState(artifactId, { surface: 'main', tabId: mainTabId });
   return true;
 }
@@ -231,12 +238,12 @@ export async function moveArtifactToTab(panelTabId: string, at: TabPlace = {}): 
 // floating panel stood in it). With no pane, an open tab is activated where it is; a new one appends to the focused pane.
 // P4-B4 (the B3 merge's review): the move carries the viewer's state, so an ask left for that artifact's main viewer (a
 // link's open whose tab went before its editor took it) goes, as the carried panel open withdraws the panel's.
-function placeInMain(artifactId: string, at: TabPlace): void {
+function placeInMain(artifactId: string, machine: MachineRef, at: TabPlace): void {
   withdrawVersionRequest(artifactId, 'main');
-  const id = mainTabIdOf({ kind: 'artifact', artifactId });
+  const id = mainTabIdOf({ kind: 'artifact', artifactId, machine });
   const before = currentSet(layout().main).panes.findIndex((p) => p.tabs.some((t) => t.id === id));
   layout().revealMain();
-  layout().openTab({ kind: 'artifact', artifactId }, { pane: at.pane ?? 'focused' });
+  layout().openTab({ kind: 'artifact', artifactId, machine }, { pane: at.pane ?? 'focused' });
   if (at.pane === undefined && before !== -1) return;
   const set = currentSet(layout().main);
   // The pane asked for (pane 1 made if absent, as the right edge asks), else the one the open placed it in.

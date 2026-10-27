@@ -25,6 +25,7 @@
 // The evidence (`relaunch.txt`, `crash.txt`, `idle.txt`, the screenshots in both themes) is written from what the cases
 // observe, under MAWS_E10_SHOTS=1 only (E11 W-E: a gate run leaves the committed evidence alone; the both-themes token
 // scans run either way). Run by `pnpm e2e:supervisor` (MAWS_SUPERVISOR_E2E=1), part of `pnpm verify`.
+import { addressed } from './support/address';
 import { openSurface, surface } from './support/shell';
 import { type ChildProcess } from 'node:child_process';
 import { createConnection } from 'node:net'; // P3-A M5
@@ -562,7 +563,7 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
     const budget = value(await invoke(second.page, 'engine.budget', undefined));
     expect(budget.blocked.length + budget.settling + budget.candidates, 'engine.budget counts the kept session').toBe(1);
     await openSurface(second.page, 'Session info');
-    const budgetRow = dd(second.page.locator(`[data-session-info="${id}"]`), 'Memory budget');
+    const budgetRow = dd(second.page.locator(`[data-session-info="${await addressed(second.page, id)}"]`), 'Memory budget');
     await expect(budgetRow, 'Session info reads the budget the renderer holds').toHaveText(/ · 1 session$/);
     log.push(`engine.budget after the relaunch: ${JSON.stringify(budget)}; Session info's Memory budget "${await budgetRow.textContent()}"`);
 
@@ -851,7 +852,7 @@ test('(h) G4: after a keep-quit a restored terminal tab says its shell closed wi
       return (label = ptys[0]?.label ?? '');
     }, { timeout: 15_000, message: 'a shell for the session' }).not.toBe('');
     await expect.poll(async () => {
-      const layout = value(await invoke(first.page, 'layout.get', { key: `panel.${id}` })).value as { tabs: { id: string }[] } | null;
+      const layout = value(await invoke(first.page, 'layout.get', { key: `panel.${await addressed(first.page, id)}` })).value as { tabs: { id: string }[] } | null;
       return layout?.tabs.map((t) => t.id) ?? [];
     }, { message: 'the tab reaches layout.json' }).toContain(label);
     await s.quit(first);

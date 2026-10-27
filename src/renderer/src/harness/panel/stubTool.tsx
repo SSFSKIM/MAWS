@@ -3,6 +3,7 @@
 // visible · focus <n>`), counts `+1` clicks in its state, can refuse one close and then confirm it inline, and is
 // taller than the panel, keeping its scroll offset in its state so it returns where it was after the host unmounts it.
 import { useLayoutEffect, useRef, useSyncExternalStore } from 'react';
+import { bareOf } from '@shared/machine/address';
 import { Icon } from '../../app/IconButton';
 import type { PanelTool, PanelToolContext, PanelToolInit } from '../../panel/tool';
 
@@ -115,7 +116,7 @@ function StubBody({ state, ctx }: { state: StubState; ctx: PanelToolContext }) {
   const line = [
     state.init.instanceId.split(':')[0],
     state.init.instanceId,
-    ctx.appSessionId ?? 'no session',
+    ctx.appSessionId === null ? 'no session' : bareOf(ctx.appSessionId), // P5 O6 M2: the fake session's name ('A'), not its address
     ctx.pinned ? 'pinned' : 'unpinned',
     ctx.visible ? 'visible' : 'hidden',
     `focus ${ctx.focusRequest}`,

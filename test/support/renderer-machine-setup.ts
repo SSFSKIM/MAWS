@@ -4,4 +4,4 @@
 // in its place, `localMachine: TEST_MACHINE` included (./machine.ts).
 import { TEST_MACHINE } from './machine';
 
-(window as unknown as { maws: { localMachine: typeof TEST_MACHINE } }).maws = { localMachine: TEST_MACHINE };
+(globalThis as unknown as { window: { maws: { localMachine: typeof TEST_MACHINE } } }).window.maws = { localMachine: TEST_MACHINE };

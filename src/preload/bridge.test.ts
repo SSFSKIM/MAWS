@@ -11,7 +11,7 @@ const OTHER = 'OtherMachineRef0000000' as MachineRef;
 const createBridge = (transport: BridgeTransport, files?: Parameters<typeof createBridgeOf>[2]) => createBridgeOf(transport, LOCAL, files);
 
 function fakeTransport() {
-  const listeners = new Map<string, Set<(event: unknown, payload: unknown) => void>>();
+  const listeners = new Map<string, Set<(event: unknown, payload: unknown, machine?: unknown) => void>>();
   const transport = {
     invoke: vi.fn<(channel: string, input: unknown, machine?: unknown) => Promise<unknown>>(async () => ({ ok: true, value: 'answer' })),
     on: vi.fn((channel: string, listener: (event: unknown, payload: unknown, machine?: unknown) => void) => {

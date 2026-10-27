@@ -59,7 +59,7 @@ export function connectShell(
   const attention = () => stores.attention.getState();
   const freshness = createFreshness();
   let connected = true;
-  const on: MawsBridge['on'] = (name, listener) => client.on(name, (payload) => connected && listener(payload));
+  const on: MawsBridge['on'] = (name, listener) => client.on(name, (payload, from) => connected && listener(payload, from));
   let hostState: EventPayload<'engine.hostState'>['state'] | null = null; // E10: the engine host's last state heard
   let departures = 0; // E10: how often the engine host was heard leaving ready; a table read before the latest is stale
 

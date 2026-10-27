@@ -43,6 +43,7 @@
 // Runs under `pnpm e2e:browser-chrome` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); each launch
 // passes MAWS_HARNESS=0, so the window is the product app.
 import { mainTabById, mainTabs as chromeTabs } from './support/shell';
+import { addressed } from './support/address';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -869,13 +870,14 @@ test('9, 10, 12: the extensions action bar: the probe\'s icon right of the addre
       // ordinary tab that the options tab's main tab shows in place (one main tab where there was one), with no Back
       // into the options page
       const mainTabs = () => chromeTabs(s.page).locator('[role="tab"][data-tab-id^="browser:"]').evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-tab-id')));
-      expect(await mainTabs()).toEqual([`browser:${id}:${pageTab}`, `browser:${id}:${optionsTab}`]);
+      const session = await addressed(s.page, id); // a browser main tab's id names its session's address
+      expect(await mainTabs()).toEqual([`browser:${session}:${pageTab}`, `browser:${session}:${optionsTab}`]);
       value(await invoke(s.page, 'browser.tabs.navigate', { tabId: optionsTab, to: { url: server.url('/b.html'), typed: false } }));
       await expect.poll(async () => (await tabsOf(s, id)).tabs.some((tab) => tab.tabId === optionsTab)).toBe(false);
       const left = (await tabsOf(s, id)).tabs.find((tab) => tab.tabId !== pageTab)!;
       expect(left).toMatchObject({ url: server.url('/b.html'), internal: null, partition: DEFAULT });
-      await expect.poll(mainTabs).toEqual([`browser:${id}:${pageTab}`, `browser:${id}:${left.tabId}`]);
-      await expect(mainTabById(s.page, `browser:${id}:${left.tabId}`)).toHaveAttribute('aria-selected', 'true');
+      await expect.poll(mainTabs).toEqual([`browser:${session}:${pageTab}`, `browser:${session}:${left.tabId}`]);
+      await expect(mainTabById(s.page, `browser:${session}:${left.tabId}`)).toHaveAttribute('aria-selected', 'true');
       expect((await tabsOf(s, id)).selected).toBe(left.tabId);
       await expect(chipOf(main, left.tabId).locator('[aria-selected]')).toHaveAttribute('aria-selected', 'true');
       await expect.poll(async () => (await viewOf(s, left.tabId))?.visible).toBe(true);

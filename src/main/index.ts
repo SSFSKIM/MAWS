@@ -334,7 +334,7 @@ void startWithProfileLock(app, () => {
   });
   const sessionsDir = join(app.getPath('userData'), 'sessions');
   const intents = new FileIntentStore(join(sessionsDir, 'intents'));
-  const stopChatPanels = registerChatPanels(layout, sessions.model, intents);
+  const stopChatPanels = registerChatPanels(layout, sessions.model, intents, local); // P5 O6 M2: local
   shutdown.add('chat panels', stopChatPanels);
   shutdown.add('layout and sessions', () => {
     layout.flush();
@@ -471,7 +471,7 @@ void startWithProfileLock(app, () => {
     waiting: (id) => sessions.model.attention(id).some((item) => archiveOpen(item) && archiveActionable(item)),
     archive: (id, eligible, stillEligible) => sessionService.archive(id, { onlyIfIdle: true, eligible, stillEligible }),
     discovered: (engineSessionId) => indexSource.discoveryCurrent(engineSessionId), // a closed app's CLI use is read first
-    open: openSessionTabs(layout, (id) => sessions.model.isVisible(id)), // the sweep keeps what the owner keeps in a tab
+    open: openSessionTabs(layout, local, (id) => sessions.model.isVisible(id)), // the sweep keeps what the owner keeps in a tab (P5 O6 M2: the local machine's)
     activity: (id) => {
       const digest = sessions.model.digest(id);
       const times = [digest?.turnStartedAt, digest?.lastTurnEndedAt].flatMap((at) => at ? [Date.parse(at)] : []).filter(Number.isFinite);

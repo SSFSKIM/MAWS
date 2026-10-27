@@ -7,6 +7,7 @@ import { useEffect } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionPhase } from '@shared/ipc/schema/session';
 import type { Slots } from '../app/slots';
+import { machineFor } from '../ipc/machine';
 import { registerSlot } from '../app/slots';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
@@ -42,8 +43,8 @@ export const ShellTranscript: Slots['transcript'] = ({ appSessionId, agentId }) 
 };
 
 // A path chip: C5's file tab at that line. The chip's session is not known to a registered action, and a file tab's
-// identity is its path alone (C5's `tabId`), so the tab carries none.
-export const openFileInTab = (path: string, line?: number) => useLayout.getState().openTab({ kind: 'file', path, line: line ?? null, appSessionId: null });
+// identity is its path and machine (C5's `tabId`; P5 O6 M2), so the tab carries none, on the local machine.
+export const openFileInTab = (path: string, line?: number) => useLayout.getState().openTab({ kind: 'file', path, line: line ?? null, appSessionId: null, machine: machineFor(null) });
 
 export function connectTranscript(): () => void {
   registerSlot('transcript', ShellTranscript);

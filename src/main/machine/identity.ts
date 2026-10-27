@@ -2,7 +2,7 @@
 // the profile's `MachineRef`, read or minted at startup into `<userData>/machine.json` through the module O2's `mawsd`
 // shares (src/shared/machine/identity-file.ts), and `machine.identity`, registered with the `machine` owner's embedded
 // binding. No Electron: O3 registers the same handler in `mawsd`'s runtime.
-import type { MainHandler } from '../ipc/router';
+import type { MachineHandler } from '../ipc/router';
 import { readOrMintMachineRef } from '@shared/machine/identity-file';
 import type { MachineIdentity } from '@shared/ipc/schema/machine';
 import type { CommandName } from '@shared/ipc/schema';
@@ -17,7 +17,7 @@ export interface MachineIdentityDeps {
   userData: string;
   env: NodeJS.ProcessEnv;
   hostname: string;
-  register: <N extends CommandName>(name: N, handler: MainHandler<N>) => void;
+  register: <N extends CommandName>(name: N, handler: MachineHandler<N>) => void;
 }
 
 // Throws, naming the path, on a malformed identity file: startup stops rather than re-address everything kept.

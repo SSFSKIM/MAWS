@@ -1,7 +1,7 @@
 // The editor harness's automation surface, `window.__maws_editor` (C7 execution document, M3): Playwright shows one
 // session's editor and reads what it holds and what it submitted. Types only, so the e2e project can import them.
 export interface EditorPane {
-  appSessionId: string;
+  appSessionId: string; // P5 O6 M2: bare, as the raw bridge speaks it
   cwd: string;
   additionalDirectories?: string[];
   sessionId: string | null; // the engine session id, for the pasted tags' id

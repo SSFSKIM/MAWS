@@ -27,6 +27,7 @@ import { GATEWAY_AUTH_TOKEN, RELAY_URL } from '../src/engine-host/launch';
 import type { JournalRow } from '@shared/wire/journal';
 import { ENGINE_BIN, ENGINE_VERSION } from '../test/support/engine-pin'; // FX4: the resolved live engine
 import { scratchConfigHome } from '../test/live/support/live';
+import { addressed } from './support/address';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { chargeOf } from './support/p1-live';
 import { sidebarRow } from './support/sidebar';
@@ -509,6 +510,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
     note('session', { appId: record.appId, title: record.title.text, directory: record.directory, taskListId: status0.taskListId, mode: status0.permissionMode });
     const panel = page.locator('[data-region="panel"]');
     const agents = <T,>(read: string) => page.evaluate(`(() => { const a = window.__maws_agents; return (${read})(a); })()`) as Promise<T>;
+    const appAddress = await addressed(page, record.appId); // the page's stores key the session by its address
     const ids = { first: [] as string[], perm: '', relayBusy: '', relayIdle: '', foreground: '' };
 
     await step('i', 'two background agents under Agents, then Done', async () => {
@@ -544,7 +546,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       if (!opened) throw new Error('no agent to open (step i did not run)');
       const agentId = opened.taskId as string;
       const description = opened.description as string;
-      await agents(`(a) => a.transcript.getState().expandAll(${JSON.stringify(record.appId)})`);
+      await agents(`(a) => a.transcript.getState().expandAll(${JSON.stringify(appAddress)})`);
       await sleep(500);
       // The transcript is virtualised: the turn that dispatched the agents sits above the fold, so the list is walked
       // from its top until this agent's control (its glyph, `Open <description>`) is mounted, and that is clicked as the
@@ -580,10 +582,10 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       await expect.poll(() => probe(page, (p) => p.subagents().drillIn?.header ?? null), { timeout: 10_000 }).not.toBeNull();
       const drill = await probe(page, (p) => p.subagents().drillIn);
       expect(drill?.header, 'the drill-in is on the agent whose control was clicked').toBe(description);
-      const key = `${record.appId}:${agentId}`;
+      const key = `${appAddress}:${agentId}`;
       const childTools = s.events.filter((e) => e.kind === 'tool.use' && e.agentId === agentId).map((e) => e.toolName);
       const rowsBefore = await agents<number>(`(a) => a.transcript.getState().rows(${JSON.stringify(key)}).length`);
-      await agents(`(a) => a.layout.getState().openTab({ kind: 'agent', appSessionId: ${JSON.stringify(record.appId)}, agentId: ${JSON.stringify(agentId)} })`);
+      await agents(`(a) => a.layout.getState().openTab({ kind: 'agent', appSessionId: ${JSON.stringify(appAddress)}, agentId: ${JSON.stringify(agentId)} })`);
       await sleep(1_500);
       const keys = await agents<string[]>(`(a) => Object.keys(a.transcript.getState().entries).filter((k) => k.endsWith(${JSON.stringify(`:${agentId}`)}))`);
       const count = (selector: string) =>

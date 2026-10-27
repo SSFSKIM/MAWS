@@ -34,6 +34,7 @@ export { emit } from './events';
 // P5 O6 M2: `target` is the machine the command goes to: the local one, or (a `client` command) the machine its ids name.
 export type MainContext = HandlerContext & { readonly target: MachineRef };
 export type MainHandler<N extends CommandName> = (input: CommandInput<N>, context: MainContext) => CommandOutput<N> | Promise<CommandOutput<N>>;
+export type MachineHandler<N extends CommandName> = (input: CommandInput<N>, context: HandlerContext) => CommandOutput<N> | Promise<CommandOutput<N>>;
 export type HostOwner = Exclude<Owner, 'main'>;
 // The supervisor interface M4 implements (`HostSupervisor.dispatch`): forward to the owning host, answer its result.
 // P5 O1 M5: `client` is the asker, passed for a `machine`-owned command only (the host binding).
@@ -42,12 +43,15 @@ export type MachineBinding = { kind: 'embedded' } | { kind: 'host' };
 
 // A handler over registry R, for `main` or `machine` alike: the same signature in main and in a host runtime.
 export type RegistryHandler<R extends WireRegistry, N extends NameOf<R>> = (input: InputOf<R, N>, ctx: HandlerContext) => OutputOf<R, N> | Promise<OutputOf<R, N>>;
+// P5 O6 M2: one that runs only in main (a `main` handler, an interceptor) also learns the machine the command goes to. A
+// `machine` handler does not: a host runtime runs the same code, and it is always its own machine's.
+export type MainRegistryHandler<R extends WireRegistry, N extends NameOf<R>> = (input: InputOf<R, N>, ctx: MainContext) => OutputOf<R, N> | Promise<OutputOf<R, N>>;
 
 export interface Router<R extends WireRegistry> {
   install(): void; // one ipcMain.handle per name of R
-  registerMain<N extends NameOf<R>>(name: N, handler: RegistryHandler<R, N>): void; // refuses a name R does not give to `main`
+  registerMain<N extends NameOf<R>>(name: N, handler: MainRegistryHandler<R, N>): void; // refuses a name R does not give to `main`
   registerMachine<N extends NameOf<R>>(name: N, handler: RegistryHandler<R, N>): void; // refuses a name R does not give to `machine`
-  intercept<N extends NameOf<R>>(name: N, handler: RegistryHandler<R, N>): () => void;
+  intercept<N extends NameOf<R>>(name: N, handler: MainRegistryHandler<R, N>): () => void;
 }
 
 export interface RouterOptions {
@@ -200,7 +204,7 @@ export function installRouter(options: RouterOptions): void {
 export const registerMainHandler: <N extends CommandName>(name: N, handler: MainHandler<N>) => void = production.registerMain;
 // P5 O1 M5: for a `machine`-owned command's handler in main's root (the embedded binding); mawsd's root registers the same
 // handler with its runtime's `on` (O3).
-export const registerMachineHandler: <N extends CommandName>(name: N, handler: MainHandler<N>) => void = production.registerMachine;
+export const registerMachineHandler: <N extends CommandName>(name: N, handler: MachineHandler<N>) => void = production.registerMachine;
 // C5: the stub source's seam (above).
 export const interceptCommand: <N extends CommandName>(name: N, handler: MainHandler<N>) => () => void = production.intercept;
 

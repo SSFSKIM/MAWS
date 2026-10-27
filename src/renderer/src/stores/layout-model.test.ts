@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentId, AppSessionId, ProjectId } from '@shared/graph/ids';
+import { TEST_MACHINE as M } from '../../../../test/support/machine';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, LayoutMainSchema, NO_PROJECT, type LayoutMain, type LayoutMainV1, type TabRef, type TabSet, type TabSetKey, type TabTarget } from '@shared/ipc/schema/layout';
 import {
   activateTab, activeTab, closeTab, currentSet, cycleTab, dockSplit, dropSession, floatingPane, floatSplit, focusPane, fromV1, moveTab, openSession, openTab,
@@ -261,8 +262,8 @@ describe('replacing the active session', () => {
     expect(ids(replaceActive(pinned, 'x' as AppSessionId))).toEqual([['session:c', 'session:x', 'session:a', 'session:b']]);
     expect(ids(replaceActive(base, 'x' as AppSessionId))).toEqual([['session:x']]);
     expect(replaceActive(pinned, 'x' as AppSessionId).closedTabs).toEqual([]);
-    const pinnedFile = togglePinned(openTab(abc(), { kind: 'file', path: '/r/a.ts', line: null, appSessionId: 'a' as AppSessionId }), 'file:/r/a.ts');
-    expect(ids(replaceActive(pinnedFile, 'x' as AppSessionId))[0]).toEqual(expect.arrayContaining(['file:/r/a.ts', 'session:x']));
+    const pinnedFile = togglePinned(openTab(abc(), { kind: 'file', path: '/r/a.ts', line: null, appSessionId: 'a' as AppSessionId, machine: M }), `file:${M}:/r/a.ts`);
+    expect(ids(replaceActive(pinnedFile, 'x' as AppSessionId))[0]).toEqual(expect.arrayContaining([`file:${M}:/r/a.ts`, 'session:x']));
   });
 
   // E11 F2b (plan 2.5; owner decision 2): opening a session replaces the main tab whatever it shows; what must not be
@@ -271,7 +272,7 @@ describe('replacing the active session', () => {
     const kinds: TabTarget[] = [
       { kind: 'settings', section: null },
       { kind: 'diagnostics' },
-      { kind: 'file', path: '/r/a.ts', line: null, appSessionId: 'a' as AppSessionId },
+      { kind: 'file', path: '/r/a.ts', line: null, appSessionId: 'a' as AppSessionId, machine: M },
       { kind: 'diff', appSessionId: 'a' as AppSessionId, ref: 'HEAD' },
       { kind: 'agent', appSessionId: 'a' as AppSessionId, agentId: 'ag-1' as AgentId },
     ];
@@ -320,8 +321,8 @@ describe('the settings tab', () => {
 });
 
 describe('file tabs and the panel’s session (C8’s tenth ask)', () => {
-  const file = (line: number | null, appSessionId: AppSessionId | null = A_ID) => ({ kind: 'file' as const, path: '/repo/src/app.ts', line, appSessionId });
-  const FILE_ID = 'file:/repo/src/app.ts';
+  const file = (line: number | null, appSessionId: AppSessionId | null = A_ID) => ({ kind: 'file' as const, path: '/repo/src/app.ts', line, appSessionId, machine: M });
+  const FILE_ID = `file:${M}:/repo/src/app.ts`;
 
   // Reopening an open file tab (after its pin, with another tab active) must leave one tab, active, pinned, carrying
   // exactly what the latest open asked for.
@@ -440,18 +441,18 @@ describe('tab sets per project', () => {
     expect(setIds(m, X)).toEqual([['session:a', 'session:b']]);
     expect(ids(m)).toEqual([['session:y1', 'session:y2', 'settings']]);
     expect(activeTab(m)).toMatchObject({ id: 'settings', section: 'keyboard' });
-    const file = (appSessionId: AppSessionId | null) => ({ kind: 'file' as const, path: '/r/f.ts', line: null, appSessionId });
+    const file = (appSessionId: AppSessionId | null) => ({ kind: 'file' as const, path: '/r/f.ts', line: null, appSessionId, machine: M });
     const filed = openTab(switchSet(two(), X), file('a' as AppSessionId), { set: X });
     const moved = openTab(switchSet(filed, Y), file('y1' as AppSessionId), { set: Y });
     expect(setIds(moved, X)).toEqual([['session:a', 'session:b']]);
-    expect(ids(moved)).toEqual([['session:y1', 'session:y2', 'file:/r/f.ts']]);
+    expect(ids(moved)).toEqual([['session:y1', 'session:y2', `file:${M}:/r/f.ts`]]);
   });
 
   // P3-L (M3): an artifact's tab is the workspace's, not a session's: it follows the strip as Settings does, keeps its
   // pin, and one artifact has one tab, opened again only activated.
   it('an artifact tab follows the current set, keeps its pin, and opening it again activates its one tab', () => {
-    const artifact = { kind: 'artifact' as const, artifactId: '00000000-0000-4000-8000-000000000001' };
-    const id = `artifact:${artifact.artifactId}`;
+    const artifact = { kind: 'artifact' as const, artifactId: '00000000-0000-4000-8000-000000000001', machine: M };
+    const id = `artifact:${M}:${artifact.artifactId}`;
     expect(sessionOfTab(artifact)).toBeNull();
     let m = togglePinned(openTab(switchSet(two(), X), artifact), id);
     expect(setIds(m, X)).toEqual([[id, 'session:a', 'session:b']]);
@@ -540,7 +541,7 @@ describe('tab sets per project', () => {
 // P4-B3 M1 (parent §4.5, X37; Decision Log 1, 2, 6): the split's float state beside `splitRatio`, which a float never
 // writes, and the one validity rule every transition and hydration applies.
 describe('the split’s float', () => {
-  const ART: TabTarget = { kind: 'artifact', artifactId: 'doc-1' };
+  const ART: TabTarget = { kind: 'artifact', artifactId: 'doc-1', machine: M };
   const X = 'proj-x' as ProjectId;
   // Pane 0: the document; pane 1: sessions d (active) and e; the ratio 0.4 (r0).
   const docked = () => setSplitRatio(openTab(openTab(openTab(base, ART), S('d'), { pane: 1 }), S('e'), { pane: 1, activate: false }), 0.4);
@@ -559,7 +560,7 @@ describe('the split’s float', () => {
   it('floats nothing unless the current set is a split with that session tab active in a pane', () => {
     const m = docked();
     expect(floatSplit(m, 'session:e')).toBe(m); // not active
-    expect(floatSplit(m, 'artifact:doc-1')).toBe(m); // not a session
+    expect(floatSplit(m, `artifact:${M}:doc-1`)).toBe(m); // not a session
     expect(floatSplit(m, 'session:zz')).toBe(m); // not open
     const single = openTab(base, S('d'));
     expect(floatSplit(single, 'session:d')).toBe(single); // no split
@@ -574,27 +575,27 @@ describe('the split’s float', () => {
   });
 
   it('A’s last tab closing shows S full width, docked', () => {
-    const m = closeTab(floated(), 'artifact:doc-1');
+    const m = closeTab(floated(), `artifact:${M}:doc-1`);
     expect(ids(m)).toEqual([['session:d', 'session:e']]);
     expect('floating' in cur(m)).toBe(false);
   });
 
   it('S’s session tab closing docks the split at r0 on S’s next tab, or leaves A alone', () => {
     const next = closeTab(floated(), 'session:d');
-    expect(ids(next)).toEqual([['artifact:doc-1'], ['session:e']]);
+    expect(ids(next)).toEqual([[`artifact:${M}:doc-1`], ['session:e']]);
     expect('floating' in cur(next)).toBe(false);
     expect(cur(next).splitRatio).toBe(0.4);
     const alone = closeTab(closeTab(floated(), 'session:e'), 'session:d');
-    expect(ids(alone)).toEqual([['artifact:doc-1']]);
+    expect(ids(alone)).toEqual([[`artifact:${M}:doc-1`]]);
     expect('floating' in cur(alone)).toBe(false);
   });
 
   it('a tab change in S docks; one in A, or focus moving, keeps the float', () => {
     expect('floating' in cur(activateTab(floated(), 'session:e'))).toBe(false);
     const inA = openTab(focusPane(floated(), 0), { kind: 'settings', section: null });
-    expect(ids(inA)).toEqual([['artifact:doc-1', 'settings'], ['session:d', 'session:e']]);
+    expect(ids(inA)).toEqual([[`artifact:${M}:doc-1`, 'settings'], ['session:d', 'session:e']]);
     expect(cur(inA).floating).toEqual({ sessionTabId: 'session:d' });
-    expect(floatingPane(cur(activateTab(inA, 'artifact:doc-1')))).toBe(1);
+    expect(floatingPane(cur(activateTab(inA, `artifact:${M}:doc-1`)))).toBe(1);
   });
 
   // The review's repro: S's session tab carried into A's pane, where it is active, would otherwise keep the float and
@@ -603,11 +604,11 @@ describe('the split’s float', () => {
     const m = floated();
     expect(cur(m).focusedPane).toBe(1);
     const viaSplit = splitWithActive(m); // ⌘\ with S's pane focused
-    expect(ids(viaSplit)).toEqual([['artifact:doc-1', 'session:d'], ['session:e']]);
+    expect(ids(viaSplit)).toEqual([[`artifact:${M}:doc-1`, 'session:d'], ['session:e']]);
     expect('floating' in cur(viaSplit)).toBe(false);
     expect(floatingPane(cur(viaSplit))).toBeNull();
     const viaOpen = openSession(m, 'd' as AppSessionId, { split: true }); // "Open in split" on the floating session
-    expect(ids(viaOpen)).toEqual([['artifact:doc-1', 'session:d'], ['session:e']]);
+    expect(ids(viaOpen)).toEqual([[`artifact:${M}:doc-1`, 'session:d'], ['session:e']]);
     expect('floating' in cur(viaOpen)).toBe(false);
     const viaMove = moveTab(m, 'session:d', 0, 1); // a drag between the strips
     expect('floating' in cur(viaMove)).toBe(false);
@@ -629,8 +630,8 @@ describe('the split’s float', () => {
     expect(cur(repairMain(floated(), () => true)).floating).toEqual({ sessionTabId: 'session:d' });
     const at = (floating: TabSet['floating']): LayoutMain => ({ ...floated(), sets: { [NO_PROJECT]: { ...cur(floated()), floating } } });
     expect('floating' in cur(repairMain(at({ sessionTabId: 'session:e' }), () => true))).toBe(false); // not active
-    expect('floating' in cur(repairMain(at({ sessionTabId: 'artifact:doc-1' }), () => true))).toBe(false); // not a session
+    expect('floating' in cur(repairMain(at({ sessionTabId: `artifact:${M}:doc-1` }), () => true))).toBe(false); // not a session
     expect('floating' in cur(repairMain(floated(), (id) => id !== 'd'))).toBe(false); // its session is gone
-    expect(ids(repairMain(floated(), (id) => id !== 'd'))).toEqual([['artifact:doc-1'], ['session:e']]);
+    expect(ids(repairMain(floated(), (id) => id !== 'd'))).toEqual([[`artifact:${M}:doc-1`], ['session:e']]);
   });
 });
