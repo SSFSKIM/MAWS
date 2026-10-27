@@ -816,6 +816,7 @@ No new dependency. zod 4, Node's `crypto`, the peer-auth addon already in the tr
     export const IDENTITY_FILE = 'machine.json';                            // in the profile's root: { version: 1, ref, mintedAt }, 0600
     export function readMachineRef(profileDir: string): MachineRef | null;  // null when absent; throws naming the path on a malformed file
     export function readOrMintMachineRef(profileDir: string): MachineRef;   // temporary file, fsync, link; EEXIST reads the winner's file
+    // O2's M8 adds an optional `{ prefix }`, a devcloud VM's delegation id, so its ref is `<id>_<random>` (P5 Decision Log 30)
 
 **`src/shared/machine/address.ts`** (M1; the one codec):
 
