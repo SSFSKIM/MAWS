@@ -5,10 +5,13 @@
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
+import { createConnection } from 'node:net';
 import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
+import { WIRE_MINOR } from '@shared/ipc/wire';
 import type { AppSessionId } from '@shared/graph/ids';
 import { readOrMintMachineRef } from '@shared/machine/identity-file';
 import { buildIdOf } from '../engine-host/supervisor-files';
+import type { FakeSupervisor } from '../../test/support/fake-supervisor';
 import { MawsdScene, RawApp, sleep, until, type StandIn } from '../../test/support/mawsd-scene';
 
 let scene: MawsdScene;
@@ -186,6 +189,26 @@ describe('the upstreams and machine.sock', () => {
 });
 
 describe('the handshake reflects the upstream', () => {
+  // M5 review: an app that sends its hello and leaves while the host starts is never attached
+  it('an app that leaves while its hello is held is never attached, so nothing counts it as a client', async () => {
+    scene.engineSpawn = null; // the host comes up when the test says
+    const daemon = await scene.start();
+    const socket = createConnection(scene.paths.sockets['engine-host']);
+    socket.on('error', () => {});
+    await new Promise<void>((resolve) => socket.once('connect', () => resolve()));
+    socket.write(`${JSON.stringify({ t: 'hello', protocol: SOCKET_PROTOCOL, token: scene.token(), minor: WIRE_MINOR, build: 'raw-app', capabilities: [], appPid: process.pid })}\n`);
+    await until(() => scene.spawn.mock.calls.length === 1, 3_000, 'the wake');
+    socket.end(); // its FIN, while the hello is held
+    await sleep(50);
+    await scene.engine({ pid: (scene.spawn.mock.results[0]!.value as { pid: number }).pid });
+    await until(() => daemon.hosts.snapshot('engine-host').state === 'ready', 3_000, 'the host');
+    await sleep(100);
+    expect((await daemon.status()).clients.engineHost).toBe(false);
+    expect(scene.logs.some((line) => line.includes('engine-host.sock: client connected'))).toBe(false);
+    expect(scene.logs.some((line) => line.includes('closed a connection whose peer left before its admission answered'))).toBe(true);
+    socket.destroy();
+  });
+
   it('a hello wakes the parked engine host and is welcomed with its pid, start, build and counts, its capabilities with mawsd’s', async () => {
     scene.engineSpawn = { counts: { liveSessions: 2, rows: 5 } };
     await scene.start();
@@ -327,6 +350,51 @@ describe('the interceptions', () => {
     await until(() => app.closed);
   });
 
+  // M5 review: a quit's departure recycle must not override a deliberate exit
+  for (const asked of ['host.stopAll', 'exit now'] as const) {
+    it(`${asked} then the app's draining close at once: one spawn, and the host parks (the departure does not reconnect it)`, async () => {
+      const exitLater = (self: FakeSupervisor) => void setTimeout(() => void self.die(), 100);
+      scene.engineSpawn = { onExitNow: exitLater, answers: { 'host.stopAll': () => (exitLater(scene.lastEngine().supervisor), { stopped: 0 }) } };
+      const daemon = await scene.start();
+      const app = await scene.app();
+      app.ready();
+      if (asked === 'host.stopAll') expect(await app.request('host.stopAll')).toMatchObject({ ok: true });
+      else {
+        await app.request('engine.ping'); // the attach's recycle is over
+        app.exit('now');
+        await until(() => scene.lastEngine().supervisor.exits.includes('now'));
+      }
+      app.leave(); // main's quit right after
+      await until(() => daemon.hosts.parked('engine-host'), 3_000, 'the park');
+      await sleep(300);
+      expect(scene.spawn).toHaveBeenCalledOnce();
+      expect(daemon.hosts.parked('engine-host')).toBe(true);
+    });
+  }
+
+  it('host.exitWhenIdle is tracked on the link that answers it: armed, the host’s idle exit parks it; disarmed, its exit is a crash', async () => {
+    const daemon = await scene.start();
+    const app = await scene.app();
+    expect(await app.request('host.exitWhenIdle', { armed: true })).toMatchObject({ ok: true }); // sent just after the attach
+    const first = scene.lastEngine();
+    expect(first.named('host.exitWhenIdle')).toEqual([{ armed: true }]);
+    app.leave(); // the departure's recycle keeps the arming (per process)
+    await until(() => app.closed);
+    await until(() => daemon.hosts.snapshot('engine-host').state === 'ready', 3_000, 'the fresh link');
+    await first.supervisor.die(); // it exits once idle
+    await until(() => daemon.hosts.parked('engine-host'), 3_000, 'the park');
+    await sleep(200);
+    expect(scene.spawn).toHaveBeenCalledOnce();
+
+    const back = await scene.app(); // wakes a fresh one
+    expect(scene.spawn).toHaveBeenCalledTimes(2);
+    await back.request('host.exitWhenIdle', { armed: true });
+    await back.request('host.exitWhenIdle', { armed: false });
+    await scene.lastEngine().supervisor.die({ keepLock: true }); // a crash now
+    await until(() => scene.spawn.mock.calls.length === 3, 3_000, 'the crash ladder’s relaunch');
+    expect(daemon.hosts.parked('engine-host')).toBe(false);
+  });
+
   it('exit idle from the app is ignored; exit now makes the engine host exit and park', async () => {
     const daemon = await scene.start();
     const app = await scene.app();
@@ -375,7 +443,9 @@ describe('the ready line, the recycle and the burst', () => {
 describe('the departure drains both hops', () => {
   // Main leaves with its real draining close (the host supervisor's stop); an event the engine host writes as mawsd
   // takes the departure (before it sees mawsd's end) reaches the departing app, one written after reaches the next app.
-  async function departure(halfOpen: boolean): Promise<{ departing: unknown[]; next: unknown[] }> {
+  // `stall`: the upstream writes the in-flight event `emitMs` after the departure and closes its side at `closeMs` (by
+  // default it writes it at once, as mawsd takes the departure, and closes at mawsd's end).
+  async function departure(halfOpen: boolean, stall: { emitMs: number; closeMs: number } | null = null) {
     const daemon = await scene.start({ halfOpen });
     const main = scene.appHosts();
     const departing: unknown[] = [];
@@ -385,18 +455,26 @@ describe('the departure drains both hops', () => {
     await until(() => engine.emitRaw('probe.event', { n: 0 }), 3_000, 'main ready');
     await until(() => departing.length === 1);
     daemon.services.onAttachment((attached) => {
-      if (!attached) engine.send({ n: 1 }); // written before the upstream sees mawsd's end
+      if (attached) return;
+      if (!stall) return void engine.send({ n: 1 }); // written before the upstream sees mawsd's end
+      // The host is still writing as mawsd's end arrives: its side stays open past that end (half-open), and it closes
+      // only at `closeMs`, as a host busy writing would.
+      const link = engine.supervisor.connections.at(-1)!;
+      link.allowHalfOpen = true;
+      setTimeout(() => void engine.send({ n: 1 }), stall.emitMs);
+      setTimeout(() => void link.end(), stall.closeMs);
     });
-    const drained = main.stop();
-    await drained;
-    await until(() => daemon.hosts.snapshot('engine-host').state === 'ready', 3_000, 'the fresh link');
+    const began = Date.now();
+    await main.stop(); // its real draining close, ended when mawsd ends the app's side
+    const appSideEndedMs = Date.now() - began;
+    await until(() => daemon.hosts.snapshot('engine-host').state === 'ready', 5_000, 'the fresh link');
     await sleep(150);
     engine.send({ n: 2 }); // after: held for the next app
     const second = await scene.app();
     second.ready();
     await until(() => second.events().length >= 1, 3_000, 'the next burst');
     await sleep(100);
-    return { departing, next: second.events() };
+    return { departing, next: second.events(), appSideEndedMs };
   }
 
   it('a half-open relay: the event in flight reaches the departing app, the next one the next app, neither lost nor doubled', async () => {
@@ -409,6 +487,22 @@ describe('the departure drains both hops', () => {
     const { departing, next } = await departure(false);
     expect(departing).toEqual([{ n: 0 }]);
     expect(next).toEqual([{ n: 2 }]);
+  });
+
+  it('an event the upstream writes later but inside the 500 ms bound still reaches the departing app', async () => {
+    const { departing, next, appSideEndedMs } = await departure(true, { emitMs: 200, closeMs: 250 });
+    expect(departing).toEqual([{ n: 0 }, { n: 1 }]);
+    expect(next).toEqual([{ n: 2 }]);
+    expect(appSideEndedMs).toBeGreaterThanOrEqual(200); // the app's side stayed open for it
+  });
+
+  it('a stalled upstream: the bound ends the app’s side at 500 ms, inside main’s 1 s grace, and what comes after is counted lost', async () => {
+    const { departing, next, appSideEndedMs } = await departure(true, { emitMs: 700, closeMs: 800 });
+    expect(appSideEndedMs).toBeGreaterThanOrEqual(450);
+    expect(appSideEndedMs).toBeLessThan(950); // mawsd's bound, not main's grace, ended it
+    expect(departing).toEqual([{ n: 0 }]);
+    expect(next).toEqual([{ n: 2 }]); // the host counted n 1 delivered: a consumer's death would lose it too
+    await until(() => scene.logs.some((line) => line.includes('1 events the engine-host wrote before it saw the app\'s end came after its side ended and were lost')), 3_000, 'the lost count');
   });
 });
 

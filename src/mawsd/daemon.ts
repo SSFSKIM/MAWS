@@ -278,6 +278,16 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       hosts.expectExit('engine-host');
       return hosts.forward('engine-host', { name: 'host.stopAll', input: request.input, ...(request.client && { client: request.client }) });
     });
+  // host.exitWhenIdle, forwarded and tracked: the link that answers it is marked armed (its exit once idle is
+  // deliberate and parks the host) or disarmed. Sent after an attach's recycle, as a stop-all is.
+  const exitWhenIdle = (request: { input: unknown; client?: string }): Promise<HostResponse> =>
+    recycled.then(async () => {
+      const armed = (request.input as { armed?: unknown } | null)?.armed;
+      const answer = await hosts.forward('engine-host', { name: 'host.exitWhenIdle', input: request.input, ...(request.client && { client: request.client }) });
+      if (answer.ok && armed === true) hosts.expectIdleExit('engine-host');
+      if (answer.ok && armed === false) hosts.disarmExit('engine-host');
+      return answer;
+    });
   const engineRelay = new Relay({
     owner: 'engine-host',
     hosts,
@@ -337,8 +347,10 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         if (ms === null || (typeof ms === 'number' && Number.isInteger(ms) && ms > 0 && ms <= MAX_IDLE_EXIT_MS)) clocks.configure(ms);
         return null;
       }
+      case 'host.exitWhenIdle':
+        return exitWhenIdle(request);
       default:
-        return null; // host.exitWhenIdle among them: forwarded; the park clock arms and disarms by its own means
+        return null;
     }
   }
 
@@ -489,6 +501,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       if (host === 'pty-host' && (name === 'pty.ack' || name === 'pty.checkpoint')) return refused(`${name} through the endpoint: the credit is the app's or the daemon's`);
       if (host === 'engine-host' && name === 'host.interest') return refused('a remote viewer’s interest arrives through interest.report');
       if (host === 'engine-host' && name === 'host.stopAll') return stopAll({ input, ...(client && { client: client.id }) });
+      if (host === 'engine-host' && name === 'host.exitWhenIdle') return exitWhenIdle({ input, ...(client && { client: client.id }) });
       // a remote viewer never holds a pty's output credit: every attach through the seam reads without taking it
       const sent = host === 'pty-host' && name === 'pty.attach' ? { ...(input as object), credit: false } : input;
       if (host === 'engine-host') return hosts.forward(host, { name, input: sent, ...(client && { client: client.id }) });

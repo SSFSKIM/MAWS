@@ -8,7 +8,8 @@
 //   its update banner and Diagnostics read the host, as they do today. While the upstream waits for an incompatible host
 //   still running sessions, the app gets that host's refusal line as received. While the upstream is starting (a parked
 //   host woken by this hello), the hello waits until it is connected or HELLO_HOLD_MS pass, then the connection closes
-//   and the app retries within its own start budget.
+//   unanswered: the hold spans the app's whole start budget, so the app reads it as a start attempt that got no answer
+//   (its transport's start failure), not as a retry within the same budget.
 // - Requests are forwarded raw (`forward`), and their answers come back as received, so a field this build does not
 //   know passes through; the daemon intercepts what it must (`intercept`). Events reach the app from its own `ready` on,
 //   as received (`deliver`, from the supervisor's `onRaw`).
@@ -24,7 +25,7 @@ import type { HostDoc, HostResponse } from '@shared/ipc/host-protocol';
 import { WIRE_CAPABILITIES } from '@shared/ipc/wire';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 
-export const HELLO_HOLD_MS = 15_000; // a hello waits this long for its upstream to connect (the transport's start budget)
+export const HELLO_HOLD_MS = 15_000; // a hello waits this long for its upstream to connect: the app's whole start budget (the architect's ruling)
 export const DEPARTURE_BOUND_MS = 500; // inside main's 1 s draining-close grace (CLOSE_GRACE_MS), which does not change
 
 export type RelayOwner = 'engine-host' | 'pty-host';
