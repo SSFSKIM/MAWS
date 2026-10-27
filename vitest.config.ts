@@ -38,6 +38,7 @@ const TIMING_NODE_TESTS = [
   'src/engine-host/documents/sigkill.test.ts', // P3-A: bundles and forks a writer, kills it mid-stream, reopens the store
   'test/artifacts/one-schema.test.ts', // P3-B: the portability test's pattern, for the one-schema rule
   'test/one-locale.test.ts', // the same pattern, for the one-locale rule over src/ and the desk's web app
+  'test/endpoint/enroll.test.ts', // P5 O10 M2: enrolls against desk-hub's local runner, a wrangler dev child process
 ];
 const TIMING_RENDERER_TESTS = [
   'src/renderer/src/App.test.tsx',
