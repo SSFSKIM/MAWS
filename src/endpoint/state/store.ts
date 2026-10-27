@@ -100,6 +100,9 @@ const NotifiedSchema = z.record(
   z.strictObject({ project: z.string().min(1), pending: z.number().int().positive(), owed: z.literal(true).optional() }),
 );
 
+/** A web-cards passkey's last signature counter, by credential id (M5): an assertion's must rise where it keeps one. */
+const WebAuthnSchema = z.record(z.string().min(1), z.number().int().nonnegative());
+
 export type MachineKeyFile = z.infer<typeof MachineKeySchema>;
 export type LedgerFile = z.infer<typeof LedgerSchema>;
 export type EnrollmentFile = z.infer<typeof EnrollmentSchema>;
@@ -107,6 +110,7 @@ export type OrgFile = z.infer<typeof OrgSchema>;
 export type PolicyFile = z.infer<typeof PolicySchema>;
 export type ListingsFile = z.infer<typeof ListingsSchema>;
 export type NotifiedFile = z.infer<typeof NotifiedSchema>;
+export type WebAuthnFile = z.infer<typeof WebAuthnSchema>;
 export type ChainEntry = z.infer<typeof ChainEntrySchema>;
 
 const FILES = {
@@ -118,6 +122,7 @@ const FILES = {
   legacy: 'legacy.json',
   listings: 'listings.json',
   notified: 'notified.json',
+  webauthn: 'webauthn.json',
 } as const;
 
 type Options = { uid?: number; now?: () => number; log?: (line: string) => void };
@@ -134,6 +139,7 @@ export class EndpointState {
   #policy: PolicyFile | null = null;
   #listings: ListingsFile = {};
   #notified: NotifiedFile = {};
+  #webauthn: WebAuthnFile = {};
   #legacy = false;
 
   private constructor(
@@ -168,6 +174,7 @@ export class EndpointState {
       const policy = read(FILES.policy, PolicySchema);
       const listings = read(FILES.listings, ListingsSchema);
       const notified = read(FILES.notified, NotifiedSchema);
+      const webauthn = read(FILES.webauthn, WebAuthnSchema);
       const legacy = checkPrivateFile(join(dir, FILES.legacy), options.uid);
 
       const alone = (machineKey === null) !== (ledger === null);
@@ -189,6 +196,7 @@ export class EndpointState {
       state.#policy = policy;
       state.#listings = listings ?? {};
       state.#notified = notified ?? {};
+      state.#webauthn = webauthn ?? {};
       state.#legacy = legacy;
       return state;
     } catch (error) {
@@ -227,6 +235,10 @@ export class EndpointState {
   get notified(): NotifiedFile {
     return this.#notified;
   }
+  /** Each web-cards credential's last signature counter; empty when none was seen. */
+  get webauthn(): WebAuthnFile {
+    return this.#webauthn;
+  }
 
   setMachineKey(value: MachineKeyFile): void {
     this.#write(FILES.machineKey, MachineKeySchema.parse(value));
@@ -255,6 +267,10 @@ export class EndpointState {
   setNotified(value: NotifiedFile): void {
     this.#write(FILES.notified, NotifiedSchema.parse(value));
     this.#notified = value;
+  }
+  setWebAuthn(value: WebAuthnFile): void {
+    this.#write(FILES.webauthn, WebAuthnSchema.parse(value));
+    this.#webauthn = value;
   }
   /** Deletes the DX1 org key (`mawsd endpoint legacy retire`, O14's final brief). */
   removeLegacy(): void {
