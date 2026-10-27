@@ -29,7 +29,7 @@ After O6:
 
 ## Progress
 
-- [ ] M1: machine identity and the address codec
+- [x] M1: machine identity and the address codec (2026-10-27T10:11Z; commits `ece0eb80a`..`ae671bfd0`, task review clean after two fix rounds; class 1a GREEN, run 40486094807)
 - [ ] M2: addresses across the boundary, one machine
 - [ ] M3: machine links and the second-profile stand-in
 - [ ] M4: per-machine stores, the shell per machine, explicit machines for paths
@@ -986,11 +986,14 @@ No new dependency. zod 4, Node's `crypto`, the peer-auth addon already in the tr
     - `readMachineRef` reads the `ref` of a file of any positive integer `version`, so an older build keeps a newer build's identity; a bad or missing `ref` stays fatal. The minter writes version 1.
     - The stray sweep removes only files of the minter's own shape, `machine.json.<digits>.<base64url>`, older than 60 s, so an owner's `machine.json.bak` is never touched. It runs in `readOrMintMachineRef` only.
     - `readOrMintMachineRef` creates the profile directory, since O2's `mawsd` may run first in a fresh profile.
+    - The temporary file is written whole by a loop over short writes, and it is removed on any failure of the write, close or link (task review).
     - The race test pauses the first minter inside a mocked `linkSync` and runs the second minter there. Rejected: a real multi-process race, which is nondeterministic.
     - A malformed file stops startup with a `[machine]` log line, `dialog.showErrorBox` and `app.exit(1)`. The mint is the first step inside `startWithProfileLock`, before any host or window.
   - The codec:
     - The plain-union rule is made concrete by run-time shape: an id beside a plain string, enum or literal throws; objects merge by key; an object and a record both carrying ids, or an array and a tuple both carrying ids, throw; null, number and boolean members are ignored, so `union([dunion, null])` stays dispatched.
     - Constructs the walker cannot see through throw at compile when they would hide an id: an intersection, a map, a set, a promise, or a transform on the chosen side of a pipe.
+    - The plain-union rule compares every option that applies at a path (task review): objects merge with records, catchalls and record values included, and tuples with arrays, rests included; an id-keyed record beside an object throws. Beside an id, only another id, a string-like, an object, a record, an array, a tuple, a union, or a primitive that is never a string may stand; any other member (intersection, map, set, promise, transform, date, file, `unknown`, `any`, `custom`, or a lazy resolving to one) refuses compilation, naming the path.
+    - Lifted ids are built through `addressOf`, so an empty loose id throws at lift.
     - `addressOf` refuses an empty bare id.
     - It exports `addressedKindOf` and `addressedPaths(schema, direction)` beyond the Interfaces block, so the coverage test reads the compile step's own findings.
     - The snapshot records command inputs as lowered and outputs and events as lifted, one `<path> <Kind>` line each.
