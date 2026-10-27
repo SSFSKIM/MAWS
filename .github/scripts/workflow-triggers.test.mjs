@@ -30,12 +30,9 @@ const staysHosted = (runsOn) => {
   if (runsOn && typeof runsOn === 'object') return Object.keys(runsOn).every((key) => key === 'labels') && 'labels' in runsOn && staysHosted([runsOn.labels].flat());
   return hostedLabel(runsOn);
 };
-// A job that calls a reusable workflow runs that workflow's jobs. One in this repository's .github/workflows is checked
-// as a file of its own; any other is code the check cannot read.
-const reachesSelfHosted = (job) => {
-  if (!('runs-on' in job) && typeof job.uses === 'string' && job.uses.startsWith('./.github/workflows/')) return false;
-  return !staysHosted(job['runs-on']);
-};
+// A job that calls a reusable workflow has no runs-on of its own and runs that workflow's jobs, which the check does
+// not follow, so it reaches them as any unreadable runs-on does.
+const reachesSelfHosted = (job) => !staysHosted(job['runs-on']);
 // A workflow's events, from any form of `on` (an event, a list of them, a mapping by event); null when unreadable.
 const events = (on) => {
   if (typeof on === 'string') return [on];
@@ -127,13 +124,12 @@ test('every reaching job of the workflow is named, the hosted ones are not', () 
 });
 
 // A job that calls a reusable workflow has no runs-on of its own: the called workflow's jobs run on this repository's
-// runners. One in this repository is a file this check reads on its own, under its own `workflow_call` trigger; any
-// other is code the check cannot read.
-test("a reusable workflow's call: a local one is checked as its own file, any other fails, as does a job with neither", () => {
-  assert.deepEqual(violations('on: pull_request\njobs:\n  call:\n    uses: ./.github/workflows/build.yml\n'), []);
-  assert.deepEqual(violations('on: pull_request\njobs:\n  call:\n    uses: someone/else/.github/workflows/build.yml@v1\n'), [
-    "job call's runs-on can reach a self-hosted runner, and the workflow triggers on pull_request",
-  ]);
+// runners, and the check does not follow the call, in this repository or another.
+test("a reusable workflow's call fails beside an outside trigger, local or not, as does a job with no runs-on", () => {
+  for (const uses of ['./.github/workflows/build.yml', 'someone/else/.github/workflows/build.yml@v1']) {
+    assert.deepEqual(violations(`on: pull_request\njobs:\n  call:\n    uses: ${uses}\n`), ["job call's runs-on can reach a self-hosted runner, and the workflow triggers on pull_request"], uses);
+    assert.deepEqual(violations(`on: [push, workflow_dispatch]\njobs:\n  call:\n    uses: ${uses}\n`), [], uses);
+  }
   assert.deepEqual(violations('on: pull_request\njobs:\n  bare:\n    steps: []\n'), ["job bare's runs-on can reach a self-hosted runner, and the workflow triggers on pull_request"]);
   assert.deepEqual(violations('on: workflow_call\njobs:\n  build:\n    runs-on: self-hosted\n'), [
     "job build's runs-on can reach a self-hosted runner, and the workflow triggers on workflow_call",
