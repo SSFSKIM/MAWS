@@ -19,11 +19,12 @@ vi.mock('node:fs', async (importOriginal) => {
     hook?.();
     fs.linkSync(existing, created);
   };
-  const writeSync = ((fd: number, buffer: NodeJS.ArrayBufferView, offset = 0, length = buffer.byteLength - offset) => {
+  // The minter's one form, (fd, buffer, offset, length).
+  const writeSync = ((fd: number, buffer: Uint8Array, offset: number, length: number): number => {
     writes.calls++;
     if (writes.fail) throw writes.fail;
     return fs.writeSync(fd, buffer, offset, writes.chunk === null ? length : Math.min(length, writes.chunk));
-  }) as typeof fs.writeSync;
+  }) as unknown as typeof fs.writeSync;
   return { ...fs, default: { ...fs, linkSync, writeSync }, linkSync, writeSync };
 });
 
