@@ -188,6 +188,34 @@ describe('the connection manager', () => {
     expect(brief(self.manager.list()).map(({ ref }) => ref)).toEqual([LOCAL]);
   });
 
+  it('lets a live directory take over a remembered ref from one that is not up, whatever the order the directories are configured in', async () => {
+    for (const configured of [[DIR_B, DIR_C], [DIR_C, DIR_B]]) {
+      const m = manager(configured, [{ ref: B, name: 'standin-b', carrier: { kind: 'socket', dir: DIR_B } }]);
+      m.link(DIR_B).down(); // B's old directory is away
+      m.link(DIR_C).up(B, 'standin-b'); // and B now answers from the new one
+      expect(m.link(DIR_C).closed, configured.join(' ')).toBe(false);
+      expect(brief(m.manager.list()), configured.join(' ')).toEqual([
+        { ref: LOCAL, state: 'up', generation: 0, local: true },
+        { ref: B, state: 'up', generation: 1, local: false }, // the old directory is kept, with no ref until it identifies
+      ]);
+      await expect(m.manager.dispatch(B, 'session.list', {}, ctx)).resolves.toEqual({ ok: true, value: { from: B } });
+      expect(m.link(DIR_C).calls).toHaveLength(1);
+      expect(m.knownFile().machines).toEqual([{ ref: B, name: 'standin-b', carrier: { kind: 'socket', dir: DIR_C } }]);
+      expect(m.log).toHaveBeenCalledWith(expect.stringContaining(`${DIR_C} now reaches machine ${B}`));
+
+      m.link(DIR_B).up(C, 'standin-c'); // the old directory, back, holds another profile: listed as that one
+      expect(brief(m.manager.list()).map(({ ref, state }) => `${ref} ${state}`)).toEqual(expect.arrayContaining([`${B} up`, `${C} up`]));
+    }
+  });
+
+  it('still refuses a directory that reaches a machine another directory reaches while up', () => {
+    const m = manager([DIR_B, DIR_C], [{ ref: B, name: 'standin-b', carrier: { kind: 'socket', dir: DIR_B } }]);
+    m.link(DIR_B).up(B, 'standin-b');
+    m.link(DIR_C).up(B, 'standin-b');
+    expect(m.link(DIR_C).closed).toBe(true);
+    expect(m.knownFile().machines).toEqual([{ ref: B, name: 'standin-b', carrier: { kind: 'socket', dir: DIR_B } }]);
+  });
+
   it('closes every link at close', () => {
     const m = manager([DIR_B, DIR_C]);
     m.manager.close();

@@ -12,7 +12,8 @@
 // - Known machines persist (known-machines.ts): an entry of a configured directory is listed `connecting` from launch,
 //   before its link is up, so a relaunch with that machine down keeps its tabs (acceptance 7); an entry whose directory is
 //   no longer configured is dropped at launch. A directory whose far side answers another ref than the one known for it
-//   now holds another profile: that is logged and adopted.
+//   now holds another profile: that is logged and adopted. A remembered ref is a hint: a directory answering it live takes
+//   it over from one that is not up; only a machine another directory reaches while up is refused.
 import type { ClientRef } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandName, CommandResult, EventName, EventPayload } from '@shared/ipc/schema';
@@ -101,17 +102,26 @@ export function createConnectionManager(deps: ConnectionManagerDeps): Connection
   const knownNow = (): KnownMachine[] =>
     entries.flatMap((entry) => (entry.ref === null ? [] : [{ ref: entry.ref, name: entry.name, carrier: { kind: 'socket' as const, dir: entry.dir } }]));
 
-  // The link said who it reaches: adopt it, unless it is this machine or one another directory already reaches.
+  // The link said who it reaches: adopt it, unless it is this machine or one another directory reaches while up. A ref
+  // remembered for another directory is a hint, not a claim: a directory that answers it live takes it over from an entry
+  // that is not up, which is kept, with no ref, until its own link identifies (whatever it then holds).
   function learned(entry: Entry): boolean {
     const { machine: ref, name } = entry.link;
     if (ref === null) return false;
-    if (ref === local || entries.some((other) => other !== entry && other.ref === ref)) {
-      log(`${entry.dir} serves machine ${ref}, which ${ref === local ? 'is this one' : 'another directory already reaches'}; closing that link`);
+    const holder = entries.find((other) => other !== entry && other.ref === ref);
+    if (ref === local || holder?.state === 'up') {
+      log(`${entry.dir} serves machine ${ref}, which ${ref === local ? 'is this one' : `${holder!.dir} already reaches`}; closing that link`);
       entry.link.close();
       return false;
     }
+    if (holder) {
+      log(`${entry.dir} now reaches machine ${ref}, remembered at ${holder.dir}, which is ${holder.state}; ${holder.dir} is kept with no machine until it answers`);
+      holder.ref = null;
+      holder.name = holder.dir;
+      holder.generation = 0;
+    }
     if (entry.ref !== null && entry.ref !== ref) log(`${entry.dir} now serves machine ${ref} (it served ${entry.ref}): the directory holds another profile`);
-    const differs = entry.ref !== ref || entry.name !== (name ?? entry.name);
+    const differs = holder !== undefined || entry.ref !== ref || entry.name !== (name ?? entry.name);
     entry.ref = ref;
     entry.name = name ?? entry.name;
     if (differs) persist(knownNow());
