@@ -38,6 +38,7 @@ import {
   type VerdictCode,
 } from 'org-protocol';
 import { isBase64urlOf } from '../protocol/base64url';
+import { utf8Length } from '../protocol/parts';
 import type { CertConflict, EnrollmentKey, Listings, MemberId } from '../protocol/identity';
 import type { OrgChain } from './org-chain';
 import type { Result } from './registry';
@@ -253,6 +254,26 @@ export class OrgRecords {
     const machines = [...new Set(rows.map((r) => r.machine))];
     const endpoints = machines.flatMap((m) => this.sql.exec<{ body: string }>('SELECT body FROM endpoints WHERE machine = ?', m).toArray());
     return { listings: parsed<Signed<Listing>>(rows), endpoints: parsed<Signed<EndpointRecord>>(endpoints) };
+  }
+
+  /**
+   * Every listing kept, in pages whose records come to at most `budget` bytes of JSON each, a record larger than that
+   * alone in its page; one empty page when none is kept. The Registry socket's snapshot (OX8; O11 M7), so that no frame
+   * grows with the org's listings.
+   */
+  listingPages(budget: number): Signed<Listing>[][] {
+    const pages: Signed<Listing>[][] = [[]];
+    let bytes = 0;
+    for (const { body } of this.sql.exec<{ body: string }>('SELECT body FROM listings ORDER BY machine, session')) {
+      const size = utf8Length(body);
+      if (pages.at(-1)!.length > 0 && bytes + size > budget) {
+        pages.push([]);
+        bytes = 0;
+      }
+      pages.at(-1)!.push(JSON.parse(body) as Signed<Listing>);
+      bytes += size;
+    }
+    return pages;
   }
 
   /**

@@ -60,9 +60,9 @@ import {
   PROJECTION_PATH,
   PROJECT_STATE_FAULT_PATH,
   MISSING_METHOD_PATH,
+  REGISTRY_RPC_PATH,
   REGISTRY_HEAD_FAULT_PATH,
   PROJECT_STATE_CACHE_PATH,
-  REGISTRY_RPC_PATH,
   AS_MEMBER_PATH,
   LACKS_PATH,
   CLAIM_HOLD_PATH,
@@ -473,6 +473,15 @@ export async function startLocalHub() {
     async stateFault(project: string, arm: { times?: number; missing?: boolean } = {}): Promise<{ remaining: number; calls: number; announced: number | null }> {
       return JSON.parse(await seam('PROJECT', project, PROJECT_STATE_FAULT_PATH, arm));
     },
+    /** Calls one of the Registry's RPC methods as another object would (M6's Machine DO; a `Project`'s push), and
+     * answers its result (the suites' Worker only). */
+    async registryRpc<T>(method: 'storeListing' | 'storeEndpoint' | 'notify' | 'ownersOf' | 'push', ...args: unknown[]): Promise<T> {
+      return JSON.parse(await seam('REGISTRY', ORG, REGISTRY_RPC_PATH, { method, args })) as T;
+    },
+    /** Calls the Registry's RPC methods all at once, as several objects would, and answers each one's result in order. */
+    async registryRpcs<T>(calls: Array<{ method: 'storeListing' | 'storeEndpoint'; args: unknown[] }>): Promise<T[]> {
+      return JSON.parse(await seam('REGISTRY', ORG, REGISTRY_RPC_PATH, { concurrent: calls })) as T[];
+    },
     /** Makes every `Registry.head()` fail from now on (`true`), or answer again (`false`) (the suites' Worker only). */
     async headFault(fail: boolean) {
       await seam('REGISTRY', ORG, REGISTRY_HEAD_FAULT_PATH, { fail });
@@ -482,15 +491,6 @@ export async function startLocalHub() {
      * the org-state head (the suites' Worker only). */
     async stateCache(project: string, change: { ahead?: number; hold?: boolean; readTimeoutMs?: number } = {}): Promise<{ reads: number }> {
       return JSON.parse(await seam('PROJECT', project, PROJECT_STATE_CACHE_PATH, change));
-    },
-    /** Calls one of the Registry's RPC methods as another object would (M6's Machine DO; a `Project`'s push), and
-     * answers its result (the suites' Worker only). */
-    async registryRpc<T>(method: 'storeListing' | 'storeEndpoint' | 'notify' | 'ownersOf' | 'push', ...args: unknown[]): Promise<T> {
-      return JSON.parse(await seam('REGISTRY', ORG, REGISTRY_RPC_PATH, { method, args })) as T;
-    },
-    /** Calls the Registry's RPC methods all at once, as several objects would, and answers each one's result in order. */
-    async registryRpcs<T>(calls: Array<{ method: 'storeListing' | 'storeEndpoint'; args: unknown[] }>): Promise<T[]> {
-      return JSON.parse(await seam('REGISTRY', ORG, REGISTRY_RPC_PATH, { concurrent: calls })) as T[];
     },
     /** Makes the Registry refuse calls of `method` as one on older code would (null: as deployed). */
     async registryLacks(method: string | null) {

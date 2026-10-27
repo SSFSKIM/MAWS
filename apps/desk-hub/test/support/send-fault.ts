@@ -114,6 +114,10 @@ export const PROJECT_STATE_FAULT_PATH = '/__test/state-fault';
 /** Where the suites' `Registry` calls a method no `Project` has, and answers `{lacks, message}`: whether the Registry
  * takes workerd's refusal for a callee on older code. */
 export const MISSING_METHOD_PATH = '/__test/missing-method';
+/** Where the suites' `Registry` takes a call of one of its RPC methods (`{method, args}`) as an object calling it would
+ * (M6's Machine DO, Project), and answers its result: `storeListing`, `storeEndpoint`, `notify`, `ownersOf`, `push`;
+ * with `{concurrent: [{method, args}…]}`, all at once, answering each one's result in order. */
+export const REGISTRY_RPC_PATH = '/__test/registry-rpc';
 /** Where the suites' `Registry` is armed (`{fail: boolean}`) to throw from every `head()` until disarmed, as an
  * unreachable Registry would answer a `Project` checking a v2 event. */
 export const REGISTRY_HEAD_FAULT_PATH = '/__test/head-fault';
@@ -122,10 +126,6 @@ export const REGISTRY_HEAD_FAULT_PATH = '/__test/head-fault';
  * would, and bounds those reads by `{readTimeoutMs}`; every request there answers `{reads}`, how many times the project
  * read the org-state head. */
 export const PROJECT_STATE_CACHE_PATH = '/__test/state-cache';
-/** Where the suites' `Registry` takes a call of one of its RPC methods (`{method, args}`) as an object calling it would
- * (M6's Machine DO, Project), and answers its result: `storeListing`, `storeEndpoint`, `notify`, `ownersOf`, `push`;
- * with `{concurrent: [{method, args}…]}`, all at once, answering each one's result in order. */
-export const REGISTRY_RPC_PATH = '/__test/registry-rpc';
 /** Where the suites' `Registry` calls one of its methods that take a member (`{call, member, args}`) with the member
  * record given, as the Worker would with one it resolved before a state removed or demoted them; answers the result. */
 export const AS_MEMBER_PATH = '/__test/as-member';
