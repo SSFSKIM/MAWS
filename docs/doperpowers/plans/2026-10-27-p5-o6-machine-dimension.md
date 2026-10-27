@@ -973,6 +973,9 @@ No new dependency. zod 4, Node's `crypto`, the peer-auth addon already in the tr
 - Observation: every `internal`-graded command is also main-only at this base, so the link surface's "no `internal` one" and "no main-only one" pick the same commands: 291 of the registry's 399 cross a link.
 - Observation: the host runtime's `emit` refuses events outside `HOST_EVENTS` only when it serves `engine-host`, so a `machine`-owner runtime over the link registry can emit every link event, as the stand-in needs.
 - Observation: a new class-1 e2e group off `HOSTED_MAC_E2E` moves three gate-script pins: `ci-gate-pool-demand.test.mjs`'s hosted-lane waiter count, `e2e-default-specs.test.mjs`'s bare spec count (twice), and `gate-plan.test.mjs`'s raw time-bound walker, which reads `git ls-files` and so sees a new spec's bound only once it is staged.
+- Observation: more of M2's string-id class surfaced in M4, found by reading every `machine-wide` command a session surface calls. `fs.tasks` (graded `machine-wide`, so a B session's checklist silently read A's list of the same id) and `session.takeOverPane` (the holder's pid is a process on the session's machine) now go to the session's machine. Left as this machine's, with their owners: `session.deletions.list` (the whole trash set is replaced on read), `pty.list` (the terminal registry's restore), `session.search` (the palette's server-side search) and `session.archiveOlder` with `projectId: null` (M5, O7). `artifacts/registry.ts` keys editor holds and staged hand-offs by artifact id alone, harmless while artifacts are local (O7).
+- Observation: the stores' per-machine partitions live in each factory's closure, out of `setState`'s reach, so a test that resets a store must also call `resetMachine`.
+- Observation: both stand-in profiles share one disk, so in M4's scene the panel's branch alone cannot tell which machine ran git; the transcript, read from B's `CLAUDE_CONFIG_DIR`, can. M6's scene gives the two checkouts different branches for that reason.
 
 ## Decision Log
 
@@ -1037,6 +1040,20 @@ No new dependency. zod 4, Node's `crypto`, the peer-auth addon already in the tr
   - `ownerChannel.changed` is a link event (its payload is `{ appSessionId, state }`); `machines.changed` is an app event.
   - `e2e:machines` joins `CLASS1_E2E` only. Its 2 s departure bound is asserted on `MachineState.since` against B's process exit and listed in `gate-plan.test.mjs`'s `LIVENESS_BOUNDS`.
   Date/Author: 2026-10-27, O6's executor (controller), from M3's executor.
+
+- Decision: M4's executor's calls, folded at M4.
+  - Path-keyed stores: `useGit` and `useGitDiagnostics` key by `checkoutKey(machine, path)`. `useFiles` and `useViewer` keep their keys, which are the session's address (or a tab id naming it) and so already name the machine; `files.*` is `addressed` and `files.changed` carries a lifted `appSessionId`. That narrows M4's list of `checkoutKey` stores to two with no change in behaviour.
+  - Local surfaces, each site commented with its owning child: plugin and marketplace widgets inside a session as well as outside (a plugin operation's progress and `plugins.changed` are app events no link carries; O4), Customize and Discover (O4), `settings.*` writes (O3), and `settings.usage`, which asks only for this machine's sessions. Hidden projects and Add project use the project's machine when one is in scope, by M4's first rule, where M4's list had named them local.
+  - Reconciliation:
+    - `useMachines.loaded` is a set apart from the roster, since a snapshot may land before the roster answers.
+    - A failed `attention.list` calls `attention.cancelSnapshot(machine)`, which replays that machine's buffer and removes nothing.
+    - Another machine is settled (`setLoaded`, `settleMachine`) only once all three record snapshots applied, so a partial read never judges its tabs.
+    - A non-local `engine.hostState` starts unknown at each generation.
+    - `useHosts` forgets another machine's hosts only on a generation change it has itself seen.
+  - Typing: the two generic wrappers over addressed commands (`widgets/read.ts`, `widgets/operation.ts`) use an `AddressedInvoke` cast, because TypeScript defers `InvokeRest<N>` over a generic `N`. Every other generic wrapper forwards `...opts: InvokeRest<N>`.
+  - M2's two M4 items: transcript chips pass the row's session to `openFile` and `loadSpill`, so a file tab takes its session's machine. `shell/transfer.ts` compares the record's machine through `panelShows`; `panelRecordOf`, the strip's drag payload, is unchanged.
+  - Tests and e2e: `resetShellStores` calls `resetMachine(TEST_MACHINE)`. `sidebarRow(page, match, machine?)` builds the row's address on that machine. M4's scene sits inside M3's two-profile test, before B quits.
+  Date/Author: 2026-10-27, O6's executor (controller), from M4's executor.
 
 - Decision: the verification.
   - This document gets one `doperpowers:adversarial-reviewer` buildability review before execution (P5 Decision Log 12).
