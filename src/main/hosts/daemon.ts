@@ -8,9 +8,9 @@
 //   runs this bundle, before the hosts start; an unpackaged run uses an installed and loaded unit and never writes one,
 //   and otherwise runs embedded for the launch, saying why (the log, Diagnostics). A unit the system refuses (MAWS turned
 //   off in Login Items) also runs embedded, with the reason, and so does a loaded unit that does not start `mawsd`: the
-//   unit is asked to start and `mawsd`'s lock must name a live process within UNIT_READY_MS (a rejected kickstart, or a
-//   job whose program is gone, never gets there). `mawsd`'s canonical label refuses an unpackaged program before it
-//   writes anything (M6), so an unpackaged run never asks;
+//   unit is asked to start and `mawsd` must welcome a hello on its machine.sock within UNIT_READY_MS (a rejected
+//   kickstart, a job whose program is gone, or a `mawsd` whose start fails after its lock never gets there). `mawsd`'s
+//   canonical label refuses an unpackaged program before it writes anything (M6), so an unpackaged run never asks;
 // - the embedded shape on the default profile of a packaged app uninstalls a LaunchAgent it finds before the hosts
 //   start (which ends `mawsd`, whose hosts keep running);
 // - an embedded launch of any profile that finds the daemon shape's processes named in its `mawsd/` directory leaves
@@ -37,6 +37,7 @@ import { appIdentity } from '@shared/host/identity';
 import type { DaemonStatus } from '@shared/ipc/schema/daemon';
 import type { SupervisorShape } from '@shared/ipc/schema/settings';
 import { installDaemon, isDefaultProfile, uninstallDaemon, unitFor, type InstallDeps } from '../../mawsd/install';
+import { HELLO_TIMEOUT_MS, reachMachine } from '../../mawsd/machine-client';
 import { DEFAULT_LABEL, readIfPresent, UnitError, type Unit, type UnitProgram, type UnitState } from '../../mawsd/units/unit';
 import { isAlive, isSameProcess, procStartOf, readLock } from '../../engine-host/supervisor-files';
 import { PTY_HOST_FILES } from '../../pty-host/files';
@@ -133,7 +134,7 @@ export interface LaunchInput {
 
 export interface LaunchDeps extends InstallDeps {
   leaveDaemon?(paths: DaemonPaths): Promise<void>; // leaveDaemonShape unless a test brings its own
-  awaitDaemon?(paths: DaemonPaths): Promise<void>; // awaitDaemonLock unless a test brings its own
+  awaitDaemon?(paths: DaemonPaths): Promise<void>; // awaitDaemonWelcome unless a test brings its own
   log(line: string): void;
 }
 
@@ -159,7 +160,7 @@ export function resolveLaunch(input: LaunchInput, deps: LaunchDeps): LaunchShape
     install: () => installDaemon({ ...target, program: input.program }, deps),
     startUnit: async () => {
       unit!.start(); // throws launchctl's answer when the system will not start the job
-      await (deps.awaitDaemon ?? ((p) => awaitDaemonLock(p, { readLock, isAlive, procStartOf, sleep: deps.sleep })))(paths);
+      await (deps.awaitDaemon ?? ((p) => awaitDaemonWelcome(p, { reach: reachMachine, now: Date.now, sleep: deps.sleep })))(paths);
     },
     uninstall: () => uninstallDaemon(target, deps),
     daemonLeft: () => existsSync(join(paths.dir, DAEMON_FILES.lock)) || existsSync(join(paths.ptyHost, PTY_HOST_FILES.lock)),
@@ -170,23 +171,32 @@ export function resolveLaunch(input: LaunchInput, deps: LaunchDeps): LaunchShape
 
 // ---- the unit's daemon, up ----------------------------------------------------------------------------------------------
 
-export const UNIT_READY_MS = 10_000; // a started job's `mawsd` takes its lock within a second; past this it is not starting
+export const UNIT_READY_MS = 10_000; // from the kickstart: a started job's `mawsd` listens within a second or two; past this it is not starting
 const READY_POLL_MS = 100;
+// The hello's `build`, which machine.sock only logs: it names the probe in `mawsd`'s log rather than a build to compare.
+const READY_PROBE_BUILD = 'main-ready-probe';
 
 export interface AwaitDaemonDeps {
-  readLock: typeof readLock;
-  isAlive(pid: number): boolean;
-  procStartOf(pid: number): string | null;
+  reach: typeof reachMachine;
+  now(): number;
   sleep(ms: number): Promise<unknown>;
 }
 
-// `mawsd`'s lock naming a live process (the one it records) within `budgetMs`; rejects past it.
-export async function awaitDaemonLock(paths: DaemonPaths, deps: AwaitDaemonDeps, budgetMs = UNIT_READY_MS): Promise<void> {
-  for (let waited = 0; ; waited += READY_POLL_MS) {
-    const lock = deps.readLock(paths.dir, undefined, DAEMON_FILES.lock);
-    if (lock && isSameProcess(lock, deps)) return;
-    if (waited >= budgetMs) throw new Error(`no mawsd took its lock within ${budgetMs / 1000} s of the unit's start`);
-    await deps.sleep(READY_POLL_MS);
+// `mawsd` up is an authenticated welcome on its own machine.sock within `budgetMs`; rejects past it, and at once when a
+// `mawsd` refuses the hello. Its lock alone is not: `mawsd` takes it before it writes its token, reads its identity and
+// listens, and a start that fails past it releases the lock and exits. machine.sock is `mawsd`'s, not relayed, so the
+// welcome is immediate; the probe closes with no request (`daemon.status` would wake the engine host).
+export async function awaitDaemonWelcome(paths: DaemonPaths, deps: AwaitDaemonDeps, budgetMs = UNIT_READY_MS): Promise<void> {
+  const until = deps.now() + budgetMs;
+  let why = 'nothing answered';
+  for (;;) {
+    const left = until - deps.now();
+    if (left <= 0) throw new Error(`no mawsd welcomed a hello on machine.sock within ${budgetMs / 1000} s of the unit's start (last: ${why})`);
+    const reached = await deps.reach(paths, { build: READY_PROBE_BUILD, helloTimeoutMs: Math.min(HELLO_TIMEOUT_MS, left) });
+    if (reached.ok) return reached.link.close();
+    if (reached.state === 'incompatible') throw new Error(reached.why);
+    why = reached.why; // down, or a path not yet private (a socket between its listen and its chmod): asked again
+    await deps.sleep(Math.min(READY_POLL_MS, Math.max(0, until - deps.now())));
   }
 }
 

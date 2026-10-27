@@ -4,18 +4,26 @@
 // nothing in the running launch and the next embedded launch uninstalling the unit before its hosts exist; how main's
 // three transports start and reach `mawsd`; the build check.
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer, type Server, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { daemonPaths } from '@shared/daemon/files';
+import { createHostRuntime } from '@shared/host/runtime';
+import { writeToken } from '@shared/host/socket-host';
+import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
+import { serveSocketClients } from '@shared/host/socket-server';
 import type { HostState } from '@shared/ipc/schema';
+import { WIRE_MINOR } from '@shared/ipc/wire';
 import { daemonStatus } from '../../../test/support/builders';
 import { FakeManagers } from '../../../test/support/fake-units';
-import { isAlive, procStartOf, readLock } from '../../engine-host/supervisor-files';
+import { procStartOf } from '../../engine-host/supervisor-files';
+import { HELLO_TIMEOUT_MS, reachMachine } from '../../mawsd/machine-client';
 import type { HostMode } from './mode';
 import {
-  awaitDaemonLock,
+  awaitDaemonWelcome,
+  type AwaitDaemonDeps,
   daemonHostSpecs,
   daemonStart,
   endSocketPtyHost,
@@ -148,23 +156,94 @@ describe('the default profile’s unit', () => {
     expect(logs).toContainEqual(expect.stringMatching(/^\[hosts\] the daemon shape does not run this launch: the LaunchAgent did not start mawsd: .*; running embedded$/));
   });
 
-  it('a loaded unit whose mawsd never takes its lock (a program gone) runs the launch embedded within the bound', async () => {
-    await installUnit();
-    let slept = 0;
-    const launch = await settle(resolveLaunch({ env: {}, shape: 'daemon', packaged: false, profileDir: defaultProfile(), program: CHECKOUT }, deps({ awaitDaemon: undefined, sleep: async (ms) => void (slept += ms) })));
-    expect(launch).toEqual({ mode: 'detached', daemon: null, unavailable: `the LaunchAgent did not start mawsd: no mawsd took its lock within ${UNIT_READY_MS / 1000} s of the unit's start` });
-    expect(slept, 'it waited the bound, and no longer').toBe(UNIT_READY_MS);
-    expect(managers.changes()).toEqual([`launchctl kickstart gui/501/${LABEL}`]);
+  it('asks machine.sock again until the bound, each hello within what is left of it, and stops at once at a refusal', async () => {
+    const paths = daemonPaths(defaultProfile());
+    let now = 0;
+    const hellos: number[] = [];
+    const clock = { now: () => now, sleep: async (ms: number) => void (now += ms) };
+    const down: AwaitDaemonDeps['reach'] = async (_paths, options) => (hellos.push(options.helloTimeoutMs!), (now += Math.min(20, options.helloTimeoutMs!)), { ok: false, state: 'down', why: 'its socket is left from a daemon that has exited' });
+    await expect(awaitDaemonWelcome(paths, { reach: down, ...clock })).rejects.toThrow(`no mawsd welcomed a hello on machine.sock within ${UNIT_READY_MS / 1000} s of the unit's start (last: its socket is left from a daemon that has exited)`);
+    expect(now, 'the bound, and no longer').toBe(UNIT_READY_MS);
+    expect(hellos[0]).toBe(HELLO_TIMEOUT_MS);
+    expect(hellos.at(-1), 'the last hello waits only what is left').toBeLessThan(HELLO_TIMEOUT_MS);
+    const refusing: AwaitDaemonDeps['reach'] = async () => ({ ok: false, state: 'incompatible', why: 'mawsd refused the hello (protocol)' });
+    now = 0;
+    await expect(awaitDaemonWelcome(paths, { reach: refusing, ...clock })).rejects.toThrow('mawsd refused the hello (protocol)');
+    expect(now, 'no second hello').toBe(0);
   });
 
-  it('awaits mawsd’s lock naming a live process, and never believes a lock whose process is gone', async () => {
-    const paths = daemonPaths(defaultProfile());
-    mkdirSync(paths.dir, { recursive: true });
-    const real = { readLock, isAlive, procStartOf, sleep: async () => {} };
-    writeLock(join(paths.dir, 'mawsd.lock'), process.pid, procStartOf(process.pid) ?? '');
-    await expect(awaitDaemonLock(paths, real, 1_000)).resolves.toBeUndefined();
-    writeLock(join(paths.dir, 'mawsd.lock'), process.pid, 'Thu Jan  1 00:00:00 1970'); // the pid reused by another process
-    await expect(awaitDaemonLock(paths, real, 1_000)).rejects.toThrow('no mawsd took its lock within 1 s');
+  // M7 re-review I1: `mawsd` up is its authenticated welcome on machine.sock, never its lock. The real client reaches the
+  // default profile's sockets here, within a short bound.
+  describe('the unit’s mawsd, up', () => {
+    const BOUND_MS = 600;
+    const cleanups: (() => unknown)[] = [];
+    afterEach(async () => {
+      for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+    });
+    const awaitDaemon = (p: Parameters<NonNullable<LaunchDeps['awaitDaemon']>>[0]) => awaitDaemonWelcome(p, { reach: reachMachine, now: Date.now, sleep: (ms) => new Promise((r) => setTimeout(r, ms)) }, BOUND_MS);
+    const launchUnit = async () => settle(resolveLaunch({ env: {}, shape: 'daemon', packaged: false, profileDir: defaultProfile(), program: CHECKOUT }, deps({ awaitDaemon })));
+    // the default profile's daemon files as a `mawsd` past its lock and its token leaves them, private
+    const daemonFiles = () => {
+      const paths = daemonPaths(defaultProfile());
+      mkdirSync(paths.dir, { recursive: true, mode: 0o700 });
+      mkdirSync(paths.socketDir, { recursive: true, mode: 0o700 });
+      cleanups.push(() => rmSync(paths.socketDir, { recursive: true, force: true })); // under the OS temp directory when the profile's path is long
+      return { paths, token: writeToken(join(paths.dir, 'mawsd.token')) };
+    };
+    const listenAt = async (server: Server, path: string) => {
+      await new Promise<void>((resolve, reject) => server.once('error', reject).listen(path, () => resolve()));
+      chmodSync(path, 0o600);
+      cleanups.push(() => new Promise((resolve) => server.close(resolve)));
+    };
+
+    it('a live lock holder whose machine.sock never welcomes runs the launch embedded, saying so', async () => {
+      await installUnit();
+      const { paths } = daemonFiles();
+      writeLock(join(paths.dir, 'mawsd.lock'), process.pid, procStartOf(process.pid) ?? ''); // a live process, as a starting mawsd's
+      const accepted: Socket[] = [];
+      await listenAt(createServer((socket) => void accepted.push(socket)), paths.sockets.machine); // accepts, never answers
+      cleanups.push(() => accepted.forEach((socket) => socket.destroy()));
+      const launch = await launchUnit();
+      expect(launch).toEqual({ mode: 'detached', daemon: null, unavailable: expect.stringMatching(new RegExp(`^the LaunchAgent did not start mawsd: no mawsd welcomed a hello on machine.sock within ${BOUND_MS / 1000} s of the unit's start \\(last: no answer to the hello within`)) });
+      expect(accepted.length, 'it was asked').toBeGreaterThan(0);
+    });
+
+    it('a mawsd whose start fails after its lock (the lock released, the process gone) runs the launch embedded', async () => {
+      await installUnit();
+      const { paths } = daemonFiles();
+      const lock = join(paths.dir, 'mawsd.lock');
+      const failing = spawn(process.execPath, ['-e', `setTimeout(() => { require('node:fs').rmSync(${JSON.stringify(lock)}, { force: true }); process.exit(1); }, 150); process.stdout.write('ready');`], { stdio: ['ignore', 'pipe', 'ignore'] });
+      cleanups.push(() => failing.kill('SIGKILL'));
+      await new Promise((resolve) => failing.stdout!.once('data', resolve));
+      writeLock(lock, failing.pid!, procStartOf(failing.pid!) ?? '');
+      const gone = new Promise((resolve) => failing.once('exit', resolve));
+      const launch = await launchUnit();
+      expect(launch).toEqual({ mode: 'detached', daemon: null, unavailable: expect.stringMatching(/^the LaunchAgent did not start mawsd: no mawsd welcomed a hello on machine\.sock within/) });
+      await gone;
+      expect(existsSync(lock)).toBe(false);
+    });
+
+    it('a welcome on machine.sock runs the launch on the unit, the probe closed with no request', async () => {
+      await installUnit();
+      const { paths, token } = daemonFiles();
+      const asked: string[] = [];
+      const connections: boolean[] = [];
+      const server = createServer();
+      serveSocketClients(server, {
+        many: { runtimeFor: () => createHostRuntime((on) => on('daemon.status', async () => void asked.push('daemon.status') as never)) },
+        badToken: 'close',
+        identity: () => ({ protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, buildId: 'mawsd-build', capabilities: [], wire: 'wire', pid: process.pid, startedAt: new Date().toISOString() }),
+        counts: () => ({ liveSessions: 0, rows: 0 }),
+        token: () => token,
+        onExit: () => {},
+        onClient: (connected) => void connections.push(connected),
+        log: () => {},
+      });
+      await listenAt(server, paths.sockets.machine);
+      expect(await launchUnit()).toEqual({ mode: 'daemon', daemon: 'unit', unavailable: null });
+      await vi.waitFor(() => expect(connections, 'welcomed, then closed').toEqual([true, false]), { timeout: 2_000, interval: 10 });
+      expect(asked, 'daemon.status would wake the engine host').toEqual([]);
+    });
   });
 
   it('is never written by an unpackaged run, whatever the shape', async () => {
