@@ -29,9 +29,10 @@
 // It adds `selection` and `related` (the paths for vitest related as JSON, or empty for the full suite) to the outputs
 // and one line saying which to the summary; a run without the trailer writes neither. Such a run is never landing
 // evidence.
-// The Mac runners (ci-kit's mac-lane concurrency spec, M2): on the macOS lane a MEASURED_E2E group and every group of a
-// live run (LIVE_E2E and LIVE_GUARD_E2E) ask for [self-hosted, macOS, ARM64, ci-kit-mac-home], the mini's exclusive instance
-// alone: measured bounds were calibrated there, and only it holds the engine login. These stay home whatever the shared
+// The Mac runners (ci-kit's mac-lane concurrency spec, M2): on the macOS lane a MEASURED_E2E group, a MAC_HOME_E2E group and
+// every group of a live run (LIVE_E2E and LIVE_GUARD_E2E) ask for [self-hosted, macOS, ARM64, ci-kit-mac-home], the mini's
+// exclusive instance alone: measured bounds were calibrated there, and only it holds the engine login and ClaudeUsage's
+// relay (the EC2 Mac carries today's labels too, but neither). These stay home whatever the shared
 // and VM lists or Lane: say. Other Mac jobs keep today's labels, carried by the exclusive instances, unless on MAC_SHARED_E2E,
 // the e2e groups (and `unit:darwin`) a trial showed giving beside a neighbour the results they give alone; those ask for
 // [ci-kit-mac-shared] alone, the label only the instances that run two jobs at a time carry. A foreground group (its script
@@ -62,7 +63,7 @@
 // (.github/scripts/hosted-mac.sh), which pushes the filtered tree to SSFSKIM/maws-app, waits for that group's run on a
 // hosted Mac there and ends with its verdict. Eligible is none of `default` (its selection is derived from the whole run,
 // which does not cross), MEASURED_E2E, LIVE_E2E or LIVE_GUARD_E2E, MAC_SECRET_E2E (a credential stays on the mini),
-// POOL_E2E; a live run hosts none, nor does a Linux lane, nor a run on a reserved final ref (FINAL_LABELS). A list naming
+// MAC_HOME_E2E, POOL_E2E; a live run hosts none, nor does a Linux lane, nor a run on a reserved final ref (FINAL_LABELS). A list naming
 // an ineligible group is refused. `Lane: hosted`
 // hosts every eligible group of the run and names the rest in the summary; `Lane: no-hosted` hosts none; under
 // `Lane: vm` or `vm-trial` a group on both lists goes to the guest. A hosted entry carries `hosted: true`, the waiter's
@@ -189,6 +190,8 @@ export function planOf(env, scripts) {
   const poppler = new Set(words(env.POPPLER_E2E));
   // The timing-measured groups: on a Mac their job waits first for the desktop to settle, with a longer timeout.
   const measured = new Set(words(env.MEASURED_E2E));
+  // The groups that need what only the mini's exclusive instance has (ClaudeUsage's relay): the home Mac on a macOS lane.
+  const home = new Set(words(env.MAC_HOME_E2E));
   // desk-web, the one POOL_E2E group, is one Playwright worker; a cpus-4 box is a c3d-highcpu-4 with 8 GB, where cpus-2's
   // e2-highcpu-2 has 2 GB for the build, two browsers and the hub double, at about the same price (Decision Log 68).
   const offMac = new Set(words(env.POOL_E2E));
@@ -208,13 +211,14 @@ export function planOf(env, scripts) {
   const unbuilt = listedVm.filter((name) => name !== 'unit:darwin' && !measured.has(name) && variantOf(name) === undefined);
   const macVm = new Set(listedVm.filter((name) => !measured.has(name) && !unbuilt.includes(name)));
   const onMac = (name) => (macVm.has(name) && vmLane ? LANES[vmLane] : macShared.has(name) ? RUNNERS.macShared : macVm.has(name) ? RUNNERS.macSolo : RUNNERS.macos);
-  const placed = (group) => (lane === 'macos' && (measured.has(group) || live) ? RUNNERS.macHome : !offMac.has(group) ? (lane === 'macos' ? onMac(group) : RUNNERS[lane]) : class1a === 'pool' ? poolBox(4) : RUNNERS.linux);
+  const placed = (group) => (lane === 'macos' && (measured.has(group) || home.has(group) || live) ? RUNNERS.macHome : !offMac.has(group) ? (lane === 'macos' ? onMac(group) : RUNNERS[lane]) : class1a === 'pool' ? poolBox(4) : RUNNERS.linux);
   // The hosted Macs. Why a group never goes there, if it never does: its selection is the whole run's (`default`), its
-  // bounds the mini's (measured), it spends (live), it needs a credential (secret), or it never takes a Mac (pool).
+  // bounds the mini's (measured), it spends (live), it needs a credential (secret), it needs the mini (home), or it never
+  // takes a Mac (pool).
   const secret = new Set(words(env.MAC_SECRET_E2E));
   const liveOnes = new Set([...words(env.LIVE_E2E), ...words(env.LIVE_GUARD_E2E)]);
   const notHosted = (group) =>
-    [group === 'default' && 'default', measured.has(group) && 'measured', liveOnes.has(group) && 'live', secret.has(group) && 'secret', offMac.has(group) && 'pool'].filter(Boolean);
+    [group === 'default' && 'default', measured.has(group) && 'measured', liveOnes.has(group) && 'live', secret.has(group) && 'secret', home.has(group) && 'home', offMac.has(group) && 'pool'].filter(Boolean);
   const named = (groups, prefix = '') => groups.map((group) => `${prefix}${group} (${notHosted(group).join(', ')})`).join(', ');
   const listedHosted = words(env.HOSTED_MAC_E2E);
   const contradictions = listedHosted.filter((group) => notHosted(group).length > 0);
