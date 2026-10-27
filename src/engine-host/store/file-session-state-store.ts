@@ -38,6 +38,7 @@ type StateFile = z.infer<typeof StateFileSchema>;
 const empty = (): StateFile => ({ version: 1, queue: { entries: [], paused: false }, grants: { allow: [] }, launchSpec: null });
 
 export class FileSessionStateStore implements SessionStateStore {
+  private readonly staleCronRecords = new Set<AppSessionId>(); // P5 O2 M2: ids whose last cron record save failed
   private readonly stateDir: string;
   private readonly journalDir: string;
   private readonly chains = new Map<AppSessionId, Promise<unknown>>();
@@ -116,16 +117,25 @@ export class FileSessionStateStore implements SessionStateStore {
   }
 
   // P5 O2 M2 (P5 Decision Log 49): the cron record, read on its own so a record of a shape this build cannot read is
-  // only a missing record (the resume stays unknown), never an unreadable state file
+  // only a missing record (the resume stays unknown), never an unreadable state file. A save that failed leaves the file
+  // holding an older record, which may be cleaner than the truth, so until a later save of the id succeeds the record
+  // reads as missing too (fail closed).
   loadCronRecord(id: AppSessionId): Promise<CronRecord | null> {
     return this.run(id, async () => {
+      if (this.staleCronRecords.has(id)) return null;
       const parsed = CronRecordSchema.safeParse((await this.read(id)).cronRecord);
       return parsed.success ? parsed.data : null;
     });
   }
 
-  saveCronRecord(id: AppSessionId, record: CronRecord): Promise<void> {
-    return this.update(id, (file) => ({ ...file, cronRecord: CronRecordSchema.parse(record) }));
+  async saveCronRecord(id: AppSessionId, record: CronRecord): Promise<void> {
+    try {
+      await this.update(id, (file) => ({ ...file, cronRecord: CronRecordSchema.parse(record) }));
+    } catch (error) {
+      this.staleCronRecords.add(id);
+      throw error;
+    }
+    this.staleCronRecords.delete(id);
   }
 
   // Archive: the session's journal directory only. The state file with the queue and the grant snapshot survives, so an

@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LaunchSpecSchema } from '@shared/engine/launch-spec';
 import type { QueueEntry, QueueState } from '@shared/engine/session-state-store';
@@ -243,6 +243,17 @@ describe('FileSessionStateStore: the cron record (P5 O2 M2, P5 Decision Log 49)'
     expect(await store.loadCronRecord(ID)).toBeNull();
     await store.saveCronRecord(ID, record);
     expect(await new FileSessionStateStore(userData).loadCronRecord(ID)).toEqual(record);
+  });
+
+  it('after a failed save the older record on disk reads as null, until a save succeeds', async () => {
+    const store = new FileSessionStateStore(userData);
+    await store.saveCronRecord(ID, { sessionCrons: [], toolSinceStop: false });
+    const full = Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' });
+    vi.spyOn(store as unknown as { update: () => Promise<void> }, 'update').mockRejectedValueOnce(full);
+    await expect(store.saveCronRecord(ID, record)).rejects.toThrow('ENOSPC');
+    expect(await store.loadCronRecord(ID)).toBeNull(); // the clean record still on disk is not admitted
+    await store.saveCronRecord(ID, record);
+    expect(await store.loadCronRecord(ID)).toEqual(record);
   });
 
   it('a record of a shape this build cannot read is null, and the rest of the file still loads', async () => {

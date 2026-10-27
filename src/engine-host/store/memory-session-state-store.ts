@@ -47,12 +47,21 @@ export class MemorySessionStateStore implements SessionStateStore {
   async saveEngineSessionIds(id: AppSessionId, ids: string[]): Promise<void> {
     this.engineSessionIds.set(id, [...ids]);
   }
+  // P5 O2 M2: as the file store, a record whose last save failed reads as missing until a save succeeds;
+  // `cronRecordWriteError`, while set, fails every save with it (a full disk, in tests)
+  cronRecordWriteError: Error | null = null;
+  private readonly staleCronRecords = new Set<AppSessionId>();
   async loadCronRecord(id: AppSessionId): Promise<CronRecord | null> {
     const record = this.cronRecords.get(id);
-    return record === undefined ? null : structuredClone(record);
+    return record === undefined || this.staleCronRecords.has(id) ? null : structuredClone(record);
   }
   async saveCronRecord(id: AppSessionId, record: CronRecord): Promise<void> {
+    if (this.cronRecordWriteError) {
+      this.staleCronRecords.add(id);
+      throw this.cronRecordWriteError;
+    }
     this.cronRecords.set(id, structuredClone(record));
+    this.staleCronRecords.delete(id);
   }
   // keeps no journal: nothing to delete, but the id is still checked as the file store checks it
   async forgetJournal(id: AppSessionId): Promise<void> {

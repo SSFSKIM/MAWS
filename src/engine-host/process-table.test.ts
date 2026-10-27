@@ -1063,6 +1063,25 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     expect(await store.loadCronRecord('a' as AppSessionId)).toEqual({ sessionCrons: [cron], toolSinceStop: false });
   });
 
+  it('a failed cron record write fails closed: the record reads as unknown until a write succeeds, and the same Stop is written again once storage recovers', async () => {
+    const store = new MemorySessionStateStore();
+    const { s } = await releaseTable(['a'], () => ({ session: { store } }));
+    await humanTurn(s.a!, [stop([])]);
+    expect(await store.loadCronRecord('a' as AppSessionId)).toEqual({ sessionCrons: [], toolSinceStop: false }); // clean on disk
+    store.cronRecordWriteError = Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' });
+    await humanTurn(s.a!, [assistantTool('CronCreate'), stop([cron])]);
+    expect(s.a!.logs.filter((line) => line.includes('cron record not saved'))).toHaveLength(2); // the tool's and the Stop's
+    expect(store.cronRecords.get('a' as AppSessionId)).toEqual({ sessionCrons: [], toolSinceStop: false }); // the older, cleaner record
+    expect(await store.loadCronRecord('a' as AppSessionId)).toBeNull(); // which is never admitted
+    // a resume while the record is unconfirmed is unknown, not known-empty
+    const resumed = await releaseTable(['a'], () => ({ spec: { resume: { sessionId: RESUMED as never, fork: false }, sessionId: null }, session: { store } }));
+    expect(resumed.s.a!.session.status().work).toEqual({ crons: [], unknown: 'resumed' });
+    // storage recovers: the next Stop, identical to the failed one, is written
+    store.cronRecordWriteError = null;
+    await humanTurn(s.a!, [stop([cron], 'stop-3')]);
+    expect(await store.loadCronRecord('a' as AppSessionId)).toEqual({ sessionCrons: [cron], toolSinceStop: false });
+  });
+
   const resumeWithRecord = (record: CronRecord | null) => () => {
     const store = new MemorySessionStateStore();
     if (record !== null) void store.saveCronRecord('a' as AppSessionId, record);

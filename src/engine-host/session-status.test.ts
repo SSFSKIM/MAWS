@@ -79,3 +79,27 @@ describe('SessionStatusTracker.pluginsObservedAt', () => {
   });
 });
 // P2-A end
+
+// P5 O2 M2 (P5 Decision Log 49): the cron record goes out at each Stop and cron tool when it differs from the one last
+// written; a write that failed is not counted as written, so the same record is sent again
+describe('SessionStatusTracker: the cron record', () => {
+  it('skips a record already written, and retries one whose write failed, though the next Stop is identical', async () => {
+    const sent: unknown[] = [];
+    let fail = true;
+    const tracker = new SessionStatusTracker(spec, () => {}, {
+      onCronRecord: async (record) => {
+        sent.push(record);
+        if (fail) throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' });
+      },
+    });
+    const stop = { hook_event_name: 'Stop', session_crons: [{ id: 'c1', schedule: '0 3 * * *', recurring: true, prompt: 'nightly' }] };
+    const clean = { sessionCrons: stop.session_crons, toolSinceStop: false };
+    tracker.stopped(stop);
+    await Promise.resolve();
+    fail = false;
+    tracker.stopped(stop); // identical, but the last write failed: sent again
+    await Promise.resolve();
+    tracker.stopped(stop); // identical and written: skipped
+    expect(sent).toEqual([clean, clean]);
+  });
+});

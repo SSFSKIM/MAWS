@@ -238,7 +238,11 @@ export class EngineSession {
     });
     this.tracker = new SessionStatusTracker(opts.spec, () => this.touch(), { // P5 O2 M2: the work state's start and sources
       launchKind: opts.launchKind, durableCrons: () => this.durableCrons.read(), log: this.log,
-      onCronRecord: (record) => this.storeWrite(this.store.saveCronRecord(this.spec.appSessionId, record), 'cron record'), // P5 Decision Log 49
+      onCronRecord: (record) => { // P5 Decision Log 49: tracked and logged here, its outcome the tracker's to retry on
+        const write = this.store.saveCronRecord(this.spec.appSessionId, record);
+        this.storeWrite(write, 'cron record');
+        return write;
+      },
     });
     // P5 O2 M2: the Stop callback, every launch's (host-hooks.ts): its `session_crons` into the work state, answered at once
     registerStopHook(this.hooks, (input) => {

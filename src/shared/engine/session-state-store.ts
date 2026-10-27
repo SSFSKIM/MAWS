@@ -131,7 +131,8 @@ export interface SessionStateStore {
   // against (src/engine-host/durable-crons.ts); empty when never saved
   loadEngineSessionIds(appSessionId: AppSessionId): Promise<string[]>;
   saveEngineSessionIds(appSessionId: AppSessionId, ids: string[]): Promise<void>;
-  // P5 O2 M2 (P5 Decision Log 49): the cron record; null when never written or of a shape this build cannot read
+  // P5 O2 M2 (P5 Decision Log 49): the cron record; null when never written, of a shape this build cannot read, or
+  // when this store's last save of it failed (the record on disk may then be cleaner than the truth)
   loadCronRecord(appSessionId: AppSessionId): Promise<CronRecord | null>;
   saveCronRecord(appSessionId: AppSessionId, record: CronRecord): Promise<void>;
 }

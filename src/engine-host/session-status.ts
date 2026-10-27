@@ -81,22 +81,22 @@ export class SessionStatusTracker {
   private readonly work: WorkState;
   private readonly launchKind: LaunchKind;
   private readonly durableCrons: () => CronRead;
-  private readonly onCronRecord: (record: CronRecord) => void;
-  private recorded: string | null = null; // the cron record last handed to onCronRecord, as JSON
+  private readonly onCronRecord: (record: CronRecord) => Promise<void>;
+  private recorded: string | null = null; // the cron record last written (or being written), as JSON; null after a failure
   private readonly log: (line: string) => void;
 
   constructor(
     private readonly spec: LaunchSpec,
     private readonly onChange: () => void, // a held peer message expired
     // P5 O2 M2: `onCronRecord` persists the cron record (P5 Decision Log 49), handed over at each Stop and cron tool
-    opts: { launchKind?: LaunchKind; durableCrons?: () => CronRead; onCronRecord?: (record: CronRecord) => void; log?: (line: string) => void } = {},
+    opts: { launchKind?: LaunchKind; durableCrons?: () => CronRead; onCronRecord?: (record: CronRecord) => Promise<void>; log?: (line: string) => void } = {},
   ) {
     this.requestedMode = spec.permissionMode ?? 'default';
     this.effectiveMode = this.requestedMode;
     this.launchKind = opts.launchKind ?? (spec.resume === null ? 'fresh' : 'resumed');
     this.work = new WorkState(this.launchKind);
     this.durableCrons = opts.durableCrons ?? (() => []);
-    this.onCronRecord = opts.onCronRecord ?? (() => {});
+    this.onCronRecord = opts.onCronRecord ?? (async () => {});
     this.log = opts.log ?? (() => {});
   }
 
@@ -172,13 +172,16 @@ export class SessionStatusTracker {
     this.record();
   }
 
-  // The cron record, handed over when it changed
+  // The cron record, handed over when it differs from the one last written
   private record(): void {
     const record = this.work.cronRecord();
     const json = JSON.stringify(record);
     if (json === this.recorded) return;
     this.recorded = json;
-    this.onCronRecord(record);
+    // a failed write is retried at the next Stop or cron tool, the same record included (the writer logs the failure)
+    this.onCronRecord(record).catch(() => {
+      if (this.recorded === json) this.recorded = null;
+    });
   }
 
   // A cron tool's tool_use block in an assistant frame, the main lane's or a subagent's

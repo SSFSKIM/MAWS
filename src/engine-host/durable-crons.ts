@@ -28,7 +28,8 @@ export const readTextFile: ReadTextFile = (path) => {
   }
 };
 
-export function durableCronsOf(read: ReadTextFile, dirs: readonly string[], lineage: ReadonlySet<string>, drop: (line: string) => void): CronRead {
+// `owns(id)`: whether a job's `createdBySessionId` is one of the session's.
+export function durableCronsOf(read: ReadTextFile, dirs: readonly string[], owns: (createdBySessionId: string) => boolean, drop: (line: string) => void): CronRead {
   const crons = new Map<string, SessionCron>();
   for (const dir of new Set(dirs)) {
     let tasks: unknown;
@@ -50,7 +51,7 @@ export function durableCronsOf(read: ReadTextFile, dirs: readonly string[], line
         drop(`a scheduled task of the wrong shape was dropped: ${JSON.stringify(task)?.slice(0, 200)}`);
         continue;
       }
-      if (typeof t.createdBySessionId === 'string' && lineage.has(t.createdBySessionId) && !crons.has(t.id)) crons.set(t.id, { id: t.id, schedule: t.cron, recurring: t.recurring === true, prompt: t.prompt });
+      if (typeof t.createdBySessionId === 'string' && owns(t.createdBySessionId) && !crons.has(t.id)) crons.set(t.id, { id: t.id, schedule: t.cron, recurring: t.recurring === true, prompt: t.prompt });
     }
   }
   return [...crons.values()];
@@ -66,10 +67,13 @@ export interface DurableCronSourceOptions {
 }
 
 // One launch's reader: its lineage (loaded with the session's state, then grown by `note`) and the file read on it. A
-// lineage that did not load is never saved, so a passing read failure cannot overwrite the ids the file holds.
+// lineage that did not load is never saved, so a passing read failure cannot overwrite the ids the file holds, and it
+// fails closed: while it is unavailable, a job some other id created may be the session's (an id before a `/clear`), so
+// a file holding one reads as unreadable; a file with no such job still reads as it is.
 export class DurableCronSource {
   private readonly lineage: Set<string>;
   private loaded = false;
+  private unavailable = false; // the stored lineage could not be loaded
   private readonly readFile: ReadTextFile;
 
   constructor(private readonly opts: DurableCronSourceOptions) {
@@ -83,6 +87,7 @@ export class DurableCronSource {
       stored = await this.opts.loadLineage();
     } catch (error) {
       this.opts.log(`engine session ids not loaded: ${error instanceof Error ? error.message : String(error)}`);
+      this.unavailable = true;
       return;
     }
     const unsaved = [...this.lineage].some((id) => !stored.includes(id));
@@ -99,6 +104,11 @@ export class DurableCronSource {
   }
 
   read(): CronRead {
-    return durableCronsOf(this.readFile, this.opts.dirs(), this.lineage, this.opts.log);
+    if (!this.unavailable) return durableCronsOf(this.readFile, this.opts.dirs(), (id) => this.lineage.has(id), this.opts.log);
+    let unattributed = false;
+    const crons = durableCronsOf(this.readFile, this.opts.dirs(), (id) => this.lineage.has(id) || ((unattributed = true), false), this.opts.log);
+    if (!unattributed) return crons;
+    this.opts.log('a scheduled task another engine session id created may be this session\'s: its lineage did not load');
+    return 'unreadable';
   }
 }
