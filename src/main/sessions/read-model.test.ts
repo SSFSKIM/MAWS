@@ -96,6 +96,17 @@ describe('read model snapshot matches events', () => {
     expect(src.visible).toEqual([[A, true], [A, false]]);
   });
 
+  it('P5 O2 M2: reports each visibility change, and lists the sessions on screen', () => {
+    const seen: [string, boolean][] = [];
+    model.on('visible', (id, visible) => void seen.push([id, visible]));
+    model.setVisible(A, true);
+    model.setVisible(A, true);
+    expect(model.visibleSessions()).toEqual([A]);
+    model.setVisible(A, false);
+    expect(seen).toEqual([[A, true], [A, false]]);
+    expect(model.visibleSessions()).toEqual([]);
+  });
+
   it('keeps records, projects and attention for main-side consumers', () => {
     const onRecord = vi.fn();
     const onAttention = vi.fn();

@@ -40,6 +40,7 @@ interface ReadModelEvents {
   digest: (digest: SessionDigest) => void;
   engine: (appSessionId: AppSessionId, status: EngineSessionStatus | null) => void;
   attention: (appSessionId: AppSessionId, items: AttentionItem[]) => void;
+  visible: (appSessionId: AppSessionId, visible: boolean) => void; // P5 O2 M2: main's interest report follows it
 }
 
 const APP_EVENTS_KEPT = 20; // debt wave 5: per session
@@ -78,7 +79,7 @@ export class SessionReadModel {
   private readonly clearedRelease = new Map<AppSessionId, string | null>();
   private readonly acquisitions = new Map<AppSessionId, AcquisitionMemory>(); // P2-A: the session service's, this app run
   private readonly listeners: { [K in keyof ReadModelEvents]: Set<ReadModelEvents[K]> } = {
-    record: new Set(), digest: new Set(), engine: new Set(), attention: new Set(),
+    record: new Set(), digest: new Set(), engine: new Set(), attention: new Set(), visible: new Set(),
   };
 
   constructor(
@@ -165,6 +166,10 @@ export class SessionReadModel {
     return this.visible.has(appSessionId);
   }
 
+  visibleSessions(): AppSessionId[] {
+    return [...this.visible];
+  }
+
   setVisible(appSessionId: AppSessionId, visible: boolean): void {
     if (this.visible.has(appSessionId) === visible) return;
     if (visible) {
@@ -176,6 +181,7 @@ export class SessionReadModel {
       this.visible.delete(appSessionId);
     }
     for (const source of this.sources) source.onSetVisible?.(appSessionId, visible);
+    this.fire('visible', appSessionId, visible);
   }
 
   on<K extends keyof ReadModelEvents>(event: K, listener: ReadModelEvents[K]): () => void {

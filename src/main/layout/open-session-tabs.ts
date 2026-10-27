@@ -15,13 +15,14 @@ export function openSessionTabs(layout: Pick<LayoutStore, 'get'>, onScreen: (app
     const value = layout.get('main.tabs');
     if (value !== read) {
       read = value;
-      open = sessionsIn(value);
+      open = sessionsInTabs(value);
     }
     return open.has(appSessionId) || onScreen(appSessionId);
   };
 }
 
-function sessionsIn(value: unknown): Set<AppSessionId> {
+// The set itself, from a `main.tabs` value (P5 O2 M2: main's interest report, src/main/sessions/interest.ts).
+export function sessionsInTabs(value: unknown): Set<AppSessionId> {
   const parsed = StoredMainSchema.safeParse(value);
   if (!parsed.success) return new Set();
   const main = parsed.data;

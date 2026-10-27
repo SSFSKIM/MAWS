@@ -65,8 +65,15 @@ export function reasonWords(reason: HardReason, status: EngineSessionStatus | nu
     case 'busy':
       return 'working';
     case 'background_tasks': {
+      // P5 O2 M2: the reason also carries the session's scheduled jobs and the work the engine host cannot read yet
       const tasks = status?.backgroundTasks.filter((t) => !t.ambient).length ?? 0;
-      return tasks > 0 ? plural(tasks, 'background task') : 'background tasks';
+      const jobs = status?.work?.crons.length ?? 0;
+      const parts = [
+        ...(tasks > 0 ? [plural(tasks, 'background task')] : []),
+        ...(jobs > 0 ? [plural(jobs, 'scheduled job')] : []),
+        ...(status?.work?.unknown ? ["background work MAWS can't read yet"] : []),
+      ];
+      return parts.length > 0 ? parts.join(', ') : 'background tasks';
     }
     case 'pending_request':
       return 'waiting for you';

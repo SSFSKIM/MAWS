@@ -86,6 +86,7 @@ import { captureRegion } from './layout/capture-region'; // P3-G
 import { createClaudeUsageApp, execRunner } from './gateway/claude-usage-app';
 import { startEngineConfigure } from './settings/engine-configure';
 import { startHostConfigure } from './settings/host-configure'; // E10
+import { interestSet, startInterest } from './sessions/interest'; // P5 O2 M2
 import { revealPath } from './settings/reveal';
 import { sessionSettingsOf } from './settings/session-settings';
 import { knownSessionDirectories } from './settings/session-directories';
@@ -519,6 +520,18 @@ void startWithProfileLock(app, () => {
     env: process.env,
   });
   shutdown.add('host configure', stopHostConfigure);
+  // P5 O2 M2: the sessions this app holds open, which the engine host's idle release never stops
+  const stopInterest = startInterest({
+    sessions: () => interestSet(layout.get('main.tabs'), sessions.model.visibleSessions()),
+    onChange: (listener) => {
+      const offs = [layout.onChange((key) => { if (key === 'main.tabs') listener(); }), sessions.model.on('visible', () => listener())];
+      return () => offs.forEach((off) => off());
+    },
+    streaming: () => hosts.streaming('engine-host'),
+    onStreaming: (listener) => hosts.onStreaming('engine-host', listener),
+    dispatch: (input) => hosts.dispatch('engine-host', 'host.interest', input) as Promise<CommandResult<'host.interest'>>,
+  });
+  shutdown.add('interest', stopInterest);
   // C12 start: the Settings tab's read of the configuration main holds for it
   registerMainHandler('settings.engineApplied', () => engineConfigure.applied());
   // C12 end
