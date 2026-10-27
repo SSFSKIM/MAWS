@@ -131,9 +131,14 @@ test('a layout from before O6 comes back after the upgrade, addressed, and a thi
       await expect.poll(() => keys(page), { message: 'the bare panel key is renamed to the address’s' }).toContain(`panel.${address}`);
       expect(await keys(page)).not.toContain(`panel.${id}`);
       expect(await get(page, `panel.${address}`), 'the panel tab is back').toEqual(PANEL);
+      // P5 O6 M5: the set keyed by the project's address moves to its row's key once the machine has derived the project's
+      // org key; the seeded folder was only discovered (nobody opened it), so its sessions' row is the machine's own
+      await expect
+        .poll(async () => ((await get(page, 'main.tabs')) as { current: string }).current, { message: 'the set follows its row' })
+        .toBe(`machine:${ref}`);
       const main = (await get(page, 'main.tabs')) as { version: number; current: string; sets: Record<string, { panes: { tabs: { id: string; appSessionId?: string; machine?: string }[] }[] }> };
       expect(main.version).toBe(3);
-      expect(main.current).toBe(await addressed(page, project));
+      expect(Object.keys(main.sets), 'no set is left at the project’s address').not.toContain(await addressed(page, project));
       expect(main.sets[main.current]!.panes[0]!.tabs.map((tab) => ({ id: tab.id, appSessionId: tab.appSessionId, machine: tab.machine }))).toEqual([
         { id: `session:${address}`, appSessionId: address, machine: undefined },
         { id: `file:${ref}:${notes}`, appSessionId: address, machine: ref },

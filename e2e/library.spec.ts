@@ -239,12 +239,13 @@ function schemaOf(db: DatabaseSync): { version: unknown; objects: unknown[] } {
   };
 }
 
-// An index at version 9 as an install before P3-L left it: drop the library tables
+// An index at version 9 as an install before P3-L left it: drop P5 O6 M5's org columns (13), the library tables
 // (10/11) and UX1-B's conversation search (12), checked against migrations 1 to 9.
 function rewindIndexTo9(path: string): void {
   const db = new DatabaseSync(path);
   try {
-    expect(schemaOf(db).version, 'the first launch left the index at 12').toBe(12);
+    expect(schemaOf(db).version, 'the first launch left the index at 13').toBe(13);
+    db.exec('ALTER TABLE projects DROP COLUMN org_smns_id; ALTER TABLE projects DROP COLUMN org_source; ALTER TABLE projects DROP COLUMN org_name; ALTER TABLE projects DROP COLUMN org_key;');
     db.exec('DROP TRIGGER session_text_delete; DROP TABLE session_text_chunks; DROP TABLE session_text_state; DROP TABLE session_text;');
     db.exec('DROP TABLE library_text; DROP TABLE library_links; DROP TABLE library_artifacts; DROP TABLE library_spaces; PRAGMA user_version = 9;');
     const template = new DatabaseSync(':memory:');
@@ -334,7 +335,7 @@ test('an index at version 9 beside a populated host store migrates to the curren
   launch = null;
   const db = new DatabaseSync(join(userData, 'index.sqlite'), { readOnly: true });
   try {
-    expect(schemaOf(db).version, 'the index is at 12 again').toBe(12);
+    expect(schemaOf(db).version, 'the index is at 13 again').toBe(13);
     expect((db.prepare("SELECT count(*) AS n FROM library_artifacts WHERE kind <> 'design_system'").get() as { n: number }).n).toBe(3); // the case's own three (P3-D seeds design systems)
   } finally {
     db.close();
