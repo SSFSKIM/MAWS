@@ -58,23 +58,22 @@ function ownerAdded(proof: Action): MemberId | null {
 }
 
 /**
- * Who signed `proof`: the member whose device it names, with the step-up keys that may have signed at its `created`
- * (current, or retired no earlier), `revoked` when the device's step-up key is revoked, or null for no such device.
+ * Who signed `proof`: the member that held the step-up key whose signature verifies, among the keys the device id it
+ * names has held that may sign at its `created` (its current one, and each retired no earlier). Each key keeps the
+ * member that held it, so a device id given to another member later never inherits an earlier holder's signatures.
+ * `unknown-signer` when the id names no such key, `revoked` when the id's step-up key is revoked and nothing verifies,
+ * `bad-signature` when a key is found and none verifies.
  */
-function proofSigner(state: OrgState, proof: Action): { member: MemberId; keys: string[] } | { revoked: true } | null {
+async function proofSigner(state: OrgState, proof: Action): Promise<{ member: MemberId } | { refused: 'unknown-signer' | 'revoked' | 'bad-signature' }> {
   const holds = (h: unknown): h is { member: MemberId; device: string; key: string } => isObject(h) && h.device === proof.device && h.key === 'step-up';
+  const candidates: Array<{ member: MemberId; pub: string }> = [];
   for (const m of state.members) {
-    const d = m.devices.find((device) => device.id === proof.device);
-    if (d?.stepUpPub !== undefined) {
-      const retired = state.retired.filter((r) => holds(r.holder) && r.notAfter >= proof.created).map((r) => r.pub);
-      return { member: m.id, keys: [d.stepUpPub, ...retired] };
-    }
+    for (const d of m.devices) if (d.id === proof.device && d.stepUpPub !== undefined) candidates.push({ member: m.id, pub: d.stepUpPub });
   }
-  const retired = state.retired.filter((r) => holds(r.holder));
-  const timely = retired.filter((r) => r.notAfter >= proof.created);
-  if (timely.length > 0) return { member: (timely[0].holder as { member: MemberId }).member, keys: timely.map((r) => r.pub) };
-  if (state.revoked.some((r) => holds(r.holder))) return { revoked: true };
-  return null;
+  for (const r of state.retired) if (holds(r.holder) && r.notAfter >= proof.created) candidates.push({ member: r.holder.member, pub: r.pub });
+  for (const { member, pub } of candidates) if ((await verifyStepUp(proof, pub)).ok) return { member };
+  if (state.revoked.some((r) => holds(r.holder))) return { refused: 'revoked' };
+  return { refused: candidates.length === 0 ? 'unknown-signer' : 'bad-signature' };
 }
 
 /**
@@ -92,12 +91,8 @@ export async function verifyOwnersProof(
 ): Promise<Verdict> {
   if (!isAction(proof) || proof.stepUp === undefined || proof.org !== state.org) return refuse('malformed');
   if (proof.machine !== machine) return refuse('other-machine');
-  const signer = proofSigner(state, proof);
-  if (signer === null) return refuse('unknown-signer');
-  if ('revoked' in signer) return refuse('revoked');
-  let signed = false;
-  for (const pub of signer.keys) if ((await verifyStepUp(proof, pub)).ok) signed = true;
-  if (!signed) return refuse('bad-signature');
+  const signer = await proofSigner(state, proof);
+  if ('refused' in signer) return refuse(signer.refused);
   if (SPAWN_ACTIONS.includes(proof.action)) return signer.member === owner ? accept() : refuse('not-owner');
   if (ownerAdded(proof) !== owner) return refuse('not-owner');
   const owners = await machineOwners(state, machine, certificates, new Date(proof.created));
@@ -117,7 +112,7 @@ export async function verifyAttestation(state: OrgState, certificates: Certifica
   if (sender === null) return refuse('unknown-signer');
   const established = new Set(ownerMembers(state, sender.owners));
   for (const proof of attest.ownersProof) {
-    const signer = proofSigner(state, proof);
+    const signer = isAction(proof) && proof.stepUp !== undefined ? await proofSigner(state, proof) : null;
     const target = ownerAdded(proof) ?? (signer !== null && 'member' in signer ? signer.member : '');
     const verdict = await verifyOwnersProof(state, certificates, proof, target, sender.ref, [...established]);
     if (!verdict.ok) return verdict;

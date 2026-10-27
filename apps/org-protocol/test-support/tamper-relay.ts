@@ -1,7 +1,8 @@
 // In-memory carriers for RL2's suites: `duplexPair`, two ends of one message-oriented link, and `TamperRelay`, a
 // hostile relay in the channel's path (acceptance 3) that flips a byte, drops, repeats or reorders a message, or holds
 // one for a given time. Each message is delivered on a later turn, in order, as a socket delivers it; a close reaches
-// the other end after every message sent before it. WebCrypto-free and runtime-neutral, though only suites use it.
+// the other end after every message sent before it. A link's turns are timer turns by default, or microtasks
+// (`turns: 'microtask'`), which leave the receiver's own asynchronous work no room to finish between two deliveries. WebCrypto-free and runtime-neutral, though only suites use it.
 import type { ByteDuplex } from '../src/channel.ts';
 
 type End = {
@@ -14,6 +15,7 @@ type End = {
  * it after the message that follows it, or hold it back for `holdMs` while later ones pass. */
 export type Tamper = { flip: number } | 'drop' | 'repeat' | 'reorder' | { holdMs: number };
 export type Direction = 'to-endpoint' | 'to-device';
+export type Turns = 'timer' | 'microtask';
 
 class Link {
   private readonly ends: [End, End] = [
@@ -22,9 +24,11 @@ class Link {
   ];
   private tail: Promise<void> = Promise.resolve();
   private readonly intercept: (from: 0 | 1, bytes: Uint8Array, deliver: (bytes: Uint8Array) => void) => void;
+  private readonly turns: Turns;
 
-  constructor(intercept: (from: 0 | 1, bytes: Uint8Array, deliver: (bytes: Uint8Array) => void) => void = (_, bytes, deliver) => deliver(bytes)) {
+  constructor(intercept: (from: 0 | 1, bytes: Uint8Array, deliver: (bytes: Uint8Array) => void) => void = (_, bytes, deliver) => deliver(bytes), turns: Turns = 'timer') {
     this.intercept = intercept;
+    this.turns = turns;
   }
 
   end(side: 0 | 1): ByteDuplex {
@@ -52,6 +56,10 @@ class Link {
 
   /** Runs `work` on a later turn, after everything queued before it. */
   later(work: () => void): void {
+    if (this.turns === 'microtask') {
+      this.tail = this.tail.then(work);
+      return;
+    }
     this.tail = this.tail.then(() => new Promise<void>((resolve) => setTimeout(() => {
       work();
       resolve();
@@ -60,8 +68,8 @@ class Link {
 }
 
 /** Two ends of one in-memory link: the device's, then the endpoint's. */
-export function duplexPair(): [ByteDuplex, ByteDuplex] {
-  const link = new Link();
+export function duplexPair(options: { turns?: Turns } = {}): [ByteDuplex, ByteDuplex] {
+  const link = new Link(undefined, options.turns);
   return [link.end(0), link.end(1)];
 }
 

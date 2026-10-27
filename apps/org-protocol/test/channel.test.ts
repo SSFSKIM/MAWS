@@ -16,11 +16,12 @@ import {
   type MachineIdentity,
 } from '../src/channel.ts';
 import { FRAME_PLAINTEXT_MAX, FrameOpener, FrameSealer, REKEY_FRAMES, REKEY_MS, rekeyDirection, sealFrame, type DirectionKeys } from '../src/frames.ts';
-import { generateSigningKey, utf8 } from '../src/keys.ts';
+import { generateSigningKey, importSigningKey, keyId, utf8 } from '../src/keys.ts';
 import { advanceHead, memoryOrgView } from '../src/org-view.ts';
-import { signTransition } from '../src/org-state.ts';
+import { endorseDevice, signOrgState, signTransition, stateHash } from '../src/org-state.ts';
+import { VECTOR_KEYS, VECTORS } from '../vectors/index.ts';
 import { CHANNEL_HEADER_BYTES, RL1_MESSAGE_LIMIT } from '../src/relay.ts';
-import type { SignedOrgState } from '../src/types.ts';
+import type { OrgState, RootTransition, Signed, SignedOrgState } from '../src/types.ts';
 import { actionFingerprint, verifyStepUp } from '../src/action.ts';
 import { readMessage } from '../src/messages.ts';
 import { duplexPair, TamperRelay } from '../test-support/tamper-relay.ts';
@@ -173,6 +174,14 @@ describe('a channel', () => {
     await expect(opened.value.send({ t: 'ping', at: 1 })).rejects.toThrow(ChannelError);
   });
 
+  it('delivers a sealed close that arrives just before the carrier ends, over a carrier with no timer turns', async () => {
+    const { accepted, opened } = await connect(duplexPair({ turns: 'microtask' }));
+    if (accepted.status !== 'fulfilled' || opened.status !== 'fulfilled') throw new Error(`${refusal(accepted)} ${refusal(opened)}`);
+    const reason = new Promise<[string, number | undefined]>((resolve) => opened.value.onClose((r, v) => resolve([r, v])));
+    accepted.value.channel.close('behind', 7);
+    expect(await reason).toEqual(['behind', 7]);
+  });
+
   it('refuses a device the state does not list, lists for another class, or has revoked', async () => {
     expect(refusal((await connect(duplexPair(), view('r3'), view('r3'), device('stranger'))).accepted)).toBe('unknown-device');
     expect(refusal((await connect(duplexPair(), view('r3'), view('r3'), device('a1', 'web-cards'))).accepted)).toBe('class');
@@ -255,6 +264,83 @@ describe('org-state catch-up in the handshake', () => {
     expect(channel.peer.stateVersion).toBe(2);
   });
 
+  /** Pages a catch-up of the device past an endpoint at `from`, one state per page, and lists each connection's end. */
+  async function pagedCatchUp(endpointChain: SignedOrgState[], deviceChain: SignedOrgState[], who: DeviceIdentity, me = machine(), turns: 'timer' | 'microtask' = 'timer') {
+    const endpointSide = memoryOrgView({ chain: endpointChain });
+    const longest = [...endpointChain, ...deviceChain].map((s) => utf8(canonicalize(s)).length);
+    const pageBytes = 1024 + Math.max(...longest);
+    const connections: string[] = [];
+    const settled: Promise<unknown>[] = [];
+    const dial = () => {
+      const io = duplexPair({ turns });
+      settled.push(
+        acceptChannel(io[1], me, endpointSide, options({ pageBytes })).then(
+          async ({ channel }) => {
+            connections.push('admitted');
+            await channel.send({ t: 'caps' });
+          },
+          (error: ChannelError) => connections.push(error.reason === 'behind' ? `behind ${error.stateVersion}` : error.reason),
+        ),
+      );
+      return io[0];
+    };
+    const channel = await connectChannel(dial, who, memoryOrgView({ chain: deviceChain }), { ...options({ pageBytes }), machine: REF_MINI });
+    await Promise.all(settled);
+    return { channel, connections, endpointSide };
+  }
+
+  /** r3 and a successor at version 4 that `edit` makes, signed by the admin. */
+  async function successorOfR3(edit: (s: OrgState) => Promise<void>): Promise<SignedOrgState> {
+    const s = structuredClone(org.states.r3.state);
+    s.version = 4;
+    s.prev = await stateHash(org.states.r3.state);
+    s.issued = '2026-10-27T03:00:00.000Z';
+    await edit(s);
+    return signOrgState(s, [keys.a1StepUp]);
+  }
+
+  it('pages a catch-up over a carrier with no timer turns, its behind close kept ahead of the carrier ending', async () => {
+    const { connections } = await pagedCatchUp([org.states.r1], [org.states.r1, org.states.r2, org.states.r3], device('b2'), machine(), 'microtask');
+    expect(connections).toEqual(['behind 2', 'admitted']);
+  });
+
+  it("pages an endpoint whose entry for the device holds a key the device rotated beyond the first page", async () => {
+    const rotated = await successorOfR3(async (s) => {
+      const old = s.members[0].devices[0];
+      const fresh = { ...old, channelPub: keys.a3Channel.pub };
+      delete fresh.endorsement;
+      s.members[0].devices[0] = { ...fresh, endorsement: await endorseDevice(org.id, org.members.A, fresh, keys.a1StepUp.privateKey, keys.a1StepUp.pub) };
+      s.retired.push({ keyId: await keyId(old.channelPub), pub: old.channelPub, notAfter: '2026-10-27T03:00:00.000Z', holder: { member: org.members.A, device: old.id, class: old.class, key: 'channel' } });
+    });
+    const who = { ...device('a1'), channelKey: keys.a3Channel };
+    const { connections, endpointSide } = await pagedCatchUp([org.states.r1], [org.states.r1, org.states.r2, org.states.r3, rotated], who);
+    expect(connections).toEqual(['behind 2', 'behind 3', 'admitted']);
+    expect(endpointSide.head().state.version).toBe(4);
+  });
+
+  it("pages a device whose state holds a machine key the machine rotated beyond h2's first page", async () => {
+    const rotated = await successorOfR3(async (s) => {
+      s.machines[0].pub = keys.miniRotated.pub;
+      s.retired.push({ keyId: await keyId(keys.mini.pub), pub: keys.mini.pub, notAfter: '2026-10-27T03:00:00.000Z', holder: { machine: REF_MINI } });
+    });
+    const deviceChain = [org.states.r1];
+    const endpointChain = [org.states.r1, org.states.r2, org.states.r3, rotated];
+    const pageBytes = 1024 + Math.max(...endpointChain.map((st) => utf8(canonicalize(st)).length));
+    const endpointSide = memoryOrgView({ chain: endpointChain });
+    const deviceSide = memoryOrgView({ chain: deviceChain });
+    let connections = 0;
+    const dial = () => {
+      connections++;
+      const io = duplexPair();
+      void acceptChannel(io[1], { ...machine(), key: keys.miniRotated }, endpointSide, options({ pageBytes })).then(({ channel }) => channel.send({ t: 'caps' }), () => {});
+      return io[0];
+    };
+    const channel = await connectChannel(dial, device('a1'), deviceSide, { ...options({ pageBytes }), machine: REF_MINI });
+    expect(channel.peer.stateVersion).toBe(4);
+    expect(deviceSide.head().state.version).toBe(4);
+    expect(connections).toBe(3);
+  });
+
   it("closes a connection whose h3 is over the endpoint's page limit", async () => {
     const io = duplexPair();
     const accepting = acceptChannel(io[1], machine(), view('r1'), options({ pageBytes: 2048 }));
@@ -305,6 +391,27 @@ describe('the tamper relay', () => {
 });
 
 describe('the org view', () => {
+  it('serializes concurrent advances, so a page that verified against an older head never lands after a newer one', async () => {
+    for (const pages of [
+      [[org.states.r2, org.states.r3, org.states.r4], [org.states.r2]],
+      [[org.states.r2], [org.states.r2, org.states.r3, org.states.r4]],
+    ]) {
+      const v = view('r1');
+      await Promise.all(pages.map((page) => v.advance(page, [])));
+      expect(v.head().state.version).toBe(4);
+      expect(v.since(1).states.map((s) => s.state.version)).toEqual([2, 3, 4]);
+    }
+  });
+
+  it('takes only the transition that authorized the adopted successor, not another genuine one held beside it', async () => {
+    const recovery = await importSigningKey(VECTOR_KEYS.recovery.jwk);
+    const authorizing = VECTORS.fixtures['a rewind from a forged head by the pinned recovery key'] as Signed<RootTransition>;
+    const other = await signTransition({ ...authorizing.body, newRootKeys: [VECTOR_KEYS.a4StepUp.pub], issued: '2026-10-27T09:00:00.000Z' }, recovery.privateKey, recovery.pub);
+    const result = await advanceHead(VECTORS.fixtures['remote r3'] as SignedOrgState, [VECTORS.fixtures['remote r4 under the recovered root']], [other, authorizing]);
+    expect(result.head.state.version).toBe(4);
+    expect(result.transitions).toEqual([authorizing]);
+  });
+
   it('takes only transitions the recovery key signed, never one a peer forged beside a successor', async () => {
     const forged = await signTransition({ org: org.id, fromVersion: 1, newRootKeys: [keys.a3StepUp.pub], issued: '2099-01-01T00:00:00.000Z' }, keys.stranger.privateKey, keys.stranger.pub);
     const result = await advanceHead(org.states.r1, [org.states.r2], [forged]);

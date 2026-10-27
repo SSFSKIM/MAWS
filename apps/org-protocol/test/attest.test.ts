@@ -2,10 +2,10 @@
 // (records.ts), the step-up and WebAuthn verdicts: each case's expected verdict is written here, so a scenario that
 // drifted would fail before its vectors replay (vectors.test.ts replays them against the code).
 import { describe, expect, it } from 'vitest';
-import { verifyAttestation } from '../src/attest.ts';
+import { verifyAttestation, type Attest } from '../src/attest.ts';
 import { NO_CERTIFICATES } from '../src/records.ts';
-import type { SignedOrgState } from '../src/types.ts';
-import { VECTORS } from '../vectors/index.ts';
+import type { LogEventV2, OrgState, SignedOrgState } from '../src/types.ts';
+import { VECTOR_KEYS, VECTORS } from '../vectors/index.ts';
 
 const ok = (extra: Record<string, unknown> = {}) => ({ ok: true, ...extra });
 const no = (code: string) => ({ ok: false, code });
@@ -66,6 +66,17 @@ describe('the remote cases', () => {
       expect(found?.expect).toEqual(resolveMembers(expected));
     });
   }
+
+  it("keeps a retired step-up key its own member's: a new member enrolled under a retired device id is not proven by the old key's spawn", async () => {
+    const { state: r4 } = VECTORS.fixtures['remote r4'] as SignedOrgState;
+    const DAVE = '4d1b2c3d4e5f60718293a4b5c6d7e8f9';
+    const r5: OrgState = structuredClone(r4);
+    r5.version = 5;
+    r5.members.push({ id: DAVE, email: 'dave@example.com', role: 'member', devices: [{ id: 'dev-b1', class: 'native-mac', keyStorage: 'software', channelPub: VECTOR_KEYS.stranger.pub, stepUpPub: VECTOR_KEYS.a4StepUp.pub }] });
+    const proven = VECTORS.fixtures['an attested owner proven by their spawn'] as LogEventV2 & { attest: Attest };
+    expect(await verifyAttestation(r5, NO_CERTIFICATES, { ...proven, attest: { ...proven.attest, owners: [DAVE] } })).toEqual(no('not-owner'));
+    expect(await verifyAttestation(r5, NO_CERTIFICATES, proven)).toEqual(ok({ owners: [members.B] }));
+  });
 
   it('refuses an attestation that is no attestation, and an event without one', async () => {
     const { state } = VECTORS.fixtures['remote r3'] as SignedOrgState;

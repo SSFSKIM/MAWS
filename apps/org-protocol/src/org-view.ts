@@ -11,14 +11,19 @@ export interface OrgView {
   certificates(): Certificates;
   /** The states after `version` and the root transitions from it on, each in chain order, as far as the view holds them. */
   since(version: number): { states: SignedOrgState[]; transitions: Signed<RootTransition>[] };
-  /** Verifies and adopts every successor of the head among `states`, in version order, until one fails to verify. */
+  /**
+   * Verifies and adopts every successor of the head among `states`, in version order, until one fails to verify. Calls
+   * are serialized: each verifies against the head the one before it left, so a page verified against an older head
+   * never lands after a newer one (two channels' handshakes can each carry a page at once).
+   */
   advance(states: SignedOrgState[], transitions: Signed<RootTransition>[]): Promise<void>;
 }
 
 /**
  * The successors among `states` that follow `head` one by one, each verified by `verifySuccessor` against the one
  * before (with the transitions among `transitions` held for it), up to the first that fails or is missing: the new head,
- * the states adopted and the transitions they took (each verified against the state it leaves). A peer's states are org-signed, so who carried them doesn't matter.
+ * the states adopted, and for each successor a root transition authorized, that transition. A peer's states are
+ * org-signed, so who carried them doesn't matter.
  */
 export async function advanceHead(
   head: SignedOrgState,
@@ -38,13 +43,24 @@ export async function advanceHead(
   for (;;) {
     const next = byVersion.get(current.state.version + 1);
     if (next === undefined || !(await verifySuccessor(current, next, held)).ok) break;
-    // Only a transition the recovery key signed for this version is taken: the verifier keeps what it takes as accepted
-    // (`verifyRewind`'s `issued` rule), so one a peer forged must never enter it.
-    for (const t of held) if ((await verifyTransition(current, t, current.state.root.recoveryPub)).ok) took.push(t);
+    // Only the transition that authorized this successor is taken. The verifier keeps what it takes as accepted
+    // (`verifyRewind`'s `issued` rule), so neither one a peer forged nor a genuine one to a root set the successor
+    // didn't take may enter it: a later recovery would then be refused as older than it.
+    const authorizing = await authorizedBy(current, next, held);
+    if (authorizing !== null) took.push(authorizing);
     adopted.push(next);
     current = next;
   }
   return { head: current, adopted, transitions: took };
+}
+
+/** The transition among `held` that authorized `next` on `current`, or null when the old root set signed it. */
+async function authorizedBy(current: SignedOrgState, next: SignedOrgState, held: Signed<RootTransition>[]): Promise<Signed<RootTransition> | null> {
+  for (const t of held) {
+    if (!(await verifyTransition(current, t, current.state.root.recoveryPub)).ok) continue;
+    if ((await verifySuccessor(current, next, [t])).ok) return t;
+  }
+  return null;
 }
 
 /**
@@ -56,6 +72,7 @@ export function memoryOrgView(input: { chain: SignedOrgState[]; transitions?: Si
   const chain = [...input.chain];
   const transitions = [...(input.transitions ?? [])];
   const certificates = input.certificates ?? NO_CERTIFICATES;
+  let queue: Promise<void> = Promise.resolve();
   return {
     head: () => chain[chain.length - 1],
     certificates: () => certificates,
@@ -63,10 +80,14 @@ export function memoryOrgView(input: { chain: SignedOrgState[]; transitions?: Si
       states: chain.filter((s) => s.state.version > version),
       transitions: transitions.filter((t) => t.body.fromVersion >= version),
     }),
-    async advance(states, offered) {
-      const result = await advanceHead(chain[chain.length - 1], states, offered);
-      chain.push(...result.adopted);
-      for (const t of result.transitions) if (!transitions.includes(t)) transitions.push(t);
+    advance(states, offered) {
+      const run = queue.then(async () => {
+        const result = await advanceHead(chain[chain.length - 1], states, offered);
+        chain.push(...result.adopted);
+        for (const t of result.transitions) if (!transitions.includes(t)) transitions.push(t);
+      });
+      queue = run.catch(() => {});
+      return run;
     },
   };
 }

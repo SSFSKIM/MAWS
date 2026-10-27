@@ -23,9 +23,9 @@
 // bring the peer up to the sender's head, in chain order from the peer's head, the whole message at most `pageBytes`
 // (`HANDSHAKE_PAGE_BYTES` on both carriers). Each side adopts what verifies (`OrgView.advance`) before it checks the
 // other's signature, whether or not the handshake then succeeds. A catch-up longer than a page takes one connection per
-// page: an endpoint still below the device's `stateVersion` and missing its entry closes with a sealed `close
-// {reason: 'behind', stateVersion}`; a device still below the endpoint's and missing the machine's key closes after
-// `h2`. `connectChannel` reconnects while each connection advanced a head.
+// page: an endpoint still below the device's `stateVersion` that doesn't hold the device as it signed (no entry, or an
+// older one of another key or class) closes with a sealed `close {reason: 'behind', stateVersion}`; a device still
+// below the endpoint's and missing the machine's key (absent, or rotated in a later state) closes after `h2`. `connectChannel` reconnects while each connection advanced a head.
 //
 // The endpoint's first sealed message is `caps` (M4) or a `close`; `openChannel` resolves on it, so a device learns its
 // refusal before it sends anything.
@@ -408,11 +408,15 @@ class SealedChannel implements Channel {
     this.opener = opener;
     this.id = id;
     this.peer = peer;
+    // The carrier's end waits behind every frame it delivered first: a sealed close just before it (a `behind` with
+    // its stateVersion) is still read, whatever turns the carrier delivers on.
     inbox.handOff(
       (bytes) => {
         this.receiving = this.receiving.then(() => this.receive(bytes));
       },
-      (reason) => this.ended(reason),
+      (reason) => {
+        this.receiving = this.receiving.then(() => this.ended(reason));
+      },
     );
   }
 
@@ -719,14 +723,15 @@ export async function acceptChannel(io: ByteDuplex, me: MachineIdentity, org: Or
     const channel = () => new SealedChannel(io, inbox, new FrameSealer(secrets.r2i, { now: clock }), new FrameOpener(secrets.i2r), secrets.channelId, { protocol: h1.protocol, build: h1.build, capabilities: h1.capabilities, stateVersion: h1.stateVersion });
     if (head.revoked.some((r) => r.keyId === h3.sig.kid)) throw new ChannelError('revoked');
     const device = head.members.find((m) => m.id === h1.member)?.devices.find((d) => d.id === h1.device);
-    if (device === undefined) {
-      if (head.version < h1.stateVersion) {
-        // The device has verified h2, so this close is the machine's: it reconnects with the next page.
-        await channel().closeWith('behind', head.version);
-        throw new ChannelError('behind', { stateVersion: head.version, advanced: head.version > start.version });
-      }
-      throw new ChannelError('unknown-device');
+    // A head below the device's that doesn't hold the device as it signed (no entry, or an older one: another class or
+    // key) is still catching up: the next page may carry the entry it signed with.
+    const resolved = device !== undefined && device.class === h1.clientClass && (await keyId(device.channelPub)) === h3.sig.kid;
+    if (!resolved && head.version < h1.stateVersion) {
+      // The device has verified h2, so this close is the machine's: it reconnects with the next page.
+      await channel().closeWith('behind', head.version);
+      throw new ChannelError('behind', { stateVersion: head.version, advanced: head.version > start.version });
     }
+    if (device === undefined) throw new ChannelError('unknown-device');
     if (device.class !== h1.clientClass) throw new ChannelError('class');
     if ((await keyId(device.channelPub)) !== h3.sig.kid) throw new ChannelError('bad-signature');
     if (!(await macVerifies(secrets.kmI, deviceMacInput(h1.member, h1.device), h3.mac))) throw new ChannelError('bad-mac');
