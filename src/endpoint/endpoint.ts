@@ -190,6 +190,7 @@ export class Endpoint implements EndpointModule {
         counter: (credentialId) => this.#state?.webauthn[credentialId] ?? 0,
         setCounter: (credentialId, counter) => this.#state?.setWebAuthn({ ...this.#state.webauthn, [credentialId]: counter }),
       },
+      stamp: () => this.#state?.ledger,
       offers: authorization.offers,
       gradeOf: authorization.gradeOf,
       registry: authorization.registry,

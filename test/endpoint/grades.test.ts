@@ -97,7 +97,12 @@ function engineHost(seen: string[]) {
     const { appSessionId, requestId } = input as { appSessionId?: string; requestId?: string };
     if (owner !== 'engine-host') return refused('unknown_command');
     if (name === 'session.status') return appSessionId !== undefined && ENGINE[appSessionId] !== undefined ? ok({ appSessionId, engineSessionId: ENGINE[appSessionId], launchId: 'launch-1' }) : refused('internal');
-    if (name === 'session.pendingRequest') return ok({ event: requestId !== undefined && PENDING[requestId] !== undefined ? { kind: PENDING[requestId], requestId } : null });
+    if (name === 'session.pendingRequest') {
+      // As the engine host answers: a session it holds no stream for is an error; so is an outage.
+      if (appSessionId === undefined || ENGINE[appSessionId] === undefined || requestId === 'rq-internal') return refused('internal');
+      if (requestId === 'rq-outage') return refused('host_unavailable');
+      return ok({ event: requestId !== undefined && PENDING[requestId] !== undefined ? { kind: PENDING[requestId], requestId } : null });
+    }
     if (name === 'session.queue.list') return ok({ entries: [{ queueId: 'q1', appSessionId, content: '/clear', createdAt: iso(Date.now()), state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false }], paused: true });
     return refused('unknown_command');
   };
@@ -410,6 +415,19 @@ describe('by effect, through the channel', () => {
     expect(await send(a, laneB(f, a, 'session.answer', 'app-shared', { requestId: 'rq-perm', answer: allow }))).toBe('ok');
   });
 
+  it('reads nothing of a session the caller holds no rank on, so a refusal can’t tell a private session from none', async () => {
+    const f = await start();
+    const c = await open(f, c1, C);
+    const question = { kind: 'question', answers: { 'Which one?': 'the first' } };
+    expect(await send(c, laneB(f, c, 'session.answer', 'app-private', { requestId: 'rq-question', answer: question }))).toBe('grade');
+    expect(await send(c, laneB(f, c, 'session.answer', 'app-ghost', { requestId: 'rq-question', answer: question }))).toBe('grade');
+    expect(f.reads).not.toContain('session.pendingRequest');
+    // A read that fails for its session is `grade`; only a host that can't answer now is `unavailable`.
+    const a = await open(f, a1, A);
+    expect(await send(a, laneB(f, a, 'session.answer', 'app-own', { requestId: 'rq-internal', answer: question }))).toBe('grade');
+    expect(await send(a, laneB(f, a, 'session.answer', 'app-own', { requestId: 'rq-outage', answer: question }))).toBe('unavailable');
+  });
+
   it('takes manage to unpause a queue (one holding `/clear` here) or promote an entry, converse to pause it', async () => {
     const f = await start();
     const b = await open(f, b1, B);
@@ -579,7 +597,17 @@ describe('the web-cards class (RL §5.10)', () => {
 
 describe('the decision without a channel', () => {
   /** An authorizer over a fixed head, for what a channel can't show directly. */
-  async function authorizer(options: { tooOld?: boolean } = {}): Promise<{ authorizer: Authorizer; ref: string }> {
+  type Unit = {
+    authorizer: Authorizer;
+    ref: string;
+    /** The head the authorizer reads, and the next one: the machine's owners moved from A to B. */
+    heads: { s2: OrgState; s3: OrgState };
+    setHead(head: OrgState): void;
+    records: Map<string, SessionRecord>;
+    changed(target: SessionTarget): void;
+  };
+
+  async function authorizer(options: { tooOld?: boolean; dispatch?: AuthorizeContext['dispatch'] } = {}): Promise<Unit> {
     const ref = 'R'.repeat(22);
     const key = await generateSigningKey();
     const s1 = await genesis(ORG, A, a1, recovery);
@@ -588,20 +616,126 @@ describe('the decision without a channel', () => {
       s.machines.push({ name: 'mini', ref, pub: key.pub, owners: [A] });
       s.machineNames.push({ name: 'mini', ref });
     });
+    const s3 = await successor(s2, [a1], (s) => void (s.machines[0].owners = [B]));
+    let head = s2.state;
     const records = new Map(RECORDS.map((r) => [`${r.lane}:${r.session}`, r]));
+    const listeners = new Set<(t: SessionTarget) => void>();
     const ctx: AuthorizeContext = {
       ref: () => ref,
-      org: () => ({ head: s2.state, certificates: NO_CERTIFICATES, tooOld: options.tooOld === true }),
+      org: () => ({ head, certificates: NO_CERTIFICATES, tooOld: options.tooOld === true }),
       rights: async (member) => (member === A ? ['spawn', 'shell', 'machine-admin'] : []),
       policy: () => ({ read_only: false, ceiling: 'settings' }),
       settingsMode: () => 'default',
-      records: { record: (t) => records.get(`${t.lane}:${t.session}`) ?? null, onChange: () => () => {} },
+      records: {
+        record: (t) => records.get(`${t.lane}:${t.session}`) ?? null,
+        onChange: (listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+      },
       checkouts: { known: () => true },
-      dispatch: engineHost([]),
+      dispatch: options.dispatch ?? engineHost([]),
       webauthn: { origin: () => HUB, counter: () => 0, setCounter: () => {} },
     };
-    return { authorizer: new Authorizer(ctx), ref };
+    return {
+      authorizer: new Authorizer(ctx),
+      ref,
+      heads: { s2: s2.state, s3: s3.state },
+      setHead: (next) => void (head = next),
+      records,
+      changed: (t) => listeners.forEach((listener) => listener(t)),
+    };
   }
+
+  /** A dispatch whose first `read` (`session.status` unless named) waits until the test lets it go, saying when it is reached. */
+  function suspended(read = 'session.status'): { dispatch: AuthorizeContext['dispatch']; reached: Promise<void>; release(): void; reads: () => number } {
+    const host = engineHost([]);
+    let reached!: () => void;
+    let release!: () => void;
+    const at = new Promise<void>((resolve) => (reached = resolve));
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let reads = 0;
+    return {
+      dispatch: async (owner, name, input) => {
+        if (name === read && reads++ === 0) {
+          reached();
+          await gate;
+        }
+        return host(owner, name, input);
+      },
+      reached: at,
+      release: () => release(),
+      reads: () => reads,
+    };
+  }
+
+  const whoA = { member: A, device: 'a1', clientClass: 'native-mac' as const };
+  const whoB = { member: B, device: 'b1', clientClass: 'native-mac' as const };
+
+  function sendOn(ref: string, appSessionId: string, content: string, device: TestDevice = a1, member = A) {
+    const d = new Device({ identity: { org: ORG, member, device: device.device.id, clientClass: 'native-mac', channelKey: device.channel, build: 'x', capabilities: [] }, org: memoryOrgView({ chain: [{} as SignedOrgState] }) });
+    const action = d.action({ machine: ref, action: 'session.send', session: appSessionId, context: { lane: 'B', launchId: 'launch-1', engineSessionId: ENGINE[appSessionId] }, args: { appSessionId, content } });
+    return { kind: 'act' as const, name: action.action, input: action.args, action };
+  }
+
+  it('decides again when the head moves under its reads: ownership taken away mid-read is `grade`', async () => {
+    const host = suspended();
+    const unit = await authorizer({ dispatch: host.dispatch });
+    const deciding = unit.authorizer.authorize(sendOn(unit.ref, 'app-own', '/clear'), whoA, Date.now());
+    await host.reached;
+    unit.setHead(unit.heads.s3);
+    host.release();
+    expect(await deciding).toEqual({ ok: false, reason: 'grade' });
+    // Unmoved, the same request passes.
+    const fresh = await authorizer();
+    expect((await fresh.authorizer.authorize(sendOn(fresh.ref, 'app-own', '/clear'), whoA, Date.now())).ok).toBe(true);
+  });
+
+  it('decides again when the target’s record changes under its reads: a share withdrawn mid-read is `grade`', async () => {
+    // The record is read after the session's status; the answer's pending request is read after the record.
+    const host = suspended('session.pendingRequest');
+    const unit = await authorizer({ dispatch: host.dispatch });
+    const answer = (ref: string) => {
+      const d = new Device({ identity: { org: ORG, member: B, device: 'b1', clientClass: 'native-mac', channelKey: b1.channel, build: 'x', capabilities: [] }, org: memoryOrgView({ chain: [{} as SignedOrgState] }) });
+      const action = d.action({ machine: ref, action: 'session.answer', session: 'app-shared', context: { lane: 'B', launchId: 'launch-1', engineSessionId: 'eng-shared' }, args: { appSessionId: 'app-shared', requestId: 'rq-question', answer: { kind: 'question', answers: { 'Which?': 'A' } } } });
+      return { kind: 'act' as const, name: action.action, input: action.args, action };
+    };
+    const deciding = unit.authorizer.authorize(answer(unit.ref), whoB, Date.now());
+    await host.reached;
+    unit.records.set('B:eng-shared', { lane: 'B', session: 'eng-shared', owners: [A] });
+    unit.changed({ lane: 'B', session: 'eng-shared', appSessionId: 'app-shared' });
+    host.release();
+    expect(await deciding).toEqual({ ok: false, reason: 'grade' });
+  });
+
+  it('gives up `unavailable` when the head keeps moving under its reads', async () => {
+    let flips = 0;
+    const unit: Unit = await authorizer({
+      dispatch: async (owner, name, input) => {
+        // Every read of the session's status sees a new head adopted while it ran.
+        if (name === 'session.status') unit.setHead(++flips % 2 === 1 ? unit.heads.s3 : unit.heads.s2);
+        return engineHost([])(owner, name, input);
+      },
+    });
+    expect(await unit.authorizer.authorize(sendOn(unit.ref, 'app-own', 'hello'), whoA, Date.now())).toEqual({ ok: false, reason: 'unavailable' });
+  });
+
+  it('answers a web-cards device’s query only for what its class may do, on a session its member owns', async () => {
+    const { authorizer: authz } = await authorizer();
+    const phone = { member: B, device: 'bw', clientClass: 'web-cards' as const };
+    const own: SessionTarget = { lane: 'B', session: 'eng-b', appSessionId: 'app-b' };
+    const shared: SessionTarget = { lane: 'B', session: 'eng-shared', appSessionId: 'app-shared' };
+    const query = (name: string, target: SessionTarget | null) => ({ kind: 'query' as const, name, input: { member: B, target } });
+    expect(await authz.authorize(query('session.answer', own), phone, Date.now())).toEqual({ ok: true, target: own });
+    expect(await authz.authorize(query('sminos.decide', { lane: 'A', session: 'la-b' }), phone, Date.now())).toEqual({ ok: true, target: { lane: 'A', session: 'la-b' } });
+    // Its member's native operations: a queued message's edit on a session only shared with them, a send, a spawn.
+    expect(await authz.authorize(query('session.queue.edit', shared), phone, Date.now())).toEqual({ ok: false, reason: 'class' });
+    expect(await authz.authorize(query('session.send', own), phone, Date.now())).toEqual({ ok: false, reason: 'class' });
+    expect(await authz.authorize(query('session.answer', shared), phone, Date.now())).toEqual({ ok: false, reason: 'class' });
+    expect(await authz.authorize(query('sminos.spawn', null), phone, Date.now())).toEqual({ ok: false, reason: 'class' });
+    // The member's native device may.
+    expect((await authz.authorize(query('session.queue.edit', shared), whoB, Date.now())).ok).toBe(true);
+  });
 
   it('answers a query only to the operation’s own member, while they hold view on its target', async () => {
     const { authorizer: authz } = await authorizer();
