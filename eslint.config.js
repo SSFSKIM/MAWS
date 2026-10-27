@@ -204,6 +204,15 @@ module.exports = defineConfig(
       'no-restricted-syntax': ['error', CLIENT_PORT_DYNAMIC, YJS_DYNAMIC],
     },
   },
+  // P5 O2 M5: `mawsd` runs as plain Node where no Electron is installed, O1's rule with no exception; its files' one
+  // block of each rule, so it restates src/'s Yjs and endpoint rules (it reaches the endpoint module through its entry).
+  {
+    files: ['src/mawsd/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': ['error', { paths: [{ name: 'electron', message: CLIENT_PORT }], patterns: [{ group: ['**/open-external'], message: CLIENT_PORT }, ...YJS_PATTERNS, ...ENDPOINT_PATTERNS] }],
+      'no-restricted-syntax': ['error', CLIENT_PORT_DYNAMIC, YJS_DYNAMIC],
+    },
+  },
   // Outside src/: the suites (but the module's own) and the e2e specs reach the module through its entry too.
   {
     files: ['test/**/*.{ts,tsx}', 'e2e/**/*.ts'],

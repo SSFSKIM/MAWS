@@ -66,6 +66,10 @@ export default defineConfig(({ command }) => {
     main: {
       resolve: { alias },
       define: { __MAWS_DEV_CSP_NONCE__: JSON.stringify(devNonce), __MAWS_VERSION__: JSON.stringify(version), __MAWS_BUILD__: JSON.stringify(build) },
+      // P5 O2 M5: `mawsd` (out/main/mawsd.js) is main's second input, so its `?modulePath` imports of the hosts emit the
+      // files main's do and one build has one build id; src/engine-host/bundle-guard.test.ts holds its graph to Node's
+      // builtins and the hosts' externals (no `electron`)
+      build: { rollupOptions: { input: { index: resolve(__dirname, 'src/main/index.ts'), mawsd: resolve(__dirname, 'src/mawsd/index.ts') } } },
     },
     preload: {
       resolve: { alias },

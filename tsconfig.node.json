@@ -14,6 +14,7 @@
     "src/preload/**/*",
     "src/engine-host/**/*",
     "src/pty-host/**/*",
+    "src/mawsd/**/*", // P5 O2 M5: the machine daemon
     "src/shared/**/*",
     "src/artifacts/**/*", // P3-A: the portable artifact layer, typechecked as the host will import it
     "apps/org-protocol/src/**/*.ts", // P5-O10 M9: the remote layer's protocol package, which main's device keys sign with

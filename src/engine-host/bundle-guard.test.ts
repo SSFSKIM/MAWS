@@ -2,9 +2,14 @@
 // modules, so the engine-host chunk must load everything at start: no dynamic `import()`, and nothing required but
 // Node's builtins and `zod` (and, P3-HD, the pinned MCP SDK's own modules). Reads the built chunk under `out/main` when
 // a build is present and is skipped otherwise; the E10 gates run it after `pnpm build`, which makes it mandatory there.
+//
+// P5 O2 M5 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, "The build"): `mawsd` runs under the same rule, outliving
+// the binary that started it, and runs as plain Node where no Electron is installed: `out/main/mawsd.js` and every chunk
+// it requires load everything at start and require only Node's builtins and the externals the engine host allows; the
+// pty host's chunk, which `mawsd` spawns, adds `node-pty`.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { builtinModules } from 'node:module';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const OUT = resolve(__dirname, '../../out/main');
@@ -39,3 +44,70 @@ describe.skipIf(chunk === null)('the built engine-host chunk', () => {
     expect(required.filter((name) => !name.startsWith('node:') && !builtinModules.includes(name) && name !== 'zod' && !sdk(name))).toEqual([]);
   });
 });
+
+// P5 O2 M5 start
+const MAWSD = join(OUT, 'mawsd.js');
+const PTY_MARKER = 'the pty host runs as a utility process (process.parentPort) or detached'; // its index.ts's own refusal
+const REQUIRES = /\brequire\(\s*["']([^"']+)["']\s*\)/g;
+
+// An entry and every chunk it requires, transitively, by path
+function graphOf(entry: string): Map<string, string> | null {
+  if (!existsSync(entry)) return null;
+  const graph = new Map<string, string>();
+  const visit = (file: string) => {
+    if (graph.has(file)) return;
+    const text = readFileSync(file, 'utf8');
+    graph.set(file, text);
+    for (const [, name] of text.matchAll(REQUIRES)) if (name.startsWith('.')) visit(resolve(dirname(file), name));
+  };
+  visit(entry);
+  return graph;
+}
+
+function ptyHostChunk(): string | null {
+  if (!existsSync(OUT)) return null;
+  for (const name of readdirSync(OUT).filter((file) => file.endsWith('.js'))) {
+    const text = readFileSync(join(OUT, name), 'utf8');
+    if (text.includes(PTY_MARKER)) return text;
+  }
+  return null;
+}
+
+const externals = (text: string) => [...new Set([...text.matchAll(REQUIRES)].map((match) => match[1]))].filter((name) => !name.startsWith('.'));
+const allowed = (name: string, extra: readonly string[] = []) =>
+  name.startsWith('node:') || builtinModules.includes(name) || name === 'zod' || name === '@modelcontextprotocol/sdk' || name.startsWith('@modelcontextprotocol/sdk/') || extra.includes(name);
+const code = (text: string) => text.split('\n').filter((line) => !/^\s*(\*|\/\*|\/\/)/.test(line));
+
+const graph = graphOf(MAWSD);
+const pty = ptyHostChunk();
+
+describe.skipIf(graph === null)('the built mawsd and its chunks', () => {
+  it('have no dynamic import()', () => {
+    for (const [file, text] of graph!) expect(code(text).filter((line) => /\bimport\s*\(/.test(line)), file).toEqual([]);
+  });
+
+  it('require only Node builtins and the engine host’s externals, never electron', () => {
+    for (const [file, text] of graph!) expect(externals(text).filter((name) => !allowed(name)), file).toEqual([]);
+  });
+
+  it('name the host bundles main names (one build, one build id)', () => {
+    // `?modulePath` emits `path.join(__dirname, "<relative>/index-<hash>.js")`
+    const hostFiles = (of: Map<string, string>) =>
+      [...new Set([...of].flatMap(([file, text]) => [...text.matchAll(/["']((?:\.\.?\/)*index-[A-Za-z0-9_-]+\.js)["']/g)].map((match) => resolve(dirname(file), match[1]))))].sort();
+    const mawsd = hostFiles(graph!);
+    expect(mawsd).toHaveLength(2); // the engine host's and the pty host's
+    for (const file of mawsd) expect(existsSync(file), file).toBe(true);
+    expect(hostFiles(graphOf(join(OUT, 'index.js'))!)).toEqual(mawsd);
+  });
+});
+
+describe.skipIf(pty === null)('the built pty-host chunk', () => {
+  it('has no dynamic import()', () => {
+    expect(code(pty!).filter((line) => /\bimport\s*\(/.test(line))).toEqual([]);
+  });
+
+  it('requires only Node builtins, zod and node-pty', () => {
+    expect(externals(pty!).filter((name) => !allowed(name, ['node-pty']))).toEqual([]);
+  });
+});
+// P5 O2 M5 end
