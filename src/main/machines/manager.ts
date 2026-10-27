@@ -7,8 +7,9 @@
 //   `up`, or not known, answers `host_unavailable` at once.
 // - A link's events reach the windows with that link's machine (`emitFrom`), heard by none of main's own services.
 // - `machines.list` and `machines.changed` (main-owned, graded `client`) report every machine with its state: the local
-//   one first, always `up`, then each known machine. Every `up` of another machine's link is a new generation (+1 per
-//   welcome), announced before any event of the new connection is relayed (M4 resets that machine's counters on it).
+//   one first, always `up`, then each known machine. Every `up` of another machine is a new generation (+1 per welcome,
+//   counted by its ref whichever directory carries it, never reset within the run), announced before any event of the new
+//   connection is relayed (M4 resets that machine's counters on it).
 // - Known machines persist (known-machines.ts): an entry of a configured directory is listed `connecting` from launch,
 //   before its link is up, so a relaunch with that machine down keeps its tabs (acceptance 7); an entry whose directory is
 //   no longer configured is dropped at launch. A directory whose far side answers another ref than the one known for it
@@ -61,7 +62,6 @@ interface Entry {
   name: string;
   state: LinkState;
   since: string;
-  generation: number;
 }
 
 export function createConnectionManager(deps: ConnectionManagerDeps): ConnectionManager {
@@ -78,11 +78,14 @@ export function createConnectionManager(deps: ConnectionManagerDeps): Connection
   }
   const knownByDir = new Map(kept.map((machine) => [machine.carrier.dir, machine]));
   const entries: Entry[] = [];
+  // Each machine's welcomes this run, by its ref and never reset, so a machine that comes back through another directory is
+  // still a new generation (M4 resets that machine's counters on one).
+  const generations = new Map<MachineRef, number>();
 
   function list(): MachineState[] {
     const machines: MachineState[] = [{ ref: local, name: localName, local: true, state: 'up', since: started, generation: 0 }];
     for (const entry of entries) {
-      if (entry.ref !== null) machines.push({ ref: entry.ref, name: entry.name, local: false, state: entry.state, since: entry.since, generation: entry.generation });
+      if (entry.ref !== null) machines.push({ ref: entry.ref, name: entry.name, local: false, state: entry.state, since: entry.since, generation: generations.get(entry.ref) ?? 0 });
     }
     return machines;
   }
@@ -118,7 +121,6 @@ export function createConnectionManager(deps: ConnectionManagerDeps): Connection
       log(`${entry.dir} now reaches machine ${ref}, remembered at ${holder.dir}, which is ${holder.state}; ${holder.dir} is kept with no machine until it answers`);
       holder.ref = null;
       holder.name = holder.dir;
-      holder.generation = 0;
     }
     if (entry.ref !== null && entry.ref !== ref) log(`${entry.dir} now serves machine ${ref} (it served ${entry.ref}): the directory holds another profile`);
     const differs = holder !== undefined || entry.ref !== ref || entry.name !== (name ?? entry.name);
@@ -131,14 +133,14 @@ export function createConnectionManager(deps: ConnectionManagerDeps): Connection
   for (const dir of configured) {
     const remembered = knownByDir.get(dir);
     const link = deps.connect(dir);
-    const entry: Entry = { dir, link, ref: remembered?.ref ?? null, name: remembered?.name ?? dir, state: 'connecting', since: started, generation: 0 };
+    const entry: Entry = { dir, link, ref: remembered?.ref ?? null, name: remembered?.name ?? dir, state: 'connecting', since: started };
     entries.push(entry);
     link.onState((state) => {
       if (state === 'up' && !learned(entry)) return;
       if (state === entry.state) return;
       entry.state = state;
       entry.since = new Date().toISOString();
-      if (state === 'up') entry.generation += 1;
+      if (state === 'up') generations.set(entry.ref!, (generations.get(entry.ref!) ?? 0) + 1); // learned() set the ref
       changed();
     });
     link.onEvent((name, payload) => {

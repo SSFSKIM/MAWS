@@ -208,6 +208,16 @@ describe('the connection manager', () => {
     }
   });
 
+  it('counts a machine’s generations by its ref, whichever directory carries it: a carrier change is a new generation', () => {
+    const m = manager([DIR_B, DIR_C]);
+    m.link(DIR_B).up(B, 'standin-b');
+    m.link(DIR_B).down();
+    m.link(DIR_C).up(B, 'standin-b'); // B answers from a new directory
+    m.link(DIR_C).down();
+    m.link(DIR_C).up(B, 'standin-b');
+    expect(m.changes.map((machines) => machines.find((machine) => machine.ref === B)).map((b) => b && `${b.state}:${b.generation}`)).toEqual(['up:1', 'down:1', 'up:2', 'down:2', 'up:3']);
+  });
+
   it('still refuses a directory that reaches a machine another directory reaches while up', () => {
     const m = manager([DIR_B, DIR_C], [{ ref: B, name: 'standin-b', carrier: { kind: 'socket', dir: DIR_B } }]);
     m.link(DIR_B).up(B, 'standin-b');
