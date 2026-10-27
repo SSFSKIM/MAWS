@@ -120,19 +120,32 @@ describe('the sign-in operation', () => {
     expect(t.last(opId)).toMatchObject({ state: 'failed', reason: 'engine', message: 'the authorization URL was not opened: only http, https and mailto links open outside MAWS' });
   });
 
+  it('fails as not opened when the hand-off throws while it still waits on that browser', async () => {
+    const t = make({ port: { openExternal: async () => Promise.reject(new Error('the client went away')) } });
+    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null);
+    await t.ended(opId);
+    expect(t.last(opId)).toMatchObject({ state: 'failed', reason: 'engine', message: 'the authorization URL was not opened: the client went away' });
+  });
+
   // A port that answers late (mawsd's asks a remote client): the browser's return can come before its answer, and the
-  // answer, whatever it says, does not undo what the callback already advanced.
-  it.each([{ opened: true as const }, { opened: false as const, reason: 'the client answered late' }])('takes a callback that comes back before a slow port answers $opened, and keeps it', async (late) => {
-    let answer: (value: typeof late) => void = () => {};
+  // answer, whatever it says or a rejection, does not undo what the callback already advanced.
+  type Late = { opened: true } | { opened: false; reason: string };
+  it.each<{ late: string; settle: (answer: (value: Late) => void, reject: (error: Error) => void) => void }>([
+    { late: 'opened', settle: (answer) => answer({ opened: true }) },
+    { late: 'not opened', settle: (answer) => answer({ opened: false, reason: 'the client answered late' }) },
+    { late: 'a rejection', settle: (_answer, reject) => reject(new Error('the client went away')) },
+  ])('takes a callback that comes back before a slow port answers $late, and keeps it', async ({ settle }) => {
+    let answer: (value: Late) => void = () => {};
+    let reject: (error: Error) => void = () => {};
     const opened: string[] = [];
-    const t = make({ port: { openExternal: (_client, target) => (opened.push((target as { url: string }).url), new Promise((resolve) => (answer = resolve))) } });
+    const t = make({ port: { openExternal: (_client, target) => (opened.push((target as { url: string }).url), new Promise((resolve, rejected) => ((answer = resolve), (reject = rejected)))) } });
     const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null);
     await t.until(() => opened.length === 1, 'the hand-off');
     expect(t.last(opId).state).toBe('waiting_callback'); // ready before the port has answered
     const redirect = new URL(new URL(opened[0]!).searchParams.get('redirect_uri')!);
     const page = await fetch(`${redirect.origin}/callback?code=the-code&state=engine-state`);
     expect(page.status).toBe(200);
-    answer(late);
+    settle(answer, reject);
     await t.ended(opId);
     expect(t.states(opId)).toEqual(['starting', 'waiting_browser', 'waiting_callback', 'submitting', 'watching_status', 'done']);
   });

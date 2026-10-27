@@ -270,11 +270,15 @@ export function createSignIn(deps: SignInDeps): SignIn {
       move(op, (waiting = 'watching_status'));
       watch(op, Date.now() + callbackMs, false);
     }
-    const opened = await deps.port.openExternal(op.client, { url: authUrl });
-    if (isNoClient(opened) || !opened.opened) {
-      // only an operation still waiting on that browser fails: a callback, a cancel or an end meanwhile stands
-      if (live(op) && op.state === waiting) fail(op, 'engine', `the authorization URL was not opened: ${isNoClient(opened) ? NO_CLIENT_REASON : opened.reason}`);
+    let notOpened: string | null; // why the hand-off failed, an answer's reason or a throw's message; null once opened
+    try {
+      const opened = await deps.port.openExternal(op.client, { url: authUrl });
+      notOpened = isNoClient(opened) ? NO_CLIENT_REASON : opened.opened ? null : opened.reason;
+    } catch (error) {
+      notOpened = error instanceof Error ? error.message : String(error);
     }
+    // only an operation still waiting on that browser fails: a callback, a cancel or an end meanwhile stands
+    if (notOpened !== null && live(op) && op.state === waiting) fail(op, 'engine', `the authorization URL was not opened: ${notOpened}`);
   }
 
   const unsubscribe = deps.onSessionGone((appSessionId) => {
