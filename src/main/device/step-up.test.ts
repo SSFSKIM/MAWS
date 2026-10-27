@@ -1,9 +1,21 @@
 // Step-up in main (P5-O10 M9; RL §5.6): main builds the action from the typed fields it is asked for, renders its text
 // itself, has the person confirm that text through the injected confirmation (U5's winner; a fake here), and only then
 // signs the action's canonical form with the step-up key. The renderer never supplies the bytes or the text.
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateSigningKey, isAction, verifyStepUp, type Action, type SigningKey } from '../../../apps/org-protocol/src/index.ts';
-import { createStepUp, renderAction, type Confirm, type StepUpPrompt } from './step-up';
+
+// Electron's systemPreferences, faked: no test calls the real promptTouchID, so none raises a system prompt.
+const touchID = vi.hoisted(() => ({ reasons: [] as string[], answer: async (): Promise<void> => {} }));
+vi.mock('electron', () => ({
+  systemPreferences: {
+    promptTouchID: (reason: string) => {
+      touchID.reasons.push(reason);
+      return touchID.answer();
+    },
+  },
+}));
+
+import { createStepUp, promptTouchIDConfirmation, renderAction, type Confirm, type StepUpPrompt } from './step-up';
 
 const DEVICE = { org: 'org-step-up', device: 'dev-mac' };
 const REF = 'mref-test-0000001';
@@ -194,5 +206,39 @@ describe('the rendered text', () => {
     expect(text).toContain('label: "abc\\u202edef"');
     expect(text).toContain('"odd\\nkey": 1');
     expect(text).not.toMatch(/[\u202A-\u202E\u2066-\u2069]/);
+  });
+});
+
+describe('the confirmation main uses: promptTouchID (U5)', () => {
+  const prompt: StepUpPrompt = { summary: `sminos.spawn on machine ${REF}`, text: `Action: sminos.spawn\nMachine: ${REF}` };
+
+  beforeEach(() => {
+    touchID.reasons.length = 0;
+    touchID.answer = async () => {};
+  });
+
+  it('asks with the summary as the reason, and confirms when the person authenticates', async () => {
+    const reasons: string[] = [];
+    const confirm = promptTouchIDConfirmation({ promptTouchID: async (reason) => void reasons.push(reason) });
+    expect(await confirm(prompt)).toEqual({ ok: true });
+    expect(reasons).toEqual([prompt.summary]);
+  });
+
+  it('refuses when the prompt is rejected: a cancel, or any failure to authenticate', async () => {
+    // What macOS answered to the spike's cancel (Korean locale): Electron rejects with the localized description alone.
+    const confirm = promptTouchIDConfirmation({ promptTouchID: () => Promise.reject(new Error('인증이 취소되었습니다.')) });
+    expect(await confirm(prompt)).toEqual({ ok: false, reason: 'cancelled' });
+  });
+
+  it('is what a step-up uses when main injects no confirmation', async () => {
+    const stepUp = createStepUp({ device: DEVICE, key: await stepUpKey(), now: () => NOW });
+    const signed = await stepUp.sign(spawn);
+    if (!signed.ok) throw new Error(`refused: ${signed.reason}`);
+    expect(touchID.reasons).toEqual([renderAction(signed.action).summary]);
+    expect(await verifyStepUp(signed.action, (await stepUpKey()).pub)).toEqual({ ok: true });
+
+    touchID.answer = () => Promise.reject(new Error('Authentication canceled.'));
+    expect(await stepUp.sign(spawn)).toEqual({ ok: false, reason: 'cancelled' });
+    expect(touchID.reasons).toHaveLength(2);
   });
 });

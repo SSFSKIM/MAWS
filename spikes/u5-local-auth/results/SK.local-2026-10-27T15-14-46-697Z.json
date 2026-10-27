@@ -1,0 +1,47 @@
+{
+  "spike": "u5-local-auth",
+  "startedAt": "2026-10-27T15:14:46.697Z",
+  "environment": {
+    "host": "SK.local",
+    "model": "MacBookPro18,4",
+    "macos": "26.6.2",
+    "arch": "arm64",
+    "electron": "44.4.5",
+    "node": "24.21.0",
+    "execPath": "/Users/new/.local/share/p5-desk-track-owner/wt/o10-m9/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+    "codesign": "Executable=/Users/new/.local/share/p5-desk-track-owner/wt/o10-m9/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron\nIdentifier=Electron\nFormat=app bundle with Mach-O thin (arm64)\nCodeDirectory v=20400 size=392 flags=0x20002(adhoc,linker-signed) hashes=9+0 location=embedded\nSignature=adhoc\nInfo.plist=not bound\nTeamIdentifier=not set\nSealed Resources=none\nInternal requirements=none",
+    "appName": "Electron"
+  },
+  "candidates": [
+    {
+      "number": 1,
+      "name": "systemPreferences.promptTouchID",
+      "steps": [
+        {
+          "step": "approve-touch-id",
+          "expect": "resolved",
+          "ms": 8195,
+          "answered": true,
+          "ok": true
+        },
+        {
+          "step": "approve-password",
+          "expect": "resolved",
+          "ms": 14372,
+          "answered": true,
+          "ok": true
+        },
+        {
+          "step": "cancel",
+          "expect": "rejected",
+          "ms": 3264,
+          "answered": true,
+          "ok": false,
+          "error": "인증이 취소되었습니다."
+        }
+      ],
+      "canPromptTouchID": true
+    }
+  ],
+  "finishedAt": "2026-10-27T15:15:20.428Z"
+}
