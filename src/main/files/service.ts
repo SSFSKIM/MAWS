@@ -33,6 +33,8 @@ import { createHash } from 'node:crypto';
 import fs, { type BigIntStats } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, normalize, sep } from 'node:path';
+import { isNoClient, NO_CLIENT_REASON, type ClientPort } from '@shared/client/port';
+import type { ClientRef } from '@shared/ipc/client';
 import type { AppSessionId } from '@shared/graph/ids';
 import {
   BINARY_SNIFF_BYTES,
@@ -67,8 +69,7 @@ export interface FilesServiceOptions {
   records: (appSessionId: AppSessionId) => AllowlistRecord | null; // `SessionReadModel.record` in the product
   hooks?: BoundaryHooks;
   emit?: (payload: FilesChanged) => void; // files.changed
-  openPath?: (path: string) => Promise<string>; // Electron's shell.openPath: '' on success, else the error text
-  showItemInFolder?: (path: string) => void; // E1: Electron's shell.showItemInFolder, which reports nothing
+  port?: Pick<ClientPort, 'openExternal' | 'reveal'>; // the client port (OX4): open a file in its viewer; E1: show it in Finder
   env?: NodeJS.ProcessEnv; // MAWS_E2E and MAWS_E2E_OPEN_LOG, the e2e's openExternal (and E1's reveal) seam
   // E2: whether the session's deliverable records name this realpath (main's `DeliverableReader.admitted`), consulted for
   // a path outside the roots by `read`, `openExternal` and `reveal` only (Design §3, Decision Log 18)
@@ -94,8 +95,8 @@ export interface FilesService {
   write(input: FilesWriteInput): Promise<FilesWriteOutput>; // E5
   watch(appSessionId: AppSessionId, path: string, owner: string): Promise<void>;
   unwatch(appSessionId: AppSessionId, path: string, owner: string): Promise<void>;
-  openExternal(appSessionId: AppSessionId, path: string): Promise<FilesOpenExternalOutput>;
-  reveal(appSessionId: AppSessionId, path: string): Promise<FilesRevealOutput>; // E1
+  openExternal(appSessionId: AppSessionId, path: string, client: ClientRef | null): Promise<FilesOpenExternalOutput>;
+  reveal(appSessionId: AppSessionId, path: string, client: ClientRef | null): Promise<FilesRevealOutput>; // E1
   release(owner: string): void; // everything a client holds, when it ends
   watching(): string[];
   dispose(): void;
@@ -134,7 +135,7 @@ interface Confirmed {
   roots: string[];
 }
 
-export function createFilesService({ records, hooks, emit = () => {}, openPath, showItemInFolder, env = process.env, admitted /* E2 */ }: FilesServiceOptions): FilesService {
+export function createFilesService({ records, hooks, emit = () => {}, port, env = process.env, admitted /* E2 */ }: FilesServiceOptions): FilesService {
   const at = async (point: BoundaryPoint, path: string) => {
     await hooks?.at?.(point, path);
   };
@@ -380,7 +381,7 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
     }
   }
 
-  async function openExternal(appSessionId: AppSessionId, path: string): Promise<FilesOpenExternalOutput> {
+  async function openExternal(appSessionId: AppSessionId, path: string, client: ClientRef | null): Promise<FilesOpenExternalOutput> {
     const { real0 } = await precheck(appSessionId, path, DELIVERED_TOO); // E2: a delivered file opens outside wherever it lives
     // "Open externally" shows a document in its viewer; it never runs a program an agent wrote into the tree. The
     // object is in-root (step 1), so naming it in the message leaks nothing.
@@ -392,13 +393,14 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
       await fs.promises.appendFile(env.MAWS_E2E_OPEN_LOG, `${real0}\n`);
       return { opened: true, message: null };
     }
-    if (!openPath) throw new Error('files.openExternal has no opener');
-    const message = await openPath(real0);
-    return message === '' ? { opened: true, message: null } : { opened: false, message };
+    if (!port) throw new Error('files.openExternal has no opener');
+    const answer = await port.openExternal(client, { path: real0 });
+    if (isNoClient(answer)) return { opened: false, message: NO_CLIENT_REASON };
+    return answer.opened ? { opened: true, message: null } : { opened: false, message: answer.reason };
   }
 
   // E1 start: Reveal in Finder for a delivered file. A refusal is an answer (`revealed: false` and why), not a thrown error.
-  async function reveal(appSessionId: AppSessionId, path: string): Promise<FilesRevealOutput> {
+  async function reveal(appSessionId: AppSessionId, path: string, client: ClientRef | null): Promise<FilesRevealOutput> {
     let real0: string;
     try {
       ({ real0 } = await precheck(appSessionId, path, DELIVERED_TOO)); // E2
@@ -411,9 +413,8 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
       await fs.promises.appendFile(env.MAWS_E2E_OPEN_LOG, `reveal ${real0}\n`);
       return { revealed: true, message: null };
     }
-    if (!showItemInFolder) throw new Error('files.reveal has no Finder');
-    showItemInFolder(real0);
-    return { revealed: true, message: null };
+    if (!port) throw new Error('files.reveal has no Finder');
+    return isNoClient(await port.reveal(client, real0)) ? { revealed: false, message: NO_CLIENT_REASON } : { revealed: true, message: null };
   }
   // E1 end
 

@@ -9,7 +9,8 @@ import { eventChannel, type CommandName, type EventName, type HostState } from '
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
 import { clientOf, pageOf } from '../ipc/clients';
 import type { MainContext } from '../ipc/router';
-import { startConnectors, WINDOW_RECHECK_MS, type ConnectorWindow } from '.';
+import { startConnectors, WINDOW_RECHECK_MS } from '.';
+import { electronWindowShown } from '../client/window-shown';
 import { CONNECTOR_OPERATION_DEADLINE_MS } from './engine-route';
 
 const ART = '11111111-1111-4111-8111-111111111111';
@@ -194,7 +195,11 @@ beforeEach(() => {
     register: ((name: string, handler: (input: unknown, context: MainContext) => unknown) => void handlers.set(name, handler)) as never,
     index: { sessions: { get: (id) => records.get(id) ?? null }, projects: { list: () => [{ id: 'proj', directory: '/repo' }] } },
     realpath: (path) => path,
-    windowOf: (client) => (windows.get(pageOf(client)?.id ?? -1) ?? null) as ConnectorWindow | null,
+    windowShown: (client) => {
+      const win = windows.get(pageOf(client)?.id ?? -1);
+      return win ? electronWindowShown(win as never) : null;
+    },
+    port: { openExternal: vi.fn() },
     log: (line) => void logged.push(line),
   });
 });

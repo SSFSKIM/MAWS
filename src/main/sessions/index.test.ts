@@ -1,6 +1,5 @@
 import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
-import type { WebContents } from 'electron';
 import { clientOf } from '../ipc/clients';
 import type { MainContext } from '../ipc/router';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -23,7 +22,7 @@ import { emittedAppEventsSource, startSessions } from '.';
 
 // A fake page: Electron's WebContents is an EventEmitter with an id; the router hands a handler its ClientRef.
 let pageIds = 0;
-const fakePage = () => Object.assign(new EventEmitter(), { id: ++pageIds, isDestroyed: () => false }) as unknown as WebContents;
+const fakePage = () => Object.assign(new EventEmitter(), { id: ++pageIds, isDestroyed: () => false }) as unknown as Parameters<typeof clientOf>[0];
 
 // The source is real: after the renderer disappears, a disk advance must stay unread.
 describe('visibility belongs to the reporting renderer', () => {

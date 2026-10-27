@@ -4,40 +4,43 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { Settings } from '@shared/ipc/schema';
 import { digest, item, project, record } from '../../../test/support/builders';
 import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
+import type { ClientPort, NotifyEvent, NotifyRequest } from '@shared/client/port';
 
-// A stand-in for Electron's Notification: records every instance, and lets a test fire its events.
-const electron = vi.hoisted(() => {
-  type Listener = (...args: unknown[]) => void;
-  class FakeNotification {
-    static supported = true;
-    static instances: FakeNotification[] = [];
-    static isSupported = () => FakeNotification.supported;
-    listeners = new Map<string, Listener[]>();
-    shown = 0;
-    close = vi.fn();
-    constructor(readonly options: { title: string; body: string; silent: boolean }) {
-      FakeNotification.instances.push(this);
-    }
-    on(event: string, listener: Listener) {
-      this.listeners.set(event, [...(this.listeners.get(event) ?? []), listener]);
-      return this;
-    }
-    show() {
-      this.shown += 1;
-    }
-    fire(event: string, ...args: unknown[]) {
-      for (const listener of this.listeners.get(event) ?? []) listener({}, ...args);
-    }
+// A stand-in for the client port's notifications, badge and focus: records every notification asked for, and lets a
+// test fire the events the port relays, by Electron's names for them.
+const os = {
+  supported: true,
+  instances: [] as FakeNotification[],
+  badge: vi.fn<ClientPort['badge']>(),
+  focus: vi.fn<ClientPort['focus']>(),
+};
+class FakeNotification {
+  shown = 1;
+  close = vi.fn();
+  constructor(readonly options: NotifyRequest, private readonly onEvent: (event: NotifyEvent) => void) {}
+  fire(event: string, ...args: unknown[]) {
+    const kinds: Record<string, () => NotifyEvent> = {
+      show: () => ({ kind: 'shown' }), failed: () => ({ kind: 'failed', error: args[0] as string }), click: () => ({ kind: 'clicked' }),
+      reply: () => ({ kind: 'replied', text: args[0] as string }), action: () => ({ kind: 'action', index: args[0] as number }), close: () => ({ kind: 'closed' }),
+    };
+    this.onEvent(kinds[event]!());
   }
-  return { FakeNotification, bounce: vi.fn(), setBadge: vi.fn() };
-});
-vi.mock('electron', () => ({
-  Notification: electron.FakeNotification,
-  app: { dock: { bounce: electron.bounce, setBadge: electron.setBadge } },
-}));
+}
+const port: Pick<ClientPort, 'notify' | 'badge' | 'focus'> = {
+  notify: (_client, request, onEvent) => {
+    if (!os.supported) return { unsupported: 'notifications are not supported' };
+    const notification = new FakeNotification(request, onEvent);
+    os.instances.push(notification);
+    return notification;
+  },
+  badge: (client, count) => os.badge(client, count),
+  focus: (client, mode) => os.focus(client, mode),
+};
+const bounces = () => os.focus.mock.calls.filter(([, mode]) => mode === 'request');
+const brought = () => os.focus.mock.calls.filter(([, mode]) => mode === 'bring');
 
-const { SessionReadModel } = await import('../sessions/read-model');
-const { startNotifier } = await import('./notifier');
+import { SessionReadModel } from '../sessions/read-model';
+import { startNotifier } from './notifier';
 type Writer = import('../sessions/read-model').ReadModelWriter;
 
 const CHARTER = 'app-charter' as AppSessionId;
@@ -55,22 +58,21 @@ function harness(opts: { focused?: boolean; settings?: Settings; before?: (w: Wr
   opts.before?.(writer);
   const state = { viewing: null as AppSessionId | null, focused: opts.focused ?? false, settings: opts.settings ?? SETTINGS };
   const emit = vi.fn(() => true);
-  const focusWindow = vi.fn();
   const navigate = vi.fn();
   const failure = vi.fn();
-  const stop = startNotifier(model, { actions: opts.actions, failure, isFocused: () => state.focused, isViewing: (id) => state.focused && state.viewing === id, focusWindow, navigate, settings: () => state.settings, emit });
+  const stop = startNotifier(model, { port, actions: opts.actions, failure, isFocused: () => state.focused, isViewing: (id) => state.focused && state.viewing === id, navigate, settings: () => state.settings, emit });
   const set = (appSessionId: AppSessionId, items: AttentionItem[]) => writer.observeAttention(appSessionId, items);
-  return { model, writer, state, emit, focusWindow, navigate, failure, stop, set };
+  return { model, writer, state, emit, navigate, failure, stop, set };
 }
 
-const posted = () => electron.FakeNotification.instances;
+const posted = () => os.instances;
 const emitted = (emit: ReturnType<typeof vi.fn>, name: string) => emit.mock.calls.filter(([n]) => n === name).map(([, payload]) => payload);
 
 beforeEach(() => {
-  electron.FakeNotification.instances = [];
-  electron.FakeNotification.supported = true;
-  electron.bounce.mockClear();
-  electron.setBadge.mockClear();
+  os.instances = [];
+  os.supported = true;
+  os.badge.mockClear();
+  os.focus.mockClear();
   vi.restoreAllMocks();
 });
 
@@ -145,12 +147,12 @@ describe('notifier fires once per item when unfocused', () => {
 
   it('P2-C: posts an owner-channel question and must-read under their own groups (asyncInput, essential), and counts them in the badge', () => {
     for (const [asyncInput, essential, bodies] of [[true, false, ['async_input']], [false, true, ['essential_unread']]] as const) {
-      electron.FakeNotification.instances = [];
+      os.instances = [];
       const settings: Settings = { ...SETTINGS, notifications: { ...SETTINGS.notifications, kinds: { ...SETTINGS.notifications.kinds, asyncInput, essential } } };
       const h = harness({ settings });
       h.set(CHARTER, [item(CHARTER, 'async_input', T), item(CHARTER, 'essential_unread', '2026-09-28T10:01:00Z')]);
       expect(posted().map((n) => n.options.body)).toEqual(bodies.map((kind) => `${kind} for ${CHARTER}`));
-      expect(electron.setBadge).toHaveBeenLastCalledWith('1');
+      expect(os.badge).toHaveBeenLastCalledWith(null, 1);
       h.stop();
     }
   });
@@ -180,8 +182,7 @@ describe('notifier fires once per item when unfocused', () => {
     const next = item(LOOSE, 'question', T);
     h.set(LOOSE, [next]);
     expect(posted()).toHaveLength(1); // the second never reached Notification
-    expect(electron.bounce).toHaveBeenCalledTimes(2);
-    expect(electron.bounce).toHaveBeenCalledWith('informational');
+    expect(bounces()).toEqual([[null, 'request'], [null, 'request']]);
     expect(emitted(h.emit, 'attention.notified')).toEqual([
       { appSessionId: CHARTER, attentionId: first.id, delivery: 'fallback', at: expect.any(String) },
       { appSessionId: LOOSE, attentionId: next.id, delivery: 'fallback', at: expect.any(String) },
@@ -189,13 +190,13 @@ describe('notifier fires once per item when unfocused', () => {
     expect(log).toHaveBeenCalledExactlyOnceWith('notifier: OS notifications unavailable (Notifications are not allowed for this application); using dock bounce and toasts');
   });
 
-  it('uses the fallback from the start when notifications are not supported', () => {
+  it('uses the fallback when the port says notifications are not supported', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    electron.FakeNotification.supported = false;
+    os.supported = false;
     const h = harness();
     h.set(CHARTER, [item(CHARTER, 'permission', T)]);
     expect(posted()).toHaveLength(0);
-    expect(electron.bounce).toHaveBeenCalledOnce();
+    expect(bounces()).toHaveLength(1);
     expect(emitted(h.emit, 'attention.notified')).toMatchObject([{ delivery: 'fallback' }]);
   });
 
@@ -204,7 +205,7 @@ describe('notifier fires once per item when unfocused', () => {
     const read = item(CHARTER, 'permission', T);
     h.set(CHARTER, [read]);
     posted()[0].fire('click');
-    expect(h.focusWindow).toHaveBeenCalledOnce();
+    expect(brought()).toEqual([[null, 'bring']]);
     expect(h.navigate).toHaveBeenCalledExactlyOnceWith({ appSessionId: CHARTER, attentionId: read.id, source: 'notification' });
     expect(emitted(h.emit, 'attention.navigate')).toEqual([]); // never emitted around the relay
   });
@@ -221,13 +222,13 @@ describe('dock badge', () => {
   it('counts the tier-1 Needs-you sessions whatever the focus, and clears at zero', () => {
     const waiting = item(CHARTER, 'permission', T);
     const h = harness({ focused: true, before: (w) => w.observeAttention(CHARTER, [waiting]) });
-    expect(electron.setBadge).toHaveBeenLastCalledWith('1');
+    expect(os.badge).toHaveBeenLastCalledWith(null, 1);
     h.set(LOOSE, [item(LOOSE, 'question', T), item(LOOSE, 'plan', T)]);
-    expect(electron.setBadge).toHaveBeenLastCalledWith('2');
+    expect(os.badge).toHaveBeenLastCalledWith(null, 2);
     h.set(LOOSE, [item(LOOSE, 'held_peer_message', T)]); // tier 2 only
-    expect(electron.setBadge).toHaveBeenLastCalledWith('1');
+    expect(os.badge).toHaveBeenLastCalledWith(null, 1);
     h.set(CHARTER, [{ ...waiting, state: 'confirmed' }]);
-    expect(electron.setBadge).toHaveBeenLastCalledWith('');
+    expect(os.badge).toHaveBeenLastCalledWith(null, 0);
   });
 
   it('leaves out archived sessions and sessions with no record', () => {
@@ -235,7 +236,7 @@ describe('dock badge', () => {
     h.writer.observeRecord(record(CHARTER, { archived: true }));
     h.set(CHARTER, [item(CHARTER, 'permission', T)]);
     h.set('app-unknown' as AppSessionId, [item('app-unknown', 'permission', T)]);
-    expect(electron.setBadge).toHaveBeenLastCalledWith('');
+    expect(os.badge).toHaveBeenLastCalledWith(null, 0);
     expect(posted()).toHaveLength(0); // neither is in Needs you, so neither is announced
   });
 });
@@ -266,7 +267,7 @@ describe('dock badge', () => {
     h.writer.setDigest(digest(CHARTER, { phase: 'working', turnStartedAt: T }));
     h.writer.setDigest(digest(CHARTER, { lastTurnEndedAt: '2026-09-28T10:01:00Z' }));
     posted()[0].fire('reply', 'Do not lose these words');
-    await vi.waitFor(() => expect(h.focusWindow).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(brought()).toEqual([[null, 'bring']]));
     expect(h.navigate).toHaveBeenCalledWith({ appSessionId: CHARTER, attentionId: null, source: 'notification' });
     expect(h.failure).toHaveBeenCalledExactlyOnceWith({ appSessionId: CHARTER, attentionId: null, delivery: 'in-app', at: expect.any(String), error: 'Session unavailable', reply: 'Do not lose these words' });
     expect(emitted(h.emit, 'attention.notified')).toEqual([]);
@@ -279,7 +280,7 @@ describe('dock badge', () => {
     h.set(CHARTER, [request]);
     await vi.waitFor(() => expect(posted()).toHaveLength(1));
     posted()[0].fire('action', 0);
-    await vi.waitFor(() => expect(h.focusWindow).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(brought()).toEqual([[null, 'bring']]));
     expect(h.failure).toHaveBeenCalledExactlyOnceWith({ appSessionId: CHARTER, attentionId: request.id, delivery: 'in-app', at: expect.any(String), error: 'Request expired' });
     expect(emitted(h.emit, 'attention.notified')).toEqual([]);
   });

@@ -64,6 +64,16 @@ function service(extra: Partial<FilesServiceOptions> = {}) {
   services.push(created);
   return created;
 }
+// The client port's open and reveal over Electron-shaped fakes: openPath answers '' or the error text.
+function portOf({ openPath, showItemInFolder }: { openPath?: (path: string) => Promise<string>; showItemInFolder?: (path: string) => void }): NonNullable<FilesServiceOptions['port']> {
+  return {
+    openExternal: async (_client, target) => {
+      const message = await openPath!((target as { path: string }).path);
+      return message === '' ? { opened: true } : { opened: false, reason: message };
+    },
+    reveal: async (_client, path) => (showItemInFolder!(path), { revealed: true }),
+  };
+}
 function within<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<T>((_, reject) => (timer = setTimeout(() => reject(new Error(`not answered within ${ms} ms`)), ms)));
@@ -625,10 +635,10 @@ describe('files openExternal', () => {
 
   it('refuses a path outside the roots and opens nothing', async () => {
     const openPath = vi.fn(async () => '');
-    const files = service({ openPath, env: {} });
-    await expect(files.openExternal(A, join(outside, 'secret.txt'))).rejects.toThrow(OUT);
+    const files = service({ port: portOf({ openPath }), env: {} });
+    await expect(files.openExternal(A, join(outside, 'secret.txt'), null)).rejects.toThrow(OUT);
     symlinkSync(join(outside, 'secret.txt'), inRoot('leak'));
-    await expect(files.openExternal(A, inRoot('leak'))).rejects.toThrow(OUT);
+    await expect(files.openExternal(A, inRoot('leak'), null)).rejects.toThrow(OUT);
     expect(openPath).not.toHaveBeenCalled();
   });
 
@@ -645,24 +655,24 @@ describe('files openExternal', () => {
     fs.chmodSync(inRoot('movie.mp4'), 0o755); // an allowed kind with an execute bit is still refused
     mkdirSync(inRoot('Bundle.pdf')); // an allowed name on a directory is still refused
     for (const name of ['tool.py', 'archive.zip', 'data.bin', 'run.sh', 'script.command', 'movie.mp4', 'Bundle.pdf', 'legacy.doc']) {
-      await expect(files.openExternal(A, inRoot(name))).rejects.toThrow(new Error(`not opened outside MAWS: ${inRoot(name)}`));
+      await expect(files.openExternal(A, inRoot(name), null)).rejects.toThrow(new Error(`not opened outside MAWS: ${inRoot(name)}`));
     }
     expect(fs.existsSync(log)).toBe(false); // nothing was handed to the OS
     const open = ['doc.pdf', 'page.html', 'clip.mp4', 'report.DOCX', 'server.log'];
     for (const name of open) {
       write(inRoot(name), 'x');
-      expect(await files.openExternal(A, inRoot(name))).toEqual({ opened: true, message: null });
+      expect(await files.openExternal(A, inRoot(name), null)).toEqual({ opened: true, message: null });
     }
     expect(readFileSync(log, 'utf8')).toBe(open.map((name) => `${inRoot(name)}\n`).join(''));
   });
 
-  it('opens the checked realpath and relays shell.openPath’s answer', async () => {
+  it('opens the checked realpath through the client port and relays its reason', async () => {
     const openPath = vi.fn<(path: string) => Promise<string>>(async () => '');
-    const files = service({ openPath, env: {} });
-    expect(await files.openExternal(A, inRoot('doc.pdf'))).toEqual({ opened: true, message: null });
+    const files = service({ port: portOf({ openPath }), env: {} });
+    expect(await files.openExternal(A, inRoot('doc.pdf'), null)).toEqual({ opened: true, message: null });
     expect(openPath).toHaveBeenCalledWith(inRoot('doc.pdf'));
     openPath.mockResolvedValueOnce('No application knows how to open this file');
-    expect(await files.openExternal(A, inRoot('doc.pdf'))).toEqual({ opened: false, message: 'No application knows how to open this file' });
+    expect(await files.openExternal(A, inRoot('doc.pdf'), null)).toEqual({ opened: false, message: 'No application knows how to open this file' });
   });
 
   it('under MAWS_E2E=1 with MAWS_E2E_OPEN_LOG appends the realpath instead of opening', async () => {
@@ -670,14 +680,14 @@ describe('files openExternal', () => {
     const log = at('open.log');
     symlinkSync(root, at('root-link'));
     records.set(A, record(at('root-link')));
-    const files = service({ openPath, env: { MAWS_E2E: '1', MAWS_E2E_OPEN_LOG: log } });
-    expect(await files.openExternal(A, at('root-link', 'doc.pdf'))).toEqual({ opened: true, message: null });
-    expect(await files.openExternal(A, at('root-link', 'media', 'clip.mp4'))).toEqual({ opened: true, message: null });
+    const files = service({ port: portOf({ openPath }), env: { MAWS_E2E: '1', MAWS_E2E_OPEN_LOG: log } });
+    expect(await files.openExternal(A, at('root-link', 'doc.pdf'), null)).toEqual({ opened: true, message: null });
+    expect(await files.openExternal(A, at('root-link', 'media', 'clip.mp4'), null)).toEqual({ opened: true, message: null });
     expect(readFileSync(log, 'utf8')).toBe(`${inRoot('doc.pdf')}\n${inRoot('media', 'clip.mp4')}\n`);
     expect(openPath).not.toHaveBeenCalled();
     // without MAWS_E2E the log variable is ignored: the production path has no seam
-    const production = service({ openPath, env: { MAWS_E2E_OPEN_LOG: log } });
-    await production.openExternal(A, inRoot('doc.pdf'));
+    const production = service({ port: portOf({ openPath }), env: { MAWS_E2E_OPEN_LOG: log } });
+    await production.openExternal(A, inRoot('doc.pdf'), null);
     expect(openPath).toHaveBeenCalledTimes(1);
   });
 });
@@ -1016,29 +1026,29 @@ describe('files reveal', () => {
 
   it('shows any regular file in the roots, whatever its kind, since revealing runs nothing', async () => {
     const showItemInFolder = vi.fn<(path: string) => void>();
-    const files = service({ showItemInFolder, env: {} });
-    for (const name of ['hello.txt', 'tool.py', 'run.sh']) expect(await files.reveal(A, inRoot(name))).toEqual({ revealed: true, message: null });
+    const files = service({ port: portOf({ showItemInFolder }), env: {} });
+    for (const name of ['hello.txt', 'tool.py', 'run.sh']) expect(await files.reveal(A, inRoot(name), null)).toEqual({ revealed: true, message: null });
     expect(showItemInFolder.mock.calls.map(([path]) => path)).toEqual([inRoot('hello.txt'), inRoot('tool.py'), inRoot('run.sh')]);
   });
 
   it('answers revealed: false with the boundary\'s message for a path outside, a symlink, a directory or a missing file', async () => {
     const showItemInFolder = vi.fn<(path: string) => void>();
-    const files = service({ showItemInFolder, env: {} });
+    const files = service({ port: portOf({ showItemInFolder }), env: {} });
     symlinkSync(join(outside, 'secret.txt'), inRoot('leak'));
     mkdirSync(inRoot('dir'));
-    expect(await files.reveal(A, join(outside, 'secret.txt'))).toEqual({ revealed: false, message: OUT });
-    expect(await files.reveal(A, inRoot('leak'))).toEqual({ revealed: false, message: OUT });
-    expect(await files.reveal(A, inRoot('dir'))).toEqual({ revealed: false, message: `not a file: ${inRoot('dir')}` });
-    expect(await files.reveal(A, inRoot('gone.txt'))).toEqual({ revealed: false, message: `not found: ${inRoot('gone.txt')}` });
-    expect(await files.reveal(B, inRoot('hello.txt'))).toEqual({ revealed: false, message: 'unknown app session: B' });
+    expect(await files.reveal(A, join(outside, 'secret.txt'), null)).toEqual({ revealed: false, message: OUT });
+    expect(await files.reveal(A, inRoot('leak'), null)).toEqual({ revealed: false, message: OUT });
+    expect(await files.reveal(A, inRoot('dir'), null)).toEqual({ revealed: false, message: `not a file: ${inRoot('dir')}` });
+    expect(await files.reveal(A, inRoot('gone.txt'), null)).toEqual({ revealed: false, message: `not found: ${inRoot('gone.txt')}` });
+    expect(await files.reveal(B, inRoot('hello.txt'), null)).toEqual({ revealed: false, message: 'unknown app session: B' });
     expect(showItemInFolder).not.toHaveBeenCalled();
   });
 
   it('under MAWS_E2E=1 with MAWS_E2E_OPEN_LOG appends `reveal <realpath>` instead of revealing', async () => {
     const showItemInFolder = vi.fn<(path: string) => void>();
     const log = at('open.log');
-    const files = service({ showItemInFolder, env: { MAWS_E2E: '1', MAWS_E2E_OPEN_LOG: log } });
-    expect(await files.reveal(A, inRoot('hello.txt'))).toEqual({ revealed: true, message: null });
+    const files = service({ port: portOf({ showItemInFolder }), env: { MAWS_E2E: '1', MAWS_E2E_OPEN_LOG: log } });
+    expect(await files.reveal(A, inRoot('hello.txt'), null)).toEqual({ revealed: true, message: null });
     expect(readFileSync(log, 'utf8')).toBe(`reveal ${inRoot('hello.txt')}\n`);
     expect(showItemInFolder).not.toHaveBeenCalled();
   });
@@ -1061,8 +1071,8 @@ describe('files admission of delivered files', () => {
     const log = at('open.log');
     const files = service({ admitted, env: { MAWS_E2E: '1', MAWS_E2E_OPEN_LOG: log } });
     expect((await files.read({ appSessionId: A, path: join(outside, 'notes.md') })).content).toBe('# delivered notes\n');
-    expect(await files.openExternal(A, delivered)).toEqual({ opened: true, message: null });
-    expect(await files.reveal(A, delivered)).toEqual({ revealed: true, message: null });
+    expect(await files.openExternal(A, delivered, null)).toEqual({ opened: true, message: null });
+    expect(await files.reveal(A, delivered, null)).toEqual({ revealed: true, message: null });
     expect(readFileSync(log, 'utf8')).toBe(`${delivered}\nreveal ${delivered}\n`);
     expect(admitted).toHaveBeenCalledWith(A, delivered);
   });
@@ -1082,7 +1092,7 @@ describe('files admission of delivered files', () => {
     await expect(files.read({ appSessionId: A, path: join(outside, 'secret.txt') })).rejects.toThrow(OUT);
     records.set(B, record(root));
     await expect(files.read({ appSessionId: B, path: delivered })).rejects.toThrow(OUT);
-    expect(await files.reveal(B, delivered)).toEqual({ revealed: false, message: OUT });
+    expect(await files.reveal(B, delivered, null)).toEqual({ revealed: false, message: OUT });
   });
 
   it('refuses a symlink to it, inside the roots or beside it', async () => {
@@ -1091,7 +1101,7 @@ describe('files admission of delivered files', () => {
     symlinkSync(delivered, join(outside, 'link.pdf'));
     await expect(files.read({ appSessionId: A, path: inRoot('link.pdf') })).rejects.toThrow(OUT);
     await expect(files.read({ appSessionId: A, path: join(outside, 'link.pdf') })).rejects.toThrow(OUT);
-    expect(await files.reveal(A, join(outside, 'link.pdf'))).toEqual({ revealed: false, message: OUT });
+    expect(await files.reveal(A, join(outside, 'link.pdf'), null)).toEqual({ revealed: false, message: OUT });
   });
 
   it('asks only for a file outside the roots, and admits nothing without a reader', async () => {

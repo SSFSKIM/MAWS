@@ -18,6 +18,8 @@ import { worktreeDirName } from '@shared/sessions/worktree';
 import type { FirstMessage, ForkTarget, Location, SetupIntent, SetupIntentPatch } from '@shared/sessions/intent';
 import type { SetupResources, StartOutcome } from '@shared/sessions/setup';
 import type { TrustState } from '@shared/sessions/trust';
+import { isNoClient, NO_CLIENT_REASON } from '@shared/client/port';
+import type { ClientRef } from '@shared/ipc/client';
 import type { ArchiveOutcome, DeleteOutcome, StartOptions } from '@shared/ipc/schema/session';
 import { emptyProgress, HostError, hostCall, STOP_WAIT_MS, WATCHDOG_MS, type SessionServiceDeps } from './context';
 import { DeletionManifests, type DeletionManifest } from './delete-manifest';
@@ -987,8 +989,9 @@ export class SessionService {
     return this.serial(appSessionId, async () => renameRecord(await this.ready(), appSessionId, title));
   }
 
-  async revealPath(path: string): Promise<void> {
-    this.deps.reveal(await revealablePath(await this.ready(), this.deps.index.projects, path));
+  async revealPath(path: string, client: ClientRef | null): Promise<void> {
+    const answer = await this.deps.port.reveal(client, await revealablePath(await this.ready(), this.deps.index.projects, path));
+    if (isNoClient(answer)) throw new Error(`not revealed: ${NO_CLIENT_REASON}`);
   }
 
   // `session.trust.check`, read with the environment the engine receives.

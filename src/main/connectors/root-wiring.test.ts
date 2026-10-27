@@ -95,7 +95,7 @@ describe('the application root’s connector composition', () => {
     const { createDirectRoute } = await import('./direct-route'); // the instance the root imported (modules were reset)
     expect(state.connectorDeps).not.toBeNull();
     expect(state.connectorDeps!.direct).toBe(createDirectRoute);
-    expect(typeof state.connectorDeps!.windowOf).toBe('function');
+    expect(typeof state.connectorDeps!.windowShown).toBe('function');
     expect(state.connectorDeps!.index).toBeDefined();
   });
 

@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { CommandInput, CommandName, CommandOutput, EventName, EventPayload } from '@shared/ipc/schema';
+import type { ClientPort } from '@shared/client/port';
 import type { SetupIntent } from '@shared/sessions/intent';
 import type { TakeOverDeps } from './take-over'; // W7
 import type { AcquisitionMemory } from './availability'; // P2-A
@@ -43,7 +44,7 @@ export interface SessionServiceDeps {
   env: NodeJS.ProcessEnv | Promise<NodeJS.ProcessEnv>; // the environment the engine receives (C3's login-shell capture)
   emit: Emit;
   trash: (path: string) => Promise<void>; // shell.trashItem
-  reveal: (path: string) => void; // shell.showItemInFolder
+  port: Pick<ClientPort, 'reveal'>; // the client port (OX4): `session.revealPath` shows a place in Finder
   replay?: ReplaySeam | null; // the e2e seam (MAWS_E2E_REPLAY_FIXTURES)
   settings?: () => C10Settings;
   userDefaults?: () => Promise<UserEngineDefaults>; // W3: the user's own settings.json (read only); absent, none

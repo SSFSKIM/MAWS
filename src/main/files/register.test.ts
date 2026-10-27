@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FILES_READ_MAX_LENGTH } from '@shared/ipc/schema/files';
+import type { ClientPort } from '@shared/client/port';
 import type { AllowlistRecord } from './allowlist';
 
 // Electron is faked as in the git handlers' test: one recorded ipcMain handler per channel, one app window.
@@ -48,15 +49,16 @@ describe('main answers files.* through the router', () => {
     vi.restoreAllMocks();
   });
 
-  async function install(openPath = vi.fn<(path: string) => Promise<string>>(async () => ''), showItemInFolder = vi.fn<(path: string) => void>()) {
+  // The client port's open and reveal, asked through the invoking page's client
+  async function install(openExternal = vi.fn<ClientPort['openExternal']>(async () => ({ opened: true })), reveal = vi.fn<ClientPort['reveal']>(async () => ({ revealed: true }))) {
     const { registerFilesHandlers } = await import('./register');
     const { installRouter } = await import('../ipc/router');
     const records = new Map<string, AllowlistRecord>([['A', { directory: join(root, 'repo'), additionalDirectories: [], worktree: null }]]);
     const emit = vi.fn();
-    const files = registerFilesHandlers((id) => records.get(id) ?? null, { emit, openPath, showItemInFolder, env: {} });
+    const files = registerFilesHandlers((id) => records.get(id) ?? null, { emit, port: { openExternal, reveal }, env: {} });
     dispose = () => files.dispose();
     installRouter({ appUrl: APP_URL });
-    return { files, emit, openPath, followed: files.followed };
+    return { files, emit, openExternal, followed: files.followed };
   }
   const invoke = (name: string, input?: unknown) => electron.handlers.get(`maws:cmd:${name}`)!(event, input) as Promise<Result>;
 
@@ -129,15 +131,15 @@ describe('main answers files.* through the router', () => {
     expect(files.watching()).toEqual([join(root, 'repo', 'src')]);
   });
 
-  it('opens an allowed file through shell.openPath and answers its error text', async () => {
-    const openPath = vi.fn<(path: string) => Promise<string>>(async () => 'no application');
+  it('opens an allowed file through the asking client’s port and answers its reason', async () => {
+    const openPath = vi.fn<ClientPort['openExternal']>(async () => ({ opened: false, reason: 'no application' }));
     await install(openPath);
     writeFileSync(join(root, 'repo', 'doc.pdf'), '%PDF-1.4\n');
     expect(await invoke('files.openExternal', { appSessionId: 'A', path: join(root, 'repo', 'doc.pdf') })).toEqual({
       ok: true,
       value: { opened: false, message: 'no application' },
     });
-    expect(openPath).toHaveBeenCalledWith(join(root, 'repo', 'doc.pdf'));
+    expect(openPath).toHaveBeenCalledWith(expect.objectContaining({ id: expect.stringMatching(/^page:7\./) }), { path: join(root, 'repo', 'doc.pdf') });
     expect(await invoke('files.openExternal', { appSessionId: 'A', path: join(root, 'repo', 'src', 'a.ts') })).toEqual({
       ok: false,
       error: { code: 'internal', message: `not opened outside MAWS: ${join(root, 'repo', 'src', 'a.ts')}` },
@@ -147,11 +149,11 @@ describe('main answers files.* through the router', () => {
   });
 
   // E1: Reveal in Finder for a delivered file; a refusal is an answer, not an error
-  it('reveals a file in the roots through shell.showItemInFolder and answers a refusal with its message', async () => {
-    const showItemInFolder = vi.fn<(path: string) => void>();
+  it('reveals a file in the roots through the asking client’s port and answers a refusal with its message', async () => {
+    const showItemInFolder = vi.fn<ClientPort['reveal']>(async () => ({ revealed: true }));
     await install(undefined, showItemInFolder);
     expect(await invoke('files.reveal', { appSessionId: 'A', path: join(root, 'repo', 'src', 'a.ts') })).toEqual({ ok: true, value: { revealed: true, message: null } });
-    expect(showItemInFolder).toHaveBeenCalledWith(join(root, 'repo', 'src', 'a.ts'));
+    expect(showItemInFolder).toHaveBeenCalledWith(expect.objectContaining({ id: expect.stringMatching(/^page:7\./) }), join(root, 'repo', 'src', 'a.ts'));
     expect(await invoke('files.reveal', { appSessionId: 'A', path: '/etc/hosts' })).toEqual({ ok: true, value: { revealed: false, message: OUT } });
     expect(showItemInFolder).toHaveBeenCalledTimes(1);
   });

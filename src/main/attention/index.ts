@@ -1,9 +1,10 @@
 // Wires main's notifier to the app's windows (C5): focus is read from the windows themselves when an item arrives (no
-// window, or none focused, is unfocused), and a click brings the window forward, re-creating it through the same path
-// the dock's `activate` uses when none is open. The navigation goes through the relay (`navigation.ts`), which emits it
-// to a page that is listening or keeps it for `attention.pendingNavigate`; any page load or window close makes the page
-// un-announced again.
+// window, or none focused, is unfocused); the banners, the badge and a click's focus go through the client port, whose
+// Electron form brings the window forward, re-creating it when none is open. The navigation goes through the relay
+// (`navigation.ts`), which emits it to a page that is listening or keeps it for `attention.pendingNavigate`; any page
+// load or window close makes the page un-announced again.
 import { app, type App, type BrowserWindow, type WebContentsDidStartNavigationEventParams } from 'electron';
+import type { ClientPort } from '@shared/client/port';
 import type { AppSessionId, AttentionId } from '@shared/graph/ids';
 import type { ClientId } from '@shared/ipc/client';
 import type { Settings } from '@shared/ipc/schema';
@@ -16,7 +17,7 @@ import { createNavigationRelay } from './navigation';
 import type { NotificationActions } from './actions';
 import { startNotifier } from './notifier';
 
-export function startAttention(model: SessionReadModel, deps: { actions?: NotificationActions; restoredIds: ReadonlySet<AttentionId>; settings(): Settings; openWindow(): BrowserWindow }): () => void {
+export function startAttention(model: SessionReadModel, deps: { actions?: NotificationActions; restoredIds: ReadonlySet<AttentionId>; settings(): Settings; port: Pick<ClientPort, 'notify' | 'badge' | 'focus'> }): () => void {
   const viewing = new Map<ClientId, { appSessionId: AppSessionId | null; release(): void }>();
   registerMainHandler('attention.viewing', ({ appSessionId }, { client }) => {
     let page = viewing.get(client.id);
@@ -44,14 +45,8 @@ export function startAttention(model: SessionReadModel, deps: { actions?: Notifi
   followAppPages(app, relay.pageGone);
 
   const isFocused = () => appWindows().some((win) => win.isFocused()); // E2: app windows only
-  const focusWindow = () => {
-    const win = appWindows()[0] ?? deps.openWindow(); // E2
-    if (win.isMinimized()) win.restore();
-    win.show();
-    win.focus();
-  };
   // Listen immediately, including during store retries; only restored arrivals are silent.
-  const stop = startNotifier(model, { actions: deps.actions, restoredIds: deps.restoredIds, isFocused, isViewing, focusWindow, navigate: relay.deliver, failure: relay.failure, settings: deps.settings, emit });
+  const stop = startNotifier(model, { port: deps.port, actions: deps.actions, restoredIds: deps.restoredIds, isFocused, isViewing, navigate: relay.deliver, failure: relay.failure, settings: deps.settings, emit });
   return () => { stop(); for (const page of viewing.values()) page.release(); };
 }
 

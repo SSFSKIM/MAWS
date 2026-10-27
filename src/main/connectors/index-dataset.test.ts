@@ -10,7 +10,8 @@ import type { CommandName, EventName } from '@shared/ipc/schema';
 import { validateCommandInput, validateCommandOutput, validateEventPayload } from '@shared/ipc/validate';
 import { clientOf } from '../ipc/clients';
 import type { MainContext } from '../ipc/router';
-import { startConnectors, type ConnectorWindow } from '.';
+import { startConnectors } from '.';
+import { electronWindowShown } from '../client/window-shown';
 
 const ART = '11111111-1111-4111-8111-111111111111';
 const REQUEST = '22222222-2222-4222-8222-222222222222';
@@ -115,7 +116,8 @@ beforeEach(() => {
     register: ((name: string, handler: (input: unknown, context: MainContext) => unknown) => void handlers.set(name, handler)) as never,
     index: { sessions: { get: () => ({ projectId: 'proj', directory: '/repo' }) }, projects: { list: () => [{ id: 'proj', directory: '/repo' }] } },
     realpath: (path) => path,
-    windowOf: () => new FakeWindow() as unknown as ConnectorWindow,
+    windowShown: () => electronWindowShown(new FakeWindow() as never),
+    port: { openExternal: vi.fn() },
     log: () => {},
   });
 });

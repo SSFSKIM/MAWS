@@ -10,7 +10,7 @@ import type { DirectOperationOutcome, DirectSource } from '@shared/ipc/schema/co
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
 import { clientOf } from '../ipc/clients';
 import type { MainContext } from '../ipc/router';
-import { startConnectors, type ConnectorWindow, type ConnectorsDeps } from '.';
+import { startConnectors, type ConnectorsDeps } from '.';
 import { createDirectRoute, type DirectRouteDeps } from './direct-route';
 import type { ConnectorOAuthProvider } from './oauth-provider';
 
@@ -98,7 +98,8 @@ function start(over: Partial<ConnectorsDeps> = {}) {
     register: ((name: string, handler: (input: unknown, context: MainContext) => unknown) => void handlers.set(name, handler)) as never,
     index: { sessions: { get: () => ({ projectId: 'proj', directory: '/repo' }) }, projects: { list: () => [{ id: 'proj', directory: '/repo' }] } },
     realpath: (path) => path,
-    windowOf: () => null as unknown as ConnectorWindow,
+    windowShown: () => null,
+    port: { openExternal: vi.fn() },
     log: () => {},
     direct: (deps) => {
       routeDeps = deps;

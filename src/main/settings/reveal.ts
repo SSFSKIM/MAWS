@@ -5,21 +5,22 @@
 // answers, so it keeps no list of the paths the engine's reads named; every file the widgets name lies under those roots.
 import { realpath } from 'node:fs/promises';
 import { isAbsolute, relative } from 'node:path';
+import { isNoClient, type ClientPort } from '@shared/client/port';
+import type { ClientRef } from '@shared/ipc/client';
 
 export interface RevealDeps {
   configHome(): string; // CLAUDE_CONFIG_DIR, else ~/.claude
   sessionDirectories(): string[]; // every known session record's directory and additional directories
-  showItemInFolder(path: string): void; // Electron's shell.showItemInFolder
+  port: Pick<ClientPort, 'reveal'>; // the client port (OX4), asked through the requesting client
 }
 
-export async function revealPath(path: string, deps: RevealDeps): Promise<{ revealed: boolean }> {
+export async function revealPath(path: string, client: ClientRef | null, deps: RevealDeps): Promise<{ revealed: boolean }> {
   if (!isAbsolute(path)) return { revealed: false };
   const real = await resolved(path);
   if (real === null) return { revealed: false }; // nothing there to show
   const roots = await Promise.all([...new Set([deps.configHome(), ...deps.sessionDirectories()])].map(resolved)); // many sessions share a directory
   if (!roots.some((root) => root !== null && within(root, real))) return { revealed: false };
-  deps.showItemInFolder(real);
-  return { revealed: true };
+  return { revealed: !isNoClient(await deps.port.reveal(client, real)) };
 }
 
 async function resolved(path: string): Promise<string | null> {

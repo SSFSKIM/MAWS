@@ -2,7 +2,11 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { saveTextFile, type SaveDialog } from './save-text';
+import type { ClientPort } from '@shared/client/port';
+import { saveTextFile } from './save-text';
+
+type SaveDialog = ClientPort['save'];
+const saving = (path: string | null): { port: Pick<ClientPort, 'save'> } => ({ port: { save: async () => (path === null ? { cancelled: true } : { path }) } });
 
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'maws-save-')); });
@@ -11,9 +15,9 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 describe('layout.saveTextFile writes then renames', () => {
   it('opens the save dialog at Downloads/<defaultName> and saves the text without temporary leftovers', async () => {
     const target = join(dir, 'a.txt');
-    const showSaveDialog = vi.fn<SaveDialog>(async () => ({ canceled: false, filePath: target }));
-    const result = await saveTextFile({ defaultName: 'a.txt', text: 'Reply with exactly OK\n' }, { showSaveDialog, downloads: '/Users/new/Downloads' });
-    expect(showSaveDialog).toHaveBeenCalledExactlyOnceWith({ defaultPath: '/Users/new/Downloads/a.txt' });
+    const save = vi.fn<SaveDialog>(async () => ({ path: target }));
+    const result = await saveTextFile({ defaultName: 'a.txt', text: 'Reply with exactly OK\n' }, null, { port: { save }, downloads: '/Users/new/Downloads' });
+    expect(save).toHaveBeenCalledExactlyOnceWith(null, { defaultPath: '/Users/new/Downloads/a.txt' });
     expect(result).toEqual({ saved: true, path: target });
     expect(readFileSync(target, 'utf8')).toBe('Reply with exactly OK\n');
     expect(readdirSync(dir)).toEqual(['a.txt']);
@@ -21,34 +25,34 @@ describe('layout.saveTextFile writes then renames', () => {
 
   it('replaces an existing file whole', async () => {
     const target = join(dir, 'b.txt');
-    const deps = { showSaveDialog: async () => ({ canceled: false, filePath: target }), downloads: dir };
-    await saveTextFile({ defaultName: 'b.txt', text: 'first, longer text' }, deps);
-    await saveTextFile({ defaultName: 'b.txt', text: 'second' }, deps);
+    const deps = { ...saving(target), downloads: dir };
+    await saveTextFile({ defaultName: 'b.txt', text: 'first, longer text' }, null, deps);
+    await saveTextFile({ defaultName: 'b.txt', text: 'second' }, null, deps);
     expect(readFileSync(target, 'utf8')).toBe('second');
     expect(readdirSync(dir)).toEqual(['b.txt']);
   });
 
   it('answers saved: false on cancel and writes nothing', async () => {
-    const result = await saveTextFile({ defaultName: 'a.txt', text: 'x' }, { showSaveDialog: async () => ({ canceled: true, filePath: '' }), downloads: dir });
+    const result = await saveTextFile({ defaultName: 'a.txt', text: 'x' }, null, { ...saving(null), downloads: dir });
     expect(result).toEqual({ saved: false });
     expect(readdirSync(dir)).toEqual([]);
   });
 
   it('refuses a defaultName with a path separator before opening any dialog', async () => {
-    const showSaveDialog = vi.fn<SaveDialog>();
+    const save = vi.fn<SaveDialog>();
     for (const defaultName of ['../x.txt', 'a/b.txt', 'a\\b.txt']) {
-      await expect(saveTextFile({ defaultName, text: 'x' }, { showSaveDialog, downloads: dir })).rejects.toMatchObject({
+      await expect(saveTextFile({ defaultName, text: 'x' }, null, { port: { save }, downloads: dir })).rejects.toMatchObject({
         error: { code: 'invalid_input', message: expect.stringContaining('path separator') },
       });
     }
-    expect(showSaveDialog).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
   });
 
   it('removes its temporary file on a failed rename and leaves the destination intact', async () => {
     const target = join(dir, 'folder');
     mkdirSync(target);
     writeFileSync(join(target, 'kept.txt'), 'keep');
-    await expect(saveTextFile({ defaultName: 'a.txt', text: 'x' }, { showSaveDialog: async () => ({ canceled: false, filePath: target }), downloads: dir })).rejects.toThrow();
+    await expect(saveTextFile({ defaultName: 'a.txt', text: 'x' }, null, { ...saving(target), downloads: dir })).rejects.toThrow();
     expect(readFileSync(join(target, 'kept.txt'), 'utf8')).toBe('keep');
     expect(readdirSync(dir)).toEqual(['folder']);
   });
@@ -56,7 +60,7 @@ describe('layout.saveTextFile writes then renames', () => {
   it('refuses a destination whose parent is not a directory', async () => {
     const parent = join(dir, 'not-a-directory');
     writeFileSync(parent, 'keep');
-    await expect(saveTextFile({ defaultName: 'a.txt', text: 'x' }, { showSaveDialog: async () => ({ canceled: false, filePath: join(parent, 'a.txt') }), downloads: dir })).rejects.toMatchObject({ code: 'ENOTDIR' });
+    await expect(saveTextFile({ defaultName: 'a.txt', text: 'x' }, null, { ...saving(join(parent, 'a.txt')), downloads: dir })).rejects.toMatchObject({ code: 'ENOTDIR' });
     expect(readFileSync(parent, 'utf8')).toBe('keep');
     expect(readdirSync(dir)).toEqual(['not-a-directory']);
   });

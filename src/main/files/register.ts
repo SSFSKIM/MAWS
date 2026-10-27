@@ -3,6 +3,7 @@
 // are held per requesting client, as `registerGitHandlers` holds git's: a client that ends (its page closes, crashes or
 // reloads) releases whatever it still holds, since its page can no longer unwatch and a reloaded page watches afresh.
 import type { AppSessionId } from '@shared/graph/ids';
+import type { ClientPort } from '@shared/client/port';
 import type { ClientId, ClientRef } from '@shared/ipc/client';
 import type { FilesChanged } from '@shared/ipc/schema/files';
 import { registerMainHandler } from '../ipc/router';
@@ -11,8 +12,7 @@ import { createFilesService, type FilesService } from './service';
 
 export interface FilesHandlerDeps {
   emit(payload: FilesChanged): void;
-  openPath(path: string): Promise<string>; // Electron's shell.openPath
-  showItemInFolder(path: string): void; // E1: Electron's shell.showItemInFolder (files.reveal)
+  port: Pick<ClientPort, 'openExternal' | 'reveal'>; // the client port (OX4): files.openExternal, E1's files.reveal
   env?: NodeJS.ProcessEnv;
   admitted?: (appSessionId: AppSessionId, real: string) => Promise<boolean>; // E2: the deliverable reader's admission (Design §3)
 }
@@ -44,7 +44,7 @@ export function registerFilesHandlers(records: (appSessionId: AppSessionId) => A
     if (!followed.has(client.id)) await files.unwatch(session(appSessionId), path, client.id); // released while in flight
   });
   registerMainHandler('files.unwatch', ({ appSessionId, path }, { client }) => files.unwatch(session(appSessionId), path, client.id));
-  registerMainHandler('files.openExternal', ({ appSessionId, path }) => files.openExternal(session(appSessionId), path));
-  registerMainHandler('files.reveal', ({ appSessionId, path }) => files.reveal(session(appSessionId), path)); // E1
+  registerMainHandler('files.openExternal', ({ appSessionId, path }, { client }) => files.openExternal(session(appSessionId), path, client));
+  registerMainHandler('files.reveal', ({ appSessionId, path }, { client }) => files.reveal(session(appSessionId), path, client)); // E1
   return Object.assign(files, { followed: followed as ReadonlySet<ClientId> });
 }

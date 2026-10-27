@@ -1,17 +1,16 @@
 // `layout.pickFiles`, the composer's "+" menu (C7 execution document, Interfaces "X2 additions"; §4.1: the renderer
-// loads nothing by path, so picked files reach it through main). The native open dialog; an image up to 20 MiB or a PDF
+// loads nothing by path, so picked files reach it through main). The client port's pick (OX4); an image up to 20 MiB or a PDF
 // up to 32 MiB comes back with its bytes (base64) for an attachment (PNG, JPEG, GIF and WebP only), anything else by path alone (the renderer mentions
 // it). `kind: 'directory'` answers the chosen directory's path and never reads what is in it. E11: `pathsOnly` answers
 // every file by path alone (the Question sheet's file question, which keeps only paths), reading no bytes.
-import type { OpenDialogOptions } from 'electron';
 import { readFile, stat } from 'node:fs/promises';
 import { basename, extname } from 'node:path';
+import type { ClientPort, PickRequest } from '@shared/client/port';
+import type { ClientRef } from '@shared/ipc/client';
 import type { PickedFile, PickFilesInput } from '@shared/ipc/schema/layout';
 
 export const IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 export const PDF_MAX_BYTES = 32 * 1024 * 1024;
-
-export type OpenDialog = (options: OpenDialogOptions) => Promise<{ canceled: boolean; filePaths: string[] }>;
 
 const MEDIA_TYPES: Record<string, string> = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.heic': 'image/heic', '.bmp': 'image/bmp', '.tiff': 'image/tiff', '.tif': 'image/tiff',
@@ -22,16 +21,15 @@ const MEDIA_TYPES: Record<string, string> = {
 const ATTACHABLE_IMAGES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 const IMAGE_EXTENSIONS = Object.keys(MEDIA_TYPES).filter((ext) => ATTACHABLE_IMAGES.has(MEDIA_TYPES[ext]!)).map((ext) => ext.slice(1));
 
-export async function pickFiles(input: PickFilesInput, deps: { showOpenDialog: OpenDialog; imageMaxBytes?: number }): Promise<{ files: PickedFile[] }> {
+export async function pickFiles(input: PickFilesInput, client: ClientRef | null, deps: { port: Pick<ClientPort, 'pick'>; imageMaxBytes?: number }): Promise<{ files: PickedFile[] }> {
   // E1: `multiple` holds for directories too (the Question sheet's `multiple` folder question)
-  const base: OpenDialogOptions['properties'] = input.kind === 'directory' ? ['openDirectory', 'createDirectory'] : ['openFile'];
-  const options: OpenDialogOptions = { properties: input.multiple ? [...base!, 'multiSelections'] : base };
-  if (input.kind === 'photos') options.filters = [{ name: 'Images', extensions: IMAGE_EXTENSIONS }];
-  if (input.directory !== null) options.defaultPath = input.directory;
-  const { canceled, filePaths } = await deps.showOpenDialog(options);
-  if (canceled) return { files: [] };
+  const request: PickRequest = { kind: input.kind === 'directory' ? 'directory' : 'file', multiple: input.multiple };
+  if (input.kind === 'photos') request.filters = [{ name: 'Images', extensions: IMAGE_EXTENSIONS }];
+  if (input.directory !== null) request.defaultPath = input.directory;
+  const answer = await deps.port.pick(client, request);
+  if (!('paths' in answer)) return { files: [] }; // cancelled, or no client to ask
   const files: PickedFile[] = [];
-  for (const path of filePaths) {
+  for (const path of answer.paths) {
     if (input.kind === 'directory') {
       files.push({ path, name: basename(path), bytes: 0, mediaType: 'inode/directory', data: null });
       continue;

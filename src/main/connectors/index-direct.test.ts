@@ -11,7 +11,8 @@ import type { DirectOperationOutcome } from '@shared/ipc/schema/connectors';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
 import { clientOf } from '../ipc/clients';
 import type { MainContext } from '../ipc/router';
-import { startConnectors, type ConnectorWindow } from '.';
+import { startConnectors } from '.';
+import { electronWindowShown } from '../client/window-shown';
 import { createDirectRoute } from './direct-route';
 
 const ART = '11111111-1111-4111-8111-111111111111';
@@ -166,7 +167,8 @@ beforeEach(() => {
     register: ((name: string, handler: (input: unknown, context: MainContext) => unknown) => void handlers.set(name, handler)) as never,
     index: { sessions: { get: (id) => (id === 'app-own' ? { projectId: 'proj', directory: '/repo' } : null) }, projects: { list: () => [{ id: 'proj', directory: '/repo' }] } },
     realpath: (path) => path,
-    windowOf: () => new FakeWindow() as unknown as ConnectorWindow,
+    windowShown: () => electronWindowShown(new FakeWindow() as never),
+    port: { openExternal: vi.fn() },
     log: (line) => void logged.push(line),
     direct: createDirectRoute,
   });

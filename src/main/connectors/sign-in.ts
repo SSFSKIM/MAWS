@@ -35,6 +35,8 @@
 // old flow's callback (findings-m4 3, 4). No event carries the authorization URL, a code or a state. MAWS's own OAuth
 // store (./oauth-store.ts) is not involved. `mcp_set_servers` is never used (it drops the session's SDK server).
 import { randomUUID } from 'node:crypto';
+import { isNoClient, NO_CLIENT_REASON, type ClientPort } from '@shared/client/port';
+import type { ClientRef } from '@shared/ipc/client';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import { CONNECTOR_ALREADY_CONNECTED, type ConnectorSignInChanged } from '@shared/ipc/schema/connectors';
 import { entryRefusal } from './sign-in-entry';
@@ -61,7 +63,7 @@ export interface SignInHost {
 export interface SignInDeps {
   host: SignInHost;
   listen: ListenLoopback;
-  open(url: string): boolean; // the one scheme-checked browser seam (`openExternalUrl`)
+  port: Pick<ClientPort, 'openExternal'>; // the client port (OX4): the engine's authorization URL, in the asking client's browser
   emit(event: ConnectorSignInChanged): void;
   ready(appSessionId: string): boolean; // the session's process is ready now
   onSessionGone(listener: (appSessionId: string) => void): () => void; // its process left ready
@@ -84,7 +86,7 @@ export interface ConnectorConfiguration {
 export const connectorKey = ({ name, scope, cwd }: ConnectorConfiguration): string => [scope, scope === 'user' ? '' : (cwd ?? ''), name].join('\u0000');
 
 export interface SignIn {
-  start(input: ConnectorConfiguration & { path: string; appSessionId: string }): { opId: string };
+  start(input: ConnectorConfiguration & { path: string; appSessionId: string }, client: ClientRef | null): { opId: string };
   cancel(opId: string): boolean;
   stop(): void;
 }
@@ -105,6 +107,7 @@ interface Operation {
   connector: string; // connectorKey
   configuration: ConnectorConfiguration & { path: string }; // the entry asked for
   appSessionId: string;
+  client: ClientRef | null; // who asked: the browser the authorization URL opens in
   state: State;
   listener: LoopbackListener | null;
   timers: Set<NodeJS.Timeout>;
@@ -254,7 +257,11 @@ export function createSignIn(deps: SignInDeps): SignIn {
     const { authUrl, requiresUserAction, redirectScheme, state } = auth.answer;
     if (authUrl === undefined || requiresUserAction === false) return move(op, 'done', { where: 'here' });
     move(op, 'waiting_browser');
-    if (!deps.open(authUrl)) return fail(op, 'engine', 'the engine answered an authorization URL the browser seam refused');
+    // Electron's port answers as the URL is handed off, before the browser can call back; a port that answers later
+    // (mawsd's, O3) must not let the callback arrive before waiting_callback, which refuses it until then
+    const opened = await deps.port.openExternal(op.client, { url: authUrl });
+    if (!live(op)) return;
+    if (isNoClient(opened) || !opened.opened) return fail(op, 'engine', `the authorization URL was not opened: ${isNoClient(opened) ? NO_CLIENT_REASON : opened.reason}`);
     if (redirectScheme === 'custom' && typeof state === 'string') {
       expected = state;
       move(op, 'waiting_callback');
@@ -273,14 +280,14 @@ export function createSignIn(deps: SignInDeps): SignIn {
   });
 
   return {
-    start({ name, scope, cwd, path, appSessionId }) {
+    start({ name, scope, cwd, path, appSessionId }, client) {
       const connector = connectorKey({ name, scope, cwd });
       // the connector's running sign-in, and the one driving this session's engine flow for the name
       for (const previous of new Set([byConnector.get(connector), byFlow.get(flowKey({ appSessionId, name }))])) {
         const op = previous === undefined ? undefined : operations.get(previous);
         if (op) move(op, 'cancelled');
       }
-      const op: Operation = { opId: randomUUID(), name, connector, configuration: { name, scope, cwd, path }, appSessionId, state: 'starting', listener: null, timers: new Set() };
+      const op: Operation = { opId: randomUUID(), name, connector, configuration: { name, scope, cwd, path }, appSessionId, client, state: 'starting', listener: null, timers: new Set() };
       operations.set(op.opId, op);
       byConnector.set(connector, op.opId);
       byFlow.set(flowKey(op), op.opId);
@@ -312,7 +319,7 @@ export interface SignInServiceDeps {
   host: SignInHost;
   onSessionStatus(listener: (payload: { appSessionId: string; status: { process: string; cwd: string } }) => void): () => void;
   onHostLost(listener: () => void): () => void; // the engine host left ready: every session with it
-  open(url: string): boolean;
+  port: Pick<ClientPort, 'openExternal'>;
   listen: ListenLoopback;
 }
 
@@ -342,13 +349,13 @@ export function startSignIn(deps: SignInServiceDeps): { stop(): void } {
   const signIn = createSignIn({
     host: deps.host,
     listen: deps.listen,
-    open: deps.open,
+    port: deps.port,
     emit: (event) => void deps.emit('connectors.signInChanged', event),
     ready: (appSessionId) => ready.has(appSessionId),
     onSessionGone: (listener) => (goneListeners.add(listener), () => goneListeners.delete(listener)),
     check,
   });
-  deps.register('connectors.signIn', ({ name, scope, cwd, path, appSessionId }) => signIn.start({ name, scope, cwd, path, appSessionId }));
+  deps.register('connectors.signIn', ({ name, scope, cwd, path, appSessionId }, { client }) => signIn.start({ name, scope, cwd, path, appSessionId }, client));
   deps.register('connectors.signInCancel', ({ opId }) => ({ cancelled: signIn.cancel(opId) }));
   return {
     stop() {
