@@ -4,6 +4,8 @@ import type { TabRef } from '@shared/ipc/schema/layout';
 import { focusedProject } from '../keymap/actions-runtime';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
+import { machineOf } from '@shared/machine/address';
+import { ipc } from '../ipc/client';
 
 export type CustomizeSection = Extract<TabRef, { kind: 'customize' }>['section'];
 // Undefined is a restored tab's focused project; null is an explicit choice of user scope. `directory` is a page no
@@ -23,8 +25,10 @@ export function openCustomize(section: CustomizeSection = 'plugins', projectId: 
 // directory: the project whose directory it is, else the directory itself, never a parent project or the user
 // configuration; the library showing that page opens on Discover, mounted already or mounting.
 export const useDiscoverRequest = create<{ cwd: string | null } | { cwd?: undefined }>(() => ({}));
+// P5 O6 M4: `cwd` is this machine's (the session plugin widgets open it only for this machine's sessions), so it names
+// this machine's project of that directory, never another machine's of the same path (Customize is local until O4).
 export function openDiscover(cwd: string): void {
-  const project = [...useSessions.getState().projects.values()].find((p) => p.directory === cwd);
+  const project = [...useSessions.getState().projects.values()].find((p) => p.directory === cwd && machineOf(p.id) === ipc.localMachine);
   showCustomize('plugins', project ? { projectId: project.id } : { projectId: null, directory: cwd });
   useDiscoverRequest.setState({ cwd }, true);
 }

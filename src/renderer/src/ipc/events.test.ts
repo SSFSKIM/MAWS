@@ -485,6 +485,25 @@ describe('the shell per machine', () => {
     expect(stores.sessions.getState().records.get(onB('b1'))?.title.text).toBe('renamed');
   });
 
+  // M4's review: events heard before the first roster belong to no generation the page has reconciled.
+  it('takes the first generation it learns as new: B’s events heard before the roster do not outrank B’s restarted counter', async () => {
+    const { fake, stores } = setup(0, { machines: null });
+    fake.event('session.changed', { record: titledB('b', 'before the restart'), cause: 'update', revision: 900 }, OTHER_MACHINE);
+    fake.event('machines.changed', { machines: [LOCAL_ENTRY, other('down', 1)] });
+    fake.event('machines.changed', { machines: [LOCAL_ENTRY, other('up', 2)] });
+    await answerSnapshots(fake);
+    await answerOther(fake, [titledB('b', 'after the restart')], 1);
+    expect(stores.sessions.getState().records.get(onB('b'))?.title.text).toBe('after the restart');
+  });
+
+  it('forgets B’s statuses heard before the first roster when that roster reports B down', async () => {
+    const { fake, stores } = setup(0, { machines: null });
+    fake.event('session.status', { appSessionId: 'b', status: status('b') }, OTHER_MACHINE);
+    expect(stores.sessions.getState().engine.has(onB('b'))).toBe(true);
+    await fake.reply('machines.list', { machines: [LOCAL_ENTRY, other('down', 1)] });
+    expect(stores.sessions.getState().engine.has(onB('b'))).toBe(false);
+  });
+
   it('a new generation drops the events still queued from the generation before', async () => {
     const { fake, stores } = setup(60_000, { machines: [LOCAL_ENTRY, other('up', 1)] }); // a window that never closes by itself
     await answerSnapshots(fake);

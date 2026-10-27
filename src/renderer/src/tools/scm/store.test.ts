@@ -10,7 +10,7 @@ import type { PreloadBridge } from '@shared/ipc/schema';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import type { ScmRemoteOutput } from '@shared/ipc/schema/scm';
 import { isolatedGitEnv } from '../../../../../test/support/git-env';
-import { at, TEST_MACHINE } from '../../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
 import { createClient } from '../../ipc/client';
 import { checkoutKey } from '../../ipc/machine';
 import { queryClient } from '../../ipc/query';
@@ -256,7 +256,7 @@ describe('source control store: diffs', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(diffOf(store.getState(), target)).toMatchObject({ status: 'ok' });
 
-    for (const [i, mutate] of [() => store.getState().stage(ui, at(A), ['untracked.txt']), () => store.getState().discard(ui, at(A), [{ path: 'untracked.txt', group: 'untracked' }])].entries()) {
+    for (const [i, mutate] of [() => store.getState().stage(ui, at(A), DIR, ['untracked.txt']), () => store.getState().discard(ui, at(A), DIR, [{ path: 'untracked.txt', group: 'untracked' }])].entries()) {
       store.getState().statusChanged(checkoutKey(TEST_MACHINE, DIR)); // a re-read, in flight when the mutation goes out
       await vi.advanceTimersByTimeAsync(SCM_REFRESH_MS);
       await mutate();
@@ -274,6 +274,53 @@ describe('source control store: diffs', () => {
     reads[5]!('gone');
     await vi.advanceTimersByTimeAsync(0);
     expect(diffOf(store.getState(), target)).toEqual({ status: 'error', message: 'not an untracked file: untracked.txt' });
+    off();
+  });
+
+  // P5 O6 M4 (the task review): a stage or discard is of one checkout on one machine; another machine's checkout of the
+  // same directory and path is neither dropped nor read again because of it.
+  it('a stage on one machine leaves another machine’s untracked diff of the same path alone', async () => {
+    vi.useFakeTimers();
+    const here: ScmDiffTarget = { machine: TEST_MACHINE, directory: DIR, scope: 'untracked', path: 'untracked.txt' };
+    const there: ScmDiffTarget = { ...here, machine: OTHER_MACHINE };
+    const main = installFakeMain((name) => {
+      if (name === 'scm.stage') return ok({ ok: true, status: statusOf({ files: [] }), output: '' });
+      return name === 'git.diff' ? ok({ patch: untrackedPatch, files: [{ path: 'untracked.txt', oldPath: null, insertions: 2, deletions: 0, binary: false }] }) : ok();
+    });
+    const store = createScmStore(validated(main.bridge));
+    const ui = createScmUi({ session: at(A) });
+    const offs = [store.getState().hold(here), store.getState().hold(there)];
+    await vi.advanceTimersByTimeAsync(0);
+    const diffsOn = (machine: string) => main.calls.filter((c) => c.name === 'git.diff' && c.machine === machine).length;
+    expect([diffsOn(TEST_MACHINE), diffsOn(OTHER_MACHINE)]).toEqual([1, 1]);
+    await store.getState().stage(ui, at(A), DIR, ['untracked.txt']);
+    await vi.advanceTimersByTimeAsync(SCM_REFRESH_MS);
+    expect([diffsOn(TEST_MACHINE), diffsOn(OTHER_MACHINE)]).toEqual([2, 1]);
+    offs.forEach((off) => off());
+  });
+
+  it('keeps another machine’s untracked answer that a stage on this machine went out during', async () => {
+    vi.useFakeTimers();
+    const there: ScmDiffTarget = { machine: OTHER_MACHINE, directory: DIR, scope: 'untracked', path: 'untracked.txt' };
+    const reads: ((answer: 'patch' | 'gone') => void)[] = [];
+    const main = installFakeMain(async (name, input) => {
+      if (name === 'scm.stage') return ok({ ok: true, status: statusOf({ files: [] }), output: '' });
+      if (name !== 'git.diff') return ok();
+      const answer = await new Promise<'patch' | 'gone'>((resolve) => reads.push(resolve));
+      return answer === 'gone' ? fail(`not an untracked file: ${input.path}`) : ok({ patch: untrackedPatch, files: [{ path: 'untracked.txt', oldPath: null, insertions: 2, deletions: 0, binary: false }] });
+    });
+    const store = createScmStore(validated(main.bridge));
+    const ui = createScmUi({ session: at(A) });
+    const off = store.getState().hold(there);
+    await vi.advanceTimersByTimeAsync(0);
+    reads[0]!('patch');
+    await vi.advanceTimersByTimeAsync(0);
+    store.getState().statusChanged(checkoutKey(OTHER_MACHINE, DIR)); // B's re-read, in flight when A stages
+    await vi.advanceTimersByTimeAsync(SCM_REFRESH_MS);
+    await store.getState().stage(ui, at(A), DIR, ['untracked.txt']);
+    reads[1]!('gone');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(diffOf(store.getState(), there)).toEqual({ status: 'error', message: 'not an untracked file: untracked.txt' });
     off();
   });
 
@@ -300,7 +347,7 @@ describe('source control store applies no status of its own and resumes a run fr
     const entries = git.getState().entries;
     const ui = createScmUi({ session: at(A) });
     ui.setState({ notice: { kind: 'changed', text: 'stale', output: '' } });
-    const result = await store.getState().stage(ui, at(A), ['src/app.ts', 'udir/']);
+    const result = await store.getState().stage(ui, at(A), DIR, ['src/app.ts', 'udir/']);
     expect(result).toMatchObject({ ok: true, value: { ok: true } });
     await store.getState().unstage(ui, at(A), ['src/app.ts']);
     expect(main.callsOf('scm.stage')).toEqual([{ appSessionId: A, paths: ['src/app.ts', 'udir/'] }]);
@@ -324,7 +371,7 @@ describe('source control store applies no status of its own and resumes a run fr
     // E11 W-D: a discard's refusal or failure is its sheet's to show (the sheet stays open), not the notice behind it
     answer = ok(refusal('unmerged', '"a.ts" has a merge conflict'));
     ui.setState({ notice: null });
-    await store.getState().discard(ui, at(A), [{ path: 'a.ts', group: 'unstaged' }]);
+    await store.getState().discard(ui, at(A), DIR, [{ path: 'a.ts', group: 'unstaged' }]);
     expect(ui.getState().notice).toBeNull();
     expect(main.callsOf('scm.discard')).toEqual([{ appSessionId: A, entries: [{ path: 'a.ts', group: 'unstaged' }] }]);
   });
@@ -398,7 +445,7 @@ describe('source control store applies no status of its own and resumes a run fr
     });
     const store = createScmStore(validated(main.bridge));
     const ui = createScmUi({ session: at(A) });
-    const done = store.getState().stage(ui, at(A), ['a.ts']);
+    const done = store.getState().stage(ui, at(A), DIR, ['a.ts']);
     await tick();
     ui.setState({ session: at(B) });
     release();

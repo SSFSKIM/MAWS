@@ -240,7 +240,8 @@ export function connectShell(
       if (m.ref === local) continue;
       const link = linkOf(m.ref);
       if (m.state !== 'up') {
-        if (!link.up) continue;
+        // A machine not up has no live host here, whether or not this page saw it up: its statuses go, those heard
+        // before the first roster included (forgetting none is a no-op).
         link.up = false;
         link.hostState = null;
         link.departures++;
@@ -252,10 +253,11 @@ export function connectShell(
       link.up = true;
       link.hostState = null; // unknown until its first event; counted ready while the link is up
       link.freshness.advance();
-      if (link.generation !== null) {
-        queued = queued.filter((q) => q.m !== m.ref);
-        sessions().resetMachine(m.ref);
-      }
+      // Every generation the page learns is new to it, the first included: what it heard before (events that came ahead
+      // of the first roster) belongs to no generation it has reconciled, and could outrank a restarted machine's counter.
+      // The snapshot taken below is newer than all of it.
+      queued = queued.filter((q) => q.m !== m.ref);
+      sessions().resetMachine(m.ref);
       link.generation = m.generation;
       void snapshot(m.ref).then((applied) => {
         if (!applied) return;

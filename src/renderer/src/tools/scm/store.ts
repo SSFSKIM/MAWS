@@ -20,6 +20,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
 import type { GitDiffInput } from '@shared/ipc/schema/git';
 import type { RemotePlan, ScmDiscardInput, ScmMutation, ScmRemoteOutput } from '@shared/ipc/schema/scm';
+import { machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../../ipc/client';
 import { checkoutKey } from '../../ipc/machine';
@@ -55,9 +56,10 @@ export interface ScmStore {
   hold(target: ScmDiffTarget): () => void; // ref-counted; the first reads, the last forgets
   statusChanged(checkout: string): void; // a new status for the git store's checkout: every held diff of it re-reads, trailing
   loadFile(target: ScmDiffTarget, path: string): void; // a staged or worktree scope past its cap; an untracked diff is whole
-  stage(ui: StoreApi<ScmUi>, appSessionId: AppSessionId, paths: string[]): Promise<ScmMutationResult>;
+  // P5 O6 M4: `directory` is the session's checkout (on the session's machine), the one a stage or discard moves files in
+  stage(ui: StoreApi<ScmUi>, appSessionId: AppSessionId, directory: string, paths: string[]): Promise<ScmMutationResult>;
   unstage(ui: StoreApi<ScmUi>, appSessionId: AppSessionId, paths: string[]): Promise<ScmMutationResult>;
-  discard(ui: StoreApi<ScmUi>, appSessionId: AppSessionId, entries: ScmDiscardInput['entries']): Promise<ScmMutationResult>;
+  discard(ui: StoreApi<ScmUi>, appSessionId: AppSessionId, directory: string, entries: ScmDiscardInput['entries']): Promise<ScmMutationResult>;
   commit(ui: StoreApi<ScmUi>, appSessionId: AppSessionId): Promise<ScmMutationResult>; // the session's draft and Skip hooks
   resume(appSessionId: AppSessionId): () => void; // ref-counted: seeds the run from `scm.remote.last` and follows its events
   started(appSessionId: AppSessionId, plan: RemotePlan): void; // `scm.push`/`scm.pr.create` answered `started` for the plan
@@ -84,7 +86,8 @@ export interface ScmStoreOptions {
 
 export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}): UseBoundStore<StoreApi<ScmStore>> {
   let mutations = 0; // E11: stages and discards sent, counted
-  const moved = new Map<string, number>(); // E11: a path's last stage or discard, by that count
+  const moved = new Map<string, number>(); // E11: a path's last stage or discard, by that count; P5 O6 M4: by checkout and path
+  const movedKey = (machine: MachineRef, directory: string, path: string) => `${checkoutKey(machine, directory)}\0${path}`;
   const resumed = new Map<AppSessionId, Resumed>();
 
   const store = create<ScmStore>()((set, get) => {
@@ -96,7 +99,7 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
       overtaken(target) {
         if (target.scope !== 'untracked') return () => false;
         const asked = mutations;
-        return () => (moved.get(target.path) ?? -1) >= asked;
+        return () => (moved.get(movedKey(target.machine, target.directory, target.path)) ?? -1) >= asked;
       },
     });
 
@@ -126,14 +129,16 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
 
     // E11: a stage or discard of these paths: an untracked read of one already asked is dropped, and each held one is
     // read again (trailing) once the mutation answered, whether or not it ran anything
-    const moving = async (paths: readonly string[], call: () => Promise<ScmMutationResult>) => {
+    // P5 O6 M4: of one checkout on one machine; another checkout's file of the same relative path is not this one.
+    const moving = async (machine: MachineRef, directory: string, paths: readonly string[], call: () => Promise<ScmMutationResult>) => {
       const seq = mutations;
       mutations++;
-      for (const path of paths) moved.set(path, seq);
+      for (const path of paths) moved.set(movedKey(machine, directory, path), seq);
       try {
         return await call();
       } finally {
-        heldDiffs.reread((t) => t.scope === 'untracked' && paths.includes(t.path));
+        const checkout = checkoutKey(machine, directory);
+        heldDiffs.reread((t) => t.scope === 'untracked' && checkoutKey(t.machine, t.directory) === checkout && paths.includes(t.path));
       }
     };
 
@@ -156,9 +161,9 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
         if (target.scope !== 'untracked') heldDiffs.loadFile(target, path); // an untracked diff is whole
       },
 
-      stage: (ui, appSessionId, paths) => moving(paths, () => mutate(ui, appSessionId, client.invoke('scm.stage', { appSessionId, paths }))),
+      stage: (ui, appSessionId, directory, paths) => moving(machineOf(appSessionId), directory, paths, () => mutate(ui, appSessionId, client.invoke('scm.stage', { appSessionId, paths }))),
       unstage: (ui, appSessionId, paths) => mutate(ui, appSessionId, client.invoke('scm.unstage', { appSessionId, paths })),
-      discard: (ui, appSessionId, entries) => moving(entries.map((entry) => entry.path), () => mutate(ui, appSessionId, client.invoke('scm.discard', { appSessionId, entries }), undefined, true)),
+      discard: (ui, appSessionId, directory, entries) => moving(machineOf(appSessionId), directory, entries.map((entry) => entry.path), () => mutate(ui, appSessionId, client.invoke('scm.discard', { appSessionId, entries }), undefined, true)),
 
       // The commit takes the session's draft; once it lands the draft is cleared, unless it was edited meanwhile, and
       // Skip hooks goes back off (it is a decision per commit, as `--no-verify` is in a terminal).

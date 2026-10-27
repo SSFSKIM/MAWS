@@ -3,21 +3,22 @@
 // Imported only by happy-dom suites. P5 O6 M2: main's side, so it is asked and answers with bare ids, on `TEST_MACHINE`.
 import type { CommandName, EventName, EventPayload, PreloadBridge } from '@shared/ipc/schema';
 import { TEST_MACHINE } from '../../../../test/support/machine';
+import type { MachineRef } from '@shared/machine/ref';
 
 type Answer = { ok: true; value: unknown } | { ok: false; error: { code: string; message: string } };
-export type Handler = (name: CommandName, input: Record<string, unknown>) => Answer | Promise<Answer>;
+export type Handler = (name: CommandName, input: Record<string, unknown>, machine?: MachineRef) => Answer | Promise<Answer>;
 
 export const ok = (value: unknown = undefined): Answer => ({ ok: true, value });
 export const fail = (message: string): Answer => ({ ok: false, error: { code: 'internal', message } });
 
 export function installFakeMain(handler: Handler) {
-  const calls: { name: CommandName; input: Record<string, unknown> }[] = [];
+  const calls: { name: CommandName; input: Record<string, unknown>; machine?: MachineRef }[] = []; // P5 O6 M4: the machine asked
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   const bridge = {
     localMachine: TEST_MACHINE,
-    async invoke(name: CommandName, input: Record<string, unknown>) {
-      calls.push({ name, input });
-      return handler(name, input);
+    async invoke(name: CommandName, input: Record<string, unknown>, machine?: MachineRef) {
+      calls.push({ name, input, machine });
+      return handler(name, input, machine);
     },
     on(name: string, listener: (payload: unknown) => void) {
       const set = listeners.get(name) ?? new Set();

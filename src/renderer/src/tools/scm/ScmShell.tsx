@@ -83,7 +83,7 @@ export function ScmShell({ appSessionId, directory, ui }: ScmShellProps) {
 
   const actions: RowActions = {
     select: (selection) => ui.setState(selectFile(selection)),
-    stage: (paths) => void useScm.getState().stage(ui, appSessionId, paths),
+    stage: (paths) => void useScm.getState().stage(ui, appSessionId, directory, paths),
     unstage: (paths) => void useScm.getState().unstage(ui, appSessionId, paths),
     discard: (entries) => ui.setState({ sheet: { kind: 'discard', entries } }),
     open: (path) => openFile(appSessionId, checkoutPath(status.repoRoot, path), null),
@@ -201,7 +201,7 @@ function GroupSection({ name, groups, ui, selected, enabled, actions }: { name: 
 // The open sheet of this tool: Discard, Push or Open PR.
 function Sheets({ appSessionId, ui, status, scm, directory }: { appSessionId: AppSessionId; ui: StoreApi<ScmUi>; status: GitStatus; scm: ScmStatus | undefined; directory: string }) {
   const sheet = useStore(ui, (s) => s.sheet);
-  if (sheet?.kind === 'discard') return <DiscardSheet appSessionId={appSessionId} ui={ui} entries={sheet.entries} />;
+  if (sheet?.kind === 'discard') return <DiscardSheet appSessionId={appSessionId} ui={ui} directory={directory} entries={sheet.entries} />;
   if (sheet?.kind === 'push') return <PushSheet appSessionId={appSessionId} ui={ui} status={status} scm={scm} />;
   if (sheet?.kind === 'pr') return <PrSheet appSessionId={appSessionId} ui={ui} status={status} scm={scm} directory={directory} />;
   return null;

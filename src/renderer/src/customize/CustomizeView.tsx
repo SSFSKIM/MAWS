@@ -30,6 +30,7 @@ import { useCustomizeProject, type CustomizeSection } from './open';
 import { ConnectorsSection } from './connectors/ConnectorsSection';
 import { CONNECTORS } from './connectors/copy';
 import { configuredOf } from './connectors/present';
+import { machineOf } from '@shared/machine/address';
 
 const DIRECTORY_PAGE = '\0directory'; // the selector's value for a directory page: no project id or '' can equal it
 const SECTIONS = { plugins: 'Plugins', skills: 'Skills', mcp: 'Connectors' } as const; // P4-AGG M4: the value `mcp` stays, so saved tabs keep working
@@ -46,20 +47,26 @@ export function CustomizeView({ section }: { section: CustomizeSection }) {
   // P4-AGG M4: Connectors too (an add or a removal runs on, its line kept, across a section switch)
   const [visitedConnectors, setVisitedConnectors] = useState(section === 'mcp');
   if (section === 'mcp' && !visitedConnectors) setVisitedConnectors(true);
-  const projects = useSessions((s) => s.projects);
+  // P5 O6 M4: Customize reads and changes this machine's configuration until O4 spans machines, so its pages are this
+  // machine's projects, directories and live sessions only: another machine's project at the same path is never read or
+  // changed here as if it were this one's. (`useCustomizeProject.directory` comes from `openDiscover`, which takes only
+  // this machine's directories.)
+  const allProjects = useSessions((s) => s.projects);
+  const projects = useMemo(() => new Map([...allProjects].filter(([id]) => machineOf(id) === ipc.localMachine)), [allProjects]);
   const records = useSessions((s) => s.records);
   const engine = useSessions((s) => s.engine);
   const current = useLayout((s) => s.main.current);
   const chosen = useCustomizeProject((s) => s.projectId);
   // a directory no project has as its own (Open Discover from a session there, Decision Log 10): the page is that directory
   const directory = useCustomizeProject((s) => s.directory);
-  const projectId = chosen === undefined ? (current === NO_PROJECT ? null : current) : chosen;
+  const focused = chosen === undefined ? (current === NO_PROJECT ? null : current) : chosen;
+  const projectId = focused !== null && projects.has(focused) ? focused : null; // another machine's project: the user configuration
   const project = directory === undefined && projectId ? projects.get(projectId) : undefined;
   const cwd = directory ?? project?.directory ?? null;
   const labels = useMemo(() => projectLabels([...projects.values()]), [projects]);
   // Attach only a ready process in exactly the chosen directory. Project membership alone would also match a worktree
   // with different local configuration. A page never acquires a session, including after an attached process exits.
-  const live = [...engine.values()].filter((status) => status.process === 'ready' && cwd !== null && status.cwd === cwd)
+  const live = [...engine.values()].filter((status) => status.process === 'ready' && cwd !== null && status.cwd === cwd && machineOf(status.appSessionId) === ipc.localMachine)
     .sort((a, b) => a.appSessionId.localeCompare(b.appSessionId));
   const [pickedSession, setPickedSession] = useState<AppSessionId | null>(null);
   const attached = live.find((status) => status.appSessionId === pickedSession) ?? live[0] ?? null;
