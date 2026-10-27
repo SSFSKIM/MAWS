@@ -70,7 +70,7 @@ describe('the endpoint’s org read', () => {
     state.setEnrollment({ version: 1, state: 'org-listed', name: 'mini', ref: services.machine.ref, org: 'org-http', hub: 'http://hub.test', enrollment: 'e'.repeat(32), credentials: { clientId: 'id', clientSecret: 'secret' }, at: new Date().toISOString() });
     const a1 = await newDevice('a1');
     const s1 = await genesis('org-http', memberId(), a1, await generateSigningKey());
-    state.setOrg({ version: 1, org: 'org-http', pinned: { roots: s1.state.root.keys, recoveryPub: s1.state.root.recoveryPub }, head: null, chain: [], certificates: NO_CERTIFICATES, acceptedTransitions: [], highWater: 0 });
+    state.setOrg({ version: 1, org: 'org-http', pinned: { roots: s1.state.root.keys, recoveryPub: s1.state.root.recoveryPub }, head: null, chain: [], hashes: [], certificates: NO_CERTIFICATES, acceptedTransitions: [], highWater: 0 });
     await new EndpointOrg(state, { log: () => {} }).adopt([s1], []);
 
     const seen: AbortSignal[] = [];

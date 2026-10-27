@@ -35,7 +35,7 @@ async function enrolled(): Promise<Enrolled> {
     s.machines.push({ name: 'mini', ref, pub: key.pub, owners: [A] });
     s.machineNames.push({ name: 'mini', ref });
   });
-  state.setOrg({ version: 1, org: ORG, pinned: { roots: s1.state.root.keys, recoveryPub: recovery.pub }, head: null, chain: [], certificates: NO_CERTIFICATES, acceptedTransitions: [], highWater: 0 });
+  state.setOrg({ version: 1, org: ORG, pinned: { roots: s1.state.root.keys, recoveryPub: recovery.pub }, head: null, chain: [], hashes: [], certificates: NO_CERTIFICATES, acceptedTransitions: [], highWater: 0 });
   await new EndpointOrg(state, { log: () => {} }).adopt([s1, s2], []);
   const endpoint = createEndpoint();
   await endpoint.start(services);

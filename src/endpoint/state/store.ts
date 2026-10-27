@@ -68,6 +68,11 @@ const OrgSchema = z.strictObject({
    * one commit: a rewind replaces states below the head, which a window written apart could show without the head.
    */
   chain: z.array(ChainEntrySchema),
+  /**
+   * The hash of every state adopted since the first sync, by version (`hashes[v - 1]`), kept past the window: what a
+   * rewind's base must hash to once its state has aged out of `chain` (org-sync.ts).
+   */
+  hashes: z.array(z.string().min(1)),
   certificates: custom<Certificates>(isCertificates),
   acceptedTransitions: z.array(custom<RootTransition>(isRootTransition)),
   highWater: z.number().int().nonnegative(),

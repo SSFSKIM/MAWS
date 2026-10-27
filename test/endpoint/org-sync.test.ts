@@ -4,7 +4,7 @@
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { endorseDevice, generateSigningKey, keyId, NO_CERTIFICATES, stateHash, type RootTransition, type Signed, type SignedOrgState, type SigningKey } from 'org-protocol';
+import { endorseDevice, generateSigningKey, keyId, NO_CERTIFICATES, signOrgState, stateHash, type RootTransition, type Signed, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EndpointOrg, type OrgChange, type OrgStateView } from '../../src/endpoint/org-sync';
 import { EndpointState } from '../../src/endpoint/state/store';
@@ -45,7 +45,7 @@ afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
 async function enrolled(pinned: TestDevice = a1, now = () => Date.now()) {
   const state = EndpointState.open(join(root, 'endpoint'), { log: (l) => lines.push(l) });
   if (state.org === null) {
-    state.setOrg({ version: 1, org: ORG, pinned: { roots: [await keyId(pinned.stepUp.pub)], recoveryPub: recovery.pub }, head: null, chain: [], certificates: NO_CERTIFICATES, acceptedTransitions: [], highWater: 0 });
+    state.setOrg({ version: 1, org: ORG, pinned: { roots: [await keyId(pinned.stepUp.pub)], recoveryPub: recovery.pub }, head: null, chain: [], hashes: [], certificates: NO_CERTIFICATES, acceptedTransitions: [], highWater: 0 });
   }
   const org = new EndpointOrg(state, { log: (l) => lines.push(l), now });
   const changes: OrgChange[] = [];
@@ -56,7 +56,7 @@ async function enrolled(pinned: TestDevice = a1, now = () => Date.now()) {
 /** A second endpoint state, in its own directory, synced to `chain` with the clock at `now`. */
 async function enrolledAgain(now: number, chain: SignedOrgState[]) {
   const state = EndpointState.open(join(root, 'again'), { log: (l) => lines.push(l) });
-  state.setOrg({ version: 1, org: ORG, pinned: { roots: [await keyId(a1.stepUp.pub)], recoveryPub: recovery.pub }, head: null, chain: [], certificates: NO_CERTIFICATES, acceptedTransitions: [], highWater: 0 });
+  state.setOrg({ version: 1, org: ORG, pinned: { roots: [await keyId(a1.stepUp.pub)], recoveryPub: recovery.pub }, head: null, chain: [], hashes: [], certificates: NO_CERTIFICATES, acceptedTransitions: [], highWater: 0 });
   const org = new EndpointOrg(state, { log: (l) => lines.push(l), now: () => now });
   await org.sync(hub(chain));
   return { state, org };
@@ -70,7 +70,7 @@ function hub(chain: SignedOrgState[], transitions: Signed<RootTransition>[] = []
   };
 }
 
-const onDisk = () => JSON.parse(fs.readFileSync(join(root, 'endpoint', 'org.json'), 'utf8')) as { head: SignedOrgState | null; highWater: number; acceptedTransitions: unknown[] };
+const onDisk = () => JSON.parse(fs.readFileSync(join(root, 'endpoint', 'org.json'), 'utf8')) as { head: SignedOrgState | null; highWater: number; acceptedTransitions: unknown[]; hashes: string[] };
 
 describe('the first sync', () => {
   it('adopts the chain from its genesis, a page at a time, when a pinned root signed it', async () => {
@@ -222,10 +222,35 @@ describe('a synced endpoint', () => {
     // Delivered with the authentic chain, the base is the one r3's prev names.
     expect(await org.adopt([v1, v2, r3], [r])).toMatchObject({ adopted: 1, rewound: true });
     expect(org.head()).toEqual(r3);
+    // Every version's hash is kept past the window, the rewound one replaced.
+    expect(onDisk().hashes).toEqual(await Promise.all([v1, v2, r3].map((s) => stateHash(s.state))));
     // A base that isn't the one r3 names is no base.
     const other = await successor(v1, [a1], (s) => void s.projects.push({ id: 'p', name: 'other' }), iso(now - 35 * DAY));
     const { org: fresh } = await enrolledAgain(now, [v1, v2, forged3]);
     expect(await fresh.adopt([other, r3], [r])).toMatchObject({ adopted: 0 });
+  });
+
+  it('takes an aged-out base from a delivery only when it is the state it adopted at that version', async () => {
+    const now = Date.now();
+    const v1 = await genesis(ORG, A, a1, recovery, iso(now - 40 * DAY));
+    const v2 = await successor(v1, [a1], () => {}, iso(now - 35 * DAY));
+    const forged3 = await successor(v2, [a1], () => {}, iso(now - DAY));
+    const { org } = await enrolled(a1, () => now);
+    await org.sync(hub([v1, v2, forged3]));
+    // A genuine recovery from version 2, which binds no base: the attacker supplies one of their own at version 2,
+    // naming their own root and recovery key, and an ordinary successor of it.
+    const a2 = await newDevice('a2');
+    const r = await transition(ORG, 2, [a2], recovery, iso(now));
+    const x = await newDevice('x');
+    const xRecovery = await generateSigningKey();
+    const forgedBase = await signOrgState(
+      { ...structuredClone(v2.state), root: { keys: [await keyId(x.stepUp.pub)], recoveryPub: xRecovery.pub }, members: [{ id: A, email: 'owner@example.com', role: 'admin', devices: [x.device] }] },
+      [x.stepUp],
+    );
+    const x3 = await successor(forgedBase, [x], () => {}, iso(now));
+    expect(await org.adopt([forgedBase, x3], [r])).toMatchObject({ adopted: 0 });
+    expect(org.head()).toEqual(forged3);
+    expect(onDisk()).toMatchObject({ head: forged3, highWater: 3 });
   });
 
   it('commits a rewind’s window with its head: a fault before the head is written leaves the window it had', async () => {

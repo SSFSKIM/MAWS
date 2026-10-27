@@ -246,7 +246,7 @@ function writeEnrollment(ctx: EnrollContext, key: SigningKey, keepLedger: boolea
     state.setEnrollment(enrollment);
     const org = state.org;
     if (org === null || (org.head?.state.org ?? org.org) !== enrollment.org || org.pinned.recoveryPub !== pins.recoveryPub) {
-      state.setOrg({ version: 1, org: enrollment.org, pinned: pins, head: null, chain: [], certificates: NO_CERTIFICATES, acceptedTransitions: [], highWater: 0 });
+      state.setOrg({ version: 1, org: enrollment.org, pinned: pins, head: null, chain: [], hashes: [], certificates: NO_CERTIFICATES, acceptedTransitions: [], highWater: 0 });
     } else if (org.head === null) {
       state.setOrg({ ...org, pinned: pins });
     }
