@@ -188,3 +188,22 @@ describe('re-enrolling an active machine in place', () => {
     void gone;
   });
 });
+
+// The Worker resolves a machine's credential before it reads the body; a revocation or a re-enrollment may come between.
+describe('a machine resolved before its revocation or re-enrollment', () => {
+  it('is refused its key, its certificate and a retirement it relays', async () => {
+    const moved = await enrollV2((await code()).text, 'moved');
+    const replaced = (await machineNamed('moved'))!;
+    await enrollV2((await code('moved')).text, undefined, { ref: moved.ref });
+    await enrollV2((await code()).text, 'revoked');
+    const revoked = (await machineNamed('revoked'))!;
+    expect((await hub.fetchAs(ADMIN, '/api/machines/revoked', { method: 'DELETE' })).status).toBe(200);
+    for (const stale of [replaced, revoked]) {
+      for (const call of ['keepMachineKey', 'storeCert', 'machineRetiresCert']) {
+        expect(await hub.asMember(call, stale, {}), `${call} as ${stale.name}`).toEqual(expect.objectContaining({ ok: false, status: 403, error: 'not-enrolled' }));
+      }
+    }
+    // The machine as it stands passes the check and meets the body's.
+    expect(await hub.asMember('storeCert', (await machineNamed('moved'))!, {})).toEqual(expect.objectContaining({ ok: false, status: 400 }));
+  });
+});

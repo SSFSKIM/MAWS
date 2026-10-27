@@ -48,6 +48,16 @@ async function v2(name: string): Promise<V2Machine> {
   return enrollV2(code, name);
 }
 
+/** A v2 machine the org state lists, as RL1 needs (a ref only its key posted routes nowhere). */
+async function listed(name: string): Promise<V2Machine> {
+  const machine = await v2(name);
+  await accept((s) => {
+    s.machines.push({ name, ref: machine.ref, pub: machine.key.pub, owners: [A] });
+    s.machineNames.push({ name, ref: machine.ref });
+  });
+  return machine;
+}
+
 const endpointOf = (machine: V2Machine, options: Partial<ConstructorParameters<typeof FakeEndpoint>[0]> = {}) =>
   new FakeEndpoint({ hub: hub.url, credentials: machine.credentials, ref: machine.ref, ...options });
 const appOf = (machine: string, who = ADMIN) => RelayApp.open(hub.url, machine, credentials(who));
@@ -332,7 +342,7 @@ describe('channels (acceptance 3)', () => {
 
 describe('the lease, the generation and the fence', () => {
   it('heartbeats after an eviction keep the lease past a full LEASE_MS', async () => {
-    const machine = await v2('leased');
+    const machine = await listed('leased');
     const leaseMs = 1200;
     const project = '8d2e3f40-5a61-4b7c-9d8e-0f1a2b3c4d5e';
     await hub.timing(relayName(machine), { heartbeatMs: 200, leaseMs, graceMs: 200 });
@@ -355,7 +365,7 @@ describe('the lease, the generation and the fence', () => {
   });
 
   it('replaces a DX2 stream by an RL1 socket and back, by one generation counter', async () => {
-    const machine = await v2('both-ways');
+    const machine = await listed('both-ways');
     const dx = new MachineClient(hub, 'both-ways', machine.credentials);
     await dx.connect();
     const endpoint = endpointOf(machine);
@@ -373,7 +383,7 @@ describe('the lease, the generation and the fence', () => {
   for (const evicted of [false, true]) {
     const when = evicted ? 'after an eviction' : 'before one';
     it(`closes the old sockets on a newer generation ${when}`, async () => {
-      const machine = await v2(`newer-${evicted ? 'e' : 'n'}`);
+      const machine = await listed(`newer-${evicted ? 'e' : 'n'}`);
       const first = endpointOf(machine);
       await first.connect();
       const app = await appOf(machine.ref);
@@ -397,7 +407,7 @@ describe('the lease, the generation and the fence', () => {
 
     it(`closes the socket on a revocation ${when}, and refuses its credential after`, async () => {
       const name = `revoked-${evicted ? 'e' : 'n'}`;
-      const machine = await v2(name);
+      const machine = await listed(name);
       const endpoint = endpointOf(machine);
       await endpoint.connect();
       const app = await appOf(machine.ref);
