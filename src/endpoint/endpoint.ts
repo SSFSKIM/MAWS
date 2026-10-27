@@ -118,6 +118,7 @@ export class Endpoint implements EndpointModule {
     org.onAdopted((change) => this.#adopted(change));
     this.#state = state;
     this.#org = org;
+    this.notifier.restore();
     if (state.refusing !== null) return;
     if (state.machineKey !== null) {
       try {

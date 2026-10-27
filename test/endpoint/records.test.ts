@@ -440,6 +440,38 @@ describe('notify', () => {
     expect(file()).toEqual({});
   });
 
+  it('keeps an owed `settled 0` through a `forget` that comes first after a restart (round 3 finding 1)', () => {
+    const { notifier, sent, listed, ctx, file, up } = setup();
+    notifier.pendingSet('p1', [{ session: 's1' }]);
+    up(false);
+    listed.delete('s1');
+    notifier.withdrawn('s1', 'p1');
+    const restarted = new Notifier(ctx);
+    restarted.forget('s1');
+    up(true);
+    restarted.welcome();
+    expect(sent).toEqual([notify('s1', 'waiting', 1), notify('s1', 'settled', 0)]);
+    expect(file()).toEqual({});
+  });
+
+  it('pays an owed `settled 0` at the welcome though the session is listed again, before any count is restated (round 3 finding 2)', () => {
+    const { notifier, sent, listed, ctx, file, up } = setup();
+    notifier.pendingSet('p1', [{ session: 's1' }]);
+    up(false);
+    listed.delete('s1');
+    notifier.withdrawn('s1', 'p1');
+    const restarted = new Notifier(ctx);
+    listed.add('s1');
+    up(true);
+    restarted.welcome();
+    restarted.pendingSet('p1', []);
+    expect(sent).toEqual([notify('s1', 'waiting', 1), notify('s1', 'settled', 0)]);
+    expect(file()).toEqual({});
+    // A count restated later is told after the zero, as usual.
+    restarted.pendingSet('p1', [{ session: 's1' }]);
+    expect(sent.slice(2)).toEqual([notify('s1', 'waiting', 1)]);
+  });
+
   it('carries the count it last told in a `wrote` after a restart, before sminos restates the set, and keeps what it told (round 2 finding 2)', () => {
     const { notifier, sent, ctx, file } = setup();
     const host = (seq: number) => ({ kind: 'host', session: 's1', project: 'p1', sub: null, body: { event: { kind: 'message', writer: 'mini/host', seq } } });

@@ -10,9 +10,10 @@
 // was up is told at the next welcome. A count above 0 the hub was told is kept on disk (`notified.json`), so after a
 // restart the first pending set that leaves its session out still tells it `settled 0`; the hub keeps a count until it
 // is told otherwise. A session withdrawn while no connection is up owes its `settled 0`, kept there too and paid at the
-// next welcome, though the session is no longer listed. A `wrote` carries the last count told when sminos hasn't
-// restated one yet, and what it carries is what the hub was told. Any other session's first count after a restart is told as it is (`settled 0` clears a badge left
-// from before).
+// next welcome, listed again or not (a count known then is told after it). The file is read when the notifier is made
+// and again at the module's start, before anything is fed. A `wrote` carries the last count told when sminos hasn't
+// restated one yet, and what it carries is what the hub was told. Any other session's first count after a restart is
+// told as it is (`settled 0` clears a badge left from before).
 //
 // `wrote` is a to-human message: a session-lane `host` message sent outside any subscription whose event is a
 // `message`, which O12's phase 2 sends as each is written, whether or not a device is subscribed. It is told once per
@@ -45,8 +46,8 @@ const HELD_LIMIT = 64;
 export class Notifier {
   readonly #ctx: NotifyContext;
   readonly #counts = new Map<string, number>();
-  /** What the hub was last told of each session; read from the store at first use (the store opens at the module's start). */
-  #toldNow: Map<string, number> | null = null;
+  /** What the hub was last told of each session (`restore()` reads what it was told before a restart). */
+  readonly #told = new Map<string, number>();
   /** Withdrawn sessions whose `settled 0` no connection carried yet, with their project (on disk as `owed`). */
   readonly #owed = new Map<string, string>();
   readonly #inProject = new Map<string, Set<string>>();
@@ -56,11 +57,28 @@ export class Notifier {
 
   constructor(ctx: NotifyContext) {
     this.#ctx = ctx;
+    this.restore();
+  }
+
+  /**
+   * Reads what the hub was told before a restart from the store: each session's count, in its project's set, and each
+   * `settled 0` still owed. At construction, and again by the module once its state is open, before anything is fed.
+   */
+  restore(): void {
+    this.#told.clear();
+    this.#owed.clear();
+    this.#inProject.clear();
+    for (const [session, { project, pending, owed }] of Object.entries(this.#ctx.store.read())) {
+      if (owed === true) this.#owed.set(session, project);
+      else {
+        this.#told.set(session, pending);
+        this.#inProject.set(project, new Set([...(this.#inProject.get(project) ?? []), session]));
+      }
+    }
   }
 
   /** A project's whole pending set: each session's count, and 0 for one its last set, or the hub's count, held that this one doesn't. */
   pendingSet(project: string, raised: ReadonlyArray<{ session: string }>): void {
-    this.#restore();
     const counts = new Map<string, number>();
     for (const item of raised) counts.set(item.session, (counts.get(item.session) ?? 0) + 1);
     for (const session of this.#inProject.get(project) ?? []) if (!counts.has(session)) counts.set(session, 0);
@@ -121,12 +139,9 @@ export class Notifier {
 
   /** A connection was welcomed: every count the hub wasn't told goes now, then the held `wrote`s. */
   welcome(): void {
-    this.#restore();
+    // Every `settled 0` owed goes first, listed again or not; a count known now is told after it.
     for (const [session, project] of this.#owed) {
-      // Listed again since: its own count is told below, as it is now.
-      if (this.#ctx.listed(session) === null && !this.#ctx.send({ t: 'notify', session, project, kind: 'settled', pending: 0 })) continue;
-      this.#owed.delete(session);
-      this.#setTold(session, project, undefined);
+      if (this.#ctx.send({ t: 'notify', session, project, kind: 'settled', pending: 0 })) this.#setTold(session, project, 0);
     }
     for (const session of this.#counts.keys()) this.#tell(session);
     this.#flush(null, true);
@@ -160,25 +175,6 @@ export class Notifier {
     if (told === count) return;
     const kind = count > (told ?? 0) ? 'waiting' : 'settled';
     if (this.#ctx.send({ t: 'notify', session, project: listed.project, kind, pending: count })) this.#setTold(session, listed.project, count);
-  }
-
-  get #told(): Map<string, number> {
-    return this.#restore();
-  }
-
-  /** What the hub was told before a restart, from the store, once: each session's count, and in its project's set. */
-  #restore(): Map<string, number> {
-    if (this.#toldNow !== null) return this.#toldNow;
-    this.#toldNow = new Map();
-    for (const [session, { project, pending, owed }] of Object.entries(this.#ctx.store.read())) {
-      if (owed === true) {
-        this.#owed.set(session, project);
-        continue;
-      }
-      this.#toldNow.set(session, pending);
-      this.#inProject.set(project, new Set([...(this.#inProject.get(project) ?? []), session]));
-    }
-    return this.#toldNow;
   }
 
   /** What the hub was told of a session (`undefined`: nothing to keep), and on disk when it is above 0. */
