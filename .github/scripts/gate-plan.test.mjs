@@ -1476,7 +1476,7 @@ test("gate.yml runs the unit job over the plan's shards: its name, its --shard (
 // tree and its peer, and the e2e:cross-build entry the plan makes of them.
 const PEER = '0123456789abcdef0123456789abcdef01234567';
 const peerTrailers = (peerWire, wire) => `Peer: ${PEER}\nPeer-Wire: ${peerWire}\nWire: ${wire}`;
-const peerEntry = { group: 'cross-build', script: 'e2e:cross-build', slug: 'cross-build', build: false, libreoffice: false, poppler: false, measured: false, runner: JSON.stringify(mac), timeout: 50, peer: PEER };
+const peerEntry = { group: 'cross-build', script: 'e2e:cross-build', slug: 'cross-build', build: false, libreoffice: false, poppler: false, measured: false, runner: JSON.stringify(mac), timeout: 25, peer: PEER };
 
 test("a tree a minor from its peer takes the peer groups, on the Mac's exclusive instance with the peer, whatever the lane and the gates asked", () => {
   const lists = { PEER_E2E: 'cross-build', LINUX_E2E: 'library', MAC_VM_E2E: 'cross-build side' };
@@ -1543,7 +1543,7 @@ test('a peer group asked for takes the peer at any wire, and without a Peer: tra
 test('a peer group never goes to a hosted Mac: Lane: hosted names it with its reason, and HOSTED_MAC_E2E naming it is refused', () => {
   const lists = { PEER_E2E: 'cross-build', HOSTED_MAC_E2E: 'library' };
   const { outputs, summary } = plan({ ...lists, HEAD_MESSAGE: `ci-gate: test\n\nGates: e2e:library\nRunner: macos\nLane: hosted\n${peerTrailers('3.0', '3.1')}` });
-  assert.deepEqual(placement(outputs), { library: [waiter, 100], 'cross-build': [mac, 50] });
+  assert.deepEqual(placement(outputs), { library: [waiter, 100], 'cross-build': [mac, 25] });
   assert.match(summary, / Lane: hosted, but never on a hosted Mac, so where it would be: e2e:cross-build \(peer\)\./);
   const refused = refusal({ ...lists, HOSTED_MAC_E2E: 'library cross-build', HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:library\nRunner: macos' });
   assert.equal(refused.stderr, 'gate-plan: HOSTED_MAC_E2E names what never goes to a hosted Mac: cross-build (peer)\n');

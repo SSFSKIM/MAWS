@@ -257,8 +257,10 @@ export function planOf(env, scripts) {
   // 95-minute deadline and under the pool's 120-minute bound on a box's run.
   const HOSTED_WAITER = poolBox(2);
   const HOSTED_TIMEOUT_MINUTES = 100;
-  // A peer group's minutes: the peer's install and build beside this tree's build, and its spec's two crossings.
-  const PEER_MINUTES = 40;
+  // A peer group's minutes: the peer's fetch, install and build, this tree's build and the spec's two crossings, which
+  // took 3 min 22 s on the mini (run 40495960740: the peer 47 s, this tree's build 40 s, the crossings 1.4 min), four
+  // times over for a cold store or a slow Mac.
+  const PEER_MINUTES = 15;
   const e2e = [...gates]
     .filter((gate) => gate.startsWith('e2e:'))
     .map((gate) => {
