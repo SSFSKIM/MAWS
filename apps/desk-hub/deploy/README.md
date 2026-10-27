@@ -208,8 +208,11 @@ hub's half alone.
 These act as the org's admin, through a test device's keys: `--device-keys <file>`, a JSON file
 `{"keys": {"a1.channel": <JWK>, "a1.stepUp": <JWK>, "recovery": <JWK>}}` of private keys (keep it 0600; it is read and
 never printed, nor quoted when it does not parse). The device's step-up key signs the successors they post, so it must
-be a root key of the head. They act only on a staging Worker (`desk-hub-staging`, or one named `desk-hub-staging-…`):
-production's host and Worker are refused by name before a credential is read or the hub asked anything, whatever the
+be a root key of the head. They act only on staging, by its exact names (`config.ts`: the Worker `desk-hub-staging`
+at `https://desk-hub-staging.opencognita-platform.workers.dev`), or the suites' loopback hub; no pattern, since wrangler
+names a version's preview alias `<alias>-<worker>.<subdomain>.workers.dev` and `desk-hub-staging-desk-hub.…` would be
+one of production's. Production's host, its Worker and a preview alias of it are refused by name first, before a
+credential is read or the hub asked anything, whatever the
 configuration's org, its `orgGenesis` or `--test-org` say (`redeploy-check`, whose RL1 leg writes the state, likewise).
 Within that, they write the state only where an operator's anchor allows:
 - in the configuration's own org, only when it serves a chain whose genesis is the configuration's `orgGenesis`

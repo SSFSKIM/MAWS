@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { main as acceptance } from '../../deploy/acceptance.ts';
-import { checkTestHub, checkTestTarget, PRODUCTION_HOST, PRODUCTION_WORKER, readDeployConfig, type DeployConfig } from '../../deploy/config.ts';
+import { checkTestHub, checkTestTarget, PRODUCTION_HOST, PRODUCTION_WORKER, readDeployConfig, STAGING_HOST, STAGING_WORKER, type DeployConfig } from '../../deploy/config.ts';
 import { Person } from '../../deploy/hub.ts';
 import { newAdminDevice, OrgAdmin } from '../../deploy/org-admin.ts';
 import { Cleanup } from '../../deploy/proof.ts';
@@ -51,6 +51,15 @@ describe('production, by name', () => {
       expect(() => checkTestHub(hub, 'write org state')).toThrow(/production/);
     }
   });
+
+  // Wrangler names a version's preview alias `<alias>-<worker>.<subdomain>.workers.dev`: an alias of production's Worker
+  // reaches production's objects, whatever the alias says, a name starting `desk-hub-staging` included.
+  it('is refused through a preview alias of its Worker, as a hub and as a configuration', () => {
+    for (const host of ['desk-hub-staging-desk-hub.opencognita-platform.workers.dev', 'preview-desk-hub.opencognita-platform.workers.dev']) {
+      expect(() => checkTestHub(`https://${host}`, 'write org state')).toThrow(/production/);
+      expect(() => checkTestTarget({ ...staging, worker: host.split('.')[0], host }, 'write org state')).toThrow(/production/);
+    }
+  });
 });
 
 describe('what a test command may write to', () => {
@@ -61,10 +70,26 @@ describe('what a test command may write to', () => {
     expect(() => checkTestHub('http://localhost:8787', 'write org state')).not.toThrow();
   });
 
-  it('is nothing else: another Worker, another host, plain http to a remote host', () => {
-    expect(() => checkTestTarget({ ...staging, worker: 'shop', host: 'shop.opencognita-platform.workers.dev' }, 'write org state')).toThrow(/not a staging/);
-    for (const hub of ['https://shop.opencognita-platform.workers.dev', 'https://example.com', `http://${staging.host}`, 'https://desk-hub-staging.example.com']) {
-      expect(() => checkTestHub(hub, 'write org state')).toThrow(/not a staging/);
+  it('is staging’s Worker and host by their exact names, which staging.json holds', () => {
+    expect(staging.worker).toBe(STAGING_WORKER);
+    expect(staging.host).toBe(STAGING_HOST);
+  });
+
+  it('is nothing else: another Worker, another host, a sibling or an alias of staging’s, plain http to a remote host', () => {
+    expect(() => checkTestTarget({ ...staging, worker: 'shop', host: 'shop.opencognita-platform.workers.dev' }, 'write org state')).toThrow(/not the staging/);
+    // A Worker named after staging is not staging, nor is staging's Worker on another account's subdomain.
+    expect(() => checkTestTarget({ ...staging, worker: 'desk-hub-staging-2', host: 'desk-hub-staging-2.opencognita-platform.workers.dev' }, 'write org state')).toThrow(/not the staging/);
+    expect(() => checkTestTarget({ ...staging, host: 'desk-hub-staging.someone-else.workers.dev' }, 'write org state')).toThrow(/not the staging/);
+    for (const hub of [
+      'https://shop.opencognita-platform.workers.dev',
+      'https://example.com',
+      `http://${staging.host}`,
+      'https://desk-hub-staging.example.com',
+      'https://desk-hub-staging-2.opencognita-platform.workers.dev',
+      'https://preview-desk-hub-staging.opencognita-platform.workers.dev',
+      'https://desk-hub-staging.someone-else.workers.dev',
+    ]) {
+      expect(() => checkTestHub(hub, 'write org state')).toThrow(/not the staging/);
     }
   });
 });
