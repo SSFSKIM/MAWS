@@ -6,8 +6,7 @@
 // A `full` subscription carries every plane message sminos sends for the session, its `host` messages among them; a
 // `cards` one only the session's pending requests and their settlement.
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import type { FakeSminos, Frame } from './rl10/fake-sminos';
-import { drop, evs, laneAMember, makeOrg, of, openRemote, plane, PROJECT, snapshot, sminos, startEndpoint, stopAll, subscribe, until, waitFor, type Fixture, type Org, type Remote } from './sub-harness';
+import { counter, drop, evs, laneAMember, makeOrg, of, openRemote, plane, PROJECT, serve, snapshot, sminos, startEndpoint, stopAll, subscribe, until, waitFor, type Fixture, type Org, type Remote } from './sub-harness';
 
 let org: Org;
 const started: Fixture[] = [];
@@ -19,23 +18,6 @@ afterEach(() => stopAll(started));
 afterAll(() => stopAll(started));
 
 const RAISED = { request: 'toolu_1', session: 'la-1', tool: 'Bash', input: { command: 'ls' } };
-
-/** sminos's answer to the endpoint's next `subscribe`: its snapshot at n 0 (with the session's last host event). */
-async function serve(s: FakeSminos): Promise<Frame> {
-  const subscribe = await s.next((x) => x.t === 'subscribe', 'an upstream subscribe');
-  s.send(plane('snapshot', { rows: [{ uuid: 'r1' }], more: false, subagents: [], presence: { record: null, bridge: true }, streaming: [], host: [{ id: { writer: 'mini/host', seq: 1 }, event: { kind: 'message', text: 'hi' } }] }, { sub: subscribe.sub as string, n: 0 }));
-  return subscribe;
-}
-
-/** sminos's next `n` on an upstream subscription. */
-function counter(): (sub: string, kind: string, body: unknown) => Record<string, unknown> {
-  const n = new Map<string, number>();
-  return (sub, kind, body) => {
-    const next = (n.get(sub) ?? 0) + 1;
-    n.set(sub, next);
-    return plane(kind, body, { sub, n: next });
-  };
-}
 
 /** The bodies of `sub`'s `ev`s, each the plane message's kind with its body. */
 const kinds = (r: Remote, sub: string, from = 0) => evs(r, sub, from).map((e) => (e.body as { kind: string }).kind);

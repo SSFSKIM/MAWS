@@ -10,10 +10,16 @@ import * as fs from 'node:fs';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
-import { generateSigningKey, keyId, memoryOrgView, NO_CERTIFICATES, type ByteDuplex, type Channel, type ChannelMessage, type SignedOrgState, type SigningKey } from 'org-protocol';
+import { base64urlEncode, generateSigningKey, keyId, memoryOrgView, NO_CERTIFICATES, type Action, type ByteDuplex, type Channel, type ChannelMessage, type SignedOrgState, type SigningKey } from 'org-protocol';
+import { SoftwareAuthenticator } from '../../apps/org-protocol/test-support/authenticator.ts';
 import { TestDevice as Device } from '../../apps/org-protocol/test-support/test-device.ts';
 import type { SessionEvent } from '@shared/graph/events';
+import type { HandlerContext } from '@shared/ipc/client';
 import type { HostResponse } from '@shared/ipc/host-protocol';
+import { OpLedger } from '@shared/host/op-ledger';
+import type { CommandInput } from '@shared/ipc/schema';
+import { validateCommandInput } from '@shared/ipc/validate';
+import { opCommands } from '../../src/engine-host/ops';
 import { createEndpoint, type Endpoint } from '../../src/endpoint';
 import type { EndpointOptions } from '../../src/endpoint/endpoint';
 import { EndpointOrg } from '../../src/endpoint/org-sync';
@@ -22,13 +28,14 @@ import { EndpointState } from '../../src/endpoint/state/store';
 import { dialDirect } from './carriers';
 import { fakeServices, type FakeServices } from './fake-services';
 import { genesis, iso, memberId, newDevice, successor, type TestDevice } from './org-fixtures';
-import { FakeSminos } from './rl10/fake-sminos';
+import { FakeSminos, type Frame } from './rl10/fake-sminos';
 
 export const ORG = 'org-m8';
 export const PROJECT = 'proj-m8';
 export const CHECKOUT = '/work/m8';
 const TAILNET = '100.101.102.108';
-const HUB = 'http://127.0.0.1:9';
+export const HUB = 'http://127.0.0.1:9';
+const RP_ID = 'hub.example';
 export const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 export async function until<T>(check: () => T | null | false | undefined, what: string, ms = 3000): Promise<T> {
@@ -43,13 +50,15 @@ export async function until<T>(check: () => T | null | false | undefined, what: 
 
 // ---- The org ----------------------------------------------------------------------------------------------------------
 
-export type Org = { A: string; B: string; C: string; a1: TestDevice; b1: TestDevice; c1: TestDevice; recovery: SigningKey };
+export type Org = { A: string; B: string; C: string; a1: TestDevice; b1: TestDevice; c1: TestDevice; passkey: SoftwareAuthenticator; recovery: SigningKey };
 
 export async function makeOrg(): Promise<Org> {
-  // A web-cards device holds no step-up key (RL §5.10).
-  const c1 = await newDevice('c1', 'web-cards');
+  // A web-cards device holds no step-up key (RL §5.10); its passkey signs its answers.
+  const phone = await newDevice('c1', 'web-cards');
+  const passkey = new SoftwareAuthenticator(await generateSigningKey(), base64urlEncode(crypto.getRandomValues(new Uint8Array(16))), RP_ID);
+  const c1 = { ...phone, device: { ...phone.device, passkey: passkey.passkey } };
   delete c1.device.stepUpPub;
-  return { A: memberId(), B: memberId(), C: memberId(), a1: await newDevice('a1'), b1: await newDevice('b1'), c1, recovery: await generateSigningKey() };
+  return { A: memberId(), B: memberId(), C: memberId(), a1: await newDevice('a1'), b1: await newDevice('b1'), c1, passkey, recovery: await generateSigningKey() };
 }
 
 // ---- The engine host, as mawsd's dispatch and events give it ---------------------------------------------------------
@@ -82,9 +91,21 @@ export class FakeEngineHost {
   readonly #events = new Set<(owner: 'engine-host' | 'pty-host', message: { name: string; payload: unknown }) => void>();
   readonly #attachments = new Set<(attached: boolean) => void>();
   #launches = 0;
+  #ops: ReturnType<typeof opCommands> | null = null;
+  /** Each answer the engine host delivered: `<appSessionId> <requestId>`. */
+  readonly answered: string[] = [];
 
-  /** Wires the fake into `services`' dispatch, onEvent and onAttachment. */
+  /** Wires the fake into `services`' dispatch, onEvent and onAttachment, its op ledger in the machine's state directory. */
   serve(services: FakeServices): void {
+    this.#ops = opCommands({
+      ledger: OpLedger.open(services.machine.stateDir, 'host-ops.jsonl'),
+      handler: (name) => (name === 'session.answer' ? (input) => Promise.resolve(this.#answer(input as { appSessionId: string; requestId: string })) : undefined),
+      status: (id) => {
+        const s = this.sessions.get(id);
+        return s === undefined || s.engineSessionId === null ? null : { launchId: s.launchId, engineSessionId: s.engineSessionId };
+      },
+      pending: (id, requestId) => this.#pending(this.sessions.get(id), requestId),
+    });
     services.dispatch = (owner, name, input) => this.dispatch(owner, name, input);
     services.onEvent = (listener) => {
       this.#events.add(listener);
@@ -201,6 +222,11 @@ export class FakeEngineHost {
   /** The answer is made when the command arrives; one held (`hold`) reaches the endpoint only at its `release`. */
   async dispatch(owner: string, name: string, input: unknown): Promise<HostResponse> {
     this.calls.push({ name, input });
+    if (owner === 'engine-host' && name === 'host.op' && this.#ops !== null) {
+      // The runtime checks every input against the registry before a handler sees it.
+      const checked = validateCommandInput(name, input);
+      return checked.ok ? ok(await this.#ops.op(checked.value as CommandInput<'host.op'>, { client: {} } as HandlerContext)) : no('internal');
+    }
     const answer = this.answer(owner, name, input);
     if (this.#holding.has(name)) await new Promise<void>((resolve) => this.#held.set(name, [...(this.#held.get(name) ?? []), resolve]));
     return answer;
@@ -220,7 +246,7 @@ export class FakeEngineHost {
       case 'session.pendingItems':
         return ok({ items: s.items });
       case 'session.pendingRequest':
-        return ok({ event: s.items.some((i) => (i.request as { requestId: string }).requestId === requestId) ? (s.requests.get(requestId!) ?? null) : null });
+        return ok({ event: this.#pending(s, requestId!) });
       case 'session.queue.list':
         return ok(s.queue);
       case 'session.catalog':
@@ -228,6 +254,20 @@ export class FakeEngineHost {
       default:
         return no('unknown_command');
     }
+  }
+
+  /** A request still listed among the broker's items. */
+  #pending(s: HostSession | undefined, requestId: string): SessionEvent | null {
+    if (s === undefined || !s.items.some((i) => (i.request as { requestId: string }).requestId === requestId)) return null;
+    return s.requests.get(requestId) ?? null;
+  }
+
+  /** `session.answer` delivered: the request settles, its item leaving the broker's set. */
+  #answer({ appSessionId, requestId }: { appSessionId: string; requestId: string }): { outcome: 'delivered' } {
+    const s = this.session(appSessionId);
+    this.answered.push(`${appSessionId} ${requestId}`);
+    this.setItems(appSessionId, s.items.filter((i) => (i.request as { requestId: string }).requestId !== requestId));
+    return { outcome: 'delivered' };
   }
 
   status(s: HostSession): Record<string, unknown> {
@@ -306,6 +346,8 @@ export class Records implements RecordSource {
 // ---- A started, enrolled endpoint -------------------------------------------------------------------------------------
 
 export type Fixture = {
+  /** The org's id, when not the suite's own (ORG). */
+  org?: string;
   endpoint: Endpoint;
   services: FakeServices;
   host: FakeEngineHost;
@@ -404,18 +446,38 @@ export function plane(kind: string, body: unknown, fields: { session?: string | 
   return { t: 'session', message: { project: PROJECT, machine: 'mini', session: fields.session === undefined ? 'la-1' : fields.session, kind, sub: fields.sub ?? null, n: fields.n ?? null, body } };
 }
 
+/** sminos's answer to the endpoint's next `subscribe`: its snapshot at n 0 (with the session's last host event). */
+export async function serve(s: FakeSminos, session?: string): Promise<Frame> {
+  const subscribe = await s.next((x) => x.t === 'subscribe' && (session === undefined || x.session === session), 'an upstream subscribe');
+  s.send(plane('snapshot', { rows: [{ uuid: 'r1' }], more: false, subagents: [], presence: { record: null, bridge: true }, streaming: [], host: [{ id: { writer: 'mini/host', seq: 1 }, event: { kind: 'message', text: 'hi' } }] }, { session: subscribe.session as string, sub: subscribe.sub as string, n: 0 }));
+  return subscribe;
+}
+
+/** sminos's next `n` on an upstream subscription of `session`. */
+export function counter(session = 'la-1'): (sub: string, kind: string, body: unknown) => Record<string, unknown> {
+  const n = new Map<string, number>();
+  return (sub, kind, body) => {
+    const next = (n.get(sub) ?? 0) + 1;
+    n.set(sub, next);
+    return plane(kind, body, { session, sub, n: next });
+  };
+}
+
 // ---- A device on a channel --------------------------------------------------------------------------------------------
 
 export type Remote = { device: Device; channel: Channel; inbox: ChannelMessage[]; carrier: () => ByteDuplex; member: string };
 
-export async function openRemote(f: Fixture, who: TestDevice, member: string): Promise<Remote> {
+/** A device's channel to the endpoint: over the direct listener unless `dial` gives another carrier. */
+export async function openRemote(f: Fixture, who: TestDevice, member: string, options: { dial?: () => Promise<ByteDuplex>; passkey?: SoftwareAuthenticator } = {}): Promise<Remote> {
   const device = new Device({
-    identity: { org: ORG, member, device: who.device.id, clientClass: who.device.class, channelKey: who.channel, build: 'subs', capabilities: [] },
+    identity: { org: f.org ?? ORG, member, device: who.device.id, clientClass: who.device.class, channelKey: who.channel, build: 'subs', capabilities: [] },
     org: memoryOrgView({ chain: [...f.chain] }),
     ...(who.device.stepUpPub === undefined ? {} : { stepUpKey: who.stepUp }),
+    ...(options.passkey === undefined ? {} : { authenticator: options.passkey }),
   });
+  const dial = options.dial ?? (() => dialDirect(`ws://127.0.0.1:${f.port()}`));
   let carrier: ByteDuplex | null = null;
-  const channel = await device.open(async () => (carrier = await dialDirect(`ws://127.0.0.1:${f.port()}`)), f.ref);
+  const channel = await device.open(async () => (carrier = await dial()), f.ref);
   const inbox: ChannelMessage[] = [];
   channel.onMessage((m) => void inbox.push(m));
   return { device, channel, inbox, carrier: () => carrier!, member };
@@ -475,4 +537,17 @@ export function evs(r: Remote, sub: string, from = 0): Array<{ epoch: string; se
 export function cursorOf(event: SessionEvent): { epoch: string; seq: number; idx: number } {
   const parts = event.id.split(':');
   return { epoch: parts.at(-3)!, seq: Number(parts.at(-2)), idx: Number(parts.at(-1)) };
+}
+
+/** An action sent, and its `ack`'s word: `ok` when accepted, else the refusal's reason. */
+export async function act(r: Remote, action: Action): Promise<string> {
+  const from = r.inbox.length;
+  await r.channel.send({ t: 'act', action });
+  const m = await waitFor(r, (x) => x.t === 'ack' && x.opId === action.opId, `the ack of ${action.action}`, from);
+  return m.state === 'accepted' ? 'ok' : (m.reason as string);
+}
+
+/** An accepted action's outcome, from its `done`. */
+export async function done(r: Remote, action: Action, from = 0): Promise<unknown> {
+  return (await waitFor(r, (x) => x.t === 'done' && x.opId === action.opId, `the done of ${action.action}`, from)).outcome;
 }

@@ -8,7 +8,7 @@
 import type { SessionEvent } from '@shared/graph/events';
 import { requestDigestOf } from '@shared/host/request-digest';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { cursorOf, drop, evs, item, makeOrg, of, openRemote, snapshot, snapshots, startEndpoint, stopAll, subscribe, until, waitFor, type Fixture, type Org, type Remote } from './sub-harness';
+import { act, cursorOf, done, drop, evs, HUB, item, makeOrg, of, openRemote, snapshot, snapshots, startEndpoint, stopAll, subscribe, until, waitFor, type Fixture, type Org, type Remote } from './sub-harness';
 
 let org: Org;
 const started: Fixture[] = [];
@@ -260,20 +260,34 @@ describe('a lane B `cards` subscription', () => {
     expect(of(a, 'c1').every((m) => m.t !== 'snap' || !Object.keys(JSON.parse(m.body as string) as object).some((k) => k !== 'pendingItems'))).toBe(true);
   });
 
-  it('answers a resumed cards subscription with a snapshot of what is pending now, which a web-cards device subscribes to on a session its member owns', async () => {
+  it('answers a resumed cards subscription with a snapshot of what is pending now, which a web-cards device subscribes to on a session its member owns and answers from the card alone', async () => {
     const f = await lab();
     const s = f.host.session('app-1');
     f.records.set({ lane: 'B', session: s.engineSessionId!, owners: [org.C] }, 'app-1');
     f.host.request('app-1', 'permission', 'rq-p');
-    const c = await openRemote(f, org.c1, org.C);
+    const c = await openRemote(f, org.c1, org.C, { passkey: org.passkey });
     expect(await subscribe(c, 'full', { lane: 'B', id: 'app-1' })).toMatchObject({ t: 'ended', reason: 'class' });
     const first = await subscribe(c, 'c1', { lane: 'B', id: 'app-1' }, { view: 'cards' });
     drop(c);
     f.host.request('app-1', 'question', 'rq-q');
-    const again = await openRemote(f, org.c1, org.C);
+    const again = await openRemote(f, org.c1, org.C, { passkey: org.passkey });
     expect(await subscribe(again, 'c1', { lane: 'B', id: 'app-1' }, { view: 'cards', cursor: { epoch: first.epoch as string, seq: 0 } })).toMatchObject({ mode: 'snapshot' });
     const snap = await snapshot(again, 'c1');
-    expect((snap.body.pendingItems as Array<{ item: { kind: string } }>).map((c) => c.item.kind)).toEqual(['permission', 'question']);
+    const cards = snap.body.pendingItems as Array<{ item: { kind: string; request: { requestId: string } }; context: { launchId: string; engineSessionId: string }; requestDigest: unknown }>;
+    expect(cards.map((card) => card.item.kind)).toEqual(['permission', 'question']);
+    // What the card carries is all an answer needs: its context and its digest, which the engine host checks at the claim.
+    const answers = [{ kind: 'permission', decision: 'allow', scope: 'once' }, { kind: 'question', answers: { 'Which way?': 'left' } }];
+    for (const [i, card] of cards.entries()) {
+      const action = await again.device.webauthn(
+        again.device.action({ machine: f.ref, action: 'session.answer', session: 'app-1', context: { lane: 'B', ...card.context }, requestDigest: card.requestDigest as never, args: { appSessionId: 'app-1', requestId: card.item.request.requestId, answer: answers[i] } }),
+        HUB,
+      );
+      const from = again.inbox.length;
+      expect(await act(again, action)).toBe('ok');
+      expect(await done(again, action, from)).toEqual({ state: 'done', result: { outcome: 'delivered' } });
+    }
+    expect(f.host.answered).toEqual(['app-1 rq-p', 'app-1 rq-q']);
+    await until(() => (JSON.parse(of(again, 'c1').filter((m) => m.t === 'snap').at(-1)!.body as string) as { pendingItems: unknown[] }).pendingItems.length === 0, 'the cards settled');
   });
 });
 
