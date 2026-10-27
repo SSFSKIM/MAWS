@@ -51,6 +51,7 @@ import {
   type FilesWriteOutput,
   type FilesRevealOutput, // E1
 } from '@shared/ipc/schema/files';
+import { ReleaseFences } from '../release-fences';
 import { rootsOf, under, type AllowlistRecord } from './allowlist';
 import { fileMime, isTextMime } from './mime';
 import { sameIdentity, WatchTable, type Identity, type Installation } from './watch';
@@ -141,7 +142,7 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
   // Per confirmed file identity (`dev:ino`), the tail of its writes' chain: two writes of one file (two tabs, two
   // sessions, a hard-link alias) compare and write one after the other. Removed when its chain drains.
   const writing = new Map<string, Promise<void>>();
-  const releases = new Map<string, number>(); // per client, how many times its holds were released (files.unwatch)
+  const releases = new ReleaseFences<string>(); // per client: an unwatch in flight across its release drops nothing
 
   // Step 1: absolute, already normal (a `..` is refused before the disk is touched, since the kernel resolves `/X/..`
   // only when `/X` exists) and with no trailing separator (under which `lstat` follows a final-component symlink, so
@@ -425,16 +426,16 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
     // the hold on the directory the path names now (the realpath a watch of it would be keyed by), else the first found;
     // a release of the window meanwhile (a navigation) took the page's holds, and a hold under the same key is the new
     // page's, so an unwatch that straddled it drops nothing
-    unwatch: async (appSessionId, path, owner) => {
-      const generation = releases.get(owner) ?? 0;
-      const real = isAbsolute(path) ? await fs.promises.realpath(path).catch(() => null) : null;
-      if ((releases.get(owner) ?? 0) !== generation) return;
-      watches.unwatch({ owner, appSessionId, path }, real);
-    },
+    unwatch: (appSessionId, path, owner) =>
+      releases.hold(owner, async (released) => {
+        const real = isAbsolute(path) ? await fs.promises.realpath(path).catch(() => null) : null;
+        if (released()) return;
+        watches.unwatch({ owner, appSessionId, path }, real);
+      }),
     openExternal,
     reveal, // E1
     release: (owner) => {
-      releases.set(owner, (releases.get(owner) ?? 0) + 1);
+      releases.release(owner);
       watches.release(owner);
     },
     watching: () => watches.watching(),

@@ -23,7 +23,7 @@ export function registerGitHandlers(git: GitService): void {
   registerMainHandler('git.diff', (input) => relay(() => git.diff(input)));
   registerMainHandler('git.log', (input) => relay(() => git.log(input)));
   registerMainHandler('git.watch', ({ directory }, { client }) => relay(() => {
-    const watching = git.watch(directory, client.id); // reads the owner's release count at once, so a release from here on drops it
+    const watching = git.watch(directory, client.id); // takes the owner's release fence at once, so a release from here on drops it
     follow(client);
     return watching;
   }));

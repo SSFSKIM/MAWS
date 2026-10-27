@@ -276,6 +276,19 @@ describe('voice service owns one capture and drops late events', () => {
     expect(h.backend.cancel).not.toHaveBeenCalled();
   });
 
+  it('starts nothing for a client that has already ended, and a live client can start afterwards', async () => {
+    const h = setup();
+    const gone = sender(1);
+    const ended = gone.client;
+    gone.emit('destroyed'); // the page went before its start reached the service
+    await expect(h.service.start({ captureId: A, locale: null }, ended)).resolves.toEqual({ accepted: false, reason: 'cancelled', path: null });
+    expect(h.backend.start).not.toHaveBeenCalled();
+    expect(h.backend.cancel).not.toHaveBeenCalled(); // nothing was started, so nothing is cancelled
+    const next = h.service.start({ captureId: B, locale: null }, sender(2).client);
+    h.starts.at(-1)!.answer({ accepted: true });
+    await expect(next).resolves.toEqual({ accepted: true });
+  });
+
   it('answers voice.status from the backend probe for the locale asked', async () => {
     const h = setup();
     await expect(h.service.status('en-US')).resolves.toEqual(STATUS);

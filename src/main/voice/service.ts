@@ -29,6 +29,7 @@ interface Capture {
   captureId: string;
   clientId: ClientId;
   phase: 'starting' | 'listening' | 'stopping';
+  asked: boolean; // the backend was asked to start it, so only then has it anything to cancel
   unfollow(): void; // stops watching the owning page's end
 }
 
@@ -46,9 +47,12 @@ export class VoiceService {
 
   async start({ captureId, locale }: VoiceStartInput, client: ClientRef): Promise<VoiceStartResult> {
     if (this.active) return { accepted: false, reason: 'busy', path: null };
-    const capture: Capture = { captureId, clientId: client.id, phase: 'starting', unfollow: () => {} };
+    const capture: Capture = { captureId, clientId: client.id, phase: 'starting', asked: false, unfollow: () => {} };
     this.active = capture;
     this.follow(capture, client);
+    // A client that had already ended released the capture as it was followed: no composer is left to own a recording.
+    if (this.active !== capture) return { accepted: false, reason: 'cancelled', path: null };
+    capture.asked = true;
     let result: VoiceStartResult;
     try {
       result = await this.backend.start(captureId, locale, (event) => this.forward(capture, event));
@@ -106,7 +110,7 @@ export class VoiceService {
     capture.unfollow = client.onGone(() => {
       if (this.active !== capture) return;
       this.release(capture);
-      this.backend.cancel(capture.captureId);
+      if (capture.asked) this.backend.cancel(capture.captureId);
     });
   }
 
