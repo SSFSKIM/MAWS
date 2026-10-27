@@ -26,6 +26,7 @@ import { openDocuments, type Documents } from '../../src/engine-host/documents';
 import { registerArtifacts } from '../../src/engine-host/documents/register';
 import { openDocument, type DocOpenDeps } from '../../src/main/artifacts/open';
 import { createHostSupervisor, type HostSupervisor, type HostSpec } from '../../src/main/hosts/supervisor';
+import { clientOf } from '../../src/main/ipc/clients';
 import type { HostOwner } from '../../src/main/ipc/router';
 import { CommandFailure } from '../../src/main/ipc/router';
 import { createArtifactHost, type DocPorts } from '../../src/renderer/src/artifacts/host';
@@ -110,8 +111,7 @@ function window(id = 1) {
   const sender = {
     id,
     isDestroyed: () => false,
-    on: () => {},
-    once: () => {},
+    on: () => {}, // the page never ends here
     postMessage: (_name: string, { channel }: { channel: number }, [port]: PortLike[]) => {
       const waiter = waiting.get(channel);
       if (!waiter) return void posted.set(channel, port);
@@ -119,6 +119,7 @@ function window(id = 1) {
       waiter(port);
     },
   };
+  const client = clientOf(sender as never); // the window's page, as the router names it to main's handler
   const deps: DocOpenDeps = {
     dispatch: supervisor.dispatch,
     postDocPort: supervisor.postDocPort,
@@ -134,7 +135,7 @@ function window(id = 1) {
       if (name !== 'artifacts.open') return supervisor.dispatch('engine-host', name, input as never);
       opens.push(Date.now());
       try {
-        return { ok: true, value: await openDocument(deps, (input as CommandInput<'artifacts.open'>).artifactId, sender as never) };
+        return { ok: true, value: await openDocument(deps, (input as CommandInput<'artifacts.open'>).artifactId, client) };
       } catch (error) {
         if (error instanceof CommandFailure) return { ok: false, error: error.error };
         throw error;
