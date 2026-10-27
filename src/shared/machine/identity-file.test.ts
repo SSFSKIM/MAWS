@@ -1,0 +1,130 @@
+import * as actualFs from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { IDENTITY_FILE, readMachineRef, readOrMintMachineRef } from './identity-file';
+import { MachineRefSchema } from './ref';
+
+// The minter's pause point: the identity file is published by `link`, so a hook run just before the real link stands for
+// a first run paused after writing its temporary file and before linking it.
+const beforeLink = vi.hoisted(() => ({ hook: null as null | (() => void) }));
+vi.mock('node:fs', async (importOriginal) => {
+  const fs = await importOriginal<typeof import('node:fs')>();
+  const linkSync: typeof fs.linkSync = (existing, created) => {
+    const hook = beforeLink.hook;
+    beforeLink.hook = null;
+    hook?.();
+    fs.linkSync(existing, created);
+  };
+  return { ...fs, default: { ...fs, linkSync }, linkSync };
+});
+
+let profile: string;
+beforeEach(() => {
+  profile = actualFs.mkdtempSync(join(tmpdir(), 'maws-identity-'));
+});
+afterEach(() => {
+  beforeLink.hook = null;
+  actualFs.rmSync(profile, { recursive: true, force: true });
+});
+
+const identityPath = () => join(profile, IDENTITY_FILE);
+const leftovers = () => actualFs.readdirSync(profile).filter((name) => name !== IDENTITY_FILE);
+
+describe('readOrMintMachineRef', () => {
+  it('mints once at the first run into a 0600 machine.json and reads the same ref ever after', () => {
+    const ref = readOrMintMachineRef(profile);
+    const written = actualFs.readFileSync(identityPath(), 'utf8');
+    expect(JSON.parse(written)).toEqual({ version: 1, ref, mintedAt: expect.any(String) });
+    expect(Number.isNaN(Date.parse(JSON.parse(written).mintedAt))).toBe(false);
+    expect(actualFs.statSync(identityPath()).mode & 0o777).toBe(0o600);
+    expect(leftovers()).toEqual([]);
+
+    expect(readOrMintMachineRef(profile)).toBe(ref);
+    expect(readMachineRef(profile)).toBe(ref);
+    expect(actualFs.readFileSync(identityPath(), 'utf8')).toBe(written); // never rewritten
+  });
+
+  it("is RL5's format, from 128 random bits: 22 base64url characters of 16 random bytes", () => {
+    const refs = new Set<string>();
+    for (let n = 0; n < 32; n++) {
+      const dir = actualFs.mkdtempSync(join(profile, 'p-'));
+      const ref = readOrMintMachineRef(dir);
+      expect(ref).toMatch(/^[A-Za-z0-9_-]{22}$/);
+      expect(MachineRefSchema.safeParse(ref).success).toBe(true);
+      expect(Buffer.from(ref, 'base64url')).toHaveLength(16);
+      refs.add(ref);
+    }
+    expect(refs.size).toBe(32); // a second profile gets a different ref
+  });
+
+  it("creates the profile's directory when it does not exist yet", () => {
+    const dir = join(profile, 'fresh', 'profile');
+    const ref = readOrMintMachineRef(dir);
+    expect(readMachineRef(dir)).toBe(ref);
+  });
+
+  it("publishes atomically: a run that starts while the first is paused before its link leaves both on one complete ref", () => {
+    let second: string | null = null;
+    let seenBySecond: string[] = [];
+    beforeLink.hook = () => {
+      // The first run's complete temporary file is on disk and machine.json is not: a second run starts meanwhile.
+      expect(actualFs.existsSync(identityPath())).toBe(false);
+      second = readOrMintMachineRef(profile);
+      seenBySecond = leftovers();
+    };
+    const first = readOrMintMachineRef(profile);
+
+    expect(second).not.toBeNull();
+    expect(first).toBe(second); // the first run lost the link and read the winner's file
+    expect(readMachineRef(profile)).toBe(first);
+    expect(JSON.parse(actualFs.readFileSync(identityPath(), 'utf8')).ref).toBe(first);
+    expect(seenBySecond).toHaveLength(1); // the paused run's fresh temporary file survived the second run's sweep
+    expect(leftovers()).toEqual([]); // and each run removed its own
+  });
+
+  it('removes a stray temporary file older than a minute at the next start, and keeps a fresh one (a racing minter)', () => {
+    const stray = join(profile, `${IDENTITY_FILE}.4242.c3RyYXk`);
+    const fresh = join(profile, `${IDENTITY_FILE}.4343.ZnJlc2g`);
+    actualFs.writeFileSync(stray, '{"version":1,"ref":"strayStrayStrayStr', { mode: 0o600 });
+    actualFs.writeFileSync(fresh, '{"version":1,"ref":"freshFreshFreshFre', { mode: 0o600 });
+    const old = new Date(Date.now() - 2 * 60_000);
+    actualFs.utimesSync(stray, old, old);
+
+    readOrMintMachineRef(profile);
+    expect(actualFs.existsSync(stray)).toBe(false);
+    expect(actualFs.existsSync(fresh)).toBe(true);
+  });
+});
+
+describe('a malformed identity file', () => {
+  const malformed: [string, string][] = [
+    ['not JSON', '{"version":1,"ref":'],
+    ['empty', ''],
+    ['no ref', '{"version":1,"mintedAt":"2026-10-27T00:00:00.000Z"}'],
+    ['a ref that breaks the format', '{"version":1,"ref":"abcdefgh/ijklmnopqrst","mintedAt":"2026-10-27T00:00:00.000Z"}'],
+    ['a ref too short', '{"version":1,"ref":"short","mintedAt":"2026-10-27T00:00:00.000Z"}'],
+    ['not an object', '"q3J8Vb2bQyKh0bN7k6m2Fw"'],
+  ];
+
+  it.each(malformed)('is refused loudly, naming the path, and never re-minted (%s)', (_, content) => {
+    actualFs.writeFileSync(identityPath(), content);
+    expect(() => readMachineRef(profile)).toThrow(identityPath());
+    expect(() => readOrMintMachineRef(profile)).toThrow(identityPath());
+    expect(actualFs.readFileSync(identityPath(), 'utf8')).toBe(content);
+    expect(leftovers()).toEqual([]);
+  });
+});
+
+describe('readMachineRef', () => {
+  it('answers null when no identity exists, and mints nothing', () => {
+    expect(readMachineRef(profile)).toBeNull();
+    expect(actualFs.readdirSync(profile)).toEqual([]);
+  });
+
+  it('reads a ref minted elsewhere in the whole RL5 range, whatever the file version', () => {
+    const ref = 'Another_daemon-minted-this-ref-0123456789';
+    actualFs.writeFileSync(identityPath(), JSON.stringify({ version: 2, ref, mintedAt: '2026-10-27T00:00:00.000Z', extra: true }));
+    expect(readMachineRef(profile)).toBe(ref);
+  });
+});
