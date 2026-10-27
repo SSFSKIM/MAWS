@@ -6,6 +6,7 @@ import { appendFileSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileS
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
 import { readOrMintMachineRef } from '@shared/machine/identity-file';
+import { fakePack, packProgram } from '../../test/support/fake-pack';
 import { FakeManagers } from '../../test/support/fake-units';
 import { MawsdScene, until } from '../../test/support/mawsd-scene';
 import { runCli, type CliDeps } from './cli';
@@ -349,9 +350,25 @@ describe('mawsd install and uninstall', () => {
     const packaged = await cli(['install'], { env: {}, self: { runtime: '/Applications/MAWS.app/Contents/MacOS/MAWS', entry: '/Applications/MAWS.app/Contents/Resources/app.asar/out/main/mawsd.js' } });
     expect(packaged.code).toBe(0);
     expect(packaged.out).toContain('unit dev.maws.mawsd loaded');
-    const linux = await cli(['install'], { env: {}, platform: 'linux' }); // not the release directory's current, and not named
+    const linux = await cli(['install'], { env: {}, platform: 'linux' }); // not a pack
     expect(linux.code).toBe(1);
-    expect(linux.err).toContain('/opt/maws/out/main/mawsd.js is not in the release directory');
+    expect(linux.err).toContain('/opt/maws/out/main/mawsd.js is not a mawsd release (pnpm mawsd:pack makes one)');
+  });
+
+  it('on Linux, installs the pack it runs from as the release directory’s current, and the default unit runs current', async () => {
+    const home = join(scene.root, 'home');
+    const self = packProgram(fakePack(join(scene.root, 'checkout', 'dist', 'mawsd'), 'a1b2c3d4'));
+    const installed = await cli(['install'], { env: {}, platform: 'linux', self });
+    expect(installed.code).toBe(0);
+    const current = join(home, '.local', 'share', 'maws', 'mawsd', 'current');
+    expect(installed.out).toContain(`release 0.0.0-a1b2c3d4 installed as ${current}`);
+    expect(installed.out).toContain('unit mawsd.service loaded');
+    expect(readFileSync(join(home, '.config', 'systemd', 'user', 'mawsd.service'), 'utf8')).toContain(`ExecStart=${current}/runtime/bin/node --disable-sigusr1 ${current}/out/main/mawsd.js run --unit`);
+    expect((await cli(['install'], { env: {}, platform: 'linux', self })).out).toContain('release 0.0.0-a1b2c3d4 is current');
+    // the canonical Linux unit always runs its release's own runtime, so naming another is refused
+    const named = await cli(['install', '--runtime', '/usr/bin/node'], { env: {}, platform: 'linux', self });
+    expect(named.code).toBe(1);
+    expect(named.err).toContain('--runtime');
   });
 
   it('is not available where there is no unit manager', async () => {

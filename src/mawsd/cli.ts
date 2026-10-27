@@ -24,8 +24,9 @@ import { PTY_HOST_FILES } from '../pty-host/files';
 import { NO_ENDPOINT_MODULE } from './endpoint-seam';
 import { installDaemon, resolveLabel, uninstallDaemon, unitFor, type InstallDeps } from './install';
 import { reachMachine, REQUEST_TIMEOUT_MS, type MachineLink } from './machine-client';
+import { releasesRoot, type InstalledRelease } from './release';
 import { USAGE as RUN_USAGE } from './run-args';
-import { UnitError, type CommandRunner, type UnitProgram } from './units/unit';
+import { DEFAULT_LABEL, UnitError, type CommandRunner, type UnitProgram } from './units/unit';
 
 export const EXIT = { done: 0, failed: 1, unavailable: 2, notRunning: 3, notListed: 4 } as const;
 const ENROLL_WAIT_DEFAULT_S = 300;
@@ -40,6 +41,7 @@ export const USAGE = `usage: mawsd <command> [--profile <dir>] [--label <label>]
   keys [--json]
   endpoint <command> [<argument>…] a command of the endpoint module (P5 O10)
   install [--delegation-id <id>] [--runtime <node>] [--entry <mawsd.js>]
+                                   on Linux the default profile's unit installs the pack it runs from (pnpm mawsd:pack)
   uninstall
   ${RUN_USAGE.replace(/^usage: mawsd /, '')}
 exit codes: 0 done, 1 failed, 2 not available here, 3 not running, 4 enrolled with the hub but not yet listed in the org state`;
@@ -467,12 +469,20 @@ async function install(context: Context, args: readonly string[]): Promise<numbe
   const program = { runtime: path('--runtime', deps.self.runtime), entry: path('--entry', deps.self.entry) };
   const delegation = given.get('--delegation-id');
   const label = requiredLabel(context);
-  const programGiven = given.has('--runtime') && given.has('--entry');
-  const result = await installDaemon({ profileDir, label, program, programGiven, ...(typeof delegation === 'string' && { delegationId: delegation }) }, installDeps(deps));
+  // P5 O2 M8: the default profile's Linux unit runs the release directory's `current`, with that release's own runtime
+  if (deps.platform === 'linux' && label === DEFAULT_LABEL && given.has('--runtime')) throw new Usage(`${label}'s unit runs its release's own runtime; --runtime is for another --label`);
+  const result = await installDaemon({ profileDir, label, program, ...(typeof delegation === 'string' && { delegationId: delegation }) }, installDeps(deps));
   const change = { loaded: 'loaded', unchanged: 'unchanged', updated: 'updated and restarted' }[result.change];
   const linked = result.linked === null ? '' : result.linked === 'other' ? ` · ${join(deps.home, '.local', 'bin', 'mawsd')} is another mawsd, left as it is` : ` · linked from ${result.linked}`;
-  deps.out([`unit ${result.unit.name} ${change} (${result.unit.file})`, `wrapper ${result.wrapper}${linked}`, ...(result.ref ? [`machine ${result.ref}`] : []), ''].join('\n'));
+  const release = result.release === null ? [] : [releaseLine(result.release, deps.home)];
+  deps.out([...release, `unit ${result.unit.name} ${change} (${result.unit.file})`, `wrapper ${result.wrapper}${linked}`, ...(result.ref ? [`machine ${result.ref}`] : []), ''].join('\n'));
   return EXIT.done;
+}
+
+function releaseLine({ release, previous, flipped, pruned }: InstalledRelease, home: string): string {
+  const current = join(releasesRoot(home), 'current');
+  const head = flipped ? `release ${release} installed as ${current}${previous === null ? '' : ` (was ${previous})`}` : `release ${release} is current (${current})`;
+  return pruned.length === 0 ? head : `${head} · pruned ${pruned.join(', ')}`;
 }
 
 async function uninstall(context: Context): Promise<number> {

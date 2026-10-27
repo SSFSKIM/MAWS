@@ -4,11 +4,13 @@
 // home and the app (M7) and the Linux package (M8) call the same code with their own program.
 //
 // An install, in order: the delegation id checked; under the default label, the program checked to be a packaged build
-// (residue 21: never a checkout); the profile's `mawsd/` directory made private (a symlink, another
+// (residue 21: never a checkout; on Linux a pack, which M8 installs as the release directory's `current`, release.ts,
+// and the unit runs `current`); the profile's `mawsd/` directory made private (a symlink, another
 // owner or a wider mode refuses the install, writing no unit); with `--delegation-id`, the profile's machine ref minted
 // with the delegation's id as its prefix when it has none (before the unit's first start, so the daemon reads it); the
 // wrapper `<profile>/mawsd/bin/mawsd` and, for the default profile, its link `~/.local/bin/mawsd`; then the unit applied
-// (units/unit.ts's `apply`: written when changed, loaded, the daemon restarted when a loaded unit changed). Idempotent.
+// (units/unit.ts's `apply`: written when changed, loaded, the daemon restarted when a loaded unit changed, or when
+// `current` now names another release). Idempotent.
 // An uninstall unloads the unit (which ends `mawsd`; the hosts and their sessions keep running, and the next app
 // connects to the engine host in either shape), removes its file, the wrapper and the link if it is ours.
 //
@@ -21,6 +23,7 @@ import { defaultProfileDir } from '@shared/daemon/profile';
 import { makePrivateDirectory } from '@shared/host/private-listen';
 import { readOrMintMachineRef } from '@shared/machine/identity-file';
 import type { MachineRef } from '@shared/machine/ref';
+import { installRelease, packOf, releaseProgram, type InstalledRelease, type Pack } from './release';
 import { launchdUnit } from './units/launchd';
 import { systemdUnit } from './units/systemd';
 import { DEFAULT_LABEL, UnitError, writeWhole, type Unit, type UnitChange, type UnitDeps, type UnitProgram, type UnitSpec } from './units/unit';
@@ -87,53 +90,56 @@ export function wrapperText({ label, profileDir, program }: UnitSpec): string {
 export interface InstallOptions {
   profileDir: string;
   label: string;
-  program: UnitProgram;
-  programGiven?: boolean; // the caller named the runtime and the entry itself (the CLI's --runtime and --entry)
+  program: UnitProgram; // the program to run; on Linux under the default label, the pack to install as the release
   delegationId?: string;
 }
 
-// The Linux release directory's current release (M8 installs it; residue 21).
-export const linuxReleaseCurrent = (home: string): string => join(home, '.local', 'share', 'maws', 'mawsd', 'current');
-
 // Residue 21: the canonical unit never runs code from a working checkout. Under the default profile's label, a Mac's
-// program is a packaged app (its entry inside an `app.asar`), and a Linux one is the release directory's `current`, or a
-// program the caller named itself (until M8's release directory exists, the only way M8's install can say where it is).
-// Any other label (a scratch profile, every test) may run an unpackaged build.
-export function unpackagedProgram({ label, program }: UnitSpec, platform: NodeJS.Platform, home: string, given: boolean): string | null {
+// program is a packaged app (its entry inside an `app.asar`), and a Linux one is a pack (`pnpm mawsd:pack`, release.ts)
+// with its runtime, which the install makes the release directory's `current`. Any other label (a scratch profile,
+// every test) may run an unpackaged build, and installs no release.
+export function unpackagedProgram({ label, program }: UnitSpec, platform: NodeJS.Platform): string | null {
   if (label !== DEFAULT_LABEL) return null;
   if (platform === 'darwin') return /\.asar[/\\]/.test(program.entry) ? null : `${program.entry} is not inside a packaged app's app.asar`;
-  const current = `${linuxReleaseCurrent(home)}/`;
-  if (given || (program.entry.startsWith(current) && program.runtime.startsWith(current))) return null;
-  return `${program.entry} is not in the release directory ${current} (name --runtime and --entry to install another)`;
+  const pack = packOf(program.entry);
+  if (pack === null) return `${program.entry} is not a mawsd release (pnpm mawsd:pack makes one)`;
+  return pack.runtime ? null : `the release ${pack.release} at ${pack.root} has no runtime/bin/node (pnpm mawsd:pack adds it on Linux)`;
 }
 
 export interface InstallResult {
   unit: Unit;
-  change: UnitChange;
+  change: UnitChange; // 'updated' too when the unit's text is unchanged but `current` named another release (restarted)
   wrapper: string;
   linked: string | 'other' | null; // the link's path; 'other' when another mawsd is there; null when none is made
   ref: MachineRef | null; // the ref, when --delegation-id asked for one
+  release: InstalledRelease | null; // the Linux canonical unit's release (release.ts); null otherwise
 }
 
 export async function installDaemon(options: InstallOptions, deps: InstallDeps): Promise<InstallResult> {
-  const { profileDir, label, program, delegationId } = options;
+  const { profileDir, label, delegationId } = options;
   if (delegationId !== undefined && !DELEGATION_ID.test(delegationId)) throw new UnitError(`a delegation id is 32 lower-case hex digits; refusing ${JSON.stringify(delegationId)}`);
   const unit = unitFor(label, deps);
-  const spec: UnitSpec = { label, profileDir, program };
-  const unpackaged = unpackagedProgram(spec, deps.platform, deps.home, options.programGiven === true);
+  const unpackaged = unpackagedProgram({ label, profileDir, program: options.program }, deps.platform);
   if (unpackaged !== null) throw new UnitError(`refusing to install ${unit.name} for a build that is not packaged: ${unpackaged}`);
+  const pack: Pack | null = deps.platform === 'linux' && label === DEFAULT_LABEL ? packOf(options.program.entry) : null;
 
   mkdirSync(profileDir, { recursive: true, mode: 0o700 });
   makePrivateDirectory(join(profileDir, DAEMON_FILES.dir));
   const ref = delegationId === undefined ? null : readOrMintMachineRef(profileDir, { prefix: delegationId });
+  const release = pack === null ? null : installRelease(pack, deps.home);
+  const spec: UnitSpec = { label, profileDir, program: pack === null ? options.program : releaseProgram(deps.home) };
 
   const wrapper = wrapperPath(profileDir);
   mkdirSync(dirname(wrapper), { recursive: true, mode: 0o700 });
   writeWhole(wrapper, wrapperText(spec), 0o700);
   const linked = isDefaultProfile(profileDir, deps.platform, deps.env, deps.home) ? link(join(deps.home, '.local', 'bin'), wrapper) : null;
 
-  const change = await unit.apply(unit.render(spec));
-  return { unit, change, wrapper, linked, ref };
+  let change = await unit.apply(unit.render(spec));
+  if (change === 'unchanged' && release?.flipped) {
+    unit.restart(); // the unit runs `current`, which now names another release; its hosts and sessions keep running (KillMode=process)
+    change = 'updated';
+  }
+  return { unit, change, wrapper, linked, ref, release };
 }
 
 export interface UninstallResult {

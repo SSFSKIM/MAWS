@@ -1,12 +1,13 @@
 // `mawsd install` and `uninstall` (P5 O2 M6; docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M6's Proves): the command
 // sequence of an install twice (the second changes nothing) and of an uninstall, on each platform, through fake managers
 // in a scratch home; the wrapper and its link; the delegation's ref; the label a profile's unit goes by.
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readMachineRef } from '@shared/machine/identity-file';
 import { MachineRefSchema } from '@shared/machine/ref';
+import { fakePack, packProgram } from '../../test/support/fake-pack';
 import { FakeManagers } from '../../test/support/fake-units';
 import { installDaemon, isDefaultProfile, resolveLabel, uninstallDaemon, wrapperPath, wrapperText, type InstallDeps } from './install';
 
@@ -14,7 +15,9 @@ let home: string;
 let managers: FakeManagers;
 const PROGRAM = { runtime: '/Applications/MAWS.app/Contents/MacOS/MAWS', entry: '/Applications/MAWS.app/Contents/Resources/app.asar/out/main/mawsd.js' };
 const DELEGATION = '0123456789abcdef0123456789abcdef';
-const linuxProgram = () => ({ runtime: join(home, '.local/share/maws/mawsd/current/runtime/bin/node'), entry: join(home, '.local/share/maws/mawsd/current/out/main/mawsd.js') });
+// a command line run from a pack (pnpm mawsd:pack's dist/mawsd/<release>), as devenv/setup.sh runs `mawsd install`
+const linuxProgram = (commit = 'a1b2c3d4') => packProgram(fakePack(join(home, 'checkout', 'dist', 'mawsd'), commit));
+const current = () => join(home, '.local/share/maws/mawsd/current');
 const CHECKOUT = { runtime: '/Users/u/src/MAWS/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron', entry: '/Users/u/src/MAWS/out/main/mawsd.js' };
 
 beforeEach(() => {
@@ -131,18 +134,56 @@ describe('install and uninstall on macOS', () => {
 describe('install and uninstall on Linux', () => {
   it('installs: the unit written, reloaded, enabled with --now, lingering; a second install changes nothing; uninstall', async () => {
     const profileDir = linuxProfile();
-    await expect(installDaemon({ profileDir, label: 'dev.maws.mawsd', program: linuxProgram() }, deps('linux'))).resolves.toMatchObject({ change: 'loaded' });
+    const program = linuxProgram();
+    await expect(installDaemon({ profileDir, label: 'dev.maws.mawsd', program }, deps('linux'))).resolves.toMatchObject({ change: 'loaded', release: { release: '0.0.0-a1b2c3d4', previous: null, flipped: true } });
     expect(managers.changes()).toEqual(['systemctl --user daemon-reload', 'systemctl --user enable --now mawsd.service', 'loginctl enable-linger u']);
-    expect(existsSync(join(home, '.config', 'systemd', 'user', 'mawsd.service'))).toBe(true);
+    const unit = readFileSync(join(home, '.config', 'systemd', 'user', 'mawsd.service'), 'utf8');
+    expect(unit).toContain(`ExecStart=${current()}/runtime/bin/node --disable-sigusr1 ${current()}/out/main/mawsd.js run --unit --dir ${profileDir}/mawsd`);
+    expect(unit).not.toContain('checkout');
+    expect(readlinkSync(current())).toBe('releases/0.0.0-a1b2c3d4');
     expect(readFileSync(wrapperPath(profileDir), 'utf8')).toContain('export ELECTRON_RUN_AS_NODE=1');
+    expect(readFileSync(wrapperPath(profileDir), 'utf8')).toContain(`exec '${current()}/runtime/bin/node' --disable-sigusr1 '${current()}/out/main/mawsd.js' "$@"`);
 
     managers.calls.length = 0;
-    await expect(installDaemon({ profileDir, label: 'dev.maws.mawsd', program: linuxProgram() }, deps('linux'))).resolves.toMatchObject({ change: 'unchanged' });
+    await expect(installDaemon({ profileDir, label: 'dev.maws.mawsd', program }, deps('linux'))).resolves.toMatchObject({ change: 'unchanged', release: { flipped: false } });
     expect(managers.changes()).toEqual([]);
 
     managers.calls.length = 0;
     await uninstallDaemon({ profileDir, label: 'dev.maws.mawsd' }, deps('linux'));
     expect(managers.changes()).toEqual(['systemctl --user disable --now mawsd.service', 'systemctl --user daemon-reload']);
+  });
+
+  it('a new release flips current and restarts the running unit onto it; the release it runs from installs as current', async () => {
+    const profileDir = linuxProfile();
+    await installDaemon({ profileDir, label: 'dev.maws.mawsd', program: linuxProgram('aaaaaaaa') }, deps('linux'));
+    const unitFile = join(home, '.config', 'systemd', 'user', 'mawsd.service');
+    const text = readFileSync(unitFile, 'utf8');
+
+    managers.calls.length = 0;
+    await expect(installDaemon({ profileDir, label: 'dev.maws.mawsd', program: linuxProgram('bbbbbbbb') }, deps('linux'))).resolves.toMatchObject({ change: 'updated', release: { release: '0.0.0-bbbbbbbb', previous: '0.0.0-aaaaaaaa', flipped: true } });
+    expect(managers.changes()).toEqual(['systemctl --user restart mawsd.service']); // the unit's text names current, so only the daemon changes
+    expect(readFileSync(unitFile, 'utf8')).toBe(text);
+    expect(readlinkSync(current())).toBe('releases/0.0.0-bbbbbbbb');
+
+    // a rollback: `mawsd install` run from the previous release's own copy (its real path, as Node runs it)
+    managers.calls.length = 0;
+    const previous = join(home, '.local/share/maws/mawsd/releases/0.0.0-aaaaaaaa');
+    await expect(installDaemon({ profileDir, label: 'dev.maws.mawsd', program: packProgram(previous) }, deps('linux'))).resolves.toMatchObject({ change: 'updated', release: { release: '0.0.0-aaaaaaaa', flipped: true } });
+    expect(managers.changes()).toEqual(['systemctl --user restart mawsd.service']);
+
+    // a unit not running when the release flips is started by the install, not restarted
+    managers.active.delete('mawsd.service');
+    managers.calls.length = 0;
+    await expect(installDaemon({ profileDir, label: 'dev.maws.mawsd', program: linuxProgram('cccccccc') }, deps('linux'))).resolves.toMatchObject({ change: 'loaded' });
+    expect(managers.changes()).toEqual(['systemctl --user enable --now mawsd.service']);
+    expect(readdirSync(join(home, '.local/share/maws/mawsd/releases')).sort()).toEqual(['0.0.0-aaaaaaaa', '0.0.0-bbbbbbbb', '0.0.0-cccccccc']);
+  });
+
+  it('a scratch label installs no release: its unit runs the program it was given', async () => {
+    const program = linuxProgram();
+    await expect(installDaemon({ profileDir: join(home, 'scratch'), label: 'dev.maws.mawsd.e2e-4', program }, deps('linux'))).resolves.toMatchObject({ release: null });
+    expect(readFileSync(join(home, '.config', 'systemd', 'user', 'dev.maws.mawsd.e2e-4.service'), 'utf8')).toContain(`ExecStart=${program.runtime} `);
+    expect(existsSync(current())).toBe(false);
   });
 
   it('is not available on a platform with neither manager', async () => {
@@ -187,19 +228,22 @@ describe('install --delegation-id', () => {
 describe('the canonical unit runs a packaged build only (residue 21)', () => {
   it('on macOS, refuses an entry outside an app.asar under the default label, before writing anything', async () => {
     const profileDir = darwinProfile();
-    await expect(installDaemon({ profileDir, label: 'dev.maws.mawsd', program: CHECKOUT, programGiven: true }, deps('darwin'))).rejects.toThrow(`${CHECKOUT.entry} is not inside a packaged app's app.asar`);
+    await expect(installDaemon({ profileDir, label: 'dev.maws.mawsd', program: CHECKOUT }, deps('darwin'))).rejects.toThrow(`${CHECKOUT.entry} is not inside a packaged app's app.asar`);
     expect(existsSync(profileDir)).toBe(false);
     expect(managers.calls).toEqual([]);
     await expect(installDaemon({ profileDir, label: 'dev.maws.mawsd', program: PROGRAM }, deps('darwin'))).resolves.toMatchObject({ change: 'loaded' });
   });
 
-  it('on Linux, takes the release directory’s current, or a program the caller named, and refuses any other', async () => {
+  it('on Linux, refuses a program that is not a pack, before writing anything', async () => {
     const profileDir = linuxProfile();
-    await expect(installDaemon({ profileDir, label: 'dev.maws.mawsd', program: CHECKOUT }, deps('linux'))).rejects.toThrow(`${CHECKOUT.entry} is not in the release directory`);
+    await expect(installDaemon({ profileDir, label: 'dev.maws.mawsd', program: CHECKOUT }, deps('linux'))).rejects.toThrow(`${CHECKOUT.entry} is not a mawsd release (pnpm mawsd:pack makes one)`);
+    const named = { runtime: join(current(), 'runtime/bin/node'), entry: join(current(), 'out/main/mawsd.js') }; // current/ with nothing installed there
+    await expect(installDaemon({ profileDir, label: 'dev.maws.mawsd', program: named }, deps('linux'))).rejects.toThrow('is not a mawsd release');
+    const bare = packProgram(fakePack(join(home, 'mac-dist'), 'ffffffff', { runtime: false })); // a pack made on a Mac carries no runtime
+    await expect(installDaemon({ profileDir, label: 'dev.maws.mawsd', program: bare }, deps('linux'))).rejects.toThrow('has no runtime/bin/node');
     expect(existsSync(profileDir)).toBe(false);
+    expect(existsSync(current())).toBe(false);
     expect(managers.calls).toEqual([]);
-    await expect(installDaemon({ profileDir, label: 'dev.maws.mawsd', program: CHECKOUT, programGiven: true }, deps('linux'))).resolves.toMatchObject({ change: 'loaded' });
-    await expect(installDaemon({ profileDir, label: 'dev.maws.mawsd', program: linuxProgram() }, deps('linux'))).resolves.toMatchObject({ change: 'updated' });
   });
 
   it('lets any other label run an unpackaged build', async () => {
