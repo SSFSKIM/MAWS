@@ -11,7 +11,7 @@ naming its account, Worker, host, owner and org:
 
 Everything here goes through one command, run from the MAWS worktree root:
 
-    pnpm --filter desk-hub deployment <deploy|probe|fake-check|redeploy-check|measure|frame-cost|counts|access-sync> [--config deploy/<file>.json] [options]
+    pnpm --filter desk-hub deployment <deploy|probe|fake-check|redeploy-check|measure|frame-cost|counts|access-sync|relay-measure|acceptance> [--config deploy/<file>.json] [options]
 
 Each command acts on the deployment `--config` names, `config.json` when it
 names none (the path resolves from `apps/desk-hub`, where pnpm runs the
@@ -59,7 +59,7 @@ repository:
 | `CF_ACCESS_SETUP_TOKEN` | An API token with Access: Apps and Policies Edit, Service Tokens Edit, Organizations Read | `deploy`, `redeploy-check`, `access-sync` |
 | `DESK_MACHINE_CLIENT_ID`, `DESK_MACHINE_CLIENT_SECRET` | The service token of a machine enrolled in the deployment's org | `access-sync` |
 | `CF_DESK_HUB_SERVICE_TOKENS` | An API token with Access: Service Tokens Edit only. It becomes the Worker's `CF_API_TOKEN` secret, with which the hub mints and deletes machines' service tokens | `deploy`, `probe`, `redeploy-check` |
-| `DESK_ACCESS_TOKEN` | A person's Access session as an app token for one deployment: `cloudflared access login $HUB` once (a browser sign-in), then `cloudflared access token -app=$HUB` | `probe`, `fake-check`, `redeploy-check`, `measure`, `counts` |
+| `DESK_ACCESS_TOKEN` | A person's Access session as an app token for one deployment: `cloudflared access login $HUB` once (a browser sign-in), then `cloudflared access token -app=$HUB` | `probe`, `fake-check`, `redeploy-check`, `measure`, `counts`, `relay-measure`, `acceptance` |
 
 The owner keeps the two API tokens under
 `~/.config/claude-secrets/projects/-Users-new-Developer-GitHub-doperpowers/`.
@@ -203,6 +203,66 @@ is the hub's replay after `caught-up`, its latest 100 rows. `--audit` also print
 those rows (`decided` carries who settled each request); `--json` prints the
 hub's half alone.
 
+## The org-state commands (O11): `relay-measure`, `acceptance`
+
+These act as the org's admin, through a test device's keys: `--device-keys <file>`, a JSON file
+`{"keys": {"a1.channel": <JWK>, "a1.stepUp": <JWK>, "recovery": <JWK>}}` of private keys (keep it 0600; it is read and
+never printed, nor quoted when it does not parse). The device's step-up key signs the successors they post, so it must
+be a root key of the head. They act only on staging, by its exact names (`config.ts`: the Worker `desk-hub-staging`
+at `https://desk-hub-staging.opencognita-platform.workers.dev`), or the suites' loopback hub; no pattern, since wrangler
+names a version's preview alias `<alias>-<worker>.<subdomain>.workers.dev` and `desk-hub-staging-desk-hub.…` would be
+one of production's. Production's host, its Worker and a preview alias of it are refused by name first, before a
+credential is read or the hub asked anything, whatever the
+configuration's org, its `orgGenesis` or `--test-org` say (`redeploy-check`, whose RL1 leg writes the state, likewise).
+Within that, they write the state only where an operator's anchor allows:
+- in the configuration's own org, only when it serves a chain whose genesis is the configuration's `orgGenesis`
+  (staging's is pinned; production's config pins none, so they refuse it), and never a genesis;
+- in a throwaway org named with `--test-org` (proof.ts's rule), where they post the genesis when it has none.
+
+Each machine they enroll is listed by a signed successor, owned by the device's member, and taken out again by another (its key retired, an honest departure, so what it signed keeps verifying), and
+revoked, which deletes its service token. A service token Access has just minted is refused for up to about a minute,
+so they wait it out.
+
+They undo what they made however they end, an operator's Ctrl-C (SIGINT) or a timeout's kill (SIGTERM) included: the
+signal stops the run, gives a request in flight 5 s to land, runs the cleanup (each step within 30 s) and exits 130 or
+143. A second signal exits at once, printing the cleanup steps not yet done — what may be left on the deployment.
+
+- `relay-measure` (U2): a machine `m8-rm-<tag>` whose endpoint echoes, and the reference client's Machine socket to it,
+  both run here. Every frame is synthetic and RL2-sized: a 64-bit sequence number, random bytes for the ciphertext and a
+  16-byte tag, which the hub cannot tell from a sealed frame. It prints a channel's opening, the round trip app → Machine
+  DO → endpoint → back at 1 KiB and 64 KiB of plaintext (p50, p95, p99, one frame in flight, `--samples`, default 200), and
+  the sustained throughput of 256 KiB frames (`--seconds`, default 10, `--window` in flight, default 4), every echo
+  checked byte for byte; then the tailnet verdict (over 150 ms of p95 at 1 KiB, the direct tailnet carrier becomes
+  O10's default).
+- `acceptance`: O11's acceptance items 2 (delegation), 3, 4, 5 and 6 (`--items`, default all), one line per check:
+  - 2: a successor off the head refused `not-head` and the genesis posted again `rollback`; a member
+    `o11-m8-<tag>@staging.invalid` added with a device b1, and a second device b2 refused unendorsed
+    (`endorsement-missing`) and endorsed but signed by the member's devices alone (`not-root-signed`), then admitted
+    endorsed by b1 and admin-signed; a provisioning key re-issued as a delegation, a VM `m8-vm-<tag>-1` redeeming it and
+    posting its certificate, which `GET /api/org/state` serves and which verifies against the head;
+  - 3: `--frames` (default 1 000) frames of 1 B to 256 KiB through a channel to the machine `m8-ep-<tag>`, byte-identical
+    and in order, then a message over 1 MiB closing the socket 1009;
+  - 4: in a project the machine opens, its v2-only, dual-coded and v1 events stored; a broken signature and a key the
+    state does not list for the writer refused `bad-signature`; a byte-identical resend taken as a duplicate, a
+    re-signed one refused `conflict`; and the same for the device's own v2 `human`;
+  - 5: a push subscription bound to the device at a sink this command runs, then a notify for a session listed for the
+    device's member and one listed for another member: exactly one notice arrives, decrypted with the subscription's
+    keys as `{project, machine, session, kind}`. The hub must reach the sink over https: `--push-url <https base>`
+    forwarded to `127.0.0.1:<--push-port>` (a tunnel the operator runs); without them the item is skipped. Every other
+    subscription the member holds on the deployment gets the same notice;
+  - 6: the reference client's run (`org-protocol` `referenceCheck`) with the device's channel key, the project and the
+    machine.
+
+  Its cleanup posts the successors that take the member out (their device keys revoked), the machine and the delegation out (the delegation's key revoked: its id
+  and prefix stay reserved for good, RL DL 26), retires the VM's certificate, revokes both machines and the provisioning
+  key and deletes the push subscription; it then reads the head and the hub's lists back and prints `LEFT …` for
+  anything of its own still current. What outlives a run, by design: the state's new versions, the machines' names in
+  `machineNames`, their retired keys and the delegation's revoked one, the certificate and its retirement, the
+  machine's listings, and the project with its events (a project outlives its machines).
+
+    printf 'DESK_ACCESS_TOKEN=%s\n' "$(cloudflared access token -app=$HUB)" \
+      | pnpm --filter desk-hub deployment acceptance --config deploy/staging.json --device-keys <file> [--push-url <https> --push-port <port>]
+
 ## `walk-console.js` (the walk's item 8, read into DevTools)
 
 `deploy/walk-console.js` is not a `deployment` command: it is a snippet the owner
@@ -234,6 +294,69 @@ deletes what it minted, however it ends. It fails if any of that fails.
 - `probe`: the admission probe's five cases, plus enrollment's name refusal and the archive designation. Needs `DESK_ACCESS_TOKEN` and `CF_DESK_HUB_SERVICE_TOKENS`, the latter for minting the one never-enrolled token, which it deletes.
 - `fake-check`: M4's fake machine, enrolled from a code, replays its recording, and a browser sees every row, request, decision, log event, and outcome, plus one RPC answered.
 - `redeploy-check`: two fake machines and a browser write while the hub is redeployed mid-run, under the same throwaway org. The writing lasts 420 s by default (`--seconds`), because the cut came +314 to +329 s after the deploy. The redeploy is new code, since its build's name is new: Cloudflare restarts objects for new code only. Nothing may be lost or duplicated, and the check fails as "not exercised" when the redeploy cut no machine's stream. See M5's findings in DC3's plan: on 2026-10-15, Cloudflare kept the old version's connections open after a deploy.
+  Beside them runs RL1's leg (O11): a v2 machine listed in the throwaway org's state holds RL1 through its endpoint, and an app holds a channel to it. A socket the redeploy drops must come back: the endpoint under a higher generation, the app through a new channel. It prints when each socket dropped (from the redeploy's start) and how long each took to come back. Cloudflare cuts the sockets when it chooses, and within the window it may not (O11 M8's phase B saw a cut in one run of three), so once the writing stops the leg cuts both sockets itself, from the client's end, twice in a row: each time the endpoint must be welcomed again under a higher generation and a new channel echo within 60 s (`rl1: forced cut <n>: …`). Those prove the reconnect, not the deploy's cut, which is what acceptance 3 asks for: only a run whose redeploy cut both RL1 sockets, both came back, and whose forced cuts came back is a PASS. A run that lost nothing and whose forced cuts came back but whose redeploy left an RL1 socket uncut (`rl1: neither socket was cut`) ends `INCONCLUSIVE: deploy cut: not exercised (…)` with status 3, neither PASS nor FAIL. The state is signed by an admin device: `--device-keys <file>` (below), or without it a device made for the run, which posts the throwaway org's genesis and so needs an org with no state yet.
 - `measure`: machines streaming chunks into one project, with browsers subscribed. It runs three series: the phase-1 budget (one session at 150 chunks/s watched by 1 to 3 browsers, with another machine's presence and log events crossing it), fan-out, and a ramp. It reports throughput, latency, and the load average per step, as DC3's plan records them (G6).
 - `frame-cost`: what a POST and each frame in it cost on the path from a machine to its project.
 
+
+## Staging runs: `staging-deploy.sh`, `staging-run.sh`, `staging-sweep.py`
+
+The live runs on staging (O11 M8's phase B; O13's and O14's acceptance re-run them) are three scripts beside the
+commands, run from any clean MAWS checkout. They act on `desk-hub-staging` alone: each holds staging's Worker, host and
+org (`desk-hub-staging`, `desk-hub-staging.opencognita-platform.workers.dev`, `staging-ssfskim`) and production's
+(`desk-hub`, `desk-hub.opencognita-platform.workers.dev`) as named constants, reads `deploy/staging.json` first, and
+stops before anything else runs unless it names exactly staging's Worker, host and org; a configuration naming
+production's Worker or host, or a preview alias of it (`<alias>-desk-hub.…`), is refused as production by name.
+
+- `zsh deploy/staging-deploy.sh [--checkout <path>] [--org-id staging-<…>] [--org-name <name>]` builds desk-web and
+  runs `deployment deploy --config deploy/staging.json` from the checkout (default: the one the script is in; it must
+  have no uncommitted changes to tracked files). `--org-id` deploys staging as a throwaway org. It prints production's
+  `X-Desk-Build` before and after, credential-free, and fails if any wrangler call named a Worker other than
+  `desk-hub-staging`.
+- `zsh deploy/staging-run.sh <step>`, one step at a time; any further arguments go to the step's command:
+  - `prod <label>`: production's `X-Desk-Build`, credential-free, into `prod/prod-build-<label>.txt`; `prod after`
+    compares it with `prod before`.
+  - `deploy`, `build`: the checkout to staging; staging's and production's `X-Desk-Build`.
+  - `acceptance [--no-push]`, `relay-measure`: those commands under `staging-ssfskim` with the admin device's keys.
+    `acceptance`'s push item gets its sink behind an account-less quick tunnel (`cloudflared tunnel --url`), stopped
+    when the run ends; `--no-push` skips the item.
+  - `access-sync`: the people policy read back at the org state's head, with the machine credentials access-sync uses.
+  - `throwaway <n>`: staging deployed under the throwaway org `staging-probe-<n>`, then `fake-check` and
+    `redeploy-check` there (its RL1 leg included), then the account swept and staging deployed back under
+    `staging-ssfskim`. The sweep and the restore run however the step ends, a failure or Ctrl-C included; the step
+    fails unless both checks, the sweep and the restore passed and `/api/me` names `staging-ssfskim` again (read
+    within 30 s; a read that fails or times out is `restore check failed: …`). An `INCONCLUSIVE` redeploy-check
+    (status 3) fails the step too.
+  - `desk-web <n>`: the same around acceptance 8's desk-web check (`apps/desk-web/e2e-staging`, its own
+    `playwright.staging.config.ts`): Playwright's headless Chromium loads staging's desk-web, sets the throwaway org's
+    key up, enrolls M4's fake machine from the Machines dialog, and screenshots the grid, the session listed, its
+    permission card, the card answered from the page and the decision in the group chat, into `desk-web-<n>/`. The
+    browser holds the owner's Access token as its `CF_Authorization` cookie for the staging host; nothing records a
+    trace, video or HAR, and afterwards every file the step wrote is searched for the token, which must be in none.
+    The step takes no option to pass on, and Playwright runs in an environment the script builds (`env -i`, no
+    `PWDEBUG`, `PW_*` or `PLAYWRIGHT_*`); `playwright.staging.config.ts` itself refuses any option but naming it and any
+    such variable (`e2e-staging/recording.ts`), so nothing can turn recording back on.
+    Playwright's Chromium must be installed once (`pnpm --filter desk-web exec playwright install chromium`).
+- `staging-sweep.py snapshot|sweep` is the throwaway steps' account sweep: the service tokens and the `desk-hub*`
+  Access apps and policies before the run, and after it the deletion of what appeared and is the throwaway org's
+  (service tokens `desk-<org>-*`, apps and policies `desk-hub-staging*`). Anything else that appeared is left alone and
+  fails the sweep; it refuses an org that is not `staging-probe-*` and never deletes production's objects.
+
+What they read, at run time, never printed or passed as an argument:
+- `DESK_STAGING_SECRETS` (default `~/.config/claude-secrets/projects/-Users-new-Developer-GitHub-doperpowers`): the
+  directory holding `CF_ACCESS_SETUP_TOKEN` and `CF_DESK_HUB_SERVICE_TOKENS`, each read with `cat` inside the pipe
+  that hands it to the command;
+- the owner's staging Access token, from `cloudflared access token -app=https://desk-hub-staging.opencognita-platform.workers.dev`
+  (the owner's `cloudflared access login` once; a step without it stops with nothing changed). It reaches a command on
+  its stdin and curl as a configuration through a pipe (`printf … | curl -K -`), never a here-string, which zsh spools
+  to a temporary file;
+- `DESK_STAGING_DEVICE` (default `$DESK_STAGING_DIR/device`): `keys.json`, the admin device's keys (the org-state
+  commands above), and `machine.json`, `{"DESK_MACHINE_CLIENT_ID": …, "DESK_MACHINE_CLIENT_SECRET": …}` for
+  `access-sync`.
+
+Where they write: `DESK_STAGING_DIR` (default `~/.local/state/desk-hub-staging`, created 0700): one log per step and
+deploy, `prod/`, the throwaway steps' snapshots and sweeps, `access-sync/` (its checkpoint) and `desk-web-<n>/`.
+`DESK_HEAVY_WRAPPER`, when set, prefixes the web build (a slot limiter on a shared machine).
+
+Production's Access read-back (its apps and policies, GETs only, compared before and after a run) is not among them:
+it reads production's objects with the setup token, which no script here does.

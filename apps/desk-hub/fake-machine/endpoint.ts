@@ -28,8 +28,10 @@ export type FakeEndpointOptions = {
   channels?: ChannelHandler;
   /** Whether each `welcome`'s `heartbeat_ms` is kept with `hb` (default true; a suspended endpoint's is not). */
   heartbeats?: boolean;
-  /** Every connection's opening and end, for a command's log. */
+  /** Every connection's opening and end, and each failed reconnect, for a command's log. */
   log?: (line: string) => void;
+  /** How long an upgrade may go unanswered before the attempt is given up (default 15 s). */
+  openMs?: number;
 };
 
 /** How a connection ended: the WebSocket close code and reason. */
@@ -74,13 +76,20 @@ export class FakeEndpoint {
     const from = this.frames.length;
     let opened = false;
     let welcomed = false;
+    const openMs = this.options.openMs ?? 15_000;
+    let unanswered: ReturnType<typeof setTimeout> | undefined;
     const ready = new Promise<void>((resolve, reject) => {
       socket.addEventListener('open', () => {
         opened = true;
         resolve();
       });
       socket.addEventListener('error', () => reject(new Error(`RL1 socket refused at ${url}`)));
-    });
+      // An upgrade the hub never answers would hold this attempt, and every reconnect after it, for good.
+      unanswered = setTimeout(() => {
+        reject(new Error(`RL1 upgrade unanswered for ${openMs} ms at ${url}`));
+        socket.close();
+      }, openMs);
+    }).finally(() => clearTimeout(unanswered));
     socket.addEventListener('message', (event) => this.receive(socket, event.data as string | ArrayBuffer));
     socket.addEventListener('close', (event) => {
       if (this.socket === socket) this.lost(event.code, event.reason, opened && welcomed);
@@ -117,7 +126,8 @@ export class FakeEndpoint {
     const again = () => {
       this.retry = setTimeout(
         () => {
-          this.connect().catch(() => {
+          this.connect().catch((error: unknown) => {
+            this.options.log?.(`reconnect failed: ${error instanceof Error ? error.message : String(error)}`);
             attempt++;
             if (!this.closing && !this.socket) again();
           });

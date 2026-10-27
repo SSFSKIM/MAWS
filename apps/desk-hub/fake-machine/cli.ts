@@ -2,10 +2,11 @@
 // project of the hub — the local stand-in's or a deployment's — and stay connected, serving subscriptions and answering
 // RPCs, until interrupted. Its state file (0600) holds the machine's service token, the org key, and the memory a
 // restart needs (the RPC ledger above all), so a run after a crash answers a retried nonce without running it again.
-import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, renameSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { base64urlDecode, base64urlEncode } from '../src/protocol/base64url';
+import { readJsonFile } from './json-file';
 import { FakeMachine } from './machine';
 import { relayMain } from './relay-cli';
 import { emptyMemory, type Memory } from './memory';
@@ -45,7 +46,7 @@ const USAGE = `usage:
       --plugin <name>          doperpowers (default) | sminos: the plugin its bridge and ask run in (a rolled machine)`;
 
 function readState(path: string): State {
-  return JSON.parse(readFileSync(path, 'utf8')) as State;
+  return readJsonFile<State>(path, "a fake machine's state");
 }
 
 function writeState(path: string, state: State): void {
