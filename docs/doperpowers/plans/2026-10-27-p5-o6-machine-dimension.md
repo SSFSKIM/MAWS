@@ -193,7 +193,7 @@ The order is M1, M2, M3, M4, M5, M6.
 - A coverage test holds the registry to branded ids.
 
 **Touches.**
-- `src/shared/machine/ref.ts` (new: `MachineRefSchema`, `MachineRef`);
+- `src/shared/machine/ref.ts` (new: `MachineRefSchema`, `MachineRef`) and `src/shared/machine/identity-file.ts` (new: the identity file's reader and minter, with no Electron import, so O2's `mawsd` uses the same module; whichever of O2 and O6 lands first creates both, P5 Decision Log 27);
 - `src/shared/machine/address.ts`, `address.test.ts`, `coverage.test.ts`, `address-paths.json` (new);
 - `src/main/machine/identity.ts`, `identity.test.ts` (new);
 - `src/shared/ipc/schema/machine.ts`, `src/shared/ipc/names/machine.ts`, `src/shared/ipc/grades/machine.ts` (new), and their composition into `src/shared/ipc/schema.ts`, `names.ts` and `grades.ts`;
@@ -216,8 +216,8 @@ The order is M1, M2, M3, M4, M5, M6.
     - Rejected: `open(…, 'wx')` then write. That exposes an empty or partial file to a racing reader, and leaves a profile unable to start after a crash mid-write.
     - A `machine.json` that exists but does not parse, or whose ref breaks the format, stops startup with an error naming the path. Re-minting would silently re-address everything persisted under the old ref.
     - Nothing ever rewrites the file.
-  - The interface O2 honours. This file, its shape and these rules are how a profile's identity survives O2 and O3:
-    - O2's `mawsd`, minting for a profile at its first run, reads this file when it exists and creates it under these rules when it does not;
+  - The interface O2 shares (P5 Decision Log 27). `<userData>` is the profile's root, O2's `<profile>`, never its `mawsd/` directory. This file, its shape and these rules are how a profile's identity survives O2 and O3:
+    - O2's `mawsd` reads and mints it through the same module, `src/shared/machine/identity-file.ts`, so whichever of the app and `mawsd` runs first in a profile mints it, and the link makes that race safe without a shared lock;
     - O3's data-directory migration moves it with the index.
   - Rejected: minting in memory and reporting it only through `machine.identity`. The ref has to exist before the first window opens (M2 hands it to the preload), and a crash before the write would mint twice.
 - **The machine's name.** It is `MAWS_MACHINE_NAME` when that is set, else the short hostname (`os.hostname()` up to its first `.`).
@@ -430,7 +430,7 @@ The order is M1, M2, M3, M4, M5, M6.
 - `src/shared/host/socket-server.ts` (an `admit` option; **needs O1** for the v3 server);
 - `src/main/index.ts` (composition);
 - `e2e/machines.spec.ts` (new);
-- `package.json` (`e2e:machines`), `.github/workflows/gate.yml` (`HOSTED_MAC_E2E` and `CLASS1_E2E`), and whatever `.github/scripts/gate-plan.test.mjs` then requires.
+- `package.json` (`e2e:machines`), `.github/workflows/gate.yml` (`CLASS1_E2E`), and whatever `.github/scripts/gate-plan.test.mjs` then requires. The group joins `HOSTED_MAC_E2E` only by gate-offload's admission rule: three green `Lane: hosted` runs with it listed, on one tree, whose count lines equal a `Lane: no-hosted` run's. Record those run ids in Outcomes; the architect writes the gate-offload Decision Log entry (P5 Decision Log 27).
 
 **Decisions.**
 - **The link surface** (`link-surface.ts`). It is the same for the stand-in, for O3's `mawsd` and for O7's channels.
@@ -810,6 +810,12 @@ No new dependency. zod 4, Node's `crypto`, the peer-auth addon already in the tr
 
     export const MachineRefSchema = z.string().regex(/^[A-Za-z0-9_-]{16,64}$/).brand<'MachineRef'>(); // RL5's `ref`
     export type MachineRef = z.infer<typeof MachineRefSchema>;
+
+**`src/shared/machine/identity-file.ts`** (M1; no Electron import, shared with O2's `mawsd`, P5 Decision Log 27):
+
+    export const IDENTITY_FILE = 'machine.json';                            // in the profile's root: { version: 1, ref, mintedAt }, 0600
+    export function readMachineRef(profileDir: string): MachineRef | null;  // null when absent; throws naming the path on a malformed file
+    export function readOrMintMachineRef(profileDir: string): MachineRef;   // temporary file, fsync, link; EEXIST reads the winner's file
 
 **`src/shared/machine/address.ts`** (M1; the one codec):
 
