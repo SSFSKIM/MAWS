@@ -381,9 +381,11 @@ test('the slash palette opens above a started session’s composer and moves not
     const composer = page.locator('[data-region="main"]').getByRole('textbox', { name: 'Message' });
     await expect(composer).toBeVisible();
     // The pointer leaves the row it clicked: resting there, it opens the row's hover card 300 ms later, which on a slow
-    // runner stands over the composer when the palette's check clicks it, and never closes while the pointer stays.
+    // runner stands over the composer when the palette's check clicks it, and never closes while the pointer stays. It
+    // goes to the composer's far end: a card already open stands beside the sidebar, 342 px wide, and a pointer on the
+    // card holds it open (at this window's 440 px a session's card reaches down over the composer's middle).
     const box = (await composer.boundingBox())!;
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.move(box.x + box.width - 8, box.y + box.height / 2);
     await expect(page.locator('[data-hover-card]')).toHaveCount(0);
     await slashPaletteMovesNothing(page, 'a started session');
     expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
