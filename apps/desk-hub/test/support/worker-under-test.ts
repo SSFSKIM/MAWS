@@ -99,6 +99,7 @@ import {
   MISSING_METHOD_PATH,
   REGISTRY_HEAD_FAULT_PATH,
   PROJECT_STATE_CACHE_PATH,
+  REGISTRY_RPC_PATH,
   AS_MEMBER_PATH,
   LACKS_PATH,
 } from './send-fault';
@@ -110,6 +111,9 @@ export { default } from '../../src/worker';
 type Fault = { remaining: number; calls: number };
 /** An armed fault of state announcements: `missing` throws workerd's refusal of a method the callee lacks. */
 type StateFault = Fault & { missing?: boolean };
+
+/** The Registry's RPC methods a suite calls as an object would (REGISTRY_RPC_PATH). */
+const REGISTRY_RPCS = ['storeListing', 'storeEndpoint', 'notify', 'ownersOf', 'push'] as const;
 
 /** The org's registry, which can also take a member (the hub has no endpoint for that before the org phase). */
 export class Registry extends DeployedRegistry {
@@ -262,6 +266,14 @@ export class Registry extends DeployedRegistry {
           .map((m) => ({ ...m, owners: JSON.parse(m.owners) as unknown })),
       });
     }
+    if (url.pathname === REGISTRY_RPC_PATH) {
+      type Call = { method: (typeof REGISTRY_RPCS)[number]; args: unknown[] };
+      const body = (await request.json()) as Call | { concurrent: Call[] };
+      const calls = 'concurrent' in body ? body.concurrent : [body];
+      if (!calls.every((c) => REGISTRY_RPCS.includes(c.method))) return new Response('no such RPC', { status: 400 });
+      const results = await Promise.all(calls.map(async ({ method, args }) => ((await (this[method] as (...a: unknown[]) => unknown).apply(this, args)) ?? null)));
+      return Response.json('concurrent' in body ? results : results[0]);
+    }
     if (url.pathname === LACKS_PATH) {
       const { method } = (await request.json()) as { method: string | null };
       if (method === null) this.ctx.storage.kv.delete('lacks');
@@ -372,6 +384,10 @@ export class Machine extends DeployedMachine {
   }
 
   async revoke(clientId: string | null): Promise<number> {
+    if (this.ctx.storage.kv.get<string>('revoke-fault') === 'fail') {
+      this.ctx.storage.kv.delete('revoke-fault');
+      throw new Error('a revocation that failed before it was applied (the suite armed it)');
+    }
     const generation = await super.revoke(clientId);
     const fault = this.ctx.storage.kv.get<string>('revoke-fault');
     if (fault) this.ctx.storage.kv.delete('revoke-fault');

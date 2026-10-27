@@ -1,8 +1,9 @@
 // DX7 — identity: the registry's records, machine names, and the enrollment code. Written to outlive phase 1: the
 // org phase adds roles and per-member keys to these records rather than replacing them.
 import { isMachineName, isMemberId, machineNameKey, RESERVED_MACHINE_NAMES, type MemberId } from 'org-protocol';
-import type { Certificates, DeviceClass, KeyStorage, Passkey, RootTransition, Signed, SignedOrgState } from 'org-protocol';
-import { base64urlDecode, base64urlEncode } from './base64url';
+import { isPublicKey } from 'org-protocol';
+import type { Certificates, Delegation, DeviceClass, EndpointRecord, KeyStorage, Listing, Passkey, RootTransition, Signed, SignedOrgState } from 'org-protocol';
+import { base64urlDecode, base64urlEncode, isBase64urlOf } from './base64url';
 import type { JsonObject } from './json';
 
 // Member ids and machine names live in the protocol package (apps/org-protocol), whose org state names both; they are
@@ -117,17 +118,21 @@ export type PushSubscriptionRecord = {
   endpoint: string;
   keys: { p256dh: string; auth: string };
   created: string;
+  /** The member's device (an org-state device id) it is bound to; while bound, pushed only while the head lists it. */
+  device?: string;
 };
 
 // Web Push's endpoints (DX7), the signed-in member's own. `GET /api/push/key` answers the hub's VAPID public key, the
 // `applicationServerKey` a browser subscribes with; `PUT /api/push/subscriptions` keeps a subscription (what
 // `PushSubscription.toJSON()` gives: an https endpoint, `p256dh` the 65-byte uncompressed P-256 point and `auth` 16
-// bytes, each canonical base64url); `DELETE` with `{endpoint}` forgets one; `GET` lists the member's.
+// bytes, each canonical base64url); `DELETE` with `{endpoint}` forgets one; `GET` lists the member's. A subscription may
+// name `device`, one of the member's devices in the org state (O11 M4; `409 unknown-device` otherwise): it is then pushed
+// only while the head lists that device for the member.
 export const PUSH_KEY_PATH = '/api/push/key';
 export const PUSH_SUBSCRIPTIONS_PATH = '/api/push/subscriptions';
 /** The uncompressed P-256 point (65 bytes), base64url. */
 export type PushKey = { key: string };
-export type PushSubscriptionRequest = { endpoint: string; keys: { p256dh: string; auth: string } };
+export type PushSubscriptionRequest = { endpoint: string; keys: { p256dh: string; auth: string }; device?: string };
 export type PushSubscriptionKept = { subscription: PushSubscriptionRecord };
 export type PushSubscriptionDeleted = { deleted: boolean };
 export type PushSubscriptions = { subscriptions: PushSubscriptionRecord[] };
@@ -239,7 +244,11 @@ export const serviceTokenName = (org: string, machine: string) => `desk-${org}-$
 // Enrollment's endpoints (DX7). Every error is `{error, message?}`.
 
 /** `POST /api/enrollments` (an admin): asks for a one-time token, live `ttl_s` seconds (1 to 3600; 900 by default). */
-export type EnrollmentRequest = { ttl_s?: number };
+export type EnrollmentRequest = {
+  ttl_s?: number;
+  /** An active machine's name: the token re-enrolls it in place (its credential replaced; O11 M4), under that name only. */
+  machine?: string;
+};
 export const ENROLLMENT_TTL_S = 900;
 export const MAX_ENROLLMENT_TTL_S = 3600;
 /** The token, 256 random bits as base64url, is shown this once; the hub keeps only its hash. */
@@ -251,7 +260,16 @@ export const REDEEM_PATH = '/machine/enroll';
 /** `POST /machine/enroll`. Redeeming again with the same token and name while pending rotates the credential. */
 export type RedeemRequest = { token: string; machine: string };
 /** The machine's Access service token; the secret is shown this once. */
-export type Redeemed = { org: string; machine: string; client_id: string; client_secret: string };
+export type Redeemed = {
+  org: string;
+  machine: string;
+  client_id: string;
+  client_secret: string;
+  /** The enrollment's id: a v2 machine's `tokenId` in its MAC (`MACHINE_KEY_PATH`). Every hub of O11 M4 on sends it. */
+  enrollment?: string;
+  /** Through a provisioning key, which of its uses this is: the `use` the machine's certificate carries. */
+  use?: number;
+};
 export type RedeemError =
   | 'bad-shape'
   | 'bad-name' // not an admitted machine name
@@ -265,7 +283,8 @@ export type RedeemError =
   | 'key-revoked' // the provisioning key was revoked: it enrolls nothing more
   | 'key-expired' // the provisioning key's time is up
   | 'key-exhausted' // the provisioning key has made all the enrollments its `max_uses` allows
-  | 'prefix-mismatch'; // the name does not start with the provisioning key's prefix
+  | 'prefix-mismatch' // the name does not start with the provisioning key's prefix
+  | 'not-active'; // a re-enrollment's machine is no longer an active one
 
 // Provisioning keys (the provisioning-keys spec, an extension of DX7): a reusable, revocable credential an admin makes,
 // good for many enrollments under one name prefix until it expires, is revoked, or is used up. Its secret is redeemed at
@@ -294,6 +313,8 @@ export type ProvisioningKeyRecord = {
   revoked: string | null;
   /** The machines enrolled through it now, pending or active. */
   machines: Array<{ name: string; state: MachineState }>;
+  /** Once re-issued as a delegation (`delegationFor`): the head's delegation of this id, its key and owners. */
+  delegation?: { pub: string; owners: Delegation['owners'] };
 };
 /** `POST /api/provisioning-keys` (an admin). */
 export type ProvisioningKeyRequest = { label: string; prefix: string; ttl_s?: number; max_uses?: number | null; offline_revoke_s?: number | null };
@@ -345,13 +366,7 @@ function checkFields<F extends string>(kind: string, code: Record<F, unknown>, f
   for (const field of fields) if (typeof code[field] !== 'string' || code[field] === '') throw new TypeError(`${kind}: no ${field}`);
   const checked = Object.fromEntries(fields.map((field) => [field, code[field] as string])) as Record<F, string>;
   const { hub, key } = checked as Record<string, string>;
-  let url: URL;
-  try {
-    url = new URL(hub);
-  } catch {
-    throw new TypeError(`${kind}: the hub is not a URL`);
-  }
-  if (!(url.protocol === 'https:' || (url.protocol === 'http:' && LOOPBACK.has(url.hostname)))) throw new TypeError(`${kind}: the hub is not https`);
+  checkHub(kind, hub);
   if (!isMachineName(checked[name])) throw new TypeError(`${kind}: ${nameIs} is not admitted`);
   let bytes: Uint8Array;
   try {
@@ -361,6 +376,17 @@ function checkFields<F extends string>(kind: string, code: Record<F, unknown>, f
   }
   if (bytes.length !== 32) throw new TypeError(`${kind}: the key is not 256 bits`);
   return checked;
+}
+
+/** The hub is a URL, https (http only on a loopback host, for the local runtime). */
+function checkHub(kind: string, hub: string): void {
+  let url: URL;
+  try {
+    url = new URL(hub);
+  } catch {
+    throw new TypeError(`${kind}: the hub is not a URL`);
+  }
+  if (!(url.protocol === 'https:' || (url.protocol === 'http:' && LOOPBACK.has(url.hostname)))) throw new TypeError(`${kind}: the hub is not https`);
 }
 
 const ENROLLMENT_FIELDS = ['hub', 'org', 'token', 'machine', 'key'] as const;
@@ -425,3 +451,116 @@ export function decodeCode(text: string): DecodedCode {
   if (text.startsWith(PROVISION_PREFIX)) return { kind: 'provision', ...decodeProvisioningCode(text) };
   throw new TypeError('enrollment code: not smns-enroll-v1 or smns-provision-v1');
 }
+
+// ---- Hub v2 (O11 M4): machine enrollment with its own key, delegations, listings, endpoint records, owner-only push --
+
+/**
+ * The v2 enrollment code (RL §5.3): built by the enrolling member's app, carried by hand, read at the machine's hidden
+ * prompt. It carries the org's trust anchors instead of a secret org key: `roots`, the root key ids the machine pins
+ * (the org state's `root.keys`), and `recoveryPub`, the offline recovery key. `k`, the one-time pairing secret (16 to 64
+ * bytes, base64url), is added by the app and never reaches the hub: the machine MACs its enrollment with it
+ * (org-protocol's `enrollmentMac`) and the member's device checks the MAC. `machine` names the machine when the app
+ * chose it, as a re-enrollment's code does (an active machine re-enrolls in place only under a token that names it,
+ * `EnrollmentRequest.machine`). Text form: `smns-enroll-v2.` + base64url of the UTF-8 JSON object.
+ */
+export type EnrollmentCodeV2 = { hub: string; token: string; roots: string[]; recoveryPub: string; k: string; machine?: string };
+
+const CODE_V2_PREFIX = 'smns-enroll-v2.';
+const CODE_V2_FIELDS = ['hub', 'token', 'roots', 'recoveryPub', 'k', 'machine'];
+
+function checkCodeV2(code: Record<string, unknown>): EnrollmentCodeV2 {
+  const kind = 'enrollment code';
+  for (const field of Object.keys(code)) if (!CODE_V2_FIELDS.includes(field)) throw new TypeError(`${kind}: unknown field ${field}`);
+  const { hub, token, roots, recoveryPub, k, machine } = code;
+  for (const [field, value] of [['hub', hub], ['token', token]] as const) if (typeof value !== 'string' || value === '') throw new TypeError(`${kind}: no ${field}`);
+  checkHub(kind, hub as string);
+  if (!Array.isArray(roots) || roots.length === 0 || !roots.every((r) => isBase64urlOf(r, 16))) throw new TypeError(`${kind}: the roots are not key ids`);
+  if (!isPublicKey(recoveryPub)) throw new TypeError(`${kind}: the recovery key is not a public key`);
+  if (typeof k !== 'string' || !isBase64urlOf(k, (k.length * 6) >> 3) || base64urlDecode(k).length < 16 || base64urlDecode(k).length > 64) {
+    throw new TypeError(`${kind}: the pairing secret is not 128 to 512 bits`);
+  }
+  if (machine !== undefined && (typeof machine !== 'string' || !isMachineName(machine))) throw new TypeError(`${kind}: the machine name is not admitted`);
+  return { hub: hub as string, token: token as string, roots: [...(roots as string[])], recoveryPub, k, ...(machine === undefined ? {} : { machine }) };
+}
+
+export function encodeEnrollmentCodeV2(code: EnrollmentCodeV2): string {
+  return CODE_V2_PREFIX + base64urlEncode(new TextEncoder().encode(JSON.stringify(checkCodeV2(code))));
+}
+
+export function decodeEnrollmentCodeV2(text: string): EnrollmentCodeV2 {
+  if (!text.startsWith(CODE_V2_PREFIX)) throw new TypeError('enrollment code: not smns-enroll-v2');
+  return checkCodeV2(body('enrollment code', text, CODE_V2_PREFIX));
+}
+
+/**
+ * `POST /machine/key` (the machine, once redeemed): its public key, its ref (RL §2.3, minted at its first run) and the
+ * MAC over `{name, machinePub: pub, ref, tokenId}` under the code's `k`, where `name` is the machine's enrolled name and
+ * `tokenId` its enrollment's id (`Redeemed.enrollment`). One key per enrollment: posting the same again answers as
+ * before, another is refused `409 key-posted`. `GET /api/enrollments/<id>/key` (the member who made the enrollment)
+ * answers it, `404 no-key` until it is posted; the hub never checks the MAC, the member's device does, before it signs
+ * the machine into the org state. The hub shows the machine `listed` once the head lists that ref with that key
+ * (`MachineView.key`), apart from its hub confirmation (`state`), as RL §5.3 keeps them.
+ */
+export const MACHINE_KEY_PATH = '/machine/key';
+export const ENROLLMENT_KEY_PATH = /^\/api\/enrollments\/([0-9a-f]{32})\/key$/;
+export type MachineKeyRequest = { pub: string; ref: string; mac: string };
+export type EnrollmentKey = { enrollment: string; machine: string; pub: string; ref: string; mac: string; posted: string };
+/** `GET /api/machines` answers each machine with its v2 key once it posted one, and whether the head lists it. */
+export type MachineView = MachineRecord & { key?: { ref: string; pub: string; listed: boolean } };
+
+/**
+ * A provisioning key re-issued as an RL5 delegation: the admin's app adds `delegationFor(key, pub, owners)` to a
+ * successor, its key pair the delegation's, and the hub then lists the key with the delegation's `pub` and `owners` from
+ * the head (`ProvisioningKeyRecord.delegation`). A key's "no cap" (`max_uses` null) is `NO_USE_CAP`, and "never"
+ * (`offline_revoke_s` null) is `NEVER_OFFLINE`, 0, which no real offline time can be (MIN_OFFLINE_REVOKE_S).
+ */
+export const NO_USE_CAP = Number.MAX_SAFE_INTEGER;
+export const NEVER_OFFLINE = 0;
+export function delegationFor(
+  key: Pick<ProvisioningKeyRecord, 'id' | 'prefix' | 'expires' | 'max_uses' | 'offline_revoke_s'>,
+  pub: string,
+  owners: Delegation['owners'],
+): Delegation {
+  return { id: key.id, pub, prefix: key.prefix, expires: key.expires, maxUses: key.max_uses ?? NO_USE_CAP, offlineRevokeS: key.offline_revoke_s ?? NEVER_OFFLINE, owners };
+}
+
+/**
+ * `POST /machine/cert` (a machine enrolled through a provisioning key): its delegation-signed `MachineCert`. The hub
+ * stores one only on a clean `verifyMachineCert` against the head, for the posting machine's own name and its key's
+ * delegation, at the use its redemption was counted as (`Redeemed.use`), and never one that would contest another
+ * live certificate's ref or name: that refusal is `409 contested`, naming the conflicts and the remedies (a fresh name,
+ * or the old certificate retired by its delegation's key or revoked in the org state). A certificate the hub holds is
+ * answered as before; another for the same key is refused `409 conflict`. Certificates are served beside the state.
+ */
+export const MACHINE_CERT_PATH = '/machine/cert';
+/**
+ * A certificate's retirement by its own delegation's key (`CertRetirement`, RL DL 24), from a member (`devcloud vm
+ * delete` on the owner's Mac) or a machine; stored on a clean `verifyCertRetirement` and served beside the certificates.
+ */
+export const CERT_RETIREMENTS_PATH = '/api/org/cert-retirements';
+export const MACHINE_CERT_RETIREMENTS_PATH = '/machine/cert-retirements';
+/** A contested refusal's conflicts: each live certificate (or the state's entry) the posted one would contest. */
+export type CertConflict = { ref: string; name: string; keyId: string | null; holder: 'certificate' | 'state' };
+
+/**
+ * Listings (RL6's projection) and endpoint records (RL §4.1's direct carriers), machine-signed and stored per machine
+ * ref: a listing per `(machine, session)` at its highest `revision` (`409 stale-listing` for one not above it), an
+ * endpoint record at its newest `issued` (`409 stale-endpoint` for an older one); a byte-identical resend is taken as
+ * before. A record whose machine has no key in the head or a live certificate is refused `403 not-listed`, one signed
+ * by another key `403 unknown-signer` (or `revoked`), one whose signature fails `403 bad-signature`, a contested ref's
+ * `409 contested`. RL1 carries them up (M6: `Registry.storeListing`, `Registry.storeEndpoint`). `GET
+ * /api/listings[?project=<id>]` (a member) answers the stored listings, a project's alone when named, with their
+ * machines' endpoint records; `GET /api/machines/<ref or name>/endpoint` one machine's record (`404 no-endpoint`).
+ */
+export const LISTINGS_PATH = '/api/listings';
+export const MACHINE_ENDPOINT_PATH = /^\/api\/machines\/([^/]+)\/endpoint$/;
+export type Listings = { listings: Signed<Listing>[]; endpoints: Signed<EndpointRecord>[] };
+export type MachineEndpoint = { record: Signed<EndpointRecord> };
+
+/**
+ * A v2 push (RL §7.4): sent only to the devices of the session's listed owners, and carrying only what says a session is
+ * waiting or wrote. `machine` is the machine's ref. Kept apart from DX7's `PushNotice`, whose kinds desk-web's service
+ * worker draws by name, so a hub on this version changes nothing a phone reads; a worker that cannot read it draws its
+ * plain prompt to open the desk.
+ */
+export type OwnerNotice = { project: string; machine: string; session: string; kind: 'waiting' | 'wrote' };

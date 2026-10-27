@@ -505,7 +505,7 @@ export class Project extends DurableObject<Env> {
       // second report of one a bridge raised as well (`src` its call's id), which pushes once, whichever came first.
       if (event.kind === 'question' && typeof event.src === 'string' && !this.plane.markAsked(ctx.machine, session, event.src, now)) continue;
       // The count holds the question this push announces while it is open: it is stored above (`waitingSessions`).
-      this.push({ v: 1, project: this.projectId, session, alias: typeof event.from === 'string' ? event.from : null, kind: event.kind, event: { writer: event.writer, seq: event.seq } }, this.waitingSessions().size);
+      this.push({ v: 1, project: this.projectId, session, alias: typeof event.from === 'string' ? event.from : null, kind: event.kind, event: { writer: event.writer, seq: event.seq } }, this.waitingSessions().size, event.writer.slice(0, event.writer.indexOf('/')));
     }
     return { owed };
   }
@@ -1146,19 +1146,21 @@ export class Project extends DurableObject<Env> {
     const alias = this.log.latestOf(`${machine}/${raised.session}`)?.from;
     // The badge counts the session this request waits on, whether or not its presence says so yet.
     const waiting = this.waitingSessions().add(`${machine}/${raised.session}`);
-    this.push({ v: 1, project: this.projectId, session: raised.session, alias: typeof alias === 'string' ? alias : null, kind: question ? 'question' : 'permission', request: raised.request }, waiting.size);
+    this.push({ v: 1, project: this.projectId, session: raised.session, alias: typeof alias === 'string' ? alias : null, kind: question ? 'question' : 'permission', request: raised.request }, waiting.size, machine);
   }
 
   /** To every member with no browser showing the project (a socket's visibility rides in its attachment). `waiting` is
-   * this project's count as of this push; the Registry adds the other projects' to it for the badge. */
-  private push(notice: Omit<PushNotice, 'name' | 'waiting'>, waiting: number): void {
+   * this project's count as of this push; the Registry adds the other projects' to it for the badge. `machine`, the
+   * session's machine by name, lets the Registry send a session that machine listed to its owners alone (O11 M4); a
+   * Registry on older code takes the extra argument as nothing. */
+  private push(notice: Omit<PushNotice, 'name' | 'waiting'>, waiting: number, machine: string): void {
     const looking = new Set<string>();
     for (const socket of this.ctx.getWebSockets()) {
       const attachment = this.attachment(socket);
       if (attachment.visibleAt !== null && Date.now() - attachment.visibleAt < this.visibleMs()) looking.add(attachment.member);
     }
     void this.registry()
-      .push(notice, [...looking], waiting)
+      .push(notice, [...looking], waiting, machine)
       .catch(() => {});
   }
 
