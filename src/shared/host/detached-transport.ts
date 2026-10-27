@@ -721,7 +721,15 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     // was asked to exit now (a stop-all, `exit now`): its close stays deliberate, so an on-demand host parks
     if (connection.recycled) {
       connection.recycled();
-      if (connection.exitAsked !== 'now') return launch();
+      if (connection.exitAsked === null || connection.replaced) return launch();
+      // armed to exit when idle: reconnected while the process still runs (it may be working yet); once it has exited
+      // (looked at one poll later, as below), that was the idle exit asked for, and no successor starts
+      if (connection.exitAsked === 'idle') {
+        return after(timing.pidPollMs, () => {
+          if ((spawned.get(connection.proc.pid) ?? null) === null && sameProcess(connection.proc)) return launch();
+          events.lost('deliberate');
+        });
+      }
     }
     if (connection.replaced) {
       log(`another client replaced this app at supervisor pid ${connection.proc.pid}`);

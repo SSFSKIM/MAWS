@@ -213,6 +213,40 @@ describe('recycle', () => {
     });
   }
 
+  // M5 re-review: an idle-armed host that exits during a recycle's drain parks; one still running is reconnected
+  it('of an idle-armed on-demand host that exits during the drain: parks, no successor spawned', async () => {
+    const supervisor = makeSupervisor({ 'engine-host': { onDemand: true } });
+    await supervisor.start();
+    supervisor.wake('engine-host');
+    await until(() => supervisor.snapshot('engine-host').state === 'ready');
+    const fake = fakes.at(-1)!;
+    expect(supervisor.expectIdleExit('engine-host')).toBe(true);
+    fake.connections.at(-1)!.allowHalfOpen = true; // its side stays open while the drain runs
+    setTimeout(() => void fake.die(), 100); // it exits once idle, 100 ms into the drain
+    const order: string[] = [];
+    await supervisor.recycle('engine-host', { drained: () => void order.push('drained') }).then(() => void order.push('settled'));
+    expect(order).toEqual(['drained', 'settled']);
+    await until(() => supervisor.parked('engine-host'));
+    await sleep(200);
+    expect(spawn).toHaveBeenCalledOnce();
+    expect(supervisor.parked('engine-host')).toBe(true);
+    expect(supervisor.facts('engine-host').lastExit).toBeNull();
+  });
+
+  it('of an idle-armed host still running: reconnects to it, armed still', async () => {
+    const fake = await startFake();
+    const supervisor = makeSupervisor({ 'engine-host': { onDemand: true } });
+    await supervisor.start();
+    await expect(supervisor.adopt('engine-host')).resolves.toBe(true);
+    expect(supervisor.expectIdleExit('engine-host')).toBe(true);
+    await supervisor.recycle('engine-host');
+    expect(supervisor.snapshot('engine-host')).toMatchObject({ state: 'ready', pid: fake.pid });
+    expect(supervisor.parked('engine-host')).toBe(false);
+    await fake.die(); // its idle exit, on the fresh link
+    await until(() => supervisor.parked('engine-host'));
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
   it('with nothing served, runs drained and resolves at once', async () => {
     const supervisor = makeSupervisor({ 'engine-host': { onDemand: true } });
     await supervisor.start();
