@@ -53,7 +53,7 @@ function fakeMain() {
 let main: ReturnType<typeof fakeMain>;
 
 beforeEach(() => {
-  for (const name of TERMINAL_TOKEN_NAMES) document.documentElement.style.setProperty(name, '#000'); // the tokens the emulator's theme reads
+  for (const name of TERMINAL_TOKEN_NAMES) document.documentElement.style.setProperty(name, 'fixture'); // the tokens the emulator's theme reads (any value)
   main = fakeMain();
   window.maws = main.bridge;
 });
