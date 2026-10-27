@@ -1,6 +1,7 @@
 // DX3 — browser ↔ hub. WebSockets with JSON text frames: one to a project's `Project` object for its view
 // (`/api/projects/<id>/socket`), one to the org's `Registry` for the grid (`/api/registry/socket`). Browsers see project
 // offsets, never writer vectors.
+import type { RegistryAppFrame } from 'org-protocol';
 import type { ProjectKind } from './identity';
 import type { JsonObject } from './json';
 import type { HumanEvent, LogEvent } from './log';
@@ -155,6 +156,13 @@ export type MachineSummary = { name: string; online: boolean; seen: string | nul
 /** Hub → browser over the registry socket. A frame above `FRAME_LIMIT` (a grid of many projects) comes as numbered parts,
  * joined as on a project socket. */
 export type GridDown = { t: 'grid'; projects: ProjectSummary[] } | { t: 'summary'; project: ProjectSummary } | Part;
+
+/**
+ * Everything the registry socket sends: the grid, and since O11 M7 the app's frames beside it (OX8, `org-protocol`'s
+ * `RegistryAppFrame`): after the grid, the org state's head version and every listing the hub holds, then a `state`
+ * notice at each accepted state and a `listing` as each is stored. Desk-web reads the grid's frames and passes the rest by.
+ */
+export type RegistryDown = GridDown | RegistryAppFrame;
 
 /**
  * What a push carries (encrypted for the device, RFC 8291): only what points to a card, since the service worker holds

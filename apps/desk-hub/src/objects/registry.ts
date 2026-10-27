@@ -41,8 +41,8 @@ import type { AccessIdentity } from '../identity/access';
 import { ServiceTokenApiError, serviceTokens } from '../identity/service-tokens';
 import { importVapidKey, pushRequest, type VapidKey } from '../push/web-push';
 import { base64urlDecode, base64urlEncode, isBase64urlOf } from '../protocol/base64url';
-import type { Delegation } from 'org-protocol';
-import type { GridDown, MachineSummary, ProjectSummary, PushNotice } from '../protocol/browser';
+import type { Delegation, Listing, Signed } from 'org-protocol';
+import type { GridDown, MachineSummary, ProjectSummary, PushNotice, RegistryDown } from '../protocol/browser';
 import type { OrgFrame } from '../protocol/machine';
 import { toWire } from '../protocol/parts';
 import {
@@ -726,9 +726,10 @@ export class Registry extends DurableObject<Env> {
     if (offline) void this.scheduleAlarm().catch(() => {});
   }
 
-  // ---- The grid (DX3's registry socket) ------------------------------------------------------------------------
+  // ---- The grid (DX3's registry socket) and the app's frames on it (OX8; O11 M7) -------------------------------
 
-  /** A member's grid socket (the Worker sends only a member's): every project's summary, then each change. */
+  /** A member's registry socket (the Worker sends only a member's): every project's summary, the org state's head version
+   * and every listing held, then each change of any of them. */
   async fetch(request: Request): Promise<Response> {
     if (new URL(request.url).pathname !== '/grid') return new Response('not found', { status: 404 });
     if (request.headers.get('Upgrade') !== 'websocket') return new Response('expected a WebSocket', { status: 426 });
@@ -739,6 +740,10 @@ export class Registry extends DurableObject<Env> {
     this.ctx.acceptWebSocket(server);
     server.serializeAttachment({ member });
     this.send(server, this.gridFrame());
+    // The app's connection (OX8; O11 M7): the head's version, then every listing held; desk-web passes both by.
+    const version = this.chain.head()?.state.version;
+    if (version !== undefined) this.send(server, { t: 'state', version });
+    this.send(server, { t: 'listings', records: this.records.listings(null).listings });
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -800,12 +805,12 @@ export class Registry extends DurableObject<Env> {
     return { id: project.id, name: project.name, kind: project.kind, ...(counts ?? { machines: 0, machines_online: 0, working: 0, waiting: 0, live: 0 }) };
   }
 
-  private toGrid(frame: GridDown): void {
+  private toGrid(frame: RegistryDown): void {
     for (const socket of this.ctx.getWebSockets()) this.send(socket, frame);
   }
 
   /** A frame above `FRAME_LIMIT` (a grid of many projects) goes in numbered parts, as on a project socket. */
-  private send(socket: WebSocket, frame: GridDown): void {
+  private send(socket: WebSocket, frame: RegistryDown): void {
     try {
       for (const line of toWire(frame)) socket.send(line);
     } catch {
@@ -1206,7 +1211,8 @@ export class Registry extends DurableObject<Env> {
 
   /**
    * A genesis or a successor (`OrgChain.submit`). Once one is accepted, the members it dropped are refused here at once,
-   * their grid sockets close `4403 removed`, and every project is told the new version and the members it holds.
+   * their grid sockets close `4403 removed`, every project is told the new version and the members it holds, and every
+   * open registry socket is sent its `state` notice (O11 M7).
    */
   async submitState(member: MemberRecord, body: unknown): Promise<Result<OrgStateAccepted>> {
     if (body === undefined) return fail(400, 'bad-shape', 'the body is a SignedOrgState, {state, sigs}');
@@ -1239,6 +1245,7 @@ export class Registry extends DurableObject<Env> {
     }
     for (const { id } of projects) void this.announce(org.id, { project: id, version, members });
     for (const { name } of this.sql.exec<{ name: string }>("SELECT name FROM machines WHERE state = 'active'").toArray()) this.announceToMachine(org.id, name, version, memberIds, 1);
+    this.toGrid({ t: 'state', version });
     await this.scheduleAlarm();
     return ok({ version });
   }
@@ -1380,8 +1387,11 @@ export class Registry extends DurableObject<Env> {
   }
 
   /** A machine-signed listing (RL1's `listing`, through M6's Machine DO). */
-  storeListing(record: unknown): Promise<Result<{ stored: boolean }>> {
-    return this.records.storeListing(record);
+  async storeListing(record: unknown): Promise<Result<{ stored: boolean }>> {
+    const kept = await this.records.storeListing(record);
+    // Relayed to the members' Registry sockets as it is stored (OX8; O11 M7); one held already, or refused, is not.
+    if (kept.ok && kept.value.stored) this.toGrid({ t: 'listing', record: record as Signed<Listing> });
+    return kept;
   }
 
   /** A machine-signed endpoint record (RL1's `endpoint`, through M6's Machine DO). */

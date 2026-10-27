@@ -3,6 +3,7 @@
 // mawsd and the app's main import it, and nothing reimplements it. Runtime-neutral: WebCrypto (`crypto.subtle`) and
 // plain TypeScript, with `.ts` import extensions so Node's type stripping loads it unbundled (tsconfig.json holds it
 // to types/neutral-runtime.d.ts).
+export * from './app-hub.ts';
 export * from './base64url.ts';
 export * from './canonical.ts';
 export * from './enrollment.ts';
