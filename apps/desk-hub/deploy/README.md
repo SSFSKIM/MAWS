@@ -295,3 +295,58 @@ deletes what it minted, however it ends. It fails if any of that fails.
 - `measure`: machines streaming chunks into one project, with browsers subscribed. It runs three series: the phase-1 budget (one session at 150 chunks/s watched by 1 to 3 browsers, with another machine's presence and log events crossing it), fan-out, and a ramp. It reports throughput, latency, and the load average per step, as DC3's plan records them (G6).
 - `frame-cost`: what a POST and each frame in it cost on the path from a machine to its project.
 
+
+## Staging runs: `staging-deploy.sh`, `staging-run.sh`, `staging-sweep.py`
+
+The live runs on staging (O11 M8's phase B; O13's and O14's acceptance re-run them) are three scripts beside the
+commands, run from any clean MAWS checkout. They act on `desk-hub-staging` alone: each holds staging's Worker, host and
+org (`desk-hub-staging`, `desk-hub-staging.opencognita-platform.workers.dev`, `staging-ssfskim`) and production's
+(`desk-hub`, `desk-hub.opencognita-platform.workers.dev`) as named constants, reads `deploy/staging.json` first, and
+stops before anything else runs unless it names exactly staging's Worker, host and org; a configuration naming
+production's Worker or host, or a preview alias of it (`<alias>-desk-hub.…`), is refused as production by name.
+
+- `zsh deploy/staging-deploy.sh [--checkout <path>] [--org-id staging-<…>] [--org-name <name>]` builds desk-web and
+  runs `deployment deploy --config deploy/staging.json` from the checkout (default: the one the script is in; it must
+  have no uncommitted changes to tracked files). `--org-id` deploys staging as a throwaway org. It prints production's
+  `X-Desk-Build` before and after, credential-free, and fails if any wrangler call named a Worker other than
+  `desk-hub-staging`.
+- `zsh deploy/staging-run.sh <step>`, one step at a time; any further arguments go to the step's command:
+  - `prod <label>`: production's `X-Desk-Build`, credential-free, into `prod/prod-build-<label>.txt`; `prod after`
+    compares it with `prod before`.
+  - `deploy`, `build`: the checkout to staging; staging's and production's `X-Desk-Build`.
+  - `acceptance [--no-push]`, `relay-measure`: those commands under `staging-ssfskim` with the admin device's keys.
+    `acceptance`'s push item gets its sink behind an account-less quick tunnel (`cloudflared tunnel --url`), stopped
+    when the run ends; `--no-push` skips the item.
+  - `access-sync`: the people policy read back at the org state's head, with the machine credentials access-sync uses.
+  - `throwaway <n>`: staging deployed under the throwaway org `staging-probe-<n>`, then `fake-check` and
+    `redeploy-check` there (its RL1 leg included), then the account swept and staging deployed back under
+    `staging-ssfskim`. The sweep and the restore run however the step ends, a failure or Ctrl-C included; the step
+    fails unless both checks, the sweep and the restore passed and `/api/me` names `staging-ssfskim` again.
+  - `desk-web <n>`: the same around acceptance 8's desk-web check (`apps/desk-web/e2e-staging`, its own
+    `playwright.staging.config.ts`): Playwright's headless Chromium loads staging's desk-web, sets the throwaway org's
+    key up, enrolls M4's fake machine from the Machines dialog, and screenshots the grid, the session listed, its
+    permission card, the card answered from the page and the decision in the group chat, into `desk-web-<n>/`. The
+    browser holds the owner's Access token as its `CF_Authorization` cookie for the staging host; nothing records a
+    trace, video or HAR, and afterwards every file the step wrote is searched for the token, which must be in none.
+    Playwright's Chromium must be installed once (`pnpm --filter desk-web exec playwright install chromium`).
+- `staging-sweep.py snapshot|sweep` is the throwaway steps' account sweep: the service tokens and the `desk-hub*`
+  Access apps and policies before the run, and after it the deletion of what appeared and is the throwaway org's
+  (service tokens `desk-<org>-*`, apps and policies `desk-hub-staging*`). Anything else that appeared is left alone and
+  fails the sweep; it refuses an org that is not `staging-probe-*` and never deletes production's objects.
+
+What they read, at run time, never printed or passed as an argument:
+- `DESK_STAGING_SECRETS` (default `~/.config/claude-secrets/projects/-Users-new-Developer-GitHub-doperpowers`): the
+  directory holding `CF_ACCESS_SETUP_TOKEN` and `CF_DESK_HUB_SERVICE_TOKENS`, each read with `cat` inside the pipe
+  that hands it to the command;
+- the owner's staging Access token, from `cloudflared access token -app=https://desk-hub-staging.opencognita-platform.workers.dev`
+  (the owner's `cloudflared access login` once; a step without it stops with nothing changed);
+- `DESK_STAGING_DEVICE` (default `$DESK_STAGING_DIR/device`): `keys.json`, the admin device's keys (the org-state
+  commands above), and `machine.json`, `{"DESK_MACHINE_CLIENT_ID": …, "DESK_MACHINE_CLIENT_SECRET": …}` for
+  `access-sync`.
+
+Where they write: `DESK_STAGING_DIR` (default `~/.local/state/desk-hub-staging`, created 0700): one log per step and
+deploy, `prod/`, the throwaway steps' snapshots and sweeps, `access-sync/` (its checkpoint) and `desk-web-<n>/`.
+`DESK_HEAVY_WRAPPER`, when set, prefixes the web build (a slot limiter on a shared machine).
+
+Production's Access read-back (its apps and policies, GETs only, compared before and after a run) is not among them:
+it reads production's objects with the setup token, which no script here does.
