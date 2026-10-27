@@ -10,8 +10,8 @@ import { CLIENT_EVENTS, LINK_EVENTS, LINK_REGISTRY, onLink } from './link-surfac
 describe('the link surface', () => {
   it('keeps LINK_EVENTS and CLIENT_EVENTS a partition of the registry’s events', () => {
     const events = Object.keys(REGISTRY.events).sort();
-    const link = [...LINK_EVENTS].sort();
-    const client = [...CLIENT_EVENTS].sort();
+    const link: string[] = [...LINK_EVENTS].sort();
+    const client: string[] = [...CLIENT_EVENTS].sort();
     expect(link.filter((name) => client.includes(name)), 'an event on both sides').toEqual([]);
     expect(events.filter((name) => !link.includes(name) && !client.includes(name)), 'an event on neither side: say whether its payload is a machine’s').toEqual([]);
     expect([...link, ...client].sort()).toEqual(events);

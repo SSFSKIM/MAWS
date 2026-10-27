@@ -108,7 +108,7 @@ const scenarios = [
   ['hosted jobs and a hosted POOL_E2E group ask for no boxes', 'Gates: static,unit,probes,e2e:desk-web\nClass1a: linux\nRunner: linux', 'none'],
   // ci-kit's hosted-Mac spec: a hosted group's job is a waiter on one cpus-2 box, the code's own count of e2e entries.
   ['each group on a hosted Mac is one cpus-2 waiter box', 'Gates: e2e:document-app,e2e:transcript\nClass1a: linux\nRunner: macos\nLane: hosted', '2x2'],
-  ['the whole macOS matrix under Lane: hosted: a waiter per eligible group, beside the pool jobs it had', 'Runner: macos\nLane: hosted', '16x1 8x4 4x2 2x33'],
+  ['the whole macOS matrix under Lane: hosted: a waiter per eligible group, beside the pool jobs it had', 'Runner: macos\nLane: hosted', '16x1 8x4 4x2 2x34'], // P5 O6 M3: e2e:machines, a class-1 group off HOSTED_MAC_E2E, eligible under Lane: hosted
 ];
 for (const [name, trailers, expected] of scenarios) {
   test(name, () => fixture(({ tree, sha, dir }) => {
