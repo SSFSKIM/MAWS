@@ -5,9 +5,10 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { readDeployConfig, type DeployConfig } from '../../deploy/config.ts';
 import { deployHub, workerWrangler, type WranglerRun } from '../../deploy/deploy.ts';
+import { serviceTokenName } from '../../src/protocol/identity.ts';
 
 process.env.DESK_HUB_APP ??= join(import.meta.dirname, '../..');
 
@@ -66,6 +67,15 @@ function fakeAccount() {
   return { fetcher, calls, policies, apps, unchanged: () => production() === before };
 }
 
+// Every call reaches the account through fakeAccount's fetcher; the global fetch throws, so a test that missed it fails
+// here instead of calling Cloudflare.
+beforeAll(() => {
+  vi.stubGlobal('fetch', () => Promise.reject(new Error('a test reached the global fetch: pass fakeAccount().fetcher')));
+});
+afterAll(() => {
+  vi.unstubAllGlobals();
+});
+
 const SECRETS = { CF_ACCESS_SETUP_TOKEN: 'setup-token', CF_DESK_HUB_SERVICE_TOKENS: 'service-tokens' };
 
 /** The `--name` a wrangler argv carries: what wrangler takes as the Worker. */
@@ -73,11 +83,17 @@ const named = (args: string[]) => args[args.lastIndexOf('--name') + 1];
 
 describe('the staging configuration', () => {
   it('is its own Worker, on its own host, with its own org: never production’s', () => {
-    expect(staging).toMatchObject({ worker: 'desk-hub-staging', host: 'desk-hub-staging.opencognita-platform.workers.dev', org: { id: 'ssfskim-staging' } });
+    expect(staging).toMatchObject({ worker: 'desk-hub-staging', host: 'desk-hub-staging.opencognita-platform.workers.dev', org: { id: 'staging-ssfskim' } });
     expect(staging.account).toBe(production.account);
     expect(staging.ownerEmail).toBe(production.ownerEmail);
-    // Machine service tokens are named desk-<org>-<machine> account-wide, and redemption deletes that name first.
-    expect(staging.org.id).not.toBe(production.org.id);
+  });
+
+  it("names no machine service token production could also name", () => {
+    // Machine service tokens are named desk-<org>-<machine> account-wide, and redemption deletes that name first; machine
+    // names may hold '-', so neither org's token prefix may begin the other's.
+    const [stagingPrefix, productionPrefix] = [serviceTokenName(staging.org.id, ''), serviceTokenName(production.org.id, '')];
+    expect(stagingPrefix.startsWith(productionPrefix)).toBe(false);
+    expect(productionPrefix.startsWith(stagingPrefix)).toBe(false);
   });
 });
 
@@ -92,7 +108,7 @@ describe('deploying with the staging configuration', () => {
       expect(named(args)).toBe('desk-hub-staging');
       expect(env).toEqual({ CLOUDFLARE_ACCOUNT_ID: staging.account });
     }
-    expect(wrangler.calls[0].args).toContain('ORG_ID:ssfskim-staging');
+    expect(wrangler.calls[0].args).toContain('ORG_ID:staging-ssfskim');
   });
 
   it("leaves production's Access objects as they were, and makes staging's own", async () => {
@@ -155,7 +171,7 @@ describe('the target guard', () => {
     const wrangler = fakeWrangler();
     const run = workerWrangler(staging, wrangler.run, (line) => lines.push(line));
     await run(['secret', 'put', 'CF_API_TOKEN'], 'service-tokens');
-    await run(['deploy', '--var', 'ORG_ID:ssfskim-staging']);
+    await run(['deploy', '--var', 'ORG_ID:staging-ssfskim']);
     expect(lines).toEqual([
       `wrangler target desk-hub-staging (config worker desk-hub-staging, account ${staging.account}): secret put CF_API_TOKEN`,
       `wrangler target desk-hub-staging (config worker desk-hub-staging, account ${staging.account}): deploy`,

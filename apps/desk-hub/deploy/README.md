@@ -7,7 +7,7 @@ naming its account, Worker, host, owner and org:
 | Configuration | Worker | Host | Org | What it is |
 | --- | --- | --- | --- | --- |
 | `config.json` (the default) | `desk-hub` | `desk-hub.opencognita-platform.workers.dev` | `ssfskim` | Production: the owner's machines and phone |
-| `staging.json` | `desk-hub-staging` | `desk-hub-staging.opencognita-platform.workers.dev` | `ssfskim-staging` | Staging, for live tests (P5 O11's M2); agents deploy here and nowhere else |
+| `staging.json` | `desk-hub-staging` | `desk-hub-staging.opencognita-platform.workers.dev` | `staging-ssfskim` | Staging, for live tests (P5 O11's M2); agents deploy here and nowhere else |
 
 Everything here goes through one command, run from the MAWS worktree root:
 
@@ -31,11 +31,13 @@ takes the same check.
 
 Staging is its own Worker, so its own Durable Objects, Access applications,
 policies and secrets (its own `VAPID_KEY`; `CF_API_TOKEN` is the same
-service-token API token as production's). Its org id is `ssfskim-staging`,
-never `ssfskim`: a machine's service token is named `desk-<org>-<machine>` in
-the account-wide namespace, and redemption deletes every token of that name
-first, so a staging org named `ssfskim` would delete production machines'
-credentials.
+service-token API token as production's). Its org id is `staging-ssfskim`:
+a machine's service token is named `desk-<org>-<machine>` in the account-wide
+namespace, and redemption deletes every token of that name first. A staging org
+named `ssfskim` would delete production machines' credentials, and so would one
+that extends it (`ssfskim-staging` with machine `x` is `desk-ssfskim-staging-x`,
+production's name for a machine `staging-x`). No production token name starts
+`desk-staging-`.
 
 ## Credentials
 
@@ -162,7 +164,7 @@ touches the org key, and it refuses to run against any project but the one in
 
 Each runs against the deployment through Access and enrolls throwaway
 machines. Each requires `--test-org <id>`: a throwaway org, never the
-configuration's own (staging's `ssfskim-staging` included), which the
+configuration's own (staging's `staging-ssfskim` included), which the
 deployment must be serving (`deploy --config <file> --org-id <id>` first). Before enrolling or writing anything, each checks that `/api/me` names
 that org, and refuses otherwise. Their projects and events outlive the machines'
 revocation, and their events are sealed with a throwaway org key.
