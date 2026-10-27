@@ -1053,6 +1053,10 @@ The joint review's second round (`9be0bc941`), 2026-10-27, two P1s, both reprodu
   Rationale: the nonce-on-claim rule needs the claim and the record read under one lock, or a reseal landing between them is lost; the rest keeps M7a to the two debt items.
   Date/Author: 2026-10-27, M7a's executor, accepted by O12's phase 2 executor.
 
+- Decision: sminos cuts over only on a `welcome` whose identity is complete (`org`, `name`, `ref` and `enrolled` all present). Any other `welcome`, or a `refuse`, closes the socket: no `identity.json` is written, the DX2 uplink keeps running exactly as before, `daemon status` says an endpoint is present but not enrolled, and the RL10 side backs off and tries again. Before cutover a present `rl10.json` never stops a running DX2 uplink; only a complete welcome switches the machine (M5). Pinned with a stand-in welcome carrying no `org` and no `ref`: no cutover, and the DX2 uplink stays up.
+  Rationale: once O2 and O10 M10 land, the owner's own MAWS runs `mawsd` with an unenrolled endpoint on the owner's machines; if that endpoint ever wrote `rl10.json` and welcomed, an auto-updated sminos would cut the real machine over, local-only and off the desk hub, long before O14. O10 is amended so the endpoint serves RL10 only once its enrollment is org-listed; this is sminos's defence in depth. Raised by the O12 executor's O14 note, ruled by the spec's owner.
+  Date/Author: 2026-10-27, p5-desk-track-owner (ruling), built by O12's phase 2 executor in M5.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
