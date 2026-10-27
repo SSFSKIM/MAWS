@@ -178,3 +178,47 @@ describe('the file', () => {
     expect(open().readable).toBe(false);
   });
 });
+
+// Review round 1: a failed append leaves the file and the entries in an unknown agreement (the claim may be on disk
+// though its fsync failed; a partial write leaves a torn tail). The ledger then answers nothing until it is opened again,
+// when the load reconciles it with the file as at a restart.
+describe('a failed append', () => {
+  const failFsyncOnce = () =>
+    vi.mocked(fs.fsyncSync).mockImplementationOnce(() => {
+      throw Object.assign(new Error('i/o error'), { code: 'EIO' });
+    });
+
+  it('closes the ledger when a claim fsync fails: a second member cannot claim the same id, and a reopen keeps only the first claim', () => {
+    const ledger = open();
+    failFsyncOnce();
+    expect(ledger.begin(OP, iso(now), claim(), () => null)).toEqual({ kind: 'answered', answer: { state: 'refused', reason: 'unavailable' } });
+    expect(ledger.begin(OP, iso(now), claim({ member: 'm-b', fingerprint: 'fp-b' }), () => null)).toEqual({ kind: 'answered', answer: { state: 'refused', reason: 'unavailable' } });
+    expect(ledger.readable).toBe(false);
+    expect(ledger.query(OP, iso(now), true)).toEqual({ state: 'unavailable' });
+    ledger.finish(OP, { ok: true, value: 'b ran' });
+    expect(lines()).toEqual([{ opId: OP, opCreated: iso(T0), at: T0, claim: claim() }]);
+    const reopened = open();
+    expect(reopened.readable).toBe(true);
+    expect(reopened.query(OP, iso(now), false)).toMatchObject({ state: 'in-progress', member: 'm-a' });
+    expect(reopened.begin(OP, iso(now), claim({ member: 'm-b', fingerprint: 'fp-b' }), () => null)).toEqual({ kind: 'answered', answer: { state: 'refused', reason: 'op-conflict' } });
+  });
+
+  it('closes the ledger after a partial write, so no later append turns the torn tail into a corrupt middle line', () => {
+    const ledger = open();
+    ledger.begin(OP, iso(now), claim(), () => null);
+    const write = vi.mocked(fs.writeSync);
+    write.mockImplementationOnce(((fd: number, buffer: Buffer, offset: number, length: number) => {
+      fs.appendFileSync(join(dir, 'ops.jsonl'), buffer.subarray(offset, offset + Math.floor(length / 2)));
+      throw Object.assign(new Error('no space'), { code: 'ENOSPC' });
+    }) as never);
+    ledger.finish(OP, { ok: true, value: 'half' });
+    expect(ledger.begin(OP2, iso(now), claim(), () => null)).toEqual({ kind: 'answered', answer: { state: 'refused', reason: 'unavailable' } });
+    expect(ledger.readable).toBe(false);
+    expect(ledger.query(OP2, iso(now), true)).toEqual({ state: 'unavailable' });
+    const reopened = open();
+    expect(reopened.readable).toBe(true);
+    expect(reopened.query(OP, iso(now), false)).toMatchObject({ state: 'in-progress' });
+    expect(reopened.begin(OP2, iso(now), claim(), () => null)).toEqual({ kind: 'claimed' });
+    expect(lines().map((l) => l.opId)).toEqual([OP, OP2]);
+  });
+});
