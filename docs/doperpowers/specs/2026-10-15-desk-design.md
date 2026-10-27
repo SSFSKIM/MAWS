@@ -21,6 +21,8 @@
 > `docs/charter.md` are MAWS. Its child and contract ids carry a `D` (DC1–DC9, DX1–DX8)
 > because MAWS's own charter already binds C1–C12 and X1–X8 in that
 > repository.
+>
+> **Superseded in part, 2026-10-27.** The owner folded the desk into MAWS (MAWS P5, `docs/doperpowers/plans/2026-10-27-p5-org.md`). That retires this document's "not MAWS's web edition" ruling (§1). Its security model (one shared org key; §6, DX7) is replaced by the remote layer (`docs/doperpowers/specs/2026-10-26-remote-layer-design.md`). Desk Web keeps only the phone's cards (P5 §9). What P5 does not change stays in force.
 
 ## Purpose
 
