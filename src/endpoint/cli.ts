@@ -152,6 +152,7 @@ async function grant(endpoint: Endpoint, args: readonly string[], secret: string
   const { state, org, services } = endpoint.parts!;
   const result = await acceptGrant(state, org, services.machine.ref, value, new Date(endpoint.deps.now()));
   if (!result.ok) return { code: EXIT.failed, out: `refused: ${result.reason}` };
+  endpoint.channels.refreshCaps();
   const g = result.grant.body;
   return { code: EXIT.done, out: `kept: version ${g.version} for member ${g.member}, ${g.rights.length === 0 ? 'no rights' : g.rights.join(', ')}` };
 }

@@ -19,6 +19,8 @@
     "apps/org-protocol/src/**/*.ts", // P5-O10 M9: the remote layer's protocol package, which main's device keys sign with
     "apps/org-protocol/types/node-runtime.d.ts", // its WebCrypto type names under Node's declarations
     "apps/org-protocol/test-support/tamper-relay.ts", // its in-memory carrier, for main's device-key handshake test
+    "apps/org-protocol/test-support/test-device.ts", // P5 O10 M4: its test device, which the endpoint's channel suites drive
+    "apps/org-protocol/test-support/authenticator.ts", // the test device's passkey
     // P5 O10 start: the endpoint module, which mawsd bundles (its suites are test/endpoint, under test/** below). It
     // imports desk-hub's protocol module (the DX-era vocabulary); its suites' local-hub harness imports the member's side
     // from desk-hub's deploy tools

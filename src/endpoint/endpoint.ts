@@ -1,16 +1,24 @@
 // The endpoint module (O10; Interfaces §F): the one object `mawsd` starts, asks for its status and hands its
 // `mawsd endpoint` commands. M2 holds its state, its enrollment, its org state and its policy; M3 the hub link (RL1) with
-// the machine's listings, endpoint record and notifications; M4–M8 add the channels, authorization, RL10, actions and
-// subscriptions beside them, each fed by the org state's adoptions.
+// the machine's listings, endpoint record and notifications; M4 the devices' channels (RL2) over the hub's multiplex and
+// the direct listener; M5–M8 add authorization, RL10, actions and subscriptions beside them, each fed by the org state's
+// adoptions.
 //
 // The hub link runs while the machine is `org-listed` (the hub refuses RL1 to a machine the head doesn't list): from
 // start when it already is, else from the sync that lists it. Its welcome and each `state` notice read the org state at
 // once, besides the 10-minute sync. A verdict that stops it (`re-enroll`, `revoked`, `replaced`) is `status().refusing`
 // until an enrollment writes new credentials.
-import { importSigningKey, stateHash, type OrgState, type Rl1Refusal, type SigningKey } from 'org-protocol';
+//
+// Channels are served while the machine is `org-listed` with a head (M4): relayed ones as the hub opens them, direct
+// ones on the tailnet listener, which a `unit` daemon binds, and a `private` one only under `MAWS_ENDPOINT_DIRECT=1`.
+// The listener's addresses go into the endpoint record. `stop()` closes every channel (`restart`) before the hub link.
+import { networkInterfaces } from 'node:os';
+import { importSigningKey, stateHash, type MachineIdentity, type OrgState, type Rl1Refusal, type SigningKey } from 'org-protocol';
+import { Channels } from './channels';
+import { DirectListener, type DirectListenerOptions } from './direct-listener';
 import { runCli } from './cli';
 import { enrollDelegatedInto, promoteIfListed, syncAndPromote, type DelegatedInput, type EnrollContext, type EnrollmentState } from './enroll';
-import { dropRevokedGrants } from './grants';
+import { dropRevokedGrants, machineRights } from './grants';
 import type { HubDeps } from './hub-http';
 import { HubLink } from './hub-link';
 import { EndpointRecords, Listings, RecordRetries, type RecordsContext } from './listings';
@@ -20,12 +28,26 @@ import { EndpointPolicy } from './policy';
 import type { EndpointModule, EndpointServices } from './services';
 import { EndpointState } from './state/store';
 import { endpointStatus, NO_LINKS, type EndpointLinks, type EndpointStatus } from './status';
+import { directPort, type InterfaceTable } from './tailnet';
 
 /**
- * `build` is `mawsd`'s build id, as RL1's hello names it (M10 passes it); `now` is the module's clock; `fetch` and
- * `sleep` are the suites' seams for faults and fast retries.
+ * `build` is `mawsd`'s build id, as RL1's hello and RL2's h2 name it (M10 passes it); `now` is the module's clock;
+ * `fetch` and `sleep` are the suites' seams for faults and fast retries; `env` is where `MAWS_ENDPOINT_DIRECT` and
+ * `MAWS_ENDPOINT_PORT` are read (the process's); `pingMs` and `direct` are the suites' seams for channel liveness and
+ * the listener (its interface table, how it listens, its limits).
  */
-export type EndpointOptions = { build?: string; now?(): number; fetch?: typeof fetch; sleep?(ms: number): Promise<void> };
+export type EndpointOptions = {
+  build?: string;
+  now?(): number;
+  fetch?: typeof fetch;
+  sleep?(ms: number): Promise<void>;
+  env?: Record<string, string | undefined>;
+  pingMs?: readonly [number, number];
+  direct?: { interfaces?(): InterfaceTable } & Pick<DirectListenerOptions, 'listen' | 'limits' | 'rescanMs'>;
+};
+
+/** The whole handshake of a direct connection is this long at most (M4). */
+export const DIRECT_HANDSHAKE_MS = 10_000;
 
 /** The org state is read again this often, besides at RL1's welcome and each `state` notice (M3). */
 export const SYNC_EVERY_MS = 10 * 60_000;
@@ -42,6 +64,11 @@ export class Endpoint implements EndpointModule {
   readonly endpointRecords: EndpointRecords;
   /** `notify` from the pending sets and the to-human messages (M6 feeds them). */
   readonly notifier: Notifier;
+  /** The devices' channels, over either carrier (M4); M5–M8 set its routes. */
+  readonly channels: Channels;
+  readonly #options: EndpointOptions;
+  #direct: DirectListener | null = null;
+  #directStarted = false;
   #services: EndpointServices | null = null;
   #state: EndpointState | null = null;
   #org: EndpointOrg | null = null;
@@ -55,6 +82,7 @@ export class Endpoint implements EndpointModule {
   readonly #retries = new RecordRetries();
 
   constructor(options: EndpointOptions = {}) {
+    this.#options = options;
     this.deps = {
       fetch: options.fetch ?? ((input, init) => fetch(input, init)),
       sleep: options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
@@ -108,6 +136,22 @@ export class Endpoint implements EndpointModule {
       store: { read: () => this.#state?.notified ?? {}, write: (file) => this.#state?.setNotified(file) },
       log,
     });
+    this.channels = new Channels({
+      identity: () => this.#identity(),
+      org: () => (this.#identity() === null ? null : this.#org),
+      adopt: (states, transitions) => this.#org?.adopt(states, transitions) ?? Promise.resolve(),
+      rights: (member) => {
+        const org = this.#org;
+        if (this.#state === null || this.#services === null || !org?.ready) return Promise.resolve([]);
+        return machineRights(this.#state, org.head().state, org.certificates(), this.#services.machine.ref, member, new Date(this.deps.now()));
+      },
+      hold: (reason) => this.#services?.hold(reason) ?? (() => {}),
+      counts: (counts) => (this.links.channels = counts),
+      log,
+      now: this.deps.now,
+      pingMs: options.pingMs,
+    });
+    this.hub.setChannels(this.channels.relay(this.hub));
   }
 
   async start(services: EndpointServices): Promise<void> {
@@ -134,6 +178,8 @@ export class Endpoint implements EndpointModule {
       // The ledger is re-read against a new head after the head is on disk; a crash between the two left it unread.
       this.#endRevokedGrants(org.head().state, log);
     }
+    const env = this.#options.env ?? process.env;
+    if (services.machine.kind === 'unit' || env.MAWS_ENDPOINT_DIRECT === '1') this.#direct = this.#listener(env);
     if (state.enrolled) this.#keepSynced();
     this.#ensureLink();
   }
@@ -143,7 +189,16 @@ export class Endpoint implements EndpointModule {
     this.#retries.clear();
     if (this.#timer !== null) clearInterval(this.#timer);
     this.#timer = null;
+    // Each channel's sealed `restart` goes out before the carriers end: the hub link and the listener close after.
+    await this.channels.closeAll('restart');
+    await this.#direct?.stop();
+    this.links.listener = { bound: false };
     await this.hub.stop();
+  }
+
+  /** The direct listener, when this daemon binds one (a suite reads its addresses again through it). */
+  get direct(): DirectListener | null {
+    return this.#direct;
   }
 
   status(): EndpointStatus {
@@ -221,11 +276,43 @@ export class Endpoint implements EndpointModule {
     } else if (refusal.frame === 'endpoint') this.#retries.retry('endpoint', () => void this.endpointRecords.issue());
   }
 
-  /** Opens the hub link when the machine is listed and nothing stops it. */
+  /** Opens the hub link when the machine is listed and nothing stops it, and the direct listener once it can serve. */
   #ensureLink(): void {
     if (this.#stopped) return;
     const enrollment = this.#state?.enrolled ? this.#state.enrollment : null;
     if (enrollment?.state === 'org-listed' && this.#key !== null && this.#state?.refusing === null && this.links.refusing === undefined) this.hub.start();
+    if (this.#direct !== null && !this.#directStarted && this.#identity() !== null) {
+      this.#directStarted = true;
+      void this.#direct.start();
+    }
+  }
+
+  /** The machine as RL2's `h2` signs it, while it serves channels: listed in the org with a head, its state sound. */
+  #identity(): MachineIdentity | null {
+    const enrollment = this.#state?.enrolled ? this.#state.enrollment : null;
+    if (this.#stopped || this.#services === null || this.#key === null || enrollment?.state !== 'org-listed' || this.#state?.refusing !== null || this.#org?.ready !== true) return null;
+    return { ref: this.#services.machine.ref, key: this.#key, build: this.#options.build ?? 'unknown', capabilities: [] };
+  }
+
+  #listener(env: Record<string, string | undefined>): DirectListener {
+    const log = (line: string) => this.#services?.log(line);
+    const { port, ignored } = directPort(env);
+    if (ignored !== undefined) log(`endpoint: MAWS_ENDPOINT_PORT names no port (${ignored.slice(0, 32)}); the direct listener takes ${port}`);
+    const seams = this.#options.direct ?? {};
+    return new DirectListener({
+      port,
+      interfaces: seams.interfaces ?? networkInterfaces,
+      listen: seams.listen,
+      limits: seams.limits,
+      rescanMs: seams.rescanMs,
+      now: this.deps.now,
+      log,
+      connection: (io) => void this.channels.accept('direct', io, { deadlineMs: DIRECT_HANDSHAKE_MS }),
+      addresses: (urls) => {
+        this.links.listener = { bound: urls.length > 0 };
+        void this.endpointRecords.setAddresses(urls);
+      },
+    });
   }
 
   #keepSynced(): void {
@@ -239,6 +326,8 @@ export class Endpoint implements EndpointModule {
   #adopted(change: OrgChange): void {
     const parts = this.parts;
     if (parts === null) return;
+    // Removal closes at once, before anything else hears of the new head (M4).
+    this.channels.adopted(change.head.state);
     const log = (line: string) => parts.services.log(line);
     void stateHash(change.head.state).then((hash) => (this.#headHash = hash));
     const { members, devices, keys } = change.removed;
