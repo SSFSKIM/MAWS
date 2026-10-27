@@ -223,16 +223,22 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
       readScroll(virtualizer.getTotalSize());
       scrollbarPointer.current = null;
     };
+    // Upward intent is the latest movement: a return to the end not yet read as a scroll event must not resume
+    // following once the reader has turned back up, so the movement baseline is where the intent found them.
+    const releaseUpward = () => {
+      known.current.offset = element.scrollTop;
+      releaseFollow();
+    };
     const wheel = (event: WheelEvent) => {
       observeEnd();
-      if (event.deltaY < 0 && !nestedScrollerOwnsUp(event.target, element)) releaseFollow();
+      if (event.deltaY < 0 && !nestedScrollerOwnsUp(event.target, element)) releaseUpward();
     };
     let touchY: number | null = null;
     const touchStart = (event: TouchEvent) => { observeEnd(); touchY = event.touches.length === 1 ? event.touches[0].clientY : null; };
     const touchMove = (event: TouchEvent) => {
       observeEnd();
       const next = event.touches.length === 1 ? event.touches[0].clientY : null;
-      if (next !== null && touchY !== null && next > touchY && !nestedScrollerOwnsUp(event.target, element)) releaseFollow();
+      if (next !== null && touchY !== null && next > touchY && !nestedScrollerOwnsUp(event.target, element)) releaseUpward();
       touchY = next;
     };
     const key = (event: KeyboardEvent) => {

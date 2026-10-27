@@ -360,6 +360,16 @@ for (const shortfall of [0.25, 0.75, 1, 1.75, 2]) {
   });
 }
 
+it('a small upward wheel after an unread return to the end keeps the reader released', async () => {
+  const s = await scene();
+  s.readerMove(-200);
+  s.move(200, false); // back at the end, its scroll event not yet delivered
+  s.readerMove(-2.5); // turned back up within the DOM-end slack; one event reports both moves
+  s.stream();
+  expect(s.handle.current!.following).toBe(false);
+  expect(s.writes).toEqual([]);
+});
+
 it('a witnessed key whose clamp lands on a rounded fractional end keeps following', async () => {
   const s = await scene(false, true);
   s.roundDOMEnd(1.75);
