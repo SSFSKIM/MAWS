@@ -7,7 +7,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { listing, mintRef, type V2Machine } from '../fake-machine/org';
 import type { PushNotice } from '../src/protocol/browser';
 import type { OwnerNotice, PushSubscriptionRecord } from '../src/protocol/identity';
-import { refusal } from './support/clients';
+import { newNonce } from '../src/protocol/codes';
+import type { LogEvent } from '../src/protocol/log';
+import { enroll, MachineClient, refusal, waitFor } from './support/clients';
 import { ADMIN, ORG, startLocalHub, type LocalHub } from './support/local';
 import { genesis, memberId, newDevice, next, revokedDevice, signedBy, type TestDevice } from './support/org';
 import { decrypt, userAgent, type UserAgent } from './support/push';
@@ -24,6 +26,11 @@ const PROJECT = '5b1d2c3e-4f50-4a6b-8c7d-9e0f1a2b3c4d';
 const SESSION = '67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b';
 const UNLISTED = '0d9e8f7a-6b5c-4d3e-a2f1-0e9d8c7b6a59';
 let machine: V2Machine;
+/** Another machine of the state, listing a session of its own that `mini` never listed. */
+let other: V2Machine;
+/** A DX2 machine (`dx-listed`) the state also lists with a key of the suite's, so its listings verify. */
+let dx: V2Machine;
+const DX_SESSION = '3f2e1d0c-9b8a-4766-8554-433221100fed';
 let phoneA: UserAgent;
 let phoneB: UserAgent;
 let laptopB: UserAgent;
@@ -55,11 +62,16 @@ beforeAll(async () => {
   [a1, b1, b2] = await Promise.all([newDevice('a1'), newDevice('b1', 'web-cards'), newDevice('b2', 'web-cards')]);
   head = await signedBy(await genesis(ORG, A, ADMIN, a1, await generateSigningKey()), a1);
   expect((await hub.fetchAs(ADMIN, '/api/org/state', { body: head })).status).toBe(201);
-  machine = { hub: hub.url, org: ORG, name: 'mini', ref: mintRef(), key: await generateSigningKey(), credentials: { clientId: '', clientSecret: '' }, enrollment: '' };
+  const stateOnly = async (name: string): Promise<V2Machine> => ({ hub: hub.url, org: ORG, name, ref: mintRef(), key: await generateSigningKey(), credentials: { clientId: '', clientSecret: '' }, enrollment: '' });
+  [machine, other, dx] = await Promise.all([stateOnly('mini'), stateOnly('other'), stateOnly('dx-listed')]);
   await accept((s) => {
     s.members.push({ id: B, email: MEMBER_B, role: 'member', devices: [b1.device, b2.device] });
     s.machines.push({ name: 'mini', ref: machine.ref, pub: machine.key.pub, owners: [A] });
     s.machineNames.push({ name: 'mini', ref: machine.ref });
+    s.machines.push({ name: 'other', ref: other.ref, pub: other.key.pub, owners: [A] });
+    s.machineNames.push({ name: 'other', ref: other.ref });
+    s.machines.push({ name: 'dx-listed', ref: dx.ref, pub: dx.key.pub, owners: [A] });
+    s.machineNames.push({ name: 'dx-listed', ref: dx.ref });
   });
   [phoneA, phoneB, laptopB] = await Promise.all(['https://push.test/a-phone', 'https://push.test/b-phone', 'https://push.test/b-laptop'].map((e) => userAgent(e)));
 });
@@ -111,16 +123,51 @@ describe('a v2 notice', () => {
 });
 
 describe("DX2's push", () => {
-  const notice = (session: string): Omit<PushNotice, 'name' | 'waiting'> => ({ v: 1, project: PROJECT, session, alias: 'x', kind: 'message', event: { writer: 'mini/x', seq: 1 } });
+  const notice = (session: string, kind: 'message' | 'permission' = 'message'): Omit<PushNotice, 'name' | 'waiting'> =>
+    kind === 'message' ? { v: 1, project: PROJECT, session, alias: 'x', kind, event: { writer: `mini/${session}`, seq: 1 } } : { v: 1, project: PROJECT, session, alias: 'x', kind, request: 'toolu_1' };
+  const legacy = (payload: unknown) => expect(payload).toMatchObject({ v: 1, project: PROJECT, alias: 'x', name: expect.any(String) as string, waiting: 0 });
 
-  it('keeps today’s rule for a session with no listing: every member not looking', async () => {
-    const pushed = await pushedBy(() => hub.registryRpc('push', notice(UNLISTED), [], 0));
+  it('keeps today’s rule and payload for a session its machine never listed: every member not looking', async () => {
+    const pushed = await pushedBy(() => hub.registryRpc('push', notice(UNLISTED), [], 0, 'mini'));
     expect([...pushed.keys()].sort()).toEqual([phoneA.endpoint, phoneB.endpoint].sort());
+    for (const payload of pushed.values()) legacy(payload);
   });
 
-  it('goes to the listed owners alone for a session with a listing', async () => {
-    const pushed = await pushedBy(() => hub.registryRpc('push', notice(SESSION), [], 0));
+  it('is not redirected by another machine’s listing of the same session id', async () => {
+    const OTHERS = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d';
+    expect((await hub.registryRpc<{ ok: boolean }>('storeListing', await listing(other, OTHERS, 1, { owners: [A], project: PROJECT, lane: 'B', state: 'waiting', title: 't' }))).ok).toBe(true);
+    const pushed = await pushedBy(() => hub.registryRpc('push', notice(OTHERS), [], 0, 'mini'));
+    expect([...pushed.keys()].sort()).toEqual([phoneA.endpoint, phoneB.endpoint].sort());
+    for (const payload of pushed.values()) legacy(payload);
+  });
+
+  it('goes to its machine’s listed owners alone for a session it listed, carrying only the v2 notice', async () => {
+    const pushed = await pushedBy(() => hub.registryRpc('push', notice(SESSION), [], 0, 'mini'));
     expect([...pushed.keys()]).toEqual([phoneB.endpoint]);
-    expect(await pushedBy(() => hub.registryRpc('push', notice(SESSION), [B], 0))).toEqual(new Map());
+    expect(pushed.get(phoneB.endpoint)).toEqual({ project: PROJECT, machine: machine.ref, session: SESSION, kind: 'wrote' });
+    const asked = await pushedBy(() => hub.registryRpc('push', notice(SESSION, 'permission'), [], 0, 'MINI'));
+    expect(asked.get(phoneB.endpoint)).toEqual({ project: PROJECT, machine: machine.ref, session: SESSION, kind: 'waiting' });
+    expect(await pushedBy(() => hub.registryRpc('push', notice(SESSION), [B], 0, 'mini'))).toEqual(new Map());
+  });
+
+  it('from a Project on the code before the machine was passed, keeps today’s rule and payload', async () => {
+    const pushed = await pushedBy(() => hub.registryRpc('push', notice(SESSION), [], 0));
+    expect([...pushed.keys()].sort()).toEqual([phoneA.endpoint, phoneB.endpoint].sort());
+    for (const payload of pushed.values()) legacy(payload);
+  });
+
+  it('from an upload, names the uploading machine: a listed session’s message reaches its owners as a v2 notice', async () => {
+    expect((await hub.registryRpc<{ ok: boolean }>('storeListing', await listing(dx, DX_SESSION, 1, { owners: [B], project: PROJECT, lane: 'A', state: 'busy', title: 't' }))).ok).toBe(true);
+    const client = new MachineClient(hub, 'dx-listed', await enroll(hub, ADMIN, 'dx-listed'));
+    await client.connect();
+    await client.sync(PROJECT, 'demo');
+    const event = { ts: new Date().toISOString(), writer: `dx-listed/${DX_SESSION}`, seq: 1, kind: 'message', from: 'maws-1', to: 'host', text: 'done', mac: { nonce: newNonce(), value: Buffer.from(new Uint8Array(32)).toString('base64url') } };
+    client.store(PROJECT, event as unknown as LogEvent);
+    const from = hub.pushes.length;
+    await client.postOk([{ t: 'events', project: PROJECT, events: [event as unknown as LogEvent] }]);
+    const push = await waitFor(() => hub.pushes.slice(from).find((p) => p.endpoint === phoneB.endpoint));
+    expect(JSON.parse(new TextDecoder().decode(await decrypt(phoneB, push.body)))).toEqual({ project: PROJECT, machine: dx.ref, session: DX_SESSION, kind: 'wrote' });
+    expect(hub.pushes.slice(from).map((p) => p.endpoint)).toEqual([phoneB.endpoint]);
+    await client.close();
   });
 });

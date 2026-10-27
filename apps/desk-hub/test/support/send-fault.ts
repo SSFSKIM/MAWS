@@ -55,7 +55,8 @@ export const PROJECT_BACKLOG_PATH = '/__test/backlog-pages';
 /** Where the suites' `Project` is armed to fail its next `forget`, as a failed RPC from the Registry would. */
 export const PROJECT_FORGET_FAULT_PATH = '/__test/forget-fault';
 /** Where the suites' `Machine` is armed (`?mode=hold`) to hold its next revocation's answer until it is released, as a
- * slow RPC would, or (`?mode=lose`) to lose it once the revocation is stored, as an RPC whose answer never came back. */
+ * slow RPC would, (`?mode=lose`) to lose it once the revocation is stored, as an RPC whose answer never came back, or
+ * (`?mode=fail`) to fail it before it is applied, as an RPC that never arrived. */
 export const REVOKE_FAULT_PATH = '/__test/revoke-fault';
 /** Where the suites' `Machine` says whether a revocation's answer is held: `held` or `none`. */
 export const REVOKE_HELD_PATH = '/__test/revoke-held';
@@ -113,5 +114,6 @@ export const PROJECT_STATE_FAULT_PATH = '/__test/state-fault';
  * takes workerd's refusal for a callee on older code. */
 export const MISSING_METHOD_PATH = '/__test/missing-method';
 /** Where the suites' `Registry` takes a call of one of its RPC methods (`{method, args}`) as an object calling it would
- * (M6's Machine DO, Project), and answers its result: `storeListing`, `storeEndpoint`, `notify`, `ownersOf`, `push`. */
+ * (M6's Machine DO, Project), and answers its result: `storeListing`, `storeEndpoint`, `notify`, `ownersOf`, `push`;
+ * with `{concurrent: [{method, args}…]}`, all at once, answering each one's result in order. */
 export const REGISTRY_RPC_PATH = '/__test/registry-rpc';

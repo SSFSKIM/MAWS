@@ -147,7 +147,7 @@ export class OrgRecords {
         return fail(409, 'contested', `the ref ${cert.machine} is the org state's machine "${entry.name}": mint a fresh ref under the delegation`, conflicts);
       }
       const held = certs.certs.find((c) => c.body.pub === cert.pub);
-      if (held) return canonicalize(held) === canonicalize(body) ? ok(() => ({ stored: false })) : fail(409, 'conflict', 'a certificate for this key is held; a new key takes a new certificate');
+      if (held) return canonicalize(held) === canonicalize(body) ? ok(() => ok({ stored: false })) : fail(409, 'conflict', 'a certificate for this key is held; a new key takes a new certificate');
       const contested = new Set(await contestedRefs(state, { certs: [...certs.certs, body], retirements: certs.retirements }, now));
       if (contested.has(cert.machine)) {
         const rivals = certs.certs.filter((c) => contested.has(c.body.machine) && (c.body.machine === cert.machine || machineNameKey(c.body.name) === machineNameKey(cert.name)));
@@ -163,7 +163,7 @@ export class OrgRecords {
       return ok(() => {
         this.sql.exec('INSERT INTO machine_certs (key_id, ref, name_key, body, stored) VALUES (?, ?, ?, ?, ?)', kid, cert.machine, machineNameKey(cert.name), canonicalize(body), iso());
         this.raiseCertsVersion();
-        return { stored: true };
+        return ok({ stored: true });
       });
     });
   }
@@ -177,7 +177,7 @@ export class OrgRecords {
       return ok(() => {
         const stored = this.sql.exec('INSERT OR IGNORE INTO cert_retirements (body, key_id, stored) VALUES (?, ?, ?)', canonicalize(body), body.body.keyId, iso()).rowsWritten > 0;
         if (stored) this.raiseCertsVersion();
-        return { stored };
+        return ok({ stored });
       });
     });
   }
@@ -194,21 +194,19 @@ export class OrgRecords {
     const l = body.body;
     return this.machineSigned(verifyListing, body, () => {
       const held = this.sql.exec<{ revision: number; body: string }>('SELECT revision, body FROM listings WHERE machine = ? AND session = ?', l.machine, l.session).toArray()[0];
-      if (held && held.body === canonicalize(body)) return ok(() => ({ stored: false }));
+      if (held && held.body === canonicalize(body)) return ok({ stored: false });
       if (held && l.revision <= held.revision) return fail(409, 'stale-listing', `the listing held is at revision ${held.revision}`);
-      return ok(() => {
-        this.sql.exec(
-          'INSERT OR REPLACE INTO listings (machine, session, revision, project, owners, body, stored) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          l.machine,
-          l.session,
-          l.revision,
-          l.fields.project,
-          JSON.stringify(l.fields.owners),
-          canonicalize(body),
-          iso(),
-        );
-        return { stored: true };
-      });
+      this.sql.exec(
+        'INSERT OR REPLACE INTO listings (machine, session, revision, project, owners, body, stored) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        l.machine,
+        l.session,
+        l.revision,
+        l.fields.project,
+        JSON.stringify(l.fields.owners),
+        canonicalize(body),
+        iso(),
+      );
+      return ok({ stored: true });
     });
   }
 
@@ -218,24 +216,23 @@ export class OrgRecords {
     const r = body.body;
     return this.machineSigned(verifyEndpointRecord, body, () => {
       const held = this.sql.exec<{ issued: string; body: string }>('SELECT issued, body FROM endpoints WHERE machine = ?', r.machine).toArray()[0];
-      if (held && held.body === canonicalize(body)) return ok(() => ({ stored: false }));
+      if (held && held.body === canonicalize(body)) return ok({ stored: false });
       if (held && r.issued <= held.issued) return fail(409, 'stale-endpoint', `the endpoint record held was issued ${held.issued}`);
-      return ok(() => {
-        this.sql.exec('INSERT OR REPLACE INTO endpoints (machine, issued, body, stored) VALUES (?, ?, ?, ?)', r.machine, r.issued, canonicalize(body), iso());
-        return { stored: true };
-      });
+      this.sql.exec('INSERT OR REPLACE INTO endpoints (machine, issued, body, stored) VALUES (?, ?, ?, ?)', r.machine, r.issued, canonicalize(body), iso());
+      return ok({ stored: true });
     });
   }
 
-  /** A machine-signed record verified by `verify`, then judged against what is held by `keep`, which commits it. */
+  /** A machine-signed record verified by `verify`, then judged against what is held and committed by `keep`, in one
+   * synchronous step, so two submissions at once never both pass the freshness check. */
   private machineSigned<T extends Listing | EndpointRecord>(
     verify: (state: OrgState, record: Signed<T>, certs: Certificates, now: Date) => Promise<Verdict>,
     record: Signed<T>,
-    keep: () => Result<() => { stored: boolean }>,
+    keep: () => Result<{ stored: boolean }>,
   ): Promise<Result<{ stored: boolean }>> {
     return this.underHead<{ stored: boolean }>(async (state, certs, now) => {
       const verdict = await verify(state, record, certs, now);
-      return verdict.ok ? keep() : refusedRecord(verdict.code);
+      return verdict.ok ? ok(keep) : refusedRecord(verdict.code);
     });
   }
 
@@ -258,13 +255,21 @@ export class OrgRecords {
     const byRef = (ref: string) => this.sql.exec<{ body: string }>('SELECT body FROM endpoints WHERE machine = ?', ref).toArray()[0];
     let row = byRef(machine);
     if (!row) {
-      const head = this.chain.head();
-      const ref =
-        (head ? refOfName(head.state, machine) : undefined) ??
-        this.sql.exec<{ ref: string }>('SELECT ref FROM machine_certs WHERE name_key = ? ORDER BY rowid DESC LIMIT 1', machineNameKey(machine)).toArray()[0]?.ref;
-      if (ref !== undefined) row = byRef(ref);
+      const ref = this.refOf(machine);
+      if (ref !== null) row = byRef(ref);
     }
     return row ? (JSON.parse(row.body) as Signed<EndpointRecord>) : null;
+  }
+
+  /** The ref a machine name stands for: the one `machineNames` gives it in the head, or that of the certificate last
+   * kept under it; null for neither. */
+  refOf(name: string): string | null {
+    const head = this.chain.head();
+    return (
+      (head ? refOfName(head.state, name) : undefined) ??
+      this.sql.exec<{ ref: string }>('SELECT ref FROM machine_certs WHERE name_key = ? ORDER BY rowid DESC LIMIT 1', machineNameKey(name)).toArray()[0]?.ref ??
+      null
+    );
   }
 
   /** The owners a session's listing names, or null when the machine listed none for it. */
@@ -273,19 +278,24 @@ export class OrgRecords {
     return row ? (JSON.parse(row.owners) as MemberId[]) : null;
   }
 
-  /** The owners of a session's listing, whichever machine listed it (the last kept), or null for an unlisted session. */
-  ownersOfSession(session: string): MemberId[] | null {
-    const row = this.sql.exec<{ owners: string }>('SELECT owners FROM listings WHERE session = ? ORDER BY stored DESC LIMIT 1', session).toArray()[0];
-    return row ? (JSON.parse(row.owners) as MemberId[]) : null;
+  /** The ref and owners of the listing the machine named `name` (a log writer's prefix) keeps for a session, or null
+   * when that machine listed none for it: another machine's listing of the same session id never answers. */
+  listingOfNamed(name: string, session: string): { ref: string; owners: MemberId[] } | null {
+    const ref = this.refOf(name);
+    if (ref === null) return null;
+    const owners = this.ownersOf(ref, session);
+    return owners === null ? null : { ref, owners };
   }
 
   // ---- Verification against the head -----------------------------------------------------------------------------
 
   /**
-   * Runs `judge` against the head and the certificates as they stand, and commits what it answers only while neither
-   * moved during its awaits; otherwise it judges again. `409 no-state` before any state.
+   * Runs `judge` against the head and the certificates as they stand, and runs the commit it answers only while
+   * neither moved during its awaits; otherwise it judges again. The commit runs in one synchronous transaction and may
+   * still refuse: a check against what is kept (a listing's revision, say) belongs there, since another submission can
+   * commit during this one's awaits. `409 no-state` before any state.
    */
-  private async underHead<T>(judge: (state: OrgState, certs: Certificates, now: Date) => Promise<Result<() => T>>): Promise<Result<T>> {
+  private async underHead<T>(judge: (state: OrgState, certs: Certificates, now: Date) => Promise<Result<() => Result<T>>>): Promise<Result<T>> {
     for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
       const head = this.chain.head();
       if (head === null) return fail(409, 'no-state', 'the org has no signed state yet');
@@ -293,7 +303,7 @@ export class OrgRecords {
       const judged = await judge(head.state, this.certificates(), new Date());
       if (!judged.ok) return judged;
       if (this.chain.head()?.state.version === head.state.version && (this.storage.kv.get<number>(CERTS_VERSION) ?? 0) === certsVersion) {
-        return ok(this.storage.transactionSync(judged.value));
+        return this.storage.transactionSync(judged.value);
       }
     }
     return fail(503, 'busy', 'the org state moved while this was verified; send it again');

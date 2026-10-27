@@ -101,6 +101,17 @@ describe('a delegated VM', () => {
     expect(await refusal(await hub.fetchAs(ADMIN, '/api/machines/nobody/endpoint'))).toBe('404 no-endpoint');
   });
 
+  it('never lets a lower revision or an older record, submitted at once, overwrite a newer one', async () => {
+    const LATER = '9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d';
+    const listings = await Promise.all(Array.from({ length: 20 }, (_, i) => listing(vm, LATER, 100 - i, fields([A]))));
+    await hub.registryRpcs(listings.map((l) => ({ method: 'storeListing', args: [l] })));
+    const kept = ((await (await hub.fetchAs(ADMIN, '/api/listings')).json()) as Listings).listings.find((l) => l.body.session === LATER);
+    expect(kept?.body.revision).toBe(100);
+    const records = await Promise.all(Array.from({ length: 20 }, (_, i) => endpointRecord(vm, ['100.64.0.7:7443'], new Date(Date.UTC(2026, 9, 28, 0, 0, 20 - i)).toISOString())));
+    await hub.registryRpcs(records.map((r) => ({ method: 'storeEndpoint', args: [r] })));
+    expect(((await (await hub.fetchAs(ADMIN, `/api/machines/${vm.ref}/endpoint`)).json()) as MachineEndpoint).record).toEqual(records[0]);
+  });
+
   it('refuses records signed by another key, forged, or of a machine with no key', async () => {
     const stranger: SigningKey = await generateSigningKey();
     expect(await storeListing(await listing({ ...vm, key: stranger }, SESSION, 9, fields([A])))).toBe('403 unknown-signer');

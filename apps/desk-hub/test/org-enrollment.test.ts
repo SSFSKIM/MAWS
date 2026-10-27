@@ -144,6 +144,42 @@ describe('re-enrolling an active machine in place', () => {
     await old.close();
   });
 
+  it('is refused until the old stream is fenced, and changes nothing until then', async () => {
+    const first = await enrollV2((await code()).text, 'fenced');
+    const old = new MachineClient(hub, 'fenced', first.credentials);
+    await old.connect();
+    const c = await code('fenced');
+    await hub.faultNextRevoke('fenced', 'fail');
+    const refused = await hub.fetchAs(null, '/machine/enroll', { body: { token: c.token, machine: 'fenced' } });
+    expect(await refusal(refused)).toBe('503 fence-failed');
+    // Nothing moved: the old credential still works, its stream still open.
+    expect((await machineFetch(hub.url, first.credentials, '/machine/enrollment')).status).toBe(200);
+    expect(old.isEnded).toBe(false);
+    // Redeemed again, the fence is placed and the re-enrollment goes through.
+    const again = await enrollV2(c.text, undefined, { ref: first.ref });
+    await waitFor(() => (old.isEnded ? true : undefined));
+    expect(await machineNamed('fenced')).toMatchObject({ state: 'active', enrollment: again.enrollment });
+    await old.close();
+  });
+
+  it('that expires before its machine connects refuses the new credential and keeps the machine', async () => {
+    const first = await enrollV2((await code()).text, 'lapsed');
+    const c = await code('lapsed');
+    const redeemed = (await (await hub.fetchAs(null, '/machine/enroll', { body: { token: c.token, machine: 'lapsed' } })).json()) as { client_id: string; client_secret: string };
+    await hub.backdate({ enrollment: { machine: 'lapsed', expires: '2020-01-01T00:00:00.000Z' } });
+    // The new credential's first request finds its enrollment lapsed.
+    const late = await hub.fetchAs({ clientId: redeemed.client_id, clientSecret: redeemed.client_secret }, '/machine/enrollment');
+    expect(late.status).toBeGreaterThanOrEqual(400);
+    expect(await refusal(await hub.fetchAs(null, '/machine/enroll', { body: { token: c.token, machine: 'lapsed' } }))).toBe('410 expired');
+    const after = await hub.fetchAs({ clientId: redeemed.client_id, clientSecret: redeemed.client_secret }, '/machine/enrollment');
+    expect(after.status).toBeGreaterThanOrEqual(400);
+    // Its token is deleted at Cloudflare in time; the machine keeps its name and record, and re-enrolls under its ref.
+    await waitFor(() => (hub.standin.tokens().some((t) => t.client_id === redeemed.client_id) ? undefined : true));
+    expect(await machineNamed('lapsed')).toMatchObject({ state: 'active', client_id: null });
+    const again = await enrollV2((await code('lapsed')).text, undefined, { ref: first.ref });
+    expect(await machineNamed('lapsed')).toMatchObject({ state: 'active', confirmed: expect.any(String) as string, key: { ref: first.ref, pub: again.key.pub } });
+  });
+
   it('is refused once the machine it names is gone', async () => {
     const gone = await enrollV2((await code()).text, 'gone');
     const c = await code('gone');

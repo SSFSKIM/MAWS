@@ -237,10 +237,12 @@ export class Registry extends DeployedRegistry {
       });
     }
     if (url.pathname === REGISTRY_RPC_PATH) {
-      const { method, args } = (await request.json()) as { method: (typeof REGISTRY_RPCS)[number]; args: unknown[] };
-      if (!REGISTRY_RPCS.includes(method)) return new Response(`no RPC ${method}`, { status: 400 });
-      const call = this[method] as (...a: unknown[]) => unknown;
-      return Response.json((await call.apply(this, args)) ?? null);
+      type Call = { method: (typeof REGISTRY_RPCS)[number]; args: unknown[] };
+      const body = (await request.json()) as Call | { concurrent: Call[] };
+      const calls = 'concurrent' in body ? body.concurrent : [body];
+      if (!calls.every((c) => REGISTRY_RPCS.includes(c.method))) return new Response('no such RPC', { status: 400 });
+      const results = await Promise.all(calls.map(async ({ method, args }) => ((await (this[method] as (...a: unknown[]) => unknown).apply(this, args)) ?? null)));
+      return Response.json('concurrent' in body ? results : results[0]);
     }
     if (url.pathname === MISSING_METHOD_PATH) {
       const stub = this.env.PROJECT.get(this.env.PROJECT.idFromName('missing-method')) as unknown as { noSuchMethod(): Promise<void> };
@@ -341,6 +343,10 @@ export class Machine extends DeployedMachine {
   }
 
   async revoke(clientId: string | null): Promise<number> {
+    if (this.ctx.storage.kv.get<string>('revoke-fault') === 'fail') {
+      this.ctx.storage.kv.delete('revoke-fault');
+      throw new Error('a revocation that failed before it was applied (the suite armed it)');
+    }
     const generation = await super.revoke(clientId);
     const fault = this.ctx.storage.kv.get<string>('revoke-fault');
     if (fault) this.ctx.storage.kv.delete('revoke-fault');

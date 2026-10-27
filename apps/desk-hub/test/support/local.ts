@@ -323,9 +323,10 @@ export async function startLocalHub() {
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
     },
-    /** Holds the answer to the machine's next revocation until `releaseRevoke`, or loses it once the revocation is
-     * stored (`lose`), as a slow or a lost RPC answer would (the suites' Worker only). */
-    async faultNextRevoke(machine: string, mode: 'hold' | 'lose') {
+    /** Holds the answer to the machine's next revocation until `releaseRevoke`, loses it once the revocation is stored
+     * (`lose`), as a slow or a lost RPC answer would, or fails it before it is applied (`fail`), as an RPC that never
+     * arrived (the suites' Worker only). */
+    async faultNextRevoke(machine: string, mode: 'hold' | 'lose' | 'fail') {
       await seam('MACHINE', machine, `${REVOKE_FAULT_PATH}?mode=${mode}`);
     },
     /** Whether the answer to a revocation of the machine is held. */
@@ -467,6 +468,10 @@ export async function startLocalHub() {
      * answers its result (the suites' Worker only). */
     async registryRpc<T>(method: 'storeListing' | 'storeEndpoint' | 'notify' | 'ownersOf' | 'push', ...args: unknown[]): Promise<T> {
       return JSON.parse(await seam('REGISTRY', ORG, REGISTRY_RPC_PATH, { method, args })) as T;
+    },
+    /** Calls the Registry's RPC methods all at once, as several objects would, and answers each one's result in order. */
+    async registryRpcs<T>(calls: Array<{ method: 'storeListing' | 'storeEndpoint'; args: unknown[] }>): Promise<T[]> {
+      return JSON.parse(await seam('REGISTRY', ORG, REGISTRY_RPC_PATH, { concurrent: calls })) as T[];
     },
     /** Whether the Registry takes workerd's own refusal of a method a callee lacks for one on older code. */
     async missingMethod(): Promise<{ lacks: boolean; message: string }> {

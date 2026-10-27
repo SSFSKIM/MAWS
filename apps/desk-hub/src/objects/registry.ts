@@ -26,8 +26,9 @@
 // key and ref with its pairing MAC once redeemed, and is shown listed once the head lists that key, apart from its hub
 // confirmation; a machine enrolled through a provisioning key re-issued as a delegation posts its delegation-signed
 // certificate, at the use its redemption counted; machines' listings and endpoint records are kept at their newest. An
-// active machine re-enrolls in place under a token that names it. A push goes to a session's listed owners alone, when
-// a listing names them, to the devices of theirs the head still lists.
+// active machine re-enrolls in place under a token that names it, once its old credential is fenced. A push for a
+// session its own machine listed goes to the listed owners alone, as the v2 notice, to the devices of theirs the head
+// still lists.
 //
 // The org's signed state (RL5; O11 M3) is kept beside all this (`OrgChain`, org-chain.ts): once a genesis is accepted,
 // `members` is the head's projection, and member management is a signed successor, never a route of the hub's own. A
@@ -229,7 +230,16 @@ export class Registry extends DurableObject<Env> {
     const machine = this.sql.exec<MachineRecord>(`SELECT ${MACHINE_COLUMNS} FROM machines WHERE client_id = ?`, identity.clientId).toArray()[0];
     if (!machine) return null;
     if (machine.state === 'active' && machine.confirmed === null) {
-      // A machine re-enrolled in place, on its new credential's first request.
+      // A machine re-enrolled in place, on its new credential's first request, while its enrollment is live: one that
+      // lapsed first is expired here, its credential refused from now (`expire`).
+      const enrollment = this.enrollmentById(machine.enrollment);
+      if (!enrollment || enrollment.state !== 'pending' || lapsed(enrollment)) {
+        if (enrollment && (enrollment.state === 'open' || enrollment.state === 'pending')) {
+          this.expire(enrollment);
+          void this.scheduleAlarm().catch(() => {});
+        }
+        return null;
+      }
       const confirmed = iso(Date.now());
       this.ctx.storage.transactionSync(() => {
         this.sql.exec('UPDATE machines SET confirmed = ? WHERE name = ?', confirmed, machine.name);
@@ -359,30 +369,38 @@ export class Registry extends DurableObject<Env> {
   }
 
   /**
-   * A re-enrollment in place (O11 M4): the token names an active machine, which redeems it under that name. Its record
-   * passes to this enrollment with no credential, in the redemption's synchronous step, so the old credential is refused
-   * at the hub at once; its stream at its `Machine` object is ended; then the new credential is minted, which deletes
-   * the old one at Cloudflare. The machine keeps its name, project and history; its new credential's first request
-   * confirms it (`resolve`), and a v2 machine posts its new key under this enrollment.
+   * A re-enrollment in place (O11 M4): the token names an active machine, which redeems it under that name. The old
+   * credential is fenced at the machine's `Machine` object first (its streams refused and ended), and nothing else moves
+   * until that is done: a fence that fails is `503 fence-failed`, and the redemption is sent again. Then, in one
+   * synchronous step, the record passes to this enrollment with no credential, so the old credential is refused at the
+   * hub as well, and the new one is minted, which deletes the old one at Cloudflare. The machine keeps its name, project
+   * and history; its new credential's first request confirms it (`resolve`), and a v2 machine posts its new key under
+   * this enrollment.
    */
   private async reenroll(enrollment: EnrollmentRow, machine: string, expires: string, org: string): Promise<Result<Redeemed>> {
     if (machineNameKey(machine) !== machineNameKey(enrollment.replaces!)) return fail(409, 'token-used', `this token re-enrolls the machine "${enrollment.replaces}"`);
-    const held = this.sql.exec<MachineRecord>(`SELECT ${MACHINE_COLUMNS} FROM machines WHERE name_key = ?`, machineNameKey(machine)).toArray()[0];
-    if (held?.state !== 'active') return fail(409, 'not-active', `"${enrollment.replaces}" is no longer an active machine; ask for an enrollment of a new one`);
+    const active = () => this.sql.exec<MachineRecord>(`SELECT ${MACHINE_COLUMNS} FROM machines WHERE name_key = ? AND state = 'active'`, machineNameKey(machine)).toArray()[0];
+    const held = active();
+    if (!held) return fail(409, 'not-active', `"${enrollment.replaces}" is no longer an active machine; ask for an enrollment of a new one`);
     const id = enrollment.id;
-    this.ctx.storage.transactionSync(() => {
-      this.sql.exec("UPDATE enrollments SET state = 'pending', machine = ?, expires = ? WHERE id = ?", held.name, expires, id);
-      this.sql.exec('UPDATE machines SET enrollment = ?, client_id = NULL, confirmed = NULL WHERE name = ?', id, held.name);
-    });
+    // A second redemption of this token meanwhile is answered `busy`.
     this.busy.add(id);
     try {
       await this.env.MACHINE.get(this.env.MACHINE.idFromName(`${org}:${held.name}`)).revoke(held.client_id);
     } catch (error) {
-      // The old credential is refused at the hub already, and the mint deletes it at Cloudflare: only its stream lingers.
       console.log(JSON.stringify({ desk: 'registry', event: 'reenroll-fence-failed', machine: held.name, error: described(error) }));
+      return fail(503, 'fence-failed', 'the machine’s old credential could not be fenced yet; redeem this token again');
     } finally {
       this.busy.delete(id);
     }
+    // While its object answered, the machine may have been revoked or re-enrolled, or this token expired.
+    const now = active();
+    const current = this.enrollmentById(id);
+    if (!now || now.enrollment !== held.enrollment || current?.state !== 'open' || lapsed(current)) return fail(409, 'not-active', `"${held.name}" changed while its old credential was fenced; ask for a new enrollment`);
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec("UPDATE enrollments SET state = 'pending', machine = ?, expires = ? WHERE id = ?", held.name, expires, id);
+      this.sql.exec('UPDATE machines SET enrollment = ?, client_id = NULL, confirmed = NULL WHERE name = ?', id, held.name);
+    });
     return this.mint(id, held.name, serviceTokenName(org, held.name), org);
   }
 
@@ -855,17 +873,25 @@ export class Registry extends DurableObject<Env> {
   /**
    * Sends `notice` (DX7's, from a `Project`) to the members not `looking` (those with a browser showing the project),
    * with the project's `name` as the grid shows it, and `waiting` the org's: the pushing project's own count as of the
-   * push (its summary may not have reached here yet) and every other project's as last reported. A session some
-   * machine listed (RL6) goes to its listed owners alone (O11 M4); an unlisted one, as every DX2 machine's is, to every
-   * member. Answers what happened, for the suites and the logs.
+   * push (its summary may not have reached here yet) and every other project's as last reported. Answers what
+   * happened, for the suites and the logs.
+   *
+   * `machine` (O11 M4, additive) names the machine whose event or request it is, as its log writers do. When that
+   * machine keeps a listing of the session (RL6), the push goes to the listed owners alone and carries only the v2
+   * notice (`OwnerNotice`: a question or a permission `waiting`, a message `wrote`). An unlisted session, as every DX2
+   * machine's is, and a push from a `Project` on the code before `machine` was passed, keep today's rule and payload.
    */
-  async push(notice: Omit<PushNotice, 'name' | 'waiting'>, looking: string[], projectWaiting: number): Promise<Pushed> {
+  async push(notice: Omit<PushNotice, 'name' | 'waiting'>, looking: string[], projectWaiting: number, machine?: string): Promise<Pushed> {
+    const members = this.sql.exec<{ id: string }>('SELECT id FROM members').toArray().map((m) => m.id);
+    const listed = typeof machine === 'string' ? this.records.listingOfNamed(machine, notice.session) : null;
+    if (listed !== null) {
+      const owner: OwnerNotice = { project: notice.project, machine: listed.ref, session: notice.session, kind: notice.kind === 'message' ? 'wrote' : 'waiting' };
+      return this.sendPush(members.filter((id) => listed.owners.includes(id) && !looking.includes(id)), owner);
+    }
     const others = this.sql.exec<{ n: number | null }>('SELECT SUM(waiting) AS n FROM summaries WHERE project != ?', notice.project).one().n ?? 0;
     const { v, project, ...rest } = notice;
     const full: PushNotice = { v, project, name: this.project(project)?.name ?? '', ...rest, waiting: others + projectWaiting };
-    const members = this.sql.exec<{ id: string }>('SELECT id FROM members').toArray().map((m) => m.id);
-    const owners = this.records.ownersOfSession(notice.session);
-    return this.sendPush(members.filter((id) => (owners === null || owners.includes(id)) && !looking.includes(id)), full);
+    return this.sendPush(members.filter((id) => !looking.includes(id)), full);
   }
 
   /**
@@ -964,6 +990,15 @@ export class Registry extends DurableObject<Env> {
         this.sql.exec('DELETE FROM machines WHERE name = ?', machine.name);
         this.orphan(machine.token_name);
       }
+      // A re-enrollment in place that lapsed before its machine connected (O11 M4): the machine stays, with its name,
+      // project and history, and no credential; the one minted for it is refused from now and deleted by the sweep.
+      const replaced = this.sql
+        .exec<{ name: string; token_name: string }>("SELECT name, token_name FROM machines WHERE enrollment = ? AND state = 'active' AND confirmed IS NULL", enrollment.id)
+        .toArray()[0];
+      if (replaced) {
+        this.sql.exec('UPDATE machines SET client_id = NULL WHERE name = ?', replaced.name);
+        this.orphan(replaced.token_name);
+      }
       this.sql.exec("UPDATE enrollments SET state = 'expired' WHERE id = ?", enrollment.id);
     });
   }
@@ -1051,7 +1086,8 @@ export class Registry extends DurableObject<Env> {
     const api = serviceTokens(this.config.api);
     for (const { token_name } of orphans) {
       await this.onName(token_name, async () => {
-        const held = this.sql.exec('SELECT 1 FROM machines WHERE token_name = ?', token_name).toArray().length > 0;
+        // A machine without a credential (a re-enrollment that lapsed) holds no token of the name: its tokens go.
+        const held = this.sql.exec('SELECT 1 FROM machines WHERE token_name = ? AND client_id IS NOT NULL', token_name).toArray().length > 0;
         if (!held) {
           try {
             await api.deleteNamed(token_name);
