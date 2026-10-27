@@ -1343,6 +1343,12 @@ export class Registry extends DurableObject<Env> {
     return ref;
   }
 
+  /** Whether a signed record still binds the machine name `name` to `ref` (`machineRefOf`'s binding): asked by the ref's
+   * object as it installs an endpoint the Worker resolved earlier, so a rename accepted meanwhile refuses it. */
+  machineBinds(name: string, ref: string): boolean {
+    return this.records.boundRef(name) === ref;
+  }
+
   /** A relay's object, kept from its first socket on: it is owed every state from then (`submitState`), and the head
    * now, so the members it admits are the head's though no state has been accepted since. */
   private relayed(ref: string): void {

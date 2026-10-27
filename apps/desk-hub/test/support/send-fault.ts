@@ -138,6 +138,13 @@ export const CLAIM_HOLD_PATH = '/__test/claim-hold';
 export const CLAIM_HELD_PATH = '/__test/claim-held';
 /** Where the suites' `Machine` releases a held claim's answer: `released`, or `none` while none is held. */
 export const CLAIM_RELEASE_PATH = '/__test/claim-release';
+/** Where the suites' `Machine` (a ref's) holds the next endpoint upgrade it is handed, before its relay sees it, until it
+ * is released: an upgrade the Worker admitted and forwarded that reaches the ref's object late. */
+export const UPGRADE_HOLD_PATH = '/__test/upgrade-hold';
+/** Where the suites' `Machine` says whether an upgrade is held (`held` or `none`). */
+export const UPGRADE_HELD_PATH = '/__test/upgrade-held';
+/** Where the suites' `Machine` releases a held upgrade: `released`, or `none` while none is held. */
+export const UPGRADE_RELEASE_PATH = '/__test/upgrade-release';
 /** Where the suites' `Machine` (a ref's) is armed to throw from its next `times` calls of a relay method
  * (`{method, times}`), as a call to an object a reset or an overload failed. */
 export const RELAY_FAULT_PATH = '/__test/relay-fault';
