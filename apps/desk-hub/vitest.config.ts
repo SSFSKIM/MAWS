@@ -10,6 +10,8 @@ export default defineConfig({
     environment: 'node',
     include: ['test/**/*.test.ts'],
     globalSetup: ['test/support/bundle.ts'],
+    // The global fetch reaches loopback only: no suite can call Cloudflare or any other host by default.
+    setupFiles: ['test/support/no-network.ts'],
     // Each Worker suite starts a workerd process; under the Mac's load rule that start can take seconds.
     testTimeout: 30_000,
     hookTimeout: 60_000,

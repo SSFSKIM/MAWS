@@ -1,0 +1,8 @@
+{
+  "account": "60c19eec070f0ed2457828c5d88a8b28",
+  "worker": "desk-hub-staging",
+  "host": "desk-hub-staging.opencognita-platform.workers.dev",
+  "ownerEmail": "supremekim17@gmail.com",
+  "sessionDuration": "720h",
+  "org": { "id": "staging-ssfskim", "name": "SSFSKIM staging" }
+}
