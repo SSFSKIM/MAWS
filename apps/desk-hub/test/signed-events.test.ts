@@ -1,8 +1,9 @@
 // The org state a Project verifies v2 log events against (O11 M5; RL8), apart from any Durable Object: a head cached
 // from the Registry, refreshed on each announcement, on an unknown signer at most once a second, and when it is older
 // than a minute at the moment it is needed; and a v2 event never accepted without a state, nor against one known old.
-import { generateSigningKey, NO_CERTIFICATES, signEvent, type OrgState, type SigningKey } from 'org-protocol';
+import { generateSigningKey, NO_CERTIFICATES, signEvent, type Certificates, type OrgState, type SigningKey } from 'org-protocol';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { certify, mintRef, retirement, type DelegationKey } from '../fake-machine/org';
 import { SignedEvents, STATE_MAX_AGE_MS, UNKNOWN_SIGNER_READ_MS } from '../src/objects/signed-events';
 import type { OrgStateView } from '../src/protocol/identity';
 import { genesis, memberId, newDevice, next, revokedDevice, type TestDevice } from './support/org';
@@ -23,6 +24,7 @@ let v1: OrgState;
  */
 class FakeRegistry {
   head: OrgState | null = null;
+  certificates: Certificates = NO_CERTIFICATES;
   reachable = true;
   reads = 0;
   private holding = false;
@@ -30,7 +32,7 @@ class FakeRegistry {
   read = async (): Promise<OrgStateView> => {
     this.reads++;
     if (!this.reachable) throw new Error('the Registry is unreachable');
-    const view = { head: this.head && { state: this.head, sigs: [] }, transitions: [], certificates: NO_CERTIFICATES };
+    const view = { head: this.head && { state: this.head, sigs: [] }, transitions: [], certificates: this.certificates };
     if (this.holding) await new Promise<void>((resolve) => this.released.push(resolve));
     return view;
   };
@@ -233,6 +235,28 @@ describe('a batch', () => {
     clock += UNKNOWN_SIGNER_READ_MS; // d3's unknown signer may read the head again
     const checks = await events.checkAll(CTX, [await words(d2, 'by d2', 1), await words(d3, 'by d3', 2)]);
     expect(checks).toEqual([{ ok: false, reason: 'bad-signature', message: expect.stringContaining('revoked') }, { ok: true }]);
+  });
+
+  it('is judged against one certificate set: an event checked before a read at the same version retired its key is checked again', async () => {
+    const delegation: DelegationKey = { id: 'd'.repeat(32), key: await generateSigningKey() };
+    const vm = { org: ORG, ref: mintRef(delegation.id), name: 'vm-1', key: await generateSigningKey(), use: 1 };
+    registry.head = v1 = await next(v1, (s) =>
+      s.delegations.push({ id: delegation.id, pub: delegation.key.pub, prefix: 'vm-', expires: '2027-10-27T00:00:00.000Z', maxUses: 10, offlineRevokeS: 0, owners: 'org' }),
+    );
+    registry.certificates = { certs: [await certify(vm, delegation)], retirements: [] };
+    const said = async (seq: number) => {
+      const at = new Date(clock).toISOString();
+      const draft = { ts: at, created: at, writer: `vm-1/${PROJECT}`, seq, kind: 'say', from: 'vm-1', to: '*', text: `say ${seq}` };
+      return signEvent(CTX, draft, vm.key.privateKey, vm.key.pub);
+    };
+    expect(await events.check(CTX, await said(1))).toEqual({ ok: true }); // the certificate held, not yet retired
+    // Retired at a moment before the next event's signed time, with the state's version unchanged.
+    const cutoff = new Date(clock).toISOString();
+    clock += UNKNOWN_SIGNER_READ_MS;
+    registry.certificates = { ...registry.certificates, retirements: [await retirement(ORG, vm.key, delegation, cutoff)] };
+    const checks = await events.checkAll(CTX, [await said(2), await words(await newDevice('d3'), 'by d3', 3)]);
+    expect(checks[0]).toEqual({ ok: false, reason: 'bad-signature', message: expect.stringContaining('expired') });
+    expect(checks[1]).toMatchObject({ ok: false, reason: 'bad-signature', message: expect.stringContaining('unknown-signer') });
   });
 
   it('checked while an announcement outruns its head is checked again against the announced one', async () => {

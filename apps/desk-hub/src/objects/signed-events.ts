@@ -14,8 +14,9 @@
 // `state-unavailable`, and its sender retries. A v2 event is never stored unchecked.
 //
 // A batch (one upload) is judged against one head: once every event is checked, any checked against a head older than
-// the newest held or announced is checked again, so no two events of a batch are judged by states a revocation
-// separates.
+// the newest held or announced, or against the newest version with other certificates than the newest read brought
+// (a retirement or a certificate kept since, which moves no version), is checked again, so no two events of a batch
+// are judged by states or certificate sets a revocation or a retirement separates.
 import { verifyEvent, type Certificates, type EventContext, type LogEventV2, type OrgState, type Verdict } from 'org-protocol';
 import type { OrgStateView } from '../protocol/identity';
 
@@ -31,11 +32,14 @@ const BATCH_ROUNDS = 3;
 /** A v2 event's check: accepted, or refused with the reason and the message the uploader's refusal carries. */
 export type SignatureCheck = { ok: true } | { ok: false; reason: 'bad-signature' | 'state-unavailable'; message: string };
 
-/** The head as read: its state (null before the org's first), its certificates, and when the read was sent. */
-type Held = { state: OrgState | null; certificates: Certificates; version: number; read: number };
+/**
+ * The head as read: its state (null before the org's first), its certificates (and `certs`, them as JSON, to tell two
+ * reads of one version apart), and when the read was sent.
+ */
+type Held = { state: OrgState | null; certificates: Certificates; certs: string; version: number; read: number };
 
-/** A check, with the version of the head it was judged against (none for `state-unavailable`). */
-type Judged = { check: SignatureCheck; version?: number };
+/** A check, with the head it was judged against (none for `state-unavailable`). */
+type Judged = { check: SignatureCheck; against?: Held };
 
 /** The refusal of a v2 event no usable org state could check. */
 export const STATE_UNAVAILABLE: SignatureCheck = { ok: false, reason: 'state-unavailable', message: 'the org state could not be read to check the v2 signature; send it again' };
@@ -77,10 +81,17 @@ export class SignedEvents {
         break;
       }
       for (const i of pending) judged[i] = await this.judge(ctx, events[i]);
-      const newest = Math.max(this.announced, this.held?.version ?? 0);
-      pending = judged.flatMap((j, i) => (j.version !== undefined && j.version < newest ? [i] : []));
+      pending = judged.flatMap((j, i) => (j.against !== undefined && this.outrun(j.against) ? [i] : []));
     }
     return judged.map((j) => j.check);
+  }
+
+  /** Whether a check against `against` may not stand: its version is older than the newest held or announced, or the
+   * newest read of that same version brought other certificates. */
+  private outrun(against: Held): boolean {
+    const held = this.held;
+    if (against.version < Math.max(this.announced, held?.version ?? 0)) return true;
+    return held !== undefined && held !== against && held.version === against.version && held.certs !== against.certs;
   }
 
   private async judge(ctx: EventContext, event: LogEventV2): Promise<Judged> {
@@ -93,8 +104,8 @@ export class SignedEvents {
       if (!fresher) return { check: STATE_UNAVAILABLE };
       [held, verdict] = [fresher, await this.verify(ctx, fresher, event)];
     }
-    if (verdict.ok) return { check: verdict, version: held.version };
-    return { check: { ok: false, reason: 'bad-signature', message: `the v2 signature does not verify against the org state (${verdict.code})` }, version: held.version };
+    if (verdict.ok) return { check: verdict, against: held };
+    return { check: { ok: false, reason: 'bad-signature', message: `the v2 signature does not verify against the org state (${verdict.code})` }, against: held };
   }
 
   private verify(ctx: EventContext, held: Held, event: LogEventV2): Promise<Verdict> {
@@ -131,7 +142,7 @@ export class SignedEvents {
     const reading = (async () => {
       const view = await bounded(this.readHead(), this.readTimeoutMs());
       const state = view.head?.state ?? null;
-      const held: Held = { state, certificates: view.certificates, version: state?.version ?? 0, read };
+      const held: Held = { state, certificates: view.certificates, certs: JSON.stringify(view.certificates), version: state?.version ?? 0, read };
       if (!this.held || held.version >= this.held.version) this.held = held;
       return held;
     })();

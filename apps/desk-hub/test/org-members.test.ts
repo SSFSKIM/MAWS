@@ -5,7 +5,7 @@
 import { generateSigningKey, type OrgState, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { PendingDevice } from '../src/protocol/identity';
-import { waitFor } from './support/clients';
+import { enroll, MachineClient, waitFor } from './support/clients';
 import { ADMIN, ORG, startLocalHub, credentials, type LocalHub, type Who } from './support/local';
 import { endorsed, fakeMac, genesis, memberId, newDevice, next, signedBy, type TestDevice } from './support/org';
 
@@ -108,6 +108,21 @@ describe('a member', () => {
     await waitFor(async () => ((await hub.stateFault(PROJECT)).announced === head.state.version ? true : undefined));
     expect(await hub.socketUpgrade({ project: PROJECT }, F)).toBe(101);
     await accept(await next(head, without(F)), a1);
+  });
+
+  it('removed before a project is first registered is refused there, though no state is accepted after it', async () => {
+    const H = memberId();
+    await accept(await next(head, (s) => s.members.push({ id: H, email: 'h@example.com', role: 'member', devices: [] })), a1);
+    await accept(await next(head, without(H)), a1);
+    // The project is registered after the removal was announced to every project then held.
+    const fresh = '1c2d3e4f-0000-4000-8000-000000000000';
+    const machine = new MachineClient(hub, 'registers', await enroll(hub, ADMIN, 'registers'));
+    await machine.connect();
+    await machine.sync(fresh);
+    await waitFor(async () => ((await hub.stateFault(fresh)).announced === head.state.version ? true : undefined));
+    expect(await hub.socketUpgrade({ project: fresh }, H)).toBe(403);
+    expect(await hub.socketUpgrade({ project: fresh }, A)).toBe(101);
+    await machine.close();
   });
 
   it('is projected with their devices by member and class, and machines by ref', async () => {
