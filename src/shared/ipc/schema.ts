@@ -59,6 +59,7 @@ import * as connectors from './schema/connectors'; // P3-H H3b
 import * as delivery from './schema/delivery'; // P4-B5
 import * as customization from './schema/customization'; // UX2-K
 import * as catalog from './schema/catalog'; // P4-AGG M2
+import * as daemon from './schema/daemon'; // P5 O2 M5
 export { CustomizationInventorySchema, type CustomizationInventory, type CustomizationSkill, type CustomizationServer, type CustomizationEndpoint } from './schema/customization';
 
 export {
@@ -158,6 +159,7 @@ export const commands = {
   ...delivery.commands, // P4-B5
   ...customization.commands, // UX2-K
   ...catalog.commands, // P4-AGG M2
+  ...daemon.commands, // P5 O2 M5
 } as const satisfies Record<`${Namespace}.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -205,6 +207,7 @@ export const events = {
   ...delivery.events, // P4-B5
   ...customization.events, // UX2-K
   ...catalog.events, // P4-AGG M2
+  ...daemon.events, // P5 O2 M5
 } as const satisfies Record<`${Namespace}.${string}`, z.ZodType>;
 
 export type CommandName = keyof typeof commands;
