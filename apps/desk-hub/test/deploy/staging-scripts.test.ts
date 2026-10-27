@@ -1,7 +1,7 @@
 // The staging runner (deploy/staging-run.sh, O11 M8): what it hands the desk-web check, and how it hands curl the
 // owner's token. Offline: the refusals below come before any token is read or any request made.
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -28,6 +28,32 @@ describe('the desk-web step', () => {
       expect(run.stdout + run.stderr).toMatch(/desk-web takes no option/);
     }
     expect(readdirSync(dir)).toEqual([]);
+  });
+
+  // The check lists in DESK_STAGING_SCAN what it saw besides the token (the enrollment code, its token, the org key); the
+  // runner's search afterwards, run here on its own over a run's files, counts each file holding any of them.
+  it.skipIf(!zsh)('counts every file holding the token or anything the check listed, and nothing else', () => {
+    const text = scripts[0].text;
+    expect(text.split('\n').find((l) => l.includes('playwright test'))).toMatch(/ DESK_STAGING_SCAN=\$SCAN /);
+    const search = text.split('\n').find((l) => l.trimStart().startsWith('holding='))!.trim();
+    // A run's files: its log, its screenshots directory holding a screenshot and `files`; and the check's list, `scan`.
+    const holding = (scan: string, files: Record<string, string>) => {
+      const dir = mkdtempSync(join(tmpdir(), 'staging-scan-'));
+      const shots = join(dir, 'shots');
+      mkdirSync(join(shots, 'playwright'), { recursive: true });
+      writeFileSync(join(dir, 'run.log'), 'desk-web check exit 1\n');
+      writeFileSync(join(shots, '1-grid-project.png'), 'pixels');
+      writeFileSync(join(dir, 'run.scan'), scan);
+      for (const [name, body] of Object.entries(files)) writeFileSync(join(shots, name), body);
+      const run = spawnSync('zsh', ['-c', `T=eyJtoken.synthetic SCAN=${dir}/run.scan shots=${shots} LOG=${dir}/run.log; ${search}; print -r -- $holding`], { encoding: 'utf8' });
+      return run.stdout.trim();
+    };
+    const listed = 'smns-enroll-v1.code\nonce-token\norg-key\n';
+    // An empty line in the list would match every file: none counted here.
+    expect(holding(`${listed}\n`, {})).toBe('0');
+    expect(holding(listed, { 'playwright/error-context.md': '- text: smns-enroll-v1.code' })).toBe('1');
+    expect(holding(listed, { 'a.txt': 'once-token', 'b.txt': 'key org-key', 'c.txt': 'nothing' })).toBe('2');
+    expect(holding('', { 'cookie.txt': 'eyJtoken.synthetic' })).toBe('1');
   });
 
   it('runs Playwright with an environment of its own choosing, no Playwright variable passed through', () => {

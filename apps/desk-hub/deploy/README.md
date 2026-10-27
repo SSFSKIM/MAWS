@@ -332,7 +332,10 @@ production's Worker or host, or a preview alias of it (`<alias>-desk-hub.…`), 
     key up, enrolls M4's fake machine from the Machines dialog, and screenshots the grid, the session listed, its
     permission card, the card answered from the page and the decision in the group chat, into `desk-web-<n>/`. The
     browser holds the owner's Access token as its `CF_Authorization` cookie for the staging host; nothing records a
-    trace, video or HAR, and afterwards every file the step wrote is searched for the token, which must be in none.
+    trace, video or HAR, nor the failure context (`error-context.md`, with a snapshot of the page) Playwright writes
+    for a failed test whatever its options say (`e2e-staging/unrecorded.ts`). Afterwards every file the step wrote is
+    searched for the token and for what the check lists in `desk-web-<n>.scan` (the enrollment code it read from the
+    Machines dialog, its one-time token and the org key), which must be in none; the list is removed with the run.
     The step takes no option to pass on, and Playwright runs in an environment the script builds (`env -i`, no
     `PWDEBUG`, `PW_*` or `PLAYWRIGHT_*`); `playwright.staging.config.ts` itself refuses any option but naming it and any
     such variable (`e2e-staging/recording.ts`), so nothing can turn recording back on.

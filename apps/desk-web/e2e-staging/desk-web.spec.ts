@@ -6,22 +6,28 @@
 // Access admits the browser by the owner's app token, which cloudflared already holds for staging: read here at run time
 // (`cloudflared access token`), handed to the browser as its `CF_Authorization` cookie for the staging host alone and to
 // this process's own requests as `cf-access-token`. It is never printed, logged or passed as an argument, and the run
-// records no trace, video or HAR: the screenshots carry pixels only.
+// records no trace, video, HAR or failure context (`test` is e2e-staging/unrecorded.ts's): the screenshots carry pixels
+// only. The enrollment code, which holds the org key, is listed in DESK_STAGING_SCAN, the file the runner searches every
+// file of the run for afterwards, as it does for the token.
 //
 // The machine is M4's fake machine, enrolled the way the web app enrolls one (the Machines dialog's code, which holds
 // the org key the browser set up), replaying the committed recording with its decisions left to the web.
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { appendFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 import { FakeMachine, loadRecording, TWO_SUBAGENTS, type Step } from 'desk-hub/fake-machine';
+import { decodeEnrollmentCode } from 'desk-hub/protocol';
 import { SUITE_PASSPHRASE, enrollInBrowser, newPassphrase, openKeyDialog } from '../e2e-hub/org';
+import { test } from './unrecorded';
 
 const STAGING_HOST = 'desk-hub-staging.opencognita-platform.workers.dev';
 const PRODUCTION_HOST = 'desk-hub.opencognita-platform.workers.dev';
 const HUB = `https://${STAGING_HOST}`;
 const org = process.env.DESK_STAGING_TEST_ORG ?? '';
 const shots = process.env.DESK_STAGING_SHOTS ?? '';
+const scan = process.env.DESK_STAGING_SCAN ?? '';
 
 /** The owner's staging Access token, as cloudflared holds it; read here, never shown. */
 function accessToken(): string {
@@ -38,6 +44,7 @@ test('acceptance 8: desk-web lists a fake machine’s session and answers its pe
   expect(HUB).not.toContain(PRODUCTION_HOST);
   expect(org, 'DESK_STAGING_TEST_ORG: the throwaway org staging serves').toMatch(/^staging-probe-[a-z0-9-]+$/);
   expect(shots, 'DESK_STAGING_SHOTS: where the screenshots go').not.toBe('');
+  expect(scan, 'DESK_STAGING_SCAN: the file listing what the runner searches the run’s files for').not.toBe('');
   const token = accessToken();
   const api = (path: string, init: RequestInit = {}) => fetch(`${HUB}${path}`, { ...init, headers: { ...(init.headers as Record<string, string>), 'cf-access-token': token } });
   const me = (await (await api('/api/me')).json()) as { org: { id: string }; member: { id: string } };
@@ -61,6 +68,9 @@ test('acceptance 8: desk-web lists a fake machine’s session and answers its pe
     const name = `web-${randomUUID().slice(0, 6)}`;
     enrolled.push(name);
     const code = await enrollInBrowser(page, name);
+    // The code, its one-time token and the org key, one a line: none may be in any file the run leaves.
+    const { token: once, key } = decodeEnrollmentCode(code);
+    appendFileSync(scan, `${code}\n${once}\n${key}\n`, { mode: 0o600 });
     const redeemed = await FakeMachine.redeem(code);
     const rec = loadRecording(TWO_SUBAGENTS, { session: randomUUID() });
     const project = randomUUID();
