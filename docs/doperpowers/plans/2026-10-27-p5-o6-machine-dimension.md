@@ -23,7 +23,7 @@ After O6:
 - **Main reaches every machine through one connection manager.** Each machine has a link. The local machine's is in-process (main's own services). Another profile's machine on the same Mac is reached over a same-uid socket speaking O1's protocol 3. The links O7 and O10 add later (RL2 channels) plug into the same manager.
 - **The stores reconcile per machine.** A machine's snapshot replaces only that machine's records, and its departure greys only its rows.
 - **The layout keeps the machine, and so do drafts.** The layout carries the machine of every tab and panel key, and a layout from before O6 migrates once. Drafts stay on their session's machine, addressed through it.
-- **The sidebar groups by org project.** The same repository checked out on two machines is one row holding both machines' sessions, each session with its machine chip. A folder the owner added stays a row of its own. Sessions in a folder nobody opened sit under their machine's row. An offline machine's rows grey.
+- **The sidebar groups by org project.** The same repository checked out on two machines is one row holding both machines' sessions, each of another machine's sessions with its machine chip. A folder the owner added stays a row of its own. Sessions in a folder nobody opened sit under their machine's row. An offline machine's rows grey.
 
 **How to see it working.** Two MAWS profiles on one Mac stand in for two machines. A second profile's app serves its machine services over a socket, and the first profile's app connects to it. The first app's sidebar then shows both profiles' sessions, grouped by org project, each with its machine. Quit the second app and only its rows grey. Relaunch the first and the second's open tab and draft are still there. The commands are in Concrete Steps.
 
@@ -61,7 +61,7 @@ Each item is checked by the command Concrete Steps names. Paths are repository-r
    - It writes `main.tabs` back at version 3 with addresses.
    - A second launch reads version 3 and rewrites nothing.
 5. **Two machines, one sidebar.** A runs with B linked (M3). A's sidebar shows the following:
-   - One row for the repository both profiles have checked out. It holds A's and B's sessions, each with its machine chip.
+   - One row for the repository both profiles have checked out. It holds A's and B's sessions; B's carry B's machine chip, and A's carry none (T1).
    - A row of its own for a folder A added that is not a repository.
    - B's machine row, holding a session B ran in a folder nobody added.
    - Hovering B's session shows B's name.
@@ -124,7 +124,7 @@ Each item is checked by the command Concrete Steps names. Paths are repository-r
   - Connectors, the library, delivery and the catalog across machines (O4).
   - The machine's enrollment as an input to the org-project rule (O10; O6 passes none).
 - **The engine is never patched** (D-1).
-- **Light theme, tokens only** (charter X7). Every interface choice listed under "Taste decisions for the owner" (M5) stays the owner's. O6 builds each in the provisional form stated there, and nothing more.
+- **Light theme, tokens only** (charter X7). The interface choices under M5's "Taste decisions" are the owner's answers (P5 Decision Log 28). O6 builds each as answered, and nothing more.
 - **Machines and gates.** Gates run on GitHub Actions through `scripts/ci-gate.sh <worktree>`, prefixed `cd /tmp &&` in the shell.
   - Class 1a: `--gates static,unit,probes --class1a pool`.
   - Mac e2e: `--runner macos --lane hosted` for the groups in `.github/workflows/gate.yml`'s `HOSTED_MAC_E2E`.
@@ -602,7 +602,7 @@ The order is M1, M2, M3, M4, M5, M6.
 - **Each machine derives the org project of every checkout** by sminos's rule, extended as OX3 now says, and reports it on `ProjectRecord.org`. `machine.identity` reports the machine's own project.
 - **The renderer assembles `OrgProject`s from every machine's checkouts.**
 - **The sidebar groups by org project:**
-  - session rows carry machine chips;
+  - other machines' session rows carry machine chips (T1);
   - an offline machine's rows grey;
   - each machine has its machine project row in place of "Other sessions".
 - **The layout's project keys refile to org project keys.**
@@ -693,7 +693,7 @@ The order is M1, M2, M3, M4, M5, M6.
   - `selectSessionsOfOrg(key)` is the union of sessions across machines, filed by the rule above.
   - Ordering, caps, "Show more", lineage nesting, search and sort are today's `projectList` and `projectSessions` over the union.
   - A machine project row sorts after the org projects. With several machine rows, the local machine's comes first, then the rest by name.
-- **The Projects view** lists every machine's checkouts, in its three groups as today. Each carries its machine chip, and its actions route by the project's address.
+- **The Projects view** lists every machine's checkouts, in its three groups as today. Each of another machine carries its machine chip (T1), and its actions route by the project's address.
 - **Offline.** A machine's rows are greyed when `useMachines` says it is not `up`. A greyed row:
   - still opens its tab, whose content says the machine is offline;
   - says "machine offline" (P5 §8);
