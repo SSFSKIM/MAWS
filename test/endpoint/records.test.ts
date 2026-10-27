@@ -152,7 +152,7 @@ describe('listings', () => {
     expect(await verifyListing(w.head.state, resigned, NO_CERTIFICATES, new Date())).toEqual({ ok: true });
   });
 
-  it('keeps its revisions rising past a lost file (the clock’s milliseconds), and forgets a session that left', async () => {
+  it('keeps its revisions rising past a lost file (the clock’s milliseconds)', async () => {
     const w = await world();
     const listings = new Listings(w.ctx);
     await listings.report(report);
@@ -161,9 +161,89 @@ describe('listings', () => {
     w.tick(5);
     await listings.report({ ...report, state: 'idle' });
     expect(w.file.s1.revision).toBeGreaterThan(first);
+  });
+});
+
+describe('withdrawing a listing (RL6’s `gone`; the remote layer’s Decision Log 27)', () => {
+  it('signs a last `gone` revision when a listed session leaves or goes private, with every field but its lane empty, and lists it again higher', async () => {
+    const w = await world();
+    const listings = new Listings(w.ctx);
+    await listings.report(report);
+    const live = w.file.s1.record;
+    w.tick();
     await listings.gone('s1');
-    expect(w.file).toEqual({});
+    const left = w.listings().at(-1)!.record;
+    expect(left.body).toMatchObject({ org: 'org-test', machine: w.ref, session: 's1', fields: { owners: [], project: null, lane: 'A', state: 'gone', title: '' } });
+    expect(left.body.revision).toBeGreaterThan(live.body.revision);
+    expect(await verifyListing(w.head.state, left, NO_CERTIFICATES, new Date())).toEqual({ ok: true });
+    // listings.json keeps it like any other record, and no notify may name the session.
+    expect(w.file.s1.record).toEqual(left);
     expect(listings.listed('s1')).toBeNull();
+    await listings.gone('s1');
+    expect(w.listings()).toHaveLength(2);
+
+    // Reported again: a new, higher revision.
+    w.tick();
+    await listings.report(report);
+    const back = w.listings().at(-1)!.record;
+    expect(back.body.fields.state).toBe('working');
+    expect(back.body.revision).toBeGreaterThan(left.body.revision);
+
+    // Gone private: withdrawn, once.
+    w.tick();
+    await listings.report({ ...report, access: 'private' });
+    await listings.report({ ...report, access: 'private', title: 'still private' });
+    const hidden = w.listings().slice(3);
+    expect(hidden.map((l) => l.record.body.fields)).toEqual([{ owners: [], project: null, lane: 'A', state: 'gone', title: '' }]);
+    expect(hidden[0].record.body.revision).toBeGreaterThan(back.body.revision);
+
+    // A welcome sends the tombstone again as it holds it.
+    await listings.welcome();
+    expect(w.listings().at(-1)!.record).toBe(w.file.s1.record);
+    expect(w.file.s1.record.body.fields.state).toBe('gone');
+  });
+
+  it('signs nothing for a session it never listed', async () => {
+    const w = await world();
+    const listings = new Listings(w.ctx);
+    await listings.report({ ...report, access: 'private' });
+    await listings.gone('s1');
+    await listings.gone('never-seen');
+    expect(w.sent).toEqual([]);
+  });
+
+  it('owes a withdrawal it can’t sign yet (no head) until the next refresh, and signs a tombstone made under an old key again at a welcome', async () => {
+    const w = await world();
+    let ready = true;
+    const listings = new Listings({ ...w.ctx, head: () => (ready ? w.ctx.head() : null) });
+    await listings.report(report);
+    ready = false;
+    await listings.gone('s1');
+    await listings.welcome();
+    expect(w.listings()).toHaveLength(1);
+    ready = true;
+    await listings.refresh();
+    const left = w.listings().at(-1)!.record;
+    expect(left.body.fields.state).toBe('gone');
+    await listings.refresh();
+    expect(w.listings()).toHaveLength(2);
+
+    await w.rekey();
+    w.tick();
+    await listings.welcome();
+    const resigned = w.listings().at(-1)!.record;
+    expect(resigned.sig.kid).not.toBe(left.sig.kid);
+    expect(resigned.body.fields).toEqual(left.body.fields);
+    expect(resigned.body.revision).toBeGreaterThan(left.body.revision);
+  });
+
+  it('tells the hub before the tombstone that a withdrawn session holds nothing pending', async () => {
+    const w = await world();
+    const order: string[] = [];
+    const listings = new Listings({ ...w.ctx, withdrawing: (session, project) => void order.push(`withdrawing ${session} in ${project}`), send: (frame) => (order.push(frame.t), w.ctx.send(frame)) });
+    await listings.report(report);
+    await listings.gone('s1');
+    expect(order).toEqual(['listing', 'withdrawing s1 in p1', 'listing']);
   });
 });
 
@@ -227,6 +307,17 @@ describe('notify', () => {
     listed.add('private');
     notifier.listed('private');
     expect(sent).toHaveLength(2);
+  });
+
+  it('settles a withdrawn session’s count at the hub, then tells it nothing more', () => {
+    const { notifier, sent, listed } = setup();
+    notifier.pendingSet('p1', [{ session: 's1' }, { session: 's1' }]);
+    // By the time it is withdrawn the session no longer qualifies (it left, or is private): its project comes from its listing.
+    listed.delete('s1');
+    notifier.withdrawn('s1', 'p1');
+    notifier.withdrawn('s1', 'p1');
+    notifier.pendingSet('p1', [{ session: 's1' }]);
+    expect(sent).toEqual([notify('s1', 'waiting', 2), notify('s1', 'settled', 0)]);
   });
 
   it('tells at the welcome what changed while no connection was up, as one change', () => {

@@ -3,7 +3,8 @@
 // heartbeat keeping its lease; a forced cut (its object evicted with its sockets) and a redeploy each reconnected under a
 // higher generation; `stale-generation` retried at once; `not-listed` after a rename stopping it (`re-enroll`); `503`
 // retried; a second replacement within a minute stopping it (`replaced`); its endpoint record and a listing stored and
-// served (`GET /api/listings` as a member); a notify pushed to the listing's owner and to no other member.
+// served (`GET /api/listings` as a member), and withdrawn when its session goes private; a notify pushed to the
+// listing's owner and to no other member.
 import * as fs from 'node:fs';
 import { join } from 'node:path';
 import { base64urlEncode, generateSigningKey, keyId, RL1_PROTOCOL, verifyEndpointRecord, verifyListing, NO_CERTIFICATES, type SignedOrgState, type SigningKey, type OrgState } from 'org-protocol';
@@ -236,6 +237,22 @@ describe('the machine’s records', () => {
       return now !== undefined && now.body.revision > listing.body.revision ? now : null;
     }, 'the re-issued listing');
     expect(reissued.body.fields.owners).toEqual([A, B]);
+
+    // Made private, it is withdrawn (RL6's `gone`): the hub keeps the tombstone and serves the session no more; listed
+    // again, it is served at a higher revision.
+    await listed.endpoint.listings.report({ session: shown, project, lane: 'A', state: 'working', title: 'Fix the build', owners: ['@machine'], access: 'private' });
+    await until(async () => {
+      const body = (await (await hub.fetchAs(ADMIN, '/api/listings')).json()) as HubListings;
+      return body.listings.some((l) => l.body.session === shown) ? null : true;
+    }, 'the withdrawn listing left out');
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))[shown].record.body.fields.state).toBe('gone');
+    await listed.endpoint.listings.report({ session: shown, project, lane: 'A', state: 'idle', title: 'Fix the build', owners: ['@machine'] });
+    const back = await until(async () => {
+      const body = (await (await hub.fetchAs(ADMIN, '/api/listings')).json()) as HubListings;
+      return body.listings.find((l) => l.body.session === shown) ?? null;
+    }, 'the session listed again');
+    expect(back.body.fields.state).toBe('idle');
+    expect(back.body.revision).toBeGreaterThan(reissued.body.revision);
   });
 
   it('pushes a notify to the devices of the listing’s owner, and to no other member’s', async () => {

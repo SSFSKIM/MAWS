@@ -548,9 +548,10 @@ export type CertConflict = { ref: string; name: string; keyId: string | null; ho
  * endpoint record at its newest `issued` (`409 stale-endpoint` for an older one); a byte-identical resend is taken as
  * before. A record whose machine has no key in the head or a live certificate is refused `403 not-listed`, one signed
  * by another key `403 unknown-signer` (or `revoked`), one whose signature fails `403 bad-signature`, a contested ref's
- * `409 contested`. RL1 carries them up (M6: `Registry.storeListing`, `Registry.storeEndpoint`). `GET
- * /api/listings[?project=<id>]` (a member) answers the stored listings, a project's alone when named, with their
- * machines' endpoint records; `GET /api/machines/<ref or name>/endpoint` one machine's record (`404 no-endpoint`).
+ * `409 contested`. RL1 carries them up (M6: `Registry.storeListing`, `Registry.storeEndpoint`). A withdrawn listing
+ * (`LISTING_GONE`, RL6) is stored like any other, so its revision still refuses an earlier one. `GET
+ * /api/listings[?project=<id>]` (a member) answers the stored listings but the withdrawn, a project's alone when named,
+ * with their machines' endpoint records; `GET /api/machines/<ref or name>/endpoint` one machine's record (`404 no-endpoint`).
  */
 export const LISTINGS_PATH = '/api/listings';
 export const MACHINE_ENDPOINT_PATH = /^\/api\/machines\/([^/]+)\/endpoint$/;

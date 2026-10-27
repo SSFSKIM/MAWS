@@ -14,11 +14,18 @@
 // revision is passed. `listings.json` keeps each listing whole, and every welcome sends them again byte for byte: the
 // hub takes a resend of what it holds, and a listing sent while no connection was up reaches it then.
 //
+// A listed session that leaves, or becomes `private`, is withdrawn (RL6; the remote layer's Decision Log 27): one last
+// revision whose `state` is `LISTING_GONE`, with `owners`, `project` and `title` empty, kept and resent like any other,
+// so the hub's revision rule still refuses a replay of an earlier one and every app that cached the session drops it.
+// Reported again, it is listed at a higher revision. A session never listed, or withdrawn already, signs nothing.
+//
 // The endpoint record (`{org, machine, addresses, issued}`) names the machine's direct carriers (M4's listener on the
 // tailnet); an empty list is a relay-only machine. It is signed at each welcome and whenever the addresses change.
 import { createHash } from 'node:crypto';
 import {
+  isListingGone,
   isMemberId,
+  LISTING_GONE,
   machineOwners,
   ownerMembers,
   signRecord,
@@ -65,6 +72,9 @@ export type RecordsContext = {
   log(line: string): void;
   /** A session's listing was just signed and sent: a notify held for its listing may follow it now. */
   signed?(session: string): void;
+  /** A listed session of `project` is about to be withdrawn: what the hub was told of it (its pending count) is settled
+   * first, while the hub still holds its owners. */
+  withdrawing?(session: string, project: string): void;
 };
 
 /** The member ids `owners` names: `@machine` as the machine's owners in `state` (none for a machine it doesn't list). */
@@ -81,6 +91,8 @@ export async function resolveOwners(owners: readonly string[], state: OrgState, 
 export class Listings {
   readonly #ctx: RecordsContext;
   readonly #reports = new Map<string, SessionReport>();
+  /** Sessions that left whose withdrawal is still to be signed (no key or head when they left). */
+  readonly #leaving = new Set<string>();
   #queue: Promise<unknown> = Promise.resolve();
 
   constructor(ctx: RecordsContext) {
@@ -90,35 +102,38 @@ export class Listings {
   /** A session as it stands now: listed, or listed again, when it qualifies and a field changed. */
   report(report: SessionReport): Promise<void> {
     this.#reports.set(report.session, report);
+    this.#leaving.delete(report.session);
     return this.#serial(() => this.#evaluate(report.session));
   }
 
-  /** A session that left the machine: no longer listed or sent again. */
+  /** A session that left the machine: withdrawn, if it is listed. */
   gone(session: string): Promise<void> {
     this.#reports.delete(session);
-    return this.#serial(async () => {
-      const file = this.#ctx.store.read();
-      if (!(session in file)) return;
-      const rest = { ...file };
-      delete rest[session];
-      this.#ctx.store.write(rest);
-    });
+    this.#leaving.add(session);
+    return this.#serial(() => this.#withdraw(session));
   }
 
-  /** Every reported session judged again (a new head, a project opened). */
+  /** Every reported session judged again (a new head, a project opened), and every withdrawal still owed signed. */
   refresh(): Promise<void> {
     return this.#serial(async () => {
       for (const session of this.#reports.keys()) await this.#evaluate(session);
+      for (const session of this.#leaving) await this.#withdraw(session);
     });
   }
 
-  /** A connection was welcomed: every listing held goes again, signed anew where the key or the org it was made under changed. */
+  /** A connection was welcomed: every listing held goes again, signed anew where the key or the org it was made under
+   * changed, a withdrawal included; a withdrawal still owed is signed. */
   welcome(): Promise<void> {
     return this.#serial(async () => {
       for (const [session, entry] of Object.entries(this.#ctx.store.read())) {
         const report = this.#reports.get(session);
-        if (report !== undefined && !this.#qualifies(report)) continue;
-        if (this.#current(entry.record)) this.#ctx.send({ t: 'listing', record: entry.record });
+        if (isListingGone(entry.record.body)) {
+          if (this.#current(entry.record)) this.#ctx.send({ t: 'listing', record: entry.record });
+          else if (report === undefined || !this.#qualifies(report)) await this.#sign(session, entry.record.body.fields);
+          else await this.#evaluate(session);
+        } else if (this.#leaving.has(session) || report?.access === 'private') await this.#withdraw(session);
+        else if (report !== undefined && !this.#qualifies(report)) continue;
+        else if (this.#current(entry.record)) this.#ctx.send({ t: 'listing', record: entry.record });
         // Made under another key or org: signed again from its report; one not reported yet waits for sminos's.
         else if (report !== undefined) await this.#evaluate(session);
       }
@@ -128,7 +143,8 @@ export class Listings {
   /** The project of a session listed now, or null: what `notify` may name (a session the hub holds no listing of pushes to no one). */
   listed(session: string): { project: string } | null {
     const report = this.#reports.get(session);
-    if (report === undefined || !this.#qualifies(report) || !(session in this.#ctx.store.read())) return null;
+    const held = this.#ctx.store.read()[session];
+    if (report === undefined || !this.#qualifies(report) || held === undefined || isListingGone(held.record.body)) return null;
     return { project: report.project };
   }
 
@@ -145,19 +161,34 @@ export class Listings {
 
   async #evaluate(session: string): Promise<void> {
     const report = this.#reports.get(session);
+    if (report?.access === 'private') return this.#withdraw(session);
     const head = this.#ctx.head();
     if (report === undefined || head === null || !this.#qualifies(report)) return;
     const owners = await resolveOwners(report.owners, head.state, this.#ctx.ref(), head.certificates, new Date(this.#ctx.now()));
     const fields: Listing['fields'] = { owners, project: report.project, lane: report.lane, state: report.state, title: report.title };
     const held = this.#ctx.store.read()[session];
     if (held !== undefined && held.hash === hashOf(fields) && this.#current(held.record)) return;
-    await this.#sign(session, fields);
+    if (await this.#sign(session, fields)) this.#ctx.signed?.(session);
   }
 
-  async #sign(session: string, fields: Listing['fields']): Promise<void> {
+  /** The last revision of a session listed now: `LISTING_GONE`, every field but its lane empty. */
+  async #withdraw(session: string): Promise<void> {
+    const held = this.#ctx.store.read()[session];
+    if (held === undefined || isListingGone(held.record.body)) {
+      this.#leaving.delete(session);
+      return;
+    }
+    if (this.#ctx.key() === null || this.#ctx.head() === null) return; // owed: signed at the next refresh or welcome
+    const { project, lane } = held.record.body.fields;
+    if (project !== null) this.#ctx.withdrawing?.(session, project);
+    if (await this.#sign(session, { owners: [], project: null, lane, state: LISTING_GONE, title: '' })) this.#leaving.delete(session);
+  }
+
+  /** Signs and sends a revision of the session's listing, and keeps it; false when no key or head is held. */
+  async #sign(session: string, fields: Listing['fields']): Promise<boolean> {
     const key = this.#ctx.key();
     const head = this.#ctx.head();
-    if (key === null || head === null) return;
+    if (key === null || head === null) return false;
     const file = this.#ctx.store.read();
     const now = this.#ctx.now();
     const revision = Math.max((file[session]?.revision ?? 0) + 1, now);
@@ -167,7 +198,7 @@ export class Listings {
     this.#ctx.store.write({ ...this.#ctx.store.read(), [session]: { revision, issued, hash: hashOf(fields), record } });
     // Sent now if a connection is up; else the next welcome sends what the file holds.
     this.#ctx.send({ t: 'listing', record });
-    this.#ctx.signed?.(session);
+    return true;
   }
 
   #serial(run: () => Promise<void>): Promise<void> {

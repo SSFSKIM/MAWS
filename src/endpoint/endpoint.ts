@@ -88,6 +88,7 @@ export class Endpoint implements EndpointModule {
       store: { read: () => this.#state?.listings ?? {}, write: (file) => this.#state?.setListings(file) },
       log,
       signed: (session) => this.notifier.listed(session),
+      withdrawing: (session, project) => this.notifier.withdrawn(session, project),
     };
     this.listings = new Listings(records);
     this.endpointRecords = new EndpointRecords(records);

@@ -16,11 +16,13 @@ import {
   isCertRetirement,
   isEndpointRecord,
   isListing,
+  isListingGone,
   isMachineCert,
   isMachineRef,
   isPublicKey,
   isSigned,
   keyId,
+  LISTING_GONE,
   machineNameKey,
   refOfName,
   verifyCertRetirement,
@@ -54,6 +56,11 @@ CREATE TABLE IF NOT EXISTS listings (
   body TEXT NOT NULL, stored TEXT NOT NULL, PRIMARY KEY (machine, session));
 CREATE TABLE IF NOT EXISTS endpoints (machine TEXT PRIMARY KEY, issued TEXT NOT NULL, body TEXT NOT NULL, stored TEXT NOT NULL);
 `;
+
+/** A `listings` row's condition for a live listing (not withdrawn), bound to `LISTING_GONE`. */
+const LIVE = `json_extract(body, '$.body.fields.state') IS NOT ?`;
+/** What `storeListing` did: whether it stored the listing, and whether the revision it replaced was a live one. */
+export type StoredListing = { stored: boolean; replacedLive: boolean };
 
 /** The `kv` key of a counter raised by every certificate or retirement kept, so a verification sees the set move. */
 const CERTS_VERSION = 'certs-version';
@@ -197,14 +204,20 @@ export class OrgRecords {
 
   // ---- Listings and endpoint records (RL6, RL §4.1) -----------------------------------------------------------
 
-  /** A session's listing, kept at its highest revision; `409 stale-listing` for one not above it (the same again is taken). */
-  async storeListing(body: unknown): Promise<Result<{ stored: boolean }>> {
+  /**
+   * A session's listing, kept at its highest revision; `409 stale-listing` for one not above it (the same again is
+   * taken). A withdrawn one (`LISTING_GONE`) is kept like any other, never deleted, so its revision still refuses a
+   * replay of an earlier one. `replacedLive`: whether the revision it replaced was a live one, which every app may have
+   * cached (read before the overwrite).
+   */
+  async storeListing(body: unknown): Promise<Result<StoredListing>> {
     if (!isSigned(body, isListing)) return fail(400, 'malformed', 'a listing is a machine-signed Listing, {body, sig}');
     const l = body.body;
-    return this.machineSigned(verifyListing, body, () => {
+    return this.machineSigned<Listing, StoredListing>(verifyListing, body, () => {
       const held = this.sql.exec<{ revision: number; body: string }>('SELECT revision, body FROM listings WHERE machine = ? AND session = ?', l.machine, l.session).toArray()[0];
-      if (held && held.body === canonicalize(body)) return ok({ stored: false });
+      if (held && held.body === canonicalize(body)) return ok({ stored: false, replacedLive: false });
       if (held && l.revision <= held.revision) return fail(409, 'stale-listing', `the listing held is at revision ${held.revision}`);
+      const replacedLive = held !== undefined && !isListingGone((JSON.parse(held.body) as Signed<Listing>).body);
       this.sql.exec(
         'INSERT OR REPLACE INTO listings (machine, session, revision, project, owners, body, stored) VALUES (?, ?, ?, ?, ?, ?, ?)',
         l.machine,
@@ -215,7 +228,7 @@ export class OrgRecords {
         canonicalize(body),
         iso(),
       );
-      return ok({ stored: true });
+      return ok({ stored: true, replacedLive });
     });
   }
 
@@ -223,7 +236,7 @@ export class OrgRecords {
   async storeEndpoint(body: unknown): Promise<Result<{ stored: boolean }>> {
     if (!isSigned(body, isEndpointRecord)) return fail(400, 'malformed', 'an endpoint record is a machine-signed EndpointRecord, {body, sig}');
     const r = body.body;
-    return this.machineSigned(verifyEndpointRecord, body, () => {
+    return this.machineSigned<EndpointRecord, { stored: boolean }>(verifyEndpointRecord, body, () => {
       const held = this.sql.exec<{ issued: string; body: string }>('SELECT issued, body FROM endpoints WHERE machine = ?', r.machine).toArray()[0];
       if (held && held.body === canonicalize(body)) return ok({ stored: false });
       if (held && r.issued <= held.issued) return fail(409, 'stale-endpoint', `the endpoint record held was issued ${held.issued}`);
@@ -234,37 +247,39 @@ export class OrgRecords {
 
   /** A machine-signed record verified by `verify`, then judged against what is held and committed by `keep`, in one
    * synchronous step, so two submissions at once never both pass the freshness check. */
-  private machineSigned<T extends Listing | EndpointRecord>(
+  private machineSigned<T extends Listing | EndpointRecord, V extends { stored: boolean }>(
     verify: (state: OrgState, record: Signed<T>, certs: Certificates, now: Date) => Promise<Verdict>,
     record: Signed<T>,
-    keep: () => Result<{ stored: boolean }>,
-  ): Promise<Result<{ stored: boolean }>> {
-    return this.underHead<{ stored: boolean }>(always, async (state, certs, now) => {
+    keep: () => Result<V>,
+  ): Promise<Result<V>> {
+    return this.underHead<V>(always, async (state, certs, now) => {
       const verdict = await verify(state, record, certs, now);
       return verdict.ok ? ok(keep) : refusedRecord(verdict.code);
     });
   }
 
-  /** Every listing kept, or a project's alone, with the endpoint records of their machines. */
+  /** Every live listing kept (a withdrawn one is left out), or a project's alone, with the endpoint records of their machines. */
   listings(project: string | null): Listings {
     const rows =
       project === null
-        ? this.sql.exec<{ machine: string; body: string }>('SELECT machine, body FROM listings ORDER BY machine, session').toArray()
-        : this.sql.exec<{ machine: string; body: string }>('SELECT machine, body FROM listings WHERE project = ? ORDER BY machine, session', project).toArray();
+        ? this.sql.exec<{ machine: string; body: string }>(`SELECT machine, body FROM listings WHERE ${LIVE} ORDER BY machine, session`, LISTING_GONE).toArray()
+        : this.sql
+            .exec<{ machine: string; body: string }>(`SELECT machine, body FROM listings WHERE project = ? AND ${LIVE} ORDER BY machine, session`, project, LISTING_GONE)
+            .toArray();
     const machines = [...new Set(rows.map((r) => r.machine))];
     const endpoints = machines.flatMap((m) => this.sql.exec<{ body: string }>('SELECT body FROM endpoints WHERE machine = ?', m).toArray());
     return { listings: parsed<Signed<Listing>>(rows), endpoints: parsed<Signed<EndpointRecord>>(endpoints) };
   }
 
   /**
-   * Every listing kept, in pages whose records come to at most `budget` bytes of JSON each, a record larger than that
-   * alone in its page; one empty page when none is kept. The Registry socket's snapshot (OX8; O11 M7), so that no frame
-   * grows with the org's listings.
+   * Every live listing kept (a withdrawn one is left out), in pages whose records come to at most `budget` bytes of JSON
+   * each, a record larger than that alone in its page; one empty page when none is kept. The Registry socket's snapshot
+   * (OX8; O11 M7), so that no frame grows with the org's listings.
    */
   listingPages(budget: number): Signed<Listing>[][] {
     const pages: Signed<Listing>[][] = [[]];
     let bytes = 0;
-    for (const { body } of this.sql.exec<{ body: string }>('SELECT body FROM listings ORDER BY machine, session')) {
+    for (const { body } of this.sql.exec<{ body: string }>(`SELECT body FROM listings WHERE ${LIVE} ORDER BY machine, session`, LISTING_GONE)) {
       const size = utf8Length(body);
       if (pages.at(-1)!.length > 0 && bytes + size > budget) {
         pages.push([]);
@@ -330,7 +345,7 @@ export class OrgRecords {
     return [...new Set([...named, ...certified])];
   }
 
-  /** The owners a session's listing names, or null when the machine listed none for it. */
+  /** The owners a session's listing names (none for a withdrawn one), or null when the machine listed none for it. */
   ownersOf(machine: string, session: string): MemberId[] | null {
     const row = this.sql.exec<{ owners: string }>('SELECT owners FROM listings WHERE machine = ? AND session = ?', machine, session).toArray()[0];
     return row ? (JSON.parse(row.owners) as MemberId[]) : null;

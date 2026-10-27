@@ -63,6 +63,16 @@ export class Notifier {
     this.#tell(session);
   }
 
+  /**
+   * A listed session of `project` is being withdrawn (it left, or became `private`), its last listing still the hub's: a
+   * count the hub was told is settled to 0 now, and nothing held for it goes later.
+   */
+  withdrawn(session: string, project: string): void {
+    if ((this.#told.get(session) ?? 0) > 0) this.#ctx.send({ t: 'notify', session, project, kind: 'settled', pending: 0 });
+    this.#told.delete(session);
+    this.#held = this.#held.filter((held) => held !== session);
+  }
+
   /** A session left the machine. */
   forget(session: string): void {
     this.#counts.delete(session);
