@@ -93,6 +93,57 @@ describe('a step-up', () => {
     expect(await verifyStepUp(signed.action, (await stepUpKey()).pub)).toEqual({ ok: true });
   });
 
+  it('signs what was shown even when the caller changes its request, or the device identity, while the person decides', async () => {
+    const request = {
+      machine: REF,
+      action: 'sminos.spawn',
+      args: { checkout: '/Users/owner/w', permission_mode: 'default', brief: 'fix the tests', nested: { mode: 'plan' } },
+      session: 'sess-1',
+      context: { lane: 'A' as const, session: 'sess-1', launch: 'launch-1' },
+      requestDigest: { session: 'sess-1', request: 'toolu_1', tool: 'Bash', input_sha256: 'a'.repeat(64) },
+    };
+    const device = { ...DEVICE };
+    const prompts: StepUpPrompt[] = [];
+    const stepUp = createStepUp({
+      device,
+      key: await stepUpKey(),
+      now: () => NOW,
+      confirm: async (prompt) => {
+        prompts.push(prompt);
+        request.args.permission_mode = 'bypassPermissions';
+        request.args.brief = 'rm -rf ~';
+        request.args.nested.mode = 'bypassPermissions';
+        request.context.launch = 'launch-2';
+        request.requestDigest.tool = 'Write';
+        device.device = 'dev-other';
+        device.org = 'org-other';
+        return { ok: true };
+      },
+    });
+    const signed = await stepUp.sign(request);
+    if (!signed.ok) throw new Error(`refused: ${signed.reason}`);
+    expect(signed.action).toMatchObject({
+      org: DEVICE.org,
+      device: DEVICE.device,
+      args: { permission_mode: 'default', brief: 'fix the tests', nested: { mode: 'plan' } },
+      context: { launch: 'launch-1' },
+      requestDigest: { tool: 'Bash' },
+    });
+    expect(prompts).toEqual([renderAction(signed.action)]);
+    expect(await verifyStepUp(signed.action, (await stepUpKey()).pub)).toEqual({ ok: true });
+  });
+
+  it('treats an arg whose value is undefined as absent, as the canonical form the signature covers does', async () => {
+    const h = harness();
+    const stepUp = createStepUp({ device: DEVICE, key: await stepUpKey(), confirm: h.confirm, now: h.now });
+    const signed = await stepUp.sign({ ...spawn, args: { ...spawn.args, worktree: undefined } });
+    if (!signed.ok) throw new Error(`refused: ${signed.reason}`);
+    expect('worktree' in signed.action.args).toBe(false);
+    expect(h.prompts[0].text).not.toContain('worktree');
+    expect(h.prompts).toEqual([renderAction(signed.action)]);
+    expect(renderAction({ ...signed.action, args: { ...signed.action.args, worktree: undefined } })).toEqual(h.prompts[0]);
+  });
+
   it('refuses a request whose fields make no action, before asking anyone', async () => {
     const h = harness();
     const stepUp = createStepUp({ device: DEVICE, key: await stepUpKey(), confirm: h.confirm, now: h.now });

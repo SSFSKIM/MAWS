@@ -8,7 +8,7 @@
 // How the person confirms is injected (`Confirm`), because U5 settles it by a spike on the MacBook
 // (spikes/u5-local-auth/): Electron's `promptTouchID`, a LocalAuthentication addon with device-owner authentication, or
 // an app-level confirmation recorded as a weaker device. Whichever wins plugs in here unchanged.
-import { base64urlEncode, isAction, NONCE_BYTES, signStepUp, type Action, type SigningKey } from '../../../apps/org-protocol/src/index.ts';
+import { base64urlEncode, canonicalize, isAction, NONCE_BYTES, signStepUp, type Action, type SigningKey } from '../../../apps/org-protocol/src/index.ts';
 
 /** What the person is asked to confirm: `summary` fits a system prompt's one line; `text` is every field, one per line. */
 export type StepUpPrompt = { summary: string; text: string };
@@ -28,7 +28,8 @@ export function createStepUp(deps: { device: { org: string; device: string }; ke
     async sign(request) {
       // The fields come from the request by name, so nothing else it carries reaches the action.
       const { machine, action, args, session, context, requestDigest, opId, opCreated } = request;
-      const build = (at: string): Action => ({
+      const at = now().toISOString();
+      const built: Action = {
         v: 1,
         org: deps.device.org,
         machine,
@@ -42,9 +43,12 @@ export function createStepUp(deps: { device: { org: string; device: string }; ke
         ...(requestDigest === undefined ? {} : { requestDigest }),
         nonce: random(NONCE_BYTES),
         created: at,
-      });
-      const shown = build(now().toISOString());
-      if (!isAction(shown)) return { ok: false, reason: 'malformed' };
+      };
+      if (!isAction(built)) return { ok: false, reason: 'malformed' };
+      // A private copy in the canonical form the signature covers (an undefined field absent), taken before anything
+      // is shown: the caller keeps references to its args, context and digest, and to the device identity, and may change
+      // them while the person decides. What is shown is what is signed.
+      const shown = JSON.parse(canonicalize(built)) as Action;
       const prompt = renderAction(shown);
       let answer: Confirmation;
       try {
@@ -53,9 +57,10 @@ export function createStepUp(deps: { device: { org: string; device: string }; ke
         answer = { ok: false, reason: 'failed' };
       }
       if (!answer.ok) return answer;
-      // Stamped when the person confirmed, so time spent at the prompt doesn't make it stale (RL4's 60 s); the opId
-      // stays the one shown. The nonce and times are not part of what is rendered, so the text still describes it.
-      const sealed: Action = { ...build(now().toISOString()), opId: shown.opId };
+      // Stamped when the person confirmed, so time spent at the prompt doesn't make it stale (RL4's 60 s). Only the
+      // nonce and times change, and they are not part of what is rendered.
+      const sealedAt = now().toISOString();
+      const sealed: Action = { ...shown, opCreated: opCreated ?? sealedAt, nonce: random(NONCE_BYTES), created: sealedAt };
       if (!isAction(sealed)) return { ok: false, reason: 'malformed' };
       return { ok: true, action: await signStepUp(sealed, deps.key) };
     },
@@ -76,7 +81,8 @@ export function renderAction(a: Action): StepUpPrompt {
     const d = a.requestDigest;
     lines.push(`Request: ${shown(d.tool)} ${shown(d.request)} in session ${shown(d.session)}, input SHA-256 ${shown(d.input_sha256)}`);
   }
-  for (const name of Object.keys(a.args).sort()) lines.push(`${/^[A-Za-z0-9_.-]+$/.test(name) ? name : json(name)}: ${json(a.args[name])}`);
+  // An undefined value is absent from the canonical form the signature covers, so it is not shown either.
+  for (const name of Object.keys(a.args).filter((key) => a.args[key] !== undefined).sort()) lines.push(`${/^[A-Za-z0-9_.-]+$/.test(name) ? name : json(name)}: ${json(a.args[name])}`);
   return { summary: `${shown(a.action)} on machine ${shown(a.machine)}`, text: lines.join('\n') };
 }
 
