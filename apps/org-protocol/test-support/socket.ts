@@ -86,6 +86,19 @@ export class JsonSocket {
     }, what, ms);
   }
 
+  /**
+   * Waits for the frame that says the socket is ready to use. When the wait fails (a timeout, a close), the socket is
+   * closed before the failure is thrown: its opener never receives it, so nothing else could close it.
+   */
+  protected async untilReady(predicate: (frame: Frame) => boolean, what: string, ms: number): Promise<void> {
+    try {
+      await this.next(predicate, what, 0, ms);
+    } catch (error) {
+      this.close();
+      throw error;
+    }
+  }
+
   send(frame: object): void {
     this.socket.send(JSON.stringify(frame));
   }
