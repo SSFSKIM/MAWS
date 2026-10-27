@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { captureShellEnvironment, invalidateShellEnvironment, parseNulSeparatedEnv, runShellCapture, SHELL_CAPTURE_TIMEOUT_MS } from './shell-env';
+import { captureShellEnvironment, invalidateShellEnvironment, loginShell, parseNulSeparatedEnv, runShellCapture, SHELL_CAPTURE_TIMEOUT_MS } from './shell-env';
 
 let dir: string;
 beforeEach(() => {
@@ -110,5 +110,29 @@ describe('login-shell environment capture (X6)', { timeout: 15_000 }, () => {
     expect(second).not.toBe(first);
     expect(second.MAWS_ONCE).not.toBe(first.MAWS_ONCE); // another shell ran
     expect(third).toBe(second);
+  });
+});
+
+// P5 O2 M8 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M8 "The login-shell capture under a unit"): a unit's
+// environment is minimal and may carry no SHELL, so the capture's shell is $SHELL, else the passwd entry's, else the
+// platform's default.
+describe('the login shell the capture runs', () => {
+  it('is $SHELL when it is set', () => {
+    expect(loginShell({ SHELL: '/usr/bin/fish' }, 'linux', () => '/bin/bash')).toBe('/usr/bin/fish');
+  });
+
+  it('is the passwd entry’s shell when $SHELL is unset or empty', () => {
+    expect(loginShell({}, 'linux', () => '/bin/bash')).toBe('/bin/bash');
+    expect(loginShell({ SHELL: '' }, 'darwin', () => '/opt/homebrew/bin/zsh')).toBe('/opt/homebrew/bin/zsh');
+  });
+
+  it('is /bin/zsh on macOS and /bin/sh on Linux when neither names one', () => {
+    expect(loginShell({}, 'darwin', () => null)).toBe('/bin/zsh');
+    expect(loginShell({}, 'linux', () => null)).toBe('/bin/sh');
+    expect(loginShell({ SHELL: '' }, 'linux', () => '')).toBe('/bin/sh');
+  });
+
+  it('reads the passwd entry of this process’s user by default', () => {
+    expect(loginShell({}, 'linux')).toMatch(/^\//);
   });
 });

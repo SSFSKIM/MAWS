@@ -19,6 +19,7 @@ import { LOG_ROTATE_BYTES, openSupervisorLog } from '../engine-host/supervisor-l
 import { DAEMON_FILES } from '@shared/daemon/files';
 import { buildIdOf } from '../engine-host/supervisor-files';
 import { runCli } from './cli';
+import { nodeFloorProblem } from './node-floor';
 import { parseRun, USAGE, type RunArgs } from './run-args';
 
 function main(argv: readonly string[]): void {
@@ -27,6 +28,13 @@ function main(argv: readonly string[]): void {
   const args = parseRun(rest);
   if (typeof args === 'string') {
     process.stderr.write(`${args}\n${USAGE}\n`);
+    process.exit(1);
+  }
+  // P5 O2 M8: a unit's runtime is named by a file that outlives the build that wrote it; a private daemon runs the app's
+  // own binary as Node, whose Node the app's build pins
+  const belowFloor = args.kind === 'unit' ? nodeFloorProblem(process.versions.node) : null;
+  if (belowFloor) {
+    process.stderr.write(`${belowFloor} (${process.execPath})\n`);
     process.exit(1);
   }
   const profileDir = process.env.MAWS_USER_DATA;

@@ -27,6 +27,7 @@ import { randomUUID } from 'node:crypto';
 import * as nodePty from 'node-pty';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { HostEmit } from '@shared/host/runtime';
+import { loginShell } from '@shared/host/shell-env';
 import type { CommandInput, CommandOutput, PtyCheckpoint, PtyId, PtyInfo } from '@shared/ipc/schema';
 import { HIGH_WATERMARK, INITIAL_FLOW, stepFlow, type Flow, type FlowInput } from './flow';
 import { foregroundOf } from './foreground';
@@ -39,7 +40,6 @@ export const RING_BYTES = 512 * 1024;
 if (RING_BYTES !== 2 * HIGH_WATERMARK) throw new Error('the ring buffer must hold twice the high watermark');
 
 export const DEAD_ENTRY_TTL_MS = 60 * 60 * 1000;
-const DEFAULT_SHELL = '/bin/zsh';
 const LOGIN_ARGS = ['-l'];
 const FLUSH_BYTES = 64 * 1024;
 const FLUSH_INTERVAL_MS = 5;
@@ -162,7 +162,7 @@ export function createPtyTable({ emit, environment: initial }: PtyTableOptions):
         if (entry.info.alive) throw new Error(`session ${appSessionId} already has a live pty labelled ${label}`);
         remove(id); // a dead terminal under the same tab is superseded by its replacement
       }
-      const program = shell ?? (env.SHELL || DEFAULT_SHELL);
+      const program = shell ?? loginShell(env); // P5 O2 M8: $SHELL, else the passwd entry's, else the platform's default
       const ptyId = randomUUID() as PtyId;
       const [wrapper, ...wrapperArgs] = IUTF8_WRAPPER;
       const pty = nodePty.spawn(wrapper, [...wrapperArgs, program, ...(args ?? LOGIN_ARGS)], {
