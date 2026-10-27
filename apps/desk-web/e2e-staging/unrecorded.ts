@@ -11,6 +11,7 @@ import { test as base } from '@playwright/test';
 
 // Given as a function alone, the override keeps the fixture's own options (automatic, around every hook).
 export const test = base.extend<{ _setupArtifacts: void }>({
+  // eslint-disable-next-line no-empty-pattern -- Playwright requires the fixtures argument to be destructured
   _setupArtifacts: async ({}, use) => {
     await use();
   },

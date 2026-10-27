@@ -10,9 +10,9 @@
 //   iOS fetches for a home-screen app without the Access cookie and which carry nothing of the org.
 //
 // Policies are the account's reusable ones, each found by name among every page of them; applications are found by name
-// too, so a second run updates in place. The one exception is the people policy (`<worker> owner`): a deploy creates it with the owner alone
-// and never rewrites it after, since its include list is `deployment access-sync`'s, reconciled to the org state's
-// member emails (O11 M3), and a deploy that reset it would shut out every member the state admitted.
+// too, so a second run updates in place. The one exception is the people policy (`<worker> owner`): a deploy creates it
+// with the owner alone and never rewrites it after, since its include list is `deployment access-sync`'s, reconciled to
+// the org state's member emails (O11 M3), and a deploy that reset it would shut out every member the state admitted.
 import { REDEEM_PATH } from '../src/protocol/identity';
 
 export type AccessConfig = {
