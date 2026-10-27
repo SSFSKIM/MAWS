@@ -13,6 +13,10 @@ export const SIGNING_DOMAINS = {
   certRetire: 'smns-cert-retire-v1',
   endpoint: 'smns-endpoint-v1',
   log: 'smns-hub-log-v2',
+  /** RL2's handshake: its signatures and MACs (channel.ts). */
+  rl2: 'smns-rl2-v1',
+  /** RL4's canonical action: its step-up signature, its WebAuthn challenge (action.ts). */
+  action: 'smns-action-v1',
 } as const;
 
 export type DeviceClass = 'native-mac' | 'web-cards';

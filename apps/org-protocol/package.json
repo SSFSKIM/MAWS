@@ -2,7 +2,7 @@
   "name": "org-protocol",
   "version": "0.0.0",
   "private": true,
-  "description": "The remote layer's one protocol package: RL5's signed org state and RL8's signed log events, with their vectors (docs/doperpowers/plans/2026-10-27-p5-o11-hub-v2.md, Interfaces §A)",
+  "description": "The remote layer's one protocol package: RL5's signed org state and RL8's signed log events (docs/doperpowers/plans/2026-10-27-p5-o11-hub-v2.md, Interfaces §A), RL2's channel, RL3's messages, RL4's action and RL9's attestation (docs/doperpowers/plans/2026-10-27-p5-o10-endpoint.md, Interfaces §A-§C), with their vectors",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",

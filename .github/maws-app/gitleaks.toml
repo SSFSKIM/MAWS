@@ -59,6 +59,14 @@ paths = ['''^apps/org-protocol/vectors/vectors\.json$''']
 regexes = ['''^[A-Za-z0-9_-]{22}$''']
 
 [[allowlists]]
+description = "The protocol package's RL2 and RL4 vectors (apps/org-protocol/vectors/vectors.json, P5 O10 M1): a channel direction's AES key, derived from the vectors' fixed test ephemerals, and a software authenticator's WebAuthn authenticatorData (37 bytes), both drawn fresh each time the generator runs"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^apps/org-protocol/vectors/vectors\.json$''']
+regexTarget = "match"
+regexes = ['''^(?:key|authenticatorData)": "[A-Za-z0-9_-]{43,50}"?$''']
+
+[[allowlists]]
 description = "RFC 6455's sample Sec-WebSocket-Key (§1.3, 'the sample nonce'), in desk-hub's upgrade tests"
 targetRules = ["generic-api-key"]
 regexes = ['''^dGhlIHNhbXBsZSBub25jZQ==$''']

@@ -11,6 +11,9 @@ import { endorseDevice, signOrgState, signTransition, stateHash } from '../src/o
 import { signRecord } from '../src/records.ts';
 import { SIGNING_DOMAINS, type Signer, type Device, type RevokedKey, type EndpointRecord, type Grant, type Listing, type MachineCert, type OrgState, type RootTransition, type Signed, type SignedOrgState } from '../src/types.ts';
 import type { Verdict } from '../src/verdict.ts';
+import { buildRemoteScenario, type ActionEncoding, type ChannelVectors } from './scenario-remote.ts';
+
+export { buildRemoteOrg, ORG_REMOTE, ORIGIN, RP_ID, type ActionEncoding, type ChannelVectors, type HandshakeRun, type RemoteOrg } from './scenario-remote.ts';
 
 /** Every key the scenario signs with, by role. */
 export const KEY_NAMES = [
@@ -26,6 +29,9 @@ export const KEY_NAMES = [
   'delegation', 'vm1', 'vm1Rival', 'vm1Next', // a delegation, the VM it certifies, a rival claim on its ref, its successor
   'delegationB', // a second delegation's key
   'stranger', // a key the org never listed
+  'c1Channel', 'c1StepUp', // C's Mac, in the remote org (scenario-remote.ts)
+  'aPasskey', // A's phone's passkey (WebAuthn, ES256)
+  'deviceEphemeral', 'machineEphemeral', // RL2's ephemerals, fixed so a handshake's bytes repeat
 ] as const;
 export type KeyName = (typeof KEY_NAMES)[number];
 export type Keys = Record<KeyName, SigningKey>;
@@ -48,19 +54,26 @@ export type Case = {
     | 'verifyEvent'
     | 'signerFor'
     | 'contestedRefs'
-    | 'machineKeys';
+    | 'machineKeys'
+    | 'verifyRewind'
+    | 'verifyAttestation'
+    | 'verifyStepUp'
+    | 'verifyWebAuthn'
+    | 'isAction';
   args: Arg[];
-  expect: Verdict | { signers: Signer[] } | { refs: string[] } | { keys: B64[]; contested: boolean };
+  expect: (Verdict & { owners?: string[]; counter?: number }) | { signers: Signer[] } | { refs: string[] } | { keys: B64[]; contested: boolean } | { valid: boolean };
 };
 export type DualCase = { name: string; org: string; project: string; orgKey: string; event: Record<string, unknown> };
 export type Encodings = {
   kids: Array<{ pub: B64; kid: string }>;
   stateHashes: Array<{ state: { $state: string }; hash: B64 }>;
   inputs: Array<{ domain: string; body: unknown; input: string }>;
+  /** RL4's actions: signing input, digest, fingerprint. */
+  actions: ActionEncoding[];
 };
 /** Enrollment MACs (enrollment.ts): `input` is the length-prefixed encoding, base64url; `k` the pairing secret. */
 export type EnrollmentCase = { name: string; machinePub: B64; ref: string; tokenId: string; k: string; input: string; mac: string };
-export type VectorSet = { fixtures: Record<string, unknown>; cases: Case[]; dual: DualCase[]; encodings: Encodings; enrollment: EnrollmentCase[] };
+export type VectorSet = { fixtures: Record<string, unknown>; cases: Case[]; dual: DualCase[]; encodings: Encodings; enrollment: EnrollmentCase[]; channel: ChannelVectors };
 
 export const ORG = 'org-vectors';
 export const PROJECT = 'proj-1';
@@ -699,6 +712,16 @@ export async function buildScenario(k: Keys): Promise<VectorSet> {
     const g = await signRecord(SIGNING_DOMAINS.grant, grant, k.a1StepUp.privateKey, k.a1StepUp.pub);
     await recordCase('a grant whose rights changed after signing', 'verifyGrant', { body: { ...grant, rights: ['spawn', 'shell'] }, sig: g.sig }, no('bad-signature'));
   }
+  {
+    // A grant for a VM under a delegation (O10 M1): for its live certificate's key, signed by its delegation's owners
+    // (here the org's: its admins).
+    const vmGrant: Grant = { ...grant, machine: REF_VM1, machineKey: await kid('vm1') };
+    const withCert = [bundle([fixture('cert vm-1')]), NOW];
+    await recordCase('a grant for a certified VM, signed by an admin of its org-owned delegation', 'verifyGrant', await signRecord(SIGNING_DOMAINS.grant, vmGrant, k.a1StepUp.privateKey, k.a1StepUp.pub), ok(), withCert);
+    await recordCase('a grant for a certified VM, signed by a member who owns no part of it', 'verifyGrant', await signRecord(SIGNING_DOMAINS.grant, vmGrant, k.b1StepUp.privateKey, k.b1StepUp.pub), no('unknown-signer'), withCert);
+    await recordCase("a grant for a certified VM's other key", 'verifyGrant', await signRecord(SIGNING_DOMAINS.grant, { ...vmGrant, machineKey: await kid('vm1Rival') }, k.a1StepUp.privateKey, k.a1StepUp.pub), no('not-listed'), withCert);
+    await recordCase('a grant for a certified VM without its certificate', 'verifyGrant', await signRecord(SIGNING_DOMAINS.grant, vmGrant, k.a1StepUp.privateKey, k.a1StepUp.pub), no('not-listed'), [bundle(), NOW]);
+  }
 
   const certBody: MachineCert = { org: ORG, machine: REF_VM1, name: 'vm-1', pub: k.vm1.pub, delegation: DLG_VM, use: 1, issued: at(3) };
   const cert = await signRecord(SIGNING_DOMAINS.machineCert, certBody, k.delegation.privateKey, k.delegation.pub);
@@ -1062,6 +1085,8 @@ export async function buildScenario(k: Keys): Promise<VectorSet> {
   await dualCase("a dual-coded machine event", machineSay, base64urlEncode(new Uint8Array(16).fill(1)));
   await dualCase("a dual-coded member's words", position(await signEvent(ctx, { ...draft, text: 'and tag it' }, k.a1Channel.privateKey, k.a1Channel.pub), 9), base64urlEncode(new Uint8Array(16).fill(2)));
 
+  const remote = await buildRemoteScenario(k, fixtures);
+  cases.push(...remote.cases);
   const encodings: Encodings = {
     kids: await Promise.all((['a1StepUp', 'mini', 'recovery'] as const).map(async (n) => ({ pub: k[n].pub, kid: await kid(n) }))),
     stateHashes: [
@@ -1082,6 +1107,7 @@ export async function buildScenario(k: Keys): Promise<VectorSet> {
         return { domain, body, input: `${domain}\n${canonicalize(body)}` };
       }),
     ),
+    actions: remote.actions,
   };
   // The enrollment MAC's encoding: fields that plain concatenation would run together encode apart.
   const pairing = new Uint8Array(32).map((_, i) => i);
@@ -1095,7 +1121,7 @@ export async function buildScenario(k: Keys): Promise<VectorSet> {
     const fields = { name, machinePub: k.vm1.pub, ref, tokenId };
     enrollment.push({ ...fields, k: base64urlEncode(pairing), input: base64urlEncode(enrollmentMacInput(fields)), mac: await enrollmentMac(pairing, fields) });
   }
-  return { fixtures, cases, dual, encodings, enrollment };
+  return { fixtures, cases, dual, encodings, enrollment, channel: remote.channel };
 }
 
 /** DX1's seal of a log event (`codes.ts` `seal`), written out so the vectors need nothing from desk-hub. */

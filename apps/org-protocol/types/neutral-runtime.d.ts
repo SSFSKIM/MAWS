@@ -1,5 +1,5 @@
 // What the protocol code may use of its runtime: WebCrypto's HMAC, SHA-256, P-256 ECDSA and ECDH, HKDF, AES-GCM and
-// random values, UTF-8 text encoding, and URL parsing. Browsers, Workers, and Node provide each alike. Only the neutral
+// random values, UTF-8 text encoding, URL parsing, and timers (RL2's handshake waits a bounded time for each message). Browsers, Workers, and Node provide each alike. Only the neutral
 // typechecks read this file (apps/org-protocol/tsconfig.json, apps/desk-hub/tsconfig.protocol.json); the Worker, the web
 // app, and the tests compile the same code against their runtime's own declarations of the same names.
 
@@ -79,3 +79,6 @@ declare class URL {
   readonly protocol: string;
   readonly hostname: string;
 }
+
+declare function setTimeout(handler: () => void, ms: number): unknown;
+declare function clearTimeout(id: unknown): void;

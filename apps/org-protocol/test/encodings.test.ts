@@ -1,7 +1,7 @@
 // The vectors' encodings checked by a second implementation: Node's own crypto (not WebCrypto) and a canonical form
 // written here for the vectors' plain JSON (strings, safe integers, null, booleans), so the package does not check
 // itself.
-import { createHash, createHmac, createPublicKey, verify } from 'node:crypto';
+import { createCipheriv, createECDH, createHash, createHmac, createPublicKey, verify } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { VECTOR_KEYS, VECTORS, type KeyName } from '../vectors/index.ts';
 
@@ -97,5 +97,105 @@ describe('the encodings, by a second implementation', () => {
       const code = createHmac('sha256', Buffer.from(orgKey, 'base64url')).update(`smns-hub-log-v1\n${project}\n${jcs(v1)}`).digest();
       expect(b64(code)).toBe(mac.value);
     }
+  });
+});
+
+/** A P-256 public key from its 65-byte point, for Node's verify. */
+const pointKey = (pub: string) => {
+  const point = Buffer.from(pub, 'base64url');
+  return createPublicKey({ key: { kty: 'EC', crv: 'P-256', x: b64(point.subarray(1, 33)), y: b64(point.subarray(33)) }, format: 'jwk' });
+};
+const sha256 = (data: Buffer | string) => createHash('sha256').update(data).digest();
+const hmac = (key: Buffer, data: Buffer | string) => createHmac('sha256', key).update(data).digest();
+/** HKDF-Expand for one block (at most 32 bytes), as RFC 5869 writes it. */
+const expand = (prk: Buffer, info: string, length: number) => hmac(prk, Buffer.concat([Buffer.from(info, 'utf8'), Buffer.from([1])])).subarray(0, length);
+const without = (value: Record<string, unknown>, ...fields: string[]) => Object.fromEntries(Object.entries(value).filter(([k]) => !fields.includes(k)));
+
+describe("RL2's and RL4's encodings, by a second implementation", () => {
+  const [t] = VECTORS.channel.transcripts;
+  const h1 = JSON.parse(t.h1) as Record<string, unknown>;
+  const h2 = JSON.parse(t.h2) as Record<string, unknown>;
+  const h3 = JSON.parse(t.h3) as Record<string, unknown>;
+
+  it('derive the handshake keys: ECDH, the salt over h1 and h2, HKDF-Extract and -Expand', () => {
+    const ecdh = createECDH('prime256v1');
+    ecdh.setPrivateKey(Buffer.from(t.deviceEphemeral.d as string, 'base64url'));
+    const z = ecdh.computeSecret(Buffer.from(h2.e as string, 'base64url'));
+    const salt = sha256(jcs(h1) + jcs(without(h2, 'sig', 'mac')));
+    expect(b64(salt)).toBe(t.salt);
+    const prk = hmac(salt, z);
+    expect(b64(expand(prk, 'smns-rl2-v1 mac r', 32))).toBe(t.kmR);
+    expect(b64(expand(prk, 'smns-rl2-v1 mac i', 32))).toBe(t.kmI);
+    expect(b64(expand(prk, 'smns-rl2-v1 key i2r', 32))).toBe(t.i2r.key);
+    expect(b64(expand(prk, 'smns-rl2-v1 iv i2r', 4))).toBe(t.i2r.iv);
+    expect(b64(expand(prk, 'smns-rl2-v1 key r2i', 32))).toBe(t.r2i.key);
+    expect(b64(expand(prk, 'smns-rl2-v1 iv r2i', 4))).toBe(t.r2i.iv);
+    expect(b64(expand(prk, 'smns-rl2-v1 id', 16))).toBe(t.channelId);
+  });
+
+  it('sign each side over both messages before its own, and MAC its identity', () => {
+    const machineInput = `smns-rl2-v1\n${jcs({ role: 'machine', h1, h2: without(h2, 'sig', 'mac') })}`;
+    const deviceInput = `smns-rl2-v1\n${jcs({ role: 'device', h1, h2: without(h2, 'sig', 'mac'), h3: without(h3, 'sig', 'mac') })}`;
+    expect(machineInput).toBe(t.machineTranscript);
+    expect(deviceInput).toBe(t.deviceTranscript);
+    const p1363 = (pub: string, input: string, sig: unknown) =>
+      verify('sha256', Buffer.from(input, 'utf8'), { key: pointKey(pub), dsaEncoding: 'ieee-p1363' }, Buffer.from((sig as { value: string }).value, 'base64url'));
+    expect(p1363(t.machinePub, machineInput, h2.sig)).toBe(true);
+    expect(p1363(t.devicePub, deviceInput, h3.sig)).toBe(true);
+    const machineMac = `smns-rl2-v1\n${jcs({ keyId: h2.keyId, machine: h1.machine, role: 'machine' })}`;
+    expect(machineMac).toBe(t.machineMacInput);
+    expect(b64(hmac(Buffer.from(t.kmR, 'base64url'), machineMac))).toBe(h2.mac);
+    expect(b64(hmac(Buffer.from(t.kmI, 'base64url'), t.deviceMacInput))).toBe(h3.mac);
+  });
+
+  it('seal each frame with AES-256-GCM: the header as associated data, the nonce the iv and the sequence', () => {
+    for (const f of VECTORS.channel.frames) {
+      const header = Buffer.alloc(10);
+      header[0] = 1;
+      header[1] = f.epoch & 0xff;
+      header.writeBigUInt64BE(BigInt(f.seq), 2);
+      const nonce = Buffer.alloc(12);
+      Buffer.from(f.keys.iv, 'base64url').copy(nonce);
+      nonce.writeBigUInt64BE(BigInt(f.seq), 4);
+      const cipher = createCipheriv('aes-256-gcm', Buffer.from(f.keys.key, 'base64url'), nonce);
+      cipher.setAAD(header);
+      const body = Buffer.concat([cipher.update(Buffer.from(f.plaintext, 'base64url')), cipher.final(), cipher.getAuthTag()]);
+      expect(b64(Buffer.concat([header, body])), f.name).toBe(f.frame);
+    }
+  });
+
+  it('rekey by HKDF-Expand over the old key alone', () => {
+    for (const { keys, next } of VECTORS.channel.rekeys) {
+      const key = Buffer.from(keys.key, 'base64url');
+      expect(b64(expand(key, 'smns-rl2-v1 rekey', 32))).toBe(next.key);
+      expect(b64(expand(key, 'smns-rl2-v1 rekey iv', 4))).toBe(next.iv);
+    }
+  });
+
+  it("sign an action over its domain and canonical form, and fingerprint what a reseal keeps", () => {
+    for (const { name, action, input, digest, fingerprint } of VECTORS.encodings.actions) {
+      const a = action as unknown as Record<string, unknown>;
+      expect(input, name).toBe(`smns-action-v1\n${jcs(without(a, 'stepUp', 'webauthn'))}`);
+      expect(b64(sha256(input))).toBe(digest);
+      expect(b64(sha256(jcs(without(a, 'nonce', 'created', 'stepUp', 'webauthn'))))).toBe(fingerprint);
+    }
+    const stepped = fixture<Record<string, unknown> & { stepUp: string }>("an action's step-up by its device's step-up key");
+    const input = `smns-action-v1\n${jcs(without(stepped, 'stepUp', 'webauthn'))}`;
+    const stepUpPub = VECTORS.cases.find((c) => c.name === "an action's step-up by its device's step-up key")?.args[1] as string;
+    expect(verify('sha256', Buffer.from(input, 'utf8'), { key: pointKey(stepUpPub), dsaEncoding: 'ieee-p1363' }, Buffer.from(stepped.stepUp, 'base64url'))).toBe(true);
+  });
+
+  it("make a WebAuthn assertion's DER signature over authenticatorData and the client data's hash, the challenge the action's digest", () => {
+    const answer = fixture<Record<string, unknown> & { webauthn: Record<string, string> }>('a web-cards answer with its assertion');
+    const passkey = VECTORS.cases.find((c) => c.name === 'a web-cards answer with its assertion')?.args[1] as { publicKey: string; rpId: string };
+    const authData = Buffer.from(answer.webauthn.authenticatorData, 'base64url');
+    const client = Buffer.from(answer.webauthn.clientDataJSON, 'base64url');
+    expect(authData.subarray(0, 32)).toEqual(sha256(passkey.rpId));
+    expect(authData[32] & 0x05).toBe(0x05);
+    expect(authData.readUInt32BE(33)).toBe(5);
+    const challenge = b64(sha256(`smns-action-v1\n${jcs(without(answer, 'stepUp', 'webauthn'))}`));
+    expect(JSON.parse(client.toString('utf8'))).toMatchObject({ type: 'webauthn.get', challenge, origin: 'https://desk.example' });
+    const signed = Buffer.concat([authData, sha256(client)]);
+    expect(verify('sha256', signed, { key: pointKey(passkey.publicKey), dsaEncoding: 'der' }, Buffer.from(answer.webauthn.signature, 'base64url'))).toBe(true);
   });
 });

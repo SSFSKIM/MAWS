@@ -119,6 +119,43 @@ describe('the committed vectors', () => {
     expect(VECTORS.dual.length).toBeGreaterThan(0);
   });
 
+  it("carry the channel's transcripts, handshakes and frames O10 M1 proves", () => {
+    const runs = new Map(VECTORS.channel.runs.map((r) => [r.name, r]));
+    const expectations: Array<[string, unknown[]]> = [
+      ["a handshake at one head, the device's end", [{ ok: true }]],
+      ["a handshake at one head, the endpoint's end", [{ ok: true }]],
+      ["a handshake carrying successors in h2, the device's end", [{ ok: true }]],
+      ["a handshake carrying successors in h3, the endpoint's end", [{ ok: true }]],
+      ["a catch-up over two pages, the endpoint's end", [{ ok: false, reason: 'behind', stateVersion: 2 }, { ok: true }]],
+      ["a catch-up over two pages, the device's end", [{ ok: false, reason: 'behind', stateVersion: 2 }, { ok: true }]],
+      ["a device the state does not list, the endpoint's end", [{ ok: false, reason: 'unknown-device' }]],
+      ["a device claiming another class, the endpoint's end", [{ ok: false, reason: 'class' }]],
+      ["a revoked device, the endpoint's end", [{ ok: false, reason: 'revoked' }]],
+      ["an h3 over the page limit, the endpoint's end", [{ ok: false, reason: 'too-large' }]],
+      ['an h2 whose signature is over another exchange', [{ ok: false, reason: 'bad-signature' }]],
+      ['an h2 whose MAC is wrong', [{ ok: false, reason: 'bad-mac' }]],
+    ];
+    for (const [name, outcomes] of expectations) {
+      expect(runs.get(name)?.connections.map((c) => c.expect), name).toMatchObject(outcomes);
+    }
+    expect(runs.get("a handshake carrying successors in h2, the device's end")?.headAfter).toBe(3);
+    expect(runs.get("a catch-up over two pages, the endpoint's end")?.headAfter).toBe(3);
+    const receives = new Map(VECTORS.channel.receives.map((r) => [r.name, r.expect]));
+    expect(Object.fromEntries(receives)).toEqual({
+      'frames in sequence': { opened: 3 },
+      'a sequence skipped': { opened: 1, reason: 'sequence' },
+      'a sequence repeated': { opened: 1, reason: 'sequence' },
+      'a sequence reordered': { opened: 0, reason: 'sequence' },
+      'across a rekey at 2^20, the sequence continuing': { opened: 2 },
+      "an epoch's last frame dropped before the next epoch's first": { opened: 1, reason: 'sequence' },
+      'an epoch jump of two': { opened: 0, reason: 'epoch' },
+      'a tag altered': { opened: 0, reason: 'tag' },
+    });
+    expect(VECTORS.channel.frames.map((f) => [f.epoch, f.seq])).toContainEqual([1, 2 ** 20]);
+    expect(VECTORS.channel.transcripts).toHaveLength(1);
+    expect(VECTORS.encodings.actions.map((a) => a.name)).toEqual(['a lane B answer', 'a lane A spawn']);
+  });
+
   it("name each key by its point's kid, and each private JWK signs as its point", async () => {
     for (const name of KEY_NAMES) {
       const key = VECTOR_KEYS[name];
@@ -131,7 +168,8 @@ describe('the committed vectors', () => {
 describe('the scenario', () => {
   it('holds for keys other than the committed ones', async () => {
     const keys = {} as Keys;
-    for (const name of KEY_NAMES) keys[name] = await generateSigningKey();
+    // Extractable: the channel's handshake runs carry each end's private test key, as keys.json does.
+    for (const name of KEY_NAMES) keys[name] = await generateSigningKey(true);
     const set = await buildScenario(keys);
     expect(set.cases.length).toBe(VECTORS.cases.length);
     expect(await replayVectors(set)).toEqual([]);
