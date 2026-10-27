@@ -26,7 +26,7 @@ What someone can see after the first phase:
 
 Phase 1 (dispatchable now; P5's item 1, item 4, and item 7's refusals):
 - [ ] M1 — The session record (item 1)
-- [ ] M2 — The opId ledger (item 4)
+- [x] M2 — The opId ledger (item 4). Reviewed clean (doperpowers:reviewer-medium, one P2 fixed), landed as doperpowers PR #401 (`bdd39e50`, sminos 1.17.0), 2026-10-27T03:00Z.
 - [ ] M3 — The lane B observer: marker and refusals (item 7, first part)
 
 Blocked (P5's edges):
