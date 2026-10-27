@@ -20,9 +20,14 @@
 // prints one line, adds it as an annotation, and writes the samples to test-results/daemon-idle.json. Until M9 it
 // records only: no bound is asserted.
 //
-// A measured group (gate.yml's MEASURED_E2E): `pnpm e2e:daemon-idle` sets MAWS_DAEMON_IDLE_PERF=1, and the gate runs it
-// only when named, on the mini's exclusive instance behind the measured-job guard. It spends nothing and touches no
-// keychain: a replay runs no engine.
+// The second case is the runtime floor (P5 Decision Log 54), the footprint of the bare runtime `mawsd` runs on, which
+// sets `mawsd`'s own memory bound; it writes test-results/daemon-idle-floor.json.
+//
+// Two measured groups (gate.yml's MEASURED_E2E), one case each, chosen by title: `pnpm e2e:daemon-idle` (the supervisor)
+// and `pnpm e2e:daemon-idle-floor` (the floor, which needs no build). Each sets MAWS_DAEMON_IDLE_PERF=1, and the gate
+// runs it only when named, on the mini's exclusive instance behind the measured-job guard. Neither spends anything or
+// touches a keychain: a replay runs no engine.
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { loadavg, tmpdir } from 'node:os';
@@ -31,19 +36,20 @@ import { expect, test } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
-import { cpuSeconds, IDLE_RUN, idleLine, invalidReasons, measured, median, readerMismatches, readFootprints, readTopMem, type MeasuredProcess, type TopMem } from '../test/support/daemon-idle';
+import { cpuSeconds, floorLine, IDLE_RUN, idleLine, invalidReasons, measured, median, readerMismatches, readFootprints, readTopMem, type MeasuredProcess, type TopMem } from '../test/support/daemon-idle';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { isAlive, killScratchProcesses, processesNaming, ps } from './support/processes';
 import { tmpSocketDirOf } from './support/supervisor-socket';
 
-test.skip(process.env.MAWS_DAEMON_IDLE_PERF !== '1', 'the idle-cost measurement runs under pnpm e2e:daemon-idle (MAWS_DAEMON_IDLE_PERF=1)');
+test.skip(process.env.MAWS_DAEMON_IDLE_PERF !== '1', 'the idle-cost measurement runs under pnpm e2e:daemon-idle and e2e:daemon-idle-floor (MAWS_DAEMON_IDLE_PERF=1)');
 test.describe.configure({ timeout: 20 * 60_000 }); // about 13 minutes: the scene, the settle and the window
 
 // C3's permission round trip: a prompt, ~44 rows, a Bash `can_use_tool` (seq 49) the replay holds at until it is
 // answered, ~44 more rows to the turn's result (seq 93), then a hold at the next prompt (seq 94, an `out` row).
 const PERMISSION = 'spikes/protocol-probe/fixtures/permission-roundtrip.jsonl';
 const ROW_MS = '500'; // about 22 s from the answer to the result: the quit lands mid-turn
+const FLOOR_ARGV0 = 'maws-runtime-floor';
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 interface JournalRow { seq: number; direction: string; frame: Record<string, unknown> }
@@ -133,69 +139,117 @@ test('daemon idle: the physical footprint and CPU of the detached supervisor hol
 
     await sleep(IDLE_RUN.settleS * 1_000);
 
-    // The window: the measured processes and their start times, then a sample every 30 s on a fixed schedule.
     const procs: MeasuredProcess[] = measured(processesNaming(root), root);
     expect(procs.map((p) => p.pid), "the profile's supervisor is what is measured").toContain(supervisor);
-    const started = new Map(procs.map((p) => [p.pid, ps(p.pid, 'lstart')]));
-    const cpuAtStart = new Map(procs.map((p) => [p.pid, cpuSeconds(ps(p.pid, 'time'))]));
-    const cpuAtEnd = new Map<number, number>();
-    const samples: Sample[] = [];
-    const lost: { pid: number; argv0: string; atS: number }[] = [];
-    let crossCheck: CrossCheck | null = null;
-    const windowStart = Date.now();
-    for (let k = 0; k < IDLE_RUN.samples; k += 1) {
-      await sleep(Math.max(0, windowStart + k * IDLE_RUN.everyS * 1_000 - Date.now()));
-      const atS = Math.round((Date.now() - windowStart) / 1_000);
-      const live = procs.filter((p) => ps(p.pid, 'lstart') === started.get(p.pid));
-      const read = readFootprints(live.map((p) => p.pid));
-      const footprintOf = (pid: number) => { const f = read.get(pid); return f === undefined || 'errno' in f ? null : f.footprintKiB; };
-      if (k === 0 && live.length > 0) {
-        const top = readTopMem(live.map((p) => p.pid)); // back to back with the first reader
-        crossCheck = { atS, readings: live.filter((p) => footprintOf(p.pid) !== null).map((p) => ({ pid: p.pid, argv0: p.argv0, footprintKiB: footprintOf(p.pid)!, top: top.get(p.pid) ?? null })) };
-        console.log(`[daemon-idle] readers at ${atS} s: ${crossCheck.readings.map((r) => `${r.argv0} pid ${r.pid} proc_pid_rusage ${Math.round(r.footprintKiB)} KiB, top ${r.top?.text ?? 'none'}`).join('; ')}`);
-      }
-      const footprintKiB: Record<number, number | null> = {};
-      const rssKiB: Record<number, number | null> = {};
-      for (const p of procs) {
-        const alive = live.includes(p) && ps(p.pid, 'lstart') === started.get(p.pid); // still the same process after the read
-        if (alive && footprintOf(p.pid) === null) throw new Error(`proc_pid_rusage could not read ${p.argv0} pid ${p.pid}, which is alive (${JSON.stringify(read.get(p.pid))})`);
-        footprintKiB[p.pid] = alive ? footprintOf(p.pid) : null;
-        rssKiB[p.pid] = alive ? Number(ps(p.pid, 'rss')) : null;
-        if (!alive && !lost.some((l) => l.pid === p.pid)) lost.push({ pid: p.pid, argv0: p.argv0, atS });
-        if (alive && k === IDLE_RUN.samples - 1) cpuAtEnd.set(p.pid, cpuSeconds(ps(p.pid, 'time')));
-      }
-      samples.push({ atS, load: loadavg()[0]!, footprintKiB, rssKiB });
-    }
+    const measurement = await measureWindow(procs);
     const sessionEnded = launchEnded(journal(userData, id));
 
-    const names = [...new Set(procs.map((p) => p.argv0))];
-    const mismatches = readerMismatches(crossCheck?.readings ?? []);
-    const reasons = invalidReasons({ loads: samples.map((s) => s.load), measured: names, lost, sessionEnded, mismatches });
-    const whole = samples.filter((s) => procs.every((p) => s.footprintKiB[p.pid] !== null && s.rssKiB[p.pid] !== null));
-    const summed = (of: (s: Sample) => Record<number, number | null>) => (whole.length === 0 ? null : median(whole.map((s) => procs.reduce((sum, p) => sum + of(s)[p.pid]!, 0))));
-    const footprintKiB = summed((s) => s.footprintKiB);
-    const rssKiB = summed((s) => s.rssKiB);
-    const cpuS = lost.length > 0 ? null : Math.round(procs.reduce((sum, p) => sum + cpuAtEnd.get(p.pid)! - cpuAtStart.get(p.pid)!, 0) * 100) / 100;
-    const load = Math.max(...samples.map((s) => s.load));
-    const line = footprintKiB === null || rssKiB === null || cpuS === null ? null : idleLine({ footprintKiB, rssKiB, samples: whole.length, cpuS, measured: names, load });
-    const info = test.info();
-    mkdirSync(info.project.outputDir, { recursive: true });
-    writeFileSync(join(info.project.outputDir, 'daemon-idle.json'), `${JSON.stringify({
-      line, valid: reasons.length === 0, reasons, sha: process.env.GITHUB_SHA ?? null, runId: process.env.GITHUB_RUN_ID ?? null,
-      shape: 'detached', run: IDLE_RUN, footprintKiB, rssKiB, cpuS, load,
-      processes: procs.map((p) => ({ ...p, started: started.get(p.pid), cpuStartS: cpuAtStart.get(p.pid), cpuEndS: cpuAtEnd.get(p.pid) ?? null })),
-      crossCheck, mismatches, lost, sessionEnded, samples,
-    }, null, 2)}\n`);
-    if (line !== null) {
-      console.log(line);
-      info.annotations.push({ type: 'daemon-idle', description: line });
-    }
-    expect(reasons, 'the run is valid').toEqual([]);
+    const reasons = invalidReasons({ loads: measurement.samples.map((s) => s.load), measured: measurement.names, lost: measurement.lost, sessionEnded, mismatches: measurement.mismatches });
+    const { footprintKiB, rssKiB, cpuS, load } = measurement;
+    const line = footprintKiB === null || rssKiB === null || cpuS === null ? null : idleLine({ footprintKiB, rssKiB, samples: measurement.whole, cpuS, measured: measurement.names, load });
+    report('daemon-idle.json', line, reasons, { shape: 'detached', ...measurement.record, sessionEnded });
   } finally {
     leftover = await removeScratch(root, userData, maws, supervisor);
   }
   if (leftover !== null) throw leftover; // the body passed: a process of the scratch outliving it is the case's failure
 });
+
+// The runtime floor (P5 Decision Log 54): what `mawsd` runs on, before any of its code. The Electron binary the engine
+// host runs, as Node (ELECTRON_RUN_AS_NODE=1, `--disable-sigusr1` as the supervisor is spawned), on an empty script that
+// stays alive, with an environment of its own (no NODE_OPTIONS or loader from the test runner). Its argv names the
+// scratch root, so the window finds it and the cleanup kills it. The same settle, window, readers and load rule.
+// `pnpm e2e:daemon-idle-floor` runs this case alone; `pnpm e2e:daemon-idle` runs the other alone.
+test('daemon idle runtime floor: the physical footprint and CPU of the bare Electron runtime as Node holding an empty script alive', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-dif-')));
+  const script = join(root, 'floor.js');
+  writeFileSync(script, 'setInterval(() => {}, 1 << 30);\n');
+  const binary = join(REPO_ROOT, 'node_modules', 'electron', 'dist', readFileSync(join(REPO_ROOT, 'node_modules', 'electron', 'path.txt'), 'utf8').trim());
+  const env = { ELECTRON_RUN_AS_NODE: '1', PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: root };
+  const electron = execFileSync(binary, ['-p', 'process.versions.electron'], { env, encoding: 'utf8' }).trim();
+  let floor: ChildProcess | null = null;
+  let leftover: unknown = null;
+  try {
+    floor = spawn(binary, ['--disable-sigusr1', script], { env, stdio: 'ignore', argv0: FLOOR_ARGV0 });
+    await sleep(IDLE_RUN.settleS * 1_000);
+    const procs = measured(processesNaming(root), root, [FLOOR_ARGV0]);
+    expect(procs.map((p) => p.pid), 'the bare runtime is what is measured').toEqual([floor.pid]);
+    const measurement = await measureWindow(procs);
+
+    const reasons = invalidReasons({ loads: measurement.samples.map((s) => s.load), measured: measurement.names, lost: measurement.lost, sessionEnded: false, mismatches: measurement.mismatches });
+    const { footprintKiB, rssKiB, cpuS, load } = measurement;
+    const line = footprintKiB === null || rssKiB === null || cpuS === null ? null : floorLine({ footprintKiB, rssKiB, samples: measurement.whole, cpuS, electron, load });
+    report('daemon-idle-floor.json', line, reasons, { shape: 'runtime floor', electron, ...measurement.record });
+  } finally {
+    floor?.kill('SIGKILL');
+    await killScratchProcesses(root, floor?.pid === undefined ? [] : [floor.pid]).catch((error: unknown) => (leftover = error));
+    rmSync(root, { recursive: true, force: true });
+  }
+  if (leftover !== null) throw leftover;
+});
+
+// The window over the measured processes: their start times, then a sample every 30 s on a fixed schedule, each
+// process's footprint (proc_pid_rusage) and `ps -o rss=` summed per sample and the 1-minute load, top's cross-check at
+// the first sample, and `ps -o time=` at the start and the end.
+async function measureWindow(procs: readonly MeasuredProcess[]) {
+  const started = new Map(procs.map((p) => [p.pid, ps(p.pid, 'lstart')]));
+  const cpuAtStart = new Map(procs.map((p) => [p.pid, cpuSeconds(ps(p.pid, 'time'))]));
+  const cpuAtEnd = new Map<number, number>();
+  const samples: Sample[] = [];
+  const lost: { pid: number; argv0: string; atS: number }[] = [];
+  let crossCheck: CrossCheck | null = null;
+  const windowStart = Date.now();
+  for (let k = 0; k < IDLE_RUN.samples; k += 1) {
+    await sleep(Math.max(0, windowStart + k * IDLE_RUN.everyS * 1_000 - Date.now()));
+    const atS = Math.round((Date.now() - windowStart) / 1_000);
+    const live = procs.filter((p) => ps(p.pid, 'lstart') === started.get(p.pid));
+    const read = readFootprints(live.map((p) => p.pid));
+    const footprintOf = (pid: number) => { const f = read.get(pid); return f === undefined || 'errno' in f ? null : f.footprintKiB; };
+    if (k === 0 && live.length > 0) {
+      const top = readTopMem(live.map((p) => p.pid)); // back to back with the first reader
+      crossCheck = { atS, readings: live.filter((p) => footprintOf(p.pid) !== null).map((p) => ({ pid: p.pid, argv0: p.argv0, footprintKiB: footprintOf(p.pid)!, top: top.get(p.pid) ?? null })) };
+      console.log(`[daemon-idle] readers at ${atS} s: ${crossCheck.readings.map((r) => `${r.argv0} pid ${r.pid} proc_pid_rusage ${Math.round(r.footprintKiB)} KiB, top ${r.top?.text ?? 'none'}`).join('; ')}`);
+    }
+    const footprintKiB: Record<number, number | null> = {};
+    const rssKiB: Record<number, number | null> = {};
+    for (const p of procs) {
+      const alive = live.includes(p) && ps(p.pid, 'lstart') === started.get(p.pid); // still the same process after the read
+      if (alive && footprintOf(p.pid) === null) throw new Error(`proc_pid_rusage could not read ${p.argv0} pid ${p.pid}, which is alive (${JSON.stringify(read.get(p.pid))})`);
+      footprintKiB[p.pid] = alive ? footprintOf(p.pid) : null;
+      rssKiB[p.pid] = alive ? Number(ps(p.pid, 'rss')) : null;
+      if (!alive && !lost.some((l) => l.pid === p.pid)) lost.push({ pid: p.pid, argv0: p.argv0, atS });
+      if (alive && k === IDLE_RUN.samples - 1) cpuAtEnd.set(p.pid, cpuSeconds(ps(p.pid, 'time')));
+    }
+    samples.push({ atS, load: loadavg()[0]!, footprintKiB, rssKiB });
+  }
+
+  const names = [...new Set(procs.map((p) => p.argv0))];
+  const mismatches = readerMismatches(crossCheck?.readings ?? []);
+  const whole = samples.filter((s) => procs.every((p) => s.footprintKiB[p.pid] !== null && s.rssKiB[p.pid] !== null));
+  const summed = (of: (s: Sample) => Record<number, number | null>) => (whole.length === 0 ? null : median(whole.map((s) => procs.reduce((sum, p) => sum + of(s)[p.pid]!, 0))));
+  const footprintKiB = summed((s) => s.footprintKiB);
+  const rssKiB = summed((s) => s.rssKiB);
+  const cpuS = lost.length > 0 ? null : Math.round(procs.reduce((sum, p) => sum + cpuAtEnd.get(p.pid)! - cpuAtStart.get(p.pid)!, 0) * 100) / 100;
+  const load = Math.max(...samples.map((s) => s.load));
+  const processes = procs.map((p) => ({ ...p, started: started.get(p.pid), cpuStartS: cpuAtStart.get(p.pid), cpuEndS: cpuAtEnd.get(p.pid) ?? null }));
+  return {
+    samples, lost, mismatches, names, whole: whole.length, footprintKiB, rssKiB, cpuS, load,
+    record: { run: IDLE_RUN, footprintKiB, rssKiB, cpuS, load, processes, crossCheck, mismatches, lost, samples },
+  };
+}
+
+// The run's JSON beside the report, then its line printed and annotated, then the validity asserted.
+function report(file: string, line: string | null, reasons: string[], record: Record<string, unknown>): void {
+  const info = test.info();
+  mkdirSync(info.project.outputDir, { recursive: true });
+  writeFileSync(join(info.project.outputDir, file), `${JSON.stringify({
+    line, valid: reasons.length === 0, reasons, sha: process.env.GITHUB_SHA ?? null, runId: process.env.GITHUB_RUN_ID ?? null, ...record,
+  }, null, 2)}\n`);
+  if (line !== null) {
+    console.log(line);
+    info.annotations.push({ type: 'daemon-idle', description: line });
+  }
+  expect(reasons, 'the run is valid').toEqual([]);
+}
 
 // The app closed if it is still open, then every process of the scratch killed (the supervisor by its lock's pid too),
 // then the supervisor's socket directory and the scratch removed. A survivor is answered, after the files are removed.

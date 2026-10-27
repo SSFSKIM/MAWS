@@ -9,52 +9,71 @@
 // jobs' pressure and counts shared clean pages, so three runs of the same supervisor spread 2x on the mini; the
 // footprint keeps compressed pages and leaves shared clean ones out. RSS stays in the line and the JSON as a diagnostic.
 //
-// The baseline is three runs of `e2e:daemon-idle` at M1's commit on the mini: the median of their footprint medians and
-// the median of their CPU times, with the run ids and the commit. Until the recording commit (touching only this file)
-// writes it, it is null and the spec records only; the bound is derived from it, so it is null too.
+// The baseline is three runs of the supervisor's scene on the mini at M1's `src/`: the median of their footprint
+// medians and the median of their CPU times, with the run ids and the commit. The runtime floor (P5 Decision Log 54) is
+// three runs of the floor's scene, the bare Electron binary as Node holding an empty script alive, which is what `mawsd`
+// runs on: the median of their footprint medians, with the Electron version, since it measures the runtime and not
+// `src/`. Each is written by a recording commit touching only this file; the bound is derived from both, so it is null
+// while the floor is pending.
 import { execFileSync } from 'node:child_process';
 
 export const IDLE_RUN = { settleS: 120, windowS: 600, everyS: 30, samples: 21, maxLoad: 5 } as const;
 
-export interface DaemonIdleBaseline {
+interface IdleRecord {
   commit: string;
   runs: string[]; // the three GitHub Actions run ids
   footprintKiB: number; // the median of the runs' footprint medians, the measured processes summed per sample
+}
+
+export interface DaemonIdleBaseline extends IdleRecord {
   cpuS: number; // the median of the runs' CPU seconds over the window, summed across the measured processes
+}
+
+export interface DaemonIdleRuntimeFloor extends IdleRecord {
+  electron: string; // process.versions.electron of the binary the floor ran
 }
 
 // Recorded from three e2e:daemon-idle runs on the mini at d14e92991, the footprint reader on M1's `src/` (P5 Decision
 // Log 54): footprints 64481, 66033 and 63969 KiB, CPU 0.12, 0.11 and 0.11 s, load 3.3, 3.0 and 2.7.
-export const DAEMON_IDLE_BASELINE: DaemonIdleBaseline | null = { commit: 'd14e92991', runs: ['40490756731', '40492851056', '40495339208'], footprintKiB: 64481, cpuS: 0.11 };
+export const DAEMON_IDLE_BASELINE: DaemonIdleBaseline = { commit: 'd14e92991', runs: ['40490756731', '40492851056', '40495339208'], footprintKiB: 64481, cpuS: 0.11 };
+
+// PENDING: recorded from three e2e:daemon-idle-floor runs on the mini (P5 Decision Log 54).
+export const DAEMON_IDLE_RUNTIME_FLOOR: DaemonIdleRuntimeFloor | null = null;
 
 export interface DaemonIdleBound {
-  footprintKiB: number;
-  cpuS: number; // over IDLE_RUN.windowS
+  engineHostFootprintKiB: number;
+  mawsdFootprintKiB: number;
+  cpuS: number; // the daemon shape's processes together, over IDLE_RUN.windowS
 }
 
 export const FOOTPRINT_FACTOR = 1.5;
 export const CPU_ALLOWANCE_S_PER_600 = 1.0;
 
-// The daemon shape's processes together stay within 1.5 times the baseline's footprint (in whole KiB, never above it)
-// and within its CPU time plus 1.0 s per 600 s of window (in centiseconds, ps's resolution): the shape adds one Node
-// process that loads less than the engine host and adds no periodic work.
-export function idleBound(baseline: DaemonIdleBaseline, windowS: number = IDLE_RUN.windowS): DaemonIdleBound {
+// The memory bound is per process (P5 Decision Log 54): the engine host within 1.5 times the supervisor's baseline
+// footprint, and `mawsd` within 1.5 times the footprint of the bare runtime it runs on, each in whole KiB, never above
+// 1.5x. A combined 1.5x would leave `mawsd` less than its runtime alone costs, judging the shape P5 chose rather than a
+// regression in either process. The CPU bound is combined: the baseline's CPU time plus 1.0 s per 600 s of window (in
+// centiseconds, ps's resolution), since the shape adds no periodic work.
+export function idleBound(baseline: DaemonIdleBaseline, floor: DaemonIdleRuntimeFloor, windowS: number = IDLE_RUN.windowS): DaemonIdleBound {
   return {
-    footprintKiB: Math.floor(baseline.footprintKiB * FOOTPRINT_FACTOR),
+    engineHostFootprintKiB: Math.floor(baseline.footprintKiB * FOOTPRINT_FACTOR),
+    mawsdFootprintKiB: Math.floor(floor.footprintKiB * FOOTPRINT_FACTOR),
     cpuS: Math.round((baseline.cpuS + (CPU_ALLOWANCE_S_PER_600 * windowS) / 600) * 100) / 100,
   };
 }
 
-export const DAEMON_IDLE_BOUND: DaemonIdleBound | null = DAEMON_IDLE_BASELINE === null ? null : idleBound(DAEMON_IDLE_BASELINE);
+export const DAEMON_IDLE_BOUND: DaemonIdleBound | null = DAEMON_IDLE_RUNTIME_FLOOR === null ? null : idleBound(DAEMON_IDLE_BASELINE, DAEMON_IDLE_RUNTIME_FLOOR);
 
-// What is wrong with a recorded baseline, each one line; empty when it is well formed, and for none recorded yet.
-export function baselineProblems(baseline: DaemonIdleBaseline | null): string[] {
-  if (baseline === null) return [];
+// What is wrong with a recorded baseline or runtime floor, each one line; empty when it is well formed, and for none
+// recorded yet.
+export function baselineProblems(record: DaemonIdleBaseline | DaemonIdleRuntimeFloor | null): string[] {
+  if (record === null) return [];
   const problems: string[] = [];
-  if (!/^[0-9a-f]{7,40}$/.test(baseline.commit)) problems.push(`commit ${baseline.commit} is not a sha`);
-  if (baseline.runs.length !== 3 || new Set(baseline.runs).size !== 3) problems.push(`runs [${baseline.runs.join(', ')}] are not three distinct run ids`);
-  if (!(baseline.footprintKiB > 0)) problems.push(`footprintKiB ${baseline.footprintKiB} is not a positive number of KiB`);
-  if (!(baseline.cpuS >= 0)) problems.push(`cpuS ${baseline.cpuS} is negative`);
+  if (!/^[0-9a-f]{7,40}$/.test(record.commit)) problems.push(`commit ${record.commit} is not a sha`);
+  if (record.runs.length !== 3 || new Set(record.runs).size !== 3) problems.push(`runs [${record.runs.join(', ')}] are not three distinct run ids`);
+  if (!(record.footprintKiB > 0)) problems.push(`footprintKiB ${record.footprintKiB} is not a positive number of KiB`);
+  if ('cpuS' in record && !(record.cpuS >= 0)) problems.push(`cpuS ${record.cpuS} is negative`);
+  if ('electron' in record && !/^\d+\.\d+\.\d+(?:-[\w.]+)?$/.test(record.electron)) problems.push(`electron ${record.electron} is not a version`);
   return problems;
 }
 
@@ -193,6 +212,11 @@ export function invalidReasons(run: IdleRunCheck): string[] {
   if (run.sessionEnded) reasons.push('the kept session ended before the window did (the scene measures one held idle session)');
   reasons.push(...run.mismatches);
   return reasons;
+}
+
+// The runtime floor's line, with the Electron version the floor measured.
+export function floorLine(run: { footprintKiB: number; rssKiB: number; samples: number; cpuS: number; electron: string; load: number }): string {
+  return `[daemon-idle] runtime floor footprint ${Math.round(run.footprintKiB)} KiB (median of ${run.samples}) · rss ${Math.round(run.rssKiB)} KiB · cpu ${run.cpuS.toFixed(2)} s · electron ${run.electron} · load ${run.load.toFixed(1)}`;
 }
 
 // The job log's line; `load` is the highest 1-minute load the window read.

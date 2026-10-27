@@ -4,6 +4,8 @@ import {
   cpuSeconds,
   DAEMON_IDLE_BASELINE,
   DAEMON_IDLE_BOUND,
+  DAEMON_IDLE_RUNTIME_FLOOR,
+  floorLine,
   footprints,
   IDLE_RUN,
   idleBound,
@@ -140,34 +142,46 @@ describe('the window', () => {
   });
 });
 
-describe('the baseline and the bound (acceptance 7; P5 acceptance 14, Decision Log 48)', () => {
+describe('the baseline, the runtime floor and the bound (acceptance 7; P5 acceptance 14, Decision Logs 48 and 54)', () => {
   const baseline = { commit: '1a2b3c4d5', runs: ['41000000001', '41000000002', '41000000003'], footprintKiB: 98_304, cpuS: 0.41 };
+  const floor = { commit: '1a2b3c4d5', runs: ['41000000004', '41000000005', '41000000006'], footprintKiB: 20_480, electron: '44.4.5' };
 
-  it("is 1.5 times the baseline's physical footprint and its CPU plus 1.0 s per 600 s", () => {
-    expect(idleBound(baseline)).toEqual({ footprintKiB: 147_456, cpuS: 1.41 });
-    expect(idleBound({ ...baseline, footprintKiB: 98_305, cpuS: 2.07 })).toEqual({ footprintKiB: 147_457, cpuS: 3.07 }); // whole KiB, never above 1.5x
-    expect(idleBound(baseline, 1_200)).toEqual({ footprintKiB: 147_456, cpuS: 2.41 }); // the allowance is per 600 s
+  it("holds the engine host within 1.5 times the supervisor's footprint, mawsd within 1.5 times its bare runtime's, and the two together within the CPU plus 1.0 s per 600 s", () => {
+    expect(idleBound(baseline, floor)).toEqual({ engineHostFootprintKiB: 147_456, mawsdFootprintKiB: 30_720, cpuS: 1.41 });
+    expect(idleBound({ ...baseline, footprintKiB: 98_305, cpuS: 2.07 }, { ...floor, footprintKiB: 20_481 })).toEqual({ engineHostFootprintKiB: 147_457, mawsdFootprintKiB: 30_721, cpuS: 3.07 }); // whole KiB, never above 1.5x
+    expect(idleBound(baseline, floor, 1_200)).toEqual({ engineHostFootprintKiB: 147_456, mawsdFootprintKiB: 30_720, cpuS: 2.41 }); // the allowance is per 600 s
   });
 
-  it('is derived from the recorded baseline, and is none while none is recorded', () => {
-    expect(DAEMON_IDLE_BOUND).toEqual(DAEMON_IDLE_BASELINE === null ? null : idleBound(DAEMON_IDLE_BASELINE));
+  it("is derived from the recorded baseline and floor, and is none while the floor is pending; the engine host's is 96721 KiB", () => {
+    expect(DAEMON_IDLE_BOUND).toEqual(DAEMON_IDLE_RUNTIME_FLOOR === null ? null : idleBound(DAEMON_IDLE_BASELINE, DAEMON_IDLE_RUNTIME_FLOOR));
+    expect(idleBound(DAEMON_IDLE_BASELINE, floor).engineHostFootprintKiB).toBe(96_721);
   });
 
-  it('a baseline is three distinct runs at a commit, with a positive footprint and a CPU time that is not negative', () => {
+  it('a record is three distinct runs at a commit with a positive footprint, a baseline a CPU time that is not negative, and a floor the Electron version it ran on', () => {
     expect(baselineProblems(null)).toEqual([]); // not yet recorded: nothing to hold
     expect(baselineProblems(baseline)).toEqual([]);
+    expect(baselineProblems(floor)).toEqual([]);
     expect(baselineProblems({ commit: 'HEAD', runs: ['1', '1'], footprintKiB: 0, cpuS: -0.01 })).toEqual([
       'commit HEAD is not a sha',
       'runs [1, 1] are not three distinct run ids',
       'footprintKiB 0 is not a positive number of KiB',
       'cpuS -0.01 is negative',
     ]);
+    expect(baselineProblems({ ...floor, runs: ['1', '2'], footprintKiB: Number.NaN, electron: 'v44' })).toEqual([
+      'runs [1, 2] are not three distinct run ids',
+      'footprintKiB NaN is not a positive number of KiB',
+      'electron v44 is not a version',
+    ]);
   });
 
-  // The recorded baseline itself, once the commit that records it (touching only daemon-idle.ts) lands; until then the
-  // case is reported as skipped, not passed.
-  it.skipIf(DAEMON_IDLE_BASELINE === null)('the recorded baseline is well formed', () => {
+  it('the recorded baseline is well formed', () => {
     expect(baselineProblems(DAEMON_IDLE_BASELINE)).toEqual([]);
+  });
+
+  // The recorded floor itself, once the commit that records it (touching only daemon-idle.ts) lands; until then the
+  // case is reported as skipped, not passed.
+  it.skipIf(DAEMON_IDLE_RUNTIME_FLOOR === null)('the recorded runtime floor is well formed', () => {
+    expect(baselineProblems(DAEMON_IDLE_RUNTIME_FLOOR)).toEqual([]);
   });
 });
 
@@ -178,6 +192,12 @@ describe('the printed line', () => {
     );
     expect(idleLine({ footprintKiB: 80_000.5, rssKiB: 120_000.5, samples: 21, cpuS: 1, measured: ['mawsd', 'maws-supervisor'], load: 0.04 })).toBe(
       '[daemon-idle] footprint 80001 KiB (median of 21) · rss 120001 KiB · cpu 1.00 s over 600 s · processes mawsd, maws-supervisor · load 0.0',
+    );
+  });
+
+  it("reads the runtime floor's line with the Electron version it measured", () => {
+    expect(floorLine({ footprintKiB: 20_480.4, rssKiB: 41_000, samples: 21, cpuS: 0.03, electron: '44.4.5', load: 2.71 })).toBe(
+      '[daemon-idle] runtime floor footprint 20480 KiB (median of 21) · rss 41000 KiB · cpu 0.03 s · electron 44.4.5 · load 2.7',
     );
   });
 });
