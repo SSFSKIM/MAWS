@@ -105,6 +105,9 @@ import {
   CLAIM_HOLD_PATH,
   CLAIM_HELD_PATH,
   CLAIM_RELEASE_PATH,
+  UPGRADE_HOLD_PATH,
+  UPGRADE_HELD_PATH,
+  UPGRADE_RELEASE_PATH,
   RELAY_FAULT_PATH,
   CLAIM_PATH,
 } from './send-fault';
@@ -160,6 +163,12 @@ export class Registry extends DeployedRegistry {
   memberPushSubscriptions(member: MemberRecord): ReturnType<DeployedRegistry['memberPushSubscriptions']> {
     if (this.ctx.storage.kv.get<string>('lacks') === 'memberPushSubscriptions') throw new TypeError('The RPC receiver does not implement the method "memberPushSubscriptions".');
     return super.memberPushSubscriptions(member);
+  }
+
+  /** Armed, refused as a Registry on the code before the relay's binding check would refuse it. */
+  machineBinds(name: string, ref: string): ReturnType<DeployedRegistry['machineBinds']> {
+    if (this.ctx.storage.kv.get<string>('lacks') === 'machineBinds') throw new TypeError('The RPC receiver does not implement the method "machineBinds".');
+    return super.machineBinds(name, ref);
   }
 
   /** Armed, the next report is taken as the version before `live` took it, once: its counts stored without `live`, and
@@ -316,6 +325,8 @@ export class Machine extends DeployedMachine {
   private release: (() => void) | undefined;
   private claimHeld = false;
   private claimRelease: (() => void) | undefined;
+  private upgradeHeld = false;
+  private upgradeRelease: (() => void) | undefined;
   private replacedArmed = false;
   private revokeRelease: (() => void) | undefined;
 
@@ -342,6 +353,21 @@ export class Machine extends DeployedMachine {
       this.claimRelease = undefined;
       release?.();
       return new Response(release ? 'released' : 'none');
+    }
+    if (url.pathname === UPGRADE_HOLD_PATH) {
+      this.upgradeHeld = true;
+      return new Response('armed');
+    }
+    if (url.pathname === UPGRADE_HELD_PATH) return new Response(this.upgradeRelease ? 'held' : 'none');
+    if (url.pathname === UPGRADE_RELEASE_PATH) {
+      const release = this.upgradeRelease;
+      this.upgradeRelease = undefined;
+      release?.();
+      return new Response(release ? 'released' : 'none');
+    }
+    if (url.pathname === '/socket' && this.upgradeHeld) {
+      this.upgradeHeld = false;
+      await new Promise<void>((resolve) => (this.upgradeRelease = resolve));
     }
     if (url.pathname === CLAIM_PATH) {
       const { org, name, ref, client } = (await request.json()) as { org: string; name: string; ref: string; client: string };

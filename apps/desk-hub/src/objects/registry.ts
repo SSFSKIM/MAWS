@@ -268,7 +268,10 @@ export class Registry extends DurableObject<Env> {
         this.sql.exec("UPDATE enrollments SET state = 'confirmed' WHERE id = ?", enrollment.id);
         return this.keepMachineProject(project, machine.name);
       });
-      if (listed) this.toGrid({ t: 'summary', project: this.summaryOf(this.project(project)!) });
+      if (listed) {
+        this.seedProject(project);
+        this.toGrid({ t: 'summary', project: this.summaryOf(this.project(project)!) });
+      }
       this.directoryChanged();
       return { kind: 'machine', org, machine: { ...machine, state: 'active', confirmed } };
     }
@@ -646,10 +649,25 @@ export class Registry extends DurableObject<Env> {
       : this.sql.exec("INSERT INTO projects (id, name, registered_by, created, archive_machine, kind, machine, retired) VALUES (?, ?, ?, ?, NULL, 'hub', NULL, 0)", id, name, machine, iso(Date.now())).rowsWritten > 0;
     const project = this.project(id)!;
     if (listed) {
+      this.seedProject(id);
       this.toGrid({ t: 'summary', project: this.summaryOf(project) });
       this.directoryChanged();
     }
     return project;
+  }
+
+  /**
+   * A project new to the grid is owed the head now, as a relay's object is from its first socket (`relayed`): the states
+   * accepted before were announced only to the projects held then, and a project told none admits any member. A socket
+   * it admits before this announcement lands is closed by it, as one admitted just before a removal is.
+   */
+  private seedProject(id: string): void {
+    const version = this.chain.head()?.state.version;
+    if (version === undefined) return;
+    const members = this.memberIds();
+    this.owe(id, version, members);
+    void this.announce(this.ensureOrg().id, { project: id, version, members });
+    void this.scheduleAlarm().catch(() => {});
   }
 
   /** Registers an enrolled machine's project under its name, or reactivates it; true when it was not on the grid. */
@@ -1323,6 +1341,12 @@ export class Registry extends DurableObject<Env> {
     const ref = this.records.refBound(machine) ? machine : this.records.boundRef(machine);
     if (ref !== null) this.relayed(ref);
     return ref;
+  }
+
+  /** Whether a signed record still binds the machine name `name` to `ref` (`machineRefOf`'s binding): asked by the ref's
+   * object as it installs an endpoint the Worker resolved earlier, so a rename accepted meanwhile refuses it. */
+  machineBinds(name: string, ref: string): boolean {
+    return this.records.boundRef(name) === ref;
   }
 
   /** A relay's object, kept from its first socket on: it is owed every state from then (`submitState`), and the head

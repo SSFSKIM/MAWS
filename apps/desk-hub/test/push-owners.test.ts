@@ -11,7 +11,7 @@ import { newNonce } from '../src/protocol/codes';
 import type { LogEvent } from '../src/protocol/log';
 import { enroll, MachineClient, refusal, waitFor } from './support/clients';
 import { ADMIN, ORG, startLocalHub, type LocalHub } from './support/local';
-import { genesis, memberId, newDevice, next, revokedDevice, signedBy, type TestDevice } from './support/org';
+import { endorsed, genesis, memberId, newDevice, next, revokedDevice, signedBy, type TestDevice } from './support/org';
 import { decrypt, userAgent, type UserAgent } from './support/push';
 
 let hub: LocalHub;
@@ -119,6 +119,30 @@ describe('a v2 notice', () => {
     });
     const pushed = await pushedBy(() => notify({ project: PROJECT, session: SESSION, kind: 'waiting' }));
     expect([...pushed.keys()]).toEqual([phoneB.endpoint]);
+  });
+
+  it('is not pushed to a device id the head lists again with other keys, until that device subscribes', async () => {
+    const waiting = () => pushedBy(() => notify({ project: PROJECT, session: SESSION, kind: 'waiting' }));
+    const devicesOfB = (devices: TestDevice['device'][], revoked: Awaited<ReturnType<typeof revokedDevice>>) =>
+      accept((s) => {
+        s.members.find((m) => m.id === B)!.devices = devices;
+        s.revoked.push(...revoked);
+      });
+    // Removed, then its id listed again for a new device: phoneB's subscription was the old device's.
+    await devicesOfB([], await revokedDevice(B, b1.device));
+    expect([...(await waiting()).keys()]).toEqual([]);
+    const reused = await newDevice('b1');
+    await devicesOfB([reused.device], []);
+    expect([...(await waiting()).keys()]).toEqual([]);
+    // The new device subscribes; then, in one step, its id is given to a replacement it endorsed, its own keys revoked.
+    expect((await subscribe(MEMBER_B, phoneB, 'b1')).status).toBe(200);
+    expect([...(await waiting()).keys()]).toEqual([phoneB.endpoint]);
+    const replacement = await endorsed(ORG, B, await newDevice('b1'), reused);
+    await devicesOfB([replacement.device], await revokedDevice(B, reused.device));
+    expect([...(await waiting()).keys()]).toEqual([]);
+    // Bound again for the suites after this one.
+    expect((await subscribe(MEMBER_B, phoneB, 'b1')).status).toBe(200);
+    expect([...(await waiting()).keys()]).toEqual([phoneB.endpoint]);
   });
 });
 

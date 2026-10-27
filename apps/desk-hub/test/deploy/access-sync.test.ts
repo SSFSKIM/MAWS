@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { admittedEmails, checkpointFile, syncAccess } from '../../deploy/access-sync.ts';
 import type { DeployConfig } from '../../deploy/config.ts';
 import type { OrgStateView } from '../../src/protocol/identity.ts';
-import { fakeAccessApi } from '../support/access-api.ts';
+import { fakeAccessApi, pagedAccessApi } from '../support/access-api.ts';
 import { accessPlan, reconcileAccess } from '../../deploy/access.ts';
 
 const config: DeployConfig = { account: 'acct', worker: 'desk-hub-staging', host: 'desk-hub-staging.example.workers.dev', ownerEmail: 'owner@example.com', sessionDuration: '24h', org: { id: 'staging-x', name: 'X' } };
@@ -40,6 +40,17 @@ describe('syncing the people policy', () => {
     const synced = await syncAccess(access.api, config, { head: null, transitions: [], certificates: empty });
     expect(synced.readBack).toEqual(['owner@example.com']);
     expect([...access.policies.values()]).toEqual([expect.objectContaining({ name: 'desk-hub-staging owner', decision: 'allow' })]);
+  });
+});
+
+describe('finding the people policy', () => {
+  it('searches every page of the account’s policies: one past the first page is updated, not duplicated', async () => {
+    const others = Array.from({ length: 45 }, (_, i) => `other ${i}`);
+    const access = pagedAccessApi([...others, 'desk-hub-staging owner']);
+    const synced = await syncAccess(access.api, config, viewOf(['owner@example.com', 'b@example.com']));
+    expect(access.calls.filter((c) => !c.startsWith('GET'))).toEqual(['PUT /access/policies/policies-45']);
+    expect(access.policies.filter((p) => p.name === 'desk-hub-staging owner')).toHaveLength(1);
+    expect(synced.readBack).toEqual(['b@example.com', 'owner@example.com']);
   });
 });
 

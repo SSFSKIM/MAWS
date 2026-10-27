@@ -55,7 +55,7 @@ stamp() { date -u +%Y%m%dT%H%M%SZ; }
 filter() { perl -ne 'print if /^wrangler target / || !/token|secret|bearer|eyJ/i'; }
 # A deployment's X-Desk-Build, credential-free; stops the script unless it names a hub build.
 header() {
-  local h=$(curl -sI --max-time 30 -X POST $1/machine/enroll | /usr/bin/grep -i '^x-desk-build:' | tr -d '\r')
+  local h=$(curl -q -sI --max-time 30 -X POST $1/machine/enroll | /usr/bin/grep -i '^x-desk-build:' | tr -d '\r')
   [[ $h =~ '^[Xx]-[Dd]esk-[Bb]uild: hub@[0-9a-f]{8}' ]] || { print -r -- "no valid X-Desk-Build from $1 (read: '${h}'): stop"; exit 3; }
   print -r -- $h
 }
@@ -146,6 +146,9 @@ case $step in
     [[ $step == desk-web && $# -gt 0 ]] && { print -r -- "desk-web takes no option (given: $*): stop. Nothing was changed."; exit 2; }
     org=staging-probe-$n
     LOG=$O/$step-$n.log; : > $LOG
+    # What the desk-web check saw besides the token (the enrollment code, its token, the org key), one a line, for the
+    # scan below; removed with the run.
+    SCAN=$O/$step-$n.scan; : > $SCAN
     say() { print -r -- "$*" | tee -a $LOG; }
     owner_token
     cat $S/CF_ACCESS_SETUP_TOKEN | python3 -B -I $HERE/staging-sweep.py snapshot $ACCOUNT $O/$step-$n-before.json | tee -a $LOG
@@ -156,12 +159,14 @@ case $step in
     finalize() {
       local first=$?
       (( finalized )) && return; finalized=1
+      rm -f $SCAN
       cat $S/CF_ACCESS_SETUP_TOKEN | python3 -B -I $HERE/staging-sweep.py sweep $ACCOUNT $O/$step-$n-before.json $org $O/$step-$n-sweep.json | tee -a $LOG
       swept=${pipestatus[2]}; say "sweep exit $swept"
       zsh $HERE/staging-deploy.sh --checkout $W 2>&1 | filter | tail -6 | tee -a $LOG
       restored=${pipestatus[1]}
-      # Which org staging serves now: curl's configuration (the token) through a pipe, never an argument or a file.
-      served=$(printf 'header = "cf-access-token: %s"\nurl = "%s/api/me"\n' "$T" "$URL" | curl -sf --max-time 30 -K - | python3 -B -I -c 'import json,sys; print(json.load(sys.stdin)["org"]["id"])' 2>/dev/null)
+      # Which org staging serves now: curl's configuration (the token) through a pipe, never an argument or a file, and
+      # no ~/.curlrc (-q, first), whose verbose or trace options would print or keep the token.
+      served=$(printf 'header = "cf-access-token: %s"\nurl = "%s/api/me"\n' "$T" "$URL" | curl -q -sf --max-time 30 -K - | python3 -B -I -c 'import json,sys; print(json.load(sys.stdin)["org"]["id"])' 2>/dev/null)
       unset T
       say "restore exit $restored; staging serves org: ${served:-unknown}; log $LOG"
       [[ -n $served ]] || say "restore check failed: /api/me gave no org within 30 s (no answer, an error status or an unreadable body)"
@@ -183,14 +188,15 @@ case $step in
       checks+=(${pipestatus[2]}); say "redeploy-check exit ${checks[-1]}"
     else
       # Acceptance 8's desk-web check (apps/desk-web/e2e-staging): Playwright's headless Chromium, the token its
-      # cookie; no trace, video or HAR. It runs in an environment of this script's choosing (no PWDEBUG, PW_* or
-      # PLAYWRIGHT_* passes through), and its configuration refuses any option or such variable as well. Afterwards
-      # every file it wrote is searched for the token (read from a pipe, never an argument): none may hold it.
+      # cookie; no trace, video, HAR or failure context. It runs in an environment of this script's choosing (no
+      # PWDEBUG, PW_* or PLAYWRIGHT_* passes through), and its configuration refuses any option or such variable as
+      # well. Afterwards every file it wrote is searched for the token and for what the check listed in $SCAN (the
+      # enrollment code, its token, the org key), the patterns read from a pipe, never an argument: none may hold one.
       shots=$O/desk-web-$n; mkdir -p $shots
-      ( cd $W/apps/desk-web && env -i HOME=$HOME PATH=$PATH USER=$USER TMPDIR=${TMPDIR:-/tmp} LANG=${LANG:-C} DESK_STAGING_TEST_ORG=$org DESK_STAGING_SHOTS=$shots npx playwright test -c playwright.staging.config.ts ) 2>&1 | filter | tee -a $LOG
+      ( cd $W/apps/desk-web && env -i HOME=$HOME PATH=$PATH USER=$USER TMPDIR=${TMPDIR:-/tmp} LANG=${LANG:-C} DESK_STAGING_TEST_ORG=$org DESK_STAGING_SHOTS=$shots DESK_STAGING_SCAN=$SCAN npx playwright test -c playwright.staging.config.ts ) 2>&1 | filter | tee -a $LOG
       checks+=(${pipestatus[1]}); say "desk-web check exit ${checks[-1]}; screenshots: $(cd $shots && print -r -- *.png(N))"
-      holding=$(/usr/bin/grep -rlF -f <(print -r -- "$T") $shots $LOG 2>/dev/null | wc -l | tr -d ' ')
-      say "files holding the Access token: $holding"
+      holding=$(/usr/bin/grep -rlF -f <(print -r -- "$T"; /usr/bin/grep -v '^$' $SCAN) $shots $LOG 2>/dev/null | wc -l | tr -d ' ')
+      say "files holding the Access token or the enrollment code: $holding"
       (( holding == 0 )) || checks+=(1)
     fi
     exit 0 ;;

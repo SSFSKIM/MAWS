@@ -28,17 +28,33 @@ export class PartJoiner {
 /** `http(s)://…` → `ws(s)://…`. */
 export const socketUrl = (base: string, path: string) => `${base.replace(/\/$/, '').replace(/^http/, 'ws')}${path}`;
 
-/**
- * Opens a WebSocket with `headers` (Node's WebSocket, undici's, takes headers in place of the protocols argument) and
- * resolves once it is open; a refused upgrade rejects, naming `what`.
- */
-export function openSocket(url: string, headers: Headers, what: string): Promise<WebSocket> {
+/** A WebSocket to `url` with `headers` (Node's WebSocket, undici's, takes headers in place of the protocols argument),
+ * not yet open. */
+export function newSocket(url: string, headers: Headers): WebSocket {
   const socket = new WebSocket(url, { headers } as unknown as string[]);
   socket.binaryType = 'arraybuffer';
+  return socket;
+}
+
+/**
+ * Resolves once `socket` is open; a refused upgrade rejects, naming `what`, and so does one unanswered past `ms`, the
+ * socket closed while connecting (which fails it: it never opens): a caller's bound holds however far the server got.
+ */
+export function opened(socket: WebSocket, what: string, ms: number): Promise<WebSocket> {
+  let unanswered: ReturnType<typeof setTimeout> | undefined;
   return new Promise<WebSocket>((resolve, reject) => {
     socket.addEventListener('open', () => resolve(socket));
     socket.addEventListener('error', () => reject(new Error(`the ${what} socket was refused`)));
-  });
+    unanswered = setTimeout(() => {
+      reject(new Error(`the ${what} socket's upgrade went unanswered for ${ms} ms`));
+      socket.close();
+    }, ms);
+  }).finally(() => clearTimeout(unanswered));
+}
+
+/** Opens a WebSocket with `headers` and resolves once it is open (`opened`). */
+export function openSocket(url: string, headers: Headers, what: string, ms: number): Promise<WebSocket> {
+  return opened(newSocket(url, headers), what, ms);
 }
 
 /** Waits until `probe` answers something other than undefined; throws naming `what` past `ms`. */

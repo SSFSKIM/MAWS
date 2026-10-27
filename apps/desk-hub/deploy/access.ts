@@ -9,10 +9,10 @@
 //   redemption (`POST /machine/enroll`, guarded by its one-time token) and for the web app's manifest and icons, which
 //   iOS fetches for a home-screen app without the Access cookie and which carry nothing of the org.
 //
-// Policies are the account's reusable ones, each found by name; applications are found by name too, so a second run
-// updates in place. The one exception is the people policy (`<worker> owner`): a deploy creates it with the owner alone
-// and never rewrites it after, since its include list is `deployment access-sync`'s, reconciled to the org state's
-// member emails (O11 M3), and a deploy that reset it would shut out every member the state admitted.
+// Policies are the account's reusable ones, each found by name among every page of them; applications are found by name
+// too, so a second run updates in place. The one exception is the people policy (`<worker> owner`): a deploy creates it
+// with the owner alone and never rewrites it after, since its include list is `deployment access-sync`'s, reconciled to
+// the org state's member emails (O11 M3), and a deploy that reset it would shut out every member the state admitted.
 import { REDEEM_PATH } from '../src/protocol/identity';
 
 export type AccessConfig = {
@@ -102,6 +102,20 @@ export function cfApi(token: string, account: string, fetcher: typeof fetch = fe
 
 type Named = { id: string; name: string };
 
+/** Rows a list call asks for at once: under every Access list's maximum, so a page holding fewer is the last. */
+const PER_PAGE = 50;
+
+/** Every record of the collection at `path`, page by page: a list call that names no page answers the first alone, and
+ * a lookup by name that read only it would miss a record further on (and create a second of that name). */
+export async function listAll<T>(api: CfApi, path: string): Promise<T[]> {
+  const all: T[] = [];
+  for (let page = 1; ; page++) {
+    const rows = await api.request<T[]>('GET', `${path}?page=${page}&per_page=${PER_PAGE}`);
+    all.push(...rows);
+    if (rows.length < PER_PAGE) return all;
+  }
+}
+
 /** Creates or updates, by name, the record `body` describes in the collection at `path`; its id. */
 export async function upsert(api: CfApi, path: string, existing: Named[], body: { name: string }): Promise<Named & Record<string, unknown>> {
   const found = existing.find((record) => record.name === body.name);
@@ -113,14 +127,14 @@ export type AccessState = { aud: string; apps: Record<string, string>; policies:
 /** Brings the account's Access policies and applications to the plan; the main application's AUD and every id. */
 export async function reconcileAccess(api: CfApi, plan: AccessPlan): Promise<AccessState> {
   const policyIds: Record<string, string> = {};
-  const policies = await api.request<Named[]>('GET', '/access/policies');
+  const policies = await listAll<Named>(api, '/access/policies');
   for (const { createOnly, ...spec } of plan.policies) {
     const found = createOnly ? policies.find((p) => p.name === spec.name) : undefined;
     policyIds[spec.name] = (found ?? (await upsert(api, '/access/policies', policies, spec))).id;
   }
   const appIds: Record<string, string> = {};
   let aud = '';
-  const apps = await api.request<Named[]>('GET', '/access/apps');
+  const apps = await listAll<Named>(api, '/access/apps');
   for (const spec of plan.apps) {
     const body = { ...spec, policies: spec.policies.map(({ name }, i) => ({ id: policyIds[name], precedence: i + 1 })) };
     const app = await upsert(api, '/access/apps', apps, body);
