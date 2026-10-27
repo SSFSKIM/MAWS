@@ -275,6 +275,13 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
     function admitted(admission: Admission, peer: WirePeer, appPid: number, line: (counts: { liveSessions: number; rows: number }, identity?: SupervisorIdentity) => ServerWelcome | ServerWelcomeV2): void {
       socket.off('data', onData);
       if (socket.destroyed) return;
+      // the peer left while its admission was pending: on a half-open server its FIN ends the socket without destroying
+      // it, and a port built now would never hear that end
+      if (socket.readableEnded) {
+        log('closed a connection whose peer left before its admission answered');
+        socket.destroy();
+        return;
+      }
       if (admission.kind === 'close') {
         log(`closed a connection: ${admission.why}`);
         socket.destroy();

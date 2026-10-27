@@ -221,6 +221,9 @@ export interface DetachedTransport {
   // P5 O2 M5: the exit-when-idle asked of the served host is taken back (the host was told so by command): its next
   // close is read as any other, not as the idle exit. False when nothing is served.
   disarmIdle(): boolean;
+  // P5 O2 M5: the served host was armed to exit when idle by command (`host.exitWhenIdle {armed: true}`, which writes no
+  // `exit` line): its close once it is gone is the idle exit, deliberate, as after `exit idle`. False when nothing is served.
+  expectIdleExit(): boolean;
   // terminal: the socket closed with no `exit` sent; the supervisor keeps serving; nothing restarts. E11: answers once
   // the draining close has ended (the supervisor closed its side, or the port's grace destroyed the socket), so the
   // quit can wait for the last lines before the process exits; nothing when nothing is served (Decision Log 28)
@@ -714,10 +717,11 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       stopped = true; // the quit's stop-all ended the supervisor, or it closed first: either way nothing follows
       return events.disconnected();
     }
-    // P5 O2 M3: a recycle's drain has ended: a fresh attempt at once, with nothing reported
+    // P5 O2 M3: a recycle's drain has ended: a fresh attempt at once, with nothing reported. P5 O2 M5: unless the host
+    // was asked to exit now (a stop-all, `exit now`): its close stays deliberate, so an on-demand host parks
     if (connection.recycled) {
       connection.recycled();
-      return launch();
+      if (connection.exitAsked !== 'now') return launch();
     }
     if (connection.replaced) {
       log(`another client replaced this app at supervisor pid ${connection.proc.pid}`);
@@ -850,6 +854,13 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       return new Promise((resolve) => launch(false, resolve));
     },
     // P5 O2 M3 end
+    expectIdleExit() {
+      if (!served || stopped) return false;
+      if (served.exitAsked !== 'now') served.exitAsked = 'idle';
+      idleArmed = served.proc;
+      log(`supervisor pid ${served.proc.pid} is armed to exit when idle`);
+      return true;
+    },
     disarmIdle() {
       if (!served || stopped) return false;
       idleArmed = null;

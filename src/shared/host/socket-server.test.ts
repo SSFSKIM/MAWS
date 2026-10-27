@@ -435,6 +435,29 @@ describe('the socket layer’s admission (server side, P5 O2 M5)', () => {
     expect(admit).not.toHaveBeenCalled();
   });
 
+  // M5 review: on a half-open server a FIN during admission ends the socket without destroying it
+  it('welcomes nobody whose peer left while its admission was pending (a half-open server included)', async () => {
+    for (const halfOpen of [true, false]) {
+      let admitNow!: () => void;
+      const host = await start({
+        halfOpen,
+        admit: () => new Promise((resolve) => (admitNow = () => resolve({ kind: 'welcome', identity: UPSTREAM, counts: { liveSessions: 0, rows: 0 } }))),
+      });
+      const client = await host.connect();
+      client.send(hello());
+      await settle();
+      client.socket.end(); // its FIN, before the answer
+      await settle();
+      admitNow();
+      await settle();
+      expect(host.changes).toEqual([]);
+      expect(host.served.connected()).toBe(false);
+      expect(host.served.count()).toBe(0);
+      await client.closed;
+      expect(client.lines).toEqual([]);
+    }
+  });
+
   it('marks an exit on a served connection as not refused', async () => {
     const host = await start({ admit: async () => ({ kind: 'welcome', identity: UPSTREAM, counts: { liveSessions: 0, rows: 0 } }) });
     const client = await host.connect();

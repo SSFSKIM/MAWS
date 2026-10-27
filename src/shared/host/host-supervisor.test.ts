@@ -190,6 +190,29 @@ describe('recycle', () => {
     expect(seen.map((s) => s.state)).toEqual(['ready', 'restarting', 'ready']);
   });
 
+  // M5 review: a quit's departure recycles a host a stop-all (or exit now) is ending; it must park, not reconnect
+  for (const asked of ['stop-all', 'exit now'] as const) {
+    it(`of an on-demand host asked to exit (${asked}): drains in order, reconnects nothing, parks and resolves`, async () => {
+      onSpawn = (candidate) => void startFake({ pid: candidate.pid, onExitNow: () => {} }); // the exit comes 100 ms later
+      const supervisor = makeSupervisor({ 'engine-host': { onDemand: true } });
+      await supervisor.start();
+      supervisor.wake('engine-host');
+      await until(() => supervisor.snapshot('engine-host').state === 'ready');
+      const fake = fakes.at(-1)!;
+      if (asked === 'stop-all') supervisor.expectExit('engine-host');
+      else supervisor.exitSupervisor('now', 'engine-host');
+      setTimeout(() => void fake.die(), 100);
+      const order: string[] = [];
+      await supervisor.recycle('engine-host', { drained: () => void order.push('drained') }).then(() => void order.push('settled'));
+      expect(order).toEqual(['drained', 'settled']);
+      await until(() => supervisor.parked('engine-host'));
+      await sleep(200);
+      expect(spawn).toHaveBeenCalledOnce();
+      expect(supervisor.parked('engine-host')).toBe(true);
+      expect(supervisor.facts('engine-host').lastExit).toBeNull(); // no crash
+    });
+  }
+
   it('with nothing served, runs drained and resolves at once', async () => {
     const supervisor = makeSupervisor({ 'engine-host': { onDemand: true } });
     await supervisor.start();
@@ -521,6 +544,28 @@ describe('what mawsd reflects and takes back (P5 O2 M5)', () => {
     await until(() => supervisor.parked('engine-host'));
     await sleep(60);
     expect(spawn).not.toHaveBeenCalled();
+  });
+
+  // M5 review: host.exitWhenIdle {armed: true} writes no exit line, so the relay tells the transport it was answered
+  it('expectIdleExit: an exit when idle armed by command parks the host when it goes; disarmExit takes it back', async () => {
+    const fake = await startFake();
+    const supervisor = makeSupervisor({ 'engine-host': { onDemand: true } });
+    await supervisor.start();
+    await expect(supervisor.adopt('engine-host')).resolves.toBe(true);
+    expect(supervisor.expectIdleExit('engine-host')).toBe(true);
+    expect(fake.exits).toEqual([]); // nothing written: the command armed it
+    await fake.die();
+    await until(() => supervisor.parked('engine-host'));
+    await sleep(60);
+    expect(spawn).not.toHaveBeenCalled();
+    await expect(ping(supervisor)).resolves.toMatchObject({ ok: true }); // woken: the spawned one
+    expect(spawn).toHaveBeenCalledOnce();
+    const next = fakes.at(-1)!;
+    expect(supervisor.expectIdleExit('engine-host')).toBe(true);
+    expect(supervisor.disarmExit('engine-host')).toBe(true);
+    await next.die({ keepLock: true }); // a crash now
+    await until(() => spawn.mock.calls.length === 2); // the crash ladder, not a park
+    expect(supervisor.parked('engine-host')).toBe(false);
   });
 
   it('onParked tells each park and each leaving of it', async () => {

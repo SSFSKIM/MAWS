@@ -187,6 +187,7 @@ export interface HostSupervisor {
   // P5 O2 M5 start (above)
   welcome(owner: HostOwner): Welcomed | null; // the served detached link's welcome; null while none is served
   disarmExit(owner: HostOwner): boolean; // the transport's disarmIdle
+  expectIdleExit(owner: HostOwner): boolean; // the transport's expectIdleExit: a host.exitWhenIdle {armed: true} it answered
   // P5 O2 M5 end
 }
 
@@ -576,6 +577,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
     const deliberate = () => {
       if (host.spec.onDemand && !holdsAny(host)) {
         park(host, true);
+        settle(host); // P5 O2 M5: a recycle of a host asked to exit ends here
         return;
       }
       launch(host);
@@ -992,5 +994,6 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
     // P5 O2 M3 end
     welcome: (owner) => hostOf(owner).welcome, // P5 O2 M5
     disarmExit: (owner) => hosts[owner]?.transport?.disarmIdle() ?? false, // P5 O2 M5
+    expectIdleExit: (owner) => hosts[owner]?.transport?.expectIdleExit() ?? false, // P5 O2 M5
   };
 }
