@@ -18,7 +18,7 @@
 //
 // The label: `dev.maws.mawsd` (systemd: `mawsd.service`) for the default profile; any other profile, and every test,
 // names its own, which the wrapper then carries for the commands run through it.
-import { lstatSync, mkdirSync, readlinkSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readlinkSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { DAEMON_FILES } from '@shared/daemon/files';
 import { defaultProfileDir } from '@shared/daemon/profile';
@@ -132,6 +132,7 @@ export async function installDaemon(options: InstallOptions, deps: InstallDeps):
   const spec: UnitSpec = { label, profileDir, program: pack === null ? options.program : releaseProgram(deps.home) };
 
   const wrapper = wrapperPath(profileDir);
+  const unitWasInstalled = existsSync(unit.file);
   let linked: InstallResult['linked'];
   let change: UnitChange;
   try {
@@ -144,8 +145,11 @@ export async function installDaemon(options: InstallOptions, deps: InstallDeps):
       change = 'updated';
     }
   } catch (error) {
-    // no user manager here (2): no unit will run, and the command line runs `current` through the wrapper, so it stays
-    if (flip?.flipped && !(error instanceof UnitError && error.code === 2)) restoreCurrent(deps.home, flip.previous);
+    // No user manager (2) and no unit file before: a host with no manager (a container), where no unit will run and the
+    // command line runs `current` through the wrapper, so it stays. With a unit file, an unreachable manager may be a
+    // passing one whose lingering daemon still runs the previous release: put it back, so the retry restarts the unit.
+    const noManagerEver = error instanceof UnitError && error.code === 2 && !unitWasInstalled;
+    if (flip?.flipped && !noManagerEver) restoreCurrent(deps.home, flip.previous);
     throw error;
   }
   const release = flip === null ? null : { ...flip, pruned: pruneReleases(deps.home) };

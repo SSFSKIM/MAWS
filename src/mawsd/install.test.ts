@@ -194,6 +194,20 @@ describe('install and uninstall on Linux', () => {
     expect(readlinkSync(current())).toBe('releases/0.0.0-bbbbbbbb');
   });
 
+  it('an installed unit whose user manager is unreachable for one install keeps its release; the reachable retry restarts onto the new one', async () => {
+    const profileDir = linuxProfile();
+    await installDaemon({ profileDir, label: 'dev.maws.mawsd', program: linuxProgram('aaaaaaaa') }, deps('linux'));
+    managers.userManager = false; // the lingering unit's daemon runs a; its bus is unreachable for a moment
+    await expect(installDaemon({ profileDir, label: 'dev.maws.mawsd', program: linuxProgram('bbbbbbbb') }, deps('linux'))).rejects.toMatchObject({ code: 2 });
+    expect(readlinkSync(current())).toBe('releases/0.0.0-aaaaaaaa');
+
+    managers.userManager = true;
+    managers.calls.length = 0;
+    await expect(installDaemon({ profileDir, label: 'dev.maws.mawsd', program: linuxProgram('bbbbbbbb') }, deps('linux'))).resolves.toMatchObject({ change: 'updated', release: { release: '0.0.0-bbbbbbbb', previous: '0.0.0-aaaaaaaa', flipped: true } });
+    expect(managers.changes()).toEqual(['systemctl --user restart mawsd.service']);
+    expect(readlinkSync(current())).toBe('releases/0.0.0-bbbbbbbb');
+  });
+
   it('a first install whose unit fails to load leaves no current; with no user manager current stays for the command line', async () => {
     const profileDir = linuxProfile();
     managers.script('systemctl --user enable --now mawsd.service', { status: 1, stderr: 'Failed to enable unit' });
