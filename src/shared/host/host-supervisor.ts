@@ -546,7 +546,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
       console.error(`[hosts] ${host.owner} ${why}`);
       detach(host, 'is unreachable');
       const { reason = null, refused = null, waitingLiveSessions = null, refusal = null } = facts;
-      const changed = host.reason !== reason || host.refused !== refused || host.waitingLiveSessions !== waitingLiveSessions;
+      const changed = host.reason !== reason || host.refused !== refused || host.waitingLiveSessions !== waitingLiveSessions || JSON.stringify(host.refusal) !== JSON.stringify(refusal);
       [host.reason, host.refused, host.waitingLiveSessions, host.refusal] = [reason, refused, waitingLiveSessions, refusal];
       if (host.state.state !== 'crashed' || changed) transition(host, { state: 'crashed', pid: host.state.pid, restarts: host.state.restarts });
       host.settleFirstLaunch();

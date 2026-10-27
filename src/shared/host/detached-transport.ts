@@ -37,6 +37,7 @@ import * as fs from 'node:fs';
 import { createConnection, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { makePrivateDirectory } from './private-listen'; // P5 O2 M3
 import { assertPrivateDirectory, assertPrivateSocket, PrivatePathError } from './private-path'; // P5 O2 M3
 import { SocketPort } from './socket-port';
 import { HELLO_TIMEOUT_MS } from './socket-server';
@@ -269,7 +270,9 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
   let awaitDeath: Proc | null = null; // the next attempt waits for this process to be gone (a deliberate close)
   let idleArmed: Proc | null = null; // the supervisor main asked to exit when idle: remembered across reconnects to it
   let unserved: Proc | null = null; // the welcomed supervisor whose connection closed while it may live on (quiet)
-  let waitingFor: number | null = null; // while waiting, the live count last reported (reported again only if it changes)
+  // while waiting, the refusal last reported, whole (P5 O2 M3: reported again when any field changes, so a relay never
+  // reflects a replaced incompatible host's stale line)
+  let waitingFor: string | null = null;
   const spawned = new Map<number, ExitInfo | null>(); // candidates this app run started, and how each exited
   let adopting: ((served: boolean) => void) | null = null; // P5 O2 M3: the adoption under way, answered once
 
@@ -527,8 +530,9 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
         if (holder || waitingFor === null) log(`asked the incompatible supervisor ${holder ? `pid ${holder.pid} ` : ''}to exit when idle`);
       }
       finish();
-      if (waitingFor !== refuse.liveSessions) {
-        waitingFor = refuse.liveSessions;
+      const line = JSON.stringify(refuse);
+      if (waitingFor !== line) {
+        waitingFor = line;
         log(`supervisor ${holder ? `pid ${holder.pid} ` : ''}is incompatible (${on}) and runs ${refuse.liveSessions} sessions; waiting`);
         events.waiting(refuse);
       }
@@ -867,17 +871,6 @@ export function supervisorEnv(env: NodeJS.ProcessEnv, opts: { userData: string; 
   return out;
 }
 
-// P5 O2 M3: a host's directory, created 0700 when it is missing; one that exists is checked, never corrected, so a path
-// another process put there (a symlink, a wider mode, another owner) is refused rather than adopted.
-function makePrivateDirectory(path: string): void {
-  try {
-    fs.lstatSync(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    fs.mkdirSync(path, { recursive: true, mode: 0o700 });
-  }
-  assertPrivateDirectory(path);
-}
 
 // P5 O1 M6: a welcome in the hello's own form and of its major (`major`), read tolerantly.
 function parseAnswer(line: string, form: Form, major: number, logDropped: (message: string, dropped: readonly string[]) => void): Answer {

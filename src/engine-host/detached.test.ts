@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -13,6 +13,7 @@ import { readLive, writeLive } from './live-ledger';
 import { buildIdOf, isAlive, procStartOf, readLock } from './supervisor-files';
 import { invalidateShellEnvironment } from '@shared/host/shell-env';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { createServer } from 'node:net';
 
 // procStartOf stays the real one unless a case makes one `ps` fail
 vi.mock('./supervisor-files', async (importOriginal) => {
@@ -94,6 +95,16 @@ async function connect(): Promise<LineClient> {
   return client;
 }
 
+// A socket inode a SIGKILLed listener leaves behind: listened on, then kept by a hard link while the server closes
+// (a closing Node server unlinks its own path), so nothing listens and the file is still a socket.
+async function leftoverSocket(path: string): Promise<void> {
+  const server = createServer();
+  await new Promise<void>((resolve) => server.listen(path, () => resolve()));
+  linkSync(path, `${path}.kept`);
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  renameSync(`${path}.kept`, path);
+}
+
 describe('the detached entry', () => {
   it('takes the lock, writes the token, listens, and serves a client end to end', async () => {
     const host = harness();
@@ -153,7 +164,7 @@ describe('the detached entry', () => {
   it('takes over from a SIGKILLed supervisor: a dead pid’s lock and its leftover socket file', async () => {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     writeFileSync(join(dir, 'host.lock'), JSON.stringify({ pid: 999_999, procStart: 'gone', protocol: 1, buildId: 'old', socketPath: join(dir, 'host.sock'), startedAt: 'then' }));
-    writeFileSync(join(dir, 'host.sock'), ''); // the kernel never removes a socket file
+    await leftoverSocket(join(dir, 'host.sock')); // the kernel never removes a socket file
     const host = harness();
     expect(await host.start()).not.toBeNull();
     expect(readLock(dir)?.pid).toBe(process.pid);
@@ -284,6 +295,21 @@ describe('the detached entry', () => {
     expect(await host.start()).toBeNull();
     expect(host.exit).toHaveBeenCalledExactlyOnceWith(1);
     expect(host.lines.some((line) => line.includes('cannot listen'))).toBe(true);
+  });
+
+  // P5 O2 M3 (acceptance 9): the socket path is never replaced when it is not this uid's own socket
+  it('refuses a symlink at the socket path, naming the path, and leaves it in place', async () => {
+    const host = harness();
+    mkdirSync(dir, { mode: 0o700 });
+    const elsewhere = join(root, 'elsewhere.sock');
+    writeFileSync(elsewhere, 'not ours');
+    const socketPath = join(dir, 'host.sock');
+    symlinkSync(elsewhere, socketPath);
+    expect(await host.start()).toBeNull();
+    expect(host.exit).toHaveBeenCalledExactlyOnceWith(1);
+    expect(host.lines).toContain(`cannot listen on ${socketPath}: ${socketPath} is a symlink`);
+    expect(lstatSync(socketPath).isSymbolicLink()).toBe(true);
+    expect(readFileSync(elsewhere, 'utf8')).toBe('not ours');
   });
 
   // The clocks are the engine host's (supervision.ts); the entry tells it when it serves, who connects and what the

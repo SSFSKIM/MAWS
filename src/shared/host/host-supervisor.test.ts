@@ -313,12 +313,24 @@ describe('the relayed transport and the build policies', () => {
     expect(supervisor.facts('engine-host').reason).toBe('held_lock');
   });
 
-  it('waiting carries the whole refusal line, for a relay to reflect', async () => {
-    await startFake({ protocol: 99, counts: { liveSessions: 2, rows: 2 } });
+  it('waiting carries the whole refusal line, for a relay to reflect, and a retry’s changed line with the same count replaces it', async () => {
+    const fake = await startFake({ protocol: 99, counts: { liveSessions: 2, rows: 2 } });
     const supervisor = makeSupervisor();
+    const seen = states(supervisor);
     await supervisor.start();
     expect(supervisor.facts('engine-host')).toMatchObject({ reason: 'incompatible', refused: 'protocol', waitingLiveSessions: 2 });
     expect(supervisor.refusal('engine-host')).toEqual({ t: 'refuse', reason: 'protocol', protocol: 99, buildId: expect.any(String), wire: expect.any(String), liveSessions: 2 });
+    const before = seen.length;
+    // another incompatible host in its place: another protocol and build, the same live count
+    fake.options.protocol = 98;
+    fake.options.buildId = 'replacement-build';
+    await until(() => supervisor.refusal('engine-host')?.protocol === 98);
+    expect(supervisor.refusal('engine-host')).toMatchObject({ protocol: 98, buildId: 'replacement-build', liveSessions: 2 });
+    expect(seen.length).toBeGreaterThan(before); // announced, so host.status and a relay read the new line
+    await sleep(200); // further retries with the same line report nothing new
+    const settled = seen.length;
+    await sleep(200);
+    expect(seen.length).toBe(settled);
   });
 
   it('serve: another build is served, with nothing live or with sessions live, and never asked to exit', async () => {
