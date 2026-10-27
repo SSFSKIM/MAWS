@@ -1042,6 +1042,17 @@ The joint review's second round (`9be0bc941`), 2026-10-27, two P1s, both reprodu
   Rationale: the first finding was a person's words forged by writer name through a transport the words gate never saw (the merge accepted an unsigned `<thisname>/human` event, and `log_read` and `_owed` returned it as this machine's); a receipt written by the one appender is provenance that no transport can supply. The second was an upload form the endpoint could not sign, settled by deriving it from what sminos already writes. Rejected (strongest): protecting own-writer files inside `integrate`, which covers one transport (git) and leaves the next, and a `log/` file dropped in by hand; and sminos adding `created` at upload, which would make the uploaded bytes differ from the stored line that `words?` and the echo compare.
   Date/Author: 2026-10-27, desk-sminos-orchestrator (p5-desk-track-owner), the rulings the orchestrator's.
 
+- Decision: Phase 2's execution layout. Each milestone is its own doperpowers branch and PR, merged with a merge commit once its review rung is clean and `ci-gate` is GREEN; the spec's living record is kept on one MAWS branch, `p5-o12-p2-record`, landed by the architect at checkpoints. M5 is cut from M7a's head (`p5-o12-m5` at `7400df00`) while M7a's review finishes, and merges `main` in once M7a lands, as M3 was cut from M1 in phase 1. M5 is built by two executors in sequence on that one branch, the transport and the switch first (discovery, the hello and welcome, `identity.json` and cutover, the supervisor, `daemon status`, the hub verbs, `revoked.json`, the policy and the legacy key, and the endpoint stand-in), then the uncoded log plane, the session lane's drafts and the RPCs over RL10; one doperpowers:reviewer-high review and one PR cover both.
+  Rationale: M5 consumes nothing of M7a's but the ledger file it also edits, and is the phase's long pole; its breadth (a new transport, a new identity source and three planes) is more than one executor's context holds well.
+  Date/Author: 2026-10-27, O12's phase 2 executor (p5-desk-track-owner).
+- Decision: M7a's gaps, settled in building it.
+  - `Rpcs.flight` is already a dict, `op -> {"nonce"}`, written by `dispatch` before the worker starts; `Rpcs.latest(rpc)` is its one reader, so M7 adds the binding's keys and changes no structure.
+  - The worker's claim (`run`) and any refusal it keeps from inside `plan` are written under `op_lock` from the in-flight record's nonce, so a reseal either updates `flight` before the claim or finds the claim after it. `keep` requires its caller to hold `op_lock`. The lock order stays `op_lock` then the ledger's lock.
+  - `Ledger.acked` on an entry without an outcome changes only its nonce; it no longer writes `acked: false` onto a claim.
+  - `steered` hands a `lane-b` answer to `refused_op`, the one observer-refusal reader; `command()` keeps its live raise, with the same code and message.
+  Rationale: the nonce-on-claim rule needs the claim and the record read under one lock, or a reseal landing between them is lost; the rest keeps M7a to the two debt items.
+  Date/Author: 2026-10-27, M7a's executor, accepted by O12's phase 2 executor.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
