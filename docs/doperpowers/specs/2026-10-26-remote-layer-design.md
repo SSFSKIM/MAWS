@@ -220,20 +220,26 @@ The contract is the research's §4, adopted whole. The points that bind every im
 7. **Discrete actions carry a stable operation id and their target, and are time-bound even inside a channel.**
    - **What every action carries.**
      - An `opId`, chosen once by the app and kept across every reseal.
+     - `opCreated`, the app's clock when it chose the `opId`, also kept across every reseal.
      - The session `context` it targets (§3.5): lane B's binding, or lane A's launch epoch.
 
-     The channel and any step-up or WebAuthn signature cover both.
+     The channel and any step-up or WebAuthn signature cover all three.
    - **Each executing side keeps one durable ledger keyed by `opId`, holding the claim and the result together.**
      - **Lane A:** sminos's existing RPC ledger, re-keyed from the RPC nonce to `opId`. It already records the claim before the run, answers a known id from the ledger without running it again, and fails closed: while the ledger can't be read, no RPC runs (`sminos_rpc.py:16, 165, 279-401`).
      - **Lane B:** the engine host's ledger, beside the Query, built the same way.
      - **The endpoint module keeps no op ledger.** It checks freshness and channel replay. It forwards `query {opId}` and the `not-received` tombstone to the executing side, over RL10 for lane A. Splitting the claim and the result across a process boundary would open two crash windows: a claim whose action never arrives stays `in-progress` forever, and a run whose claim is lost runs again.
      - A repeated `opId` returns the stored result and never executes twice.
      - The ledger is kept for a day, as desk's is (`KEPT_S = 86400`).
+     - **An id has a horizon, so pruning never reopens it** (desk-sminos-orchestrator, 2026-10-27). A reseal carries a fresh `created`, so freshness alone would let a resealed copy of a pruned id run again.
+       - The executing side refuses an action whose `opCreated` is older than `OP_HORIZON = KEPT_S − 3600` s by its own clock, with `expired`. It answers `query` for such an id `expired`, whether the ledger still holds it or not.
+       - It refuses an action whose `opCreated` is later than its `created` by more than the freshness window, as malformed. With freshness, no entry is received more than two minutes before its `opCreated`. So an entry is pruned only after its id is past the horizon, whatever the app's clock did.
      - MW5 made the upload id the RPC nonce. A reseal changes the nonce, so the upload id moves to `opId`.
    - **The context is checked again at dispatch.** The daemon or engine host (lane B), or the bridge (lane A), rechecks it, not only the endpoint. So an action that arrives after a resume or a `/clear` is refused.
    - **Freshness.** An action is refused past a 60 s window, measured by the machine's clock against its `created`. The channel prevents replay and reordering, but the hub can still hold a frame.
-   - **Resealing.** An action whose request is still pending is resealed by the app: a new nonce and `created`, the same `opId`, arguments and request digest.
-   - **A lost acknowledgement isn't "not sent".** The app asks `query {opId}` (RL4) and shows *outcome unknown* until the machine answers `done | in-progress | refused | not-received`.
+   - **Resealing.** An action whose request is still pending is resealed by the app: a new nonce and `created`, the same `opId`, `opCreated`, arguments and request digest. The app stops resealing an action past `OP_HORIZON` by its own clock and asks `query` instead.
+   - **A lost acknowledgement isn't "not sent".** The app asks `query {opId, opCreated}` (RL4) and shows *outcome unknown* until the machine answers `done | in-progress | refused | not-received | expired`.
+     - `expired` stays *outcome unknown, too old to retry*. It never shows as not sent.
+     - `unavailable` means the executing side's ledger can't be read right now. Nothing runs while it can't, and the app asks again later.
      - Only `not-received` shows *not sent, send again*.
      - The machine then tombstones that `opId`, so a late copy is refused.
      - A resend uses a new `opId`.
@@ -693,13 +699,14 @@ These are named here with their binding fields. Byte-level schemas and test vect
   - The answer is `replay | snapshot | missing`.
   - Credit-based flow control, and snapshot paging.
 - **RL4, Discrete action.**
-  - The fields are `{opId, action, session?, context?, args, requestDigest?, nonce, created, stepUp?, webauthn?}`, sealed inside the channel.
+  - The fields are `{opId, opCreated, action, session?, context?, args, requestDigest?, nonce, created, stepUp?, webauthn?}`, sealed inside the channel. The canonical action includes `opCreated`.
   - `context` is mandatory for any action on a session.
   - `stepUp` is the step-up signature over the canonical action.
   - `webauthn` is `{credentialId, authenticatorData, clientDataJSON, signature}`, whose challenge is SHA-256 of the canonical action.
   - Refused past 60 s, and refused on a reused nonce. A repeated `opId` returns its stored result.
+  - Refused `expired` when `opCreated` is older than `OP_HORIZON = KEPT_S − 3600` s, and refused as malformed when `opCreated` is later than `created` by more than 60 s (§4.7).
   - The answer is immediate (`accepted | refused {reason}`). The outcome arrives on the plane.
-  - `query {opId}` answers `done {result} | in-progress | refused | not-received`. The executing side's ledger answers it; the endpoint module only forwards it (§4.7).
+  - `query {opId, opCreated}` answers `done {result} | in-progress | refused | not-received | expired | unavailable`. The executing side's ledger answers it; the endpoint module only forwards it (§4.7). `opCreated` is required: without it, a pruned id would answer `not-received`, and the resend that follows could run an action twice.
   - Revocations are RL4 actions too, sent by an admin device to each machine and acknowledged (§5.2).
 - **RL5, Signed org state.**
   - The fields are `{org, version, prev, issued, root: {keys[], recoveryPub}, members[{id, email, role, devices[{id, class, keyStorage, channelPub, stepUpPub, passkey?: {credentialId, publicKey, rpId}}]}], machines[{name, pub, owners: memberId[] | 'org'}], delegations[{id, pub, prefix, expires, maxUses, offlineRevokeS, owners}], projects[...]}`, with signatures by root keys.
@@ -813,3 +820,8 @@ These are named here with their binding fields. Byte-level schemas and test vect
    - An org-owned machine's owners resolve to the org's admins, never to `'org'`, so `approve` stays off org-wide. Receivers check terminal-session owners the same way (§5.8).
    - As a principal, `@machine` resolves through the slot binding. A machine with several member owners binds its default slot explicitly (§5.8, §6.4).
    - RL1 gains an `endpoint {record}` frame for the machine-signed endpoint record (domain `smns-endpoint-v1`), stored and served by the hub (O11 M4).
+18. **2026-10-27, desk-sminos-orchestrator's O12 buildability review.**
+   - RL4 gains `opCreated`, set once with the `opId`, kept across reseals, and covered by the seal and the canonical action.
+   - An op older than `OP_HORIZON = KEPT_S − 3600` s is refused `expired`, and `query` answers `expired` for it, so pruning the ledger never reopens an id.
+   - An `opCreated` later than `created` by more than the freshness window is malformed. That bounds clock skew, so the hour's margin holds.
+   - `query` carries `opCreated` (required), and gains `expired` and `unavailable` (the ledger can't be read; O12 calls it `failed`) (§4.7, RL4).
