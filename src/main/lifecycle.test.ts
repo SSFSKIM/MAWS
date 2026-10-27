@@ -52,7 +52,8 @@ vi.mock('./design/export', () => ({ registerDesignExporters: vi.fn() })); // P3-
 vi.mock('./dashboard/export', () => ({ registerDashboardExporters: vi.fn(() => () => {}) })); // P3-E (E2 M5): the dashboard's exporters, registered into the artifacts' registry
 vi.mock('./presentations/present', () => ({ registerPresenter: vi.fn(() => ({ end: vi.fn() })) })); // P3-C M6: the presenter's windows
 vi.mock('./browser/import', () => ({ ImportedProfiles: { open: () => ({ list: () => [] }) }, sweepBrowserImports: vi.fn(), startBrowserImport: () => ({ stop: vi.fn() }) })); // E4b: the Chrome import's main side
-vi.mock('./ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: vi.fn() /* C3 */, interceptCommand: vi.fn(), CommandFailure: Error /* C11 */ }));
+vi.mock('./ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: vi.fn() /* C3 */, registerMachineHandler: vi.fn() /* P5 O6 M1 */, interceptCommand: vi.fn(), CommandFailure: Error /* C11 */ }));
+vi.mock('./machine/identity', () => ({ startMachineIdentity: vi.fn() })); // P5 O6 M1: no machine.json under the fixed getPath
 // C3 start: main's attention service and its store, started from index.ts, are replaced like the other wired modules
 vi.mock('./attention/service', () => ({ startAttentionService: vi.fn() }));
 vi.mock('./attention/file-attention-store', () => ({ FileAttentionStore: vi.fn() }));

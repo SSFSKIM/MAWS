@@ -117,7 +117,7 @@ describe('each construct the compile step walks', () => {
   it("a pipe: its input side when lowering, its output side when lifting", () => {
     const inSide = z.strictObject({ id: AppSessionIdSchema });
     const outSide = z.strictObject({ id: z.string() });
-    const piped = inSide.pipe(outSide);
+    const piped = (inSide as z.ZodType).pipe(outSide as z.ZodType); // the brand's type does not reach a plain string's input; the walk is what is tested
     expect(compileAddressing(piped).lower({ id: at(A, 'a1') }).value).toEqual({ id: 'a1' }); // in: the id
     expect(compileAddressing(piped).lift({ id: 'a1' }, A)).toEqual({ id: 'a1' }); // out: a plain string
     const reversed = outSide.pipe(inSide);
