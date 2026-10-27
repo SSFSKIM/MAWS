@@ -294,7 +294,7 @@ deletes what it minted, however it ends. It fails if any of that fails.
 - `probe`: the admission probe's five cases, plus enrollment's name refusal and the archive designation. Needs `DESK_ACCESS_TOKEN` and `CF_DESK_HUB_SERVICE_TOKENS`, the latter for minting the one never-enrolled token, which it deletes.
 - `fake-check`: M4's fake machine, enrolled from a code, replays its recording, and a browser sees every row, request, decision, log event, and outcome, plus one RPC answered.
 - `redeploy-check`: two fake machines and a browser write while the hub is redeployed mid-run, under the same throwaway org. The writing lasts 420 s by default (`--seconds`), because the cut came +314 to +329 s after the deploy. The redeploy is new code, since its build's name is new: Cloudflare restarts objects for new code only. Nothing may be lost or duplicated, and the check fails as "not exercised" when the redeploy cut no machine's stream. See M5's findings in DC3's plan: on 2026-10-15, Cloudflare kept the old version's connections open after a deploy.
-  Beside them runs RL1's leg (O11): a v2 machine listed in the throwaway org's state holds RL1 through its endpoint, and an app holds a channel to it. A socket the redeploy drops must come back: the endpoint under a higher generation, the app through a new channel. It prints when each socket dropped (from the redeploy's start) and how long each took to come back. Cloudflare cuts the sockets when it chooses, and within the window it may not (O11 M8's phase B saw a cut in one run of three), so once the writing stops the leg cuts both sockets itself, from the client's end, twice in a row: each time the endpoint must be welcomed again under a higher generation and a new channel echo within 60 s (`rl1: forced cut <n>: …`). A redeploy that cut neither socket is said (`rl1: neither socket was cut`), not failed. The state is signed by an admin device: `--device-keys <file>` (below), or without it a device made for the run, which posts the throwaway org's genesis and so needs an org with no state yet.
+  Beside them runs RL1's leg (O11): a v2 machine listed in the throwaway org's state holds RL1 through its endpoint, and an app holds a channel to it. A socket the redeploy drops must come back: the endpoint under a higher generation, the app through a new channel. It prints when each socket dropped (from the redeploy's start) and how long each took to come back. Cloudflare cuts the sockets when it chooses, and within the window it may not (O11 M8's phase B saw a cut in one run of three), so once the writing stops the leg cuts both sockets itself, from the client's end, twice in a row: each time the endpoint must be welcomed again under a higher generation and a new channel echo within 60 s (`rl1: forced cut <n>: …`). Those prove the reconnect, not the deploy's cut, which is what acceptance 3 asks for: only a run whose redeploy cut both RL1 sockets, both came back, and whose forced cuts came back is a PASS. A run that lost nothing and whose forced cuts came back but whose redeploy left an RL1 socket uncut (`rl1: neither socket was cut`) ends `INCONCLUSIVE: deploy cut: not exercised (…)` with status 3, neither PASS nor FAIL. The state is signed by an admin device: `--device-keys <file>` (below), or without it a device made for the run, which posts the throwaway org's genesis and so needs an org with no state yet.
 - `measure`: machines streaming chunks into one project, with browsers subscribed. It runs three series: the phase-1 budget (one session at 150 chunks/s watched by 1 to 3 browsers, with another machine's presence and log events crossing it), fan-out, and a ramp. It reports throughput, latency, and the load average per step, as DC3's plan records them (G6).
 - `frame-cost`: what a POST and each frame in it cost on the path from a machine to its project.
 
@@ -324,13 +324,18 @@ production's Worker or host, or a preview alias of it (`<alias>-desk-hub.…`), 
   - `throwaway <n>`: staging deployed under the throwaway org `staging-probe-<n>`, then `fake-check` and
     `redeploy-check` there (its RL1 leg included), then the account swept and staging deployed back under
     `staging-ssfskim`. The sweep and the restore run however the step ends, a failure or Ctrl-C included; the step
-    fails unless both checks, the sweep and the restore passed and `/api/me` names `staging-ssfskim` again.
+    fails unless both checks, the sweep and the restore passed and `/api/me` names `staging-ssfskim` again (read
+    within 30 s; a read that fails or times out is `restore check failed: …`). An `INCONCLUSIVE` redeploy-check
+    (status 3) fails the step too.
   - `desk-web <n>`: the same around acceptance 8's desk-web check (`apps/desk-web/e2e-staging`, its own
     `playwright.staging.config.ts`): Playwright's headless Chromium loads staging's desk-web, sets the throwaway org's
     key up, enrolls M4's fake machine from the Machines dialog, and screenshots the grid, the session listed, its
     permission card, the card answered from the page and the decision in the group chat, into `desk-web-<n>/`. The
     browser holds the owner's Access token as its `CF_Authorization` cookie for the staging host; nothing records a
     trace, video or HAR, and afterwards every file the step wrote is searched for the token, which must be in none.
+    The step takes no option to pass on, and Playwright runs in an environment the script builds (`env -i`, no
+    `PWDEBUG`, `PW_*` or `PLAYWRIGHT_*`); `playwright.staging.config.ts` itself refuses any option but naming it and any
+    such variable (`e2e-staging/recording.ts`), so nothing can turn recording back on.
     Playwright's Chromium must be installed once (`pnpm --filter desk-web exec playwright install chromium`).
 - `staging-sweep.py snapshot|sweep` is the throwaway steps' account sweep: the service tokens and the `desk-hub*`
   Access apps and policies before the run, and after it the deletion of what appeared and is the throwaway org's
@@ -342,7 +347,9 @@ What they read, at run time, never printed or passed as an argument:
   directory holding `CF_ACCESS_SETUP_TOKEN` and `CF_DESK_HUB_SERVICE_TOKENS`, each read with `cat` inside the pipe
   that hands it to the command;
 - the owner's staging Access token, from `cloudflared access token -app=https://desk-hub-staging.opencognita-platform.workers.dev`
-  (the owner's `cloudflared access login` once; a step without it stops with nothing changed);
+  (the owner's `cloudflared access login` once; a step without it stops with nothing changed). It reaches a command on
+  its stdin and curl as a configuration through a pipe (`printf … | curl -K -`), never a here-string, which zsh spools
+  to a temporary file;
 - `DESK_STAGING_DEVICE` (default `$DESK_STAGING_DIR/device`): `keys.json`, the admin device's keys (the org-state
   commands above), and `machine.json`, `{"DESK_MACHINE_CLIENT_ID": …, "DESK_MACHINE_CLIENT_SECRET": …}` for
   `access-sync`.

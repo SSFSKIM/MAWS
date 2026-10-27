@@ -234,6 +234,13 @@ export class Rl1Watch {
     return problems;
   }
 
+  /** Which RL1 sockets the redeploy left uncut, since the mark: for the run's verdict, since only a deploy's own cut of
+   * both proves acceptance 3's "after a deploy". */
+  uncut(): Array<'endpoint' | 'app'> {
+    const { endpointCut, appCut } = this.cutAndBack();
+    return [...(endpointCut ? [] : ['endpoint' as const]), ...(appCut ? [] : ['app' as const])];
+  }
+
   /**
    * Cuts both sockets from this end, `count` times in a row, as a client whose network went away: the endpoint drops its
    * RL1 socket and the app its Machine socket. Each time the endpoint must be welcomed again under a higher generation

@@ -11,7 +11,10 @@
 // an app holds a channel to it. A socket the redeploy drops must come back, the endpoint under a higher generation and
 // the app through a new channel; it reports when each dropped and how long each took. Whether the redeploy cuts RL1
 // within the window is Cloudflare's (phase B saw it in one run of three), so once the writing stops the leg cuts both
-// sockets from the client's end, twice in a row, and each time both must come back (`rl1: forced cut <n>: …`).
+// sockets from the client's end, twice in a row, and each time both must come back (`rl1: forced cut <n>: …`). Those
+// prove the reconnect, not the deploy's cut: only a run whose redeploy cut both RL1 sockets, both back, and whose forced
+// cuts came back is a PASS; one whose redeploy left an RL1 socket uncut, all else passing, ends `INCONCLUSIVE: deploy
+// cut: not exercised …` with status 3 (REDEPLOY_INCONCLUSIVE).
 //
 // stdin (deploy.ts, readSecrets): DESK_ACCESS_TOKEN (the owner's Access app token), CF_ACCESS_SETUP_TOKEN and
 // CF_DESK_HUB_SERVICE_TOKENS (the redeploy is `deployment deploy`'s own). Options: --test-org (required, the throwaway
@@ -45,6 +48,10 @@ async function until<T>(read: () => Promise<T | undefined>, what: string, ms: nu
     await sleep(1000);
   }
 }
+
+/** The status of a run that lost nothing and whose forced cuts came back, but whose redeploy left an RL1 socket uncut:
+ * not a PASS (acceptance 3 is the deploy's cut), not a FAIL. */
+export const REDEPLOY_INCONCLUSIVE = 3;
 
 export async function main(argv: string[]): Promise<number> {
   const { config, values } = deployArgs(argv, {
@@ -269,9 +276,11 @@ export async function redeployCheck(
   if (!complete(browserVector())) problems.push(`the live browser holds ${JSON.stringify(browserVector())}`);
   // RL1: a socket the redeploy dropped must be back, the endpoint under a higher generation, a channel re-opened. A
   // redeploy need not cut RL1 within the window (phase B's runs B and C saw no cut), so the leg then cuts both sockets
-  // itself, twice in a row, on the code the redeploy put up.
+  // itself, twice in a row, on the code the redeploy put up: that proves the reconnect, not the deploy's cut, so a
+  // redeploy that left an RL1 socket uncut makes the run inconclusive at best (below).
   problems.push(...(await rl1.settle(Date.now() + 60_000, { cutRequired: false })));
   for (const line of rl1.report()) console.log(line);
+  const uncut = rl1.uncut();
   problems.push(...(await rl1.forceCuts(2)));
   // The proof needs the redeploy to have cut the machines' streams; one that cut nothing proved nothing.
   machines.forEach((fm, i) => {
@@ -289,6 +298,11 @@ export async function redeployCheck(
   if (problems.length) {
     console.log(`FAIL\n  ${problems.join('\n  ')}`);
     return 1;
+  }
+  if (uncut.length) {
+    const which = uncut.length === 2 ? 'neither RL1 socket' : uncut[0] === 'endpoint' ? "only the app's socket, not the endpoint's" : "only the endpoint's socket, not the app's";
+    console.log(`INCONCLUSIVE: deploy cut: not exercised (the redeploy cut ${which}); nothing lost or duplicated, and the leg's own cuts came back`);
+    return REDEPLOY_INCONCLUSIVE;
   }
   console.log('PASS: nothing lost, nothing duplicated across the redeploy');
   return 0;

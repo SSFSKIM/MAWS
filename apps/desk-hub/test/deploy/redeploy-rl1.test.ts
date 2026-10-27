@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sleep, until } from '../../deploy/hub.ts';
 import { OrgAdmin, type AdminDevice } from '../../deploy/org-admin.ts';
 import { Cleanup } from '../../deploy/proof.ts';
-import { redeployCheck } from '../../deploy/redeploy-check.ts';
+import { REDEPLOY_INCONCLUSIVE, redeployCheck } from '../../deploy/redeploy-check.ts';
 import { Rl1Watch, upgradeProbe, type AppOpener } from '../../deploy/rl1-reconnect.ts';
 import { ORG, startLocalHub, type LocalHub } from '../support/local';
 import { adminKeysFile, LocalPerson } from '../support/local-person';
@@ -194,6 +194,35 @@ describe('redeploy-check', () => {
     const names = await machines();
     expect(names.filter((n) => n.startsWith('rd-'))).toEqual([]);
     expect((await head()).machines).toEqual([]);
+  }, 180_000);
+
+  // Acceptance 3 reads "after a staging deploy, both sockets drop": the leg's own cuts prove the reconnect, not the
+  // deploy's cut. A redeploy that cut DX2's streams and neither RL1 socket is no PASS, and no FAIL either: the run says
+  // the deploy's cut was not exercised and ends with its own status.
+  it('is inconclusive, not a pass, when the redeploy cut neither RL1 socket', async () => {
+    const out: string[] = [];
+    const log = console.log;
+    console.log = (...args: unknown[]) => void out.push(args.join(' '));
+    const cleanup = new Cleanup();
+    // The redeploy's stand-in ends the DX2 machines' objects alone; the object holding RL1 (addressed by the ref) stays.
+    const cutDx2Only = async () => {
+      for (const name of (await machines()).filter((n) => /^rd-[ab]-/.test(n))) await hub.terminate(name);
+    };
+    let code: number;
+    try {
+      code = await redeployCheck(person, ORG, { seconds: '10', 'redeploy-at': '2' }, cleanup, cutDx2Only, device);
+    } finally {
+      console.log = log;
+    }
+    const text = out.join('\n');
+    expect(text).toMatch(/rl1: neither socket was cut/);
+    expect(text).toMatch(/rl1: forced cut 2: .* a new channel to the endpoint echoed/);
+    expect(text).not.toMatch(/^PASS/m);
+    expect(text).toMatch(/^INCONCLUSIVE: deploy cut: not exercised \(the redeploy cut neither RL1 socket\); nothing lost or duplicated, and the leg's own cuts came back$/m);
+    expect(code).toBe(REDEPLOY_INCONCLUSIVE);
+    expect(REDEPLOY_INCONCLUSIVE).not.toBe(0);
+    expect(REDEPLOY_INCONCLUSIVE).not.toBe(1);
+    expect(await cleanup.run()).toEqual([]);
   }, 180_000);
 });
 
