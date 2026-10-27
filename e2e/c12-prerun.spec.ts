@@ -284,10 +284,10 @@ test('§10.1 real store, read only', async () => {
     const ds = await digests(page);
     const foreign = ds.filter((d) => d.phase === 'foreign').length;
     await showProjectList(page); // W11: five projects, then the rest behind "Show more"
-    const projectRowsShown = await sidebar(page).locator('[data-kind="project"][data-menu^="project:"]').count(); // not Other sessions' row
+    const projectRowsShown = await sidebar(page).locator('[data-kind="project"][data-menu^="project:"]').count(); // not a machine's own row (P5 O6 M5)
     const cards = await board.getByRole('article').count();
     // W11: session rows show inside each expanded project (eight at most), so the foreign glyphs are counted project by
-    // project (Other sessions too), each reached by its row's id, taken once: the list reorders as the owner's sessions
+    // project (the machine's own row too), each reached by its row's id, taken once: the list reorders as the owner's sessions
     // work. Each project is collapsed again after its count.
     let foreignGlyphs = 0;
     for (const key of await projectList.evaluateAll((els) => els.map((el) => el.getAttribute('data-tree-id')!))) {

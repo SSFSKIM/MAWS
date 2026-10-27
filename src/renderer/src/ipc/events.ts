@@ -5,7 +5,7 @@
 // unless a registered tab retention (C10's) keeps it.
 // P5 O6 M4: the subscriptions are made once, and each event goes to the partition of the machine it came from; each
 // machine's snapshots are taken when its link comes up, and again for each new generation of it (`connectShell`).
-import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { EventPayload, MawsBridge, SessionDigest } from '@shared/ipc/schema';
 import type { MachineState } from '@shared/ipc/schema/machines';
 import { machineOf } from '@shared/machine/address';
@@ -16,6 +16,9 @@ import { createFreshness, type Freshness } from '../stores/freshness';
 import { useLayout } from '../stores/layout';
 import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
+import { selectOrgIndex, sessionSetKey, setKeyOfProject } from '../stores/org-projects'; // P5 O6 M5
+import type { RekeyOf } from '../stores/layout-model';
+import type { TabSetKey } from '@shared/ipc/schema/layout';
 import { ipc } from './client';
 import { checkoutKey } from './machine';
 // C8a start
@@ -278,15 +281,29 @@ export function connectShell(
   // W12: a session's tabs live in its project's set: the record's project, else its unstarted intent's; a record whose
   // project changes (a refold) moves its tabs (the layout ignores this until it has hydrated). A session with neither
   // (a removal on its way to closing its tabs, a draft whose intent was just discarded) is not known: its tabs stay put.
-  const projectOf = (id: AppSessionId): ProjectId | null | undefined => {
-    const record = sessions().records.get(id);
-    if (record) return record.projectId;
-    const retention = currentTabRetention();
-    const unstarted = retention ? retention.retains(id) : sessions().unstarted.has(id);
-    return unstarted ? unstartedProjectOf(id) : undefined;
+  // P5 O6 M5: the set is the session's row's (`stores/org-projects.ts`): its org project's, or its machine's own when no
+  // checkout lists its directory; so a change of any machine's projects can move tabs too.
+  const projectOf = (id: AppSessionId): TabSetKey | null | undefined =>
+    sessionSetKey(sessions(), local, id, () => {
+      const retention = currentTabRetention();
+      const unstarted = retention ? retention.retains(id) : sessions().unstarted.has(id);
+      return unstarted ? unstartedProjectOf(id) : undefined;
+    });
+  // P5 O6 M5 ("Migrating project-keyed state"): a layout key that is a project's address is from before M5. It becomes
+  // the set that project's sessions file under once its machine has loaded and has derived the project's key; a project
+  // its loaded machine no longer lists is gone; anything else waits for that machine's next projects.
+  const rekeyOf: RekeyOf = (address) => {
+    if (!stores.machines.getState().loaded.has(machineOf(address))) return 'wait';
+    const project = sessions().projects.get(address);
+    if (project === undefined) return 'gone';
+    return project.org === undefined ? 'wait' : setKeyOfProject(selectOrgIndex(sessions(), local), project);
   };
   const offRefile = stores.sessions.subscribe((state, previous) => {
-    if (state.records !== previous.records) stores.layout.getState().refileTabs();
+    if (state.projects !== previous.projects) stores.layout.getState().rekeyProjects();
+    if (state.records !== previous.records || state.projects !== previous.projects) stores.layout.getState().refileTabs();
+  });
+  const offRekey = stores.machines.subscribe((state, previous) => {
+    if (state.loaded !== previous.loaded) stores.layout.getState().rekeyProjects();
   });
 
   // P5 O6 M4 ("The layout across machines"): a tab is kept when its session is held or retained; a tab of another
@@ -310,12 +327,13 @@ export function connectShell(
     const retention = currentTabRetention();
     if (retention) await retention.ready;
     if (!connected) return;
-    await stores.layout.getState().hydrate(client, knownTab, { settle: flushNow, projectOf });
+    await stores.layout.getState().hydrate(client, knownTab, { settle: flushNow, projectOf, rekeyOf });
   });
 
   return () => {
     connected = false;
     offRefile();
+    offRekey();
     if (timer) clearTimeout(timer);
     timer = null;
     queued = [];

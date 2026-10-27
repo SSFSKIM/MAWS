@@ -979,15 +979,15 @@ describe('tab sets per project', () => {
     expect(useLayout.getState().regions.sidebar.expandedProjects).toEqual([at('proj-maws')]);
   });
 
-  it('a project with nothing open shows the empty pane under its name; Other sessions shows the unlabelled no-project set', async () => {
+  it('a project with nothing open shows the empty pane under its name; the machine’s own row shows its unlabelled set', async () => {
     const user = userEvent.setup();
     render(<Shell />);
     await user.click(projectRow('claude-usage-menubar'));
     expect(tabNames()).toEqual([]);
     expect(within(within(main()).getByRole('tabpanel')).getByText('No open tabs')).toBeTruthy();
     expect(label()?.textContent).toBe('claude-usage-menubar');
-    await user.click(projectRow('Other sessions'));
-    expect(useLayout.getState().main.current).toBe('none');
+    await user.click(projectRow('This Mac'));
+    expect(useLayout.getState().main.current).toBe(`machine:${TEST_MACHINE}`); // P5 O6 M5
     expect(label()).toBeNull();
   });
 

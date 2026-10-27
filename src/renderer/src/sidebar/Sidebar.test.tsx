@@ -5,10 +5,12 @@ import { REL } from '../test-support/relative-time';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { ProjectRecordSchema, type PreloadBridge, type ProjectRecord } from '@shared/ipc/schema';
 import { SessionRecordSchema, type SessionRecord } from '@shared/graph/session';
-import { compileAddressing } from '@shared/machine/address';
+import { addressOf, compileAddressing } from '@shared/machine/address';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
-import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
+import { machineKey, type OrgKey } from '@shared/machine/org-key';
+import { useMachines } from '../stores/machines';
 import { registerSessionAction } from '../app/session-actions';
 import { registerSessionCreator } from '../keymap/actions-runtime';
 import { closeDialog, useDialogs } from '../sessions/dialogs';
@@ -53,7 +55,7 @@ const sessionRows = (el: HTMLElement) =>
     .queryAllByRole('treeitem')
     .filter((t) => t.dataset.kind === 'session')
     .map(label);
-const expand = (...keys: string[]) => act(() => useLayout.getState().setSidebar({ expandedProjects: keys.map((key) => (key === 'other' ? key : at(key))) as ProjectKey[] })); // bare keys, as the scenario names them
+const expand = (...keys: string[]) => act(() => useLayout.getState().setSidebar({ expandedProjects: keys.map((key) => (key === 'other' ? machineKey(TEST_MACHINE) : at(key))) as ProjectKey[] })); // bare keys, as the scenario names them
 const expanded = () => useLayout.getState().regions.sidebar.expandedProjects;
 const toggle = (user: ReturnType<typeof userEvent.setup>, name: string) => user.click(within(row(name)).getAllByText(name)[0]);
 
@@ -243,13 +245,13 @@ describe('sidebar recovery routes', () => {
     window.maws = fake.client as unknown as PreloadBridge;
     render(<><Sidebar /><SessionDialogs /></>);
     if (route === 'footer') {
-      expect(screen.queryByRole('treeitem', { name: 'Other sessions' })).toBeNull();
+      expect(screen.queryByRole('treeitem', { name: 'This Mac' })).toBeNull();
       await userEvent.click(screen.getByRole('button', { name: 'Archived sessions…' }));
     } else {
-      fireEvent.contextMenu(row('Other sessions'));
+      fireEvent.contextMenu(row('This Mac'));
       await userEvent.click(await screen.findByRole('menuitem', { name: 'Archived sessions…' }));
     }
-    const dialog = await screen.findByRole('dialog', { name: 'Archived sessions · Other sessions' });
+    const dialog = await screen.findByRole('dialog', { name: 'Archived sessions · This Mac' });
     await within(dialog).findByText('Recovered notes');
     expect(within(dialog).queryByText('Project notes')).toBeNull();
     expect(fake.invoked('session.list')).toEqual([{ includeArchived: true }]);
@@ -257,8 +259,8 @@ describe('sidebar recovery routes', () => {
     await within(dialog).findByText('No archived sessions.');
     expect(fake.invoked('session.update')).toEqual([{ appSessionId: archived.appId, patch: { archived: false } }]);
     act(() => closeDialog());
-    await toggle(userEvent.setup(), 'Other sessions');
-    expect(sessionRows(row('Other sessions'))).toContain('Recovered notes');
+    await toggle(userEvent.setup(), 'This Mac');
+    expect(sessionRows(row('This Mac'))).toContain('Recovered notes');
   });
 
   it('reports a failed hidden-project restore without revealing a row that remains hidden', async () => {
@@ -433,12 +435,12 @@ describe('Needs you across projects', () => {
 describe('the project list', () => {
   beforeEach(() => fillStores(nine));
 
-  it('lists the projects most recently active first, then Other sessions, each collapsed, with no drill-in or Pinned section', () => {
+  it('lists the projects most recently active first, then this machine’s own row, each collapsed, with no drill-in or Pinned section', () => {
     render(<Sidebar />);
     expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Needs you · 3', 'Projects']);
     expect(screen.queryByTestId('sidebar-levels')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Back to projects' })).toBeNull();
-    expect(projectRows()).toEqual(['claude-usage-menubar', 'codex_somersault', 'MAWS', 'Other sessions']);
+    expect(projectRows()).toEqual(['claude-usage-menubar', 'codex_somersault', 'MAWS', 'This Mac']);
     expect(within(projectsTree()).getAllByRole('treeitem').map((t) => t.getAttribute('aria-expanded'))).toEqual(['false', 'false', 'false', 'false']);
     expect(sessionRows(projectsTree())).toEqual([]);
   });
@@ -450,7 +452,7 @@ describe('the project list', () => {
     expect(within(row('codex_somersault')).getByLabelText('1 waiting').textContent).toBe('◐1');
     expect(within(row('codex_somersault')).queryByLabelText(/working/)).toBeNull();
     expect(within(row('claude-usage-menubar')).getByLabelText('1 working')).toBeTruthy();
-    expect(within(row('Other sessions')).queryByLabelText(/waiting|working/)).toBeNull();
+    expect(within(row('This Mac')).queryByLabelText(/waiting|working/)).toBeNull();
     expand('proj-maws');
     expect(within(row('MAWS')).queryByLabelText('2 waiting')).toBeNull();
   });
@@ -487,33 +489,33 @@ describe('the project list', () => {
     expand('proj-removed', 'proj-codex-somersault');
     render(<Sidebar />);
     expect(sessionRows(row('codex_somersault'))).toEqual(['Quota reset recovery', 'Somersault terminal run', 'Trace stream reconnects']);
-    expect(projectRows()).toEqual(['claude-usage-menubar', 'codex_somersault', 'MAWS', 'Other sessions']);
+    expect(projectRows()).toEqual(['claude-usage-menubar', 'codex_somersault', 'MAWS', 'This Mac']);
   });
 
-  it('Other sessions expands like a project, without a "+" but with archive recovery', async () => {
+  it('This machine’s own row expands like a project, without a "+" but with archive recovery', async () => {
     const user = userEvent.setup();
     render(<Sidebar />);
-    expect(within(row('Other sessions')).queryByRole('button')).toBeNull();
-    expect(row('Other sessions').getAttribute('data-menu')).toBe('other');
-    await toggle(user, 'Other sessions');
-    expect(expanded()).toEqual(['other']);
-    expect(sessionRows(row('Other sessions'))).toEqual(['Terminal workflow notes']);
+    expect(within(row('This Mac')).queryByRole('button')).toBeNull();
+    expect(row('This Mac').getAttribute('data-menu')).toBe(`machine:${TEST_MACHINE}`);
+    await toggle(user, 'This Mac');
+    expect(expanded()).toEqual([machineKey(TEST_MACHINE)]);
+    expect(sessionRows(row('This Mac'))).toEqual(['Terminal workflow notes']);
   });
 
-  it('lists five projects, then "Show more" for the rest (not persisted), with Other sessions last; a search lists every project', async () => {
+  it('lists five projects, then "Show more" for the rest (not persisted), with this machine’s row last; a search lists every project', async () => {
     const extra = (n: number): ProjectRecord => ({ ...nine.projects[0], id: `proj-x${n}` as ProjectId, name: `extra-${n}`, directory: `/x/extra-${n}`, order: 10 + n, createdAt: `2026-08-0${n}T00:00:00.000Z` });
     fillStores({ ...nine, projects: [...nine.projects, extra(1), extra(2), extra(3), extra(4)] });
     const user = userEvent.setup();
     const { unmount } = render(<Sidebar />);
-    expect(projectRows()).toEqual(['claude-usage-menubar', 'codex_somersault', 'MAWS', 'extra-4', 'extra-3', 'Other sessions']);
+    expect(projectRows()).toEqual(['claude-usage-menubar', 'codex_somersault', 'MAWS', 'extra-4', 'extra-3', 'This Mac']);
     const rows = within(projectsTree()).getAllByRole('treeitem').map(label);
-    expect(rows.indexOf('Show more')).toBe(rows.indexOf('Other sessions') - 1);
+    expect(rows.indexOf('Show more')).toBe(rows.indexOf('This Mac') - 1);
     const field = screen.getByRole('searchbox', { name: 'Search projects and sessions' });
     await user.type(field, 'extra');
     expect(projectRows()).toEqual(['extra-4', 'extra-3', 'extra-2', 'extra-1']);
     await user.clear(field);
     await user.click(row('Show more'));
-    expect(projectRows()).toEqual(['claude-usage-menubar', 'codex_somersault', 'MAWS', 'extra-4', 'extra-3', 'extra-2', 'extra-1', 'Other sessions']);
+    expect(projectRows()).toEqual(['claude-usage-menubar', 'codex_somersault', 'MAWS', 'extra-4', 'extra-3', 'extra-2', 'extra-1', 'This Mac']);
     expect(screen.queryByRole('treeitem', { name: 'Show more' })).toBeNull();
     expect(document.activeElement).toBe(row('extra-2')); // the first project it revealed
     unmount();
@@ -523,7 +525,7 @@ describe('the project list', () => {
 });
 
 // W11 (I5): the removal action hides a project from the sidebar; a hidden project and its sessions show nowhere in the
-// tree (never under Other sessions), and "Hidden projects…" at the end offers them back.
+// tree (never under its machine’s row), and "Hidden projects…" at the end offers them back.
 describe('removing a project from the sidebar', () => {
   beforeEach(() => fillStores(nine));
 
@@ -546,8 +548,8 @@ describe('removing a project from the sidebar', () => {
     expand('proj-maws', 'other');
     const user = userEvent.setup();
     render(<Sidebar />);
-    expect(projectRows()).toEqual(['claude-usage-menubar', 'codex_somersault', 'Other sessions']);
-    expect(sessionRows(row('Other sessions'))).toEqual(['Terminal workflow notes']); // none of MAWS's
+    expect(projectRows()).toEqual(['claude-usage-menubar', 'codex_somersault', 'This Mac']);
+    expect(sessionRows(row('This Mac'))).toEqual(['Terminal workflow notes']); // none of MAWS's
     await user.click(screen.getByRole('button', { name: 'Hidden projects…' }));
     expect(useDialogs.getState().open).toEqual({ kind: 'hiddenProjects' });
   });
@@ -954,7 +956,7 @@ describe('sidebar keyboard', () => {
     await user.keyboard('{ArrowDown}{ArrowDown}');
     expect(document.activeElement).toBe(row('MAWS'));
     await user.keyboard('{End}');
-    expect(document.activeElement).toBe(row('Other sessions'));
+    expect(document.activeElement).toBe(row('This Mac'));
     await user.keyboard('{ArrowUp}{Enter}');
     expect(expanded()).toEqual([at('proj-maws')]);
     expect(useLayout.getState().main.current, 'W12: Enter shows the project’s tab set, as a click does').toBe(at('proj-maws'));
@@ -984,7 +986,7 @@ describe('sidebar keyboard', () => {
 
   // W12 (I3) on W11's tree: a project's activation is one path for the pointer and the keys, and it shows the project's
   // tab set, so a project reached by keyboard switches the strip as a click does.
-  it('a click, Enter, ArrowRight or Space on a project row shows its tab set; Other sessions shows the no-project set', async () => {
+  it('a click, Enter, ArrowRight or Space on a project row shows its tab set; a machine’s row shows its own set', async () => {
     const user = userEvent.setup();
     fileTabsByProject();
     act(() => useLayout.getState().openSession(idOf('Fix sidebar drag')));
@@ -1003,9 +1005,9 @@ describe('sidebar keyboard', () => {
     await user.keyboard('{ArrowRight}');
     expect(current()).toBe(at('proj-claude-usage-menubar'));
     expect(expanded()).toEqual([at('proj-codex-somersault'), at('proj-maws'), at('proj-claude-usage-menubar')]);
-    row('Other sessions').focus();
+    row('This Mac').focus();
     await user.keyboard(' ');
-    expect(current()).toBe('none');
+    expect(current()).toBe(machineKey(TEST_MACHINE));
   });
 
   it('the selected session is the tree’s stop when it is on screen', () => {
@@ -1223,12 +1225,16 @@ describe('deliberately selected projects', () => {
   });
 });
 
-it('keeps a discovered project with pinned, running or waiting work, but explicit removal wins', () => {
-  fillStores({ ...nine, projects: nine.projects.map((p) => ({ ...p, discovered: true })) });
+// P5 O6 M5 ("What a checkout is"): a folder nobody opened is no row, whatever work it holds; its sessions sit under its
+// machine's row, and a hidden one's nowhere, while Needs you still lists what waits.
+it('lists a discovered project’s sessions under its machine’s row, a hidden one’s nowhere', () => {
+  fillStores({ ...nine, projects: nine.projects.map((p) => ({ ...p, discovered: p.name === 'MAWS' })) });
+  expand('other');
   render(<Sidebar />);
-  expect(screen.getByRole('treeitem', { name: 'MAWS' })).toBeTruthy();
-  act(() => useSessions.getState().applyProjects({ projects: page.projects.map((p) => ({ ...p, discovered: true, hidden: p.name === 'MAWS' })), revision: useSessions.getState().revision + 1 }, TEST_MACHINE));
   expect(screen.queryByRole('treeitem', { name: 'MAWS' })).toBeNull();
+  expect(sessionRows(row('This Mac'))).toEqual(expect.arrayContaining(['Fix sidebar drag', 'Terminal workflow notes']));
+  act(() => useSessions.getState().applyProjects({ projects: page.projects.map((p) => ({ ...p, discovered: p.name === 'MAWS', hidden: p.name === 'MAWS' })), revision: useSessions.getState().revision + 1 }, TEST_MACHINE));
+  expect(sessionRows(row('This Mac'))).toEqual(['Terminal workflow notes']);
   expect(within(screen.getByRole('list', { name: 'Needs you' })).getByRole('button', { name: /Fix sidebar drag/ })).toBeTruthy();
 });
 
@@ -1251,4 +1257,81 @@ it('filters to the current session project, toggles back, and supports a chosen 
   await toggle(userEvent.setup(), 'MAWS');
   expect(row('MAWS').getAttribute('aria-expanded')).toBe('true');
   expect(projectRows()).toHaveLength(2);
+});
+
+// P5 O6 M5 (OX3; P5 Decision Log 28, T1 to T4): two machines' checkouts and sessions in one tree.
+describe('the sidebar across machines', () => {
+  const studio = (id: string) => addressOf(OTHER_MACHINE, id);
+  const maws = { key: 'repo:maws' as OrgKey, name: 'MAWS', source: 'remote' as const, smnsId: null };
+  const projects = [
+    project(at('maws'), 0, { name: 'MAWS', org: maws }),
+    project(studio('maws-b'), 0, { name: 'maws-b', org: maws }),
+    project(studio('notes'), 1, { name: 'notes', org: { key: `folder:${OTHER_MACHINE}:notes` as OrgKey, name: 'notes', source: 'folder', smnsId: null } }),
+    project(studio('tmp'), 2, { name: 'tmp', discovered: true, org: { key: `folder:${OTHER_MACHINE}:tmp` as OrgKey, name: 'tmp', source: 'folder', smnsId: null } }),
+  ];
+  const sessions = [
+    record(at('here'), { projectId: at('maws') as ProjectId, title: { text: 'Sidebar pass', source: 'user' }, updatedAt: '2026-10-27T10:00:00Z' }),
+    record(studio('there'), { projectId: studio('maws-b') as ProjectId, title: { text: 'Studio build', source: 'user' }, updatedAt: '2026-10-27T09:00:00Z' }),
+    record(studio('jot'), { projectId: studio('notes') as ProjectId, title: { text: 'Jot', source: 'user' }, updatedAt: '2026-10-27T08:00:00Z' }),
+    record(studio('scratch'), { projectId: studio('tmp') as ProjectId, title: { text: 'Scratch', source: 'user' } }),
+    record(studio('home'), { projectId: null, title: { text: 'Home errand', source: 'user' } }),
+    record(at('home-here'), { projectId: null, title: { text: 'Local errand', source: 'user' } }),
+  ];
+  const fill = (over: (p: ProjectRecord) => ProjectRecord = (p) => p) =>
+    useSessions.setState({ loaded: true, projects: new Map(projects.map((p) => [p.id, over(p)])), records: new Map(sessions.map((r) => [r.appId, r])) });
+  const roster = (studioState: 'up' | 'down') =>
+    useMachines.getState().applyRoster([
+      { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-10-27T10:00:00Z', generation: 0 },
+      { ref: OTHER_MACHINE, name: 'Studio', local: false, state: studioState, since: '2026-10-27T10:00:00Z', generation: 0 },
+    ]);
+  const chip = (title: string) => row(title).querySelector('[data-machine-chip]')?.textContent ?? null;
+  beforeEach(() => {
+    useAttention.setState({ loaded: true });
+    roster('up');
+  });
+  afterEach(() => useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() }));
+
+  it('lists one row per org project with both machines’ sessions, then each machine’s own row, this machine’s first', () => {
+    fill();
+    act(() => useLayout.getState().setSidebar({ expandedProjects: ['repo:maws', machineKey(TEST_MACHINE), machineKey(OTHER_MACHINE)] as ProjectKey[] }));
+    render(<Sidebar />);
+    expect(projectRows()).toEqual(['MAWS', 'notes', 'This Mac', 'Studio']);
+    expect(sessionRows(row('MAWS'))).toEqual(['Sidebar pass', 'Studio build']);
+    expect(row('MAWS').getAttribute('data-menu')).toBe(`project:${at('maws')}`); // the local checkout acts for the row
+    expect(sessionRows(row('This Mac'))).toEqual(['Local errand']);
+    expect(sessionRows(row('Studio')).sort()).toEqual(['Home errand', 'Scratch']); // a folder nobody opened, and no folder
+    expect(row('Studio').getAttribute('data-menu')).toBe(`machine:${OTHER_MACHINE}`);
+  });
+
+  it('marks another machine’s session rows with @name, this machine’s with nothing, and the project row with no machine', () => {
+    fill();
+    act(() => useLayout.getState().setSidebar({ expandedProjects: ['repo:maws'] as ProjectKey[] }));
+    render(<Sidebar />);
+    expect(chip('Studio build')).toBe('@Studio');
+    expect(chip('Sidebar pass')).toBeNull();
+    expect(row('MAWS').querySelector('[data-project-line] [data-machine-chip]')).toBeNull();
+  });
+
+  it('greys an offline machine’s rows in place, "offline" where the chip was, and an org row only when all its machines are', () => {
+    fill();
+    roster('down');
+    act(() => useLayout.getState().setSidebar({ expandedProjects: ['repo:maws', `folder:${OTHER_MACHINE}:notes`] as ProjectKey[] }));
+    render(<Sidebar />);
+    expect(projectRows()).toEqual(['MAWS', 'notes, machine offline', 'This Mac', 'Studio, machine offline']); // the order unchanged
+    const offline = row('Studio build, machine offline');
+    expect(offline.dataset.offline).toBe('true');
+    expect(chip('Studio build, machine offline')).toBe('offline');
+    expect(offline.querySelector('[data-session-title]')!.className).toContain('text-fg-faint');
+    expect(row('Sidebar pass').dataset.offline).toBeUndefined();
+    expect(row('MAWS').dataset.offline).toBeUndefined();
+  });
+
+  it('shows an org row while one machine’s checkout is listed, without the hidden checkout’s sessions', () => {
+    fill((p) => (p.id === at('maws') ? { ...p, hidden: true } : p));
+    act(() => useLayout.getState().setSidebar({ expandedProjects: ['repo:maws'] as ProjectKey[] }));
+    render(<Sidebar />);
+    expect(sessionRows(row('MAWS'))).toEqual(['Studio build']);
+    expect(row('MAWS').getAttribute('data-menu')).toBe(`project:${studio('maws-b')}`);
+    expect((within(row('MAWS')).getByRole('button', { name: 'New chat in MAWS' }) as HTMLButtonElement).disabled).toBe(true); // another machine's: O7
+  });
 });

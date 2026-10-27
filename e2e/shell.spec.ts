@@ -12,7 +12,7 @@ import { expect, test, type ElectronApplication, type Locator, type Page, type T
 import { ACTIONS, type ActionId } from '../src/shared/keymap/actions';
 import type { EventPayload } from '../src/shared/ipc/schema';
 import { formatChord } from '../src/shared/keymap/chord';
-import { addressed, localRef } from './support/address';
+import { addressed, localName, localRef } from './support/address';
 import { invoke, value } from './support/c7-replay'; // P5 O6 M2: the upgrade scene's raw-bridge calls
 import { activateForScene, traceForeground } from './support/foreground-trace';
 import { launchMaws, type MawsLaunch } from './support/launch';
@@ -231,14 +231,16 @@ test('tab sets per project: the strip switches with the project, ⌘1 counts in 
     expect(before, 'the new tab is in front').not.toContain(await selectedTab(page, 'Open tabs'));
     await expect(label).toHaveText('codex_somersault');
 
-    // Other sessions is the no-project set: no label
-    await clickProject('Other sessions');
+    // the machine's own row (P5 O6 M5, T3: its name, in place of "Other sessions") has a set of its own and no label
+    await clickProject(await localName(page));
     await expect(label).toHaveCount(0);
-    const projectSets = [await addressed(page, 'proj-codex-somersault'), await addressed(page, 'proj-maws')]; // a set of a project is keyed by its address
+    // a set of a project is keyed by its address while it has no org project (the stub source's projects derive none)
+    const ref = await localRef(page);
+    const projectSets = [await addressed(page, 'proj-codex-somersault'), await addressed(page, 'proj-maws')];
     await expect.poll(async () => {
       const value = (await layoutGet(page, 'main.tabs')) as { version: number; current: string; sets: Record<string, unknown> };
       return [value.version, value.current, Object.keys(value.sets).sort()];
-    }, { message: 'version 3, one set per project with tabs' }).toEqual([3, 'none', ['none', ...projectSets].sort()]);
+    }, { message: 'version 3, one set per project with tabs' }).toEqual([3, `machine:${ref}`, [`machine:${ref}`, ...projectSets].sort()]);
     expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
   } finally {
     await maws.cleanup();
@@ -550,13 +552,14 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     await expect(sidebar.getByRole('button', { name: 'Filter projects' })).toBeFocused();
     await sidebar.getByRole('searchbox').focus();
     await expect(page.locator('[data-hover-card]')).toHaveCount(0);
-    expect(await projectRows(sidebar)).toEqual([USAGE_PROJECT, 'codex_somersault', 'MAWS', 'Other sessions']);
-    expect(await rollups(sidebar)).toEqual({ [USAGE_PROJECT]: '●1', codex_somersault: '◐1', MAWS: '◐2●1', 'Other sessions': '' });
+    const here = await localName(page); // P5 O6 M5 (T3): the machine's own row, in place of "Other sessions"
+    expect(await projectRows(sidebar)).toEqual([USAGE_PROJECT, 'codex_somersault', 'MAWS', here]);
+    expect(await rollups(sidebar)).toEqual({ [USAGE_PROJECT]: '●1', codex_somersault: '◐1', MAWS: '◐2●1', [here]: '' });
     const pages: Record<string, string[]> = {
       MAWS: ['Workstation north star', FIX, SIP, 'Charter + research'],
       codex_somersault: [QUOTA, 'Somersault terminal run', 'Trace stream reconnects'],
       [USAGE_PROJECT]: ['Usage reset countdown', 'Settings idle probe', 'SDK wire inventory'],
-      'Other sessions': ['Terminal workflow notes'],
+      [here]: ['Terminal workflow notes'],
     };
     const glyphs: Record<string, string | null | undefined> = {};
     const unread: string[] = [];

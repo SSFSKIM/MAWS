@@ -2,7 +2,10 @@ import { act, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
-import { at } from '../../../../test/support/machine';
+import { addressOf } from '@shared/machine/address';
+import type { OrgKey } from '@shared/machine/org-key';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
+import { useMachines } from '../stores/machines';
 import { project, record } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { runSessionAction, sessionActionsFor } from '../app/session-actions';
@@ -132,6 +135,55 @@ describe('the session and project entries', () => {
     await waitFor(() => expect(useDialogs.getState().open).toMatchObject({ kind: 'confirm', title: 'Archive 1 session in maws?' }));
     const { body } = useDialogs.getState().open as { body: string };
     expect(body).toBe('Running sessions stop; transcripts stay where Claude Code keeps them, and every session can be unarchived from Archived sessions.');
+  });
+
+  // P5 O6 M5 ("Hiding"): an org project's row spans machines; its removal hides each checkout on a machine that is up
+  describe('on an org project checked out on two machines', () => {
+    const org = { key: 'repo:maws' as OrgKey, name: 'maws', source: 'remote' as const, smnsId: null };
+    const THERE = addressOf(OTHER_MACHINE, 'p1' as ProjectId);
+    const B = addressOf(OTHER_MACHINE, BARE_A);
+    const roster = (state: 'up' | 'down') =>
+      useMachines.getState().applyRoster([
+        { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-10-27T10:00:00Z', generation: 0 },
+        { ref: OTHER_MACHINE, name: 'Studio', local: false, state, since: '2026-10-27T10:00:00Z', generation: 0 },
+      ]);
+    beforeEach(() => {
+      useSessions.setState({
+        projects: new Map([[P1, project(P1, 0, { name: 'maws', org })], [THERE, project(THERE, 0, { name: 'maws', org })]]),
+        records: new Map([[A, record(A, { projectId: P1 })], [B, record(B, { projectId: THERE })]]),
+      });
+    });
+    afterEach(() => useMachines.setState({ roster: 'unread', machines: new Map() }));
+    const removeAndConfirm = async (body: string) => {
+      act(() => runProjectAction('removeProject', P1));
+      await waitFor(() => expect(useDialogs.getState().open).toMatchObject({ kind: 'confirm', body }));
+      act(() => (useDialogs.getState().open as { answer(yes: boolean): void }).answer(true));
+    };
+
+    it('Remove from sidebar hides the checkout on every machine that is up, counting the row’s sessions from both', async () => {
+      roster('up');
+      await removeAndConfirm('Its 2 sessions stay on disk and in the terminal. Show the project again from Hidden projects… at the end of the sidebar\'s list.');
+      await waitFor(() => expect(fake.invoked('session.projects.remove')).toEqual([{ id: 'p1' }, { id: 'p1' }]));
+      expect(fake.machines('session.projects.remove')).toEqual([TEST_MACHINE, OTHER_MACHINE]);
+    });
+
+    it('leaves an offline machine’s checkout as it is', async () => {
+      roster('down');
+      await removeAndConfirm('Its 2 sessions stay on disk and in the terminal. Show the project again from Hidden projects… at the end of the sidebar\'s list.');
+      await waitFor(() => expect(fake.invoked('session.projects.remove')).toEqual([{ id: 'p1' }]));
+      expect(fake.machines('session.projects.remove')).toEqual([TEST_MACHINE]);
+    });
+
+    it('archives the old sessions of the row’s projects on every machine that is up', async () => {
+      roster('up');
+      act(() => runProjectAction('archiveOlder', P1));
+      await waitFor(() => expect(fake.pending('session.archiveOlder')).toBe(1));
+      await act(() => fake.reply('session.archiveOlder', { archived: 1, skipped: 0 }));
+      await waitFor(() => expect(fake.pending('session.archiveOlder')).toBe(1));
+      await act(() => fake.reply('session.archiveOlder', { archived: 2, skipped: 1 }));
+      expect(fake.machines('session.archiveOlder')).toEqual([TEST_MACHINE, OTHER_MACHINE]);
+      expect(useNotices.getState().notices.some((n) => n.text === '3 sessions archived; 1 kept')).toBe(true);
+    });
   });
 
   it('Add project picks a directory with the native chooser and adds it; a cancelled chooser adds nothing', async () => {

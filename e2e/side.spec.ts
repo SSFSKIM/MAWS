@@ -253,9 +253,9 @@ const fileAnchor = (repo: ScratchRepo, line: number) => ({ kind: 'file-line' as 
 // The sidebar's rows of the parent's project, in order: their ids and levels.
 async function projectRows(page: Page, parent: string): Promise<{ id: string; level: string | null }[]> {
   await sidebarRow(page, { appSessionId: parent }); // its project expanded
-  const projectId = value(await invoke(page, 'session.get', { appSessionId: parent as never }))?.projectId ?? null;
-  const key = projectId === null ? 'other' : await addressed(page, projectId); // the tree names a project by its address
-  const project = sidebarOf(page).locator(`[data-kind="project"][data-tree-id="p:${key}"]`);
+  // the row that holds the parent (P5 O6 M5: a row is keyed by its org project's key, a session of none sits in its
+  // machine's own row)
+  const project = sidebarOf(page).locator('[data-kind="project"]').filter({ has: page.locator(`[data-menu="session:${await addressed(page, parent)}"]`) });
   const rows = await project.locator('[role="treeitem"][data-menu^="session:"]').evaluateAll((rows) => rows.map((r) => ({ id: r.getAttribute('data-menu')!.slice('session:'.length), level: r.getAttribute('aria-level') })));
   return rows.map((row) => ({ ...row, id: bareOf(row.id) })); // the rows name addresses; the callers, the raw bridge's bare ids
 }

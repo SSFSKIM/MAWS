@@ -5,7 +5,7 @@ import { fakeClient } from '../../../../test/support/fake-client';
 import { addressOf } from '@shared/machine/address';
 import { at, OTHER_MACHINE, TEST_MACHINE as M } from '../../../../test/support/machine';
 import { createLayoutStore, registerReplaceGuard, type ReplaceVerdict } from './layout';
-import { currentSet } from './layout-model';
+import { currentSet, type RekeyOf } from './layout-model';
 
 const A = at('app-a' as AppSessionId);
 // A session's tab as a layout from before O6 holds it (bare: P5 O6 M2), and as it reads, lifted to the local machine.
@@ -657,5 +657,36 @@ describe('settling a machine’s tabs', () => {
     store.getState().openSession(onB('b9'), { how: 'tab' });
     store.getState().settleMachine(OTHER_MACHINE);
     expect(tabIds(store)).toEqual([`session:${onB('b9')}`]);
+  });
+});
+
+// P5 O6 M5 ("Migrating project-keyed state"): the sets, expanded rows and panel contexts keyed by a project's address (a
+// key from before M5) move to its org project's key at hydration, and again as each machine's projects arrive.
+describe('rekeying project-keyed state to org keys', () => {
+  const P1 = at('p1' as ProjectId);
+  const P2 = addressOf(OTHER_MACHINE, 'p2' as ProjectId);
+  const ORG = 'repo:maws' as never;
+  const set = (...ids: string[]) => ({ panes: [{ tabs: ids.map(session), activeTabId: `session:${ids[0]}` }], focusedPane: 0, splitRatio: 0.5 });
+  const B1 = addressOf(OTHER_MACHINE, 'b1' as AppSessionId);
+  const values = {
+    'main.tabs': { version: 3, current: P1, sets: { [P1]: set(A), [P2]: set(B1) }, closedTabs: [] },
+    regions: { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, expandedProjects: [P1, P2, 'other'] } },
+  };
+  let otherLoaded = false;
+  const projectOf = (id: AppSessionId) => (id === A ? ORG : id === B1 ? (otherLoaded ? ORG : undefined) : null); // B's records come with its snapshot
+
+  it('moves what it can at hydration, leaves a machine not loaded yet, and moves its keys on its arrival', async () => {
+    const rekeyOf: RekeyOf = (key) => (key === P1 ? ORG : otherLoaded ? ORG : 'wait');
+    const fake = fakeClient({ 'layout.list': { keys: Object.keys(values) }, 'layout.get': ({ key }: { key: string }) => ({ value: (values as Record<string, unknown>)[key] ?? null }) });
+    const store = createLayoutStore();
+    await store.getState().hydrate(fake.client, () => true, { projectOf, rekeyOf });
+    expect(Object.keys(store.getState().main.sets).sort()).toEqual([P2, ORG].sort());
+    expect(store.getState().main.current).toBe(ORG); // current follows its set
+    expect(store.getState().regions.sidebar.expandedProjects).toEqual([ORG, P2, `machine:${M}`]);
+    otherLoaded = true;
+    store.getState().rekeyProjects();
+    expect(Object.keys(store.getState().main.sets)).toEqual([ORG]);
+    expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual([`session:${A}`, `session:${B1}`]); // merged into the current set
+    expect(store.getState().regions.sidebar.expandedProjects).toEqual([ORG, `machine:${M}`]);
   });
 });

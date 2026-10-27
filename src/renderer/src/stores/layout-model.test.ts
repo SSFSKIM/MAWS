@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentId, AppSessionId, ProjectId } from '@shared/graph/ids';
-import { TEST_MACHINE as M } from '../../../../test/support/machine';
-import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, LayoutMainSchema, NO_PROJECT, type LayoutMain, type LayoutMainV1, type TabRef, type TabSet, type TabSetKey, type TabTarget } from '@shared/ipc/schema/layout';
+import { OTHER_MACHINE, TEST_MACHINE as M } from '../../../../test/support/machine';
+import type { OrgKey } from '@shared/machine/org-key';
+import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, LayoutMainSchema, NO_PROJECT, type LayoutMain, type LayoutMainV1, type ProjectKey, type TabRef, type TabSet, type TabSetKey, type TabTarget } from '@shared/ipc/schema/layout';
 import {
   activateTab, activeTab, closeTab, currentSet, cycleTab, dockSplit, dropSession, floatingPane, floatSplit, focusPane, fromV1, moveTab, openSession, openTab,
-  refile, reopenClosed, repairMain, replaceActive, retargetTab, selectTab, sessionOfTab, setSplitRatio, splitWithActive, switchSet, togglePinned, type SetOfTab,
+  refile, rekeyContexts, rekeyExpanded, rekeySets, reopenClosed, repairMain, replaceActive, retargetTab, selectTab, sessionOfTab, setSplitRatio, splitWithActive, switchSet, togglePinned, type RekeyOf, type SetOfTab,
 } from './layout-model';
 
 const S = (id: string) => ({ kind: 'session' as const, appSessionId: id as AppSessionId });
@@ -633,5 +634,123 @@ describe('the split’s float', () => {
     expect('floating' in cur(repairMain(at({ sessionTabId: `artifact:${M}:doc-1` }), () => true))).toBe(false); // not a session
     expect('floating' in cur(repairMain(floated(), (id) => id !== 'd'))).toBe(false); // its session is gone
     expect(ids(repairMain(floated(), (id) => id !== 'd'))).toEqual([[`artifact:${M}:doc-1`], ['session:e']]);
+  });
+});
+
+// P5 O6 M5 (docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md, "Migrating project-keyed state"): an M2
+// version-3 layout keys its sets by project address; each migrates whole to its org project's key once its machine's
+// projects are known, sets landing on one key merge, a set whose project is gone re-homes its tabs, and a set of a
+// machine not loaded yet waits for it.
+describe('rekeying project sets to org keys', () => {
+  const B = OTHER_MACHINE;
+  const PA = `${M}/proj-a` as ProjectId; // A's checkout of the shared repository
+  const PB = `${B}/proj-b` as ProjectId; // B's checkout of it
+  const PG = `${M}/proj-gone` as ProjectId; // a project A no longer has
+  const PF = `${M}/proj-files` as ProjectId;
+  const PL = `${B}/proj-late` as ProjectId; // B's, before B has loaded
+  const SHARED = 'remote:example.org/team/shared' as OrgKey;
+  const FILES = `folder:${M}:proj-files` as OrgKey;
+  const LATE = 'remote:example.org/team/late' as OrgKey;
+  const OWN = `machine:${M}` as OrgKey;
+  const session = (id: string): TabRef => ({ id: `session:${id}`, kind: 'session', appSessionId: id as AppSessionId, pinned: false });
+  const file = (path: string, machine = M): TabRef => ({ id: `file:${machine}:${path}`, kind: 'file', path, line: null, appSessionId: null, machine, pinned: false });
+  const set = (panes: TabRef[][], focusedPane: 0 | 1 = 0, splitRatio = 0.5): TabSet => ({
+    panes: panes.map((tabs) => ({ tabs, activeTabId: tabs.at(-1)?.id ?? '' })) as TabSet['panes'],
+    focusedPane,
+    splitRatio,
+  });
+  const sA1 = session(`${M}/a1`);
+  const sA2 = session(`${M}/a2`);
+  const sB1 = session(`${B}/b1`);
+  const sG = session(`${M}/g1`);
+  const sL = session(`${B}/l1`);
+  // B loads later: until then its keys wait
+  let bLoaded = false;
+  const rekeyOf: RekeyOf = (key) => {
+    if (key === PA) return SHARED;
+    if (key === PB) return bLoaded ? SHARED : 'wait';
+    if (key === PF) return FILES;
+    if (key === PG) return 'gone';
+    if (key === PL) return bLoaded ? LATE : 'wait';
+    return 'wait';
+  };
+  // where a session tab files now: g1's record sits under A's machine row
+  const setOf: SetOfTab = (tab) => (sessionOfTab(tab) === `${M}/g1` ? OWN : null);
+  const v3 = (): LayoutMain => ({
+    version: 3,
+    current: PB,
+    sets: {
+      [PA]: set([[sA1], [sA2]], 1, 0.3),
+      [PB]: set([[sB1, file('/b/readme.md', B)]]),
+      [PG]: set([[sG, file('/g/notes.md')]]),
+      [PF]: set([[file('/f/one.md'), file('/f/two.md')]]),
+      [PL]: set([[sL]]),
+      [NO_PROJECT]: set([[file('/loose.md')]]),
+    },
+    closedTabs: [],
+  });
+  const loaded = <T,>(fn: () => T): T => {
+    bLoaded = true;
+    try {
+      return fn();
+    } finally {
+      bLoaded = false;
+    }
+  };
+
+  it('merges two checkouts’ sets on one key into the current one’s panes, the other’s tabs after its focused pane’s', () => {
+    const { main } = loaded(() => rekeySets(v3(), rekeyOf, setOf));
+    expect(main.current).toBe(SHARED);
+    // PB was current: its panes, focus and ratio; PA's tabs (both panes) follow in its focused pane
+    expect(main.sets[SHARED]).toEqual({ panes: [{ tabs: [sB1, file('/b/readme.md', B), sA1, sA2], activeTabId: file('/b/readme.md', B).id }], focusedPane: 0, splitRatio: 0.5 });
+    expect(main.sets[PA]).toBeUndefined();
+    expect(main.sets[PB]).toBeUndefined();
+    expect(LayoutMainSchema.safeParse(main).success).toBe(true);
+  });
+
+  it('with no current set among them, the first set in key order is the base', () => {
+    const { main } = loaded(() => rekeySets({ ...v3(), current: NO_PROJECT }, rekeyOf, setOf));
+    expect(main.current).toBe(NO_PROJECT);
+    expect(main.sets[SHARED]).toEqual({ panes: [{ tabs: [sA1], activeTabId: sA1.id }, { tabs: [sA2, sB1, file('/b/readme.md', B)], activeTabId: sA2.id }], focusedPane: 1, splitRatio: 0.3 });
+  });
+
+  it('moves a set of file tabs alone to its key, and re-homes a gone project’s tabs: sessions where they file, the rest to none', () => {
+    const { main } = rekeySets(v3(), rekeyOf, setOf);
+    expect(main.sets[FILES]).toEqual(v3().sets[PF]);
+    expect(main.sets[PG]).toBeUndefined();
+    expect(main.sets[OWN]?.panes[0].tabs).toEqual([sG]);
+    expect(main.sets[NO_PROJECT]?.panes[0].tabs).toEqual([file('/loose.md'), file('/g/notes.md')]);
+    expect(LayoutMainSchema.safeParse(main).success).toBe(true);
+  });
+
+  it('a gone project’s set that was current hands the strip to where its shown tab went', () => {
+    const { main } = rekeySets({ ...v3(), current: PG }, rekeyOf, setOf);
+    expect(main.current).toBe(NO_PROJECT); // its active tab, the notes file
+  });
+
+  it('leaves a set of a machine not loaded as it is, and migrates it once the machine has loaded', () => {
+    const before = rekeySets(v3(), rekeyOf, setOf).main;
+    expect(before.current).toBe(PB); // B's checkout waits, the strip with it
+    expect(before.sets[PL]).toEqual(v3().sets[PL]);
+    expect(before.sets[PA]).toBeUndefined(); // A's migrated meanwhile
+    expect(before.sets[SHARED]?.panes.map((p) => p.tabs)).toEqual([[sA1], [sA2]]);
+    const after = loaded(() => rekeySets(before, rekeyOf, setOf).main);
+    expect(after.sets[LATE]).toEqual(v3().sets[PL]);
+    expect(after.current).toBe(SHARED);
+    expect(after.sets[SHARED]?.panes.map((p) => p.tabs)).toEqual([[sB1, file('/b/readme.md', B), sA1, sA2]]); // B's set was current
+    expect(loaded(() => rekeySets(after, rekeyOf, setOf).main)).toBe(after); // nothing left to migrate: the same value
+  });
+
+  it('rekeys the panel’s remembered contexts by the same map, a merge keeping the current set’s entry', () => {
+    const contexts = { [PA]: `${M}/a1`, [PB]: `${B}/b1`, [PG]: `${M}/g1`, [PL]: `${B}/l1`, [NO_PROJECT]: `${M}/x` } as unknown as Record<string, AppSessionId>;
+    const { bases } = loaded(() => rekeySets(v3(), rekeyOf, setOf));
+    expect(loaded(() => rekeyContexts(contexts, rekeyOf, bases))).toEqual({ [SHARED]: `${B}/b1`, [LATE]: `${B}/l1`, [NO_PROJECT]: `${M}/x` });
+    // a machine not loaded: kept under the address
+    expect(rekeyContexts({ [PB]: `${B}/b1` } as Record<string, AppSessionId>, rekeyOf, new Map())).toEqual({ [PB]: `${B}/b1` });
+  });
+
+  it('rekeys the expanded rows: an address to its org key once, a gone one dropped, a waiting one kept, Other sessions to this machine’s row', () => {
+    const list = [PA, PG, PL, 'other', SHARED] as ProjectKey[];
+    expect(rekeyExpanded(list, rekeyOf, M)).toEqual([SHARED, PL, OWN]);
   });
 });

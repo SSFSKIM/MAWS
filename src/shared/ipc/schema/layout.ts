@@ -13,6 +13,7 @@ import { BrowserTabIdSchema } from '../../browser/tab';
 // P5 O6 M2
 import { addressOf, isAddress } from '../../machine/address';
 import { MachineRefSchema, type MachineRef } from '../../machine/ref';
+import { OrgKeySchema } from '../../machine/org-key'; // P5 O6 M5
 
 // W5 (§5.2 as amended 2026-10-01): the Overview is no longer a tab; it floats over the main area (`regions.overview`).
 // A stored `main.tabs` that still holds its tab is read through `StoredMainSchema`, which drops it. W6 (E1): the
@@ -97,7 +98,11 @@ export type PanelTabRef = z.infer<typeof PanelTabRefSchema>;
 // lists the project rows open in place (a project id, or `'other'` for Other sessions), remembered across launches;
 // every other row is collapsed. It replaces version 2's `openProject` (W5's drill-in: the open page becomes the one
 // expanded project) and version 1's `collapsedProjects` and `collapsedSections` (read as nothing expanded).
-export const ProjectKeySchema = z.union([ProjectIdSchema, z.literal('other')]);
+// P5 O6 M5: a row is an org project's or a machine's (`OrgKeySchema`: `remote:…`, `machine:<ref>`, …), which replace
+// project ids and `'other'`; an entry that is still a project's address, or `'other'`, is from before M5 and migrates
+// once its machine's projects are known (`layout-model.ts`'s `rekeySets`). No version: every one is a string as before.
+export const ProjectKeySchema = z.union([z.literal('other'), OrgKeySchema, ProjectIdSchema]);
+export type ProjectKey = z.infer<typeof ProjectKeySchema>;
 // The floating Overview's rect, in px from the top left of the main area under the top bar (null: the default place).
 export const OverviewRectSchema = z.strictObject({ x: z.number().int(), y: z.number().int(), width: z.number().int(), height: z.number().int() });
 export type OverviewRect = z.infer<typeof OverviewRectSchema>;
@@ -172,7 +177,9 @@ export function storedRegionsSchema(local: MachineRef) {
 // once across every set; the closed-tab history (⌘⇧T, newest last) is shared. Version 1, one pane layout, is read
 // through `StoredMainSchema` and filed by project at hydration (the layout model's `fromV1`).
 export const NO_PROJECT = 'none';
-export const TabSetKeySchema = z.union([z.literal(NO_PROJECT), ProjectIdSchema]);
+// P5 O6 M5: a set is an org project's or a machine's row's (`OrgKeySchema`); one keyed by a project's address is from
+// before M5 and migrates as `ProjectKeySchema`'s entries do.
+export const TabSetKeySchema = z.union([z.literal(NO_PROJECT), OrgKeySchema, ProjectIdSchema]);
 export type TabSetKey = z.infer<typeof TabSetKeySchema>;
 const TabSetShape = {
   panes: z.tuple([PaneStateSchema]).or(z.tuple([PaneStateSchema, PaneStateSchema])), focusedPane: z.union([z.literal(0), z.literal(1)]), splitRatio: z.number() };

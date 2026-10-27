@@ -159,7 +159,7 @@ describe('editor registrations', () => {
       disk.files[APP] = 'const a = 2;\n'; // no event: the save finds it
       await act(async () => void (await useViewer.getState().save(ID)));
       expect(entry().theirs?.view).toBe('merge');
-      act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: 'app-s' as AppSessionId }));
+      act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: at('app-s' as AppSessionId) }));
       expect(activeTab(useLayout.getState().main)?.id).not.toBe(ID);
       await act(() => requestCloseTab(ID));
       expect(sheet()).toBeNull();
@@ -174,7 +174,7 @@ describe('editor registrations', () => {
   describe('file.save', () => {
     it('saves the focused pane’s file tab, and writes nothing while a session tab is active', async () => {
       const { disk } = await openApp({ dirty: true });
-      act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: 'app-s' as AppSessionId }));
+      act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: at('app-s' as AppSessionId) }));
       runAction('file.save');
       await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
       expect(disk.callsOf('files.write')).toHaveLength(0);
@@ -195,7 +195,7 @@ describe('editor registrations', () => {
       expect(tab.getAttribute('data-dirty')).toBe('true');
       expect(within(tab).getByRole('img', { name: 'Unsaved changes' }).textContent).toBe('•');
       marked.unmount();
-      const session = strip({ id: 'session:app-s', kind: 'session', appSessionId: 'app-s' as AppSessionId, pinned: false });
+      const session = strip({ id: `session:${at('app-s')}`, kind: 'session', appSessionId: at('app-s' as AppSessionId), pinned: false });
       expect(session.container.querySelector('[data-dirty]')).toBeNull();
       expect(session.queryByRole('img', { name: 'Unsaved changes' })).toBeNull();
     });

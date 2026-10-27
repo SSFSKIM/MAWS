@@ -520,10 +520,10 @@ describe('the shell per machine', () => {
     const { fake, stores } = setup(0, { machines: [LOCAL_ENTRY, other('connecting', 0)], tabs: sessionTabs(A, onB('b1'), onB('b9')) });
     await answerSnapshots(fake);
     await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
-    expect(tabIds(stores)).toEqual([`session:${A}`, `session:${onB('b1')}`, `session:${onB('b9')}`]);
+    expect(tabIds(stores).sort()).toEqual([`session:${A}`, `session:${onB('b1')}`, `session:${onB('b9')}`].sort()); // each machine's tabs in their sets (P5 O6 M5)
     fake.event('machines.changed', { machines: [LOCAL_ENTRY, other('up', 1)] });
     await answerOther(fake, [record('b1')], 5);
-    expect(tabIds(stores)).toEqual([`session:${A}`, `session:${onB('b1')}`]);
+    expect(tabIds(stores).sort()).toEqual([`session:${A}`, `session:${onB('b1')}`].sort()); // each machine's tabs in their sets (P5 O6 M5)
   });
 
   it('hydrates once the roster has answered or failed: a down machine’s tab and a failed roster’s are kept, a machine no longer listed loses its tabs', async () => {
@@ -533,7 +533,7 @@ describe('the shell per machine', () => {
     expect(down.stores.layout.getState().hydrated).toBe(false); // the roster answers after the local snapshot and the layout reads
     await down.fake.reply('machines.list', { machines: [LOCAL_ENTRY, other('down', 3)] });
     await vi.waitFor(() => expect(down.stores.layout.getState().hydrated).toBe(true));
-    expect(tabIds(down.stores)).toEqual([`session:${A}`, `session:${onB('b9')}`]);
+    expect(tabIds(down.stores).sort()).toEqual([`session:${A}`, `session:${onB('b9')}`].sort()); // each machine's tabs in their sets (P5 O6 M5)
 
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const failed = setup(0, { machines: null, tabs: sessionTabs(A, onB('b9')) });
@@ -542,7 +542,7 @@ describe('the shell per machine', () => {
     expect(failed.stores.layout.getState().hydrated).toBe(false); // the roster is still unread
     await failed.fake.fail('machines.list', 'no main handler registered for machines.list');
     await vi.waitFor(() => expect(failed.stores.layout.getState().hydrated).toBe(true));
-    expect(tabIds(failed.stores)).toEqual([`session:${A}`, `session:${onB('b9')}`]);
+    expect(tabIds(failed.stores).sort()).toEqual([`session:${A}`, `session:${onB('b9')}`].sort()); // each machine's tabs in their sets (P5 O6 M5)
     expect(warn.mock.calls.map(([line]) => line)).toEqual(['[shell] machines.list unavailable; keeping every other machine’s tabs']);
     warn.mockRestore();
 

@@ -11,11 +11,14 @@ import { lastActivity, sortSessions, type SidebarSort } from '../overview/derive
 import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { displayTitle } from '../sessions/title'; // E3
 import { projectLabels } from './project-labels';
+import type { MachineRef } from '@shared/machine/ref';
+import { machineOrder, machineProject, orgIndex, orgKeyOf, primaryCheckout, rowOfSession, type OrgProject, type RowKey } from '../stores/org-projects'; // P5 O6 M5
 import { SIDE_COPY } from '../side/copy'; // E3
 
-// "Other sessions": the pseudo-project at the end of the list, for sessions without a (known) project.
-export const OTHER_SESSIONS = 'other' as const;
-export type ProjectKey = ProjectId | typeof OTHER_SESSIONS;
+// P5 O6 M5: a row is an org project's, keyed by its org key (an address while its machine has not derived it), or a
+// machine's own project's (`machine:<ref>`), which took the place of "Other sessions": one per machine, after the
+// projects (`stores/org-projects.ts`).
+export type ProjectKey = RowKey;
 
 const isWorking = (digest: SessionDigest | undefined) => digest?.phase === 'working' || digest?.phase === 'starting';
 
@@ -37,66 +40,92 @@ export function sessionMatcher(query: string, projects: ReadonlyMap<ProjectId, P
 export interface ProjectListInput {
   records: ReadonlyMap<AppSessionId, SessionRecord>;
   digests: ReadonlyMap<AppSessionId, SessionDigest>;
-  projects: readonly ProjectRecord[]; // the listed ones
+  projects: ReadonlyMap<ProjectId, ProjectRecord>; // every machine's, hidden and discovered ones included
   rows: NeedsYouRow[]; // the Needs-you rows: a project's waiting count is how many of its sessions have one
-  hidden?: ReadonlySet<ProjectId>; // W11 (I5): projects removed from the sidebar, whose sessions show nowhere in it
+  local: MachineRef;
+  machineName(machine: MachineRef): string;
+  alsoListed?: ReadonlySet<ProjectKey>; // keys listed for the moment though no checkout lists them (the project filter's)
 }
 
 export interface ProjectEntry {
   key: ProjectKey;
-  project: ProjectRecord | null; // null for Other sessions
+  org: OrgProject;
+  project: ProjectRecord | null; // the checkout the row's actions and card act on (`primaryCheckout`); null for a machine's row
+  machine: MachineRef | null; // a machine row's machine; null for an org project's
   name: string;
   sessions: SessionRecord[]; // not archived, unsorted
   rollup: { waiting: number; working: number };
   lastActivity: number | null; // W11 (I6): the latest movement of any of its sessions, archived ones included; null without one
 }
 
-const OTHER_NAME = 'Other sessions';
-
-// Every listed project, then Other sessions when nonempty, each with its sessions, its waiting (◐) and working
-// (●) counts and its last activity; a hidden project's sessions are in neither. Projects are sorted by recency of
-// activity: the latest movement of any of their sessions (archived ones included, so archiving does not demote a
-// project), a project without sessions by when it was added; ties by the project order, then the name.
-export function projectList({ records, digests, projects, rows, hidden }: ProjectListInput): ProjectEntry[] {
-  const byId = new Map(projects.map((p) => [p.id, p]));
-  const labels = projectLabels(projects);
+// P5 O6 M5: every listed org project, then each machine's own project that holds a session (T3: named after the machine,
+// the local machine's first, then by name), each with its sessions from every machine, its waiting (◐) and working (●)
+// counts and its last activity; a hidden project's sessions are in none. Org projects are sorted by recency of activity:
+// the latest movement of any of their sessions (archived ones included, so archiving does not demote a project), one
+// without sessions by when its checkout was added; ties by its checkout's order, then the name.
+export function projectList({ records, digests, projects, rows, local, machineName, alsoListed }: ProjectListInput): ProjectEntry[] {
+  const index = orgIndex(projects.values(), local);
   const waiting = new Set(rows.map((row) => row.appSessionId));
   const grouped = new Map<ProjectKey, { live: SessionRecord[]; activity: number }>();
   for (const record of records.values()) {
-    if (record.projectId !== null && hidden?.has(record.projectId)) continue; // never Other sessions'
-    const key: ProjectKey = record.projectId !== null && byId.has(record.projectId) ? record.projectId : OTHER_SESSIONS;
+    const key = rowOfSession(index, projects, record, alsoListed);
+    if (key === null) continue; // a hidden project's: nowhere
     const entry = grouped.get(key) ?? { live: [], activity: Number.NEGATIVE_INFINITY };
     if (!grouped.has(key)) grouped.set(key, entry);
     entry.activity = Math.max(entry.activity, lastActivity(record, digests.get(record.appId)));
     if (!record.archived) entry.live.push(record);
   }
-  const entryOf = (key: ProjectKey, project: ProjectRecord | null): ProjectEntry => {
-    const group = grouped.get(key);
+  const listedKeys = [...index.orgs.keys()].filter((key) => index.listed.has(key) || alsoListed?.has(key));
+  const primaries = new Map(listedKeys.flatMap((key) => {
+    const primary = primaryCheckout(index, key, local);
+    return primary ? [[key, primary] as const] : [];
+  }));
+  const labels = projectLabels([...primaries.values()].map((p) => ({ ...p, name: index.orgs.get(orgKeyOf(p))!.name })));
+  const entryOf = (org: OrgProject, project: ProjectRecord | null, machine: MachineRef | null, name: string): ProjectEntry => {
+    const group = grouped.get(org.id);
     const sessions = group?.live ?? [];
     return {
-      key,
+      key: org.id,
+      org,
       project,
-      name: project ? labels.get(project.id)! : OTHER_NAME,
+      machine,
+      name,
       sessions,
       rollup: { waiting: sessions.filter((r) => waiting.has(r.appId)).length, working: sessions.filter((r) => isWorking(digests.get(r.appId))).length },
       lastActivity: group && Number.isFinite(group.activity) ? group.activity : null,
     };
   };
-  const activityOf = (key: ProjectKey, project: ProjectRecord) => grouped.get(key)?.activity ?? Date.parse(project.createdAt);
-  const listed = projects
-    .map((project) => ({ entry: entryOf(project.id, project), activity: activityOf(project.id, project) }))
+  const listed = [...primaries]
+    .map(([key, project]) => ({ entry: entryOf(index.orgs.get(key)!, project, null, labels.get(project.id)!), activity: grouped.get(key)?.activity ?? Date.parse(project.createdAt) }))
     .sort((a, b) => b.activity - a.activity || a.entry.project!.order - b.entry.project!.order || a.entry.name.localeCompare(b.entry.name))
     .map(({ entry }) => entry);
-  const other = entryOf(OTHER_SESSIONS, null);
-  return other.sessions.length > 0 ? [...listed, other] : listed;
+  const machines = [...new Set([...grouped.keys()].filter(isMachineKey).map(machineOfKey))].sort(machineOrder(local, machineName));
+  const own = machines.map((machine) => entryOf(machineProject(machine, machineName(machine)), null, machine, machineName(machine))).filter((entry) => entry.sessions.length > 0);
+  return [...listed, ...own];
 }
 
-// The list while searching: the projects whose name matches, and those holding a session that matches.
+const MACHINE_PREFIX = 'machine:';
+const isMachineKey = (key: ProjectKey): boolean => key.startsWith(MACHINE_PREFIX);
+const machineOfKey = (key: ProjectKey): MachineRef => key.slice(MACHINE_PREFIX.length) as MachineRef;
+
+// The list while searching: the org projects whose name matches, and every row holding a session that matches.
 export function filterProjectList(entries: ProjectEntry[], query: string, projects: ReadonlyMap<ProjectId, ProjectRecord>): ProjectEntry[] {
   const q = query.trim().toLowerCase();
   if (q === '') return entries;
   const matches = sessionMatcher(query, projects);
-  return entries.filter((e) => (e.project !== null && e.name.toLowerCase().includes(q)) || e.sessions.some(matches));
+  return entries.filter((e) => (e.machine === null && e.name.toLowerCase().includes(q)) || e.sessions.some(matches));
+}
+
+// The projects in order of recency, as the sidebar ranks its rows (a New chat's project picker): the latest movement of
+// any of a project's sessions, else when it was added; ties by its order, then its name.
+export function projectsByRecency(records: ReadonlyMap<AppSessionId, SessionRecord>, digests: ReadonlyMap<AppSessionId, SessionDigest>, projects: readonly ProjectRecord[]): ProjectRecord[] {
+  const activity = new Map<ProjectId, number>();
+  for (const record of records.values()) {
+    if (record.projectId === null) continue;
+    activity.set(record.projectId, Math.max(activity.get(record.projectId) ?? Number.NEGATIVE_INFINITY, lastActivity(record, digests.get(record.appId))));
+  }
+  const at = (p: ProjectRecord) => activity.get(p.id) ?? Date.parse(p.createdAt);
+  return [...projects].sort((a, b) => at(b) - at(a) || a.order - b.order || a.name.localeCompare(b.name));
 }
 
 // ---- an expanded project's sessions ------------------------------------------------------------------------------------

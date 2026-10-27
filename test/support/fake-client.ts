@@ -31,10 +31,11 @@ export function fakeClient(given: Partial<Record<CommandName, unknown>> = {}): F
   const calls: string[] = [];
   const client = {
     localMachine: TEST_MACHINE,
-    invoke(name: CommandName, input: unknown, opts?: { machine?: MachineRef }) {
+    // the client's `opts`, or the machine the page's client hands a bridge (installed as `window.maws`)
+    invoke(name: CommandName, input: unknown, opts?: { machine?: MachineRef } | MachineRef) {
       calls.push(`invoke ${name}`);
       inputs.set(name, [...(inputs.get(name) ?? []), input]);
-      named.set(name, [...(named.get(name) ?? []), opts?.machine]);
+      named.set(name, [...(named.get(name) ?? []), typeof opts === 'string' ? opts : opts?.machine]);
       if (name in auto) {
         const given = auto[name];
         return Promise.resolve({ ok: true, value: typeof given === 'function' ? (given as (i: unknown) => unknown)(input) : given });

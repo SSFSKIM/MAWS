@@ -5,7 +5,8 @@
 // row's card (`SessionHoverCard`) says what the one-line row leaves out: the status and age, the context used, the
 // branch and worktree, who holds a foreign-live session or what a working one does, and the last assistant line; then
 // the pending request, if any, through the `requestCard` slot in its `hover` placement, with the originating request
-// fetched once per item through `attention.request` and cached in the attention store. Opening it answers nothing:
+// fetched once per item through `attention.request` and cached in the attention store. P5 O6 M5: the card always names
+// the session's machine, and for an offline machine says so and when it was last seen (the roster's `since`). Opening it answers nothing:
 // approval is an explicit click inside the card, and the slot offers it only for read-only tools. The project row's
 // card is `ProjectHoverCard.tsx`.
 import { HoverCard as Radix } from 'radix-ui';
@@ -15,6 +16,8 @@ import { QuickReply, useQuickReply, type QuickReplyState } from './QuickReply';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
+import { formatAgo } from '@shared/app/date-format';
+import { useMachineMark } from '../app/machine-mark';
 import { useSlot } from '../app/slots';
 import { useNow } from '../app/use-now';
 import { holderLine, waitingItem } from '../attention/derive';
@@ -159,6 +162,7 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
     return parent === undefined ? null : displayTitle(parent);
   });
   const now = useNow();
+  const machine = useMachineMark(appSessionId);
   if (!record) return null;
   const glyph = glyphFor(record, digest, pending, ended, now);
   const waiting = waitingItem(pending);
@@ -175,6 +179,9 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
       </div>
       <p data-testid="hover-meta" className="m-0 text-fg-muted tabular-nums">
         {meta}
+      </p>
+      <p data-testid="hover-machine" className={`m-0 truncate ${machine.offline ? 'text-fg-faint' : 'text-fg-muted'}`}>
+        {machine.offline ? [machine.name, 'offline', lastSeen(machine.since, now)].filter(Boolean).join(' · ') : machine.name}
       </p>
       {place && (
         <p data-testid="hover-place" title={place.title ?? undefined} className="m-0 truncate text-fg-muted">
@@ -206,6 +213,12 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
         <QuickReply record={record} reply={reply} />}
     </div>
   );
+}
+
+// When an offline machine was last seen: when its link went down, as the roster says.
+function lastSeen(since: string | null, now: number): string | null {
+  const at = since === null ? Number.NaN : Date.parse(since);
+  return Number.isFinite(at) ? `last seen ${formatAgo(Math.max(0, now - at), { narrow: true })}` : null;
 }
 
 function Request({ item }: { item: AttentionItem }) {

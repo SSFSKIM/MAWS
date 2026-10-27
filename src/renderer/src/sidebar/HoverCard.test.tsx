@@ -11,6 +11,7 @@ import { ev } from '../../../../test/support/events';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { useAttention } from '../stores/attention';
+import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
 import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { projectList } from './derive';
@@ -58,6 +59,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   delete (window as { maws?: PreloadBridge }).maws;
+  useMachines.setState({ roster: 'unread', machines: new Map() });
 });
 
 describe.each(['tree', 'Needs you'] as const)('%s hover card approves read-only only', (placement) => {
@@ -219,6 +221,23 @@ describe('a session row’s hover card', () => {
     const main = await open('Fix sidebar drag');
     expect(within(main).getByTestId('hover-place').textContent).toBe('⎇ master');
   });
+
+  // P5 O6 M5: the card always names the session's machine; an offline one's also says when it was last seen
+  it('names the session’s machine, and an offline machine’s last sighting', async () => {
+    withMain();
+    const since = new Date(Date.now() - 5 * 60_000).toISOString();
+    const roster = (state: 'up' | 'down') =>
+      useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'Studio', local: true, state, since, generation: 0 }]);
+    act(() => roster('up'));
+    render(<Sidebar />);
+    expect(within(await open('Fix sidebar drag')).getByTestId('hover-machine').textContent).toBe('Studio');
+    cleanup();
+    act(() => roster('down'));
+    render(<Sidebar />);
+    await userEvent.setup().hover(needsRow('Fix sidebar drag, machine offline'));
+    const card = await screen.findByRole('dialog', { name: 'Fix sidebar drag' });
+    expect(within(card).getByTestId('hover-machine').textContent).toBe(`Studio · offline · last seen ${formatAgo(5 * 60_000, { narrow: true })}`);
+  });
 });
 
 // W11 (I6): a project row's card, in the same shell: the name, the path home-abbreviated, the counts, the last activity
@@ -247,7 +266,7 @@ describe('a project’s hover card', () => {
     expect(within(card).getByTestId('project-path').getAttribute('title')).toBe(maws.directory);
     expect(within(card).getByTestId('project-counts').textContent).toBe('4 sessions · 3 waiting · 1 working'); // the 3 s request included
     const s = useSessions.getState();
-    const last = projectList({ records: s.records, digests: s.digests, projects: [...s.projects.values()], rows: [] }).find((e) => e.key === at('proj-maws'))!.lastActivity!;
+    const last = projectList({ records: s.records, digests: s.digests, projects: s.projects, rows: [], local: TEST_MACHINE, machineName: () => 'This Mac' }).find((e) => e.key === at('proj-maws'))!.lastActivity!;
     const elapsed = Date.now() - last;
     expect(within(card).getByTestId('project-activity').textContent).toBe(elapsed < 60_000 ? 'Active now' : `Last active ${formatAgo(elapsed, { narrow: true })}`);
     const worktrees = await within(card).findByRole('list', { name: 'Worktrees' });
@@ -255,7 +274,7 @@ describe('a project’s hover card', () => {
     expect(fake.invoked('git.worktree.list')).toEqual([{ repoRoot: maws.directory }]);
   });
 
-  it('opens on the project row’s keyboard focus, says nothing of worktrees outside a repository, and Other sessions has none', async () => {
+  it('opens on the project row’s keyboard focus, says nothing of worktrees outside a repository, and a machine’s own row has none', async () => {
     fake = fakeClient();
     window.maws = fake.client as unknown as PreloadBridge;
     render(<Sidebar />);
@@ -268,9 +287,9 @@ describe('a project’s hover card', () => {
     expect(within(card).queryByRole('list', { name: 'Worktrees' })).toBeNull();
     act(() => screen.getByRole('treeitem', { name: 'codex_somersault' }).blur());
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'codex_somersault' })).toBeNull());
-    act(() => screen.getByRole('treeitem', { name: 'Other sessions' }).focus());
+    act(() => screen.getByRole('treeitem', { name: 'This Mac' }).focus());
     await new Promise((resolve) => setTimeout(resolve, 350));
-    expect(screen.queryByRole('dialog', { name: 'Other sessions' })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: 'This Mac' })).toBeNull();
   });
 });
 

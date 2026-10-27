@@ -13,6 +13,7 @@ import { useAttention } from '../stores/attention';
 import { useShellView } from '../app/shell-view';
 import { NO_PROJECT_OF, useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
+import { sessionSetKey } from '../stores/org-projects';
 import { TEST_FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { loadScenario, type Scenario } from '../../../../test/support/scenario';
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
@@ -88,8 +89,9 @@ export function resetShellStores(): void {
   });
 }
 
-// W12: the layout files each session's tabs under its record's project, as the shell's hydration has it do (until this,
-// a component test keeps every tab in the no-project set).
+// W12: the layout files each session's tabs under its record's project's row, as the shell's hydration has it do (P5 O6
+// M5: `sessionSetKey`, an org project's key, a machine's row's for a session of no checkout; until this, a component test
+// keeps every tab in the no-project set). An unstarted session's tabs stay in the no-project set.
 export function fileTabsByProject(): void {
-  useLayout.setState({ projectOf: (id) => useSessions.getState().records.get(id)?.projectId ?? null });
+  useLayout.setState({ projectOf: (id) => sessionSetKey(useSessions.getState(), TEST_MACHINE, id, () => null) ?? null });
 }

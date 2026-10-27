@@ -17,6 +17,9 @@ import { archiveSession, forkInPlace } from './record-ops';
 import { resumeSession } from './setup-actions';
 import { displayTitle } from './title';
 import { machineOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
+import { selectOffline, useMachines } from '../stores/machines';
+import { orgKeyOf, reachableCheckouts, rowProjects, selectOrgIndex, sessionsOfRow } from '../stores/org-projects';
 
 const fail = (text: string) => toast({ level: 'danger', text, actions: [], dismissible: true });
 
@@ -26,30 +29,46 @@ function removeWorktree(appSessionId: AppSessionId): void {
   if (target) openDialog({ kind: 'cleanup', target });
 }
 
-async function removeProject(projectId: ProjectId): Promise<void> {
+// P5 O6 M5: a project's row is its org project's, spanning machines. Its actions reach the row's checkouts and sessions on
+// every machine that is up; a checkout on an offline machine stays as it is, and shows the row again when it returns.
+const up = (machine: MachineRef) => !selectOffline(useMachines.getState(), machine);
+function rowOf(projectId: ProjectId) {
   const sessions = useSessions.getState();
   const project = sessions.projects.get(projectId);
-  if (!project) return;
-  const count = [...sessions.records.values()].filter((r) => r.projectId === projectId && !r.archived).length;
+  if (!project) return null;
+  return { sessions, project, key: orgKeyOf(project), index: selectOrgIndex(sessions, ipc.localMachine) };
+}
+
+async function removeProject(projectId: ProjectId): Promise<void> {
+  const row = rowOf(projectId);
+  if (!row) return;
+  const { sessions, project, key, index } = row;
+  const name = index.orgs.get(key)?.name ?? project.name;
+  const checkouts = index.listed.has(key) ? reachableCheckouts(index, key, up) : [project];
+  const count = sessionsOfRow(sessions, ipc.localMachine, key).filter((r) => !r.archived).length;
   // W11 (I5): the project row's archive icon and the menu's "Remove from sidebar…"; nothing is deleted
   const yes = await confirm({
-    title: `Remove ${project.name} from the sidebar?`,
+    title: `Remove ${name} from the sidebar?`,
     body: `Its ${count} ${count === 1 ? 'session stays' : 'sessions stay'} on disk and in the terminal. Show the project again from Hidden projects… at the end of the sidebar's list.`,
     confirmLabel: 'Remove from sidebar',
     destructive: false,
   });
   if (!yes) return;
-  const result = await ipc.invoke('session.projects.remove', { id: projectId });
-  if (!result.ok) fail(result.error.message);
+  // each checkout is hidden on its own machine (`session.projects.remove` routes by the project's address)
+  for (const checkout of checkouts) {
+    const result = await ipc.invoke('session.projects.remove', { id: checkout.id });
+    if (!result.ok) fail(result.error.message);
+  }
 }
 
 async function archiveProjectSessions(projectId: ProjectId): Promise<void> {
-  const sessions = useSessions.getState();
-  const project = sessions.projects.get(projectId);
-  const ids = [...sessions.records.values()].filter((r) => r.projectId === projectId && !r.archived).map((r) => r.appId);
-  if (!project || ids.length === 0) return;
+  const row = rowOf(projectId);
+  if (!row) return;
+  const { sessions, project, key, index } = row;
+  const ids = sessionsOfRow(sessions, ipc.localMachine, key).filter((r) => !r.archived && up(machineOf(r.appId))).map((r) => r.appId);
+  if (ids.length === 0) return;
   const yes = await confirm({
-    title: `Archive ${ids.length} ${ids.length === 1 ? 'session' : 'sessions'} in ${project.name}?`,
+    title: `Archive ${ids.length} ${ids.length === 1 ? 'session' : 'sessions'} in ${index.orgs.get(key)?.name ?? project.name}?`,
     body: 'Running sessions stop; transcripts stay where Claude Code keeps them, and every session can be unarchived from Archived sessions.',
     confirmLabel: 'Archive',
     destructive: false,
@@ -61,6 +80,23 @@ async function archiveProjectSessions(projectId: ProjectId): Promise<void> {
     if ('error' in answer) refused.push(`${displayTitle(sessions.records.get(id))}: ${answer.error}`);
   }
   if (refused.length > 0) fail(`Not archived: ${refused.join('; ')}`);
+}
+
+async function archiveOlder(projectId: ProjectId): Promise<void> {
+  const row = rowOf(projectId);
+  const targets = row ? rowProjects(row.index, row.key, up).map((p) => p.id) : [projectId]; // one the page does not know: main says
+  let archived = 0;
+  let skipped = 0;
+  for (const target of targets) {
+    const result = await ipc.invoke('session.archiveOlder', { projectId: target, days: 7 });
+    if (!result.ok) {
+      fail(result.error.message);
+      return;
+    }
+    archived += result.value.archived;
+    skipped += result.value.skipped;
+  }
+  toast({ level: 'info', text: `${archived} sessions archived; ${skipped} kept`, actions: [], dismissible: true });
 }
 
 async function revealProject(projectId: ProjectId): Promise<void> {
@@ -99,11 +135,7 @@ export function registerSessionActions(): () => void {
     registerSessionAction('attach', (id) => attachOrSay(id)),
     registerProjectAction('removeProject', removeProject),
     registerProjectAction('archiveSessions', archiveProjectSessions),
-    registerProjectAction('archiveOlder', async (projectId) => {
-      const result = await ipc.invoke('session.archiveOlder', { projectId, days: 7 });
-      if (!result.ok) fail(result.error.message);
-      else toast({ level: 'info', text: `${result.value.archived} sessions archived; ${result.value.skipped} kept`, actions: [], dismissible: true });
-    }),
+    registerProjectAction('archiveOlder', archiveOlder),
     registerProjectAction('revealInFinder', revealProject),
     registerProjectAction('archivedSessions', (projectId) => openDialog({ kind: 'archived', projectId })),
     registerProjectAction('worktrees', (projectId) => openDialog({ kind: 'worktrees', projectId })), // C12

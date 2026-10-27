@@ -10,18 +10,20 @@ import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { useLayout } from '../stores/layout';
 import { machineOf } from '@shared/machine/address';
+import { orgKeyOf, type RowKey } from '../stores/org-projects';
 
-let revealer: ((projectId: ProjectId) => void) | null = null;
-export const projectReveal = createStore<{ pending: ProjectId | null }>(() => ({ pending: null }));
+// P5 O6 M5: a project is revealed by its row, its org project's (one row whatever machines check it out).
+let revealer: ((key: RowKey) => void) | null = null;
+export const projectReveal = createStore<{ pending: RowKey | null }>(() => ({ pending: null }));
 
 // The mounted sidebar registers how it reveals a project, and takes the reveal that was waiting for it; returns the
 // disposer.
-export function registerProjectRevealer(fn: (projectId: ProjectId) => void): () => void {
+export function registerProjectRevealer(fn: (key: RowKey) => void): () => void {
   revealer = fn;
-  const projectId = projectReveal.getState().pending;
-  if (projectId !== null) {
+  const key = projectReveal.getState().pending;
+  if (key !== null) {
     projectReveal.setState({ pending: null });
-    fn(projectId);
+    fn(key);
   }
   return () => {
     if (revealer === fn) revealer = null;
@@ -46,10 +48,12 @@ export function revealProject(projectId: ProjectId): void {
 }
 
 function revealVisibleProject(projectId: ProjectId): void {
+  const project = useSessions.getState().projects.get(projectId);
+  const key = project ? orgKeyOf(project) : projectId;
   useLayout.getState().setSidebar(({ expandedProjects }) => ({
     collapsed: false,
-    expandedProjects: expandedProjects.includes(projectId) ? expandedProjects : [...expandedProjects, projectId],
+    expandedProjects: expandedProjects.includes(key) ? expandedProjects : [...expandedProjects, key],
   }));
-  if (revealer) revealer(projectId);
-  else projectReveal.setState({ pending: projectId });
+  if (revealer) revealer(key);
+  else projectReveal.setState({ pending: key });
 }

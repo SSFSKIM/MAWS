@@ -530,11 +530,11 @@ describe('a layout written before O6', () => {
     const fileTab = { ...file, id: `file:${TEST_MACHINE}:/w/x.ts`, appSessionId: A, machine: TEST_MACHINE };
     const main = { version: 3, current: X, sets: { [X]: { panes: [{ tabs: [fileTab, { id: `session:${A}`, kind: 'session', appSessionId: A, pinned: false }], activeTabId: `session:${A}` }], focusedPane: 0, splitRatio: 0.5 } }, closedTabs: [] };
     expect(store.getState().main).toEqual(main);
-    expect(store.getState().regions.sidebar.expandedProjects).toEqual([X, 'other']);
+    expect(store.getState().regions.sidebar.expandedProjects).toEqual([X, `machine:${TEST_MACHINE}`]); // P5 O6 M5: the machine's own row
     expect(store.getState().panelBySession.get(A)).toEqual(held['panel.app-a']);
     expect(Object.fromEntries(sets().map(({ key, value }) => [key, value]))).toEqual({
       'main.tabs': main,
-      regions: { ...held.regions, version: 5, sidebar: { ...held.regions.sidebar, expandedProjects: [X, 'other'] } },
+      regions: { ...held.regions, version: 5, sidebar: { ...held.regions.sidebar, expandedProjects: [X, `machine:${TEST_MACHINE}`] } },
       'panelTools.surfaces': { version: 2, stacks: { [A]: ['files:1'] }, pinnedTools: [], contexts: { [X]: A } },
       [`panel.${A}`]: held['panel.app-a'],
       'panel.app-a': null, // deleted, once its address's key is written

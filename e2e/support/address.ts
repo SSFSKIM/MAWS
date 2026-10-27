@@ -7,21 +7,27 @@ import { addressOf } from '../../src/shared/machine/address';
 import type { MachineRef } from '../../src/shared/machine/ref';
 
 // One read per launched page: the ref belongs to the profile, so a relaunch over it answers the same.
-const refs = new WeakMap<Page, Promise<MachineRef>>();
+const identities = new WeakMap<Page, Promise<{ ref: MachineRef; name: string }>>();
 
-export function localRef(page: Page): Promise<MachineRef> {
-  let ref = refs.get(page);
-  if (!ref) {
-    ref = page.evaluate(async () => {
+function identity(page: Page): Promise<{ ref: MachineRef; name: string }> {
+  let read = identities.get(page);
+  if (!read) {
+    read = page.evaluate(async () => {
       const result = await window.maws.invoke('machine.identity', undefined);
       if (!result.ok) throw new Error(`machine.identity: ${result.error.code}: ${result.error.message}`);
-      return result.value.ref;
+      return { ref: result.value.ref, name: result.value.name };
     });
-    ref.catch(() => refs.delete(page));
-    refs.set(page, ref);
+    read.catch(() => identities.delete(page));
+    identities.set(page, read);
   }
-  return ref;
+  return read;
 }
+
+export const localRef = async (page: Page): Promise<MachineRef> => (await identity(page)).ref;
+
+// P5 O6 M5: the name the local machine goes by, which its own row in the sidebar carries (T3; the host's short name, or
+// `MAWS_MACHINE_NAME` when a spec sets it).
+export const localName = async (page: Page): Promise<string> => (await identity(page)).name;
 
 // The local machine's address of a bare id from the raw bridge.
 export async function addressed(page: Page, id: string): Promise<string> {
