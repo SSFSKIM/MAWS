@@ -6,8 +6,9 @@ org's. Records names and ids only. The Access setup token is read from stdin (on
 
   snapshot <account> <file>              every service token, and every Access app and reusable policy named desk-hub*
   sweep <account> <before> <org> <out>   compares with <before>; deletes what appeared and is the throwaway org's:
-                                         service tokens named desk-<org>-* or desk-probe-unenrolled-*, and Access apps,
-                                         then policies, named desk-hub-staging*. Anything else that appeared is left
+                                         service tokens named desk-<org>-* or desk-probe-unenrolled-*, and the Access
+                                         apps, then policies, the deploy tool makes on staging (STAGING_APPS and
+                                         STAGING_POLICIES, by exact name). Anything else that appeared is left
                                          untouched and makes the sweep fail (exit 3). <out> records what it found and
                                          deleted.
 
@@ -24,7 +25,12 @@ import urllib.request
 
 API = 'https://api.cloudflare.com/client/v4'
 THROWAWAY_PREFIX = 'staging-probe-'
-STAGING_APP_PREFIX = 'desk-hub-staging'
+# The Access objects the deploy tool makes on the staging Worker (deploy/access.ts's accessPlan for STAGING_WORKER in
+# deploy/config.ts), by exact name. Not a prefix: wrangler names a version's preview alias `<alias>-<worker>`, so
+# `desk-hub-staging-desk-hub` is one of production's, and its Access objects would carry that name.
+STAGING_WORKER = 'desk-hub-staging'
+STAGING_APPS = (STAGING_WORKER, f'{STAGING_WORKER} public paths')
+STAGING_POLICIES = (f'{STAGING_WORKER} owner', f'{STAGING_WORKER} machines', f'{STAGING_WORKER} public paths')
 # Production's Worker and its Access apps, and its org's service tokens: never deleted.
 PRODUCTION_NAMES = ('desk-hub', 'desk-hub public paths')
 PRODUCTION_TOKEN_PREFIX = 'desk-ssfskim-'
@@ -89,8 +95,8 @@ def main():
     report = {'org': org, 'appeared': {}, 'deleted': [], 'left_untouched': []}
     owned = {
         'service_tokens': lambda n: n.startswith(f'desk-{org}-') or n.startswith('desk-probe-unenrolled-'),
-        'apps': lambda n: n.startswith(STAGING_APP_PREFIX),
-        'policies': lambda n: n.startswith(STAGING_APP_PREFIX),
+        'apps': lambda n: n in STAGING_APPS,
+        'policies': lambda n: n in STAGING_POLICIES,
     }
     for kind in ('service_tokens', 'apps', 'policies'):  # apps before the policies they reference
         known = {r['id'] for r in before[kind]}

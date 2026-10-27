@@ -4,7 +4,7 @@
 // reconciliation against Cloudflare's API is run against a fake of that API: created once, updated in place after.
 import { describe, expect, it } from 'vitest';
 import { accessPlan, reconcileAccess } from '../../deploy/access.ts';
-import { fakeAccessApi as fakeApi } from '../support/access-api.ts';
+import { fakeAccessApi as fakeApi, pagedAccessApi } from '../support/access-api.ts';
 import { readFileSync } from 'node:fs';
 import { deployVars } from '../../deploy/config.ts';
 
@@ -77,6 +77,17 @@ describe('reconciling the plan with the account', () => {
     await reconcileAccess(api, accessPlan({ name: 'desk-hub', host: HOST, ownerEmail: 'other@example.com', sessionDuration: '24h' }));
     expect(people().include).toEqual([{ email: { email: 'owner@example.com' } }, { email: { email: 'member@example.com' } }]);
     expect(calls).not.toContain(`PUT /access/policies/${String(people().id)}`);
+  });
+});
+
+describe('finding the account’s records by name', () => {
+  it('searches every page: policies and applications past the first page are kept or updated, never made twice', async () => {
+    const others = Array.from({ length: 45 }, (_, i) => `other ${i}`);
+    const access = pagedAccessApi([...others, ...plan.policies.map((p) => p.name)], [...others, ...plan.apps.map((a) => a.name)]);
+    await reconcileAccess(access.api, plan);
+    expect(access.calls.filter((c) => c.startsWith('POST'))).toEqual([]);
+    expect(access.policies.find((p) => p.name === 'desk-hub owner')!.include).toEqual([{ email: { email: 'old@example.com' } }]);
+    expect(access.calls.filter((c) => c.startsWith('PUT')).sort()).toEqual(['PUT /access/apps/apps-45', 'PUT /access/apps/apps-46', 'PUT /access/policies/policies-46', 'PUT /access/policies/policies-47']);
   });
 });
 
