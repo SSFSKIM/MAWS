@@ -1,9 +1,10 @@
-// redeploy-check's RL1 leg (O11 M8; acceptance 3's deploy clause): a code update drops every hibernatable socket, so
-// after a deploy both the endpoint's RL1 socket and an app's Machine socket must drop, the endpoint come back under a
-// higher generation, and the app reach the endpoint again through a channel. The leg holds a listed v2 machine's
-// endpoint (reconnecting, as O10's will) and an app socket with a channel proved by an echo, watches both across the
-// redeploy, reopens the app's socket and a channel as an app would, and says when each dropped and how long each took
-// to come back.
+// redeploy-check's RL1 leg (O11 M8; acceptance 3's deploy clause): a code update drops hibernatable sockets, and after
+// a cut the endpoint's RL1 socket must come back under a higher generation and an app reach the endpoint again through
+// a channel. The leg holds a listed v2 machine's endpoint (reconnecting, as O10's will) and an app socket with a channel
+// proved by an echo, watches both across the redeploy, reopens the app's socket and a channel as an app would, and says
+// when each dropped and how long each took to come back. A redeploy cuts the sockets when Cloudflare chooses, if at all
+// within the window, so the leg also cuts both itself (`forceCuts`), from the client's end, as many times in a row as
+// asked.
 import { randomBytes } from 'node:crypto';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
@@ -18,6 +19,7 @@ import type { Cleanup } from './proof';
 import { connectEndpoint, EchoReader, echoingEndpoint, openedChannel, sameBytes, sealedFrame } from './rl1';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 
 /** Opens an app's Machine socket: `RelayApp.open`, or a suite's stand-in for it. */
 export type AppOpener = (hub: string, machine: string, headers: Record<string, string>) => Promise<RelayApp>;
@@ -198,54 +200,108 @@ export class Rl1Watch {
 
   private since = (seen: Seen[]) => seen.filter((s) => s.at >= (this.redeployAt ?? Infinity));
 
-  /** Whether everything the redeploy should cause has happened and come back. */
-  private settled(): boolean {
-    const downs = this.since(this.appDowns);
-    return (
-      this.since(this.endpointDowns).length > 0 &&
-      this.endpoint.isOpen &&
-      this.endpoint.generation > this.generationBefore &&
-      downs.length > 0 &&
-      this.since(this.appBacks).some((back) => back.at >= downs.at(-1)!.at)
-    );
+  /** Since the mark, which socket was cut and whether each has come back: the endpoint under a higher generation than
+   * at the mark, the app with a new channel echoing after its last drop. */
+  private cutAndBack() {
+    const appDowns = this.since(this.appDowns);
+    return {
+      endpointCut: this.since(this.endpointDowns).length > 0,
+      endpointBack: this.endpoint.isOpen && this.endpoint.generation > this.generationBefore,
+      appCut: appDowns.length > 0,
+      appBack: appDowns.length > 0 && this.since(this.appBacks).some((back) => back.at >= appDowns.at(-1)!.at),
+    };
   }
 
-  /** Waits until the redeploy's cut has come and gone on both sockets, or `until`; what did not happen, as problems. */
-  async settle(until: number): Promise<string[]> {
-    while (!this.settled() && Date.now() < until) await sleep(250);
+  /**
+   * Waits until the redeploy's cut has come and gone on both sockets, or `until`; what did not happen, as problems. With
+   * `cutRequired` false (the leg forces its own cuts, `forceCuts`), a socket the redeploy did not cut is no problem and is
+   * not waited for; one it cut must still come back.
+   */
+  async settle(until: number, { cutRequired = true }: { cutRequired?: boolean } = {}): Promise<string[]> {
+    const done = () => {
+      const now = this.cutAndBack();
+      return (now.endpointCut ? now.endpointBack : !cutRequired) && (now.appCut ? now.appBack : !cutRequired);
+    };
+    while (!done() && Date.now() < until) await sleep(250);
+    const { endpointCut, endpointBack, appCut, appBack } = this.cutAndBack();
     const problems: string[] = [];
-    if (this.since(this.endpointDowns).length === 0) problems.push(`the redeploy never cut ${this.machine.name}'s RL1 socket (still generation ${this.endpoint.generation}): not exercised`);
-    else if (!this.endpoint.isOpen || this.endpoint.generation <= this.generationBefore) problems.push(`${this.machine.name}'s endpoint did not come back under a higher generation (generation ${this.generationBefore} before, ${this.endpoint.isOpen ? this.endpoint.generation : 'not connected'} now)`);
-    const downs = this.since(this.appDowns);
-    if (downs.length === 0) problems.push(`the redeploy never cut the app's socket to ${this.machine.name}: not exercised`);
-    else if (!this.since(this.appBacks).some((back) => back.at >= downs.at(-1)!.at)) problems.push(`the app's channel to ${this.machine.name} was not re-opened after its socket dropped`);
+    if (!endpointCut) {
+      if (cutRequired) problems.push(`the redeploy never cut ${this.machine.name}'s RL1 socket (still generation ${this.endpoint.generation}): not exercised`);
+    } else if (!endpointBack) problems.push(`${this.machine.name}'s endpoint did not come back under a higher generation (generation ${this.generationBefore} before, ${this.endpoint.isOpen ? this.endpoint.generation : 'not connected'} now)`);
+    if (!appCut) {
+      if (cutRequired) problems.push(`the redeploy never cut the app's socket to ${this.machine.name}: not exercised`);
+    } else if (!appBack) problems.push(`the app's channel to ${this.machine.name} was not re-opened after its socket dropped`);
     return problems;
+  }
+
+  /**
+   * Cuts both sockets from this end, `count` times in a row, as a client whose network went away: the endpoint drops its
+   * RL1 socket and the app its Machine socket. Each time the endpoint must be welcomed again under a higher generation
+   * and a new channel echo within `ms`, before the next cut is made. Logs a line per cut; what did not come back, as
+   * problems, and no cut after it.
+   */
+  async forceCuts(count: number, log: (line: string) => void = console.log, ms = 60_000): Promise<string[]> {
+    for (let n = 1; n <= count; n++) {
+      const at = Date.now();
+      const generation = this.endpoint.generation;
+      this.endpoint.drop(1000, 'forced cut');
+      this.app.close();
+      const welcomed = () => (this.endpoint.isOpen ? this.endpointUps.find((up) => up.at >= at && up.generation! > generation) : undefined);
+      const dropped = () => this.appDowns.find((down) => down.at >= at);
+      const echoed = () => {
+        const down = dropped();
+        return down && this.appBacks.find((back) => back.at >= down.at);
+      };
+      while (!(welcomed() && echoed()) && Date.now() < at + ms) await sleep(100);
+      const up = welcomed();
+      const back = echoed();
+      const problems: string[] = [];
+      if (!up) problems.push(`forced cut ${n}: ${this.machine.name}'s endpoint was not welcomed again under a higher generation within ${seconds(ms)} (generation ${generation} before, ${this.endpoint.isOpen ? this.endpoint.generation : 'not connected'} now)`);
+      if (!back) problems.push(`forced cut ${n}: no new channel to ${this.machine.name} echoed within ${seconds(ms)} of the app's drop`);
+      log(
+        `rl1: forced cut ${n}: the endpoint dropped its socket at generation ${generation} and ` +
+          (up ? `was welcomed again under generation ${up.generation} ${seconds(up.at - at)} after` : `was not welcomed again within ${seconds(ms)}`) +
+          '; the app dropped its socket and ' +
+          (back ? `a new channel to the endpoint echoed ${seconds(back.at - at)} after` : `no new channel echoed within ${seconds(ms)}`),
+      );
+      if (problems.length > 0) {
+        const failures = this.failuresSummary(at);
+        if (failures) log(failures);
+        return problems;
+      }
+    }
+    return [];
+  }
+
+  /** The endpoint's failed reconnects from `from` on, each kind counted, with what the hub answered the probes beside
+   * them; times relative to `from`. */
+  private failuresSummary(from: number): string | undefined {
+    const failures = this.failures.filter((f) => f.at >= from);
+    if (failures.length === 0) return undefined;
+    const counted = (values: string[]) => [...new Set(values)].map((v) => `${v} ×${values.filter((x) => x === v).length}`).join(', ');
+    return (
+      `rl1: the endpoint's reconnects failed ${failures.length} time(s), from +${seconds(failures[0].at - from)} to +${seconds(failures.at(-1)!.at - from)}: ${counted(failures.map((f) => f.message))}; ` +
+      `the hub answered an upgrade beside them: ${counted(failures.flatMap((f) => (f.probe ? [f.probe] : []))) || 'no probe made'}`
+    );
   }
 
   /** What the redeploy did to each socket, relative to its start, and how long each took to come back. */
   report(): string[] {
-    const s = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
     const from = this.redeployAt ?? 0;
     const lines: string[] = [];
     for (const down of this.since(this.endpointDowns)) {
       const up = this.endpointUps.find((u) => u.at >= down.at);
       lines.push(
-        `rl1: the endpoint's socket closed ${down.code} ${down.reason || '(no reason)'} at +${s(down.at - from)} (generation ${down.generation}); ` +
-          (up ? `welcomed again under generation ${up.generation} ${s(up.at - down.at)} after` : 'not welcomed again'),
+        `rl1: the endpoint's socket closed ${down.code} ${down.reason || '(no reason)'} at +${seconds(down.at - from)} (generation ${down.generation}); ` +
+          (up ? `welcomed again under generation ${up.generation} ${seconds(up.at - down.at)} after` : 'not welcomed again'),
       );
     }
     for (const down of this.since(this.appDowns)) {
       const back = this.appBacks.find((b) => b.at >= down.at);
-      lines.push(`rl1: the app's socket closed ${down.code} ${down.reason || '(no reason)'} at +${s(down.at - from)}; ` + (back ? `a new channel to the endpoint echoed ${s(back.at - down.at)} after` : 'no channel echoed again'));
+      lines.push(`rl1: the app's socket closed ${down.code} ${down.reason || '(no reason)'} at +${seconds(down.at - from)}; ` + (back ? `a new channel to the endpoint echoed ${seconds(back.at - down.at)} after` : 'no channel echoed again'));
     }
-    const failures = this.since(this.failures as Seen[]) as unknown as typeof this.failures;
-    if (failures.length > 0) {
-      const counted = (values: string[]) => [...new Set(values)].map((v) => `${v} ×${values.filter((x) => x === v).length}`).join(', ');
-      lines.push(
-        `rl1: the endpoint's reconnects failed ${failures.length} time(s), from +${s(failures[0].at - from)} to +${s(failures.at(-1)!.at - from)}: ${counted(failures.map((f) => f.message))}; ` +
-          `the hub answered an upgrade beside them: ${counted(failures.flatMap((f) => (f.probe ? [f.probe] : []))) || 'no probe made'}`,
-      );
-    }
+    const failures = this.failuresSummary(this.redeployAt ?? Infinity);
+    if (failures) lines.push(failures);
     return lines.length > 0 ? lines : ['rl1: neither socket was cut'];
   }
 

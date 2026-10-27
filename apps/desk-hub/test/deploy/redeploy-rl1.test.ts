@@ -47,6 +47,9 @@ describe('the RL1 leg', () => {
       expect.stringMatching(/never cut rd-ep-local's RL1 socket .*not exercised/),
       expect.stringMatching(/never cut the app's socket to rd-ep-local: not exercised/),
     ]);
+    // Where the leg forces its own cuts, a redeploy that cut neither socket is said, not failed.
+    expect(await watch.settle(Date.now() + 300, { cutRequired: false })).toEqual([]);
+    expect(watch.report()).toEqual(['rl1: neither socket was cut']);
 
     watch.mark();
     await hub.restart();
@@ -59,6 +62,88 @@ describe('the RL1 leg', () => {
     expect((await head()).machines).toEqual([]);
     expect(await machines()).not.toContain('rd-ep-local');
   });
+});
+
+describe('two cuts in a row', () => {
+  // Phase B's run A: the endpoint came back after a first cut and never after a second. Each cut here must be followed
+  // by the endpoint welcomed under a higher generation than the one it was cut at, and a new channel echoing.
+  const twice = async (name: string, cut: (ref: string) => Promise<void>) => {
+    const lines: string[] = [];
+    const cleanup = new Cleanup();
+    const admin = await OrgAdmin.open(person, { org: ORG, throwaway: true }, device, () => {});
+    const watch = await Rl1Watch.start(person, admin, name, cleanup, (line) => lines.push(line));
+    const ref = /\(ref ([\w-]+)\)/.exec(lines.at(-1)!)![1];
+    const generations: Array<[number, number]> = [];
+    for (const n of [1, 2]) {
+      watch.mark();
+      await cut(ref);
+      expect(await watch.settle(Date.now() + 30_000), `cut ${n}`).toEqual([]);
+      const report = watch.report();
+      const endpoint = /\(generation (\d+)\); welcomed again under generation (\d+)/.exec(report.find((l) => l.startsWith("rl1: the endpoint's socket")) ?? '');
+      expect(endpoint, `cut ${n}: ${report.join(' | ')}`).not.toBeNull();
+      generations.push([Number(endpoint![1]), Number(endpoint![2])]);
+      expect(report.find((l) => l.startsWith("rl1: the app's socket")), `cut ${n}`).toMatch(/a new channel to the endpoint echoed [\d.]+ s after/);
+    }
+    // The second cut ends the connection the first one's reconnect made, and the endpoint comes back above it.
+    expect(generations[0][1]).toBeGreaterThan(generations[0][0]);
+    expect(generations[1][0]).toBe(generations[0][1]);
+    expect(generations[1][1]).toBeGreaterThan(generations[1][0]);
+    expect(await cleanup.run()).toEqual([]);
+  };
+
+  it('the runtime restarted twice: the endpoint back under a higher generation and a channel echoing after each', async () => {
+    await twice('rd-ep-twice', () => hub.restart());
+  }, 120_000);
+
+  // The object holding RL1 is addressed by the machine's ref (relay.ts, relayObjectName).
+  it('the object holding RL1 evicted twice, its sockets closed: the same after each', async () => {
+    await twice('rd-ep-evict', (ref) => hub.evict('Machine', `${ORG}:ref:${ref}`, 'close'));
+  }, 120_000);
+
+  // The live leg's own cuts: a redeploy need not cut RL1 within its window (phase B's runs B and C), so the leg drops
+  // both sockets from the client's end, twice in a row, and waits for each to come back before the next.
+  it('forced from the client: the endpoint and the app drop their sockets twice, and each time both come back', async () => {
+    const cleanup = new Cleanup();
+    const admin = await OrgAdmin.open(person, { org: ORG, throwaway: true }, device, () => {});
+    const watch = await Rl1Watch.start(person, admin, 'rd-ep-forced', cleanup, () => {});
+    const lines: string[] = [];
+    expect(await watch.forceCuts(2, (line) => lines.push(line))).toEqual([]);
+    const cut = (n: number) =>
+      new RegExp(
+        `^rl1: forced cut ${n}: the endpoint dropped its socket at generation (\\d+) and was welcomed again under generation (\\d+) [\\d.]+ s after; ` +
+          `the app dropped its socket and a new channel to the endpoint echoed [\\d.]+ s after$`,
+      );
+    expect(lines).toEqual([expect.stringMatching(cut(1)), expect.stringMatching(cut(2))]);
+    const [first, second] = [cut(1).exec(lines[0])!, cut(2).exec(lines[1])!].map((m) => [Number(m[1]), Number(m[2])]);
+    expect(first[0]).toBe(1);
+    expect(first[1]).toBeGreaterThan(first[0]);
+    expect(second[0]).toBe(first[1]);
+    expect(second[1]).toBeGreaterThan(second[0]);
+    // A forced cut is not the redeploy's: a mark after them sees nothing cut.
+    watch.mark();
+    expect(watch.report()).toEqual(['rl1: neither socket was cut']);
+    expect(await cleanup.run()).toEqual([]);
+    expect(await machines()).not.toContain('rd-ep-forced');
+  }, 120_000);
+
+  it('a forced cut that does not come back within its bound is a problem, and the cuts after it are not made', async () => {
+    const cleanup = new Cleanup();
+    const admin = await OrgAdmin.open(person, { org: ORG, throwaway: true }, device, () => {});
+    let opened = 0;
+    // The first socket opens; every reopen is refused, as an app whose Access session lapsed.
+    const open: AppOpener = async (hub, ref, headers) => {
+      if (opened++ > 0) throw new Error('refused');
+      return RelayApp.open(hub, ref, headers);
+    };
+    const watch = await Rl1Watch.start(person, admin, 'rd-ep-unforced', cleanup, () => {}, open);
+    const lines: string[] = [];
+    const started = Date.now();
+    const problems = await watch.forceCuts(2, (line) => lines.push(line), 3000);
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(problems).toEqual(["forced cut 1: no new channel to rd-ep-unforced echoed within 3.0 s of the app's drop"]);
+    expect(lines).toEqual([expect.stringMatching(/^rl1: forced cut 1: the endpoint dropped its socket at generation 1 and was welcomed again under generation \d+ [\d.]+ s after; the app dropped its socket and no new channel echoed within 3.0 s$/)]);
+    expect(await cleanup.run()).toEqual([]);
+  }, 60_000);
 });
 
 describe('a failing reconnect, diagnosed', () => {
@@ -102,6 +187,9 @@ describe('redeploy-check', () => {
     expect(code).toBe(0);
     expect(text).toMatch(/rl1: the endpoint's socket closed .* welcomed again under generation/);
     expect(text).toMatch(/rl1: the app's socket closed .* a new channel to the endpoint echoed/);
+    // Then the leg's own cuts, twice, on the code the redeploy put up.
+    expect(text).toMatch(/rl1: forced cut 1: the endpoint dropped its socket at generation \d+ and was welcomed again under generation \d+ .* a new channel to the endpoint echoed/);
+    expect(text).toMatch(/rl1: forced cut 2: the endpoint dropped its socket at generation \d+ and was welcomed again under generation \d+ .* a new channel to the endpoint echoed/);
     expect(await cleanup.run()).toEqual([]);
     const names = await machines();
     expect(names.filter((n) => n.startsWith('rd-'))).toEqual([]);

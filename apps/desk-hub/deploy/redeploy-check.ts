@@ -8,8 +8,10 @@
 //
 // Beside them runs RL1's leg (O11 M8, rl1-reconnect.ts; acceptance 3's deploy clause): a v2 machine, listed in the
 // throwaway org's state by an admin device (a genesis first when the org has none), holds RL1 through its endpoint, and
-// an app holds a channel to it. The redeploy must drop both sockets, the endpoint must come back under a higher
-// generation and the app reach it again through a new channel; it reports when each dropped and how long each took.
+// an app holds a channel to it. A socket the redeploy drops must come back, the endpoint under a higher generation and
+// the app through a new channel; it reports when each dropped and how long each took. Whether the redeploy cuts RL1
+// within the window is Cloudflare's (phase B saw it in one run of three), so once the writing stops the leg cuts both
+// sockets from the client's end, twice in a row, and each time both must come back (`rl1: forced cut <n>: …`).
 //
 // stdin (deploy.ts, readSecrets): DESK_ACCESS_TOKEN (the owner's Access app token), CF_ACCESS_SETUP_TOKEN and
 // CF_DESK_HUB_SERVICE_TOKENS (the redeploy is `deployment deploy`'s own). Options: --test-org (required, the throwaway
@@ -265,9 +267,12 @@ export async function redeployCheck(
     if (fm.rejected.length) problems.push(`${fm.name} rejected: ${JSON.stringify(fm.rejected.slice(0, 3))}`);
   }
   if (!complete(browserVector())) problems.push(`the live browser holds ${JSON.stringify(browserVector())}`);
-  // RL1: both sockets dropped by the redeploy and back, the endpoint under a higher generation, a channel re-opened.
-  problems.push(...(await rl1.settle(Date.now() + 60_000)));
+  // RL1: a socket the redeploy dropped must be back, the endpoint under a higher generation, a channel re-opened. A
+  // redeploy need not cut RL1 within the window (phase B's runs B and C saw no cut), so the leg then cuts both sockets
+  // itself, twice in a row, on the code the redeploy put up.
+  problems.push(...(await rl1.settle(Date.now() + 60_000, { cutRequired: false })));
   for (const line of rl1.report()) console.log(line);
+  problems.push(...(await rl1.forceCuts(2)));
   // The proof needs the redeploy to have cut the machines' streams; one that cut nothing proved nothing.
   machines.forEach((fm, i) => {
     if (fm.generation === generations[i]) problems.push(`the redeploy never cut ${fm.name}'s stream (still generation ${fm.generation}): not exercised`);
