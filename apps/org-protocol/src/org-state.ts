@@ -14,8 +14,8 @@
 //     transition's new root devices without one: the recovery key vouches for them, and the old devices may be lost.
 //   - `retired` holds keys that left honestly, each with its point and holder, and none still held. A successor keeps
 //     each entry unchanged or drops it (the key is then revoked), and adds a key only in the step it stops being
-//     current, under the holder the head held it by; so a revoked key never re-enters `retired` and a `notAfter` never moves.
-//     Genesis retires nothing.
+//     current, under the holder the head held it by, and no key the head retired is current in it; so a revoked key
+//     never re-enters `retired` and a `notAfter` never moves. Genesis retires nothing.
 //   - A root transition is issued against the head (`fromVersion` = head's version). While one is held for the head,
 //     the successor must be signed by one of its new root keys, not the old root set, and take its keys as `root.keys`.
 import { canonicalize } from './canonical.ts';
@@ -102,14 +102,23 @@ async function retiredApart(state: OrgState): Promise<boolean> {
   return true;
 }
 
+/** The keys a state holds as current: devices' channel and step-up keys, and machine entries' keys. */
+const currentKeys = (state: OrgState): B64[] => [
+  ...state.members.flatMap((m) => m.devices.flatMap((d) => [d.channelPub, ...(d.stepUpPub === undefined ? [] : [d.stepUpPub])])),
+  ...state.machines.map((m) => m.pub),
+];
+
 /**
  * `retired` across a successor (RL DL 22): an entry is the head's own, unchanged, or a key that stops being current in
  * this very step — held by the head under exactly that holder, and (by `retiredApart`) held nowhere in the successor:
  * a device that leaves its member, a machine entry whose `pub` changes. So every step is checked against its
  * predecessor alone, and a key dropped earlier (revoked) can never be retired later. An entry may leave (the key is then
- * revoked: a retirement can turn out to have been a compromise); a `notAfter` never moves.
+ * revoked: a retirement can turn out to have been a compromise), but its key never comes back as current in that step,
+ * which would let a later retirement reset its `notAfter`; a `notAfter` never moves.
  */
 function retiredKept(head: OrgState, next: OrgState): boolean {
+  const current = new Set(currentKeys(next));
+  if (head.retired.some((r) => current.has(r.pub))) return false;
   const kept = new Set(head.retired.map((r) => canonicalize(r)));
   return next.retired.every((r) => {
     if (kept.has(canonicalize(r))) return true;
@@ -195,12 +204,6 @@ export async function verifyTransition(head: SignedOrgState, t: Signed<RootTrans
   if (!(await verifyInput(signingInput(SIGNING_DOMAINS.transition, t.body), t.sig, pinnedRecovery))) return refuse('bad-signature');
   return accept();
 }
-
-/** The keys a state holds as current: devices' channel and step-up keys, and machine entries' keys. */
-const currentKeys = (state: OrgState): B64[] => [
-  ...state.members.flatMap((m) => m.devices.flatMap((d) => [d.channelPub, ...(d.stepUpPub === undefined ? [] : [d.stepUpPub])])),
-  ...state.machines.map((m) => m.pub),
-];
 
 /**
  * The key ids a step revokes (RL DL 23), sorted: device and machine keys current or retired in `prev` and neither

@@ -53,6 +53,20 @@ describe('the committed vectors', () => {
       'a device key dropped two steps before, retired now',
       "a successor retiring a member's device",
       "a successor rotating a machine's key and retiring the old one",
+      'then the retired key made current again, its retirement dropped in the same step',
+      'then a retired device key made current again, its retirement dropped in the same step',
+      "a retired device key's words after its member left",
+      'a retirement by another delegation, through a certificate-shaped object',
+      "a VM's listing beside another delegation's retirement, through a certificate-shaped object",
+      "a VM's listing beside another delegation's retirement of its own certificate of the key",
+      "a listed machine's listing while a live certificate claims its ref",
+      "a listed machine's event while a live certificate claims its ref",
+      "a listed machine's keys while a live certificate claims its ref",
+      "contested refs: a forged certificate on an entry's ref",
+      "contested refs: a retired certificate on an entry's ref",
+      "a VM's event after its certificate expired, under its renewal",
+      "a retired certificate's event, with vm-1 enrolled under another ref",
+      "a retired certificate's event, with vm-1 enrolled under its ref",
     ]) {
       expect(names, name).toContain(name);
     }

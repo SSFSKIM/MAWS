@@ -6,7 +6,7 @@ import { enrollmentMac, enrollmentMacInput } from '../src/enrollment.ts';
 import { verifyEvent, signerFor } from '../src/events.ts';
 import { keyId, signingInput } from '../src/keys.ts';
 import { revokedBy, stateHash, verifyGenesis, verifySuccessor, verifyTransition } from '../src/org-state.ts';
-import { verifyCertRetirement, verifyCertRevocation, verifyEndpointRecord, verifyGrant, verifyListing, verifyMachineCert } from '../src/records.ts';
+import { contestedRefs, machineKeys, verifyCertRetirement, verifyCertRevocation, verifyEndpointRecord, verifyGrant, verifyListing, verifyMachineCert } from '../src/records.ts';
 import type { OrgState, SignedOrgState } from '../src/types.ts';
 import type { Case, VectorSet } from './scenario.ts';
 
@@ -55,6 +55,10 @@ async function run(set: VectorSet, c: Case): Promise<unknown> {
       return verifyCertRetirement(a[0], a[1], a[2]);
     case 'verifyCertRevocation':
       return verifyCertRevocation(a[0], a[1]);
+    case 'contestedRefs':
+      return { refs: await contestedRefs(a[0], a[1], date(a[2])) };
+    case 'machineKeys':
+      return machineKeys(a[0], a[1], a[2], date(a[3]));
   }
 }
 
