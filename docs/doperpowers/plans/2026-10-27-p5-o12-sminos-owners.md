@@ -306,7 +306,7 @@ A live check of M3 runs zero inference against an isolated config dir: start a `
 }
 ```
 
-- `owners` has at least one entry. `ownersProof` stays `[]` until O10 signs spawn and `manage` actions.
+- `owners` has at least one entry, and is either `["@machine"]` or member ids alone: the writer refuses a mix (its wire shape is Phase 2's, with RL). `ownersProof` stays `[]` until O10 signs spawn and `manage` actions.
 - `joined` events gain `owners` and `origin`, with the same shapes; owners holding `@machine` stay off them, and nothing else in the record leaves the machine.
 - `source: 'hook'` is a record taken from the session's own environment by the hook path. A record is final whenever its `source` isn't `default`.
 - Writer: `set_session_controller(sid, lane, since=None) -> bool` in `sminos.py` changes `controller` alone, and answers False while the session has no record yet.
@@ -410,6 +410,7 @@ OP_HORIZON = KEPT_S - 3600
   Date/Author: 2026-10-26, M1's executor, accepted by O12's executor (desk-sminos-orchestrator).
 - Decision: `@machine` is never published. A `joined` leaves off `owners` whenever they hold the token; `origin` still rides. Remote readers already default a member with no published owners to `["@machine"]`, so they read the same value.
   Rationale: M1 said final owners ride on `joined`, and RL6 with the remote layer's Decision Log 17 says the token never leaves the machine. RL binds, and the reader's default makes the omission lossless. Raised by M1's executor.
+  The omission is lossless only for owners exactly `["@machine"]`, so the record writer refuses a list mixing `@machine` with member ids. Phase 1 has no path that makes one (a launch gives one or the other, and lineage inherits one or the other). The wire shape for a mixed list belongs to Phase 2's sharing work, settled with RL.
   Date/Author: 2026-10-26, O12's executor (desk-sminos-orchestrator).
 - Decision: M2's gaps, settled in building it.
   - `opCreated` is an ISO 8601 UTC string, parsed as `created` is. A number is refused `bad-op-created`.
