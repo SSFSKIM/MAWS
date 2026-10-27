@@ -135,6 +135,11 @@ export function buildEnvironment(spec: LaunchSpec, captured: Record<string, stri
   // engine's direct parent: `transport.ts` spawns the binary itself, and a shell or wrapper put between would drop the
   // membership silently.
   env.SMNS_MEMBER = String(spawnerPid);
+  // P5-O12 (the lane B marker, P5 Decision Log 16): this host controls the session, so sminos's bridge only observes it
+  // and refuses every control, the desk's and `sminos steer`'s alike, rather than racing this host. sminos honours it
+  // only together with SMNS_MEMBER's parent check above, so a `claude` a tool starts under the engine, which inherits
+  // both, stays a session of its own. Set over any value the capture holds (`MAWS_*` never passes the allowlist anyway).
+  env.MAWS_LANE = 'B';
   env.TERM = 'dumb';
   env.DISABLE_AUTOUPDATER = '1'; // W13: MAWS's processes never race the user's own updater; Settings › Engine offers the update
   if (spec.subagentModel !== null) env.CLAUDE_CODE_SUBAGENT_MODEL = spec.subagentModel;
