@@ -25,8 +25,8 @@ What someone can see after the first phase:
 ## Progress
 
 Phase 1 (dispatchable now; P5's item 1, item 4, and item 7's refusals):
-- [x] M1 — The session record (item 1). Reviewed clean after three doperpowers:reviewer-high rounds (one P2 carried as an unresolved finding), landed as doperpowers PR #402 (`40cb5721`, sminos 1.18.0), 2026-10-27T05:10Z.
-- [x] M2 — The opId ledger (item 4). Reviewed clean (doperpowers:reviewer-medium, one P2 fixed), landed as doperpowers PR #401 (`bdd39e50`, sminos 1.17.0), 2026-10-27T03:00Z.
+- [x] M1 — The session record (item 1). Reviewed clean after three doperpowers:reviewer-high rounds (one P2 carried as an unresolved finding), landed as doperpowers PR #402 (`40cb5721`, sminos 1.18.0), 2026-10-27T03:10Z.
+- [x] M2 — The opId ledger (item 4). Reviewed clean (doperpowers:reviewer-medium, one P2 fixed), landed as doperpowers PR #401 (`bdd39e50`, sminos 1.17.0), 2026-10-27T02:05Z.
 - [ ] M3 — The lane B observer: marker and refusals (item 7, first part)
 
 Blocked (P5's edges):
