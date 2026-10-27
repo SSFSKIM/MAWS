@@ -180,6 +180,20 @@ describe('re-enrolling an active machine in place', () => {
     expect(await machineNamed('lapsed')).toMatchObject({ state: 'active', confirmed: expect.any(String) as string, key: { ref: first.ref, pub: again.key.pub } });
   });
 
+  it('displaces an earlier one not yet connected, whose token sent again leaves the newer credential working', async () => {
+    const first = await enrollV2((await code()).text, 'twice');
+    const a = await code('twice');
+    const redeemA = () => hub.fetchAs(null, '/machine/enroll', { body: { token: a.token, machine: 'twice' } });
+    expect((await redeemA()).status).toBe(200);
+    // A's credential never connects; B replaces the machine in place and connects.
+    const b = await enrollV2((await code('twice')).text, undefined, { ref: first.ref });
+    expect(await machineNamed('twice')).toMatchObject({ state: 'active', enrollment: b.enrollment, confirmed: expect.any(String) as string });
+    expect(await refusal(await redeemA())).toBe('410 expired');
+    expect((await machineFetch(hub.url, b.credentials, '/machine/enrollment')).status).toBe(200);
+    expect(hub.standin.tokens().some((t) => t.client_id === b.credentials.clientId)).toBe(true);
+    expect(await machineNamed('twice')).toMatchObject({ enrollment: b.enrollment, client_id: b.credentials.clientId });
+  });
+
   it('is refused once the machine it names is gone', async () => {
     const gone = await enrollV2((await code()).text, 'gone');
     const c = await code('gone');

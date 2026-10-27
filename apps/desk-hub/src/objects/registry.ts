@@ -368,7 +368,14 @@ export class Registry extends DurableObject<Env> {
         this.reserve(machine, tokenName, id, iso(Date.now()));
       });
     } else {
-      // A rotation: the credential minted before stops at the hub at once, before Cloudflare deletes it.
+      // A rotation, only while the machine still holds this enrollment: one a later re-enrollment displaced must not
+      // clear or delete the credential that holds it now. Then the credential minted before stops at the hub at once,
+      // before Cloudflare deletes it.
+      const holder = this.sql.exec<{ enrollment: string }>('SELECT enrollment FROM machines WHERE name_key = ?', machineNameKey(machine)).toArray()[0];
+      if (holder?.enrollment !== id) {
+        this.sql.exec("UPDATE enrollments SET state = 'expired' WHERE id = ?", id);
+        return fail(410, 'expired', 'a later enrollment of this machine replaced this one; ask for a new one');
+      }
       this.rotate(id, machine, expires);
     }
     return this.mint(id, machine, tokenName, org.id);
@@ -404,6 +411,8 @@ export class Registry extends DurableObject<Env> {
     const current = this.enrollmentById(id);
     if (!now || now.enrollment !== held.enrollment || current?.state !== 'open' || lapsed(current)) return fail(409, 'not-active', `"${held.name}" changed while its old credential was fenced; ask for a new enrollment`);
     this.ctx.storage.transactionSync(() => {
+      // An earlier re-enrollment whose machine never connected ends here: its token sent again is refused, never rotated.
+      this.sql.exec("UPDATE enrollments SET state = 'expired' WHERE id = ? AND state = 'pending'", now.enrollment);
       this.sql.exec("UPDATE enrollments SET state = 'pending', machine = ?, expires = ? WHERE id = ?", held.name, expires, id);
       this.sql.exec('UPDATE machines SET enrollment = ?, client_id = NULL, confirmed = NULL WHERE name = ?', id, held.name);
     });
@@ -486,13 +495,17 @@ export class Registry extends DurableObject<Env> {
     this.busy.add(id);
     try {
       await this.scheduleAlarm();
+      const holds = () =>
+        this.enrollmentById(id)?.state === 'pending' && this.sql.exec<{ enrollment: string }>('SELECT enrollment FROM machines WHERE name = ?', machine).toArray()[0]?.enrollment === id;
       return await this.onName(tokenName, async (): Promise<Result<Redeemed>> => {
+        // A mint queued behind another of the name finds the machine as that one left it: an enrollment ended or
+        // displaced meanwhile deletes nothing, since the name's tokens are another enrollment's now.
+        if (!holds()) return fail(410, 'expired', 'the enrollment ended before its token was minted');
         const api = serviceTokens(this.config.api);
         await api.deleteNamed(tokenName);
         const minted = await api.create(tokenName);
         // A revocation may have run while the API answered; then the token is no machine's.
-        const held = this.sql.exec<{ enrollment: string }>('SELECT enrollment FROM machines WHERE name = ?', machine).toArray()[0];
-        if (this.enrollmentById(id)?.state !== 'pending' || held?.enrollment !== id) {
+        if (!holds()) {
           await api.delete(minted.id).catch(() => this.orphan(tokenName));
           return fail(410, 'expired', 'the enrollment ended while its token was minted');
         }
