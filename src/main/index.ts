@@ -11,7 +11,7 @@ import { app, BrowserWindow, dialog, screen } from 'electron';
 import type { ClientRef } from '@shared/ipc/client';
 import { pageOf } from './ipc/clients';
 import { createHosts } from './hosts';
-import { installRouter } from './ipc/router';
+import { dispatchLocal, installRouter } from './ipc/router'; // P5 O6 M3: dispatchLocal, the local link's and the stand-in's
 import { startSettings } from './settings';
 import { startWithProfileLock } from './files/profile-lock';
 import { describeMainBuild, loadedBundlePath, olderInstanceNotice, staleBuildCheck, type MainBuild } from './build-identity'; // E11 §2.7; F2b 2.7b
@@ -23,6 +23,7 @@ import { emit } from './ipc/events';
 import { registerMachineHandler, registerMainHandler } from './ipc/router'; // P5 O6 M1: registerMachineHandler
 import { startMachineIdentity } from './machine/identity'; // P5 O6 M1
 import { bindLocalMachine } from './machine/local'; // P5 O6 M2
+import { startMachines } from './machines'; // P5 O6 M3: the connection manager, and the stand-in behind its gate
 import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2
 // C3 end
 // C4 start (emit comes with C3's imports)
@@ -239,8 +240,9 @@ void startWithProfileLock(app, () => {
   // before anything starts or any window opens. A malformed file stops startup, naming its path: a fresh ref would
   // re-address everything kept under the old one.
   let local: MachineRef;
+  let localName: string; // P5 O6 M3: a display attribute, for machines.list
   try {
-    local = startMachineIdentity({ userData: app.getPath('userData'), env: process.env, hostname: hostname(), register: registerMachineHandler }).ref;
+    ({ ref: local, name: localName } = startMachineIdentity({ userData: app.getPath('userData'), env: process.env, hostname: hostname(), register: registerMachineHandler }));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[machine] ${message}`);
@@ -255,7 +257,21 @@ void startWithProfileLock(app, () => {
   registerPtyOpenLink();
   // C9 block end
   const hosts = createHosts(MAIN_BUILD); // E11 §2.7: main's build for host.status
-  installRouter({ appUrl, local, dispatchToHost: hosts.dispatch });
+  // P5 O6 M3: every other machine through the connection manager (one link per machine; MAWS_LOCAL_MACHINES names another
+  // profile's serve directory in a build that is not packaged), and machines.list and machines.changed
+  const machines = startMachines({
+    local,
+    localName,
+    userData: app.getPath('userData'),
+    packaged: app.isPackaged,
+    env: process.env,
+    build: `${MAIN_BUILD.version}+${MAIN_BUILD.commit}`,
+    resourcesPath: process.resourcesPath,
+    appRoot: process.cwd(), // the development app root, as the browser's peer check reads the addon's prebuild
+    register: registerMainHandler,
+    dispatchLocal,
+  });
+  installRouter({ appUrl, local, dispatchToHost: hosts.dispatch, remote: machines.dispatch });
   // P5 O1 M3 (OX4): the client port, the one way a machine-bound service reaches the person's screen: dialogs, the
   // Replace question, Finder, the browser, notifications, the badge and focus. `openWindow` is read when a focus needs it.
   const clientPort = electronClientPort({ env: process.env, openWindow: () => openWindow() });
@@ -857,4 +873,9 @@ void startWithProfileLock(app, () => {
   });
   shutdown.add('voice', () => voice.dispose());
   // E9 end
+  // P5 O6 M3: with every handler registered, this profile's machine services for another profile's app (the stand-in,
+  // MAWS_MACHINE_SERVE=1 in a build that is not packaged; O3 replaces it with mawsd). The links stop at quit; no far side
+  // is ever stopped.
+  machines.serve();
+  shutdown.add('machines', () => machines.stop());
 }, { build: MAIN_BUILD, onSecondInstance: answerSecondLaunch }); // E11 §2.7
