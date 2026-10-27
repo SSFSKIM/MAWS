@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { connectLines, listenTemp, type LineClient, type TempSocket } from '../../../test/support/socket-lines';
 import { createHostRuntime, type DocPortEnd, type DocPortHandler, type HostEmit, type HostRuntime } from './runtime';
 import { SocketPort } from './socket-port';
-import { splitLines } from './socket-protocol';
+import { encodePtyFrame, PTY_FRAMES_CAPABILITY, PTY_MARK, splitLines } from './socket-protocol';
 import { serveSocketClients, type SocketClients } from './socket-server';
 
 const TOKEN = 'a'.repeat(64);
@@ -514,5 +514,51 @@ describe('the socket layer’s document channels (server side, P3-A M5)', () => 
     client.port.postMessage(open(4));
     await until(() => client.lines.length === 1);
     expect(client.lines).toEqual([{ t: 'documents.closed', channel: 4, reason: 'host' }]);
+  });
+});
+
+// P5 O2 M4: the server writes pty frames only to a client whose hello listed `socket.ptyFrames`; any other gets the line
+describe('the pty frames capability gate (P5 O2 M4)', () => {
+  const DATA = { ptyId: 'pty-1', offset: 0, data: new Uint8Array([0x68, 0x69]) };
+  async function ptyServer() {
+    let emit!: HostEmit;
+    const runtime = createHostRuntime((on, e) => {
+      on('pty.ping', async () => ({ pid: 4242, uptimeMs: 1, hostVersion: 'test' }));
+      emit = e;
+    });
+    const server = createServer();
+    serveSocketClients(server, { runtime, identity: () => ({ ...IDENTITY, capabilities: [PTY_FRAMES_CAPABILITY] }), counts: () => ({ liveSessions: 0, rows: 0 }), token: () => TOKEN, onExit: () => {}, log: () => {} });
+    temp = await listenTemp(server);
+    return { runtime, emit: () => emit('pty.data', DATA as never) };
+  }
+  // the welcome a raw client reads, and the bytes after it once the server has emitted one pty.data
+  async function afterWelcome(capabilities: string[]): Promise<{ welcome: unknown; rest: Buffer }> {
+    const host = await ptyServer();
+    const socket = createConnection(temp!.path);
+    sockets.push(socket);
+    await new Promise((resolve) => socket.once('connect', resolve));
+    const chunks: Buffer[] = [];
+    socket.on('data', (chunk: Buffer) => void chunks.push(chunk));
+    socket.write(`${JSON.stringify(hello({ capabilities }))}\n{"t":"ready"}\n`);
+    await until(() => host.runtime.hasClient());
+    expect(host.emit()).toBe(true);
+    const all = () => Buffer.concat(chunks);
+    await until(() => all().length > all().indexOf(0x0a) + 1);
+    await settle();
+    const bytes = all();
+    const newline = bytes.indexOf(0x0a);
+    return { welcome: JSON.parse(bytes.subarray(0, newline).toString('utf8')), rest: bytes.subarray(newline + 1) };
+  }
+
+  it('lists the capability in its welcome and frames pty.data for a client that listed it', async () => {
+    const { welcome, rest } = await afterWelcome([PTY_FRAMES_CAPABILITY]);
+    expect(welcome).toMatchObject({ t: 'welcome', capabilities: [PTY_FRAMES_CAPABILITY] });
+    expect([...rest]).toEqual([...encodePtyFrame(DATA)!]);
+  });
+
+  it('writes the JSON line to a client that did not list it', async () => {
+    const { rest } = await afterWelcome(['area.feature']);
+    expect(rest[0]).not.toBe(PTY_MARK);
+    expect(JSON.parse(rest.toString('utf8'))).toEqual({ t: 'evt', name: 'pty.data', payload: { ptyId: 'pty-1', offset: 0, data: { $bytes: Buffer.from(DATA.data).toString('base64') } } });
   });
 });

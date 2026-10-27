@@ -712,6 +712,148 @@ describe('terminal registry lifecycle', () => {
   });
 });
 
+// P5 O2 M4 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md): a socket-mode pty host whose link closed comes back as the
+// same process with its shells alive, so running terminals wait through `restarting` and reattach when it is `ready`
+// with the pid they knew; another pid, or `crashed`, ends them as before (a utility host always comes back new).
+describe('terminal registry across a reconnect to the pty host', () => {
+  const READY: HostState = { state: 'ready', pid: 42, restarts: 0, revision: 1 };
+  const restarting = (revision: number): HostState => ({ state: 'restarting', pid: null, restarts: 0, revision });
+  const ready = (pid: number, revision: number): HostState => ({ state: 'ready', pid, restarts: 0, revision });
+  const attachOf = (ptyId: PtyId, replay: Uint8Array<ArrayBuffer>, replayFrom: number, checkpoint: PtyAttach['checkpoint'] = null): PtyAttach => ({
+    info: ptyInfo({ ptyId, label: 't1', pid: 1001, cols: 80, rows: 24, offset: replayFrom + replay.byteLength }),
+    checkpoint,
+    replay,
+    replayFrom,
+    nextOffset: replayFrom + replay.byteLength,
+  });
+
+  // A running terminal that has shown `hello` (5 bytes), with the host's ready pid 42 known.
+  async function shown() {
+    const registry = makeRegistry();
+    const terminal = await openRunning(registry);
+    ipc.emit('pty.hostState', READY);
+    ipc.data(terminal.ptyId, 0, bytes('hello'));
+    await settle();
+    return { registry, ...terminal };
+  }
+
+  it('keeps a running terminal through restarting and, at the same pid, continues it from what it shows', async () => {
+    const { registry, id, ptyId, renderer } = await shown();
+    ipc.emit('pty.hostState', restarting(2));
+    expect(registry.get(id)!.info.status).toBe('running');
+    expect(ipc.inputs('pty.attach')).toEqual([]);
+    const held = deferred<PtyAttach>();
+    ipc.handlers['pty.attach'] = () => held.promise;
+    ipc.emit('pty.hostState', ready(42, 3));
+    await settle();
+    expect(ipc.inputs('pty.attach')).toEqual([{ ptyId }]);
+    ipc.data(ptyId, 12, bytes('live')); // emitted after the host's answer, before it reaches the page: held, then written
+    held.resolve(attachOf(ptyId, bytes('hello meanwhile'.slice(0, 12)), 0));
+    await settle();
+    expect(renderer.writes).toEqual(['hello', ' meanwh', 'live']); // the screen kept: only what it lacked, then live
+    expect(renderer.resets).toBe(0);
+    expect(registry.get(id)!.info).toMatchObject({ status: 'running', reconnect: 'exact', pid: 1001 });
+    ipc.data(ptyId, 16, bytes('!'));
+    expect(renderer.writes.at(-1)).toBe('!');
+  });
+
+  it('restores from the checkpoint or the ring when the ring no longer reaches what it shows', async () => {
+    const { registry, id, ptyId, renderer } = await shown();
+    ipc.emit('pty.hostState', restarting(2));
+    ipc.handlers['pty.attach'] = () => attachOf(ptyId, bytes('tail\r\nnew line\r\n'), 600 * KiB);
+    ipc.emit('pty.hostState', ready(42, 3));
+    await settle();
+    expect(renderer.resets).toBe(1);
+    expect(renderer.writes.at(-1)).toBe('new line\r\n'); // the lossy path's aligned tail
+    expect(registry.get(id)!.info).toMatchObject({ status: 'running', reconnect: 'lossy' });
+
+    // and exactly from a checkpoint the ring still reaches: the old screen cleared once, the checkpoint, then the replay
+    ipc.emit('pty.hostState', restarting(4));
+    ipc.handlers['pty.attach'] = () => attachOf(ptyId, bytes('after'), 700 * KiB, { offset: 700 * KiB, state: 'STATE' });
+    ipc.emit('pty.hostState', ready(42, 5));
+    await settle();
+    expect(renderer.resets).toBe(2);
+    expect(renderer.writes.slice(-2)).toEqual(['STATE', 'after']);
+    expect(registry.get(id)!.info).toMatchObject({ status: 'running', reconnect: 'exact' });
+  });
+
+  it('keeps waiting when the host goes again before it answers, and reattaches at the next ready of the same pid', async () => {
+    const { registry, id, ptyId, renderer } = await shown();
+    ipc.emit('pty.hostState', restarting(2));
+    const first = deferred<unknown>();
+    ipc.handlers['pty.attach'] = () => first.promise;
+    ipc.emit('pty.hostState', ready(42, 3));
+    await settle();
+    ipc.emit('pty.hostState', restarting(4));
+    first.resolve(fail('host_unavailable', 'pty-host disconnected before answering pty.attach'));
+    await settle();
+    expect(registry.get(id)!.info.status).toBe('running');
+    ipc.handlers['pty.attach'] = () => attachOf(ptyId, bytes('hello!'), 0);
+    ipc.emit('pty.hostState', ready(42, 5));
+    await settle();
+    expect(ipc.inputs('pty.attach')).toHaveLength(2);
+    expect(renderer.writes).toEqual(['hello', '!']);
+  });
+
+  it('ignores the answer of a reattach a later one overtook', async () => {
+    const { ptyId, renderer } = await shown();
+    const answers = [deferred<PtyAttach>(), deferred<PtyAttach>()];
+    let asked = 0;
+    ipc.handlers['pty.attach'] = () => {
+      const answer = answers[asked]!;
+      asked += 1;
+      return answer.promise;
+    };
+    ipc.emit('pty.hostState', restarting(2));
+    ipc.emit('pty.hostState', ready(42, 3));
+    ipc.emit('pty.hostState', restarting(4));
+    ipc.emit('pty.hostState', ready(42, 5));
+    await settle();
+    expect(asked).toBe(2);
+    answers[1]!.resolve(attachOf(ptyId, bytes('hello, then'), 0));
+    await settle();
+    answers[0]!.resolve(attachOf(ptyId, bytes('hello'), 0)); // older, and shorter than the screen: would reset it
+    await settle();
+    expect(renderer.writes).toEqual(['hello', ', then']);
+    expect(renderer.resets).toBe(0);
+  });
+
+  it('ends a waiting terminal when the host comes back with another pid, or crashed, without asking for an attach', async () => {
+    const first = await shown();
+    ipc.emit('pty.hostState', restarting(2));
+    ipc.emit('pty.hostState', ready(43, 3));
+    await settle();
+    expect(first.registry.get(first.id)!.info).toMatchObject({ status: 'lost', exit: { exitCode: null, signal: null } });
+
+    ipc = fakeBridge();
+    const second = await shown();
+    ipc.emit('pty.hostState', restarting(2));
+    ipc.emit('pty.hostState', { state: 'crashed', pid: null, restarts: 3, revision: 3 });
+    expect(second.registry.get(second.id)!.info.status).toBe('lost');
+    expect(ipc.inputs('pty.attach')).toEqual([]);
+  });
+
+  it('ends a waiting terminal whose pty the host no longer knows', async () => {
+    const { registry, id } = await shown();
+    ipc.emit('pty.hostState', restarting(2));
+    ipc.handlers['pty.attach'] = () => fail('internal', 'unknown pty');
+    ipc.emit('pty.hostState', ready(42, 3));
+    await settle();
+    expect(registry.get(id)!.info.status).toBe('lost');
+  });
+
+  it('ends a waiting terminal at the next ready when it never saw the host ready before', async () => {
+    const registry = makeRegistry();
+    ipc.handlers['pty.hostState'] = () => restarting(1);
+    const { id } = await openRunning(registry);
+    ipc.emit('pty.hostState', restarting(2));
+    ipc.emit('pty.hostState', ready(42, 3));
+    await settle();
+    expect(registry.get(id)!.info.status).toBe('lost');
+    expect(ipc.inputs('pty.attach')).toEqual([]);
+  });
+});
+
 describe('terminal key filter', () => {
   it('reads effective application bindings on each key, without sending them to xterm or dispatching them twice', async () => {
     const previous = useSettings.getState().state;

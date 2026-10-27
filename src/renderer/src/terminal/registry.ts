@@ -4,9 +4,10 @@
 // (Residue *Persistence*). It carries the renderer side of flow control (coalesced acks, the hidden throttle), the
 // claim-before-request dispatch that makes reattaching gapless, boundary-safe checkpoints (Residue *Reattach
 // checkpoint*), the key filter and the ⌘ rule for links, the WebGL budget, lifecycle (lost on a host crash, respawn,
-// close) and theme pushes.
+// close) and theme pushes. P5 O2 M4: a running terminal waits through the pty host's `restarting` and reattaches when the
+// host is `ready` again as the same process (a socket-mode host whose link closed); another pid, or `crashed`, ends it.
 import type { AppSessionId } from '@shared/graph/ids';
-import type { EventPayload, HostState, IpcError, MawsBridge, PtyExit, PtyId, PtyInfo } from '@shared/ipc/schema';
+import type { EventPayload, HostState, IpcError, MawsBridge, PtyAttach, PtyExit, PtyId, PtyInfo } from '@shared/ipc/schema';
 import type * as z from 'zod';
 import { ipc } from '../ipc/client';
 import { runAction } from '../keymap/actions-runtime';
@@ -124,6 +125,7 @@ class Entry implements TerminalHandle {
   size: { cols: number; rows: number } | null = null;
   spawning: Promise<void> | null = null; // the spawn in flight, which a respawn awaits
   focusPending = false;
+  reattaches = 0; // P5 O2 M4: the reattach under way after a reconnect; an earlier one's answer is stale
 
   constructor(id: TerminalId, init: TerminalInit, status: TerminalStatus) {
     this.command = init.command;
@@ -187,6 +189,9 @@ export class TerminalRegistry {
   private themeKey = '';
   private fontKey: string | null = null; // C11: the font the renderers were last given, so a root `--font-mono` change reaches them
   private hostState: HostState | null = null;
+  // P5 O2 M4: the pid of the host's last `ready`, and the running terminals waiting through a `restarting` for it
+  private readyPid: number | null = null;
+  private readonly waiting = new Set<Entry>();
   private readonly webglBudget: number;
 
   constructor(private readonly deps: RegistryDeps) {
@@ -515,7 +520,7 @@ export class TerminalRegistry {
       return null;
     }
     if (entry.disposed) return null;
-    const { checkpoint, replay, replayFrom, nextOffset, info: now } = attached.value;
+    const { info: now } = attached.value;
     if (!renderer) {
       // Nothing can show this pty: release the claim and its held events, and report the handle with the reason.
       this.byPty.delete(info.ptyId);
@@ -523,6 +528,15 @@ export class TerminalRegistry {
       this.update(entry, { status: now.alive ? 'running' : deadStatus(now.exit), exit: now.exit, pid: now.pid });
       return entry.info.id;
     }
+    this.restore(entry, renderer, attached.value);
+    return entry.info.id;
+  }
+
+  // The screen from an attach's answer, exactly from the checkpoint or lossily from the ring, then the events held since
+  // the claim; a lossy full-screen program is nudged to repaint. `shown`: the renderer already shows an earlier screen.
+  private restore(entry: Entry, renderer: TerminalRenderer, attach: PtyAttach, shown = false): void {
+    const { checkpoint, replay, replayFrom, nextOffset, info: now } = attach;
+    const ptyId = now.ptyId;
     entry.size = { cols: now.cols, rows: now.rows };
     renderer.resize(now.cols, now.rows);
     entry.acked = nextOffset; // the attach acknowledged everything emitted
@@ -530,6 +544,7 @@ export class TerminalRegistry {
     entry.nextOffset = nextOffset;
     const exact = checkpoint !== null && replayFrom === checkpoint.offset;
     if (exact) {
+      if (shown) renderer.reset(); // P5 O2 M4: a screen that showed the pty before restarts from the checkpoint
       this.writeTracked(entry, checkpoint.state);
       entry.parsed = entry.checkpointOffset = checkpoint.offset;
       entry.checkpointSize = `${now.cols}x${now.rows}`;
@@ -539,11 +554,47 @@ export class TerminalRegistry {
       this.writeStream(entry, alignReplay(replay), nextOffset);
     }
     this.update(entry, { reconnect: exact ? 'exact' : 'lossy', status: now.alive ? 'running' : deadStatus(now.exit), exit: now.exit, pid: now.pid });
+    this.deliverHeld(entry, now);
+    if (!exact && now.alive && now.rows > 1) this.nudgeRepaint(entry, ptyId, now.cols, now.rows);
+  }
+
+  // The events held while an attach was under way, in order; a dead pty's claim ends with them.
+  private deliverHeld(entry: Entry, now: PtyInfo): void {
     const held = entry.held.items.splice(0);
     for (const item of held) this.dispatch(entry, item);
-    if (!now.alive) this.byPty.delete(info.ptyId);
-    if (!exact && now.alive && now.rows > 1) this.nudgeRepaint(entry, info.ptyId, now.cols, now.rows);
-    return entry.info.id;
+    if (!now.alive) this.byPty.delete(now.ptyId);
+  }
+
+  // P5 O2 M4: a terminal that waited through a reconnect to the same pty host takes its pty back by the reload's path,
+  // the claim before the request. When the ring still reaches what the screen shows, the screen stays and only what it
+  // lacks is written; when it does not, the screen is restored from the checkpoint or the ring, as after a reload. A pty
+  // the host no longer knows ends the terminal; a host gone again before it answered leaves it waiting.
+  private async reattach(entry: Entry): Promise<void> {
+    const ptyId = entry.info.ptyId!;
+    const renderer = entry.renderer!;
+    const attempt = ++entry.reattaches;
+    entry.bound = false; // what the host emits after its answer waits in the held list
+    const attached = await this.deps.ipc.invoke('pty.attach', { ptyId });
+    if (attempt !== entry.reattaches || entry.disposed || entry.info.ptyId !== ptyId || entry.info.status !== 'running') return;
+    if (!attached.ok) {
+      if (attached.error.code === 'host_unavailable' && this.hostState?.state !== 'ready') return void this.waiting.add(entry);
+      console.error(`[terminal] pty.attach failed for ${ptyId} after the pty host reconnected`, attached.error);
+      return this.exited(entry, { exitCode: null, signal: null });
+    }
+    const { replay, replayFrom, nextOffset, info: now } = attached.value;
+    if (replayFrom <= entry.nextOffset && entry.nextOffset <= nextOffset) {
+      entry.acked = nextOffset; // the attach acknowledged everything emitted
+      entry.bound = true;
+      const shown = entry.nextOffset;
+      entry.nextOffset = nextOffset;
+      this.writeStream(entry, replay.subarray(shown - replayFrom), nextOffset);
+      this.update(entry, { reconnect: 'exact', status: now.alive ? 'running' : deadStatus(now.exit), exit: now.exit, pid: now.pid });
+      return this.deliverHeld(entry, now);
+    }
+    const held = entry.held;
+    entry.resetStream(); // the screen restarts from the answer; the events held since the claim are kept
+    entry.held = held;
+    this.restore(entry, renderer, attached.value, true);
   }
 
   // A full-screen program repaints on SIGWINCH; the lossy path has no screen to show until it does.
@@ -704,15 +755,31 @@ export class TerminalRegistry {
 
   // --- host, theme, publishing ---------------------------------------------------------------------------------
 
-  // A crashed or restarting host has taken every pty with it: live handles are lost (the supervisor's `pty.exit`
-  // events say the same and find them lost already).
+  // A crashed host has taken every pty with it: live handles are lost (the supervisor's `pty.exit` events say the same
+  // and find them lost already). P5 O2 M4: through `restarting` a running terminal waits instead (a starting one is lost
+  // as before), since a socket-mode host may only have lost its link; at the next `ready` the same pid reattaches each
+  // waiting terminal, and another pid (a utility host always comes back new), or no `ready` seen before, ends it.
   private applyHost(state: HostState): void {
     if (this.hostState && state.revision < this.hostState.revision) return;
     this.hostState = state;
-    if (state.state === 'crashed' || state.state === 'restarting') {
+    const lost = (entry: Entry) => this.exited(entry, { exitCode: null, signal: null });
+    if (state.state === 'restarting') {
       for (const entry of this.entries.values()) {
-        if (entry.info.status === 'running' || entry.info.status === 'starting') this.exited(entry, { exitCode: null, signal: null });
+        if (entry.info.status === 'running' && entry.info.ptyId) this.waiting.add(entry);
+        else if (entry.info.status === 'starting') lost(entry);
       }
+    } else if (state.state === 'crashed') {
+      this.waiting.clear();
+      for (const entry of this.entries.values()) if (entry.info.status === 'running' || entry.info.status === 'starting') lost(entry);
+    } else if (state.state === 'ready') {
+      const same = this.readyPid !== null && state.pid === this.readyPid;
+      const waiting = [...this.waiting].filter((entry) => !entry.disposed && entry.info.status === 'running');
+      this.waiting.clear();
+      for (const entry of waiting) {
+        if (!same) lost(entry);
+        else if (entry.renderer) void this.reattach(entry); // one without a renderer shows nothing and keeps no claim
+      }
+      this.readyPid = state.pid;
     }
     this.publish();
   }

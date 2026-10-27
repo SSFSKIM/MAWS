@@ -17,6 +17,10 @@
 //
 // A pty that exits on its own stays as a dead entry for an hour, so a reloaded renderer can still show its last
 // screen; one the renderer killed is removed when it exits. An id the table does not hold fails with `unknown pty`.
+//
+// P5 O2 M4 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md): an attach with `credit: false` (a remote viewer's, which
+// `mawsd` forces) answers as any attach does but leaves the flow untouched, so the reader that holds the credit keeps it;
+// `shutdown` ends every live pty through the kill ladder, for the socket mode's exit order.
 import { randomUUID } from 'node:crypto';
 import * as nodePty from 'node-pty';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -75,6 +79,7 @@ export interface PtyTable {
   attach(input: CommandInput<'pty.attach'>): CommandOutput<'pty.attach'>;
   list(): CommandOutput<'pty.list'>;
   foreground(input: CommandInput<'pty.foreground'>): Promise<CommandOutput<'pty.foreground'>>;
+  shutdown(): Promise<void>; // P5 O2 M4: every live pty killed, each through its ladder; resolves once all have settled
   // tests: the flow state, the ring's oldest offset, and node-pty's reads and bytes read (flushed or pending)
   inspect(ptyId: string): { flow: Flow; ringStart: number; reads: number; read: number };
 }
@@ -127,6 +132,15 @@ export function createPtyTable({ emit, environment }: PtyTableOptions): PtyTable
     if (!entry.info.alive) return;
     if (effect === 'pause' && !entry.killed) entry.pty.pause();
     else if (effect === 'resume') entry.pty.resume();
+  };
+
+  // A live pty asked to end: removed once it has exited, through the shared ladder.
+  const end = (ptyId: string, entry: PtyEntry, signal: string): Promise<void> => {
+    entry.killed = true;
+    // A paused pty would never read to its end, and node-pty reports the exit only once the output is drained.
+    step(ptyId, entry, { kind: 'attach' });
+    entry.termination ??= terminate(entry, signal);
+    return entry.termination;
   };
 
   return {
@@ -222,11 +236,7 @@ export function createPtyTable({ emit, environment }: PtyTableOptions): PtyTable
         remove(ptyId);
         return Promise.resolve();
       }
-      entry.killed = true;
-      // A paused pty would never read to its end, and node-pty reports the exit only once the output is drained.
-      step(ptyId, entry, { kind: 'attach' });
-      entry.termination ??= terminate(entry, signal ?? 'SIGHUP');
-      return entry.termination;
+      return end(ptyId, entry, signal ?? 'SIGHUP');
     },
 
     ack({ ptyId, offset }) {
@@ -240,10 +250,10 @@ export function createPtyTable({ emit, environment }: PtyTableOptions): PtyTable
       entry.checkpoint = { offset: Math.min(offset, entry.flow.total), state };
     },
 
-    attach({ ptyId }) {
+    attach({ ptyId, credit = true }) {
       const entry = get(ptyId);
       flush(ptyId, entry); // nextOffset covers every byte read, and the renderer receives them as a live event
-      step(ptyId, entry, { kind: 'attach' });
+      if (credit) step(ptyId, entry, { kind: 'attach' }); // P5 O2 M4: a non-crediting reader leaves the credit where it is
       const replayFrom = Math.max(entry.checkpoint?.offset ?? 0, entry.ring.start);
       return {
         info: infoOf(entry),
@@ -262,6 +272,12 @@ export function createPtyTable({ emit, environment }: PtyTableOptions): PtyTable
       const entry = get(ptyId);
       if (!entry.info.alive) return { process: null, busy: false };
       return foregroundOf({ pid: entry.info.pid, shell: entry.info.shell, process: entry.pty.process });
+    },
+
+    async shutdown() {
+      const live = [...entries.values()].filter((entry) => entry.info.alive);
+      const ended = await Promise.allSettled(live.map((entry) => end(entry.info.ptyId, entry, 'SIGHUP')));
+      for (const [i, result] of ended.entries()) if (result.status === 'rejected') console.error(`[pty-host] ${live[i]!.info.ptyId} did not end at shutdown`, result.reason);
     },
 
     inspect(ptyId) {

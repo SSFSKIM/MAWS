@@ -135,6 +135,11 @@ export function createHostRuntime<R extends WireRegistry = typeof REGISTRY>(regi
       console.error(`[host] refused to emit ${name}: ${name} is not in HOST_EVENTS`);
       return false;
     }
+    // P5 O2 M4: and the pty host only what PTY_HOST_EVENTS lists, so the wire manifest covers every event it sends
+    if (servedOwner === 'pty-host' && !registry.ptyHostEvents.includes(name)) {
+      console.error(`[host] refused to emit ${name}: ${name} is not in PTY_HOST_EVENTS`);
+      return false;
+    }
     const checked = validateEventPayload(name, payload);
     if (!checked.ok) {
       console.error(`[host] refused to emit invalid ${name}`, checked.issues);

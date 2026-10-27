@@ -255,6 +255,7 @@ describe('raw forwarding', () => {
     commands: { 'engine.ping': { input: z.void(), output: HostPingSchema.extend({ extra: z.string() }), owner: 'engine-host' as const } },
     events: { 'session.brokerItems': z.unknown(), 'probe.newEvent': z.strictObject({ m: z.number() }) },
     hostEvents: ['session.brokerItems', 'probe.newEvent'],
+    ptyHostEvents: [],
     mainOnly: new Set<string>(),
   } as const satisfies WireRegistry;
 

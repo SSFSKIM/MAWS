@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -20,6 +20,16 @@ describe('the supervisor log', () => {
     const lines = readFileSync(join(dir, 'host.log'), 'utf8').trimEnd().split('\n');
     expect(lines).toHaveLength(2);
     expect(lines[0]).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z first$/);
+  });
+
+  // P5 O2 M4: the log is opened before the start checks the directory, so it must not correct a directory the check
+  // refuses (P5 O2 M3: refused, not corrected; acceptance 9)
+  it('leaves an existing directory’s mode as it is', () => {
+    const dir = join(root, 'wide');
+    mkdirSync(dir);
+    chmodSync(dir, 0o755);
+    openSupervisorLog(dir)('line');
+    expect(statSync(dir).mode & 0o777).toBe(0o755);
   });
 
   it('rotates to host.log.1 past the size cap, keeping one previous generation', () => {

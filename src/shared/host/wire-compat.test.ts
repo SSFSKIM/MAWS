@@ -36,6 +36,7 @@ const A = {
   },
   events: { 'probe.changed': z.strictObject({ n: z.number() }) },
   hostEvents: ['probe.changed'],
+  ptyHostEvents: [],
   mainOnly: new Set<string>(),
 } as const satisfies WireRegistry;
 
@@ -47,6 +48,7 @@ const B = {
   },
   events: { 'probe.changed': z.strictObject({ n: z.number(), extra: z.string().optional() }), 'probe.newEvent': z.strictObject({ m: z.number() }) },
   hostEvents: ['probe.changed', 'probe.newEvent'],
+  ptyHostEvents: [],
   mainOnly: new Set<string>(),
 } as const satisfies WireRegistry;
 

@@ -83,7 +83,9 @@ export const commands = {
     output: z.void(),
     owner: 'pty-host',
   },
-  'pty.attach': { input: z.strictObject({ ptyId: PtyIdSchema }), output: PtyAttachSchema, owner: 'pty-host' },
+  // P5 O2 M4: `credit: false` answers the same replay without taking the output credit (the flow reducer's attach), so
+  // the reader that holds it keeps it: how a remote viewer reads a terminal (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md)
+  'pty.attach': { input: z.strictObject({ ptyId: PtyIdSchema, credit: z.boolean().optional() }), output: PtyAttachSchema, owner: 'pty-host' },
   'pty.list': { input: z.void(), output: z.strictObject({ ptys: z.array(PtyInfoSchema) }), owner: 'pty-host' },
   'pty.foreground': {
     input: z.strictObject({ ptyId: PtyIdSchema }),

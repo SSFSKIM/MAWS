@@ -46,6 +46,7 @@ import {
   ServerWelcomeSchema,
   ServerWelcomeV2Schema,
   SOCKET_PROTOCOL_V2,
+  PTY_FRAMES_CAPABILITY,
   splitLines,
   type ClientExit,
   type ClientHello,
@@ -666,7 +667,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
   // The welcomed connection: C1's envelope through a SocketPort; the layer's own `refuse replaced` is read here.
   // `otherBuild`: a supervisor of another build still running sessions, asked to exit when idle unless already asked.
   function serve(socket: Socket, leftover: Buffer, proc: Proc, welcome: Welcomed, otherBuild: boolean): void {
-    const port = new SocketPort(socket, leftover, { log: (line) => log(`socket: ${line}`) });
+    const port = new SocketPort(socket, leftover, { log: (line) => log(`socket: ${line}`), ptyFrames: welcome.peer.capabilities.includes(PTY_FRAMES_CAPABILITY) }); // P5 O2 M4: the welcome's capability gate, as the server's
     if (idleArmed && !(idleArmed.pid === proc.pid && idleArmed.procStart === proc.procStart)) idleArmed = null;
     const connection: Served = { port, proc, exitAsked: idleArmed ? 'idle' : null, replaced: false, recycled: null };
     served = connection;

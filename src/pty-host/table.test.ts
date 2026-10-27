@@ -219,6 +219,30 @@ describe('pty host checkpoint and replay window', () => {
     expect(h.table.inspect(ptyId).flow).toMatchObject({ mode: 'flowing', acked: flow.total }); // attach resumed it
   });
 
+  // P5 O2 M4: a remote viewer reads frames and the ring without taking the output credit from the reader that holds it
+  it('an attach with credit: false answers the replay and leaves a paused pty paused, acked unchanged; a crediting attach then resumes it', async () => {
+    const h = harness();
+    const { ptyId } = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'yes | head -c 5000000'] }));
+    await h.until(() => h.table.inspect(ptyId).flow.mode === 'paused', WAIT_MS, 'paused');
+    const partial = 100 * 1024;
+    h.table.ack({ ptyId, offset: partial });
+    h.table.checkpoint({ ptyId, offset: partial, state: 'STATE-AT-100K' });
+    const before = h.table.inspect(ptyId).flow;
+    const viewer = h.table.attach({ ptyId, credit: false });
+    expect(viewer.checkpoint).toEqual({ offset: partial, state: 'STATE-AT-100K' });
+    expect(viewer.replayFrom).toBe(partial);
+    expect(viewer.nextOffset).toBe(before.total);
+    expect(viewer.replay).toEqual(h.bytes(ptyId).subarray(partial));
+    expect(viewer.info.paused).toBe(true);
+    expect(h.table.inspect(ptyId).flow).toEqual(before); // paused, acked unchanged
+    await new Promise((r) => setTimeout(r, 200));
+    expect(h.table.inspect(ptyId).flow.total).toBe(before.total); // and still nothing flows
+
+    h.table.attach({ ptyId, credit: true });
+    expect(h.table.inspect(ptyId).flow).toMatchObject({ mode: 'flowing', acked: before.total });
+    await h.until(() => h.table.inspect(ptyId).flow.total > before.total, WAIT_MS, 'the pty resumed');
+  });
+
   it('answers lossy when the flood outran the checkpoint: replay from the ring start, the whole ring', async () => {
     const h = harness();
     const { ptyId } = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'sleep 0.3; yes | head -c 5000000'] }));
@@ -468,6 +492,21 @@ describe('pty host lifecycle', () => {
     h.table.kill({ ptyId });
     await expect(h.exited(ptyId)).resolves.toEqual({ ptyId, exitCode: 0, signal: 1 });
     expect(h.table.list().ptys).toEqual([]);
+  });
+
+  // P5 O2 M4: the socket mode's exit order (exit now, SIGTERM) ends every live pty through its ladder
+  it('shutdown ends every live pty through its ladder, past an ignored HUP, and leaves a dead entry alone', async () => {
+    const h = harness();
+    const dead = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'exit 0'] }));
+    await h.exited(dead.ptyId);
+    const plain = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'sleep 30'] }));
+    const stubborn = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', "trap '' HUP; printf 'READY\\n'; while :; do read line; done"] }));
+    await h.until(() => h.text(stubborn.ptyId).includes('READY'), WAIT_MS, 'signal handlers installed');
+    await h.table.shutdown();
+    expect(h.exits.get(plain.ptyId)).toMatchObject({ signal: 1 });
+    expect(h.exits.get(stubborn.ptyId)).toMatchObject({ signal: 15 });
+    expect(h.table.list().ptys).toEqual([expect.objectContaining({ ptyId: dead.ptyId, alive: false })]);
+    for (const pid of [plain.pid, stubborn.pid]) expect(() => process.kill(pid, 0)).toThrow();
   });
 
   it('refuses a second live pty under the same session and label, and replaces a dead one', async () => {

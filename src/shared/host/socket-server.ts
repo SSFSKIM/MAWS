@@ -23,6 +23,10 @@
 // E10's `refuse token`). `many` serves every welcomed client at once, each through its own runtime from `runtimeFor`,
 // with no replacement (`mawsd`'s machine.sock). `onClientEnd` reports a welcomed client's FIN apart from its close, for a
 // server made with `allowHalfOpen`, whose side then stays writable until it closes the client.
+//
+// P5 O2 M4: the capability gate. A client whose hello listed `socket.ptyFrames` gets `pty.data` as pty frames (its port
+// is made with `ptyFrames`); any other, a protocol-2 one included, gets the JSON line. The welcome lists what the
+// identity says, which is WIRE_CAPABILITIES for every host.
 import { timingSafeEqual } from 'node:crypto';
 import type { Server, Socket } from 'node:net';
 import { HostClientGoneSchema, HostReadySchema, HostRequestSchema } from '../ipc/host-protocol';
@@ -39,6 +43,7 @@ import {
   DocumentsOpenSchema,
   HelloPreambleSchema,
   LINE_CAP,
+  PTY_FRAMES_CAPABILITY,
   SOCKET_PROTOCOL_V2,
   splitLines,
   type RefuseReason,
@@ -247,7 +252,7 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
         }
         const { liveSessions, rows } = options.counts();
         socket.write(`${JSON.stringify(line({ liveSessions, rows }))}\n`);
-        const port = new SocketPort(socket, splitter.rest(), { lineCap, log });
+        const port = new SocketPort(socket, splitter.rest(), { lineCap, log, ptyFrames: peer.capabilities.includes(PTY_FRAMES_CAPABILITY) }); // P5 O2 M4
         const runtime = many ? many.runtimeFor() : options.runtime!; // P5 O2 M3
         const documents = new HostDocChannels(port, (message, end) => runtime.docPort(message, end), { highWater: options.docHighWater, log }); // P3-A M5
         const client: Client = { socket, port, runtime, documents, peer };
