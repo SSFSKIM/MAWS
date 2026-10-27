@@ -12,10 +12,10 @@ const sha = '512107c14abcdef0512107c14abcdef0512107c1';
 
 // The summary line for a run's jobs ("conclusion<TAB>name", sorted by name as ci-gate.sh sorts them) and failed log,
 // under ci-gate.sh's flags.
-function refusals(jobs, log, { gates = 'all', runner = 'macos', class1a = 'pool', live = '', lane = '', default_beside = '', label = 'f1-landing' } = {}) {
+function refusals(jobs, log, { gates = 'all', runner = 'macos', class1a = 'pool', live = '', lane = '', default_beside = '', label = 'f1-landing', relaunch_peer } = {}) {
   return execFileSync('bash', ['-c', 'set -uo pipefail; source "$0"; refusals "$1" "$2"', join(root, 'scripts/ci-gate-refusals.sh'), jobs.join('\n'), log.join('\n')], {
     encoding: 'utf8',
-    env: { ...process.env, sha, gates, runner, class1a, live, lane, default_beside, label },
+    env: { ...process.env, sha, gates, runner, class1a, live, lane, default_beside, label, ...(relaunch_peer !== undefined && { relaunch_peer }) },
   });
 }
 
@@ -175,4 +175,20 @@ test('a run on a Lane: relaunches on it, its refused groups and a refused plan a
   );
   const planRefused = ['failure\tplan', 'skipped\te2e:document-app'];
   assert.match(refusals(planRefused, [refusal('plan')], { lane: 'vm-trial', gates: 'e2e:document-app' }), / --class1a pool --lane vm-trial --gates e2e:document-app --label /);
+});
+
+// The PEER_E2E groups' peer (ci-gate-peer.mjs): a relaunch checks the pair the run checked, its peer's full sha as
+// resolved, or none when the run had none, never the merge base of the moment.
+test("a run's peer goes into its relaunch as resolved, a sha or none, for its refused groups and a refused plan alike", () => {
+  const peer = '0123456789abcdef0123456789abcdef01234567';
+  const crossRun = ['failure\te2e:cross-build', 'success\tplan', 'success\tstatic', 'success\tunit'];
+  assert.equal(
+    refusals(crossRun, [refusal('e2e:cross-build')], { relaunch_peer: peer }),
+    'ci-gate: refused by the mini (1): e2e:cross-build; green (2): static unit; red (0): none; ' +
+      `relaunch the refused and the red (less any red baseline, Decision Log 58(c)): scripts/ci-gate.sh ${sha} --runner macos --class1a pool --peer ${peer} ` +
+      '--gates e2e:cross-build --label f1-landing --evidence\n',
+  );
+  const planRefused = ['failure\tplan', 'skipped\te2e:cross-build'];
+  assert.match(refusals(planRefused, [refusal('plan')], { relaunch_peer: 'none', gates: 'static,unit,probes' }), / --class1a pool --peer none --gates static,unit,probes --label /);
+  assert.doesNotMatch(refusals(crossRun, [refusal('e2e:cross-build')]), /--peer/);
 });

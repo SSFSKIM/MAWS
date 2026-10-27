@@ -1,6 +1,6 @@
 // An org's signed states for the endpoint's suites, made with the protocol package's own signing as an admin's app makes
 // them: devices with fresh keys, a genesis, successors, root transitions and revocations.
-import { generateSigningKey, keyId, signOrgState, signTransition, stateHash, type Device, type DeviceClass, type OrgState, type RevokedKey, type RootTransition, type Signed, type SignedOrgState, type SigningKey } from 'org-protocol';
+import { endorseDevice, generateSigningKey, keyId, signOrgState, signTransition, stateHash, type Device, type DeviceClass, type OrgState, type RevokedKey, type RootTransition, type Signed, type SignedOrgState, type SigningKey } from 'org-protocol';
 
 export type TestDevice = { device: Device; channel: SigningKey; stepUp: SigningKey };
 
@@ -8,6 +8,11 @@ export async function newDevice(id: string, cls: DeviceClass = 'native-mac'): Pr
   const channel = await generateSigningKey();
   const stepUp = await generateSigningKey();
   return { channel, stepUp, device: { id, class: cls, keyStorage: 'software', channelPub: channel.pub, stepUpPub: stepUp.pub } };
+}
+
+/** `device` endorsed by `by`, an existing device of the same member (its step-up key signs), as a member's second device must be. */
+export async function endorsed(org: string, member: string, device: TestDevice, by: TestDevice): Promise<TestDevice> {
+  return { ...device, device: { ...device.device, endorsement: await endorseDevice(org, member, device.device, by.stepUp.privateKey, by.stepUp.pub) } };
 }
 
 /** A fresh member id: 128 random bits as lowercase hex. */

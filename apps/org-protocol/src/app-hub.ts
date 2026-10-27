@@ -3,7 +3,8 @@
 // hub holds (`listings`, in pages); then a `state` notice at each accepted state and a `listing` as each is stored. The
 // notice carries no state: the app reads `GET /api/org/state?since=<held>` and verifies what it gets (RL §5.2), and
 // verifies every listing against the state it holds (RL §6.2). A `private` session's listing is never posted to the
-// hub, so every listing the hub holds is one every member may see.
+// hub, so every listing the hub holds is one every member may see. A withdrawn listing (`LISTING_GONE`) is never in the
+// `listings` pages; a `listing` frame may carry one, and the app drops the session it names.
 import type { ListingFrame, StateNotice } from './relay.ts';
 import type { Listing, Signed } from './types.ts';
 

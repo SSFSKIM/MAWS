@@ -1,0 +1,101 @@
+{
+  "spike": "u5-local-auth",
+  "startedAt": "2026-10-27T15:13:10.970Z",
+  "environment": {
+    "host": "SK.local",
+    "model": "MacBookPro18,4",
+    "macos": "26.6.2",
+    "arch": "arm64",
+    "electron": "44.4.5",
+    "node": "24.21.0",
+    "execPath": "/Users/new/.local/share/p5-desk-track-owner/wt/o10-m9/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+    "codesign": "Executable=/Users/new/.local/share/p5-desk-track-owner/wt/o10-m9/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron\nIdentifier=Electron\nFormat=app bundle with Mach-O thin (arm64)\nCodeDirectory v=20400 size=392 flags=0x20002(adhoc,linker-signed) hashes=9+0 location=embedded\nSignature=adhoc\nInfo.plist=not bound\nTeamIdentifier=not set\nSealed Resources=none\nInternal requirements=none",
+    "appName": "Electron"
+  },
+  "candidates": [
+    {
+      "number": 1,
+      "name": "systemPreferences.promptTouchID",
+      "steps": [
+        {
+          "step": "approve-touch-id",
+          "expect": "resolved",
+          "ms": 3474,
+          "answered": true,
+          "ok": true
+        },
+        {
+          "step": "approve-password",
+          "expect": "resolved",
+          "ms": 2215,
+          "answered": true,
+          "ok": true
+        },
+        {
+          "step": "cancel",
+          "expect": "rejected",
+          "ms": 1885,
+          "answered": true,
+          "ok": true
+        }
+      ],
+      "canPromptTouchID": true
+    },
+    {
+      "number": 2,
+      "name": "the LAContext addon (deviceOwnerAuthentication)",
+      "steps": [
+        {
+          "step": "approve-touch-id",
+          "expect": "ok: true",
+          "ms": 1390.241000175476,
+          "answered": true,
+          "ok": true
+        },
+        {
+          "step": "approve-password",
+          "expect": "ok: true",
+          "ms": 1303.6399998664856,
+          "answered": true,
+          "ok": true
+        },
+        {
+          "step": "cancel",
+          "expect": "ok: false, code -2 (user cancel)",
+          "ms": 2021.3429999351501,
+          "answered": true,
+          "ok": false,
+          "code": -2,
+          "domain": "com.apple.LocalAuthentication",
+          "message": "인증이 취소되었습니다."
+        }
+      ],
+      "addonVersion": 1,
+      "canEvaluate": {
+        "ok": true,
+        "biometryType": "touch-id"
+      }
+    },
+    {
+      "number": 3,
+      "name": "an app-level confirmation",
+      "steps": [
+        {
+          "step": "confirm",
+          "expect": "ok: true",
+          "ms": 2520,
+          "answered": true,
+          "ok": true
+        },
+        {
+          "step": "cancel",
+          "expect": "ok: false",
+          "ms": 1710,
+          "answered": true,
+          "ok": true
+        }
+      ]
+    }
+  ],
+  "finishedAt": "2026-10-27T15:13:43.107Z"
+}

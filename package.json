@@ -73,6 +73,7 @@
     "e2e:design-systems-live": "scripts/e2e-build.sh plain && playwright test e2e/design-systems-live.spec.ts",
     "e2e:supervisor": "scripts/e2e-build.sh plain && MAWS_SUPERVISOR_E2E=1 MAWS_HOST_MODE=detached MAWS_ENGINE_REPLAY=1 playwright test e2e/supervisor.spec.ts",
     "e2e:supervisor:packaged": "MAWS_E2E_EXECUTABLE=${MAWS_E2E_EXECUTABLE:-dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS} MAWS_SUPERVISOR_E2E=1 MAWS_HOST_MODE=detached playwright test e2e/supervisor-packaged.spec.ts",
+    "e2e:cross-build": "scripts/e2e-build.sh plain && MAWS_CROSS_BUILD_E2E=1 MAWS_HOST_MODE=detached MAWS_ENGINE_REPLAY=1 playwright test e2e/cross-build.spec.ts",
     "verify:fuses": "out=$(FORCE_COLOR=0 NO_COLOR=1 electron-fuses read --app dist/mac-arm64/MAWS.app) && echo \"$out\" && echo \"$out\" | grep -q '^ *RunAsNode is Enabled$' || { echo 'verify:fuses: dist/mac-arm64/MAWS.app does not report RunAsNode is Enabled; the E10 supervisor runs the app binary as Node (ELECTRON_RUN_AS_NODE)' >&2; exit 1; }",
     "e2e:side": "scripts/e2e-build.sh harness && MAWS_ENGINE_REPLAY=1 playwright test e2e/side.spec.ts",
     "e2e:to-human": "scripts/e2e-build.sh harness && MAWS_ENGINE_REPLAY=1 MAWS_E2E_FOREGROUND=1 playwright test e2e/to-human.spec.ts",
@@ -173,6 +174,7 @@
     "@types/node": "^24",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@types/ws": "8.18.1",
     "@vitejs/plugin-react": "^5.2.0",
     "@xterm/headless": "6.0.0",
     "babel-plugin-react-compiler": "^1.0.0",
@@ -218,6 +220,7 @@
     "unist-util-visit": "^5.0.0",
     "vite": "^7.3.6",
     "vitest": "^5.0.2",
+    "ws": "8.22.0",
     "zustand": "^5.0.15"
   }
 }

@@ -109,6 +109,15 @@ export type Listing = {
   issued: string;
   fields: { owners: MemberId[]; project: string | null; lane: 'A' | 'B'; state: string; title: string };
 };
+/**
+ * The `state` of a withdrawn listing (RL6; the remote layer's Decision Log 27): a session that becomes `private` or
+ * leaves gets one last revision in this state, with `owners`, `project` and `title` empty. The Registry keeps it, so its
+ * revision still refuses a replay of an earlier one, and leaves it out of every snapshot it serves; the incremental
+ * `listing` push carries it, so an app that cached the session drops it. Listing the session again is a higher revision.
+ */
+export const LISTING_GONE = 'gone';
+/** Whether a listing withdraws its session (`LISTING_GONE`). */
+export const isListingGone = (listing: Listing): boolean => listing.fields.state === LISTING_GONE;
 /** RL §4.1's direct carriers. */
 export type EndpointRecord = { org: string; machine: string; addresses: string[]; issued: string };
 

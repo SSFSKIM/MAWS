@@ -9,12 +9,14 @@ import { join } from 'node:path';
 import {
   isCertificates,
   isGrant,
+  isListing,
   isMachineCert,
   isRootTransition,
   isSigned,
   isSignedOrgState,
   type Certificates,
   type Grant,
+  type Listing,
   type MachineCert,
   type RootTransition,
   type Signed,
@@ -78,12 +80,33 @@ const OrgSchema = z.strictObject({
   highWater: z.number().int().nonnegative(),
 });
 const PolicySchema = z.strictObject({ read_only: z.boolean(), ceiling: z.enum([...PERMISSION_MODES, 'settings']) });
+/**
+ * Each listed session's last listing (listings.ts): its revision, when it was issued, the hash of its fields, and the
+ * signed record itself, which each welcome sends again byte for byte (the hub takes a resend of what it holds, and
+ * refuses a new signature at a revision it holds).
+ */
+const ListingsSchema = z.record(
+  z.string().min(1),
+  z.strictObject({ revision: z.number().int().positive(), issued: Iso, hash: z.string().min(1), record: custom<Signed<Listing>>((v) => isSigned(v, isListing)) }),
+);
+
+/**
+ * The sessions whose pending count the hub was last told above 0 (notify.ts), with their project: after a restart, a
+ * pending set that leaves one out is told `settled 0`, which the hub would otherwise never hear. `owed`: the session was
+ * withdrawn while no connection was up, and its `settled 0` goes at the next welcome.
+ */
+const NotifiedSchema = z.record(
+  z.string().min(1),
+  z.strictObject({ project: z.string().min(1), pending: z.number().int().positive(), owed: z.literal(true).optional() }),
+);
 
 export type MachineKeyFile = z.infer<typeof MachineKeySchema>;
 export type LedgerFile = z.infer<typeof LedgerSchema>;
 export type EnrollmentFile = z.infer<typeof EnrollmentSchema>;
 export type OrgFile = z.infer<typeof OrgSchema>;
 export type PolicyFile = z.infer<typeof PolicySchema>;
+export type ListingsFile = z.infer<typeof ListingsSchema>;
+export type NotifiedFile = z.infer<typeof NotifiedSchema>;
 export type ChainEntry = z.infer<typeof ChainEntrySchema>;
 
 const FILES = {
@@ -93,6 +116,8 @@ const FILES = {
   org: 'org.json',
   policy: 'policy.json',
   legacy: 'legacy.json',
+  listings: 'listings.json',
+  notified: 'notified.json',
 } as const;
 
 type Options = { uid?: number; now?: () => number; log?: (line: string) => void };
@@ -107,6 +132,8 @@ export class EndpointState {
   #enrollment: EnrollmentFile | null = null;
   #org: OrgFile | null = null;
   #policy: PolicyFile | null = null;
+  #listings: ListingsFile = {};
+  #notified: NotifiedFile = {};
   #legacy = false;
 
   private constructor(
@@ -139,6 +166,8 @@ export class EndpointState {
       const enrollment = read(FILES.enrollment, EnrollmentSchema);
       const org = read(FILES.org, OrgSchema);
       const policy = read(FILES.policy, PolicySchema);
+      const listings = read(FILES.listings, ListingsSchema);
+      const notified = read(FILES.notified, NotifiedSchema);
       const legacy = checkPrivateFile(join(dir, FILES.legacy), options.uid);
 
       const alone = (machineKey === null) !== (ledger === null);
@@ -158,6 +187,8 @@ export class EndpointState {
       }
       state.#org = org;
       state.#policy = policy;
+      state.#listings = listings ?? {};
+      state.#notified = notified ?? {};
       state.#legacy = legacy;
       return state;
     } catch (error) {
@@ -188,6 +219,14 @@ export class EndpointState {
   get legacy(): boolean {
     return this.#legacy;
   }
+  /** Each listed session's last listing; empty when none was made. */
+  get listings(): ListingsFile {
+    return this.#listings;
+  }
+  /** The sessions whose pending count the hub was last told above 0; empty when none. */
+  get notified(): NotifiedFile {
+    return this.#notified;
+  }
 
   setMachineKey(value: MachineKeyFile): void {
     this.#write(FILES.machineKey, MachineKeySchema.parse(value));
@@ -208,6 +247,14 @@ export class EndpointState {
   setPolicy(value: PolicyFile): void {
     this.#write(FILES.policy, PolicySchema.parse(value));
     this.#policy = value;
+  }
+  setListings(value: ListingsFile): void {
+    this.#write(FILES.listings, ListingsSchema.parse(value));
+    this.#listings = value;
+  }
+  setNotified(value: NotifiedFile): void {
+    this.#write(FILES.notified, NotifiedSchema.parse(value));
+    this.#notified = value;
   }
   /** Deletes the DX1 org key (`mawsd endpoint legacy retire`, O14's final brief). */
   removeLegacy(): void {

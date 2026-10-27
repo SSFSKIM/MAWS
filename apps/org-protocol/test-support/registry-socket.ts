@@ -1,11 +1,11 @@
 // The app's Registry socket (OX8; O11 M7), `/api/registry/socket?app=1`: DX3's grid first, as desk-web reads it, then
 // the org state's head version (`state {version}`, when the hub holds a state) and every listing the hub holds
 // (`listings {records, last}` pages, the last marked), then a `state` notice at each accepted state and a
-// `listing {record}` as each is stored. The app fetches the state itself (`GET /api/org/state?since=<held>`) and
+// `listing {record}` as each is stored, a withdrawn one (`LISTING_GONE`) dropping its session. The app fetches the state itself (`GET /api/org/state?since=<held>`) and
 // verifies every listing against it; the hub only relays them.
 import { REGISTRY_APP_PARAM, type ListingsFrame } from '../src/app-hub.ts';
 import type { ListingFrame } from '../src/relay.ts';
-import type { Listing, Signed } from '../src/types.ts';
+import { isListingGone, type Listing, type Signed } from '../src/types.ts';
 import { JsonSocket, openSocket, socketUrl, type Frame, type Headers } from './socket.ts';
 
 export const REGISTRY_SOCKET_PATH = `/api/registry/socket?${REGISTRY_APP_PARAM}=1`;
@@ -16,7 +16,7 @@ export const listingKey = (record: Signed<Listing>) => `${record.body.machine}/$
 export class RegistrySocket extends JsonSocket {
   /** The head's version as last noticed; null until a `state` frame came (the hub holds no state yet, or has not said). */
   version: number | null = null;
-  /** Every listing received, the newest revision per machine and session. */
+  /** Every listing received, the newest revision per machine and session, but for a session withdrawn since. */
   readonly listings = new Map<string, Signed<Listing>>();
   /** Whether the last `listings` page came (the socket's opening frames are all in). */
   ready = false;
@@ -42,7 +42,10 @@ export class RegistrySocket extends JsonSocket {
   }
 
   private keep(record: Signed<Listing>): void {
-    const held = this.listings.get(listingKey(record));
-    if (!held || held.body.revision < record.body.revision) this.listings.set(listingKey(record), record);
+    const key = listingKey(record);
+    const held = this.listings.get(key);
+    if (held && held.body.revision >= record.body.revision) return;
+    if (isListingGone(record.body)) this.listings.delete(key);
+    else this.listings.set(key, record);
   }
 }

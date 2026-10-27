@@ -4,7 +4,7 @@
 // desk-web's grid socket, without the query, keeps the grid alone; and one
 // member's client holds the Registry, Project and Machine sockets at once (acceptance 6), signing its words into the
 // log with its device key and binding a push subscription to that device.
-import { base64urlEncode, generateSigningKey, keyId, LISTINGS_PAGE_BYTES, type Listing, type ListingsFrame, type Signed, type SignedOrgState, type SigningKey } from 'org-protocol';
+import { base64urlEncode, generateSigningKey, keyId, LISTING_GONE, LISTINGS_PAGE_BYTES, type Listing, type ListingsFrame, type Signed, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { deviceHuman, HubClient, HubRefusal, listingKey, referenceCheck, type RegistrySocket } from 'org-protocol/test-support';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FakeEndpoint } from '../fake-machine/endpoint';
@@ -173,6 +173,63 @@ describe('the reference client', () => {
     const refused = await client.registerPush({ endpoint: 'https://push.test/other', keys, device: memberId() }).catch((error: unknown) => error);
     expect(refused).toBeInstanceOf(HubRefusal);
     expect(refused).toMatchObject({ status: 409, error: 'unknown-device' });
+  });
+});
+
+describe('a withdrawn listing (RL6’s `gone`; the remote layer’s Decision Log 27)', () => {
+  const WITHDRAWN = 'c7d6e5f4-a3b2-4c1d-8e9f-0a1b2c3d4e5f';
+  const NEVER_LISTED = 'd8e7f6a5-b4c3-4d2e-9f0a-1b2c3d4e5f6a';
+  const gone = (): Listing['fields'] => ({ owners: [], project: null, lane: 'B', state: LISTING_GONE, title: '' });
+  const key = () => `${mini.ref}/${WITHDRAWN}`;
+  const isListingOf = (session: string, revision: number) => (f: { t: string }) =>
+    f.t === 'listing' && (f as unknown as { record: Signed<Listing> }).record.body.session === session && (f as unknown as { record: Signed<Listing> }).record.body.revision === revision;
+
+  it('is kept for its high-water mark and relayed to a connected app, which drops the session; snapshots leave it out; listing it again is a new revision', async () => {
+    const cached = await client.registry();
+    const live = await listing(mini, WITHDRAWN, 5, fields('working'));
+    endpoint.listing(live);
+    await cached.next(isListingOf(WITHDRAWN, 5), 'the live listing');
+    expect(cached.listings.get(key())).toEqual(live);
+
+    // The tombstone reaches the app that cached the session, which drops it.
+    const withdrawn = await listing(mini, WITHDRAWN, 6, gone());
+    endpoint.listing(withdrawn);
+    await cached.next(isListingOf(WITHDRAWN, 6), 'the tombstone');
+    expect(cached.listings.has(key())).toBe(false);
+    // Its owners went with it: nothing pushes for the session now.
+    expect(await hub.registryRpc<string[] | null>('ownersOf', mini.ref, WITHDRAWN)).toEqual([]);
+
+    // A replay of the older signed revision is refused: the gone revision holds the high-water mark.
+    const endpointFrom = endpoint.frames.length;
+    endpoint.listing(live);
+    await endpoint.next((f) => f.t === 'refusal' && f.error === 'stale-listing' && f.session === WITHDRAWN, 'the replay refused', endpointFrom);
+
+    // Every snapshot leaves it out: a reconnecting app's opening pages and GET /api/listings.
+    const reconnected = await client.registry();
+    expect(reconnected.listings.has(key())).toBe(false);
+    expect(reconnected.frames.flatMap((f) => (f.t === 'listings' ? (f as unknown as ListingsFrame).records : [])).some((r) => r.body.session === WITHDRAWN)).toBe(false);
+    expect((await client.listings()).listings.some((l) => l.body.session === WITHDRAWN)).toBe(false);
+
+    // Listed again: a new, higher revision, served as any listing.
+    const back = await listing(mini, WITHDRAWN, 7, fields('idle'));
+    endpoint.listing(back);
+    await reconnected.next(isListingOf(WITHDRAWN, 7), 'the listing again');
+    expect(reconnected.listings.get(key())).toEqual(back);
+    expect((await client.listings()).listings).toContainEqual(back);
+    cached.close();
+    reconnected.close();
+  });
+
+  it('is relayed to no app when no app could have held the session (the hub never served a live revision of it)', async () => {
+    const app = await client.registry();
+    const from = app.frames.length;
+    const stored = await hub.registryRpc<{ ok: boolean; value: { stored: boolean } }>('storeListing', await listing(mini, NEVER_LISTED, 1, gone()));
+    expect(stored).toEqual({ ok: true, value: { stored: true } });
+    // A later live revision is relayed as any (an app's first sight of the session).
+    endpoint.listing(await listing(mini, NEVER_LISTED, 2, fields('working')));
+    await app.next(isListingOf(NEVER_LISTED, 2), 'the live listing');
+    expect(relayed(app, from).map((r) => r.body.revision)).toEqual([2]);
+    app.close();
   });
 });
 

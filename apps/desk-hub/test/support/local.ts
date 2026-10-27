@@ -93,7 +93,9 @@ export type Push = { endpoint: string; headers: Record<string, string>; body: Ui
 
 export type LocalHub = Awaited<ReturnType<typeof startLocalHub>>;
 
-export async function startLocalHub() {
+/** `script` is the bundled Worker (`bundleHub`); a suite of desk-hub's own leaves it to its global setup's. */
+export async function startLocalHub(options: { script?: string } = {}) {
+  const script = options.script ?? inject('hubScript');
   const standin = await AccessStandin.create({ issuer: `${STANDIN}/standin`, audience: 'aud-desk-local', account: 'acct-local' });
   const persist = mkdtempSync(join(tmpdir(), 'desk-hub-state-'));
   const vars = {
@@ -160,8 +162,8 @@ export async function startLocalHub() {
             compatibilityFlags: picked.compatibilityFlags,
             assets: picked.assets,
             modules: true,
-            scriptPath: inject('hubScript'),
-            modulesRoot: dirname(inject('hubScript')),
+            scriptPath: script,
+            modulesRoot: dirname(script),
             bindings: { ...picked.bindings, ...vars },
             outboundService: async (request) => {
               const response = await outbound(request as unknown as Request);
@@ -254,7 +256,7 @@ export async function startLocalHub() {
     /** Shortens a machine's heartbeat and lease (and its grace, the heartbeat's unless given, and its probe); set before
      * its stream opens (the suites' Worker only). */
     async timing(machine: string, timing: { heartbeatMs: number; leaseMs: number; graceMs?: number; probeMs?: number; writeTimeoutMs?: number }) {
-      const query = new URLSearchParams(Object.entries(timing).map(([name, value]) => [name, String(value)]));
+      const query = new URLSearchParams(Object.entries(timing).map(([name, value]): [string, string] => [name, String(value)]));
       await seam('MACHINE', machine, `${TIMING_PATH}?${query}`);
     },
     /** Arms a machine's object to find itself replaced at its next probe, as one Cloudflare replaced under its stream. */
