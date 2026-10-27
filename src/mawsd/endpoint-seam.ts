@@ -14,6 +14,9 @@ import type { HostResponse } from '@shared/ipc/host-protocol';
 import type { MachineRef } from '@shared/machine/ref';
 
 export const ENDPOINT_STOP_MS = 2_500;
+// `daemon.endpoint`'s answer while there is no module, `{code: 2, out: NO_ENDPOINT_MODULE}`, for every command; the
+// command line (cli.ts) reads it to answer `keys` with the machine ref alone (P5 O2 M6).
+export const NO_ENDPOINT_MODULE = 'this daemon has no endpoint module yet (P5 O10)';
 // The document channels of the one upstream link are split between its two users until O3: the app's below 2^31, the
 // endpoint's at 2^31 and above. A value convention inside the existing `Channel` range, enforced here and never as a
 // narrowed schema bound (P5 Decision Log 42: the `documents.*` lines are frozen for major 3).

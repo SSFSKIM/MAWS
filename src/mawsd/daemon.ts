@@ -53,7 +53,7 @@ import { buildIdOf, isAlive, procStartOf, readLock, START_EXIT_HELD, takeLock } 
 import { LOG_ROTATE_BYTES, openSupervisorLog } from '../engine-host/supervisor-log';
 import { ptyHostFiles } from '../pty-host/files';
 import { DaemonClocks } from './clocks';
-import { ENDPOINT_CHANNEL_BASE, ENDPOINT_STOP_MS, loadEndpointModule, type DaemonServices, type EndpointModule } from './endpoint-seam';
+import { ENDPOINT_CHANNEL_BASE, ENDPOINT_STOP_MS, loadEndpointModule, NO_ENDPOINT_MODULE, type DaemonServices, type EndpointModule } from './endpoint-seam';
 import { DEPARTURE_BOUND_MS, Relay, type RelayRequest } from './relay';
 
 export const EXIT_RESTART = 75; // a requested restart: the units restart on it
@@ -464,7 +464,6 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       endpoint: { present: endpoint !== null, detail: endpoint ? safely(() => endpoint.status(), log) : null },
     };
   }
-  const NO_ENDPOINT = 'this daemon has no endpoint module yet (P5 O10)';
   async function daemonCommand(name: string, input: unknown): Promise<unknown> {
     switch (name) {
       case 'daemon.status':
@@ -475,7 +474,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         return undefined;
       case 'daemon.endpoint': {
         const { command, args, secret } = input as { command: string; args: string[]; secret?: string };
-        if (!endpoint) return { code: 2, out: NO_ENDPOINT };
+        if (!endpoint) return { code: 2, out: NO_ENDPOINT_MODULE };
         return endpoint.cli(command, args, secret); // the secret is passed, never logged
       }
       default:

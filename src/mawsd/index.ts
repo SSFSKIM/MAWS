@@ -5,22 +5,25 @@
 //
 //     mawsd run --unit|--private --dir <profile>/mawsd        with MAWS_USER_DATA=<profile>
 //
-// M6 adds the command line's other commands here. Exit codes: 0 done, 1 failed, 2 not available here, 3 the lock held
-// by another private daemon, 75 a requested restart.
+// Every other command is the command line's (cli.ts, P5 O2 M6), given this process's facts here. The daemon's exit
+// codes: 0 done, 1 failed, 3 the lock held by another private daemon, 75 a requested restart; the command line's: 0
+// done, 1 failed, 2 not available here, 3 not running, 4 enrolled with the hub but not yet listed in the org state.
+import { spawnSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
+import { homedir, userInfo } from 'node:os';
 import { format } from 'node:util';
 import engineHostPath from '../engine-host/index?modulePath';
 import ptyHostPath from '../pty-host/index?modulePath';
 import { startDaemon, type RunningDaemon } from './daemon';
 import { LOG_ROTATE_BYTES, openSupervisorLog } from '../engine-host/supervisor-log';
 import { DAEMON_FILES } from '@shared/daemon/files';
+import { buildIdOf } from '../engine-host/supervisor-files';
+import { runCli } from './cli';
 import { parseRun, USAGE, type RunArgs } from './run-args';
 
 function main(argv: readonly string[]): void {
   const [command, ...rest] = argv;
-  if (command !== 'run') {
-    process.stderr.write(`${command === undefined ? 'mawsd needs a command' : `mawsd has no command ${command}`}\n${USAGE}\n`);
-    process.exit(command === undefined ? 1 : 2);
-  }
+  if (command !== 'run') return void commandLine(argv);
   const args = parseRun(rest);
   if (typeof args === 'string') {
     process.stderr.write(`${args}\n${USAGE}\n`);
@@ -83,6 +86,71 @@ function routeConsole(log: (line: string) => void): void {
   console.debug = to('debug: ');
   console.warn = to('warn: ');
   console.error = to('error: ');
+}
+
+function commandLine(argv: readonly string[]): void {
+  const stop = new AbortController(); // an interrupt ends a `logs --follow` as done; any other command it ends at once
+  if (argv.includes('logs') && argv.includes('--follow')) for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => stop.abort());
+  const self = process.argv[1]!;
+  void runCli(argv, {
+    env: process.env,
+    platform: process.platform,
+    home: homedir(),
+    cwd: process.cwd(),
+    uid: process.getuid?.() ?? -1,
+    user: userInfo().username,
+    out: (text) => void process.stdout.write(text),
+    err: (text) => void process.stderr.write(text),
+    stdin: { isTTY: process.stdin.isTTY === true, read: readStdin, prompt: hiddenPrompt },
+    run: (command, args) => {
+      const result = spawnSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000 });
+      return { status: result.status, stdout: result.stdout ?? '', stderr: result.stderr ?? (result.error ? String(result.error) : '') };
+    },
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    now: () => Date.now(),
+    self: { runtime: process.execPath, entry: realpathSync(self) },
+    build: buildIdOf(self),
+    follow: { signal: stop.signal },
+  }).then((code) => {
+    process.exitCode = code;
+    setTimeout(() => process.exit(code), 2_000).unref(); // should a handle outlive the command
+  });
+}
+
+function readStdin(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    process.stdin.on('data', (chunk: Buffer) => chunks.push(chunk));
+    process.stdin.once('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    process.stdin.once('error', reject);
+  });
+}
+
+// A line read from the terminal with nothing echoed (the enrollment code); ^C abandons it.
+function hiddenPrompt(question: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const stdin = process.stdin;
+    let value = '';
+    const finish = (then: () => void) => {
+      stdin.off('data', onData);
+      stdin.setRawMode(false);
+      stdin.pause();
+      process.stderr.write('\n');
+      then();
+    };
+    const onData = (chunk: string) => {
+      for (const char of chunk) {
+        if (char === '\r' || char === '\n' || char === '\u0004') return finish(() => resolve(value));
+        if (char === '\u0003') return finish(() => reject(new Error('the enrollment was abandoned')));
+        value = char === '\u007f' || char === '\b' ? value.slice(0, -1) : value + char;
+      }
+    };
+    process.stderr.write(question);
+    stdin.setRawMode(true);
+    stdin.setEncoding('utf8');
+    stdin.on('data', onData);
+    stdin.resume();
+  });
 }
 
 main(process.argv.slice(2));

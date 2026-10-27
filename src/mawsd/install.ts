@@ -1,0 +1,177 @@
+// `mawsd install` and `uninstall` (P5 O2 M6; docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M6 "The units",
+// "install --delegation-id", "The wrapper"): the unit for any profile under any label, the LaunchAgent on macOS and the
+// systemd user unit on Linux (units/), with its runners, home and paths injected, so a test drives fakes in a scratch
+// home and the app (M7) and the Linux package (M8) call the same code with their own program.
+//
+// An install, in order: the delegation id checked; the profile's `mawsd/` directory made private (a symlink, another
+// owner or a wider mode refuses the install, writing no unit); with `--delegation-id`, the profile's machine ref minted
+// with the delegation's id as its prefix when it has none (before the unit's first start, so the daemon reads it); the
+// wrapper `<profile>/mawsd/bin/mawsd` and, for the default profile, its link `~/.local/bin/mawsd`; then the unit applied
+// (units/unit.ts's `apply`: written when changed, loaded, the daemon restarted when a loaded unit changed). Idempotent.
+// An uninstall unloads the unit (which ends `mawsd`; the hosts and their sessions keep running, and the next app
+// connects to the engine host in either shape), removes its file, the wrapper and the link if it is ours.
+//
+// The label: `dev.maws.mawsd` (systemd: `mawsd.service`) for the default profile; any other profile, and every test,
+// names its own, which the wrapper then carries for the commands run through it.
+import { lstatSync, mkdirSync, readlinkSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
+import { DAEMON_FILES } from '@shared/daemon/files';
+import { defaultProfileDir } from '@shared/daemon/profile';
+import { makePrivateDirectory } from '@shared/host/private-listen';
+import { readOrMintMachineRef } from '@shared/machine/identity-file';
+import type { MachineRef } from '@shared/machine/ref';
+import { launchdUnit } from './units/launchd';
+import { systemdUnit } from './units/systemd';
+import { DEFAULT_LABEL, UnitError, writeWhole, type Unit, type UnitChange, type UnitDeps, type UnitProgram, type UnitSpec } from './units/unit';
+
+export interface InstallDeps extends UnitDeps {
+  platform: NodeJS.Platform;
+}
+
+// The environment variable the wrapper names its profile's label in; read only for MAWS_USER_DATA's own profile.
+export const LABEL_ENV = 'MAWS_MAWSD_LABEL';
+const LABEL_FORMAT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const DELEGATION_ID = /^[0-9a-f]{32}$/; // a devcloud delegation's id (RL5; the remote layer's Decision Log 25)
+
+// The unit manager for `label` on this platform; not available (code 2) where there is neither.
+export function unitFor(label: string, deps: InstallDeps): Unit {
+  if (deps.platform === 'darwin') return launchdUnit(label, deps);
+  if (deps.platform === 'linux') return systemdUnit(label, deps);
+  throw new UnitError(`mawsd has no unit manager on ${deps.platform}`, 2);
+}
+
+// Whether `profileDir` is the platform's default profile, by real path (either may not exist yet).
+export function isDefaultProfile(profileDir: string, platform: NodeJS.Platform, env: NodeJS.ProcessEnv, home: string): boolean {
+  return real(profileDir) === real(defaultProfileDir(platform, env, home));
+}
+
+export interface LabelQuery {
+  profileDir: string;
+  profileFrom: 'flag' | 'env' | 'default'; // how the profile was named: --profile, MAWS_USER_DATA, or the platform's default
+  labelFlag?: string;
+  env: NodeJS.ProcessEnv;
+  platform: NodeJS.Platform;
+  home: string;
+}
+
+// The label the profile's unit goes by: `--label`; else the wrapper's MAWS_MAWSD_LABEL when the profile is MAWS_USER_DATA's;
+// else the default label for the default profile; else none (a profile that names no unit, as a private daemon's).
+export function resolveLabel(query: LabelQuery): string | null {
+  const named = query.labelFlag ?? (query.profileFrom === 'env' ? query.env[LABEL_ENV] || undefined : undefined);
+  if (named !== undefined) {
+    if (!LABEL_FORMAT.test(named)) throw new UnitError(`a unit label is letters, digits, dots, dashes and underscores; refusing ${JSON.stringify(named)}`);
+    return named;
+  }
+  return isDefaultProfile(query.profileDir, query.platform, query.env, query.home) ? DEFAULT_LABEL : null;
+}
+
+export const wrapperPath = (profileDir: string): string => join(profileDir, DAEMON_FILES.dir, DAEMON_FILES.bin, 'mawsd');
+
+const sh = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
+
+// The command line for one profile: the unit's program, with the profile and its label. ELECTRON_RUN_AS_NODE makes the
+// app binary Node on a Mac and is inert under a plain Node.
+export function wrapperText({ label, profileDir, program }: UnitSpec): string {
+  return [
+    '#!/bin/sh',
+    `# mawsd's command line for the profile ${profileDir.replace(/\n/g, ' ')}, written by \`mawsd install\``,
+    `export MAWS_USER_DATA=${sh(profileDir)}`,
+    `export ${LABEL_ENV}=${sh(label)}`,
+    'export ELECTRON_RUN_AS_NODE=1',
+    `exec ${sh(program.runtime)} --disable-sigusr1 ${sh(program.entry)} "$@"`,
+    '',
+  ].join('\n');
+}
+
+export interface InstallOptions {
+  profileDir: string;
+  label: string;
+  program: UnitProgram;
+  delegationId?: string;
+}
+
+export interface InstallResult {
+  unit: Unit;
+  change: UnitChange;
+  wrapper: string;
+  linked: string | 'other' | null; // the link's path; 'other' when another mawsd is there; null when none is made
+  ref: MachineRef | null; // the ref, when --delegation-id asked for one
+}
+
+export async function installDaemon(options: InstallOptions, deps: InstallDeps): Promise<InstallResult> {
+  const { profileDir, label, program, delegationId } = options;
+  if (delegationId !== undefined && !DELEGATION_ID.test(delegationId)) throw new UnitError(`a delegation id is 32 lower-case hex digits; refusing ${JSON.stringify(delegationId)}`);
+  const unit = unitFor(label, deps);
+  const spec: UnitSpec = { label, profileDir, program };
+
+  mkdirSync(profileDir, { recursive: true, mode: 0o700 });
+  makePrivateDirectory(join(profileDir, DAEMON_FILES.dir));
+  const ref = delegationId === undefined ? null : readOrMintMachineRef(profileDir, { prefix: delegationId });
+
+  const wrapper = wrapperPath(profileDir);
+  mkdirSync(dirname(wrapper), { recursive: true, mode: 0o700 });
+  writeWhole(wrapper, wrapperText(spec), 0o700);
+  const linked = isDefaultProfile(profileDir, deps.platform, deps.env, deps.home) ? link(join(deps.home, '.local', 'bin'), wrapper) : null;
+
+  const change = await unit.apply(unit.render(spec));
+  return { unit, change, wrapper, linked, ref };
+}
+
+export interface UninstallResult {
+  unit: Unit;
+  removed: boolean; // a unit was loaded or its file was there
+}
+
+export async function uninstallDaemon({ profileDir, label }: { profileDir: string; label: string }, deps: InstallDeps): Promise<UninstallResult> {
+  const unit = unitFor(label, deps);
+  const removed = await unit.remove();
+  const wrapper = wrapperPath(profileDir);
+  const linkPath = join(deps.home, '.local', 'bin', 'mawsd');
+  if (linkTarget(linkPath) === wrapper) rmSync(linkPath, { force: true });
+  rmSync(wrapper, { force: true });
+  return { unit, removed };
+}
+
+// `<bin>/mawsd` → the wrapper, when `bin` exists and holds no other `mawsd`.
+function link(bin: string, wrapper: string): string | 'other' | null {
+  try {
+    if (!lstatSync(bin).isDirectory()) return null;
+  } catch {
+    return null;
+  }
+  const path = join(bin, 'mawsd');
+  const target = linkTarget(path);
+  if (target === wrapper) return path;
+  if (target !== null || exists(path)) return 'other';
+  symlinkSync(wrapper, path);
+  return path;
+}
+
+function linkTarget(path: string): string | null {
+  try {
+    return lstatSync(path).isSymbolicLink() ? readlinkSync(path) : null;
+  } catch {
+    return null;
+  }
+}
+
+function exists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// The real path of `path`, or of its nearest existing ancestor with the rest appended (so `/var/…` and `/private/var/…`
+// compare equal on a Mac whether or not the profile exists yet).
+function real(path: string): string {
+  const absolute = resolve(path);
+  try {
+    return realpathSync(absolute);
+  } catch {
+    const parent = dirname(absolute);
+    return parent === absolute ? absolute : join(real(parent), basename(absolute));
+  }
+}
