@@ -425,6 +425,10 @@ OP_HORIZON = KEPT_S - 3600
   Rationale: each fills a silence in M2 or RL4 in the direction of "an id runs at most once and always has one answer".
   Date/Author: 2026-10-26, M2's executor, accepted by O12's executor (desk-sminos-orchestrator).
 
+- Decision: M3's sminos side is cut from M1's branch (`p5-o12-m3` at `72e67f77`) while M1's review finishes, rather than from `main` after M1 lands, and merges `main` in once M1 does. Its MAWS marker landed first, as MAWS PR #194 (`0de73723e`, P5 Decision Log 26).
+  Rationale: M3 consumes only M1's reader and controller writer, whose shape the review rounds don't move; most of M3 is the bridge mod, which M1 doesn't touch.
+  Date/Author: 2026-10-27, O12's executor (desk-sminos-orchestrator).
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
