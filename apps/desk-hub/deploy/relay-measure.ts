@@ -2,9 +2,9 @@
 // org state by the test device (org-admin.ts), its endpoint (M6's fake endpoint, echoing) holds RL1, and the reference
 // client's Machine socket (M7) opens channels to it through the Machine DO. Every frame is synthetic and RL2-sized
 // (rl1.ts): the hub cannot tell it from a sealed one. It reports
-// - a channel's opening, app → DO → endpoint and the DO's answer back, p50 and p95;
+// - a channel's opening, app → DO → endpoint and the DO's answer back, p50, p95 and p99;
 // - a sealed frame's round trip, app → Machine DO → endpoint → back, one in flight, at 1 KiB and 64 KiB of plaintext,
-//   p50 and p95;
+//   p50, p95 and p99;
 // - sustained throughput of 256 KiB frames, a few in flight, each echo checked byte for byte;
 // and the tailnet verdict P5 asks of it: past 150 ms of p95 round trip for a 1 KiB frame (a delta's size), O10 makes the
 // direct tailnet carrier the default where reachable; at or under it, the hub stays the default and the tailnet the
@@ -29,7 +29,7 @@ export const KIB = 1024;
 /** P5's line for the tailnet verdict: the relay's p95 round trip for a delta-sized frame, from the owner's MacBook. */
 export const VERDICT_P95_MS = 150;
 
-export type Spread = { samples: number; p50: number; p95: number; min: number; max: number };
+export type Spread = { samples: number; p50: number; p95: number; p99: number; min: number; max: number };
 export type RoundTrip = Spread & { plaintext: number; sealed: number };
 export type Throughput = { plaintext: number; sealed: number; window: number; frames: number; seconds: number; framesPerSecond: number; mibPerSecond: number };
 export type Measured = { opens: Spread; roundTrips: RoundTrip[]; throughput: Throughput };
@@ -43,7 +43,7 @@ export function percentile(values: number[], p: number): number {
 }
 
 export function spread(values: number[]): Spread {
-  return { samples: values.length, p50: percentile(values, 50), p95: percentile(values, 95), min: Math.min(...values), max: Math.max(...values) };
+  return { samples: values.length, p50: percentile(values, 50), p95: percentile(values, 95), p99: percentile(values, 99), min: Math.min(...values), max: Math.max(...values) };
 }
 
 /** The tailnet verdict for a measured 1 KiB p95 round trip. */
@@ -122,7 +122,7 @@ async function throughput(app: RelayApp, channel: number, plaintext: number, sec
 export async function measure(app: RelayApp, options: MeasureOptions, log: (line: string) => void): Promise<Measured> {
   const ms = (n: number) => n.toFixed(1);
   const opened = await opens(app, Math.min(20, options.samples));
-  log(`channel open: ${opened.samples} opens, p50 ${ms(opened.p50)} ms, p95 ${ms(opened.p95)} ms (min ${ms(opened.min)}, max ${ms(opened.max)})`);
+  log(`channel open: ${opened.samples} opens, p50 ${ms(opened.p50)} ms, p95 ${ms(opened.p95)} ms, p99 ${ms(opened.p99)} ms (min ${ms(opened.min)}, max ${ms(opened.max)})`);
   const channel = await openedChannel(app);
   const trips: RoundTrip[] = [];
   let seq = 0;
@@ -133,7 +133,7 @@ export async function measure(app: RelayApp, options: MeasureOptions, log: (line
     const trip = await roundTrips(app, channel, plaintext, samples, seq);
     seq += samples + WARMUP;
     trips.push(trip);
-    log(`round trip, ${plaintext / KIB} KiB frames (${trip.sealed} B sealed): ${trip.samples} samples, p50 ${ms(trip.p50)} ms, p95 ${ms(trip.p95)} ms (min ${ms(trip.min)}, max ${ms(trip.max)})`);
+    log(`round trip, ${plaintext / KIB} KiB frames (${trip.sealed} B sealed): ${trip.samples} samples, p50 ${ms(trip.p50)} ms, p95 ${ms(trip.p95)} ms, p99 ${ms(trip.p99)} ms (min ${ms(trip.min)}, max ${ms(trip.max)})`);
   }
   const through = await throughput(app, channel, 256 * KIB, options.seconds, options.window, seq);
   log(
