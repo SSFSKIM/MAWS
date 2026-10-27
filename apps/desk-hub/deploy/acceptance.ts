@@ -1,6 +1,8 @@
 // `deployment acceptance`: O11's acceptance items that no other command proves (O11 M8), run against a deployment by the
 // test device as the org's admin (org-admin.ts), each check one line a person can read and the whole re-runnable:
-//   2  a provisioning key re-issued as a delegation enrolls a VM whose certificate the hub serves beside the state;
+//   2  a successor off the head refused `not-head` and an older one `rollback`; a member added, and their second device
+//      admitted only endorsed by their first and root-signed; a provisioning key re-issued as a delegation enrolls a
+//      VM whose certificate the hub serves beside the state;
 //   3  1 000 frames of 1 B to 256 KiB cross a channel byte-identical and in order, and a message over 1 MiB is refused;
 //   4  v2-only, dual-coded and v1 events are stored; a bad signature, or a key the state does not list for the writer,
 //      is refused `bad-signature`; a byte-identical resend is a duplicate and a re-signed one a `conflict` — from the
@@ -25,7 +27,7 @@ import type { SignedOrgState } from 'org-protocol';
 import { readDeployConfig } from './config';
 import { deployArgs, readSecrets } from './deploy';
 import { Person } from './hub';
-import { connection, delegation, events, frames, lingering, push, Report, type Context, type Fixture } from './acceptance-items';
+import { connection, delegation, events, frames, lingering, members, push, Report, type Context, type Fixture } from './acceptance-items';
 import { loadAdminDevice, OrgAdmin, type AdminDevice, type OrgScope } from './org-admin';
 import { Cleanup, testOrgArg } from './proof';
 import { httpPushSink, type PushSink } from './push-sink';
@@ -54,11 +56,14 @@ async function fixture(ctx: Context): Promise<Fixture> {
  */
 export async function acceptance(person: Person, scope: OrgScope, device: AdminDevice, options: AcceptanceOptions, cleanup: Cleanup, print: (line: string) => void = console.log): Promise<{ report: Report; made: Context['made'] }> {
   const report = new Report(print);
-  const made: Context['made'] = { machines: [], delegations: [], provisioningKeys: [] };
+  const made: Context['made'] = { machines: [], delegations: [], provisioningKeys: [], members: [] };
   const admin = await OrgAdmin.open(person, scope, device, print);
   const ctx: Context = { person, admin, cleanup, report, tag: Math.random().toString(36).slice(2, 7), made };
   print(`acceptance: ${person.hub}, org ${admin.org} at head version ${admin.head.state.version}, device ${device.id} of ${admin.member}; items ${options.items.join(', ')}`);
-  if (options.items.includes('2')) await delegation(ctx);
+  if (options.items.includes('2')) {
+    await members(ctx);
+    await delegation(ctx);
+  }
   const rest = options.items.filter((item) => item !== '2');
   if (rest.length === 0) return { report, made };
   let shared: Fixture | undefined;
@@ -138,7 +143,7 @@ export async function main(argv: string[]): Promise<number> {
   if (made) {
     const left = await afterCleanup(person, made).catch((error: unknown) => [`the check after cleanup failed: ${error instanceof Error ? error.message : String(error)}`]);
     for (const line of left) console.log(`LEFT ${line}`);
-    if (left.length === 0) console.log('cleanup: the head lists none of the run’s machines or delegations, the hub holds none of its machines, and its provisioning key is revoked');
+    if (left.length === 0) console.log('cleanup: the head lists none of the run’s members, machines or delegations, the hub holds none of its machines, and its provisioning key is revoked');
     if (left.length) code = 1;
   }
   console.log(`acceptance: ${code === 0 && failed.length === 0 ? 'PASS' : 'FAIL'}`);

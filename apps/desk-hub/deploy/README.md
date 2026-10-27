@@ -225,8 +225,11 @@ so they wait it out.
   checked byte for byte; then the tailnet verdict (over 150 ms of p95 at 1 KiB, the direct tailnet carrier becomes
   O10's default).
 - `acceptance`: O11's acceptance items 2 (delegation), 3, 4, 5 and 6 (`--items`, default all), one line per check:
-  - 2: a provisioning key re-issued as a delegation; a VM `m8-vm-<tag>-1` redeems it and posts its certificate, which
-    `GET /api/org/state` serves and which verifies against the head;
+  - 2: a successor off the head refused `not-head` and the genesis posted again `rollback`; a member
+    `o11-m8-<tag>@staging.invalid` added with a device b1, and a second device b2 refused unendorsed
+    (`endorsement-missing`) and endorsed but signed by the member's devices alone (`not-root-signed`), then admitted
+    endorsed by b1 and admin-signed; a provisioning key re-issued as a delegation, a VM `m8-vm-<tag>-1` redeeming it and
+    posting its certificate, which `GET /api/org/state` serves and which verifies against the head;
   - 3: `--frames` (default 1 000) frames of 1 B to 256 KiB through a channel to the machine `m8-ep-<tag>`, byte-identical
     and in order, then a message over 1 MiB closing the socket 1009;
   - 4: in a project the machine opens, its v2-only, dual-coded and v1 events stored; a broken signature and a key the
@@ -240,7 +243,7 @@ so they wait it out.
   - 6: the reference client's run (`org-protocol` `referenceCheck`) with the device's channel key, the project and the
     machine.
 
-  Its cleanup posts the successors that take the machine and the delegation out (the delegation's key revoked: its id
+  Its cleanup posts the successors that take the member out (their device keys revoked), the machine and the delegation out (the delegation's key revoked: its id
   and prefix stay reserved for good, RL DL 26), retires the VM's certificate, revokes both machines and the provisioning
   key and deletes the push subscription; it then reads the head and the hub's lists back and prints `LEFT …` for
   anything of its own still current. What outlives a run, by design: the state's new versions, the machines' names in

@@ -2,7 +2,24 @@
 // Acceptance), each the parts of its item no other command proves. Every check is one report line; what an item makes
 // is undone through the run's cleanup (acceptance.ts).
 import { randomUUID } from 'node:crypto';
-import { canonicalize, generateSigningKey, keyId, signEvent, verifyMachineCert, type Listing, type MachineCert, type OrgState, type Signed, type SigningKey } from 'org-protocol';
+import {
+  canonicalize,
+  endorseDevice,
+  generateSigningKey,
+  keyId,
+  signEvent,
+  signOrgState,
+  stateHash,
+  verifyMachineCert,
+  type Device,
+  type Listing,
+  type MachineCert,
+  type OrgState,
+  type RevokedKey,
+  type Signed,
+  type SignedOrgState,
+  type SigningKey,
+} from 'org-protocol';
 import { deviceHuman, echoCheck, echoPayloads, HubClient, referenceCheck, RelayApp, type DeviceHuman, type ProjectSocket } from 'org-protocol/test-support';
 import type { FakeEndpoint } from '../fake-machine/endpoint';
 import { enrollDelegated, listing, retirement, type DelegationKey, type V2Machine } from '../fake-machine/org';
@@ -10,7 +27,7 @@ import { importOrgKey, seal } from '../src/protocol/codes';
 import { delegationFor, type OrgStateView, type ProvisioningKeyIssued, type ProvisioningKeys } from '../src/protocol/identity';
 import type { LogEvent } from '../src/protocol/log';
 import type { Person } from './hub';
-import { ADMIT_MS, type OrgAdmin } from './org-admin';
+import { ADMIT_MS, successor, type OrgAdmin } from './org-admin';
 import { revoke, type Cleanup } from './proof';
 import { readPush, userAgent, type PushSink } from './push-sink';
 
@@ -51,7 +68,7 @@ export type Context = {
   report: Report;
   tag: string;
   /** Names, delegations and provisioning keys the run made, for the check after cleanup. */
-  made: { machines: string[]; delegations: string[]; provisioningKeys: string[] };
+  made: { machines: string[]; delegations: string[]; provisioningKeys: string[]; members: string[] };
 };
 
 /** The listed machine items 3–6 share: its endpoint holds RL1 and has opened `project`. */
@@ -67,6 +84,74 @@ async function until<T>(probe: () => T | undefined | Promise<T | undefined>, wha
     if (Date.now() > deadline) throw new Error(`no ${what} within ${ms} ms`);
     await sleep(100);
   }
+}
+
+// ---- acceptance 2: a successor off the head refused, a member added, a second device admitted only endorsed and root-signed ----
+
+/** A device of the test member, made for this run: its channel and step-up keys. */
+async function memberDevice(id: string): Promise<{ device: Device; stepUp: SigningKey }> {
+  const channel = await generateSigningKey();
+  const stepUp = await generateSigningKey();
+  return { stepUp, device: { id, class: 'native-mac', keyStorage: 'software', channelPub: channel.pub, stepUpPub: stepUp.pub } };
+}
+
+export async function members(ctx: Context): Promise<void> {
+  const { person, admin, cleanup, report, tag } = ctx;
+  const item = '2';
+  const post = async (signed: SignedOrgState) => {
+    const response = await person.fetch('/api/org/state', { body: signed });
+    return `${response.status} ${((await response.json().catch(() => ({}))) as { error?: string }).error ?? ''}`.trim();
+  };
+  await report.check(item, 'a successor off the head, and an older version', async () => {
+    const head = await admin.read();
+    const off = await successor(head.state, () => {});
+    off.prev = await stateHash({ ...head.state, issued: '2000-01-01T00:00:00.000Z' });
+    const forked = await post(await signOrgState(off, [admin.device.stepUp]));
+    if (head.state.version < 2) throw new Error(`the head is the genesis: no older version to post (${forked} for the fork)`);
+    const first = (await person.json<{ chain: SignedOrgState[] }>('/api/org/state?since=0')).chain[0];
+    const older = await post(first);
+    if (forked !== '409 not-head' || older !== '409 rollback') throw new Error(`answered ${forked} and ${older}`);
+    return `a successor whose prev is not the head's hash: ${forked}; the genesis posted again over version ${head.state.version}: ${older}`;
+  });
+  const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+  const email = `o11-m8-${tag}@staging.invalid`;
+  const b1 = await memberDevice('b1');
+  const b2 = await memberDevice('b2');
+  ctx.made.members.push(id);
+  await report.check(item, 'a member added', async () => {
+    // Undone by a successor that removes them, every device key of theirs revoked.
+    cleanup.add(`remove the member ${id}`, async () => {
+      const keys = new Map<string, RevokedKey[]>([
+        ['b1', await revokedKeys(id, b1.device)],
+        ['b2', await revokedKeys(id, b2.device)],
+      ]);
+      await admin.amend(`the member ${email} removed, their devices' keys revoked`, (s) => {
+        const member = s.members.find((m) => m.id === id);
+        if (!member) return false;
+        s.members = s.members.filter((m) => m.id !== id);
+        for (const d of member.devices) s.revoked.push(...(keys.get(d.id) ?? []));
+      });
+    });
+    const at = await admin.amend(`the member ${email} added`, (s) => void s.members.push({ id, email, role: 'member', devices: [b1.device] }));
+    return `${email} (${id}) added with device b1 at version ${at!.state.version}`;
+  });
+  await report.check(item, 'a second device', async () => {
+    const head = await admin.read();
+    const withDevice = (device: Device) => successor(head.state, (s) => void s.members.find((m) => m.id === id)!.devices.push(device));
+    const unendorsed = await post(await signOrgState(await withDevice(b2.device), [admin.device.stepUp]));
+    const endorsed = { ...b2.device, endorsement: await endorseDevice(admin.org, id, b2.device, b1.stepUp.privateKey, b1.stepUp.pub) };
+    const memberOnly = await post(await signOrgState(await withDevice(endorsed), [b1.stepUp, b2.stepUp]));
+    if (unendorsed !== '409 endorsement-missing' || memberOnly !== '409 not-root-signed') throw new Error(`answered ${unendorsed} and ${memberOnly}`);
+    const at = await admin.amend(`b2 endorsed by b1, admin-signed`, (s) => void s.members.find((m) => m.id === id)!.devices.push(endorsed));
+    return `b2 unendorsed, admin-signed: ${unendorsed}; endorsed by b1 but signed by the member's devices only: ${memberOnly}; endorsed and admin-signed: accepted at version ${at!.state.version}`;
+  });
+}
+
+/** A device's keys as `revoked` entries, for the step that removes it (RL DL 24: a key leaving enters `retired` or
+ * `revoked`; a test member's are revoked, as for a lost device). */
+async function revokedKeys(member: string, d: Device): Promise<RevokedKey[]> {
+  const keys: Array<['channel' | 'step-up', string]> = [['channel', d.channelPub], ...(d.stepUpPub ? [['step-up', d.stepUpPub] as ['step-up', string]] : [])];
+  return Promise.all(keys.map(async ([key, pub]) => ({ keyId: await keyId(pub), holder: { member, device: d.id, class: d.class, key } })));
 }
 
 // ---- acceptance 2: a provisioning key re-issued as a delegation enrolls a VM whose certificate the hub serves ----
@@ -337,6 +422,7 @@ export async function connection(ctx: Context, fixture: Fixture, device: { id: s
 /** The state's view of what a run made, after its cleanup: nothing of it still current. */
 export function lingering(state: OrgState, made: Context['made']): string[] {
   return [
+    ...state.members.filter((m) => made.members.includes(m.id)).map((m) => `the state still lists the member ${m.email}`),
     ...state.machines.filter((m) => made.machines.includes(m.name)).map((m) => `the state still lists ${m.name}`),
     ...state.delegations.filter((d) => made.delegations.includes(d.id)).map((d) => `the state still holds the delegation ${d.id}`),
   ];

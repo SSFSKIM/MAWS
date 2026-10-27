@@ -13,7 +13,7 @@ import { Cleanup } from '../../deploy/proof.ts';
 import type { PushSink } from '../../deploy/push-sink.ts';
 import { ADMIN, ORG, startLocalHub, type LocalHub } from '../support/local';
 import { adminKeysFile, LocalPerson } from '../support/local-person';
-import { genesis, signedBy } from '../support/org';
+import { genesis, next, signedBy } from '../support/org';
 
 process.env.DESK_HUB_APP ??= join(import.meta.dirname, '../..');
 const STAGING = join(import.meta.dirname, '../../deploy/staging.json');
@@ -39,6 +39,8 @@ beforeAll(async () => {
   const head = await signedBy(await genesis(ORG, A, ADMIN, testDevice, device.recovery), testDevice);
   await person.json('/api/org/state', { body: head }, 201);
   pinned = await stateHash(head.state);
+  // As staging's chain, past its genesis: so an older version can be posted.
+  await person.json('/api/org/state', { body: await signedBy(await next(head), testDevice) }, 201);
 });
 afterAll(() => hub?.close());
 
@@ -53,7 +55,7 @@ describe('acceptance', () => {
     const failed = report.lines.filter((l) => l.status !== 'pass');
     expect(failed).toEqual([]);
     const checks = (item: string) => report.lines.filter((l) => l.item === item).map((l) => l.check);
-    expect(checks('2')).toEqual(['re-issued as a delegation', 'a delegated VM enrolls', 'the certificate is served beside the state']);
+    expect(checks('2')).toEqual(['a successor off the head, and an older version', 'a member added', 'a second device', 're-issued as a delegation', 'a delegated VM enrolls', 'the certificate is served beside the state']);
     expect(checks('3')).toEqual(['frames', 'over 1 MiB']);
     expect(checks('4')).toHaveLength(9);
     expect(checks('5')).toEqual(['a subscription bound to the device', 'the owner’s session reaches the owner’s device', 'another member’s session reaches none of the owner’s devices']);
@@ -73,6 +75,8 @@ describe('acceptance', () => {
     expect(after.version).toBeGreaterThan(before);
     expect(after.machines).toEqual([]);
     expect(after.delegations).toEqual([]);
+    expect(after.members.map((m) => m.email)).toEqual([ADMIN]);
+    expect(after.revoked.filter((r) => 'member' in r.holder && r.holder.member === made.members[0])).toHaveLength(4);
     const delegationKid = after.revoked.find((r) => 'delegation' in r.holder && r.holder.delegation === made.delegations[0]);
     expect(delegationKid?.holder).toEqual({ delegation: made.delegations[0], prefix: expect.stringMatching(/^m8-vm-[a-z0-9]+-$/) });
     const machine = during.machines[0];
