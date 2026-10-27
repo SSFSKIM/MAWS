@@ -1,6 +1,6 @@
 # 기계 쪽 세션 holder 설계 (MAWS·웹 세션의 프로세스를 쥐는 구조)
 
-2026-10-24 판. 설계 문서다. 구현을 승인한 것이 아니다. MAWS #52의 연구 결과
+2026-10-26 판. 설계 문서다. 구현을 승인한 것이 아니다. MAWS #52의 연구 결과
 [web-maws-remote-research.ko.md](web-maws-remote-research.ko.md)
 §3.2, §3.7 위에 선다.
 
@@ -10,6 +10,10 @@
 - 2026-10-23: 웹 터미널 창을 뺐다(F5, F6).
 - 2026-10-24: PTY holder를 뺐다(F7). 터미널에서 띄운 세션은 holder 밖에서 plain으로 돌고 bridge mod로만 제어한다.
   이 문서는 이제 MAWS 앱이나 웹에서 연 `claude -p` 세션만 다룬다. 이전 판 전체는 PR #79의 커밋 8a9f24261에 있다.
+- 2026-10-26: 두 가지를 고쳤다.
+  - **Query의 자리.** Query는 MAWS 데몬이 아니라 engine host 안에 있다. MAWS architect가 코드로 확인했다(오늘의 E10 Session, `src/shared/engine/initialize.ts:13`). 기계 데몬(mawsd)은 engine host의 유일한 클라이언트다.
+  - **Claude Desktop 3.6556.2의 helper 변경.** 미룬 interrupt의 영속, 첫 시작의 session id, 확인된 입양, 보류 입력의 한 번 시작을 반영했다([desktop-ssh-helper-3.6556.md](desktop-ssh-helper-3.6556.md)).
+  - 원격 계층 전체(endpoint, 채널, 신원)는 MAWS PR #183의 `docs/doperpowers/specs/2026-10-26-remote-layer-design.md`가 정한다.
 
 사실의 근거가 되는 측정 노트(Claude Code 2.1.304–2.1.308):
 - [desktop-ssh-helper-protocol.md](desktop-ssh-helper-protocol.md): claude-ssh의 전송·재입양 계약(이 설계의 기준)
@@ -24,15 +28,15 @@
 - **경로 A.** 사람이 터미널에서 띄운 세션과 엔진의 `--bg` 세션이다. 프로세스는 사람의 터미널이나 엔진 supervisor가
   쥐고, 웹은 세션 안의 bridge mod로 제어한다. holder는 관여하지 않는다. 제어 폭은 mod API가 한도이고, 그 폭을
   넓히는 일은 이 문서 밖에서 한다(§3.4).
-- **경로 B.** MAWS 앱이나 웹에서 연 세션이다. `claude -p` stream-json으로 띄우고, holder가 프로세스를 쥐고, MAWS 데몬의
+- **경로 B.** MAWS 앱이나 웹에서 연 세션이다. `claude -p` stream-json으로 띄우고, holder가 프로세스를 쥐고, engine host의
   Query가 제어한다. **이 문서의 대상이다.**
 
 **장면 (경로 B).** 사람이 폰의 웹에서 MacBook의 MAWS 세션을 연다. 세션은 MAWS의 기능을 모두 쓴다. 폰이 잠들거나,
-hub가 배포로 재시작하거나, MAWS 데몬이 업데이트로 재시작해도 claude 프로세스와 그 백그라운드 셸·서브에이전트·
+hub가 배포로 재시작하거나, mawsd나 engine host가 업데이트로 재시작해도 claude 프로세스와 그 백그라운드 셸·서브에이전트·
 Monitor·MCP 작업은 끊기지 않는다. 다시 열면 놓친 출력을 받고 그대로 이어 쓴다.
 
 **조건.**
-- claude 프로세스는 MAWS 데몬보다 오래 산다. Query 재시작은 프로세스 재시작이 아니다.
+- claude 프로세스는 Query보다 오래 산다. Query는 engine host에 있고, session host가 프로세스를 쥐므로 engine host 재시작은 프로세스 재시작이 아니다. mawsd 재시작은 Query도 건드리지 않는다.
 - 출력은 놓치지 않고, 입력은 정확히 한 번 적용한다. 대기 중인 권한·dialog는 Query가 다시 붙을 때 다시 받는다.
 - 클라이언트가 없어도 일이 남아 있는 세션은 끝내지 않는다.
 
@@ -67,12 +71,12 @@ Monitor·MCP 작업은 끊기지 않는다. 다시 열면 놓친 출력을 받�
   claude TUI (경로 A, holder 밖)                     │
      └ bridge mod ────────────┐                     hub (중계만, 믿지 않음)
                               ▼                      │
-                         sminos 데몬 ────────────────┘  (uplink, 신뢰 경계, plane)
-                              ▲
-                              │ X1 이벤트 (경로 B)
-                         MAWS 데몬 ── Query (쓰는 쪽 하나, 출력 checkpoint, request ledger)
-                              │ stdin offset ↓ · 출력 seq ↑
-                         session host (세션마다 하나) ◀── holder manager (roster 재입양, 수명)
+                         mawsd (endpoint 모듈: uplink, 신뢰 경계, 채널) ─┘
+                              ▲            └ sminos 데몬 (로컬: 로그, 전달, 경로 A plane)
+                              │ X1 이벤트 (경로 B), mawsd는 engine host의 유일한 클라이언트
+                         engine host ── Query · maws tool server (쓰는 쪽 하나, 출력 checkpoint, request ledger)
+                              │ stdin offset ↓ · 출력 seq ↑     └ holder manager (roster 재입양, 수명)
+                         session host (세션마다 하나)
                               │ stdin·stdout pipe
                          claude -p stream-json (안에 관찰 전용 bridge mod)
 ```
@@ -87,7 +91,7 @@ Monitor·MCP 작업은 끊기지 않는다. 다시 열면 놓친 출력을 받�
 host가 죽으면 pipe가 닫혀 세션이 끝난다. 그래서 host는 가능한 한 작게 두고, 바뀌는 정책은 manager로 보낸다.
 수명·인증·fence의 집행은 host에 남긴다. claude-ssh 데몬의 프로세스 객체를 세션마다 떼어 낸 모양이다.
 
-- **쥐는 것.** claude의 stdin·stdout·stderr pipe. MAWS 데몬이 준 launch descriptor(argv, cwd, env)로 시작한다.
+- **쥐는 것.** claude의 stdin·stdout·stderr pipe. engine host가 준 launch descriptor(argv, cwd, env)로 시작한다.
 - **식별자.** `holderId`는 holder 자리의 안정된 id다. `processEpoch`는 claude 자식을 띄울 때마다 새로 만들고 그 프로세스
   동안 바꾸지 않는다. `engineSessionId`는 현재 대화의 id이고, `bindingGeneration`은 채널 결합을 바꿀 때 증가시킨다.
   `hello`와 roster가 네 필드를 모두 싣는다. `/clear`, `/branch`, resume는 프로세스를 바꾸지 않고 `engineSessionId`를 바꾼다
@@ -158,15 +162,27 @@ host가 죽으면 pipe가 닫혀 세션이 끝난다. 그래서 host는 가능�
   데몬과 함께 launchd·systemd unit으로 돈다. 세션마다의 host binary도 MAWS가 함께 배포한다. E10 프로토콜에서 지킬 것과
   더할 것은 연구 문서 §3.4를 따른다.
 
-### 3.3 MAWS 데몬의 Query
+### 3.3 engine host의 Query
 
-- **자리.** Query는 브라우저가 아니라 기계의 MAWS 데몬에 둔다. Desktop SSH 모드에서 Desktop 앱이 하던 역할을 같은
-  기계의 MAWS 데몬이 맡고, 브라우저는 그 바깥의 클라이언트다. claude.ai는 브라우저가 Query를 직접 돌리지만
+- **자리.** Query는 클라이언트 앱이 아니라 세션이 도는 기계의 engine host에 둔다(지금 MAWS 코드도 그렇다: E10 Session).
+  Desktop SSH 모드에서 Desktop 앱이 하던 역할을 같은 기계의 engine host가 맡는다. mawsd는 그 engine host의 유일한 클라이언트이고,
+  앱은 그 바깥의 클라이언트다. claude.ai는 브라우저가 Query를 직접 돌리지만
   ([claude.ai 클라이언트](claude-ai-rc-client-protocol.md#L33)) 우리는 그렇게 하지 않는다.
   - MAWS 소유 일(in-process MCP, hook callback)이 Query와 같은 프로세스에 산다.
   - Query는 엔진의 질문에 답하는 쓰는 쪽 하나라 잠드는 탭이나 여러 탭 중 하나에 둘 수 없다.
   - hub는 믿지 않는 중계라 SDK stdio를 통째로 지나게 하지 않는다(F5).
 - **쓰는 쪽 하나.** host의 writer fence로 옛 Query의 쓰기를 거절한다. Query 재시작은 processEpoch를 바꾸지 않는다.
+- **확인된 입양과 붙어 있음은 다르다** (Desktop 3.6556.2). 재입양한 프로세스는 Query가 다시 `initialize`하고, hook, 권한 모드, 대기 요청
+  확인을 마친 뒤에야 "확인됨"으로 친다. 그 전에는 붙어 있어도 제어나 공유를 열지 않는다.
+- **미룬 interrupt는 영속한다** (Desktop 3.6556.2의 `stopOwedAt`). 사람이 보낸 interrupt를 돌고 있는 세션에 넘길 때 owed 표시를
+  영속으로 남긴다. 그 표시는 interrupt가 끝났거나, 관련 stdin 쓰기가 모두 받아들여진 것(`stdinApplied`)을 확인한 뒤에야 지운다.
+  owed 표시가 있는 세션은 그냥 재입양해 일을 잇지 않는다. 재입양할 때 interrupt부터 전달하거나, 정리 대상으로만 다룬다.
+- **첫 시작의 session id를 먼저 정한다** (Desktop 3.6556.2의 `namedCliSessionId`). spawn할 때 `--session-id`를 골라 roster에 적는다.
+  claude가 id를 알리기 전에 Query가 죽어도 그 프로세스를 다시 찾을 수 있다.
+- **보류 입력은 한 번만 시작한다** (Desktop 3.6556.2). 프로세스가 없는데 사람의 입력이 보류돼 있으면 세션을 한 번만 자동으로 다시 연다.
+  그 한 번이 실패하면 사람의 다시 시도나 다음 입력을 기다린다. 끝없이 다시 시작하지 않는다.
+- **`--await-initialize` 후보.** Desktop은 관리되는 launcher로 시작할 때 이 인자를 붙이고, 첫 stdin 쓰기 뒤에 `keep_alive` 한 줄을 보낸다.
+  2.1.310에도 이 인자가 있다. Query의 `initialize` 전에 claude가 턴을 시작하지 않게 하는 데 쓸 수 있는지는 잰다(§9).
 - **재입양.** claude-ssh의 전송·adoption 계약을 가져온다
   ([출력 checkpoint·stdin offset](desktop-ssh-helper-protocol.md#L183)–225,
   [대기 요청·gap 복구](desktop-ssh-helper-protocol.md#L299)–346).
@@ -176,7 +192,8 @@ host가 죽으면 pipe가 닫혀 세션이 끝난다. 그래서 host는 가능�
     다시 읽어 reseed한다.
   - 다시 `initialize`하면 엔진이 대기 중인 권한·dialog 요청을 다시 보낸다. replay와 겹치는 것은 request id로 중복을 없앤다.
   - host의 ring은 durable Query checkpoint가 아니다. ring만 남아 있다고 Query의 소비 위치와 응답 이력이 복원되지는 않는다.
-- **살아남는 일의 경계.** CLI가 소유한 일은 MAWS 데몬 재시작을 견딘다. MAWS가 소유한 일은 그대로 살아남지 않는다.
+- **살아남는 일의 경계.** CLI가 소유한 일은 engine host 재시작을 견딘다. MAWS가 소유한 일(engine host 안의 tool server와 hook)은 그대로 살아남지 않는다.
+  mawsd 재시작은 둘 다 건드리지 않는다.
   - in-process MCP tool call은 MAWS의 메모리에 있다
     ([server.ts의 calls](/Users/new/Developer/GitHub/MAWS/src/engine-host/tool-server/server.ts#L77),
     [dispatch와 완료](/Users/new/Developer/GitHub/MAWS/src/engine-host/tool-server/server.ts#L164)–187).
@@ -186,8 +203,8 @@ host가 죽으면 pipe가 닫혀 세션이 끝난다. 그래서 host는 가능�
     timeout만으로 강제 중단을 허용하지 않는다.
   - 갑작스러운 재시작 뒤 orphan request에는 "결과 불명; 이미 완료됐을 수 있다"고 답한다. 보통의 재시도 가능한 오류로
     돌려 side effect를 중복 실행하게 하지 않는다.
-- **plane 생산.** Query가 받은 이벤트를 X1으로 바꿔 sminos 데몬의 plane에 넣는다. 서브에이전트 토큰 델타는 SDK wire에
-  없으므로 세션 안 관찰 전용 bridge의 `turn.step` 조각을 받아 같은 seq에 넣는다. 한 세션의 seq는 MAWS 데몬 하나만
+- **plane 생산.** Query가 받은 이벤트를 X1으로 바꿔 경로 B의 plane을 만들고, mawsd의 endpoint 모듈이 구독자마다 봉인해 내보낸다. 서브에이전트 토큰 델타는 SDK wire에
+  없으므로 세션 안 관찰 전용 bridge의 `turn.step` 조각을 받아 같은 seq에 넣는다. 한 세션의 seq는 engine host 하나만
   매긴다(연구 문서 §3.7).
 
 ### 3.4 bridge mod
@@ -196,8 +213,8 @@ host가 죽으면 pipe가 닫혀 세션이 끝난다. 그래서 host는 가능�
   덮어쓰기, `$.command.run`으로 slash 명령을 다룬다. 이 폭을 최대한 넓히는 것이 F7의 일이다. 무엇이 닿고 무엇이 닿지 않는지와
   닿지 않는 것을 메울 길은 [mod-control-surface.md](mod-control-surface.md)에
   정리했다(2.1.309, 코드 읽기).
-- **경로 B에서는 관찰만 한다.** MAWS 데몬이 spawn할 때 env 표시를 두고, 그 표시가 있으면 bridge는 제어를 거절하거나
-  MAWS 데몬으로 넘긴다. 서브에이전트 델타를 MAWS 데몬에 주고, 정리 fence의 `turn.step` 문을 집행한다(§3.2).
+- **경로 B에서는 관찰만 한다.** engine host가 spawn할 때 env 표시를 두고, 그 표시가 있으면 bridge는 제어를 거절하거나
+  engine host로 넘긴다(새 일이다. 지금 `bridge.tsx`에는 그 표시가 없다). 서브에이전트 델타를 engine host에 주고, 정리 fence의 `turn.step` 문을 집행한다(§3.2).
 
 ### 3.5 웹
 
@@ -216,16 +233,17 @@ host가 죽으면 pipe가 닫혀 세션이 끝난다. 그래서 host는 가능�
 
 - **경로 A.** claude 안의 bridge mod → bridge child → sminos 데몬 plane → hub → 웹. 웹의 동작은 봉인된 명령으로
   hub → sminos 데몬(봉인 검증) → bridge mod다.
-- **경로 B 출력.** claude -p stdout → host(seq ring) → MAWS 데몬 Query(checkpoint) → X1 이벤트 → sminos 데몬 plane → hub → 웹.
-- **경로 B 입력.** 웹의 봉인된 명령 → hub → sminos 데몬(봉인 검증) → MAWS 데몬 → Query → host(writer fence, stdin offset)
-  → claude -p stdin.
+- **경로 B 출력.** claude -p stdout → session host(seq ring) → engine host Query(checkpoint) → X1 이벤트 → mawsd endpoint 모듈(구독자마다 봉인) → 채널(hub 중계 또는 tailnet 직접) → 앱.
+- **경로 B 입력.** 앱의 동작(RL4) → 채널 → mawsd endpoint 모듈(검증, 등급, 신선도) → engine host Query(opId 원장, 맥락 재확인)
+  → session host(writer fence, stdin offset) → claude -p stdin.
 - cursor의 맥락은 `(holderId, processEpoch, engineSessionId, bindingGeneration)`이고 그 안에 seq를 둔다.
 
 ## 5. 고장과 회복
 
 | 일 | 결과 | 대응 |
 |---|---|---|
-| MAWS 데몬이 죽음 | claude와 CLI 일은 유지. MAWS의 in-flight call은 잃음 | Query 재입양(checkpoint, stdinApplied rebase, 대기 요청 재전달)과 ledger 복구. orphan은 결과 불명으로 답함 |
+| mawsd가 죽음 | Query, tool server, claude, CLI 일 모두 유지 | 채널과 engine host 클라이언트 연결만 끊긴다. 다시 붙고 cursor로 이어 간다 |
+| engine host가 죽음 | claude와 CLI 일은 유지(session host가 쥔다). MAWS의 in-flight call은 잃음 | Query 재입양(checkpoint, stdinApplied rebase, 대기 요청 재전달, owed interrupt 먼저)과 ledger 복구. orphan은 결과 불명으로 답함 |
 | manager가 죽음 | 세션·Query 연결·fence 기록은 host에 남음 | roster로 재입양하고 기존 fence를 읽음 |
 | host가 죽음 | pipe가 닫혀 claude가 끝남 | ended로 표시하고 resume 제안. 끊긴 턴 재개 변수는 자동 설정하지 않음 |
 | claude가 죽음 | host의 waitpid가 종료를 확인함 | 마지막 출력을 남기고 ended. 웹에서 resume 제안 |
@@ -279,8 +297,8 @@ host가 죽으면 pipe가 닫혀 세션이 끝난다. 그래서 host는 가능�
 
 ## 8. 검증 계획 (구현할 때)
 
-1. **Query 재입양.** input 전 checkpoint commit, stdinApplied rebase, 줄 경계, 대기 요청 중복 제거, gap reseed를 검사한다.
-   MAWS 데몬을 SIGKILL한 뒤 다시 띄워도 claude의 백그라운드 셸·서브에이전트·Monitor가 그대로 돌고, 놓친 출력을 받는다.
+1. **Query 재입양.** input 전 checkpoint commit, stdinApplied rebase, 줄 경계, 대기 요청 중복 제거, gap reseed, owed interrupt를 검사한다.
+   engine host를 SIGKILL한 뒤 다시 띄워도 claude의 백그라운드 셸·서브에이전트·Monitor가 그대로 돌고, 놓친 출력을 받는다.
 2. **writer fence.** 옛 Query와 새 Query가 동시에 쓰면 옛 쪽이 거절된다. 재결합 뒤 옛 명령도 거절된다.
 3. **ledger.** MAWS 재시작 중 tool 효과가 이미 실행됐어도 orphan 응답이 보통의 재시도를 유도하지 않는다.
 4. **manager.** SIGKILL해도 Query 연결과 host의 fence·input offset은 유지되고, 다시 뜬 manager가 이를 초기화하지 않는다.
@@ -300,6 +318,9 @@ host가 죽으면 pipe가 닫혀 세션이 끝난다. 그래서 host는 가능�
 - **경로 A의 mod 제어 표면.** 목록과 메울 길은 [mod-control-surface.md](mod-control-surface.md)에 있다.
   그 노트 §7의 spike(plan 나가기와 모드 전환, compaction으로 잘라 내기, 합성 Read로 미디어 넣기, model 확인 경로,
   elicitation 계약, panel 없는 설정·사용량·MCP 읽기)가 남은 일이다.
+- **`--await-initialize`.** 2.1.310 reprint에 이 인자가 있다([L580881](/Users/new/claude-code-bundle/2.1.310/cli.pretty.js#L580881)). `initialize` 전에 턴이 시작되는 것을 막는지는 잰다(§3.3).
+- **session host 소켓 경로 길이.** Desktop의 새 helper는 긴 Unix socket 경로를 위해 descriptor와 디렉터리 상대 경로로 붙는다.
+  우리 경로를 짧게 두거나 같은 대비를 한다.
 - **Linux scope와 lingering.** user transient scope가 logind session cgroup과 분리되고, KillUserProcesses와 로그아웃에서
   의도대로 살아남는가.
 - **macOS TCC.** 데몬 아래 claude의 파일 접근 권한이 어느 앱에 귀속되는가(Desktop처럼 MAWS 앱인가).
