@@ -4,13 +4,13 @@
 // witness, so what it serves is trusted only as far as the operator's own anchors carry it: the genesis hash the
 // deployment's config pins (`orgGenesis`), and the checkpoint of the last head a run accepted, kept beside the
 // operator's state (here in a temporary directory), which each run must extend.
-import { mkdtempSync, rmSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { generateSigningKey, stateHash, type OrgState, type SignedOrgState } from 'org-protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { accessSync, readCheckpoint, readVerifiedState, type HubRead } from '../deploy/access-sync';
-import { accessPlan, reconcileAccess } from '../deploy/access';
+import { accessSync, readCheckpoint, readVerifiedState, writeCheckpoint, type HubRead } from '../deploy/access-sync';
+import { accessPlan, reconcileAccess, type CfApi } from '../deploy/access';
 import type { DeployConfig } from '../deploy/config';
 import { enroll, type Credentials } from './support/clients';
 import { fakeAccessApi } from './support/access-api';
@@ -44,15 +44,31 @@ const rewritten =
     change(page);
     return Response.json(page);
   };
-/** Runs access-sync against a fresh fake Access API holding the policy a deploy made; the API's calls (and its writes
- * alone), and the run's outcome: its result, or its error. */
-async function run(read: HubRead, deployment: DeployConfig = anchored) {
+/** Runs access-sync against a fresh fake Access API holding the policy a deploy made (seen by the run through `fault`,
+ * if given); the API's calls (and its writes alone), and the run's outcome: its result, or its error. */
+async function run(read: HubRead, deployment: DeployConfig = anchored, { file = checkpointFile, fault }: { file?: string; fault?: (api: CfApi) => CfApi } = {}) {
   const access = fakeAccessApi();
   await reconcileAccess(access.api, accessPlan({ name: config.worker, host: config.host, ownerEmail: ADMIN, sessionDuration: '24h' }));
   access.calls.length = 0;
-  const outcome = await accessSync({ read, api: access.api, checkpointFile }, deployment).catch((error: unknown) => error as Error);
+  const api = fault ? fault(access.api) : access.api;
+  const outcome = await accessSync({ read, api, checkpointFile: file }, deployment).catch((error: unknown) => error as Error);
   return { outcome, writes: access.calls.filter((c) => !c.startsWith('GET')), calls: access.calls };
 }
+/** An Access API whose answer to a matching call is lost: the call is made (a write commits), then it throws. */
+const losing =
+  (method: string, path: RegExp) =>
+  (api: CfApi): CfApi => ({
+    async request<T>(m: string, p: string, body?: unknown): Promise<T> {
+      const answer = await api.request<T>(m, p, body);
+      if (m === method && path.test(p)) throw new Error(`${m} ${p}: the connection dropped`);
+      return answer;
+    },
+  });
+/** The chain served as it was one version back: an authentic older prefix as the head. */
+const prefix = rewritten((page) => {
+  page.chain = page.chain.slice(0, -1);
+  page.head = page.chain.at(-1) ?? null;
+});
 const failure = (outcome: unknown) => (outcome instanceof Error ? outcome.message : `no error: ${JSON.stringify(outcome)}`);
 
 beforeAll(async () => {
@@ -110,10 +126,6 @@ describe('access-sync', () => {
   });
 
   it('writes nothing for an authentic older prefix served as the head, nor for no state at all, once checkpointed past it', async () => {
-    const prefix = rewritten((page) => {
-      page.chain = page.chain.slice(0, -1);
-      page.head = page.chain.at(-1) ?? null;
-    });
     const older = await run(prefix);
     expect(failure(older.outcome)).toMatch(/checkpoint/);
     expect(older.writes).toEqual([]);
@@ -138,5 +150,60 @@ describe('access-sync', () => {
     const { outcome, writes } = await run(asMachine, { ...anchored, org: { id: 'another-org', name: 'Other' } });
     expect(failure(outcome)).toMatch(/checkpoint .* another-org|another-org .* checkpoint|org/);
     expect(writes).toEqual([]);
+  });
+
+  it('moves the checkpoint before it touches Access, so a run whose Access answer is lost still refuses the older head next', async () => {
+    for (const fault of [losing('PUT', /^\/access\/policies\/./), losing('GET', /^\/access\/policies\/./)]) {
+      await accept(await next(head, (s) => s.projects.push({ id: `lost-${head.state.version}`, name: 'Lost' })));
+      const lost = await run(asMachine, anchored, { fault });
+      expect(failure(lost.outcome)).toMatch(/connection dropped/);
+      // Access took the head's list; whatever it answered, no older state is accepted after it.
+      expect(lost.writes).toEqual([expect.stringMatching(/^PUT /)]);
+      expect(readCheckpoint(checkpointFile)).toEqual({ org: ORG, version: head.state.version, hash: await stateHash(head.state) });
+      const older = await run(prefix);
+      expect(failure(older.outcome)).toMatch(/behind the checkpoint/);
+      expect(older.writes).toEqual([]);
+    }
+  });
+
+  it('touches no Access at all when it cannot move the checkpoint', async () => {
+    const elsewhere = join(dir, 'unwritable');
+    mkdirSync(elsewhere);
+    const file = join(elsewhere, `${config.worker}.json`);
+    cpSync(checkpointFile, file);
+    // The checkpoint's new copy cannot be made: its path is a directory.
+    mkdirSync(`${file}.tmp`);
+    await accept(await next(head, (s) => s.projects.push({ id: 'unwritten', name: 'Unwritten' })));
+    const { outcome, calls } = await run(asMachine, anchored, { file });
+    expect(failure(outcome)).toMatch(/EISDIR|EPERM|illegal operation/);
+    expect(calls).toEqual([]);
+    expect(readFileSync(file, 'utf8')).toBe(readFileSync(checkpointFile, 'utf8'));
+  });
+
+  it('refuses a run that overlaps another, with no Access call, and the other carries the checkpoint and the policy to the head', async () => {
+    let release!: () => void, reading!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const started = new Promise<void>((resolve) => (reading = resolve));
+    // The first run's reads wait, as a slow one's would, while the operator retries.
+    const slow = run(async (path) => (reading(), await held, asMachine(path)));
+    await started;
+    const retry = await run(asMachine);
+    expect(failure(retry.outcome)).toMatch(/another run holds/);
+    expect(retry.calls).toEqual([]);
+    release();
+    expect((await slow).outcome).toMatchObject({ readBack: ['owner-new@example.com'] });
+    expect(readCheckpoint(checkpointFile)).toMatchObject({ version: head.state.version });
+    expect((await run(asMachine)).outcome).toMatchObject({ readBack: ['owner-new@example.com'] });
+  });
+
+  it('writes nothing if the checkpoint moved while it ran, as when its lock was removed by hand under it', async () => {
+    const file = join(dir, 'moved', `${config.worker}.json`);
+    mkdirSync(dirname(file));
+    cpSync(checkpointFile, file);
+    const moved = { ...readCheckpoint(file)!, hash: 'another-run' };
+    const { outcome, calls } = await run(async (path) => (writeCheckpoint(file, moved), asMachine(path)), anchored, { file });
+    expect(failure(outcome)).toMatch(/moved during this run/);
+    expect(calls).toEqual([]);
+    expect(readCheckpoint(file)).toEqual(moved);
   });
 });

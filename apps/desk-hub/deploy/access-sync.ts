@@ -15,9 +15,10 @@
 //     authentic older prefix served as the head (a removed member restored) is refused, and so is "no state" once the
 //     org is set up.
 // The chain is read from its genesis and verified step by step with the protocol package, and only its head's emails
-// are used. It then upserts the policy by name, reads it back through the Access API, prints what Access now admits,
-// and moves the checkpoint to the head. The config's host must be its Worker's before anything is read or written. On
-// production this is an Access change, which waits for the owner.
+// are used. It then moves the checkpoint to the head, before Access is touched, upserts the policy by name, reads it
+// back through the Access API and prints what Access now admits; the whole run holds a lock beside the checkpoint, so
+// two runs never overlap. The config's host must be its Worker's before anything is read or written. On production
+// this is an Access change, which waits for the owner.
 //
 // Credentials as NAME=value lines on stdin (deploy.ts, readSecrets): CF_ACCESS_SETUP_TOKEN (Access: policies edit), and
 // DESK_MACHINE_CLIENT_ID with DESK_MACHINE_CLIENT_SECRET, the service token of a machine enrolled in the org.
@@ -30,6 +31,7 @@ import { MACHINE_ORG_STATE_PATH, type OrgStateView } from '../src/protocol/ident
 import { cfApi, peoplePolicy, upsert, type CfApi } from './access';
 import { checkTarget, readDeployConfig, type DeployConfig } from './config';
 import { readSecrets } from './deploy';
+import { withRunLock } from './run-lock';
 
 /** The emails Access is to admit: the head's members', lowercased and sorted; the owner alone before any state. */
 export function admittedEmails(config: DeployConfig, view: OrgStateView): string[] {
@@ -138,18 +140,29 @@ export async function syncAccess(api: CfApi, config: DeployConfig, view: OrgStat
 /** What a run reaches: the hub (as a machine), the Access API, and the deployment's checkpoint file. */
 export type SyncIo = { read: HubRead; api: CfApi; checkpointFile: string };
 
+const sameCheckpoint = (a: Checkpoint | null, b: Checkpoint | null) => a === b || (a !== null && b !== null && a.org === b.org && a.version === b.version && a.hash === b.hash);
+
 /**
- * One run: the target checked, the chain read and verified against the pinned genesis and the checkpoint, the policy
- * made the head's emails and read back, and, once Access reads back what was written, the checkpoint moved to the head.
- * Nothing is written to Access unless the chain is accepted.
+ * One run, holding the checkpoint's lock (`<checkpoint>.lock`, run-lock.ts) throughout, so runs never overlap: the target
+ * checked, the chain read and verified against the pinned genesis and the checkpoint, the checkpoint moved to the head,
+ * then the policy made the head's emails and read back. The checkpoint moves first: once Access may hold the head's
+ * list, no older state is accepted, whether Access's answer, its read-back or the run is lost after the write. A run
+ * that cannot move it writes nothing to Access, nor does one whose chain is refused.
  */
 export async function accessSync(io: SyncIo, config: DeployConfig): Promise<{ policy: string; emails: string[]; readBack: string[]; view: OrgStateView }> {
   checkTarget(config, 'change Access');
-  const { view, checkpoint } = await readVerifiedState(io.read, config, readCheckpoint(io.checkpointFile));
-  const synced = await syncAccess(io.api, config, view);
-  if (synced.readBack.join('\n') !== synced.emails.join('\n')) throw new Error(`Access read back ${synced.readBack.join(', ')}, not ${synced.emails.join(', ')}`);
-  if (checkpoint !== null) writeCheckpoint(io.checkpointFile, checkpoint);
-  return { ...synced, view };
+  return withRunLock(`${io.checkpointFile}.lock`, async () => {
+    const held = readCheckpoint(io.checkpointFile);
+    const { view, checkpoint } = await readVerifiedState(io.read, config, held);
+    if (checkpoint !== null) {
+      // Under the lock no other run moves it; read again in case the lock was removed by hand under a slow run.
+      if (!sameCheckpoint(readCheckpoint(io.checkpointFile), held)) throw new Error(`${io.checkpointFile} moved during this run: another run went at once; run again`);
+      writeCheckpoint(io.checkpointFile, checkpoint);
+    }
+    const synced = await syncAccess(io.api, config, view);
+    if (synced.readBack.join('\n') !== synced.emails.join('\n')) throw new Error(`Access read back ${synced.readBack.join(', ')}, not ${synced.emails.join(', ')}`);
+    return { ...synced, view };
+  });
 }
 
 export async function main(argv: string[]): Promise<number> {

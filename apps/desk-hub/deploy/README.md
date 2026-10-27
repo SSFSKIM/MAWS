@@ -145,8 +145,15 @@ operator holds:
   `~/.local/state/desk-hub/<worker>.json` (`DESK_HUB_STATE_DIR` moves the
   directory). Each run's chain must hold that version under that hash, so an
   older state served as the head, or "no state" once the org is set up, is
-  refused. It moves to the new head once Access reads back what was written.
-  Delete it only on purpose, after checking the head another way. A member the state
+  refused. It moves to the new head before Access is touched, so a run whose
+  Access write lands but whose answer or read-back is lost still refuses the
+  older state next time; a run that cannot write it touches no Access. Delete
+  it only on purpose, after checking the head another way.
+- **A lock**, `<worker>.json.lock` beside the checkpoint, held for the whole
+  run, so two runs (a retry beside a slow run, in another terminal) never
+  overlap: the second is refused, naming the first's pid. A lock whose process
+  is gone from this host is taken over; one from another host, or one whose
+  process still runs, is the operator's to remove. A member the state
 admits, or an email it changes, reaches the hub only after this runs; one it
 removes is refused by the Registry at once, and by Access once this runs.
 
