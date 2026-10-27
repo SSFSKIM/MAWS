@@ -3,14 +3,17 @@
 // Machine socket drop, the endpoint comes back under a higher generation, a new channel echoes, and the leg says when
 // each dropped and how long each took; then the whole command, DX2's machines and browser beside the leg, passes across
 // the restart and undoes what it made.
+import { createServer } from 'node:net';
 import { type SignedOrgState } from 'org-protocol';
 import { RelayApp } from 'org-protocol/test-support';
+import { FakeEndpoint } from '../../fake-machine/endpoint.ts';
+import { credentialHeaders } from '../../fake-machine/link.ts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sleep, until } from '../../deploy/hub.ts';
 import { OrgAdmin, type AdminDevice } from '../../deploy/org-admin.ts';
 import { Cleanup } from '../../deploy/proof.ts';
 import { redeployCheck } from '../../deploy/redeploy-check.ts';
-import { Rl1Watch, type AppOpener } from '../../deploy/rl1-reconnect.ts';
+import { Rl1Watch, upgradeProbe, type AppOpener } from '../../deploy/rl1-reconnect.ts';
 import { ORG, startLocalHub, type LocalHub } from '../support/local';
 import { adminKeysFile, LocalPerson } from '../support/local-person';
 
@@ -55,6 +58,30 @@ describe('the RL1 leg', () => {
     expect(await cleanup.run()).toEqual([]);
     expect((await head()).machines).toEqual([]);
     expect(await machines()).not.toContain('rd-ep-local');
+  });
+});
+
+describe('a failing reconnect, diagnosed', () => {
+  it('gives up an upgrade the hub never answers, so the endpoint tries again', async () => {
+    const silent = createServer(() => {});
+    await new Promise<void>((resolve) => silent.listen(0, '127.0.0.1', () => resolve()));
+    const { port } = silent.address() as { port: number };
+    const endpoint = new FakeEndpoint({ hub: `http://127.0.0.1:${port}`, credentials: { clientId: 'x', clientSecret: 'y' }, ref: 'r'.repeat(22), openMs: 300 });
+    try {
+      await expect(endpoint.connect()).rejects.toThrow(/upgrade unanswered for 300 ms/);
+    } finally {
+      silent.close();
+    }
+  });
+
+  it('probes what the hub answers an endpoint’s upgrade: the socket for a listed machine, a refusal otherwise', async () => {
+    const cleanup = new Cleanup();
+    const admin = await OrgAdmin.open(person, { org: ORG, throwaway: true }, device, () => {});
+    const machine = await admin.listedMachine('rd-probe', cleanup);
+    expect(await upgradeProbe(hub.url, credentialHeaders(machine.credentials))).toBe('101');
+    expect(await upgradeProbe(hub.url, credentialHeaders({ clientId: 'nobody', clientSecret: 'nothing' }))).toMatch(/^40[13] /);
+    expect(await cleanup.run()).toEqual([]);
+    expect(await upgradeProbe(hub.url, credentialHeaders(machine.credentials))).toMatch(/^40[13] /);
   });
 });
 

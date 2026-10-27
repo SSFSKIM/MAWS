@@ -4,7 +4,12 @@
 // endpoint (reconnecting, as O10's will) and an app socket with a channel proved by an echo, watches both across the
 // redeploy, reopens the app's socket and a channel as an app would, and says when each dropped and how long each took
 // to come back.
+import { randomBytes } from 'node:crypto';
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { RelayApp } from 'org-protocol/test-support';
+import { credentialHeaders } from '../fake-machine/link';
+import { MACHINE_SOCKET_PATH } from '../src/protocol/machine';
 import type { FakeEndpoint } from '../fake-machine/endpoint';
 import type { V2Machine } from '../fake-machine/org';
 import { settledWithin, STOP_WAIT_MS, type Person } from './hub';
@@ -20,6 +25,47 @@ export type AppOpener = (hub: string, machine: string, headers: Record<string, s
 /** One end of a socket, or its coming back, at a time since the epoch. */
 type Seen = { at: number; code?: number; reason?: string; generation?: number };
 
+/**
+ * What the hub answers an RL1 upgrade with `headers` now: `101` (the socket, closed at once), the status and the error
+ * the answer names (Access's page as `access`), `unanswered` after `ms`, or the request's own error. A diagnostic of
+ * a failing reconnect: a 101 installs a connection for a moment, so it is asked only while the endpoint is down.
+ */
+export function upgradeProbe(hub: string, headers: Record<string, string>, ms = 15_000): Promise<string> {
+  const url = new URL(MACHINE_SOCKET_PATH, hub);
+  const send = url.protocol === 'https:' ? httpsRequest : httpRequest;
+  const req = send(url, { headers: { ...headers, Connection: 'Upgrade', Upgrade: 'websocket', 'Sec-WebSocket-Version': '13', 'Sec-WebSocket-Key': randomBytes(16).toString('base64') } });
+  return new Promise<string>((resolve) => {
+    const timer = setTimeout(() => {
+      req.destroy();
+      resolve('unanswered');
+    }, ms);
+    req.on('upgrade', (_response, socket) => {
+      clearTimeout(timer);
+      socket.destroy();
+      resolve('101');
+    });
+    req.on('response', (response) => {
+      let body = '';
+      response.on('data', (chunk: Buffer) => (body += chunk.toString()));
+      response.on('end', () => {
+        clearTimeout(timer);
+        let error: string;
+        try {
+          error = String((JSON.parse(body) as { error?: unknown }).error);
+        } catch {
+          error = /Cloudflare Access/i.test(body) ? 'access' : `non-JSON (${body.length} B)`;
+        }
+        resolve(`${response.statusCode} ${error}`);
+      });
+    });
+    req.on('error', (e) => {
+      clearTimeout(timer);
+      resolve(`error ${e.message}`);
+    });
+    req.end();
+  });
+}
+
 export class Rl1Watch {
   /** The endpoint's connections (`welcome`s) and ends, in order. */
   private readonly endpointUps: Seen[] = [];
@@ -27,6 +73,9 @@ export class Rl1Watch {
   /** The app's socket ends, and the moments a channel echoed again after each. */
   private readonly appDowns: Seen[] = [];
   private readonly appBacks: Seen[] = [];
+  /** The endpoint's failed reconnects, each with the hub's answer to a probe made beside it (at most one per 10 s). */
+  private readonly failures: Array<{ at: number; message: string; probe?: string }> = [];
+  private lastProbe = 0;
   private redeployAt: number | undefined;
   private generationBefore = 0;
   private stopped = false;
@@ -59,7 +108,14 @@ export class Rl1Watch {
   ): Promise<Rl1Watch> {
     const machine = await admin.listedMachine(name, cleanup);
     const seen: { watch?: Rl1Watch } = {};
-    const endpoint = echoingEndpoint(person.hub, machine, { reconnect: true, build: 'redeploy-check', log: () => seen.watch?.observe() });
+    const endpoint = echoingEndpoint(person.hub, machine, {
+      reconnect: true,
+      build: 'redeploy-check',
+      log: (line) => {
+        seen.watch?.observe();
+        if (line.startsWith('reconnect failed: ')) seen.watch?.failed(line.slice('reconnect failed: '.length));
+      },
+    });
     cleanup.add(`close ${name}'s endpoint`, async () => endpoint.close());
     await connectEndpoint(endpoint);
     const app = await openApp(person.hub, machine.ref, person.headers);
@@ -83,6 +139,15 @@ export class Rl1Watch {
       this.generationSeen = this.endpoint.generation;
       this.endpointUps.push({ at, generation: this.endpoint.generation });
     }
+  }
+
+  /** A failed reconnect of the endpoint, kept with a probe of what the hub answers an upgrade now. */
+  private failed(message: string): void {
+    const failure: { at: number; message: string; probe?: string } = { at: Date.now(), message: message.replace(/ at wss?:\/\/\S+/, '') };
+    this.failures.push(failure);
+    if (failure.at - this.lastProbe < 10_000 || this.endpoint.isOpen) return;
+    this.lastProbe = failure.at;
+    void upgradeProbe(this.person.hub, credentialHeaders(this.machine.credentials)).then((answer) => (failure.probe = answer));
   }
 
   /** One sealed frame through a new channel and back, byte-identical, within `ms`. */
@@ -172,6 +237,14 @@ export class Rl1Watch {
     for (const down of this.since(this.appDowns)) {
       const back = this.appBacks.find((b) => b.at >= down.at);
       lines.push(`rl1: the app's socket closed ${down.code} ${down.reason || '(no reason)'} at +${s(down.at - from)}; ` + (back ? `a new channel to the endpoint echoed ${s(back.at - down.at)} after` : 'no channel echoed again'));
+    }
+    const failures = this.since(this.failures as Seen[]) as unknown as typeof this.failures;
+    if (failures.length > 0) {
+      const counted = (values: string[]) => [...new Set(values)].map((v) => `${v} ×${values.filter((x) => x === v).length}`).join(', ');
+      lines.push(
+        `rl1: the endpoint's reconnects failed ${failures.length} time(s), from +${s(failures[0].at - from)} to +${s(failures.at(-1)!.at - from)}: ${counted(failures.map((f) => f.message))}; ` +
+          `the hub answered an upgrade beside them: ${counted(failures.flatMap((f) => (f.probe ? [f.probe] : []))) || 'no probe made'}`,
+      );
     }
     return lines.length > 0 ? lines : ['rl1: neither socket was cut'];
   }
