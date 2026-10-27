@@ -12,8 +12,9 @@ export class LocalPerson extends Person {
   constructor(
     hub: LocalHub,
     private readonly who: string = ADMIN,
+    gate?: () => void,
   ) {
-    super(hub.url, 'unused');
+    super(hub.url, 'unused', gate);
   }
 
   override get headers(): Record<string, string> {

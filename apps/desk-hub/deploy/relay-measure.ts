@@ -14,7 +14,8 @@
 // admin device whose step-up key signs the org state, read and never printed), --test-org <id> (a throwaway org
 // instead of the configuration's own, whose pinned genesis is otherwise required), --samples (round trips per size,
 // default 200), --seconds (the throughput run, default 10), --window (256 KiB frames in flight, default 4). However it
-// ends, the machine leaves the org state (its key retired) and is revoked, which deletes its service token.
+// ends, a SIGINT or SIGTERM included (proof.ts, interruptible), the machine leaves the org state (its key retired) and is
+// revoked, which deletes its service token.
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { RelayApp } from 'org-protocol/test-support';
@@ -22,7 +23,7 @@ import { readDeployConfig } from './config';
 import { deployArgs, readSecrets } from './deploy';
 import { Person } from './hub';
 import { loadAdminDevice, OrgAdmin, type AdminDevice, type OrgScope } from './org-admin';
-import { Cleanup, testOrgArg } from './proof';
+import { Cleanup, interruptible, isTestTarget, testOrgArg, type InterruptOptions } from './proof';
 import { connectEndpoint, EchoReader, echoingEndpoint, frameSeq, openedChannel, SEALED_OVERHEAD, sameBytes, sealedFrame } from './rl1';
 
 export const KIB = 1024;
@@ -56,9 +57,10 @@ export function tailnetVerdict(p95: number): string {
 const WARMUP = 5;
 
 /** `count` channel openings and closings on `app`, timed from the open sent to the hub's answer. */
-async function opens(app: RelayApp, count: number): Promise<Spread> {
+async function opens(app: RelayApp, count: number, signal?: AbortSignal): Promise<Spread> {
   const times: number[] = [];
   for (let i = 0; i < count; i++) {
+    signal?.throwIfAborted();
     const started = performance.now();
     const channel = await openedChannel(app);
     times.push(performance.now() - started);
@@ -68,11 +70,12 @@ async function opens(app: RelayApp, count: number): Promise<Spread> {
 }
 
 /** `count` round trips of one sealed frame of `plaintext` bytes on `channel`, one in flight, after a short warm-up. */
-async function roundTrips(app: RelayApp, channel: number, plaintext: number, count: number, first: number): Promise<RoundTrip> {
+async function roundTrips(app: RelayApp, channel: number, plaintext: number, count: number, first: number, signal?: AbortSignal): Promise<RoundTrip> {
   const reader = new EchoReader(app, channel);
   const times: number[] = [];
   try {
     for (let i = 0; i < count + WARMUP; i++) {
+      signal?.throwIfAborted();
       const frame = sealedFrame(plaintext, first + i);
       const started = performance.now();
       app.send(channel, frame);
@@ -88,7 +91,7 @@ async function roundTrips(app: RelayApp, channel: number, plaintext: number, cou
 }
 
 /** 256 KiB frames (or `plaintext`) sent for `seconds` with `window` in flight, each echo checked byte for byte. */
-async function throughput(app: RelayApp, channel: number, plaintext: number, seconds: number, window: number, first: number): Promise<Throughput> {
+async function throughput(app: RelayApp, channel: number, plaintext: number, seconds: number, window: number, first: number, signal?: AbortSignal): Promise<Throughput> {
   const reader = new EchoReader(app, channel);
   const inFlight = new Map<number, Uint8Array>();
   let next = first;
@@ -103,6 +106,7 @@ async function throughput(app: RelayApp, channel: number, plaintext: number, sec
   try {
     for (let i = 0; i < window; i++) send();
     while (inFlight.size > 0) {
+      signal?.throwIfAborted();
       const back = await reader.next(30_000);
       const seq = frameSeq(back);
       const sent = inFlight.get(seq);
@@ -118,10 +122,10 @@ async function throughput(app: RelayApp, channel: number, plaintext: number, sec
   return { plaintext, sealed: plaintext + SEALED_OVERHEAD, window, frames, seconds: elapsed, framesPerSecond: frames / elapsed, mibPerSecond: (frames * plaintext) / 2 ** 20 / elapsed };
 }
 
-/** The whole measurement on an app socket to an echoing endpoint, each part printed as it ends. */
-export async function measure(app: RelayApp, options: MeasureOptions, log: (line: string) => void): Promise<Measured> {
+/** The whole measurement on an app socket to an echoing endpoint, each part printed as it ends; `signal` stops it. */
+export async function measure(app: RelayApp, options: MeasureOptions, log: (line: string) => void, signal?: AbortSignal): Promise<Measured> {
   const ms = (n: number) => n.toFixed(1);
-  const opened = await opens(app, Math.min(20, options.samples));
+  const opened = await opens(app, Math.min(20, options.samples), signal);
   log(`channel open: ${opened.samples} opens, p50 ${ms(opened.p50)} ms, p95 ${ms(opened.p95)} ms, p99 ${ms(opened.p99)} ms (min ${ms(opened.min)}, max ${ms(opened.max)})`);
   const channel = await openedChannel(app);
   const trips: RoundTrip[] = [];
@@ -130,12 +134,12 @@ export async function measure(app: RelayApp, options: MeasureOptions, log: (line
     [KIB, options.samples],
     [64 * KIB, Math.max(20, Math.ceil(options.samples / 2))],
   ]) {
-    const trip = await roundTrips(app, channel, plaintext, samples, seq);
+    const trip = await roundTrips(app, channel, plaintext, samples, seq, signal);
     seq += samples + WARMUP;
     trips.push(trip);
     log(`round trip, ${plaintext / KIB} KiB frames (${trip.sealed} B sealed): ${trip.samples} samples, p50 ${ms(trip.p50)} ms, p95 ${ms(trip.p95)} ms, p99 ${ms(trip.p99)} ms (min ${ms(trip.min)}, max ${ms(trip.max)})`);
   }
-  const through = await throughput(app, channel, 256 * KIB, options.seconds, options.window, seq);
+  const through = await throughput(app, channel, 256 * KIB, options.seconds, options.window, seq, signal);
   log(
     `throughput, 256 KiB frames (${through.sealed} B sealed), ${through.window} in flight for ${through.seconds.toFixed(1)} s: ${through.frames} frames echoed byte-identical, ` +
       `${through.framesPerSecond.toFixed(1)} frames/s, ${through.mibPerSecond.toFixed(2)} MiB/s of plaintext each way`,
@@ -158,9 +162,33 @@ export async function relayMeasure(person: Person, scope: OrgScope, device: Admi
   const app = await RelayApp.open(person.hub, machine.ref, person.headers);
   cleanup.add('close the app socket', async () => app.close());
   log(`relay-measure: ${person.hub} (org ${admin.org}), machine ${name} (ref ${machine.ref}, generation ${welcome.generation}); app and endpoint both on ${hostname()}`);
-  const measured = await measure(app, options, log);
+  const measured = await measure(app, options, log, cleanup.signal);
   log(`tailnet verdict: ${tailnetVerdict(measured.roundTrips[0].p95)}`);
   return measured;
+}
+
+/**
+ * relayMeasure as the command runs it, under `interruptible`: its cleanup runs however the run ends, a signal included.
+ * The command's status. `person`'s requests should pass `cleanup.check`, so an interrupted run's stop.
+ */
+export function runRelayMeasure(
+  person: Person,
+  scope: OrgScope,
+  device: AdminDevice,
+  options: MeasureOptions,
+  cleanup: Cleanup,
+  log: (line: string) => void = console.log,
+  interrupt: InterruptOptions = {},
+): Promise<number> {
+  return interruptible(
+    cleanup,
+    async () => {
+      await relayMeasure(person, scope, device, options, cleanup, log);
+      return 0;
+    },
+    async (status) => ((await cleanup.run()).length ? 1 : status),
+    interrupt,
+  );
 }
 
 export async function main(argv: string[]): Promise<number> {
@@ -171,6 +199,7 @@ export async function main(argv: string[]): Promise<number> {
     seconds: { type: 'string', default: '10' },
     window: { type: 'string', default: '4' },
   });
+  if (!isTestTarget(config)) return 2;
   const options = { samples: Number(values.samples), seconds: Number(values.seconds), window: Number(values.window) };
   if (!Object.values(options).every((n) => Number.isSafeInteger(n) && n > 0)) {
     console.error('--samples, --seconds and --window are positive integers');
@@ -194,12 +223,5 @@ export async function main(argv: string[]): Promise<number> {
   }
   const device = await loadAdminDevice(values['device-keys'] as string);
   const cleanup = new Cleanup();
-  let code = 0;
-  try {
-    await relayMeasure(new Person(`https://${config.host}`, secrets.DESK_ACCESS_TOKEN), scope, device, options, cleanup);
-  } catch (error) {
-    console.error(`FAIL: ${error instanceof Error ? error.message : String(error)}`);
-    code = 1;
-  }
-  return (await cleanup.run()).length ? 1 : code;
+  return runRelayMeasure(new Person(`https://${config.host}`, secrets.DESK_ACCESS_TOKEN, () => cleanup.check()), scope, device, options, cleanup);
 }

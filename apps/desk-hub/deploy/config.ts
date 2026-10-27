@@ -35,6 +35,39 @@ export function checkTarget(config: DeployConfig, refusing: string): void {
   if (config.host.split('.')[0] !== config.worker) throw new Error(`the config's host ${config.host} is not the Worker ${config.worker}'s: refusing to ${refusing}`);
 }
 
+/** Production, by name: what no command that writes org state for a test may act on, whatever a configuration says. */
+export const PRODUCTION_WORKER = 'desk-hub';
+export const PRODUCTION_HOST = 'desk-hub.opencognita-platform.workers.dev';
+/** A staging Worker (`desk-hub-staging`, or a sibling named after it): the only Workers those commands may act on. */
+const STAGING_WORKER = /^desk-hub-staging(?:-[a-z0-9-]+)?$/;
+/** The suites' local hubs. */
+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]']);
+
+/**
+ * Throws unless `hub` (an origin, `https://<host>`) is one a test command may write org state to: a staging Worker's
+ * workers.dev host over https, or a local hub on loopback (the suites'). Production's host and Worker are refused by
+ * name first, so nothing a configuration says — its org, its pinned genesis, a `--test-org` — can lead such a command
+ * there.
+ */
+export function checkTestHub(hub: string, refusing: string): void {
+  const url = new URL(hub);
+  const worker = url.hostname.split('.')[0];
+  if (url.hostname === PRODUCTION_HOST || (worker === PRODUCTION_WORKER && url.hostname.endsWith('.workers.dev'))) {
+    throw new Error(`${url.origin} is production (the Worker ${PRODUCTION_WORKER}): refusing to ${refusing}`);
+  }
+  if (LOOPBACK.has(url.hostname)) return;
+  if (url.protocol !== 'https:' || !url.hostname.endsWith('.workers.dev') || !STAGING_WORKER.test(worker)) {
+    throw new Error(`${url.origin} is not a staging hub (https://desk-hub-staging….workers.dev): refusing to ${refusing}`);
+  }
+}
+
+/** `checkTestHub` for a configuration, whose Worker must also be a staging one and the one its host names. */
+export function checkTestTarget(config: DeployConfig, refusing: string): void {
+  if (config.worker === PRODUCTION_WORKER) throw new Error(`the config names production's Worker ${PRODUCTION_WORKER}: refusing to ${refusing}`);
+  checkTestHub(`https://${config.host}`, refusing);
+  checkTarget(config, refusing);
+}
+
 export function readDeployConfig(path: string): DeployConfig {
   return JSON.parse(readFileSync(path, 'utf8')) as DeployConfig;
 }

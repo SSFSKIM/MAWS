@@ -6,10 +6,11 @@
 //   - `relay-check` is the app's side: as a member (the Access token on stdin), it opens a channel through the hub to a
 //     running endpoint and checks that every frame comes back byte-identical and in order, then that a message over
 //     1 MiB is refused.
-import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, renameSync, writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { generateSigningKey, importSigningKey } from 'org-protocol';
 import { FakeEndpoint } from './endpoint';
+import { readJsonFile } from './json-file';
 import type { Credentials } from './link';
 import { enrollV2 } from './org';
 import { echoCheck, echoPayloads, RelayApp } from './relay-app';
@@ -59,7 +60,7 @@ export async function relayMain(command: 'enroll-v2' | 'endpoint' | 'relay-check
   }
   if (command === 'endpoint') {
     if (!values.state || !existsSync(values.state)) return usage();
-    const state = JSON.parse(readFileSync(values.state, 'utf8')) as V2State;
+    const state = readJsonFile<V2State>(values.state, "a v2 machine's state");
     await importSigningKey(state.key);
     const endpoint = new FakeEndpoint({ hub: state.hub, credentials: state.credentials, ref: state.ref, reconnect: true, log: (line) => console.log(`${new Date().toISOString()} ${state.machine} ${line}`) });
     const stop = () => {

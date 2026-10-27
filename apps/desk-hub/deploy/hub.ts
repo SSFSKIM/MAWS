@@ -14,13 +14,16 @@ export class Person {
   constructor(
     readonly hub: string,
     private readonly token: string,
+    /** Called before each request, which it refuses by throwing: an interrupted run's (proof.ts, `Cleanup.check`). */
+    private readonly gate: () => void = () => {},
   ) {}
 
   get headers(): Record<string, string> {
     return { 'cf-access-token': this.token };
   }
 
-  fetch(path: string, init: { method?: string; body?: unknown } = {}): Promise<Response> {
+  async fetch(path: string, init: { method?: string; body?: unknown } = {}): Promise<Response> {
+    this.gate();
     return fetch(`${this.hub}${path}`, {
       method: init.method ?? (init.body === undefined ? 'GET' : 'POST'),
       headers: { ...this.headers, ...(init.body === undefined ? {} : { 'content-type': 'application/json' }) },
@@ -42,7 +45,8 @@ export class Person {
   }
 
   /** A WebSocket with this person's Access session; resolves once it is open. */
-  socket(path: string): Promise<Socket> {
+  async socket(path: string): Promise<Socket> {
+    this.gate();
     return Socket.open(`${this.hub.replace(/^http/, 'ws')}${path}`, this.headers);
   }
 }
@@ -216,7 +220,7 @@ export async function until<T>(read: () => T | undefined, what: string, ms = 15_
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Waits for `promise` to settle, at most `ms`, leaving no timer behind. */
-async function settledWithin(promise: Promise<unknown>, ms: number): Promise<void> {
+export async function settledWithin(promise: Promise<unknown>, ms: number): Promise<void> {
   if (ms <= 0) return;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const settled = promise.then(

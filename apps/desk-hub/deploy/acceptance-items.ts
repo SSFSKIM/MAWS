@@ -36,15 +36,21 @@ export type Line = { item: string; check: string; status: 'pass' | 'fail' | 'ski
 
 export class Report {
   readonly lines: Line[] = [];
-  constructor(private readonly print: (line: string) => void) {}
+  constructor(
+    private readonly print: (line: string) => void,
+    /** An interrupted run's (`Cleanup.signal`): once it aborts, no further check starts, and the run unwinds. */
+    private readonly signal?: AbortSignal,
+  ) {}
 
   add(line: Line): void {
     this.lines.push(line);
     this.print(`${line.status.toUpperCase()} ${line.item} ${line.check}: ${line.detail}`);
   }
 
-  /** Runs one check: its detail when it passes, `{skip}` when it cannot run, its error when it fails. */
+  /** Runs one check: its detail when it passes, `{skip}` when it cannot run, its error when it fails. Once the run is
+   * interrupted it throws instead, starting nothing. */
   async check(item: string, check: string, run: () => Promise<string | { skip: string }>): Promise<boolean> {
+    this.signal?.throwIfAborted();
     try {
       const detail = await run();
       this.add(typeof detail === 'string' ? { item, check, status: 'pass', detail } : { item, check, status: 'skip', detail: detail.skip });

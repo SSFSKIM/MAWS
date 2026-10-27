@@ -12,12 +12,15 @@ import { credentialHeaders } from '../fake-machine/link';
 import { MACHINE_SOCKET_PATH } from '../src/protocol/machine';
 import type { FakeEndpoint } from '../fake-machine/endpoint';
 import type { V2Machine } from '../fake-machine/org';
-import type { Person } from './hub';
+import { settledWithin, STOP_WAIT_MS, type Person } from './hub';
 import type { OrgAdmin } from './org-admin';
 import type { Cleanup } from './proof';
 import { connectEndpoint, EchoReader, echoingEndpoint, openedChannel, sameBytes, sealedFrame } from './rl1';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Opens an app's Machine socket: `RelayApp.open`, or a suite's stand-in for it. */
+export type AppOpener = (hub: string, machine: string, headers: Record<string, string>) => Promise<RelayApp>;
 
 /** One end of a socket, or its coming back, at a time since the epoch. */
 type Seen = { at: number; code?: number; reason?: string; generation?: number };
@@ -76,6 +79,8 @@ export class Rl1Watch {
   private redeployAt: number | undefined;
   private generationBefore = 0;
   private stopped = false;
+  /** When the stops stop waiting for the follow loop (a reopen's upgrade can stall): set by the first. */
+  private abandonAt: number | undefined;
   private following: Promise<void> = Promise.resolve();
   private seq = 0;
   private endsSeen = 0;
@@ -86,13 +91,21 @@ export class Rl1Watch {
     private readonly person: Person,
     private readonly machine: V2Machine,
     private app: RelayApp,
+    private readonly openApp: AppOpener,
   ) {}
 
   /**
    * Lists `name` in the org state (its undoing on `cleanup`), connects its endpoint, opens the app's socket and proves a
    * channel with an echo; the app's socket is then followed until `stop`.
    */
-  static async start(person: Person, admin: OrgAdmin, name: string, cleanup: Cleanup, log: (line: string) => void = console.log): Promise<Rl1Watch> {
+  static async start(
+    person: Person,
+    admin: OrgAdmin,
+    name: string,
+    cleanup: Cleanup,
+    log: (line: string) => void = console.log,
+    openApp: AppOpener = (hub, machine, headers) => RelayApp.open(hub, machine, headers),
+  ): Promise<Rl1Watch> {
     const machine = await admin.listedMachine(name, cleanup);
     const seen: { watch?: Rl1Watch } = {};
     const endpoint = echoingEndpoint(person.hub, machine, {
@@ -105,8 +118,8 @@ export class Rl1Watch {
     });
     cleanup.add(`close ${name}'s endpoint`, async () => endpoint.close());
     await connectEndpoint(endpoint);
-    const app = await RelayApp.open(person.hub, machine.ref, person.headers);
-    const watch = new Rl1Watch(person, machine, app);
+    const app = await openApp(person.hub, machine.ref, person.headers);
+    const watch = new Rl1Watch(person, machine, app, openApp);
     watch.endpoint = endpoint;
     watch.observe();
     seen.watch = watch;
@@ -161,7 +174,12 @@ export class Rl1Watch {
       this.appDowns.push({ at: Date.now(), code: this.app.ended.code, reason: this.app.ended.reason });
       while (!this.stopped) {
         try {
-          if (this.app.ended) this.app = await RelayApp.open(this.person.hub, this.machine.ref, this.person.headers);
+          if (this.app.ended) {
+            const app = await this.openApp(this.person.hub, this.machine.ref, this.person.headers);
+            // Opened after a stop that no longer waited for it: nobody holds it but this loop.
+            if (this.stopped) return app.close();
+            this.app = app;
+          }
           await this.echo(this.app, 5000);
           this.appBacks.push({ at: Date.now() });
           break;
@@ -231,10 +249,15 @@ export class Rl1Watch {
     return lines.length > 0 ? lines : ['rl1: neither socket was cut'];
   }
 
-  /** Stops following and closes the app's socket. */
-  async stop(): Promise<void> {
+  /**
+   * Stops following and closes the app's socket. A reopen still in progress (its upgrade stalled, say) is waited for
+   * until `waitMs` after the first stop, and no longer by any later one, as `LogFollower.stop` does: past that, the
+   * stopped loop closes the socket when it opens.
+   */
+  async stop(waitMs = STOP_WAIT_MS): Promise<void> {
     this.stopped = true;
-    await this.following;
+    this.abandonAt ??= Date.now() + waitMs;
+    await settledWithin(this.following, this.abandonAt - Date.now());
     this.app.close();
   }
 }

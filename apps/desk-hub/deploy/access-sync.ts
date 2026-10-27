@@ -27,6 +27,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { canonicalize, stateHash, verifyGenesis, verifySuccessor, type SignedOrgState } from 'org-protocol';
+import { parseJsonFile } from '../fake-machine/json-file';
 import { MACHINE_ORG_STATE_PATH, type OrgStateView } from '../src/protocol/identity';
 import { cfApi, peoplePolicy, upsert, type CfApi } from './access';
 import { checkTarget, readDeployConfig, type DeployConfig } from './config';
@@ -58,7 +59,7 @@ export function readCheckpoint(file: string): Checkpoint | null {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw error;
   }
-  const c = JSON.parse(text) as Checkpoint;
+  const c = parseJsonFile<Checkpoint>(text, file, 'a checkpoint');
   if (typeof c.org !== 'string' || !Number.isSafeInteger(c.version) || c.version < 1 || typeof c.hash !== 'string') throw new Error(`${file} is not a checkpoint ({org, version, hash})`);
   return c;
 }
