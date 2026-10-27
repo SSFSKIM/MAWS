@@ -25,6 +25,10 @@
 //   field this build does not know passes through.
 // A detached pty host that crashed (its welcomed pid gone) takes its ptys with it, so the supervisor says `pty.exit` for
 // each, as the utility path does; a quiet loss (the pid lives, the link closed) says nothing, since the shells live on.
+//
+// P5 O2 M5: what `mawsd`'s relay reflects and takes back: the served welcome's facts (`welcome`), an exit-when-idle it
+// asked and takes back by command (`disarmExit`), the loss to another client told apart (`onReplaced`), and a document
+// channel's end with its reason (doc-relay.ts's `closedBy`).
 import { ipcError } from '../ipc/errors';
 import type { ClientRef } from '../ipc/client'; // P5 O1 M5
 import { HostToMainSchema, type HostDoc, type HostMessage, type HostResponse } from '../ipc/host-protocol';
@@ -36,7 +40,7 @@ import { readTolerant, tolerantLog } from '../ipc/tolerant'; // P5 O1 M6
 import { codecOf } from '../ipc/validate';
 import type { WirePeer } from '../ipc/wire'; // P5 O1 M6
 import { clientGoneRelay, type ClientGoneRelay } from './client-refs'; // P5 O1 M5
-import { createDetachedTransport, refusedOn, type DetachedEvents, type DetachedTransport, type DetachedTransportOptions, type ExitInfo, type HostLink } from './detached-transport'; // E10
+import { createDetachedTransport, refusedOn, type DetachedEvents, type DetachedTransport, type DetachedTransportOptions, type ExitInfo, type HostLink, type Welcomed } from './detached-transport'; // E10
 import { MainDocRelay, type RelayPort } from './doc-relay'; // P3-A M5
 import { DocumentsClosedSchema, SOCKET_PROTOCOL_V2, type ServerRefuse } from './socket-protocol'; // P3-A M5
 
@@ -92,6 +96,7 @@ export interface HostSupervisorOptions {
   userData(): string; // the profile's directory, read at each detached attempt
   packaged(): boolean;
   // P5 O2 M3 end
+  onReplaced?(owner: HostOwner): void; // P5 O2 M5: another client took a detached host (it is crashed for good)
 }
 
 // E10: what main pulls from a host between its connect and its `ready` line (X13: the host emits nothing before it).
@@ -177,6 +182,10 @@ export interface HostSupervisor {
   forward(owner: HostOwner, request: { name: string; input: unknown; client?: string }): Promise<HostResponse>;
   onRaw(owner: HostOwner, listener: (message: { name: string; payload: unknown }) => void): () => void;
   // P5 O2 M3 end
+  // P5 O2 M5 start (above)
+  welcome(owner: HostOwner): Welcomed | null; // the served detached link's welcome; null while none is served
+  disarmExit(owner: HostOwner): boolean; // the transport's disarmIdle
+  // P5 O2 M5 end
 }
 
 export const REQUEST_TIMEOUT_MS = 10_000;
@@ -238,6 +247,7 @@ interface Host {
   relay: MainDocRelay | null; // P3-A M5: a detached host's document channels
   gone: ClientGoneRelay | null; // P5 O1 M5: the current link's clientGone relay
   peer: WirePeer | null; // P5 O1 M6: the served link's welcome, until it detaches
+  welcome: Welcomed | null; // P5 O2 M5: the whole of it
   // P5 O2 M3 start
   parked: boolean; // an on-demand host with no launch under way
   readyAsked: boolean; // an external host's sayReady with no connection to say it on yet
@@ -290,6 +300,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
       relay: null, // P3-A M5
       gone: null, // P5 O1 M5
       peer: null, // P5 O1 M6
+      welcome: null, // P5 O2 M5
       parked: false, // P5 O2 M3
       readyAsked: false,
       raw: new Set(),
@@ -455,6 +466,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
     host.gone?.close(); // P5 O1 M5: the host ends this link's remote clients by itself
     host.gone = null;
     host.peer = null; // P5 O1 M6
+    host.welcome = null; // P5 O2 M5
   }
 
   function failSent(host: Host, reason: string): void {
@@ -565,6 +577,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         host.parked = false; // P5 O2 M3: an adoption, or a launch, reached it
         host.port = link;
         host.peer = welcome.peer; // P5 O1 M6
+        host.welcome = welcome; // P5 O2 M5
         host.gone?.close(); // P5 O1 M5: a link's relay never outlives it
         host.gone = clientGoneRelay((message) => link.postMessage(message));
         // P3-A M5: the document channels' frames and the host's `documents.closed` go to the relay, not the envelope
@@ -577,7 +590,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
             return;
           }
           logDropped('socket documents.closed', closed.dropped);
-          host.relay?.closed(closed.value.channel);
+          host.relay?.closed(closed.value.channel, closed.value.reason); // P5 O2 M5: with its reason
         });
         transition(host, { state: 'ready', pid: welcome.pid, restarts: host.state.restarts });
         sendHeld(host);
@@ -592,7 +605,10 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
       },
       lost(loss) {
         if (stopped) return;
-        if (loss === 'replaced') return crashed('was taken over by another client of its supervisor; not reconnecting');
+        if (loss === 'replaced') {
+          crashed('was taken over by another client of its supervisor; not reconnecting');
+          return options.onReplaced?.(host.owner); // P5 O2 M5
+        }
         disconnected();
         if (loss === 'quiet') return relaunch(restartBackoffMs[0]);
         if (loss === 'deliberate') return deliberate();
@@ -965,5 +981,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
       return () => raw.delete(listener);
     },
     // P5 O2 M3 end
+    welcome: (owner) => hostOf(owner).welcome, // P5 O2 M5
+    disarmExit: (owner) => hosts[owner]?.transport?.disarmIdle() ?? false, // P5 O2 M5
   };
 }

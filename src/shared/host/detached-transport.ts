@@ -218,6 +218,9 @@ export interface DetachedTransport {
   // reported), false otherwise (nothing reported); another attempt started meanwhile answers false.
   adopt(): Promise<boolean>;
   // P5 O2 M3 end
+  // P5 O2 M5: the exit-when-idle asked of the served host is taken back (the host was told so by command): its next
+  // close is read as any other, not as the idle exit. False when nothing is served.
+  disarmIdle(): boolean;
   // terminal: the socket closed with no `exit` sent; the supervisor keeps serving; nothing restarts. E11: answers once
   // the draining close has ended (the supervisor closed its side, or the port's grace destroyed the socket), so the
   // quit can wait for the last lines before the process exits; nothing when nothing is served (Decision Log 28)
@@ -847,6 +850,13 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       return new Promise((resolve) => launch(false, resolve));
     },
     // P5 O2 M3 end
+    disarmIdle() {
+      if (!served || stopped) return false;
+      idleArmed = null;
+      if (served.exitAsked === 'idle') served.exitAsked = null;
+      log(`supervisor pid ${served.proc.pid} is no longer asked to exit when idle`);
+      return true;
+    },
     stop() {
       if (stopped) return undefined;
       stopped = true;

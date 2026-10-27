@@ -4,7 +4,7 @@ import { connectLines, listenTemp, type LineClient, type TempSocket } from '../.
 import { createHostRuntime, type DocPortEnd, type DocPortHandler, type HostEmit, type HostRuntime } from './runtime';
 import { SocketPort } from './socket-port';
 import { encodePtyFrame, PTY_FRAMES_CAPABILITY, PTY_MARK, splitLines } from './socket-protocol';
-import { serveSocketClients, type SocketClients } from './socket-server';
+import { serveSocketClients, type SocketClients, type SocketServerOptions } from './socket-server';
 
 const TOKEN = 'a'.repeat(64);
 const IDENTITY = { protocol: 3, minor: 2, buildId: 'build-1', capabilities: ['area.feature'], wire: 'wire-1', pid: 4242, startedAt: '2026-10-06T10:00:00.000Z' };
@@ -36,6 +36,7 @@ interface StartOptions {
   badToken?: 'refuse' | 'close';
   many?: { runtimeFor(): HostRuntime };
   halfOpen?: boolean;
+  admit?: SocketServerOptions['admit']; // P5 O2 M5
 }
 
 async function start(options: StartOptions = {}) {
@@ -47,6 +48,7 @@ async function start(options: StartOptions = {}) {
   });
   for (const hook of options.hooks ?? []) runtime.onConnect(hook);
   const exits: string[] = [];
+  const refusedExits: string[] = []; // P5 O2 M5: the exits a refused connection asked
   const changes: boolean[] = [];
   const ends: number[] = [];
   const log = vi.fn<(line: string) => void>();
@@ -58,8 +60,12 @@ async function start(options: StartOptions = {}) {
     identity: () => IDENTITY,
     counts: () => ({ liveSessions: 2, rows: 3 }),
     token: () => TOKEN,
-    onExit: (when) => void exits.push(when),
+    onExit: (when, from) => {
+      exits.push(when);
+      if (from?.refused) refusedExits.push(when);
+    },
     onClient: (connected) => void changes.push(connected),
+    admit: options.admit, // P5 O2 M5
     log,
     helloTimeoutMs: options.helloTimeoutMs,
     docHighWater: options.docHighWater, // P3-A M5
@@ -94,7 +100,7 @@ async function start(options: StartOptions = {}) {
     port.start();
     return { socket, port, lines, frames };
   };
-  return { runtime, emit: () => emit('session.brokerItems', ITEMS as never), exits, changes, ends, log, served, connect, connectPort };
+  return { runtime, emit: () => emit('session.brokerItems', ITEMS as never), exits, refusedExits, changes, ends, log, served, connect, connectPort };
 }
 
 describe('the socket layer handshake (server side)', () => {
@@ -368,6 +374,75 @@ describe('the socket layer handshake (server side)', () => {
     host.served.closeClient();
     await client.closed;
     await until(() => !host.served.connected());
+  });
+});
+
+// P5 O2 M5 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, "The handshake reflects the upstream"): a relay's welcome
+// waits for `admit`, which answers the facts it reflects, a refusal line to write as received, or a close.
+describe('the socket layer’s admission (server side, P5 O2 M5)', () => {
+  const UPSTREAM = { protocol: 3, minor: 1, buildId: 'upstream-build', capabilities: ['up.cap'], wire: 'wire-1', pid: 5151, startedAt: '2026-10-27T09:00:00.000Z' };
+
+  it('holds the welcome until admit answers, then welcomes with its facts and serves what the client sent meanwhile', async () => {
+    let admitNow!: () => void;
+    const peers: unknown[] = [];
+    const host = await start({
+      admit: (peer) => {
+        peers.push(peer);
+        return new Promise((resolve) => (admitNow = () => resolve({ kind: 'welcome', identity: UPSTREAM, counts: { liveSessions: 4, rows: 6 } })));
+      },
+    });
+    const client = await host.connect();
+    client.send(hello());
+    client.send({ t: 'req', id: '1', name: 'engine.ping', input: undefined }); // sent before the welcome, kept for the port
+    await settle();
+    expect(client.lines).toEqual([]);
+    expect(host.changes).toEqual([]);
+    expect(peers).toEqual([{ major: 3, minor: 2, build: 'build-1', capabilities: [] }]);
+    admitNow();
+    expect(await client.next()).toEqual({ t: 'welcome', protocol: 3, minor: 1, build: 'upstream-build', capabilities: ['up.cap'], pid: 5151, startedAt: UPSTREAM.startedAt, liveSessions: 4, rows: 6 });
+    expect(await client.next((line) => (line as { t: string }).t === 'res')).toMatchObject({ t: 'res', id: '1', ok: true });
+    expect(host.changes).toEqual([true]);
+  });
+
+  it('writes a refusal admit answers as it is, then honours one exit from that connection, marked refused', async () => {
+    const line = { t: 'refuse', reason: 'protocol', protocol: 4, buildId: 'newer', wire: 'w', liveSessions: 2 } as const;
+    const host = await start({ admit: async () => ({ kind: 'refuse', line }) });
+    const client = await host.connect();
+    client.send(hello());
+    expect(await client.next()).toEqual(line);
+    client.send({ t: 'exit', when: 'now' });
+    await until(() => host.refusedExits.length === 1);
+    expect(host.refusedExits).toEqual(['now']);
+    expect(host.exits).toEqual(['now']);
+    expect(host.changes).toEqual([]);
+  });
+
+  it('closes the connection with nothing written when admit answers close', async () => {
+    const host = await start({ admit: async () => ({ kind: 'close', why: 'the upstream did not start within 15 s' }) });
+    const client = await host.connect();
+    client.send(hello());
+    await client.closed;
+    expect(client.lines).toEqual([]);
+    expect(host.log).toHaveBeenCalledWith('closed a connection: the upstream did not start within 15 s');
+  });
+
+  it('never asks admit for a wrong token', async () => {
+    const admit = vi.fn(async () => ({ kind: 'close' as const, why: 'unused' }));
+    const host = await start({ admit, badToken: 'close' });
+    const client = await host.connect();
+    client.send(hello({ token: 'b'.repeat(64) }));
+    await client.closed;
+    expect(admit).not.toHaveBeenCalled();
+  });
+
+  it('marks an exit on a served connection as not refused', async () => {
+    const host = await start({ admit: async () => ({ kind: 'welcome', identity: UPSTREAM, counts: { liveSessions: 0, rows: 0 } }) });
+    const client = await host.connect();
+    client.send(hello());
+    await client.next();
+    client.send({ t: 'exit', when: 'idle' });
+    await until(() => host.exits.length === 1);
+    expect(host.refusedExits).toEqual([]);
   });
 });
 

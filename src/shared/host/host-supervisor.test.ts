@@ -483,3 +483,55 @@ describe('private paths (acceptance 9)', () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 });
+
+// P5 O2 M5: what `mawsd`'s relay needs beyond M3's list: the welcome's facts to reflect, an exit-when-idle it can take
+// back, and the replaced loss told apart.
+describe('what mawsd reflects and takes back (P5 O2 M5)', () => {
+  it('welcome(owner) holds the served welcome’s pid and counts until the link goes', async () => {
+    const fake = await startFake({ counts: { liveSessions: 2, rows: 5 } });
+    const supervisor = makeSupervisor();
+    expect(supervisor.welcome('engine-host')).toBeNull();
+    await supervisor.start();
+    expect(supervisor.welcome('engine-host')).toMatchObject({ pid: fake.pid, liveSessions: 2, rows: 5, peer: { major: SOCKET_PROTOCOL } });
+    fake.dropClient();
+    await until(() => supervisor.welcome('engine-host') === null);
+  });
+
+  it('disarmExit: once taken back, an exit-when-idle’s close is no longer read as deliberate', async () => {
+    const fake = await startFake();
+    const supervisor = makeSupervisor({ 'engine-host': { onDemand: true } });
+    await supervisor.start();
+    await expect(supervisor.adopt('engine-host')).resolves.toBe(true);
+    expect(supervisor.exitSupervisor('idle')).toBe(true);
+    await until(() => fake.exits.includes('idle'));
+    expect(supervisor.disarmExit('engine-host')).toBe(true);
+    await fake.die({ keepLock: true }); // a crash now, not the idle exit it was once asked for
+    await until(() => spawn.mock.calls.length === 1); // relaunched by the crash ladder, not parked
+    expect(supervisor.parked('engine-host')).toBe(false);
+  });
+
+  it('without disarmExit the same close parks the host, as the idle exit it was asked for', async () => {
+    const fake = await startFake();
+    const supervisor = makeSupervisor({ 'engine-host': { onDemand: true } });
+    await supervisor.start();
+    await expect(supervisor.adopt('engine-host')).resolves.toBe(true);
+    expect(supervisor.exitSupervisor('idle')).toBe(true);
+    await until(() => fake.exits.includes('idle'));
+    await fake.die();
+    await until(() => supervisor.parked('engine-host'));
+    await sleep(60);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('onReplaced tells a relay its host was taken by another client', async () => {
+    await startFake();
+    const replaced: HostOwner[] = [];
+    const supervisor = makeSupervisor({ 'engine-host': {} }, { onReplaced: (owner) => void replaced.push(owner) });
+    await supervisor.start();
+    const other = makeSupervisor({ 'engine-host': {} }); // a second client takes the supervisor
+    await other.start();
+    await until(() => replaced.length === 1);
+    expect(replaced).toEqual(['engine-host']);
+    expect(supervisor.snapshot('engine-host').state).toBe('crashed');
+  });
+});

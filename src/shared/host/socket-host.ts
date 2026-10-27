@@ -206,8 +206,8 @@ export async function startSocketHost(opts: SocketHostOptions, proc: HostProcess
   return host;
 }
 
-// 32 random bytes as hex, written through a temporary file so a reader never sees half a token.
-function writeToken(path: string): string {
+// 32 random bytes as hex, written through a temporary file so a reader never sees half a token (P5 O2 M5: `mawsd`'s too).
+export function writeToken(path: string): string {
   const token = randomBytes(32).toString('hex');
   const temporary = `${path}.${process.pid}`;
   fs.writeFileSync(temporary, token, { mode: 0o600 });
