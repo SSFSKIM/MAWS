@@ -212,7 +212,14 @@ describe('arriving events', () => {
 });
 
 /** A served RL10 on a scratch state directory, with sminos connected and welcomed. */
-async function served(options: { head: () => { state: OrgState; certificates: Certificates }; machineOwners?: () => Promise<string[]>; listed?: string[]; hostMessage?: (message: unknown, sent?: () => void) => void; legacy?: { org: string; key: string } }) {
+async function served(options: {
+  head: () => { state: OrgState; certificates: Certificates };
+  machineOwners?: () => Promise<string[]>;
+  listed?: () => string[];
+  hostMessage?: (message: unknown, sent?: () => void) => void;
+  legacy?: { org: string; key: string };
+  engineSessions?: () => Array<{ appSessionId: string; engineSessionId: string }>;
+}) {
   const dir = scratch();
   const state = EndpointState.open(dir);
   if (options.legacy !== undefined) state.setLegacy(options.legacy);
@@ -227,25 +234,31 @@ async function served(options: { head: () => { state: OrgState; certificates: Ce
     policy: new EndpointPolicy(() => state),
     hub: { openProject: () => () => {}, send: () => true },
     listings: {
-      report: async () => {},
+      report: async (report) => void calls.push(`report ${report.session}`),
       gone: async (session) => void calls.push(`gone ${session}`),
       refresh: async () => {},
-      listedSessions: () => options.listed ?? [],
+      listedSessions: () => options.listed?.() ?? [],
     },
     notifier: { pendingSet: () => {}, hostMessage: (m, sent) => options.hostMessage?.(m, sent), forget: (session) => void calls.push(`forget ${session}`) },
     machineOwners: options.machineOwners ?? (async () => []),
-    dispatch: () => Promise.reject(new Error('none')),
+    dispatch: async () =>
+      options.engineSessions === undefined ? Promise.reject(new Error('none')) : { t: 'res' as const, id: '0', ok: true as const, value: options.engineSessions() },
     now: Date.now,
     log: () => {},
   });
   await rl10.serve();
   closers.push(() => rl10.unserve());
   const info = JSON.parse(fs.readFileSync(join(dir, 'rl10.json'), 'utf8')) as { socket: string; token: string };
-  const sminos = await FakeSminos.open(info.socket);
-  closers.push(() => sminos.close());
-  sminos.send({ t: 'hello', protocol: { major: 1, minor: 0 }, capabilities: [], token: info.token, sminos: { version: 'review' }, policy: { read_only: false, ceiling: 'settings' } });
-  await sminos.next((f) => f.t === 'welcome', 'the welcome');
-  return { rl10, sminos, state, calls, dir };
+  /** A sminos connection, hello'd and welcomed (a new one replaces the last). */
+  const connect = async () => {
+    const sminos = await FakeSminos.open(info.socket);
+    closers.push(() => sminos.close());
+    sminos.send({ t: 'hello', protocol: { major: 1, minor: 0 }, capabilities: [], token: info.token, sminos: { version: 'review' }, policy: { read_only: false, ceiling: 'settings' } });
+    await sminos.next((f) => f.t === 'welcome', 'the welcome');
+    return sminos;
+  };
+  const sminos = await connect();
+  return { rl10, sminos, state, calls, dir, connect };
 }
 
 describe('the session lane', () => {
@@ -277,12 +290,12 @@ describe('the session lane', () => {
     const { sminos, calls } = await served({ head: () => ({ state: head.state, certificates: NO_CERTS }) });
     sminos.send(memberFrame());
     sminos.send({ t: 'member', session: S, gone: true });
-    await expect.poll(() => calls).toEqual([`gone ${S}`, `forget ${S}`]);
+    await expect.poll(() => calls).toEqual([`report ${S}`, `gone ${S}`, `forget ${S}`]);
   });
 
   it('settles a session held only as a listing before forgetting it (finding 8)', async () => {
     const { head } = await org();
-    const { sminos, calls } = await served({ head: () => ({ state: head.state, certificates: NO_CERTS }), listed: ['app-left'] });
+    const { sminos, calls } = await served({ head: () => ({ state: head.state, certificates: NO_CERTS }), listed: () => ['app-left'] });
     sminos.send({ t: 'restated' });
     await expect.poll(() => calls).toEqual(['gone app-left', 'forget app-left']);
   });
@@ -304,5 +317,111 @@ describe('the session lane', () => {
     await sminos.next((f) => f.t === 'legacy-key?', 'the ask');
     expect(rl10.legacy.held).toBe(false);
     expect(state.legacyKey).toBeNull();
+  });
+});
+
+describe('round 2', () => {
+  it('keeps a whole record that lost only its newline, through the next append and a reopen (finding 1, round 2)', () => {
+    const dir = scratch();
+    const sig = (n: number) => ({ hash: `h${n}`, sig: { kid: 'AAAAAAAAAAAAAAAAAAAAAA', value: Buffer.alloc(64, n).toString('base64url') } });
+    new SignatureLedger(() => dir).put(P, 'host/human', 1, sig(1));
+    const path = join(dir, `${P}.jsonl`);
+    fs.writeFileSync(path, fs.readFileSync(path, 'utf8').replace(/\n$/, ''));
+    const reopened = new SignatureLedger(() => dir);
+    expect(reopened.get(P, 'host/human', 1)).toEqual(sig(1));
+    reopened.put(P, 'host/human', 2, sig(2));
+    const again = new SignatureLedger(() => dir);
+    expect(again.get(P, 'host/human', 1)).toEqual(sig(1));
+    expect(again.get(P, 'host/human', 2)).toEqual(sig(2));
+
+    const index = scratch();
+    new InboundIndex(() => index, Date.now).record(P, 'c1', 'hub/b', 1);
+    const idx = join(index, `${P}.idx`);
+    fs.writeFileSync(idx, fs.readFileSync(idx, 'utf8').replace(/\n$/, ''));
+    const held = new InboundIndex(() => index, Date.now);
+    expect(held.seen(P, 'c1', 'hub/b', 2)).toEqual({ kind: 'replayed', writer: 'hub/b', seq: 1 });
+    held.record(P, 'c2', 'hub/b', 3);
+    expect(new InboundIndex(() => index, Date.now).seen(P, 'c1', 'hub/b', 2)).toEqual({ kind: 'replayed', writer: 'hub/b', seq: 1 });
+  });
+
+  it('never withdraws a lane B listing whose app restated under a new engine session (finding 2, round 2)', async () => {
+    const { head } = await org();
+    const [E1, E2] = ['e1111111-1111-4111-8111-111111111111', 'e2222222-2222-4222-8222-222222222222'];
+    let engines = [{ appSessionId: 'app-1', engineSessionId: E1 }];
+    let listed: string[] = [];
+    const { calls, sminos, connect } = await served({ head: () => ({ state: head.state, certificates: NO_CERTS }), engineSessions: () => engines, listed: () => listed });
+    const laneB = (session: string) => ({ ...memberFrame({ session, lane: 'B' }), launch: undefined });
+    sminos.send(laneB(E1));
+    await expect.poll(() => calls).toEqual(['report app-1']);
+    listed = ['app-1'];
+    // sminos away; the app's engine session changes; sminos back, restating the new one only.
+    sminos.close();
+    engines = [{ appSessionId: 'app-1', engineSessionId: E2 }];
+    const back = await connect();
+    back.send(laneB(E2));
+    back.send({ t: 'restated' });
+    await expect.poll(() => calls.length).toBe(2);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(calls).toEqual(['report app-1', 'report app-1']);
+  });
+
+  describe('expired (ruling 3)', () => {
+    async function judge(signer: 'retired-state-key' | 'expired-certificate') {
+      const { a1, head } = await org();
+      const key = await generateSigningKey();
+      const delegationKey = await generateSigningKey();
+      const delegation = memberId();
+      const created = iso(Date.now() - 60_000);
+      let certificates: Certificates = NO_CERTS;
+      let name = 'other';
+      const later = await successor(head, [a1], async (s) => {
+        if (signer === 'retired-state-key') {
+          s.machineNames.push({ name, ref: 'r'.repeat(22) });
+          s.retired.push({ keyId: await keyId(key.pub), pub: key.pub, notAfter: iso(Date.now() - 120_000), holder: { machine: 'r'.repeat(22) } });
+        } else {
+          name = 'vm-one';
+          s.delegations.push({ id: delegation, pub: delegationKey.pub, prefix: 'vm-', expires: iso(Date.now() - 120_000), maxUses: 5, offlineRevokeS: 0, owners: [s.members[0].id] });
+        }
+      });
+      if (signer === 'expired-certificate') {
+        const cert = await signRecord(SIGNING_DOMAINS.machineCert, { org: ORG, machine: `${delegation}_${'c'.repeat(22)}`, name, pub: key.pub, delegation, use: 1, issued: iso(Date.now() - 600_000) }, delegationKey.privateKey, delegationKey.pub);
+        certificates = { certs: [cert], retirements: [] };
+      }
+      const event = await signEvent({ org: ORG, project: P }, { ts: created, created, writer: `${name}/human`, seq: 1, kind: 'human', from: 'human', to: '*', text: 'hi' }, key.privateKey, key.pub);
+      const dir = scratch();
+      const state = EndpointState.open(dir);
+      const down: Frame[] = [];
+      const up: Frame[] = [];
+      const r = new LogRelay({
+        org: () => ({ head: later.state, certificates, ref: REF, name: NAME }),
+        key: () => null,
+        members: members(),
+        ledger: new SignatureLedger(() => state.subdirectory('signatures')),
+        index: new InboundIndex(() => state.subdirectory('inbound'), Date.now),
+        legacy: new LegacyKey(() => state, () => ORG),
+        hub: { openProject: () => () => {}, send: (f) => (up.push(f), true) },
+        toSminos: (f) => void down.push(f),
+        opened: () => {},
+        now: Date.now,
+        log: () => {},
+      });
+      r.hello({ t: 'hello', project: P, name: 'maws', have: {} });
+      await r.fromHub({ t: 'events', project: P, events: [event] });
+      return { r, down, up };
+    }
+
+    it('is final for a key the state retired: spent, and rejected up', async () => {
+      const { down, up, r } = await judge('retired-state-key');
+      expect(down).toEqual([{ t: 'spent', project: P, writer: 'other/human', seq: 1, reason: 'expired' }]);
+      expect(up.map((f) => f.reason)).toEqual(['bad-code']);
+      expect(r.holding).toBe(0);
+    });
+
+    it('is held for a machine certificate, whose renewal may not have reached the endpoint yet', async () => {
+      const { down, up, r } = await judge('expired-certificate');
+      expect(down).toEqual([]);
+      expect(up).toEqual([]);
+      expect(r.holding).toBe(1);
+    });
   });
 });

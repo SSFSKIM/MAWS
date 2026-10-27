@@ -133,7 +133,9 @@ export class Members implements RecordSource, CheckoutSource {
       this.#apps.delete(session);
       this.#changed(member, member);
     }
-    if (listing !== null) {
+    // A lane B app's listing outlives an engine session it superseded: while another member holds the listing (the
+    // app's engine session now), retiring the old record withdraws and forgets nothing.
+    if (listing !== null && !this.#listedBy(listing)) {
       // Withdrawn first, which settles what notify told the hub (`settled 0`, or owed), then forgotten.
       await this.#ctx.listings.gone(listing);
       this.#ctx.forget(listing);
@@ -206,6 +208,12 @@ export class Members implements RecordSource, CheckoutSource {
   }
 
   // ---- Inside -----------------------------------------------------------------------------------------------------
+
+  /** Whether a member held now is listed under `listing`. */
+  #listedBy(listing: string): boolean {
+    for (const session of this.#members.keys()) if (this.listingId(session) === listing) return true;
+    return false;
+  }
 
   /** Joins a lane B member to its appSessionId through `engine.sessions`, once; a host that can't answer leaves it unjoined. */
   async #join(session: string): Promise<void> {

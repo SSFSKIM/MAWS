@@ -22,15 +22,16 @@
 //     with `signer: {kind: 'legacy'}`.
 // What can't go down is judged by whether a later head could change the verdict.
 //   - Final (no later head can change it): a bad shape, an own-writer event that is no echo, a replay, a v2 signature
-//     that fails under a key the head knows (or whose key the head has revoked, or retired before its `created`), a
-//     v1 code that fails under the held legacy key. It is refused up the log plane as DX2's `rejected`, and its
+//     that fails under a key the head knows (or whose key the head has revoked, or the state retired before its
+//     `created`), a v1 code that fails under the held legacy key. It is refused up the log plane as DX2's `rejected`, and its
 //     position goes down to sminos as `spent {project, writer, seq, reason}`, in stream order where the event would
 //     have gone (the `events` frame split around it), with no content: sminos records the position as one it refused
 //     itself, so the writer's later events aren't held behind it. The hub's Rejection takes four reasons, so the
 //     endpoint's verdict rides in its message: a forged or unverifiable event `bad-code`, a replay `seen-nonce`, an
 //     own-writer event that is no echo `conflict`, a shape `bad-shape`.
-//   - Not yet decidable (a signer or key the endpoint's head doesn't know, as when it is behind the hub's; no head yet;
-//     a v1 event while no legacy key is held): held, neither rejected nor spent, and verified again each time the head
+//   - Not yet decidable (a signer or key the endpoint's head doesn't know, as when it is behind the hub's; a machine
+//     certificate lapsed at its `created`, which a renewal not yet received may accept; no head yet; a v1 event while
+//     no legacy key is held): held, neither rejected nor spent, and verified again each time the head
 //     or the certificates move or the legacy key arrives (`retry`). The hold is bounded (`HOLD_MAX` events, each
 //     `HOLD_MS`); one let go is only forgotten, and comes again from the hub at sminos's next log-plane hello, since
 //     sminos's `have` stops below it.
@@ -342,6 +343,10 @@ export class LogRelay {
           case 'revoked':
             return { spent: 'revoked', reason: 'bad-code', message: 'revoked: the head revokes its signing key' };
           case 'expired':
+            // A key the state retired keeps its notAfter for good; a machine certificate's runs to its delegation's
+            // expiry or retirement, and a renewal this endpoint hasn't received yet may still accept it. verifyEvent
+            // names no signer, so a certificate bearing the signing key is held.
+            if (await certifies(org.certificates, event.sig.kid)) return { hold: 'its machine certificate had lapsed at its created, and a renewal may be on its way' };
             return { spent: 'expired', reason: 'bad-code', message: 'expired: its key was retired before its created' };
           case 'bad-signature':
             return { spent: 'bad-signature', reason: 'bad-code', message: 'forged: its v2 signature does not verify under the key it names' };
@@ -397,6 +402,12 @@ export class LogRelay {
     const held = this.#seen.get(k);
     if (held === undefined || at > held) this.#seen.set(k, at);
   }
+}
+
+/** Whether a machine certificate bears the key `kid` names. */
+async function certifies(certificates: Certificates, kid: string): Promise<boolean> {
+  for (const c of certificates.certs) if ((await keyId(c.body.pub)) === kid) return true;
+  return false;
 }
 
 /** An own event as it goes up: the upload form with what the endpoint added, in the order it first went. */

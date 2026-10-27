@@ -90,15 +90,16 @@ export function sweepTemporaries(dir: string): void {
 /**
  * Appends `lines` (each without its newline) to `dir/name`, created 0600 when absent, and fsyncs the file before it
  * returns: an append-only record (the signature ledger, the inbound index) is on disk before anything it vouches for
- * leaves. A torn last line (a crash mid-append: bytes after the last newline) is cut off first, so the new lines don't
- * join it into one that never parses. A file that isn't private is refused (checkPrivateFile).
+ * leaves. What follows the last newline is settled first, as `readLines` reads it: a whole record that lost only its
+ * newline (a crash between the two) is kept and terminated, and a torn one (a crash mid-record, which doesn't parse)
+ * is cut off, so the new lines never join it. A file that isn't private is refused (checkPrivateFile).
  */
 export function appendLines(dir: string, name: string, lines: readonly string[]): void {
   const path = join(dir, name);
   const created = !checkPrivateFile(path);
   const fd = fs.openSync(path, 'a+', 0o600);
   try {
-    cutTornTail(fd);
+    settleTail(fd);
     const bytes = Buffer.from(lines.map((line) => `${line}\n`).join(''), 'utf8');
     let at = 0;
     while (at < bytes.length) at += fs.writeSync(fd, bytes, at, bytes.length - at);
@@ -109,8 +110,8 @@ export function appendLines(dir: string, name: string, lines: readonly string[])
   if (created) syncDirectory(dir);
 }
 
-/** Truncates the file behind `fd` to its last newline when it doesn't end in one. */
-function cutTornTail(fd: number): void {
+/** Settles what follows the last newline of the file behind `fd`: a whole record terminated, a torn one cut off. */
+function settleTail(fd: number): void {
   const size = fs.fstatSync(fd).size;
   if (size === 0) return;
   const last = Buffer.alloc(1);
@@ -119,10 +120,25 @@ function cutTornTail(fd: number): void {
   const whole = Buffer.alloc(size);
   let at = 0;
   while (at < size) at += fs.readSync(fd, whole, at, size - at, at);
-  fs.ftruncateSync(fd, whole.lastIndexOf(10) + 1);
+  const start = whole.lastIndexOf(10) + 1;
+  if (parses(whole.subarray(start).toString('utf8'))) fs.writeSync(fd, '\n');
+  else fs.ftruncateSync(fd, start);
 }
 
-/** The JSON lines of `dir/name` (none when it is absent); a line that doesn't parse (a torn last write) is left out. */
+/** Whether a line is a record `readLines` takes. */
+function parses(line: string): boolean {
+  try {
+    JSON.parse(line);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The JSON lines of `dir/name` (none when it is absent); a line that doesn't parse (a torn last write) is left out, and
+ * a whole last record without its newline is taken, as `appendLines` keeps it.
+ */
 export function readLines(dir: string, name: string): unknown[] {
   const text = readPrivateText(join(dir, name));
   if (text === null) return [];
