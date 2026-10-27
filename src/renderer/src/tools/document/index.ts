@@ -7,7 +7,6 @@ import { artifactHost } from '../../artifacts';
 import { registerArtifactEditor } from '../../artifacts/registry';
 import { ipc } from '../../ipc/client';
 import { useSessions } from '../../stores/sessions';
-import type { AppSessionId } from '@shared/graph/ids';
 import { DocumentMain } from './DocumentMain';
 import { DocumentPanel } from './DocumentPanel';
 import { DocumentTabState, type DocumentTabDeps } from './tab-state';

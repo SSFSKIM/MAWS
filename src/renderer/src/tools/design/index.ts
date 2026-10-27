@@ -3,7 +3,6 @@
 // an `artifact` main tab `DesignMain`, each with the state `createState` made for that tab (its replica, deck session
 // and workbench view, kept until `dispose`), so the X32 header's close guard and Zoom to fit read the tab's state while
 // its body is unmounted. In a window main loaded for the e2e harness the design's seam is installed with it.
-import type { AppSessionId } from '@shared/graph/ids';
 import { artifactHost } from '../../artifacts';
 import { e2eRequested } from '../../artifacts/e2e-seam';
 import { ipc } from '../../ipc/client';
