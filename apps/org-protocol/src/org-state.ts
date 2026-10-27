@@ -12,6 +12,9 @@
 //     a changed key is a new device. New devices of a member who had devices carry an endorsement by the `stepUpPub`
 //     of one of that member's devices in the head. The successor that a root transition authorizes may add the
 //     transition's new root devices without one: the recovery key vouches for them, and the old devices may be lost.
+//   - One holder per key: a state holds no key under two holders (two devices, a device's channel and step-up, a machine
+//     and a delegation, the recovery key and any other), and a key the successor holds only under another holder has
+//     left its own.
 //   - Where a key goes (RL DL 24). A device's or machine's key the head holds and the successor doesn't enters `retired`
 //     or `revoked` in that step, under the holder the head held it by; a delegation's key enters `revoked` only. A
 //     `retired` entry stays as it is or moves to `revoked`; `revoked` is append-only. A key the state never held enters
@@ -88,6 +91,8 @@ async function stateInvariants(state: OrgState): Promise<boolean> {
   if (!distinct(state.delegations.map((d) => d.id)) || !distinct(state.projects.map((p) => p.id))) return false;
   if (!state.machines.every((m) => ownersKnown(m.owners)) || !state.delegations.every((d) => ownersKnown(d.owners))) return false;
   if (state.root.keys.length === 0 || !distinct(state.root.keys)) return false;
+  // One holder per key: no key is two devices', a device's two, a machine's and a delegation's, or the recovery key too.
+  if (!distinct([...heldKeys(state).map((k) => k.pub), state.root.recoveryPub])) return false;
   // Name namespaces: a certificate's name, under its delegation's prefix, never meets an enrolled name or another
   // delegation's. A revoked delegation's prefix and id stay reserved (RL DL 26), so nothing reopens its history: no
   // later delegation takes them, and no entry takes the `<id>_` ref shape of a delegation the state knows.
@@ -166,12 +171,13 @@ async function keysAccounted(head: OrgState, next: OrgState): Promise<boolean> {
   for (const r of head.retired) if (!retiredNext.has(canonicalize(r)) && !intoRevoked(r.keyId, r.holder)) return false;
 
   const held = heldKeys(head);
-  const stillHeld = new Set(heldKeys(next).map((k) => k.pub));
+  // A key counts as kept only under the same holder: one that reappears under another has left its own.
+  const stillHeld = new Set(heldKeys(next).map((k) => canonicalize(k)));
   const heldByKid = new Map<string, Holder>();
   for (const { pub, holder } of held) {
     const kid = await keyId(pub);
     heldByKid.set(kid, holder);
-    if (stillHeld.has(pub)) continue;
+    if (stillHeld.has(canonicalize({ pub, holder }))) continue;
     const retiredNow = !('delegation' in holder) && next.retired.some((r) => r.pub === pub && same(r.holder, holder));
     if (!retiredNow && !intoRevoked(kid, holder)) return false;
   }

@@ -106,6 +106,13 @@ describe('the committed vectors', () => {
       "then its delegation revoked, the certificate's key left retired",
       "then its delegation revoked, the certificate's key revoked with it",
       "then a delegation reissuing the old VM's key under the revoked prefix",
+      // Wave 7: one holder per key; a key leaving its holder is recorded even if it reappears under another.
+      "a successor dropping a delegation, its key now a machine's, not revoked",
+      "a successor dropping a delegation, its key revoked and now a machine's",
+      "a successor giving a machine a delegation's key",
+      'a successor giving two machines one key',
+      "a successor giving a machine a device's channel key",
+      'genesis with a device whose step-up key is its channel key',
     ]) {
       expect(names, name).toContain(name);
     }

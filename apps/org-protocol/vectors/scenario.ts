@@ -496,6 +496,38 @@ export async function buildScenario(k: Keys): Promise<VectorSet> {
   }, 2), 'a1StepUp');
   keep('v2 without the delegation', noDelegation);
   cases.push({ name: 'a successor dropping a delegation, its key revoked', call: 'verifySuccessor', args: [signed('v2'), signed('v2 without the delegation'), []], expect: ok() });
+  // A key has one holder at a time, on the state alone, and a key leaving its holder is retired or revoked even when it
+  // reappears under another: a delegation dropped while its key becomes a machine's would leave no revocation, and a
+  // later delegation could take its prefix and certify its VMs' keys again.
+  await successorCase("a successor dropping a delegation, its key now a machine's, not revoked", await next(v2, (s) => {
+    s.delegations = [];
+    s.machines.push({ name: 'host-d', ref: REF_NEWCOMER, pub: k.delegation.pub, owners: [A] });
+    s.machineNames.push({ name: 'host-d', ref: REF_NEWCOMER });
+  }, 2), ['a1StepUp'], no('malformed'));
+  await successorCase("a successor dropping a delegation, its key revoked and now a machine's", await next(v2, (s) => {
+    s.delegations = [];
+    s.revoked.push(dlgRevoked);
+    s.machines.push({ name: 'host-d', ref: REF_NEWCOMER, pub: k.delegation.pub, owners: [A] });
+    s.machineNames.push({ name: 'host-d', ref: REF_NEWCOMER });
+  }, 2), ['a1StepUp'], no('revoked'));
+  await successorCase("a successor giving a machine a delegation's key", await next(v2, (s) => {
+    s.machines.push({ name: 'host-d', ref: REF_NEWCOMER, pub: k.delegation.pub, owners: [A] });
+    s.machineNames.push({ name: 'host-d', ref: REF_NEWCOMER });
+  }, 2), ['a1StepUp'], no('malformed'));
+  await successorCase("a successor giving two machines one key", await next(v2, (s) => {
+    s.machines.push({ name: 'host-d', ref: REF_NEWCOMER, pub: k.mini.pub, owners: [A] });
+    s.machineNames.push({ name: 'host-d', ref: REF_NEWCOMER });
+  }, 2), ['a1StepUp'], no('malformed'));
+  await successorCase("a successor giving a machine a device's channel key", await next(v2, (s) => {
+    s.machines.push({ name: 'host-d', ref: REF_NEWCOMER, pub: k.b1Channel.pub, owners: [A] });
+    s.machineNames.push({ name: 'host-d', ref: REF_NEWCOMER });
+  }, 2), ['a1StepUp'], no('malformed'));
+  await successorCase("a successor giving a delegation the recovery key", await next(v2, (s) => s.delegations.push({ ...dlgB, pub: k.recovery.pub }), 2), ['a1StepUp'], no('malformed'));
+  await genesisVariant("genesis with a device whose step-up key is its channel key", (s) => {
+    s.members[0].devices[0].stepUpPub = s.members[0].devices[0].channelPub;
+    s.root.keys = [channelRoot];
+  }, 'a1Channel', no('malformed'));
+
   // A revoked delegation's prefix and id stay reserved for the life of the org (RL DL 26), and no enrolled ref takes the
   // `<id>_` shape of a delegation the state knows: so no later delegation or entry reopens the revoked one's history.
   await successorCase("then a delegation taking the revoked one's prefix", await next(noDelegation, (s) => s.delegations.push({ ...dlgB, prefix: 'vm-' }), 3), ['a1StepUp'], no('malformed'), 'v2 without the delegation');
