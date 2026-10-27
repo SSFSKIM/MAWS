@@ -47,7 +47,7 @@ P5's O12 acceptance items 1, 4 and 7 are this phase's acceptance, checked as fol
 2. **The ledger.**
    - The daemon's `query` answers by state: `done` for an op whose outcome is done, `refused` for one refused at admission, `in-progress` for a claimed or in-flight op, `expired` for one older than the replay horizon, and `not-received` for an unknown id inside it.
    - After a tombstone, a late arrival of that id is refused `tombstoned` and never runs. A tombstone is refused while the op is in flight or claimed.
-   - A resealed copy of an id the ledger has pruned is refused `expired`.
+   - A resealed copy of an id the ledger has pruned is refused `expired`, and one that omits `opCreated` is refused `bad-op-created`.
    - A DX6 RPC with no `opId` is keyed by its nonce, as today. Every existing ledger, spawn, reconcile and MW5 upload test passes unchanged.
 3. **The observer.** With `MAWS_LANE=B` set, and the session's parent process being the `SMNS_MEMBER` pid:
    - the bridge's `capabilities.controls` reports every key `{available: false, reason: "MAWS controls this session"}`, and `ops` is empty;
@@ -95,7 +95,7 @@ P5's O12 acceptance items 1, 4 and 7 are this phase's acceptance, checked as fol
   - it always writes the merged launch settings file, even under the default home where `launch_settings` returns the raw settings today, with `env.SMINOS_LAUNCH=<launch-id>` beside `env.SMINOS_HOME`;
   - the child's first `record_session` claims the pending file by an atomic rename to `<session>.json`, with `source: 'launch'`.
 
-  The first claim wins. `launch_env` drops `SMINOS_LAUNCH` from every child environment it builds, so a process started from the seat's Bash never claims, and a stale claim finds the file gone. A pending file unclaimed after a day is removed by the daemon's sweep. The spawner exiting before `poll_uuid` changes nothing, since the child claims for itself. Rejected: passing `--session-id` through `claude --bg`, which isn't measured to work for background launches.
+  The claim is the first thing `record_session` does on the child's SessionStart. It runs before any of its early returns (an engine registry not yet holding the session, a missing transcript) and needs only the hook's own session id. SessionStart completes before the session runs any tool. So the seat claims before anything it starts can run, and any later claimant, such as a `claude` launched directly from the seat's Bash with the inherited variable, finds the file gone. A claim is also refused unless the claiming session is new: no record for its id, and the hook's `source` is `startup`. `launch_env` drops `SMINOS_LAUNCH` from the environments sminos builds. A pending file unclaimed after a day is removed by the daemon's sweep. The spawner exiting before `poll_uuid` changes nothing, since the child claims for itself. Rejected: passing `--session-id` through `claude --bg`, which isn't measured to work for background launches.
 - **What each path writes.**
   - **A `sminos spawn`** copies `owners`, `ownersProof`, `principal` and `inference` from the caller's record when the caller is a session (`CLAUDE_CODE_SESSION_ID`). Its `origin` is `{kind: 'sminos-spawn', spawnerSession}`. A seat whose `settings` are non-empty gets `inference: {kind: 'route', settingsRef: <the merged launch file's path>}` in place of the parent's.
   - **A desk-RPC spawn** (`sminos_rpc.spawn`, `SMINOS_DESK_MEMBER` set) writes `owners: [<member>]`, `principal: <member>` and `origin: {kind: 'maws', requester: <member>}`. It is the predecessor of a MAWS remote spawn on a lane-A machine (RL §3.4).
@@ -110,7 +110,7 @@ P5's O12 acceptance items 1, 4 and 7 are this phase's acceptance, checked as fol
   3. the first `joined` along the lineage that carries `owners` (`source: 'lineage'`);
   4. only then the defaults: `owners: ["@machine"]`, `principal: "@machine"`, origin `terminal`, the default slot (`source: 'default'`).
 
-  A `default` record is replaced when a launch claim or lineage evidence appears later, for instance after an older daemon's `hand_off` that copied no record. Every other source is final. The record file wins over the log when both exist locally.
+  A `default` record is provisional, and it stays provisional when it is inherited. A continuation or spawn that copies a provisional record keeps `source: 'default'`. Only a record whose evidence chain reaches a launch claim or the hook's own environment is final. A provisional record is replaced when such evidence appears, for instance after an older daemon's `hand_off` that copied no record. The record file wins over the log when both exist locally.
 - **The controller is current state, not provenance.** RL §3.2 lets an ended lane-A conversation reopen as lane B under the same session id. So `controller {lane, since}` is updated at each launch by the bridge's verdict (M3), relayed by its child, and never copied as provenance. Desk Resume reads `controller.lane`.
 - **`@machine`** stands for "this machine's owners", as RL6 now allows (remote layer Decision Log 17, PR #185). Nothing on a machine knows its owner's member id until the org state exists (O10, O11). RL10's endpoint resolves it against the current state:
   - for grades, at dispatch;
@@ -118,6 +118,7 @@ P5's O12 acceptance items 1, 4 and 7 are this phase's acceptance, checked as fol
   - for `principal`, through the machine's binding of the record's inference slot.
 
   The token never leaves the machine. Late binding is deliberate: a terminal session's owners are its machine's owners by definition (RL §6.1), so a change of machine ownership should change them, and receivers check terminal sessions against the machine's current owners anyway.
+- **Only final provenance is published.** A `joined` carries `owners` and `origin` only when the record is final. A provisional record publishes neither, and remote readers fall back to the same `@machine` default, so they see the same value without being bound to it.
 - **The readback rule for other machines' members.** `_projection` and `_member` take `owners` and `origin` from the first `joined` along the lineage that carries them, as `by` is taken today. A member with neither reads `owners: ["@machine"]`, `origin: {kind: 'terminal'}`.
 - **Moves** (`move_session`, `by="move"`) leave the record as it is.
 - **`by` is not reused.** It keeps mixing aliases, member ids and `move`, and it means "who wrote this event", not "whose session".
@@ -126,6 +127,9 @@ P5's O12 acceptance items 1, 4 and 7 are this phase's acceptance, checked as fol
 
 **Proves.** Acceptance 1. Tests also pin:
 - a child whose hook runs before `poll_uuid` returns gets the parent's owners, not the defaults;
+- a parent whose first hook can't complete registration, followed by a `claude` launched directly from its Bash, leaves the parent's claim with the parent;
+- a provisional join already read on another machine is corrected there once the final record publishes;
+- a continuation from a predecessor whose record is still provisional stays provisional;
 - a seat spawned from a seat copies the grandparent's owners;
 - an older binary's `hand_off` followed by new-binary reconciliation recovers the ancestor's owners, rather than freezing defaults;
 - a `joined` written by an older binary (no owners) after a new one doesn't change what `list` shows;
@@ -165,8 +169,10 @@ P5's O12 acceptance items 1, 4 and 7 are this phase's acceptance, checked as fol
   - `tombstone` refuses an id that is in `flight` or claimed.
 
   The reconciler skips tombstones: an entry without an outcome is interrupted work only when it isn't a tombstone. `rpc-query` reads only the ledger file. It can't see `flight`, so it answers `not-received` where the daemon would answer `in-progress`, and it says so in its output. It never tombstones.
-- **The id's lifetime.**
-  - An entry records `opCreated`: the RPC's `opCreated` when present (RL4 gains this field, kept across reseals), else its `created`.
+- **The id's lifetime** (remote layer Decision Log 18).
+  - An RPC that carries `opId` must carry `opCreated`, which stays the same across reseals. Without it, the RPC is refused loose with `bad-op-created`.
+  - An `opCreated` later than the RPC's `created` by more than `FRESH_S` is refused the same way. The ledger prunes by receipt time, so without this bound an app clock running ahead would reopen the hole.
+  - Only a legacy, nonce-keyed RPC (no `opId`) uses its `created` as `opCreated`. Its nonce can never be resealed.
   - Receipt refuses an op whose `opCreated` is older than `OP_HORIZON = KEPT_S − 3600` seconds with `expired`.
   - `query` answers `expired` for such an id, given or stored, instead of `not-received`.
   - Pruning at `KEPT_S` therefore never lets a resealed copy of an old id run again. Today's `created` freshness check stays as it is.
@@ -177,7 +183,7 @@ P5's O12 acceptance items 1, 4 and 7 are this phase's acceptance, checked as fol
   - `in-progress`: a claim without an outcome, or the op is in `flight`.
   - `expired`: older than the horizon.
   - `not-received`: no entry, inside the horizon. That includes a loose refusal from checks 1–2, which never enters the ledger and ran nothing.
-  - `failed`: the ledger is unreadable. Fail-closed stays, and the answer is never `not-received`.
+  - `unavailable`: the ledger is unreadable. Fail-closed stays, and the answer is never `not-received` (RL4's name for it, so the app shows "outcome unknown" and asks again).
 
 **Not touched.** The RL10 transport (Phase 2). The hub's DX6 shapes.
 
@@ -185,13 +191,18 @@ P5's O12 acceptance items 1, 4 and 7 are this phase's acceptance, checked as fol
 - with a worker paused between admission and claim, a tombstone call is refused while the op is in `flight`;
 - an op tombstoned before admission never reaches `flight`;
 - a reseal of a pruned id is refused `expired`;
+- a reseal of a pruned id that omits `opCreated` is refused `bad-op-created`, never run;
+- an `opCreated` more than `FRESH_S` after `created` is refused;
 - a tombstone survives a daemon restart, and the reconciler doesn't answer it `interrupted`.
 
 ### M3 — The lane B observer: marker and refusals
 
 **What exists at its end.** MAWS's engine host sets `MAWS_LANE=B` on every `claude -p` child it launches, beside `SMNS_MEMBER=<its own pid>`, which it already sets. A session is lane B when both hold: the marker is present, and `member_mark` confirms that the session's parent process is the `SMNS_MEMBER` pid (sminos's existing, tested check). A `claude` started from a lane B session's Bash inherits both variables but has a different parent, so it stays a lane A controller.
 
-The bridge mod reads the marker at `bridgeStart` and is a provisional observer until its child's hello carries the `member_mark` verdict (the mod can't read a parent pid; the child can). A false verdict turns it into a full controller. The verdict is kept in `$.state`, so a module reload keeps it, and it is relayed to the record's `controller` (M1).
+The bridge mod reads the marker at `bridgeStart` and is a provisional observer until its child's hello carries the parent check's verdict (the mod can't read a parent pid; the child can). The verdict has three states, since `member_mark` returns false both for a different parent and when the session's pid or `ps` is unavailable:
+- `match`: an observer;
+- `mismatch`: a full controller, but only on positive evidence that the session's parent pid is known and differs;
+- `unresolved`: stays an observer. The child retries every 2 s for up to a minute, then every 30 s, and never publishes lane A. The verdict is kept in `$.state`, so a module reload keeps it, and it is relayed to the record's `controller` (M1).
 
 In observer mode:
 - every control op is refused `lane-b`, and every `capabilities.controls` key is `{available: false, reason: "MAWS controls this session"}`;
@@ -225,6 +236,7 @@ In observer mode:
 
 **Proves.** Acceptance 3. Tests also pin:
 - a `claude` started from a lane B session's Bash, with both variables inherited and a different parent, is a full lane A controller once its child's verdict arrives;
+- a marked session whose pid isn't yet in the registry, and one whose `ps` fails, each stay observers with `controller` unset, and become `match` once the check resolves;
 - a module reload keeps the verdict;
 - a lane-A session later reopened by MAWS as lane B (same session id) has `controller.lane: 'B'` and is refused desk Resume after it ends;
 - a `sminos spawn` child of a marked session doesn't carry `MAWS_LANE`.
@@ -245,7 +257,7 @@ This is the protocol O12 proposes. It is revised after the buildability review, 
   - On `proceed` (the reap was cancelled), it calls `next`.
   - On `stop` (the session is ending), it doesn't call `next`, and streams one text chunk: "The holder ended this session; reopening it continues the conversation."
   - With no answer, it waits until the fence's lease has expired by its own clock, plus a margin of one heartbeat, and then calls `next`. By then the host has lost permission to signal, so a turn is never lost to a dead host, and a live host never signals into a released turn.
-- **What a stopped turn leaves owed.** The trigger of a stopped turn stays owed: a peer message stays undelivered in sminos and is delivered after resume (P5 Decision Log 16).
+- **What a stopped turn leaves owed.** The trigger of a stopped turn stays owed: a peer message stays undelivered in sminos and is delivered after resume (P5 Decision Log 16). This isn't buildable with the messages above alone, because today `deliver_next` settles a delivery once `push_live` hands it to the engine's inbox, before `turn.step` decides. OX10's adoption therefore also needs a correlated settlement: sminos defers settling an inbox delivery to a marked session until the observer reports the turn it started as `proceed`, carrying the delivery's id that the bridge read from the inbox row. On `stop`, it stays owed. That contract is part of M4's completion, and its producer (sminos's delivery) and settlement changes are M4's.
 - **No observer connected** (the sminos plugin not loaded). Whether the session may then be released on verified-empty alone is O16's decision. M4 assumes neither answer.
 
 M4's milestone text is completed when OX10 is adopted and U6 is measured. Its acceptance is the holder design's §9 item 6, the reap-fence race with turns from every origin. It adds delayed `arm` processing, and delayed `turn` replies across the final SIGTERM check.
@@ -307,15 +319,15 @@ In the daemon's RPC controller (`sminos_rpc.py`), which holds `flight`:
 ```python
 query(op: str, op_created: float | None = None) -> dict
     # {"state": "done"|"refused", "outcome": ...} | {"state": "in-progress"} | {"state": "expired"}
-    # | {"state": "not-received"} | {"state": "failed"}   (unreadable ledger)
+    # | {"state": "not-received"} | {"state": "unavailable"}   (unreadable ledger; RL4's name)
 tombstone(op: str) -> dict
-    # {"ok": True} | {"ok": False, "state": "in-progress"|"done"|"refused"|"expired"|"failed"}
+    # {"ok": True} | {"ok": False, "state": "in-progress"|"done"|"refused"|"expired"|"unavailable"}
 Ledger.claim(op: str, entry: dict) -> bool   # replaces the unconditional put; False when tombstoned or claimed
 OP_HORIZON = KEPT_S - 3600
 ```
 
 - CLI: `sminos rpc-query <opId>` prints the ledger file's view. It can't see `flight`, and it says so.
-- RL4 gains `opCreated` (asked of remote-architecture). Until then, `opCreated` defaults to the RPC's `created`.
+- RL4 carries `opCreated` on every action and in `query` (remote layer Decision Log 18). Here it is required whenever `opId` is present. A legacy nonce-keyed RPC uses its `created`.
 
 ### C. The lane B marker (M3) and OX10 (M4, proposed)
 
@@ -331,7 +343,7 @@ OP_HORIZON = KEPT_S - 3600
 
 ## Decision Log
 
-- Decision: Verification and review for this child. The document gets doperpowers:adversarial-reviewer's buildability review before it executes (P5 Decision Log 12). M1 and M2 each get doperpowers:reviewer-medium at their PR. M3 gets doperpowers:reviewer-high, because it changes who may control a session. Phase 1 closes with a doperpowers:review-code high pass over its range in doperpowers.
+- Decision: Verification and review for this child. The document gets doperpowers:adversarial-reviewer's buildability review before it executes (P5 Decision Log 12). M2 gets doperpowers:reviewer-medium at its PR. M1 and M3 get doperpowers:reviewer-high: M3 because it changes who may control a session, and M1 because its ownership rules took two review rounds to settle (see the second-round entry below). Phase 1 closes with a doperpowers:review-code high pass over its range in doperpowers.
   Rationale: M3 removes a control path from every MAWS session, and a mistake there is either two controllers or a dead session.
   Date/Author: 2026-10-27, desk-sminos-orchestrator.
 - Decision: The record follows RL6's `principal` + `inference` split, not P5's O12 text `credential {slot, kind, principal}`.
@@ -356,6 +368,17 @@ OP_HORIZON = KEPT_S - 3600
   - routes are recorded from the session's environment, and inline settings become a private file even under the default home;
   - the proposed reap fence is acknowledged and leased.
   Rationale: each was a real gap at an ownership or replay boundary (doperpowers:adversarial-reviewer, 2026-10-27).
+  Date/Author: 2026-10-27, desk-sminos-orchestrator.
+
+- Decision: The second buildability round's findings are adopted:
+  - provisional ownership stays out of the published log, and stays provisional when inherited;
+  - the launch claim is SessionStart's first act, and only a new session may claim;
+  - the lane B verdict has three states, and `unresolved` stays an observer;
+  - `opCreated` is required whenever `opId` is present, with a skew bound (also remote layer Decision Log 18);
+  - M4 needs a correlated delivery settlement before OX10's adoption.
+
+  Also: the unreadable-ledger answer is named `unavailable`, after RL4. M1 now gets doperpowers:reviewer-high, as M3 does, because its ownership rules took two review rounds to settle. The document isn't sent for a third round: the remaining risk is implementation detail, which those reviews and the pinned tests cover.
+  Rationale: each finding was a real path to a wrong owner, a wrong controller or a replayed action (doperpowers:adversarial-reviewer, round 2, 2026-10-27).
   Date/Author: 2026-10-27, desk-sminos-orchestrator.
 
 ## Outcomes & Retrospective
