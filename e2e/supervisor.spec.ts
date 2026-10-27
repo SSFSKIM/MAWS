@@ -1069,16 +1069,23 @@ test('(m) P5 O2 M7: with the app open, an idle session with no tab is released; 
     await s.ready(page);
     const fixture = turnsJournal(s.root, 'interest', 1);
     const stamp = Date.now();
+    // a launch of the replay and its prompt, played to its turn's end (unpaced, a turn may open and end between reads)
+    const played = async (id: AppSessionId, replay: string, prompt: string) => {
+      await launchReady(page, id, replay, { cwd: s.repo });
+      value(await invoke(page, 'session.send', { appSessionId: id, content: prompt }));
+      await expect.poll(async () => (await eventsOf(page, id)).some((e) => e.kind === 'turn.ended'), { timeout: 30_000, message: `${id}'s turn ends` }).toBe(true);
+    };
     const tabbed = await s.record(page);
     await showSession(page, tabbed);
-    await startTurn(page, s, tabbed, fixture, 'turn 1');
+    await played(tabbed, fixture, 'turn 1');
     const untabbed = `m7-untabbed-${stamp}` as AppSessionId;
-    await startTurn(page, s, untabbed, fixture, 'turn 1');
+    await played(untabbed, fixture, 'turn 1');
     const kept = `m7-kept-${stamp}` as AppSessionId;
-    await startTurn(page, s, kept, fixture, 'turn 1');
-    value(await invoke(page, 'session.setKeep', { appSessionId: kept, keep: true }));
+    await launchReady(page, kept, fixture, { cwd: s.repo });
+    value(await invoke(page, 'session.setKeep', { appSessionId: kept, keep: true })); // before its turn can make it eligible
+    value(await invoke(page, 'session.send', { appSessionId: kept, content: 'turn 1' }));
     const durable = `m7-durable-${stamp}` as AppSessionId;
-    await startTurn(page, s, durable, DURABLE, firstPrompt(DURABLE));
+    await played(durable, DURABLE, firstPrompt(DURABLE));
     const resumed = `m7-resumed-${stamp}` as AppSessionId;
     await launchReady(page, resumed, RESUMED, { cwd: s.repo, resume: { sessionId: engineSessionId as never, fork: false }, sessionId: null });
     const all = [tabbed, untabbed, kept, durable, resumed];
