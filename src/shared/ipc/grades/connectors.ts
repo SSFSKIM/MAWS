@@ -1,0 +1,40 @@
+// OX9 grades of `connectors.*` (`../grades.ts`; M4's rubric in docs/doperpowers/plans/2026-10-27-p5-o1-seams.md): the
+// owner's grants, leases and accounts, `machine-admin` (OX9).
+import type { CommandGrades } from '../grades';
+
+export const grades = {
+  'connectors.open': 'machine-admin',
+  'connectors.declare': 'machine-admin',
+  'connectors.call': 'machine-admin',
+  'connectors.watch': 'machine-admin',
+  'connectors.unwatch': 'machine-admin',
+  'connectors.refresh': 'machine-admin',
+  'connectors.visibility': 'machine-admin',
+  'connectors.close': 'machine-admin',
+  'connectors.servers': 'machine-admin',
+  'connectors.connect': 'machine-admin',
+  'connectors.reconnect': 'machine-admin',
+  'connectors.disconnect': 'machine-admin',
+  'connectors.add': 'machine-admin',
+  'connectors.remove': 'machine-admin',
+  'connectors.signIn': 'machine-admin',
+  'connectors.signInCancel': 'machine-admin',
+  // main-only
+  'connectors.grants': 'internal',
+  'connectors.grant': 'internal',
+  'connectors.revoke': 'internal',
+  'connectors.check': 'internal',
+  'connectors.resolve': 'internal',
+  'connectors.start': 'internal',
+  'connectors.take': 'internal',
+  'connectors.cancel': 'internal',
+  'connectors.directResolve': 'internal',
+  'connectors.directStart': 'internal',
+  'connectors.directDiscover': 'internal',
+  'connectors.directTake': 'internal',
+  'connectors.directCancel': 'internal',
+  'connectors.directClose': 'internal',
+  'connectors.directLocate': 'internal',
+  'connectors.directSend': 'internal',
+  'connectors.observe': 'internal',
+} as const satisfies CommandGrades<'connectors'>;
