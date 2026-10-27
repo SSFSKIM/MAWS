@@ -1,13 +1,13 @@
 # P5 O6: the renderer's machine dimension and org projects (2026-10-27)
 
-> **Parent:** `docs/doperpowers/plans/2026-10-27-p5-org.md` (P5), child **O6**, parent pin blob `7adc58e71` (master `84dd399cd`).
+> **Parent:** `docs/doperpowers/plans/2026-10-27-p5-org.md` (P5), child **O6**, parent pin blob `063f83c39` (master `957658290`; re-pinned at execution, Decision Log 2026-10-27 "the refresh pass").
 >
 > **What binds.**
 > - O6's section in P5 is this document's design, and its contracts bind: **OX2** (machine-scoped addresses) and **OX3** (org projects), as P5 Decision Logs 21 and 22 restate them.
 > - So do P5 §3 (the app: the connection manager, addresses, org projects) and §8 (the interface: the sidebar by org project, machine chips, an offline machine's rows greyed, sessions with no project under their machine).
 > - So do RL5's machine `ref` (`docs/doperpowers/specs/2026-10-26-remote-layer-design.md` §2.3 and Decision Log 19) and **OX7** (every landing step stays within the local latency budget).
 >
-> **Inherited from other children.** O6 builds on O1's execution document, `docs/doperpowers/plans/2026-10-27-p5-o1-seams.md`, which is executing and has not landed. Its names are cited as that document defines them, and every step that needs O1's code is marked **(needs O1)**. If O1 lands a name differently, follow O1 and record the difference in Surprises.
+> **Inherited from other children.** O6 builds on O1's execution document, `docs/doperpowers/plans/2026-10-27-p5-o1-seams.md`. O1 landed at `368ede2cf` (PR #213; report `docs/doperpowers/plans/2026-10-27-p5-o1-report.md`), and the names this document cites were reconciled against master at execution (Surprises, "O1 as landed"). Steps that need O1's code are still marked **(needs O1)**, as a pointer to where O1's code is consumed. If O1's code differs from a name here, follow O1 and record the difference in Surprises.
 >
 > **Advisory.** The survey behind O6 is `research/org/headless-cut-survey.md` §4.3–§4.4, with its scan in `research/org/scripts/`.
 >
@@ -46,8 +46,8 @@ Each item is checked by the command Concrete Steps names. Paths are repository-r
    - The OX7 bench (`e2e:local-latency`) is within budget at M2's commit and at the head. Budget: p50 at most the baseline's plus 2 ms, p95 at most its plus 5 ms (O1 acceptance 1).
 2. **Machine identity.**
    - The first launch of a profile writes `<userData>/machine.json` holding one `MachineRef`. A relaunch reads the same ref, and a second profile gets a different one.
-   - `machine.identity` answers `{ ref, name, project }`.
-   - `src/main/machine/identity.test.ts` pins:
+   - `machine.identity` answers `{ ref, name, project }`, pinned with main's startup mint in `src/main/machine/identity.test.ts`.
+   - `src/shared/machine/identity-file.test.ts` pins (it travels with the module O2 shares; Decision Log, "the seam PR"):
      - atomic publication. A first run paused after writing its temporary file and before linking it, with a second run starting meanwhile, leaves both reading one complete ref. A stray temporary file is removed at the next start;
      - a malformed file is refused loudly, never re-minted;
      - the format is RL5's: `[A-Za-z0-9_-]{16,64}`, from at least 128 random bits.
@@ -929,7 +929,7 @@ No new dependency. zod 4, Node's `crypto`, the peer-auth addon already in the tr
 
       { "version": 1, "ref": "<MachineRef>", "mintedAt": "<ISO-8601>" }
 
-  It is created exclusively (`wx`, 0600), never rewritten, and a malformed file stops startup.
+  It is published once by linking a complete 0600 temporary file (M1's decision; `wx` then write was rejected there), never rewritten, and a malformed file stops startup.
 - `<userData>/known-machines.json` is the client's (M3):
 
       { "version": 1, "machines": [{ "ref": "<MachineRef>", "name": "<string>", "carrier": { "kind": "socket", "dir": "<absolute path>" } }] }
@@ -955,7 +955,25 @@ No new dependency. zod 4, Node's `crypto`, the peer-auth addon already in the tr
 - Observation: two pieces of main's machine-side code read the client's layout content: the inactive sweep's open tabs and the panel-key lifetime. Both must understand addresses until OX5 replaces the first.
   Evidence: `src/main/layout/open-session-tabs.ts`, and `src/main/layout/store.ts`'s `SESSION_PANEL_KEY` check and `dropPanelKeysOfRemovedSessions`.
 
+- Observation: O1 as landed, against the names this document cites (reconciled at master `957658290`). Every cited name exists: `registerMainHandler`, `registerMachineHandler`, `createRouter`, `Router<R>`, `HandlerContext` and `ClientRef` (`src/shared/ipc/client.ts`), `gradeOf` and `ROUTING_CLASSES = ['client', 'internal']` (`src/shared/ipc/grades.ts`), `WireRegistry`, `createHostRuntime`, `HostOn`, `HostRegister` (`on`, `emit`, `client` hooks), `HostCommandError`, `codecOf`, `SocketPort`, `ClientHelloSchema`, `ServerWelcomeSchema`, `src/shared/host/client-refs.ts`, `wireFingerprint()`, `pnpm wire:manifest`. What O6 adds is absent, as expected: `MainContext` is `HandlerContext` with no `target`; `Router<R>` has `install`, `registerMain`, `registerMachine` and `intercept`, with no `dispatchLocal`; `SocketServerOptions` has no `admit`.
+  Evidence: `src/main/ipc/router.ts:25-41`, `src/shared/host/socket-server.ts:58-69`, `src/shared/host/runtime.ts:25-80`.
+- Observation: `WIRE_MINOR` is 0 on master, and the only commit that touched it is O1's M6. O6's bump is master's first unless O2 lands its own first.
+  Evidence: `git log -S WIRE_MINOR origin/master -- src/shared/ipc/wire.ts` lists `dbd9ee9b7` alone.
+- Observation: the peer-auth helpers are where M3 cites them: `peerAddonPath`, `loadPeerAddon` and `socketFd` in `src/main/browser/cua/peer.ts`.
+
 ## Decision Log
+
+- Decision: the refresh pass, at execution.
+  - The parent is re-pinned from blob `7adc58e71` (master `84dd399cd`) to blob `063f83c39` (master `957658290`). P5 has since gained Decision Logs 28 (the taste answers, already folded into M5), 33 and 43 (OX7's baseline and O1's head numbers), 36 (O1's grading calls), 42 (protocol 2's frozen lines) and 44 (O2 and O6's shared seams). None changes a milestone's design. Decision Log 42 bears on M3 only in that the stand-in's link speaks protocol 3 and adds no field to a frozen line.
+  - O1's names are reconciled (Surprises, "O1 as landed").
+  - Interfaces' "Files on disk" said `machine.json` is created with `wx`, contradicting M1's decision, which rejected `wx` for a link from a complete temporary file. M1's decision governs; the line is corrected.
+  Date/Author: 2026-10-27, O6's executor (controller).
+
+- Decision: the seam PR (P5 Decision Log 44).
+  - `src/shared/machine/ref.ts` and `src/shared/machine/identity-file.ts` land on master first, as their own small PR, once M1's task review is clean, so O2 imports them from master.
+  - So M1 commits those two modules and their tests in a commit of their own, touching no other file. The file-level tests live beside the module in `src/shared/machine/identity-file.test.ts` (and `ref.test.ts`), not in `src/main/machine/identity.test.ts`, and acceptance 2 is reworded to say so. `src/main/machine/identity.test.ts` pins main's part: the startup mint into `<userData>`, the name, and `machine.identity`.
+  - Rejected: keeping the race and format tests in main's test file, which would ship the shared module to O2 without its tests.
+  Date/Author: 2026-10-27, O6's executor (controller).
 
 - Decision: the verification.
   - This document gets one `doperpowers:adversarial-reviewer` buildability review before execution (P5 Decision Log 12).
