@@ -1,0 +1,22 @@
+{
+  // The package as its consumers load it, against types/neutral-runtime.d.ts and no runtime's types: the Worker, desk-web,
+  // mawsd and the app's main import it, so a Workers, Node, or DOM API it reaches for fails to compile here. Its imports
+  // carry `.ts` extensions and only erasable syntax, so Node's type stripping loads it unbundled.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023"],
+    "types": [],
+    "strict": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*.ts", "vectors/index.ts", "vectors/replay.ts", "types/neutral-runtime.d.ts"]
+}

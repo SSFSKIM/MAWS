@@ -1,0 +1,5713 @@
+{
+ "about": "org-protocol vectors (docs/doperpowers/plans/2026-10-27-p5-o11-hub-v2.md, M1): written by vectors/generate.ts; test keys only.",
+ "fixtures": {
+  "g1": {
+   "state": {
+    "org": "org-vectors",
+    "version": 1,
+    "prev": null,
+    "issued": "2026-10-27T00:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       }
+      ]
+     }
+    ],
+    "machines": [],
+    "delegations": [],
+    "projects": []
+   },
+   "sigs": [
+    {
+     "kid": "MOKxOtSc0yivgxjs8Aokgw",
+     "value": "C8sIM8BiJLyX2ZCTy-16LARB7PUZYbmfnbmhQebeIG5rs0rGRmAu2W8Y2Sg_4TIs1NWFBREHizwqhofg6JCMyA"
+    }
+   ]
+  },
+  "genesis signed by a key outside its root": {
+   "state": {
+    "org": "org-vectors",
+    "version": 1,
+    "prev": null,
+    "issued": "2026-10-27T00:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       }
+      ]
+     }
+    ],
+    "machines": [],
+    "delegations": [],
+    "projects": []
+   },
+   "sigs": [
+    {
+     "kid": "xO8YjFOp-ElGtmP7rhfzfQ",
+     "value": "3kvM22_fzF8Yd7PAfbogx5b4bHvCgQGLxHGQgR0lGK3pc35r5nuzi4aeVtsk9T8n2RdwlreiOOMdzkJDh7Y6yA"
+    }
+   ]
+  },
+  "genesis at version 2": {
+   "state": {
+    "org": "org-vectors",
+    "version": 2,
+    "prev": null,
+    "issued": "2026-10-27T00:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       }
+      ]
+     }
+    ],
+    "machines": [],
+    "delegations": [],
+    "projects": []
+   },
+   "sigs": [
+    {
+     "kid": "MOKxOtSc0yivgxjs8Aokgw",
+     "value": "8LqE9PnEFTRI0qhjvhQh4q6IWjQ9BbfFfuZ2zce16tl6OsRJXd3b4OKeyFL2uiJ4kGVXW0tv5dIOPGjPjTlSRQ"
+    }
+   ]
+  },
+  "genesis with a prev": {
+   "state": {
+    "org": "org-vectors",
+    "version": 1,
+    "prev": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "issued": "2026-10-27T00:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       }
+      ]
+     }
+    ],
+    "machines": [],
+    "delegations": [],
+    "projects": []
+   },
+   "sigs": [
+    {
+     "kid": "MOKxOtSc0yivgxjs8Aokgw",
+     "value": "YfFsi08GlFmMFyuHM6ooGb1m3Vs7zeXv3uxFEt_5efH0ZQwt0rKkF0J1hi-Hn-b-wTwavLkm46uZQ7IBIPKzFQ"
+    }
+   ]
+  },
+  "genesis whose root names a channel key": {
+   "state": {
+    "org": "org-vectors",
+    "version": 1,
+    "prev": null,
+    "issued": "2026-10-27T00:00:00.000Z",
+    "root": {
+     "keys": [
+      "nEW8LdQpZ2idv9D_lPjTjA"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       }
+      ]
+     }
+    ],
+    "machines": [],
+    "delegations": [],
+    "projects": []
+   },
+   "sigs": [
+    {
+     "kid": "nEW8LdQpZ2idv9D_lPjTjA",
+     "value": "mLOUiHY-wKTH4XQlvFlIMwGwmwAqyKTX258XmtGiqpHADo-L20qnAZfx_B_QcAHJUVEVztNz5zOe4z6xTFoGtw"
+    }
+   ]
+  },
+  "genesis with an empty root": {
+   "state": {
+    "org": "org-vectors",
+    "version": 1,
+    "prev": null,
+    "issued": "2026-10-27T00:00:00.000Z",
+    "root": {
+     "keys": [],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       }
+      ]
+     }
+    ],
+    "machines": [],
+    "delegations": [],
+    "projects": []
+   },
+   "sigs": [
+    {
+     "kid": "MOKxOtSc0yivgxjs8Aokgw",
+     "value": "kQy7kHJo3eQJIEHa3wS6-lEm6JWQT13KYpsipohKa7hyilI90-CI07A13KVmvlCI9xlI3rN-tt_UYeAh-8XqEg"
+    }
+   ]
+  },
+  "genesis whose web-cards device holds a step-up key": {
+   "state": {
+    "org": "org-vectors",
+    "version": 1,
+    "prev": null,
+    "issued": "2026-10-27T00:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       },
+       {
+        "id": "dev-phone",
+        "class": "web-cards",
+        "keyStorage": "webcrypto",
+        "channelPub": "BJ3Py4rtOGxb6vGrvXGSQfohwzIanAPwZ2tAGBhxExMHmF3sb85_miVhhrOcjJNpSKBBc02bgKilxQn9Xsf9SMo",
+        "stepUpPub": "BHc5-c1U9n5n-A4DWWDulX9PrZioGua7ylsJo-Pzl5JIzCZRmMNd31hpovgx0VTZUMzjQsW2VO_UmJNaBvIo6Cg"
+       }
+      ]
+     }
+    ],
+    "machines": [],
+    "delegations": [],
+    "projects": []
+   },
+   "sigs": [
+    {
+     "kid": "MOKxOtSc0yivgxjs8Aokgw",
+     "value": "IIwiVyrQ8KUepjpmPUnl5flIfDaS7b9AnoUGs6rbdcYfv6CGvKi2XoB1JjJfLUUqFmFGCql0Mc1CjjWBdr2Sfw"
+    }
+   ]
+  },
+  "genesis with two members of one email": {
+   "state": {
+    "org": "org-vectors",
+    "version": 1,
+    "prev": null,
+    "issued": "2026-10-27T00:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       }
+      ]
+     },
+     {
+      "id": "f9e8d7c6b5a4938271605f4e3d2c1b0a",
+      "email": "A@example.com",
+      "role": "member",
+      "devices": []
+     }
+    ],
+    "machines": [],
+    "delegations": [],
+    "projects": []
+   },
+   "sigs": [
+    {
+     "kid": "MOKxOtSc0yivgxjs8Aokgw",
+     "value": "3MZEXiH6UWEq9FSwkl_9wKDrG7_DbCofvyOHQx0e_b42_LMLnV1LcQImCWjIPv_DSr-LEeYBKlNthHRZH7tUiA"
+    }
+   ]
+  },
+  "genesis with a machine owned by a non-member": {
+   "state": {
+    "org": "org-vectors",
+    "version": 1,
+    "prev": null,
+    "issued": "2026-10-27T00:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       }
+      ]
+     }
+    ],
+    "machines": [
+     {
+      "name": "mini",
+      "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+      "owners": [
+       "f9e8d7c6b5a4938271605f4e3d2c1b0a"
+      ]
+     }
+    ],
+    "delegations": [],
+    "projects": []
+   },
+   "sigs": [
+    {
+     "kid": "MOKxOtSc0yivgxjs8Aokgw",
+     "value": "LHNLChbsSbfwT83FWM5-kZ6QmWJgrHuAB-f36rc3nSN28NpOKH16RypRpybCaY-6lBwiJyjsYO2UqWlM3SQ9rA"
+    }
+   ]
+  },
+  "genesis with an unknown field": {
+   "state": {
+    "org": "org-vectors",
+    "version": 1,
+    "prev": null,
+    "issued": "2026-10-27T00:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       }
+      ]
+     }
+    ],
+    "machines": [],
+    "delegations": [],
+    "projects": [],
+    "extra": true
+   },
+   "sigs": [
+    {
+     "kid": "MOKxOtSc0yivgxjs8Aokgw",
+     "value": "8xogsyNTIdoTzIbSpu81Pvrd3_mdbcVS7F6w4BjApN7DBs1ZZket8Kf63XH7V_CuHPp-23L2ugIXjY4IQgIB5g"
+    }
+   ]
+  },
+  "v2": {
+   "state": {
+    "org": "org-vectors",
+    "version": 2,
+    "prev": "un3ena9tV8UGiSV9xKUYS2BE75cN-n5s14dcOTy62iI",
+    "issued": "2026-10-27T01:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       },
+       {
+        "id": "dev-a-phone",
+        "class": "web-cards",
+        "keyStorage": "webcrypto",
+        "channelPub": "BJ3Py4rtOGxb6vGrvXGSQfohwzIanAPwZ2tAGBhxExMHmF3sb85_miVhhrOcjJNpSKBBc02bgKilxQn9Xsf9SMo",
+        "passkey": {
+         "credentialId": "AQIDBAUGBwg",
+         "publicKey": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+         "rpId": "desk.example"
+        },
+        "endorsement": {
+         "kid": "MOKxOtSc0yivgxjs8Aokgw",
+         "value": "MfRQYuULKrBbG4drU0qVNqKRljchubkKQ5ASnAmMERT3E1c0dGCJ18oDOIFWD4JX8TBciBqyJX3b1QSJYjgn6g"
+        }
+       }
+      ]
+     },
+     {
+      "id": "f9e8d7c6b5a4938271605f4e3d2c1b0a",
+      "email": "b@example.com",
+      "role": "member",
+      "devices": [
+       {
+        "id": "dev-b1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BHpKiDqVeZsSJJFTjZBULgYQV18KQP99oIrIsfd5X9V0qrEiezHo5UUDGJiR1NdDNGvSnizFSchexsmGo0qq5uI",
+        "stepUpPub": "BCz_P6IYIrd0FkpjVZKhf5kwbRd1xZp78qIZ-RwbyhRnfbX2ZR4QJMe4fXK2-8Qr6cGB5w-J7jeoISNwpXCMbII"
+       }
+      ]
+     }
+    ],
+    "machines": [
+     {
+      "name": "mini",
+      "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+      "owners": [
+       "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      ]
+     },
+     {
+      "name": "vm-build",
+      "pub": "BD3x2zNV3PNluyvagW-ccU9Lkl0tm878b6nRnDEkTo8kC14FfK9Hl3TdHp63iEObErVd6krV1X1lQ9fcyVaQx6A",
+      "owners": "org"
+     }
+    ],
+    "delegations": [
+     {
+      "id": "dlg-vm",
+      "pub": "BBjnDTvXQhLklZU0sBlye7RbjmVkBPJFNsGPve4XCK9RaTxasa8leKLtqbMt4vdIcANprV8z5fduCuivp5AAgRg",
+      "prefix": "vm-",
+      "expires": "2026-11-27T00:00:00.000Z",
+      "maxUses": 3,
+      "offlineRevokeS": 3600,
+      "owners": "org"
+     }
+    ],
+    "projects": [
+     {
+      "id": "proj-1",
+      "name": "one"
+     }
+    ]
+   },
+   "sigs": [
+    {
+     "kid": "MOKxOtSc0yivgxjs8Aokgw",
+     "value": "BF3MhCRxMDKZFCHa4HXT77fQhE11LdTj6cfoo618ZxdIYKsQnekrnw_LqS_HbHYS_t4tMm6KXe_FnAObrcBn4w"
+    }
+   ]
+  },
+  "v2 phone without endorsement": {
+   "state": {
+    "org": "org-vectors",
+    "version": 2,
+    "prev": "un3ena9tV8UGiSV9xKUYS2BE75cN-n5s14dcOTy62iI",
+    "issued": "2026-10-27T01:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       },
+       {
+        "id": "dev-a-phone",
+        "class": "web-cards",
+        "keyStorage": "webcrypto",
+        "channelPub": "BJ3Py4rtOGxb6vGrvXGSQfohwzIanAPwZ2tAGBhxExMHmF3sb85_miVhhrOcjJNpSKBBc02bgKilxQn9Xsf9SMo",
+        "passkey": {
+         "credentialId": "AQIDBAUGBwg",
+         "publicKey": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+         "rpId": "desk.example"
+        }
+       }
+      ]
+     }
+    ],
+    "machines": [],
+    "delegations": [],
+    "projects": []
+   },
+   "sigs": [
+    {
+     "kid": "MOKxOtSc0yivgxjs8Aokgw",
+     "value": "fc4k6XqFcXOWYzLjrCg7_Eqb7M_i-d4egTYDc-fTxJh3Ld8t-_AcFn8Ti1TaYUmiq82xt2rPAEQo6xlDMkI2aQ"
+    }
+   ]
+  },
+  "v3": {
+   "state": {
+    "org": "org-vectors",
+    "version": 3,
+    "prev": "BA3eB7fCwGH-VTtvPcliZfuMKWWKKo7taVbzV9ysLlQ",
+    "issued": "2026-10-27T02:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       },
+       {
+        "id": "dev-a-phone",
+        "class": "web-cards",
+        "keyStorage": "webcrypto",
+        "channelPub": "BJ3Py4rtOGxb6vGrvXGSQfohwzIanAPwZ2tAGBhxExMHmF3sb85_miVhhrOcjJNpSKBBc02bgKilxQn9Xsf9SMo",
+        "passkey": {
+         "credentialId": "AQIDBAUGBwg",
+         "publicKey": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+         "rpId": "desk.example"
+        },
+        "endorsement": {
+         "kid": "MOKxOtSc0yivgxjs8Aokgw",
+         "value": "MfRQYuULKrBbG4drU0qVNqKRljchubkKQ5ASnAmMERT3E1c0dGCJ18oDOIFWD4JX8TBciBqyJX3b1QSJYjgn6g"
+        }
+       }
+      ]
+     },
+     {
+      "id": "f9e8d7c6b5a4938271605f4e3d2c1b0a",
+      "email": "b@example.com",
+      "role": "member",
+      "devices": [
+       {
+        "id": "dev-b1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BHpKiDqVeZsSJJFTjZBULgYQV18KQP99oIrIsfd5X9V0qrEiezHo5UUDGJiR1NdDNGvSnizFSchexsmGo0qq5uI",
+        "stepUpPub": "BCz_P6IYIrd0FkpjVZKhf5kwbRd1xZp78qIZ-RwbyhRnfbX2ZR4QJMe4fXK2-8Qr6cGB5w-J7jeoISNwpXCMbII"
+       },
+       {
+        "id": "dev-b2",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BFUkGKFp_Ul0Ikm8agUKb5L7BeZlIYfiI9MwIAuvtk4_wZ0MYuuYS7fnHctJdC_qKmHObk0pG17bAw_rmRQlzGg",
+        "stepUpPub": "BLtLgVsu3VjBSAqJ5e5548Uc8K3mr_xxcwB-n5bMEo05q5jihcmfMPQudcNXomjGReokMNAnkDIuoCz7zU2hP6E",
+        "endorsement": {
+         "kid": "9AH8MazwFkhpV9cdy8kEXg",
+         "value": "qRwyHQXUDt51yv3D3zXTpCg-Ng0RsKy2nOTrBak8Ex1KI0nwDzXI2UaUyA-NAp0q4Qb9hwkuznPPuvBO8i_3VQ"
+        }
+       }
+      ]
+     }
+    ],
+    "machines": [
+     {
+      "name": "mini",
+      "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+      "owners": [
+       "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      ]
+     },
+     {
+      "name": "vm-build",
+      "pub": "BD3x2zNV3PNluyvagW-ccU9Lkl0tm878b6nRnDEkTo8kC14FfK9Hl3TdHp63iEObErVd6krV1X1lQ9fcyVaQx6A",
+      "owners": "org"
+     }
+    ],
+    "delegations": [
+     {
+      "id": "dlg-vm",
+      "pub": "BBjnDTvXQhLklZU0sBlye7RbjmVkBPJFNsGPve4XCK9RaTxasa8leKLtqbMt4vdIcANprV8z5fduCuivp5AAgRg",
+      "prefix": "vm-",
+      "expires": "2026-11-27T00:00:00.000Z",
+      "maxUses": 3,
+      "offlineRevokeS": 3600,
+      "owners": "org"
+     }
+    ],
+    "projects": [
+     {
+      "id": "proj-1",
+      "name": "one"
+     }
+    ]
+   },
+   "sigs": [
+    {
+     "kid": "MOKxOtSc0yivgxjs8Aokgw",
+     "value": "xS0E10gTaGttxy6efzQGyu2Zy9dVis_jVFKrmpbur1s2fSi4s-O7nRu1eLvBKnWnKveRVUoiCLdjD1tHi2vkBw"
+    }
+   ]
+  },
+  "a second device without an endorsement": {
+   "state": {
+    "org": "org-vectors",
+    "version": 3,
+    "prev": "BA3eB7fCwGH-VTtvPcliZfuMKWWKKo7taVbzV9ysLlQ",
+    "issued": "2026-10-27T02:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       },
+       {
+        "id": "dev-a-phone",
+        "class": "web-cards",
+        "keyStorage": "webcrypto",
+        "channelPub": "BJ3Py4rtOGxb6vGrvXGSQfohwzIanAPwZ2tAGBhxExMHmF3sb85_miVhhrOcjJNpSKBBc02bgKilxQn9Xsf9SMo",
+        "passkey": {
+         "credentialId": "AQIDBAUGBwg",
+         "publicKey": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+         "rpId": "desk.example"
+        },
+        "endorsement": {
+         "kid": "MOKxOtSc0yivgxjs8Aokgw",
+         "value": "MfRQYuULKrBbG4drU0qVNqKRljchubkKQ5ASnAmMERT3E1c0dGCJ18oDOIFWD4JX8TBciBqyJX3b1QSJYjgn6g"
+        }
+       }
+      ]
+     },
+     {
+      "id": "f9e8d7c6b5a4938271605f4e3d2c1b0a",
+      "email": "b@example.com",
+      "role": "member",
+      "devices": [
+       {
+        "id": "dev-b1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BHpKiDqVeZsSJJFTjZBULgYQV18KQP99oIrIsfd5X9V0qrEiezHo5UUDGJiR1NdDNGvSnizFSchexsmGo0qq5uI",
+        "stepUpPub": "BCz_P6IYIrd0FkpjVZKhf5kwbRd1xZp78qIZ-RwbyhRnfbX2ZR4QJMe4fXK2-8Qr6cGB5w-J7jeoISNwpXCMbII"
+       },
+       {
+        "id": "dev-b2",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BFUkGKFp_Ul0Ikm8agUKb5L7BeZlIYfiI9MwIAuvtk4_wZ0MYuuYS7fnHctJdC_qKmHObk0pG17bAw_rmRQlzGg",
+        "stepUpPub": "BLtLgVsu3VjBSAqJ5e5548Uc8K3mr_xxcwB-n5bMEo05q5jihcmfMPQudcNXomjGReokMNAnkDIuoCz7zU2hP6E"
+       }
+      ]
+     }
+    ],
+    "machines": [
+     {
+      "name": "mini",
+      "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+      "owners": [
+       "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      ]
+     },
+     {
+      "name": "vm-build",
+      "pub": "BD3x2zNV3PNluyvagW-ccU9Lkl0tm878b6nRnDEkTo8kC14FfK9Hl3TdHp63iEObErVd6krV1X1lQ9fcyVaQx6A",
+      "owners": "org"
+     }
+    ],
+    "delegations": [
+     {
+      "id": "dlg-vm",
+      "pub": "BBjnDTvXQhLklZU0sBlye7RbjmVkBPJFNsGPve4XCK9RaTxasa8leKLtqbMt4vdIcANprV8z5fduCuivp5AAgRg",
+      "prefix": "vm-",
+      "expires": "2026-11-27T00:00:00.000Z",
+      "maxUses": 3,
+      "offlineRevokeS": 3600,
+      "owners": "org"
+     }
+    ],
+    "projects": [
+     {
+      "id": "proj-1",
+      "name": "one"
+     }
+    ]
+   },
+   "sigs": [
+    {
+     "kid": "MOKxOtSc0yivgxjs8Aokgw",
+     "value": "6K-zMc_Zc_h4uO87C-BBd2DYvFpM5CP5LOex0IAW2UKv70AnLmCFT3jWAcf_b1U8HLqDrsOFFb7mfUOfDLCKnQ"
+    }
+   ]
+  },
+  "a second device whose channel key changed after its endorsement": {
+   "state": {
+    "org": "org-vectors",
+    "version": 3,
+    "prev": "BA3eB7fCwGH-VTtvPcliZfuMKWWKKo7taVbzV9ysLlQ",
+    "issued": "2026-10-27T02:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       },
+       {
+        "id": "dev-a-phone",
+        "class": "web-cards",
+        "keyStorage": "webcrypto",
+        "channelPub": "BJ3Py4rtOGxb6vGrvXGSQfohwzIanAPwZ2tAGBhxExMHmF3sb85_miVhhrOcjJNpSKBBc02bgKilxQn9Xsf9SMo",
+        "passkey": {
+         "credentialId": "AQIDBAUGBwg",
+         "publicKey": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+         "rpId": "desk.example"
+        },
+        "endorsement": {
+         "kid": "MOKxOtSc0yivgxjs8Aokgw",
+         "value": "MfRQYuULKrBbG4drU0qVNqKRljchubkKQ5ASnAmMERT3E1c0dGCJ18oDOIFWD4JX8TBciBqyJX3b1QSJYjgn6g"
+        }
+       }
+      ]
+     },
+     {
+      "id": "f9e8d7c6b5a4938271605f4e3d2c1b0a",
+      "email": "b@example.com",
+      "role": "member",
+      "devices": [
+       {
+        "id": "dev-b1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BHpKiDqVeZsSJJFTjZBULgYQV18KQP99oIrIsfd5X9V0qrEiezHo5UUDGJiR1NdDNGvSnizFSchexsmGo0qq5uI",
+        "stepUpPub": "BCz_P6IYIrd0FkpjVZKhf5kwbRd1xZp78qIZ-RwbyhRnfbX2ZR4QJMe4fXK2-8Qr6cGB5w-J7jeoISNwpXCMbII"
+       },
+       {
+        "id": "dev-b2",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BHc5-c1U9n5n-A4DWWDulX9PrZioGua7ylsJo-Pzl5JIzCZRmMNd31hpovgx0VTZUMzjQsW2VO_UmJNaBvIo6Cg",
+        "stepUpPub": "BLtLgVsu3VjBSAqJ5e5548Uc8K3mr_xxcwB-n5bMEo05q5jihcmfMPQudcNXomjGReokMNAnkDIuoCz7zU2hP6E",
+        "endorsement": {
+         "kid": "9AH8MazwFkhpV9cdy8kEXg",
+         "value": "qRwyHQXUDt51yv3D3zXTpCg-Ng0RsKy2nOTrBak8Ex1KI0nwDzXI2UaUyA-NAp0q4Qb9hwkuznPPuvBO8i_3VQ"
+        }
+       }
+      ]
+     }
+    ],
+    "machines": [
+     {
+      "name": "mini",
+      "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+      "owners": [
+       "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      ]
+     },
+     {
+      "name": "vm-build",
+      "pub": "BD3x2zNV3PNluyvagW-ccU9Lkl0tm878b6nRnDEkTo8kC14FfK9Hl3TdHp63iEObErVd6krV1X1lQ9fcyVaQx6A",
+      "owners": "org"
+     }
+    ],
+    "delegations": [
+     {
+      "id": "dlg-vm",
+      "pub": "BBjnDTvXQhLklZU0sBlye7RbjmVkBPJFNsGPve4XCK9RaTxasa8leKLtqbMt4vdIcANprV8z5fduCuivp5AAgRg",
+      "prefix": "vm-",
+      "expires": "2026-11-27T00:00:00.000Z",
+      "maxUses": 3,
+      "offlineRevokeS": 3600,
+      "owners": "org"
+     }
+    ],
+    "projects": [
+     {
+      "id": "proj-1",
+      "name": "one"
+     }
+    ]
+   },
+   "sigs": [
+    {
+     "kid": "MOKxOtSc0yivgxjs8Aokgw",
+     "value": "QNllrD8Ug3mmVOCqzz1msm1louVAktUnUrNnjwFIJvumZ1CVNiy2aUBVpa8vnQ-P7ovxmTl4v-EjR7_hODJULA"
+    }
+   ]
+  },
+  "a second device whose key storage changed after its endorsement": {
+   "state": {
+    "org": "org-vectors",
+    "version": 3,
+    "prev": "BA3eB7fCwGH-VTtvPcliZfuMKWWKKo7taVbzV9ysLlQ",
+    "issued": "2026-10-27T02:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       },
+       {
+        "id": "dev-a-phone",
+        "class": "web-cards",
+        "keyStorage": "webcrypto",
+        "channelPub": "BJ3Py4rtOGxb6vGrvXGSQfohwzIanAPwZ2tAGBhxExMHmF3sb85_miVhhrOcjJNpSKBBc02bgKilxQn9Xsf9SMo",
+        "passkey": {
+         "credentialId": "AQIDBAUGBwg",
+         "publicKey": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+         "rpId": "desk.example"
+        },
+        "endorsement": {
+         "kid": "MOKxOtSc0yivgxjs8Aokgw",
+         "value": "MfRQYuULKrBbG4drU0qVNqKRljchubkKQ5ASnAmMERT3E1c0dGCJ18oDOIFWD4JX8TBciBqyJX3b1QSJYjgn6g"
+        }
+       }
+      ]
+     },
+     {
+      "id": "f9e8d7c6b5a4938271605f4e3d2c1b0a",
+      "email": "b@example.com",
+      "role": "member",
+      "devices": [
+       {
+        "id": "dev-b1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BHpKiDqVeZsSJJFTjZBULgYQV18KQP99oIrIsfd5X9V0qrEiezHo5UUDGJiR1NdDNGvSnizFSchexsmGo0qq5uI",
+        "stepUpPub": "BCz_P6IYIrd0FkpjVZKhf5kwbRd1xZp78qIZ-RwbyhRnfbX2ZR4QJMe4fXK2-8Qr6cGB5w-J7jeoISNwpXCMbII"
+       },
+       {
+        "id": "dev-b2",
+        "class": "native-mac",
+        "keyStorage": "enclave",
+        "channelPub": "BFUkGKFp_Ul0Ikm8agUKb5L7BeZlIYfiI9MwIAuvtk4_wZ0MYuuYS7fnHctJdC_qKmHObk0pG17bAw_rmRQlzGg",
+        "stepUpPub": "BLtLgVsu3VjBSAqJ5e5548Uc8K3mr_xxcwB-n5bMEo05q5jihcmfMPQudcNXomjGReokMNAnkDIuoCz7zU2hP6E",
+        "endorsement": {
+         "kid": "9AH8MazwFkhpV9cdy8kEXg",
+         "value": "qRwyHQXUDt51yv3D3zXTpCg-Ng0RsKy2nOTrBak8Ex1KI0nwDzXI2UaUyA-NAp0q4Qb9hwkuznPPuvBO8i_3VQ"
+        }
+       }
+      ]
+     }
+    ],
+    "machines": [
+     {
+      "name": "mini",
+      "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+      "owners": [
+       "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      ]
+     },
+     {
+      "name": "vm-build",
+      "pub": "BD3x2zNV3PNluyvagW-ccU9Lkl0tm878b6nRnDEkTo8kC14FfK9Hl3TdHp63iEObErVd6krV1X1lQ9fcyVaQx6A",
+      "owners": "org"
+     }
+    ],
+    "delegations": [
+     {
+      "id": "dlg-vm",
+      "pub": "BBjnDTvXQhLklZU0sBlye7RbjmVkBPJFNsGPve4XCK9RaTxasa8leKLtqbMt4vdIcANprV8z5fduCuivp5AAgRg",
+      "prefix": "vm-",
+      "expires": "2026-11-27T00:00:00.000Z",
+      "maxUses": 3,
+      "offlineRevokeS": 3600,
+      "owners": "org"
+     }
+    ],
+    "projects": [
+     {
+      "id": "proj-1",
+      "name": "one"
+     }
+    ]
+   },
+   "sigs": [
+    {
+     "kid": "MOKxOtSc0yivgxjs8Aokgw",
+     "value": "Vsb42PczR1m_hUKP_fPFlKpRyhGpPANmuyv3sM5I24QRTlqSCVNJrffem997eGdtSvUb28EVR64w_Ely8cIv9g"
+    }
+   ]
+  },
+  "a second device endorsed by another member's device": {
+   "state": {
+    "org": "org-vectors",
+    "version": 3,
+    "prev": "BA3eB7fCwGH-VTtvPcliZfuMKWWKKo7taVbzV9ysLlQ",
+    "issued": "2026-10-27T02:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       },
+       {
+        "id": "dev-a-phone",
+        "class": "web-cards",
+        "keyStorage": "webcrypto",
+        "channelPub": "BJ3Py4rtOGxb6vGrvXGSQfohwzIanAPwZ2tAGBhxExMHmF3sb85_miVhhrOcjJNpSKBBc02bgKilxQn9Xsf9SMo",
+        "passkey": {
+         "credentialId": "AQIDBAUGBwg",
+         "publicKey": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+         "rpId": "desk.example"
+        },
+        "endorsement": {
+         "kid": "MOKxOtSc0yivgxjs8Aokgw",
+         "value": "MfRQYuULKrBbG4drU0qVNqKRljchubkKQ5ASnAmMERT3E1c0dGCJ18oDOIFWD4JX8TBciBqyJX3b1QSJYjgn6g"
+        }
+       }
+      ]
+     },
+     {
+      "id": "f9e8d7c6b5a4938271605f4e3d2c1b0a",
+      "email": "b@example.com",
+      "role": "member",
+      "devices": [
+       {
+        "id": "dev-b1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BHpKiDqVeZsSJJFTjZBULgYQV18KQP99oIrIsfd5X9V0qrEiezHo5UUDGJiR1NdDNGvSnizFSchexsmGo0qq5uI",
+        "stepUpPub": "BCz_P6IYIrd0FkpjVZKhf5kwbRd1xZp78qIZ-RwbyhRnfbX2ZR4QJMe4fXK2-8Qr6cGB5w-J7jeoISNwpXCMbII"
+       },
+       {
+        "id": "dev-b2",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BFUkGKFp_Ul0Ikm8agUKb5L7BeZlIYfiI9MwIAuvtk4_wZ0MYuuYS7fnHctJdC_qKmHObk0pG17bAw_rmRQlzGg",
+        "stepUpPub": "BLtLgVsu3VjBSAqJ5e5548Uc8K3mr_xxcwB-n5bMEo05q5jihcmfMPQudcNXomjGReokMNAnkDIuoCz7zU2hP6E",
+        "endorsement": {
+         "kid": "MOKxOtSc0yivgxjs8Aokgw",
+         "value": "zvBdpKa1sXQrjHvagg8lUUjuq8ewFPnAbUJvcik1vx0XWJ_Hf2AEslL_gbwqYObDQQjDPYy5yynq0a3qPOm1BQ"
+        }
+       }
+      ]
+     }
+    ],
+    "machines": [
+     {
+      "name": "mini",
+      "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+      "owners": [
+       "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      ]
+     },
+     {
+      "name": "vm-build",
+      "pub": "BD3x2zNV3PNluyvagW-ccU9Lkl0tm878b6nRnDEkTo8kC14FfK9Hl3TdHp63iEObErVd6krV1X1lQ9fcyVaQx6A",
+      "owners": "org"
+     }
+    ],
+    "delegations": [
+     {
+      "id": "dlg-vm",
+      "pub": "BBjnDTvXQhLklZU0sBlye7RbjmVkBPJFNsGPve4XCK9RaTxasa8leKLtqbMt4vdIcANprV8z5fduCuivp5AAgRg",
+      "prefix": "vm-",
+      "expires": "2026-11-27T00:00:00.000Z",
+      "maxUses": 3,
+      "offlineRevokeS": 3600,
+      "owners": "org"
+     }
+    ],
+    "projects": [
+     {
+      "id": "proj-1",
+      "name": "one"
+     }
+    ]
+   },
+   "sigs": [
+    {
+     "kid": "MOKxOtSc0yivgxjs8Aokgw",
+     "value": "ThbsR5kf5pGwv0GJUW5zhj9AzesM2p2UzN90jm5fiVwYK3XPAdwjC1wjWIhxa3O5UEiUDDx2uC_vCSPDyaokMQ"
+    }
+   ]
+  },
+  "a second device endorsed by the member's channel key": {
+   "state": {
+    "org": "org-vectors",
+    "version": 3,
+    "prev": "BA3eB7fCwGH-VTtvPcliZfuMKWWKKo7taVbzV9ysLlQ",
+    "issued": "2026-10-27T02:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       },
+       {
+        "id": "dev-a-phone",
+        "class": "web-cards",
+        "keyStorage": "webcrypto",
+        "channelPub": "BJ3Py4rtOGxb6vGrvXGSQfohwzIanAPwZ2tAGBhxExMHmF3sb85_miVhhrOcjJNpSKBBc02bgKilxQn9Xsf9SMo",
+        "passkey": {
+         "credentialId": "AQIDBAUGBwg",
+         "publicKey": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+         "rpId": "desk.example"
+        },
+        "endorsement": {
+         "kid": "MOKxOtSc0yivgxjs8Aokgw",
+         "value": "MfRQYuULKrBbG4drU0qVNqKRljchubkKQ5ASnAmMERT3E1c0dGCJ18oDOIFWD4JX8TBciBqyJX3b1QSJYjgn6g"
+        }
+       }
+      ]
+     },
+     {
+      "id": "f9e8d7c6b5a4938271605f4e3d2c1b0a",
+      "email": "b@example.com",
+      "role": "member",
+      "devices": [
+       {
+        "id": "dev-b1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BHpKiDqVeZsSJJFTjZBULgYQV18KQP99oIrIsfd5X9V0qrEiezHo5UUDGJiR1NdDNGvSnizFSchexsmGo0qq5uI",
+        "stepUpPub": "BCz_P6IYIrd0FkpjVZKhf5kwbRd1xZp78qIZ-RwbyhRnfbX2ZR4QJMe4fXK2-8Qr6cGB5w-J7jeoISNwpXCMbII"
+       },
+       {
+        "id": "dev-b2",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BFUkGKFp_Ul0Ikm8agUKb5L7BeZlIYfiI9MwIAuvtk4_wZ0MYuuYS7fnHctJdC_qKmHObk0pG17bAw_rmRQlzGg",
+        "stepUpPub": "BLtLgVsu3VjBSAqJ5e5548Uc8K3mr_xxcwB-n5bMEo05q5jihcmfMPQudcNXomjGReokMNAnkDIuoCz7zU2hP6E",
+        "endorsement": {
+         "kid": "DQ1GJV5m1OQoeDhxlbpf9g",
+         "value": "xdHMgAJphBfI7Tv9EVeeYGkdSFIdKbGNzdv6T4K-Ea2bQYZ66mjOtXyKs8xLhiwRp1G7i__GBWCcrDhquJGGpg"
+        }
+       }
+      ]
+     }
+    ],
+    "machines": [
+     {
+      "name": "mini",
+      "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+      "owners": [
+       "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      ]
+     },
+     {
+      "name": "vm-build",
+      "pub": "BD3x2zNV3PNluyvagW-ccU9Lkl0tm878b6nRnDEkTo8kC14FfK9Hl3TdHp63iEObErVd6krV1X1lQ9fcyVaQx6A",
+      "owners": "org"
+     }
+    ],
+    "delegations": [
+     {
+      "id": "dlg-vm",
+      "pub": "BBjnDTvXQhLklZU0sBlye7RbjmVkBPJFNsGPve4XCK9RaTxasa8leKLtqbMt4vdIcANprV8z5fduCuivp5AAgRg",
+      "prefix": "vm-",
+      "expires": "2026-11-27T00:00:00.000Z",
+      "maxUses": 3,
+      "offlineRevokeS": 3600,
+      "owners": "org"
+     }
+    ],
+    "projects": [
+     {
+      "id": "proj-1",
+      "name": "one"
+     }
+    ]
+   },
+   "sigs": [
+    {
+     "kid": "MOKxOtSc0yivgxjs8Aokgw",
+     "value": "QYHWH1V2pXEJxbbEefGCE8xAsoIYkXT2MXGauW_b_VvbNArzgLzzkRgVUxMtsiAddnBAgVhK-qL9wS0AXVuJcw"
+    }
+   ]
+  },
+  "a second device endorsed for another org": {
+   "state": {
+    "org": "org-vectors",
+    "version": 3,
+    "prev": "BA3eB7fCwGH-VTtvPcliZfuMKWWKKo7taVbzV9ysLlQ",
+    "issued": "2026-10-27T02:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       },
+       {
+        "id": "dev-a-phone",
+        "class": "web-cards",
+        "keyStorage": "webcrypto",
+        "channelPub": "BJ3Py4rtOGxb6vGrvXGSQfohwzIanAPwZ2tAGBhxExMHmF3sb85_miVhhrOcjJNpSKBBc02bgKilxQn9Xsf9SMo",
+        "passkey": {
+         "credentialId": "AQIDBAUGBwg",
+         "publicKey": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+         "rpId": "desk.example"
+        },
+        "endorsement": {
+         "kid": "MOKxOtSc0yivgxjs8Aokgw",
+         "value": "MfRQYuULKrBbG4drU0qVNqKRljchubkKQ5ASnAmMERT3E1c0dGCJ18oDOIFWD4JX8TBciBqyJX3b1QSJYjgn6g"
+        }
+       }
+      ]
+     },
+     {
+      "id": "f9e8d7c6b5a4938271605f4e3d2c1b0a",
+      "email": "b@example.com",
+      "role": "member",
+      "devices": [
+       {
+        "id": "dev-b1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BHpKiDqVeZsSJJFTjZBULgYQV18KQP99oIrIsfd5X9V0qrEiezHo5UUDGJiR1NdDNGvSnizFSchexsmGo0qq5uI",
+        "stepUpPub": "BCz_P6IYIrd0FkpjVZKhf5kwbRd1xZp78qIZ-RwbyhRnfbX2ZR4QJMe4fXK2-8Qr6cGB5w-J7jeoISNwpXCMbII"
+       },
+       {
+        "id": "dev-b2",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BFUkGKFp_Ul0Ikm8agUKb5L7BeZlIYfiI9MwIAuvtk4_wZ0MYuuYS7fnHctJdC_qKmHObk0pG17bAw_rmRQlzGg",
+        "stepUpPub": "BLtLgVsu3VjBSAqJ5e5548Uc8K3mr_xxcwB-n5bMEo05q5jihcmfMPQudcNXomjGReokMNAnkDIuoCz7zU2hP6E",
+        "endorsement": {
+         "kid": "9AH8MazwFkhpV9cdy8kEXg",
+         "value": "QxCAMv3dUGRJOry3kxeon2iUgF8nCWm8ciczz1Z2jI8wy8i4HLNyHhUlULylP5vk6Edo5SIThI-gYPbucQqzrA"
+        }
+       }
+      ]
+     }
+    ],
+    "machines": [
+     {
+      "name": "mini",
+      "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+      "owners": [
+       "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      ]
+     },
+     {
+      "name": "vm-build",
+      "pub": "BD3x2zNV3PNluyvagW-ccU9Lkl0tm878b6nRnDEkTo8kC14FfK9Hl3TdHp63iEObErVd6krV1X1lQ9fcyVaQx6A",
+      "owners": "org"
+     }
+    ],
+    "delegations": [
+     {
+      "id": "dlg-vm",
+      "pub": "BBjnDTvXQhLklZU0sBlye7RbjmVkBPJFNsGPve4XCK9RaTxasa8leKLtqbMt4vdIcANprV8z5fduCuivp5AAgRg",
+      "prefix": "vm-",
+      "expires": "2026-11-27T00:00:00.000Z",
+      "maxUses": 3,
+      "offlineRevokeS": 3600,
+      "owners": "org"
+     }
+    ],
+    "projects": [
+     {
+      "id": "proj-1",
+      "name": "one"
+     }
+    ]
+   },
+   "sigs": [
+    {
+     "kid": "MOKxOtSc0yivgxjs8Aokgw",
+     "value": "IE2evjX9nA8v2Hmt9W3qqL-kcRAVumQdWx1wfhmBdjNcMuQzEh_H4ghaRPci48GXCkSg_Qjtt98ipGJgRRhuxg"
+    }
+   ]
+  },
+  "a successor signed by a member, not an admin": {
+   "state": {
+    "org": "org-vectors",
+    "version": 3,
+    "prev": "BA3eB7fCwGH-VTtvPcliZfuMKWWKKo7taVbzV9ysLlQ",
+    "issued": "2026-10-27T02:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       },
+       {
+        "id": "dev-a-phone",
+        "class": "web-cards",
+        "keyStorage": "webcrypto",
+        "channelPub": "BJ3Py4rtOGxb6vGrvXGSQfohwzIanAPwZ2tAGBhxExMHmF3sb85_miVhhrOcjJNpSKBBc02bgKilxQn9Xsf9SMo",
+        "passkey": {
+         "credentialId": "AQIDBAUGBwg",
+         "publicKey": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+         "rpId": "desk.example"
+        },
+        "endorsement": {
+         "kid": "MOKxOtSc0yivgxjs8Aokgw",
+         "value": "MfRQYuULKrBbG4drU0qVNqKRljchubkKQ5ASnAmMERT3E1c0dGCJ18oDOIFWD4JX8TBciBqyJX3b1QSJYjgn6g"
+        }
+       }
+      ]
+     },
+     {
+      "id": "f9e8d7c6b5a4938271605f4e3d2c1b0a",
+      "email": "b@example.com",
+      "role": "member",
+      "devices": [
+       {
+        "id": "dev-b1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BHpKiDqVeZsSJJFTjZBULgYQV18KQP99oIrIsfd5X9V0qrEiezHo5UUDGJiR1NdDNGvSnizFSchexsmGo0qq5uI",
+        "stepUpPub": "BCz_P6IYIrd0FkpjVZKhf5kwbRd1xZp78qIZ-RwbyhRnfbX2ZR4QJMe4fXK2-8Qr6cGB5w-J7jeoISNwpXCMbII"
+       },
+       {
+        "id": "dev-b2",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BFUkGKFp_Ul0Ikm8agUKb5L7BeZlIYfiI9MwIAuvtk4_wZ0MYuuYS7fnHctJdC_qKmHObk0pG17bAw_rmRQlzGg",
+        "stepUpPub": "BLtLgVsu3VjBSAqJ5e5548Uc8K3mr_xxcwB-n5bMEo05q5jihcmfMPQudcNXomjGReokMNAnkDIuoCz7zU2hP6E",
+        "endorsement": {
+         "kid": "9AH8MazwFkhpV9cdy8kEXg",
+         "value": "qRwyHQXUDt51yv3D3zXTpCg-Ng0RsKy2nOTrBak8Ex1KI0nwDzXI2UaUyA-NAp0q4Qb9hwkuznPPuvBO8i_3VQ"
+        }
+       }
+      ]
+     }
+    ],
+    "machines": [
+     {
+      "name": "mini",
+      "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+      "owners": [
+       "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      ]
+     },
+     {
+      "name": "vm-build",
+      "pub": "BD3x2zNV3PNluyvagW-ccU9Lkl0tm878b6nRnDEkTo8kC14FfK9Hl3TdHp63iEObErVd6krV1X1lQ9fcyVaQx6A",
+      "owners": "org"
+     }
+    ],
+    "delegations": [
+     {
+      "id": "dlg-vm",
+      "pub": "BBjnDTvXQhLklZU0sBlye7RbjmVkBPJFNsGPve4XCK9RaTxasa8leKLtqbMt4vdIcANprV8z5fduCuivp5AAgRg",
+      "prefix": "vm-",
+      "expires": "2026-11-27T00:00:00.000Z",
+      "maxUses": 3,
+      "offlineRevokeS": 3600,
+      "owners": "org"
+     }
+    ],
+    "projects": [
+     {
+      "id": "proj-1",
+      "name": "one"
+     }
+    ]
+   },
+   "sigs": [
+    {
+     "kid": "9AH8MazwFkhpV9cdy8kEXg",
+     "value": "8CP2QVNDu1YTWxSXAMfwszRUJC3CjUUMQLU0OAOZk2o62dF9hXLJdXQKpByxErLTFTslI_A6Xc08OzE4a3fgbQ"
+    }
+   ]
+  },
+  "a successor carrying a signature over another state": {
+   "state": {
+    "org": "org-vectors",
+    "version": 3,
+    "prev": "BA3eB7fCwGH-VTtvPcliZfuMKWWKKo7taVbzV9ysLlQ",
+    "issued": "2026-10-27T02:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       },
+       {
+        "id": "dev-a-phone",
+        "class": "web-cards",
+        "keyStorage": "webcrypto",
+        "channelPub": "BJ3Py4rtOGxb6vGrvXGSQfohwzIanAPwZ2tAGBhxExMHmF3sb85_miVhhrOcjJNpSKBBc02bgKilxQn9Xsf9SMo",
+        "passkey": {
+         "credentialId": "AQIDBAUGBwg",
+         "publicKey": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+         "rpId": "desk.example"
+        },
+        "endorsement": {
+         "kid": "MOKxOtSc0yivgxjs8Aokgw",
+         "value": "MfRQYuULKrBbG4drU0qVNqKRljchubkKQ5ASnAmMERT3E1c0dGCJ18oDOIFWD4JX8TBciBqyJX3b1QSJYjgn6g"
+        }
+       }
+      ]
+     },
+     {
+      "id": "f9e8d7c6b5a4938271605f4e3d2c1b0a",
+      "email": "b@example.com",
+      "role": "member",
+      "devices": [
+       {
+        "id": "dev-b1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BHpKiDqVeZsSJJFTjZBULgYQV18KQP99oIrIsfd5X9V0qrEiezHo5UUDGJiR1NdDNGvSnizFSchexsmGo0qq5uI",
+        "stepUpPub": "BCz_P6IYIrd0FkpjVZKhf5kwbRd1xZp78qIZ-RwbyhRnfbX2ZR4QJMe4fXK2-8Qr6cGB5w-J7jeoISNwpXCMbII"
+       },
+       {
+        "id": "dev-b2",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BFUkGKFp_Ul0Ikm8agUKb5L7BeZlIYfiI9MwIAuvtk4_wZ0MYuuYS7fnHctJdC_qKmHObk0pG17bAw_rmRQlzGg",
+        "stepUpPub": "BLtLgVsu3VjBSAqJ5e5548Uc8K3mr_xxcwB-n5bMEo05q5jihcmfMPQudcNXomjGReokMNAnkDIuoCz7zU2hP6E",
+        "endorsement": {
+         "kid": "9AH8MazwFkhpV9cdy8kEXg",
+         "value": "qRwyHQXUDt51yv3D3zXTpCg-Ng0RsKy2nOTrBak8Ex1KI0nwDzXI2UaUyA-NAp0q4Qb9hwkuznPPuvBO8i_3VQ"
+        }
+       }
+      ]
+     }
+    ],
+    "machines": [
+     {
+      "name": "mini",
+      "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+      "owners": [
+       "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      ]
+     },
+     {
+      "name": "vm-build",
+      "pub": "BD3x2zNV3PNluyvagW-ccU9Lkl0tm878b6nRnDEkTo8kC14FfK9Hl3TdHp63iEObErVd6krV1X1lQ9fcyVaQx6A",
+      "owners": "org"
+     }
+    ],
+    "delegations": [
+     {
+      "id": "dlg-vm",
+      "pub": "BBjnDTvXQhLklZU0sBlye7RbjmVkBPJFNsGPve4XCK9RaTxasa8leKLtqbMt4vdIcANprV8z5fduCuivp5AAgRg",
+      "prefix": "vm-",
+      "expires": "2026-11-27T00:00:00.000Z",
+      "maxUses": 3,
+      "offlineRevokeS": 3600,
+      "owners": "org"
+     }
+    ],
+    "projects": [
+     {
+      "id": "proj-1",
+      "name": "one"
+     }
+    ]
+   },
+   "sigs": [
+    {
+     "kid": "MOKxOtSc0yivgxjs8Aokgw",
+     "value": "Z97WNjusiNhYm8eIFP99XTOBCANOiGNLb6KNiS7l-Yi2XwsOffJuv27I2__D-Et-ToytbhRssmHQJNndUFM_5g"
+    }
+   ]
+  },
+  "a fork at the head: another state of the head version": {
+   "state": {
+    "org": "org-vectors",
+    "version": 3,
+    "prev": "BA3eB7fCwGH-VTtvPcliZfuMKWWKKo7taVbzV9ysLlQ",
+    "issued": "2026-10-27T02:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       },
+       {
+        "id": "dev-a-phone",
+        "class": "web-cards",
+        "keyStorage": "webcrypto",
+        "channelPub": "BJ3Py4rtOGxb6vGrvXGSQfohwzIanAPwZ2tAGBhxExMHmF3sb85_miVhhrOcjJNpSKBBc02bgKilxQn9Xsf9SMo",
+        "passkey": {
+         "credentialId": "AQIDBAUGBwg",
+         "publicKey": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+         "rpId": "desk.example"
+        },
+        "endorsement": {
+         "kid": "MOKxOtSc0yivgxjs8Aokgw",
+         "value": "MfRQYuULKrBbG4drU0qVNqKRljchubkKQ5ASnAmMERT3E1c0dGCJ18oDOIFWD4JX8TBciBqyJX3b1QSJYjgn6g"
+        }
+       }
+      ]
+     },
+     {
+      "id": "f9e8d7c6b5a4938271605f4e3d2c1b0a",
+      "email": "b@example.com",
+      "role": "member",
+      "devices": [
+       {
+        "id": "dev-b1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BHpKiDqVeZsSJJFTjZBULgYQV18KQP99oIrIsfd5X9V0qrEiezHo5UUDGJiR1NdDNGvSnizFSchexsmGo0qq5uI",
+        "stepUpPub": "BCz_P6IYIrd0FkpjVZKhf5kwbRd1xZp78qIZ-RwbyhRnfbX2ZR4QJMe4fXK2-8Qr6cGB5w-J7jeoISNwpXCMbII"
+       }
+      ]
+     }
+    ],
+    "machines": [
+     {
+      "name": "mini",
+      "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+      "owners": [
+       "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      ]
+     },
+     {
+      "name": "vm-build",
+      "pub": "BD3x2zNV3PNluyvagW-ccU9Lkl0tm878b6nRnDEkTo8kC14FfK9Hl3TdHp63iEObErVd6krV1X1lQ9fcyVaQx6A",
+      "owners": "org"
+     }
+    ],
+    "delegations": [
+     {
+      "id": "dlg-vm",
+      "pub": "BBjnDTvXQhLklZU0sBlye7RbjmVkBPJFNsGPve4XCK9RaTxasa8leKLtqbMt4vdIcANprV8z5fduCuivp5AAgRg",
+      "prefix": "vm-",
+      "expires": "2026-11-27T00:00:00.000Z",
+      "maxUses": 3,
+      "offlineRevokeS": 3600,
+      "owners": "org"
+     }
+    ],
+    "projects": [
+     {
+      "id": "proj-1",
+      "name": "one"
+     },
+     {
+      "id": "proj-2",
+      "name": "two"
+     }
+    ]
+   },
+   "sigs": [
+    {
+     "kid": "MOKxOtSc0yivgxjs8Aokgw",
+     "value": "Oy2fJG28LOUmbQ9XRPWWhxo_FyiQnLu1XjpnMT9yqh70sE4Q4AlvpslSKEv0MELbZBG3wiAK-zKfaPF_K9vSug"
+    }
+   ]
+  },
+  "v4 beyond a gap": {
+   "state": {
+    "org": "org-vectors",
+    "version": 4,
+    "prev": "AyGTbfDQLkmAaiNjzoIAqsJfg9-5CXJQ0gTSfOnGd58",
+    "issued": "2026-10-27T03:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       },
+       {
+        "id": "dev-a-phone",
+        "class": "web-cards",
+        "keyStorage": "webcrypto",
+        "channelPub": "BJ3Py4rtOGxb6vGrvXGSQfohwzIanAPwZ2tAGBhxExMHmF3sb85_miVhhrOcjJNpSKBBc02bgKilxQn9Xsf9SMo",
+        "passkey": {
+         "credentialId": "AQIDBAUGBwg",
+         "publicKey": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+         "rpId": "desk.example"
+        },
+        "endorsement": {
+         "kid": "MOKxOtSc0yivgxjs8Aokgw",
+         "value": "MfRQYuULKrBbG4drU0qVNqKRljchubkKQ5ASnAmMERT3E1c0dGCJ18oDOIFWD4JX8TBciBqyJX3b1QSJYjgn6g"
+        }
+       }
+      ]
+     },
+     {
+      "id": "f9e8d7c6b5a4938271605f4e3d2c1b0a",
+      "email": "b@example.com",
+      "role": "member",
+      "devices": [
+       {
+        "id": "dev-b1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BHpKiDqVeZsSJJFTjZBULgYQV18KQP99oIrIsfd5X9V0qrEiezHo5UUDGJiR1NdDNGvSnizFSchexsmGo0qq5uI",
+        "stepUpPub": "BCz_P6IYIrd0FkpjVZKhf5kwbRd1xZp78qIZ-RwbyhRnfbX2ZR4QJMe4fXK2-8Qr6cGB5w-J7jeoISNwpXCMbII"
+       },
+       {
+        "id": "dev-b2",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BFUkGKFp_Ul0Ikm8agUKb5L7BeZlIYfiI9MwIAuvtk4_wZ0MYuuYS7fnHctJdC_qKmHObk0pG17bAw_rmRQlzGg",
+        "stepUpPub": "BLtLgVsu3VjBSAqJ5e5548Uc8K3mr_xxcwB-n5bMEo05q5jihcmfMPQudcNXomjGReokMNAnkDIuoCz7zU2hP6E",
+        "endorsement": {
+         "kid": "9AH8MazwFkhpV9cdy8kEXg",
+         "value": "qRwyHQXUDt51yv3D3zXTpCg-Ng0RsKy2nOTrBak8Ex1KI0nwDzXI2UaUyA-NAp0q4Qb9hwkuznPPuvBO8i_3VQ"
+        }
+       }
+      ]
+     }
+    ],
+    "machines": [
+     {
+      "name": "mini",
+      "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+      "owners": [
+       "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      ]
+     },
+     {
+      "name": "vm-build",
+      "pub": "BD3x2zNV3PNluyvagW-ccU9Lkl0tm878b6nRnDEkTo8kC14FfK9Hl3TdHp63iEObErVd6krV1X1lQ9fcyVaQx6A",
+      "owners": "org"
+     }
+    ],
+    "delegations": [
+     {
+      "id": "dlg-vm",
+      "pub": "BBjnDTvXQhLklZU0sBlye7RbjmVkBPJFNsGPve4XCK9RaTxasa8leKLtqbMt4vdIcANprV8z5fduCuivp5AAgRg",
+      "prefix": "vm-",
+      "expires": "2026-11-27T00:00:00.000Z",
+      "maxUses": 3,
+      "offlineRevokeS": 3600,
+      "owners": "org"
+     }
+    ],
+    "projects": [
+     {
+      "id": "proj-1",
+      "name": "one"
+     }
+    ]
+   },
+   "sigs": [
+    {
+     "kid": "MOKxOtSc0yivgxjs8Aokgw",
+     "value": "7FKptKr_7g2rMByIS31_xIo3Ln842yVJ8GBOUZL_LGLDxZ7feu0hTuF7_-E2scC3LJ4IlJkT6SSMfcdHS-CerA"
+    }
+   ]
+  },
+  "a successor whose prev is not the head": {
+   "state": {
+    "org": "org-vectors",
+    "version": 3,
+    "prev": "un3ena9tV8UGiSV9xKUYS2BE75cN-n5s14dcOTy62iI",
+    "issued": "2026-10-27T02:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       },
+       {
+        "id": "dev-a-phone",
+        "class": "web-cards",
+        "keyStorage": "webcrypto",
+        "channelPub": "BJ3Py4rtOGxb6vGrvXGSQfohwzIanAPwZ2tAGBhxExMHmF3sb85_miVhhrOcjJNpSKBBc02bgKilxQn9Xsf9SMo",
+        "passkey": {
+         "credentialId": "AQIDBAUGBwg",
+         "publicKey": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+         "rpId": "desk.example"
+        },
+        "endorsement": {
+         "kid": "MOKxOtSc0yivgxjs8Aokgw",
+         "value": "MfRQYuULKrBbG4drU0qVNqKRljchubkKQ5ASnAmMERT3E1c0dGCJ18oDOIFWD4JX8TBciBqyJX3b1QSJYjgn6g"
+        }
+       }
+      ]
+     },
+     {
+      "id": "f9e8d7c6b5a4938271605f4e3d2c1b0a",
+      "email": "b@example.com",
+      "role": "member",
+      "devices": [
+       {
+        "id": "dev-b1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BHpKiDqVeZsSJJFTjZBULgYQV18KQP99oIrIsfd5X9V0qrEiezHo5UUDGJiR1NdDNGvSnizFSchexsmGo0qq5uI",
+        "stepUpPub": "BCz_P6IYIrd0FkpjVZKhf5kwbRd1xZp78qIZ-RwbyhRnfbX2ZR4QJMe4fXK2-8Qr6cGB5w-J7jeoISNwpXCMbII"
+       },
+       {
+        "id": "dev-b2",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BFUkGKFp_Ul0Ikm8agUKb5L7BeZlIYfiI9MwIAuvtk4_wZ0MYuuYS7fnHctJdC_qKmHObk0pG17bAw_rmRQlzGg",
+        "stepUpPub": "BLtLgVsu3VjBSAqJ5e5548Uc8K3mr_xxcwB-n5bMEo05q5jihcmfMPQudcNXomjGReokMNAnkDIuoCz7zU2hP6E",
+        "endorsement": {
+         "kid": "9AH8MazwFkhpV9cdy8kEXg",
+         "value": "qRwyHQXUDt51yv3D3zXTpCg-Ng0RsKy2nOTrBak8Ex1KI0nwDzXI2UaUyA-NAp0q4Qb9hwkuznPPuvBO8i_3VQ"
+        }
+       }
+      ]
+     }
+    ],
+    "machines": [
+     {
+      "name": "mini",
+      "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+      "owners": [
+       "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      ]
+     },
+     {
+      "name": "vm-build",
+      "pub": "BD3x2zNV3PNluyvagW-ccU9Lkl0tm878b6nRnDEkTo8kC14FfK9Hl3TdHp63iEObErVd6krV1X1lQ9fcyVaQx6A",
+      "owners": "org"
+     }
+    ],
+    "delegations": [
+     {
+      "id": "dlg-vm",
+      "pub": "BBjnDTvXQhLklZU0sBlye7RbjmVkBPJFNsGPve4XCK9RaTxasa8leKLtqbMt4vdIcANprV8z5fduCuivp5AAgRg",
+      "prefix": "vm-",
+      "expires": "2026-11-27T00:00:00.000Z",
+      "maxUses": 3,
+      "offlineRevokeS": 3600,
+      "owners": "org"
+     }
+    ],
+    "projects": [
+     {
+      "id": "proj-1",
+      "name": "one"
+     }
+    ]
+   },
+   "sigs": [
+    {
+     "kid": "MOKxOtSc0yivgxjs8Aokgw",
+     "value": "inEryGCHEU11p6svyrhmNVGYwigicVLRChpOXO4xMLMyiPkjJtd3T5FFflKHrsb5xOwU7B4PAUKd51NtwZwLuQ"
+    }
+   ]
+  },
+  "a successor of another org": {
+   "state": {
+    "org": "org-other",
+    "version": 3,
+    "prev": "BA3eB7fCwGH-VTtvPcliZfuMKWWKKo7taVbzV9ysLlQ",
+    "issued": "2026-10-27T02:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       },
+       {
+        "id": "dev-a-phone",
+        "class": "web-cards",
+        "keyStorage": "webcrypto",
+        "channelPub": "BJ3Py4rtOGxb6vGrvXGSQfohwzIanAPwZ2tAGBhxExMHmF3sb85_miVhhrOcjJNpSKBBc02bgKilxQn9Xsf9SMo",
+        "passkey": {
+         "credentialId": "AQIDBAUGBwg",
+         "publicKey": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+         "rpId": "desk.example"
+        },
+        "endorsement": {
+         "kid": "MOKxOtSc0yivgxjs8Aokgw",
+         "value": "MfRQYuULKrBbG4drU0qVNqKRljchubkKQ5ASnAmMERT3E1c0dGCJ18oDOIFWD4JX8TBciBqyJX3b1QSJYjgn6g"
+        }
+       }
+      ]
+     },
+     {
+      "id": "f9e8d7c6b5a4938271605f4e3d2c1b0a",
+      "email": "b@example.com",
+      "role": "member",
+      "devices": [
+       {
+        "id": "dev-b1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BHpKiDqVeZsSJJFTjZBULgYQV18KQP99oIrIsfd5X9V0qrEiezHo5UUDGJiR1NdDNGvSnizFSchexsmGo0qq5uI",
+        "stepUpPub": "BCz_P6IYIrd0FkpjVZKhf5kwbRd1xZp78qIZ-RwbyhRnfbX2ZR4QJMe4fXK2-8Qr6cGB5w-J7jeoISNwpXCMbII"
+       }
+      ]
+     }
+    ],
+    "machines": [
+     {
+      "name": "mini",
+      "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+      "owners": [
+       "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      ]
+     },
+     {
+      "name": "vm-build",
+      "pub": "BD3x2zNV3PNluyvagW-ccU9Lkl0tm878b6nRnDEkTo8kC14FfK9Hl3TdHp63iEObErVd6krV1X1lQ9fcyVaQx6A",
+      "owners": "org"
+     }
+    ],
+    "delegations": [
+     {
+      "id": "dlg-vm",
+      "pub": "BBjnDTvXQhLklZU0sBlye7RbjmVkBPJFNsGPve4XCK9RaTxasa8leKLtqbMt4vdIcANprV8z5fduCuivp5AAgRg",
+      "prefix": "vm-",
+      "expires": "2026-11-27T00:00:00.000Z",
+      "maxUses": 3,
+      "offlineRevokeS": 3600,
+      "owners": "org"
+     }
+    ],
+    "projects": [
+     {
+      "id": "proj-1",
+      "name": "one"
+     }
+    ]
+   },
+   "sigs": [
+    {
+     "kid": "MOKxOtSc0yivgxjs8Aokgw",
+     "value": "jvYj6q84lQeO6sq2ShAmZNfCrUqxu89WPh6cSdHDzUjlQqfmE-3Ph6EQZg4fnM-kL4hI0vaca7wtBwTlngxGoQ"
+    }
+   ]
+  },
+  "a successor that changes the recovery key": {
+   "state": {
+    "org": "org-vectors",
+    "version": 3,
+    "prev": "BA3eB7fCwGH-VTtvPcliZfuMKWWKKo7taVbzV9ysLlQ",
+    "issued": "2026-10-27T02:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BHc5-c1U9n5n-A4DWWDulX9PrZioGua7ylsJo-Pzl5JIzCZRmMNd31hpovgx0VTZUMzjQsW2VO_UmJNaBvIo6Cg"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       },
+       {
+        "id": "dev-a-phone",
+        "class": "web-cards",
+        "keyStorage": "webcrypto",
+        "channelPub": "BJ3Py4rtOGxb6vGrvXGSQfohwzIanAPwZ2tAGBhxExMHmF3sb85_miVhhrOcjJNpSKBBc02bgKilxQn9Xsf9SMo",
+        "passkey": {
+         "credentialId": "AQIDBAUGBwg",
+         "publicKey": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+         "rpId": "desk.example"
+        },
+        "endorsement": {
+         "kid": "MOKxOtSc0yivgxjs8Aokgw",
+         "value": "MfRQYuULKrBbG4drU0qVNqKRljchubkKQ5ASnAmMERT3E1c0dGCJ18oDOIFWD4JX8TBciBqyJX3b1QSJYjgn6g"
+        }
+       }
+      ]
+     },
+     {
+      "id": "f9e8d7c6b5a4938271605f4e3d2c1b0a",
+      "email": "b@example.com",
+      "role": "member",
+      "devices": [
+       {
+        "id": "dev-b1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BHpKiDqVeZsSJJFTjZBULgYQV18KQP99oIrIsfd5X9V0qrEiezHo5UUDGJiR1NdDNGvSnizFSchexsmGo0qq5uI",
+        "stepUpPub": "BCz_P6IYIrd0FkpjVZKhf5kwbRd1xZp78qIZ-RwbyhRnfbX2ZR4QJMe4fXK2-8Qr6cGB5w-J7jeoISNwpXCMbII"
+       }
+      ]
+     }
+    ],
+    "machines": [
+     {
+      "name": "mini",
+      "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+      "owners": [
+       "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      ]
+     },
+     {
+      "name": "vm-build",
+      "pub": "BD3x2zNV3PNluyvagW-ccU9Lkl0tm878b6nRnDEkTo8kC14FfK9Hl3TdHp63iEObErVd6krV1X1lQ9fcyVaQx6A",
+      "owners": "org"
+     }
+    ],
+    "delegations": [
+     {
+      "id": "dlg-vm",
+      "pub": "BBjnDTvXQhLklZU0sBlye7RbjmVkBPJFNsGPve4XCK9RaTxasa8leKLtqbMt4vdIcANprV8z5fduCuivp5AAgRg",
+      "prefix": "vm-",
+      "expires": "2026-11-27T00:00:00.000Z",
+      "maxUses": 3,
+      "offlineRevokeS": 3600,
+      "owners": "org"
+     }
+    ],
+    "projects": [
+     {
+      "id": "proj-1",
+      "name": "one"
+     }
+    ]
+   },
+   "sigs": [
+    {
+     "kid": "MOKxOtSc0yivgxjs8Aokgw",
+     "value": "y4SxozYzh2OButqy9u3hpqtXHjwY0ddDmXmCh7No5SuISlzBVybuoDMr3lhhP68oeUqIfvcY34KvpoIKWxwMJQ"
+    }
+   ]
+  },
+  "a successor issued before the head": {
+   "state": {
+    "org": "org-vectors",
+    "version": 3,
+    "prev": "BA3eB7fCwGH-VTtvPcliZfuMKWWKKo7taVbzV9ysLlQ",
+    "issued": "2026-10-27T00:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       },
+       {
+        "id": "dev-a-phone",
+        "class": "web-cards",
+        "keyStorage": "webcrypto",
+        "channelPub": "BJ3Py4rtOGxb6vGrvXGSQfohwzIanAPwZ2tAGBhxExMHmF3sb85_miVhhrOcjJNpSKBBc02bgKilxQn9Xsf9SMo",
+        "passkey": {
+         "credentialId": "AQIDBAUGBwg",
+         "publicKey": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+         "rpId": "desk.example"
+        },
+        "endorsement": {
+         "kid": "MOKxOtSc0yivgxjs8Aokgw",
+         "value": "MfRQYuULKrBbG4drU0qVNqKRljchubkKQ5ASnAmMERT3E1c0dGCJ18oDOIFWD4JX8TBciBqyJX3b1QSJYjgn6g"
+        }
+       }
+      ]
+     },
+     {
+      "id": "f9e8d7c6b5a4938271605f4e3d2c1b0a",
+      "email": "b@example.com",
+      "role": "member",
+      "devices": [
+       {
+        "id": "dev-b1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BHpKiDqVeZsSJJFTjZBULgYQV18KQP99oIrIsfd5X9V0qrEiezHo5UUDGJiR1NdDNGvSnizFSchexsmGo0qq5uI",
+        "stepUpPub": "BCz_P6IYIrd0FkpjVZKhf5kwbRd1xZp78qIZ-RwbyhRnfbX2ZR4QJMe4fXK2-8Qr6cGB5w-J7jeoISNwpXCMbII"
+       }
+      ]
+     }
+    ],
+    "machines": [
+     {
+      "name": "mini",
+      "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+      "owners": [
+       "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      ]
+     },
+     {
+      "name": "vm-build",
+      "pub": "BD3x2zNV3PNluyvagW-ccU9Lkl0tm878b6nRnDEkTo8kC14FfK9Hl3TdHp63iEObErVd6krV1X1lQ9fcyVaQx6A",
+      "owners": "org"
+     }
+    ],
+    "delegations": [
+     {
+      "id": "dlg-vm",
+      "pub": "BBjnDTvXQhLklZU0sBlye7RbjmVkBPJFNsGPve4XCK9RaTxasa8leKLtqbMt4vdIcANprV8z5fduCuivp5AAgRg",
+      "prefix": "vm-",
+      "expires": "2026-11-27T00:00:00.000Z",
+      "maxUses": 3,
+      "offlineRevokeS": 3600,
+      "owners": "org"
+     }
+    ],
+    "projects": [
+     {
+      "id": "proj-1",
+      "name": "one"
+     }
+    ]
+   },
+   "sigs": [
+    {
+     "kid": "MOKxOtSc0yivgxjs8Aokgw",
+     "value": "jJCYk6QQxnlIWYFvysYqfGmNO80ZDjLLwV_8Onc6dHTysaSwPGxM4oWdimkDMoGBSO05hzJYHc6rtuW2S_PF7g"
+    }
+   ]
+  },
+  "v4": {
+   "state": {
+    "org": "org-vectors",
+    "version": 4,
+    "prev": "AyGTbfDQLkmAaiNjzoIAqsJfg9-5CXJQ0gTSfOnGd58",
+    "issued": "2026-10-27T03:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw",
+      "9AH8MazwFkhpV9cdy8kEXg"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       },
+       {
+        "id": "dev-a-phone",
+        "class": "web-cards",
+        "keyStorage": "webcrypto",
+        "channelPub": "BJ3Py4rtOGxb6vGrvXGSQfohwzIanAPwZ2tAGBhxExMHmF3sb85_miVhhrOcjJNpSKBBc02bgKilxQn9Xsf9SMo",
+        "passkey": {
+         "credentialId": "AQIDBAUGBwg",
+         "publicKey": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+         "rpId": "desk.example"
+        },
+        "endorsement": {
+         "kid": "MOKxOtSc0yivgxjs8Aokgw",
+         "value": "MfRQYuULKrBbG4drU0qVNqKRljchubkKQ5ASnAmMERT3E1c0dGCJ18oDOIFWD4JX8TBciBqyJX3b1QSJYjgn6g"
+        }
+       }
+      ]
+     },
+     {
+      "id": "f9e8d7c6b5a4938271605f4e3d2c1b0a",
+      "email": "b@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-b1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BHpKiDqVeZsSJJFTjZBULgYQV18KQP99oIrIsfd5X9V0qrEiezHo5UUDGJiR1NdDNGvSnizFSchexsmGo0qq5uI",
+        "stepUpPub": "BCz_P6IYIrd0FkpjVZKhf5kwbRd1xZp78qIZ-RwbyhRnfbX2ZR4QJMe4fXK2-8Qr6cGB5w-J7jeoISNwpXCMbII"
+       },
+       {
+        "id": "dev-b2",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BFUkGKFp_Ul0Ikm8agUKb5L7BeZlIYfiI9MwIAuvtk4_wZ0MYuuYS7fnHctJdC_qKmHObk0pG17bAw_rmRQlzGg",
+        "stepUpPub": "BLtLgVsu3VjBSAqJ5e5548Uc8K3mr_xxcwB-n5bMEo05q5jihcmfMPQudcNXomjGReokMNAnkDIuoCz7zU2hP6E",
+        "endorsement": {
+         "kid": "9AH8MazwFkhpV9cdy8kEXg",
+         "value": "qRwyHQXUDt51yv3D3zXTpCg-Ng0RsKy2nOTrBak8Ex1KI0nwDzXI2UaUyA-NAp0q4Qb9hwkuznPPuvBO8i_3VQ"
+        }
+       }
+      ]
+     }
+    ],
+    "machines": [
+     {
+      "name": "mini",
+      "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+      "owners": [
+       "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      ]
+     },
+     {
+      "name": "vm-build",
+      "pub": "BD3x2zNV3PNluyvagW-ccU9Lkl0tm878b6nRnDEkTo8kC14FfK9Hl3TdHp63iEObErVd6krV1X1lQ9fcyVaQx6A",
+      "owners": "org"
+     }
+    ],
+    "delegations": [
+     {
+      "id": "dlg-vm",
+      "pub": "BBjnDTvXQhLklZU0sBlye7RbjmVkBPJFNsGPve4XCK9RaTxasa8leKLtqbMt4vdIcANprV8z5fduCuivp5AAgRg",
+      "prefix": "vm-",
+      "expires": "2026-11-27T00:00:00.000Z",
+      "maxUses": 3,
+      "offlineRevokeS": 3600,
+      "owners": "org"
+     }
+    ],
+    "projects": [
+     {
+      "id": "proj-1",
+      "name": "one"
+     }
+    ]
+   },
+   "sigs": [
+    {
+     "kid": "MOKxOtSc0yivgxjs8Aokgw",
+     "value": "VyVHAjOtDcfcbvFQ5H7zLrWmfpjPINdomsmGxyeRr9mMIPy2TeRycWMNN7u1V0PEbR_n5-_YnbxRcNJKrKdgew"
+    }
+   ]
+  },
+  "a demotion that keeps the root key": {
+   "state": {
+    "org": "org-vectors",
+    "version": 5,
+    "prev": "rf4ocoVEJiWaz3aEHjns0iuaoe7bfZgB7heCjNiqRUA",
+    "issued": "2026-10-27T04:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw",
+      "9AH8MazwFkhpV9cdy8kEXg"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       },
+       {
+        "id": "dev-a-phone",
+        "class": "web-cards",
+        "keyStorage": "webcrypto",
+        "channelPub": "BJ3Py4rtOGxb6vGrvXGSQfohwzIanAPwZ2tAGBhxExMHmF3sb85_miVhhrOcjJNpSKBBc02bgKilxQn9Xsf9SMo",
+        "passkey": {
+         "credentialId": "AQIDBAUGBwg",
+         "publicKey": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+         "rpId": "desk.example"
+        },
+        "endorsement": {
+         "kid": "MOKxOtSc0yivgxjs8Aokgw",
+         "value": "MfRQYuULKrBbG4drU0qVNqKRljchubkKQ5ASnAmMERT3E1c0dGCJ18oDOIFWD4JX8TBciBqyJX3b1QSJYjgn6g"
+        }
+       }
+      ]
+     },
+     {
+      "id": "f9e8d7c6b5a4938271605f4e3d2c1b0a",
+      "email": "b@example.com",
+      "role": "member",
+      "devices": [
+       {
+        "id": "dev-b1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BHpKiDqVeZsSJJFTjZBULgYQV18KQP99oIrIsfd5X9V0qrEiezHo5UUDGJiR1NdDNGvSnizFSchexsmGo0qq5uI",
+        "stepUpPub": "BCz_P6IYIrd0FkpjVZKhf5kwbRd1xZp78qIZ-RwbyhRnfbX2ZR4QJMe4fXK2-8Qr6cGB5w-J7jeoISNwpXCMbII"
+       },
+       {
+        "id": "dev-b2",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BFUkGKFp_Ul0Ikm8agUKb5L7BeZlIYfiI9MwIAuvtk4_wZ0MYuuYS7fnHctJdC_qKmHObk0pG17bAw_rmRQlzGg",
+        "stepUpPub": "BLtLgVsu3VjBSAqJ5e5548Uc8K3mr_xxcwB-n5bMEo05q5jihcmfMPQudcNXomjGReokMNAnkDIuoCz7zU2hP6E",
+        "endorsement": {
+         "kid": "9AH8MazwFkhpV9cdy8kEXg",
+         "value": "qRwyHQXUDt51yv3D3zXTpCg-Ng0RsKy2nOTrBak8Ex1KI0nwDzXI2UaUyA-NAp0q4Qb9hwkuznPPuvBO8i_3VQ"
+        }
+       }
+      ]
+     }
+    ],
+    "machines": [
+     {
+      "name": "mini",
+      "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+      "owners": [
+       "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      ]
+     },
+     {
+      "name": "vm-build",
+      "pub": "BD3x2zNV3PNluyvagW-ccU9Lkl0tm878b6nRnDEkTo8kC14FfK9Hl3TdHp63iEObErVd6krV1X1lQ9fcyVaQx6A",
+      "owners": "org"
+     }
+    ],
+    "delegations": [
+     {
+      "id": "dlg-vm",
+      "pub": "BBjnDTvXQhLklZU0sBlye7RbjmVkBPJFNsGPve4XCK9RaTxasa8leKLtqbMt4vdIcANprV8z5fduCuivp5AAgRg",
+      "prefix": "vm-",
+      "expires": "2026-11-27T00:00:00.000Z",
+      "maxUses": 3,
+      "offlineRevokeS": 3600,
+      "owners": "org"
+     }
+    ],
+    "projects": [
+     {
+      "id": "proj-1",
+      "name": "one"
+     }
+    ]
+   },
+   "sigs": [
+    {
+     "kid": "MOKxOtSc0yivgxjs8Aokgw",
+     "value": "dBvDrXQybGQnqpt3qsLTsFDZ0ATu-yKx5-5JMd9Ul1gtgiUEZbssGZLf6QrrrqceKC1yBgqFF18voNuIbev9NQ"
+    }
+   ]
+  },
+  "v5": {
+   "state": {
+    "org": "org-vectors",
+    "version": 5,
+    "prev": "rf4ocoVEJiWaz3aEHjns0iuaoe7bfZgB7heCjNiqRUA",
+    "issued": "2026-10-27T04:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       },
+       {
+        "id": "dev-a-phone",
+        "class": "web-cards",
+        "keyStorage": "webcrypto",
+        "channelPub": "BJ3Py4rtOGxb6vGrvXGSQfohwzIanAPwZ2tAGBhxExMHmF3sb85_miVhhrOcjJNpSKBBc02bgKilxQn9Xsf9SMo",
+        "passkey": {
+         "credentialId": "AQIDBAUGBwg",
+         "publicKey": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+         "rpId": "desk.example"
+        },
+        "endorsement": {
+         "kid": "MOKxOtSc0yivgxjs8Aokgw",
+         "value": "MfRQYuULKrBbG4drU0qVNqKRljchubkKQ5ASnAmMERT3E1c0dGCJ18oDOIFWD4JX8TBciBqyJX3b1QSJYjgn6g"
+        }
+       }
+      ]
+     }
+    ],
+    "machines": [
+     {
+      "name": "mini",
+      "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+      "owners": [
+       "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      ]
+     },
+     {
+      "name": "vm-build",
+      "pub": "BD3x2zNV3PNluyvagW-ccU9Lkl0tm878b6nRnDEkTo8kC14FfK9Hl3TdHp63iEObErVd6krV1X1lQ9fcyVaQx6A",
+      "owners": "org"
+     }
+    ],
+    "delegations": [
+     {
+      "id": "dlg-vm",
+      "pub": "BBjnDTvXQhLklZU0sBlye7RbjmVkBPJFNsGPve4XCK9RaTxasa8leKLtqbMt4vdIcANprV8z5fduCuivp5AAgRg",
+      "prefix": "vm-",
+      "expires": "2026-11-27T00:00:00.000Z",
+      "maxUses": 3,
+      "offlineRevokeS": 3600,
+      "owners": "org"
+     }
+    ],
+    "projects": [
+     {
+      "id": "proj-1",
+      "name": "one"
+     }
+    ]
+   },
+   "sigs": [
+    {
+     "kid": "9AH8MazwFkhpV9cdy8kEXg",
+     "value": "6pIS28uaqlaS-dVBz3M9mjFilAkHLTRhn8wVEa0muDBs2Vp-8qEdco0FW6sHz3CNh-ftgghzTP6EhR77VPMOgQ"
+    }
+   ]
+  },
+  "a successor signed by a removed admin's key": {
+   "state": {
+    "org": "org-vectors",
+    "version": 6,
+    "prev": "xDyyqALsQqiV3CFd_OK-IANl7O-e50-cQIzY48WMkDs",
+    "issued": "2026-10-27T05:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       },
+       {
+        "id": "dev-a-phone",
+        "class": "web-cards",
+        "keyStorage": "webcrypto",
+        "channelPub": "BJ3Py4rtOGxb6vGrvXGSQfohwzIanAPwZ2tAGBhxExMHmF3sb85_miVhhrOcjJNpSKBBc02bgKilxQn9Xsf9SMo",
+        "passkey": {
+         "credentialId": "AQIDBAUGBwg",
+         "publicKey": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+         "rpId": "desk.example"
+        },
+        "endorsement": {
+         "kid": "MOKxOtSc0yivgxjs8Aokgw",
+         "value": "MfRQYuULKrBbG4drU0qVNqKRljchubkKQ5ASnAmMERT3E1c0dGCJ18oDOIFWD4JX8TBciBqyJX3b1QSJYjgn6g"
+        }
+       }
+      ]
+     }
+    ],
+    "machines": [
+     {
+      "name": "mini",
+      "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+      "owners": [
+       "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      ]
+     },
+     {
+      "name": "vm-build",
+      "pub": "BD3x2zNV3PNluyvagW-ccU9Lkl0tm878b6nRnDEkTo8kC14FfK9Hl3TdHp63iEObErVd6krV1X1lQ9fcyVaQx6A",
+      "owners": "org"
+     }
+    ],
+    "delegations": [
+     {
+      "id": "dlg-vm",
+      "pub": "BBjnDTvXQhLklZU0sBlye7RbjmVkBPJFNsGPve4XCK9RaTxasa8leKLtqbMt4vdIcANprV8z5fduCuivp5AAgRg",
+      "prefix": "vm-",
+      "expires": "2026-11-27T00:00:00.000Z",
+      "maxUses": 3,
+      "offlineRevokeS": 3600,
+      "owners": "org"
+     }
+    ],
+    "projects": [
+     {
+      "id": "proj-1",
+      "name": "one"
+     },
+     {
+      "id": "proj-3",
+      "name": "three"
+     }
+    ]
+   },
+   "sigs": [
+    {
+     "kid": "9AH8MazwFkhpV9cdy8kEXg",
+     "value": "7zS66f14XV5Y3oc7GB6uQK13cchC1VoIorD5EqbRM3m7LaHStxZssC9oCAMT4jZsg4r-8zDyXcvYRnrqQbYP2g"
+    }
+   ]
+  },
+  "t5": {
+   "body": {
+    "org": "org-vectors",
+    "fromVersion": 5,
+    "newRootKeys": [
+     "BKf-32bSZNLAVjkkUYSFrSDU0WOlWVO3sBdBifL8IxSmd885JnrKvOJuCdxuWQQN-GaTWubO7WSNw95Olv90obo"
+    ],
+    "issued": "2026-10-27T05:00:00.000Z"
+   },
+   "sig": {
+    "kid": "uwBz3uibAbXGfwcqBydEwg",
+    "value": "yisKayPiLE3wML9a-zZgaUaxszs9kdBOIXOplHDuC4KohFpu-tADX51R8GnMyQySR1uAL76gcIy276nyfpjNhQ"
+   }
+  },
+  "a root transition signed by an admin key": {
+   "body": {
+    "org": "org-vectors",
+    "fromVersion": 5,
+    "newRootKeys": [
+     "BKf-32bSZNLAVjkkUYSFrSDU0WOlWVO3sBdBifL8IxSmd885JnrKvOJuCdxuWQQN-GaTWubO7WSNw95Olv90obo"
+    ],
+    "issued": "2026-10-27T05:00:00.000Z"
+   },
+   "sig": {
+    "kid": "MOKxOtSc0yivgxjs8Aokgw",
+    "value": "_WuKpCtDPbOe9tGE8F-jwgLWKbrBD6SQoWfi0I2SMW18XTak7a157WzdmTGA_YsHMfZjJK2Hp25WFnqrQDXNrw"
+   }
+  },
+  "a root transition whose new keys changed after signing": {
+   "body": {
+    "org": "org-vectors",
+    "fromVersion": 5,
+    "newRootKeys": [
+     "BHc5-c1U9n5n-A4DWWDulX9PrZioGua7ylsJo-Pzl5JIzCZRmMNd31hpovgx0VTZUMzjQsW2VO_UmJNaBvIo6Cg"
+    ],
+    "issued": "2026-10-27T05:00:00.000Z"
+   },
+   "sig": {
+    "kid": "uwBz3uibAbXGfwcqBydEwg",
+    "value": "yisKayPiLE3wML9a-zZgaUaxszs9kdBOIXOplHDuC4KohFpu-tADX51R8GnMyQySR1uAL76gcIy276nyfpjNhQ"
+   }
+  },
+  "a root transition against an older version": {
+   "body": {
+    "org": "org-vectors",
+    "fromVersion": 4,
+    "newRootKeys": [
+     "BKf-32bSZNLAVjkkUYSFrSDU0WOlWVO3sBdBifL8IxSmd885JnrKvOJuCdxuWQQN-GaTWubO7WSNw95Olv90obo"
+    ],
+    "issued": "2026-10-27T05:00:00.000Z"
+   },
+   "sig": {
+    "kid": "uwBz3uibAbXGfwcqBydEwg",
+    "value": "RIB2h7hIBBdTZ5ma5GPvc_g4xJ-4dgZ_L25rJdUfHZws1o4M5ExkyXr4fj6SDucUUmobm4dIzPX4h77pjWSpHQ"
+   }
+  },
+  "a root transition against a later version": {
+   "body": {
+    "org": "org-vectors",
+    "fromVersion": 6,
+    "newRootKeys": [
+     "BKf-32bSZNLAVjkkUYSFrSDU0WOlWVO3sBdBifL8IxSmd885JnrKvOJuCdxuWQQN-GaTWubO7WSNw95Olv90obo"
+    ],
+    "issued": "2026-10-27T05:00:00.000Z"
+   },
+   "sig": {
+    "kid": "uwBz3uibAbXGfwcqBydEwg",
+    "value": "IwJcAn5Qr5LRJAcfbn1CjzPHUr1DDjJhAeihqDpnDyj3UQPVML1h-Dne0ufYkI0-zPQVCCHPLVpEfOcoz2pssA"
+   }
+  },
+  "a root transition of another org": {
+   "body": {
+    "org": "org-other",
+    "fromVersion": 5,
+    "newRootKeys": [
+     "BKf-32bSZNLAVjkkUYSFrSDU0WOlWVO3sBdBifL8IxSmd885JnrKvOJuCdxuWQQN-GaTWubO7WSNw95Olv90obo"
+    ],
+    "issued": "2026-10-27T05:00:00.000Z"
+   },
+   "sig": {
+    "kid": "uwBz3uibAbXGfwcqBydEwg",
+    "value": "kNMi_kuXaGYaYmJC68E_WFbSh0duJQE9n02zDpQNJMtBm82cDAzPPmp5-Q8VOOyPk-l1-2F8Myal4NLMAvZbvQ"
+   }
+  },
+  "the successor a root transition authorizes": {
+   "state": {
+    "org": "org-vectors",
+    "version": 6,
+    "prev": "xDyyqALsQqiV3CFd_OK-IANl7O-e50-cQIzY48WMkDs",
+    "issued": "2026-10-27T06:00:00.000Z",
+    "root": {
+     "keys": [
+      "_Z-qidHq1FGDfSHuuoONyg"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a3",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BMvsrTTZXJSQwrJntBsYaLWlG_8fNsvQCWe5ILGOqW7iJTRBQOVf10riLkZKmk-0pFpxKJrjcpGuDmamQpD1LHY",
+        "stepUpPub": "BKf-32bSZNLAVjkkUYSFrSDU0WOlWVO3sBdBifL8IxSmd885JnrKvOJuCdxuWQQN-GaTWubO7WSNw95Olv90obo"
+       }
+      ]
+     }
+    ],
+    "machines": [
+     {
+      "name": "mini",
+      "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+      "owners": [
+       "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      ]
+     },
+     {
+      "name": "vm-build",
+      "pub": "BD3x2zNV3PNluyvagW-ccU9Lkl0tm878b6nRnDEkTo8kC14FfK9Hl3TdHp63iEObErVd6krV1X1lQ9fcyVaQx6A",
+      "owners": "org"
+     }
+    ],
+    "delegations": [
+     {
+      "id": "dlg-vm",
+      "pub": "BBjnDTvXQhLklZU0sBlye7RbjmVkBPJFNsGPve4XCK9RaTxasa8leKLtqbMt4vdIcANprV8z5fduCuivp5AAgRg",
+      "prefix": "vm-",
+      "expires": "2026-11-27T00:00:00.000Z",
+      "maxUses": 3,
+      "offlineRevokeS": 3600,
+      "owners": "org"
+     }
+    ],
+    "projects": [
+     {
+      "id": "proj-1",
+      "name": "one"
+     }
+    ]
+   },
+   "sigs": [
+    {
+     "kid": "_Z-qidHq1FGDfSHuuoONyg",
+     "value": "0irFSzJqAKn-ZJhRSTLX0ucmLuILSrHVrjd46KvIfVYxgkFneL95-CLr747jpdr4gb0sDM4lSN2o6t7AR_34PQ"
+    }
+   ]
+  },
+  "v6": {
+   "state": {
+    "org": "org-vectors",
+    "version": 6,
+    "prev": "xDyyqALsQqiV3CFd_OK-IANl7O-e50-cQIzY48WMkDs",
+    "issued": "2026-10-27T06:00:00.000Z",
+    "root": {
+     "keys": [
+      "_Z-qidHq1FGDfSHuuoONyg"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a3",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BMvsrTTZXJSQwrJntBsYaLWlG_8fNsvQCWe5ILGOqW7iJTRBQOVf10riLkZKmk-0pFpxKJrjcpGuDmamQpD1LHY",
+        "stepUpPub": "BKf-32bSZNLAVjkkUYSFrSDU0WOlWVO3sBdBifL8IxSmd885JnrKvOJuCdxuWQQN-GaTWubO7WSNw95Olv90obo"
+       }
+      ]
+     }
+    ],
+    "machines": [
+     {
+      "name": "mini",
+      "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+      "owners": [
+       "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      ]
+     },
+     {
+      "name": "vm-build",
+      "pub": "BD3x2zNV3PNluyvagW-ccU9Lkl0tm878b6nRnDEkTo8kC14FfK9Hl3TdHp63iEObErVd6krV1X1lQ9fcyVaQx6A",
+      "owners": "org"
+     }
+    ],
+    "delegations": [
+     {
+      "id": "dlg-vm",
+      "pub": "BBjnDTvXQhLklZU0sBlye7RbjmVkBPJFNsGPve4XCK9RaTxasa8leKLtqbMt4vdIcANprV8z5fduCuivp5AAgRg",
+      "prefix": "vm-",
+      "expires": "2026-11-27T00:00:00.000Z",
+      "maxUses": 3,
+      "offlineRevokeS": 3600,
+      "owners": "org"
+     }
+    ],
+    "projects": [
+     {
+      "id": "proj-1",
+      "name": "one"
+     }
+    ]
+   },
+   "sigs": [
+    {
+     "kid": "_Z-qidHq1FGDfSHuuoONyg",
+     "value": "0irFSzJqAKn-ZJhRSTLX0ucmLuILSrHVrjd46KvIfVYxgkFneL95-CLr747jpdr4gb0sDM4lSN2o6t7AR_34PQ"
+    }
+   ]
+  },
+  "the same successor without the transition": {
+   "state": {
+    "org": "org-vectors",
+    "version": 6,
+    "prev": "xDyyqALsQqiV3CFd_OK-IANl7O-e50-cQIzY48WMkDs",
+    "issued": "2026-10-27T06:00:00.000Z",
+    "root": {
+     "keys": [
+      "_Z-qidHq1FGDfSHuuoONyg"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a3",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BMvsrTTZXJSQwrJntBsYaLWlG_8fNsvQCWe5ILGOqW7iJTRBQOVf10riLkZKmk-0pFpxKJrjcpGuDmamQpD1LHY",
+        "stepUpPub": "BKf-32bSZNLAVjkkUYSFrSDU0WOlWVO3sBdBifL8IxSmd885JnrKvOJuCdxuWQQN-GaTWubO7WSNw95Olv90obo"
+       }
+      ]
+     }
+    ],
+    "machines": [
+     {
+      "name": "mini",
+      "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+      "owners": [
+       "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      ]
+     },
+     {
+      "name": "vm-build",
+      "pub": "BD3x2zNV3PNluyvagW-ccU9Lkl0tm878b6nRnDEkTo8kC14FfK9Hl3TdHp63iEObErVd6krV1X1lQ9fcyVaQx6A",
+      "owners": "org"
+     }
+    ],
+    "delegations": [
+     {
+      "id": "dlg-vm",
+      "pub": "BBjnDTvXQhLklZU0sBlye7RbjmVkBPJFNsGPve4XCK9RaTxasa8leKLtqbMt4vdIcANprV8z5fduCuivp5AAgRg",
+      "prefix": "vm-",
+      "expires": "2026-11-27T00:00:00.000Z",
+      "maxUses": 3,
+      "offlineRevokeS": 3600,
+      "owners": "org"
+     }
+    ],
+    "projects": [
+     {
+      "id": "proj-1",
+      "name": "one"
+     }
+    ]
+   },
+   "sigs": [
+    {
+     "kid": "_Z-qidHq1FGDfSHuuoONyg",
+     "value": "Wh-koj1Xw4gwo3msW7_72kwEhqTbERPLQX7DsEYcQwruhOV6Lz5rPG34geBZtAcNhZj9aF30CQyn3ZyKXBK-9A"
+    }
+   ]
+  },
+  "a successor signed by the old root while a transition is held": {
+   "state": {
+    "org": "org-vectors",
+    "version": 6,
+    "prev": "xDyyqALsQqiV3CFd_OK-IANl7O-e50-cQIzY48WMkDs",
+    "issued": "2026-10-27T06:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       },
+       {
+        "id": "dev-a-phone",
+        "class": "web-cards",
+        "keyStorage": "webcrypto",
+        "channelPub": "BJ3Py4rtOGxb6vGrvXGSQfohwzIanAPwZ2tAGBhxExMHmF3sb85_miVhhrOcjJNpSKBBc02bgKilxQn9Xsf9SMo",
+        "passkey": {
+         "credentialId": "AQIDBAUGBwg",
+         "publicKey": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+         "rpId": "desk.example"
+        },
+        "endorsement": {
+         "kid": "MOKxOtSc0yivgxjs8Aokgw",
+         "value": "MfRQYuULKrBbG4drU0qVNqKRljchubkKQ5ASnAmMERT3E1c0dGCJ18oDOIFWD4JX8TBciBqyJX3b1QSJYjgn6g"
+        }
+       }
+      ]
+     }
+    ],
+    "machines": [
+     {
+      "name": "mini",
+      "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+      "owners": [
+       "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      ]
+     },
+     {
+      "name": "vm-build",
+      "pub": "BD3x2zNV3PNluyvagW-ccU9Lkl0tm878b6nRnDEkTo8kC14FfK9Hl3TdHp63iEObErVd6krV1X1lQ9fcyVaQx6A",
+      "owners": "org"
+     }
+    ],
+    "delegations": [
+     {
+      "id": "dlg-vm",
+      "pub": "BBjnDTvXQhLklZU0sBlye7RbjmVkBPJFNsGPve4XCK9RaTxasa8leKLtqbMt4vdIcANprV8z5fduCuivp5AAgRg",
+      "prefix": "vm-",
+      "expires": "2026-11-27T00:00:00.000Z",
+      "maxUses": 3,
+      "offlineRevokeS": 3600,
+      "owners": "org"
+     }
+    ],
+    "projects": [
+     {
+      "id": "proj-1",
+      "name": "one"
+     },
+     {
+      "id": "proj-3",
+      "name": "three"
+     }
+    ]
+   },
+   "sigs": [
+    {
+     "kid": "MOKxOtSc0yivgxjs8Aokgw",
+     "value": "xDoeY6e7sgG0T4irgGF5MqiLhyhQYUktH49frkDzEXqROYncf0UWMDacbtywLNHolygiZbmPUWMKV663SqNe3Q"
+    }
+   ]
+  },
+  "a successor after a transition that keeps the old root key": {
+   "state": {
+    "org": "org-vectors",
+    "version": 6,
+    "prev": "xDyyqALsQqiV3CFd_OK-IANl7O-e50-cQIzY48WMkDs",
+    "issued": "2026-10-27T06:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw",
+      "_Z-qidHq1FGDfSHuuoONyg"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       },
+       {
+        "id": "dev-a3",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BMvsrTTZXJSQwrJntBsYaLWlG_8fNsvQCWe5ILGOqW7iJTRBQOVf10riLkZKmk-0pFpxKJrjcpGuDmamQpD1LHY",
+        "stepUpPub": "BKf-32bSZNLAVjkkUYSFrSDU0WOlWVO3sBdBifL8IxSmd885JnrKvOJuCdxuWQQN-GaTWubO7WSNw95Olv90obo"
+       }
+      ]
+     }
+    ],
+    "machines": [
+     {
+      "name": "mini",
+      "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+      "owners": [
+       "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      ]
+     },
+     {
+      "name": "vm-build",
+      "pub": "BD3x2zNV3PNluyvagW-ccU9Lkl0tm878b6nRnDEkTo8kC14FfK9Hl3TdHp63iEObErVd6krV1X1lQ9fcyVaQx6A",
+      "owners": "org"
+     }
+    ],
+    "delegations": [
+     {
+      "id": "dlg-vm",
+      "pub": "BBjnDTvXQhLklZU0sBlye7RbjmVkBPJFNsGPve4XCK9RaTxasa8leKLtqbMt4vdIcANprV8z5fduCuivp5AAgRg",
+      "prefix": "vm-",
+      "expires": "2026-11-27T00:00:00.000Z",
+      "maxUses": 3,
+      "offlineRevokeS": 3600,
+      "owners": "org"
+     }
+    ],
+    "projects": [
+     {
+      "id": "proj-1",
+      "name": "one"
+     }
+    ]
+   },
+   "sigs": [
+    {
+     "kid": "_Z-qidHq1FGDfSHuuoONyg",
+     "value": "4DRAl5DGQOGwFn0xD43gj4QQa9aIQRZVbTFLD6x-21URwqcX1gBFHMscD0i5Yf8XOaeAwsoOlfhP4lfTMRnhbQ"
+    }
+   ]
+  },
+  "t5 by a stranger": {
+   "body": {
+    "org": "org-vectors",
+    "fromVersion": 5,
+    "newRootKeys": [
+     "BKf-32bSZNLAVjkkUYSFrSDU0WOlWVO3sBdBifL8IxSmd885JnrKvOJuCdxuWQQN-GaTWubO7WSNw95Olv90obo"
+    ],
+    "issued": "2026-10-27T05:00:00.000Z"
+   },
+   "sig": {
+    "kid": "xO8YjFOp-ElGtmP7rhfzfQ",
+    "value": "7izN5lNQCNP-nxbLW3wn6vwQ7g7k_8dh78fPGWrxtxbtLYtNxutD1_vU9KsZvdTs-bn_pfaTRzSQYkAG5f8-lg"
+   }
+  },
+  "a successor by the old root, beside a transition that fails to verify": {
+   "state": {
+    "org": "org-vectors",
+    "version": 6,
+    "prev": "xDyyqALsQqiV3CFd_OK-IANl7O-e50-cQIzY48WMkDs",
+    "issued": "2026-10-27T06:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       },
+       {
+        "id": "dev-a-phone",
+        "class": "web-cards",
+        "keyStorage": "webcrypto",
+        "channelPub": "BJ3Py4rtOGxb6vGrvXGSQfohwzIanAPwZ2tAGBhxExMHmF3sb85_miVhhrOcjJNpSKBBc02bgKilxQn9Xsf9SMo",
+        "passkey": {
+         "credentialId": "AQIDBAUGBwg",
+         "publicKey": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+         "rpId": "desk.example"
+        },
+        "endorsement": {
+         "kid": "MOKxOtSc0yivgxjs8Aokgw",
+         "value": "MfRQYuULKrBbG4drU0qVNqKRljchubkKQ5ASnAmMERT3E1c0dGCJ18oDOIFWD4JX8TBciBqyJX3b1QSJYjgn6g"
+        }
+       }
+      ]
+     }
+    ],
+    "machines": [
+     {
+      "name": "mini",
+      "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+      "owners": [
+       "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      ]
+     },
+     {
+      "name": "vm-build",
+      "pub": "BD3x2zNV3PNluyvagW-ccU9Lkl0tm878b6nRnDEkTo8kC14FfK9Hl3TdHp63iEObErVd6krV1X1lQ9fcyVaQx6A",
+      "owners": "org"
+     }
+    ],
+    "delegations": [
+     {
+      "id": "dlg-vm",
+      "pub": "BBjnDTvXQhLklZU0sBlye7RbjmVkBPJFNsGPve4XCK9RaTxasa8leKLtqbMt4vdIcANprV8z5fduCuivp5AAgRg",
+      "prefix": "vm-",
+      "expires": "2026-11-27T00:00:00.000Z",
+      "maxUses": 3,
+      "offlineRevokeS": 3600,
+      "owners": "org"
+     }
+    ],
+    "projects": [
+     {
+      "id": "proj-1",
+      "name": "one"
+     },
+     {
+      "id": "proj-3",
+      "name": "three"
+     }
+    ]
+   },
+   "sigs": [
+    {
+     "kid": "MOKxOtSc0yivgxjs8Aokgw",
+     "value": "RY5YzcE8o2Ya4tEkkpdOemgIQGy3aV0H8F5TU8COv-ftxwt9u-JWxJ5SiZp7VGw78F4UuuLe2OK6akiPs8Ko-g"
+    }
+   ]
+  },
+  "a grant signed by the machine owner": {
+   "body": {
+    "org": "org-vectors",
+    "machine": "mini",
+    "member": "f9e8d7c6b5a4938271605f4e3d2c1b0a",
+    "rights": [
+     "spawn"
+    ],
+    "version": 1,
+    "issued": "2026-10-27T02:00:00.000Z"
+   },
+   "sig": {
+    "kid": "MOKxOtSc0yivgxjs8Aokgw",
+    "value": "phtWQJOLfJsDL0yFVfeplzzZzmlrHo0hV0N4Iki094D_LFXsVBPBdgSBC5YMsa-NZNKPXTjsIT4rl0wq_kHsXg"
+   }
+  },
+  "a grant signed by the owner's channel key": {
+   "body": {
+    "org": "org-vectors",
+    "machine": "mini",
+    "member": "f9e8d7c6b5a4938271605f4e3d2c1b0a",
+    "rights": [
+     "spawn"
+    ],
+    "version": 1,
+    "issued": "2026-10-27T02:00:00.000Z"
+   },
+   "sig": {
+    "kid": "nEW8LdQpZ2idv9D_lPjTjA",
+    "value": "KAND9VFpdrndrgPLgAn_h2vmJ7kZliXVNgvhSPrYWjUANmdVXV6Kiaeqb-XKZ3JWWlvGO7FEmWAd5vE3AynF1A"
+   }
+  },
+  "a grant signed by a member who does not own the machine": {
+   "body": {
+    "org": "org-vectors",
+    "machine": "mini",
+    "member": "f9e8d7c6b5a4938271605f4e3d2c1b0a",
+    "rights": [
+     "spawn"
+    ],
+    "version": 1,
+    "issued": "2026-10-27T02:00:00.000Z"
+   },
+   "sig": {
+    "kid": "9AH8MazwFkhpV9cdy8kEXg",
+    "value": "tFYDc13AqDXGAJUmmpQN-LGwqc6hmBo6z2hoHA-yWcSmV6EtYfsLA7nDbNWr73Y82WGTcfZW-71mVp2NKIc0rA"
+   }
+  },
+  "a grant on an org-owned machine, signed by an admin": {
+   "body": {
+    "org": "org-vectors",
+    "machine": "vm-build",
+    "member": "f9e8d7c6b5a4938271605f4e3d2c1b0a",
+    "rights": [
+     "spawn"
+    ],
+    "version": 1,
+    "issued": "2026-10-27T02:00:00.000Z"
+   },
+   "sig": {
+    "kid": "MOKxOtSc0yivgxjs8Aokgw",
+    "value": "PGaxTaWyIYGVCfDQFnZZR3_4lHyT-GJYj9J2wg1RtYXbWKbX5Y0DHXm-yRjwKvVrmAfyGQjEt7JcRXZe248nJA"
+   }
+  },
+  "a grant on an unlisted machine": {
+   "body": {
+    "org": "org-vectors",
+    "machine": "ghost",
+    "member": "f9e8d7c6b5a4938271605f4e3d2c1b0a",
+    "rights": [
+     "spawn"
+    ],
+    "version": 1,
+    "issued": "2026-10-27T02:00:00.000Z"
+   },
+   "sig": {
+    "kid": "MOKxOtSc0yivgxjs8Aokgw",
+    "value": "rQZoo7e5rM7QWWd_S7uFBhvC-VjbKogPI3rl15WawulpNof-XC66gIUXH935EKKbbXVQcS6QDKXnpIwL0HAJ_A"
+   }
+  },
+  "a grant whose rights changed after signing": {
+   "body": {
+    "org": "org-vectors",
+    "machine": "mini",
+    "member": "f9e8d7c6b5a4938271605f4e3d2c1b0a",
+    "rights": [
+     "spawn",
+     "shell"
+    ],
+    "version": 1,
+    "issued": "2026-10-27T02:00:00.000Z"
+   },
+   "sig": {
+    "kid": "MOKxOtSc0yivgxjs8Aokgw",
+    "value": "z-WJw5bWlLjx4VdDK7e1aImP9I1Xc1XZp-0ZdWbc8lodAFxF__FDxDwOSSMjRprlrFqLukIDHwZ5-QDu6I1O-A"
+   }
+  },
+  "a machine certificate under a live delegation": {
+   "body": {
+    "org": "org-vectors",
+    "machine": "vm-1",
+    "pub": "BB7Vq8OXaIdsz9h22ZPX-R-PfsMISMeeOx4aW6JltjRz1NLxkcH3XnvZjmmkdbewel5nxr5JpYnbgMDsFBw0Ax8",
+    "delegation": "dlg-vm",
+    "use": 1,
+    "issued": "2026-10-27T03:00:00.000Z"
+   },
+   "sig": {
+    "kid": "pFcw6c5Zh3miAsDSvu8knA",
+    "value": "dTxUnQsI0lR6gRGb4jjm_KnT-7KEs8CYkVb3gQ5HKHziq7GZ_E8RnsBzWhtF2QKVVe7Vm1Vf3Gfeh-YnHYUsWw"
+   }
+  },
+  "cert vm-1": {
+   "body": {
+    "org": "org-vectors",
+    "machine": "vm-1",
+    "pub": "BB7Vq8OXaIdsz9h22ZPX-R-PfsMISMeeOx4aW6JltjRz1NLxkcH3XnvZjmmkdbewel5nxr5JpYnbgMDsFBw0Ax8",
+    "delegation": "dlg-vm",
+    "use": 1,
+    "issued": "2026-10-27T03:00:00.000Z"
+   },
+   "sig": {
+    "kid": "pFcw6c5Zh3miAsDSvu8knA",
+    "value": "dTxUnQsI0lR6gRGb4jjm_KnT-7KEs8CYkVb3gQ5HKHziq7GZ_E8RnsBzWhtF2QKVVe7Vm1Vf3Gfeh-YnHYUsWw"
+   }
+  },
+  "v2 without the delegation": {
+   "state": {
+    "org": "org-vectors",
+    "version": 2,
+    "prev": "un3ena9tV8UGiSV9xKUYS2BE75cN-n5s14dcOTy62iI",
+    "issued": "2026-10-27T01:00:00.000Z",
+    "root": {
+     "keys": [
+      "MOKxOtSc0yivgxjs8Aokgw"
+     ],
+     "recoveryPub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+    },
+    "members": [
+     {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "email": "a@example.com",
+      "role": "admin",
+      "devices": [
+       {
+        "id": "dev-a1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0",
+        "stepUpPub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8"
+       },
+       {
+        "id": "dev-a-phone",
+        "class": "web-cards",
+        "keyStorage": "webcrypto",
+        "channelPub": "BJ3Py4rtOGxb6vGrvXGSQfohwzIanAPwZ2tAGBhxExMHmF3sb85_miVhhrOcjJNpSKBBc02bgKilxQn9Xsf9SMo",
+        "passkey": {
+         "credentialId": "AQIDBAUGBwg",
+         "publicKey": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+         "rpId": "desk.example"
+        },
+        "endorsement": {
+         "kid": "MOKxOtSc0yivgxjs8Aokgw",
+         "value": "MfRQYuULKrBbG4drU0qVNqKRljchubkKQ5ASnAmMERT3E1c0dGCJ18oDOIFWD4JX8TBciBqyJX3b1QSJYjgn6g"
+        }
+       }
+      ]
+     },
+     {
+      "id": "f9e8d7c6b5a4938271605f4e3d2c1b0a",
+      "email": "b@example.com",
+      "role": "member",
+      "devices": [
+       {
+        "id": "dev-b1",
+        "class": "native-mac",
+        "keyStorage": "software",
+        "channelPub": "BHpKiDqVeZsSJJFTjZBULgYQV18KQP99oIrIsfd5X9V0qrEiezHo5UUDGJiR1NdDNGvSnizFSchexsmGo0qq5uI",
+        "stepUpPub": "BCz_P6IYIrd0FkpjVZKhf5kwbRd1xZp78qIZ-RwbyhRnfbX2ZR4QJMe4fXK2-8Qr6cGB5w-J7jeoISNwpXCMbII"
+       }
+      ]
+     }
+    ],
+    "machines": [
+     {
+      "name": "mini",
+      "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+      "owners": [
+       "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      ]
+     },
+     {
+      "name": "vm-build",
+      "pub": "BD3x2zNV3PNluyvagW-ccU9Lkl0tm878b6nRnDEkTo8kC14FfK9Hl3TdHp63iEObErVd6krV1X1lQ9fcyVaQx6A",
+      "owners": "org"
+     }
+    ],
+    "delegations": [],
+    "projects": [
+     {
+      "id": "proj-1",
+      "name": "one"
+     }
+    ]
+   },
+   "sigs": []
+  },
+  "a machine certificate after its delegation is removed": {
+   "body": {
+    "org": "org-vectors",
+    "machine": "vm-1",
+    "pub": "BB7Vq8OXaIdsz9h22ZPX-R-PfsMISMeeOx4aW6JltjRz1NLxkcH3XnvZjmmkdbewel5nxr5JpYnbgMDsFBw0Ax8",
+    "delegation": "dlg-vm",
+    "use": 1,
+    "issued": "2026-10-27T03:00:00.000Z"
+   },
+   "sig": {
+    "kid": "pFcw6c5Zh3miAsDSvu8knA",
+    "value": "dTxUnQsI0lR6gRGb4jjm_KnT-7KEs8CYkVb3gQ5HKHziq7GZ_E8RnsBzWhtF2QKVVe7Vm1Vf3Gfeh-YnHYUsWw"
+   }
+  },
+  "a machine certificate after its delegation expires": {
+   "body": {
+    "org": "org-vectors",
+    "machine": "vm-1",
+    "pub": "BB7Vq8OXaIdsz9h22ZPX-R-PfsMISMeeOx4aW6JltjRz1NLxkcH3XnvZjmmkdbewel5nxr5JpYnbgMDsFBw0Ax8",
+    "delegation": "dlg-vm",
+    "use": 1,
+    "issued": "2026-10-27T03:00:00.000Z"
+   },
+   "sig": {
+    "kid": "pFcw6c5Zh3miAsDSvu8knA",
+    "value": "dTxUnQsI0lR6gRGb4jjm_KnT-7KEs8CYkVb3gQ5HKHziq7GZ_E8RnsBzWhtF2QKVVe7Vm1Vf3Gfeh-YnHYUsWw"
+   }
+  },
+  "a machine certificate past its delegation's uses": {
+   "body": {
+    "org": "org-vectors",
+    "machine": "vm-1",
+    "pub": "BB7Vq8OXaIdsz9h22ZPX-R-PfsMISMeeOx4aW6JltjRz1NLxkcH3XnvZjmmkdbewel5nxr5JpYnbgMDsFBw0Ax8",
+    "delegation": "dlg-vm",
+    "use": 4,
+    "issued": "2026-10-27T03:00:00.000Z"
+   },
+   "sig": {
+    "kid": "pFcw6c5Zh3miAsDSvu8knA",
+    "value": "q63i3rquBvYIFTAFdA_N9EWhqQsQxKC7-ncX_GcC9cnoofVHIMVN1h1XR-i70nxKyh_f8vLSIlfszU09M3d2zA"
+   }
+  },
+  "a machine certificate outside the prefix": {
+   "body": {
+    "org": "org-vectors",
+    "machine": "box-1",
+    "pub": "BB7Vq8OXaIdsz9h22ZPX-R-PfsMISMeeOx4aW6JltjRz1NLxkcH3XnvZjmmkdbewel5nxr5JpYnbgMDsFBw0Ax8",
+    "delegation": "dlg-vm",
+    "use": 1,
+    "issued": "2026-10-27T03:00:00.000Z"
+   },
+   "sig": {
+    "kid": "pFcw6c5Zh3miAsDSvu8knA",
+    "value": "8PdkbxrmyOyZth-O1ROPoQyyG_H_uNc4jJhHNXKqIFXC6PBZ6OdhOz0o9wMqXHa9KVweMo3ZSSR-Lb8JqSFGYQ"
+   }
+  },
+  "a machine certificate for a listed machine": {
+   "body": {
+    "org": "org-vectors",
+    "machine": "VM-Build",
+    "pub": "BB7Vq8OXaIdsz9h22ZPX-R-PfsMISMeeOx4aW6JltjRz1NLxkcH3XnvZjmmkdbewel5nxr5JpYnbgMDsFBw0Ax8",
+    "delegation": "dlg-vm",
+    "use": 1,
+    "issued": "2026-10-27T03:00:00.000Z"
+   },
+   "sig": {
+    "kid": "pFcw6c5Zh3miAsDSvu8knA",
+    "value": "xGUv_YFbVAs0_K8rGAhGgg3kNOJp8a2uRi0C4r-vw6jDyU44KPTwZDEAc3CpqbwDywPtdd3k4LMURvWGGeYDJA"
+   }
+  },
+  "a machine certificate signed by another key": {
+   "body": {
+    "org": "org-vectors",
+    "machine": "vm-1",
+    "pub": "BB7Vq8OXaIdsz9h22ZPX-R-PfsMISMeeOx4aW6JltjRz1NLxkcH3XnvZjmmkdbewel5nxr5JpYnbgMDsFBw0Ax8",
+    "delegation": "dlg-vm",
+    "use": 1,
+    "issued": "2026-10-27T03:00:00.000Z"
+   },
+   "sig": {
+    "kid": "xO8YjFOp-ElGtmP7rhfzfQ",
+    "value": "sib2p-CJxnN7VCuKzjxhA5xI4k1uhA86fesTSCNGoK3EDLOxi3L095hHTTKgNh8LdDQiYayRjkuTU8wjz71W8g"
+   }
+  },
+  "a machine certificate whose key changed after signing": {
+   "body": {
+    "org": "org-vectors",
+    "machine": "vm-1",
+    "pub": "BHc5-c1U9n5n-A4DWWDulX9PrZioGua7ylsJo-Pzl5JIzCZRmMNd31hpovgx0VTZUMzjQsW2VO_UmJNaBvIo6Cg",
+    "delegation": "dlg-vm",
+    "use": 1,
+    "issued": "2026-10-27T03:00:00.000Z"
+   },
+   "sig": {
+    "kid": "pFcw6c5Zh3miAsDSvu8knA",
+    "value": "dTxUnQsI0lR6gRGb4jjm_KnT-7KEs8CYkVb3gQ5HKHziq7GZ_E8RnsBzWhtF2QKVVe7Vm1Vf3Gfeh-YnHYUsWw"
+   }
+  },
+  "a listing signed by its listed machine": {
+   "body": {
+    "org": "org-vectors",
+    "machine": "mini",
+    "session": "b1f0c3a2-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+    "revision": 1,
+    "issued": "2026-10-27T03:00:00.000Z",
+    "fields": {
+     "owners": [
+      "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+     ],
+     "project": "proj-1",
+     "lane": "B",
+     "state": "waiting",
+     "title": "fix the build"
+    }
+   },
+   "sig": {
+    "kid": "wumzQrn1tDdp_WGHx7Vwdg",
+    "value": "IHuKgPpHeygA7sV5BH6eDh4pHekjuvPKXKZzshcQ6nSULZEkn4aV1EJHucbw2BLDXhrJ3TwxqU55jmpo9M4h-g"
+   }
+  },
+  "a listing signed by a certified VM": {
+   "body": {
+    "org": "org-vectors",
+    "machine": "vm-1",
+    "session": "b1f0c3a2-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+    "revision": 1,
+    "issued": "2026-10-27T03:00:00.000Z",
+    "fields": {
+     "owners": [
+      "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "f9e8d7c6b5a4938271605f4e3d2c1b0a"
+     ],
+     "project": "proj-1",
+     "lane": "B",
+     "state": "waiting",
+     "title": "fix the build"
+    }
+   },
+   "sig": {
+    "kid": "i-IwHrd9Df4amq_CD2yf9A",
+    "value": "F0kRfMAq_O49npT4rcgPAUzO6mwAyxcvqN7BjzetOXl0Fs-XMHCjLbHRMHYRsoRR48QLtgy9nXRUOLG7HQMi6w"
+   }
+  },
+  "a VM's listing without its certificate": {
+   "body": {
+    "org": "org-vectors",
+    "machine": "vm-1",
+    "session": "b1f0c3a2-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+    "revision": 1,
+    "issued": "2026-10-27T03:00:00.000Z",
+    "fields": {
+     "owners": [
+      "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "f9e8d7c6b5a4938271605f4e3d2c1b0a"
+     ],
+     "project": "proj-1",
+     "lane": "B",
+     "state": "waiting",
+     "title": "fix the build"
+    }
+   },
+   "sig": {
+    "kid": "i-IwHrd9Df4amq_CD2yf9A",
+    "value": "bfTeNLqDWSRJrfVWFmcZ4jDSDqfem_eIcfdFFKCMtcz6rMCJXaLrMQUwKEiQnSjKyd-dnTt2yRehkMbX-ADstQ"
+   }
+  },
+  "a VM's listing after its delegation is removed": {
+   "body": {
+    "org": "org-vectors",
+    "machine": "vm-1",
+    "session": "b1f0c3a2-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+    "revision": 1,
+    "issued": "2026-10-27T03:00:00.000Z",
+    "fields": {
+     "owners": [
+      "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "f9e8d7c6b5a4938271605f4e3d2c1b0a"
+     ],
+     "project": "proj-1",
+     "lane": "B",
+     "state": "waiting",
+     "title": "fix the build"
+    }
+   },
+   "sig": {
+    "kid": "i-IwHrd9Df4amq_CD2yf9A",
+    "value": "xDhWUO9dHVHi_vsr21G67ykFsD3fkv4H9zkWya6x7c8NziggncTGun0NeGTLBCv-_sxmVs5OIcPxLnwl2fQxig"
+   }
+  },
+  "a listing of a listed machine signed by another key": {
+   "body": {
+    "org": "org-vectors",
+    "machine": "mini",
+    "session": "b1f0c3a2-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+    "revision": 1,
+    "issued": "2026-10-27T03:00:00.000Z",
+    "fields": {
+     "owners": [
+      "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+     ],
+     "project": "proj-1",
+     "lane": "B",
+     "state": "waiting",
+     "title": "fix the build"
+    }
+   },
+   "sig": {
+    "kid": "xO8YjFOp-ElGtmP7rhfzfQ",
+    "value": "qmxpl1k95FCRC3xApaKS8GTsDDTaQ47epRsksZhIIalYTNCTBnssvIFJyBdFhURoE6WZzVTuPaA-xZzkNMSiXA"
+   }
+  },
+  "a listing whose title changed after signing": {
+   "body": {
+    "org": "org-vectors",
+    "machine": "mini",
+    "session": "b1f0c3a2-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+    "revision": 1,
+    "issued": "2026-10-27T03:00:00.000Z",
+    "fields": {
+     "owners": [
+      "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+     ],
+     "project": "proj-1",
+     "lane": "B",
+     "state": "waiting",
+     "title": "rm -rf"
+    }
+   },
+   "sig": {
+    "kid": "wumzQrn1tDdp_WGHx7Vwdg",
+    "value": "IHuKgPpHeygA7sV5BH6eDh4pHekjuvPKXKZzshcQ6nSULZEkn4aV1EJHucbw2BLDXhrJ3TwxqU55jmpo9M4h-g"
+   }
+  },
+  "a listing naming @machine as an owner": {
+   "body": {
+    "org": "org-vectors",
+    "machine": "mini",
+    "session": "b1f0c3a2-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+    "revision": 1,
+    "issued": "2026-10-27T03:00:00.000Z",
+    "fields": {
+     "owners": [
+      "@machine"
+     ],
+     "project": "proj-1",
+     "lane": "B",
+     "state": "waiting",
+     "title": "fix the build"
+    }
+   },
+   "sig": {
+    "kid": "wumzQrn1tDdp_WGHx7Vwdg",
+    "value": "yGMX8FRglniGQiejeoKqpD19DNN4yBRY2vSDevUZuh4EZss6eGwWEA0TDARZHK9-NWEywOOIh6CsAwgGnw-wVQ"
+   }
+  },
+  "a listing of an unlisted machine": {
+   "body": {
+    "org": "org-vectors",
+    "machine": "ghost",
+    "session": "b1f0c3a2-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+    "revision": 1,
+    "issued": "2026-10-27T03:00:00.000Z",
+    "fields": {
+     "owners": [
+      "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+     ],
+     "project": "proj-1",
+     "lane": "B",
+     "state": "waiting",
+     "title": "fix the build"
+    }
+   },
+   "sig": {
+    "kid": "wumzQrn1tDdp_WGHx7Vwdg",
+    "value": "3xp1ceT-2CeKKAcWADzrdz1FwaVOa2sZH0X5iipEjMgPMfx8ColhhNbidGBqFBIxDv9v9BcoU47wXvdDidWQ6w"
+   }
+  },
+  "an endpoint record signed by its listed machine": {
+   "body": {
+    "org": "org-vectors",
+    "machine": "mini",
+    "addresses": [
+     "wss://100.64.0.7:7420"
+    ],
+    "issued": "2026-10-27T03:00:00.000Z"
+   },
+   "sig": {
+    "kid": "wumzQrn1tDdp_WGHx7Vwdg",
+    "value": "KYUraXX_79p7SPQ8ul9tF9VKewSwEtfKNHwCqIl43T4CMBpUZTs4hOBJ1igYMVgPM85Hi1E_73ZvJd9mLoc3Ag"
+   }
+  },
+  "an endpoint record signed by a certified VM": {
+   "body": {
+    "org": "org-vectors",
+    "machine": "vm-1",
+    "addresses": [
+     "wss://100.64.0.7:7420"
+    ],
+    "issued": "2026-10-27T03:00:00.000Z"
+   },
+   "sig": {
+    "kid": "i-IwHrd9Df4amq_CD2yf9A",
+    "value": "89JOK71VfrcrCxb_tADs2zujvrwZqT2kMWvyQBsUB86QNLP3wg2lFXxqwxaCu4EBUbM41AOvX8IHatOR6UO4Zw"
+   }
+  },
+  "a VM's endpoint record after its delegation is removed": {
+   "body": {
+    "org": "org-vectors",
+    "machine": "vm-1",
+    "addresses": [
+     "wss://100.64.0.7:7420"
+    ],
+    "issued": "2026-10-27T03:00:00.000Z"
+   },
+   "sig": {
+    "kid": "i-IwHrd9Df4amq_CD2yf9A",
+    "value": "K1BYy7YVnGZhPKKpQnSJEDB3Pz9Siev2R23hC6ruXabn__XBxO7AaqVI3Cb2QCobiNyhFkaF_4wik1H1y04pOw"
+   }
+  },
+  "an endpoint record whose addresses changed after signing": {
+   "body": {
+    "org": "org-vectors",
+    "machine": "mini",
+    "addresses": [
+     "wss://203.0.113.9:7420"
+    ],
+    "issued": "2026-10-27T03:00:00.000Z"
+   },
+   "sig": {
+    "kid": "wumzQrn1tDdp_WGHx7Vwdg",
+    "value": "KYUraXX_79p7SPQ8ul9tF9VKewSwEtfKNHwCqIl43T4CMBpUZTs4hOBJ1igYMVgPM85Hi1E_73ZvJd9mLoc3Ag"
+   }
+  },
+  "an endpoint record signed as a listing": {
+   "body": {
+    "org": "org-vectors",
+    "machine": "mini",
+    "addresses": [
+     "wss://100.64.0.7:7420"
+    ],
+    "issued": "2026-10-27T03:00:00.000Z"
+   },
+   "sig": {
+    "kid": "wumzQrn1tDdp_WGHx7Vwdg",
+    "value": "Wd3yTKT4KqHzjMmqAUl3CcyDefjsGQ8IE50LnDo0fzTZ0-nYewdaMrPwLXAewXxihlEkKMPByEiKQ7pWdtbdfg"
+   }
+  },
+  "a machine's event signed by its key": {
+   "ts": "2026-10-27T04:00:01.234Z",
+   "writer": "mini/67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b",
+   "seq": 42,
+   "kind": "say",
+   "from": "maws-45",
+   "to": "*",
+   "text": "the build is green",
+   "sig": {
+    "kid": "wumzQrn1tDdp_WGHx7Vwdg",
+    "value": "xCsauqYtOQnm8c0ok9L-baXx-HTq83aWxif0mzO9dBdaUOnbSJ8qsKP34srJq_FhJpqh2v0yaR6zxw9oqAkTsQ"
+   }
+  },
+  "a machine's event whose text changed after signing": {
+   "ts": "2026-10-27T04:00:01.234Z",
+   "writer": "mini/67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b",
+   "seq": 42,
+   "kind": "say",
+   "from": "maws-45",
+   "to": "*",
+   "text": "the build is red",
+   "sig": {
+    "kid": "wumzQrn1tDdp_WGHx7Vwdg",
+    "value": "xCsauqYtOQnm8c0ok9L-baXx-HTq83aWxif0mzO9dBdaUOnbSJ8qsKP34srJq_FhJpqh2v0yaR6zxw9oqAkTsQ"
+   }
+  },
+  "a machine's event whose seq changed after signing": {
+   "ts": "2026-10-27T04:00:01.234Z",
+   "writer": "mini/67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b",
+   "seq": 43,
+   "kind": "say",
+   "from": "maws-45",
+   "to": "*",
+   "text": "the build is green",
+   "sig": {
+    "kid": "wumzQrn1tDdp_WGHx7Vwdg",
+    "value": "xCsauqYtOQnm8c0ok9L-baXx-HTq83aWxif0mzO9dBdaUOnbSJ8qsKP34srJq_FhJpqh2v0yaR6zxw9oqAkTsQ"
+   }
+  },
+  "a machine's event signed by another key": {
+   "ts": "2026-10-27T04:00:01.234Z",
+   "writer": "mini/67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b",
+   "seq": 42,
+   "kind": "say",
+   "from": "maws-45",
+   "to": "*",
+   "text": "the build is green",
+   "sig": {
+    "kid": "xO8YjFOp-ElGtmP7rhfzfQ",
+    "value": "K15X40Ouo76pc8PfWK2WkKr3L32yTmiuPAjLL_sTDgV-jyO5KpkOO6EJzxlPVdBGv02s5JNtnw1j2NADNo2I3w"
+   }
+  },
+  "a certified VM's event": {
+   "ts": "2026-10-27T04:00:01.234Z",
+   "writer": "vm-1/0b9c8d7e-6f5a-4b3c-2d1e-0f9a8b7c6d5e",
+   "seq": 42,
+   "kind": "say",
+   "from": "maws-45",
+   "to": "*",
+   "text": "the build is green",
+   "sig": {
+    "kid": "i-IwHrd9Df4amq_CD2yf9A",
+    "value": "X899IMYb184YfJK7fBNEBQfG3DOvb0xf9gVW1J4lpanYXHFcqYshz6YOd_JrMEYhkyQmGcbntav1QsJDbi-KzA"
+   }
+  },
+  "a VM's event without its certificate": {
+   "ts": "2026-10-27T04:00:01.234Z",
+   "writer": "vm-1/0b9c8d7e-6f5a-4b3c-2d1e-0f9a8b7c6d5e",
+   "seq": 42,
+   "kind": "say",
+   "from": "maws-45",
+   "to": "*",
+   "text": "the build is green",
+   "sig": {
+    "kid": "i-IwHrd9Df4amq_CD2yf9A",
+    "value": "X899IMYb184YfJK7fBNEBQfG3DOvb0xf9gVW1J4lpanYXHFcqYshz6YOd_JrMEYhkyQmGcbntav1QsJDbi-KzA"
+   }
+  },
+  "a VM's event after its delegation is removed": {
+   "ts": "2026-10-27T04:00:01.234Z",
+   "writer": "vm-1/0b9c8d7e-6f5a-4b3c-2d1e-0f9a8b7c6d5e",
+   "seq": 42,
+   "kind": "say",
+   "from": "maws-45",
+   "to": "*",
+   "text": "the build is green",
+   "sig": {
+    "kid": "i-IwHrd9Df4amq_CD2yf9A",
+    "value": "X899IMYb184YfJK7fBNEBQfG3DOvb0xf9gVW1J4lpanYXHFcqYshz6YOd_JrMEYhkyQmGcbntav1QsJDbi-KzA"
+   }
+  },
+  "a legacy writer": {
+   "ts": "2026-10-27T04:00:01.234Z",
+   "writer": "legacy/chat",
+   "seq": 42,
+   "kind": "say",
+   "from": "maws-45",
+   "to": "*",
+   "text": "the build is green",
+   "sig": {
+    "kid": "wumzQrn1tDdp_WGHx7Vwdg",
+    "value": "MhNbqQaugjzbvC4dmygAYMIUxYfzK7MBBV1Jz-Coaci5ciHhOMmoNG_Gtca0Wj2GYgcOCiNoKOkKnDBEtkHoTA"
+   }
+  },
+  "a member's words signed by their device's channel key": {
+   "kind": "human",
+   "from": "human",
+   "member": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+   "to": "*",
+   "text": "ship it",
+   "created": "2026-10-27T04:00:00.000Z",
+   "nonce": "BwcHBwcHBwcHBwcHBwcHBw",
+   "sig": {
+    "kid": "nEW8LdQpZ2idv9D_lPjTjA",
+    "value": "0ZW0vtUllHnA7IeFcF6SLZrYi4xDxLGrTAS3i9JvgcRXSpn8D7Iyq98cyqre3QNv3Lx0BdBJ4lq73zwG_mVZTw"
+   },
+   "writer": "hub/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+   "seq": 7,
+   "ts": "2026-10-27T05:00:00.500Z"
+  },
+  "a member's words at another position the hub assigned": {
+   "kind": "human",
+   "from": "human",
+   "member": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+   "to": "*",
+   "text": "ship it",
+   "created": "2026-10-27T04:00:00.000Z",
+   "nonce": "BwcHBwcHBwcHBwcHBwcHBw",
+   "sig": {
+    "kid": "nEW8LdQpZ2idv9D_lPjTjA",
+    "value": "0ZW0vtUllHnA7IeFcF6SLZrYi4xDxLGrTAS3i9JvgcRXSpn8D7Iyq98cyqre3QNv3Lx0BdBJ4lq73zwG_mVZTw"
+   },
+   "writer": "hub/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+   "seq": 8,
+   "ts": "2026-10-27T05:00:00.500Z"
+  },
+  "a member's words placed under another member's writer": {
+   "kind": "human",
+   "from": "human",
+   "member": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+   "to": "*",
+   "text": "ship it",
+   "created": "2026-10-27T04:00:00.000Z",
+   "nonce": "BwcHBwcHBwcHBwcHBwcHBw",
+   "sig": {
+    "kid": "nEW8LdQpZ2idv9D_lPjTjA",
+    "value": "0ZW0vtUllHnA7IeFcF6SLZrYi4xDxLGrTAS3i9JvgcRXSpn8D7Iyq98cyqre3QNv3Lx0BdBJ4lq73zwG_mVZTw"
+   },
+   "writer": "hub/f9e8d7c6b5a4938271605f4e3d2c1b0a",
+   "seq": 7,
+   "ts": "2026-10-27T05:00:00.500Z"
+  },
+  "a member's words signed by their step-up key": {
+   "kind": "human",
+   "from": "human",
+   "member": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+   "to": "*",
+   "text": "ship it",
+   "created": "2026-10-27T04:00:00.000Z",
+   "nonce": "BwcHBwcHBwcHBwcHBwcHBw",
+   "sig": {
+    "kid": "MOKxOtSc0yivgxjs8Aokgw",
+    "value": "ji2KlnulP36BZ7IvHD56AHE0eDQLMevJiL35dimNBe4P9zC4-X2cgfCCyC1Gui7jXkBY2l2Iy-pulF3V8aPlyQ"
+   },
+   "writer": "hub/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+   "seq": 7,
+   "ts": "2026-10-27T05:00:00.500Z"
+  },
+  "a member's words signed by their web-cards phone": {
+   "kind": "human",
+   "from": "human",
+   "member": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+   "to": "*",
+   "text": "ship it",
+   "created": "2026-10-27T04:00:00.000Z",
+   "nonce": "BwcHBwcHBwcHBwcHBwcHBw",
+   "sig": {
+    "kid": "noaDMJm5T5GiotPmsABYqw",
+    "value": "ksuBTU7dVxiXa0xQgmrs27viSkcDNpNhOhfPgI57z9Z-dxpgT0xYR9NHe9ukIbEhj-WiEFdrHmNFapK7dqgKuA"
+   },
+   "writer": "hub/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+   "seq": 7,
+   "ts": "2026-10-27T05:00:00.500Z"
+  },
+  "a member's words signed by another member's device": {
+   "kind": "human",
+   "from": "human",
+   "member": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+   "to": "*",
+   "text": "ship it",
+   "created": "2026-10-27T04:00:00.000Z",
+   "nonce": "BwcHBwcHBwcHBwcHBwcHBw",
+   "sig": {
+    "kid": "DQ1GJV5m1OQoeDhxlbpf9g",
+    "value": "GKuWK1eCLV4IXWMn6bgWfNhFghugW3q5C3RRUaygT8mN8VsrbhHZa_42M-gcmEbSMW4qen8qlXrE5C-xmPG66w"
+   },
+   "writer": "hub/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+   "seq": 7,
+   "ts": "2026-10-27T05:00:00.500Z"
+  },
+  "words from a device the head has since removed": {
+   "kind": "human",
+   "from": "human",
+   "member": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+   "to": "*",
+   "text": "ship it",
+   "created": "2026-10-27T04:00:00.000Z",
+   "nonce": "BwcHBwcHBwcHBwcHBwcHBw",
+   "sig": {
+    "kid": "nEW8LdQpZ2idv9D_lPjTjA",
+    "value": "0ZW0vtUllHnA7IeFcF6SLZrYi4xDxLGrTAS3i9JvgcRXSpn8D7Iyq98cyqre3QNv3Lx0BdBJ4lq73zwG_mVZTw"
+   },
+   "writer": "hub/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+   "seq": 7,
+   "ts": "2026-10-27T05:00:00.500Z"
+  },
+  "a dual-coded machine event": {
+   "ts": "2026-10-27T04:00:01.234Z",
+   "writer": "mini/67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b",
+   "seq": 42,
+   "kind": "say",
+   "from": "maws-45",
+   "to": "*",
+   "text": "the build is green",
+   "sig": {
+    "kid": "wumzQrn1tDdp_WGHx7Vwdg",
+    "value": "xCsauqYtOQnm8c0ok9L-baXx-HTq83aWxif0mzO9dBdaUOnbSJ8qsKP34srJq_FhJpqh2v0yaR6zxw9oqAkTsQ"
+   },
+   "mac": {
+    "nonce": "AQEBAQEBAQEBAQEBAQEBAQ",
+    "value": "Hra2nCGwC8UVPBvjDEakoRDw_RZ-xPOl8LELj5uKpYQ"
+   }
+  },
+  "a dual-coded member's words": {
+   "kind": "human",
+   "from": "human",
+   "member": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+   "to": "*",
+   "text": "and tag it",
+   "created": "2026-10-27T04:00:00.000Z",
+   "nonce": "BwcHBwcHBwcHBwcHBwcHBw",
+   "sig": {
+    "kid": "nEW8LdQpZ2idv9D_lPjTjA",
+    "value": "jqkBpDmi3mmqbX7friUx-rMMRNXxQK9RrZX6VyUsEv2RGlwTLzKOJX-QWpkyKfxEX-IO6Rxuzx5WB-qSG6bSxQ"
+   },
+   "writer": "hub/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+   "seq": 9,
+   "ts": "2026-10-27T05:00:00.500Z",
+   "mac": {
+    "nonce": "AgICAgICAgICAgICAgICAg",
+    "value": "vsjRgrHISAIq1ExkDWPPnCD-HMN9shrxh5Vhax7fUXM"
+   }
+  }
+ },
+ "cases": [
+  {
+   "name": "genesis signed by its own root",
+   "call": "verifyGenesis",
+   "args": [
+    {
+     "$signed": "g1"
+    }
+   ],
+   "expect": {
+    "ok": true
+   }
+  },
+  {
+   "name": "genesis signed by a key outside its root",
+   "call": "verifyGenesis",
+   "args": [
+    {
+     "$signed": "genesis signed by a key outside its root"
+    }
+   ],
+   "expect": {
+    "ok": false,
+    "code": "not-root-signed"
+   }
+  },
+  {
+   "name": "genesis at version 2",
+   "call": "verifyGenesis",
+   "args": [
+    {
+     "$signed": "genesis at version 2"
+    }
+   ],
+   "expect": {
+    "ok": false,
+    "code": "malformed"
+   }
+  },
+  {
+   "name": "genesis with a prev",
+   "call": "verifyGenesis",
+   "args": [
+    {
+     "$signed": "genesis with a prev"
+    }
+   ],
+   "expect": {
+    "ok": false,
+    "code": "bad-link"
+   }
+  },
+  {
+   "name": "genesis whose root names a channel key",
+   "call": "verifyGenesis",
+   "args": [
+    {
+     "$signed": "genesis whose root names a channel key"
+    }
+   ],
+   "expect": {
+    "ok": false,
+    "code": "malformed"
+   }
+  },
+  {
+   "name": "genesis with an empty root",
+   "call": "verifyGenesis",
+   "args": [
+    {
+     "$signed": "genesis with an empty root"
+    }
+   ],
+   "expect": {
+    "ok": false,
+    "code": "malformed"
+   }
+  },
+  {
+   "name": "genesis whose web-cards device holds a step-up key",
+   "call": "verifyGenesis",
+   "args": [
+    {
+     "$signed": "genesis whose web-cards device holds a step-up key"
+    }
+   ],
+   "expect": {
+    "ok": false,
+    "code": "malformed"
+   }
+  },
+  {
+   "name": "genesis with two members of one email",
+   "call": "verifyGenesis",
+   "args": [
+    {
+     "$signed": "genesis with two members of one email"
+    }
+   ],
+   "expect": {
+    "ok": false,
+    "code": "malformed"
+   }
+  },
+  {
+   "name": "genesis with a machine owned by a non-member",
+   "call": "verifyGenesis",
+   "args": [
+    {
+     "$signed": "genesis with a machine owned by a non-member"
+    }
+   ],
+   "expect": {
+    "ok": false,
+    "code": "malformed"
+   }
+  },
+  {
+   "name": "genesis with an unknown field",
+   "call": "verifyGenesis",
+   "args": [
+    {
+     "$signed": "genesis with an unknown field"
+    }
+   ],
+   "expect": {
+    "ok": false,
+    "code": "malformed"
+   }
+  },
+  {
+   "name": "a successor adding a member, an endorsed phone, machines and a delegation",
+   "call": "verifySuccessor",
+   "args": [
+    {
+     "$signed": "g1"
+    },
+    {
+     "$signed": "v2"
+    },
+    []
+   ],
+   "expect": {
+    "ok": true
+   }
+  },
+  {
+   "name": "a new device of a member with devices, unendorsed",
+   "call": "verifySuccessor",
+   "args": [
+    {
+     "$signed": "g1"
+    },
+    {
+     "$signed": "v2 phone without endorsement"
+    },
+    []
+   ],
+   "expect": {
+    "ok": false,
+    "code": "endorsement-missing"
+   }
+  },
+  {
+   "name": "a member's second device, endorsed by their first and countersigned by an admin",
+   "call": "verifySuccessor",
+   "args": [
+    {
+     "$signed": "v2"
+    },
+    {
+     "$signed": "v3"
+    },
+    []
+   ],
+   "expect": {
+    "ok": true
+   }
+  },
+  {
+   "name": "a second device without an endorsement",
+   "call": "verifySuccessor",
+   "args": [
+    {
+     "$signed": "v2"
+    },
+    {
+     "$signed": "a second device without an endorsement"
+    },
+    []
+   ],
+   "expect": {
+    "ok": false,
+    "code": "endorsement-missing"
+   }
+  },
+  {
+   "name": "a second device whose channel key changed after its endorsement",
+   "call": "verifySuccessor",
+   "args": [
+    {
+     "$signed": "v2"
+    },
+    {
+     "$signed": "a second device whose channel key changed after its endorsement"
+    },
+    []
+   ],
+   "expect": {
+    "ok": false,
+    "code": "bad-signature"
+   }
+  },
+  {
+   "name": "a second device whose key storage changed after its endorsement",
+   "call": "verifySuccessor",
+   "args": [
+    {
+     "$signed": "v2"
+    },
+    {
+     "$signed": "a second device whose key storage changed after its endorsement"
+    },
+    []
+   ],
+   "expect": {
+    "ok": false,
+    "code": "bad-signature"
+   }
+  },
+  {
+   "name": "a second device endorsed by another member's device",
+   "call": "verifySuccessor",
+   "args": [
+    {
+     "$signed": "v2"
+    },
+    {
+     "$signed": "a second device endorsed by another member's device"
+    },
+    []
+   ],
+   "expect": {
+    "ok": false,
+    "code": "unknown-signer"
+   }
+  },
+  {
+   "name": "a second device endorsed by the member's channel key",
+   "call": "verifySuccessor",
+   "args": [
+    {
+     "$signed": "v2"
+    },
+    {
+     "$signed": "a second device endorsed by the member's channel key"
+    },
+    []
+   ],
+   "expect": {
+    "ok": false,
+    "code": "unknown-signer"
+   }
+  },
+  {
+   "name": "a second device endorsed for another org",
+   "call": "verifySuccessor",
+   "args": [
+    {
+     "$signed": "v2"
+    },
+    {
+     "$signed": "a second device endorsed for another org"
+    },
+    []
+   ],
+   "expect": {
+    "ok": false,
+    "code": "bad-signature"
+   }
+  },
+  {
+   "name": "a successor signed by a member, not an admin",
+   "call": "verifySuccessor",
+   "args": [
+    {
+     "$signed": "v2"
+    },
+    {
+     "$signed": "a successor signed by a member, not an admin"
+    },
+    []
+   ],
+   "expect": {
+    "ok": false,
+    "code": "not-root-signed"
+   }
+  },
+  {
+   "name": "a successor carrying a signature over another state",
+   "call": "verifySuccessor",
+   "args": [
+    {
+     "$signed": "v2"
+    },
+    {
+     "$signed": "a successor carrying a signature over another state"
+    },
+    []
+   ],
+   "expect": {
+    "ok": false,
+    "code": "bad-signature"
+   }
+  },
+  {
+   "name": "a fork at the head: another state of the head version",
+   "call": "verifySuccessor",
+   "args": [
+    {
+     "$signed": "v3"
+    },
+    {
+     "$signed": "a fork at the head: another state of the head version"
+    },
+    []
+   ],
+   "expect": {
+    "ok": false,
+    "code": "not-head"
+   }
+  },
+  {
+   "name": "an older version than the head",
+   "call": "verifySuccessor",
+   "args": [
+    {
+     "$signed": "v3"
+    },
+    {
+     "$signed": "v2"
+    },
+    []
+   ],
+   "expect": {
+    "ok": false,
+    "code": "rollback"
+   }
+  },
+  {
+   "name": "a successor two versions past the head",
+   "call": "verifySuccessor",
+   "args": [
+    {
+     "$signed": "v2"
+    },
+    {
+     "$signed": "v4 beyond a gap"
+    },
+    []
+   ],
+   "expect": {
+    "ok": false,
+    "code": "not-head"
+   }
+  },
+  {
+   "name": "a successor whose prev is not the head",
+   "call": "verifySuccessor",
+   "args": [
+    {
+     "$signed": "v2"
+    },
+    {
+     "$signed": "a successor whose prev is not the head"
+    },
+    []
+   ],
+   "expect": {
+    "ok": false,
+    "code": "not-head"
+   }
+  },
+  {
+   "name": "a successor of another org",
+   "call": "verifySuccessor",
+   "args": [
+    {
+     "$signed": "v2"
+    },
+    {
+     "$signed": "a successor of another org"
+    },
+    []
+   ],
+   "expect": {
+    "ok": false,
+    "code": "bad-link"
+   }
+  },
+  {
+   "name": "a successor that changes the recovery key",
+   "call": "verifySuccessor",
+   "args": [
+    {
+     "$signed": "v2"
+    },
+    {
+     "$signed": "a successor that changes the recovery key"
+    },
+    []
+   ],
+   "expect": {
+    "ok": false,
+    "code": "malformed"
+   }
+  },
+  {
+   "name": "a successor issued before the head",
+   "call": "verifySuccessor",
+   "args": [
+    {
+     "$signed": "v2"
+    },
+    {
+     "$signed": "a successor issued before the head"
+    },
+    []
+   ],
+   "expect": {
+    "ok": false,
+    "code": "malformed"
+   }
+  },
+  {
+   "name": "a member promoted to admin and root",
+   "call": "verifySuccessor",
+   "args": [
+    {
+     "$signed": "v3"
+    },
+    {
+     "$signed": "v4"
+    },
+    []
+   ],
+   "expect": {
+    "ok": true
+   }
+  },
+  {
+   "name": "a demotion that keeps the root key",
+   "call": "verifySuccessor",
+   "args": [
+    {
+     "$signed": "v4"
+    },
+    {
+     "$signed": "a demotion that keeps the root key"
+    },
+    []
+   ],
+   "expect": {
+    "ok": false,
+    "code": "malformed"
+   }
+  },
+  {
+   "name": "an admin removed, by their own root key",
+   "call": "verifySuccessor",
+   "args": [
+    {
+     "$signed": "v4"
+    },
+    {
+     "$signed": "v5"
+    },
+    []
+   ],
+   "expect": {
+    "ok": true
+   }
+  },
+  {
+   "name": "a successor signed by a removed admin's key",
+   "call": "verifySuccessor",
+   "args": [
+    {
+     "$signed": "v5"
+    },
+    {
+     "$signed": "a successor signed by a removed admin's key"
+    },
+    []
+   ],
+   "expect": {
+    "ok": false,
+    "code": "not-root-signed"
+   }
+  },
+  {
+   "name": "a root transition signed by the pinned recovery key",
+   "call": "verifyTransition",
+   "args": [
+    {
+     "$signed": "v5"
+    },
+    {
+     "$fixture": "t5"
+    },
+    "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+   ],
+   "expect": {
+    "ok": true
+   }
+  },
+  {
+   "name": "a root transition signed by an admin key",
+   "call": "verifyTransition",
+   "args": [
+    {
+     "$signed": "v5"
+    },
+    {
+     "$fixture": "a root transition signed by an admin key"
+    },
+    "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "unknown-signer"
+   }
+  },
+  {
+   "name": "a root transition whose new keys changed after signing",
+   "call": "verifyTransition",
+   "args": [
+    {
+     "$signed": "v5"
+    },
+    {
+     "$fixture": "a root transition whose new keys changed after signing"
+    },
+    "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "bad-signature"
+   }
+  },
+  {
+   "name": "a root transition against an older version",
+   "call": "verifyTransition",
+   "args": [
+    {
+     "$signed": "v5"
+    },
+    {
+     "$fixture": "a root transition against an older version"
+    },
+    "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "rollback"
+   }
+  },
+  {
+   "name": "a root transition against a later version",
+   "call": "verifyTransition",
+   "args": [
+    {
+     "$signed": "v5"
+    },
+    {
+     "$fixture": "a root transition against a later version"
+    },
+    "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "not-head"
+   }
+  },
+  {
+   "name": "a root transition of another org",
+   "call": "verifyTransition",
+   "args": [
+    {
+     "$signed": "v5"
+    },
+    {
+     "$fixture": "a root transition of another org"
+    },
+    "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "bad-link"
+   }
+  },
+  {
+   "name": "the successor a root transition authorizes",
+   "call": "verifySuccessor",
+   "args": [
+    {
+     "$signed": "v5"
+    },
+    {
+     "$signed": "the successor a root transition authorizes"
+    },
+    [
+     {
+      "$fixture": "t5"
+     }
+    ]
+   ],
+   "expect": {
+    "ok": true
+   }
+  },
+  {
+   "name": "the same successor without the transition",
+   "call": "verifySuccessor",
+   "args": [
+    {
+     "$signed": "v5"
+    },
+    {
+     "$signed": "the same successor without the transition"
+    },
+    []
+   ],
+   "expect": {
+    "ok": false,
+    "code": "not-root-signed"
+   }
+  },
+  {
+   "name": "a successor signed by the old root while a transition is held",
+   "call": "verifySuccessor",
+   "args": [
+    {
+     "$signed": "v5"
+    },
+    {
+     "$signed": "a successor signed by the old root while a transition is held"
+    },
+    [
+     {
+      "$fixture": "t5"
+     }
+    ]
+   ],
+   "expect": {
+    "ok": false,
+    "code": "not-root-signed"
+   }
+  },
+  {
+   "name": "a successor after a transition that keeps the old root key",
+   "call": "verifySuccessor",
+   "args": [
+    {
+     "$signed": "v5"
+    },
+    {
+     "$signed": "a successor after a transition that keeps the old root key"
+    },
+    [
+     {
+      "$fixture": "t5"
+     }
+    ]
+   ],
+   "expect": {
+    "ok": false,
+    "code": "malformed"
+   }
+  },
+  {
+   "name": "a successor by the old root, beside a transition that fails to verify",
+   "call": "verifySuccessor",
+   "args": [
+    {
+     "$signed": "v5"
+    },
+    {
+     "$signed": "a successor by the old root, beside a transition that fails to verify"
+    },
+    [
+     {
+      "$fixture": "t5 by a stranger"
+     }
+    ]
+   ],
+   "expect": {
+    "ok": true
+   }
+  },
+  {
+   "name": "a rollback after a transition",
+   "call": "verifySuccessor",
+   "args": [
+    {
+     "$signed": "v6"
+    },
+    {
+     "$signed": "v5"
+    },
+    [
+     {
+      "$fixture": "t5"
+     }
+    ]
+   ],
+   "expect": {
+    "ok": false,
+    "code": "rollback"
+   }
+  },
+  {
+   "name": "a grant signed by the machine owner",
+   "call": "verifyGrant",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a grant signed by the machine owner"
+    }
+   ],
+   "expect": {
+    "ok": true
+   }
+  },
+  {
+   "name": "a grant signed by the owner's channel key",
+   "call": "verifyGrant",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a grant signed by the owner's channel key"
+    }
+   ],
+   "expect": {
+    "ok": false,
+    "code": "unknown-signer"
+   }
+  },
+  {
+   "name": "a grant signed by a member who does not own the machine",
+   "call": "verifyGrant",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a grant signed by a member who does not own the machine"
+    }
+   ],
+   "expect": {
+    "ok": false,
+    "code": "unknown-signer"
+   }
+  },
+  {
+   "name": "a grant on an org-owned machine, signed by an admin",
+   "call": "verifyGrant",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a grant on an org-owned machine, signed by an admin"
+    }
+   ],
+   "expect": {
+    "ok": true
+   }
+  },
+  {
+   "name": "a grant on an unlisted machine",
+   "call": "verifyGrant",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a grant on an unlisted machine"
+    }
+   ],
+   "expect": {
+    "ok": false,
+    "code": "not-listed"
+   }
+  },
+  {
+   "name": "a grant whose rights changed after signing",
+   "call": "verifyGrant",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a grant whose rights changed after signing"
+    }
+   ],
+   "expect": {
+    "ok": false,
+    "code": "bad-signature"
+   }
+  },
+  {
+   "name": "a machine certificate under a live delegation",
+   "call": "verifyMachineCert",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a machine certificate under a live delegation"
+    },
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": true
+   }
+  },
+  {
+   "name": "a machine certificate after its delegation is removed",
+   "call": "verifyMachineCert",
+   "args": [
+    {
+     "$state": "v2 without the delegation"
+    },
+    {
+     "$fixture": "a machine certificate after its delegation is removed"
+    },
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "not-listed"
+   }
+  },
+  {
+   "name": "a machine certificate after its delegation expires",
+   "call": "verifyMachineCert",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a machine certificate after its delegation expires"
+    },
+    "2026-12-01T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "expired"
+   }
+  },
+  {
+   "name": "a machine certificate past its delegation's uses",
+   "call": "verifyMachineCert",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a machine certificate past its delegation's uses"
+    },
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "expired"
+   }
+  },
+  {
+   "name": "a machine certificate outside the prefix",
+   "call": "verifyMachineCert",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a machine certificate outside the prefix"
+    },
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "unknown-signer"
+   }
+  },
+  {
+   "name": "a machine certificate for a listed machine",
+   "call": "verifyMachineCert",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a machine certificate for a listed machine"
+    },
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "unknown-signer"
+   }
+  },
+  {
+   "name": "a machine certificate signed by another key",
+   "call": "verifyMachineCert",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a machine certificate signed by another key"
+    },
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "unknown-signer"
+   }
+  },
+  {
+   "name": "a machine certificate whose key changed after signing",
+   "call": "verifyMachineCert",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a machine certificate whose key changed after signing"
+    },
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "bad-signature"
+   }
+  },
+  {
+   "name": "a listing signed by its listed machine",
+   "call": "verifyListing",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a listing signed by its listed machine"
+    },
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": true
+   }
+  },
+  {
+   "name": "a listing signed by a certified VM",
+   "call": "verifyListing",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a listing signed by a certified VM"
+    },
+    [
+     {
+      "$fixture": "cert vm-1"
+     }
+    ],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": true
+   }
+  },
+  {
+   "name": "a VM's listing without its certificate",
+   "call": "verifyListing",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a VM's listing without its certificate"
+    },
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "not-listed"
+   }
+  },
+  {
+   "name": "a VM's listing after its delegation is removed",
+   "call": "verifyListing",
+   "args": [
+    {
+     "$state": "v2 without the delegation"
+    },
+    {
+     "$fixture": "a VM's listing after its delegation is removed"
+    },
+    [
+     {
+      "$fixture": "cert vm-1"
+     }
+    ],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "not-listed"
+   }
+  },
+  {
+   "name": "a listing of a listed machine signed by another key",
+   "call": "verifyListing",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a listing of a listed machine signed by another key"
+    },
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "unknown-signer"
+   }
+  },
+  {
+   "name": "a listing whose title changed after signing",
+   "call": "verifyListing",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a listing whose title changed after signing"
+    },
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "bad-signature"
+   }
+  },
+  {
+   "name": "a listing naming @machine as an owner",
+   "call": "verifyListing",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a listing naming @machine as an owner"
+    },
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "malformed"
+   }
+  },
+  {
+   "name": "a listing of an unlisted machine",
+   "call": "verifyListing",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a listing of an unlisted machine"
+    },
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "not-listed"
+   }
+  },
+  {
+   "name": "an endpoint record signed by its listed machine",
+   "call": "verifyEndpointRecord",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "an endpoint record signed by its listed machine"
+    },
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": true
+   }
+  },
+  {
+   "name": "an endpoint record signed by a certified VM",
+   "call": "verifyEndpointRecord",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "an endpoint record signed by a certified VM"
+    },
+    [
+     {
+      "$fixture": "cert vm-1"
+     }
+    ],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": true
+   }
+  },
+  {
+   "name": "a VM's endpoint record after its delegation is removed",
+   "call": "verifyEndpointRecord",
+   "args": [
+    {
+     "$state": "v2 without the delegation"
+    },
+    {
+     "$fixture": "a VM's endpoint record after its delegation is removed"
+    },
+    [
+     {
+      "$fixture": "cert vm-1"
+     }
+    ],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "not-listed"
+   }
+  },
+  {
+   "name": "an endpoint record whose addresses changed after signing",
+   "call": "verifyEndpointRecord",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "an endpoint record whose addresses changed after signing"
+    },
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "bad-signature"
+   }
+  },
+  {
+   "name": "an endpoint record signed as a listing",
+   "call": "verifyEndpointRecord",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "an endpoint record signed as a listing"
+    },
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "bad-signature"
+   }
+  },
+  {
+   "name": "a machine's event signed by its key",
+   "call": "verifyEvent",
+   "args": [
+    {
+     "org": "org-vectors",
+     "project": "proj-1"
+    },
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a machine's event signed by its key"
+    },
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": true
+   }
+  },
+  {
+   "name": "a machine's event replayed into another project",
+   "call": "verifyEvent",
+   "args": [
+    {
+     "org": "org-vectors",
+     "project": "proj-2"
+    },
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a machine's event signed by its key"
+    },
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "bad-signature"
+   }
+  },
+  {
+   "name": "a machine's event replayed into another org",
+   "call": "verifyEvent",
+   "args": [
+    {
+     "org": "org-other",
+     "project": "proj-1"
+    },
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a machine's event signed by its key"
+    },
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "bad-signature"
+   }
+  },
+  {
+   "name": "a machine's event whose text changed after signing",
+   "call": "verifyEvent",
+   "args": [
+    {
+     "org": "org-vectors",
+     "project": "proj-1"
+    },
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a machine's event whose text changed after signing"
+    },
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "bad-signature"
+   }
+  },
+  {
+   "name": "a machine's event whose seq changed after signing",
+   "call": "verifyEvent",
+   "args": [
+    {
+     "org": "org-vectors",
+     "project": "proj-1"
+    },
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a machine's event whose seq changed after signing"
+    },
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "bad-signature"
+   }
+  },
+  {
+   "name": "a machine's event signed by another key",
+   "call": "verifyEvent",
+   "args": [
+    {
+     "org": "org-vectors",
+     "project": "proj-1"
+    },
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a machine's event signed by another key"
+    },
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "unknown-signer"
+   }
+  },
+  {
+   "name": "a certified VM's event",
+   "call": "verifyEvent",
+   "args": [
+    {
+     "org": "org-vectors",
+     "project": "proj-1"
+    },
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a certified VM's event"
+    },
+    [
+     {
+      "$fixture": "cert vm-1"
+     }
+    ],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": true
+   }
+  },
+  {
+   "name": "a VM's event without its certificate",
+   "call": "verifyEvent",
+   "args": [
+    {
+     "org": "org-vectors",
+     "project": "proj-1"
+    },
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a VM's event without its certificate"
+    },
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "unknown-signer"
+   }
+  },
+  {
+   "name": "a VM's event after its delegation is removed",
+   "call": "verifyEvent",
+   "args": [
+    {
+     "org": "org-vectors",
+     "project": "proj-1"
+    },
+    {
+     "$state": "v2 without the delegation"
+    },
+    {
+     "$fixture": "a VM's event after its delegation is removed"
+    },
+    [
+     {
+      "$fixture": "cert vm-1"
+     }
+    ],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "unknown-signer"
+   }
+  },
+  {
+   "name": "a legacy writer",
+   "call": "verifyEvent",
+   "args": [
+    {
+     "org": "org-vectors",
+     "project": "proj-1"
+    },
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a legacy writer"
+    },
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "unknown-signer"
+   }
+  },
+  {
+   "name": "a member's words signed by their device's channel key",
+   "call": "verifyEvent",
+   "args": [
+    {
+     "org": "org-vectors",
+     "project": "proj-1"
+    },
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a member's words signed by their device's channel key"
+    },
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": true
+   }
+  },
+  {
+   "name": "a member's words at another position the hub assigned",
+   "call": "verifyEvent",
+   "args": [
+    {
+     "org": "org-vectors",
+     "project": "proj-1"
+    },
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a member's words at another position the hub assigned"
+    },
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": true
+   }
+  },
+  {
+   "name": "a member's words placed under another member's writer",
+   "call": "verifyEvent",
+   "args": [
+    {
+     "org": "org-vectors",
+     "project": "proj-1"
+    },
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a member's words placed under another member's writer"
+    },
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "malformed"
+   }
+  },
+  {
+   "name": "a member's words signed by their step-up key",
+   "call": "verifyEvent",
+   "args": [
+    {
+     "org": "org-vectors",
+     "project": "proj-1"
+    },
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a member's words signed by their step-up key"
+    },
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "unknown-signer"
+   }
+  },
+  {
+   "name": "a member's words signed by their web-cards phone",
+   "call": "verifyEvent",
+   "args": [
+    {
+     "org": "org-vectors",
+     "project": "proj-1"
+    },
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a member's words signed by their web-cards phone"
+    },
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "unknown-signer"
+   }
+  },
+  {
+   "name": "a member's words signed by another member's device",
+   "call": "verifyEvent",
+   "args": [
+    {
+     "org": "org-vectors",
+     "project": "proj-1"
+    },
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a member's words signed by another member's device"
+    },
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "unknown-signer"
+   }
+  },
+  {
+   "name": "words from a device the head has since removed",
+   "call": "verifyEvent",
+   "args": [
+    {
+     "org": "org-vectors",
+     "project": "proj-1"
+    },
+    {
+     "$state": "v6"
+    },
+    {
+     "$fixture": "words from a device the head has since removed"
+    },
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": false,
+    "code": "unknown-signer"
+   }
+  },
+  {
+   "name": "a member's writer: their devices' channel keys, the web-cards phone excepted",
+   "call": "signerFor",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    "hub/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "keys": [
+     "BIxdW5yOFTC109Yte8XC6r8USY7RIFKEiE7njfpUEBJzL_dGNT7Nn0WaeNz-8kdy2el4Ga4DwoqaIIFK9_5QTH0"
+    ]
+   }
+  },
+  {
+   "name": "a listed machine's writer: its key",
+   "call": "signerFor",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    "mini/67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b",
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "keys": [
+     "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw"
+    ]
+   }
+  },
+  {
+   "name": "a certified VM's writer: its certificate's key",
+   "call": "signerFor",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    "vm-1/human",
+    [
+     {
+      "$fixture": "cert vm-1"
+     }
+    ],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "keys": [
+     "BB7Vq8OXaIdsz9h22ZPX-R-PfsMISMeeOx4aW6JltjRz1NLxkcH3XnvZjmmkdbewel5nxr5JpYnbgMDsFBw0Ax8"
+    ]
+   }
+  },
+  {
+   "name": "a legacy writer: no key",
+   "call": "signerFor",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    "legacy/chat",
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "keys": []
+   }
+  },
+  {
+   "name": "an unknown member's writer: no key",
+   "call": "signerFor",
+   "args": [
+    {
+     "$state": "v2"
+    },
+    "hub/00000000000000000000000000000000",
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "keys": []
+   }
+  },
+  {
+   "name": "a dual-coded machine event",
+   "call": "verifyEvent",
+   "args": [
+    {
+     "org": "org-vectors",
+     "project": "proj-1"
+    },
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a dual-coded machine event"
+    },
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": true
+   }
+  },
+  {
+   "name": "a dual-coded member's words",
+   "call": "verifyEvent",
+   "args": [
+    {
+     "org": "org-vectors",
+     "project": "proj-1"
+    },
+    {
+     "$state": "v2"
+    },
+    {
+     "$fixture": "a dual-coded member's words"
+    },
+    [],
+    "2026-10-28T00:00:00.000Z"
+   ],
+   "expect": {
+    "ok": true
+   }
+  }
+ ],
+ "dual": [
+  {
+   "name": "a dual-coded machine event",
+   "org": "org-vectors",
+   "project": "proj-1",
+   "orgKey": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+   "event": {
+    "ts": "2026-10-27T04:00:01.234Z",
+    "writer": "mini/67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b",
+    "seq": 42,
+    "kind": "say",
+    "from": "maws-45",
+    "to": "*",
+    "text": "the build is green",
+    "sig": {
+     "kid": "wumzQrn1tDdp_WGHx7Vwdg",
+     "value": "xCsauqYtOQnm8c0ok9L-baXx-HTq83aWxif0mzO9dBdaUOnbSJ8qsKP34srJq_FhJpqh2v0yaR6zxw9oqAkTsQ"
+    },
+    "mac": {
+     "nonce": "AQEBAQEBAQEBAQEBAQEBAQ",
+     "value": "Hra2nCGwC8UVPBvjDEakoRDw_RZ-xPOl8LELj5uKpYQ"
+    }
+   }
+  },
+  {
+   "name": "a dual-coded member's words",
+   "org": "org-vectors",
+   "project": "proj-1",
+   "orgKey": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+   "event": {
+    "kind": "human",
+    "from": "human",
+    "member": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+    "to": "*",
+    "text": "and tag it",
+    "created": "2026-10-27T04:00:00.000Z",
+    "nonce": "BwcHBwcHBwcHBwcHBwcHBw",
+    "sig": {
+     "kid": "nEW8LdQpZ2idv9D_lPjTjA",
+     "value": "jqkBpDmi3mmqbX7friUx-rMMRNXxQK9RrZX6VyUsEv2RGlwTLzKOJX-QWpkyKfxEX-IO6Rxuzx5WB-qSG6bSxQ"
+    },
+    "writer": "hub/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+    "seq": 9,
+    "ts": "2026-10-27T05:00:00.500Z",
+    "mac": {
+     "nonce": "AgICAgICAgICAgICAgICAg",
+     "value": "vsjRgrHISAIq1ExkDWPPnCD-HMN9shrxh5Vhax7fUXM"
+    }
+   }
+  }
+ ],
+ "encodings": {
+  "kids": [
+   {
+    "pub": "BGya5WbB3gvk4I4y8nkgyerYQZZNA8KhIyg5WSi1uUstt73gYYuRsVwMiJ7lPwo0uHEhWD5XzxkrDJNLbyD4CV8",
+    "kid": "MOKxOtSc0yivgxjs8Aokgw"
+   },
+   {
+    "pub": "BOE3tTiswYTCIWQqW__debL1_Zng29JPoFfRq0rGbzRwqLEIX26Ch8vqu063bdCFewQvTcWgH0VmIRRXhtSmBGw",
+    "kid": "wumzQrn1tDdp_WGHx7Vwdg"
+   },
+   {
+    "pub": "BD4G6QabpU0vg3RlDKm96VhC52RFdRH1kljGrbPS1ipE-xX901azTVKEBWI-_JiQfDbXhqCNvj8AZPD3AdAdrzY",
+    "kid": "uwBz3uibAbXGfwcqBydEwg"
+   }
+  ],
+  "stateHashes": [
+   {
+    "state": {
+     "$state": "g1"
+    },
+    "hash": "un3ena9tV8UGiSV9xKUYS2BE75cN-n5s14dcOTy62iI"
+   },
+   {
+    "state": {
+     "$state": "v2"
+    },
+    "hash": "BA3eB7fCwGH-VTtvPcliZfuMKWWKKo7taVbzV9ysLlQ"
+   }
+  ],
+  "inputs": [
+   {
+    "domain": "smns-org-grant-v1",
+    "body": {
+     "org": "org-vectors",
+     "machine": "mini",
+     "member": "f9e8d7c6b5a4938271605f4e3d2c1b0a",
+     "rights": [
+      "spawn"
+     ],
+     "version": 1,
+     "issued": "2026-10-27T02:00:00.000Z"
+    },
+    "input": "smns-org-grant-v1\n{\"issued\":\"2026-10-27T02:00:00.000Z\",\"machine\":\"mini\",\"member\":\"f9e8d7c6b5a4938271605f4e3d2c1b0a\",\"org\":\"org-vectors\",\"rights\":[\"spawn\"],\"version\":1}"
+   },
+   {
+    "domain": "smns-machine-cert-v1",
+    "body": {
+     "org": "org-vectors",
+     "machine": "vm-1",
+     "pub": "BB7Vq8OXaIdsz9h22ZPX-R-PfsMISMeeOx4aW6JltjRz1NLxkcH3XnvZjmmkdbewel5nxr5JpYnbgMDsFBw0Ax8",
+     "delegation": "dlg-vm",
+     "use": 1,
+     "issued": "2026-10-27T03:00:00.000Z"
+    },
+    "input": "smns-machine-cert-v1\n{\"delegation\":\"dlg-vm\",\"issued\":\"2026-10-27T03:00:00.000Z\",\"machine\":\"vm-1\",\"org\":\"org-vectors\",\"pub\":\"BB7Vq8OXaIdsz9h22ZPX-R-PfsMISMeeOx4aW6JltjRz1NLxkcH3XnvZjmmkdbewel5nxr5JpYnbgMDsFBw0Ax8\",\"use\":1}"
+   },
+   {
+    "domain": "smns-listing-v1",
+    "body": {
+     "org": "org-vectors",
+     "machine": "mini",
+     "session": "b1f0c3a2-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+     "revision": 1,
+     "issued": "2026-10-27T03:00:00.000Z",
+     "fields": {
+      "owners": [
+       "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+      ],
+      "project": "proj-1",
+      "lane": "B",
+      "state": "waiting",
+      "title": "fix the build"
+     }
+    },
+    "input": "smns-listing-v1\n{\"fields\":{\"lane\":\"B\",\"owners\":[\"0a1b2c3d4e5f60718293a4b5c6d7e8f9\"],\"project\":\"proj-1\",\"state\":\"waiting\",\"title\":\"fix the build\"},\"issued\":\"2026-10-27T03:00:00.000Z\",\"machine\":\"mini\",\"org\":\"org-vectors\",\"revision\":1,\"session\":\"b1f0c3a2-5d6e-4f70-8a9b-0c1d2e3f4a5b\"}"
+   },
+   {
+    "domain": "smns-endpoint-v1",
+    "body": {
+     "org": "org-vectors",
+     "machine": "mini",
+     "addresses": [
+      "wss://100.64.0.7:7420"
+     ],
+     "issued": "2026-10-27T03:00:00.000Z"
+    },
+    "input": "smns-endpoint-v1\n{\"addresses\":[\"wss://100.64.0.7:7420\"],\"issued\":\"2026-10-27T03:00:00.000Z\",\"machine\":\"mini\",\"org\":\"org-vectors\"}"
+   },
+   {
+    "domain": "smns-org-transition-v1",
+    "body": {
+     "org": "org-vectors",
+     "fromVersion": 5,
+     "newRootKeys": [
+      "BKf-32bSZNLAVjkkUYSFrSDU0WOlWVO3sBdBifL8IxSmd885JnrKvOJuCdxuWQQN-GaTWubO7WSNw95Olv90obo"
+     ],
+     "issued": "2026-10-27T05:00:00.000Z"
+    },
+    "input": "smns-org-transition-v1\n{\"fromVersion\":5,\"issued\":\"2026-10-27T05:00:00.000Z\",\"newRootKeys\":[\"BKf-32bSZNLAVjkkUYSFrSDU0WOlWVO3sBdBifL8IxSmd885JnrKvOJuCdxuWQQN-GaTWubO7WSNw95Olv90obo\"],\"org\":\"org-vectors\"}"
+   }
+  ]
+ }
+}

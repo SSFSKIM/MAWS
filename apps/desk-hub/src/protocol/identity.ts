@@ -1,11 +1,12 @@
 // DX7 — identity: the registry's records, machine names, and the enrollment code. Written to outlive phase 1: the
 // org phase adds roles and per-member keys to these records rather than replacing them.
+import { isMachineName, isMemberId, machineNameKey, RESERVED_MACHINE_NAMES, type MemberId } from 'org-protocol';
 import { base64urlDecode, base64urlEncode } from './base64url';
 import type { JsonObject } from './json';
 
-/** A member id: 128 random bits as lowercase hex. Not a uuid, which sminos would read as a session (`writer_session`). */
-export type MemberId = string;
-export const isMemberId = (id: string) => /^[0-9a-f]{32}$/.test(id);
+// Member ids and machine names live in the protocol package (apps/org-protocol), whose org state names both; they are
+// re-exported here under their names.
+export { isMachineName, isMemberId, machineNameKey, RESERVED_MACHINE_NAMES, type MemberId };
 
 export type Role = 'admin' | 'member';
 
@@ -129,18 +130,6 @@ export type PushSubscriptionRequest = { endpoint: string; keys: { p256dh: string
 export type PushSubscriptionKept = { subscription: PushSubscriptionRecord };
 export type PushSubscriptionDeleted = { deleted: boolean };
 export type PushSubscriptions = { subscriptions: PushSubscriptionRecord[] };
-
-// Machine names. A machine writes `<name>/<session>` feeds into files named after them on every machine, so a name is a
-// file-name-safe word, unique in the org without regard to case (macOS's disk ignores case), and never a prefix the hub
-// gives another meaning: `hub/` (web writes) and `legacy/` (pre-.smns chats).
-export const RESERVED_MACHINE_NAMES = ['hub', 'legacy'] as const;
-const MACHINE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/;
-
-export const machineNameKey = (name: string) => name.toLowerCase();
-
-export function isMachineName(name: string): boolean {
-  return MACHINE_NAME.test(name) && !(RESERVED_MACHINE_NAMES as readonly string[]).includes(machineNameKey(name));
-}
 
 /**
  * A machine project's id: the UUID v5, in the URL namespace, of `smns-machine:<org>:<the machine's name lower-cased>`
