@@ -58,7 +58,7 @@ describe('attended enrollment', () => {
     expect(json(result.out)).toMatchObject({ enrollment: 'org-listed', name: 'mini', org: 'local' });
     const dir = services.machine.stateDir;
     expect(mode(dir)).toBe(0o700);
-    for (const name of ['machine-key.json', 'grants.json', 'enrollment.json', 'org.json', 'chain.jsonl']) expect(mode(join(dir, name))).toBe(0o600);
+    for (const name of ['machine-key.json', 'grants.json', 'enrollment.json', 'org.json']) expect(mode(join(dir, name))).toBe(0o600);
     const keys = await endpoint.cli('keys', ['--json']);
     expect(keys.code).toBe(0);
     expect(json(keys.out)).toMatchObject({ enrollment: 'org-listed', name: 'mini', org: 'local', ref: services.machine.ref });
@@ -146,6 +146,30 @@ describe('attended enrollment', () => {
     const newKey = await keyId(posted!.pub);
     expect(ledger().heldKeys).toEqual([oldKey, newKey]);
     expect(Object.keys(ledger().grants)).toEqual([member.id]);
+  });
+
+  it('refuses a re-enrollment the hub answers with another org under the same pins, and keeps its high-water mark', async () => {
+    let renaming = false;
+    const renamingHub: typeof fetch = async (input, init) => {
+      const response = await fetch(input, init);
+      if (!renaming || !String(input).endsWith('/machine/enroll') || response.status !== 200) return response;
+      return Response.json({ ...((await response.json()) as object), org: 'elsewhere' });
+    };
+    const { endpoint, services } = await endpointOn({ fetch: renamingHub });
+    const first = await member.code();
+    const enrolling = endpoint.cli('enroll', ['--name', 'kept', '--wait', '30'], first.code);
+    await member.awaitPosted(first.enrollment);
+    await member.list(first.enrollment, first.k);
+    expect((await enrolling).code).toBe(0);
+    const orgFile = () => JSON.parse(fs.readFileSync(join(services.machine.stateDir, 'org.json'), 'utf8')) as { org: string; highWater: number; head: { state: { version: number } } | null };
+    const before = orgFile();
+    expect(before.highWater).toBeGreaterThan(1);
+
+    renaming = true;
+    const replaced = await endpoint.cli('enroll', ['--replace'], (await member.code('kept')).code);
+    expect(replaced.code).toBe(1);
+    expect(replaced.out).toMatch(/elsewhere/);
+    expect(orgFile()).toMatchObject({ org: 'local', highWater: before.highWater, head: { state: { version: before.head!.state.version } } });
   });
 });
 

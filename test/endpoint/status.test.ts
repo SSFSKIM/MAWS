@@ -51,7 +51,7 @@ describe('status()', () => {
     const key = await generateSigningKey(true);
     const id = await keyId(key.pub);
     state.setMachineKey({ version: 1, keyId: id, jwk: (await crypto.subtle.exportKey('jwk', key.privateKey)) as JsonWebKey, created: new Date().toISOString() });
-    state.setLedger({ version: 1, heldKeys: [id], grants: {} });
+    state.setLedger({ version: 1, heldKeys: [id], grants: {}, highWater: {} });
     state.setEnrollment({
       version: 1,
       state: 'org-listed',
@@ -66,7 +66,7 @@ describe('status()', () => {
     const a1 = await newDevice('a1');
     const recovery = await generateSigningKey();
     const head = await genesis('org-local', memberId(), a1, recovery);
-    state.setOrg({ version: 1, org: 'org-local', pinned: { roots: head.state.root.keys, recoveryPub: recovery.pub }, head: null, certificates: NO_CERTIFICATES, acceptedTransitions: [], highWater: 0 });
+    state.setOrg({ version: 1, org: 'org-local', pinned: { roots: head.state.root.keys, recoveryPub: recovery.pub }, head: null, chain: [], certificates: NO_CERTIFICATES, acceptedTransitions: [], highWater: 0 });
     await new EndpointOrg(state, { log: () => {} }).adopt([head], []);
     fs.writeFileSync(join(services.machine.stateDir, 'legacy.json'), JSON.stringify({ org: 'org-local', key: 'k'.repeat(43) }), { mode: 0o600 });
 

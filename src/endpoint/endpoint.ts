@@ -1,7 +1,7 @@
 // The endpoint module (O10; Interfaces §F): the one object `mawsd` starts, asks for its status and hands its
 // `mawsd endpoint` commands. M2 holds its state, its enrollment, its org state and its policy; M3–M8 add the hub link,
 // the channels, authorization, RL10, actions and subscriptions beside them, each fed by the org state's adoptions.
-import { importSigningKey, stateHash, type SigningKey } from 'org-protocol';
+import { importSigningKey, stateHash, type OrgState, type SigningKey } from 'org-protocol';
 import { runCli } from './cli';
 import { enrollDelegatedInto, promoteIfListed, syncAndPromote, type DelegatedInput, type EnrollContext, type EnrollmentState } from './enroll';
 import { dropRevokedGrants } from './grants';
@@ -56,7 +56,11 @@ export class Endpoint implements EndpointModule {
         return;
       }
     }
-    if (org.ready) this.#headHash = await stateHash(org.head().state);
+    if (org.ready) {
+      this.#headHash = await stateHash(org.head().state);
+      // The ledger is re-read against a new head after the head is on disk; a crash between the two left it unread.
+      this.#endRevokedGrants(org.head().state, log);
+    }
     if (state.enrolled) this.#keepSynced();
   }
 
@@ -129,8 +133,12 @@ export class Endpoint implements EndpointModule {
     if (members.length + devices.length + keys.length > 0) {
       log(`endpoint: org state ${change.head.state.version}${change.rewound ? ' (a recovery rewind)' : ''} removed ${members.length} member(s), ${devices.length} device(s), revoked ${keys.length} key(s)`);
     }
-    const ended = dropRevokedGrants(parts.state, change.head.state);
-    if (ended.length > 0) log(`endpoint: ${ended.length} grant(s) ended with their signer's revoked key`);
+    this.#endRevokedGrants(change.head.state, log);
     void promoteIfListed({ state: parts.state, org: parts.org, deps: this.deps, log });
+  }
+
+  #endRevokedGrants(head: OrgState, log: (line: string) => void): void {
+    const ended = dropRevokedGrants(this.#state!, head);
+    if (ended.length > 0) log(`endpoint: ${ended.length} grant(s) ended with their signer's revoked key`);
   }
 }

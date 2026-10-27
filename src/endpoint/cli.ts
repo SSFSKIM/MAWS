@@ -76,7 +76,9 @@ async function enroll(endpoint: Endpoint, args: readonly string[], secret: strin
   }
   const { values } = parse(normalized, { name: { type: 'string' }, replace: { type: 'boolean' }, wait: { type: 'string' }, json: { type: 'boolean' } });
   if (secret === undefined || secret.trim() === '') return { code: EXIT.failed, out: 'the enrollment code is read from stdin (or the hidden prompt), never from an argument' };
-  const waitMs = values.wait === undefined ? 0 : Number(values.wait) * 1000;
+  const waitS = values.wait === undefined ? 0 : Number(values.wait);
+  if (!Number.isFinite(waitS) || waitS < 0) throw new UsageError(`--wait takes a number of seconds, not ${values.wait}\n${USAGE}`);
+  const waitMs = waitS * 1000;
   const { result, refused } = await enrollAttended(endpoint.enrollContext(), { code: secret, name: values.name, replace: values.replace === true, waitMs });
   const code = result.state === 'org-listed' ? EXIT.done : EXIT.notListed;
   if (values.json) return { code, out: JSON.stringify({ enrollment: result.state, name: result.name, org: result.org, ref: result.ref, ...(refused === undefined ? {} : { refused }) }) };

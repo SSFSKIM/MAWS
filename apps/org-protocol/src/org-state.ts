@@ -298,8 +298,17 @@ export async function verifyRewind(head: SignedOrgState, t: Signed<RootTransitio
   if (t.body.fromVersion > head.state.version) return refuse('not-head');
   if (t.sig.kid !== (await keyId(pinnedRecovery))) return refuse('unknown-signer');
   if (!(await verifyInput(signingInput(SIGNING_DOMAINS.transition, t.body), t.sig, pinnedRecovery))) return refuse('bad-signature');
-  if (accepted.some((a) => canonicalize(a) === canonicalize(t.body) || a.issued >= t.body.issued)) return refuse('rollback');
+  if (!issuedAfterAll(t.body, accepted)) return refuse('rollback');
   return accept();
+}
+
+/**
+ * The replay barrier over root transitions: `t` is issued later than every transition in `accepted` and is none of them.
+ * A recovery behind the head must pass it (`verifyRewind`), and so must a transition taken forward once a rewind has
+ * brought an older transition's `fromVersion` back to the head (`advanceHead` given `accepted`).
+ */
+export function issuedAfterAll(t: RootTransition, accepted: RootTransition[]): boolean {
+  return !accepted.some((a) => canonicalize(a) === canonicalize(t) || a.issued >= t.issued);
 }
 
 /**

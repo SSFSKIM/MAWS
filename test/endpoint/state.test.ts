@@ -51,12 +51,12 @@ describe('the state directory', () => {
     const state = open();
     const key = await machineKey();
     state.setMachineKey(key);
-    state.setLedger({ version: 1, heldKeys: [key.keyId], grants: {} });
+    state.setLedger({ version: 1, heldKeys: [key.keyId], grants: {}, highWater: {} });
     state.setPolicy({ read_only: true, ceiling: 'plan' });
     for (const name of ['machine-key.json', 'grants.json', 'policy.json']) expect(mode(join(dir, name))).toBe(0o600);
     const again = open();
     expect(again.machineKey).toEqual(key);
-    expect(again.ledger).toEqual({ version: 1, heldKeys: [key.keyId], grants: {} });
+    expect(again.ledger).toEqual({ version: 1, heldKeys: [key.keyId], grants: {}, highWater: {} });
     expect(again.policy).toEqual({ read_only: true, ceiling: 'plan' });
   });
 
@@ -85,7 +85,7 @@ describe('the machine key and the grant ledger', () => {
       const state = open();
       const key = await machineKey();
       state.setMachineKey(key);
-      state.setLedger({ version: 1, heldKeys: [key.keyId], grants: {} });
+      state.setLedger({ version: 1, heldKeys: [key.keyId], grants: {}, highWater: {} });
       state.setEnrollment({
         version: 1,
         state: 'org-listed',
@@ -129,7 +129,7 @@ describe('refusing a state that is not private', () => {
     const state = open();
     const key = await machineKey();
     state.setMachineKey(key);
-    state.setLedger({ version: 1, heldKeys: [key.keyId], grants: {} });
+    state.setLedger({ version: 1, heldKeys: [key.keyId], grants: {}, highWater: {} });
     fs.chmodSync(join(dir, 'machine-key.json'), 0o644);
     const widened = open();
     expect(widened.refusing).toBe('state-mode');

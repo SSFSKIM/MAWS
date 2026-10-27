@@ -4,7 +4,8 @@
 // is `memoryOrgView`. Either way the verification is `advanceHead`, the package's.
 import { keyId, signingInput, verifyInput, type B64 } from './keys.ts';
 import { NO_CERTIFICATES } from './records.ts';
-import { verifyGenesis, verifySuccessor, verifyTransition } from './org-state.ts';
+import { issuedAfterAll, verifyGenesis, verifySuccessor, verifyTransition } from './org-state.ts';
+import { isRootTransition, isSigned } from './shapes.ts';
 import { SIGNING_DOMAINS, type Certificates, type RootTransition, type Signed, type SignedOrgState } from './types.ts';
 import type { VerdictCode } from './verdict.ts';
 
@@ -25,15 +26,19 @@ export interface OrgView {
  * The successors among `states` that follow `head` one by one, each verified by `verifySuccessor` against the one
  * before (with the transitions among `transitions` held for it), up to the first that fails or is missing: the new head,
  * the states adopted, and for each successor a root transition authorized, that transition. A peer's states are
- * org-signed, so who carried them doesn't matter.
+ * org-signed, so who carried them doesn't matter. A verifier that keeps the transitions it accepted passes them as
+ * `accepted`: a transition then authorizes only when it is issued after every one of them and those the run took before
+ * it (`issuedAfterAll`), since a recovery's rewind can bring an older transition's `fromVersion` back to the head.
  */
 export async function advanceHead(
   head: SignedOrgState,
   states: unknown,
   transitions: unknown,
+  accepted?: RootTransition[],
 ): Promise<{ head: SignedOrgState; adopted: SignedOrgState[]; transitions: Signed<RootTransition>[] }> {
   const offered = Array.isArray(states) ? (states as SignedOrgState[]) : [];
-  const held = Array.isArray(transitions) ? (transitions as Signed<RootTransition>[]) : [];
+  const offeredTransitions = Array.isArray(transitions) ? (transitions as Signed<RootTransition>[]) : [];
+  const barrier = accepted === undefined ? null : [...accepted];
   const byVersion = new Map<number, SignedOrgState>();
   for (const s of offered) {
     const version = (s as { state?: { version?: unknown } } | null)?.state?.version;
@@ -44,12 +49,16 @@ export async function advanceHead(
   let current = head;
   for (;;) {
     const next = byVersion.get(current.state.version + 1);
+    const held = barrier === null ? offeredTransitions : offeredTransitions.filter((t) => isSigned(t, isRootTransition) && issuedAfterAll(t.body, barrier));
     if (next === undefined || !(await verifySuccessor(current, next, held)).ok) break;
     // Only the transition that authorized this successor is taken. The verifier keeps what it takes as accepted
     // (`verifyRewind`'s `issued` rule), so neither one a peer forged nor a genuine one to a root set the successor
     // didn't take may enter it: a later recovery would then be refused as older than it.
     const authorizing = await authorizedBy(current, next, held);
-    if (authorizing !== null) took.push(authorizing);
+    if (authorizing !== null) {
+      took.push(authorizing);
+      barrier?.push(authorizing.body);
+    }
     adopted.push(next);
     current = next;
   }

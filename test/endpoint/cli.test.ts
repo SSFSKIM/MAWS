@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 import { join } from 'node:path';
 import { endorseDevice, generateSigningKey, keyId, NO_CERTIFICATES, SIGNING_DOMAINS, signRecord, type Grant, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { afterEach, describe, expect, it } from 'vitest';
+import { encodeEnrollmentCodeV2 } from 'desk-hub/protocol';
 import { createEndpoint, type Endpoint } from '../../src/endpoint';
 import { EndpointOrg } from '../../src/endpoint/org-sync';
 import { EndpointState } from '../../src/endpoint/state/store';
@@ -24,7 +25,7 @@ async function enrolled(): Promise<Enrolled> {
   const key = await generateSigningKey(true);
   const machineKey = await keyId(key.pub);
   state.setMachineKey({ version: 1, keyId: machineKey, jwk: (await crypto.subtle.exportKey('jwk', key.privateKey)) as JsonWebKey, created: new Date().toISOString() });
-  state.setLedger({ version: 1, heldKeys: [machineKey], grants: {} });
+  state.setLedger({ version: 1, heldKeys: [machineKey], grants: {}, highWater: {} });
   state.setEnrollment({ version: 1, state: 'org-listed', name: 'mini', ref, org: ORG, hub: 'http://127.0.0.1:9', enrollment: 'e'.repeat(32), credentials: { clientId: 'id', clientSecret: 'secret' }, at: new Date().toISOString() });
   const A = memberId();
   const a1 = await newDevice('a1');
@@ -34,7 +35,7 @@ async function enrolled(): Promise<Enrolled> {
     s.machines.push({ name: 'mini', ref, pub: key.pub, owners: [A] });
     s.machineNames.push({ name: 'mini', ref });
   });
-  state.setOrg({ version: 1, org: ORG, pinned: { roots: s1.state.root.keys, recoveryPub: recovery.pub }, head: null, certificates: NO_CERTIFICATES, acceptedTransitions: [], highWater: 0 });
+  state.setOrg({ version: 1, org: ORG, pinned: { roots: s1.state.root.keys, recoveryPub: recovery.pub }, head: null, chain: [], certificates: NO_CERTIFICATES, acceptedTransitions: [], highWater: 0 });
   await new EndpointOrg(state, { log: () => {} }).adopt([s1, s2], []);
   const endpoint = createEndpoint();
   await endpoint.start(services);
@@ -135,6 +136,87 @@ describe('grant: kept by the ledger’s rule', () => {
     expect((await e.endpoint.cli('revoke', ['-'], JSON.stringify(s4))).code).toBe(0);
     const ledger = JSON.parse(fs.readFileSync(join(services.machine.stateDir, 'grants.json'), 'utf8')) as { grants: Record<string, unknown> };
     expect(ledger.grants).toEqual({});
+  });
+
+  /** A second device of the owner, a2, joins as a root (delivered by hand), and member B with it. */
+  async function joinA2(e: Enrolled) {
+    const a2 = await newDevice('a2');
+    const B = memberId();
+    const endorsement = await endorseDevice(ORG, e.A, a2.device, e.a1.stepUp.privateKey, e.a1.stepUp.pub);
+    const s3 = await successor(e.head, [e.a1], async (s) => {
+      s.members[0].devices.push({ ...a2.device, endorsement });
+      s.root.keys.push(await keyId(a2.stepUp.pub));
+      s.members.push({ id: B, email: 'b@example.com', role: 'member', devices: [] });
+    });
+    expect((await e.endpoint.cli('revoke', ['-'], JSON.stringify(s3))).code).toBe(0);
+    const s4 = await successor(s3, [e.a1], async (s) => {
+      s.members[0].devices = s.members[0].devices.filter((d) => d.id !== 'a2');
+      s.root.keys = [await keyId(e.a1.stepUp.pub)];
+      s.revoked.push(...(await revokedDevice(e.A, a2.device)));
+    });
+    return { a2, B, s3, s4 };
+  }
+  const ledgerOnDisk = () => JSON.parse(fs.readFileSync(join(services.machine.stateDir, 'grants.json'), 'utf8')) as { grants: Record<string, { body: Grant }>; highWater: Record<string, number> };
+
+  it('keeps a member’s version when its grant ends, so an older grant replayed is still refused', async () => {
+    const e = await enrolled();
+    const { a2, s4 } = await joinA2(e);
+    const v1 = await signRecord(SIGNING_DOMAINS.grant, grantOf(e, { rights: ['spawn', 'shell'] }), e.a1.stepUp.privateKey, e.a1.stepUp.pub);
+    const v2 = await signRecord(SIGNING_DOMAINS.grant, grantOf(e, { version: 2 }), a2.stepUp.privateKey, a2.stepUp.pub);
+    expect((await e.endpoint.cli('grant', ['-'], JSON.stringify(v1))).code).toBe(0);
+    expect((await e.endpoint.cli('grant', ['-'], JSON.stringify(v2))).code).toBe(0);
+    expect((await e.endpoint.cli('revoke', ['-'], JSON.stringify(s4))).code).toBe(0);
+    expect(ledgerOnDisk().grants).toEqual({});
+    expect((await e.endpoint.cli('grant', ['-'], JSON.stringify(v1))).out).toBe('refused: not-newer');
+    expect(ledgerOnDisk().grants).toEqual({});
+  });
+
+  it('takes grants arriving together one at a time: the higher version stands, and another member’s isn’t lost', async () => {
+    const e = await enrolled();
+    const { B } = await joinA2(e);
+    const sign = (g: Grant) => signRecord(SIGNING_DOMAINS.grant, g, e.a1.stepUp.privateKey, e.a1.stepUp.pub);
+    const [v4, v3, forB] = await Promise.all([sign(grantOf(e, { version: 4 })), sign(grantOf(e, { version: 3 })), sign(grantOf(e, { member: B }))]);
+    const results = await Promise.all([v4, v3, forB].map((g) => e.endpoint.cli('grant', ['-'], JSON.stringify(g))));
+    expect(results.map((r) => r.out)).toEqual([`kept: version 4 for member ${e.A}, spawn`, 'refused: not-newer', `kept: version 1 for member ${B}, spawn`]);
+    const grants = ledgerOnDisk().grants;
+    expect(grants[e.A].body.version).toBe(4);
+    expect(grants[B].body.version).toBe(1);
+  });
+
+  it('ends at start a grant whose signer the head on disk revokes, when a crash came between the two writes', async () => {
+    const e = await enrolled();
+    const { a2, s4 } = await joinA2(e);
+    const v1 = await signRecord(SIGNING_DOMAINS.grant, grantOf(e), a2.stepUp.privateKey, a2.stepUp.pub);
+    expect((await e.endpoint.cli('grant', ['-'], JSON.stringify(v1))).code).toBe(0);
+    await e.endpoint.stop();
+    // The revoking head reaches org.json, and the process dies before the ledger is re-read against it.
+    const state = EndpointState.open(services.machine.stateDir);
+    expect(await new EndpointOrg(state, { log: () => {} }).adopt([s4], [])).toMatchObject({ adopted: 1 });
+    expect(Object.keys(ledgerOnDisk().grants)).toEqual([e.A]);
+    const restarted = createEndpoint();
+    await restarted.start(services);
+    expect(ledgerOnDisk().grants).toEqual({});
+    expect(services.lines.join('\n')).toMatch(/grant\(s\) ended/);
+    expect(ledgerOnDisk().highWater).toEqual({ [e.A]: 1 });
+    await restarted.stop();
+  });
+});
+
+describe('enroll --wait', () => {
+  it('refuses a wait that is not a non-negative number before it reaches the hub', async () => {
+    services = fakeServices();
+    const calls: string[] = [];
+    const endpoint = createEndpoint({ fetch: async (input) => (calls.push(String(input)), Response.json({ error: 'refused' }, { status: 500 })) });
+    await endpoint.start(services);
+    const recovery = await generateSigningKey();
+    const code = encodeEnrollmentCodeV2({ hub: 'https://hub.example.com', token: 't'.repeat(32), roots: [await keyId((await generateSigningKey()).pub)], recoveryPub: recovery.pub, k: 'k'.repeat(43) });
+    for (const wait of ['--wait=soon', '--wait=-5', '--wait=Infinity']) {
+      const refused = await endpoint.cli('enroll', ['--name', 'mini', wait], code);
+      expect(refused.code).toBe(1);
+      expect(refused.out).toMatch(/--wait/);
+    }
+    expect(calls).toEqual([]);
+    expect(fs.existsSync(join(services.machine.stateDir, 'machine-key.json'))).toBe(false);
   });
 });
 

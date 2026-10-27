@@ -37,6 +37,8 @@ const LedgerSchema = z.strictObject({
   version: z.literal(1),
   heldKeys: z.array(z.string().min(1)),
   grants: z.record(z.string(), custom<Signed<Grant>>((v) => isSigned(v, isGrant))),
+  /** The highest grant version kept per member, whether or not that grant is still in force (grants.ts). */
+  highWater: z.record(z.string(), z.number().int().nonnegative()),
 });
 const EnrollmentSchema = z.strictObject({
   version: z.literal(1),
@@ -51,21 +53,26 @@ const EnrollmentSchema = z.strictObject({
   /** A delegated machine's certificate (enrollDelegated): it is listed once `verifyMachineCert` accepts it. */
   cert: custom<Signed<MachineCert>>((v) => isSigned(v, isMachineCert)).optional(),
 });
+const ChainEntrySchema = z.union([
+  z.strictObject({ state: custom<SignedOrgState>(isSignedOrgState) }),
+  z.strictObject({ transition: custom<Signed<RootTransition>>((v) => isSigned(v, isRootTransition)) }),
+]);
 const OrgSchema = z.strictObject({
   version: z.literal(1),
   org: z.string().min(1),
   pinned: z.strictObject({ roots: z.array(z.string().min(1)).min(1), recoveryPub: z.string().min(1) }),
   /** Null until the first sync. */
   head: custom<SignedOrgState>(isSignedOrgState).nullable(),
+  /**
+   * The chain window ending at the head, in chain order (org-sync.ts). It lives in the head's own file so the two are
+   * one commit: a rewind replaces states below the head, which a window written apart could show without the head.
+   */
+  chain: z.array(ChainEntrySchema),
   certificates: custom<Certificates>(isCertificates),
   acceptedTransitions: z.array(custom<RootTransition>(isRootTransition)),
   highWater: z.number().int().nonnegative(),
 });
 const PolicySchema = z.strictObject({ read_only: z.boolean(), ceiling: z.enum([...PERMISSION_MODES, 'settings']) });
-const ChainEntrySchema = z.union([
-  z.strictObject({ state: custom<SignedOrgState>(isSignedOrgState) }),
-  z.strictObject({ transition: custom<Signed<RootTransition>>((v) => isSigned(v, isRootTransition)) }),
-]);
 
 export type MachineKeyFile = z.infer<typeof MachineKeySchema>;
 export type LedgerFile = z.infer<typeof LedgerSchema>;
@@ -79,7 +86,6 @@ const FILES = {
   ledger: 'grants.json',
   enrollment: 'enrollment.json',
   org: 'org.json',
-  chain: 'chain.jsonl',
   policy: 'policy.json',
   legacy: 'legacy.json',
 } as const;
@@ -95,7 +101,6 @@ export class EndpointState {
   #ledger: LedgerFile | null = null;
   #enrollment: EnrollmentFile | null = null;
   #org: OrgFile | null = null;
-  #chain: ChainEntry[] = [];
   #policy: PolicyFile | null = null;
   #legacy = false;
 
@@ -130,7 +135,6 @@ export class EndpointState {
       const org = read(FILES.org, OrgSchema);
       const policy = read(FILES.policy, PolicySchema);
       const legacy = checkPrivateFile(join(dir, FILES.legacy), options.uid);
-      const chain = checkPrivateFile(join(dir, FILES.chain), options.uid) ? readChain(join(dir, FILES.chain), log) : [];
 
       const alone = (machineKey === null) !== (ledger === null);
       const state = new EndpointState(dir, null, alone);
@@ -148,7 +152,6 @@ export class EndpointState {
         state.#enrollment = enrollment;
       }
       state.#org = org;
-      state.#chain = chain;
       state.#policy = policy;
       state.#legacy = legacy;
       return state;
@@ -174,9 +177,6 @@ export class EndpointState {
   get org(): OrgFile | null {
     return this.#org;
   }
-  get chain(): readonly ChainEntry[] {
-    return this.#chain;
-  }
   get policy(): PolicyFile | null {
     return this.#policy;
   }
@@ -199,10 +199,6 @@ export class EndpointState {
   setOrg(value: OrgFile): void {
     this.#write(FILES.org, OrgSchema.parse(value));
     this.#org = value;
-  }
-  setChain(entries: ChainEntry[]): void {
-    this.#writeText(FILES.chain, entries.map((entry) => `${JSON.stringify(entry)}\n`).join(''));
-    this.#chain = entries;
   }
   setPolicy(value: PolicyFile): void {
     this.#write(FILES.policy, PolicySchema.parse(value));
@@ -233,16 +229,4 @@ function parseJson(text: string): unknown {
   } catch {
     return undefined;
   }
-}
-
-/** chain.jsonl, one entry per line; a line that doesn't parse is skipped with a log line (the file is written whole). */
-function readChain(path: string, log: (line: string) => void): ChainEntry[] {
-  const entries: ChainEntry[] = [];
-  for (const line of fs.readFileSync(path, 'utf8').split('\n')) {
-    if (line === '') continue;
-    const parsed = ChainEntrySchema.safeParse(parseJson(line));
-    if (parsed.success) entries.push(parsed.data);
-    else log(`endpoint: a line of ${path} does not hold a chain entry; skipped`);
-  }
-  return entries;
 }

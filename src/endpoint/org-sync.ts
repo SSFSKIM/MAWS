@@ -2,15 +2,17 @@
 // it. Every state and transition it adopts is verified by the protocol package against its head and pins
 // (`verifyPinnedChain` at the first sync, then `advanceHead` and `verifyRewind`), whoever carried it: the hub
 // (`sync`), a device's handshake page (`advance`, the channel's `OrgView`), or an admin's delivery. Adoption is
-// serialized, each against the head the one before left, and lands on disk (chain.jsonl, then org.json, the head being
-// the commit) before anything is told of it, so a revocation is acted on only once it would survive a crash. A state
-// below the high-water mark is refused (`rollback`), as is one that doesn't follow the head (`fork`, or the verdict).
+// serialized, each against the head the one before left, and lands on disk (org.json, written whole and renamed into
+// place: the head and its window are one commit) before anything is told of it, so a revocation is acted on only once it
+// would survive a crash. A state below the high-water mark is refused (`rollback`), as is one that doesn't follow the
+// head (`fork`, or the verdict).
 //
-// The chain window (chain.jsonl) keeps the states issued in the last 30 days and the head always, with the transitions
-// that authorized them; it is what `since` pages a device's catch-up from. `acceptedTransitions` keeps every transition
-// that authorized an adopted state from the first sync on, which `verifyRewind`'s `issued` rule needs whole. A rewind
-// (a recovery transition from below the head) drops the states after its `fromVersion` from both, and the high-water
-// mark with them, since the recovery key says those states were forged.
+// The chain window (org.json's `chain`) keeps the states issued in the last 30 days and the head always, with the
+// transitions that authorized them; it is what `since` pages a device's catch-up from. `acceptedTransitions` keeps every
+// transition that authorized an adopted state from the first sync on, which `verifyRewind`'s `issued` rule needs whole,
+// and forward adoption checks each transition against them too (`advanceHead`'s replay barrier). A rewind (a recovery
+// transition from below the head) drops the states after its `fromVersion` from both, and the high-water mark with
+// them, since the recovery key says those states were forged.
 import {
   advanceHead,
   isCertificates,
@@ -38,7 +40,7 @@ export type OrgChange = { previous: SignedOrgState | null; head: SignedOrgState;
 export type AdoptResult = { adopted: number; rewound: boolean; refused?: string };
 
 const DAY_MS = 86_400_000;
-/** chain.jsonl keeps the states issued this recently (and the head always). */
+/** The chain window keeps the states issued this recently (and the head always). */
 export const CHAIN_WINDOW_MS = 30 * DAY_MS;
 /** A head issued longer ago stops every remote action (RL §5.2's backstop: an admin app signs a successor weekly). */
 export const BACKSTOP_MS = 30 * DAY_MS;
@@ -113,6 +115,14 @@ export class EndpointOrg implements OrgView {
     return this.#serial(() => this.#adopt(chain, list(view.transitions) as Signed<RootTransition>[], served, certificates));
   }
 
+  /**
+   * Runs `run` in the adoptions' queue: nothing is adopted while it runs, so what it reads of the head holds until it
+   * returns (the grant ledger's intake and an enrollment's writes run here, against the adoptions that change both).
+   */
+  exclusive<T>(run: () => Promise<T>): Promise<T> {
+    return this.#serial(run);
+  }
+
   /** Called after each adoption is on disk, in order. A listener's failure is logged and stops nothing. */
   onAdopted(listener: (change: OrgChange) => void): () => void {
     this.#listeners.add(listener);
@@ -144,12 +154,12 @@ export class EndpointOrg implements OrgView {
     const rewind = await this.#rewind(org, window, states, transitions);
     if (rewind !== null) {
       const from = rewind.t.body.fromVersion;
-      window = { states: window.states.filter((s) => s.state.version <= from), transitions: window.transitions.filter((t) => t.body.fromVersion < from) };
-      accepted = accepted.filter((t) => t.fromVersion < from);
+      window = { states: [...window.states.filter((s) => s.state.version < from), rewind.base], transitions: window.transitions.filter((t) => t.body.fromVersion < from) };
+      accepted = [...accepted.filter((t) => t.fromVersion < from), rewind.t.body];
       head = rewind.first;
       took.push(rewind.t);
     }
-    const run = await advanceHead(head, states, transitions);
+    const run = await advanceHead(head, states, transitions, accepted);
     took.push(...run.transitions);
     const adopted = [...(rewind === null ? [] : [rewind.first]), ...run.adopted];
     if (adopted.length === 0) {
@@ -163,7 +173,7 @@ export class EndpointOrg implements OrgView {
       head: run.head,
       states: [...window.states, ...adopted],
       transitions: [...window.transitions, ...took],
-      accepted: [...accepted, ...took.map((t) => t.body)],
+      accepted: [...accepted, ...run.transitions.map((t) => t.body)],
       certificates: certificates ?? org.certificates,
       rewound: rewind !== null,
     });
@@ -189,20 +199,29 @@ export class EndpointOrg implements OrgView {
     return { adopted: verdict.adopted.length, rewound: false };
   }
 
-  /** The newest recovery transition among `transitions` that rewinds the head, with the first state under it; or null. */
-  async #rewind(org: OrgFile, window: Window, states: SignedOrgState[], transitions: Signed<RootTransition>[]): Promise<{ t: Signed<RootTransition>; first: SignedOrgState } | null> {
+  /**
+   * The newest recovery transition among `transitions` that rewinds the head, with the state at its `fromVersion` (the
+   * base) and the first state under it; or null. The base is the window's; once it has aged out of the window, one the
+   * delivery carries, which the first state's `prev` authenticates (`verifySuccessor` checks the link, and only the new
+   * root the recovery key named could have signed that state).
+   */
+  async #rewind(org: OrgFile, window: Window, states: SignedOrgState[], transitions: Signed<RootTransition>[]): Promise<{ t: Signed<RootTransition>; base: SignedOrgState; first: SignedOrgState } | null> {
     const head = org.head as SignedOrgState;
     const candidates = transitions.filter((t) => typeof t?.body?.fromVersion === 'number' && t.body.fromVersion < head.state.version);
     candidates.sort((x, y) => (x.body.issued < y.body.issued ? 1 : -1));
     for (const t of candidates) {
       if (!(await verifyRewind(head, t, org.pinned.recoveryPub, org.acceptedTransitions)).ok) continue;
-      const base = window.states.find((s) => s.state.version === t.body.fromVersion);
-      if (base === undefined) {
-        this.#log(`endpoint: a recovery transition from version ${t.body.fromVersion} reaches before the chain the endpoint keeps; it waits for the hub`);
+      const from = t.body.fromVersion;
+      const held = window.states.find((s) => s.state.version === from);
+      const bases = held !== undefined ? [held] : states.filter((s) => s.state.version === from);
+      if (bases.length === 0) {
+        this.#log(`endpoint: a recovery transition from version ${from} reaches before the chain the endpoint keeps, and the delivery doesn't carry version ${from}`);
         continue;
       }
-      for (const s of states) {
-        if (s.state.version === t.body.fromVersion + 1 && (await verifySuccessor(base, s, [t])).ok) return { t, first: s };
+      for (const base of bases) {
+        for (const s of states) {
+          if (s.state.version === from + 1 && (await verifySuccessor(base, s, [t])).ok) return { t, base, first: s };
+        }
       }
     }
     return null;
@@ -225,8 +244,8 @@ export class EndpointOrg implements OrgView {
   }
 
   #commit(org: OrgFile, next: { previous: SignedOrgState | null; head: SignedOrgState; states: SignedOrgState[]; transitions: Signed<RootTransition>[]; accepted: RootTransition[]; certificates: Certificates; rewound: boolean }): void {
-    this.#state.setChain(windowEntries(next.states, next.transitions, next.head, this.#now()));
-    this.#state.setOrg({ ...org, head: next.head, certificates: next.certificates, acceptedTransitions: next.accepted, highWater: next.head.state.version });
+    const chain = windowEntries(next.states, next.transitions, next.head, this.#now());
+    this.#state.setOrg({ ...org, head: next.head, chain, certificates: next.certificates, acceptedTransitions: next.accepted, highWater: next.head.state.version });
     const change: OrgChange = { previous: next.previous, head: next.head, rewound: next.rewound, removed: removals(next.previous?.state ?? null, next.head.state) };
     for (const listener of this.#listeners) {
       try {
@@ -237,18 +256,14 @@ export class EndpointOrg implements OrgView {
     }
   }
 
-  /** The chain held, up to the head (a crash between the chain's write and the head's leaves later states in the file). */
+  /** The chain window held with the head (which it ends at). */
   #window(): Window {
-    const head = this.#state.org?.head ?? null;
-    if (head === null) return { states: [], transitions: [] };
-    const top = head.state.version;
     const states: SignedOrgState[] = [];
     const transitions: Signed<RootTransition>[] = [];
-    for (const entry of this.#state.chain) {
-      if ('state' in entry && entry.state.state.version < top) states.push(entry.state);
-      if ('transition' in entry && entry.transition.body.fromVersion < top) transitions.push(entry.transition);
+    for (const entry of this.#state.org?.chain ?? []) {
+      if ('state' in entry) states.push(entry.state);
+      else transitions.push(entry.transition);
     }
-    states.push(head);
     return { states, transitions };
   }
 }
