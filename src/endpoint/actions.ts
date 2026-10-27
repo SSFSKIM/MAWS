@@ -19,6 +19,11 @@
 // failed `{state: 'failed', error}`; `{state: 'refused', reason}`; `{state: 'in-progress'}`). An engine host that can't
 // be reached once the action is handed on leaves it unknown (`{state: 'unknown', reason}`): the device asks by `query`.
 //
+// sminos answers each lane A copy under its nonce (an op's result under its latest copy's, a copy from another member or
+// of another operation `op-conflict` under its own), so a result goes to the channel of the copy whose nonce it
+// answers: a copy under a known opId never takes another sender's result, and one under a nonce already handed down is
+// `replayed` (the nonce window is each device's).
+//
 // Each action in flight holds `mawsd` (`hold('op')`) until its result is recorded: lane B's and the endpoint's until
 // their answer, lane A's until sminos's result or the channel's close (sminos keeps its result, and a reconnecting
 // device asks). `stop()` takes no action more (`restart`) and waits up to STOP_WAIT_MS for those in flight.
@@ -44,7 +49,9 @@ export type ActionsContext = {
   log(line: string): void;
 };
 
-type Pending = { channel: RemoteChannel; release(): void };
+/** A lane A copy handed down: the op it carries, who sent it (sminos's binding: a copy from another member, or of
+ * another operation, is refused `op-conflict`), and the channel its result goes to. */
+type Pending = { opId: string; member: string; fingerprint: string; channel: RemoteChannel; release(): void };
 
 /** A ledger's kept result (`{ok: true, value}` or `{ok: false, error}`) as a device reads an outcome. */
 export function outcomeOf(result: unknown): unknown {
@@ -61,7 +68,7 @@ const isObject = (value: unknown): value is Record<string, unknown> => typeof va
 
 export class Actions {
   readonly #inflight = new Set<Promise<unknown>>();
-  /** Lane A's actions handed down, by opId: the channel its result goes to (the latest copy's). */
+  /** Lane A's copies handed down, by the nonce sminos answers each under. */
   readonly #laneA = new Map<string, Pending>();
   /** Every hold out for an action in flight; `stop` lets go of those still out once it has waited. */
   readonly #holds = new Set<() => void>();
@@ -88,14 +95,13 @@ export class Actions {
     this.#track(run);
   }
 
-  /** sminos's result of a lane A action: `done` to the channel that sent it. */
+  /** sminos's result of a lane A action: `done` to the channel that sent the copy whose nonce it answers. */
   result(result: RpcResult): void {
-    if (result.opId === undefined) return;
-    const pending = this.#laneA.get(result.opId);
-    if (pending === undefined) return;
-    this.#laneA.delete(result.opId);
+    const pending = this.#laneA.get(result.nonce);
+    if (pending === undefined || pending.opId !== result.opId) return;
+    this.#laneA.delete(result.nonce);
     pending.release();
-    pending.channel.send({ t: 'done', opId: result.opId, outcome: result.outcome });
+    pending.channel.send({ t: 'done', opId: pending.opId, outcome: result.outcome });
   }
 
   /** Takes no action more and waits, up to STOP_WAIT_MS, for those in flight to record their results. */
@@ -134,22 +140,35 @@ export class Actions {
     if (channel.closed) return;
 
     if (row.executor === 'sminos') {
+      // A nonce is a copy's own: one already handed down (another device's, the window being each device's) is a replay.
+      if (this.#laneA.has(action.nonce)) return refuse('replayed');
       const sent = this.ctx.rl10.rpc(action, who, fingerprint);
       if (!sent.ok) return refuse(sent.reason);
-      this.#laneA.get(action.opId)?.release();
+      // sminos answers an op under its latest copy's nonce, a copy being one from the same member of the same operation:
+      // an earlier copy of that sender's is answered no more. A copy from anyone else is answered under its own nonce
+      // (`op-conflict`) and leaves the op's routing as it was.
+      for (const [nonce, earlier] of this.#laneA) {
+        if (earlier.opId !== action.opId || earlier.member !== who.member || earlier.fingerprint !== fingerprint) continue;
+        this.#laneA.delete(nonce);
+        earlier.release();
+      }
       const release = this.#hold();
       const off = channel.onClose(() => {
-        if (this.#laneA.get(action.opId)?.channel !== channel) return;
-        this.#laneA.delete(action.opId);
+        if (this.#laneA.get(action.nonce) !== pending) return;
+        this.#laneA.delete(action.nonce);
         release();
       });
-      this.#laneA.set(action.opId, {
+      const pending: Pending = {
+        opId: action.opId,
+        member: who.member,
+        fingerprint,
         channel,
         release: () => {
           off();
           release();
         },
-      });
+      };
+      this.#laneA.set(action.nonce, pending);
       accept();
       return;
     }
