@@ -425,7 +425,7 @@ export class Project extends DeployedProject {
   }
 
   /** Armed, the next announcements throw: as a reset object's call fails, or as one on older code lacks the method. */
-  async stateAdvanced(version: number, removed?: string[]): Promise<void> {
+  async stateAdvanced(version: number, members?: string[]): Promise<void> {
     const fault = this.ctx.storage.kv.get<StateFault>('state-fault');
     if (fault) {
       this.ctx.storage.kv.put('state-fault', { ...fault, remaining: Math.max(0, fault.remaining - 1), calls: fault.calls + 1 });
@@ -434,7 +434,7 @@ export class Project extends DeployedProject {
       }
     }
     this.ctx.storage.kv.put('announced', Math.max(version, this.ctx.storage.kv.get<number>('announced') ?? 0));
-    return super.stateAdvanced(version, removed);
+    return super.stateAdvanced(version, members);
   }
 
   protected async register(project: string, name: string, machine: string): Promise<ProjectRecord> {

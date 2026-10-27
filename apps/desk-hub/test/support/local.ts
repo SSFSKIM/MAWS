@@ -218,6 +218,26 @@ export async function startLocalHub() {
       await response.body?.cancel();
       return status;
     },
+    /**
+     * A member's socket upgrade straight to a project's object (`/socket`) or the Registry (`/grid`), with the headers
+     * the Worker sets once it resolved the member: how an upgrade the Worker admitted reaches the object late, after
+     * a state that dropped the member. Answers the status; an accepted socket is closed at once.
+     */
+    async socketUpgrade(to: { project: string } | 'registry', member: string): Promise<number> {
+      const binding = to === 'registry' ? 'REGISTRY' : 'PROJECT';
+      const namespace = await mf.getDurableObjectNamespace(binding);
+      const response = await namespace
+        .get(namespace.idFromName(to === 'registry' ? ORG : `${ORG}:${to.project}`))
+        .fetch(to === 'registry' ? 'https://registry/grid' : 'https://project/socket', {
+          headers: { Upgrade: 'websocket', 'X-Desk-Member': member, 'X-Desk-Org': ORG, ...(to === 'registry' ? {} : { 'X-Desk-Project': to.project }) },
+        });
+      const socket = response.webSocket;
+      if (socket) {
+        socket.accept();
+        socket.close(1000, 'done');
+      } else await response.body?.cancel();
+      return response.status;
+    },
     /** Shortens a machine's heartbeat and lease (and its grace, the heartbeat's unless given, and its probe); set before
      * its stream opens (the suites' Worker only). */
     async timing(machine: string, timing: { heartbeatMs: number; leaseMs: number; graceMs?: number; probeMs?: number; writeTimeoutMs?: number }) {

@@ -1,7 +1,7 @@
 // A test device's side of RL5 (O11 M3): fresh P-256 keys, devices built from them, and org states signed with them,
 // through the protocol package's own signing functions, so the suites post to the hub exactly what an admin's app would.
 import { endorseDevice, generateSigningKey, keyId, signOrgState, signTransition, stateHash } from 'org-protocol';
-import type { Device, DeviceClass, OrgState, RootTransition, Signed, SignedOrgState, SigningKey } from 'org-protocol';
+import type { Device, DeviceClass, OrgState, RevokedKey, RootTransition, Signed, SignedOrgState, SigningKey } from 'org-protocol';
 
 /** A device and the keys it holds: a channel key, and a step-up key unless it is `web-cards`. */
 export type TestDevice = { device: Device; channel: SigningKey; stepUp?: SigningKey };
@@ -33,9 +33,19 @@ export async function genesis(org: string, member: string, email: string, device
     machines: [],
     machineNames: [],
     retired: [],
+    revoked: [],
     delegations: [],
     projects: [],
   };
+}
+
+/**
+ * The entries a device's keys take in `revoked` when it leaves `member` in a step (RL DL 24: a device key leaving the
+ * state enters `retired` or `revoked` in that step); the suites revoke, as for a lost device.
+ */
+export async function revokedDevice(member: string, device: Device): Promise<RevokedKey[]> {
+  const keys: Array<['channel' | 'step-up', string]> = [['channel', device.channelPub], ...(device.stepUpPub === undefined ? [] : [['step-up', device.stepUpPub] as ['step-up', string]])];
+  return Promise.all(keys.map(async ([key, pub]) => ({ keyId: await keyId(pub), holder: { member, device: device.id, class: device.class, key } })));
 }
 
 /** The state after `head`, changed by `edit`: the next version, linked to the head, issued now. */

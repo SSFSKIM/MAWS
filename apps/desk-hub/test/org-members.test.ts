@@ -89,6 +89,30 @@ describe('a member', () => {
     ownProject.ws.close();
   });
 
+  it('removed while their project socket hibernates, still has it closed 4403 removed', async () => {
+    const E = memberId();
+    await accept(await next(head, (s) => s.members.push({ id: E, email: 'e@example.com', role: 'member', devices: [] })), a1);
+    const project = await socket(`/api/projects/${PROJECT}/socket`, 'e@example.com');
+    await hub.evict('Project', `${ORG}:${PROJECT}`, 'hibernate');
+    await accept(await next(head, without(E)), a1);
+    expect(await project.closed).toEqual({ code: 4403, reason: 'removed' });
+  });
+
+  it('admitted by the Worker just before a removal is refused at the object’s accept after it, until a state holds them again', async () => {
+    const F = memberId();
+    await accept(await next(head, (s) => s.members.push({ id: F, email: 'f@example.com', role: 'member', devices: [] })), a1);
+    expect(await hub.socketUpgrade({ project: PROJECT }, F)).toBe(101);
+    expect(await hub.socketUpgrade('registry', F)).toBe(101);
+    await accept(await next(head, without(F)), a1);
+    await waitFor(async () => ((await hub.stateFault(PROJECT)).announced === head.state.version ? true : undefined));
+    expect(await hub.socketUpgrade({ project: PROJECT }, F)).toBe(403);
+    expect(await hub.socketUpgrade('registry', F)).toBe(403);
+    await accept(await next(head, (s) => s.members.push({ id: F, email: 'f@example.com', role: 'member', devices: [] })), a1);
+    await waitFor(async () => ((await hub.stateFault(PROJECT)).announced === head.state.version ? true : undefined));
+    expect(await hub.socketUpgrade({ project: PROJECT }, F)).toBe(101);
+    await accept(await next(head, without(F)), a1);
+  });
+
   it('is projected with their devices by member and class, and machines by ref', async () => {
     const C = memberId();
     const c1 = await newDevice('c1');

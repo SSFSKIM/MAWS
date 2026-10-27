@@ -25,7 +25,8 @@
 // The org's signed state (RL5; O11 M3) is kept beside all this (`OrgChain`, org-chain.ts): once a genesis is accepted,
 // `members` is the head's projection, and member management is a signed successor, never a route of the hub's own. A
 // member a state drops is refused from then on, their grid sockets here and their project sockets (through each
-// project's announcement of the state, `Project.stateAdvanced`) closing `4403 removed`.
+// project's announcement of the state, `Project.stateAdvanced`, which carries the head's member ids) closing `4403
+// removed`, and a socket the Worker admitted just before is refused at its accept, here and at the project.
 import { DurableObject } from 'cloudflare:workers';
 import { hubConfig, MEMBER_HEADER, type Env, type HubConfig } from '../env';
 import type { AccessIdentity } from '../identity/access';
@@ -620,9 +621,12 @@ export class Registry extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
     if (new URL(request.url).pathname !== '/grid') return new Response('not found', { status: 404 });
     if (request.headers.get('Upgrade') !== 'websocket') return new Response('expected a WebSocket', { status: 426 });
+    // Resolved before a state that dropped the member, and reaching here after it.
+    const member = request.headers.get(MEMBER_HEADER) ?? '';
+    if (this.sql.exec('SELECT 1 FROM members WHERE id = ?', member).toArray().length === 0) return Response.json({ error: 'removed' }, { status: 403 });
     const [client, server] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({ member: request.headers.get(MEMBER_HEADER) ?? '' });
+    server.serializeAttachment({ member });
     this.send(server, this.gridFrame());
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -1008,7 +1012,7 @@ export class Registry extends DurableObject<Env> {
 
   /**
    * A genesis or a successor (`OrgChain.submit`). Once one is accepted, the members it dropped are refused here at once,
-   * their grid sockets close `4403 removed`, and every project is told the new version and who was dropped.
+   * their grid sockets close `4403 removed`, and every project is told the new version and the members it holds.
    */
   async submitState(member: MemberRecord, body: unknown): Promise<Result<OrgStateAccepted>> {
     if (body === undefined) return fail(400, 'bad-shape', 'the body is a SignedOrgState, {state, sigs}');
@@ -1024,23 +1028,24 @@ export class Registry extends DurableObject<Env> {
         // already closing
       }
     }
-    for (const { id } of this.sql.exec<{ id: string }>('SELECT id FROM projects').toArray()) this.announce(org.id, id, version, removed, 1);
+    const members = this.sql.exec<{ id: string }>('SELECT id FROM members ORDER BY id').toArray().map((m) => m.id);
+    for (const { id } of this.sql.exec<{ id: string }>('SELECT id FROM projects').toArray()) this.announce(org.id, id, version, members, 1);
     return ok({ version });
   }
 
   /**
-   * Tells a project the org state advanced to `version`, dropping `removed` (`Project.stateAdvanced`), `attempt` being
+   * Tells a project the org state advanced to `version`, holding `members` (`Project.stateAdvanced`), `attempt` being
    * how many times it was told; a call that fails is sent again as retry.ts says. A project still on the code before
    * the announcement lacks the method: it holds no cached state to refresh, and is taken as told.
    */
-  private announce(org: string, project: string, version: number, removed: string[], attempt: number): void {
+  private announce(org: string, project: string, version: number, members: string[], attempt: number): void {
     void this.env.PROJECT.get(this.env.PROJECT.idFromName(`${org}:${project}`))
-      .stateAdvanced(version, removed)
+      .stateAdvanced(version, members)
       .catch((error: unknown) => {
         if (lacksMethod(error, 'stateAdvanced')) return;
         const wait = attempt < RETRY_ATTEMPTS ? retryDelay(attempt, this.retryBaseMs(), error) : null;
         console.log(JSON.stringify({ desk: 'registry', event: 'announce-failed', project, version, attempt, error: described(error), retry_ms: wait === null ? null : Math.round(wait) }));
-        if (wait !== null) setTimeout(() => this.announce(org, project, version, removed, attempt + 1), wait);
+        if (wait !== null) setTimeout(() => this.announce(org, project, version, members, attempt + 1), wait);
       });
   }
 

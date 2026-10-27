@@ -9,7 +9,7 @@ import { fakeAccessApi } from '../support/access-api.ts';
 import { accessPlan, reconcileAccess } from '../../deploy/access.ts';
 
 const config: DeployConfig = { account: 'acct', worker: 'desk-hub-staging', host: 'desk-hub-staging.example.workers.dev', ownerEmail: 'owner@example.com', sessionDuration: '24h', org: { id: 'staging-x', name: 'X' } };
-const empty = { certs: [], retirements: [], revocations: [] };
+const empty = { certs: [], retirements: [] };
 const member = (id: string, email: string) => ({ id, email, role: 'member', devices: [] });
 const viewOf = (emails: string[]) => ({ head: { state: { members: emails.map((email, i) => member(String(i).padStart(32, '0'), email)) }, sigs: [] }, transitions: [], certificates: empty }) as unknown as OrgStateView;
 

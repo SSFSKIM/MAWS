@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { OrgStateView } from '../src/protocol/identity';
 import { enroll } from './support/clients';
 import { ADMIN, ORG, startLocalHub, type LocalHub, type Who } from './support/local';
-import { endorsed, genesis, memberId, newDevice, next, rootKid, signedBy, transition, type TestDevice } from './support/org';
+import { endorsed, genesis, memberId, newDevice, next, revokedDevice, rootKid, signedBy, transition, type TestDevice } from './support/org';
 
 let hub: LocalHub;
 /** The bootstrap admin's member id, as `ensureOrg` made it. */
@@ -138,10 +138,13 @@ describe('admins and their devices', () => {
     );
     // While C is an admin, C's key signs.
     await accept(await next(head, (s) => s.projects.push({ id: 'by-c-admin', name: 'C' })), c1);
+    // C's device leaves with C: its keys are revoked in the same step (RL DL 24).
+    const revoked = await revokedDevice(C, c1.device);
     await accept(
       await next(head, (s) => {
         s.members = s.members.filter((m) => m.id !== C);
         s.root.keys = s.root.keys.filter((k) => k !== kid);
+        s.revoked.push(...revoked);
       }),
       a1,
     );

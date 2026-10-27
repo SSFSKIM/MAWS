@@ -56,6 +56,10 @@ export const VISIBLE_MS = 90_000;
  * once as before). */
 export type MachineContext = { org: string; project: string; machine: string; client: string; generation: number; leaseMs: number; graceMs?: number };
 
+/** The `kv` key of the newest org state announced to this project and the member ids it holds (`stateAdvanced`). */
+const STATE_MEMBERS = 'state-members';
+type StateMembers = { version: number; members: string[] };
+
 /** A route's generation while its subscription waits for the machine's next stream: no stream is generation 0. */
 const PARKED = 0;
 
@@ -118,6 +122,8 @@ export class Project extends DurableObject<Env> {
     if (url.pathname !== '/socket') return new Response('not found', { status: 404 });
     if (request.headers.get('Upgrade') !== 'websocket') return new Response('expected a WebSocket', { status: 426 });
     const member = request.headers.get(MEMBER_HEADER) ?? '';
+    // The Worker admitted the member against the Registry's head, and a state announced since may have dropped them.
+    if (!this.stateHolds(member)) return Response.json({ error: 'removed' }, { status: 403 });
     this.remember(request.headers.get(ORG_HEADER) ?? '', request.headers.get(PROJECT_HEADER) ?? '');
     this.sweepLeases();
     const id = newSocketId();
@@ -327,13 +333,20 @@ export class Project extends DurableObject<Env> {
   }
 
   /**
-   * The Registry's announcement of an accepted org state (O11 M3): `version` is the state's, `removed` the members it
-   * dropped, whose sockets here close `4403 removed` (Access no longer admits them, so none opens again). A second
-   * telling closes nothing more. M5 refreshes the project's cached head here.
+   * The Registry's announcement of an accepted org state (O11 M3): `version` is the state's, `members` the ids it holds.
+   * The newest announced is kept (an older one arriving late changes nothing), every socket of a member it does not
+   * hold closes `4403 removed`, and a socket the Worker admitted before the state but that reaches this object after it
+   * is refused at its accept (`stateHolds`): a removed member keeps no read of the log, hibernated sockets included,
+   * whose attachments name their member. M5 refreshes the project's cached head here.
    */
-  async stateAdvanced(version: number, removed: string[] = []): Promise<void> {
+  async stateAdvanced(version: number, members?: string[]): Promise<void> {
+    if (members === undefined) return;
+    const held = this.ctx.storage.kv.get<StateMembers>(STATE_MEMBERS);
+    if (held && held.version >= version) return;
+    this.ctx.storage.kv.put(STATE_MEMBERS, { version, members } satisfies StateMembers);
+    const kept = new Set(members);
     for (const socket of this.ctx.getWebSockets()) {
-      if (!removed.includes(this.attachment(socket).member)) continue;
+      if (kept.has(this.attachment(socket).member)) continue;
       await this.webSocketClose(socket);
       try {
         socket.close(4403, 'removed');
@@ -341,6 +354,12 @@ export class Project extends DurableObject<Env> {
         // already closing
       }
     }
+  }
+
+  /** Whether the newest org state announced here holds `member` (any member, before the first announcement). */
+  private stateHolds(member: string): boolean {
+    const held = this.ctx.storage.kv.get<StateMembers>(STATE_MEMBERS);
+    return held === undefined || held.members.includes(member);
   }
 
   /** Leases that lapsed, request windows that closed, and command receipts past retention, without new traffic. */
