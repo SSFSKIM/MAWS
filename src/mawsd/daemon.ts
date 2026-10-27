@@ -263,13 +263,21 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
 
   // --- the engine host's relay ---------------------------------------------------------------------------------------
   let recycling = 0;
+  let recycled: Promise<void> = Promise.resolve(); // the latest recycle's end
   const recycleEngine = (drained?: () => void) => {
     recycling += 1;
-    void hosts.recycle('engine-host', { drained }).then(() => {
+    recycled = hosts.recycle('engine-host', { drained }).then(() => {
       recycling -= 1;
       if (recycling === 0 && hosts.snapshot('engine-host').state !== 'ready') engineRelay.dropApp(`the engine host is ${hosts.snapshot('engine-host').state} after its recycle`);
     });
   };
+  // A stop-all's close is deliberate (the host parks until the next attach or request). It is marked on the link the
+  // request is written to, so one sent just after an attach waits for that attach's recycle.
+  const stopAll = (request: { input: unknown; client?: string }): Promise<HostResponse> =>
+    recycled.then(() => {
+      hosts.expectExit('engine-host');
+      return hosts.forward('engine-host', { name: 'host.stopAll', input: request.input, ...(request.client && { client: request.client }) });
+    });
   const engineRelay = new Relay({
     owner: 'engine-host',
     hosts,
@@ -278,7 +286,13 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     intercept: (request) => interceptEngine(request),
     onDocument: (message, end) => {
       // the app's channels are below 2^31; one at or above is the endpoint's range (P5 Decision Log 42: a value rule)
-      if (message.channel >= ENDPOINT_CHANNEL_BASE || !hosts.postDocPort(message, end, 'app')) end.close();
+      if (message.channel >= ENDPOINT_CHANNEL_BASE) return end.close();
+      // one opened just after the attach rides the fresh link, not the one its recycle ends
+      let closed = false;
+      end.on('close', () => void (closed = true));
+      void recycled.then(() => {
+        if (!closed && !hosts.postDocPort(message, end, 'app')) end.close();
+      });
     },
     onExit: (when, refused) => {
       if (when === 'idle') return log('exit idle from the app ignored: the daemon’s clocks decide');
@@ -317,8 +331,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         return sendInterest();
       }
       case 'host.stopAll':
-        hosts.expectExit('engine-host'); // the close that follows is deliberate: the host parks until the next attach or request
-        return null;
+        return stopAll(request);
       case 'host.configure': {
         const ms = input.idleExitMs;
         if (ms === null || (typeof ms === 'number' && Number.isInteger(ms) && ms > 0 && ms <= MAX_IDLE_EXIT_MS)) clocks.configure(ms);
@@ -332,6 +345,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   // --- the pty host's relay, and its output credit -------------------------------------------------------------------
   let credit: 'daemon' | 'app' = 'daemon';
   let ptyCheck = 0; // a park check in flight is stale once this moved
+  let ptyRequests = 0; // the endpoint's requests to the pty host in flight: no park under them
   const ptyReady = () => hosts.snapshot('pty-host').state === 'ready' && !hosts.parked('pty-host');
   // The credit while no app holds it: every live pty acknowledged at its offset (a pty paused while mawsd was down
   // resumes), then the pty host parks when nothing lives.
@@ -342,7 +356,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     if (!listed.ok || credit !== 'daemon' || check !== ptyCheck) return;
     const { ptys } = listed.value as { ptys: { ptyId: string; alive: boolean; offset: number }[] };
     for (const pty of ptys.filter((p) => p.alive)) void hosts.dispatch('pty-host', 'pty.ack', { ptyId: pty.ptyId, offset: pty.offset });
-    if (ptys.some((p) => p.alive) || ptyRelay.attachedApp()) return;
+    if (ptys.some((p) => p.alive) || ptyRelay.attachedApp() || ptyRequests > 0) return;
     log('no app on pty-host.sock and no pty alive: the pty host exits now and parks');
     hosts.exitSupervisor('now', 'pty-host');
   };
@@ -474,10 +488,18 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       }
       if (host === 'pty-host' && (name === 'pty.ack' || name === 'pty.checkpoint')) return refused(`${name} through the endpoint: the credit is the app's or the daemon's`);
       if (host === 'engine-host' && name === 'host.interest') return refused('a remote viewer’s interest arrives through interest.report');
-      if (host === 'engine-host' && name === 'host.stopAll') hosts.expectExit('engine-host');
+      if (host === 'engine-host' && name === 'host.stopAll') return stopAll({ input, ...(client && { client: client.id }) });
       // a remote viewer never holds a pty's output credit: every attach through the seam reads without taking it
       const sent = host === 'pty-host' && name === 'pty.attach' ? { ...(input as object), credit: false } : input;
-      return hosts.forward(host, { name, input: sent, ...(client && { client: client.id }) });
+      if (host === 'engine-host') return hosts.forward(host, { name, input: sent, ...(client && { client: client.id }) });
+      // the pty host it woke stays up for the request (a spawn), and parks after it if nothing lives and no app is on
+      ptyRequests += 1;
+      try {
+        return await hosts.forward(host, { name, input: sent, ...(client && { client: client.id }) });
+      } finally {
+        ptyRequests -= 1;
+        if (ptyRequests === 0) void settleCredit();
+      }
     },
     onEvent: (listener) => (eventListeners.add(listener), () => void eventListeners.delete(listener)),
     onAttachment: (listener) => (attachmentListeners.add(listener), () => void attachmentListeners.delete(listener)),

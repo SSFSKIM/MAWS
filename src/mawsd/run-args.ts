@@ -1,4 +1,7 @@
 // `mawsd run`'s arguments (P5 O2 M5): `run --unit|--private --dir <profile>/mawsd`, the profile itself in MAWS_USER_DATA.
+// The directory is absolute: a unit starts in `/`, so a relative one would name somewhere else.
+import { isAbsolute } from 'node:path';
+
 export const USAGE = 'usage: mawsd run --unit|--private --dir <profile>/mawsd (with MAWS_USER_DATA=<profile>)';
 
 export interface RunArgs {
@@ -18,6 +21,7 @@ export function parseRun(argv: readonly string[]): RunArgs | string {
     } else if (arg === '--dir') {
       dir = argv[++i] ?? null;
       if (!dir) return '--dir needs a directory';
+      if (!isAbsolute(dir)) return `--dir needs an absolute path, not ${dir}`;
     } else return `run does not take ${arg}`;
   }
   if (kind === null) return 'run needs --unit or --private';

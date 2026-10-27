@@ -83,6 +83,8 @@ export interface FakeSupervisorOptions {
   docHighWater?: number; // P3-A M5: the document channels' reset mark
   // What `exit {when: 'now'}` does; by default the supervisor exits at once (its files removed, its pid dead).
   onExitNow?: (supervisor: FakeSupervisor) => void;
+  // P5 O2 M5: what `exit {when: 'idle'}` does once armed; by default nothing (it is recorded), as a host with work does
+  onExitIdle?: (supervisor: FakeSupervisor) => void;
 }
 
 export class FakeSupervisor {
@@ -157,6 +159,7 @@ export class FakeSupervisor {
         onExit: (when) => {
           this.exits.push(when);
           if (when === 'now') (this.options.onExitNow ?? ((s) => void s.die()))(this);
+          else this.options.onExitIdle?.(this); // P5 O2 M5
         },
         log: (line) => void this.logs.push(line),
         docHighWater: this.options.docHighWater, // P3-A M5
