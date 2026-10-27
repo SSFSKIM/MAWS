@@ -39,7 +39,7 @@ Phase 1 (dispatchable now; P5's item 1, item 4, and item 7's refusals):
 
 Phase 2 (written 2026-10-27 against O10's M6 and Interfaces §D, whose landing P5's Decision Log 45 records; P5's items 2, 3, 5, 6 and 8, item 4's rest, and Decision Log 45's duties):
 - [x] M7a — Ticket 11's two debt fixes (the reseal's nonce, the `lane-b` recovery code). Reviewed clean by doperpowers:reviewer-medium in one round (no findings), landed as doperpowers PR #404 (`ae7e3ba9`, sminos 1.20.0), 2026-10-27.
-- [ ] M5 — The RL10 client and the local-only switch (item 5). Buildable now against sminos's own endpoint stand-in; its conformance replay lands once O10 M6's `conversation.json` exists.
+- [x] M5 — The RL10 client and the local-only switch (item 5). Built by two executors in sequence on one branch, reviewed by doperpowers:reviewer-high over two rounds (round 1: one P1, one P2, both reproduced and fixed with regression tests; round 2 clean), landed as doperpowers PR #405 (`76cd8caf`, sminos 1.21.0), 2026-10-27. Its conformance replay lands once O10 M6's `conversation.json` exists, as a follow-up.
 - [ ] M6 — Members, words and the label (items 2 and 3). After M5.
 - [ ] M7 — Lane A actions with remote context (item 4's rest; Decision Log 45's fence, binding and proof). After M6, whose `member` frames it extends with `launch` and whose publication it proves; after M7a.
 - [ ] M8 — To-human off the hub (item 6). After M5. Its store needs nothing of RL10.
