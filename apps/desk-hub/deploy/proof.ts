@@ -69,7 +69,7 @@ export class Cleanup {
   private running: string | undefined;
   private readonly interruption = new AbortController();
   /** Aborted when the run is interrupted: the work stops at its next step. */
-  readonly signal = this.interruption.signal;
+  readonly signal: AbortSignal = this.interruption.signal;
 
   constructor(private readonly stepMs = STEP_MS) {}
 
