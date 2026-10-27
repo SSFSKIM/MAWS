@@ -3,7 +3,7 @@
 #
 #   scripts/ci-gate.sh <worktree-or-sha> --gates all|static,unit,unit:darwin,probes,e2e:<group>,… [--runner linux|macos]
 #                      [--class1a linux|macos|pool] [--lane vm|vm-trial|hosted|no-hosted] [--default-beside <groups>] [--evidence]
-#                      [--live] [--affected] [--label <name>] [--keep]
+#                      [--live] [--affected] [--peer <ref>|none] [--label <name>] [--keep]
 #
 #   scripts/ci-gate.sh <worktree> --gates static,unit,probes     class 1a alone
 #   scripts/ci-gate.sh <worktree> --gates all                    the whole set (on a macOS e2e lane, every Mac job)
@@ -61,6 +61,16 @@
 #                      test-history spec, M4). A selected run is NEVER landing evidence, even when it ran the whole
 #                      suite: a landing needs a full class 1a run on the head's tree without --affected, and a red
 #                      selected run counts as red (default: off)
+#   --peer             the build the PEER_E2E groups (gate.yml: e2e:cross-build, the two-build check) run the tested tree
+#                      against, a ref this checkout resolves, or `none`. Default: the merge base with origin/master,
+#                      fetched first. The commit goes in a `Peer:` trailer beside both trees' wires (`Peer-Wire:`, `Wire:`,
+#                      each the major.minor of its src/shared/ipc/wire-manifest.json), and the plan adds those groups to a
+#                      run whose two wires are a minor apart and whose gates hold unit, unit:darwin or an e2e group (so
+#                      class 1a and --gates all do, a static or probes check does not), unless the run is --live or
+#                      --affected. No trailer when the tree has no manifest, is its own merge base, or with `none`. Refused
+#                      (exit 2), naming --peer: a --peer that names no commit or one with no manifest, and a checkout that
+#                      cannot find its merge base (shallow, or with none with origin/master). A refused run's relaunch
+#                      line carries the peer as resolved, its sha or `none`
 #   --label            the ref's name before the short sha (default: the worktree's branch, else `gate`)
 #   --keep             leave the ci/ ref in place
 #
@@ -68,6 +78,7 @@
 # triggers a run of its own and the run found is this one's) and, when given, the `Gates:` (none for `all`, the plan's
 # default set), `Runner:`, `Class1a:`, `Lane:`, `DefaultBeside:`, `Evidence:` and `Live:` trailers; under --affected its subject is
 # `ci-gate: <short> affected` and it carries `Selection: affected`, `Affected-Count:` and an `Affected:` trailer per path.
+# The peer's `Peer:`, `Peer-Wire:` and `Wire:` trailers follow when there is one (--peer).
 # A successful local plan adds `Pool-Demand:`, ci-kit's advisory attempt-1 pre-launch hint: the exact multiset of pool
 # jobs, or `none` when no job uses the pool. If it fails, no hint is written and the push still proceeds.
 # The pushed tree is always the tested tree plus that one commit. A Linux lane admits only the e2e groups green there (§3.1); the plan refuses the rest.
@@ -113,6 +124,7 @@ default_beside=''
 evidence=''
 live=''
 affected=''
+peer=''
 label=''
 keep=false
 while (($# > 0)); do
@@ -125,6 +137,7 @@ while (($# > 0)); do
     --evidence) evidence=yes; shift ;;
     --live) live=yes; shift ;;
     --affected) affected=yes; shift ;;
+    --peer) peer=${2:?--peer needs a ref or none}; shift 2 ;;
     --label) label=${2:?--label needs a name}; shift 2 ;;
     --keep) keep=true; shift ;;
     -h | --help) usage ;;
@@ -164,12 +177,30 @@ else
   branch=''
 fi
 
+# The peer of the PEER_E2E groups and both trees' wires, as trailers (ci-gate-peer.mjs), read before the alert check, whose
+# plan they can add a Mac job to; what it decided is said once the transcript starts.
+peer_notes=$(mktemp)
+peer_trailers=$(node "$(dirname "$0")/ci-gate-peer.mjs" --git-dir "$git_dir" --sha "$sha" --peer "$peer" 2>"$peer_notes")
+peer_status=$?
+peer_said=$(<"$peer_notes")
+rm -f "$peer_notes"
+if ((peer_status != 0)); then
+  printf '%s\n' "${peer_said:-ci-gate: the peer could not be resolved}" >&2
+  exit 2
+fi
+# A relaunch (ci-gate-refusals.sh) checks the same pair: the peer as resolved, or none.
+relaunch_peer=$(printf '%s\n' "$peer_trailers" | sed -n 's/^Peer: //p')
+relaunch_peer=${relaunch_peer:-none}
+
 # ci-kit's alert watcher: while no online Mac runner is free of an open alert, a run with Mac jobs is not pushed, its jobs
 # would only be refused. Exit 2, as for the script's other refusals; anything else from the check goes ahead.
 if [[ ${MAWS_GATE_IGNORE_ALERTS:-} == 1 ]]; then
   alert_check='ci-gate: MAWS_GATE_IGNORE_ALERTS=1, the ci-kit alert check skipped'
 else
-  alert_check=$(node "$(dirname "$0")/ci-gate-alerts.mjs" --gates "$gates_trailer" --runner "$runner" --class1a "$class1a" --lane "$lane" --live "$live" --git-dir "$git_dir" --sha "$sha")
+  # the peer's trailers, and an iteration run's Selection, which keeps the peer groups off the run
+  alert_trailers=$peer_trailers
+  [[ -n $affected ]] && alert_trailers+=$'\n'"Selection: affected"
+  alert_check=$(node "$(dirname "$0")/ci-gate-alerts.mjs" --gates "$gates_trailer" --runner "$runner" --class1a "$class1a" --lane "$lane" --live "$live" --trailers "$alert_trailers" --git-dir "$git_dir" --sha "$sha")
   case $? in
     0) ;;
     2)
@@ -188,6 +219,7 @@ mkdir -p "$out"
 log=$out/ci-$short.log
 exec > >(tee "$log") 2>&1
 [[ -z $alert_check ]] || printf '%s\n' "$alert_check"
+[[ -z $peer_said ]] || printf '%s\n' "$peer_said"
 
 # --affected: the change's paths, from the merge base with origin/master to the tested commit, each as a line of
 # `git diff --name-status -M` (status, tab, path, and a rename's new path after another tab). A failed fetch goes ahead:
@@ -227,6 +259,7 @@ if [[ -n $affected ]]; then
   trailers+=$'\n'"Selection: affected"$'\n'"Affected-Count: ${#affected_lines[@]}"
   if ((${#affected_lines[@]} > 0 && ${#affected_lines[@]} <= AFFECTED_BOUND)); then for line in "${affected_lines[@]}"; do trailers+=$'\n'"Affected: $line"; done; fi
 fi
+[[ -n $peer_trailers ]] && trailers+=$'\n'"$peer_trailers"
 # ci-kit's attempt-1 pre-launch hint: this plan's exact pool jobs, not the shape of a historical run. Advisory only:
 # an unreadable variable, tree or plan omits the hint and leaves the launcher its history fallback. Read the variables
 # now, and the package scripts and workflow env at the sha we push (never the caller's possibly dirty checkout).

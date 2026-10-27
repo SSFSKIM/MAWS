@@ -241,6 +241,13 @@ env:
   # 127.0.0.1:8641, which the mini runs and the EC2 Mac does not (there it answered `relay_unreachable` in runs
   # 40429551303 and 40432481369).
   MAC_HOME_E2E: discover
+  # The groups that check this tree against another build, its peer (the two-build check, e2e/cross-build.spec.ts):
+  # scripts/ci-gate.sh names the peer in a `Peer:` trailer (the merge base with master, unless its --peer names another)
+  # beside both trees' wires, and the plan adds these groups to a run with unit or an e2e group whenever the two are a
+  # minor apart (gate-plan.mjs). Their job fetches that one
+  # commit, checks it out under RUNNER_TEMP with an install of its own and builds its out/ (.github/scripts/gate-peer.sh),
+  # and stops every supervisor of either build whatever happened. Always the Mac's exclusive instance, never hosted.
+  PEER_E2E: cross-build
 
 defaults:
   run:
@@ -609,6 +616,14 @@ jobs:
           path: ${{ runner.temp }}/maws-e2e-build
       - if: matrix.build
         run: .github/scripts/gate-run.sh 'built in|error' pnpm build
+      # A PEER_E2E group's peer (the plan's `peer`, the commit the `Peer:` trailer names): that commit alone fetched, checked
+      # out under RUNNER_TEMP, installed against the runner's pnpm store and built as its own e2e groups build it; its root
+      # reaches the spec as MAWS_E2E_PEER_ROOT below.
+      - id: peer
+        if: matrix.peer
+        env:
+          PEER: ${{ matrix.peer }}
+        run: .github/scripts/gate-run.sh 'built in|error|^gate-peer' .github/scripts/gate-peer.sh prepare "$PEER" "$RUNNER_TEMP/maws-peer"
       # P4-AGG M1 (docs/doperpowers/specs/2026-10-24-plugin-aggregator-design.md): the Discover group runs the real engine
       # 2.1.309, provisioned here, before its offline test phase: the official build, verified against the checksum
       # committed in scripts/engine-checksums.txt and cached by version under the runner's user directory; the script
@@ -640,6 +655,7 @@ jobs:
       - env:
           SCRIPT: ${{ matrix.script }}
           VARIANT: ${{ matrix.variant }}
+          MAWS_E2E_PEER_ROOT: ${{ matrix.peer && format('{0}/maws-peer', runner.temp) || '' }}
         run: |
           display=()
           if [[ $RUNNER_OS == Linux ]]; then display=(xvfb-run -a --server-args='-screen 0 1920x1080x24'); fi
@@ -657,6 +673,12 @@ jobs:
           if [[ -s $RUNNER_TEMP/e2e-specs ]]; then while IFS= read -r spec; do specs+=("$spec"); done <"$RUNNER_TEMP/e2e-specs"; fi
           # Playwright's count lines, and vitest's for the one group that runs a vitest file (tool-time-heavy-live, P4-A2).
           .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)|^e2e-build: |^ +(Test Files|Tests) +[0-9]' "${display[@]}" pnpm "$SCRIPT" "${specs[@]}"
+      # The peer's supervisors and this tree's outlive their apps by design (detached, each in a process group of its own),
+      # so whatever the run did, every one of either build is stopped here, with the peer's apps and checkout: nothing the
+      # job started is left to the next job on this Mac.
+      # Any job of a peer group that checked out, so a prepare cancelled midway is undone too.
+      - if: always() && matrix.peer && steps.checkout.outcome == 'success'
+        run: .github/scripts/gate-peer.sh stop "$RUNNER_TEMP/maws-peer"
       # Only after this job's own checkout: on the Mac the workspace persists between jobs and only the checkout's clean
       # clears the last job's reports, so a job that failed before it (a refused measured group) would upload another's.
       # desk-web's suites (desk-web, desk-web-hub) run under apps/desk-web and write their output there.

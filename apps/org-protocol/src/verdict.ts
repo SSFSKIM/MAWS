@@ -25,6 +25,15 @@
 //                       or event it signed, a certificate's under a revoked delegation included
 //   name-retired        a machine name some version gave another ref, given again, or a successor that drops a name
 //                       from `machineNames`
+//   not-owner           an attested owner neither the sending machine's owner nor proven by a proof, or a proof that
+//                       proves no ownership (another member's spawn; an owner-add by a member not yet an owner)
+//   other-machine       an ownership proof that names another machine than the one whose event it attests
+//   challenge           a WebAuthn assertion over another challenge than the action's digest
+//   origin              a WebAuthn assertion from another origin than the verifier expects
+//   rp-id               a WebAuthn assertion whose authenticator data names another relying party
+//   user-presence       a WebAuthn assertion without the user-present flag
+//   user-verification   a WebAuthn assertion without the user-verified flag
+//   counter             a WebAuthn assertion whose signature counter did not rise where either side keeps one
 export type VerdictCode =
   | 'malformed'
   | 'bad-signature'
@@ -39,7 +48,15 @@ export type VerdictCode =
   | 'stale-listing'
   | 'contested'
   | 'name-retired'
-  | 'revoked';
+  | 'revoked'
+  | 'not-owner'
+  | 'other-machine'
+  | 'challenge'
+  | 'origin'
+  | 'rp-id'
+  | 'user-presence'
+  | 'user-verification'
+  | 'counter';
 
 export type Verdict = { ok: true } | { ok: false; code: VerdictCode };
 

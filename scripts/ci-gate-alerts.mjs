@@ -15,8 +15,9 @@
 // The run's Mac jobs are the tested plan's when it runs. If it cannot run, the flags name the Mac jobs and no home job
 // is known; a failed GitHub read goes ahead with a warning, since the runner's own check still refuses.
 // Usage: node scripts/ci-gate-alerts.mjs --gates <list> --runner <lane> --class1a <runner> --lane <lane> --live <yes>
-// --git-dir <dir> --sha <commit>, ci-gate.sh's own values (empty when not given; its `--gates all` comes as empty, the
-// default set; the directory and the commit are the tested tree). Prints its lines on stdout and exits 2
+// --trailers <lines> --git-dir <dir> --sha <commit>, ci-gate.sh's own values (empty when not given; its `--gates all` comes
+// as empty, the default set; `--trailers` its peer's, ci-gate-peer.mjs's lines; the directory and the commit are the
+// tested tree). Prints its lines on stdout and exits 2
 // when the run is not to be pushed, else 0. The parsing and the decision are exported for scripts/ci-gate-alerts.test.mjs.
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
@@ -172,7 +173,7 @@ export function runsOn(json) {
 // for no Mac jobs, `vm` or `vm-trial` when every Mac job can run there, otherwise null. `home` names jobs on ci-kit-mac-home.
 // The plan job itself is included under GATE_RUNNER=macos. A missing tree, refusal or unreadable plan returns null.
 // Extract the commit's planner, workflow and package scripts, then run with its env and ci-gate.sh's trailers.
-export function macPlan({ gitDir, sha, gates = '', runner = '', class1a = '', lane = '', live = '', variables = {} }) {
+export function macPlan({ gitDir, sha, gates = '', runner = '', class1a = '', lane = '', live = '', trailers: more = '', variables = {} }) {
   if (!gitDir || !sha) return null;
   let dir;
   try {
@@ -182,7 +183,7 @@ export function macPlan({ gitDir, sha, gates = '', runner = '', class1a = '', la
     const archive = join(dir, 'archive.tar');
     execFileSync('git', ['-C', top, 'archive', '--format=tar', `--output=${archive}`, sha, '--', '.github/scripts', '.github/workflows/gate.yml', 'package.json'], { stdio: ['ignore', 'pipe', 'pipe'] });
     execFileSync('tar', ['-x', '-f', archive, '-C', dir], { stdio: ['ignore', 'pipe', 'pipe'] });
-    const trailers = Object.entries({ Gates: gates, Runner: runner, Class1a: class1a, Lane: lane, Live: live }).filter(([, value]) => value).map(([key, value]) => `${key}: ${value}`);
+    const trailers = [...Object.entries({ Gates: gates, Runner: runner, Class1a: class1a, Lane: lane, Live: live }).filter(([, value]) => value).map(([key, value]) => `${key}: ${value}`), ...more.split('\n').filter(Boolean)];
     const output = join(dir, 'github-output');
     execFileSync(process.execPath, ['.github/scripts/gate-plan.mjs'], {
       cwd: dir,
@@ -230,7 +231,7 @@ export function macPlan({ gitDir, sha, gates = '', runner = '', class1a = '', la
 export const guestRun = (run) => macPlan(run)?.guest ?? null;
 
 // The reads, through `gh` (args to stdout, throwing on failure), and the decision; any failed read goes ahead with a warning.
-export function check({ gates, runner, class1a, lane, live, gitDir, sha, offMac, gh }) {
+export function check({ gates, runner, class1a, lane, live, trailers, gitDir, sha, offMac, gh }) {
   const read = (path, jq) =>
     gh(['api', '--paginate', path, '--jq', jq])
       .split('\n')
@@ -241,7 +242,7 @@ export function check({ gates, runner, class1a, lane, live, gitDir, sha, offMac,
     const variables = Object.fromEntries(read(`repos/${REPO}/actions/variables?per_page=30`, '.variables[] | [.name, .value]'));
     // The Mac jobs are the tested commit's plan's (a hosted group is on none), whose lists may differ from this checkout's;
     // those the flags and this checkout's POOL_E2E name only when that plan cannot be run.
-    const placed = macPlan({ gitDir, sha, gates, runner, class1a, lane, live, variables });
+    const placed = macPlan({ gitDir, sha, gates, runner, class1a, lane, live, trailers, variables });
     const jobs = placed ? placed.jobs : macJobs({ gates, runner, class1a, variables, offMac });
     if (jobs.length === 0) return { stop: false, lines: [] };
     step = `the open ci-kit alerts (${ALERTS})`;
@@ -263,7 +264,7 @@ export function check({ gates, runner, class1a, lane, live, gitDir, sha, offMac,
 
 // realpath: node resolves argv[1] but not its symlinks (a worktree under /tmp), while import.meta.url is the real path.
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const { values } = parseArgs({ options: { gates: { type: 'string', default: '' }, runner: { type: 'string', default: '' }, class1a: { type: 'string', default: '' }, lane: { type: 'string', default: '' }, live: { type: 'string', default: '' }, 'git-dir': { type: 'string', default: '' }, sha: { type: 'string', default: '' } } });
+  const { values } = parseArgs({ options: { gates: { type: 'string', default: '' }, runner: { type: 'string', default: '' }, class1a: { type: 'string', default: '' }, lane: { type: 'string', default: '' }, live: { type: 'string', default: '' }, trailers: { type: 'string', default: '' }, 'git-dir': { type: 'string', default: '' }, sha: { type: 'string', default: '' } } });
   const gh = (args) => execFileSync('gh', args, { encoding: 'utf8', timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] });
   const offMac = poolE2e(readFileSync(new URL('../.github/workflows/gate.yml', import.meta.url), 'utf8'));
   const { stop, lines } = check({ ...values, gitDir: values['git-dir'], offMac, gh });
