@@ -1,7 +1,7 @@
 // Words are decided at delivery (O10 M6; RL §5.7; P5's O12 item 2). Before sminos delivers a `human` event as a
-// person's words it asks `words? {id, session, event}` with the event exactly as it stored it, and delivers it as words
-// only on `words`; no answer is no words. The endpoint answers `peer` for a session it holds no `member` for, and
-// otherwise decides by where the event came from:
+// person's words it asks `words? {id, project, session, event}` with the event exactly as it stored it, and delivers it
+// as words only on `words`; no answer is no words. The endpoint answers `refuse` for one naming no project, `peer` for
+// a session it holds no `member` for, and otherwise decides by where the event came from:
 //
 //   - an arriving event (stored with its `sig`): verified again against the head at this moment, and found in the
 //     inbound index at its own position. A device-signed `hub/<member>` event is `words` when its member holds
@@ -16,8 +16,8 @@
 //     granting nothing.
 //   - anything else (unsigned, v1): `peer`.
 //
-// `words?` names no project; the event is the session's member's project's, unless sminos names one (`project`, which
-// it may add): a session sminos lists in two projects is listed under the first.
+// `words?` names the project whose log holds the event (`project`, required): sminos's `say` copies one message into
+// two projects' logs, so the session's member's project is no stand-in. One without a project is `refuse`.
 import { createHash } from 'node:crypto';
 import { eventSigningInput, isHubWriter, isIsoMillis, isLogSeq, isSig, machineNameKey, verifyEvent, writerMachine, type Certificates, type LogEventV2, type OrgState } from 'org-protocol';
 import { rankAtLeast, sessionRank } from '../grades';
@@ -44,13 +44,14 @@ export type WordsContext = {
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 export async function decideWords(ctx: WordsContext, frame: Record<string, unknown>): Promise<Verdict> {
+  const project = frame.project;
+  if (typeof project !== 'string' || project === '') return 'refuse';
   const member = typeof frame.session === 'string' ? ctx.members.get(frame.session) : null;
   if (member === null) return 'peer';
   const event = frame.event;
   if (!isObject(event) || typeof event.writer !== 'string' || !isLogSeq(event.seq)) return 'refuse';
   const org = ctx.org();
   if (org === null) return 'peer';
-  const project = typeof frame.project === 'string' ? frame.project : member.project;
   const record = ctx.members.recordOf(member.session);
   const owners = await ctx.machineOwners();
   const name = writerMachine(event.writer);

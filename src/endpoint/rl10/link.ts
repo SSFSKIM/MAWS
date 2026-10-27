@@ -6,15 +6,16 @@
 // The hello. sminos's first line carries the token; its `policy` is taken only while the endpoint holds none. The
 // welcome answers with the machine's identity under the head (`org`, `hub`, `name`, `former` as names, `ref`,
 // `enrolled`), the policy and the head's version; then the head's whole revocation set, the org directory, and, while
-// no legacy key is held, `legacy-key?`. After each welcome sminos restates its session-lane state whole, which replaces
-// what was held (members.ts); the endpoint restates its revocation set and directory whenever the head changes them.
+// no legacy key is held, `legacy-key?`. After each welcome sminos restates its session-lane state whole and closes it
+// with `restated {}`, and the restatement replaces what was held (members.ts); the endpoint restates its revocation
+// set and directory whenever the head changes them.
 //
 // What sminos sends:
 //   - the log plane (`hello`, `events`, `rejected`), relayed to RL1 (log-relay.ts);
-//   - the session lane, which stops here and never reaches the hub: `member` (members.ts), `pending` (M3's notify
-//     counts), and `session` messages of every DX4 kind: a `machine` presence gives its project's checkouts, a sub-less
-//     `host` is a to-human event (M3's `wrote`, once per `(writer, seq)`, durably), and every message goes to the
-//     session listeners (M8's subscriptions);
+//   - the session lane, which stops here and never reaches the hub: `member` and `restated` (members.ts), `pending`
+//     (M3's notify counts), and `session` messages of every DX4 kind: a `machine` presence gives its project's
+//     checkouts, a sub-less `host` is a to-human event (M3's `wrote`, once per `(writer, seq)`, durably), and every
+//     message goes to the session listeners (M8's subscriptions);
 //   - `words?`, answered `words` (words.ts); `policy-set`, the policy changed and restated; `legacy-key`, kept;
 //   - `rpc-result`, handed to the result listeners (M7) and acknowledged `rpc-ack {opId, nonce}`; `queried` and
 //     `tombstoned`, the answers to `query` and `tombstone`.
@@ -169,9 +170,14 @@ export class Rl10 {
     if (this.#welcomed) this.#server.current?.send(frame);
   }
 
-  /** A new head or certificate set: the revocation set and the directory restated where they changed. */
+  /**
+   * A new head or certificate set: the revocation set and the directory restated where they changed (first, so a
+   * revocation reaches sminos before what the new head lets through), then the arriving events held for it judged again.
+   */
   async adopted(): Promise<void> {
-    if (this.#welcomed) await this.#restate(false);
+    if (!this.#welcomed) return;
+    await this.#restate(false);
+    await this.relay.retry();
   }
 
   /** An RL1 connection was welcomed (the log relay checks what the hub holds). */
@@ -313,6 +319,7 @@ export class Rl10 {
 
   #closed(): void {
     this.#welcomed = false;
+    this.members.stop();
     this.#told = null;
     this.relay.closeAll();
     for (const waiting of [this.#queries, this.#tombstones]) {
@@ -349,6 +356,8 @@ export class Rl10 {
         return this.relay.rejected(frame);
       case 'member':
         return this.members.member(frame);
+      case 'restated':
+        return this.members.restated();
       case 'pending':
         return this.#pending(frame);
       case 'session':
@@ -448,11 +457,13 @@ export class Rl10 {
     this.#ctx.policy.set(change);
   }
 
-  #legacyKey(frame: Frame): void {
+  async #legacyKey(frame: Frame): Promise<void> {
     const identity = this.#ctx.identity();
     if (identity === null) return;
     const kept = this.legacy.take(frame, identity.org);
     this.#ctx.log(kept === 'kept' ? 'endpoint: the legacy org key is kept (handed over by sminos)' : `endpoint: a legacy org key sminos sent was not kept (${kept})`);
+    // v1 events held for want of the key can be checked now.
+    if (kept === 'kept') await this.relay.retry();
   }
 }
 

@@ -27,6 +27,8 @@ let stopHub: () => Promise<void>;
 let a1: TestDevice;
 let b1: TestDevice;
 let b2: TestDevice;
+/** B's third device, endorsed by b2, which the head holds only from the `add-device` scene on. */
+let b3: TestDevice;
 let recovery: SigningKey;
 let head: SignedOrgState;
 let A: string;
@@ -79,7 +81,8 @@ beforeAll(async () => {
   a1 = await newDevice('a1');
   b1 = await newDevice('b1');
   b2 = await endorsed(ORG, B, await newDevice('b2'), b1);
-  Object.assign(devices, { b1, b2 });
+  b3 = await endorsed(ORG, B, await newDevice('b3'), b2);
+  Object.assign(devices, { b1, b2, b3 });
   recovery = await generateSigningKey();
   head = await genesis(ORG, A, a1, recovery);
   expect((await hub.fetchAs(ADMIN, '/api/org/state', { body: head })).status).toBe(201);
@@ -137,6 +140,7 @@ async function runBindings(): Promise<Record<string, unknown>> {
     'member:B': B,
     'kid:b1': await keyId(b1.device.channelPub),
     'kid:b2': await keyId(b2.device.channelPub),
+    'kid:b3': await keyId(b3.device.channelPub),
     'kid:b1-step': revoked.find((r) => 'key' in r.holder && r.holder.key === 'step-up')?.keyId,
     'kid:machine': machineKey.keyId,
     'project:machine': machineProjectId(ORG, NAME),
@@ -167,7 +171,7 @@ const scenes = async (step: { scene: string } & Record<string, unknown>, binding
       const entry = await until(() => {
         const held = listings()[step.session as string];
         return held !== undefined && isListingGone(held.record.body) === (step.scene === 'withdrawn') ? held : null;
-      }, `${step.scene} ${String(step.session)}`);
+      }, `${step.scene} ${String(step.session)}`, (step.within as number | undefined) ?? 10_000);
       await until(() => toHub.some((f) => f.t === 'listing' && JSON.stringify(f.record) === JSON.stringify(entry.record)), 'the listing sent the hub');
       return;
     }
@@ -273,8 +277,15 @@ const scenes = async (step: { scene: string } & Record<string, unknown>, binding
       bindings.token = rl10Info().token;
       return;
     }
-    case 'restated':
-      return endpoint.rl10.members.settle();
+    case 'not-rejected':
+      expect(toHub.some((f) => f.t === 'rejected' && (f.event as { writer: string; seq: number } | null)?.seq === step.seq && (f.event as { writer: string }).writer === step.writer)).toBe(false);
+      return;
+    case 'add-device': {
+      const device = devices[step.device as string];
+      await accept((s) => void s.members.find((m) => m.id === B)!.devices.push(device.device));
+      await until(() => endpoint.status().stateVersion === head.state.version, 'the new head');
+      return;
+    }
     case 'revoke': {
       const device = devices[step.device as string];
       const revoked = await revokedDevice(B, device.device);

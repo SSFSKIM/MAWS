@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { revocationSet } from '../../../src/endpoint/rl10/org-directory';
 import { InboundIndex, INBOUND_KEPT_MS } from '../../../src/endpoint/rl10/inbound-index';
+import { HOLD_MAX, HOLD_MS, LogRelay, type RelayContext } from '../../../src/endpoint/rl10/log-relay';
 import { Rl10Server, socketPath, type Frame } from '../../../src/endpoint/rl10/server';
 import { createdOf, SignatureLedger, uploadForm } from '../../../src/endpoint/rl10/signature-ledger';
 import { genesis, memberId, newDevice, revokedDevice, successor } from '../org-fixtures';
@@ -108,6 +109,56 @@ describe('the revocation set', () => {
     // B keeps b2: naming B would revoke b2's words too.
     expect(set.members).toEqual([C]);
     expect(set.keys).toEqual([...revokedB1, ...revokedC1].map((r) => r.keyId).sort());
+  });
+});
+
+describe('the hold', () => {
+  const P = '7d2b9c40-1f3e-4a6b-8c5d-9e0f1a2b3c4d';
+  const event = (seq: number) => ({ ts: '2026-10-27T18:00:00.000Z', writer: 'hub/0f1e2d3c4b5a69788796a5b4c3d2e1f0', seq, kind: 'human', text: 'hi' });
+  /** A relay with no head yet: every arriving event waits on one. */
+  function relay() {
+    let now = Date.parse('2026-10-27T18:00:00.000Z');
+    const toSminos: Frame[] = [];
+    const toHub: Frame[] = [];
+    const lines: string[] = [];
+    const ctx = {
+      org: () => null,
+      key: () => null,
+      hub: { openProject: () => () => {}, send: (f: Frame) => (toHub.push(f), true) },
+      toSminos: (f: Frame) => void toSminos.push(f),
+      opened: () => {},
+      now: () => now,
+      log: (line: string) => void lines.push(line),
+    } as unknown as RelayContext;
+    const r = new LogRelay(ctx);
+    r.hello({ t: 'hello', project: P, name: 'maws', have: {} });
+    return { r, toSminos, toHub, lines, later: (ms: number) => (now += ms) };
+  }
+
+  it('holds what no head can judge yet: nothing down, nothing rejected, nothing spent; let go once held past HOLD_MS', async () => {
+    const { r, toSminos, toHub, lines, later } = relay();
+    await r.fromHub({ t: 'events', project: P, events: [event(1), event(2)] });
+    expect(r.holding).toBe(2);
+    expect(toSminos).toEqual([]);
+    expect(toHub).toEqual([]);
+    await r.retry();
+    expect(r.holding).toBe(2);
+    later(HOLD_MS + 1);
+    await r.retry();
+    expect(r.holding).toBe(0);
+    expect(toSminos).toEqual([]);
+    expect(toHub).toEqual([]);
+    expect(lines.filter((l) => l.includes('let go of'))).toHaveLength(2);
+  });
+
+  it('keeps at most HOLD_MAX, the oldest let go first; the same position held once; all gone when sminos goes', async () => {
+    const { r } = relay();
+    await r.fromHub({ t: 'events', project: P, events: Array.from({ length: HOLD_MAX + 5 }, (_, i) => event(i + 1)) });
+    expect(r.holding).toBe(HOLD_MAX);
+    await r.fromHub({ t: 'events', project: P, events: [event(HOLD_MAX + 5)] });
+    expect(r.holding).toBe(HOLD_MAX);
+    r.closeAll();
+    expect(r.holding).toBe(0);
   });
 });
 

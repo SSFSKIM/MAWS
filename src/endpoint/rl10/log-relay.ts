@@ -20,10 +20,21 @@
 //     goes down as verified owners;
 //   - a v1-only event (a `mac`, no `sig`) from a machine not yet moved, when DX1's code verifies under the legacy key,
 //     with `signer: {kind: 'legacy'}`.
-// Anything else is refused up the log plane as DX2's `rejected` and never reaches sminos. The hub's Rejection takes
-// four reasons, so the endpoint's verdict rides in its message: a forged or unverifiable event `bad-code`, a replay
-// `seen-nonce`, an own-writer event that is no echo `conflict`, a shape `bad-shape`.
-//
+// What can't go down is judged by whether a later head could change the verdict.
+//   - Final (no later head can change it): a bad shape, an own-writer event that is no echo, a replay, a v2 signature
+//     that fails under a key the head knows (or whose key the head has revoked, or retired before its `created`), a
+//     v1 code that fails under the held legacy key. It is refused up the log plane as DX2's `rejected`, and its
+//     position goes down to sminos as `spent {project, writer, seq, reason}`, in stream order where the event would
+//     have gone (the `events` frame split around it), with no content: sminos records the position as one it refused
+//     itself, so the writer's later events aren't held behind it. The hub's Rejection takes four reasons, so the
+//     endpoint's verdict rides in its message: a forged or unverifiable event `bad-code`, a replay `seen-nonce`, an
+//     own-writer event that is no echo `conflict`, a shape `bad-shape`.
+//   - Not yet decidable (a signer or key the endpoint's head doesn't know, as when it is behind the hub's; no head yet;
+//     a v1 event while no legacy key is held): held, neither rejected nor spent, and verified again each time the head
+//     or the certificates move or the legacy key arrives (`retry`). The hold is bounded (`HOLD_MAX` events, each
+//     `HOLD_MS`); one let go is only forgotten, and comes again from the hub at sminos's next log-plane hello, since
+//     sminos's `have` stops below it.
+
 // Lost on the way. RL10 takes what is written, but RL1 can be down while sminos uploads (its first `have` came on an
 // earlier RL1 connection), and what the hub never took would be lost: sminos's upload cursor only moves forward. So the
 // first `have` of each project after an RL1 welcome is compared with what the ledger signed, and each own writer the
@@ -59,6 +70,17 @@ export type Signer = { kind: 'device'; member: string; device: string; keyId: st
 export type Wrapped = { event: Record<string, unknown>; signer: Signer; owners?: Array<{ id: string; email: string | null }> };
 /** DX2's `rejected` up: the event named only by what it carried. */
 export type Rejected = { t: 'rejected'; project: string; event: { writer: string; seq: number } | null; reason: 'bad-code' | 'seen-nonce' | 'bad-shape' | 'conflict'; message: string };
+/** Why a position was spent (`spent`'s `reason`): the endpoint's own words for a final verdict. */
+export type SpentReason = 'bad-shape' | 'conflict' | 'replayed' | 'bad-signature' | 'revoked' | 'expired';
+/** What the endpoint makes of an arriving event (see the header). */
+type Judged =
+  | { deliver: Wrapped }
+  | { spent: SpentReason; reason: Rejected['reason']; message: string }
+  | { hold: string };
+
+/** How many arriving events the relay holds at most, and how long each, while their verdict waits on the head. */
+export const HOLD_MAX = 1000;
+export const HOLD_MS = 3_600_000;
 
 export type RelayContext = {
   /** The head and certificates, the machine's ref and its current name; null while none is held. */
@@ -89,6 +111,8 @@ export class LogRelay {
   readonly #fresh = new Set<string>();
   /** Each machine name's newest relayed event time (the org directory's `seen`). */
   readonly #seen = new Map<string, string>();
+  /** The arriving events held for a head that can judge them, by project, then `writer\nseq`, in arrival order. */
+  readonly #held = new Map<string, Map<string, { event: unknown; since: number }>>();
 
   constructor(ctx: RelayContext) {
     this.#ctx = ctx;
@@ -146,6 +170,24 @@ export class LogRelay {
     for (const { close } of this.#projects.values()) close();
     this.#projects.clear();
     this.#fresh.clear();
+    this.#held.clear();
+  }
+
+  /** The head, the certificates or the legacy key moved: every held event judged again, in the order it arrived. */
+  async retry(): Promise<void> {
+    for (const [project, held] of [...this.#held]) {
+      const prior = new Map(held);
+      held.clear();
+      await this.#arrived(project, [...prior.values()].map((h) => h.event), (key) => prior.get(key)?.since);
+      if (this.#held.get(project)?.size === 0) this.#held.delete(project);
+    }
+  }
+
+  /** How many arriving events are held now. */
+  get holding(): number {
+    let n = 0;
+    for (const held of this.#held.values()) n += held.size;
+    return n;
   }
 
   /** An RL1 connection was welcomed: each project's first `have` on it is checked against the ledger. */
@@ -210,56 +252,105 @@ export class LogRelay {
     }
   }
 
-  async #arrived(project: string, events: unknown): Promise<void> {
+  /** `since` gives a held event's first hold time, when it is judged again. */
+  async #arrived(project: string, events: unknown, since?: (key: string) => number | undefined): Promise<void> {
     if (!Array.isArray(events)) return;
-    const down: Wrapped[] = [];
+    let down: Wrapped[] = [];
+    const flush = () => {
+      if (down.length > 0) this.#ctx.toSminos({ t: 'events', project, events: down });
+      down = [];
+    };
     for (const e of events) {
-      const verdict = await this.#verify(project, e);
-      if ('event' in verdict) down.push(verdict);
-      else {
-        const at = position(e);
-        this.#ctx.log(`endpoint: refused an event the hub sent in project ${project}${at === null ? '' : ` at ${at.writer}:${at.seq}`}: ${verdict.message}`);
-        this.#ctx.hub.send({ t: 'rejected', project, event: at, reason: verdict.reason, message: verdict.message } satisfies Rejected);
+      const judged = await this.#verify(project, e);
+      const at = position(e);
+      if ('deliver' in judged) {
+        down.push(judged.deliver);
+      } else if ('hold' in judged) {
+        if (at !== null) this.#hold(project, at, e, judged.hold, since?.(`${at.writer}\n${at.seq}`));
+      } else {
+        this.#ctx.log(`endpoint: refused an event the hub sent in project ${project}${at === null ? '' : ` at ${at.writer}:${at.seq}`}: ${judged.message}`);
+        this.#ctx.hub.send({ t: 'rejected', project, event: at, reason: judged.reason, message: judged.message } satisfies Rejected);
+        if (at !== null && isLogSeq(at.seq)) {
+          flush();
+          this.#ctx.toSminos({ t: 'spent', project, writer: at.writer, seq: at.seq, reason: judged.spent });
+        }
       }
     }
-    if (down.length > 0) this.#ctx.toSminos({ t: 'events', project, events: down });
+    flush();
   }
 
-  async #verify(project: string, e: unknown): Promise<Wrapped | { reason: Rejected['reason']; message: string }> {
+  /** An arriving event kept for a head that can judge it (see the header), within the hold's bounds. */
+  #hold(project: string, at: { writer: string; seq: number }, event: unknown, why: string, first?: number): void {
+    const now = this.#ctx.now();
+    let held = this.#held.get(project);
+    if (held === undefined) this.#held.set(project, (held = new Map()));
+    const key = `${at.writer}\n${at.seq}`;
+    const since = first ?? held.get(key)?.since ?? now;
+    held.delete(key);
+    if (now - since > HOLD_MS) {
+      this.#ctx.log(`endpoint: let go of ${at.writer}:${at.seq} in project ${project}, held ${Math.round((now - since) / 60_000)} min (${why}); the hub sends it again at sminos's next hello`);
+      return;
+    }
+    held.set(key, { event, since });
+    if (since === now) this.#ctx.log(`endpoint: holding ${at.writer}:${at.seq} in project ${project} until the head can judge it (${why})`);
+    while (this.holding > HOLD_MAX) {
+      const [oldestProject, oldest] = [...this.#held].find(([, h]) => h.size > 0) ?? [];
+      const first = oldest?.keys().next().value;
+      if (oldestProject === undefined || oldest === undefined || first === undefined) break;
+      oldest.delete(first);
+      this.#ctx.log(`endpoint: let go of ${first.replace('\n', ':')} in project ${oldestProject}: more than ${HOLD_MAX} events held`);
+    }
+  }
+
+  async #verify(project: string, e: unknown): Promise<Judged> {
     if (!isObject(e) || typeof e.writer !== 'string' || !isLogSeq(e.seq) || typeof e.ts !== 'string' || typeof e.kind !== 'string') {
-      return { reason: 'bad-shape', message: 'not a log event (writer, seq, ts, kind)' };
+      return { spent: 'bad-shape', reason: 'bad-shape', message: 'not a log event (writer, seq, ts, kind)' };
     }
     const org = this.#ctx.org();
-    if (org === null) return { reason: 'bad-code', message: 'unverifiable: the endpoint holds no org state' };
+    if (org === null) return { hold: 'the endpoint holds no org state yet' };
     const event = e as LogEventV2 & { seq: number; ts: string };
     const name = writerMachine(event.writer);
     if (name !== null && this.#own(org.head, org.ref, name)) return this.#echo(project, event, name, org);
     if (isSig(event.sig)) {
       const now = new Date(this.#ctx.now());
       const verdict = await verifyEvent({ org: org.head.org, project }, org.head, event, org.certificates, now);
-      if (!verdict.ok) return { reason: 'bad-code', message: `its v2 signature does not verify (${verdict.code})` };
+      if (!verdict.ok) {
+        switch (verdict.code) {
+          case 'unknown-signer':
+            return { hold: 'its signer is not in the head this endpoint holds' };
+          case 'revoked':
+            return { spent: 'revoked', reason: 'bad-code', message: 'revoked: the head revokes its signing key' };
+          case 'expired':
+            return { spent: 'expired', reason: 'bad-code', message: 'expired: its key was retired before its created' };
+          case 'bad-signature':
+            return { spent: 'bad-signature', reason: 'bad-code', message: 'forged: its v2 signature does not verify under the key it names' };
+          default:
+            return { spent: 'bad-shape', reason: 'bad-shape', message: `its v2 signature can't be checked (${verdict.code})` };
+        }
+      }
+      const signer = await signerOf(org.head, org.certificates, event);
+      if (signer === null) return { hold: 'its signer could not be named under the head this endpoint holds' };
       const content = sha256(eventSigningInput({ org: org.head.org, project }, event));
       const seen = this.#ctx.index.seen(project, content, event.writer, event.seq);
-      if (seen.kind === 'replayed') return { reason: 'seen-nonce', message: `replayed: its signed content arrived at ${seen.writer}:${seen.seq} before` };
+      if (seen.kind === 'replayed') return { spent: 'replayed', reason: 'seen-nonce', message: `replayed: its signed content arrived at ${seen.writer}:${seen.seq} before` };
       if (seen.kind === 'new') this.#ctx.index.record(project, content, event.writer, event.seq);
-      const signer = await signerOf(org.head, org.certificates, event);
-      if (signer === null) return { reason: 'bad-code', message: 'its signer could not be named' };
       if (name !== null && isIsoMillis(event.created)) this.#saw(name, event.created);
       const owners = await verifiedOwners(event, org.head, org.certificates, this.#ctx.log);
-      return { event, signer, ...(owners === undefined ? {} : { owners }) };
+      return { deliver: { event, signer, ...(owners === undefined ? {} : { owners }) } };
     }
     if (isObject(event.mac)) {
+      if (!this.#ctx.legacy.held) return { hold: 'a v1 event, and the endpoint holds no legacy key to check it yet' };
       if (await this.#ctx.legacy.verifies(project, event)) {
         if (name !== null) this.#saw(name, event.ts);
-        return { event, signer: { kind: 'legacy' } };
+        return { deliver: { event, signer: { kind: 'legacy' } } };
       }
-      return { reason: 'bad-code', message: this.#ctx.legacy.held ? 'its DX1 code does not verify under the legacy key' : 'a v1 event, and the endpoint holds no legacy key to check it' };
+      return { spent: 'bad-signature', reason: 'bad-code', message: 'forged: its DX1 code does not verify under the legacy key' };
     }
-    return { reason: 'bad-shape', message: 'it carries neither a sig nor a mac' };
+    return { spent: 'bad-shape', reason: 'bad-shape', message: 'it carries neither a sig nor a mac' };
   }
 
   /** An event under one of this machine's own writers: only the echo of what the endpoint signed at its position. */
-  async #echo(project: string, event: LogEventV2 & { seq: number }, name: string, org: { head: OrgState; certificates: Certificates; ref: string }): Promise<Wrapped | { reason: Rejected['reason']; message: string }> {
+  async #echo(project: string, event: LogEventV2 & { seq: number }, name: string, org: { head: OrgState; certificates: Certificates; ref: string }): Promise<Judged> {
     const held = this.#ctx.ledger.get(project, event.writer, event.seq);
     const form = uploadForm(event);
     let same = false;
@@ -270,9 +361,9 @@ export class LogRelay {
         same = false;
       }
     }
-    if (!same) return { reason: 'conflict', message: `not what this machine signed at ${event.writer}:${event.seq}: only this machine writes its own writers` };
+    if (!same) return { spent: 'conflict', reason: 'conflict', message: `not what this machine signed at ${event.writer}:${event.seq}: only this machine writes its own writers` };
     const owners = await verifiedOwners(event, org.head, org.certificates, this.#ctx.log);
-    return { event, signer: { kind: 'machine', ref: org.ref, name, keyId: event.sig.kid }, ...(owners === undefined ? {} : { owners }) };
+    return { deliver: { event, signer: { kind: 'machine', ref: org.ref, name, keyId: event.sig.kid }, ...(owners === undefined ? {} : { owners }) } };
   }
 
   /** Whether `name` is one of the names `machineNames` binds to this machine's ref. */

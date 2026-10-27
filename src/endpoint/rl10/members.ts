@@ -8,16 +8,13 @@
 // its `session`, matched with the `engineSessionId` `engine.sessions` reports for it (through `dispatch`); a lane B
 // session is listed under its `appSessionId` once joined, the id a device subscribes with, and not before.
 //
-// sminos restates the whole set after each RL10 welcome, and the set replaces what was held: a session held before the
-// welcome that isn't restated within the restatement window (`RESTATE_MS`, from the welcome) left while sminos or the
-// endpoint was away, and is withdrawn as if it had sent `gone` (M3's note: its listing would otherwise stay at the hub
-// for good). RL10 has no end-of-restatement marker; the window is the bound.
+// sminos restates the whole set after each RL10 welcome and closes the restatement with `restated {}`, and the set
+// replaces what was held: a session held before the welcome, or listed at the hub, that the restatement left out left
+// while sminos or the endpoint was away, and is withdrawn as if it had sent `gone` (M3's note: its listing would
+// otherwise stay at the hub for good). A connection that ends before its `restated` withdraws nothing.
 import type { EndpointServices } from '../services';
 import type { SessionReport } from '../listings';
 import type { Access, CheckoutSource, RecordSource, SessionRecord, SessionTarget, Share } from '../sources';
-
-/** How long after a welcome a session held from before must be restated, or be taken as gone. */
-export const RESTATE_MS = 15_000;
 
 /** A `member` frame as RL10 carries it (Interfaces §D). */
 export type Member = {
@@ -86,9 +83,8 @@ export class Members implements RecordSource, CheckoutSource {
   readonly #apps = new Map<string, string>();
   readonly #checkouts = new Map<string, string[]>();
   readonly #listeners = new Set<(target: SessionTarget) => void>();
-  /** The sessions held from before the latest welcome, not restated since; null outside a restatement window. */
+  /** The sessions held from before the latest welcome, not restated since; null outside a restatement. */
   #unrestated: Set<string> | null = null;
-  #window: ReturnType<typeof setTimeout> | null = null;
 
   constructor(ctx: MembersContext) {
     this.#ctx = ctx;
@@ -96,21 +92,13 @@ export class Members implements RecordSource, CheckoutSource {
 
   // ---- What RL10 says ---------------------------------------------------------------------------------------------
 
-  /**
-   * A welcome: every session held now, and every session listed at the hub, must be restated within `RESTATE_MS`, or
-   * it is taken as gone. `windowMs` is the suites'.
-   */
-  welcome(windowMs = RESTATE_MS): void {
+  /** A welcome: every session held now, and every session listed at the hub, is to be restated before `restated`. */
+  welcome(): void {
     this.#unrestated = new Set([...this.#members.keys(), ...this.#ctx.listed()]);
-    if (this.#window !== null) clearTimeout(this.#window);
-    this.#window = setTimeout(() => void this.settle(), windowMs);
-    this.#window.unref?.();
   }
 
-  /** The restatement window closed: what wasn't restated left. */
-  async settle(): Promise<void> {
-    if (this.#window !== null) clearTimeout(this.#window);
-    this.#window = null;
+  /** sminos's `restated`: what the restatement left out left. Nothing outside a restatement (a second `restated`). */
+  async restated(): Promise<void> {
     const left = this.#unrestated ?? new Set<string>();
     this.#unrestated = null;
     for (const session of left) await this.gone(session);
@@ -211,9 +199,8 @@ export class Members implements RecordSource, CheckoutSource {
     return this.projectOfCheckout(path) !== null;
   }
 
+  /** The connection ended (or the endpoint stops): a restatement it left unfinished withdraws nothing. */
   stop(): void {
-    if (this.#window !== null) clearTimeout(this.#window);
-    this.#window = null;
     this.#unrestated = null;
   }
 
