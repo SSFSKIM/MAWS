@@ -371,7 +371,13 @@ test('the slash palette opens above a started session’s composer and moves not
     await expect(page.locator('[data-region="sidebar"] [data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setBounds({ x: 72, y: 48, width: 1200, height: 440 }));
     await (await sidebarRow(page, NORTH)).click();
-    await expect(page.locator('[data-region="main"]').getByRole('textbox', { name: 'Message' })).toBeVisible();
+    const composer = page.locator('[data-region="main"]').getByRole('textbox', { name: 'Message' });
+    await expect(composer).toBeVisible();
+    // The pointer leaves the row it clicked: resting there, it opens the row's hover card 300 ms later, which on a slow
+    // runner stands over the composer when the palette's check clicks it, and never closes while the pointer stays.
+    const box = (await composer.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await expect(page.locator('[data-hover-card]')).toHaveCount(0);
     await slashPaletteMovesNothing(page, 'a started session');
     expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
   } finally {
@@ -823,6 +829,10 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     const stripBox = (await strip.boundingBox())!;
     await drag(page, await sidebarRow(page, 'Charter + research'), { x: stripBox.x + stripBox.width - 8, y: stripBox.y + stripBox.height / 2 });
     await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'the dropped row opens a tab' }).toEqual([three[0], three[2], 'Charter + research']);
+    // The drag's press left keyboard focus on the sidebar row. The palette below hands focus back where it found it when
+    // it closes after a keystroke, where it reads as the keyboard's and opens the row's hover card 300 ms later: on a slow
+    // runner over the next palette, which then loses its Escape to the card. The dropped session's tab takes the focus.
+    await page.getByRole('tab', { name: 'Charter + research' }).focus();
   });
 
   await test.step('Item 8: the ⌘K palette', async () => {
