@@ -1,5 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { baselineProblems, cpuSeconds, DAEMON_IDLE_BASELINE, DAEMON_IDLE_BOUND, IDLE_RUN, idleBound, idleLine, invalidReasons, measured, median } from './daemon-idle';
+import {
+  baselineProblems,
+  cpuSeconds,
+  DAEMON_IDLE_BASELINE,
+  DAEMON_IDLE_BOUND,
+  DAEMON_IDLE_RUNTIME_FLOOR,
+  floorLine,
+  footprints,
+  IDLE_RUN,
+  idleBound,
+  idleLine,
+  invalidReasons,
+  measured,
+  median,
+  readerMismatches,
+  topMem,
+} from './daemon-idle';
 
 describe('the idle statistics (P5 O2, M1)', () => {
   it('takes the median: the middle sample of an odd count, the mean of the middle two of an even one', () => {
@@ -43,15 +59,80 @@ describe('the idle statistics (P5 O2, M1)', () => {
     expect(measured(processes, root, ['claude', 'maws-supervisor']).map((p) => p.pid)).toEqual([11, 12]); // M9 adds names
   });
 
-  it('calls a run invalid when the load reaches 5, when a measured process is gone before the window ends, with nothing measured, or when the kept session ended, saying which', () => {
+  it('calls a run invalid when the load reaches 5, when a measured process is gone before the window ends, with nothing measured, when the kept session ended, or when the footprint readers disagree, saying which', () => {
     const loads = Array.from({ length: 21 }, () => 1.2);
-    const valid = { loads, measured: ['maws-supervisor'], lost: [], sessionEnded: false };
+    const valid = { loads, measured: ['maws-supervisor'], lost: [], sessionEnded: false, mismatches: [] };
     expect(invalidReasons(valid)).toEqual([]);
     expect(invalidReasons({ ...valid, loads: [...loads.slice(1), 4.99] })).toEqual([]);
     expect(invalidReasons({ ...valid, loads: [...loads.slice(2), 5, 6.234] })).toEqual(['the 1-minute load reached 6.2 (a valid run stays under 5 throughout)']);
     expect(invalidReasons({ ...valid, lost: [{ pid: 11, argv0: 'maws-supervisor', atS: 270 }] })).toEqual([`maws-supervisor pid 11 was gone at 270 s of the ${IDLE_RUN.windowS} s window`]);
     expect(invalidReasons({ ...valid, measured: [] })).toEqual(['no process of the profile to measure']);
     expect(invalidReasons({ ...valid, sessionEnded: true })).toEqual(['the kept session ended before the window did (the scene measures one held idle session)']);
+    expect(invalidReasons({ ...valid, mismatches: ['top printed no MEM for maws-supervisor pid 11 (the footprint reader read 50000 KiB)'] })).toEqual([
+      'top printed no MEM for maws-supervisor pid 11 (the footprint reader read 50000 KiB)',
+    ]);
+  });
+});
+
+describe('the physical footprint, read by pid without privilege (P5 Decision Log 48)', () => {
+  it("reads the proc_pid_rusage reader's lines: the footprint and the resident size in KiB, or the errno for a pid it could not read", () => {
+    const text = '11 51200000 79425536\n12 errno 3\n13 1023 2048\n';
+    expect(footprints(text, [11, 12, 13])).toEqual(
+      new Map([
+        [11, { footprintKiB: 50_000, residentKiB: 77_564 }],
+        [12, { errno: 3 }],
+        [13, { footprintKiB: 1023 / 1024, residentKiB: 2 }],
+      ]),
+    );
+  });
+
+  it('refuses reader output that misses a pid asked for or says something else, quoting it', () => {
+    expect(() => footprints('11 51200000 79425536\n', [11, 12])).toThrow('the footprint reader printed no line for pid 12: "11 51200000 79425536\\n"');
+    expect(() => footprints('11 lots 79425536\n', [11])).toThrow('the footprint reader printed no line for pid 11: "11 lots 79425536\\n"');
+  });
+
+  it("reads top's MEM column, each value with its unit and the resolution it prints to, past top's header and its change markers", () => {
+    const text = [
+      'Processes: 642 total, 11 running, 3 stuck, 628 sleeping, 4901 threads ',
+      '2026/10/27 03:37:13',
+      'Load Avg: 1.93, 1.66, 1.63 ',
+      'PhysMem: 31G used (11G wired, 7961M compressor), 119M unused.',
+      '',
+      'PID    MEM',
+      '92242  12M',
+      '1      9985K',
+      '7      26M+',
+      '8      2G-',
+      '9      512B',
+      '10     1.5G',
+      '',
+    ].join('\n');
+    expect(topMem(text)).toEqual(
+      new Map([
+        [92242, { kiB: 12_288, resolutionKiB: 1_024, text: '12M' }],
+        [1, { kiB: 9_985, resolutionKiB: 1, text: '9985K' }],
+        [7, { kiB: 26_624, resolutionKiB: 1_024, text: '26M+' }],
+        [8, { kiB: 2 * 1_048_576, resolutionKiB: 1_048_576, text: '2G-' }],
+        [9, { kiB: 0.5, resolutionKiB: 1 / 1_024, text: '512B' }],
+        [10, { kiB: 1.5 * 1_048_576, resolutionKiB: 104_857.6, text: '1.5G' }],
+      ]),
+    );
+    expect(topMem('PID    MEM\n\n')).toEqual(new Map()); // top prints the header alone for a pid that is gone
+    expect(() => topMem('PID    MEM\n11     12Q\n')).toThrow('not a top MEM row: "11     12Q"');
+    expect(() => topMem('11  12M\n')).toThrow('top printed no PID MEM header: "11  12M\\n"');
+  });
+
+  it("agrees when top's value is within its printed resolution and 2% of the reader's, and says which process disagrees otherwise", () => {
+    const supervisor = { pid: 11, argv0: 'maws-supervisor' };
+    const top = (text: string) => topMem(`PID MEM\n11 ${text}\n`).get(11)!;
+    expect(readerMismatches([{ ...supervisor, footprintKiB: 12_449, top: top('12M') }])).toEqual([]); // 12.16 MiB prints as 12M
+    expect(readerMismatches([{ ...supervisor, footprintKiB: 9_985, top: top('9985K') }])).toEqual([]);
+    expect(readerMismatches([{ ...supervisor, footprintKiB: 60_000, top: top('60M') }])).toEqual([]); // 1440 KiB apart: past top's MiB, within it and 2%
+    expect(readerMismatches([{ ...supervisor, footprintKiB: 50_000, top: top('52M') }])).toEqual([
+      'the footprint readers disagree for maws-supervisor pid 11: proc_pid_rusage 50000 KiB, top 52M (53248 KiB), beyond the 2024 KiB tolerance',
+    ]);
+    expect(readerMismatches([{ ...supervisor, footprintKiB: 50_000, top: null }])).toEqual(['top printed no MEM for maws-supervisor pid 11 (the footprint reader read 50000 KiB)']);
+    expect(readerMismatches([])).toEqual([]);
   });
 });
 
@@ -61,44 +142,60 @@ describe('the window', () => {
   });
 });
 
-describe('the baseline and the bound (acceptance 7; P5 acceptance 14)', () => {
-  const baseline = { commit: '1a2b3c4d5', runs: ['41000000001', '41000000002', '41000000003'], rssKiB: 98_304, cpuS: 0.41 };
+describe('the baseline, the runtime floor and the bound (acceptance 7; P5 acceptance 14, Decision Logs 48 and 57)', () => {
+  const baseline = { commit: '1a2b3c4d5', runs: ['41000000001', '41000000002', '41000000003'], footprintKiB: 98_304, cpuS: 0.41 };
+  const floor = { commit: '1a2b3c4d5', runs: ['41000000004', '41000000005', '41000000006'], footprintKiB: 20_480, electron: '44.4.5' };
 
-  it("is 1.5 times the baseline's RSS and its CPU plus 1.0 s per 600 s", () => {
-    expect(idleBound(baseline)).toEqual({ rssKiB: 147_456, cpuS: 1.41 });
-    expect(idleBound({ ...baseline, rssKiB: 98_305, cpuS: 2.07 })).toEqual({ rssKiB: 147_457, cpuS: 3.07 }); // whole KiB, never above 1.5x
-    expect(idleBound(baseline, 1_200)).toEqual({ rssKiB: 147_456, cpuS: 2.41 }); // the allowance is per 600 s
+  it("holds the daemon shape's processes together within 1.5 times the supervisor's footprint and its CPU plus 1.0 s per 600 s", () => {
+    expect(idleBound(baseline)).toEqual({ footprintKiB: 147_456, cpuS: 1.41 });
+    expect(idleBound({ ...baseline, footprintKiB: 98_305, cpuS: 2.07 })).toEqual({ footprintKiB: 147_457, cpuS: 3.07 }); // whole KiB, never above 1.5x
+    expect(idleBound(baseline, 1_200)).toEqual({ footprintKiB: 147_456, cpuS: 2.41 }); // the allowance is per 600 s
   });
 
-  it('is derived from the recorded baseline, and is none while none is recorded', () => {
-    expect(DAEMON_IDLE_BOUND).toEqual(DAEMON_IDLE_BASELINE === null ? null : idleBound(DAEMON_IDLE_BASELINE));
+  it('is derived from the recorded baseline alone: 96721 KiB and 1.11 s, the runtime floor a diagnostic outside it', () => {
+    expect(DAEMON_IDLE_BOUND).toEqual(idleBound(DAEMON_IDLE_BASELINE));
+    expect(DAEMON_IDLE_BOUND).toEqual({ footprintKiB: 96_721, cpuS: 1.11 });
   });
 
-  it('a baseline is three distinct runs at a commit, with a positive RSS and a CPU time that is not negative', () => {
+  it('a record is three distinct runs at a commit with a positive footprint, a baseline a CPU time that is not negative, and a floor the Electron version it ran on', () => {
     expect(baselineProblems(null)).toEqual([]); // not yet recorded: nothing to hold
     expect(baselineProblems(baseline)).toEqual([]);
-    expect(baselineProblems({ commit: 'HEAD', runs: ['1', '1'], rssKiB: 0, cpuS: -0.01 })).toEqual([
+    expect(baselineProblems(floor)).toEqual([]);
+    expect(baselineProblems({ commit: 'HEAD', runs: ['1', '1'], footprintKiB: 0, cpuS: -0.01 })).toEqual([
       'commit HEAD is not a sha',
       'runs [1, 1] are not three distinct run ids',
-      'rssKiB 0 is not a positive number of KiB',
+      'footprintKiB 0 is not a positive number of KiB',
       'cpuS -0.01 is negative',
+    ]);
+    expect(baselineProblems({ ...floor, runs: ['1', '2'], footprintKiB: Number.NaN, electron: 'v44' })).toEqual([
+      'runs [1, 2] are not three distinct run ids',
+      'footprintKiB NaN is not a positive number of KiB',
+      'electron v44 is not a version',
     ]);
   });
 
-  // The recorded baseline itself, once the commit that records it (touching only daemon-idle.ts) lands; until then the
-  // case is reported as skipped, not passed.
-  it.skipIf(DAEMON_IDLE_BASELINE === null)('the recorded baseline is well formed', () => {
+  it('the recorded baseline is well formed', () => {
     expect(baselineProblems(DAEMON_IDLE_BASELINE)).toEqual([]);
+  });
+
+  it('the recorded runtime floor is well formed', () => {
+    expect(baselineProblems(DAEMON_IDLE_RUNTIME_FLOOR)).toEqual([]);
   });
 });
 
 describe('the printed line', () => {
-  it('reads as the document quotes it', () => {
-    expect(idleLine({ rssKiB: 98_304, samples: 21, cpuS: 0.41, measured: ['maws-supervisor'], load: 1.83 })).toBe(
-      '[daemon-idle] rss 98304 KiB (median of 21) · cpu 0.41 s over 600 s · processes maws-supervisor · load 1.8',
+  it('reads as the document quotes it: the footprint measured, the RSS beside it as a diagnostic', () => {
+    expect(idleLine({ footprintKiB: 61_440, rssKiB: 98_304, samples: 21, cpuS: 0.41, measured: ['maws-supervisor'], load: 1.83 })).toBe(
+      '[daemon-idle] footprint 61440 KiB (median of 21) · rss 98304 KiB · cpu 0.41 s over 600 s · processes maws-supervisor · load 1.8',
     );
-    expect(idleLine({ rssKiB: 120_000.5, samples: 21, cpuS: 1, measured: ['mawsd', 'maws-supervisor'], load: 0.04 })).toBe(
-      '[daemon-idle] rss 120001 KiB (median of 21) · cpu 1.00 s over 600 s · processes mawsd, maws-supervisor · load 0.0',
+    expect(idleLine({ footprintKiB: 80_000.5, rssKiB: 120_000.5, samples: 21, cpuS: 1, measured: ['mawsd', 'maws-supervisor'], load: 0.04 })).toBe(
+      '[daemon-idle] footprint 80001 KiB (median of 21) · rss 120001 KiB · cpu 1.00 s over 600 s · processes mawsd, maws-supervisor · load 0.0',
+    );
+  });
+
+  it("reads the runtime floor's line with the Electron version it measured", () => {
+    expect(floorLine({ footprintKiB: 20_480.4, rssKiB: 41_000, samples: 21, cpuS: 0.03, electron: '44.4.5', load: 2.71 })).toBe(
+      '[daemon-idle] runtime floor footprint 20480 KiB (median of 21) · rss 41000 KiB · cpu 0.03 s · electron 44.4.5 · load 2.7',
     );
   });
 });
