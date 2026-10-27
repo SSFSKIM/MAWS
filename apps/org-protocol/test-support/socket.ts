@@ -37,8 +37,8 @@ export function newSocket(url: string, headers: Headers): WebSocket {
 }
 
 /**
- * Resolves once `socket` is open; a refused upgrade rejects, naming `what`, and so does one unanswered past `ms`, its
- * connection dropped: a caller's bound holds however far the server got.
+ * Resolves once `socket` is open; a refused upgrade rejects, naming `what`, and so does one unanswered past `ms`, the
+ * socket closed while connecting (which fails it: it never opens): a caller's bound holds however far the server got.
  */
 export function opened(socket: WebSocket, what: string, ms: number): Promise<WebSocket> {
   let unanswered: ReturnType<typeof setTimeout> | undefined;

@@ -29,7 +29,7 @@ export class RelayApp {
   }
 
   /** Opens the socket with `headers` (a member's Access credentials) and resolves once it is open (`openMs` at most; an
-   * upgrade unanswered past it is dropped). */
+   * upgrade unanswered past it fails the opening). */
   static async open(hub: string, machine: string, headers: Record<string, string>, openMs = 10_000): Promise<RelayApp> {
     const socket = newSocket(socketUrl(hub, machineSocketPath(machine)), headers);
     const app = new RelayApp(socket);
