@@ -15,7 +15,8 @@
 // prompt carries a marker `[[P5O2:<plan>]]` that picks its plan, and a tool_result continues the plan of the tool_use it
 // answers, so side requests (titles) and a subagent's requests never shift the script. Fixtures under fixtures/p5/
 // (findings-p5-o2-stop-crons.txt):
-//   main              one session: CronCreate, CronDelete, a subagent's CronCreate, CronList, an interrupted turn after
+//   main              one session: CronCreate, CronDelete, a subagent's CronCreate (launched as the model launches one,
+//                     then with run_in_background false), CronList, an interrupted turn after
 //                     a CronCreate, a plain turn, a dynamic /loop (ScheduleWakeup), its tick ending without one, a plain
 //                     turn and CronList
 //   durable, session  a session creating a durable (`durable: true`) or a session-only every-minute cron
