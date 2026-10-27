@@ -75,7 +75,7 @@ class FakeEndpoint implements EndpointModule {
 
 describe('mawsd status', () => {
   it('running: the daemon, its build, its machine ref, profile and role, its hosts, clients and endpoint', async () => {
-    const daemon = await scene.start();
+    const daemon = await scene.start({ role: 'laptop' }); // pinned: the machine's own role depends on its battery
     const { code, out } = await cli(['status']);
     expect(code).toBe(0);
     const engine = scene.lastEngine();
