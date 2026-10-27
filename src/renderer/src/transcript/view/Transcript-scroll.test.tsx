@@ -344,7 +344,8 @@ it('scrolling downward near the end does not resume following until the reader r
   expect(s.changed.mock.calls).toEqual([[false], [true]]);
 });
 
-for (const shortfall of [0.25, 0.75, 1]) {
+// Chrome's reachable maximum sits up to 1.73px below the integer end at 110% zoom, 2px at 80% or 50% (DOM_END_SLACK).
+for (const shortfall of [0.25, 0.75, 1, 1.75, 2]) {
   it(`returning to the browser's fractional maximum resumes following with a ${shortfall}px rounded bottom gap`, async () => {
     const s = await scene();
     s.readerMove(-200);
@@ -358,6 +359,20 @@ for (const shortfall of [0.25, 0.75, 1]) {
     expect(s.changed.mock.calls).toEqual([[false], [true]]);
   });
 }
+
+it('a witnessed key whose clamp lands on a rounded fractional end keeps following', async () => {
+  const s = await scene(false, true);
+  s.roundDOMEnd(1.75);
+  s.move(0); // the browser's reachable maximum sits below the integer end, and the follower is at it
+  const editor = document.createElement('textarea');
+  s.scroller.querySelector('[data-index]')!.appendChild(editor);
+  act(() => { fireEvent.keyDown(editor, { key: 'PageUp' }); }); // consumed by the editor, but a witness for the list
+  s.resizeRow('last', -40);
+  s.move(0); // the browser clamps to the smaller reachable end
+  expect(s.scroller.scrollHeight - s.scroller.clientHeight - s.scroller.scrollTop).toBe(1.75);
+  expect(s.handle.current!.following).toBe(true);
+  expect(s.changed.mock.calls).toEqual([]);
+});
 
 it('a native return to the last observed end resumes following when new DOM growth precedes its scroll event', async () => {
   const s = await scene();

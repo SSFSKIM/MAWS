@@ -32,9 +32,15 @@ import { liveMarkedRowIds, reportRows, reportViewOf } from '../../owner/report/p
 // P2-C end
 import './transcript.css';
 
-// Fractional scroll positions can round by a pixel. A larger near-end band traps small finger/trackpad movements:
-// a streamed update pins them back before successive deltas can ever leave that band.
+// The logical end (the virtualiser's total against the committed sizer) is compared within a pixel.
 export const SCROLL_END_THRESHOLD = 1;
+// The DOM end is not that precise. scrollHeight and clientHeight are integers while the offset the browser lets a reader
+// reach is not, so at a zoom other than 100% a reader at the very bottom can sit short of scrollHeight - clientHeight:
+// measured in Chrome up to 1.73px at 110%, 2px at 80% and 50%, 2.09px at 33%. Being at the DOM end is read within this
+// slack, on returning and on leaving alike. The band cannot trap a reader moving away: upward wheel/touch intent
+// releases at once, and witnessed key or scrollbar movement goes past a few pixels.
+const DOM_END_SLACK = 3;
+const domEndGap = (element: HTMLElement, scrollHeight = element.scrollHeight) => scrollHeight - element.clientHeight - element.scrollTop;
 export const OVERSCAN = 6;
 // Native key/scrollbar motion can finish after its input event; read that tail before retiring its short witness.
 const INPUT_SCROLL_SETTLE_MS = 250;
@@ -111,7 +117,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     const element = scrollRef.current;
     // A measurement can shrink the logical list before React commits its smaller sizer. The old DOM scrollHeight
     // must not turn the browser's clamp to that new end into an apparent scroll away from it.
-    const away = element !== null && Math.min(element.scrollHeight, measuredSize) - element.clientHeight - element.scrollTop > SCROLL_END_THRESHOLD;
+    const away = element !== null && domEndGap(element, Math.min(element.scrollHeight, measuredSize)) > DOM_END_SLACK;
     if (away) changeFollow(false);
     return away;
   }, [changeFollow]);
@@ -122,7 +128,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     if (!element) return;
     if ((scrollbarPointer.current !== null || movementWitness.current) && element.scrollTop < known.current.offset) leaveIfAway(measuredSize);
     const movedDown = element.scrollTop > known.current.offset;
-    const reachedEnd = element.scrollTop >= Math.min(known.current.end, Math.max(0, element.scrollHeight - element.clientHeight)) - SCROLL_END_THRESHOLD;
+    const reachedEnd = element.scrollTop >= Math.min(known.current.end, Math.max(0, element.scrollHeight - element.clientHeight)) - DOM_END_SLACK;
     remember();
     if (movedDown && reachedEnd) changeFollow(true);
   }, [changeFollow, leaveIfAway, remember]);
@@ -140,7 +146,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
   const measure = useCallback((element: Element, entry: ResizeObserverEntry | undefined, instance: Parameters<typeof measureElement>[2]) => {
     // Notice a return or browser clamp to the DOM end before measurement moves it or anchoring replaces the offset.
     const scroller = scrollRef.current;
-    if (scroller && scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= SCROLL_END_THRESHOLD) readScroll(instance.getTotalSize());
+    if (scroller && domEndGap(scroller) <= DOM_END_SLACK) readScroll(instance.getTotalSize());
     const size = measureElement(element, entry, instance);
     const id = element.getAttribute('data-row-id');
     const before = id === null ? undefined : measured.current.get(id);
