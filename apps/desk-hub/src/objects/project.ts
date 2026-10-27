@@ -37,7 +37,7 @@ import { BATCH_BYTES, eventShapeError, LogStore, resendNonce, sameEvent, type Au
 import type { SummaryReport } from './registry';
 import { RETRY_ATTEMPTS, RETRY_BASE_MS, retryDelay } from './retry';
 import { pendingKey, SessionStore, type Lease, type Route, type RpcRecord } from './session-store';
-import { SignedEvents, STATE_UNAVAILABLE, type SignatureCheck } from './signed-events';
+import { SignedEvents, STATE_READ_TIMEOUT_MS, STATE_UNAVAILABLE, type SignatureCheck } from './signed-events';
 
 /** A `.smns` project id (a lowercase uuid). */
 export const PROJECT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -108,14 +108,18 @@ export class Project extends DurableObject<Env> {
   private reportRetry: ReturnType<typeof setTimeout> | undefined;
   /** v2 events' signatures, checked against the org-state head cached from the Registry (O11 M5). */
   private readonly signatures: SignedEvents;
-  /** Browsers' `human`s, taken one at a time in arrival order: a signed one waits for its check (`human`). */
-  private humans: Promise<void> = Promise.resolve();
+  /** Each member's `human`s, taken one at a time in arrival order: a signed one waits for its check (`human`). */
+  private readonly humans = new Map<string, Promise<void>>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.log = new LogStore(ctx.storage);
     this.plane = new SessionStore(ctx.storage);
-    this.signatures = new SignedEvents(() => this.readOrgState(), () => this.now());
+    this.signatures = new SignedEvents(
+      () => this.readOrgState(),
+      () => this.now(),
+      () => this.stateReadTimeoutMs(),
+    );
     ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS machines (name TEXT PRIMARY KEY, generation INTEGER NOT NULL)');
     // A route whose socket is gone (a restart drops every connection, and a socket's close may not have reached a
     // restarted object) is dropped; its machine's stream went with the restart too.
@@ -447,8 +451,9 @@ export class Project extends DurableObject<Env> {
       if ((this.plane.lease(ctx.machine)?.generation ?? 0) > ctx.generation || !this.isOpen(ctx)) return 'stale';
     }
     const checked = await this.checkSignatures(ctx, events, archive);
-    // As above: a newer stream that opened the project during the checks outlived this upload.
-    if (checked.size > 0 && ((this.plane.lease(ctx.machine)?.generation ?? 0) > ctx.generation || !this.isOpen(ctx))) return 'stale';
+    // As above, and a revocation of this stream (DX7's `forget`) that came while the head was read: either way the
+    // upload is the retired stream's.
+    if (checked.size > 0 && ((this.plane.lease(ctx.machine)?.generation ?? 0) > ctx.generation || !this.isOpen(ctx) || this.isRevoked(ctx.machine, ctx.generation))) return 'stale';
     const accepted: Stored[] = [];
     const stopped = new Set<string>();
     for (const event of events as LogEvent[]) {
@@ -508,16 +513,17 @@ export class Project extends DurableObject<Env> {
   /**
    * The v2 signature of each event of an upload that may be stored: well formed, the machine's to write, and past its
    * writer's last stored seq (a copy of a stored event, or a conflict, is decided by its bytes alone). An event past a
-   * stored seq now stays past it, so every event `upload` stores was checked here.
+   * stored seq now stays past it, so every event `upload` stores was checked here. The batch is judged against one head
+   * (`SignedEvents.checkAll`): no event keeps a verdict from a state a later read in the batch moved past.
    */
   private async checkSignatures(ctx: MachineContext, events: unknown[], archive: string | null | undefined): Promise<Map<unknown, SignatureCheck>> {
-    const checked = new Map<unknown, SignatureCheck>();
-    for (const event of events as LogEvent[]) {
-      if (eventShapeError(event) !== null || event.sig === undefined || event.seq <= this.log.last(event.writer)) continue;
-      const mine = writerMachine(event.writer) === ctx.machine || (event.writer.startsWith(LEGACY_WRITER_PREFIX) && archive === ctx.machine);
-      if (mine) checked.set(event, await this.signatures.check({ org: ctx.org, project: ctx.project }, event as LogEventV2));
-    }
-    return checked;
+    const candidates = (events as LogEvent[]).filter((event) => {
+      if (eventShapeError(event) !== null || event.sig === undefined || event.seq <= this.log.last(event.writer)) return false;
+      return writerMachine(event.writer) === ctx.machine || (event.writer.startsWith(LEGACY_WRITER_PREFIX) && archive === ctx.machine);
+    });
+    if (candidates.length === 0) return new Map();
+    const checks = await this.signatures.checkAll({ org: ctx.org, project: ctx.project }, candidates as LogEventV2[]);
+    return new Map(candidates.map((event, i) => [event, checks[i]]));
   }
 
   /** A daemon's report of an event it refused: recorded in the audit record and shown to every browser. */
@@ -1184,10 +1190,20 @@ export class Project extends DurableObject<Env> {
     for (const row of this.log.audit(AUDIT_REPLAY)) this.toSocket(socket, this.audited(row));
   }
 
-  /** A browser's `human`, taken after every one before it has been (`takeHuman`). */
+  /**
+   * A browser's `human`, taken after every one its member sent before it (`takeHuman`), so a member's feed keeps the
+   * order they were sent in and one signed send is never stored twice. Other members' humans don't wait: a sealed one
+   * waits behind a signed one's read of the head only when the same member sent both, and that read is bounded
+   * (signed-events.ts).
+   */
   private human(socket: WebSocket, event: unknown): Promise<void> {
-    const taken = this.humans.then(() => this.takeHuman(socket, event));
-    this.humans = taken.catch(() => {});
+    const { member } = this.attachment(socket);
+    const taken = (this.humans.get(member) ?? Promise.resolve()).then(() => this.takeHuman(socket, event));
+    const tail = taken.catch(() => {});
+    this.humans.set(member, tail);
+    void tail.then(() => {
+      if (this.humans.get(member) === tail) this.humans.delete(member);
+    });
     return taken;
   }
 
@@ -1199,6 +1215,8 @@ export class Project extends DurableObject<Env> {
   // payload differs, a re-signed copy included.
   private async takeHuman(socket: WebSocket, event: unknown): Promise<void> {
     const { member } = this.attachment(socket);
+    // A state announced while this waited its turn may have removed the member, and closed this socket.
+    if (!this.stateHolds(member)) return;
     const draft = event as Record<string, unknown> & { member?: unknown; nonce?: unknown; mac?: { nonce?: unknown; value?: unknown } };
     const nonce = typeof draft === 'object' && draft !== null ? resendNonce(draft) : undefined;
     const problem = humanShapeError(event);
@@ -1216,7 +1234,7 @@ export class Project extends DurableObject<Env> {
     if (draft.sig !== undefined) {
       const signature = await this.signatures.check({ org: this.orgId, project: this.projectId }, positioned() as LogEventV2);
       if (!signature.ok) return this.refuseBrowser(socket, { reason: signature.reason, writer, nonce, message: signature.message });
-      // A state announced during the check may have removed the member, and closed this socket.
+      // Or during the check.
       if (!this.stateHolds(member)) return;
     }
     const stored = positioned();
@@ -1401,6 +1419,11 @@ export class Project extends DurableObject<Env> {
   protected readOrgState(): Promise<OrgStateView> {
     if (!this.orgId) return Promise.reject(new Error('this project has not learned its org yet'));
     return this.registry().head();
+  }
+
+  /** How long a read of the org-state head may take (the suites' Worker shortens it). */
+  protected stateReadTimeoutMs(): number {
+    return STATE_READ_TIMEOUT_MS;
   }
 
   /** The clock the cached org state is aged by (the suites' Worker moves it on). */

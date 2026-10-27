@@ -3,7 +3,7 @@
 // than a minute at the moment it is needed; and a v2 event never accepted without a state, nor against one known old.
 import { generateSigningKey, NO_CERTIFICATES, signEvent, type OrgState, type SigningKey } from 'org-protocol';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { SignedEvents, STATE_MAX_AGE_MS } from '../src/objects/signed-events';
+import { SignedEvents, STATE_MAX_AGE_MS, UNKNOWN_SIGNER_READ_MS } from '../src/objects/signed-events';
 import type { OrgStateView } from '../src/protocol/identity';
 import { genesis, memberId, newDevice, next, revokedDevice, type TestDevice } from './support/org';
 
@@ -17,16 +17,30 @@ let d2: TestDevice;
 let recovery: SigningKey;
 let v1: OrgState;
 
-/** The Registry as the cache meets it: a head that can move, a reachability switch, and a count of reads. */
+/**
+ * The Registry as the cache meets it: a head that can move, a reachability switch, a count of reads, and reads that can
+ * be held: a held read answers the head as it was when the read arrived, once released (or never, if never released).
+ */
 class FakeRegistry {
   head: OrgState | null = null;
   reachable = true;
   reads = 0;
+  private holding = false;
+  private released: Array<() => void> = [];
   read = async (): Promise<OrgStateView> => {
     this.reads++;
     if (!this.reachable) throw new Error('the Registry is unreachable');
-    return { head: this.head && { state: this.head, sigs: [] }, transitions: [], certificates: NO_CERTIFICATES };
+    const view = { head: this.head && { state: this.head, sigs: [] }, transitions: [], certificates: NO_CERTIFICATES };
+    if (this.holding) await new Promise<void>((resolve) => this.released.push(resolve));
+    return view;
   };
+  hold() {
+    this.holding = true;
+  }
+  release() {
+    this.holding = false;
+    for (const resolve of this.released.splice(0)) resolve();
+  }
 }
 
 let registry: FakeRegistry;
@@ -43,7 +57,7 @@ beforeEach(async () => {
   registry = new FakeRegistry();
   registry.head = v1;
   clock = Date.parse('2026-10-27T06:00:00.000Z');
-  events = new SignedEvents(registry.read, () => clock);
+  events = new SignedEvents(registry.read, () => clock, () => 50);
 });
 
 /** A device's v2 `human`, positioned as the hub positions it. */
@@ -152,6 +166,66 @@ describe('the cached head', () => {
     const batch = await Promise.all([1, 2, 3, 4].map((n) => words(d1, `n${n}`, n)));
     expect(await Promise.all(batch.map((e) => events.check(CTX, e)))).toEqual(batch.map(() => ({ ok: true })));
     expect(registry.reads).toBe(1);
+  });
+});
+
+describe('a head read', () => {
+  it('for an unknown signer that answers below an announcement made meanwhile is read again, never trusted', async () => {
+    expect(await events.check(CTX, await words(d1))).toEqual({ ok: true });
+    const d3 = await newDevice('d3');
+    const v2 = await next(v1, (s) => s.members[0].devices.push(d3.device));
+    const revoked = await revokedDevice(member, d3.device);
+    const v3 = await next(v2, (s) => {
+      s.members[0].devices = s.members[0].devices.filter((d) => d.id !== d3.device.id);
+      s.revoked.push(...revoked);
+    });
+    clock += UNKNOWN_SIGNER_READ_MS;
+    registry.head = v2;
+    registry.hold(); // the unknown signer's read is sent while v2 is the head
+    const checked = events.check(CTX, await words(d3));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    registry.head = v3;
+    const announced = events.advanced(3); // v3 is accepted and announced while that read is out
+    registry.release();
+    await announced;
+    expect(await checked).toMatchObject({ ok: false, reason: 'bad-signature', message: expect.stringContaining('revoked') });
+  });
+
+  it('that stalls fails closed within the bound, and the next check reads again', async () => {
+    expect(await events.check(CTX, await words(d1))).toEqual({ ok: true });
+    clock += STATE_MAX_AGE_MS + 1;
+    registry.hold(); // never released while the check waits
+    expect(await events.check(CTX, await words(d1))).toMatchObject({ ok: false, reason: 'state-unavailable' });
+    expect(registry.reads).toBe(2);
+    registry.release();
+    expect(await events.check(CTX, await words(d1))).toEqual({ ok: true });
+    expect(registry.reads).toBe(3);
+  });
+});
+
+describe('a batch', () => {
+  it('is judged against one head: an event checked before a later read brought in its key’s revocation is checked again', async () => {
+    expect(await events.check(CTX, await words(d1))).toEqual({ ok: true }); // v1 held: d2 current
+    const d3 = await newDevice('d3');
+    const revoked = await revokedDevice(member, d2.device);
+    registry.head = await next(v1, (s) => {
+      s.members[0].devices = [d1.device, d3.device];
+      s.revoked.push(...revoked);
+    });
+    clock += UNKNOWN_SIGNER_READ_MS; // d3's unknown signer may read the head again
+    const checks = await events.checkAll(CTX, [await words(d2, 'by d2', 1), await words(d3, 'by d3', 2)]);
+    expect(checks).toEqual([{ ok: false, reason: 'bad-signature', message: expect.stringContaining('revoked') }, { ok: true }]);
+  });
+
+  it('checked while an announcement outruns its head is checked again against the announced one', async () => {
+    expect(await events.check(CTX, await words(d1))).toEqual({ ok: true });
+    registry.head = await without(d2);
+    const batch = events.checkAll(CTX, [await words(d2, 'one', 1), await words(d2, 'two', 2)]);
+    void events.advanced(2); // arrives while the batch is being checked
+    expect(await batch).toEqual([
+      { ok: false, reason: 'bad-signature', message: expect.stringContaining('revoked') },
+      { ok: false, reason: 'bad-signature', message: expect.stringContaining('revoked') },
+    ]);
   });
 });
 

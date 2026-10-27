@@ -279,7 +279,7 @@ export async function startLocalHub() {
       return JSON.parse(await seam('PROJECT', project, PROJECT_CALLS_PATH)) as { calls: number; frames: number };
     },
     /** Hands a project a lease's renewal or close for any generation, as a late one from an older stream would come. */
-    async lease(project: string, change: { op: 'renew' | 'closed'; machine: string; generation: number; leaseMs?: number }) {
+    async lease(project: string, change: { op: 'renew' | 'closed' | 'forget'; machine: string; generation: number; leaseMs?: number }) {
       await seam('PROJECT', project, PROJECT_LEASE_PATH, { org: ORG, project, client: '', leaseMs: 0, ...change });
     },
     /**
@@ -468,10 +468,11 @@ export async function startLocalHub() {
     async headFault(fail: boolean) {
       await seam('REGISTRY', ORG, REGISTRY_HEAD_FAULT_PATH, { fail });
     },
-    /** Moves a project's clock on by `ahead` ms, so the org state it cached ages; answers how many times the project
-     * read the org-state head (the suites' Worker only). */
-    async stateCache(project: string, ahead = 0): Promise<{ reads: number }> {
-      return JSON.parse(await seam('PROJECT', project, PROJECT_STATE_CACHE_PATH, { ahead }));
+    /** Moves a project's clock on by `ahead` ms, so the org state it cached ages; holds its reads of the org-state head
+     * (`hold: true`) or releases them (`false`); bounds them by `readTimeoutMs`; answers how many times the project read
+     * the org-state head (the suites' Worker only). */
+    async stateCache(project: string, change: { ahead?: number; hold?: boolean; readTimeoutMs?: number } = {}): Promise<{ reads: number }> {
+      return JSON.parse(await seam('PROJECT', project, PROJECT_STATE_CACHE_PATH, change));
     },
     /** Whether the Registry takes workerd's own refusal of a method a callee lacks for one on older code. */
     async missingMethod(): Promise<{ lacks: boolean; message: string }> {

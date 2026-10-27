@@ -12,7 +12,7 @@ import type { HumanDraft, HumanEvent, LogEvent, SignedHumanEvent } from '../src/
 import type { DownFrame } from '../src/protocol/machine';
 import { BrowserClient, enroll, MachineClient, waitFor } from './support/clients';
 import { ADMIN, ORG, startLocalHub, type LocalHub } from './support/local';
-import { endorsed, genesis, newDevice, next, revokedDevice, signedBy, type TestDevice } from './support/org';
+import { endorsed, genesis, memberId, newDevice, next, revokedDevice, signedBy, type TestDevice } from './support/org';
 
 let hub: LocalHub;
 /** The bootstrap admin's member id, whose devices write `hub/<A>`. */
@@ -90,10 +90,23 @@ const dualSay = async (project: string, seq: number, text?: string) => (await se
 const v1Say = async (project: string, seq: number, text?: string) => (await seal(await KEY, 'log', project, draftSay(seq, text))) as unknown as LogEvent;
 
 /** A device's `human`, before the hub positions it: signed by `device`, dual-coded when `dual`. */
-async function deviceWords(project: string, device: TestDevice, text: string, dual = false): Promise<SignedHumanEvent> {
-  const draft: HumanDraft & { nonce: string } = { kind: 'human', from: 'human', member: A, to: '*', text, created: new Date().toISOString(), nonce: newNonce() };
+async function deviceWords(project: string, device: TestDevice, text: string, dual = false, member = A): Promise<SignedHumanEvent> {
+  const draft: HumanDraft & { nonce: string } = { kind: 'human', from: 'human', member, to: '*', text, created: new Date().toISOString(), nonce: newNonce() };
   const signed = await signEvent({ org: ORG, project }, draft, device.channel.privateKey, device.channel.pub);
   return dual ? seal(await KEY, 'log', project, signed) : signed;
+}
+
+/** A browser's sealed (v1) `human` of `member`. */
+async function webWords(project: string, member: string, text: string): Promise<HumanEvent> {
+  return seal(await KEY, 'log', project, { kind: 'human', from: 'human', member, to: '*', text, created: new Date().toISOString() } satisfies HumanDraft);
+}
+
+/** A member with one device, listed by an accepted successor; `email` is admitted by the projection. */
+async function addMember(email: string): Promise<{ id: string; device: TestDevice }> {
+  const id = memberId();
+  const device = await newDevice(`${email}-1`);
+  await accept(await next(head, (s) => s.members.push({ id, email, role: 'member', devices: [device.device] })));
+  return { id, device };
 }
 
 /** Uploads `events` and waits until the hub has answered each: stored (the browser follows the log) or refused. */
@@ -266,7 +279,7 @@ describe('the cached org state', () => {
     await waitFor(async () => ((await hub.stateFault(project)).calls === 1 ? true : undefined));
     // Within the minute the missed state goes unseen: the staleness the age bounds.
     expect(await say(browser, await deviceWords(project, a3, 'stale'))).toMatchObject({ t: 'human-ack' });
-    await hub.stateCache(project, 60_001);
+    await hub.stateCache(project, { ahead: 60_001 });
     expect(await say(browser, await deviceWords(project, a3, 'aged'))).toMatchObject({ t: 'refused', refusal: { reason: 'bad-signature', message: expect.stringContaining('revoked') } });
     browser.close();
   });
@@ -304,3 +317,90 @@ describe('the cached org state', () => {
     browser.close();
   });
 });
+
+describe('a check that waits for the head', () => {
+  it("stores nothing of an upload whose stream was revoked while the head was read", async () => {
+    const { project, browser } = await opened();
+    await hub.stateCache(project, { hold: true });
+    const { reads } = await hub.stateCache(project);
+    const posted = machine.post([{ t: 'events', project, events: [await v2Say(project, 1)] }]);
+    await waitFor(async () => ((await hub.stateCache(project)).reads > reads ? true : undefined));
+    await hub.lease(project, { op: 'forget', machine: machine.name, generation: machine.generation }); // DX7's revocation
+    await hub.stateCache(project, { hold: false });
+    expect((await posted).status).toBe(409);
+    browser.send({ t: 'resume', after: 0 });
+    await browser.next((f) => f.t === 'caught-up', 'caught-up', browser.frames.length);
+    expect(browser.logged).toEqual([]);
+    browser.close();
+  });
+
+  it("stores no human, signed or not, of a member removed while one waited for the head", async () => {
+    const { project, browser } = await opened();
+    const email = 'removed@example.com';
+    const b = await addMember(email);
+    await announced(project);
+    const theirs = await BrowserClient.open(hub, email, project);
+    await hub.stateCache(project, { hold: true, ahead: 60_001 }); // the cached head is too old: the next check reads
+    theirs.send({ t: 'human', event: (await deviceWords(project, b.device, 'signed', false, b.id)) as unknown as HumanEvent });
+    theirs.send({ t: 'human', event: await webWords(project, b.id, 'sealed, queued behind it') });
+    const revoked = await revokedDevice(b.id, b.device.device);
+    await accept(
+      await next(head, (s) => {
+        s.members = s.members.filter((m) => m.id !== b.id);
+        s.revoked.push(...revoked);
+      }),
+    );
+    await announced(project);
+    await waitFor(() => (theirs.closed ? true : undefined));
+    await hub.stateCache(project, { hold: false });
+    // A's own human after both, which A's browser follows live: the log's first event, and nothing of B's is stored.
+    expect(await say(browser, await deviceWords(project, a1, 'after'))).toMatchObject({ t: 'human-ack', offset: 1 });
+    await waitFor(() => (browser.logged.length > 0 ? true : undefined));
+    expect(browser.logged.map((l) => l.event.writer)).toEqual([`hub/${A}`]);
+    browser.close();
+  });
+
+  it("fails closed within the bound when the head stalls, and holds no other member's sealed human behind it", async () => {
+    const { project, browser } = await opened();
+    const email = 'other@example.com';
+    const c = await addMember(email);
+    await announced(project);
+    const theirs = await BrowserClient.open(hub, email, project);
+    await hub.stateCache(project, { hold: true, readTimeoutMs: 1000, ahead: 60_001 });
+    const signed = await deviceWords(project, a1, 'waits for the head');
+    const from = browser.frames.length;
+    browser.send({ t: 'human', event: signed as unknown as HumanEvent });
+    const mineAfter = await webWords(project, A, 'sealed, after my signed one');
+    browser.send({ t: 'human', event: mineAfter });
+    // Another member's sealed human is answered while A's signed one still waits.
+    const theirsWords = await webWords(project, c.id, 'sealed, another member');
+    expect(await say(theirs, theirsWords)).toMatchObject({ t: 'human-ack', writer: `hub/${c.id}` });
+    expect(browser.frames.slice(from).some((f) => f.t === 'refused' && f.refusal.nonce === signed.nonce)).toBe(false);
+    // A's signed one fails closed at the bound; A's sealed one, behind it, is stored then.
+    const refused = await browser.next((f) => f.t === 'refused' && f.refusal.nonce === signed.nonce, 'the stalled refusal', from, 5000);
+    expect(refused).toMatchObject({ refusal: { reason: 'state-unavailable' } });
+    await browser.next((f) => f.t === 'human-ack' && f.nonce === mineAfter.mac.nonce, 'the sealed ack', from);
+    await hub.stateCache(project, { hold: false });
+    // The stalled read was let go: the sender's retry reads again and is stored.
+    expect(await say(browser, signed)).toMatchObject({ t: 'human-ack' });
+    theirs.close();
+    browser.close();
+  });
+});
+
+describe('a DX2 daemon', () => {
+  it('is sent a v2-only event as stored, without a mac, and its rejection of it is recorded', async () => {
+    const { project, browser } = await opened();
+    const from = machine.frames.length;
+    const only = await deviceWords(project, a1, 'no mac for the daemon');
+    expect(await say(browser, only)).toMatchObject({ t: 'human-ack', seq: 1 });
+    const sent = (await machine.next((f) => f.t === 'events' && f.project === project, 'the fan-out', from)) as Extract<DownFrame, { t: 'events' }>;
+    expect(sent.events).toEqual([{ ...only, writer: `hub/${A}`, seq: 1, ts: sent.events[0].ts }]);
+    expect(sent.events[0].mac).toBeUndefined();
+    // sminos refuses it on import as `bad-code` (no code to check), spends the position and reports it (DX2 `rejected`).
+    await machine.postOk([{ t: 'rejected', project, event: { writer: `hub/${A}`, seq: 1 }, reason: 'bad-code', message: 'its code or nonce is not the canonical base64url of 32 and 16 bytes' }]);
+    expect(await browser.next((f) => f.t === 'rejected', 'the rejection')).toMatchObject({ rejection: { machine: machine.name, event: { writer: `hub/${A}`, seq: 1 }, reason: 'bad-code' } });
+    browser.close();
+  });
+});
+

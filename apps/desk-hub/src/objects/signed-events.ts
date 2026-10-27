@@ -8,8 +8,14 @@
 //   - on an unknown signer, at most once a second, so a device paired or a machine listed a moment ago is met;
 //   - whenever it is older than STATE_MAX_AGE_MS at the moment an event needs it, so a lost announcement costs at most
 //     a minute of staleness.
-// A cache an announcement has outrun is never used, nor one past its age that cannot be read again: the event is then
-// refused `state-unavailable`, and its sender retries. A v2 event is never stored unchecked.
+// No head older than the newest announced version is trusted, whichever way it was read: a read sent before an
+// announcement is sent again. A read is bounded (STATE_READ_TIMEOUT_MS); one that stalls fails, and the next check
+// sends another. An event no head can be had for, young enough and no older than the announcement, is refused
+// `state-unavailable`, and its sender retries. A v2 event is never stored unchecked.
+//
+// A batch (one upload) is judged against one head: once every event is checked, any checked against a head older than
+// the newest held or announced is checked again, so no two events of a batch are judged by states a revocation
+// separates.
 import { verifyEvent, type Certificates, type EventContext, type LogEventV2, type OrgState, type Verdict } from 'org-protocol';
 import type { OrgStateView } from '../protocol/identity';
 
@@ -17,12 +23,19 @@ import type { OrgStateView } from '../protocol/identity';
 export const STATE_MAX_AGE_MS = 60_000;
 /** How often an unknown signer may send the cache back to the Registry. */
 export const UNKNOWN_SIGNER_READ_MS = 1_000;
+/** How long a read of the head may take before it counts as failed. */
+export const STATE_READ_TIMEOUT_MS = 5_000;
+/** How many times a batch is checked again for a head that moved under it before it is refused `state-unavailable`. */
+const BATCH_ROUNDS = 3;
 
 /** A v2 event's check: accepted, or refused with the reason and the message the uploader's refusal carries. */
 export type SignatureCheck = { ok: true } | { ok: false; reason: 'bad-signature' | 'state-unavailable'; message: string };
 
 /** The head as read: its state (null before the org's first), its certificates, and when the read was sent. */
 type Held = { state: OrgState | null; certificates: Certificates; version: number; read: number };
+
+/** A check, with the version of the head it was judged against (none for `state-unavailable`). */
+type Judged = { check: SignatureCheck; version?: number };
 
 /** The refusal of a v2 event no usable org state could check. */
 export const STATE_UNAVAILABLE: SignatureCheck = { ok: false, reason: 'state-unavailable', message: 'the org state could not be read to check the v2 signature; send it again' };
@@ -38,6 +51,7 @@ export class SignedEvents {
   constructor(
     private readonly readHead: () => Promise<OrgStateView>,
     private readonly now: () => number = Date.now,
+    private readonly readTimeoutMs: () => number = () => STATE_READ_TIMEOUT_MS,
   ) {}
 
   /** The Registry accepted `version`: a head older than it is read again now, and is never used until it is. */
@@ -50,15 +64,36 @@ export class SignedEvents {
 
   /** `event`, positioned as stored, checked for `ctx` against the cached head. */
   async check(ctx: EventContext, event: LogEventV2): Promise<SignatureCheck> {
+    return (await this.checkAll(ctx, [event]))[0];
+  }
+
+  /** Each of `events` checked for `ctx`, all against one head: the newest held or announced when the checks end. */
+  async checkAll(ctx: EventContext, events: LogEventV2[]): Promise<SignatureCheck[]> {
+    const judged: Judged[] = [];
+    let pending = events.map((_, i) => i);
+    for (let round = 0; pending.length > 0; round++) {
+      if (round === BATCH_ROUNDS) {
+        for (const i of pending) judged[i] = { check: STATE_UNAVAILABLE };
+        break;
+      }
+      for (const i of pending) judged[i] = await this.judge(ctx, events[i]);
+      const newest = Math.max(this.announced, this.held?.version ?? 0);
+      pending = judged.flatMap((j, i) => (j.version !== undefined && j.version < newest ? [i] : []));
+    }
+    return judged.map((j) => j.check);
+  }
+
+  private async judge(ctx: EventContext, event: LogEventV2): Promise<Judged> {
     let held = await this.usable();
-    if (!held) return STATE_UNAVAILABLE;
+    if (!held) return { check: STATE_UNAVAILABLE };
     let verdict = await this.verify(ctx, held, event);
     if (!verdict.ok && verdict.code === 'unknown-signer' && this.now() - this.lastRead >= UNKNOWN_SIGNER_READ_MS) {
-      held = await this.fresh().catch(() => undefined);
-      if (held) verdict = await this.verify(ctx, held, event);
+      // Unread, the refusal stands: it fails closed.
+      const fresher = await this.readAnnounced();
+      if (fresher) [held, verdict] = [fresher, await this.verify(ctx, fresher, event)];
     }
-    if (verdict.ok) return verdict;
-    return { ok: false, reason: 'bad-signature', message: `the v2 signature does not verify against the org state (${verdict.code})` };
+    if (verdict.ok) return { check: verdict, version: held.version };
+    return { check: { ok: false, reason: 'bad-signature', message: `the v2 signature does not verify against the org state (${verdict.code})` }, version: held.version };
   }
 
   private verify(ctx: EventContext, held: Held, event: LogEventV2): Promise<Verdict> {
@@ -67,9 +102,14 @@ export class SignedEvents {
   }
 
   /** The held head when it is young enough and no announcement outran it; else a fresh read; else undefined. */
-  private async usable(): Promise<Held | undefined> {
+  private usable(): Promise<Held | undefined> {
     const held = this.held;
-    if (held && this.now() - held.read <= STATE_MAX_AGE_MS && held.version >= this.announced) return held;
+    if (held && this.now() - held.read <= STATE_MAX_AGE_MS && held.version >= this.announced) return Promise.resolve(held);
+    return this.readAnnounced();
+  }
+
+  /** A fresh read no older than the newest announcement, or undefined when none can be had. */
+  private async readAnnounced(): Promise<Held | undefined> {
     try {
       let read = await this.fresh();
       // A read sent before the announcement may answer the version before it: one more read is after it.
@@ -80,20 +120,32 @@ export class SignedEvents {
     }
   }
 
-  /** Reads the head, one read at a time: callers that need one while it is out share it. */
+  /**
+   * Reads the head, one read at a time: callers that need one while it is out share it. A read that outlasts the bound
+   * fails, its late answer is dropped, and the next caller sends another.
+   */
   private fresh(): Promise<Held> {
-    this.reading ??= (async () => {
-      const read = (this.lastRead = this.now());
-      try {
-        const view = await this.readHead();
-        const state = view.head?.state ?? null;
-        const held: Held = { state, certificates: view.certificates, version: state?.version ?? 0, read };
-        if (!this.held || held.version >= this.held.version) this.held = held;
-        return held;
-      } finally {
-        this.reading = undefined;
-      }
+    if (this.reading) return this.reading;
+    const read = (this.lastRead = this.now());
+    const reading = (async () => {
+      const view = await bounded(this.readHead(), this.readTimeoutMs());
+      const state = view.head?.state ?? null;
+      const held: Held = { state, certificates: view.certificates, version: state?.version ?? 0, read };
+      if (!this.held || held.version >= this.held.version) this.held = held;
+      return held;
     })();
-    return this.reading;
+    this.reading = reading;
+    const settled = () => {
+      if (this.reading === reading) this.reading = undefined;
+    };
+    reading.then(settled, settled);
+    return reading;
   }
+}
+
+/** `promise`, or a rejection once `ms` have passed. */
+function bounded<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error(`the org-state read took over ${ms} ms`)), ms)));
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }

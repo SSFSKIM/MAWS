@@ -392,6 +392,7 @@ export class Project extends DeployedProject {
   private held: { promise: Promise<void>; release: () => void } | undefined;
   private heldArchive: { promise: Promise<void>; release: () => void } | undefined;
   private backlogPages = 0;
+  private readHold: { promise: Promise<void>; release: () => void } | undefined;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -430,10 +431,16 @@ export class Project extends DeployedProject {
     return super.now() + (this.ctx.storage.kv.get<number>('clock-ahead') ?? 0);
   }
 
-  /** The org-state head as deployed, each read counted. */
-  protected readOrgState(): ReturnType<DeployedProject['readOrgState']> {
+  /** The org-state head as deployed, each read counted, and held while the suite holds it. */
+  protected async readOrgState(): ReturnType<DeployedProject['readOrgState']> {
     this.ctx.storage.kv.put('state-reads', (this.ctx.storage.kv.get<number>('state-reads') ?? 0) + 1);
+    await this.readHold?.promise;
     return super.readOrgState();
+  }
+
+  /** The bound on a read of the org-state head, as the suite set it. */
+  protected stateReadTimeoutMs(): number {
+    return this.ctx.storage.kv.get<number>('read-timeout-ms') ?? super.stateReadTimeoutMs();
   }
 
   /** A suite's first wait before a failed summary report is sent again, over the deployed second. */
@@ -526,8 +533,17 @@ export class Project extends DeployedProject {
       return Response.json({ remaining: fault.remaining, calls: fault.calls, announced: this.ctx.storage.kv.get<number>('announced') ?? null });
     }
     if (url.pathname === PROJECT_STATE_CACHE_PATH) {
-      const { ahead = 0 } = (await request.json()) as { ahead?: number };
+      const { ahead = 0, hold, readTimeoutMs } = (await request.json()) as { ahead?: number; hold?: boolean; readTimeoutMs?: number };
       this.ctx.storage.kv.put('clock-ahead', (this.ctx.storage.kv.get<number>('clock-ahead') ?? 0) + ahead);
+      if (readTimeoutMs !== undefined) this.ctx.storage.kv.put('read-timeout-ms', readTimeoutMs);
+      if (hold && !this.readHold) {
+        let release!: () => void;
+        const promise = new Promise<void>((resolve) => (release = resolve));
+        this.readHold = { promise, release };
+      } else if (hold === false && this.readHold) {
+        this.readHold.release();
+        this.readHold = undefined;
+      }
       return Response.json({ reads: this.ctx.storage.kv.get<number>('state-reads') ?? 0 });
     }
     if (url.pathname === PROJECT_FORGET_FAULT_PATH) {
@@ -537,8 +553,9 @@ export class Project extends DeployedProject {
     if (url.pathname === PROJECT_LIFE_PATH) return new Response(this.life);
     if (url.pathname === PROJECT_CALLS_PATH) return Response.json(this.ctx.storage.kv.get('calls') ?? { calls: 0, frames: 0 });
     if (url.pathname === PROJECT_LEASE_PATH) {
-      const { op, ...ctx } = (await request.json()) as { op: 'renew' | 'closed'; org: string; project: string; machine: string; client: string; generation: number; leaseMs: number };
+      const { op, ...ctx } = (await request.json()) as { op: 'renew' | 'closed' | 'forget'; org: string; project: string; machine: string; client: string; generation: number; leaseMs: number };
       if (op === 'renew') this.renew(ctx);
+      else if (op === 'forget') this.forget(ctx.org, ctx.project, ctx.machine, ctx.generation);
       else this.closed(ctx);
       return new Response('done');
     }
