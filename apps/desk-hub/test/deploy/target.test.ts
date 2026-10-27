@@ -5,7 +5,7 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { readDeployConfig, type DeployConfig } from '../../deploy/config.ts';
 import { deployHub, workerWrangler, type WranglerRun } from '../../deploy/deploy.ts';
 import { serviceTokenName } from '../../src/protocol/identity.ts';
@@ -66,15 +66,6 @@ function fakeAccount() {
   const production = () => JSON.stringify([...policies.values(), ...apps.values()].filter((r) => String(r.id).startsWith('prod-')));
   return { fetcher, calls, policies, apps, unchanged: () => production() === before };
 }
-
-// Every call reaches the account through fakeAccount's fetcher; the global fetch throws, so a test that missed it fails
-// here instead of calling Cloudflare.
-beforeAll(() => {
-  vi.stubGlobal('fetch', () => Promise.reject(new Error('a test reached the global fetch: pass fakeAccount().fetcher')));
-});
-afterAll(() => {
-  vi.unstubAllGlobals();
-});
 
 const SECRETS = { CF_ACCESS_SETUP_TOKEN: 'setup-token', CF_DESK_HUB_SERVICE_TOKENS: 'service-tokens' };
 
@@ -176,5 +167,17 @@ describe('the target guard', () => {
       `wrangler target desk-hub-staging (config worker desk-hub-staging, account ${staging.account}): secret put CF_API_TOKEN`,
       `wrangler target desk-hub-staging (config worker desk-hub-staging, account ${staging.account}): deploy`,
     ]);
+  });
+});
+
+describe('the suites have no network', () => {
+  it('refuses the global fetch to any host but loopback, before a request leaves', async () => {
+    await expect(fetch('https://api.cloudflare.com/client/v4/accounts/x/access/organizations')).rejects.toThrow(/no network in tests: https:\/\/api\.cloudflare\.com refused/);
+  });
+
+  it('so a deploy given no fake account fails at its first Access call, and runs no wrangler', async () => {
+    const wrangler = fakeWrangler();
+    await expect(deployHub(staging, SECRETS, { assets, quiet: true }, { wrangler: wrangler.run, fetch })).rejects.toThrow(/no network in tests/);
+    expect(wrangler.calls).toEqual([]);
   });
 });
