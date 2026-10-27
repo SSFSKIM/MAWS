@@ -40,7 +40,7 @@ Phase 1 (dispatchable now; P5's item 1, item 4, and item 7's refusals):
 Phase 2 (written 2026-10-27 against O10's M6 and Interfaces §D, whose landing P5's Decision Log 45 records; P5's items 2, 3, 5, 6 and 8, item 4's rest, and Decision Log 45's duties):
 - [x] M7a — Ticket 11's two debt fixes (the reseal's nonce, the `lane-b` recovery code). Reviewed clean by doperpowers:reviewer-medium in one round (no findings), landed as doperpowers PR #404 (`ae7e3ba9`, sminos 1.20.0), 2026-10-27.
 - [x] M5 — The RL10 client and the local-only switch (item 5). Built by two executors in sequence on one branch, reviewed by doperpowers:reviewer-high over two rounds (round 1: one P1, one P2, both reproduced and fixed with regression tests; round 2 clean), landed as doperpowers PR #405 (`76cd8caf`, sminos 1.21.0), 2026-10-27. Its conformance replay lands once O10 M6's `conversation.json` exists, as a follow-up.
-- [ ] M6 — Members, words and the label (items 2 and 3). After M5.
+- [x] M6 — Members, words and the label (items 2 and 3). Built by two executors in sequence on one branch (member frames, receipts, revocation marks and the label; then the words pass and every deliverer), merged with M8 and re-bumped, reviewed by doperpowers:reviewer-high over two rounds (round 1: two P1 revocation bypasses and one P2 missing send-frame label, each reproduced and fixed with a regression test; round 2 clean), landed as doperpowers PR #407 (`15e60f18`, sminos 1.24.0), 2026-10-27.
 - [ ] M7 — Lane A actions with remote context (item 4's rest; Decision Log 45's fence, binding and proof). After M6, whose `member` frames it extends with `launch` and whose publication it proves; after M7a.
 - [x] M8 — To-human off the hub (item 6). Reviewed by doperpowers:reviewer-medium over three rounds (round 1: a cutover race leaving a copy in each store, and an unbounded host batch; round 2: a clock rollback stranding seqs behind the cursor, introduced by the bounded passes; each reproduced and fixed with a regression test; round 3 clean), landed as doperpowers PR #406 (`5463fe8c`, sminos 1.23.0), 2026-10-27.
 - [ ] M9 — The mini (item 8). After M5–M8, and after O14's brief cuts the mini over.
@@ -1111,6 +1111,13 @@ The joint review's second round (`9be0bc941`), 2026-10-27, two P1s, both reprodu
   - DX2's call shapes are kept: `words` is passed to `push_member` and `push_live` only with a verdict, and `gated` is added to `deliver_next`'s result only on a cut-over machine.
   Rationale: each keeps one deliverer per writer's order and the endpoint's verdict as the only route to words, while leaving the DX2 path's calls and results as they were.
   Date/Author: 2026-10-27, M6's second executor, accepted by O12's phase 2 executor.
+
+- Decision: M6's review round (doperpowers:reviewer-high, round 1, three findings, each reproduced and fixed):
+  - the revocation set is read before each event of a delivery batch, never cached across it, so a revocation persisted mid-batch stops the rest (P1);
+  - every event a `send` bundles (`SendDelivery`, member and seat paths) is checked against the current set; a revoked one is marked without dropping its valid predecessors, and when an earlier event cannot be cleared (an unreadable set, or a refusal that could not be recorded) the whole send stays owed and prints `recorded <ref> for <alias>; it waits behind <ref>, …`, the daemon delivering in order once the set reads (P1);
+  - send frames carry the label as chat frames do, keeping the message id `send --wait` needs; on a machine not cut over they stay byte-identical (P2).
+  Rationale: RL §5.2's "every delivery checks its signer against the current state when it is delivered" holds per event, for every path that pushes. Rejected: dropping a revoked event's valid predecessors from a held send, which would split the writer's order.
+  Date/Author: 2026-10-27, M6's second executor and doperpowers:reviewer-high, accepted by O12's phase 2 executor.
 
 ## Outcomes & Retrospective
 
