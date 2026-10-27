@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2: the router's local machine
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitFixture } from '../../../test/support/git-fixture';
 import type { ExecFileFn } from './runner';
@@ -46,7 +47,7 @@ describe('main answers git.* through the router', () => {
     const service = new GitService({ env: repo.serviceEnv(), ...options });
     dispose = () => service.dispose();
     registerGitHandlers(service);
-    installRouter({ appUrl: APP_URL });
+    installRouter({ appUrl: APP_URL, local: 'LocalMachineRef0000000' as MachineRef });
     return service;
   }
   const invoke = (name: string, input?: unknown) => electron.handlers.get(`maws:cmd:${name}`)!(event, input) as Promise<Result>;

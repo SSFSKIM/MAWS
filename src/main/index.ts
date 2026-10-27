@@ -22,6 +22,8 @@ import { appUrl, createWindow, installContentSecurityPolicy, prepareHarness } fr
 import { emit } from './ipc/events';
 import { registerMachineHandler, registerMainHandler } from './ipc/router'; // P5 O6 M1: registerMachineHandler
 import { startMachineIdentity } from './machine/identity'; // P5 O6 M1
+import { bindLocalMachine } from './machine/local'; // P5 O6 M2
+import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2
 // C3 end
 // C4 start (emit comes with C3's imports)
 import { startIndexAttention } from './index/attention-service';
@@ -236,8 +238,9 @@ void startWithProfileLock(app, () => {
   // P5 O6 M1 (OX2): the profile's MachineRef, minted at its first start into <userData>/machine.json and read ever after,
   // before anything starts or any window opens. A malformed file stops startup, naming its path: a fresh ref would
   // re-address everything kept under the old one.
+  let local: MachineRef;
   try {
-    startMachineIdentity({ userData: app.getPath('userData'), env: process.env, hostname: hostname(), register: registerMachineHandler });
+    local = startMachineIdentity({ userData: app.getPath('userData'), env: process.env, hostname: hostname(), register: registerMachineHandler }).ref;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[machine] ${message}`);
@@ -245,13 +248,14 @@ void startWithProfileLock(app, () => {
     app.exit(1);
     return;
   }
+  bindLocalMachine(local); // P5 O6 M2: the router's, `emit`'s and every app window's local machine
   installContentSecurityPolicy();
   // C9 block begin: the harness's fake session directories; a terminal's links open through pty.openLink
   if (process.env.MAWS_HARNESS === '1') prepareHarness();
   registerPtyOpenLink();
   // C9 block end
   const hosts = createHosts(MAIN_BUILD); // E11 §2.7: main's build for host.status
-  installRouter({ appUrl, dispatchToHost: hosts.dispatch });
+  installRouter({ appUrl, local, dispatchToHost: hosts.dispatch });
   // P5 O1 M3 (OX4): the client port, the one way a machine-bound service reaches the person's screen: dialogs, the
   // Replace question, Finder, the browser, notifications, the badge and focus. `openWindow` is read when a focus needs it.
   const clientPort = electronClientPort({ env: process.env, openWindow: () => openWindow() });

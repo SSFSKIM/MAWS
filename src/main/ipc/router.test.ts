@@ -1,18 +1,22 @@
 import { EventEmitter } from 'node:events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
+import type { MachineRef } from '@shared/machine/ref';
 import type { HostDispatch, MainContext } from './router';
+
+const LOCAL = 'LocalMachineRef0000000' as MachineRef;
+const OTHER = 'OtherMachineRef0000000' as MachineRef;
 
 // Electron is faked: `ipcMain.handle` records one handler per channel, and each fake window is the one whose
 // webContents the fake event names as its sender.
 const electron = vi.hoisted(() => ({
-  handlers: new Map<string, (event: unknown, input: unknown) => Promise<unknown>>(),
+  handlers: new Map<string, (event: unknown, input: unknown, machine?: unknown) => Promise<unknown>>(),
   windows: new Map<object, { webContents: { mainFrame: object } }>(),
   opened: [] as string[], // C9: what `shell.openExternal` was asked to open
 }));
 vi.mock('electron', () => ({
   ipcMain: {
-    handle: (channel: string, handler: (event: unknown, input: unknown) => Promise<unknown>) => {
+    handle: (channel: string, handler: (event: unknown, input: unknown, machine?: unknown) => Promise<unknown>) => {
       if (electron.handlers.has(channel)) throw new Error(`second handler for ${channel}`);
       electron.handlers.set(channel, handler);
     },
@@ -41,13 +45,14 @@ async function load(appUrl = DEV_URL, dispatchToHost?: Parameters<Router['instal
   electron.windows.clear();
   electron.opened.length = 0;
   router = await import('./router');
-  router.installRouter({ appUrl, dispatchToHost });
+  router.installRouter({ appUrl, local: LOCAL, dispatchToHost });
 }
 
-const invoke = (event: unknown, name: string, input?: unknown) => {
+// P5 O6 M2: the preload sends the machine as the invoke's last argument; none is the local machine.
+const invoke = (event: unknown, name: string, input?: unknown, ...machine: [unknown?]) => {
   const handler = electron.handlers.get(`maws:cmd:${name}`);
   if (!handler) throw new Error(`no ipcMain handler for ${name}`);
-  return handler(event, input);
+  return handler(event, input, ...machine);
 };
 
 const LIGHT = { settings: { ...SETTINGS_DEFAULTS_V18, theme: 'light' }, resolvedTheme: 'light' } as const;
@@ -68,7 +73,54 @@ describe('main ipc router', () => {
     router.registerMainHandler('settings.get', handler);
     const event = appWindow();
     await expect(invoke(event, 'settings.get')).resolves.toEqual({ ok: true, value: LIGHT });
-    expect(handler).toHaveBeenCalledWith(undefined, { client: expect.objectContaining({ id: `page:${event.sender.id}.1` }) }); // who asked, for per-client state
+    expect(handler).toHaveBeenCalledWith(undefined, { client: expect.objectContaining({ id: `page:${event.sender.id}.1` }), target: LOCAL }); // who asked, for per-client state
+  });
+
+  // P5 O6 M2 (OX2): the machine each invoke names
+  describe('the machine an invoke names', () => {
+    it('treats an invoke that names none, or names the local machine, as the local machine’s', async () => {
+      const handler = vi.fn<(input: unknown, context: MainContext) => typeof LIGHT>(() => LIGHT);
+      router.registerMainHandler('settings.get', handler);
+      const event = appWindow();
+      await expect(invoke(event, 'settings.get', undefined)).resolves.toEqual({ ok: true, value: LIGHT });
+      await expect(invoke(event, 'settings.get', undefined, LOCAL)).resolves.toEqual({ ok: true, value: LIGHT });
+      expect(handler.mock.calls.map(([, context]) => context.target)).toEqual([LOCAL, LOCAL]);
+    });
+
+    it('refuses a machine that is not a MachineRef with invalid_input, before the handler', async () => {
+      const handler = vi.fn(() => LIGHT);
+      router.registerMainHandler('settings.get', handler);
+      for (const machine of ['', 'a/b', 42, null]) {
+        await expect(invoke(appWindow(), 'settings.get', undefined, machine)).resolves.toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+      }
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('answers a command for another machine host_unavailable until the connection manager reaches it, running no handler', async () => {
+      const handler = vi.fn(() => LIGHT);
+      router.registerMainHandler('settings.get', handler);
+      await expect(invoke(appWindow(), 'settings.get', undefined, OTHER)).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('refuses a client command whose ids name another machine before its handler runs, and hands the local one as ctx.target', async () => {
+      const handler = vi.fn<(input: unknown, context: MainContext) => { navigate: null }>(() => ({ navigate: null }));
+      router.registerMainHandler('attention.pendingNavigate', handler);
+      await expect(invoke(appWindow(), 'attention.pendingNavigate', undefined, OTHER)).resolves.toEqual({
+        ok: false,
+        error: { code: 'host_unavailable', message: 'attention.pendingNavigate: not available for a session on another machine yet' },
+      });
+      expect(handler).not.toHaveBeenCalled();
+      await invoke(appWindow(), 'attention.pendingNavigate', undefined, LOCAL);
+      expect(handler.mock.calls.map(([, context]) => context.target)).toEqual([LOCAL]);
+    });
+
+    it('answers attention.viewing for another machine with no effect', async () => {
+      const handler = vi.fn(() => undefined);
+      router.registerMainHandler('attention.viewing', handler);
+      await expect(invoke(appWindow(), 'attention.viewing', { appSessionId: 'app-1' }, OTHER)).resolves.toEqual({ ok: true, value: undefined });
+      expect(handler).not.toHaveBeenCalled();
+    });
   });
 
   it('hands a handler the asking page instance’s ClientRef: the same one per page, a new one after a reload', async () => {
@@ -272,7 +324,7 @@ describe('main ipc router', () => {
       const dispose = router.interceptCommand('session.list', stub);
       await expect(invoke(appWindow(), 'session.list', {})).resolves.toEqual({ ok: true, value: { sessions: [], revision: 7 } });
       await expect(invoke(appWindow(), 'session.digests')).resolves.toEqual({ ok: true, value: { digests: [] } });
-      expect(stub).toHaveBeenCalledWith({}, { client: expect.objectContaining({ id: expect.stringMatching(/^page:\d+\.1$/) }) });
+      expect(stub).toHaveBeenCalledWith({}, { client: expect.objectContaining({ id: expect.stringMatching(/^page:\d+\.1$/) }), target: LOCAL });
       dispose();
       await expect(invoke(appWindow(), 'session.list', {})).resolves.toMatchObject({ ok: false, error: { code: 'internal' } });
     });

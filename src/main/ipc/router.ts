@@ -8,6 +8,13 @@
 // production's `REGISTRY`. A `machine`-owned command goes through the router's `MachineBinding`: `embedded` runs the
 // handler registered with `registerMachine` here, `host` forwards it with the asker's `ClientRef` to the `machine` host
 // (src/main/hosts/supervisor.ts), which runs the same handler code in its own runtime. O1 binds production embedded.
+//
+// P5 O6 M2 (OX2; docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md, "The router and `emit`"): every invoke names
+// the machine it goes to (the IPC message's last argument; none is the local machine), validated as a `MachineRef`, and a
+// handler learns it as `ctx.target`. A command graded `client` (O1 M4) is the local app's own: for another machine's ids it
+// is refused `host_unavailable` before any handler runs, since an app effect has no app to run in there, except
+// `attention.viewing`, answered with no effect (its only effect is the local notifier's). Any other command for another
+// machine answers `host_unavailable` until the connection manager (M3) reaches it.
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
 import { HostCommandError, thrownError } from '@shared/host/runtime';
 import type { ClientRef, HandlerContext } from '@shared/ipc/client';
@@ -15,6 +22,8 @@ import { ipcError, type IpcError } from '@shared/ipc/errors';
 import { REGISTRY, type InputOf, type NameOf, type OutputOf, type WireRegistry } from '@shared/ipc/registry';
 import { commandChannel, type CommandInput, type CommandName, type CommandOutput, type CommandResult, type Owner } from '@shared/ipc/schema';
 import { codecOf } from '@shared/ipc/validate';
+import { gradeOf } from '@shared/ipc/grades';
+import { MachineRefSchema, type MachineRef } from '@shared/machine/ref';
 import { clientOf } from './clients';
 
 export { emit } from './events';
@@ -22,7 +31,8 @@ export { emit } from './events';
 // Who asked (P5 O1 M2): the asking page instance's `ClientRef`, for a handler whose state is held per client (git.watch's
 // counts), keyed by `client.id` and released on `client.onGone`. A client-shell handler that acts on the page itself gets
 // it with `pageOf(client)` (./clients).
-export type MainContext = HandlerContext;
+// P5 O6 M2: `target` is the machine the command goes to: the local one, or (a `client` command) the machine its ids name.
+export type MainContext = HandlerContext & { readonly target: MachineRef };
 export type MainHandler<N extends CommandName> = (input: CommandInput<N>, context: MainContext) => CommandOutput<N> | Promise<CommandOutput<N>>;
 export type HostOwner = Exclude<Owner, 'main'>;
 // The supervisor interface M4 implements (`HostSupervisor.dispatch`): forward to the owning host, answer its result.
@@ -43,6 +53,7 @@ export interface Router<R extends WireRegistry> {
 export interface RouterOptions {
   // The URL the app window loads: the dev server's in development, the renderer's `index.html` file URL otherwise.
   appUrl: string;
+  local: MachineRef; // P5 O6 M2: this main's own machine (src/main/machine/local.ts), which a command naming none goes to
   dispatchToHost?: HostDispatch;
   machine?: MachineBinding; // P5 O1 M5: `embedded` unless said otherwise
 }
@@ -90,7 +101,8 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
     event: IpcMainInvokeEvent,
     name: string,
     rawInput: unknown,
-    { appUrl, dispatchToHost = hostsNotStarted, machine = { kind: 'embedded' } }: RouterOptions,
+    rawMachine: unknown,
+    { appUrl, local, dispatchToHost = hostsNotStarted, machine = { kind: 'embedded' } }: RouterOptions,
   ): Promise<CommandResult<CommandName>> {
     if (!isAppSender(event, appUrl)) {
       console.warn(`[ipc] refused ${name} from ${event.senderFrame?.url ?? 'a detached frame'}`);
@@ -99,11 +111,22 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
     if (mainOnly.has(name)) {
       return { ok: false, error: ipcError('forbidden_sender', `${name} may only be invoked by main`) };
     }
+    let target = local;
+    if (rawMachine !== undefined) {
+      const parsed = MachineRefSchema.safeParse(rawMachine);
+      if (!parsed.success) return { ok: false, error: ipcError('invalid_input', `${name}: not a machine: ${JSON.stringify(rawMachine)}`, parsed.error.issues) };
+      target = parsed.data;
+    }
     const input = codec.validateCommandInput(name, rawInput);
     if (!input.ok) return input;
+    if (target !== local) {
+      if (gradeOf(name) !== 'client') return { ok: false, error: ipcError('host_unavailable', `${name}: machine ${target} is not connected`) }; // M3: the connection manager
+      if (name === 'attention.viewing') return { ok: true, value: undefined as CommandOutput<CommandName> };
+      return { ok: false, error: ipcError('host_unavailable', `${name}: not available for a session on another machine yet`) };
+    }
 
     const { owner } = commands[name];
-    const context: MainContext = { client: clientOf(event.sender) };
+    const context: MainContext = { client: clientOf(event.sender), target };
     const run = (handler: AnyHandler) => async () => ({ ok: true, value: (await handler(input.value, context)) as CommandOutput<CommandName> }) as const;
     // P5 O1 M5: an embedded machine handler's output is checked against the registry, as a host runtime checks it before
     // answering, so a handler answers the same in either root.
@@ -146,7 +169,7 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
   return {
     install(options) {
       for (const name of Object.keys(commands)) {
-        ipcMain.handle(commandChannel(name as CommandName), (event, input: unknown) => route(event, name, input, options));
+        ipcMain.handle(commandChannel(name as CommandName), (event, input: unknown, machine: unknown) => route(event, name, input, machine, options));
       }
     },
     registerMain: registerIn(mainHandlers, 'main') as Router<R>['registerMain'],

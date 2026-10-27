@@ -6,6 +6,8 @@
 import type * as z from 'zod';
 import type { IpcError } from './errors';
 import type { BridgedCommandName, BridgedEventName, MainOnlyCommandName } from './names';
+import type { PathCommandName } from './routes'; // P5 O6 M2
+import type { MachineRef } from '../machine/ref'; // P5 O6 M2
 import * as attention from './schema/attention';
 import type { CommandSpec, Namespace } from './schema/common';
 import * as engine from './schema/engine';
@@ -254,11 +256,38 @@ export type EventPayload<N extends EventName> = z.output<(typeof events)[N]>;
 
 export type CommandResult<N extends CommandName> = { ok: true; value: CommandOutput<N> } | { ok: false; error: IpcError };
 
-// The whole surface the preload exposes as `window.maws`; nothing else is bridged.
+// P5 O6 M2 (OX2; docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md, "The bridge types"): every invoke goes to a
+// machine and every event comes from one. `MawsBridge` is the renderer client's surface (`src/renderer/src/ipc/client.ts`),
+// over addresses; `PreloadBridge` is `window.maws`, the raw pipe over bare ids, whose invoke with no machine is the local
+// machine's (the e2e specs' and harness pages' convenience).
+export interface InvokeOptions {
+  machine?: MachineRef;
+}
+// A `path` command's options name its machine (`src/shared/ipc/routes.ts`): `MachineOptions` is that required form, which
+// M4 switches on (`PathMachineRequired`) together with the call sites that pass it; until then every command's options
+// are optional, and a `path` command that names no machine goes to the local one.
+type PathMachineRequired = false;
+export type MachineOptions<N extends CommandName> = N extends PathCommandName ? [opts: { machine: MachineRef }] : [opts?: InvokeOptions];
+export type InvokeRest<N extends CommandName> = PathMachineRequired extends true ? MachineOptions<N> : [opts?: InvokeOptions];
+export interface EventSource {
+  machine: MachineRef;
+}
+
+// The renderer client's surface over `window.maws`: components and stores use it through `ipc`.
 export interface MawsBridge {
-  invoke<N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandResult<N>>;
-  on<N extends EventName>(name: N, listener: (payload: EventPayload<N>) => void): () => void; // returns unsubscribe
+  readonly localMachine: MachineRef;
+  invoke<N extends CommandName>(name: N, input: CommandInput<N>, ...opts: InvokeRest<N>): Promise<CommandResult<N>>;
+  on<N extends EventName>(name: N, listener: (payload: EventPayload<N>, from: EventSource) => void): () => void; // returns unsubscribe
   pathForFile(file: File): string; // C7: a dropped file's path through Electron's webUtils.getPathForFile; '' when Electron has none (a file dragged from a browser)
+}
+
+// The whole surface the preload exposes as `window.maws`; nothing else is bridged. Typed by name as the client is (the ids
+// it carries are bare, which the same branded types describe), so a spec's raw call reads its answer typed.
+export interface PreloadBridge {
+  readonly localMachine: MachineRef;
+  invoke<N extends CommandName>(name: N, input: CommandInput<N>, machine?: MachineRef): Promise<CommandResult<N>>; // no machine: the local one
+  on<N extends EventName>(name: N, listener: (payload: EventPayload<N>, machine: MachineRef | undefined) => void): () => void;
+  pathForFile(file: File): string;
 }
 
 // The bridged and main-only zod-free lists together cover the registries, without exposing main-only commands.

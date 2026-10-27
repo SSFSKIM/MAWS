@@ -52,7 +52,7 @@ const ARTIFACTS_DOM_TESTS = 'src/artifacts/**/*.dom.test.{ts,tsx}';
 const ARTIFACTS_DOM_CSS = { include: [/\/document\/editor\/.+\.css/, /\/renderer\/src\/styles\/tokens\.css/, /\/(slides|design)\/editor\/.+\.css\?raw$/, /\/artifacts\/comments\/.+\.css\?raw$/] };
 // Every happy-dom project drops KaTeX's one quirks-mode advisory (happy-dom has no `document.compatMode`, so no doctype
 // silences it); every other warning passes through.
-const HAPPY_DOM_SETUP = ['test/support/artifacts-dom-setup.ts'];
+const HAPPY_DOM_SETUP = ['test/support/artifacts-dom-setup.ts', 'test/support/renderer-machine-setup.ts']; // P5 O6 M2: the page's local machine
 
 // P4 Decision Log 4 (English throughout): the suites of the code that writes what the owner reads (the renderer, the
 // artifacts, and main's and the host's display words in DISPLAY_NODE_TESTS) run under the owner's Korean system locale,

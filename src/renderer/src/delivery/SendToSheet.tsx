@@ -13,6 +13,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { DeliveryStatus } from '@shared/ipc/schema/delivery';
 import type { ArtifactExportFormat } from '@shared/maws/tools';
 import { formatAgo } from '@shared/app/date-format';
+import { addressOf } from '@shared/machine/address';
 import { useNow } from '../app/use-now';
 import { ipc } from '../ipc/client';
 import { useExportFormats } from '../library/export';
@@ -28,7 +29,8 @@ import { closeSendTo, useDelivery, type SendToSubject } from './store';
 // Drive keeps Office files editable (a deck as PowerPoint), else a PDF.
 const DRIVE_PREFER: readonly ArtifactExportFormat[] = ['docx', 'pptx', 'pdf', 'md', 'html', 'png', 'claude'];
 // The label gws's shells are filed under in the PTY host: no session owns them.
-const GWS_OWNER = 'maws-gws-setup' as AppSessionId;
+// P5 O6 M2: an address of the local machine, whose PTY host runs gws.
+const GWS_OWNER = addressOf(ipc.localMachine, 'maws-gws-setup' as AppSessionId);
 
 export const driveFormatOf = (formats: readonly ArtifactExportFormat[], picked: ArtifactExportFormat | null): ArtifactExportFormat | null =>
   picked !== null && formats.includes(picked) ? picked : (DRIVE_PREFER.find((format) => formats.includes(format)) ?? formats[0] ?? null);

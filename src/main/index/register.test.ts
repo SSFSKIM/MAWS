@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2: the router's local machine
 import { EventEmitter } from 'node:events';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -41,7 +42,7 @@ describe('main answers the record side of session.* from the index', () => {
     const { installRouter } = await import('../ipc/router');
     index = new Index(join(dir.path, 'index.sqlite'));
     registerIndexHandlers(index);
-    installRouter({ appUrl: APP_URL });
+    installRouter({ appUrl: APP_URL, local: 'LocalMachineRef0000000' as MachineRef });
   });
   afterEach(() => {
     index.close();
@@ -127,7 +128,7 @@ describe('main answers the record side of session.* from the index', () => {
     const { installRouter } = await import('../ipc/router');
     index = new Index(join(dir.path, 'index.sqlite'));
     registerIndexHandlers(index);
-    installRouter({ appUrl: APP_URL });
+    installRouter({ appUrl: APP_URL, local: 'LocalMachineRef0000000' as MachineRef });
     expect(index.readOnly).toBe(true);
     const unavailable = { ok: false, error: { code: 'internal', message: 'index unavailable: user_version 99 is newer than this app knows (12)' } }; // P2-C2: 9; P3-L: 10
     const appSessionId = randomUUID();

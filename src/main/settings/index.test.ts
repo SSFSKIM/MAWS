@@ -1,4 +1,5 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2: the router's local machine
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -71,7 +72,7 @@ beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'maws-theme-'));
   file = join(dir, 'settings.json');
   const router = await import('../ipc/router');
-  router.installRouter({ appUrl: 'http://localhost:5173/' });
+  router.installRouter({ appUrl: 'http://localhost:5173/', local: 'LocalMachineRef0000000' as MachineRef });
   ({ startSettings } = await import('./index'));
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));

@@ -1,6 +1,7 @@
 // `scm.*` through the router: every command reaches the service with the session id as sent (a run with its kind),
 // refusals arrive as values, a git timeout as `timeout` and anything else as `internal`.
 import { EventEmitter } from 'node:events';
+import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2: the router's local machine
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ScmService } from './service';
 
@@ -35,7 +36,7 @@ describe('main answers scm.* through the router', () => {
     const { registerScmHandlers } = await import('./register');
     const { installRouter } = await import('../ipc/router');
     registerScmHandlers(service as unknown as ScmService);
-    installRouter({ appUrl: APP_URL });
+    installRouter({ appUrl: APP_URL, local: 'LocalMachineRef0000000' as MachineRef });
   });
   const invoke = (name: string, input?: unknown) => electron.handlers.get(`maws:cmd:${name}`)!(event, input);
 
