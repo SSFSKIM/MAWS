@@ -26,3 +26,12 @@ export function retryDelay(attempt: number, baseMs: number, error: unknown): num
   const step = overloaded ? RETRY_CAP_MS : Math.min(RETRY_CAP_MS, baseMs * 2 ** (attempt - 1));
   return step / 2 + (Math.random() * step) / 2;
 }
+
+/**
+ * True when a call failed because the callee's code lacks `method`: during a rollout the object called may still run
+ * the code from before the method was added, and workerd refuses the call ("The RPC receiver does not implement the
+ * method "<method>"."). A caller that has a fallback for older code takes it instead of retrying.
+ */
+export function lacksMethod(error: unknown, method: string): boolean {
+  return error instanceof Error && error.message.includes(`does not implement the method "${method}"`);
+}

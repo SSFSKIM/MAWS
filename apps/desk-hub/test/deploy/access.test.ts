@@ -3,41 +3,13 @@
 // Access for enrollment's redemption and the web app's manifest and icons. Its plan is pinned here, and its
 // reconciliation against Cloudflare's API is run against a fake of that API: created once, updated in place after.
 import { describe, expect, it } from 'vitest';
-import { accessPlan, reconcileAccess, type CfApi } from '../../deploy/access.ts';
+import { accessPlan, reconcileAccess } from '../../deploy/access.ts';
+import { fakeAccessApi as fakeApi } from '../support/access-api.ts';
 import { readFileSync } from 'node:fs';
 import { deployVars } from '../../deploy/config.ts';
 
 const HOST = 'desk-hub.example.workers.dev';
 const plan = accessPlan({ name: 'desk-hub', host: HOST, ownerEmail: 'owner@example.com', sessionDuration: '24h' });
-
-/** A fake of the account's Access API: reusable policies and applications, each with an id; an app has an `aud`. */
-function fakeApi() {
-  const policies = new Map<string, Record<string, unknown>>();
-  const apps = new Map<string, Record<string, unknown>>();
-  const calls: string[] = [];
-  let next = 0;
-  const api: CfApi = {
-    async request<T>(method: string, path: string, body?: unknown): Promise<T> {
-      calls.push(`${method} ${path}`);
-      const table = path.startsWith('/access/policies') ? policies : path.startsWith('/access/apps') ? apps : undefined;
-      if (!table) throw new Error(`unexpected ${method} ${path}`);
-      const id = path.split('/')[3];
-      if (method === 'GET' && !id) return [...table.values()] as T;
-      if (method === 'POST' && !id) {
-        const record = { ...(body as object), id: `id-${++next}`, ...(table === apps ? { aud: `aud-${next}` } : {}) };
-        table.set(record.id, record);
-        return record as T;
-      }
-      if (method === 'PUT' && id && table.has(id)) {
-        const record = { ...table.get(id), ...(body as object), id };
-        table.set(id, record);
-        return record as T;
-      }
-      throw new Error(`unexpected ${method} ${path}`);
-    },
-  };
-  return { api, policies, apps, calls };
-}
 
 describe('the Access plan', () => {
   const app = plan.apps.find((a) => a.name === 'desk-hub')!;
@@ -87,13 +59,24 @@ describe('reconciling the plan with the account', () => {
     const { api, policies, apps, calls } = fakeApi();
     const first = await reconcileAccess(api, plan);
     calls.length = 0;
-    const changed = accessPlan({ name: 'desk-hub', host: HOST, ownerEmail: 'other@example.com', sessionDuration: '24h' });
-    const second = await reconcileAccess(api, changed);
+    const second = await reconcileAccess(api, plan);
     expect(second.aud).toBe(first.aud);
     expect(policies.size).toBe(3);
     expect(apps.size).toBe(2);
     expect(calls.filter((c) => c.startsWith('POST'))).toEqual([]);
-    expect([...policies.values()].find((p) => p.name === 'desk-hub owner')!.include).toEqual([{ email: { email: 'other@example.com' } }]);
+  });
+
+  it('creates the people policy with the owner alone, and never rewrites an existing one’s list (access-sync owns it)', async () => {
+    const { api, policies, calls } = fakeApi();
+    await reconcileAccess(api, plan);
+    const people = () => [...policies.values()].find((p) => p.name === 'desk-hub owner')!;
+    expect(people().include).toEqual([{ email: { email: 'owner@example.com' } }]);
+    // access-sync admitted a second member; a deploy, even one naming another owner, leaves the list as it is.
+    people().include = [{ email: { email: 'owner@example.com' } }, { email: { email: 'member@example.com' } }];
+    calls.length = 0;
+    await reconcileAccess(api, accessPlan({ name: 'desk-hub', host: HOST, ownerEmail: 'other@example.com', sessionDuration: '24h' }));
+    expect(people().include).toEqual([{ email: { email: 'owner@example.com' } }, { email: { email: 'member@example.com' } }]);
+    expect(calls).not.toContain(`PUT /access/policies/${String(people().id)}`);
   });
 });
 

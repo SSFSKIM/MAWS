@@ -57,6 +57,9 @@ import {
   UNREGISTER_PATH,
   WRITE_STALL_PATH,
   PROJECT_MACHINES_PATH,
+  PROJECTION_PATH,
+  PROJECT_STATE_FAULT_PATH,
+  MISSING_METHOD_PATH,
 } from './send-fault';
 
 const require = createRequire(import.meta.url);
@@ -318,8 +321,13 @@ export async function startLocalHub() {
     },
     /** Moves a machine's `seen` or `confirmed`, a provisioning key's expiry, or a machine's pending enrollment's expiry
      * back, as the time having passed would leave them; the Registry schedules its alarm after, and the alarm is
-     * answered (ms, or null). */
-    async backdate(change: { machines?: Array<{ name: string; seen?: string; confirmed?: string }>; key?: { id: string; expires: string }; enrollment?: { machine: string; expires: string } }): Promise<number | null> {
+     * answered (ms, or null). A pending device's expiry moves the same way. */
+    async backdate(change: {
+      machines?: Array<{ name: string; seen?: string; confirmed?: string }>;
+      key?: { id: string; expires: string };
+      enrollment?: { machine: string; expires: string };
+      pendingDevice?: { member: string; device: string; expires: string };
+    }): Promise<number | null> {
       return (JSON.parse(await seam('REGISTRY', ORG, BACKDATE_PATH, change)) as { alarm: number | null }).alarm;
     },
     /** The Registry's alarm (ms, or null); with `clear`, deleted first. */
@@ -419,6 +427,24 @@ export async function startLocalHub() {
     /** Puts `count` projects straight into the Registry, with long names. */
     async addProjects(count: number, prefix: string) {
       await seam('REGISTRY', ORG, PROJECTS_PATH, { count, prefix });
+    },
+    /** The Registry's projection of the org state. */
+    async projection(): Promise<{
+      members: Array<{ id: string; email: string; role: string }>;
+      devices: Array<{ id: string; member: string; class: string; access_client_id: string | null }>;
+      machines: Array<{ ref: string; name: string; pub: string; owners: string[] | 'org' }>;
+    }> {
+      return JSON.parse(await seam('REGISTRY', ORG, PROJECTION_PATH));
+    },
+    /** Makes a project's next `times` state announcements throw (0 disarms), as a reset object's would, or with
+     * `missing` as a project on the code before the announcement refuses the method; without `times`, arms nothing.
+     * Answers the throws still armed, the calls taken since, and the newest version announced (the suites' Worker only). */
+    async stateFault(project: string, arm: { times?: number; missing?: boolean } = {}): Promise<{ remaining: number; calls: number; announced: number | null }> {
+      return JSON.parse(await seam('PROJECT', project, PROJECT_STATE_FAULT_PATH, arm));
+    },
+    /** Whether the Registry takes workerd's own refusal of a method a callee lacks for one on older code. */
+    async missingMethod(): Promise<{ lacks: boolean; message: string }> {
+      return JSON.parse(await seam('REGISTRY', ORG, MISSING_METHOD_PATH));
     },
     /** Takes workerd's log lines matching `pattern` out of the output, kept in `runtimeLogs` for the suite to assert. */
     expectRuntimeLog(pattern: RegExp) {

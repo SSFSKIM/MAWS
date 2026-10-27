@@ -1,6 +1,7 @@
 // DX7 — identity: the registry's records, machine names, and the enrollment code. Written to outlive phase 1: the
 // org phase adds roles and per-member keys to these records rather than replacing them.
 import { isMachineName, isMemberId, machineNameKey, RESERVED_MACHINE_NAMES, type MemberId } from 'org-protocol';
+import type { Certificates, DeviceClass, KeyStorage, Passkey, RootTransition, Signed, SignedOrgState } from 'org-protocol';
 import { base64urlDecode, base64urlEncode } from './base64url';
 import type { JsonObject } from './json';
 
@@ -130,6 +131,47 @@ export type PushSubscriptionRequest = { endpoint: string; keys: { p256dh: string
 export type PushSubscriptionKept = { subscription: PushSubscriptionRecord };
 export type PushSubscriptionDeleted = { deleted: boolean };
 export type PushSubscriptions = { subscriptions: PushSubscriptionRecord[] };
+
+// The signed org state (RL5; O11 M3). The Registry keeps its chain and serves it to members and machines alike, each on
+// a route of its own: `GET` answers the head (null before a genesis), the root transitions held and the delegation
+// certificates (M4), and with `?since=<version>` the chain after that version, oldest first, in pages of about 1 MiB
+// (`more` says another page follows from the last version sent). `POST` takes a genesis (from the configured admin
+// only, keeping the bootstrap member's id) or a successor on the head; a refusal is `409 <the package's verdict code>`,
+// or `409 genesis-member`, and keeps nothing. A writer refused `not-head` signs again on the new head.
+export const ORG_STATE_PATH = '/api/org/state';
+export const MACHINE_ORG_STATE_PATH = '/machine/org/state';
+/** `POST` a recovery-signed root transition against the head (`409 <verdict code>` on refusal). */
+export const ORG_TRANSITIONS_PATH = '/api/org/transitions';
+export type OrgStateView = {
+  head: SignedOrgState | null;
+  transitions: Signed<RootTransition>[];
+  certificates: Certificates;
+  chain?: SignedOrgState[];
+  more?: boolean;
+};
+export type OrgStateAccepted = { version: number };
+export type TransitionAccepted = { fromVersion: number };
+
+// The device pairing exchange (RL §5.3): a new device, signed in as its member, posts its public keys with a MAC under
+// the pairing code its approving device shows; the member's devices list the entries, and the approving one checks the
+// MAC (the hub never does) before endorsing the device into a successor, whose acceptance drops the entry. Entries are
+// the poster's member's, at most MAX_PENDING_DEVICES, and expire PENDING_DEVICE_TTL_S after they are posted; posting a
+// device id again replaces its entry.
+export const PENDING_DEVICES_PATH = '/api/devices/pending';
+export const PENDING_DEVICE_TTL_S = 600;
+export const MAX_PENDING_DEVICES = 8;
+/** `mac`: HMAC-SHA-256, 32 bytes base64url. */
+export type PendingDeviceRequest = {
+  deviceId: string;
+  class: DeviceClass;
+  keyStorage: KeyStorage;
+  channelPub: string;
+  stepUpPub?: string;
+  passkey?: Passkey;
+  mac: string;
+};
+export type PendingDevice = PendingDeviceRequest & { member: MemberId; created: string; expires: string };
+export type PendingDevices = { pending: PendingDevice[] };
 
 /**
  * A machine project's id: the UUID v5, in the URL namespace, of `smns-machine:<org>:<the machine's name lower-cased>`

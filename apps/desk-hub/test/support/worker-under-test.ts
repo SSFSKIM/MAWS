@@ -32,6 +32,10 @@
 //   - a `Registry` armed to hold its next `leave` until the suite releases it, as the Worker held between resolving a
 //     machine's credential and asking for its revocation would be;
 //   - a `Registry` whose unfinished offline revocations wait less than a minute before they are tried again;
+//   - a `Registry` that answers its projection of the org state, moves a pending
+//     device's expiry back, and calls a method no `Project` has, saying whether it takes the refusal for older code;
+//   - a `Project` armed to throw from its next state announcements, as a reset object's call fails or as a project on
+//     the code before the announcement refuses it, saying the newest version announced;
 //   - a `Machine` armed to throw from its next calls of `directory`, and a `Registry` armed to throw from its next summary
 //     reports of a project, as a call to an object a code update reset fails, each counting the calls it took; a
 //     `Registry` and a `Project` whose first retry of such a call waits another time than the deployed second; and a
@@ -86,12 +90,18 @@ import {
   UNREGISTER_PATH,
   WRITE_STALL_PATH,
   PROJECT_MACHINES_PATH,
+  PROJECTION_PATH,
+  PROJECT_STATE_FAULT_PATH,
+  MISSING_METHOD_PATH,
 } from './send-fault';
+import { lacksMethod } from '../../src/objects/retry';
 
 export { default } from '../../src/worker';
 
 /** An armed fault: the throws still armed, and the calls taken since it was armed. */
 type Fault = { remaining: number; calls: number };
+/** An armed fault of state announcements: `missing` throws workerd's refusal of a method the callee lacks. */
+type StateFault = Fault & { missing?: boolean };
 
 /** The org's registry, which can also take a member (the hub has no endpoint for that before the org phase). */
 export class Registry extends DeployedRegistry {
@@ -161,10 +171,11 @@ export class Registry extends DeployedRegistry {
       return new Response(release ? 'released' : 'none');
     }
     if (url.pathname === BACKDATE_PATH) {
-      const { machines, key, enrollment } = (await request.json()) as {
+      const { machines, key, enrollment, pendingDevice } = (await request.json()) as {
         machines?: Array<{ name: string; seen?: string; confirmed?: string }>;
         key?: { id: string; expires: string };
         enrollment?: { machine: string; expires: string };
+        pendingDevice?: { member: string; device: string; expires: string };
       };
       const sql = this.ctx.storage.sql;
       for (const machine of machines ?? []) {
@@ -173,6 +184,7 @@ export class Registry extends DeployedRegistry {
       }
       if (key) sql.exec('UPDATE provisioning_keys SET expires = ? WHERE id = ?', key.expires, key.id);
       if (enrollment) sql.exec('UPDATE enrollments SET expires = ? WHERE id = (SELECT enrollment FROM machines WHERE name = ?)', enrollment.expires, enrollment.machine);
+      if (pendingDevice) sql.exec('UPDATE pending_devices SET expires = ? WHERE member = ? AND device = ?', pendingDevice.expires, pendingDevice.member, pendingDevice.device);
       await this.scheduleAlarm();
       return Response.json({ alarm: await this.ctx.storage.getAlarm() });
     }
@@ -208,6 +220,26 @@ export class Registry extends DeployedRegistry {
       const { id } = (await request.json()) as { id: string };
       this.ctx.storage.sql.exec('DELETE FROM projects WHERE id = ?', id);
       return new Response('unregistered');
+    }
+    if (url.pathname === PROJECTION_PATH) {
+      const sql = this.ctx.storage.sql;
+      return Response.json({
+        members: sql.exec('SELECT id, email, role FROM members ORDER BY id').toArray(),
+        devices: sql.exec('SELECT id, member, class, access_client_id FROM devices ORDER BY id').toArray(),
+        machines: sql
+          .exec<{ ref: string; name: string; pub: string; owners: string }>('SELECT ref, name, pub, owners FROM state_machines ORDER BY ref')
+          .toArray()
+          .map((m) => ({ ...m, owners: JSON.parse(m.owners) as unknown })),
+      });
+    }
+    if (url.pathname === MISSING_METHOD_PATH) {
+      const stub = this.env.PROJECT.get(this.env.PROJECT.idFromName('missing-method')) as unknown as { noSuchMethod(): Promise<void> };
+      try {
+        await stub.noSuchMethod();
+        return Response.json({ lacks: false, message: 'answered' });
+      } catch (error) {
+        return Response.json({ lacks: lacksMethod(error, 'noSuchMethod'), message: error instanceof Error ? error.message : String(error) });
+      }
     }
     if (url.pathname === ORG_ROW_PATH) {
       const { id, name } = (await request.json()) as { id: string; name: string };
@@ -392,6 +424,19 @@ export class Project extends DeployedProject {
     super.forget(org, project, machine, generation);
   }
 
+  /** Armed, the next announcements throw: as a reset object's call fails, or as one on older code lacks the method. */
+  async stateAdvanced(version: number, removed?: string[]): Promise<void> {
+    const fault = this.ctx.storage.kv.get<StateFault>('state-fault');
+    if (fault) {
+      this.ctx.storage.kv.put('state-fault', { ...fault, remaining: Math.max(0, fault.remaining - 1), calls: fault.calls + 1 });
+      if (fault.remaining > 0) {
+        throw fault.missing ? new TypeError('The RPC receiver does not implement the method "stateAdvanced".') : new Error('a failure the suite injected into a state announcement');
+      }
+    }
+    this.ctx.storage.kv.put('announced', Math.max(version, this.ctx.storage.kv.get<number>('announced') ?? 0));
+    return super.stateAdvanced(version, removed);
+  }
+
   protected async register(project: string, name: string, machine: string): Promise<ProjectRecord> {
     await this.held?.promise;
     return super.register(project, name, machine);
@@ -449,6 +494,12 @@ export class Project extends DeployedProject {
       return new Response('queued');
     }
     if (url.pathname === PROJECT_BACKLOG_PATH) return Response.json(this.backlogPages);
+    if (url.pathname === PROJECT_STATE_FAULT_PATH) {
+      const { times, missing = false } = (await request.json()) as { times?: number; missing?: boolean };
+      if (times !== undefined) this.ctx.storage.kv.put('state-fault', { remaining: times, calls: 0, missing });
+      const fault = this.ctx.storage.kv.get<StateFault>('state-fault') ?? { remaining: 0, calls: 0 };
+      return Response.json({ remaining: fault.remaining, calls: fault.calls, announced: this.ctx.storage.kv.get<number>('announced') ?? null });
+    }
     if (url.pathname === PROJECT_FORGET_FAULT_PATH) {
       this.ctx.storage.kv.put('forget-fault', true);
       return new Response('armed');

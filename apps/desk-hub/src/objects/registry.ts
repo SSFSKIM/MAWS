@@ -21,6 +21,11 @@
 // and the alarm revokes a key's machine offline past the key's time; with an admin's removal, three callers of the one
 // revocation (`revokeMachine`), each bound to the enrollment it read, so a name enrolled anew between two of its
 // caller's steps is never revoked in the old one's place.
+//
+// The org's signed state (RL5; O11 M3) is kept beside all this (`OrgChain`, org-chain.ts): once a genesis is accepted,
+// `members` is the head's projection, and member management is a signed successor, never a route of the hub's own. A
+// member a state drops is refused from then on, their grid sockets here and their project sockets (through each
+// project's announcement of the state, `Project.stateAdvanced`) closing `4403 removed`.
 import { DurableObject } from 'cloudflare:workers';
 import { hubConfig, MEMBER_HEADER, type Env, type HubConfig } from '../env';
 import type { AccessIdentity } from '../identity/access';
@@ -32,6 +37,11 @@ import type { OrgFrame } from '../protocol/machine';
 import { toWire } from '../protocol/parts';
 import {
   ENROLLMENT_TTL_S,
+  type OrgStateAccepted,
+  type OrgStateView,
+  type PendingDevice,
+  type PendingDevices,
+  type TransitionAccepted,
   isMachineName,
   machineNameKey,
   machineProjectId,
@@ -53,10 +63,11 @@ import {
   type Redeemed,
   type WrappedKeyRemoved,
 } from '../protocol/identity';
+import { OrgChain } from './org-chain';
 import { OrgKeys, type StoredKey } from './org-keys';
 import { described } from './project';
 import { checkRequest, ProvisioningKeys, type KeyRow } from './provisioning-keys';
-import { RETRY_ATTEMPTS, RETRY_BASE_MS, retryDelay } from './retry';
+import { lacksMethod, RETRY_ATTEMPTS, RETRY_BASE_MS, retryDelay } from './retry';
 
 export type Principal = { kind: 'member'; org: OrgRecord; member: MemberRecord } | { kind: 'machine'; org: OrgRecord; machine: MachineRecord };
 
@@ -144,6 +155,7 @@ export class Registry extends DurableObject<Env> {
 
   private readonly keys: OrgKeys;
   private readonly provisioning: ProvisioningKeys;
+  private readonly chain: OrgChain;
   /** Per enrollment, an offline revocation the sweep began and has not seen complete, and when it last began: its fence
    * may be placed, so it is tried again until it completes, whatever the machine's online state or offline deadline
    * reads since (an object restart forgets it). */
@@ -164,6 +176,7 @@ export class Registry extends DurableObject<Env> {
     }
     this.keys = new OrgKeys(ctx.storage);
     this.provisioning = new ProvisioningKeys(ctx.storage);
+    this.chain = new OrgChain(ctx.storage);
   }
 
   private get config(): HubConfig {
@@ -974,7 +987,78 @@ export class Registry extends DurableObject<Env> {
   }
 
   private holdsAnything(): boolean {
-    return ['machines', 'enrollments', 'projects'].some((table) => this.sql.exec(`SELECT 1 FROM ${table} LIMIT 1`).toArray().length > 0) || this.provisioning.any();
+    return ['machines', 'enrollments', 'projects'].some((table) => this.sql.exec(`SELECT 1 FROM ${table} LIMIT 1`).toArray().length > 0) || this.provisioning.any() || this.chain.any();
+  }
+
+  // ---- The org's signed state (RL5; O11 M3) --------------------------------------------------------------------
+
+  /** The head, the transitions and the certificates; with `since` (a version, as the query gives it), the chain after it. */
+  orgState(since: string | null): Result<OrgStateView> {
+    this.ensureOrg();
+    if (since === null) return ok(this.chain.view());
+    if (!/^(0|[1-9][0-9]{0,15})$/.test(since) || !Number.isSafeInteger(Number(since))) return fail(400, 'bad-shape', '?since= is a version: a whole number from 0');
+    return ok(this.chain.view(Number(since)));
+  }
+
+  /** The head as `GET /api/org/state` answers it, for a `Project` verifying v2 events (M5) to cache. */
+  head(): OrgStateView {
+    this.ensureOrg();
+    return this.chain.view();
+  }
+
+  /**
+   * A genesis or a successor (`OrgChain.submit`). Once one is accepted, the members it dropped are refused here at once,
+   * their grid sockets close `4403 removed`, and every project is told the new version and who was dropped.
+   */
+  async submitState(member: MemberRecord, body: unknown): Promise<Result<OrgStateAccepted>> {
+    if (body === undefined) return fail(400, 'bad-shape', 'the body is a SignedOrgState, {state, sigs}');
+    const org = this.ensureOrg();
+    const accepted = await this.chain.submit(body, member, org.id, { email: this.config.org.adminEmail });
+    if (!accepted.ok) return accepted;
+    const { version, removed } = accepted.value;
+    for (const socket of this.ctx.getWebSockets()) {
+      if (!removed.includes((socket.deserializeAttachment() as { member?: string } | null)?.member ?? '')) continue;
+      try {
+        socket.close(4403, 'removed');
+      } catch {
+        // already closing
+      }
+    }
+    for (const { id } of this.sql.exec<{ id: string }>('SELECT id FROM projects').toArray()) this.announce(org.id, id, version, removed, 1);
+    return ok({ version });
+  }
+
+  /**
+   * Tells a project the org state advanced to `version`, dropping `removed` (`Project.stateAdvanced`), `attempt` being
+   * how many times it was told; a call that fails is sent again as retry.ts says. A project still on the code before
+   * the announcement lacks the method: it holds no cached state to refresh, and is taken as told.
+   */
+  private announce(org: string, project: string, version: number, removed: string[], attempt: number): void {
+    void this.env.PROJECT.get(this.env.PROJECT.idFromName(`${org}:${project}`))
+      .stateAdvanced(version, removed)
+      .catch((error: unknown) => {
+        if (lacksMethod(error, 'stateAdvanced')) return;
+        const wait = attempt < RETRY_ATTEMPTS ? retryDelay(attempt, this.retryBaseMs(), error) : null;
+        console.log(JSON.stringify({ desk: 'registry', event: 'announce-failed', project, version, attempt, error: described(error), retry_ms: wait === null ? null : Math.round(wait) }));
+        if (wait !== null) setTimeout(() => this.announce(org, project, version, removed, attempt + 1), wait);
+      });
+  }
+
+  /** A root transition the recovery key signed against the head (`OrgChain.submitTransition`). */
+  async submitTransition(body: unknown): Promise<Result<TransitionAccepted>> {
+    if (body === undefined) return fail(400, 'bad-shape', 'the body is a signed RootTransition, {body, sig}');
+    this.ensureOrg();
+    return this.chain.submitTransition(body);
+  }
+
+  /** A new device's pairing entry, posted as its member (`OrgChain.keepPending`). */
+  keepPendingDevice(member: MemberRecord, body: unknown): Result<{ pending: PendingDevice }> {
+    return this.chain.keepPending(member.id, body);
+  }
+
+  /** The member's pairing entries, for their devices to approve. */
+  pendingDevices(member: MemberRecord): PendingDevices {
+    return { pending: this.chain.pending(member.id) };
   }
 
   // ---- The org key's wrapped copies (DX7) ----------------------------------------------------------------------

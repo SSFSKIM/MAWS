@@ -11,7 +11,7 @@ naming its account, Worker, host, owner and org:
 
 Everything here goes through one command, run from the MAWS worktree root:
 
-    pnpm --filter desk-hub deployment <deploy|probe|fake-check|redeploy-check|measure|frame-cost|counts> [--config deploy/<file>.json] [options]
+    pnpm --filter desk-hub deployment <deploy|probe|fake-check|redeploy-check|measure|frame-cost|counts|access-sync> [--config deploy/<file>.json] [options]
 
 Each command acts on the deployment `--config` names, `config.json` when it
 names none (the path resolves from `apps/desk-hub`, where pnpm runs the
@@ -56,9 +56,9 @@ repository:
 
 | Name | What it is | Used by |
 | --- | --- | --- |
-| `CF_ACCESS_SETUP_TOKEN` | An API token with Access: Apps and Policies Edit, Service Tokens Edit, Organizations Read | `deploy`, `redeploy-check` |
+| `CF_ACCESS_SETUP_TOKEN` | An API token with Access: Apps and Policies Edit, Service Tokens Edit, Organizations Read | `deploy`, `redeploy-check`, `access-sync` |
 | `CF_DESK_HUB_SERVICE_TOKENS` | An API token with Access: Service Tokens Edit only. It becomes the Worker's `CF_API_TOKEN` secret, with which the hub mints and deletes machines' service tokens | `deploy`, `probe`, `redeploy-check` |
-| `DESK_ACCESS_TOKEN` | A person's Access session as an app token for one deployment: `cloudflared access login $HUB` once (a browser sign-in), then `cloudflared access token -app=$HUB` | `probe`, `fake-check`, `redeploy-check`, `measure`, `counts` |
+| `DESK_ACCESS_TOKEN` | A person's Access session as an app token for one deployment: `cloudflared access login $HUB` once (a browser sign-in), then `cloudflared access token -app=$HUB` | `probe`, `fake-check`, `redeploy-check`, `measure`, `counts`, `access-sync` |
 
 The owner keeps the two API tokens under
 `~/.config/claude-secrets/projects/-Users-new-Developer-GitHub-doperpowers/`.
@@ -83,7 +83,7 @@ OAuth token carries no Access scopes, which is why the setup token exists.
    the Worker (`<worker>` below: `desk-hub` or `desk-hub-staging`), so the two
    deployments' Access objects never meet:
    - three reusable policies:
-     - `<worker> owner`: Allow, the owner's email;
+     - `<worker> owner`: Allow, the owner's email. Created so when absent and never rewritten after: its email list is `access-sync`'s (below), and a deploy that reset it would shut out every member the org state admitted;
      - `<worker> machines`: Service Auth, any Access service token;
      - `<worker> public paths`: Bypass, everyone;
    - two self-hosted applications:
@@ -113,6 +113,24 @@ Options:
 The org id is written into every project's `.smns` (`hub.org`) and into each
 machine's service-token name (`desk-<org>-<machine>`), so changing it later
 means enrolling every machine again.
+
+## `access-sync` (an Access change)
+
+Access fronts the whole host, so a person reaches the hub only if the people
+policy `<worker> owner` lists their email. Once the org has a signed state
+(O11's Registry, `GET /api/org/state`), members are added, removed and have
+their emails changed by signed successors, and `access-sync` makes the
+policy's list exactly the head's member emails: it reads the head as the
+person whose `DESK_ACCESS_TOKEN` it is given, upserts the policy by name, reads
+it back through the Access API and prints what Access now admits. Before any
+state, the list is the owner alone. A member the state admits, or an email it
+changes, reaches the hub only after this runs; one it removes is refused by the
+Registry at once, and by Access once this runs.
+
+    printf '%s\n' "CF_ACCESS_SETUP_TOKEN=$(cat $S/CF_ACCESS_SETUP_TOKEN)" "DESK_ACCESS_TOKEN=$(cloudflared access token -app=$HUB)" \
+      | pnpm --filter desk-hub deployment access-sync --config deploy/staging.json
+
+On production it changes production's Access, which waits for the owner.
 
 ## After the first deploy (the owner)
 

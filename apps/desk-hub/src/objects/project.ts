@@ -326,6 +326,23 @@ export class Project extends DurableObject<Env> {
     this.reportSummary();
   }
 
+  /**
+   * The Registry's announcement of an accepted org state (O11 M3): `version` is the state's, `removed` the members it
+   * dropped, whose sockets here close `4403 removed` (Access no longer admits them, so none opens again). A second
+   * telling closes nothing more. M5 refreshes the project's cached head here.
+   */
+  async stateAdvanced(version: number, removed: string[] = []): Promise<void> {
+    for (const socket of this.ctx.getWebSockets()) {
+      if (!removed.includes(this.attachment(socket).member)) continue;
+      await this.webSocketClose(socket);
+      try {
+        socket.close(4403, 'removed');
+      } catch {
+        // already closing
+      }
+    }
+  }
+
   /** Leases that lapsed, request windows that closed, and command receipts past retention, without new traffic. */
   async alarm(): Promise<void> {
     this.sweepLeases();
