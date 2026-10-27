@@ -7,8 +7,30 @@ import { drain, readLimited } from './drain';
 import { CLIENT_HEADER, hubConfig, MACHINE_HEADER, MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, type Env } from './env';
 import { AccessError, certsKeySource, verifyAccessAssertion, type KeySource } from './identity/access';
 import type { Principal, Registry, Result } from './objects/registry';
-import { MACHINE_ENROLLMENT_PATH, ORG_KEYS_PATH, PROVISIONING_KEYS_PATH, PUSH_KEY_PATH, PUSH_SUBSCRIPTIONS_PATH, REDEEM_PATH, type MachineSelf } from './protocol/identity';
+import {
+  CERT_RETIREMENTS_PATH,
+  ENROLLMENT_KEY_PATH,
+  LISTINGS_PATH,
+  MACHINE_CERT_PATH,
+  MACHINE_CERT_RETIREMENTS_PATH,
+  MACHINE_ENDPOINT_PATH,
+  MACHINE_KEY_PATH,
+  MACHINE_ENROLLMENT_PATH,
+  MACHINE_ORG_STATE_PATH,
+  ORG_KEYS_PATH,
+  ORG_STATE_PATH,
+  ORG_TRANSITIONS_PATH,
+  PENDING_DEVICES_PATH,
+  PROVISIONING_KEYS_PATH,
+  PUSH_KEY_PATH,
+  PUSH_SUBSCRIPTIONS_PATH,
+  REDEEM_PATH,
+  type MachineSelf,
+  type PushSubscriptions,
+} from './protocol/identity';
+import { lacksMethod } from './objects/retry';
 import { POST_LIMIT } from './protocol/machine';
+import { FRAME_LIMIT } from './protocol/parts';
 
 export { Machine } from './objects/machine';
 export { Project } from './objects/project';
@@ -22,6 +44,8 @@ const ORG_KEY_PATH = /^\/api\/org\/keys\/([^/]+)$/;
 const PROVISIONING_KEY_PATH = /^\/api\/provisioning-keys\/([^/]+)$/;
 /** A JSON body of an endpoint other than the machine's POST is small. */
 const BODY_LIMIT = 64 * 1024;
+/** A signed org state grows with the org (members, devices, every machine name it ever held): it may take a frame. */
+const STATE_LIMIT = FRAME_LIMIT;
 
 // One key source per certificate URL for the isolate's life, so the team's keys are fetched once, not per request.
 const keySources = new Map<string, KeySource>();
@@ -40,12 +64,17 @@ function keysAt(url: string): KeySource {
 
 const json = (status: number, body: unknown) => Response.json(body, { status });
 const answer = <T>(result: Result<T>, status = 200) =>
-  result.ok ? json(status, result.value) : json(result.status, { error: result.error, ...(result.message ? { message: result.message } : {}) });
+  result.ok
+    ? json(status, result.value)
+    : json(result.status, { error: result.error, ...(result.message ? { message: result.message } : {}), ...(result.conflicts ? { conflicts: result.conflicts } : {}) });
+/** A record's keeping: `201` when it was kept, `200` when the same was held already. */
+const kept = <T extends { stored: boolean } | { kept: boolean }>(result: Result<T>) =>
+  answer(result, result.ok && ('stored' in result.value ? result.value.stored : result.value.kept) ? 201 : 200);
 
 /** A small JSON body; undefined when it is missing, too large, or not JSON (the callee answers `bad-shape`). */
-async function body(request: Request): Promise<unknown> {
-  if (Number(request.headers.get('Content-Length') ?? 0) > BODY_LIMIT) return undefined;
-  const bytes = await readLimited(request.body, BODY_LIMIT);
+async function body(request: Request, limit = BODY_LIMIT): Promise<unknown> {
+  if (Number(request.headers.get('Content-Length') ?? 0) > limit) return undefined;
+  const bytes = await readLimited(request.body, limit);
   if (!bytes) return undefined;
   try {
     return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
@@ -75,11 +104,24 @@ const BUILD = typeof DESK_BUILD === 'string' ? DESK_BUILD : 'dev';
  * machine reconnects on either, as on any answer but 200; the line is the hub's record of it.
  */
 function failure(error: unknown): Response {
+  // A route this code added, reaching an object still on the code before it (a deploy reaches objects minutes after the
+  // Worker): the client tries again once the object is updated.
+  if (lacksMethod(error)) return json(503, { error: 'hub-updating', message: (error as Error).message });
   const e = error as { message?: unknown; retryable?: unknown; overloaded?: unknown } | null;
   const retryable = e?.retryable === true || e?.overloaded === true;
   const message = typeof e?.message === 'string' ? e.message : String(error);
   console.error(JSON.stringify({ desk: 'worker-exception', message, retryable, overloaded: e?.overloaded === true }));
   return json(retryable ? 503 : 500, { error: retryable ? 'hub-unavailable' : 'hub-error', message });
+}
+
+/** A Registry method this code added, or, from a Registry still on the code before it, what its older method answers. */
+async function orOlder<T>(call: () => Promise<T>, method: string, older: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (error) {
+    if (lacksMethod(error, method)) return older();
+    throw error;
+  }
 }
 
 export default {
@@ -145,9 +187,27 @@ async function member(request: Request, url: URL, env: Env, registry: DurableObj
   if (pathname === PROVISIONING_KEYS_PATH && method === 'POST') return answer(await registry.createProvisioningKey(you, await body(request)), 201);
   const provisioningKey = PROVISIONING_KEY_PATH.exec(pathname);
   if (provisioningKey && method === 'DELETE') return answer(await registry.revokeProvisioningKey(you, decodeURIComponent(provisioningKey[1])));
+  if (pathname === ORG_STATE_PATH && method === 'GET') return answer(await registry.orgState(url.searchParams.get('since')));
+  if (pathname === ORG_STATE_PATH && method === 'POST') return answer(await registry.submitState(you, await body(request, STATE_LIMIT)), 201);
+  if (pathname === ORG_TRANSITIONS_PATH && method === 'POST') return answer(await registry.submitTransition(you, await body(request)), 201);
+  const enrollmentKey = ENROLLMENT_KEY_PATH.exec(pathname);
+  if (enrollmentKey && method === 'GET') return answer(await registry.enrollmentKey(you, enrollmentKey[1]));
+  if (pathname === CERT_RETIREMENTS_PATH && method === 'POST') return kept(await registry.memberRetiresCert(you, await body(request)));
+  if (pathname === LISTINGS_PATH && method === 'GET') return answer(await registry.listings(you, url.searchParams.get('project')));
+  const endpoint = MACHINE_ENDPOINT_PATH.exec(pathname);
+  if (endpoint && method === 'GET') return answer(await registry.machineEndpoint(you, decodeURIComponent(endpoint[1])));
+  if (pathname === PENDING_DEVICES_PATH && method === 'GET') return answer(await registry.pendingDevices(you));
+  if (pathname === PENDING_DEVICES_PATH && method === 'POST') return answer(await registry.keepPendingDevice(you, await body(request)), 201);
   if (pathname === PUSH_KEY_PATH && method === 'GET') return json(200, await registry.pushKey());
   if (pathname === PUSH_SUBSCRIPTIONS_PATH) {
-    if (method === 'GET') return json(200, await registry.pushSubscriptions(you));
+    if (method === 'GET') {
+      const listed = await orOlder<Result<PushSubscriptions>>(
+        async () => await registry.memberPushSubscriptions(you),
+        'memberPushSubscriptions',
+        async () => ({ ok: true, value: await registry.pushSubscriptions(you) }),
+      );
+      return answer(listed);
+    }
     if (method === 'PUT') return answer(await registry.keepPushSubscription(you, await body(request)));
     if (method === 'DELETE') return answer(await registry.deletePushSubscription(you, await body(request)));
   }
@@ -174,6 +234,13 @@ async function machine(request: Request, url: URL, env: Env, registry: DurableOb
     if (request.method === 'GET') return json(200, { org: org.id, machine: self.name, state: self.state, confirmed: self.confirmed } satisfies MachineSelf);
     if (request.method === 'DELETE') return answer(await registry.leave(self));
   }
+  // The org state, as members read it: RL1's `state {version}` notice sends an endpoint here.
+  if (url.pathname === MACHINE_ORG_STATE_PATH && request.method === 'GET') return answer(await registry.orgState(url.searchParams.get('since')));
+  // Hub v2's enrollment (O11 M4): the machine's own key, or a delegated machine's certificate, and a certificate's
+  // retirement by its delegation's key.
+  if (request.method === 'POST' && url.pathname === MACHINE_KEY_PATH) return kept(await registry.keepMachineKey(principal.machine, await body(request)));
+  if (request.method === 'POST' && url.pathname === MACHINE_CERT_PATH) return kept(await registry.storeCert(principal.machine, await body(request)));
+  if (request.method === 'POST' && url.pathname === MACHINE_CERT_RETIREMENTS_PATH) return kept(await registry.machineRetiresCert(principal.machine, await body(request)));
   const stub = env.MACHINE.get(env.MACHINE.idFromName(`${principal.org.id}:${principal.machine.name}`));
   const identity = { [ORG_HEADER]: principal.org.id, [MACHINE_HEADER]: principal.machine.name, [CLIENT_HEADER]: principal.machine.client_id ?? '' };
   if (url.pathname === '/machine/stream' && request.method === 'GET') return stub.fetch(forward(request, 'https://machine/stream', identity));

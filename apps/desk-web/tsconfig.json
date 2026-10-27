@@ -14,6 +14,8 @@
     "types": ["vite/client"],
     "strict": true,
     "isolatedModules": true,
+    // The protocol package (apps/org-protocol), reached through `desk-hub/protocol`, imports with `.ts` extensions.
+    "allowImportingTsExtensions": true,
     "noEmit": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,

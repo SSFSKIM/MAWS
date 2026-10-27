@@ -3,9 +3,10 @@
 // and the project's audit record. Events are kept as received (a `hub/` event with the `writer`, `seq`, and `ts` the hub
 // assigned) and compared by their canonical form, so a second copy of an event differs from the first only if its
 // canonical form does.
+import { isSig } from 'org-protocol';
 import { isBase64urlOf } from '../protocol/base64url';
 import { canonicalize } from '../protocol/canonical';
-import { isHubWriter, isLogSeq, questionEffect, type LogEvent, type Vector } from '../protocol/log';
+import { isHubWriter, isLogSeq, LEGACY_WRITER_PREFIX, questionEffect, type LogEvent, type Vector } from '../protocol/log';
 import { FRAME_LIMIT } from '../protocol/parts';
 
 // `open_questions`: one row per async question the log holds open (`questionEffect`), kept as each event is stored.
@@ -36,8 +37,10 @@ export type AuditRow = { id: number; at: string; kind: AuditKind; entry: Record<
 
 /**
  * Why an event is not one the hub can store, or null when it can: a writer of the form `<prefix>/<rest>` without
- * control characters, a positive integer seq, string `ts` and `kind`, a `mac` whose nonce and value are canonical
- * base64url, a form RFC 8785 admits, and at most 1 MiB. The hub holds no key and checks no code.
+ * control characters, a positive integer seq, string `ts` and `kind`, DX1's `mac` or RL8's `sig` or both (O11 M5), each
+ * in its canonical spelling, a form RFC 8785 admits, and at most 1 MiB. A `hub/` event's `nonce`, which a v2-only one
+ * needs for its resends to be known, is 16 bytes; a `legacy/` writer is v1-only and carries a `mac`. The hub holds no
+ * org key and checks no code; a `sig` is checked by the Project (signed-events.ts).
  */
 export function eventShapeError(event: unknown): string | null {
   if (typeof event !== 'object' || event === null || Array.isArray(event)) return 'an event is a JSON object';
@@ -47,11 +50,17 @@ export function eventShapeError(event: unknown): string | null {
   }
   if (!isLogSeq(e.seq)) return 'seq is a positive integer';
   if (typeof e.ts !== 'string' || typeof e.kind !== 'string') return 'ts and kind are strings';
+  if (e.mac === undefined && e.sig === undefined) return 'an event carries a mac, a sig, or both';
   const mac = e.mac as { nonce?: unknown; value?: unknown } | undefined;
   // DX1: one spelling per value. A variant the hub stored would reach every daemon as an event it refuses.
-  if (typeof mac !== 'object' || mac === null || !isBase64urlOf(mac.nonce, 16) || !isBase64urlOf(mac.value, 32)) {
+  if (mac !== undefined && (typeof mac !== 'object' || mac === null || !isBase64urlOf(mac.nonce, 16) || !isBase64urlOf(mac.value, 32))) {
     return 'mac is {nonce, value}: 16 and 32 bytes, each in canonical base64url';
   }
+  if (e.sig !== undefined && !isSig(e.sig)) return 'sig is {kid, value}: 16 and 64 bytes, each in canonical base64url';
+  if (isHubWriter(e.writer) && (e.nonce !== undefined || mac === undefined) && !isBase64urlOf(e.nonce, 16)) {
+    return 'a hub/ event without a mac carries nonce, and a nonce is 16 bytes in canonical base64url';
+  }
+  if (e.writer.startsWith(LEGACY_WRITER_PREFIX) && mac === undefined) return 'a legacy/ event is v1-only: it carries a mac';
   try {
     if (encoder.encode(canonicalize(event)).length > FRAME_LIMIT) return 'an event is at most 1 MiB';
   } catch (error) {
@@ -95,7 +104,7 @@ export class LogStore {
     return row && (JSON.parse(row.body) as LogEvent);
   }
 
-  /** A `hub/` event by its writer and `mac.nonce` (a web `human` sent again). */
+  /** A `hub/` event by its writer and its resend nonce (`resendNonce`: a web or device `human` sent again). */
   byNonce(writer: string, nonce: string): Stored | undefined {
     const row = this.sql.exec<{ offset: number; body: string }>('SELECT offset, body FROM events WHERE nonce = ? AND writer = ?', nonce, writer).toArray()[0];
     return row && { offset: row.offset, event: JSON.parse(row.body) as LogEvent };
@@ -111,7 +120,7 @@ export class LogStore {
           event.writer,
           event.seq,
           JSON.stringify(event),
-          isHubWriter(event.writer) ? event.mac.nonce : null,
+          isHubWriter(event.writer) ? resendNonce(event) : null,
         )
         .one().offset;
       this.sql.exec('INSERT INTO writers (writer, last) VALUES (?, ?) ON CONFLICT (writer) DO UPDATE SET last = excluded.last', event.writer, event.seq);
@@ -187,6 +196,15 @@ export class LogStore {
       .reverse()
       .map((row) => ({ ...row, entry: JSON.parse(row.entry) as Record<string, unknown> }));
   }
+}
+
+/**
+ * The nonce a `hub/` event's resend is known by: its own `nonce` (RL8's, inside its signature), or DX1's `mac.nonce`
+ * for an event without one. Undefined for neither.
+ */
+export function resendNonce(event: { nonce?: unknown; mac?: { nonce?: unknown } }): string | undefined {
+  if (typeof event.nonce === 'string') return event.nonce;
+  return typeof event.mac?.nonce === 'string' ? event.mac.nonce : undefined;
 }
 
 /** Two events are one when their canonical forms are equal (the order of keys, say, is not a difference). */

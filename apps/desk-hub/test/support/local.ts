@@ -57,6 +57,14 @@ import {
   UNREGISTER_PATH,
   WRITE_STALL_PATH,
   PROJECT_MACHINES_PATH,
+  PROJECTION_PATH,
+  PROJECT_STATE_FAULT_PATH,
+  MISSING_METHOD_PATH,
+  REGISTRY_HEAD_FAULT_PATH,
+  PROJECT_STATE_CACHE_PATH,
+  REGISTRY_RPC_PATH,
+  AS_MEMBER_PATH,
+  LACKS_PATH,
 } from './send-fault';
 
 const require = createRequire(import.meta.url);
@@ -215,6 +223,26 @@ export async function startLocalHub() {
       await response.body?.cancel();
       return status;
     },
+    /**
+     * A member's socket upgrade straight to a project's object (`/socket`) or the Registry (`/grid`), with the headers
+     * the Worker sets once it resolved the member: how an upgrade the Worker admitted reaches the object late, after
+     * a state that dropped the member. Answers the status; an accepted socket is closed at once.
+     */
+    async socketUpgrade(to: { project: string } | 'registry', member: string): Promise<number> {
+      const binding = to === 'registry' ? 'REGISTRY' : 'PROJECT';
+      const namespace = await mf.getDurableObjectNamespace(binding);
+      const response = await namespace
+        .get(namespace.idFromName(to === 'registry' ? ORG : `${ORG}:${to.project}`))
+        .fetch(to === 'registry' ? 'https://registry/grid' : 'https://project/socket', {
+          headers: { Upgrade: 'websocket', 'X-Desk-Member': member, 'X-Desk-Org': ORG, ...(to === 'registry' ? {} : { 'X-Desk-Project': to.project }) },
+        });
+      const socket = response.webSocket;
+      if (socket) {
+        socket.accept();
+        socket.close(1000, 'done');
+      } else await response.body?.cancel();
+      return response.status;
+    },
     /** Shortens a machine's heartbeat and lease (and its grace, the heartbeat's unless given, and its probe); set before
      * its stream opens (the suites' Worker only). */
     async timing(machine: string, timing: { heartbeatMs: number; leaseMs: number; graceMs?: number; probeMs?: number; writeTimeoutMs?: number }) {
@@ -254,7 +282,7 @@ export async function startLocalHub() {
       return JSON.parse(await seam('PROJECT', project, PROJECT_CALLS_PATH)) as { calls: number; frames: number };
     },
     /** Hands a project a lease's renewal or close for any generation, as a late one from an older stream would come. */
-    async lease(project: string, change: { op: 'renew' | 'closed'; machine: string; generation: number; leaseMs?: number }) {
+    async lease(project: string, change: { op: 'renew' | 'closed' | 'forget'; machine: string; generation: number; leaseMs?: number }) {
       await seam('PROJECT', project, PROJECT_LEASE_PATH, { org: ORG, project, client: '', leaseMs: 0, ...change });
     },
     /**
@@ -299,9 +327,10 @@ export async function startLocalHub() {
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
     },
-    /** Holds the answer to the machine's next revocation until `releaseRevoke`, or loses it once the revocation is
-     * stored (`lose`), as a slow or a lost RPC answer would (the suites' Worker only). */
-    async faultNextRevoke(machine: string, mode: 'hold' | 'lose') {
+    /** Holds the answer to the machine's next revocation until `releaseRevoke`, loses it once the revocation is stored
+     * (`lose`), as a slow or a lost RPC answer would, or fails it before it is applied (`fail`), as an RPC that never
+     * arrived (the suites' Worker only). */
+    async faultNextRevoke(machine: string, mode: 'hold' | 'lose' | 'fail') {
       await seam('MACHINE', machine, `${REVOKE_FAULT_PATH}?mode=${mode}`);
     },
     /** Whether the answer to a revocation of the machine is held. */
@@ -318,8 +347,13 @@ export async function startLocalHub() {
     },
     /** Moves a machine's `seen` or `confirmed`, a provisioning key's expiry, or a machine's pending enrollment's expiry
      * back, as the time having passed would leave them; the Registry schedules its alarm after, and the alarm is
-     * answered (ms, or null). */
-    async backdate(change: { machines?: Array<{ name: string; seen?: string; confirmed?: string }>; key?: { id: string; expires: string }; enrollment?: { machine: string; expires: string } }): Promise<number | null> {
+     * answered (ms, or null). A pending device's expiry moves the same way. */
+    async backdate(change: {
+      machines?: Array<{ name: string; seen?: string; confirmed?: string }>;
+      key?: { id: string; expires: string };
+      enrollment?: { machine: string; expires: string };
+      pendingDevice?: { member: string; device: string; expires: string };
+    }): Promise<number | null> {
       return (JSON.parse(await seam('REGISTRY', ORG, BACKDATE_PATH, change)) as { alarm: number | null }).alarm;
     },
     /** The Registry's alarm (ms, or null); with `clear`, deleted first. */
@@ -419,6 +453,51 @@ export async function startLocalHub() {
     /** Puts `count` projects straight into the Registry, with long names. */
     async addProjects(count: number, prefix: string) {
       await seam('REGISTRY', ORG, PROJECTS_PATH, { count, prefix });
+    },
+    /** The Registry's projection of the org state. */
+    async projection(): Promise<{
+      members: Array<{ id: string; email: string; role: string }>;
+      devices: Array<{ id: string; member: string; class: string; access_client_id: string | null }>;
+      machines: Array<{ ref: string; name: string; pub: string; owners: string[] | 'org' }>;
+    }> {
+      return JSON.parse(await seam('REGISTRY', ORG, PROJECTION_PATH));
+    },
+    /** Makes a project's next `times` state announcements throw (0 disarms), as a reset object's would, or with
+     * `missing` as a project on the code before the announcement refuses the method; without `times`, arms nothing.
+     * Answers the throws still armed, the calls taken since, and the newest version announced (the suites' Worker only). */
+    async stateFault(project: string, arm: { times?: number; missing?: boolean } = {}): Promise<{ remaining: number; calls: number; announced: number | null }> {
+      return JSON.parse(await seam('PROJECT', project, PROJECT_STATE_FAULT_PATH, arm));
+    },
+    /** Makes every `Registry.head()` fail from now on (`true`), or answer again (`false`) (the suites' Worker only). */
+    async headFault(fail: boolean) {
+      await seam('REGISTRY', ORG, REGISTRY_HEAD_FAULT_PATH, { fail });
+    },
+    /** Moves a project's clock on by `ahead` ms, so the org state it cached ages; holds its reads of the org-state head
+     * (`hold: true`) or releases them (`false`); bounds them by `readTimeoutMs`; answers how many times the project read
+     * the org-state head (the suites' Worker only). */
+    async stateCache(project: string, change: { ahead?: number; hold?: boolean; readTimeoutMs?: number } = {}): Promise<{ reads: number }> {
+      return JSON.parse(await seam('PROJECT', project, PROJECT_STATE_CACHE_PATH, change));
+    },
+    /** Calls one of the Registry's RPC methods as another object would (M6's Machine DO; a `Project`'s push), and
+     * answers its result (the suites' Worker only). */
+    async registryRpc<T>(method: 'storeListing' | 'storeEndpoint' | 'notify' | 'ownersOf' | 'push', ...args: unknown[]): Promise<T> {
+      return JSON.parse(await seam('REGISTRY', ORG, REGISTRY_RPC_PATH, { method, args })) as T;
+    },
+    /** Calls the Registry's RPC methods all at once, as several objects would, and answers each one's result in order. */
+    async registryRpcs<T>(calls: Array<{ method: 'storeListing' | 'storeEndpoint'; args: unknown[] }>): Promise<T[]> {
+      return JSON.parse(await seam('REGISTRY', ORG, REGISTRY_RPC_PATH, { concurrent: calls })) as T[];
+    },
+    /** Makes the Registry refuse calls of `method` as one on older code would (null: as deployed). */
+    async registryLacks(method: string | null) {
+      await seam('REGISTRY', ORG, LACKS_PATH, { method });
+    },
+    /** Calls the Registry's `call` for `member` as given (a record the Worker resolved earlier), with `args`; its answer. */
+    async asMember(call: string, member: unknown, ...args: unknown[]): Promise<unknown> {
+      return JSON.parse(await seam('REGISTRY', ORG, AS_MEMBER_PATH, { call, member, args }));
+    },
+    /** Whether the Registry takes workerd's own refusal of a method a callee lacks for one on older code. */
+    async missingMethod(): Promise<{ lacks: boolean; message: string }> {
+      return JSON.parse(await seam('REGISTRY', ORG, MISSING_METHOD_PATH));
     },
     /** Takes workerd's log lines matching `pattern` out of the output, kept in `runtimeLogs` for the suite to assert. */
     expectRuntimeLog(pattern: RegExp) {

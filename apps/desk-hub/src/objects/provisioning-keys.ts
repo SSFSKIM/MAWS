@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS provisioning_keys (
 
 const COLUMNS = 'id, label, prefix, created_by, created, expires, max_uses, uses, offline_revoke_s, revoked';
 /** A key as stored, without the machines it enrolled. */
-export type KeyRow = Omit<ProvisioningKeyRecord, 'machines'>;
+export type KeyRow = Omit<ProvisioningKeyRecord, 'machines' | 'delegation'>;
 
 const whole = (value: unknown, min: number, max: number): value is number => typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max;
 
@@ -92,9 +92,10 @@ export class ProvisioningKeys {
     return this.sql.exec<KeyRow>(`SELECT ${COLUMNS} FROM provisioning_keys WHERE secret_hash = ?`, secretHash).toArray()[0];
   }
 
-  /** Counts one enrollment made through the key. */
-  use(id: string): void {
+  /** Counts one enrollment made through the key; answers which use it was (the count after it). */
+  use(id: string): number {
     this.sql.exec('UPDATE provisioning_keys SET uses = uses + 1 WHERE id = ?', id);
+    return this.sql.exec<{ uses: number }>('SELECT uses FROM provisioning_keys WHERE id = ?', id).one().uses;
   }
 
   /** Every key by creation, with the machines enrolled through it now (pending or active). */

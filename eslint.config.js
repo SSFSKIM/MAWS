@@ -185,7 +185,7 @@ module.exports = defineConfig(
   // the fake machine as it stands, so it imports no runtime's module; apps/desk-hub/tsconfig.protocol.json holds its
   // globals to WebCrypto, text encoding, and URL.
   {
-    files: ['apps/desk-hub/src/protocol/**/*.ts'],
+    files: ['apps/desk-hub/src/protocol/**/*.ts', 'apps/org-protocol/src/**/*.ts', 'apps/org-protocol/vectors/{index,replay,scenario}.ts'], // P5-O11 M1: the protocol package
     rules: {
       'no-restricted-imports': [
         'error',

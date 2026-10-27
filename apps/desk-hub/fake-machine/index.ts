@@ -12,6 +12,7 @@ export { listedOf, loadRoutes, ROUTES_2_1_307, routeOf, type CommandRefusalCode,
 export { derive, deriveFromRows, LoopIndex, TABLE, type Body, type BridgeAgent } from './jobs';
 export { answerOutput } from './output';
 export type { Credentials } from './link';
+export { certify, endpointRecord, enrollDelegated, enrollV2, listing, machineFetch, mintRef, redeemDelegated, retirement, type DelegationKey, type V2Machine } from './org';
 
 /** The recording committed beside the tool: a haiku session with two subagents, a permission prompt and a question
  * answered from the web, a `<message>`, and a turn interrupted mid-response (record.py made it). */

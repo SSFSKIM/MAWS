@@ -73,7 +73,7 @@ export const SOURCE_READERS = [
   // The hub's Worker reaches its suites as a bundle: the global setup's (loaded into Miniflare through local.ts and
   // hub.ts, so every suite that imports either), the fake machine's bin.ts and local/run.ts, each spawned.
   {
-    trees: ['apps/desk-hub/src/'],
+    trees: ['apps/desk-hub/src/', 'apps/org-protocol/src/'], // P5-O11 M1: the Worker bundles the protocol package
     suites: ['apps/desk-hub/test/support/local.ts', 'apps/desk-hub/test/support/hub.ts', 'apps/desk-hub/test/fake-machine/command.test.ts', 'apps/desk-hub/test/stream-close.test.ts'],
   },
   // The service worker's import graph walked through fs.

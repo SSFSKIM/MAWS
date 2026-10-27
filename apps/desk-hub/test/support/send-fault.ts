@@ -18,7 +18,8 @@ export const MACHINE_ABORT_PATH = '/__test/abort';
 export const ABORT_REASON = 'terminated by the suite';
 /** Where the suites' `Project` says which instance it is. */
 export const PROJECT_LIFE_PATH = '/__test/life';
-/** Where the suites' `Project` takes a renewal or close of a lease, as its `Machine` would send one. */
+/** Where the suites' `Project` takes a renewal or close of a lease, as its `Machine` would send one, or a revocation
+ * (`forget`), as the Registry would send one. */
 export const PROJECT_LEASE_PATH = '/__test/lease';
 /** Where the suites' `Project` holds a `hello` at its registration (`{hold: boolean}`), as a slow Registry would. */
 export const PROJECT_HOLD_PATH = '/__test/hold';
@@ -55,7 +56,8 @@ export const PROJECT_BACKLOG_PATH = '/__test/backlog-pages';
 /** Where the suites' `Project` is armed to fail its next `forget`, as a failed RPC from the Registry would. */
 export const PROJECT_FORGET_FAULT_PATH = '/__test/forget-fault';
 /** Where the suites' `Machine` is armed (`?mode=hold`) to hold its next revocation's answer until it is released, as a
- * slow RPC would, or (`?mode=lose`) to lose it once the revocation is stored, as an RPC whose answer never came back. */
+ * slow RPC would, (`?mode=lose`) to lose it once the revocation is stored, as an RPC whose answer never came back, or
+ * (`?mode=fail`) to fail it before it is applied, as an RPC that never arrived. */
 export const REVOKE_FAULT_PATH = '/__test/revoke-fault';
 /** Where the suites' `Machine` says whether a revocation's answer is held: `held` or `none`. */
 export const REVOKE_HELD_PATH = '/__test/revoke-held';
@@ -102,3 +104,31 @@ export const REPORT_RETRY_PATH = '/__test/report-retry';
 export const LEAVE_HELD_PATH = '/__test/leave-held';
 /** Where the suites' `Registry` releases a held `leave`: answers `released`, or `none` while none is held. */
 export const LEAVE_RELEASE_PATH = '/__test/leave-release';
+/** Where the suites' `Registry` answers its projection of the org state (`{members, devices, machines}`). */
+export const PROJECTION_PATH = '/__test/projection';
+/** Where the suites' `Project` is armed (`{times, missing?}`) to throw from its next `times` state announcements, as a
+ * call to an object a code update reset fails, or (`missing`) as a project on the code before the announcement refuses
+ * a method it lacks (0 disarms); every request there answers `{remaining, calls, announced}`: the throws still armed,
+ * the calls taken since it was last armed, and the newest version announced to it. */
+export const PROJECT_STATE_FAULT_PATH = '/__test/state-fault';
+/** Where the suites' `Registry` calls a method no `Project` has, and answers `{lacks, message}`: whether the Registry
+ * takes workerd's refusal for a callee on older code. */
+export const MISSING_METHOD_PATH = '/__test/missing-method';
+/** Where the suites' `Registry` is armed (`{fail: boolean}`) to throw from every `head()` until disarmed, as an
+ * unreachable Registry would answer a `Project` checking a v2 event. */
+export const REGISTRY_HEAD_FAULT_PATH = '/__test/head-fault';
+/** Where the suites' `Project` moves its clock on by `{ahead}` ms (cumulative), so its cached org state ages within a
+ * test, holds its reads of the org-state head (`{hold: true}`) until released (`{hold: false}`), as a stalled Registry
+ * would, and bounds those reads by `{readTimeoutMs}`; every request there answers `{reads}`, how many times the project
+ * read the org-state head. */
+export const PROJECT_STATE_CACHE_PATH = '/__test/state-cache';
+/** Where the suites' `Registry` takes a call of one of its RPC methods (`{method, args}`) as an object calling it would
+ * (M6's Machine DO, Project), and answers its result: `storeListing`, `storeEndpoint`, `notify`, `ownersOf`, `push`;
+ * with `{concurrent: [{method, args}…]}`, all at once, answering each one's result in order. */
+export const REGISTRY_RPC_PATH = '/__test/registry-rpc';
+/** Where the suites' `Registry` calls one of its methods that take a member (`{call, member, args}`) with the member
+ * record given, as the Worker would with one it resolved before a state removed or demoted them; answers the result. */
+export const AS_MEMBER_PATH = '/__test/as-member';
+/** Where the suites' `Registry` is armed (`{method}`, or `{method: null}` to disarm) to refuse calls of one of its
+ * methods as a Registry on the code before the method refuses them (workerd's missing-method error). */
+export const LACKS_PATH = '/__test/lacks';

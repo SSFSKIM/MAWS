@@ -16,22 +16,28 @@
 // and is carried to it at its `hello`. When the lease lapses (the grace or the lease ran out) or the machine is revoked,
 // the machine is offline, and what still waited ends too: a waiting subscription ends, a waiting RPC fails
 // `machine-offline` (it never reached the machine).
+//
+// The log takes v1 (DX1's `mac`), dual-coded and v2-only (RL8's `sig`) events alike (O11 M5). A v2 signature is checked
+// before its event is stored, by the protocol package against the org-state head this object caches from its Registry
+// (signed-events.ts); a `mac` is still never checked here.
 import { DurableObject } from 'cloudflare:workers';
+import type { LogEventV2 } from 'org-protocol';
 import { MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, type Env } from '../env';
 import { isBase64urlOf } from '../protocol/base64url';
 import { BROWSER_SET_LIMIT, BROWSER_SET_PARTS, isOutputTail, isTaskId, OUTPUT_TAIL_MAX, readShapeError, type AuditEntry, type PendingRequest, type ProjectDown, type PushNotice } from '../protocol/browser';
 import { canonicalize } from '../protocol/canonical';
-import { isMemberId, type ProjectRecord } from '../protocol/identity';
+import { isMemberId, type OrgStateView, type ProjectRecord } from '../protocol/identity';
 import type { JsonObject } from '../protocol/json';
 import { HUB_WRITER_PREFIX, hubWriter, isHubPosition, isIsoMillis, LEGACY_WRITER_PREFIX, questionEffect, withoutPosition, writerMachine, type LogEvent, type Vector } from '../protocol/log';
 import type { DownFrame, RefusedFrame, Refusal, Rejection, UpFrame } from '../protocol/machine';
 import { FRAME_LIMIT, PartAssembler, PartsBudgetError, toWire, type Part } from '../protocol/parts';
 import { RPC_FRESHNESS_MS, RPC_NAMES, type Rpc, type RpcErrorCode, type RpcOutcome } from '../protocol/rpc';
 import { SESSION_WIDE_KINDS, SUBSCRIPTION_KINDS, SUGGESTION_BYTES_MAX, SUGGESTIONS_MAX, type Delivery, type MachinePresence, type Raised, type SessionKind, type SessionMessage, type Settled } from '../protocol/session';
-import { BATCH_BYTES, eventShapeError, LogStore, sameEvent, type AuditRow, type Stored } from './log-store';
+import { BATCH_BYTES, eventShapeError, LogStore, resendNonce, sameEvent, type AuditRow, type Stored } from './log-store';
 import type { SummaryReport } from './registry';
 import { RETRY_ATTEMPTS, RETRY_BASE_MS, retryDelay } from './retry';
 import { pendingKey, SessionStore, type Lease, type Route, type RpcRecord } from './session-store';
+import { SignedEvents, STATE_READ_TIMEOUT_MS, STATE_UNAVAILABLE, type SignatureCheck } from './signed-events';
 
 /** A `.smns` project id (a lowercase uuid). */
 export const PROJECT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -55,6 +61,10 @@ export const VISIBLE_MS = 90_000;
  * lease holds after that stream closes (`graceMs`; absent from a `Machine` of an older deploy, whose closes lapse at
  * once as before). */
 export type MachineContext = { org: string; project: string; machine: string; client: string; generation: number; leaseMs: number; graceMs?: number };
+
+/** The `kv` key of the newest org state announced to this project and the member ids it holds (`stateAdvanced`). */
+const STATE_MEMBERS = 'state-members';
+type StateMembers = { version: number; members: string[] };
 
 /** A route's generation while its subscription waits for the machine's next stream: no stream is generation 0. */
 const PARKED = 0;
@@ -96,11 +106,20 @@ export class Project extends DurableObject<Env> {
   /** The retry of a summary report the Registry did not acknowledge, waiting for its time: one at most, any report sent
    * meanwhile superseding it (`reportFailed`; an object restart forgets it). */
   private reportRetry: ReturnType<typeof setTimeout> | undefined;
+  /** v2 events' signatures, checked against the org-state head cached from the Registry (O11 M5). */
+  private readonly signatures: SignedEvents;
+  /** Each member's `human`s, taken one at a time in arrival order: a signed one waits for its check (`human`). */
+  private readonly humans = new Map<string, Promise<void>>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.log = new LogStore(ctx.storage);
     this.plane = new SessionStore(ctx.storage);
+    this.signatures = new SignedEvents(
+      () => this.readOrgState(),
+      () => this.now(),
+      () => this.stateReadTimeoutMs(),
+    );
     ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS machines (name TEXT PRIMARY KEY, generation INTEGER NOT NULL)');
     // A route whose socket is gone (a restart drops every connection, and a socket's close may not have reached a
     // restarted object) is dropped; its machine's stream went with the restart too.
@@ -118,6 +137,8 @@ export class Project extends DurableObject<Env> {
     if (url.pathname !== '/socket') return new Response('not found', { status: 404 });
     if (request.headers.get('Upgrade') !== 'websocket') return new Response('expected a WebSocket', { status: 426 });
     const member = request.headers.get(MEMBER_HEADER) ?? '';
+    // The Worker admitted the member against the Registry's head, and a state announced since may have dropped them.
+    if (!this.stateHolds(member)) return Response.json({ error: 'removed' }, { status: 403 });
     this.remember(request.headers.get(ORG_HEADER) ?? '', request.headers.get(PROJECT_HEADER) ?? '');
     this.sweepLeases();
     const id = newSocketId();
@@ -157,11 +178,11 @@ export class Project extends DurableObject<Env> {
       if (error instanceof PartsBudgetError) return this.refuseBrowser(socket, { reason: 'too-large', message: error.message });
       return this.refuseBrowser(socket, { reason: 'bad-shape', message: 'a malformed part' });
     }
-    if (whole !== undefined) this.dispatch(socket, whole as { t?: unknown; [key: string]: unknown });
+    if (whole !== undefined) await this.dispatch(socket, whole as { t?: unknown; [key: string]: unknown });
   }
 
   /** A whole logical frame from a browser. */
-  private dispatch(socket: WebSocket, frame: { t?: unknown; [key: string]: unknown } | null): void {
+  private dispatch(socket: WebSocket, frame: { t?: unknown; [key: string]: unknown } | null): void | Promise<void> {
     switch (frame?.t) {
       case 'resume':
         return this.resume(socket, frame.after);
@@ -326,6 +347,43 @@ export class Project extends DurableObject<Env> {
     this.reportSummary();
   }
 
+  /**
+   * The Registry's announcement of an accepted org state (O11 M3): `version` is the state's, `members` the ids it holds.
+   * The newest announced is kept (an older one arriving late changes nothing), every socket of a member it does not
+   * hold closes `4403 removed`, and a socket the Worker admitted before the state but that reaches this object after it
+   * is refused at its accept (`stateHolds`): a removed member keeps no read of the log, hibernated sockets included,
+   * whose attachments name their member. The head v2 events are checked against is read again when it is older than
+   * `version` (M5, signed-events.ts).
+   */
+  async stateAdvanced(version: number, members?: string[]): Promise<void> {
+    // Called first, so the cached head counts as old before anything here waits.
+    const refreshed = this.signatures.advanced(version);
+    if (members !== undefined) await this.keepMembers(version, members);
+    await refreshed;
+  }
+
+  private async keepMembers(version: number, members: string[]): Promise<void> {
+    const held = this.ctx.storage.kv.get<StateMembers>(STATE_MEMBERS);
+    if (held && held.version >= version) return;
+    this.ctx.storage.kv.put(STATE_MEMBERS, { version, members } satisfies StateMembers);
+    const kept = new Set(members);
+    for (const socket of this.ctx.getWebSockets()) {
+      if (kept.has(this.attachment(socket).member)) continue;
+      await this.webSocketClose(socket);
+      try {
+        socket.close(4403, 'removed');
+      } catch {
+        // already closing
+      }
+    }
+  }
+
+  /** Whether the newest org state announced here holds `member` (any member, before the first announcement). */
+  private stateHolds(member: string): boolean {
+    const held = this.ctx.storage.kv.get<StateMembers>(STATE_MEMBERS);
+    return held === undefined || held.members.includes(member);
+  }
+
   /** Leases that lapsed, request windows that closed, and command receipts past retention, without new traffic. */
   async alarm(): Promise<void> {
     this.sweepLeases();
@@ -373,8 +431,11 @@ export class Project extends DurableObject<Env> {
   }
 
   // A machine's upload: each event stored once at the next seq of its writer, a copy of a stored one passed over, a
-  // gap answered by `resend`, and a writer the machine may not write, or a different payload at a stored position,
-  // refused, reported, and recorded. A writer stops at its first refusal or gap in a batch.
+  // gap answered by `resend`, and a writer the machine may not write, a different payload at a stored position (its
+  // `sig` included: ECDSA's are malleable, so a re-signed copy is another payload), or a v2 event whose signature the
+  // org state does not verify, refused, reported, and recorded. A writer stops at its first refusal or gap in a batch.
+  // The v2 signatures are checked first, every one that may be stored, so the batch is then stored in one step with no
+  // wait inside it.
   private async upload(ctx: MachineContext, events: unknown): Promise<'stale' | Taken> {
     if (!Array.isArray(events)) {
       const refusal: Refusal = { reason: 'bad-shape', message: 'events is a list' };
@@ -389,6 +450,10 @@ export class Project extends DurableObject<Env> {
       // and stores nothing.
       if ((this.plane.lease(ctx.machine)?.generation ?? 0) > ctx.generation || !this.isOpen(ctx)) return 'stale';
     }
+    const checked = await this.checkSignatures(ctx, events, archive);
+    // As above, and a revocation of this stream (DX7's `forget`) that came while the head was read: either way the
+    // upload is the retired stream's.
+    if (checked.size > 0 && ((this.plane.lease(ctx.machine)?.generation ?? 0) > ctx.generation || !this.isOpen(ctx) || this.isRevoked(ctx.machine, ctx.generation))) return 'stale';
     const accepted: Stored[] = [];
     const stopped = new Set<string>();
     for (const event of events as LogEvent[]) {
@@ -417,6 +482,12 @@ export class Project extends DurableObject<Env> {
           refuse({ reason: 'conflict', writer, seq, message: 'a different payload is stored at this position' });
         }
       } else if (seq === last + 1) {
+        const signature = event.sig === undefined ? undefined : (checked.get(event) ?? STATE_UNAVAILABLE);
+        if (signature && !signature.ok) {
+          stopped.add(writer);
+          refuse({ reason: signature.reason, writer, seq, message: signature.message });
+          continue;
+        }
         accepted.push(this.log.append(event));
       } else {
         stopped.add(writer);
@@ -434,9 +505,25 @@ export class Project extends DurableObject<Env> {
       // second report of one a bridge raised as well (`src` its call's id), which pushes once, whichever came first.
       if (event.kind === 'question' && typeof event.src === 'string' && !this.plane.markAsked(ctx.machine, session, event.src, now)) continue;
       // The count holds the question this push announces while it is open: it is stored above (`waitingSessions`).
-      this.push({ v: 1, project: this.projectId, session, alias: typeof event.from === 'string' ? event.from : null, kind: event.kind, event: { writer: event.writer, seq: event.seq } }, this.waitingSessions().size);
+      this.push({ v: 1, project: this.projectId, session, alias: typeof event.from === 'string' ? event.from : null, kind: event.kind, event: { writer: event.writer, seq: event.seq } }, this.waitingSessions().size, event.writer.slice(0, event.writer.indexOf('/')));
     }
     return { owed };
+  }
+
+  /**
+   * The v2 signature of each event of an upload that may be stored: well formed, the machine's to write, and past its
+   * writer's last stored seq (a copy of a stored event, or a conflict, is decided by its bytes alone). An event past a
+   * stored seq now stays past it, so every event `upload` stores was checked here. The batch is judged against one head
+   * (`SignedEvents.checkAll`): no event keeps a verdict from a state a later read in the batch moved past.
+   */
+  private async checkSignatures(ctx: MachineContext, events: unknown[], archive: string | null | undefined): Promise<Map<unknown, SignatureCheck>> {
+    const candidates = (events as LogEvent[]).filter((event) => {
+      if (eventShapeError(event) !== null || event.sig === undefined || event.seq <= this.log.last(event.writer)) return false;
+      return writerMachine(event.writer) === ctx.machine || (event.writer.startsWith(LEGACY_WRITER_PREFIX) && archive === ctx.machine);
+    });
+    if (candidates.length === 0) return new Map();
+    const checks = await this.signatures.checkAll({ org: ctx.org, project: ctx.project }, candidates as LogEventV2[]);
+    return new Map(candidates.map((event, i) => [event, checks[i]]));
   }
 
   /** A daemon's report of an event it refused: recorded in the audit record and shown to every browser. */
@@ -1059,19 +1146,21 @@ export class Project extends DurableObject<Env> {
     const alias = this.log.latestOf(`${machine}/${raised.session}`)?.from;
     // The badge counts the session this request waits on, whether or not its presence says so yet.
     const waiting = this.waitingSessions().add(`${machine}/${raised.session}`);
-    this.push({ v: 1, project: this.projectId, session: raised.session, alias: typeof alias === 'string' ? alias : null, kind: question ? 'question' : 'permission', request: raised.request }, waiting.size);
+    this.push({ v: 1, project: this.projectId, session: raised.session, alias: typeof alias === 'string' ? alias : null, kind: question ? 'question' : 'permission', request: raised.request }, waiting.size, machine);
   }
 
   /** To every member with no browser showing the project (a socket's visibility rides in its attachment). `waiting` is
-   * this project's count as of this push; the Registry adds the other projects' to it for the badge. */
-  private push(notice: Omit<PushNotice, 'name' | 'waiting'>, waiting: number): void {
+   * this project's count as of this push; the Registry adds the other projects' to it for the badge. `machine`, the
+   * session's machine by name, lets the Registry send a session that machine listed to its owners alone (O11 M4); a
+   * Registry on older code takes the extra argument as nothing. */
+  private push(notice: Omit<PushNotice, 'name' | 'waiting'>, waiting: number, machine: string): void {
     const looking = new Set<string>();
     for (const socket of this.ctx.getWebSockets()) {
       const attachment = this.attachment(socket);
       if (attachment.visibleAt !== null && Date.now() - attachment.visibleAt < this.visibleMs()) looking.add(attachment.member);
     }
     void this.registry()
-      .push(notice, [...looking], waiting)
+      .push(notice, [...looking], waiting, machine)
       .catch(() => {});
   }
 
@@ -1103,13 +1192,35 @@ export class Project extends DurableObject<Env> {
     for (const row of this.log.audit(AUDIT_REPLAY)) this.toSocket(socket, this.audited(row));
   }
 
-  // A web `human`: accepted only from its own member, sealed by the browser without a position, and given one by the
-  // hub (writer `hub/<member>`, the next seq, the time) that DX1's check admits. A nonce the member's feed holds is
-  // the same send again: answered from the stored event, never stored twice.
-  private human(socket: WebSocket, event: unknown): void {
+  /**
+   * A browser's `human`, taken after every one its member sent before it (`takeHuman`), so a member's feed keeps the
+   * order they were sent in and one signed send is never stored twice. Other members' humans don't wait: a sealed one
+   * waits behind a signed one's read of the head only when the same member sent both, and that read is bounded
+   * (signed-events.ts).
+   */
+  private human(socket: WebSocket, event: unknown): Promise<void> {
     const { member } = this.attachment(socket);
-    const draft = event as Record<string, unknown> & { member?: unknown; mac?: { nonce?: unknown; value?: unknown } };
-    const nonce = typeof draft?.mac?.nonce === 'string' ? draft.mac.nonce : undefined;
+    const taken = (this.humans.get(member) ?? Promise.resolve()).then(() => this.takeHuman(socket, event));
+    const tail = taken.catch(() => {});
+    this.humans.set(member, tail);
+    void tail.then(() => {
+      if (this.humans.get(member) === tail) this.humans.delete(member);
+    });
+    return taken;
+  }
+
+  // A web `human`: accepted only from its own member, sealed by the browser without a position, and given one by the
+  // hub (writer `hub/<member>`, the next seq, the time) that DX1's check admits. A device's signed one (RL8, O11 M5)
+  // arrives the same way with `sig` and `nonce`, `mac` too when dual-coded, and is stored only once its signature
+  // verifies for the member's devices. A nonce the member's feed holds (the event's own `nonce`, else its `mac.nonce`)
+  // is the same send again: answered from the stored event, never stored twice, and refused `conflict` when its
+  // payload differs, a re-signed copy included.
+  private async takeHuman(socket: WebSocket, event: unknown): Promise<void> {
+    const { member } = this.attachment(socket);
+    // A state announced while this waited its turn may have removed the member, and closed this socket.
+    if (!this.stateHolds(member)) return;
+    const draft = event as Record<string, unknown> & { member?: unknown; nonce?: unknown; mac?: { nonce?: unknown; value?: unknown } };
+    const nonce = typeof draft === 'object' && draft !== null ? resendNonce(draft) : undefined;
     const problem = humanShapeError(event);
     if (problem) return this.refuseBrowser(socket, { reason: problem === 'too-large' ? 'too-large' : 'bad-shape', message: problem, ...(nonce ? { nonce } : {}) });
     if (draft.member !== member) {
@@ -1121,7 +1232,14 @@ export class Project extends DurableObject<Env> {
       if (!sameEvent(withoutPosition(sent.event), draft)) return this.refuseBrowser(socket, { reason: 'conflict', writer, seq: sent.event.seq, nonce, message: 'this nonce was sent with another payload' });
       return this.toSocket(socket, { t: 'human-ack', nonce: nonce!, offset: sent.offset, writer, seq: sent.event.seq });
     }
-    const stored = { ts: new Date().toISOString(), writer, seq: this.log.last(writer) + 1, ...draft } as LogEvent;
+    const positioned = () => ({ ts: new Date().toISOString(), writer, seq: this.log.last(writer) + 1, ...draft }) as LogEvent;
+    if (draft.sig !== undefined) {
+      const signature = await this.signatures.check({ org: this.orgId, project: this.projectId }, positioned() as LogEventV2);
+      if (!signature.ok) return this.refuseBrowser(socket, { reason: signature.reason, writer, nonce, message: signature.message });
+      // Or during the check.
+      if (!this.stateHolds(member)) return;
+    }
+    const stored = positioned();
     if (!isHubPosition(stored)) throw new Error('the hub assigned a position DX1 refuses');
     const appended = this.log.append(stored);
     this.toSocket(socket, { t: 'human-ack', nonce: nonce!, offset: appended.offset, writer, seq: stored.seq });
@@ -1299,6 +1417,22 @@ export class Project extends DurableObject<Env> {
     return this.env.REGISTRY.get(this.env.REGISTRY.idFromName(this.orgId));
   }
 
+  /** The org-state head v2 events are checked against (`Registry.head()`, O11 M3), from this object's org's Registry. */
+  protected readOrgState(): Promise<OrgStateView> {
+    if (!this.orgId) return Promise.reject(new Error('this project has not learned its org yet'));
+    return this.registry().head();
+  }
+
+  /** How long a read of the org-state head may take (the suites' Worker shortens it). */
+  protected stateReadTimeoutMs(): number {
+    return STATE_READ_TIMEOUT_MS;
+  }
+
+  /** The clock the cached org state is aged by (the suites' Worker moves it on). */
+  protected now(): number {
+    return Date.now();
+  }
+
   /** The org and project this object serves, which its name (`<org>:<project>`) holds but the object cannot read. */
   private remember(org: string, project: string): void {
     if (org && this.ctx.storage.kv.get('org') !== org) this.ctx.storage.kv.put('org', org);
@@ -1437,7 +1571,8 @@ function rpcShapeError(rpc: Record<string, unknown>, project: string): string | 
   return null;
 }
 
-/** Why a browser's `human` is not a sealed `HumanDraft`, or null. It must not name a position: the hub assigns it. */
+/** Why a browser's `human` is not a sealed `HumanDraft` or a signed one, or null. It must not name a position: the hub
+ * assigns it. */
 function humanShapeError(event: unknown): string | null {
   if (typeof event !== 'object' || event === null || Array.isArray(event)) return 'event is a sealed HumanDraft';
   const e = event as Record<string, unknown>;
@@ -1449,7 +1584,8 @@ function humanShapeError(event: unknown): string | null {
   const recipients = Array.isArray(to) && to.every((r) => typeof r?.session === 'string' && typeof r?.alias === 'string');
   if (to !== '*' && !recipients) return 'to is "*" or [{session, alias}]';
   const mac = e.mac as { nonce?: unknown; value?: unknown } | undefined;
-  if (typeof mac !== 'object' || mac === null || typeof mac.nonce !== 'string' || mac.nonce === '' || typeof mac.value !== 'string') return 'mac is {nonce, value}';
+  if (mac === undefined && e.sig === undefined) return 'a human carries a mac, a sig, or both';
+  if (mac !== undefined && (typeof mac !== 'object' || mac === null || typeof mac.nonce !== 'string' || mac.nonce === '' || typeof mac.value !== 'string')) return 'mac is {nonce, value}';
   const shape = eventShapeError({ ...e, writer: `${HUB_WRITER_PREFIX}${e.member}`, seq: 1, ts: '' });
   if (shape === 'an event is at most 1 MiB') return 'too-large';
   if (shape) return shape;

@@ -253,6 +253,13 @@ describe('launch contract builds the X6 command line and environment', () => {
       expect(buildLaunch(spec({ gateway: 'direct' }), captured, OPTS).env.SMNS_MEMBER).toBe(String(SPAWNER_PID));
     });
 
+    // P5-O12: the lane B marker sminos's bridge stands down on (observer mode), bound to the engine by SMNS_MEMBER
+    it('sets MAWS_LANE=B under both gateway modes, over any value the capture holds', () => {
+      const captured = { ...CAPTURED, MAWS_LANE: 'A' };
+      expect(buildLaunch(spec(), captured, OPTS).env.MAWS_LANE).toBe('B');
+      expect(buildLaunch(spec({ gateway: 'direct' }), captured, OPTS).env.MAWS_LANE).toBe('B');
+    });
+
     it('passes the allowlisted shell keys through, by name and by prefix', () => {
       const { env } = buildLaunch(spec(), CAPTURED, OPTS);
       expect(env).toMatchObject({
