@@ -344,7 +344,8 @@ it('scrolling downward near the end does not resume following until the reader r
   expect(s.changed.mock.calls).toEqual([[false], [true]]);
 });
 
-for (const shortfall of [0.25, 0.75, 1]) {
+// Chrome's reachable maximum sits up to 1.73px below the integer end at 110% zoom, 2px at 80% or 50% (DOM_END_SLACK).
+for (const shortfall of [0.25, 0.75, 1, 1.75, 2]) {
   it(`returning to the browser's fractional maximum resumes following with a ${shortfall}px rounded bottom gap`, async () => {
     const s = await scene();
     s.readerMove(-200);
@@ -356,6 +357,27 @@ for (const shortfall of [0.25, 0.75, 1]) {
     s.stream();
     expect(s.scroller.scrollHeight - s.scroller.clientHeight - s.scroller.scrollTop).toBe(shortfall);
     expect(s.changed.mock.calls).toEqual([[false], [true]]);
+  });
+}
+
+it('a small upward wheel after an unread return to the end keeps the reader released', async () => {
+  const s = await scene();
+  s.readerMove(-200);
+  s.move(200, false); // back at the end, its scroll event not yet delivered
+  s.readerMove(-2.5); // turned back up within the DOM-end slack; one event reports both moves
+  s.stream();
+  expect(s.handle.current!.following).toBe(false);
+  expect(s.writes).toEqual([]);
+});
+
+for (const report of [false, true]) {
+  it(`an animated key scroll's first 2px frame releases following before a streamed row (native event reported: ${report})`, async () => {
+    const s = await scene();
+    act(() => { fireEvent.keyDown(document.body, { key: 'ArrowUp' }); });
+    s.move(-2, report); // Chromium's ArrowUp animation reports 2-3px before the rest of its 40px
+    s.stream();
+    expect(s.handle.current!.following).toBe(false);
+    expect(s.writes).toEqual([]);
   });
 }
 
@@ -379,6 +401,32 @@ it('a downward gesture observes a newly grown end rather than resuming at the ob
   expect(s.handle.current!.following).toBe(false);
   s.readerMove(40);
   expect(s.handle.current!.following).toBe(true);
+});
+
+it('a clamped compensation from the end is not re-issued over a reader who scrolled away before their scroll event', async () => {
+  const s = await scene(false, true);
+  s.freezeDOMSize();
+  s.resizeRow('first', 40); // above the reader at the end: the virtualizer's compensation clamps at the frozen end
+  s.readerMove(-200, false); // the reader leaves; the browser has not delivered the scroll event yet
+  const held = s.scroller.scrollTop;
+  s.commitDOMSize(); // a commit lands first and grows the sizer the clamped write was waiting for
+  s.stream();
+  expect(s.handle.current!.following).toBe(false);
+  expect(s.scroller.scrollTop).toBe(held);
+});
+
+it('a released reader near the end keeps a clamped anchor correction through a later release', async () => {
+  const s = await scene(false, true);
+  s.readerMove(-199);
+  s.readerMove(1); // a forward direction lets the virtualizer anchor a re-measured row above the reader
+  const at = s.scroller.scrollTop;
+  s.freezeDOMSize();
+  s.resizeRow('first', 400); // more than the distance to the old end: the anchoring write clamps there
+  act(() => { fireEvent.pointerDown(s.scroller, { pointerType: 'mouse', button: 0, pointerId: 3 }); }); // a press, no drag yet
+  s.commitDOMSize();
+  s.stream();
+  expect(s.scroller.scrollTop).toBe(at + 400);
+  expect(s.handle.current!.following).toBe(false);
 });
 
 it('a reader reaching the bottom is noticed before a pending measurement moves that bottom again', async () => {
