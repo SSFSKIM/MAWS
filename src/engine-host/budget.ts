@@ -37,10 +37,11 @@ export function defaultBudgetKiB(totalBytes: number): number {
 }
 
 // What the process holds, in a fixed order. An open turn is also the queue's `busy`, so `busy` is named only without
-// one. P5 O2 M2: `background_tasks` also names a session cron and unreadable work (`holdsWork`). Ambient background tasks are left out: the engine marks them as housekeeping it does not surface as user work
-// (every skip_transcript task, such as a memory extraction or a dream, and auto-started watchers; the SDK's
-// `SDKBackgroundTasksChangedMessage.tasks[].ambient`), and an auto-started watcher would otherwise hold a process
-// forever. Grants never appear (the snapshot re-applies on resume), nor does a server the owner did not list.
+// one. P5 O2 M2: `background_tasks` also names a cron and unreadable work (`holdsWork`). Ambient background tasks are
+// left out: the engine marks them as housekeeping it does not surface as user work (every skip_transcript task, such
+// as a memory extraction or a dream, and auto-started watchers; the SDK's `SDKBackgroundTasksChangedMessage.tasks[].
+// ambient`), and an auto-started watcher would otherwise hold a process forever. Grants never appear (the snapshot
+// re-applies on resume), nor does a server the owner did not list.
 export function hardReasons(s: EngineSessionStatus, stateful: ReadonlySet<string>): HardReason[] {
   const reasons: HardReason[] = [];
   if (s.turn !== null) reasons.push('turn');

@@ -27,7 +27,7 @@ describe('startInterest', () => {
     onChange: (l) => ((change = l), () => {}),
     streaming: () => streaming,
     onStreaming: (l) => ((streamed = l), () => {}),
-    dispatch: (input) => (sent.push(input.sessions), answer() as never),
+    dispatch: (input) => (sent.push(input.sessions as AppSessionId[]), answer() as never),
   });
 
   beforeEach(() => {
