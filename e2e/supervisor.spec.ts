@@ -858,7 +858,11 @@ async function terminalsOutliveTheApp(): Promise<void> {
     await openSurface(second.page, 'Terminal');
     const region = surface(second.page, 'terminal');
     await expect(region.locator(`[data-tab-id="${label}"]`)).toBeVisible({ timeout: 15_000 });
-    await expect(region.locator('[data-terminal-id]:visible')).toHaveCount(1, { timeout: 15_000 });
+    const restored = region.locator('[data-terminal-id]:visible');
+    await expect(restored).toHaveCount(1, { timeout: 15_000 });
+    // the restored terminal shows it: its emulator's buffer, read through the page's terminals seam (it draws on a canvas)
+    const terminalId = (await restored.getAttribute('data-terminal-id'))!;
+    await expect.poll(() => second.page.evaluate((tid) => (window as unknown as { __maws_terminals: { lines(id: string): string[] | null } }).__maws_terminals.lines(tid), terminalId), { timeout: 15_000, message: 'the restored terminal renders what the shell printed while the app was closed' }).toContain('m7-closed-42');
     await expect(region.getByRole('status', { name: 'previous shell' }), 'no lost-shell line: the shell is the same').toHaveCount(0);
     expect(second.maws.consoleErrors()).toEqual([]);
   });
