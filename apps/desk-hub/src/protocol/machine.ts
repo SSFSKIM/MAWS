@@ -44,7 +44,9 @@ export type Refusal = {
     | 'bad-shape'
     | 'too-large'
     | 'stale-generation'
-    | 'not-open'; // any frame but `hello` for a project this stream has not opened with `hello`
+    | 'not-open' // any frame but `hello` for a project this stream has not opened with `hello`
+    | 'bad-signature' // a v2 event whose `sig` the org state does not verify for its writer (the message names the verdict)
+    | 'state-unavailable'; // a v2 event the hub could not check, the org state unreadable: send it again
   writer?: string;
   seq?: number;
   message: string;

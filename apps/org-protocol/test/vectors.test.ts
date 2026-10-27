@@ -94,6 +94,25 @@ describe('the committed vectors', () => {
       "a VM's event after its delegation is revoked",
       "a revoked machine key's event",
       "a grant for a machine's key it has rotated away from",
+      // Wave 6: events judged by their signed `created`; revoked delegations' ids and prefixes reserved (RL DL 26).
+      "a retired machine key's event created before its notAfter, its ts after",
+      "a retired machine key's event created after its notAfter, its ts before",
+      "a machine's event without created",
+      "then a delegation taking the revoked one's prefix",
+      "then a delegation taking the revoked one's id",
+      'then a machine named under the revoked prefix',
+      "then a machine enrolled under a ref of the revoked delegation's shape",
+      "a successor enrolling a machine under a ref of a live delegation's shape",
+      "then its delegation revoked, the certificate's key left retired",
+      "then its delegation revoked, the certificate's key revoked with it",
+      "then a delegation reissuing the old VM's key under the revoked prefix",
+      // Wave 7: one holder per key; a key leaving its holder is recorded even if it reappears under another.
+      "a successor dropping a delegation, its key now a machine's, not revoked",
+      "a successor dropping a delegation, its key revoked and now a machine's",
+      "a successor giving a machine a delegation's key",
+      'a successor giving two machines one key',
+      "a successor giving a machine a device's channel key",
+      'genesis with a device whose step-up key is its channel key',
     ]) {
       expect(names, name).toContain(name);
     }

@@ -158,7 +158,7 @@ describe('a delegated VM', () => {
     const kid = await keyId(delegation.key.pub);
     await accept((s) => {
       s.delegations = [];
-      s.revoked.push({ keyId: kid, holder: { delegation: delegation.id } });
+      s.revoked.push({ keyId: kid, holder: { delegation: delegation.id, prefix: 'vm-' } });
     });
     expect(await storeListing(await listing(vm, SESSION, 4, fields([A])))).toBe('403 not-listed');
     expect(await storeEndpoint(await endpointRecord(vm, ['100.64.0.9:7443']))).toBe('403 not-listed');

@@ -141,7 +141,7 @@ function isRetiredKey(value: unknown): value is RetiredKey {
 function isRevokedKey(value: unknown): value is RevokedKey {
   if (!fields(value, ['keyId', 'holder'])) return false;
   const h = value.holder;
-  return (isKeyHolder(h) || (fields(h, ['delegation']) && isDelegationId(h.delegation))) && isBase64urlOf(value.keyId, 16);
+  return (isKeyHolder(h) || (fields(h, ['delegation', 'prefix']) && isDelegationId(h.delegation) && typeof h.prefix === 'string' && isMachineName(h.prefix))) && isBase64urlOf(value.keyId, 16);
 }
 
 export function isOrgState(value: unknown): value is OrgState {

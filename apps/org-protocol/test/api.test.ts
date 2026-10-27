@@ -9,7 +9,7 @@ import type { OrgState } from '../src/types.ts';
 import { ORG, PROJECT, REF_VM1, VECTORS } from '../vectors/index.ts';
 
 const ctx = { org: ORG, project: PROJECT };
-const event = { writer: 'mini/67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b', seq: 1, ts: '2026-10-27T00:00:00.000Z', kind: 'say', text: 'hi' };
+const event = { writer: 'mini/67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b', seq: 1, ts: '2026-10-27T00:00:00.000Z', created: '2026-10-27T00:00:00.000Z', kind: 'say', text: 'hi' };
 
 describe('signEvent', () => {
   it('signs before DX1 seals: an event that already has a mac is refused', async () => {
@@ -21,6 +21,14 @@ describe('signEvent', () => {
     const key = await generateSigningKey();
     const signed = await signEvent(ctx, event, key.privateKey, key.pub);
     await expect(signEvent(ctx, signed, key.privateKey, key.pub)).rejects.toThrow(TypeError);
+  });
+
+  it('signs only an event carrying its own created time, which retirement is judged by', async () => {
+    const key = await generateSigningKey();
+    const bare: Record<string, unknown> = { ...event };
+    delete bare.created;
+    await expect(signEvent(ctx, bare, key.privateKey, key.pub)).rejects.toThrow(TypeError);
+    await expect(signEvent(ctx, { ...event, created: 'yesterday' }, key.privateKey, key.pub)).rejects.toThrow(TypeError);
   });
 
   it("names its key by kid and makes a 64-byte P1363 value", async () => {
