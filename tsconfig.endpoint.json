@@ -1,0 +1,15 @@
+{
+  // P5 O10: the endpoint module (src/endpoint/) and its suites (test/endpoint/), which import the protocol package
+  // (apps/org-protocol, `.ts`-extension imports) and desk-hub's protocol module, typed against Node and WebCrypto's DOM
+  // declarations as desk-hub's own Node code is (apps/desk-hub/tsconfig.test.json). Not composite: what they import from
+  // src/shared and apps/ is checked here as they import it, and checked again by its own config.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "noEmit": true,
+    "lib": ["ES2023", "DOM"],
+    "types": ["node"],
+    "allowImportingTsExtensions": true
+  },
+  "include": ["src/endpoint/**/*", "test/endpoint/**/*", "src/shared/host/private-path.ts"]
+}

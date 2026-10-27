@@ -1,0 +1,63 @@
+// The Registry's HTTP routes the endpoint calls (O10 Orientation): enrollment's redemption, key and certificate, and the
+// org state, each as the machine (its Access service token) or, for the redemption, unauthenticated (the one-time
+// token guards it). RL1, the socket, is M3's. Every retry here has its budget; nothing logs a body, since a request or an
+// answer may carry a token or a credential.
+import { MACHINE_ORG_STATE_PATH, type OrgStateView } from 'desk-hub/protocol';
+
+export type Credentials = { clientId: string; clientSecret: string };
+
+/** What the endpoint's network and clock calls go through: real ones in `mawsd`, faults and fast clocks in the suites. */
+export type HubDeps = { fetch: typeof fetch; sleep: (ms: number) => Promise<void>; now: () => number };
+
+export class HubError extends Error {
+  readonly status: number;
+  readonly error: string;
+  constructor(what: string, status: number, error: string) {
+    super(`${what}: ${status} ${error}`);
+    this.name = 'HubError';
+    this.status = status;
+    this.error = error;
+  }
+}
+
+/** A request to the hub, as the machine when `credentials` are given, with a JSON body when `body` is. */
+export function hubRequest(deps: HubDeps, hub: string, path: string, init: { credentials?: Credentials; body?: unknown } = {}): Promise<Response> {
+  const headers: Record<string, string> = {};
+  if (init.credentials) Object.assign(headers, { 'CF-Access-Client-Id': init.credentials.clientId, 'CF-Access-Client-Secret': init.credentials.clientSecret });
+  if (init.body !== undefined) headers['content-type'] = 'application/json';
+  return deps.fetch(`${hub}${path}`, { method: init.body === undefined ? 'GET' : 'POST', headers, body: init.body === undefined ? undefined : JSON.stringify(init.body), redirect: 'manual' });
+}
+
+/** The refusal's code from a DX7 `{error}` body, or the status alone; the body is read and dropped. */
+export async function refusalOf(response: Response): Promise<string> {
+  const text = await response.text().catch(() => '');
+  try {
+    const error = (JSON.parse(text) as { error?: unknown }).error;
+    return typeof error === 'string' ? error : 'refused';
+  } catch {
+    return response.status === 401 ? 'access' : 'refused';
+  }
+}
+
+/** The org state from `since` on (`GET /machine/org/state?since=`), one page. */
+export async function fetchOrgState(deps: HubDeps, hub: string, credentials: Credentials, since: number): Promise<OrgStateView> {
+  const response = await hubRequest(deps, hub, `${MACHINE_ORG_STATE_PATH}?since=${since}`, { credentials });
+  if (response.status !== 200) throw new HubError('the org state', response.status, await refusalOf(response));
+  return (await response.json()) as OrgStateView;
+}
+
+/**
+ * A request as the machine with a credential minted moments ago: Access refuses a fresh service token (401) at its edge
+ * for up to about a minute (O11 M3, `ADMIT_MS`), so a 401 is tried again every 2 s for up to 90 s.
+ */
+export async function admittedRequest(deps: HubDeps, hub: string, path: string, credentials: Credentials, body: unknown): Promise<Response> {
+  const deadline = deps.now() + ADMIT_MS;
+  for (;;) {
+    const response = await hubRequest(deps, hub, path, { credentials, body });
+    if (response.status !== 401 || deps.now() + 2000 > deadline) return response;
+    await response.body?.cancel();
+    await deps.sleep(2000);
+  }
+}
+
+export const ADMIT_MS = 90_000;

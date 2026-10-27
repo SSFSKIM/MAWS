@@ -252,6 +252,9 @@ importers:
       d3-shape:
         specifier: 3.2.0
         version: 3.2.0
+      desk-hub:
+        specifier: workspace:*
+        version: link:apps/desk-hub
       docx:
         specifier: 9.10.0
         version: 9.10.0
@@ -312,6 +315,9 @@ importers:
       node-api-headers:
         specifier: 1.9.0
         version: 1.9.0
+      org-protocol:
+        specifier: workspace:*
+        version: link:apps/org-protocol
       parse5:
         specifier: 7.3.0
         version: 7.3.0
