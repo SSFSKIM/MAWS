@@ -283,6 +283,26 @@ export async function verifyTransition(head: SignedOrgState, t: Signed<RootTrans
 }
 
 /**
+ * A recovery behind the head (O10 M1): a root transition the pinned recovery key signed from a version at or below the
+ * verifier's `head`, issued later than every transition the verifier has accepted (`accepted`, held by their bodies)
+ * and none of them. The recovery key is the root of every machine's pins, so a transition it signs from an earlier
+ * version says the states after that version are forged; the stolen admin key that forged them cannot sign one, and an
+ * older genuine transition replayed is refused by the `issued` rule (`rollback`). On accepting one the verifier drops
+ * every state after `fromVersion` and takes the first state under the new root as its head (`verifySuccessor` against
+ * the state at `fromVersion`, which that state's `prev` authenticates), whose `revoked` is authoritative. The rule
+ * holds only if `accepted` holds every transition of the chain the verifier took, its first sync's included.
+ */
+export async function verifyRewind(head: SignedOrgState, t: Signed<RootTransition>, pinnedRecovery: B64, accepted: RootTransition[]): Promise<Verdict> {
+  if (!isSigned(t, isRootTransition) || !(await allOnCurve(t.body.newRootKeys)) || !Array.isArray(accepted)) return refuse('malformed');
+  if (t.body.org !== head.state.org) return refuse('bad-link');
+  if (t.body.fromVersion > head.state.version) return refuse('not-head');
+  if (t.sig.kid !== (await keyId(pinnedRecovery))) return refuse('unknown-signer');
+  if (!(await verifyInput(signingInput(SIGNING_DOMAINS.transition, t.body), t.sig, pinnedRecovery))) return refuse('bad-signature');
+  if (accepted.some((a) => canonicalize(a) === canonicalize(t.body) || a.issued >= t.body.issued)) return refuse('rollback');
+  return accept();
+}
+
+/**
  * A successor of `head`: it links to the head, is root-signed (by the head's root set, or by the new root keys of a
  * transition in `transitions` held for the head), and every device new to a member who had devices is endorsed by one
  * of that member's devices in the head. `transitions` may hold every transition the verifier keeps; those for other
