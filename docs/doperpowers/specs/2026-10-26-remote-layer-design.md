@@ -144,6 +144,9 @@ Three rules carry the design:
 - **The machine owner** is recorded in the signed org state (§5.2) when the machine enrolls, as the member whose device approved the enrollment.
 - **The machine's ref** (P5 OX2; Decision Log 19). The daemon mints a `MachineRef` at its first run, before any enrollment, and never changes it. It is an opaque string, `[A-Za-z0-9_-]{16,64}`, drawn from at least 128 random bits.
   - **It is the machine's identity in every contract here.** Each field named `machine` carries it. The name is a display attribute of the org-state entry, which an admin may change. A rename re-issues nothing.
+  - **Log writers are the one exception.** They stay `<name>/…`, as DX2's log plane has them (RL8), so moving them to refs doesn't fork the Project DO's writer rule. That costs two things:
+    - A name is bound to one ref for the life of the org. RL5's append-only `machineNames` makes this checkable, and a name once used never passes to another machine. A replacement machine takes a new name.
+    - A rename starts a new writer, so the machine's log history splits at the rename. Events under the old name still verify, through the same binding.
   - **RL5's machine entry carries it as `ref`,** set at enrollment and immutable after. Verifiers (the hub's Registry, apps and machines) refuse a state that changes an entry's ref, or holds two entries with one ref.
   - **A key change keeps the ref.** Re-enrolling the machine or rotating its key is an admin-signed state change of the entry's `pub`, and the entry's identity across it is its ref.
     - Channels pinned to the old key close.
@@ -690,7 +693,7 @@ The hub serves both protocols, but a migrated endpoint accepts only one trust mo
 
 ## Interfaces (the contracts the composite lifts)
 
-These are named here with their binding fields. Byte-level schemas and test vectors are written by the child that builds each, against this list. Every field named `machine` carries the machine's ref (§2.3), never its name.
+These are named here with their binding fields. Byte-level schemas and test vectors are written by the child that builds each, against this list. Every field named `machine` carries the machine's ref (§2.3), never its name. RL8's writer prefix is the exception: it is the name, bound to one ref by RL5's `machineNames`.
 
 - **RL1, Endpoint ↔ hub.**
   - One WebSocket.
@@ -723,6 +726,8 @@ These are named here with their binding fields. Byte-level schemas and test vect
   - Grants are separate records signed by a machine owner's device, or by an admin device for org-owned machines: `{machine, member, rights, version}`.
   - Machine certificates under a delegation are `{machine, name, pub, delegation, use}`, signed by the delegation key.
   - `ref` is immutable and unique across the state's entries and the live certificates (§2.3, §5.3).
+  - `machineNames: {name, ref}[]` is append-only (desk-sminos-orchestrator's O11 M1). A successor keeps every pair its predecessor holds, and adds the pair of each new or renamed entry. No name is ever held under two refs. Each step checks against its predecessor alone, so by induction the rule holds over the whole chain, and machines verify it as the hub does.
+  - A live certificate whose name `machineNames` holds under another ref is refused, as is one whose name another live certificate claims under a different ref.
   - A root transition `{fromVersion, newRootKeys[], issued}` is signed by the recovery key. Machines accept it over any state signed by the old root set.
   - Grants are checked only by the hosting machine (§5.8).
 - **RL6, Session record** (machine-held).
@@ -735,6 +740,7 @@ These are named here with their binding fields. Byte-level schemas and test vect
   - Per device: `{grades granted, clientClass}`.
 - **RL8, Log event signature.**
   - The writer is a `device | machine`, signing over the canonical event.
+  - A machine's writer prefix is its name (§2.3). A verifier accepts the event only if `machineNames`, or a live certificate, binds that name to the signer's ref, and the key id names a key that ref held.
   - The signature names its signer with a key id, and uses a new domain version (`…-v2`). Today's `mac` is fixed at `{nonce 16 B, value 32 B}`, and nothing names the signer (`log-store.ts:52`, `project.ts:1353, 1428`, `sminos_codes.py:49-50`).
   - The v1 verification path stays for history, or a signed checkpoint freezes it.
   - Signatures are made once and reused on every resend (§5.7).
@@ -842,3 +848,9 @@ These are named here with their binding fields. Byte-level schemas and test vect
    - A key change keeps the ref. It is an admin-signed change of the entry's `pub`, and old signatures verify against the versions that held the old key.
    - The enrollment MAC covers the ref, with length-prefixed fields. A delegation's certificate carries it, and a contested ref is refused, never resolved in either claimant's favour (§2.3, §5.3, RL5, RL6).
    - Rejected: the key's fingerprint. It would change at enrollment and at every rotation.
+20. **2026-10-27, log writers stay name-based** (desk-sminos-orchestrator, O11 M1).
+   - Decision Log 19's "every field named `machine`" covers the contracts' identity fields, not RL8's writer prefix. Writers stay `<name>/…`, which keeps DX2's log-plane vocabulary and the Project DO's writer rule.
+   - RL5 gains an append-only `machineNames: {name, ref}[]`. A name is held under one ref for the life of the org, so the writer prefix maps to one ref over the whole chain, checkable by induction from each predecessor.
+   - Without it, a renamed machine, plus a new machine taking its old name, would let one machine write as the other.
+   - Costs: a used name never passes to another machine, and a rename splits the machine's log history.
+   - Rejected: ref-keyed writers, which drop the guard but fork the log plane's writer rule during the migration.
