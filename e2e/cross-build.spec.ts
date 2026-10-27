@@ -18,6 +18,18 @@
 // `unknown_command` from the older supervisor and is served once the app has moved, and one another owner serves (main,
 // for `machine`) answers alike whichever supervisor is attached; in both directions neither end logs a refusal of what
 // the other sent. The older app cannot name a command it lacks: its preload bridges only its own registry.
+// P5 O2 M8 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M9's two-build check, "this branch's mawsd against that
+// build's engine host"): the same crossing with this build on the daemon shape (MAWS_HOST_MODE=daemon), whose private
+// `mawsd` is the engine host's client, the peer on the embedded shape's detached supervisor, which every build since
+// E10 has and a build before O2 is limited to:
+//   (update, daemon)    the peer's app keeps a session on its own supervisor; this build's app attaches on the daemon
+//                       shape: its `mawsd` connects to the peer's engine host across the minor, which it serves until
+//                       idle (exit-when-idle armed, as E10's replace policy), relays it to the app, and then starts an
+//                       engine host of its own build, the same `mawsd` serving both;
+//   (downgrade, daemon) this build's app keeps a session under its `mawsd`; the peer's app, which knows no daemon,
+//                       attaches to that engine host directly, which replaces `mawsd` as its client (`mawsd` exits 0,
+//                       residue 38), is served as another build and moves to a supervisor of its own: the path back
+//                       from O2 to a build before it.
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
 // WIRE_MINOR (.github/scripts/gate-plan.mjs).
 import { randomUUID } from 'node:crypto';
@@ -26,6 +38,7 @@ import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { HostStatus } from '@shared/ipc/schema/host';
 import type { CommandInput } from '@shared/ipc/schema';
 import { classifyWireChange, type WireManifest } from '@shared/ipc/wire';
 import { invoke, replaySpec, turnsJournal, value } from './support/c7-replay';
@@ -71,7 +84,7 @@ function mainOnlyOf(root: string): Set<string> {
   return names;
 }
 
-function builds(): { older: Build; newer: Build } {
+function builds(): { older: Build; newer: Build; here: Build; peer: Build } {
   const here = buildAt(REPO_ROOT, 'this build');
   const peer = buildAt(PEER!, 'the peer');
   expect(peer.manifest.major, `the peer speaks wire ${wireOf(peer)} and this build ${wireOf(here)}: the group checks two builds of one major`).toBe(here.manifest.major);
@@ -79,7 +92,7 @@ function builds(): { older: Build; newer: Build } {
   // OX1's rule between the two, as between two minors: within a major nothing may change but additively (a JSON Schema
   // rendering rebased after a zod upgrade reads as breaking here too; such a pair is not one this check can vouch for)
   expect(classifyWireChange(older.manifest, newer.manifest).breaking, `${older.label} (wire ${wireOf(older)}) to ${newer.label} (wire ${wireOf(newer)})`).toEqual([]);
-  return { older, newer };
+  return { older, newer, here, peer };
 }
 
 // ---- JSON Schema, as the manifest renders the wire (z.toJSONSchema) ---------------------------------------------------
@@ -158,14 +171,23 @@ const MAIN_REFUSES = /\[hosts\] (?:dropped a malformed message from engine-host|
 const HOST_REFUSES = /dropped a malformed message from main|closed the client: |closed a connection: |refused to emit |\[host\] \S+ produced an invalid output/;
 const DROPPED = /dropped \S+ from .*, a field this build does not know|dropped engine-host's event \S+: not in this build's event registry/;
 
-async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer: Build; older: Build } | null): Promise<string[]> {
-  const said: string[] = [`${keeper.label} (wire ${wireOf(keeper)}) keeps a session; ${attacher.label} (wire ${wireOf(attacher)}) attaches`];
+// The shape each app runs on: the embedded shape's detached supervisor, or the daemon shape (P5 O2), whose `mawsd` is
+// the engine host's client and relays it to the app.
+type Shape = 'detached' | 'daemon';
+interface Shapes { keeper: Shape; attacher: Shape }
+const EMBEDDED: Shapes = { keeper: 'detached', attacher: 'detached' };
+const onShape = (shape: Shape) => (st: HostStatus) => shape === 'detached' || st.daemon !== null; // the daemon shape's main also knows its mawsd
+
+async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer: Build; older: Build } | null, shapes: Shapes = EMBEDDED): Promise<string[]> {
+  const shapeOf = (shape: Shape) => (shape === 'daemon' ? ' on the daemon shape' : '');
+  const said: string[] = [`${keeper.label} (wire ${wireOf(keeper)})${shapeOf(shapes.keeper)} keeps a session; ${attacher.label} (wire ${wireOf(attacher)})${shapeOf(shapes.attacher)} attaches`];
 
   // the keeper: a paced replay kept across a quit, its background failure and its request still ahead
-  const first = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep', MAWS_E2E_REPLAY_ROW_MS: ROW_MS }, keeper.root);
-  const own = await s.ready(first.page);
+  const first = await s.launch({ MAWS_HOST_MODE: shapes.keeper, MAWS_E2E_QUIT_ANSWER: 'keep', MAWS_E2E_REPLAY_ROW_MS: ROW_MS }, keeper.root);
+  const own = await s.ready(first.page, onShape(shapes.keeper));
   expect(own, `${keeper.label} on its own supervisor`).toMatchObject({ matches: 'same', supervisor: { buildId: own.appBuildId } });
   const kept = own.supervisor!;
+  const keeperDaemon = shapes.keeper === 'daemon' ? own.daemon!.pid : null;
   const id = await s.record(first.page);
   const fixture = tailFixture(s.root);
   await launchOn(keeper, first.page, id, fixture, s);
@@ -175,24 +197,34 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   await s.quit(first);
   expect(first.quitLines()).toContain('quit-guard: 1 mid-turn, auto-answered keep, 1 session kept');
   expect(isAlive(kept.pid), 'the kept supervisor outlives its app').toBe(true);
+  if (keeperDaemon !== null) expect(isAlive(keeperDaemon), 'the keeper’s mawsd serves its kept session').toBe(true);
   const atQuit = s.journal(id);
   const seqAtQuit = Math.max(...atQuit.map((r) => r.seq));
   expect(atQuit.filter((r) => isTaskFailureRow(r) || isRequestRow(r)), 'the failure and the request come after the app has exited').toEqual([]);
   await expect.poll(() => s.journal(id).some(isRequestRow), { timeout: 30_000, message: 'the request reaches the journal while no app runs' }).toBe(true);
 
   // the other build's app attaches, and is served as another build until the kept sessions are idle
-  const second = await s.launch({ MAWS_E2E_SUPERVISOR_IDLE_MS: String(IDLE_MS) }, attacher.root);
-  const served = await s.ready(second.page, (st) => st.supervisor!.exitWhenIdle);
+  const second = await s.launch({ MAWS_HOST_MODE: shapes.attacher, MAWS_E2E_SUPERVISOR_IDLE_MS: String(IDLE_MS) }, attacher.root);
+  const served = await s.ready(second.page, (st) => st.supervisor!.exitWhenIdle && onShape(shapes.attacher)(st));
   expect(served, `${attacher.label} served by ${keeper.label}'s supervisor`).toMatchObject({ matches: 'build', supervisor: { pid: kept.pid, buildId: kept.buildId, liveSessions: 1, exitWhenIdle: true } });
   const build = served.appBuildId;
   expect(build, 'two builds').not.toBe(kept.buildId);
   await expect(banner(second.page, 'MAWS was updated.')).toContainText('1 session is still running');
-  // the hello across the minor, as each end logged it
-  const hello = `client connected: appPid ${second.child.pid} build ${build} wire ${wireOf(attacher)} capabilities [`;
-  expect(s.log(), "host.log: the attaching app's hello, at its own minor").toContain(hello);
+  // the hello across the minor, as each end logged it; on the daemon shape the engine host's client is `mawsd`, which
+  // says this build's engine-host build and wire, and the app's main reads the welcome `mawsd` reflects from upstream
+  const attacherDaemon = shapes.attacher === 'daemon' ? served.daemon!.pid : null;
+  const hello = `client connected: appPid ${attacherDaemon ?? second.child.pid} build ${build} wire ${wireOf(attacher)} capabilities [`;
+  expect(s.log(), `host.log: the attaching ${attacherDaemon === null ? 'app' : 'app’s mawsd'}'s hello, at its own minor`).toContain(hello);
   const welcome = `connected to supervisor pid ${kept.pid} build ${kept.buildId} wire ${wireOf(keeper)} capabilities [`;
   expect(second.output(), "the attaching app's main: the welcome, at the supervisor's minor").toContain(welcome);
+  if (attacherDaemon !== null) expect(s.daemonLog(), "mawsd's log: the upstream's welcome, at the supervisor's minor").toContain(welcome);
   said.push(`  hello: ${hello}…`, `  welcome: ${welcome}…`);
+  if (keeperDaemon !== null) {
+    // the peer's app took the engine host from the keeper's `mawsd`, which stops reaching it and exits 0 (residue 38)
+    await expect.poll(() => isAlive(keeperDaemon), { timeout: 15_000, message: 'the keeper’s mawsd exits once the engine host is taken' }).toBe(false);
+    expect(s.daemonLog(), 'mawsd says why it left').toContain('the engine-host was taken by another client; exiting');
+    said.push(`  mawsd pid ${keeperDaemon} exited: the engine host was taken by ${attacher.label}'s app`);
+  }
 
   // the tail: what the kept supervisor journaled while no app ran reaches this main, its live derivation included
   const atAttach = await eventsOf(second.page, id);
@@ -228,8 +260,9 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   said.push(`  served: a launch played its turn on the kept supervisor; the kept turn played on after this app's answer, ${await arrived()} rows live`);
 
   // the move: once both sessions are idle they are released, the kept supervisor exits, and the app starts its own
-  const moved = await s.ready(second.page, (st) => st.supervisor!.pid !== kept.pid, IDLE_MS + 45_000);
+  const moved = await s.ready(second.page, (st) => st.supervisor!.pid !== kept.pid && onShape(shapes.attacher)(st), IDLE_MS + 45_000);
   expect(moved, `${attacher.label} on a supervisor of its own build`).toMatchObject({ matches: 'same', supervisor: { buildId: build, exitWhenIdle: false } });
+  if (attacherDaemon !== null) expect(moved.daemon!.pid, 'the same mawsd serves the new engine host').toBe(attacherDaemon);
   await expect.poll(() => isAlive(kept.pid), { timeout: 10_000, message: 'the kept supervisor is gone' }).toBe(false);
   expect(s.lock(), 'the lock names the new supervisor').toMatchObject({ pid: moved.supervisor!.pid, buildId: build });
   expect(s.log(), 'the kept supervisor exited by itself once idle').toContain('exiting (exitWhenIdle)');
@@ -263,7 +296,11 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   const hostLines = s.log().split('\n');
   expect(appLines.filter((l) => MAIN_REFUSES.test(l)), `${attacher.label}'s main refuses nothing ${keeper.label}'s supervisor sent`).toEqual([]);
   expect(hostLines.filter((l) => HOST_REFUSES.test(l)), 'neither supervisor refuses what the other build sent').toEqual([]);
-  const dropped = [...appLines, ...hostLines].filter((l) => DROPPED.test(l));
+  // `mawsd` forwards raw, so it has nothing of the other build's to refuse; its log is read for the record, not held to
+  // the pattern, since it also closes its own machine.sock probes
+  const daemonLines = s.daemonLog().split('\n');
+  if (shapes.keeper === 'daemon' || shapes.attacher === 'daemon') said.push(`  mawsd's log: ${daemonLines.filter((l) => HOST_REFUSES.test(l)).length} lines of the refusal pattern${daemonLines.filter((l) => HOST_REFUSES.test(l)).map((l) => ` | ${l.trim()}`).join('')}`);
+  const dropped = [...appLines, ...hostLines, ...daemonLines].filter((l) => DROPPED.test(l));
   said.push(dropped.length === 0 ? '  dropped: nothing, at either end' : `  dropped (the tolerant reader): ${dropped.map((l) => l.trim()).join(' | ')}`);
   expect(second.maws.consoleErrors()).toEqual([]);
   return said;
@@ -284,4 +321,16 @@ test('(update) the older build’s app keeps a session; the newer build’s app 
 test('(downgrade) the newer build’s app keeps a session; the older build’s app attaches across the minor, is served, launches, and moves to its own supervisor', async () => {
   const { older, newer } = builds();
   await withScratch('xb-downgrade', async (s) => record(await crossing(s, newer, older, null)));
+});
+
+test('(update, daemon) the peer’s app keeps a session on its own supervisor; this build’s app attaches on the daemon shape, its mawsd relays the peer’s engine host across the minor until idle, then starts its own', async () => {
+  const { here, peer, newer, older } = builds();
+  const gap = here === newer ? { newer, older } : null;
+  await withScratch('xb-daemon-update', async (s) => record(await crossing(s, peer, here, gap, { keeper: 'detached', attacher: 'daemon' })));
+});
+
+test('(downgrade, daemon) this build’s app keeps a session under its mawsd; the peer’s app takes that engine host from mawsd, which exits, is served as another build, and moves to its own supervisor', async () => {
+  const { here, peer, newer, older } = builds();
+  const gap = peer === newer ? { newer, older } : null;
+  await withScratch('xb-daemon-downgrade', async (s) => record(await crossing(s, here, peer, gap, { keeper: 'daemon', attacher: 'detached' })));
 });
