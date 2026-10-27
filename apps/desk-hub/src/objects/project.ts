@@ -781,12 +781,12 @@ export class Project extends DurableObject<Env> {
 
   /** Writes a forwarded RPC to the stream its record names. A send that finds no stream fails it `machine-offline`; but a
    * `retry` of an uncertain one stays uncertain, since a retry the hub could not deliver says nothing of what the first
-   * forward did. An RL1 connection carries no RPC (O11 M6): it fails `unsupported`, retry or not, since it was never
-   * sent. */
+   * forward did, whatever the transport answers. An RL1 connection carries no RPC (O11 M6): a first forward to one fails
+   * `unsupported`, since it was never sent; a retry stays uncertain, since an earlier stream may have run it. */
   private send(record: RpcRecord, retry = false): void {
     const { rpc, generation } = record;
     const unsent = (undelivered: 'failed' | 'uncertain', error: RpcError = { code: 'machine-offline', message: `${rpc.machine} is offline` }) => {
-      const state = retry && error.code === 'machine-offline' ? 'uncertain' : undelivered;
+      const state = retry ? 'uncertain' : undelivered;
       const now = this.plane.rpc(rpc.nonce);
       if (now?.state !== 'forwarded' || now.generation !== generation) return;
       const outcome: RpcOutcome | null = state === 'failed' ? { state: 'failed', error } : null;

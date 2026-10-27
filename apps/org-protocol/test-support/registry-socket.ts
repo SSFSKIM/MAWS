@@ -21,9 +21,10 @@ export class RegistrySocket extends JsonSocket {
   /** Whether the last `listings` page came (the socket's opening frames are all in). */
   ready = false;
 
-  static async open(base: string, headers: Headers): Promise<RegistrySocket> {
+  /** Opens the socket and resolves once its opening frames are in (`readyMs` at most; a socket that times out is closed). */
+  static async open(base: string, headers: Headers, readyMs = 10_000): Promise<RegistrySocket> {
     const socket = new RegistrySocket(await openSocket(socketUrl(base, REGISTRY_SOCKET_PATH), headers, 'Registry'));
-    await socket.next((f) => f.t === 'listings' && f.last === true, 'the last listings page');
+    await socket.untilReady((f) => f.t === 'listings' && f.last === true, 'the last listings page', readyMs);
     return socket;
   }
 

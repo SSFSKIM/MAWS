@@ -28,9 +28,10 @@ export class ProjectSocket extends JsonSocket {
   /** The highest offset the hub said this socket is caught up to. */
   caughtUp: number | null = null;
 
-  static async open(base: string, headers: Headers, project: string): Promise<ProjectSocket> {
+  /** Opens the socket and resolves once the project welcomes it (`readyMs` at most; a socket that times out is closed). */
+  static async open(base: string, headers: Headers, project: string, readyMs = 10_000): Promise<ProjectSocket> {
     const socket = new ProjectSocket(await openSocket(socketUrl(base, projectSocketPath(project)), headers, `project ${project}`));
-    await socket.next((f) => f.t === 'welcome', 'welcome');
+    await socket.untilReady((f) => f.t === 'welcome', 'welcome', readyMs);
     return socket;
   }
 
