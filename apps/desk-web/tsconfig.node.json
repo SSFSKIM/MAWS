@@ -5,6 +5,6 @@
   "compilerOptions": {
     "types": ["node", "vite/client"]
   },
-  "include": ["*.config.ts", "src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "e2e/**/*.ts", "e2e-hub/**/*.ts", "../../src/renderer/src/env.d.ts"],
+  "include": ["*.config.ts", "src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "e2e/**/*.ts", "e2e-hub/**/*.ts", "e2e-staging/**/*.ts", "../../src/renderer/src/env.d.ts"],
   "exclude": []
 }
