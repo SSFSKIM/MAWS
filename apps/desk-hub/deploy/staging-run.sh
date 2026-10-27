@@ -141,6 +141,9 @@ case $step in
   throwaway|desk-web)
     n=${1:?a run id}; shift
     [[ $n =~ '^[a-z0-9-]{1,20}$' ]] || { print -r -- "bad run id $n"; exit 2; }
+    # The desk-web check passes nothing on: a Playwright option (--trace=on, --debug, …) would record the browser that
+    # holds the owner's token.
+    [[ $step == desk-web && $# -gt 0 ]] && { print -r -- "desk-web takes no option (given: $*): stop. Nothing was changed."; exit 2; }
     org=staging-probe-$n
     LOG=$O/$step-$n.log; : > $LOG
     say() { print -r -- "$*" | tee -a $LOG; }
@@ -157,10 +160,11 @@ case $step in
       swept=${pipestatus[2]}; say "sweep exit $swept"
       zsh $HERE/staging-deploy.sh --checkout $W 2>&1 | filter | tail -6 | tee -a $LOG
       restored=${pipestatus[1]}
-      served=$(curl -s -K - <<< "header = \"cf-access-token: $T\"
-url = \"$URL/api/me\"" | python3 -B -I -c 'import json,sys; print(json.load(sys.stdin)["org"]["id"])' 2>/dev/null)
+      # Which org staging serves now: curl's configuration (the token) through a pipe, never an argument or a file.
+      served=$(printf 'header = "cf-access-token: %s"\nurl = "%s/api/me"\n' "$T" "$URL" | curl -sf --max-time 30 -K - | python3 -B -I -c 'import json,sys; print(json.load(sys.stdin)["org"]["id"])' 2>/dev/null)
       unset T
       say "restore exit $restored; staging serves org: ${served:-unknown}; log $LOG"
+      [[ -n $served ]] || say "restore check failed: /api/me gave no org within 30 s (no answer, an error status or an unreadable body)"
       if (( first == 0 && deployed == 0 && ${#checks} > 0 && ${#${checks:#0}} == 0 && swept == 0 && restored == 0 )) && [[ $served == "$STAGING_ORG" ]]; then final=0; else final=$(( first ? first : 1 )); fi
       exit $final
     }
@@ -179,10 +183,11 @@ url = \"$URL/api/me\"" | python3 -B -I -c 'import json,sys; print(json.load(sys.
       checks+=(${pipestatus[2]}); say "redeploy-check exit ${checks[-1]}"
     else
       # Acceptance 8's desk-web check (apps/desk-web/e2e-staging): Playwright's headless Chromium, the token its
-      # cookie; no trace, video or HAR. Afterwards every file it wrote is searched for the token (read from a pipe,
-      # never an argument): none may hold it.
+      # cookie; no trace, video or HAR. It runs in an environment of this script's choosing (no PWDEBUG, PW_* or
+      # PLAYWRIGHT_* passes through), and its configuration refuses any option or such variable as well. Afterwards
+      # every file it wrote is searched for the token (read from a pipe, never an argument): none may hold it.
       shots=$O/desk-web-$n; mkdir -p $shots
-      ( cd $W/apps/desk-web && DESK_STAGING_TEST_ORG=$org DESK_STAGING_SHOTS=$shots npx playwright test -c playwright.staging.config.ts "$@" ) 2>&1 | filter | tee -a $LOG
+      ( cd $W/apps/desk-web && env -i HOME=$HOME PATH=$PATH USER=$USER TMPDIR=${TMPDIR:-/tmp} LANG=${LANG:-C} DESK_STAGING_TEST_ORG=$org DESK_STAGING_SHOTS=$shots npx playwright test -c playwright.staging.config.ts ) 2>&1 | filter | tee -a $LOG
       checks+=(${pipestatus[1]}); say "desk-web check exit ${checks[-1]}; screenshots: $(cd $shots && print -r -- *.png(N))"
       holding=$(/usr/bin/grep -rlF -f <(print -r -- "$T") $shots $LOG 2>/dev/null | wc -l | tr -d ' ')
       say "files holding the Access token: $holding"
