@@ -32,13 +32,13 @@ import { liveMarkedRowIds, reportRows, reportViewOf } from '../../owner/report/p
 // P2-C end
 import './transcript.css';
 
-// The logical end (the virtualiser's total against the committed sizer) is compared within a pixel.
+// Leaving the end, and the logical end (the virtualiser's total against the committed sizer), are read within a pixel:
+// an animated key scroll's first frames move only 2-3px, and a wider band would pin them back to a grown end.
 export const SCROLL_END_THRESHOLD = 1;
-// The DOM end is not that precise. scrollHeight and clientHeight are integers while the offset the browser lets a reader
-// reach is not, so at a zoom other than 100% a reader at the very bottom can sit short of scrollHeight - clientHeight:
-// measured in Chrome up to 1.73px at 110%, 2px at 80% and 50%, 2.09px at 33%. Being at the DOM end is read within this
-// slack, on returning and on leaving alike. The band cannot trap a reader moving away: upward wheel/touch intent
-// releases at once, and witnessed key or scrollbar movement goes past a few pixels.
+// Returning is read within a wider slack. scrollHeight and clientHeight are integers while the offset the browser lets a
+// reader reach is not, so at a zoom other than 100% a reader at the very bottom can sit short of
+// scrollHeight - clientHeight: measured in Chrome up to 1.73px at 110%, 2px at 80% and 50%, 2.09px at 33%. Only a
+// downward move resumes (upward intent re-bases it below), so the slack cannot pull back a reader turning away.
 const DOM_END_SLACK = 3;
 const domEndGap = (element: HTMLElement, scrollHeight = element.scrollHeight) => scrollHeight - element.clientHeight - element.scrollTop;
 export const OVERSCAN = 6;
@@ -117,7 +117,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
     const element = scrollRef.current;
     // A measurement can shrink the logical list before React commits its smaller sizer. The old DOM scrollHeight
     // must not turn the browser's clamp to that new end into an apparent scroll away from it.
-    const away = element !== null && domEndGap(element, Math.min(element.scrollHeight, measuredSize)) > DOM_END_SLACK;
+    const away = element !== null && domEndGap(element, Math.min(element.scrollHeight, measuredSize)) > SCROLL_END_THRESHOLD;
     if (away) changeFollow(false);
     return away;
   }, [changeFollow]);

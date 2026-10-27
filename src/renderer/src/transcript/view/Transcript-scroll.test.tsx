@@ -370,19 +370,16 @@ it('a small upward wheel after an unread return to the end keeps the reader rele
   expect(s.writes).toEqual([]);
 });
 
-it('a witnessed key whose clamp lands on a rounded fractional end keeps following', async () => {
-  const s = await scene(false, true);
-  s.roundDOMEnd(1.75);
-  s.move(0); // the browser's reachable maximum sits below the integer end, and the follower is at it
-  const editor = document.createElement('textarea');
-  s.scroller.querySelector('[data-index]')!.appendChild(editor);
-  act(() => { fireEvent.keyDown(editor, { key: 'PageUp' }); }); // consumed by the editor, but a witness for the list
-  s.resizeRow('last', -40);
-  s.move(0); // the browser clamps to the smaller reachable end
-  expect(s.scroller.scrollHeight - s.scroller.clientHeight - s.scroller.scrollTop).toBe(1.75);
-  expect(s.handle.current!.following).toBe(true);
-  expect(s.changed.mock.calls).toEqual([]);
-});
+for (const report of [false, true]) {
+  it(`an animated key scroll's first 2px frame releases following before a streamed row (native event reported: ${report})`, async () => {
+    const s = await scene();
+    act(() => { fireEvent.keyDown(document.body, { key: 'ArrowUp' }); });
+    s.move(-2, report); // Chromium's ArrowUp animation reports 2-3px before the rest of its 40px
+    s.stream();
+    expect(s.handle.current!.following).toBe(false);
+    expect(s.writes).toEqual([]);
+  });
+}
 
 it('a native return to the last observed end resumes following when new DOM growth precedes its scroll event', async () => {
   const s = await scene();
