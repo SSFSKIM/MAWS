@@ -167,6 +167,22 @@ describe('binding', () => {
     expect(f.requested).toHaveLength(3);
   });
 
+  it('lets an address go at once though a WebSocket on it is open: the socket is ended, the new set bound and advertised, and stop() not held', async () => {
+    const f = await fixture();
+    const live = raw(f, 'fd7a:115c:a1e0::abcd');
+    await opened(live);
+    const ended = closedOf(live);
+    f.table.current = { utun4: [v4('100.101.102.103'), v4('100.90.1.2')] };
+    const bounded = <T>(work: Promise<T>, what: string) => Promise.race([work, new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${what} held past 2 s`)), 2000))]);
+    await bounded(f.listener.rescan(), 'the rescan');
+    expect(f.reports.at(-1)).toEqual([`ws://100.101.102.103:${f.ports.get('100.101.102.103')}`, `ws://100.90.1.2:${f.ports.get('100.90.1.2')}`]);
+    await bounded(ended, 'the vanished address’s socket');
+    const staying = raw(f);
+    await opened(staying);
+    await bounded(f.listener.stop(), 'stop()');
+    await bounded(closedOf(staying), 'the socket at stop');
+  });
+
   it('reads the interfaces again at once on a bind error, and tries the failed address again only at the next periodic read', async () => {
     const f = await fixture({ failing: ['fd7a:115c:a1e0::abcd'] });
     expect(f.log.some((line) => line.includes('EADDRNOTAVAIL'))).toBe(true);

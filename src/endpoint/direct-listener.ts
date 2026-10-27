@@ -77,7 +77,8 @@ export type DirectListenerOptions = {
   now?(): number;
 };
 
-type Bound = { server: Server; port: number };
+/** An address's server and the WebSockets it upgraded, which `server.close()` alone would wait on. */
+type Bound = { server: Server; port: number; sockets: Set<WebSocket> };
 
 const BUSY = '{"error":"busy"}';
 
@@ -124,8 +125,8 @@ export class DirectListener {
     if (this.#timer !== null) clearInterval(this.#timer);
     this.#timer = null;
     await this.#serial(async () => {
+      for (const address of [...this.#bound.keys()]) this.#unbind(address);
       for (const client of this.#wss.clients) client.terminate();
-      await Promise.all([...this.#bound.keys()].map((address) => this.#unbind(address)));
     });
   }
 
@@ -145,14 +146,15 @@ export class DirectListener {
       this.#options.log(`endpoint: the network interfaces could not be read: ${(error as Error).message}`);
       return false;
     }
-    for (const address of [...this.#bound.keys()]) if (!wanted.includes(address)) await this.#unbind(address);
+    for (const address of [...this.#bound.keys()]) if (!wanted.includes(address)) this.#unbind(address);
     let failed = false;
     for (const address of wanted) {
       if (this.#bound.has(address) || this.#failed.has(address) || this.#stopped) continue;
-      const server = this.#server();
+      const sockets = new Set<WebSocket>();
+      const server = this.#server(sockets);
       try {
         const port = await (this.#options.listen ?? listenOn)(server, address, this.#options.port);
-        this.#bound.set(address, { server, port });
+        this.#bound.set(address, { server, port, sockets });
         this.#options.log(`endpoint: the direct listener is bound to ${directUrl(address, port)}`);
       } catch (error) {
         server.close();
@@ -172,35 +174,43 @@ export class DirectListener {
     this.#options.addresses(urls);
   }
 
-  #unbind(address: string): Promise<void> {
+  /**
+   * Stops listening on `address` at once and ends every socket it carried (a channel on an address that left has no
+   * path back anyway). Nothing waits for the server's drain: an upgraded socket would hold it, and the rebind and the
+   * endpoint record must not.
+   */
+  #unbind(address: string): void {
     const bound = this.#bound.get(address);
     this.#bound.delete(address);
-    if (bound === undefined) return Promise.resolve();
+    if (bound === undefined) return;
     this.#options.log(`endpoint: the direct listener let ${directUrl(address, bound.port)} go`);
-    return new Promise<void>((resolve) => {
-      bound.server.close(() => resolve());
-      bound.server.closeAllConnections();
-    });
+    for (const socket of bound.sockets) socket.terminate();
+    bound.server.close();
+    bound.server.closeAllConnections();
   }
 
-  #server(): Server {
+  #server(sockets: Set<WebSocket>): Server {
     const server = createServer((_request, response) => {
       response.writeHead(426, { 'content-type': 'text/plain', connection: 'close' });
       response.end('RL2 only\n');
     });
-    server.on('upgrade', (request: IncomingMessage, socket: Duplex, head: Buffer) => this.#upgrade(request, socket, head));
+    server.on('upgrade', (request: IncomingMessage, socket: Duplex, head: Buffer) => this.#upgrade(request, socket, head, sockets));
     server.on('error', (error) => this.#options.log(`endpoint: the direct listener's server failed: ${error.message}`));
     return server;
   }
 
-  #upgrade(request: IncomingMessage, socket: Duplex, head: Buffer): void {
+  #upgrade(request: IncomingMessage, socket: Duplex, head: Buffer, sockets: Set<WebSocket>): void {
     socket.on('error', () => socket.destroy());
     const source = request.socket.remoteAddress ?? 'unknown';
     if (this.#stopped || !this.#limiter.take(source)) {
       socket.end(`HTTP/1.1 503 Service Unavailable\r\ncontent-type: application/json\r\ncontent-length: ${Buffer.byteLength(BUSY)}\r\nconnection: close\r\n\r\n${BUSY}`);
       return;
     }
-    this.#wss.handleUpgrade(request, socket, head, (ws) => this.#connected(ws, source));
+    this.#wss.handleUpgrade(request, socket, head, (ws) => {
+      sockets.add(ws);
+      ws.once('close', () => sockets.delete(ws));
+      this.#connected(ws, source);
+    });
   }
 
   #connected(ws: WebSocket, source: string): void {

@@ -11,11 +11,13 @@ import {
   generateSigningKey,
   importSigningKey,
   keyId,
+  machineKeys,
   machineNameKey,
   NO_CERTIFICATES,
   SIGNING_DOMAINS,
   signRecord,
   verifyMachineCert,
+  type Certificates,
   type MachineCert,
   type SignedOrgState,
   type SigningKey,
@@ -177,17 +179,29 @@ export async function syncAndPromote(ctx: EnrollContext, until?: number): Promis
 }
 
 /**
- * Writes `org-listed` once the head lists the machine (attended) or accepts its certificate (delegated), for the key on
- * disk: the record and the key a re-enrollment writes are judged together, never the new record by the old key.
+ * Writes `org-listed` once the machine speaks for its ref in the head (`speaksFor`), for the key on disk: the record and
+ * the key a re-enrollment writes are judged together, never the new record by the old key.
  */
 export async function promoteIfListed(ctx: Pick<EnrollContext, 'state' | 'org' | 'deps' | 'log'>): Promise<boolean> {
   const { enrollment, machineKey } = ctx.state;
   if (enrollment === null || machineKey === null || !ctx.org.ready) return false;
   if (enrollment.state === 'org-listed') return true;
-  if (!(await listedIn(ctx.org.head(), enrollment, machineKey.keyId, new Date(ctx.deps.now())))) return false;
+  if (!(await speaksFor(ctx.org.head(), ctx.org.certificates(), enrollment, machineKey.keyId, new Date(ctx.deps.now())))) return false;
   ctx.state.setEnrollment({ ...enrollment, state: 'org-listed' });
   ctx.log(`endpoint: ${enrollment.name} is listed in the org state at version ${ctx.org.head().state.version}`);
   return true;
+}
+
+/**
+ * Whether the key on disk speaks for the machine's ref in `head`, as a device judges it at the handshake: the head lists
+ * the ref with that key (attended) or accepts its certificate (delegated, its delegation present and unexpired), the key
+ * is neither revoked nor retired, and no live certificate contests the ref. Losing it takes the machine off the org: its
+ * channels close and it is `hub-confirmed` again (M4).
+ */
+export async function speaksFor(head: SignedOrgState, certificates: Certificates, enrollment: EnrollmentFile, machineKey: string, now: Date): Promise<boolean> {
+  if (head.state.revoked.some((r) => r.keyId === machineKey) || head.state.retired.some((r) => r.keyId === machineKey)) return false;
+  if (!(await listedIn(head, enrollment, machineKey, now))) return false;
+  return !(await machineKeys(head.state, enrollment.ref, certificates, now)).contested;
 }
 
 async function listedIn(head: SignedOrgState, enrollment: EnrollmentFile, machineKey: string, now: Date): Promise<boolean> {

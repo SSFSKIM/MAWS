@@ -104,6 +104,8 @@ type Entry = {
   peer: DevicePeer;
   /** The key id of the channel key the device signed `h3` with. */
   kid: string;
+  /** The machine key `h2` was signed with. */
+  machinePub: string;
   /** The grades `caps` last said; one refresh at a time, in order. */
   grades: Right[];
   caps: Promise<void>;
@@ -239,6 +241,7 @@ export class Channels {
     const org = this.#ctx.org();
     if (identity === null || org === null) {
       io.close('unavailable');
+      this.#ctx.log(`endpoint: a ${carrier} channel was refused: unavailable`);
       return null;
     }
     this.#pending.add(io);
@@ -266,7 +269,7 @@ export class Channels {
       } finally {
         clearTimeout(timer);
       }
-      return await this.#admit(key, carrier, channel, peer, epoch);
+      return await this.#admit(key, carrier, channel, peer, epoch, identity.key.pub);
     } finally {
       this.#pending.delete(io);
     }
@@ -277,7 +280,7 @@ export class Channels {
    * head adopted, the device gone, the endpoint stopped) is read once more here, synchronously with registering it, so
    * nothing falls between the two.
    */
-  async #admit(key: string, carrier: Carrier, channel: Channel, peer: DevicePeer, epoch: number): Promise<RemoteChannel | null> {
+  async #admit(key: string, carrier: Carrier, channel: Channel, peer: DevicePeer, epoch: number, machinePub: string): Promise<RemoteChannel | null> {
     let kid: string;
     let grades: Right[];
     try {
@@ -289,14 +292,15 @@ export class Channels {
       return null;
     }
     if (channel.closed) return null;
-    const org = this.#ctx.identity() === null ? null : this.#ctx.org();
+    // The endpoint still serves, under the key this handshake was signed with.
+    const org = this.#ctx.identity()?.key.pub !== machinePub ? null : this.#ctx.org();
     const reason = org === null ? 'unavailable' : holds(org.head().state, peer, kid) ? null : 'removed';
     if (org === null || reason !== null) {
       channel.close(reason ?? 'unavailable');
       this.#ctx.log(`endpoint: a ${carrier} channel was refused: ${reason}`);
       return null;
     }
-    const entry = this.#register(key, carrier, channel, peer, kid, grades);
+    const entry = this.#register(key, carrier, channel, peer, kid, grades, machinePub);
     entry.remote.send(this.#caps(entry, grades, org.head().state.version));
     if (epoch !== this.#capsEpoch) this.#refresh(entry);
     channel.onMessage((message) => this.#receive(entry, message));
@@ -347,6 +351,14 @@ export class Channels {
     this.refreshCaps();
   }
 
+  /**
+   * The machine key was replaced (`--replace`): every channel the old key authenticated closes `restart`, so its device
+   * handshakes again against the new one once the head lists it (a replaced key is often a suspect one).
+   */
+  keyReplaced(current: string): void {
+    for (const entry of [...this.#entries.values()]) if (entry.machinePub !== current) entry.remote.close('restart');
+  }
+
   /** Reads each channel's grades again and sends `caps` where they changed (a grant kept or ended, an owner changed). */
   refreshCaps(): void {
     this.#capsEpoch++;
@@ -365,8 +377,8 @@ export class Channels {
     clearTimeout(timer);
   }
 
-  #register(key: string, carrier: Carrier, channel: Channel, peer: DevicePeer, kid: string, grades: Right[]): Entry {
-    const entry: Entry = { remote: new Remote(key, carrier, channel, peer, this.#ctx.log), channel, peer, kid, grades, caps: Promise.resolve(), heard: false, unanswered: 0, timer: null };
+  #register(key: string, carrier: Carrier, channel: Channel, peer: DevicePeer, kid: string, grades: Right[], machinePub: string): Entry {
+    const entry: Entry = { remote: new Remote(key, carrier, channel, peer, this.#ctx.log), channel, peer, kid, machinePub, grades, caps: Promise.resolve(), heard: false, unanswered: 0, timer: null };
     // A number the hub gives again on a later connection replaces whatever still closes under it.
     this.#entries.get(key)?.remote.close('endpoint-gone');
     this.#entries.set(key, entry);

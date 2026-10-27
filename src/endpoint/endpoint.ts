@@ -13,11 +13,11 @@
 // ones on the tailnet listener, which a `unit` daemon binds, and a `private` one only under `MAWS_ENDPOINT_DIRECT=1`.
 // The listener's addresses go into the endpoint record. `stop()` closes every channel (`restart`) before the hub link.
 import { networkInterfaces } from 'node:os';
-import { importSigningKey, stateHash, type MachineIdentity, type OrgState, type Rl1Refusal, type SigningKey } from 'org-protocol';
+import { importSigningKey, stateHash, type MachineIdentity, type OrgState, type Rl1Refusal, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { Channels } from './channels';
 import { DirectListener, type DirectListenerOptions } from './direct-listener';
 import { runCli } from './cli';
-import { enrollDelegatedInto, promoteIfListed, syncAndPromote, type DelegatedInput, type EnrollContext, type EnrollmentState } from './enroll';
+import { enrollDelegatedInto, promoteIfListed, speaksFor, syncAndPromote, type DelegatedInput, type EnrollContext, type EnrollmentState } from './enroll';
 import { dropRevokedGrants, machineRights } from './grants';
 import type { HubDeps } from './hub-http';
 import { HubLink } from './hub-link';
@@ -232,6 +232,8 @@ export class Endpoint implements EndpointModule {
       log: (line) => parts.services.log(line),
       keyChanged: (key) => {
         this.#key = key;
+        // The channels the old key authenticated end: their devices meet the new key once the head lists it.
+        this.channels.keyReplaced(key.pub);
         // New credentials: the link under the old ones ends, and a stop it came to is cleared; it opens again once the
         // new key is listed.
         void this.hub.stop();
@@ -326,7 +328,9 @@ export class Endpoint implements EndpointModule {
   #adopted(change: OrgChange): void {
     const parts = this.parts;
     if (parts === null) return;
-    // Removal closes at once, before anything else hears of the new head (M4).
+    // Removal closes at once, before anything else hears of the new head (M4): the machine's own standing first, then
+    // each device's.
+    this.#judgeStanding(change.head);
     this.channels.adopted(change.head.state);
     const log = (line: string) => parts.services.log(line);
     void stateHash(change.head.state).then((hash) => (this.#headHash = hash));
@@ -338,6 +342,42 @@ export class Endpoint implements EndpointModule {
     void promoteIfListed({ state: parts.state, org: parts.org, deps: this.deps, log }).then(() => this.#ensureLink());
     // The machine's owners or the admins may have changed: `@machine` listings are re-issued.
     void this.listings.refresh();
+  }
+
+  /**
+   * A new head may take away the machine's own standing (its entry removed, its key rotated or revoked; a certificate
+   * machine's delegation dropped or certificate revoked, RL §5.2). What needs no signature check is judged now,
+   * synchronously with the adoption; the rest (`speaksFor`: the certificate's signature and use, a contested ref) right
+   * after. Either way the machine is `hub-confirmed` again, every channel closes `removed`, and no handshake is admitted
+   * until a head lists it once more (`promoteIfListed`).
+   */
+  #judgeStanding(head: SignedOrgState): void {
+    const state = this.#state;
+    const enrollment = state?.enrolled ? state.enrollment : null;
+    const machineKey = state?.machineKey ?? null;
+    if (state === null || enrollment?.state !== 'org-listed' || machineKey === null || this.#key === null || this.#org === null) return;
+    const now = this.deps.now();
+    const kid = machineKey.keyId;
+    const pub = this.#key.pub;
+    const s = head.state;
+    const gone = s.revoked.some((r) => r.keyId === kid) || s.retired.some((r) => r.keyId === kid);
+    const cert = enrollment.cert?.body;
+    const delegation = cert === undefined ? undefined : s.delegations.find((d) => d.id === cert.delegation);
+    const held = cert === undefined ? s.machines.some((m) => m.ref === enrollment.ref && m.pub === pub) : cert.pub === pub && delegation !== undefined && Date.parse(delegation.expires) > now;
+    if (gone || !held) return this.#standDown(head);
+    const org = this.#org;
+    void speaksFor(head, org.certificates(), enrollment, kid, new Date(now)).then((speaks) => {
+      if (!speaks && org.ready && org.head().state.version === head.state.version) this.#standDown(head);
+    });
+  }
+
+  #standDown(head: SignedOrgState): void {
+    const state = this.#state;
+    const enrollment = state?.enrolled ? state.enrollment : null;
+    if (state === null || enrollment?.state !== 'org-listed') return;
+    state.setEnrollment({ ...enrollment, state: 'hub-confirmed' });
+    this.#services?.log(`endpoint: the org state at version ${head.state.version} no longer lets ${enrollment.name} speak for its ref with its key; it serves no channel until a head lists it again`);
+    void this.channels.closeAll('removed');
   }
 
   #endRevokedGrants(head: OrgState, log: (line: string) => void): void {
