@@ -3,6 +3,7 @@ import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import type { SpawnOptions } from 'node:child_process';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { captureConsole } from '../../../test/support/console-capture';
 import { connectLines } from '../../../test/support/socket-lines';
 import { fakeProfile, FakeProcesses, FakeSupervisor, type FakeProfile, type FakeSupervisorOptions } from '../../../test/support/fake-supervisor';
 import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
@@ -388,6 +389,16 @@ describe('the detached transport: a served connection ends', () => {
     expect(spawn).not.toHaveBeenCalled();
     expect(fake.connections).toHaveLength(2);
     other.socket.destroy();
+  });
+
+  it('a `refuse replaced` with a field this build does not know is still a replacement, the field dropped and logged', async () => {
+    const fake = await startFake();
+    await supervisor.start();
+    const refuse = { t: 'refuse', reason: 'replaced', protocol: SOCKET_PROTOCOL, buildId: 'newer', wire: wireFingerprint(), liveSessions: 0, newer: true };
+    fake.connections.at(-1)!.end(`${JSON.stringify(refuse)}\n`); // as a replaced connection ends: the refusal, then the close
+    await until(() => state().state === 'crashed');
+    expect(spawn).not.toHaveBeenCalled();
+    expect(logs).toContain('dropped newer from socket refuse, a field this build does not know (logged once per message and path)');
   });
 
   it('an exit the socket refuses to write is not remembered: the later death is a crash', async () => {
@@ -997,5 +1008,22 @@ describe('the detached transport: deliberate stops, restarts and the quit', () =
     await until(() => state().state === 'crashed');
     expect(supervisor.facts('engine-host')).toMatchObject({ reason: null, lastExit: null });
     other.socket.destroy();
+  });
+});
+
+// P5 O1 M6: a newer supervisor's socket-layer messages are read tolerantly after the welcome as before it.
+describe('the detached transport: a newer supervisor’s document close', () => {
+  it('a `documents.closed` with a field this build does not know still ends the window’s port, the field dropped and logged', async () => {
+    const dropped = captureConsole('warn', /^\[hosts\] dropped /);
+    const ends: unknown[] = [];
+    const fake = await startFake({ register: (_on, _emit, client) => client.onDocPort((_message, end) => void ends.push(end)) });
+    await supervisor.start();
+    const port = Object.assign(new EventEmitter(), { postMessage: vi.fn(), start: vi.fn(), close: vi.fn() });
+    expect(supervisor.postDocPort({ t: 'doc', channel: 7, artifactId: '11111111-1111-4111-8111-111111111111', actor: { kind: 'human' } }, port as never)).toBe(true);
+    await until(() => ends.length === 1);
+    fake.connections.at(-1)!.write(`${JSON.stringify({ t: 'documents.closed', channel: 7, reason: 'host', newer: true })}\n`);
+    await until(() => port.close.mock.calls.length === 1);
+    expect(errors).not.toHaveBeenCalled();
+    expect(dropped.lines()).toEqual(['[hosts] dropped newer from socket documents.closed, a field this build does not know (logged once per message and path)']);
   });
 });

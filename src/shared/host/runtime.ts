@@ -10,7 +10,7 @@
 // handlers ignore it.
 //
 // P5 O1 M6 (OX1): main may be another build of the wire's major, so the runtime reads the envelope and every command's
-// input tolerantly (tolerant.ts): an object key this build does not know is dropped, logged once per message and field,
+// input tolerantly (tolerant.ts): an object key this build does not know is dropped, logged once per message and path,
 // and the rest is validated strictly. What it answers and emits it still validates strictly against its own registry.
 import type { MessagePortMain } from 'electron';
 import type { HandlerContext } from '../ipc/client';

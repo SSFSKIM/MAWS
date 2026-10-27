@@ -82,17 +82,28 @@ function without(value: unknown, strips: readonly Strip[]): unknown {
   return root.value;
 }
 
-// A reader's log of what it dropped: one line per message and field, at the first path the field was seen at. `message`
-// names what was read (`the input of session.status`, `event session.status`, `envelope req`). A field is its last path
-// segment, so array indices and record keys (session ids) never multiply the lines or the memory kept.
+// A reader's log of what it dropped: one line per message and structural path, at the first concrete path seen for it.
+// `message` names what was read (`the input of session.status`, `event session.status`, `envelope req`). An array index
+// folds into `[]`, so a list's length never multiplies the lines; distinct fields at distinct places stay distinct. A
+// record key (a session id) cannot be told from a property name without the schema, so the set is capped instead: past
+// TOLERANT_LOG_CAP distinct paths the log says so once and keeps no more.
+export const TOLERANT_LOG_CAP = 256;
+
 export function tolerantLog(write: (line: string) => void): (message: string, dropped: readonly string[]) => void {
   const seen = new Set<string>();
+  let full = false;
   return (message, dropped) => {
     for (const path of dropped) {
-      const field = `${message}\u0000${path.slice(path.lastIndexOf('.') + 1)}`;
-      if (seen.has(field)) continue;
-      seen.add(field);
-      write(`dropped ${path} from ${message}, a field this build does not know (logged once per message and field)`);
+      if (full) return;
+      const key = `${message}\u0000${path.replace(/(^|\.)\d+(?=\.|$)/g, '$1[]')}`;
+      if (seen.has(key)) continue;
+      if (seen.size === TOLERANT_LOG_CAP) {
+        full = true;
+        write(`dropped fields past the first ${TOLERANT_LOG_CAP} distinct paths go unlogged from here on`);
+        return;
+      }
+      seen.add(key);
+      write(`dropped ${path} from ${message}, a field this build does not know (logged once per message and path)`);
     }
   };
 }

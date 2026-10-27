@@ -520,6 +520,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     port.on('message', ({ data }) => {
       const refuse = readTolerant(ServerRefuseSchema, data);
       if (refuse.ok) {
+        logDropped('socket refuse', refuse.dropped);
         if (refuse.value.reason === 'replaced') connection.replaced = true;
         return;
       }

@@ -16,7 +16,7 @@ const MODE = process.env.MAWS_WIRE_MANIFEST_WRITE;
 // One minified entry per line, so a diff of the manifest shows which entries changed.
 function formatManifest(manifest: WireManifest): string {
   const lines = Object.entries(manifest.entries).map(([name, entry]) => `${JSON.stringify(name)}:${JSON.stringify(entry)}`);
-  return `{"major":${manifest.major},"minor":${manifest.minor},"entries":{\n${lines.join(',\n')}\n}}\n`;
+  return `{"major":${manifest.major},"minor":${manifest.minor},"capabilities":${JSON.stringify(manifest.capabilities)},"entries":{\n${lines.join(',\n')}\n}}\n`;
 }
 
 type Verdict = { ok: true; write: WireManifest | null } | { ok: false; message: string };
@@ -41,35 +41,31 @@ function verdict(committed: WireManifest | null, current: WireManifest, mode: st
     return mode === '1' ? write : fail(`${at}, at WIRE_MINOR ${current.minor}: ${RUN} to record it`);
   }
   if (current.minor !== committed.minor) return fail(`WIRE_MINOR is ${current.minor}, but the wire has not changed since the manifest’s minor ${committed.minor}`);
-  if (JSON.stringify(current.entries) !== JSON.stringify(committed.entries)) {
+  if (formatManifest(current) !== formatManifest(committed)) {
     return mode === 'rebase' ? write : fail('the wire manifest’s rendering differs with no change of shape (a zod upgrade, or an annotation): rewrite it with MAWS_WIRE_MANIFEST_WRITE=rebase pnpm wire:manifest');
   }
   return { ok: true, write: null };
 }
 
+// The production gate: this build's wire against the committed manifest. An authorized write (pnpm wire:manifest) comes
+// first; the assertion after it is against what is committed then, so a valid minor or major rewrite passes as it is.
 describe('the committed wire manifest', () => {
-  it('records this major, which is the socket protocol', () => {
-    const committed = JSON.parse(readFileSync(MANIFEST_PATH, 'utf8')) as WireManifest;
+  it('holds this build’s wire: WIRE_MAJOR (the socket protocol), WIRE_MINOR, WIRE_CAPABILITIES and every entry', () => {
     expect(WIRE_MAJOR).toBe(SOCKET_PROTOCOL);
-    expect(committed.major).toBe(WIRE_MAJOR);
-  });
-
-  it('holds the wire at WIRE_MINOR', () => {
+    const current = wireManifestOf(REGISTRY);
     const committed = existsSync(MANIFEST_PATH) ? (JSON.parse(readFileSync(MANIFEST_PATH, 'utf8')) as WireManifest) : null;
-    const answer = verdict(committed, wireManifestOf(REGISTRY), MODE);
+    const answer = verdict(committed, current, MODE);
     if (!answer.ok) throw new Error(answer.message);
     if (answer.write) writeFileSync(MANIFEST_PATH, formatManifest(answer.write));
-  });
-
-  it('starts major 3 at minor 0 with no capabilities', () => {
-    expect([WIRE_MAJOR, WIRE_MINOR, WIRE_CAPABILITIES]).toEqual([3, 0, []]);
+    expect(readFileSync(MANIFEST_PATH, 'utf8')).toBe(formatManifest(current));
   });
 });
 
 // The gate's verdicts on a manifest changed by hand, since a test cannot edit the registry's source.
 describe('the manifest gate', () => {
-  const base: WireManifest = { major: 3, minor: 4, entries: { 'events.a': { type: 'object', properties: { x: { type: 'string' } }, required: ['x'], additionalProperties: false } } };
-  const withEntry = (minor: number, entry: unknown, major = 3): WireManifest => ({ major, minor, entries: { 'events.a': entry } });
+  const base: WireManifest = { major: 3, minor: 4, capabilities: ['area.kept'], entries: { 'events.a': { type: 'object', properties: { x: { type: 'string' } }, required: ['x'], additionalProperties: false } } };
+  const withEntry = (minor: number, entry: unknown, major = 3): WireManifest => ({ major, minor, capabilities: base.capabilities, entries: { 'events.a': entry } });
+  const withCapabilities = (minor: number, capabilities: string[]): WireManifest => ({ ...base, minor, capabilities });
   const optionalAdded = { type: 'object', properties: { x: { type: 'string' }, y: { type: 'number' } }, required: ['x'], additionalProperties: false };
 
   it('passes an unchanged wire at the manifest’s minor, and refuses a minor bumped with nothing to record', () => {
@@ -101,6 +97,20 @@ describe('the manifest gate', () => {
     expect(verdict(base, withEntry(0, removed, 2), '1')).toMatchObject({ ok: false, message: expect.stringContaining('below') });
   });
 
+  it('writes a first manifest only at minor 0', () => {
+    const first: WireManifest = { ...base, minor: 0, capabilities: [] };
+    expect(verdict(null, first, '1')).toEqual({ ok: true, write: first });
+    expect(verdict(null, first, undefined)).toMatchObject({ ok: false, message: expect.stringContaining('no wire manifest is committed') });
+    expect(verdict(null, { ...first, minor: 1 }, '1')).toMatchObject({ ok: false, message: expect.stringContaining('set WIRE_MINOR to 0') });
+  });
+
+  it('takes an added capability as additive, a minor bump like any other; a removed one is breaking', () => {
+    expect(verdict(base, withCapabilities(4, ['area.kept', 'area.added']), undefined)).toEqual({ ok: false, message: 'additive change to the wire at capabilities.area.added: bump WIRE_MINOR to 5 and run pnpm wire:manifest' });
+    expect(verdict(base, withCapabilities(5, ['area.kept', 'area.added']), undefined)).toMatchObject({ ok: false, message: expect.stringContaining('run pnpm wire:manifest to record it') });
+    expect(verdict(base, withCapabilities(5, ['area.kept', 'area.added']), '1')).toEqual({ ok: true, write: withCapabilities(5, ['area.kept', 'area.added']) });
+    expect(verdict(base, withCapabilities(5, []), '1')).toEqual({ ok: false, message: 'breaking change to the wire at capabilities.area.kept: it takes a major (raise WIRE_MAJOR with SOCKET_PROTOCOL); no minor can carry it' });
+  });
+
   it('rewrites a rendering-only difference only under rebase, at the same minor', () => {
     const described = { ...(base.entries['events.a'] as object), description: 'now described' };
     expect(verdict(base, withEntry(4, described), undefined)).toMatchObject({ ok: false, message: expect.stringContaining('MAWS_WIRE_MANIFEST_WRITE=rebase') });
@@ -124,7 +134,8 @@ describe('wireManifestOf', () => {
 
   it('covers the engine host’s and machine’s commands, the host events, the envelope and the socket layer, and nothing else', () => {
     const manifest = wireManifestOf(fixture);
-    expect(manifest).toMatchObject({ major: WIRE_MAJOR, minor: WIRE_MINOR });
+    expect(manifest).toMatchObject({ major: WIRE_MAJOR, minor: WIRE_MINOR, capabilities: [...WIRE_CAPABILITIES].sort() });
+    expect(wireManifestOf(fixture, ['b.second', 'a.first']).capabilities).toEqual(['a.first', 'b.second']);
     expect(Object.keys(manifest.entries)).toEqual(
       [
         'commands.probe.host',
@@ -139,7 +150,7 @@ describe('wireManifestOf', () => {
 });
 
 describe('classifyWireChange', () => {
-  const manifest = (entries: Record<string, unknown>): WireManifest => ({ major: 3, minor: 0, entries });
+  const manifest = (entries: Record<string, unknown>, capabilities: string[] = []): WireManifest => ({ major: 3, minor: 0, capabilities, entries });
   const render = (schema: z.ZodType) => z.toJSONSchema(schema, { unrepresentable: 'any' });
   const event = (schema: z.ZodType) => manifest({ 'events.e': render(schema) });
   const classify = (was: z.ZodType, now: z.ZodType) => classifyWireChange(event(was), event(now));
@@ -199,5 +210,15 @@ describe('classifyWireChange', () => {
     expect(classifyWireChange(manifest({ 'commands.a': command('engine-host') }), manifest({ 'commands.a': command('engine-host'), 'commands.b': command('machine'), 'events.e': render(z.strictObject({})) }))).toEqual({ additive: ['commands.b', 'events.e'], breaking: [] });
     expect(classifyWireChange(manifest({ 'commands.a': command('engine-host'), 'commands.b': command('machine') }), manifest({ 'commands.a': command('machine') }))).toEqual({ additive: [], breaking: ['commands.a.owner', 'commands.b'] });
     expect(classify(z.strictObject({ a: z.string() }), z.strictObject({ a: z.string().describe('the a') }))).toEqual({ additive: [], breaking: [] });
+  });
+
+  it('a new socket or envelope message kind is breaking: an older peer closes the connection on a line it cannot read', () => {
+    const line = render(z.strictObject({ t: z.literal('x') }));
+    expect(classifyWireChange(manifest({}), manifest({ 'socket.documents.reopen': line, 'envelope.ping': line }))).toEqual({ additive: [], breaking: ['envelope.ping', 'socket.documents.reopen'] });
+  });
+
+  it('an added capability is additive; a removed one is breaking', () => {
+    expect(classifyWireChange(manifest({}, ['a.kept']), manifest({}, ['a.kept', 'b.added']))).toEqual({ additive: ['capabilities.b.added'], breaking: [] });
+    expect(classifyWireChange(manifest({}, ['a.kept', 'b.gone']), manifest({}, ['a.kept']))).toEqual({ additive: [], breaking: ['capabilities.b.gone'] });
   });
 });

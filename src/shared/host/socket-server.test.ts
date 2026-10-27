@@ -299,7 +299,7 @@ describe('the socket layer’s wire major (server side, P5 O1 M6)', () => {
     const client = await host.connect();
     client.send(hello({ newerField: true }));
     expect(await client.next()).toEqual(WELCOME);
-    expect(host.log).toHaveBeenCalledWith('dropped newerField from socket hello, a field this build does not know (logged once per message and field)');
+    expect(host.log).toHaveBeenCalledWith('dropped newerField from socket hello, a field this build does not know (logged once per message and path)');
     client.send({ t: 'req', id: '1', name: 'engine.ping', input: undefined, newerEnvelope: 1 });
     expect(await client.next((line) => (line as { t: string }).t === 'res')).toMatchObject({ id: '1', ok: true });
     client.send({ t: 'ready', newerEnvelope: 1 });

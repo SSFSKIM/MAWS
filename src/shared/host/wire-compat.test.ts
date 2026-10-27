@@ -157,8 +157,9 @@ const DROPPED = /^\[host(s)?\] dropped /;
 
 describe('the two registries', () => {
   it('differ by additive changes only, one of each kind', () => {
-    expect(classifyWireChange(wireManifestOf(A), wireManifestOf(B))).toEqual({
+    expect(classifyWireChange(wireManifestOf(A, BUILD_A.capabilities), wireManifestOf(B, BUILD_B.capabilities))).toEqual({
       additive: [
+        'capabilities.probe.extra',
         'commands.probe.echo.input.properties.loud',
         'commands.probe.echo.output.properties.length',
         'commands.probe.newer',
@@ -197,9 +198,9 @@ describe('builds a minor apart over the real socket (acceptance 6)', () => {
       ['probe.changed', { n: 2 }],
     ]);
     expect(dropped.lines()).toEqual([
-      '[hosts] dropped length from the output of probe.echo, a field this build does not know (logged once per message and field)',
-      '[hosts] dropped inner.added from the output of probe.shape, a field this build does not know (logged once per message and field)',
-      '[hosts] dropped extra from event probe.changed, a field this build does not know (logged once per message and field)',
+      '[hosts] dropped length from the output of probe.echo, a field this build does not know (logged once per message and path)',
+      '[hosts] dropped inner.added from the output of probe.shape, a field this build does not know (logged once per message and path)',
+      '[hosts] dropped extra from event probe.changed, a field this build does not know (logged once per message and path)',
       "[hosts] dropped engine-host's event probe.newEvent: not in this build's event registry (logged once per name)",
     ]);
   });
@@ -222,6 +223,6 @@ describe('builds a minor apart over the real socket (acceptance 6)', () => {
     // A's events reach B unchanged
     expect(side.emit('probe.changed', { n: 3 })).toBe(true);
     await vi.waitFor(() => expect(side.relayed).toEqual([['probe.changed', { n: 3 }]]), { timeout: 3_000, interval: 5 });
-    expect(dropped.lines()).toEqual(['[host] dropped loud from the input of probe.echo, a field this build does not know (logged once per message and field)']);
+    expect(dropped.lines()).toEqual(['[host] dropped loud from the input of probe.echo, a field this build does not know (logged once per message and path)']);
   });
 });

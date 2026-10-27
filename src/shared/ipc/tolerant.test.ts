@@ -2,7 +2,7 @@
 // reports, since the reader's rule is built on it; the rest drives readTolerant.
 import * as z from 'zod';
 import { describe, expect, it } from 'vitest';
-import { readTolerant, tolerantLog } from './tolerant';
+import { readTolerant, TOLERANT_LOG_CAP, tolerantLog } from './tolerant';
 
 const issuesOf = (schema: z.ZodType, value: unknown) => {
   const parsed = schema.safeParse(value);
@@ -99,17 +99,32 @@ describe('readTolerant', () => {
 });
 
 describe('tolerantLog', () => {
-  it('logs a dropped field once per message and field, whatever its index or record key', () => {
+  const lineOf = (path: string, message: string) => `dropped ${path} from ${message}, a field this build does not know (logged once per message and path)`;
+
+  it('logs a dropped field once per message and structural path: array indices fold together, distinct paths stay distinct', () => {
     const lines: string[] = [];
     const log = tolerantLog((line) => void lines.push(line));
-    log('event session.status', ['list.0.newField', 'list.1.newField', 'byId.s1.other']);
-    log('event session.status', ['list.7.newField']);
+    log('event session.status', ['list.0.newField', 'list.1.newField', 'left.extra', 'right.extra']);
+    log('event session.status', ['list.7.newField', 'right.extra', 'list.2.inner.3.deep']);
+    log('event session.status', ['list.4.inner.0.deep']);
     log('event session.queue', ['list.0.newField']);
     log('event session.queue', []);
     expect(lines).toEqual([
-      'dropped list.0.newField from event session.status, a field this build does not know (logged once per message and field)',
-      'dropped byId.s1.other from event session.status, a field this build does not know (logged once per message and field)',
-      'dropped list.0.newField from event session.queue, a field this build does not know (logged once per message and field)',
+      lineOf('list.0.newField', 'event session.status'),
+      lineOf('left.extra', 'event session.status'),
+      lineOf('right.extra', 'event session.status'),
+      lineOf('list.2.inner.3.deep', 'event session.status'),
+      lineOf('list.0.newField', 'event session.queue'),
     ]);
+  });
+
+  it('stays bounded when record keys multiply the paths: past its cap it says so once and logs no more', () => {
+    const lines: string[] = [];
+    const log = tolerantLog((line) => void lines.push(line));
+    for (let i = 0; i < TOLERANT_LOG_CAP + 50; i++) log('event session.status', [`byId.session-${i}.extra`]);
+    log('event session.queue', ['newField']);
+    expect(lines).toHaveLength(TOLERANT_LOG_CAP + 1);
+    expect(lines[0]).toBe(lineOf('byId.session-0.extra', 'event session.status'));
+    expect(lines.at(-1)).toBe(`dropped fields past the first ${TOLERANT_LOG_CAP} distinct paths go unlogged from here on`);
   });
 });

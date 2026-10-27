@@ -11,7 +11,7 @@
 // No production `machine` host runs in O1: a dispatch to an owner with no host answers `host_unavailable`.
 // P5 O1 M6 (OX1): a detached host may be another build of the wire's major, so what a host sends is read tolerantly
 // (@shared/ipc/tolerant): the envelope, each output and each event lose the object keys this build does not know, logged
-// once per message and field, and an event this build does not know is dropped with one line per name. What reaches the
+// once per message and path, and an event this build does not know is dropped with one line per name. What reaches the
 // renderer has then passed this build's schemas. The supervisor keeps what each welcome said of its peer (`peer`).
 import { createInterface } from 'node:readline';
 import { app, MessageChannelMain, utilityProcess, type MessagePortMain, type UtilityProcess } from 'electron';
@@ -441,9 +441,13 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
         host.relay?.connect(link);
         link.onDoc((channel, frame) => host.relay?.deliver(channel, frame));
         link.onMessage((data) => {
-          const closed = DocumentsClosedSchema.safeParse(data);
-          if (closed.success) host.relay?.closed(closed.data.channel);
-          else receive(host, data);
+          const closed = readTolerant(DocumentsClosedSchema, data); // P5 O1 M6: a newer supervisor's close still ends the port
+          if (!closed.ok) {
+            receive(host, data);
+            return;
+          }
+          logDropped('socket documents.closed', closed.dropped);
+          host.relay?.closed(closed.value.channel);
         });
         transition(host, { state: 'ready', pid: welcome.pid, restarts: host.state.restarts });
         sendHeld(host);

@@ -286,9 +286,9 @@ describe('host supervisor', () => {
     fromHost(pty, { t: 'res', id: request.id, ok: true, value: { ...PING(202), newerOutput: 'x' } });
     await expect(reply).resolves.toEqual({ ok: true, value: PING(202) });
     expect(warn.lines()).toEqual([
-      '[hosts] dropped newerEnvelope from envelope evt, a field this build does not know (logged once per message and field)',
-      '[hosts] dropped newer from event pty.data, a field this build does not know (logged once per message and field)',
-      '[hosts] dropped newerOutput from the output of pty.ping, a field this build does not know (logged once per message and field)',
+      '[hosts] dropped newerEnvelope from envelope evt, a field this build does not know (logged once per message and path)',
+      '[hosts] dropped newer from event pty.data, a field this build does not know (logged once per message and path)',
+      '[hosts] dropped newerOutput from the output of pty.ping, a field this build does not know (logged once per message and path)',
     ]);
   });
 
