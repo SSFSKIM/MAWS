@@ -5,7 +5,8 @@
 // main's own facts) and the two actions behind the Settings and Diagnostics rows and the banners (`host.restart`,
 // `host.openLog`). The main-owned half never crosses the socket, so only the engine-host half is in the wire fingerprint.
 import * as z from 'zod';
-import { HostStateSchema, type CommandSpec } from './common';
+import { IpcErrorSchema } from '../errors';
+import { HostStateSchema, JsonValueSchema, type CommandSpec } from './common';
 import { MAX_IDLE_MINUTES } from './settings';
 
 // The supervisor's idle time: settings' 1 to MAX_IDLE_MINUTES minutes, in ms, or null for never. Capped on the wire
@@ -66,13 +67,15 @@ export const HostOpInputSchema = z.strictObject({
   opCreated: z.string(),
   ...OpBindingShape,
   name: z.string().min(1),
-  input: z.unknown(),
+  input: JsonValueSchema, // the action's args, which crossed the channel as JSON: never undefined, so no JSON copy drops it
   context: z.strictObject({ launchId: z.string().min(1), engineSessionId: z.string().min(1) }),
   requestDigest: OpRequestDigestSchema.optional(),
 });
-// `result` is the command's own answer as the ledger keeps it: `{ok: true, value}` or `{ok: false, error}`.
+// `result` is the command's own answer as the ledger keeps it: `{ok: true, value}` (no `value` for a command that answers
+// nothing, as a JSON copy of an undefined one reads) or `{ok: false, error}`.
+export const HostOpResultSchema = z.union([z.strictObject({ ok: z.literal(true), value: z.unknown().optional() }), z.strictObject({ ok: z.literal(false), error: IpcErrorSchema })]);
 export const HostOpOutputSchema = z.discriminatedUnion('state', [
-  z.strictObject({ state: z.literal('done'), result: z.unknown() }),
+  z.strictObject({ state: z.literal('done'), result: HostOpResultSchema }),
   z.strictObject({ state: z.literal('refused'), reason: z.string() }),
   z.strictObject({ state: z.literal('in-progress') }),
 ]);

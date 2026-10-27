@@ -20,7 +20,7 @@ import type { OpLedger } from '@shared/host/op-ledger';
 import { requestDigestOf, type RequestDigest } from '@shared/host/request-digest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { HandlerContext } from '@shared/ipc/client';
-import { ipcError } from '@shared/ipc/errors';
+import { ipcError, type IpcError } from '@shared/ipc/errors';
 import { commands, type CommandInput, type CommandOutput } from '@shared/ipc/schema';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
 
@@ -70,7 +70,7 @@ export function opCommands(deps: OpsDeps): { op(input: OpInput, ctx: HandlerCont
     });
     if (begun.kind === 'answered') return begun.answer as OpOutput;
 
-    let result: { ok: true; value: unknown } | { ok: false; error: unknown };
+    let result: { ok: true; value: unknown } | { ok: false; error: IpcError };
     try {
       const value = await handler(checked.value, ctx);
       const output = validateCommandOutput(name as keyof typeof commands, value);

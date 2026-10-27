@@ -17,7 +17,10 @@
 // past the horizon, `expired`), and a torn last line (a crash mid-append) is cut, a whole last record that lost only its
 // newline kept. A line before the last that doesn't parse, a record of no known shape, or a file that is a symlink, not
 // this uid's, or open to others makes the ledger unreadable, and an unreadable ledger answers every op `unavailable`,
-// never `not-received`: it can't say what it holds.
+// never `not-received`: it can't say what it holds. So does one whose append failed (a claim, a result or a tombstone):
+// the file may then hold a record the entries don't (an fsync that failed after the write) or a torn tail, and a later
+// append would bury that tail mid-file. It stays closed until it is opened again (a restart of its owner), when the load
+// reconciles it with the file as above.
 import { randomBytes } from 'node:crypto';
 import * as fs from 'node:fs';
 import { join } from 'node:path';
@@ -74,7 +77,7 @@ export class OpLedger {
     return ledger;
   }
 
-  /** Whether the file could be read: when not, every op is `unavailable`. */
+  /** Whether the ledger answers: not when its file could not be read or an append failed; every op is then `unavailable`. */
   get readable(): boolean {
     return this.#readable;
   }
@@ -101,14 +104,14 @@ export class OpLedger {
     try {
       this.#append({ opId, opCreated, at, claim });
     } catch (error) {
-      this.#log(`an operation could not be claimed in ${this.#path}: ${(error as Error).message}`);
+      this.#failed('an operation could not be claimed', error);
       return answered({ state: 'refused', reason: 'unavailable' });
     }
     this.#entries.set(opId, { opCreated, at, claim });
     return { kind: 'claimed' };
   }
 
-  /** The claimed op's result, appended; one that can't be written leaves the op `in-progress` (logged). */
+  /** The claimed op's result, appended; one that can't be written closes the ledger (logged), its op `in-progress` on disk. */
   finish(opId: string, result: unknown): void {
     const entry = this.#entries.get(opId);
     if (entry === undefined || entry.claim === null || entry.result !== undefined) return;
@@ -116,7 +119,7 @@ export class OpLedger {
     try {
       this.#append({ opId, result });
     } catch (error) {
-      this.#log(`the result of an operation could not be kept in ${this.#path}: ${(error as Error).message}`);
+      this.#failed('the result of an operation could not be kept', error);
     }
   }
 
@@ -139,7 +142,7 @@ export class OpLedger {
       try {
         this.#append({ opId, opCreated, at, tombstone: true });
       } catch (error) {
-        this.#log(`an operation could not be tombstoned in ${this.#path}: ${(error as Error).message}`);
+        this.#failed('an operation could not be tombstoned', error);
         return { state: 'unavailable' };
       }
       this.#entries.set(opId, { opCreated, at, claim: null });
@@ -217,6 +220,13 @@ export class OpLedger {
     this.#readable = false;
     this.#entries.clear();
     this.#log(`the operation ledger ${this.#path} cannot be read (${(error as Error).message}): every operation is unavailable`);
+  }
+
+  /** A failed append: the ledger answers every op `unavailable` until it is opened again. */
+  #failed(what: string, error: unknown): void {
+    this.#readable = false;
+    this.#entries.clear();
+    this.#log(`${what} in ${this.#path} (${(error as Error).message}): every operation is unavailable until the ledger is reopened`);
   }
 
   /** The kept entries written whole to a temporary file, fsynced and renamed over the ledger. */

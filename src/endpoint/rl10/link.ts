@@ -198,7 +198,7 @@ export class Rl10 {
 
   // ---- M7's and M8's seams ----------------------------------------------------------------------------------------
 
-  /** Each `rpc-result` sminos reports (M7 answers the device by its opId); acknowledged after the listeners ran. */
+  /** Each `rpc-result` sminos reports (M7 answers the device whose copy it answers, by its nonce); acknowledged after the listeners ran. */
   onResult(listener: (result: RpcResult) => void): () => void {
     this.#results.add(listener);
     return () => this.#results.delete(listener);
