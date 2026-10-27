@@ -67,6 +67,7 @@ import {
   CLAIM_HELD_PATH,
   CLAIM_RELEASE_PATH,
   RELAY_FAULT_PATH,
+  CLAIM_PATH,
 } from './send-fault';
 
 const require = createRequire(import.meta.url);
@@ -501,6 +502,10 @@ export async function startLocalHub() {
     },
     async releaseClaim(machine: string) {
       if ((await seam('MACHINE', machine, CLAIM_RELEASE_PATH)) !== 'released') throw new Error(`no claim of ${machine} was held`);
+    },
+    /** A generation claim of `machine`'s under another credential, granted by its name's object, that no socket follows. */
+    async claimAs(machine: string, ref: string, client: string): Promise<unknown> {
+      return JSON.parse(await seam('MACHINE', machine, CLAIM_PATH, { org: ORG, name: machine, ref, client }));
     },
     /** Makes a machine's ref object throw from its next `times` calls of `method` (`relayRevoke`, `relayState`). */
     async relayFault(ref: string, method: 'relayRevoke' | 'relayState', times: number) {

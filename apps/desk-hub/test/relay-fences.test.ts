@@ -147,6 +147,39 @@ describe('a revocation', () => {
   }
 });
 
+describe('a revocation of a credential another credential’s claim followed', () => {
+  it('ends that credential’s connection though the newer claim never installed', async () => {
+    const machine = await listed('revoke-overlapped');
+    const endpoint = endpointOf(machine);
+    await endpoint.connect();
+    endpoint.heartbeats = false;
+    const app = await appOf(machine.ref);
+    const channel = await app.openChannel();
+    await waitFor(() => (endpoint.channels.has(channel) ? true : undefined));
+    // Another credential of the name claims the next generation, and no socket of it follows.
+    expect(await hub.claimAs(machine.name, machine.ref, 'a-newer-credential')).toEqual({ generation: endpoint.generation + 1 });
+    expect((await hub.fetchAs(ADMIN, `/api/machines/${machine.name}`, { method: 'DELETE' })).status).toBe(200);
+    await waitFor(() => (endpoint.ends.length > 0 ? true : undefined));
+    expect(endpoint.ends[0]).toMatchObject({ code: 4403, reason: 'revoked' });
+    await app.until(() => app.closes.find((c) => c.channel === channel), 'the channel closed');
+  });
+});
+
+describe('a name enrolled again in another case, with the same ref and key', () => {
+  it('connects under its own name’s generations, not the revoked name’s fence', async () => {
+    const machine = await listed('case-name');
+    const old = endpointOf(machine);
+    await old.connect();
+    expect((await hub.fetchAs(ADMIN, '/api/machines/case-name', { method: 'DELETE' })).status).toBe(200);
+    await waitFor(() => (old.ends.length > 0 ? true : undefined));
+    const again = await v2('CASE-NAME', { ref: machine.ref, key: machine.key });
+    expect(again.name).toBe('CASE-NAME');
+    const now = endpointOf(again);
+    expect((await now.connect()).generation).toBe(1);
+    now.close();
+  });
+});
+
 describe('a member removed from the org state', () => {
   it('loses app sockets to a machine no endpoint ever connected to, across an eviction and a missed announcement, and is refused after', async () => {
     const B = memberId();
@@ -237,5 +270,30 @@ describe('a session-plane frame for an RL1 machine', () => {
     await endpoint.next((f) => f.t === 'events' && (f.events as LogEvent[]).some((e) => e.writer === 'rl1-peer/s'), 'the log plane after the refusals');
     await dx.close();
     browser.close();
+  });
+
+  it('leaves a retry of an RPC a DX2 stream took uncertain, the machine since on RL1', async () => {
+    const machine = await listed('uncertain-switch');
+    const project = '5d2e3f40-5a61-4b7c-9d8e-0f1a2b3c4d5e';
+    const dx = new MachineClient(hub, machine.name, machine.credentials);
+    await dx.connect();
+    await dx.sync(project, 'switch');
+    const browser = await BrowserClient.open(hub, ADMIN, project);
+    const nonce = base64urlEncode(crypto.getRandomValues(new Uint8Array(16)));
+    const rpc = { rpc: 'interrupt', project, machine: machine.name, member: A, created: new Date().toISOString(), nonce, args: { session: 'a-session' }, mac: base64urlEncode(new Uint8Array(32)) };
+    browser.send({ t: 'rpc', rpc } as never);
+    await dx.next((f) => f.t === 'rpc', 'the RPC delivered over DX2');
+    // The machine moves to RL1: its stream ends with the RPC unanswered, which may have run.
+    const endpoint = endpointOf(machine);
+    await endpoint.connect();
+    await endpoint.project(project, 'switch');
+    await browser.next((f) => f.t === 'rpc-state' && f.nonce === nonce && f.state === 'uncertain', 'the RPC uncertain');
+    const from = browser.frames.length;
+    browser.send({ t: 'rpc', rpc } as never);
+    const answer = await browser.next((f) => f.t === 'rpc-state' && f.nonce === nonce && f.state !== 'forwarded', 'the retry’s answer', from);
+    expect(answer).toEqual({ t: 'rpc-state', nonce, state: 'uncertain' });
+    browser.close();
+    endpoint.close();
+    await dx.close();
   });
 });
