@@ -39,6 +39,7 @@ import {
 // C4 start: the record side, projects, drafts and replay (C4 execution document, Interfaces "X2 additions")
 // (AppSessionIdSchema and MessageUuidSchema come with C3's imports above.)
 import { ProjectIdSchema, SessionIdSchema } from '@shared/graph/ids';
+import { OrgKeySchema } from '@shared/machine/org-key'; // P5 O6 M5
 import { ForeignHolderSchema, SessionRecordSchema } from '@shared/graph/session';
 // C4 end
 // C7 start: the composer's prompt history shapes (C7 execution document, Interfaces "X2 additions")
@@ -185,6 +186,16 @@ export const C3_SESSION_EVENTS = Object.keys(c3Events) as (keyof typeof c3Events
 // projected, `order` being its sort order. W11 (I5, additive): `hidden` is true for a project removed from the sidebar
 // (`session.projects.remove`), absent otherwise; the list and its change event carry hidden projects so the renderer
 // can keep them and their sessions out of the sidebar and offer them under "Hidden projects…".
+// P5 O6 M5 (docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md, "`ProjectRecord.org`"; OX3, additive): the org
+// project its machine derived for the directory, by sminos's rule (src/main/index/org-project.ts); absent until the
+// machine has derived it, when the renderer draws the project as a row of its own.
+export const ProjectOrgSchema = z.strictObject({
+  key: OrgKeySchema, // the persisted identity: smns:…, remote:…, repo:…, folder:…
+  name: z.string(),
+  source: z.enum(['smns', 'remote', 'repository', 'folder']),
+  smnsId: z.string().nullable(), // sminos's project id where one exists, for joins (O8)
+});
+export type ProjectOrg = z.infer<typeof ProjectOrgSchema>;
 export const ProjectRecordSchema = z.strictObject({
   id: ProjectIdSchema,
   name: z.string(),
@@ -193,6 +204,7 @@ export const ProjectRecordSchema = z.strictObject({
   createdAt: z.string(),
   hidden: z.boolean().optional(),
   discovered: z.boolean().optional(), // UX1: discovered, not explicitly added to the sidebar
+  org: ProjectOrgSchema.optional(), // P5 O6 M5
 });
 export type ProjectRecord = z.infer<typeof ProjectRecordSchema>;
 

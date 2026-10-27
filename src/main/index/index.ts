@@ -9,7 +9,9 @@ import { IndexAttentionStore, type AttentionStore } from './attention';
 import { openDb, type Db } from './db';
 import { DraftStore } from './drafts';
 import { MIGRATIONS, REPAIRS } from './migrations';
-import { ProjectStore } from './projects';
+import { ProjectStore, type OrgRow } from './projects';
+import { deriveOrg, machineEnrollment, type Enrollment } from './org-project'; // P5 O6 M5
+import type { MachineRef } from '@shared/machine/ref';
 import { ReplayFixtureStore } from './replay-fixtures';
 import { SessionSearchStore } from './session-search';
 import { SessionStore } from './sessions';
@@ -19,6 +21,8 @@ import { BrowserActivityStore } from './browser-activity'; // cua board #93
 import { BrowserBookmarksStore } from './browser-bookmarks'; // cua board #90
 import { OwnerChannelStore } from '../owner/store'; // P2-C (2026-10-09)
 import { LibraryStore } from '../library/store'; // P3-L
+
+const ORG_CONCURRENCY = 4; // the derivations in flight at once, as `warmLinkedWorktrees` keeps its calls
 
 export class Index {
   readonly sessions: SessionStore;
@@ -35,6 +39,7 @@ export class Index {
   readonly library: LibraryStore; // P3-L: the library's rows, links, Spaces and search, derived from the engine host (migration 10)
   private readonly db: Db;
   private stamped = 0;
+  private closed = false;
 
   constructor(path: string) {
     this.db = openDb(path, MIGRATIONS, REPAIRS);
@@ -82,7 +87,35 @@ export class Index {
     return this.db.transaction(fn);
   }
 
+  // P5 O6 M5 (docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md, "Persisting and refreshing"): every project's
+  // org project, derived again off main's thread at each start, ORG_CONCURRENCY at a time, each change written to its
+  // row and told as a project change; from then on a project made is derived once it is committed. A `.smns` added or a
+  // remote changed mid-run shows at the next start. A derivation that got no answer leaves the row as it was.
+  async refreshOrgProjects({ machine, enrollment = machineEnrollment, derive = deriveOrg }: {
+    machine: MachineRef;
+    enrollment?: () => Enrollment | null;
+    derive?: typeof deriveOrg;
+  }): Promise<void> {
+    if (this.db.readOnly) return;
+    const one = async (row: OrgRow) => {
+      try {
+        const org = await derive({ directory: row.directory, machine, projectId: row.id, name: row.name }, enrollment());
+        if (org !== null && !this.closed) this.projects.setOrg(row.id, org);
+      } catch (error) {
+        if (!this.closed) console.error(`[index] the org project of ${row.directory} failed:`, error instanceof Error ? error.message : error);
+      }
+    };
+    this.projects.onCreated((row) => void one(row));
+    const queue = this.projects.orgRows();
+    const worker = async () => {
+      for (let row = queue.shift(); row !== undefined && !this.closed; row = queue.shift()) await one(row);
+    };
+    await Promise.all(Array.from({ length: ORG_CONCURRENCY }, worker));
+  }
+
   close(): void {
+    this.closed = true;
+    this.projects.onCreated(null);
     this.browserActivity.close();
     this.db.close();
   }

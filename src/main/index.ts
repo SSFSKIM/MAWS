@@ -293,6 +293,8 @@ void startWithProfileLock(app, () => {
   // engine host's store events into it once the host is ready. C5's read model starts the source (its block below:
   // SessionReadModel.register, which refuses it in launch mode scenario) and stops it at will-quit.
   const index = new Index(join(app.getPath('userData'), 'index.sqlite'));
+  // P5 O6 M5: each project's org project, derived again in the background at every start (OX3)
+  void index.refreshOrgProjects({ machine: local });
   registerIndexHandlers(index);
   const indexSource = new IndexSessionSource(index, hosts, { emit });
   // C3's attention service, as C3 started it, with `Index.attention` as its store (C3's file store only when this app

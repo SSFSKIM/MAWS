@@ -6,6 +6,7 @@ import type { MachineHandler } from '../ipc/router';
 import { readOrMintMachineRef } from '@shared/machine/identity-file';
 import type { MachineIdentity } from '@shared/ipc/schema/machine';
 import type { CommandName } from '@shared/ipc/schema';
+import { machineEnrollment, machineProject, type Enrollment } from '../index/org-project';
 
 // A display attribute, never an identity: `MAWS_MACHINE_NAME` when set (the e2e names each profile, since two profiles
 // on one Mac share a hostname), else the short hostname. Once the machine is enrolled the org state names it (O8, O11).
@@ -18,14 +19,15 @@ export interface MachineIdentityDeps {
   env: NodeJS.ProcessEnv;
   hostname: string;
   register: <N extends CommandName>(name: N, handler: MachineHandler<N>) => void;
+  enrollment?: () => Enrollment | null; // P5 O6 M5: `machineEnrollment` (none until O10); tests inject one
 }
 
 // Throws, naming the path, on a malformed identity file: startup stops rather than re-address everything kept.
-export function startMachineIdentity({ userData, env, hostname, register }: MachineIdentityDeps): MachineIdentity {
+export function startMachineIdentity({ userData, env, hostname, register, enrollment = machineEnrollment }: MachineIdentityDeps): MachineIdentity {
   const ref = readOrMintMachineRef(userData);
   const name = machineName(env, hostname);
-  // Until M5 the machine project is the machine's alone; M5 fills `smnsId` for an enrolled machine (none is until O10).
-  const identity: MachineIdentity = { ref, name, project: { key: `machine:${ref}`, name, smnsId: null } };
+  // P5 O6 M5 (OX3): the machine's own project, `machine:<ref>`, named after it; sminos's machine project id once enrolled.
+  const identity: MachineIdentity = { ref, name, project: machineProject(ref, name, enrollment()) };
   register('machine.identity', () => identity);
   return identity;
 }
