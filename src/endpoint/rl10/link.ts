@@ -203,9 +203,10 @@ export class Rl10 {
    * An authorized lane A action down as DX2's `rpc` (Interfaces §D), or why it can't go: `unavailable` with no sminos
    * connected, no member for its session, or a member with no `launch` (no bridge to fence it: sminos would refuse it
    * unfenced anyway), or a spawn whose checkout no presence lists; `malformed` when the action's own session, context or
-   * digest disagree with its args.
+   * digest disagree with its args, or an action on a session carries no lane A context; `context` (M7) when the launch it
+   * was sealed for is not the session's launch now (the bridge rechecks it at the effect, for a relaunch after this).
    */
-  rpc(action: Action, who: { member: string; device: string }, fingerprint: string): { ok: true; frame: Frame } | { ok: false; reason: 'unavailable' | 'malformed' } {
+  rpc(action: Action, who: { member: string; device: string }, fingerprint: string): { ok: true; frame: Frame } | { ok: false; reason: 'unavailable' | 'malformed' | 'context' } {
     const identity = this.#ctx.identity();
     if (!this.connected || identity === null || !action.action.startsWith('sminos.')) return { ok: false, reason: 'unavailable' };
     const name = action.action.slice('sminos.'.length);
@@ -218,10 +219,11 @@ export class Rl10 {
       if (typeof session !== 'string') return { ok: false, reason: 'malformed' };
       const digest = (args as { digest?: unknown }).digest;
       if (action.session !== undefined && action.session !== session) return { ok: false, reason: 'malformed' };
-      if (action.context !== undefined && (action.context.lane !== 'A' || action.context.session !== session)) return { ok: false, reason: 'malformed' };
+      if (action.context === undefined || action.context.lane !== 'A' || action.context.session !== session) return { ok: false, reason: 'malformed' };
       if (action.requestDigest !== undefined && JSON.stringify(action.requestDigest) !== JSON.stringify(digest)) return { ok: false, reason: 'malformed' };
       const member = this.members.get(session);
       if (member === null || member.lane !== 'A' || member.launch === undefined) return { ok: false, reason: 'unavailable' };
+      if (action.context.launch !== member.launch) return { ok: false, reason: 'context' };
       project = member.project;
     }
     if (project === null) return { ok: false, reason: 'unavailable' };
