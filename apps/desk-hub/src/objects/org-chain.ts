@@ -10,10 +10,16 @@
 //   - `devices`: device id → member and class, and the Access client id a device principal may get (U9, M7), kept
 //     across rebuilds while the device stays its member's;
 //   - `state_machines`: the listed machines by ref, with name, key and owners (P5 DL 21).
+// A push subscription bound to a device (the Registry's `push_subscriptions`, O11 M4) is that device's keys', not its
+// id's: it is dropped in the same step once the head no longer lists, for its member, a device of that id with those
+// keys, so a replacement under the id, or the id listed again after a removal, has none until it subscribes itself.
 // Before any state, the bootstrap admin `ensureOrg` made is the one member, so the owner is admitted as before.
 //
 // A state is verified against the head read before the verification's awaits, and committed only if that is still the
 // head, so a successor that loses a race is refused `not-head` and its writer signs again on the new head (RL §5.2).
+// It is verified against the root transitions held then too, and committed only while they are still all the chain
+// holds: a transition accepted meanwhile changes which roots sign without moving the head, so the successor is verified
+// again against the set that now stands (a recovery fences the old root at once), up to VERIFY_ROUNDS times.
 import {
   canonicalize,
   isBase64urlOf,
@@ -43,6 +49,8 @@ CREATE TABLE IF NOT EXISTS pending_devices (
 /** About how much of the chain one `?since=` answer carries (at least one state). */
 const CHAIN_PAGE_BYTES = 1024 * 1024;
 const MAX_DEVICE_ID = 128;
+/** How many times a successor is verified when root transitions land under its verification, before `503 busy`. */
+const VERIFY_ROUNDS = 3;
 const PENDING_FIELDS = ['deviceId', 'class', 'keyStorage', 'channelPub', 'stepUpPub', 'passkey', 'mac'];
 
 /** A refusal for the Worker to send, with DX7's `{error, message?}`. */
@@ -76,6 +84,10 @@ export class OrgChain {
 
   private headVersion(): number {
     return this.sql.exec<{ v: number | null }>('SELECT MAX(version) AS v FROM org_states').one().v ?? 0;
+  }
+
+  private transitionCount(): number {
+    return this.sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM org_transitions').one().n;
   }
 
   transitions(): Signed<RootTransition>[] {
@@ -119,9 +131,14 @@ export class OrgChain {
       }
       return this.commit(0, genesis, poster);
     }
-    const verdict = await verifySuccessor(head, body as SignedOrgState, this.transitions());
-    if (!verdict.ok) return this.refusedAgainst(head.state.version, verdict.code);
-    return this.commit(head.state.version, body as SignedOrgState, poster);
+    for (let round = 0; round < VERIFY_ROUNDS; round++) {
+      const transitions = this.transitions();
+      const verdict = await verifySuccessor(head, body as SignedOrgState, transitions);
+      if (!verdict.ok) return this.refusedAgainst(head.state.version, verdict.code);
+      const committed = this.commit(head.state.version, body as SignedOrgState, poster, transitions.length);
+      if (committed !== 'transitions-moved') return committed;
+    }
+    return refused(503, 'busy', 'root transitions kept landing while this was verified; send it again');
   }
 
   /** A root transition the recovery key signed against the head, kept beside the chain (once). */
@@ -151,17 +168,23 @@ export class OrgChain {
 
   /**
    * Stores `s` as the version after `expected`, unless the head moved meanwhile or its poster is no longer a member,
-   * and rebuilds the projections.
+   * and rebuilds the projections. With `transitions`, the count of root transitions `s` was verified against: a
+   * transition accepted since (the table only grows) answers `transitions-moved`, and nothing is stored.
    */
-  private commit(expected: number, s: SignedOrgState, poster: MemberRecord): Outcome<Accepted> {
+  private commit(expected: number, s: SignedOrgState, poster: MemberRecord): Outcome<Accepted>;
+  private commit(expected: number, s: SignedOrgState, poster: MemberRecord, transitions: number): Outcome<Accepted> | 'transitions-moved';
+  private commit(expected: number, s: SignedOrgState, poster: MemberRecord, transitions?: number): Outcome<Accepted> | 'transitions-moved' {
     return this.storage.transactionSync(() => {
       if (!this.holds(poster)) return notMember();
       const current = this.headVersion();
       if (current !== expected) return this.refusedAgainst(current, 'not-head');
+      if (transitions !== undefined && this.transitionCount() !== transitions) return 'transitions-moved' as const;
       const now = iso(Date.now());
+      const before = this.head()?.state;
       this.sql.exec('INSERT INTO org_states (version, body, accepted) VALUES (?, ?, ?)', s.state.version, canonicalize(s), now);
       const removed = this.projectMembers(s.state, now);
       this.projectDevices(s.state);
+      if (before) this.dropEndedSubscriptions(before, s.state);
       this.sql.exec('DELETE FROM state_machines');
       for (const m of s.state.machines) this.sql.exec('INSERT INTO state_machines (ref, name, pub, owners) VALUES (?, ?, ?, ?)', m.ref, m.name, m.pub, JSON.stringify(m.owners));
       return { ok: true as const, value: { version: s.state.version, removed } };
@@ -188,6 +211,18 @@ export class OrgChain {
         const clientId = held?.member === member.id ? held.access_client_id : null;
         this.sql.exec('INSERT INTO devices (id, member, class, access_client_id) VALUES (?, ?, ?, ?)', device.id, member.id, device.class, clientId);
         this.sql.exec('DELETE FROM pending_devices WHERE member = ? AND device = ?', member.id, device.id);
+      }
+    }
+  }
+
+  /** Drops the push subscriptions bound to a device of `before` that `after` no longer lists for its member with the
+   * same keys: a device id outlives the keys it was given, and a subscription belongs to the keys' holder. */
+  private dropEndedSubscriptions(before: OrgState, after: OrgState): void {
+    const incarnation = (member: string, d: Device) => JSON.stringify([member, d.id, d.channelPub, d.stepUpPub ?? null]);
+    const kept = new Set(after.members.flatMap((m) => m.devices.map((d) => incarnation(m.id, d))));
+    for (const member of before.members) {
+      for (const device of member.devices) {
+        if (!kept.has(incarnation(member.id, device))) this.sql.exec('DELETE FROM push_subscriptions WHERE member = ? AND device = ?', member.id, device.id);
       }
     }
   }

@@ -126,6 +126,12 @@ async function refusedUpload(project: string, event: LogEvent) {
 /** Waits until `project` has been told of the suite's head. */
 const announced = (project: string) => waitFor(async () => ((await hub.stateFault(project)).announced === head.state.version ? true : undefined));
 
+/** The project's object holding no head: its registration's announcement read one, and an eviction forgets it. */
+async function coldCache(project: string): Promise<void> {
+  await announced(project);
+  await hub.evict('Project', `${ORG}:${project}`, 'hibernate');
+}
+
 /** A project the machine has opened, and a browser of A following its log. */
 async function opened(): Promise<{ project: string; browser: BrowserClient }> {
   const project = newProject();
@@ -300,6 +306,7 @@ describe('the cached org state', () => {
 
   it('that cannot be read refuses v2 events state-unavailable, never storing one unchecked, and v1 flows on', async () => {
     const { project, browser } = await opened();
+    await coldCache(project);
     await hub.headFault(true);
     try {
       expect(await say(browser, await deviceWords(project, a1, 'unchecked'))).toMatchObject({ t: 'refused', refusal: { reason: 'state-unavailable' } });
@@ -321,6 +328,7 @@ describe('the cached org state', () => {
 describe('a check that waits for the head', () => {
   it("stores nothing of an upload whose stream was revoked while the head was read", async () => {
     const { project, browser } = await opened();
+    await coldCache(project);
     await hub.stateCache(project, { hold: true });
     const { reads } = await hub.stateCache(project);
     const posted = machine.post([{ t: 'events', project, events: [await v2Say(project, 1)] }]);

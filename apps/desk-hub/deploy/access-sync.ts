@@ -29,7 +29,7 @@ import { parseArgs } from 'node:util';
 import { canonicalize, stateHash, verifyGenesis, verifySuccessor, type SignedOrgState } from 'org-protocol';
 import { parseJsonFile } from '../fake-machine/json-file';
 import { MACHINE_ORG_STATE_PATH, type OrgStateView } from '../src/protocol/identity';
-import { cfApi, peoplePolicy, upsert, type CfApi } from './access';
+import { cfApi, listAll, peoplePolicy, upsert, type CfApi } from './access';
 import { checkTarget, readDeployConfig, type DeployConfig } from './config';
 import { readSecrets } from './deploy';
 import { withRunLock } from './run-lock';
@@ -126,12 +126,13 @@ export async function readVerifiedState(read: HubRead, config: DeployConfig, che
 
 type Policy = { id: string; name: string; include?: Array<{ email?: { email?: string } }> };
 
-/** Upserts the people policy to `view`'s emails and reads it back: the emails Access now lists for it. */
+/** Upserts the people policy to `view`'s emails, found by name among every page of the account's policies, and reads it
+ * back: the emails Access now lists for it. */
 export async function syncAccess(api: CfApi, config: DeployConfig, view: OrgStateView): Promise<{ policy: string; emails: string[]; readBack: string[] }> {
   checkTarget(config, 'change Access');
   const emails = admittedEmails(config, view);
   const spec = peoplePolicy(config.worker, emails);
-  const policies = await api.request<Policy[]>('GET', '/access/policies');
+  const policies = await listAll<Policy>(api, '/access/policies');
   const { id } = await upsert(api, '/access/policies', policies, spec);
   const stored = await api.request<Policy>('GET', `/access/policies/${id}`);
   const readBack = (stored.include ?? []).map((rule) => rule.email?.email ?? JSON.stringify(rule)).sort();

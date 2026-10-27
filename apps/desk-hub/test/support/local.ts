@@ -68,6 +68,9 @@ import {
   CLAIM_HOLD_PATH,
   CLAIM_HELD_PATH,
   CLAIM_RELEASE_PATH,
+  UPGRADE_HOLD_PATH,
+  UPGRADE_HELD_PATH,
+  UPGRADE_RELEASE_PATH,
   RELAY_FAULT_PATH,
   CLAIM_PATH,
 } from './send-fault';
@@ -514,6 +517,17 @@ export async function startLocalHub() {
     },
     async releaseClaim(machine: string) {
       if ((await seam('MACHINE', machine, CLAIM_RELEASE_PATH)) !== 'released') throw new Error(`no claim of ${machine} was held`);
+    },
+    /** Holds the next endpoint upgrade a machine's ref object is handed, before its relay sees it, until `releaseUpgrade`. */
+    async holdUpgrade(ref: string) {
+      await seam('MACHINE', `ref:${ref}`, UPGRADE_HOLD_PATH);
+    },
+    /** Whether an upgrade is held at a ref's object. */
+    async upgradeHeld(ref: string): Promise<boolean> {
+      return (await seam('MACHINE', `ref:${ref}`, UPGRADE_HELD_PATH)) === 'held';
+    },
+    async releaseUpgrade(ref: string) {
+      if ((await seam('MACHINE', `ref:${ref}`, UPGRADE_RELEASE_PATH)) !== 'released') throw new Error(`no upgrade to ${ref} was held`);
     },
     /** A generation claim of `machine`'s under another credential, granted by its name's object, that no socket follows. */
     async claimAs(machine: string, ref: string, client: string): Promise<unknown> {

@@ -245,6 +245,75 @@ describe('a rename that keeps the ref and key', () => {
   });
 });
 
+describe('an old name’s claim in flight across a rename', () => {
+  it('is not installed over the new name’s connection that installed while it was answered', async () => {
+    const machine = await listed('rn-held-old');
+    const first = endpointOf(machine);
+    expect((await first.connect()).generation).toBe(1);
+    // The old name's next claim is granted (generation 2) and its answer held: an upgrade admitted before the rename.
+    await hub.holdClaim(machine.name);
+    const late = endpointOf(machine);
+    const connecting = late.connect();
+    await waitFor(async () => ((await hub.claimHeld(machine.name)) ? true : undefined));
+    await accept((s) => {
+      s.machines.find((m) => m.ref === machine.ref)!.name = 'rn-held-new';
+      s.machineNames.push({ name: 'rn-held-new', ref: machine.ref });
+    });
+    const renamed = await v2('rn-held-new', { ref: machine.ref, key: machine.key });
+    const now = endpointOf(renamed);
+    expect((await now.connect()).generation).toBe(1);
+    await waitFor(() => (first.ends.length > 0 ? true : undefined));
+    const app = await appOf(machine.ref);
+    const channel = await app.openChannel();
+    await waitFor(() => (now.channels.has(channel) ? true : undefined));
+    await hub.releaseClaim(machine.name);
+    await expect(connecting).rejects.toThrow();
+    await sleep(200);
+    expect(now.ends).toEqual([]);
+    expect(app.closes.find((c) => c.channel === channel)).toBeUndefined();
+  });
+});
+
+describe('an old name’s upgrade that reaches the ref’s object after a rename', () => {
+  it('is not installed over the renamed endpoint’s connection, though the Worker admitted it before the rename', async () => {
+    const machine = await listed('rn-late-old');
+    const first = endpointOf(machine);
+    expect((await first.connect()).generation).toBe(1);
+    // The Worker resolves the old name's next upgrade to the ref and forwards it; the ref's object is handed it late.
+    await hub.holdUpgrade(machine.ref);
+    const late = endpointOf(machine);
+    const connecting = late.connect();
+    await waitFor(async () => ((await hub.upgradeHeld(machine.ref)) ? true : undefined));
+    await accept((s) => {
+      s.machines.find((m) => m.ref === machine.ref)!.name = 'rn-late-new';
+      s.machineNames.push({ name: 'rn-late-new', ref: machine.ref });
+    });
+    const renamed = await v2('rn-late-new', { ref: machine.ref, key: machine.key });
+    const now = endpointOf(renamed);
+    expect((await now.connect()).generation).toBe(1);
+    await waitFor(() => (first.ends.length > 0 ? true : undefined));
+    const app = await appOf(machine.ref);
+    const channel = await app.openChannel();
+    await waitFor(() => (now.channels.has(channel) ? true : undefined));
+    await hub.releaseUpgrade(machine.ref);
+    await expect(connecting).rejects.toThrow();
+    await sleep(200);
+    expect(now.ends).toEqual([]);
+    expect(app.closes.find((c) => c.channel === channel)).toBeUndefined();
+  });
+});
+
+describe('a Registry on the code before the binding check', () => {
+  it('refuses the endpoint’s upgrade after its claim, and it connects once the Registry answers', async () => {
+    const machine = await listed('binds-lacking');
+    await hub.registryLacks('machineBinds');
+    await expect(endpointOf(machine).connect()).rejects.toThrow(/refused/);
+    await hub.registryLacks(null);
+    // The refused upgrade drew generation 1 before the check failed closed (the client's upgrade sees only a refusal).
+    expect((await endpointOf(machine).connect()).generation).toBe(2);
+  });
+});
+
 describe('a session-plane frame for an RL1 machine', () => {
   it('is refused to its sender, and the log plane keeps flowing', async () => {
     const machine = await listed('rl1-only');

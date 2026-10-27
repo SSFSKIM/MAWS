@@ -332,15 +332,21 @@ production's Worker or host, or a preview alias of it (`<alias>-desk-hub.…`), 
     key up, enrolls M4's fake machine from the Machines dialog, and screenshots the grid, the session listed, its
     permission card, the card answered from the page and the decision in the group chat, into `desk-web-<n>/`. The
     browser holds the owner's Access token as its `CF_Authorization` cookie for the staging host; nothing records a
-    trace, video or HAR, and afterwards every file the step wrote is searched for the token, which must be in none.
+    trace, video or HAR, nor the failure context (`error-context.md`, with a snapshot of the page) Playwright writes
+    for a failed test whatever its options say (`e2e-staging/unrecorded.ts`). Afterwards every file the step wrote is
+    searched for the token and for what the check lists in `desk-web-<n>.scan` (the enrollment code it read from the
+    Machines dialog, its one-time token and the org key), which must be in none; the list is removed with the run.
     The step takes no option to pass on, and Playwright runs in an environment the script builds (`env -i`, no
     `PWDEBUG`, `PW_*` or `PLAYWRIGHT_*`); `playwright.staging.config.ts` itself refuses any option but naming it and any
     such variable (`e2e-staging/recording.ts`), so nothing can turn recording back on.
     Playwright's Chromium must be installed once (`pnpm --filter desk-web exec playwright install chromium`).
 - `staging-sweep.py snapshot|sweep` is the throwaway steps' account sweep: the service tokens and the `desk-hub*`
   Access apps and policies before the run, and after it the deletion of what appeared and is the throwaway org's
-  (service tokens `desk-<org>-*`, apps and policies `desk-hub-staging*`). Anything else that appeared is left alone and
-  fails the sweep; it refuses an org that is not `staging-probe-*` and never deletes production's objects.
+  (service tokens `desk-<org>-*`, and the apps and policies the deploy tool makes on staging, by exact name:
+  `desk-hub-staging`, `desk-hub-staging public paths`, `desk-hub-staging owner`, `desk-hub-staging machines`). Anything
+  else that appeared is left alone and fails the sweep, a name merely starting with `desk-hub-staging` too (a production
+  preview alias's, `desk-hub-staging-desk-hub`, would); it refuses an org that is not `staging-probe-*` and never deletes
+  production's objects.
 
 What they read, at run time, never printed or passed as an argument:
 - `DESK_STAGING_SECRETS` (default `~/.config/claude-secrets/projects/-Users-new-Developer-GitHub-doperpowers`): the
@@ -348,8 +354,9 @@ What they read, at run time, never printed or passed as an argument:
   that hands it to the command;
 - the owner's staging Access token, from `cloudflared access token -app=https://desk-hub-staging.opencognita-platform.workers.dev`
   (the owner's `cloudflared access login` once; a step without it stops with nothing changed). It reaches a command on
-  its stdin and curl as a configuration through a pipe (`printf … | curl -K -`), never a here-string, which zsh spools
-  to a temporary file;
+  its stdin and curl as a configuration through a pipe (`printf … | curl -q -K -`), never a here-string, which zsh
+  spools to a temporary file; every curl call puts `-q` first, so the user's `~/.curlrc` (a `verbose` or `trace` there
+  would print or keep the token) is never read;
 - `DESK_STAGING_DEVICE` (default `$DESK_STAGING_DIR/device`): `keys.json`, the admin device's keys (the org-state
   commands above), and `machine.json`, `{"DESK_MACHINE_CLIENT_ID": …, "DESK_MACHINE_CLIENT_SECRET": …}` for
   `access-sync`.

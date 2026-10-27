@@ -1,7 +1,9 @@
 // The staging runner (deploy/staging-run.sh, O11 M8): what it hands the desk-web check, and how it hands curl the
 // owner's token. Offline: the refusals below come before any token is read or any request made.
-import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -28,6 +30,32 @@ describe('the desk-web step', () => {
     expect(readdirSync(dir)).toEqual([]);
   });
 
+  // The check lists in DESK_STAGING_SCAN what it saw besides the token (the enrollment code, its token, the org key); the
+  // runner's search afterwards, run here on its own over a run's files, counts each file holding any of them.
+  it.skipIf(!zsh)('counts every file holding the token or anything the check listed, and nothing else', () => {
+    const text = scripts[0].text;
+    expect(text.split('\n').find((l) => l.includes('playwright test'))).toMatch(/ DESK_STAGING_SCAN=\$SCAN /);
+    const search = text.split('\n').find((l) => l.trimStart().startsWith('holding='))!.trim();
+    // A run's files: its log, its screenshots directory holding a screenshot and `files`; and the check's list, `scan`.
+    const holding = (scan: string, files: Record<string, string>) => {
+      const dir = mkdtempSync(join(tmpdir(), 'staging-scan-'));
+      const shots = join(dir, 'shots');
+      mkdirSync(join(shots, 'playwright'), { recursive: true });
+      writeFileSync(join(dir, 'run.log'), 'desk-web check exit 1\n');
+      writeFileSync(join(shots, '1-grid-project.png'), 'pixels');
+      writeFileSync(join(dir, 'run.scan'), scan);
+      for (const [name, body] of Object.entries(files)) writeFileSync(join(shots, name), body);
+      const run = spawnSync('zsh', ['-c', `T=eyJtoken.synthetic SCAN=${dir}/run.scan shots=${shots} LOG=${dir}/run.log; ${search}; print -r -- $holding`], { encoding: 'utf8' });
+      return run.stdout.trim();
+    };
+    const listed = 'smns-enroll-v1.code\nonce-token\norg-key\n';
+    // An empty line in the list would match every file: none counted here.
+    expect(holding(`${listed}\n`, {})).toBe('0');
+    expect(holding(listed, { 'playwright/error-context.md': '- text: smns-enroll-v1.code' })).toBe('1');
+    expect(holding(listed, { 'a.txt': 'once-token', 'b.txt': 'key org-key', 'c.txt': 'nothing' })).toBe('2');
+    expect(holding('', { 'cookie.txt': 'eyJtoken.synthetic' })).toBe('1');
+  });
+
   it('runs Playwright with an environment of its own choosing, no Playwright variable passed through', () => {
     const text = scripts[0].text;
     const line = text.split('\n').find((l) => l.includes('playwright test'))!;
@@ -44,6 +72,42 @@ describe('curl and the owner’s token', () => {
   it('is bounded in time wherever it is called', () => {
     for (const { name, text } of scripts) {
       for (const line of text.split('\n').filter((l) => /\bcurl\b/.test(l) && !l.trimStart().startsWith('#'))) expect(line, `${name}: ${line.trim()}`).toMatch(/--max-time \d+/);
+    }
+  });
+
+  // Each curl call as the scripts write it, from `curl` to the end of its command (a pipe, a closing parenthesis).
+  const calls = scripts.flatMap(({ name, text }) =>
+    text
+      .split('\n')
+      .filter((l) => !l.trimStart().startsWith('#'))
+      .flatMap((l) => [...l.matchAll(/\bcurl\b[^|)]*/g)].map((m) => ({ name, call: m[0].trim() }))),
+  );
+
+  it('ignores the user’s curl configuration (~/.curlrc), which could print or keep the token: -q first, everywhere', () => {
+    expect(calls.length).toBeGreaterThan(0);
+    for (const { name, call } of calls) expect(call, `${name}: ${call}`).toMatch(/^curl -q /);
+  });
+
+  it.skipIf(!zsh)('shows nothing of the token when ~/.curlrc asks for verbose output', async () => {
+    const [{ call }] = calls.filter(({ call }) => call.includes('-K -'));
+    const token = `eyJ${'x'.repeat(24)}.synthetic`;
+    const server = createServer((_req, res) => res.end('{"org":{"id":"staging-ssfskim"}}'));
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const home = mkdtempSync(join(tmpdir(), 'staging-curlrc-'));
+    writeFileSync(join(home, '.curlrc'), 'verbose\n');
+    try {
+      const config = `header = "cf-access-token: ${token}"\nurl = "http://127.0.0.1:${(server.address() as AddressInfo).port}/api/me"\n`;
+      const child = spawn('zsh', ['-c', `${call}`], { env: { PATH: process.env.PATH, HOME: home, CURL_HOME: home } });
+      let out = '';
+      child.stdout.on('data', (d) => (out += d));
+      child.stderr.on('data', (d) => (out += d));
+      child.stdin.end(config);
+      const status = await new Promise((resolve) => child.on('close', resolve));
+      expect(status, out).toBe(0);
+      expect(out).toContain('staging-ssfskim');
+      expect(out).not.toContain(token);
+    } finally {
+      server.close();
     }
   });
 

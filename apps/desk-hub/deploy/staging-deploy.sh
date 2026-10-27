@@ -60,7 +60,7 @@ ${=DESK_HEAVY_WRAPPER} pnpm --filter desk-web build 2>&1 | tail -3
 (( ${pipestatus[1]} == 0 )) || { print -r -- "the web build failed: stop"; exit 5; }
 [[ -f $D/apps/desk-web/dist/index.html ]] || { print -r -- "no web build: stop"; exit 5; }
 L=$(git rev-parse --abbrev-ref HEAD).$(git rev-parse --short=8 HEAD)
-build() { curl -sI --max-time 30 -X POST https://$1/machine/enroll | /usr/bin/grep -i '^x-desk-build:' | tr -d '\r'; }
+build() { curl -q -sI --max-time 30 -X POST https://$1/machine/enroll | /usr/bin/grep -i '^x-desk-build:' | tr -d '\r'; }
 print -r -- "deploying staging hub@$(git rev-parse --short=8 HEAD) web@$L" | tee $LOG
 print -r -- "production before: $(build $PRODUCTION_HOST)" | tee -a $LOG
 printf '%s\n' "CF_ACCESS_SETUP_TOKEN=$(cat $S/CF_ACCESS_SETUP_TOKEN)" "CF_DESK_HUB_SERVICE_TOKENS=$(cat $S/CF_DESK_HUB_SERVICE_TOKENS)" \
