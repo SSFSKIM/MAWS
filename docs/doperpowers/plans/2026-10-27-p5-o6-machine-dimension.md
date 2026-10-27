@@ -32,7 +32,7 @@ After O6:
 - [x] M1: machine identity and the address codec (2026-10-27T10:11Z; commits `ece0eb80a`..`ae671bfd0`, task review clean after two fix rounds; class 1a GREEN, run 40486094807)
 - [x] M2: addresses across the boundary, one machine (2026-10-27; commits `8362f2d74`..`849b08ae5`, task review clean after one fix round; class 1a GREEN 40520987967; hosted e2e GREEN 40501648644, 40503154665, 40506863633; mini e2e:default GREEN 40518812172; OX7 bench within budget 40507512064)
 - [x] M3: machine links and the second-profile stand-in (2026-10-27; commits `98d55f9cf`..`4cc3aa1fc`, task review clean after two fix rounds; class 1a with e2e:cross-build GREEN 40537654843; hosted e2e:supervisor GREEN 40527949745 and self-hosted e2e:machines GREEN 40527965726, both at `f7672566b`, before the manager-only fixes)
-- [x] M4: per-machine stores, the shell per machine, explicit machines for paths (2026-10-27; commits `6370e06ec`..`3d385c4cb`, task review clean after one fix round; class 1a GREEN 40573698654; at `4b59cd5f5`, before the fix wave: hosted GREEN 40559770099, mini e2e:machines with M4's scene and e2e:default GREEN 40559769024, OX7 bench within budget 40563723819. Owed at the fix head: the mini's e2e:machines, e2e:default and e2e:cross-build, blocked by the mini's loginwindow alert (ci-kit-sandbox#59), and hosted e2e:layout's `shell.spec.ts:367`, red at the pre-fix head too, 40577605822)
+- [x] M4: per-machine stores, the shell per machine, explicit machines for paths (2026-10-27; commits `6370e06ec`..`3d385c4cb`, task review clean after one fix round; class 1a GREEN 40573698654; at `4b59cd5f5`, before the fix wave: hosted GREEN 40559770099, mini e2e:machines with M4's scene and e2e:default GREEN 40559769024, OX7 bench within budget 40563723819. At the fix head, once the mini's loginwindow alert (ci-kit-sandbox#59) closed: e2e:machines, e2e:default and e2e:cross-build GREEN, run 40585344264. Hosted e2e:layout's `shell.spec.ts:367`, red at the pre-fix head too (40577605822), was a race in the test, fixed in `18c452b74`)
 - [ ] M5: org projects and the sidebar
 - [ ] M6: acceptance
 
@@ -976,6 +976,9 @@ No new dependency. zod 4, Node's `crypto`, the peer-auth addon already in the tr
 - Observation: more of M2's string-id class surfaced in M4, found by reading every `machine-wide` command a session surface calls. `fs.tasks` (graded `machine-wide`, so a B session's checklist silently read A's list of the same id) and `session.takeOverPane` (the holder's pid is a process on the session's machine) now go to the session's machine. Left as this machine's, with their owners: `session.deletions.list` (the whole trash set is replaced on read), `pty.list` (the terminal registry's restore), `session.search` (the palette's server-side search) and `session.archiveOlder` with `projectId: null` (M5, O7). `artifacts/registry.ts` keys editor holds and staged hand-offs by artifact id alone, harmless while artifacts are local (O7).
 - Observation: the stores' per-machine partitions live in each factory's closure, out of `setState`'s reach, so a test that resets a store must also call `resetMachine`.
 - Observation: both stand-in profiles share one disk, so in M4's scene the panel's branch alone cannot tell which machine ran git; the transcript, read from B's `CLAUDE_CONFIG_DIR`, can. M6's scene gives the two checkouts different branches for that reason.
+- Observation: `pnpm wire:manifest` doesn't move for `ProjectRecord.org`. `session.*` and `layout.*` are main-owned and outside the manifest, so O6's one `WIRE_MINOR` bump stays `machine.identity`'s.
+- Observation: sminos's `os.path.join` lets an absolute part win, and a linked worktree's `.git` file holds an absolute `gitdir:`, so the port follows it with `path.resolve`. A plain join derived `repo:` for a linked worktree of a remote repository.
+- Observation: `e2e/shell.spec.ts:367` and `:50` failed on hosted Macs at O6's heads and at the pre-fix control (runs 40577605822, 40580909588, 40580909622). Each test left Playwright's pointer, or keyboard focus, on a sidebar row, whose hover card opens after 300 ms. On a slow runner the card was open before the next click's hit-test (`:367`) or took the palette's Escape (`:50`). CI-opt diagnosed `:367`; `:50`'s focus cause is inferred, since the artifact had no page snapshot. Test-only fix `18c452b74` (then `5260d0060`): the pointer moves to the composer, and the dragged tab takes focus. No timing changed and no assertion was dropped. Hosted e2e:layout GREEN, runs 40583048072 and 40597601420.
 
 ## Decision Log
 
@@ -1060,6 +1063,23 @@ No new dependency. zod 4, Node's `crypto`, the peer-auth addon already in the tr
     - SCM's mutation guard and re-read key by machine, checkout and path, and stage and discard take the checkout from their callers.
   - Tests and e2e: `resetShellStores` calls `resetMachine(TEST_MACHINE)`. `sidebarRow(page, match, machine?)` builds the row's address on that machine. M4's scene sits inside M3's two-profile test, before B quits.
   Date/Author: 2026-10-27, O6's executor (controller), from M4's executor.
+
+- Decision: M5's executor's calls, folded at M5.
+  - The derivation:
+    - Remotes are read as every key of each remote's section (`git config --file <common>/config --no-includes -z --get-regexp '^remote\.'`), taking each remote's first `url`. So "origin, else the only one" counts remotes the way sminos's `derivation` does, where a section with only `fetch` is still a remote. M5's `\.url$` form would have counted only remotes with a URL.
+    - When git doesn't answer (a timeout, or a spawn failure), the stored derivation is kept, so a slow disk never flips a key to `folder:` and back. An error answer, such as "not a repository", counts as an answer.
+    - `.smns` fields count only as strings; any other value marks the file invalid, and the walk goes on.
+    - The stub session source stays underived, so stub-driven e2e runs exercise the "not derived yet" path.
+  - Hiding uses `session.projects.remove`, for each listed checkout on an `up` machine. M5's text named `session.projects.update { hidden: true }`, which doesn't exist, because removal is what hides. The Projects view's "Hide from sidebar" hides the whole row the same way, since hiding one checkout would leave the row listed through another.
+  - Tab sets key by the row their sessions show under: the org key when that org project is listed (or the project is hidden), else `machine:<ref>`. `rekeySets` maps an address key the same way. Keying by raw `org.key` would strand a discovered folder's tabs in a set no row shows.
+  - The sidebar no longer lists a discovered folder that has pinned, running or waiting work as a row of its own. By the checkout rule, those sessions sit under the machine's row.
+  - New chat is this machine's only (O7's picker spans machines). An org row's "+" and "New chat" are disabled, titled "Not available here", when the row's checkout is another machine's. The title bar's chip, ⌘N's preselection and Customize act on the set's local checkout.
+  - A row's checkout (`primaryCheckout`) is this machine's listed checkout, else the first listed one in ref order. Project actions keep their one-id signature and widen to the row in their handlers.
+  - Archive actions span the row's sessions on every machine, skipping offline ones. A machine row's menu offers "Archived sessions…" for that machine, titled by its name.
+  - Greying (T2): an org row greys only when every checkout's machine is offline; a machine row greys with its machine. A greyed row's accessible name gains ", machine offline", and the chip reads "offline", titled "machine offline". The project hover card is unchanged (T4).
+  - Names: before the roster answers, a machine is named "This Mac" if local, else by its ref. The Environment card names another machine, with "· offline" when it is down.
+  - Test support: `renderer-machine-setup.ts` reinstalls the bare `{ localMachine }` bridge before each test, because the page now reads its machine while rendering.
+  Date/Author: 2026-10-27, O6's executor (controller), from M5's executor.
 
 - Decision: the verification.
   - This document gets one `doperpowers:adversarial-reviewer` buildability review before execution (P5 Decision Log 12).
