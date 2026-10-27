@@ -58,7 +58,7 @@ export type Rl10Context = {
   hub: { openProject(project: string, handler: LogProject): () => void; send(frame: Frame): boolean };
   /** M3's listings and notify, which the session lane feeds. */
   listings: MembersContext['listings'] & { refresh(): Promise<void>; listedSessions(): readonly string[] };
-  notifier: { pendingSet(project: string, raised: ReadonlyArray<{ session: string }>): void; hostMessage(message: SessionLaneMessage): void; forget(session: string): void };
+  notifier: { pendingSet(project: string, raised: ReadonlyArray<{ session: string }>): void; hostMessage(message: SessionLaneMessage, sent?: () => void): void; forget(session: string): void };
   machineOwners(): Promise<string[]>;
   dispatch: MembersContext['dispatch'];
   now(): number;
@@ -99,7 +99,7 @@ export class Rl10 {
     };
     this.#ledger = new SignatureLedger(sub('signatures'));
     this.#index = new InboundIndex(sub('inbound'), ctx.now);
-    this.legacy = new LegacyKey(ctx.state);
+    this.legacy = new LegacyKey(ctx.state, () => ctx.identity()?.org ?? null);
     this.members = new Members({ dispatch: ctx.dispatch, listings: ctx.listings, listed: () => ctx.listings.listedSessions(), forget: (s) => ctx.notifier.forget(s), log: ctx.log, now: ctx.now });
     this.relay = new LogRelay({
       org: () => {
@@ -393,7 +393,7 @@ export class Rl10 {
     const message = raw as SessionLaneMessage & Record<string, unknown>;
     if (typeof message.kind !== 'string' || typeof message.project !== 'string') return this.#ctx.log('endpoint: an RL10 session message that is not one was ignored');
     if (message.kind === 'machine' && message.session === null) this.members.presence(message.project, message.body);
-    if (message.kind === 'host' && message.sub === null && this.#newHost(message)) this.#ctx.notifier.hostMessage(message);
+    if (message.kind === 'host' && message.sub === null) this.#host(message);
     for (const listener of this.#sessions) {
       try {
         listener(message);
@@ -404,35 +404,60 @@ export class Rl10 {
   }
 
   /**
-   * Whether a sub-less host message is one not taken before (by its event's `(writer, seq)` in its project's host store,
-   * against the durable mark, `hosts.json`); a new one moves the mark.
+   * A sub-less host message: a `wrote` unless its event's `(writer, seq)` in its project's host store is at or below the
+   * durable mark (`hosts.json`), which moves only once the `wrote` has gone to the hub: one held while RL1 is down and
+   * lost to a restart comes again in sminos's resend of the last 50.
    */
-  #newHost(message: SessionLaneMessage): boolean {
+  #host(message: SessionLaneMessage): void {
     const event = (message.body as { event?: { writer?: unknown; seq?: unknown } } | null)?.event;
     const state = this.#ctx.state();
-    if (state === null || typeof event?.writer !== 'string' || !Number.isSafeInteger(event.seq)) return true;
-    const held = state.hosts[message.project] ?? {};
-    if ((held[event.writer] ?? 0) >= (event.seq as number)) return false;
-    state.setHosts({ ...state.hosts, [message.project]: { ...held, [event.writer]: event.seq as number } });
-    return true;
+    if (state === null || typeof event?.writer !== 'string' || !Number.isSafeInteger(event.seq)) return this.#ctx.notifier.hostMessage(message);
+    const { writer } = event;
+    const seq = event.seq as number;
+    if ((state.hosts[message.project]?.[writer] ?? 0) >= seq) return;
+    this.#ctx.notifier.hostMessage(message, () => {
+      const held = state.hosts[message.project] ?? {};
+      if ((held[writer] ?? 0) >= seq) return;
+      try {
+        state.setHosts({ ...state.hosts, [message.project]: { ...held, [writer]: seq } });
+      } catch (error) {
+        this.#ctx.log(`endpoint: the host mark could not be kept: ${(error as Error).message}`);
+      }
+    });
   }
 
+  /**
+   * `words?`, decided against what it read: when the head, the certificates or the session's record moved while it was
+   * decided, it is decided again, once, against the state now (M5's `authorize` does the same). Moved again, no answer
+   * goes: no answer is no words, and sminos keeps the delivery owed and asks again, where `peer` would deliver the
+   * person's words for good as a peer message.
+   */
   async #words(frame: Frame): Promise<void> {
     if (typeof frame.id !== 'string') return;
-    const head = this.#ctx.head();
-    const identity = this.#ctx.identity();
-    const verdict = await decideWords(
-      {
-        org: () => (head === null || identity === null ? null : { head: head.state, certificates: head.certificates, ref: identity.ref }),
-        machineOwners: this.#ctx.machineOwners,
-        members: this.members,
-        ledger: this.#ledger,
-        index: this.#index,
-        now: this.#ctx.now,
-      },
-      frame,
-    );
-    this.send({ t: 'words', id: frame.id, verdict });
+    const session = typeof frame.session === 'string' ? frame.session : null;
+    const stamp = () => {
+      const head = this.#ctx.head();
+      return [head?.state, head?.certificates, session === null ? null : JSON.stringify([this.members.get(session), this.members.recordOf(session)])];
+    };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const before = stamp();
+      const head = this.#ctx.head();
+      const identity = this.#ctx.identity();
+      const verdict = await decideWords(
+        {
+          org: () => (head === null || identity === null ? null : { head: head.state, certificates: head.certificates, ref: identity.ref }),
+          machineOwners: this.#ctx.machineOwners,
+          members: this.members,
+          ledger: this.#ledger,
+          index: this.#index,
+          now: this.#ctx.now,
+        },
+        frame,
+      );
+      const after = stamp();
+      if (before.every((v, i) => v === after[i])) return this.send({ t: 'words', id: frame.id, verdict });
+    }
+    this.#ctx.log(`endpoint: words? ${frame.id.slice(0, 64)} went unanswered: the head or the session's record moved twice while it was decided`);
   }
 
   #result(frame: Frame): void {

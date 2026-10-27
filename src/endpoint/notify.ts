@@ -43,6 +43,9 @@ const SEEN_LIMIT = 4096;
 /** How many `wrote`s are held for the next welcome. */
 const HELD_LIMIT = 64;
 
+/** A `wrote` owed to a session, and who hears that it went. */
+type HeldWrote = { session: string; sent?: () => void };
+
 export class Notifier {
   readonly #ctx: NotifyContext;
   readonly #counts = new Map<string, number>();
@@ -53,7 +56,7 @@ export class Notifier {
   readonly #inProject = new Map<string, Set<string>>();
   readonly #seen = new Set<string>();
   /** Sessions owed a `wrote`, oldest first. */
-  #held: string[] = [];
+  #held: HeldWrote[] = [];
 
   constructor(ctx: NotifyContext) {
     this.#ctx = ctx;
@@ -98,7 +101,7 @@ export class Notifier {
    */
   withdrawn(session: string, project: string): void {
     const told = this.#told.get(session) ?? 0;
-    this.#held = this.#held.filter((held) => held !== session);
+    this.#held = this.#held.filter((held) => held.session !== session);
     if (told > 0 && !this.#ctx.send({ t: 'notify', session, project, kind: 'settled', pending: 0 })) {
       this.#told.delete(session);
       this.#owed.set(session, project);
@@ -114,8 +117,11 @@ export class Notifier {
     if (!this.#owed.has(session)) this.#setTold(session, '', undefined);
   }
 
-  /** A session-lane message: a to-human `host` message outside any subscription is a `wrote`, once per event. */
-  hostMessage(message: SessionLaneMessage): void {
+  /**
+   * A session-lane message: a to-human `host` message outside any subscription is a `wrote`, once per event. `sent` is
+   * called once its `wrote` has gone to the hub (RL10 moves its durable mark then, never before).
+   */
+  hostMessage(message: SessionLaneMessage, sent?: () => void): void {
     if (message.kind !== 'host' || message.sub !== null || message.session === null) return;
     const event = (message.body as { event?: { kind?: unknown; writer?: unknown; seq?: unknown } } | null)?.event;
     if (event?.kind !== 'message') return;
@@ -126,7 +132,7 @@ export class Notifier {
     if (this.#seen.has(id)) return;
     this.#seen.add(id);
     if (this.#seen.size > SEEN_LIMIT) this.#seen.delete(this.#seen.values().next().value as string);
-    this.#held.push(message.session);
+    this.#held.push({ session: message.session, ...(sent === undefined ? {} : { sent }) });
     if (this.#held.length > HELD_LIMIT) this.#held.shift();
     this.#flush(message.session, false);
   }
@@ -149,20 +155,23 @@ export class Notifier {
 
   /** Sends the held `wrote`s (of `only`, or all); one still unlisted is kept, unless `dropUnlisted`. */
   #flush(only: string | null, dropUnlisted: boolean): void {
-    const kept: string[] = [];
-    for (const session of this.#held) {
+    const kept: HeldWrote[] = [];
+    for (const held of this.#held) {
+      const { session } = held;
       if (only !== null && session !== only) {
-        kept.push(session);
+        kept.push(held);
         continue;
       }
       const listed = this.#ctx.listed(session);
       if (listed === null) {
-        if (!dropUnlisted) kept.push(session);
+        if (!dropUnlisted) kept.push(held);
         continue;
       }
       const pending = this.#counts.get(session) ?? this.#told.get(session) ?? 0;
-      if (this.#ctx.send({ t: 'notify', session, project: listed.project, kind: 'wrote', pending })) this.#setTold(session, listed.project, pending);
-      else kept.push(session);
+      if (this.#ctx.send({ t: 'notify', session, project: listed.project, kind: 'wrote', pending })) {
+        this.#setTold(session, listed.project, pending);
+        held.sent?.();
+      } else kept.push(held);
     }
     this.#held = kept;
   }

@@ -90,13 +90,15 @@ export function sweepTemporaries(dir: string): void {
 /**
  * Appends `lines` (each without its newline) to `dir/name`, created 0600 when absent, and fsyncs the file before it
  * returns: an append-only record (the signature ledger, the inbound index) is on disk before anything it vouches for
- * leaves. A file that isn't private is refused (checkPrivateFile).
+ * leaves. A torn last line (a crash mid-append: bytes after the last newline) is cut off first, so the new lines don't
+ * join it into one that never parses. A file that isn't private is refused (checkPrivateFile).
  */
 export function appendLines(dir: string, name: string, lines: readonly string[]): void {
   const path = join(dir, name);
   const created = !checkPrivateFile(path);
-  const fd = fs.openSync(path, 'a', 0o600);
+  const fd = fs.openSync(path, 'a+', 0o600);
   try {
+    cutTornTail(fd);
     const bytes = Buffer.from(lines.map((line) => `${line}\n`).join(''), 'utf8');
     let at = 0;
     while (at < bytes.length) at += fs.writeSync(fd, bytes, at, bytes.length - at);
@@ -105,6 +107,19 @@ export function appendLines(dir: string, name: string, lines: readonly string[])
     fs.closeSync(fd);
   }
   if (created) syncDirectory(dir);
+}
+
+/** Truncates the file behind `fd` to its last newline when it doesn't end in one. */
+function cutTornTail(fd: number): void {
+  const size = fs.fstatSync(fd).size;
+  if (size === 0) return;
+  const last = Buffer.alloc(1);
+  fs.readSync(fd, last, 0, 1, size - 1);
+  if (last[0] === 10) return;
+  const whole = Buffer.alloc(size);
+  let at = 0;
+  while (at < size) at += fs.readSync(fd, whole, at, size - at, at);
+  fs.ftruncateSync(fd, whole.lastIndexOf(10) + 1);
 }
 
 /** The JSON lines of `dir/name` (none when it is absent); a line that doesn't parse (a torn last write) is left out. */

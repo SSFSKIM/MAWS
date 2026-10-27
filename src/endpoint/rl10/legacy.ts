@@ -3,7 +3,9 @@
 // verifies under the same key. The key is handed over once: at an RL10 hello on an endpoint that holds no
 // `legacy.json`, the endpoint asks for it (`legacy-key?`), sminos answers from its `hub.json` when the org matches, and
 // the endpoint keeps it at 0600, until O14's final brief deletes it (`mawsd endpoint legacy retire`). With no key, events
-// go out v2-only and legacy events can't be checked. The key is in no log line and no frame but sminos's answer.
+// go out v2-only and legacy events can't be checked. The key is in no log line and no frame but sminos's answer. A key
+// kept for another org than the enrollment's (the machine moved) is no key: it is removed when next read, and the new
+// org's is asked for.
 import { base64urlDecode, deriveLogNonce, importOrgKey, seal, verify, type OrgKey } from 'desk-hub/protocol';
 import type { EndpointState } from '../state/store';
 
@@ -11,15 +13,33 @@ export type Mac = { nonce: string; value: string };
 
 export class LegacyKey {
   readonly #state: () => EndpointState | null;
+  readonly #org: () => string | null;
   #imported: { raw: string; key: Promise<OrgKey> } | null = null;
 
-  constructor(state: () => EndpointState | null) {
+  /** `org` is the enrollment's org now (null when not enrolled). */
+  constructor(state: () => EndpointState | null, org: () => string | null) {
     this.#state = state;
+    this.#org = org;
   }
 
-  /** Whether a key is held. */
+  /** Whether a key of the enrollment's org is held. */
   get held(): boolean {
-    return this.#state()?.legacyKey != null;
+    return this.#current() !== null;
+  }
+
+  /** The key held for the enrollment's org; one kept for another org is removed. */
+  #current(): { org: string; key: string } | null {
+    const state = this.#state();
+    const held = state?.legacyKey ?? null;
+    const org = this.#org();
+    if (state === null || held === null || org === null) return null;
+    if (held.org === org) return held;
+    try {
+      state.removeLegacy();
+    } catch {
+      // a state that refuses writes keeps the file; the key is still not this org's
+    }
+    return null;
   }
 
   /**
@@ -29,7 +49,7 @@ export class LegacyKey {
   take(frame: Record<string, unknown>, org: string): 'kept' | 'held' | 'other-org' | 'malformed' {
     const state = this.#state();
     if (state === null) return 'malformed';
-    if (state.legacyKey !== null) return 'held';
+    if (this.#current() !== null) return 'held';
     if (frame.org !== org) return 'other-org';
     if (typeof frame.key !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(frame.key)) return 'malformed';
     try {
@@ -56,7 +76,7 @@ export class LegacyKey {
   }
 
   async #key(): Promise<OrgKey | null> {
-    const held = this.#state()?.legacyKey ?? null;
+    const held = this.#current();
     if (held === null) {
       this.#imported = null;
       return null;

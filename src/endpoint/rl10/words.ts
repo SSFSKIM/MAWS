@@ -4,10 +4,12 @@
 // a session it holds no `member` for, and otherwise decides by where the event came from:
 //
 //   - an arriving event (stored with its `sig`): verified again against the head at this moment, and found in the
-//     inbound index at its own position. A device-signed `hub/<member>` event is `words` when its member holds
-//     `converse` on the session (M5's rank); a revoked signer, a body that no longer verifies, or one the index doesn't
-//     hold at this position (a replay) is `refuse`; a machine-signed event, or one signed more than a day ago, is
-//     `peer`: words into another machine's session need a device's signature, and the inbound index outlives a day.
+//     inbound index at its own position. A device-signed `hub/<member>` event is `words` when its member is in the
+//     head and holds `converse` on the session (M5's rank); a revoked signer, a body that no longer verifies, or one
+//     the index doesn't hold at this position (a replay) is `refuse`; a machine-signed event, one signed more than a day
+//     ago, one whose member the head no longer holds (a retired key still verifies), or any while the head is past RL
+//     §5.2's 30-day backstop, is `peer`: words into another machine's session need a device's signature, the inbound
+//     index outlives a day, and a stale head can't vouch for a person's standing.
 //   - this machine's own writer (the operator path; sminos stores it unsigned and asks only when its append receipt
 //     matches): `words` when the session's owners, `@machine` resolved against the head, include one of the machine's
 //     owners, `peer` otherwise; and `refuse` when the signature ledger holds another body at its position, which is
@@ -21,6 +23,7 @@
 import { createHash } from 'node:crypto';
 import { eventSigningInput, isHubWriter, isIsoMillis, isLogSeq, isSig, machineNameKey, verifyEvent, writerMachine, type Certificates, type LogEventV2, type OrgState } from 'org-protocol';
 import { rankAtLeast, sessionRank } from '../grades';
+import { BACKSTOP_MS } from '../org-sync';
 import { resolveOwners } from '../listings';
 import type { InboundIndex } from './inbound-index';
 import type { Members } from './members';
@@ -71,6 +74,12 @@ export async function decideWords(ctx: WordsContext, frame: Record<string, unkno
   if (ctx.index.at(project, event.writer, event.seq) !== content) return 'refuse';
   if (!isIsoMillis(event.created) || ctx.now() - Date.parse(event.created) > WORDS_MAX_AGE_MS) return 'peer';
   if (!isHubWriter(event.writer)) return 'peer';
+  // RL §5.2's backstop: a head this old can't vouch for a remote person's standing (the operator path, above, is the
+  // same uid's and exempt).
+  if (ctx.now() - Date.parse(org.head.issued) > BACKSTOP_MS) return 'peer';
+  // A retired key still verifies its member's earlier words after they left; a member the head no longer holds has no
+  // standing on any session, whatever a record's owners, shares or access say.
   const signer = event.writer.slice('hub/'.length);
+  if (!org.head.members.some((m) => m.id === signer)) return 'peer';
   return rankAtLeast(sessionRank(record, signer, owners), 'converse') ? 'words' : 'peer';
 }

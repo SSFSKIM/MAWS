@@ -70,6 +70,7 @@ export type Signer = { kind: 'device'; member: string; device: string; keyId: st
 export type Wrapped = { event: Record<string, unknown>; signer: Signer; owners?: Array<{ id: string; email: string | null }> };
 /** DX2's `rejected` up: the event named only by what it carried. */
 export type Rejected = { t: 'rejected'; project: string; event: { writer: string; seq: number } | null; reason: 'bad-code' | 'seen-nonce' | 'bad-shape' | 'conflict'; message: string };
+type Uploaded = { event: Record<string, unknown> } | { reason: string; message: string };
 /** Why a position was spent (`spent`'s `reason`): the endpoint's own words for a final verdict. */
 export type SpentReason = 'bad-shape' | 'conflict' | 'replayed' | 'bad-signature' | 'revoked' | 'expired';
 /** What the endpoint makes of an arriving event (see the header). */
@@ -111,6 +112,11 @@ export class LogRelay {
   readonly #fresh = new Set<string>();
   /** Each machine name's newest relayed event time (the org directory's `seen`). */
   readonly #seen = new Map<string, string>();
+  /**
+   * The uploads being signed, by `project\nwriter\nseq`: a position is checked, signed and kept in the ledger by one
+   * upload at a time, across connections (a replaced connection's upload may still be signing when the new one resends).
+   */
+  readonly #signing = new Map<string, Promise<unknown>>();
   /** The arriving events held for a head that can judge them, by project, then `writer\nseq`, in arrival order. */
   readonly #held = new Map<string, Map<string, { event: unknown; since: number }>>();
 
@@ -195,11 +201,26 @@ export class LogRelay {
     for (const project of this.#projects.keys()) this.#fresh.add(project);
   }
 
-  async #up(project: string, e: unknown): Promise<{ event: Record<string, unknown> } | { reason: string; message: string }> {
+  async #up(project: string, e: unknown): Promise<Uploaded> {
+    if (!isObject(e) || typeof e.writer !== 'string' || !isLogSeq(e.seq)) return { reason: 'bad-shape', message: 'not a log event (writer, seq)' };
+    const at = `${project}\n${e.writer}\n${e.seq}`;
+    const before = this.#signing.get(at) ?? Promise.resolve();
+    const run = before.then(() => this.#upAt(project, e as Record<string, unknown> & { writer: string; seq: number }));
+    const settled = run.then(
+      () => {},
+      () => {},
+    );
+    this.#signing.set(at, settled);
+    void settled.then(() => {
+      if (this.#signing.get(at) === settled) this.#signing.delete(at);
+    });
+    return run;
+  }
+
+  async #upAt(project: string, e: Record<string, unknown> & { writer: string; seq: number }): Promise<Uploaded> {
     const org = this.#ctx.org();
     const key = this.#ctx.key();
-    if (!isObject(e) || typeof e.writer !== 'string' || !isLogSeq(e.seq)) return { reason: 'bad-shape', message: 'not a log event (writer, seq)' };
-    const { writer, seq } = e as { writer: string; seq: number };
+    const { writer, seq } = e;
     if (org === null || key === null) return { reason: 'state-unavailable', message: 'the endpoint holds no org state or machine key now' };
     if (writerMachine(writer) === null || machineNameKey(writerMachine(writer) as string) !== machineNameKey(org.name)) {
       return { reason: 'writer-not-yours', message: `${writer} is not one of ${org.name}'s writers` };
@@ -398,6 +419,12 @@ async function signerOf(head: OrgState, certificates: Certificates, event: LogEv
   }
   const name = writerMachine(event.writer);
   if (name === null) return null;
-  const ref = refOfName(head, name) ?? certificates.certs.find((c) => machineNameKey(c.body.name) === machineNameKey(name))?.body.machine;
-  return ref === undefined ? null : { kind: 'machine', ref, name, keyId: kid };
+  const bound = refOfName(head, name);
+  if (bound !== undefined) return { kind: 'machine', ref: bound, name, keyId: kid };
+  // A certificate's name can be borne again by another delegated machine once the first is retired: the one whose key
+  // signed is the signer.
+  for (const c of certificates.certs) {
+    if (machineNameKey(c.body.name) === machineNameKey(name) && (await keyId(c.body.pub)) === kid) return { kind: 'machine', ref: c.body.machine, name, keyId: kid };
+  }
+  return null;
 }

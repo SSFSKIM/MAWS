@@ -126,16 +126,17 @@ export class Members implements RecordSource, CheckoutSource {
   /** A session that left (or wasn't restated): withdrawn, its record gone. */
   async gone(session: string): Promise<void> {
     const member = this.#members.get(session);
-    this.#members.delete(session);
-    // A session held only as a listing (from before a restart) is gone by its listing's id.
+    // A session held only as a listing (from before a restart) is gone by its listing's id; read before the member goes.
     const listing = member === undefined ? session : this.listingId(session);
+    this.#members.delete(session);
     if (member !== undefined) {
       this.#apps.delete(session);
       this.#changed(member, member);
     }
     if (listing !== null) {
-      this.#ctx.forget(listing);
+      // Withdrawn first, which settles what notify told the hub (`settled 0`, or owed), then forgotten.
       await this.#ctx.listings.gone(listing);
+      this.#ctx.forget(listing);
     }
   }
 
