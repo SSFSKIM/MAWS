@@ -4,23 +4,36 @@
 // counter both transports draw from, the revocation fence, and the address its projects reach the machine by: a
 // project's frame for an RL1 generation reaches this object through it (`relaySend`).
 //
+// A generation is a name's: a machine renamed in the org state keeps its ref, so connections of two names, each counted
+// by its own name's object, meet here. Connections here are numbered by this object (`conn`), the newest installed one
+// is current whatever its name, and each name has a fence (`fence:<name key>`): the lowest generation of that name that
+// may still install. Installing a connection raises its name's fence to its generation, and a connection replaced,
+// superseded by a DX2 stream, or revoked raises its name's fence past its own, so a claim the name's object granted
+// before any of these and that arrives after them is refused, never installed (`endpoint`), and a connection under the
+// fence carries nothing more (`live`). The name's object delivers its supersessions and revocations until they are
+// taken (machine.ts's owed calls).
+//
 // Over the endpoint's socket travel DX2's log plane (each project's frames handed to it through `Project.fromMachine`,
 // as DX2's POSTs are), `hb`/`hb-ack` with the lease, the machine's signed `listing` and `endpoint` records and its
 // `notify` (to the Registry), the `state` notice, and the channel multiplex. An app's socket carries channels only.
 // Channel frames are forwarded at once, unread and unbuffered, with no flow control: credit is RL3's, end to end.
 //
 // Both kinds of socket hibernate. Nothing kept in memory is needed after an eviction:
-//   - the endpoint socket's attachment is `{kind: 'endpoint', generation}`; the current connection (its generation,
+//   - the endpoint socket's attachment is `{kind: 'endpoint', conn}`; the current connection (its conn, generation,
 //     org, name, credential, whether it said hello) is in `kv` `endpoint`;
-//   - the projects a connection opened are in `kv` `rl1-projects:<generation>`, with what their lease calls need;
+//   - the projects a connection opened are in `kv` `rl1-projects:<conn>`, with what their lease calls need;
 //   - each app socket's attachment is `{kind: 'app', member, device?, channels}`, and the channel → socket map is
 //     rebuilt from them (`map`);
-//   - the per-project order of log frames and a set of parts being joined live only while frames are in flight, which
-//     no idle object (the only kind evicted) has.
+//   - the members of the newest org state the Registry announced here are in `kv` `state-members`;
+//   - the per-project order of log frames lives only while frames are in flight, which no idle object (the only kind
+//     evicted) has. A frame sent as parts can span an eviction: a part that continues a set this instance never began
+//     closes the connection `4412 parts-lost`, and the endpoint, reconnecting, sends again what its hellos say is
+//     missing.
 // The ends drive the heartbeats; this object keeps no timer. A code update drops hibernated sockets: every end
 // reconnects, and the endpoint's next connection takes a higher generation.
 import {
   CHANNEL_CLOSE,
+  machineNameKey,
   decodeChannelFrame,
   encodeChannelFrame,
   isEndpointHello,
@@ -38,7 +51,7 @@ import {
 import { CLIENT_HEADER, MACHINE_HEADER, MEMBER_HEADER, ORG_HEADER, REF_HEADER, type Env } from '../env';
 import { NOT_ON_RL1, RL1_LOG_DOWN, type DownFrame, type UpFrame } from '../protocol/machine';
 import { PartAssembler, toWire, utf8Length, type Part } from '../protocol/parts';
-import type { Machine, Timing } from './machine';
+import type { Machine, Sent, Timing } from './machine';
 import { described, PROJECT_ID, type MachineContext } from './project';
 import { lacksMethod } from './retry';
 
@@ -46,22 +59,25 @@ import { lacksMethod } from './retry';
  * `:`, so this never names a DX2 object (`<org>:<name>`). */
 export const relayObjectName = (org: string, ref: string) => `${org}:ref:${ref}`;
 
-/** The current endpoint connection. */
-type Current = { generation: number; org: string; name: string; client: string; welcomed: boolean };
-type EndpointAttachment = { kind: 'endpoint'; generation: number };
+/** The current endpoint connection: `conn` is this object's number for it, `generation` its name's. */
+type Current = { conn: number; generation: number; org: string; name: string; client: string; welcomed: boolean };
+type EndpointAttachment = { kind: 'endpoint'; conn: number };
 type AppAttachment = { kind: 'app'; member: string; device?: string; channels: number[] };
 type Attachment = EndpointAttachment | AppAttachment;
 /** The projects a connection opened, and what a lease call for it carries. */
-type Opened = { org: string; name: string; client: string; projects: string[] };
+type Opened = { org: string; name: string; client: string; generation: number; projects: string[] };
+/** A name's fence: the lowest generation of it that may install, and why the ones below may not. */
+type Fence = { from: number; cause: 'replaced' | 'revoked' };
 
-/** Close codes of the sockets: the endpoint's when a newer connection or a revocation ends it, either kind's for a
- * message over 1 MiB, or for a frame out of order. */
-const CLOSE = { replaced: 4409, revoked: 4403, protocol: 4400, tooLarge: 1009, failed: 1011 } as const;
+/** Close codes of the sockets: the endpoint's when a newer connection or a revocation ends it, or when a frame's parts
+ * were lost to an eviction (send it again), either kind's for a message over 1 MiB, or for a frame out of order. */
+const CLOSE = { replaced: 4409, revoked: 4403, partsLost: 4412, protocol: 4400, tooLarge: 1009, failed: 1011 } as const;
 
 const json = (status: number, body: unknown) => Response.json(body, { status });
 type Frame = { t: string } & Record<string, unknown>;
 const isFrame = (value: unknown): value is Frame => typeof value === 'object' && value !== null && !Array.isArray(value) && typeof (value as { t?: unknown }).t === 'string';
-const projectsKey = (generation: number) => `rl1-projects:${generation}`;
+const projectsKey = (conn: number) => `rl1-projects:${conn}`;
+const fenceKey = (name: string) => `fence:${machineNameKey(name)}`;
 
 function note(line: Record<string, unknown>): void {
   console.log(JSON.stringify({ desk: 'machine-stream', transport: 'rl1', ...line }));
@@ -70,8 +86,8 @@ function note(line: Record<string, unknown>): void {
 export class Relay {
   /** Channel id → the app socket that holds it; rebuilt from the attachments after an eviction (`map`). */
   private channels: Map<number, WebSocket> | undefined;
-  /** A connection's part sets being joined (its generation's). */
-  private parts: { generation: number; assembler: PartAssembler } | undefined;
+  /** A connection's part sets being joined (its conn's). */
+  private parts: { conn: number; assembler: PartAssembler } | undefined;
   /** The last call queued per order key (a project, the Registry): each waits for the one before it. */
   private readonly order = new Map<string, Promise<unknown>>();
 
@@ -94,6 +110,25 @@ export class Relay {
     return this.kv.get<Current>('endpoint');
   }
 
+  /** The current connection, unless its name's fence passed it: then it ends here, and nothing more travels on it. */
+  private live(): Current | undefined {
+    const current = this.current();
+    const fence = current && this.fence(current.name);
+    if (!current || !fence || current.generation >= fence.from) return current;
+    this.retire(current, fence.cause === 'revoked' ? CLOSE.revoked : CLOSE.replaced, fence.cause);
+    return undefined;
+  }
+
+  private fence(name: string): Fence | undefined {
+    return this.kv.get<Fence>(fenceKey(name));
+  }
+
+  /** Raises a name's fence to `from`; never lowers it. */
+  private raiseFence(name: string, from: number, cause: Fence['cause']): void {
+    const held = this.fence(name);
+    if (!held || held.from < from) this.kv.put(fenceKey(name), { from, cause } satisfies Fence);
+  }
+
   private get ref(): string {
     return this.kv.get<string>('ref') ?? '';
   }
@@ -101,7 +136,8 @@ export class Relay {
   // ---- Upgrades ------------------------------------------------------------------------------------------------
 
   /** The endpoint's socket: the next generation, drawn from the machine's name-addressed object, which refuses a revoked
-   * credential and ends the machine's DX2 stream; a newer connection here ends the older one, with its channels. */
+   * credential and ends the machine's DX2 stream; installed unless its name's fence passed it while the claim was
+   * answered, and then it ends the connection before it here, whatever that one's name, with its channels. */
   async endpoint(request: Request): Promise<Response> {
     if (request.headers.get('Upgrade') !== 'websocket') return json(426, { error: 'upgrade-required' });
     const org = request.headers.get(ORG_HEADER) ?? '';
@@ -111,24 +147,36 @@ export class Relay {
     this.kv.put('ref', ref);
     let claimed: { generation: number } | { refused: 'revoked' };
     try {
-      claimed = await this.named(org, name).claimGeneration(org, ref, client);
+      claimed = await this.named(org, name).claimGeneration(org, name, ref, client);
     } catch (error) {
       note({ event: 'claim-failed', machine: name, ref, error: described(error) });
       return json(503, { error: lacksMethod(error, 'claimGeneration') ? 'hub-updating' : 'hub-unavailable', message: 'connect again' });
     }
     if ('refused' in claimed) return json(403, { error: 'not-enrolled', message: 'this credential was revoked' });
     const { generation } = claimed;
+    // While the claim was answered, a newer connection of the name installed, a DX2 stream took a newer generation, or
+    // the credential was revoked: this one is ended already.
+    const fence = this.fence(name);
+    if (fence && generation < fence.from) {
+      return fence.cause === 'revoked'
+        ? json(403, { error: 'not-enrolled', message: 'this credential was revoked' })
+        : json(409, { error: 'stale-generation', message: 'a newer connection of this machine opened meanwhile' });
+    }
     const before = this.current();
-    // A newer connection took a generation while this one waited for its own: this one is already replaced.
-    if (before && before.generation > generation) return json(409, { error: 'stale-generation', message: 'a newer connection of this machine opened meanwhile' });
+    const conn = (this.kv.get<number>('conn-seq') ?? 0) + 1;
+    this.kv.put('conn-seq', conn);
     const pair = new WebSocketPair();
     const [outside, inside] = [pair[0], pair[1]];
     this.ctx.acceptWebSocket(inside, ['endpoint']);
-    inside.serializeAttachment({ kind: 'endpoint', generation } satisfies EndpointAttachment);
-    this.kv.put('endpoint', { generation, org, name, client, welcomed: false } satisfies Current);
-    this.kv.put(projectsKey(generation), { org, name, client, projects: [] } satisfies Opened);
-    if (before) this.retire(before, CLOSE.replaced, 'replaced');
-    note({ event: 'open', machine: name, ref, generation });
+    inside.serializeAttachment({ kind: 'endpoint', conn } satisfies EndpointAttachment);
+    this.kv.put('endpoint', { conn, generation, org, name, client, welcomed: false } satisfies Current);
+    this.kv.put(projectsKey(conn), { org, name, client, generation, projects: [] } satisfies Opened);
+    this.raiseFence(name, generation, 'replaced');
+    if (before) {
+      this.raiseFence(before.name, before.generation + 1, 'replaced');
+      this.retire(before, CLOSE.replaced, 'replaced');
+    }
+    note({ event: 'open', machine: name, ref, generation, conn });
     return new Response(null, { status: 101, webSocket: outside });
   }
 
@@ -158,9 +206,10 @@ export class Relay {
       this.closeSocket(ws, CLOSE.tooLarge, 'too-large');
       return this.gone(ws, attachment);
     }
+    // A connection its name's fence passed ends before anything travels, either way.
+    const current = this.live();
     if (attachment.kind === 'app') return this.fromApp(ws, attachment, message);
-    const current = this.current();
-    if (current?.generation !== attachment.generation) return this.closeSocket(ws, CLOSE.replaced, 'replaced');
+    if (current?.conn !== attachment.conn) return this.closeSocket(ws, CLOSE.replaced, 'replaced');
     if (typeof message === 'string') return this.fromEndpointText(ws, current, message);
     return this.fromEndpointBinary(ws, message);
   }
@@ -173,9 +222,9 @@ export class Relay {
   private gone(ws: WebSocket, attachment: Attachment): void {
     if (attachment.kind === 'app') return this.appGone(ws, attachment);
     const current = this.current();
-    if (current?.generation === attachment.generation) this.retire(current, CLOSE.failed, 'closed');
+    if (current?.conn === attachment.conn) this.retire(current, CLOSE.failed, 'closed');
     // An older connection's projects are closed once; a retired connection's were already.
-    else this.closeProjects(attachment.generation);
+    else this.closeProjects(attachment.conn);
   }
 
   // ---- The endpoint's text frames ------------------------------------------------------------------------------
@@ -191,7 +240,7 @@ export class Relay {
     let frame = parsed;
     if (!current.welcomed) return this.hello(ws, current, frame);
     if (frame.t === 'part') {
-      const joined = this.join(current.generation, frame as unknown as Part, ws);
+      const joined = this.join(current, frame as unknown as Part, ws);
       if (!isFrame(joined)) return;
       frame = joined;
     }
@@ -220,7 +269,7 @@ export class Relay {
     } catch {
       // A Registry on older code, or out of reach: the endpoint reads the state on its own.
     }
-    if (version !== null && this.current()?.generation === current.generation) this.sendTo(ws, JSON.stringify({ t: 'state', version }));
+    if (version !== null && this.current()?.conn === current.conn) this.sendTo(ws, JSON.stringify({ t: 'state', version }));
   }
 
   /** `hb {generation}`: while the connection is still the machine's newest and its credential is not revoked, the lease
@@ -235,13 +284,13 @@ export class Relay {
     } catch {
       // Unknown: the lease's own fence (the generation) still holds.
     }
-    if (this.current()?.generation !== current.generation) return;
+    if (this.current()?.conn !== current.conn) return;
     if (standing !== 'current') {
-      const now = this.current();
-      if (now) this.retire(now, standing === 'revoked' ? CLOSE.revoked : CLOSE.replaced, standing);
+      this.raiseFence(current.name, current.generation + 1, standing);
+      this.retire(current, standing === 'revoked' ? CLOSE.revoked : CLOSE.replaced, standing);
       return;
     }
-    const opened = this.kv.get<Opened>(projectsKey(current.generation));
+    const opened = this.kv.get<Opened>(projectsKey(current.conn));
     await Promise.allSettled((opened?.projects ?? []).map((project) => this.project(current.org, project).renew(this.context(current, project))));
     this.sendTo(ws, JSON.stringify({ t: 'hb-ack', generation: current.generation }));
   }
@@ -254,8 +303,8 @@ export class Relay {
       return this.refuse(ws, { frame: frame.t, status: 400, error: 'bad-shape', message: 'the frame names no .smns project id' });
     }
     if (frame.t === 'hello') {
-      const opened = this.kv.get<Opened>(projectsKey(current.generation));
-      if (opened && !opened.projects.includes(project)) this.kv.put(projectsKey(current.generation), { ...opened, projects: [...opened.projects, project] });
+      const opened = this.kv.get<Opened>(projectsKey(current.conn));
+      if (opened && !opened.projects.includes(project)) this.kv.put(projectsKey(current.conn), { ...opened, projects: [...opened.projects, project] });
     }
     const result = await this.inOrder(`project:${project}`, async () => {
       try {
@@ -266,7 +315,7 @@ export class Relay {
       }
     });
     const now = this.current();
-    if (now?.generation !== current.generation) return;
+    if (now?.conn !== current.conn) return;
     if (result.stale) this.retire(now, CLOSE.replaced, 'replaced');
     else if (result.failed) this.retire(now, CLOSE.failed, 'undeliverable');
   }
@@ -304,8 +353,16 @@ export class Relay {
     );
   }
 
-  private join(generation: number, part: Part, ws: WebSocket): unknown {
-    if (this.parts?.generation !== generation) this.parts = { generation, assembler: new PartAssembler() };
+  /** Joins a part to its set. A socket keeps its messages' order, so a set's parts arrive from index 0 up: one past 0 for
+   * a set this instance does not hold was begun before an eviction, and the connection closes `4412 parts-lost` for
+   * the endpoint to send the frame again on its next one. */
+  private join(current: Current, part: Part, ws: WebSocket): unknown {
+    if (this.parts?.conn !== current.conn) this.parts = { conn: current.conn, assembler: new PartAssembler() };
+    if (typeof part.index === 'number' && part.index > 0 && typeof part.id === 'string' && !this.parts.assembler.holds(part.id)) {
+      note({ event: 'parts-lost', machine: current.name, generation: current.generation, id: part.id, index: part.index });
+      this.retire(current, CLOSE.partsLost, 'parts-lost');
+      return undefined;
+    }
     try {
       return this.parts.assembler.add(part);
     } catch (error) {
@@ -452,80 +509,79 @@ export class Relay {
    * project it opened (held through the grace for the next connection, as DX2's stream's end). */
   private retire(current: Current, code: number, reason: string): void {
     for (const ws of this.ctx.getWebSockets('endpoint')) {
-      if ((ws.deserializeAttachment() as EndpointAttachment).generation === current.generation) this.closeSocket(ws, code, reason);
+      if ((ws.deserializeAttachment() as EndpointAttachment).conn === current.conn) this.closeSocket(ws, code, reason);
     }
-    if (this.current()?.generation === current.generation) this.kv.delete('endpoint');
+    if (this.current()?.conn === current.conn) this.kv.delete('endpoint');
     this.closeAllChannels();
-    this.closeProjects(current.generation);
-    if (this.parts?.generation === current.generation) this.parts = undefined;
-    note({ event: 'end', machine: current.name, generation: current.generation, cause: reason });
+    this.closeProjects(current.conn);
+    if (this.parts?.conn === current.conn) this.parts = undefined;
+    note({ event: 'end', machine: current.name, generation: current.generation, conn: current.conn, cause: reason });
     this.broadcastPresence();
   }
 
-  private closeProjects(generation: number): void {
-    const opened = this.kv.get<Opened>(projectsKey(generation));
+  private closeProjects(conn: number): void {
+    const opened = this.kv.get<Opened>(projectsKey(conn));
     if (!opened) return;
-    this.kv.delete(projectsKey(generation));
+    this.kv.delete(projectsKey(conn));
     const { leaseMs, graceMs } = this.timing();
     for (const project of opened.projects) {
-      const context: MachineContext = { org: opened.org, project, machine: opened.name, client: opened.client, generation, leaseMs, graceMs, transport: 'rl1' };
+      const context: MachineContext = { org: opened.org, project, machine: opened.name, client: opened.client, generation: opened.generation, leaseMs, graceMs, transport: 'rl1' };
       void this.project(opened.org, project).closed(context).catch(() => {});
     }
   }
 
   private endpointSocket(): WebSocket | undefined {
-    const generation = this.current()?.generation;
-    return this.ctx.getWebSockets('endpoint').find((ws) => (ws.deserializeAttachment() as EndpointAttachment).generation === generation);
+    const conn = this.current()?.conn;
+    return this.ctx.getWebSockets('endpoint').find((ws) => (ws.deserializeAttachment() as EndpointAttachment).conn === conn);
   }
 
   // ---- Calls from the machine's name-addressed object (machine.ts) --------------------------------------------
 
-  /** A project's frame for the connection of `generation`: "offline" unless it is the current one. Only the log plane
-   * reaches an RL1 endpoint: a session-plane frame is not sent (its machine reads its sessions in channels). */
-  relaySend(frame: DownFrame, generation: number): 'written' | 'offline' {
-    const current = this.current();
-    if (current?.generation !== generation || !current.welcomed) return 'offline';
-    if (!RL1_LOG_DOWN.has(frame.t)) {
-      note({ event: 'not-sent', machine: current.name, generation, frame: frame.t });
-      return 'written';
-    }
+  /** A project's frame for the connection of `name` at `generation`: "offline" unless it is the current one. Only the
+   * log plane reaches an RL1 endpoint: a session-plane frame is refused `not-on-rl1` to its sender, the project, which
+   * settles what asked for it (the machine reads its sessions in channels). */
+  relaySend(name: string, generation: number, frame: DownFrame): Sent {
+    const current = this.live();
+    if (current?.name !== name || current.generation !== generation || !current.welcomed) return 'offline';
+    if (!RL1_LOG_DOWN.has(frame.t)) return 'not-on-rl1';
     for (const line of toWire(frame)) if (!this.toEndpoint(line)) return 'offline';
     return 'written';
   }
 
-  /** A project could not deliver to the connection of `generation`: it ends, when it is still the current one. */
-  relayClose(generation: number): void {
+  /** A project could not deliver to the connection of `name` at `generation`: it ends, when it is still the current one. */
+  relayClose(name: string, generation: number): void {
     const current = this.current();
-    if (current?.generation === generation) this.retire(current, CLOSE.failed, 'undeliverable');
+    if (current?.name === name && current.generation === generation) this.retire(current, CLOSE.failed, 'undeliverable');
   }
 
-  /** A newer connection of either transport took `generation`: an older endpoint connection here ends. */
-  relaySupersede(generation: number): void {
-    const current = this.current();
-    if (current && current.generation < generation) this.retire(current, CLOSE.replaced, 'replaced');
+  /** A newer connection of either transport took `generation` of `name`: its connections up to it end, here now and when
+   * a claim of one arrives late. */
+  relaySupersede(name: string, generation: number): void {
+    this.raiseFence(name, generation + 1, 'replaced');
+    this.live();
   }
 
-  /** The machine's credential was revoked (`client`, or whichever it is when null): its connection ends. */
-  relayRevoke(client: string | null): void {
-    const current = this.current();
-    if (current && (client === null || current.client === client)) this.retire(current, CLOSE.revoked, 'revoked');
+  /** A credential of `name` was revoked when the name had counted `generation`: its connections up to it end, here now
+   * and when a claim of one arrives late. */
+  relayRevoke(name: string, generation: number): void {
+    this.raiseFence(name, generation + 1, 'revoked');
+    this.live();
   }
 
   /**
-   * The org state advanced: the `state` notice, to a connection that said hello. With the head's `members` (and not
-   * behind a newer announcement), every app socket of a member it no longer holds closes `4403 removed`, and such a
-   * member's upgrade is refused from now on, as the project and grid sockets are (O11 M3).
+   * The org state advanced (the Registry's announcement, sent until taken): the `state` notice, to a connection that
+   * said hello, and every app socket of a member the head no longer holds closes `4403 removed`, such a member's upgrade
+   * refused from now on, as the project and grid sockets are (O11 M3). An announcement behind one taken is passed by.
    */
-  relayState(version: number, members?: string[]): void {
+  relayState(version: number, members: string[]): void {
     const held = this.kv.get<{ version: number; members: string[] }>('state-members');
-    if (members && (!held || held.version < version)) {
-      this.kv.put('state-members', { version, members });
-      for (const ws of this.ctx.getWebSockets('app')) {
-        const attachment = ws.deserializeAttachment() as AppAttachment;
-        if (members.includes(attachment.member)) continue;
-        this.closeSocket(ws, CLOSE.revoked, 'removed');
-        this.appGone(ws, attachment);
-      }
+    if (held && held.version >= version) return;
+    this.kv.put('state-members', { version, members });
+    for (const ws of this.ctx.getWebSockets('app')) {
+      const attachment = ws.deserializeAttachment() as AppAttachment;
+      if (members.includes(attachment.member)) continue;
+      this.closeSocket(ws, CLOSE.revoked, 'removed');
+      this.appGone(ws, attachment);
     }
     if (this.current()?.welcomed) this.toEndpoint(JSON.stringify({ t: 'state', version }));
   }

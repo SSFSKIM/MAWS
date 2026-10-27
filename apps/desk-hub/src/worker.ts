@@ -97,9 +97,9 @@ function forward(request: Request, url: string, identity: Record<string, string>
  * A ref the Registry resolved, or the answer when it could not: a Registry still on the code before RL1 (a deploy's
  * first minutes) lacks the method, and the client connects again.
  */
-async function refFrom(lookup: () => Promise<string | null>): Promise<{ ref: string | null } | Response> {
+async function refFrom<T>(lookup: () => Promise<T>): Promise<T | Response> {
   try {
-    return { ref: await lookup() };
+    return await lookup();
   } catch (error) {
     if (lacksMethod(error, 'machineRefOf') || lacksMethod(error, 'machineRefNamed')) return json(503, { error: 'hub-updating', message: 'connect again' });
     throw error;
@@ -231,11 +231,11 @@ async function member(request: Request, url: URL, env: Env, registry: DurableObj
   // An app's socket to a machine (O11 M6): channels, relayed by the object its ref addresses.
   const appSocket = APP_SOCKET_PATH.exec(pathname);
   if (appSocket && method === 'GET') {
-    const found = await refFrom(() => registry.machineRefNamed(decodeURIComponent(appSocket[1])));
-    if (found instanceof Response) return found;
-    if (found.ref === null) return json(404, { error: 'unknown-machine' });
-    const stub = env.MACHINE.get(env.MACHINE.idFromName(relayObjectName(principal.org.id, found.ref)));
-    return stub.fetch(forward(request, 'https://machine/app', { [MEMBER_HEADER]: you.id, [ORG_HEADER]: principal.org.id, [REF_HEADER]: found.ref }));
+    const ref = await refFrom(() => registry.machineRefNamed(decodeURIComponent(appSocket[1])));
+    if (ref instanceof Response) return ref;
+    if (ref === null) return json(404, { error: 'unknown-machine' });
+    const stub = env.MACHINE.get(env.MACHINE.idFromName(relayObjectName(principal.org.id, ref)));
+    return stub.fetch(forward(request, 'https://machine/app', { [MEMBER_HEADER]: you.id, [ORG_HEADER]: principal.org.id, [REF_HEADER]: ref }));
   }
   const socket = PROJECT_SOCKET.exec(pathname);
   if (socket && method === 'GET') {
@@ -268,9 +268,20 @@ async function machine(request: Request, url: URL, env: Env, registry: DurableOb
   // RL1 (O11 M6): the endpoint's one socket, held by the object its ref addresses; its ref is the hub's own record of
   // this machine, never the client's word.
   if (url.pathname === MACHINE_SOCKET_PATH && request.method === 'GET') {
-    const found = await refFrom(() => registry.machineRefOf(principal.machine));
+    const found = await refFrom(async () => {
+      const resolved = await registry.machineRefOf(principal.machine);
+      return 'error' in resolved ? { error: resolved.error } : { ref: resolved.ref };
+    });
     if (found instanceof Response) return found;
-    if (found.ref === null) return json(409, { error: 'no-ref', message: 'RL1 needs the machine’s ref: post its key (POST /machine/key) or its certificate (POST /machine/cert) first' });
+    if ('error' in found) {
+      return json(409, {
+        error: found.error,
+        message:
+          found.error === 'no-ref'
+            ? 'RL1 needs the machine’s ref: post its key (POST /machine/key) or its certificate (POST /machine/cert) first'
+            : 'the org state lists no machine of this name: RL1 serves a machine once an admin lists its key',
+      });
+    }
     const relay = env.MACHINE.get(env.MACHINE.idFromName(relayObjectName(principal.org.id, found.ref)));
     return relay.fetch(forward(request, 'https://machine/socket', { ...identity, [REF_HEADER]: found.ref }));
   }

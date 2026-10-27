@@ -63,6 +63,10 @@ import {
   REGISTRY_RPC_PATH,
   AS_MEMBER_PATH,
   LACKS_PATH,
+  CLAIM_HOLD_PATH,
+  CLAIM_HELD_PATH,
+  CLAIM_RELEASE_PATH,
+  RELAY_FAULT_PATH,
 } from './send-fault';
 
 const require = createRequire(import.meta.url);
@@ -486,6 +490,35 @@ export async function startLocalHub() {
     /** Whether the Registry takes workerd's own refusal of a method a callee lacks for one on older code. */
     async missingMethod(): Promise<{ lacks: boolean; message: string }> {
       return JSON.parse(await seam('REGISTRY', ORG, MISSING_METHOD_PATH));
+    },
+    /** Holds the answer to a machine's next RL1 generation claim (its name's object) until `releaseClaim`. */
+    async holdClaim(machine: string) {
+      await seam('MACHINE', machine, CLAIM_HOLD_PATH);
+    },
+    /** Whether a claim's answer is held. */
+    async claimHeld(machine: string): Promise<boolean> {
+      return (await seam('MACHINE', machine, CLAIM_HELD_PATH)) === 'held';
+    },
+    async releaseClaim(machine: string) {
+      if ((await seam('MACHINE', machine, CLAIM_RELEASE_PATH)) !== 'released') throw new Error(`no claim of ${machine} was held`);
+    },
+    /** Makes a machine's ref object throw from its next `times` calls of `method` (`relayRevoke`, `relayState`). */
+    async relayFault(ref: string, method: 'relayRevoke' | 'relayState', times: number) {
+      await seam('MACHINE', `ref:${ref}`, RELAY_FAULT_PATH, { method, times });
+    },
+    /** A member's app-socket upgrade straight to a machine's ref object, as the Worker forwards one it resolved: how an
+     * upgrade admitted just before a removal reaches the object late. Answers the status; an accepted socket is closed. */
+    async relayUpgrade(ref: string, member: string): Promise<number> {
+      const namespace = await mf.getDurableObjectNamespace('MACHINE');
+      const response = await namespace
+        .get(namespace.idFromName(`${ORG}:ref:${ref}`))
+        .fetch('https://machine/app', { headers: { Upgrade: 'websocket', 'X-Desk-Member': member, 'X-Desk-Org': ORG, 'X-Desk-Machine-Ref': ref } });
+      const socket = response.webSocket;
+      if (socket) {
+        socket.accept();
+        socket.close(1000, 'done');
+      } else await response.body?.cancel();
+      return response.status;
     },
     /** Takes workerd's log lines matching `pattern` out of the output, kept in `runtimeLogs` for the suite to assert. */
     expectRuntimeLog(pattern: RegExp) {

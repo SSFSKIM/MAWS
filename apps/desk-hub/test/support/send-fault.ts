@@ -123,3 +123,12 @@ export const AS_MEMBER_PATH = '/__test/as-member';
 /** Where the suites' `Registry` is armed (`{method}`, or `{method: null}` to disarm) to refuse calls of one of its
  * methods as a Registry on the code before the method refuses them (workerd's missing-method error). */
 export const LACKS_PATH = '/__test/lacks';
+/** Where the suites' `Machine` (a name's) holds its next RL1 generation claim's answer until it is released (O11 M6). */
+export const CLAIM_HOLD_PATH = '/__test/claim-hold';
+/** Where the suites' `Machine` says whether a claim's answer is held (`held` or `none`). */
+export const CLAIM_HELD_PATH = '/__test/claim-held';
+/** Where the suites' `Machine` releases a held claim's answer: `released`, or `none` while none is held. */
+export const CLAIM_RELEASE_PATH = '/__test/claim-release';
+/** Where the suites' `Machine` (a ref's) is armed to throw from its next `times` calls of a relay method
+ * (`{method, times}`), as a call to an object a reset or an overload failed. */
+export const RELAY_FAULT_PATH = '/__test/relay-fault';

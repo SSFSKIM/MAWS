@@ -108,6 +108,11 @@ export class OrgRecords {
       if (held.pub === b.pub && held.ref === b.ref && held.mac === b.mac) return ok({ key: held, kept: false });
       return fail(409, 'key-posted', 'this enrollment holds another key; enroll again with a new code to post another');
     }
+    // A ref the state or a certificate gives other names is theirs: a key posted with it would claim their relay (O11 M6).
+    const names = this.namesOfRef(b.ref);
+    if (names.length > 0 && !names.includes(machineNameKey(machine.name))) {
+      return fail(409, 'ref-taken', `the ref ${b.ref} is another machine's in the org state or a certificate: mint a fresh ref`);
+    }
     const key: EnrollmentKey = { enrollment: machine.enrollment, machine: machine.name, pub: b.pub as string, ref: b.ref, mac: b.mac as string, posted: iso() };
     this.sql.exec('INSERT INTO machine_keys (enrollment, machine, pub, ref, mac, posted) VALUES (?, ?, ?, ?, ?, ?)', key.enrollment, key.machine, key.pub, key.ref, key.mac, key.posted);
     return ok({ key, kept: true });
@@ -275,16 +280,33 @@ export class OrgRecords {
     );
   }
 
-  /** Whether `ref` is a machine's the hub knows: in the head's machines or `machineNames`, a kept certificate's, or one a
-   * machine posted with its key. */
-  holdsRef(ref: string): boolean {
-    if (!isMachineRef(ref)) return false;
-    const head = this.chain.head();
-    if (head && (head.state.machines.some((m) => m.ref === ref) || head.state.machineNames.some((m) => m.ref === ref))) return true;
+  /**
+   * The ref RL1 routes a machine name to (O11 M6): the one the head's live `machines` entry of the name holds, else that
+   * of the certificate last kept under the name; null for neither. Only a binding a signed record makes: never a ref a
+   * machine posted with its key, which any enrollment can post, nor `machineNames`' history of names a machine had.
+   */
+  boundRef(name: string): string | null {
+    const key = machineNameKey(name);
     return (
-      this.sql.exec('SELECT 1 FROM machine_certs WHERE ref = ? LIMIT 1', ref).toArray().length > 0 ||
-      this.sql.exec('SELECT 1 FROM machine_keys WHERE ref = ? LIMIT 1', ref).toArray().length > 0
+      this.chain.head()?.state.machines.find((m) => machineNameKey(m.name) === key)?.ref ??
+      this.sql.exec<{ ref: string }>('SELECT ref FROM machine_certs WHERE name_key = ? ORDER BY rowid DESC LIMIT 1', key).toArray()[0]?.ref ??
+      null
     );
+  }
+
+  /** Whether a signed record binds `ref` to a machine: the head's live `machines`, or a kept certificate (`boundRef`). */
+  refBound(ref: string): boolean {
+    if (!isMachineRef(ref)) return false;
+    if (this.chain.head()?.state.machines.some((m) => m.ref === ref)) return true;
+    return this.sql.exec('SELECT 1 FROM machine_certs WHERE ref = ? LIMIT 1', ref).toArray().length > 0;
+  }
+
+  /** The names (as `machineNameKey`s) the head, in `machines` or `machineNames`, or a kept certificate gives `ref`. */
+  private namesOfRef(ref: string): string[] {
+    const state = this.chain.head()?.state;
+    const named = state ? [...state.machines, ...state.machineNames].filter((m) => m.ref === ref).map((m) => machineNameKey(m.name)) : [];
+    const certified = this.sql.exec<{ name_key: string }>('SELECT name_key FROM machine_certs WHERE ref = ?', ref).toArray().map((r) => r.name_key);
+    return [...new Set([...named, ...certified])];
   }
 
   /** The owners a session's listing names, or null when the machine listed none for it. */
