@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { MemorySessionStateStore } from './store/memory-session-state-store';
 import { DurableCronSource, durableCronsOf, scheduledTasksPath } from './durable-crons';
+import type { SessionCron } from './work-state';
 
 const ID = 'e12639e3-7f62-4cf5-8a24-fd50f3a4c993';
 const OTHER = '55555555-5555-4555-8555-555555555555';
@@ -24,12 +25,12 @@ describe('durableCronsOf', () => {
   });
 
   it('a one-shot job (no `recurring` key) reads as not recurring', () => {
-    const { recurring: _recurring, ...oneShot } = recorded();
+    const oneShot = recorded({ recurring: undefined }); // left out of the file's JSON
     expect(durableCronsOf(reader({ [scheduledTasksPath('/w')]: file([oneShot]) }), ['/w'], new Set([ID]), () => {})).toEqual([expect.objectContaining({ id: 'efd35f19', recurring: false })]);
   });
 
   it('no file means no durable crons, and a job with no creator (a legacy or hand-written one) is no session\'s', () => {
-    const { createdBySessionId: _c, ...legacy } = recorded();
+    const legacy = recorded({ createdBySessionId: undefined }); // left out of the file's JSON
     expect(durableCronsOf(reader({}), ['/w'], new Set([ID]), () => {})).toEqual([]);
     expect(durableCronsOf(reader({ [scheduledTasksPath('/w')]: file([legacy]) }), ['/w'], new Set([ID]), () => {})).toEqual([]);
   });
@@ -51,7 +52,7 @@ describe('durableCronsOf', () => {
 
   it('reads every directory once and a job once, by its id', () => {
     const read = reader({ [scheduledTasksPath('/w')]: file([recorded()]), [scheduledTasksPath('/w/wt')]: file([recorded(), recorded({ id: 'two' })]) });
-    expect(durableCronsOf(read, ['/w', '/w/wt', '/w'], new Set([ID]), () => {}).map((c) => c.id)).toEqual(['efd35f19', 'two']);
+    expect((durableCronsOf(read, ['/w', '/w/wt', '/w'], new Set([ID]), () => {}) as SessionCron[]).map((c) => c.id)).toEqual(['efd35f19', 'two']);
   });
 });
 

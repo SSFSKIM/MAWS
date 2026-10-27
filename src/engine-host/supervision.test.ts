@@ -227,7 +227,7 @@ describe('exit-when-idle (detached)', () => {
 
   it('a utility host refuses it: it ends with the app', async () => {
     const h = harness('utility');
-    await expect(h.handlers.get('host.exitWhenIdle')!({ armed: true })).rejects.toMatchObject({ ipcError: { code: 'internal' } });
+    await expect(h.handlers.get('host.exitWhenIdle')!({ armed: true }, { client: endableClientRef('1') })).rejects.toMatchObject({ ipcError: { code: 'internal' } });
   });
 });
 
