@@ -42,7 +42,7 @@ Phase 2 (written 2026-10-27 against O10's M6 and Interfaces §D, whose landing P
 - [x] M5 — The RL10 client and the local-only switch (item 5). Built by two executors in sequence on one branch, reviewed by doperpowers:reviewer-high over two rounds (round 1: one P1, one P2, both reproduced and fixed with regression tests; round 2 clean), landed as doperpowers PR #405 (`76cd8caf`, sminos 1.21.0), 2026-10-27. Its conformance replay lands once O10 M6's `conversation.json` exists, as a follow-up.
 - [ ] M6 — Members, words and the label (items 2 and 3). After M5.
 - [ ] M7 — Lane A actions with remote context (item 4's rest; Decision Log 45's fence, binding and proof). After M6, whose `member` frames it extends with `launch` and whose publication it proves; after M7a.
-- [ ] M8 — To-human off the hub (item 6). After M5. Its store needs nothing of RL10.
+- [x] M8 — To-human off the hub (item 6). Reviewed by doperpowers:reviewer-medium over three rounds (round 1: a cutover race leaving a copy in each store, and an unbounded host batch; round 2: a clock rollback stranding seqs behind the cursor, introduced by the bounded passes; each reproduced and fixed with a regression test; round 3 clean), landed as doperpowers PR #406 (`5463fe8c`, sminos 1.23.0), 2026-10-27.
 - [ ] M9 — The mini (item 8). After M5–M8, and after O14's brief cuts the mini over.
 
 M7a consumes nothing and lands first. M6 and M8 consume only M5 and may run on parallel branches cut from `main` once M5 lands; M7 is cut from `main` after M6 lands. Each re-bumps the sminos version above the one before it (phase 1's rule). The phase closes with a doperpowers:review-code high pass over its range, as phase 1 did.
@@ -1090,6 +1090,14 @@ The joint review's second round (`9be0bc941`), 2026-10-27, two P1s, both reprodu
   - **Member frames.** `title` is the title this machine published for the session; `known_projects()` is re-listed on the member cadence, not every tick; a session in two projects' rows is sent under the first by project id; the plane's rows are `Plane.member_rows` (a first name shadowed the `rows` frame handler, caught by CI).
   Rationale: each keeps the words gate's provenance and the delivery record's order where the document was silent, and leaves the DX2 path's output unchanged.
   Date/Author: 2026-10-27, M6's first executor, accepted by O12's phase 2 executor.
+
+- Decision: M8's gaps and its review rounds, settled in building it.
+  - **Where the store applies**: a cut-over machine, for every project whose kind is not `local` (the machine's own project and every hub project, whatever its org); a git-mirrored or local project keeps host events in its log. The cutover check runs first, so a machine not cut over pays one `lexists`.
+  - **One copy across the cutover** (reviewer-medium, round 1, P1, reproduced as a copy in each store): `append_host` holds the writer's log-file locks while it decides the route, checks the log for the same `(kind, src)` and appends, the store's locks taken inside the log's (`_append` gained `held=`). An exporter that chose the log under the lock before `identity.json` existed has linearized its event before the cutover, which stays in the log as every older host event does; nothing chosen after the cutover enters the log, and no `(kind, src)` is in both stores.
+  - **Bounded, ordered passes** (round 1, P2; round 2, P2): the sub-less pass queues entries of at most 256 KiB and nothing while the lane holds 4 MiB unsent, the cursor advancing entry by entry; each writer's events go in seq order, writers merged by time (`host_order`), so a clock stepped back never strands a seq behind the per-writer cursor; a welcome's resend (each session's last 50, the highest seqs per writer, plus everything unsent) waits in `host_owed` under the same bound. A single host event over 16 MiB would still close the lane, left as unrealistic.
+  - **Shapes.** A snapshot's `host` entries are `{id, event}`, the shape of a `host` message body, so the endpoint dedups both by one rule; only a main subscription (`agentId` null) carries host events; sminos has no `cards` view, so "a cards-only subscriber sees none" is pinned on sminos's side as nothing but the sub-less message carrying an unsubscribed event. The sub-less pass reads every own-writer file in `host/`, former names and an asker's writer included, so a member that left still has its events sent.
+  Rationale: each keeps a host event's single place and its delivery to the endpoint at least once, in order, whatever the clock or the backlog.
+  Date/Author: 2026-10-27, M8's executor and doperpowers:reviewer-medium, accepted by O12's phase 2 executor.
 
 ## Outcomes & Retrospective
 
