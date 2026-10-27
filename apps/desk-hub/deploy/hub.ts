@@ -22,17 +22,19 @@ export class Person {
     return { 'cf-access-token': this.token };
   }
 
-  async fetch(path: string, init: { method?: string; body?: unknown } = {}): Promise<Response> {
+  /** A request as this person; `signal` ends it, its body's reading included. */
+  async fetch(path: string, init: { method?: string; body?: unknown; signal?: AbortSignal } = {}): Promise<Response> {
     this.gate();
     return fetch(`${this.hub}${path}`, {
       method: init.method ?? (init.body === undefined ? 'GET' : 'POST'),
       headers: { ...this.headers, ...(init.body === undefined ? {} : { 'content-type': 'application/json' }) },
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
       redirect: 'manual',
+      signal: init.signal,
     });
   }
 
-  async json<T>(path: string, init: { method?: string; body?: unknown } = {}, status = 200): Promise<T> {
+  async json<T>(path: string, init: { method?: string; body?: unknown; signal?: AbortSignal } = {}, status = 200): Promise<T> {
     const response = await this.fetch(path, init);
     const text = await response.text();
     if (response.status !== status) throw new Error(`${init.method ?? 'GET'} ${path}: ${response.status} ${text.slice(0, 300)}`);

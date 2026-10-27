@@ -6,9 +6,10 @@ import { EventEmitter } from 'node:events';
 import { type SignedOrgState } from 'org-protocol';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { runAcceptance } from '../../deploy/acceptance.ts';
-import { Person, until } from '../../deploy/hub.ts';
+import { Person, sleep, until } from '../../deploy/hub.ts';
 import { type AdminDevice } from '../../deploy/org-admin.ts';
 import { Cleanup, interruptible } from '../../deploy/proof.ts';
+import type { PushSink } from '../../deploy/push-sink.ts';
 import { runRelayMeasure } from '../../deploy/relay-measure.ts';
 import { ADMIN, ORG, startLocalHub, type LocalHub } from '../support/local';
 import { adminKeysFile, LocalPerson } from '../support/local-person';
@@ -224,5 +225,80 @@ describe('against the local hub', () => {
     const { keys } = await new LocalPerson(hub).json<{ keys: Array<{ revoked?: string | null }> }>('/api/provisioning-keys');
     expect(keys.length).toBeGreaterThan(0);
     expect(keys.every((k) => k.revoked)).toBe(true);
+  }, 120_000);
+
+  type Init = { method?: string; body?: unknown; signal?: AbortSignal };
+  const provisioningKeys = async () => (await new LocalPerson(hub).json<{ keys: Array<{ id: string; revoked: string | null }> }>('/api/provisioning-keys')).keys;
+
+  it('acceptance, interrupted while its provisioning key is being created, revokes that key all the same', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const signals = new EventEmitter();
+    const cleanup = new Cleanup();
+    // The hub makes the key; its answer is held past the run's settle, as a slow network would hold it, and the signal
+    // comes meanwhile: the run never learns the key's id.
+    class SlowCreation extends LocalPerson {
+      override async fetch(path: string, init: Init = {}): Promise<Response> {
+        const response = await super.fetch(path, init);
+        if (path === '/api/provisioning-keys' && init.body !== undefined) {
+          signals.emit('SIGINT', 'SIGINT');
+          await sleep(1500);
+        }
+        return response;
+      }
+    }
+    const before = (await provisioningKeys()).length;
+    const printed: string[] = [];
+    const status = await runAcceptance(new SlowCreation(hub, ADMIN, () => cleanup.check()), { org: ORG, throwaway: true }, device, { items: ['2'], frames: 2 }, cleanup, (line) => void printed.push(line), {
+      signals,
+      settleMs: 200,
+    });
+    expect(status).toBe(130);
+    const text = printed.join('\n');
+    expect(text).not.toMatch(/PASS 2 re-issued as a delegation/);
+    expect(text).not.toMatch(/^LEFT /m);
+    const keys = await provisioningKeys();
+    expect(keys.length).toBe(before + 1);
+    expect(keys.filter((k) => !k.revoked)).toEqual([]);
+  }, 120_000);
+
+  it('acceptance, interrupted, ends 130 within its bound though its sink’s close and the read-back after the cleanup stall', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const signals = new EventEmitter();
+    const cleanup = new Cleanup();
+    let interrupted = false;
+    // After the signal, the hub never answers the machines' list (the read-back's; nothing in the cleanup reads it),
+    // short of the request's own signal ending it; and the push sink never finishes closing.
+    class StalledReads extends LocalPerson {
+      override async fetch(path: string, init: Init = {}): Promise<Response> {
+        if (interrupted && path === '/api/machines' && init.method === undefined && init.body === undefined) {
+          return new Promise<Response>((_, reject) => init.signal?.addEventListener('abort', () => reject(init.signal!.reason)));
+        }
+        return super.fetch(path, init);
+      }
+    }
+    const sink: PushSink = { endpoint: (name) => `https://push.invalid/${name}`, received: () => [], close: () => new Promise<void>(() => {}) };
+    const printed: string[] = [];
+    const started = Date.now();
+    const status = await runAcceptance(
+      new StalledReads(hub, ADMIN, () => cleanup.check()),
+      { org: ORG, throwaway: true },
+      device,
+      { items: ['2'], frames: 2, sink },
+      cleanup,
+      (line) => {
+        printed.push(line);
+        if (line.startsWith('PASS 2 re-issued as a delegation')) {
+          interrupted = true;
+          signals.emit('SIGINT', 'SIGINT');
+        }
+      },
+      { signals, settleMs: 200, afterCleanupMs: 500 },
+    );
+    expect(status).toBe(130);
+    const text = printed.join('\n');
+    expect(text).toMatch(/^LEFT the check after cleanup failed: no answer within 0.5 s$/m);
+    expect(text).toMatch(/^acceptance: FAIL$/m);
+    expect(Date.now() - started).toBeLessThan(60_000);
+    expect((await provisioningKeys()).filter((k) => !k.revoked)).toEqual([]);
   }, 120_000);
 });

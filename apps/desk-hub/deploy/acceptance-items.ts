@@ -26,10 +26,14 @@ import { enrollDelegated, listing, retirement, type DelegationKey, type V2Machin
 import { importOrgKey, seal } from '../src/protocol/codes';
 import { delegationFor, type OrgStateView, type ProvisioningKeyIssued, type ProvisioningKeys } from '../src/protocol/identity';
 import type { LogEvent } from '../src/protocol/log';
-import type { Person } from './hub';
+import { settledWithin, type Person } from './hub';
 import { ADMIT_MS, successor, type OrgAdmin } from './org-admin';
-import { revoke, type Cleanup } from './proof';
+import { revoke, STEP_MS, type Cleanup } from './proof';
 import { readPush, userAgent, type PushSink } from './push-sink';
+
+/** How long a cleanup step waits for a creation still in flight to land before it looks for what it made: within the
+ * step's own bound, leaving it room for the lookup and the undo. */
+const CREATION_WAIT_MS = STEP_MS - 10_000;
 
 /** One line of the run: an item, its check, and how it went. */
 export type Line = { item: string; check: string; status: 'pass' | 'fail' | 'skip'; detail: string };
@@ -74,7 +78,7 @@ export type Context = {
   report: Report;
   tag: string;
   /** Names, delegations and provisioning keys the run made, for the check after cleanup. */
-  made: { machines: string[]; delegations: string[]; provisioningKeys: string[]; members: string[] };
+  made: { machines: string[]; delegations: string[]; provisioningPrefixes: string[]; members: string[] };
 };
 
 /** The listed machine items 3–6 share: its endpoint holds RL1 and has opened `project`. */
@@ -169,13 +173,23 @@ export async function delegation(ctx: Context): Promise<void> {
   let issued: ProvisioningKeyIssued | undefined;
   let delegated: DelegationKey | undefined;
   await report.check(item, 're-issued as a delegation', async () => {
-    issued = await person.json<ProvisioningKeyIssued>('/api/provisioning-keys', { body: { label: `o11 m8 acceptance ${tag}`, prefix, ttl_s: 3600, max_uses: 2, offline_revoke_s: null } }, 201);
-    const id = issued.key.id;
-    ctx.made.provisioningKeys.push(id);
-    cleanup.add(`revoke the provisioning key ${id}`, async () => {
-      const response = await person.fetch(`/api/provisioning-keys/${id}`, { method: 'DELETE' });
-      if (response.status !== 200 && response.status !== 404) throw new Error(`${response.status} ${await response.text()}`);
+    // Undone by the run's prefix, which is known before the key exists: an interrupt can come while the creation is in
+    // flight, the key made and its id not yet back. The undo waits for that creation within its bound, then revokes
+    // every key of the prefix the hub lists.
+    ctx.made.provisioningPrefixes.push(prefix);
+    const pending: { creation?: Promise<unknown> } = {};
+    cleanup.add(`revoke the provisioning key of prefix ${prefix}`, async () => {
+      if (pending.creation) await settledWithin(pending.creation, CREATION_WAIT_MS);
+      const { keys } = await person.json<ProvisioningKeys>('/api/provisioning-keys');
+      for (const key of keys.filter((k) => k.prefix === prefix && !k.revoked)) {
+        const response = await person.fetch(`/api/provisioning-keys/${key.id}`, { method: 'DELETE' });
+        if (response.status !== 200 && response.status !== 404) throw new Error(`${key.id}: ${response.status} ${await response.text()}`);
+      }
     });
+    const creation = person.json<ProvisioningKeyIssued>('/api/provisioning-keys', { body: { label: `o11 m8 acceptance ${tag}`, prefix, ttl_s: 3600, max_uses: 2, offline_revoke_s: null } }, 201);
+    pending.creation = creation;
+    issued = await creation;
+    const id = issued.key.id;
     delegated = { id, key: await generateSigningKey() };
     const kid = await keyId(delegated.key.pub);
     ctx.made.delegations.push(id);

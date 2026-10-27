@@ -47,6 +47,10 @@ export async function httpPushSink(port: number, publicBase: string): Promise<Pu
   return {
     endpoint: (name) => `${base.origin}${prefix}/${encodeURIComponent(name)}`,
     received: (endpoint) => bodies.get(new URL(endpoint).pathname) ?? [],
-    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.close(() => resolve());
+        server.closeAllConnections();
+      }),
   };
 }

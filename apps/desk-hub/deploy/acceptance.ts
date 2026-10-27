@@ -27,10 +27,10 @@ import { join } from 'node:path';
 import type { SignedOrgState } from 'org-protocol';
 import { readDeployConfig } from './config';
 import { deployArgs, readSecrets } from './deploy';
-import { Person } from './hub';
+import { Person, settledWithin } from './hub';
 import { connection, delegation, events, frames, lingering, members, push, Report, type Context, type Fixture } from './acceptance-items';
 import { loadAdminDevice, OrgAdmin, type AdminDevice, type OrgScope } from './org-admin';
-import { Cleanup, interruptible, isTestTarget, testOrgArg, type InterruptOptions } from './proof';
+import { Cleanup, interruptible, isTestTarget, STEP_MS, testOrgArg, type InterruptOptions } from './proof';
 import { httpPushSink, type PushSink } from './push-sink';
 import { connectEndpoint, echoingEndpoint } from './rl1';
 
@@ -62,7 +62,7 @@ export async function acceptance(
   options: AcceptanceOptions,
   cleanup: Cleanup,
   print: (line: string) => void = console.log,
-  made: Context['made'] = { machines: [], delegations: [], provisioningKeys: [], members: [] },
+  made: Context['made'] = { machines: [], delegations: [], provisioningPrefixes: [], members: [] },
 ): Promise<{ report: Report; made: Context['made'] }> {
   const report = new Report(print, cleanup.signal);
   const admin = await OrgAdmin.open(person, scope, device, print);
@@ -88,15 +88,19 @@ export async function acceptance(
 }
 
 /** After the cleanup: the head and the hub's lists read back, so the run shows it left none of its own current. */
-export async function afterCleanup(person: Person, made: Context['made']): Promise<string[]> {
-  const { head } = await person.json<{ head: SignedOrgState | null }>('/api/org/state');
+export async function afterCleanup(person: Person, made: Context['made'], signal?: AbortSignal): Promise<string[]> {
+  const { head } = await person.json<{ head: SignedOrgState | null }>('/api/org/state', { signal });
   const problems = head ? lingering(head.state, made) : [];
-  const { machines } = await person.json<{ machines: Array<{ name: string }> }>('/api/machines');
+  const { machines } = await person.json<{ machines: Array<{ name: string }> }>('/api/machines', { signal });
   problems.push(...machines.filter((m) => made.machines.includes(m.name)).map((m) => `the hub still holds the machine ${m.name}`));
-  const { keys } = await person.json<{ keys: Array<{ id: string; revoked?: string | null }> }>('/api/provisioning-keys');
-  problems.push(...keys.filter((k) => made.provisioningKeys.includes(k.id) && !k.revoked).map((k) => `the provisioning key ${k.id} is not revoked`));
+  const { keys } = await person.json<{ keys: Array<{ id: string; prefix: string; revoked?: string | null }> }>('/api/provisioning-keys', { signal });
+  problems.push(...keys.filter((k) => made.provisioningPrefixes.includes(k.prefix) && !k.revoked).map((k) => `the provisioning key ${k.id} (prefix ${k.prefix}) is not revoked`));
   return problems;
 }
+
+/** How long the steps after the cleanup may take, each: the push sink's close and the read-back, whose stalled reads
+ * are aborted at it, so an interrupted command still ends. */
+export const AFTER_CLEANUP_MS = STEP_MS;
 
 /**
  * The acceptance run as the command makes it, under `interruptible`: the items, then however the run ends (a signal
@@ -110,16 +114,19 @@ export function runAcceptance(
   options: AcceptanceOptions,
   cleanup: Cleanup,
   print: (line: string) => void = console.log,
-  interrupt: InterruptOptions = {},
+  { afterCleanupMs = AFTER_CLEANUP_MS, ...interrupt }: InterruptOptions & { afterCleanupMs?: number } = {},
 ): Promise<number> {
-  const made: Context['made'] = { machines: [], delegations: [], provisioningKeys: [], members: [] };
+  const made: Context['made'] = { machines: [], delegations: [], provisioningPrefixes: [], members: [] };
   return interruptible(
     cleanup,
     async () => ((await acceptance(person, scope, device, options, cleanup, print, made)).report.ok ? 0 : 1),
     async (status) => {
       const failed = await cleanup.run();
-      await options.sink?.close();
-      const left = await afterCleanup(person, made).catch((error: unknown) => [`the check after cleanup failed: ${error instanceof Error ? error.message : String(error)}`]);
+      const closing = options.sink?.close();
+      if (closing) await settledWithin(closing, afterCleanupMs);
+      const left = await afterCleanup(person, made, AbortSignal.timeout(afterCleanupMs)).catch((error: unknown) => [
+        `the check after cleanup failed: ${error instanceof Error && error.name === 'TimeoutError' ? `no answer within ${afterCleanupMs / 1000} s` : error instanceof Error ? error.message : String(error)}`,
+      ]);
       for (const line of left) print(`LEFT ${line}`);
       if (left.length === 0) print('cleanup: the head lists none of the run’s members, machines or delegations, the hub holds none of its machines, and its provisioning key is revoked');
       const code = failed.length || left.length ? 1 : status;
