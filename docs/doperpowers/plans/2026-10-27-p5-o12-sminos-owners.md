@@ -1160,4 +1160,9 @@ The joint review's second round (`9be0bc941`), 2026-10-27, two P1s, both reprodu
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+Phase 2's code milestones, 2026-10-27 (interim; the phase closes with M7b and M9).
+
+- **What landed.** M7a (#404, 1.20.0), M5 (#405, 1.21.0), M8 (#406, 1.23.0), M6 (#407, 1.24.0), M7 (#408, 1.25.0), and the closing review's fixes (#409, `09e85c00`, 1.25.1), all on doperpowers main. A machine without a complete RL10 welcome runs exactly as before; the owner's Macs, auto-updated through each, were never cut over.
+- **Review.** Every milestone met its rung; eleven findings across the milestone rounds and four in the closing pass, every one reproduced before it was fixed and pinned by a regression test. The milestone reviews caught each milestone's own defects (a rename double-running an op, revocation bypasses, a cutover race, unbounded and misordered batches); the closing pass caught what none of them could see alone: that member records must reach the endpoint before the uploads it signs from them, and that every producer on the one socket lane must be paced. Both are properties of the lane as a whole, which no single milestone owned.
+- **What changed in the design while building.** The owner's guard (cut over only on a complete identity, DX2 kept up beside a probe until then), `hub` added to the identity, the chat label's `(unverified)` limited to events after the cutover, the launch carried beside `bridge` rather than under it, and M7b for RL10's three joint frames.
+- **Open.** M7b (the three frames and the conformance replay, after O10 M6), M9 (the mini, after O14; it measures the words pass's cost first), M4 and O8's record actions (blocked). Residue: truncating a raised request's `input` at the daemon (one frame over 16 MiB closes the lane), and the flaky core assertion "v2 desc became brief".
