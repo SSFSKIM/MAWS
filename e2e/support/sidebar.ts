@@ -3,6 +3,8 @@
 // that reaches a session's row expands its project first; the project comes from the session's own record
 // (`session.list`), so a test names only the session.
 import { expect, type Locator, type Page } from '@playwright/test';
+import { addressOf } from '../../src/shared/machine/address';
+import type { MachineRef } from '../../src/shared/machine/ref';
 import { addressed } from './address';
 import { clickRevealed } from './hover';
 
@@ -72,29 +74,32 @@ export async function newChatIn(page: Page, name: string): Promise<void> {
 export type SessionMatch = string | { appSessionId: string };
 
 // The row of a session, its project expanded first, and its project's "Show more" opened when the row is past the first
-// five. A session past the eighth is the Resume… picker's, not the tree's.
-export async function sidebarRow(page: Page, match: SessionMatch): Promise<Locator> {
-  const bare = await page.evaluate(async (match) => {
-    const [sessions, projects] = await Promise.all([window.maws.invoke('session.list', { includeArchived: true }), window.maws.invoke('session.projects.list', undefined)]);
+// five. A session past the eighth is the Resume… picker's, not the tree's. P5 O6 M4: `machine` names another machine's
+// session, read through the raw bridge on that machine (a `{ appSessionId }` match is then that machine's bare id).
+export async function sidebarRow(page: Page, match: SessionMatch, machine?: MachineRef): Promise<Locator> {
+  const bare = await page.evaluate(async ([match, machine]) => {
+    const on = (machine ?? undefined) as never;
+    const [sessions, projects] = await Promise.all([window.maws.invoke('session.list', { includeArchived: true }, on), window.maws.invoke('session.projects.list', undefined, on)]);
     if (!sessions.ok || !projects.ok) throw new Error('session.list or session.projects.list failed');
     const record = sessions.value.sessions.find((r) => (typeof match === 'string' ? r.title.text === match : r.appId === match.appSessionId));
     if (!record) throw new Error(`no session ${JSON.stringify(match)}`);
     const project = projects.value.projects.find((p) => p.id === record.projectId);
     if (project?.discovered && !project.hidden) {
-      const added = await window.maws.invoke('session.projects.add', { directory: project.directory });
+      const added = await window.maws.invoke('session.projects.add', { directory: project.directory }, on);
       if (!added.ok) throw new Error(added.error.message);
     }
     return project ? project.id : 'other';
-  }, match);
+  }, [match, machine ?? null] as const);
   // The page's tree ids hold addresses; the raw bridge answered bare ids.
-  const key = bare === 'other' ? bare : await addressed(page, bare);
+  const address = async (id: string) => (machine === undefined ? addressed(page, id) : addressOf(machine, id));
+  const key = bare === 'other' ? bare : await address(bare);
   await showProjectList(page);
   const project = sidebarOf(page).locator(`[data-kind="project"][data-tree-id="p:${key}"]`);
   await expandRow(page, project);
   const row =
     typeof match === 'string'
       ? project.getByRole('treeitem', { name: match, exact: true })
-      : project.locator(`[role="treeitem"][data-menu="session:${await addressed(page, match.appSessionId)}"]`);
+      : project.locator(`[role="treeitem"][data-menu="session:${await address(match.appSessionId)}"]`);
   const more = project.locator(`[data-tree-id="more:${key}"]`);
   if ((await row.count()) === 0 && (await more.count()) > 0) {
     await more.click();
