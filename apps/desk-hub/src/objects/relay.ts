@@ -13,6 +13,12 @@
 // fence carries nothing more (`live`). The name's object delivers its supersessions and revocations until they are
 // taken (machine.ts's owed calls).
 //
+// A fence orders one name's generations; it cannot order two names', whose counters are apart. So each upgrade takes
+// this object's next arrival number before its claim is asked, and the newest install keeps its name and the highest
+// arrival installed (`installed`): a claim answered after a connection of another name that reached this object later
+// has installed is refused, never installed, as a claim under its own name's fence is. An upgrade the Worker admitted
+// under the old name before a rename thus cannot displace the renamed endpoint's connection.
+//
 // Over the endpoint's socket travel DX2's log plane (each project's frames handed to it through `Project.fromMachine`,
 // as DX2's POSTs are), `hb`/`hb-ack` with the lease, the machine's signed `listing` and `endpoint` records and its
 // `notify` (to the Registry), the `state` notice, and the channel multiplex. An app's socket carries channels only.
@@ -67,6 +73,8 @@ type Attachment = EndpointAttachment | AppAttachment;
 type Opened = { org: string; name: string; client: string; generation: number; projects: string[] };
 /** A name's fence: the lowest generation of it that may install, and why the ones below may not. */
 type Fence = { from: number; cause: 'replaced' | 'revoked' };
+/** The newest install's name, and the highest arrival number (`arrival-seq`) any install held. */
+type Installed = { name: string; arrival: number };
 
 /** Close codes of the sockets: the endpoint's when a newer connection or a revocation ends it, or when a frame's parts
  * were lost to an eviction (send it again), either kind's for a message over 1 MiB, or for a frame out of order. */
@@ -138,7 +146,8 @@ export class Relay {
 
   /** The endpoint's socket: the next generation, drawn from the machine's name-addressed object, which refuses a revoked
    * credential and ends the machine's DX2 stream; installed unless its name's fence passed it while the claim was
-   * answered, and then it ends the connection before it here, whatever that one's name, with its channels. */
+   * answered, or a later upgrade of another name installed meanwhile, and then it ends the connection before it here,
+   * whatever that one's name, with its channels. */
   async endpoint(request: Request): Promise<Response> {
     if (request.headers.get('Upgrade') !== 'websocket') return json(426, { error: 'upgrade-required' });
     const org = request.headers.get(ORG_HEADER) ?? '';
@@ -146,6 +155,8 @@ export class Relay {
     const client = request.headers.get(CLIENT_HEADER) ?? '';
     const ref = request.headers.get(REF_HEADER) ?? '';
     this.kv.put('ref', ref);
+    const arrival = (this.kv.get<number>('arrival-seq') ?? 0) + 1;
+    this.kv.put('arrival-seq', arrival);
     let claimed: { generation: number } | { refused: 'revoked' };
     try {
       claimed = await this.named(org, name).claimGeneration(org, name, ref, client);
@@ -163,6 +174,11 @@ export class Relay {
         ? json(403, { error: 'not-enrolled', message: 'this credential was revoked' })
         : json(409, { error: 'stale-generation', message: 'a newer connection of this machine opened meanwhile' });
     }
+    // While the claim was answered, a connection of another name (the machine renamed) that came after this one installed.
+    const installed = this.kv.get<Installed>('installed');
+    if (installed && installed.name !== name && installed.arrival > arrival) {
+      return json(409, { error: 'stale-generation', message: 'a newer connection of this machine opened meanwhile' });
+    }
     const before = this.current();
     const conn = (this.kv.get<number>('conn-seq') ?? 0) + 1;
     this.kv.put('conn-seq', conn);
@@ -173,6 +189,7 @@ export class Relay {
     this.kv.put('endpoint', { conn, generation, org, name, client, welcomed: false } satisfies Current);
     this.kv.put(projectsKey(conn), { org, name, client, generation, projects: [] } satisfies Opened);
     this.raiseFence(name, generation, 'replaced');
+    this.kv.put('installed', { name, arrival: Math.max(arrival, installed?.arrival ?? 0) } satisfies Installed);
     if (before) {
       this.raiseFence(before.name, before.generation + 1, 'replaced');
       this.retire(before, CLOSE.replaced, 'replaced');

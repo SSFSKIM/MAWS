@@ -245,6 +245,35 @@ describe('a rename that keeps the ref and key', () => {
   });
 });
 
+describe('an old name’s claim in flight across a rename', () => {
+  it('is not installed over the new name’s connection that installed while it was answered', async () => {
+    const machine = await listed('rn-held-old');
+    const first = endpointOf(machine);
+    expect((await first.connect()).generation).toBe(1);
+    // The old name's next claim is granted (generation 2) and its answer held: an upgrade admitted before the rename.
+    await hub.holdClaim(machine.name);
+    const late = endpointOf(machine);
+    const connecting = late.connect();
+    await waitFor(async () => ((await hub.claimHeld(machine.name)) ? true : undefined));
+    await accept((s) => {
+      s.machines.find((m) => m.ref === machine.ref)!.name = 'rn-held-new';
+      s.machineNames.push({ name: 'rn-held-new', ref: machine.ref });
+    });
+    const renamed = await v2('rn-held-new', { ref: machine.ref, key: machine.key });
+    const now = endpointOf(renamed);
+    expect((await now.connect()).generation).toBe(1);
+    await waitFor(() => (first.ends.length > 0 ? true : undefined));
+    const app = await appOf(machine.ref);
+    const channel = await app.openChannel();
+    await waitFor(() => (now.channels.has(channel) ? true : undefined));
+    await hub.releaseClaim(machine.name);
+    await expect(connecting).rejects.toThrow();
+    await sleep(200);
+    expect(now.ends).toEqual([]);
+    expect(app.closes.find((c) => c.channel === channel)).toBeUndefined();
+  });
+});
+
 describe('a session-plane frame for an RL1 machine', () => {
   it('is refused to its sender, and the log plane keeps flowing', async () => {
     const machine = await listed('rl1-only');
