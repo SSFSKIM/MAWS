@@ -970,6 +970,9 @@ No new dependency. zod 4, Node's `crypto`, the peer-auth addon already in the tr
   Evidence: e2e:terminal, e2e:side test 2 and e2e:default's dashboard cases, each red before M2's fixes (`task-2-report.md`, M2's workspace).
 - Observation: a transcript path chip opens its file tab with `appSessionId: null` (pre-O6), so `machineFor(null)` gives the local machine even for another machine's transcript; and `shell/transfer.ts`'s `panelRecordOf` compares artifact ids only. Both hold with one machine and are M4's to carry the machine through.
 - Observation: OX7's bench at M2's head (`f9e802d2a`, run 40507512064, load 5.5) read delta to frame p50 25.8 / p95 37.7 ms and round trip 1.0 / 1.3 ms, against ceilings of 26.45 / 42.56 and 2.9 / 6.3 ms. The p50 margin is 0.65 ms at that load; an earlier M2 run at load 2.3 (`c76459b4b`, 40501668478) read 24.3 ms. Later milestones add work on the delta path only through the stores, so the head's bench is the one to watch.
+- Observation: every `internal`-graded command is also main-only at this base, so the link surface's "no `internal` one" and "no main-only one" pick the same commands: 291 of the registry's 399 cross a link.
+- Observation: the host runtime's `emit` refuses events outside `HOST_EVENTS` only when it serves `engine-host`, so a `machine`-owner runtime over the link registry can emit every link event, as the stand-in needs.
+- Observation: a new class-1 e2e group off `HOSTED_MAC_E2E` moves three gate-script pins: `ci-gate-pool-demand.test.mjs`'s hosted-lane waiter count, `e2e-default-specs.test.mjs`'s bare spec count (twice), and `gate-plan.test.mjs`'s raw time-bound walker, which reads `git ls-files` and so sees a new spec's bound only once it is staged.
 
 ## Decision Log
 
@@ -1021,6 +1024,18 @@ No new dependency. zod 4, Node's `crypto`, the peer-auth addon already in the tr
   - The task review's round: a unit test per synthetic pty owner follows it from its producer, through the real Terminal tool and registry where it goes through them, to the bare owner and local machine `pty.spawn` reaches (`src/renderer/src/terminal/synthetic-owners.test.ts`).
   - Side case 11 ("pinned under the heading after the Reload") failed in the mini's e2e:default at M2's head and passed at the base (run 40514243088). The trace showed the document bridge measuring the anchor before the reloaded page's viewport had a width. The bridge (`src/main/artifacts/bridge-script.ts`) now waits for a sized viewport and measures again on resize. It is a latent race outside M2's area; why M2's head exposed it under load was not shown.
   Date/Author: 2026-10-27, O6's executor (controller), from M2's executor.
+
+- Decision: M3's executor's calls, folded at M3.
+  - Interfaces beyond the block: `MachineLink` gains `name` and `onState(listener)`, and `ConnectionManager` gains `close()`. `createConnectionManager`'s deps gain `connect(dir)` and `log`. `serveMachineStandIn` takes `router: Pick<Router, 'dispatchLocal'>`, `build` and an optional `registry`, and returns `{ ready, close }`; a bad serve directory throws synchronously, naming the path.
+  - Composition: `src/main/machines/index.ts` (`startMachines`), outside M3's Touches, keeps `src/main/index.ts`'s addition to one call. The links start before `installRouter`. The stand-in starts last, after every handler is registered. The router's non-local branch is `RouterOptions.remote`; a `client` command for another machine is still refused before it.
+  - Link states: `connecting` lasts only until the first attempt settles, and retries stay `down`, so `machines.changed` doesn't flap every second. A `refuse replaced` leaves the link down with no retry, so two apps don't keep replacing each other on a one-client server. A command off the link surface answers `host_unavailable` without being sent.
+  - Generations: a non-local link's generation goes up when it turns `up` (after its welcome's `machine.identity`), and the link posts `ready` only after the manager has sent `machines.changed`, so no event of a new connection precedes its generation.
+  - Safety at the edges: the socket link checks the socket with O2's `assertPrivateSocket` (`src/shared/host/private-path.ts`) before it reads the token or connects. The stand-in refuses a serve directory owned by another uid, as well as a symlink, and a socket path over 103 bytes, rather than falling back to a temporary path.
+  - Known machines: a malformed `known-machines.json` is logged and read as empty, since it is a cache. An entry naming the local ref is dropped. A link whose far ref is the local machine's, or a machine another directory already reaches, is logged and closed. `MAWS_LOCAL_MACHINES` skips a relative entry with a log line, normalises trailing slashes, and drops duplicates.
+  - The stand-in's welcome counts come from tapping `host.supervisorStatus`; they are 0 until one is emitted, which never happens in utility mode. The build string on both sides is `<version>+<commit>` from `MAIN_BUILD`.
+  - `ownerChannel.changed` is a link event (its payload is `{ appSessionId, state }`); `machines.changed` is an app event.
+  - `e2e:machines` joins `CLASS1_E2E` only. Its 2 s departure bound is asserted on `MachineState.since` against B's process exit and listed in `gate-plan.test.mjs`'s `LIVENESS_BOUNDS`.
+  Date/Author: 2026-10-27, O6's executor (controller), from M3's executor.
 
 - Decision: the verification.
   - This document gets one `doperpowers:adversarial-reviewer` buildability review before execution (P5 Decision Log 12).
