@@ -162,12 +162,12 @@ async function member(request: Request, url: URL, env: Env, registry: DurableObj
   if (provisioningKey && method === 'DELETE') return answer(await registry.revokeProvisioningKey(you, decodeURIComponent(provisioningKey[1])));
   if (pathname === ORG_STATE_PATH && method === 'GET') return answer(await registry.orgState(url.searchParams.get('since')));
   if (pathname === ORG_STATE_PATH && method === 'POST') return answer(await registry.submitState(you, await body(request, STATE_LIMIT)), 201);
-  if (pathname === ORG_TRANSITIONS_PATH && method === 'POST') return answer(await registry.submitTransition(await body(request)), 201);
-  if (pathname === PENDING_DEVICES_PATH && method === 'GET') return json(200, await registry.pendingDevices(you));
+  if (pathname === ORG_TRANSITIONS_PATH && method === 'POST') return answer(await registry.submitTransition(you, await body(request)), 201);
+  if (pathname === PENDING_DEVICES_PATH && method === 'GET') return answer(await registry.pendingDevices(you));
   if (pathname === PENDING_DEVICES_PATH && method === 'POST') return answer(await registry.keepPendingDevice(you, await body(request)), 201);
   if (pathname === PUSH_KEY_PATH && method === 'GET') return json(200, await registry.pushKey());
   if (pathname === PUSH_SUBSCRIPTIONS_PATH) {
-    if (method === 'GET') return json(200, await registry.pushSubscriptions(you));
+    if (method === 'GET') return answer(await registry.pushSubscriptions(you));
     if (method === 'PUT') return answer(await registry.keepPushSubscription(you, await body(request)));
     if (method === 'DELETE') return answer(await registry.deletePushSubscription(you, await body(request)));
   }

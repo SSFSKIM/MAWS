@@ -68,7 +68,7 @@ import { OrgChain } from './org-chain';
 import { OrgKeys, type StoredKey } from './org-keys';
 import { described } from './project';
 import { checkRequest, ProvisioningKeys, type KeyRow } from './provisioning-keys';
-import { lacksMethod, RETRY_ATTEMPTS, RETRY_BASE_MS, retryDelay } from './retry';
+import { lacksMethod, RETRY_ATTEMPTS, RETRY_BASE_MS, RETRY_CAP_MS, retryDelay } from './retry';
 
 export type Principal = { kind: 'member'; org: OrgRecord; member: MemberRecord } | { kind: 'machine'; org: OrgRecord; machine: MachineRecord };
 
@@ -99,6 +99,8 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 CREATE TABLE IF NOT EXISTS summaries (
   project TEXT PRIMARY KEY, machines INTEGER NOT NULL, machines_online INTEGER NOT NULL, working INTEGER NOT NULL,
   waiting INTEGER NOT NULL, report_seq INTEGER, live INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS announcements (
+  project TEXT PRIMARY KEY, version INTEGER NOT NULL, members TEXT NOT NULL, attempts INTEGER NOT NULL, due INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS machine_states (
   project TEXT NOT NULL, name_key TEXT NOT NULL, client TEXT NOT NULL, online INTEGER NOT NULL,
   PRIMARY KEY (project, name_key, client));
@@ -223,15 +225,16 @@ export class Registry extends DurableObject<Env> {
 
   /** A one-time token for an admin to build an enrollment code from; the hub keeps only its hash. */
   async createEnrollment(member: MemberRecord, body: unknown): Promise<Result<EnrollmentIssued>> {
-    if (member.role !== 'admin') return fail(403, 'not-admin');
+    const token = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
+    const hash = await sha256(token);
+    const admin = this.current(member, 'admin');
+    if (!admin.ok) return admin;
     const ttl = typeof body === 'object' && body !== null ? ((body as { ttl_s?: unknown }).ttl_s ?? ENROLLMENT_TTL_S) : undefined;
     if (typeof ttl !== 'number' || !Number.isInteger(ttl) || ttl < 1 || ttl > MAX_ENROLLMENT_TTL_S) {
       return fail(400, 'bad-shape', `the body is {ttl_s?}, a whole number of seconds from 1 to ${MAX_ENROLLMENT_TTL_S}`);
     }
-    const token = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
-    const hash = await sha256(token);
     const now = Date.now();
-    const enrollment: EnrollmentRecord = { id: newId(), created_by: member.id, created: iso(now), expires: iso(now + ttl * 1000), state: 'open', machine: null };
+    const enrollment: EnrollmentRecord = { id: newId(), created_by: admin.value.id, created: iso(now), expires: iso(now + ttl * 1000), state: 'open', machine: null };
     this.sql.exec(
       "INSERT INTO enrollments (id, token_hash, created_by, created, expires, ttl_s, state, machine) VALUES (?, ?, ?, ?, ?, ?, 'open', NULL)",
       enrollment.id,
@@ -247,11 +250,13 @@ export class Registry extends DurableObject<Env> {
 
   /** A provisioning key for an admin to build a provisioning code from; the hub keeps only its secret's hash. */
   async createProvisioningKey(member: MemberRecord, body: unknown): Promise<Result<ProvisioningKeyIssued>> {
-    if (member.role !== 'admin') return fail(403, 'not-admin');
+    const token = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
+    const hash = await sha256(token);
+    const admin = this.current(member, 'admin');
+    if (!admin.ok) return admin;
     const request = checkRequest(body);
     if (!request.ok) return fail(400, 'bad-shape', request.message);
-    const token = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
-    const key = this.provisioning.add(member, request.value, newId(), await sha256(token), Date.now());
+    const key = this.provisioning.add(admin.value, request.value, newId(), hash, Date.now());
     return ok({ key, token });
   }
 
@@ -261,7 +266,8 @@ export class Registry extends DurableObject<Env> {
 
   /** Stops new enrollments through the key; the machines it enrolled stay. A second revocation keeps the first's time. */
   revokeProvisioningKey(member: MemberRecord, id: string): Result<ProvisioningKeyRevoked> {
-    if (member.role !== 'admin') return fail(403, 'not-admin');
+    const admin = this.current(member, 'admin');
+    if (!admin.ok) return admin;
     return this.provisioning.revoke(id, iso(Date.now())) ? ok({ revoked: id }) : fail(404, 'unknown-key');
   }
 
@@ -411,7 +417,9 @@ export class Registry extends DurableObject<Env> {
 
   /** An admin's removal of a machine: whatever holds the name now (`revokeMachine`). */
   async revoke(member: MemberRecord, name: string): Promise<Result<{ revoked: string }>> {
-    if (member.role !== 'admin') return fail(403, 'not-admin');
+    // Checked in the step that begins the revocation (its first await is the fence at the machine's object).
+    const admin = this.current(member, 'admin');
+    if (!admin.ok) return admin;
     if (this.sql.exec('SELECT 1 FROM machines WHERE name_key = ?', machineNameKey(name)).toArray().length === 0) return fail(404, 'unknown-machine');
     return ok(await this.revokeMachine(name));
   }
@@ -718,6 +726,8 @@ export class Registry extends DurableObject<Env> {
 
   /** Keeps a member device's subscription, keyed by its endpoint (a device subscribing again replaces its keys). */
   keepPushSubscription(member: MemberRecord, body: unknown): Result<{ subscription: PushSubscriptionRecord }> {
+    const held = this.current(member);
+    if (!held.ok) return held;
     const b = (typeof body === 'object' && body !== null ? body : {}) as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } };
     const endpoint = b.endpoint;
     let url: URL | undefined;
@@ -745,13 +755,17 @@ export class Registry extends DurableObject<Env> {
 
   /** Forgets one of the member's own subscriptions. */
   deletePushSubscription(member: MemberRecord, body: unknown): Result<{ deleted: boolean }> {
+    const held = this.current(member);
+    if (!held.ok) return held;
     const endpoint = typeof body === 'object' && body !== null ? (body as { endpoint?: unknown }).endpoint : undefined;
     if (typeof endpoint !== 'string') return fail(400, 'bad-shape', 'the body is {endpoint}');
     return ok({ deleted: this.sql.exec('DELETE FROM push_subscriptions WHERE endpoint = ? AND member = ?', endpoint, member.id).rowsWritten > 0 });
   }
 
-  pushSubscriptions(member: MemberRecord): { subscriptions: PushSubscriptionRecord[] } {
-    return { subscriptions: this.subscriptionsOf([member.id]) };
+  pushSubscriptions(member: MemberRecord): Result<{ subscriptions: PushSubscriptionRecord[] }> {
+    const held = this.current(member);
+    if (!held.ok) return held;
+    return ok({ subscriptions: this.subscriptionsOf([member.id]) });
   }
 
   /**
@@ -802,7 +816,8 @@ export class Registry extends DurableObject<Env> {
   /** Names the one machine that writes the project's git archive (DX2's `have.archive` tells it at its next `hello`), or
    * clears it. */
   designateArchive(member: MemberRecord, id: string, body: unknown): Result<{ project: ProjectRecord }> {
-    if (member.role !== 'admin') return fail(403, 'not-admin');
+    const admin = this.current(member, 'admin');
+    if (!admin.ok) return admin;
     const machine = typeof body === 'object' && body !== null ? (body as { machine?: unknown }).machine : undefined;
     if (!(machine === null || typeof machine === 'string')) return fail(400, 'bad-shape', 'the body is {machine}, a name or null');
     if (!this.project(id)) return fail(404, 'unknown-project');
@@ -816,7 +831,8 @@ export class Registry extends DurableObject<Env> {
     return ok({ project: this.project(id)! });
   }
 
-  /** Expired enrollments, orphaned tokens, and revocations projects have not taken, swept when their time comes. */
+  /** Expired enrollments, orphaned tokens, revocations and state announcements projects have not taken, swept when
+   * their time comes. */
   async alarm(): Promise<void> {
     await this.sweep();
   }
@@ -849,6 +865,7 @@ export class Registry extends DurableObject<Env> {
     const live = this.sql.exec<EnrollmentRow>(`SELECT ${ENROLLMENT_COLUMNS} FROM enrollments WHERE state IN ('open', 'pending')`).toArray();
     for (const enrollment of live) if (lapsed(enrollment, now) && !this.busy.has(enrollment.id)) this.expire(enrollment);
     await this.sweepOffline(now);
+    this.sweepAnnouncements(now);
     await this.sweepRevocations();
     await this.sweepOrphans();
     await this.scheduleAlarm();
@@ -960,6 +977,8 @@ export class Registry extends DurableObject<Env> {
     for (const { enrollment, deadline } of this.offlineDeadlines()) if (!this.unfinished.has(enrollment)) next.push(deadline);
     for (const { began } of this.unfinished.values()) next.push(began + this.offlineRetryMs());
     if (this.sql.exec('SELECT 1 FROM orphans UNION ALL SELECT 1 FROM revocations LIMIT 1').toArray().length > 0) next.push(now + RETRY_MS);
+    const announcement = this.sql.exec<{ due: number | null }>('SELECT MIN(due) AS due FROM announcements').one().due;
+    if (announcement !== null) next.push(announcement);
     if (next.length === 0) return;
     const at = Math.max(Math.min(...next), now + 250);
     const current = await this.ctx.storage.getAlarm();
@@ -1028,42 +1047,94 @@ export class Registry extends DurableObject<Env> {
         // already closing
       }
     }
-    const members = this.sql.exec<{ id: string }>('SELECT id FROM members ORDER BY id').toArray().map((m) => m.id);
-    for (const { id } of this.sql.exec<{ id: string }>('SELECT id FROM projects').toArray()) this.announce(org.id, id, version, members, 1);
+    // Stored in the step that accepted the state (no await between), so a reset never loses one; a project still owed
+    // an older version is owed this one instead, which carries everything the older one did.
+    const members = JSON.stringify(this.sql.exec<{ id: string }>('SELECT id FROM members ORDER BY id').toArray().map((m) => m.id));
+    const due = Date.now() + this.retryBaseMs();
+    const projects = this.sql.exec<{ id: string }>('SELECT id FROM projects').toArray();
+    for (const { id } of projects) {
+      this.sql.exec(
+        'INSERT INTO announcements (project, version, members, attempts, due) VALUES (?, ?, ?, 0, ?) ON CONFLICT (project) DO UPDATE SET version = excluded.version, members = excluded.members, attempts = 0, due = excluded.due WHERE excluded.version > announcements.version',
+        id,
+        version,
+        members,
+        due,
+      );
+    }
+    for (const { id } of projects) void this.announce(org.id, { project: id, version, members });
+    await this.scheduleAlarm();
     return ok({ version });
   }
 
   /**
-   * Tells a project the org state advanced to `version`, holding `members` (`Project.stateAdvanced`), `attempt` being
-   * how many times it was told; a call that fails is sent again as retry.ts says. A project still on the code before
-   * the announcement lacks the method: it holds no cached state to refresh, and is taken as told.
+   * Tells a project the org state advanced to `version`, holding `members` (`Project.stateAdvanced`). The announcement
+   * stays stored until the project answers, or a newer one replaces it; one that fails is sent again by the alarm, its
+   * wait growing as retry.ts's does, up to a minute, for as long as it takes: a project that never hears of a removal
+   * would keep serving the removed member. A project still on the code before the announcement lacks the method: it
+   * holds no state to refresh, and its sockets go at its code update, so it is taken as told.
    */
-  private announce(org: string, project: string, version: number, members: string[], attempt: number): void {
-    void this.env.PROJECT.get(this.env.PROJECT.idFromName(`${org}:${project}`))
-      .stateAdvanced(version, members)
-      .catch((error: unknown) => {
-        if (lacksMethod(error, 'stateAdvanced')) return;
-        const wait = attempt < RETRY_ATTEMPTS ? retryDelay(attempt, this.retryBaseMs(), error) : null;
-        console.log(JSON.stringify({ desk: 'registry', event: 'announce-failed', project, version, attempt, error: described(error), retry_ms: wait === null ? null : Math.round(wait) }));
-        if (wait !== null) setTimeout(() => this.announce(org, project, version, members, attempt + 1), wait);
-      });
+  private async announce(org: string, owed: { project: string; version: number; members: string }): Promise<void> {
+    const { project, version } = owed;
+    let failure: { error: unknown } | null = null;
+    try {
+      await this.env.PROJECT.get(this.env.PROJECT.idFromName(`${org}:${project}`)).stateAdvanced(version, JSON.parse(owed.members) as string[]);
+    } catch (error) {
+      if (!lacksMethod(error, 'stateAdvanced')) failure = { error };
+    }
+    if (failure === null) {
+      this.sql.exec('DELETE FROM announcements WHERE project = ? AND version = ?', project, version);
+      return;
+    }
+    const row = this.sql.exec<{ attempts: number }>('SELECT attempts FROM announcements WHERE project = ? AND version = ?', project, version).toArray()[0];
+    if (!row) return;
+    const attempt = row.attempts + 1;
+    const wait = retryDelay(Math.min(attempt, RETRY_ATTEMPTS), this.retryBaseMs(), failure.error);
+    this.sql.exec('UPDATE announcements SET attempts = ?, due = ? WHERE project = ? AND version = ?', attempt, Date.now() + wait, project, version);
+    console.log(JSON.stringify({ desk: 'registry', event: 'announce-failed', project, version, attempt, error: described(failure.error), retry_ms: Math.round(wait) }));
+    await this.scheduleAlarm();
+  }
+
+  /** Sends again every announcement whose time has come, not waiting for the answers (a redemption sweeps too); one in
+   * flight waits a minute before it is sent again, unless its answer says otherwise first. */
+  private sweepAnnouncements(now: number): void {
+    const due = this.sql.exec<{ project: string; version: number; members: string }>('SELECT project, version, members FROM announcements WHERE due <= ?', now).toArray();
+    if (due.length === 0) return;
+    const org = this.ensureOrg().id;
+    for (const owed of due) this.sql.exec('UPDATE announcements SET due = ? WHERE project = ? AND version = ?', now + RETRY_CAP_MS, owed.project, owed.version);
+    for (const owed of due) void this.announce(org, owed);
   }
 
   /** A root transition the recovery key signed against the head (`OrgChain.submitTransition`). */
-  async submitTransition(body: unknown): Promise<Result<TransitionAccepted>> {
+  async submitTransition(member: MemberRecord, body: unknown): Promise<Result<TransitionAccepted>> {
     if (body === undefined) return fail(400, 'bad-shape', 'the body is a signed RootTransition, {body, sig}');
     this.ensureOrg();
-    return this.chain.submitTransition(body);
+    return this.chain.submitTransition(body, member);
   }
 
   /** A new device's pairing entry, posted as its member (`OrgChain.keepPending`). */
   keepPendingDevice(member: MemberRecord, body: unknown): Result<{ pending: PendingDevice }> {
+    const held = this.current(member);
+    if (!held.ok) return held;
     return this.chain.keepPending(member.id, body);
   }
 
   /** The member's pairing entries, for their devices to approve. */
-  pendingDevices(member: MemberRecord): PendingDevices {
-    return { pending: this.chain.pending(member.id) };
+  pendingDevices(member: MemberRecord): Result<PendingDevices> {
+    const held = this.current(member);
+    if (!held.ok) return held;
+    return ok({ pending: this.chain.pending(member.id) });
+  }
+
+  /**
+   * `member` as the members table holds them now. The Worker resolved them before it read the request's body, and a
+   * state accepted since may have removed or demoted them, so every change the Registry makes for a member checks
+   * here, in the synchronous step of the change itself (after the method's last await): no state comes between.
+   */
+  private current(member: MemberRecord, role?: 'admin'): Result<MemberRecord> {
+    const now = this.sql.exec<MemberRecord>('SELECT id, email, role, created FROM members WHERE id = ?', member.id).toArray()[0];
+    if (!now) return fail(403, 'not-a-member', 'the org state no longer lists you');
+    if (role === 'admin' && now.role !== 'admin') return fail(403, 'not-admin');
+    return ok(now);
   }
 
   // ---- The org key's wrapped copies (DX7) ----------------------------------------------------------------------
@@ -1074,19 +1145,22 @@ export class Registry extends DurableObject<Env> {
 
   /** Adds a wrapped key; the first sets the org's `key_check` and `key_auth` in the same step as its insert. */
   async addOrgKey(member: MemberRecord, body: unknown): Promise<Result<{ key: StoredKey }>> {
-    if (member.role !== 'admin') return fail(403, 'not-admin');
     const authHash = await this.authHash(body);
-    // From here to the insert, nothing else runs in this object: two first posts cannot both set the check.
+    // From here to the insert, nothing else runs in this object: two first posts cannot both set the check, and no
+    // state can demote the admin between the check and the insert.
+    const admin = this.current(member, 'admin');
+    if (!admin.ok) return admin;
     const org = this.ensureOrg();
     const keyAuth = this.keyAuth();
     const setOrg = (check: string, auth: string) => this.sql.exec('UPDATE org SET key_check = ?, key_auth = ?', check, auth);
-    const added = this.keys.add(member, body, { keyCheck: org.key_check, keyAuth }, authHash, setOrg, newId(), iso(Date.now()));
+    const added = this.keys.add(admin.value, body, { keyCheck: org.key_check, keyAuth }, authHash, setOrg, newId(), iso(Date.now()));
     return added.ok ? ok({ key: added.value }) : fail(added.status, added.error, added.message);
   }
 
   async removeOrgKey(member: MemberRecord, id: string, body: unknown): Promise<Result<WrappedKeyRemoved>> {
-    if (member.role !== 'admin') return fail(403, 'not-admin');
     const authHash = await this.authHash(body);
+    const admin = this.current(member, 'admin');
+    if (!admin.ok) return admin;
     const removed = this.keys.remove(id, this.keyAuth(), authHash);
     return removed.ok ? ok({ removed: removed.value }) : fail(removed.status, removed.error, removed.message);
   }

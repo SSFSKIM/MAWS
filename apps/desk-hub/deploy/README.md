@@ -57,8 +57,9 @@ repository:
 | Name | What it is | Used by |
 | --- | --- | --- |
 | `CF_ACCESS_SETUP_TOKEN` | An API token with Access: Apps and Policies Edit, Service Tokens Edit, Organizations Read | `deploy`, `redeploy-check`, `access-sync` |
+| `DESK_MACHINE_CLIENT_ID`, `DESK_MACHINE_CLIENT_SECRET` | The service token of a machine enrolled in the deployment's org | `access-sync` |
 | `CF_DESK_HUB_SERVICE_TOKENS` | An API token with Access: Service Tokens Edit only. It becomes the Worker's `CF_API_TOKEN` secret, with which the hub mints and deletes machines' service tokens | `deploy`, `probe`, `redeploy-check` |
-| `DESK_ACCESS_TOKEN` | A person's Access session as an app token for one deployment: `cloudflared access login $HUB` once (a browser sign-in), then `cloudflared access token -app=$HUB` | `probe`, `fake-check`, `redeploy-check`, `measure`, `counts`, `access-sync` |
+| `DESK_ACCESS_TOKEN` | A person's Access session as an app token for one deployment: `cloudflared access login $HUB` once (a browser sign-in), then `cloudflared access token -app=$HUB` | `probe`, `fake-check`, `redeploy-check`, `measure`, `counts` |
 
 The owner keeps the two API tokens under
 `~/.config/claude-secrets/projects/-Users-new-Developer-GitHub-doperpowers/`.
@@ -118,19 +119,29 @@ means enrolling every machine again.
 
 Access fronts the whole host, so a person reaches the hub only if the people
 policy `<worker> owner` lists their email. Once the org has a signed state
-(O11's Registry, `GET /api/org/state`), members are added, removed and have
-their emails changed by signed successors, and `access-sync` makes the
-policy's list exactly the head's member emails: it reads the head as the
-person whose `DESK_ACCESS_TOKEN` it is given, upserts the policy by name, reads
-it back through the Access API and prints what Access now admits. Before any
-state, the list is the owner alone. A member the state admits, or an email it
-changes, reaches the hub only after this runs; one it removes is refused by the
-Registry at once, and by Access once this runs.
+(O11's Registry), members are added, removed and have their emails changed by
+signed successors, and `access-sync` makes the policy's list exactly the
+head's member emails; before any state, the owner alone. It refuses a
+configuration whose `host` is not its `worker`'s before it reads or writes
+anything.
 
-    printf '%s\n' "CF_ACCESS_SETUP_TOKEN=$(cat $S/CF_ACCESS_SETUP_TOKEN)" "DESK_ACCESS_TOKEN=$(cloudflared access token -app=$HUB)" \
+It reads the state as a machine, through `GET /machine/org/state` with an
+enrolled machine's service token, never as a person: once a successor changes
+the only member's email, the Registry refuses the old email at once and Access
+refuses the new one until this runs, so no person could read the head. The hub
+is then its only witness, so the tool reads the chain from its genesis (which
+must be this deployment's org) and verifies every step with the protocol
+package before it uses the head. It upserts the policy by name, reads it back
+through the Access API and prints what Access now admits. A member the state
+admits, or an email it changes, reaches the hub only after this runs; one it
+removes is refused by the Registry at once, and by Access once this runs.
+
+    printf '%s\n' "CF_ACCESS_SETUP_TOKEN=$(cat $S/CF_ACCESS_SETUP_TOKEN)" "DESK_MACHINE_CLIENT_ID=<id>" "DESK_MACHINE_CLIENT_SECRET=<secret>" \
       | pnpm --filter desk-hub deployment access-sync --config deploy/staging.json
 
-On production it changes production's Access, which waits for the owner.
+(the machine's credentials from its enrollment, read inside a script and never
+printed). On production it changes production's Access, which waits for the
+owner.
 
 ## After the first deploy (the owner)
 

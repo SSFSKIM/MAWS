@@ -23,6 +23,12 @@ export type DeployConfig = {
 
 export const CF_API_URL = 'https://api.cloudflare.com/client/v4';
 
+/** Throws unless the config's host is its Worker's (`<worker>.<subdomain>.workers.dev`): a config that names one
+ * Worker's host and another's name would act on the other Worker, or on its Access objects. */
+export function checkTarget(config: DeployConfig, refusing: string): void {
+  if (config.host.split('.')[0] !== config.worker) throw new Error(`the config's host ${config.host} is not the Worker ${config.worker}'s: refusing to ${refusing}`);
+}
+
 export function readDeployConfig(path: string): DeployConfig {
   return JSON.parse(readFileSync(path, 'utf8')) as DeployConfig;
 }

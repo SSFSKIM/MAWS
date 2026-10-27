@@ -60,6 +60,7 @@ import {
   PROJECTION_PATH,
   PROJECT_STATE_FAULT_PATH,
   MISSING_METHOD_PATH,
+  AS_MEMBER_PATH,
 } from './send-fault';
 
 const require = createRequire(import.meta.url);
@@ -461,6 +462,10 @@ export async function startLocalHub() {
      * Answers the throws still armed, the calls taken since, and the newest version announced (the suites' Worker only). */
     async stateFault(project: string, arm: { times?: number; missing?: boolean } = {}): Promise<{ remaining: number; calls: number; announced: number | null }> {
       return JSON.parse(await seam('PROJECT', project, PROJECT_STATE_FAULT_PATH, arm));
+    },
+    /** Calls the Registry's `call` for `member` as given (a record the Worker resolved earlier), with `args`; its answer. */
+    async asMember(call: string, member: unknown, ...args: unknown[]): Promise<unknown> {
+      return JSON.parse(await seam('REGISTRY', ORG, AS_MEMBER_PATH, { call, member, args }));
     },
     /** Whether the Registry takes workerd's own refusal of a method a callee lacks for one on older code. */
     async missingMethod(): Promise<{ lacks: boolean; message: string }> {

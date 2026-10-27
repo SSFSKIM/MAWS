@@ -42,3 +42,12 @@ describe('syncing the people policy', () => {
     expect([...access.policies.values()]).toEqual([expect.objectContaining({ name: 'desk-hub-staging owner', decision: 'allow' })]);
   });
 });
+
+describe('the target', () => {
+  it('is checked before any Access call: a config whose host is not its Worker’s writes nothing', async () => {
+    const access = fakeAccessApi();
+    const stale: DeployConfig = { ...config, worker: 'desk-hub' };
+    await expect(syncAccess(access.api, stale, viewOf(['owner@example.com']))).rejects.toThrow(/not the Worker desk-hub/);
+    expect(access.calls).toEqual([]);
+  });
+});

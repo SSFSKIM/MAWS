@@ -112,3 +112,6 @@ export const PROJECT_STATE_FAULT_PATH = '/__test/state-fault';
 /** Where the suites' `Registry` calls a method no `Project` has, and answers `{lacks, message}`: whether the Registry
  * takes workerd's refusal for a callee on older code. */
 export const MISSING_METHOD_PATH = '/__test/missing-method';
+/** Where the suites' `Registry` calls one of its methods that take a member (`{call, member, args}`) with the member
+ * record given, as the Worker would with one it resolved before a state removed or demoted them; answers the result. */
+export const AS_MEMBER_PATH = '/__test/as-member';
