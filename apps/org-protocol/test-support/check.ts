@@ -38,6 +38,21 @@ async function subscriptionKeys(): Promise<{ p256dh: string; auth: string }> {
   return { p256dh: base64urlEncode(point), auth: base64urlEncode(crypto.getRandomValues(new Uint8Array(16))) };
 }
 
+type Closable = { close(): void };
+
+/**
+ * Waits for every socket in `opening` (undefined for one not asked for). When any is refused, every one that opened —
+ * those that open after the refusal too — is closed, and the first refusal is thrown; else all of them are answered.
+ */
+export async function openTogether(opening: Array<Promise<Closable> | undefined>): Promise<Array<Closable | undefined>> {
+  const settled = await Promise.allSettled(opening.map((socket) => socket ?? Promise.resolve(undefined)));
+  const refused = settled.find((s): s is PromiseRejectedResult => s.status === 'rejected');
+  const opened = settled.map((s) => (s.status === 'fulfilled' ? s.value : undefined));
+  if (refused === undefined) return opened;
+  for (const socket of opened) socket?.close();
+  throw refused.reason;
+}
+
 export async function referenceCheck(options: CheckOptions, log: (line: CheckLine) => void = () => {}): Promise<CheckResult> {
   const lines: CheckLine[] = [];
   const line = (step: string, status: CheckLine['status'], detail: string) => {
@@ -71,20 +86,18 @@ export async function referenceCheck(options: CheckOptions, log: (line: CheckLin
     project = projects.find((p) => !p.retired)?.id;
   }
 
-  // The three sockets, opened together and held through every step.
+  // The three sockets, opened together and held through every step; closed at the end, whatever failed.
   let registry: RegistrySocket | undefined;
   let projectSocket: ProjectSocket | undefined;
   let machine: RelayApp | undefined;
-  await attempt('sockets', async () => {
-    [registry, projectSocket, machine] = await Promise.all([
-      hub.registry(),
-      project === undefined ? undefined : hub.project(project),
-      options.machine === undefined ? undefined : hub.machine(options.machine),
-    ]);
-    return `Registry${projectSocket ? `, Project ${project}` : ''}${machine ? `, Machine ${options.machine}` : ''} open`;
-  });
-
   try {
+    await attempt('sockets', async () => {
+      const opened = await openTogether([hub.registry(), project === undefined ? undefined : hub.project(project), options.machine === undefined ? undefined : hub.machine(options.machine)]);
+      [registry, projectSocket, machine] = opened as [RegistrySocket, ProjectSocket | undefined, RelayApp | undefined];
+      return `Registry${projectSocket ? `, Project ${project}` : ''}${machine ? `, Machine ${options.machine}` : ''} open`;
+    });
+    if (lines.at(-1)?.status === 'fail') return { ok: false, member, lines };
+
     await attempt('registry', async () => {
       if (!registry) throw new Error('no Registry socket');
       const [{ head }, { listings }] = await Promise.all([hub.orgState(), hub.listings()]);

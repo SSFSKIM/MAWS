@@ -55,6 +55,8 @@ export async function until<T>(probe: () => T | undefined, what: string, ms = 10
 /** A JSON socket: every whole frame kept in order, and how it closed once it has. */
 export class JsonSocket {
   readonly frames: Frame[] = [];
+  /** The size in bytes of every text message the socket carried, parts included. */
+  readonly wire: number[] = [];
   ended: { code: number; reason: string } | undefined;
   private readonly parts = new PartJoiner();
   protected readonly socket: WebSocket;
@@ -63,6 +65,7 @@ export class JsonSocket {
     this.socket = socket;
     socket.addEventListener('message', (event) => {
       if (typeof event.data !== 'string') return;
+      this.wire.push(new TextEncoder().encode(event.data).length);
       const whole = this.parts.add(JSON.parse(event.data) as Frame);
       if (whole !== undefined) this.received(whole);
     });

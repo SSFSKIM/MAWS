@@ -1,14 +1,17 @@
 // The app's hub connection (OX8; O11 M7), through the Node reference client in apps/org-protocol/test-support: the
-// Registry socket gains the org state's head version (`state`, on connect and at each accepted state) and the listings
-// (`listings` on connect, `listing` as each is stored) beside DX3's grid, which stays first for desk-web; and one
+// Registry socket opened as an app's (`?app=1`) gains the org state's head version (`state`, on connect and at each
+// accepted state) and the listings (`listings` pages on connect, `listing` as each is stored) after DX3's grid, while
+// desk-web's grid socket, without the query, keeps the grid alone; and one
 // member's client holds the Registry, Project and Machine sockets at once (acceptance 6), signing its words into the
 // log with its device key and binding a push subscription to that device.
-import { base64urlEncode, generateSigningKey, keyId, type Listing, type Signed, type SignedOrgState, type SigningKey } from 'org-protocol';
+import { base64urlEncode, generateSigningKey, keyId, LISTINGS_PAGE_BYTES, type Listing, type ListingsFrame, type Signed, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { deviceHuman, HubClient, HubRefusal, listingKey, referenceCheck, type RegistrySocket } from 'org-protocol/test-support';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FakeEndpoint } from '../fake-machine/endpoint';
 import { enrollV2, listing, type V2Machine } from '../fake-machine/org';
 import { encodeEnrollmentCodeV2 } from '../src/protocol/identity';
+import { FRAME_LIMIT } from '../src/protocol/parts';
+import { GridClient, waitFor } from './support/clients';
 import { ADMIN, credentials, ORG, startLocalHub, type LocalHub } from './support/local';
 import { genesis, memberId, newDevice, next, signedBy, type TestDevice } from './support/org';
 
@@ -117,6 +120,20 @@ describe('the Registry socket', () => {
     socket.close();
     fresh.close();
   });
+
+  it('keeps a grid socket without the app query (desk-web’s) to the grid alone, as states are accepted and listings stored', async () => {
+    const grid = await GridClient.open(hub, ADMIN);
+    await accept(next(head));
+    endpoint.listing(await listing(mini, SESSION, 4, fields('idle')));
+    const app = await client.registry();
+    await app.next((f) => f.t === 'state' && f.version === head.state.version, 'the state at the app');
+    await waitFor(() => (app.listings.get(`${mini.ref}/${SESSION}`)?.body.revision === 4 ? true : undefined));
+    // The grid socket is behind the app's in nothing: both were sent everything in the same steps.
+    await sleep(200);
+    expect(new Set(grid.frames.map((f) => f.t))).toEqual(new Set(['grid']));
+    grid.close();
+    app.close();
+  });
 });
 
 describe('the reference client', () => {
@@ -156,5 +173,33 @@ describe('the reference client', () => {
     const refused = await client.registerPush({ endpoint: 'https://push.test/other', keys, device: memberId() }).catch((error: unknown) => error);
     expect(refused).toBeInstanceOf(HubRefusal);
     expect(refused).toMatchObject({ status: 409, error: 'unknown-device' });
+  });
+});
+
+describe('a listing set past what one frame holds', () => {
+  it('comes to an app as bounded pages, the last marked, and a grid socket never meets it', async () => {
+    // 20 listings of about 900 KB each: past desk-web's 16 MiB bound on a frame's unfinished parts (PARTS_HELD_LIMIT).
+    const title = 'x'.repeat(900 * 1024);
+    const sessions = Array.from({ length: 20 }, (_, i) => `b1c2d3e4-f5a6-4b7c-8d9e-${i.toString(16).padStart(12, '0')}`);
+    for (const session of sessions) {
+      const stored = await hub.registryRpc<{ ok: boolean }>('storeListing', await listing(mini, session, 1, { ...fields('working'), title }));
+      expect(stored.ok).toBe(true);
+    }
+    const grid = await GridClient.open(hub, ADMIN);
+    const app = await client.registry();
+    const pages = app.frames.filter((f) => f.t === 'listings') as unknown as ListingsFrame[];
+    expect(pages.map((p) => p.last)).toEqual([...pages.slice(1).map(() => false), true]);
+    for (const page of pages) {
+      const bytes = page.records.reduce((sum, r) => sum + new TextEncoder().encode(JSON.stringify(r)).length, 0);
+      expect(page.records.length === 1 || bytes <= LISTINGS_PAGE_BYTES).toBe(true);
+    }
+    expect(Math.max(...app.wire)).toBeLessThanOrEqual(FRAME_LIMIT);
+    expect(app.listings.size).toBe((await client.listings()).listings.length);
+    for (const session of sessions) expect(app.listings.has(`${mini.ref}/${session}`)).toBe(true);
+    await sleep(300);
+    expect(new Set(grid.frames.map((f) => f.t))).toEqual(new Set(['grid']));
+    expect(Math.max(...grid.wire)).toBeLessThan(64 * 1024);
+    grid.close();
+    app.close();
   });
 });

@@ -1,14 +1,14 @@
-// The app's Registry socket (OX8; O11 M7), `/api/registry/socket`: DX3's grid first, as desk-web reads it, then the
-// org state's head version (`state {version}`, when the hub holds a state) and every listing the hub holds
-// (`listings {records}`), then a `state` notice at each accepted state and a `listing {record}` as each is stored. The
-// app fetches the state itself (`GET /api/org/state?since=<held>`) and verifies every listing against it; the hub only
-// relays them.
-import type { ListingsFrame } from '../src/app-hub.ts';
+// The app's Registry socket (OX8; O11 M7), `/api/registry/socket?app=1`: DX3's grid first, as desk-web reads it, then
+// the org state's head version (`state {version}`, when the hub holds a state) and every listing the hub holds
+// (`listings {records, last}` pages, the last marked), then a `state` notice at each accepted state and a
+// `listing {record}` as each is stored. The app fetches the state itself (`GET /api/org/state?since=<held>`) and
+// verifies every listing against it; the hub only relays them.
+import { REGISTRY_APP_PARAM, type ListingsFrame } from '../src/app-hub.ts';
 import type { ListingFrame } from '../src/relay.ts';
 import type { Listing, Signed } from '../src/types.ts';
 import { JsonSocket, openSocket, socketUrl, type Frame, type Headers } from './socket.ts';
 
-export const REGISTRY_SOCKET_PATH = '/api/registry/socket';
+export const REGISTRY_SOCKET_PATH = `/api/registry/socket?${REGISTRY_APP_PARAM}=1`;
 
 /** A listing's key: one per machine (ref) and session. */
 export const listingKey = (record: Signed<Listing>) => `${record.body.machine}/${record.body.session}`;
@@ -18,12 +18,12 @@ export class RegistrySocket extends JsonSocket {
   version: number | null = null;
   /** Every listing received, the newest revision per machine and session. */
   readonly listings = new Map<string, Signed<Listing>>();
-  /** Whether the `listings` snapshot came (the socket's opening frames are all in). */
+  /** Whether the last `listings` page came (the socket's opening frames are all in). */
   ready = false;
 
   static async open(base: string, headers: Headers): Promise<RegistrySocket> {
     const socket = new RegistrySocket(await openSocket(socketUrl(base, REGISTRY_SOCKET_PATH), headers, 'Registry'));
-    await socket.next((f) => f.t === 'listings', 'the listings snapshot');
+    await socket.next((f) => f.t === 'listings' && f.last === true, 'the last listings page');
     return socket;
   }
 
@@ -31,8 +31,9 @@ export class RegistrySocket extends JsonSocket {
     super.received(frame);
     if (frame.t === 'state' && typeof frame.version === 'number') this.version = frame.version;
     if (frame.t === 'listings') {
-      for (const record of (frame as unknown as ListingsFrame).records) this.keep(record);
-      this.ready = true;
+      const page = frame as unknown as ListingsFrame;
+      for (const record of page.records) this.keep(record);
+      if (page.last) this.ready = true;
     }
     if (frame.t === 'listing') this.keep((frame as unknown as ListingFrame).record);
   }

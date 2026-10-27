@@ -42,7 +42,7 @@ import type { AccessIdentity } from '../identity/access';
 import { ServiceTokenApiError, serviceTokens } from '../identity/service-tokens';
 import { importVapidKey, pushRequest, type VapidKey } from '../push/web-push';
 import { base64urlDecode, base64urlEncode, isBase64urlOf } from '../protocol/base64url';
-import type { Delegation, Listing, Signed } from 'org-protocol';
+import { LISTINGS_PAGE_BYTES, REGISTRY_APP_PARAM, type Delegation, type Listing, type RegistryAppFrame, type Signed } from 'org-protocol';
 import type { GridDown, MachineSummary, ProjectSummary, PushNotice, RegistryDown } from '../protocol/browser';
 import type { OrgFrame } from '../protocol/machine';
 import { toWire } from '../protocol/parts';
@@ -143,6 +143,8 @@ const MAX_PUSH_SUBSCRIPTIONS = 20;
 const MAX_ENDPOINT = 2048;
 /** A device id as the org state's pairing exchange bounds it (org-chain.ts). */
 const MAX_DEVICE_ID = 128;
+/** A registry socket's hibernation attachment: its member, and `app` when it was opened as an app's (O11 M7). */
+type RegistrySocketAttachment = { member: string; app?: true };
 /** What a push did, for the suites and the logs. */
 type Pushed = { sent: number; gone: number; failed: number };
 type Counts = Pick<ProjectSummary, 'machines' | 'machines_online' | 'working' | 'waiting' | 'live'>;
@@ -748,22 +750,31 @@ export class Registry extends DurableObject<Env> {
 
   // ---- The grid (DX3's registry socket) and the app's frames on it (OX8; O11 M7) -------------------------------
 
-  /** A member's registry socket (the Worker sends only a member's): every project's summary, the org state's head version
-   * and every listing held, then each change of any of them. */
+  /**
+   * A member's registry socket (the Worker sends only a member's): every project's summary, then each change. An app's
+   * (`?app=1`, OX8; O11 M7) gets after the grid the org state's head version and every listing held, in pages of at
+   * most `LISTINGS_PAGE_BYTES`, the last marked, then a `state` notice at each accepted state and each listing as it is
+   * stored. A socket without the query, desk-web's grid, gets none of it: listings are no use to it, every phone's
+   * reconnect would carry them all, and a snapshot past its parts bound would close it into a reconnect loop.
+   */
   async fetch(request: Request): Promise<Response> {
-    if (new URL(request.url).pathname !== '/grid') return new Response('not found', { status: 404 });
+    const url = new URL(request.url);
+    if (url.pathname !== '/grid') return new Response('not found', { status: 404 });
     if (request.headers.get('Upgrade') !== 'websocket') return new Response('expected a WebSocket', { status: 426 });
     // Resolved before a state that dropped the member, and reaching here after it.
     const member = request.headers.get(MEMBER_HEADER) ?? '';
     if (this.sql.exec('SELECT 1 FROM members WHERE id = ?', member).toArray().length === 0) return Response.json({ error: 'removed' }, { status: 403 });
     const [client, server] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({ member });
+    const app = url.searchParams.get(REGISTRY_APP_PARAM) === '1';
+    server.serializeAttachment({ member, ...(app ? { app } : {}) } satisfies RegistrySocketAttachment);
     this.send(server, this.gridFrame());
-    // The app's connection (OX8; O11 M7): the head's version, then every listing held; desk-web passes both by.
-    const version = this.chain.head()?.state.version;
-    if (version !== undefined) this.send(server, { t: 'state', version });
-    this.send(server, { t: 'listings', records: this.records.listings(null).listings });
+    if (app) {
+      const version = this.chain.head()?.state.version;
+      if (version !== undefined) this.send(server, { t: 'state', version });
+      const pages = this.records.listingPages(LISTINGS_PAGE_BYTES);
+      pages.forEach((records, i) => this.send(server, { t: 'listings', records, last: i === pages.length - 1 }));
+    }
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -825,8 +836,15 @@ export class Registry extends DurableObject<Env> {
     return { id: project.id, name: project.name, kind: project.kind, ...(counts ?? { machines: 0, machines_online: 0, working: 0, waiting: 0, live: 0 }) };
   }
 
-  private toGrid(frame: RegistryDown): void {
+  private toGrid(frame: GridDown): void {
     for (const socket of this.ctx.getWebSockets()) this.send(socket, frame);
+  }
+
+  /** A frame of the app's connection, to the sockets opened as an app's alone. */
+  private toApps(frame: RegistryAppFrame): void {
+    for (const socket of this.ctx.getWebSockets()) {
+      if ((socket.deserializeAttachment() as RegistrySocketAttachment | null)?.app === true) this.send(socket, frame);
+    }
   }
 
   /** A frame above `FRAME_LIMIT` (a grid of many projects) goes in numbered parts, as on a project socket. */
@@ -1232,7 +1250,7 @@ export class Registry extends DurableObject<Env> {
   /**
    * A genesis or a successor (`OrgChain.submit`). Once one is accepted, the members it dropped are refused here at once,
    * their grid sockets close `4403 removed`, every project is told the new version and the members it holds, and every
-   * open registry socket is sent its `state` notice (O11 M7).
+   * app's registry socket is sent its `state` notice (O11 M7).
    */
   async submitState(member: MemberRecord, body: unknown): Promise<Result<OrgStateAccepted>> {
     if (body === undefined) return fail(400, 'bad-shape', 'the body is a SignedOrgState, {state, sigs}');
@@ -1259,7 +1277,7 @@ export class Registry extends DurableObject<Env> {
     ];
     for (const target of targets) this.owe(target, version, members);
     for (const target of targets) void this.announce(org.id, { project: target, version, members });
-    this.toGrid({ t: 'state', version });
+    this.toApps({ t: 'state', version });
     await this.scheduleAlarm();
     return ok({ version });
   }
@@ -1452,8 +1470,8 @@ export class Registry extends DurableObject<Env> {
   /** A machine-signed listing (RL1's `listing`, through M6's Machine DO). */
   async storeListing(record: unknown): Promise<Result<{ stored: boolean }>> {
     const kept = await this.records.storeListing(record);
-    // Relayed to the members' Registry sockets as it is stored (OX8; O11 M7); one held already, or refused, is not.
-    if (kept.ok && kept.value.stored) this.toGrid({ t: 'listing', record: record as Signed<Listing> });
+    // Relayed to the members' app sockets as it is stored (OX8; O11 M7); one held already, or refused, is not.
+    if (kept.ok && kept.value.stored) this.toApps({ t: 'listing', record: record as Signed<Listing> });
     return kept;
   }
 

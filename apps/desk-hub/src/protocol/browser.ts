@@ -158,9 +158,10 @@ export type MachineSummary = { name: string; online: boolean; seen: string | nul
 export type GridDown = { t: 'grid'; projects: ProjectSummary[] } | { t: 'summary'; project: ProjectSummary } | Part;
 
 /**
- * Everything the registry socket sends: the grid, and since O11 M7 the app's frames beside it (OX8, `org-protocol`'s
- * `RegistryAppFrame`): after the grid, the org state's head version and every listing the hub holds, then a `state`
- * notice at each accepted state and a `listing` as each is stored. Desk-web reads the grid's frames and passes the rest by.
+ * Everything the registry socket sends: the grid, and since O11 M7, to a socket opened as an app's (`?app=1`), the app's
+ * frames after it (OX8, `org-protocol`'s `RegistryAppFrame`): the org state's head version and every listing the hub
+ * holds, in bounded pages, then a `state` notice at each accepted state and a `listing` as each is stored. Desk-web opens
+ * its grid without the query and gets the grid alone.
  */
 export type RegistryDown = GridDown | RegistryAppFrame;
 

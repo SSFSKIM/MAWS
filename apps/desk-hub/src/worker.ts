@@ -3,6 +3,7 @@
 // assertion is enrollment's redemption (`/machine/enroll`), which Access does not guard either: its one-time token, or
 // a provisioning key's secret, does. Every path it answers is under `/api/*` or `/machine/*`, the routes wrangler.jsonc runs it first for; the web
 // app's assets answer the rest.
+import { REGISTRY_APP_PARAM } from 'org-protocol';
 import { drain, readLimited } from './drain';
 import { CLIENT_HEADER, hubConfig, MACHINE_HEADER, MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, REF_HEADER, type Env } from './env';
 import { AccessError, certsKeySource, verifyAccessAssertion, type KeySource } from './identity/access';
@@ -226,7 +227,9 @@ async function member(request: Request, url: URL, env: Env, registry: DurableObj
     if (method === 'DELETE') return answer(await registry.deletePushSubscription(you, await body(request)));
   }
   if (pathname === '/api/registry/socket' && method === 'GET') {
-    return registry.fetch(forward(request, 'https://registry/grid', { [MEMBER_HEADER]: you.id, [ORG_HEADER]: principal.org.id }));
+    // An app's socket (`?app=1`, O11 M7) is told so: it gets the app's frames beside the grid.
+    const app = url.searchParams.get(REGISTRY_APP_PARAM) === '1' ? `?${REGISTRY_APP_PARAM}=1` : '';
+    return registry.fetch(forward(request, `https://registry/grid${app}`, { [MEMBER_HEADER]: you.id, [ORG_HEADER]: principal.org.id }));
   }
   // An app's socket to a machine (O11 M6): channels, relayed by the object its ref addresses.
   const appSocket = APP_SOCKET_PATH.exec(pathname);

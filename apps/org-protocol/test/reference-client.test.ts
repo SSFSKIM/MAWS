@@ -2,6 +2,7 @@
 // only, sent as Access's `cf-access-token`, and never in an error.
 import { describe, expect, it } from 'vitest';
 import { generateSigningKey } from '../src/keys.ts';
+import { openTogether } from '../test-support/check.ts';
 import { cliOptions } from '../test-support/cli.ts';
 import { PartJoiner } from '../test-support/socket.ts';
 
@@ -40,5 +41,29 @@ describe('cliOptions', () => {
     await expect(cliOptions(['--hub', 'https://hub.test'], 'TOKEN=secret-thing')).rejects.not.toThrow(/secret-thing/);
     await expect(cliOptions([], `DESK_ACCESS_TOKEN=${TOKEN}`)).rejects.toThrow(/--hub/);
     await expect(cliOptions([], `DESK_ACCESS_TOKEN=${TOKEN}`)).rejects.not.toThrow(TOKEN);
+  });
+});
+
+describe('openTogether', () => {
+  const socket = () => {
+    const s = { closed: false, close: () => void (s.closed = true) };
+    return s;
+  };
+
+  it('answers every socket, undefined for one not asked for', async () => {
+    const a = socket();
+    const b = socket();
+    expect(await openTogether([Promise.resolve(a), undefined, Promise.resolve(b)])).toEqual([a, undefined, b]);
+    expect([a.closed, b.closed]).toEqual([false, false]);
+  });
+
+  it('closes every socket that opened, one opening after the refusal too, and throws the refusal', async () => {
+    const early = socket();
+    const late = socket();
+    let openLate!: (s: typeof late) => void;
+    const opening = openTogether([Promise.resolve(early), Promise.reject(new Error('the project socket was refused')), new Promise((resolve) => (openLate = resolve))]);
+    setTimeout(() => openLate(late), 20);
+    await expect(opening).rejects.toThrow('the project socket was refused');
+    expect([early.closed, late.closed]).toEqual([true, true]);
   });
 });
