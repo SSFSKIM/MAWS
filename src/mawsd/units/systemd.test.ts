@@ -155,4 +155,10 @@ describe('the systemd user unit through fake managers', () => {
     unit.restart();
     expect(managers.calls).toEqual(['systemctl --user restart mawsd.service']);
   });
+
+  it('starts through systemctl --user start (P5 O2 M7: the app\'s unit start strategy)', () => {
+    const unit = systemdUnit(SPEC.label, deps());
+    unit.start();
+    expect(managers.calls).toEqual(['systemctl --user start mawsd.service']);
+  });
 });

@@ -7,6 +7,7 @@
 import * as z from 'zod';
 import { AppSessionIdSchema } from '../../graph/ids';
 import { HostStateSchema, type CommandSpec } from './common';
+import { DaemonStatusSchema } from './daemon'; // P5 O2 M7
 import { MAX_IDLE_MINUTES } from './settings';
 
 // The supervisor's idle time: settings' 1 to MAX_IDLE_MINUTES minutes, in ms, or null for never. Capped on the wire
@@ -40,8 +41,13 @@ export type SupervisorStatus = z.infer<typeof SupervisorStatusSchema>;
 export const MainBuildSchema = z.strictObject({ version: z.string(), commit: z.string(), builtAt: z.string() });
 export type MainBuild = z.infer<typeof MainBuildSchema>;
 
+// P5 O2 M7 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M7 "Status"): `transport` is `daemon` when the engine host
+// is reached through the machine daemon, whose own `daemon.status` is `daemon` (null in the embedded shape, and until
+// the daemon first answers); `daemonUnavailable` says why a launch whose setting asks for the daemon runs embedded (no
+// unit installed for an unpackaged run, a unit the system refuses), null otherwise. On the daemon shape `matches` compares
+// the engine host's build with the one the daemon would start (`daemon.build.engineHostBuildId`).
 export const HostStatusSchema = z.strictObject({
-  transport: z.enum(['utility', 'detached']),
+  transport: z.enum(['utility', 'detached', 'daemon']),
   state: HostStateSchema.shape.state,
   supervisor: SupervisorStatusSchema.nullable(), // null while none is connected
   appBuildId: z.string(),
@@ -53,6 +59,8 @@ export const HostStatusSchema = z.strictObject({
   waitingLiveSessions: z.number().int().nonnegative().nullable(),
   // the last unexpected exit this app run; code and signal only for a supervisor this run spawned
   lastExit: z.strictObject({ code: z.number().int().nullable(), signal: z.string().nullable(), at: z.string(), interrupted: z.number().int() }).nullable(),
+  daemon: DaemonStatusSchema.nullable(), // P5 O2 M7
+  daemonUnavailable: z.string().nullable(), // P5 O2 M7
 });
 export type HostStatus = z.infer<typeof HostStatusSchema>;
 

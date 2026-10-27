@@ -205,4 +205,14 @@ describe('the LaunchAgent through a fake launchctl', () => {
     unit.restart();
     expect(managers.calls).toEqual(['launchctl kickstart -k gui/501/dev.maws.mawsd.e2e-3']);
   });
+
+  // P5 O2 M7: the app's unit start strategy asks launchd to start a loaded job that is not running, never to kill one
+  it('starts through a plain kickstart, and fails when the job is not loaded', async () => {
+    const unit = launchdUnit('dev.maws.mawsd.e2e-4', deps());
+    expect(() => unit.start()).toThrow(/kickstart/);
+    await unit.apply(launchdPlist({ ...SPEC, label: 'dev.maws.mawsd.e2e-4' }));
+    managers.calls.length = 0;
+    unit.start();
+    expect(managers.calls).toEqual(['launchctl kickstart gui/501/dev.maws.mawsd.e2e-4']);
+  });
 });

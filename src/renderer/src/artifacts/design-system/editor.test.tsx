@@ -11,7 +11,7 @@ import { writeSystem } from '@artifacts/design-system/model';
 import { parseTokens, serializeTokens } from '@artifacts/design-system/tokens';
 import { ARTIFACT_KINDS } from '@shared/artifacts/entity';
 import type { LibraryRow } from '@shared/ipc/schema/library';
-import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
 import { resetLibrary } from '../../library/store';
 import { resetMarkupSurfaces } from '../../markup/surface';
 import { editorHostOf, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';
@@ -75,7 +75,7 @@ beforeEach(() => {
   resetEditorHosts();
   resetMarkupSurfaces();
   resetComposerStore();
-  useSettings.setState({ state: { settings: SETTINGS_DEFAULTS_V18, resolvedTheme: 'light' } });
+  useSettings.setState({ state: { settings: SETTINGS_DEFAULTS_V19, resolvedTheme: 'light' } });
   useNotices.setState({ notices: [] });
   // main's library reads, which the editor's title asks for (Decision Log 29); a case that needs more installs its own
   installFakeMain((name, input) => (name === 'library.get' ? ok({ row: ROWS.find((r) => r.id === input.artifactId) ?? null }) : listed(input)));
@@ -147,12 +147,12 @@ describe('the header’s app actions', () => {
   }
 
   it('Set as my default writes settings 14, and is disabled once it is the default', async () => {
-    const main = installFakeMain((name, input) => (name === 'settings.set' ? ok({ settings: { ...SETTINGS_DEFAULTS_V18, artifacts: { defaultDesignSystem: (input as { artifacts: { defaultDesignSystem: string } }).artifacts.defaultDesignSystem, spaceDesignSystems: {}, commentsView: 'expand' /* P4-B1 */ } }, resolvedTheme: 'light' }) : listed(input)));
+    const main = installFakeMain((name, input) => (name === 'settings.set' ? ok({ settings: { ...SETTINGS_DEFAULTS_V19, artifacts: { defaultDesignSystem: (input as { artifacts: { defaultDesignSystem: string } }).artifacts.defaultDesignSystem, spaceDesignSystems: {}, commentsView: 'expand' /* P4-B1 */ } }, resolvedTheme: 'light' }) : listed(input)));
     await opened();
     expect(action('Set as my default').disabled).toBe(false);
     await act(async () => action('Set as my default').onSelect());
     expect(main.callsOf('settings.set')).toEqual([{ artifacts: { defaultDesignSystem: DS } }]);
-    act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V18, artifacts: { defaultDesignSystem: DS, spaceDesignSystems: {}, commentsView: 'expand' /* P4-B1 */ } }, resolvedTheme: 'light' } }));
+    act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V19, artifacts: { defaultDesignSystem: DS, spaceDesignSystems: {}, commentsView: 'expand' /* P4-B1 */ } }, resolvedTheme: 'light' } }));
     expect(action('Set as my default').disabled).toBe(true);
   });
 

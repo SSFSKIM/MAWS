@@ -32,7 +32,7 @@ import * as maws from './schema/maws';
 import * as side from './schema/side';
 // E3 end
 // C11 start
-import { SETTINGS_DEFAULTS_V18 } from '../settings/defaults';
+import { SETTINGS_DEFAULTS_V19 } from '../settings/defaults';
 // C11 end
 // E9 start
 import * as voice from './schema/voice';
@@ -344,7 +344,7 @@ describe('ipc schema validates both directions', () => {
   });
 
   describe('command output (renderer, on receipt)', () => {
-    const state = { settings: { ...SETTINGS_DEFAULTS_V18, theme: 'system' }, resolvedTheme: 'dark' };
+    const state = { settings: { ...SETTINGS_DEFAULTS_V19, theme: 'system' }, resolvedTheme: 'dark' };
 
     it('accepts a settings state and returns it unchanged', () => {
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
@@ -379,7 +379,7 @@ describe('ipc schema validates both directions', () => {
     it('accepts well-formed events unchanged', () => {
       const exit = { ptyId: 'p1', exitCode: null, signal: null };
       expect(validateEventPayload('pty.exit', exit)).toEqual({ ok: true, value: exit });
-      const changed = { settings: { ...SETTINGS_DEFAULTS_V18, theme: 'light' }, resolvedTheme: 'light' };
+      const changed = { settings: { ...SETTINGS_DEFAULTS_V19, theme: 'light' }, resolvedTheme: 'light' };
       expect(validateEventPayload('settings.changed', changed)).toEqual({ ok: true, value: changed });
     });
 
@@ -612,7 +612,7 @@ describe('ipc schema validates both directions', () => {
     });
 
     it('settings.get and settings.changed carry the whole version 18 state', () => { // P4-R8: the app MCP servers; P4-A2: the launch profile
-      const state = { settings: { ...SETTINGS_DEFAULTS_V18, engine: { ...SETTINGS_DEFAULTS_V18.engine, mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }], launchProfile: { plugins: { off: ['ptc@ptc-tool'] }, outputStyle: 'maws', hooks: 'none' } }, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
+      const state = { settings: { ...SETTINGS_DEFAULTS_V19, engine: { ...SETTINGS_DEFAULTS_V19.engine, mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }], launchProfile: { plugins: { off: ['ptc@ptc-tool'] }, outputStyle: 'maws', hooks: 'none' } }, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
       expect(validateEventPayload('settings.changed', state).ok).toBe(true);
       expect(validateEventPayload('settings.changed', { ...state, settings: { ...state.settings, version: 2 } }).ok).toBe(false);
@@ -1146,7 +1146,7 @@ describe('ipc schema validates both directions', () => {
       mode: 'detached', pid: 4321, startedAt: '2026-10-06T10:00:00.000Z', buildId: '0123456789abcdef', protocol: 1, wire: 'fedcba9876543210', liveSessions: 1, rows: 2,
       idleExitMs: 600_000, idleExitAt: null, exitWhenIdle: false, socketPath: '/u/supervisor/host.sock', logPath: '/u/supervisor/host.log', orphansKilled: 0,
     };
-    const status = { transport: 'detached', state: 'ready', supervisor, appBuildId: '0123456789abcdef', appWire: 'fedcba9876543210', mainBuild: { version: '0.0.0', commit: 'ac8724a6', builtAt: '2026-10-08T09:05:53.000Z' }, matches: 'same', reason: null, waitingLiveSessions: null, lastExit: null };
+    const status = { transport: 'detached', state: 'ready', supervisor, appBuildId: '0123456789abcdef', appWire: 'fedcba9876543210', mainBuild: { version: '0.0.0', commit: 'ac8724a6', builtAt: '2026-10-08T09:05:53.000Z' }, matches: 'same', reason: null, waitingLiveSessions: null, lastExit: null, daemon: null, daemonUnavailable: null }; // P5 O2 M7: the embedded shape
 
     it('adds the host namespace: four engine-host commands (three main-only senders), three main-owned, one event each side', () => {
       // P5 O2 M2 adds host.interest (main-only, below)
@@ -1208,6 +1208,12 @@ describe('ipc schema validates both directions', () => {
       expect(validateEventPayload('host.status', waiting).ok).toBe(true);
       expect(validateEventPayload('host.status', { ...waiting, waitingLiveSessions: 1.5 }).ok).toBe(false);
       expect(validateEventPayload('host.status', { ...status, waitingLiveSessions: undefined }).ok).toBe(false);
+      // P5 O2 M7: the daemon shape: its transport, the daemon's own status, and why a launch asked for it runs embedded
+      const daemon = { pid: 4100, startedAt: 't', kind: 'unit', build: { version: '0.0.0', commit: 'c', builtAt: 't', buildId: 'b', engineHostBuildId: 'e' }, machine: 'mRef0123456789abcdefAB', profile: '/p', platform: 'darwin', role: 'laptop', hosts: { 'engine-host': { state: 'ready', pid: 1, build: 'e', liveSessions: 0 }, 'pty-host': { state: 'parked', pid: null, build: null, liveSessions: null } }, clients: { engineHost: true, ptyHost: false, machine: 1 }, idleExitAt: null, logPath: '/p/mawsd/mawsd.log', endpoint: { present: false, detail: null } };
+      expect(validateEventPayload('host.status', { ...status, transport: 'daemon', daemon }).ok).toBe(true);
+      expect(validateEventPayload('host.status', { ...status, daemonUnavailable: 'no LaunchAgent is installed' }).ok).toBe(true);
+      expect(validateEventPayload('host.status', { ...status, transport: 'daemon', daemon: { ...daemon, kind: 'remote' } }).ok).toBe(false);
+      expect(validateEventPayload('host.status', { ...status, daemon: undefined }).ok).toBe(false);
       expect(validateCommandInput('host.restart', { stopSessions: true }).ok).toBe(true);
       expect(validateCommandInput('host.restart', {}).ok).toBe(false);
       expect(validateCommandInput('host.openLog', undefined).ok).toBe(true);

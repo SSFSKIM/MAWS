@@ -10,7 +10,7 @@ import type { ImportedProfile } from '@shared/browser/profiles';
 import { profilePartition, type BrowserTab } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { Settings } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
 import { browserTab, T1 } from '../../../test-support/browser';
 import { RECORD } from '../../../test-support/browser-import';
 import { installFakeMain, ok } from '../../../test-support/code';
@@ -37,7 +37,7 @@ let tree: BookmarkTree;
 let disconnect: () => void;
 const record = (over: Partial<ImportedProfile> = {}): ImportedProfile => ({ ...RECORD, profileDir: 'Profile 1', partition: WORK, bookmarks: { consentedAt: RECORD.importedAt, syncedAt: RECORD.importedAt, count: 6, error: null, errorAt: null }, ...over });
 const setSettings = (browser: Partial<Settings['browser']> = {}) =>
-  useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V18, browser: { ...SETTINGS_DEFAULTS_V18.browser, ...browser } }, resolvedTheme: 'light' } });
+  useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V19, browser: { ...SETTINGS_DEFAULTS_V19.browser, ...browser } }, resolvedTheme: 'light' } });
 
 beforeEach(() => {
   resetBrowser();
@@ -56,7 +56,7 @@ beforeEach(() => {
       case 'browser.bookmarks.favicons':
         return ok({ icons: { 'https://a.example': ICON } });
       case 'settings.set':
-        return ok({ settings: SETTINGS_DEFAULTS_V18, resolvedTheme: 'light' });
+        return ok({ settings: SETTINGS_DEFAULTS_V19, resolvedTheme: 'light' });
       default:
         return ok();
     }

@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
 
 // Loads the real `src/main/index.ts` against a fake Electron `app` that records its listeners, with the modules it
 // wires (hosts, router, settings, window) replaced, so what is under test is the app lifecycle alone.
@@ -40,7 +40,7 @@ vi.mock('electron', () => {
     screen: { getAllDisplays: () => [display], getPrimaryDisplay: () => display },
   };
 });
-vi.mock('./hosts', () => ({ createHosts: () => fake.hosts }));
+vi.mock('./hosts', () => ({ createHosts: () => fake.hosts, prepareLaunch: () => ({ mode: 'utility', daemon: null, unavailable: null }) })); // P5 O2 M7: the launch's shape, settled at once
 vi.mock('./windows', () => ({ appWindows: () => fake.windows })); // E2: the app-window registry `activate` reads
 vi.mock('./browser', () => ({ startBrowser: () => ({ stop: vi.fn(), partitions: {} /* E4b */ }) })); // E4a: the in-app browser's main side
 vi.mock('./artifacts', () => ({ registerStoreSchemes: vi.fn() /* M7 */, installStorePolicies: vi.fn() /* P3-L M6b: E2's startDeliverables' policies */, startArtifacts: () => ({ stop: vi.fn(), exporters: { register: () => () => {} } /* P3-B: the document exporters register here */ }) })); // P3-A: the artifact store's main side
@@ -57,7 +57,7 @@ vi.mock('./ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: vi
 vi.mock('./attention/service', () => ({ startAttentionService: vi.fn() }));
 vi.mock('./attention/file-attention-store', () => ({ FileAttentionStore: vi.fn() }));
 // C3 end
-vi.mock('./settings', () => ({ startSettings: () => ({ state: () => ({ settings: SETTINGS_DEFAULTS_V18, resolvedTheme: 'light' }), onChange: vi.fn(() => vi.fn()) }) }));
+vi.mock('./settings', () => ({ startSettings: () => ({ state: () => ({ settings: SETTINGS_DEFAULTS_V19, resolvedTheme: 'light' }), onChange: vi.fn(() => vi.fn()) }) }));
 vi.mock('./window', () => ({ appUrl: 'file:///index.html', createWindow: fake.createWindow, installContentSecurityPolicy: vi.fn() }));
 // C4: the index and its session source are replaced too; the lifecycle only has to open, start and close them.
 const c4 = vi.hoisted(() => ({ close: vi.fn(), stopSource: vi.fn(), stopAttention: vi.fn(), started: 0 }));

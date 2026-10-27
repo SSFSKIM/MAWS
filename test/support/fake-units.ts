@@ -105,6 +105,7 @@ export class FakeManagers {
         if (rest[0] === '--now') this.active.delete(unit);
         return ok();
       case 'restart':
+      case 'start': // P5 O2 M7
         this.active.add(unit);
         return ok();
       default:

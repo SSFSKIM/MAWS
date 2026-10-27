@@ -106,5 +106,8 @@ export function systemdUnit(label: string, deps: UnitDeps): Unit {
     restart() {
       must(deps.run, 'systemctl', ['--user', 'restart', name]);
     },
+    start() {
+      must(deps.run, 'systemctl', ['--user', 'start', name]); // P5 O2 M7
+    },
   };
 }

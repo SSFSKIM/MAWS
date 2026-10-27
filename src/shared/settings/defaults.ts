@@ -1,14 +1,14 @@
 // The values of MAWS's own settings file (C11 execution document, Interfaces "Settings, version 3"): the current
-// version's defaults (W13: version 8; E9: version 9; E10: version 10; E4a: version 11; cua #90: version 12; P2-C: version 13; P3-D: version 14; P4-B1: version 15; P4-R8: version 16; P4-A2: version 17; UX1: version 18), the one migration from every earlier version, and the one patch merge
+// version's defaults (W13: version 8; E9: version 9; E10: version 10; E4a: version 11; cua #90: version 12; P2-C: version 13; P3-D: version 14; P4-B1: version 15; P4-R8: version 16; P4-A2: version 17; UX1: version 18; P5 O2: version 19), the one migration from every earlier version, and the one patch merge
 // `settings.set` applies. Pure; main's store (src/main/settings/store.ts) reads, migrates, merges and writes with these,
 // and nothing else does.
 import * as z from 'zod';
 import { ACTION_IDS, RETIRED_ACTION_IDS } from '../keymap/actions';
-import { BrowserSettingsSchema, ChordSchema, SettingsSchema, ThemeSettingSchema, type Settings, type SettingsPatch } from '../ipc/schema/settings';
+import { BrowserSettingsSchema, ChordSchema, SettingsSchema, SupervisorSettingsSchema, ThemeSettingSchema, type Settings, type SettingsPatch } from '../ipc/schema/settings';
 import { userScopeProfile } from '../engine/launch-profile'; // P4-A2
 
-export const SETTINGS_DEFAULTS_V18: Settings = {
-  version: 18, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14; P4-B1: 15; P4-R8: 16; P4-A2: 17; UX1: 18
+export const SETTINGS_DEFAULTS_V19: Settings = {
+  version: 19, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14; P4-B1: 15; P4-R8: 16; P4-A2: 17; UX1: 18; P5 O2: 19
   sessions: { archiveInactiveDays: null }, // UX1: opt-in only
   theme: 'light', // light-first (D-4, charter §10 item 10)
   keymap: {},
@@ -19,7 +19,7 @@ export const SETTINGS_DEFAULTS_V18: Settings = {
   appearance: { monoFont: null, transcriptWidth: 768 /* W2 */ },
   permissions: { autoFallback: 'acceptEdits' }, // W3: the owner's ruling of 2026-10-01 (charter D-18)
   voice: { locale: null }, // E9: the system locale
-  supervisor: { idleExitMinutes: 10, keepRunningDefault: true }, // E10: ruled by A-29 (residue 10 and 11)
+  supervisor: { idleExitMinutes: 10, keepRunningDefault: true, shape: 'daemon' }, // E10: ruled by A-29 (residue 10 and 11); P5 O2 M7: the machine daemon
   browser: { profile: null, searchUrl: 'https://www.google.com/search?q=%s', linkTarget: 'in-app', bookmarksBar: 'shown' }, // E4a: the default partition; Google (Decision Log 10); new-window links in the app (Decision Log 11); cua #90: the bookmarks bar shown
   mods: { toHuman: { enabled: true } }, // P2-C: the to-human lane on (the P2-C document, §9)
   artifacts: { defaultDesignSystem: null, spaceDesignSystems: {}, commentsView: 'expand' /* P4-B1: Docs' default, the cards in the margin */ }, // P3-D: the house system, no Space defaults (D9)
@@ -34,9 +34,14 @@ const SettingsV2Schema = z.strictObject({
   notifications: z.strictObject({ enabled: z.boolean(), sound: z.boolean() }),
 });
 
+// P5 O2 M7 start: UX1's version 18, as it wrote it: version 19's sections less the supervisor's shape
+const SettingsV18Schema = SettingsSchema.extend({ version: z.literal(18), supervisor: SupervisorSettingsSchema.omit({ shape: true }) });
+type SettingsV18 = z.infer<typeof SettingsV18Schema>;
+// P5 O2 M7 end
+
 // UX1-A + UX1-B: v17 predates both policies. The independently built batches could
-// also write either field at v17; preserve those choices when migrating.
-const SettingsV17Schema = SettingsSchema.extend({
+// also write either field at v17; preserve those choices when migrating. (P5 O2 M7: re-based on version 18)
+const SettingsV17Schema = SettingsV18Schema.extend({
   version: z.literal(17),
   sessions: SettingsSchema.shape.sessions.optional(),
   notifications: SettingsSchema.shape.notifications.extend({ kinds: SettingsSchema.shape.notifications.shape.kinds.extend({ turnFinished: z.boolean().optional() }) }),
@@ -121,10 +126,12 @@ const SettingsV3Schema = SettingsV4Schema.extend({
 });
 // C12 end
 
-const defaults = (): Settings => structuredClone(SETTINGS_DEFAULTS_V18);
+const defaults = (): Settings => structuredClone(SETTINGS_DEFAULTS_V19);
 
-// UX1: v17 → v18, archive Never and completed-turn notifications on unless already chosen.
-const fromV17 = (v17: SettingsV17): Settings => ({ ...v17, version: 18, sessions: v17.sessions ?? defaults().sessions, notifications: { ...v17.notifications, kinds: { ...v17.notifications.kinds, turnFinished: v17.notifications.kinds.turnFinished ?? defaults().notifications.kinds.turnFinished } } });
+// P5 O2 M7: v18 → v19, the machine daemon (P5 §2: the owner's profile moves to it at O2's landing; Settings switches back)
+const fromV18 = (v18: SettingsV18): Settings => ({ ...v18, version: 19, supervisor: { ...v18.supervisor, shape: defaults().supervisor.shape } });
+// UX1: v17 → v18, archive Never and completed-turn notifications on unless already chosen; P5 O2 M7: then v18 → v19
+const fromV17 = (v17: SettingsV17): Settings => fromV18({ ...v17, version: 18, sessions: v17.sessions ?? defaults().sessions, notifications: { ...v17.notifications, kinds: { ...v17.notifications.kinds, turnFinished: v17.notifications.kinds.turnFinished ?? defaults().notifications.kinds.turnFinished } } });
 
 // P4-A2: v16 → v17, the user scope (nothing changes until the owner sets a profile in Settings › Engine)
 const fromV16 = (v16: SettingsV16): Settings => fromV17({ ...v16, version: 17, engine: { ...v16.engine, launchProfile: defaults().engine.launchProfile } });
@@ -174,7 +181,7 @@ const fromV4 = (v4: SettingsV4): Settings => fromV5({ ...v4, version: 5, appeara
 // (W13: the pin dropped) → v9 (E9: the voice section) → v10 (E10: the supervisor section) → v11 (E4a: the browser
 // section) → v12 (cua #90: the bookmarks bar's switch) → v13 (P2-C: the mods section and two notification groups) → v14
 // (P3-D: the design-system defaults) → v15 (P4-B1: the comments view) → v16 (P4-R8: the app's MCP servers) → v17 (P4-A2:
-// the launch profile) → v18 (UX1: inactive archive and turn-finished notifications). A version 18 object is validated and returned as it is;
+// the launch profile) → v18 (UX1: inactive archive and turn-finished notifications) → v19 (P5 O2: the supervisor's shape). A version 19 object is validated and returned as it is;
 // anything else (another version, an invalid file of a known version) throws the schema's error, which the store turns
 // into the defaults with a warning. At any version, overrides of a retired action are dropped first (W10).
 export function migrateSettings(input: unknown): Settings {
@@ -225,6 +232,8 @@ export function migrateSettings(input: unknown): Settings {
       return fromV16(SettingsV16Schema.parse(raw)); // P4-A2
     case 17:
       return fromV17(SettingsV17Schema.parse(raw)); // UX1-A + UX1-B
+    case 18:
+      return fromV18(SettingsV18Schema.parse(raw)); // P5 O2 M7
     default:
       return SettingsSchema.parse(raw);
   }

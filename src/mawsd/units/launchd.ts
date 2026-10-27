@@ -127,5 +127,8 @@ export function launchdUnit(label: string, deps: UnitDeps): Unit {
     restart() {
       must(deps.run, 'launchctl', ['kickstart', '-k', target]);
     },
+    start() {
+      must(deps.run, 'launchctl', ['kickstart', target]); // P5 O2 M7: without -k, a running job is left as it is
+    },
   };
 }

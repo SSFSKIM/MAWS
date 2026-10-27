@@ -54,6 +54,7 @@ export interface Unit {
   // Unloads the unit (which ends `mawsd`, whose hosts keep running) and removes its file; false when nothing was there.
   remove(): Promise<boolean>;
   restart(): void;
+  start(): void; // P5 O2 M7: starts a loaded unit that is not running (the app's unit start strategy); kills nothing
 }
 
 // A unit operation that failed: `code` 2 when the manager is not available here, else 1.

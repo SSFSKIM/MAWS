@@ -37,7 +37,7 @@ import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
-import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
 import { cpuSeconds, floorLine, IDLE_RUN, idleLine, invalidReasons, mawsdLine, measured, median, readerMismatches, readFootprints, readTopMem, type MeasuredProcess, type TopMem } from '../test/support/daemon-idle';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
@@ -93,7 +93,7 @@ test('daemon idle: the physical footprint and CPU of the detached supervisor hol
   mkdirSync(repo, { recursive: true });
   // No idle release and no idle exit (null: never), so the kept session holds through the window.
   mkdirSync(userData, { recursive: true });
-  writeFileSync(join(userData, 'settings.json'), JSON.stringify({ ...SETTINGS_DEFAULTS_V18, supervisor: { ...SETTINGS_DEFAULTS_V18.supervisor, idleExitMinutes: null } }));
+  writeFileSync(join(userData, 'settings.json'), JSON.stringify({ ...SETTINGS_DEFAULTS_V19, supervisor: { ...SETTINGS_DEFAULTS_V19.supervisor, idleExitMinutes: null } }));
   // A session C4 files from a transcript in the engine store, so the replayed launch has a record (as e2e/supervisor.spec.ts does).
   const engineId = randomUUID();
   const project = join(userData, 'claude-config', 'projects', repo.replace(/[^a-zA-Z0-9]/g, '-'));

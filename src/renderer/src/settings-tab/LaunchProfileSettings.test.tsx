@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MawsBridge, Settings } from '@shared/ipc/schema';
 import type { InstalledPlugin } from '@shared/ipc/schema/plugins';
 import type { LaunchProfile } from '@shared/engine/launch-profile';
-import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
 import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
 import { settingsBridge, type SettingsBridge } from '../test-support/settings-bridge';
@@ -33,7 +33,7 @@ let b: SettingsBridge;
 let unsubscribe = () => {};
 const current = () => useSettings.getState().state!.settings;
 
-function renderSection(initial: Settings = SETTINGS_DEFAULTS_V18, installed: InstalledPlugin[] = INSTALLED) {
+function renderSection(initial: Settings = SETTINGS_DEFAULTS_V19, installed: InstalledPlugin[] = INSTALLED) {
   b = settingsBridge(initial);
   b.answers['plugins.list'] = () => ({ plugins: installed });
   window.maws = b.bridge;
@@ -51,7 +51,7 @@ function renderSection(initial: Settings = SETTINGS_DEFAULTS_V18, installed: Ins
 const row = (label: string) => screen.getByRole('group', { name: label });
 const pluginSwitch = (id: string) => within(row(LAUNCH_PROFILE.plugins)).getByRole('switch', { name: LAUNCH_PROFILE.pluginOn(id) });
 const radio = (group: string, label: string) => within(screen.getByRole('radiogroup', { name: group })).getByRole('radio', { name: label }) as HTMLInputElement;
-const profileWith = (over: Partial<LaunchProfile>): Settings => ({ ...SETTINGS_DEFAULTS_V18, engine: { ...SETTINGS_DEFAULTS_V18.engine, launchProfile: { ...SETTINGS_DEFAULTS_V18.engine.launchProfile, ...over } } });
+const profileWith = (over: Partial<LaunchProfile>): Settings => ({ ...SETTINGS_DEFAULTS_V19, engine: { ...SETTINGS_DEFAULTS_V19.engine, launchProfile: { ...SETTINGS_DEFAULTS_V19.engine.launchProfile, ...over } } });
 
 afterEach(() => {
   unsubscribe();
@@ -107,7 +107,7 @@ describe('Settings › Engine › the launch profile', () => {
   });
 
   it('says when the user’s settings turn on no plugin', async () => {
-    renderSection(SETTINGS_DEFAULTS_V18, []);
+    renderSection(SETTINGS_DEFAULTS_V19, []);
     expect(await within(row(LAUNCH_PROFILE.plugins)).findByText(LAUNCH_PROFILE.pluginsNone)).toBeTruthy();
   });
 

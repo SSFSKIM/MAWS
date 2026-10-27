@@ -10,9 +10,9 @@ import { totalmem } from 'node:os'; // C12: the default memory budget
 import { app, BrowserWindow, dialog, screen } from 'electron';
 import type { ClientRef } from '@shared/ipc/client';
 import { pageOf } from './ipc/clients';
-import { createHosts } from './hosts';
+import { createHosts, prepareLaunch, type LaunchShape } from './hosts'; // P5 O2 M7: prepareLaunch
 import { installRouter } from './ipc/router';
-import { startSettings } from './settings';
+import { startSettings, type SettingsService } from './settings';
 import { startWithProfileLock } from './files/profile-lock';
 import { describeMainBuild, loadedBundlePath, olderInstanceNotice, staleBuildCheck, type MainBuild } from './build-identity'; // E11 §2.7; F2b 2.7b
 import { builtAtLabel } from '@shared/app/build-time'; // E11 §2.7
@@ -233,17 +233,31 @@ function answerSecondLaunch(launched: MainBuild | null): void {
 }
 
 void startWithProfileLock(app, () => {
+  // P5 O2 M7: the settings are read before the hosts, and the launch's shape (`supervisor.shape`, read once) settled
+  // before they are created: the default profile's LaunchAgent installed, repaired or uninstalled first
+  const settings = startSettings(join(app.getPath('userData'), 'settings.json'));
+  const launch = prepareLaunch(settings.state().settings.supervisor.shape);
+  if (!(launch instanceof Promise)) return startMain(settings, launch);
+  void launch.then(
+    (settled) => startMain(settings, settled),
+    (error: unknown) => {
+      console.error('[hosts] the launch could not settle its shape; quitting', error);
+      app.exit(1);
+    },
+  );
+}, { build: MAIN_BUILD, onSecondInstance: answerSecondLaunch }); // E11 §2.7
+
+function startMain(settings: SettingsService, launch: LaunchShape): void {
   installContentSecurityPolicy();
   // C9 block begin: the harness's fake session directories; a terminal's links open through pty.openLink
   if (process.env.MAWS_HARNESS === '1') prepareHarness();
   registerPtyOpenLink();
   // C9 block end
-  const hosts = createHosts(MAIN_BUILD); // E11 §2.7: main's build for host.status
+  const hosts = createHosts(MAIN_BUILD, launch); // E11 §2.7: main's build for host.status; P5 O2 M7: the launch's shape
   installRouter({ appUrl, dispatchToHost: hosts.dispatch });
   // P5 O1 M3 (OX4): the client port, the one way a machine-bound service reaches the person's screen: dialogs, the
   // Replace question, Finder, the browser, notifications, the badge and focus. `openWindow` is read when a focus needs it.
   const clientPort = electronClientPort({ env: process.env, openWindow: () => openWindow() });
-  const settings = startSettings(join(app.getPath('userData'), 'settings.json'));
   // E11: every will-quit step below joins one ordered list behind one listener (tracker row E10 "14 will-quit listeners");
   // a step's promise (the hosts' draining close of a kept supervisor's socket) holds the exit, bounded by the port's grace;
   // P4 W2-B: the hosts' stop is a drain, run before the rest, which stop once it has settled
@@ -803,7 +817,7 @@ void startWithProfileLock(app, () => {
     // C3's engine host stops its sessions within the grace; a host that cannot answer (not started, or a build without
     // C3's command) has nothing to stop. E10: through the quit's stop-all (`host.stopAll` to a detached supervisor, which
     // then exits; `engine.shutdown` to a utility host), and keep offered in detached mode with the setting's default.
-    ...engineQuitDeps(hosts, () => settings.state().settings),
+    ...engineQuitDeps(hosts, () => settings.state().settings, () => launch.mode === 'daemon'), // P5 O2 M7: terminals outlive the app on the daemon shape
     // debt wave 6: past the bound, the ladder's SIGKILL rung for the engines still the engine host's children
     engines: { hostPid: () => hosts.snapshot('engine-host').pid, ps: listProcesses, kill: (pid) => process.kill(pid, 'SIGKILL') },
     // E5 start: the unsaved files the windows pushed, and Save all's round trip
@@ -853,4 +867,4 @@ void startWithProfileLock(app, () => {
   });
   shutdown.add('voice', () => voice.dispose());
   // E9 end
-}, { build: MAIN_BUILD, onSecondInstance: answerSecondLaunch }); // E11 §2.7
+}

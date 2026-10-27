@@ -8,6 +8,8 @@ import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import type { CommandResult, HostState } from '@shared/ipc/schema';
 import type { HostStatus, SupervisorStatus } from '@shared/ipc/schema/host';
 import { validateEventPayload } from '@shared/ipc/validate';
+import type { DaemonStatus } from '@shared/ipc/schema/daemon';
+import { daemonStatus } from '../../../test/support/builders';
 import { CommandFailure } from '../ipc/router';
 import type { HostFacts } from './supervisor';
 import { startHostStatus, type HostStatusDeps } from './status';
@@ -22,7 +24,7 @@ const supervisorStatus = (over: Partial<SupervisorStatus> = {}): SupervisorStatu
   socketPath: '/u/supervisor/host.sock', logPath: '/u/supervisor/host.log', orphansKilled: 0, ...over,
 });
 
-function harness(transport: HostFacts['transport'] = 'detached') {
+function harness(transport: HostFacts['transport'] = 'detached', shape: Pick<HostStatusDeps, 'daemon' | 'daemonUnavailable'> = {}) {
   let state: HostState = { state: 'starting', pid: null, restarts: 0, revision: 0 };
   let facts: HostFacts = { transport, reason: null, refused: null, waitingLiveSessions: null, lastExit: null };
   const stateListeners = new Set<(s: HostState) => void>();
@@ -46,6 +48,7 @@ function harness(transport: HostFacts['transport'] = 'detached') {
     emit: (status) => void emitted.push(status),
     register: ((name: string, handler: (input: unknown) => unknown) => void handlers.set(name, handler)) as HostStatusDeps['register'],
     openPath,
+    ...shape,
   };
   const service = startHostStatus(deps);
   return {
@@ -71,6 +74,7 @@ describe('host.status', () => {
     const h = harness();
     await expect(h.call('host.status')).resolves.toEqual({
       transport: 'detached', state: 'starting', supervisor: null, appBuildId: APP_BUILD, appWire: APP_WIRE, mainBuild: MAIN_BUILD, matches: null, reason: null, waitingLiveSessions: null, lastExit: null,
+      daemon: null, daemonUnavailable: null, // P5 O2 M7: the embedded shape
     });
     h.move({ state: 'ready', pid: 4242 });
     expect(h.emitted.at(-1)).toMatchObject({ state: 'ready', supervisor: null, matches: null });
@@ -145,6 +149,32 @@ describe('host.status', () => {
     h.move({ state: 'ready', pid: 9 });
     h.status(supervisorStatus({ mode: 'utility', socketPath: null, logPath: null }));
     await expect(h.call('host.status')).resolves.toMatchObject({ transport: 'utility', supervisor: { mode: 'utility' }, matches: 'same' });
+  });
+
+  // P5 O2 M7: on the daemon shape the engine host is `mawsd`'s to update, so the banner's comparison is with the build
+  // the daemon would start, not the app's own
+  it('on the daemon shape reports the daemon and compares the engine host with the build the daemon would start', () => {
+    let daemon: DaemonStatus | null = null;
+    const h = harness('detached', { daemon: () => daemon });
+    h.move({ state: 'ready', pid: 4242 });
+    h.status(supervisorStatus());
+    expect(h.emitted.at(-1)).toMatchObject({ transport: 'daemon', daemon: null, matches: null }); // not yet read: no banner either way
+    daemon = daemonStatus({ build: { ...daemonStatus().build, engineHostBuildId: APP_BUILD } });
+    h.service.refresh();
+    expect(h.emitted.at(-1)).toMatchObject({ transport: 'daemon', daemon, matches: 'same' });
+    daemon = daemonStatus({ build: { ...daemonStatus().build, engineHostBuildId: 'newer00000000000' } }); // the daemon would start another
+    h.service.refresh();
+    expect(h.emitted.at(-1)?.matches).toBe('build'); // though the engine host is this app's own build
+    h.status(supervisorStatus({ buildId: 'newer00000000000' }));
+    expect(h.emitted.at(-1)?.matches).toBe('same');
+    h.move({ state: 'crashed' }, { reason: 'incompatible', refused: 'protocol', waitingLiveSessions: 1 });
+    expect(h.emitted.at(-1)).toMatchObject({ transport: 'daemon', matches: 'protocol' }); // a refusal says itself, as embedded
+    for (const status of h.emitted) expect(validateEventPayload('host.status', status).ok).toBe(true);
+  });
+
+  it('says why a launch asked for the daemon runs embedded', async () => {
+    const h = harness('detached', { daemonUnavailable: 'no LaunchAgent is installed' });
+    await expect(h.call('host.status')).resolves.toMatchObject({ transport: 'detached', daemon: null, daemonUnavailable: 'no LaunchAgent is installed' });
   });
 
   it('stop unsubscribes', () => {

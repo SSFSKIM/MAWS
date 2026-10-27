@@ -65,7 +65,7 @@ export function SupervisorRow() {
           {ROW.restartNow}
         </button>
       )}
-      {status?.transport === 'detached' && (
+      {status !== null && status.transport !== 'utility' && ( // P5 O2 M7: the engine host keeps its log on the daemon shape too
         <button type="button" className={BUTTON} onClick={() => void openLog()}>
           {ROW.openLog}
         </button>
