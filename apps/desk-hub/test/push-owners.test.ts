@@ -2,7 +2,7 @@
 // with a listing goes to its listed owners' devices alone and carries only {project, machine, session, kind}; a session
 // with no listing on a v2 machine pushes nothing, while DX2's push keeps today's rule; and a device the head no longer
 // lists is pushed nothing.
-import { generateSigningKey, type SignedOrgState } from 'org-protocol';
+import { generateSigningKey, signEvent, type SignedOrgState } from 'org-protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { listing, mintRef, type V2Machine } from '../fake-machine/org';
 import type { PushNotice } from '../src/protocol/browser';
@@ -168,6 +168,15 @@ describe("DX2's push", () => {
     const push = await waitFor(() => hub.pushes.slice(from).find((p) => p.endpoint === phoneB.endpoint));
     expect(JSON.parse(new TextDecoder().decode(await decrypt(phoneB, push.body)))).toEqual({ project: PROJECT, machine: dx.ref, session: DX_SESSION, kind: 'wrote' });
     expect(hub.pushes.slice(from).map((p) => p.endpoint)).toEqual([phoneB.endpoint]);
+    // The same through M5's signed path: a v2-only event, checked against the head before it is stored, pushes alike.
+    const ts = new Date().toISOString();
+    const signed = await signEvent({ org: ORG, project: PROJECT }, { ts, created: ts, writer: `dx-listed/${DX_SESSION}`, seq: 2, kind: 'message', from: 'maws-1', to: 'host', text: 'signed' }, dx.key.privateKey, dx.key.pub);
+    client.store(PROJECT, signed as unknown as LogEvent);
+    const fromSigned = hub.pushes.length;
+    await client.postOk([{ t: 'events', project: PROJECT, events: [signed as unknown as LogEvent] }]);
+    const pushedSigned = await waitFor(() => hub.pushes.slice(fromSigned).find((p) => p.endpoint === phoneB.endpoint));
+    expect(JSON.parse(new TextDecoder().decode(await decrypt(phoneB, pushedSigned.body)))).toEqual({ project: PROJECT, machine: dx.ref, session: DX_SESSION, kind: 'wrote' });
+    expect(hub.pushes.slice(fromSigned).map((p) => p.endpoint)).toEqual([phoneB.endpoint]);
     await client.close();
   });
 });

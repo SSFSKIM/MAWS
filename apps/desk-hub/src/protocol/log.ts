@@ -1,7 +1,7 @@
 // DX1 — log events (docs/doperpowers/specs/2026-10-15-desk-design.md): smns §3's events, carried by the hub exactly as
 // received. The hub reads `writer`, `seq`, `kind`, `to`, and `member`; every other field passes through, which is why an
 // event is typed as an open object.
-import { isHubPosition, isHubWriter, isIsoMillis, isLogSeq, hubWriter, HUB_WRITER_PREFIX, LEGACY_WRITER_PREFIX, writerMachine } from 'org-protocol';
+import { isHubPosition, isHubWriter, isIsoMillis, isLogSeq, hubWriter, HUB_WRITER_PREFIX, LEGACY_WRITER_PREFIX, writerMachine, type Sig } from 'org-protocol';
 import type { JsonObject } from './json';
 
 // The writer grammar and the ISO time rule live in the protocol package (apps/org-protocol), which the v2 writer-to-
@@ -18,12 +18,21 @@ export type Mac = { nonce: string; value: string };
 
 export type Recipient = { session: string; alias: string };
 
+/**
+ * A log event. `mac` is DX1's code; `sig` is RL8's v2 signature (apps/org-protocol), made first when an event carries
+ * both (dual coding), so the mac covers it. During the migration the hub also carries v2-only events, whose `mac` is
+ * absent although the type keeps it: DX1's readers (the daemon's import, desk-web's `isLogEvent`) refuse such an event
+ * as malformed. `nonce` is a v2 `hub/<member>` event's own: 16 random bytes in canonical base64url, inside its
+ * signature, by which a resend is known (a dual-coded one carries it too).
+ */
 export type LogEvent = JsonObject & {
   ts: string;
   writer: string;
   seq: number;
   kind: string;
   mac: Mac;
+  sig?: Sig;
+  nonce?: string;
 };
 
 /**
@@ -41,6 +50,14 @@ export type HumanDraft = {
 };
 
 export type HumanEvent = HumanDraft & { mac: Mac };
+
+/**
+ * A device's `human` (RL8, O11 M5): the draft signed by one of its member's devices before the hub positions it, with
+ * its own `nonce` (inside the signature), and DX1's `mac` too when it is dual-coded. It arrives as DX3's `human`
+ * message does, `{t: 'human', event}`, and is answered by `human-ack` naming its `nonce`; DX3's `ProjectUp` keeps
+ * typing the sealed web one, which desk-web sends.
+ */
+export type SignedHumanEvent = HumanDraft & { nonce: string; sig: Sig; mac?: Mac };
 
 /** `{writer: max seq}` for one project: the version vector of the log handshake (DX2). */
 export type Vector = Record<string, number>;
