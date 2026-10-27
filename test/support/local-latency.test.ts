@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BENCH, budgetMisses, clockCheck, invalidReasons, LOCAL_LATENCY_BASELINE, latencyLine, nearestRank, OX7_BUDGET_MS, summarize } from './local-latency';
+import { baselineProblems, BENCH, budgetMisses, clockCheck, invalidReasons, LOCAL_LATENCY_BASELINE, latencyLine, nearestRank, OX7_BUDGET_MS, summarize } from './local-latency';
 
 describe('the bench statistics (P5 O1, M1)', () => {
   it('reads p50 and p95 by nearest rank: the smallest sample at or above that share of the samples', () => {
@@ -67,7 +67,7 @@ describe('the clock check', () => {
 
 describe('the budget (OX7)', () => {
   const baseline = {
-    commit: 'abc', appTree: 'c3507722d' as const, runs: ['1', '2', '3'],
+    commit: 'ecd9b047f', appTree: 'c3507722d' as const, runs: ['1', '2', '3'],
     deltaToFrame: { p50: 6, p95: 10, n: 600, spreadP50: 0.4, spreadP95: 1.1 },
     roundTrip: { p50: 2, p95: 3, n: 200, spreadP50: 0.1, spreadP95: 0.3 },
   };
@@ -76,23 +76,27 @@ describe('the budget (OX7)', () => {
     expect(OX7_BUDGET_MS).toEqual({ p50: 2, p95: 5 });
   });
 
-  // Holds before the baseline is recorded (null: nothing asserted) and after, when the commit that records it touches only
-  // local-latency.ts.
-  it('a recorded baseline is three runs of the whole bench at the app of c3507722d, each metric ranked and its spread non-negative', () => {
-    if (LOCAL_LATENCY_BASELINE === null) return;
-    const { commit, appTree, runs, deltaToFrame, roundTrip } = LOCAL_LATENCY_BASELINE;
-    expect(commit).toMatch(/^[0-9a-f]{7,40}$/);
-    expect(appTree).toBe('c3507722d');
-    expect(runs).toHaveLength(3);
-    expect(new Set(runs).size).toBe(3);
-    expect(deltaToFrame.n).toBeGreaterThanOrEqual(Math.ceil(BENCH.markersPerTurn * (BENCH.turns - BENCH.warmupTurns) * BENCH.sampleFloor));
-    expect(roundTrip.n).toBe(BENCH.roundTrips - BENCH.roundTripWarmup);
-    for (const metric of [deltaToFrame, roundTrip]) {
-      expect(metric.p50).toBeGreaterThanOrEqual(0);
-      expect(metric.p95).toBeGreaterThanOrEqual(metric.p50);
-      expect(metric.spreadP50).toBeGreaterThanOrEqual(0);
-      expect(metric.spreadP95).toBeGreaterThanOrEqual(0);
-    }
+  it('a baseline is three distinct runs of the whole bench at the app of c3507722d, each metric ranked and its spread non-negative', () => {
+    expect(baselineProblems(null)).toEqual([]); // not yet recorded: nothing to hold
+    expect(baselineProblems(baseline)).toEqual([]);
+    expect(baselineProblems({
+      ...baseline, commit: 'HEAD', runs: ['1', '1'],
+      deltaToFrame: { ...baseline.deltaToFrame, n: 569, p95: 5 },
+      roundTrip: { ...baseline.roundTrip, n: 220, spreadP95: -0.1 },
+    })).toEqual([
+      'commit HEAD is not a sha',
+      'runs [1, 1] are not three distinct run ids',
+      'delta-to-frame n 569 is under the floor of 570',
+      'delta-to-frame p95 5 is under its p50 6',
+      'round trip n 220 is not 200',
+      'round trip spreadP95 -0.1 is negative',
+    ]);
+  });
+
+  // The recorded baseline itself, once the commit that records it (touching only local-latency.ts) lands; until then the
+  // case is reported as skipped, not passed.
+  it.skipIf(LOCAL_LATENCY_BASELINE === null)('the recorded baseline is well formed', () => {
+    expect(baselineProblems(LOCAL_LATENCY_BASELINE)).toEqual([]);
   });
 
   it('names each metric over its budget and passes one exactly at it', () => {

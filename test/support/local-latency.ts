@@ -15,17 +15,37 @@ export interface LatencySummary {
 
 export const OX7_BUDGET_MS = { p50: 2, p95: 5 } as const;
 
-export const LOCAL_LATENCY_BASELINE: null | {
+export interface LocalLatencyBaseline {
   commit: string;
   appTree: 'c3507722d';
   runs: string[];
   deltaToFrame: LatencySummary & { spreadP50: number; spreadP95: number };
   roundTrip: LatencySummary & { spreadP50: number; spreadP95: number };
-} = null;
+}
+export const LOCAL_LATENCY_BASELINE: LocalLatencyBaseline | null = null;
 
 // The run's shape: three turns of 300 deltas, the first a warm-up; 220 round trips, the first 20 a warm-up. A run with
 // fewer than 95% of the kept markers as samples is invalid, as is a renderer clock more than 1 ms off the runner's.
 export const BENCH = { turns: 3, warmupTurns: 1, markersPerTurn: 300, roundTrips: 220, roundTripWarmup: 20, sampleFloor: 0.95, clockToleranceMs: 1 } as const;
+
+// What is wrong with a recorded baseline, each one line; empty when it is well formed, and for none recorded yet. It
+// is three distinct valid runs at a commit, each metric's n a valid run's, ranked, with non-negative spreads.
+export function baselineProblems(baseline: LocalLatencyBaseline | null): string[] {
+  if (baseline === null) return [];
+  const problems: string[] = [];
+  if (!/^[0-9a-f]{7,40}$/.test(baseline.commit)) problems.push(`commit ${baseline.commit} is not a sha`);
+  if (baseline.appTree !== 'c3507722d') problems.push(`appTree ${String(baseline.appTree)} is not c3507722d`);
+  if (baseline.runs.length !== 3 || new Set(baseline.runs).size !== 3) problems.push(`runs [${baseline.runs.join(', ')}] are not three distinct run ids`);
+  const floor = Math.ceil(BENCH.markersPerTurn * (BENCH.turns - BENCH.warmupTurns) * BENCH.sampleFloor);
+  const trips = BENCH.roundTrips - BENCH.roundTripWarmup;
+  for (const [label, metric, n] of [['delta-to-frame', baseline.deltaToFrame, null], ['round trip', baseline.roundTrip, trips]] as const) {
+    if (n === null ? metric.n < floor : metric.n !== n) problems.push(`${label} n ${metric.n} ${n === null ? `is under the floor of ${floor}` : `is not ${n}`}`);
+    if (metric.p50 < 0) problems.push(`${label} p50 ${metric.p50} is negative`);
+    if (metric.p95 < metric.p50) problems.push(`${label} p95 ${metric.p95} is under its p50 ${metric.p50}`);
+    for (const spread of ['spreadP50', 'spreadP95'] as const) if (metric[spread] < 0) problems.push(`${label} ${spread} ${metric[spread]} is negative`);
+  }
+  return problems;
+}
 
 // The p-th percentile by nearest rank over ascending samples: the ⌈p/100 · n⌉-th smallest.
 export function nearestRank(sorted: readonly number[], p: number): number {
