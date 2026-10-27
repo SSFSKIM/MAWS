@@ -1077,11 +1077,11 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     expect(lifecycle(s.a!)).toBe('exiting');
   });
 
-  it.each([
+  it.each<[string, CronRecord | null]>([
     ['a listed session cron', { sessionCrons: [cron], toolSinceStop: false }],
     ['a cron tool since the Stop', { sessionCrons: [], toolSinceStop: true }],
     ['no record', null],
-  ] as const)('a resume whose record shows %s holds the session until its first Stop', async (_case, record) => {
+  ])('a resume whose record shows %s holds the session until its first Stop', async (_case, record) => {
     const { table, s } = await releaseTable(['a'], resumeWithRecord(record));
     expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'resumed' });
     table.setIdleRelease({ idleMs: IDLE_MS, active: true });
