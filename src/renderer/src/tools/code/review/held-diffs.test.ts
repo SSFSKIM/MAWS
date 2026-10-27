@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import { createHeldDiffs, diffKeys, type HeldDiffState } from './held-diffs';
 import { deferred, installFakeMain, ok } from '../../../test-support/code';
+import { createClient } from '../../../ipc/client';
 
 interface Target {
   directory: string;
@@ -33,7 +34,7 @@ describe('createHeldDiffs: the overtaken hook', () => {
     };
     const asked: number[] = [];
     const state = createStore<HeldDiffState>()(() => ({ diffs: new Map(), files: new Map() }));
-    const cache = createHeldDiffs<Target>(main.bridge, state.setState, {
+    const cache = createHeldDiffs<Target>(createClient(() => main.bridge), state.setState, {
       keys,
       input: (t) => ({ directory: t.directory, scope: t.scope }),
       overtaken() {

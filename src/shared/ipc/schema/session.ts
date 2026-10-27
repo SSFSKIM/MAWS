@@ -40,7 +40,6 @@ import {
 // (AppSessionIdSchema and MessageUuidSchema come with C3's imports above.)
 import { ProjectIdSchema, SessionIdSchema } from '@shared/graph/ids';
 import { ForeignHolderSchema, SessionRecordSchema } from '@shared/graph/session';
-import { PtyIdSchema } from './pty'; // P5 O6 M2: session.takeOver's paneId
 // C4 end
 // C7 start: the composer's prompt history shapes (C7 execution document, Interfaces "X2 additions")
 import { HistoryEntrySchema, PastedContentSchema } from '../../composer/history-entry';

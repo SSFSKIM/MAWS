@@ -11,6 +11,7 @@ import type { ArtifactExportFormat } from '@shared/maws/tools';
 import { resetExportFormats } from '../library/export';
 import { useNotices } from '../stores/notices';
 import { deferred, fail, installFakeMain, ok } from '../test-support/code';
+import { createClient } from '../ipc/client';
 import { CONNECT_FAILURE, GWS_INSTALL, MAYBE_SENT, SEND_TO_COPY as C, sendFailure } from './copy';
 import { useSendToAction } from './header';
 import { SendToHost } from './SendToSheet';
@@ -281,7 +282,7 @@ describe('the header’s Send to', () => {
   });
 
   it('a bridge that cannot answer the receipts read leaves none, nothing thrown', async () => {
-    const stop = connectDelivery(installFakeMain(() => Promise.reject(new Error('unexpected delivery.receipts'))).bridge);
+    const stop = connectDelivery(createClient(() => installFakeMain(() => Promise.reject(new Error('unexpected delivery.receipts'))).bridge));
     await act(async () => {});
     expect(useDelivery.getState().receipts).toEqual({});
     stop();
