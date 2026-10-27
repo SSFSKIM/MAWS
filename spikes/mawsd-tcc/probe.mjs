@@ -152,6 +152,9 @@ class Probe {
     const stub = join(this.root, 'claude');
     writeFileSync(stub, stubScript(results), { mode: 0o755 });
     mkdirSync(join(this.root, 'cwd'), { recursive: true });
+    // launchd opens StandardOutPath and StandardErrorPath before it execs, so their directory exists first, as `mawsd
+    // install` makes it (owner-only) before it loads the unit
+    mkdirSync(join(profile, 'mawsd'), { recursive: true, mode: 0o700 });
     const label = `dev.maws.mawsd.tcc-probe-${this.id}-b`;
     // the unit's plist (src/mawsd/units/launchd.ts), for a scratch profile under a probe label
     this.load(label, plist({ label, program: [this.binary, '--disable-sigusr1', this.entry, 'run', '--unit', '--dir', join(profile, 'mawsd')], env: { ELECTRON_RUN_AS_NODE: '1', MAWS_USER_DATA: profile }, out: join(profile, 'mawsd', 'mawsd.out') }));

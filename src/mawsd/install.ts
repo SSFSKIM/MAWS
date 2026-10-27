@@ -10,7 +10,9 @@
 // with the delegation's id as its prefix when it has none (before the unit's first start, so the daemon reads it); the
 // wrapper `<profile>/mawsd/bin/mawsd` and, for the default profile, its link `~/.local/bin/mawsd`; then the unit applied
 // (units/unit.ts's `apply`: written when changed, loaded, the daemon restarted when a loaded unit changed, or when
-// `current` now names another release). Idempotent.
+// `current` now names another release). On Linux the release is activated as one transition: a failure after `current`
+// flipped (the wrapper, the unit, its restart) puts `current` back, as a failed unit transition puts its file back, so a
+// retry sees the flip again and completes it; only once it is active are older releases pruned. Idempotent.
 // An uninstall unloads the unit (which ends `mawsd`; the hosts and their sessions keep running, and the next app
 // connects to the engine host in either shape), removes its file, the wrapper and the link if it is ours.
 //
@@ -23,7 +25,7 @@ import { defaultProfileDir } from '@shared/daemon/profile';
 import { makePrivateDirectory } from '@shared/host/private-listen';
 import { readOrMintMachineRef } from '@shared/machine/identity-file';
 import type { MachineRef } from '@shared/machine/ref';
-import { installRelease, packOf, releaseProgram, type InstalledRelease, type Pack } from './release';
+import { installRelease, packOf, pruneReleases, releaseProgram, restoreCurrent, type InstalledRelease, type Pack } from './release';
 import { launchdUnit } from './units/launchd';
 import { systemdUnit } from './units/systemd';
 import { DEFAULT_LABEL, UnitError, writeWhole, type Unit, type UnitChange, type UnitDeps, type UnitProgram, type UnitSpec } from './units/unit';
@@ -126,19 +128,27 @@ export async function installDaemon(options: InstallOptions, deps: InstallDeps):
   mkdirSync(profileDir, { recursive: true, mode: 0o700 });
   makePrivateDirectory(join(profileDir, DAEMON_FILES.dir));
   const ref = delegationId === undefined ? null : readOrMintMachineRef(profileDir, { prefix: delegationId });
-  const release = pack === null ? null : installRelease(pack, deps.home);
+  const flip = pack === null ? null : installRelease(pack, deps.home);
   const spec: UnitSpec = { label, profileDir, program: pack === null ? options.program : releaseProgram(deps.home) };
 
   const wrapper = wrapperPath(profileDir);
-  mkdirSync(dirname(wrapper), { recursive: true, mode: 0o700 });
-  writeWhole(wrapper, wrapperText(spec), 0o700);
-  const linked = isDefaultProfile(profileDir, deps.platform, deps.env, deps.home) ? link(join(deps.home, '.local', 'bin'), wrapper) : null;
-
-  let change = await unit.apply(unit.render(spec));
-  if (change === 'unchanged' && release?.flipped) {
-    unit.restart(); // the unit runs `current`, which now names another release; its hosts and sessions keep running (KillMode=process)
-    change = 'updated';
+  let linked: InstallResult['linked'];
+  let change: UnitChange;
+  try {
+    mkdirSync(dirname(wrapper), { recursive: true, mode: 0o700 });
+    writeWhole(wrapper, wrapperText(spec), 0o700);
+    linked = isDefaultProfile(profileDir, deps.platform, deps.env, deps.home) ? link(join(deps.home, '.local', 'bin'), wrapper) : null;
+    change = await unit.apply(unit.render(spec));
+    if (change === 'unchanged' && flip?.flipped) {
+      unit.restart(); // the unit runs `current`, which now names another release; its hosts and sessions keep running (KillMode=process)
+      change = 'updated';
+    }
+  } catch (error) {
+    // no user manager here (2): no unit will run, and the command line runs `current` through the wrapper, so it stays
+    if (flip?.flipped && !(error instanceof UnitError && error.code === 2)) restoreCurrent(deps.home, flip.previous);
+    throw error;
   }
+  const release = flip === null ? null : { ...flip, pruned: pruneReleases(deps.home) };
   return { unit, change, wrapper, linked, ref, release };
 }
 

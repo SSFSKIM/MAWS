@@ -179,6 +179,32 @@ describe('install and uninstall on Linux', () => {
     expect(readdirSync(join(home, '.local/share/maws/mawsd/releases')).sort()).toEqual(['0.0.0-aaaaaaaa', '0.0.0-bbbbbbbb', '0.0.0-cccccccc']);
   });
 
+  it('a failed restart after a flip puts current back, so the next install flips and restarts again', async () => {
+    const profileDir = linuxProfile();
+    await installDaemon({ profileDir, label: 'dev.maws.mawsd', program: linuxProgram('aaaaaaaa') }, deps('linux'));
+    managers.script('systemctl --user restart mawsd.service', { status: 1, stderr: 'Job for mawsd.service failed.' });
+    managers.calls.length = 0;
+    await expect(installDaemon({ profileDir, label: 'dev.maws.mawsd', program: linuxProgram('bbbbbbbb') }, deps('linux'))).rejects.toThrow('Job for mawsd.service failed.');
+    expect(readlinkSync(current())).toBe('releases/0.0.0-aaaaaaaa'); // the daemon still runs a, and current says so
+    expect(readdirSync(join(home, '.local/share/maws/mawsd/releases')).sort()).toEqual(['0.0.0-aaaaaaaa', '0.0.0-bbbbbbbb']); // b stays installed
+
+    managers.calls.length = 0;
+    await expect(installDaemon({ profileDir, label: 'dev.maws.mawsd', program: linuxProgram('bbbbbbbb') }, deps('linux'))).resolves.toMatchObject({ change: 'updated', release: { release: '0.0.0-bbbbbbbb', previous: '0.0.0-aaaaaaaa', flipped: true } });
+    expect(managers.changes()).toEqual(['systemctl --user restart mawsd.service']);
+    expect(readlinkSync(current())).toBe('releases/0.0.0-bbbbbbbb');
+  });
+
+  it('a first install whose unit fails to load leaves no current; with no user manager current stays for the command line', async () => {
+    const profileDir = linuxProfile();
+    managers.script('systemctl --user enable --now mawsd.service', { status: 1, stderr: 'Failed to enable unit' });
+    await expect(installDaemon({ profileDir, label: 'dev.maws.mawsd', program: linuxProgram('aaaaaaaa') }, deps('linux'))).rejects.toThrow('Failed to enable unit');
+    expect(existsSync(current())).toBe(false);
+    managers.userManager = false;
+    await expect(installDaemon({ profileDir, label: 'dev.maws.mawsd', program: linuxProgram('aaaaaaaa') }, deps('linux'))).rejects.toMatchObject({ code: 2 });
+    expect(readlinkSync(current())).toBe('releases/0.0.0-aaaaaaaa');
+    expect(readFileSync(wrapperPath(profileDir), 'utf8')).toContain(`exec '${current()}/runtime/bin/node'`);
+  });
+
   it('a scratch label installs no release: its unit runs the program it was given', async () => {
     const program = linuxProgram();
     await expect(installDaemon({ profileDir: join(home, 'scratch'), label: 'dev.maws.mawsd.e2e-4', program }, deps('linux'))).resolves.toMatchObject({ release: null });

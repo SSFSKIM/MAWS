@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 // `pnpm mawsd:pack` (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M8 "The pack", "The Linux runtime and the Node
-// floor"): runs `pnpm build:main-preload`, then assembles `dist/mawsd/<version>-<commit>/`, the package `mawsd install`
-// installs as a Linux release (src/mawsd/release.ts):
+// floor"): runs `pnpm build:main-preload`, then assembles `dist/mawsd/<version>-<commit>-<content>/`, the package
+// `mawsd install` installs as a Linux release (src/mawsd/release.ts). `<content>` is 8 hex of the SHA-256 of everything
+// in it but its package.json (each file's path, kind and bytes, in path order), so the release name is its content's:
+// the same content is the same release, which an install copies once and never rewrites, and a rebuild of one commit
+// that changed anything is another release.
 //
 //   out/main/**                  main's build, whose second input is mawsd.js (and the host bundles it spawns)
 //   node_modules/…               the production closure of the externals the bundle guard allows (zod, the MCP SDK,
@@ -15,7 +18,7 @@
 import { Buffer } from 'node:buffer';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import process from 'node:process';
@@ -59,6 +62,28 @@ function commitOf(root) {
   const head = spawnSync('git', ['rev-parse', '--short=8', 'HEAD'], { cwd: root, encoding: 'utf8' }); // as electron.vite.config.ts's build stamp
   if (head.status !== 0) throw new Error(`cannot read ${root}'s commit: ${head.stderr.trim()}`);
   return head.stdout.trim();
+}
+
+// 8 hex of the SHA-256 of the tree under `dir`: every entry's path relative to it, its kind (file, executable file,
+// link) and its bytes or link target, in path order.
+export function contentId(dir) {
+  const hash = createHash('sha256');
+  const walk = (at) => {
+    for (const name of readdirSync(join(dir, at)).sort()) {
+      const rel = at === '' ? name : `${at}/${name}`;
+      const stat = lstatSync(join(dir, rel));
+      if (stat.isDirectory()) {
+        walk(rel);
+      } else if (stat.isSymbolicLink()) {
+        hash.update(`l\0${rel}\0${readlinkSync(join(dir, rel))}\0`);
+      } else {
+        hash.update(`${stat.mode & 0o111 ? 'x' : 'f'}\0${rel}\0${stat.size}\0`);
+        hash.update(readFileSync(join(dir, rel)));
+      }
+    }
+  };
+  walk('');
+  return hash.digest('hex').slice(0, 8);
 }
 
 const sha256Of = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
@@ -149,9 +174,9 @@ export async function pack({
   }
   if (!existsSync(join(root, 'out', 'main', 'mawsd.js'))) throw new Error(`${root}/out/main/mawsd.js is not built`);
   const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-  const release = `${version}-${commit}`;
   mkdirSync(out, { recursive: true });
-  const staged = mkdtempSync(join(out, `.${release}.`));
+  const staged = mkdtempSync(join(out, '.staging.'));
+  let release;
   try {
     cpSync(join(root, 'out', 'main'), join(staged, 'out', 'main'), { recursive: true });
     for (const dir of closure(root, EXTERNALS)) {
@@ -164,6 +189,7 @@ export async function pack({
       node = await addRuntime({ into: join(staged, 'runtime'), target: `linux-${arch}`, manifestPath: manifest, cache: join(out, DOWNLOADS), download, log });
       smoke({ node: join(staged, 'runtime', 'bin', 'node'), version: node, pack: staged });
     }
+    release = `${version}-${commit}-${contentId(staged)}`;
     const packageJson = { name: 'maws-mawsd', version, private: true, main: 'out/main/mawsd.js', mawsd: { release, commit, platform, arch, node } };
     writeFileSync(join(staged, 'package.json'), `${JSON.stringify(packageJson, null, 2)}\n`);
     // the output directory holds this pack alone (and the download cache)

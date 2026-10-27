@@ -8,10 +8,10 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
 import { URL } from 'node:url';
-import { closure, pack } from './mawsd-pack.mjs';
+import { closure, contentId, pack } from './mawsd-pack.mjs';
 
 let dir;
 let root;
@@ -49,6 +49,7 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 const quiet = { log: () => {} };
 const listing = (at) => readdirSync(at, { recursive: true }).map(String).sort();
+const packs = (out) => readdirSync(out).filter((name) => name !== '.downloads');
 
 test('the closure is the externals and their production dependencies, resolved as Node resolves them', () => {
   assert.deepEqual(closure(root, ['zod', '@modelcontextprotocol/sdk', 'node-pty']), [
@@ -69,7 +70,7 @@ test('a production dependency that is not installed refuses the closure', () => 
 
 test('the pack holds out/main, the closure and a package.json naming its release; on macOS no runtime', async () => {
   const at = await pack({ root, out: join(dir, 'dist'), platform: 'darwin', arch: 'arm64', commit: 'a1b2c3d4', build: false, ...quiet });
-  assert.equal(at, join(dir, 'dist', '1.2.3-a1b2c3d4'));
+  assert.match(at, /\/dist\/1\.2\.3-a1b2c3d4-[0-9a-f]{8}$/);
   assert.equal(readFileSync(join(at, 'out/main/mawsd.js'), 'utf8'), 'require("zod");\n');
   assert.ok(existsSync(join(at, 'out/main/chunks/a.js')));
   assert.ok(!existsSync(join(at, 'out/preload')));
@@ -81,15 +82,40 @@ test('the pack holds out/main, the closure and a package.json naming its release
     version: '1.2.3',
     private: true,
     main: 'out/main/mawsd.js',
-    mawsd: { release: '1.2.3-a1b2c3d4', commit: 'a1b2c3d4', platform: 'darwin', arch: 'arm64', node: null },
+    mawsd: { release: basename(at), commit: 'a1b2c3d4', platform: 'darwin', arch: 'arm64', node: null },
   });
+});
+
+test('the release is named by its content: the same tree packs to the same name, a rebuild of one commit that changed anything to another', async () => {
+  const options = { root, platform: 'darwin', arch: 'arm64', commit: 'a1b2c3d4', build: false, ...quiet };
+  const first = basename(await pack({ ...options, out: join(dir, 'one') }));
+  assert.equal(basename(await pack({ ...options, out: join(dir, 'two') })), first);
+  write(join(root, 'out/main/chunks/a.js'), '// a chunk, rebuilt\n');
+  const rebuilt = basename(await pack({ ...options, out: join(dir, 'three') }));
+  assert.match(rebuilt, /^1\.2\.3-a1b2c3d4-[0-9a-f]{8}$/);
+  assert.notEqual(rebuilt, first);
+});
+
+test('the content id covers each entry’s path, kind and bytes', () => {
+  const tree = join(dir, 'tree');
+  write(join(tree, 'a/b.js'), 'x');
+  const before = contentId(tree);
+  assert.match(before, /^[0-9a-f]{8}$/);
+  assert.equal(contentId(tree), before);
+  rmSync(join(tree, 'a'), { recursive: true });
+  write(join(tree, 'a/c.js'), 'x');
+  assert.notEqual(contentId(tree), before, 'a renamed file');
+  rmSync(join(tree, 'a'), { recursive: true });
+  write(join(tree, 'a/b.js'), 'x', 0o755);
+  assert.notEqual(contentId(tree), before, 'a file made executable');
 });
 
 test('a new pack replaces the one before it in the output directory', async () => {
   const out = join(dir, 'dist');
   await pack({ root, out, platform: 'darwin', arch: 'arm64', commit: 'aaaaaaaa', build: false, ...quiet });
   await pack({ root, out, platform: 'darwin', arch: 'arm64', commit: 'bbbbbbbb', build: false, ...quiet });
-  assert.deepEqual(readdirSync(out), ['1.2.3-bbbbbbbb']);
+  assert.equal(readdirSync(out).length, 1);
+  assert.match(readdirSync(out)[0], /^1\.2\.3-bbbbbbbb-[0-9a-f]{8}$/);
 });
 
 // ---- the Linux runtime ------------------------------------------------------------------------------------------------
@@ -134,7 +160,7 @@ test('the runtime is refused on a wrong sha256, before it is unpacked, and no pa
     new RegExp(`node-v24.21.0-linux-x64.tar.gz has sha256 ${sha256(archive)}, not the pinned ${'f'.repeat(64)}`),
   );
   assert.deepEqual(fetched, ['https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-x64.tar.gz']);
-  assert.ok(!existsSync(join(out, '1.2.3-a1b2c3d4')));
+  assert.deepEqual(packs(out), []);
   assert.ok(!existsSync(join(out, '.downloads', 'node-v24.21.0-linux-x64.tar.gz')), 'the refused archive is not kept');
 });
 
@@ -159,7 +185,7 @@ test('a runtime failing a smoke check refuses the pack, naming the check', async
   const download = async (_url, to) => cpSync(archive, to);
   const out = join(dir, 'dist');
   await assert.rejects(pack({ root, out, platform: 'linux', arch: 'x64', commit: 'a1b2c3d4', build: false, manifest: manifest('24.21.0', sha256(archive)), download, ...quiet }), /smoke check node:sqlite failed .*No such built-in module/);
-  assert.ok(!existsSync(join(out, '1.2.3-a1b2c3d4')));
+  assert.deepEqual(packs(out), []);
 });
 
 test('a runtime of another version than the pin refuses the pack', async () => {
