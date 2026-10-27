@@ -1099,6 +1099,19 @@ The joint review's second round (`9be0bc941`), 2026-10-27, two P1s, both reprodu
   Rationale: each keeps a host event's single place and its delivery to the endpoint at least once, in order, whatever the clock or the backlog.
   Date/Author: 2026-10-27, M8's executor and doperpowers:reviewer-medium, accepted by O12's phase 2 executor.
 
+- Decision: M6's second half's gaps, settled in building it (the words pass and every deliverer).
+  - **`deliver_imports` asks through the tick that follows it**, which `serve_link` runs after every batch, so an own event's `words?` always follows its upload frame on the socket.
+  - **Only the CLI nudges** for a words-gated writer (`say`'s fast path and both `send` paths); `daemon run`'s tick leaves the writer owed without nudging, which would spin its own loop. The uplink's words pass also sweeps every 10 s.
+  - **Unverified and legacy peers go by whichever deliverer meets them** (`daemon run`'s tick, `say`'s fast path, the uplink's import delivery): the trust model is the same either way, and restricting them to `daemon run` would split one writer's order between deliverers. Words-gated events are the only ones withheld from those callers.
+  - **Fail-closed covers events that carry `verified`**: with `revoked.json` unreadable such an event waits, neither pushed nor asked; an event with no `verified` names no signer and is delivered as usual.
+  - **Checks per event, in order**: a noted push, then revocation (never delivered, whatever the policy), then read-only (an outside event on a read-only machine is settled `refused-read-only` without asking), then the words gate; `deliver_verdict` rechecks both.
+  - **An unanswered ask is a failed attempt**, and after `DELIVERY_ATTEMPTS` the event is settled `failed` as a failed push is; with no endpoint connected nothing is asked and nothing counts, so the event stays owed. Ask ids are random per ask; an answer to an ask no longer held (expired and re-asked, dropped by a revocation, or from an earlier connection) is ignored.
+  - **"`sminos chat` shows it undelivered"** reads as: `chat` lists the recorded event while the delivery record holds it owed; no owed marker is added to chat lines, which have never rendered delivery state.
+  - **The seat `send`** on a cut-over machine records and pushes nothing, reusing the concurrent-delivery branch; a stopped seat is resumed by the uplink's verdict delivery. The printed line names the seat's or member's alias.
+  - DX2's call shapes are kept: `words` is passed to `push_member` and `push_live` only with a verdict, and `gated` is added to `deliver_next`'s result only on a cut-over machine.
+  Rationale: each keeps one deliverer per writer's order and the endpoint's verdict as the only route to words, while leaving the DX2 path's calls and results as they were.
+  Date/Author: 2026-10-27, M6's second executor, accepted by O12's phase 2 executor.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
