@@ -339,8 +339,11 @@ production's Worker or host, or a preview alias of it (`<alias>-desk-hub.…`), 
     Playwright's Chromium must be installed once (`pnpm --filter desk-web exec playwright install chromium`).
 - `staging-sweep.py snapshot|sweep` is the throwaway steps' account sweep: the service tokens and the `desk-hub*`
   Access apps and policies before the run, and after it the deletion of what appeared and is the throwaway org's
-  (service tokens `desk-<org>-*`, apps and policies `desk-hub-staging*`). Anything else that appeared is left alone and
-  fails the sweep; it refuses an org that is not `staging-probe-*` and never deletes production's objects.
+  (service tokens `desk-<org>-*`, and the apps and policies the deploy tool makes on staging, by exact name:
+  `desk-hub-staging`, `desk-hub-staging public paths`, `desk-hub-staging owner`, `desk-hub-staging machines`). Anything
+  else that appeared is left alone and fails the sweep, a name merely starting with `desk-hub-staging` too (a production
+  preview alias's, `desk-hub-staging-desk-hub`, would); it refuses an org that is not `staging-probe-*` and never deletes
+  production's objects.
 
 What they read, at run time, never printed or passed as an argument:
 - `DESK_STAGING_SECRETS` (default `~/.config/claude-secrets/projects/-Users-new-Developer-GitHub-doperpowers`): the
