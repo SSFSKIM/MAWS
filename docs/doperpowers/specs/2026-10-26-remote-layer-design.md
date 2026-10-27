@@ -392,16 +392,27 @@ All keys are P-256: ECDSA for signatures, ECDH for channel keys. Node, WebCrypto
   - There is no recipient policy, narrowing or off switch in this initiative.
   - As today, a peer message never counts as a person's words and never approves anything. Human words come through the bridge and peer messages through the inbox, so the two can't be confused (§5.7).
 - **The label is an attestation.** The hosting machine signs `{machine, session, owners, ownersProof, origin, orgStateVersion}` into the event (RL9). A receiving machine accepts it only if the sending machine is in the current org state, and each claimed owner is one of:
-  - one of the machine's owners, per the org state or its delegation certificate;
+  - one of the machine's owners, per the org state or its delegation certificate. For this check, an org-owned machine's owners are the org's admins (the `@machine` token, below);
   - proven by `ownersProof`: device signatures from the owners themselves, namely the requester's signed spawn action for a MAWS spawn, and an existing owner's signed `manage` action for each co-owner added (§6.1). A `sminos spawn` child copies its parent's owners and proofs, and records the parent's session id.
 
   Grants play no part in this check. They bound spawning only at the hosting machine, which holds the current grants and gets revocations directly (§5.2). Owner sets are small, and each proof is a few hundred bytes.
 - **The residual.** A compromised machine can reuse a proof to label another of its sessions with that owner. It can't label a session with a member who never spawned or was never added on that machine.
 - **Default owners** by how a session started (desk-sminos-orchestrator's sminos-side rule):
-  - a terminal session: its machine's owner;
+  - a terminal session: its machine's owners, recorded as the token `@machine` (below);
   - a session MAWS spawned: the signed requester. Desk spawns already record `by` as the hub member id (`sminos_rpc.py:618-620`).
-  - a session spawned with `sminos spawn`: the spawning session's owners, **copied into the new record at spawn time**, and it copies the parent's principal and inference route fields (§6.4). Starting the child on the parent's slot is deferred with account-managed inference: `claude --bg` gives a seat the bg supervisor's environment, not the spawner's. A terminal parent carries no proofs, and its children inherit the machine owner. Today sminos records `by` as the spawner's alias (`caller_alias()`, `sminos.py:7598, 7693`), and aliases change and are reused. sminos must also record the spawner's session id, and never resolve owners later through the alias.
-- **Lane A's session record** is sminos's member record. It has no owners field today, so that field is new. Sessions that predate it default to the machine owner.
+  - a session spawned with `sminos spawn`: the spawning session's owners, **copied into the new record at spawn time**, and it copies the parent's principal and inference route fields (§6.4). Starting the child on the parent's slot is deferred with account-managed inference: `claude --bg` gives a seat the bg supervisor's environment, not the spawner's. A terminal parent carries no proofs, and its children copy its `@machine`. Today sminos records `by` as the spawner's alias (`caller_alias()`, `sminos.py:7598, 7693`), and aliases change and are reused. sminos must also record the spawner's session id, and never resolve owners later through the alias.
+- **Lane A's session record** is sminos's member record. It has no owners field today, so that field is new. Sessions that predate it default to `@machine`.
+- **The `@machine` token** (desk-sminos-orchestrator, 2026-10-27). Before cutover nothing on a machine knows its owner's member id: `hub.json`, `org.json` and the hub's welcome carry none. So sminos records `@machine` wherever a default above names the machine's owners: terminal sessions, their `sminos spawn` children, records that predate the field, and the daemon's reconciliation.
+  - **What it means.** The machine's owners in the signed org state, or its delegation's (§5.3): its member owners, or the org's admins when the org owns the machine. It never resolves to `'org'` as an owner, because owners hold `approve` and `approve` is never org-wide (§5.5). The admins already sign an org-owned machine's grants (§6.3).
+  - **Who resolves it, and when.** The endpoint module, only against signed org state:
+    - at dispatch, against the current state, for grades (§5.5);
+    - when it attests (RL9) or lists (RL6's projection), against the version it stamps.
+  - **It never leaves the machine.** Attestations and listings carry member ids.
+  - **It isn't an alias.** A terminal session carries no `ownersProof`, so receivers check its owners against the machine's current owners anyway. A member id copied at creation would fail that check after an ownership change; the token follows the change. A change to `machines[].owners` or to the admins re-issues the listings of `@machine` records with a new revision.
+  - **It can stand beside member ids.** An owner added by a `manage` action is recorded as a member id with its proof.
+  - **As a principal** it means the binding of the record's inference slot on this machine (§6.4). With no explicit binding, the default slot binds to the machine's sole member owner, or to `'org'` on an org-owned machine. A machine with several member owners binds its default slot explicitly. Until it does, the principal is unresolved, which nothing enforces in this initiative.
+  - It can't collide with a member id (32 hex) or with `'org'`.
+  - **Rejected:** the hub returning the enrolling member at redemption. That needs a hub change and a re-enrollment, for a value O14's v2 re-enrollment supersedes anyway.
 
 #### 5.9 What the hub can and can't do
 
@@ -670,6 +681,7 @@ These are named here with their binding fields. Byte-level schemas and test vect
   - The hello is `{protocol, build, machine, leaseGeneration}`, authenticated by the Access service token.
   - The hub multiplexes channel frames as `{channel, seq, bytes}` opaque to the hub.
   - Lease and `hb`/`hb-ack` as in DX2. Frames are under 1 MiB.
+  - An `endpoint {record}` frame carries the machine's endpoint record (RL6) up to the hub, which stores it and serves it to the org's apps (O11 M4). Its signature domain is `smns-endpoint-v1`. The app verifies it against `machines[].pub` and keeps the newest `issued`; the hub refuses a record older than the one it holds.
 - **RL2, Channel.** It is carried either in RL1's multiplex or over a direct WebSocket to the endpoint module (§4.1). The bytes and handshake are the same on both.
   - The SIGMA-I handshake over P-256, carrying `{deviceId, machine, clientClass, orgStateVersion}`.
   - HKDF-SHA-256 per direction.
@@ -696,8 +708,8 @@ These are named here with their binding fields. Byte-level schemas and test vect
   - A root transition `{fromVersion, newRootKeys[], issued}` is signed by the recovery key. Machines accept it over any state signed by the old root set.
   - Grants are checked only by the hosting machine (§5.8).
 - **RL6, Session record** (machine-held).
-  - `{machine, session, lane, origin: {kind: 'terminal' | 'maws' | 'sminos-spawn', requester?, spawnerSession?}, principal: memberId | 'org', inference: {kind: 'slot', configDir} | {kind: 'route', settingsRef}, project?, owners[], ownersProof[], access: 'private' | 'listed' | 'org-view' | 'org-converse', shares[{member, grade}], created, context}`.
-  - Owners are copied at spawn and never resolved later through an alias.
+  - `{machine, session, lane, origin: {kind: 'terminal' | 'maws' | 'sminos-spawn', requester?, spawnerSession?}, principal: memberId | 'org' | '@machine', inference: {kind: 'slot', configDir} | {kind: 'route', settingsRef}, project?, owners: (memberId | '@machine')[], ownersProof[], access: 'private' | 'listed' | 'org-view' | 'org-converse', shares[{member, grade}], created, context}`.
+  - Owners are copied at spawn and never resolved later through an alias. `@machine` isn't an alias: the endpoint module resolves it against signed org state, and it never leaves the machine (§5.8).
   - The listing projection is `{session, revision, issued, fields: {owners, machine, project, lane, state, title}}`, signed by the machine key.
   - The machine's endpoint record is `{machine, addresses[], issued}`, signed by the machine key. It carries the direct RL2 addresses (§4.1).
 - **RL7, Capabilities.**
@@ -711,7 +723,7 @@ These are named here with their binding fields. Byte-level schemas and test vect
   - The operator path: a machine-signed `human` event attests its owner's words from the owner's own terminal `sminos say`, outside any session (§5.7).
   - It replaces DX1's HMAC for the merged product.
 - **RL9, Attestation of a session's owners** on a say.
-  - `{machine, session, owners, ownersProof, origin, orgStateVersion}`, signed by the machine key, inside the log event.
+  - `{machine, session, owners, ownersProof, origin, orgStateVersion}`, signed by the machine key, inside the log event. `owners` are member ids, with `@machine` resolved at `orgStateVersion` (§5.8).
   - `ownersProof` is a list of device-signed actions: the requester's spawn action, and `manage` add-owner actions. Each names the machine.
 - **RL10, Endpoint module ↔ sminos daemon** (local 0600 socket, same uid).
   - Log events go both ways. Upward events are signed by the endpoint module as they leave; downward events are verified before sminos imports them.
@@ -796,3 +808,8 @@ These are named here with their binding fields. Byte-level schemas and test vect
 16. **2026-10-26, from the composite's critique** (through the MAWS architect).
    - RL2 also runs over a direct tailnet WebSocket to the endpoint module, which advertises its addresses in a machine-signed record. The app tries direct first, and U2 picks the default (§4.1, RL6).
    - The client-bound tools are `show_pane` and notifications. Capture, export and screenshots move to the machine's render service, and the browser tab's home follows U3 (§3.1).
+17. **2026-10-27, desk-sminos-orchestrator's O12 and O11 M4 needs.**
+   - RL6's `owners` and `principal` admit the token `@machine`, which the endpoint module resolves against signed org state and which never leaves the machine (§5.8).
+   - An org-owned machine's owners resolve to the org's admins, never to `'org'`, so `approve` stays off org-wide. Receivers check terminal-session owners the same way (§5.8).
+   - As a principal, `@machine` resolves through the slot binding. A machine with several member owners binds its default slot explicitly (§5.8, §6.4).
+   - RL1 gains an `endpoint {record}` frame for the machine-signed endpoint record (domain `smns-endpoint-v1`), stored and served by the hub (O11 M4).
