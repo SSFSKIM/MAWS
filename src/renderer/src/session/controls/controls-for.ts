@@ -14,7 +14,7 @@ import type { LaneAState } from '@shared/ipc/schema/lane-a';
 import type { HumanPromptOptions, HumanPromptResult } from '../../composer/submit/send-human-prompt';
 import { ipc } from '../../ipc/client';
 import { holderWords } from '../../sessions/holder-words';
-import { laneAStateOf, useLaneAState } from '../../stores/lane-a';
+import { laneAStateOf, useLaneACatalog, useLaneAState } from '../../stores/lane-a';
 import { useSessions } from '../../stores/sessions';
 import { laneAControls } from './lane-a';
 import { laneBControls, type LaneBFrame, type LaneBInputs } from './lane-b';
@@ -38,10 +38,12 @@ export function sessionControls(appSessionId: AppSessionId, client: MawsBridge =
   return controlsFor(useSessions.getState().records.get(appSessionId) ?? null, laneAStateOf(appSessionId), { appSessionId, client });
 }
 
-// The session's port for a component, following its record; `frame` is what the composer reads beside it.
+// The session's port for a component, following its record, its lane A state and its catalog's body (which the lane A
+// port reads when asked: the model chip, the palette, MCP's capabilities); `frame` is what the composer reads beside it.
 export function useSessionControls(appSessionId: AppSessionId, options: { client?: MawsBridge; frame?: LaneBFrame } = {}): SessionControls | null {
   const record = useSessions((s) => s.records.get(appSessionId) ?? null);
   const laneA = useLaneAState(appSessionId);
+  useLaneACatalog(appSessionId); // read through the port; subscribed here so its arrival renders again
   return controlsFor(record, laneA, { appSessionId, client: options.client ?? ipc, ...(options.frame && { frame: options.frame }) });
 }
 

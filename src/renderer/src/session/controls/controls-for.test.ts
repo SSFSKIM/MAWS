@@ -1,17 +1,19 @@
 // Which implementation of the controls port a session gets (P5 O9 M4): lane B for a session MAWS holds or nobody
 // holds (a contested one included); for a session a terminal or a background job holds, lane A while its bridge is live
 // (M5), none otherwise, which stays read-only.
+import { act, render, renderHook } from '@testing-library/react';
+import { createElement } from 'react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { item, record, status, T0 } from '../../../../../test/support/builders';
 import { fakeClient } from '../../../../../test/support/fake-client';
 import { TEST_MACHINE } from '../../../../../test/support/machine';
-import { applyLaneAState, resetLaneAStore } from '../../stores/lane-a';
+import { applyLaneAState, resetLaneAStore, useLaneA } from '../../stores/lane-a';
 import { resetQueueStore } from '../../stores/queue';
-import { laneAState } from '../../lane-a/test-support/lane-a-state';
+import { laneACatalog, laneAState } from '../../lane-a/test-support/lane-a-state';
 import { useSessions } from '../../stores/sessions';
-import { answerSession, askSession, compactSession, controlsFor, sendToSession, sessionControls, stopSessionTask } from './controls-for';
+import { answerSession, askSession, compactSession, controlsFor, sendToSession, sessionControls, stopSessionTask, useSessionControls } from './controls-for';
 
 const APP = 'app-c' as AppSessionId;
 const UUID = '22222222-2222-4222-8222-222222222222' as MessageUuid;
@@ -58,6 +60,35 @@ describe('controlsFor', () => {
     expect(controlsFor(held, laneAState(APP, { bridge: 'starting', reason: 'the session’s bridge is starting' }), inputs())).toBeNull();
     expect(controlsFor(held, laneAState(APP, { bridge: 'none', reason: 'update sminos' }), inputs())).toBeNull();
     expect(controlsFor(record(APP), laneAState(APP), inputs())!.queue(), 'a session MAWS holds stays lane B').not.toBeNull();
+  });
+});
+
+describe('useSessionControls', () => {
+  // The lane A port reads the session's catalog body when asked (the model chip, the palette, MCP's capabilities), so
+  // the hook follows that body as well as the record and the state.
+  it('renders again when a bridged session’s catalog arrives, with the catalog’s models', () => {
+    useSessions.setState({ records: new Map([[APP, record(APP, { holder: terminal })]]) });
+    applyLaneAState(APP, laneAState(APP));
+    const { client } = fakeClient({ 'laneA.catalog': null });
+    const { result } = renderHook(() => useSessionControls(APP, { client })?.bindings().model.options.map((o) => o.value));
+    expect(result.current).toEqual(['fable']); // no catalog yet
+    act(() => useLaneA.setState((s) => ({ catalogs: new Map(s.catalogs).set(APP, laneACatalog()) })));
+    expect(result.current).toEqual(['opus', 'sonnet', 'haiku', 'fable']);
+  });
+
+  // As a component reads it (the composer's chips), which the React Compiler memoizes on the port it was handed.
+  it('hands a component a port that names the catalog’s models once it arrives', () => {
+    useSessions.setState({ records: new Map([[APP, record(APP, { holder: terminal })]]) });
+    applyLaneAState(APP, laneAState(APP));
+    function Models() {
+      const controls = useSessionControls(APP);
+      return createElement('p', null, controls?.bindings().model.options.map((o) => o.value).join(' '));
+    }
+    const view = render(createElement(Models));
+    expect(view.container.textContent).toBe('fable');
+    act(() => useLaneA.setState((s) => ({ catalogs: new Map(s.catalogs).set(APP, laneACatalog()) })));
+    expect(view.container.textContent).toBe('opus sonnet haiku fable');
+    view.unmount();
   });
 });
 
