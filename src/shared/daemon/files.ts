@@ -37,9 +37,15 @@ const SOCKET_NAMES: Record<DaemonSocket, string> = { 'engine-host': DAEMON_FILES
 export function daemonPaths(profileDir: string, tmp: string = tmpdir()): DaemonPaths {
   const dir = join(profileDir, DAEMON_FILES.dir);
   const longest = Math.max(...Object.values(SOCKET_NAMES).map((name) => Buffer.byteLength(join(dir, name), 'utf8')));
-  const socketDir = longest <= SOCKET_PATH_MAX_BYTES ? dir : join(tmp, `maws-mawsd-${createHash('sha1').update(profileDir).digest('hex').slice(0, 12)}`);
+  const socketDir = longest <= SOCKET_PATH_MAX_BYTES ? dir : socketFallbackDir(profileDir, tmp);
   const sockets = Object.fromEntries(Object.entries(SOCKET_NAMES).map(([socket, name]) => [socket, join(socketDir, name)])) as Record<DaemonSocket, string>;
   return { profileDir, dir, socketDir, sockets, log: join(dir, DAEMON_FILES.log), endpoint: join(dir, DAEMON_FILES.endpoint), ptyHost: join(dir, DAEMON_FILES.ptyHost) };
+}
+
+// The directory a profile's sockets fall back to when `<profile>/mawsd/` is too long for them (also what the packaged
+// e2e watches for the default profile, whichever directory its daemon took).
+export function socketFallbackDir(profileDir: string, tmp: string = tmpdir()): string {
+  return join(tmp, `maws-mawsd-${createHash('sha1').update(profileDir).digest('hex').slice(0, 12)}`);
 }
 
 // The file set a client's transport reaches one of `mawsd`'s sockets by: one lock and one token cover all three.

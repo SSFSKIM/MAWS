@@ -11,14 +11,17 @@
 // (`pnpm e2e:supervisor-daemon:packaged`, a step of the gate's packaged job) the daemon shape's check runs instead: the
 // private `mawsd` of a scratch profile is the app binary run as Node, named `mawsd`, its entry inside `app.asar`, and
 // the engine host it starts is the app binary named `maws-supervisor` as above. It installs no LaunchAgent, and fails
-// if the account's canonical `dev.maws.mawsd` plist appears or changes.
+// if it creates, changes or removes anything of the account's canonical `dev.maws.mawsd`: its plist, the default
+// profile's sockets and lock, or that profile's mawsd/ tree (O14 residue 18: the gate's Mac runs a real one).
 //   pnpm build:app && pnpm e2e:supervisor-daemon:packaged
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { expect, test } from '@playwright/test';
 import type { HostStatus } from '@shared/ipc/schema/host';
+import { DAEMON_FILES, socketFallbackDir } from '../src/shared/daemon/files'; // O14 residue 18
+import { defaultProfileDir } from '../src/shared/daemon/profile'; // O14 residue 18
 import { invoke } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { INSPECTOR_LINE, inspectorPortHolders, isAlive, killScratchProcesses, ps, tcpListeners } from './support/processes';
@@ -37,6 +40,53 @@ function realpathOr(path: string): string {
     return path; // the launcher reports a missing executable
   }
 }
+// P5 O2 (O14 residue 18): the account's canonical mawsd as the daemon-shape check watches it, never opened, read or
+// connected to except the plist: the plist's text and mtime; each of the default profile's sockets and its lock, in
+// <profile>/mawsd/ and in the $TMPDIR fallback directory (this process's and the account's own, which launchd gives
+// the canonical job), by kind, inode and mtime; and the default profile's mawsd/ subtree by entry names, kinds and
+// mtimes. A path that does not exist is recorded as absent, so its appearance fails as its change does.
+function canonicalNow(): Record<string, unknown> {
+  const home = homedir();
+  const profile = defaultProfileDir('darwin', process.env, home);
+  const dir = join(profile, DAEMON_FILES.dir);
+  const tmps = new Set([tmpdir(), execFileSync('getconf', ['DARWIN_USER_TEMP_DIR'], { encoding: 'utf8' }).trim()]);
+  const names = [DAEMON_FILES.machineSocket, DAEMON_FILES.engineHostSocket, DAEMON_FILES.ptyHostSocket, DAEMON_FILES.lock];
+  const watched = [dir, ...[...tmps].map((tmp) => socketFallbackDir(profile, tmp))].flatMap((at) => names.map((name) => join(at, name)));
+  const plist = join(home, 'Library', 'LaunchAgents', 'dev.maws.mawsd.plist');
+  return {
+    plist: existsSync(plist) ? { text: readFileSync(plist, 'utf8'), mtimeMs: statSync(plist).mtimeMs } : null,
+    sockets: Object.fromEntries(watched.map((path) => [path, entryOf(path)])),
+    profile: treeOf(dir),
+  };
+}
+
+function entryOf(path: string): { kind: string; ino: number; mtimeMs: number } | null {
+  try {
+    const stat = lstatSync(path);
+    return { kind: stat.isSocket() ? 'socket' : stat.isDirectory() ? 'dir' : stat.isSymbolicLink() ? 'link' : 'file', ino: stat.ino, mtimeMs: stat.mtimeMs };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+// `relative path → kind@mtime` for every entry under `dir` (symlinks not followed), or null when there is no `dir`.
+function treeOf(dir: string): Record<string, string> | null {
+  if (entryOf(dir) === null) return null;
+  const tree: Record<string, string> = {};
+  const walk = (at: string, prefix: string) => {
+    for (const name of readdirSync(at).sort()) {
+      const entry = entryOf(join(at, name));
+      if (entry === null) continue; // gone between the listing and its lstat: the next snapshot lacks it too
+      tree[`${prefix}${name}`] = `${entry.kind}@${entry.mtimeMs}`;
+      if (entry.kind === 'dir') walk(join(at, name), `${prefix}${name}/`);
+    }
+  };
+  tree['.'] = `dir@${entryOf(dir)!.mtimeMs}`;
+  walk(dir, '');
+  return tree;
+}
+
 // The process's executable: `lsof`'s first text (mapped program) file, which needs no privilege for one's own process.
 // `ps -o comm=` follows argv0, so it reads `maws-supervisor`, not the binary.
 function executableOf(pid: number): string {
@@ -171,10 +221,9 @@ test('packaged, the daemon shape: mawsd is the app binary run as Node, named maw
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-o2-packaged-')));
   const userData = join(root, 'ud'); // not the default profile: a private mawsd, never the LaunchAgent
   mkdirSync(userData);
-  // The account's canonical LaunchAgent is never written, even by a packaged app: the gate's Mac runs the owner's real
-  // one once its account is cut over, so the check fails if the plist appears, changes or goes.
-  const canonical = join(homedir(), 'Library', 'LaunchAgents', 'dev.maws.mawsd.plist');
-  const canonicalNow = () => (existsSync(canonical) ? { text: readFileSync(canonical, 'utf8'), mtimeMs: statSync(canonical).mtimeMs } : null);
+  // The account's canonical mawsd is never touched, even by a packaged app: the gate's Mac runs the owner's real one
+  // once its account is cut over (O14), so the check fails if the job creates, changes or removes its plist, its sockets
+  // and lock, or its profile's mawsd/ tree, whether or not each exists (canonicalNow).
   const canonicalBefore = canonicalNow();
   let maws: MawsLaunch | null = null;
   const pids: number[] = [];
@@ -217,7 +266,7 @@ test('packaged, the daemon shape: mawsd is the app binary run as Node, named maw
     await app.evaluate(({ app: electronApp }) => electronApp.quit());
     await exited;
     await expect.poll(() => isAlive(enginePid), { timeout: 10_000, message: 'the unbusy quit parks the engine host' }).toBe(false);
-    expect(canonicalNow(), `the account's ${canonical} is untouched`).toEqual(canonicalBefore);
+    expect(canonicalNow(), "the account's canonical mawsd (its plist, sockets, lock and profile) is untouched").toEqual(canonicalBefore);
   } finally {
     if (maws) await maws.cleanup().catch((error: unknown) => console.error(error));
     await killScratchProcesses(root, pids).catch((error: unknown) => (leftover = error));
