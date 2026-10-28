@@ -113,6 +113,8 @@ export type RelayContext = {
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const position = (e: unknown): { writer: string; seq: number } | null => (isObject(e) && typeof e.writer === 'string' && typeof e.seq === 'number' ? { writer: e.writer, seq: e.seq } : null);
 const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('base64url');
+/** A writer the hub stores (desk-hub's `eventShapeError`): `<machine>/<feed>`, at most 256 characters, none a control. */
+const isWriterName = (writer: string) => /^[^/]+\/.+$/.test(writer) && writer.length <= 256 && ![...writer].some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f);
 
 export class LogRelay {
   readonly #ctx: RelayContext;
@@ -230,6 +232,7 @@ export class LogRelay {
 
   async #up(project: string, e: unknown): Promise<Uploaded> {
     if (!isObject(e) || typeof e.writer !== 'string' || !isLogSeq(e.seq)) return { reason: 'bad-shape', message: 'not a log event (writer, seq)' };
+    if (!isWriterName(e.writer)) return { reason: 'bad-shape', message: 'writer is <machine>/<feed>, without control characters' };
     const at = `${project}\n${e.writer}\n${e.seq}`;
     const before = this.#signing.get(at) ?? Promise.resolve();
     const run = before.then(() => this.#upAt(project, e as Record<string, unknown> & { writer: string; seq: number }));

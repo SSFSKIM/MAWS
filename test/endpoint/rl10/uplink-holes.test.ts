@@ -13,6 +13,7 @@ import { LegacyKey } from '../../../src/endpoint/rl10/legacy';
 import { LogRelay } from '../../../src/endpoint/rl10/log-relay';
 import { Members } from '../../../src/endpoint/rl10/members';
 import { SignatureLedger } from '../../../src/endpoint/rl10/signature-ledger';
+import { Uplink } from '../../../src/endpoint/rl10/uplink';
 import { EndpointState } from '../../../src/endpoint/state/store';
 import { until } from '../fake-hub';
 import { genesis, memberId, newDevice, successor } from '../org-fixtures';
@@ -335,5 +336,30 @@ describe('the uplink’s recovery from a dropped upload', () => {
       await s.run(40, () => WRITERS.every((w) => s.hub.last.get(w) === 40));
       expect(s.hub.gaps).toBe(0);
     }, 30_000);
+  });
+  describe('a writer named with a newline (review round 5)', () => {
+    const odd = `${NAME}/feed\nsuffix`;
+
+    it('is refused at the upload, bad-shape, and nothing of it is queued or held', async () => {
+      const s = await scene();
+      await s.submit([s.event(odd, 1)]);
+      expect(s.toSminos).toContainEqual(expect.objectContaining({ t: 'refused', refusal: expect.objectContaining({ reason: 'bad-shape', writer: odd, seq: 1 }) }));
+      expect(s.relay.uplinkQueued).toBe(0);
+    });
+
+    it('lets its unanswered ask go once, by the writer the ask named, and asks the next hole', async () => {
+      // The uplink alone, past the relay's check: its ask must not lean on what a writer's name holds.
+      const toSminos: Frame[] = [];
+      const lines: string[] = [];
+      const uplink = new Uplink({ send: () => true, toSminos: (f) => void toSminos.push(f), signed: () => true, now: Date.now, log: (line) => void lines.push(line), limits: { bytes: CAP, reserve: RESERVE, askMs: 50 } });
+      const [healthy] = WRITERS;
+      expect(uplink.resend(P, odd, 1)).toBe(true);
+      expect(uplink.resend(P, healthy, 1)).toBe(true);
+      expect(toSminos).toEqual([{ t: 'resend', project: P, writer: odd, from: 1 }]);
+      await until(() => toSminos.length === 2, 'the next hole asked');
+      expect(toSminos[1]).toEqual({ t: 'resend', project: P, writer: healthy, from: 1 });
+      expect(lines.filter((line) => line.includes('sent nothing'))).toHaveLength(1);
+      uplink.ended();
+    });
   });
 });

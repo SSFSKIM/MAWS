@@ -78,7 +78,7 @@ export class Uplink {
   /** Where sminos stopped each writer it stopped on this connection, by `project\nwriter` (0: the writer itself). */
   readonly #stopped = new Map<string, number>();
   /** The hole asked for last, until it is filled or let go, and when it is let go unanswered. */
-  #asking: { key: string; until: number } | null = null;
+  #asking: { project: string; writer: string; until: number } | null = null;
   #timer: ReturnType<typeof setTimeout> | null = null;
   #timerAt = Infinity;
 
@@ -159,8 +159,8 @@ export class Uplink {
       if (hole === undefined && !this.#ctx.signed(project, writer, Math.max(seq, 1))) return;
       const k = key(project, writer);
       this.#stopped.set(k, Math.min(seq, this.#stopped.get(k) ?? seq));
-      if (this.#asking?.key === k && !this.#askable(project, writer, hole!)) this.#asking = null;
-    } else if (hole !== undefined && hole.from === seq && this.#asking?.key === key(project, writer)) {
+      if (this.#isAsking(project, writer) && !this.#askable(project, writer, hole!)) this.#asking = null;
+    } else if (hole !== undefined && hole.from === seq && this.#isAsking(project, writer)) {
       this.#again(project, writer, this.#ctx.now() + this.#askMs);
     }
     this.#ask();
@@ -198,7 +198,7 @@ export class Uplink {
     const held = this.#holes.get(project)?.get(writer);
     if (held !== undefined && held.from <= from) return;
     this.#set(project, writer, { from, asked: false, due: 0 });
-    if (this.#asking?.key === key(project, writer)) this.#asking = null;
+    if (this.#isAsking(project, writer)) this.#asking = null;
   }
 
   #set(project: string, writer: string, hole: Hole): void {
@@ -211,7 +211,7 @@ export class Uplink {
   #again(project: string, writer: string, due: number): void {
     const hole = this.#holes.get(project)?.get(writer);
     if (hole !== undefined) Object.assign(hole, { asked: false, due });
-    if (this.#asking?.key === key(project, writer)) this.#asking = null;
+    if (this.#isAsking(project, writer)) this.#asking = null;
   }
 
   /** `writer`'s hole filled, or asked for anew: gone. */
@@ -219,13 +219,18 @@ export class Uplink {
     const holes = this.#holes.get(project);
     holes?.delete(writer);
     if (holes?.size === 0) this.#holes.delete(project);
-    if (this.#asking?.key === key(project, writer)) this.#asking = null;
+    if (this.#isAsking(project, writer)) this.#asking = null;
   }
 
   /** Every hole counted as asked, none asked again until the next welcome's `have` (RL1, or sminos, gone). */
   #parkAll(): void {
     for (const holes of this.#holes.values()) for (const hole of holes.values()) Object.assign(hole, { asked: true, due: Infinity });
     this.#asking = null;
+    this.#wake(Infinity);
+  }
+
+  #isAsking(project: string, writer: string): boolean {
+    return this.#asking !== null && this.#asking.project === project && this.#asking.writer === writer;
   }
 
   /** Whether sminos follows a `resend` of `writer` from its hole: one before where it stopped the writer, or none. */
@@ -242,7 +247,7 @@ export class Uplink {
   #ask(): void {
     const now = this.#ctx.now();
     if (this.#asking !== null && now >= this.#asking.until) {
-      const [project, writer] = this.#asking.key.split('\n') as [string, string];
+      const { project, writer } = this.#asking;
       this.#ctx.log(`endpoint: sminos sent nothing of ${writer} in project ${project} within ${this.#askMs} ms of the endpoint's resend; the next hole is asked for`);
       this.#again(project, writer, now + this.#askMs);
     }
@@ -257,7 +262,7 @@ export class Uplink {
           continue;
         }
         Object.assign(hole, { asked: true, due: Infinity });
-        this.#asking = { key: key(project, writer), until: now + this.#askMs };
+        this.#asking = { project, writer, until: now + this.#askMs };
         this.#ctx.toSminos({ t: 'resend', project, writer, from: hole.from });
         return this.#wake(this.#asking.until);
       }
