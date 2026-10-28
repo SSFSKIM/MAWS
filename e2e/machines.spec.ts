@@ -287,7 +287,8 @@ test('two machines in one sidebar by org project; one leaving greys only its row
       const tab = mainTabById(a.page, `session:${bSharedAt}`);
       await expect(tab, 'B’s tab is kept with B down').toBeVisible({ timeout: 20_000 });
       await expect(a.page.locator('[data-region="main"] [data-machine-offline]'), 'greyed: its content says B is offline').toHaveText(`${B_NAME} is offline`, { timeout: 15_000 });
-      await expect(tab.locator('span.text-fg-faint', { hasText: 'B’s shared session' })).toBeVisible();
+      // its title in the disabled token (T5); B has not loaded in this run, so A holds no record to title it by
+      await expect(tab.locator('span.text-fg-faint')).toBeVisible();
       expect(await stateOf(a.page, bRef)).not.toBe('up');
       await a.page.waitForTimeout(1_000); // past the layout's write delay: a drop would have been written
       expect(JSON.stringify(await invoke(a.page, 'layout.get', { key: 'main.tabs' })), 'nothing dropped').toContain(`"session:${bSharedAt}"`);
