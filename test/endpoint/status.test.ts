@@ -1,6 +1,7 @@
 // `status()` (O10 M2): `daemon.status`'s `endpoint.detail`, which a remote caller reads too, holds no path, no address, no
 // key material and no credential. The walk allows the public `headHash` and fails on any other string that looks like a
-// path, an IP address, or a base64url run of 43 characters or more (a P-256 point, a signature, a secret).
+// path, an IP address, or a base64url run of 43 characters or more (a P-256 point, a signature, a secret); a held
+// delegation is said as `delegated` alone.
 import * as fs from 'node:fs';
 import { join } from 'node:path';
 import { generateSigningKey, keyId, NO_CERTIFICATES, stateHash } from 'org-protocol';
@@ -41,6 +42,7 @@ describe('status()', () => {
       listener: { bound: false },
       legacyKey: false,
       legacyRetired: false,
+      delegated: false,
     });
     await endpoint.stop();
   });
@@ -77,12 +79,17 @@ describe('status()', () => {
     state.setOrg({ version: 1, org: 'org-local', pinned: { roots: first.state.root.keys, recoveryPub: recovery.pub }, head: null, chain: [], hashes: [], certificates: NO_CERTIFICATES, acceptedTransitions: [], highWater: 0 });
     await new EndpointOrg(state, { log: () => {} }).adopt([first, head], []);
     fs.writeFileSync(join(services.machine.stateDir, 'legacy.json'), JSON.stringify({ org: 'org-local', key: 'k'.repeat(43) }), { mode: 0o600 });
+    // A delegation held (O14 M1): its private key is in no answer, only that the machine holds one.
+    const delegationKey = await generateSigningKey(true);
+    const privateJwk = (await crypto.subtle.exportKey('jwk', delegationKey.privateKey)) as JsonWebKey;
+    state.setDelegation({ version: 1, id: '0d1e2a3b4c5d6e7f8091a2b3c4d5e6f7', prefix: 'vm-', privateJwk });
 
     const endpoint = createEndpoint();
     await endpoint.start(services);
     const status = endpoint.status() as Record<string, unknown>;
-    expect(status).toMatchObject({ enrollment: 'org-listed', name: 'mini', org: 'org-local', stateVersion: 2, headHash: await stateHash(head.state), legacyKey: true, legacyRetired: false });
+    expect(status).toMatchObject({ enrollment: 'org-listed', name: 'mini', org: 'org-local', stateVersion: 2, headHash: await stateHash(head.state), legacyKey: true, legacyRetired: false, delegated: true });
     expect(leaks(status)).toEqual([]);
+    expect(JSON.stringify(status)).not.toContain(privateJwk.d);
     // The walk itself catches what it should.
     expect(leaks({ ...status, extra: { dir: services.machine.stateDir, ip: '100.64.1.2', pub: key.pub } }).map((l) => l.at)).toEqual(['$.extra.dir', '$.extra.ip', '$.extra.pub']);
     await endpoint.stop();

@@ -329,6 +329,99 @@ hand once nothing runs (`run-lock.ts`, never taken over). Against a deployment, 
 `/dev/tty` before any request and confirm there: a shell with no controlling terminal stops at that open
 (`Device not configured`) and sends nothing.
 
+### The cutover's verbs (P5 O14 M2)
+
+    pnpm --filter desk-hub deployment admin <show | enroll | delegation create|publish|drop | machine drop | provisioning revoke | keys retire|purge | abandon-pending | code inspect|strip-legacy> …
+
+The same keys file, anchor, lock and confirmation rule as above: each verb verifies the served chain against the anchor
+before anything else, settles a pending proposal first, and signs through the one `amend` (`delegation create`
+through its no-POST half, `propose`). An `unsent` proposal (`delegation create`'s) is the exception: no verb settles
+it but `delegation publish`; `show` and `devices` name it and go on, and every other verb refuses, signing and sending
+nothing, naming `delegation publish` and `abandon-pending`. Against a deployment each verb that signs, posts or
+deletes (`enroll`, `delegation create`, `delegation publish`, `delegation drop`, `machine drop`, `provisioning revoke`,
+`keys retire`, `keys purge`, `abandon-pending`) opens `/dev/tty` before any request. The token is `DESK_ACCESS_TOKEN` from the environment when it is
+set there (the runners' `--pipe`), else on stdin.
+
+- `show` prints the age line, the members and their devices, the machines as a table (`NAME STATE REF KEY ONLINE
+  SEEN`: a head entry `listed`; a served certificate `certified`, `retired <notAfter>`, `revoked` or `refused <code>`,
+  as `org-protocol`'s checks judge it against the verified head; a hub row neither covers `unlisted` when it posted a
+  v2 key the head does not list, `phase-1` otherwise; `ONLINE` and `SEEN` are the row's DX2 presence when
+  `GET /api/machines` reports it, `-` when not, which is the hub's answer today), the delegations (and the dropped
+  ones, whose prefixes stay reserved), and `legacyRetired` once a head carries it. It settles a sent pending proposal
+  as every verb does, and never sends an unsent one: `pending version n lists delegation <id> (prefix <p>), unsent:
+  admin delegation publish sends it once its stored code decodes under code inspect`.
+- `enroll <name> [--replace] [--ttl <s>] [--wait <s>]` mints an enrollment token (`--ttl`, default 900 s; with
+  `--replace`, `{machine: <name>}`, which re-enrolls an active hub row in place and ends its old credential at the
+  machine's redemption), builds the `smns-enroll-v2.` code with a fresh `k` and writes it to the terminal and the
+  clipboard, never stdout; then asks `GET /api/enrollments/<id>/key` every 5 s for up to `--wait` (default 1800 s).
+  It refuses a key posted under another name or whose MAC is not under `k`, prints `machine <name> ref <ref> key <key
+  id>`, and asks `compare with mawsd keys --json on <name>, then list it? [y/N]`: answer only once the three values match
+  what `mawsd keys --json` prints on the intended machine, since a process that read the code could have redeemed it
+  first under a valid MAC. It then signs the successor listing the machine, owned by you (with `--replace` on a listed
+  name: the new key under the same ref, the old one retired), and prints `listed: version n`. A name the head binds to
+  another ref is refused, as is a name under a delegation's prefix, a listed name or a hub row's without `--replace`.
+  The anchor's lock is held for its reads and its signing, never across the wait: a `refresh` meanwhile signs, and
+  `enroll` signs after it, on the head it reads again. An interrupted `enroll` leaves only a token that lapses.
+- `delegation create --label <l> --prefix <p> --code-to-stdout [--ttl <s>] [--max-uses <n>] [--legacy-from-v1-code]`
+  refuses a stdout that is a terminal and a prefix the head holds, nests or reserved (a dropped delegation's), asks
+  `delegate <p> for <s> s? [y/N]`, mints the provisioning key (`POST /api/provisioning-keys`, `--ttl` default 90 days),
+  makes the delegation's key pair, signs the successor holding it, and writes the `smns-provision-v2.` code (the hub,
+  the org, the roots, `recoveryPub`, the key's token, the delegation's id, prefix and private JWK) to stdout and
+  nothing else there; every other line goes to stderr. With `--legacy-from-v1-code` it reads a v1 provisioning code on
+  stdin (for this hub and org) and copies its org key into the code's `legacy`. What it signs is what you approved:
+  the prefix, an expiry `--ttl` from the mint, the use limit; a mint answer that disagrees with them (another prefix,
+  an expiry more than 60 s off, another limit, an id that is not 32 hex) is refused before anything is signed, naming
+  the key to revoke. It posts no state: the successor is signed into the anchor's pending slot, marked `unsent`, the
+  code written, and the command exits 0, closing the pipe, at which `gcloud secrets create --data-file=-` stores it
+  (it reads to EOF before it stores anything). So the delegation cannot take effect before its code is stored: a run
+  killed anywhere leaves nothing at the hub. Then check the stored code (`gcloud secrets versions access latest
+  --secret=<id> | … admin code inspect`), and only once it decodes run `admin delegation publish`, which posts the
+  proposal and puts the delegation in effect; until then every other verb but `show` and `devices` refuses, so a
+  verb waiting meanwhile (an `enroll` waiting for its machine's key) cannot send it. A store that failed: `admin abandon-pending` (nothing was posted, so no fork can follow),
+  `admin provisioning revoke <id>`, and delete the secret if it was created. A code that could not be written (the
+  pipe closed) drops the proposal there and names the key to revoke. The stderr lines say these next steps. Its one
+  destination is a pipe into Secret Manager:
+  `… | production-run.sh admin --pipe delegation create … | gcloud secrets create <id> --data-file=-`.
+- `delegation publish` posts the unsent proposal `delegation create` left pending, after asking `publish delegation
+  <id>? [y/N]`, and prints `delegation <id> prefix <p> in effect from version n` and `published: version n`. With none
+  pending it refuses; with a stale one (another successor took its version) it refuses, naming `abandon-pending`.
+- `delegation drop <id>` asks, then signs the successor revoking the delegation's key by its id and prefix (both
+  reserved for the life of the org) and moving every admin retirement of its certificates into `revoked`, then revokes
+  its provisioning key at the hub.
+- `machine drop <name> [--revoke]` says what holds the name and asks: a head entry gets a successor retiring its key
+  (`--revoke`: revoking it) and its hub row deleted; a live certificate, an admin's retirement of its key under its ref
+  (RL §5.2) and the row deleted, so a recreated VM may take the name; a hub row with nothing in the head, the
+  `DELETE /api/machines/<name>` alone. Rerun after a failed DELETE, it finds the row alone and deletes it.
+- `provisioning revoke <id>` revokes a provisioning key at the hub (the phase-1 key at B4) after showing its label,
+  prefix and uses; a live delegation's key is refused (`delegation drop` revokes it with the delegation).
+- `keys retire [--undo]` asks, then signs the successor retiring the DX1 org key (`legacyRetired` at its own version
+  and issue time, O14 M5a: machines stop dual-coding), which `show` prints; `--undo` signs the successor dropping it,
+  refused before anything is signed once the hub has purged the wrapped copies (`GET /api/org/keys` `410 retired`; the
+  hub would refuse the successor `409 key-purged`). A head already retiring the key, or retiring none for `--undo`,
+  signs nothing and says so.
+- `keys purge` deletes every wrapped copy of the org key at the hub (`POST /api/org/keys/purge`), which cannot be
+  undone: it refuses unless the head carries `legacyRetired` (as the hub does, `409 not-retired`), shows the number of
+  copies and asks with that consequence. From then the retirement stands. Run again, it says the hub holds none.
+- `abandon-pending` drops the anchor's pending proposal, after showing it and what the hub holds and asking with the
+  consequence (a later verb may sign another successor of the same parent, which a hub that kept the abandoned bytes
+  could show a machine as a fork): for a proposal the hub refused for good, once you know why. An `unsent` proposal
+  (`delegation create`'s, never posted) carries no such risk, and it says so: `pending version n <hash> was never sent:
+  nothing was posted`. A delegation the proposal held is named with its minted provisioning key to revoke. It settles
+  nothing else, and refuses while the hub's chain holds the proposal, which the next run adopts.
+- `code inspect` and `code strip-legacy` are local transforms, stdin to stdout, with no keys, anchor, credential or
+  hub request: `inspect` prints a provisioning code's fields, every key and token elided; `strip-legacy` writes the
+  same code without `legacy` (B4), to a pipe alone, refused on a terminal. Run `strip-legacy` as
+  `zsh apps/desk-hub/deploy/production-run.sh admin --pipe code strip-legacy` (no credential read), never through
+  `pnpm … deployment`: pnpm's recursive runner writes its own failure lines to stdout even under `--silent`, which in a
+  pipe would join the stream. `inspect`, whose stdout is the terminal, runs as
+  `pnpm --silent --filter desk-hub deployment admin code inspect`.
+
+Nothing these verbs print on stdout or stderr holds a key, a token or a code, but the code on the two verbs whose stdout
+is one (`delegation create`, `code strip-legacy`); a machine's code goes to the terminal and the clipboard alone. The
+provisioning code's codec is `org-protocol`'s (`encodeProvisioningCodeV2` / `decodeProvisioningCodeV2`, O14 M1): a code
+it refuses is reported as `stdin: provisioning code: <reason>`, and `strip-legacy` writes the package's canonical
+encoding of what remains.
+
 ## `walk-console.js` (the walk's item 8, read into DevTools)
 
 `deploy/walk-console.js` is not a `deployment` command: it is a snippet the owner
@@ -422,6 +515,7 @@ production's Worker or host, or a preview alias of it (`<alias>-desk-hub.…`), 
     `remove-device` ask at `/dev/tty`, and `pair`'s code goes to the terminal and the clipboard, never the step's log.
     The step names the deployment and the keys itself: it refuses `--hub`, `--user`, `--yes`, `--config`, `--keys`
     and `init`. Its output is filtered line by line, so a fingerprint is on screen before the question about it.
+    `admin --pipe <verb…>` is the secret-stream mode, as `production-run.sh`'s below.
   - `throwaway <n>`: staging deployed under the throwaway org `staging-probe-<n>`, then `fake-check` and
     `redeploy-check` there (its RL1 leg included), then the account swept and staging deployed back under
     `staging-ssfskim`. The sweep and the restore run however the step ends, a failure or Ctrl-C included; the step
@@ -515,12 +609,21 @@ hands it to a command, and never printed or passed as an argument; output goes t
     $DESK_PRODUCTION_DEVICE/keys.json` and the owner's production Access token (`cloudflared access token
     -app=https://desk-hub.opencognita-platform.workers.dev`, after `cloudflared access login` once) on its stdin; `init`
     needs no token. The deployment and the keys are the script's: `--config`, `--keys`, `--hub`, `--user` and `--yes` are
-    refused. `genesis`, `pair` and `remove-device` ask on the terminal (`/dev/tty`) before they sign, and a pairing code
-    is written to the terminal alone, never to the step's log; `genesis` keeps no log at all (`--recovery paper` prints
-    the recovery key once).
+    refused. Every verb that signs, posts or deletes asks on the terminal (`/dev/tty`) first, and a pairing or
+    enrollment code is written to the terminal alone, never to the step's log; `genesis` keeps no log at all
+    (`--recovery paper` prints the recovery key once). `delegation create` and the `code` verbs are refused here: their
+    stdout is a code, which this step would filter and log.
+  - `admin --pipe <verb…>` (O14 M2), for `delegation create` and `code strip-legacy` alone, the two verbs whose stdout
+    is a secret code: the owner's token goes to the command's environment (`DESK_ACCESS_TOKEN`) instead of its stdin,
+    which, with its stdout, passes through untouched and unlogged; its stderr alone is filtered and logged
+    (`admin-<verb>-pipe-<time>.log`), and every line of the step's own goes to stderr. The command runs as the package's
+    `deployment` script runs it (`node … deploy/bin.ts` in the app's directory), not through pnpm, whose failure lines
+    go to stdout. The step refuses the mode when its stdout is a terminal. `code strip-legacy` reads no token and no
+    keys.
 
-  The steps that change production (`access-sync`; `admin genesis`, `pair`, `remove-device`, `refresh`) say so in their
-  first line, before they read any credential, and stop at the first one they lack.
+  The steps that change production (`access-sync`; `admin genesis`, `pair`, `remove-device`, `refresh`, `enroll`,
+  `delegation`, `machine drop`, `provisioning revoke`, `keys`) say so in their first line, before they read any credential, and
+  stop at the first one they lack.
 
 What they read, at run time:
 - `DESK_PRODUCTION_SECRETS` (default `~/.config/claude-secrets/projects/-Users-new-Developer-GitHub-doperpowers`): the

@@ -2,6 +2,9 @@
 // as `mawsd`'s own aliases):
 //
 //   enroll [--name N] [--replace] [--wait [s]] [--json]   the code is the request's `secret` (stdin), never an argument
+//   provision [--name N] [--wait [s]] [--json]   a `smns-provision-v2.` code, as `enroll` reads its code (O14 M1)
+//   retire [--not-after ISO] [--json]   a delegated machine retires its certificate, frees its hub row, destroys its keys
+//   unenroll [--json]      back to `enrollment: none` on this machine alone: RL10 unserved, the keys destroyed
 //   keys [--json] | status [--json]
 //   revoke <file|->        a signed org state (or {states, transitions}) delivered by hand, adopted as from the hub
 //   grant <file|->         a signed grant, kept by the ledger's rule (grants.ts)
@@ -14,10 +17,12 @@
 // `-` reads the file's content from the request's `secret`, as `mawsd`'s client sends stdin. Exit codes are O2's: 0
 // done, 1 failed, 2 not available here, 3 not running, 4 enrolled with the hub but not yet listed in the org state.
 import { readFileSync } from 'node:fs';
+import { basename } from 'node:path';
 import { parseArgs, type ParseArgsOptionsConfig } from 'node:util';
-import { keyId, stateHash, type SignedOrgState } from 'org-protocol';
+import { decodeProvisioningCodeV2, isIsoMillis, keyId, stateHash, type ProvisioningCodeV2, type SignedOrgState } from 'org-protocol';
 import { EnrollError, enrollAttended } from './enroll';
 import { attestHistory, checkHistory, historyNames, type Attested, type Checked } from './history';
+import { defaultMachineName, provisionInto } from './provision';
 import type { Endpoint } from './endpoint';
 import { acceptGrant } from './grants';
 import { describePolicy, isCeiling } from './policy';
@@ -26,7 +31,8 @@ export const EXIT = { done: 0, failed: 1, notHere: 2, notRunning: 3, notListed: 
 
 type Out = { code: number; out: string };
 
-const USAGE = `usage: mawsd endpoint enroll [--name N] [--replace] [--wait [s]] [--json] | keys [--json] | status [--json]
+const USAGE = `usage: mawsd endpoint enroll [--name N] [--replace] [--wait [s]] [--json] | provision [--name N] [--wait [s]] [--json]
+                     | retire [--not-after ISO] [--json] | unenroll [--json] | keys [--json] | status [--json]
                      | revoke <file|-> | grant <file|-> | policy [--read-only on|off] [--ceiling MODE|settings] | legacy status | legacy purge
                      | attest-history [--former NAME]… [--project ID] [--check] [--json]`;
 /** `--wait` with no number waits this long (O2 M6). */
@@ -38,6 +44,12 @@ export async function runCli(endpoint: Endpoint, command: string, args: readonly
     switch (command) {
       case 'enroll':
         return await enroll(endpoint, args, secret);
+      case 'provision':
+        return await provision(endpoint, args, secret);
+      case 'retire':
+        return await retire(endpoint, args);
+      case 'unenroll':
+        return await unenroll(endpoint, args);
       case 'keys':
         return await keys(endpoint, args);
       case 'status':
@@ -73,19 +85,28 @@ function parse<const T extends ParseArgsOptionsConfig>(args: readonly string[], 
   }
 }
 
-async function enroll(endpoint: Endpoint, args: readonly string[], secret: string | undefined): Promise<Out> {
-  // `--wait` takes an optional number of seconds.
+/** `--wait` with an optional number of seconds after it, as `--wait=<s>` (`DEFAULT_WAIT_S` when none follows). */
+function normalizeWait(args: readonly string[]): string[] {
   const normalized: string[] = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] !== '--wait') normalized.push(args[i]);
     else if (/^\d+$/.test(args[i + 1] ?? '')) normalized.push(`--wait=${args[++i]}`);
     else normalized.push(`--wait=${DEFAULT_WAIT_S}`);
   }
-  const { values } = parse(normalized, { name: { type: 'string' }, replace: { type: 'boolean' }, wait: { type: 'string' }, json: { type: 'boolean' } });
+  return normalized;
+}
+
+/** `--wait`'s seconds in milliseconds, 0 when it is absent. */
+function waitOf(wait: string | undefined, absent = 0): number {
+  const waitS = wait === undefined ? absent : Number(wait);
+  if (!Number.isFinite(waitS) || waitS < 0) throw new UsageError(`--wait takes a number of seconds, not ${wait}\n${USAGE}`);
+  return waitS * 1000;
+}
+
+async function enroll(endpoint: Endpoint, args: readonly string[], secret: string | undefined): Promise<Out> {
+  const { values } = parse(normalizeWait(args), { name: { type: 'string' }, replace: { type: 'boolean' }, wait: { type: 'string' }, json: { type: 'boolean' } });
   if (secret === undefined || secret.trim() === '') return { code: EXIT.failed, out: 'the enrollment code is read from stdin (or the hidden prompt), never from an argument' };
-  const waitS = values.wait === undefined ? 0 : Number(values.wait);
-  if (!Number.isFinite(waitS) || waitS < 0) throw new UsageError(`--wait takes a number of seconds, not ${values.wait}\n${USAGE}`);
-  const waitMs = waitS * 1000;
+  const waitMs = waitOf(values.wait);
   const { result, refused } = await enrollAttended(endpoint.enrollContext(), { code: secret, name: values.name, replace: values.replace === true, waitMs });
   const code = result.state === 'org-listed' ? EXIT.done : EXIT.notListed;
   if (values.json) return { code, out: JSON.stringify({ enrollment: result.state, name: result.name, org: result.org, ref: result.ref, ...(refused === undefined ? {} : { refused }) }) };
@@ -96,21 +117,80 @@ async function enroll(endpoint: Endpoint, args: readonly string[], secret: strin
   return { code, out };
 }
 
+/**
+ * `provision` (O14 M1): the code from the request's secret, the name from `--name` or the host's; waits `--wait` (300 s
+ * when absent) for the certificate to be live. Exit 0 when live, 4 while `hub-confirmed`, 1 on a refusal.
+ */
+async function provision(endpoint: Endpoint, args: readonly string[], secret: string | undefined): Promise<Out> {
+  const { values } = parse(normalizeWait(args), { name: { type: 'string' }, wait: { type: 'string' }, json: { type: 'boolean' } });
+  if (secret === undefined || secret.trim() === '') return { code: EXIT.failed, out: 'the provisioning code is read from stdin (or the hidden prompt), never from an argument' };
+  const waitMs = waitOf(values.wait, DEFAULT_WAIT_S);
+  let code: ProvisioningCodeV2;
+  try {
+    code = decodeProvisioningCodeV2(secret.trim());
+  } catch (error) {
+    throw new EnrollError(`not a provisioning code: ${(error as Error).message.replace(/^provisioning code: /, '')}`);
+  }
+  const { state } = endpoint.parts!;
+  const name = values.name ?? state.provisioning?.redeemed.machine ?? (state.enrolled ? state.enrollment?.name : undefined) ?? defaultMachineName();
+  const { result, refused } = await provisionInto(endpoint.enrollContext(), { ...code, name, waitMs });
+  const exit = result.state === 'org-listed' ? EXIT.done : EXIT.notListed;
+  if (values.json) return { code: exit, out: JSON.stringify({ enrollment: result.state, name: result.name, org: result.org, ref: result.ref, delegated: true, ...(refused === undefined ? {} : { refused }) }) };
+  const out =
+    result.state === 'org-listed'
+      ? `provisioned: ${result.name} in ${result.org}, certified under the delegation ${code.delegation.id}`
+      : `provisioned with the hub: ${result.name} in ${result.org}, its certificate not yet live${refused === undefined ? '' : ` (${refused})`}; \`provision\` again resumes it`;
+  return { code: exit, out };
+}
+
+/** `retire` (O14 M1): a delegated machine's departure (retire.ts). */
+async function retire(endpoint: Endpoint, args: readonly string[]): Promise<Out> {
+  const { values } = parse(args, { 'not-after': { type: 'string' }, json: { type: 'boolean' } });
+  const notAfter = values['not-after'];
+  if (notAfter !== undefined && !isIsoMillis(notAfter)) throw new UsageError(`--not-after takes an ISO time with milliseconds in UTC (2026-10-28T12:00:00.000Z), not ${notAfter}\n${USAGE}`);
+  const outcome = await endpoint.retire(notAfter === undefined ? {} : { notAfter });
+  if (values.json) return { code: EXIT.done, out: JSON.stringify(outcome) };
+  switch (outcome.kind) {
+    case 'nothing':
+      return { code: EXIT.done, out: 'nothing to retire: this machine holds no certificate and no credential' };
+    case 'retired':
+      return { code: EXIT.done, out: `retired: ${outcome.name} (certificate ${outcome.keyId} not after ${outcome.notAfter}); the hub row is gone; the keys are destroyed` };
+    case 'uncertified':
+      return { code: EXIT.done, out: `retired: ${outcome.name}, whose certificate the hub never held (${outcome.reason}); the hub row is gone; the keys are destroyed` };
+    case 'orphaned':
+      return { code: EXIT.done, out: `retired: ${outcome.name} here; the hub no longer took its credential, so its row and any certificate are an admin's to drop (\`machine drop ${outcome.name}\`); the keys are destroyed` };
+  }
+}
+
+/** `unenroll` (O14 M1): local, talks to no hub, refuses no enrollment state. */
+async function unenroll(endpoint: Endpoint, args: readonly string[]): Promise<Out> {
+  const { values } = parse(args, { json: { type: 'boolean' } });
+  const { aside, keyIds } = await endpoint.unenroll();
+  const kept = basename(aside);
+  if (values.json) return { code: EXIT.done, out: JSON.stringify({ enrollment: 'none', destroyed: keyIds, aside: kept }) };
+  return { code: EXIT.done, out: `enrollment: none; ${keyIds.length} private key(s) destroyed (their ids kept in ${kept}/keys.json), the rest of the state moved to ${kept}/` };
+}
+
 async function keys(endpoint: Endpoint, args: readonly string[]): Promise<Out> {
   const { values } = parse(args, { json: { type: 'boolean' } });
   const { state, services } = endpoint.parts!;
   const enrollment = state.enrolled ? state.enrollment : null;
+  // A redemption whose set is not yet whole is the hub's already (O14 M1), as `status` says it.
+  const pending = enrollment === null ? (state.provisioning?.redeemed ?? null) : null;
+  const named = enrollment ?? (pending === null ? null : { name: pending.machine, org: pending.org });
   const key = endpoint.key;
   const view = {
-    enrollment: enrollment?.state ?? 'none',
-    ...(enrollment === null ? {} : { name: enrollment.name, org: enrollment.org }),
+    enrollment: enrollment?.state ?? (pending === null ? 'none' : 'hub-confirmed'),
+    ...(named === null ? {} : { name: named.name, org: named.org }),
     ref: services.machine.ref,
+    delegated: state.delegation !== null,
     ...(key === null || enrollment === null ? {} : { keyId: await keyId(key.pub), heldKeys: state.ledger?.heldKeys.length ?? 0 }),
     ...(state.refusing === null ? {} : { refusing: state.refusing }),
   };
   if (values.json) return { code: EXIT.done, out: JSON.stringify(view) };
-  const lines = [`enrollment: ${view.enrollment}`, ...(enrollment === null ? [] : [`machine: ${enrollment.name} in ${enrollment.org}`]), `ref: ${view.ref}`];
+  const lines = [`enrollment: ${view.enrollment}`, ...(named === null ? [] : [`machine: ${named.name} in ${named.org}`]), `ref: ${view.ref}`];
   if ('keyId' in view) lines.push(`machine key: ${view.keyId} (${view.heldKeys} held over its enrollments)`);
+  if (view.delegated) lines.push(`delegated: under the delegation ${state.delegation?.id}`);
   if (state.refusing !== null) lines.push(`refusing its state: ${state.refusing} (the log names the path)`);
   return { code: EXIT.done, out: lines.join('\n') };
 }
