@@ -182,6 +182,12 @@ else
   branch=''
 fi
 
+# Resolve the pushed ref before preflight: reserved final refs stay on the self-hosted Mac.
+short=${sha:0:8}
+label=${label:-${branch:-gate}}
+label=${label//[^A-Za-z0-9._-]/-}
+ref=ci/$label-$short
+
 # The peer of the PEER_E2E groups and both trees' wires, as trailers (ci-gate-peer.mjs), read before the alert check, whose
 # plan they can add a Mac job to; what it decided is said once the transcript starts.
 peer_notes=$(mktemp)
@@ -206,7 +212,7 @@ else
   alert_trailers=$peer_trailers
   [[ -n $hosted_route ]] && alert_trailers+=$'\n'"Hosted-Route: $hosted_route"
   [[ -n $affected ]] && alert_trailers+=$'\n'"Selection: affected"
-  alert_check=$(node "$(dirname "$0")/ci-gate-alerts.mjs" --gates "$gates_trailer" --runner "$runner" --class1a "$class1a" --lane "$lane" --live "$live" --trailers "$alert_trailers" --git-dir "$git_dir" --sha "$sha")
+  alert_check=$(node "$(dirname "$0")/ci-gate-alerts.mjs" --gates "$gates_trailer" --runner "$runner" --class1a "$class1a" --lane "$lane" --live "$live" --trailers "$alert_trailers" --git-dir "$git_dir" --sha "$sha" --ref "$ref")
   case $? in
     0) ;;
     2)
@@ -216,10 +222,6 @@ else
     *) alert_check+="${alert_check:+$'\n'}ci-gate: warning: the ci-kit alert check failed; going ahead (the runner's job-started check still refuses jobs under a dialog)" ;;
   esac
 fi
-short=${sha:0:8}
-label=${label:-${branch:-gate}}
-label=${label//[^A-Za-z0-9._-]/-}
-ref=ci/$label-$short
 out=/tmp/maws-review/gates
 mkdir -p "$out"
 log=$out/ci-$short.log

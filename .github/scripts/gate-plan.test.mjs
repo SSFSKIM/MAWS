@@ -39,6 +39,7 @@ function plan(scenarioEnv) {
         INPUT_LANE: '',
         INPUT_HOSTED_ROUTE: '',
         HOSTED_MAC_ROUTE: '',
+        HOSTED_MAC_JOBS: '',
         GATE_RUNNER: '',
         GATE_E2E_RUNNER: '',
         CLASS1_E2E: '',
@@ -1098,7 +1099,7 @@ test("gate.yml times every job that can take the exclusive Mac instance by the p
     return Function('needs', 'fromJSON', `return (${expression});`)({ plan: { outputs } }, JSON.parse);
   };
   for (const route of ['mirror', 'direct']) {
-    const outputs = plan({ HEAD_MESSAGE: 'Gates: packaged\nRunner: macos', HOSTED_MAC_ROUTE: route }).outputs;
+    const outputs = plan({ HEAD_MESSAGE: 'Gates: packaged\nRunner: macos', HOSTED_MAC_ROUTE: route, HOSTED_MAC_JOBS: 'packaged' }).outputs;
     assert.deepEqual(evaluate('runs-on', outputs), route === 'direct' ? 'macos-26' : ['self-hosted', 'macOS', 'ARM64']);
     assert.equal(evaluate('timeout-minutes', outputs), route === 'direct' ? 45 : 40);
   }
@@ -1710,15 +1711,19 @@ test('direct preserves never-hosted, no-hosted, Linux, live and final-ref exclus
   for (const env of cases) assert.ok(JSON.parse(plan({ ...lists, ...env }).outputs.e2e).every((entry) => !entry.hosted), JSON.stringify(env));
 });
 
-test('unsigned packaged takes the direct Mac but stays self-hosted under mirror or excluded lanes', () => {
-  const base = { HEAD_MESSAGE: 'Gates: packaged\nRunner: macos', HOSTED_MAC_ROUTE: 'direct' };
+test('unsigned packaged needs explicit admission regardless of Lane, and stays self-hosted under mirror or final refs', () => {
+  const unlisted = { HEAD_MESSAGE: 'Gates: packaged\nRunner: macos', HOSTED_MAC_ROUTE: 'direct' };
+  assert.equal(plan(unlisted).outputs.packaged_runner, undefined);
+  assert.equal(plan({ ...unlisted, HEAD_MESSAGE: `${unlisted.HEAD_MESSAGE}\nLane: hosted` }).outputs.packaged_runner, undefined);
+  assert.equal(workflowList(readWorkflow(), 'HOSTED_MAC_JOBS'), '');
+  const base = { ...unlisted, HOSTED_MAC_JOBS: 'packaged' };
+  assert.equal(plan({ ...base, HEAD_MESSAGE: `${base.HEAD_MESSAGE}\nLane: no-hosted` }).outputs.packaged_runner, '"macos-26"');
   const output = plan(base).outputs;
   assert.equal(output.packaged_runner, '"macos-26"');
   assert.equal(JSON.parse(output.timeouts).packaged, 45);
   assert.equal(output.pool, 'false');
   for (const env of [
     { HOSTED_MAC_ROUTE: 'mirror' },
-    { HEAD_MESSAGE: `${base.HEAD_MESSAGE}\nLane: no-hosted` },
     { HEAD_MESSAGE: 'Gates: packaged\nRunner: linux' },
     ...FINAL_LABELS.map((label) => ({ GITHUB_REF_NAME: `ci/${label}-test` })),
   ]) assert.equal(plan({ ...base, ...env }).outputs.packaged_runner, undefined);

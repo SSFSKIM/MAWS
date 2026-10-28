@@ -173,7 +173,7 @@ export function runsOn(json) {
 // for no Mac jobs, `vm` or `vm-trial` when every Mac job can run there, otherwise null. `home` names jobs on ci-kit-mac-home.
 // The plan job itself is included under GATE_RUNNER=macos. A missing tree, refusal or unreadable plan returns null.
 // Extract the commit's planner, workflow and package scripts, then run with its env and ci-gate.sh's trailers.
-export function macPlan({ gitDir, sha, gates = '', runner = '', class1a = '', lane = '', live = '', trailers: more = '', variables = {} }) {
+export function macPlan({ gitDir, sha, ref = '', gates = '', runner = '', class1a = '', lane = '', live = '', trailers: more = '', variables = {} }) {
   if (!gitDir || !sha) return null;
   let dir;
   try {
@@ -193,6 +193,8 @@ export function macPlan({ gitDir, sha, gates = '', runner = '', class1a = '', la
         PATH: process.env.PATH,
         ...workflowEnv(readFileSync(join(dir, '.github/workflows/gate.yml'), 'utf8')),
         EVENT: 'push',
+        GITHUB_REF: ref ? `refs/heads/${ref}` : '',
+        GITHUB_REF_NAME: ref,
         HEAD_MESSAGE: `ci-gate: alert check\n\n${trailers.join('\n')}`,
         GATE_RUNNER: variables.GATE_RUNNER ?? '',
         GATE_E2E_RUNNER: variables.GATE_E2E_RUNNER ?? '',
@@ -232,7 +234,7 @@ export function macPlan({ gitDir, sha, gates = '', runner = '', class1a = '', la
 export const guestRun = (run) => macPlan(run)?.guest ?? null;
 
 // The reads, through `gh` (args to stdout, throwing on failure), and the decision; any failed read goes ahead with a warning.
-export function check({ gates, runner, class1a, lane, live, trailers, gitDir, sha, offMac, gh }) {
+export function check({ gates, runner, class1a, lane, live, trailers, gitDir, sha, ref, offMac, gh }) {
   const read = (path, jq) =>
     gh(['api', '--paginate', path, '--jq', jq])
       .split('\n')
@@ -243,7 +245,7 @@ export function check({ gates, runner, class1a, lane, live, trailers, gitDir, sh
     const variables = Object.fromEntries(read(`repos/${REPO}/actions/variables?per_page=30`, '.variables[] | [.name, .value]'));
     // The Mac jobs are the tested commit's plan's (a hosted group is on none), whose lists may differ from this checkout's;
     // those the flags and this checkout's POOL_E2E name only when that plan cannot be run.
-    const placed = macPlan({ gitDir, sha, gates, runner, class1a, lane, live, trailers, variables });
+    const placed = macPlan({ gitDir, sha, ref, gates, runner, class1a, lane, live, trailers, variables });
     const jobs = placed ? placed.jobs : macJobs({ gates, runner, class1a, variables, offMac });
     if (jobs.length === 0) return { stop: false, lines: [] };
     step = `the open ci-kit alerts (${ALERTS})`;
@@ -265,7 +267,7 @@ export function check({ gates, runner, class1a, lane, live, trailers, gitDir, sh
 
 // realpath: node resolves argv[1] but not its symlinks (a worktree under /tmp), while import.meta.url is the real path.
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const { values } = parseArgs({ options: { gates: { type: 'string', default: '' }, runner: { type: 'string', default: '' }, class1a: { type: 'string', default: '' }, lane: { type: 'string', default: '' }, live: { type: 'string', default: '' }, trailers: { type: 'string', default: '' }, 'git-dir': { type: 'string', default: '' }, sha: { type: 'string', default: '' } } });
+  const { values } = parseArgs({ options: { gates: { type: 'string', default: '' }, runner: { type: 'string', default: '' }, class1a: { type: 'string', default: '' }, lane: { type: 'string', default: '' }, live: { type: 'string', default: '' }, trailers: { type: 'string', default: '' }, 'git-dir': { type: 'string', default: '' }, sha: { type: 'string', default: '' }, ref: { type: 'string', default: '' } } });
   const gh = (args) => execFileSync('gh', args, { encoding: 'utf8', timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] });
   const offMac = poolE2e(readFileSync(new URL('../.github/workflows/gate.yml', import.meta.url), 'utf8'));
   const { stop, lines } = check({ ...values, gitDir: values['git-dir'], offMac, gh });

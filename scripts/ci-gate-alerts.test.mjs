@@ -400,7 +400,7 @@ test("a MAC_VM_E2E group that does not build through scripts/e2e-build.sh needs 
 // ci-kit's hosted-Mac spec (Placement): a hosted group's job is a waiter on the pool, so the tested commit's plan puts it on
 // no Mac. A run whose every Mac job would be such a group has no Mac job, and a mini alert does not hold it; guestRun
 // says `none` for it, which a run that needs the host never is.
-const hostedTree = () => tree(envOf('  CLASS1_E2E: side tools library\n  MAC_VM_E2E: side\n  HOSTED_MAC_E2E: tools\n'));
+const hostedTree = () => tree(envOf('  CLASS1_E2E: side tools library\n  MAC_VM_E2E: side\n  HOSTED_MAC_E2E: tools\n  HOSTED_MAC_JOBS: packaged\n'));
 
 test("a run whose e2e groups are all hosted puts no job on a Mac: guestRun says none, and one host or guest job beside them says otherwise", () => {
   const hosted = hostedTree();
@@ -589,4 +589,16 @@ test('alert planning sees the direct variable and its mirror override, including
   const ask = (extra = {}) => macPlan({ ...hosted, gates: 'e2e:tools,packaged', runner: 'macos', variables: { ...today, HOSTED_MAC_ROUTE: 'direct' }, ...extra });
   assert.deepEqual(ask(), { jobs: [], guest: 'none', home: [] });
   assert.deepEqual(ask({ trailers: 'Hosted-Route: mirror' }), { jobs: ['packaged'], guest: null, home: [] });
+});
+
+
+test('preflight uses the pushed ref for reserved-final exclusions on either hosted route', () => {
+  const target = hostedTree();
+  for (const route of ['direct', 'mirror']) {
+    const inputs = { ...target, gates: 'e2e:tools,packaged', runner: 'macos', variables: { ...today, HOSTED_MAC_ROUTE: route } };
+    const final = macPlan({ ...inputs, ref: 'ci/e1-final-test' });
+    assert.deepEqual(final, { jobs: ['packaged', 'e2e:tools'], guest: null, home: [] });
+    const ordinary = macPlan({ ...inputs, ref: 'ci/ordinary-test' });
+    assert.deepEqual(ordinary.jobs, route === 'direct' ? [] : ['packaged']);
+  }
 });

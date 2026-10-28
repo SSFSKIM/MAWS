@@ -67,7 +67,7 @@ function gate(args, { alerts = false, base = {}, change } = {}) {
       stderr: run.stderr,
       calls: existsSync(calls) ? readFileSync(calls, 'utf8').trimEnd().split('\n') : [],
       refs,
-      message: refs.length > 0 ? git('--git-dir', origin, 'log', '-1', '--format=%B', `refs/heads/ci/gates-${short}`) : '',
+      message: refs.length > 0 ? git('--git-dir', origin, 'log', '-1', '--format=%B', refs[0]) : '',
     };
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -269,7 +269,19 @@ test('--hosted-route writes a validated override, with no trailer when omitted',
 test('a direct packaged/peer admission push is not held by the mini alert', () => {
   const own = (path) => readFileSync(join(root, path), 'utf8');
   const base = Object.fromEntries(['.github/scripts/gate-plan.mjs', '.github/scripts/gate-affected.mjs', '.github/workflows/gate.yml', 'package.json'].map((path) => [path, own(path)]));
+  base['.github/workflows/gate.yml'] = base['.github/workflows/gate.yml'].replace("HOSTED_MAC_JOBS: ''", 'HOSTED_MAC_JOBS: packaged');
   const result = gate(['--gates', 'packaged,e2e:cross-build', '--runner', 'macos', '--lane', 'hosted', '--hosted-route', 'direct', '--peer', 'none'], { alerts: true, base, change: () => {} });
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.ok(result.refs.length > 0);
+});
+
+
+test('the reserved final push ref keeps direct packaged on the Mac in the alert preflight', () => {
+  const own = (path) => readFileSync(join(root, path), 'utf8');
+  const base = Object.fromEntries(['.github/scripts/gate-plan.mjs', '.github/scripts/gate-affected.mjs', '.github/workflows/gate.yml', 'package.json'].map((path) => [path, own(path)]));
+  base['.github/workflows/gate.yml'] = base['.github/workflows/gate.yml'].replace("HOSTED_MAC_JOBS: ''", 'HOSTED_MAC_JOBS: packaged');
+  const result = gate(['--gates', 'packaged', '--runner', 'macos', '--hosted-route', 'direct', '--lane', 'hosted', '--peer', 'none', '--label', 'e1-final'], { alerts: true, base, change: () => {} });
+  assert.equal(result.status, 2, result.stdout + result.stderr);
+  assert.match(result.stderr, /this run puts jobs on a Mac \(packaged\)/);
+  assert.deepEqual(result.refs, []);
 });

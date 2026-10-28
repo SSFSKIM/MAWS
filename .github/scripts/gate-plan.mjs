@@ -72,7 +72,8 @@
 // HOSTED_MAC_ROUTE defaults to mirror. Hosted-Route: (the dispatch's hosted_route input) overrides it per run.
 // Under direct the same eligible groups instead enter e2e_host on macos-26, building their own out/, with no pool
 // demand. The peer exclusion is mirror-only: MAWS's own checkout can fetch its peer. Unsigned packaged can also
-// take the direct Mac on a macOS lane, except no-hosted and reserved final refs. No admission lists change.
+// take the direct Mac on a macOS lane when HOSTED_MAC_JOBS admits it, except on reserved final refs. Lane moves
+// e2e groups only; packaged is unadmitted until its hosted failures are fixed and it passes 3/3.
 // The peer groups (PEER_E2E; the two-build check, e2e/cross-build.spec.ts): each runs this tree's app against another
 // build's supervisor on one profile, and the reverse. The other build is the commit of the `Peer:` trailer (a push only),
 // which scripts/ci-gate.sh resolves (the merge base with master, unless its --peer names another) beside each tree's
@@ -329,8 +330,8 @@ export function planOf(env, scripts) {
     e2e_hosted: JSON.stringify(e2eHosted), peer_wait: JSON.stringify(peerWait),
   };
   // No signing credentials: build:app disables identity discovery, mac.identity is null, and the helper
-  // only invokes swiftc. Keep no-hosted, Linux and final runs on the old runner, as for the e2e groups.
-  const packagedHosted = direct && lane === 'macos' && laneAsked !== 'no-hosted' && finalRef === undefined;
+  // only invokes swiftc. Its bare suite still needs admission: Lane is an e2e override, not a packaged trial.
+  const packagedHosted = direct && words(env.HOSTED_MAC_JOBS).includes('packaged') && lane === 'macos' && finalRef === undefined;
   if (packagedHosted) {
     outputs.packaged_runner = JSON.stringify(RUNNERS.macHosted);
     outputs.timeouts = JSON.stringify({ ...timeouts, packaged: 30 + HOSTED_MARGIN_MINUTES });
