@@ -74,7 +74,7 @@ export function startCatalog(deps: CatalogDeps): Catalog {
     },
     watch: deps.watch,
     poll: deps.poll,
-    appSettings: join(deps.userData, 'settings.json'),
+    appSettings: join(deps.userData, 'machine-settings.json'), // P5 O3-A: MAWS's own servers are the machine's
   });
 
   // One cwd's catalog and the revision it was built under: the store's revision, the engine reads' generation at the time

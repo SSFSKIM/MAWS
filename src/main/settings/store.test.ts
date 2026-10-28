@@ -2,27 +2,44 @@ import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, w
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
-import { DEFAULT_SETTINGS, openSettingsStore, resolveTheme } from './store';
+import * as z from 'zod';
+import { SettingsSchema, type Settings } from '@shared/ipc/schema/settings';
+import { clientSettingsDefaults, machineSettingsDefaults, mergeSettings, migrateClientSettings, migrateMachineSettings, SETTINGS_DEFAULTS_V21, splitSettings as splitOf } from '@shared/settings/defaults';
+import { composeSettings, resolveTheme } from '../client/settings-store';
+import { startMachineSettings } from './machine';
+import { settingsPaths, splitSettingsFiles } from './split';
+import { openSettingsFile } from './store';
 
 let dir: string;
 let file: string;
+let machineFile: string;
 
 beforeEach(() => {
   vi.restoreAllMocks();
   dir = mkdtempSync(join(tmpdir(), 'maws-settings-'));
   file = join(dir, 'settings.json');
+  machineFile = join(dir, 'machine-settings.json');
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-const v3 = (theme: string) => ({ ...SETTINGS_DEFAULTS_V20, theme });
+// P5 O3-A (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md §3): the profile's settings as main opens them holding
+// spine.lock: the split of a unified file, once (logging one line), the machine half, and the merged settings over both
+// files; `onDisk` is what the two files hold, merged.
+const DEFAULT_SETTINGS = SETTINGS_DEFAULTS_V21;
+const open = () => {
+  const paths = settingsPaths(dir);
+  const split = splitSettingsFiles(paths);
+  return composeSettings({ clientFile: paths.client, machine: startMachineSettings(paths.machine, { refused: split.machineRefused, unsplit: split.unsplit }) });
+};
+const onDisk = () => mergeSettings(migrateClientSettings(JSON.parse(readFileSync(file, 'utf8'))), migrateMachineSettings(JSON.parse(readFileSync(machineFile, 'utf8'))));
+const v3 = (theme: string) => ({ ...SETTINGS_DEFAULTS_V21, theme });
 // P5 O2 M7: a version 19 file (and every earlier one) has no supervisor shape; migrated, it runs under the machine daemon
 const before20 = (theme: string) => {
   const { shape: _shape, ...supervisor } = v3(theme).supervisor;
   void _shape;
   return { ...v3(theme), supervisor, version: 19 };
 };
-const shaped = <T extends { supervisor: object }>(earlier: T) => ({ ...earlier, version: 20, supervisor: { ...earlier.supervisor, shape: 'daemon' } });
+const shaped = <T extends { supervisor: object }>(earlier: T) => ({ ...earlier, version: 21, supervisor: { ...earlier.supervisor, shape: 'daemon' } }); // P5 O3-A: the merged settings
 // Version 19 (the owner's ruling of 2026-10-28): a version 18 file's launch profile has an output style, the user
 // scope's `user` (and so a version 17 file's).
 const before19 = (theme: string) => ({ ...before20(theme), version: 18, engine: { ...before20(theme).engine, launchProfile: { ...before20(theme).engine.launchProfile, outputStyle: 'user' } } });
@@ -106,119 +123,134 @@ const before6 = (theme: string) => {
   void _p;
   return rest;
 };
-const v3Json = (theme: string) => JSON.stringify(v3(theme));
+const clientJson = (theme: string) => JSON.stringify({ ...clientSettingsDefaults(), theme }); // P5 O3-A: a client file
 const FIXTURES = join(__dirname, '../../../test/fixtures/settings');
 
 describe('settings persistence regressions', () => {
-  it('keeps migrated dark settings when the rewrite fails and retries on a later patch', () => {
+  // P5 O3-A: the split's writes fail; the run keeps the unified file's values in memory, writes neither file, and the
+  // next start splits it
+  it('keeps migrated dark settings when the split cannot write, refuses writes this run, and splits at the next start', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const original = '{"version":1,"theme":"dark"}';
+    const original = JSON.stringify({ ...before6('dark'), version: 5, engine: { ...ENGINE_BEFORE_V7, subagentModel: 'haiku' } });
     writeFileSync(file, original);
     chmodSync(dir, 0o500);
-    let store: ReturnType<typeof openSettingsStore>;
+    let store: ReturnType<typeof open>;
     try {
-      store = openSettingsStore(file);
-      expect(store.settings.theme).toBe('dark');
+      store = open();
+      expect(store.settings).toMatchObject({ theme: 'dark', engine: { subagentModel: 'haiku' } });
       expect(readFileSync(file, 'utf8')).toBe(original);
+      expect(readdirSync(dir)).toEqual(['settings.json']);
     } finally {
       chmodSync(dir, 0o700);
     }
-    store.update({ notifications: { enabled: false } });
-    expect(openSettingsStore(file).settings).toMatchObject({ theme: 'dark', notifications: { enabled: false } });
+    expect(() => store.update({ notifications: { enabled: false } })).toThrow(/not written this run/);
+    expect(() => store.update({ engine: { subagentModel: null } })).toThrow(/not written this run/);
+    expect(readFileSync(file, 'utf8')).toBe(original);
+    expect(open().update({ notifications: { enabled: false } })).toMatchObject({ theme: 'dark', engine: { subagentModel: 'haiku' }, notifications: { enabled: false } });
+    expect(onDisk()).toMatchObject({ theme: 'dark', engine: { subagentModel: 'haiku' }, notifications: { enabled: false } });
   });
 
   it('refuses a patch when the disk file is unreadable or invalid instead of persisting defaults', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const original = '{"version":1,"theme":"dark"';
     writeFileSync(file, original);
-    const store = openSettingsStore(file);
+    const store = open();
     expect(() => store.update({ notifications: { sound: true } })).toThrow();
     expect(readFileSync(file, 'utf8')).toBe(original);
-    writeFileSync(file, v3Json('dark'));
+    expect(() => store.update({ engine: { subagentModel: 'haiku' } })).toThrow(/not written this run/); // P5 O3-A: nor a machine file over it
+    expect(readdirSync(dir)).toEqual(['settings.json']);
+    writeFileSync(file, clientJson('dark'));
     chmodSync(file, 0o000);
     try {
       expect(() => store.update({ notifications: { sound: true } })).toThrow();
     } finally {
       chmodSync(file, 0o600);
     }
-    expect(readFileSync(file, 'utf8')).toBe(v3Json('dark'));
+    expect(readFileSync(file, 'utf8')).toBe(clientJson('dark'));
   });
 
   it('merges an unrelated patch against the latest disk settings, not a stale snapshot', () => {
-    const first = openSettingsStore(file);
-    const second = openSettingsStore(file);
-    first.update({ engine: { binaryPath: '/opt/custom/claude' } });
-    second.update({ notifications: { sound: true } });
-    expect(openSettingsStore(file).settings).toMatchObject({ engine: { binaryPath: '/opt/custom/claude' }, notifications: { sound: true } });
+    const first = open();
+    const second = open();
+    first.update({ engine: { binaryPath: '/opt/custom/claude' }, notifications: { enabled: false } });
+    second.update({ gateway: { offerDirect: false }, notifications: { sound: true } }); // P5 O3-A: each file merged against its own latest
+    expect(open().settings).toMatchObject({ engine: { binaryPath: '/opt/custom/claude' }, gateway: { offerDirect: false }, notifications: { enabled: false, sound: true } });
   });
 });
 
 describe('settings store', () => {
-  it('defaults to light when there is no file yet, silently and without writing one', () => {
+  it('defaults to light when there is no file yet, silently, writing only the defaults of the two files', () => {
     const warn = vi.spyOn(console, 'warn');
     expect(DEFAULT_SETTINGS).toEqual(v3('light'));
-    expect(openSettingsStore(file).settings).toEqual(DEFAULT_SETTINGS);
+    expect(open().settings).toEqual(DEFAULT_SETTINGS);
     expect(warn).not.toHaveBeenCalled();
-    expect(readdirSync(dir)).toEqual([]);
+  // P5 O3-A: both files with their defaults: the machine file, so a profile any split build started has one; the client
+  // file at 21, the version fence a build before the split refuses to write over
+    expect(readdirSync(dir).sort()).toEqual(['machine-settings.json', 'settings.json']);
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(clientSettingsDefaults());
+    expect(JSON.parse(readFileSync(machineFile, 'utf8'))).toEqual(machineSettingsDefaults());
   });
 
   it('reads the persisted setting', () => {
-    writeFileSync(file, v3Json('dark'));
-    expect(openSettingsStore(file).settings).toEqual(v3('dark'));
+    writeFileSync(file, clientJson('dark'));
+    writeFileSync(machineFile, JSON.stringify({ ...machineSettingsDefaults(), permissions: { autoFallback: 'plan' } }));
+    expect(open().settings).toEqual({ ...v3('dark'), permissions: { autoFallback: 'plan' } });
   });
 
   it.each([
     ['unparseable JSON', '{"version":3,'],
     ['an unknown theme', JSON.stringify({ ...v3('sepia') })],
-    ['an unknown later version', JSON.stringify({ ...v3('dark'), version: 21 })], // C12: 4 is the current version; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14; P4-B1: 15; P4-R8: 16; P4-A2: 17; UX1: 18; the style removed: 19; P5 O2: 20
+    ['an unknown later version', JSON.stringify({ ...clientSettingsDefaults(), theme: 'dark', version: 22 })], // P5 O3-A: a client file of a later version; C12: 4 is the current version; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14; P4-B1: 15; P4-R8: 16; P4-A2: 17; UX1: 18; the style removed: 19; P5 O2: 20; P5 O3-A: 21
+    ['a merged object, which no file holds', JSON.stringify({ ...v3('dark') })], // P5 O3-A
     ['a version 2 file with a version 3 section', JSON.stringify({ version: 2, theme: 'dark', keymap: {}, notifications: { enabled: true, sound: false }, usage: { nearLimitPercent: 90 } })],
     ['an unknown key', JSON.stringify({ ...v3('dark'), font: 'x' })],
     ['a version 1 file that is not valid version 1', '{"version":1,"theme":"sepia"}'],
   ])('replaces a file with %s by the defaults and warns, never throws', (_, content) => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     writeFileSync(file, content);
-    expect(openSettingsStore(file).settings).toEqual(DEFAULT_SETTINGS);
+    expect(open().settings).toEqual(DEFAULT_SETTINGS);
     expect(warn).toHaveBeenCalledExactlyOnceWith(expect.stringContaining(file), expect.anything());
   });
 
   it('replaces an unreadable path by the defaults and warns', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mkdirSync(file);
-    expect(openSettingsStore(file).settings).toEqual(DEFAULT_SETTINGS);
+    expect(open().settings).toEqual(DEFAULT_SETTINGS);
     expect(warn).toHaveBeenCalledOnce();
   });
 
-  it('persists an update as compact JSON through a temporary file, leaving only settings.json', () => {
-    const store = openSettingsStore(file);
-    expect(store.update({ theme: 'dark' })).toEqual(v3('dark'));
-    expect(store.settings).toEqual(v3('dark'));
-    const persisted = readFileSync(file, 'utf8');
-    expect(JSON.parse(persisted)).toEqual(v3('dark'));
-    expect(persisted, 'compact JSON without whitespace or a trailing newline').toBe(JSON.stringify(JSON.parse(persisted)));
-    expect(readdirSync(dir)).toEqual(['settings.json']);
-    expect(openSettingsStore(file).settings).toEqual(v3('dark'));
+  it('persists an update as compact JSON through a temporary file, leaving only the two settings files', () => {
+    const store = open();
+    expect(store.update({ theme: 'dark', gateway: { relayUnreachable: 'wait' } })).toEqual({ ...v3('dark'), gateway: { ...v3('dark').gateway, relayUnreachable: 'wait' } });
+    expect(store.settings).toEqual({ ...v3('dark'), gateway: { ...v3('dark').gateway, relayUnreachable: 'wait' } });
+    for (const persisted of [readFileSync(file, 'utf8'), readFileSync(machineFile, 'utf8')]) expect(persisted, 'compact JSON without whitespace or a trailing newline').toBe(JSON.stringify(JSON.parse(persisted)));
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ ...clientSettingsDefaults(), theme: 'dark' });
+    expect(readdirSync(dir).sort()).toEqual(['machine-settings.json', 'settings.json']);
+    expect(open().settings).toEqual({ ...v3('dark'), gateway: { ...v3('dark').gateway, relayUnreachable: 'wait' } });
   });
 
   it('creates the settings directory when it does not exist yet', () => {
-    const nested = join(dir, 'fresh', 'settings.json');
-    openSettingsStore(nested).update({ theme: 'system' });
-    expect(JSON.parse(readFileSync(nested, 'utf8'))).toEqual(v3('system'));
+    const nested = join(dir, 'fresh');
+    const paths = settingsPaths(nested);
+    composeSettings({ clientFile: paths.client, machine: startMachineSettings(paths.machine, { refused: null }) }).update({ theme: 'system', sessions: { archiveInactiveDays: 30 } });
+    expect(JSON.parse(readFileSync(paths.client, 'utf8'))).toEqual({ ...clientSettingsDefaults(), theme: 'system' });
+    expect(JSON.parse(readFileSync(paths.machine, 'utf8'))).toEqual({ ...machineSettingsDefaults(), sessions: { archiveInactiveDays: 30 } });
   });
 
   it('keeps what a patch leaves out, including a key present as undefined', () => {
-    const store = openSettingsStore(file);
+    const store = open();
     store.update({ theme: 'dark' });
     expect(store.update({})).toEqual(v3('dark'));
     expect(store.update({ theme: undefined })).toEqual(v3('dark'));
   });
 
   it('persists keymap overrides and the notification policy', () => {
-    const store = openSettingsStore(file);
+    const store = open();
     store.update({ keymap: { 'attention.next': 'Cmd+Alt+J', 'tab.close': null }, notifications: { enabled: false, sound: true } });
-    expect(openSettingsStore(file).settings).toEqual({
-      ...SETTINGS_DEFAULTS_V20,
+    expect(open().settings).toEqual({
+      ...SETTINGS_DEFAULTS_V21,
       keymap: { 'attention.next': 'Cmd+Alt+J', 'tab.close': null },
-      notifications: { enabled: false, sound: true, kinds: SETTINGS_DEFAULTS_V20.notifications.kinds },
+      notifications: { enabled: false, sound: true, kinds: SETTINGS_DEFAULTS_V21.notifications.kinds },
     });
   });
 
@@ -234,20 +266,20 @@ describe('settings migrate v1 and v2 to v3', () => {
   it('migrates a version 1 file to version 3, rewrites it and logs one line', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     writeFileSync(file, readFileSync(join(FIXTURES, 'v1.json')));
-    expect(openSettingsStore(file).settings).toEqual(v3('dark'));
-    expect(readFileSync(file, 'utf8')).toBe(v3Json('dark'));
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/^\[settings\] migrated .*settings\.json from version 1 to 20$/)); // C12: to 4; W2: to 5; W3: to 6; W7: to 7; W13: to 8; E9: to 9; E10: to 10; E4a: to 11; cua #90: to 12; P2-C: to 13; P3-D: to 14; P4-B1: to 15; P4-R8: to 16; P4-A2: to 17; UX1: to 18; the style removed: to 19; P5 O2: to 20
+    expect(open().settings).toEqual(v3('dark'));
+    expect(onDisk()).toEqual(v3('dark'));
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/^\[settings\] split .*settings\.json \(version 1\) into machine-settings\.json \(version 1\) and the client file \(version 21\)$/)); // C12: to 4; W2: to 5; W3: to 6; W7: to 7; W13: to 8; E9: to 9; E10: to 10; E4a: to 11; cua #90: to 12; P2-C: to 13; P3-D: to 14; P4-B1: to 15; P4-R8: to 16; P4-A2: to 17; UX1: to 18; the style removed: to 19; P5 O2: to 20
   });
 
   it("migrates C5's version 2 file keeping its keymap override and notification policy, and rewrites it once", () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     writeFileSync(file, readFileSync(join(FIXTURES, 'v2.json')));
-    const migrated = { ...v3('system'), keymap: { 'attention.next': 'Cmd+Alt+J' }, notifications: { enabled: false, sound: true, kinds: SETTINGS_DEFAULTS_V20.notifications.kinds } };
-    expect(openSettingsStore(file).settings).toEqual(migrated);
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 2 to 20$/)); // C12: to 4; W2: to 5; W3: to 6; W7: to 7; W13: to 8; E9: to 9; E10: to 10; E4a: to 11; cua #90: to 12; P2-C: to 13; P3-D: to 14; P4-B1: to 15; P4-R8: to 16; P4-A2: to 17; UX1: to 18; the style removed: to 19; P5 O2: to 20
+    const migrated = { ...v3('system'), keymap: { 'attention.next': 'Cmd+Alt+J' }, notifications: { enabled: false, sound: true, kinds: SETTINGS_DEFAULTS_V21.notifications.kinds } };
+    expect(open().settings).toEqual(migrated);
+    expect(onDisk()).toEqual(migrated);
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/\(version 2\) into machine-settings\.json \(version 1\) and the client file \(version 21\)$/)); // C12: to 4; W2: to 5; W3: to 6; W7: to 7; W13: to 8; E9: to 9; E10: to 10; E4a: to 11; cua #90: to 12; P2-C: to 13; P3-D: to 14; P4-B1: to 15; P4-R8: to 16; P4-A2: to 17; UX1: to 18; the style removed: to 19; P5 O2: to 20
     log.mockClear();
-    expect(openSettingsStore(file).settings).toEqual(migrated);
+    expect(open().settings).toEqual(migrated);
     expect(log).not.toHaveBeenCalled();
   });
 
@@ -258,10 +290,10 @@ describe('settings migrate v1 and v2 to v3', () => {
     void _m;
     void _s;
     writeFileSync(file, JSON.stringify({ ...before6('dark'), version: 3, engine: { ...engineV3, subagentModel: 'haiku' }, appearance: { monoFont: null } }));
-    const migrated = { ...v3('dark'), engine: { ...SETTINGS_DEFAULTS_V20.engine, subagentModel: 'haiku' } };
-    expect(openSettingsStore(file).settings).toEqual(migrated);
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 3 to 20$/));
+    const migrated = { ...v3('dark'), engine: { ...SETTINGS_DEFAULTS_V21.engine, subagentModel: 'haiku' } };
+    expect(open().settings).toEqual(migrated);
+    expect(onDisk()).toEqual(migrated);
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/\(version 3\) into machine-settings\.json \(version 1\) and the client file \(version 21\)$/));
   });
   // C12 end
 
@@ -270,9 +302,9 @@ describe('settings migrate v1 and v2 to v3', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     writeFileSync(file, JSON.stringify({ ...before6('dark'), version: 4, appearance: { monoFont: 'Hack' } }));
     const migrated = { ...v3('dark'), appearance: { monoFont: 'Hack', transcriptWidth: 768 } };
-    expect(openSettingsStore(file).settings).toEqual(migrated);
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 4 to 20$/));
+    expect(open().settings).toEqual(migrated);
+    expect(onDisk()).toEqual(migrated);
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/\(version 4\) into machine-settings\.json \(version 1\) and the client file \(version 21\)$/));
   });
   // W2 end
 
@@ -280,9 +312,9 @@ describe('settings migrate v1 and v2 to v3', () => {
   it('migrates a version 5 file to version 6 with acceptEdits as the auto fallback, rewrites it once and logs one line', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     writeFileSync(file, JSON.stringify({ ...before6('dark'), version: 5 }));
-    expect(openSettingsStore(file).settings).toEqual(v3('dark'));
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(v3('dark'));
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 5 to 20$/));
+    expect(open().settings).toEqual(v3('dark'));
+    expect(onDisk()).toEqual(v3('dark'));
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/\(version 5\) into machine-settings\.json \(version 1\) and the client file \(version 21\)$/));
   });
   // W3 end
 
@@ -291,10 +323,10 @@ describe('settings migrate v1 and v2 to v3', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const v6 = { ...before7('dark'), version: 6, engine: { ...ENGINE_BEFORE_V7, memoryBudgetMiB: 6144 } };
     writeFileSync(file, JSON.stringify(v6));
-    const migrated = { ...v3('dark'), engine: { ...SETTINGS_DEFAULTS_V20.engine, memoryBudgetMiB: 6144 } };
-    expect(openSettingsStore(file).settings).toEqual(migrated);
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 6 to 20$/));
+    const migrated = { ...v3('dark'), engine: { ...SETTINGS_DEFAULTS_V21.engine, memoryBudgetMiB: 6144 } };
+    expect(open().settings).toEqual(migrated);
+    expect(onDisk()).toEqual(migrated);
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/\(version 6\) into machine-settings\.json \(version 1\) and the client file \(version 21\)$/));
   });
   // W7 end
 
@@ -303,10 +335,10 @@ describe('settings migrate v1 and v2 to v3', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const v7 = before8('dark');
     writeFileSync(file, JSON.stringify({ ...v7, engine: { ...v7.engine, binaryPath: '/opt/claude', pinnedVersion: '2.1.290' } }));
-    const migrated = { ...v3('dark'), engine: { ...SETTINGS_DEFAULTS_V20.engine, binaryPath: '/opt/claude' } };
-    expect(openSettingsStore(file).settings).toEqual(migrated);
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 7 to 20$/));
+    const migrated = { ...v3('dark'), engine: { ...SETTINGS_DEFAULTS_V21.engine, binaryPath: '/opt/claude' } };
+    expect(open().settings).toEqual(migrated);
+    expect(onDisk()).toEqual(migrated);
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/\(version 7\) into machine-settings\.json \(version 1\) and the client file \(version 21\)$/));
   });
   // W13 end
 
@@ -316,12 +348,12 @@ describe('settings migrate v1 and v2 to v3', () => {
     const v8 = { ...before9('dark'), keymap: { 'attention.next': 'Cmd+Alt+J' }, usage: { nearLimitPercent: 80 } };
     writeFileSync(file, JSON.stringify(v8));
     const migrated = { ...v3('dark'), keymap: { 'attention.next': 'Cmd+Alt+J' }, usage: { nearLimitPercent: 80 }, voice: { locale: null } };
-    expect(openSettingsStore(file).settings).toEqual(migrated);
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 8 to 20$/));
+    expect(open().settings).toEqual(migrated);
+    expect(onDisk()).toEqual(migrated);
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/\(version 8\) into machine-settings\.json \(version 1\) and the client file \(version 21\)$/));
     log.mockClear();
-    expect(openSettingsStore(file).update({ voice: { locale: 'en-US' } }).voice).toEqual({ locale: 'en-US' });
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ ...migrated, voice: { locale: 'en-US' } });
+    expect(open().update({ voice: { locale: 'en-US' } }).voice).toEqual({ locale: 'en-US' });
+    expect(onDisk()).toEqual({ ...migrated, voice: { locale: 'en-US' } });
     expect(log).not.toHaveBeenCalled();
   });
   // E9 end
@@ -332,13 +364,13 @@ describe('settings migrate v1 and v2 to v3', () => {
     const v9 = { ...before10('dark'), voice: { locale: 'en-GB' }, usage: { nearLimitPercent: 80 } };
     writeFileSync(file, JSON.stringify(v9));
     const migrated = { ...v3('dark'), voice: { locale: 'en-GB' }, usage: { nearLimitPercent: 80 } };
-    expect(openSettingsStore(file).settings).toEqual(migrated);
+    expect(open().settings).toEqual(migrated);
     expect(migrated.supervisor).toEqual({ idleExitMinutes: 10, keepRunningDefault: true, shape: 'daemon' }); // P5 O2 M7: then to 20
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 9 to 20$/));
+    expect(onDisk()).toEqual(migrated);
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/\(version 9\) into machine-settings\.json \(version 1\) and the client file \(version 21\)$/));
     log.mockClear();
-    expect(openSettingsStore(file).update({ supervisor: { idleExitMinutes: null } }).supervisor).toEqual({ idleExitMinutes: null, keepRunningDefault: true, shape: 'daemon' });
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ ...migrated, supervisor: { idleExitMinutes: null, keepRunningDefault: true, shape: 'daemon' } });
+    expect(open().update({ supervisor: { idleExitMinutes: null } }).supervisor).toEqual({ idleExitMinutes: null, keepRunningDefault: true, shape: 'daemon' });
+    expect(onDisk()).toEqual({ ...migrated, supervisor: { idleExitMinutes: null, keepRunningDefault: true, shape: 'daemon' } });
     expect(log).not.toHaveBeenCalled();
   });
   // E10 end
@@ -349,13 +381,13 @@ describe('settings migrate v1 and v2 to v3', () => {
     const v10 = { ...before11('dark'), supervisor: { idleExitMinutes: 30, keepRunningDefault: false }, voice: { locale: 'en-GB' } };
     writeFileSync(file, JSON.stringify(v10));
     const migrated = { ...v3('dark'), supervisor: { idleExitMinutes: 30, keepRunningDefault: false, shape: 'daemon' }, voice: { locale: 'en-GB' } };
-    expect(openSettingsStore(file).settings).toEqual(migrated);
+    expect(open().settings).toEqual(migrated);
     expect(migrated.browser).toEqual({ profile: null, searchUrl: 'https://www.google.com/search?q=%s', linkTarget: 'in-app', bookmarksBar: 'shown' });
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 10 to 20$/));
+    expect(onDisk()).toEqual(migrated);
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/\(version 10\) into machine-settings\.json \(version 1\) and the client file \(version 21\)$/));
     log.mockClear();
-    expect(openSettingsStore(file).update({ browser: { linkTarget: 'external' } }).browser).toEqual({ ...migrated.browser, linkTarget: 'external' });
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ ...migrated, browser: { ...migrated.browser, linkTarget: 'external' } });
+    expect(open().update({ browser: { linkTarget: 'external' } }).browser).toEqual({ ...migrated.browser, linkTarget: 'external' });
+    expect(onDisk()).toEqual({ ...migrated, browser: { ...migrated.browser, linkTarget: 'external' } });
     expect(log).not.toHaveBeenCalled();
   });
   // E4a end
@@ -366,9 +398,9 @@ describe('settings migrate v1 and v2 to v3', () => {
     const v11 = before12('dark');
     writeFileSync(file, JSON.stringify({ ...v11, browser: { ...v11.browser, linkTarget: 'external' } }));
     const migrated = { ...v3('dark'), browser: { ...v3('dark').browser, linkTarget: 'external' } };
-    expect(openSettingsStore(file).settings).toEqual(migrated);
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 11 to 20$/));
+    expect(open().settings).toEqual(migrated);
+    expect(onDisk()).toEqual(migrated);
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/\(version 11\) into machine-settings\.json \(version 1\) and the client file \(version 21\)$/));
   });
   // cua #90 end
 
@@ -378,13 +410,13 @@ describe('settings migrate v1 and v2 to v3', () => {
     const v12 = before13('dark');
     writeFileSync(file, JSON.stringify({ ...v12, notifications: { ...v12.notifications, kinds: { ...v12.notifications.kinds, errors: false } }, browser: { ...v12.browser, bookmarksBar: 'hidden' } }));
     const migrated = { ...v3('dark'), notifications: { ...v3('dark').notifications, kinds: { ...v3('dark').notifications.kinds, errors: false } }, browser: { ...v3('dark').browser, bookmarksBar: 'hidden' } };
-    expect(openSettingsStore(file).settings).toEqual(migrated);
+    expect(open().settings).toEqual(migrated);
     expect(migrated.mods).toEqual({ toHuman: { enabled: true } });
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 12 to 20$/));
+    expect(onDisk()).toEqual(migrated);
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/\(version 12\) into machine-settings\.json \(version 1\) and the client file \(version 21\)$/));
     log.mockClear();
-    expect(openSettingsStore(file).update({ mods: { toHuman: { enabled: false } } }).mods).toEqual({ toHuman: { enabled: false } });
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ ...migrated, mods: { toHuman: { enabled: false } } });
+    expect(open().update({ mods: { toHuman: { enabled: false } } }).mods).toEqual({ toHuman: { enabled: false } });
+    expect(onDisk()).toEqual({ ...migrated, mods: { toHuman: { enabled: false } } });
     expect(log).not.toHaveBeenCalled();
   });
   // P2-C end
@@ -394,10 +426,10 @@ describe('settings migrate v1 and v2 to v3', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     writeFileSync(file, JSON.stringify({ ...before14('dark'), mods: { toHuman: { enabled: false } } }));
     const migrated = { ...v3('dark'), mods: { toHuman: { enabled: false } } };
-    expect(openSettingsStore(file).settings).toEqual(migrated);
+    expect(open().settings).toEqual(migrated);
     expect(migrated.artifacts).toEqual({ defaultDesignSystem: null, spaceDesignSystems: {}, commentsView: 'expand' }); // P4-B1: then to 15
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 13 to 20$/));
+    expect(onDisk()).toEqual(migrated);
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/\(version 13\) into machine-settings\.json \(version 1\) and the client file \(version 21\)$/));
   });
   // P3-D end
 
@@ -406,10 +438,10 @@ describe('settings migrate v1 and v2 to v3', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     writeFileSync(file, JSON.stringify(before15('dark')));
     const migrated = v3('dark');
-    expect(openSettingsStore(file).settings).toEqual(migrated);
+    expect(open().settings).toEqual(migrated);
     expect(migrated.artifacts.commentsView).toBe('expand');
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 14 to 20$/));
+    expect(onDisk()).toEqual(migrated);
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/\(version 14\) into machine-settings\.json \(version 1\) and the client file \(version 21\)$/));
   });
   // P4-B1 end
 
@@ -419,11 +451,11 @@ describe('settings migrate v1 and v2 to v3', () => {
     const v15 = { ...before16('dark'), engine: { ...before16('dark').engine, binaryPath: '/opt/claude', subagentModel: 'haiku', statefulMcpServers: ['plugin:ptc:ptc'], memoryBudget: { enabled: false } }, artifacts: { ...before16('dark').artifacts, commentsView: 'hide' } };
     writeFileSync(file, JSON.stringify(v15));
     const migrated = { ...shaped(v15), ...ux1Policies(v15), engine: { ...v15.engine, mcpServers: [], launchProfile: USER_SCOPE } }; // P4-A2: then to 17
-    expect(openSettingsStore(file).settings).toEqual(migrated);
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 15 to 20$/));
+    expect(open().settings).toEqual(migrated);
+    expect(onDisk()).toEqual(migrated);
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/\(version 15\) into machine-settings\.json \(version 1\) and the client file \(version 21\)$/));
     log.mockClear();
-    expect(openSettingsStore(file).settings).toEqual(migrated);
+    expect(open().settings).toEqual(migrated);
     expect(log).not.toHaveBeenCalled();
   });
   // P4-R8 end
@@ -434,14 +466,14 @@ describe('settings migrate v1 and v2 to v3', () => {
     const v16 = { ...before17('dark'), engine: { ...before17('dark').engine, binaryPath: '/opt/claude', statefulMcpServers: ['plugin:ptc:ptc'], mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }] }, mods: { toHuman: { enabled: false } } };
     writeFileSync(file, JSON.stringify(v16));
     const migrated = { ...shaped(v16), ...ux1Policies(v16), engine: { ...v16.engine, launchProfile: USER_SCOPE } };
-    expect(openSettingsStore(file).settings).toEqual(migrated);
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 16 to 20$/));
+    expect(open().settings).toEqual(migrated);
+    expect(onDisk()).toEqual(migrated);
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/\(version 16\) into machine-settings\.json \(version 1\) and the client file \(version 21\)$/));
     log.mockClear();
     const launchProfile = { plugins: { off: ['ptc@ptc-tool'] }, hooks: 'none' as const };
-    expect(openSettingsStore(file).update({ engine: { launchProfile } }).engine).toEqual({ ...migrated.engine, launchProfile });
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ ...migrated, engine: { ...migrated.engine, launchProfile } });
-    expect(openSettingsStore(file).settings.engine.launchProfile).toEqual(launchProfile);
+    expect(open().update({ engine: { launchProfile } }).engine).toEqual({ ...migrated.engine, launchProfile });
+    expect(onDisk()).toEqual({ ...migrated, engine: { ...migrated.engine, launchProfile } });
+    expect(open().settings.engine.launchProfile).toEqual(launchProfile);
     expect(log).not.toHaveBeenCalled();
   });
   // P4-A2 end
@@ -451,11 +483,11 @@ describe('settings migrate v1 and v2 to v3', () => {
     const saved = { ...before18('dark'), notifications: { ...before18('dark').notifications, sound: true } };
     writeFileSync(file, JSON.stringify(saved));
     const migrated = { ...shaped(saved), ...ux1Policies(saved), engine: { ...saved.engine, launchProfile: USER_SCOPE } };
-    expect(openSettingsStore(file).settings).toEqual(migrated);
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 17 to 20$/));
+    expect(open().settings).toEqual(migrated);
+    expect(onDisk()).toEqual(migrated);
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/\(version 17\) into machine-settings\.json \(version 1\) and the client file \(version 21\)$/));
     log.mockClear();
-    expect(openSettingsStore(file).settings).toEqual(migrated);
+    expect(open().settings).toEqual(migrated);
     expect(log).not.toHaveBeenCalled();
   });
 
@@ -466,11 +498,11 @@ describe('settings migrate v1 and v2 to v3', () => {
     const saved = { ...before19('dark'), engine: { ...before19('dark').engine, launchProfile: { plugins: { off: ['ptc@ptc-tool'] }, outputStyle: 'maws', hooks: 'none' } } };
     writeFileSync(file, JSON.stringify(saved));
     const migrated = shaped({ ...saved, engine: { ...saved.engine, launchProfile: { plugins: { off: ['ptc@ptc-tool'] }, hooks: 'none' } } });
-    expect(openSettingsStore(file).settings).toEqual(migrated);
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 18 to 20$/));
+    expect(open().settings).toEqual(migrated);
+    expect(onDisk()).toEqual(migrated);
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/\(version 18\) into machine-settings\.json \(version 1\) and the client file \(version 21\)$/));
     log.mockClear();
-    expect(openSettingsStore(file).settings).toEqual(migrated);
+    expect(open().settings).toEqual(migrated);
     expect(log).not.toHaveBeenCalled();
   });
 
@@ -480,41 +512,184 @@ describe('settings migrate v1 and v2 to v3', () => {
     const saved = { ...before20('dark'), supervisor: { idleExitMinutes: null, keepRunningDefault: false }, sessions: { archiveInactiveDays: 14 } };
     writeFileSync(file, JSON.stringify(saved));
     const migrated = shaped(saved);
-    expect(openSettingsStore(file).settings).toEqual(migrated);
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 19 to 20$/));
+    expect(open().settings).toEqual(migrated);
+    expect(onDisk()).toEqual(migrated);
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/\(version 19\) into machine-settings\.json \(version 1\) and the client file \(version 21\)$/));
     log.mockClear();
-    expect(openSettingsStore(file).settings).toEqual(migrated);
+    expect(open().settings).toEqual(migrated);
     expect(log).not.toHaveBeenCalled();
   });
 
-  it('never rewrites a file that is already version 20, nor writes defaults into it', () => { // C12: version 4; W2: version 5; W3: version 6; W7: version 7; W13: version 8; E9: version 9; E10: version 10; E4a: version 11; cua #90: version 12; P2-C: version 13; P3-D: version 14; P4-B1: version 15; P4-R8: version 16; P4-A2: version 17; UX1: version 18; the style removed: version 19; P5 O2: version 20
+  // C12: version 4; W2: version 5; W3: version 6; W7: version 7; W13: version 8; E9: version 9; E10: version 10; E4a: version 11; cua #90: version 12; P2-C: version 13; P3-D: version 14; P4-B1: version 15; P4-R8: version 16; P4-A2: version 17; UX1: version 18; the style removed: version 19; P5 O2: version 20; P5 O3-A: the client file at 21 beside the machine file at 1
+  it('never rewrites files already split, nor writes defaults into them', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-    const text = JSON.stringify({ ...v3('system'), usage: { nearLimitPercent: 80 } }, null, 2); // not the store's own formatting
+    const text = JSON.stringify({ ...clientSettingsDefaults(), theme: 'system', usage: { nearLimitPercent: 80 } }, null, 2); // not the store's own formatting
+    const machineText = JSON.stringify({ ...machineSettingsDefaults(), engine: { ...machineSettingsDefaults().engine, subagentModel: 'haiku' } }, null, 2);
     writeFileSync(file, text);
-    openSettingsStore(file);
+    writeFileSync(machineFile, machineText);
+    expect(open().settings).toMatchObject({ theme: 'system', usage: { nearLimitPercent: 80 }, engine: { subagentModel: 'haiku' } });
     expect(readFileSync(file, 'utf8')).toBe(text);
+    expect(readFileSync(machineFile, 'utf8')).toBe(machineText);
     expect(log).not.toHaveBeenCalled();
+  });
+});
+
+// P5 O3-A (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md §3, O3-A acceptance 2 and 3): the split, once and idempotent
+describe('the settings split', () => {
+  // The merged settings with every field away from its default, and the unified file an O2-era profile holds of them
+  const merged = (): Settings => ({
+    ...SETTINGS_DEFAULTS_V21, theme: 'dark',
+    keymap: { 'attention.next': 'Cmd+Alt+J' },
+    engine: { ...SETTINGS_DEFAULTS_V21.engine, subagentModel: 'haiku', mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }] },
+    gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false },
+    usage: { nearLimitPercent: 75 },
+    permissions: { autoFallback: 'plan' },
+    supervisor: { idleExitMinutes: 30, keepRunningDefault: false, shape: 'embedded' },
+    mods: { toHuman: { enabled: false } },
+    artifacts: { defaultDesignSystem: '6f1c1d2e-0b7a-4c55-9a3e-2f1b0c9d8e71', spaceDesignSystems: {}, commentsView: 'hide', exportAuthorName: 'Kim Min' },
+    sessions: { archiveInactiveDays: 14 },
+  });
+  const unified = () => ({ ...merged(), version: 20 });
+  const paths = () => settingsPaths(dir);
+  const io = (fail?: { path: string; nth: number }) => {
+    let writes = 0;
+    return {
+      read: (path: string) => { try { return readFileSync(path, 'utf8'); } catch { return null; } },
+      write: (path: string, text: string) => {
+        writes += 1;
+        if (fail && path === fail.path && writes === fail.nth) throw Object.assign(new Error('the disk went away'), { code: 'EIO' });
+        writeFileSync(path, text);
+      },
+    };
+  };
+
+  it('writes each file exactly its owner’s fields: the machine file at 1, settings.json at 21', () => {
+    writeFileSync(file, JSON.stringify(unified()));
+    expect(splitSettingsFiles(paths(), undefined, () => {})).toEqual({ outcome: 'split', machineRefused: null, unsplit: null });
+    const machine = JSON.parse(readFileSync(machineFile, 'utf8'));
+    const client = JSON.parse(readFileSync(file, 'utf8'));
+    expect(Object.keys(machine).sort()).toEqual(['artifacts', 'engine', 'gateway', 'mods', 'permissions', 'sessions', 'supervisor', 'version']);
+    expect(machine).toMatchObject({ version: 1, supervisor: { idleExitMinutes: 30 }, artifacts: { defaultDesignSystem: '6f1c1d2e-0b7a-4c55-9a3e-2f1b0c9d8e71', spaceDesignSystems: {} } });
+    expect(machine.supervisor).not.toHaveProperty('shape');
+    expect(machine.artifacts).not.toHaveProperty('commentsView');
+    expect(Object.keys(client).sort()).toEqual(['appearance', 'artifacts', 'browser', 'keymap', 'notifications', 'supervisor', 'theme', 'usage', 'version', 'voice']);
+    expect(client).toMatchObject({ version: 21, supervisor: { keepRunningDefault: false, shape: 'embedded' }, artifacts: { commentsView: 'hide', exportAuthorName: 'Kim Min' } });
+    expect(client.supervisor).not.toHaveProperty('idleExitMinutes');
+    expect(onDisk()).toEqual(merged());
+  });
+
+  // Every point a start can stop at, and the start after it: the same two files, nothing lost or doubled
+  it.each([
+    ['writing the machine file', 1],
+    ['writing the client file, after the machine file', 2],
+  ])('converges to the same files after an interruption while %s', (_, nth) => {
+    writeFileSync(file, JSON.stringify(unified()));
+    const target = nth === 1 ? machineFile : file;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const interrupted = splitSettingsFiles(paths(), io({ path: target, nth }), () => {});
+    expect(warn).toHaveBeenCalledOnce();
+    if (nth === 1) {
+      // nothing written: the unified file intact, its machine fields held in memory for this run with writes refused
+      expect(interrupted).toMatchObject({ outcome: 'none', unsplit: splitOf(merged()).machine });
+      expect(interrupted.machineRefused).toMatch(/could not be written/);
+      expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(unified());
+      expect(readdirSync(dir)).toEqual(['settings.json']);
+    } else {
+      // the machine file written and authoritative; settings.json still unified, read and not written this run
+      expect(interrupted).toEqual({ outcome: 'split', machineRefused: null, unsplit: null });
+      expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(unified());
+      expect(JSON.parse(readFileSync(machineFile, 'utf8'))).toEqual(splitOf(merged()).machine);
+    }
+    const next = splitSettingsFiles(paths(), undefined, () => {});
+    expect(next.outcome).toBe(nth === 1 ? 'split' : 'finished');
+    expect(onDisk()).toEqual(merged());
+    expect(splitSettingsFiles(paths(), undefined, () => {}).outcome).toBe('none');
+    expect(onDisk()).toEqual(merged());
+  });
+
+  it('a crash between the two writes leaves the machine file authoritative: a later unified write the old build made is not read for machine fields', () => {
+    writeFileSync(file, JSON.stringify(unified()));
+    splitSettingsFiles(paths(), io({ path: file, nth: 2 }), () => {});
+    vi.restoreAllMocks();
+    // settings.json still unified, edited meanwhile (a pre-split build's write of a client field and a machine field)
+    writeFileSync(file, JSON.stringify({ ...unified(), theme: 'light', gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask', offerDirect: true } }));
+    splitSettingsFiles(paths(), undefined, () => {});
+    expect(onDisk()).toEqual({ ...merged(), theme: 'light' }); // the client field taken; the machine file's gateway kept
+  });
+
+  it('a settings.json this build cannot read creates no machine file over it, and the run refuses machine writes', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    for (const text of ['{"version":20,', JSON.stringify({ ...unified(), theme: 'sepia' }), JSON.stringify({ ...clientSettingsDefaults(), version: 22 })]) {
+      writeFileSync(file, text);
+      const outcome = splitSettingsFiles(paths(), undefined, () => {});
+      expect(outcome.outcome).toBe('none');
+      expect(outcome.machineRefused).toMatch(/is not a settings file this build reads[\s\S]*machine-settings\.json is not created over it/);
+      expect(readdirSync(dir)).toEqual(['settings.json']);
+      expect(readFileSync(file, 'utf8')).toBe(text);
+    }
+  });
+
+  // The fence where no setting was ever changed (high review, round 1): without a client file a build before the split
+  // takes the profile for a first run and writes a unified file, whose machine fields a later split would lose to the
+  // machine file. With it, that build reads defaults and refuses the write, and nothing is lost.
+  it('a profile with no settings.json gets the client file at 21 beside the machine file, so a build before the split writes nothing over them', () => {
+    const preSplit = SettingsSchema.extend({ version: z.literal(20) });
+    const preSplitStore = () =>
+      openSettingsFile(file, { read: (raw) => ({ value: preSplit.parse(raw) }), defaults: () => ({ ...SETTINGS_DEFAULTS_V21, version: 20 as const }), validate: (value) => preSplit.parse(value) });
+    expect(splitSettingsFiles(paths(), undefined, () => {}).outcome).toBe('machine');
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(clientSettingsDefaults());
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(() => preSplitStore().update((settings) => ({ ...settings, gateway: { ...settings.gateway, defaultRoute: 'direct' } }))).toThrow();
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(clientSettingsDefaults());
+    // and a profile whose machine file is there but whose client file is not (a crash before it was written) gets it too
+    rmSync(file);
+    expect(splitSettingsFiles(paths(), undefined, () => {}).outcome).toBe('none');
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(clientSettingsDefaults());
+  });
+
+  it('a client file whose machine file has gone gains the machine defaults, and keeps its own bytes', () => {
+    const text = clientJson('dark');
+    writeFileSync(file, text);
+    expect(splitSettingsFiles(paths(), undefined, () => {}).outcome).toBe('machine');
+    expect(readFileSync(file, 'utf8')).toBe(text);
+    expect(JSON.parse(readFileSync(machineFile, 'utf8'))).toEqual(machineSettingsDefaults());
+  });
+
+  // O3-A acceptance 7: a build before the split opens the split files. Its reading was the unified migration ending in
+  // version 20's schema (`SettingsSchema` at 20): neither file is a version it knows, so its store keeps the defaults in
+  // memory, refuses writes, and writes neither file at open (its rule for a file it cannot read).
+  it('a build before the split reads neither file as its own', () => {
+    writeFileSync(file, JSON.stringify(unified()));
+    splitSettingsFiles(paths(), undefined, () => {});
+    const preSplit = SettingsSchema.extend({ version: z.literal(20) });
+    expect(preSplit.safeParse(JSON.parse(readFileSync(file, 'utf8'))).success).toBe(false);
+    expect(preSplit.safeParse(JSON.parse(readFileSync(machineFile, 'utf8'))).success).toBe(false);
+    const before = [readFileSync(file, 'utf8'), readFileSync(machineFile, 'utf8')];
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const preSplitStore = openSettingsFile(file, { read: (raw) => ({ value: preSplit.parse(raw) }), defaults: () => ({ ...SETTINGS_DEFAULTS_V21, version: 20 as const }), validate: (value) => preSplit.parse(value) });
+    expect(preSplitStore.value.theme).toBe('light'); // the defaults, not the person's dark
+    expect(() => preSplitStore.update((settings) => ({ ...settings, theme: 'dark' }))).toThrow();
+    expect([readFileSync(file, 'utf8'), readFileSync(machineFile, 'utf8')]).toEqual(before);
   });
 });
 
 describe('settings patch merges one kind and keeps its siblings', () => {
   it('changes one gateway field and keeps the rest of the state', () => {
-    const store = openSettingsStore(file);
+    const store = open();
     expect(store.update({ gateway: { relayUnreachable: 'wait' } })).toEqual({ ...DEFAULT_SETTINGS, gateway: { ...DEFAULT_SETTINGS.gateway, relayUnreachable: 'wait' } });
   });
 
   it('patches one notification kind and leaves its four siblings; a notifications field leaves kinds alone', () => {
-    const store = openSettingsStore(file);
+    const store = open();
     const siblings = { turnFinished: false, approvals: false, questions: false, planReviews: false, errors: true, heldPeerMessages: true, asyncInput: false, essential: true /* P2-C */ };
     store.update({ notifications: { kinds: siblings } });
     expect(store.update({ notifications: { kinds: { errors: false } } }).notifications.kinds).toEqual({ ...siblings, errors: false });
     expect(store.update({ notifications: { enabled: false } }).notifications).toEqual({ enabled: false, sound: false, kinds: { ...siblings, errors: false } });
-    expect(openSettingsStore(file).settings.notifications.kinds).toEqual({ ...siblings, errors: false });
+    expect(open().settings.notifications.kinds).toEqual({ ...siblings, errors: false });
   });
 
   it('refuses a merged state the schema refuses, and keeps the previous one', () => {
-    const store = openSettingsStore(file);
+    const store = open();
     expect(() => store.update({ usage: { nearLimitPercent: 20 } })).toThrow();
     expect(store.settings).toEqual(DEFAULT_SETTINGS);
   });

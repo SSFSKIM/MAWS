@@ -6,7 +6,7 @@
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { ConnectorToolRefSchema } from '@shared/artifacts/connectors';
-import { migrateSettings } from '@shared/settings/defaults';
+import { isUnifiedSettings, migrateMachineSettings, migrateSettings } from '@shared/settings/defaults';
 import type { ConnectorSourceAnswer, ConnectorWriteEntryAnswer, VerifiedConnectorSource } from './provenance';
 import { canonicalJson, CONFIG_FILE_MAX_BYTES, configFileOf, legacyConfigFileOf, materializeEntry, nodeSourceFiles, type ConnectorLaunchEntry, type SourceFiles } from './source-entry';
 
@@ -20,7 +20,8 @@ const httpUrl = (url: string) => { try { const u = new URL(url); return (u.proto
 export class ConfiguredDeliverySources {
   private readonly files: SourceFiles;
   private readonly directories: Record<Scope, string>;
-  private readonly settingsFile: string;
+  private readonly settingsFile: string; // the app scope's identity (P5 O3-A: the name, not where the bytes are read)
+  private readonly machineFile: string; // P5 O3-A
   private readonly captureEnv: () => Promise<Record<string, string>>;
   private readonly known: Record<Scope, Map<string, Known>> = { app: new Map(), user: new Map() };
   private pending: Record<Scope, Promise<void>> = { app: Promise.resolve(), user: Promise.resolve() };
@@ -31,6 +32,7 @@ export class ConfiguredDeliverySources {
   constructor(options: { userData: string; captureEnv: () => Promise<Record<string, string>>; files?: SourceFiles }) {
     this.files = options.files ?? nodeSourceFiles;
     this.settingsFile = join(options.userData, 'settings.json');
+    this.machineFile = join(options.userData, 'machine-settings.json');
     this.captureEnv = options.captureEnv;
     // Private selectors, never session working directories or filesystem permissions.
     this.directories = { app: join(options.userData, 'connectors', 'configured-app'), user: join(options.userData, 'connectors', 'configured-user') };
@@ -88,18 +90,34 @@ export class ConfiguredDeliverySources {
     return { path: configFileOf(environment), legacyFile: legacyConfigFileOf(environment) };
   }
 
+  private async json(path: string): Promise<unknown> {
+    const text = await this.files.read(path, CONFIG_FILE_MAX_BYTES);
+    if (text === null) throw new Error('absent');
+    return JSON.parse(text);
+  }
+
+  // P5 O3-A (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md §3): MAWS's own servers are read from the machine's
+  // machine-settings.json, and from the unified settings.json while that file is absent (a profile no split build has
+  // started); a client settings.json holds none. The source's identity keeps naming `<profile>/settings.json` whichever
+  // file the bytes came from (`settingsFile`, below), a stable name for MAWS's own servers, so a grant saved under it
+  // before the split is adopted after it with no new sign-in.
+  private async appServers() {
+    const machine = await this.files.read(this.machineFile, CONFIG_FILE_MAX_BYTES);
+    if (machine !== null) return migrateMachineSettings(JSON.parse(machine)).engine.mcpServers;
+    const unified = await this.json(this.settingsFile);
+    if (!isUnifiedSettings(unified)) throw new Error('absent');
+    return migrateSettings(unified).engine.mcpServers;
+  }
+
   private async readScope(scope: Scope, epoch: number): Promise<Map<string, Entry>> {
     const entries = new Map<string, Entry>();
     const next = new Map<string, Known>();
     try {
       const { path, legacyFile } = scope === 'app' ? { path: this.settingsFile, legacyFile: null } : await this.userPaths();
       if (!path || (scope === 'user' && (!legacyFile || await this.files.exists(legacyFile)))) throw new Error('unidentified');
-      const text = await this.files.read(path, CONFIG_FILE_MAX_BYTES);
-      if (text === null) throw new Error('absent');
-      const json: unknown = JSON.parse(text);
       const configured = scope === 'app'
-        ? migrateSettings(json).engine.mcpServers.map(({ name, type, url }) => [name, { type, url }] as const)
-        : Object.entries(record(record(json)?.mcpServers) ?? {});
+        ? (await this.appServers()).map(({ name, type, url }) => [name, { type, url }] as const)
+        : Object.entries(record(record(await this.json(path))?.mcpServers) ?? {});
       if (configured.length > 256) throw new Error('capacity');
       for (const [server, raw] of configured) {
         if (!ConnectorToolRefSchema.shape.server.safeParse(server).success) continue;

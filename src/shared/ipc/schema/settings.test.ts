@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { SETTINGS_DEFAULTS_V20 } from '../../settings/defaults';
+import { SETTINGS_DEFAULTS_V21 } from '../../settings/defaults';
 import { commands, SettingsPatchSchema, SettingsSchema } from './settings'; // C12: commands
 import { LaunchProfileSchema, userScopeProfile } from '../../engine/launch-profile'; // P4-A2
 
-const base = SETTINGS_DEFAULTS_V20;
+const base = SETTINGS_DEFAULTS_V21;
 const issueCodes = (value: unknown) => {
   const parsed = SettingsSchema.safeParse(value);
   return parsed.success ? [] : parsed.error.issues.map((issue) => issue.code);
@@ -33,8 +33,9 @@ describe('settings keymap is a partial record', () => {
     expect(issueCodes({ ...base, keymap: { 'tab.close': 'Cmd J!' } })).toEqual(['invalid_format']);
   });
 
-  it('is version 20 and carries the notification policy (P4-R8: the app MCP servers; P4-A2: the launch profile; P5 O2: the shape)', () => {
-    expect(base.version).toBe(20);
+  it('is version 21 and carries the notification policy (P4-R8: the app MCP servers; P4-A2: the launch profile; P5 O2: the shape; P5 O3-A: the client file’s version)', () => {
+    expect(base.version).toBe(21);
+    expect(SettingsSchema.safeParse({ ...base, version: 20 }).success).toBe(false); // P5 O3-A: a unified file is migrated, never read as the merged settings
     expect(SettingsSchema.safeParse({ ...base, version: 19 }).success).toBe(false); // P5 O2 M7
     expect(SettingsSchema.safeParse({ ...base, supervisor: { ...base.supervisor, shape: undefined } }).success).toBe(false); // P5 O2 M7: required
     expect(SettingsSchema.safeParse({ ...base, version: 18 }).success).toBe(false); // the launch profile's style removed
