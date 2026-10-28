@@ -464,6 +464,29 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     expect(inspect(path)).toMatchObject({ version: 99, mode: 'delete' });
   });
 
+  // P5 O3-A (the O3 document §2): a run refused the spine opens no file at all, the index's or a new one
+  it('an index refused the spine is unavailable with the reason and never opens its file: an existing file keeps its bytes, an absent one stays absent', () => {
+    const path = join(dir.path, 'index.sqlite');
+    const reason = 'spine.lock is held by pid 4242 (build 1.0.0 abc)';
+    const absent = new Index(path, { refused: reason });
+    opened.push(absent);
+    expect(absent.unavailable).toBe(reason);
+    expect(absent.readOnly).toBe(true);
+    expect(() => absent.sessions.list()).toThrow(`index unavailable: ${reason}`);
+    expect(readdirSync(dir.path)).toEqual([]);
+
+    open(path).close();
+    opened.pop();
+    const before = readFileSync(path);
+    const refused = new Index(path, { refused: reason });
+    opened.push(refused);
+    expect(() => refused.projects.list()).toThrow(`index unavailable: ${reason}`);
+    refused.close();
+    opened.pop();
+    expect(readFileSync(path).equals(before)).toBe(true);
+    expect(readdirSync(dir.path).sort()).toEqual(['index.sqlite']);
+  });
+
   it('a file SQLite reports as not a database is moved aside as index.sqlite.broken-<epoch>, never deleted, and a fresh index is created', () => {
     const path = join(dir.path, 'index.sqlite');
     const garbage = 'this is not a database, but it is sixteen bytes and more of text';

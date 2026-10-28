@@ -188,6 +188,13 @@ export function openDb(path: string, migrations: readonly Migration[], repairs: 
   );
 }
 
+// P5 O3-A (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md §2): the index of a run refused the spine, because another
+// live process holds `<profile>/spine.lock`. The file is never opened, so this run neither reads a schema another process
+// may be migrating nor takes a lock on it; every statement fails with `index unavailable: <reason>`, as for a newer file.
+export function refusedDb(reason: string): Db {
+  return new Db(new DatabaseSync(':memory:'), [], reason);
+}
+
 function hasColumn(db: DatabaseSync, table: string, column: string): boolean {
   return (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((info) => info.name === column);
 }

@@ -6,7 +6,7 @@
 // `app.whenReady()` on `<userData>/index.sqlite`. Everything main-side (the session source, C3's attention service,
 // C5's read model, C10) reaches it through these stores.
 import { IndexAttentionStore, type AttentionStore } from './attention';
-import { openDb, type Db } from './db';
+import { openDb, refusedDb, type Db } from './db';
 import { DraftStore } from './drafts';
 import { MIGRATIONS, REPAIRS } from './migrations';
 import { ProjectStore, type OrgRow } from './projects';
@@ -32,6 +32,10 @@ const ORG_RETRY_MS = [1_000, 4_000, 15_000] as const;
 // every try at that timeout, each try killed before the shim could warm (P5 O6 M6, hosted e2e:machines).
 const ORG_RETRY_GIT_TIMEOUT_MS = GIT_TIMEOUT_MS;
 
+export interface IndexOptions {
+  refused?: string | null; // P5 O3-A
+}
+
 export class Index {
   readonly sessions: SessionStore;
   readonly sessionSearch: SessionSearchStore;
@@ -49,8 +53,10 @@ export class Index {
   private stamped = 0;
   private closed = false;
 
-  constructor(path: string) {
-    this.db = openDb(path, MIGRATIONS, REPAIRS);
+  // P5 O3-A: `refused`, why this run may not run the spine (src/main/settings/spine-lock.ts): the index is then unavailable
+  // with that reason, its file never opened.
+  constructor(path: string, options: IndexOptions = {}) {
+    this.db = options.refused ? refusedDb(options.refused) : openDb(path, MIGRATIONS, REPAIRS);
     // One revision per committed change, stamped as each change is announced after its commit (never inside a
     // transaction that may still roll back), so revisions are distinct and in commit order.
     const stamp = () => ++this.stamped;
