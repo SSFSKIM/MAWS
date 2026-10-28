@@ -656,13 +656,13 @@ The hub serves both protocols, but a migrated endpoint accepts only one trust mo
 2. **Upgrade each machine and re-enroll it in place** with a new code (§5.3), keeping its name, as `hub enroll --replace` does today.
    - Log writers are `<enrolled name>/…`, so a new name would split the log's history.
    - The mini still runs a pre-MW1 sminos, so upgrading it comes first. The upgrade goes through `mini-ops`, a session on the mini, at the owner's request. The owner's standing rule forbids driving `claude` over ssh there, and that covers both the sminos upgrade and installing the daemon. This is an operational dependency.
-   - The hub serves DX2 and RL1 side by side for each machine until that machine has moved.
+   - The hub serves DX2 and RL1 side by side for each machine until that machine has moved. The exception is the machine's own re-enrollment: redeeming its code ends its DX2 credential, so from then until it is listed and cut over, it is on neither path (Decision Log 29).
 3. **Re-attest history.** At migration, each machine signs its own past events once. The hub's existing project logs then display as *attested at migration by `<machine>`* instead of *unverified (legacy)* for good.
 4. **Move the phone's cards to `web-cards`** (§5.10), no later than the first cutover of a machine the owner answers from the phone (above).
    - The phone registers a device: a WebCrypto channel key plus its passkey, approved from the owner's Mac.
    - It answers through RL4 actions over a channel.
    - This means desk-web implements RL2 in WebCrypto (ECDH, HKDF and AES-GCM are all available there). It is not free.
-   - The phone loop keeps working at every step.
+   - The phone loop keeps working at every step, except for that pause at the cutover of a machine it answers. The pause falls inside a window the owner names, with no session waiting and nothing owed (owner, O14's Q3).
 5. **Retire the shared org key** once the last machine and the phone have moved. The hub deletes the wrapped copies, and the endpoint module ignores DX1 codes.
 
 ### 10. Open owner decisions, with recommendations
@@ -972,3 +972,8 @@ These are named here with their binding fields. Byte-level schemas and test vect
    - The backstop needs a signer while the stand-in is the only admin device, so the stand-in signs a no-change successor at the owner's hand before the head turns 30 days old.
    - Rejected: retiring the stand-in's keys. It signs no log events, so retirement keeps nothing that revocation loses, and it needs the key destroyed, which a file kept for weeks can't show.
    - Rejected: requiring an Enclave-held first root, which no build can make before signed builds.
+29. **2026-10-28, a re-enrollment in place ends the machine's DX2 at its redemption** (p5-desk-track-owner, from the adversarial review of O14 M6).
+   - The hub keeps one credential per machine name, and redeeming a re-enrollment code ends the old one at once, as it does today. From the redemption until the machine is listed and sminos is welcomed, the machine is on neither DX2 nor RL, and the phone's loop for it pauses.
+   - The owner approved the pause, bounded (O14's Q3): a 30-minute window the owner names, with no session waiting and nothing owed, a card test within 10 minutes of the cutover, and an undo back to DX2 within 60 minutes of the redemption. Nothing is lost in it: owed deliveries wait, and after the cutover the phone reaches the machine's questions through `web-cards`.
+   - The trust model is the same either way. Accepting one trust model is the machine's rule, enforced at sminos's welcome (O12 M5), and the hub is trusted with availability only.
+   - Rejected: keeping the DX2 credential until the endpoint's first RL1 claim (O14 M6 as first written). Its review found that doing it safely needs a migration state for the credential with its own deadline, deletion by token id, and a cutover bound atomically to an accepted claim from the new credential. That is a state machine in a security-sensitive credential lifecycle, to save a few minutes once per machine inside a window the owner already approved.
