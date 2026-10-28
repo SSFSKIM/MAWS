@@ -94,7 +94,8 @@ export class BrowserData {
   }
 
   // Reads the index's version and, at 14 or above, opens the file if it is not open yet, then brings its schema current
-  // and promotes any staging: staging an index restored from a backup left while the browser ran is promoted too.
+  // and promotes any staging, so what the migration of an index restored from a backup staged while the browser ran is
+  // promoted at the next reattach.
   private open(): void {
     if (this.unavailable !== null || this.closed) return;
     const version = indexVersion(this.paths.index);
