@@ -1015,4 +1015,7 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
     orgFeed.close();
     void orgSession?.close();
   });
+  // P5 O3-A: the last step, once every service that writes the machine's files has stopped (the process's exit releases
+  // it too, for a quit that never reaches the steps)
+  shutdown.add('spine lock', spine.release);
 }
