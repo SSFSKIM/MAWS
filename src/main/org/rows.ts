@@ -263,9 +263,13 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
   }
 
   async function retryWaiting(current: SignedIn): Promise<void> {
-    const entries = [...waiting.values()];
-    waiting.clear();
-    for (const entry of entries) await judge(current, entry.record, entry.hash);
+    // Each entry stays in `waiting` while it is judged, so a read meanwhile still names its machine in `pending`. Then
+    // it goes unless the judgment replaced it: `accept` has removed it, `wait` has set a new entry, and anything else
+    // (below its mark, a conflict, an ended key) leaves this one.
+    for (const [id, entry] of [...waiting]) {
+      await judge(current, entry.record, entry.hash);
+      if (waiting.get(id) === entry) waiting.delete(id);
+    }
   }
 
   async function reverifyHeld(current: SignedIn): Promise<void> {

@@ -177,7 +177,7 @@ const running: RemoteRows[] = [];
 
 async function start(
   w: World,
-  options: { files?: ReturnType<typeof memoryFiles>; roster?: string[]; projects?: ProjectRecord[]; coalesce?: number; unverifiedMax?: number } = {},
+  options: { files?: ReturnType<typeof memoryFiles>; roster?: string[]; projects?: ProjectRecord[]; coalesce?: number; unverifiedMax?: number; onNow?: () => void } = {},
 ) {
   const feed = fakeFeed();
   const files = options.files ?? memoryFiles();
@@ -196,7 +196,7 @@ async function start(
     onLocalProjects: (listener) => (projectListeners.add(listener), () => void projectListeners.delete(listener)),
     files,
     emit: (next) => emitted.push(next),
-    now: () => w.clock,
+    now: () => (options.onNow?.(), w.clock),
     timing: { ROWS_COALESCE_MS: options.coalesce ?? 1, ROWS_CACHE_WRITE_MS: 1, ...(options.unverifiedMax === undefined ? {} : { UNVERIFIED_MAX: options.unverifiedMax }) },
     log: (line) => logs.push(line),
   });
@@ -591,6 +591,36 @@ describe('coverage', () => {
     await h.settle();
     expect(h.rows.rows()).toMatchObject({ complete: true, pending: [] });
     expect(h.shown()).toEqual(['s r20']);
+  });
+
+  it('keeps a machine pending while its waiting record is judged again, until the judgment lands', async () => {
+    const w = await World.make();
+    // the clock is read as each record is verified: there the rows are read as `org.rows` or an emission would
+    const probes: OrgRows[] = [];
+    let probing = false;
+    const h = await start(w, { onNow: () => void (probing && probes.push(h.rows.rows())) });
+    await snapshot(h, [await w.list(w.m1, 's', 10)]);
+    const rotated = { ref: w.m1.ref, key: await generateSigningKey() };
+    h.feed.close();
+    h.feed.open();
+    h.feed.state(w.head().state.version + 1);
+    h.feed.page([await w.list(rotated, 't', 1)], true);
+    await h.settle();
+    expect(h.rows.rows()).toMatchObject({ complete: false, pending: [w.m1.ref], rows: [] });
+    probing = true;
+    const oldKid = await keyId(w.m1.key.pub);
+    await w.adopt((s) => {
+      s.machines = s.machines.map((m) => (m.ref === w.m1.ref ? { ...m, pub: rotated.key.pub } : m));
+      s.retired.push({ keyId: oldKid, pub: w.m1.key.pub, notAfter: iso(w.clock), holder: { machine: w.m1.ref } });
+    });
+    await h.settle();
+    probing = false;
+    expect(probes.length).toBeGreaterThan(0);
+    for (const probe of probes) {
+      if (!probe.rows.some((r) => r.session === 't')) expect(probe.pending).toEqual([w.m1.ref]);
+    }
+    expect(h.rows.rows()).toMatchObject({ complete: true, pending: [] });
+    expect(h.shown()).toEqual(['t r1']);
   });
 });
 
