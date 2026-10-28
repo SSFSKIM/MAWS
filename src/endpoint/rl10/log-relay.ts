@@ -92,7 +92,8 @@ export type RelayContext = {
   ledger: SignatureLedger;
   index: InboundIndex;
   legacy: LegacyKey;
-  hub: { openProject(project: string, handler: LogProject): () => void; send(frame: Frame): boolean };
+  /** `writable`: resolves once the hub link's socket has room (hub-link.ts), which an upload waits for. */
+  hub: { openProject(project: string, handler: LogProject): () => void; send(frame: Frame): boolean; writable?(): Promise<void> };
   /** A frame down RL10 to sminos (dropped when it isn't connected). */
   toSminos(frame: Frame): void;
   /** A project sminos opened (listings re-judge what they relay). */
@@ -163,7 +164,10 @@ export class LogRelay {
         this.#ctx.toSminos({ t: 'refused', project, refusal: { reason: signed.reason, ...(at ?? {}), message: signed.message } });
       }
     }
-    if (out.length > 0) this.#ctx.hub.send({ t: 'events', project, events: out });
+    if (out.length === 0) return;
+    // The hub link's socket holding its soft cap, the upload waits, and RL10's next frames behind it (server.ts).
+    await this.#ctx.hub.writable?.();
+    this.#ctx.hub.send({ t: 'events', project, events: out });
   }
 
   /** sminos's `rejected` (an event it refused on import) on to the hub. */

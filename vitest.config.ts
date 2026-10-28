@@ -44,6 +44,7 @@ const TIMING_NODE_TESTS = [
   'test/endpoint/channels.local.test.ts', // P5 O10 M4: RL2 over the hub's multiplex (desk-hub's Worker in Miniflare) and the direct listener
   'test/endpoint/rl10/conversation.local.test.ts', // P5 O10 M6: RL10's conversation replayed against the real socket and desk-hub's Worker in Miniflare
   'test/endpoint/subscriptions.local.test.ts', // P5 O10 M8: subscriptions across a forced drop over the hub's multiplex (desk-hub's Worker in Miniflare) and the direct listener
+  'test/endpoint/rl10/uplink.test.ts', // P5 O10: the log plane's uploads held at a stand-in hub's real socket and RL10's, a burst signed and sent
 ];
 const TIMING_RENDERER_TESTS = [
   'src/renderer/src/App.test.tsx',

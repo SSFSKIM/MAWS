@@ -11,8 +11,10 @@
 //
 // A connection's first line is sminos's `hello` with the token, within `HELLO_MS`: the endpoint writes nothing before
 // the token checks out and closes on a wrong one. One connection is served at a time; a new one that checks out
-// replaces the last. Every frame after the hello is handed on in order, each awaited before the next line is read, so a
-// frame's effects (an upload's signature) are done before the frame behind it is seen.
+// replaces the last. Every frame after the hello is handed on in order, each awaited before the next is handed on, so a
+// frame's effects (an upload's signature) are done before the frame behind it is seen. Lines waiting their turn hold at
+// most READ_AHEAD_BYTES: past it the socket is not read until they drain, so a frame held (an upload waiting for the
+// hub link to have room, log-relay.ts) holds sminos's lane behind it, which paces itself and keeps its backlog on disk.
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
 import * as fs from 'node:fs';
 import { createServer, type Server, type Socket } from 'node:net';
@@ -27,6 +29,11 @@ export const RL10_PROTOCOL = { major: 1, minor: 0 } as const;
 export const LINE_LIMIT = 1024 * 1024;
 /** How long a connection has to send its hello. */
 export const HELLO_MS = 10_000;
+/**
+ * The lines read and not yet handed on, at most (one read past it at most): sminos's own read-ahead (`UPLOAD_AHEAD`, one
+ * upload pass), so a held upload holds the endpoint to that while sminos's lane holds the rest.
+ */
+export const READ_AHEAD_BYTES = 4 * 1024 * 1024;
 /** What a connection may hold unread by sminos before it is given up (sminos stopped reading). */
 const UNREAD_LIMIT = 64 * 1024 * 1024;
 /** The longest path a Unix socket's address holds (macOS's 104 bytes with its terminator; Linux's is 108). */
@@ -217,9 +224,11 @@ class Connection implements Rl10Connection {
     this.#closers.push(run);
   }
 
-  /** Reads lines, handing each to `each` in order, the next only once the last is done. */
+  /** Reads lines, handing each to `each` in order, the next only once the last is done; past READ_AHEAD_BYTES waiting, none. */
   read(each: (line: string) => Promise<void> | void): void {
     let queue: Promise<void> = Promise.resolve();
+    let waiting = 0;
+    let paused = false;
     this.#socket.on('data', (chunk: Buffer) => {
       this.#buffer = Buffer.concat([this.#buffer, chunk]);
       for (;;) {
@@ -232,7 +241,22 @@ class Connection implements Rl10Connection {
           return this.close();
         }
         if (line === '') continue;
-        queue = queue.then(() => (this.#closed ? undefined : each(line))).catch((error: unknown) => this.#log(`endpoint: an RL10 frame failed: ${(error as Error).message}`));
+        const size = end + 1;
+        waiting += size;
+        queue = queue
+          .then(() => (this.#closed ? undefined : each(line)))
+          .catch((error: unknown) => this.#log(`endpoint: an RL10 frame failed: ${(error as Error).message}`))
+          .then(() => {
+            waiting -= size;
+            if (paused && waiting < READ_AHEAD_BYTES && !this.#closed) {
+              paused = false;
+              this.#socket.resume();
+            }
+          });
+      }
+      if (!paused && waiting >= READ_AHEAD_BYTES) {
+        paused = true;
+        this.#socket.pause();
       }
       if (this.#buffer.length > LINE_LIMIT) {
         this.#log('endpoint: an RL10 line past 1 MiB closed its connection');

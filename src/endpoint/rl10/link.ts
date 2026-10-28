@@ -11,7 +11,8 @@
 // set and directory whenever the head changes them.
 //
 // What sminos sends:
-//   - the log plane (`hello`, `events`, `rejected`), relayed to RL1 (log-relay.ts);
+//   - the log plane (`hello`, `events`, `rejected`), relayed to RL1 (log-relay.ts); an `events` upload waits while the
+//     hub link's socket holds its soft cap, and with it every frame behind it on the one stream (server.ts);
 //   - the session lane, which stops here and never reaches the hub: `member` and `restated` (members.ts), `pending`
 //     (M3's notify counts), and `session` messages of every DX4 kind: a `machine` presence gives its project's
 //     checkouts, a sub-less `host` is a to-human event (M3's `wrote`, once per `(writer, seq)`, durably), and every
@@ -56,7 +57,7 @@ export type Rl10Context = {
   identity(): Identity | null;
   key(): { key: SigningKey; keyId: string } | null;
   policy: EndpointPolicy;
-  hub: { openProject(project: string, handler: LogProject): () => void; send(frame: Frame): boolean };
+  hub: { openProject(project: string, handler: LogProject): () => void; send(frame: Frame): boolean; writable?(): Promise<void> };
   /** M3's listings and notify, which the session lane feeds. */
   listings: MembersContext['listings'] & { refresh(): Promise<void>; listedSessions(): readonly string[] };
   notifier: { pendingSet(project: string, raised: ReadonlyArray<{ session: string }>): void; hostMessage(message: SessionLaneMessage, sent?: () => void): void; forget(session: string): void };
