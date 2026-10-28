@@ -1,6 +1,6 @@
 import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 // The web app's suites under MAWS's own vitest, as the hub's are (MAWS's root config lists this file among its
 // projects, so `pnpm test` reaches them). They run under Node, which has the browser's WebSocket and WebCrypto and
@@ -23,6 +23,8 @@ export default defineConfig({
     root: import.meta.dirname,
     environment: 'node',
     include: ['src/**/*.test.{ts,tsx}', 'test/**/*.test.ts'],
+    // The suites that start the local hub, a wrangler dev child, run in vitest.local.config.ts's project (P5 O13 M4).
+    exclude: [...configDefaults.exclude, '**/*.local.test.ts'],
     env: { LC_ALL: 'ko_KR.UTF-8', LANG: 'ko_KR.UTF-8' },
     setupFiles: [resolve(import.meta.dirname, '../../test/support/artifacts-dom-setup.ts')],
   },

@@ -244,7 +244,8 @@ env:
   # The groups that check this tree against another build, its peer (the two-build check, e2e/cross-build.spec.ts):
   # scripts/ci-gate.sh names the peer in a `Peer:` trailer (the merge base with master, unless its --peer names another)
   # beside both trees' wires, and the plan adds these groups to a run with unit or an e2e group whenever the two are a
-  # minor apart (gate-plan.mjs). Their job fetches that one
+  # minor apart (gate-plan.mjs), unless an older run holds the check: then a hosted waiter follows its verdict.
+  # A real peer job fetches that one
   # commit, checks it out under RUNNER_TEMP with an install of its own and builds its out/ (.github/scripts/gate-peer.sh),
   # and stops every supervisor of either build whatever happened. Always the Mac's exclusive instance, never hosted.
   PEER_E2E: cross-build
@@ -255,6 +256,9 @@ defaults:
 
 jobs:
   plan:
+    permissions:
+      contents: read
+      actions: read
     # The smallest hosted runner (ubuntu-slim, 1 vCPU; the plan only computes outputs and takes seconds), or the self-hosted Mac
     # when the repository variable GATE_RUNNER is `macos` (§3.6); hosted under `pool`, since it is what makes the pool's box
     # (Decision Log 53). The jobs below take the runners the plan resolves: class 1a's from the `Class1a:` trailer or
@@ -290,6 +294,7 @@ jobs:
       e2e_build: ${{ steps.plan.outputs.e2e_build }}
       e2e_build_runner: ${{ steps.plan.outputs.e2e_build_runner }}
       e2e_hosted: ${{ steps.plan.outputs.e2e_hosted }}
+      peer_wait: ${{ steps.plan.outputs.peer_wait }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -297,6 +302,13 @@ jobs:
             package.json
             .github
           sparse-checkout-cone-mode: false
+      - name: Find an existing peer check
+        env:
+          EVENT: ${{ github.event_name }}
+          GATE_RUNNER: ${{ vars.GATE_RUNNER }}
+          GATE_E2E_RUNNER: ${{ vars.GATE_E2E_RUNNER }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node .github/scripts/gate-peer-held.mjs
       - id: plan
         env:
           EVENT: ${{ github.event_name }}
@@ -310,6 +322,32 @@ jobs:
           GATE_RUNNER: ${{ vars.GATE_RUNNER }}
           GATE_E2E_RUNNER: ${{ vars.GATE_E2E_RUNNER }}
         run: node .github/scripts/gate-plan.mjs
+
+  # An omitted duplicate still owes the holder's verdict. Use a standard hosted runner: ubuntu-slim has a hard
+  # 15-minute cap, while the mini's queue alone has reached 71 minutes. No Mac or pool instance is occupied here.
+  e2e-peer-wait:
+    needs: plan
+    if: needs.plan.outputs.peer_wait != '[]'
+    name: e2e:${{ matrix.group }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ matrix.timeout }}
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.peer_wait) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github
+      - env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PEER_RUN: ${{ matrix.run }}
+          PEER_GROUP: ${{ matrix.group }}
+          PEER_WAIT_MINUTES: ${{ matrix.wait }}
+        run: .github/scripts/gate-run.sh '^held by run ' node .github/scripts/gate-peer-wait.mjs
 
   static:
     needs: plan
