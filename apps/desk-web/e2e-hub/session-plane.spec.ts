@@ -279,6 +279,8 @@ test("G2: an RPC is drawn forwarded, uncertain when its machine drops, retried u
   await expect(composer.locator('[data-rpc-state="done"]')).toHaveText(/^Interrupted|^Nothing was running/, { timeout: 15_000 });
   expect(sent.filter((r) => r.rpc === 'interrupt')).toHaveLength(2);
   expect(sent[1]).toEqual(sent[0]); // the same sealed RPC, nonce and all
+  // `done` can be drawn from the first RPC's result alone, before the machine records the retry's ledger answer.
+  await expect.poll(() => fm.rpcs.length, { timeout: 15_000 }).toBe(2);
   expect(fm.rpcs.map((r) => [r.nonce, r.executed])).toEqual([
     [sent[0].nonce, true],
     [sent[0].nonce, false], // answered from the ledger, never run twice
