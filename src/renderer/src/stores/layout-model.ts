@@ -488,6 +488,34 @@ export function dockSplit(main: LayoutMain): LayoutMain {
 // moves to that project's set, after the active tab of its focused pane; when it is what the strip shows, the strip
 // follows it. Nothing moves, nothing changes. P5 O6 M5: nothing leaves a set still keyed from before M5 whose key
 // `rekeyOf` cannot answer yet; that set migrates whole (`rekeySets`), its panes and ratio with it.
+// P5 O6 M2 (M6's scene): each session tab takes its session's title where `titleOf` knows one that differs from the
+// title the tab holds; a session it does not know keeps the title its tab last knew. Nothing differs: `main` itself.
+export function titleTabs(main: LayoutMain, titleOf: (appSessionId: AppSessionId) => string | undefined): LayoutMain {
+  let sets: LayoutMain['sets'] | null = null;
+  for (const key of setKeys(main)) {
+    const set = main.sets[key];
+    if (!set) continue;
+    let changed = false;
+    const panes = set.panes.map((pane) => {
+      let paneChanged = false;
+      const tabs = pane.tabs.map((tab) => {
+        if (tab.kind !== 'session') return tab;
+        const title = titleOf(tab.appSessionId);
+        if (title === undefined || title === tab.title) return tab;
+        paneChanged = true;
+        return { ...tab, title };
+      });
+      if (!paneChanged) return pane;
+      changed = true;
+      return { ...pane, tabs };
+    }) as TabSet['panes'];
+    if (!changed) continue;
+    sets ??= { ...main.sets };
+    sets[key] = { ...set, panes };
+  }
+  return sets === null ? main : { ...main, sets };
+}
+
 export function refile(main: LayoutMain, setOf: SetOfTab, rekeyOf?: RekeyOf): LayoutMain {
   const waiting = (key: TabSetKey) => rekeyOf !== undefined && isProjectAddress(key) && rekeyOf(key) === 'wait';
   let next = main;

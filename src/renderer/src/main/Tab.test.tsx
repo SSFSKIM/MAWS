@@ -4,7 +4,7 @@
 // Without an open project chat, the item is disabled and says why, even with a pinned Artifacts tab. P4-B3: through
 // the transfer's move (shell/transfer.ts),
 // which carries the editor's state, so the tab's own guard is not asked.
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TEST_MACHINE } from '../../../../test/support/machine';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, tabId, type LayoutMain, type TabRef } from '@shared/ipc/schema/layout';
@@ -20,7 +20,10 @@ import { fail, installFakeMain, ok } from '../test-support/code';
 import { A, panelOf, resetPanelStores, sessionTab } from '../test-support/panel';
 import { ARTIFACTS_TOOL_ID, artifactsTool, type ArtifactsHandle } from '../tools/artifacts/ArtifactsTool';
 import { MainArea } from './MainArea';
-import { SHOW_IN_PANEL_COPY } from './Tab';
+import { SHOW_IN_PANEL_COPY, useTabLabel } from './Tab';
+import { addressOf } from '@shared/machine/address';
+import type { AppSessionId } from '@shared/graph/ids';
+import { OTHER_MACHINE } from '../../../../test/support/machine';
 
 const DECK = '00000000-0000-4000-8000-000000000001';
 const ARTIFACT: TabRef = { id: tabId({ kind: 'artifact', artifactId: DECK, machine: TEST_MACHINE }), kind: 'artifact', artifactId: DECK, machine: TEST_MACHINE, pinned: false };
@@ -150,5 +153,15 @@ describe('Show in panel on an artifact tab', () => {
     fireEvent.contextMenu(document.querySelector<HTMLElement>(`[data-tab-id="${sessionTab(A).id}"]`)!);
     const menu = await screen.findByRole('menu');
     expect(within(menu).queryByRole('menuitem', { name: SHOW_IN_PANEL_COPY.label })).toBeNull();
+  });
+});
+
+// P5 O6 M2 (M6's scene): a session tab whose record the page does not hold (another machine not loaded in this run) is
+// titled by the title the tab last knew, not "New chat".
+describe('a session tab’s label without its record', () => {
+  it('is the tab’s last-known title', () => {
+    const onB = addressOf(OTHER_MACHINE, 'b-session' as AppSessionId);
+    const { result } = renderHook(() => useTabLabel({ id: `session:${onB}`, kind: 'session', appSessionId: onB, pinned: false, title: 'B’s shared session' }));
+    expect(result.current.title).toBe('B’s shared session');
   });
 });

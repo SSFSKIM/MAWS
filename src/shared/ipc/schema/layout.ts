@@ -41,8 +41,12 @@ const ArtifactTabV2Schema = z.strictObject({ id: z.string(), kind: z.literal('ar
 // the tab's last URL as a suggestion, never auto-loaded (the page itself lives in main, `<userData>/browser/tabs.json`)
 const BrowserTabSchema = z.strictObject({ id: z.string(), kind: z.literal('browser'), appSessionId: AppSessionIdSchema, browserTabId: BrowserTabIdSchema, pinned: z.boolean() });
 // E4a end
+// P5 O6 M2 (M6's scene): a session tab in version 3 keeps its session's last-known title, so a tab of a machine whose
+// records the page does not hold yet (one not loaded in this run) is still named; optional, so a tab written without it
+// reads, and version 3 is unchanged otherwise.
+const SessionTabV3Schema = SessionTabSchema.extend({ title: z.string().optional() });
 export const TabRefSchema = z.discriminatedUnion('kind', [
-  SessionTabSchema, AgentTabSchema, FileTabV2Schema.extend({ machine: MachineRefSchema }), DiffTabSchema, DiagnosticsTabSchema, SettingsTabSchema,
+  SessionTabV3Schema, AgentTabSchema, FileTabV2Schema.extend({ machine: MachineRefSchema }), DiffTabSchema, DiagnosticsTabSchema, SettingsTabSchema,
   ArtifactsTabSchema, ProjectsTabSchema, CustomizeTabSchema, ArtifactTabV2Schema.extend({ machine: MachineRefSchema }), BrowserTabSchema,
 ]);
 export type TabRef = z.infer<typeof TabRefSchema>;

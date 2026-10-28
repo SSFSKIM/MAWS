@@ -70,7 +70,8 @@ export interface LayoutState {
   // set.
   // P5 O6 M5: `rekeyOf` answers what a project key from before M5 (a project's address) becomes (`model.RekeyOf`); every
   // set, expanded row and panel context keyed by one migrates at hydration and again at `rekeyProjects`.
-  hydrate(client: MawsBridge, known: (appSessionId: AppSessionId) => boolean, opts?: { settle?: () => void; projectOf?: ProjectOf; rekeyOf?: model.RekeyOf }): Promise<void>;
+  // P5 O6 M2 (M6's scene): `titleOf` answers a held session's title, which its tabs keep (`refreshTabTitles`).
+  hydrate(client: MawsBridge, known: (appSessionId: AppSessionId) => boolean, opts?: { settle?: () => void; projectOf?: ProjectOf; rekeyOf?: model.RekeyOf; titleOf?: TitleOf }): Promise<void>;
   // A tab of a session opens in its project's set, which the strip shows first when it is activated (W12).
   openTab(ref: TabTarget, opts?: { pane?: model.PaneTarget; activate?: boolean }): void;
   // I2: replaces the focused pane's session unless `how: 'tab'` or `split` asks otherwise (`model.openSession`); W12:
@@ -81,6 +82,9 @@ export interface LayoutState {
   setCurrentProject(key: TabSetKey | null): void;
   // W12: tabs whose session's project changed move to its set (the shell calls it when records or intents change).
   refileTabs(): void;
+  // P5 O6 M2 (M6's scene): session tabs take their sessions' titles where they differ (the shell calls it when records
+  // change); nothing differs, nothing changes, so nothing is written.
+  refreshTabTitles(): void;
   // P5 O6 M5 ("Migrating project-keyed state"): the keys still from before M5 migrate, as far as `rekeyOf` now knows
   // (the shell calls it when a machine's projects arrive). Before hydration, nothing: hydration migrates what it reads.
   rekeyProjects(): void;
@@ -151,6 +155,8 @@ const NO_SURFACES: PanelSurfaces = { version: 2, stacks: {}, pinnedTools: [], co
 export type ProjectOf = (appSessionId: AppSessionId) => TabSetKey | null | undefined;
 const WAIT: model.RekeyOf = () => 'wait';
 export const NO_PROJECT_OF: ProjectOf = () => null;
+// P5 O6 M2: a held session's title, undefined for a session the page does not hold
+export type TitleOf = (appSessionId: AppSessionId) => string | undefined;
 
 // I2: an unstarted tab a replace would take the place of is not replaced: the session opens beside it, then the tab
 // passes C10's close guard (it asks only about a non-empty draft) and goes with its intent, or stays when declined
@@ -272,8 +278,10 @@ export function createLayoutStore() {
     // the first `layout.get`) apply at once and are kept, then replayed over the hydrated tabs, so hydration never
     // wipes what the user just opened. After hydration a change simply applies.
     // P4-B3x: every change of the tabs or the regions lands through `commit`, so the fold rule holds at every state.
+    // P5 O6 M2: every change lands with its session tabs titled, so a tab is titled when it opens
+    let titleOf: TitleOf = () => undefined;
     const commit = (nextMain: LayoutMain, nextRegions: LayoutRegions) => {
-      const next = reconcileFold(get().main, { main: nextMain, regions: nextRegions });
+      const next = reconcileFold(get().main, { main: model.titleTabs(nextMain, titleOf), regions: nextRegions });
       set({ ...next, panelSurfaces: rememberSurfaceContext(get(), next.main) });
     };
     const earlySurfaces: ((state: PanelSurfaces) => PanelSurfaces)[] = [];
@@ -329,6 +337,7 @@ export function createLayoutStore() {
       async hydrate(client, known, opts = {}) {
         set({ knownSession: known, ...(opts.projectOf ? { projectOf: opts.projectOf } : {}) });
         rekeyOf = opts.rekeyOf ?? WAIT;
+        titleOf = opts.titleOf ?? titleOf;
         localMachine = client.localMachine;
         const absent: LayoutKey[] = []; // keys layout.json does not hold yet (not keys that failed to read)
         const readAs = new Map<LayoutKey, unknown>(); // each key read as a valid value, as layout.json holds it
@@ -406,7 +415,7 @@ export function createLayoutStore() {
         panelSurfaces = earlySurfaces.splice(0).reduce((state, change) => change(state), panelSurfaces);
         // P4-B3x: a fold restored with its float stands; one whose float the reader dropped opens the panel it folded,
         // and one stored beside an open panel is dropped (both written back below).
-        const { main: hydratedMain, regions: foldedRegions } = reconcileFold(restored, { main: repairedMain, regions: replayedRegions });
+        const { main: hydratedMain, regions: foldedRegions } = reconcileFold(restored, { main: model.titleTabs(repairedMain, titleOf), regions: replayedRegions });
         const hydratedPins = pins(panelPinned, get().panelActiveNoSession ?? storedNoSession.activeTabId);
         const regions = surfaceRegions({ ...get(), main: hydratedMain, regions: foldedRegions, ...hydratedPins, panelBySession, panelSurfaces, hydrated: true });
         // P4-B3: the params of panel tabs no list holds now (closed, or a session's not kept) are not read; the
@@ -428,7 +437,8 @@ export function createLayoutStore() {
         // reader drops would reopen a panel the owner has since closed).
         const unfolded = model.foldOf(stored) !== null && model.foldOf(hydratedMain) === null;
         const migrated = rekeyed.bases.size > 0 && !sameJson(hydratedMain, persistedMain); // P5 O6 M5
-        if (persistedMain.version === 1 || rewritten || unfolded || migrated || (replayed.length > 0 && JSON.stringify(hydratedMain) !== JSON.stringify(persistedMain))) unsaved.add('main.tabs');
+        const titled = model.titleTabs(repairedMain, titleOf) !== repairedMain; // P5 O6 M2: a title learnt at hydration is kept
+        if (persistedMain.version === 1 || rewritten || unfolded || migrated || titled || (replayed.length > 0 && JSON.stringify(hydratedMain) !== JSON.stringify(persistedMain))) unsaved.add('main.tabs');
         if (regions !== persistedRegions || (readAs.has('regions') && !sameJson(readAs.get('regions'), persistedRegions))) unsaved.add('regions'); // P5 O6 M2: a migrated version too
         if (!sameJson(panelSurfaces, storedSurfaces) || (readAs.has('panelTools.surfaces') && !sameJson(readAs.get('panelTools.surfaces'), storedSurfaces))) unsaved.add('panelTools.surfaces');
         const values: Partial<Record<LayoutKey, unknown>> = { regions, 'main.tabs': get().main, 'panel.pinned': panelPinned, 'panelTools.surfaces': panelSurfaces };
@@ -505,6 +515,11 @@ export function createLayoutStore() {
       refileTabs() {
         if (!get().hydrated) return;
         const next = model.refile(get().main, setOfTab, rekeyOf);
+        if (next !== get().main) commit(next, get().regions);
+      },
+      refreshTabTitles() {
+        if (!get().hydrated) return;
+        const next = model.titleTabs(get().main, titleOf);
         if (next !== get().main) commit(next, get().regions);
       },
       rekeyProjects() {

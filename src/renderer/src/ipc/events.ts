@@ -17,6 +17,7 @@ import { useLayout } from '../stores/layout';
 import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
 import { selectOrgIndex, sessionSetKey, setKeyOfProject } from '../stores/org-projects'; // P5 O6 M5
+import { displayTitle } from '../sessions/title'; // P5 O6 M2: a session tab's last-known title
 import type { RekeyOf } from '../stores/layout-model';
 import type { TabSetKey } from '@shared/ipc/schema/layout';
 import { ipc } from './client';
@@ -303,9 +304,15 @@ export function connectShell(
     const key = setKeyOfProject(selectOrgIndex(sessions(), local), project);
     return project.org === undefined && key !== address ? 'wait' : key;
   };
+  // P5 O6 M2 (M6's scene): a held session's title, which its tabs keep for when it is not held
+  const titleOf = (id: AppSessionId): string | undefined => {
+    const record = sessions().records.get(id);
+    return record === undefined ? undefined : displayTitle(record);
+  };
   const offRefile = stores.sessions.subscribe((state, previous) => {
     if (state.projects !== previous.projects) stores.layout.getState().rekeyProjects();
     if (state.records !== previous.records || state.projects !== previous.projects) stores.layout.getState().refileTabs();
+    if (state.records !== previous.records) stores.layout.getState().refreshTabTitles();
   });
   const offRekey = stores.machines.subscribe((state, previous) => {
     if (state.loaded === previous.loaded) return;
@@ -334,7 +341,7 @@ export function connectShell(
     const retention = currentTabRetention();
     if (retention) await retention.ready;
     if (!connected) return;
-    await stores.layout.getState().hydrate(client, knownTab, { settle: flushNow, projectOf, rekeyOf });
+    await stores.layout.getState().hydrate(client, knownTab, { settle: flushNow, projectOf, rekeyOf, titleOf });
   });
 
   return () => {

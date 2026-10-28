@@ -6,7 +6,7 @@ import { addressOf } from '@shared/machine/address';
 import { machineKey } from '@shared/machine/org-key';
 import { at, OTHER_MACHINE, TEST_MACHINE as M } from '../../../../test/support/machine';
 import { createLayoutStore, registerReplaceGuard, type ReplaceVerdict } from './layout';
-import { currentSet, type RekeyOf } from './layout-model';
+import { allTabs, currentSet, type RekeyOf } from './layout-model';
 
 const A = at('app-a' as AppSessionId);
 // A session's tab as a layout from before O6 holds it (bare: P5 O6 M2), and as it reads, lifted to the local machine.
@@ -715,5 +715,35 @@ describe('rekeying project-keyed state to org keys', () => {
     store.getState().rekeyProjects();
     expect(store.getState().main.current).toBe(OWN);
     expect(store.getState().main.sets).toEqual({ [OWN]: split });
+  });
+});
+
+// P5 O6 M2 (M6's scene): a session tab keeps its session's last-known title, so a tab of a machine that has not loaded in
+// this run (its record not held) is still named; the title is written only when it differs from the one the tab holds.
+describe('a session tab’s last-known title', () => {
+  it('is set when the tab opens and refreshed when its record’s title changes, and only then', async () => {
+    const titles = new Map<AppSessionId, string>([[A, 'First title']]);
+    const fake = fakeClient({ 'layout.list': { keys: [] }, 'layout.get': () => ({ value: null }) });
+    const store = createLayoutStore();
+    await store.getState().hydrate(fake.client, () => true, { titleOf: (id: AppSessionId) => titles.get(id) });
+    store.getState().openSession(A);
+    const tab = () => allTabs(store.getState().main).find((t) => t.id === `session:${A}`);
+    expect(tab()).toMatchObject({ title: 'First title' });
+    const before = store.getState().main;
+    store.getState().refreshTabTitles();
+    expect(store.getState().main, 'nothing differs: nothing changes, so nothing is written').toBe(before);
+    titles.set(A, 'Renamed');
+    store.getState().refreshTabTitles();
+    expect(tab()).toMatchObject({ title: 'Renamed' });
+    titles.delete(A); // its record not held (its machine not loaded): the title it had stays
+    store.getState().refreshTabTitles();
+    expect(tab()).toMatchObject({ title: 'Renamed' });
+  });
+
+  it('reads a tab saved before the title was kept, and a saved title back', async () => {
+    const titled = { ...lifted('app-a'), title: 'Saved title' };
+    const saved = { version: 3, current: NO_PROJECT, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [titled, lifted('app-b')], activeTabId: titled.id }] } }, closedTabs: [] };
+    const { store } = await hydrate({ 'main.tabs': saved }, () => true);
+    expect(allTabs(store.getState().main)).toEqual([titled, lifted('app-b')]);
   });
 });
