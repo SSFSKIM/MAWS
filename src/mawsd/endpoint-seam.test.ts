@@ -1,12 +1,13 @@
 // P5 Decision Log 45: `mawsd`'s seam and O10's endpoint module agree field for field, and O10 M10 binds the module. The
 // architect's lever (a) on acceptance 14: the module is loaded at the daemon's start only when an enrollment is on disk,
-// else at its first command, and starts then as it would have at the daemon's start.
+// else at the first command that needs it, and starts then as it would have at the daemon's start; a read-only command
+// over a state directory that holds nothing is answered without it, as it would answer.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, expectTypeOf, it } from 'vitest';
 import type { EndpointModule as O10Module, EndpointServices } from '../endpoint/index';
-import { UNENROLLED_STATUS } from '../endpoint/presence';
+import { unloadedAnswer, UNENROLLED_STATUS } from '../endpoint/presence';
 import { LazyEndpoint, loadEndpointModule, type DaemonServices, type EndpointModule } from './endpoint-seam';
 
 let dir: string | null = null;
@@ -97,13 +98,14 @@ describe('the endpoint seam', () => {
 });
 
 describe('the endpoint loaded when it is needed (lever (a))', () => {
-  it('an unenrolled daemon loads nothing at start; the first command loads it once, starts it with the daemon’s services, then runs', async () => {
+  it('an unenrolled daemon loads nothing at start; the first command that needs it loads it once, starts it with the daemon’s services, then runs', async () => {
     const { state, load } = loader();
     const endpoint = new LazyEndpoint('b1', load);
     const s = services();
     await endpoint.start(s);
     expect(state.loads).toBe(0);
     expect(endpoint.status()).toEqual(UNENROLLED_STATUS);
+    // A read-only command asked while the module loads waits for it, and is the module's to answer.
     const [first, second] = await Promise.all([endpoint.cli('enroll', ['--json'], 'CODE'), endpoint.cli('keys', [])]);
     expect([first, second]).toEqual([
       { code: 0, out: 'enroll' },
@@ -115,8 +117,43 @@ describe('the endpoint loaded when it is needed (lever (a))', () => {
     expect(m.started).toBe(s);
     expect(m.events).toEqual(['start', 'cli enroll', 'cli keys']);
     expect(endpoint.status()).toEqual({ enrollment: 'loaded' });
+    // Loaded, the module answers every command, the read-only ones too.
+    expect(await endpoint.cli('status', [])).toEqual({ code: 0, out: 'status' });
     await endpoint.stop();
     expect(m.events.at(-1)).toBe('stop');
+  });
+
+  it('an unenrolled daemon answers status, keys and policy, as text and --json, without loading the module, as it would answer', async () => {
+    const { state, load } = loader();
+    const endpoint = new LazyEndpoint('b7', load);
+    const s = services();
+    await endpoint.start(s);
+    for (const command of ['status', 'keys', 'policy']) {
+      for (const args of [[], ['--json']]) {
+        const answer = await endpoint.cli(command, args);
+        expect(answer, `${command} ${args.join(' ')}`).toEqual(unloadedAnswer(s.machine, command, args));
+        expect(answer.code).toBe(0);
+      }
+    }
+    expect(await endpoint.cli('status', [])).toEqual({ code: 0, out: 'enrollment: none\nhub: not connected; channels: 0 relayed, 0 direct; sminos: not connected' });
+    expect(await endpoint.cli('keys', ['--json'])).toEqual({ code: 0, out: JSON.stringify({ enrollment: 'none', ref: s.machine.ref, delegated: false }) });
+    expect(state.loads).toBe(0);
+    expect(s.lines).toEqual([]);
+    // Anything else needs the module: other arguments, or another command.
+    expect(await endpoint.cli('status', ['--bogus'])).toEqual({ code: 0, out: 'status' });
+    expect(state.loads).toBe(1);
+    expect(s.lines).toEqual(['loading the endpoint for its first command']);
+  });
+
+  it('a read-only command over a state directory that holds anything loads the module, which judges it', async () => {
+    const { state, load } = loader();
+    const endpoint = new LazyEndpoint('b8', load);
+    const s = services();
+    writeFileSync(join(s.machine.stateDir, 'policy.json'), '{}', { mode: 0o600 });
+    await endpoint.start(s);
+    expect(state.loads).toBe(0); // a policy alone is no enrollment
+    expect(await endpoint.cli('policy', [])).toEqual({ code: 0, out: 'policy' });
+    expect(state.loads).toBe(1);
   });
 
   it('a daemon with an enrollment on disk loads and starts it at start, as before', async () => {
@@ -134,6 +171,7 @@ describe('the endpoint loaded when it is needed (lever (a))', () => {
     await idle.start(services());
     await idle.stop();
     expect(await idle.cli('keys', [])).toEqual({ code: 3, out: 'the endpoint has stopped' });
+    expect(await idle.cli('unenroll', [])).toEqual({ code: 3, out: 'the endpoint has stopped' });
     expect(quiet.state.loads).toBe(0);
 
     // Stopped while its chunk loads: never started, so nothing to stop.
@@ -142,7 +180,7 @@ describe('the endpoint loaded when it is needed (lever (a))', () => {
     held.state.gate = new Promise<void>((r) => (release = r));
     const busy = new LazyEndpoint('b4', held.load);
     await busy.start(services());
-    const command = busy.cli('keys', []);
+    const command = busy.cli('unenroll', []);
     const stopped = busy.stop();
     release();
     await stopped;
@@ -155,7 +193,7 @@ describe('the endpoint loaded when it is needed (lever (a))', () => {
     await late.start(services());
     let started!: () => void;
     Module.startGate = new Promise<void>((r) => (started = r));
-    const run = late.cli('keys', []);
+    const run = late.cli('unenroll', []);
     await new Promise((r) => setTimeout(r, 0));
     const ending = late.stop();
     started();
@@ -171,14 +209,16 @@ describe('the endpoint loaded when it is needed (lever (a))', () => {
     const endpoint = new LazyEndpoint('b5', load);
     const s = services();
     await endpoint.start(s);
-    const refused = await endpoint.cli('keys', []);
+    const refused = await endpoint.cli('unenroll', []);
     expect(refused.code).toBe(1);
     expect(refused.out).toContain('the endpoint module could not be loaded');
     expect(refused.out).toContain('mawsd restart');
     expect(s.lines.some((line) => line.includes("Cannot find module './chunks/index-OLD.js'"))).toBe(true);
     expect(endpoint.status()).toEqual(UNENROLLED_STATUS);
+    expect(await endpoint.cli('keys', [])).toEqual(unloadedAnswer(s.machine, 'keys', [])); // still unloaded: answered without it
+    expect(state.loads).toBe(1);
     state.fail = null;
-    expect(await endpoint.cli('keys', [])).toEqual({ code: 0, out: 'keys' });
+    expect(await endpoint.cli('unenroll', [])).toEqual({ code: 0, out: 'unenroll' });
     expect(state.loads).toBe(2);
   });
 

@@ -11,7 +11,7 @@ import { fakePack, packProgram } from '../../test/support/fake-pack';
 import { FakeManagers } from '../../test/support/fake-units';
 import { MawsdScene, until } from '../../test/support/mawsd-scene';
 import { runCli, type CliDeps } from './cli';
-import { NO_ENDPOINT_MODULE, type EndpointModule } from './endpoint-seam';
+import { LazyEndpoint, NO_ENDPOINT_MODULE, type EndpointModule } from './endpoint-seam';
 
 let scene: MawsdScene;
 let managers: FakeManagers;
@@ -382,6 +382,37 @@ describe('mawsd enroll, keys and endpoint, through an endpoint module', () => {
     expect(empty).toMatchObject({ code: 1, err: expect.stringContaining('no signed grant came on stdin') });
     expect((await cli(['endpoint', 'revoke', 'a.json', 'b.json'])).code).toBe(1);
     expect(endpoint.calls).toEqual([]);
+  });
+});
+
+// The architect's lever (a) on acceptance 14 (P5 Decision Log 114): on a machine with nothing in its endpoint's state
+// directory, a read-only check costs the daemon no module. Each answers as the module would answer it unenrolled
+// (test/endpoint/presence.test.ts holds the two byte for byte); a command that needs the module loads it.
+describe('mawsd keys and endpoint status, policy, unenrolled: answered without loading the module', () => {
+  it('as text and --json, the module never loaded; the first command that needs it loads it', async () => {
+    const loaded: FakeEndpoint[] = [];
+    const endpoint = new LazyEndpoint('cli-test', async () => ({ createEndpoint: () => (loaded.push(new FakeEndpoint()), loaded.at(-1)!) }));
+    const daemon = await scene.start({ endpoint });
+    const keys = { code: 0, out: `enrollment: none\nref: ${daemon.ref}\n`, err: '' };
+    expect(await cli(['keys'])).toEqual(keys);
+    expect(await cli(['endpoint', 'keys'])).toEqual(keys);
+    expect(await cli(['keys', '--json'])).toEqual({ code: 0, out: `{"enrollment":"none","ref":"${daemon.ref}","delegated":false}\n`, err: '' });
+    expect(await cli(['endpoint', 'status'])).toEqual({ code: 0, out: 'enrollment: none\nhub: not connected; channels: 0 relayed, 0 direct; sminos: not connected\n', err: '' });
+    expect(await cli(['endpoint', 'status', '--json'])).toEqual({
+      code: 0,
+      out: '{"enrollment":"none","hub":{"connected":false},"channels":{"relayed":0,"direct":0},"rl10":{"connected":false},"listener":{"bound":false},"legacyKey":false,"legacyRetired":false,"delegated":false}\n',
+      err: '',
+    });
+    expect(await cli(['endpoint', 'policy'])).toEqual({ code: 0, out: "read-only: no\nceiling: settings (from your settings' defaultMode)\n(the default: no policy is set)\n", err: '' });
+    expect(await cli(['endpoint', 'policy', '--json'])).toEqual({ code: 0, out: '{"read_only":false,"ceiling":"settings","source":"default"}\n', err: '' });
+    expect(loaded).toEqual([]);
+    expect(scene.logs.join('\n')).not.toContain('loading the endpoint');
+
+    expect(await cli(['endpoint', 'policy', '--read-only', 'on'])).toEqual({ code: 0, out: 'done\n', err: '' });
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].calls).toEqual([['policy', ['--read-only', 'on'], undefined]]);
+    expect(scene.logs.join('\n')).toContain('loading the endpoint for its first command');
+    expect(await cli(['keys'])).toEqual({ code: 0, out: 'done\n', err: '' }); // loaded: the module answers
   });
 });
 

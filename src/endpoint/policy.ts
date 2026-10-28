@@ -11,13 +11,11 @@
 // (`unknown-checkout`).
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { DEFAULT_POLICY, type Policy, type PolicySource } from './answers';
 import type { CheckoutSource } from './sources';
-import { PERMISSION_MODES, type Ceiling, type EndpointState, type PolicyFile } from './state/store';
+import { PERMISSION_MODES, type Ceiling, type EndpointState } from './state/store';
 
-export type Policy = PolicyFile;
-export type PolicySource = 'set' | 'sminos' | 'default';
-
-export const DEFAULT_POLICY: Policy = { read_only: false, ceiling: 'settings' };
+export type { Policy, PolicySource };
 
 export const isCeiling = (value: string): value is Ceiling => value === 'settings' || (PERMISSION_MODES as readonly string[]).includes(value);
 
@@ -54,14 +52,6 @@ export class EndpointPolicy {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
   }
-}
-
-/** The policy as `sminos daemon policy` shows it. */
-export function describePolicy(policy: Policy & { source: PolicySource }): string {
-  const readOnly = policy.read_only ? 'yes — no remote request above view is served, and nothing written outside this machine is delivered as words' : 'no';
-  const ceiling = policy.ceiling === 'settings' ? "settings (from your settings' defaultMode)" : `${policy.ceiling} (set here)`;
-  const source = policy.source === 'set' ? '' : policy.source === 'sminos' ? '\n(taken from sminos: no endpoint policy is set)' : '\n(the default: no policy is set)';
-  return `read-only: ${readOnly}\nceiling: ${ceiling}${source}`;
 }
 
 /** DX6's spawn fields: all a remote spawn's args may carry (Interfaces §G). */

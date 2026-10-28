@@ -3,15 +3,27 @@
 // `MAWS_DEV_ORG` (O7's development session, unpackaged builds only) there is no production session: the status says
 // `development`, from the development session's identity once it has loaded, and every act is refused `busy`.
 //
-// M2 adds `org.rows` (registerRowsHandler).
+// M2 adds `org.rows` (registerRowsHandler). M3 adds the signer's acts: `org.resign`, `org.revokeSuperseded`, `org.rekey`,
+// `org.discardPending` and `org.resetSigning`, each refused under `MAWS_DEV_ORG` as the rest are.
 //
 // Electron-free: main injects its `registerMainHandler` and `emit`.
-import type { OrgAttempt, OrgRows, OrgStatus } from '@shared/ipc/schema/org';
+import type { DiscardResult, OrgAttempt, OrgRows, OrgStatus, SignResult } from '@shared/ipc/schema/org';
 import type { MainHandler } from '../ipc/router';
 import type { OrgSessionService } from './org-session';
 import type { OrgSession } from './session';
 
-type OrgCommand = 'org.status' | 'org.register' | 'org.signIn' | 'org.reanchor' | 'org.cancel' | 'org.signOut';
+type OrgCommand =
+  | 'org.status'
+  | 'org.register'
+  | 'org.signIn'
+  | 'org.reanchor'
+  | 'org.cancel'
+  | 'org.signOut'
+  | 'org.resign'
+  | 'org.revokeSuperseded'
+  | 'org.rekey'
+  | 'org.discardPending'
+  | 'org.resetSigning';
 
 export function registerOrgHandlers(deps: {
   register<N extends OrgCommand>(name: N, handler: MainHandler<N>): void;
@@ -28,12 +40,19 @@ export function registerOrgHandlers(deps: {
       return { state: 'development', org: identity?.org ?? '', member: identity?.member ?? '', device: identity?.device ?? '' };
     };
     const refused: OrgAttempt = { ok: false, reason: { code: 'busy', detail: 'MAWS_DEV_ORG is in force' } };
+    const unsigned: SignResult = { ok: false, reason: 'busy', detail: 'MAWS_DEV_ORG is in force' };
+    const undiscarded: DiscardResult = { ok: false, reason: 'none' };
     deps.register('org.status', status);
     deps.register('org.register', () => refused);
     deps.register('org.signIn', () => refused);
     deps.register('org.reanchor', () => refused);
     deps.register('org.cancel', () => {});
     deps.register('org.signOut', () => Promise.resolve());
+    deps.register('org.resign', () => unsigned);
+    deps.register('org.revokeSuperseded', () => unsigned);
+    deps.register('org.rekey', () => refused);
+    deps.register('org.discardPending', () => undiscarded);
+    deps.register('org.resetSigning', () => {});
     return development?.onChanged(() => deps.emit('org.changed', status())) ?? (() => {});
   }
   deps.register('org.status', () => service.status());
@@ -42,6 +61,11 @@ export function registerOrgHandlers(deps: {
   deps.register('org.reanchor', ({ code }) => service.reanchor(code));
   deps.register('org.cancel', () => service.cancel());
   deps.register('org.signOut', () => service.signOut());
+  deps.register('org.resign', () => service.resign());
+  deps.register('org.revokeSuperseded', ({ offer }) => service.revokeSuperseded(offer));
+  deps.register('org.rekey', ({ code }) => service.rekey(code));
+  deps.register('org.discardPending', ({ confirmed, hash }) => service.discardPending(confirmed, hash));
+  deps.register('org.resetSigning', ({ confirmed }) => service.resetSigning(confirmed));
   return service.onStatus((status) => deps.emit('org.changed', status));
 }
 
