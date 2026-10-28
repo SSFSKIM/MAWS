@@ -19,15 +19,18 @@
 // failed `{state: 'failed', error}`; `{state: 'refused', reason}`; `{state: 'in-progress'}`). An engine host that can't
 // be reached once the action is handed on leaves it unknown (`{state: 'unknown', reason}`): the device asks by `query`.
 //
-// sminos answers each lane A copy under its nonce (an op's result under its latest copy's, a copy from another member or
-// of another operation `op-conflict` under its own), so a result goes to the channel of the copy whose nonce it
-// answers: a copy under a known opId never takes another sender's result, and one under a nonce already handed down is
-// `replayed` (the nonce window is each device's).
+// Lane A's results are bound to their sender for as long as sminos can answer them (KEPT_S): the endpoint holds each op
+// it handed down by opId, with its sender (sminos's identity: the member and the operation's fingerprint) and every
+// nonce a copy of it went under. A copy of a held op from anyone else is refused `op-conflict` and never handed down; a
+// nonce already used is `replayed`, whoever sends it (the freshness window is each device's). A result under any of the
+// op's nonces (sminos answers under the latest copy's, but one under an earlier copy's may already be on its way) goes
+// to the open channels its sender's copies came on; with none open it goes nowhere, and the device asks by `query`. A
+// closed channel frees nothing: the op stays its sender's.
 //
 // Each action in flight holds `mawsd` (`hold('op')`) until its result is recorded: lane B's and the endpoint's until
-// their answer, lane A's until sminos's result or the channel's close (sminos keeps its result, and a reconnecting
-// device asks). `stop()` takes no action more (`restart`) and waits up to STOP_WAIT_MS for those in flight.
-import { actionFingerprint, type ActMessage, type RefusalReason } from 'org-protocol';
+// their answer, lane A's until sminos's result or the close of every channel its copies came on (sminos keeps its result,
+// and a reconnecting device asks). `stop()` takes no action more (`restart`) and waits up to STOP_WAIT_MS for those in flight.
+import { actionFingerprint, KEPT_S, type ActMessage, type RefusalReason } from 'org-protocol';
 import type { RemoteChannel } from './channels';
 import type { EndpointActions } from './endpoint-actions';
 import type { Freshness } from './freshness';
@@ -49,9 +52,16 @@ export type ActionsContext = {
   log(line: string): void;
 };
 
-/** A lane A copy handed down: the op it carries, who sent it (sminos's binding: a copy from another member, or of
- * another operation, is refused `op-conflict`), and the channel its result goes to. */
-type Pending = { opId: string; member: string; fingerprint: string; channel: RemoteChannel; release(): void };
+/** At most this many lane A ops are held; past it a new one is refused `busy` until older ones age out. */
+export const LANE_A_MAX = 100_000;
+
+/**
+ * A lane A op handed down, held until KEPT_S after its first copy (as long as sminos keeps it, and so can answer it):
+ * its sender (sminos's identity, the member and the operation), every nonce a copy of it went under (sminos answers
+ * under any of them: the latest copy's, or an earlier one's already on its way), the open channels its copies came on
+ * with each one's close listener, and the hold while an answer is awaited on one.
+ */
+type LaneAOp = { member: string; fingerprint: string; nonces: Set<string>; channels: Map<RemoteChannel, () => void>; until: number; release: (() => void) | null };
 
 /** A ledger's kept result (`{ok: true, value}` or `{ok: false, error}`) as a device reads an outcome. */
 export function outcomeOf(result: unknown): unknown {
@@ -68,8 +78,9 @@ const isObject = (value: unknown): value is Record<string, unknown> => typeof va
 
 export class Actions {
   readonly #inflight = new Set<Promise<unknown>>();
-  /** Lane A's copies handed down, by the nonce sminos answers each under. */
-  readonly #laneA = new Map<string, Pending>();
+  /** Lane A's ops handed down, by opId, oldest first; and each nonce a copy went under, to its opId. */
+  readonly #laneA = new Map<string, LaneAOp>();
+  readonly #nonces = new Map<string, string>();
   /** Every hold out for an action in flight; `stop` lets go of those still out once it has waited. */
   readonly #holds = new Set<() => void>();
   #stopping = false;
@@ -95,13 +106,18 @@ export class Actions {
     this.#track(run);
   }
 
-  /** sminos's result of a lane A action: `done` to the channel that sent the copy whose nonce it answers. */
+  /** sminos's result of a lane A action: `done` to the open channels its sender's copies came on, when the nonce is one
+   * of that op's; none open, it goes nowhere (the device asks by `query`). */
   result(result: RpcResult): void {
-    const pending = this.#laneA.get(result.nonce);
-    if (pending === undefined || pending.opId !== result.opId) return;
-    this.#laneA.delete(result.nonce);
-    pending.release();
-    pending.channel.send({ t: 'done', opId: pending.opId, outcome: result.outcome });
+    const opId = this.#nonces.get(result.nonce);
+    const op = opId === undefined || opId !== result.opId ? undefined : this.#laneA.get(opId);
+    if (opId === undefined || op === undefined) return;
+    for (const [channel, off] of op.channels) {
+      off();
+      if (!channel.closed) channel.send({ t: 'done', opId, outcome: result.outcome });
+    }
+    op.channels.clear();
+    this.#letGo(op);
   }
 
   /** Takes no action more and waits, up to STOP_WAIT_MS, for those in flight to record their results. */
@@ -110,7 +126,9 @@ export class Actions {
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([Promise.allSettled([...this.#inflight]), new Promise<void>((resolve) => (timer = setTimeout(resolve, STOP_WAIT_MS)))]);
     clearTimeout(timer);
+    for (const op of this.#laneA.values()) for (const off of op.channels.values()) off();
     this.#laneA.clear();
+    this.#nonces.clear();
     for (const release of [...this.#holds]) release();
   }
 
@@ -122,6 +140,36 @@ export class Actions {
     };
     this.#holds.add(once);
     return once;
+  }
+
+  /** A copy of `op` awaits its answer on `channel`: held while one of its channels is open. */
+  #await(op: LaneAOp, channel: RemoteChannel): void {
+    if (!op.channels.has(channel)) {
+      op.channels.set(
+        channel,
+        channel.onClose(() => {
+          op.channels.delete(channel);
+          if (op.channels.size === 0) this.#letGo(op);
+        }),
+      );
+    }
+    op.release ??= this.#hold();
+  }
+
+  #letGo(op: LaneAOp): void {
+    op.release?.();
+    op.release = null;
+  }
+
+  /** Lane A ops past KEPT_S let go: sminos keeps none of them longer, so none is answered after. */
+  #expire(now: number): void {
+    for (const [opId, op] of this.#laneA) {
+      if (op.until > now) break;
+      for (const off of op.channels.values()) off();
+      this.#letGo(op);
+      for (const nonce of op.nonces) this.#nonces.delete(nonce);
+      this.#laneA.delete(opId);
+    }
   }
 
   async #execute(channel: RemoteChannel, m: ActMessage, decision: Granted, progress: { accepted: boolean }): Promise<void> {
@@ -140,35 +188,22 @@ export class Actions {
     if (channel.closed) return;
 
     if (row.executor === 'sminos') {
-      // A nonce is a copy's own: one already handed down (another device's, the window being each device's) is a replay.
-      if (this.#laneA.has(action.nonce)) return refuse('replayed');
+      const now = this.ctx.now();
+      this.#expire(now);
+      const known = this.#laneA.get(action.opId);
+      // A nonce is a copy's own for as long as its op is held: one already handed down is a replay, whoever sends it.
+      if (this.#nonces.has(action.nonce)) return refuse('replayed');
+      // A copy of an op held here is its sender's (sminos's identity: the member and the operation); anyone else's is
+      // refused here and never handed down, so nothing of the op's answers can reach it.
+      if (known !== undefined && (known.member !== who.member || known.fingerprint !== fingerprint)) return refuse('op-conflict');
+      if (known === undefined && this.#laneA.size >= LANE_A_MAX) return refuse('busy');
       const sent = this.ctx.rl10.rpc(action, who, fingerprint);
       if (!sent.ok) return refuse(sent.reason);
-      // sminos answers an op under its latest copy's nonce, a copy being one from the same member of the same operation:
-      // an earlier copy of that sender's is answered no more. A copy from anyone else is answered under its own nonce
-      // (`op-conflict`) and leaves the op's routing as it was.
-      for (const [nonce, earlier] of this.#laneA) {
-        if (earlier.opId !== action.opId || earlier.member !== who.member || earlier.fingerprint !== fingerprint) continue;
-        this.#laneA.delete(nonce);
-        earlier.release();
-      }
-      const release = this.#hold();
-      const off = channel.onClose(() => {
-        if (this.#laneA.get(action.nonce) !== pending) return;
-        this.#laneA.delete(action.nonce);
-        release();
-      });
-      const pending: Pending = {
-        opId: action.opId,
-        member: who.member,
-        fingerprint,
-        channel,
-        release: () => {
-          off();
-          release();
-        },
-      };
-      this.#laneA.set(action.nonce, pending);
+      const op = known ?? { member: who.member, fingerprint, nonces: new Set<string>(), channels: new Map(), until: now + KEPT_S * 1000, release: null };
+      if (known === undefined) this.#laneA.set(action.opId, op);
+      op.nonces.add(action.nonce);
+      this.#nonces.set(action.nonce, action.opId);
+      this.#await(op, channel);
       accept();
       return;
     }
