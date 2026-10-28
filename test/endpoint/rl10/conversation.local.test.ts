@@ -2,7 +2,8 @@
 // throwaway org on desk-hub's Worker in Miniflare (miniflare-hub.ts), and sminos played by fake-sminos.ts from
 // conversation.json, the fixture O12's phase 2 copies for its own conformance replay. What happens on the endpoint's
 // side between sminos's lines (a device's words, a hub that reposts or forges, a restart, a revocation, a lane A action)
-// is this suite's `scenes`. Events reach the endpoint from the hub through its log relay's entry point
+// is this suite's `scenes`; a lane A action that names a `member` is only decided by the endpoint's authorizer, as that
+// member's device, and never sent. Events reach the endpoint from the hub through its log relay's entry point
 // (`rl10.relay.fromHub`), where the hub link hands them, so a hostile hub's frames can be played; what the endpoint
 // sends the hub is the hub link's own `send`, watched.
 import * as fs from 'node:fs';

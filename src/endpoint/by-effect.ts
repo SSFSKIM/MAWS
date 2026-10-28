@@ -1,8 +1,8 @@
 // The grade of a by-effect command, read from its input (O10 M5; RL §5.5, "including indirect paths"; P5 Decision Logs 36
 // and 43). One row for every by-effect command of the composed registry, a rule or an explicit `no-rule`
 // (test/endpoint/by-effect.test.ts fails when the registry gains a by-effect name this table lacks), and lane A's
-// `sminos.command`, graded as the slash command it runs, and `sminos.send`, graded by its text (O9 M1). A rule answers the grade its input's effect takes; the endpoint
-// holds it to the command's floor where the two are both session ranks. `no-rule` is refused remotely (`no-rule`) until
+// `sminos.command`, graded as the slash command it runs, and `sminos.send`, graded by its text (O9 M1). A rule answers
+// the grade its input's effect takes; the endpoint holds it to the command's floor where the two are both session ranks. `no-rule` is refused remotely (`no-rule`) until
 // someone reads what the command does for a remote caller.
 //
 // Words are graded by their slash command (RL §5.5): text that doesn't start with `/` takes `converse`, as do the

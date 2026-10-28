@@ -50,9 +50,9 @@ export const OP_ID = /^[A-Za-z0-9_-]{16,128}$/;
  * The longest text a `send` carries, in UTF-16 code units: MAWS's own limit on a prompt as typed
  * (`session.history.append`), so a text within it is within sminos's bound, which counts code points (O9 M1).
  */
-export const SEND_TEXT_MAX = 65_536;
+const SEND_TEXT_MAX = 65_536;
 
-/** Whether a `send`'s text is a message sminos takes by its length: a string, not blank, within `SEND_TEXT_MAX`. */
+/** Whether a `send`'s text is one the endpoint hands on: a string, not blank, within `SEND_TEXT_MAX`. */
 const isSendText = (text: unknown): boolean => typeof text === 'string' && text.length <= SEND_TEXT_MAX && text.trim() !== '';
 
 export type Identity = { org: string; hub: string; name: string; ref: string; enrolled: string };
