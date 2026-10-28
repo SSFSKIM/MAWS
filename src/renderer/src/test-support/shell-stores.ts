@@ -69,7 +69,7 @@ export function resetShellStores(): void {
   useShellView.setState({ sidebarOverlay: false, cardsOverlay: false });
   projectReveal.setState({ pending: null });
   fillStores({ projects: [], sessions: [], digests: [], engine: [], attention: [], timeline: [] }, { loaded: false });
-  useSessions.setState({ indexing: null, listed: new Map(), listedMachines: new Set() }); // P5 O8 M2: no other machine's rows
+  useSessions.setState({ indexing: null, listed: new Map(), listedMachines: new Set(), members: new Map(), member: null }); // P5 O8 M2, M5: no other machine's rows
   // P5 O6 M4: the store's per-machine reconciliation (revisions, tombstones) is no state `setState` reaches, and a
   // suite's earlier writes would refuse a later one's lower revisions.
   useSessions.getState().resetMachine(TEST_MACHINE);

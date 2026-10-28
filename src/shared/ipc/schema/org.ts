@@ -72,11 +72,20 @@ export const RemoteRowSchema = z.strictObject({
   mine: z.boolean(), // the signed-in member is an owner
 });
 export type RemoteRow = z.infer<typeof RemoteRowSchema>;
+/**
+ * M5 (Interfaces §L): an owner a row names, as the held head lists them. `name` is `memberName`'s, widened where two
+ * members collide (`src/shared/org/member-name.ts`); an id the head doesn't list has a null email and reads "former member".
+ */
+export const OrgMemberSchema = z.strictObject({ id: z.string(), email: z.string().nullable(), name: z.string() });
+export type OrgMember = z.infer<typeof OrgMemberSchema>;
+export const FORMER_MEMBER = 'former member';
 export const OrgRowsSchema = z.strictObject({
   machines: z.array(MachineRefSchema), // the RL2 roster: these take no record snapshot
   rows: z.array(RemoteRowSchema),
   complete: z.boolean(), // this run's hub snapshot applied, the announced head adopted
   pending: z.array(MachineRefSchema), // roster machines with records awaiting verification
+  members: z.array(OrgMemberSchema), // M5: every member id some row's owners name
+  member: z.string().nullable(), // M5: the signed-in member the rows were computed for ("you"); null signed out
 });
 export type OrgRows = z.infer<typeof OrgRowsSchema>;
 

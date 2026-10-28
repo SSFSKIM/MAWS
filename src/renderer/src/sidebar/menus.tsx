@@ -1,7 +1,8 @@
 // The sidebar's context menus (§5.1 session and project actions), one Radix ContextMenu for the whole sidebar whose
 // items follow the row under the pointer (or the focused row, for the keyboard's context-menu key). Actions another
 // child answers render disabled until its handler registers. A foreign-live session offers only the opens (D-12); I2:
-// Open replaces the focused pane's session, Open in new tab keeps it.
+// Open replaces the focused pane's session, Open in new tab keeps it. P5 O8 M5: a project's and a machine's row both
+// carry the row's People toggle, checked while it draws other people's sessions.
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import type { ReactNode } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
@@ -12,7 +13,9 @@ import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../ipc/client';
 import { createSession, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { openDialog } from '../sessions/dialogs';
-import { orgKeyOf, sessionsOfRow } from '../stores/org-projects';
+import { machineKey } from '@shared/machine/org-key';
+import { orgKeyOf, sessionsOfRow, type RowKey } from '../stores/org-projects';
+import { usePeople } from '../stores/people'; // P5 O8 M5
 import { useSessions } from '../stores/sessions';
 import { PROJECT_ACTION_IDS, PROJECT_ACTIONS, runProjectAction, useProjectActionEnabled, type ProjectActionId } from './project-actions';
 import { openResumeChooser } from '../resume/host'; // P2-D
@@ -47,9 +50,12 @@ export function SidebarMenuContent({ target }: { target: MenuTarget | null }) {
     <ContextMenu.Portal>
       <ContextMenu.Content className="z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
         {target?.kind === 'machine' && (
-          <Item enabled onSelect={() => openDialog({ kind: 'archived', projectId: null, machine: target.machine })}>
-            Archived sessions…
-          </Item>
+          <>
+            <Item enabled onSelect={() => openDialog({ kind: 'archived', projectId: null, machine: target.machine })}>
+              Archived sessions…
+            </Item>
+            <PeopleItem rowKey={machineKey(target.machine)} />
+          </>
         )}
         {target?.kind === 'session' && <SessionItems appSessionId={target.appSessionId} />}
         {target?.kind === 'project' && <ProjectItems projectId={target.projectId} />}
@@ -117,11 +123,23 @@ function ProjectItems({ projectId }: { projectId: ProjectId }) {
       <Item enabled={unread.length > 0} onSelect={() => void markAllRead(unread)}>
         Mark all read
       </Item>
+      {project !== undefined && <PeopleItem rowKey={orgKeyOf(project)} />}
       <ContextMenu.Separator className="my-1 h-px bg-border" />
       {PROJECT_ACTION_IDS.map((id) => (
         <ProjectItem key={id} id={id} projectId={projectId} />
       ))}
     </>
+  );
+}
+
+// P5 O8 M5: the row's People toggle (its hover action's twin), checked while the row draws other people's sessions.
+function PeopleItem({ rowKey }: { rowKey: RowKey }) {
+  const on = usePeople((s) => s.on.has(rowKey));
+  return (
+    <ContextMenu.CheckboxItem checked={on} onCheckedChange={() => usePeople.getState().toggle(rowKey)} className={ITEM}>
+      Show people’s sessions
+      <ContextMenu.ItemIndicator className="ml-auto pl-3 text-accent">✓</ContextMenu.ItemIndicator>
+    </ContextMenu.CheckboxItem>
   );
 }
 

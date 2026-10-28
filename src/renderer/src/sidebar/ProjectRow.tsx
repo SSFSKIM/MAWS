@@ -12,12 +12,15 @@
 // chat only on this machine's (another machine's is O7's picker). Each machine's own row (T3: its name, after the
 // projects) is the same row without hover actions or a card, with a context menu for its archived sessions. A row whose
 // machines are all offline greys (T2). P5 O8 M2: other machines' listed sessions sit among its sessions (`ListedRow.tsx`).
+// P5 O8 M5 (Q3): its People toggle (the first hover action, and its menu's checked item; a machine's row has the menu
+// alone) draws other people's sessions among them; while it is off, "+N others", faint, counts those it leaves out.
 import { useState } from 'react';
 import type { ProjectId } from '@shared/graph/ids';
 import { machineOf } from '@shared/machine/address';
 import { MACHINE_OFFLINE } from '../app/machine-mark';
 import { ipc } from '../ipc/client';
 import { selectOffline, useMachines } from '../stores/machines';
+import { usePeople } from '../stores/people'; // P5 O8 M5
 import { FolderIcon, Icon, PlusIcon, SearchIcon } from '../app/IconButton';
 import { createSession, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { DisclosureBody } from '../ui/disclosure';
@@ -65,6 +68,11 @@ export function ProjectRow({ entry, open, sessions, more, matchCount, onToggle, 
       {open ? <FolderOpenIcon className={`size-[13px] ${project ? 'text-fg-muted' : 'text-fg-faint'}`} /> : <FolderIcon className={`size-[13px] ${project ? 'text-fg-muted' : 'text-fg-faint'}`} />}
       <span className={`min-w-0 flex-1 truncate text-ui ${offline ? 'text-fg-faint' : project ? 'text-fg' : 'text-fg-muted'}`}>{name}</span>
       {matchCount !== undefined && <span aria-label={`${matchCount} matching sessions`} className="text-ui-sm text-fg-muted tabular-nums">{matchCount}</span>}
+      {entry.others > 0 && (
+        <span aria-label={othersText(entry.others).slice(1)} className="shrink-0 text-ui-sm text-fg-faint tabular-nums group-hover/line:hidden group-focus-visible/project:hidden">
+          {othersText(entry.others)}
+        </span>
+      )}
       {!open && (rollup.waiting > 0 || rollup.working > 0) && (
         <span className="flex shrink-0 items-center gap-[7px] group-hover/line:hidden group-focus-visible/project:hidden">
           {rollup.waiting > 0 && (
@@ -79,7 +87,7 @@ export function ProjectRow({ entry, open, sessions, more, matchCount, onToggle, 
           )}
         </span>
       )}
-      {project ? <ProjectActions projectId={project.id} name={name} /> : <span aria-hidden className="size-[22px] shrink-0" />}
+      {project ? <ProjectActions projectId={project.id} rowKey={key} name={name} /> : <span aria-hidden className="size-[22px] shrink-0" />}
     </div>
   );
 
@@ -127,15 +135,36 @@ export function ProjectRow({ entry, open, sessions, more, matchCount, onToggle, 
 const ACTION =
   'inline-flex size-[22px] shrink-0 items-center justify-center rounded-sm text-fg-muted hover:bg-bg-active hover:text-fg disabled:text-fg-faint disabled:hover:bg-transparent';
 
+// "+N others" (P5 O8 M5): how many of other people's sessions the row's People toggle leaves out.
+const othersText = (count: number) => `+${count} ${count === 1 ? 'other' : 'others'}`;
+const peopleActionLabel = (on: boolean) => (on ? 'Hide people’s sessions' : 'Show people’s sessions');
+
 // The row's hover actions, out of the tab order (the row is the tree's stop; its context menu carries the same actions
-// for the keyboard): the search icon opens the Resume… picker on the project (I7, "Resume a session…"), the minus
-// removes the project from the sidebar after a confirm (I5; the menu's "Remove from sidebar…"), and "+" opens an
-// unstarted session tab in the project ("New chat in X", the New chat landing's open copy item).
-function ProjectActions({ projectId, name }: { projectId: ProjectId; name: string }) {
+// for the keyboard): the people icon toggles the row's other people's sessions, pressed while they show (P5 O8 M5, the
+// menu's "Show people's sessions"; first, so the three before it keep their places), the search icon opens the Resume…
+// picker on the project (I7, "Resume a session…"), the minus removes the project from the sidebar after a confirm (I5;
+// the menu's "Remove from sidebar…"), and "+" opens an unstarted session tab in the project ("New chat in X", the New
+// chat landing's open copy item).
+function ProjectActions({ projectId, rowKey, name }: { projectId: ProjectId; rowKey: ProjectKey; name: string }) {
   const canCreate = useSessionCreatorRegistered() && machineOf(projectId) === ipc.localMachine;
   const canRemove = useProjectActionEnabled('removeProject');
+  const people = usePeople((s) => s.on.has(rowKey));
   return (
     <span className="hidden shrink-0 items-center group-hover/line:flex group-focus-visible/project:flex">
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-label={`${peopleActionLabel(people)} in ${name}`}
+        aria-pressed={people}
+        title={peopleActionLabel(people)}
+        onClick={(event) => {
+          event.stopPropagation();
+          usePeople.getState().toggle(rowKey);
+        }}
+        className={`${ACTION} aria-pressed:bg-bg-active aria-pressed:text-fg`}
+      >
+        <PeopleIcon className="size-[13px]" />
+      </button>
       <button
         type="button"
         tabIndex={-1}
@@ -201,6 +230,14 @@ export function ShowMoreRow({ id, level, onShow }: { id: string; level: 1 | 2; o
     </div>
   );
 }
+
+// Two people, lucide's `users` redrawn on the 16px grid (P5 O8 M5's People toggle).
+const PeopleIcon = ({ className }: { className?: string }) => (
+  <Icon className={className}>
+    <circle cx="6" cy="5.5" r="2.5" />
+    <path d="M1.5 13.5v-1a3 3 0 0 1 3-3h3a3 3 0 0 1 3 3v1M10.5 3.1a2.5 2.5 0 0 1 0 4.8M14.5 13.5v-1a3 3 0 0 0-2.2-2.9" />
+  </Icon>
+);
 
 // A folder with its front swung open (Codex's `folder-open` beside `folder` for an expanded project).
 const FolderOpenIcon = ({ className }: { className?: string }) => (
