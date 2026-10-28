@@ -429,7 +429,7 @@ describe('the pending slot', () => {
     const names = h.writes.map((w) => w.name).filter((n) => n === 'registration.json' || n === SIGNING_FILE);
     expect(names.slice(0, 2)).toEqual(['registration.json', SIGNING_FILE]);
     const first = h.writes.find((w) => w.name === SIGNING_FILE)!.value as SigningFile;
-    expect(first.pending).toEqual({ signed, parent: await stateHash(h.genesis.state), exposed: { hub: false, machines: [] } });
+    expect(first.pending).toEqual({ signed, parent: await stateHash(h.genesis.state), hash: await stateHash(signed.state), exposed: { hub: false, machines: [] } });
     expect(first.deliveries).toEqual([{ hash, signed, owed: ['m-one', 'm-two'], known: {}, probed: {}, tooLarge: [] }]);
 
     // At the post, the file on disk already says the hub may hold it.
@@ -619,8 +619,9 @@ describe('discarding a pending proposal', () => {
     h.hub.mode = 'purged';
     await h.signer.sign(noChangeEdit());
     const slot = h.disk()!.pending!;
-    // The status names the slot by its state's stateHash, the hash the owner's confirmation carries back.
-    expect(h.signer.pending()!.hash).toBe(await stateHash(slot.signed.state));
+    // The slot keeps its state's stateHash from its write; the status names it so, and the confirmation carries it back.
+    expect(slot.hash).toBe(await stateHash(slot.signed.state));
+    expect(h.signer.pending()!.hash).toBe(slot.hash);
     const reads = h.hub.reads;
     expect(await h.signer.discardPending(true, await stateHash(h.genesis.state))).toEqual({ ok: false, reason: 'stale' });
     expect(h.hub.reads).toBe(reads); // refused before the hub is read

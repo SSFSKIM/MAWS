@@ -51,10 +51,14 @@ export type ChainFile = {
 };
 
 /**
- * A signed state kept before it goes anywhere (M3's pending slot): its parent's `stateHash`, and where it may already be,
- * written before each send (`exposed.hub` before the POST, a machine's ref before its `endpoint.state` act).
+ * A signed state kept before it goes anywhere (M3's pending slot): its parent's `stateHash`, its own (`hash`, the name a
+ * confirmed discard carries; written with the slot, and computed again from the state at each load, so a slot kept
+ * before the field existed loads too), and where it may already be, written before each send (`exposed.hub` before the
+ * POST, a machine's ref before its `endpoint.state` act).
  */
-export type Pending = { signed: SignedOrgState; parent: string; exposed: { hub: boolean; machines: string[] } };
+export type Pending = { signed: SignedOrgState; parent: string; hash: string; exposed: { hub: boolean; machines: string[] } };
+/** signing.json as it may stand on disk: a slot written before its `hash` was kept lacks one until the store loads it. */
+export type StoredSigningFile = Omit<SigningFile, 'pending'> & { pending: (Omit<Pending, 'hash'> & { hash?: string }) | null };
 /**
  * A state that ends keys, owed to the machines of the roster at its signing (M3's direct delivery): the signed bytes,
  * the machines still owing an acknowledgement, each machine's cursor on the app's line (`line`: a 48-bit digest of the
@@ -252,9 +256,9 @@ const isTexts = (value: unknown): value is string[] => Array.isArray(value) && v
 const isInstantOrNull = (value: unknown): value is string | null => value === null || isText(value);
 const isRecordOf = <T>(value: unknown, item: (v: unknown) => v is T): value is Record<string, T> => isObject(value) && Object.values(value).every(item);
 
-function isPending(value: unknown): value is Pending {
+function isStoredPending(value: unknown): value is StoredSigningFile['pending'] & object {
   if (!isObject(value) || !isSignedOrgState(value.signed) || !isText(value.parent) || !isObject(value.exposed)) return false;
-  return typeof value.exposed.hub === 'boolean' && isTexts(value.exposed.machines);
+  return (value.hash === undefined || isText(value.hash)) && typeof value.exposed.hub === 'boolean' && isTexts(value.exposed.machines);
 }
 
 function isObligation(value: unknown): value is Obligation {
@@ -268,12 +272,17 @@ function isAbandoned(value: unknown): value is Abandoned {
   return isObject(value) && isText(value.hash) && isVersion(value.version) && typeof value.hub === 'boolean' && isTexts(value.machines);
 }
 
-/** The shape only, every field: the signing store refuses to write anything else, and reads anything else as damaged. */
+/** The shape only, every field: the signing store refuses to write anything else (a slot without its `hash` included). */
 export function isSigningFile(value: unknown): value is SigningFile {
+  return isStoredSigningFile(value) && (value.pending === null || value.pending.hash !== undefined);
+}
+
+/** What the signing store reads: `isSigningFile`'s shape, a slot without its `hash` admitted; anything else is damaged. */
+export function isStoredSigningFile(value: unknown): value is StoredSigningFile {
   if (!isObject(value) || value.version !== 1) return false;
   const { pending, deliveries, abandoned, lastAsked, lastNotified } = value;
   return (
-    (pending === null || isPending(pending)) &&
+    (pending === null || isStoredPending(pending)) &&
     Array.isArray(deliveries) &&
     deliveries.every(isObligation) &&
     Array.isArray(abandoned) &&

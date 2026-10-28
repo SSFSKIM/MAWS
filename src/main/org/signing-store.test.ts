@@ -7,7 +7,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { generateSigningKey, keyId, signOrgState, type OrgState, type SignedOrgState } from '../../../apps/org-protocol/src/index.ts';
+import { generateSigningKey, keyId, signOrgState, stateHash, type OrgState, type SignedOrgState } from '../../../apps/org-protocol/src/index.ts';
 import { orgFiles, SIGNING_FILE, type OrgFiles, type SigningFile } from './files';
 import { createSigningStore, emptySigningFile, SigningDamaged, withExposure } from './signing-store';
 
@@ -49,6 +49,26 @@ async function profile() {
     });
   const path = join(dir, 'org', SIGNING_FILE);
   return { dir, path, order, registration, open, failing: (on: boolean) => void (failWrites = on), disk: () => JSON.parse(readFileSync(path, 'utf8')) as SigningFile };
+}
+
+async function signed(version: number): Promise<SignedOrgState> {
+  const key = await generateSigningKey();
+  const recovery = await generateSigningKey();
+  const state: OrgState = {
+    org: 'org-exposure',
+    version,
+    prev: null,
+    issued: '2026-10-28T12:00:00.000Z',
+    root: { keys: [await keyId(key.pub)], recoveryPub: recovery.pub },
+    members: [],
+    machines: [],
+    machineNames: [],
+    retired: [],
+    revoked: [],
+    delegations: [],
+    projects: [],
+  };
+  return signOrgState(state, [key]);
 }
 
 const asked = (at: string) => (file: SigningFile) => ((file.lastAsked = at), { next: file, value: undefined });
@@ -110,31 +130,42 @@ describe('the signing store', () => {
   });
 });
 
-describe('exposure', () => {
-  async function signed(version: number): Promise<SignedOrgState> {
-    const key = await generateSigningKey();
-    const recovery = await generateSigningKey();
-    const state: OrgState = {
-      org: 'org-exposure',
-      version,
-      prev: null,
-      issued: '2026-10-28T12:00:00.000Z',
-      root: { keys: [await keyId(key.pub)], recoveryPub: recovery.pub },
-      members: [],
-      machines: [],
-      machineNames: [],
-      retired: [],
-      revoked: [],
-      delegations: [],
-      projects: [],
-    };
-    return signOrgState(state, [key]);
-  }
+describe('the pending slot\'s hash', () => {
+  it('is the package\'s stateHash of the slot\'s state: computed at load for a slot kept without one, and again over a stored one', async () => {
+    const p = await profile();
+    p.registration.signing = true;
+    const kept = await signed(2);
+    const hash = await stateHash(kept.state);
+    // A slot written before the hash was kept.
+    writeFileSync(p.path, JSON.stringify({ ...emptySigningFile(), pending: { signed: kept, parent: 'p', exposed: { hub: true, machines: [] } } }), { mode: 0o600 });
+    let store = await p.open();
+    expect(store.get()).not.toBe('damaged');
+    expect((store.get() as SigningFile).pending).toEqual({ signed: kept, parent: 'p', hash, exposed: { hub: true, machines: [] } });
+    // The next write keeps it.
+    await store.update(asked('2026-10-28T12:00:00.000Z'));
+    expect(p.disk().pending!.hash).toBe(hash);
 
+    // A stored hash is never trusted over the state it names.
+    writeFileSync(p.path, JSON.stringify({ ...p.disk(), pending: { ...p.disk().pending, hash: 'not-its-hash' } }));
+    store = await p.open();
+    expect((store.get() as SigningFile).pending!.hash).toBe(hash);
+  });
+
+  it('is required of a slot an update writes', async () => {
+    const p = await profile();
+    const store = await p.open();
+    const kept = await signed(2);
+    const unhashed = { signed: kept, parent: 'p', exposed: { hub: false, machines: [] } } as unknown as SigningFile['pending'];
+    await expect(store.update((file) => ({ next: { ...file, pending: unhashed }, value: undefined }))).rejects.toThrow(TypeError);
+    expect(p.order).toEqual([]);
+  });
+});
+
+describe('exposure', () => {
   it('grows only the slot holding the state it names: the hub once, each machine once', async () => {
     const mine = await signed(2);
     const other = await signed(3);
-    const file: SigningFile = { ...emptySigningFile(), pending: { signed: mine, parent: 'p', exposed: { hub: false, machines: [] } } };
+    const file: SigningFile = { ...emptySigningFile(), pending: { signed: mine, parent: 'p', hash: 'h', exposed: { hub: false, machines: [] } } };
     withExposure(file, other, { hub: true });
     expect(file.pending!.exposed).toEqual({ hub: false, machines: [] });
     withExposure(file, mine, { hub: true });

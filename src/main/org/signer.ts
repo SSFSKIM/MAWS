@@ -24,7 +24,6 @@
 //
 // Network calls and adoptions run outside the signing store's updates (whose queue adoption's anchor write waits on).
 // Electron-free: the state signer is injected (step-up.ts's `createStateSigner`, imported here for its type only).
-import { createHash } from 'node:crypto';
 import { canonicalize, isSignedOrgState, stateHash, verifySuccessor, type OrgState, type SignedOrgState } from '../../../apps/org-protocol/src/index.ts';
 import type { StateSigner } from '../device/step-up';
 import { checkSuccessor, type Finding, type SupersededOffer } from './checks';
@@ -154,17 +153,12 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     return view !== null && signer !== null && view.head().state.root.keys.includes(signer.kid);
   }
 
-  /** `stateHash` of a state's canonical form, synchronously (SHA-256, unpadded base64url: the package's `B64`). */
-  function slotHash(canonical: string): string {
-    return createHash('sha256').update(canonical).digest('base64url');
-  }
-
   function pending(): ReturnType<OrgSigner['pending']> {
     const file = store.get();
     if (file === 'damaged' || file.pending === null) return null;
     const { signed, exposed } = file.pending;
     const key = canonicalize(signed.state);
-    return { version: signed.state.version, exposed: exposed.hub || exposed.machines.length > 0, fork: judged !== null && judged.key === key && judged.fork, hash: slotHash(key) };
+    return { version: signed.state.version, exposed: exposed.hub || exposed.machines.length > 0, fork: judged !== null && judged.key === key && judged.fork, hash: file.pending.hash };
   }
 
   function announce(): void {
@@ -404,7 +398,7 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
       return { ok: false, reason: 'invalid', detail: verdict.code };
     }
     const obligation = await deliveries.obligation(signed, parent.state);
-    const slot: Pending = { signed, parent: await stateHash(parent.state), exposed: { hub: false, machines: [] } };
+    const slot: Pending = { signed, parent: await stateHash(parent.state), hash: await stateHash(signed.state), exposed: { hub: false, machines: [] } };
     let kept: 'kept' | 'pending' | 'moved';
     try {
       kept = await store.update((f) => {
@@ -457,7 +451,7 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
         if (file.pending === null) return { ok: false, reason: 'none' };
         const slot = file.pending;
         // The owner's consent is to the proposal they were shown: a slot replaced since is not theirs to discard.
-        if (slotHash(canonicalize(slot.signed.state)) !== named) return { ok: false, reason: 'stale' };
+        if (slot.hash !== named) return { ok: false, reason: 'stale' };
         const version = slot.signed.state.version;
         if (await clearIfHeld()) return { ok: false, reason: 'held' };
         const hub = deps.hub();

@@ -14,8 +14,8 @@
 //   file that reads is what the store holds from then, and one that doesn't is `damaged`.
 //
 // Electron-free: vitest's node project runs it.
-import { canonicalize, type SignedOrgState } from '../../../apps/org-protocol/src/index.ts';
-import { isSigningFile, SIGNING_FILE, type OrgFiles, type SigningFile } from './files';
+import { canonicalize, stateHash, type SignedOrgState } from '../../../apps/org-protocol/src/index.ts';
+import { isSigningFile, isStoredSigningFile, SIGNING_FILE, type OrgFiles, type SigningFile } from './files';
 
 export type { Abandoned, Obligation, Pending, SigningFile } from './files';
 
@@ -57,11 +57,15 @@ export async function createSigningStore(deps: {
   const log = (line: string) => deps.log?.(`signing: ${line}`);
   const flagged = () => deps.registration()?.signing === true;
 
-  /** The file on disk as the store judges it: absent before the first write is a fresh file; anything else unread is damaged. */
+  /**
+   * The file on disk as the store judges it: absent before the first write is a fresh file; anything else unread is
+   * damaged. The pending slot's `hash` is the package's `stateHash` of its state, computed here whatever the file says
+   * (a slot kept before the field existed has none), so `get()` names the slot synchronously.
+   */
   async function read(): Promise<SigningFile | 'damaged'> {
     const raw = await files.read(SIGNING_FILE);
     if (raw === null && !flagged()) return emptySigningFile();
-    if (isSigningFile(raw)) return raw;
+    if (isStoredSigningFile(raw)) return { ...raw, pending: raw.pending === null ? null : { ...raw.pending, hash: await stateHash(raw.pending.signed.state) } };
     log(`${SIGNING_FILE} is ${raw === null ? 'missing or unreadable' : 'malformed'} after its first write: nothing is signed until it is reset`);
     return 'damaged';
   }

@@ -574,8 +574,9 @@ describe('acknowledgement', () => {
 async function pend(a: App, signed: SignedOrgState, parent: SignedOrgState): Promise<void> {
   const ob = await a.deliveries.obligation(signed, parent.state);
   const parentHash = await stateHash(parent.state);
+  const hash = await stateHash(signed.state);
   await a.store.update((f) => {
-    f.pending = { signed, parent: parentHash, exposed: { hub: true, machines: [] } };
+    f.pending = { signed, parent: parentHash, hash, exposed: { hub: true, machines: [] } };
     f.deliveries.push(ob!);
     return { next: f, value: undefined };
   });
