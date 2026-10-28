@@ -44,6 +44,9 @@ export class FileSessionStateStore implements SessionStateStore {
   private readonly journalDir: string;
   private readonly chains = new Map<AppSessionId, Promise<unknown>>();
   private readonly corrupted = new Map<AppSessionId, string>(); // where an unreadable file went, until a queue load reports it
+  // P5 O2 branch review: an unreadable file moved aside took its engine session ids with it, until they are saved again.
+  // In memory, as `unremovedCronRecords` is: a store after a restart reads the fresh file's absent ids as none.
+  private readonly lostEngineSessionIds = new Set<AppSessionId>();
   private readonly warn: (message: string) => void;
 
   // `userData` is the app's userData directory; the engine host's files live under `engine-host/` there.
@@ -108,13 +111,23 @@ export class FileSessionStateStore implements SessionStateStore {
     return this.update(id, (file) => ({ ...file, keep }));
   }
 
-  // P5 O2 M2 (P5 Decision Log 46): the engine session ids the session has had, which its durable crons are matched against
+  // P5 O2 M2 (P5 Decision Log 46): the engine session ids the session has had, which its durable crons are matched against.
+  // Ids in a state file moved aside as unreadable are lost, not none: the load rejects until a save of them succeeds,
+  // so the caller's lineage stays unavailable (and a job some other id created reads as possibly the session's) rather
+  // than loading clean and empty (P5 O2 branch review).
   loadEngineSessionIds(id: AppSessionId): Promise<string[]> {
-    return this.run(id, async () => (await this.read(id)).engineSessionIds ?? []);
+    return this.run(id, async () => {
+      const { engineSessionIds } = await this.read(id);
+      if (this.lostEngineSessionIds.has(id)) throw new Error(`engine session ids of ${id} are unavailable: its state file was unreadable and moved aside, and they have not been saved since`);
+      return engineSessionIds ?? [];
+    });
   }
 
   saveEngineSessionIds(id: AppSessionId, ids: string[]): Promise<void> {
-    return this.update(id, (file) => ({ ...file, engineSessionIds: [...ids] }));
+    return this.run(id, async () => {
+      await this.write(id, { ...(await this.read(id)), engineSessionIds: [...ids] });
+      this.lostEngineSessionIds.delete(id);
+    });
   }
 
   // P5 O2 M2 (P5 Decision Log 49): the cron record, in its own file so a record this build cannot read is only a missing
@@ -169,6 +182,7 @@ export class FileSessionStateStore implements SessionStateStore {
     return this.run(id, async () => {
       await rm(this.fileOf(id), { force: true });
       await rm(this.cronFileOf(id), { force: true });
+      this.lostEngineSessionIds.delete(id); // erased, the session has no ids to lose
       await this.removeJournal(id);
     });
   }
@@ -213,13 +227,14 @@ export class FileSessionStateStore implements SessionStateStore {
   }
 
   private update(id: AppSessionId, patch: (file: StateFile) => StateFile): Promise<void> {
-    return this.run(id, async () => {
-      const next = patch(await this.read(id));
-      await mkdir(this.stateDir, { recursive: true });
-      const temp = `${this.fileOf(id)}.${process.pid}.tmp`;
-      await writeFile(temp, `${JSON.stringify(next)}\n`);
-      await rename(temp, this.fileOf(id));
-    });
+    return this.run(id, async () => this.write(id, patch(await this.read(id))));
+  }
+
+  private async write(id: AppSessionId, file: StateFile): Promise<void> {
+    await mkdir(this.stateDir, { recursive: true });
+    const temp = `${this.fileOf(id)}.${process.pid}.tmp`;
+    await writeFile(temp, `${JSON.stringify(file)}\n`);
+    await rename(temp, this.fileOf(id));
   }
 
   // The file, or the empty state when there is none. An unreadable file is moved aside and kept (never deleted), the
@@ -238,6 +253,7 @@ export class FileSessionStateStore implements SessionStateStore {
       const aside = `${this.fileOf(id)}.corrupt-${Date.now()}`;
       await rename(this.fileOf(id), aside);
       this.corrupted.set(id, aside);
+      this.lostEngineSessionIds.add(id);
       this.warn(`state file for ${id} was unreadable (${error instanceof Error ? error.message.split('\n')[0] : String(error)}); moved to ${aside}`);
       return empty();
     }

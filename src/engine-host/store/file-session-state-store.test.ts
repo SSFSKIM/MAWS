@@ -251,6 +251,26 @@ describe('FileSessionStateStore: the keep mark and the engine session ids (P5 O2
     expect(await after.loadEngineSessionIds(ID)).toEqual(['e-1', 'e-2']);
     expect((await after.loadQueue(ID)).entries).toEqual([entry()]);
   });
+
+  // Branch review: an unreadable state file took the ids with it, so they are unavailable, never a clean empty list (which
+  // would let a durable job an id before a /clear created read as no one's), until a save of them after a load succeeds.
+  it.each<[string, (store: FileSessionStateStore) => Promise<unknown>]>([
+    ['the ids\' own load', async () => {}],
+    ['the keep mark\'s load (a launch reads it first)', (store) => store.loadKeep(ID)],
+  ])('ids in a file moved aside as unreadable are unavailable, whichever load found it (%s), until they are saved again', async (_first, findFirst) => {
+    const dir = join(userData, 'engine-host', 'state');
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, `${ID}.json`), '{"version":1,"engineSessionIds":["e-old"');
+    const store = new FileSessionStateStore(userData, { warn: () => {} });
+    await findFirst(store);
+    await expect(store.loadEngineSessionIds(ID)).rejects.toThrow(/unavailable/);
+    await store.saveLaunchSpec(ID, spec); // the launch's own writes make a fresh file, without the ids
+    await expect(store.loadEngineSessionIds(ID)).rejects.toThrow(/unavailable/);
+    expect(await store.loadKeep(ID)).toBe(false); // the other loads recover as they did
+    expect((await store.loadQueue(ID)).corrupt).toMatch(/\.corrupt-\d+$/);
+    await store.saveEngineSessionIds(ID, ['e-new']);
+    expect(await store.loadEngineSessionIds(ID)).toEqual(['e-new']);
+  });
 });
 
 describe('FileSessionStateStore: the cron record (P5 O2 M2, P5 Decision Log 49)', () => {

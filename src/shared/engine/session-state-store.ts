@@ -128,7 +128,8 @@ export interface SessionStateStore {
   loadKeep(appSessionId: AppSessionId): Promise<boolean>;
   saveKeep(appSessionId: AppSessionId, keep: boolean): Promise<void>;
   // P5 O2 M2 (P5 Decision Log 46): every engine session id the app session has had, which its durable crons are matched
-  // against (src/engine-host/durable-crons.ts); empty when never saved
+  // against (src/engine-host/durable-crons.ts); empty when never saved; rejects when they were lost (a state file moved
+  // aside as unreadable since they were last saved), so a lost lineage is unavailable, never a clean empty one
   loadEngineSessionIds(appSessionId: AppSessionId): Promise<string[]>;
   saveEngineSessionIds(appSessionId: AppSessionId, ids: string[]): Promise<void>;
   // P5 O2 M2 (P5 Decision Log 49): the cron record; null when never written, of a shape this build cannot read, or

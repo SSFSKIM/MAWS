@@ -7,6 +7,9 @@ import { endableClientRef } from '@shared/ipc/client'; // P5 O2 M2
 import { evaluate, isIdleRow } from './budget'; // P5 O2 M2
 import { SERVER_RELEASE_MS } from './supervision'; // P5 O2 M2
 import { MemorySessionStateStore } from './store/memory-session-state-store'; // P5 O2 M2
+import { FileSessionStateStore } from './store/file-session-state-store'; // P5 O2 branch review
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'; // P5 O2 branch review
+import { tmpdir } from 'node:os'; // P5 O2 branch review
 import type { CronRecord } from '@shared/engine/session-state-store'; // P5 O2 M2
 import { EngineSession } from './session';
 import type { LiveRow } from './live-ledger'; // E10
@@ -1118,6 +1121,35 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     table.setIdleRelease({ idleMs: IDLE_MS, active: true });
     await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
     expect(lifecycle(s.a!)).toBe('ready');
+  });
+
+  // Branch review: a durable job an id before a /clear created, its lineage lost with an unreadable state file, read
+  // through the disk store, its cron record clean. Whichever load finds the file unreadable, the job may be the
+  // session's, so the resume stays unknown and is never released.
+  it.each([
+    ['the keep mark\'s load finds the unreadable state file first', false],
+    ['the lineage\'s load finds it first', true],
+  ])('a lineage lost with an unreadable state file holds a resume while another id\'s durable job exists (%s)', async (_case, lineageFirst) => {
+    const userData = await mkdtemp(join(tmpdir(), 'maws-lineage-'));
+    try {
+      const store = new FileSessionStateStore(userData, { warn: () => {} });
+      await store.saveCronRecord('a' as AppSessionId, { sessionCrons: [], toolSinceStop: false }); // clean: alone it would clear the resume's unknown
+      await writeFile(join(userData, 'engine-host', 'state', 'a.json'), '{"version":1,"engineSessionIds":["');
+      if (lineageFirst) store.loadKeep = async () => false; // the keep mark read elsewhere: the lineage's load is the first read
+      const beforeClear = '66666666-6666-4666-8666-666666666666'; // the id the job keeps after a /clear moved the session on
+      const files = new Map([['/p/.claude/scheduled_tasks.json', JSON.stringify({ tasks: [durableJob(beforeClear)] })]]);
+      const { table, s } = await releaseTable(['a'], () => ({ spec: resumeOf('resumed', files)().spec, session: { launchKind: 'resumed', scheduledTasksFile: tasksFile(files), store } }));
+      expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'durable_unreadable' });
+      expect(s.a!.logs).toContainEqual(expect.stringContaining('engine session ids not loaded'));
+      table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+      await humanTurn(s.a!, [stop([])]); // a Stop re-reads the file on the same lost lineage
+      expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'durable_unreadable' });
+      await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
+      expect(lifecycle(s.a!)).toBe('ready');
+      expect(budgetOf(s.a!)).toMatchObject({ release: null, blocked: [{ appSessionId: 'a' }] });
+    } finally {
+      await rm(userData, { recursive: true, force: true });
+    }
   });
 
   it('an adopted process holds the session until a task snapshot and a Stop have both arrived', async () => {
