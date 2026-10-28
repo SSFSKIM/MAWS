@@ -35,6 +35,11 @@ export class EndpointActions {
     this.#ledger = OpLedger.open(this.ctx.stateDir(), 'ops.jsonl', { now: this.ctx.now, log: (line) => this.ctx.log(`endpoint: ${line}`) });
   }
 
+  /** Why its ledger answers nothing until mawsd restarts, or null (the status shows it). */
+  get closed(): string | null {
+    return this.#ledger?.closed ?? null;
+  }
+
   /** Runs `action` once under the ledger: a known opId answers what the ledger holds and runs nothing. */
   async run(action: Action, who: { member: string; device: string }, fingerprint: string): Promise<OpAnswer> {
     const ledger = this.#ledger;

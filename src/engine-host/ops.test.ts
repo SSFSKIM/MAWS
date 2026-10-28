@@ -137,10 +137,22 @@ describe('host.op', () => {
     expect(await again.op(interrupt, CTX)).toEqual({ state: 'in-progress' });
   });
 
-  it('answers every op `unavailable` when its ledger can’t be read', async () => {
-    const h = ops({ ledger: { readable: false, begin: () => ({ kind: 'answered', answer: { state: 'refused', reason: 'unavailable' } }), finish: () => {}, query: () => ({ state: 'unavailable' }) } as unknown as OpLedger });
-    expect(await h.op(op(), CTX)).toEqual({ state: 'refused', reason: 'unavailable' });
-    expect(h.opQuery({ opId: 'op-000000000000001', opCreated: iso(Date.now()), tombstoneIfAbsent: true })).toEqual({ state: 'unavailable' });
+  it('answers every op `unavailable` when its ledger is closed, saying why (`ledger`) so the endpoint can show it', async () => {
+    const h = ops({ ledger: { readable: false, closed: 'write-failed', begin: () => ({ kind: 'answered', answer: { state: 'refused', reason: 'unavailable' } }), finish: () => {}, query: () => ({ state: 'unavailable' }) } as unknown as OpLedger });
+    expect(await h.op(op(), CTX)).toEqual({ state: 'refused', reason: 'unavailable', ledger: 'write-failed' });
+    expect(h.opQuery({ opId: 'op-000000000000001', opCreated: iso(Date.now()), tombstoneIfAbsent: true })).toEqual({ state: 'unavailable', ledger: 'write-failed' });
+  });
+
+  it('says its ledger closed on every answer while it is, `done` included: a run that ended after the ledger closed, or whose result could not be kept', async () => {
+    // Claimed while the ledger was open; closed while the command ran (another op's claim failed), or by its own finish.
+    for (const closedAt of ['run', 'finish'] as const) {
+      const ledger = { closed: null as string | null, begin: () => ({ kind: 'claimed' }), finish: () => void (ledger.closed = 'write-failed'), query: () => ({ state: 'unavailable' }) };
+      const h = ops({ ledger: ledger as unknown as OpLedger, handler: () => async () => (closedAt === 'run' && (ledger.closed = 'write-failed'), { messageUuid: null, disposition: 'queued', queueId: 'q1' }) });
+      expect(await h.op(op(), CTX)).toEqual({ state: 'done', result: { ok: true, value: { messageUuid: null, disposition: 'queued', queueId: 'q1' } }, ledger: 'write-failed' });
+    }
+    const open = ops({ ledger: { closed: null, begin: () => ({ kind: 'claimed' }), finish: () => {}, query: () => ({ state: 'not-received' }) } as unknown as OpLedger });
+    expect(await open.op(op(), CTX)).not.toHaveProperty('ledger');
+    expect(open.opQuery({ opId: 'op-000000000000001', opCreated: iso(Date.now()), tombstoneIfAbsent: false })).toEqual({ state: 'not-received' });
   });
 });
 

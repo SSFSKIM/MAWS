@@ -332,6 +332,21 @@ describe('the rows off the live chain', () => {
     expect(user(rows, 'Use the staging database.')).toMatchObject({ dropped: true, messageUuid: delivery.uuid });
   });
 
+  // The to-human plugin's answer after a final message (MAWS's `isMadeUpFinalAnswer`) is written under the call's result
+  // with no request: it read nothing, so a delivery the bridge appended while the message tool ran was never read.
+  it('a delivery appended while a final message was sent, the plugin’s answer under the call’s result, draws as not read', async () => {
+    const c = new Chain();
+    c.prompt('Run the stages.');
+    const call = c.assistant([{ type: 'tool_use', id: 'toolu_f1', name: 'mcp__to-human__message', input: { text: 'Both stages ran.', final: true } }]);
+    const delivery = c.delivery('5e551e17', 'Use the staging database.', call);
+    c.result('toolu_f1', call);
+    c.row('assistant', { answeredWithoutRequest: true, message: { id: 'msg_hook_01Qx7Vb3Hn2KcR8t', role: 'assistant', model: 'claude-opus-5-5', type: 'message', content: [{ type: 'text', text: 'Message sent to the human.' }], stop_reason: 'end_turn', usage: { input_tokens: 0, output_tokens: 0 } } });
+    c.end();
+    const { rows } = await drawn(c.rows, [delivery]);
+    expect(user(rows, 'Use the staging database.')).toMatchObject({ dropped: true, messageUuid: delivery.uuid });
+    expect(answers(rows)).toEqual([]);
+  });
+
   it('a response the engine dropped when a message reached its turn is not drawn; the message and the turn go on', async () => {
     const c = new Chain();
     c.prompt('Explain the bug.');

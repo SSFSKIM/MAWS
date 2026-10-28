@@ -19,19 +19,18 @@
 // failed `{state: 'failed', error}`; `{state: 'refused', reason}`; `{state: 'in-progress'}`). An engine host that can't
 // be reached once the action is handed on leaves it unknown (`{state: 'unknown', reason}`): the device asks by `query`.
 //
-// sminos answers each lane A copy under its nonce (an op's result under its latest copy's, a copy from another member or
-// of another operation `op-conflict` under its own), so a result goes to the channel of the copy whose nonce it
-// answers: a copy under a known opId never takes another sender's result, and one under a nonce already handed down is
-// `replayed` (the nonce window is each device's).
+// Lane A's copies go through lane-a.ts, which asks sminos whose an op is before a first copy goes down and routes each
+// result by the nonce it answers.
 //
 // Each action in flight holds `mawsd` (`hold('op')`) until its result is recorded: lane B's and the endpoint's until
-// their answer, lane A's until sminos's result or the channel's close (sminos keeps its result, and a reconnecting
-// device asks). `stop()` takes no action more (`restart`) and waits up to STOP_WAIT_MS for those in flight.
+// their answer, lane A's until sminos's result or its channel's close (sminos keeps its result, and a reconnecting device
+// asks). `stop()` takes no action more (`restart`) and waits up to STOP_WAIT_MS for those in flight.
 import { actionFingerprint, type ActMessage, type RefusalReason } from 'org-protocol';
 import type { RemoteChannel } from './channels';
 import type { EndpointActions } from './endpoint-actions';
 import type { Freshness } from './freshness';
 import type { Granted } from './gate';
+import { LaneA } from './lane-a';
 import { OFFERS, type Offers } from './offers';
 import type { Rl10, RpcResult } from './rl10/link';
 import type { EndpointServices } from './services';
@@ -41,17 +40,15 @@ export const STOP_WAIT_MS = 2000;
 export type ActionsContext = {
   freshness: Freshness;
   own: EndpointActions;
-  rl10: Pick<Rl10, 'rpc'>;
+  rl10: Pick<Rl10, 'draw' | 'rpc' | 'query'>;
   dispatch: EndpointServices['dispatch'];
   hold(reason: string): () => void;
+  /** What the engine host's last ledger answer said of its ledger: why it is closed, or null (the status shows it). */
+  engineHostLedger?(closed: string | null): void;
   offers?: Offers;
   now(): number;
   log(line: string): void;
 };
-
-/** A lane A copy handed down: the op it carries, who sent it (sminos's binding: a copy from another member, or of
- * another operation, is refused `op-conflict`), and the channel its result goes to. */
-type Pending = { opId: string; member: string; fingerprint: string; channel: RemoteChannel; release(): void };
 
 /** A ledger's kept result (`{ok: true, value}` or `{ok: false, error}`) as a device reads an outcome. */
 export function outcomeOf(result: unknown): unknown {
@@ -59,22 +56,34 @@ export function outcomeOf(result: unknown): unknown {
   return result.ok === true ? { state: 'done', result: result.value } : { state: 'failed', error: result.error };
 }
 
-/** A ledger's answer to an action (host.op's, the endpoint's own) as `done`'s outcome. */
+/** A ledger's answer to an action (host.op's, the endpoint's own) as `done`'s outcome; why a ledger is closed is the
+ * machine's status, not the device's. */
 function answered(answer: unknown): unknown {
-  return isObject(answer) && answer.state === 'done' ? outcomeOf(answer.result) : answer;
+  if (!isObject(answer)) return answer;
+  if (answer.state === 'done') return outcomeOf(answer.result);
+  const outcome = { ...answer };
+  delete outcome.ledger;
+  return outcome;
+}
+
+/** Why the engine host's ledger is closed, as its answer says it (`ledger`, on every answer while it is), or null: open. */
+export function closedLedgerOf(value: unknown): string | null {
+  return isObject(value) && typeof value.ledger === 'string' ? value.ledger : null;
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
 export class Actions {
   readonly #inflight = new Set<Promise<unknown>>();
-  /** Lane A's copies handed down, by the nonce sminos answers each under. */
-  readonly #laneA = new Map<string, Pending>();
+  /** Lane A's copies, and whose an op is (lane-a.ts). */
+  readonly #laneA: LaneA;
   /** Every hold out for an action in flight; `stop` lets go of those still out once it has waited. */
   readonly #holds = new Set<() => void>();
   #stopping = false;
 
-  constructor(private readonly ctx: ActionsContext) {}
+  constructor(private readonly ctx: ActionsContext) {
+    this.#laneA = new LaneA({ rl10: ctx.rl10, hold: (reason) => ctx.hold(reason), now: () => ctx.now() });
+  }
 
   /** The channel's `act` route: freshness and replay, then `authorized` (the gate, which calls `execute`). */
   receive(channel: RemoteChannel, m: ActMessage, authorized: (channel: RemoteChannel, m: ActMessage) => void): void {
@@ -95,13 +104,9 @@ export class Actions {
     this.#track(run);
   }
 
-  /** sminos's result of a lane A action: `done` to the channel that sent the copy whose nonce it answers. */
+  /** sminos's result of a lane A action (lane-a.ts). */
   result(result: RpcResult): void {
-    const pending = this.#laneA.get(result.nonce);
-    if (pending === undefined || pending.opId !== result.opId) return;
-    this.#laneA.delete(result.nonce);
-    pending.release();
-    pending.channel.send({ t: 'done', opId: pending.opId, outcome: result.outcome });
+    this.#laneA.result(result);
   }
 
   /** Takes no action more and waits, up to STOP_WAIT_MS, for those in flight to record their results. */
@@ -110,7 +115,7 @@ export class Actions {
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([Promise.allSettled([...this.#inflight]), new Promise<void>((resolve) => (timer = setTimeout(resolve, STOP_WAIT_MS)))]);
     clearTimeout(timer);
-    this.#laneA.clear();
+    this.#laneA.stop();
     for (const release of [...this.#holds]) release();
   }
 
@@ -140,35 +145,8 @@ export class Actions {
     if (channel.closed) return;
 
     if (row.executor === 'sminos') {
-      // A nonce is a copy's own: one already handed down (another device's, the window being each device's) is a replay.
-      if (this.#laneA.has(action.nonce)) return refuse('replayed');
-      const sent = this.ctx.rl10.rpc(action, who, fingerprint);
-      if (!sent.ok) return refuse(sent.reason);
-      // sminos answers an op under its latest copy's nonce, a copy being one from the same member of the same operation:
-      // an earlier copy of that sender's is answered no more. A copy from anyone else is answered under its own nonce
-      // (`op-conflict`) and leaves the op's routing as it was.
-      for (const [nonce, earlier] of this.#laneA) {
-        if (earlier.opId !== action.opId || earlier.member !== who.member || earlier.fingerprint !== fingerprint) continue;
-        this.#laneA.delete(nonce);
-        earlier.release();
-      }
-      const release = this.#hold();
-      const off = channel.onClose(() => {
-        if (this.#laneA.get(action.nonce) !== pending) return;
-        this.#laneA.delete(action.nonce);
-        release();
-      });
-      const pending: Pending = {
-        opId: action.opId,
-        member: who.member,
-        fingerprint,
-        channel,
-        release: () => {
-          off();
-          release();
-        },
-      };
-      this.#laneA.set(action.nonce, pending);
+      const refusal = await this.#laneA.hand(channel, action, who, fingerprint);
+      if (refusal !== null) return refuse(refusal);
       accept();
       return;
     }
@@ -207,6 +185,7 @@ export class Actions {
         context: { launchId: context.launchId, engineSessionId: context.engineSessionId },
         ...(action.requestDigest === undefined ? {} : { requestDigest: action.requestDigest }),
       });
+      if (answer.ok) this.ctx.engineHostLedger?.(closedLedgerOf(answer.value));
       channel.send({ t: 'done', opId: action.opId, outcome: answer.ok ? answered(answer.value) : { state: 'unknown', reason: answer.error.code } });
     } finally {
       release();

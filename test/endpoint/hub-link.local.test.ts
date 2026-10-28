@@ -95,21 +95,33 @@ async function listedEndpoint(name: string, before?: (ref: string) => Promise<vo
   return { endpoint, services, ref, name, credentials: enrollment.credentials };
 }
 
-/** Another RL1 connection under the same credentials (a second daemon holding the machine's key); its close code. */
-async function rawEndpoint(listed: Listed): Promise<{ generation: number; closed: Promise<number> }> {
+/** Settles as `promise` does, or fails after `ms` naming `what`: a wait on the hub that can't hang the suite. */
+function within<T>(promise: Promise<T>, what: string, ms = 15_000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error(`no ${what} within ${ms} ms`)), ms)));
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * Another RL1 connection under the same credentials (a second daemon holding the machine's key), once its hello is sent:
+ * its generation once welcomed (a rejection should it close first), and its close code. The hub retires the connection
+ * it replaces at the upgrade, so the endpoint, replaced, may connect again and replace this one before its welcome.
+ */
+async function rawEndpoint(listed: Listed): Promise<{ welcomed: Promise<number>; closed: Promise<number> }> {
   const socket = new WebSocket(`${hub.url.replace(/^http/, 'ws')}/machine/socket`, { headers: { 'CF-Access-Client-Id': listed.credentials.clientId, 'CF-Access-Client-Secret': listed.credentials.clientSecret } });
   sockets.push(socket);
   const closed = new Promise<number>((resolve) => socket.on('close', (code) => resolve(code)));
-  const welcome = new Promise<number>((resolve, reject) => {
+  const welcomed = new Promise<number>((resolve, reject) => {
     socket.on('message', (data) => {
       const frame = JSON.parse(String(data)) as { t: string; generation?: number };
       if (frame.t === 'welcome') resolve(frame.generation as number);
     });
-    socket.on('error', reject);
+    socket.on('close', (code) => reject(new Error(`closed ${code} before its welcome`)));
   });
-  await new Promise((resolve, reject) => socket.once('open', resolve).once('error', reject));
+  welcomed.catch(() => {});
+  await within(new Promise((resolve, reject) => socket.once('open', resolve).once('error', reject)), 'open socket');
   socket.send(JSON.stringify({ t: 'hello', protocol: RL1_PROTOCOL, build: 'twin', machine: listed.ref }));
-  return { generation: await welcome, closed };
+  return { welcomed, closed };
 }
 
 const relayObject = (ref: string) => `${ORG}:ref:${ref}`;
@@ -177,10 +189,11 @@ describe('the hub’s verdicts', () => {
     await hub.evict('Machine', relayObject(listed.ref), 'close');
     await until(() => hub.claimHeld(listed.name), 'the endpoint’s claim held');
     const twin = await rawEndpoint(listed);
+    const generation = await within(twin.welcomed, 'twin’s welcome');
     await hub.releaseClaim(listed.name);
     await until(() => said(listed, '409 stale-generation; connecting again at once'), 'the stale-generation verdict');
-    expect(await twin.closed).toBe(4409);
-    await until(() => (listed.endpoint.hub.generation ?? 0) > twin.generation, 'the endpoint installed again');
+    expect(await within(twin.closed, 'twin’s close')).toBe(4409);
+    await until(() => (listed.endpoint.hub.generation ?? 0) > generation, 'the endpoint installed again');
   });
 
   it('tries a 503 again with its backoff', async () => {
@@ -212,15 +225,23 @@ describe('the hub’s verdicts', () => {
 
   it('reconnects once after a replacement, and stops with `replaced` when replaced again within a minute', async () => {
     const listed = await listedEndpoint('m3-twin');
+    // Replaced, the endpoint connects again at once and replaces the twin, which may be before the twin's welcome
+    // (tracker e7801606b: waiting for that welcome hung the test): only the twin's close is awaited.
     const first = await rawEndpoint(listed);
-    expect(await first.closed).toBe(4409);
+    expect(await within(first.closed, 'the first twin’s close')).toBe(4409);
     await until(() => listed.endpoint.hub.connected, 'the endpoint back');
+    const lines = listed.services.lines.length;
     const second = await rawEndpoint(listed);
     await until(() => listed.endpoint.status().refusing === 'replaced', 'the stop');
     expect(listed.endpoint.hub.connected).toBe(false);
-    await sleep(500);
-    // The other daemon keeps the machine: nothing fights it.
-    expect(await Promise.race([second.closed, sleep(500).then(() => 'open')])).toBe('open');
+    // Stopped, the link schedules nothing more: the other daemon is welcomed and keeps the machine, and nothing fights it.
+    let open = true;
+    void second.closed.then(() => (open = false));
+    await within(second.welcomed, 'the second twin’s welcome');
+    expect(open).toBe(true);
+    const after = listed.services.lines.slice(lines).filter((line) => line.includes('the hub connection'));
+    expect(after).toHaveLength(1);
+    expect(after[0]).toContain('stopped (replaced)');
   });
 });
 

@@ -18,7 +18,7 @@
 // after the same check. An `opCreated` past OP_HORIZON is `expired` whether or not a ledger still holds the op. An
 // outcome reads as `done`'s does (actions.ts's `outcomeOf`).
 import { OP_HORIZON_S, type DeviceClass, type QueriedMessage, type QueryMessage } from 'org-protocol';
-import { outcomeOf } from './actions';
+import { closedLedgerOf, outcomeOf } from './actions';
 import type { AuthorizeRequest, Decision, QueryBinding, Who } from './authorize';
 import type { RemoteChannel } from './channels';
 import type { EndpointActions } from './endpoint-actions';
@@ -32,6 +32,8 @@ export type QueriesContext = {
   own: Pick<EndpointActions, 'query'>;
   rl10: Pick<Rl10, 'query' | 'tombstone'>;
   dispatch: EndpointServices['dispatch'];
+  /** As actions.ts's: what the engine host's last ledger answer said of its ledger. */
+  engineHostLedger?(closed: string | null): void;
   now(): number;
   log(line: string): void;
 };
@@ -76,6 +78,7 @@ export class Queries {
   /** The engine host's ledger (lane B), looked up and tombstoned in one turn. Its target is an appSessionId. */
   async #engineHost(opId: string, opCreated: string): Promise<Answer> {
     const response = await this.ctx.dispatch('engine-host', 'host.opQuery', { opId, opCreated, tombstoneIfAbsent: true });
+    if (response.ok) this.ctx.engineHostLedger?.(closedLedgerOf(response.value));
     if (!response.ok || !isObject(response.value) || !isText(response.value.state)) return { state: 'unavailable', binding: null };
     const value = response.value;
     if (!REVEALING.has(value.state as string)) return { state: value.state as string, binding: null };

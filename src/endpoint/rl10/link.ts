@@ -233,6 +233,13 @@ export class Rl10 {
    * was sealed for is not the session's launch now (the bridge rechecks it at the effect, for a relaunch after this).
    */
   rpc(action: Action, who: { member: string; device: string }, fingerprint: string): { ok: true; frame: Frame } | { ok: false; reason: 'unavailable' | 'malformed' | 'context' } {
+    const drawn = this.draw(action, who, fingerprint);
+    if (drawn.ok) this.send(drawn.frame);
+    return drawn;
+  }
+
+  /** `rpc`'s checks and frame, sent nowhere: what M7 checks before it asks sminos whose an op is. */
+  draw(action: Action, who: { member: string; device: string }, fingerprint: string): { ok: true; frame: Frame } | { ok: false; reason: 'unavailable' | 'malformed' | 'context' } {
     const identity = this.#ctx.identity();
     if (!this.connected || identity === null || !action.action.startsWith('sminos.')) return { ok: false, reason: 'unavailable' };
     const name = action.action.slice('sminos.'.length);
@@ -268,9 +275,7 @@ export class Rl10 {
       fingerprint,
       ...(name === 'spawn' ? { proof: action } : {}),
     };
-    const frame = { t: 'rpc', rpc };
-    this.send(frame);
-    return { ok: true, frame };
+    return { ok: true, frame: { t: 'rpc', rpc } };
   }
 
   /** sminos's ledger answer for an op (`query`), or `unavailable` when it can't answer within `ANSWER_MS`. */
