@@ -319,6 +319,55 @@ describe('a synced endpoint', () => {
     expect(org.head()).toEqual(d3);
   });
 
+  it('keeps the successors a read after its head brought when a genuine recovery behind them authorizes nothing the hub serves', async () => {
+    // Two genuine transitions from version 1: the older hands the root to a2, whose line the endpoint holds; the newer
+    // names a root nobody used. It passes `verifyRewind` against the head, and nothing the hub serves is signed under it.
+    const a2 = await newDevice('a2');
+    const unused = await newDevice('unused');
+    const t1 = await transition(ORG, 1, [a2], recovery, iso(Date.now() - DAY));
+    const t2 = await transition(ORG, 1, [unused], recovery);
+    const line = [s1, await successor(s1, [a2], async (s) => {
+      s.members[0].devices = [a1.device, a2.device];
+      s.root.keys = [await keyId(a2.stepUp.pub)];
+    })];
+    while (line.length < 6) line.push(await successor(line.at(-1)!, [a2]));
+    const state = EndpointState.open(join(root, 'endpoint'), { log: (l) => lines.push(l) });
+    state.setOrg({ version: 1, org: ORG, pinned: { roots: [await keyId(a1.stepUp.pub)], recoveryPub: recovery.pub }, head: null, chain: [], hashes: [], certificates: NO_CERTIFICATES, acceptedTransitions: [], highWater: 0 });
+    // A read takes at most 2 one-state pages.
+    const org = new EndpointOrg(state, { log: (l) => lines.push(l), maxPages: 2 });
+    for (let at = 2; at <= 5; at++) await org.sync(hub(line.slice(0, at), [t1], 100));
+    expect(org.head()).toEqual(line[4]);
+    const sinces: number[] = [];
+    const serve = hub(line, [t1, t2], 1);
+    const fetchView = (since: number) => (sinces.push(since), serve(since));
+    expect(await org.sync(fetchView)).toMatchObject({ adopted: 1, rewound: false });
+    expect(org.head()).toEqual(line[5]);
+    // What the unused transition costs: its base and the state after it, never the history up to the head.
+    expect(sinces).toEqual([5, 0, 1]);
+    sinces.length = 0;
+    expect(await org.sync(fetchView)).toMatchObject({ adopted: 0 });
+    expect(sinces).toEqual([6, 0, 1]);
+  });
+
+  it('reads a recovered line on from its first state up to its head, and adopts it with the states after the head', async () => {
+    const { org } = await enrolled();
+    await org.sync(hub([s1]));
+    // Versions 2 to 4 reach the endpoint straight from an admin; the hub's line goes on from 1 under a recovery.
+    const direct = [await successor(s1, [a1], (s) => void s.projects.push({ id: 'direct', name: 'delivered' }))];
+    while (direct.length < 3) direct.push(await successor(direct.at(-1)!, [a1]));
+    expect(await org.adopt(direct, [])).toMatchObject({ adopted: 3 });
+    const t = await transition(ORG, 1, [a1], recovery);
+    const recovered = [await successor(s1, [a1], (s) => void s.projects.push({ id: 'hub', name: 'recovered' }))];
+    while (recovered.length < 4) recovered.push(await successor(recovered.at(-1)!, [a1]));
+    const sinces: number[] = [];
+    const serve = hub([s1, ...recovered], [t], 1);
+    expect(await org.sync((since) => (sinces.push(since), serve(since)))).toMatchObject({ adopted: 4, rewound: true });
+    // The base and the first state, then the recovered line up to the head's version, then the read after the head's.
+    expect(sinces).toEqual([4, 0, 1, 2, 3]);
+    expect(org.head()).toEqual(recovered[3]);
+    expect(org.since(0).states).toEqual([s1, ...recovered]);
+  });
+
   it('commits a rewind’s window with its head: a fault before the head is written leaves the window it had', async () => {
     const { org } = await enrolled();
     const s2 = await successor(s1, [a1]);

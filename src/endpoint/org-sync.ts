@@ -47,7 +47,8 @@ export const BACKSTOP_MS = 30 * DAY_MS;
 /** The most pages one sync reads (a page is about 1 MiB and holds at least one state). */
 const MAX_PAGES = 1000;
 
-type Options = { log: (line: string) => void; now?: () => number };
+/** `maxPages`: a suite's lower cap on the pages one read takes (MAX_PAGES otherwise). */
+type Options = { log: (line: string) => void; now?: () => number; maxPages?: number };
 
 export class EndpointOrg implements OrgView {
   #queue: Promise<unknown> = Promise.resolve();
@@ -56,11 +57,13 @@ export class EndpointOrg implements OrgView {
   readonly #state: EndpointState;
   readonly #log: (line: string) => void;
   readonly #now: () => number;
+  readonly #maxPages: number;
 
   constructor(state: EndpointState, options: Options) {
     this.#state = state;
     this.#log = options.log;
     this.#now = options.now ?? Date.now;
+    this.#maxPages = options.maxPages ?? MAX_PAGES;
   }
 
   /** A head is held: the first sync has been adopted. */
@@ -95,59 +98,75 @@ export class EndpointOrg implements OrgView {
   /**
    * Reads the hub's state from the head on (from version 0 at the first sync), a page at a time, and adopts it. Its
    * `head` tells a rollback apart; its certificates are kept beside the state as served (each use verifies them). When
-   * the hub holds a recovery from below the head, the chain is read again from under its base (`#rereadFrom`).
+   * the hub holds a recovery from below the head that the endpoint would take, the states under the head it needs are
+   * read too (`#recovered`), beside those after the head: they never displace them.
    */
   async sync(fetchView: (since: number) => Promise<OrgStateView>): Promise<AdoptResult> {
-    let read = await this.#read(fetchView, this.ready ? this.head().state.version : 0);
-    const from = await this.#rereadFrom(read.transitions);
-    if (from !== null) read = await this.#read(fetchView, from);
-    const { chain, view, transitions } = read;
+    const read = await this.#read(fetchView, this.ready ? this.head().state.version : 0);
+    const below = await this.#recovered(fetchView, read.transitions);
+    const { view, transitions } = read;
     const served = isSignedOrgState(view.head) ? view.head : null;
     const certificates = isCertificates(view.certificates) ? view.certificates : null;
-    return this.#serial(() => this.#adopt(chain, transitions, served, certificates));
+    return this.#serial(() => this.#adopt([...below, ...read.chain], transitions, served, certificates));
   }
 
-  /** The hub's chain after `since`, a page at a time, with the last page's view and the transitions it served. */
-  async #read(fetchView: (since: number) => Promise<OrgStateView>, since: number): Promise<{ chain: SignedOrgState[]; view: OrgStateView; transitions: Signed<RootTransition>[] }> {
+  /**
+   * The hub's chain after `since`, a page at a time, up to the page that reaches version `until`: the states, the last
+   * page's view and the transitions it served, the last version read, and whether the hub had nothing after it.
+   */
+  async #read(fetchView: (since: number) => Promise<OrgStateView>, since: number, until = Infinity): Promise<Read> {
     let cursor = since;
     const chain: SignedOrgState[] = [];
     let view: OrgStateView;
+    let ended = false;
     for (let page = 0; ; page++) {
       view = await fetchView(cursor);
       const got = list(view.chain).filter(isSignedOrgState);
       chain.push(...got);
-      if (view.more !== true || got.length === 0) break;
-      if (page + 1 >= MAX_PAGES) {
-        this.#log(`endpoint: the org state's chain ran past ${MAX_PAGES} pages; the rest waits for the next sync`);
+      if (view.more !== true || got.length === 0) {
+        ended = true;
         break;
       }
       cursor = got[got.length - 1].state.version;
+      if (cursor >= until) break;
+      if (page + 1 >= this.#maxPages) {
+        this.#log(`endpoint: the org state's chain ran past ${this.#maxPages} pages; the rest waits for the next sync`);
+        break;
+      }
     }
-    return { chain, view, transitions: list(view.transitions) as Signed<RootTransition>[] };
+    return { chain, view, transitions: list(view.transitions) as Signed<RootTransition>[], last: chain.at(-1)?.state.version ?? since, ended };
   }
 
   /**
-   * The version to read the hub's chain again from, or null when the read after the head is enough (the app's rule,
-   * src/main/org/held.ts's `rereadFrom`). A recovery from below the head needs the first state under it, at
-   * `fromVersion + 1`, which a read after the head leaves out whenever that state is at or below the head's version (a
-   * sibling of the head: the hub never had the head, an admin having delivered it straight to the machines); and the
-   * base at `fromVersion` once it has aged out of the window. So the read starts under the lowest base among the
-   * transitions that pass `verifyRewind` against the head: only one the recovery key signed passes, and one already
-   * accepted doesn't, so a hub can't have the chain read again with a transition of its own making, nor with a recovery
-   * the endpoint has taken. It picks only what is read: `#adopt` verifies the rewind again, against the head it adopts
-   * onto.
+   * The hub's states under the head that a recovery from below it needs, or none (the app's rule, src/main/org/held.ts's
+   * `rereadFrom`, with the endpoint's window). A recovery needs its base at `fromVersion`, once that has aged out of the
+   * window, and the first state under it at `fromVersion + 1`, which a read after the head leaves out whenever that
+   * state is at or below the head's version (a sibling of the head: the hub never had the head, an admin having
+   * delivered it straight to the machines).
+   *
+   * Each transition that passes `verifyRewind` against the head (only one the recovery key signed, and none already
+   * accepted) has its base and first state read, a page or two, and `#rewind` judges them. Only when it finds a rewind
+   * is the recovered line read on, up to the head's version (the states after it are the read after the head's). So a
+   * genuine transition nothing is signed under costs those pages each sync, never the history up to the head, and
+   * whatever is read here only joins the read after the head. It picks only what is read: `#adopt` verifies the rewind
+   * again, against the head it adopts onto.
    */
-  async #rereadFrom(transitions: Signed<RootTransition>[]): Promise<number | null> {
+  async #recovered(fetchView: (since: number) => Promise<OrgStateView>, transitions: Signed<RootTransition>[]): Promise<SignedOrgState[]> {
     const org = this.#state.org;
     const head = org?.head ?? null;
-    if (org === null || head === null) return null;
-    let from: number | null = null;
+    if (org === null || head === null) return [];
+    const bases = new Set<number>();
     for (const t of transitions) {
-      if (typeof t?.body?.fromVersion !== 'number' || t.body.fromVersion >= head.state.version) continue;
-      if (!(await verifyRewind(head, t, org.pinned.recoveryPub, org.acceptedTransitions)).ok) continue;
-      from = Math.min(from ?? t.body.fromVersion, t.body.fromVersion);
+      if (typeof t?.body?.fromVersion !== 'number' || t.body.fromVersion >= head.state.version || bases.has(t.body.fromVersion)) continue;
+      if ((await verifyRewind(head, t, org.pinned.recoveryPub, org.acceptedTransitions)).ok) bases.add(t.body.fromVersion);
     }
-    return from === null ? null : Math.max(0, from - 1);
+    const probes = new Map<number, Read>();
+    for (const from of [...bases].sort((x, y) => x - y)) probes.set(from, await this.#read(fetchView, Math.max(0, from - 1), from + 1));
+    const rewind = await this.#rewind(org, this.#window(), [...probes.values()].flatMap((p) => p.chain), transitions, () => {});
+    if (rewind === null) return [];
+    const probe = probes.get(rewind.t.body.fromVersion) as Read;
+    if (probe.ended || probe.last >= head.state.version) return probe.chain;
+    return [...probe.chain, ...(await this.#read(fetchView, probe.last, head.state.version)).chain];
   }
 
   /**
@@ -256,7 +275,7 @@ export class EndpointOrg implements OrgView {
    * it verified then. A transition binds no base, so a base known only by the first state's `prev` could be anyone's,
    * and a base under another recovery key would let its own root sign that first state.
    */
-  async #rewind(org: OrgFile, window: Window, states: SignedOrgState[], transitions: Signed<RootTransition>[]): Promise<{ t: Signed<RootTransition>; base: SignedOrgState; first: SignedOrgState } | null> {
+  async #rewind(org: OrgFile, window: Window, states: SignedOrgState[], transitions: Signed<RootTransition>[], log = this.#log): Promise<{ t: Signed<RootTransition>; base: SignedOrgState; first: SignedOrgState } | null> {
     const head = org.head as SignedOrgState;
     const candidates = transitions.filter((t) => typeof t?.body?.fromVersion === 'number' && t.body.fromVersion < head.state.version);
     candidates.sort((x, y) => (x.body.issued < y.body.issued ? 1 : -1));
@@ -270,7 +289,7 @@ export class EndpointOrg implements OrgView {
         if (s.state.version === from && (await stateHash(s.state)) === adopted) bases.push(s);
       }
       if (bases.length === 0) {
-        this.#log(`endpoint: a recovery transition from version ${from} reaches before the chain the endpoint keeps, and the delivery doesn't carry the state it adopted at version ${from}`);
+        log(`endpoint: a recovery transition from version ${from} reaches before the chain the endpoint keeps, and the delivery doesn't carry the state it adopted at version ${from}`);
         continue;
       }
       for (const base of bases) {
@@ -328,6 +347,7 @@ export class EndpointOrg implements OrgView {
 }
 
 type Window = { states: SignedOrgState[]; transitions: Signed<RootTransition>[] };
+type Read = { chain: SignedOrgState[]; view: OrgStateView; transitions: Signed<RootTransition>[]; last: number; ended: boolean };
 
 const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
