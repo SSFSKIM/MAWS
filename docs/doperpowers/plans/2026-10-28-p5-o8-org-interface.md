@@ -41,8 +41,9 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-10-28) Task 2: `checks.ts` (`checkSuccessor`, `supersededRevocations`) and its proofs, the zero-roots ones included.
   - [x] (2026-10-28) Task 3: the device module, `createStateSigner` and the next keys (create, promote, destroy).
   - [x] (2026-10-28) Task 4: `signing-store.ts`, `signer.ts`, `postState`, `signing.json`, §H's M3 rows.
-  - [x] (2026-10-28) Task 5 built (5448d421b; review pending): `weekly.ts` and `deliveries.ts`.
-  - [ ] Task 6: the session's composition, the rekey transaction and its replay, the IPC commands, main's wiring, and the Org section.
+  - [x] (2026-10-28) Task 5, reviewed clean (5448d421b, fixes 34b043605 and 841d36673): `weekly.ts` and `deliveries.ts`.
+  - [ ] Task 6a: the session's composition, the rekey transaction and its replay, the IPC schema and commands, main's wiring.
+  - [ ] Task 6b: the Org section (its lines, buttons and confirmations) and `copy.ts`.
   - [ ] Task 7: `test/org/signer.local.test.ts`.
   - [ ] reviewer-high on the PR, the desk track's review of the `admin.ts` hunk, and the final gate.
 - [ ] M4 — The Org page — *advisory; Q1 answered; needs M3 and O11's H1*
@@ -1491,6 +1492,10 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
      - A delivery reaches the endpoint as one RL2 message (`endpoint.state` in a call). RL2 messages are capped at `MESSAGE_MAX_BYTES` (4 MiB, `org-protocol` `channel.ts:50`). The endpoint's calls hold that cap less 1 KiB (`src/endpoint/calls.ts:101`). RL2 pages a message over RL1's 1 MiB frames (`RL1_MESSAGE_LIMIT`, `relay.ts:19`; `HANDSHAKE_PAGE_BYTES`).
      - `DELIVERY_MAX_BYTES`, 512 KiB, is an eighth of that cap. That leaves margin for the call's envelope and the transitions it carries.
      - Task 7 proves one run at the bound end to end over the real link. `deliveries.test.ts` proves that a single over-bound state reads `too-large` and is not retried in a loop.
+  10. (Review fixes, 34b043605.) The fixes cover three cases.
+     - A run records the held view and head it was planned on, and checks them again synchronously after the exposure write and just before `link.act`. A change means nothing is sent and the run is planned again.
+     - A recovery probe carries its base and the state after it. When that pair is over the bound, the probe reads `too-large`, is not sent and is not recorded as probed, and that pass falls through to head-finding. A machine that reached the recovered line by its own sync still settles.
+     - A machine leaves an obligation only on authenticated evidence: the state's own removal, or a certificate that `verifyMachineCert` accepts against the parent. A machine `next.machines` still holds is never dropped.
   8. The planner's "last 16 held states" (the signer entry above) and `DELIVERY_SPAN` are superseded by the byte-bounded forward paging of the re-plan's rounds. The §H row is gone, and the constant leaves `timing.ts`.
   Date/Author: 2026-10-28, O8's executor.
 
