@@ -4,8 +4,14 @@
 // sign out and sign in, re-anchoring, and the fresh token's grace. Over an in-memory hub (an injected fetch) serving
 // real signed org states and approving as the approving device would, the device's real keys in a temporary profile
 // (backup exclusion stubbed), and a fake Registry feed the tests drive.
+//
+// M3 (the session as the org's signer; M3's Proves for this file): the signer composed over the session (settled at
+// start and at each feed open, its registration flag, a post's credential answer), the status's `signer` part, `rekey`
+// end to end, a cancel and a sign-out before and after the transaction's step 1, the replay at each boundary, and the
+// retired key file's destruction. The state signer is a test one over the profile's own step-up key: no Touch ID, no
+// Electron, no Keychain.
 import { readFileSync } from 'node:fs';
-import { chmod, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -20,6 +26,7 @@ import {
   pairingFingerprint,
   signOrgState,
   signRecord,
+  signTransition,
   SIGNING_DOMAINS,
   stateHash,
   verifyPairingMac,
@@ -32,12 +39,13 @@ import {
   type SignedOrgState,
   type SigningKey,
 } from '../../../apps/org-protocol/src/index.ts';
-import type { OrgStatus } from '@shared/ipc/schema/org';
-import { DeviceKeysError, loadDeviceKeys, type DeviceKeys } from '../device/keys';
+import { OrgStatusSchema, type OrgStatus } from '@shared/ipc/schema/org';
+import { createNextDeviceKeys, deviceKeyIds, DeviceKeysError, loadDeviceKeys, promoteNextDeviceKeys, type DeviceKeys } from '../device/keys';
+import type { StepUpPrompt } from '../device/step-up';
 import { AccessLoginError, type AccessLogin, type HubCredential } from './access-login';
-import { ACCESS_FILE, CHAIN_FILE, orgFiles, REGISTRATION_FILE, type OrgFiles, type RegistrationFile } from './files';
+import { ACCESS_FILE, CHAIN_FILE, orgFiles, REGISTRATION_FILE, SIGNING_FILE, type OrgFiles, type RegistrationFile, type SigningFile } from './files';
 import type { PendingEntry } from './hub-client';
-import { createOrgSession, type OrgSessionDeps, type OrgSessionService } from './org-session';
+import { createOrgSession, type DeviceKeyFiles, type OrgSessionDeps, type OrgSessionService, type OrgSigningDeps } from './org-session';
 import type { RegistryFeedHooks } from './registry-feed';
 
 // ---- the org, signed as an admin's devices sign it (held.test.ts's helpers) ----
@@ -128,6 +136,9 @@ class FakeHub {
   meAnswer?: (n: number) => Answer | undefined;
   stateAnswer?: (since: string | null) => Answer | undefined;
   pendingAnswer?: () => Answer | undefined;
+  /** M3: the states posted to `POST /api/org/state`, and an override of the hub's answer. */
+  posted: SignedOrgState[] = [];
+  postAnswer?: (signed: SignedOrgState) => Answer | undefined;
 
   constructor(
     readonly url: string,
@@ -169,6 +180,16 @@ class FakeHub {
       if (since === null) return worker(200, view);
       const after = this.chain.filter((s) => s.state.version > Number(since));
       return worker(200, { ...view, chain: after.slice(0, this.pageSize), ...(after.length > this.pageSize ? { more: true } : {}) });
+    }
+    if (method === 'POST' && url.pathname === '/api/org/state') {
+      // The Worker's rule in brief: a successor of its head is kept (201), anything else is `409 not-head`.
+      const signed = JSON.parse(String(init?.body)) as SignedOrgState;
+      this.posted.push(signed);
+      const override = this.postAnswer?.(signed);
+      if (override !== undefined) return override;
+      if (signed.state.version !== this.head.state.version + 1 || signed.state.prev !== (await stateHash(this.head.state))) return worker(409, { error: 'not-head' });
+      this.chain.push(signed);
+      return worker(201, { version: signed.state.version });
     }
     if (method === 'POST' && url.pathname === '/api/devices/pending') {
       this.pending.push(JSON.parse(String(init?.body)) as PendingEntry);
@@ -258,6 +279,7 @@ let s1: SignedOrgState;
 let hub: FakeHub;
 let opened: OrgSessionService[];
 let emitted: string[];
+let signing: ReturnType<typeof testSigning>;
 
 beforeEach(async () => {
   userData = await mkdtemp(join(tmpdir(), 'maws-org-session-'));
@@ -270,12 +292,15 @@ beforeEach(async () => {
   opened = [];
   emitted = [];
   secrets.length = 0;
+  signing = testSigning();
 });
 
 afterEach(async () => {
   for (const session of opened) await session.close();
   // No status ever emitted carries a token, a pairing code or its secret.
   for (const text of emitted) for (const secret of secrets) expect(text).not.toContain(secret);
+  // Every status emitted is one org.changed carries: it parses as the schema says (M3: the signer part included).
+  for (const text of emitted) OrgStatusSchema.parse(JSON.parse(text));
   await chmod(join(userData, 'org'), 0o700).catch(() => {});
   await rm(userData, { recursive: true, force: true });
 });
@@ -305,6 +330,7 @@ function make(over: Overrides = {}) {
     excludeFromBackup: async () => true,
     login: testLogin(),
     fetch: hub.fetch,
+    signing: signing.deps,
     log: (line) => void logs.push(line),
     ...rest,
     timing: { ...TIMING, ...timing },
@@ -316,6 +342,42 @@ function make(over: Overrides = {}) {
   session.onChanged(() => void changes++);
   opened.push(session);
   return { session, statuses, logs, changes: () => changes, keyLoads: () => keyLoads };
+}
+
+/**
+ * M3's signer deps: a state signer over the profile's own step-up key that records each prompt and signs unless told to
+ * decline (no Touch ID), focus the test drives, notifications kept, and no RL2 machine.
+ */
+function testSigning() {
+  const focus = new Set<() => void>();
+  const harness = {
+    prompts: [] as StepUpPrompt[],
+    decline: false,
+    focused: false,
+    notes: [] as string[],
+    focus: () => focus.forEach((listener) => listener()),
+    deps: undefined as unknown as OrgSigningDeps,
+  };
+  harness.deps = {
+    stateSigner: async (k) => ({
+      kid: await keyId(k.stepUp.pub),
+      sign: async (state, prompt) => {
+        harness.prompts.push(prompt);
+        if (harness.decline) return { ok: false, reason: 'cancelled' };
+        return { ok: true, signed: await signOrgState(state, [k.stepUp]) };
+      },
+    }),
+    focused: () => harness.focused,
+    onFocus: (listener) => {
+      focus.add(listener);
+      return () => void focus.delete(listener);
+    },
+    notify: (text) => void harness.notes.push(text),
+    roster: () => [],
+    onRoster: () => () => {},
+    link: () => null,
+  };
+  return harness;
 }
 
 /** The feed's notices, driven by the test. */
@@ -396,8 +458,8 @@ function gatedFiles() {
 }
 
 /** A profile signed in on [s1, s2 listing this device]: keys made first, so registration is done at `checking`. */
-async function signedIn(over: Overrides = {}) {
-  const keys = await preKeys();
+async function signedIn(over: Overrides = {}, keysFirst: () => Promise<DeviceKeys> = preKeys) {
+  const keys = await keysFirst();
   const entry = await entryOf(keys);
   hub.chain.push(await listing(hub.head, entry));
   const made = make(over);
@@ -1351,5 +1413,427 @@ describe('the status', () => {
       expect(text).not.toContain(code.text);
       expect(text).not.toContain(code.k);
     }
+  });
+});
+
+// ---- M3: the session as the org's signer ----
+
+/** Keys made where the exclusion failed: a key file without the backup mark. */
+const unmarkedKeys = () => loadDeviceKeys(userData, { excludeFromBackup: async () => false });
+const deviceFile = (name: string) => join(userData, 'device', name);
+type SignerPart = NonNullable<Registered['signer']>;
+const signerOf = (session: OrgSessionService): SignerPart => {
+  const part = registered(session).signer;
+  if (part === null) throw new Error('no signer part in the status');
+  return part;
+};
+const headVersion = (session: OrgSessionService) => registered(session).head?.version ?? 0;
+
+/** A successor making this profile's device a root, as `deployment admin root add` does. */
+async function rootAdd(keys: DeviceKeys): Promise<void> {
+  const kid = await keyId(keys.stepUp.pub);
+  hub.chain.push(await successor(hub.head, [a1], (s) => void s.root.keys.push(kid)));
+}
+
+/** The session follows the hub to its head (the feed's open reads the chain since the held head). */
+async function followHub(session: OrgSessionService, feed: ReturnType<typeof fakeFeed>): Promise<void> {
+  feed.open();
+  await until(() => headVersion(session) === hub.head.state.version, `version ${hub.head.state.version} held`);
+}
+
+/** Signed in, a root, following a fake feed; the composed signer up. */
+async function signingRoot(over: Overrides = {}) {
+  const made = await signedIn(over);
+  const feed = fakeFeed();
+  made.session.attach(feed.hooks);
+  await rootAdd(made.keys);
+  await followHub(made.session, feed);
+  await until(() => signerOf(made.session).maySign, 'the signer up');
+  return { ...made, feed };
+}
+
+describe('M3: the signer composed over the session', () => {
+  it('the status\'s signer part: the fingerprint and step-up kid for `root add`, a root once the head lists the kid, signing only while signed in', async () => {
+    const { session, keys, entry } = await signedIn();
+    await until(() => registered(session).signer !== null, 'the signer part');
+    expect(signerOf(session)).toEqual({
+      root: false,
+      maySign: false,
+      fingerprint: await pairingFingerprint(ORG, A, entry),
+      stepUpKid: await keyId(keys.stepUp.pub),
+      due: false,
+      ageDays: 0,
+      pending: null,
+      offer: null,
+      owing: [],
+      abandoned: [],
+      rekey: null,
+      rekeying: null,
+      oldDevice: null,
+    });
+    const feed = fakeFeed();
+    session.attach(feed.hooks);
+    await rootAdd(keys);
+    await followHub(session, feed);
+    await until(() => signerOf(session).maySign, 'may sign');
+    expect(signerOf(session)).toMatchObject({ root: true, maySign: true, due: false });
+
+    await session.signOut();
+    expect(signerOf(session)).toMatchObject({ root: true, maySign: false });
+    expect(await session.resign()).toMatchObject({ ok: false, reason: 'not-root' });
+    expect(signing.prompts).toEqual([]);
+  });
+
+  it('an unmarked key file is offered new keys, and signs nothing even as a root', async () => {
+    const { session, keys } = await signedIn({}, unmarkedKeys);
+    const feed = fakeFeed();
+    session.attach(feed.hooks);
+    await rootAdd(keys);
+    await followHub(session, feed);
+    await until(() => signerOf(session).root, 'a root');
+    expect(signerOf(session)).toMatchObject({ root: true, maySign: false, rekey: 'unmarked' });
+    expect(await session.resign()).toMatchObject({ ok: false, reason: 'unmarked' });
+    expect(signing.prompts).toEqual([]);
+  });
+
+  it('re-sign now: the no-change successor signed, posted and adopted, registration.json flagged before signing.json\'s first write', async () => {
+    const { session } = await signingRoot();
+    const before = headVersion(session);
+    expect(await exists(join(orgDir(), SIGNING_FILE))).toBe(false);
+    expect(await session.resign()).toEqual({ ok: true, version: before + 1 });
+    expect(signing.prompts.map((p) => p.summary)).toEqual(['re-sign the org state (no change)']);
+    expect(hub.head.state.version).toBe(before + 1);
+    expect(headVersion(session)).toBe(before + 1);
+    expect((await readJson<RegistrationFile>(REGISTRATION_FILE)).signing).toBe(true);
+    expect(await readJson<SigningFile>(SIGNING_FILE)).toMatchObject({ pending: null });
+    expect(signerOf(session).pending).toBeNull();
+  });
+
+  it('asks at a window\'s focus once the weekly successor is due', async () => {
+    const { session } = await signingRoot({ timing: { WEEKLY_DUE_DAYS: 0 } });
+    await until(() => signerOf(session).due, 'due');
+    const before = headVersion(session);
+    signing.focus();
+    await until(() => headVersion(session) === before + 1, 'the weekly successor adopted');
+    expect(signing.prompts).toHaveLength(1);
+    // Asked once a day: another focus asks nothing.
+    signing.focus();
+    await pause(30);
+    expect(signing.prompts).toHaveLength(1);
+  });
+
+  it('a post Access answers ends the hub sign-in and leaves the state pending; signed in again, the feed\'s open settles it with the same bytes', async () => {
+    const { session, feed } = await signingRoot();
+    const before = headVersion(session);
+    hub.postAnswer = () => access(401);
+    expect(await session.resign()).toMatchObject({ ok: false, reason: 'hub' });
+    expect(registered(session).hubAccess).toBe('expired');
+    expect(session.current()?.hub).toBeNull();
+    expect(session.current()).not.toBeNull();
+    expect(signerOf(session).pending).toMatchObject({ version: before + 1, fork: false, exposed: true });
+    expect(signerOf(session).pending?.refused).not.toBeNull();
+
+    hub.postAnswer = undefined;
+    expect(session.signIn()).toEqual({ ok: true });
+    await until(() => isSignedIn(session) && registered(session).hubAccess === 'connecting', 'signed in again');
+    feed.open();
+    await until(() => signerOf(session).pending === null, 'settled');
+    expect(hub.posted).toHaveLength(2);
+    expect(hub.posted[1]).toEqual(hub.posted[0]);
+    expect(headVersion(session)).toBe(before + 1);
+  });
+
+  it('settles at start: a state kept and never answered is posted again, the same bytes, at the next start', async () => {
+    const { session } = await signingRoot();
+    const before = headVersion(session);
+    hub.postAnswer = () => 'unreachable';
+    expect(await session.resign()).toMatchObject({ ok: false, reason: 'hub' });
+    expect(signerOf(session).pending).toMatchObject({ version: before + 1 });
+    hub.postAnswer = undefined;
+
+    const again = await restart();
+    await until(() => registered(again.session).signer?.pending === null && headVersion(again.session) === before + 1, 'settled at start');
+    expect(hub.posted).toHaveLength(2);
+    expect(hub.posted[1]).toEqual(hub.posted[0]);
+  });
+
+  it('discards a state the hub keeps refusing, on confirmation, in abandon-pending\'s words, the abandoned proposal on the status', async () => {
+    const { session } = await signingRoot();
+    const before = headVersion(session);
+    hub.postAnswer = () => worker(409, { error: 'key-purged' });
+    expect(await session.resign()).toMatchObject({ ok: false, reason: 'hub', detail: '409 key-purged' });
+    expect(signerOf(session).pending).toEqual({ version: before + 1, fork: false, exposed: true, refused: '409 key-purged' });
+
+    expect(await session.discardPending(true)).toEqual({ ok: true, unsent: false, hubVersion: before });
+    expect(signerOf(session)).toMatchObject({ pending: null, abandoned: [{ version: before + 1, hub: true, machines: [] }] });
+    expect(await session.discardPending(true)).toEqual({ ok: false, reason: 'none' });
+  });
+
+  it('a signing.json lost after its first write reads problem `signing` and signs nothing until the owner resets it', async () => {
+    const { session } = await signingRoot();
+    expect((await session.resign()).ok).toBe(true);
+    await rm(join(orgDir(), SIGNING_FILE));
+    const again = await restart();
+    await until(() => registered(again.session).problem === 'signing', 'problem signing');
+    expect(signerOf(again.session).maySign).toBe(false);
+    expect(await again.session.resign()).toMatchObject({ ok: false, reason: 'signing' });
+
+    await again.session.resetSigning(true);
+    expect(registered(again.session).problem).toBeNull();
+    await until(() => signerOf(again.session).maySign, 'may sign again');
+    expect((await again.session.resign()).ok).toBe(true);
+  });
+
+  it('offers the superseded states\' revocations after a recovery, withholds this device\'s own, and signs the offer', async () => {
+    const { session, keys, entry } = await signedIn();
+    const feed = fakeFeed();
+    session.attach(feed.hooks);
+    const self: TestDevice = { device: entry as Device, channel: keys.channel, stepUp: keys.stepUp };
+    const selfKid = await keyId(keys.stepUp.pub);
+    const B = memberId();
+    const b1 = await newDevice('b1');
+    // Version 3: member B with device b1; this device a root beside a1.
+    hub.chain.push(
+      await successor(hub.head, [a1], (s) => {
+        s.members.push({ id: B, email: 'b@example.com', role: 'member', devices: [b1.device] });
+        s.root.keys.push(selfKid);
+      }),
+    );
+    const base = hub.head;
+    // Version 4, the branch a recovery discards: b1 removed, and this device too, their keys revoked.
+    const discarded = await successor(base, [a1], async (s) => {
+      s.members = s.members.filter((m) => m.id !== B);
+      s.members[0].devices = s.members[0].devices.filter((d) => d.id !== entry.id);
+      s.root.keys = s.root.keys.filter((k) => k !== selfKid);
+      s.revoked.push(...(await revokedDevice(B, b1.device)), ...(await revokedDevice(A, entry)));
+    });
+    hub.chain.push(discarded);
+    await followHub(session, feed);
+    expect(registered(session).session).toBe('removed');
+
+    // The recovery from version 3 to this device alone: a1 (whose key signed the branch) removed and revoked.
+    const t = await signTransition({ org: ORG, fromVersion: 3, newRootKeys: [keys.stepUp.pub], issued: iso(Date.now()) }, recovery.privateKey, recovery.pub);
+    const recovered = await successor(base, [self], async (s) => {
+      s.members[0].devices = s.members[0].devices.filter((d) => d.id !== 'a1');
+      s.root.keys = [selfKid];
+      s.revoked.push(...(await revokedDevice(A, a1.device)));
+    });
+    hub.chain = [...hub.chain.slice(0, 3), recovered];
+    hub.transitions = [t];
+    feed.open();
+    await until(() => registered(session).session === 'signed-in' && signerOf(session).offer !== null, 'the offer');
+    const offer = signerOf(session).offer!;
+    expect(offer.superseded).toBe(2);
+    expect(offer.withheld).toHaveLength(2);
+    for (const line of offer.withheld) expect(line).toContain(entry.id);
+    await until(() => signerOf(session).maySign, 'may sign');
+
+    expect(await session.revokeSuperseded()).toEqual({ ok: true, version: 5 });
+    expect(signing.prompts.at(-1)?.summary).toBe('revoke the keys a recovery left current');
+    const revoked = new Set(hub.head.state.revoked.map((r) => r.keyId));
+    expect(revoked.has(await keyId(b1.channel.pub)) && revoked.has(await keyId(b1.stepUp.pub))).toBe(true);
+    expect(hub.head.state.members.some((m) => m.id === B && m.devices.length > 0)).toBe(false);
+    await until(() => signerOf(session).offer?.superseded === 0, 'the offer signed');
+    expect(signerOf(session).offer?.withheld).toHaveLength(2);
+    expect(await session.revokeSuperseded()).toMatchObject({ ok: false, reason: 'invalid' });
+  });
+});
+
+describe('M3: rekey', () => {
+  /** A rekey under way to the approval step: the fresh code, the new device's id from the posted entry. */
+  async function toApproval(session: OrgSessionService) {
+    const code = await pairing();
+    expect(session.rekey(code.text)).toEqual({ ok: true });
+    await until(() => signerOf(session).rekeying?.step === 'approval', 'approval');
+    const posted = hub.pending.at(-1)!;
+    return { code, newId: posted.deviceId };
+  }
+  const readRegistration = () => readJson<RegistrationFile>(REGISTRATION_FILE);
+  const currentKeyId = async () => (await deviceKeyIds(userData, 'current'))?.device;
+
+  it('end to end: the old device answers current() until the new entry is listed; then promoted, signed in as the new device; the retired file destroyed once the head drops the old one', async () => {
+    const { session, entry, changes } = await signedIn({}, unmarkedKeys);
+    const feed = fakeFeed();
+    session.attach(feed.hooks);
+    await until(() => registered(session).signer !== null, 'the signer part');
+    expect(signerOf(session).rekey).toBe('unmarked');
+
+    const { code, newId } = await toApproval(session);
+    expect(newId).not.toBe(entry.id);
+    expect(signerOf(session).rekeying).toMatchObject({ step: 'approval', expires: expect.any(String) });
+    const nextIds = await deviceKeyIds(userData, 'next');
+    expect(nextIds?.device).toBe(newId);
+    expect(signerOf(session).rekeying?.fingerprint).toBe(await pairingFingerprint(ORG, A, { id: newId, class: 'native-mac', keyStorage: 'software', channelPub: nextIds!.channelPub, stepUpPub: nextIds!.stepUpPub }));
+    expect(session.current()?.identity.device).toBe(entry.id);
+    await pause(30);
+    expect(session.current()?.identity.device).toBe(entry.id);
+
+    const c = changes();
+    const approved = await hub.approve(code.k);
+    await until(() => session.current()?.identity.device === newId, 'the new device signed in');
+    expect(changes()).toBeGreaterThan(c);
+    expect(await readRegistration()).not.toHaveProperty('rekey');
+    expect((await readRegistration()).device).toBe(newId);
+    expect(await currentKeyId()).toBe(newId);
+    expect((await deviceKeyIds(userData, 'retired'))?.device).toBe(entry.id);
+    expect(await exists(deviceFile('keys.next.json'))).toBe(false);
+    await until(() => signerOf(session).oldDevice === entry.id, 'the old device named');
+    expect(signerOf(session)).toMatchObject({ rekey: null, rekeying: null, fingerprint: await pairingFingerprint(ORG, A, approved) });
+    expect(registered(session)).toMatchObject({ device: newId, session: 'signed-in' });
+
+    // A root removes the old device: its retired key file goes.
+    hub.chain.push(await dropping(hub.head, entry));
+    await followHub(session, feed);
+    await until(() => signerOf(session).oldDevice === null, 'the old device gone');
+    expect(await exists(deviceFile('keys.retired.json'))).toBe(false);
+    expect(session.current()?.identity.device).toBe(newId);
+  });
+
+  it('is offered to a device the org removed, which signs in again as the new device, its old keys destroyed at once', async () => {
+    const { session, entry } = await signedIn();
+    const feed = fakeFeed();
+    session.attach(feed.hooks);
+    hub.chain.push(await dropping(hub.head, entry));
+    await followHub(session, feed);
+    expect(registered(session).session).toBe('removed');
+    const { code, newId } = await toApproval(session);
+    await hub.approve(code.k);
+    await until(() => session.current()?.identity.device === newId, 'the new device signed in');
+    await until(async () => !(await exists(deviceFile('keys.retired.json'))), 'the retired keys destroyed');
+    expect(signerOf(session).oldDevice).toBeNull();
+  });
+
+  it('is refused for marked keys the head lists, and for a code of another member', async () => {
+    const { session } = await signedIn();
+    expect(session.rekey((await pairing()).text)).toMatchObject({ ok: false, reason: { code: 'busy' } });
+    expect(session.rekey((await pairing({ member: memberId() })).text)).toEqual({ ok: false, reason: { code: 'other-org' } });
+    expect(await exists(deviceFile('keys.next.json'))).toBe(false);
+  });
+
+  it('refuses `keys` and writes nothing when the next keys can\'t be excluded from backup', async () => {
+    await signedIn({}, unmarkedKeys);
+    const again = await restart({ excludeFromBackup: async () => false });
+    await until(() => registered(again.session).signer !== null, 'the signer part');
+    expect(again.session.rekey((await pairing()).text)).toEqual({ ok: true });
+    await until(() => registered(again.session).refused?.code === 'keys', 'refused keys');
+    expect(await exists(deviceFile('keys.next.json'))).toBe(false);
+    expect(hub.pending).toHaveLength(0);
+  });
+
+  for (const act of ['cancel', 'sign-out'] as const) {
+    it(`a ${act} during the approval leaves the old registration and no next keys`, async () => {
+      const { session, entry } = await signedIn({}, unmarkedKeys);
+      const { code } = await toApproval(session);
+      if (act === 'cancel') session.cancel();
+      else await session.signOut();
+      await until(async () => !(await exists(deviceFile('keys.next.json'))), 'the next keys removed');
+      await hub.approve(code.k);
+      await pause(50);
+      const reg = await readRegistration();
+      expect(reg.device).toBe(entry.id);
+      expect(reg).not.toHaveProperty('rekey');
+      expect(await currentKeyId()).toBe(entry.id);
+      expect(await exists(deviceFile('keys.retired.json'))).toBe(false);
+      expect(signerOf(session).rekeying).toBeNull();
+      if (act === 'cancel') expect(session.current()?.identity.device).toBe(entry.id);
+      else expect(reg.signedOut).toBe(true);
+    });
+  }
+
+  /** The key files' promotion, held at `stage` until released. */
+  function heldPromotion(stage: 'after step 1' | 'after the first rename' | 'after both renames') {
+    let reached!: () => void;
+    let release!: () => void;
+    const atStage = new Promise<void>((resolve) => (reached = resolve));
+    const released = new Promise<void>((resolve) => (release = resolve));
+    const promote: DeviceKeyFiles['promote'] = async (profile) => {
+      if (stage === 'after the first rename') await rename(join(profile, 'device', 'keys.json'), join(profile, 'device', 'keys.retired.json'));
+      if (stage === 'after both renames') await promoteNextDeviceKeys(profile);
+      reached();
+      await released;
+      await promoteNextDeviceKeys(profile);
+    };
+    return { keyFiles: { promote }, atStage, release };
+  }
+
+  for (const stage of ['after step 1', 'after the first rename', 'after both renames'] as const) {
+    for (const act of ['cancel', 'sign-out'] as const) {
+      it(`a ${act} ${stage} no longer stops it: the promotion completes${act === 'sign-out' ? ', and the sign-out\'s marker stays' : ''}`, async () => {
+        const held = heldPromotion(stage);
+        const { session, entry } = await signedIn({ keyFiles: held.keyFiles }, unmarkedKeys);
+        const { code, newId } = await toApproval(session);
+        await hub.approve(code.k);
+        await held.atStage;
+        expect((await readRegistration()).rekey).toEqual({ device: newId });
+        if (act === 'cancel') session.cancel();
+        const signedOut = act === 'sign-out' ? session.signOut() : Promise.resolve();
+        held.release();
+        await signedOut;
+        await until(async () => (await readRegistration()).device === newId, 'step 4 written');
+        const reg = await readRegistration();
+        expect(reg).not.toHaveProperty('rekey');
+        expect(await currentKeyId()).toBe(newId);
+        expect((await deviceKeyIds(userData, 'retired'))?.device).toBe(entry.id);
+        expect(await exists(deviceFile('keys.next.json'))).toBe(false);
+        if (act === 'cancel') {
+          await until(() => session.current()?.identity.device === newId, 'the new device signed in');
+        } else {
+          expect(reg.signedOut).toBe(true);
+          expect(await exists(join(orgDir(), ACCESS_FILE))).toBe(false);
+          expect(session.current()).toBeNull();
+          expect(registered(session)).toMatchObject({ device: newId, session: 'signed-out' });
+        }
+      });
+    }
+  }
+
+  /** Signed in with next keys the head lists, then the session closed: the files as a crash during the rekey left them. */
+  async function crashedRekey() {
+    const { session, entry } = await signedIn();
+    const next = await createNextDeviceKeys(userData, { excludeFromBackup: async () => true });
+    const nextEntry = await entryOf(next);
+    hub.chain.push(await listing(hub.head, nextEntry));
+    const feed = fakeFeed();
+    session.attach(feed.hooks);
+    await followHub(session, feed);
+    const reg = await readRegistration();
+    await realFiles().write(REGISTRATION_FILE, { ...reg, rekey: { device: nextEntry.id } });
+    for (const s of opened) await s.close();
+    return { old: entry, next: nextEntry };
+  }
+
+  const boundaries: Record<string, () => Promise<void>> = {
+    'after step 1': async () => {},
+    'after the first rename': () => rename(deviceFile('keys.json'), deviceFile('keys.retired.json')),
+    'after both renames, the registration still old': async () => {
+      await rename(deviceFile('keys.json'), deviceFile('keys.retired.json'));
+      await rename(deviceFile('keys.next.json'), deviceFile('keys.json'));
+    },
+  };
+  for (const [boundary, crash] of Object.entries(boundaries)) {
+    it(`the replay at load, a crash ${boundary}, reaches the new device signed in`, async () => {
+      const { old, next } = await crashedRekey();
+      await crash();
+      const { session } = await restart();
+      expect(session.current()?.identity.device).toBe(next.id);
+      expect(registered(session)).toMatchObject({ device: next.id, session: 'signed-in' });
+      const reg = await readRegistration();
+      expect(reg.device).toBe(next.id);
+      expect(reg).not.toHaveProperty('rekey');
+      expect(await currentKeyId()).toBe(next.id);
+      expect((await deviceKeyIds(userData, 'retired'))?.device).toBe(old.id);
+      expect(await exists(deviceFile('keys.next.json'))).toBe(false);
+    });
+  }
+
+  it('the replay at load drops a rekey whose next keys were lost before step 2: the old registration stands', async () => {
+    const { old } = await crashedRekey();
+    await rm(deviceFile('keys.next.json'));
+    const { session } = await restart();
+    expect(session.current()?.identity.device).toBe(old.id);
+    const reg = await readRegistration();
+    expect(reg.device).toBe(old.id);
+    expect(reg).not.toHaveProperty('rekey');
+    expect(await currentKeyId()).toBe(old.id);
   });
 });

@@ -91,7 +91,7 @@ function describeCurrent(c: Current): string {
 }
 
 /** A holder in words, its machine named where the state's `machineNames` gives the ref one. */
-function describeHolder(state: OrgState, holder: RevokedKey['holder']): string {
+export function describeHolder(state: OrgState, holder: RevokedKey['holder']): string {
   if ('delegation' in holder) return `delegation ${holder.delegation} (prefix ${holder.prefix})`;
   if ('machine' in holder) {
     const name = state.machineNames.find((n) => n.ref === holder.machine)?.name;

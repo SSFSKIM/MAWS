@@ -25,6 +25,7 @@ const REGISTERED: OrgStatus = {
   hubAccess: 'connected',
   head: { version: 12, issued: new Date(Date.now() - 3 * DAY).toISOString() },
   problem: null,
+  signer: null,
 };
 
 let calls: { name: string; input: unknown }[];

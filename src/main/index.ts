@@ -24,9 +24,10 @@ import { registerMachineHandler, registerMainHandler } from './ipc/router'; // P
 import { startMachineIdentity } from './machine/identity'; // P5 O6 M1
 import { bindLocalMachine } from './machine/local'; // P5 O6 M2
 import { startMachines } from './machines'; // P5 O6 M3: the connection manager, and the stand-in behind its gate
-import { createStepUp } from './device/step-up'; // P5 O7 M1: the development org session's signer; P5 O8 M1: the production session's
+import { createStateSigner, createStepUp } from './device/step-up'; // P5 O7 M1: the development org session's signer; P5 O8 M1: the production session's; M3: its state signer
 import { createDevOrgSession } from './org/dev-session'; // P5 O7 M1
 import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2
+import type { RemoteLink } from './machines/remote/link'; // P5 O8 M3: the deliveries' links
 import { powerMonitor } from 'electron'; // P5 O8 M1: the Registry feed reconnects at wake and unlock
 import { openExternalUrl } from './open-external'; // P5 O8 M1: the Access login's browser trip
 import { createOrgSession } from './org/org-session'; // P5 O8 M1
@@ -287,6 +288,19 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
   registerPtyOpenLink();
   // C9 block end
   const hosts = createHosts(MAIN_BUILD, launch); // E11 §2.7: main's build for host.status; P5 O2 M7: the launch's shape
+  // P5 O1 M3 (OX4): the client port, the one way a machine-bound service reaches the person's screen: dialogs, the
+  // Replace question, Finder, the browser, notifications, the badge and focus. `openWindow` is read when a focus needs it.
+  // (Made before the org session, whose weekly successor notifies through it: P5 O8 M3.)
+  const clientPort = electronClientPort({ env: process.env, openWindow: () => openWindow() });
+  // P5 O8 M2: O7's RL2 roster, as machines.onRemote reports it (wired once the machines start, below), for M2's rows and
+  // M3's deliveries; M3: the links themselves, through machines.remote once it exists
+  let roster: readonly MachineRef[] = [];
+  const rosterListeners = new Set<() => void>();
+  const onRoster = (listener: () => void) => {
+    rosterListeners.add(listener);
+    return () => void rosterListeners.delete(listener);
+  };
+  let remoteLink: (ref: MachineRef) => RemoteLink | null = () => null;
   // P5 O8 M1: this profile's org session (src/main/org/org-session.ts): the sign-in from a pairing code, the held org
   // state and the hub's credential, read from <userData>/org/ in the background; a profile that never signs in makes no
   // keys, files or requests. A development build started with MAWS_DEV_ORG=<dir> runs O7's development session instead
@@ -317,6 +331,26 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
           stepUp: (keys, device) => createStepUp({ device, key: keys.stepUp }),
           // `<userData>/org/` stays out of Time Machine, as the device keys do: a restored token or chain is no one's
           excludeFromBackup: (path) => excludeFromBackup(path),
+          // M3: the app as the org's signer. Org states are signed with the device's step-up key behind Touch ID (the
+          // key stays in step-up.ts); the weekly successor asks at a window's focus, and notifies once a day while no
+          // window is in front (a click brings the app forward, whose focus may then ask); revocations go to the RL2
+          // roster's machines over their links.
+          signing: {
+            stateSigner: (keys) => createStateSigner({ key: keys.stepUp }),
+            focused: () => BrowserWindow.getFocusedWindow() !== null,
+            onFocus: (listener) => {
+              const focused = () => listener();
+              app.on('browser-window-focus', focused);
+              return () => void app.off('browser-window-focus', focused);
+            },
+            notify: (text) =>
+              void clientPort.notify(null, { title: 'MAWS', body: text, silent: false }, (event) => {
+                if (event.kind === 'clicked') clientPort.focus(null, 'bring');
+              }),
+            roster: () => roster,
+            onRoster,
+            link: (ref) => remoteLink(ref),
+          },
           log: (line) => console.log(line),
         })
       : null;
@@ -343,9 +377,7 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
     session,
   });
   installRouter({ appUrl, local, dispatchToHost: hosts.dispatch, remote: machines.dispatch });
-  // P5 O1 M3 (OX4): the client port, the one way a machine-bound service reaches the person's screen: dialogs, the
-  // Replace question, Finder, the browser, notifications, the badge and focus. `openWindow` is read when a focus needs it.
-  const clientPort = electronClientPort({ env: process.env, openWindow: () => openWindow() });
+  remoteLink = (ref) => machines.remote(ref);
   // E11: every will-quit step below joins one ordered list behind one listener (tracker row E10 "14 will-quit listeners");
   // a step's promise (the hosts' draining close of a kept supervisor's socket) holds the exit, bounded by the port's grace;
   // P4 W2-B: the hosts' stop is a drain, run before the rest, which stop once it has settled
@@ -368,8 +400,6 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
   registerIndexHandlers(index);
   // P5 O8 M2: other machines' sessions, from their signed listings through the feed, verified against the held org state,
   // for the machines of O7's RL2 roster (src/main/org/rows.ts); org.rows and org.rows.changed carry them to the sidebar
-  let roster: readonly MachineRef[] = [];
-  const rosterListeners = new Set<() => void>();
   machines.onRemote((refs) => {
     roster = refs;
     for (const listener of [...rosterListeners]) listener();
@@ -378,10 +408,7 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
     session,
     feed: orgFeed,
     roster: () => roster,
-    onRoster: (listener) => {
-      rosterListeners.add(listener);
-      return () => void rosterListeners.delete(listener);
-    },
+    onRoster,
     localProjects: async () => index.projects.listWithRemoved(),
     onLocalProjects: (listener) => onEmitted('session.projects.changed', () => listener()),
     files: orgDir,

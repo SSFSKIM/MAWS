@@ -382,6 +382,7 @@ export const ORG = {
     rollback: 'The hub served an older org state than this Mac holds. It was refused.',
     fork: 'The hub served an org state that conflicts with the one this Mac holds. It was refused.',
     directory: 'MAWS’s org folder isn’t private to you, so it wasn’t used.',
+    signing: 'This Mac’s record of the org states it signed is missing or damaged, so it signs nothing until it is reset.',
   },
   reanchor: 'Re-anchor',
   reanchorNote: 'Re-anchoring replaces the org state this Mac trusted with the one the code’s device vouches for.',
