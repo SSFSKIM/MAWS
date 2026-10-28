@@ -7,8 +7,9 @@
 # `mawsd` (pnpm mawsd:pack: main's build, the externals' closure and the pinned Node) and installs it for the default
 # profile: `mawsd install` copies the pack into ~/.local/share/maws/mawsd/releases/, points `current` at it, and
 # enables the systemd user unit and lingering, so the daemon survives logout. With MAWS_DELEGATION_ID set (the
-# delegation id devcloud's provisioning decodes, P5 O14), the profile's machine ref is minted with it as its prefix at
-# the first install; without it the ref has none. Where `systemctl --user` reaches no user manager (a container), it
+# delegation id from the driver profile's `[desk] delegation_id`, which devcloud carries through its descriptor into
+# /etc/devcloud/env, P5 O14; the devcloud seed is a GCP credential and carries none), the profile's machine ref is
+# minted with it as its prefix at the first install; without it the ref has none. Where `systemctl --user` reaches no user manager (a container), it
 # says so and installs no unit. On macOS it never touches launchd: the app installs its own LaunchAgent (M7).
 set -euo pipefail
 
