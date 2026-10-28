@@ -14,7 +14,8 @@ function verdictOf(holder, jobs, group) {
   if (plan?.status === 'completed' && plan.conclusion !== 'success') return `holder plan ${plan.conclusion}`;
   if (peer?.status === 'completed') return peer.conclusion;
   if (holder.status === 'completed') return `holder ${holder.conclusion} without a completed e2e:${group}`;
-  if (!peer && plan?.status === 'completed') return `holder plan finished without e2e:${group}`;
+  // GitHub can publish the downstream matrix after the successful plan. A missing peer job is not definitive
+  // while the holder is active; the completed-run check above (or the polling deadline) supplies the bound.
   return null;
 }
 

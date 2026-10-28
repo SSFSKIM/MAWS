@@ -54,12 +54,22 @@ for (const conclusion of ['failure', 'cancelled', 'skipped', 'timed_out', 'neutr
   });
 }
 
-test('a failed or cancelled plan, or a finished plan without a peer job, fails the stand-in', async () => {
-  for (const conclusion of ['failure', 'cancelled', 'skipped', 'success']) {
+test('a failed or cancelled plan, or a completed holder without a peer job, fails the stand-in', async () => {
+  for (const conclusion of ['failure', 'cancelled', 'skipped']) {
     const { status, lines } = await wait([snapshot('in_progress', null, [job('plan', 'completed', conclusion)])]);
     assert.equal(status, 1);
     assert.match(lines.at(-1), /held by run 90:.*plan/);
   }
+  const { status, lines } = await wait([snapshot('completed', 'success', [plan])]);
+  assert.equal(status, 1);
+  assert.match(lines.at(-1), /held by run 90:.*without.*e2e:cross-build/);
+});
+
+test('a successful plan can precede publication of the peer job while the holder is still active', async () => {
+  const { status, lines, poll } = await wait([snapshot('in_progress', null, [plan]), done('success')]);
+  assert.equal(status, 0);
+  assert.equal(poll, 1);
+  assert.equal(lines.at(-1), 'held by run 90: success');
 });
 
 test('a cancelled holder with a stale queued peer job cannot pass or keep waiting', async () => {
