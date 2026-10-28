@@ -85,6 +85,7 @@ const RECORDS: SessionRecord[] = [
   record('A', 'la-approve', { owners: [A], shares: [{ member: B, grade: 'approve' }], launch: 'L1' }),
   record('A', 'la-converse', { owners: [A], shares: [{ member: B, grade: 'converse' }], launch: 'L1' }),
   record('A', 'la-b', { owners: [B], launch: 'L1' }),
+  record('A', 'la-orgview', { owners: [A], access: 'org-view', launch: 'L1' }),
 ];
 /** requestId → the kind of the event that opened it (`session.pendingRequest`). */
 const PENDING: Record<string, string> = { 'rq-question': 'question.requested', 'rq-ask': 'maws.ask.opened', 'rq-perm': 'permission.requested', 'rq-plan': 'plan.requested' };
@@ -440,6 +441,19 @@ describe('lane A’s actions and the machine’s reads', () => {
     expect(await send(b, laneA(f, b, 'steer', 'la-unknown', { text: 'go on' }))).toBe('grade');
     expect(await call(b, 'sminos.rows', { session: 'la-converse' })).toBe('ok');
     expect(await call(b, 'sminos.rows', { session: 'la-unknown' })).toBe('grade');
+  });
+
+  it('grades `send` by its text, as `session.send`’s: plain text and a converse command at converse, `/clear` at manage', async () => {
+    const f = await start();
+    const c = await open(f, c1, C);
+    expect(await send(c, laneA(f, c, 'send', 'la-orgview', { text: 'hello' }))).toBe('grade');
+    const b = await open(f, b1, B);
+    expect(await send(b, laneA(f, b, 'send', 'la-converse', { text: 'please look at the tests' }))).toBe('ok');
+    expect(await send(b, laneA(f, b, 'send', 'la-converse', { text: '/model opus' }))).toBe('ok');
+    expect(await send(b, laneA(f, b, 'send', 'la-converse', { text: '/clear' }))).toBe('grade');
+    expect(await send(b, laneA(f, b, 'send', 'la-converse', { text: ' /clear' }))).toBe('grade');
+    const a = await open(f, a1, A);
+    expect(await send(a, laneA(f, a, 'send', 'la-converse', { text: '/clear' }))).toBe('ok');
   });
 
   it('answers the listings call to every member, and serves session reads by rank', async () => {
