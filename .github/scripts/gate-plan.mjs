@@ -388,6 +388,13 @@ export function planOf(env, scripts) {
     summary += `\n${line}\n`;
     stdout += `${line}\n${(selection.related ?? []).map((path) => `  ${path}\n`).join('')}`;
   }
+  // Pre-push spec-import advice is evidence for the lander, never a gate or a change to the job matrix.
+  if (!dispatched) {
+    for (const line of (env.HEAD_MESSAGE ?? '').split('\n').filter((line) => /^E2E-Coverage:/i.test(line))) {
+      summary += `\n${line.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}\n`;
+      stdout += `${line}\n`;
+    }
+  }
   return { outputs, summary, stdout, peerCheck };
 }
 
