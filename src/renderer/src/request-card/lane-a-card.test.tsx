@@ -88,6 +88,21 @@ describe('a terminal session’s permission card', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
+  it('stays on an answer refused as the terminal’s to give, saying so with its actions closed, until a real settlement', async () => {
+    fake = fakeClient({ 'laneA.answer': { outcome: 'not_pending', settled: null, terminalOnly: true, message: 'the window closed' }, 'laneA.catalog': null });
+    window.maws = fake.client as unknown as PreloadBridge;
+    live({ pending: [raised({ agentId: 'a1' })] });
+    mount(permission({ requestId: REQ, agentId: 'a1' as never }));
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await userEvent.setup({ advanceTimers: vi.advanceTimersByTime }).click(screen.getByRole('button', { name: 'Allow' }));
+    await waitFor(() => expect(screen.getByText('Answer this in the terminal')).toBeTruthy());
+    await act(async () => void vi.advanceTimersByTime(5_000)); // past the not-pending card's close
+    expect(screen.queryByText('Already answered elsewhere')).toBeNull();
+    for (const name of ['Allow', 'Deny']) expect(screen.getByRole('button', { name }).hasAttribute('disabled')).toBe(true);
+    act(() => live({ pending: [], settled: [{ request: REQ, session: 'eng-1', winner: 'terminal', outcome: 'allow', by: 'terminal' }] }));
+    expect(screen.getByRole('status').textContent).toBe('Answered in the terminal: Allowed');
+  });
+
   it('reads a background request past its window as the terminal’s to answer, its buttons disabled', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     live({ pending: [raised({ agentId: 'a1', deadline: new Date(Date.now() + 1200).toISOString() })] });

@@ -26,6 +26,10 @@ export interface LaneAAttentionDeps {
 
 export const STREAM_GRACE_MS = 5000;
 
+// A lane A item, by its id (`lane-a:<engineSession>:<request>`): a prompt its terminal shows too.
+const PREFIX = 'lane-a:';
+export const isLaneAItem = (id: string): boolean => id.startsWith(PREFIX);
+
 interface Session {
   raised: LaneARaised[];
   seen: Map<string, string>; // a request the bridge stamped no time to: when it was first seen
@@ -61,7 +65,7 @@ function entryOf(appId: AppSessionId, raised: LaneARaised, createdAt: string): L
   const requestId = raised.request as RequestId;
   const toolUseId = (raised.toolUseId ?? raised.request) as ToolUseId;
   const agentId = (raised.agentId ?? null) as AgentId | null;
-  const id = `lane-a:${raised.session}:${raised.request}`;
+  const id = `${PREFIX}${raised.session}:${raised.request}`;
   const item: AttentionItem = {
     id: id as AttentionId,
     appSessionId: appId,

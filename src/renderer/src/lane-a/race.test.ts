@@ -1,10 +1,13 @@
 // The approval race on a terminal session's request (P5 O9 M6, "The race"; the owner's Q3): whether the terminal asks it
 // too, who settled it and with what, and whether it is the terminal's alone to answer (a background request past its
 // window, less 200 ms).
-import { describe, expect, it } from 'vitest';
+import { act, renderHook } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
+import { applyLaneAState, resetLaneAStore } from '../stores/lane-a';
 import { laneAState } from './test-support/lane-a-state';
-import { pastWindow, raceOf, RACE, settledWords } from './race';
+import { pastWindow, raceOf, RACE, settledWords, useRace } from './race';
 
 const A = 'app-a' as AppSessionId;
 const T = Date.parse('2026-10-28T10:00:00.000Z');
@@ -46,5 +49,22 @@ describe('the race', () => {
     expect(settledWords({ where: 'maws', outcome: 'allow' })).toBe('Answered in MAWS: Allowed');
     expect(RACE.asked).toBe('Also asked in the terminal: the first answer wins');
     expect(RACE.terminal).toBe('Answer this in the terminal');
+  });
+});
+
+describe('useRace', () => {
+  afterEach(() => {
+    resetLaneAStore();
+    vi.useRealTimers();
+  });
+
+  it('reads a request whose window closed before its state arrived as the terminal’s at once', () => {
+    vi.useFakeTimers({ now: T });
+    const item = { appSessionId: A, request: { requestId: 'r1', toolUseId: 'r1', taskId: null, agentId: 'a1' } } as unknown as AttentionItem;
+    const { result } = renderHook(() => useRace(item));
+    vi.setSystemTime(T + 5_000); // the state hydrates late, its window already past
+    act(() => applyLaneAState(A, laneAState(A, { pending: [raised('r1', { agentId: 'a1', deadline: new Date(T + 2_000).toISOString() })] })));
+    act(() => void vi.advanceTimersByTime(0));
+    expect(result.current).toEqual({ asked: true, settled: null, terminalOnly: true });
   });
 });

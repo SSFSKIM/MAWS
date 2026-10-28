@@ -27,7 +27,7 @@ import { DockedCardFrame } from '../composer/docked/DockedCardFrame';
 import { ipc } from '../ipc/client';
 import { answerSession, useSessionControls } from '../session/controls/controls-for'; // P5 O9 M4
 import type { Capability } from '../session/controls/types'; // P5 O9 M6
-import { RACE, settledWords, useRace } from '../lane-a/race'; // P5 O9 M6
+import { RACE, settledWords, terminalOnlyNow, useRace } from '../lane-a/race'; // P5 O9 M6
 import { BUTTON_LIKE_INPUTS } from '../keymap/dispatcher';
 import { useKeyChord } from '../keymap/useKeyChord';
 import { itemAge } from '../sidebar/derive';
@@ -107,7 +107,7 @@ function useDelivery(item: AttentionItem, onAnswered: RequestCardProps['onAnswer
           setPhase('delivered');
           delivered?.();
         } else if (outcome === 'not_pending') {
-          setPhase('not_pending');
+          setPhase(terminalOnlyNow(item) ? 'pending' : 'not_pending'); // P5 O9 M6: the terminal's to answer, still pending
         } else {
           setPhase('pending');
           setFailed({ retry: () => void send(), detail: result.ok ? null : result.error.message });

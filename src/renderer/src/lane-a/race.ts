@@ -49,6 +49,20 @@ export function settledWords(settled: NonNullable<Race['settled']>): string {
   return outcome ? `${WHERE[settled.where]}: ${outcome}` : WHERE[settled.where];
 }
 
+// The race of an item's request as the lane A store holds it now, outside render.
+function raceNow(item: Pick<AttentionItem, 'appSessionId' | 'request'>, now: number): Race {
+  const s = useLaneA.getState();
+  const { requestId } = item.request;
+  return raceOf(s.states.get(item.appSessionId) ?? null, requestId === null ? null : (s.told.get(item.appSessionId)?.get(requestId) ?? null), requestId, now);
+}
+
+// Whether a request is the terminal's alone and still unsettled: an answer the bridge refused as past its window is no
+// settlement, so the card stays, saying so, until the terminal's answer settles it.
+export function terminalOnlyNow(item: Pick<AttentionItem, 'appSessionId' | 'request'>): boolean {
+  const race = raceNow(item, Date.now());
+  return race.terminalOnly && race.settled === null;
+}
+
 // The race of an item's request, following its session's lane A state and turning terminal-only when its window closes.
 export function useRace(item: Pick<AttentionItem, 'appSessionId' | 'request'>): Race {
   const appSessionId = item.appSessionId as AppSessionId;
@@ -59,8 +73,8 @@ export function useRace(item: Pick<AttentionItem, 'appSessionId' | 'request'>): 
   const deadline = requestId === null ? undefined : state?.pending.find((p) => p.request === requestId)?.deadline;
   useEffect(() => {
     if (deadline === undefined) return;
-    const wait = Date.parse(deadline) - WINDOW_MARGIN_MS - Date.now();
-    if (wait <= 0) return;
+    // a window already closed when the request was first seen (its state hydrated late) reads at once
+    const wait = Math.max(0, Date.parse(deadline) - WINDOW_MARGIN_MS - Date.now());
     const timer = setTimeout(() => setNow(Date.now()), wait);
     return () => clearTimeout(timer);
   }, [deadline]);
