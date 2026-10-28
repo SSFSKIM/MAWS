@@ -45,6 +45,7 @@ export class ListingsStore {
   readonly #resolving = new Set<ListingKey>();
   /** The `listings` pages of the connection now opening, until its last. */
   #snapshot: Signed<Listing>[] | null = null;
+  #loaded = false;
   readonly #listeners = new Set<() => void>();
   #judging: Promise<void> = Promise.resolve();
 
@@ -52,6 +53,11 @@ export class ListingsStore {
 
   #now(): Date {
     return (this.deps.now ?? (() => new Date()))();
+  }
+
+  /** Whether a connection's whole set has come in (its last `listings` page judged) since the store began or was cleared. */
+  get loaded(): boolean {
+    return this.#loaded;
   }
 
   /** The verified listings, by `<machine ref>/<session>`. */
@@ -83,6 +89,7 @@ export class ListingsStore {
         this.#held.delete(key);
       }
       for (const record of [...snapshot].sort((a, b) => a.body.revision - b.body.revision)) await this.#take(record);
+      this.#loaded = true;
       this.#tell();
     });
   }
@@ -91,6 +98,19 @@ export class ListingsStore {
   listing(record: Signed<Listing>): Promise<void> {
     return this.#serial(async () => {
       if (await this.#take(record)) this.#tell();
+    });
+  }
+
+  /**
+   * Records read from the hub at a landing, before a snapshot is in: taken as frames are, oldest first, unless a
+   * snapshot has come in by their turn (a snapshot is the whole set: a read it outran has nothing to add).
+   */
+  landing(records: Signed<Listing>[]): Promise<void> {
+    return this.#serial(async () => {
+      if (this.#loaded) return;
+      let changed = false;
+      for (const record of [...records].sort((a, b) => a.body.revision - b.body.revision)) changed = (await this.#take(record)) || changed;
+      if (changed) this.#tell();
     });
   }
 
@@ -113,6 +133,7 @@ export class ListingsStore {
     this.#watermarks.clear();
     this.#resolving.clear();
     this.#snapshot = null;
+    this.#loaded = false;
     this.#tell();
   }
 

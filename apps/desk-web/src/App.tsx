@@ -1,11 +1,14 @@
 // The desk's frame: sign-in (Access admits the person; `/api/me` names the member), the device's org key, the grid's
-// socket, the route — the grid, every session of the org, or a project — and the PWA's part: the service worker, this device's notifications
+// socket, the route — the grid, every session of the org, a project, or the cards of the machines moved to MAWS — and
+// the PWA's part: the service worker, this device's notifications
 // handed to the hub again at start, and the card a tapped notification opens. A phone draws a compact top bar. This
 // browser as a `web-cards` device (P5 O13 M3: its record, the org state it verified, the listings, the push binding) is
-// started with the member, and its Device panel is reached from the top bar and the phone's menu.
+// started with the member, and its Device panel is reached from the top bar and the phone's menu; so are the cards
+// (P5 O13 M5), *Cards*, with a dot while anything waits on a cut-over machine.
 //
 // The first load is the grid's: the project view (with MAWS's Markdown and request cards) and the dialogs load as
-// chunks of their own when first opened, so the phone's first screen does not wait on them. So does the latency
+// chunks of their own when first opened, so the phone's first screen does not wait on them; so do the cards' views,
+// with the device's part they reach (cards/boot.ts). So does the latency
 // readout, drawn only when asked for (`latency/latency.ts`).
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
@@ -19,6 +22,7 @@ import { browserPushEnv, resyncPush } from './push/device';
 import { orgWaiting, showBadge } from './pwa/badge';
 import { registerServiceWorker } from './pwa/service-worker';
 import { bootDevice, isDevice, stopDevice } from './cards/boot';
+import { useCardsBoard, waitingOn } from './cards/board';
 import { followHistory, useDeskLayout } from './shell/layout';
 import { usePhoneProject } from './shell/phone';
 import { useNarrow } from './shell/viewport';
@@ -36,6 +40,8 @@ const KeyDialog = lazy(() => loadChunk(() => import('./views/key/KeyDialog').the
 const MachinesDialog = lazy(() => loadChunk(() => import('./views/machines/MachinesDialog').then((m) => ({ default: m.MachinesDialog }))));
 const NotificationsDialog = lazy(() => loadChunk(() => import('./views/notifications/NotificationsDialog').then((m) => ({ default: m.NotificationsDialog }))));
 const DevicePanel = lazy(() => loadChunk(() => import('./views/cards/DevicePanel').then((m) => ({ default: m.DevicePanel }))));
+const CardsList = lazy(() => loadChunk(() => import('./views/cards/CardsList').then((m) => ({ default: m.CardsList }))));
+const ChannelCards = lazy(() => loadChunk(() => import('./views/cards/ChannelCards').then((m) => ({ default: m.ChannelCards }))));
 
 const queries = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } });
 
@@ -129,8 +135,12 @@ function Desk({ me }: { me: Me }) {
         <Suspense fallback={null}>
           <OrgView me={me} />
         </Suspense>
+      ) : route.view === 'cards' ? (
+        <Suspense fallback={<Opening what="the cards" />}>
+          {'machine' in route ? <ChannelCards key={`${route.machine}/${route.session}`} me={me} machine={route.machine} session={route.session} onDevice={() => setPanel('device')} /> : <CardsList me={me} onDevice={() => setPanel('device')} />}
+        </Suspense>
       ) : (
-        <Suspense fallback={<Opening />}>
+        <Suspense fallback={<Opening what="the project" />}>
           <ProjectView key={route.project} me={me} project={route.project} channel={route.channel} />
         </Suspense>
       )}
@@ -145,12 +155,19 @@ function Desk({ me }: { me: Me }) {
   );
 }
 
-function Opening() {
+function Opening({ what }: { what: string }) {
   return (
     <p className="m-0 p-6 text-ui-sm text-fg-muted" role="status">
-      Opening the project…
+      Opening {what}…
     </p>
   );
+}
+
+/** Whether anything waits on a cut-over machine: the dot on the cards' entries. */
+const useCardsWaiting = () => useCardsBoard((s) => waitingOn(s.machines) > 0);
+
+function WaitingDot() {
+  return <span className="ml-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-warning align-middle" data-testid="cards-dot" aria-label="waiting" />;
 }
 
 function TopBar({ me, open }: { me: Me; open: (panel: Panel) => void }) {
@@ -158,13 +175,15 @@ function TopBar({ me, open }: { me: Me; open: (panel: Panel) => void }) {
   const navigate = useDeskLayout((s) => s.navigate);
   const narrow = useNarrow();
   const name = useGrid((s) => (route.view === 'project' ? s.projects.find((p) => p.id === route.project)?.name : undefined));
-  const title = route.view === 'project' ? (name ?? route.project.slice(0, 8)) : route.view === 'org' ? 'All sessions' : null;
+  const title = route.view === 'project' ? (name ?? route.project.slice(0, 8)) : route.view === 'org' ? 'All sessions' : route.view === 'cards' ? 'Cards' : null;
+  const cardsWaiting = useCardsWaiting();
   const groupChatOpen = usePhoneProject((s) => s.groupChatOpen);
   const hubHealthy = useHubState().healthy;
   if (narrow) {
     // A phone's stack (05-phone.html, 3A): a channel goes back to the project's list, the list to the projects.
-    const inChannel = route.view === 'project' && (route.channel.kind === 'session' || groupChatOpen);
+    const inChannel = (route.view === 'project' && (route.channel.kind === 'session' || groupChatOpen)) || (route.view === 'cards' && 'machine' in route);
     const back = () => {
+      if (route.view === 'cards') return navigate({ view: 'cards' });
       if (route.view !== 'project') return;
       if (route.channel.kind === 'session') navigate({ view: 'project', project: route.project, channel: { kind: 'group' } });
       else usePhoneProject.setState({ groupChatOpen: false });
@@ -200,6 +219,7 @@ function TopBar({ me, open }: { me: Me; open: (panel: Panel) => void }) {
           <KeyButton open={open} compact />
           <button type="button" onClick={() => open('menu')} className="flex h-9 shrink-0 items-center rounded-sm px-2 text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg" data-testid="menu">
             Menu
+            {cardsWaiting && <WaitingDot />}
           </button>
         </div>
       </header>
@@ -222,6 +242,10 @@ function TopBar({ me, open }: { me: Me; open: (panel: Panel) => void }) {
         )}
       </nav>
       <div className="ml-auto flex items-center gap-3 text-ui-sm text-fg-muted">
+        <button type="button" onClick={() => navigate({ view: 'cards' })} className="flex items-center rounded-sm px-1 hover:bg-bg-hover hover:text-fg">
+          Cards
+          {cardsWaiting && <WaitingDot />}
+        </button>
         <button type="button" onClick={() => open('notifications')} className="rounded-sm px-1 hover:bg-bg-hover hover:text-fg">
           Notifications
         </button>
@@ -283,9 +307,22 @@ function GridStatus({ compact = false }: { compact?: boolean }) {
 /** The phone's menu: what the wide top bar shows inline. */
 function PhoneMenu({ me, open, onClose }: { me: Me; open: (panel: Panel) => void; onClose: () => void }) {
   const row = 'flex h-11 w-full items-center rounded-md px-3 text-left text-ui hover:bg-bg-hover';
+  const navigate = useDeskLayout((s) => s.navigate);
+  const cardsWaiting = useCardsWaiting();
   return (
     <div className="fixed inset-0 z-50 flex items-end bg-fg/20" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <div role="dialog" aria-modal="true" aria-label="Menu" className="w-full rounded-t-lg border-t border-border-strong bg-bg-overlay p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] text-fg shadow-lg">
+        <button
+          type="button"
+          className={row}
+          onClick={() => {
+            onClose();
+            navigate({ view: 'cards' });
+          }}
+        >
+          Cards
+          {cardsWaiting && <WaitingDot />}
+        </button>
         <button type="button" className={row} onClick={() => open('notifications')}>
           Notifications
         </button>
