@@ -41,7 +41,7 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-10-28) Task 2: `checks.ts` (`checkSuccessor`, `supersededRevocations`) and its proofs, the zero-roots ones included.
   - [x] (2026-10-28) Task 3: the device module, `createStateSigner` and the next keys (create, promote, destroy).
   - [x] (2026-10-28) Task 4: `signing-store.ts`, `signer.ts`, `postState`, `signing.json`, §H's M3 rows.
-  - [ ] Task 5: `weekly.ts` and `deliveries.ts`.
+  - [x] (2026-10-28) Task 5 built (5448d421b; review pending): `weekly.ts` and `deliveries.ts`.
   - [ ] Task 6: the session's composition, the rekey transaction and its replay, the IPC commands, main's wiring, and the Org section.
   - [ ] Task 7: `test/org/signer.local.test.ts`.
   - [ ] reviewer-high on the PR, the desk track's review of the `admin.ts` hunk, and the final gate.
@@ -510,7 +510,7 @@ M3's own edits are the no-change successor and that revocation. The delegation a
 - **To whom.** Each machine of the roster at signing, less a machine the state itself removes.
 - **The obligation is durable before anything is sent.** The signing store's `deliveries` gains `{hash, signed, owed: ref[]}` (`hash` the signed state's `stateHash`) in the same update as the pending slot. It keeps the signed bytes, so delivery never depends on the hub having accepted the state. Publication (the slot) and delivery (the obligation) settle apart: the slot clears at the hub's acceptance, and the obligation when its last machine acknowledges or leaves the roster. A crash between them loses neither.
 - **Only the app's own line is ever sent.** An obligation sends while its state is on the app's line: the held chain holds it, or it is the pending slot's state and the slot is not `pending-fork`. In `pending-fork` its sends are suspended. `org.discardPending` removes the obligation in the same update that clears the slot, so no abandoned byte is sent again. It moves to `abandoned: [{hash, version, hub, machines}]` (whether the hub and which machines may hold it, from the exposure record), which the status reports. If the held chain later adopts that state after all, the obligation is not revived: the machines get it through their own sync.
-- **The payload pages forward through the app's line** (`link.act({action: 'endpoint.state', args: {states, transitions}, stepUp: 'never'})`). The line is the held chain plus, while unaccepted, the pending state. `transitions` are all the held view's accepted transitions, a few at most. Each machine's cursor is kept per obligation as `known: {version, line}`. `line` is the count of accepted transitions the app held when the cursor was set, so a rewind the app adopts resets every cursor.
+- **The payload pages forward through the app's line** (`link.act({action: 'endpoint.state', args: {states, transitions}, stepUp: 'never'})`). The line is the held chain plus, while unaccepted, the pending state. `transitions` are all the held view's accepted transitions, a few at most. Each machine's cursor is kept per obligation as `known: {version, line}`. `line` is a digest of the accepted transitions the app held when the cursor was set, so a rewind the app adopts resets every cursor. A count would not do: a rewind past one forward root transition drops one transition and adds the recovery, which leaves the count unchanged (Decision Log, Task 5).
   1. **Recovery first.** When the app's line contains an accepted transition (`fromVersion` f) and this machine has no cursor on the current line, the first run starts at the state at f: the transition's base, which the whole held chain keeps. It runs forward through f + 1 and on. `EndpointOrg.#rewind` (`org-sync.ts:225-244`) needs the state at f + 1 and, when f has left its window, the authenticated base, and the run carries both. An endpoint still on the superseded branch, above the recovered head or at an equal version, rewinds by it. A `done` sets the cursor on this line.
      Recovery first is a probe, tried once per machine per line. Any other answer records `probed[ref] = line` and hands the machine to step 2, then step 3, on the same line. Two endpoints answer that way and neither is a failure:
      - One below the base (head < f − 1). No candidate transition applies (`fromVersion` ≥ its head), and the run holds no state at its head + 1, so it answers `not-newer`.
@@ -524,7 +524,7 @@ M3's own edits are the no-change successor and that revocation. The delegation a
   - A machine already ahead of the state is acknowledged once a run reaches its head's version.
   - A machine ahead of the app's own held head on the same line waits until the app adopts that far. One ahead on a superseded line is handled by recovery first.
   - Anything else stays owed, sent again at that machine's next link up and every `DELIVERY_RETRY_MS` (1 h).
-  - A machine that leaves the roster is no longer owed.
+  - A machine is no longer owed once it is out of the roster and the held head no longer names it. The roster is empty at start and at sign-out, so the roster alone would erase every obligation (Decision Log, Task 5).
 - The status lists the machines still owing an acknowledgement per version, and those that may hold an abandoned proposal. M4's page shows them.
 
 *New keys* (P5 Decision Log 71; M1's `removed` refusal said M3 builds it).
@@ -1018,7 +1018,6 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
 | `WEEKLY_DUE_DAYS` | 7 | Q6 |
 | `ASK_GAP_MS` | 86 400 000 | Q6's once a day |
 | `WEEKLY_CHECK_MS` | 3 600 000 | — |
-| `DELIVERY_SPAN` | 16 states | — |
 | `DELIVERY_RETRY_MS` | 3 600 000 | — |
 | `DELIVERY_MAX_BYTES` | 524 288 | an eighth of RL2's `MESSAGE_MAX_BYTES` (4 MiB, `channel.ts:50`) |
 
@@ -1142,7 +1141,7 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
     signing.json     { "version": 1,
                        "pending": { "signed": SignedOrgState, "parent": "<stateHash>", "exposed": { "hub": <boolean>, "machines": ["<ref>"] } } | null,
                        "deliveries": [ { "hash": "<stateHash>", "signed": SignedOrgState, "owed": ["<ref>", …],
-                                         "known": { "<ref>": { "version": <n>, "line": <accepted transitions held> } }, "probed": { "<ref>": <line> }, "tooLarge": ["<ref>"] } ],
+                                         "known": { "<ref>": { "version": <n>, "line": "<digest of the accepted transitions held>" } }, "probed": { "<ref>": <line> }, "tooLarge": ["<ref>"] } ],
                        "abandoned": [ { "hash": "<stateHash>", "version": <n>, "hub": <boolean>, "machines": ["<ref>"] } ],
                        "lastAsked": "<ISO>" | null, "lastNotified": "<ISO>" | null }      // fails closed once registration.json says signing: true
     registration.json  gains "signing": true (once signing.json is first written) and "rekey": { "device": "<new id>" } (during a rekey's promotion)
@@ -1477,6 +1476,17 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   - `markRegistration` writes inside the current queue turn, without a nested `commit`, and updates the in-memory registration;
   - the Org section offers Discard for a refused slot that isn't a fork;
   - a post's `credentials` or `denied` answer goes to the session's hub-failure handling.
+  Date/Author: 2026-10-28, O8's executor.
+
+- Decision: Task 5 (`weekly.ts` and `deliveries.ts`, 5448d421b) settles these points of delivery. All of Task 4's seams fitted with no change to the signer.
+  1. A cursor's `line` is a 48-bit digest of the held accepted transitions, not their count, which stays level across a rewind past one forward root transition.
+  2. A machine is no longer owed once it is out of the roster and the held head no longer names it. The roster is empty at start and at sign-out.
+  3. An obligation whose state a recovery superseded is dropped. The superseded offer carries its revocations.
+  4. A run for a state already on the held chain stops at the held head, so it never carries another obligation's pending state.
+  5. Recovery first starts at the newest transition's `fromVersion`. Any judging answer records the probe.
+  6. A forward `not-newer` or `rollback` drops the cursor and resumes head-finding past the run.
+  7. `too-large` clears the cursor and keeps the machine owed, and a retry finds its head from caps.
+  8. The planner's "last 16 held states" (the signer entry above) and `DELIVERY_SPAN` are superseded by the byte-bounded forward paging of the re-plan's rounds. The §H row is gone, and the constant leaves `timing.ts`.
   Date/Author: 2026-10-28, O8's executor.
 
 ## Outcomes & Retrospective
