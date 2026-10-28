@@ -346,7 +346,7 @@ describe('a new head', () => {
 
 describe('the relay carrier', () => {
   /** The hub's side of RL1's multiplex for one app channel: the device's first message opens it, numbered 7. */
-  function relayed(h: Harness, writable?: () => Promise<void>): { device: ByteDuplex; endpointClosed: () => boolean } {
+  function relayed(h: Harness, writable?: (signal?: AbortSignal) => Promise<void>): { device: ByteDuplex; endpointClosed: () => boolean } {
     const toDevice: Array<(bytes: Uint8Array) => void> = [];
     const deviceClose: Array<(reason: string) => void> = [];
     let opened = false;
@@ -404,6 +404,30 @@ describe('the relay carrier', () => {
     room();
     await streamed;
     expect(taken).toBe(true);
+  });
+
+  it('lets a relayed stream’s wait for room go when its channel ends, unregistered from the link', async () => {
+    const h = harness();
+    // A link that never has room: a wait ends only when its signal aborts.
+    const waits = new Set<AbortSignal | undefined>();
+    const writable = (signal?: AbortSignal) =>
+      new Promise<void>((resolve) => {
+        waits.add(signal);
+        signal?.addEventListener('abort', () => {
+          waits.delete(signal);
+          resolve();
+        });
+      });
+    let remote: RemoteChannel | null = null;
+    h.channels.setRoutes({ call: (ch) => void (remote = ch) });
+    const channel = await device(a1, A).open(() => relayed(h, writable).device, REF);
+    await channel.send({ t: 'call', id: 'c1', name: 'daemon.status', input: {} });
+    const ch = await until(() => remote ?? undefined, 'the call');
+    const streamed = ch.transmit({ t: 'ev', sub: 's', epoch: 'e', seq: 1, body: 'one' });
+    await until(() => waits.size === 1, 'the wait for room');
+    channel.close('done');
+    await streamed;
+    expect(waits.size).toBe(0);
   });
 
   it('runs the hub’s channel as the same channel: the first payload is `h1`, `caps` comes first, and each end’s close reaches the other', async () => {

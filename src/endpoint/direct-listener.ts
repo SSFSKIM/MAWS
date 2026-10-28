@@ -11,8 +11,8 @@
 //
 // What a connection is sent waits in its socket's send buffer (send-buffer.ts) until the device reads it, bounded as
 // DIRECT_SEND_LIMITS says: the channel's stream waits at the soft cap, and the socket is ended (no sealed close, which
-// would wait behind the same bytes) once what it holds would pass the hard cap, or once it has held bytes and written
-// none of them for the stall bound. The channel then closes, its subscriptions' cursors resumable on the device's next
+// would wait behind the same bytes) once what it holds would pass the ceiling, or once it has held bytes and written no
+// frame for the stall bound. The channel then closes, its subscriptions' cursors resumable on the device's next
 // one. No WebSocket ping is answered (RL2 has its own), so every byte the socket is sent is one the caps count.
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -26,14 +26,14 @@ import { directUrl, tailnetAddresses, type InterfaceTable } from './tailnet';
 export const RESCAN_MS = 30_000;
 
 /**
- * A device socket's send buffer (send-buffer.ts). Its stream waits at 1 MiB unsent: four frames' worth (a frame is at
- * most 256 KiB of plaintext), so a healthy link never waits on one snapshot page, while a control message waits behind
- * at most that, the channel's stream window and one message. The socket is ended past 16 MiB: room for the soft cap, the
+ * A device socket's send buffer (send-buffer.ts). Its stream waits at 1 MiB held: four frames' worth (a frame is at most
+ * 256 KiB of plaintext), so a healthy link never waits on one snapshot page, while a control message waits behind at
+ * most that, the channel's stream window and one message. The socket is ended past 16 MiB: room for the soft cap, the
  * window and three of the largest answers a request gets (4 MiB each), which only a device that stopped reading
- * reaches. And it is ended after 30 s holding bytes with none of them written, the stream window's own deadline: a frame
+ * reaches. And it is ended after 30 s holding bytes with no frame written, the stream window's own deadline: a frame
  * taking that long is under 9 KiB a second, a dead link rather than a slow one.
  */
-export const DIRECT_SEND_LIMITS: SendLimits = { soft: 1024 * 1024, hard: 16 * 1024 * 1024, stallMs: 30_000 };
+export const DIRECT_SEND_LIMITS: SendLimits = { soft: 1024 * 1024, ceiling: 16 * 1024 * 1024, stallMs: 30_000 };
 
 type Bucket = { burst: number; perMinute: number };
 export type HandshakeLimits = { perSource: Bucket; overall: Bucket };
@@ -242,18 +242,20 @@ export class DirectListener {
       this.#options.log(line);
       ws.terminate();
     };
-    const buffer = new SendBuffer(ws, limits, () =>
-      end('stalled', `endpoint: a direct connection from ${source} held ${buffer.buffered} bytes and wrote none of it in ${limits.stallMs} ms; it is ended`),
+    const buffer = new SendBuffer(ws, limits, (why) =>
+      end(
+        why,
+        why === 'stalled'
+          ? `endpoint: a direct connection from ${source} has held ${buffer.buffered} bytes and written nothing for ${limits.stallMs} ms; it is ended`
+          : `endpoint: a direct connection from ${source} holds ${buffer.buffered} bytes its device hasn't read, and a send would take it past its ceiling; it is ended`,
+      ),
     );
     const io = new CarrierDuplex({
       send: (bytes) => {
-        if (ws.readyState !== ws.OPEN) return;
-        if (!buffer.send(bytes, { binary: true, capped: true })) {
-          end('overflow', `endpoint: a direct connection from ${source} holds ${buffer.buffered} bytes its device hasn't read, and a send would take it past its hard cap; it is ended`);
-        }
+        if (ws.readyState === ws.OPEN) buffer.send(bytes, { binary: true });
       },
       close: (reason) => ws.close(1000, reason.slice(0, 64)),
-      writable: () => buffer.writable(),
+      writable: (signal) => buffer.writable(signal),
       buffered: () => buffer.buffered,
     });
     ws.on('message', (data: RawData, isBinary: boolean) => {

@@ -11,8 +11,8 @@
 // set and directory whenever the head changes them.
 //
 // What sminos sends:
-//   - the log plane (`hello`, `events`, `rejected`), relayed to RL1 (log-relay.ts); an `events` upload waits while the
-//     hub link's socket holds its soft cap, and with it every frame behind it on the one stream (server.ts);
+//   - the log plane (`hello`, `events`, `rejected`), relayed to RL1 (log-relay.ts); signed uploads wait for the hub
+//     link's room in the relay's own capped queue, never holding the frames behind them;
 //   - the session lane, which stops here and never reaches the hub: `member` and `restated` (members.ts), `pending`
 //     (M3's notify counts), and `session` messages of every DX4 kind: a `machine` presence gives its project's
 //     checkouts, a sub-less `host` is a to-human event (M3's `wrote`, once per `(writer, seq)`, durably), and every

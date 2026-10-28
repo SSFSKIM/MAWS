@@ -13,8 +13,9 @@
 // the token checks out and closes on a wrong one. One connection is served at a time; a new one that checks out
 // replaces the last. Every frame after the hello is handed on in order, each awaited before the next is handed on, so a
 // frame's effects (an upload's signature) are done before the frame behind it is seen. Lines waiting their turn hold at
-// most READ_AHEAD_BYTES: past it the socket is not read until they drain, so a frame held (an upload waiting for the
-// hub link to have room, log-relay.ts) holds sminos's lane behind it, which paces itself and keeps its backlog on disk.
+// most READ_AHEAD_BYTES: past it the socket is not read until they drain, so an endpoint slower than sminos (signing a
+// long backlog) holds sminos's lane, which paces itself and keeps its backlog on disk. Nothing here waits on the hub:
+// the uplink queues on its own (log-relay.ts).
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
 import * as fs from 'node:fs';
 import { createServer, type Server, type Socket } from 'node:net';
@@ -30,8 +31,8 @@ export const LINE_LIMIT = 1024 * 1024;
 /** How long a connection has to send its hello. */
 export const HELLO_MS = 10_000;
 /**
- * The lines read and not yet handed on, at most (one read past it at most): sminos's own read-ahead (`UPLOAD_AHEAD`, one
- * upload pass), so a held upload holds the endpoint to that while sminos's lane holds the rest.
+ * The lines read and not yet handed on, at most (one read past it at most): one of sminos's upload passes
+ * (`UPLOAD_AHEAD`), while sminos's lane holds the rest.
  */
 export const READ_AHEAD_BYTES = 4 * 1024 * 1024;
 /** What a connection may hold unread by sminos before it is given up (sminos stopped reading). */

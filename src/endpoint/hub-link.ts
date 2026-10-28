@@ -17,12 +17,15 @@
 // to learn of a change: a frame of a kind this endpoint doesn't know is ignored with one log line per kind, and the
 // welcome is read for the fields it needs. Nothing logs a credential or a frame's body.
 //
-// The socket's send buffer (send-buffer.ts) is shared by RL1's own frames and every relayed channel, so it applies
-// back-pressure rather than closing the socket: the relayed channels' streams wait while it holds HUB_SEND_LIMITS's soft
-// cap unsent (`writable`), and go on as it drains; RL1's frames and the channels' control messages never wait. Past the
-// hard cap, which counts only channel data (what devices behind the relay can make the endpoint hold), the channel whose
-// frame would pass it is closed, and the connection and its other channels are kept. A hub that reads nothing is not
-// waited on: it answers no `hb`, so the connection is given up within two heartbeats, and what it held is let go.
+// The socket's send buffer (send-buffer.ts) carries every frame the link sends, its pongs among them, and is shared by
+// RL1's own frames and every relayed channel, so it applies back-pressure first: the relayed channels' streams and the
+// log plane's uploads wait while it holds HUB_SEND_LIMITS's soft cap (`writable`), and go on as it drains; RL1's control
+// and the channels' control messages never wait. Past the budget, which counts only channel data (what devices behind
+// the relay can make the endpoint hold), the channel whose frame would pass it is closed, the connection and its other
+// channels kept. A hub that reads nothing costs its connection, given up as dead and opened again on the backoff: once
+// what the socket holds would pass the ceiling, whatever sent it, or once it has held bytes and written no frame for the
+// stall bound. That is read from the socket's own writes, not from what the hub sends: a hub's `hb-ack` says nothing of
+// whether it read anything else.
 import {
   CHANNEL_CLOSE,
   CHANNEL_HEADER_BYTES,
@@ -94,12 +97,14 @@ export const OPEN_MS = 15_000;
 /** The heartbeat a welcome that names none is kept at: the deployed hub's. */
 export const DEFAULT_HEARTBEAT_MS = 15_000;
 /**
- * The socket's send buffer. Relayed streams wait at 1 MiB unsent, as on a direct socket (direct-listener.ts says why).
- * Channel data holds at most 32 MiB: past the soft cap each streaming channel adds at most its stream window and one
- * message, about half a MiB with a snapshot page, so two dozen streaming at once still leave room for the answers to
- * their requests; only answers that outrun the uplink for long reach it.
+ * The socket's send buffer. Relayed streams and uploads wait at 1 MiB held, as on a direct socket (direct-listener.ts
+ * says why). Channel data holds at most 32 MiB: past the soft cap each streaming channel adds at most its stream window
+ * and one message, about half a MiB with a snapshot page, so two dozen streaming at once still leave room for the
+ * answers to their requests. Everything held is at most 40 MiB: the channels' budget and 8 MiB for RL1's own frames,
+ * which are small (a heartbeat, a listing, a notify) and an upload past the soft cap. A frame (1 MiB at most) not
+ * written in 30 s is under 35 KiB a second: a stalled hub, not a slow uplink.
  */
-export const HUB_SEND_LIMITS: SendLimits = { soft: 1024 * 1024, hard: 32 * 1024 * 1024 };
+export const HUB_SEND_LIMITS: SendLimits = { soft: 1024 * 1024, budget: 32 * 1024 * 1024, ceiling: 40 * 1024 * 1024, stallMs: 30_000 };
 /** The most of a refused upgrade's body read for its verdict. */
 const VERDICT_BYTES = 64 * 1024;
 
@@ -254,15 +259,18 @@ export class HubLink {
     return this.#attempt?.buffer.buffered ?? 0;
   }
 
-  /** Resolves once the connection's socket holds less than its soft cap unsent, or at once with none: what relayed streams wait on. */
-  writable(): Promise<void> {
-    return this.#attempt?.buffer.writable() ?? Promise.resolve();
+  /**
+   * Resolves once the connection's socket holds less than its soft cap, or at once with none, or when `signal` aborts:
+   * what relayed streams and the log plane's uploads wait on.
+   */
+  writable(signal?: AbortSignal): Promise<void> {
+    return this.#attempt?.buffer.writable(signal) ?? Promise.resolve();
   }
 
   /**
    * Sends `payload` on an open channel; false while it isn't open on the welcomed connection, and when the frame would
-   * take the socket's channel data past its hard cap: the channel is then closed (its handler told, its device opening
-   * it again), the connection and its other channels kept.
+   * take the socket's channel data past its budget: the channel is then closed (its handler told, its device opening it
+   * again), the connection and its other channels kept.
    */
   sendChannel(channel: number, payload: Uint8Array): boolean {
     if (CHANNEL_HEADER_BYTES + payload.length > RL1_MESSAGE_LIMIT) throw new RangeError(`a channel's message is at most ${RL1_MESSAGE_LIMIT - CHANNEL_HEADER_BYTES} bytes`);
@@ -273,7 +281,8 @@ export class HubLink {
       attempt.lastSent = 'channel';
       return true;
     }
-    this.#options.log(`endpoint: the hub's socket holds ${attempt.buffer.buffered} bytes unsent, and relayed channel ${channel}'s frame would take it past its hard cap; the channel is closed`);
+    if (attempt.buffer.ended) return false;
+    this.#options.log(`endpoint: the hub's socket holds ${attempt.buffer.buffered} bytes, and relayed channel ${channel}'s frame would take the channels' data past its budget; the channel is closed`);
     this.closeChannel(channel);
     this.#call(() => this.#channels?.closed(channel, 'closed'));
     return false;
@@ -305,6 +314,8 @@ export class HubLink {
         maxPayload: RL1_MESSAGE_LIMIT,
         perMessageDeflate: false,
         followRedirects: false,
+        // Its pongs go through the send buffer, counted (below).
+        autoPong: false,
       });
     } catch (error) {
       // An address the socket can't be opened to at all (the enrollment's hub, malformed): tried again on the backoff.
@@ -313,6 +324,7 @@ export class HubLink {
       this.#retry = setTimeout(() => this.#connect(), wait);
       return;
     }
+    const limits = this.#options.sendLimits ?? HUB_SEND_LIMITS;
     const attempt: Attempt = {
       socket,
       ending: null,
@@ -324,7 +336,13 @@ export class HubLink {
       unacked: 0,
       lastSent: 'hello',
       parts: new PartAssembler({ now: this.#now }),
-      buffer: new SendBuffer(socket, this.#options.sendLimits ?? HUB_SEND_LIMITS),
+      buffer: new SendBuffer(socket, limits, (why) => {
+        const held = attempt.buffer.buffered;
+        this.#end(attempt, {
+          kind: 'dead',
+          why: why === 'stalled' ? `its socket has held ${held} bytes and written nothing for ${limits.stallMs} ms` : `the hub read too little of the ${held} bytes its socket holds, and a frame would take them past its ceiling`,
+        });
+      }),
       channels: new Set(),
       timers: [],
       beat: null,
@@ -336,6 +354,7 @@ export class HubLink {
       this.#sendText(attempt, { t: 'hello', protocol: RL1_PROTOCOL, build: this.#options.build, machine: target.ref, ...(this.#lastGeneration > 0 ? { leaseGeneration: this.#lastGeneration } : {}) });
     });
     socket.on('message', (data, isBinary) => this.#message(attempt, data, isBinary));
+    socket.on('ping', (data: Buffer) => attempt.buffer.pong(data));
     // A failed upgrade or a broken socket: its close follows, and decides.
     socket.on('error', (error) => {
       if (attempt.ending === null) attempt.ending = { kind: 'failed', why: error.message };
@@ -543,7 +562,7 @@ export class HubLink {
   #sendText(attempt: Attempt, frame: { t: string } & Record<string, unknown>): boolean {
     if (attempt.socket.readyState !== WebSocket.OPEN) return false;
     try {
-      for (const line of toWire(frame, RL1_MESSAGE_LIMIT)) attempt.buffer.send(line, { binary: false, capped: false });
+      for (const line of toWire(frame, RL1_MESSAGE_LIMIT)) if (!attempt.buffer.send(line, { binary: false })) return false;
       attempt.lastSent = frame.t;
       return true;
     } catch (error) {
@@ -552,10 +571,9 @@ export class HubLink {
     }
   }
 
-  /** A channel's `open` or `close`: control, which no cap holds. */
+  /** A channel's `open` or `close`: control, outside the channels' budget. */
   #sendBinary(attempt: Attempt, bytes: Uint8Array): boolean {
-    if (attempt.socket.readyState !== WebSocket.OPEN) return false;
-    attempt.buffer.send(bytes, { binary: true, capped: false });
+    if (attempt.socket.readyState !== WebSocket.OPEN || !attempt.buffer.send(bytes, { binary: true })) return false;
     attempt.lastSent = 'channel';
     return true;
   }

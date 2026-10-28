@@ -348,17 +348,17 @@ describe('the channel multiplex', () => {
 });
 
 describe('the socket’s send buffer, against a hub that stops reading', () => {
-  const limits: SendLimits = { soft: 256 * 1024, hard: 4 * 1024 * 1024 };
+  const limits: SendLimits = { soft: 256 * 1024, budget: 4 * 1024 * 1024, ceiling: 6 * 1024 * 1024, stallMs: 60_000 };
   const payload = new Uint8Array(128 * 1024);
   /** What a frame on the multiplex is to the hub: its type and channel. */
   const channelFrames = (hub: FakeHub, conn = 0) =>
     hub.received.filter((r): r is { conn: number; binary: Buffer } => 'binary' in r && r.conn === conn).map((r) => decodeChannelFrame(r.binary)!);
 
   /** A welcomed link with channels 1 and 2 open, its hub's socket paused (reading nothing), and the channels' events. */
-  async function stalled(heartbeatMs = 60_000) {
+  async function stalled(options: { heartbeatMs?: number; limits?: Partial<SendLimits> } = {}) {
     const hub = await fakeHub();
-    hub.heartbeatMs = heartbeatMs;
-    const { link } = linkTo(hub, { sendLimits: limits });
+    hub.heartbeatMs = options.heartbeatMs ?? 60_000;
+    const { link } = linkTo(hub, { sendLimits: { ...limits, ...options.limits } });
     const events: string[] = [];
     link.setChannels({ opened: (channel) => void events.push(`open ${channel}`), data: () => {}, closed: (channel, reason) => void events.push(`close ${channel} ${reason}`) });
     link.start();
@@ -370,12 +370,21 @@ describe('the socket’s send buffer, against a hub that stops reading', () => {
     return { hub, link, events };
   }
 
+  /** Channel 1's frames until the socket holds the soft cap and the kernel, its buffers full, takes no more. */
+  async function fill(link: HubLink): Promise<number> {
+    let sent = 0;
+    for (let round = 0; round < 64; round++) {
+      while (link.buffered < limits.soft && sent < 512) if (link.sendChannel(1, payload)) sent++;
+      await new Promise((resolve) => setImmediate(resolve));
+      if (link.buffered >= limits.soft) return sent;
+    }
+    throw new Error('the socket never held its soft cap');
+  }
+
   it('holds the relayed streams while the socket is over its soft cap, sends RL1 control at once, and lets them go on once the hub reads', async () => {
     const { hub, link } = await stalled();
     // What a relayed stream does: a frame while the link is writable. Past the kernel's buffers the socket holds them.
-    let sent = 0;
-    while (link.buffered < limits.soft && sent < 512) if (link.sendChannel(1, payload)) sent++;
-    expect(link.buffered).toBeGreaterThanOrEqual(limits.soft);
+    const sent = await fill(link);
     let writable = false;
     const drained = link.writable().then(() => void (writable = true));
     // RL1's control waits on nothing.
@@ -390,14 +399,14 @@ describe('the socket’s send buffer, against a hub that stops reading', () => {
     expect(link.sendChannel(1, payload)).toBe(true);
   });
 
-  it('closes the relayed channel whose send would take the socket past its hard cap, and keeps the connection and its other channels', async () => {
+  it('closes the relayed channel whose send would take the channels’ data past its budget, and keeps the connection and its other channels', async () => {
     const { hub, link, events } = await stalled();
     let sent = 0;
     while (sent < 512 && link.sendChannel(1, payload)) sent++;
     expect(sent).toBeLessThan(512);
-    expect(link.buffered).toBeLessThanOrEqual(limits.hard);
+    expect(link.buffered).toBeLessThanOrEqual(limits.budget!);
     expect(events).toEqual(['open 1', 'open 2', 'close 1 closed']);
-    expect(lines.some((line) => line.includes('relayed channel 1') && line.includes('past its hard cap'))).toBe(true);
+    expect(lines.some((line) => line.includes('relayed channel 1') && line.includes('past its budget'))).toBe(true);
     expect(link.sendChannel(1, payload)).toBe(false);
     hub.current.resume();
     await link.writable();
@@ -408,14 +417,42 @@ describe('the socket’s send buffer, against a hub that stops reading', () => {
     expect(link.generation).toBe(1);
   });
 
-  it('gives up a connection whose hub reads nothing within its heartbeats, letting what it held go', async () => {
-    const { link, events } = await stalled(100);
-    for (let n = 0; n < 512 && link.buffered < limits.soft; n++) link.sendChannel(1, payload);
-    expect(link.buffered).toBeGreaterThanOrEqual(limits.soft);
-    await link.writable();
-    expect(lines.some((line) => line.includes('two heartbeats went unanswered'))).toBe(true);
-    expect(events).toContain('close 1 endpoint-gone');
+  it('gives up a connection once what it holds, whatever sent it, would pass the ceiling: RL1’s own frames too', async () => {
+    const { link } = await stalled();
+    const text = 'n'.repeat(64 * 1024);
+    let peak = 0;
+    for (let n = 0; n < 512 && link.generation === 1; n++) {
+      link.send({ t: 'events', project: 'p1', events: [{ text }] });
+      peak = Math.max(peak, link.buffered);
+    }
+    expect(peak).toBeLessThanOrEqual(limits.ceiling);
+    expect(lines.some((line) => line.includes('past its ceiling'))).toBe(true);
     await until(() => link.generation === 2, 'a new connection');
-    expect(link.buffered).toBeLessThan(limits.soft);
+  });
+
+  it('gives up a connection whose hub reads nothing though it keeps acknowledging heartbeats: no frame written for the stall bound', async () => {
+    const { hub, link } = await stalled({ heartbeatMs: 100, limits: { stallMs: 400 } });
+    const first = hub.current;
+    // Acknowledgements the hub never read a heartbeat for: they keep the heartbeat's own check satisfied.
+    const acks = setInterval(() => first.send(JSON.stringify({ t: 'hb-ack', generation: 1 })), 20);
+    try {
+      await fill(link);
+      await link.writable();
+      expect(lines.some((line) => line.includes('written nothing'))).toBe(true);
+      expect(lines.some((line) => line.includes('heartbeats went unanswered') || line.includes('nothing heard'))).toBe(false);
+    } finally {
+      clearInterval(acks);
+    }
+    await until(() => link.generation === 2, 'a new connection');
+  });
+
+  it('answers the hub’s WebSocket ping through its buffer', async () => {
+    const hub = await fakeHub();
+    const { link } = linkTo(hub, { sendLimits: limits });
+    link.start();
+    await until(() => link.connected, 'the welcome');
+    const pong = new Promise<string>((resolve) => hub.current.once('pong', (data: Buffer) => resolve(data.toString())));
+    hub.current.ping(Buffer.from('are you there'));
+    expect(await pong).toBe('are you there');
   });
 });

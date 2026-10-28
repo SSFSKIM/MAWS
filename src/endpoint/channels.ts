@@ -57,7 +57,7 @@ export interface RemoteChannel {
   send(message: EndpointMessage): boolean;
   /**
    * `send`, resolved once the message is sealed onto the carrier and the carrier has room again (its send buffer under
-   * its soft cap, send-buffer.ts); false: the channel closed first. It never rejects. A subscription's stream goes
+   * its soft cap, send-buffer.ts), or the carrier has ended; false: the channel closed first. It never rejects. A subscription's stream goes
    * through it (stream-window.ts), so the channel's queue, and the socket under it, hold only a window of the stream.
    */
   transmit(message: EndpointMessage): Promise<boolean>;
@@ -196,8 +196,8 @@ class Remote implements RemoteChannel {
 export type CarrierOut = {
   send(bytes: Uint8Array): void;
   close(reason: string): void;
-  /** Resolves once the carrier has room again (under its soft cap). */
-  writable?(): Promise<void>;
+  /** Resolves once the carrier has room again (under its soft cap), or `signal` aborts (the wait unregistered). */
+  writable?(signal: AbortSignal): Promise<void>;
   /** The bytes it holds unsent. */
   buffered?(): number;
 };
@@ -208,6 +208,8 @@ export class CarrierDuplex implements ByteDuplex {
   readonly #bytes: Array<(bytes: Uint8Array) => void> = [];
   readonly #ends: Array<(reason: string) => void> = [];
   readonly #waiting: Uint8Array[] = [];
+  /** Aborted at the carrier's end: every wait for room it still has is let go. */
+  readonly #ending = new AbortController();
   #ended: string | null = null;
 
   constructor(out: CarrierOut) {
@@ -225,13 +227,14 @@ export class CarrierDuplex implements ByteDuplex {
 
   /** Resolves once the carrier has room again, or has ended: what a channel's stream waits on (`transmit`). */
   writable(): Promise<void> {
-    return this.#ended === null ? (this.#out.writable?.() ?? Promise.resolve()) : Promise.resolve();
+    return this.#ended === null ? (this.#out.writable?.(this.#ending.signal) ?? Promise.resolve()) : Promise.resolve();
   }
 
   /** Closes the carrier; what reads it (a handshake waiting for its next message) learns it ended. */
   close(reason: string): void {
     if (this.#ended !== null) return;
     this.#ended = reason;
+    this.#ending.abort();
     this.#out.close(reason);
     for (const listener of this.#ends) listener(reason);
   }
@@ -256,6 +259,7 @@ export class CarrierDuplex implements ByteDuplex {
   end(reason: string): void {
     if (this.#ended !== null) return;
     this.#ended = reason;
+    this.#ending.abort();
     for (const listener of this.#ends) listener(reason);
   }
 }
@@ -365,7 +369,7 @@ export class Channels {
    * The hub's multiplex as carriers: each channel the hub opens, numbered by it, is one (`link` is the hub link). They
    * share the link's socket, so each has room while the link does.
    */
-  relay(link: { sendChannel(channel: number, payload: Uint8Array): boolean; closeChannel(channel: number): void; writable?(): Promise<void> }): ChannelHandler {
+  relay(link: { sendChannel(channel: number, payload: Uint8Array): boolean; closeChannel(channel: number): void; writable?(signal?: AbortSignal): Promise<void> }): ChannelHandler {
     const carriers = new Map<number, CarrierDuplex>();
     return {
       opened: (number, payload) => {
@@ -382,7 +386,7 @@ export class Channels {
             carriers.delete(number);
             link.closeChannel(number);
           },
-          writable: () => link.writable?.() ?? Promise.resolve(),
+          writable: (signal) => link.writable?.(signal) ?? Promise.resolve(),
         });
         carriers.set(number, io);
         void this.accept('relayed', io, { key: `relayed:${number}` });

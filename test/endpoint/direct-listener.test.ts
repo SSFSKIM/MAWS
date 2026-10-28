@@ -3,7 +3,7 @@
 // ever bound and no firewall prompt is raised), advertises them, rebinds when they change, reads nothing but the
 // handshake before it verifies, and answers past its rate limit `busy`. Its send buffer, against a device that stops
 // reading: the channel's stream held at the soft cap and let go on when the device reads, the connection ended past the
-// hard cap or after bytes held with none written, and no WebSocket pong the caps don't count.
+// ceiling or after bytes held with no frame written, and no WebSocket pong the caps don't count.
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { NetworkInterfaceInfo } from 'node:os';
@@ -330,7 +330,7 @@ describe('the send buffer, against a device that stops reading', () => {
   const closeOf = (remote: RemoteChannel) => new Promise<string>((resolve) => remote.onClose(resolve));
 
   it('holds the channel’s stream at the soft cap while the device reads nothing, and lets it go on, in order, once it reads', async () => {
-    const limits: SendLimits = { soft: 256 * 1024, hard: 64 * 1024 * 1024, stallMs: 60_000 };
+    const limits: SendLimits = { soft: 256 * 1024, ceiling: 64 * 1024 * 1024, stallMs: 60_000 };
     const f = await fixture({ sendLimits: limits });
     const { channel, socket, io, remote } = await connected(f);
     const got: number[] = [];
@@ -353,8 +353,8 @@ describe('the send buffer, against a device that stops reading', () => {
     expect(seen.peak).toBeLessThanOrEqual(limits.soft + STREAM_WINDOW_BYTES + 2 * body.length);
   });
 
-  it('ends the connection once what it holds unread would pass the hard cap, having held no more than it', async () => {
-    const limits: SendLimits = { soft: 64 * 1024, hard: 2 * 1024 * 1024, stallMs: 60_000 };
+  it('ends the connection once what it holds unread would pass its ceiling, having held no more than it', async () => {
+    const limits: SendLimits = { soft: 64 * 1024, ceiling: 2 * 1024 * 1024, stallMs: 60_000 };
     const f = await fixture({ sendLimits: limits });
     const { socket, io, remote } = await connected(f);
     socket.pause();
@@ -370,12 +370,12 @@ describe('the send buffer, against a device that stops reading', () => {
     pump();
     expect(await closed).toBe('overflow');
     expect(sent).toBeLessThan(most);
-    expect(seen.peak).toBeLessThanOrEqual(limits.hard);
-    expect(f.log.some((line) => line.includes('past its hard cap'))).toBe(true);
+    expect(seen.peak).toBeLessThanOrEqual(limits.ceiling);
+    expect(f.log.some((line) => line.includes('past its ceiling'))).toBe(true);
   });
 
-  it('ends the connection when it holds bytes and has written none of them for its stall bound', async () => {
-    const limits: SendLimits = { soft: 64 * 1024, hard: 64 * 1024 * 1024, stallMs: 200 };
+  it('ends the connection when it holds bytes and has written no frame for its stall bound', async () => {
+    const limits: SendLimits = { soft: 64 * 1024, ceiling: 64 * 1024 * 1024, stallMs: 200 };
     const f = await fixture({ sendLimits: limits });
     const { socket, io, remote } = await connected(f);
     socket.pause();
@@ -389,7 +389,7 @@ describe('the send buffer, against a device that stops reading', () => {
     peakOf(io, pump);
     pump();
     expect(await closed).toBe('stalled');
-    expect(f.log.some((line) => line.includes('wrote none of it'))).toBe(true);
+    expect(f.log.some((line) => line.includes('written nothing'))).toBe(true);
   });
 
   it('answers no WebSocket ping: every byte a connection is sent is the channel’s, which the caps count', async () => {

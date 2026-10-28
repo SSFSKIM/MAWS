@@ -10,6 +10,14 @@
 // logged, never signed again. An event with no upload form is refused `malformed`; one under a writer not this
 // machine's current name, `writer-not-yours`.
 //
+// The uplink. Signed uploads wait in a queue of at most UPLINK_BYTES for the hub link's socket to have room (its soft
+// cap, send-buffer.ts), and go up in order; RL10 is read on meanwhile, so nothing the endpoint answers locally (`query`,
+// `words?`, `rpc-result`) waits on the uplink. An upload that would take the queue past its cap is dropped: its events
+// are in the ledger, and once the queue has drained each writer is asked again from sminos (`resend`) from the first
+// position dropped, rebuilt byte for byte from the ledger. While RL1 is down the queue is let go: each RL1 welcome checks
+// the hub's `have` against the ledger (below) and asks for the rest. The log plane is resumable throughout (the hub, too,
+// answers a gap with its own `resend`), so a drop costs a resend, never an event.
+//
 // Down. An arriving event goes to sminos only verified, wrapped `{event, signer, owners?}`:
 //   - under one of this machine's own writers (its current name, or a former one `machineNames` binds to its ref), only
 //     as an echo of what the endpoint signed at that `(project, writer, seq)`, the same upload form and signature: this
@@ -80,6 +88,13 @@ type Judged =
   | { spent: SpentReason; reason: Rejected['reason']; message: string }
   | { hold: string };
 
+/**
+ * The signed uploads waiting for the hub link to have room, at most (one upload past it while the queue is empty): one
+ * of sminos's upload passes (`UPLOAD_AHEAD`) and as much again, so a pass that lands while the last still drains waits
+ * whole.
+ */
+export const UPLINK_BYTES = 8 * 1024 * 1024;
+
 /** How many arriving events the relay holds at most, and how long each, while their verdict waits on the head. */
 export const HOLD_MAX = 1000;
 export const HOLD_MS = 3_600_000;
@@ -92,7 +107,7 @@ export type RelayContext = {
   ledger: SignatureLedger;
   index: InboundIndex;
   legacy: LegacyKey;
-  /** `writable`: resolves once the hub link's socket has room (hub-link.ts), which an upload waits for. */
+  /** `writable`: resolves once the hub link's socket has room (hub-link.ts), which the uplink waits for. */
   hub: { openProject(project: string, handler: LogProject): () => void; send(frame: Frame): boolean; writable?(): Promise<void> };
   /** A frame down RL10 to sminos (dropped when it isn't connected). */
   toSminos(frame: Frame): void;
@@ -119,6 +134,12 @@ export class LogRelay {
    * upload at a time, across connections (a replaced connection's upload may still be signing when the new one resends).
    */
   readonly #signing = new Map<string, Promise<unknown>>();
+  /** Signed uploads waiting for the hub link's room, in order, and their bytes. */
+  readonly #uplink: Array<{ frame: Frame; bytes: number }> = [];
+  #uplinkBytes = 0;
+  #draining = false;
+  /** The first position dropped since the uplink last drained, by project, then writer. */
+  readonly #dropped = new Map<string, Map<string, number>>();
   /** The arriving events held for a head that can judge them, by project, then `writer\nseq`, in arrival order. */
   readonly #held = new Map<string, Map<string, { event: unknown; since: number }>>();
 
@@ -164,10 +185,56 @@ export class LogRelay {
         this.#ctx.toSminos({ t: 'refused', project, refusal: { reason: signed.reason, ...(at ?? {}), message: signed.message } });
       }
     }
-    if (out.length === 0) return;
-    // The hub link's socket holding its soft cap, the upload waits, and RL10's next frames behind it (server.ts).
-    await this.#ctx.hub.writable?.();
-    this.#ctx.hub.send({ t: 'events', project, events: out });
+    if (out.length > 0) this.#upload({ t: 'events', project, events: out }, project, out);
+  }
+
+  /** The signed uploads' bytes waiting for the hub link's room. */
+  get uplinkQueued(): number {
+    return this.#uplinkBytes;
+  }
+
+  /** An upload to the uplink queue, or, past its cap, dropped and owed again from sminos. */
+  #upload(frame: Frame, project: string, events: Record<string, unknown>[]): void {
+    const bytes = Buffer.byteLength(JSON.stringify(frame));
+    if (this.#uplink.length > 0 && this.#uplinkBytes + bytes > UPLINK_BYTES) {
+      const owed = this.#dropped.get(project) ?? new Map<string, number>();
+      if (this.#dropped.size === 0) this.#ctx.log(`endpoint: the hub is taking uploads slower than sminos sends them; uploads past ${UPLINK_BYTES} bytes are dropped and asked again from sminos once the uplink drains`);
+      this.#dropped.set(project, owed);
+      for (const e of events) {
+        const { writer, seq } = e as { writer: string; seq: number };
+        owed.set(writer, Math.min(owed.get(writer) ?? seq, seq));
+      }
+      return;
+    }
+    this.#uplink.push({ frame, bytes });
+    this.#uplinkBytes += bytes;
+    void this.#drain();
+  }
+
+  /** Sends the queue up as the hub link has room; once it is empty, asks sminos again for what was dropped. */
+  async #drain(): Promise<void> {
+    if (this.#draining) return;
+    this.#draining = true;
+    try {
+      while (this.#uplink.length > 0) {
+        await this.#ctx.hub.writable?.();
+        const next = this.#uplink.shift()!;
+        this.#uplinkBytes -= next.bytes;
+        if (!this.#ctx.hub.send(next.frame)) {
+          // RL1 is down: the next welcome checks every project's `have` against the ledger and asks sminos for the
+          // rest, so nothing queued or dropped is asked again now, only to be lost the same way.
+          this.#uplink.length = 0;
+          this.#uplinkBytes = 0;
+          this.#dropped.clear();
+        }
+      }
+    } finally {
+      this.#draining = false;
+    }
+    for (const [project, owed] of this.#dropped) {
+      for (const [writer, from] of owed) this.#ctx.toSminos({ t: 'resend', project, writer, from });
+    }
+    this.#dropped.clear();
   }
 
   /** sminos's `rejected` (an event it refused on import) on to the hub. */

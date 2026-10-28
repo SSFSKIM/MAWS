@@ -1,95 +1,175 @@
-// A carrier's send buffer (O10, after M8; RL §4.4): what the endpoint handed a WebSocket and the socket hasn't yet
-// written to the kernel, which a peer that stops reading would otherwise grow without limit. The direct listener keeps
-// one per device socket, the hub link one per RL1 connection.
+// A carrier's send buffer (O10, after M8; RL §4.4): what the endpoint handed a WebSocket and the peer hasn't yet taken,
+// which a peer that stops reading would otherwise grow without limit. The direct listener keeps one per device socket,
+// the hub link one per RL1 connection.
+//
+// Every frame the endpoint sends on the socket goes through it, in order, a WebSocket pong among them (the carriers
+// answer pings here, not in `ws`, so no byte escapes the count). It hands the socket one frame at a time, the next once
+// the kernel took the last: what waits is held here, counted, and each frame written is progress the buffer sees,
+// however the socket would have batched queued writes (a batch's callbacks all wait for its last byte).
 //
 // Under the soft cap the carrier is writable: a channel's stream (stream-window.ts, through `RemoteChannel.transmit`)
-// waits while the buffer is at or over it, and goes on once it drains under it. Nothing else waits: every send goes into
-// the socket at once, in order, so control messages are never held behind the stream. A capped send (what a peer can
-// make the endpoint hold: a channel's frames) is refused once the capped bytes held would pass the hard cap, and the
-// carrier decides what that ends. Each is counted with its frame's largest header, so a socket whose every send is
-// capped holds no more than the hard cap. A carrier may also bound how long bytes are held with none written
-// (`stallMs`): a peer that reads nothing, while its own traffic keeps its channel alive, is ended then.
+// and the log plane's uploads (rl10/log-relay.ts) wait while the buffer is at or over it, and go on once it drains
+// under it. Nothing else waits. A capped send (a relayed channel's frame on the hub link) is refused once the capped
+// bytes held would pass the budget, and the carrier decides what that ends. Past the ceiling, which counts every byte
+// held, and when bytes are held with no frame written for the stall bound, the buffer ends and the carrier ends its
+// socket: what a peer that reads nothing costs is its connection, whatever else it keeps sending.
 import type WebSocket from 'ws';
 
 export type SendLimits = {
-  /** At or over this many bytes unsent, the carrier's stream waits. */
+  /** At or over this many bytes held, the carrier's streams and uploads wait. */
   soft: number;
-  /** Capped sends hold at most this many bytes unsent; one that would pass it is refused. */
-  hard: number;
-  /** Bytes held with none of them written for this long are a stall; unset, there is no bound. */
-  stallMs?: number;
+  /** Every byte held, at most: a send that would pass it ends the buffer (`overflow`). */
+  ceiling: number;
+  /** Capped sends' bytes held, at most: a capped send that would pass it is refused; unset, the ceiling alone. */
+  budget?: number;
+  /** Bytes held with no frame written for this long end the buffer (`stalled`). */
+  stallMs: number;
 };
+
+export type SendEnding = 'overflow' | 'stalled';
 
 /** A WebSocket frame's header at most (RFC 6455 §5.2: two bytes, a 64-bit length and a mask). */
 const FRAME_HEADER_MAX = 14;
 
+type Held = { data: Uint8Array | string; binary: boolean; pong: boolean; capped: boolean; size: number };
+
 export class SendBuffer {
   readonly #socket: WebSocket;
   readonly #limits: SendLimits;
-  readonly #stalled: () => void;
-  readonly #waiting: Array<() => void> = [];
-  /** Capped bytes sent and not yet written. */
+  readonly #ended: (why: SendEnding) => void;
+  readonly #held: Held[] = [];
+  readonly #waiting = new Set<() => void>();
+  /** Bytes held here, not yet handed to the socket. */
+  #queued = 0;
+  /** Capped bytes held here, or handed to the socket and not yet written. */
   #capped = 0;
-  #closed = false;
-  /** When the socket last wrote a send, or began holding bytes. */
+  #writing = false;
+  #over = false;
+  /** When the socket last wrote a frame, or began holding bytes. */
   #wroteAt = 0;
   #timer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(socket: WebSocket, limits: SendLimits, stalled: () => void = () => {}) {
+  constructor(socket: WebSocket, limits: SendLimits, ended: (why: SendEnding) => void) {
     this.#socket = socket;
     this.#limits = limits;
-    this.#stalled = stalled;
-    socket.once('close', () => {
-      this.#closed = true;
-      if (this.#timer !== null) clearTimeout(this.#timer);
-      this.#timer = null;
-      this.#release();
-    });
+    this.#ended = ended;
+    socket.once('close', () => this.#stop());
   }
 
-  /** Bytes handed to the socket and not yet written, whatever sent them. */
+  /** Every byte held: here, and handed to the socket and not yet written. */
   get buffered(): number {
-    return this.#socket.bufferedAmount;
+    return this.#queued + this.#socket.bufferedAmount;
   }
 
-  /** Sends `data` now; a capped send that would take the capped bytes held past the hard cap is refused (false), unsent. */
-  send(data: Uint8Array | string, options: { binary: boolean; capped: boolean }): boolean {
-    const cost = options.capped ? (typeof data === 'string' ? Buffer.byteLength(data) : data.length) + FRAME_HEADER_MAX : 0;
-    if (this.#capped + cost > this.#limits.hard) return false;
-    this.#capped += cost;
-    this.#socket.send(data, { binary: options.binary }, () => {
-      this.#capped -= cost;
-      this.#wroteAt = Date.now();
-      if (this.buffered < this.#limits.soft) this.#release();
+  /** The buffer ended (past its ceiling, stalled, or its socket closed): it sends nothing more. */
+  get ended(): boolean {
+    return this.#over;
+  }
+
+  /** The `writable()` waits registered now. */
+  get waits(): number {
+    return this.#waiting.size;
+  }
+
+  /**
+   * Sends `data` after everything sent before it. False when refused: a capped send past the budget (the buffer goes
+   * on), or a send past the ceiling or after the end (the buffer has ended).
+   */
+  send(data: Uint8Array | string, options: { binary: boolean; capped?: boolean }): boolean {
+    return this.#hold({ data, binary: options.binary, pong: false, capped: options.capped === true });
+  }
+
+  /** A pong for the peer's ping, held and counted as any frame. */
+  pong(data: Uint8Array): void {
+    this.#hold({ data, binary: true, pong: true, capped: false });
+  }
+
+  /** Resolves once the buffer holds less than the soft cap, or has ended, or `signal` aborts (the wait unregistered). */
+  writable(signal?: AbortSignal): Promise<void> {
+    if (this.#over || signal?.aborted === true || this.buffered < this.#limits.soft) return Promise.resolve();
+    return new Promise((resolve) => {
+      const done = () => {
+        this.#waiting.delete(done);
+        signal?.removeEventListener('abort', done);
+        resolve();
+      };
+      this.#waiting.add(done);
+      signal?.addEventListener('abort', done, { once: true });
     });
-    if (this.buffered > 0) this.#arm();
+  }
+
+  #hold(item: Omit<Held, 'size'>): boolean {
+    if (this.#over) return false;
+    const size = (typeof item.data === 'string' ? Buffer.byteLength(item.data) : item.data.length) + FRAME_HEADER_MAX;
+    if (item.capped && this.#capped + size > (this.#limits.budget ?? Infinity)) return false;
+    if (this.buffered + size > this.#limits.ceiling) {
+      this.#end('overflow');
+      return false;
+    }
+    this.#held.push({ ...item, size });
+    this.#queued += size;
+    if (item.capped) this.#capped += size;
+    this.#write();
+    this.#arm();
     return true;
   }
 
-  /** Resolves once the socket holds less than the soft cap unsent, or has closed. */
-  writable(): Promise<void> {
-    if (this.#closed || this.buffered < this.#limits.soft) return Promise.resolve();
-    return new Promise((resolve) => this.#waiting.push(resolve));
+  /** Hands the socket the next frame, once it wrote the last. */
+  #write(): void {
+    if (this.#writing || this.#over || this.#socket.readyState !== this.#socket.OPEN) return;
+    const item = this.#held.shift();
+    if (item === undefined) return;
+    this.#queued -= item.size;
+    this.#writing = true;
+    const written = () => {
+      this.#writing = false;
+      if (item.capped) this.#capped -= item.size;
+      this.#wroteAt = Date.now();
+      if (this.buffered < this.#limits.soft) this.#release();
+      this.#write();
+    };
+    if (item.pong) this.#socket.pong(item.data, undefined, written);
+    else this.#socket.send(item.data, { binary: item.binary }, written);
   }
 
   #release(): void {
-    for (const resolve of this.#waiting.splice(0)) resolve();
+    for (const done of [...this.#waiting]) done();
+  }
+
+  #holding(): boolean {
+    return this.#writing || this.#held.length > 0 || this.#socket.bufferedAmount > 0;
   }
 
   #arm(): void {
-    const ms = this.#limits.stallMs;
-    if (ms === undefined || this.#timer !== null || this.#closed) return;
+    if (this.#timer !== null || this.#over || !this.#holding()) return;
     this.#wroteAt = Date.now();
-    this.#timer = setTimeout(() => this.#check(ms), ms);
+    this.#timer = setTimeout(() => this.#check(), this.#limits.stallMs);
     this.#timer.unref?.();
   }
 
-  #check(ms: number): void {
+  #check(): void {
     this.#timer = null;
-    if (this.#closed || this.buffered === 0) return;
+    if (this.#over || !this.#holding()) return;
     const idle = Date.now() - this.#wroteAt;
-    if (idle >= ms) return this.#stalled();
-    this.#timer = setTimeout(() => this.#check(ms), ms - idle);
+    if (idle >= this.#limits.stallMs) return this.#end('stalled');
+    this.#timer = setTimeout(() => this.#check(), this.#limits.stallMs - idle);
     this.#timer.unref?.();
+  }
+
+  /** Ends the buffer: the carrier hears why while what it held is still counted, then everything held is let go. */
+  #end(why: SendEnding): void {
+    if (this.#over) return;
+    this.#over = true;
+    this.#ended(why);
+    this.#stop();
+  }
+
+  #stop(): void {
+    this.#over = true;
+    if (this.#timer !== null) clearTimeout(this.#timer);
+    this.#timer = null;
+    this.#held.length = 0;
+    this.#queued = 0;
+    this.#release();
   }
 }
