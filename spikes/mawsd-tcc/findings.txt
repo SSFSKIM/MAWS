@@ -1,0 +1,171 @@
+# The TCC probe's record (spikes/mawsd-tcc/README.md); the verdict and the decision it implies go to the O2 document's Surprises.
+{
+  "facts": {
+    "when": "2026-10-28T00:04:16.749Z",
+    "macos": "ProductName:\t\tmacOS \u00b7 ProductVersion:\t\t26.6.2 \u00b7 BuildVersion:\t\t25G83",
+    "model": "MacBookPro18,4",
+    "app": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-ac26b9fb7eb470a43/dist/mac-arm64/MAWS.app",
+    "bundleId": "dev.maws.app",
+    "signature": [
+      "Identifier=Electron",
+      "Format=app bundle with Mach-O thin (arm64)",
+      "Signature=adhoc",
+      "TeamIdentifier=not set"
+    ]
+  },
+  "stageA": {
+    "pid": 16866,
+    "ppid": 1,
+    "execPath": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-ac26b9fb7eb470a43/dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS",
+    "rows": [
+      {
+        "dir": "/Users/new/Documents",
+        "status": 0,
+        "error": "",
+        "entries": 62,
+        "blockedMs": 1645
+      },
+      {
+        "dir": "/Users/new/Desktop",
+        "status": 0,
+        "error": "",
+        "entries": 24,
+        "blockedMs": 1095
+      }
+    ],
+    "operator": {
+      "dialog": "y",
+      "named": "maws, requested access to documents and something else",
+      "answered": "allow",
+      "settings": "desktop and documents"
+    },
+    "operatorBefore": {
+      "settings": "MAWS listed with Documents only",
+      "source": "the owner's answer after the run, relayed by the architect, 2026-10-28; added by hand by O2's controller (the probe asks only after each stage)"
+    }
+  },
+  "stageB": {
+    "configured": {
+      "t": "res",
+      "id": "tcc-1",
+      "ok": true,
+      "value": {
+        "path": "/private/tmp/maws-tcc-71472e/claude",
+        "testedVersion": "2.1.296",
+        "version": "2.1.283",
+        "ok": true,
+        "error": null,
+        "declaresSystemPromptSnapshot": false
+      }
+    },
+    "launched": {
+      "t": "res",
+      "id": "tcc-2",
+      "ok": true,
+      "value": {
+        "status": "launching",
+        "session": {
+          "appSessionId": "tcc-probe-71472e",
+          "engineSessionId": "1d8c7572-02d5-4757-aaa1-a42471c9edc6",
+          "pid": null,
+          "launchId": "qniwkhij",
+          "launchedAt": "2026-10-28T00:05:03.739Z",
+          "taskListId": "1d8c7572-02d5-4757-aaa1-a42471c9edc6",
+          "cwd": "/tmp/maws-tcc-71472e/cwd",
+          "pendingPlan": null,
+          "process": "starting",
+          "exit": null,
+          "engineState": "unknown",
+          "activity": null,
+          "turn": null,
+          "model": {
+            "requested": null,
+            "resolved": null
+          },
+          "effort": null,
+          "permissionMode": {
+            "requested": "default",
+            "effective": "default",
+            "refusal": null
+          },
+          "prePlanMode": null,
+          "gateway": {
+            "mode": "direct",
+            "baseUrl": null,
+            "verified": "pending",
+            "autoModeServer": "unknown",
+            "localLane": null
+          },
+          "subagentModel": null,
+          "modelOverrides": {},
+          "engineVersion": "2.1.283",
+          "fileCheckpointing": true,
+          "bin": "/private/tmp/maws-tcc-71472e/claude",
+          "fastMode": {
+            "state": null,
+            "disabledReason": null
+          },
+          "plugins": [],
+          "pluginErrors": [],
+          "pluginWarnings": [],
+          "pluginsObservedAt": null,
+          "backgroundTasks": [],
+          "grants": [],
+          "mcpServers": [],
+          "heldPeerMessages": [],
+          "pendingRequests": 0,
+          "queue": {
+            "length": 0,
+            "paused": false
+          },
+          "keepAlive": [],
+          "busy": false,
+          "lastUsedAt": "2026-10-28T00:05:03.739Z",
+          "memory": {
+            "rssKiB": null,
+            "treeRssKiB": null,
+            "sampledAt": null
+          },
+          "journalPath": "/tmp/maws-tcc-71472e/p/engine-host/journal/tcc-probe-71472e/qniwkhij.jsonl",
+          "hostHooks": [
+            "maws_Stop_1"
+          ],
+          "lastEventSeq": 0,
+          "trust": {
+            "attested": false,
+            "recorded": null
+          },
+          "work": {
+            "crons": [],
+            "unknown": null
+          },
+          "kept": false
+        }
+      }
+    },
+    "ran": {
+      "pid": 28792,
+      "ppid": 27564,
+      "rows": [
+        {
+          "dir": "/Users/new/Documents",
+          "status": 0,
+          "error": "",
+          "blockedS": 0
+        },
+        {
+          "dir": "/Users/new/Desktop",
+          "status": 0,
+          "error": "",
+          "blockedS": 0
+        }
+      ]
+    },
+    "operator": {
+      "dialog": "n",
+      "named": "",
+      "answered": "",
+      "settings": "yes"
+    }
+  }
+}
