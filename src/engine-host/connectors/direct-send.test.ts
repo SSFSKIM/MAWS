@@ -15,7 +15,7 @@ import { ManualClock, ScriptedPool, deferred } from './direct-pool.fixture';
 import { DIRECT_LOCATE_VERIFY_MAX, DirectCalls, type DirectCallsOptions, type DirectSendInput } from './direct-calls';
 import { ConnectorStatusCache, connectorLaunchContext, type ConnectorLaunchContext } from './provenance';
 import { ConfiguredDeliverySources } from './configured-delivery';
-import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
 
 type Server = { name: string; status: string; scope: string; source: string; config: Record<string, unknown>; tools?: { name: string; annotations?: Record<string, unknown> }[] };
 const notion = (tools: Server['tools'] = [{ name: 'notion-create-pages', annotations: {} }, { name: 'notion-search', annotations: { readOnly: true } }]): Server => ({ name: 'notion', status: 'connected', scope: 'user', source: 'user', config: { type: 'stdio', command: 'toy', args: ['notion.mjs'] }, tools });
@@ -99,7 +99,7 @@ const toolCalls = () => pool.wire.filter((entry) => entry.kind === 'tools/call')
 const fences = () => (documents.store as unknown as { fences: Map<string, Set<unknown>> }).fences.size;
 
 describe('WR 76/78: cold app-owned delivery', () => {
-  const settings = (servers: { name: string; type: 'http'; url: string }[]) => writeFileSync(join(dir, 'data', 'settings.json'), JSON.stringify({ ...SETTINGS_DEFAULTS_V18, engine: { ...SETTINGS_DEFAULTS_V18.engine, mcpServers: servers } }));
+  const settings = (servers: { name: string; type: 'http'; url: string }[]) => writeFileSync(join(dir, 'data', 'settings.json'), JSON.stringify({ ...SETTINGS_DEFAULTS_V19, engine: { ...SETTINGS_DEFAULTS_V19.engine, mcpServers: servers } }));
   const configured = (captureEnv = async () => ({ CLAUDE_CONFIG_DIR: config, HOME: join(dir, 'home') })) => new ConfiguredDeliverySources({ userData: join(dir, 'data'), captureEnv });
   const inputOf = (source: Awaited<ReturnType<typeof located>>[number]): DirectSendInput => ({ operationId: nextId(), artifactId, directory: source.directory, server: source.server, sourceId: source.sourceId, generation: source.generation, tool: 'notion-create-pages', arguments: { pages: [{ content: '# Cold delivery' }] } });
 
