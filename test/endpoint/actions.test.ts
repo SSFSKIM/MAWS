@@ -10,7 +10,7 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { base64urlEncode, generateSigningKey, keyId, memoryOrgView, NO_CERTIFICATES, OP_HORIZON_S, signRecord, SIGNING_DOMAINS, type Action, type Channel, type ChannelMessage, type Grant, type SignedOrgState, type SigningKey } from 'org-protocol';
+import { actionFingerprint, base64urlEncode, generateSigningKey, keyId, memoryOrgView, NO_CERTIFICATES, OP_HORIZON_S, signRecord, SIGNING_DOMAINS, type Action, type Channel, type ChannelMessage, type Grant, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { SoftwareAuthenticator } from '../../apps/org-protocol/test-support/authenticator.ts';
 import { TestDevice as Device } from '../../apps/org-protocol/test-support/test-device.ts';
@@ -285,6 +285,26 @@ async function bobsSession(f: Fixture, s: FakeSminos): Promise<void> {
   await until(() => f.endpoint.rl10.members.get('la-b') !== null, 'Bob’s lane A member');
 }
 const bobsSteer = (f: Fixture, b: Remote): Action => b.device.action({ machine: f.ref, action: 'sminos.steer', session: 'la-b', context: { lane: 'A', session: 'la-b', launch: 'LB' }, args: { session: 'la-b', text: 'bob' } });
+/** The endpoint stopped and started again on the same machine state, engine host and org; its sminos gone with it. */
+async function restartEndpoint(f: Fixture): Promise<Fixture> {
+  f.sminos?.close();
+  await f.endpoint.stop();
+  started.splice(started.indexOf(f), 1);
+  return start({ services: f.services, host: f.host, records: f.records, chain: f.chain, key: f.key });
+}
+
+/**
+ * A lane A copy's act when the endpoint asks sminos whose the op is first: its admission query answered `answer`
+ * (sminos holding nothing, by default), then the ack.
+ */
+async function actA(remote: Remote, s: FakeSminos, action: Action, answer: Record<string, unknown> = { state: 'not-received' }): Promise<string> {
+  const acked = act(remote, action);
+  await s.next((x) => x.t === 'query' && x.opId === action.opId, `the admission query of ${action.opId}`);
+  s.send({ t: 'queried', opId: action.opId, ...answer });
+  return acked;
+}
+/** sminos's answer for an op it holds, bound to `member` and the forwarded rpc's fingerprint. */
+const boundTo = (member: string, rpc: Record<string, unknown>) => ({ state: 'in-progress', member, device: rpc.device, fingerprint: rpc.fingerprint, target: { kind: 'session', session: 'la-1' } });
 const aged = (a: Action, createdAgo: number, opCreatedAgo = createdAgo): Action => ({ ...a, created: iso(Date.now() - createdAgo), opCreated: iso(Date.now() - opCreatedAgo) });
 
 async function grantFor(f: Fixture, member: string, version = 1): Promise<unknown> {
@@ -465,7 +485,7 @@ describe('lane A, through sminos’s ledger over RL10', () => {
     const s = await sminos(f);
     const a = await open(f, a1, A);
     const steer = laneA(f, a, 'steer', { text: 'go on' });
-    expect(await act(a, steer)).toBe('ok');
+    expect(await actA(a, s, steer)).toBe('ok');
     const rpc = (await s.next((x) => x.t === 'rpc', 'the rpc')).rpc as Record<string, unknown>;
     expect(rpc).toMatchObject({ rpc: 'steer', opId: steer.opId, nonce: steer.nonce, member: A, device: 'a1', context: { lane: 'A', session: 'la-1', launch: 'L1' } });
     s.send({ t: 'rpc-result', project: PROJECT, opId: steer.opId, nonce: steer.nonce, outcome: { state: 'done', result: {} } });
@@ -480,10 +500,10 @@ describe('lane A, through sminos’s ledger over RL10', () => {
     const a = await open(f, a1, A);
     const b = await open(f, b1, B);
     const alice = laneA(f, a, 'steer', { text: 'alice' });
-    expect(await act(a, alice)).toBe('ok');
-    await s.next((x) => x.t === 'rpc', 'Alice’s rpc');
+    expect(await actA(a, s, alice)).toBe('ok');
+    const aliceRpc = (await s.next((x) => x.t === 'rpc', 'Alice’s rpc')).rpc as Record<string, unknown>;
     // Bob, authorized on his own session, reuses Alice's pending opId under his own nonce.
-    expect(await act(b, { ...bobsSteer(f, b), opId: alice.opId, opCreated: alice.opCreated })).toBe('op-conflict');
+    expect(await actA(b, s, { ...bobsSteer(f, b), opId: alice.opId, opCreated: alice.opCreated }, boundTo(A, aliceRpc))).toBe('op-conflict');
     s.send({ t: 'rpc-result', project: PROJECT, opId: alice.opId, nonce: alice.nonce, outcome: { state: 'done', result: { secret: 'alice' } } });
     expect(await done(a, alice)).toEqual({ state: 'done', result: { secret: 'alice' } });
     await sleep(50);
@@ -497,13 +517,13 @@ describe('lane A, through sminos’s ledger over RL10', () => {
     await bobsSession(f, s);
     const a = await open(f, a1, A);
     const alice = laneA(f, a, 'steer', { text: 'alice' });
-    expect(await act(a, alice)).toBe('ok');
-    await s.next((x) => x.t === 'rpc', 'Alice’s rpc');
+    expect(await actA(a, s, alice)).toBe('ok');
+    const aliceRpc = (await s.next((x) => x.t === 'rpc', 'Alice’s rpc')).rpc as Record<string, unknown>;
     a.channel.close('done');
     await until(() => f.endpoint.status().channels.direct === 0, 'Alice’s channel closed at the endpoint');
     const b = await open(f, b1, B);
     expect(await act(b, { ...bobsSteer(f, b), opId: alice.opId, opCreated: alice.opCreated, nonce: alice.nonce })).toBe('replayed');
-    expect(await act(b, { ...bobsSteer(f, b), opId: alice.opId, opCreated: alice.opCreated })).toBe('op-conflict');
+    expect(await actA(b, s, { ...bobsSteer(f, b), opId: alice.opId, opCreated: alice.opCreated }, boundTo(A, aliceRpc))).toBe('op-conflict');
     s.send({ t: 'rpc-result', project: PROJECT, opId: alice.opId, nonce: alice.nonce, outcome: { state: 'done', result: { secret: 'alice' } } });
     await s.next((x) => x.t === 'rpc-ack' && x.opId === alice.opId, 'the rpc-ack');
     await sleep(50);
@@ -516,7 +536,7 @@ describe('lane A, through sminos’s ledger over RL10', () => {
     const s = await sminos(f);
     const a = await open(f, a1, A);
     const first = laneA(f, a, 'steer', { text: 'again' });
-    expect(await act(a, first)).toBe('ok');
+    expect(await actA(a, s, first)).toBe('ok');
     await s.next((x) => x.t === 'rpc' && (x.rpc as Record<string, unknown>).nonce === first.nonce, 'the first copy');
     const again = await open(f, a1, A);
     const copy: Action = { ...first, nonce: Buffer.from('resealed-copy-02').toString('base64url'), created: iso(Date.now()) };
@@ -535,7 +555,7 @@ describe('lane A, through sminos’s ledger over RL10', () => {
     const a = await open(f, a1, A);
     const b = await open(f, b1, B);
     const alice = laneA(f, a, 'steer', { text: 'alice' });
-    expect(await act(a, alice)).toBe('ok');
+    expect(await actA(a, s, alice)).toBe('ok');
     await s.next((x) => x.t === 'rpc', 'Alice’s rpc');
     expect(await act(b, { ...bobsSteer(f, b), opId: alice.opId, opCreated: alice.opCreated, nonce: alice.nonce })).toBe('replayed');
     s.send({ t: 'rpc-result', project: PROJECT, opId: alice.opId, nonce: alice.nonce, outcome: { state: 'done', result: { secret: 'alice' } } });
@@ -544,12 +564,74 @@ describe('lane A, through sminos’s ledger over RL10', () => {
     expect(b.inbox.filter((x) => x.t === 'done')).toEqual([]);
   });
 
+  it('asks sminos whose an op is before a first copy goes down: one bound to another, or to no RL10 sender, is `op-conflict` and goes nowhere', async () => {
+    const f = await start();
+    const s = await sminos(f);
+    await bobsSession(f, s);
+    const b = await open(f, b1, B);
+    const held = bobsSteer(f, b);
+    expect(await actA(b, s, held, { state: 'in-progress', member: A, device: 'a1', fingerprint: 'fp-alice', target: { kind: 'session', session: 'la-1' } })).toBe('op-conflict');
+    const dx2 = bobsSteer(f, b);
+    expect(await actA(b, s, dx2, { state: 'done', outcome: { state: 'done' } })).toBe('op-conflict');
+    expect(await actA(b, s, bobsSteer(f, b), { state: 'unavailable' })).toBe('unavailable');
+    await sleep(50);
+    expect(s.received.filter((x) => x.t === 'rpc')).toEqual([]);
+  });
+
+  it('after an endpoint restart, takes sminos’s binding: another’s copy is refused under the op’s nonce or its own, and the sender’s reseal goes down and gets its result', async () => {
+    const f = await start();
+    const s = await sminos(f);
+    await bobsSession(f, s);
+    const a = await open(f, a1, A);
+    const alice = laneA(f, a, 'steer', { text: 'alice' });
+    expect(await actA(a, s, alice)).toBe('ok');
+    const aliceRpc = (await s.next((x) => x.t === 'rpc', 'Alice’s rpc')).rpc as Record<string, unknown>;
+    const g = await restartEndpoint(f);
+    const s2 = await sminos(g);
+    await bobsSession(g, s2);
+    const b = await open(g, b1, B);
+    const bound = boundTo(A, aliceRpc);
+    expect(await actA(b, s2, { ...bobsSteer(g, b), opId: alice.opId, opCreated: alice.opCreated, nonce: alice.nonce }, bound)).toBe('op-conflict');
+    expect(await actA(b, s2, { ...bobsSteer(g, b), opId: alice.opId, opCreated: alice.opCreated }, bound)).toBe('op-conflict');
+    // sminos sends again the result the endpoint never acknowledged: it reaches no one but Alice's own copies.
+    s2.send({ t: 'rpc-result', project: PROJECT, opId: alice.opId, nonce: alice.nonce, outcome: { state: 'done', result: { secret: 'alice' } } });
+    await s2.next((x) => x.t === 'rpc-ack' && x.opId === alice.opId, 'the rpc-ack');
+    const a2 = await open(g, a1, A);
+    const reseal = a2.device.reseal(alice);
+    expect(await actA(a2, s2, reseal, bound)).toBe('ok');
+    await s2.next((x) => x.t === 'rpc' && (x.rpc as Record<string, unknown>).nonce === reseal.nonce, 'Alice’s reseal');
+    s2.send({ t: 'rpc-result', project: PROJECT, opId: alice.opId, nonce: reseal.nonce, outcome: { state: 'done', result: { secret: 'alice' } } });
+    expect(await done(a2, reseal)).toEqual({ state: 'done', result: { secret: 'alice' } });
+    await sleep(50);
+    expect(s2.received.filter((x) => x.t === 'rpc')).toHaveLength(1);
+    expect(b.inbox.filter((x) => x.t === 'done')).toEqual([]);
+  });
+
+  it('never makes a copy sminos refused the op’s owner: the op’s own sender is asked about afresh and goes down', async () => {
+    const f = await start();
+    const s = await sminos(f);
+    await bobsSession(f, s);
+    const a = await open(f, a1, A);
+    const b = await open(f, b1, B);
+    const alice = laneA(f, a, 'steer', { text: 'alice' });
+    // sminos held nothing yet when Bob's copy was asked about; by its arrival Alice's had bound the op.
+    const bob = { ...bobsSteer(f, b), opId: alice.opId, opCreated: alice.opCreated };
+    expect(await actA(b, s, bob)).toBe('ok');
+    await s.next((x) => x.t === 'rpc' && (x.rpc as Record<string, unknown>).nonce === bob.nonce, 'Bob’s rpc');
+    s.send({ t: 'rpc-result', project: PROJECT, opId: alice.opId, nonce: bob.nonce, outcome: { state: 'refused', reason: 'op-conflict' } });
+    expect(await done(b, bob)).toEqual({ state: 'refused', reason: 'op-conflict' });
+    expect(await actA(a, s, alice, { state: 'in-progress', member: A, device: 'a1', fingerprint: await actionFingerprint(alice), target: { kind: 'session', session: 'la-1' } })).toBe('ok');
+    await s.next((x) => x.t === 'rpc' && (x.rpc as Record<string, unknown>).nonce === alice.nonce, 'Alice’s rpc');
+    s.send({ t: 'rpc-result', project: PROJECT, opId: alice.opId, nonce: alice.nonce, outcome: { state: 'done', result: {} } });
+    expect(await done(a, alice)).toEqual({ state: 'done', result: {} });
+  });
+
   it('answers a resealed copy from the same sender under its latest nonce, on the channel that sent it', async () => {
     const f = await start();
     const s = await sminos(f);
     const a = await open(f, a1, A);
     const first = laneA(f, a, 'steer', { text: 'again' });
-    expect(await act(a, first)).toBe('ok');
+    expect(await actA(a, s, first)).toBe('ok');
     await s.next((x) => x.t === 'rpc' && (x.rpc as Record<string, unknown>).nonce === first.nonce, 'the first copy');
     const again = await open(f, a1, A);
     const copy: Action = { ...first, nonce: Buffer.from('resealed-copy-01').toString('base64url'), created: iso(Date.now()) };
@@ -576,7 +658,7 @@ describe('lane A, through sminos’s ledger over RL10', () => {
     const s = await sminos(f);
     const a = await open(f, a1, A);
     const spawn = await a.device.stepUp(a.device.action({ machine: f.ref, action: 'sminos.spawn', args: { checkout: CHECKOUT, brief: 'fix it' } }));
-    expect(await act(a, spawn)).toBe('ok');
+    expect(await actA(a, s, spawn)).toBe('ok');
     const rpc = (await s.next((x) => x.t === 'rpc', 'the spawn rpc')).rpc as Record<string, unknown>;
     // The result never reaches the device (lost); it asks.
     const asked = query(a, spawn.opId, spawn.opCreated, 'sminos');
@@ -593,7 +675,7 @@ describe('lane A, through sminos’s ledger over RL10', () => {
     await until(() => f.endpoint.rl10.members.get('la-b') !== null, 'Bob’s lane A member');
     const b = await open(f, b1, B);
     const steer = b.device.action({ machine: f.ref, action: 'sminos.steer', session: 'la-b', context: { lane: 'A', session: 'la-b', launch: 'LB' }, args: { session: 'la-b', text: 'private' } });
-    expect(await act(b, steer)).toBe('ok');
+    expect(await actA(b, s, steer)).toBe('ok');
     const rpc = (await s.next((x) => x.t === 'rpc', 'the steer rpc')).rpc as Record<string, unknown>;
     // B's Mac is replaced by newly endorsed web-cards keys under the same device id: a successor the org accepts.
     const phone = await newDevice('b1', 'web-cards');
@@ -730,4 +812,5 @@ describe('a closed ledger, in the endpoint’s status', () => {
     expect(await run(a, send(f, a, 'open again'))).toMatchObject({ state: 'done' });
     expect(f.endpoint.status().opLedgers).toBeUndefined();
   });
+
 });
