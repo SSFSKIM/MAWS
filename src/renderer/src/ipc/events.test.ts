@@ -4,6 +4,7 @@ import type { PreloadBridge } from '@shared/ipc/schema';
 import { EMPTY_TAB_SET, NO_PROJECT } from '@shared/ipc/schema/layout';
 import type { MachineState } from '@shared/ipc/schema/machines';
 import { addressOf } from '@shared/machine/address';
+import type { OrgKey } from '@shared/machine/org-key';
 import { digest, item, project, record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
@@ -542,8 +543,8 @@ describe('the shell per machine', () => {
   // The branch review: B's session.list lands before its session.projects.list, so for a moment B's records name projects
   // the page does not hold yet. A restored org set holding B's sessions stays whole, panes and ratio, through it.
   it('keeps a restored org set whole while another machine’s records arrive before its projects', async () => {
-    const ORG = 'remote:github.com/example/shared';
-    const org = { key: ORG, name: 'shared', source: 'remote', smnsId: null } as const;
+    const ORG = 'remote:github.com/example/shared' as OrgKey;
+    const org = { key: ORG, name: 'shared', source: 'remote' as const, smnsId: null };
     const session = (id: string) => ({ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false });
     const split = { panes: [{ tabs: [session(A)], activeTabId: `session:${A}` }, { tabs: [session(onB('b1'))], activeTabId: `session:${onB('b1')}` }], focusedPane: 1, splitRatio: 0.3 };
     const { fake, stores } = setup(0, { machines: [LOCAL_ENTRY, other('up', 1)], tabs: { version: 3, current: ORG, sets: { [ORG]: split }, closedTabs: [] } });
