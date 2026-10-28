@@ -18,10 +18,12 @@
 //
 // Node has no `openat`, so the walk is made per open: on macOS every open carries `O_NOFOLLOW_ANY`, which fails the
 // open if any component of the path is a link, atomically; elsewhere (Linux CI) each ancestor is `lstat`ed first and the
-// open carries `O_NOFOLLOW`, which refuses every link present when it looks.
+// open carries `O_NOFOLLOW`, which refuses every link present when it looks. Nor has it `mkdirat` or `unlinkat`, so each
+// directory the walk reaches is pinned by its `dev` and `ino`, and every mutation (a mkdir, an unlink, an rmdir) first
+// reopens what it touches the same way and checks it is still that directory, or a regular file (`mutate`, below).
 import { randomBytes } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, rmdirSync, unlinkSync, writeSync } from 'node:fs';
-import { dirname, isAbsolute, join, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, sep } from 'node:path';
 import type { ControlResult } from '@shared/ipc/schema/lane-a';
 import { atomicWriteFileSync } from '../files/atomic-write';
 import { NotARepositoryError, type GitRun } from '../git/runner';
@@ -126,27 +128,78 @@ function openNoLink(path: string, flags: number, mode?: number): number {
   }
 }
 
-// The directory `path`, reached with no link on its way, `below` it created 0700 where missing when `create`: its path.
-function walk(path: string, below: readonly string[] = [], create = false): string {
-  let at = path;
-  closeSync(openNoLink(at, constants.O_RDONLY | constants.O_DIRECTORY));
+// A directory the walk reached with no link on its way, pinned by its device and inode.
+interface Pinned {
+  path: string;
+  dev: number;
+  ino: number;
+}
+
+// `path`, reached with no link on its way, if it is a directory: pinned.
+function pin(path: string): Pinned {
+  const fd = openNoLink(path, constants.O_RDONLY | constants.O_DIRECTORY);
+  try {
+    const { dev, ino } = fstatSync(fd);
+    return { path, dev, ino };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+// Still the pinned directory, reached with no link on its way; Unsafe otherwise.
+function still(dir: Pinned): void {
+  const now = pin(dir.path);
+  if (now.dev !== dir.dev || now.ino !== dir.ino) throw new Unsafe(`${dir.path} is no longer the directory the upload walked: nothing is changed through it`);
+}
+
+// Every mutation goes through here: `under` (and `also`, when given) checked to be the very directories the walk pinned,
+// reached with no link, and a file to unlink checked to be a regular file reached with no link, immediately before the
+// call. What remains is the window between that check and the syscall, which Node cannot close (it has no `mkdirat`,
+// `unlinkat` or `unlinkat(AT_REMOVEDIR)`): a racing process would have to swap a component inside it, and any process
+// that can is the user's own (RL §5.11's uid boundary), with the user's authority already. Accepted, and recorded in
+// the O9 document; rejected: a native or Python helper for the `*at` calls, a runtime dependency of main for a same-uid
+// race.
+function mutate(under: Pinned, change: { mkdir: string } | { unlink: string } | { rmdir: Pinned }): void {
+  still(under);
+  if ('mkdir' in change) {
+    mkdirSync(join(under.path, change.mkdir), 0o700);
+  } else if ('unlink' in change) {
+    const path = join(under.path, change.unlink);
+    const fd = openNoLink(path, constants.O_RDONLY | constants.O_NONBLOCK);
+    try {
+      if (!fstatSync(fd).isFile()) throw new Unsafe(`${path} is not a regular file: it is left`);
+    } finally {
+      closeSync(fd);
+    }
+    unlinkSync(path);
+  } else {
+    still(change.rmdir);
+    rmdirSync(change.rmdir.path);
+  }
+}
+
+// The directory `path` and `below` it, each reached with no link on its way and pinned, `below` created 0700 where
+// missing when `create`: the pins, `path`'s first.
+function walk(path: string, below: readonly string[] = [], create = false): Pinned[] {
+  const pins = [pin(path)];
   for (const name of below) {
-    at = join(at, name);
+    const parent = pins.at(-1)!;
     if (create) {
       try {
-        mkdirSync(at, 0o700);
+        mutate(parent, { mkdir: name });
       } catch (error) {
         if (code(error) !== 'EEXIST') throw error;
       }
     }
-    closeSync(openNoLink(at, constants.O_RDONLY | constants.O_DIRECTORY));
+    pins.push(pin(join(parent.path, name)));
   }
-  return at;
+  return pins;
 }
 
 // `name` under `dir`, created exclusively, 0600; a name already there (a link included) is Unsafe.
-function writeNew(dir: string, name: string, bytes: Buffer): void {
-  const path = join(dir, name);
+function writeNew(dir: Pinned, name: string, bytes: Buffer): void {
+  still(dir);
+  const path = join(dir.path, name);
   let fd: number;
   try {
     fd = openNoLink(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
@@ -158,7 +211,7 @@ function writeNew(dir: string, name: string, bytes: Buffer): void {
     for (let at = 0; at < bytes.length; ) at += writeSync(fd, bytes, at);
   } catch (error) {
     closeSync(fd);
-    unlinkSync(path); // created by this upload: not left half written
+    mutate(dir, { unlink: name }); // created by this upload: not left half written
     throw error;
   }
   closeSync(fd);
@@ -168,7 +221,8 @@ function writeNew(dir: string, name: string, bytes: Buffer): void {
 // order. When one cannot be saved, the files this upload made are removed and nothing else. Throws Unsafe, or an
 // OSError.
 export function saveUpload(base: string, session: string, upload: string, files: readonly DecodedFile[]): { root: string; names: string[] } {
-  const root = walk(base, [...UPLOADS, session], true);
+  const pins = walk(base, [...UPLOADS, session], true);
+  const [parent, root] = pins.slice(-2) as [Pinned, Pinned];
   const names: string[] = [];
   try {
     files.forEach((file, n) => {
@@ -177,37 +231,53 @@ export function saveUpload(base: string, session: string, upload: string, files:
       names.push(name);
     });
   } catch (error) {
-    clear(root, names);
+    clear(parent, root, names);
     throw error;
   }
-  return { root, names };
+  return { root: root.path, names };
 }
 
-// The files `names` (every file, when none are named) under `root`, never a directory; `root` too once it is empty.
-function clear(root: string, names?: readonly string[]): void {
-  for (const name of names ?? readdirSync(root)) {
+// An upload's own file name (`<upload>.<n>.<ext>`): the only names a removal ever touches.
+const UPLOAD_FILE = /^[A-Za-z0-9_-]{1,128}\.[0-3]\.(?:png|jpg|gif|webp|pdf)$/;
+
+// The upload files `names` (every upload file the root lists, when none are named) removed from the pinned `root`, then
+// `root` from its pinned `parent` once it is empty; nothing else, nothing recursed into. Whether everything was taken:
+// false when a mutation was refused (a pin that no longer holds, a file that is no regular file).
+function clear(parent: Pinned, root: Pinned, names?: readonly string[]): boolean {
+  let clean = true;
+  let listed: string[];
+  try {
+    listed = names === undefined ? readdirSync(root.path) : [...names];
+  } catch {
+    return false;
+  }
+  for (const name of listed.filter((n) => UPLOAD_FILE.test(n))) {
     try {
-      if (!lstatSync(join(root, name)).isDirectory()) unlinkSync(join(root, name));
-    } catch {
-      // gone already, or not ours to remove
+      mutate(root, { unlink: name });
+    } catch (error) {
+      if (code(error) !== 'ENOENT') clean = false; // gone already is taken
     }
   }
   try {
-    if (readdirSync(root).length === 0) rmdirSync(root);
-  } catch {
-    // left
+    still(root);
+    if (readdirSync(root.path).length === 0) mutate(parent, { rmdir: root });
+  } catch (error) {
+    if (code(error) !== 'ENOENT') clean = false;
   }
+  return clean;
 }
 
-// An upload's files removed (every file, when none are named), its recorded path walked from `/` without following a
-// link, so a link an ancestor became since leads nowhere; what cannot be reached safely is left.
-export function removeUpload(root: string, names?: readonly string[]): void {
+// An upload's files removed (every upload file, when none are named), its recorded path walked from `/` without
+// following a link, so a link an ancestor became since leads nowhere: whether it is done (a root already gone is). False
+// when anything on the way could not be reached safely or a mutation was refused, everything there left.
+export function removeUpload(root: string, names?: readonly string[]): boolean {
+  let pins: Pinned[];
   try {
-    walk(root);
-  } catch {
-    return;
+    pins = walk(dirname(root), [basename(root)]);
+  } catch (error) {
+    return code(error) === 'ENOENT';
   }
-  clear(root, names);
+  return clear(pins[0]!, pins[1]!, names);
 }
 
 // The upload directories excluded from the repository `base` is in (its common `info/exclude`, which every worktree of
@@ -222,8 +292,13 @@ export async function excludeUploads(base: string, git: GitRun): Promise<boolean
     throw error;
   }
   if (!isAbsolute(common)) return false;
-  const info = walk(realpathSync(common), ['info'], true);
-  const fd = openNoLink(join(info, 'exclude'), constants.O_RDWR | constants.O_CREAT | constants.O_APPEND | constants.O_NONBLOCK, 0o644);
+  const info = walk(realpathSync(common), ['info'], true).at(-1)!;
+  // What is there is looked at before it is opened: a socket or a FIFO fails the open itself with an error that is no
+  // refusal, so an exclude that is anything but a regular file (or missing) is refused here.
+  still(info);
+  const there = lstatSync(join(info.path, 'exclude'), { throwIfNoEntry: false });
+  if (there !== undefined && (there.isSymbolicLink() || !there.isFile())) throw new Unsafe('the repository’s info/exclude is a link or not a regular file');
+  const fd = openNoLink(join(info.path, 'exclude'), constants.O_RDWR | constants.O_CREAT | constants.O_APPEND | constants.O_NONBLOCK, 0o644);
   try {
     if (!fstatSync(fd).isFile()) throw new Unsafe('the repository’s info/exclude is not a regular file');
     const text = readFileSync(fd, 'utf8');
@@ -239,7 +314,7 @@ type Root = { path: string; session: string; at: string };
 
 export interface UploadRecords {
   record(session: string, root: string): void; // before anything is written under it; throws when it can't be kept
-  sweep(): number; // the roots no upload went to for a day removed, and their records: how many
+  sweep(): number; // the roots no upload went to for a day removed, and their records: how many (one refused stays)
 }
 
 // `uploads.json`: `{version: 1, roots: [{path, session, at}]}`, 0600, written whole; `at` the last upload to the root.
@@ -266,9 +341,14 @@ export function uploadRecords(file: string, { now = Date.now, log = (line: strin
       const roots = read();
       const old = roots.filter((r) => now() - Date.parse(r.at) >= SWEEP_AFTER_MS);
       if (old.length === 0) return 0;
-      for (const r of old) removeUpload(r.path);
-      write(roots.filter((r) => !old.includes(r)));
-      return old.length;
+      // a root that could not be reached safely, or whose removal was refused, keeps its record for a later pass
+      const swept = old.filter((r) => {
+        const done = removeUpload(r.path);
+        if (!done) log(`${r.path} was not swept: it could not be reached without a link, or held what is not its own; it is tried again later`);
+        return done;
+      });
+      if (swept.length > 0) write(roots.filter((r) => !swept.includes(r)));
+      return swept.length;
     },
   };
 }

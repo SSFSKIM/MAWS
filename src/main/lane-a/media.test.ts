@@ -1,13 +1,34 @@
 // A local lane A upload (P5 O9 M7, "Proves"): the checks before anything is written, the walk that follows no link, the
 // exclusive create and its extension by signature, the repository's exclude entry, the records and their sweep. Scratch
 // directories only (realpath'd: the system temp root is itself a link on macOS), never a real repository or `~`.
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GitFixture } from '../../../test/support/git-fixture';
 import { createGitRunner } from '../git/runner';
 import { checkUpload, EXCLUDE_LINE, excludeUploads, removeUpload, rootOf, saveUpload, typeOf, uploadId, uploadRecords, Unsafe, type DecodedFile } from './media';
+
+// A race staged between the walk and a mutation: `node:fs` passes through, but a directory listing first runs the hook
+// the test set (once it set one), the way another process could move things the moment after the walk pinned them.
+const race = vi.hoisted(() => ({ onList: null as ((path: string) => void) | null }));
+vi.mock('node:fs', async (original) => {
+  const fs = await original<typeof import('node:fs')>();
+  const readdirSync = ((...args: Parameters<typeof fs.readdirSync>) => {
+    race.onList?.(String(args[0]));
+    return fs.readdirSync(...args);
+  }) as typeof fs.readdirSync;
+  return { ...fs, default: { ...fs, readdirSync }, readdirSync };
+});
+const once = (at: string, act: () => void) => {
+  race.onList = (path) => {
+    if (path !== at) return;
+    race.onList = null;
+    act();
+  };
+};
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
@@ -24,6 +45,7 @@ const dir = (prefix = 'o9m7-') => {
   return d;
 };
 afterEach(() => {
+  race.onList = null;
   for (const d of scratch.splice(0)) rmSync(d, { recursive: true, force: true });
   for (const f of fixtures.splice(0)) f.dispose();
 });
@@ -184,8 +206,51 @@ describe('the save', () => {
     const kept = saveUpload(other, SESSION, 'up3', decoded([file('d.png', 'image/png', PNG)]));
     const moved = join(dir(), 'moved');
     symlinkSync(other, moved);
-    removeUpload(join(moved, '.claude', 'desk-uploads', SESSION));
+    expect(removeUpload(join(moved, '.claude', 'desk-uploads', SESSION))).toBe(false);
     expect(readdirSync(kept.root)).toEqual(['up3.0.png']);
+  });
+
+  it('refuses a removal whose root was swapped for a link after the walk pinned it, touching nothing outside the tree', () => {
+    const base = dir();
+    const { root } = saveUpload(base, SESSION, 'up1', decoded([file_('a.png')]));
+    const outside = dir('o9m7-outside-');
+    writeFileSync(join(outside, 'up9.0.png'), 'sentinel');
+    once(root, () => {
+      renameSync(root, `${root}.moved`);
+      symlinkSync(outside, root);
+    });
+    const removed = removeUpload(root);
+    expect(existsSync(join(outside, 'up9.0.png')), 'nothing outside the tree is touched').toBe(true);
+    expect(removed).toBe(false);
+    expect(readdirSync(`${root}.moved`)).toEqual(['up1.0.png']);
+  });
+
+  it('refuses to unlink a file swapped for a link, or anything that is no regular file, and leaves it', () => {
+    const base = dir();
+    const { root } = saveUpload(base, SESSION, 'up1', decoded([file_('a.png'), file_('b.png')]));
+    const target = join(dir('o9m7-outside-'), 'target');
+    writeFileSync(target, 'sentinel');
+    execFileSync('/usr/bin/mkfifo', [join(root, 'up2.0.png')]);
+    once(root, () => {
+      rmSync(join(root, 'up1.0.png'));
+      symlinkSync(target, join(root, 'up1.0.png'));
+    });
+    expect(removeUpload(root)).toBe(false);
+    expect(readFileSync(target, 'utf8')).toBe('sentinel');
+    expect(lstatSync(join(root, 'up1.0.png')).isSymbolicLink()).toBe(true);
+    expect(lstatSync(join(root, 'up2.0.png')).isFIFO()).toBe(true);
+    expect(existsSync(join(root, 'up1.1.png'))).toBe(false); // the regular one went
+  });
+
+  it('removes only upload files and never recurses: another name or a directory in the root stays, and so does the root', () => {
+    const base = dir();
+    const { root } = saveUpload(base, SESSION, 'up1', decoded([file_('a.png')]));
+    writeFileSync(join(root, 'notes.txt'), 'kept');
+    mkdirSync(join(root, 'up2.0.png'));
+    writeFileSync(join(root, 'up2.0.png', 'inside'), 'kept');
+    expect(removeUpload(root)).toBe(false); // the directory named like an upload file is no regular file
+    expect(readdirSync(root).sort()).toEqual(['notes.txt', 'up2.0.png']);
+    expect(readFileSync(join(root, 'up2.0.png', 'inside'), 'utf8')).toBe('kept');
   });
 });
 
@@ -244,6 +309,22 @@ describe('the exclude entry', () => {
     await expect(excludeUploads(f.root, git)).rejects.toThrow(Unsafe);
     expect(readdirSync(elsewhere)).toEqual([]);
   });
+
+  it('refuses an exclude that is a socket or a FIFO, which fail the open itself', async () => {
+    const f = await repo();
+    const git = createGitRunner({ env: f.serviceEnv() });
+    rmSync(exclude(f), { force: true });
+    const server = createServer();
+    await new Promise<void>((resolve) => server.listen(exclude(f), resolve));
+    try {
+      await expect(excludeUploads(f.root, git)).rejects.toThrow(Unsafe);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+    rmSync(exclude(f), { force: true });
+    execFileSync('/usr/bin/mkfifo', [exclude(f)]);
+    await expect(excludeUploads(f.root, git)).rejects.toThrow(Unsafe);
+  });
 });
 
 describe('the records and the sweep', () => {
@@ -273,7 +354,7 @@ describe('the records and the sweep', () => {
     expect(existsSync(youngRoot)).toBe(true);
   });
 
-  it('sweeps a root whose ancestor became a link by dropping its record and touching nothing behind the link', () => {
+  it('leaves a root whose ancestor became a link, touching nothing behind the link, and keeps its record for a later pass', () => {
     const data = dir();
     let now = 0;
     const records = uploadRecords(join(data, 'uploads.json'), { now: () => now, log: () => {} });
@@ -281,10 +362,21 @@ describe('the records and the sweep', () => {
     const kept = saveUpload(real, SESSION, 'up1', decoded([file_('a.png')])).root;
     const parent = dir();
     symlinkSync(real, join(parent, 'checkout'));
-    records.record(SESSION, join(parent, 'checkout', '.claude', 'desk-uploads', SESSION));
+    const linked = join(parent, 'checkout', '.claude', 'desk-uploads', SESSION);
+    records.record(SESSION, linked);
+    now += 25 * 3600_000;
+    expect(records.sweep()).toBe(0);
+    expect(readdirSync(kept)).toEqual(['up1.0.png']);
+    expect(JSON.parse(readFileSync(join(data, 'uploads.json'), 'utf8')).roots.map((r: { path: string }) => r.path)).toEqual([linked]);
+  });
+
+  it('drops the record of a root already gone', () => {
+    const data = dir();
+    let now = 0;
+    const records = uploadRecords(join(data, 'uploads.json'), { now: () => now, log: () => {} });
+    records.record(SESSION, join(dir(), 'gone', '.claude', 'desk-uploads', SESSION));
     now += 25 * 3600_000;
     expect(records.sweep()).toBe(1);
-    expect(readdirSync(kept)).toEqual(['up1.0.png']);
     expect(JSON.parse(readFileSync(join(data, 'uploads.json'), 'utf8')).roots).toEqual([]);
   });
 
