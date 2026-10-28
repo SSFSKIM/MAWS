@@ -365,6 +365,24 @@ deletes what it minted, however it ends. It fails if any of that fails.
       printf 'DESK_ACCESS_TOKEN=%s\n' "$(cloudflared access token -app=$HUB)" \
         | pnpm --filter desk-hub deployment probe --rpc --config deploy/config.json
 
+  `probe --retired` is the same step's owner-token half of the removed routes: `POST /api/org/keys` and `DELETE /api/org/keys/x` answer the Worker's own 404 (`{"error":"not-found"}`) under the deployed build, and `GET /api/org/keys` answers `410 retired` (after B4 step 4's purge) or the list (before it), each under that build too (K1 to K3). The build it expects is the one the credential-free `POST /machine/enroll` names, as step 3's `curl` reads it; `--build <name>` pins it instead. Each request carries no body, so a hub before M5b refuses the POST a bad shape and the DELETE `not-key-holder` and keeps nothing (and the case fails there); it runs in the deployment's own org on `DESK_ACCESS_TOKEN` alone:
+
+      printf 'DESK_ACCESS_TOKEN=%s\n' "$(cloudflared access token -app=$HUB)" \
+        | pnpm --filter desk-hub deployment probe --retired --config deploy/config.json
+
+  The machine-token half (DX2's two routes) runs on the VM, whose endpoint holds a service token: the script reads it by path from the endpoint's `enrollment.json` (`credentials.clientId`, `credentials.clientSecret`; `${XDG_CONFIG_HOME:-$HOME/.config}/MAWS/mawsd/endpoint/` on Linux) and never prints it. Each answer must be `404 {"error":"not-found"}` under the build step 3's `curl` named; a hub before M5b answers the VM's v2 credential `403 v2-credential` (M5a), and no body is sent:
+
+      devcloud vm ssh <vm> -- "HUB=$HUB node --input-type=module -" <<'EOF'
+      import { readFileSync } from 'node:fs';
+      const dir = `${process.env.XDG_CONFIG_HOME ?? `${process.env.HOME}/.config`}/MAWS/mawsd/endpoint`;
+      const { credentials } = JSON.parse(readFileSync(`${dir}/enrollment.json`, 'utf8'));
+      const headers = { 'CF-Access-Client-Id': credentials.clientId, 'CF-Access-Client-Secret': credentials.clientSecret };
+      for (const [method, path] of [['GET', '/machine/stream'], ['POST', '/machine/frames']]) {
+        const response = await fetch(`${process.env.HUB}${path}`, { method, headers, redirect: 'manual' });
+        console.log(method, path, response.status, response.headers.get('x-desk-build'), (await response.text()).slice(0, 200));
+      }
+      EOF
+
 - `fake-check`: M4's fake machine, enrolled from a code, replays its recording, and a browser sees every row, request, decision, log event, and outcome, plus one RPC answered.
 - `redeploy-check`: two fake machines and a browser write while the hub is redeployed mid-run, under the same throwaway org. The writing lasts 420 s by default (`--seconds`), because the cut came +314 to +329 s after the deploy. The redeploy is new code, since its build's name is new: Cloudflare restarts objects for new code only. Nothing may be lost or duplicated, and the check fails as "not exercised" when the redeploy cut no machine's stream. See M5's findings in DC3's plan: on 2026-10-15, Cloudflare kept the old version's connections open after a deploy.
   Beside them runs RL1's leg (O11): a v2 machine listed in the throwaway org's state holds RL1 through its endpoint, and an app holds a channel to it. A socket the redeploy drops must come back: the endpoint under a higher generation, the app through a new channel. It prints when each socket dropped (from the redeploy's start) and how long each took to come back. Cloudflare cuts the sockets when it chooses, and within the window it may not (O11 M8's phase B saw a cut in one run of three), so once the writing stops the leg cuts both sockets itself, from the client's end, twice in a row: each time the endpoint must be welcomed again under a higher generation and a new channel echo within 60 s (`rl1: forced cut <n>: …`). Those prove the reconnect, not the deploy's cut, which is what acceptance 3 asks for: only a run whose redeploy cut both RL1 sockets, both came back, and whose forced cuts came back is a PASS. A run that lost nothing and whose forced cuts came back but whose redeploy left an RL1 socket uncut (`rl1: neither socket was cut`) ends `INCONCLUSIVE: deploy cut: not exercised (…)` with status 3, neither PASS nor FAIL. The state is signed by an admin device: `--device-keys <file>` (below), or without it a device made for the run, which posts the throwaway org's genesis and so needs an org with no state yet.
