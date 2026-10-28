@@ -31,7 +31,7 @@ import { commandRoute, slashItems } from '../../lane-a/conversation/catalog';
 import { announceCommand } from '../../lane-a/outcomes';
 import { watchLaneA } from '../../lane-a/watches';
 import { branchLabel, recordBranch } from '../../sessions/branch-label';
-import { canTakeOver } from '../../sessions/record-ops';
+import { canTakeOver } from '../../sessions/holder-words'; // not record-ops: its imports reach the terminal stack
 import type { SessionCatalog } from '../../stores/catalog';
 import { holdPendingSend, useLaneA } from '../../stores/lane-a';
 import { MODE_OPTIONS } from '../../statusline/mode-menu';
