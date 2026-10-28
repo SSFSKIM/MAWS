@@ -6,8 +6,12 @@
 import * as z from 'zod';
 import type { CommandSpec } from './common';
 
-/** Why an attempt ended without signing in; `detail` names a verdict, a status or the email Access signed in. */
-export const ORG_REFUSALS = ['bad-code', 'other-org', 'access', 'not-member', 'keys', 'chain', 'removed', 'expired', 'hub', 'busy'] as const;
+/**
+ * Why an attempt ended without signing in; `detail` names a verdict, a status or the email Access signed in.
+ * `directory`: `<userData>/org/` failed its checks, so nothing can be written there (beyond §B's list: the document's
+ * Decision Log).
+ */
+export const ORG_REFUSALS = ['bad-code', 'other-org', 'access', 'not-member', 'keys', 'chain', 'removed', 'expired', 'hub', 'busy', 'directory'] as const;
 export const OrgRefusalSchema = z.strictObject({ code: z.enum(ORG_REFUSALS), detail: z.string().optional() });
 export type OrgRefusal = z.infer<typeof OrgRefusalSchema>;
 

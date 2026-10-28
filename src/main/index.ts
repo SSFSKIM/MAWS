@@ -25,6 +25,12 @@ import { startMachineIdentity } from './machine/identity'; // P5 O6 M1
 import { bindLocalMachine } from './machine/local'; // P5 O6 M2
 import { startMachines } from './machines'; // P5 O6 M3: the connection manager, and the stand-in behind its gate
 import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2
+import { powerMonitor } from 'electron'; // P5 O8 M1: the Registry feed reconnects at wake and unlock
+import { createStepUp } from './device/step-up'; // P5 O8 M1: the org session's signer
+import { openExternalUrl } from './open-external'; // P5 O8 M1: the Access login's browser trip
+import { createOrgSession } from './org/org-session'; // P5 O8 M1
+import { createRegistryFeed } from './org/registry-feed'; // P5 O8 M1
+import { registerOrgHandlers } from './org/register'; // P5 O8 M1
 // C3 end
 // C4 start (emit comes with C3's imports)
 import { startIndexAttention } from './index/attention-service';
@@ -257,6 +263,23 @@ void startWithProfileLock(app, () => {
   registerPtyOpenLink();
   // C9 block end
   const hosts = createHosts(MAIN_BUILD); // E11 §2.7: main's build for host.status
+  // P5 O8 M1: this profile's org session (src/main/org/org-session.ts): the sign-in from a pairing code, the held org
+  // state and the hub's credential, read from <userData>/org/ in the background; a profile that never signs in makes no
+  // keys, files or requests. One Registry feed (?app=1) follows the hub for it, and org.* answers the Org section.
+  const orgSession = createOrgSession({
+    userData: app.getPath('userData'),
+    build: `${MAIN_BUILD.version}+${MAIN_BUILD.commit}`,
+    packaged: app.isPackaged,
+    env: process.env,
+    openExternal: openExternalUrl,
+    stepUp: (keys, device) => createStepUp({ device, key: keys.stepUp }),
+    log: (line) => console.log(line),
+  });
+  const orgFeed = createRegistryFeed({ session: orgSession, log: (line) => console.log(line) });
+  orgSession.attach(orgFeed);
+  registerOrgHandlers({ register: registerMainHandler, emit: (name, status) => void emit(name, status), service: orgSession, development: null });
+  powerMonitor.on('resume', () => orgFeed.probe());
+  powerMonitor.on('unlock-screen', () => orgFeed.probe());
   // P5 O6 M3: every other machine through the connection manager (one link per machine; MAWS_LOCAL_MACHINES names another
   // profile's serve directory in a build that is not packaged), and machines.list and machines.changed
   const machines = startMachines({
@@ -880,4 +903,8 @@ void startWithProfileLock(app, () => {
   // is ever stopped.
   machines.serve();
   shutdown.add('machines', () => machines.stop());
+  shutdown.add('org', () => {
+    orgFeed.close();
+    return orgSession.close();
+  });
 }, { build: MAIN_BUILD, onSecondInstance: answerSecondLaunch }); // E11 §2.7
