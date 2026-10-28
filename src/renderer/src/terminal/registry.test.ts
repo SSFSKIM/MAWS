@@ -12,8 +12,11 @@ import type { TerminalTheme } from './renderer';
 import { TerminalRegistry, type Adopting } from './registry';
 import { alignReplay, explicitModes, INITIAL_STREAM } from './replay';
 import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
+import { addressOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 
-const A = 'session-a' as AppSessionId;
+const A = at('session-a' as AppSessionId);
 const KiB = 1024;
 const bytes = (text: string) => new TextEncoder().encode(text);
 const filled = (length: number, char = 'x') => bytes(char.repeat(length));
@@ -37,7 +40,7 @@ const fail = (code: Failure['code'], message: string) => new Failure(code, messa
 
 // A bridge whose commands answer from handlers (a returned promise holds the reply) and whose events the test emits.
 function fakeBridge() {
-  const listeners = new Map<string, Set<(payload: unknown) => void>>();
+  const listeners = new Map<string, Set<(payload: unknown, from: { machine: MachineRef }) => void>>();
   const calls: { name: string; input: unknown }[] = [];
   let ptys = 0;
   const handlers: Record<string, Handler> = {
@@ -47,6 +50,7 @@ function fakeBridge() {
     'pty.foreground': () => ({ process: 'zsh', busy: false }),
   };
   const bridge = {
+    localMachine: TEST_MACHINE,
     async invoke(name: CommandName, input: unknown) {
       calls.push({ name, input });
       const handler = handlers[name];
@@ -54,7 +58,7 @@ function fakeBridge() {
       if (value instanceof Failure) return { ok: false, error: { code: value.code, message: value.message } };
       return { ok: true, value };
     },
-    on(name: EventName, listener: (payload: unknown) => void) {
+    on(name: EventName, listener: (payload: unknown, from: { machine: MachineRef }) => void) {
       const set = listeners.get(name) ?? new Set();
       set.add(listener);
       listeners.set(name, set);
@@ -66,8 +70,8 @@ function fakeBridge() {
     handlers,
     calls,
     inputs: (name: CommandName) => calls.filter((c) => c.name === name).map((c) => c.input as Record<string, unknown>),
-    emit<N extends EventName>(name: N, payload: EventPayload<N>) {
-      listeners.get(name)?.forEach((cb) => cb(payload));
+    emit<N extends EventName>(name: N, payload: EventPayload<N>, machine: MachineRef = TEST_MACHINE) {
+      listeners.get(name)?.forEach((cb) => cb(payload, { machine }));
     },
     data(ptyId: string, offset: number, data: Uint8Array<ArrayBuffer>) {
       this.emit('pty.data', { ptyId: ptyId as PtyId, offset, data });
@@ -574,6 +578,23 @@ describe('terminal registry lifecycle', () => {
     // The lost handle no longer receives or acknowledges anything under its old id.
     ipc.data(live.ptyId, 0, bytes('late'));
     expect(live.renderer.writes).toEqual([]);
+  });
+
+  // P5 O6 M3/M4 (the branch review): `pty.hostState` crosses machine links, so another machine's pty host leaving takes
+  // only that machine's terminals, and each machine's revisions are judged apart.
+  it('a host crash on one machine loses only that machine’s terminals, each machine’s revisions judged apart', async () => {
+    const registry = makeRegistry();
+    const local = await openRunning(registry, 't1');
+    const id = registry.open({ appSessionId: addressOf(OTHER_MACHINE, 'session-b' as AppSessionId), label: 't2', cwd: '/tmp/b' });
+    registry.mount(id, parent());
+    await settle();
+    const crashedB: HostState = { state: 'crashed', pid: null, restarts: 9, revision: 50 };
+    ipc.emit('pty.hostState', crashedB, OTHER_MACHINE);
+    expect(registry.get(id)!.info.status, 'B’s terminal goes with B’s host').toBe('lost');
+    expect(registry.get(local.id)!.info.status, 'A’s terminal is untouched').toBe('running');
+    expect(registry.host(), 'the local host state stays the local machine’s').toMatchObject({ state: 'ready', revision: 1 });
+    ipc.emit('pty.hostState', { state: 'crashed', pid: null, restarts: 1, revision: 2 }, TEST_MACHINE);
+    expect(registry.get(local.id)!.info.status, 'A’s own crash, at a revision under B’s, still counts').toBe('lost');
   });
 
   it('respawns a lost terminal with its cwd and label in the same handle, the old screen cleared', async () => {
