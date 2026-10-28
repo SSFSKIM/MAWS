@@ -169,13 +169,17 @@ describe('the v2 notice', () => {
     const shown = describeNotice(parseNotice(wrote));
     expect(shown.title).toBe('A session sent you a message');
     expect(shown.options.body).toBe('Open MAWS to read it');
-    expect(shown.options.tag).toBe(`cards/${MACHINE}/${SESSION}`);
+    expect(shown.options.tag).toBe(`wrote/${MACHINE}/${SESSION}`);
     expect(shown.options.data).toEqual({ url: '/cards' });
   });
 
-  it("tags one notification per session, so a repeat (or the session's next notice) replaces it", () => {
-    expect(describeNotice(parseNotice(waiting)).options.tag).toBe(describeNotice(parseNotice(wrote)).options.tag);
+  it('tags one notification per session and kind, so a repeat replaces its own kind', () => {
+    expect(describeNotice(parseNotice(waiting)).options.tag).toBe(describeNotice(parseNotice({ ...waiting })).options.tag);
     expect(describeNotice(parseNotice({ ...waiting, session: 'other' })).options.tag).toBe(`cards/${MACHINE}/other`);
+  });
+
+  it("never lets a session's message hide its waiting notice: the two kinds carry different tags", () => {
+    expect(describeNotice(parseNotice(waiting)).options.tag).not.toBe(describeNotice(parseNotice(wrote)).options.tag);
   });
 
   it('encodes a machine ref or session id that is not URL-safe in the landing', () => {

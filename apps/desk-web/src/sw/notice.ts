@@ -98,20 +98,21 @@ const WORDS: Record<PushNotice['kind'], { title: string; body: (alias: string | 
   message: { title: 'sent you a message', body: (alias) => (alias ? `Opens in ${named(alias)}’s channel` : 'Opens in its channel') },
 };
 
-const WORDS_V2: Record<NoticeV2['kind'], { title: string; body: string }> = {
-  waiting: { title: 'A session is waiting for your answer', body: 'Opens at its cards' },
-  wrote: { title: 'A session sent you a message', body: 'Open MAWS to read it' },
+const WORDS_V2: Record<NoticeV2['kind'], { title: string; body: string; tag: string }> = {
+  waiting: { title: 'A session is waiting for your answer', body: 'Opens at its cards', tag: 'cards' },
+  wrote: { title: 'A session sent you a message', body: 'Open MAWS to read it', tag: 'wrote' },
 };
 
 /**
  * The notification for a notice; for null (a payload the worker cannot read), a plain prompt to open the desk. A v2
- * notice is tagged by its session, so the session's next notice replaces it.
+ * notice is tagged by its kind and session, so a repeat replaces its own kind and a session's message never hides the
+ * notice that it is waiting.
  */
 export function describeNotice(notice: Notice | null): NoticeDisplay {
   if (notice === null) return { title: 'The desk', options: { body: 'Something needs you. Open the desk to see it.', data: { url: '/' } } };
   if ('v2' in notice) {
     const words = WORDS_V2[notice.kind];
-    return { title: words.title, options: { body: words.body, tag: `cards/${notice.machine}/${notice.session}`, data: { url: noticeUrl(notice) } } };
+    return { title: words.title, options: { body: words.body, tag: `${words.tag}/${notice.machine}/${notice.session}`, data: { url: noticeUrl(notice) } } };
   }
   const words = WORDS[notice.kind];
   const card = notice.event ? `event/${notice.event.writer}/${notice.event.seq}` : `request/${notice.request}`;
