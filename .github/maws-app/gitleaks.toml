@@ -67,6 +67,13 @@ regexTarget = "match"
 regexes = ['''^(?:key|authenticatorData)": "[A-Za-z0-9_-]{43,50}"?$''']
 
 [[allowlists]]
+description = "The protocol package's provisioning-code vectors (apps/org-protocol/vectors/vectors.json, P5 O14 M1): the legacy org key a vector code carries is the bytes 0x40, 0x41, … 0x5f in base64url, a fixed test value gitleaks finds inside the code's base64 text"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^apps/org-protocol/vectors/vectors\.json$''']
+regexes = ['''^QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8$''']
+
+[[allowlists]]
 description = "RFC 6455's sample Sec-WebSocket-Key (§1.3, 'the sample nonce'), in desk-hub's upgrade tests"
 targetRules = ["generic-api-key"]
 regexes = ['''^dGhlIHNhbXBsZSBub25jZQ==$''']

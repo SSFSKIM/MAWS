@@ -56,10 +56,11 @@ umask 077
 mkdir -p $OUT || exit 2
 LOG=$OUT/staging-deploy-$(date -u +%Y%m%dT%H%M%SZ).log
 cd $D || exit 2
-${=DESK_HEAVY_WRAPPER} pnpm --filter desk-web build 2>&1 | tail -3
+# The web label, which the build carries (the phone's channel handshake names it, `h1.build`) and the deploy stamps.
+L=$(git rev-parse --abbrev-ref HEAD).$(git rev-parse --short=8 HEAD)
+VITE_DESK_WEB_BUILD=$L ${=DESK_HEAVY_WRAPPER} pnpm --filter desk-web build 2>&1 | tail -3
 (( ${pipestatus[1]} == 0 )) || { print -r -- "the web build failed: stop"; exit 5; }
 [[ -f $D/apps/desk-web/dist/index.html ]] || { print -r -- "no web build: stop"; exit 5; }
-L=$(git rev-parse --abbrev-ref HEAD).$(git rev-parse --short=8 HEAD)
 build() { curl -q -sI --max-time 30 -X POST https://$1/machine/enroll | /usr/bin/grep -i '^x-desk-build:' | tr -d '\r'; }
 print -r -- "deploying staging hub@$(git rev-parse --short=8 HEAD) web@$L" | tee $LOG
 print -r -- "production before: $(build $PRODUCTION_HOST)" | tee -a $LOG

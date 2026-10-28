@@ -13,8 +13,12 @@
 #   relay-measure            `deployment relay-measure` under staging-ssfskim
 #   access-sync              `deployment access-sync`: the people policy read back at the org state's head
 #   admin <args…>            `deployment admin <args…>` against staging-ssfskim with the admin device's keys: adopt,
-#                            devices, refresh run unattended; pair and remove-device confirm at /dev/tty, and pair's
-#                            code goes to the terminal alone, never to the log
+#                            devices, refresh, show run unattended; every verb that signs, posts or deletes confirms at
+#                            /dev/tty, and a pairing or enrollment code goes to the terminal alone, never to the log
+#   admin --pipe <verb…>     the secret-stream mode, for delegation create and code strip-legacy alone: the token in the
+#                            command's environment, its stdin and stdout untouched and unlogged, its stderr alone
+#                            filtered and logged; refused when stdout is a terminal (production-run.sh's, the same);
+#                            delegation create posts no state; admin delegation publish alone posts its proposal
 #   throwaway <n>            staging deployed under the throwaway org staging-probe-<n>, fake-check and redeploy-check
 #                            there, the account swept (staging-sweep.py), staging restored under staging-ssfskim
 #   desk-web <n>             the same around acceptance 8's desk-web check (apps/desk-web/e2e-staging) in place of
@@ -70,6 +74,10 @@ owner_token() {
   [[ -n $T && $T == eyJ* ]] || { print -r -- "no staging Access token: the owner runs 'cloudflared access login $URL' first. Nothing was changed."; exit 2; }
 }
 deployment() { pnpm -s -C $W --filter desk-hub deployment "$@" --config deploy/staging.json; }
+# The same command for the secret-stream mode, launched as the package's `deployment` script launches it but not through
+# pnpm, whose recursive runner writes its own failure lines (ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL, the checkout's path) to
+# stdout even under -s: there stdout is the secret stream, and holds the command's own output alone.
+direct() { ( cd $W/apps/desk-hub && node --experimental-strip-types --disable-warning=ExperimentalWarning deploy/bin.ts "$@" --config deploy/staging.json ); }
 step=$1; (( $# )) && shift
 case $step in
   prod)
@@ -144,12 +152,37 @@ case $step in
     rc=${pipestatus[2]}; unset secrets
     print -r -- "access-sync exit $rc; checkpoint: $(cat $O/access-sync/$STAGING_WORKER.json 2>/dev/null)"; exit $rc ;;
   admin)
-    [[ -f $H/keys.json ]] || { print -r -- "no admin device keys at $H/keys.json (DESK_STAGING_DEVICE): stop"; exit 2; }
+    pipe=0
+    [[ $1 == --pipe ]] && { pipe=1; shift; }
+    # In the secret-stream mode stdout is the code's pipe: every line of the runner's own goes to stderr.
+    say() { if (( pipe )); then print -r -- "$*" >&2; else print -r -- "$*"; fi; }
+    sub=$1
+    verb="$1${2:+ $2}"
+    if (( pipe )); then
+      [[ $verb == ("delegation create"|"code strip-legacy") ]] || { say "admin --pipe is for delegation create and code strip-legacy alone, the verbs whose stdout is a secret code (given: ${verb:-nothing}): stop. Nothing was changed."; exit 2; }
+      [[ -t 1 ]] && { say "admin --pipe: stdout is a terminal, and the code goes only to a pipe: stop. Nothing was changed."; exit 2; }
+    else
+      [[ $verb == "delegation create" || $sub == code ]] && { say "admin $verb writes a secret code to stdout, which this step filters and logs: run it as 'staging-run.sh admin --pipe $verb … | <its destination>': stop. Nothing was changed."; exit 2; }
+    fi
+    [[ $verb == "code strip-legacy" || -f $H/keys.json ]] || { say "no admin device keys at $H/keys.json (DESK_STAGING_DEVICE): stop"; exit 2; }
     # The step names the deployment and the keys itself; staging's admin device is O11's test device, adopted, not made.
-    [[ $1 == init ]] && { print -r -- "admin init: staging's admin device exists ($H/keys.json); run admin adopt: stop. Nothing was changed."; exit 2; }
+    [[ $1 == init ]] && { say "admin init: staging's admin device exists ($H/keys.json); run admin adopt: stop. Nothing was changed."; exit 2; }
     for a in "$@"; do
-      [[ $a == (--hub|--user|--yes|--config|--keys)(|=*) ]] && { print -r -- "admin takes no $a here: the step acts on staging with $H/keys.json, confirming at /dev/tty: stop. Nothing was changed."; exit 2; }
+      [[ $a == (--hub|--user|--yes|--config|--keys)(|=*) ]] && { say "admin takes no $a here: the step acts on staging with $H/keys.json, confirming at /dev/tty: stop. Nothing was changed."; exit 2; }
     done
+    if (( pipe )); then
+      # As production-run.sh's: the token in the environment alone, stdout to the pipe, stderr alone filtered and logged.
+      unsetopt multios
+      LOG=$O/admin-${sub}-pipe-$(stamp).log
+      if [[ $sub == code ]]; then
+        { direct admin "$@" 2>&1 1>&3 3>&- | filter | tee -a $LOG >&2; rc=${pipestatus[1]}; } 3>&1
+      else
+        owner_token >&2
+        { DESK_ACCESS_TOKEN=$T direct admin "$@" --keys $H/keys.json 2>&1 1>&3 3>&- | filter | tee -a $LOG >&2; rc=${pipestatus[1]}; } 3>&1
+        unset T
+      fi
+      say "admin exit $rc; log $LOG (stderr alone: stdout went to the pipe)"; exit $rc
+    fi
     owner_token
     LOG=$O/admin-$(stamp).log
     printf 'DESK_ACCESS_TOKEN=%s\n' "$T" | deployment admin "$@" --keys $H/keys.json 2>&1 | filter | tee -a $LOG
@@ -217,5 +250,5 @@ case $step in
       (( holding == 0 )) || checks+=(1)
     fi
     exit 0 ;;
-  *) print -r -- "prod <label> | deploy | build | acceptance [--no-push] | relay-measure | access-sync | admin <args…> | throwaway <n> | desk-web <n>"; exit 2 ;;
+  *) print -r -- "prod <label> | deploy | build | acceptance [--no-push] | relay-measure | access-sync | admin [--pipe] <args…> | throwaway <n> | desk-web <n>"; exit 2 ;;
 esac

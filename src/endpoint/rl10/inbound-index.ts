@@ -38,6 +38,11 @@ export class InboundIndex {
     return this.#load(project).byPosition.get(`${writer}\n${seq}`) ?? null;
   }
 
+  /** Drops what was read: `inbound/` was moved aside (an enrollment under another authority), and is read anew. */
+  forget(): void {
+    this.#projects.clear();
+  }
+
   /** Records content new to `project` at its position, on disk before it returns. */
   record(project: string, content: string, writer: string, seq: number): void {
     const entry: Entry = { content, writer, seq, at: this.#now() };

@@ -12,10 +12,10 @@ const sha = '512107c14abcdef0512107c14abcdef0512107c1';
 
 // The summary line for a run's jobs ("conclusion<TAB>name", sorted by name as ci-gate.sh sorts them) and failed log,
 // under ci-gate.sh's flags.
-function refusals(jobs, log, { gates = 'all', runner = 'macos', class1a = 'pool', live = '', lane = '', default_beside = '', label = 'f1-landing', relaunch_peer } = {}) {
+function refusals(jobs, log, { gates = 'all', runner = 'macos', class1a = 'pool', live = '', lane = '', hosted_route = '', default_beside = '', label = 'f1-landing', relaunch_peer } = {}) {
   return execFileSync('bash', ['-c', 'set -uo pipefail; source "$0"; refusals "$1" "$2"', join(root, 'scripts/ci-gate-refusals.sh'), jobs.join('\n'), log.join('\n')], {
     encoding: 'utf8',
-    env: { ...process.env, sha, gates, runner, class1a, live, lane, default_beside, label, ...(relaunch_peer !== undefined && { relaunch_peer }) },
+    env: { ...process.env, sha, gates, runner, class1a, live, lane, hosted_route, default_beside, label, ...(relaunch_peer !== undefined && { relaunch_peer }) },
   });
 }
 
@@ -191,4 +191,10 @@ test("a run's peer goes into its relaunch as resolved, a sha or none, for its re
   const planRefused = ['failure\tplan', 'skipped\te2e:cross-build'];
   assert.match(refusals(planRefused, [refusal('plan')], { relaunch_peer: 'none', gates: 'static,unit,probes' }), / --class1a pool --peer none --gates static,unit,probes --label /);
   assert.doesNotMatch(refusals(crossRun, [refusal('e2e:cross-build')]), /--peer/);
+});
+
+test('a refused admission run relaunches with its explicit hosted route', () => {
+  for (const hosted_route of ['direct', 'mirror']) {
+    assert.match(refusals(run(), [refusal('e2e:default')], { hosted_route }), new RegExp(`--hosted-route ${hosted_route} `));
+  }
 });

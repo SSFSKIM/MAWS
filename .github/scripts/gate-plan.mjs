@@ -69,6 +69,11 @@
 // `Lane: vm` or `vm-trial` a group on both lists goes to the guest. A hosted entry carries `hosted: true`, the waiter's
 // box and timeout and no variant; it stays in `e2e` (default's derivation, the pool-demand hint) and makes `e2e_hosted`,
 // the e2e-hosted job's matrix, and the pool flag; never `e2e_host`, `e2e_vm` or `e2e_build`.
+// HOSTED_MAC_ROUTE defaults to mirror. Hosted-Route: (the dispatch's hosted_route input) overrides it per run.
+// Under direct the same eligible groups instead enter e2e_host on macos-26, building their own out/, with no pool
+// demand. The peer exclusion is mirror-only: MAWS's own checkout can fetch its peer. Unsigned packaged can also
+// take the direct Mac on a macOS lane when HOSTED_MAC_JOBS admits it, except on reserved final refs. Lane moves
+// e2e groups only; packaged is unadmitted until its hosted failures are fixed and it passes 3/3.
 // The peer groups (PEER_E2E; the two-build check, e2e/cross-build.spec.ts): each runs this tree's app against another
 // build's supervisor on one profile, and the reverse. The other build is the commit of the `Peer:` trailer (a push only),
 // which scripts/ci-gate.sh resolves (the merge base with master, unless its --peer names another) beside each tree's
@@ -76,9 +81,10 @@
 // major the plan adds the peer groups itself to a run that tests code, one whose gates hold unit (or unit:darwin) or an
 // e2e group, so every WIRE_MINOR bump is checked without anyone asking, class 1a and the default set included, while a
 // static or probes check stays quick; not to a live run (its live groups alone) nor a `Selection: affected` one (never
-// landing evidence). A peer group's job fetches the
-// peer's one commit and builds it beside this tree (gate.yml), so it takes the Mac's exclusive instance whatever the lane:
-// never a hosted Mac (maws-app holds one filtered tree and no history to fetch a peer from), the shared instances or the
+// landing evidence). gate-peer-held supplies PEER_HELD_BY when an older run holds this tree and peer's check,
+// suppressing the automatic join but never an explicit request. A peer group's job fetches the
+// peer's one commit and builds it beside this tree (gate.yml), so outside direct hosting it takes the Mac's exclusive
+// instance: never a mirror job (maws-app has no history to fetch a peer from), the shared instances or the
 // guest. Its entry carries the `peer` sha; asked for without a Peer: trailer it has none, and its spec runs nothing.
 // Writes the switches, the runners and the e2e matrix to the job's outputs and the set to its summary. Run from the
 // checkout's root.
@@ -119,6 +125,7 @@ export function planOf(env, scripts) {
   const RUNNERS = {
     linux: 'ubuntu-24.04',
     macos: ['self-hosted', 'macOS', 'ARM64'],
+    macHosted: 'macos-26',
     macHome: ['self-hosted', 'macOS', 'ARM64', 'ci-kit-mac-home'],
     macShared: ['ci-kit-mac-shared'],
     // ci-kit's VM lane: the exclusive instance or the guest; the guest alone; the guest under the trial slot's identity.
@@ -167,6 +174,9 @@ export function planOf(env, scripts) {
   const laneAsked = ((dispatched ? env.INPUT_LANE : trailer('Lane')) || '').toLowerCase();
   if (laneAsked && !Object.hasOwn(LANES, laneAsked) && laneAsked !== 'hosted' && laneAsked !== 'no-hosted') refuse(`no such lane: ${laneAsked} (vm, vm-trial, hosted or no-hosted, through ci-gate.sh --lane; none for the default routing)`);
   const vmLane = Object.hasOwn(LANES, laneAsked) ? laneAsked : '';
+  const hostedRoute = ((dispatched ? env.INPUT_HOSTED_ROUTE : trailer('Hosted-Route')) || env.HOSTED_MAC_ROUTE || 'mirror').toLowerCase();
+  if (!['mirror', 'direct'].includes(hostedRoute)) refuse(`no such hosted route: ${hostedRoute} (mirror or direct)`);
+  const direct = hostedRoute === 'direct';
 
   const evidence = dispatched ? env.INPUT_EVIDENCE === 'true' : trailer('Evidence')?.toLowerCase() === 'yes';
   const live = dispatched ? env.INPUT_LIVE === 'true' : trailer('Live')?.toLowerCase() === 'yes';
@@ -189,8 +199,16 @@ export function planOf(env, scripts) {
   const [treeWire, peerWire] = [wireOf('Wire'), wireOf('Peer-Wire')];
   const minorApart = peer !== '' && treeWire !== null && peerWire !== null && treeWire.major === peerWire.major && treeWire.minor !== peerWire.minor;
   const testsCode = [...gates].some((gate) => gate === 'unit' || gate === 'unit:darwin' || gate.startsWith('e2e:'));
-  const peerJoined = minorApart && testsCode && !live && !trailer('Selection') ? [...peerGroups].filter((group) => scriptOf(group) in scripts && !gates.has(`e2e:${group}`)) : [];
+  // Expose eligibility before deduplication to gate-peer-held: a candidate uses this same rule, including when it
+  // explicitly requested a peer group. PEER_HELD_BY suppresses only additions, never a group already in Gates.
+  const peerCheck = { peer, minorApart, groups: minorApart && testsCode && !live && !trailer('Selection') ? [...peerGroups].filter((group) => scriptOf(group) in scripts) : [] };
+  const peerAdditions = peerCheck.groups.filter((group) => !gates.has(`e2e:${group}`));
+  const heldBy = /^(\d+) (queued|in_progress|waiting|succeeded|plan (?:queued|in_progress|waiting|pending|requested))$/.exec(env.PEER_HELD_BY ?? '');
+  const peerJoined = heldBy ? [] : peerAdditions;
   for (const group of peerJoined) gates.add(`e2e:${group}`);
+  // The missing Mac job is replaced by a hosted-Linux verdict waiter, never by an unobserved dependency. The mini's
+  // queue has reached 71 minutes before the peer job's 25-minute bound; leave both room within the hosted job's limit.
+  const peerWait = heldBy ? peerAdditions.map((group) => ({ group, run: heldBy[1], timeout: 180, wait: 175 })) : [];
 
   const unknown = [...gates].filter((gate) => !['static', 'unit', 'unit:darwin', 'probes', 'packaged'].includes(gate) && !(gate.startsWith('e2e:') && scriptOf(gate.slice(4)) in scripts));
   if (unknown.length > 0) refuse(`no such gate: ${unknown.join(', ')} (static, unit, unit:darwin, probes, packaged, e2e:default or e2e:<group> with a package.json script)`);
@@ -244,7 +262,7 @@ export function planOf(env, scripts) {
   const secret = new Set(words(env.MAC_SECRET_E2E));
   const liveOnes = new Set([...words(env.LIVE_E2E), ...words(env.LIVE_GUARD_E2E)]);
   const notHosted = (group) =>
-    [group === 'default' && 'default', measured.has(group) && 'measured', liveOnes.has(group) && 'live', secret.has(group) && 'secret', home.has(group) && 'home', offMac.has(group) && 'pool', peerGroups.has(group) && 'peer'].filter(Boolean);
+    [group === 'default' && 'default', measured.has(group) && 'measured', liveOnes.has(group) && 'live', secret.has(group) && 'secret', home.has(group) && 'home', offMac.has(group) && 'pool', !direct && peerGroups.has(group) && 'peer'].filter(Boolean);
   const named = (groups, prefix = '') => groups.map((group) => `${prefix}${group} (${notHosted(group).join(', ')})`).join(', ');
   const listedHosted = words(env.HOSTED_MAC_E2E);
   const contradictions = listedHosted.filter((group) => notHosted(group).length > 0);
@@ -260,6 +278,10 @@ export function planOf(env, scripts) {
   // 95-minute deadline and under the pool's 120-minute bound on a box's run.
   const HOSTED_WAITER = poolBox(2);
   const HOSTED_TIMEOUT_MINUTES = 100;
+  // Cold hosted setup/build and the slower CPU, not queue/waiter time. Mirror runs 40631170883 (document)
+  // and 40631172347 (terminal) took 2m51s and 4m11s; the original spike's slowest groups took 14m.
+  // Keep each group's own budget, adding 15 minutes for that overhead, also for the peer's second build.
+  const HOSTED_MARGIN_MINUTES = 15;
   // A peer group's minutes: the peer's fetch, install and build, this tree's build and the spec's two crossings, which
   // took 3 min 22 s on the mini (run 40495960740: the peer 47 s, this tree's build 40 s, the crossings 1.4 min), four
   // times over for a cold store or a slow Mac.
@@ -269,14 +291,15 @@ export function planOf(env, scripts) {
     .map((gate) => {
       const group = gate.slice(4);
       const hosted = hostedOf(group);
-      const where = hosted ? HOSTED_WAITER : placed(group);
+      const where = hosted ? (direct ? RUNNERS.macHosted : HOSTED_WAITER) : placed(group);
       const runner = JSON.stringify(where);
       const guest = GUEST.includes(where) ? { variant: variantOf(group) } : {};
-      const timeout = hosted ? HOSTED_TIMEOUT_MINUTES : timeoutOn(where, measured.has(group) ? 45 : peerGroups.has(group) ? PEER_MINUTES : 30);
+      const minutes = measured.has(group) ? 45 : peerGroups.has(group) ? PEER_MINUTES : 30;
+      const timeout = hosted ? (direct ? minutes + HOSTED_MARGIN_MINUTES : HOSTED_TIMEOUT_MINUTES) : timeoutOn(where, minutes);
       return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group), poppler: poppler.has(group), measured: measured.has(group), ...(hosted && { hosted }), runner, timeout, ...guest, ...(peerGroups.has(group) && peer && { peer }) };
     });
-  const e2eHosted = e2e.filter((entry) => entry.hosted);
-  const e2eHost = e2e.filter((entry) => entry.variant === undefined && !entry.hosted);
+  const e2eHosted = e2e.filter((entry) => entry.hosted && !direct);
+  const e2eHost = e2e.filter((entry) => entry.variant === undefined && (!entry.hosted || direct));
   const e2eVm = e2e.filter((entry) => entry.variant !== undefined);
   const e2eBuild = [...new Set(e2eVm.map((entry) => entry.variant))].sort();
   const unitDarwinRunner = onMac('unit:darwin');
@@ -304,8 +327,15 @@ export function planOf(env, scripts) {
     packaged: has('packaged'), evidence: String(evidence), live: String(live), default_beside: JSON.stringify(defaultBeside),
     unit_shards: JSON.stringify(unitShards), unit_darwin_runner: JSON.stringify(unitDarwinRunner), timeouts: JSON.stringify(timeouts),
     e2e_host: JSON.stringify(e2eHost), e2e_vm: JSON.stringify(e2eVm), e2e_build: JSON.stringify(e2eBuild), e2e_build_runner: JSON.stringify(E2E_BUILD_BOX),
-    e2e_hosted: JSON.stringify(e2eHosted),
+    e2e_hosted: JSON.stringify(e2eHosted), peer_wait: JSON.stringify(peerWait),
   };
+  // No signing credentials: build:app disables identity discovery, mac.identity is null, and the helper
+  // only invokes swiftc. Its bare suite still needs admission: Lane is an e2e override, not a packaged trial.
+  const packagedHosted = direct && words(env.HOSTED_MAC_JOBS).includes('packaged') && lane === 'macos' && finalRef === undefined;
+  if (packagedHosted) {
+    outputs.packaged_runner = JSON.stringify(RUNNERS.macHosted);
+    outputs.timeouts = JSON.stringify({ ...timeouts, packaged: 30 + HOSTED_MARGIN_MINUTES });
+  }
   const from = words(asked).length > 0 ? (dispatched ? 'the `gates` input' : 'the `Gates:` trailer') : 'the default (class 1a, with unit:darwin and class 1 e2e on a macOS lane)';
   const beside = defaultBeside.length > 0 ? ` Default beside: ${defaultBeside.join(', ')}.` : '';
   // The groups placed off the lane's runner: on the pool, or on the hosted Linux runner beside a macOS lane.
@@ -322,9 +352,10 @@ export function planOf(env, scripts) {
   const keptForFinal = finalRef !== undefined && e2e.some((entry) => hostable(entry.group));
   const hostedNote =
     (keptForFinal ? ` On the reserved final ref ${finalRef}, so no group of this run is hosted: a group's final bundle is written only on the runner that ran it.` : '') +
-    said('Hosted Mac (SSFSKIM/maws-app, each through a waiter on the pool)', e2eHosted.map((entry) => `e2e:${entry.group}`)) +
+    said(direct ? 'Hosted Mac (direct, macos-26)' : 'Hosted Mac (SSFSKIM/maws-app, each through a waiter on the pool)', e2e.filter((entry) => entry.hosted).map((entry) => `e2e:${entry.group}`)) +
+    (packagedHosted && gates.has('packaged') ? ' Hosted Mac (direct, macos-26): packaged.' : '') +
     (keptOffHosted.length > 0 ? ` Lane: hosted, but never on a hosted Mac, so where it would be: ${named(keptOffHosted, 'e2e:')}.` : '') +
-    (laneAsked === 'hosted' && e2eHosted.length === 0 && keptOffHosted.length === 0 && !keptForFinal ? ' Lane: hosted, but no e2e group of this run is hosted.' : '') +
+    (laneAsked === 'hosted' && !e2e.some((entry) => entry.hosted) && keptOffHosted.length === 0 && !keptForFinal ? ' Lane: hosted, but no e2e group of this run is hosted.' : '') +
     (laneAsked === 'no-hosted' ? ' Lane: no-hosted, so no group of this run is hosted.' : '');
   const laneNote = !vmLane ? '' : laneJobs.length > 0 ? said(`Lane: ${vmLane}, on [${LANES[vmLane]}] alone`, laneJobs) : ` Lane: ${vmLane}, but no job of this run is on MAC_VM_E2E.`;
   const macNote =
@@ -338,9 +369,14 @@ export function planOf(env, scripts) {
     said('Out/ built on the pool (e2e-build) for the guest-eligible jobs', e2eBuild) +
     hostedNote;
   // The peer, when a trailer names one, and the groups its minor brought in.
-  const peerLine = peer === '' ? '' : `Peer: ${peer.slice(0, 8)}${peerWire ? `, wire ${peerWire.text}` : ''}${treeWire ? `; this tree's ${treeWire.text}` : ''}${minorApart ? ', a minor apart' : ''}${peerJoined.length > 0 ? `, so ${peerJoined.map((group) => `e2e:${group}`).join(', ')} joined` : minorApart && !testsCode ? ', but the peer groups join only a run with unit or an e2e group' : ''}.`;
+  const peerLine = peer === '' ? '' : `Peer: ${peer.slice(0, 8)}${peerWire ? `, wire ${peerWire.text}` : ''}${treeWire ? `; this tree's ${treeWire.text}` : ''}${minorApart ? ', a minor apart' : ''}${heldBy && peerAdditions.length > 0 ? `; ${peerAdditions.map((group) => `e2e:${group}`).join(', ')} ${peerAdditions.length === 1 ? 'is' : 'are'} checked in run ${heldBy[1]} (${heldBy[2]}), so not here` : peerJoined.length > 0 ? `, so ${peerJoined.map((group) => `e2e:${group}`).join(', ')} joined` : minorApart && !testsCode ? ', but the peer groups join only a run with unit or an e2e group' : ''}.`;
+  const peerWaitLine = peerWait.length > 0 ? 'The peer verdict is awaited on hosted Linux; this run fails if its holder does not pass the check.' : '';
   let summary = `### Gates\n\n${[...gates].map((gate) => `- \`${gate}\``).join('\n')}\n\nFrom: ${from}. Class 1a: ${class1a}. E2e lane: ${lane}${pooledNote}.${evidence ? ' Evidence: yes.' : ''}${live ? ' Live: yes (MAWS_LIVE, MAWS_LIBRARY_LIVE, MAWS_LIVE_DOCUMENT at 1).' : ''}${beside}${macNote}${peerLine && ` ${peerLine}`}\n`;
   let stdout = `${[...gates].join('\n')}\nclass 1a: ${class1a}\nlane: ${lane}${pooledNote}\n${live ? 'live: yes\n' : ''}${defaultBeside.length > 0 ? `default beside: ${defaultBeside.join(' ')}\n` : ''}${macNote ? `${macNote.trim()}\n` : ''}${peerLine && `${peerLine}\n`}`;
+  if (peerWaitLine) {
+    summary += `\n${peerWaitLine}\n`;
+    stdout += `${peerWaitLine}\n`;
+  }
   if (selection) {
     const line = selection.related
       ? `Selection: affected — ${selection.paths} paths, unit runs vitest related`
@@ -350,7 +386,7 @@ export function planOf(env, scripts) {
     summary += `\n${line}\n`;
     stdout += `${line}\n${(selection.related ?? []).map((path) => `  ${path}\n`).join('')}`;
   }
-  return { outputs, summary, stdout };
+  return { outputs, summary, stdout, peerCheck };
 }
 
 // Importing the planner does no I/O. The workflow entry point alone reads its checkout and appends its artifacts.

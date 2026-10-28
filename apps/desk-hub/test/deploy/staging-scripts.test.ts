@@ -1,11 +1,12 @@
 // The staging runner (deploy/staging-run.sh, O11 M8): what it hands the desk-web check, and how it hands curl the
 // owner's token. Offline: the refusals below come before any token is read or any request made.
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { base64urlEncode, encodeProvisioningCodeV2, generateSigningKey, type ProvisioningCodeV2 } from 'org-protocol';
 import { describe, expect, it } from 'vitest';
 
 const deploy = join(import.meta.dirname, '../../deploy');
@@ -79,7 +80,23 @@ describe('the admin step', () => {
     writeFileSync(join(bin, 'cloudflared'), `#!/bin/sh\nprintf '%s' '${token}'\n`, { mode: 0o755 });
     writeFileSync(
       join(bin, 'pnpm'),
-      `#!/bin/sh\nprintf '%s\\n' "$@" > '${dir}/args'\ncat > '${dir}/stdin'\necho 'head version 3, issued 2 days ago'\necho 'a line naming a secret'\necho 'devices listed'\nexit 0\n`,
+      [
+        '#!/bin/sh',
+        `printf '%s\\n' "$@" > '${dir}/args'`,
+        `cat > '${dir}/stdin'`,
+        "echo 'head version 3, issued 2 days ago'",
+        "echo 'a line naming a secret'",
+        "echo 'devices listed'",
+        'exit 0',
+        '',
+      ].join('\n'),
+      { mode: 0o755 },
+    );
+    // The secret-stream mode's launcher (O14 M2): its directory and arguments, the token it found in its environment,
+    // its stdin copied to its stdout.
+    writeFileSync(
+      join(bin, 'node'),
+      `#!/bin/sh\nprintf '%s\\n' "$(pwd)" "$@" > '${dir}/node-args'\nprintf '%s' "\${DESK_ACCESS_TOKEN-unset}" > '${dir}/env'\ntee '${dir}/stdin'\necho 'head version 3, issued 2 days ago' >&2\necho 'a line naming a secret' >&2\nexit 0\n`,
       { mode: 0o755 },
     );
     const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, DESK_STAGING_DIR: join(dir, 'state'), DESK_STAGING_DEVICE: device, DESK_STAGING_SECRETS: join(dir, 'secrets') };
@@ -119,8 +136,121 @@ describe('the admin step', () => {
     expect(readdirSync(none.dir)).not.toContain('args');
   });
 
+  it.skipIf(!zsh)('admin --pipe: the token in the environment, stdin and stdout byte for byte, stderr alone filtered and logged; other verbs refused', () => {
+    const input = 'smns-provision-v1.eyJodWIiOiJ4In0\nno newline at the end';
+    const create = ['delegation', 'create', '--label', 'devcloud', '--prefix', 'dc-', '--code-to-stdout'];
+    const { dir, device, env } = setup();
+    const run = spawnSync('zsh', [runner, 'admin', '--pipe', ...create], { encoding: 'utf8', env: env, input });
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout).toBe(input);
+    expect(readFileSync(join(dir, 'stdin'), 'utf8')).toBe(input);
+    expect(readFileSync(join(dir, 'env'), 'utf8')).toBe(token);
+    expect(readdirSync(dir)).not.toContain('args');
+    const args = readFileSync(join(dir, 'node-args'), 'utf8').trim().split('\n');
+    expect(args[0]).toMatch(/\/apps\/desk-hub$/);
+    expect(args.slice(args.indexOf('deploy/bin.ts'))).toEqual(['deploy/bin.ts', 'admin', ...create, '--keys', `${device}/keys.json`, '--config', 'deploy/staging.json']);
+    expect(run.stderr).toContain('head version 3, issued 2 days ago');
+    expect(run.stderr).not.toContain('secret');
+    const logs = readdirSync(join(dir, 'state')).filter((name) => name.startsWith('admin-delegation-pipe-'));
+    expect(logs).toHaveLength(1);
+    expect(readFileSync(join(dir, 'state', logs[0]), 'utf8')).toBe('head version 3, issued 2 days ago\n');
+    expect(run.stdout + run.stderr + readFileSync(join(dir, 'state', logs[0]), 'utf8')).not.toContain(token);
+
+    for (const refused of [['--pipe', 'devices'], ['--pipe', 'pair', '--class', 'web-cards'], create, ['code', 'strip-legacy']]) {
+      const other = setup();
+      const r = spawnSync('zsh', [runner, 'admin', ...refused], { encoding: 'utf8', env: other.env, input });
+      expect(r.status, refused.join(' ')).toBe(2);
+      expect(r.stdout + r.stderr, refused.join(' ')).toMatch(/admin --pipe is for delegation create and code strip-legacy alone|writes a secret code to stdout/);
+      expect(readdirSync(other.dir), refused.join(' ')).not.toContain('args');
+      expect(readdirSync(other.dir), refused.join(' ')).not.toContain('node-args');
+    }
+  });
+
   it('filters line by line, so what a step asks about at /dev/tty is shown before the question', () => {
     expect(scripts[0].text).toMatch(/^filter\(\) \{ perl -ne 'BEGIN \{ \$\| = 1 \} /m);
+  });
+});
+
+/** A provisioning code with a `legacy` field, and the same code without it: what strip-legacy turns one into. */
+async function sampleCode(): Promise<{ text: string; stripped: string }> {
+  const key = await generateSigningKey(true);
+  const jwk = (await crypto.subtle.exportKey('jwk', key.privateKey)) as JsonWebKey;
+  const code: ProvisioningCodeV2 = {
+    hub: 'https://desk-hub.example',
+    org: 'org-x',
+    roots: [base64urlEncode(crypto.getRandomValues(new Uint8Array(16)))],
+    recoveryPub: (await generateSigningKey()).pub,
+    token: base64urlEncode(crypto.getRandomValues(new Uint8Array(32))),
+    delegation: { id: 'a'.repeat(32), prefix: 'dc-', privateJwk: { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y, d: jwk.d } },
+  };
+  return { text: encodeProvisioningCodeV2({ ...code, legacy: { org: 'org-x', key: base64urlEncode(crypto.getRandomValues(new Uint8Array(32))) } }), stripped: encodeProvisioningCodeV2(code) };
+}
+
+/**
+ * The runner as it is in this checkout, with its real launcher, for `admin --pipe code strip-legacy`: a local transform
+ * that reads no credential and reaches no deployment (a cloudflared that fails, first on PATH, records any call).
+ * stdout is the secret stream, so it must hold the command's own stdout and nothing else, on success and on refusal.
+ */
+async function realStripLegacy(script: string, env: (dir: string) => Record<string, string>) {
+  const scratchDir = mkdtempSync(join(tmpdir(), 'pipe-real-'));
+  const bin = join(scratchDir, 'bin');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'cloudflared'), `#!/bin/sh\necho called >> '${scratchDir}/cloudflared'\nexit 1\n`, { mode: 0o755 });
+  const run = (input: string) => spawnSync('zsh', [script, 'admin', '--pipe', 'code', 'strip-legacy'], { encoding: 'utf8', input, timeout: 120_000, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...env(scratchDir) } });
+  const { text, stripped } = await sampleCode();
+  return { good: run(`${text}\n`), bad: run('not a code\n'), stripped, called: () => existsSync(join(scratchDir, 'cloudflared')) };
+}
+
+describe.skipIf(!zsh)('admin --pipe with the real launcher', () => {
+  it('puts nothing but the command\'s own stdout on the stream: the stripped code, or nothing at all on a refusal', async () => {
+    const { good, bad, stripped, called } = await realStripLegacy(runner, (dir) => ({ DESK_STAGING_DIR: join(dir, 'state'), DESK_STAGING_DEVICE: join(dir, 'device'), DESK_STAGING_SECRETS: join(dir, 'secrets') }));
+    expect(good.status, good.stderr).toBe(0);
+    expect(good.stdout).toBe(`${stripped}\n`);
+    expect(bad.status, bad.stderr).toBe(1);
+    expect(bad.stdout).toBe('');
+    expect(bad.stderr).toMatch(/admin: stdin: provisioning code: not smns-provision-v2/);
+    expect(called()).toBe(false);
+  }, 240_000);
+});
+
+describe('the staging deploy', () => {
+  // `staging-deploy.sh` (O13 M4): the web build carries the label the deploy names with `--web`, as VITE_DESK_WEB_BUILD,
+  // so the phone's channel handshake says which build it runs (`h1.build`, `desk-web/<label>`). Run from a copy in a
+  // throwaway git checkout, with stubs for pnpm (recording the label it builds with and the deploy's arguments), curl and
+  // sleep, and a synthetic secrets directory: nothing reaches staging.
+  it.skipIf(!zsh)('builds desk-web with VITE_DESK_WEB_BUILD set to the --web label', () => {
+    const root = mkdtempSync(join(tmpdir(), 'staging-deploy-'));
+    const [bin, secrets, state, dir] = ['bin', 'secrets', 'state', 'maws'].map((name) => join(root, name));
+    for (const d of [bin, secrets, join(dir, 'apps/desk-hub/deploy')]) mkdirSync(d, { recursive: true });
+    writeFileSync(join(secrets, 'CF_ACCESS_SETUP_TOKEN'), 'setup-SYNTHETIC\n');
+    writeFileSync(join(secrets, 'CF_DESK_HUB_SERVICE_TOKENS'), 'service-SYNTHETIC\n');
+    writeFileSync(
+      join(bin, 'pnpm'),
+      `#!/bin/sh
+case "$*" in
+  *"desk-web build"*) printf '%s\\n' "$VITE_DESK_WEB_BUILD" > '${root}/label'; mkdir -p apps/desk-web/dist && echo built > apps/desk-web/dist/index.html ;;
+  *"deployment deploy"*) printf '%s\\n' "$@" > '${root}/deploy-args'; cat > /dev/null; echo 'wrangler target desk-hub-staging (config worker desk-hub-staging, account a): deploy' ;;
+esac
+exit 0
+`,
+      { mode: 0o755 },
+    );
+    writeFileSync(join(bin, 'curl'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    writeFileSync(join(bin, 'sleep'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    for (const name of ['staging-deploy.sh', 'staging.json']) writeFileSync(join(dir, 'apps/desk-hub/deploy', name), readFileSync(join(deploy, name)));
+    writeFileSync(join(dir, '.gitignore'), 'apps/desk-web/dist/\n');
+    const git = (...args: string[]) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: dir, encoding: 'utf8' });
+    for (const args of [['init', '-q', '-b', 'o13-m4'], ['add', '-A'], ['commit', '-q', '-m', 'one']]) expect(git(...args).status).toBe(0);
+    const head = git('rev-parse', '--short=8', 'HEAD').stdout.trim();
+    const run = spawnSync('zsh', [join(dir, 'apps/desk-hub/deploy/staging-deploy.sh')], {
+      encoding: 'utf8',
+      env: { PATH: `${bin}:${process.env.PATH}`, HOME: root, LANG: 'C', DESK_STAGING_SECRETS: secrets, DESK_STAGING_DIR: state },
+    });
+    expect(run.status, run.stdout + run.stderr).toBe(0);
+    const label = `o13-m4.${head}`;
+    expect(readFileSync(join(root, 'label'), 'utf8').trim()).toBe(label);
+    const args = readFileSync(join(root, 'deploy-args'), 'utf8').trim().split('\n');
+    expect(args[args.indexOf('--web') + 1]).toBe(label);
   });
 });
 

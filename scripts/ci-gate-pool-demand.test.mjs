@@ -216,6 +216,7 @@ printf '%s\\n' "$*" >> '${join(dir, 'gh-calls')}'
 case "$*" in
   'variable get GATE_RUNNER -R SSFSKIM/MAWS') ${failure === 'variable' ? 'exit 1' : 'echo pool'} ;;
   'variable get GATE_E2E_RUNNER -R SSFSKIM/MAWS') echo macos ;;
+  'variable list -R SSFSKIM/MAWS '*) ;;
   *' run list '*) ;;
   *) echo "unexpected gh call: $*" >&2; exit 1 ;;
 esac
@@ -239,6 +240,8 @@ test('ci-gate pushes exactly one Pool-Demand line from the same trailers and pus
     [['--gates', 'static,unit,probes'], '16x1 8x4 2x1', false],
     [['--gates', 'all', '--runner', 'macos'], '16x1 8x4 4x3 2x33', false], // P5 O6 M6: e2e:machines joins HOSTED_MAC_E2E
     [['--gates', 'unit', '--class1a', 'macos'], 'none', false],
+    [['--gates', 'e2e:document,e2e:panel', '--runner', 'macos', '--hosted-route', 'direct'], 'none', false],
+    [['--gates', 'e2e:document,e2e:panel', '--runner', 'macos', '--hosted-route', 'mirror'], '2x2', false],
     [['--gates', 'static,unit,probes', '--affected'], '16x1 8x1 2x1', true],
   ]) {
     const result = pushedGate(args, { affected });
@@ -255,3 +258,10 @@ test('failed variable reads or a failed CLI omit the advisory hint but still pus
     assert.match(result.message, /^Gates: static,unit,probes$/m);
   }
 });
+
+test('direct groups consume no pool waiter, from the variable or the override; mirror override restores demand', () => fixture(({ tree, sha }) => {
+  const trailers = 'Gates: e2e:document,e2e:panel\nRunner: macos\nLane: hosted';
+  assert.equal(demand(tree, sha, trailers, { ...variables, HOSTED_MAC_ROUTE: 'direct' }).stdout, 'none\n');
+  assert.equal(demand(tree, sha, `${trailers}\nHosted-Route: direct`).stdout, 'none\n');
+  assert.equal(demand(tree, sha, `${trailers}\nHosted-Route: mirror`, { ...variables, HOSTED_MAC_ROUTE: 'direct' }).stdout, '2x2\n');
+}));

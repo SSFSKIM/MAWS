@@ -13,9 +13,9 @@
 # variants those jobs need at the tested sha, and e2e-vm runs them, restoring out/ from its artifacts (ci-kit's mac-lane
 # concurrency spec, Decision Log "out/ is built on the pool"). On a macOS lane the eligible groups on HOSTED_MAC_E2E, or
 # every eligible group of a run under `Lane: hosted` (ci-gate.sh --lane hosted; `no-hosted` keeps them all here), run on
-# GitHub's hosted Macs: each is the e2e-hosted job, a waiter on the pool that pushes the run's filtered tree to the public
-# SSFSKIM/maws-app, waits for that group's run there and ends with its verdict (ci-kit's hosted-Mac spec,
-# docs/doperpowers/specs/2026-10-26-maws-hosted-mac-design.md).
+# GitHub's hosted Macs. HOSTED_MAC_ROUTE (Hosted-Route: overrides it) defaults to mirror: e2e-hosted waits on the pool
+# for SSFSKIM/maws-app. With direct, e2e runs the group here on macos-26, without the filter, scan or waiter. The lists
+# and lane exclusions are unchanged (ci-kit's docs/doperpowers/specs/2026-10-26-maws-hosted-mac-design.md).
 #
 # ci-kit's VM contract (its mac-lane concurrency spec, The VM lane): on a Mac with ci-kit's guest, the exclusive
 # instance's job-started hook reads the workflow a job runs under at its sha, and lets the job run beside a guest only
@@ -62,6 +62,11 @@ on:
         default: false
       lane:
         description: "Where the e2e groups go on a Mac: vm (the MAC_VM_E2E groups to ci-kit's guest alone) or vm-trial (its trial slot); hosted (every eligible group to GitHub's hosted Macs) or no-hosted (none there); empty: either Mac desktop that is free, and HOSTED_MAC_E2E's groups hosted."
+        type: string
+        default: ''
+
+      hosted_route:
+        description: 'Hosted Mac route: mirror (default, through maws-app) or direct (macos-26 here); empty takes HOSTED_MAC_ROUTE.'
         type: string
         default: ''
 
@@ -236,6 +241,11 @@ env:
     document-app browser-chrome available artifacts settings connectors connectors-direct delivery to-human widgets side
     supervisor c12 browser-import document code scm agents library deliverables presentations dashboard design
     design-systems tools panel browser-cua terminal c7 browser transcript machines
+  # Non-e2e jobs admitted to the direct hosted route. Lane: hosted/no-hosted never changes these.
+  # packaged is unsigned but not admitted: run 40637823292 had four bare-suite failures
+  # (layout-transfer:416 twice, :540; sessions:301). Admit only after fixes and 3/3 hosted passes.
+  # A hosted packaged trial edits this list on its branch; the default stays self-hosted.
+  HOSTED_MAC_JOBS: ''
   # The groups that need a credential or the login keychain's custody, so never go to a hosted Mac, whatever the lane
   # (maws-app holds no secret): connectors-oauth, and discover, whose custody conditions (a), (b) and (c) stand.
   MAC_SECRET_E2E: connectors-oauth discover
@@ -247,9 +257,10 @@ env:
   # The groups that check this tree against another build, its peer (the two-build check, e2e/cross-build.spec.ts):
   # scripts/ci-gate.sh names the peer in a `Peer:` trailer (the merge base with master, unless its --peer names another)
   # beside both trees' wires, and the plan adds these groups to a run with unit or an e2e group whenever the two are a
-  # minor apart (gate-plan.mjs). Their job fetches that one
+  # minor apart (gate-plan.mjs), unless an older run holds the check: then a hosted waiter follows its verdict.
+  # A real peer job fetches that one
   # commit, checks it out under RUNNER_TEMP with an install of its own and builds its out/ (.github/scripts/gate-peer.sh),
-  # and stops every supervisor of either build whatever happened. Always the Mac's exclusive instance, never hosted.
+  # and stops every supervisor of either build whatever happened. Exclusive on the mirror route; eligible on direct.
   PEER_E2E: cross-build
 
 defaults:
@@ -258,6 +269,9 @@ defaults:
 
 jobs:
   plan:
+    permissions:
+      contents: read
+      actions: read
     # The smallest hosted runner (ubuntu-slim, 1 vCPU; the plan only computes outputs and takes seconds), or the self-hosted Mac
     # when the repository variable GATE_RUNNER is `macos` (§3.6); hosted under `pool`, since it is what makes the pool's box
     # (Decision Log 53). The jobs below take the runners the plan resolves: class 1a's from the `Class1a:` trailer or
@@ -280,6 +294,7 @@ jobs:
       unit_runner: ${{ steps.plan.outputs.unit_runner }}
       probes_runner: ${{ steps.plan.outputs.probes_runner }}
       packaged: ${{ steps.plan.outputs.packaged }}
+      packaged_runner: ${{ steps.plan.outputs.packaged_runner }}
       evidence: ${{ steps.plan.outputs.evidence }}
       live: ${{ steps.plan.outputs.live }}
       default_beside: ${{ steps.plan.outputs.default_beside }}
@@ -293,6 +308,7 @@ jobs:
       e2e_build: ${{ steps.plan.outputs.e2e_build }}
       e2e_build_runner: ${{ steps.plan.outputs.e2e_build_runner }}
       e2e_hosted: ${{ steps.plan.outputs.e2e_hosted }}
+      peer_wait: ${{ steps.plan.outputs.peer_wait }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -300,6 +316,14 @@ jobs:
             package.json
             .github
           sparse-checkout-cone-mode: false
+      - name: Find an existing peer check
+        env:
+          EVENT: ${{ github.event_name }}
+          GATE_RUNNER: ${{ vars.GATE_RUNNER }}
+          GATE_E2E_RUNNER: ${{ vars.GATE_E2E_RUNNER }}
+          HOSTED_MAC_ROUTE: ${{ vars.HOSTED_MAC_ROUTE }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node .github/scripts/gate-peer-held.mjs
       - id: plan
         env:
           EVENT: ${{ github.event_name }}
@@ -309,10 +333,38 @@ jobs:
           INPUT_EVIDENCE: ${{ inputs.evidence }}
           INPUT_LIVE: ${{ inputs.live }}
           INPUT_LANE: ${{ inputs.lane }}
+          INPUT_HOSTED_ROUTE: ${{ inputs.hosted_route }}
+          HOSTED_MAC_ROUTE: ${{ vars.HOSTED_MAC_ROUTE }}
           HEAD_MESSAGE: ${{ github.event.head_commit.message }}
           GATE_RUNNER: ${{ vars.GATE_RUNNER }}
           GATE_E2E_RUNNER: ${{ vars.GATE_E2E_RUNNER }}
         run: node .github/scripts/gate-plan.mjs
+
+  # An omitted duplicate still owes the holder's verdict. Use a standard hosted runner: ubuntu-slim has a hard
+  # 15-minute cap, while the mini's queue alone has reached 71 minutes. No Mac or pool instance is occupied here.
+  e2e-peer-wait:
+    needs: plan
+    if: needs.plan.outputs.peer_wait != '[]'
+    name: e2e:${{ matrix.group }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ matrix.timeout }}
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.peer_wait) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github
+      - env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PEER_RUN: ${{ matrix.run }}
+          PEER_GROUP: ${{ matrix.group }}
+          PEER_WAIT_MINUTES: ${{ matrix.wait }}
+        run: .github/scripts/gate-run.sh '^held by run ' node .github/scripts/gate-peer-wait.mjs
 
   static:
     needs: plan
@@ -463,18 +515,24 @@ jobs:
       - run: .github/scripts/gate-run.sh '^(ℹ|#) (tests|suites|pass|fail|cancelled|skipped|todo) ' pnpm test:probes
 
   # The unsigned packaged app (Decision Log 35): one `pnpm build:app`, then its fuses and the e2e scripts that run against
-  # dist/ (the bare set, the detached supervisor, voice's packaged case). Only by `Gates: packaged`; always on the Mac.
+  # dist/ (the bare set, the detached supervisor, voice's packaged case). Only by `Gates: packaged`; unsigned, so
+  # HOSTED_MAC_JOBS may admit it to direct macos-26. Unlisted (today), the plan keeps the self-hosted fallback.
   packaged:
     needs: plan
     if: needs.plan.outputs.packaged == 'true'
-    runs-on: [self-hosted, macOS, ARM64]
-    timeout-minutes: 40 # 30, and the exclusive instance's wait bound (gate-plan.mjs's MAC_EXCLUSIVE_WAIT_MINUTES)
+    runs-on: ${{ fromJSON(needs.plan.outputs.packaged_runner || '["self-hosted","macOS","ARM64"]') }}
+    timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeouts).packaged || 40 }}
     env:
       MAWS_E2E_QUIET: '1'
       SHELL: /bin/zsh
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
+        # e2e:packaged collects the bare set, including the PDF/export specs. Keep the full declaration
+        # on a hosted Mac too, rather than the named e2e groups' per-group dependency skips.
+        with:
+          libreoffice: 'true'
+          poppler: 'true'
       # The voice helper compiles with swiftc. Without a developer directory, xcrun's shim would offer to install the
       # tools in a dialog on the runner's desktop, so it is asked first; nothing is ever installed here.
       - run: |
@@ -576,8 +634,8 @@ jobs:
         if: always()
         run: .github/scripts/hosted-mac.sh --cleanup
 
-  # The e2e groups the plan keeps off the guest's labels and off the hosted Macs (its e2e_host); e2e-vm below runs the
-  # guest-eligible ones with these same steps.
+  # The e2e groups outside the guest and mirror matrices (e2e_host), including direct hosted Macs. Each direct job
+  # builds its own out/: no pool prerequisite or artifact transfer. e2e-vm shares these steps for guest jobs.
   e2e:
     needs: plan
     if: needs.plan.outputs.e2e_host != '[]'

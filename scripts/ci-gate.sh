@@ -3,7 +3,7 @@
 #
 #   scripts/ci-gate.sh <worktree-or-sha> --gates all|static,unit,unit:darwin,probes,e2e:<group>,… [--runner linux|macos]
 #                      [--class1a linux|macos|pool] [--lane vm|vm-trial|hosted|no-hosted] [--default-beside <groups>] [--evidence]
-#                      [--live] [--affected] [--peer <ref>|none] [--label <name>] [--keep]
+#                      [--hosted-route direct|mirror] [--live] [--affected] [--peer <ref>|none] [--label <name>] [--keep]
 #
 #   scripts/ci-gate.sh <worktree> --gates static,unit,probes     class 1a alone
 #   scripts/ci-gate.sh <worktree> --gates all                    the whole set (on a macOS e2e lane, every Mac job)
@@ -71,6 +71,8 @@
 #                      (exit 2), naming --peer: a --peer that names no commit or one with no manifest, and a checkout that
 #                      cannot find its merge base (shallow, or with none with origin/master). A refused run's relaunch
 #                      line carries the peer as resolved, its sha or `none`
+#   --hosted-route     override HOSTED_MAC_ROUTE for this run: direct (macos-26 in MAWS) or mirror (maws-app).
+#                      Unset uses the repository variable, which defaults to mirror. Admission and --lane still apply.
 #   --label            the ref's name before the short sha (default: the worktree's branch, else `gate`)
 #   --keep             leave the ci/ ref in place
 #
@@ -120,6 +122,7 @@ gates=''
 runner=${MAWS_GATE_RUNNER:-}
 class1a=''
 lane=''
+hosted_route=''
 default_beside=''
 evidence=''
 live=''
@@ -132,6 +135,7 @@ while (($# > 0)); do
     --gates) gates=${2?--gates needs a list}; shift 2 ;;
     --runner) runner=${2:?--runner needs linux or macos}; shift 2 ;;
     --class1a) class1a=${2:?--class1a needs linux, macos or pool}; shift 2 ;;
+    --hosted-route) hosted_route=${2:?--hosted-route needs direct or mirror}; shift 2 ;;
     --lane) lane=${2:?--lane needs vm, vm-trial, hosted or no-hosted}; shift 2 ;;
     --default-beside) default_beside=${2:?--default-beside needs a list of e2e groups}; shift 2 ;;
     --evidence) evidence=yes; shift ;;
@@ -148,6 +152,7 @@ done
 [[ -n $target ]] || usage
 case $runner in '' | linux | macos) ;; *) echo "ci-gate: --runner is linux or macos, not $runner" >&2; exit 2 ;; esac
 case $class1a in '' | linux | macos | pool) ;; *) echo "ci-gate: --class1a is linux, macos or pool, not $class1a" >&2; exit 2 ;; esac
+case $hosted_route in '' | direct | mirror) ;; *) echo "ci-gate: --hosted-route is direct or mirror, not $hosted_route" >&2; exit 2 ;; esac
 case $lane in '' | vm | vm-trial | hosted | no-hosted) ;; *) echo "ci-gate: --lane is vm, vm-trial, hosted or no-hosted, not $lane" >&2; exit 2 ;; esac
 # The names land unquoted in a printed relaunch command, so only characters that are inert there pass.
 case $default_beside in *[!A-Za-z0-9._:,\ -]*) echo "ci-gate: --default-beside takes group names of letters, digits, . _ : - separated by commas, not $default_beside" >&2; exit 2 ;; esac
@@ -177,6 +182,12 @@ else
   branch=''
 fi
 
+# Resolve the pushed ref before preflight: reserved final refs stay on the self-hosted Mac.
+short=${sha:0:8}
+label=${label:-${branch:-gate}}
+label=${label//[^A-Za-z0-9._-]/-}
+ref=ci/$label-$short
+
 # The peer of the PEER_E2E groups and both trees' wires, as trailers (ci-gate-peer.mjs), read before the alert check, whose
 # plan they can add a Mac job to; what it decided is said once the transcript starts.
 peer_notes=$(mktemp)
@@ -199,8 +210,9 @@ if [[ ${MAWS_GATE_IGNORE_ALERTS:-} == 1 ]]; then
 else
   # the peer's trailers, and an iteration run's Selection, which keeps the peer groups off the run
   alert_trailers=$peer_trailers
+  [[ -n $hosted_route ]] && alert_trailers+=$'\n'"Hosted-Route: $hosted_route"
   [[ -n $affected ]] && alert_trailers+=$'\n'"Selection: affected"
-  alert_check=$(node "$(dirname "$0")/ci-gate-alerts.mjs" --gates "$gates_trailer" --runner "$runner" --class1a "$class1a" --lane "$lane" --live "$live" --trailers "$alert_trailers" --git-dir "$git_dir" --sha "$sha")
+  alert_check=$(node "$(dirname "$0")/ci-gate-alerts.mjs" --gates "$gates_trailer" --runner "$runner" --class1a "$class1a" --lane "$lane" --live "$live" --trailers "$alert_trailers" --git-dir "$git_dir" --sha "$sha" --ref "$ref")
   case $? in
     0) ;;
     2)
@@ -210,10 +222,6 @@ else
     *) alert_check+="${alert_check:+$'\n'}ci-gate: warning: the ci-kit alert check failed; going ahead (the runner's job-started check still refuses jobs under a dialog)" ;;
   esac
 fi
-short=${sha:0:8}
-label=${label:-${branch:-gate}}
-label=${label//[^A-Za-z0-9._-]/-}
-ref=ci/$label-$short
 out=/tmp/maws-review/gates
 mkdir -p "$out"
 log=$out/ci-$short.log
@@ -252,6 +260,7 @@ trailers="Nonce: $(date +%s)-$$"
 [[ -n $runner ]] && trailers+=$'\n'"Runner: $runner"
 [[ -n $class1a ]] && trailers+=$'\n'"Class1a: $class1a"
 [[ -n $lane ]] && trailers+=$'\n'"Lane: $lane"
+[[ -n $hosted_route ]] && trailers+=$'\n'"Hosted-Route: $hosted_route"
 [[ -n $default_beside ]] && trailers+=$'\n'"DefaultBeside: $default_beside"
 [[ -n $evidence ]] && trailers+=$'\n'"Evidence: $evidence"
 [[ -n $live ]] && trailers+=$'\n'"Live: $live"
@@ -265,7 +274,8 @@ fi
 # now, and the package scripts and workflow env at the sha we push (never the caller's possibly dirty checkout).
 if gate_runner=$(gh variable get GATE_RUNNER -R "$REPO") &&
    gate_e2e_runner=$(gh variable get GATE_E2E_RUNNER -R "$REPO") &&
-   pool_demand=$(HEAD_MESSAGE="$trailers" GATE_RUNNER="$gate_runner" GATE_E2E_RUNNER="$gate_e2e_runner" \
+   gate_hosted_route=$(gh variable list -R "$REPO" --json name,value --jq '.[] | select(.name == "HOSTED_MAC_ROUTE") | .value') &&
+   pool_demand=$(HEAD_MESSAGE="$trailers" GATE_RUNNER="$gate_runner" GATE_E2E_RUNNER="$gate_e2e_runner" HOSTED_MAC_ROUTE="$gate_hosted_route" \
      node "$(dirname "$0")/ci-gate-pool-demand.mjs" --git-dir "$git_dir" --sha "$sha"); then
   trailers+=$'\n'"Pool-Demand: $pool_demand"
 else
@@ -294,7 +304,7 @@ interrupted() {
 }
 trap interrupted INT TERM
 
-echo "ci-gate: $sha as $ref${gates:+ (Gates: $gates)}${runner:+ (Runner: $runner)}${class1a:+ (Class1a: $class1a)}${lane:+ (Lane: $lane)}${default_beside:+ (DefaultBeside: $default_beside)}${evidence:+ (Evidence: $evidence)}${live:+ (Live: $live)}${affected:+ (Selection: affected)}"
+echo "ci-gate: $sha as $ref${gates:+ (Gates: $gates)}${runner:+ (Runner: $runner)}${class1a:+ (Class1a: $class1a)}${lane:+ (Lane: $lane)}${hosted_route:+ (Hosted-Route: $hosted_route)}${default_beside:+ (DefaultBeside: $default_beside)}${evidence:+ (Evidence: $evidence)}${live:+ (Live: $live)}${affected:+ (Selection: affected)}"
 # The ref is this invocation's own and the commit fixed, so a forced re-push is idempotent: a transient rejection
 # (a remote index-pack race while another gate pushes, a "[remote rejected] (failed)") is retried twice; an
 # authentication failure is not (Decision Log 54).
