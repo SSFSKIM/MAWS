@@ -29,7 +29,7 @@ import { setAgentWorkClient, type AgentWorkClient } from '../client';
 import { fakeAgentWorkClient, type FakeAgentWorkClient } from '../fake-work-client';
 import { openLog } from '../log/LogTool';
 import { useTaskGraph } from '../store';
-import { SLOW_TICK_MS } from '../subagents/shared';
+import { SLOW_TICK_MS, STOP_DOUBT_MS } from '../subagents/shared';
 import { subagentsTool, type SubagentsParams } from '../subagents/SubagentsTool';
 import { BackgroundSummary } from './BackgroundSummary';
 import { backgroundTool, type BackgroundHandle, type BackgroundParams } from './BackgroundTool';
@@ -584,6 +584,53 @@ describe('background work', () => {
       });
       expect(row('bsleep01')).toBeNull();
       expect(screen.getByText('Shells and monitors are known only while the session runs here')).toBeTruthy();
+    });
+
+    // A session once run in MAWS keeps its exited engine status after a terminal resumes it: who holds it now decides.
+    it('lists the jobs its bridge derives and stops through the bridge, though an exited engine status is kept', async () => {
+      act(() => {
+        seedSessions(live({ process: 'exited' }));
+        holder({ kind: 'terminal', pid: 4242 });
+      });
+      render(<Mounted state={create(undefined)} />);
+      await watched();
+      plane('snapshot', [job('bsleep01')]);
+      expect(heading('shells')).toBe('Shells · 1 running');
+      expect(within(row('bsleep01')!).queryByRole('button', { name: 'Output' })).toBeNull();
+      fireEvent.click(within(row('bsleep01')!).getByRole('button', { name: 'Stop' }));
+      await waitFor(() => expect(bridge.invoked('laneA.stopTask')).toEqual([{ appSessionId: 'A', taskId: 'bsleep01' }]));
+      expect(fake.inputs.stopTask).toEqual([]); // never the engine's
+    });
+
+    // A stop whose outcome is unknown may not have happened: said, and Stop offered again once the transcript has not
+    // ended the job within the wait.
+    it('says a stop with an unknown outcome may not have stopped, and offers Stop again after the wait', async () => {
+      install({ 'laneA.stopTask': { state: 'unknown', why: 'timeout' } });
+      render(<Mounted state={create(undefined)} />);
+      await watched();
+      plane('snapshot', [job('bsleep01')]);
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      fireEvent.click(within(row('bsleep01')!).getByRole('button', { name: 'Stop' }));
+      await waitFor(() => expect(row('bsleep01')!.textContent).toContain('May not have stopped'));
+      expect((within(row('bsleep01')!).getByRole('button', { name: 'stopping…' }) as HTMLButtonElement).disabled).toBe(true);
+      await act(async () => vi.advanceTimersByTimeAsync(STOP_DOUBT_MS));
+      const stop = within(row('bsleep01')!).getByRole('button', { name: 'Stop' }) as HTMLButtonElement;
+      expect(stop.disabled).toBe(false);
+      expect(row('bsleep01')!.textContent).toContain('May not have stopped');
+      fireEvent.click(stop);
+      await waitFor(() => expect(bridge.invoked('laneA.stopTask')).toHaveLength(2));
+    });
+
+    it('drops the doubt once the transcript ends the job within the wait', async () => {
+      install({ 'laneA.stopTask': { state: 'unknown', why: 'timeout' } });
+      render(<Mounted state={create(undefined)} />);
+      await watched();
+      plane('snapshot', [job('bsleep01')]);
+      fireEvent.click(within(row('bsleep01')!).getByRole('button', { name: 'Stop' }));
+      await waitFor(() => expect(row('bsleep01')!.textContent).toContain('May not have stopped'));
+      plane('subagents', [job('bsleep01', { status: 'stopped', endedAt: T })]);
+      expect(row('bsleep01')!.textContent).not.toContain('May not have stopped');
+      expect(within(row('bsleep01')!).queryByRole('button')).toBeNull();
     });
 
     it('the summary counts its running jobs', async () => {

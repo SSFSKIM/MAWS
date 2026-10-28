@@ -39,16 +39,22 @@ export function StopError({ message }: { message: string | null }) {
   return message === null ? null : <p className="text-ui-sm text-danger">{BACKGROUND_COPY.stopFailed(message)}</p>;
 }
 
+// P5 O9: a stop whose outcome is unknown, while its task still runs.
+export function StopDoubt() {
+  return <p className="text-ui-sm text-warning">{BACKGROUND_COPY.stopUncertain}</p>;
+}
+
 interface RowProps {
   node: TaskNode;
   now: number;
   selected: boolean;
   stopError: string | null;
+  stopDoubt?: boolean; // P5 O9: its stop's outcome is unknown
   onStop: (taskId: TaskId) => void;
   stopGap?: string | null; // P5 O9 M5: why Stop is unavailable, from the port's `stop-task` capability
 }
 
-function TaskRow({ node, now, selected, stopError, onStop, stopGap = null, kind, children }: RowProps & { kind: 'shell' | 'monitor'; children?: ReactNode }) {
+function TaskRow({ node, now, selected, stopError, stopDoubt = false, onStop, stopGap = null, kind, children }: RowProps & { kind: 'shell' | 'monitor'; children?: ReactNode }) {
   const running = node.status === 'running';
   const line = taskLine(node, now);
   return (
@@ -68,6 +74,7 @@ function TaskRow({ node, now, selected, stopError, onStop, stopGap = null, kind,
         {running && <StopButton node={node} label={BACKGROUND_COPY.stop} onStop={onStop} gap={stopGap} />}
       </div>
       <StopError message={stopError} />
+      {stopDoubt && running && <StopDoubt />}
     </div>
   );
 }

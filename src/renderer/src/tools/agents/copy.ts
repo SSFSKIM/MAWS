@@ -43,6 +43,7 @@ export const SUBAGENTS_COPY = {
   stopConfirmNo: 'Keep running',
   stopping: 'stopping…',
   stopFailed: (message: string) => `Couldn't stop it: ${message}`,
+  stopUncertain: 'May not have stopped', // P5 O9: a terminal session's stop whose outcome is unknown
   waitingToStart: 'Waiting for the agent to start',
   // E7 start: the topology tree (Design §3, §5)
   agents: (running: number) => `Agents · ${running} running`,
@@ -114,6 +115,7 @@ export const BACKGROUND_COPY = {
   stop: 'Stop',
   stopping: 'stopping…',
   stopFailed: (message: string) => `Couldn't stop it: ${message}`,
+  stopUncertain: 'May not have stopped', // P5 O9: a terminal session's stop whose outcome is unknown
   running: (description: string, elapsed: string) => `${description} · running ${elapsed}`, // a shell or a monitor
   runningUntimed: (description: string) => `${description} · running · elapsed unavailable`, // known from the status's list alone
   ended: (description: string, status: string, ago: string) => `${description} · ${status} ${ago}`,

@@ -4,7 +4,7 @@
 // mounts and never builds (the store's one attachment is shared with C5's agent tab), with the registered actions and
 // C7's inline request card, so a child's permission is answered in place; then the relay composer.
 import { Popover } from 'radix-ui';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentId, AppSessionId, ToolUseId } from '@shared/graph/ids';
 import type { SessionPhase } from '@shared/ipc/schema/session';
 import type { PanelToolContext } from '../../../panel/tool';
@@ -19,7 +19,7 @@ import { elapsedOf, formatElapsed, formatTokens } from '../model/elapsed';
 import { isEnded, rowTitle, type TaskNode } from '../model/task-graph';
 import { useTaskGraph } from '../store';
 import { RelayComposer } from './RelayComposer';
-import { agentOfToolUse, refOf, taskOf, useTicker } from './shared';
+import { agentOfToolUse, refOf, STOP_DOUBT_MS, taskOf, useTicker } from './shared';
 import type { SubagentsHandle } from './SubagentsTool';
 import { displayTitle } from '../../../sessions/title';
 
@@ -97,9 +97,10 @@ export function DrillIn({ appSessionId, agentId, handle, draft, ctx }: Props) {
               {SUBAGENTS_COPY.dispatchedBy(sessionTitle)}
             </p>
           </div>
-          {node?.status === 'running' && ctx.status !== null && <StopAgent key={node.taskId} appSessionId={appSessionId} node={node} title={title} />}
-          {/* P5 O9 M5: a session driven through its bridge stops the agent by its id, while the agent has not ended */}
-          {driven && ctx.status === null && !(node && isEnded(node.status)) && <StopAgent key={agentId} appSessionId={appSessionId} node={node} title={title} driven={{ controls: driven, agentId }} />}
+          {!driven && node?.status === 'running' && ctx.status !== null && <StopAgent key={node.taskId} appSessionId={appSessionId} node={node} title={title} />}
+          {/* P5 O9 M5: a session driven through its bridge stops the agent by its id, while the agent has not ended, whatever
+              engine status MAWS kept from an earlier run of the session */}
+          {driven && !(node && isEnded(node.status)) && <StopAgent key={agentId} appSessionId={appSessionId} node={node} title={title} driven={{ controls: driven, agentId }} />}
         </div>
       </header>
       <Transcript key={source.key ?? agentId} source={source} variant="child" actions={actions} renderRequest={renderRequest} className="min-h-0 flex-1" />
@@ -112,21 +113,33 @@ const ACTION = 'shrink-0 rounded-sm border border-border-strong px-2 py-0.5 text
 
 // A running agent's stop is irreversible, so it asks first (Codex confirms it); the node reads stopping until the
 // engine's terminal frame, and a refused call says why.
-// P5 O9 M5: `driven`, the session's bridge stops it (`stop-agent`), the button closed with the control's reason.
+// P5 O9 M5: `driven`, the session's bridge stops it (`stop-agent`), the button closed with the control's reason. P5 O9: a
+// stop whose outcome is unknown says it may not have stopped, and is offered again after STOP_DOUBT_MS.
 function StopAgent({ appSessionId, node, title, driven }: { appSessionId: AppSessionId; node: TaskNode | undefined; title: string; driven?: { controls: SessionControls; agentId: AgentId } }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [asked, setAsked] = useState(false);
+  const [doubted, setDoubted] = useState(false);
+  const doubt = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => void (doubt.current !== null && clearTimeout(doubt.current)), []);
   const closed = driven ? driven.controls.capability('stop-agent') : null;
   const stop = () => {
     setOpen(false);
     setError(null);
     if (driven) {
       setAsked(true);
+      setDoubted(false);
+      if (doubt.current !== null) clearTimeout(doubt.current);
       void driven.controls.stopAgent(driven.agentId).then((result) => {
         if (result.state === 'refused') {
           setAsked(false);
           setError(result.message);
+        } else if (result.state === 'unknown') {
+          setDoubted(true);
+          doubt.current = setTimeout(() => {
+            doubt.current = null;
+            setAsked(false);
+          }, STOP_DOUBT_MS);
         }
       });
       return;
@@ -172,6 +185,7 @@ function StopAgent({ appSessionId, node, title, driven }: { appSessionId: AppSes
         </Popover.Root>
       )}
       {error !== null && <p className="max-w-48 text-right text-ui-sm text-danger">{SUBAGENTS_COPY.stopFailed(error)}</p>}
+      {doubted && <p className="max-w-48 text-right text-ui-sm text-warning">{SUBAGENTS_COPY.stopUncertain}</p>}
     </div>
   );
 }

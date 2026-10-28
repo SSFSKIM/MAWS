@@ -9,7 +9,8 @@
 // open the widget. Its Scheduled section (Design §7) lists the session's cron jobs after Monitors.
 // P5 O9 M5: a terminal session driven through its bridge lists the shells and monitors main derives from its transcript
 // (../../../lane-a/jobs/lane-jobs.ts), each stopped through its bridge, with no output tail; an ended one's stay listed
-// exited.
+// exited. Whether it is driven is the port's to say (a non-null `turn()`), whatever engine status MAWS kept from an
+// earlier run of the session: that status is not live while a terminal holds it.
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { AppSessionId, TaskId } from '@shared/graph/ids';
 import { Icon } from '../../../app/IconButton';
@@ -24,7 +25,7 @@ import { elapsedOf } from '../model/elapsed';
 import { emptyGraph, monitors, shells, workflows, type TaskNode } from '../model/task-graph';
 import { resolveRun, runView, type PhaseSelection } from '../model/workflow-run'; // E7
 import { useTaskGraph } from '../store';
-import { SLOW_TICK_MS, useTicker } from '../subagents/shared';
+import { SLOW_TICK_MS, STOP_DOUBT_MS, useTicker } from '../subagents/shared';
 import { AGENT_TOOL_IDS } from '../tool-ids';
 import { BackgroundSummary } from './BackgroundSummary';
 import { Group, type BackgroundSection } from './Group';
@@ -67,6 +68,7 @@ export interface BackgroundState {
   stopErrors: Map<string, string>;
   reveal: number;
   stoppingJobs: ReadonlySet<string>; // P5 O9 M5: a lane A job's stop the bridge took, until its job ends
+  doubtedJobs: ReadonlySet<string>; // P5 O9: a lane A job's stop whose outcome is unknown: it may not have stopped
 }
 
 const sectionOfNode = (node: TaskNode | undefined): BackgroundSection => (node?.kind === 'shell' ? 'shells' : node?.kind === 'monitor' ? 'monitors' : 'workflows');
@@ -75,10 +77,11 @@ export class BackgroundHandle {
   private state: BackgroundState;
   private readonly listeners = new Set<() => void>();
   private release: (() => void) | null = null;
+  private readonly doubtTimers = new Map<string, ReturnType<typeof setTimeout>>(); // P5 O9: per doubted stop
 
   constructor(appSessionId: AppSessionId | null, params: BackgroundParams | undefined) {
     this.state = {
-      appSessionId, view: LIST, pendingRun: null, selected: null, expanded: new Set(ALL_SECTIONS), showEarlierTasks: false, scrollTop: 0, stopErrors: new Map(), reveal: 0, stoppingJobs: new Set(),
+      appSessionId, view: LIST, pendingRun: null, selected: null, expanded: new Set(ALL_SECTIONS), showEarlierTasks: false, scrollTop: 0, stopErrors: new Map(), reveal: 0, stoppingJobs: new Set(), doubtedJobs: new Set(),
     };
     this.watch(appSessionId);
     this.open(params);
@@ -158,35 +161,61 @@ export class BackgroundHandle {
   };
 
   // P5 O9 M5: a lane A job's stop goes to the session's bridge; the row reads stopping… until the transcript ends the job
-  // (or its error, when the bridge refused it).
+  // (or its error, when the bridge refused it). P5 O9: a stop whose outcome is unknown says it may not have stopped, and
+  // after STOP_DOUBT_MS without the transcript ending the job, Stop is offered again.
   stopJob = async (taskId: TaskId) => {
     const { appSessionId } = this.state;
     if (appSessionId === null || this.state.stoppingJobs.has(taskId)) return;
     const stopErrors = new Map(this.state.stopErrors);
     stopErrors.delete(taskId);
-    this.update({ stopErrors, stoppingJobs: new Set(this.state.stoppingJobs).add(taskId) });
+    this.clearDoubt(taskId);
+    this.update({ stopErrors, stoppingJobs: new Set(this.state.stoppingJobs).add(taskId), doubtedJobs: without(this.state.doubtedJobs, taskId) });
     const result = await stopSessionTask(appSessionId, taskId);
-    if (result.state !== 'refused' || this.state.appSessionId !== appSessionId) return;
-    const stoppingJobs = new Set(this.state.stoppingJobs);
-    stoppingJobs.delete(taskId);
-    this.update({ stoppingJobs, stopErrors: new Map(this.state.stopErrors).set(taskId, result.message) });
+    if (this.state.appSessionId !== appSessionId) return;
+    if (result.state === 'refused') {
+      this.update({ stoppingJobs: without(this.state.stoppingJobs, taskId), stopErrors: new Map(this.state.stopErrors).set(taskId, result.message) });
+    } else if (result.state === 'unknown') {
+      this.update({ doubtedJobs: new Set(this.state.doubtedJobs).add(taskId) });
+      this.doubtTimers.set(
+        taskId,
+        setTimeout(() => {
+          this.doubtTimers.delete(taskId);
+          if (this.state.appSessionId === appSessionId) this.update({ stoppingJobs: without(this.state.stoppingJobs, taskId) });
+        }, STOP_DOUBT_MS),
+      );
+    }
   };
+
+  private clearDoubt(taskId?: string): void {
+    for (const [id, timer] of this.doubtTimers) {
+      if (taskId !== undefined && id !== taskId) continue;
+      clearTimeout(timer);
+      this.doubtTimers.delete(id);
+    }
+  }
 
   // A pinned tab's session changed under it: that session's work, with the selection, scroll and stop errors reset. No
   // session shown (the Overview) changes nothing: returning to the same session finds the tab as it was (as Subagents).
   follow = (appSessionId: AppSessionId | null) => {
     if (appSessionId === null || appSessionId === this.state.appSessionId) return;
     this.watch(appSessionId);
-    this.update({ appSessionId, view: LIST, pendingRun: null, selected: null, showEarlierTasks: false, scrollTop: 0, stopErrors: new Map(), stoppingJobs: new Set() });
+    this.clearDoubt();
+    this.update({ appSessionId, view: LIST, pendingRun: null, selected: null, showEarlierTasks: false, scrollTop: 0, stopErrors: new Map(), stoppingJobs: new Set(), doubtedJobs: new Set() });
   };
 
   dispose = () => {
+    this.clearDoubt();
     this.release?.();
     this.release = null;
   };
 }
 
 const EMPTY_GRAPH = emptyGraph();
+const without = (set: ReadonlySet<string>, id: string): ReadonlySet<string> => {
+  const next = new Set(set);
+  next.delete(id);
+  return next;
+};
 
 function BackgroundBody({ state, ctx }: { state: BackgroundHandle; ctx: PanelToolContext }) {
   const snapshot = useSyncExternalStore(state.subscribe, state.snapshot);
@@ -215,10 +244,11 @@ interface ViewProps {
 function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
   const graph = useTaskGraph((s) => s.entries.get(appSessionId)?.graph ?? EMPTY_GRAPH);
   const runsError = useTaskGraph((s) => s.entries.get(appSessionId)?.disk.runsError ?? null);
-  const live = ctx.status !== null;
-  // P5 O9 M5: a terminal session driven through its bridge lists the jobs derived from its transcript
+  // P5 O9 M5: a terminal session driven through its bridge lists the jobs derived from its transcript; the engine status
+  // MAWS kept from an earlier run of it is not live meanwhile
   const controls = useSessionControls(appSessionId);
   const driven = controls !== null && controls.turn() !== null;
+  const live = !driven && ctx.status !== null;
   const jobs = useDrivenJobs(appSessionId, driven && !live);
   const derived = live || jobs === null ? null : jobNodes(jobs, own ? snapshot.stoppingJobs : NO_JOBS);
   const listed = live || derived !== null;
@@ -230,6 +260,7 @@ function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
   const stopGap = stopCapability !== null && !stopCapability.available ? stopCapability.reason : null;
   const selected = own ? snapshot.selected : null;
   const stopErrors = own ? snapshot.stopErrors : new Map<string, string>();
+  const doubted = own && derived !== null ? snapshot.doubtedJobs : NO_JOBS; // P5 O9
 
   const expanded = snapshot.expanded;
   // A running task's elapsed (a running workflow's on its card's line) ticks once a second; an ended shell's or monitor's
@@ -293,6 +324,7 @@ function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
               now={now}
               selected={selected === node.taskId}
               stopError={stopErrors.get(node.taskId) ?? null}
+              stopDoubt={doubted.has(node.taskId)}
               onStop={onStop}
               stopGap={stopGap}
               onOutput={derived !== null ? null : (path) => openLog(appSessionId, path, node.description)} // a lane A job's tail is remote-only
@@ -303,7 +335,7 @@ function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
       {monitorNodes.length > 0 && (
         <Group id="monitors" heading={BACKGROUND_COPY.monitors(monitorNodes.length)} expanded={expanded.has('monitors')} onToggle={handle.toggle}>
           {monitorNodes.map((node) => (
-            <MonitorRow key={node.taskId} node={node} now={now} selected={selected === node.taskId} stopError={stopErrors.get(node.taskId) ?? null} onStop={onStop} stopGap={stopGap} />
+            <MonitorRow key={node.taskId} node={node} now={now} selected={selected === node.taskId} stopError={stopErrors.get(node.taskId) ?? null} stopDoubt={doubted.has(node.taskId)} onStop={onStop} stopGap={stopGap} />
           ))}
         </Group>
       )}
