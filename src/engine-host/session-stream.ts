@@ -180,9 +180,11 @@ export class SessionStream {
 
   // `session.events`: every event after `afterSeq` (null: from the start of this launch), whole rows at a time up to
   // about `limit`; `complete` is false when the answer stops short (the limit, or a journal that cannot be read back).
+  // O10 M8: a range the ring dropped and the journal can't give back is answered from the ring alone and marked
+  // `historyUnavailable`, so a reader paging on (the endpoint's remote subscriptions) knows events are missing.
   async snapshot(afterSeq: number | null, limit: number | null): Promise<EventsSnapshot> {
     if (this.evictedThrough === null || (afterSeq !== null && afterSeq >= this.evictedThrough)) return page(this.ring, afterSeq, limit, true);
-    return (await this.fromJournal(afterSeq, limit)) ?? page(this.ring, afterSeq, limit, false);
+    return (await this.fromJournal(afterSeq, limit)) ?? { ...page(this.ring, afterSeq, limit, false), historyUnavailable: true };
   }
 
   dispose(): void {

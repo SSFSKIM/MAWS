@@ -12,6 +12,7 @@ export const grades = {
   'session.events': 'view',
   'session.stop': 'manage',
   'session.pendingRequest': 'view',
+  'session.pendingItems': 'view', // P5 O10 M8: the broker's items, as `session.pendingRequest` reads one
   'session.catalog': 'view',
   // the composer
   'session.send': words,

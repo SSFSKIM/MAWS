@@ -171,6 +171,23 @@ describe('session event stream: batches, the ring and the reload snapshot', () =
     expect(answer.complete).toBe(false);
     expect(answer.events).toEqual(events.slice(-answer.events.length));
     expect(answer.events.length).toBeGreaterThanOrEqual(5);
+    // O10 M8: and says the range it was asked for is not all there, apart from `complete` (a page's limit sets that too).
+    expect(answer.historyUnavailable).toBe(true);
+    const limited = await stream.snapshot(null, 2);
+    expect(limited).toMatchObject({ complete: false, historyUnavailable: true });
+    // A read the ring covers whole is whole, the journal lost or not.
+    const covered = await stream.snapshot(answer.events.at(-2)!.seq!, null);
+    expect(covered.historyUnavailable).toBeUndefined();
+  });
+
+  it('marks no answer `historyUnavailable` while the journal reads back, a page cut by its limit included (O10 M8)', async () => {
+    const { events, launchId, sessionId, appSessionId, journalPath } = await recordedInit();
+    const stream = new SessionStream({ appSessionId, launchId, sessionId: sessionId as never, journalPath, emit: recorder().emit, ringSize: 5 });
+    stream.events(events);
+    const page = await stream.snapshot(null, 2);
+    expect(page.complete).toBe(false);
+    expect(page.historyUnavailable).toBeUndefined();
+    expect((await stream.snapshot(null, null)).historyUnavailable).toBeUndefined();
   });
 
   it('keeps each broker item\'s originating request event while the item is pending or delivered', async () => {
