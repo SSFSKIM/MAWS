@@ -289,7 +289,8 @@ describe('the app as the org’s signer on the local hub', { timeout: 180_000 },
     expect(before).toMatchObject({ root: false, maySign: false });
     expect(await app.resign()).toMatchObject({ ok: false, reason: 'not-root' });
 
-    const { out } = await org.admin('root', 'add', deviceId, '--yes');
+    // Options first and the id after `--`: a base64url id may start with '-' (as the Org section prints the command).
+    const { out } = await org.admin('root', 'add', '--yes', '--', deviceId);
     expect(out.find((line) => line.startsWith('root added: '))).toMatch(new RegExp(`^root added: ${deviceId}, step-up ${before.stepUpKid} \\(version \\d+\\)$`));
     await until(() => signer().root && signer().maySign, 'the app reading itself a root');
     const adminKid = await keyId((await readAdminKeys(org.adminKeys)).stepUp.pub);
@@ -415,7 +416,7 @@ describe('the app as the org’s signer on the local hub', { timeout: 180_000 },
     await until(() => registered(unmarked)?.signer?.oldDevice === old, 'the old device named');
     expect(registered(unmarked)).toMatchObject({ device: renewed.identity.device, session: 'signed-in', signer: { rekey: null, rekeying: null } });
 
-    await org.admin('remove-device', old, '--yes');
+    await org.admin('remove-device', '--yes', '--', old);
     await until(() => !existsSync(keysFile('keys.retired.json')) && registered(unmarked)?.signer?.oldDevice === null, 'the retired key file destroyed');
     expect(unmarked.current()?.identity.device).toBe(renewed.identity.device);
     expect((await hubHead()).state.members.flatMap((m) => m.devices.map((d) => d.id))).not.toContain(old);

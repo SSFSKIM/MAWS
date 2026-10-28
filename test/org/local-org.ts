@@ -90,7 +90,10 @@ export interface LocalOrg {
   member: string;
   /** The org's recovery key, as `genesis` wrote it to the (local) removable volume. */
   recovery: string;
-  /** A verb run against the local deployment (`--hub`, `--user`, `--keys` appended), its lines readable as it runs. */
+  /**
+   * A verb run against the local deployment (`--hub`, `--user`, `--keys` added before any `--`), its lines readable as it
+   * runs. A device id goes after `--`, options before it.
+   */
   start(...args: string[]): { status: Promise<number>; out: string[]; err: string[] };
   /** A verb run to its end; a non-zero status throws. */
   admin(...args: string[]): Promise<{ out: string[]; err: string[] }>;
@@ -108,7 +111,10 @@ export async function startLocalOrg(scratch: { root: string; dir(name: string): 
   const local = () => ['--hub', hub.url, '--user', ADMIN, '--keys', adminKeys];
   const start = (...args: string[]) => {
     const run = adminIo(scratch.root);
-    return { status: runAdmin([...args, ...local()], run.io), out: run.out, err: run.err };
+    // The local options go before a `--`, after which every argument is a positional (a device id may start with '-').
+    const end = args.indexOf('--');
+    const argv = end < 0 ? [...args, ...local()] : [...args.slice(0, end), ...local(), ...args.slice(end)];
+    return { status: runAdmin(argv, run.io), out: run.out, err: run.err };
   };
   const admin = async (...args: string[]) => {
     const run = start(...args);

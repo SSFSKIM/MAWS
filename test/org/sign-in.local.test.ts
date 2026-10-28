@@ -233,7 +233,7 @@ describe('the org session on the local hub', { timeout: 120_000 }, () => {
   it('makes current() null when an admin `remove-device` drops this device', async () => {
     const s = sessions[1];
     expect(s.current()).not.toBeNull();
-    await org.admin('remove-device', deviceId, '--yes');
+    await org.admin('remove-device', '--yes', '--', deviceId);
     await until(() => s.current() === null, 'current() null');
     expect(registered(s)).toMatchObject({ session: 'removed' });
   });

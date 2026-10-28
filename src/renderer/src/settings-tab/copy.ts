@@ -409,7 +409,8 @@ export const ORG = {
   weekly: (days: number) => `Org state is ${days} days old`,
   resign: 'Re-sign now',
   makeRoot: 'Make this Mac a root: run',
-  rootCommand: (device: string) => `deployment admin root add ${device}`,
+  // The id after `--`: a base64url key id may start with '-', which the admin's option parser would read as an option.
+  rootCommand: (device: string) => `deployment admin root add -- ${device}`,
   rootNote: (fingerprint: string) => `Its confirmation names this Mac’s fingerprint, ${fingerprint}. Compare the two before you confirm.`,
   unmarked: 'This Mac’s keys weren’t kept out of Time Machine backups when they were made, so it signs nothing. Make new keys with a pairing code.',
   signed: (version: number) => `Signed version ${version}.`,
@@ -475,7 +476,7 @@ export const ORG = {
   theHub: 'the hub',
   oldDevice: 'Old device',
   oldDeviceLine: 'Listed until a root removes it: run',
-  removeCommand: (device: string) => `deployment admin remove-device ${device}`,
+  removeCommand: (device: string) => `deployment admin remove-device -- ${device}`,
   newKeys: 'New keys',
   makeNewKeys: 'Make new keys',
   rekeySteps: { browser: 'Finish signing in in the browser.', checking: 'Checking the org…', approval: 'Waiting for approval.', promoting: 'Switching to the new keys…' },

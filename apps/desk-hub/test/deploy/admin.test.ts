@@ -771,6 +771,21 @@ describe('root add', () => {
     // The app no longer signs: its successor is refused by the root set it left.
     expect(await verifySuccessor(head, await signOrgState(await successor(head.state, () => {}), [app.stepUp]), [])).toEqual({ ok: false, code: 'not-root-signed' });
   });
+
+  it("takes a device id that starts with '-' after `--` (an id is a base64url key id: about one in 64 does)", async () => {
+    const id = '-dash-mac';
+    await paired({ id, class: 'native-mac', keyStorage: 'software', channelPub: (await generateSigningKey()).pub, stepUpPub: (await generateSigningKey()).pub });
+    const bare = fake();
+    expect(await runAdmin(['root', 'add', id, ...asLocal(), '--yes'], bare.io)).toBe(2);
+    expect(bare.err.join('\n')).toMatch(/Unknown option/);
+    const added = fake();
+    expect(await runAdmin(['root', 'add', ...asLocal(), '--yes', '--', id], added.io)).toBe(0);
+    expect(added.out.at(-1)).toMatch(new RegExp(`^root added: ${id}, step-up `));
+    expect((await served()).state.root.keys).toHaveLength(2);
+    const removed = fake();
+    expect(await runAdmin(['remove-device', ...asLocal(), '--yes', '--', id], removed.io)).toBe(0);
+    expect((await served()).state.root.keys).toEqual([adminKid]);
+  });
 });
 
 describe('no two successors of one parent', () => {

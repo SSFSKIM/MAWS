@@ -273,7 +273,8 @@ describe('Settings › Org: this Mac as the org’s signer (M3)', () => {
     renderSection(signing({}));
     const signer = await found('Signer');
     expect(within(signer).getByText('Make this Mac a root: run')).toBeTruthy();
-    expect(within(signer).getByText(`deployment admin root add ${DEVICE}`).className).toContain('font-mono');
+    // The id after `--`: a base64url id may start with '-', which the admin's option parser would take for an option.
+    expect(within(signer).getByText(`deployment admin root add -- ${DEVICE}`).className).toContain('font-mono');
     expect(within(signer).getByText(new RegExp(FINGERPRINT))).toBeTruthy();
     expect(within(signer).queryByRole('button')).toBeNull();
     expect(screen.queryByRole('textbox')).toBeNull(); // a marked, listed device is offered no new keys
@@ -557,7 +558,7 @@ describe('Settings › Org: this Mac as the org’s signer (M3)', () => {
   it('the old device, still listed after a rekey: its id with the remove-device command', async () => {
     renderSection(signing({ ...ROOT, oldDevice: OLD_DEVICE }));
     const old = await found('Old device');
-    expect(within(old).getByText(`deployment admin remove-device ${OLD_DEVICE}`).className).toContain('font-mono');
+    expect(within(old).getByText(`deployment admin remove-device -- ${OLD_DEVICE}`).className).toContain('font-mono');
     emit(signing(ROOT));
     expect(screen.queryByRole('group', { name: 'Old device' })).toBeNull();
   });

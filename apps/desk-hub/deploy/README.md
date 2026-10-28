@@ -314,9 +314,9 @@ signs in through the stand-in instead, and only there may `--yes` answer its con
   the device's panel shows too: compare the two before `y`, since the clipboard exposes `k` to every process under
   your uid. Two entries answering one code are refused and the code is spent. It then signs a successor listing the
   device, endorsed by this device, and prints `listed: version n`.
-- `devices` lists the member's devices; `remove-device <id>` asks, then signs a successor dropping the device, its keys
+- `devices` lists the member's devices; `remove-device -- <id>` asks, then signs a successor dropping the device, its keys
   into `revoked` and its step-up key out of the root set if it was a root. Machines learn it at the hub's `state` notice, within its 10-minute poll at worst.
-- `root add <id>` makes a device of the signed-in member a root beside this one (P5 O8 M3: the owner's MAWS, whose
+- `root add -- <id>` makes a device of the signed-in member a root beside this one (P5 O8 M3: the owner's MAWS, whose
   Settings › Org shows its id and fingerprint): a native-mac device with a step-up key, as this device is; a web-cards
   device, another member's, one the head doesn't list or one already a root is refused. It asks `make <device> of
   <email> (fingerprint <xxxxx-xxxxx>, step-up <kid>) a root of <org>? [y/N]` (the fingerprint `pair` showed for the
