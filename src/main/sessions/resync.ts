@@ -8,7 +8,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { EventsSnapshot } from '@shared/ipc/schema/session';
-import type { HostDispatch } from '../ipc/router';
+import type { HostDispatch } from '@shared/host/host-supervisor';
 import type { ReadModelWriter } from './read-model';
 
 export const RESYNC_PAGE = 2_000; // events per `session.events` page

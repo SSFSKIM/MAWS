@@ -3,9 +3,6 @@
 // host's stream does (whole journal rows, about `limit` events, `lastSeq` the next cursor). The fold is the real read
 // model's; the burst and the live batches arrive through `hostEventSource`'s `session.eventBatch` listener.
 import { describe, expect, it, vi } from 'vitest';
-
-vi.mock('electron', () => ({ BrowserWindow: { getAllWindows: () => [] }, ipcMain: { handle: vi.fn() } }));
-
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
@@ -13,8 +10,7 @@ import type { CommandResult, HostState, SessionDigest } from '@shared/ipc/schema
 import type { EventsSnapshot } from '@shared/ipc/schema/session';
 import { record, status } from '../../../test/support/builders';
 import { ev } from '../../../test/support/events';
-import type { HostResync } from '../hosts/supervisor';
-import type { HostDispatch } from '../ipc/router';
+import type { HostDispatch, HostResync } from '@shared/host/host-supervisor';
 import { hostEventSource } from '.';
 import { SessionReadModel } from './read-model';
 import { randomUUID } from 'node:crypto';

@@ -38,7 +38,7 @@ import { markIdOf, type MarkId } from '@shared/owner/marks';
 import type { AnswerMember, OwnerChannelState, OwnerMark, QuestionState } from '@shared/owner/state';
 import { TO_HUMAN_GRAMMAR_VERSION } from '@shared/owner/to-human-parser';
 import type { SessionStore } from '../index/sessions';
-import type { HostDispatch } from '../ipc/router';
+import type { HostDispatch } from '@shared/host/host-supervisor';
 import { hostCall } from '../sessions/context';
 import { applyEvent, newAnswer, onItsWay, settleAnswers, statusOf, storedOf, type Answer, type PromptEvent } from './answers';
 import { laneOn } from './launch';

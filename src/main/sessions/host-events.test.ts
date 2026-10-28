@@ -1,12 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
-
-vi.mock('electron', () => ({ BrowserWindow: { getAllWindows: () => [] }, ipcMain: { handle: vi.fn() } }));
-
+import { describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { humanTurn, record, status } from '../../../test/support/builders';
 import { ev } from '../../../test/support/events';
 import { item } from '../../../test/support/builders';
-import { emit } from '../ipc/events';
+import { fakeBus } from '../../../test/support/fake-bus';
 import { emittedAppEventsSource, emittedAttentionSource, hostEventSource } from '.';
 import { SessionReadModel } from './read-model';
 
@@ -45,10 +42,11 @@ describe('read model snapshot matches events', () => {
     expect(model.digests()).toMatchObject([{ appSessionId: 'r1' as AppSessionId, phase: 'working', activity: 'Searching' }]);
   });
 
-  it('sees attention.changed as emitted through main’s emit, in either launch mode', () => {
+  it('sees attention.changed as emitted on the bus, in either launch mode', () => {
     for (const mode of ['index', 'scenario'] as const) {
+      const { emit, onEmitted } = fakeBus();
       const model = new SessionReadModel(mode);
-      const stop = mode === 'index' ? model.register(emittedAttentionSource()) : model.registerScenario(emittedAttentionSource());
+      const stop = mode === 'index' ? model.register(emittedAttentionSource(onEmitted)) : model.registerScenario(emittedAttentionSource(onEmitted));
       const items = [item('a1', 'permission', '2026-09-28T10:00:00Z')];
       expect(emit('attention.changed', { appSessionId: 'a1' as AppSessionId, items })).toBe(true);
       expect(model.attention('a1' as AppSessionId)).toEqual(items);
@@ -62,10 +60,11 @@ describe('read model snapshot matches events', () => {
   // C10's route notice) is emitted once and nowhere journalled, so main keeps it for a page that loads after it.
   it('keeps the events main synthesises for a session, as emitted, until the session is removed', () => {
     const A = 'a1' as AppSessionId;
+    const { emit, onEmitted } = fakeBus();
     const model = new SessionReadModel('index');
     let remove = () => {};
     model.register({ start: (writer) => (writer.observeRecord(record('a1')), (remove = () => writer.observeRemoved(A)), () => {}) });
-    const stop = model.register(emittedAppEventsSource());
+    const stop = model.register(emittedAppEventsSource(onEmitted));
     const notice = ev('notice.posted', { id: 'a1:c10:relay-fallback:1', seq: null, level: 'warning', key: 'relay:direct_fallback', text: 'Direct.' });
     const live = ev('turn.started', { id: 'a1:7', seq: 7 }); // C3's live row: journalled by the host
     const disk = ev('turn.started', { id: 'uuid-1', seq: null }); // C4's disk form: read from the transcript

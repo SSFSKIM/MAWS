@@ -1,44 +1,26 @@
-// `scm.*` through the router: every command reaches the service with the session id as sent (a run with its kind),
+// `scm.*` through the services bus, routed as main's router routes them: every command reaches the service with the session id as sent (a run with its kind),
 // refusals arrive as values, a git timeout as `timeout` and anything else as `internal`.
-import { EventEmitter } from 'node:events';
-import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2: the router's local machine
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CommandName } from '@shared/ipc/schema';
+import { fakeBus, type FakeBus } from '../../../test/support/fake-bus';
+import { GitTimeoutError } from '../git/runner';
+import { registerScmHandlers } from './register';
 import type { ScmService } from './service';
 
-const electron = vi.hoisted(() => ({
-  handlers: new Map<string, (event: unknown, input: unknown) => Promise<unknown>>(),
-  windows: new Map<object, { webContents: { mainFrame: object } }>(),
-}));
-vi.mock('electron', () => ({
-  ipcMain: {
-    handle: (channel: string, handler: (event: unknown, input: unknown) => Promise<unknown>) => void electron.handlers.set(channel, handler),
-  },
-  BrowserWindow: { fromWebContents: (webContents: object) => electron.windows.get(webContents) ?? null },
-}));
-
-const APP_URL = 'http://localhost:5173/';
-const mainFrame = { url: APP_URL, parent: null };
-const sender = Object.assign(new EventEmitter(), { id: 7, mainFrame, isDestroyed: () => false });
-const event = { sender, senderFrame: mainFrame };
 const appSessionId = 'a1111111-1111-4111-8111-111111111111';
 
-describe('main answers scm.* through the router', () => {
+describe('main answers scm.* on the services bus', () => {
   let service: { [K in Exclude<keyof ScmService, 'dispose'>]: ReturnType<typeof vi.fn> };
-  beforeEach(async () => {
-    vi.resetModules();
-    electron.handlers.clear();
-    electron.windows.clear();
-    electron.windows.set(sender, { webContents: sender });
+  let bus: FakeBus;
+  beforeEach(() => {
     service = {
       status: vi.fn(), stage: vi.fn(), unstage: vi.fn(), discard: vi.fn(), commit: vi.fn(), planPush: vi.fn(), planPr: vi.fn(), run: vi.fn(),
       cancel: vi.fn(), last: vi.fn(), prState: vi.fn(),
     };
-    const { registerScmHandlers } = await import('./register');
-    const { installRouter } = await import('../ipc/router');
-    registerScmHandlers(service as unknown as ScmService);
-    installRouter({ appUrl: APP_URL, local: 'LocalMachineRef0000000' as MachineRef });
+    bus = fakeBus();
+    registerScmHandlers(service as unknown as ScmService, bus);
   });
-  const invoke = (name: string, input?: unknown) => electron.handlers.get(`maws:cmd:${name}`)!(event, input);
+  const invoke = (name: string, input?: unknown) => bus.invoke(name as CommandName, input);
 
   it('passes each command its input and answers a refusal as a value', async () => {
     const refusal = { refused: 'untrusted', detail: 'MAWS runs git here only after you trust the folder in a session', output: '' };
@@ -91,13 +73,10 @@ describe('main answers scm.* through the router', () => {
   });
 
   it('answers timeout for a git timeout and internal for anything else', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { GitTimeoutError } = await import('../git/runner'); // the module instance the router's handlers were loaded with
     service.commit.mockRejectedValue(new GitTimeoutError('git commit timed out after 60 s in /r'));
     expect(await invoke('scm.commit', { appSessionId, message: 'x', noVerify: false })).toEqual({ ok: false, error: { code: 'timeout', message: 'git commit timed out after 60 s in /r' } });
     service.stage.mockRejectedValue(new Error(`unknown app session: ${appSessionId}`));
     expect(await invoke('scm.stage', { appSessionId, paths: ['a'] })).toEqual({ ok: false, error: { code: 'internal', message: `unknown app session: ${appSessionId}` } });
     expect(await invoke('scm.stage', { appSessionId, paths: [] })).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
-    logged.mockRestore();
   });
 });

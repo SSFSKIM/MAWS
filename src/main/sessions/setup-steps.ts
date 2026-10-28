@@ -11,7 +11,7 @@ import type { GitRun } from '../git/runner';
 import type { WorktreeService } from '../git/worktrees';
 import type { SessionStore } from '../index/sessions';
 import type { SideThreadStore } from '../index/side-threads'; // E3
-import type { HostDispatch } from '../ipc/router';
+import type { HostDispatch } from '@shared/host/host-supervisor';
 import { attachCommand } from '@shared/sessions/attach';
 import { bgRefusalOf } from './attach';
 import { hostCall, reservationOf, type Emit, type HostEvents, type LaunchGate } from './context'; // C12: LaunchGate

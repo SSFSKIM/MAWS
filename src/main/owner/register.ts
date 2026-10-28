@@ -12,7 +12,8 @@ import type { Settings } from '@shared/ipc/schema/settings';
 import type { AttentionService } from '../attention/service';
 import { claudeConfigDir } from '../history/prompt-history';
 import type { Index } from '../index/index';
-import type { HostDispatch, registerMainHandler } from '../ipc/router';
+import type { HostDispatch } from '@shared/host/host-supervisor';
+import type { ServicesBus } from '@shared/spine/bus';
 import { transcriptPathOf, type HostEvents } from '../sessions/context';
 import { OwnerChannelLaunches } from './launch';
 import { modsList, setSessionOverride, type ModsDeps } from './mods';
@@ -24,7 +25,7 @@ export interface OwnerChannelDeps {
   settings: () => Settings;
   engineEnv: Promise<NodeJS.ProcessEnv>; // the captured login-shell environment the engine is launched with
   onEvent: HostEvents;
-  register: typeof registerMainHandler;
+  register: ServicesBus['register'];
   log?: (message: string) => void;
   // M4 start (2026-10-09)
   attention: Pick<AttentionService, 'setOwnerItems'>;

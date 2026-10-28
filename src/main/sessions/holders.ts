@@ -12,7 +12,7 @@ import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { normalizePath } from '@shared/sessions/trust';
 import type { WorktreeOccupancy } from '@shared/sessions/worktree';
-import type { HostDispatch } from '../ipc/router';
+import type { HostDispatch } from '@shared/host/host-supervisor';
 import { hostCall } from './context';
 
 export interface HolderDeps {

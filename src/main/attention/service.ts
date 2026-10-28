@@ -21,7 +21,7 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import type { CommandInput, CommandName, CommandOutput, EventName, EventPayload } from '@shared/ipc/schema';
 import { previewLine } from '@shared/owner/preview';
 import type { AttentionStore } from './store';
-import type { HostSupervisor } from '../hosts/supervisor';
+import type { HostSupervisor } from '@shared/host/host-supervisor';
 
 // SPEC 45.25.4 `qpn`: the terminal reasons that are hard failures (an interrupt is not one).
 export const HARD_FAILURE_REASONS: ReadonlySet<string> = new Set([
@@ -79,8 +79,8 @@ export interface AttentionServiceDeps {
   onEvent: <N extends EventName>(name: N, listener: (payload: EventPayload<N>) => void) => () => void; // HostSupervisor.onEvent
   dispatch: Dispatch; // HostSupervisor.dispatch
   store: AttentionStore;
-  emit: <N extends EventName>(name: N, payload: EventPayload<N>) => unknown; // main's validated emit to the renderer
-  register: <N extends CommandName>(name: N, handler: (input: CommandInput<N>) => CommandOutput<N> | Promise<CommandOutput<N>>) => void; // registerMainHandler
+  emit: <N extends EventName>(name: N, payload: EventPayload<N>) => unknown; // the services bus's validated emit to every client
+  register: <N extends CommandName>(name: N, handler: (input: CommandInput<N>) => CommandOutput<N> | Promise<CommandOutput<N>>) => void; // the services bus's register
   log?: (message: string) => void;
 }
 

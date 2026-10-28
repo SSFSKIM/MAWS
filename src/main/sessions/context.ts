@@ -18,7 +18,7 @@ import type { WorktreeService } from '../git/worktrees';
 import type { ProjectStore } from '../index/projects';
 import type { SessionStore } from '../index/sessions';
 import type { SideThreadStore } from '../index/side-threads'; // E3
-import type { HostDispatch } from '../ipc/router';
+import type { HostDispatch } from '@shared/host/host-supervisor';
 import type { C10Settings } from './launch-mapping';
 import type { BootstrapNotes, IntentStore } from './intents';
 import type { ReplaySeam } from './replay-seam';

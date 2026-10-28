@@ -4,8 +4,9 @@ import { describe, expect, it } from 'vitest';
 import { emptyObservedFacts } from '@shared/engine/observed-facts';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName, CommandResult } from '@shared/ipc/schema';
-import type { HostDispatch } from '../ipc/router';
-import { observedFactsOf } from './observed';
+import type { HostDispatch } from '@shared/host/host-supervisor';
+import { fakeBus } from '../../../test/support/fake-bus';
+import { observedFactsOf, registerObservedFacts } from './observed';
 
 const ID = 'app-main-facts' as AppSessionId;
 
@@ -30,5 +31,12 @@ describe('session.observedFacts in main', () => {
     };
     expect(await observedFactsOf(thrown, ID, (line) => lines.push(line))).toBeNull();
     expect(lines).toEqual([expect.stringContaining('the engine host is restarting'), expect.stringContaining('socket closed')]);
+  });
+
+  it('answers session.observedFacts on the services bus', async () => {
+    const answer = { ...emptyObservedFacts(ID, '2026-10-09T10:00:00.000Z', 'journal'), complete: true };
+    const bus = fakeBus();
+    registerObservedFacts(async () => ({ ok: true, value: answer }) as CommandResult<CommandName>, bus, () => {});
+    expect(await bus.invoke('session.observedFacts', { appSessionId: ID })).toEqual({ ok: true, value: answer });
   });
 });

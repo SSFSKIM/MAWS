@@ -9,7 +9,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { status } from '../../../test/support/builders';
 import { summary, tempDir } from '../../../test/support/index-fixture';
 import { Index } from '../index/index';
-import type { HostDispatch } from '../ipc/router';
+import type { HostDispatch } from '@shared/host/host-supervisor';
 import { ScreenshotRefused } from './screenshot';
 import { sendToMain } from './send-to-main';
 

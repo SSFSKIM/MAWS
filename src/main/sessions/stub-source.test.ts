@@ -1,12 +1,10 @@
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-vi.mock('electron', () => ({ BrowserWindow: { getAllWindows: () => [] }, ipcMain: { handle: vi.fn() } }));
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName, EventName } from '@shared/ipc/schema';
 import type { Draft } from '@shared/ipc/schema/session';
 import { TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
-import type { onEmitted } from '../ipc/events';
+import type { ServicesBus } from '@shared/spine/bus';
 import { emittedAttentionSource } from '.';
 import { SessionReadModel } from './read-model';
 import { stubSource, type StubSourceDeps } from './stub-source';
@@ -19,12 +17,12 @@ const USAGE = 'app-59505fdc' as AppSessionId;
 function harness(scenario = NINE /* C12 */) {
   const handlers = new Map<CommandName, (input: unknown) => unknown>();
   const emitted: { name: EventName; payload: unknown }[] = [];
-  // main's emit and its taps, as sessions/index.ts wires them: the read model hears attention only as emitted.
+  // the bus's emit and its taps, as sessions/index.ts wires them: the read model hears attention only as emitted.
   const taps = new Map<string, (payload: unknown) => void>();
   const tap = ((name: string, listener: (payload: unknown) => void) => {
     taps.set(name, listener);
     return () => taps.delete(name);
-  }) as typeof onEmitted;
+  }) as ServicesBus['onEmitted'];
   const deps: StubSourceDeps = {
     emit: (name, payload) => {
       emitted.push({ name, payload });

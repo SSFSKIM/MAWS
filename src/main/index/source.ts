@@ -25,7 +25,7 @@ import type { AppSessionId, ProjectId, SessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { CommandInput, CommandName, CommandOutput, EventName, EventPayload } from '@shared/ipc/schema';
 import type { Holder, TranscriptSummary } from '@shared/wire/store';
-import type { HostSupervisor } from '../hosts/supervisor';
+import type { HostSupervisor } from '@shared/host/host-supervisor';
 import type { ReadModelWriter as ShellReadModelWriter, SessionSource } from '../sessions/read-model';
 import { toSessionRecordPatch } from '@shared/engine/status';
 import { previewLine } from '@shared/owner/preview';
@@ -41,7 +41,7 @@ export type ReadModelWriter = Pick<ShellReadModelWriter, 'observeRecord' | 'obse
 export type SourceHost = Pick<HostSupervisor, 'dispatch' | 'onEvent' | 'onState' | 'onStreaming' | 'snapshot'>; // E10: onStreaming
 
 export interface SourceOptions {
-  emit: <N extends EventName>(name: N, payload: EventPayload<N>) => boolean; // main → renderer (src/main/ipc/events)
+  emit: <N extends EventName>(name: N, payload: EventPayload<N>) => boolean; // to every client: the services bus's emit (P5 O3-C)
   tickMs?: number; // session.changed coalescing and fs.bind batching; 16 ms
   now?: () => string;
   warmLinkedWorktrees?: (directories: string[]) => Promise<void>; // projects.ts's; a test holds the warm-up open

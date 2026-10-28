@@ -2,7 +2,7 @@
 // the profile's `MachineRef`, read or minted at startup into `<userData>/machine.json` through the module O2's `mawsd`
 // shares (src/shared/machine/identity-file.ts), and `machine.identity`, registered with the `machine` owner's embedded
 // binding. No Electron: O3 registers the same handler in `mawsd`'s runtime.
-import type { MachineHandler } from '../ipc/router';
+import type { ServiceHandler } from '@shared/spine/bus';
 import { readOrMintMachineRef } from '@shared/machine/identity-file';
 import type { MachineIdentity } from '@shared/ipc/schema/machine';
 import type { CommandName } from '@shared/ipc/schema';
@@ -18,7 +18,7 @@ export interface MachineIdentityDeps {
   userData: string;
   env: NodeJS.ProcessEnv;
   hostname: string;
-  register: <N extends CommandName>(name: N, handler: MachineHandler<N>) => void;
+  register: <N extends CommandName>(name: N, handler: ServiceHandler<N>) => void; // the `machine` owner's: registerMachineHandler in main's root
   enrollment?: () => Enrollment | null; // P5 O6 M5: `machineEnrollment` (none until O10); tests inject one
 }
 

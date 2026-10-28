@@ -1,37 +1,24 @@
-import { EventEmitter } from 'node:events';
-import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2: the router's local machine
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { endableClientRef, type EndableClientRef } from '@shared/ipc/client';
+import type { CommandName } from '@shared/ipc/schema';
+import { fakeBus, type FakeBus } from '../../../test/support/fake-bus';
 import { GitFixture } from '../../../test/support/git-fixture';
+import { registerGitHandlers } from './register';
 import type { ExecFileFn } from './runner';
-
-// Electron is faked as in the router's own test: one recorded ipcMain handler per channel, one app window.
-const electron = vi.hoisted(() => ({
-  handlers: new Map<string, (event: unknown, input: unknown) => Promise<unknown>>(),
-  windows: new Map<object, { webContents: { mainFrame: object } }>(),
-}));
-vi.mock('electron', () => ({
-  ipcMain: {
-    handle: (channel: string, handler: (event: unknown, input: unknown) => Promise<unknown>) => void electron.handlers.set(channel, handler),
-  },
-  BrowserWindow: { fromWebContents: (webContents: object) => electron.windows.get(webContents) ?? null },
-}));
-
-const APP_URL = 'http://localhost:5173/';
-const mainFrame = { url: APP_URL, parent: null };
-const sender = Object.assign(new EventEmitter(), { id: 7, mainFrame, isDestroyed: () => false }); // the app window's webContents
-const event = { sender, senderFrame: mainFrame };
+import { GitService } from './service';
 
 type Result = { ok: boolean; value?: unknown; error?: { code: string; message: string } };
 
-describe('main answers git.* through the router', () => {
+// The asking page, as main's router hands a handler its ClientRef (src/main/ipc/clients.ts): a reload ends this
+// document's ref and the page asks with the next generation's.
+describe('main answers git.* on the services bus', () => {
   let repo: GitFixture;
   let dispose: () => void;
+  let bus: FakeBus;
+  let page: EndableClientRef;
   beforeEach(async () => {
-    vi.resetModules();
-    electron.handlers.clear();
-    electron.windows.clear();
-    electron.windows.set(sender, { webContents: sender });
-    sender.removeAllListeners();
+    bus = fakeBus();
+    page = endableClientRef('page:7.1');
     repo = await GitFixture.create();
   });
   afterEach(() => {
@@ -41,16 +28,12 @@ describe('main answers git.* through the router', () => {
   });
 
   async function install(options: { execFile?: ExecFileFn } = {}) {
-    const { GitService } = await import('./service');
-    const { registerGitHandlers } = await import('./register');
-    const { installRouter } = await import('../ipc/router');
     const service = new GitService({ env: repo.serviceEnv(), ...options });
     dispose = () => service.dispose();
-    registerGitHandlers(service);
-    installRouter({ appUrl: APP_URL, local: 'LocalMachineRef0000000' as MachineRef });
+    registerGitHandlers(service, bus);
     return service;
   }
-  const invoke = (name: string, input?: unknown) => electron.handlers.get(`maws:cmd:${name}`)!(event, input) as Promise<Result>;
+  const invoke = (name: CommandName, input?: unknown) => bus.invoke(name, input, page) as Promise<Result>;
 
   it('answers status, branches, diff and log, and watch then unwatch', async () => {
     await install();
@@ -71,23 +54,22 @@ describe('main answers git.* through the router', () => {
     await invoke('git.watch', { directory: repo.root });
     await invoke('git.watch', { directory: repo.root });
     expect(watch.mock.calls.map((call) => call[1])).toEqual(['page:7.1', 'page:7.1']);
-    sender.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false }); // a reload: the new page watches afresh
+    page.end(); // a reload: the new page watches afresh
+    page = endableClientRef('page:7.2');
     expect(release).toHaveBeenCalledWith('page:7.1');
     expect(release).toHaveBeenCalledTimes(1); // followed once, however many watches
     await invoke('git.watch', { directory: repo.root });
     expect(watch.mock.calls[2][1]).toBe('page:7.2');
-    sender.emit('destroyed');
+    page.end(); // the page closes
     expect(release).toHaveBeenLastCalledWith('page:7.2');
     expect(release).toHaveBeenCalledTimes(2);
   });
 
   it('fails internal "not a git repository" outside a repository, and invalid_input for a limit out of range', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {}); // the router logs a handler's throw
     await install();
     expect(await invoke('git.status', { directory: '/tmp' })).toEqual({ ok: false, error: { code: 'internal', message: 'not a git repository' } });
     expect(await invoke('git.watch', { directory: '/tmp' })).toEqual({ ok: false, error: { code: 'internal', message: 'not a git repository' } });
     expect(await invoke('git.log', { directory: repo.root, limit: 501 })).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
-    expect(logged).toHaveBeenCalled();
   });
 
   it('answers timeout when git is killed at its deadline', async () => {

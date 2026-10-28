@@ -4,7 +4,8 @@
 // it is back. Main keeps no copy.
 import type { ObservedFactsAnswer } from '@shared/engine/observed-facts';
 import type { AppSessionId } from '@shared/graph/ids';
-import { registerMainHandler, type HostDispatch } from '../ipc/router';
+import type { HostDispatch } from '@shared/host/host-supervisor';
+import type { ServicesBus } from '@shared/spine/bus';
 import { hostCall } from './context';
 
 export async function observedFactsOf(dispatch: HostDispatch, appSessionId: AppSessionId, log: (line: string) => void): Promise<ObservedFactsAnswer | null> {
@@ -16,6 +17,6 @@ export async function observedFactsOf(dispatch: HostDispatch, appSessionId: AppS
   }
 }
 
-export function registerObservedFacts(dispatch: HostDispatch, log: (line: string) => void = (line) => console.warn(`[sessions] ${line}`)): void {
-  registerMainHandler('session.observedFacts', ({ appSessionId }) => observedFactsOf(dispatch, appSessionId as AppSessionId, log));
+export function registerObservedFacts(dispatch: HostDispatch, { register }: Pick<ServicesBus, 'register'>, log: (line: string) => void = (line) => console.warn(`[sessions] ${line}`)): void {
+  register('session.observedFacts', ({ appSessionId }) => observedFactsOf(dispatch, appSessionId as AppSessionId, log));
 }

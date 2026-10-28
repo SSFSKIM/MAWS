@@ -25,7 +25,7 @@ import { TO_HUMAN_SUPPLEMENT_VERSION } from '@shared/owner/contract';
 import type { ContractSource, LaneOverride } from '@shared/owner/state';
 import { claudeConfigDir } from '../history/prompt-history';
 import type { SessionStore } from '../index/sessions';
-import type { HostDispatch } from '../ipc/router';
+import type { HostDispatch } from '@shared/host/host-supervisor';
 import { hostCall, transcriptPathOf } from '../sessions/context';
 import { withOwnerChannel, type AppendedText } from '../sessions/launch-mapping';
 import { recordedState, type RecordedState } from './prompt-state';

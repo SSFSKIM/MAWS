@@ -1,6 +1,6 @@
 // The stub session source (C5 execution document, Main modules; residue *Read model and stub source*), enabled by
 // `MAWS_SESSION_SOURCE=stub:<scenario>` in launch mode `scenario`. It loads a scenario (validated by the X1/X2 schemas
-// and C3's status schema), fills the stub store and the read model, answers through `interceptCommand` the commands
+// and C3's status schema), fills the stub store and the read model, answers through the services bus's `intercept` the commands
 // the shell calls that C4 (record side) and C3 (`attention.list`, `attention.request`, `session.answer`) answer in
 // production, emits the events those siblings would emit, and plays the scenario's timeline on the wall clock or, for
 // the smoke, on a manual clock driven through `globalThis.__maws_scenario` in main (no test-only IPC command exists).
@@ -11,7 +11,7 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import type { BudgetState } from '@shared/ipc/schema/engine'; // C12
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { loadScenario, type Scenario, type ScenarioDigest, type ScenarioOp } from '../../../test/support/scenario';
-import type { interceptCommand } from '../ipc/router';
+import type { ServicesBus } from '@shared/spine/bus';
 import type { ReadModelWriter, SessionSource } from './read-model';
 import type { ScenarioClock } from './select-source';
 import { StubStore } from './stub-store';
@@ -20,7 +20,7 @@ import type { Draft, SessionPatch } from '@shared/ipc/schema/session';
 
 export interface StubSourceDeps {
   emit: <N extends EventName>(name: N, payload: EventPayload<N>) => boolean;
-  intercept: typeof interceptCommand;
+  intercept: ServicesBus['intercept'];
   now?: () => number; // wall-clock ms, for record timestamps and the wall clock's offsets
 }
 

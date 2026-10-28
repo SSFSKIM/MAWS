@@ -1,55 +1,32 @@
 import { randomUUID } from 'node:crypto';
-import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2: the router's local machine
-import { EventEmitter } from 'node:events';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
+import type { CommandName } from '@shared/ipc/schema';
+import { fakeBus, type FakeBus } from '../../../test/support/fake-bus';
 import { summary, tempDir } from '../../../test/support/index-fixture';
+import { Index } from './index';
+import { registerIndexHandlers } from './register';
 
-// Electron is faked as in the router's own test: one recorded ipcMain handler per channel, one app window.
-const electron = vi.hoisted(() => ({
-  handlers: new Map<string, (event: unknown, input: unknown) => Promise<unknown>>(),
-  windows: new Map<object, { webContents: { mainFrame: object } }>(),
-}));
-vi.mock('electron', () => ({
-  ipcMain: {
-    handle: (channel: string, handler: (event: unknown, input: unknown) => Promise<unknown>) => void electron.handlers.set(channel, handler),
-  },
-  BrowserWindow: { fromWebContents: (webContents: object) => electron.windows.get(webContents) ?? null },
-}));
-
-const APP_URL = 'http://localhost:5173/';
-const mainFrame = { url: APP_URL, parent: null };
-const sender = Object.assign(new EventEmitter(), { id: 7, mainFrame, isDestroyed: () => false }); // the app window's webContents
-const event = { sender, senderFrame: mainFrame };
-
-type IndexModule = typeof import('./index');
-
+// The handlers answer through the services bus (P5 O3-C M1), routed as main's router routes them.
 describe('main answers the record side of session.* from the index', () => {
   let dir: ReturnType<typeof tempDir>;
-  let index: InstanceType<IndexModule['Index']>;
-  beforeEach(async () => {
-    vi.restoreAllMocks();
-    vi.resetModules();
-    electron.handlers.clear();
-    electron.windows.clear();
-    electron.windows.set(sender, { webContents: sender });
+  let index: Index;
+  let bus: FakeBus;
+  beforeEach(() => {
     dir = tempDir();
-    const { Index } = (await import('./index')) as IndexModule;
-    const { registerIndexHandlers } = await import('./register');
-    const { installRouter } = await import('../ipc/router');
     index = new Index(join(dir.path, 'index.sqlite'));
-    registerIndexHandlers(index);
-    installRouter({ appUrl: APP_URL, local: 'LocalMachineRef0000000' as MachineRef });
+    bus = fakeBus();
+    registerIndexHandlers(index, bus);
   });
   afterEach(() => {
     index.close();
     dir.dispose();
   });
 
-  const invoke = (name: string, input?: unknown) => electron.handlers.get(`maws:cmd:${name}`)!(event, input) as Promise<{ ok: boolean; value?: unknown; error?: { code: string; message: string } }>;
+  const invoke = (name: CommandName, input?: unknown) => bus.invoke(name, input) as Promise<{ ok: boolean; value?: unknown; error?: { code: string; message: string } }>;
 
   it('session.list and session.get answer records with the index revision; get answers null for an id with no row', async () => {
     const { record } = index.sessions.upsertFromSummary(summary());
@@ -77,13 +54,11 @@ describe('main answers the record side of session.* from the index', () => {
   });
 
   it('session.update and session.drafts.* for an app session with no row fail internal "unknown app session: <id>"', async () => {
-    const error = vi.spyOn(console, 'error').mockImplementation(() => {}); // the router logs a handler's throw
     const unknown = randomUUID() as AppSessionId;
     const expected = { ok: false, error: { code: 'internal', message: `unknown app session: ${unknown}` } };
     expect(await invoke('session.update', { appSessionId: unknown, patch: { pinned: true } })).toEqual(expected);
     expect(await invoke('session.drafts.set', { appSessionId: unknown, draft: null })).toEqual(expected);
     expect(await invoke('session.drafts.get', { appSessionId: unknown })).toEqual(expected);
-    expect(error).toHaveBeenCalledTimes(3);
   });
 
   it('session.drafts.set and get round-trip a draft', async () => {
@@ -94,7 +69,6 @@ describe('main answers the record side of session.* from the index', () => {
   });
 
   it('session.projects.* list, add, update and remove through the index', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
     const tree = tempDir('maws-register-');
     try {
       const directory = join(tree.path, 'alpha');
@@ -120,15 +94,9 @@ describe('main answers the record side of session.* from the index', () => {
     const raw = new DatabaseSync(join(dir.path, 'index.sqlite'));
     raw.exec('PRAGMA user_version = 99');
     raw.close();
-    vi.resetModules();
-    electron.handlers.clear();
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { Index } = (await import('./index')) as IndexModule;
-    const { registerIndexHandlers } = await import('./register');
-    const { installRouter } = await import('../ipc/router');
     index = new Index(join(dir.path, 'index.sqlite'));
-    registerIndexHandlers(index);
-    installRouter({ appUrl: APP_URL, local: 'LocalMachineRef0000000' as MachineRef });
+    bus = fakeBus();
+    registerIndexHandlers(index, bus);
     expect(index.readOnly).toBe(true);
     const unavailable = { ok: false, error: { code: 'internal', message: 'index unavailable: user_version 99 is newer than this app knows (14)' } }; // P2-C2: 9; P3-L: 10; P5 O6 M5: 13; P5 O3-A: 14
     const appSessionId = randomUUID();

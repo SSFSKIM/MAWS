@@ -18,7 +18,7 @@ import { slugOf } from '../../engine-host/fs/paths';
 import { installToHumanPlugin, PLUGIN_STYLE } from '../../../test/support/to-human-plugin';
 import { summary, tempDir } from '../../../test/support/index-fixture';
 import { Index } from '../index/index';
-import type { HostDispatch } from '../ipc/router';
+import type { HostDispatch } from '@shared/host/host-supervisor';
 import { decideFlags, desiredSource, laneOn, OwnerChannelLaunches, ownerChannelLaunch, type OwnerLaunchSetup } from './launch';
 import type { RecordedState } from './prompt-state';
 

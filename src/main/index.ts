@@ -150,9 +150,12 @@ import { ImportedProfiles, startBrowserImport, sweepBrowserImports } from './bro
 // E4b end
 // P3-A start
 import { installStorePolicies, registerStoreSchemes, startArtifacts } from './artifacts';
+import { startArtifactDefaults } from './artifacts/defaults'; // P5 O3-C (D23): the spine's relay, beside the artifacts
 // P3-A end
 // P3-L start
 import { startLibrary } from './library';
+import { registerLibraryFiles } from './library/files'; // P5 O3-C (D22): the client's, beside the spine's derived index
+import type { ServicesBus } from '@shared/spine/bus'; // P5 O3-C
 import { fileAdmission } from './library/admission'; // M6b
 // P3-L end
 // P3-B start
@@ -371,6 +374,10 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
     session,
   });
   installRouter({ appUrl, local, dispatchToHost: hosts.dispatch, remote: machines.dispatch });
+  // P5 O3-C (Interfaces §A): the services bus, how the library (the spine and the checkouts) registers its commands,
+  // installs its intercepts, emits its events and taps them, bound here to the router and `emit`, so every tap main's
+  // own code holds (the menu's, the stand-in's) still hears the library's events. O3-D's mawsd binds its services front.
+  const bus: ServicesBus = { register: registerMainHandler, intercept: interceptCommand, emit, onEmitted };
   // P5 O1 M3 (OX4): the client port, the one way a machine-bound service reaches the person's screen: dialogs, the
   // Replace question, Finder, the browser, notifications, the badge and focus. `openWindow` is read when a focus needs it.
   const clientPort = electronClientPort({ env: process.env, openWindow: () => openWindow() });
@@ -394,7 +401,7 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
   const index = new Index(join(app.getPath('userData'), 'index.sqlite'), { refused: spine.refused });
   // P5 O6 M5: each project's org project, derived again in the background at every start (OX3)
   void index.refreshOrgProjects({ machine: local });
-  registerIndexHandlers(index);
+  registerIndexHandlers(index, bus);
   // P5 O8 M2: other machines' sessions, from their signed listings through the feed, verified against the held org state,
   // for the machines of O7's RL2 roster (src/main/org/rows.ts); org.rows and org.rows.changed carry them to the sidebar
   let roster: readonly MachineRef[] = [];
@@ -418,7 +425,7 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
     log: (line) => console.log(`[org-rows] ${line}`),
   });
   registerRowsHandler({ register: registerMainHandler, rows: remoteRows });
-  const indexSource = new IndexSessionSource(index, hosts, { emit });
+  const indexSource = new IndexSessionSource(index, hosts, { emit: bus.emit });
   // C3's attention service, as C3 started it, with `Index.attention` as its store (C3's file store only when this app
   // cannot read the index); an archive the index records retires the session's attention.
   // P5 O3-A: none in a run refused the spine, whose index is unavailable and which writes no attention fallback
@@ -427,18 +434,18 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
         onEvent: (name, listener) => hosts.onEvent(name, listener),
         onState: (owner, listener) => hosts.onState(owner, listener),
         dispatch: hosts.dispatch,
-        emit,
-        register: registerMainHandler,
+        emit: bus.emit,
+        register: bus.register,
         fallbackFile: join(app.getPath('userData'), 'attention.json'),
       })
     : null;
   // Replay (M5): started here, run in the engine host; the fixtures table lists the checkout's probe journals and
   // transcripts (none in a packaged app). P5 O3-A: none in a run refused the spine.
-  const replays = spineRuns ? registerReplayHandlers(index, hosts) : null;
+  const replays = spineRuns ? registerReplayHandlers(index, hosts, bus) : null;
   if (index.unavailable === null) seedReplayFixtures(index.fixtures, appRoot(app.getAppPath()));
   // The read-only git service (M6): git.* for any directory in a repository, and git.changed for watched roots.
-  const git = new GitService({ emit: (change) => void emit('git.changed', change) });
-  registerGitHandlers(git);
+  const git = new GitService({ emit: (change) => void bus.emit('git.changed', change) });
+  registerGitHandlers(git, bus);
   shutdown.add('git, replays and attention', () => {
     git.dispose();
     replays?.dispose();
@@ -456,7 +463,7 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
   // A relative scenario path is the repository's: the working directory of `pnpm dev`, `pnpm dev:stub` and the smoke's
   // launch alike (`app.getAppPath()` is `out/main` when the built app is launched by file, as the smoke does).
   const sessions = startSessions({
-    env: process.env, packaged: app.isPackaged, appRoot: process.cwd(), hosts, indexSource,
+    env: process.env, packaged: app.isPackaged, appRoot: process.cwd(), hosts, bus, indexSource,
     // tracker 2026-09-29: what a resumed process restored, by its transcript's last `cost-state` (the cost ledger), from
     // the transcript the index knows for the session, else where the engine writes a launched session's
     restoredCost: async ({ appId, directory, engineSessionId }) => {
@@ -559,7 +566,8 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
   // fills in launch mode index and the stub in scenario); watches are released per window inside the handlers.
   // E11: an unstarted session (a New chat before its first send) reads its setup intent's location
   const filesService = registerFilesHandlers(allowlistOf(sessions.model, intents), {
-    emit: (payload) => void emit('files.changed', payload),
+    bus,
+    emit: (payload) => void bus.emit('files.changed', payload),
     port: clientPort, // files.openExternal; E1: files.reveal
     admitted: fileAdmission(index.unavailable === null ? index.library : null), // E2; P3-L M6b: a File artifact's file outside the roots, from the library's index
   });
@@ -576,7 +584,7 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
     // the worktree service (M2): git.worktree.*, every git mutation MAWS makes, with occupancy from holder authority
     // (C3's process table and C4's fresh registry read through the engine host, the index's records).
     const worktrees = new WorktreeService({ git: createGitRunner(), holders: { dispatch: hosts.dispatch, sessions: index.sessions } });
-    registerWorktreeHandlers(worktrees);
+    registerWorktreeHandlers(worktrees, bus);
     // The session service (M3): intents, start, fork, archive, delete, rename and the trust check, reading the global
     // config and the store with the environment the engine receives (the login-shell capture, as C3's host builds every
     // launch's). Its start resets every stale `self` holder at once (D-16), then forgets stale bootstrap ids and
@@ -585,9 +593,9 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
     // decision every MAWS-owned launch takes for the to-human lane, reading the engine's config home from its environment;
     // M4: the marks, the answers and their attention items (ownerChannel.*), projected into C3's attention service
     const ownerChannel = startOwnerChannel({
-      index, settings: () => settings.state().settings, engineEnv, onEvent: (name, listener) => hosts.onEvent(name, listener), register: registerMainHandler,
+      index, settings: () => settings.state().settings, engineEnv, onEvent: (name, listener) => hosts.onEvent(name, listener), register: bus.register,
       attention: attention!, dispatch: hosts.dispatch, onHostState: (listener) => hosts.onState('engine-host', listener), onStreaming: (listener) => hosts.onStreaming('engine-host', listener),
-      streaming: () => hosts.streaming('engine-host'), emit: (name, payload) => void emit(name, payload), onSettings: (listener) => settings.onChange(listener),
+      streaming: () => hosts.streaming('engine-host'), emit: (name, payload) => void bus.emit(name, payload), onSettings: (listener) => settings.onChange(listener),
     });
     shutdown.add('owner channel', ownerChannel.stop);
     // P2-C end
@@ -605,7 +613,7 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
       bootstraps: new BootstrapNotes(join(sessionsDir, 'bootstraps')),
       userData: app.getPath('userData'),
       env: engineEnv,
-      emit,
+      emit: bus.emit,
       trash: trashFor(process.env, (path) => shell.trashItem(path)), // the e2e seam (MAWS_E2E_TRASH_DIR) or the Trash
       port: clientPort, // session.revealPath
       replay: ReplaySeam.fromEnv(process.env, process.cwd()), // the e2e seam (MAWS_E2E_REPLAY_FIXTURES)
@@ -616,7 +624,7 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
       ownerChannel: ownerChannel.launches, // P2-C (2026-10-09)
       acquisitions: sessions.model, // P2-A (X16): the digest's availability follows each acquisition
     });
-    registerSessionServiceHandlers(service);
+    registerSessionServiceHandlers(service, bus);
     sessionService = service;
     const inactiveArchive = new InactiveArchive({
       index, git: createGitRunner(), status: (id) => sessions.model.engineStatus(id),
@@ -630,11 +638,11 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
         return times.length ? Math.max(...times) : null;
       },
     });
-    registerMainHandler('session.archiveOlder', ({ days, projectId }) => inactiveArchive.run(days, projectId as ProjectId | null));
+    bus.register('session.archiveOlder', ({ days, projectId }) => inactiveArchive.run(days, projectId as ProjectId | null));
     shutdown.add('inactive archive', scheduleInactiveArchive(inactiveArchive, () => settings.state().settings.sessions.archiveInactiveDays, (changed) => settings.onChange(changed), (scanned) => indexSource.onScanned(scanned)));
     service.start().catch((error: unknown) => console.error('[sessions] the session service failed to start:', error));
   }
-  registerObservedFacts(hosts.dispatch); // P2-A (X17): the engine host's observed facts, beside session.digests
+  registerObservedFacts(hosts.dispatch, bus); // P2-A (X17): the engine host's observed facts, beside session.digests
   // C10 end
   // E6 start: source control (E6 execution document, M1, M2): scm.* over the session's checkout, from the read model in
   // both launch modes; mutations through the mutating runner under the login-shell capture, which is also the environment
@@ -649,17 +657,17 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
     refresh: (directory) => git.refresh(directory),
     captured: () => engineEnv,
     env: process.env,
-    emit: (event) => void emit('scm.remote.output', event),
+    emit: (event) => void bus.emit('scm.remote.output', event),
   });
-  registerScmHandlers(scm);
+  registerScmHandlers(scm, bus);
   shutdown.add('scm', () => scm.dispose());
   // E6 end
   // W7: a live MAWS process yields when a terminal or job that resumed its session starts writing into it
   // E3: each live turn end of a side thread summarises it in its parent's transcript (E3 execution document, Design §5)
   // P5 O3-A: neither in a run refused the spine
   if (spineRuns) {
-    shutdown.add('yield', startYield({ dispatch: hosts.dispatch, onEvent: (name, listener) => hosts.onEvent(name, listener), sessions: index.sessions, emit }));
-    shutdown.add('side threads', startSideThreads({ onEvent: (name, listener) => hosts.onEvent(name, listener), emit, sessions: index.sessions, sideThreads: index.sideThreads }));
+    shutdown.add('yield', startYield({ dispatch: hosts.dispatch, onEvent: (name, listener) => hosts.onEvent(name, listener), sessions: index.sessions, emit: bus.emit }));
+    shutdown.add('side threads', startSideThreads({ onEvent: (name, listener) => hosts.onEvent(name, listener), emit: bus.emit, sessions: index.sessions, sideThreads: index.sideThreads }));
   }
 
   // C11 start: the plumbing of settings v3 (C11 execution document, M1). The engine host's binary configuration follows
@@ -672,7 +680,7 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
   if (spineRuns) void rm(join(app.getPath('userData'), 'engine'), { recursive: true, force: true }).catch((error: unknown) => console.warn('[engine] could not remove the retired custody copy', error));
   const engineConfigure = !spineRuns ? null : startEngineConfigure({ // C12: the coordinator (C11's stopEngineConfigure is its stop)
     settings: () => settings.state().settings,
-    onSettingsChanged: (listener) => onEmitted('settings.changed', (state) => listener(state.settings)),
+    onSettingsChanged: (listener) => bus.onEmitted('settings.changed', (state) => listener(state.settings)),
     hostState: () => hosts.snapshot('engine-host'),
     onHostState: (listener) => hosts.onState('engine-host', listener),
     dispatch: (config) => hosts.dispatch('engine-host', 'engine.configure', config) as Promise<CommandResult<'engine.configure'>>,
@@ -685,7 +693,7 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
   // E10: the supervisor's idle time, pushed beside engine.configure at every ready
   if (spineRuns) shutdown.add('host configure', startHostConfigure({
     settings: () => settings.state().settings,
-    onSettingsChanged: (listener) => onEmitted('settings.changed', (state) => listener(state.settings)),
+    onSettingsChanged: (listener) => bus.onEmitted('settings.changed', (state) => listener(state.settings)),
     hostState: () => hosts.snapshot('engine-host'),
     onHostState: (listener) => hosts.onState('engine-host', listener),
     dispatch: (input) => hosts.dispatch('engine-host', 'host.configure', input) as Promise<CommandResult<'host.configure'>>,
@@ -814,13 +822,19 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
     hosts,
     register: registerMainHandler,
     emit, // P3-A M5: artifacts.resync
-    settings: () => settings.state().settings,
-    onSettingsChanged: (listener) => onEmitted('settings.changed', (state) => listener(state.settings)),
     env: process.env,
     openWindow,
     root: join(app.getPath('userData'), 'artifacts'), // P3-A M7: the store's directory (the host's own rule)
-    relayDefaults: spineRuns, // P5 O3-A: the design-system defaults are the machine's settings, relayed by the spine
   });
+  // P5 O3-A: the design-system defaults are the machine's settings, relayed by the spine; none in a run refused it.
+  // P5 O3-C (D23): composed here beside the artifacts, its stop where it ran inside theirs, first.
+  if (spineRuns) shutdown.add('design-system defaults', startArtifactDefaults({
+    settings: () => settings.state().settings,
+    onSettingsChanged: (listener) => bus.onEmitted('settings.changed', (state) => listener(state.settings)),
+    hostState: () => hosts.snapshot('engine-host'),
+    onHostState: (listener) => hosts.onState('engine-host', listener),
+    dispatch: (input) => hosts.dispatch('engine-host', 'artifacts.setDefaults', input) as Promise<CommandResult<'artifacts.setDefaults'>>,
+  }));
   shutdown.add('artifacts', artifacts.stop);
   // P3-H H3b: an artifact page's connector calls and watches and the owner's grants (main's broker; route E through the
   // engine host's main-only commands). At will-quit every lease, watch and pending operation ends. P4 W2-B: the stop runs
@@ -902,19 +916,20 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
   const library = startLibrary({
     index,
     hosts,
-    register: registerMainHandler,
-    emit,
+    register: bus.register,
+    emit: bus.emit,
     e2e: process.env.MAWS_E2E === '1',
-    // P3-L M5b: the viewers' and the library's reach to a byte kind's stored file and its exports
-    files: {
-      call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
-      exporters: artifacts.exporters,
-      root: join(app.getPath('userData'), 'artifacts'),
-      downloads: () => app.getPath('downloads'),
-      port: clientPort, // Save as…, the Replace question, Open externally, Reveal
-      readFile: (input) => filesService.readResolved(input), // M6b fix wave 2: `library.read`
-      env: process.env,
-    },
+  });
+  // P3-L M5b: the viewers' and the library's reach to a byte kind's stored file and its exports, whatever the index's
+  // state. P5 O3-C (D22): the client's, composed beside the spine's derived index rather than through it.
+  registerLibraryFiles(registerMainHandler, {
+    call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
+    exporters: artifacts.exporters,
+    root: join(app.getPath('userData'), 'artifacts'),
+    downloads: () => app.getPath('downloads'),
+    port: clientPort, // Save as…, the Replace question, Open externally, Reveal
+    readFile: (input) => filesService.readResolved(input), // M6b fix wave 2: `library.read`
+    env: process.env,
   });
   shutdown.add('library', library.stop);
   // P3-E start (E2 M3; E's Decision Log 18): a dashboard source sheet's Download, the artifact's own asset saved through

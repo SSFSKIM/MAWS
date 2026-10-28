@@ -4,24 +4,24 @@
 import type { AppSessionId, MessageUuid, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { SessionPatch } from '@shared/ipc/schema/session';
-import { registerMainHandler } from '../ipc/router';
+import type { ServicesBus } from '@shared/spine/bus';
 import { addFolder } from './add-folder'; // New chat
 import type { Index } from './index';
 
-export function registerIndexHandlers(index: Index): void {
-  registerMainHandler('session.search', ({ query }) => ({ hits: index.sessionSearch.search(query), indexing: index.sessionSearch.indexing(), incomplete: index.sessionSearch.incomplete() }));
-  registerMainHandler('session.list', ({ includeArchived }) => ({ sessions: index.sessions.list({ includeArchived }), revision: index.revision }));
+export function registerIndexHandlers(index: Index, { register }: Pick<ServicesBus, 'register'>): void {
+  register('session.search', ({ query }) => ({ hits: index.sessionSearch.search(query), indexing: index.sessionSearch.indexing(), incomplete: index.sessionSearch.incomplete() }));
+  register('session.list', ({ includeArchived }) => ({ sessions: index.sessions.list({ includeArchived }), revision: index.revision }));
   // An app session id with no row (an unstarted tab) is an answer, not an error.
-  registerMainHandler('session.get', ({ appSessionId }) => index.sessions.get(appSessionId as AppSessionId));
-  registerMainHandler('session.update', ({ appSessionId, patch }) => applyPatch(index, appSessionId as AppSessionId, patch as SessionPatch));
+  register('session.get', ({ appSessionId }) => index.sessions.get(appSessionId as AppSessionId));
+  register('session.update', ({ appSessionId, patch }) => applyPatch(index, appSessionId as AppSessionId, patch as SessionPatch));
   // W11 (I5): hidden projects included, marked `hidden`, so the renderer keeps their sessions out of Other sessions
-  registerMainHandler('session.projects.list', () => ({ projects: index.projects.listWithRemoved(), revision: index.revision }));
-  registerMainHandler('session.projects.add', ({ directory }) => index.projects.add(directory));
-  registerMainHandler('session.projects.addFolder', ({ directory }) => addFolder(index.projects, directory)); // New chat: "Open folder…"
-  registerMainHandler('session.projects.update', ({ id, patch }) => index.projects.update(id as ProjectId, patch));
-  registerMainHandler('session.projects.remove', ({ id }) => index.projects.hide(id as ProjectId));
-  registerMainHandler('session.drafts.get', ({ appSessionId }) => index.drafts.get(appSessionId as AppSessionId));
-  registerMainHandler('session.drafts.set', ({ appSessionId, draft }) => index.drafts.set(appSessionId as AppSessionId, draft));
+  register('session.projects.list', () => ({ projects: index.projects.listWithRemoved(), revision: index.revision }));
+  register('session.projects.add', ({ directory }) => index.projects.add(directory));
+  register('session.projects.addFolder', ({ directory }) => addFolder(index.projects, directory)); // New chat: "Open folder…"
+  register('session.projects.update', ({ id, patch }) => index.projects.update(id as ProjectId, patch));
+  register('session.projects.remove', ({ id }) => index.projects.hide(id as ProjectId));
+  register('session.drafts.get', ({ appSessionId }) => index.drafts.get(appSessionId as AppSessionId));
+  register('session.drafts.set', ({ appSessionId, draft }) => index.drafts.set(appSessionId as AppSessionId, draft));
 }
 
 // `pinned` → setPinned; `lastSeen` (with or without `unread: false`, "Mark all read") → markSeen, which clears unread;

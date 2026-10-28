@@ -3,7 +3,7 @@
 // renames or moves them (to P3-A's surface, say) changes this adapter only. A refusal (an unknown command, a host with
 // no handler for one, an unavailable host, a timeout) rejects with the command and the IpcError's code and message.
 import type { CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
-import type { HostSupervisor } from '../hosts/supervisor';
+import type { HostSupervisor } from '@shared/host/host-supervisor';
 import type { LibrarySource } from './sync';
 
 export type LibraryHost = Pick<HostSupervisor, 'dispatch' | 'onEvent' | 'onStreaming' | 'streaming'>;

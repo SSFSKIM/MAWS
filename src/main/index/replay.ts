@@ -12,8 +12,9 @@ import { basename } from 'node:path';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
 import type { ReplayFixture, ReplayProgress } from '@shared/ipc/schema/session';
-import type { HostSupervisor } from '../hosts/supervisor';
-import { CommandFailure, registerMainHandler } from '../ipc/router';
+import type { HostSupervisor } from '@shared/host/host-supervisor';
+import { HostCommandError } from '@shared/host/runtime';
+import type { ServicesBus } from '@shared/spine/bus';
 import type { Index } from './index';
 
 export type ReplayHostPort = Pick<HostSupervisor, 'dispatch' | 'onEvent' | 'onState'>;
@@ -53,7 +54,7 @@ export class ReplayStarter {
         this.cancelled.add(appSessionId);
       }
       this.index.sessions.remove(appSessionId);
-      throw new CommandFailure(result.error);
+      throw new HostCommandError(result.error);
     }
     if (fixture) this.index.fixtures.markPlayed(fixture.id, new Date().toISOString());
     const { totalRows, spanMs } = result.value as CommandOutput<'session.replay.launch'>;
@@ -99,9 +100,9 @@ export class ReplayStarter {
   }
 }
 
-export function registerReplayHandlers(index: Index, host: ReplayHostPort): ReplayStarter {
+export function registerReplayHandlers(index: Index, host: ReplayHostPort, { register }: Pick<ServicesBus, 'register'>): ReplayStarter {
   const starter = new ReplayStarter(index, host);
-  registerMainHandler('session.replay.start', (input) => starter.start(input));
-  registerMainHandler('session.replay.fixtures', () => starter.fixtures());
+  register('session.replay.start', (input) => starter.start(input));
+  register('session.replay.fixtures', () => starter.fixtures());
   return starter;
 }

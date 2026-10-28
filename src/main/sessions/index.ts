@@ -7,10 +7,10 @@ import type { SessionEvent } from '@shared/graph/events'; // E3
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ClientId } from '@shared/ipc/client';
 import type { CommandOutput, EventName, EventPayload } from '@shared/ipc/schema';
+import { HostCommandError } from '@shared/host/runtime';
+import type { ServicesBus } from '@shared/spine/bus';
 import { isAppSynthesised } from '@shared/sessions/app-events';
-import type { HostSupervisor } from '../hosts/supervisor';
-import { emit, onEmitted } from '../ipc/events';
-import { CommandFailure, interceptCommand, registerMainHandler } from '../ipc/router';
+import type { HostSupervisor } from '@shared/host/host-supervisor';
 import { isSideThreadEvent } from '../side/side-threads'; // E3
 import { SessionReadModel, type RestoredCostReader, type SessionSource } from './read-model';
 import { launchMode, scenarioClock, scenarioPath } from './select-source';
@@ -22,6 +22,7 @@ export interface SessionsOptions {
   packaged: boolean;
   appRoot: string;
   hosts: Pick<HostSupervisor, 'onEvent' | 'onState' | 'dispatch' | 'setResync'>; // C12: onState; E10: setResync
+  bus: ServicesBus; // P5 O3-C: the read side's commands, the answer intercept, the digest relay and the emitted taps
   indexSource?: SessionSource; // C4's IndexSessionSource: the records, projects and seed digests, and the unread rule
   // E3 (Design §5): app events kept elsewhere than the read model, answered with its own by `session.appEvents` (the
   // side-thread rows, re-synthesised from the index)
@@ -76,7 +77,7 @@ export function hostEventSource(
 
 // Attention as main tells the renderer (`attention.changed`, from C3's attention service or the stub source), tapped
 // after validation so the read model's view is exactly the renderer's, with no call from the emitter into the model.
-export function emittedAttentionSource(tap: typeof onEmitted = onEmitted): SessionSource {
+export function emittedAttentionSource(tap: ServicesBus['onEmitted']): SessionSource {
   return {
     start: (writer) => tap('attention.changed', ({ appSessionId, items }) => writer.observeAttention(appSessionId as AppSessionId, items)),
   };
@@ -86,7 +87,7 @@ export function emittedAttentionSource(tap: typeof onEmitted = onEmitted): Sessi
 // `session.eventBatch` as the renderer receives them, so the read model keeps what nothing else stores. E3: the
 // side-thread rows are stored by the index and come back from it (`appEventsExtra`); kept here too, a parent with many
 // threads would push its notices out of the capped store.
-export function emittedAppEventsSource(tap: typeof onEmitted = onEmitted): SessionSource {
+export function emittedAppEventsSource(tap: ServicesBus['onEmitted']): SessionSource {
   return {
     start: (writer) =>
       tap('session.eventBatch', ({ appSessionId, events }) => {
@@ -104,16 +105,16 @@ function appEventsOf(model: SessionReadModel, appSessionId: AppSessionId, extra:
   return events.filter((event) => !seen.has(event.id) && (seen.add(event.id), true));
 }
 
-export function startSessions({ env, packaged, appRoot, hosts, indexSource, appEventsExtra, restoredCost }: SessionsOptions): Sessions {
+export function startSessions({ env, packaged, appRoot, hosts, bus, indexSource, appEventsExtra, restoredCost }: SessionsOptions): Sessions {
   const mode = launchMode(env, packaged);
   const model = new SessionReadModel(mode, restoredCost);
-  registerMainHandler('session.digests', () => ({ digests: model.digests() }));
-  registerMainHandler('session.launchMode', () => ({ mode }));
-  registerMainHandler('session.appEvents', ({ appSessionId }) => ({ events: appEventsOf(model, appSessionId as AppSessionId, appEventsExtra) })); // debt wave 5; E3: the extra
+  bus.register('session.digests', () => ({ digests: model.digests() }));
+  bus.register('session.launchMode', () => ({ mode }));
+  bus.register('session.appEvents', ({ appSessionId }) => ({ events: appEventsOf(model, appSessionId as AppSessionId, appEventsExtra) })); // debt wave 5; E3: the extra
   // Visibility is the union of the clients displaying a session, not a sticky app-wide flag.
   const pages = new Map<ClientId, { ids: Set<AppSessionId>; release(): void }>();
   const refreshVisibility = (id: AppSessionId) => model.setVisible(id, [...pages.values()].some((page) => page.ids.has(id)));
-  registerMainHandler('session.setVisible', ({ appSessionId, visible }, { client }) => {
+  bus.register('session.setVisible', ({ appSessionId, visible }, { client }) => {
     let page = pages.get(client.id);
     if (!page) {
       if (!visible) return;
@@ -138,33 +139,33 @@ export function startSessions({ env, packaged, appRoot, hosts, indexSource, appE
     else page.ids.delete(id);
     refreshVisibility(id);
   });
-  model.on('digest', (digest) => emit('session.digest', digest));
+  model.on('digest', (digest) => bus.emit('session.digest', digest));
 
   const stops: (() => void)[] = [];
   if (mode === 'index') {
     // The renderer may still have an approval card after host loss. Never forward its stale answer.
-    stops.push(interceptCommand('session.answer', async (input) => {
+    stops.push(bus.intercept('session.answer', async (input) => {
       const pending = model.allAttention().get(input.appSessionId as AppSessionId)?.some((item) => item.state === 'pending' && item.request.requestId === input.requestId);
       if (!pending) return { outcome: 'not_pending' };
       const result = await hosts.dispatch('engine-host', 'session.answer', input);
-      if (!result.ok) throw new CommandFailure(result.error);
+      if (!result.ok) throw new HostCommandError(result.error);
       return result.value as CommandOutput<'session.answer'>;
     }));
     // The index first: its records are observed before any batch or status for them is folded.
     if (indexSource) stops.push(model.register(indexSource));
-    stops.push(model.register(emittedAttentionSource()));
-    stops.push(model.register(emittedAppEventsSource())); // debt wave 5
+    stops.push(model.register(emittedAttentionSource(bus.onEmitted)));
+    stops.push(model.register(emittedAppEventsSource(bus.onEmitted))); // debt wave 5
     stops.push(model.register(hostEventSource(hosts)));
   } else {
     if (indexSource) model.register(indexSource); // refused unstarted (logged): the scenario is the only source
     // Attached before the stub, whose load emits the scenario's attention through the same tap.
-    stops.push(model.registerScenario(emittedAttentionSource()));
-    stops.push(model.registerScenario(emittedAppEventsSource())); // debt wave 5
+    stops.push(model.registerScenario(emittedAttentionSource(bus.onEmitted)));
+    stops.push(model.registerScenario(emittedAppEventsSource(bus.onEmitted))); // debt wave 5
     try {
       const path = scenarioPath(env, { packaged, appRoot });
       const clock = scenarioClock(env);
-      const relay = <N extends EventName>(name: N, payload: EventPayload<N>) => emit(name, payload);
-      stops.push(model.registerScenario(stubSource(path, clock, { emit: relay, intercept: interceptCommand })));
+      const relay = <N extends EventName>(name: N, payload: EventPayload<N>) => bus.emit(name, payload);
+      stops.push(model.registerScenario(stubSource(path, clock, { emit: relay, intercept: bus.intercept })));
       console.log(`[sessions] launch mode scenario: ${path} on the ${clock.kind} clock`);
     } catch (error) {
       console.error('[sessions] the scenario could not be played; no sessions will show', error);

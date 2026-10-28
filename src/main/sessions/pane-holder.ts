@@ -2,7 +2,7 @@
 import { execFile } from 'node:child_process';
 import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
 import type { PtyInfo } from '@shared/ipc/schema/pty';
-import type { HostDispatch } from '../ipc/router';
+import type { HostDispatch } from '@shared/host/host-supervisor';
 import { HostError } from './context';
 
 export interface PaneProcess {

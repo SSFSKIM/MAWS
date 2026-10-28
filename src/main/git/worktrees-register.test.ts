@@ -1,57 +1,34 @@
 import { execFile } from 'node:child_process';
-import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2: the router's local machine
-import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { CommandName } from '@shared/ipc/schema';
+import { fakeBus, type FakeBus } from '../../../test/support/fake-bus';
 import { FakeHolderHost } from '../../../test/support/holder-host';
 import { ScratchRepo } from '../../../test/support/scratch-repo';
-import type { ExecFileFn } from './runner';
-
-// Electron is faked as in the router's own test: one recorded ipcMain handler per channel, one app window.
-const electron = vi.hoisted(() => ({
-  handlers: new Map<string, (event: unknown, input: unknown) => Promise<unknown>>(),
-  windows: new Map<object, { webContents: { mainFrame: object } }>(),
-}));
-vi.mock('electron', () => ({
-  ipcMain: {
-    handle: (channel: string, handler: (event: unknown, input: unknown) => Promise<unknown>) => void electron.handlers.set(channel, handler),
-  },
-  BrowserWindow: { fromWebContents: (webContents: object) => electron.windows.get(webContents) ?? null },
-}));
-
-const APP_URL = 'http://localhost:5173/';
-const mainFrame = { url: APP_URL, parent: null };
-const sender = Object.assign(new EventEmitter(), { id: 7, mainFrame, isDestroyed: () => false });
-const event = { sender, senderFrame: mainFrame };
+import { createGitRunner, type ExecFileFn } from './runner';
+import { WorktreeService } from './worktrees';
+import { registerWorktreeHandlers } from './worktrees-register';
 
 type Result = { ok: boolean; value?: unknown; error?: { code: string; message: string } };
 
-// The M2 check of the execution document's Concrete Steps, through main's router as the renderer's
-// `window.maws.invoke` reaches it: add, status, remove, deleteBranch over a scratch repository.
-describe('main answers git.worktree.* through the router', () => {
+// The M2 check of the execution document's Concrete Steps, on the services bus routed as main's router routes the
+// renderer's `window.maws.invoke`: add, status, remove, deleteBranch over a scratch repository.
+describe('main answers git.worktree.* on the services bus', () => {
   let repo: ScratchRepo;
+  let bus: FakeBus;
   beforeEach(async () => {
-    vi.resetModules();
-    electron.handlers.clear();
-    electron.windows.clear();
-    electron.windows.set(sender, { webContents: sender });
+    bus = fakeBus();
     repo = await ScratchRepo.create({ sentinels: false });
   });
   afterEach(() => {
     repo.dispose();
-    vi.restoreAllMocks();
   });
 
   async function install(options: { execFile?: ExecFileFn } = {}) {
-    const { WorktreeService } = await import('./worktrees');
-    const { registerWorktreeHandlers } = await import('./worktrees-register');
-    const { installRouter } = await import('../ipc/router');
-    const { createGitRunner } = await import('./runner'); // the same module instance as the service's, for its error classes
     const host = new FakeHolderHost();
-    registerWorktreeHandlers(new WorktreeService({ git: createGitRunner({ env: repo.serviceEnv(), ...options }), holders: { dispatch: host.dispatch, sessions: { list: () => [] } } }));
-    installRouter({ appUrl: APP_URL, local: 'LocalMachineRef0000000' as MachineRef });
+    registerWorktreeHandlers(new WorktreeService({ git: createGitRunner({ env: repo.serviceEnv(), ...options }), holders: { dispatch: host.dispatch, sessions: { list: () => [] } } }), bus);
   }
-  const invoke = (name: string, input?: unknown) => electron.handlers.get(`maws:cmd:${name}`)!(event, input) as Promise<Result>;
+  const invoke = (name: CommandName, input?: unknown) => bus.invoke(name, input) as Promise<Result>;
 
   it('adds, inspects, removes and deletes the branch of a worktree, as the DevTools check does', async () => {
     await install();
@@ -74,7 +51,6 @@ describe('main answers git.worktree.* through the router', () => {
   });
 
   it('answers a refusal decided before acting as internal with its named message', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {}); // the router logs a handler's throw
     await install();
     expect(await invoke('git.worktree.add', { repoRoot: repo.root, name: 'x', branch: { kind: 'new', name: 'worktree-x', base: 'no-such' } })).toEqual({
       ok: false,

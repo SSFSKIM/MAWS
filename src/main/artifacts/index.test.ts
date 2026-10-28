@@ -27,7 +27,6 @@ describe('startArtifacts', () => {
       dispatch: vi.fn(),
       postDocPort: vi.fn(),
       closeDocPorts: vi.fn(),
-      snapshot: () => ({ state: 'starting', pid: null, restarts: 0, revision: 0 }),
       onState: () => () => {},
       onEvent: vi.fn(() => () => {}),
       onStreaming: (owner: string, listener: () => void) => {
@@ -40,8 +39,6 @@ describe('startArtifacts', () => {
       hosts: hosts as unknown as ArtifactsDeps['hosts'],
       register: vi.fn() as never,
       emit: emit as never,
-      settings: () => ({}) as never,
-      onSettingsChanged: () => () => {},
       env: {},
       openWindow: vi.fn() as never,
       root: '/tmp/artifacts',
@@ -56,8 +53,8 @@ describe('startArtifacts', () => {
   it('serves maws-artifact: on the window’s session and the capture partition, registers artifacts.export and an html artifact’s PDF and PNG, and listens for the host’s exports (M7)', () => {
     const register = vi.fn();
     const onEvent = vi.fn(() => () => {});
-    const hosts = { dispatch: vi.fn(), postDocPort: vi.fn(), closeDocPorts: vi.fn(), snapshot: () => ({ state: 'starting', pid: null, restarts: 0, revision: 0 }), onState: () => () => {}, onStreaming: () => () => {}, onEvent };
-    const started = startArtifacts({ hosts: hosts as unknown as ArtifactsDeps['hosts'], register: register as never, emit: vi.fn() as never, settings: () => ({}) as never, onSettingsChanged: () => () => {}, env: {}, openWindow: vi.fn() as never, root: '/tmp/artifacts' });
+    const hosts = { dispatch: vi.fn(), postDocPort: vi.fn(), closeDocPorts: vi.fn(), onState: () => () => {}, onStreaming: () => () => {}, onEvent };
+    const started = startArtifacts({ hosts: hosts as unknown as ArtifactsDeps['hosts'], register: register as never, emit: vi.fn() as never, env: {}, openWindow: vi.fn() as never, root: '/tmp/artifacts' });
     expect(sessions.default.protocol.handle).toHaveBeenCalledWith('maws-artifact', expect.any(Function));
     expect(sessions.capture.protocol.handle).toHaveBeenCalledWith('maws-artifact', expect.any(Function));
     expect(sessions.partitions).toContain('maws-capture');

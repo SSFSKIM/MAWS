@@ -38,7 +38,7 @@ import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SetupIntent } from '@shared/sessions/intent';
 import type { SetupResources } from '@shared/sessions/setup';
-import type { HostDispatch } from '../ipc/router';
+import type { HostDispatch } from '@shared/host/host-supervisor';
 import { hostCall, isUnknownSession, pathExists, transcriptPathOf } from './context';
 import { reconcileWorktree } from './intent-rules';
 import { LaunchWatch } from './launch-watch';

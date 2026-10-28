@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
-import type { HostEmit } from '@shared/host/runtime';
+import { HostCommandError, type HostEmit } from '@shared/host/runtime';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandName, CommandResult, EventName, EventPayload, HostState } from '@shared/ipc/schema';
 import { validateCommandInput, validateCommandOutput, validateEventPayload } from '@shared/ipc/validate';
@@ -10,12 +10,8 @@ import { FIXTURE_DIR } from '../../../test/support/fixtures';
 import { tempDir } from '../../../test/support/index-fixture';
 import { ReplayHost, type ReplayBindings } from '../../engine-host/fs/replay/host';
 import { frameUnknownNormalizer, type SourceReader } from '../../engine-host/fs/replay/journal-source';
-import { CommandFailure } from '../ipc/router';
 import { Index } from './index';
 import { ReplayStarter, type ReplayHostPort } from './replay';
-
-// The router module (CommandFailure) imports Electron; nothing here reaches it.
-vi.mock('electron', () => ({ ipcMain: { handle: () => {} }, BrowserWindow: { fromWebContents: () => null } }));
 
 type Listener = (payload: unknown) => void;
 const REQUEST_TIMEOUT_MS = 10_000; // C1's supervisor deadline (src/main/hosts/supervisor.ts)
@@ -111,8 +107,8 @@ describe('session.replay.start in main', () => {
       () => null,
       (e: unknown) => e,
     );
-    expect(error).toBeInstanceOf(CommandFailure);
-    return (error as CommandFailure).error;
+    expect(error).toBeInstanceOf(HostCommandError);
+    return (error as HostCommandError).ipcError;
   };
   const replayRows = () => index.sessions.list({ includeArchived: true }).filter((record) => record.engineSessionId?.startsWith('rp_'));
 

@@ -1,42 +1,22 @@
-import { EventEmitter } from 'node:events';
-import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2: the router's local machine
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { CommandName } from '@shared/ipc/schema';
+import { fakeBus } from '../../../test/support/fake-bus';
 import { SessionHarness } from '../../../test/support/session-harness';
 import { sessionIdFor, summary } from '../../../test/support/index-fixture'; // P2-A
-import { commandChannel } from '@shared/ipc/schema';
-
-// Electron is faked as in the router's own test: one recorded ipcMain handler per channel, one app window.
-const electron = vi.hoisted(() => ({
-  handlers: new Map<string, (event: unknown, input: unknown) => Promise<unknown>>(),
-  windows: new Map<object, { webContents: { mainFrame: object } }>(),
-}));
-vi.mock('electron', () => ({
-  ipcMain: {
-    handle: (channel: string, handler: (event: unknown, input: unknown) => Promise<unknown>) => void electron.handlers.set(channel, handler),
-  },
-  BrowserWindow: { fromWebContents: (webContents: object) => electron.windows.get(webContents) ?? null },
-}));
-
-const APP_URL = 'http://localhost:5173/';
-const mainFrame = { url: APP_URL, parent: null };
-const sender = Object.assign(new EventEmitter(), { id: 7, mainFrame, isDestroyed: () => false });
-const event = { sender, senderFrame: mainFrame };
+import { registerSessionServiceHandlers } from './service-register';
 
 type Result = { ok: boolean; value?: unknown; error?: { code: string; message: string; issues?: unknown } };
 
-// The session service through main's router, as the renderer's `window.maws.invoke` reaches it.
-describe('main answers the session service commands through the router', () => {
+// The session service through the services bus (P5 O3-C), routed as main's router routes the renderer's invoke.
+describe('the session service’s commands, answered on the services bus', () => {
   let h: SessionHarness;
-  const invoke = (name: string, input: unknown) => electron.handlers.get(commandChannel(name as never))!(event, input) as Promise<Result>;
+  const bus = fakeBus();
+  const invoke = (name: CommandName, input: unknown) => bus.invoke(name, input) as Promise<Result>;
 
   beforeAll(async () => {
-    electron.windows.set(sender, { webContents: sender });
     h = await new SessionHarness().start();
-    const { registerSessionServiceHandlers } = await import('./service-register');
-    const { installRouter } = await import('../ipc/router');
-    registerSessionServiceHandlers(h.service);
-    installRouter({ appUrl: APP_URL, local: 'LocalMachineRef0000000' as MachineRef });
+    registerSessionServiceHandlers(h.service, bus);
   });
   afterAll(() => h.dispose());
 
@@ -61,7 +41,6 @@ describe('main answers the session service commands through the router', () => {
 
   // E3: the side namespace's two main commands; a screenshot's refusal and an oversized first message are invalid_input
   it('opens a side thread and sends to main through the router, refusing a bad screenshot as invalid_input naming it', async () => {
-    const { summary, sessionIdFor } = await import('../../../test/support/index-fixture');
     h.trustDirectory(h.work);
     h.host.script = () => ({});
     const parent = h.index.sessions.upsertFromSummary(summary({ sessionId: sessionIdFor(0x3e3), directory: h.work })).record.appId;

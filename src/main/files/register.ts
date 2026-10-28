@@ -6,11 +6,12 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { ClientPort } from '@shared/client/port';
 import type { ClientId, ClientRef } from '@shared/ipc/client';
 import type { FilesChanged } from '@shared/ipc/schema/files';
-import { registerMainHandler } from '../ipc/router';
+import type { ServicesBus } from '@shared/spine/bus';
 import type { AllowlistRecord } from './allowlist';
 import { createFilesService, type FilesService } from './service';
 
 export interface FilesHandlerDeps {
+  bus: Pick<ServicesBus, 'register'>; // P5 O3-C: where files.* are answered
   emit(payload: FilesChanged): void;
   port: Pick<ClientPort, 'openExternal' | 'reveal'>; // the client port (OX4): files.openExternal, E1's files.reveal
   env?: NodeJS.ProcessEnv;
@@ -22,7 +23,8 @@ export type FilesHandlers = FilesService & { readonly followed: ReadonlySet<Clie
 
 // `records`: whose directories a session may read (`allowlistOf`: its record, else its setup intent's location).
 export function registerFilesHandlers(records: (appSessionId: AppSessionId) => AllowlistRecord | null, deps: FilesHandlerDeps): FilesHandlers {
-  const files = createFilesService({ records, ...deps });
+  const { bus: { register }, ...service } = deps;
+  const files = createFilesService({ records, ...service });
   // A client is followed from its first watch until it ends. A watch in flight when its client ended is dropped when it
   // completes, rather than held by a page that can no longer unwatch it: a client no longer followed has ended.
   const followed = new Set<ClientId>();
@@ -35,16 +37,16 @@ export function registerFilesHandlers(records: (appSessionId: AppSessionId) => A
     });
   };
   const session = (id: string) => id as AppSessionId;
-  registerMainHandler('files.list', ({ appSessionId, path }) => files.list({ appSessionId: session(appSessionId), path }));
-  registerMainHandler('files.read', (input) => files.read({ ...input, appSessionId: session(input.appSessionId) }));
-  registerMainHandler('files.write', (input) => files.write({ ...input, appSessionId: session(input.appSessionId) })); // E5
-  registerMainHandler('files.watch', async ({ appSessionId, path }, { client }) => {
+  register('files.list', ({ appSessionId, path }) => files.list({ appSessionId: session(appSessionId), path }));
+  register('files.read', (input) => files.read({ ...input, appSessionId: session(input.appSessionId) }));
+  register('files.write', (input) => files.write({ ...input, appSessionId: session(input.appSessionId) })); // E5
+  register('files.watch', async ({ appSessionId, path }, { client }) => {
     follow(client);
     await files.watch(session(appSessionId), path, client.id);
     if (!followed.has(client.id)) await files.unwatch(session(appSessionId), path, client.id); // released while in flight
   });
-  registerMainHandler('files.unwatch', ({ appSessionId, path }, { client }) => files.unwatch(session(appSessionId), path, client.id));
-  registerMainHandler('files.openExternal', ({ appSessionId, path }, { client }) => files.openExternal(session(appSessionId), path, client));
-  registerMainHandler('files.reveal', ({ appSessionId, path }, { client }) => files.reveal(session(appSessionId), path, client)); // E1
+  register('files.unwatch', ({ appSessionId, path }, { client }) => files.unwatch(session(appSessionId), path, client.id));
+  register('files.openExternal', ({ appSessionId, path }, { client }) => files.openExternal(session(appSessionId), path, client));
+  register('files.reveal', ({ appSessionId, path }, { client }) => files.reveal(session(appSessionId), path, client)); // E1
   return Object.assign(files, { followed: followed as ReadonlySet<ClientId> });
 }
