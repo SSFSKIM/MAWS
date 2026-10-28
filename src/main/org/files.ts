@@ -57,8 +57,9 @@ export type ChainFile = {
 export type Pending = { signed: SignedOrgState; parent: string; exposed: { hub: boolean; machines: string[] } };
 /**
  * A state that ends keys, owed to the machines of the roster at its signing (M3's direct delivery): the signed bytes,
- * the machines still owing an acknowledgement, each machine's cursor on the app's line (`line`: the count of accepted
- * transitions held when it was set), the line each machine's recovery-first probe ran on, and the machines a run can't
+ * the machines still owing an acknowledgement, each machine's cursor on the app's line (`line`: a 48-bit digest of the
+ * accepted transitions held when it was set, `lineOf` in deliveries.ts, so a rewind the app adopts resets every cursor),
+ * the line each machine's recovery-first probe ran on, and the machines a run can't
  * reach because one state exceeds the bound.
  */
 export type Obligation = {
