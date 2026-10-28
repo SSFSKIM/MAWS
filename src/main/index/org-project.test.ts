@@ -149,6 +149,12 @@ describe('the derivation, on real repositories', () => {
       const subject = { directory: path, machine: MACHINE, projectId: 'p-1', name: 'slow-git' };
       expect(await deriveOrg(subject, null, 100)).toBeNull();
       expect(await deriveOrg(subject, null, 5_000)).toMatchObject({ key: 'remote:github.com/example/slow' });
+      // no answer says why, so a hosted run's red names its cause
+      expect(warn.mock.calls.map(([line]) => String(line))).toEqual([expect.stringMatching(/^\[index\] git config .* gave no answer: timed out after 100 ms$/)]);
+      warn.mockClear();
+      process.env.MAWS_GIT = join(root.path, 'no-such-git');
+      expect(await deriveOrg(subject, null, 5_000)).toBeNull();
+      expect(warn.mock.calls.map(([line]) => String(line))).toEqual([expect.stringMatching(/ gave no answer: it could not run \(ENOENT\)$/)]);
     } finally {
       warn.mockRestore();
       if (was === undefined) delete process.env.MAWS_GIT;

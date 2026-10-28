@@ -128,14 +128,20 @@ export function remoteName(url: string): string {
 export const ORG_GIT_TIMEOUT_MS = 2_000;
 
 // What a git call answered: its output, or its exit code; null when git gave no answer (it timed out, or could not
-// run), which decides nothing.
+// run), which decides nothing, and is logged with its cause.
 type GitAnswer = { code: 0; stdout: string } | { code: number } | null;
 
 function git(args: string[], timeoutMs: number): Promise<GitAnswer> {
   return new Promise((done) => {
     execFile(gitBinary(process.env), args, { env: gitEnv(process.env), encoding: 'utf8', timeout: timeoutMs }, (error, stdout) => {
-      if (!error) done({ code: 0, stdout });
-      else done(typeof error.code === 'number' && !error.killed ? { code: error.code } : null);
+      if (!error) return done({ code: 0, stdout });
+      if (typeof error.code === 'number' && !error.killed) return done({ code: error.code });
+      const why = error.killed ? `timed out after ${timeoutMs} ms`
+        : error.signal ? `it ended on ${error.signal}`
+        : typeof error.code === 'string' ? `it could not run (${error.code})`
+        : error.message;
+      console.warn(`[index] git ${args.join(' ')} gave no answer: ${why}`);
+      done(null);
     });
   });
 }
