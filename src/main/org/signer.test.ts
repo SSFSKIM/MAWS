@@ -572,6 +572,87 @@ describe('the pending slot', () => {
   });
 });
 
+describe('a sign-out or close while a sign is in flight', () => {
+  it('during the edit (after the last standing check): no Touch ID is asked', async () => {
+    const h = await harness();
+    let release!: () => void;
+    let applying!: () => void;
+    const applied = new Promise<void>((resolve) => (applying = resolve));
+    const held: Edit = { ...noChangeEdit(), apply: () => new Promise<void>((resolve) => ((release = resolve), applying())) };
+    const outcome = h.signer.sign(held);
+    await applied;
+    h.signer.fence(); // the session's sign-out
+    release();
+    expect(await outcome).toMatchObject({ ok: false, reason: 'not-root' });
+    expect(h.prompts).toEqual([]);
+    expect(h.hub.posts).toEqual([]);
+    expect(h.disk()).toBeNull();
+  });
+
+  it('during Touch ID: what was signed is neither kept nor sent', async () => {
+    const h = await harness();
+    h.during = () => h.signer.fence();
+    expect(await h.signer.sign(await removeDevice('old'))).toMatchObject({ ok: false, reason: 'not-root' });
+    expect(h.prompts).toHaveLength(1);
+    expect(h.hub.posts).toEqual([]);
+    expect(h.disk()).toBeNull();
+    expect(h.signer.pending()).toBeNull();
+  });
+
+  it('a close during Touch ID: nothing kept or sent either', async () => {
+    const h = await harness();
+    h.during = () => h.signer.close();
+    expect(await h.signer.sign(noChangeEdit())).toMatchObject({ ok: false });
+    expect(h.hub.posts).toEqual([]);
+    expect(h.disk()).toBeNull();
+  });
+
+  it('during the exposure write: nothing is posted; the slot stays, and the next sign-in\'s settle posts the same bytes', async () => {
+    const h = await harness();
+    h.gates.write = (name, value) => {
+      if (name !== SIGNING_FILE || (value as SigningFile).pending?.exposed.hub !== true) return;
+      h.gates.write = null;
+      h.signer.fence();
+    };
+    expect(await h.signer.sign(noChangeEdit())).toMatchObject({ ok: false, reason: 'not-root' });
+    expect(h.hub.posts).toEqual([]);
+    const kept = h.disk()!.pending!;
+    expect(kept.exposed.hub).toBe(true);
+    expect(h.held.head().state.version).toBe(1);
+
+    await h.signer.settle();
+    expect(h.hub.posts.map((s) => canonicalize(s))).toEqual([canonicalize(kept.signed)]);
+    expect(h.held.head().state.version).toBe(2);
+    expect(h.disk()!.pending).toBeNull();
+  });
+
+  it('a settle\'s post fenced the same way, and a discard after the owner confirmed it', async () => {
+    const h = await harness({ hub: false });
+    await h.signer.sign(noChangeEdit());
+    h.online = true;
+    h.gates.write = (name, value) => {
+      if (name !== SIGNING_FILE || (value as SigningFile).pending?.exposed.hub !== true) return;
+      h.gates.write = null;
+      h.signer.fence();
+    };
+    await h.signer.settle();
+    expect(h.hub.posts).toEqual([]);
+    expect(h.disk()!.pending).not.toBeNull();
+
+    // A discard whose hub read a sign-out overtakes discards nothing.
+    h.hub.mode = 'purged';
+    const hash = h.signer.pending()!.hash;
+    const read = h.hub.chain.bind(h.hub);
+    h.hub.chain = async (since) => {
+      h.signer.fence();
+      return read(since);
+    };
+    expect(await h.signer.discardPending(true, hash)).toEqual({ ok: false });
+    expect(h.disk()!.pending).not.toBeNull();
+    expect(h.disk()!.abandoned).toEqual([]);
+  });
+});
+
 describe('discarding a pending proposal', () => {
   it('is refused while the hub\'s chain holds the state', async () => {
     const h = await harness();

@@ -353,6 +353,8 @@ function testSigning() {
   const harness = {
     prompts: [] as StepUpPrompt[],
     decline: false,
+    /** Runs while the person is asked, before the answer. */
+    during: null as (() => Promise<unknown> | unknown) | null,
     focused: false,
     notes: [] as string[],
     focus: () => focus.forEach((listener) => listener()),
@@ -363,6 +365,7 @@ function testSigning() {
       kid: await keyId(k.stepUp.pub),
       sign: async (state, prompt) => {
         harness.prompts.push(prompt);
+        await harness.during?.();
         if (harness.decline) return { ok: false, reason: 'cancelled' };
         return { ok: true, signed: await signOrgState(state, [k.stepUp]) };
       },
@@ -1603,6 +1606,61 @@ describe('M3: the signer composed over the session', () => {
     await until(() => registered(again.session).signer?.pending === null && headVersion(again.session) === before + 1, 'settled at start');
     expect(hub.posted).toHaveLength(2);
     expect(hub.posted[1]).toEqual(hub.posted[0]);
+  });
+
+  it('a sign-out while Touch ID is up keeps and sends nothing, so signing in again posts nothing', async () => {
+    const { session, feed } = await signingRoot();
+    const before = headVersion(session);
+    let out: Promise<void> | null = null;
+    signing.during = () => void (out = session.signOut());
+    expect(await session.resign()).toMatchObject({ ok: false, reason: 'not-root' });
+    await out;
+    expect(hub.posted).toEqual([]);
+    expect(signerOf(session).pending).toBeNull();
+    expect((await exists(join(orgDir(), SIGNING_FILE))) ? (await readJson<SigningFile>(SIGNING_FILE)).pending : null).toBeNull();
+
+    signing.during = null;
+    expect(session.signIn()).toEqual({ ok: true });
+    await until(() => isSignedIn(session), 'signed in again');
+    feed.open();
+    await pause(50);
+    expect(hub.posted).toEqual([]);
+    expect(headVersion(session)).toBe(before);
+  });
+
+  it('a sign-out while the exposure is written posts nothing with the hub client it had; the slot settles at the next sign-in', async () => {
+    const real = realFiles();
+    let release!: () => void;
+    let holding!: () => void;
+    const held = new Promise<void>((resolve) => (holding = resolve));
+    let armed = false;
+    const files: OrgFiles = {
+      ...real,
+      write: async (name, value) => {
+        if (armed && name === SIGNING_FILE && (value as SigningFile).pending?.exposed.hub === true) {
+          armed = false;
+          await new Promise<void>((resolve) => ((release = resolve), holding()));
+        }
+        return real.write(name, value);
+      },
+    };
+    const { session, feed } = await signingRoot({ files });
+    const before = headVersion(session);
+    armed = true;
+    const signed = session.resign();
+    await held;
+    const out = session.signOut();
+    release();
+    expect(await signed).toMatchObject({ ok: false, reason: 'not-root' });
+    await out;
+    expect(hub.posted).toEqual([]);
+    expect((await readJson<SigningFile>(SIGNING_FILE)).pending).toMatchObject({ exposed: { hub: true } });
+
+    expect(session.signIn()).toEqual({ ok: true });
+    await until(() => isSignedIn(session), 'signed in again');
+    feed.open();
+    await until(() => signerOf(session).pending === null && headVersion(session) === before + 1, 'settled at the sign-in');
+    expect(hub.posted).toHaveLength(1);
   });
 
   it('discards a state the hub keeps refusing, on confirmation, in abandon-pending\'s words, the abandoned proposal on the status', async () => {

@@ -19,6 +19,10 @@
 // - Discarding (`abandon-pending`'s rule, admin.ts): only on the owner's confirmation and only while the hub's chain
 //   doesn't hold the state, read from the hub then and there. A fork waits for it; so does a slot the hub keeps
 //   refusing for another reason (a courtesy check), which settling would otherwise post again forever.
+// - A sign-out or close fences what is in flight (`fence`, `close`): a sign asked for before it stops before Touch ID,
+//   before its slot is written and before any post; a settle or discard stops before its post or its write. A slot
+//   written before the sign-out stays, and settles at the next sign-in. Each post is made on the held line it was
+//   planned on, checked again synchronously after its exposure write, with the hub client of that moment.
 // - The slot's state and its obligation settle apart: the slot at the hub's acceptance, the obligation (deliveries.ts,
 //   Task 5) when its machines acknowledge. A discard moves the obligation to `abandoned` in the same write.
 //
@@ -68,8 +72,14 @@ export interface OrgSigner {
   discardPending(confirmed: true, hash: string): Promise<DiscardOutcome>;
   /** Only in `problem: 'signing'`: a fresh signing.json. */
   resetSigning(confirmed: true): Promise<void>;
+  /**
+   * The session's sign-out: every sign, settle and discard asked for before it stops at its next step (Touch ID, the
+   * slot's write, a post, a discard's write). A slot already written stays, and settles at the next sign-in.
+   */
+  fence(): void;
   /** `pending()` changed (a slot written or cleared, its fork judged), so the status can be emitted again. */
   onChanged(listener: () => void): () => void;
+  /** Fences as `fence` does, for good: nothing in flight goes further. */
   close(): void;
 }
 
@@ -141,6 +151,15 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     return turn;
   }
   let signing = false;
+  /**
+   * The lifecycle fence. Each sign, settle and discard takes the epoch it was asked in and goes no further once a
+   * sign-out (`fence`) or `close` advances it: past Touch ID, into the slot, to the hub. The session's own generation
+   * fences its attempts (registration, rekey), not signing.
+   */
+  let epoch = 0;
+  let closed = false;
+  const live = (asked: number): boolean => !closed && epoch === asked;
+  const stopped = (what: string): SignOutcome => ({ ok: false, reason: 'not-root', detail: `this Mac signed out while signing: ${what}` });
 
   /** The fork judgment of the slot `key` names (its state's canonical form), refreshed after each change. */
   let judged: { key: string; fork: boolean } | null = null;
@@ -256,16 +275,17 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
    * Posts the slot's state, `exposed.hub` written first, and settles what the answer says; then starts the deliveries,
    * which send only what is on the app's line (so nothing of a slot the answer made a fork).
    */
-  async function post(signed: SignedOrgState): Promise<SignOutcome> {
-    const outcome = await postOnce(signed);
-    void deliveries.send().catch((error: unknown) => log(`delivering failed: ${(error as Error).message}`));
+  async function post(signed: SignedOrgState, asked: number): Promise<SignOutcome> {
+    const outcome = await postOnce(signed, asked);
+    if (live(asked)) void deliveries.send().catch((error: unknown) => log(`delivering failed: ${(error as Error).message}`));
     return outcome;
   }
 
-  async function postOnce(signed: SignedOrgState): Promise<SignOutcome> {
+  async function postOnce(signed: SignedOrgState, asked: number): Promise<SignOutcome> {
     const version = signed.state.version;
-    const hub = deps.hub();
-    if (hub === null) return { ok: false, reason: 'hub', detail: 'no hub: the state stays pending until it can be posted' };
+    const unsent = `version ${version} was not posted, and stays pending until this Mac signs in again`;
+    if (!live(asked)) return stopped(unsent);
+    if (deps.hub() === null) return { ok: false, reason: 'hub', detail: 'no hub: the state stays pending until it can be posted' };
     // The held line the post is made on: an adoption while the exposure is written (a sibling, a recovery) moves it.
     const view = deps.held();
     const head = view?.head() ?? null;
@@ -276,7 +296,11 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     }
     refreshed();
     // Synchronously from here to the post, as deliveries.ts does before its act: a proposal whose parent is no longer
-    // the held head (or whose state the held chain now holds) is not posted; it settles by the slot's rules.
+    // the held head (or whose state the held chain now holds) is not posted; it settles by the slot's rules. Nor is
+    // one a sign-out overtook, and the hub is the one this lifecycle reaches now, never a client taken before the write.
+    if (!live(asked)) return stopped(unsent);
+    const hub = deps.hub();
+    if (hub === null) return { ok: false, reason: 'hub', detail: 'no hub: the state stays pending until it can be posted' };
     if (deps.held() !== view || (view?.head() ?? null) !== head) {
       if (await clearIfHeld()) return { ok: true, version };
       log(`version ${version}: the held org state moved while its exposure was written; nothing was posted`);
@@ -315,7 +339,7 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     return { ok: false, reason: 'hub', detail: describe(answer) };
   }
 
-  async function settleLocked(): Promise<void> {
+  async function settleLocked(asked: number): Promise<void> {
     const file = store.get();
     const view = deps.held();
     if (file === 'damaged' || file.pending === null || view === null) return;
@@ -335,7 +359,7 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
         // The hub's head is still the parent, so it holds no successor of it: the same bytes go again.
         if (isSignedOrgState(served.head) && (await stateHash(served.head.state)) === slot.parent) {
           log(`pending version ${version} is not at the hub: sent again`);
-          await post(slot.signed);
+          await post(slot.signed, asked);
         } else {
           log(`pending version ${version}: the hub serves a chain the held view did not take; it stays pending`);
         }
@@ -355,10 +379,11 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     return null;
   }
 
-  async function signLocked(edit: Edit): Promise<SignOutcome> {
+  async function signLocked(edit: Edit, asked: number): Promise<SignOutcome> {
+    if (!live(asked)) return stopped('nothing was signed');
     const before = standing();
     if (before !== null) return before;
-    await settleLocked();
+    await settleLocked(asked);
     const file = store.get();
     if (file === 'damaged') return { ok: false, reason: 'signing' };
     if (file.pending !== null) return { ok: false, reason: 'pending' };
@@ -394,6 +419,8 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
       ...edit.lines,
       ...findings.map((f) => `Warning: ${f.detail}`),
     ].join('\n');
+    // The edit and the checks above are awaits a sign-out may land in: the person is not asked for it.
+    if (!live(asked)) return stopped('nothing was signed');
     const answer = await signer.sign(draft, { summary: edit.summary, text });
     if (!answer.ok) return { ok: false, reason: 'cancelled' };
     const signed = answer.signed;
@@ -409,9 +436,11 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     }
     const obligation = await deliveries.obligation(signed, parent.state);
     const slot: Pending = { signed, parent: await stateHash(parent.state), hash: await stateHash(signed.state), exposed: { hub: false, machines: [] } };
-    let kept: 'kept' | 'pending' | 'moved';
+    let kept: 'kept' | 'pending' | 'moved' | 'stopped';
     try {
       kept = await store.update((f) => {
+        // A sign-out since the person was asked: what was signed is never kept, so nothing can post it later.
+        if (!live(asked)) return { next: f, value: 'stopped' as const };
         if (f.pending !== null) return { next: f, value: 'pending' as const };
         // An adoption between the verdict and this turn: the slot would name a parent that is no longer the head.
         if (deps.held() !== current || current.head() !== parent) return { next: f, value: 'moved' as const };
@@ -424,10 +453,11 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     }
     if (kept === 'pending') return { ok: false, reason: 'pending' };
     if (kept === 'moved') return { ok: false, reason: 'invalid', detail: 'not-head' };
+    if (kept === 'stopped') return stopped('what was signed was not kept or sent');
     log(`version ${signed.state.version} signed and kept pending${obligation === null ? '' : `, owed to ${obligation.owed.length} machine(s)`}`);
     refreshed();
 
-    return post(signed);
+    return post(signed, asked);
   }
 
   return {
@@ -437,8 +467,9 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     async sign(edit) {
       if (signing) return { ok: false, reason: 'busy' };
       signing = true;
+      const asked = epoch;
       try {
-        return await exclusive(() => signLocked(edit));
+        return await exclusive(() => signLocked(edit, asked));
       } catch (error) {
         // Only the signing store throws here (a damaged file, a failed write): the slot's state is what it reads back.
         if (error instanceof SigningDamaged) return { ok: false, reason: 'signing' };
@@ -450,12 +481,15 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
       }
     },
     async settle() {
-      await exclusive(settleLocked);
+      const asked = epoch;
+      await exclusive(() => settleLocked(asked));
       await refreshNow();
     },
     async discardPending(confirmed, named) {
       if (confirmed !== true) return { ok: false };
+      const asked = epoch;
       const outcome = await exclusive(async (): Promise<DiscardOutcome> => {
+        if (!live(asked)) return { ok: false };
         const file = store.get();
         if (file === 'damaged') return { ok: false, reason: 'signing' };
         if (file.pending === null) return { ok: false, reason: 'none' };
@@ -482,6 +516,8 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
         const hash = await stateHash(slot.signed.state);
         const key = canonicalize(slot.signed.state);
         const done = await store.update((f) => {
+          // A sign-out since the owner confirmed: the hub was read for the lifecycle that ended, so nothing is discarded on it.
+          if (!live(asked)) return { next: f, value: 'stopped' as const };
           if (f.pending === null || canonicalize(f.pending.signed.state) !== key) return { next: f, value: null };
           const { hub: atHub, machines } = f.pending.exposed;
           f.pending = null;
@@ -489,6 +525,7 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
           f.abandoned.push({ hash, version, hub: atHub, machines: [...machines] });
           return { next: f, value: { unsent: !atHub && machines.length === 0 } };
         });
+        if (done === 'stopped') return { ok: false };
         if (done === null) return { ok: false, reason: 'none' };
         log(`pending version ${version} ${hash} abandoned on the owner's word${done.unsent ? ' (never sent)' : ''}; the hub's head is version ${hubVersion}`);
         return { ok: true, unsent: done.unsent, hubVersion, ...(there === undefined ? {} : { forkAt: version }) };
@@ -512,7 +549,12 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
       listeners.add(listener);
       return () => void listeners.delete(listener);
     },
+    fence() {
+      epoch++;
+    },
     close() {
+      closed = true;
+      epoch++;
       unwatch();
       listeners.clear();
     },

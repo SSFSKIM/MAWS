@@ -1445,6 +1445,9 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     // status reads signed out at once and an anchor written before the marker's turn carries it.
     if (attempt !== null) endAttempt('ended by sign-out');
     generation++;
+    // M3: a sign, settle or discard in flight goes no further (no Touch ID, no slot, no post); a slot already written
+    // stays and settles at the next sign-in.
+    composed?.signer.fence();
     attempt?.abort();
     attempt = null;
     registering = null;
