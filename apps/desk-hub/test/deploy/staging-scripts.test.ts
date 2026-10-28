@@ -79,7 +79,18 @@ describe('the admin step', () => {
     writeFileSync(join(bin, 'cloudflared'), `#!/bin/sh\nprintf '%s' '${token}'\n`, { mode: 0o755 });
     writeFileSync(
       join(bin, 'pnpm'),
-      `#!/bin/sh\nprintf '%s\\n' "$@" > '${dir}/args'\ncat > '${dir}/stdin'\necho 'head version 3, issued 2 days ago'\necho 'a line naming a secret'\necho 'devices listed'\nexit 0\n`,
+      [
+        '#!/bin/sh',
+        `printf '%s\\n' "$@" > '${dir}/args'`,
+        // The secret-stream mode (O14 M2): the token it found in its environment, its stdin copied to its stdout.
+        `if [ "$STUB_PNPM" = pipe ]; then printf '%s' "\${DESK_ACCESS_TOKEN-unset}" > '${dir}/env'; tee '${dir}/stdin'; echo 'head version 3, issued 2 days ago' >&2; echo 'a line naming a secret' >&2; exit 0; fi`,
+        `cat > '${dir}/stdin'`,
+        "echo 'head version 3, issued 2 days ago'",
+        "echo 'a line naming a secret'",
+        "echo 'devices listed'",
+        'exit 0',
+        '',
+      ].join('\n'),
       { mode: 0o755 },
     );
     const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, DESK_STAGING_DIR: join(dir, 'state'), DESK_STAGING_DEVICE: device, DESK_STAGING_SECRETS: join(dir, 'secrets') };
@@ -117,6 +128,33 @@ describe('the admin step', () => {
     const missing = spawnSync('zsh', [runner, 'admin', 'devices'], { encoding: 'utf8', env: none.env });
     expect([missing.status, missing.stdout]).toEqual([2, expect.stringMatching(/no admin device keys at .*keys\.json/)]);
     expect(readdirSync(none.dir)).not.toContain('args');
+  });
+
+  it.skipIf(!zsh)('admin --pipe: the token in the environment, stdin and stdout byte for byte, stderr alone filtered and logged; other verbs refused', () => {
+    const input = 'smns-provision-v1.eyJodWIiOiJ4In0\nno newline at the end';
+    const create = ['delegation', 'create', '--label', 'devcloud', '--prefix', 'dc-', '--code-to-stdout'];
+    const { dir, device, env } = setup();
+    const run = spawnSync('zsh', [runner, 'admin', '--pipe', ...create], { encoding: 'utf8', env: { ...env, STUB_PNPM: 'pipe' }, input });
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout).toBe(input);
+    expect(readFileSync(join(dir, 'stdin'), 'utf8')).toBe(input);
+    expect(readFileSync(join(dir, 'env'), 'utf8')).toBe(token);
+    const args = readFileSync(join(dir, 'args'), 'utf8').trim().split('\n');
+    expect(args.slice(args.indexOf('deployment'))).toEqual(['deployment', 'admin', ...create, '--keys', `${device}/keys.json`, '--config', 'deploy/staging.json']);
+    expect(run.stderr).toContain('head version 3, issued 2 days ago');
+    expect(run.stderr).not.toContain('secret');
+    const logs = readdirSync(join(dir, 'state')).filter((name) => name.startsWith('admin-delegation-pipe-'));
+    expect(logs).toHaveLength(1);
+    expect(readFileSync(join(dir, 'state', logs[0]), 'utf8')).toBe('head version 3, issued 2 days ago\n');
+    expect(run.stdout + run.stderr + readFileSync(join(dir, 'state', logs[0]), 'utf8')).not.toContain(token);
+
+    for (const refused of [['--pipe', 'devices'], ['--pipe', 'pair', '--class', 'web-cards'], create, ['code', 'strip-legacy']]) {
+      const other = setup();
+      const r = spawnSync('zsh', [runner, 'admin', ...refused], { encoding: 'utf8', env: { ...other.env, STUB_PNPM: 'pipe' }, input });
+      expect(r.status, refused.join(' ')).toBe(2);
+      expect(r.stdout + r.stderr, refused.join(' ')).toMatch(/admin --pipe is for delegation create and code strip-legacy alone|writes a secret code to stdout/);
+      expect(readdirSync(other.dir), refused.join(' ')).not.toContain('args');
+    }
   });
 
   it('filters line by line, so what a step asks about at /dev/tty is shown before the question', () => {

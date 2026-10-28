@@ -11,9 +11,15 @@
 #   wait <sha8>         reads production's X-Desk-Build until it carries hub@<sha8>, for up to 2 minutes
 #   access-sync         `deployment access-sync`: production's people policy made the org state's members (an Access
 #                       change); needs a production machine enrolled v2 (O14), its credentials in machine.json
-#   admin <args…>       `deployment admin <args…>` (O13 M2) against production with the admin device's keys and the
-#                       owner's Access token; genesis, pair and remove-device ask on the terminal before they sign
-# The steps that change production (access-sync; admin genesis, pair, remove-device, refresh) say so first.
+#   admin <args…>       `deployment admin <args…>` (O13 M2, O14 M2) against production with the admin device's keys and
+#                       the owner's Access token on its stdin; every verb that signs, posts or deletes asks on the
+#                       terminal first
+#   admin --pipe <verb…> the secret-stream mode, for `delegation create` and `code strip-legacy` alone (the two verbs whose
+#                       stdout is a secret code): the token in the command's environment, its stdin and stdout passed
+#                       through untouched and unlogged, its stderr alone filtered and logged; refused when stdout is a
+#                       terminal. Every line of the runner's own goes to stderr.
+# The steps that change production (access-sync; admin genesis, pair, remove-device, refresh, enroll, delegation,
+# machine drop, provisioning revoke) say so first.
 # Environment (README "Production runs"):
 #   DESK_PRODUCTION_SECRETS  the directory holding CF_ACCESS_SETUP_TOKEN (access-sync)
 #   DESK_PRODUCTION_DIR      logs and state (default ~/.local/state/desk-hub-production, 0700): one log per access-sync
@@ -115,23 +121,54 @@ case $step in
     rc=${pipestatus[2]}; unset secrets
     print -r -- "access-sync exit $rc; checkpoint: $(cat $O/access-sync/$PRODUCTION_WORKER.json 2>/dev/null); log $LOG"; exit $rc ;;
   admin)
+    pipe=0
+    [[ $1 == --pipe ]] && { pipe=1; shift; }
+    # In the secret-stream mode stdout is the code's pipe: every line of the runner's own goes to stderr.
+    say() { if (( pipe )); then print -r -- "$*" >&2; else print -r -- "$*"; fi; }
     sub=$1
+    verb="$1${2:+ $2}"
     for a in "$@"; do
-      [[ $a == (--config|--keys|--hub|--user|--yes)(|=*) ]] && { print -r -- "admin takes no --config, --keys, --hub, --user or --yes: its deployment is production and its keys are DESK_PRODUCTION_DEVICE's. Nothing was changed."; exit 2; }
+      [[ $a == (--config|--keys|--hub|--user|--yes)(|=*) ]] && { say "admin takes no --config, --keys, --hub, --user or --yes: its deployment is production and its keys are DESK_PRODUCTION_DEVICE's. Nothing was changed."; exit 2; }
     done
-    case $sub in
-      genesis) print -r -- "admin genesis changes production: it roots the org $PRODUCTION_ORG at $URL (a signed genesis), asking on the terminal first" ;;
-      pair) print -r -- "admin pair changes production: it adds a device to $PRODUCTION_ORG's org state (a signed successor), asking on the terminal first" ;;
-      remove-device) print -r -- "admin remove-device changes production: it revokes a device in $PRODUCTION_ORG's org state (a signed successor), asking on the terminal first" ;;
-      refresh) print -r -- "admin refresh changes production: it posts a no-change successor of $PRODUCTION_ORG's org state" ;;
-    esac
-    if [[ $sub == init ]]; then
-      mkdir -p $H || exit 2
+    if (( pipe )); then
+      [[ $verb == ("delegation create"|"code strip-legacy") ]] || { say "admin --pipe is for delegation create and code strip-legacy alone, the verbs whose stdout is a secret code (given: ${verb:-nothing}). Nothing was changed."; exit 2; }
+      [[ -t 1 ]] && { say "admin --pipe: stdout is a terminal, and the code goes only to a pipe (… | gcloud secrets create <id> --data-file=-). Nothing was changed."; exit 2; }
     else
-      [[ -f $H/keys.json ]] || { print -r -- "no admin device keys at $H/keys.json (DESK_PRODUCTION_DEVICE): run 'production-run.sh admin init' first. Nothing was changed."; exit 2; }
+      [[ $verb == "delegation create" || $sub == code ]] && { say "admin $verb writes a secret code to stdout, which this step filters and logs: run it as 'production-run.sh admin --pipe $verb … | <its destination>' (code inspect needs no runner: 'pnpm --silent --filter desk-hub deployment admin code inspect'). Nothing was changed."; exit 2; }
+    fi
+    case $sub in
+      genesis) say "admin genesis changes production: it roots the org $PRODUCTION_ORG at $URL (a signed genesis), asking on the terminal first" ;;
+      pair) say "admin pair changes production: it adds a device to $PRODUCTION_ORG's org state (a signed successor), asking on the terminal first" ;;
+      remove-device) say "admin remove-device changes production: it revokes a device in $PRODUCTION_ORG's org state (a signed successor), asking on the terminal first" ;;
+      refresh) say "admin refresh changes production: it posts a no-change successor of $PRODUCTION_ORG's org state" ;;
+      enroll) say "admin enroll changes production: it mints an enrollment and lists the machine in $PRODUCTION_ORG's org state (a signed successor), asking on the terminal first" ;;
+      delegation) say "admin $verb changes production: it changes $PRODUCTION_ORG's delegations (a provisioning key and a signed successor), asking on the terminal first" ;;
+      machine) say "admin $verb changes production: it takes a machine out of $PRODUCTION_ORG's org state and deletes its hub row, asking on the terminal first" ;;
+      provisioning) say "admin $verb changes production: it revokes a provisioning key at $URL, asking on the terminal first" ;;
+      abandon-pending) say "admin abandon-pending changes what this admin device signs next: it drops a proposal production never took, asking on the terminal first" ;;
+    esac
+    if [[ $sub == init || $verb == "code strip-legacy" ]]; then
+      # Nothing to sign in with: init makes the device, and strip-legacy is a local transform.
+      [[ $sub == init ]] && { mkdir -p $H || exit 2; }
+    else
+      [[ -f $H/keys.json ]] || { say "no admin device keys at $H/keys.json (DESK_PRODUCTION_DEVICE): run 'production-run.sh admin init' first. Nothing was changed."; exit 2; }
       # The owner's production Access token, into T (never printed; unset after use).
       T=$(cloudflared access token -app=$URL 2>/dev/null)
-      [[ -n $T && $T == eyJ* ]] || { print -r -- "no production Access token: the owner runs 'cloudflared access login $URL' first. Nothing was changed."; exit 2; }
+      [[ -n $T && $T == eyJ* ]] || { say "no production Access token: the owner runs 'cloudflared access login $URL' first. Nothing was changed."; exit 2; }
+    fi
+    if (( pipe )); then
+      # The token in the command's environment alone; its stdout straight to this script's (the pipe), its stdin from
+      # this script's; its stderr, the only stream filtered and logged, back to this script's stderr. With no multios,
+      # each stream goes to one place.
+      unsetopt multios
+      LOG=$O/admin-${sub}-pipe-$(stamp).log
+      if [[ $sub == code ]]; then
+        { deployment admin "$@" 2>&1 1>&3 3>&- | filter | tee $LOG >&2; rc=${pipestatus[1]}; } 3>&1
+      else
+        { DESK_ACCESS_TOKEN=$T deployment admin "$@" --keys $H/keys.json 2>&1 1>&3 3>&- | filter | tee $LOG >&2; rc=${pipestatus[1]}; } 3>&1
+      fi
+      unset T
+      say "admin exit $rc; log $LOG (stderr alone: stdout went to the pipe)"; exit $rc
     fi
     # A pairing code goes to the terminal alone (the command writes it to /dev/tty), and the confirmations are read
     # from it. Genesis's output goes to the terminal as it is, unlogged and unfiltered: with `--recovery paper` it shows
@@ -145,5 +182,5 @@ case $step in
     { [[ -n $T ]] && printf 'DESK_ACCESS_TOKEN=%s\n' "$T"; } | deployment admin "$@" --keys $H/keys.json 2>&1 | filter | tee $LOG
     rc=${pipestatus[2]}; unset T
     print -r -- "admin exit $rc; log $LOG"; exit $rc ;;
-  *) print -r -- "checkout [<path>] | build | wait <sha8> | access-sync | admin <args…>"; exit 2 ;;
+  *) print -r -- "checkout [<path>] | build | wait <sha8> | access-sync | admin [--pipe] <args…>"; exit 2 ;;
 esac

@@ -46,6 +46,9 @@ if [ "$STUB_PNPM" = deploy ]; then
   esac
 fi
 if [ "$STUB_PNPM" = admin ]; then cat > "$STUB_REC/pnpm.stdin"; echo "head version 1, issued 0 days ago"; [ -z "$STUB_ADMIN_OUT" ] || printf '%s\n' "$STUB_ADMIN_OUT"; exit 0; fi
+# The secret-stream mode: the token it found in its environment recorded, its stdin copied to its stdout and recorded,
+# two diagnostics on stderr (one the filter drops), and STUB_EXIT as its status.
+if [ "$STUB_PNPM" = pipe ]; then printf '%s' "\${DESK_ACCESS_TOKEN-unset}" > "$STUB_REC/pnpm.env"; tee "$STUB_REC/pnpm.stdin"; echo "head version 1, issued 0 days ago" >&2; echo "a line naming a token" >&2; exit \${STUB_EXIT:-0}; fi
 exit 1
 `,
   wrangler: `#!/bin/sh\nprintf '%s\\n' "$*" >> "$STUB_REC/wrangler"\nexit 1\n`,
@@ -615,7 +618,82 @@ describe.skipIf(!zsh)('production-run.sh', () => {
     const w = world();
     const run = w.run('production-run.sh', ['deploy']);
     expect(run.status).toBe(2);
-    expect(run.out).toMatch(/checkout \[<path>\] \| build \| wait <sha8> \| access-sync \| admin <args…>/);
+    expect(run.out).toMatch(/checkout \[<path>\] \| build \| wait <sha8> \| access-sync \| admin \[--pipe\] <args…>/);
+  });
+
+  describe('admin --pipe, the secret-stream mode (O14 M2)', () => {
+    const CREATE = ['delegation', 'create', '--label', 'devcloud', '--prefix', 'dc-', '--code-to-stdout', '--legacy-from-v1-code'];
+    // A v1 code in, as B1 step 2 pipes one; a line of its shape the filter would drop, which must pass untouched.
+    const INPUT = 'smns-provision-v1.eyJodWIiOiJodHRwczovL3gifQ\nsecond line, no newline at its end';
+    /** The runner with `input` on its stdin and its stdout and stderr apart, stdout a pipe. */
+    const piped = (w: World, args: string[], extra: Record<string, string> = {}) => {
+      const r = spawnSync('zsh', [join(w.dir, 'apps/desk-hub/deploy/production-run.sh'), ...args], { cwd: w.root, env: { ...w.env, ...extra }, input: INPUT, encoding: 'utf8', timeout: 60_000 });
+      return { status: r.status, stdout: r.stdout, stderr: r.stderr };
+    };
+    const withKeys = () => {
+      const w = world();
+      mkdirSync(join(w.out, 'device'), { recursive: true });
+      writeFileSync(join(w.out, 'device/keys.json'), '{}');
+      return w;
+    };
+
+    it('hands the token in the environment, not on stdin; passes stdin and stdout byte for byte; filters and logs stderr alone', () => {
+      const w = withKeys();
+      const run = piped(w, ['admin', '--pipe', ...CREATE], { STUB_PNPM: 'pipe', STUB_ACCESS: ACCESS });
+      expect(run.status, run.stderr).toBe(0);
+      expect(run.stdout).toBe(INPUT);
+      expect(readFileSync(join(w.rec, 'pnpm.stdin'), 'utf8')).toBe(INPUT);
+      expect(readFileSync(join(w.rec, 'pnpm.env'), 'utf8')).toBe(ACCESS);
+      expect(w.calls('pnpm')).toEqual([`-s -C ${w.dir} --filter desk-hub deployment admin ${CREATE.join(' ')} --keys ${w.out}/device/keys.json --config deploy/config.json`]);
+      expect(run.stderr.split('\n')[0]).toMatch(/^admin delegation create changes production: /);
+      expect(run.stderr).toContain('head version 1, issued 0 days ago');
+      expect(run.stderr).not.toContain('naming a token');
+      const logs = readdirSync(w.out).filter((f) => f.startsWith('admin-delegation-pipe-'));
+      expect(logs).toHaveLength(1);
+      expect(readFileSync(join(w.out, logs[0]), 'utf8')).toBe('head version 1, issued 0 days ago\n');
+      expect(run.stderr).toMatch(new RegExp(`admin exit 0; log ${w.out}/admin-delegation-pipe-.*\\.log`));
+      // The token is nowhere but the command's environment.
+      for (const text of [run.stdout, run.stderr, readFileSync(join(w.out, logs[0]), 'utf8'), ...w.calls('pnpm'), ...w.calls('cloudflared')]) expect(text).not.toContain(ACCESS);
+    });
+
+    it("passes the command's status on, and runs code strip-legacy with no token and no keys", () => {
+      const failed = withKeys();
+      expect(piped(failed, ['admin', '--pipe', ...CREATE], { STUB_PNPM: 'pipe', STUB_ACCESS: ACCESS, STUB_EXIT: '3' }).status).toBe(3);
+      const w = world();
+      const run = piped(w, ['admin', '--pipe', 'code', 'strip-legacy'], { STUB_PNPM: 'pipe' });
+      expect(run.status, run.stderr).toBe(0);
+      expect(run.stdout).toBe(INPUT);
+      expect(w.calls('cloudflared')).toEqual([]);
+      expect(readFileSync(join(w.rec, 'pnpm.env'), 'utf8')).toBe('unset');
+      expect(w.calls('pnpm')).toEqual([`-s -C ${w.dir} --filter desk-hub deployment admin code strip-legacy --config deploy/config.json`]);
+    });
+
+    it('refuses any other verb, and the two secret verbs outside the mode, with nothing run and nothing on stdout', () => {
+      for (const args of [['admin', '--pipe', 'devices'], ['admin', '--pipe', 'delegation', 'drop', 'x'], ['admin', '--pipe'], ['admin', ...CREATE], ['admin', 'code', 'strip-legacy'], ['admin', 'code', 'inspect']]) {
+        const w = withKeys();
+        const run = piped(w, args, { STUB_PNPM: 'pipe', STUB_ACCESS: ACCESS });
+        expect(run.status, args.join(' ')).toBe(2);
+        expect(run.stdout + run.stderr, args.join(' ')).toMatch(/admin --pipe is for delegation create and code strip-legacy alone|writes a secret code to stdout, which this step filters and logs/);
+        if (args[1] === '--pipe') expect(run.stdout, args.join(' ')).toBe('');
+        expect(w.calls('pnpm'), args.join(' ')).toEqual([]);
+        expect(w.calls('cloudflared'), args.join(' ')).toEqual([]);
+      }
+    });
+
+    // Its stdout a terminal (a pty: the runner reaches nothing here, every outside command a stub, none of them called).
+    it.skipIf(spawnSync('python3', ['-c', 'import pty']).status !== 0)('refuses the mode when its stdout is a terminal, before any credential is read', () => {
+      const w = withKeys();
+      const r = spawnSync('python3', ['-I', '-c', 'import pty, sys; sys.exit(pty.spawn(sys.argv[1:]) >> 8)', 'zsh', join(w.dir, 'apps/desk-hub/deploy/production-run.sh'), 'admin', '--pipe', ...CREATE], {
+        cwd: w.root,
+        env: { ...w.env, STUB_PNPM: 'pipe', STUB_ACCESS: ACCESS },
+        encoding: 'utf8',
+        timeout: 60_000,
+      });
+      expect(r.status, r.stdout + r.stderr).toBe(2);
+      expect(r.stdout).toMatch(/admin --pipe: stdout is a terminal, and the code goes only to a pipe/);
+      expect(w.calls('pnpm')).toEqual([]);
+      expect(w.calls('cloudflared')).toEqual([]);
+    });
   });
 });
 

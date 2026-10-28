@@ -1,0 +1,610 @@
+// `deployment admin`'s O14 verbs (P5 O14 M2, Interfaces §C) against the suites' local hub, beside O13's in
+// admin.test.ts: `enroll` (the code to the terminal, the machine's key checked under its MAC, compared before listing;
+// the anchor's lock held for its signing alone), `delegation create` (the provisioning code to a pipe alone),
+// `delegation drop`, `machine drop` (an attended entry, a certificate, a phase-1 row), `provisioning revoke`, `show`,
+// `abandon-pending`, and the local transforms `code inspect` and `code strip-legacy`. Against a deployment, every verb
+// that signs, posts or deletes stops at /dev/tty when the shell has none, before any request; and nothing a verb prints
+// on stdout or stderr holds a key, a token or a code, but the code on the two verbs whose stdout is a secret.
+import { spawn } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  base64urlEncode,
+  canonicalize,
+  generateSigningKey,
+  importSigningKey,
+  keyId,
+  signOrgState,
+  stateHash,
+  type SignedOrgState,
+} from 'org-protocol';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { anchorFile, runAdmin, type AdminIo } from '../../deploy/admin.ts';
+import { readAdminKeys, readText, volumeOf } from '../../deploy/admin-device.ts';
+import { successor } from '../../deploy/org-admin.ts';
+import { decodeProvisioningCodeV2, encodeProvisioningCodeV2, type ProvisioningCodeV2 } from '../../deploy/provisioning-code.ts';
+import { enrollDelegated, enrollV2, mintRef } from '../../fake-machine/org';
+import { decodeEnrollmentCodeV2, encodeEnrollmentCodeV2, encodeProvisioningCode, type MachineView, type ProvisioningKeyRecord } from '../../src/protocol/identity';
+import { enroll as enrollV1, provisioningKey } from '../support/clients';
+import { ADMIN, ORG, startLocalHub, type LocalHub } from '../support/local';
+
+const APP = join(import.meta.dirname, '../..');
+const BIN = join(APP, 'deploy/bin.ts');
+const scratch = mkdtempSync(join(tmpdir(), 'deployment-admin-verbs-'));
+afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+let dirs = 0;
+const dir = (name: string) => {
+  const path = join(scratch, `${name}-${++dirs}`);
+  mkdirSync(path, { recursive: true });
+  return path;
+};
+const placement = { home: join(scratch, 'home'), tmpRoots: [join(scratch, 'swept')] };
+
+type Fake = { io: AdminIo; out: string[]; err: string[]; term: string[]; stdout: string[]; execs: Array<{ command: string; args: string[]; input?: string }> };
+
+/** Every fake a case made, for the redaction check at the end; and every secret a case handled. */
+const fakes: Fake[] = [];
+const secrets = new Set<string>();
+
+/** The command's world, recorded: its lines, its terminal, its secret stdout; `answers` are typed at the terminal. */
+function fake(answers: string[] = [], over: Partial<AdminIo> & { stdin?: string } = {}): Fake {
+  const f: Fake = { out: [], err: [], term: [], stdout: [], execs: [], io: undefined as unknown as AdminIo };
+  const { stdin = '', ...rest } = over;
+  f.io = {
+    out: (line) => f.out.push(line),
+    err: (line) => f.err.push(line),
+    openTerminal: () => ({ write: (text) => void f.term.push(text), readLine: async () => answers.shift() ?? '' }),
+    secrets: async () => ({ DESK_ACCESS_TOKEN: 'eyJ.not-a-token' }),
+    exec: async (command, args, input) => void f.execs.push({ command, args, input }),
+    volumeOf,
+    removableVolume: () => false,
+    readText,
+    placement,
+    env: {},
+    appDir: APP,
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, Math.min(ms, 50))),
+    readStdin: async () => stdin,
+    secretOut: (text) => void f.stdout.push(text),
+    stdoutIsTerminal: false,
+    ...rest,
+  };
+  fakes.push(f);
+  return f;
+}
+
+/** Waits for `probe` to answer, up to 15 s. */
+async function until<T>(probe: () => T | undefined | null | false): Promise<T> {
+  const deadline = Date.now() + 15_000;
+  for (;;) {
+    const got = probe();
+    if (got) return got;
+    if (Date.now() > deadline) throw new Error('not within 15 s');
+    await new Promise((r) => setTimeout(r, 20));
+  }
+}
+
+/** The enrollment code a running `enroll` wrote to its terminal. */
+const codeOn = (f: Fake) => until(() => /smns-enroll-v2\.[A-Za-z0-9_-]+/.exec(f.term.join(''))?.[0]);
+
+describe('on the local hub', () => {
+  let hub: LocalHub;
+  let member: string;
+  const keys = join(scratch, 'owner', 'keys.json');
+  const asLocal = (...extra: string[]) => ['--hub', hub.url, '--user', ADMIN, '--keys', keys, ...extra];
+  const served = async () => (await hub.fetchAs(ADMIN, '/api/org/state?since=0').then((r) => r.json())) as { head: SignedOrgState; chain: SignedOrgState[]; certificates: { certs: Array<{ body: { name: string; machine: string; pub: string } }> } };
+  const head = async () => (await served()).head;
+  const hubRows = async () => ((await hub.fetchAs(ADMIN, '/api/machines').then((r) => r.json())) as { machines: MachineView[] }).machines;
+  const anchor = () => JSON.parse(readFileSync(anchorFile(keys), 'utf8')) as { version: number; pending?: SignedOrgState };
+
+  beforeAll(async () => {
+    hub = await startLocalHub();
+    expect(await runAdmin(['init', '--keys', keys], fake().io)).toBe(0);
+    expect(await runAdmin(['genesis', '--recovery', join(dir('volume'), 'recovery.json'), ...asLocal('--yes')], fake().io)).toBe(0);
+    member = ((await hub.fetchAs(ADMIN, '/api/me').then((r) => r.json())) as { member: { id: string } }).member.id;
+  });
+  afterAll(() => hub?.close());
+
+  it('shows a fresh org: the age line, the members and their devices, no machine and no delegation', async () => {
+    const f = fake();
+    expect(await runAdmin(['show', ...asLocal()], f.io)).toBe(0);
+    const admin = (await readAdminKeys(keys)).id;
+    expect(f.out[0]).toBe('head version 1, issued 0 days ago');
+    expect(f.out).toContain(`member ${member} ${ADMIN} admin`);
+    expect(f.out).toContain(`  device ${admin} native-mac software rpId - (this admin device)`);
+    expect(f.out).toContain('machines: none');
+    expect(f.out).toContain('delegations: none');
+  });
+
+  /** `enroll NAME` running, its code once shown, and the machine the test plays. */
+  async function enrolling(name: string, extra: string[] = ['--yes'], answers: string[] = []) {
+    const f = fake(answers);
+    const running = runAdmin(['enroll', name, '--wait', '20', ...asLocal(...extra)], f.io);
+    const code = await codeOn(f);
+    secrets.add(code);
+    const decoded = decodeEnrollmentCodeV2(code);
+    secrets.add(decoded.token);
+    secrets.add(decoded.k);
+    return { f, running, code, decoded };
+  }
+
+  let m1: Awaited<ReturnType<typeof enrollV2>>;
+
+  it('enrolls a machine by a code on the terminal, checks its key under the MAC, shows what to compare, and lists it', async () => {
+    const before = await head();
+    const { f, running, code, decoded } = await enrolling('m1');
+    expect(decoded).toEqual({ hub: hub.url, token: expect.any(String), roots: before.state.root.keys, recoveryPub: before.state.root.recoveryPub, k: expect.any(String), machine: 'm1' });
+    // Nothing of the code on stdout or stderr; on the terminal, and (against a deployment only) the clipboard.
+    expect([...f.out, ...f.err].join('\n')).not.toContain(code);
+    expect(f.execs).toEqual([]);
+    m1 = await enrollV2(code, 'm1');
+    expect(await running).toBe(0);
+    const kid = await keyId(m1.key.pub);
+    expect(f.out).toContain(`machine m1 ref ${m1.ref} key ${kid}`);
+    expect(f.out).toContain('compare with mawsd keys --json on m1, then list it? [y/N] yes (--yes)');
+    expect(f.out.at(-1)).toBe(`listed: version ${before.state.version + 1}`);
+    const after = await head();
+    expect(after.state.machines).toEqual([{ name: 'm1', ref: m1.ref, pub: m1.key.pub, owners: [member] }]);
+    expect(after.state.machineNames).toEqual([{ name: 'm1', ref: m1.ref }]);
+    expect(anchor().pending).toBeUndefined();
+  });
+
+  it('refuses a key whose MAC is not under the code\'s secret, and signs nothing', async () => {
+    const before = await head();
+    const { f, running, code } = await enrolling('m2');
+    // The key posted under another pairing secret, as a substitution on the way would be.
+    const decoded = decodeEnrollmentCodeV2(code);
+    await enrollV2(encodeEnrollmentCodeV2({ ...decoded, k: base64urlEncode(crypto.getRandomValues(new Uint8Array(32))) }), 'm2');
+    expect(await running).toBe(1);
+    expect(f.err.join('\n')).toMatch(/its MAC is not under this code's secret: nothing was signed/);
+    expect((await head()).state.version).toBe(before.state.version);
+  });
+
+  it('shows a leaked code\'s other machine with its own ref and key, which the owner, comparing, declines', async () => {
+    const before = await head();
+    const { f, running, code } = await enrolling('m3', [], ['n']);
+    // The intended machine's ref and key, as its `mawsd keys --json` would print them; another process redeemed first.
+    const intended = { ref: mintRef(), key: await generateSigningKey() };
+    const thief = await enrollV2(code, 'm3');
+    expect(await running).toBe(1);
+    const shown = f.out.find((l) => l.startsWith('machine m3 '))!;
+    expect(shown).toBe(`machine m3 ref ${thief.ref} key ${await keyId(thief.key.pub)}`);
+    expect(shown).not.toContain(intended.ref);
+    expect(shown).not.toContain(await keyId(intended.key.pub));
+    // Locally the values are on stdout and the question alone at the terminal; against a deployment both are there.
+    expect(f.term.join('')).toMatch(/compare with mawsd keys --json on m3, then list it\? \[y\/N\] $/);
+    expect(f.err.join('\n')).toMatch(/not listed: nothing was signed/);
+    expect((await head()).state.version).toBe(before.state.version);
+  });
+
+  it('refuses a name the head lists unless --replace, and with it lists the new key under the same ref, the old one retired', async () => {
+    const plain = fake();
+    expect(await runAdmin(['enroll', 'm1', '--wait', '5', ...asLocal('--yes')], plain.io)).toBe(1);
+    expect(plain.err.join('\n')).toMatch(/m1 is listed \(ref .*\): re-enroll it with --replace/);
+    expect(plain.term).toEqual([]);
+    // m2's row: redeemed, its key posted, never listed.
+    const row = fake();
+    expect(await runAdmin(['enroll', 'm2', '--wait', '5', ...asLocal('--yes')], row.io)).toBe(1);
+    expect(row.err.join('\n')).toMatch(/the hub holds a row named m2 .*: re-enroll it in place with --replace, or drop the row first \(machine drop m2\)/);
+    expect(row.term).toEqual([]);
+
+    const before = await head();
+    const { running, code } = await enrolling('m1', ['--replace', '--yes']);
+    const again = await enrollV2(code, 'm1', { ref: m1.ref });
+    expect(await running).toBe(0);
+    const after = await head();
+    expect(after.state.version).toBe(before.state.version + 1);
+    expect(after.state.machines).toEqual([{ name: 'm1', ref: m1.ref, pub: again.key.pub, owners: [member] }]);
+    expect(after.state.retired).toEqual([{ keyId: await keyId(m1.key.pub), pub: m1.key.pub, notAfter: expect.any(String), holder: { machine: m1.ref } }]);
+    m1 = again;
+  });
+
+  it('refuses a re-enrollment under another ref, since the name is bound to its ref for the life of the org', async () => {
+    const before = await head();
+    const { f, running, code } = await enrolling('m1', ['--replace', '--yes']);
+    await enrollV2(code, 'm1');
+    expect(await running).toBe(1);
+    expect(f.err.join('\n')).toMatch(/m1 is bound to ref .* for the life of the org, and this machine posted ref .*: nothing was signed/);
+    expect((await head()).state.version).toBe(before.state.version);
+  });
+
+  it('holds the anchor\'s lock for its signing alone: a refresh during its wait signs, and it signs next on the head it reads again', async () => {
+    const before = await head();
+    const { f, running, code } = await enrolling('m4');
+    const refreshed = fake();
+    expect(await runAdmin(['refresh', ...asLocal()], refreshed.io)).toBe(0);
+    expect(refreshed.out.at(-1)).toBe(`refreshed: version ${before.state.version + 1} (no change)`);
+    await enrollV2(code, 'm4');
+    expect(await running).toBe(0);
+    expect(f.out.at(-1)).toBe(`listed: version ${before.state.version + 2}`);
+    const { chain } = await served();
+    expect(chain.slice(-3).map((s) => s.state.version)).toEqual([before.state.version, before.state.version + 1, before.state.version + 2]);
+    expect(chain.at(-1)!.state.prev).toBe(await stateHash(chain.at(-2)!.state));
+    expect(anchor()).toMatchObject({ version: before.state.version + 2 });
+    expect(anchor().pending).toBeUndefined();
+  });
+
+  it('serializes two signers started at once: the second is refused, naming the first, with nothing signed', async () => {
+    const before = await head();
+    const [a, b] = [fake(), fake()];
+    const codes = await Promise.all([runAdmin(['refresh', ...asLocal()], a.io), runAdmin(['refresh', ...asLocal()], b.io)]);
+    expect(codes.sort()).toEqual([0, 1]);
+    expect([...a.err, ...b.err].join('\n')).toMatch(/another run holds .*keys\.json\.org\.json\.lock/);
+    expect((await head()).state.version).toBe(before.state.version + 1);
+  });
+
+  let delegation: ProvisioningCodeV2;
+
+  it('creates a delegation: confirmed first, the provisioning key minted, the delegation signed in, the code on stdout alone', async () => {
+    const before = await head();
+    const keysBefore = ((await hub.fetchAs(ADMIN, '/api/provisioning-keys').then((r) => r.json())) as { keys: ProvisioningKeyRecord[] }).keys.length;
+    const f = fake();
+    expect(await runAdmin(['delegation', 'create', '--label', 'devcloud', '--prefix', 'vm-', '--code-to-stdout', ...asLocal('--yes')], f.io)).toBe(0);
+    expect(f.out).toEqual([]);
+    expect(f.stdout).toHaveLength(1);
+    expect(f.stdout[0]).toMatch(/^smns-provision-v2\.[A-Za-z0-9_-]+\n$/);
+    delegation = decodeProvisioningCodeV2(f.stdout[0].trim());
+    secrets.add(f.stdout[0].trim());
+    secrets.add(delegation.token);
+    secrets.add(delegation.delegation.privateJwk.d!);
+    expect(f.err).toContain('delegate vm- for 7776000 s? [y/N] yes (--yes)');
+    const after = await head();
+    expect(after.state.version).toBe(before.state.version + 1);
+    const pub = (await importSigningKey(delegation.delegation.privateJwk)).pub;
+    expect(after.state.delegations).toEqual([expect.objectContaining({ id: delegation.delegation.id, prefix: 'vm-', pub, owners: [member] })]);
+    expect(delegation).toEqual({ hub: hub.url, org: ORG, roots: after.state.root.keys, recoveryPub: after.state.root.recoveryPub, token: expect.any(String), delegation: { id: expect.stringMatching(/^[0-9a-f]{32}$/), prefix: 'vm-', privateJwk: expect.any(Object) } });
+    const listed = ((await hub.fetchAs(ADMIN, '/api/provisioning-keys').then((r) => r.json())) as { keys: ProvisioningKeyRecord[] }).keys;
+    expect(listed).toHaveLength(keysBefore + 1);
+    expect(listed.find((k) => k.id === delegation.delegation.id)?.delegation).toEqual({ pub, owners: [member] });
+  });
+
+  it('refuses a stdout that is a terminal, and a prefix the head already holds or nests, before anything is minted', async () => {
+    const count = async () => ((await hub.fetchAs(ADMIN, '/api/provisioning-keys').then((r) => r.json())) as { keys: ProvisioningKeyRecord[] }).keys.length;
+    const before = await count();
+    const version = (await head()).state.version;
+    const terminal = fake([], { stdoutIsTerminal: true });
+    expect(await runAdmin(['delegation', 'create', '--label', 'x', '--prefix', 'dc-', '--code-to-stdout', ...asLocal('--yes')], terminal.io)).toBe(1);
+    expect(terminal.err.join('\n')).toMatch(/stdout is a terminal: the code goes only to a pipe \(into Secret Manager\)/);
+    const unnamed = fake();
+    expect(await runAdmin(['delegation', 'create', '--label', 'x', '--prefix', 'dc-', ...asLocal('--yes')], unnamed.io)).toBe(1);
+    expect(unnamed.err.join('\n')).toMatch(/--code-to-stdout/);
+    for (const [prefix, why] of [
+      ['vm-', /the prefix vm- is delegation .*'s/],
+      ['vm-a', /the prefix vm-a nests with delegation .*'s vm-/],
+      ['v', /the prefix v nests with delegation .*'s vm-/],
+      ['m', /the machine m1 is named under the prefix m/],
+    ] as const) {
+      const f = fake();
+      expect(await runAdmin(['delegation', 'create', '--label', 'x', '--prefix', prefix, '--code-to-stdout', ...asLocal('--yes')], f.io), prefix).toBe(1);
+      expect(f.err.join('\n'), prefix).toMatch(why);
+      expect(f.stdout).toEqual([]);
+    }
+    expect(await count()).toBe(before);
+    expect((await head()).state.version).toBe(version);
+  });
+
+  let legacyKey: string;
+  let legacyDelegation: ProvisioningCodeV2;
+
+  it('copies the org key from a v1 provisioning code on stdin into the code\'s legacy, and from nothing else', async () => {
+    legacyKey = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
+    secrets.add(legacyKey);
+    const v1 = encodeProvisioningCode({ hub: hub.url, org: ORG, token: 'v1-provisioning-secret', prefix: 'old-', key: legacyKey });
+    secrets.add(v1);
+    const f = fake([], { stdin: `${v1}\n` });
+    expect(await runAdmin(['delegation', 'create', '--label', 'legacy', '--prefix', 'lg-', '--code-to-stdout', '--legacy-from-v1-code', '--ttl', '3600', '--max-uses', '5', ...asLocal('--yes')], f.io)).toBe(0);
+    legacyDelegation = decodeProvisioningCodeV2(f.stdout[0].trim());
+    secrets.add(f.stdout[0].trim());
+    secrets.add(legacyDelegation.token);
+    secrets.add(legacyDelegation.delegation.privateJwk.d!);
+    expect(legacyDelegation.legacy).toEqual({ org: ORG, key: legacyKey });
+    expect(f.err).toContain('delegate lg- for 3600 s? [y/N] yes (--yes)');
+    expect((await head()).state.delegations.find((d) => d.prefix === 'lg-')).toMatchObject({ maxUses: 5 });
+
+    const other = fake([], { stdin: encodeProvisioningCode({ hub: 'https://elsewhere.example', org: ORG, token: 't', prefix: 'old-', key: legacyKey }) });
+    expect(await runAdmin(['delegation', 'create', '--label', 'x', '--prefix', 'lh-', '--code-to-stdout', '--legacy-from-v1-code', ...asLocal('--yes')], other.io)).toBe(1);
+    expect(other.err.join('\n')).toMatch(/the v1 code is for https:\/\/elsewhere\.example, not /);
+    const none = fake([], { stdin: 'not a code' });
+    expect(await runAdmin(['delegation', 'create', '--label', 'x', '--prefix', 'lh-', '--code-to-stdout', '--legacy-from-v1-code', ...asLocal('--yes')], none.io)).toBe(1);
+    expect(none.err.join('\n')).toMatch(/stdin holds no v1 provisioning code/);
+  });
+
+  let vm: Awaited<ReturnType<typeof enrollDelegated>>;
+
+  it('makes a code a VM certifies itself with: its token redeems under the prefix and its key signs a certificate the hub keeps', async () => {
+    const key = { id: delegation.delegation.id, key: await importSigningKey(delegation.delegation.privateJwk) };
+    vm = await enrollDelegated(hub.url, delegation.token, 'vm-x1', key);
+    expect((await served()).certificates.certs.map((c) => c.body.name)).toEqual(['vm-x1']);
+  });
+
+  it('drops a certificate machine: its key retired with its ref as holder, its row deleted, so a recreated VM takes the name', async () => {
+    const f = fake();
+    expect(await runAdmin(['machine', 'drop', 'vm-x1', ...asLocal('--yes')], f.io)).toBe(0);
+    const kid = await keyId(vm.key.pub);
+    expect(f.out).toContain(`drop vm-x1 (a certificate of delegation ${delegation.delegation.id}, ref ${vm.ref}, key ${kid}: retired)? [y/N] yes (--yes)`);
+    const after = await head();
+    expect(after.state.retired).toContainEqual({ keyId: kid, pub: vm.key.pub, notAfter: expect.any(String), holder: { machine: vm.ref } });
+    expect((await hubRows()).map((m) => m.name)).not.toContain('vm-x1');
+    const key = { id: delegation.delegation.id, key: await importSigningKey(delegation.delegation.privateJwk) };
+    const recreated = await enrollDelegated(hub.url, delegation.token, 'vm-x1', key);
+    expect(recreated.ref).not.toBe(vm.ref);
+  });
+
+  it('drops an attended machine: its key retired (or with --revoke revoked) and its row deleted', async () => {
+    const f = fake();
+    expect(await runAdmin(['machine', 'drop', 'm1', ...asLocal('--yes')], f.io)).toBe(0);
+    const after = await head();
+    expect(after.state.machines.map((m) => m.name)).toEqual(['m4']);
+    expect(after.state.retired).toContainEqual({ keyId: await keyId(m1.key.pub), pub: m1.key.pub, notAfter: expect.any(String), holder: { machine: m1.ref } });
+    expect((await hubRows()).map((m) => m.name)).not.toContain('m1');
+
+    const revoked = fake();
+    const m4 = after.state.machines[0];
+    expect(await runAdmin(['machine', 'drop', 'M4', '--revoke', ...asLocal('--yes')], revoked.io)).toBe(0);
+    const next = await head();
+    expect(next.state.machines).toEqual([]);
+    expect(next.state.revoked).toContainEqual({ keyId: await keyId(m4.pub), holder: { machine: m4.ref } });
+    expect((await hubRows()).map((m) => m.name)).not.toContain('m4');
+  });
+
+  it('drops a phase-1 row with the DELETE alone, signing nothing; and refuses a name nothing holds', async () => {
+    await enrollV1(hub, ADMIN, 'old-mac');
+    const version = (await head()).state.version;
+    const f = fake();
+    expect(await runAdmin(['machine', 'drop', 'old-mac', ...asLocal('--yes')], f.io)).toBe(0);
+    expect(f.out).toContain('drop old-mac (a hub row with no key in the head: deleted)? [y/N] yes (--yes)');
+    expect((await head()).state.version).toBe(version);
+    expect((await hubRows()).map((m) => m.name)).not.toContain('old-mac');
+    const none = fake();
+    expect(await runAdmin(['machine', 'drop', 'nothing-here', ...asLocal('--yes')], none.io)).toBe(1);
+    expect(none.err.join('\n')).toMatch(/nothing is named nothing-here: not in the head, no live certificate, no hub row/);
+  });
+
+  it('revokes a phase-1 provisioning key, and refuses a live delegation\'s', async () => {
+    const v1 = await provisioningKey(hub, ADMIN, { label: 'phase 1', prefix: 'old-' });
+    const f = fake();
+    expect(await runAdmin(['provisioning', 'revoke', v1.id, ...asLocal('--yes')], f.io)).toBe(0);
+    expect(f.out.at(-1)).toBe(`revoked: provisioning key ${v1.id}`);
+    const listed = ((await hub.fetchAs(ADMIN, '/api/provisioning-keys').then((r) => r.json())) as { keys: ProvisioningKeyRecord[] }).keys;
+    expect(listed.find((k) => k.id === v1.id)?.revoked).toEqual(expect.any(String));
+    const live = fake();
+    expect(await runAdmin(['provisioning', 'revoke', delegation.delegation.id, ...asLocal('--yes')], live.io)).toBe(1);
+    expect(live.err.join('\n')).toMatch(/is delegation vm-'s: delegation drop .* revokes it with the delegation/);
+  });
+
+  it('shows the machines as tables: an attended machine listed, a certificate machine certified, a retired one with its notAfter, and the delegations', async () => {
+    const { running, code } = await enrolling('m5');
+    const m5 = await enrollV2(code, 'm5');
+    expect(await running).toBe(0);
+    const f = fake();
+    expect(await runAdmin(['show', ...asLocal()], f.io)).toBe(0);
+    const text = f.out.join('\n');
+    expect(text).toMatch(/^NAME +STATE +REF +KEY +ONLINE +SEEN$/m);
+    expect(text).toMatch(new RegExp(`^m5 +listed +${m5.ref} +${await keyId(m5.key.pub)} +- +-$`, 'm'));
+    expect(text).toMatch(/^m2 +unlisted +[^ ]+ +[^ ]+ +- +-$/m);
+    expect(text).toMatch(new RegExp(`^vm-x1 +retired ${'\\d{4}-[^ ]+'} +${vm.ref} +${await keyId(vm.key.pub)} +- +-$`, 'm'));
+    expect(text).toMatch(/^vm-x1 +certified +[^ ]+_[^ ]+ +[^ ]+ +- +-$/m);
+    expect(text).toMatch(new RegExp(`^delegation ${delegation.delegation.id} prefix vm- expires [^ ]+ owners ${member}$`, 'm'));
+    expect(text).toMatch(/ prefix lg- expires [^ ]+ max-uses 5 owners /);
+  });
+
+  it('drops a delegation: its key revoked by its id and prefix, its certificates\' retirements moved to revoked, its key at the hub revoked', async () => {
+    const f = fake();
+    const id = delegation.delegation.id;
+    expect(await runAdmin(['delegation', 'drop', id, ...asLocal('--yes')], f.io)).toBe(0);
+    expect(f.out).toContain(`drop ${id} (its prefix vm- stays reserved)? [y/N] yes (--yes)`);
+    const after = await head();
+    const pub = (await importSigningKey(delegation.delegation.privateJwk)).pub;
+    expect(after.state.delegations.map((d) => d.prefix)).toEqual(['lg-']);
+    expect(after.state.revoked).toContainEqual({ keyId: await keyId(pub), holder: { delegation: id, prefix: 'vm-' } });
+    expect(after.state.retired.some((r) => 'machine' in r.holder && r.holder.machine.startsWith(`${id}_`))).toBe(false);
+    expect(after.state.revoked).toContainEqual({ keyId: await keyId(vm.key.pub), holder: { machine: vm.ref } });
+    const listed = ((await hub.fetchAs(ADMIN, '/api/provisioning-keys').then((r) => r.json())) as { keys: ProvisioningKeyRecord[] }).keys;
+    expect(listed.find((k) => k.id === id)?.revoked).toEqual(expect.any(String));
+    // Its prefix stays reserved: a new delegation under it is refused before anything is minted.
+    const again = fake();
+    expect(await runAdmin(['delegation', 'create', '--label', 'x', '--prefix', 'vm-', '--code-to-stdout', ...asLocal('--yes')], again.io)).toBe(1);
+    expect(again.err.join('\n')).toMatch(/the prefix vm- is the dropped delegation .*'s, reserved for the life of the org/);
+  });
+
+  describe('a pending proposal', () => {
+    /** A signed successor of the hub's head, written into the anchor as pending as if its POST had failed. */
+    async function pendingOf(edit: Parameters<typeof successor>[1] = () => {}) {
+      const admin = await readAdminKeys(keys);
+      const proposal = await signOrgState(await successor((await head()).state, edit), [admin.stepUp]);
+      writeFileSync(anchorFile(keys), JSON.stringify({ ...anchor(), pending: proposal }), { mode: 0o600 });
+      return proposal;
+    }
+
+    it('is settled by any verb first, O14\'s included', async () => {
+      const proposal = await pendingOf();
+      const f = fake();
+      expect(await runAdmin(['show', ...asLocal()], f.io)).toBe(0);
+      expect(f.out).toContain(`pending version ${proposal.state.version} is not at the hub: sent again`);
+      expect(anchor().pending).toBeUndefined();
+      expect((await head()).state.version).toBe(proposal.state.version);
+    });
+
+    it('is abandoned only on the owner\'s word, after it says the consequence; declined, it stays', async () => {
+      const nothing = fake();
+      expect(await runAdmin(['abandon-pending', ...asLocal()], nothing.io)).toBe(0);
+      expect(nothing.out.at(-1)).toBe('nothing pending');
+
+      const proposal = await pendingOf((s) => void s.projects.push({ id: 'p-refused', name: 'refused' }));
+      const hash = await stateHash(proposal.state);
+      const declined = fake(['n']);
+      expect(await runAdmin(['abandon-pending', ...asLocal()], declined.io)).toBe(1);
+      expect(declined.term.join('')).toMatch(new RegExp(`abandon version ${proposal.state.version} ${hash}\\? A later verb may sign another successor of version ${proposal.state.version - 1}`));
+      expect(canonicalOf(anchor().pending)).toBe(canonicalOf(proposal));
+
+      const f = fake(['y']);
+      expect(await runAdmin(['abandon-pending', ...asLocal()], f.io)).toBe(0);
+      expect(f.out).toContain(`the hub's head is version ${proposal.state.version - 1}; pending version ${proposal.state.version} ${hash} is not at the hub`);
+      expect(f.out.at(-1)).toBe(`abandoned: version ${proposal.state.version} ${hash}`);
+      expect(anchor().pending).toBeUndefined();
+      // The next verb signs a successor of the same parent, as the owner chose.
+      const refreshed = fake();
+      expect(await runAdmin(['refresh', ...asLocal()], refreshed.io)).toBe(0);
+      expect((await head()).state.version).toBe(proposal.state.version);
+      expect((await head()).state.projects).toEqual([]);
+    });
+
+    it('is not abandoned when the hub holds it: the next run adopts it', async () => {
+      const proposal = await pendingOf();
+      expect((await hub.fetchAs(ADMIN, '/api/org/state', { body: proposal })).status).toBe(201);
+      const f = fake(['y']);
+      expect(await runAdmin(['abandon-pending', ...asLocal()], f.io)).toBe(1);
+      expect(f.err.join('\n')).toMatch(new RegExp(`the hub holds pending version ${proposal.state.version}: the next run adopts it; nothing was abandoned`));
+      expect(canonicalOf(anchor().pending)).toBe(canonicalOf(proposal));
+      expect(await runAdmin(['show', ...asLocal()], fake().io)).toBe(0);
+      expect(anchor().pending).toBeUndefined();
+    });
+  });
+
+  it('refuses every hub-touching verb with no anchor, a chain of another genesis, or a head older than the anchor has seen', async () => {
+    const verbs = [['show'], ['enroll', 'mx'], ['delegation', 'create', '--label', 'x', '--prefix', 'zz-', '--code-to-stdout'], ['delegation', 'drop', 'f'.repeat(32)], ['machine', 'drop', 'mx'], ['provisioning', 'revoke', 'f'.repeat(32)], ['abandon-pending']];
+    const unanchored = join(dir('unanchored'), 'keys.json');
+    for (const verb of verbs) {
+      const f = fake();
+      expect(await runAdmin([...verb, '--hub', hub.url, '--user', ADMIN, '--keys', unanchored, '--yes'], f.io), verb.join(' ')).toBe(1);
+      expect(f.err.join('\n'), verb.join(' ')).toMatch(/no anchor: run genesis or adopt/);
+    }
+    const held = readFileSync(anchorFile(keys), 'utf8');
+    try {
+      for (const [change, why] of [
+        [{ version: 999 }, /older than the version 999 this device has seen/],
+        [{ genesis: 'x'.repeat(43) }, /not the anchor's x{43}: not this org's chain/],
+      ] as const) {
+        writeFileSync(anchorFile(keys), JSON.stringify({ ...JSON.parse(held), ...change }));
+        for (const verb of verbs) {
+          const f = fake();
+          expect(await runAdmin([...verb, ...asLocal('--yes')], f.io), verb.join(' ')).toBe(1);
+          expect(f.err.join('\n'), verb.join(' ')).toMatch(why);
+          expect(f.term, verb.join(' ')).toEqual([]);
+          expect(f.stdout, verb.join(' ')).toEqual([]);
+        }
+      }
+    } finally {
+      writeFileSync(anchorFile(keys), held);
+    }
+  });
+
+  it('prints nothing shaped like a key, a token or a code on any verb\'s stdout or stderr, but the two secret stdouts', () => {
+    expect(secrets.size).toBeGreaterThan(10);
+    const shaped = /smns-(enroll|provision|pair)-v\d\.|eyJ|"d"\s*:/;
+    for (const f of fakes) {
+      const printed = [...f.out, ...f.err].join('\n');
+      expect(printed).not.toMatch(shaped);
+      for (const secret of secrets) expect(printed).not.toContain(secret);
+    }
+  });
+});
+
+const canonicalOf = (value: unknown) => canonicalize(value);
+
+describe('the local transforms', () => {
+  // No keys, no anchor, no credential and no hub: not even --keys is needed.
+  const sample = async (legacy = true): Promise<ProvisioningCodeV2> => {
+    const key = await generateSigningKey(true);
+    const jwk = (await crypto.subtle.exportKey('jwk', key.privateKey)) as JsonWebKey;
+    return {
+      hub: 'https://desk-hub.example',
+      org: 'org-x',
+      roots: [base64urlEncode(crypto.getRandomValues(new Uint8Array(16)))],
+      recoveryPub: (await generateSigningKey()).pub,
+      token: base64urlEncode(crypto.getRandomValues(new Uint8Array(32))),
+      delegation: { id: 'a'.repeat(32), prefix: 'dc-', privateJwk: { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y, d: jwk.d } },
+      ...(legacy ? { legacy: { org: 'org-x', key: base64urlEncode(crypto.getRandomValues(new Uint8Array(32))) } } : {}),
+    };
+  };
+
+  it('inspects a code: its fields, every key and token elided', async () => {
+    const code = await sample();
+    const text = encodeProvisioningCodeV2(code);
+    const f = fake([], { stdin: `${text}\n`, secrets: async () => expect.unreachable('no credential is read') as never });
+    expect(await runAdmin(['code', 'inspect'], f.io)).toBe(0);
+    expect(f.out).toEqual([
+      'smns-provision-v2 code',
+      `hub ${code.hub}`,
+      `org ${code.org}`,
+      `roots ${code.roots.join(', ')}`,
+      `recoveryPub ${code.recoveryPub}`,
+      'token (elided)',
+      `delegation ${code.delegation.id} prefix dc- privateJwk (elided)`,
+      'legacy org org-x key (elided)',
+    ]);
+    for (const secret of [text, code.token, code.delegation.privateJwk.d!, code.legacy!.key]) expect([...f.out, ...f.err].join('\n')).not.toContain(secret);
+    const without = fake([], { stdin: encodeProvisioningCodeV2(await sample(false)) });
+    expect(await runAdmin(['code', 'inspect'], without.io)).toBe(0);
+    expect(without.out.at(-1)).toBe('legacy none');
+    for (const [stdin, why] of [['smns-provision-v1.e30', /not smns-provision-v2/], ['smns-provision-v2.!!', /damaged/], [encodeV2Raw({ ...code, token: undefined }), /no token/], [encodeV2Raw({ ...code, extra: 1 }), /bad extra/]] as const) {
+      const bad = fake([], { stdin });
+      expect(await runAdmin(['code', 'inspect'], bad.io)).toBe(1);
+      expect(bad.err.join('\n')).toMatch(why);
+    }
+  });
+
+  it('strips the legacy field and nothing else, to a pipe alone', async () => {
+    const code = await sample();
+    const f = fake([], { stdin: `${encodeProvisioningCodeV2(code)}\n` });
+    expect(await runAdmin(['code', 'strip-legacy'], f.io)).toBe(0);
+    expect(f.out).toEqual([]);
+    expect(f.stdout).toHaveLength(1);
+    const { legacy, ...rest } = code;
+    expect(legacy).toBeDefined();
+    expect(decodeProvisioningCodeV2(f.stdout[0].trim())).toEqual(rest);
+    expect(f.err).toEqual(['strip-legacy: the legacy field is dropped']);
+    const terminal = fake([], { stdin: encodeProvisioningCodeV2(code), stdoutIsTerminal: true });
+    expect(await runAdmin(['code', 'strip-legacy'], terminal.io)).toBe(1);
+    expect(terminal.err.join('\n')).toMatch(/stdout is a terminal/);
+    expect(terminal.stdout).toEqual([]);
+  });
+});
+
+/** A code's text around any object, unchecked: what a damaged or forged code could hold. */
+const encodeV2Raw = (value: unknown) => `smns-provision-v2.${base64urlEncode(new TextEncoder().encode(JSON.stringify(value)))}`;
+
+describe('against a deployment', () => {
+  /** A deployment's config naming a host no request can reach (`.invalid`). */
+  function unreachableConfig(): string {
+    const file = join(dir('config'), 'config.json');
+    writeFileSync(file, JSON.stringify({ account: 'acct', worker: 'admin-test', host: 'admin-test.example.invalid', ownerEmail: ADMIN, sessionDuration: '720h', org: { id: 'admin-test', name: 'admin test' } }));
+    return file;
+  }
+  /** The command as the owner's shell runs it, but with no controlling terminal (a new session), as an agent's has none. */
+  const detached = (args: string[]) =>
+    new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+      const child = spawn(process.execPath, ['--experimental-strip-types', '--disable-warning=ExperimentalWarning', BIN, 'admin', ...args], {
+        cwd: APP,
+        detached: true,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env, DESK_ADMIN_KEYS: '', DESK_ACCESS_TOKEN: 'eyJ.not-a-token' },
+      });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (chunk) => (stdout += String(chunk)));
+      child.stderr.on('data', (chunk) => (stderr += String(chunk)));
+      child.stdin.end('');
+      const timer = setTimeout(() => (child.kill('SIGKILL'), reject(new Error(`admin ${args[0]} still running after 60 s`))), 60_000);
+      child.on('close', (code) => (clearTimeout(timer), resolve({ code, stdout, stderr })));
+    });
+
+  it('stops every verb that signs, posts or deletes at /dev/tty when the shell has none, before any request', async () => {
+    const config = unreachableConfig();
+    const keys = join(dir('keys'), 'keys.json');
+    const verbs = [
+      ['enroll', 'mx'],
+      ['delegation', 'create', '--label', 'devcloud', '--prefix', 'dc-', '--code-to-stdout'],
+      ['delegation', 'drop', 'f'.repeat(32)],
+      ['machine', 'drop', 'mx'],
+      ['provisioning', 'revoke', 'f'.repeat(32)],
+      ['abandon-pending'],
+    ];
+    const runs = await Promise.all(verbs.map((verb) => detached([...verb, '--config', config, '--keys', keys])));
+    runs.forEach((run, i) => {
+      expect(run.code, verbs[i].join(' ')).toBe(1);
+      expect(run.stderr, verbs[i].join(' ')).toMatch(/cannot open \/dev\/tty \(Device not configured: no controlling terminal\): .* asks the owner there before it signs anything; nothing was sent/);
+      expect(run.stdout, verbs[i].join(' ')).toBe('');
+    });
+  }, 120_000);
+});
