@@ -499,7 +499,7 @@ describe('registration', () => {
     await session.loaded;
     const code = await pairing();
     session.register(code.text);
-    await until(() => hub.pending.length === 1, 'the entry posted');
+    await until(() => hub.pending.length === 1 && session.status().state === 'registering' && (session.status() as { step: string }).step === 'approval', 'the wait for approval');
     session.cancel();
     expect(session.status()).toEqual({ state: 'none' });
     await hub.approve(code.k);
