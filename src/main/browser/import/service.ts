@@ -29,8 +29,8 @@ import {
 } from '@shared/browser/import';
 import { partitionDirName, type ImportedBookmarks, type ImportedProfile, type ProfileAvatar } from '@shared/browser/profiles';
 import { profilePartition } from '@shared/browser/tab';
-import type { BrowserBookmarksStore } from '../../index/browser-bookmarks';
-import type { BrowserHistoryStore } from '../../index/browser-history';
+import type { BrowserBookmarksStore } from '../data/bookmarks';
+import type { BrowserHistoryStore } from '../data/history';
 import type { Partitions } from '../partition';
 import type { BrowserEmit } from '../tabs';
 import { AVATAR_FILE, avatarPng, readChromePicture, type AvatarImage, type PictureRead } from './avatar';

@@ -113,9 +113,9 @@ function fakeIndex(known: string[], unavailable: string | null = null) {
   const listeners = new Set<(record: { appId: AppSessionId }, cause: string) => void>();
   const index = {
     unavailable,
-    browserHistory: { visit: () => {}, setTitle: () => {}, suggest: () => [] },
     sessions: {
       get: (id: AppSessionId) => (known.includes(id) ? { appId: id } : null),
+      appIds: () => [...known],
       onChange: (listener: (record: { appId: AppSessionId }, cause: string) => void) => {
         listeners.add(listener);
         return () => void listeners.delete(listener);
@@ -126,8 +126,19 @@ function fakeIndex(known: string[], unavailable: string | null = null) {
   return { index: index as never, change, listeners };
 }
 
+// P5 O3-A: the browser's data as startBrowser tells it the spine's sessions (its stores unused here)
+function fakeData() {
+  const told: unknown[][] = [];
+  const data = {
+    history: { visit: () => {}, setTitle: () => {}, suggest: () => [] },
+    reattach: (sessions: Iterable<string> | null) => void told.push(['reattach', sessions === null ? null : [...sessions]]),
+    sessionChanged: (appSessionId: string, removed: boolean) => void told.push(['changed', appSessionId, removed]),
+  };
+  return { data: data as never, told };
+}
+
 function start(index: never, more: Partial<Parameters<typeof startBrowser>[0]> = {}) {
-  return startBrowser({ userData, settings: () => SETTINGS_DEFAULTS_V21.browser, index, register: () => {}, emit: () => {}, env: {}, ...more });
+  return startBrowser({ userData, settings: () => SETTINGS_DEFAULTS_V21.browser, index, data: fakeData().data, register: () => {}, emit: () => {}, env: {}, ...more });
 }
 
 describe('startBrowser (E4a Design §2, G4)', () => {
@@ -191,6 +202,20 @@ describe('startBrowser (E4a Design §2, G4)', () => {
     const browser = start(fakeIndex([], 'newer').index);
     expect(browser.store.list().tabs).toHaveLength(1);
     browser.stop();
+  });
+
+  // P5 O3-A (the O3 document §4): the snapshot at start, taken with the change listener in place, then every change
+  it('tells the browser\'s data the spine\'s sessions at start and each change to them; an unavailable index, none', () => {
+    const { index, change } = fakeIndex([A]);
+    const { data, told } = fakeData();
+    const browser = start(index, { data });
+    change(GONE, 'discovered');
+    change(A, 'removed');
+    expect(told).toEqual([['reattach', [A]], ['changed', GONE, false], ['changed', A, true]]);
+    browser.stop();
+    const unavailable = fakeData();
+    start(fakeIndex([A], 'newer').index, { data: unavailable.data }).stop();
+    expect(unavailable.told).toEqual([['reattach', null]]);
   });
 
   it('closes a session\'s tabs when its record is removed, and only then', () => {

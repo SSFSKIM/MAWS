@@ -1,9 +1,10 @@
 // An imported Chrome profile's bookmarks (cua board #90, the in-app browser's Chrome-like top chrome; its spec's
 // Interfaces "Bookmarks"): a read-only mirror of the profile's `Bookmarks` file, its three roots as Chrome shows them
 // (the bookmarks bar, "Other bookmarks", "Mobile bookmarks", which Chrome's file calls `bookmark_bar`, `other` and
-// `synced`), kept per partition in the index (migration 7) and re-read whenever the partition comes up and on demand.
-// A node's `id` is the index row's, stable only until the next sync replaces the partition's rows: the renderer never
-// keys on one across syncs. Only http(s) URLs are kept (the rule `validateBrowserUrl` applies to every tab path).
+// `synced`), kept per partition in the browser's database (the index's migration 7 until P5 O3-A) and re-read whenever
+// the partition comes up and on demand. A node's `id` is its row's, stable only until the next sync replaces the
+// partition's rows: the renderer never keys on one across syncs. Only http(s) URLs are kept (the rule
+// `validateBrowserUrl` applies to every tab path).
 import * as z from 'zod';
 import { IMPORT_TEXT_MAX } from './import';
 import { validateBrowserUrl } from './url';
