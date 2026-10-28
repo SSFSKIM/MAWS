@@ -11,7 +11,7 @@ import { FakeRenderer } from './renderer.fake';
 import type { TerminalTheme } from './renderer';
 import { TerminalRegistry, type Adopting } from './registry';
 import { alignReplay, explicitModes, INITIAL_STREAM } from './replay';
-import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
 
 const A = 'session-a' as AppSessionId;
 const KiB = 1024;
@@ -716,16 +716,16 @@ describe('terminal key filter', () => {
   it('reads effective application bindings on each key, without sending them to xterm or dispatching them twice', async () => {
     const previous = useSettings.getState().state;
     try {
-      useSettings.setState({ state: { settings: SETTINGS_DEFAULTS_V18, resolvedTheme: 'light' } });
+      useSettings.setState({ state: { settings: SETTINGS_DEFAULTS_V19, resolvedTheme: 'light' } });
       const registry = makeRegistry();
       const { renderer } = await openRunning(registry);
       expect(renderer.key('keydown', { key: 'F6', code: 'F6' })).toBe(false);
-      useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V18, keymap: { 'region.focusNext': 'F8' } }, resolvedTheme: 'light' } });
+      useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V19, keymap: { 'region.focusNext': 'F8' } }, resolvedTheme: 'light' } });
       expect(renderer.key('keydown', { key: 'F8', code: 'F8' })).toBe(false);
       expect(renderer.key('keyup', { key: 'F8', code: 'F8' })).toBe(false);
       expect(renderer.key('keydown', { key: 'F6', code: 'F6' })).toBe(true);
       expect(runAction).not.toHaveBeenCalled(); // the application menu alone owns these bindings
-      useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V18, keymap: { 'tab.next': 'F9', 'tab.previous': null } }, resolvedTheme: 'light' } });
+      useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V19, keymap: { 'tab.next': 'F9', 'tab.previous': null } }, resolvedTheme: 'light' } });
       expect(renderer.key('keydown', { key: 'Tab', code: 'Tab', ctrlKey: true })).toBe(true);
       expect(renderer.key('keydown', { key: 'Tab', code: 'Tab', ctrlKey: true, shiftKey: true })).toBe(true);
       expect(renderer.key('keydown', { key: 'F9', code: 'F9' })).toBe(false);
@@ -883,7 +883,7 @@ describe('terminal theme from tokens', () => {
     registry.unmount(hidden.id);
     expect(shown.renderer.options.theme.background).toBe('light-bg');
     currentTheme = theme('dark-bg');
-    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V18, theme: 'dark' }, resolvedTheme: 'dark' });
+    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V19, theme: 'dark' }, resolvedTheme: 'dark' });
     expect(shown.renderer.theme.background).toBe('dark-bg');
     expect(hidden.renderer.theme.background).toBe('dark-bg');
   });
@@ -919,7 +919,7 @@ describe('terminal font from the root --font-mono', () => {
     registry.unmount(hidden.id);
     const fit = vi.spyOn(shown.renderer, 'fit');
     currentFont = { ...MONO, family: '"MesloLGM Nerd Font Mono", "SF Mono", monospace' };
-    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V18, appearance: { ...SETTINGS_DEFAULTS_V18.appearance, monoFont: 'MesloLGM Nerd Font Mono' } }, resolvedTheme: 'light' });
+    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V19, appearance: { ...SETTINGS_DEFAULTS_V19.appearance, monoFont: 'MesloLGM Nerd Font Mono' } }, resolvedTheme: 'light' });
     expect(shown.renderer.font.family).toBe(currentFont.family);
     expect(hidden.renderer.font.family).toBe(currentFont.family);
     await vi.advanceTimersByTimeAsync(1_000);
@@ -953,7 +953,7 @@ describe('terminal font from the root --font-mono', () => {
     const id = registry.open({ appSessionId: A, label: 'second', cwd: '/tmp/a' });
     registry.mount(id, parent()); // its renderer is being created with the font of this moment
     currentFont = { ...MONO, family: '"Changed", monospace' };
-    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V18, appearance: { ...SETTINGS_DEFAULTS_V18.appearance, monoFont: 'Changed' } }, resolvedTheme: 'light' });
+    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V19, appearance: { ...SETTINGS_DEFAULTS_V19.appearance, monoFont: 'Changed' } }, resolvedTheme: 'light' });
     await settle();
     const renderer = registry.get(id)!.renderer as FakeRenderer;
     expect(renderer.options.font.family).toBe('mono');

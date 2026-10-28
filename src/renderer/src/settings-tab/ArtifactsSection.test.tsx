@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { MawsBridge, Settings } from '@shared/ipc/schema';
 import { ARTIFACT_KINDS } from '@shared/artifacts/entity';
 import type { LibraryRow, LibrarySpace } from '@shared/ipc/schema/library';
-import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
 import { resetLibrary } from '../library/store';
 import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
@@ -32,7 +32,7 @@ const space = (id: string, name: string): LibrarySpace => ({ id, name, createdAt
 let b: SettingsBridge;
 
 async function renderSection(artifacts: Settings['artifacts'], spaces: LibrarySpace[] = []) {
-  b = settingsBridge({ ...SETTINGS_DEFAULTS_V18, artifacts });
+  b = settingsBridge({ ...SETTINGS_DEFAULTS_V19, artifacts });
   b.answers['library.list'] = () => ({ rows: [system(MAWS, 'MAWS'), system(CLASSROOM, 'Classroom')], counts });
   b.answers['library.spaces'] = () => ({ spaces });
   window.maws = b.bridge;
@@ -58,7 +58,7 @@ describe('Settings › Artifacts', () => {
       available: true, dataDir: '/usage', readAt: '2026-10-23T12:00:00Z', error: null, drainTarget: 'routed', drainTargetIsManual: false, pinsFor: {}, gateway: null, codex: null, activity: null,
       accounts: [{ uuid: 'routed', email: 'not-the-author@example.test', displayName: 'Kim Min', planLabel: null, rateLimitTier: null, needsReauthentication: false, lastSeenActive: null, pinnedSessionCount: 0, credentialOwnership: null, windows: { fiveHour: null, sevenDay: null, scoped: [] } }],
     }) });
-    await renderSection(SETTINGS_DEFAULTS_V18.artifacts);
+    await renderSection(SETTINGS_DEFAULTS_V19.artifacts);
     const field = screen.getByRole('textbox', { name: 'Export author name' });
     expect((field as HTMLInputElement).value).toBe('');
     expect((field as HTMLInputElement).placeholder).toBe('Kim Min');
@@ -80,7 +80,7 @@ describe('Settings › Artifacts', () => {
   });
 
   it('shows the neutral fallback without an account and preserves a saved name', async () => {
-    await renderSection({ ...SETTINGS_DEFAULTS_V18.artifacts, exportAuthorName: 'Lee Sun' });
+    await renderSection({ ...SETTINGS_DEFAULTS_V19.artifacts, exportAuthorName: 'Lee Sun' });
     const field = screen.getByRole('textbox', { name: 'Export author name' }) as HTMLInputElement;
     expect(field.value).toBe('Lee Sun');
     expect(screen.getByRole('group', { name: 'Export author name' }).textContent).toContain('Comment author');

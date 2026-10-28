@@ -5,7 +5,7 @@ import { vi } from 'vitest';
 import { validateCommandInput } from '@shared/ipc/validate';
 import type { BinaryInfo } from '@shared/ipc/schema/engine';
 import type { CommandName, MawsBridge, Settings, SettingsPatch } from '@shared/ipc/schema';
-import { applySettingsPatch, SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
+import { applySettingsPatch, SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
 import { useSettings } from '../stores/settings';
 import { ARTIFACT_KINDS } from '@shared/artifacts/entity'; // P3-D
 
@@ -20,7 +20,7 @@ export interface SettingsBridge {
   answers: Record<string, (input: unknown) => unknown>; // command → the value it answers (throw to answer an error)
 }
 
-export function settingsBridge(initial: Settings = SETTINGS_DEFAULTS_V18): SettingsBridge {
+export function settingsBridge(initial: Settings = SETTINGS_DEFAULTS_V19): SettingsBridge {
   let settings = structuredClone(initial);
   const publish = () => useSettings.setState({ state: { settings, resolvedTheme: settings.theme === 'dark' ? 'dark' : 'light' } });
   publish();
