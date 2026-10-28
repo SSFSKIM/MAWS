@@ -3,8 +3,10 @@
 // `MAWS_DEV_ORG` (O7's development session, unpackaged builds only) there is no production session: the status says
 // `development`, from the development session's identity once it has loaded, and every act is refused `busy`.
 //
+// M2 adds `org.rows` (registerRowsHandler).
+//
 // Electron-free: main injects its `registerMainHandler` and `emit`.
-import type { OrgAttempt, OrgStatus } from '@shared/ipc/schema/org';
+import type { OrgAttempt, OrgRows, OrgStatus } from '@shared/ipc/schema/org';
 import type { MainHandler } from '../ipc/router';
 import type { OrgSessionService } from './org-session';
 import type { OrgSession } from './session';
@@ -41,4 +43,9 @@ export function registerOrgHandlers(deps: {
   deps.register('org.cancel', () => service.cancel());
   deps.register('org.signOut', () => service.signOut());
   return service.onStatus((status) => deps.emit('org.changed', status));
+}
+
+/** M2: `org.rows`, the remote rows main holds (rows.ts); `org.rows.changed` goes out from the rows source's own `emit`. */
+export function registerRowsHandler(deps: { register(name: 'org.rows', handler: MainHandler<'org.rows'>): void; rows: { rows(): OrgRows } }): void {
+  deps.register('org.rows', () => deps.rows.rows());
 }
