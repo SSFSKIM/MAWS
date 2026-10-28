@@ -8,8 +8,9 @@
 // is told of it, and adoptions run one at a time, each against the head the one before left.
 //
 // The certificates move without a state change (a delegated VM's certificate advances no version), so the store also
-// re-reads the state on demand (`refresh`), at most once a minute for each reason: a listing whose machine it cannot
-// resolve, a push landing, the cards view opening.
+// re-reads the state on demand (`refresh`), at most once a minute for each reason (a listing whose machine it cannot
+// resolve, a push landing, the cards view opening), counted from when the read finished; a second ask while one runs
+// shares it.
 //
 // Not followed here: a recovery transition that rewinds the head (`verifyRewind`). The phone then keeps its head and
 // refuses the rewound branch; it pairs again under the recovered org. `hashes` (each adopted version's state hash, kept
@@ -65,7 +66,9 @@ export class OrgStore implements OrgView {
   #record: OrgRecord | null = null;
   #queue: Promise<unknown> = Promise.resolve();
   readonly #listeners = new Set<(change: OrgChange) => void>();
+  /** When each reason's last re-read finished. */
   readonly #refreshed = new Map<string, number>();
+  readonly #refreshing = new Map<string, Promise<SyncResult>>();
 
   constructor(
     readonly org: string,
@@ -139,15 +142,21 @@ export class OrgStore implements OrgView {
   }
 
   /**
-   * Re-reads the state for `reason` (a machine ref, `landing`, `cards`) unless that reason did within the last minute:
-   * the certificates come with every read, whatever the version. Null when it did not run.
+   * Re-reads the state for `reason` (a machine ref, `landing`, `cards`) unless a read for it finished within the last
+   * minute: the certificates come with every read, whatever the version. A read for the reason still under way is
+   * shared, so every ask settles once it has. Null when none ran.
    */
-  async refresh(reason: string, pins: OrgPins): Promise<SyncResult | null> {
+  refresh(reason: string, pins: OrgPins): Promise<SyncResult | null> {
+    const running = this.#refreshing.get(reason);
+    if (running !== undefined) return running;
     const last = this.#refreshed.get(reason);
-    const now = this.#now();
-    if (last !== undefined && now - last < REFRESH_EVERY_MS) return null;
-    this.#refreshed.set(reason, now);
-    return this.sync(pins);
+    if (last !== undefined && this.#now() - last < REFRESH_EVERY_MS) return Promise.resolve(null);
+    const read = this.sync(pins).finally(() => {
+      this.#refreshing.delete(reason);
+      this.#refreshed.set(reason, this.#now());
+    });
+    this.#refreshing.set(reason, read);
+    return read;
   }
 
   /** Drops what the device kept of the org. */

@@ -372,8 +372,10 @@ test('a delegated VM certified with the version fixed: its listing resolved thro
   await endpoint.connect();
   await endpoint.project(PROJECT, 'cards-device');
   const posted = Date.now();
+  // Two of its sessions at once: both wait on the one re-read of its machine.
   endpoint.listing(await listing(vm, 'session-vm-1', 1, { owners: [member], project: PROJECT, lane: 'B', state: 'waiting', title: 'a permission on the VM' }));
-  await expect.poll(async () => (await readout(page)).listings.map((l) => l.session).sort(), { timeout: 5000, intervals: [100] }).toEqual(['session-mini-1', 'session-vm-1']);
+  endpoint.listing(await listing(vm, 'session-vm-2', 1, { owners: [member], project: PROJECT, lane: 'B', state: 'waiting', title: 'a question on the VM' }));
+  await expect.poll(async () => (await readout(page)).listings.map((l) => l.session).sort(), { timeout: 5000, intervals: [100] }).toEqual(['session-mini-1', 'session-vm-1', 'session-vm-2']);
   expect(Date.now() - posted).toBeLessThan(5000);
   expect((await readout(page)).version).toBe(withDelegation.state.version);
 });
@@ -406,3 +408,35 @@ test('Forget empties the store; the org state keeps the entry until the Mac remo
   await page.keyboard.press('Escape');
 });
 
+
+test('an older tab holding the database at version 1 blocks the upgrade: the page says so, and carries on once it closes', async ({ browser }) => {
+  const other = await browser.newContext();
+  try {
+    // A tab of the build before: the database at version 1, its connection held, no `versionchange` handler.
+    const old = await other.newPage();
+    await old.goto(`${hub.localhost}/api/me`);
+    await old.evaluate(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          const open = indexedDB.open('desk', 1);
+          open.onupgradeneeded = () => {
+            open.result.createObjectStore('org-keys');
+            open.result.createObjectStore('log');
+          };
+          open.onsuccess = () => ((window as unknown as { held: IDBDatabase }).held = open.result, resolve());
+          open.onerror = () => reject(open.error);
+        }),
+    );
+    const fresh = await other.newPage();
+    await fresh.goto(hub.localhost);
+    await expect(fresh.getByTestId('storage-blocked')).toContainText("Close the desk's other tabs");
+    await expect(fresh.getByTestId('key-state')).toBeDisabled(); // the org key waits on the database
+    await old.evaluate(() => (window as unknown as { held: IDBDatabase }).held.close());
+    await expect(fresh.getByTestId('storage-blocked')).toHaveCount(0);
+    await expect(fresh.getByTestId('key-state')).toBeEnabled();
+    const panel = await openDevicePanel(fresh);
+    await expect(panel.getByTestId('device-panel')).toHaveAttribute('data-state', 'none');
+  } finally {
+    await other.close();
+  }
+});

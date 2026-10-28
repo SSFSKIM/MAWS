@@ -19,6 +19,7 @@ import { followHistory, useDeskLayout } from './shell/layout';
 import { usePhoneProject } from './shell/phone';
 import { useNarrow } from './shell/viewport';
 import { startGrid, useGrid } from './state/grid';
+import { useDeskStorage } from './store/idb';
 import { SignInAgainButton } from './views/access/SignInAgain';
 import { GridView } from './views/grid/GridView';
 import { useSecondMethodPrompt } from './views/key/second-method';
@@ -104,6 +105,7 @@ function Desk({ me }: { me: Me }) {
   // The app icon's badge follows the grid while the app is open (a push sets it from its payload while it is not), so
   // a request answered anywhere clears it.
   const gridLoaded = useGrid((s) => s.loaded);
+  const storageBlocked = useDeskStorage((s) => s.blocked);
   const waiting = useGrid((s) => orgWaiting(s.projects));
   useEffect(() => {
     if (gridLoaded) void showBadge(navigator as Parameters<typeof showBadge>[0], waiting);
@@ -111,6 +113,11 @@ function Desk({ me }: { me: Me }) {
   return (
     <div className="grid h-full grid-rows-[auto_minmax(0,1fr)] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       <TopBar me={me} open={setPanel} />
+      {storageBlocked && (
+        <p className="fixed inset-x-0 top-[var(--toolbar-h)] z-40 m-0 border-b border-border bg-bg-raised px-4 py-2 text-ui-sm text-danger" role="alert" data-testid="storage-blocked">
+          Another desk tab is still open on an older version, and this one can't read its stored keys until it closes. Close the desk's other tabs (and its Home Screen app, if it's open), and this one carries on.
+        </p>
+      )}
       {route.view === 'grid' ? (
         <GridView onEnroll={() => setPanel('machines')} />
       ) : route.view === 'org' ? (

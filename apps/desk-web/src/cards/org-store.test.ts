@@ -152,3 +152,30 @@ it('loads what it adopted after a reload, and forgets it', async () => {
   expect(again.ready).toBe(false);
   expect(await persistence.load('org-store')).toBeNull();
 });
+
+it('shares a read still in flight with a second ask for the same reason, and holds off only once it finished', async () => {
+  const org = await rootedOrg('org-store');
+  const { hub, source } = fakeHub([org.genesis]);
+  let release!: () => void;
+  let gate: Promise<void> | null = null;
+  const gated: OrgSource = async (since) => {
+    if (gate) await gate;
+    return source(since);
+  };
+  let now = 1_000_000;
+  const store = new OrgStore('org-store', { persistence: memoryOrgPersistence(), source: gated, now: () => now });
+  await store.sync(org.pins);
+  gate = new Promise((resolve) => (release = resolve));
+  const first = store.refresh('vm-ref', org.pins);
+  const second = store.refresh('vm-ref', org.pins);
+  let secondDone = false;
+  void second.then(() => (secondDone = true));
+  await new Promise((r) => setTimeout(r, 10));
+  expect(secondDone).toBe(false); // not answered as if the read were done
+  now += REFRESH_EVERY_MS + 1; // the read takes long: its minute counts from when it finishes
+  release();
+  expect(await first).toEqual({ adopted: 0 });
+  expect(await second).toEqual({ adopted: 0 });
+  expect(hub.reads).toEqual([0, 1]);
+  expect(await store.refresh('vm-ref', org.pins)).toBeNull();
+});

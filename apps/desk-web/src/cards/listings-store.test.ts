@@ -153,3 +153,45 @@ describe("a listing whose machine isn't resolved", () => {
     expect(keys()).toEqual([`${mini.ref}/s1`]);
   });
 });
+
+describe('what a hostile hub can relay', () => {
+  it('cannot erase a session with a withdrawal its machine did not sign, nor hold its later updates back', async () => {
+    await store.listing(await listingOf(org.org, mini, 's1', 1));
+    const forger = { ref: mini.ref, key: await generateSigningKey() };
+    await store.listing(await listingOf(org.org, forger, 's1', 999, LISTING_GONE));
+    expect(keys()).toEqual([`${mini.ref}/s1`]);
+    await store.listing(await listingOf(org.org, forger, 's1', 998, 'working'));
+    expect(store.listings().get(`${mini.ref}/s1`)?.body.revision).toBe(1);
+    await store.listing(await listingOf(org.org, mini, 's1', 2, 'working'));
+    expect(store.listings().get(`${mini.ref}/s1`)?.body.fields.state).toBe('working');
+  });
+
+  it('withdraws a session only on its machine-signed withdrawal, and keeps it withdrawn through a snapshot', async () => {
+    await store.listing(await listingOf(org.org, mini, 's1', 1));
+    await store.listing(await listingOf(org.org, mini, 's1', 6, LISTING_GONE));
+    expect(keys()).toEqual([]);
+    store.opened();
+    await store.page([await listingOf(org.org, mini, 's1', 1)], true); // an old signed listing, served again
+    expect(keys()).toEqual([]);
+  });
+
+  it('cannot roll a session back to an older signed listing in a snapshot', async () => {
+    const old = await listingOf(org.org, mini, 's1', 1, 'idle');
+    await store.listing(old);
+    await store.listing(await listingOf(org.org, mini, 's1', 3, 'waiting'));
+    store.opened();
+    await store.page([old], true);
+    expect(store.listings().get(`${mini.ref}/s1`)?.body.revision).toBe(3);
+  });
+
+  it("drops from a snapshot what it no longer carries (a withdrawal while the socket was down), and an unverified one's revision doesn't count", async () => {
+    await store.listing(await listingOf(org.org, mini, 's1', 1));
+    await store.listing(await listingOf(org.org, mini, 's2', 1));
+    const forger = { ref: mini.ref, key: await generateSigningKey() };
+    store.opened();
+    await store.page([await listingOf(org.org, mini, 's2', 1), await listingOf(org.org, forger, 's3', 50)], true);
+    expect(keys()).toEqual([`${mini.ref}/s2`]);
+    await store.listing(await listingOf(org.org, mini, 's3', 1));
+    expect(keys().sort()).toEqual([`${mini.ref}/s2`, `${mini.ref}/s3`].sort());
+  });
+});

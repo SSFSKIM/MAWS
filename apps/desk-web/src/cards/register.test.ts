@@ -16,7 +16,7 @@ import {
   type Passkey,
   type SignedOrgState,
 } from 'org-protocol';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { create } from 'zustand';
 import type { OrgStateView, PendingDevice, PendingDeviceRequest } from 'desk-hub/protocol';
 import type { Me } from '../hub/me';
@@ -38,7 +38,15 @@ async function world() {
   let now = Date.parse('2026-10-28T09:00:00.000Z');
   const hub = {
     chain: [org.genesis] as SignedOrgState[],
-    orgState: async (since: number): Promise<OrgStateView> => ({ head: hub.chain.at(-1)!, transitions: [], certificates: { certs: [], retirements: [] }, chain: hub.chain.filter((s) => s.state.version > since) }),
+    /** Unreachable: every read fails. */
+    down: false,
+    /** A read waits on this, when set, and answers what the chain holds once it settles. */
+    gate: null as Promise<void> | null,
+    orgState: async (since: number): Promise<OrgStateView> => {
+      if (hub.down) throw new TypeError('Failed to fetch');
+      if (hub.gate) await hub.gate;
+      return { head: hub.chain.at(-1)!, transitions: [], certificates: { certs: [], retirements: [] }, chain: hub.chain.filter((s) => s.state.version > since) };
+    },
     postPending: async (request: PendingDeviceRequest): Promise<PendingDevice> => {
       posted.push(request);
       return { ...request, member: org.member, created: new Date(now).toISOString(), expires: new Date(now + TTL_MS).toISOString() };
@@ -174,6 +182,61 @@ describe('registration', () => {
     expect(again.state.kind).toBe('pending');
     expect(fresh.posted).toHaveLength(2);
     d.stop();
+    c.stop();
+  });
+});
+
+describe('a pending device with the hub out of reach', () => {
+  // The controller says each failed read on the console, as the app does.
+  beforeEach(() => void vi.spyOn(console, 'error').mockImplementation(() => {}));
+  afterEach(() => vi.restoreAllMocks());
+
+  it('expires at its TTL by the local clock, reading nothing from the hub', async () => {
+    const c = w.controller();
+    await c.load();
+    await c.register(w.text, w.me);
+    w.hub.down = true;
+    w.tick(TTL_MS);
+    await c.check();
+    expect(c.record!.state).toEqual({ kind: 'expired' });
+    expect((await w.store.load(w.org.org))?.state).toEqual({ kind: 'expired' });
+    expect(w.view.getState().record?.state).toEqual({ kind: 'expired' });
+    c.stop();
+  });
+
+  it('is loaded as expired when its TTL passed while the app was closed', async () => {
+    const c = w.controller();
+    await c.load();
+    await c.register(w.text, w.me);
+    c.stop();
+    w.hub.down = true;
+    w.tick(TTL_MS + 1000);
+    const again = w.controller();
+    await again.load();
+    expect(again.record!.state).toEqual({ kind: 'expired' });
+    expect(w.view.getState().record?.state).toEqual({ kind: 'expired' });
+    again.stop();
+  });
+});
+
+describe('Forget', () => {
+  it('wins over a read in flight: nothing it adopts after Forget writes the device again', async () => {
+    const c = w.controller();
+    await c.load();
+    await c.register(w.text, w.me);
+    await c.sync();
+    let release!: () => void;
+    w.hub.gate = new Promise((resolve) => (release = resolve));
+    await w.approve();
+    const reading = c.sync().catch(() => null);
+    await new Promise((r) => setTimeout(r, 10));
+    const forgetting = c.forget();
+    release();
+    await Promise.all([reading, forgetting]);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(await w.store.load(w.org.org)).toBeNull();
+    expect(c.record).toBeNull();
+    expect(w.view.getState()).toMatchObject({ loaded: true, record: null, fingerprint: null });
     c.stop();
   });
 });

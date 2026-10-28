@@ -95,6 +95,11 @@ export class DeviceController {
   #record: DeviceRecord | null = null;
   #poll: ReturnType<typeof setInterval> | null = null;
   #stopped = false;
+  /**
+   * Every change of the device's record runs here, one after the other: a judgement that began before Forget either
+   * wrote before Forget deleted, or finds no record once it runs, so nothing persists past Forget.
+   */
+  #writes: Promise<unknown> = Promise.resolve();
   readonly #off: () => void;
 
   constructor(private readonly deps: DeviceDeps) {
@@ -115,9 +120,12 @@ export class DeviceController {
 
   /** Reads what the device kept, and brings it up to date with the hub's state when there is a device. */
   async load(): Promise<void> {
-    this.#record = await this.deps.store.load(this.deps.org);
-    if (this.#record !== null) await this.deps.orgStore.load();
-    await this.#publish({ loaded: true });
+    await this.#serially(async () => {
+      this.#record = await this.deps.store.load(this.deps.org);
+      if (this.#record !== null) await this.deps.orgStore.load();
+    });
+    // A pending pairing whose TTL passed while the app was closed reads expired whether or not the hub answers.
+    await this.#judge({ loaded: true });
     if (this.#record !== null) {
       this.#watchPending();
       await this.sync().catch((error: unknown) => console.error('desk: reading the org state', error));
@@ -152,14 +160,26 @@ export class DeviceController {
     const { id, ...fields } = device;
     const pending = await this.deps.hub.postPending({ deviceId: id, ...fields, mac });
     record.state = { kind: 'pending', expires: pending.expires };
-    // A new pairing verifies the org afresh from its own code's pins.
-    if (held !== null) await this.deps.orgStore.forget();
-    await this.deps.store.save(this.deps.org, record);
-    this.#record = record;
+    await this.#serially(async () => {
+      if (this.#record !== held) throw new RegisterError('The device changed while pairing (forgotten or paired in another way). Try again.');
+      // A new pairing verifies the org afresh from its own code's pins.
+      if (held !== null) await this.deps.orgStore.forget();
+      await this.deps.store.save(this.deps.org, record);
+      this.#record = record;
+    });
     await this.#publish({ refused: null });
     this.#watchPending();
     void this.sync().catch((error: unknown) => console.error('desk: reading the org state', error));
     return record;
+  }
+
+  /**
+   * The pending poll's step: the TTL judged by the local clock first, so an unreachable hub cannot hold a pairing open
+   * past it, then the hub read.
+   */
+  async check(): Promise<void> {
+    await this.#judge();
+    if (this.#record?.state.kind === 'pending') await this.sync();
   }
 
   /** Reads the hub's state after the held head, verified against the device's pins; the device's state after it. */
@@ -190,9 +210,11 @@ export class DeviceController {
    * the owner's Mac removes it (`deployment admin remove-device`). */
   async forget(): Promise<void> {
     this.#stopPoll();
-    await this.deps.store.forget(this.deps.org);
-    await this.deps.orgStore.forget();
-    this.#record = null;
+    await this.#serially(async () => {
+      this.#record = null;
+      await this.deps.store.forget(this.deps.org);
+      await this.deps.orgStore.forget();
+    });
     this.#view.setState({ ...EMPTY, loaded: true });
   }
 
@@ -206,30 +228,43 @@ export class DeviceController {
     return { roots: record.pins.roots, recoveryPub: record.pins.recoveryPub };
   }
 
-  /** The device's state against the head now held, kept when it moved. */
-  async #judge(): Promise<void> {
-    const record = this.#record;
-    if (record === null) return;
-    const state = deviceStateIn(record, this.deps.orgStore.held()?.head ?? null, this.#now());
-    if (canonicalize(state) !== canonicalize(record.state)) {
+  /** Runs `change` after every record change asked for before it. */
+  #serially<T>(change: () => Promise<T>): Promise<T> {
+    const run = this.#writes.then(change);
+    this.#writes = run.catch(() => {});
+    return run;
+  }
+
+  /** The device's state against the head now held and the local clock, kept when it moved. */
+  async #judge(change: Partial<DeviceView> = {}): Promise<void> {
+    await this.#serially(async () => {
+      const record = this.#record;
+      if (record === null) return;
+      const state = deviceStateIn(record, this.deps.orgStore.held()?.head ?? null, this.#now());
+      if (canonicalize(state) === canonicalize(record.state)) return;
       const next = { ...record, state };
       await this.deps.store.save(this.deps.org, next);
-      if (this.#record === record) this.#record = next;
-    }
-    await this.#publish({});
+      this.#record = next;
+    });
+    await this.#publish(change);
     if (this.#record?.state.kind !== 'pending') this.#stopPoll();
   }
 
+  /** The view of the record held now; a record that changed while its fingerprint was made is published as it is now. */
   async #publish(change: Partial<DeviceView>): Promise<void> {
-    const record = this.#record;
-    const head = this.deps.orgStore.held()?.head ?? null;
-    const fingerprint = record === null ? null : await pairingFingerprint(this.deps.org, record.member, deviceEntry(record));
-    this.#view.setState({ ...change, record, fingerprint, head: head === null ? null : { version: head.state.version, issued: head.state.issued } });
+    for (;;) {
+      const record = this.#record;
+      const fingerprint = record === null ? null : await pairingFingerprint(this.deps.org, record.member, deviceEntry(record));
+      if (this.#record !== record) continue;
+      const head = this.deps.orgStore.held()?.head ?? null;
+      this.#view.setState({ ...change, record, fingerprint, head: head === null ? null : { version: head.state.version, issued: head.state.issued } });
+      return;
+    }
   }
 
   #watchPending(): void {
     if (this.#stopped || this.#poll !== null || this.#record?.state.kind !== 'pending') return;
-    this.#poll = setInterval(() => void this.sync().catch((error: unknown) => console.error('desk: reading the org state', error)), PENDING_POLL_MS);
+    this.#poll = setInterval(() => void this.check().catch((error: unknown) => console.error('desk: reading the org state', error)), PENDING_POLL_MS);
   }
 
   #stopPoll(): void {

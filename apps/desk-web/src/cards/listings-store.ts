@@ -5,10 +5,16 @@
 // a live certificate's), one per machine ref and session at its newest revision, and a withdrawn one (`LISTING_GONE`)
 // drops its session.
 //
+// Nothing the hub relays moves a session until it verifies: a withdrawal included, which its machine signs as it signs
+// every revision. Each session's watermark is the newest revision verified (a withdrawal's included), so no older signed
+// listing comes back, from a frame or from a reconnection's snapshot, and a record that fails verification moves
+// nothing. A snapshot is the whole set the hub holds: a session it leaves out (withdrawn while the socket was down) is
+// dropped, its watermark kept.
+//
 // A listing whose machine the head and the certificates held cannot resolve (`not-listed`: a VM certified since the
-// last read, which moves no version) is held unverified while the org store re-reads the state for that machine, and
-// dropped if the read does not resolve it. Every change of the head or the certificates judges the kept ones again, so
-// a machine removed from the org takes its sessions with it.
+// last read, which moves no version) is held unverified, beside what the session already shows, while the org store
+// re-reads the state for that machine, and dropped if the read does not resolve it. Every change of the head or the
+// certificates judges the kept ones again, so a machine removed from the org takes its sessions with it.
 import { isListingGone, verifyListing, type Certificates, type Listing, type Signed, type SignedOrgState } from 'org-protocol';
 
 export type ListingKey = `${string}/${string}`;
@@ -24,14 +30,14 @@ type Deps = {
 
 export class ListingsStore {
   #verified = new Map<ListingKey, Signed<Listing>>();
-  /** Listings waiting on their machine's resolution, by key. */
-  readonly #held = new Map<ListingKey, Signed<Listing>>();
-  /** The newest revision seen per session, a withdrawn one's included, so an older one never comes back. */
-  readonly #revisions = new Map<ListingKey, number>();
+  /** The newest revision verified per session, a withdrawal's included: nothing at or below it is taken again. */
+  readonly #watermarks = new Map<ListingKey, number>();
+  /** Listings above their session's watermark waiting on their machine's resolution, by session. */
+  readonly #held = new Map<ListingKey, Signed<Listing>[]>();
   /** The sessions whose machine is being re-read. */
   readonly #resolving = new Set<ListingKey>();
   /** The `listings` pages of the connection now opening, until its last. */
-  #snapshot: Map<ListingKey, Signed<Listing>> | null = null;
+  #snapshot: Signed<Listing>[] | null = null;
   readonly #listeners = new Set<() => void>();
   #judging: Promise<void> = Promise.resolve();
 
@@ -53,28 +59,23 @@ export class ListingsStore {
 
   /** A connection opened: its `listings` pages are the whole set the hub holds. */
   opened(): void {
-    this.#snapshot = new Map();
+    this.#snapshot = [];
   }
 
-  /** One `listings` page; at the last, what the pages carried replaces what was held. */
+  /** One `listings` page; at the last, the sessions the pages left out are dropped and the rest taken as frames are. */
   page(records: Signed<Listing>[], last: boolean): Promise<void> {
-    const snapshot = (this.#snapshot ??= new Map());
-    for (const record of records) {
-      const key = listingKey(record.body);
-      const held = snapshot.get(key);
-      if (held === undefined || held.body.revision < record.body.revision) snapshot.set(key, record);
-    }
+    const snapshot = (this.#snapshot ??= []);
+    snapshot.push(...records);
     if (!last) return this.#judging;
     this.#snapshot = null;
     return this.#serial(async () => {
-      this.#verified = new Map();
-      this.#held.clear();
-      for (const record of snapshot.values()) {
-        const key = listingKey(record.body);
-        const revision = this.#revisions.get(key);
-        if (revision === undefined || revision < record.body.revision) this.#revisions.set(key, record.body.revision);
-        await this.#place(record, false);
+      const carried = new Set(snapshot.map((r) => listingKey(r.body)));
+      for (const key of [...this.#verified.keys(), ...this.#held.keys()]) {
+        if (carried.has(key)) continue;
+        this.#verified.delete(key);
+        this.#held.delete(key);
       }
+      for (const record of [...snapshot].sort((a, b) => a.body.revision - b.body.revision)) await this.#take(record);
       this.#tell();
     });
   }
@@ -89,12 +90,11 @@ export class ListingsStore {
   /** The head or the certificates moved: every listing kept is judged again, and every one held. */
   orgChanged(): Promise<void> {
     return this.#serial(async () => {
-      const kept = [...this.#verified.values()];
-      const held = [...this.#held.values()];
-      this.#verified = new Map();
-      this.#held.clear();
-      for (const record of kept) await this.#place(record, true);
-      for (const record of held) await this.#place(record, false);
+      const org = this.deps.org();
+      for (const [key, record] of [...this.#verified]) {
+        if (!(await this.#verifies(org, record))?.ok) this.#verified.delete(key);
+      }
+      for (const key of [...this.#held.keys()]) await this.#tryHeld(key, false);
       this.#tell();
     });
   }
@@ -103,7 +103,7 @@ export class ListingsStore {
   clear(): void {
     this.#verified = new Map();
     this.#held.clear();
-    this.#revisions.clear();
+    this.#watermarks.clear();
     this.#resolving.clear();
     this.#snapshot = null;
     this.#tell();
@@ -115,48 +115,62 @@ export class ListingsStore {
     return this.#judging;
   }
 
-  /** Takes a newer revision of a session: kept, held or dropped. Whether what is kept changed. */
-  async #take(record: Signed<Listing>): Promise<boolean> {
-    const key = listingKey(record.body);
-    const revision = this.#revisions.get(key);
-    if (revision !== undefined && revision >= record.body.revision) return false;
-    this.#revisions.set(key, record.body.revision);
-    this.#held.delete(key);
-    if (isListingGone(record.body)) return this.#verified.delete(key);
-    const had = this.#verified.delete(key);
-    return (await this.#place(record, false)) || had;
+  #verifies(org: ReturnType<Deps['org']>, record: Signed<Listing>) {
+    return org === null ? Promise.resolve(null) : verifyListing(org.head.state, record, org.certificates, this.#now());
   }
 
   /**
-   * Verifies `record` against the org held: kept when it verifies; held while no state is held yet, or (unless `final`)
-   * while its machine is re-read; dropped otherwise. Whether it was kept.
+   * A record above its session's watermark: taken when it verifies (its session listed, changed or withdrawn, the
+   * watermark moved to it); held while no state is held yet, or while its machine is re-read; else ignored. Whether what
+   * is kept changed.
    */
-  async #place(record: Signed<Listing>, final: boolean): Promise<boolean> {
+  async #take(record: Signed<Listing>): Promise<boolean> {
     const key = listingKey(record.body);
-    const org = this.deps.org();
-    const verdict = org === null ? null : await verifyListing(org.head.state, record, org.certificates, this.#now());
-    if (verdict?.ok) {
-      this.#verified.set(key, record);
-      return true;
-    }
-    if (verdict === null || (!final && verdict.code === 'not-listed')) {
-      this.#held.set(key, record);
-      if (verdict !== null && !this.#resolving.has(key)) {
-        this.#resolving.add(key);
-        void this.deps.resolve(record.body.machine).finally(() => this.#settle(key));
-      }
-    }
+    if (record.body.revision <= (this.#watermarks.get(key) ?? -Infinity)) return false;
+    const verdict = await this.#verifies(this.deps.org(), record);
+    if (verdict?.ok) return this.#accept(key, record);
+    if (verdict === null || verdict.code === 'not-listed') this.#hold(key, record, verdict !== null);
     return false;
   }
 
-  /** Its machine was re-read: a listing still held is kept if it now verifies, and dropped otherwise. */
+  /** A verified record moves its session: the watermark to it, the session withdrawn or shown at it. */
+  #accept(key: ListingKey, record: Signed<Listing>): boolean {
+    this.#watermarks.set(key, record.body.revision);
+    const held = this.#held.get(key)?.filter((r) => r.body.revision > record.body.revision) ?? [];
+    if (held.length === 0) this.#held.delete(key);
+    else this.#held.set(key, held);
+    if (isListingGone(record.body)) return this.#verified.delete(key);
+    this.#verified.set(key, record);
+    return true;
+  }
+
+  #hold(key: ListingKey, record: Signed<Listing>, resolve: boolean): void {
+    this.#held.set(key, [...(this.#held.get(key) ?? []).filter((r) => r.body.revision !== record.body.revision), record]);
+    if (!resolve || this.#resolving.has(key)) return;
+    this.#resolving.add(key);
+    void this.deps.resolve(record.body.machine).finally(() => this.#settle(key));
+  }
+
+  /** Judges the records held for `key` again, oldest first: each that verifies is taken; with `final` the rest go. */
+  async #tryHeld(key: ListingKey, final: boolean): Promise<boolean> {
+    const held = (this.#held.get(key) ?? []).sort((a, b) => a.body.revision - b.body.revision);
+    this.#held.delete(key);
+    const org = this.deps.org();
+    let changed = false;
+    for (const record of held) {
+      if (record.body.revision <= (this.#watermarks.get(key) ?? -Infinity)) continue;
+      const verdict = await this.#verifies(org, record);
+      if (verdict?.ok) changed = this.#accept(key, record) || changed;
+      else if (!final && (verdict === null || verdict.code === 'not-listed')) this.#hold(key, record, verdict !== null);
+    }
+    return changed;
+  }
+
+  /** Its machine was re-read: what is still held for the session is taken if it now verifies, and dropped otherwise. */
   #settle(key: ListingKey): Promise<void> {
     this.#resolving.delete(key);
     return this.#serial(async () => {
-      const record = this.#held.get(key);
-      if (record === undefined) return;
-      this.#held.delete(key);
-      if (await this.#place(record, true)) this.#tell();
+      if (await this.#tryHeld(key, true)) this.#tell();
     });
   }
 

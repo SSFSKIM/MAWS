@@ -3,7 +3,15 @@
 // (`log`, keyed by [project, offset]), and from version 2 (P5 O13 M3) this browser's `web-cards` device (`device`,
 // keyed by org id: its record, its channel key a non-extractable CryptoKey) and the signed org state it verified
 // (`org`, keyed by org id). The browser suites seed the key through these same names.
+import { create } from 'zustand';
 export const DESK_DB = { name: 'desk', version: 2, keys: 'org-keys', log: 'log', device: 'device', org: 'org' } as const;
+
+/**
+ * Whether opening the database waits on another tab: one still running an older build holds the version before, and
+ * an older build lets go of nothing when a newer one asks (only this one's connections close on `versionchange`). The
+ * open goes through on its own once that tab closes; until then the page says so (App.tsx).
+ */
+export const useDeskStorage = create<{ blocked: boolean }>()(() => ({ blocked: false }));
 
 let opening: Promise<IDBDatabase> | null = null;
 
@@ -17,7 +25,9 @@ export function openDesk(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(DESK_DB.device)) db.createObjectStore(DESK_DB.device);
       if (!db.objectStoreNames.contains(DESK_DB.org)) db.createObjectStore(DESK_DB.org);
     };
+    request.onblocked = () => useDeskStorage.setState({ blocked: true });
     request.onsuccess = () => {
+      useDeskStorage.setState({ blocked: false });
       // A newer version opened in another tab (a deploy's) waits on this connection: it is let go, and the next open
       // here meets the new version.
       request.result.onversionchange = () => {
@@ -27,6 +37,7 @@ export function openDesk(): Promise<IDBDatabase> {
       resolve(request.result);
     };
     request.onerror = () => {
+      useDeskStorage.setState({ blocked: false });
       opening = null;
       reject(request.error);
     };
