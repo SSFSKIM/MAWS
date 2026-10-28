@@ -151,10 +151,14 @@ env:
   # daemon-idle-enrolled (P5 O10 M10, Decision Log 114), the spec's fourth case, is the increment an enrolled endpoint
   # adds to the daemon shape: the same scene's window unenrolled, then with its mawsd enrolled and listed in an org on
   # desk-hub's local runner (wrangler dev on loopback), recorded without a bound; about 27 minutes, two windows.
+  # daemon-idle-aba (the idle bound's re-derivation, after P5 O10 M10), the spec's fifth case, is A-B-A: the same scene on
+  # today's detached supervisor, on the daemon shape and on the supervisor again, each a fresh launch back to back in
+  # one job, so the daemon shape is read against the mean of two baselines on the same machine state, recorded without
+  # a bound; about 40 minutes, three windows.
   # A group with a timing bound turns its timed cases on with a switch, MAWS_<name>_PERF or MAWS_<name>_SCALE set to 1 in
   # its package script, each such spec skipping without it or asserting its bounds only under it (presentations-drag's
   # one class-1 trial in e2e:presentations logs its p95), and is on this list: ci-kit's VM contract above rests on it.
-  MEASURED_E2E: artifacts-perf daemon-idle daemon-idle-baseline daemon-idle-floor daemon-idle-mawsd daemon-idle-enrolled dashboard-scale design-scale document-scale document-scale-repeat local-latency local-latency-daemon presentations-drag presentations-scale tool-time-heavy-live
+  MEASURED_E2E: artifacts-perf daemon-idle daemon-idle-baseline daemon-idle-floor daemon-idle-mawsd daemon-idle-enrolled daemon-idle-aba dashboard-scale design-scale document-scale document-scale-repeat local-latency local-latency-daemon presentations-drag presentations-scale tool-time-heavy-live
   # The Mac jobs that may run beside another: e2e groups, and `unit:darwin`, that ask for ci-kit's shared instances
   # ([ci-kit-mac-shared], their only label), which run two jobs at a time on the mini's one desktop (ci-kit's mac-lane
   # concurrency spec, SSFSKIM/ci-kit docs/doperpowers/specs/2026-10-21-mac-lane-concurrency-design.md). Every other Mac
