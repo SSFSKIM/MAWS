@@ -414,7 +414,9 @@ export class EndpointState {
    * Claims RL10's kept records for the authority an enrollment's set is about to be written under: records made under
    * another, or under none this directory can name, are moved aside with their marker first, and the marker then names
    * `authority`. True when records were moved (their in-memory caches are then stale). Called before the set is
-   * written, so the authority held is still the one the records were made under.
+   * written. The records' authority is their marker, or else the enrollment held before this one; never anything of the
+   * enrollment being claimed (a pending provisioning's record is written before its set), so unmarked records with no
+   * earlier enrollment to name them fail closed: aside.
    */
   claimRecords(authority: Authority, now: number): boolean {
     this.#refuseWrites();
@@ -428,11 +430,13 @@ export class EndpointState {
     return moved;
   }
 
-  /** The authority of the enrollment or the pending provisioning held, for records made before the marker was kept. */
+  /**
+   * The authority of the enrollment held, for records made before the marker was kept. Only an enrollment whose set is
+   * written made records; a pending provisioning made none, and is never taken as their authority.
+   */
   #enrolledAuthority(): Authority | null {
-    if (this.#enrollment !== null && this.#org !== null) return { org: this.#enrollment.org, hub: this.#enrollment.hub, recoveryPub: this.#org.pinned.recoveryPub };
-    const p = this.#provisioning;
-    return p === null ? null : { org: p.redeemed.org, hub: p.hub, recoveryPub: p.pins.recoveryPub };
+    if (this.#enrollment === null || this.#org === null) return null;
+    return { org: this.#enrollment.org, hub: this.#enrollment.hub, recoveryPub: this.#org.pinned.recoveryPub };
   }
 
   #setAuthority(authority: Authority): void {

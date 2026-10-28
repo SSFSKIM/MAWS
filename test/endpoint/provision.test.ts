@@ -532,6 +532,30 @@ describe('the kept records across an unenroll', () => {
     expect(resent.sig).toEqual(before.sig);
   });
 
+  it('puts unmarked records aside rather than take the new provisioning as their authority', async () => {
+    const otherHub = await startLocalHub();
+    try {
+      const other = await otherHub.admin();
+      const first = await endpointOn({ ref: mintRef(vm.id) });
+      await enrollBy(other, first.endpoint, 'vm-unmarked');
+      const event = { writer: 'vm-unmarked/human', seq: 1, kind: 'human', text: 'history', ts: new Date().toISOString() };
+      const before = await upload(first.endpoint, 'project-unmarked', event);
+      expect((await first.endpoint.cli('unenroll', [])).code).toBe(0);
+      // Records kept with no marker naming their authority (an unenroll before the marker existed).
+      const dir = first.services.machine.stateDir;
+      fs.unlinkSync(join(dir, 'records-authority.json'));
+      const again = await restart(first);
+      expect((await provision(again.endpoint, await code(vm), 'vm-unmarked')).code).toBe(0);
+      const resent = await upload(again.endpoint, 'project-unmarked', event);
+      expect(resent.sig.value).not.toBe(before.sig.value);
+      const org = again.endpoint.parts!.org;
+      expect(await verifyEvent({ org: 'local', project: 'project-unmarked' }, org.head().state, resent, org.certificates(), new Date())).toEqual({ ok: true });
+      expect(read(dir, 'records-authority.json')).toMatchObject({ org: 'local', hub: hub.url });
+    } finally {
+      await otherHub.stop();
+    }
+  }, 180_000);
+
   it('puts them aside when another org enrolls the ref: a resent event is signed anew and verifies under that org', async () => {
     const first = await endpointOn();
     await enrollBy(member, first.endpoint, 'records-moved');
