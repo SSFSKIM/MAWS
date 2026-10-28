@@ -196,6 +196,8 @@ type Harness = {
   writes: Array<{ name: string; value: unknown }>;
   /** `chain`: every chain.json write fails (a full disk under the held view's adoption). */
   faults: { chain: boolean };
+  /** Runs inside each write before it reaches the disk: a test holds a write open here and acts meanwhile. */
+  gates: { write: ((name: string, value: unknown) => Promise<void> | void) | null };
   hub: FakeHub;
   /** The hub the signer is given: `null` while `hub` is false. */
   online: boolean;
@@ -222,10 +224,12 @@ async function harness(options: Options = {}): Promise<Harness> {
   expect(await base.ensure()).toEqual({ ok: true });
   const writes: Harness['writes'] = [];
   const faults = { chain: false };
+  const gates: Harness['gates'] = { write: null };
   const files: OrgFiles = {
     ...base,
     write: async (name, value) => {
       if (faults.chain && name === CHAIN_FILE) throw new Error('disk full');
+      await gates.write?.(name, value);
       writes.push({ name, value: structuredClone(value) });
       return base.write(name, value);
     },
@@ -236,7 +240,7 @@ async function harness(options: Options = {}): Promise<Harness> {
   if (!started.ok) throw new Error(started.reason);
   const hub = new FakeHub([g]);
   const registration: { signing?: true } = {};
-  const shared = { dir, files, writes, faults, hub, registration, genesis: g, prompts: [] as StepUpPrompt[] };
+  const shared = { dir, files, writes, faults, gates, hub, registration, genesis: g, prompts: [] as StepUpPrompt[] };
 
   async function compose(held: HeldOrg, online: boolean): Promise<Harness> {
     let commits: Promise<unknown> = Promise.resolve();
@@ -531,6 +535,24 @@ describe('the pending slot', () => {
     expect(next.hub.posts).toHaveLength(1);
     expect(await next.signer.sign(noChangeEdit())).toEqual({ ok: false, reason: 'pending' });
     expect(next.prompts).toHaveLength(1);
+  });
+
+  it('posts nothing when a sibling is adopted while the exposure is written: the proposal reads as the fork it now is', async () => {
+    const h = await harness();
+    const theirs = await adminSuccessor(h.genesis);
+    // The exposure write is held open; meanwhile a sibling of the pending state arrives (the feed, a link's handshake)
+    // and the held view adopts it, moving its head before the write lands.
+    h.gates.write = async (name, value) => {
+      if (name !== SIGNING_FILE || (value as SigningFile).pending?.exposed.hub !== true) return;
+      h.gates.write = null;
+      h.hub.states.push(theirs);
+      await h.held.adoptServed({ chain: [theirs], head: null, transitions: [], certificates: null });
+    };
+    const outcome = await h.signer.sign(noChangeEdit());
+    expect(outcome).toMatchObject({ ok: false, reason: 'hub' });
+    expect(h.hub.posts).toEqual([]);
+    expect(h.held.head()).toEqual(theirs);
+    await vi.waitFor(() => expect(h.signer.pending()).toMatchObject({ version: 2, exposed: true, fork: true }));
   });
 
   it('still names a rejected proposal the hub kept and serves later', async () => {

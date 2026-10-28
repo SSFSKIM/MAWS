@@ -266,12 +266,22 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     const version = signed.state.version;
     const hub = deps.hub();
     if (hub === null) return { ok: false, reason: 'hub', detail: 'no hub: the state stays pending until it can be posted' };
+    // The held line the post is made on: an adoption while the exposure is written (a sibling, a recovery) moves it.
+    const view = deps.held();
+    const head = view?.head() ?? null;
     try {
       await store.update((file) => ({ next: withExposure(file, signed, { hub: true }), value: undefined }));
     } catch (error) {
       return { ok: false, reason: 'signing', detail: (error as Error).message };
     }
     refreshed();
+    // Synchronously from here to the post, as deliveries.ts does before its act: a proposal whose parent is no longer
+    // the held head (or whose state the held chain now holds) is not posted; it settles by the slot's rules.
+    if (deps.held() !== view || (view?.head() ?? null) !== head) {
+      if (await clearIfHeld()) return { ok: true, version };
+      log(`version ${version}: the held org state moved while its exposure was written; nothing was posted`);
+      return { ok: false, reason: 'hub', detail: `the held org state moved before version ${version} was posted: nothing was posted, and it stays pending` };
+    }
     const answer = await hub.postState(signed);
     if (answer.ok) {
       log(`version ${version} accepted by the hub`);
