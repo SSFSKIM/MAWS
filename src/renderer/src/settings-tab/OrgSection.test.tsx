@@ -1,11 +1,14 @@
 // P5 O8 M1: Settings › Org (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, "The Org section"; M1's Proves):
 // each status drawn; Sign in sends `org.register` with the trimmed code and clears the field; Cancel, Sign out and Sign
 // in again; the fingerprint at approval; Re-anchor in `held-chain`; a refusal's line; and no code shown back.
+// M3's Proves (the signer's lines): the root line, and no `root add` guidance for an unmarked device; the quiet weekly
+// line and Re-sign now; the superseded offer; owing machines; the pending slot with Discard behind its confirmation;
+// `signing` with Reset behind its confirmation; the rekey offer with its code field; the old device still listed.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CommandName, PreloadBridge } from '@shared/ipc/schema';
-import { OrgStatusSchema, type OrgAttempt, type OrgStatus } from '@shared/ipc/schema/org';
+import { OrgStatusSchema, type DiscardResult, type OrgAttempt, type OrgSignerStatus, type OrgStatus, type SignResult } from '@shared/ipc/schema/org';
 import { validateCommandInput } from '@shared/ipc/validate';
 import { useNotices } from '../stores/notices';
 import { TEST_MACHINE } from '../../../../test/support/machine';
@@ -25,7 +28,41 @@ const REGISTERED: OrgStatus = {
   hubAccess: 'connected',
   head: { version: 12, issued: new Date(Date.now() - 3 * DAY).toISOString() },
   problem: null,
+  signer: null,
 };
+
+type Signer = NonNullable<OrgSignerStatus>;
+const FINGERPRINT = '65u7k-rscy7';
+const OLD_DEVICE = 'Zo1dDevice9xYc0dEk9F3';
+// pending proposals' stateHashes, as the status names them
+const HASH_A = 'aaaaPendingStateHashA0000000000000000000000';
+const HASH_B = 'bbbbPendingStateHashB0000000000000000000000';
+const HASH_C = 'ccccPendingStateHashC0000000000000000000000';
+const MINI = 'maws-mini-ref-000001';
+const VM = 'devcloud-vm-ref-0002';
+const SIGNER: Signer = {
+  root: false,
+  maySign: false,
+  fingerprint: FINGERPRINT,
+  stepUpKid: 'stepUpKid0001',
+  due: false,
+  ageDays: 3,
+  pending: null,
+  offer: null,
+  owing: [],
+  abandoned: [],
+  rekey: null,
+  rekeying: null,
+  oldDevice: null,
+};
+const signing = (signer: Partial<Signer>, rest: Partial<Extract<OrgStatus, { state: 'registered' }>> = {}): OrgStatus => ({ ...REGISTERED, ...rest, signer: { ...SIGNER, ...signer } });
+const ROOT: Partial<Signer> = { root: true, maySign: true };
+// the superseded offer as main shows it: each revocation and consequence, the checks' warnings, and the digest naming them
+const OFFER_LINES = ['revoke the step-up key k1 of device b1 of b@example.com: it was revoked before the recovery', 'its channel key k2 is revoked with it'];
+const OFFER_WARNING = 'device 7Hq2xVb9 of owner@example.com (stepUpKid0001) was revoked on the branch the recovery discarded, and this state doesn\u2019t revoke it';
+const DIGEST_A = 'offerDigestA000000000000000000000000000000';
+const DIGEST_B = 'offerDigestB000000000000000000000000000000';
+const offerOf = (offer: Partial<NonNullable<Signer['offer']>>): Signer['offer'] => ({ superseded: 2, lines: OFFER_LINES, warnings: [OFFER_WARNING], withheld: [], digest: DIGEST_A, ...offer });
 
 let calls: { name: string; input: unknown }[];
 let emit: (status: OrgStatus) => void;
@@ -41,6 +78,11 @@ function renderSection(status: OrgStatus, answers: Partial<Record<CommandName, (
     'org.reanchor': () => ({ ok: true }) satisfies OrgAttempt,
     'org.cancel': () => undefined,
     'org.signOut': () => undefined,
+    'org.resign': () => ({ ok: true, version: 13 }) satisfies SignResult,
+    'org.revokeSuperseded': () => ({ ok: true, version: 13 }) satisfies SignResult,
+    'org.rekey': () => ({ ok: true }) satisfies OrgAttempt,
+    'org.discardPending': () => ({ ok: true, unsent: false, hubVersion: 12 }) satisfies DiscardResult,
+    'org.resetSigning': () => undefined,
     ...answers,
   };
   window.maws = {
@@ -223,5 +265,301 @@ describe('Settings › Org', () => {
     await act(async () => {});
     expect(screen.getByText('This Mac is no longer in the org.')).toBeTruthy();
     expect(screen.queryByText('This Mac isn’t signed in to an org.')).toBeNull();
+  });
+});
+
+describe('Settings › Org: this Mac as the org’s signer (M3)', () => {
+  it('a marked device not yet a root: its fingerprint and id beside the root add command; a root signs; no signer lines signed out', async () => {
+    renderSection(signing({}));
+    const signer = await found('Signer');
+    expect(within(signer).getByText('Make this Mac a root: run')).toBeTruthy();
+    // The id after `--`: a base64url id may start with '-', which the admin's option parser would take for an option.
+    expect(within(signer).getByText(`deployment admin root add -- ${DEVICE}`).className).toContain('font-mono');
+    expect(within(signer).getByText(new RegExp(FINGERPRINT))).toBeTruthy();
+    expect(within(signer).queryByRole('button')).toBeNull();
+    expect(screen.queryByRole('textbox')).toBeNull(); // a marked, listed device is offered no new keys
+
+    emit(signing(ROOT));
+    expect(within(row('Signer')).getByText('This Mac signs the org state.')).toBeTruthy();
+    expect(screen.queryByText(/root add/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Re-sign now' })).toBeNull(); // not due
+
+    emit(signing(ROOT, { session: 'signed-out' }));
+    expect(screen.queryByRole('group', { name: 'Signer' })).toBeNull();
+  });
+
+  it('an unmarked device gets no root add guidance, as a root or not: the new-keys offer instead, sending org.rekey', async () => {
+    renderSection(signing({ rekey: 'unmarked' }));
+    expect(within(await found('Signer')).getByText(/weren’t kept out of Time Machine backups/)).toBeTruthy();
+    expect(screen.queryByText(/root add/)).toBeNull();
+    emit(signing({ rekey: 'unmarked', root: true }));
+    expect(within(row('Signer')).getByText(/weren’t kept out of Time Machine backups/)).toBeTruthy();
+    expect(screen.queryByText(/root add/)).toBeNull();
+    expect(screen.queryByText('This Mac signs the org state.')).toBeNull();
+
+    expect(within(row('Pairing code')).getByText(/stays signed in on its old keys/)).toBeTruthy();
+    const field = within(row('Pairing code')).getByRole('textbox', { name: 'Pairing code' }) as HTMLInputElement;
+    fireEvent.change(field, { target: { value: ` ${CODE} ` } });
+    fireEvent.click(within(row('Pairing code')).getByRole('button', { name: 'Make new keys' }));
+    await vi.waitFor(() => expect(sent('org.rekey')).toEqual([{ code: CODE }]));
+    expect(field.value).toBe('');
+    expect(sent('org.register')).toEqual([]);
+    expect(document.body.innerHTML).not.toContain(CODE);
+  });
+
+  it('a rekey under way: its step with Cancel, the new fingerprint at approval, then the promotion; a refusal under its field only', async () => {
+    renderSection(signing({ rekey: 'unmarked', rekeying: { step: 'checking', fingerprint: null, expires: null } }));
+    expect(within(await found('New keys')).getByText('Checking the org…')).toBeTruthy();
+    expect(screen.queryByRole('textbox')).toBeNull();
+    fireEvent.click(within(row('New keys')).getByRole('button', { name: 'Cancel' }));
+    await vi.waitFor(() => expect(sent('org.cancel')).toEqual([undefined]));
+
+    emit(signing({ rekey: 'unmarked', rekeying: { step: 'approval', fingerprint: 'n3wfp-12345', expires: '2026-10-28T10:30:00.000Z' } }));
+    expect(within(row('New keys')).getByText(/^Waiting for approval until /)).toBeTruthy();
+    expect(within(row('Fingerprint')).getByText('n3wfp-12345').className).toContain('font-mono');
+    emit(signing({ rekey: 'unmarked', rekeying: { step: 'promoting', fingerprint: null, expires: null } }));
+    expect(within(row('New keys')).getByText('Switching to the new keys…')).toBeTruthy();
+    expect(within(row('New keys')).queryByRole('button')).toBeNull(); // past its intent, a rekey can't be cancelled
+
+    cleanup();
+    renderSection(signing({ rekey: 'unmarked' }), { 'org.rekey': () => ({ ok: false, reason: { code: 'other-org' } }) });
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Pairing code' }), { target: { value: CODE } });
+    fireEvent.click(within(row('Pairing code')).getByRole('button', { name: 'Make new keys' }));
+    expect((await within(row('Pairing code')).findByRole('alert')).textContent).toBe('That code is for a different org from the one this Mac is in.');
+    expect(within(row('Hub')).queryByRole('alert')).toBeNull();
+  });
+
+  it('a removed device: no longer in the org, with the new-keys offer', async () => {
+    renderSection(signing({}, { session: 'removed' }));
+    expect(await screen.findByText('This Mac is no longer in the org.')).toBeTruthy();
+    expect(within(row('Pairing code')).getByText(/To rejoin, make new keys/)).toBeTruthy();
+    fireEvent.change(within(row('Pairing code')).getByRole('textbox', { name: 'Pairing code' }), { target: { value: CODE } });
+    fireEvent.click(within(row('Pairing code')).getByRole('button', { name: 'Make new keys' }));
+    await vi.waitFor(() => expect(sent('org.rekey')).toEqual([{ code: CODE }]));
+  });
+
+  it('the quiet weekly line: the org state’s age with Re-sign now, and the sign’s outcome in one line', async () => {
+    renderSection(signing({ ...ROOT, due: true, ageDays: 8 }), { 'org.resign': () => ({ ok: false, reason: 'hub', detail: '503' }) });
+    const signer = await found('Signer');
+    expect(within(signer).getByText('This Mac signs the org state.')).toBeTruthy();
+    const line = within(signer).getByText('Org state is 8 days old');
+    expect(line.className).not.toContain('text-warning'); // a quiet line, not a banner
+    fireEvent.click(within(signer).getByRole('button', { name: 'Re-sign now' }));
+    await vi.waitFor(() => expect(sent('org.resign')).toEqual([undefined]));
+    expect((await within(row('Signer')).findByRole('alert')).textContent).toBe('Not signed · The hub didn’t take it. · 503');
+  });
+
+  it('Re-sign now: a signed version says so; a Touch ID cancel says nothing', async () => {
+    let answer: SignResult = { ok: true, version: 13 };
+    renderSection(signing({ ...ROOT, due: true, ageDays: 7 }), { 'org.resign': () => answer });
+    fireEvent.click(within(await found('Signer')).getByRole('button', { name: 'Re-sign now' }));
+    expect(await within(row('Signer')).findByText('Signed version 13.')).toBeTruthy();
+    answer = { ok: false, reason: 'cancelled' };
+    fireEvent.click(within(row('Signer')).getByRole('button', { name: 'Re-sign now' }));
+    await vi.waitFor(() => expect(sent('org.resign')).toHaveLength(2));
+    await act(async () => {});
+    expect(within(row('Signer')).queryByText('Signed version 13.')).toBeNull();
+    expect(within(row('Signer')).queryByRole('alert')).toBeNull();
+  });
+
+  it('the superseded offer: Revoke again only when there is something to sign; the withheld names always', async () => {
+    const withheld = 'device 7Hq2xVb9 of owner@example.com (stepUpKid0001)';
+    renderSection(signing({ ...ROOT, offer: offerOf({ superseded: 2, withheld: [withheld] }) }));
+    const revocations = await found('Revocations');
+    expect(within(revocations).getByText('A recovery dropped the revocation of 2 keys.')).toBeTruthy();
+    expect(within(revocations).getByText((text) => text.startsWith(`Not offered: ${withheld}.`))).toBeTruthy();
+    fireEvent.click(within(revocations).getByRole('button', { name: 'Revoke again…' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Sign these revocations?' })).getByRole('button', { name: 'Sign' }));
+    await vi.waitFor(() => expect(sent('org.revokeSuperseded')).toEqual([{ offer: DIGEST_A }]));
+    expect(await within(row('Signer')).findByText('Signed version 13.')).toBeTruthy();
+
+    emit(signing({ ...ROOT, offer: offerOf({ superseded: 0, lines: [], warnings: [], withheld: [withheld] }) }));
+    expect(within(row('Revocations')).queryByRole('button')).toBeNull();
+    expect(within(row('Revocations')).queryByText(/A recovery dropped/)).toBeNull();
+    expect(within(row('Revocations')).getByText((text) => text.startsWith(`Not offered: ${withheld}.`))).toBeTruthy();
+
+    emit(signing({ offer: offerOf({ superseded: 2 }) })); // not a root: nothing shown would sign
+    expect(within(row('Revocations')).getByText('A recovery dropped the revocation of 2 keys.')).toBeTruthy();
+    expect(within(row('Revocations')).queryByRole('button')).toBeNull();
+  });
+
+  it('Revoke again shows the whole closure, the warnings and the withheld before it signs; Cancel sends nothing; a changed offer closes the sheet', async () => {
+    const withheld = 'device 7Hq2xVb9 of owner@example.com (stepUpKid0001)';
+    renderSection(signing({ ...ROOT, offer: offerOf({ withheld: [withheld] }) }), { 'org.revokeSuperseded': () => ({ ok: false, reason: 'stale', detail: 'the revocations changed since they were shown: nothing was signed' }) });
+    fireEvent.click(within(await found('Revocations')).getByRole('button', { name: 'Revoke again…' }));
+    let sheet = await screen.findByRole('dialog', { name: 'Sign these revocations?' });
+    for (const line of OFFER_LINES) expect(within(sheet).getByText(line)).toBeTruthy();
+    expect(within(sheet).getByText(`Warning: ${OFFER_WARNING}`)).toBeTruthy();
+    expect(within(sheet).getByText((text) => text.startsWith(`Not offered: ${withheld}.`))).toBeTruthy();
+    expect(sent('org.revokeSuperseded')).toEqual([]);
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }));
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(sent('org.revokeSuperseded')).toEqual([]);
+
+    // The offer changes while the sheet is open: it closes, so no confirmation reaches other words.
+    fireEvent.click(within(row('Revocations')).getByRole('button', { name: 'Revoke again…' }));
+    await screen.findByRole('dialog', { name: 'Sign these revocations?' });
+    emit(signing({ ...ROOT, offer: offerOf({ lines: OFFER_LINES.slice(0, 1), digest: DIGEST_B }) }));
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    // Main refuses a confirmation of words it no longer holds: the line says so.
+    fireEvent.click(within(row('Revocations')).getByRole('button', { name: 'Revoke again…' }));
+    sheet = await screen.findByRole('dialog', { name: 'Sign these revocations?' });
+    expect(within(sheet).queryByText(OFFER_LINES[1])).toBeNull();
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Sign' }));
+    await vi.waitFor(() => expect(sent('org.revokeSuperseded')).toEqual([{ offer: DIGEST_B }]));
+    expect((await within(row('Signer')).findByRole('alert')).textContent).toContain('What would be signed changed since it was shown.');
+  });
+
+  it('owing machines per version, a too-large one named; a discarded proposal where it may still be held', async () => {
+    renderSection(
+      signing({
+        ...ROOT,
+        owing: [{ version: 7, machines: [MINI, VM], tooLarge: [VM] }],
+        abandoned: [
+          { hash: HASH_A, version: 5, hub: true, machines: [MINI] },
+          { hash: HASH_B, version: 6, hub: false, machines: [] }, // never sent: nothing can hold it
+        ],
+      }),
+    );
+    const deliveries = await found('Deliveries');
+    expect(within(deliveries).getByText(`Version 7 · waiting for ${MINI} to acknowledge · too large to send to ${VM}, which catches up from the hub`)).toBeTruthy();
+    expect(within(row('Discarded')).getByText(`Version 5 · the hub and ${MINI} may still hold it`)).toBeTruthy();
+    expect(within(row('Discarded')).queryByText(/Version 6/)).toBeNull();
+
+    emit(signing({ ...ROOT, abandoned: [{ hash: HASH_B, version: 6, hub: false, machines: [] }] }));
+    expect(screen.queryByRole('group', { name: 'Deliveries' })).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Discarded' })).toBeNull();
+  });
+
+  it('pending-fork: Discard behind a confirmation with the fork warning; Cancel sends nothing; Discard sends it confirmed', async () => {
+    renderSection(signing({ ...ROOT, pending: { version: 13, hash: HASH_A, fork: true, exposed: true, refused: null } }), {
+      'org.discardPending': () => ({ ok: true, unsent: false, hubVersion: 13, forkAt: 13 }),
+    });
+    const pending = await found('Pending');
+    expect(within(pending).getByText('Version 13 conflicts with another version 13 at the hub: a fork.').className).toContain('text-warning');
+    fireEvent.click(within(pending).getByRole('button', { name: 'Discard…' }));
+    let sheet = await screen.findByRole('dialog', { name: 'Discard version 13?' });
+    expect(within(sheet).getByText('The hub holds another version 13: a fork.')).toBeTruthy();
+    expect(within(sheet).getByText(/A later sign may make another successor of version 12, which a hub or machine that kept these bytes could show as a fork/)).toBeTruthy();
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }));
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(sent('org.discardPending')).toEqual([]);
+
+    fireEvent.click(within(row('Pending')).getByRole('button', { name: 'Discard…' }));
+    sheet = await screen.findByRole('dialog', { name: 'Discard version 13?' });
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Discard' }));
+    await vi.waitFor(() => expect(sent('org.discardPending')).toEqual([{ confirmed: true, hash: HASH_A }]));
+    expect(await within(row('Signer')).findByText('Discarded version 13. The hub holds another version 13 (a fork); its head is version 13.')).toBeTruthy();
+  });
+
+  it('a refused slot that isn’t a fork offers Discard too; a never-sent one is worded so; a slot merely waiting offers none', async () => {
+    renderSection(signing({ ...ROOT, pending: { version: 13, hash: HASH_A, fork: false, exposed: true, refused: 'key-purged' } }), {
+      'org.discardPending': () => ({ ok: true, unsent: true, hubVersion: 12 }),
+    });
+    expect(within(await found('Pending')).getByText('The hub refused version 13 · key-purged')).toBeTruthy();
+    fireEvent.click(within(row('Pending')).getByRole('button', { name: 'Discard…' }));
+    let sheet = await screen.findByRole('dialog', { name: 'Discard version 13?' });
+    expect(within(sheet).getByText('Version 13 isn’t at the hub.')).toBeTruthy();
+    expect(within(sheet).getByText(/could show as a fork: discard it only once you know why the hub refused it/)).toBeTruthy();
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }));
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    emit(signing({ ...ROOT, pending: { version: 13, hash: HASH_B, fork: false, exposed: false, refused: 'key-purged' } }));
+    fireEvent.click(within(row('Pending')).getByRole('button', { name: 'Discard…' }));
+    sheet = await screen.findByRole('dialog', { name: 'Discard version 13?' });
+    expect(within(sheet).getByText('Version 13 was never sent: nothing was posted, so nothing can show it as a fork.')).toBeTruthy();
+    expect(within(sheet).queryByText(/A later sign/)).toBeNull();
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Discard' }));
+    expect(await within(row('Signer')).findByText('Discarded version 13. It was never sent.')).toBeTruthy();
+
+    emit(signing({ ...ROOT, pending: { version: 14, hash: HASH_C, fork: false, exposed: true, refused: null } }));
+    expect(within(row('Pending')).getByText('Version 14 is signed and waits for the hub.')).toBeTruthy();
+    expect(within(row('Pending')).queryByRole('button')).toBeNull();
+  });
+
+  it('a discard the hub overtook says so, and nothing was discarded', async () => {
+    renderSection(signing({ ...ROOT, pending: { version: 13, hash: HASH_A, fork: true, exposed: true, refused: null } }), { 'org.discardPending': () => ({ ok: false, reason: 'held' }) });
+    fireEvent.click(within(await found('Pending')).getByRole('button', { name: 'Discard…' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Discard version 13?' })).getByRole('button', { name: 'Discard' }));
+    expect((await within(row('Signer')).findByRole('alert')).textContent).toBe('Not discarded · The hub holds version 13 now: it settled.');
+  });
+
+  it('signing: the problem in words, a successor sent before the damage named; Reset behind its confirmation', async () => {
+    renderSection(signing(ROOT, { problem: 'signing' }));
+    const problem = await found('Problem');
+    expect(within(problem).getByText(/signs nothing until you reset it/)).toBeTruthy();
+    expect(within(problem).getByText(/sent before the damage could still surface as a fork/)).toBeTruthy();
+    fireEvent.click(within(problem).getByRole('button', { name: 'Reset…' }));
+    let sheet = await screen.findByRole('dialog', { name: 'Reset the signing record?' });
+    expect(within(sheet).getByText(/could still surface as a fork/)).toBeTruthy();
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }));
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(sent('org.resetSigning')).toEqual([]);
+    fireEvent.click(within(row('Problem')).getByRole('button', { name: 'Reset…' }));
+    sheet = await screen.findByRole('dialog', { name: 'Reset the signing record?' });
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Reset' }));
+    await vi.waitFor(() => expect(sent('org.resetSigning')).toEqual([{ confirmed: true }]));
+    // another problem carries no Reset
+    emit(signing(ROOT, { problem: 'rollback' }));
+    expect(within(row('Problem')).queryByRole('button')).toBeNull();
+  });
+
+  it('an open Discard confirmation closes when its proposal settles, and when another replaces it: the old hash is never sent', async () => {
+    const fork = { version: 13, hash: HASH_A, fork: true, exposed: true, refused: null };
+    renderSection(signing({ ...ROOT, pending: fork }));
+    fireEvent.click(within(await found('Pending')).getByRole('button', { name: 'Discard…' }));
+    await screen.findByRole('dialog', { name: 'Discard version 13?' });
+    emit(signing({ ...ROOT, pending: null })); // settled while the owner read the sheet
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    emit(signing({ ...ROOT, pending: fork }));
+    fireEvent.click(within(row('Pending')).getByRole('button', { name: 'Discard…' }));
+    await screen.findByRole('dialog', { name: 'Discard version 13?' });
+    // Another proposal at the same version replaces it (discarded elsewhere, signed again): the sheet was for A.
+    emit(signing({ ...ROOT, pending: { ...fork, hash: HASH_B, refused: 'key-purged', fork: false } }));
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    // An unrelated status change leaves an open sheet for the slot it names.
+    fireEvent.click(within(row('Pending')).getByRole('button', { name: 'Discard…' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Discard version 13?' });
+    emit(signing({ ...ROOT, ageDays: 4, pending: { ...fork, hash: HASH_B, refused: 'key-purged', fork: false } }));
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Discard' }));
+    await vi.waitFor(() => expect(sent('org.discardPending')).toEqual([{ confirmed: true, hash: HASH_B }]));
+  });
+
+  it('a discard main refused as stale (the slot changed since the confirmation) says so', async () => {
+    renderSection(signing({ ...ROOT, pending: { version: 13, hash: HASH_A, fork: true, exposed: true, refused: null } }), { 'org.discardPending': () => ({ ok: false, reason: 'stale' }) });
+    fireEvent.click(within(await found('Pending')).getByRole('button', { name: 'Discard…' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Discard version 13?' })).getByRole('button', { name: 'Discard' }));
+    expect((await within(row('Signer')).findByRole('alert')).textContent).toBe('Not discarded · The pending state changed since you confirmed: nothing was discarded.');
+  });
+
+  it('two discarded proposals of one version are two lines', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      renderSection(
+        signing({
+          ...ROOT,
+          abandoned: [
+            { hash: HASH_A, version: 5, hub: true, machines: [] },
+            { hash: HASH_B, version: 5, hub: false, machines: [MINI] },
+          ],
+        }),
+      );
+      const discarded = await found('Discarded');
+      expect(within(discarded).getByText('Version 5 · the hub may still hold it')).toBeTruthy();
+      expect(within(discarded).getByText(`Version 5 · ${MINI} may still hold it`)).toBeTruthy();
+      expect(errors).not.toHaveBeenCalled(); // no duplicate React keys
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
+  it('the old device, still listed after a rekey: its id with the remove-device command', async () => {
+    renderSection(signing({ ...ROOT, oldDevice: OLD_DEVICE }));
+    const old = await found('Old device');
+    expect(within(old).getByText(`deployment admin remove-device -- ${OLD_DEVICE}`).className).toContain('font-mono');
+    emit(signing(ROOT));
+    expect(screen.queryByRole('group', { name: 'Old device' })).toBeNull();
   });
 });
