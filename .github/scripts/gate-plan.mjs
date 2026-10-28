@@ -70,8 +70,9 @@
 // box and timeout and no variant; it stays in `e2e` (default's derivation, the pool-demand hint) and makes `e2e_hosted`,
 // the e2e-hosted job's matrix, and the pool flag; never `e2e_host`, `e2e_vm` or `e2e_build`.
 // HOSTED_MAC_ROUTE defaults to mirror. Hosted-Route: (the dispatch's hosted_route input) overrides it per run.
-// Under direct the same eligible groups instead enter e2e_host on macos-26, building their own out/, with no pool
-// demand. The peer exclusion is mirror-only: MAWS's own checkout can fetch its peer. Unsigned packaged can also
+// Under direct the same eligible groups instead enter e2e_host on macos-26, with no pool demand. Each starts on an empty
+// Mac, so a direct entry whose script builds out/ carries that variant as `cached`: the first job of the run to build it
+// saves it to the Actions cache under the commit and the variant, and every later one restores it (gate.yml). The peer exclusion is mirror-only: MAWS's own checkout can fetch its peer. Unsigned packaged can also
 // take the direct Mac on a macOS lane when HOSTED_MAC_JOBS admits it, except on reserved final refs. Lane moves
 // e2e groups only; packaged is unadmitted until its hosted failures are fixed and it passes 3/3.
 // The peer groups (PEER_E2E; the two-build check, e2e/cross-build.spec.ts): each runs this tree's app against another
@@ -298,7 +299,10 @@ export function planOf(env, scripts) {
       const prebuild = measured.has(group) ? variantOf(group) : undefined;
       const minutes = measured.has(group) ? (prebuild ? 60 : 45) : peerGroups.has(group) ? PEER_MINUTES : 30;
       const timeout = hosted ? (direct ? minutes + HOSTED_MARGIN_MINUTES : HOSTED_TIMEOUT_MINUTES) : timeoutOn(where, minutes);
-      return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group), poppler: poppler.has(group), measured: measured.has(group), ...(prebuild && { prebuild }), ...(hosted && { hosted }), runner, timeout, ...guest, ...(peerGroups.has(group) && peer && { peer }) };
+      // The build took 39% of the direct Macs' job time (23 jobs, 2026-10-28: 140 s of 368 s at the median), and a set larger
+      // than the account's 5 Macs runs in rounds, whose later jobs can restore what the first ones built.
+      const cached = hosted && direct ? variantOf(group) : undefined;
+      return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group), poppler: poppler.has(group), measured: measured.has(group), ...(prebuild && { prebuild }), ...(hosted && { hosted }), ...(cached && { cached }), runner, timeout, ...guest, ...(peerGroups.has(group) && peer && { peer }) };
     });
   const e2eHosted = e2e.filter((entry) => entry.hosted && !direct);
   const e2eHost = e2e.filter((entry) => entry.variant === undefined && (!entry.hosted || direct));
