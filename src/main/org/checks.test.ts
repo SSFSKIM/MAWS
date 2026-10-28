@@ -498,6 +498,33 @@ describe('supersededRevocations after a rewind', () => {
     expect((await machineKeys(signed.state, cert.body.machine, served, now)).keys).toEqual([]);
   });
 
+  it('offers an enrolled machine current again after the recovery: it leaves machines, its name stays, its key revoked under its ref', async () => {
+    let machine!: { ref: string; key: SigningKey };
+    const base = await successor(g, [a1], async (s) => void (machine = await enroll(s, 'mini')));
+    const entry: RevokedKey = { keyId: await keyId(machine.key.pub), holder: { machine: machine.ref } };
+    const { superseded, head, transitions } = await rewound(
+      base,
+      [
+        (s) => {
+          s.machines = [];
+          s.revoked.push(entry);
+        },
+      ],
+      app,
+    );
+    expect(head.state.machines.map((m) => m.ref)).toEqual([machine.ref]);
+    const offer = (await supersededRevocations(head.state, superseded, await self(app)))!;
+    expect(offer.withheld).toEqual([]);
+    expect(offer.lines).toHaveLength(1);
+    expect(offer.lines[0]).toContain('mini');
+    const { signed, verdict: v } = await signOffer(head, app, offer, transitions);
+    expect(v).toBe('ok');
+    expect(signed.state.machines).toEqual([]);
+    expect(signed.state.machineNames).toContainEqual({ name: 'mini', ref: machine.ref });
+    expect(signed.state.revoked).toContainEqual(entry);
+    expect(await check(head, signed, superseded)).toEqual([]);
+  });
+
   it("moves an enrolled machine's and a certificate's retired keys, revoked on the discarded branch, to revoked", async () => {
     const dc = await newDelegation('dc-');
     const { cert, key: certKey } = await certificate(dc, 'dc-1');
