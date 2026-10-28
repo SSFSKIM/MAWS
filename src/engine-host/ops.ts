@@ -15,6 +15,8 @@
 //     `{ok: false, error}`, a throw included: it was tried) is kept and returned.
 // `host.opQuery {opId, opCreated, tombstoneIfAbsent}`: RL4's states with the stored binding; an absent id tombstoned
 // first when asked, under the same synchronous turn as every claim.
+// A closed ledger's `unavailable` says why (`ledger`: op-ledger.ts's word), the route by which the endpoint in `mawsd`
+// shows this process's ledger in its status; a restart of the engine host reopens it.
 import { thrownError, type HostOn } from '@shared/host/runtime';
 import type { OpLedger } from '@shared/host/op-ledger';
 import { requestDigestOf, type RequestDigest } from '@shared/host/request-digest';
@@ -68,7 +70,7 @@ export function opCommands(deps: OpsDeps): { op(input: OpInput, ctx: HandlerCont
       }
       return null;
     });
-    if (begun.kind === 'answered') return begun.answer as OpOutput;
+    if (begun.kind === 'answered') return closedSaid(begun.answer as OpOutput);
 
     let result: { ok: true; value: unknown } | { ok: false; error: IpcError };
     try {
@@ -83,7 +85,13 @@ export function opCommands(deps: OpsDeps): { op(input: OpInput, ctx: HandlerCont
   }
 
   function opQuery({ opId, opCreated, tombstoneIfAbsent }: OpQueryInput): OpQueryOutput {
-    return ledger.query(opId, opCreated, tombstoneIfAbsent);
+    return closedSaid(ledger.query(opId, opCreated, tombstoneIfAbsent));
+  }
+
+  /** A closed ledger's `unavailable`, with why. */
+  function closedSaid<T extends { state: string; reason?: string }>(answer: T): T {
+    const unavailable = answer.state === 'unavailable' || (answer.state === 'refused' && answer.reason === 'unavailable');
+    return unavailable && ledger.closed !== null ? { ...answer, ledger: ledger.closed } : answer;
   }
 
   return { op, opQuery };

@@ -47,6 +47,8 @@ export type ActionsContext = {
   rl10: Pick<Rl10, 'rpc'>;
   dispatch: EndpointServices['dispatch'];
   hold(reason: string): () => void;
+  /** What the engine host's last ledger answer said of its ledger: why it is closed, or null (the status shows it). */
+  engineHostLedger?(closed: string | null): void;
   offers?: Offers;
   now(): number;
   log(line: string): void;
@@ -69,9 +71,17 @@ export function outcomeOf(result: unknown): unknown {
   return result.ok === true ? { state: 'done', result: result.value } : { state: 'failed', error: result.error };
 }
 
-/** A ledger's answer to an action (host.op's, the endpoint's own) as `done`'s outcome. */
+/** A ledger's answer to an action (host.op's, the endpoint's own) as `done`'s outcome; why a ledger is closed is the
+ * machine's status, not the device's. */
 function answered(answer: unknown): unknown {
-  return isObject(answer) && answer.state === 'done' ? outcomeOf(answer.result) : answer;
+  if (!isObject(answer)) return answer;
+  if (answer.state === 'done') return outcomeOf(answer.result);
+  return answer.state === 'refused' ? { state: 'refused', reason: answer.reason } : answer;
+}
+
+/** Why the engine host's ledger is closed, as its answer says it (`ledger`), or null for an answer of an open one. */
+export function closedLedgerOf(value: unknown): string | null {
+  return isObject(value) && typeof value.ledger === 'string' ? value.ledger : null;
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -242,6 +252,7 @@ export class Actions {
         context: { launchId: context.launchId, engineSessionId: context.engineSessionId },
         ...(action.requestDigest === undefined ? {} : { requestDigest: action.requestDigest }),
       });
+      if (answer.ok) this.ctx.engineHostLedger?.(closedLedgerOf(answer.value));
       channel.send({ t: 'done', opId: action.opId, outcome: answer.ok ? answered(answer.value) : { state: 'unknown', reason: answer.error.code } });
     } finally {
       release();

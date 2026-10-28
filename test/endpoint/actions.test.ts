@@ -705,3 +705,29 @@ describe('the endpoint’s own actions, under its own ledger', () => {
   });
 });
 
+// ---- A closed ledger, shown -----------------------------------------------------------------------------------------
+
+describe('a closed ledger, in the endpoint’s status', () => {
+  it('shows its own ledger closed, and why, until mawsd restarts', async () => {
+    const services = fakeServices();
+    fs.writeFileSync(join(services.machine.stateDir, 'ops.jsonl'), 'garbage\n{}\n', { mode: 0o600 });
+    const f = await start({ services });
+    expect(f.endpoint.status().opLedgers).toEqual({ endpoint: { closed: 'unreadable', clears: 'restart' } });
+    const a = await open(f, a1, A);
+    expect(await run(a, a.device.action({ machine: f.ref, action: 'endpoint.grant', args: { grant: await grantFor(f, B) } }))).toEqual({ state: 'refused', reason: 'unavailable' });
+  });
+
+  it('shows the engine host’s ledger closed once it answers so, and clears it once the restarted host answers again', async () => {
+    const f = await start();
+    expect(f.endpoint.status().opLedgers).toBeUndefined();
+    const a = await open(f, a1, A);
+    fs.writeFileSync(join(hostDir, 'ops.jsonl'), 'garbage\n{}\n', { mode: 0o600 });
+    f.host.restart();
+    expect(await run(a, send(f, a, 'closed'))).toEqual({ state: 'refused', reason: 'unavailable' });
+    expect(f.endpoint.status().opLedgers).toEqual({ engineHost: { closed: 'unreadable', clears: 'restart' } });
+    fs.rmSync(join(hostDir, 'ops.jsonl'));
+    f.host.restart();
+    expect(await run(a, send(f, a, 'open again'))).toMatchObject({ state: 'done' });
+    expect(f.endpoint.status().opLedgers).toBeUndefined();
+  });
+});

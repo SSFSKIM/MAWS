@@ -115,6 +115,8 @@ export class Endpoint implements EndpointModule {
   /** Judgments begun: only the latest one's verdict is taken. */
   #judgments = 0;
   #headHash: string | null = null;
+  /** Why the engine host's operation ledger is closed, as its last ledger answer said; null while it answers. */
+  #engineHostLedger: string | null = null;
   #timer: ReturnType<typeof setInterval> | null = null;
   #syncing: Promise<unknown> | null = null;
   /** `stop()` was called: nothing in flight then (a sync, an adoption) opens the link or a timer again. */
@@ -273,11 +275,20 @@ export class Endpoint implements EndpointModule {
       rl10: this.rl10,
       dispatch,
       hold: (reason) => this.#services?.hold(reason) ?? (() => {}),
+      engineHostLedger: (closed) => (this.#engineHostLedger = closed),
       offers: authorization.offers,
       now: this.deps.now,
       log,
     });
-    this.queries = new Queries({ authorize: (request, who, now) => this.authorizer.authorize(request, who, now), own: this.own, rl10: this.rl10, dispatch, now: this.deps.now, log });
+    this.queries = new Queries({
+      authorize: (request, who, now) => this.authorizer.authorize(request, who, now),
+      own: this.own,
+      rl10: this.rl10,
+      dispatch,
+      engineHostLedger: (closed) => (this.#engineHostLedger = closed),
+      now: this.deps.now,
+      log,
+    });
     this.rl10.onResult((result) => this.actions.result(result));
     this.gate.setExecutors({ act: (channel, m, decision) => this.actions.execute(channel, m, decision) });
     const gated = this.gate.routes();
@@ -345,7 +356,8 @@ export class Endpoint implements EndpointModule {
   status(): EndpointStatus {
     this.links.rl10 = { connected: this.rl10.connected };
     const stopped = this.hub.stopped;
-    return endpointStatus(this.#state, this.#headHash, this.links.refusing === undefined && stopped !== null ? { ...this.links, refusing: stopped } : this.links);
+    const links = this.links.refusing === undefined && stopped !== null ? { ...this.links, refusing: stopped } : this.links;
+    return endpointStatus(this.#state, this.#headHash, links, { endpoint: this.own.closed, engineHost: this.#engineHostLedger });
   }
 
   cli(command: string, args: readonly string[], secret?: string): Promise<{ code: number; out: string }> {

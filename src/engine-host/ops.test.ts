@@ -137,10 +137,10 @@ describe('host.op', () => {
     expect(await again.op(interrupt, CTX)).toEqual({ state: 'in-progress' });
   });
 
-  it('answers every op `unavailable` when its ledger can’t be read', async () => {
-    const h = ops({ ledger: { readable: false, begin: () => ({ kind: 'answered', answer: { state: 'refused', reason: 'unavailable' } }), finish: () => {}, query: () => ({ state: 'unavailable' }) } as unknown as OpLedger });
-    expect(await h.op(op(), CTX)).toEqual({ state: 'refused', reason: 'unavailable' });
-    expect(h.opQuery({ opId: 'op-000000000000001', opCreated: iso(Date.now()), tombstoneIfAbsent: true })).toEqual({ state: 'unavailable' });
+  it('answers every op `unavailable` when its ledger is closed, saying why (`ledger`) so the endpoint can show it', async () => {
+    const h = ops({ ledger: { readable: false, closed: 'write-failed', begin: () => ({ kind: 'answered', answer: { state: 'refused', reason: 'unavailable' } }), finish: () => {}, query: () => ({ state: 'unavailable' }) } as unknown as OpLedger });
+    expect(await h.op(op(), CTX)).toEqual({ state: 'refused', reason: 'unavailable', ledger: 'write-failed' });
+    expect(h.opQuery({ opId: 'op-000000000000001', opCreated: iso(Date.now()), tombstoneIfAbsent: true })).toEqual({ state: 'unavailable', ledger: 'write-failed' });
   });
 });
 
