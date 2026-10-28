@@ -31,6 +31,30 @@ import {
   type DeviceKeys,
 } from './keys';
 
+// The file system as keys.ts sees it, unchanged unless a test sets a hook: `before` may hold a call, `after` sees one
+// done (or failed: an open of an absent file is a read too), so two callers acting on the same key files can be
+// interleaved deterministically.
+type FsOp = 'lstat' | 'open' | 'rename';
+const fsHooks = vi.hoisted(() => ({
+  before: null as null | ((op: FsOp, path: string, to?: string) => Promise<void>),
+  after: null as null | ((op: FsOp, path: string, to?: string) => void),
+}));
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  const hooked =
+    <A extends unknown[], R>(op: FsOp, call: (...args: A) => Promise<R>) =>
+    async (...args: A): Promise<R> => {
+      const [path, to] = [String(args[0]), op === 'rename' ? String(args[1]) : undefined];
+      await fsHooks.before?.(op, path, to);
+      try {
+        return await call(...args);
+      } finally {
+        fsHooks.after?.(op, path, to);
+      }
+    };
+  return { ...actual, lstat: hooked('lstat', actual.lstat), open: hooked('open', actual.open), rename: hooked('rename', actual.rename) };
+});
+
 let profile: string;
 const deviceDir = () => join(profile, 'device');
 const keysFile = () => join(deviceDir(), 'keys.json');
@@ -43,6 +67,8 @@ beforeEach(async () => {
   profile = await mkdtemp(join(tmpdir(), 'maws-device-keys-'));
 });
 afterEach(async () => {
+  fsHooks.before = null;
+  fsHooks.after = null;
   await rm(profile, { recursive: true, force: true });
 });
 
@@ -424,6 +450,69 @@ describe('the next keys (a rekey)', () => {
     await rename(keysFile(), retiredFile());
     expect(pubs(await loadDeviceKeys(profile, excluded))).toEqual(pubs(next));
     expect((await readdir(deviceDir())).sort()).toEqual(['keys.json', 'keys.retired.json']);
+  });
+
+  /** Resolves at `fire()`, or after a moment when nothing fires: the other caller is waiting its turn and can't. */
+  const signal = () => {
+    let fire = () => {};
+    const fired = new Promise<void>((resolve) => (fire = resolve));
+    return { fire, wait: () => Promise.race([fired, new Promise<void>((resolve) => setTimeout(resolve, 100))]) };
+  };
+
+  /** Holds the first check of keys.json until a rename puts a file there: the checker is overtaken between its check and its act. */
+  const overtakeTheFirstCheckOfKeysJson = () => {
+    const installed = signal();
+    let held = false;
+    fsHooks.after = (op, _path, to) => {
+      if (op === 'rename' && to === keysFile()) installed.fire();
+    };
+    fsHooks.before = async (op, path) => {
+      if (op !== 'lstat' || path !== keysFile() || held) return;
+      held = true;
+      await installed.wait();
+    };
+  };
+
+  it('are promoted once when two promotions start together after the first rename, the new keys current and the old retired', async () => {
+    const old = await loadDeviceKeys(profile, excluded);
+    const next = await createNextDeviceKeys(profile, excluded);
+    await rename(keysFile(), retiredFile());
+    overtakeTheFirstCheckOfKeysJson();
+    await Promise.all([promoteNextDeviceKeys(profile), promoteNextDeviceKeys(profile)]);
+    expect((await readdir(deviceDir())).sort()).toEqual(['keys.json', 'keys.retired.json']);
+    expect((await deviceKeyIds(profile, 'current'))?.device).toBe(await deviceOf(next));
+    expect((await deviceKeyIds(profile, 'retired'))?.device).toBe(await deviceOf(old));
+  });
+
+  it('are promoted once when a promotion and a load that finishes it start together, the load given the new keys', async () => {
+    const old = await loadDeviceKeys(profile, excluded);
+    const next = await createNextDeviceKeys(profile, excluded);
+    await rename(keysFile(), retiredFile());
+    overtakeTheFirstCheckOfKeysJson();
+    const [, loaded] = await Promise.all([promoteNextDeviceKeys(profile), loadDeviceKeys(profile, excluded)]);
+    expect(pubs(loaded)).toEqual(pubs(next));
+    expect((await readdir(deviceDir())).sort()).toEqual(['keys.json', 'keys.retired.json']);
+    expect((await deviceKeyIds(profile, 'current'))?.device).toBe(await deviceOf(next));
+    expect((await deviceKeyIds(profile, 'retired'))?.device).toBe(await deviceOf(old));
+  });
+
+  it('are found in one reading while a promotion moves them: never missed between keys.json and keys.next.json', async () => {
+    await loadDeviceKeys(profile, excluded);
+    const next = await deviceOf(await createNextDeviceKeys(profile, excluded));
+    await rename(keysFile(), retiredFile());
+    // The promotion's last rename waits until keys.json has been read; the read of keys.next.json waits for that rename.
+    const currentRead = signal();
+    const installed = signal();
+    fsHooks.before = async (op, path, to) => {
+      if (op === 'rename' && to === keysFile()) await currentRead.wait();
+      if (op === 'open' && path === nextFile()) await installed.wait();
+    };
+    fsHooks.after = (op, path, to) => {
+      if (op === 'open' && path === keysFile()) currentRead.fire();
+      if (op === 'rename' && to === keysFile()) installed.fire();
+    };
+    const [found] = await Promise.all([findDeviceKeys(profile, next), promoteNextDeviceKeys(profile)]);
+    expect(found).not.toBeNull();
   });
 
   it('replace a retired file an earlier rekey left, destroying its keys early', async () => {

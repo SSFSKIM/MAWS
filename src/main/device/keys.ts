@@ -25,7 +25,7 @@
 // once the org no longer lists the old keys as current. A device's id is `keyId(channel.pub)`; no file stores it.
 import { constants } from 'node:fs';
 import { link, lstat, mkdir, open, rename, rm, type FileHandle } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { generateSigningKey, importSigningKey, keyId, type B64, type SigningKey } from '../../../apps/org-protocol/src/index.ts';
 import { excludeFromBackup } from './backup-exclusion';
 
@@ -72,6 +72,26 @@ const FILE_NAMES: Record<DeviceKeyFile, string> = { current: 'keys.json', next: 
 const deviceDirectory = (profile: string) => join(profile, 'device');
 const keyFile = (profile: string, which: DeviceKeyFile) => join(deviceDirectory(profile), FILE_NAMES[which]);
 
+// Every read or change of a profile's key files runs in that profile's queue, one at a time, and acts only on what it
+// finds once its turn comes. A caller that checks a file and then acts on the check can't be overtaken in between: two
+// finishers of one promotion would otherwise retire the keys the other had just installed. Main is one process, and the
+// profile's single-instance lock keeps any other process off these files.
+const queues = new Map<string, Promise<unknown>>();
+
+function serialized<T>(profile: string, body: () => Promise<T>): Promise<T> {
+  const key = resolve(deviceDirectory(profile));
+  const run = (queues.get(key) ?? Promise.resolve()).then(body);
+  const tail = run.then(
+    () => {},
+    () => {},
+  );
+  queues.set(key, tail);
+  void tail.then(() => {
+    if (queues.get(key) === tail) queues.delete(key);
+  });
+  return run;
+}
+
 /**
  * The device's keys under `profile` (main's userData), made on the first load. A promotion a crash cut off between its
  * renames (no `keys.json`, a `keys.next.json`) is finished rather than a new pair made.
@@ -83,15 +103,18 @@ export async function loadDeviceKeys(profile: string, deps: DeviceKeysDeps = {})
     console.warn(`[device-keys] could not exclude ${dir} from Time Machine: ${error instanceof Error ? error.message : String(error)}`);
     return false;
   });
-  const file = keyFile(profile, 'current');
-  const existing = await readPrivateFile(file, uid);
-  if (existing !== null) return fromFile(existing, file);
-  if (await present(keyFile(profile, 'next'))) await renameDurably(dir, keyFile(profile, 'next'), file);
-  else await createKeysFile(dir, file, (deps.now ?? (() => new Date()))(), excluded);
-  // Whichever first load linked its file into place, every load reads that one.
-  const created = await readPrivateFile(file, uid);
-  if (created === null) throw new DeviceKeysError('malformed', file, 'vanished after it was written');
-  return fromFile(created, file);
+  return serialized(profile, async () => {
+    const file = keyFile(profile, 'current');
+    const existing = await readPrivateFile(file, uid);
+    if (existing !== null) return fromFile(existing, file);
+    if (await present(keyFile(profile, 'next'))) await renameDurably(dir, keyFile(profile, 'next'), file);
+    else await createKeysFile(dir, file, (deps.now ?? (() => new Date()))(), excluded);
+    // Whichever first load linked its file into place (another process's, should one get past the profile lock), every
+    // load reads that one.
+    const created = await readPrivateFile(file, uid);
+    if (created === null) throw new DeviceKeysError('malformed', file, 'vanished after it was written');
+    return fromFile(created, file);
+  });
 }
 
 /**
@@ -112,20 +135,23 @@ export async function createNextDeviceKeys(profile: string, deps: DeviceKeysDeps
   if (!excluded) throw new DeviceKeysError('not-excluded', dir, 'has no Time Machine exclusion on this system');
   const file = keyFile(profile, 'next');
   const temp = await writeTempKeysFile(dir, (deps.now ?? (() => new Date()))(), true);
-  try {
-    await rename(temp, file);
-  } finally {
-    await rm(temp, { force: true });
-  }
-  await syncDirectory(dir);
-  const created = await readPrivateFile(file, uid);
-  if (created === null) throw new DeviceKeysError('malformed', file, 'vanished after it was written');
-  return fromFile(created, file);
+  return serialized(profile, async () => {
+    try {
+      await rename(temp, file);
+    } finally {
+      await rm(temp, { force: true });
+    }
+    await syncDirectory(dir);
+    const created = await readPrivateFile(file, uid);
+    if (created === null) throw new DeviceKeysError('malformed', file, 'vanished after it was written');
+    return fromFile(created, file);
+  });
 }
 
 /** Deletes a rekey's next keys: an attempt that ended before the org session recorded their id. */
-export async function discardNextDeviceKeys(profile: string, deps: Pick<DeviceKeysDeps, 'uid'> = {}): Promise<void> {
-  await removeDurably(profile, 'next', deps.uid ?? process.getuid!());
+export function discardNextDeviceKeys(profile: string, deps: Pick<DeviceKeysDeps, 'uid'> = {}): Promise<void> {
+  const uid = deps.uid ?? process.getuid!();
+  return serialized(profile, () => removeDurably(profile, 'next', uid));
 }
 
 /**
@@ -135,21 +161,40 @@ export async function discardNextDeviceKeys(profile: string, deps: Pick<DeviceKe
  * forward path does, once `findDeviceKeys` has placed the new id, and writes registration.json only after it returns. A
  * retired file an earlier rekey left is replaced, its keys destroyed early: a destruction only narrows what can sign.
  */
-export async function promoteNextDeviceKeys(profile: string, deps: Pick<DeviceKeysDeps, 'uid'> = {}): Promise<void> {
-  const dir = await privateDeviceDirectory(profile, deps.uid ?? process.getuid!());
-  if (!(await present(keyFile(profile, 'next')))) return syncDirectory(dir);
-  if (await present(keyFile(profile, 'current'))) await renameDurably(dir, keyFile(profile, 'current'), keyFile(profile, 'retired'));
-  await renameDurably(dir, keyFile(profile, 'next'), keyFile(profile, 'current'));
+export function promoteNextDeviceKeys(profile: string, deps: Pick<DeviceKeysDeps, 'uid'> = {}): Promise<void> {
+  const uid = deps.uid ?? process.getuid!();
+  return serialized(profile, async () => {
+    const dir = await privateDeviceDirectory(profile, uid);
+    if (!(await present(keyFile(profile, 'next')))) return syncDirectory(dir);
+    if (await present(keyFile(profile, 'current'))) await renameDurably(dir, keyFile(profile, 'current'), keyFile(profile, 'retired'));
+    await renameDurably(dir, keyFile(profile, 'next'), keyFile(profile, 'current'));
+  });
 }
 
 /** Deletes the keys a rekey retired, once the org state no longer lists them as current. */
-export async function destroyRetiredDeviceKeys(profile: string, deps: Pick<DeviceKeysDeps, 'uid'> = {}): Promise<void> {
-  await removeDurably(profile, 'retired', deps.uid ?? process.getuid!());
+export function destroyRetiredDeviceKeys(profile: string, deps: Pick<DeviceKeysDeps, 'uid'> = {}): Promise<void> {
+  const uid = deps.uid ?? process.getuid!();
+  return serialized(profile, () => removeDurably(profile, 'retired', uid));
 }
 
 /** The ids of the keys `which` holds, read and checked as a load reads them; null when there is no such file. */
-export async function deviceKeyIds(profile: string, which: DeviceKeyFile, deps: Pick<DeviceKeysDeps, 'uid'> = {}): Promise<DeviceKeyIds | null> {
+export function deviceKeyIds(profile: string, which: DeviceKeyFile, deps: Pick<DeviceKeysDeps, 'uid'> = {}): Promise<DeviceKeyIds | null> {
   const uid = deps.uid ?? process.getuid!();
+  return serialized(profile, () => readKeyIds(profile, which, uid));
+}
+
+/** Which of `keys.json` and `keys.next.json` holds the device `device`, read in one turn: the rekey replay's question. */
+export function findDeviceKeys(profile: string, device: string, deps: Pick<DeviceKeysDeps, 'uid'> = {}): Promise<'current' | 'next' | null> {
+  const uid = deps.uid ?? process.getuid!();
+  return serialized(profile, async () => {
+    for (const which of ['current', 'next'] as const) {
+      if ((await readKeyIds(profile, which, uid))?.device === device) return which;
+    }
+    return null;
+  });
+}
+
+async function readKeyIds(profile: string, which: DeviceKeyFile, uid: number): Promise<DeviceKeyIds | null> {
   if (!(await present(deviceDirectory(profile)))) return null;
   await assertPrivateDirectory(deviceDirectory(profile), uid);
   const file = keyFile(profile, which);
@@ -157,14 +202,6 @@ export async function deviceKeyIds(profile: string, which: DeviceKeyFile, deps: 
   if (text === null) return null;
   const keys = await fromFile(text, file);
   return { device: await keyId(keys.channel.pub), channelPub: keys.channel.pub, stepUpPub: keys.stepUp.pub };
-}
-
-/** Which of `keys.json` and `keys.next.json` holds the device `device`: the rekey replay's question. */
-export async function findDeviceKeys(profile: string, device: string, deps: Pick<DeviceKeysDeps, 'uid'> = {}): Promise<'current' | 'next' | null> {
-  for (const which of ['current', 'next'] as const) {
-    if ((await deviceKeyIds(profile, which, deps))?.device === device) return which;
-  }
-  return null;
 }
 
 /** `<profile>/device/`, made if absent, and refused unless it is a private directory of this uid's. */
@@ -184,12 +221,7 @@ async function removeDurably(profile: string, which: DeviceKeyFile, uid: number)
 
 /** Renames within `dir` and syncs it, so the rename survives a crash before anything that follows it is written. */
 async function renameDurably(dir: string, from: string, to: string): Promise<void> {
-  try {
-    await rename(from, to);
-  } catch (error) {
-    // Two callers finishing one promotion (two loads, or a load and the replay): the other moved it first.
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-  }
+  await rename(from, to);
   await syncDirectory(dir);
 }
 
