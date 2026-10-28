@@ -68,6 +68,7 @@ beforeAll(async () => {
 const ENGINE: Record<string, string> = {
   'app-own': 'eng-own',
   'app-shared': 'eng-shared',
+  'app-approve': 'eng-approve',
   'app-orgview': 'eng-orgview',
   'app-private': 'eng-private',
   'app-b': 'eng-b',
@@ -77,6 +78,7 @@ const record = (lane: 'A' | 'B', session: string, fields: Omit<SessionRecord, 'l
 const RECORDS: SessionRecord[] = [
   record('B', 'eng-own', { owners: ['@machine'] }),
   record('B', 'eng-shared', { owners: [A], shares: [{ member: B, grade: 'converse' }] }),
+  record('B', 'eng-approve', { owners: [A], shares: [{ member: B, grade: 'approve' }] }),
   record('B', 'eng-orgview', { owners: [A], access: 'org-view' }),
   record('B', 'eng-private', { owners: [A], access: 'private' }),
   record('B', 'eng-b', { owners: [B] }),
@@ -85,7 +87,7 @@ const RECORDS: SessionRecord[] = [
   record('A', 'la-b', { owners: [B], launch: 'L1' }),
 ];
 /** requestId → the kind of the event that opened it (`session.pendingRequest`). */
-const PENDING: Record<string, string> = { 'rq-question': 'question.requested', 'rq-perm': 'permission.requested', 'rq-plan': 'plan.requested' };
+const PENDING: Record<string, string> = { 'rq-question': 'question.requested', 'rq-ask': 'maws.ask.opened', 'rq-perm': 'permission.requested', 'rq-plan': 'plan.requested' };
 
 const ok = (value: unknown): HostResponse => ({ t: 'res', id: '0', ok: true, value });
 const refused = (code: IpcErrorCode): HostResponse => ({ t: 'res', id: '0', ok: false, error: { code, message: code } });
@@ -571,6 +573,29 @@ describe('the web-cards class (RL §5.10)', () => {
     const decide = (extra: Record<string, unknown>) => laneA(f, phone, 'decide', 'la-b', { digest: { ...digest('r1'), session: 'la-b' }, decision: 'allow', ...extra });
     expect(await send(phone, await phone.device.webauthn(decide({}), HUB))).toBe('ok');
     expect(await send(phone, await phone.device.webauthn(decide({ scope: { suggestion: 0, sha256: '0'.repeat(64), destination: 'session' } }), HUB))).toBe('class');
+  });
+
+  it('declines a pending native question with the plain deny, and nothing more: never the async ask, never with words, a changed input or a stop (`class`)', async () => {
+    const f = await start();
+    const phone = await open(f, bw, B);
+    const decline = { kind: 'permission', decision: 'deny' };
+    const signed = (requestId: string, given: Record<string, unknown>, appSessionId = 'app-b') => phone.device.webauthn(answerOn(f, phone, appSessionId, requestId, given), HUB);
+    expect(await send(phone, await signed('rq-question', decline))).toBe('ok');
+    expect(await send(phone, await signed('rq-ask', decline))).toBe('class');
+    expect(await send(phone, await signed('rq-question', { kind: 'permission', decision: 'deny_and_stop' }))).toBe('class');
+    expect(await send(phone, await signed('rq-question', { ...decline, updatedInput: { questions: [] } }))).toBe('class');
+    expect(await send(phone, await signed('rq-question', { ...decline, message: 'not now' }))).toBe('class');
+    expect(await send(phone, await signed('rq-question', { kind: 'permission', decision: 'allow', scope: 'once' }))).toBe('class');
+    // A decline unsigned, or carrying the assertion made for an answer to the same question, is refused its presence.
+    expect(await send(phone, answerOn(f, phone, 'app-b', 'rq-question', decline))).toBe('step-up');
+    const answered = await signed('rq-question', question);
+    expect(await send(phone, { ...answerOn(f, phone, 'app-b', 'rq-question', decline), webauthn: answered.webauthn })).toBe('step-up');
+    // Only on a session the member owns. Another's is refused at its floor (step 4) before ownership is read: a decline
+    // is graded as any permission answer, `approve` (by-effect.ts), so one shared with `converse` is too; one shared
+    // with `approve` passes the floor and is refused its class (step 7).
+    expect(await send(phone, await signed('rq-question', decline, 'app-private'))).toBe('grade');
+    expect(await send(phone, await signed('rq-question', decline, 'app-shared'))).toBe('grade');
+    expect(await send(phone, await signed('rq-question', decline, 'app-approve'))).toBe('class');
   });
 
   it('answers only on a session its member owns, reads listings, and subscribes only to the cards view of an owned one', async () => {

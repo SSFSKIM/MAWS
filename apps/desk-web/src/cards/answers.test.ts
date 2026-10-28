@@ -1,4 +1,4 @@
-// An answer from the phone (P5 O13 M4, §D; RL4, RL §5.10): the action built in exactly one of §D's five forms, sealed
+// An answer from the phone (P5 O13 M4, §D; RL4, RL §5.10): the action built in exactly one of §D's five forms or a question's decline on either lane, sealed
 // with a fresh nonce and a WebAuthn assertion over its digest, its `ack` and `done` read into the client's `Outcome`
 // (a `done` is an envelope, never a success by itself), and a lost acknowledgement resealed under the operation it
 // retained, which keeps every field the ledgers' fingerprint binds.
@@ -48,7 +48,7 @@ const shape = (op: Record<string, unknown>) => {
   return kept;
 };
 
-describe('the five forms an answer takes, and nothing else', () => {
+describe('the seven forms an answer takes, and nothing else', () => {
   it('lane A: a question is `sminos.answer`, a permission `sminos.decide`, each with the session’s launch and the digest twice', async () => {
     const asked = await laneACard(ASKED, 'L1');
     const raised = await laneACard(RAISED, 'L1');
@@ -63,6 +63,22 @@ describe('the five forms an answer takes, and nothing else', () => {
     const ASYNC = { ...ASKED, tool: 'mcp__sminos__AskUserQuestion' };
     const aDigest = { ...qDigest, tool: 'mcp__sminos__AskUserQuestion' };
     expect(shape(operationFor(identity, MACHINE, await laneACard(ASYNC, 'L1'), { kind: 'question', answers: { 'Which way?': 'left' } }, NOW))).toEqual({ ...common, action: 'sminos.answer', args: { session: 'la-1', answers: { 'Which way?': 'left' }, digest: aDigest }, requestDigest: aDigest });
+  });
+
+  it('lane A: a native question is declined as `sminos.decide` deny over its own digest; an async one is never declined', async () => {
+    const asked = await laneACard(ASKED, 'L1');
+    const qDigest = { session: 'la-1', request: 'toolu_2', tool: 'AskUserQuestion', input_sha256: await inputSha256(ASKED.input) };
+    const common = { v: 1, org: 'org-cards', machine: MACHINE, device: 'phone-1', opCreated: at, session: 'la-1', context: { lane: 'A', session: 'la-1', launch: 'L1' } };
+    expect(shape(operationFor(identity, MACHINE, asked, { kind: 'decline' }, NOW))).toEqual({ ...common, action: 'sminos.decide', args: { session: 'la-1', decision: 'deny', digest: qDigest }, requestDigest: qDigest });
+    const asynchronous = await laneACard({ ...ASKED, tool: 'mcp__sminos__AskUserQuestion', async: true }, 'L1');
+    expect(() => operationFor(identity, MACHINE, asynchronous, { kind: 'decline' }, NOW)).toThrow(AnswerError);
+  });
+
+  it('lane B: a question is declined with the plain permission deny the engine reads as the question skipped, over its own digest', async () => {
+    const question = await laneB(QUESTION, 'question');
+    const op = operationFor(identity, MACHINE, question, { kind: 'decline' }, NOW);
+    expect(JSON.stringify((op.args as { answer: unknown }).answer)).toBe('{"kind":"permission","decision":"deny"}');
+    expect(op).toMatchObject({ action: 'session.answer', args: { appSessionId: APP, requestId: 'rq-q' }, requestDigest: requestDigestOf(APP, QUESTION) });
   });
 
   it('lane B: Allow carries scope once, Deny no scope, a question its answers, byte for byte', async () => {
@@ -96,6 +112,9 @@ describe('the five forms an answer takes, and nothing else', () => {
     expect(() => operationFor(identity, MACHINE, permission, { kind: 'question', answers: {} }, NOW)).toThrow(AnswerError);
     const question = await laneACard(ASKED, 'L1');
     expect(() => operationFor(identity, MACHINE, question, { kind: 'decision', decision: 'allow' }, NOW)).toThrow(AnswerError);
+    expect(() => operationFor(identity, MACHINE, question, { kind: 'decision', decision: 'deny' }, NOW)).toThrow(AnswerError);
+    const answerable = await laneACard(RAISED, 'L1');
+    expect(() => operationFor(identity, MACHINE, answerable, { kind: 'decline' }, NOW)).toThrow(AnswerError);
   });
 });
 

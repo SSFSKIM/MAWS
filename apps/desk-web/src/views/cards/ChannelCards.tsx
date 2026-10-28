@@ -5,17 +5,19 @@
 // The device's standing comes first: the view follows a session only while the org state lists this device, and says
 // so when it no longer does (a removed device's handshake reads `closed`, which alone would retry for ever). The session
 // is named by its verified listing (its lane says which `cards` view to subscribe to); at a landing before the listings
-// store's snapshot is in, the listing is read from the hub (session-listing.ts). A lane B session the endpoint will not
-// subscribe to yet (`grade`: no engine session, never prompted locally) is not yet actionable, and is followed again
-// when its pending count in the machine's presence moves. No view reads the endpoint's `caps` grades as what this phone
-// may do: the endpoint decides each answer.
+// store's snapshot is in, the session's records are read from the hub into the store (session-listing.ts). A lane B
+// session the endpoint will not subscribe to yet (`grade`: no engine session, never prompted locally) is not yet
+// actionable, and is followed again when its pending count in the machine's presence moves. No view reads the
+// endpoint's `caps` grades as what this phone may do: the endpoint decides each answer.
 //
-// A push's tap lands here (P5 O13 M6, `/cards/<ref>/<session>`), cold or in a window already open. A landing on a
-// machine the org state this phone holds does not resolve — a VM certified since the last read, which moved no version
-// and raised no notice — reads the state again for that machine, at most once a minute (org-store.ts's `refresh`, keyed
-// by the ref as a listing's unresolved signer is), whatever the view's own read on opening found too recent to repeat.
+// A push's tap lands here (P5 O13 M6, `/cards/<ref>/<session>`), cold or in a window already open. At each landing (a
+// second tap on the same cards reuses this view) and at the view's opening, a machine the org state this phone holds
+// does not resolve — a VM certified since the last read, which moved no version and raised no notice — has the state
+// read again for it, at most once a minute (org-store.ts's `refresh`, keyed by the ref as a listing's unresolved
+// signer is), whatever the view's own read on opening found too recent to repeat.
 import { useEffect, useState } from 'react';
 import type { Me } from '../../hub/me';
+import { useCardsLanding } from '../../pwa/service-worker';
 import { useDeskLayout } from '../../shell/layout';
 import { useNarrow } from '../../shell/viewport';
 import { bootDevice } from '../../cards/boot';
@@ -27,23 +29,23 @@ import { cardsIdentity, followCards, openChannel, socketFor, type MachineChannel
 import type { DeviceRecord } from '../../cards/device-store';
 import { orgView } from '../../cards/org-store';
 import { syncOrg, useDevice } from '../../cards/register';
-import { fetchListing, followSessionListing, type Looked } from '../../cards/session-listing';
+import { fetchListings, followSessionListing, type Looked } from '../../cards/session-listing';
 import { deviceOrgStore, listingsStore, refreshOrg } from '../../cards/start';
 import { answerCard, attemptKey, newSet, noteCard, retryCard, useAttempts } from './attempts';
 import { ChannelCard } from './ChannelCard';
 import { DeviceStanding } from './DeviceStanding';
 
-/** The session's verified listing: the store's, or at a landing before its snapshot is in, the hub's (or none). */
+/** The session's verified listing: the store's, at a landing before its snapshot is in taken from the hub's (or none). */
 function useSessionListing(machine: string, session: string, loaded: boolean): Looked {
   const [looked, setLooked] = useState<Looked>({ state: 'looking' });
   useEffect(() => {
     const store = listingsStore();
     if (!loaded || store === null) return;
     const read = () => {
-      const org = deviceOrgStore();
-      if (org === null || !org.ready) return null;
+      // Read once the phone holds an org state to verify against: the store tells when one comes.
+      if (!deviceOrgStore()?.ready) return null;
       const project = socketFor(machine).presence()?.pending[session]?.project ?? null;
-      return fetchListing(machine, session, project, { head: org.head(), certificates: org.certificates() });
+      return fetchListings(machine, session, project);
     };
     return followSessionListing(`${machine}/${session}`, store, read, setLooked);
   }, [machine, session, loaded]);
@@ -58,9 +60,10 @@ export function ChannelCards({ me, machine, session, onDevice }: { me: Me; machi
   const looked = useSessionListing(machine, session, loaded && listed);
   const resolved = useCardsBoard((s) => s.machines.find((m) => m.ref === machine)?.name);
   const watching = useCardsBoard((s) => s.watching);
+  const landing = useCardsLanding((s) => (s.landed?.machine === machine && s.landed.session === session ? s.landed.n : 0));
   useEffect(() => {
     if (watching && resolved === undefined) refreshOrg(machine);
-  }, [machine, watching, resolved]);
+  }, [machine, watching, resolved, landing]);
   const name = resolved ?? `${machine.slice(0, 8)}…`;
   const navigate = useDeskLayout((s) => s.navigate);
   const narrow = useNarrow(); // a phone's top bar has the way back
