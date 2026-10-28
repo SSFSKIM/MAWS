@@ -472,7 +472,10 @@ A `refuse` finding ends the attempt with its code before Touch ID; `warn` findin
 
 *The superseded states' revocations* (P5 Decision Log 30). A recovery rewinds the chain to a base below the head the app held, so a revocation signed honestly on the discarded branch is lost, and its key may be current again on the new line.
 - **Candidates** (`supersededRevocations(head, superseded, self)`): each entry of a superseded state's `revoked` that `head.revoked` lacks, by its holder:
-  - **A machine holder** (`{machine}`): always offered. If `head.machines` holds that ref with that key, the machine leaves `machines` and the entry is appended. Otherwise the entry is appended alone. This covers a delegated machine's certificate, whose key lives in the certificate set and not in `head.machines`: once its revocation is lost, `certViews` (`records.ts:188-205`) admits the certificate again and `machineKeys` (`:233-239`) returns its key. `keysAccounted` permits a new machine-holder revocation whether or not the predecessor held the key (`org-state.ts:194-199`). It is offered without the hub serving the certificate.
+  - **A machine holder** (`{machine}`): always offered.
+    - If `head.machines` holds that ref with that key, the machine leaves `machines` and the entry is appended.
+    - If the key is in `head.retired` (retired before the recovery's base, revoked on the discarded branch), that retired entry moves to `revoked` with its own verified holder. `stateInvariants` refuses a key in both sets (`org-state.ts:111-112`), and `keysAccounted` permits the move (`:172-173`).
+    - Otherwise the entry is appended alone. This covers a delegated machine's certificate, whose key lives in the certificate set and not in `head.machines`: once its revocation is lost, `certViews` (`records.ts:188-205`) admits the certificate again and `machineKeys` (`:233-239`) returns its key. `keysAccounted` permits a new machine-holder revocation whether or not the predecessor held the key (`org-state.ts:194-199`). It is offered without the hub serving the certificate.
   - **A device holder:**
     - If the head lists that device under its member with that key current, the device leaves its member, and both its keys go to `revoked`: the candidate's entry, plus one for its companion key unless the head already retired or revoked it. A retired companion moves from `retired` to `revoked`. Its step-up kid leaves `root.keys`.
     - If the key is in `head.retired`, the entry moves there from `retired` to `revoked`.
@@ -498,15 +501,15 @@ M3's own edits are the no-change successor and that revocation. The delegation a
 - **To whom.** Each machine of the roster at signing, less a machine the state itself removes.
 - **The obligation is durable before anything is sent.** The signing store's `deliveries` gains `{hash, signed, owed: ref[]}` (`hash` the signed state's `stateHash`) in the same update as the pending slot. It keeps the signed bytes, so delivery never depends on the hub having accepted the state. Publication (the slot) and delivery (the obligation) settle apart: the slot clears at the hub's acceptance, and the obligation when its last machine acknowledges or leaves the roster. A crash between them loses neither.
 - **Only the app's own line is ever sent.** An obligation sends while its state is on the app's line: the held chain holds it, or it is the pending slot's state and the slot is not `pending-fork`. In `pending-fork` its sends are suspended. `org.discardPending` removes the obligation in the same update that clears the slot, so no abandoned byte is sent again. It moves to `abandoned: [{hash, version, hub, machines}]` (whether the hub and which machines may hold it, from the exposure record), which the status reports. If the held chain later adopts that state after all, the obligation is not revived: the machines get it through their own sync.
-- **The payload pages forward through the app's line** (`link.act({action: 'endpoint.state', args: {states, transitions}, stepUp: 'never'})`). The line is the held chain plus, while unaccepted, the pending state. `transitions` are all the held view's accepted transitions, a few at most.
-  - A run starts at the machine's known version: the last acknowledged answer's `version`, else the link's `caps().stateVersion` (RL7's caps, `link.ts:63-77`), else genesis.
-  - It takes consecutive states of the line up to `DELIVERY_MAX_BYTES` (512 KiB), so a run always includes the machine's own head state when the machine is on the line.
-  - `#deliver` (`endpoint.ts:671-682`) answers `done` with `{version}` either when it adopted states or when a delivered state at its head's version hashes equal to its head. Both prove the machine's head is on the app's line at that version.
-  - After `done` the next run starts at that version. After `not-newer` or `rollback` (no successor of its head in the run, `org-sync.ts:258-260`), the next run starts after this run's last state.
-  - So runs advance through the line in bounded steps, however long the missing run is, and never wait on the hub.
+- **The payload pages forward through the app's line** (`link.act({action: 'endpoint.state', args: {states, transitions}, stepUp: 'never'})`). The line is the held chain plus, while unaccepted, the pending state. `transitions` are all the held view's accepted transitions, a few at most. Each machine's cursor is kept per obligation as `known: {version, line}`. `line` is the count of accepted transitions the app held when the cursor was set, so a rewind the app adopts resets every cursor.
+  1. **Recovery first.** When the app's line contains an accepted transition (`fromVersion` f) and this machine has no cursor on the current line, the first run starts at the state at f: the transition's base, which the whole held chain keeps. It runs forward through f + 1 and on. `EndpointOrg.#rewind` (`org-sync.ts:225-244`) needs the state at f + 1 and, when f has left its window, the authenticated base, and the run carries both. An endpoint still on the superseded branch, above the recovered head or at an equal version, rewinds by it. A `done` sets the cursor on this line.
+  2. **Finding the machine's head** when no cursor exists and no recovery applies: runs start at `caps().stateVersion` (RL7's caps, `link.ts:63-77`), else genesis, and include that version's state. `#deliver` (`endpoint.ts:671-682`) answers `done` with `{version}` when it adopted states, or when a delivered state at its head's version hashes equal to its head. Either proves the machine's head is on the app's line at that version, and sets the cursor. `not-newer` or `rollback` moves the next run's start past this run's last state.
+  3. **Forward catch-up** from a cursor at version v: each run starts at v + 1, never repeating v, and takes consecutive states up to `DELIVERY_MAX_BYTES` (512 KiB). A `done` must raise the version. A run that can't hold even its first state (one state over the bound) stops that machine's delivery with a visible `too-large` in the status, and the machine catches up through its own hub sync.
+
+  So runs reach the target in bounded steps with no hub, across a recovery too. A machine on an abandoned sibling of the app's line (a `pending-fork` proposal it adopted) can't be moved by any run, and is reported under `abandoned`.
 - **Acknowledgement.** A machine is acknowledged when a `done` answer's `version` is at least the obligation's state's version. The run that earned the `done` came from the app's line, which holds that state below the version, so the state is on the machine's line too.
   - A machine already ahead of the state is acknowledged once a run reaches its head's version.
-  - A machine ahead of the app's own held head waits until the app adopts that far, then is acknowledged.
+  - A machine ahead of the app's own held head on the same line waits until the app adopts that far. One ahead on a superseded line is handled by recovery first.
   - Anything else stays owed, sent again at that machine's next link up and every `DELIVERY_RETRY_MS` (1 h).
   - A machine that leaves the roster is no longer owed.
 - The status lists the machines still owing an acknowledgement per version, and those that may hold an abandoned proposal. M4's page shows them.
@@ -555,13 +558,16 @@ M3's own edits are the no-change successor and that revocation. The delegation a
     - an honest revocation of a device present before the base and current again after the recovery, with the device removed;
     - a device whose channel key the discarded branch revoked and whose step-up key it retired, the companion accounted;
     - a revoked delegated certificate restored by the recovery, offered as a machine-holder revocation while the hub serves the certificate and while it withholds it;
+    - an enrolled machine's retired key and a delegated certificate's retired key (its certificate absent from the hub's answer), each revoked on the discarded branch: moved from `retired` to `revoked`;
     - a delegation whose certificates the recovered branch retired, those keys moved to `revoked`;
     - a device added only on the discarded branch, not offered;
     - this device's own key, withheld.
 - `weekly.test.ts`: due only when the device may sign, at 7 days, with nothing pending; the first focus asking once and `lastAsked` written first; a second focus the same day not asking; a cancel; the hourly notification only unfocused and once a day; "Re-sign now".
 - `deliveries.test.ts`, over a fake link backed by a real `EndpointOrg`:
   - which states are delivered, and that a removed machine is never sent to;
-  - runs paging forward from `caps().stateVersion`, from the last acknowledged version and from genesis;
+  - runs paging forward from `caps().stateVersion`, from the last acknowledged version and from genesis, each forward run starting after the cursor;
+  - one state fitting the bound but two consecutive ones not: still progressing one state a run; a single state over the bound reading `too-large`;
+  - after a recovery: an endpoint on the superseded branch above the recovered head, one at an equal version on the other branch, and one whose window no longer holds the recovery's base, each brought onto the app's line by the recovery-first run; every cursor reset when the app adopts a rewind;
   - a missing run larger than `DELIVERY_MAX_BYTES` reaching the target in bounded steps with no hub;
   - the pending state delivered while the hub withholds it;
   - a machine already ahead of the state acknowledged at its head;
@@ -1107,7 +1113,8 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
     // §C gains
     signing.json     { "version": 1,
                        "pending": { "signed": SignedOrgState, "parent": "<stateHash>", "exposed": { "hub": <boolean>, "machines": ["<ref>"] } } | null,
-                       "deliveries": [ { "hash": "<stateHash>", "signed": SignedOrgState, "owed": ["<ref>", …], "known": { "<ref>": <version> } } ],
+                       "deliveries": [ { "hash": "<stateHash>", "signed": SignedOrgState, "owed": ["<ref>", …],
+                                         "known": { "<ref>": { "version": <n>, "line": <accepted transitions held> } }, "tooLarge": ["<ref>"] } ],
                        "abandoned": [ { "hash": "<stateHash>", "version": <n>, "hub": <boolean>, "machines": ["<ref>"] } ],
                        "lastAsked": "<ISO>" | null, "lastNotified": "<ISO>" | null }      // fails closed once registration.json says signing: true
     registration.json  gains "signing": true (once signing.json is first written) and "rekey": { "device": "<new id>" } (during a rekey's promotion)
@@ -1368,6 +1375,14 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   5. A rekey is irreversible from its intent on: a cancel or sign-out no longer deletes its inputs.
   6. One `SigningStore` over M1's commit queue is the single writer that the signer, the weekly asking and the deliveries share. Network calls and adoption stay outside it.
   Rationale: each was checked against `records.ts`, `org-state.ts`, `org-sync.ts`, `endpoint.ts`, `link.ts` and `org-session.ts` as cited in M3.
+  Date/Author: 2026-10-28, O8's planner.
+
+- Decision: The re-plan's third buildability round is folded in (on e2c949c90: 1 P1, 2 P2).
+  1. Delivery runs recovery first. When the app's line holds a recovery transition, a machine with no cursor on that line gets a run from the transition's base, which the whole held chain keeps, forward, and every cursor resets when the app adopts a rewind.
+  2. Forward runs start after the established cursor and must raise the version. A single state over the byte bound reads `too-large` instead of looping.
+  3. A machine-holder revocation whose key the head retired moves the retired entry to `revoked`.
+  The round confirmed every earlier fix closed, and M5 clear.
+  Rationale: `org-sync.ts:225-244` (the rewind needs the state at `fromVersion + 1` and the base), `endpoint.ts:680-681` (`done` on an unchanged head), `org-state.ts:111-112` and `:172-173`.
   Date/Author: 2026-10-28, O8's planner.
 
 ## Outcomes & Retrospective
