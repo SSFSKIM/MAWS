@@ -147,6 +147,10 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     c.terminal = { bridge, pid: registryOnly.pid, close: async () => (await bridge.close(), await registryOnly.close()) };
     await expect(editor(page)).toBeVisible({ timeout: 15_000 });
     await expect(notice(page)).toHaveCount(0);
+    // the owner's Q1: its tab marks it Terminal, titled with the hover card's line
+    const marker = page.locator('[role="tab"][aria-selected="true"] [data-holder-marker]');
+    await expect(marker).toHaveText('Terminal');
+    await expect(marker).toHaveAttribute('title', 'Running in Terminal · driven through sminos’s bridge');
     // acceptance 2: each gap in place with its reason, the bridge's words from the capability fixture
     const reasonOf = (key: string) => sentence(FULL_CAPABILITIES.controls![key]!.reason!);
     await expect(main(page).getByRole('button', { name: /^Permission mode/ })).toHaveAttribute('title', "A terminal session's mode is changed in the terminal");

@@ -21,7 +21,7 @@ import { formatAgo } from '@shared/app/date-format';
 import { useMachineMark } from '../app/machine-mark';
 import { useSlot } from '../app/slots';
 import { useNow } from '../app/use-now';
-import { holderLine, waitingItem } from '../attention/derive';
+import { BRIDGED_LINE, holderLine, waitingItem } from '../attention/derive';
 import { GlyphMark } from '../attention/GlyphMark';
 import { glyphFor, listedGlyph } from '../attention/glyph';
 import { ipc } from '../ipc/client';
@@ -34,9 +34,6 @@ import { useSessionControls } from '../session/controls/controls-for'; // P5 O9 
 import { useLaneAState } from '../stores/lane-a'; // P5 O9 M5
 import { SidebarInteractionContext } from './interaction';
 import { SIDE_COPY } from '../side/copy'; // E3
-
-// P5 O9 M5: the hover card's line for a foreign session driven through its bridge (`held`: a background job's own line)
-export const BRIDGED_LINE = (held: string | null) => `${held === null ? 'Running in Terminal' : `Running as ${held}`} · driven through sminos’s bridge`;
 
 export interface SidebarHoverCardProps {
   label: string; // the card's accessible name
