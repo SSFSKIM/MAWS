@@ -19,7 +19,10 @@
 //     position (the inbound index) is `replayed`. Its `signer` names the key id its signature names, and its attestation
 //     goes down as verified owners;
 //   - a v1-only event (a `mac`, no `sig`) from a machine not yet moved, when DX1's code verifies under the legacy key,
-//     with `signer: {kind: 'legacy'}`.
+//     with `signer: {kind: 'legacy'}`; once the org state retires the key (legacy.ts's tombstone, O14 M5a), at once and
+//     unchecked, as an inert record: `signer: {kind: 'legacy', checked: false}`, never held nor spent, so a machine
+//     enrolled after the retirement reads the org's phase-1 history (sminos shows a legacy signer `(unverified,
+//     legacy)` and never delivers it as words).
 // What can't go down is judged by whether a later head could change the verdict.
 //   - Final (no later head can change it): a bad shape, an own-writer event that is no echo, a replay, a v2 signature
 //     that fails under a key the head knows (or whose key the head has revoked, or the state retired before its
@@ -67,7 +70,7 @@ import { bodyHash, uploadForm, type Signature, type SignatureLedger } from './si
 
 type Frame = { t: string } & Record<string, unknown>;
 
-export type Signer = { kind: 'device'; member: string; device: string; keyId: string } | { kind: 'machine'; ref: string; name: string; keyId: string } | { kind: 'legacy' };
+export type Signer = { kind: 'device'; member: string; device: string; keyId: string } | { kind: 'machine'; ref: string; name: string; keyId: string } | { kind: 'legacy'; checked?: false };
 export type Wrapped = { event: Record<string, unknown>; signer: Signer; owners?: Array<{ id: string; email: string | null }> };
 /** DX2's `rejected` up: the event named only by what it carried. */
 export type Rejected = { t: 'rejected'; project: string; event: { writer: string; seq: number } | null; reason: 'bad-code' | 'seen-nonce' | 'bad-shape' | 'conflict'; message: string };
@@ -365,6 +368,7 @@ export class LogRelay {
       return { deliver: { event, signer, ...(owners === undefined ? {} : { owners }) } };
     }
     if (isObject(event.mac)) {
+      if (this.#ctx.legacy.retired) return { deliver: { event, signer: { kind: 'legacy', checked: false } } };
       if (!this.#ctx.legacy.held) return { hold: 'a v1 event, and the endpoint holds no legacy key to check it yet' };
       if (await this.#ctx.legacy.verifies(project, event)) {
         if (name !== null) this.#saw(name, event.ts);
