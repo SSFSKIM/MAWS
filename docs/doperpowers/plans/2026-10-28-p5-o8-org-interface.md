@@ -40,7 +40,7 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-10-28) Task 1: `root add` in `deploy/admin.ts`, its `production-run.sh` line, and its proofs in `admin.test.ts`.
   - [x] (2026-10-28) Task 2: `checks.ts` (`checkSuccessor`, `supersededRevocations`) and its proofs, the zero-roots ones included.
   - [x] (2026-10-28) Task 3: the device module, `createStateSigner` and the next keys (create, promote, destroy).
-  - [ ] Task 4: `signing-store.ts`, `signer.ts`, `postState`, `signing.json`, §H's M3 rows.
+  - [x] (2026-10-28) Task 4: `signing-store.ts`, `signer.ts`, `postState`, `signing.json`, §H's M3 rows.
   - [ ] Task 5: `weekly.ts` and `deliveries.ts`.
   - [ ] Task 6: the session's composition, the rekey transaction and its replay, the IPC commands, main's wiring, and the Org section.
   - [ ] Task 7: `test/org/signer.local.test.ts`.
@@ -631,6 +631,14 @@ It settles P5 Decision Log 34: an admin enrolls a member's first device directly
 **Needs.** M3; O11's H1 above.
 
 **Proves.** Acceptance 4.
+
+*H1 landed (2026-10-28, PR #306, master 409920137, P5 Decision Log 121).* `GET /api/devices/pending?member=<id>`. Its answers:
+- `403 not-admin` for anyone but an admin. The admin check comes first, so a 403 never says whether the id is a member.
+- `404 no-member` for an id the head doesn't list, a removed member's lingering entries included.
+- `503 hub-updating` from a Registry before H1. M4 reads it as "try again".
+- Otherwise `{pending}`, stored as is with the MAC unchecked; the approving device checks the MAC.
+- No id, or the caller's own id, is today's read.
+M4 adds `?member=` to `hub-client.ts`'s own `PENDING_DEVICES_PATH` copy.
 
 ### M5 — Owners on rows and the People toggle
 
@@ -1461,8 +1469,9 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
      - A slot never exposed (`exposed.hub` false and `exposed.machines` empty) reads as the CLI's never-sent case: "pending version n `<hash>` was never sent: nothing was posted", and the question says nothing can show it as a fork.
      - An exposed slot (the hub, or any machine's act, since a delivery is exposure too) states where the hub stands, either not holding it or holding another state at version n (a fork). Its question carries the fork warning: "A later sign may make another successor of version n − 1, which a hub or machine that kept these bytes could show as a fork: discard it only once you know why the hub refused it."
      - The signer's discard returns `{unsent, hubVersion, forkAt?}` for the Org section to word.
-     - The held floor after a discard is `max(slot's parent version, hub head)`, as `writeAnchor` sets it. In the app the held view never moves below the head it holds, which is at least the parent, and the discard adopts the hub's chain first. A test pins that no lower version is accepted after it.
+     - The held floor after a discard is `max(slot's parent version, hub head)`, as `writeAnchor` sets it. In the app the held view never moves below the head it holds, which is at least the parent, and the discard adopts the hub's chain first. A test pins that no lower version is accepted after it. The floor holds on one line. A recovery the held view authenticates is the org's own rewind: it resets the held high-water mark to the recovered chain (`held.ts:335-360`), so a slot whose parent the recovery superseded is discarded at the recovered head, not held above it. Holding the floor at the superseded parent would refuse the recovery itself (the Task 4 re-review's finding, dismissed on that ground).
      - `abandon-pending`'s delegation-residue lines have no analogue: M3's signer adds no delegations. M4's delegation edits inherit them.
+  8. (Review fixes, 027ff0007.) The refresh before a sign follows a recovery: M1's `rereadFrom` moved to `held.ts`, shared with the session. A sign is refused `hub` when the hub was read but its head wasn't taken. A 201 is ok only once the held chain holds the signed state; a failed adoption reads `hub` ("… it stays pending"), and settle finishes it.
   Task 6 inherits these:
   - call `settle()` at start and at each feed open;
   - `markRegistration` writes inside the current queue turn, without a nested `commit`, and updates the in-memory registration;
