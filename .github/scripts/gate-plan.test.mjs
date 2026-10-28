@@ -625,7 +625,7 @@ test("gate.yml builds out/ on the pool for the guest-eligible jobs, and runs the
   // In those steps an entry with a variant downloads its build and restores it under REQUIRE; one without builds as before.
   assert.match(host, /\n {6}- if: matrix\.variant\n {8}uses: actions\/download-artifact@v8\n {8}with:\n {10}name: e2e-build-\$\{\{ github\.sha \}\}-\$\{\{ matrix\.variant \}\}\n {10}path: \$\{\{ runner\.temp \}\}\/maws-e2e-build\n/);
   assert.match(host, /\n {10}VARIANT: \$\{\{ matrix\.variant \}\}\n/);
-  assert.match(host, /\n {10}if \[\[ -n \$VARIANT \]\]; then\n {12}export MAWS_E2E_BUILD_CACHE=\$RUNNER_TEMP\/maws-e2e-build MAWS_E2E_BUILD_KEY=\$GITHUB_SHA MAWS_E2E_BUILD_REQUIRE=1\n {10}elif \[\[ \$RUNNER_OS == macOS \]\]; then export MAWS_E2E_BUILD_CACHE=\$HOME\/Library\/Caches\/maws-e2e-build\/\$RUNNER_NAME /);
+  assert.match(host, /\n {10}if \[\[ -n \$VARIANT \]\]; then\n {12}export MAWS_E2E_BUILD_CACHE=\$RUNNER_TEMP\/maws-e2e-build MAWS_E2E_BUILD_KEY=\$GITHUB_SHA MAWS_E2E_BUILD_REQUIRE=1\n {10}elif \[\[ -n \$CACHED \]\]; then export MAWS_E2E_BUILD_CACHE=\$RUNNER_TEMP\/maws-e2e-build MAWS_E2E_BUILD_KEY=\$GITHUB_SHA\n {10}elif \[\[ \$RUNNER_OS == macOS \]\]; then export MAWS_E2E_BUILD_CACHE=\$HOME\/Library\/Caches\/maws-e2e-build\/\$RUNNER_NAME /);
   // An alias with no anchor throws: the regexes and the walk never read a job whose steps they cannot see.
   assert.throws(() => expandAliases(raw.replace('    steps: &e2e-steps\n', '    steps:\n')), /the alias \*e2e-steps has no anchor before it/);
 });
@@ -636,6 +636,12 @@ test("gate.yml builds out/ on the pool for the guest-eligible jobs, and runs the
 // Eligible: not `default`, not measured, not live, not on MAC_SECRET_E2E, not on POOL_E2E.
 const waiter = ['self-hosted', 'ci-kit-pool', 'cpus-2'];
 const hostedNote = (groups) => ` Hosted Mac (SSFSKIM/maws-app, each through a waiter on the pool): ${groups.map((group) => `e2e:${group}`).join(', ')}.`;
+// The variant a direct entry carries as `cached`: its package script's leading build, as the plan reads it.
+const cachedOf = (group) => {
+  const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  const variant = /^scripts\/e2e-build\.sh (harness|plain) && /.exec((scripts[`e2e:${group}`] ?? '').trim())?.[1];
+  return variant ? { cached: variant } : {};
+};
 const ownLists = () => {
   const workflow = readWorkflow();
   const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'POPPLER_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E', 'MAC_HOME_E2E'];
@@ -1671,7 +1677,28 @@ test('direct runs the same admitted groups through e2e on macos-26 without a wai
   const direct = plan({ ...env, HOSTED_MAC_ROUTE: 'direct' }).outputs;
   assert.equal(direct.e2e_host, direct.e2e);
   assert.deepEqual([direct.e2e_hosted, direct.e2e_vm, direct.e2e_build, direct.pool], ['[]', '[]', '[]', 'false']);
-  assert.deepEqual(JSON.parse(direct.e2e), JSON.parse(mirror.e2e).map((entry) => ({ ...entry, runner: '"macos-26"', timeout: 45 })));
+  assert.deepEqual(JSON.parse(direct.e2e), JSON.parse(mirror.e2e).map((entry) => ({ ...entry, runner: '"macos-26"', timeout: 45, ...cachedOf(entry.group) })));
+});
+
+// A direct Mac starts empty, so the run shares each out/ variant through the Actions cache: keyed by the commit and the
+// variant, restored first, else built and saved, at one path on every hosted Mac; the command's build then restores it.
+test('a direct entry whose script builds out/ carries that variant as cached, which gate.yml restores or builds and saves', () => {
+  const env = { HOSTED_MAC_ROUTE: 'direct', HOSTED_MAC_E2E: 'document library', HEAD_MESSAGE: 'Gates: e2e:document,e2e:library,e2e:c12\nRunner: macos' };
+  const cached = (outputs) => Object.fromEntries(JSON.parse(outputs.e2e).map((entry) => [entry.group, entry.cached]));
+  assert.deepEqual(cached(plan(env).outputs), { document: 'harness', library: 'plain', c12: undefined });
+  assert.deepEqual(cached(plan({ ...env, HOSTED_MAC_ROUTE: 'mirror' }).outputs), { document: undefined, library: undefined, c12: undefined });
+  const host = jobBody(rawWorkflow(), 'e2e');
+  const at = '          path: ${{ runner.temp }}/maws-e2e-build/${{ github.sha }}/${{ matrix.cached }}\n          key: e2e-build-${{ runner.os }}-${{ github.sha }}-${{ matrix.cached }}\n';
+  const missed = "      - if: matrix.cached && steps.build-cache.outputs.cache-hit != 'true'\n";
+  const steps = [
+    `      - id: build-cache\n        if: matrix.cached\n        uses: actions/cache/restore@v6\n        with:\n${at}`,
+    `${missed}        env:\n          CACHED: \${{ matrix.cached }}\n        run: |\n          export MAWS_E2E_BUILD_CACHE=$RUNNER_TEMP/maws-e2e-build MAWS_E2E_BUILD_KEY=$GITHUB_SHA\n`,
+    `${missed}        continue-on-error: true\n        uses: actions/cache/save@v6\n        with:\n${at}`,
+  ];
+  const places = steps.map((step) => host.indexOf(step));
+  assert.ok(places.every((place, i) => place > 0 && (i === 0 || place > places[i - 1])), JSON.stringify(places));
+  assert.ok(places[2] < host.indexOf('\n      - env:\n          SCRIPT: ${{ matrix.script }}\n'));
+  assert.match(host, /\n {10}CACHED: \$\{\{ matrix\.cached \}\}\n {10}MAWS_E2E_PEER_ROOT:/);
 });
 
 test('the last Hosted-Route trailer overrides the variable; dispatch uses its input rather than a push trailer', () => {
@@ -1766,7 +1793,7 @@ test('route changes only placement of hosted entries across the current lists an
     const env = { ...ownLists(), GATE_RUNNER: 'pool', HEAD_MESSAGE: `Runner: macos${lane ? `\nLane: ${lane}` : ''}` };
     const mirror = plan(env).outputs;
     const direct = plan({ ...env, HOSTED_MAC_ROUTE: 'direct' }).outputs;
-    assert.deepEqual(JSON.parse(direct.e2e), JSON.parse(mirror.e2e).map((entry) => entry.hosted ? { ...entry, runner: '"macos-26"', timeout: 45 } : entry), lane);
+    assert.deepEqual(JSON.parse(direct.e2e), JSON.parse(mirror.e2e).map((entry) => entry.hosted ? { ...entry, runner: '"macos-26"', timeout: 45, ...cachedOf(entry.group) } : entry), lane);
     assert.equal(direct.e2e_vm, mirror.e2e_vm, lane);
     assert.equal(direct.e2e_build, mirror.e2e_build, lane);
   }
