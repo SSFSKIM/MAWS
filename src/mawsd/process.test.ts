@@ -113,7 +113,7 @@ describe.skipIf(!existsSync(MAWSD))('the built mawsd’s command line against a 
   const cli = (profile: string, args: string[], input = '') =>
     spawnSync(process.execPath, [MAWSD, ...args], { env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: join(profile, 'home'), MAWS_USER_DATA: profile }, input, encoding: 'utf8', timeout: 30_000 });
 
-  it('status stopped and running, logs, enroll and keys and endpoint with no module, restart', async () => {
+  it('status stopped and running, logs, enroll and keys and endpoint unenrolled, restart', async () => {
     scratch = mkdtempSync(join(tmpdir(), 'maws-mc-'));
     const profile = scratch;
     const ref = readOrMintMachineRef(profile); // as the app would have minted it
@@ -143,15 +143,17 @@ describe.skipIf(!existsSync(MAWSD))('the built mawsd’s command line against a 
     expect(logs.stdout).toContain(' serving;');
     expect(logs.stdout).toContain(`==> ${join(profile, 'supervisor', 'host.log')} <==`);
 
+    // The endpoint module (P5 O10 M10), unenrolled: a piped code reaches it and is refused unechoed, an argv one never
+    // leaves the command line, and its other commands answer for an endpoint with no enrollment.
     const enroll = cli(profile, ['enroll'], 'CODE-PIPED-SECRET\n');
-    expect(enroll.status).toBe(2);
-    expect(enroll.stderr).toBe('this daemon has no endpoint module yet (P5 O10)\n');
+    expect(enroll.status).toBe(1);
+    expect(enroll.stderr).toBe('not an enrollment code: not smns-enroll-v2\n');
     const refused = cli(profile, ['enroll', 'CODE-ARGV-SECRET']);
     expect(refused.status).toBe(1);
     expect(`${refused.stdout}${refused.stderr}`).not.toContain('CODE-ARGV-SECRET');
-    expect(cli(profile, ['keys'])).toMatchObject({ status: 0, stdout: `machine ${ref}\nno machine key: not enrolled\n` });
-    expect(cli(profile, ['endpoint', 'revoke', 'dev-1'])).toMatchObject({ status: 2, stderr: 'this daemon has no endpoint module yet (P5 O10)\n' });
-    expect(log(profile)).not.toContain('CODE-PIPED-SECRET');
+    expect(cli(profile, ['keys'])).toMatchObject({ status: 0, stdout: `enrollment: none\nref: ${ref}\n` });
+    expect(cli(profile, ['endpoint', 'status'])).toMatchObject({ status: 0, stdout: 'enrollment: none\nhub: not connected; channels: 0 relayed, 0 direct; sminos: not connected\n' });
+    expect(`${enroll.stdout}${log(profile)}`).not.toContain('CODE-PIPED-SECRET');
 
     const restart = cli(profile, ['restart']);
     expect(restart.status, restart.stderr).toBe(0);

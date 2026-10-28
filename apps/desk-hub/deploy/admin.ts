@@ -2,16 +2,17 @@
 // RL DL28; P5 O14 M2, its Interfaces §C). It holds an admin device of its own (`init`: a channel key and a step-up key in
 // a 0600 keys file), roots the deployment's org with it (`genesis`, the org's recovery key written only to an offline
 // destination and checked back), or anchors an org rooted before it (`adopt`); then pairs a device (`pair`, RL §5.3 with
-// the package's pairing code, MAC and fingerprint), lists and revokes devices, and signs the weekly no-change successor
-// the endpoint's 30-day backstop needs (`refresh`). For the cutover (O14) it enrolls and lists a machine by a code the
-// owner carries (`enroll`), creates and drops the devcloud delegation and emits its provisioning code to a pipe
+// the package's pairing code, MAC and fingerprint), lists and revokes devices, signs the weekly no-change successor
+// the endpoint's 30-day backstop needs (`refresh`), and makes a native-mac device of the owner's (the app's, P5 O8 M3) a
+// root beside itself (`root add`). For the cutover (O14) it enrolls and lists a machine by a code the owner carries
+// (`enroll`), creates and drops the devcloud delegation and emits its provisioning code to a pipe
 // (`delegation create|drop`), drops a machine however it is held (`machine drop`), revokes a phase-1 provisioning key
 // (`provisioning revoke`), shows the org (`show`), drops a proposal the hub refused once the owner judged it
 // (`abandon-pending`), and reads or strips a provisioning code locally (`code inspect|strip-legacy`).
 //
-//   deployment admin <init | genesis | adopt | refresh | pair | devices | remove-device | show | enroll | delegation |
-//                    machine | code | provisioning | abandon-pending> [--config deploy/<file>.json] [--keys <file>]
-//                    [--hub <url> --user <email> [--yes]] [the verb's own options] (deploy/README.md)
+//   deployment admin <init | genesis | adopt | refresh | pair | devices | remove-device | root | show | enroll |
+//                    delegation | machine | code | provisioning | keys | abandon-pending> [--config deploy/<file>.json]
+//                    [--keys <file>] [--hub <url> --user <email> [--yes]] [the verb's own options] (deploy/README.md)
 //
 // It acts on the deployment `--config` names (production's config.json by default; `checkTestHub` does not apply, and an
 // agent never runs it against production), as the signed-in owner: `DESK_ACCESS_TOKEN` from the environment when it is
@@ -116,19 +117,19 @@ import { deviceEntry, purgeOrgKeys, restoreLegacyKey, retireLegacyKey, successor
 import { withRunLock } from './run-lock';
 import { openTerminal, type Terminal } from './terminal';
 
-export const SUBCOMMANDS = ['init', 'genesis', 'adopt', 'refresh', 'pair', 'devices', 'remove-device', 'show', 'enroll', 'delegation', 'machine', 'code', 'provisioning', 'keys', 'abandon-pending'] as const;
+export const SUBCOMMANDS = ['init', 'genesis', 'adopt', 'refresh', 'pair', 'devices', 'remove-device', 'root', 'show', 'enroll', 'delegation', 'machine', 'code', 'provisioning', 'keys', 'abandon-pending'] as const;
 /** The subcommands that name a verb of their own after them (`delegation create`). */
-const GROUPS = { delegation: ['create', 'publish', 'drop'], machine: ['drop'], code: ['inspect', 'strip-legacy'], provisioning: ['revoke'], keys: ['retire', 'purge'] } as const;
+const GROUPS = { root: ['add'], delegation: ['create', 'publish', 'drop'], machine: ['drop'], code: ['inspect', 'strip-legacy'], provisioning: ['revoke'], keys: ['retire', 'purge'] } as const;
 type Group = keyof typeof GROUPS;
 type Subcommand = Exclude<(typeof SUBCOMMANDS)[number], Group> | { [G in Group]: `${G} ${(typeof GROUPS)[G][number]}` }[Group];
 /** What signs, posts or deletes only after the owner says so at the terminal. */
-const CONFIRMING: readonly Subcommand[] = ['genesis', 'pair', 'remove-device', 'enroll', 'delegation create', 'delegation publish', 'delegation drop', 'machine drop', 'provisioning revoke', 'keys retire', 'keys purge', 'abandon-pending'];
+const CONFIRMING: readonly Subcommand[] = ['genesis', 'pair', 'remove-device', 'root add', 'enroll', 'delegation create', 'delegation publish', 'delegation drop', 'machine drop', 'provisioning revoke', 'keys retire', 'keys purge', 'abandon-pending'];
 /** The verbs whose stdout is a secret code, for a pipe alone: every other line they print goes to stderr. */
 const SECRET_STDOUT: readonly Subcommand[] = ['delegation create', 'code strip-legacy'];
 /** The local transforms: stdin to stdout, no keys, no anchor, no credential and no hub. */
 const LOCAL_TRANSFORMS: readonly Subcommand[] = ['code inspect', 'code strip-legacy'];
 /** The positional each verb takes, by what it names. */
-const POSITIONAL: Partial<Record<Subcommand, string>> = { 'remove-device': '<device id>', enroll: '<name>', 'delegation drop': '<delegation id>', 'machine drop': '<name>', 'provisioning revoke': '<provisioning key id>' };
+const POSITIONAL: Partial<Record<Subcommand, string>> = { 'remove-device': '<device id>', 'root add': '<device id>', enroll: '<name>', 'delegation drop': '<delegation id>', 'machine drop': '<name>', 'provisioning revoke': '<provisioning key id>' };
 /** How often `pair` reads the pending list. */
 export const PAIR_POLL_MS = 2000;
 /** How often `enroll` asks for the machine's posted key, and how long it waits for it by default. */
@@ -716,6 +717,30 @@ async function removeDevice(ctx: Context): Promise<number> {
   return 0;
 }
 
+/**
+ * `root add ID`: a device of this admin's own member made a root beside this admin device (P5 O8 M3, the co-root), its
+ * step-up key's kid appended to `root.keys`. Only a native-mac device with a step-up key signs org states, as this
+ * device does; a device under another member is not this verb's, so every root it adds is one `remove-device` removes.
+ * Either root then signs any successor alone (`verifySuccessor` asks one signature of the parent's root set).
+ */
+async function rootAdd(ctx: Context): Promise<number> {
+  const id = ctx.positionals[0];
+  const from = await anchored(ctx, true);
+  const { state } = from.head;
+  const member = state.members.find((m) => m.id === from.me.member.id)!;
+  const device = member.devices.find((d) => d.id === id) ?? refuse(`${from.me.member.id} has no device ${printable(id)} in the head (version ${state.version})`);
+  if (device.class !== 'native-mac' || device.stepUpPub === undefined) refuse(`${printable(id)} is a ${device.class} device: only a native-mac device with a step-up key signs org states`);
+  const kid = await keyId(device.stepUpPub);
+  if (state.root.keys.includes(kid)) refuse(`${printable(id)} is a root already (step-up ${kid})`);
+  // What `pair` showed when the device was approved: the same entry, so the same fingerprint (its endorsement left out).
+  const fingerprint = await pairingFingerprint(from.anchor.org, member.id, device);
+  const question = `make ${describeEntry(device)} of ${printable(member.email)} (fingerprint ${fingerprint}, step-up ${kid}) a root of ${from.anchor.org}? [y/N]`;
+  if (!(await confirm(ctx, question))) refuse('not made a root: nothing was signed');
+  const signed = await from.amend((s) => void s.root.keys.push(kid));
+  ctx.io.out(`root added: ${printable(id)}, step-up ${kid} (version ${signed.state.version})`);
+  return 0;
+}
+
 async function pair(ctx: Context): Promise<number> {
   const cls = ctx.values.class;
   if (cls !== 'web-cards' && cls !== 'native-mac') return refuse('pair --class web-cards|native-mac');
@@ -1281,6 +1306,7 @@ const RUN: Record<Subcommand, (ctx: Context) => Promise<number>> = {
   pair,
   devices,
   'remove-device': removeDevice,
+  'root add': rootAdd,
   show,
   enroll,
   'delegation create': delegationCreate,
@@ -1442,7 +1468,7 @@ function localHub(text: string): string {
 
 function usage(io: AdminIo): number {
   io.err(`usage: deployment admin <${SUBCOMMANDS.join(' | ')}> [--config deploy/<file>.json] [--keys <file>] [--hub <url> --user <email> [--yes]]`);
-  io.err('  genesis --recovery <path | paper> [--media-check, at --hub]; pair --class web-cards|native-mac [--ttl <s>]; remove-device <device id>');
+  io.err('  genesis --recovery <path | paper> [--media-check, at --hub]; pair --class web-cards|native-mac [--ttl <s>]; remove-device <device id>; root add <device id>');
   io.err('  enroll <name> [--replace] [--ttl <s>] [--wait <s>]; delegation create --label <l> --prefix <p> --code-to-stdout [--ttl <s>] [--max-uses <n>] [--legacy-from-v1-code]');
   io.err('  delegation drop <id>; machine drop <name> [--revoke]; provisioning revoke <id>; code inspect | strip-legacy (stdin to stdout) (deploy/README.md)');
   return 2;

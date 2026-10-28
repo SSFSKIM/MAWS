@@ -7,6 +7,8 @@ import {
   DAEMON_IDLE_BASELINE_M1,
   DAEMON_IDLE_BOUND,
   DAEMON_IDLE_RUNTIME_FLOOR,
+  ENROLLED_INCREMENT_BUDGET_KIB,
+  enrolledLine,
   floorLine,
   footprints,
   IDLE_RUN,
@@ -248,5 +250,37 @@ describe('the printed line', () => {
       `[daemon-idle] mawsd footprint ${MAWSD_HEADROOM_KIB} KiB (median of 21) · rss 52000 KiB · cpu 0.02 s over 600 s · within the ${MAWSD_HEADROOM_KIB} KiB the bound leaves it beside the engine host's ${DAEMON_IDLE_BASELINE.footprintKiB} KiB · load 3.0`,
     );
     expect(mawsdLine({ footprintKiB: MAWSD_HEADROOM_KIB + 1, rssKiB: 60_000, samples: 21, cpuS: 0.02, load: 3 })).toContain(`· over the ${MAWSD_HEADROOM_KIB} KiB`);
+  });
+});
+
+// P5 O10 M10 and Decision Log 114: the enrolled endpoint's increment over the unenrolled daemon shape, one scene's two
+// windows, recorded without a bound asserted.
+describe("the enrolled endpoint's line", () => {
+  const unenrolled = {
+    footprintKiB: 97_439.4, cpuS: 0.15, samples: 21, load: 2.94,
+    processes: [{ argv0: 'mawsd', pid: 11, footprintKiB: 30_100.2, cpuS: 0.05 }, { argv0: 'maws-supervisor', pid: 12, footprintKiB: 67_339, cpuS: 0.1 }],
+  };
+  const enrolled = {
+    footprintKiB: 103_583.6, cpuS: 0.21, samples: 20, load: 3.12,
+    processes: [{ argv0: 'mawsd', pid: 11, footprintKiB: 36_250.4, cpuS: 0.11 }, { argv0: 'maws-supervisor', pid: 12, footprintKiB: 67_333, cpuS: 0.1 }],
+  };
+
+  it("reads the increment in memory and CPU, each process's share of it, the budget's verdict, the validity and both loads", () => {
+    expect(ENROLLED_INCREMENT_BUDGET_KIB).toBe(8 * 1024);
+    expect(enrolledLine({ unenrolled, enrolled, reasons: [] })).toBe(
+      '[daemon-idle] enrolled endpoint footprint +6145 KiB (enrolled 103584 KiB, unenrolled 97439 KiB; medians of 20 and 21) · cpu +0.06 s over 600 s (enrolled 0.21 s, unenrolled 0.15 s) · processes mawsd +6150 KiB +0.06 s, maws-supervisor -6 KiB +0.00 s · within the 8192 KiB budget (P5 Decision Log 114) · valid · load 3.1 enrolled, 2.9 unenrolled',
+    );
+  });
+
+  it('says over the budget, and names why a run is invalid', () => {
+    const heavy = { ...enrolled, footprintKiB: unenrolled.footprintKiB + 9_000 };
+    expect(enrolledLine({ unenrolled, enrolled: heavy, reasons: ['the 1-minute load reached 5.2 (a valid run stays under 5 throughout)', 'the hub link was down at the window’s end'] })).toContain(
+      '· over the 8192 KiB budget (P5 Decision Log 114) · invalid: the 1-minute load reached 5.2 (a valid run stays under 5 throughout); the hub link was down at the window’s end ·',
+    );
+  });
+
+  it('names a process measured in one window alone', () => {
+    const woken = { ...enrolled, processes: [...enrolled.processes, { argv0: 'maws-pty-host', pid: 13, footprintKiB: 9_000.4, cpuS: 0.01 }] };
+    expect(enrolledLine({ unenrolled, enrolled: woken, reasons: [] })).toContain(', maws-pty-host 9000 KiB 0.01 s, in the enrolled window alone ·');
   });
 });

@@ -9,8 +9,25 @@
 // 2026-10-27) settled it on Electron's `promptTouchID`, which main uses unless it injects another: Touch ID, or the
 // login password where there is none. Its tested fallback is a LocalAuthentication addon with device-owner
 // authentication (the spike's candidate 2), should `promptTouchID` ever lose the password path.
+//
+// The step-up key is also the key of an org root (RL5: `root.keys` holds admin devices' step-up key ids), so the org
+// states this device signs as a root are signed here too, behind the same confirmation (`createStateSigner`, P5-O8 M3).
+// The key never leaves this module (P5 Decision Log 53): the org signer composes the state and its words and hands both
+// in, and gets back only the signed state.
 import { systemPreferences, type SystemPreferences } from 'electron';
-import { base64urlEncode, canonicalize, isAction, NONCE_BYTES, signStepUp, type Action, type SigningKey } from '../../../apps/org-protocol/src/index.ts';
+import {
+  base64urlEncode,
+  canonicalize,
+  isAction,
+  keyId,
+  NONCE_BYTES,
+  signOrgState,
+  signStepUp,
+  type Action,
+  type OrgState,
+  type SignedOrgState,
+  type SigningKey,
+} from '../../../apps/org-protocol/src/index.ts';
 
 /** What the person is asked to confirm: `summary` fits a system prompt's one line; `text` is every field, one per line. */
 export type StepUpPrompt = { summary: string; text: string };
@@ -85,6 +102,35 @@ export function createStepUp(deps: { device: { org: string; device: string }; ke
       const sealed: Action = { ...shown, opCreated: opCreated ?? sealedAt, nonce: random(NONCE_BYTES), created: sealedAt };
       if (!isAction(sealed)) return { ok: false, reason: 'malformed' };
       return { ok: true, action: await signStepUp(sealed, deps.key) };
+    },
+  };
+}
+
+/** Signs org states with the step-up key, each after the person confirmed the words the org signer composed for it. */
+export type StateSigner = {
+  /** keyId(stepUp.pub): the id `root.keys` lists for this device. */
+  kid: string;
+  /** Every refusal of the confirmation is `cancelled`: nothing was signed, whatever the reason. */
+  sign(state: OrgState, prompt: StepUpPrompt): Promise<{ ok: true; signed: SignedOrgState } | { ok: false; reason: 'cancelled' }>;
+};
+
+/** `confirm` defaults to `promptTouchIDConfirmation(systemPreferences)`, main's confirmation. Async only for the key id. */
+export async function createStateSigner(deps: { key: SigningKey; confirm?: Confirm }): Promise<StateSigner> {
+  const confirm = deps.confirm ?? promptTouchIDConfirmation(systemPreferences);
+  return {
+    kid: await keyId(deps.key.pub),
+    async sign(state, prompt) {
+      // A private copy in the canonical form the signature covers, taken before the person is asked: the caller keeps
+      // its reference and may change it while the person decides. What was asked about is what is signed.
+      const asked = JSON.parse(canonicalize(state)) as OrgState;
+      let answer: Confirmation;
+      try {
+        answer = await confirm(prompt);
+      } catch {
+        answer = { ok: false, reason: 'failed' };
+      }
+      if (!answer.ok) return { ok: false, reason: 'cancelled' };
+      return { ok: true, signed: await signOrgState(asked, [deps.key]) };
     },
   };
 }

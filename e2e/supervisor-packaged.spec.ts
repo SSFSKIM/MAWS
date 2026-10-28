@@ -15,7 +15,12 @@
 // plist, the default profile's sockets and lock, or that profile's mawsd/ tree, less what a live canonical mawsd writes
 // on its own (O14 residue 18: the gate's Mac runs a real one; ./support/canonical-mawsd.ts).
 //   pnpm build:app && pnpm e2e:supervisor-daemon:packaged
-import { execFileSync } from 'node:child_process';
+// P5 O10 M10 (the architect's ruling on acceptance 14): that `mawsd` loads its endpoint at the first command that needs
+// it, a deferred load of a chunk beside mawsd.js, while a read-only one on an unenrolled machine is answered without it.
+// So the check runs both through the packaged binary as Node: `mawsd endpoint status` answers unenrolled and loads
+// nothing, and `mawsd enroll` with a code that is none loads the module from inside `app.asar`, whose own decoder
+// refuses it before anything is written or sent; a package that left the chunk out answers that it could not be loaded.
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -25,6 +30,7 @@ import { invoke } from './support/c7-replay';
 import { canonicalDifferences, canonicalPaths, snapshotCanonical } from './support/canonical-mawsd'; // O14 residue 18
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { INSPECTOR_LINE, inspectorPortHolders, isAlive, killScratchProcesses, ps, tcpListeners } from './support/processes';
+import { launchEnvironment } from './support/scratch-env';
 import { tmpSocketDirOf } from './support/supervisor-socket';
 
 const EXECUTABLE = process.env.MAWS_E2E_EXECUTABLE ? realpathOr(resolve(REPO_ROOT, process.env.MAWS_E2E_EXECUTABLE)) : null;
@@ -215,6 +221,23 @@ test('packaged, the daemon shape: mawsd is the app binary run as Node, named maw
     expect(engine).toContain(`${bundle}/Contents/Resources/app.asar/`);
     expect(realpathOr(executableOf(enginePid))).toBe(exe);
     expect(maws.consoleErrors()).toEqual([]);
+
+    // P5 O10 M10: unenrolled, `endpoint status` answers without the endpoint; `enroll` loads it from its chunk inside the asar
+    const mawsdLog = () => readFileSync(join(userData, 'mawsd', 'mawsd.log'), 'utf8');
+    const mawsd = (args: string[], input = '') => {
+      const ran = spawnSync(exe, [`${bundle}/Contents/Resources/app.asar/out/main/mawsd.js`, ...args], { env: { ...launchEnvironment(process.env, userData), ELECTRON_RUN_AS_NODE: '1' }, input, encoding: 'utf8', timeout: 30_000 });
+      return { ...ran, said: `mawsd ${args.join(' ')}: ${ran.status ?? ran.signal} ${ran.stdout}${ran.stderr}\n${mawsdLog()}` };
+    };
+    expect(mawsdLog(), 'an unenrolled mawsd starts without its endpoint').not.toContain('loading the endpoint');
+    const unenrolled = mawsd(['endpoint', 'status']);
+    expect(unenrolled.status, unenrolled.said).toBe(0);
+    expect(unenrolled.stdout, unenrolled.said).toBe('enrollment: none\nhub: not connected; channels: 0 relayed, 0 direct; sminos: not connected\n');
+    expect(mawsdLog(), 'a read-only command loads no endpoint').not.toContain('loading the endpoint');
+    const enroll = mawsd(['enroll'], 'not-a-code\n');
+    expect(enroll.status, enroll.said).toBe(1);
+    expect(enroll.stderr, enroll.said).toBe('not an enrollment code: not smns-enroll-v2\n');
+    expect(mawsdLog()).toContain('loading the endpoint for its first command');
+    expect(mawsdLog()).not.toContain('could not be loaded');
 
     // an unbusy quit parks the engine host; mawsd stays for its idle time
     await app.evaluate(({ app: electronApp }) => electronApp.quit());

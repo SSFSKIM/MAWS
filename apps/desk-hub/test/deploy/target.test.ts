@@ -192,6 +192,8 @@ describe('the options of a command that deploys', () => {
 
   it('takes one --config, or the default', () => {
     expect(deployArgs(['--config', join(import.meta.dirname, '../../deploy/staging.json')]).config.worker).toBe('desk-hub-staging');
+    // A caller's --config beside a runner's: neither wins, the deployment is named once or not at all.
+    expect(() => deployArgs(['--config', join(import.meta.dirname, '../../deploy/staging.json'), '--config', join(import.meta.dirname, '../../deploy/config.json')])).toThrow(/--config given 2 times .*: name one deployment/);
     expect(deployArgs([]).config.worker).toBe('desk-hub');
   });
 });

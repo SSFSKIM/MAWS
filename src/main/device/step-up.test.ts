@@ -2,7 +2,7 @@
 // itself, has the person confirm that text through the injected confirmation (U5's winner; a fake here), and only then
 // signs the action's canonical form with the step-up key. The renderer never supplies the bytes or the text.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { generateSigningKey, isAction, verifyStepUp, type Action, type SigningKey } from '../../../apps/org-protocol/src/index.ts';
+import { generateSigningKey, isAction, keyId, verifyGenesis, verifyStepUp, type Action, type OrgState, type SigningKey } from '../../../apps/org-protocol/src/index.ts';
 
 // Electron's systemPreferences, faked: no test calls the real promptTouchID, so none raises a system prompt.
 const touchID = vi.hoisted(() => ({ reasons: [] as string[], answer: async (): Promise<void> => {} }));
@@ -15,7 +15,7 @@ vi.mock('electron', () => ({
   },
 }));
 
-import { createStepUp, promptTouchIDConfirmation, renderAction, type Confirm, type StepUpPrompt } from './step-up';
+import { createStateSigner, createStepUp, promptTouchIDConfirmation, renderAction, type Confirm, type StepUpPrompt } from './step-up';
 
 const DEVICE = { org: 'org-step-up', device: 'dev-mac' };
 const REF = 'mref-test-0000001';
@@ -239,6 +239,115 @@ describe('the confirmation main uses: promptTouchID (U5)', () => {
 
     touchID.answer = () => Promise.reject(new Error('Authentication canceled.'));
     expect(await stepUp.sign(spawn)).toEqual({ ok: false, reason: 'cancelled' });
+    expect(touchID.reasons).toHaveLength(2);
+  });
+});
+
+describe('a state signer (M3: the org state, signed with the step-up key behind Touch ID)', () => {
+  const MEMBER = '0123456789abcdef0123456789abcdef';
+  const prompt: StepUpPrompt = { summary: 'Re-sign the org state (no change)', text: 'Version: 1\nNo change' };
+
+  /** A genesis state whose one root is `key`, so `verifyGenesis` checks the signature against it. */
+  async function genesisOf(key: SigningKey): Promise<OrgState> {
+    const recovery = await generateSigningKey();
+    return {
+      org: 'org-state-signer',
+      version: 1,
+      prev: null,
+      issued: NOW.toISOString(),
+      root: { keys: [await keyId(key.pub)], recoveryPub: recovery.pub },
+      members: [{ id: MEMBER, email: 'owner@example.com', role: 'admin', devices: [{ id: 'dev-mac', class: 'native-mac', keyStorage: 'software', channelPub: (await generateSigningKey()).pub, stepUpPub: key.pub }] }],
+      machines: [],
+      machineNames: [],
+      retired: [],
+      revoked: [],
+      delegations: [],
+      projects: [],
+    };
+  }
+
+  /** Counts the signatures WebCrypto makes, and when: the step-up key signs only through `crypto.subtle.sign`. */
+  function signatures() {
+    const spy = vi.spyOn(crypto.subtle, 'sign');
+    return { count: () => spy.mock.calls.length, restore: () => spy.mockRestore() };
+  }
+
+  it('names its key by the step-up key id the org state lists in root.keys', async () => {
+    const signer = await createStateSigner({ key: await stepUpKey(), confirm: harness().confirm });
+    expect(signer.kid).toBe(await keyId((await stepUpKey()).pub));
+  });
+
+  it('asks the confirmation with the prompt it is given, and only then signs the state', async () => {
+    const state = await genesisOf(await stepUpKey());
+    const sigs = signatures();
+    try {
+      const asked: { prompt: StepUpPrompt; signedBefore: number }[] = [];
+      const signer = await createStateSigner({
+        key: await stepUpKey(),
+        confirm: async (shown) => {
+          asked.push({ prompt: shown, signedBefore: sigs.count() });
+          return { ok: true };
+        },
+      });
+      const result = await signer.sign(state, prompt);
+      if (!result.ok) throw new Error(`refused: ${result.reason}`);
+      expect(asked).toEqual([{ prompt, signedBefore: 0 }]);
+      expect(sigs.count()).toBe(1);
+      expect(result.signed.state).toEqual(state);
+      expect(result.signed.sigs.map((sig) => sig.kid)).toEqual([signer.kid]);
+      expect(await verifyGenesis(result.signed)).toEqual({ ok: true });
+    } finally {
+      sigs.restore();
+    }
+  });
+
+  it('signs nothing when the person cancels, the confirmation is unavailable or fails, or it throws', async () => {
+    const state = await genesisOf(await stepUpKey());
+    const answers: Confirm[] = [
+      ...(['cancelled', 'unavailable', 'failed'] as const).map((reason): Confirm => async () => ({ ok: false, reason })),
+      () => Promise.reject(new Error('LAContext failed')),
+    ];
+    const sigs = signatures();
+    try {
+      for (const confirm of answers) {
+        const signer = await createStateSigner({ key: await stepUpKey(), confirm });
+        expect(await signer.sign(state, prompt)).toEqual({ ok: false, reason: 'cancelled' });
+      }
+      expect(sigs.count()).toBe(0);
+    } finally {
+      sigs.restore();
+    }
+  });
+
+  it('signs the state as it was when the person was asked, even if the caller changes it meanwhile', async () => {
+    const state = await genesisOf(await stepUpKey());
+    const asked = structuredClone(state);
+    const signer = await createStateSigner({
+      key: await stepUpKey(),
+      confirm: async () => {
+        state.members[0]!.role = 'member';
+        state.root.keys.push('AAAAAAAAAAAAAAAAAAAAAA');
+        state.issued = '2030-01-01T00:00:00.000Z';
+        return { ok: true };
+      },
+    });
+    const result = await signer.sign(state, prompt);
+    if (!result.ok) throw new Error(`refused: ${result.reason}`);
+    expect(result.signed.state).toEqual(asked);
+    expect(await verifyGenesis(result.signed)).toEqual({ ok: true });
+  });
+
+  it('asks through promptTouchID when main injects no confirmation', async () => {
+    touchID.reasons.length = 0;
+    touchID.answer = async () => {};
+    const signer = await createStateSigner({ key: await stepUpKey() });
+    const state = await genesisOf(await stepUpKey());
+    const result = await signer.sign(state, prompt);
+    expect(result.ok).toBe(true);
+    expect(touchID.reasons).toEqual([prompt.summary]);
+
+    touchID.answer = () => Promise.reject(new Error('Authentication canceled.'));
+    expect(await signer.sign(state, prompt)).toEqual({ ok: false, reason: 'cancelled' });
     expect(touchID.reasons).toHaveLength(2);
   });
 });

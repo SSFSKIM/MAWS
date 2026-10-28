@@ -20,12 +20,13 @@ import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { parseArgs, type ParseArgsOptionsConfig } from 'node:util';
 import { decodeProvisioningCodeV2, isIsoMillis, keyId, stateHash, type ProvisioningCodeV2, type SignedOrgState } from 'org-protocol';
+import { keysAnswer, policyAnswer, statusAnswer } from './answers';
 import { EnrollError, enrollAttended } from './enroll';
 import { attestHistory, checkHistory, historyNames, type Attested, type Checked } from './history';
 import { defaultMachineName, provisionInto } from './provision';
 import type { Endpoint } from './endpoint';
 import { acceptGrant } from './grants';
-import { describePolicy, isCeiling } from './policy';
+import { isCeiling } from './policy';
 
 export const EXIT = { done: 0, failed: 1, notHere: 2, notRunning: 3, notListed: 4 } as const;
 
@@ -171,39 +172,30 @@ async function unenroll(endpoint: Endpoint, args: readonly string[]): Promise<Ou
   return { code: EXIT.done, out: `enrollment: none; ${keyIds.length} private key(s) destroyed (their ids kept in ${kept}/keys.json), the rest of the state moved to ${kept}/` };
 }
 
+// `keys`, `status` and `policy` (unset) render through answers.ts, which `mawsd` renders them with before it loads
+// the module (presence.ts): change what they say there, and both say it.
 async function keys(endpoint: Endpoint, args: readonly string[]): Promise<Out> {
   const { values } = parse(args, { json: { type: 'boolean' } });
   const { state, services } = endpoint.parts!;
   const enrollment = state.enrolled ? state.enrollment : null;
-  // A redemption whose set is not yet whole is the hub's already (O14 M1), as `status` says it.
-  const pending = enrollment === null ? (state.provisioning?.redeemed ?? null) : null;
-  const named = enrollment ?? (pending === null ? null : { name: pending.machine, org: pending.org });
   const key = endpoint.key;
-  const view = {
-    enrollment: enrollment?.state ?? (pending === null ? 'none' : 'hub-confirmed'),
-    ...(named === null ? {} : { name: named.name, org: named.org }),
-    ref: services.machine.ref,
-    delegated: state.delegation !== null,
-    ...(key === null || enrollment === null ? {} : { keyId: await keyId(key.pub), heldKeys: state.ledger?.heldKeys.length ?? 0 }),
-    ...(state.refusing === null ? {} : { refusing: state.refusing }),
-  };
-  if (values.json) return { code: EXIT.done, out: JSON.stringify(view) };
-  const lines = [`enrollment: ${view.enrollment}`, ...(named === null ? [] : [`machine: ${named.name} in ${named.org}`]), `ref: ${view.ref}`];
-  if ('keyId' in view) lines.push(`machine key: ${view.keyId} (${view.heldKeys} held over its enrollments)`);
-  if (view.delegated) lines.push(`delegated: under the delegation ${state.delegation?.id}`);
-  if (state.refusing !== null) lines.push(`refusing its state: ${state.refusing} (the log names the path)`);
-  return { code: EXIT.done, out: lines.join('\n') };
+  const out = keysAnswer(
+    {
+      ref: services.machine.ref,
+      enrollment,
+      pending: enrollment === null ? (state.provisioning?.redeemed ?? null) : null,
+      delegation: state.delegation,
+      key: key === null || enrollment === null ? null : { keyId: await keyId(key.pub), heldKeys: state.ledger?.heldKeys.length ?? 0 },
+      refusing: state.refusing,
+    },
+    values.json === true,
+  );
+  return { code: EXIT.done, out };
 }
 
 function status(endpoint: Endpoint, args: readonly string[]): Out {
   const { values } = parse(args, { json: { type: 'boolean' } });
-  const s = endpoint.status();
-  if (values.json) return { code: EXIT.done, out: JSON.stringify(s) };
-  const lines = [`enrollment: ${s.enrollment}${s.name === undefined ? '' : ` (${s.name} in ${s.org})`}`];
-  if (s.stateVersion !== undefined) lines.push(`org state: version ${s.stateVersion}`);
-  lines.push(`hub: ${s.hub.connected ? 'connected' : 'not connected'}; channels: ${s.channels.relayed} relayed, ${s.channels.direct} direct; sminos: ${s.rl10.connected ? 'connected' : 'not connected'}`);
-  if (s.refusing !== undefined) lines.push(`refusing: ${s.refusing}`);
-  return { code: EXIT.done, out: lines.join('\n') };
+  return { code: EXIT.done, out: statusAnswer(endpoint.status(), values.json === true) };
 }
 
 /** The content of `<file|->`: a path read here, or `-` for the request's `secret`. */
@@ -253,8 +245,7 @@ function policy(endpoint: Endpoint, args: readonly string[]): Out {
     if (endpoint.parts!.state.refusing !== null) return { code: EXIT.failed, out: `the endpoint's state is refused (${endpoint.parts!.state.refusing}): nothing is written` };
     endpoint.policy.set({ ...(readOnly === undefined ? {} : { read_only: readOnly === 'on' }), ...(values.ceiling === undefined || !isCeiling(values.ceiling) ? {} : { ceiling: values.ceiling }) });
   }
-  const current = endpoint.policy.current();
-  return { code: EXIT.done, out: values.json ? JSON.stringify(current) : describePolicy(current) };
+  return { code: EXIT.done, out: policyAnswer(endpoint.policy.current(), values.json === true) };
 }
 
 /**

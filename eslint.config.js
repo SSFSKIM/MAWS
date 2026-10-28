@@ -46,9 +46,11 @@ const CLIENT_PORT_DYNAMIC = { selector: 'ImportExpression[source.value=/^(?:elec
 // P5 O10 start (docs/doperpowers/plans/2026-10-27-p5-o10-endpoint.md, Constraints, "The module"): the endpoint module is
 // its own directory with one entry. Its machine key, grant ledger, policy and state code are reached by nothing outside
 // it but through src/endpoint/index.ts; its own suites (test/endpoint/) are the module's and reach inside. It imports no
-// Electron, O1's rule with no exception (its block below).
-const ENDPOINT = 'The endpoint module (src/endpoint/) is reached only through its entry, src/endpoint/index.ts (P5 O10): its key, policy and state code stay inside it.';
-const ENDPOINT_PATTERNS = [{ regex: '(?:^|/)endpoint/(?!index(?:\\.ts)?$)', message: ENDPOINT }];
+// Electron, O1's rule with no exception (its block below). M10: src/endpoint/presence.ts is its second entry, what mawsd
+// reads before it loads the module (whether an enrollment is on disk, the unenrolled status, a read-only command's
+// unenrolled answer), importing of it only the pure renderers the module answers with (answers.ts, status.ts).
+const ENDPOINT = 'The endpoint module (src/endpoint/) is reached only through its entries, src/endpoint/index.ts and presence.ts (P5 O10): its key, policy and state code stay inside it.';
+const ENDPOINT_PATTERNS = [{ regex: '(?:^|/)endpoint/(?!(?:index|presence)(?:\\.ts)?$)', message: ENDPOINT }];
 // P5 O10 end
 // P3-B start: schema parity (D4 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md). The document's ProseMirror
 // schema is built in one module, src/artifacts/document/schema.ts, so the host's writer and every editor derive the same
@@ -212,6 +214,13 @@ module.exports = defineConfig(
       'no-restricted-imports': ['error', { paths: [{ name: 'electron', message: CLIENT_PORT }], patterns: [{ group: ['**/open-external'], message: CLIENT_PORT }, ...YJS_PATTERNS, ...ENDPOINT_PATTERNS] }],
       'no-restricted-syntax': ['error', CLIENT_PORT_DYNAMIC, YJS_DYNAMIC],
     },
+  },
+  // P5 O10 M10: the built mawsd's endpoint scene is proved with the endpoint's own harness (its hub, carriers, org
+  // fixtures and fake sminos), which reach inside the module, so it leaves out ENDPOINT_PATTERNS as the module's own
+  // suites do; the rest of mawsd's block stands. Only the suite: mawsd's code reaches the module through its entry.
+  {
+    files: ['src/mawsd/process-endpoint.test.ts'],
+    rules: { 'no-restricted-imports': ['error', { paths: [{ name: 'electron', message: CLIENT_PORT }], patterns: [{ group: ['**/open-external'], message: CLIENT_PORT }, ...YJS_PATTERNS] }] },
   },
   // Outside src/: the suites (but the module's own) and the e2e specs reach the module through its entry too.
   {
