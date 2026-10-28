@@ -64,11 +64,13 @@ stamp() { date -u +%Y%m%dT%H%M%SZ; }
 filter() { perl -ne 'BEGIN { $| = 1 } print if /^wrangler target / || !/token|secret|bearer|eyJ/i'; }
 # Production's X-Desk-Build, credential-free, within $1 seconds (default 30).
 build() { curl -q -sI --max-time ${1:-30} -X POST $URL/machine/enroll | /usr/bin/grep -i '^x-desk-build:' | tr -d '\r'; }
-deployment() { pnpm -s -C $W --filter desk-hub deployment "$@" --config deploy/config.json; }
+# The command word first (bin.ts reads it as argv[0]), then the deployment, then the caller's arguments: after the
+# options, so a device id given after `--` (one may start with '-') stays the last positional.
+deployment() { local c=$1; shift; pnpm -s -C $W --filter desk-hub deployment $c --config deploy/config.json "$@"; }
 # The same command for the secret-stream mode, launched as the package's `deployment` script launches it but not through
 # pnpm, whose recursive runner writes its own failure lines (ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL, the checkout's path) to
 # stdout even under -s: there stdout is the secret stream, and holds the command's own output alone.
-direct() { ( cd $W/apps/desk-hub && node --experimental-strip-types --disable-warning=ExperimentalWarning deploy/bin.ts "$@" --config deploy/config.json ); }
+direct() { local c=$1; shift; ( cd $W/apps/desk-hub && node --experimental-strip-types --disable-warning=ExperimentalWarning deploy/bin.ts $c --config deploy/config.json "$@" ); }
 step=$1; (( $# )) && shift
 case $step in
   checkout)
@@ -187,7 +189,7 @@ case $step in
       if [[ $sub == code ]]; then
         { direct admin "$@" 2>&1 1>&3 3>&- | filter | tee $LOG >&2; rc=${pipestatus[1]}; } 3>&1
       else
-        { DESK_ACCESS_TOKEN=$T direct admin "$@" --keys $H/keys.json 2>&1 1>&3 3>&- | filter | tee $LOG >&2; rc=${pipestatus[1]}; } 3>&1
+        { DESK_ACCESS_TOKEN=$T direct admin --keys $H/keys.json "$@" 2>&1 1>&3 3>&- | filter | tee $LOG >&2; rc=${pipestatus[1]}; } 3>&1
       fi
       unset T
       say "admin exit $rc; log $LOG (stderr alone: stdout went to the pipe)"; exit $rc
@@ -196,12 +198,12 @@ case $step in
     # from it. Genesis's output goes to the terminal as it is, unlogged and unfiltered: with `--recovery paper` it shows
     # the org's recovery key once, which no file may keep and no filter may drop.
     if [[ $sub == genesis ]]; then
-      { [[ -n $T ]] && printf 'DESK_ACCESS_TOKEN=%s\n' "$T"; } | deployment admin "$@" --keys $H/keys.json
+      { [[ -n $T ]] && printf 'DESK_ACCESS_TOKEN=%s\n' "$T"; } | deployment admin --keys $H/keys.json "$@"
       rc=${pipestatus[2]}; unset T
       print -r -- "admin exit $rc (no log)"; exit $rc
     fi
     LOG=$O/admin-${sub:-none}-$(stamp).log
-    { [[ -n $T ]] && printf 'DESK_ACCESS_TOKEN=%s\n' "$T"; } | deployment admin "$@" --keys $H/keys.json 2>&1 | filter | tee $LOG
+    { [[ -n $T ]] && printf 'DESK_ACCESS_TOKEN=%s\n' "$T"; } | deployment admin --keys $H/keys.json "$@" 2>&1 | filter | tee $LOG
     rc=${pipestatus[2]}; unset T
     print -r -- "admin exit $rc; log $LOG"; exit $rc ;;
   *) print -r -- "checkout [<path>] | build | wait <sha8> | access-sync | admin [--pipe] <args…>"; exit 2 ;;

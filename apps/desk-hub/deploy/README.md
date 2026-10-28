@@ -645,7 +645,7 @@ terminal: it holds the staging admin's `keys.json` and its anchor, `keys.json.or
    - The run ends with its `PASS` lines, its cleanup and `production untouched`. The agent runs it with `--lane-b`
      now that O10's feed has landed.
 5. **Cleanup**: the run's own is automatic (step 4's last lines). The phone stays listed on staging. To take it off:
-   the owner runs `staging-run.sh admin devices` for its id, then `staging-run.sh admin remove-device <id>`, which asks
+   the owner runs `staging-run.sh admin devices` for its id, then `staging-run.sh admin remove-device -- <id>`, which asks
    `revoke <id>? [y/N]` at the terminal and prints `revoked: version <v>`. Then *Forget* in the phone's Device panel,
    and the home-screen icon removed.
 

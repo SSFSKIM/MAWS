@@ -786,6 +786,25 @@ describe('root add', () => {
     expect(await runAdmin(['remove-device', ...asLocal(), '--yes', '--', id], removed.io)).toBe(0);
     expect((await served()).state.root.keys).toEqual([adminKid]);
   });
+
+  it('takes its options before the subcommand, as the runners pass them, and refuses a second --config rather than pick one', async () => {
+    // The runners' order: their own options (--config, --keys) first, then the owner's verb and its arguments.
+    const shown = fake();
+    expect(await runAdmin([...asLocal(), 'show'], shown.io)).toBe(0);
+    expect(shown.out).toContain(`member ${member} ${ADMIN} admin`);
+    const id = '-front-mac';
+    await paired({ id, class: 'native-mac', keyStorage: 'software', channelPub: (await generateSigningKey()).pub, stepUpPub: (await generateSigningKey()).pub });
+    const added = fake();
+    expect(await runAdmin([...asLocal(), '--yes', 'root', 'add', '--', id], added.io)).toBe(0);
+    expect(added.out.at(-1)).toMatch(new RegExp(`^root added: ${id}, step-up `));
+    expect(await runAdmin([...asLocal(), '--yes', 'remove-device', '--', id], fake().io)).toBe(0);
+    expect((await served()).state.root.keys).toEqual([adminKid]);
+    // A caller's --config beside a runner's: neither wins; nothing is read or sent.
+    const twice = fake();
+    expect(await runAdmin(['--config', unreachableConfig(), '--config', unreachableConfig(), ...asLocal(), 'show'], twice.io)).toBe(1);
+    expect(twice.err).toEqual(['admin: name one --config and one --keys']);
+    expect(twice.out).toEqual([]);
+  });
 });
 
 describe('no two successors of one parent', () => {

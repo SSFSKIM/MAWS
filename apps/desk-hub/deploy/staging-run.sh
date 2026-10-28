@@ -85,11 +85,11 @@ owner_token() {
   T=$(cloudflared access token -app=$URL 2>/dev/null)
   [[ -n $T && $T == eyJ* ]] || { print -r -- "no staging Access token: the owner runs 'cloudflared access login $URL' first. Nothing was changed."; exit 2; }
 }
-deployment() { pnpm -s -C $W --filter desk-hub deployment "$@" --config deploy/staging.json; }
+deployment() { local c=$1; shift; pnpm -s -C $W --filter desk-hub deployment $c --config deploy/staging.json "$@"; }
 # The same command for the secret-stream mode, launched as the package's `deployment` script launches it but not through
 # pnpm, whose recursive runner writes its own failure lines (ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL, the checkout's path) to
 # stdout even under -s: there stdout is the secret stream, and holds the command's own output alone.
-direct() { ( cd $W/apps/desk-hub && node --experimental-strip-types --disable-warning=ExperimentalWarning deploy/bin.ts "$@" --config deploy/staging.json ); }
+direct() { local c=$1; shift; ( cd $W/apps/desk-hub && node --experimental-strip-types --disable-warning=ExperimentalWarning deploy/bin.ts $c --config deploy/staging.json "$@" ); }
 # ---- The push sink's tunnel (acceptance's item 5, phone's push clause): account-less, P5 Decision Log 39 ------------
 # TUNNEL holds its cloudflared's pid, PUBLIC its https base, TCREDS the credentials file it runs on (the API's way);
 # each attempt is told through the step's `say`.
@@ -243,14 +243,14 @@ case $step in
         { direct admin "$@" 2>&1 1>&3 3>&- | filter | tee -a $LOG >&2; rc=${pipestatus[1]}; } 3>&1
       else
         owner_token >&2
-        { DESK_ACCESS_TOKEN=$T direct admin "$@" --keys $H/keys.json 2>&1 1>&3 3>&- | filter | tee -a $LOG >&2; rc=${pipestatus[1]}; } 3>&1
+        { DESK_ACCESS_TOKEN=$T direct admin --keys $H/keys.json "$@" 2>&1 1>&3 3>&- | filter | tee -a $LOG >&2; rc=${pipestatus[1]}; } 3>&1
         unset T
       fi
       say "admin exit $rc; log $LOG (stderr alone: stdout went to the pipe)"; exit $rc
     fi
     owner_token
     LOG=$O/admin-$(stamp).log
-    printf 'DESK_ACCESS_TOKEN=%s\n' "$T" | deployment admin "$@" --keys $H/keys.json 2>&1 | filter | tee -a $LOG
+    printf 'DESK_ACCESS_TOKEN=%s\n' "$T" | deployment admin --keys $H/keys.json "$@" 2>&1 | filter | tee -a $LOG
     rc=${pipestatus[2]}; unset T
     print -r -- "admin exit $rc; log $LOG"; exit $rc ;;
   phone)
