@@ -1189,6 +1189,7 @@ async function provisioningVector(k: Keys): Promise<ProvisioningVector> {
     token: 'provisioning-token-vm',
     delegation: { id: DLG_VM, prefix: 'vm-', privateJwk },
   };
+  // A fixed key (0x40, 0x41, …): the push scan's allowlist names this value (.github/maws-app/gitleaks.toml).
   const legacy: ProvisioningCodeV2 = { ...plain, legacy: { org: ORG, key: base64urlEncode(new Uint8Array(32).map((_, i) => 0x40 + i)) } };
   const wrap = (body: string) => PROVISIONING_CODE_V2_PREFIX + base64urlEncode(new TextEncoder().encode(body));
   const publicJwk: JsonWebKey = { ...privateJwk };

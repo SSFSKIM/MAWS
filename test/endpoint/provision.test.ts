@@ -187,6 +187,37 @@ describe('provision', () => {
     expect(privateKeyFiles(endpoint.parts!.state.dir)).toEqual([]);
   });
 
+  it('fences an unenroll run while a provisioning awaits its certificate’s answer: the unenroll is not undone', async () => {
+    let release: () => void = () => {};
+    const held = new Promise<void>((r) => (release = r));
+    const t: Traffic = {
+      seen: [],
+      fault: async (r, forward) => {
+        if (r !== 'POST /machine/cert') return undefined;
+        const answer = await forward();
+        await held;
+        return answer;
+      },
+    };
+    const { endpoint, services } = await endpointOn({ ref: mintRef(vm.id), traffic: t });
+    const dir = services.machine.stateDir;
+    const provisioning = provision(endpoint, await code(vm), 'vm-raced');
+    await expect.poll(() => t.seen.includes('POST /machine/cert')).toBe(true);
+    let unenrolled = false;
+    const unenrolling = endpoint.cli('unenroll', []).then((r) => ((unenrolled = true), r));
+    await new Promise((r) => setTimeout(r, 300));
+    expect(unenrolled).toBe(false);
+    release();
+    const [provisioned, undone] = await Promise.all([provisioning, unenrolling]);
+    expect(undone.code, undone.out).toBe(0);
+    expect([0, 1]).toContain(provisioned.code);
+    // Whatever the provisioning answered, the unenroll that reported done stands.
+    for (const name of ['machine-key.json', 'delegation.json', 'provisioning.json', 'enrollment.json']) expect(fs.existsSync(join(dir, name)), name).toBe(false);
+    expect(json((await endpoint.cli('keys', ['--json'])).out)).toMatchObject({ enrollment: 'none', delegated: false });
+    expect(endpoint.status()).toMatchObject({ enrollment: 'none', delegated: false });
+    expect(privateKeyFiles(dir)).toEqual([]);
+  });
+
   it('refuses a code under another delegation than the one held', async () => {
     const { endpoint } = await endpointOn({ ref: mintRef(vm.id) });
     expect((await provision(endpoint, await code(vm), 'vm-held')).code).toBe(0);
@@ -241,6 +272,9 @@ describe('provision, resumed', () => {
     const cut = await provision(first.endpoint, await code(vm), 'vm-cut');
     expect(cut.code, cut.out).toBe(4);
     expect(fs.existsSync(join(first.services.machine.stateDir, 'provisioning.json'))).toBe(true);
+    // A redemption still pending is the hub's: shown hub-confirmed and delegated, so a departure retires it.
+    expect(json((await first.endpoint.cli('keys', ['--json'])).out)).toMatchObject({ enrollment: 'hub-confirmed', name: 'vm-cut', org: 'local', delegated: true });
+    expect(first.endpoint.status()).toMatchObject({ enrollment: 'hub-confirmed', name: 'vm-cut', org: 'local', delegated: true });
     const again = await restart(first);
     const rerun = await provision(again.endpoint, await code(vm), 'vm-cut');
     expect(rerun.code, rerun.out).toBe(0);

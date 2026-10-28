@@ -32,6 +32,12 @@ export type EnrollContext = {
   log: (line: string) => void;
   /** The machine key now in force: the endpoint reloads it from what was just written. */
   keyChanged(key: SigningKey): void;
+  /**
+   * Runs a change of the machine's enrollment after every one already begun (an enrollment's or provisioning's steps up
+   * to its write set, a retirement, an unenroll; O14 M1): no hub answer one awaits is written over another's result. A
+   * wait for the listing runs outside it.
+   */
+  lifecycle<T>(run: () => Promise<T>): Promise<T>;
 };
 
 export type EnrollmentState = { state: 'hub-confirmed' | 'org-listed'; name: string; org: string; ref: string };
@@ -55,6 +61,20 @@ const LISTING_POLL_MS = 2000;
  * of the last read when it was refused.
  */
 export async function enrollAttended(ctx: EnrollContext, input: { code: string; name?: string; replace: boolean; waitMs: number }): Promise<{ result: EnrollmentState; refused?: string }> {
+  const { state, deps } = ctx;
+  await ctx.lifecycle(() => enrollWithHub(ctx, input));
+  const deadline = deps.now() + input.waitMs;
+  for (;;) {
+    const read = await syncAndPromote(ctx, deadline);
+    refuseIfUnenrolled(state);
+    if (read.listed) return { result: current(state) };
+    if (deps.now() >= deadline) return { result: current(state), ...(read.refused === undefined ? {} : { refused: read.refused }) };
+    await deps.sleep(Math.min(LISTING_POLL_MS, Math.max(0, deadline - deps.now())));
+  }
+}
+
+/** Steps 1–5: the redemption, the key's post and the state it leaves, `hub-confirmed`. */
+async function enrollWithHub(ctx: EnrollContext, input: { code: string; name?: string; replace: boolean }): Promise<void> {
   const { state, deps } = ctx;
   refuseIfRefused(state);
   const held = state.enrolled ? state.enrollment : null;
@@ -91,14 +111,6 @@ export async function enrollAttended(ctx: EnrollContext, input: { code: string; 
     at: new Date(deps.now()).toISOString(),
   }, pins);
   ctx.log(`endpoint: enrolled with the hub as ${redeemed.machine} in ${redeemed.org}${input.replace ? ' (a new key; the ref and the grants in force kept)' : ''}`);
-
-  const deadline = deps.now() + input.waitMs;
-  for (;;) {
-    const read = await syncAndPromote(ctx, deadline);
-    if (read.listed) return { result: current(state) };
-    if (deps.now() >= deadline) return { result: current(state), ...(read.refused === undefined ? {} : { refused: read.refused }) };
-    await deps.sleep(Math.min(LISTING_POLL_MS, Math.max(0, deadline - deps.now())));
-  }
 }
 
 /** A read under `--wait` has at least this long for each page, however near the wait's end. */
@@ -228,6 +240,11 @@ export function pinOrg(state: EndpointState, org: string, pins: Pins): void {
 
 export function refuseIfRefused(state: EndpointState): void {
   if (state.refusing !== null) throw new EnrollError(`the endpoint's state directory is refused (${state.refusing}); its log names the path`);
+}
+
+/** A wait for the listing outlived its enrollment: an unenroll ran meanwhile, and stands. */
+export function refuseIfUnenrolled(state: EndpointState): void {
+  if (!state.enrolled) throw new EnrollError('unenrolled: the endpoint was unenrolled while this waited for its listing');
 }
 
 export function current(state: EndpointState): EnrollmentState {

@@ -4,7 +4,11 @@
 // that lingered could sign backdated events its retirement would verify (RL §5.2); a later enrollment generates a new
 // key under the same ref. The ids of the destroyed keys are kept in the new `stale-<time>/keys.json`, written before
 // anything is destroyed; the pending provisioning's record goes before the key files, so no crash leaves a record that
-// would write a destroyed key back. What the enrollment kept besides is moved to that directory, for the record.
+// would write a destroyed key back. What the enrollment kept besides is moved to that directory, for the record, but
+// `signatures/` and `inbound/` (non-secret, keyed by project): the signatures an earlier key made stay the ones a resend
+// of a position the hub holds repeats, and the replay index keeps refusing a device's instruction at a new position,
+// under any later enrollment of the same ref (the O14 spec's Decision Log, M1's review round 1). The RL10 caches over
+// them stay true to disk, and the key-without-ledger rule never touches them.
 import * as fs from 'node:fs';
 import { join } from 'node:path';
 import { removeFile, syncDirectory, writeAtomic } from './files';
@@ -15,7 +19,7 @@ export const STALE_DIRECTORY = (now: number) => `stale-${new Date(now).toISOStri
 /** Holding private key material, destroyed: the provisioning's record first (it holds the machine key too). */
 const PRIVATE = ['provisioning.json', 'machine-key.json', 'delegation.json'] as const;
 /** The enrollment's other files and directories, moved aside. */
-const MOVED = ['grants.json', 'enrollment.json', 'org.json', 'legacy.json', 'listings.json', 'notified.json', 'retirement.json', 'signatures', 'inbound'] as const;
+const MOVED = ['grants.json', 'enrollment.json', 'org.json', 'legacy.json', 'listings.json', 'notified.json', 'retirement.json'] as const;
 
 /** The `stale-*` directories directly under `dir` (a symlink of that name is none). */
 export function staleDirectories(dir: string): string[] {

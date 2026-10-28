@@ -19,7 +19,6 @@ import { parseArgs, type ParseArgsOptionsConfig } from 'node:util';
 import { decodeProvisioningCodeV2, isIsoMillis, keyId, stateHash, type ProvisioningCodeV2, type SignedOrgState } from 'org-protocol';
 import { EnrollError, enrollAttended } from './enroll';
 import { defaultMachineName, provisionInto } from './provision';
-import { retireInto } from './retire';
 import type { Endpoint } from './endpoint';
 import { acceptGrant } from './grants';
 import { describePolicy, isCeiling } from './policy';
@@ -142,7 +141,7 @@ async function retire(endpoint: Endpoint, args: readonly string[]): Promise<Out>
   const { values } = parse(args, { 'not-after': { type: 'string' }, json: { type: 'boolean' } });
   const notAfter = values['not-after'];
   if (notAfter !== undefined && !isIsoMillis(notAfter)) throw new UsageError(`--not-after takes an ISO time with milliseconds in UTC (2026-10-28T12:00:00.000Z), not ${notAfter}\n${USAGE}`);
-  const outcome = await retireInto(endpoint.enrollContext(), () => endpoint.unenroll(), notAfter === undefined ? {} : { notAfter });
+  const outcome = await endpoint.retire(notAfter === undefined ? {} : { notAfter });
   if (values.json) return { code: EXIT.done, out: JSON.stringify(outcome) };
   switch (outcome.kind) {
     case 'nothing':
@@ -169,17 +168,20 @@ async function keys(endpoint: Endpoint, args: readonly string[]): Promise<Out> {
   const { values } = parse(args, { json: { type: 'boolean' } });
   const { state, services } = endpoint.parts!;
   const enrollment = state.enrolled ? state.enrollment : null;
+  // A redemption whose set is not yet whole is the hub's already (O14 M1), as `status` says it.
+  const pending = enrollment === null ? (state.provisioning?.redeemed ?? null) : null;
+  const named = enrollment ?? (pending === null ? null : { name: pending.machine, org: pending.org });
   const key = endpoint.key;
   const view = {
-    enrollment: enrollment?.state ?? 'none',
-    ...(enrollment === null ? {} : { name: enrollment.name, org: enrollment.org }),
+    enrollment: enrollment?.state ?? (pending === null ? 'none' : 'hub-confirmed'),
+    ...(named === null ? {} : { name: named.name, org: named.org }),
     ref: services.machine.ref,
     delegated: state.delegation !== null,
     ...(key === null || enrollment === null ? {} : { keyId: await keyId(key.pub), heldKeys: state.ledger?.heldKeys.length ?? 0 }),
     ...(state.refusing === null ? {} : { refusing: state.refusing }),
   };
   if (values.json) return { code: EXIT.done, out: JSON.stringify(view) };
-  const lines = [`enrollment: ${view.enrollment}`, ...(enrollment === null ? [] : [`machine: ${enrollment.name} in ${enrollment.org}`]), `ref: ${view.ref}`];
+  const lines = [`enrollment: ${view.enrollment}`, ...(named === null ? [] : [`machine: ${named.name} in ${named.org}`]), `ref: ${view.ref}`];
   if ('keyId' in view) lines.push(`machine key: ${view.keyId} (${view.heldKeys} held over its enrollments)`);
   if (view.delegated) lines.push(`delegated: under the delegation ${state.delegation?.id}`);
   if (state.refusing !== null) lines.push(`refusing its state: ${state.refusing} (the log names the path)`);

@@ -46,6 +46,7 @@ import { Notifier } from './notify';
 import { EndpointOrg, type OrgChange } from './org-sync';
 import { EndpointPolicy, settingsDefaultMode } from './policy';
 import { completeProvisioning, provisionInto, type DelegatedInput } from './provision';
+import { retireInto, type Retired } from './retire';
 import { Queries } from './queries';
 import { Rl10 } from './rl10/link';
 import type { EndpointModule, EndpointServices } from './services';
@@ -124,6 +125,8 @@ export class Endpoint implements EndpointModule {
   #stopped = false;
   /** Records the hub refused for now, tried again while the connection lasts. */
   readonly #retries = new RecordRetries();
+  /** The changes of the enrollment begun, one after another (`EnrollContext.lifecycle`). */
+  #lifecycle: Promise<unknown> = Promise.resolve();
 
   constructor(options: EndpointOptions = {}) {
     this.#options = options;
@@ -387,6 +390,7 @@ export class Endpoint implements EndpointModule {
       ref: parts.services.machine.ref,
       deps: this.deps,
       log: (line) => parts.services.log(line),
+      lifecycle: (run) => this.#serialLifecycle(run),
       keyChanged: (key) => {
         this.#key = key;
         // The new key speaks for the machine once it is judged to; the channels the old key authenticated end, their
@@ -419,7 +423,22 @@ export class Endpoint implements EndpointModule {
    * the hub link and the direct listener stop. The profile's `machine.json` is kept: a later enrollment takes a new key
    * under the same ref.
    */
-  async unenroll(): Promise<{ aside: string; keyIds: string[] }> {
+  unenroll(): Promise<{ aside: string; keyIds: string[] }> {
+    return this.#serialLifecycle(() => this.#unenroll());
+  }
+
+  /** `mawsd endpoint retire` (O14 M1, retire.ts), after any change of the enrollment begun; its own unenroll runs inside it. */
+  retire(input: { notAfter?: string }): Promise<Retired> {
+    return this.#serialLifecycle(() => retireInto(this.enrollContext(), () => this.#unenroll(), input));
+  }
+
+  #serialLifecycle<T>(run: () => Promise<T>): Promise<T> {
+    const next = this.#lifecycle.then(run);
+    this.#lifecycle = next.catch(() => {});
+    return next;
+  }
+
+  async #unenroll(): Promise<{ aside: string; keyIds: string[] }> {
     const parts = this.parts;
     if (parts === null) throw new Error('the endpoint has not started');
     const result = await parts.org.exclusive(() => parts.state.unenroll(this.deps.now()));

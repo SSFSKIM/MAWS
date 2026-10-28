@@ -38,11 +38,13 @@ export function endpointStatus(state: EndpointState | null, headHash: string | n
   if (ledgers.endpoint !== null) opLedgers.endpoint = { closed: ledgers.endpoint, clears: 'restart' };
   if (ledgers.engineHost !== null) opLedgers.engineHost = { closed: ledgers.engineHost, clears: 'restart' };
   const enrollment = state?.enrolled ? state.enrollment : null;
+  // A redemption whose set is not yet whole is the hub's already (O14 M1): a departure must see it to retire it.
+  const pending = enrollment === null ? (state?.provisioning?.redeemed ?? null) : null;
   const head = enrollment !== null ? (state?.org?.head ?? null) : null;
   const refusing = state?.refusing ?? (state?.stale && !state.enrolled ? 'stale-state' : links.refusing);
   return {
-    enrollment: enrollment?.state ?? 'none',
-    ...(enrollment === null ? {} : { name: enrollment.name, org: enrollment.org }),
+    enrollment: enrollment?.state ?? (pending === null ? 'none' : 'hub-confirmed'),
+    ...(enrollment !== null ? { name: enrollment.name, org: enrollment.org } : pending !== null ? { name: pending.machine, org: pending.org } : {}),
     ...(head === null ? {} : { stateVersion: head.state.version, ...(headHash === null ? {} : { headHash }) }),
     hub: { ...links.hub },
     channels: { ...links.channels },

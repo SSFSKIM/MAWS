@@ -18,7 +18,7 @@
 import { hostname } from 'node:os';
 import { generateSigningKey, importSigningKey, keyId, machineNameKey, SIGNING_DOMAINS, signRecord, type MachineCert, type ProvisioningCodeV2 } from 'org-protocol';
 import { MACHINE_CERT_PATH } from 'desk-hub/protocol';
-import { current, EnrollError, pinOrg, redeem, refuseIfRefused, refuseOtherOrg, syncAndPromote, type EnrollContext, type EnrollmentState } from './enroll';
+import { current, EnrollError, pinOrg, redeem, refuseIfRefused, refuseIfUnenrolled, refuseOtherOrg, syncAndPromote, type EnrollContext, type EnrollmentState } from './enroll';
 import { ADMIT_MS, admittedRequest, fetchOrgState, hubRequest, refusalOf, type Credentials, type HubDeps, type HubError } from './hub-http';
 import type { EndpointOrg } from './org-sync';
 import type { EndpointState, ProvisioningFile } from './state/store';
@@ -41,6 +41,21 @@ export const defaultMachineName = () => hostname().toLowerCase();
  */
 export async function provisionInto(ctx: EnrollContext, input: DelegatedInput & { waitMs: number }): Promise<ProvisionResult> {
   const { state } = ctx;
+  const settled = await ctx.lifecycle(() => provisionWithHub(ctx, input));
+  if (settled !== null) return settled;
+  const deadline = ctx.deps.now() + input.waitMs;
+  for (;;) {
+    const read = await syncAndPromote(ctx, deadline);
+    refuseIfUnenrolled(state);
+    if (read.listed) return { result: current(state) };
+    if (ctx.deps.now() >= deadline) return { result: current(state), ...(read.refused === undefined ? {} : { refused: read.refused }) };
+    await ctx.deps.sleep(Math.min(LISTING_POLL_MS, Math.max(0, deadline - ctx.deps.now())));
+  }
+}
+
+/** States 1, 2 and 4, as one change of the enrollment (`lifecycle`): a result to return, or null for state 3's wait. */
+async function provisionWithHub(ctx: EnrollContext, input: DelegatedInput): Promise<ProvisionResult | null> {
+  const { state } = ctx;
   refuseIfRefused(state);
   const code = input;
   const id = code.delegation.id;
@@ -59,17 +74,7 @@ export async function provisionInto(ctx: EnrollContext, input: DelegatedInput & 
 
   if (enrollment?.state === 'org-listed' && state.provisioning === null) return { result: current(state) };
   if (enrollment === null && state.provisioning === null) await redeemInto(ctx, code, input.name);
-  if (state.provisioning !== null) {
-    const settled = await settle(ctx, 'admitted');
-    if (settled !== null) return settled;
-  }
-  const deadline = ctx.deps.now() + input.waitMs;
-  for (;;) {
-    const read = await syncAndPromote(ctx, deadline);
-    if (read.listed) return { result: current(state) };
-    if (ctx.deps.now() >= deadline) return { result: current(state), ...(read.refused === undefined ? {} : { refused: read.refused }) };
-    await ctx.deps.sleep(Math.min(LISTING_POLL_MS, Math.max(0, deadline - ctx.deps.now())));
-  }
+  return state.provisioning === null ? null : settle(ctx, 'admitted');
 }
 
 /** State 1: what the code carries, kept before any hub call; the redemption; its record, before any other. */

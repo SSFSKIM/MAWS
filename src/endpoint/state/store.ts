@@ -6,7 +6,7 @@
 // record whose key it was, which `stale` reports once. A pending provisioning (`provisioning.json`, O14 M1) owns the
 // directory until its write set is whole: while it is held nothing is moved aside, and the endpoint's start completes the
 // set from it (provision.ts). `unenroll` takes the directory back to unenrolled: the private keys destroyed, their ids
-// kept, the rest moved to a `stale-<time>/` of its own.
+// kept, the enrollment's other files moved to a `stale-<time>/` of its own (state/unenroll.ts).
 import * as fs from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -401,7 +401,8 @@ export class EndpointState {
   /**
    * Takes the directory back to unenrolled (`mawsd endpoint unenroll`, and `retire`'s local part; O14 M1): every private
    * key it holds, at its top and under each earlier `stale-*\/`, destroyed, their ids kept in the new `stale-<time>/`'s
-   * `keys.json`; the enrollment's files moved there; `policy.json`, `hosts.json` and the profile's `machine.json` kept.
+   * `keys.json`; the enrollment's files moved there; `signatures/`, `inbound/`, `policy.json`, `hosts.json` and the
+   * profile's `machine.json` kept.
    * The key ids are read before anything is touched; the pending provisioning's record goes first, so no crash can leave
    * a record that would write a destroyed key back.
    */

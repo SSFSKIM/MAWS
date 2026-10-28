@@ -262,6 +262,11 @@ describe('unenroll and retire, with no hub (O14 M1)', () => {
     fs.writeFileSync(join(earlier, 'machine-key.json'), JSON.stringify({ version: 1, keyId: await keyId(orphan.pub), jwk: await crypto.subtle.exportKey('jwk', orphan.privateKey), created: new Date().toISOString() }), { mode: 0o600 });
     fs.writeFileSync(join(earlier, 'delegation.json'), JSON.stringify({ version: 1, id: 'a'.repeat(32), prefix: 'vm-', privateJwk: await crypto.subtle.exportKey('jwk', delegation.privateKey) }), { mode: 0o600 });
     fs.writeFileSync(join(dir, 'legacy.json'), JSON.stringify({ org: ORG, key: 'k'.repeat(43) }), { mode: 0o600 });
+    // The signatures made and the replay index stay where a later enrollment under the same ref reads them.
+    const signatures = endpoint.parts!.state.subdirectory('signatures');
+    const inbound = endpoint.parts!.state.subdirectory('inbound');
+    fs.writeFileSync(join(signatures, 'p1.jsonl'), '{"writer":"mini/s","seq":1}\n', { mode: 0o600 });
+    fs.writeFileSync(join(inbound, 'p1.jsonl'), '{"writer":"hub/x","seq":1}\n', { mode: 0o600 });
 
     const undone = await endpoint.cli('unenroll', ['--json']);
     expect(undone.code, undone.out).toBe(0);
@@ -275,6 +280,10 @@ describe('unenroll and retire, with no hub (O14 M1)', () => {
     for (const moved of ['grants.json', 'enrollment.json', 'org.json', 'legacy.json']) {
       expect(fs.existsSync(join(aside, moved)), moved).toBe(true);
       expect(fs.existsSync(join(dir, moved)), moved).toBe(false);
+    }
+    for (const kept of ['signatures/p1.jsonl', 'inbound/p1.jsonl']) {
+      expect(fs.existsSync(join(dir, kept)), kept).toBe(true);
+      expect(fs.existsSync(join(aside, kept)), kept).toBe(false);
     }
     expect(endpoint.status()).toMatchObject({ enrollment: 'none', legacyKey: false, delegated: false });
     // A fresh process over the directory is unenrolled, refusing nothing.
