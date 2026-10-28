@@ -228,32 +228,63 @@ await withRunLock(${JSON.stringify(lock)}, async () => {
   });
 });
 
+// A pipe or a file on the local hub's stdin is read as it always was, with a blocking read of fd 0, byte by byte: what
+// follows the line stays on the descriptor for the next reader, and no flag of the description it shares changes. The
+// accepted limit: a signal while the prompt waits on an empty pipe is handled once input comes.
 describe('the local hub’s prompt on a pipe', () => {
-  /** A run holding the lock that reads its answers from stdin, printing `held` before the first and each line after it. */
-  const reading = (lock: string, lines: number) =>
-    `import { withRunLock } from ${JSON.stringify(deploy('run-lock.ts'))};
+  /**
+   * A run holding the lock that reads `lines` answers from stdin, printing `held` first and each line after it; then
+   * whether stdin's open file description is non-blocking (python's F_GETFL, when `flags`), and what a `cat` that
+   * inherits fd 0 reads after it.
+   */
+  const reading = (lock: string, lines: number, flags = false) =>
+    `import { spawnSync } from 'node:child_process';
+import { withRunLock } from ${JSON.stringify(deploy('run-lock.ts'))};
 import { openTerminal } from ${JSON.stringify(deploy('terminal.ts'))};
 await withRunLock(${JSON.stringify(lock)}, async () => {
   const terminal = openTerminal(false);
   process.stdout.write('held\\n');
   for (let i = 0; i < ${lines}; i++) process.stdout.write(\`line \${JSON.stringify(await terminal.readLine())}\\n\`);
-  let rest = '';
-  for await (const chunk of process.stdin) rest += chunk;
+  // The command goes on to its requests after an answer: a turn of the event loop.
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  if (${flags}) process.stdout.write(\`nonblocking \${spawnSync('python3', ['-I', '-c', 'import fcntl, os; print(fcntl.fcntl(0, fcntl.F_GETFL) & os.O_NONBLOCK != 0)'], { stdio: ['inherit', 'pipe', 'inherit'], encoding: 'utf8' }).stdout.trim()}\\n\`);
+  const rest = spawnSync('cat', { stdio: ['inherit', 'pipe', 'inherit'], encoding: 'utf8' }).stdout;
   process.stdout.write(\`rest \${JSON.stringify(rest)}\\n\`);
 });`;
 
-  it.each(['SIGINT', 'SIGTERM'] as const)('ends at %s while it waits for a line that never comes, removing its lock', async (signal) => {
-    expect(await signalled(reading(lock, 1), signal, () => {}, 'pipe')).toEqual({ code: 128 + constants.signals[signal], signal: null });
-    expect(existsSync(lock)).toBe(false);
-  });
-
-  it('reads line by line, and leaves what follows its lines on stdin for whatever reads it next', () => {
-    const r = spawnSync(process.execPath, nodeArgs(reading(lock, 2)), { input: 'yes\nno\nthe rest\nof it', encoding: 'utf8', timeout: 20_000 });
+  it('reads line by line, leaving what follows on the descriptor for the next reader', () => {
+    const r = spawnSync(process.execPath, nodeArgs(reading(lock, 2)), { input: 'yes\nno\nthe next reader\nof it', encoding: 'utf8', timeout: 20_000 });
     expect(r.status, r.stderr).toBe(0);
-    expect(r.stdout).toBe('held\nline "yes"\nline "no"\nrest "the rest\\nof it"\n');
+    expect(r.stdout).toBe('held\nline "yes"\nline "no"\nrest "the next reader\\nof it"\n');
     // Input that ends before a newline is the last line; after the end, a line is empty.
     const short = spawnSync(process.execPath, nodeArgs(reading(lock, 2)), { input: 'y', encoding: 'utf8', timeout: 20_000 });
     expect(short.stdout).toBe('held\nline "y"\nline ""\nrest ""\n');
     expect(existsSync(lock)).toBe(false);
+  });
+
+  it.skipIf(spawnSync('python3', ['-c', 'import fcntl']).status !== 0)('leaves the description it shares blocking', () => {
+    const r = spawnSync(process.execPath, nodeArgs(reading(lock, 1, true)), { input: 'yes\nmore\n', encoding: 'utf8', timeout: 20_000 });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toBe('held\nline "yes"\nnonblocking False\nrest "more\\n"\n');
+  });
+
+  it('handles a signal at a prompt on an empty pipe at the turn of the loop after input comes, removing its lock', async () => {
+    const child = spawn(process.execPath, nodeArgs(reading(lock, 1)), { stdio: ['pipe', 'pipe', 'inherit'] });
+    const ended = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => child.once('exit', (code, sig) => resolve({ code, signal: sig })));
+    try {
+      await new Promise<void>((resolve) => {
+        let seen = '';
+        child.stdout.on('data', (chunk: Buffer) => (seen += chunk.toString()).includes('held') && resolve());
+      });
+      child.kill('SIGTERM');
+      const early = await Promise.race([ended, new Promise<'waiting'>((resolve) => setTimeout(() => resolve('waiting'), 500))]);
+      expect(early).toBe('waiting');
+      expect(existsSync(lock)).toBe(true);
+      child.stdin.end('no\n');
+      expect(await Promise.race([ended, new Promise<never>((_, reject) => setTimeout(() => reject(new Error('still running 10 s after the input')), 10_000))])).toEqual({ code: 143, signal: null });
+      expect(existsSync(lock)).toBe(false);
+    } finally {
+      child.kill('SIGKILL');
+    }
   });
 });
