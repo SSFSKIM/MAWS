@@ -503,6 +503,10 @@ M3's own edits are the no-change successor and that revocation. The delegation a
 - **Only the app's own line is ever sent.** An obligation sends while its state is on the app's line: the held chain holds it, or it is the pending slot's state and the slot is not `pending-fork`. In `pending-fork` its sends are suspended. `org.discardPending` removes the obligation in the same update that clears the slot, so no abandoned byte is sent again. It moves to `abandoned: [{hash, version, hub, machines}]` (whether the hub and which machines may hold it, from the exposure record), which the status reports. If the held chain later adopts that state after all, the obligation is not revived: the machines get it through their own sync.
 - **The payload pages forward through the app's line** (`link.act({action: 'endpoint.state', args: {states, transitions}, stepUp: 'never'})`). The line is the held chain plus, while unaccepted, the pending state. `transitions` are all the held view's accepted transitions, a few at most. Each machine's cursor is kept per obligation as `known: {version, line}`. `line` is the count of accepted transitions the app held when the cursor was set, so a rewind the app adopts resets every cursor.
   1. **Recovery first.** When the app's line contains an accepted transition (`fromVersion` f) and this machine has no cursor on the current line, the first run starts at the state at f: the transition's base, which the whole held chain keeps. It runs forward through f + 1 and on. `EndpointOrg.#rewind` (`org-sync.ts:225-244`) needs the state at f + 1 and, when f has left its window, the authenticated base, and the run carries both. An endpoint still on the superseded branch, above the recovered head or at an equal version, rewinds by it. A `done` sets the cursor on this line.
+     Recovery first is a probe, tried once per machine per line. Any other answer records `probed[ref] = line` and hands the machine to step 2, then step 3, on the same line. Two endpoints answer that way and neither is a failure:
+     - One below the base (head < f − 1). No candidate transition applies (`fromVersion` ≥ its head), and the run holds no state at its head + 1, so it answers `not-newer`.
+     - One that already accepted this recovery and whose head is past the run's first page. `verifyRewind` refuses the accepted transition (`rollback`, `org-state.ts:311`), and `#refusal` sees states below its high-water mark (`org-sync.ts:258-261`), so it answers `rollback`.
+     An endpoint at f − 1, or one past the recovery within the first page, takes the run or matches a head in it and answers `done`.
   2. **Finding the machine's head** when no cursor exists and no recovery applies: runs start at `caps().stateVersion` (RL7's caps, `link.ts:63-77`), else genesis, and include that version's state. `#deliver` (`endpoint.ts:671-682`) answers `done` with `{version}` when it adopted states, or when a delivered state at its head's version hashes equal to its head. Either proves the machine's head is on the app's line at that version, and sets the cursor. `not-newer` or `rollback` moves the next run's start past this run's last state.
   3. **Forward catch-up** from a cursor at version v: each run starts at v + 1, never repeating v, and takes consecutive states up to `DELIVERY_MAX_BYTES` (512 KiB). A `done` must raise the version. A run that can't hold even its first state (one state over the bound) stops that machine's delivery with a visible `too-large` in the status, and the machine catches up through its own hub sync.
 
@@ -568,6 +572,7 @@ M3's own edits are the no-change successor and that revocation. The delegation a
   - runs paging forward from `caps().stateVersion`, from the last acknowledged version and from genesis, each forward run starting after the cursor;
   - one state fitting the bound but two consecutive ones not: still progressing one state a run; a single state over the bound reading `too-large`;
   - after a recovery: an endpoint on the superseded branch above the recovered head, one at an equal version on the other branch, and one whose window no longer holds the recovery's base, each brought onto the app's line by the recovery-first run; every cursor reset when the app adopts a rewind;
+  - the probe's exit, on real endpoints: one below the recovery's base (answers `not-newer`), and one that already accepted the recovery and is past the first page (answers `rollback`). Each is recorded as probed on that line and reaches the target through head-finding and forward catch-up, and neither gets a second probe on the same line;
   - a missing run larger than `DELIVERY_MAX_BYTES` reaching the target in bounded steps with no hub;
   - the pending state delivered while the hub withholds it;
   - a machine already ahead of the state acknowledged at its head;
@@ -1114,7 +1119,7 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
     signing.json     { "version": 1,
                        "pending": { "signed": SignedOrgState, "parent": "<stateHash>", "exposed": { "hub": <boolean>, "machines": ["<ref>"] } } | null,
                        "deliveries": [ { "hash": "<stateHash>", "signed": SignedOrgState, "owed": ["<ref>", …],
-                                         "known": { "<ref>": { "version": <n>, "line": <accepted transitions held> } }, "tooLarge": ["<ref>"] } ],
+                                         "known": { "<ref>": { "version": <n>, "line": <accepted transitions held> } }, "probed": { "<ref>": <line> }, "tooLarge": ["<ref>"] } ],
                        "abandoned": [ { "hash": "<stateHash>", "version": <n>, "hub": <boolean>, "machines": ["<ref>"] } ],
                        "lastAsked": "<ISO>" | null, "lastNotified": "<ISO>" | null }      // fails closed once registration.json says signing: true
     registration.json  gains "signing": true (once signing.json is first written) and "rekey": { "device": "<new id>" } (during a rekey's promotion)
@@ -1383,6 +1388,10 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   3. A machine-holder revocation whose key the head retired moves the retired entry to `revoked`.
   The round confirmed every earlier fix closed, and M5 clear.
   Rationale: `org-sync.ts:225-244` (the rewind needs the state at `fromVersion + 1` and the base), `endpoint.ts:680-681` (`done` on an unchanged head), `org-state.ts:111-112` and `:172-173`.
+  Date/Author: 2026-10-28, O8's planner.
+
+- Decision: The re-plan's fourth buildability round is folded in (on 59b63b5cd: 1 P2). Recovery first is a probe with a defined exit. Any answer other than `done` records the line as probed for that machine and hands it to head-finding and forward catch-up. Two proofs are added: an endpoint below the recovery's base, and one past the first page that already accepted the recovery. The rounds converged at 11, 7, 3, 1.
+  Rationale: `org-sync.ts:227` (a transition with `fromVersion` at or above the head is no candidate), `org-state.ts:311` (an accepted transition refused as `rollback`), `org-sync.ts:258-261` (`#refusal`: `not-newer` with no state at head + 1, `rollback` with states below the high-water mark). Without the exit, both machines would stay owed forever, retried hourly with the same run.
   Date/Author: 2026-10-28, O8's planner.
 
 ## Outcomes & Retrospective
