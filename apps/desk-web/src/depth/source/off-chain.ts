@@ -29,6 +29,7 @@
 // The held rows stay verbatim; only the drawing's mapping changes. An older producer marks nothing, and the drawing is
 // every held row, as before.
 import type { ContentBlock, SessionEvent } from '@shared/graph/events';
+import { isMadeUpFinalAnswer } from '@shared/owner/message-call';
 import type { TranscriptRecord } from '@shared/wire/transcript';
 import type { JsonObject } from 'desk-hub/protocol';
 import { eventBase, isTaskNotification, localCommandKind, startsTurn, type BackfillContext } from '../../../../../src/engine-host/fs/backfill';
@@ -95,8 +96,11 @@ export function ownerInput(row: JsonObject): OwnerInput | null {
   return found;
 }
 
-/** A response the model wrote: an assistant row, but not one the engine wrote itself (`<synthetic>`), which reads nothing. */
-export const isResponse = (row: JsonObject): boolean => row.type === 'assistant' && object(row.message)?.model !== '<synthetic>';
+/**
+ * A response the model wrote: an assistant row, but not one the engine wrote itself (`<synthetic>`) nor the to-human
+ * plugin's answer after a final message (`isMadeUpFinalAnswer`), each written with no request, which read nothing.
+ */
+export const isResponse = (row: JsonObject): boolean => row.type === 'assistant' && object(row.message)?.model !== '<synthetic>' && !isMadeUpFinalAnswer(row);
 
 /** The assistant row that issued a tool result (a user row holding a `tool_result` block), or null for any other row. */
 function resultCall(row: JsonObject): string | null {

@@ -1,9 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
 import { parseJournalRow } from '@shared/wire/journal'; // P4-R7
+import { parseTranscriptRecord } from '@shared/wire/transcript';
+import { createBackfillContext, recordToEvents } from '../../engine-host/fs/backfill';
 import { activityForTool, applyStatusToDigest, costLedger, costOf, emptyDigest, foldDigest, foldEvents, restoreCost, type MessageCalls } from './digest';
 import { status } from '../../../test/support/builders'; // C12
 import { ev } from '../../../test/support/events';
@@ -318,6 +320,20 @@ describe('a message tool’s message as the last line', () => {
     expect(messages.size).toBe(0);
     fold([result('c1')]);
     expect(digest).toMatchObject({ lastAssistantLine: 'Looking first.', activity: 'Working' });
+  });
+
+  // test/fixtures/transcript-to-human-final.jsonl as C4 backfills it for a terminal session: the turn ends on an accepted
+  // final call of the plugin's tool, then the plugin's made-up answer, which said nothing and is no line; the call reads
+  // as MAWS reads the plugin's tool, and the same turn under MAWS's name leaves its message as the line.
+  it('the to-human plugin’s answer after a final message, followed from disk, is no line', () => {
+    const turn = readFileSync(join(__dirname, '../../../test/fixtures/transcript-to-human-final.jsonl'), 'utf8');
+    const lineOf = (text: string) => {
+      const ctx = createBackfillContext({ sessionId: 'S' as SessionId, agent: null });
+      const events = text.trim().split('\n').flatMap((line) => recordToEvents(parseTranscriptRecord(JSON.parse(line)), ctx));
+      return foldEvents(emptyDigest(APP), new Set(), events, costLedger(emptyDigest(APP)), false, new Map()).lastAssistantLine;
+    };
+    expect(lineOf(turn)).toBe('Looking first.');
+    expect(lineOf(turn.replaceAll('mcp__to-human__message', 'mcp__maws__message'))).toBe('Both stages ran; 37 labels are missing.');
   });
 
   it('a refused result, or a call with no words, leaves the line it had', () => {
