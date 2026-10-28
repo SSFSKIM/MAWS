@@ -292,7 +292,7 @@ async function untilDaemonHostReady(page: Page, launchedAt: number): Promise<voi
   const line = await untilHostReady({
     read: () => page.evaluate(() => window.maws.invoke('host.status', undefined)).then((status) => (status.ok ? status.value : null)),
     now: () => Date.now(),
-    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms).unref()), // the bound's timer outlives an early return; it holds no worker open
   }, launchedAt);
   if (line !== null) console.log(line);
 }
