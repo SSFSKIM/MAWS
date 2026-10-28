@@ -11,7 +11,7 @@ import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings';
 import { StoreDiagnostics } from './StoreDiagnostics';
 import { SupervisorRow } from './SupervisorRow'; // E10
-import { DaemonRow } from './DaemonRow'; // P5 O2 M7
+import { DaemonRow, SpineRow } from './DaemonRow'; // P5 O2 M7; P5 O3-A: SpineRow
 import { MainBuildRow } from './MainBuildRow'; // E11 §2.7
 // C7 start
 import { ResumeLauncher } from '../composer/dev/ResumeLauncher';
@@ -70,6 +70,8 @@ export function Diagnostics() {
       <SupervisorRow />
       {/* P5 O2 M7: the machine daemon the hosts run under, or why none runs this launch */}
       <DaemonRow />
+      {/* P5 O3-A: a run refused the spine says so */}
+      <SpineRow />
       <ShellDataRow />
       <div className="flex items-center gap-3">
         <button

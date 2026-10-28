@@ -12,7 +12,7 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import type { HostOn } from '@shared/host/runtime';
 import type { CustomizationEndpoint, CustomizationInventory, CustomizationServer, CustomizationSkill } from '@shared/ipc/schema';
 import { CUSTOMIZATION_INVENTORY_COVERAGE } from '@shared/ipc/schema/customization';
-import { migrateSettings } from '@shared/settings/defaults';
+import { isUnifiedSettings, migrateMachineSettings, migrateSettings } from '@shared/settings/defaults';
 import { captureLocalKey } from '../connectors/local-key';
 import { configFileOf, legacyConfigFileOf, nodeSourceFiles } from '../connectors/source-entry';
 import { under } from '../plugins/cli-result';
@@ -222,12 +222,19 @@ async function installedSkills(r: Reading, configHome: string, cwd: string | nul
 }
 
 async function collect(r: Reading, cwd: string | null, deps: InventoryDeps): Promise<void> {
-  const appFile = join(deps.userData, 'settings.json');
+  // P5 O3-A (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md §3): MAWS's own servers are the machine's, in
+  // machine-settings.json; while that file is absent (a profile no split build has started) they are read from the
+  // unified settings.json, as before. A client settings.json (version 21 on) holds none. A row names the file it was read from.
+  const machineFile = join(deps.userData, 'machine-settings.json');
+  const unifiedFile = join(deps.userData, 'settings.json');
   r.mcpStart();
+  const fromMachine = await r.exists(machineFile);
+  const appFile = fromMachine ? machineFile : unifiedFile;
   const app = await r.json(appFile);
-  if (app !== undefined) {
+  if (app !== undefined && (fromMachine || isUnifiedSettings(app))) {
     try {
-      for (const { name, type, url } of migrateSettings(app).engine.mcpServers) r.addServer({ name, scope: 'app', path: appFile, transport: type }, url);
+      const servers = fromMachine ? migrateMachineSettings(app).engine.mcpServers : migrateSettings(app).engine.mcpServers;
+      for (const { name, type, url } of servers) r.addServer({ name, scope: 'app', path: appFile, transport: type }, url);
     } catch (error) { if (error instanceof Stop) throw error; r.warn(`${appFile}: invalid app settings`); }
   }
   const appRead = r.mcpEnd();
