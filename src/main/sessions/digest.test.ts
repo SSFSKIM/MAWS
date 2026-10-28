@@ -1,10 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
 import { parseJournalRow } from '@shared/wire/journal'; // P4-R7
-import { activityForTool, applyStatusToDigest, costLedger, costOf, emptyDigest, foldDigest, foldEvents, restoreCost, type MessageCalls } from './digest';
+import { parseTranscriptRecord } from '@shared/wire/transcript';
+import { createBackfillContext, recordToEvents } from '../../engine-host/fs/backfill';
+import { applyStatusToDigest, costLedger, costOf, emptyDigest, foldDigest, foldEvents, restoreCost, type MessageCalls } from './digest';
 import { status } from '../../../test/support/builders'; // C12
 import { ev } from '../../../test/support/events';
 import { FIXTURE_DIR, framesOf, loadJournal } from '../../../test/support/fixtures';
@@ -307,17 +309,30 @@ describe('a message tool’s message as the last line', () => {
     expect(lines([call('c1', 'x'.repeat(300))], [result('c1')])).toEqual([null, 'x'.repeat(160)]);
   });
 
-  // The owner's ruling of 2026-10-21: in MAWS the to-human plugin's tool of the same shape is someone else's tool.
-  it('an accepted call of the to-human plugin’s message tool is work like any MCP call, and leaves the line it had', () => {
+  // P4-R7z (the P4 spec's Decision Log 92): the to-human plugin's tool, the one a MAWS session messages through, reads
+  // as MAWS's former one does: no work, and its message the line once accepted.
+  it('an accepted call of the to-human plugin’s message tool is no work, and its message is the line', () => {
     const seen = new Set<string>();
     const messages: MessageCalls = new Map();
     let digest = emptyDigest(APP);
     const fold = (batch: SessionEvent[]) => (digest = foldEvents(digest, seen, batch, costLedger(digest), true, messages));
     fold([ev('turn.started', {}), text('Looking first.'), call('c1', 'Stage 1 is done.', { toolName: 'mcp__to-human__message' })]);
-    expect(digest).toMatchObject({ lastAssistantLine: 'Looking first.', activity: activityForTool('mcp__to-human__message', { text: 'Stage 1 is done.' }) });
-    expect(messages.size).toBe(0);
+    expect(digest).toMatchObject({ lastAssistantLine: 'Looking first.', activity: 'Thinking' });
+    expect(messages.size).toBe(1);
     fold([result('c1')]);
-    expect(digest).toMatchObject({ lastAssistantLine: 'Looking first.', activity: 'Working' });
+    expect(digest).toMatchObject({ lastAssistantLine: 'Stage 1 is done.' });
+  });
+
+  // test/fixtures/transcript-to-human-final.jsonl as C4 backfills it for a terminal session: the turn ends on an accepted
+  // final call of the plugin's tool, then the plugin's made-up answer, which said nothing and is no line: the message is.
+  it('the to-human plugin’s answer after a final message, followed from disk, is no line: the message is', () => {
+    const turn = readFileSync(join(__dirname, '../../../test/fixtures/transcript-to-human-final.jsonl'), 'utf8');
+    const lineOf = (text: string) => {
+      const ctx = createBackfillContext({ sessionId: 'S' as SessionId, agent: null });
+      const events = text.trim().split('\n').flatMap((line) => recordToEvents(parseTranscriptRecord(JSON.parse(line)), ctx));
+      return foldEvents(emptyDigest(APP), new Set(), events, costLedger(emptyDigest(APP)), false, new Map()).lastAssistantLine;
+    };
+    expect(lineOf(turn)).toBe('Both stages ran; 37 labels are missing.');
   });
 
   it('a refused result, or a call with no words, leaves the line it had', () => {

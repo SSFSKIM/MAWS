@@ -64,6 +64,66 @@ describe('the desk-web step', () => {
   });
 });
 
+describe('the admin step', () => {
+  // `staging-run.sh admin <args…>` (O13 M2): `deployment admin` against staging with the admin device's keys, the owner's
+  // token on its stdin and nowhere else, its output filtered line by line into the step's log. Stubs stand for
+  // cloudflared (a synthetic token) and pnpm (which records what it was given and prints what the command would).
+  const token = `eyJ${'s'.repeat(20)}.synthetic`;
+  const setup = (keys = true) => {
+    const dir = mkdtempSync(join(tmpdir(), 'staging-admin-'));
+    const device = join(dir, 'device');
+    mkdirSync(device);
+    if (keys) writeFileSync(join(device, 'keys.json'), '{}', { mode: 0o600 });
+    const bin = join(dir, 'bin');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'cloudflared'), `#!/bin/sh\nprintf '%s' '${token}'\n`, { mode: 0o755 });
+    writeFileSync(
+      join(bin, 'pnpm'),
+      `#!/bin/sh\nprintf '%s\\n' "$@" > '${dir}/args'\ncat > '${dir}/stdin'\necho 'head version 3, issued 2 days ago'\necho 'a line naming a secret'\necho 'devices listed'\nexit 0\n`,
+      { mode: 0o755 },
+    );
+    const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, DESK_STAGING_DIR: join(dir, 'state'), DESK_STAGING_DEVICE: device, DESK_STAGING_SECRETS: join(dir, 'secrets') };
+    return { dir, device, env };
+  };
+
+  it.skipIf(!zsh)("runs the command on staging's config with the device's keys, the token on its stdin alone, the log filtered", () => {
+    const { dir, device, env } = setup();
+    const run = spawnSync('zsh', [runner, 'admin', 'devices'], { encoding: 'utf8', env });
+    expect(run.status, run.stdout + run.stderr).toBe(0);
+    const args = readFileSync(join(dir, 'args'), 'utf8').trim().split('\n');
+    expect(args.slice(args.indexOf('deployment'))).toEqual(['deployment', 'admin', 'devices', '--keys', `${device}/keys.json`, '--config', 'deploy/staging.json']);
+    expect(readFileSync(join(dir, 'stdin'), 'utf8')).toBe(`DESK_ACCESS_TOKEN=${token}\n`);
+    expect(run.stdout).toContain('head version 3, issued 2 days ago');
+    expect(run.stdout).not.toContain('secret');
+    const logs = readdirSync(join(dir, 'state')).filter((name) => name.startsWith('admin-'));
+    expect(logs).toHaveLength(1);
+    const log = readFileSync(join(dir, 'state', logs[0]), 'utf8');
+    expect(log).toBe('head version 3, issued 2 days ago\ndevices listed\n');
+    expect(run.stdout + run.stderr + log).not.toContain(token);
+  });
+
+  it.skipIf(!zsh)('names the deployment and the keys itself: no option that would name others, no init, no keys, nothing run', () => {
+    for (const extra of [['--hub', 'http://127.0.0.1:8747'], ['--user=owner@example.com'], ['--yes'], ['--config', 'deploy/config.json'], ['--keys', '/elsewhere/keys.json']]) {
+      const { dir, env } = setup();
+      const run = spawnSync('zsh', [runner, 'admin', 'pair', '--class', 'web-cards', ...extra], { encoding: 'utf8', env });
+      expect(run.status, extra.join(' ')).toBe(2);
+      expect(run.stdout, extra.join(' ')).toMatch(/admin takes no --(hub|user|yes|config|keys)/);
+      expect(readdirSync(dir)).not.toContain('args');
+    }
+    const init = setup();
+    const refused = spawnSync('zsh', [runner, 'admin', 'init'], { encoding: 'utf8', env: init.env });
+    expect([refused.status, refused.stdout]).toEqual([2, expect.stringMatching(/run admin adopt: stop/)]);
+    const none = setup(false);
+    const missing = spawnSync('zsh', [runner, 'admin', 'devices'], { encoding: 'utf8', env: none.env });
+    expect([missing.status, missing.stdout]).toEqual([2, expect.stringMatching(/no admin device keys at .*keys\.json/)]);
+    expect(readdirSync(none.dir)).not.toContain('args');
+  });
+
+  it('filters line by line, so what a step asks about at /dev/tty is shown before the question', () => {
+    expect(scripts[0].text).toMatch(/^filter\(\) \{ perl -ne 'BEGIN \{ \$\| = 1 \} /m);
+  });
+});
+
 describe('curl and the owner’s token', () => {
   it('is handed its configuration through a pipe, never a here-string (zsh spools one to a file)', () => {
     for (const { name, text } of scripts) expect(text.includes('<<<'), name).toBe(false);

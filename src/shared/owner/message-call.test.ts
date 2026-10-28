@@ -1,21 +1,22 @@
-// P4-R7: a message tool's call read as a to-human message: MAWS's own tool, and only it (the owner's ruling of
-// 2026-10-21: the to-human plugin's is someone else's tool in MAWS).
+// P4-R7: a message tool's call read as a to-human message. P4-R7z (the P4 spec's Decision Log 92): the to-human
+// plugin's tool, the one a MAWS session messages through, and MAWS's former one, which recorded sessions call.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { MAWS_SERVER_NAME } from '../maws/tools';
-import { MESSAGE_TOOL_NAMES } from '../maws/message-tool';
-import { isMessageTool, MAWS_MESSAGE_TOOL, MESSAGE_TOOLS, messageCallState, messageCallText } from './message-call';
+import { TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
+import { MAWS_TOOL_NAMES } from '../maws/tools';
+import { isHookMadeMessageId, isMadeUpFinalAnswer, isMessageTool, MAWS_MESSAGE_TOOL, MESSAGE_TOOLS, messageCallState, messageCallText, PLUGIN_MESSAGE_TOOL } from './message-call';
 
 describe('the message tools', () => {
-  it('reads MAWS’s name, and no other tool, as a message tool: the to-human plugin’s of the same shape neither', () => {
-    expect(MESSAGE_TOOLS).toEqual(['mcp__maws__message']);
-    expect(isMessageTool(MAWS_MESSAGE_TOOL)).toBe(true);
-    for (const other of ['mcp__to-human__message', 'message', 'mcp__maws__ask', 'mcp__doperpowers__message', 'SendMessage', 'mcp__to-human__AskUserQuestion', undefined, null, 42]) expect(isMessageTool(other)).toBe(false);
+  it('reads the to-human plugin’s name and MAWS’s former one as message tools, and no other tool', () => {
+    expect(MESSAGE_TOOLS).toEqual(['mcp__to-human__message', 'mcp__maws__message']);
+    for (const name of [PLUGIN_MESSAGE_TOOL, MAWS_MESSAGE_TOOL]) expect(isMessageTool(name)).toBe(true);
+    for (const other of ['message', 'mcp__maws__ask', 'mcp__doperpowers__message', 'SendMessage', 'mcp__to-human__AskUserQuestion', undefined, null, 42]) expect(isMessageTool(other)).toBe(false);
   });
 
-  // The renderer and main read the name the engine gives the server's tool; a rename on the server's side would leave
-  // every reader looking for a tool the model no longer calls.
-  it('MAWS’s name is the one the engine gives the `maws` server’s message tool', () => {
-    expect(MESSAGE_TOOL_NAMES.map((name) => `mcp__${MAWS_SERVER_NAME}__${name}`)).toEqual([MAWS_MESSAGE_TOOL]);
+  // MAWS's former tool is read in recorded sessions only: the `maws` server lists it no more.
+  it('MAWS’s former tool is not on the `maws` server', () => {
+    expect(MAWS_TOOL_NAMES).not.toContain('message');
   });
 });
 
@@ -36,5 +37,36 @@ describe('messageCallState', () => {
     expect(messageCallState(undefined)).toBe('pending');
     expect(messageCallState({ isError: false })).toBe('sent');
     expect(messageCallState({ isError: true })).toBe('refused');
+  });
+});
+
+// test/fixtures/transcript-to-human-final.jsonl: a turn ending on an accepted final call of the plugin's tool, then the
+// plugin's made-up answer and the turn's end.
+describe('isMadeUpFinalAnswer', () => {
+  const rows = readFileSync(join(TEST_FIXTURE_DIR, 'transcript-to-human-final.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+  const madeUp = rows.find((row) => row.uuid === 'made-up')!;
+  const withText = (text: string, more: unknown[] = []) => ({ ...madeUp, message: { ...(madeUp.message as object), content: [{ type: 'text', text }, ...more] } });
+
+  it('is the plugin’s answer, and no other record of the turn', () => {
+    expect(rows.filter(isMadeUpFinalAnswer).map((row) => row.uuid)).toEqual(['made-up']);
+  });
+
+  // The stream-json frame of the same answer carries no flag, only the hook-made id (doperpowers #415's live MAWS check).
+  const { answeredWithoutRequest: _flag, ...unflagged } = madeUp;
+  void _flag;
+
+  it('is the same answer as the live wire frames it: a hook-made id, no flag, no request id', () => {
+    expect(isMadeUpFinalAnswer(unflagged)).toBe(true);
+    expect(isHookMadeMessageId((madeUp.message as { id: string }).id)).toBe(true);
+    for (const id of ['msg_01KpStagesB', 'req_011CStagesB', undefined, null, 42]) expect(isHookMadeMessageId(id)).toBe(false);
+  });
+
+  it('is not a model that writes the same sentence, another hook’s answer, or the answer with more in it', () => {
+    const written: Record<string, unknown> = { ...unflagged, requestId: 'req_011CStagesC', message: { ...(madeUp.message as object), id: 'msg_01KpStagesC' } };
+    expect(isMadeUpFinalAnswer(written)).toBe(false);
+    expect(isMadeUpFinalAnswer(withText('Sent to the reviewer.'))).toBe(false);
+    expect(isMadeUpFinalAnswer(withText('Message sent to the human.', [{ type: 'text', text: 'And more.' }]))).toBe(false);
+    expect(isMadeUpFinalAnswer({ ...madeUp, type: 'user' })).toBe(false);
+    expect(isMadeUpFinalAnswer(withText('\nMessage sent to the human.\n'))).toBe(true);
   });
 });

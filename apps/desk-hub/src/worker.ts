@@ -21,6 +21,7 @@ import {
   MACHINE_ENROLLMENT_PATH,
   MACHINE_ORG_STATE_PATH,
   ORG_KEYS_PATH,
+  ORG_KEYS_PURGE_PATH,
   ORG_STATE_PATH,
   ORG_TRANSITIONS_PATH,
   PENDING_DEVICES_PATH,
@@ -194,7 +195,11 @@ async function member(request: Request, url: URL, env: Env, registry: DurableObj
   if (revoke && method === 'DELETE') return answer(await registry.revoke(you, decodeURIComponent(revoke[1])));
   const archive = PROJECT_ARCHIVE.exec(pathname);
   if (archive && method === 'PUT') return answer(await registry.designateArchive(you, archive[1], await body(request)));
-  if (pathname === ORG_KEYS_PATH && method === 'GET') return json(200, await registry.orgKeys());
+  if (pathname === ORG_KEYS_PATH && method === 'GET') {
+    const listed = await orOlder<Result<unknown>>(async () => await registry.wrappedOrgKeys(), 'wrappedOrgKeys', async () => ({ ok: true, value: await registry.orgKeys() }));
+    return answer(listed);
+  }
+  if (pathname === ORG_KEYS_PURGE_PATH && method === 'POST') return answer(await registry.purgeOrgKeys(you));
   if (pathname === ORG_KEYS_PATH && method === 'POST') return answer(await registry.addOrgKey(you, await body(request)), 201);
   const orgKey = ORG_KEY_PATH.exec(pathname);
   if (orgKey && method === 'DELETE') return answer(await registry.removeOrgKey(you, orgKey[1], await body(request)));
@@ -287,6 +292,11 @@ async function machine(request: Request, url: URL, env: Env, registry: DurableOb
     }
     const relay = env.MACHINE.get(env.MACHINE.idFromName(relayObjectName(principal.org.id, found.ref)));
     return relay.fetch(forward(request, 'https://machine/socket', { ...identity, [REF_HEADER]: found.ref }));
+  }
+  // DX2 is the phase-1 transport: a credential its enrollment's key post marked v2 never opens it (O14 M5a), so the
+  // credential a re-enrollment mints carries nothing but RL1 until its machine is listed.
+  if (principal.v2 && ((url.pathname === '/machine/stream' && request.method === 'GET') || (url.pathname === '/machine/frames' && request.method === 'POST'))) {
+    return json(403, { error: 'v2-credential', message: 'this credential belongs to a v2 enrollment (its machine key is posted): it connects over RL1 (/machine/socket), never DX2' });
   }
   const stub = env.MACHINE.get(env.MACHINE.idFromName(`${principal.org.id}:${principal.machine.name}`));
   if (url.pathname === '/machine/stream' && request.method === 'GET') return stub.fetch(forward(request, 'https://machine/stream', identity));

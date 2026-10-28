@@ -22,25 +22,44 @@
 //
 // RL10 (M6), the sminos daemon's local socket, is served while the machine speaks for its ref and is `org-listed`, and
 // not once the hub link stops for good with `re-enroll` or `revoked`: `rl10.json` and the socket exist only then.
+//
+// Actions (M7) are checked for freshness and replay before the gate authorizes them, then handed to the side that runs
+// them, each keeping its ledger: the engine host (lane B), sminos (lane A, over RL10) or the endpoint itself
+// (`endpoint.grant`, `endpoint.state`, under `<stateDir>/ops.jsonl`). A query routes to the executor it names and is
+// answered against the binding the executor stored.
+//
+// Subscriptions and reads (M8): a `sub` is registered at once and authorized by the gate, then streamed by its lane's
+// plane (lane A from sminos's session plane over RL10, lane B from the engine host's events and journal); each is
+// authorized again at every record change and every new head. A `call` the gate lets through is read by calls.ts. A
+// device's lane B subscriptions are interest (OX5).
 import { homedir, networkInterfaces } from 'node:os';
 import { importSigningKey, isListingGone, stateHash, type MachineIdentity, type OrgState, type Right, type Rl1Refusal, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { Authorizer, type AuthorizeContext } from './authorize';
+import { Calls } from './calls';
 import { Channels } from './channels';
 import { DirectListener, type DirectListenerOptions } from './direct-listener';
+import { Actions } from './actions';
 import { runCli } from './cli';
+import { EndpointActions, type EffectResult } from './endpoint-actions';
 import { enrollDelegatedInto, speaksFor, syncAndPromote, type DelegatedInput, type EnrollContext, type EnrollmentState } from './enroll';
+import { Freshness } from './freshness';
 import { Gate } from './gate';
-import { dropRevokedGrants, machineOwnerMembers, machineRights } from './grants';
+import { acceptGrant, dropRevokedGrants, machineOwnerMembers, machineRights } from './grants';
 import type { HubDeps } from './hub-http';
 import { HubLink } from './hub-link';
+import { Interest } from './interest';
 import { EndpointRecords, Listings, RecordRetries, type RecordsContext } from './listings';
 import { Notifier } from './notify';
 import { EndpointOrg, type OrgChange } from './org-sync';
+import { PlaneA } from './plane-a';
+import { PlaneB } from './plane-b';
 import { EndpointPolicy, settingsDefaultMode } from './policy';
+import { Queries } from './queries';
 import { Rl10 } from './rl10/link';
 import type { EndpointModule, EndpointServices } from './services';
-import type { CheckoutSource, RecordSource } from './sources';
+import type { CheckoutSource, RecordSource, SessionTarget } from './sources';
 import { EndpointState } from './state/store';
+import { Subscriptions } from './subscriptions';
 import { endpointStatus, NO_LINKS, type EndpointLinks, type EndpointStatus } from './status';
 import { directPort, type InterfaceTable } from './tailnet';
 
@@ -61,6 +80,8 @@ export type EndpointOptions = {
   pingMs?: readonly [number, number];
   direct?: { interfaces?(): InterfaceTable } & Pick<DirectListenerOptions, 'listen' | 'limits' | 'rescanMs'>;
   authorization?: { records?: RecordSource; checkouts?: CheckoutSource; settingsMode?(): string } & Pick<AuthorizeContext, 'offers' | 'gradeOf' | 'registry'>;
+  /** The suites' seams for subscriptions: the resume window, lane A's ring and the unsent stream's bound. */
+  subscriptions?: { resumeMs?: number; ringBytes?: number; backlogBytes?: number; recheckRetryMs?: readonly number[]; transmitDeadlineMs?: number };
 };
 
 /** The whole handshake of a direct connection is this long at most (M4). */
@@ -89,6 +110,20 @@ export class Endpoint implements EndpointModule {
   readonly gate: Gate;
   /** RL10 (M6): the sminos daemon's socket; its members are the records and checkouts authorization reads. */
   readonly rl10: Rl10;
+  /** Actions to their executing side (M7), and the endpoint's own under its ledger. */
+  readonly actions: Actions;
+  readonly own: EndpointActions;
+  /** RL4's queries (M7), answered against the binding the executor stored. */
+  readonly queries: Queries;
+  /** Subscriptions (M8): the table, lane A's and lane B's planes, and the interest they report. */
+  readonly subscriptions: Subscriptions;
+  readonly planeA: PlaneA;
+  readonly planeB: PlaneB;
+  readonly interest: Interest;
+  /** Remote reads (M8). */
+  readonly calls: Calls;
+  /** What `start` subscribed to on mawsd's seam, let go at `stop`. */
+  readonly #unseam: Array<() => void> = [];
   readonly #options: EndpointOptions;
   #direct: DirectListener | null = null;
   #directStarted = false;
@@ -101,6 +136,8 @@ export class Endpoint implements EndpointModule {
   /** Judgments begun: only the latest one's verdict is taken. */
   #judgments = 0;
   #headHash: string | null = null;
+  /** Why the engine host's operation ledger is closed, as its last ledger answer said; null while it answers. */
+  #engineHostLedger: string | null = null;
   #timer: ReturnType<typeof setInterval> | null = null;
   #syncing: Promise<unknown> | null = null;
   /** `stop()` was called: nothing in flight then (a sync, an adoption) opens the link or a timer again. */
@@ -239,7 +276,108 @@ export class Endpoint implements EndpointModule {
       registry: authorization.registry,
     });
     this.gate = new Gate({ authorize: (request, who, now) => this.authorizer.authorize(request, who, now), now: this.deps.now, log });
-    this.channels.setRoutes(this.gate.routes());
+    const dispatch: EndpointServices['dispatch'] = (owner, name, input) => {
+      if (this.#services === null) return Promise.reject(new Error('the endpoint has not started'));
+      return this.#services.dispatch(owner, name, input);
+    };
+    this.own = new EndpointActions({
+      stateDir: () => {
+        if (this.#services === null) throw new Error('the endpoint has not started');
+        return this.#services.machine.stateDir;
+      },
+      grant: (value) => this.#grant(value),
+      deliver: (states, transitions) => this.#deliver(states, transitions),
+      now: this.deps.now,
+      log: (line) => log(line),
+    });
+    this.actions = new Actions({
+      freshness: new Freshness(),
+      own: this.own,
+      rl10: this.rl10,
+      dispatch,
+      hold: (reason) => this.#services?.hold(reason) ?? (() => {}),
+      engineHostLedger: (closed) => (this.#engineHostLedger = closed),
+      offers: authorization.offers,
+      now: this.deps.now,
+      log,
+    });
+    this.queries = new Queries({
+      authorize: (request, who, now) => this.authorizer.authorize(request, who, now),
+      own: this.own,
+      rl10: this.rl10,
+      dispatch,
+      engineHostLedger: (closed) => (this.#engineHostLedger = closed),
+      now: this.deps.now,
+      log,
+    });
+    this.rl10.onResult((result) => this.actions.result(result));
+    const seams = options.subscriptions ?? {};
+    const recordSource = authorization.records ?? this.rl10.members;
+    this.interest = new Interest({ interest: () => this.#services?.interest ?? null, log, resumeMs: seams.resumeMs });
+    this.planeA = new PlaneA({
+      send: (frame) => this.rl10.send(frame),
+      connected: () => this.rl10.connected,
+      member: (session) => {
+        const member = this.rl10.members.get(session);
+        return member === null ? null : { project: member.project, lane: member.lane, ...(member.launch === undefined ? {} : { launch: member.launch }) };
+      },
+      log,
+      ringBytes: seams.ringBytes,
+      backlogBytes: seams.backlogBytes,
+      resumeMs: seams.resumeMs,
+    });
+    this.planeB = new PlaneB({ dispatch, log, backlogBytes: seams.backlogBytes });
+    this.rl10.onSession((message) => this.planeA.message(message));
+    this.rl10.onPending((project, raised) => this.planeA.pendingSet(project, raised));
+    this.rl10.onLink((connected) => connected || this.planeA.linkLost());
+    this.subscriptions = new Subscriptions({
+      recheckRetryMs: seams.recheckRetryMs,
+      transmitDeadlineMs: seams.transmitDeadlineMs,
+      authorize: (request, who, now) => this.authorizer.authorize(request, who, now),
+      planes: { A: this.planeA, B: this.planeB },
+      interest: this.interest,
+      records: recordSource,
+      now: this.deps.now,
+      log,
+    });
+    this.calls = new Calls({
+      dispatch,
+      subscription: (channel, sub) => this.subscriptions.get(channel, sub),
+      upstreamOf: (sub) => this.planeA.upstreamOf(sub),
+      toSminos: (frame) => this.rl10.send(frame),
+      members: () =>
+        this.rl10.members.sessions().flatMap((session) => {
+          const member = this.rl10.members.get(session);
+          if (member === null) return [];
+          const listingId = this.rl10.members.listingId(session);
+          const target: SessionTarget = member.lane === 'A' ? { lane: 'A', session } : { lane: 'B', session, appSessionId: listingId ?? '' };
+          return [{ member, listingId, target }];
+        }),
+      records: recordSource,
+      machineOwners: () => {
+        const org = this.#org;
+        if (!org?.ready || this.#services === null) return Promise.resolve([]);
+        return machineOwnerMembers(org.head().state, org.certificates(), this.#services.machine.ref, new Date(this.deps.now()));
+      },
+      recordFor: (report) => this.listings.recordFor(report),
+      offers: authorization.offers,
+      log,
+    });
+    this.gate.setExecutors({
+      act: (channel, m, decision) => this.actions.execute(channel, m, decision),
+      call: (channel, m) => this.calls.execute(channel, m),
+      sub: (channel, m, decision) => this.subscriptions.start(channel, m, decision),
+      subRefused: (channel, m, reason) => this.subscriptions.refused(channel, m, reason),
+    });
+    const gated = this.gate.routes();
+    this.channels.setRoutes({
+      ...gated,
+      act: (channel, m) => this.actions.receive(channel, m, gated.act),
+      query: (channel, m) => this.queries.route(channel, m),
+      sub: (channel, m) => this.subscriptions.receive(channel, m, gated.sub),
+      credit: (channel, m) => this.subscriptions.credit(channel, m),
+      unsub: (channel, m) => this.subscriptions.unsub(channel, m),
+    });
   }
 
   async start(services: EndpointServices): Promise<void> {
@@ -254,8 +392,14 @@ export class Endpoint implements EndpointModule {
     });
     this.#state = state;
     this.#org = org;
+    // Lane B's live events and the app's attachment (none at start, O2's seam), for the subscriptions.
+    this.#unseam.push(
+      services.onEvent((owner, message) => this.planeB.event(owner, message)),
+      services.onAttachment((attached) => this.planeB.attachment(attached)),
+    );
     this.notifier.restore();
     if (state.refusing !== null) return;
+    this.own.open();
     if (state.machineKey !== null) {
       try {
         this.#key = await importSigningKey(state.machineKey.jwk);
@@ -269,6 +413,8 @@ export class Endpoint implements EndpointModule {
       this.#headHash = await stateHash(org.head().state);
       // The ledger is re-read against a new head after the head is on disk; a crash between the two left it unread.
       this.#endRevokedGrants(org.head().state, log);
+      // So is legacy.json, which follows the head's retirement of the DX1 key.
+      this.#followLegacy(org.head().state, false, log);
     }
     // The standing is judged from what is on disk before anything is admitted: the marker a crash left may be stale.
     await this.#judge();
@@ -283,6 +429,10 @@ export class Endpoint implements EndpointModule {
     this.#retries.clear();
     if (this.#timer !== null) clearInterval(this.#timer);
     this.#timer = null;
+    // No action more; those in flight record their results first (up to 2 s), then the subscriptions and channels close.
+    await this.actions.stop();
+    this.subscriptions.stop();
+    for (const off of this.#unseam.splice(0)) off();
     // Each channel's sealed `restart` goes out before the carriers end: the hub link and the listener close after.
     await this.channels.closeAll('restart');
     await this.#direct?.stop();
@@ -300,7 +450,8 @@ export class Endpoint implements EndpointModule {
   status(): EndpointStatus {
     this.links.rl10 = { connected: this.rl10.connected };
     const stopped = this.hub.stopped;
-    return endpointStatus(this.#state, this.#headHash, this.links.refusing === undefined && stopped !== null ? { ...this.links, refusing: stopped } : this.links);
+    const links = this.links.refusing === undefined && stopped !== null ? { ...this.links, refusing: stopped } : this.links;
+    return endpointStatus(this.#state, this.#headHash, links, { endpoint: this.own.closed, engineHost: this.#engineHostLedger });
   }
 
   cli(command: string, args: readonly string[], secret?: string): Promise<{ code: number; out: string }> {
@@ -427,6 +578,32 @@ export class Endpoint implements EndpointModule {
     return machineRights(this.#state, org.head().state, org.certificates(), this.#services.machine.ref, member, new Date(this.deps.now()));
   }
 
+  /** `endpoint.grant`'s effect: the grant kept by the ledger's rule, and the devices told their new grades. */
+  async #grant(value: unknown): Promise<EffectResult> {
+    const parts = this.parts;
+    if (parts === null) return { ok: false, error: { code: 'unavailable' } };
+    const result = await acceptGrant(parts.state, parts.org, parts.services.machine.ref, value, new Date(this.deps.now()));
+    if (!result.ok) return { ok: false, error: { code: result.reason } };
+    this.channels.refreshCaps();
+    const g = result.grant.body;
+    return { ok: true, value: { member: g.member, version: g.version, rights: g.rights } };
+  }
+
+  /**
+   * `endpoint.state`'s effect: an admin's delivered state adopted as any delivery is, answered once the new head is on
+   * disk; a delivery whose newest state is the head already held is done too.
+   */
+  async #deliver(states: unknown, transitions: unknown): Promise<EffectResult> {
+    const org = this.#org;
+    if (org === null || !org.ready) return { ok: false, error: { code: 'unavailable' } };
+    const result = await org.adopt(states, transitions ?? []);
+    const head = org.head().state;
+    if (result.adopted > 0) return { ok: true, value: { version: head.version, ...(result.rewound ? { rewound: true } : {}) } };
+    const held = Array.isArray(states) ? (states as SignedOrgState[]).find((s) => s?.state?.version === head.version) : undefined;
+    if (held !== undefined && (await stateHash(held.state)) === (await stateHash(head))) return { ok: true, value: { version: head.version } };
+    return { ok: false, error: { code: result.refused ?? 'not-newer' } };
+  }
+
   /** The origin a web-cards device's code is served from, which its assertions name: the hub's (RL §5.10). */
   #webOrigin(): string | null {
     const hub = this.#state?.enrolled ? this.#state.enrollment?.hub : undefined;
@@ -463,11 +640,14 @@ export class Endpoint implements EndpointModule {
       log(`endpoint: org state ${change.head.state.version}${change.rewound ? ' (a recovery rewind)' : ''} removed ${members.length} member(s), ${devices.length} device(s), revoked ${keys.length} key(s)`);
     }
     this.#endRevokedGrants(change.head.state, log);
+    this.#followLegacy(change.head.state, change.previous === null, log);
     void this.#judge();
     // The machine's owners or the admins may have changed: `@machine` listings are re-issued.
     void this.listings.refresh();
     // sminos hears the head's revocation set and directory where they changed.
     void this.rl10.adopted();
+    // Every subscription, and every resumable cursor, is authorized again under the new head (M8).
+    this.subscriptions.recheck();
   }
 
   /**
@@ -535,6 +715,26 @@ export class Endpoint implements EndpointModule {
     const serve = !this.#stopped && this.#speaks && enrollment?.state === 'org-listed' && this.#state?.refusing === null && stopped !== 're-enroll' && stopped !== 'revoked';
     if (serve && !this.rl10.serving) void this.rl10.serve();
     else if (!serve && this.rl10.serving) void this.rl10.unserve();
+  }
+
+  /**
+   * `legacy.json` made the head's (O14 M5a; rl10/legacy.ts): a tombstone under its `legacyRetired`, the key again without
+   * it. `first`: the head is this enrollment's first, under which a machine has no bytes to keep. RL10 hears of it with
+   * the adoption (`rl10.adopted`), which judges the v1 events held for want of a key again.
+   */
+  #followLegacy(head: OrgState, first: boolean, log: (line: string) => void): void {
+    const legacy = this.rl10.legacy;
+    try {
+      const was = legacy.retired;
+      if (!legacy.follow(head, first) || legacy.retired === was) return;
+      log(
+        legacy.retired
+          ? `endpoint: the org state at version ${head.version} retires the legacy org key: events go out v2-only, and v1 events come down unchecked`
+          : `endpoint: the org state at version ${head.version} no longer retires the legacy org key${legacy.held ? ': it is in use again' : ''}`,
+      );
+    } catch (error) {
+      log(`endpoint: legacy.json could not follow the org state at version ${head.version}: ${(error as Error).message}`);
+    }
   }
 
   #endRevokedGrants(head: OrgState, log: (line: string) => void): void {

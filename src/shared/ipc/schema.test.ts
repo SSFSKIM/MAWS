@@ -32,7 +32,7 @@ import * as maws from './schema/maws';
 import * as side from './schema/side';
 // E3 end
 // C11 start
-import { SETTINGS_DEFAULTS_V19 } from '../settings/defaults';
+import { SETTINGS_DEFAULTS_V20 } from '../settings/defaults';
 // C11 end
 // E9 start
 import * as voice from './schema/voice';
@@ -344,7 +344,7 @@ describe('ipc schema validates both directions', () => {
   });
 
   describe('command output (renderer, on receipt)', () => {
-    const state = { settings: { ...SETTINGS_DEFAULTS_V19, theme: 'system' }, resolvedTheme: 'dark' };
+    const state = { settings: { ...SETTINGS_DEFAULTS_V20, theme: 'system' }, resolvedTheme: 'dark' };
 
     it('accepts a settings state and returns it unchanged', () => {
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
@@ -379,7 +379,7 @@ describe('ipc schema validates both directions', () => {
     it('accepts well-formed events unchanged', () => {
       const exit = { ptyId: 'p1', exitCode: null, signal: null };
       expect(validateEventPayload('pty.exit', exit)).toEqual({ ok: true, value: exit });
-      const changed = { settings: { ...SETTINGS_DEFAULTS_V19, theme: 'light' }, resolvedTheme: 'light' };
+      const changed = { settings: { ...SETTINGS_DEFAULTS_V20, theme: 'light' }, resolvedTheme: 'light' };
       expect(validateEventPayload('settings.changed', changed)).toEqual({ ok: true, value: changed });
     });
 
@@ -611,8 +611,8 @@ describe('ipc schema validates both directions', () => {
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });
 
-    it('settings.get and settings.changed carry the whole version 18 state', () => { // P4-R8: the app MCP servers; P4-A2: the launch profile
-      const state = { settings: { ...SETTINGS_DEFAULTS_V19, engine: { ...SETTINGS_DEFAULTS_V19.engine, mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }], launchProfile: { plugins: { off: ['ptc@ptc-tool'] }, outputStyle: 'maws', hooks: 'none' } }, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
+    it('settings.get and settings.changed carry the whole version 20 state', () => { // P4-R8: the app MCP servers; P4-A2: the launch profile
+      const state = { settings: { ...SETTINGS_DEFAULTS_V20, engine: { ...SETTINGS_DEFAULTS_V20.engine, mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }], launchProfile: { plugins: { off: ['ptc@ptc-tool'] }, hooks: 'none' } }, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
       expect(validateEventPayload('settings.changed', state).ok).toBe(true);
       expect(validateEventPayload('settings.changed', { ...state, settings: { ...state.settings, version: 2 } }).ok).toBe(false);
@@ -634,8 +634,9 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('settings.set', { engine: { binaryPath: null } }).ok).toBe(true);
       expect(validateCommandInput('settings.set', { engine: { mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }] } }).ok).toBe(true); // P4-R8
       expect(validateCommandInput('settings.set', { engine: { mcpServers: [{ name: 'maws', type: 'http', url: 'http://127.0.0.1/mcp' }] } }).ok).toBe(false); // P4-R8
-      expect(validateCommandInput('settings.set', { engine: { launchProfile: { plugins: { off: ['cc-plugin-diff@builtin'] }, outputStyle: 'maws', hooks: 'none' } } }).ok).toBe(true); // P4-A2
-      expect(validateCommandInput('settings.set', { engine: { launchProfile: { plugins: { off: ['__proto__'] }, outputStyle: 'user', hooks: 'user' } } }).ok).toBe(false); // P4-A2
+      expect(validateCommandInput('settings.set', { engine: { launchProfile: { plugins: { off: ['cc-plugin-diff@builtin'] }, hooks: 'none' } } }).ok).toBe(true); // P4-A2
+      expect(validateCommandInput('settings.set', { engine: { launchProfile: { plugins: { off: ['__proto__'] }, hooks: 'user' } } }).ok).toBe(false); // P4-A2
+      expect(validateCommandInput('settings.set', { engine: { launchProfile: { plugins: { off: [] }, outputStyle: 'maws', hooks: 'user' } } }).ok).toBe(false); // version 19: no style
       expect(validateCommandInput('settings.set', { engine: { binaryPath: 'bin/claude' } }).ok).toBe(false);
       expect(validateCommandInput('settings.set', { usage: { nearLimitPercent: 95 } }).ok).toBe(true);
       expect(validateCommandInput('settings.set', { usage: { nearLimitPercent: 40 } }).ok).toBe(false);
@@ -1150,15 +1151,17 @@ describe('ipc schema validates both directions', () => {
 
     it('adds the host namespace: four engine-host commands (three main-only senders), three main-owned, one event each side', () => {
       // P5 O2 M2 adds host.interest (main-only, below)
-      expect(Object.keys(host.commands)).toEqual(['host.supervisorStatus', 'host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.interest', 'host.status', 'host.restart', 'host.openLog']);
+      // P5 O10 M7: `host.op` and `host.opQuery`, lane B's operation ledger, are the endpoint's (main-only: never a window's)
+      expect(Object.keys(host.commands)).toEqual(['host.supervisorStatus', 'host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.interest', 'host.op', 'host.opQuery', 'host.status', 'host.restart', 'host.openLog']);
       const owners = Object.fromEntries(Object.entries(host.commands).map(([name, spec]) => [name, spec.owner]));
       expect(owners).toEqual({
         'host.supervisorStatus': 'engine-host', 'host.configure': 'engine-host', 'host.stopAll': 'engine-host', 'host.exitWhenIdle': 'engine-host', 'host.interest': 'engine-host',
+        'host.op': 'engine-host', 'host.opQuery': 'engine-host',
         'host.status': 'main', 'host.restart': 'main', 'host.openLog': 'main',
       });
       expect(Object.keys(host.events)).toEqual(['host.supervisorStatus', 'host.status']);
       // only main stops, configures or arms the supervisor: a renderer's stopAll would read as a crash to main's transport
-      expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['host.configure', 'host.stopAll', 'host.exitWhenIdle']));
+      expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.op', 'host.opQuery']));
       expect([...NAMES.host.commands]).toEqual(['host.supervisorStatus', 'host.status', 'host.restart', 'host.openLog']);
     });
 

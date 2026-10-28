@@ -1,5 +1,5 @@
 // `mawsd endpoint` commands that need no hub (O10 M2): the policy, a state delivered by hand (`revoke`), a grant kept
-// out of band by the ledger's rule, the legacy key's retirement, and the refusals around them.
+// out of band by the ledger's rule, the legacy key following the head's retirement, and the refusals around them.
 import * as fs from 'node:fs';
 import { join } from 'node:path';
 import { endorseDevice, generateSigningKey, keyId, NO_CERTIFICATES, SIGNING_DOMAINS, signRecord, type Grant, type SignedOrgState, type SigningKey } from 'org-protocol';
@@ -221,16 +221,51 @@ describe('enroll --wait', () => {
 });
 
 describe('the rest', () => {
-  it('retires the legacy key once', async () => {
-    const { endpoint } = await enrolled();
-    fs.writeFileSync(join(services.machine.stateDir, 'legacy.json'), JSON.stringify({ org: 'org-local', key: 'k'.repeat(43) }), { mode: 0o600 });
-    const again = createEndpoint();
-    await again.start(services);
-    expect(again.status()).toMatchObject({ legacyKey: true });
-    expect((await again.cli('legacy', ['retire'])).out).toMatch(/deleted/);
-    expect(fs.existsSync(join(services.machine.stateDir, 'legacy.json'))).toBe(false);
-    expect((await again.cli('legacy', ['retire'])).out).toBe('no legacy org key is held');
-    expect(endpoint).toBeTruthy();
+  it('follows the head’s retirement of the legacy key, keeps its bytes until purged, and has no verb of its own to retire it', async () => {
+    const { endpoint, head, a1 } = await enrolled();
+    const dir = services.machine.stateDir;
+    const key = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
+    fs.writeFileSync(join(dir, 'legacy.json'), JSON.stringify({ org: ORG, key }), { mode: 0o600 });
+    await endpoint.stop();
+    let current = createEndpoint();
+    await current.start(services);
+    const legacyFile = () => JSON.parse(fs.readFileSync(join(dir, 'legacy.json'), 'utf8')) as Record<string, unknown>;
+    expect(current.status()).toMatchObject({ legacyKey: true, legacyRetired: false });
+    expect((await current.cli('legacy', ['status'])).out).toBe('held');
+    expect(await current.cli('legacy', ['purge'])).toMatchObject({ code: 1, out: expect.stringMatching(/not retired by the org state/) as string });
+    const retire = await successor(head, [a1], (s) => void (s.legacyRetired = { version: s.version, at: s.issued }));
+    expect((await current.cli('revoke', ['-'], JSON.stringify(retire))).code).toBe(0);
+    expect(current.status()).toMatchObject({ legacyKey: false, legacyRetired: true });
+    expect(legacyFile()).toEqual({ org: ORG, retired: retire.state.legacyRetired!.at, key });
+    expect((await current.cli('legacy', ['status'])).out).toBe('retired (bytes kept)');
+    // The retirement undone by a successor: the bytes are the key again.
+    const undo = await successor(retire, [a1], (s) => void delete s.legacyRetired);
+    expect((await current.cli('revoke', ['-'], JSON.stringify(undo))).code).toBe(0);
+    expect(current.status()).toMatchObject({ legacyKey: true, legacyRetired: false });
+    expect(legacyFile()).toEqual({ org: ORG, key });
+    const again = await successor(undo, [a1], (s) => void (s.legacyRetired = { version: s.version, at: s.issued }));
+    expect((await current.cli('revoke', ['-'], JSON.stringify(again))).code).toBe(0);
+    // An undo's copy moved aside (M1's unenroll) is the key's bytes too.
+    const aside = join(dir, 'stale-2026-10-28T00-00-00.000Z');
+    fs.mkdirSync(aside, { mode: 0o700 });
+    fs.writeFileSync(join(aside, 'legacy.json'), JSON.stringify({ org: ORG, key }), { mode: 0o600 });
+    const purged = await current.cli('legacy', ['purge']);
+    expect(purged).toEqual({ code: 0, out: "purged: the legacy org key's bytes are deleted from legacy.json, stale-2026-10-28T00-00-00.000Z/legacy.json" });
+    expect(purged.out).not.toContain(key);
+    expect(legacyFile()).toEqual({ org: ORG, retired: again.state.legacyRetired!.at });
+    expect(fs.existsSync(join(aside, 'legacy.json'))).toBe(false);
+    expect((await current.cli('legacy', ['status'])).out).toBe('purged');
+    expect((await current.cli('legacy', ['purge'])).out).toBe('nothing to purge: no bytes of the legacy org key are held');
+    // A restart keeps the tombstone and what it says.
+    await current.stop();
+    current = createEndpoint();
+    await current.start(services);
+    expect(current.status()).toMatchObject({ legacyKey: false, legacyRetired: true });
+    expect((await current.cli('legacy', ['status'])).out).toBe('purged');
+    const retired = await current.cli('legacy', ['retire']);
+    expect(retired.code).toBe(1);
+    expect(retired.out).toMatch(/the org state retires the legacy org key/);
+    await current.stop();
   });
 
   it('answers not running before start, the usage for an unknown command, and never takes the code as an argument', async () => {

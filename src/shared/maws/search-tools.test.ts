@@ -90,9 +90,14 @@ describe('the maws server’s instructions (X33, route (b))', () => {
 const PROBE_TOOLS = fileURLToPath(new URL('../../../spikes/protocol-probe/scenarios/pass3/p4-maws-tools.json', import.meta.url));
 const probeTools = () => `${JSON.stringify({ instructions: MAWS_SERVER_INSTRUCTIONS, tools: mawsToolList() }, null, 2)}\n`;
 
+// P4-R7z (the P4 spec's Decision Log 92) took P4-R7's `message` off the server after the probe recorded its fixtures
+// against this snapshot, which keeps it so the fixtures still match what they were served; less that one tool it is the
+// source. Re-recording the probe drops it (the tracker's row).
 describe('the probe’s snapshot of the maws server', () => {
-  it('is the paragraph and tools/list as the source has them', () => {
+  it('is the paragraph and tools/list as the source has them, less the message tool P4-R7z took out', () => {
     if (process.env.MAWS_WRITE_PROBE_TOOLS === '1') writeFileSync(PROBE_TOOLS, probeTools());
-    expect(readFileSync(PROBE_TOOLS, 'utf8')).toBe(probeTools());
+    const snapshot = JSON.parse(readFileSync(PROBE_TOOLS, 'utf8')) as { instructions: string; tools: { name: string }[] };
+    expect(snapshot.tools.map((tool) => tool.name).filter((name) => !MAWS_TOOL_NAMES.includes(name as never))).toEqual(['message']);
+    expect(`${JSON.stringify({ instructions: snapshot.instructions, tools: snapshot.tools.filter((tool) => tool.name !== 'message') }, null, 2)}\n`).toBe(probeTools());
   });
 });

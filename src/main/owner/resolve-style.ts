@@ -1,6 +1,6 @@
 // The style resolver (the P2-C document, Design §2, "The resolver"): which output style a launch's settings select, and
-// the shape its declared to-human contract has (P2-C2, Decision Log 31: `marks`, then MAWS appends nothing; `message-tool`,
-// then MAWS appends its supplement; `none`, then the full contract). Reads, never writes. Its
+// the shape its declared to-human contract has (P2-C2, Decision Log 31), and (P4-R7z, the P4 spec's Decision Log 92)
+// whether the to-human plugin registers its message tool under it, which alone carries the lane. Reads, never writes. Its
 // config home is the engine's (the captured login-shell environment's, never main's own `process.env`). `outputStyle` is
 // taken from the highest-precedence source that sets it: managed settings, then MAWS's own `--settings`, then local,
 // project and user settings; a missing or malformed file sets nothing. The named style is then found:
@@ -9,11 +9,18 @@
 //   merged settings' `enabledPlugins` and whose installation applies to the cwd (user scope, or project or local scope
 //   for this project), in `<installPath>/output-styles/*.md` by front-matter `name`, else file stem;
 // - any other name in `<cwd>/.claude/output-styles/`, then `<configHome>/output-styles/`.
-// A style that cannot be found has no shape (MAWS then appends: doubled instructions over a silent lane), and the
-// reason is said; the engine's own report at `system/init` corrects a misreading (the mismatch check, ./launch.ts).
+// A style that cannot be found has no shape, and the reason is said; the engine's own report at `system/init` corrects a
+// misreading (the mismatch check, ./launch.ts).
+//
+// P4-R7z: the plugin registers `mcp__to-human__message` only under its own style, `doperpowers:to-human` (the to-human
+// plugin's rule), and only where its hooks load; MAWS_NATIVE_TO_HUMAN at 8, which the lane sets, admits MAWS's headless
+// launch. So a style carries the lane (`messageTool`) when it is that style, declares the tool (6 and up), the `to-human`
+// plugin is installed, enabled and applicable here as a style's plugin must be, and no setting turns every hook off (the
+// launch profile's hooks `none` does: its `disableAllHooks` keeps plugin hooks from loading), nor does a managed policy let
+// only managed hooks run.
 import { readdir, readFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { STYLE_CONTRACT_KEY, styleShape, type StyleShape } from '@shared/owner/contract';
+import { carriesPluginMessageTool, PLUGIN_STYLE, STYLE_CONTRACT_KEY, styleShape, TO_HUMAN_PLUGIN, type StyleShape } from '@shared/owner/contract';
 import { realOrSelf } from '../sessions/context';
 
 export const MANAGED_SETTINGS_PATH = '/Library/Application Support/ClaudeCode/managed-settings.json';
@@ -31,6 +38,7 @@ export interface ResolvedStyle {
   shape: StyleShape; // P2-C2: what the declared contract carries
   contract: number | null; // the declared contract version, when it has a shape
   unresolved: string | null; // why the style could not be found, when it could not
+  messageTool: boolean; // P4-R7z: whether the to-human plugin registers its message tool under it in such a launch
 }
 
 type SettingsFile = Record<string, unknown>;
@@ -67,7 +75,7 @@ export async function lookupStyle(name: string, ctx: StyleContext): Promise<Reso
 }
 
 async function lookupIn(name: string, ctx: StyleContext, settings: SettingsFile[]): Promise<ResolvedStyle> {
-  const none = (unresolved: string | null): ResolvedStyle => ({ name, shape: 'none', contract: null, unresolved });
+  const none = (unresolved: string | null): ResolvedStyle => ({ name, shape: 'none', contract: null, unresolved, messageTool: false });
   if (BUILT_IN_STYLES.has(name)) return none(null);
   const colon = name.indexOf(':');
   const directories =
@@ -81,13 +89,27 @@ async function lookupIn(name: string, ctx: StyleContext, settings: SettingsFile[
     if (style === null) continue;
     const contract = contractOf(style);
     const shape = styleShape(contract);
-    return shape === 'none' ? none(null) : { name, shape, contract, unresolved: null };
+    if (shape === 'none') return none(null);
+    const messageTool = name === PLUGIN_STYLE && carriesPluginMessageTool(contract) && !hooksDisabled(settings) && !(await managedHooksOnly(ctx)) && typeof (await pluginInstallPaths(TO_HUMAN_PLUGIN, ctx, settings)) !== 'string';
+    return { name, shape, contract, unresolved: null, messageTool };
   }
   return none(colon > 0 ? `the plugin ${name.slice(0, colon)} has no output style ${wanted}` : `no output style named ${name} in the project or the config home`);
 }
 
 // The output-style directories of the enabled installations of a plugin that apply to the cwd, or why there are none.
 async function pluginStyleDirectories(plugin: string, ctx: StyleContext, settings: SettingsFile[]): Promise<string[] | string> {
+  const paths = await pluginInstallPaths(plugin, ctx, settings);
+  return typeof paths === 'string' ? paths : paths.map((path) => join(path, 'output-styles'));
+}
+
+// P4-R7z: whether every hook is off, as the highest-precedence source that says so has it (`disableAllHooks`).
+// P4-R7z: whether managed settings let only managed hooks run (`allowManagedHooksOnly`, honoured there alone), which
+// keeps a user-installed plugin's hooks from loading; a to-human plugin installed by policy is read the same, off.
+const managedHooksOnly = async (ctx: StyleContext): Promise<boolean> => asObject(await readJson(ctx.managedSettingsPath ?? MANAGED_SETTINGS_PATH))?.allowManagedHooksOnly === true;
+const hooksDisabled = (settings: SettingsFile[]): boolean => settings.map((s) => s.disableAllHooks).find((value) => typeof value === 'boolean') === true;
+
+// The install paths of the enabled installations of a plugin that apply to the cwd, or why there are none.
+async function pluginInstallPaths(plugin: string, ctx: StyleContext, settings: SettingsFile[]): Promise<string[] | string> {
   const registry = asObject(await readJson(join(ctx.configHome, 'plugins', 'installed_plugins.json')));
   const plugins = registry?.version === 2 ? asObject(registry.plugins) : null;
   if (plugins === null) return `no readable plugin registry (version 2) for ${plugin}`;
@@ -95,16 +117,16 @@ async function pluginStyleDirectories(plugin: string, ctx: StyleContext, setting
   const enabled: Record<string, unknown> = {};
   for (const source of [...settings].reverse()) Object.assign(enabled, asObject(source.enabledPlugins) ?? {});
   const cwd = ctx.cwd === null ? null : await realOrSelf(ctx.cwd);
-  const directories: string[] = [];
+  const paths: string[] = [];
   for (const [id, records] of Object.entries(plugins)) {
     if (id.split('@')[0] !== plugin || enabled[id] !== true || !Array.isArray(records)) continue;
     for (const record of records.map(asObject)) {
       if (record === null || typeof record.installPath !== 'string') continue;
       const applies = record.scope === 'user' || ((record.scope === 'project' || record.scope === 'local') && cwd !== null && typeof record.projectPath === 'string' && (await realOrSelf(record.projectPath)) === cwd);
-      if (applies) directories.push(join(record.installPath, 'output-styles'));
+      if (applies) paths.push(record.installPath);
     }
   }
-  return directories.length > 0 ? directories : `the plugin ${plugin} is not installed, enabled and applicable here`;
+  return paths.length > 0 ? paths : `the plugin ${plugin} is not installed, enabled and applicable here`;
 }
 
 // A style file's front matter: the lines between an opening `---` and the next `---`, as `key: value`.

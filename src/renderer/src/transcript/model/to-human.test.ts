@@ -1,7 +1,7 @@
 // P4-R7: a message tool's call drawn as the to-human message it sends (derive.ts's `to_human` row), at the call's place
-// among the turn's rows; a call that sent nothing stays the engine's own cell. MAWS reads its own tool alone: a call of
-// the to-human plugin's tool of the same shape is the ordinary MCP cell it is (the owner's ruling of 2026-10-21), unless
-// the host names that tool too (the transcript source's `messageTools`, as the desk's sources do). The recorded P4-R7
+// among the turn's rows; a call that sent nothing stays the engine's own cell. P4-R7z (the P4 spec's Decision Log 92): the
+// to-human plugin's tool, the one a MAWS session messages through, and MAWS's former one, in recorded sessions, draw
+// alike, in MAWS and the desk. The recorded P4-R7
 // sessions (spikes/protocol-probe/fixtures/p4/p4-r7-*-stages.jsonl, engine 2.1.304) pin the same rows read from disk,
 // as C4 backfills a transcript, and from the wire, through the live normaliser.
 import { readFileSync } from 'node:fs';
@@ -11,7 +11,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, SessionId } from '@shared/graph/ids';
 import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
 import { ChainFollower } from '../../../../engine-host/fs/chain-follower';
-import { FIXTURE_DIR } from '../../../../../test/support/fixtures';
+import { FIXTURE_DIR, TEST_FIXTURE_DIR } from '../../../../../test/support/fixtures';
 import { MemoryFileReader } from '../../../../../test/support/memory-reader';
 import { journalToEvents } from '../dev/journal';
 import { isPersistentRow, rowsOf, turnPhrases, turnSummary, withAllExpanded } from './derive';
@@ -23,9 +23,6 @@ import { BASH_RESULT, builder, parent, task, tool, uuid, type Builder } from './
 type RowOf<K extends Row['kind']> = Extract<Row, { kind: K }>;
 const ofKind = <K extends Row['kind']>(rows: Row[], kind: K) => rows.filter((row): row is RowOf<K> => row.kind === kind);
 const reduce = (events: SessionEvent[], agentId: AgentId | null = null) => applyEvents(createState(null, agentId), events);
-// A host that reads the to-human plugin's message tool too, as the desk does (its sources' `messageTools`).
-const BOTH = ['mcp__maws__message', 'mcp__to-human__message'];
-const reduceReadingBoth = (events: SessionEvent[]) => applyEvents(createState(null, null, BOTH), events);
 // The session's owner-channel lane on, as the store sets it (a new ui version, every turn re-derived).
 const laneOn = (state: TranscriptState) => withUi(state, { ...state.ui, ownerLane: true, version: state.ui.version + 1, global: state.ui.global + 1 });
 const expanded = (state: TranscriptState) => rowsOf(withAllExpanded(state));
@@ -176,40 +173,59 @@ describe('a message tool’s call', () => {
   });
 });
 
-// The owner's ruling of 2026-10-21: in MAWS the to-human plugin's tool is someone else's tool. A call to it, in a session
-// whose lane was off or one that began outside MAWS, draws as the MCP row it is, sent or not; a host that reads it too
-// (the desk, whose sessions message their owner through it) draws it as MAWS's own is drawn.
+// P4-R7z (the P4 spec's Decision Log 92): the to-human plugin's tool is the one a MAWS session messages through; its
+// calls draw as MAWS's former tool's did, and a recorded session's calls of that tool still do.
 describe('a call of the to-human plugin’s message tool', () => {
-  it('accepted, is the ordinary MCP cell it is, its turn’s tool call: no message', () => {
-    const b = stagesTurn(PLUGIN);
-    const state = reduce(b.events);
-    const rows = expanded(state);
-    expect(ofKind(rows, 'to_human')).toEqual([]);
-    expect(allCells(rows).map((cell) => [cell.toolUseId, cell.toolName, cell.status, cell.classification.category])).toEqual([
-      ['t1', 'Bash', 'done', 'commands'], ['m1', PLUGIN, 'done', 'mcp'], ['t2', 'Bash', 'done', 'commands'],
-    ]);
-    expect(ofKind(rows, 'divider')[0]).toMatchObject({ toolCalls: 3 });
-    expect(turnSummary(state.turns.get(T1)!)).toMatchObject({ toolCalls: 3, byCategory: { commands: 2, mcp: 1 } });
-  });
-
-  it('waiting for its result in an open turn, is a running cell, not the message about to be sent', () => {
-    const b = builder();
-    b.turn('u1');
-    b.toolUse('m1', PLUGIN, { text: 'Heading into stage 2.' });
-    const rows = expanded(reduce(b.events));
-    expect(ofKind(rows, 'to_human')).toEqual([]);
-    expect(allCells(rows).map((cell) => [cell.toolUseId, cell.status])).toEqual([['m1', 'running']]);
-  });
-
-  it('a host reading it draws it as MAWS’s own: the message where the call sits, its turn’s summary and phrases without it', () => {
-    const plugin = reduceReadingBoth(stagesTurn(PLUGIN).events);
+  it('draws as MAWS’s former tool’s did: the message where the call sits, its turn’s summary and phrases without it', () => {
+    const plugin = reduce(stagesTurn(PLUGIN).events);
     const maws = reduce(stagesTurn(MAWS).events);
     const read = (state: TranscriptState) => expanded(state).map((row) => (row.kind === 'cell' ? `${row.kind}:${row.toolName}` : row.kind === 'to_human' ? `to_human:${row.text}` : row.kind));
     expect(read(plugin)).toEqual(read(maws));
     expect(ofKind(expanded(plugin), 'to_human')).toMatchObject([{ toolUseId: 'm1', pending: false }]);
-    expect(turnSummary(plugin.turns.get(T1)!, BOTH)).toEqual(turnSummary(maws.turns.get(T1)!));
-    expect(turnPhrases(plugin.turns.get(T1)!, BOTH)).toBe(turnPhrases(maws.turns.get(T1)!));
-    expect(turnPhrases(plugin.turns.get(T1)!)).not.toBe(turnPhrases(maws.turns.get(T1)!)); // MAWS's reading: one MCP call more
+    expect(allCells(expanded(plugin)).map((cell) => cell.toolName)).toEqual(['Bash', 'Bash']);
+    expect(turnSummary(plugin.turns.get(T1)!)).toEqual(turnSummary(maws.turns.get(T1)!));
+    expect(turnPhrases(plugin.turns.get(T1)!)).toBe(turnPhrases(maws.turns.get(T1)!));
+  });
+
+  it('waiting for its result in an open turn, is the message about to be sent', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('m1', PLUGIN, { text: 'Heading into stage 2.', final: true });
+    const rows = expanded(reduce(b.events));
+    expect(ofKind(rows, 'to_human')).toMatchObject([{ toolUseId: 'm1', text: 'Heading into stage 2.', pending: true }]);
+    expect(allCells(rows)).toEqual([]);
+  });
+});
+
+// test/fixtures/transcript-to-human-final.jsonl, a terminal session's turn followed from disk: it ends on an accepted
+// final call of the plugin's tool, then the plugin's made-up answer (`Message sent to the human.`), which the chain keeps
+// and no row draws. The call draws as the message it sends, the turn's last row.
+describe('the to-human plugin’s answer after a final message', () => {
+  async function followed() {
+    const events: SessionEvent[] = [];
+    const follower = new ChainFollower(new MemoryFileReader(readFileSync(join(TEST_FIXTURE_DIR, 'transcript-to-human-final.jsonl'))), 'final-session' as SessionId, null, (e) => e.t === 'events' && events.push(...e.events), { holders: () => 0 });
+    await follower.start();
+    const { chain } = follower.snapshot();
+    follower.stop();
+    return { events, chain };
+  }
+  const MESSAGE = 'Both stages ran; 37 labels are missing.';
+
+  it('draws nothing, folded or not', async () => {
+    const { events, chain } = await followed();
+    expect(chain).toEqual(['p1', 'a1', 'a2', 'r1', 'a3', 'r2', 'made-up', 'd1']);
+    const state = reduce(events);
+    for (const rows of [folded(state), expanded(state)]) expect(JSON.stringify(rows)).not.toContain('Message sent to the human.');
+  });
+
+  it('leaves the final call the message it sends, the turn’s last row, in view when the work folds', async () => {
+    const { events } = await followed();
+    const T = turnId.ofMessage(uuid('p1'));
+    const state = reduce(events);
+    expect(reading(expanded(state))).toEqual(['commentary: Looking first.', 'Bash: done', `message: ${MESSAGE}`]);
+    expect(ofKind(folded(state), 'to_human')).toMatchObject([{ toolUseId: 'toolu_01Final', text: MESSAGE, pending: false }]);
+    expect(ofKind(expanded(state), 'divider')).toMatchObject([{ state: 'completed', toolCalls: 1 }]);
+    expect(turnSummary(state.turns.get(T)!)).toMatchObject({ toolCalls: 1 });
   });
 });
 
@@ -286,17 +302,16 @@ describe('the recorded P4-R7 sessions', () => {
     });
   });
 
-  // The same session as if its calls were the to-human plugin's (each call renamed, nothing else): in MAWS every status
-  // is the MCP cell its call is, from disk and from the wire; a host that reads the plugin's tool reads the messages.
-  it('p4-r7-tool-stages under the plugin’s name, from disk and from the wire: each status an MCP cell and no message', async () => {
+  // The same session as if its calls were the to-human plugin's (each call renamed, nothing else): P4-R7z reads the
+  // plugin's tool as it read MAWS's, from disk and from the wire.
+  it('p4-r7-tool-stages under the plugin’s name, from disk and from the wire: the same statuses as messages', async () => {
     const rows = journal('p4-r7-tool-stages', PLUGIN);
-    const commands = ['Bash: done', ...STATUSES.flatMap(() => [`${PLUGIN}: done`, 'Bash: done'])];
+    const recorded = reading(expanded(reduce(await fromDisk(journal('p4-r7-tool-stages')))));
     for (const events of [await fromDisk(rows), journalToEvents(rows)]) {
       const shown = expanded(reduce(events));
-      expect(ofKind(shown, 'to_human')).toEqual([]);
-      expect(reading(shown).filter((line) => line.endsWith(': done'))).toEqual(commands);
-      expect(ofKind(shown, 'divider')).toMatchObject([{ state: 'completed', toolCalls: 7 }]);
-      expect(reading(expanded(reduceReadingBoth(events)))).toEqual(reading(expanded(reduce(await fromDisk(journal('p4-r7-tool-stages'))))));
+      expect(reading(shown)).toEqual(recorded);
+      expect(ofKind(shown, 'to_human').map((row) => row.text)).toEqual(STATUSES);
+      expect(ofKind(shown, 'divider')).toMatchObject([{ state: 'completed', toolCalls: 4 }]);
     }
   });
 

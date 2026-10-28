@@ -10,7 +10,7 @@ import type { CommandName, CommandResult, Settings } from '@shared/ipc/schema';
 import type { ConnectorSignInChanged } from '@shared/ipc/schema/connectors';
 import { artifactExportName } from '@shared/maws/tools';
 import { NO_CLIENT, type ClientPort, type NotifyEvent } from '@shared/client/port';
-import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
 import { item, project, record } from '../../../test/support/builders';
 import { SessionHarness } from '../../../test/support/session-harness';
 import { zipFiles } from '../design-systems/zip';
@@ -224,7 +224,7 @@ describe('the notifier', () => {
     writer.observeRecord(record(SESSION, { projectId: 'maws' as never }));
     const emit = vi.fn(() => true);
     const navigate = vi.fn();
-    const settings: Settings = SETTINGS_DEFAULTS_V19;
+    const settings: Settings = SETTINGS_DEFAULTS_V20;
     const stop = startNotifier(model, { port, isFocused: () => false, isViewing: () => false, navigate, failure: vi.fn(), settings: () => settings, emit });
     return { writer, emit, navigate, stop };
   }

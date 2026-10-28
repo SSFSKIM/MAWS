@@ -8,10 +8,11 @@ import { enrollmentMac, enrollmentMacInput } from '../src/enrollment.ts';
 import { eventSigningInput, signEvent } from '../src/events.ts';
 import { keyId, signInput, type B64, type SigningKey } from '../src/keys.ts';
 import { endorseDevice, signOrgState, signTransition, stateHash } from '../src/org-state.ts';
+import { encodePairingCode, pairingFingerprint, pairingMac, pairingMacInput, type PairingCode, type PairingFields } from '../src/pairing.ts';
 import { signRecord } from '../src/records.ts';
 import { SIGNING_DOMAINS, type Signer, type Device, type RevokedKey, type EndpointRecord, type Grant, type Listing, type MachineCert, type OrgState, type RootTransition, type Signed, type SignedOrgState } from '../src/types.ts';
 import type { Verdict } from '../src/verdict.ts';
-import { buildRemoteScenario, type ActionEncoding, type ChannelVectors } from './scenario-remote.ts';
+import { buildRemoteScenario, RP_ID, type ActionEncoding, type ChannelVectors } from './scenario-remote.ts';
 
 export { buildRemoteOrg, ORG_REMOTE, ORIGIN, RP_ID, type ActionEncoding, type ChannelVectors, type HandshakeRun, type RemoteOrg } from './scenario-remote.ts';
 
@@ -73,7 +74,21 @@ export type Encodings = {
 };
 /** Enrollment MACs (enrollment.ts): `input` is the length-prefixed encoding, base64url; `k` the pairing secret. */
 export type EnrollmentCase = { name: string; machinePub: B64; ref: string; tokenId: string; k: string; input: string; mac: string };
-export type VectorSet = { fixtures: Record<string, unknown>; cases: Case[]; dual: DualCase[]; encodings: Encodings; enrollment: EnrollmentCase[]; channel: ChannelVectors };
+/**
+ * A device's pairing (pairing.ts, O13 §A): a code, its decoded form, a phone's entry with its MAC input (base64url), MAC
+ * under the code's `k` and fingerprint, and the same entry with its passkey swapped and its channel key kept, its MAC
+ * recomputed under the same `k` (a leaked one), whose fingerprint differs (RL DL28).
+ */
+export type PairingVector = {
+  code: string;
+  decoded: PairingCode;
+  fields: PairingFields;
+  input: string;
+  mac: string;
+  fingerprint: string;
+  swapped: { fields: PairingFields; mac: string; fingerprint: string };
+};
+export type VectorSet = { fixtures: Record<string, unknown>; cases: Case[]; dual: DualCase[]; encodings: Encodings; enrollment: EnrollmentCase[]; pairing: PairingVector; channel: ChannelVectors };
 
 export const ORG = 'org-vectors';
 export const PROJECT = 'proj-1';
@@ -674,6 +689,18 @@ export async function buildScenario(k: Keys): Promise<VectorSet> {
     }, 3), ['a1StepUp'], no('malformed'), 'v3');
   }
 
+  // The DX1 org key's retirement in the state (O14 M5a): added at its own version, kept or dropped after, never moved.
+  {
+    const retired = await sign(await next(v2, (s) => void (s.legacyRetired = { version: s.version, at: s.issued }), 2), 'a1StepUp');
+    keep('v3 legacy key retired', retired);
+    cases.push({ name: 'a successor retiring the legacy key', call: 'verifySuccessor', args: [signed('v2'), signed('v3 legacy key retired'), []], expect: ok() });
+    await successorCase('a successor retiring the legacy key at another version', await next(v2, (s) => void (s.legacyRetired = { version: 1, at: s.issued }), 2), ['a1StepUp'], no('malformed'));
+    await successorCase('then the legacy retirement kept', await next(retired, (s) => s.projects.push({ id: 'proj-kept', name: 'kept' }), 3), ['a1StepUp'], ok(), 'v3 legacy key retired');
+    await successorCase('then the legacy retirement dropped', await next(retired, (s) => delete s.legacyRetired, 3), ['a1StepUp'], ok(), 'v3 legacy key retired');
+    await successorCase('then the legacy retirement moved', await next(retired, (s) => void (s.legacyRetired = { version: 3, at: s.issued }), 3), ['a1StepUp'], no('malformed'), 'v3 legacy key retired');
+    await successorCase('a successor whose legacy retirement carries another field', await next(v2, (s) => void Object.assign(s, { legacyRetired: { version: s.version, at: s.issued, by: A } }), 2), ['a1StepUp'], no('malformed'));
+  }
+
   // Wire input RFC 8785 cannot write, or no shape at all: a verdict, never a throw.
   cases.push({ name: 'genesis that is not an object', call: 'verifyGenesis', args: [null], expect: no('malformed') });
   {
@@ -1121,7 +1148,28 @@ export async function buildScenario(k: Keys): Promise<VectorSet> {
     const fields = { name, machinePub: k.vm1.pub, ref, tokenId };
     enrollment.push({ ...fields, k: base64urlEncode(pairing), input: base64urlEncode(enrollmentMacInput(fields)), mac: await enrollmentMac(pairing, fields) });
   }
-  return { fixtures, cases, dual, encodings, enrollment, channel: remote.channel };
+  // A phone's pairing under a code A's first Mac shows.
+  const pairingK = new Uint8Array(16).map((_, i) => 0xa0 + i);
+  const decoded: PairingCode = { hub: 'https://desk.example', org: ORG, member: A, roots: [await kid('a1StepUp')], recoveryPub: k.recovery.pub, k: base64urlEncode(pairingK) };
+  const phoneEntry: PairingFields['device'] = {
+    id: 'dev-a-phone-2',
+    class: 'web-cards',
+    keyStorage: 'webcrypto',
+    channelPub: k.aPhone.pub,
+    passkey: { credentialId: base64urlEncode(Uint8Array.from([1, 2, 3, 4, 5, 6, 7, 8])), publicKey: k.aPasskey.pub, rpId: RP_ID },
+  };
+  const pairFields: PairingFields = { org: ORG, member: A, device: phoneEntry };
+  const swappedFields: PairingFields = { ...pairFields, device: { ...phoneEntry, passkey: { credentialId: base64urlEncode(Uint8Array.from([8, 7, 6, 5])), publicKey: k.stranger.pub, rpId: RP_ID } } };
+  const devicePairing: PairingVector = {
+    code: encodePairingCode(decoded),
+    decoded,
+    fields: pairFields,
+    input: base64urlEncode(pairingMacInput(pairFields)),
+    mac: await pairingMac(pairingK, pairFields),
+    fingerprint: await pairingFingerprint(ORG, A, phoneEntry),
+    swapped: { fields: swappedFields, mac: await pairingMac(pairingK, swappedFields), fingerprint: await pairingFingerprint(ORG, A, swappedFields.device) },
+  };
+  return { fixtures, cases, dual, encodings, enrollment, pairing: devicePairing, channel: remote.channel };
 }
 
 /** DX1's seal of a log event (`codes.ts` `seal`), written out so the vectors need nothing from desk-hub. */

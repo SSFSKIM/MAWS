@@ -100,12 +100,11 @@ describe('the maws server on an EngineSession (scripted)', () => {
       // P3-B (M7): the document tools, appended after A's
       ['artifact_edit', { readOnlyHint: false, openWorldHint: false, title: 'Edit document' }], ['artifact_comments', { ...MAWS_TOOL_ANNOTATIONS, title: 'List document comments' }],
       ['artifact_reply', { readOnlyHint: false, openWorldHint: false, title: 'Reply to a document comment' }], ['artifact_resolve', { readOnlyHint: false, openWorldHint: false, title: 'Resolve a document comment' }],
-      ['artifact_search', { ...MAWS_TOOL_ANNOTATIONS, title: 'Search artifacts' }], // P4-B4: after B's
-      ['message', { ...MAWS_TOOL_ANNOTATIONS, title: 'Send message' }], // P4-R7: after the search tool, listed always loaded
+      ['artifact_search', { ...MAWS_TOOL_ANNOTATIONS, title: 'Search artifacts' }], // P4-B4: after B's; P4-R7z took P4-R7's message out after it
     ]);
-    // P4-R7's message tool and P4-A3's tools an edit needs are listed always loaded
+    // P4-A3's tools an edit needs are listed always loaded
     expect((list.result!.tools as { name: string; _meta?: unknown }[]).filter((t) => t._meta !== undefined)).toMatchObject(
-      ['artifact_describe_type', 'artifact_read', 'artifact_publish', 'artifact_edit', 'message'].map((name) => ({ name, _meta: { 'anthropic/alwaysLoad': true } })),
+      ['artifact_describe_type', 'artifact_read', 'artifact_publish', 'artifact_edit'].map((name) => ({ name, _meta: { 'anthropic/alwaysLoad': true } })),
     );
     expect((await run.answered(run.mcp({ id: 2, method: 'resources/list' }))).error).toEqual({ code: -32601, message: 'Method not found: resources/list' });
     expect((await run.answered(run.mcp({ id: 0, method: 'initialize' }, 'maws2'))).error!.code).toBe(-32601);

@@ -24,7 +24,7 @@ import {
 } from 'org-protocol';
 import { readJsonFile } from '../fake-machine/json-file';
 import { enrollV2, type V2Machine } from '../fake-machine/org';
-import { encodeEnrollmentCodeV2, ORG_STATE_PATH, type EnrollmentIssued, type EnrollmentKey, type OrgStateView } from '../src/protocol/identity';
+import { encodeEnrollmentCodeV2, ORG_KEYS_PURGE_PATH, ORG_STATE_PATH, type EnrollmentIssued, type EnrollmentKey, type OrgKeysPurged, type OrgStateView } from '../src/protocol/identity';
 import { checkTestHub } from './config';
 import type { Person } from './hub';
 import { revoke, type Cleanup } from './proof';
@@ -53,7 +53,7 @@ export async function newAdminDevice(id = 'admin'): Promise<AdminDevice> {
   return { id, channel: await generateSigningKey(), stepUp: await generateSigningKey(), recovery: await generateSigningKey() };
 }
 
-export const deviceEntry = (d: AdminDevice): Device => ({ id: d.id, class: 'native-mac', keyStorage: 'software', channelPub: d.channel.pub, stepUpPub: d.stepUp.pub });
+export const deviceEntry = (d: Pick<AdminDevice, 'id' | 'channel' | 'stepUp'>): Device => ({ id: d.id, class: 'native-mac', keyStorage: 'software', channelPub: d.channel.pub, stepUpPub: d.stepUp.pub });
 
 /** Where the admin may write: the deployment's own org under its pinned genesis, or a throwaway org. */
 export type OrgScope = { org: string; pinnedGenesis: string | undefined } | { org: string; throwaway: true };
@@ -67,6 +67,24 @@ export async function successor(head: OrgState, edit: (state: OrgState) => void)
   state.issued = now > head.issued ? now : head.issued;
   edit(state);
   return state;
+}
+
+/**
+ * The DX1 org key's retirement as a successor carries it (O14 M5a, Interfaces §E): `legacyRetired` at the successor's
+ * own version and issue time. A successor keeps it as the head has it; `restoreLegacyKey` drops it (the retirement
+ * undone, which the hub refuses once it has purged the wrapped copies). `deployment admin keys retire [--undo]` signs
+ * these edits under its anchor; `OrgAdmin` here.
+ */
+export function retireLegacyKey(next: OrgState): void {
+  next.legacyRetired = { version: next.version, at: next.issued };
+}
+export function restoreLegacyKey(next: OrgState): void {
+  delete next.legacyRetired;
+}
+
+/** The hub's purge of the org key's wrapped copies, which it takes only once the head retires the key (irreversible). */
+export function purgeOrgKeys(person: Person): Promise<OrgKeysPurged> {
+  return person.json<OrgKeysPurged>(ORG_KEYS_PURGE_PATH, { method: 'POST' });
 }
 
 export class OrgAdmin {
@@ -189,6 +207,16 @@ export class OrgAdmin {
       s.machineNames.push({ name, ref: machine.ref });
     });
     return machine;
+  }
+
+  /** The head's successor retiring the DX1 org key; nothing when the head retires it already. */
+  retireLegacy(): Promise<SignedOrgState | null> {
+    return this.amend('the legacy org key retired', (s) => (s.legacyRetired === undefined ? retireLegacyKey(s) : false));
+  }
+
+  /** The head's successor undoing that retirement; nothing when the head retires nothing. */
+  restoreLegacy(): Promise<SignedOrgState | null> {
+    return this.amend('the legacy org key back in use', (s) => (s.legacyRetired === undefined ? false : restoreLegacyKey(s)));
   }
 
   /** Takes `machine` out of the state, its key retired as of now; nothing when the head does not list it. */

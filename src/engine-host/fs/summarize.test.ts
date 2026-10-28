@@ -331,9 +331,10 @@ describe('the last assistant line and a message tool’s call', () => {
     expect(lastLine(said('Looking first.'), call('c1', '\nStage 1 is done.\nMoving on.'), result('c1'), bash('b1'))).toBe('Stage 1 is done.');
   });
 
-  // The owner's ruling of 2026-10-21: in MAWS the to-human plugin's tool of the same shape is someone else's tool.
-  it('an accepted call of the to-human plugin’s message tool is an ordinary tool call: the text before it stays the line', () => {
-    expect(lastLine(said('Looking first.'), call('c1', 'Stage 1 is done.', 'mcp__to-human__message'), result('c1'))).toBe('Looking first.');
+  // P4-R7z (the P4 spec's Decision Log 92): a MAWS session messages through the to-human plugin's tool, and a recorded
+  // session's calls of MAWS's former one read alike.
+  it('an accepted call of the to-human plugin’s message tool is a message as MAWS’s former one is: its message is the line', () => {
+    expect(lastLine(said('Looking first.'), call('c1', 'Stage 1 is done.', 'mcp__to-human__message'), result('c1'))).toBe('Stage 1 is done.');
   });
 
   it('a text written after the call is the newer line', () => {
@@ -343,5 +344,12 @@ describe('the last assistant line and a message tool’s call', () => {
   it('a call whose result the window lacks, or whose result is an error, is passed over for the text before it', () => {
     expect(lastLine(said('Looking first.'), call('c1', 'Stage 1 is done.'))).toBe('Looking first.');
     expect(lastLine(said('Looking first.'), call('c1', 'Stage 1 is done.'), result('c1', 'MCP error: the server went away', true), bash('b1'))).toBe('Looking first.');
+  });
+
+  // The to-human plugin's made-up answer after a final message is the transcript's last assistant record and said
+  // nothing: the line is the final message itself.
+  it('the to-human plugin’s answer after a final message is no line: the message before it is', () => {
+    const turn = readFileSync(join(TEST_FIXTURE_DIR, 'transcript-to-human-final.jsonl'), 'utf8');
+    expect(lastLine(turn)).toBe('Both stages ran; 37 labels are missing.');
   });
 });

@@ -1,6 +1,6 @@
 // The supervisor's files and the facts both ends read from them (E10 execution document, §Design 1 "The directory",
 // "The lock", §Design 6 "Build id"). Everything lives under `<userData>/supervisor/` (mode 0700): `host.sock`,
-// `host.lock`, `host.token`, `host.log`, `live.json`. The lock is the candidate supervisor's, never main's: it is
+// `host.lock`, `host.token`, `host.log`, `live.json`, and (P5 O10 M7) `ops.jsonl`, lane B's operation ledger. The lock is the candidate supervisor's, never main's: it is
 // created atomically with its content (`link` of a pre-written `host.lock.<pid>`), a live pid is never stale, and a
 // stale lock is broken under `host.lock.break` (taken the same way) so two breakers cannot unlink each other's fresh
 // locks. Main reads the lock (pid, procStart, socketPath) and the token from here too; nothing in this module touches
@@ -18,6 +18,7 @@ export const SUPERVISOR_FILES = {
   token: 'host.token',
   log: 'host.log',
   live: 'live.json',
+  ops: 'ops.jsonl', // P5 O10 M7: lane B's operation ledger (ops.ts, @shared/host/op-ledger)
 } as const;
 
 // Exit codes of a detached engine host: 0 clean, 1 fatal, START_EXIT_HELD when another supervisor holds the lock.

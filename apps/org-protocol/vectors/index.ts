@@ -12,5 +12,5 @@ export type VectorKey = { pub: string; kid: string; jwk: JsonWebKey };
 
 export const VECTORS = vectors as unknown as VectorSet;
 export const VECTOR_KEYS = keys.keys as unknown as Record<KeyName, VectorKey>;
-export { A, B, KEY_NAMES, ORG, PROJECT, REF_MINI, REF_NEWCOMER, REF_VM1, REF_VM_BUILD, type Case, type DualCase, type EnrollmentCase, type KeyName, type VectorSet } from './scenario.ts';
+export { A, B, KEY_NAMES, ORG, PROJECT, REF_MINI, REF_NEWCOMER, REF_VM1, REF_VM_BUILD, type Case, type DualCase, type EnrollmentCase, type KeyName, type PairingVector, type VectorSet } from './scenario.ts';
 export { replayVectors } from './replay.ts';

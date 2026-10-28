@@ -4,7 +4,10 @@
     "skipLibCheck": false,
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
-    "types": ["vite/client"]
+    "types": ["vite/client"],
+    // P5-O10 M7: the engine host's operation ledger and request digest (src/shared/host) import apps/org-protocol, whose
+    // relative imports carry `.ts` extensions; as in tsconfig.node.json, this option admits them
+    "rewriteRelativeImportExtensions": true
   },
   "include": [
     "src/renderer/src/**/*",

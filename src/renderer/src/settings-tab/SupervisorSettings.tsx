@@ -5,7 +5,7 @@
 // quit default write settings version 10's `supervisor` section; main pushes the idle time to the supervisor
 // (`host.configure`) and the quit guard reads the default. Stop all asks inline, naming the live count, then calls
 // `host.restart {stopSessions: true}`: main stops every session through the supervisor and starts a fresh one.
-// P5 O2 M7 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M7 "The shape setting"): the switch writes version 19's
+// P5 O2 M7 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M7 "The shape setting"): the switch writes version 20's
 // `supervisor.shape`, which applies at the next launch (the running launch keeps its daemon and its links), and the
 // machine daemon's line reads host.status: the daemon's kind, pid and machine ref, or why this launch runs without it.
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';

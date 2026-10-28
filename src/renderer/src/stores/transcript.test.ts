@@ -505,12 +505,10 @@ describe('transcript store: the report view', () => {
 });
 // P2-C end
 
-// P4-R7: a key's state reads the message tools its source names (the transcript source's `messageTools`). MAWS's
-// sources name none, and MAWS reads its own alone, so a call of the to-human plugin's tool is the MCP cell it is; the
-// desk's sources name the plugin's too.
-describe('transcript store: the message tools a source names', () => {
+// P4-R7z (the P4 spec's Decision Log 92): every source's state reads the to-human plugin's message tool, the one a MAWS
+// session messages through, as the desk's sources did under P4-R7x's host-set names, which the store no longer takes.
+describe('transcript store: a message tool’s call', () => {
   const PLUGIN = 'mcp__to-human__message';
-  const BOTH = ['mcp__maws__message', PLUGIN];
   function pluginMessageTurn() {
     const b = builder();
     b.turn('u1');
@@ -520,9 +518,9 @@ describe('transcript store: the message tools a source names', () => {
     b.end(['u1']);
     return b;
   }
-  const source = (events: SessionEvent[], messageTools?: readonly string[]): TranscriptSource => ({ subscribe: () => () => {}, snapshot: async () => events, ...(messageTools && { messageTools }) });
+  const source = (events: SessionEvent[]): TranscriptSource => ({ subscribe: () => () => {}, snapshot: async () => events });
 
-  it('reads MAWS’s own when the source names none, the names it gives when it does, and a re-attached key its new source’s', async () => {
+  it('is the message it sends from any source, and from a re-attached key', async () => {
     const { events } = pluginMessageTurn();
     const store = createTranscriptStore();
     const read = (key: string) => {
@@ -530,11 +528,9 @@ describe('transcript store: the message tools a source names', () => {
       return store.getState().rows(key).flatMap((row) => (row.kind === 'to_human' ? [`message ${row.toolUseId}`] : row.kind === 'group' ? row.cells.map((cell) => `cell ${cell.toolName}`) : row.kind === 'cell' ? [`cell ${row.toolName}`] : []));
     };
     await store.getState().attach('maws', source(events));
-    await store.getState().attach('desk', source(events, BOTH));
-    expect(read('maws')).toEqual([`cell ${PLUGIN}`]);
-    expect(read('desk')).toEqual(['message m1']);
+    expect(read('maws')).toEqual(['message m1']);
     store.getState().detach('maws');
-    await store.getState().attach('maws', source(events, BOTH)); // a kept key started over: staged, then installed
+    await store.getState().attach('maws', source(events)); // a kept key started over: staged, then installed
     expect(read('maws')).toEqual(['message m1']);
   });
 });

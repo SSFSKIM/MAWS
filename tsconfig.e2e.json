@@ -3,7 +3,10 @@
   "compilerOptions": {
     "skipLibCheck": false,
     "lib": ["ES2023", "DOM"],
-    "types": ["node"]
+    "types": ["node"],
+    // P5-O10 M7: the engine host's operation ledger and request digest (src/shared/host) import apps/org-protocol, whose
+    // relative imports carry `.ts` extensions; as in tsconfig.node.json, this option admits them
+    "rewriteRelativeImportExtensions": true
   },
   "include": [
     "playwright.config.ts",
@@ -117,6 +120,7 @@
     "test/support/shell-home.ts",
     "test/support/store-fixture.ts",
     "test/support/synth-transcript.ts",
+    "test/support/to-human-plugin.ts", // P4-R7z: the to-human spec installs the plugin's style and the plugin in its scratch home
     "test/support/widget-backend.ts",
     // P3-B: e2e/support/document-seed.ts writes the 200-page document through the binding module and the schema module
     "src/artifacts/yjs/*.ts",

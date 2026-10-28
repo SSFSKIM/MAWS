@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
 import type { HostDispatch, MainContext } from './router';
 
 // Electron is faked: `ipcMain.handle` records one handler per channel, and each fake window is the one whose
@@ -50,7 +50,7 @@ const invoke = (event: unknown, name: string, input?: unknown) => {
   return handler(event, input);
 };
 
-const LIGHT = { settings: { ...SETTINGS_DEFAULTS_V19, theme: 'light' }, resolvedTheme: 'light' } as const;
+const LIGHT = { settings: { ...SETTINGS_DEFAULTS_V20, theme: 'light' }, resolvedTheme: 'light' } as const;
 
 describe('main ipc router', () => {
   beforeEach(async () => {

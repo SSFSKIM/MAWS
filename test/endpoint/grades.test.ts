@@ -128,7 +128,7 @@ afterEach(async () => {
   }
 });
 
-type Options = { offers?: Offers; gradeOf?(name: string): GradeSpec | undefined; registry?: WireRegistry; settingsMode?: string; executors?: false };
+type Options = { offers?: Offers; gradeOf?(name: string): GradeSpec | undefined; registry?: WireRegistry; settingsMode?: string };
 
 async function start(options: Options = {}): Promise<Fixture> {
   const services = fakeServices();
@@ -173,7 +173,7 @@ async function start(options: Options = {}): Promise<Fixture> {
   });
   await endpoint.start(services);
   // M7 and M8 stand in: an authorized request is echoed back with what authorization resolved.
-  if (options.executors !== false) endpoint.gate.setExecutors({
+  endpoint.gate.setExecutors({
     call: (channel, m, decision) => void channel.send({ t: 'result', id: m.id, ok: true, output: { target: decision.target ?? null } }),
     act: (channel, m) => void channel.send({ t: 'ack', opId: m.action.opId, state: 'accepted' }),
     sub: (channel, m) => void channel.send({ t: 'subbed', sub: m.sub, mode: 'snapshot', epoch: 'e1', seq: 0 }),
@@ -301,18 +301,6 @@ describe('only what is offered crosses', () => {
     expect(await send(a, a.device.action({ machine: f.ref, action: 'sminos.steer', args: { text: 'hi' } }))).toBe('no-target');
     // The action's own session must be the one its input names.
     expect(await send(a, { ...laneB(f, a, 'session.interrupt', 'app-own', { cancelEngineQueued: false }), session: 'app-shared' })).toBe('malformed');
-  });
-});
-
-describe('until M7 and M8 set their executors', () => {
-  it('answers an authorized request `unavailable`, and a refused one with its reason', async () => {
-    const f = await start({ executors: false });
-    const a = await open(f, a1, A);
-    expect(await call(a, 'session.status', { appSessionId: 'app-own' })).toBe('unavailable');
-    expect(await send(a, laneB(f, a, 'session.send', 'app-own', { content: 'hi' }))).toBe('unavailable');
-    expect(await subscribe(a, { lane: 'B', id: 'app-own' })).toBe('unavailable');
-    const c = await open(f, c1, C);
-    expect(await call(c, 'session.status', { appSessionId: 'app-private' })).toBe('grade');
   });
 });
 
@@ -561,8 +549,10 @@ describe('the web-cards class (RL §5.10)', () => {
     expect(await send(phone, await phone.device.webauthn(laneB(f, phone, 'session.send', 'app-b', { content: 'hi' }), HUB))).toBe('class');
     const answered = await phone.device.webauthn(answerOn(f, phone, 'app-b', 'rq-question', question), HUB);
     expect(await send(phone, answered)).toBe('ok');
-    // The same action and assertion again (M7's nonce window aside): its counter did not rise.
-    expect(await send(phone, answered)).toBe('step-up');
+    // The same action and assertion again: M7's nonce window refuses it first; past the window (or after a restart, which
+    // loses it), authorization still would, its counter not having risen.
+    expect(await send(phone, answered)).toBe('replayed');
+    expect(await f.endpoint.authorizer.authorize({ kind: 'act', name: answered.action, input: answered.args, action: answered }, { member: B, device: 'bw', clientClass: 'web-cards' }, Date.now())).toEqual({ ok: false, reason: 'step-up' });
     // No assertion at all, or one for another origin.
     expect(await send(phone, answerOn(f, phone, 'app-b', 'rq-question', question))).toBe('step-up');
     expect(await send(phone, await phone.device.webauthn(answerOn(f, phone, 'app-b', 'rq-question', question), 'https://evil.example'))).toBe('step-up');

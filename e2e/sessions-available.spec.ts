@@ -18,7 +18,7 @@ import { StoreFixture } from '../test/support/store-fixture';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { seedTranscript, SideJournal, transcript } from './support/side-replay';
 import { sidebarRow } from './support/sidebar';
-import { MESSAGE_TOOL_ALIAS } from '../src/shared/owner/contract'; // P4-A2
+import { NATIVE_TO_HUMAN_ENV } from '../src/shared/owner/contract'; // P4-R7z
 
 const SKILLS_SESSION = 'a2a20000-0000-4000-8000-00000000000a';
 const SEND_SESSION = 'a2a20000-0000-4000-8000-00000000000b';
@@ -134,7 +134,7 @@ test.describe('sessions available on demand (P2-A)', () => {
     await expect(control).toHaveAttribute('aria-description', 'Starts this session');
     expect(existsSync(journalDir(maws, appId)), 'nothing launched on open').toBe(false);
     value(await invoke(page, 'settings.set', { engine: { mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }] } })); // P4-R8
-    value(await invoke(page, 'settings.set', { engine: { launchProfile: { plugins: { off: ['ptc@ptc-tool'] }, outputStyle: 'maws', hooks: 'none' } } })); // P4-A2
+    value(await invoke(page, 'settings.set', { engine: { launchProfile: { plugins: { off: ['ptc@ptc-tool'] }, hooks: 'none' } } })); // P4-A2
     await control.click();
     await expect(control).toHaveText('Starting…');
     await expect(mainRegion(page).getByText(REPLY, { exact: true })).toBeVisible({ timeout: 20_000 });
@@ -143,13 +143,16 @@ test.describe('sessions available on demand (P2-A)', () => {
     expect(spawns(maws, appId)[0]!.frame.args, 'the same conversation').toEqual(expect.arrayContaining(['--resume', SEND_SESSION]));
     const resumed = spawns(maws, appId)[0]!.frame.args!;
     expect(JSON.parse(resumed[resumed.indexOf('--mcp-config') + 1]!), "the resume carries the app's MCP servers (P4-R8)").toEqual({ mcpServers: { notion: { type: 'http', url: 'https://mcp.notion.com/mcp' } } });
-    // P4-A2: the launch profile set in Settings reaches the resume as flag-level keys, `user` kept among the sources; with
-    // every hook off, MAWS's start-time context rides the appended prompt rather than a SessionStart group
+    // P4-A2: the launch profile set in Settings reaches the resume as flag-level keys, `user` kept among the sources, and
+    // (settings version 19) no output style, so the user's own applies. P4-R7z: hooks `none` keeps the to-human plugin's
+    // hooks from loading, so its tool is not registered and the lane is off: no advertisement and nothing appended
     const flags = JSON.parse(resumed[resumed.indexOf('--settings') + 1]!) as Record<string, unknown>;
-    expect(flags, 'the launch profile (P4-A2)').toMatchObject({ enabledPlugins: { 'ptc@ptc-tool': false }, outputStyle: 'default', disableAllHooks: true });
+    expect(flags, 'the launch profile (P4-A2)').toMatchObject({ enabledPlugins: { 'ptc@ptc-tool': false }, disableAllHooks: true });
+    expect(flags).not.toHaveProperty('outputStyle');
     expect(flags).not.toHaveProperty('hooks');
     expect(resumed[resumed.indexOf('--setting-sources') + 1]).toBe('user,project,local');
-    expect(resumed[resumed.indexOf('--append-system-prompt') + 1], 'the alias in the appended prompt').toContain(MESSAGE_TOOL_ALIAS);
+    expect(resumed, 'nothing appended with every hook off').not.toContain('--append-system-prompt');
+    expect((flags.env as Record<string, unknown> | undefined)?.[NATIVE_TO_HUMAN_ENV] ?? null).toBeNull();
     expect(writtenUsers(maws, appId).map((r) => (r.frame as { message?: { content?: unknown } }).message?.content), 'sent once').toEqual(['Reply with OK']);
 
     // stopped: what the engine reported is kept, labelled with when
