@@ -91,8 +91,9 @@ export function submitState(i: SubmitInput): SubmitDecision {
   if (i.driven) {
     const { running, send, stop } = i.driven;
     if (mode !== 'send') return decide('send', mode === 'bash' ? 'Run' : 'Save to memory', false, MODES_IN_TERMINAL);
+    // Stop and Send each from its own capability: a bridge may interrupt without taking words, or the reverse
+    if (running && empty) return stop.available ? decide('stop', 'Stop', true) : decide('stop', 'Stop', false, stop.reason);
     if (!send.available) return decide('send', 'Send', false, send.reason);
-    if (running && empty) return stop.available ? decide('stop', 'Stop', true) : decide('send', 'Send', false);
     return decide('send', 'Send', !empty, null, running ? SENDS_AT_NEXT_STEP : null);
   }
   // P2-A start: with a record and no ready process the submission acquires the session first (the seam, and `!` and `#`

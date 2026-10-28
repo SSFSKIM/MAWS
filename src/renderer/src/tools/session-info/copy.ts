@@ -2,6 +2,7 @@
 
 import type { PermissionMode } from '@shared/graph/enums';
 import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
+import type { ControlKey } from '../../session/controls/types'; // P5 O9 M5
 
 export const LANE = {
   off: (mode: PermissionMode) => `Auto mode is off · ${PERMISSION_MODE_LABELS[mode]}`,
@@ -35,10 +36,18 @@ export const INFO = {
   // P5 O9 M5 (the owner's Q1 and Q2): a terminal session MAWS drives through its bridge, and the controls it can't reach
   bridged: 'Driven through sminos’s bridge',
   unavailableTitle: 'Not available here',
+  // every control the port names (ControlKey), each listed with its reason when unreachable
   control: {
     send: 'Send',
+    interrupt: 'Stop the running turn',
+    answer: 'Answer a request',
+    decide: 'Answer a permission request',
+    'decide.scope': 'Allow for the session or project',
+    'decide.interrupt': 'Deny and interrupt',
+    'decide.addDirectory': 'Allow and add a directory',
     model: 'Model and effort',
     mode: 'Permission mode',
+    command: 'Slash commands',
     btw: 'Side question',
     compact: 'Compact',
     'mcp.enable': 'Enable an MCP server',
@@ -50,8 +59,13 @@ export const INFO = {
     media: 'Attachments',
     queue: 'Queue',
     rewind: 'Rewind',
+    forget: 'Forget a message',
+    'rewind-files': 'Roll back files',
+    'elicitation.answer': 'Answer a form',
+    'subagent-rows': 'Subagent rows',
     'take-over': 'Take over in MAWS',
-  },
+    reopen: 'Reopen',
+  } satisfies Record<ControlKey, string>,
   processTree: 'Process tree',
   tree: (tree: string, own: string | null) => (own === null ? tree : `${tree} · own ${own}`),
   // Model

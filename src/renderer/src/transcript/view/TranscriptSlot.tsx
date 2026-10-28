@@ -30,6 +30,7 @@ import { ipcRewind, ipcSource } from '../source/ipc';
 import { useAgentLookup } from './agent-lookup'; // L197
 import type { TranscriptActions } from './context';
 import { useLaneAStreaming } from '../../lane-a/stream/use-overlay'; // P5 O9 M5
+import { useSessionControls } from '../../session/controls/controls-for'; // P5 O9 M5
 import { useRegisteredActions, useRegisteredRequestRenderer } from './registry';
 import { storeKeyOf, Transcript } from './Transcript';
 
@@ -49,7 +50,11 @@ export function TranscriptSlot({ appSessionId, agentId, className, startAt, pres
   const source = ipcSource(appSessionId, agentId); // memoised per key
   const storeKey = storeKeyOf(source);
   useAgentLookup(storeKey, appSessionId); // L197: an agent no loaded turn launched, named from the session's task graph
-  const rewind = useMemo(() => (agentId === undefined ? ipcRewind(appSessionId) : undefined), [appSessionId, agentId]);
+  // P5 O9 M5: a session driven through its bridge keeps Restore files in place, disabled with its reason (acceptance 2)
+  const controls = useSessionControls(appSessionId);
+  const filesGap = controls !== null && controls.turn() !== null ? controls.capability('rewind-files') : null;
+  const filesReason = filesGap !== null && !filesGap.available ? filesGap.reason : null;
+  const rewind = useMemo(() => (agentId === undefined ? { ...ipcRewind(appSessionId), unavailable: filesReason } : undefined), [appSessionId, agentId, filesReason]);
   // Where the session runs, from its record (its worktree's checkout when it has one): the engine's Bash input names no
   // cwd, so a shell call shows this, labelled as the session's directory. Not for a child agent's transcript: a
   // worktree-isolated subagent's shell ran elsewhere.

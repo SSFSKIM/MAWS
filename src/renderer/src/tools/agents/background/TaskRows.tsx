@@ -26,9 +26,10 @@ export function taskLine(node: TaskNode, now: number): string {
   return BACKGROUND_COPY.ended(node.description, word, formatAgo(now - Date.parse(node.endedAt)));
 }
 
-export function StopButton({ node, label, onStop }: { node: TaskNode; label: string; onStop: (taskId: TaskId) => void }) {
+// `gap`: why the session's port can't stop it (P5 O9 M5, its `stop-task` capability): drawn in place, disabled, with that.
+export function StopButton({ node, label, onStop, gap = null }: { node: TaskNode; label: string; onStop: (taskId: TaskId) => void; gap?: string | null }) {
   return (
-    <button type="button" disabled={node.stopping} onClick={() => onStop(node.taskId)} className={ACTION}>
+    <button type="button" disabled={node.stopping || gap !== null} title={gap ?? undefined} onClick={() => onStop(node.taskId)} className={ACTION}>
       {node.stopping ? BACKGROUND_COPY.stopping : label}
     </button>
   );
@@ -44,9 +45,10 @@ interface RowProps {
   selected: boolean;
   stopError: string | null;
   onStop: (taskId: TaskId) => void;
+  stopGap?: string | null; // P5 O9 M5: why Stop is unavailable, from the port's `stop-task` capability
 }
 
-function TaskRow({ node, now, selected, stopError, onStop, kind, children }: RowProps & { kind: 'shell' | 'monitor'; children?: ReactNode }) {
+function TaskRow({ node, now, selected, stopError, onStop, stopGap = null, kind, children }: RowProps & { kind: 'shell' | 'monitor'; children?: ReactNode }) {
   const running = node.status === 'running';
   const line = taskLine(node, now);
   return (
@@ -63,7 +65,7 @@ function TaskRow({ node, now, selected, stopError, onStop, kind, children }: Row
           {line}
         </span>
         {children}
-        {running && <StopButton node={node} label={BACKGROUND_COPY.stop} onStop={onStop} />}
+        {running && <StopButton node={node} label={BACKGROUND_COPY.stop} onStop={onStop} gap={stopGap} />}
       </div>
       <StopError message={stopError} />
     </div>

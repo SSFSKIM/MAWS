@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { record } from '../../../../../test/support/builders';
+import type { AppSessionId } from '@shared/graph/ids';
+import { fakeClient } from '../../../../../test/support/fake-client';
+import { at } from '../../../../../test/support/machine';
+import { laneAState } from '../../lane-a/test-support/lane-a-state';
+import { LANE_A_WORDS, laneAControls } from '../../session/controls/lane-a';
+import { CONTROL_KEYS } from '../../session/controls/types';
 import { drivenSection, heldByRow } from './model';
+
+const A = at('app-a') as AppSessionId;
 
 // W7 (charter §4.3 as amended 2026-10-01): Session info names who holds the session through the glyph's derivation.
 describe("Session info's Held by row", () => {
@@ -35,5 +43,21 @@ describe("Session info for a session driven through its terminal's bridge", () =
       ],
     });
     expect(drivenSection(() => ({ available: true }))).toBeNull();
+  });
+
+  it('lists every control key the port can name when each is unavailable, and lane A’s real gaps with their reasons', () => {
+    const rows = drivenSection((key) => ({ available: false, reason: `no ${key}` }))!.rows;
+    expect(rows.map((r) => r.value)).toEqual(CONTROL_KEYS.map((key) => `no ${key}`));
+    expect(new Set(rows.map((r) => r.label)).size).toBe(CONTROL_KEYS.length); // each its own label
+    // an idle turn is no gap: interrupt's only reason then is that nothing runs
+    expect(drivenSection((key) => (key === 'interrupt' ? { available: false, reason: LANE_A_WORDS.idle } : { available: true }))).toBeNull();
+
+    const controls = laneAControls(laneAState(A), record('s', { holder: { kind: 'terminal', pid: 7 } }), { appSessionId: A, client: fakeClient().client });
+    const listed = drivenSection((key) => controls.capability(key))!.rows;
+    for (const key of ['forget', 'rewind-files', 'elicitation.answer', 'decide.interrupt', 'mcp.disable'] as const) {
+      const gap = controls.capability(key);
+      expect(gap.available).toBe(false);
+      expect(listed.some((r) => r.value === (gap as { reason: string }).reason)).toBe(true);
+    }
   });
 });

@@ -24,7 +24,8 @@ import { num } from '../../widgets/parts';
 import { INFO, LANE } from './copy';
 import { contestLine, holderLine } from '../../attention/derive'; // W7
 import type { Lane } from './lane';
-import type { Capability, ControlKey } from '../../session/controls/types'; // P5 O9 M5
+import { CONTROL_KEYS, type Capability, type ControlKey } from '../../session/controls/types'; // P5 O9 M5
+import { LANE_A_WORDS } from '../../session/controls/lane-a'; // P5 O9 M5
 // C12 start
 import type { BudgetState } from '@shared/ipc/schema/engine';
 import { BUDGET } from '../../budget/copy';
@@ -101,11 +102,13 @@ export function heldByRow(record: SessionRecord, { bridged = false }: { bridged?
 }
 
 // P5 O9 M5 (the owner's Q2): every control a session driven through its bridge can't reach here, with its reason, in
-// the order of INFO.control; null when it reaches them all. `interrupt` is left out: its only gap is an idle turn.
+// the port's order (CONTROL_KEYS); null when it reaches them all. An idle turn is no gap: `interrupt` closed for that
+// alone is left out.
 export function drivenSection(capability: (key: ControlKey) => Capability): InfoSection | null {
-  const rows = (Object.keys(INFO.control) as (keyof typeof INFO.control)[]).flatMap((key) => {
+  const rows = CONTROL_KEYS.flatMap((key) => {
     const given = capability(key);
-    return given.available ? [] : [{ label: INFO.control[key], value: given.reason }];
+    if (given.available || (key === 'interrupt' && given.reason === LANE_A_WORDS.idle)) return [];
+    return [{ label: INFO.control[key], value: given.reason }];
   });
   return rows.length === 0 ? null : { title: INFO.unavailableTitle, rows };
 }

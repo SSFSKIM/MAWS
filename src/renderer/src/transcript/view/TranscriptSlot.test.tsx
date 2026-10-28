@@ -138,7 +138,7 @@ describe('TranscriptSlot', () => {
     b.result('t1', 'a', { structured: BASH_RESULT('a') });
     b.end(['u1']);
     const records = useSessions.getState().records;
-    act(() => useSessions.setState({ records: new Map([[id, { directory: '/w/project', worktree: { path: '/w/project-wt', branch: 'wt' } } as unknown as SessionRecord]]) }));
+    act(() => useSessions.setState({ records: new Map([[id, { directory: '/w/project', worktree: { path: '/w/project-wt', branch: 'wt' }, holder: { kind: 'self' } } as unknown as SessionRecord]]) }));
     onTestFinished(() => useSessions.setState({ records }));
     const invoke = vi.fn((name: string) => Promise.resolve({ ok: true, value: name === 'session.queue.list' ? EMPTY : name === 'session.appEvents' ? { events: [] } : { events: b.events, lastSeq: 3, complete: true } }));
     window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
@@ -161,7 +161,7 @@ describe('TranscriptSlot', () => {
     c.end(['c1']);
     const events = c.events.map((event) => ({ ...event, agentId: agent }));
     const records = useSessions.getState().records;
-    act(() => useSessions.setState({ records: new Map([[id, { directory: '/w/project', worktree: null } as unknown as SessionRecord]]) }));
+    act(() => useSessions.setState({ records: new Map([[id, { directory: '/w/project', worktree: null, holder: { kind: 'self' } } as unknown as SessionRecord]]) }));
     onTestFinished(() => useSessions.setState({ records }));
     const invoke = vi.fn((name: string) =>
       Promise.resolve(

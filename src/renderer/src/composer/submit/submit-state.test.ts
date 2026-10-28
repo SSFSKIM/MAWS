@@ -189,9 +189,11 @@ describe('a session driven through its holder (lane A)', () => {
     expect(decided({ driven: driven(true) })).toEqual(['send', 'Send', true, null, 'Sends at the next step', false]);
   });
 
-  it('is Stop on an empty box while a turn runs, when the bridge interrupts', () => {
+  it('is Stop on an empty box while a turn runs, drawn from interrupt alone: disabled with its reason when the bridge can’t', () => {
     expect(decided({ driven: driven(true), empty: true })).toEqual(['stop', 'Stop', true, null, null, false]);
-    expect(decided({ driven: driven(true, { stop: shut('Not in this session’s sminos') }), empty: true })).toEqual(['send', 'Send', false, null, null, false]);
+    expect(decided({ driven: driven(true, { stop: shut('Not in this session’s sminos') }), empty: true })).toEqual(['stop', 'Stop', false, 'Not in this session’s sminos', null, false]);
+    // a bridge that interrupts but takes no words: Stop still goes
+    expect(decided({ driven: driven(true, { send: shut('Not in this session’s sminos (1.10.0)') }), empty: true })).toEqual(['stop', 'Stop', true, null, null, false]);
   });
 
   it('says why Send is closed, and that `!` and `#` run in the terminal', () => {

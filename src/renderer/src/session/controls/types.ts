@@ -16,11 +16,14 @@ import type { SessionCatalog } from '../../stores/catalog';
 
 export type { ControlResult };
 
-export type ControlKey =
-  | 'send' | 'interrupt' | 'answer' | 'decide' | 'decide.scope' | 'decide.interrupt' | 'decide.addDirectory'
-  | 'model' | 'mode' | 'command' | 'btw' | 'compact' | 'mcp.enable' | 'mcp.disable' | 'mcp.reconnect'
-  | 'stop-agent' | 'tell' | 'stop-task' | 'media' | 'queue' | 'rewind' | 'forget' | 'rewind-files'
-  | 'elicitation.answer' | 'subagent-rows' | 'take-over' | 'reopen';
+// Every control the port names, in the order Session info lists the unreachable ones.
+export const CONTROL_KEYS = [
+  'send', 'interrupt', 'answer', 'decide', 'decide.scope', 'decide.interrupt', 'decide.addDirectory',
+  'model', 'mode', 'command', 'btw', 'compact', 'mcp.enable', 'mcp.disable', 'mcp.reconnect',
+  'stop-agent', 'tell', 'stop-task', 'media', 'queue', 'rewind', 'forget', 'rewind-files',
+  'elicitation.answer', 'subagent-rows', 'take-over', 'reopen',
+] as const;
+export type ControlKey = (typeof CONTROL_KEYS)[number];
 
 export type Capability = { available: true } | { available: false; reason: string };
 

@@ -226,6 +226,8 @@ function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
   const shellNodes = live ? shells(graph) : (derived?.shells ?? []);
   const monitorNodes = live ? monitors(graph) : (derived?.monitors ?? []);
   const onStop = derived !== null ? handle.stopJob : handle.stop;
+  const stopCapability = controls?.capability('stop-task') ?? null; // P5 O9 M5: Stop drawn from its own capability
+  const stopGap = stopCapability !== null && !stopCapability.available ? stopCapability.reason : null;
   const selected = own ? snapshot.selected : null;
   const stopErrors = own ? snapshot.stopErrors : new Map<string, string>();
 
@@ -292,6 +294,7 @@ function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
               selected={selected === node.taskId}
               stopError={stopErrors.get(node.taskId) ?? null}
               onStop={onStop}
+              stopGap={stopGap}
               onOutput={derived !== null ? null : (path) => openLog(appSessionId, path, node.description)} // a lane A job's tail is remote-only
             />
           ))}
@@ -300,7 +303,7 @@ function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
       {monitorNodes.length > 0 && (
         <Group id="monitors" heading={BACKGROUND_COPY.monitors(monitorNodes.length)} expanded={expanded.has('monitors')} onToggle={handle.toggle}>
           {monitorNodes.map((node) => (
-            <MonitorRow key={node.taskId} node={node} now={now} selected={selected === node.taskId} stopError={stopErrors.get(node.taskId) ?? null} onStop={onStop} />
+            <MonitorRow key={node.taskId} node={node} now={now} selected={selected === node.taskId} stopError={stopErrors.get(node.taskId) ?? null} onStop={onStop} stopGap={stopGap} />
           ))}
         </Group>
       )}

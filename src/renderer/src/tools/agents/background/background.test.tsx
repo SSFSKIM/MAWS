@@ -20,7 +20,7 @@ import * as query from '../../../ipc/query';
 import type { PanelToolContext } from '../../../panel/tool';
 import { useSessions } from '../../../stores/sessions';
 import { applyLaneAState, resetLaneAStore } from '../../../stores/lane-a'; // P5 O9 M5
-import { laneAState } from '../../../lane-a/test-support/lane-a-state'; // P5 O9 M5
+import { laneAState, LIVE_OPS } from '../../../lane-a/test-support/lane-a-state'; // P5 O9 M5
 import { resetLaneAWatches } from '../../../lane-a/watches'; // P5 O9 M5
 import type { Job } from 'desk-hub/protocol'; // P5 O9 M5
 import { fakeClient, type FakeClient } from '../../../../../../test/support/fake-client'; // P5 O9 M5
@@ -532,6 +532,18 @@ describe('background work', () => {
       plane('subagents', [job('bsleep01', { status: 'stopped', endedAt: T })]);
       expect(within(row('bsleep01')!).queryByRole('button')).toBeNull();
       expect(row('bsleep01')!.textContent).toContain('stopped');
+    });
+
+    it('draws Stop from the stop-task capability: disabled in place with its reason when the bridge can’t stop', async () => {
+      applyLaneAState(A, laneAState(A, { ops: LIVE_OPS.filter((op) => op !== 'stop') }));
+      render(<Mounted state={create(undefined)} />);
+      await watched();
+      plane('snapshot', [job('bsleep01')]);
+      const stop = within(row('bsleep01')!).getByRole('button', { name: 'Stop' }) as HTMLButtonElement;
+      expect(stop.disabled).toBe(true);
+      expect(stop.getAttribute('title')).toBe('Not in this session’s sminos (1.25.0)');
+      fireEvent.click(stop);
+      expect(bridge.invoked('laneA.stopTask')).toEqual([]);
     });
 
     it('shows a refused stop on the row, its Stop offered again', async () => {
