@@ -331,12 +331,14 @@ hand once nothing runs (`run-lock.ts`, never taken over). Against a deployment, 
 
 ### The cutover's verbs (P5 O14 M2)
 
-    pnpm --filter desk-hub deployment admin <show | enroll | delegation create|drop | machine drop | provisioning revoke | abandon-pending | code inspect|strip-legacy> …
+    pnpm --filter desk-hub deployment admin <show | enroll | delegation create|publish|drop | machine drop | provisioning revoke | abandon-pending | code inspect|strip-legacy> …
 
 The same keys file, anchor, lock and confirmation rule as above: each verb verifies the served chain against the anchor
 before anything else, settles a pending proposal first, and signs through the one `amend` (`delegation create`
-through its no-POST half, `propose`); against a deployment each
-that signs, posts or deletes (`enroll`, `delegation create`, `delegation drop`, `machine drop`, `provisioning revoke`,
+through its no-POST half, `propose`). An `unsent` proposal (`delegation create`'s) is the exception: no verb settles
+it but `delegation publish`; `show` and `devices` name it and go on, and every other verb refuses, signing and sending
+nothing, naming `delegation publish` and `abandon-pending`. Against a deployment each verb that signs, posts or
+deletes (`enroll`, `delegation create`, `delegation publish`, `delegation drop`, `machine drop`, `provisioning revoke`,
 `abandon-pending`) opens `/dev/tty` before any request. The token is `DESK_ACCESS_TOKEN` from the environment when it is
 set there (the runners' `--pipe`), else on stdin.
 
@@ -345,9 +347,9 @@ set there (the runners' `--pipe`), else on stdin.
   as `org-protocol`'s checks judge it against the verified head; a hub row neither covers `unlisted` when it posted a
   v2 key the head does not list, `phase-1` otherwise; `ONLINE` and `SEEN` are the row's DX2 presence when
   `GET /api/machines` reports it, `-` when not, which is the hub's answer today), the delegations (and the dropped
-  ones, whose prefixes stay reserved), and `legacyRetired` once a head carries it. Like every verb it settles a
-  pending proposal first, which is how `delegation create`'s is posted: `pending version n is not at the hub: sent`,
-  then `delegation <id> prefix <p> in effect from version n`.
+  ones, whose prefixes stay reserved), and `legacyRetired` once a head carries it. It settles a sent pending proposal
+  as every verb does, and never sends an unsent one: `pending version n lists delegation <id> (prefix <p>), unsent:
+  admin delegation publish sends it once its stored code decodes under code inspect`.
 - `enroll <name> [--replace] [--ttl <s>] [--wait <s>]` mints an enrollment token (`--ttl`, default 900 s; with
   `--replace`, `{machine: <name>}`, which re-enrolls an active hub row in place and ends its old credential at the
   machine's redemption), builds the `smns-enroll-v2.` code with a fresh `k` and writes it to the terminal and the
@@ -373,12 +375,16 @@ set there (the runners' `--pipe`), else on stdin.
   code written, and the command exits 0, closing the pipe, at which `gcloud secrets create --data-file=-` stores it
   (it reads to EOF before it stores anything). So the delegation cannot take effect before its code is stored: a run
   killed anywhere leaves nothing at the hub. Then check the stored code (`gcloud secrets versions access latest
-  --secret=<id> | … admin code inspect`), and only once it decodes run `admin show`, which posts the proposal and puts
-  the delegation in effect. A store that failed: `admin abandon-pending` (nothing was posted, so no fork can follow),
+  --secret=<id> | … admin code inspect`), and only once it decodes run `admin delegation publish`, which posts the
+  proposal and puts the delegation in effect; until then every other verb but `show` and `devices` refuses, so a
+  verb waiting meanwhile (an `enroll` waiting for its machine's key) cannot send it. A store that failed: `admin abandon-pending` (nothing was posted, so no fork can follow),
   `admin provisioning revoke <id>`, and delete the secret if it was created. A code that could not be written (the
   pipe closed) drops the proposal there and names the key to revoke. The stderr lines say these next steps. Its one
   destination is a pipe into Secret Manager:
   `… | production-run.sh admin --pipe delegation create … | gcloud secrets create <id> --data-file=-`.
+- `delegation publish` posts the unsent proposal `delegation create` left pending, after asking `publish delegation
+  <id>? [y/N]`, and prints `delegation <id> prefix <p> in effect from version n` and `published: version n`. With none
+  pending it refuses; with a stale one (another successor took its version) it refuses, naming `abandon-pending`.
 - `delegation drop <id>` asks, then signs the successor revoking the delegation's key by its id and prefix (both
   reserved for the life of the org) and moving every admin retirement of its certificates into `revoked`, then revokes
   its provisioning key at the hub.
@@ -393,8 +399,7 @@ set there (the runners' `--pipe`), else on stdin.
   could show a machine as a fork): for a proposal the hub refused for good, once you know why. An `unsent` proposal
   (`delegation create`'s, never posted) carries no such risk, and it says so: `pending version n <hash> was never sent:
   nothing was posted`. A delegation the proposal held is named with its minted provisioning key to revoke. It settles
-  nothing else, and refuses while the hub's chain holds the proposal, which the next run adopts. A stale `unsent`
-  proposal (another successor took its version first) is refused by every other verb, naming `abandon-pending`.
+  nothing else, and refuses while the hub's chain holds the proposal, which the next run adopts.
 - `code inspect` and `code strip-legacy` are local transforms, stdin to stdout, with no keys, anchor, credential or
   hub request: `inspect` prints a provisioning code's fields, every key and token elided; `strip-legacy` writes the
   same code without `legacy` (B4), to a pipe alone, refused on a terminal. Run `strip-legacy` as

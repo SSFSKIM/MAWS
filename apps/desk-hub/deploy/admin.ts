@@ -113,11 +113,11 @@ import { withRunLock } from './run-lock';
 
 export const SUBCOMMANDS = ['init', 'genesis', 'adopt', 'refresh', 'pair', 'devices', 'remove-device', 'show', 'enroll', 'delegation', 'machine', 'code', 'provisioning', 'abandon-pending'] as const;
 /** The subcommands that name a verb of their own after them (`delegation create`). */
-const GROUPS = { delegation: ['create', 'drop'], machine: ['drop'], code: ['inspect', 'strip-legacy'], provisioning: ['revoke'] } as const;
+const GROUPS = { delegation: ['create', 'publish', 'drop'], machine: ['drop'], code: ['inspect', 'strip-legacy'], provisioning: ['revoke'] } as const;
 type Group = keyof typeof GROUPS;
 type Subcommand = Exclude<(typeof SUBCOMMANDS)[number], Group> | { [G in Group]: `${G} ${(typeof GROUPS)[G][number]}` }[Group];
 /** What signs, posts or deletes only after the owner says so at the terminal. */
-const CONFIRMING: readonly Subcommand[] = ['genesis', 'pair', 'remove-device', 'enroll', 'delegation create', 'delegation drop', 'machine drop', 'provisioning revoke', 'abandon-pending'];
+const CONFIRMING: readonly Subcommand[] = ['genesis', 'pair', 'remove-device', 'enroll', 'delegation create', 'delegation publish', 'delegation drop', 'machine drop', 'provisioning revoke', 'abandon-pending'];
 /** The verbs whose stdout is a secret code, for a pipe alone: every other line they print goes to stderr. */
 const SECRET_STDOUT: readonly Subcommand[] = ['delegation create', 'code strip-legacy'];
 /** The local transforms: stdin to stdout, no keys, no anchor, no credential and no hub. */
@@ -381,8 +381,13 @@ async function post(person: Person, signed: SignedOrgState): Promise<'ok' | 'not
  * parent → the same bytes sent again; the hub holds another successor of that parent → `fork`, and nothing changes. A
  * hub that stored a proposal but answered an error is therefore never handed a second, different successor of the
  * same parent.
+ *
+ * An `unsent` proposal (`delegation create`'s) is never settled here (the spec's Decision Log, M2 round 3): its
+ * delegation takes effect only once the owner has checked the stored code, so only `delegation publish` sends it
+ * (`unsent: 'publish'`, which leaves it to that verb's confirmation); a read verb names it and goes on
+ * (`unsent: 'note'`); every other verb refuses, signing and sending nothing.
  */
-async function anchored(ctx: Context, needsSigner: boolean) {
+async function anchored(ctx: Context, needsSigner: boolean, { unsent = 'refuse' }: { unsent?: 'refuse' | 'note' | 'publish' } = {}) {
   const opened = await openAnchor(ctx);
   const { keys, person, me, verified } = opened;
   let anchor = opened.anchor;
@@ -402,21 +407,35 @@ async function anchored(ctx: Context, needsSigner: boolean) {
     const n = proposal.state.version;
     const { chain } = verified;
     const held = chain[n - 1];
+    const stale = held !== undefined || head.state.version !== n - 1 || (await stateHash(head.state)) !== proposal.state.prev;
+    const theirs = held ?? chain[n - 2] ?? head;
+    const at = async () => `the hub holds version ${theirs.state.version} ${await stateHash(theirs.state)}`;
     if (held !== undefined && canonicalize(held) === canonicalize(proposal)) {
       save(settled(anchor, head.state.version));
       ctx.io.out(`pending version ${n} is the hub's: adopted`);
       inEffect(proposal, (chain[n - 2] ?? held).state);
-    } else if (held !== undefined || head.state.version !== n - 1 || (await stateHash(head.state)) !== proposal.state.prev) {
-      const theirs = held ?? chain[n - 2] ?? head;
-      const at = `the hub holds version ${theirs.state.version} ${await stateHash(theirs.state)}`;
-      const mine = `version ${n} ${await stateHash(proposal.state)}`;
+    } else if (anchor.unsent) {
+      const added = proposal.state.delegations.filter((d) => !head.state.delegations.some((x) => x.id === d.id));
+      const named = `delegation ${added.map((d) => `${d.id} (prefix ${d.prefix})`).join(', ')}`;
+      if (unsent === 'note') {
+        ctx.io.out(
+          stale
+            ? `pending version ${n} lists ${named}, unsent and stale (${await at()}): admin abandon-pending drops it`
+            : `pending version ${n} lists ${named}, unsent: admin delegation publish sends it once its stored code decodes under code inspect`,
+        );
+      } else if (stale) {
+        refuse(`${await at()} where this device's unsent version ${n} ${await stateHash(proposal.state)} was signed (pending in ${anchorFile(ctx.keysPath)}): nothing was posted, and no fork exists; admin abandon-pending drops it, and the next verb signs on the hub's head`);
+      } else if (unsent === 'refuse') {
+        refuse(
+          `version ${n} lists ${named}, signed by delegation create and unsent in ${anchorFile(ctx.keysPath)}: nothing was signed or sent. Once its stored code decodes under code inspect, admin delegation publish sends it; if the store failed, admin abandon-pending, then admin provisioning revoke ${added.map((d) => d.id).join(', ')}`,
+        );
+      }
+    } else if (stale) {
       refuse(
-        anchor.unsent
-          ? `${at} where this device's unsent ${mine} was signed (pending in ${anchorFile(ctx.keysPath)}): nothing was posted, and no fork exists; admin abandon-pending drops it, and the next verb signs on the hub's head`
-          : `fork: ${at} where this device signed ${mine} (pending in ${anchorFile(ctx.keysPath)}): nothing was signed. Two successors of version ${n - 1} exist; take this to whoever runs the hub before anything else is signed`,
+        `fork: ${await at()} where this device signed version ${n} ${await stateHash(proposal.state)} (pending in ${anchorFile(ctx.keysPath)}): nothing was signed. Two successors of version ${n - 1} exist; take this to whoever runs the hub before anything else is signed`,
       );
     } else {
-      ctx.io.out(`pending version ${n} is not at the hub: ${anchor.unsent ? 'sent' : 'sent again'}`);
+      ctx.io.out(`pending version ${n} is not at the hub: sent again`);
       const before = head.state;
       await send(proposal);
       head = (await verifiedHead(person, anchor)).head;
@@ -444,26 +463,38 @@ async function anchored(ctx: Context, needsSigner: boolean) {
 
   /** A successor of the head, changed by `edit`, signed by the admin device, kept as pending, then posted. */
   async function amend(edit: (state: OrgState) => Promise<void> | void): Promise<SignedOrgState> {
-    const signed = await propose(edit);
+    const signed = await signPending(edit, false);
     await send(signed);
     head = signed;
     return signed;
   }
 
-  /** `amend` without the POST: the signed successor kept as pending, marked unsent, for the next verb to settle. */
-  async function propose(edit: (state: OrgState) => Promise<void> | void): Promise<SignedOrgState> {
+  /** `amend` without the POST: the signed successor kept as pending, marked unsent, for `delegation publish` to send. */
+  const propose = (edit: (state: OrgState) => Promise<void> | void) => signPending(edit, true);
+
+  async function signPending(edit: (state: OrgState) => Promise<void> | void, unsent: boolean): Promise<SignedOrgState> {
     const next = await successor(head.state, () => {});
     await edit(next);
     const signed = await signOrgState(next, [keys.stepUp]);
-    save({ ...anchor, pending: signed, unsent: true });
+    save({ ...anchor, pending: signed, ...(unsent ? { unsent: true as const } : {}) });
     return signed;
+  }
+
+  /** `delegation publish`'s send: the unsent proposal posted, the delegations it adds named in effect. */
+  async function publish(): Promise<SignedOrgState> {
+    const proposal = anchor.pending!;
+    const before = head.state;
+    await send(proposal);
+    head = (await verifiedHead(person, anchor)).head;
+    inEffect(proposal, before);
+    return proposal;
   }
 
   if (needsSigner) {
     const problem = await signerProblem(head.state, me.member.id, keys);
     if (problem) refuse(`${problem}: this device cannot sign its successors`);
   }
-  return { anchor, keys, person, me, head, certificates: verified.certificates, amend, propose };
+  return { anchor, keys, person, me, head, certificates: verified.certificates, amend, propose, publish };
 }
 
 /** The anchor and the head the hub serves, verified against it, the age line printed; nothing settled or written. */
@@ -650,7 +681,7 @@ async function refresh(ctx: Context): Promise<number> {
 }
 
 async function devices(ctx: Context): Promise<number> {
-  const { head, me, keys } = await anchored(ctx, false);
+  const { head, me, keys } = await anchored(ctx, false, { unsent: 'note' });
   const member = head.state.members.find((m) => m.id === me.member.id);
   for (const d of member?.devices ?? []) ctx.io.out(`${describeEntry(d)}${d.id === keys.id ? ' (this admin device)' : ''}`);
   if (!member) ctx.io.out(`${me.member.id} is not a member of the head`);
@@ -794,7 +825,7 @@ function delegationOver(state: OrgState, name: string): string | null {
 }
 
 async function show(ctx: Context): Promise<number> {
-  const { head, keys, person, certificates } = await anchored(ctx, false);
+  const { head, keys, person, certificates } = await anchored(ctx, false, { unsent: 'note' });
   const state = head.state;
   for (const m of state.members) {
     ctx.io.out(`member ${m.id} ${printable(m.email)} ${m.role}`);
@@ -927,9 +958,9 @@ function mintDisagrees(issued: ProvisioningKeyIssued, approved: { prefix: string
  * prefix, the expiry, the use limit), and a mint answer that disagrees is refused before anything is signed.
  *
  * It posts nothing (the spec's Decision Log, M2 round 2): the successor is signed into the anchor's pending slot,
- * unsent, and the code written; the store takes it when this command exits and closes the pipe, and the next verb
- * (`show`, once the owner's `code inspect` of the stored code decodes) posts the proposal, the delegation in effect
- * from then. A run killed anywhere here leaves nothing at the hub, so the delegation cannot take effect without its
+ * unsent, and the code written; the store takes it when this command exits and closes the pipe, and
+ * `delegation publish` (once the owner's `code inspect` of the stored code decodes) posts the proposal, the delegation
+ * in effect from then; until then every other signing verb refuses (round 3). A run killed anywhere here leaves nothing at the hub, so the delegation cannot take effect without its
  * code stored; what it leaves is undone by `abandon-pending` and `provisioning revoke`.
  */
 async function delegationCreate(ctx: Context): Promise<number> {
@@ -999,8 +1030,20 @@ async function delegationCreate(ctx: Context): Promise<number> {
     return refuse(`the code could not be written to stdout (${error instanceof Error ? error.message : String(error)}): the proposal was dropped and nothing was posted; run provisioning revoke ${delegation.id}`);
   }
   ctx.io.out(`its code went to stdout`);
-  ctx.io.out(`next: the store (gcloud secrets create) takes the code once this command exits; check the stored code with code inspect; then admin show posts version ${n}, and delegation ${delegation.id} is in effect`);
+  ctx.io.out(`next: the store (gcloud secrets create) takes the code once this command exits; check the stored code with code inspect; then admin delegation publish sends version ${n}, and delegation ${delegation.id} is in effect`);
   ctx.io.out(`if the store failed or the stored code does not decode: admin abandon-pending (nothing was posted), then admin provisioning revoke ${delegation.id}`);
+  return 0;
+}
+
+/** `delegation publish`: the unsent proposal `delegation create` left pending, sent on the owner's word. */
+async function delegationPublish(ctx: Context): Promise<number> {
+  const from = await anchored(ctx, false, { unsent: 'publish' });
+  const proposal = from.anchor.pending;
+  if (proposal === undefined || from.anchor.unsent !== true) refuse('no unsent delegation is pending (delegation create leaves one): nothing was sent');
+  const ids = proposal!.state.delegations.filter((d) => !from.head.state.delegations.some((x) => x.id === d.id)).map((d) => d.id);
+  if (!(await confirm(ctx, `publish delegation ${ids.join(', ')}? [y/N]`))) refuse('not published: it stays pending, unsent');
+  const sent = await from.publish();
+  ctx.io.out(`published: version ${sent.state.version}`);
   return 0;
 }
 
@@ -1178,6 +1221,7 @@ const RUN: Record<Subcommand, (ctx: Context) => Promise<number>> = {
   show,
   enroll,
   'delegation create': delegationCreate,
+  'delegation publish': delegationPublish,
   'delegation drop': delegationDrop,
   'machine drop': machineDrop,
   'provisioning revoke': provisioningRevoke,

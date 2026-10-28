@@ -18,8 +18,9 @@
 #                       stdout is a secret code): the token in the command's environment, its stdin and stdout passed
 #                       through untouched and unlogged, its stderr alone filtered and logged; refused when stdout is a
 #                       terminal. Every line of the runner's own goes to stderr. `delegation create` posts no state: it
-#                       signs the delegation into the admin device's pending proposal, which the next admin verb (show,
-#                       once the stored code decodes under `code inspect`) posts.
+#                       signs the delegation into the admin device's pending proposal, which `admin delegation publish`
+#                       alone posts (once the stored code decodes under `code inspect`); every other signing verb
+#                       refuses until then.
 # The steps that change production (access-sync; admin genesis, pair, remove-device, refresh, enroll, delegation,
 # machine drop, provisioning revoke) say so first.
 # Environment (README "Production runs"):
@@ -150,7 +151,9 @@ case $step in
       enroll) say "admin enroll changes production: it mints an enrollment and lists the machine in $PRODUCTION_ORG's org state (a signed successor), asking on the terminal first" ;;
       delegation)
         if [[ $verb == "delegation create" ]]; then
-          say "admin delegation create changes production: it mints a provisioning key at $URL and signs $PRODUCTION_ORG's successor listing the delegation as this device's pending proposal, posting none (the next admin verb, show, posts it once the code is stored), asking on the terminal first"
+          say "admin delegation create changes production: it mints a provisioning key at $URL and signs $PRODUCTION_ORG's successor listing the delegation as this device's pending proposal, posting none (admin delegation publish posts it once the stored code is inspected), asking on the terminal first"
+        elif [[ $verb == "delegation publish" ]]; then
+          say "admin delegation publish changes production: it posts the pending proposal delegation create signed, which puts its delegation in effect for $PRODUCTION_ORG, asking on the terminal first"
         else
           say "admin $verb changes production: it changes $PRODUCTION_ORG's delegations (a provisioning key and a signed successor), asking on the terminal first"
         fi ;;

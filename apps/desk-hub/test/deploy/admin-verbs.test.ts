@@ -234,9 +234,45 @@ describe('on the local hub', () => {
     expect((await head()).state.version).toBe(before.state.version + 1);
   });
 
+  it('refuses every verb but publish while an unsent delegation is pending: an enroll waiting across a create resumes and posts nothing', async () => {
+    const before = await head();
+    const { f, running, code } = await enrolling('m6');
+    const created = fake();
+    expect(await runAdmin(['delegation', 'create', '--label', 'cc', '--prefix', 'cc-', '--code-to-stdout', ...asLocal('--yes')], created.io)).toBe(0);
+    const issued = decodeProvisioningCodeV2(created.stdout[0].trim());
+    secrets.add(created.stdout[0].trim());
+    secrets.add(issued.token);
+    secrets.add(issued.delegation.privateJwk.d!);
+    const id = issued.delegation.id;
+    const n = before.state.version + 1;
+    await enrollV2(code, 'm6');
+    expect(await running).toBe(1);
+    const refusal = new RegExp(`version ${n} lists delegation ${id} \\(prefix cc-\\), signed by delegation create and unsent in .*: nothing was signed or sent\\. Once its stored code decodes under code inspect, admin delegation publish sends it; if the store failed, admin abandon-pending, then admin provisioning revoke ${id}`);
+    expect(f.err.join('\n')).toMatch(refusal);
+    for (const verb of [['refresh'], ['machine', 'drop', 'm6'], ['provisioning', 'revoke', id]]) {
+      const other = fake();
+      expect(await runAdmin([...verb, ...asLocal('--yes')], other.io), verb.join(' ')).toBe(1);
+      expect(other.err.join('\n'), verb.join(' ')).toMatch(refusal);
+    }
+    // Nothing reached the hub: no delegation, no machine, the head where it was.
+    const after = await head();
+    expect(after.state.version).toBe(before.state.version);
+    expect(after.state.delegations.map((d) => d.prefix)).not.toContain('cc-');
+    expect(after.state.machines.map((m) => m.name)).not.toContain('m6');
+    expect(anchor()).toMatchObject({ unsent: true, pending: { state: { version: n } } });
+    // Abandoned, the device signs again; its key revoked.
+    const hash = await stateHash(anchor().pending!.state);
+    const abandoned = fake(['y']);
+    expect(await runAdmin(['abandon-pending', ...asLocal()], abandoned.io)).toBe(0);
+    expect(abandoned.out).toContain(`pending version ${n} ${hash} was never sent: nothing was posted`);
+    expect(anchor()).not.toHaveProperty('pending');
+    expect(await runAdmin(['provisioning', 'revoke', id, ...asLocal('--yes')], fake().io)).toBe(0);
+    expect(await runAdmin(['machine', 'drop', 'm6', ...asLocal('--yes')], fake().io)).toBe(0);
+  });
+
   let delegation: ProvisioningCodeV2;
 
-  it('creates a delegation: confirmed first, the provisioning key minted, the delegation signed into pending and posted by the next verb, the code on stdout alone', async () => {
+  it('creates a delegation: confirmed first, the provisioning key minted, the delegation signed into pending, the code on stdout alone; publish alone sends it', async () => {
     const before = await head();
     const keysBefore = ((await hub.fetchAs(ADMIN, '/api/provisioning-keys').then((r) => r.json())) as { keys: ProvisioningKeyRecord[] }).keys.length;
     const f = fake();
@@ -257,13 +293,21 @@ describe('on the local hub', () => {
     expect(anchor().pending!.state.delegations.map((d) => d.id)).toEqual([id]);
     const said = f.err.join('\n');
     expect(said).toContain(`version ${n} lists delegation ${id} (prefix vm-, expires ${anchor().pending!.state.delegations[0].expires}), signed and pending in ${anchorFile(keys)}: nothing was posted`);
-    expect(said).toMatch(new RegExp(`next: the store \\(gcloud secrets create\\) takes the code once this command exits; check the stored code with code inspect; then admin show posts version ${n}, and delegation ${id} is in effect`));
+    expect(said).toMatch(new RegExp(`next: the store \\(gcloud secrets create\\) takes the code once this command exits; check the stored code with code inspect; then admin delegation publish sends version ${n}, and delegation ${id} is in effect`));
     expect(said).toContain(`if the store failed or the stored code does not decode: admin abandon-pending (nothing was posted), then admin provisioning revoke ${id}`);
-    // The next verb settles it: `show` posts it and says so.
+    // `show` reads: it names the unsent delegation and sends nothing.
     const shown = fake();
     expect(await runAdmin(['show', ...asLocal()], shown.io)).toBe(0);
-    expect(shown.out).toContain(`pending version ${n} is not at the hub: sent`);
-    expect(shown.out).toContain(`delegation ${id} prefix vm- in effect from version ${n}`);
+    expect(shown.out).toContain(`pending version ${n} lists delegation ${id} (prefix vm-), unsent: admin delegation publish sends it once its stored code decodes under code inspect`);
+    expect(shown.out.join('\n')).not.toMatch(/sent$|in effect/m);
+    expect((await head()).state.version).toBe(before.state.version);
+    expect(anchor()).toMatchObject({ unsent: true });
+    // `delegation publish`, confirmed, sends it.
+    const published = fake();
+    expect(await runAdmin(['delegation', 'publish', ...asLocal('--yes')], published.io)).toBe(0);
+    expect(published.out).toContain(`publish delegation ${id}? [y/N] yes (--yes)`);
+    expect(published.out).toContain(`delegation ${id} prefix vm- in effect from version ${n}`);
+    expect(published.out.at(-1)).toBe(`published: version ${n}`);
     expect(anchor().pending).toBeUndefined();
     expect(anchor()).not.toHaveProperty('unsent');
     const after = await head();
@@ -317,7 +361,7 @@ describe('on the local hub', () => {
     secrets.add(legacyDelegation.delegation.privateJwk.d!);
     expect(legacyDelegation.legacy).toEqual({ org: ORG, key: legacyKey });
     expect(f.err).toContain('delegate lg- for 3600 s? [y/N] yes (--yes)');
-    expect(await runAdmin(['show', ...asLocal()], fake().io)).toBe(0);
+    expect(await runAdmin(['delegation', 'publish', ...asLocal('--yes')], fake().io)).toBe(0);
     expect((await head()).state.delegations.find((d) => d.prefix === 'lg-')).toMatchObject({ maxUses: 5 });
 
     const other = fake([], { stdin: encodeProvisioningCode({ hub: 'https://elsewhere.example', org: ORG, token: 't', prefix: 'old-', key: legacyKey }) });
@@ -442,6 +486,12 @@ describe('on the local hub', () => {
       expect(f.out).toContain(`pending version ${proposal.state.version} is not at the hub: sent again`);
       expect(anchor().pending).toBeUndefined();
       expect((await head()).state.version).toBe(proposal.state.version);
+      // A signing verb settles a sent proposal the same way before it signs its own.
+      const again = await pendingOf();
+      const refreshed = fake();
+      expect(await runAdmin(['refresh', ...asLocal()], refreshed.io)).toBe(0);
+      expect(refreshed.out).toContain(`pending version ${again.state.version} is not at the hub: sent again`);
+      expect(refreshed.out.at(-1)).toBe(`refreshed: version ${again.state.version + 1} (no change)`);
     });
 
     it('is abandoned only on the owner\'s word, after it says the consequence; declined, it stays', async () => {
@@ -481,7 +531,7 @@ describe('on the local hub', () => {
   });
 
   it('refuses every hub-touching verb with no anchor, a chain of another genesis, or a head older than the anchor has seen', async () => {
-    const verbs = [['show'], ['enroll', 'mx'], ['delegation', 'create', '--label', 'x', '--prefix', 'zz-', '--code-to-stdout'], ['delegation', 'drop', 'f'.repeat(32)], ['machine', 'drop', 'mx'], ['provisioning', 'revoke', 'f'.repeat(32)], ['abandon-pending']];
+    const verbs = [['show'], ['enroll', 'mx'], ['delegation', 'create', '--label', 'x', '--prefix', 'zz-', '--code-to-stdout'], ['delegation', 'drop', 'f'.repeat(32)], ['delegation', 'publish'], ['machine', 'drop', 'mx'], ['provisioning', 'revoke', 'f'.repeat(32)], ['abandon-pending']];
     const unanchored = join(dir('unanchored'), 'keys.json');
     for (const verb of verbs) {
       const f = fake();
@@ -585,7 +635,7 @@ describe('delegation create against a hub that misbehaves', () => {
     mint = null;
     const f = fake();
     expect(await runAdmin(create('dc-', '--ttl', '3600', '--max-uses', '1'), f.io)).toBe(0);
-    expect(await runAdmin(['show', ...via()], fake().io)).toBe(0);
+    expect(await runAdmin(['delegation', 'publish', ...via('--yes')], fake().io)).toBe(0);
     const [delegation] = (await head()).state.delegations;
     expect(delegation).toMatchObject({ prefix: 'dc-', maxUses: 1 });
     expect(Math.abs(Date.parse(delegation.expires) - (Date.now() + 3600_000))).toBeLessThan(60_000);
@@ -623,9 +673,12 @@ describe('delegation create against a hub that misbehaves', () => {
     const theirs = await signOrgState(await successor((await head()).state, (s) => void s.projects.push({ id: 'p-other', name: 'other' })), [admin.stepUp]);
     expect((await hub.fetchAs(ADMIN, '/api/org/state', { body: theirs })).status).toBe(201);
     const stale = fake();
-    expect(await runAdmin(['show', ...via()], stale.io)).toBe(1);
+    expect(await runAdmin(['delegation', 'publish', ...via('--yes')], stale.io)).toBe(1);
     expect(stale.err.join('\n')).toMatch(new RegExp(`the hub holds version ${n} .* where this device's unsent version ${n} .* was signed \\(pending in .*\\): nothing was posted, and no fork exists; admin abandon-pending drops it`));
     expect(stale.err.join('\n')).not.toMatch(/Two successors/);
+    const shown = fake();
+    expect(await runAdmin(['show', ...via()], shown.io)).toBe(0);
+    expect(shown.out.join('\n')).toMatch(new RegExp(`pending version ${n} lists delegation ${id} \\(prefix lg-\\), unsent and stale \\(the hub holds version ${n} [^ ]+\\): admin abandon-pending drops it`));
 
     const hash = await stateHash(proposal.state);
     const f = fake(['y']);
@@ -749,6 +802,7 @@ describe('against a deployment', () => {
       ['enroll', 'mx'],
       ['delegation', 'create', '--label', 'devcloud', '--prefix', 'dc-', '--code-to-stdout'],
       ['delegation', 'drop', 'f'.repeat(32)],
+      ['delegation', 'publish'],
       ['machine', 'drop', 'mx'],
       ['provisioning', 'revoke', 'f'.repeat(32)],
       ['abandon-pending'],

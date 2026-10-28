@@ -486,6 +486,14 @@ describe.skipIf(!zsh)('production-run.sh', () => {
       expect(w.calls('pnpm')).toEqual([]);
     });
 
+    it('admin delegation publish says first that it puts the pending delegation in effect, before it reads any credential', () => {
+      const w = world();
+      const run = w.run('production-run.sh', ['admin', 'delegation', 'publish']);
+      expect(run.status).toBe(2);
+      expect(run.out.split('\n')[0]).toMatch(/^admin delegation publish changes production: it posts the pending proposal delegation create signed, which puts its delegation in effect/);
+      expect(run.out).toMatch(/no admin device keys at /);
+    });
+
     it.each(['genesis', 'pair', 'remove-device', 'refresh'])('admin %s: no admin keys, then no Access token', (sub) => {
       const w = world();
       const noKeys = w.run('production-run.sh', ['admin', sub]);
