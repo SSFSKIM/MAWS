@@ -92,6 +92,20 @@ const p2aCommands = {
   'engine.observedFacts': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: ObservedFactsAnswerSchema.nullable(), owner: 'engine-host' },
 } as const;
 // P2-A end
+// P5 O10 start (docs/doperpowers/plans/2026-10-27-p5-o10-endpoint.md, Decision Log: lane B's pending counts): every
+// session's count of broker items that wait on an answer (`waitsOnAnswer`), sessions with none left out, never the items
+// (src/engine-host/pending-counts.ts states the size bound; a card's items are `session.pendingItems`'s). The endpoint
+// reads it at each link to the engine host as the whole set, so `notify`'s lane B counts are restated with no
+// subscription and no per-session read. Owner engine-host; immediate; sent from `mawsd`, never a window.
+const o10Commands = {
+  'engine.pendingItems': {
+    input: z.void(),
+    output: z.strictObject({ sessions: z.array(z.strictObject({ appSessionId: AppSessionIdSchema, waiting: z.number().int().positive() })) }),
+    owner: 'engine-host',
+  },
+} as const;
+export const O10_ENGINE_COMMANDS = Object.keys(o10Commands) as (keyof typeof o10Commands)[];
+// P5 O10 end
 
 export const commands = {
   'engine.ping': { input: z.void(), output: HostPingSchema, owner: 'engine-host' },
@@ -102,6 +116,7 @@ export const commands = {
   ...c11Commands, // C11
   ...c12Commands, // C12
   ...p2aCommands, // P2-A
+  ...o10Commands, // P5 O10
 } as const satisfies Record<`engine.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

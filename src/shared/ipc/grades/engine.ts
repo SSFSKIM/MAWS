@@ -14,4 +14,5 @@ export const grades = {
   'engine.configure': 'internal',
   'engine.policy.set': 'internal',
   'engine.observedFacts': 'internal',
+  'engine.pendingItems': 'internal', // P5 O10: the endpoint's, from mawsd
 } as const satisfies CommandGrades<'engine'>;

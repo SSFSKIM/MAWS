@@ -357,6 +357,7 @@
   "designSystems.house",
   "engine.binaryInfo",
   "engine.budget",
+  "engine.pendingItems",
   "engine.ping",
   "engine.policy.set",
   "engine.relayHealth",

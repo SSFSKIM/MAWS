@@ -32,6 +32,10 @@
 // plane (lane A from sminos's session plane over RL10, lane B from the engine host's events and journal); each is
 // authorized again at every record change and every new head. A `call` the gate lets through is read by calls.ts. A
 // device's lane B subscriptions are interest (OX5).
+//
+// `notify`'s counts come from sminos's pending sets for lane A and from the engine host for lane B (lane-b-pending.ts):
+// every session's broker items as the engine host publishes them, subscribed or not, and the whole set read again at
+// each engine-host link `mawsd` reports.
 import { homedir, networkInterfaces } from 'node:os';
 import { importSigningKey, isListingGone, stateHash, type MachineIdentity, type OrgState, type Right, type Rl1Refusal, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { Authorizer, type AuthorizeContext } from './authorize';
@@ -48,6 +52,7 @@ import { acceptGrant, dropRevokedGrants, machineOwnerMembers, machineRights } fr
 import type { HubDeps } from './hub-http';
 import { HubLink } from './hub-link';
 import { Interest } from './interest';
+import { LaneBPending } from './lane-b-pending';
 import { EndpointRecords, Listings, RecordRetries, type RecordsContext } from './listings';
 import { Notifier } from './notify';
 import { EndpointOrg, type OrgChange } from './org-sync';
@@ -104,6 +109,8 @@ export class Endpoint implements EndpointModule {
   readonly endpointRecords: EndpointRecords;
   /** `notify` from the pending sets and the to-human messages (M6 feeds them). */
   readonly notifier: Notifier;
+  /** Lane B's pending counts for the notifier, from the engine host's broker items. */
+  readonly laneB: LaneBPending;
   /** The devices' channels, over either carrier (M4); M5–M8 set its routes. */
   readonly channels: Channels;
   /** Every remote request's decision (M5); M7 and M8 ask it too (a query's binding, a subscription's re-check). */
@@ -204,6 +211,14 @@ export class Endpoint implements EndpointModule {
       send: (frame) => this.hub.send(frame),
       listed: (session) => this.listings.listed(session),
       store: { read: () => this.#state?.notified ?? {}, write: (file) => this.#state?.setNotified(file) },
+      log,
+    });
+    this.laneB = new LaneBPending({
+      dispatch: (owner, name, input) => {
+        if (this.#services === null) return Promise.reject(new Error('the endpoint has not started'));
+        return this.#services.dispatch(owner, name, input);
+      },
+      notifier: this.notifier,
       log,
     });
     this.rl10 = new Rl10({
@@ -396,12 +411,18 @@ export class Endpoint implements EndpointModule {
     });
     this.#state = state;
     this.#org = org;
-    // Lane B's live events and the app's attachment (none at start, O2's seam), for the subscriptions.
-    this.#unseam.push(
-      services.onEvent((owner, message) => this.planeB.event(owner, message)),
-      services.onAttachment((attached) => this.planeB.attachment(attached)),
-    );
+    // What notify told the hub before a restart, read before anything below feeds it.
     this.notifier.restore();
+    // Lane B's live events and the app's attachment (none at start, O2's seam), for the subscriptions; its events and
+    // each engine-host link, for notify's counts.
+    this.#unseam.push(
+      services.onEvent((owner, message) => {
+        this.planeB.event(owner, message);
+        this.laneB.event(owner, message);
+      }),
+      services.onAttachment((attached) => this.planeB.attachment(attached)),
+      services.onUpstream((link) => void (link.connected && this.laneB.restate())),
+    );
     if (state.refusing !== null) return;
     // A provisioning interrupted mid-set (O14 M1) is whole again before anything below reads the directory.
     await completeProvisioning(state, org, log, () => this.rl10.forgetRecords());
