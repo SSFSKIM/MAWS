@@ -9,14 +9,16 @@ import { enrollmentMac, enrollmentMacInput } from '../src/enrollment.ts';
 import { verifyEvent, signerFor } from '../src/events.ts';
 import { keyId, signingInput } from '../src/keys.ts';
 import { decodePairingCode, encodePairingCode, pairingFingerprint, pairingMac, pairingMacInput, verifyPairingMac } from '../src/pairing.ts';
+import { decodeProvisioningCodeV2, encodeProvisioningCodeV2 } from '../src/provisioning.ts';
 import { stateHash, verifyGenesis, verifyRewind, verifySuccessor, verifyTransition } from '../src/org-state.ts';
 import { contestedRefs, machineKeys, verifyCertRetirement, verifyEndpointRecord, verifyGrant, verifyListing, verifyMachineCert } from '../src/records.ts';
 import type { OrgState, SignedOrgState } from '../src/types.ts';
 import { verifyWebAuthn } from '../src/webauthn.ts';
 import { replayChannel } from './replay-channel.ts';
+import { replayHistory } from './replay-history.ts';
 import type { Case, VectorSet } from './scenario.ts';
 
-export type { Case, DualCase, EnrollmentCase, PairingVector, VectorSet } from './scenario.ts';
+export type { Case, DualCase, EnrollmentCase, PairingVector, ProvisioningVector, VectorSet } from './scenario.ts';
 
 /** Resolves `{$signed}`, `{$state}` and `{$fixture}` references against the set's fixtures, at any depth. */
 function resolve(set: VectorSet, arg: unknown): unknown {
@@ -100,12 +102,36 @@ export async function replayVectors(set: VectorSet): Promise<string[]> {
   }
   if (new Set(set.enrollment.map((e) => e.input)).size !== set.enrollment.length) failures.push('two enrollments encode alike');
   failures.push(...(await replayPairing(set.pairing)));
+  failures.push(...replayProvisioning(set.provisioning));
   for (const { name, action, input, digest, fingerprint } of set.encodings.actions) {
     if (new TextDecoder().decode(actionSigningInput(action)) !== input) failures.push(`action input of ${name}`);
     if (base64urlEncode(await actionDigest(action)) !== digest) failures.push(`action digest of ${name}`);
     if ((await actionFingerprint(action)) !== fingerprint) failures.push(`action fingerprint of ${name}`);
   }
   failures.push(...(await replayChannel(set.channel, set.fixtures)));
+  failures.push(...(await replayHistory(set.history)));
+  return failures;
+}
+
+/** Each provisioning code decoded and encoded again, and each refused text refused by its name (provisioning.ts). */
+function replayProvisioning(p: VectorSet['provisioning']): string[] {
+  const failures: string[] = [];
+  for (const { name, text, decoded } of p.codes) {
+    try {
+      if (canonicalize(decodeProvisioningCodeV2(text)) !== canonicalize(decoded)) failures.push(`provisioning code: ${name}: decoded`);
+      if (encodeProvisioningCodeV2(decoded) !== text) failures.push(`provisioning code: ${name}: encoded`);
+    } catch (error) {
+      failures.push(`provisioning code: ${name}: threw ${String(error)}`);
+    }
+  }
+  for (const { name, text, error } of p.refusals) {
+    try {
+      decodeProvisioningCodeV2(text);
+      failures.push(`provisioning code: ${name}: decoded`);
+    } catch (thrown) {
+      if (!(thrown instanceof TypeError) || thrown.message !== error) failures.push(`provisioning code: ${name}: expected ${error}, got ${String(thrown)}`);
+    }
+  }
   return failures;
 }
 
