@@ -15,6 +15,8 @@ import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { EventPayload, ProjectRecord, SessionDigest } from '@shared/ipc/schema';
+import type { OrgRows, RemoteRow } from '@shared/ipc/schema/org';
+import { addressOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import type { NeedsYouRow } from '../attention/derive';
 import { orderProjects, sortSessions, type SidebarSort } from '../overview/derive';
@@ -52,9 +54,18 @@ export interface SessionsState {
   // machine by is forgotten; its records, projects, digests and statuses stay shown until its next snapshot replaces them.
   resetMachine(machine: MachineRef): void;
   setLoaded(): void; // the local machine's snapshot is in
+  // P5 O8 M2 (Interfaces §G): other machines' sessions as their signed listings say them, by address, and the RL2
+  // roster the rows cover (those machines take no record snapshot). Replaced whole by each `org.rows` answer or event.
+  listed: ReadonlyMap<AppSessionId, ListedSession>;
+  listedMachines: ReadonlySet<MachineRef>;
+  applyRows(rows: OrgRows): void;
   addUnstarted(appSessionId: AppSessionId, entry: UnstartedSession): void;
   dropUnstarted(appSessionId: AppSessionId): void;
 }
+
+// P5 O8 M2: a listed session is a `RemoteRow` with its address, never a `SessionRecord`: a listing has no directory, model,
+// mode, holder or lineage, and a record built from one would plant made-up values in their readers.
+export type ListedSession = RemoteRow & { appId: AppSessionId };
 
 export interface UnstartedSession {
   projectId: ProjectId | null;
@@ -162,6 +173,16 @@ export function createSessionsStore() {
       projectsVersion: 0,
       digestsVersion: 0,
       indexing: null,
+      listed: new Map(),
+      listedMachines: new Set(),
+      applyRows({ machines, rows }) {
+        const listed = new Map<AppSessionId, ListedSession>();
+        for (const row of rows) {
+          const appId = addressOf(row.machine, row.session as AppSessionId);
+          listed.set(appId, { ...row, appId });
+        }
+        set({ listed, listedMachines: new Set(machines) });
+      },
       applyList({ sessions, revision }, machine) {
         const p = partition(machine);
         const records = new Map(get().records);

@@ -32,7 +32,9 @@ import { openExternalUrl } from './open-external'; // P5 O8 M1: the Access login
 import { createOrgSession } from './org/org-session'; // P5 O8 M1
 import { excludeFromBackup } from './device/backup-exclusion';
 import { createRegistryFeed } from './org/registry-feed'; // P5 O8 M1
-import { registerOrgHandlers } from './org/register'; // P5 O8 M1
+import { registerOrgHandlers, registerRowsHandler } from './org/register'; // P5 O8 M1; M2: org.rows
+import { orgFiles } from './org/files'; // P5 O8 M1
+import { createRemoteRows } from './org/rows'; // P5 O8 M2
 // C3 end
 // C4 start (emit comes with C3's imports)
 import { startIndexAttention } from './index/attention-service';
@@ -301,9 +303,12 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
           log: (line) => console.log(line),
         })
       : null;
+  // One handle on <userData>/org/ for the session and M2's rows cache; excluded from Time Machine at its creation
+  const orgDir = orgFiles({ userData: app.getPath('userData'), excludeFromBackup: (path) => excludeFromBackup(path), log: (line) => console.log(`[org] ${line}`) });
   const orgSession =
     devOrg === null
       ? createOrgSession({
+          files: orgDir,
           userData: app.getPath('userData'),
           build: `${MAIN_BUILD.version}+${MAIN_BUILD.commit}`,
           packaged: app.isPackaged,
@@ -361,6 +366,29 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
   // P5 O6 M5: each project's org project, derived again in the background at every start (OX3)
   void index.refreshOrgProjects({ machine: local });
   registerIndexHandlers(index);
+  // P5 O8 M2: other machines' sessions, from their signed listings through the feed, verified against the held org state,
+  // for the machines of O7's RL2 roster (src/main/org/rows.ts); org.rows and org.rows.changed carry them to the sidebar
+  let roster: readonly MachineRef[] = [];
+  const rosterListeners = new Set<() => void>();
+  machines.onRemote((refs) => {
+    roster = refs;
+    for (const listener of [...rosterListeners]) listener();
+  });
+  const remoteRows = createRemoteRows({
+    session,
+    feed: orgFeed,
+    roster: () => roster,
+    onRoster: (listener) => {
+      rosterListeners.add(listener);
+      return () => void rosterListeners.delete(listener);
+    },
+    localProjects: async () => index.projects.listWithRemoved(),
+    onLocalProjects: (listener) => onEmitted('session.projects.changed', () => listener()),
+    files: orgDir,
+    emit: (rows) => void emit('org.rows.changed', rows),
+    log: (line) => console.log(`[org-rows] ${line}`),
+  });
+  registerRowsHandler({ register: registerMainHandler, rows: remoteRows });
   const indexSource = new IndexSessionSource(index, hosts, { emit });
   // C3's attention service, as C3 started it, with `Index.attention` as its store (C3's file store only when this app
   // cannot read the index); an archive the index records retires the session's attention.
@@ -957,9 +985,11 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
   // is ever stopped.
   machines.serve();
   shutdown.add('machines', () => machines.stop());
-  // P5 O8 M1: the feed and the session stop; nothing holds the quit (every org file is written whole and renamed)
+  // P5 O8 M1: the feed and the session stop (every org file is written whole and renamed); M2: the rows' last change is
+  // written to their cache first, so a relaunch keeps every mark
   shutdown.add('org', () => {
     orgFeed.close();
     void orgSession?.close();
+    return remoteRows.close();
   });
 }
