@@ -17,7 +17,7 @@ import { newDoc, type Doc } from '@artifacts/yjs';
 import { ARTIFACT_KINDS } from '@shared/artifacts/entity';
 import type { CommandName, MawsBridge } from '@shared/ipc/schema';
 import type { LibraryRow } from '@shared/ipc/schema/library';
-import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
 import { connectLibrary, resetLibrary } from '../../library/store';
 import { resetMarkupSurfaces } from '../../markup/surface';
 import { EditorHostScopeContext, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';
@@ -92,7 +92,7 @@ beforeEach(() => {
   resetEditorHosts();
   resetMarkupSurfaces();
   resetArtifactEditors();
-  useSettings.setState({ state: { settings: SETTINGS_DEFAULTS_V18, resolvedTheme: 'light' } });
+  useSettings.setState({ state: { settings: SETTINGS_DEFAULTS_V19, resolvedTheme: 'light' } });
   librarySystems = [HARBOR, HOUSE, OWNERS];
   // main's library, which the binding reads for the live systems; read again at each `library.changed`
   main = installFakeMain((name: CommandName) => (name === 'library.list' ? ok({ rows: librarySystems.map(row), counts }) : ok(null)));
@@ -161,7 +161,7 @@ function pageAccent(): string | null {
 }
 const drawn = (accent: string, what: string) => until(() => page() !== null && pageAccent() === accent, what);
 const setDefaults = (artifacts: { defaultDesignSystem: string | null; spaceDesignSystems: Record<string, string>; commentsView: 'expand' | 'minimize' | 'hide' /* P4-B1 */ }) =>
-  act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V18, artifacts }, resolvedTheme: 'light' } }));
+  act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V19, artifacts }, resolvedTheme: 'light' } }));
 
 describe('B’s document page under D’s scope', () => {
   it('draws the page in its own system’s tokens, the page element inside D’s scope', async () => {

@@ -33,6 +33,17 @@ async function code(machine?: string): Promise<{ text: string; k: Uint8Array; to
   const roots = [await keyId(a1.stepUp!.pub)];
   return { text: encodeEnrollmentCodeV2({ hub: hub.url, token, roots, recoveryPub: recovery.pub, k: base64urlEncode(k), ...(machine === undefined ? {} : { machine }) }), k, token };
 }
+/**
+ * A phase-1 machine's credential: a token redeemed with no key posted after it (a DX2 machine's, or a cutover undone);
+ * with `replacing`, a token that re-enrolls that active machine in place.
+ */
+async function redeemV1(machine: string, replacing?: string): Promise<V2Machine['credentials']> {
+  const token = replacing === undefined ? await enrollmentToken(hub, ADMIN) : (await code(replacing)).token;
+  const response = await hub.fetchAs(null, '/machine/enroll', { body: { token, machine } });
+  expect(response.status).toBe(200);
+  const redeemed = (await response.json()) as { client_id: string; client_secret: string };
+  return { clientId: redeemed.client_id, clientSecret: redeemed.client_secret };
+}
 const keyOf = (enrollment: string, who = ADMIN) => hub.fetchAs(who, `/api/enrollments/${enrollment}/key`);
 const machines = async () => ((await (await hub.fetchAs(ADMIN, '/api/machines')).json()) as { machines: MachineView[] }).machines;
 const machineNamed = async (name: string) => (await machines()).find((m) => m.name === name);
@@ -122,15 +133,17 @@ describe('re-enrolling an active machine in place', () => {
     expect(await refusal(await hub.fetchAs(MEMBER, '/api/enrollments', { body: {} }))).toMatch(/^403 /);
   });
 
-  it('replaces the credential: the old one is refused, the machine keeps its name, ref and project, and posts its new key', async () => {
-    const first = await enrollV2((await code()).text, 'studio');
+  // The machine re-enrolled from DX2, as a cutover does (a v2 credential opens no stream of its own, O14 M5a).
+  it('replaces the credential: the old one is refused, the machine keeps its name and project, and posts its new key', async () => {
+    const credentials = await redeemV1('studio');
+    const first = { credentials, enrollment: (await machineNamed('studio'))!.enrollment };
     const old = new MachineClient(hub, 'studio', first.credentials);
     await old.connect();
     // Another name under a token that names `studio` is refused, and binds nothing.
     const c = await code('studio');
     const wrong = await hub.fetchAs(null, '/machine/enroll', { body: { token: c.token, machine: 'elsewhere' } });
     expect(await refusal(wrong)).toBe('409 token-used');
-    const again = await enrollV2(c.text, undefined, { ref: first.ref });
+    const again = await enrollV2(c.text);
     expect(again.name).toBe('studio');
     expect(again.enrollment).not.toBe(first.enrollment);
     // The old service token was deleted by the new one's mint: Access refuses it before the hub would.
@@ -140,12 +153,12 @@ describe('re-enrolling an active machine in place', () => {
     await waitFor(() => (old.isEnded ? true : undefined));
     // Its new credential's first request confirmed it again.
     expect((await machineNamed('studio'))?.confirmed).not.toBeNull();
-    expect(await machineNamed('studio')).toMatchObject({ state: 'active', enrollment: again.enrollment, key: { ref: first.ref, pub: again.key.pub, listed: false } });
+    expect(await machineNamed('studio')).toMatchObject({ state: 'active', enrollment: again.enrollment, key: { ref: again.ref, pub: again.key.pub, listed: false } });
     await old.close();
   });
 
   it('is refused until the old stream is fenced, and changes nothing until then', async () => {
-    const first = await enrollV2((await code()).text, 'fenced');
+    const first = { credentials: await redeemV1('fenced') };
     const old = new MachineClient(hub, 'fenced', first.credentials);
     await old.connect();
     const c = await code('fenced');
@@ -156,7 +169,7 @@ describe('re-enrolling an active machine in place', () => {
     expect((await machineFetch(hub.url, first.credentials, '/machine/enrollment')).status).toBe(200);
     expect(old.isEnded).toBe(false);
     // Redeemed again, the fence is placed and the re-enrollment goes through.
-    const again = await enrollV2(c.text, undefined, { ref: first.ref });
+    const again = await enrollV2(c.text);
     await waitFor(() => (old.isEnded ? true : undefined));
     expect(await machineNamed('fenced')).toMatchObject({ state: 'active', enrollment: again.enrollment });
     await old.close();
@@ -219,5 +232,44 @@ describe('a machine resolved before its revocation or re-enrollment', () => {
     }
     // The machine as it stands passes the check and meets the body's.
     expect(await hub.asMember('storeCert', (await machineNamed('moved'))!, {})).toEqual(expect.objectContaining({ ok: false, status: 400 }));
+  });
+});
+
+// O14 M5a: a credential whose enrollment posted a machine key is a v2 credential, and never opens DX2 (RL Decision
+// Log 29: from a re-enrollment's redemption until its listing it is the name's only credential).
+describe('DX2 under a v2 credential', () => {
+  const stream = (credentials: V2Machine['credentials']) => machineFetch(hub.url, credentials, '/machine/stream');
+  const frames = (credentials: V2Machine['credentials']) => machineFetch(hub.url, credentials, '/machine/frames', { t: 'events', project: 'p', events: [] });
+
+  it('is refused both routes once its key is posted, before the Machine object', async () => {
+    const machine = await enrollV2((await code()).text, 'dx2-born-v2');
+    expect(await refusal(await stream(machine.credentials))).toBe('403 v2-credential');
+    expect(await refusal(await frames(machine.credentials))).toBe('403 v2-credential');
+  });
+
+  it('refuses a re-enrolled machine that posted its key, its old credential refused too; a v1 re-enrollment is admitted again', async () => {
+    const v1 = await redeemV1('dx2-moving');
+    const old = new MachineClient(hub, 'dx2-moving', v1);
+    await old.connect();
+    const moved = await enrollV2((await code('dx2-moving')).text);
+    await waitFor(() => (old.isEnded ? true : undefined));
+    expect(await refusal(await stream(moved.credentials))).toBe('403 v2-credential');
+    expect(await refusal(await frames(moved.credentials))).toBe('403 v2-credential');
+    expect(await refusal(await stream(v1))).toBe('401 access');
+    await old.close();
+    // The cutover undone: the same name re-enrolled by a token redeemed with no key post is DX2's again.
+    const back = await redeemV1('dx2-moving', 'dx2-moving');
+    const again = new MachineClient(hub, 'dx2-moving', back);
+    await again.connect();
+    expect((await frames(back)).status).not.toBe(403);
+    await again.close();
+  });
+
+  it('leaves a machine that never posted a key on DX2', async () => {
+    const v1 = await redeemV1('dx2-never-v2');
+    const client = new MachineClient(hub, 'dx2-never-v2', v1);
+    await client.connect();
+    expect((await frames(v1)).status).not.toBe(403);
+    await client.close();
   });
 });

@@ -194,3 +194,30 @@ describe('delegated enrollment', () => {
     expect(view.certificates.certs.map((c) => c.body.machine)).toContain(services.machine.ref);
   });
 });
+
+// O14 M5a: a machine enrolled under a head that already retires the DX1 org key never held it in use, so the tombstone
+// its first sync writes keeps no bytes, whatever legacy.json held before (as a provisioning code's would).
+describe('an enrollment under a retired legacy key', () => {
+  it('writes a tombstone without bytes at its first sync, asks sminos for nothing, and codes nothing', async () => {
+    await member.amend('the legacy org key retired', (s) => void (s.legacyRetired = { version: s.version, at: s.issued }));
+    const services = fakeServices();
+    const legacyPath = join(services.machine.stateDir, 'legacy.json');
+    const key = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
+    fs.writeFileSync(legacyPath, JSON.stringify({ org: 'local', key }), { mode: 0o600 });
+    const { endpoint } = await endpointOn({ services });
+    try {
+      const issued = await member.code();
+      const enrolling = endpoint.cli('enroll', ['--name', 'retired-born', '--wait', '30', '--json'], issued.code);
+      await member.awaitPosted(issued.enrollment);
+      await member.list(issued.enrollment, issued.k);
+      expect((await enrolling).code).toBe(0);
+      const at = (await member.head()).state.legacyRetired!.at;
+      expect(JSON.parse(fs.readFileSync(legacyPath, 'utf8'))).toEqual({ org: 'local', retired: at });
+      expect(mode(legacyPath)).toBe(0o600);
+      expect(endpoint.status()).toMatchObject({ enrollment: 'org-listed', legacyKey: false, legacyRetired: true });
+      expect((await endpoint.cli('legacy', ['status'])).out).toBe('purged');
+    } finally {
+      await member.amend('the legacy org key back in use', (s) => void delete s.legacyRetired);
+    }
+  });
+});

@@ -128,7 +128,7 @@ afterEach(async () => {
   }
 });
 
-type Options = { offers?: Offers; gradeOf?(name: string): GradeSpec | undefined; registry?: WireRegistry; settingsMode?: string; executors?: false };
+type Options = { offers?: Offers; gradeOf?(name: string): GradeSpec | undefined; registry?: WireRegistry; settingsMode?: string };
 
 async function start(options: Options = {}): Promise<Fixture> {
   const services = fakeServices();
@@ -173,7 +173,7 @@ async function start(options: Options = {}): Promise<Fixture> {
   });
   await endpoint.start(services);
   // M7 and M8 stand in: an authorized request is echoed back with what authorization resolved.
-  if (options.executors !== false) endpoint.gate.setExecutors({
+  endpoint.gate.setExecutors({
     call: (channel, m, decision) => void channel.send({ t: 'result', id: m.id, ok: true, output: { target: decision.target ?? null } }),
     act: (channel, m) => void channel.send({ t: 'ack', opId: m.action.opId, state: 'accepted' }),
     sub: (channel, m) => void channel.send({ t: 'subbed', sub: m.sub, mode: 'snapshot', epoch: 'e1', seq: 0 }),
@@ -301,17 +301,6 @@ describe('only what is offered crosses', () => {
     expect(await send(a, a.device.action({ machine: f.ref, action: 'sminos.steer', args: { text: 'hi' } }))).toBe('no-target');
     // The action's own session must be the one its input names.
     expect(await send(a, { ...laneB(f, a, 'session.interrupt', 'app-own', { cancelEngineQueued: false }), session: 'app-shared' })).toBe('malformed');
-  });
-});
-
-describe('until M8 sets its executors', () => {
-  it('answers an authorized call or sub `unavailable`, and a refused one with its reason (acts are M7’s: actions.test.ts)', async () => {
-    const f = await start({ executors: false });
-    const a = await open(f, a1, A);
-    expect(await call(a, 'session.status', { appSessionId: 'app-own' })).toBe('unavailable');
-    expect(await subscribe(a, { lane: 'B', id: 'app-own' })).toBe('unavailable');
-    const c = await open(f, c1, C);
-    expect(await call(c, 'session.status', { appSessionId: 'app-private' })).toBe('grade');
   });
 });
 

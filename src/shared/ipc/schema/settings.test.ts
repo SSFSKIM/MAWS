@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { SETTINGS_DEFAULTS_V18 } from '../../settings/defaults';
+import { SETTINGS_DEFAULTS_V19 } from '../../settings/defaults';
 import { commands, SettingsPatchSchema, SettingsSchema } from './settings'; // C12: commands
 import { LaunchProfileSchema, userScopeProfile } from '../../engine/launch-profile'; // P4-A2
 
-const base = SETTINGS_DEFAULTS_V18;
+const base = SETTINGS_DEFAULTS_V19;
 const issueCodes = (value: unknown) => {
   const parsed = SettingsSchema.safeParse(value);
   return parsed.success ? [] : parsed.error.issues.map((issue) => issue.code);
@@ -33,8 +33,9 @@ describe('settings keymap is a partial record', () => {
     expect(issueCodes({ ...base, keymap: { 'tab.close': 'Cmd J!' } })).toEqual(['invalid_format']);
   });
 
-  it('is version 18 and carries the notification policy (P4-R8: the app MCP servers; P4-A2: the launch profile)', () => {
-    expect(base.version).toBe(18);
+  it('is version 19 and carries the notification policy (P4-R8: the app MCP servers; P4-A2: the launch profile)', () => {
+    expect(base.version).toBe(19);
+    expect(SettingsSchema.safeParse({ ...base, version: 18 }).success).toBe(false); // the launch profile's style removed
     expect(SettingsSchema.safeParse({ ...base, version: 17 }).success).toBe(false);
     expect(SettingsSchema.safeParse({ ...base, sessions: undefined }).success).toBe(false);
     expect(SettingsSchema.safeParse({ ...base, notifications: { ...base.notifications, kinds: { ...base.notifications.kinds, turnFinished: undefined } } }).success).toBe(false);
@@ -68,7 +69,7 @@ describe('settings engine.launchProfile', () => {
 
   it('takes the user scope and plugin ids as the engine keys them, name@marketplace', () => {
     expect(LaunchProfileSchema.safeParse(userScopeProfile()).success).toBe(true);
-    expect(LaunchProfileSchema.safeParse(profile(['cc-plugin-diff@builtin', 'ptc@ptc-tool'], { outputStyle: 'maws', hooks: 'none' })).success).toBe(true);
+    expect(LaunchProfileSchema.safeParse(profile(['cc-plugin-diff@builtin', 'ptc@ptc-tool'], { hooks: 'none' })).success).toBe(true);
     expect(SettingsSchema.safeParse({ ...base, engine: { ...base.engine, launchProfile: profile(['cc-plugin-diff@builtin']) } }).success).toBe(true);
     expect(SettingsPatchSchema.safeParse({ engine: { launchProfile: profile(['cc-plugin-diff@builtin']) } }).success).toBe(true);
   });
@@ -84,9 +85,9 @@ describe('settings engine.launchProfile', () => {
   it('refuses an unknown key at either level, a value outside the two switches, and a partial profile', () => {
     expect(LaunchProfileSchema.safeParse({ ...userScopeProfile(), effort: 'high' }).success).toBe(false); // P4 Decision Log 8: no effort
     expect(LaunchProfileSchema.safeParse({ ...userScopeProfile(), plugins: { off: [], on: ['ptc@ptc-tool'] } }).success).toBe(false);
-    expect(LaunchProfileSchema.safeParse({ ...userScopeProfile(), outputStyle: 'default' }).success).toBe(false);
+    for (const outputStyle of ['user', 'maws', 'default']) expect(LaunchProfileSchema.safeParse({ ...userScopeProfile(), outputStyle }).success, outputStyle).toBe(false); // version 19: no style
     expect(LaunchProfileSchema.safeParse({ ...userScopeProfile(), hooks: 'project' }).success).toBe(false);
-    expect(LaunchProfileSchema.safeParse({ plugins: { off: [] }, outputStyle: 'user' }).success).toBe(false);
+    expect(LaunchProfileSchema.safeParse({ plugins: { off: [] } }).success).toBe(false);
     expect(SettingsPatchSchema.safeParse({ engine: { launchProfile: { hooks: 'none' } } }).success).toBe(false); // replaced whole, never by field
   });
 

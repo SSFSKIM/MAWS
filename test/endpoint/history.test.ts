@@ -190,6 +190,12 @@ describe('mawsd endpoint attest-history --check', () => {
       const attest = await mini.cli('attest-history', ['--former', 'oldmini', '--project', P1]);
       expect(attest.code).toBe(1);
       expect(attest.out).toMatch(/legacy/);
+      // At a head that retired the key (M5a's tombstone, its bytes kept) nothing is attested; the check still runs.
+      mini.parts!.state.setLegacy({ ...held, retired: new Date().toISOString() });
+      const retired = await mini.cli('attest-history', ['--former', 'oldmini', '--project', P1]);
+      expect(retired.code).toBe(1);
+      expect(retired.out).toMatch(/retired the legacy org key/);
+      expect((await mini.cli('attest-history', ['--check', '--former', 'oldmini', '--project', P1])).code).toBe(0);
     } finally {
       mini.parts!.state.setLegacy(held);
     }

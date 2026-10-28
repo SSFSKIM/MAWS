@@ -6,7 +6,8 @@
 //   revoke <file|->        a signed org state (or {states, transitions}) delivered by hand, adopted as from the hub
 //   grant <file|->         a signed grant, kept by the ledger's rule (grants.ts)
 //   policy [--read-only on|off] [--ceiling MODE|settings] [--json]
-//   legacy retire          deletes the DX1 org key (O14's final brief)
+//   legacy status          the DX1 org key: held, retired (bytes kept), purged or none (O14 M5a: the org state retires it)
+//   legacy purge           deletes the retired key's bytes for good, the stale copies' too (O14's final brief)
 //   attest-history [--former NAME]… [--project ID] [--check] [--json]
 //                          signs the machine's phase-1 history, or checks what the hub keeps of it (history.ts, O14 M4)
 //
@@ -26,7 +27,7 @@ export const EXIT = { done: 0, failed: 1, notHere: 2, notRunning: 3, notListed: 
 type Out = { code: number; out: string };
 
 const USAGE = `usage: mawsd endpoint enroll [--name N] [--replace] [--wait [s]] [--json] | keys [--json] | status [--json]
-                     | revoke <file|-> | grant <file|-> | policy [--read-only on|off] [--ceiling MODE|settings] | legacy retire
+                     | revoke <file|-> | grant <file|-> | policy [--read-only on|off] [--ceiling MODE|settings] | legacy status | legacy purge
                      | attest-history [--former NAME]… [--project ID] [--check] [--json]`;
 /** `--wait` with no number waits this long (O2 M6). */
 const DEFAULT_WAIT_S = 300;
@@ -176,20 +177,33 @@ function policy(endpoint: Endpoint, args: readonly string[]): Out {
   return { code: EXIT.done, out: values.json ? JSON.stringify(current) : describePolicy(current) };
 }
 
+/**
+ * The DX1 org key, which the org state retires (`legacyRetired`, O14 M5a) and every endpoint follows: `status` says
+ * what is held of it, `purge` deletes the retired key's bytes for good (O14's final brief). O10's `legacy retire` is
+ * gone: a local deletion was undone at the next RL10 hello, and a machine enrolled later never learned of it.
+ */
 function legacy(endpoint: Endpoint, args: readonly string[]): Out {
   const { positionals } = parse(args, {}, 1);
-  if (positionals[0] !== 'retire') return { code: EXIT.failed, out: USAGE };
-  const { state } = endpoint.parts!;
-  if (!state.legacy) return { code: EXIT.done, out: 'no legacy org key is held' };
-  state.removeLegacy();
-  return { code: EXIT.done, out: 'the legacy org key is deleted: events go out v2-only from now on' };
+  const key = endpoint.rl10.legacy;
+  if (positionals[0] === 'retire') {
+    return { code: EXIT.failed, out: 'the org state retires the legacy org key now (`deployment admin keys retire`); every endpoint follows its head. `legacy purge` deletes the bytes after.' };
+  }
+  if (positionals[0] === 'status') {
+    const { status, stale } = key.status();
+    const copies = stale > 0 && status !== 'retired (bytes kept)' ? ` (${stale} cop${stale === 1 ? 'y' : 'ies'} of an earlier enrollment's under stale-<time>/, which \`legacy purge\` deletes)` : '';
+    return { code: EXIT.done, out: `${status}${copies}` };
+  }
+  if (positionals[0] !== 'purge') return { code: EXIT.failed, out: USAGE };
+  const deleted = key.purge();
+  if (deleted.length === 0) return { code: EXIT.done, out: 'nothing to purge: no bytes of the legacy org key are held' };
+  return { code: EXIT.done, out: `purged: the legacy org key's bytes are deleted from ${deleted.join(', ')}` };
 }
 
 /**
  * `attest-history`: the machine's DX1 writers under its current name and each `--former` one, attested (exit 0 when
  * every one is attested or was already, 1 when any is skipped or refused), or with `--check` judged against what the hub
- * keeps (exit 0 only when every one is `verified`). Attesting needs the legacy key, to check each event's code; the check
- * needs none. Both need the machine listed in the org state, whose key signs.
+ * keeps (exit 0 only when every one is `verified`). Attesting needs the legacy key in use, to check each event's code:
+ * at a head that retired it (O14 M5a's tombstone, its bytes kept) nothing is attested; the check needs no key. Both need the machine listed in the org state, whose key signs.
  */
 async function attestHistoryCommand(endpoint: Endpoint, args: readonly string[]): Promise<Out> {
   const { values } = parse(args, { former: { type: 'string', multiple: true }, project: { type: 'string' }, check: { type: 'boolean' }, json: { type: 'boolean' } });
@@ -202,6 +216,9 @@ async function attestHistoryCommand(endpoint: Endpoint, args: readonly string[])
   const names = historyNames(enrollment.name, values.former ?? []);
   if (typeof names === 'string') throw new UsageError(`${names}\n${USAGE}`);
   const legacy = endpoint.rl10.legacy;
+  if (!values.check && legacy.retired) {
+    return { code: EXIT.failed, out: 'the org state has retired the legacy org key: no event’s code is checked under it, so nothing is attested (attest before `keys retire`, or after its `--undo`; `--check` needs no key)' };
+  }
   if (!values.check && !legacy.held) return { code: EXIT.failed, out: 'no legacy org key is held: no event’s code can be checked, so nothing is attested (`--check` needs none)' };
   const ctx = {
     deps: endpoint.deps,

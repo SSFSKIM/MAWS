@@ -14,7 +14,10 @@ export type EndpointStatus = {
   channels: { relayed: number; direct: number };
   rl10: { connected: boolean };
   listener: { bound: boolean };
+  /** The DX1 org key is in use (dual-coding). */
   legacyKey: boolean;
+  /** The org state retired it (O14 M5a): `legacy.json` is its tombstone. */
+  legacyRetired: boolean;
   refusing?: string;
   /** The operation ledgers closed (op-ledger.ts): why, as its word; each answers every remote action `unavailable` until
    * its process restarts (mawsd for the endpoint's, the engine host for its own). Absent while both answer. */
@@ -47,6 +50,7 @@ export function endpointStatus(state: EndpointState | null, headHash: string | n
     rl10: { ...links.rl10 },
     listener: { ...links.listener },
     legacyKey: state?.legacy ?? false,
+    legacyRetired: state?.legacyRetired ?? false,
     ...(refusing === undefined ? {} : { refusing }),
     ...(Object.keys(opLedgers).length === 0 ? {} : { opLedgers }),
   };

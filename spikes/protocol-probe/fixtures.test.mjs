@@ -665,6 +665,9 @@ test('p4 R8 scratch: a server that needs auth reads needs-auth with no tools, an
 // of the owner's user-scope plugins and probe-owned user hooks. Stub arms against the scripted API (each launch's `step`
 // notes: every request with the alias and the user hooks' markers placed), two relay arms, and the home's manifest.
 const launchProfile=await import('../../src/shared/engine/launch-profile.ts');
+// Settings version 19 (the owner's ruling of 2026-10-28) took the profile's output style away; these fixtures recorded
+// version 17's profile, so they read it as it was then: today's keys, and MAWS's style (`maws`) as the engine's `default`.
+const recordedProfile2p=({outputStyle,...profile})=>{assert.ok(outputStyle==='user'||outputStyle==='maws',String(outputStyle));return {profile,settings:{...launchProfile.profileSettings(profile),...(outputStyle==='maws'?{outputStyle:'default'}:{})}};};
 const A2P_STUB=['plain','plugins','style','hooks-group','hooks','hooks-resume','hooks-fork','hooks-user-kept','hooks-user','full'].map(s=>'p4-a2p-stub-'+s);
 const A2P_RELAY=['p4-a2p-relay-plain','p4-a2p-relay-full'];
 const A2P_PLUGINS=['designer@designer','doperpowers@doperpowers','eli5@claude-community'];
@@ -674,7 +677,7 @@ const flat2p=name=>main2p(name).flat();
 const responses2p=name=>one2p(name,'hooks').frames.filter(h=>h.subtype==='hook_response').map(h=>h.hook_name);
 const noneOf2p=name=>one2p(name,'provenance').profile.hooks==='none';
 // MAWS's `--settings` and `--append-system-prompt` for a lane-on launch under a profile, from MAWS's own modules
-const flagFor2p=prov=>({dialogExpiry:'never',...launchProfile.profileSettings(prov.profile),env:{[ownerContract.NATIVE_TO_HUMAN_ENV]:String(recorded7.version)},...(prov.group?{hooks:{SessionStart:[recorded7.group()]}}:{})});
+const flagFor2p=prov=>({dialogExpiry:'never',...recordedProfile2p(prov.profile).settings,env:{[ownerContract.NATIVE_TO_HUMAN_ENV]:String(recorded7.version)},...(prov.group?{hooks:{SessionStart:[recorded7.group()]}}:{})});
 const appendFor2p=prov=>(prov.profile.outputStyle==='maws'?recorded7.contract:recorded7.supplement)+(prov.profile.hooks==='none'&&prov.group===false?`\n\n${recorded7.alias}`:'');
 const argAfter2p=(args,flag)=>{const i=args.indexOf(flag);return i<0?null:args[i+1];};
 for(const name of [...A2P_STUB,...A2P_RELAY])test('p4/'+name+' is ordered NDJSON with correlated replies, P4-A2P provenance on the installed engine, MAWS\'s launch under its profile, the owner file unchanged and no secret',()=>{
@@ -682,7 +685,7 @@ for(const name of [...A2P_STUB,...A2P_RELAY])test('p4/'+name+' is ordered NDJSON
  const rows=text.trim().split('\n').map(JSON.parse);
  assert.equal(pass3Open(rows).size,0);
  const prov=meta4(rows,'provenance')[0];assert.equal(prov.child,'P4-A2P');assert.equal(prov.pin,'246354256c404b41189c6cbeb67a7c1157a9f0e6');assert.equal(prov.engineVersion,'2.1.306');
- assert.deepEqual(launchProfile.LaunchProfileSchema.parse(prov.profile),prov.profile);assert.deepEqual(prov.profileSettings,launchProfile.profileSettings(prov.profile));
+ const recorded=recordedProfile2p(prov.profile);assert.deepEqual(launchProfile.LaunchProfileSchema.parse(recorded.profile),recorded.profile);assert.deepEqual(prov.profileSettings,recorded.settings);
  assert.deepEqual(prov.flagSettings,flagFor2p(prov));assert.equal(prov.append,appendFor2p(prov));
  const args=meta4(rows,'spawn')[0].args;
  assert.ok(!args.includes('--model')); // the model and the effort come from the user scope

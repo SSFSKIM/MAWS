@@ -5,7 +5,7 @@
 // layer's Decision Log 24): either alone means unenrolled, and it is moved aside to `stale-<time>/` with the enrollment
 // record whose key it was, which `stale` reports once.
 import * as fs from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   isCertificates,
   isGrant,
@@ -103,8 +103,16 @@ const NotifiedSchema = z.record(
 /** A web-cards passkey's last signature counter, by credential id (M5): an assertion's must rise where it keeps one. */
 const WebAuthnSchema = z.record(z.string().min(1), z.number().int().nonnegative());
 
-/** The DX1 org key sminos handed over on RL10 (M6), for outbound dual-coding and legacy events, until O14's final brief. */
-const LegacySchema = z.strictObject({ org: z.string().min(1), key: z.string().regex(/^[A-Za-z0-9_-]{43}$/) });
+/**
+ * The DX1 org key sminos handed over on RL10 (M6), for outbound dual-coding and legacy events; or, once the org state
+ * retires it (O14 M5a), its tombstone: `retired` the head's mark's time, `key` the bytes kept until `legacy purge`, so a
+ * head that drops the mark makes them the key again (rl10/legacy.ts).
+ */
+const LegacyKeyText = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
+const LegacySchema = z.union([
+  z.strictObject({ org: z.string().min(1), key: LegacyKeyText }),
+  z.strictObject({ org: z.string().min(1), retired: Iso, key: LegacyKeyText.optional() }),
+]);
 
 /**
  * The host events (sminos's to-human store) taken from RL10 (M6), as each writer's highest `seq` per project: sminos
@@ -240,12 +248,20 @@ export class EndpointState {
   get policy(): PolicyFile | null {
     return this.#policy;
   }
-  /** Whether the DX1 org key is held. */
+  /** Whether the DX1 org key is held in use (a tombstone's kept bytes are not). */
   get legacy(): boolean {
-    return this.#legacy !== null;
+    return this.#legacy !== null && !('retired' in this.#legacy);
   }
-  /** The DX1 org key and its org, or null (never logged, never sent on). */
-  get legacyKey(): LegacyFile | null {
+  /** Whether `legacy.json` is the tombstone of a key the org state retired (O14 M5a). */
+  get legacyRetired(): boolean {
+    return this.#legacy !== null && 'retired' in this.#legacy;
+  }
+  /** The DX1 org key in use and its org, or null: none held, or its tombstone (never logged, never sent on). */
+  get legacyKey(): { org: string; key: string } | null {
+    return this.#legacy === null || 'retired' in this.#legacy ? null : this.#legacy;
+  }
+  /** `legacy.json` as held: the key and its org, its tombstone, or null (never logged, never sent on). */
+  get legacyFile(): LegacyFile | null {
     return this.#legacy;
   }
   /** Each project's host writers' highest taken `seq`; empty when none was taken. */
@@ -305,11 +321,43 @@ export class EndpointState {
     this.#write(FILES.hosts, HostsSchema.parse(value));
     this.#hosts = value;
   }
-  /** Deletes the DX1 org key (`mawsd endpoint legacy retire`, O14's final brief). */
+  /** Deletes `legacy.json` (a key of another org than the enrollment's; a tombstone without bytes the head no longer marks). */
   removeLegacy(): void {
     this.#refuseWrites();
     removeFile(this.dir, FILES.legacy);
     this.#legacy = null;
+  }
+
+  /** The `legacy.json` copies an earlier enrollment left under `stale-<time>/`, by their name under the state directory. */
+  staleLegacyCopies(): string[] {
+    const copies: string[] = [];
+    for (const entry of fs.readdirSync(this.dir, { withFileTypes: true })) {
+      // A symlink is no directory of this module's: passed over, never followed.
+      if (!entry.isDirectory() || !entry.name.startsWith('stale-')) continue;
+      const name = join(entry.name, FILES.legacy);
+      if (fs.lstatSync(join(this.dir, name), { throwIfNoEntry: false })?.isFile()) copies.push(name);
+    }
+    return copies.sort();
+  }
+
+  /**
+   * Deletes the key's bytes (`mawsd endpoint legacy purge`, O14's final brief; irreversible): from the tombstone, which
+   * stays as the mark, and every stale copy, which goes whole. Answers what it deleted, by name under the directory.
+   */
+  purgeLegacy(): string[] {
+    this.#refuseWrites();
+    const deleted: string[] = [];
+    const held = this.#legacy;
+    if (held !== null && 'retired' in held && held.key !== undefined) {
+      this.setLegacy({ org: held.org, retired: held.retired });
+      deleted.push(FILES.legacy);
+    }
+    for (const name of this.staleLegacyCopies()) {
+      fs.unlinkSync(join(this.dir, name));
+      syncDirectory(join(this.dir, dirname(name)));
+      deleted.push(name);
+    }
+    return deleted;
   }
 
   /**

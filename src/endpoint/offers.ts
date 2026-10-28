@@ -45,7 +45,7 @@ export const OFFERS: Offers = {
     'session.status': laneB('call'),
     'session.events': laneB('call'),
     'session.pendingRequest': laneB('call'),
-    'session.pendingItems': laneB('call'), // M8's command: `ungraded` until it is declared
+    'session.pendingItems': laneB('call'),
     'session.queue.list': laneB('call'),
     'session.catalog': laneB('call'),
     // Lane A's bridge-fenced RPCs and spawn, through RL10 (M6); `resume`, `retire` and `stop` run outside the bridge's

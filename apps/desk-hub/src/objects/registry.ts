@@ -71,6 +71,7 @@ import {
   type ProvisioningKeyRecord,
   type ProvisioningKeyRevoked,
   type PushSubscriptionRecord,
+  type OrgKeysPurged,
   type Redeemed,
   type WrappedKeyRemoved,
   type CertConflict,
@@ -88,16 +89,22 @@ import { relayObjectName } from './relay';
 import { checkRequest, ProvisioningKeys, type KeyRow } from './provisioning-keys';
 import { lacksMethod, RETRY_ATTEMPTS, RETRY_BASE_MS, RETRY_CAP_MS, retryDelay } from './retry';
 
-export type Principal = { kind: 'member'; org: OrgRecord; member: MemberRecord } | { kind: 'machine'; org: OrgRecord; machine: MachineRecord };
+/**
+ * Who a request is. A machine's `v2` is set when its enrollment posted a machine key (`POST /machine/key`, which
+ * `mawsd enroll` sends in the run that redeems): its credential is v2's, and never opens DX2 (O14 M5a).
+ */
+export type Principal = { kind: 'member'; org: OrgRecord; member: MemberRecord } | { kind: 'machine'; org: OrgRecord; machine: MachineRecord; v2?: true };
 
 /** An answer for the Worker to send: a value, or an HTTP status with DX7's `{error, message?}`. */
 export type Result<T> = { ok: true; value: T } | { ok: false; status: number; error: string; message?: string; conflicts?: CertConflict[] };
 
 const ok = <T>(value: T): Result<T> => ({ ok: true, value });
 const fail = (status: number, error: string, message?: string): Result<never> => ({ ok: false, status, error, ...(message ? { message } : {}) });
+/** The org key's copies after their purge (O14 M5a): the key is retired, and the hub holds none. */
+const retiredKey = (status: 409 | 410) => fail(status, 'retired', 'the org key is retired and its wrapped copies are purged: the hub holds none');
 
 const SCHEMA = `
-CREATE TABLE IF NOT EXISTS org (id TEXT PRIMARY KEY, name TEXT NOT NULL, created TEXT NOT NULL, key_check TEXT, key_auth TEXT);
+CREATE TABLE IF NOT EXISTS org (id TEXT PRIMARY KEY, name TEXT NOT NULL, created TEXT NOT NULL, key_check TEXT, key_auth TEXT, key_purged TEXT);
 CREATE TABLE IF NOT EXISTS members (
   id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, role TEXT NOT NULL, created TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS machines (
@@ -127,7 +134,8 @@ CREATE TABLE IF NOT EXISTS machine_states (
 
 /** Columns added to tables a registry stored before them, with what an older row reads as. */
 const ADDED_COLUMNS: Record<string, string[]> = {
-  org: ['key_check TEXT', 'key_auth TEXT'],
+  // `key_purged`: the wrapped copies' purge on the head's word (O14 M5a), `OrgKeysPurged['purged']` as JSON; null before.
+  org: ['key_check TEXT', 'key_auth TEXT', 'key_purged TEXT'],
   machines: ['online INTEGER NOT NULL DEFAULT 0', 'seen TEXT'],
   // The provisioning key an enrollment was made through, and which of its uses it was (O11 M4); null for a one-time
   // token's. `replaces`: the active machine a re-enrollment's token names (O11 M4).
@@ -256,7 +264,7 @@ export class Registry extends DurableObject<Env> {
         this.sql.exec('UPDATE machines SET confirmed = ? WHERE name = ?', confirmed, machine.name);
         this.sql.exec("UPDATE enrollments SET state = 'confirmed' WHERE id = ? AND state = 'pending'", machine.enrollment);
       });
-      return { kind: 'machine', org, machine: { ...machine, confirmed } };
+      return this.machinePrincipal(org, { ...machine, confirmed });
     }
     if (machine.state === 'pending') {
       const enrollment = this.enrollmentById(machine.enrollment);
@@ -273,9 +281,14 @@ export class Registry extends DurableObject<Env> {
         this.toGrid({ t: 'summary', project: this.summaryOf(this.project(project)!) });
       }
       this.directoryChanged();
-      return { kind: 'machine', org, machine: { ...machine, state: 'active', confirmed } };
+      return this.machinePrincipal(org, { ...machine, state: 'active', confirmed });
     }
-    return { kind: 'machine', org, machine };
+    return this.machinePrincipal(org, machine);
+  }
+
+  /** A machine principal, marked `v2` when its enrollment holds a posted machine key (`Principal`). */
+  private machinePrincipal(org: OrgRecord, machine: MachineRecord): Principal {
+    return { kind: 'machine', org, machine, ...(this.records.machineKey(machine.enrollment) === null ? {} : { v2: true as const }) };
   }
 
   /** A one-time token for an admin to build an enrollment code from; the hub keeps only its hash. With `machine`, an
@@ -609,9 +622,11 @@ export class Registry extends DurableObject<Env> {
   /** Every machine, a v2 one with the key it posted and whether the head lists that key for its ref (O11 M4). */
   machines(): MachineView[] {
     return this.sql
-      .exec<MachineRecord>(`SELECT ${MACHINE_COLUMNS} FROM machines ORDER BY name`)
+      .exec<MachineRecord & { online: number; seen: string | null }>(`SELECT ${MACHINE_COLUMNS}, online, seen FROM machines ORDER BY name`)
       .toArray()
-      .map((machine) => {
+      .map(({ online, seen, ...record }) => {
+        // DX2 presence, as the directory's `org` frame carries it (O14 M5a: a cutover's check reads it here).
+        const machine: MachineView = { ...record, online: online === 1, seen };
         const key = this.records.machineKey(machine.enrollment);
         if (!key) return machine;
         const listed = this.sql.exec('SELECT 1 FROM state_machines WHERE ref = ? AND pub = ?', key.ref, key.pub).toArray().length > 0;
@@ -1541,6 +1556,37 @@ export class Registry extends DurableObject<Env> {
     return { key_check: this.ensureOrg().key_check, keys: this.keys.list() };
   }
 
+  /** `orgKeys`, or `410 retired` once the copies are purged (O14 M5a). */
+  wrappedOrgKeys(): Result<{ key_check: string | null; keys: StoredKey[] }> {
+    return this.keyPurged() === null ? ok(this.orgKeys()) : retiredKey(410);
+  }
+
+  /**
+   * Deletes every wrapped copy and the org's key check and auth, on the head's word (`legacyRetired`), and records the
+   * purge; the record again once done. One synchronous step, so no state accepted meanwhile can drop the retirement
+   * between the check and the deletion (OrgChain's commit refuses that drop once the record stands).
+   */
+  purgeOrgKeys(member: MemberRecord): Result<OrgKeysPurged> {
+    const admin = this.current(member, 'admin');
+    if (!admin.ok) return admin;
+    const held = this.keyPurged();
+    if (held !== null) return ok({ purged: held });
+    const head = this.chain.head();
+    if (head?.state.legacyRetired === undefined) return fail(409, 'not-retired', 'the org state does not retire the org key (legacyRetired): retire it in the state first');
+    const purged = { version: head.state.version, at: iso(Date.now()) };
+    this.ctx.storage.transactionSync(() => {
+      this.keys.purge();
+      this.sql.exec('UPDATE org SET key_check = NULL, key_auth = NULL, key_purged = ?', JSON.stringify(purged));
+    });
+    return ok({ purged });
+  }
+
+  /** The purge's record, or null while the copies are held. */
+  private keyPurged(): OrgKeysPurged['purged'] | null {
+    const row = this.sql.exec<{ key_purged: string | null }>('SELECT key_purged FROM org').toArray()[0];
+    return row?.key_purged ? (JSON.parse(row.key_purged) as OrgKeysPurged['purged']) : null;
+  }
+
   /** Adds a wrapped key; the first sets the org's `key_check` and `key_auth` in the same step as its insert. */
   async addOrgKey(member: MemberRecord, body: unknown): Promise<Result<{ key: StoredKey }>> {
     const authHash = await this.authHash(body);
@@ -1548,6 +1594,7 @@ export class Registry extends DurableObject<Env> {
     // state can demote the admin between the check and the insert.
     const admin = this.current(member, 'admin');
     if (!admin.ok) return admin;
+    if (this.keyPurged() !== null) return retiredKey(409);
     const org = this.ensureOrg();
     const keyAuth = this.keyAuth();
     const setOrg = (check: string, auth: string) => this.sql.exec('UPDATE org SET key_check = ?, key_auth = ?', check, auth);
@@ -1559,6 +1606,7 @@ export class Registry extends DurableObject<Env> {
     const authHash = await this.authHash(body);
     const admin = this.current(member, 'admin');
     if (!admin.ok) return admin;
+    if (this.keyPurged() !== null) return retiredKey(410);
     const removed = this.keys.remove(id, this.keyAuth(), authHash);
     return removed.ok ? ok({ removed: removed.value }) : fail(removed.status, removed.error, removed.message);
   }

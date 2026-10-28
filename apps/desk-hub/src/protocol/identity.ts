@@ -51,6 +51,14 @@ export type WrappedKeyRecord = {
  * `auth` whose digest that is, or is refused `not-key-holder` before anything else about the records is told.
  */
 export const ORG_KEYS_PATH = '/api/org/keys';
+/**
+ * `POST /api/org/keys/purge` (an admin; O14 M5a): once the org state's head carries `legacyRetired`, every wrapped copy
+ * and the org's key check and auth are deleted, answering `{purged}` (the head's version it acted under, and when), the
+ * same record again after; `409 not-retired` before. From then `GET /api/org/keys` and `DELETE /api/org/keys/<id>` answer
+ * `410 retired`, `POST /api/org/keys` `409 retired`, and a successor that drops `legacyRetired` is refused `409 key-purged`.
+ */
+export const ORG_KEYS_PURGE_PATH = '/api/org/keys/purge';
+export type OrgKeysPurged = { purged: { version: number; at: string } };
 export const KEY_CHECK_DOMAIN = 'smns-desk-key-check-v1';
 export const KEY_AUTH_DOMAIN = 'smns-desk-key-auth-v1';
 export type WrappedKeys = { key_check: string | null; keys: WrappedKeyRecord[] };
@@ -506,7 +514,12 @@ export const ENROLLMENT_KEY_PATH = /^\/api\/enrollments\/([0-9a-f]{32})\/key$/;
 export type MachineKeyRequest = { pub: string; ref: string; mac: string };
 export type EnrollmentKey = { enrollment: string; machine: string; pub: string; ref: string; mac: string; posted: string };
 /** `GET /api/machines` answers each machine with its v2 key once it posted one, and whether the head lists it. */
-export type MachineView = MachineRecord & { key?: { ref: string; pub: string; listed: boolean } };
+/**
+ * A machine as `GET /api/machines` lists it: its record, its DX2 presence as the directory's `org` frame carries it
+ * (`online`, `seen`: optional, a hub before O14 M5a sends neither; an RL1 machine's presence reaches the relay alone, P5
+ * DL 37), and a v2 machine's posted key with whether the head lists it.
+ */
+export type MachineView = MachineRecord & { online?: boolean; seen?: string | null; key?: { ref: string; pub: string; listed: boolean } };
 
 /**
  * A provisioning key re-issued as an RL5 delegation: the admin's app adds `delegationFor(key, pub, owners)` to a
