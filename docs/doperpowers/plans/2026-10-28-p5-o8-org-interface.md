@@ -52,7 +52,8 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
 - [ ] M4 — The Org page — *advisory; Q1 answered; needs M3 and O11's H1*
 - [ ] M5 — Owners on rows and the People toggle — **executable** (re-planned 2026-10-28; needs M2, landed)
   - [x] (2026-10-28) Built on `p5-o8-m5` at b78445447, one task: `memberName`, `OrgRows.members` and `member`, the `sidebar.people` key and `stores/people.ts`, `ownersLabel` and `RowTitle`, `projectList`'s ownership-first filing, the People hover action and menu item, owners in the hover cards. The focused suites pass locally, each file alone.
-  - [ ] Class 1a on the merge with master, reviewer-medium, and the final gate (the full hosted set).
+  - [x] (2026-10-28) Class 1a at the merge with master (df6c2826a, run 40786128124) found one typecheck error in `derive.test.ts`, fixed at 50a1ab992. reviewer-medium found one P2, the early toggle's replay (Decision Log, M5's build, item 11), fixed at 854178726.
+  - [ ] The final gate (class 1a and the full hosted set) on the merge with master.
 - [ ] M5b — Add owner — *later; needs O10's `record.owners` offer row and O12's sminos executor*
 - [ ] M6 — Visibility, shares and per-member reader state — *advisory; taste (Q4); needs O3*
 - [ ] M7 — The project channel — *advisory; taste (Q5); needs O7 M2 and M6, O3, O12's to-human store; its people's words wait for O14's last machine*
@@ -1581,7 +1582,7 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   8. The People hover action is the first of the four buttons, so Resume, Remove and "+" keep their places at the right edge. The menu's item carries a trailing check, as the menu has no indicator gutter.
   9. The hover card lists owners only where the row's label shows (not on a session you own alone); "you" carries your email, a former member none.
   10. `usePeople.load()` runs once from `App.tsx`'s mount, not the Sidebar, which keeps IPC out of every Sidebar test.
-  11. A toggle made before the stored set is read is applied over it when the read lands, and nothing is written before. Rejected: `summary.ts`'s "toggle wins", which would replace the whole stored set with one early toggle.
+  11. A toggle made before the stored set is read records the state the person saw it reach. When the read lands, each touched key is set to that state and every other stored key is kept, and nothing is written before. Rejected: `summary.ts`'s "toggle wins", which would replace the whole stored set with one early toggle; and replaying early toggles as flips (the first build), which reviewer-medium showed turns a stored-on project off after a "Show" clicked during the read, and saves that (fixed at 854178726).
   Debt, not built: `sidebar.people` keys are neither moved when an address key becomes an org key (`layout-model.ts`'s `rekeySets` does so for `expandedProjects`) nor pruned; the toggle reads off until set again. Others' records still reach Needs you and "Mark all read"; attention across machines is O7 M6's and O3's.
   Date/Author: 2026-10-28, O8's executor.
 
