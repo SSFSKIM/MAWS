@@ -132,7 +132,7 @@ export function TranscriptPane({ controller, state, variant, actions, list, owne
           {state.retryIn != null ? ` Trying again in ${Math.round(state.retryIn / 1000)} s.` : ''}
         </p>
       )}
-      <Transcript source={state.source} variant={variant} actions={actions} tail={tail} handle={list} className="min-h-0 flex-1" ownerLane={ownerLane} renderRequest={renderRequest} atRest={atRest} />
+      <Transcript source={state.source} variant={variant} actions={actions} tail={tail} handle={list} className="min-h-0 flex-1" ownerLane={ownerLane} renderRequest={renderRequest} atRest={atRest} browserActivity={false} />
     </>
   );
 }

@@ -19,6 +19,7 @@ import type { WidgetsHarnessApi, WidgetsPane } from '../src/renderer/src/harness
 import type { WidgetBackend } from '../test/support/widget-backend';
 import { ownerShapedState, scratchMarketplace, stubCalls, writePluginCliStub, type PluginCliStub, type StubPlugin, type StubState } from '../test/support/plugin-cli-stub';
 import { KILL_GRACE_MS } from '../src/engine-host/plugins/runner';
+import { addressed } from './support/address';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
@@ -777,7 +778,7 @@ test.describe('interactive', () => {
   test('Session info renders the six sections and derives the lane from the status and the model', async ({ backend }) => {
     const { page, app } = backend;
     await openPage(page, { appSessionId: READY, mode: 'interactive' });
-    const info = page.locator(`[data-session-info="${READY}"]`);
+    const info = page.locator(`[data-session-info="${await addressed(page, READY)}"]`);
     for (const title of ['Engine', 'Model', 'Gateway', 'Permissions', 'Context, usage, cost', 'Hooks and MCP']) await expect(info.getByRole('region', { name: title })).toBeVisible();
     await expect(valueOf(info, 'Route')).toHaveText('Gateway · ClaudeUsage relay · http://127.0.0.1:8641Switch to Direct…'); // W2: with its switch
     await expect(valueOf(info, 'Context')).toHaveText('21,508 of 200,000 · 11% · autocompact at 167,000');
@@ -819,7 +820,7 @@ test.describe('interactive', () => {
     const { page } = backend;
     await openPage(page, { appSessionId: READY, mode: 'interactive' });
     await onAstraWithWork(backend);
-    const route = valueOf(page.locator(`[data-session-info="${READY}"]`), 'Route'); // W2: Session info's Route row
+    const route = valueOf(page.locator(`[data-session-info="${await addressed(page, READY)}"]`), 'Route'); // W2: Session info's Route row
     await expect(route).toContainText('Gateway · ClaudeUsage relay');
     await route.getByRole('button', { name: 'Switch to Direct…' }).click();
 
@@ -852,7 +853,7 @@ test.describe('interactive', () => {
     const { page, app } = backend;
     await openPage(page, { appSessionId: READY, mode: 'interactive' });
     await onAstraWithWork(backend);
-    await valueOf(page.locator(`[data-session-info="${READY}"]`), 'Route').getByRole('button', { name: 'Switch to Direct…' }).click(); // W2: Session info's
+    await valueOf(page.locator(`[data-session-info="${await addressed(page, READY)}"]`), 'Route').getByRole('button', { name: 'Switch to Direct…' }).click(); // W2: Session info's
     const sheet = page.getByRole('dialog', { name: 'Switch this session to Direct?' });
     await sheet.getByRole('radio', { name: /^Sonnet 5/ }).click();
     // a third task between the confirm and the stop: it starts as the switch re-reads the status after the answer

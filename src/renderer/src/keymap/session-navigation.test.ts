@@ -1,17 +1,21 @@
 import { describe, expect, it } from 'vitest';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { visibleSessionStep } from './session-navigation';
+
+// P5 O6 M2: the rows render the page's ids, addresses
+const [a, b, c] = [at('a'), at('b'), at('c')];
 
 describe('session stepping follows rendered sidebar rows', () => {
   it('walks Needs-you first, skips duplicate rows, and wraps across projects', () => {
-    document.body.innerHTML = `<div data-testid="sidebar-tree"><button data-menu="session:b"></button><div data-menu="project:p"></div><div data-menu="session:a"></div><div data-menu="session:b"></div><div data-menu="session:c"></div></div>`;
-    expect(visibleSessionStep('b', 1)).toBe('a');
-    expect(visibleSessionStep('a', -1)).toBe('b');
-    expect(visibleSessionStep('c', 1)).toBe('b');
-    expect(visibleSessionStep(null, -1)).toBe('c');
+    document.body.innerHTML = `<div data-testid="sidebar-tree"><button data-menu="session:${b}"></button><div data-menu="project:${at('p')}"></div><div data-menu="session:${a}"></div><div data-menu="session:${b}"></div><div data-menu="session:${c}"></div></div>`;
+    expect(visibleSessionStep(b, 1)).toBe(a);
+    expect(visibleSessionStep(a, -1)).toBe(b);
+    expect(visibleSessionStep(c, 1)).toBe(b);
+    expect(visibleSessionStep(null, -1)).toBe(c);
   });
   it('does not walk sessions outside the sidebar or invent a row when none is shown', () => {
-    document.body.innerHTML = '<div data-menu="session:outside"></div><div data-testid="sidebar-tree"></div>';
-    expect(visibleSessionStep('outside', 1)).toBeNull();
+    document.body.innerHTML = `<div data-menu="session:${at('outside')}"></div><div data-testid="sidebar-tree"></div>`;
+    expect(visibleSessionStep(at('outside'), 1)).toBeNull();
   });
 });
 
@@ -26,9 +30,9 @@ describe('session stepping follows rendered sidebar rows', () => {
   const off = registerShellActions();
   try {
     const layout = () => useLayout.getState();
-    layout().openTab({ kind: 'file', path: '/work/readme.md', line: null, appSessionId: null });
+    layout().openTab({ kind: 'file', path: '/work/readme.md', line: null, appSessionId: null, machine: TEST_MACHINE });
     layout().closeTab(activeTab(layout().main)!.id);
-    layout().openSession('closed-session' as never);
+    layout().openSession(at('closed-session') as never);
     layout().closeTab(activeTab(layout().main)!.id);
     expect(ACTIONS['tab.reopen'].chord).toBe('Cmd+Shift+T');
     runAction('tab.reopen');

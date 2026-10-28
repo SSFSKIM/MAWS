@@ -12,6 +12,7 @@ import { dirname, join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
+import { addressed } from './support/address';
 import { invoke, value } from './support/c7-replay';
 import { journalSpend, ownerFileCheck, scratchRepo, stateOf } from './support/c12-prerun';
 import { ENGINE_BIN, ENGINE_VERSION } from '../test/support/engine-pin';
@@ -96,7 +97,7 @@ const engines = () => sh('/bin/ps', ['-axo', 'pid=,ppid=,etime=,stat=,command=']
 async function send(page: Page, id: string, text: string): Promise<void> {
   const before = (await statusOrNull(page, id))?.lastEventSeq ?? 0;
   await (await rowOf(page, id)).click();
-  await expect(main(page).locator(`[data-composer="${id}"]`)).toBeVisible({ timeout: 20_000 });
+  await expect(main(page).locator(`[data-composer="${await addressed(page, id)}"]`)).toBeVisible({ timeout: 20_000 });
   await main(page).getByRole('textbox', { name: 'Message' }).click();
   await page.keyboard.insertText(text);
   await page.keyboard.press('Enter');

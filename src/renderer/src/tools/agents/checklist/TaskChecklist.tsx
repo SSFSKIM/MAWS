@@ -1,7 +1,8 @@
 // The session's task checklist (C8b execution document, M3; Interfaces *Background work's data*): read-only, the list a
-// TaskCreate writes, through the agent-work client's `tasks` as a TanStack query keyed `['fs.tasks', listId]` (never
-// `useCommand`, which would reach the real bridge for a harness session; `connectAgentWorkEvents` invalidates the key on
-// `fs.tasksChanged`). A live session's list is C3's `taskListId`, a disk-only one's the record's engine session id,
+// TaskCreate writes, through the agent-work client's `tasks` as a TanStack query keyed `['fs.tasks', listId, machine]`
+// (never `useCommand`, which would reach the real bridge for a harness session; `connectAgentWorkEvents` invalidates the
+// `['fs.tasks', listId]` prefix on `fs.tasksChanged`). P5 O6 M4: a list id names no machine, so the list is read on the
+// session's machine (`fs.tasks` is graded machine-wide, which alone would read this machine's list for any session). A live session's list is C3's `taskListId`, a disk-only one's the record's engine session id,
 // labelled `session list`; with neither, the section says the list is not known yet rather than guessing one.
 // E7 (P-20): the read and the list body are shared with the Tasks panel (`useChecklist`, `ChecklistBody`), so the glance
 // and the panel are two surfaces over one list; this section's heading gains `Open`, which opens the panel. Its own
@@ -16,6 +17,7 @@ import { agentWorkClient } from '../client';
 import { BACKGROUND_COPY, TASKS_COPY } from '../copy';
 import { checklistOf, listIdFor, type ListIdAnswer } from '../model/task-list';
 import { Group } from '../background/Group';
+import { machineFor } from '../../../ipc/machine';
 
 export interface Checklist {
   answer: ListIdAnswer;
@@ -27,7 +29,8 @@ export interface Checklist {
 export function useChecklist(status: EngineSessionStatus | null, session: SessionRecord | null): Checklist {
   const answer = listIdFor(status, session);
   const listId = answer.listId;
-  const tasks = useQuery({ queryKey: ['fs.tasks', listId], queryFn: () => agentWorkClient().tasks(listId!), enabled: listId !== null });
+  const machine = machineFor(session?.appId ?? status?.appSessionId ?? null);
+  const tasks = useQuery({ queryKey: ['fs.tasks', listId, machine], queryFn: () => agentWorkClient().tasks(machine, listId!), enabled: listId !== null });
   const list = listId !== null && tasks.data ? checklistOf(tasks.data) : null;
   const label = answer.listId !== null && answer.label === 'session list' ? BACKGROUND_COPY.sessionList : null;
   return { answer, list, error: tasks.error, label };

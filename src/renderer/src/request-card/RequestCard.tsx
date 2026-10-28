@@ -47,6 +47,7 @@ import type { CardKeys, Placement } from './variants/types';
 import { displayTitle } from '../sessions/title';
 // P2-C start (2026-10-10)
 import { isOpen } from '@shared/attention/kinds';
+import { bareOf } from '@shared/machine/address';
 import { markIdOf } from '@shared/owner/marks';
 import { openAnchor, ownerAnchorOf, type ItemAnchor } from '../attention/anchor';
 import { markRead } from '../owner/report/answering';
@@ -417,7 +418,7 @@ function MarkRead({ appSessionId, anchor }: { appSessionId: AttentionItem['appSe
   const [failed, setFailed] = useState<string | null>(null);
   const read = async () => {
     setFailed(null);
-    setFailed(await markRead(appSessionId, [markIdOf(appSessionId, 'essential', anchor)]));
+    setFailed(await markRead(appSessionId, [markIdOf(bareOf(appSessionId), 'essential', anchor)])); // P5 O6 M2: main's mark id, on the bare session id
   };
   return (
     <>

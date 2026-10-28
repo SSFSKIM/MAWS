@@ -8,21 +8,21 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName, MawsBridge } from '@shared/ipc/schema';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
+import { at } from '../../../../../test/support/machine';
 import { builder, uuid } from '../../transcript/model/test-events';
 import { useDeliveredReplies, DELIVERY_RETRY_MS } from './delivered';
 
-const CHILD = 'c5555555-5555-4555-8555-000000000121' as AppSessionId;
+// P5 O6 M2: the hook is handed `fake.client` itself, the page's bridge (never `window.maws`), so its ids are addresses
+const CHILD = at('c5555555-5555-4555-8555-000000000121' as AppSessionId);
 let snapshot: SessionEvent[];
 let fake: FakeClient;
 
 beforeEach(() => {
   snapshot = [];
   fake = fakeClient({ 'session.events': () => ({ events: snapshot, lastSeq: snapshot.length, complete: true }) });
-  window.maws = fake.client;
 });
 afterEach(() => {
   cleanup();
-  delete (window as { maws?: MawsBridge }).maws;
   vi.useRealTimers();
 });
 
@@ -75,12 +75,12 @@ describe('useDeliveredReplies', () => {
       let failed = 0;
       return {
         ...fake.client,
-        invoke: ((name: CommandName, input: unknown) => {
+        invoke: ((name: CommandName, input: unknown, ...rest: unknown[]) => {
           if (name === 'session.events' && failed < failures) {
             failed += 1;
             return Promise.resolve({ ok: false, error: { code: 'internal', message: 'down' } });
           }
-          return fake.client.invoke(name as never, input as never);
+          return (fake.client.invoke as unknown as (...a: unknown[]) => Promise<never>)(name, input, ...rest);
         }) as MawsBridge['invoke'],
       };
     }
@@ -130,8 +130,8 @@ describe('useDeliveredReplies', () => {
       let down = false; // the events read fails while set
       const client = spied({
         ...fake.client,
-        invoke: ((name: CommandName, input: unknown) =>
-          name === 'session.events' && down ? Promise.resolve({ ok: false, error: { code: 'internal', message: 'down' } }) : fake.client.invoke(name as never, input as never)) as MawsBridge['invoke'],
+        invoke: ((name: CommandName, input: unknown, ...rest: unknown[]) =>
+          name === 'session.events' && down ? Promise.resolve({ ok: false, error: { code: 'internal', message: 'down' } }) : (fake.client.invoke as unknown as (...a: unknown[]) => Promise<never>)(name, input, ...rest)) as MawsBridge['invoke'],
       });
       const subscriptions = () => fake.calls.filter((c) => c === 'on session.eventBatch').length;
       const { result } = renderHook(() => useDeliveredReplies(CHILD, client));

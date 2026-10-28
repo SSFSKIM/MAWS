@@ -4,21 +4,34 @@
 // document, D6). The presenter's resume line is left out there, since the card's Reply sits under it.
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, expect, it } from 'vitest';
+import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { status } from '../../../../../test/support/builders';
 import { fakeClient } from '../../../../../test/support/fake-client';
+import { at } from '../../../../../test/support/machine';
 import { resetSurfaceRegistry } from '../../engine-surface/registry';
 import { useSessions } from '../../stores/sessions';
 import { useTranscriptStore } from '../../stores/transcript';
 import { builder } from '../model/test-events';
 import { Disclosures, NO_ACTIONS, TranscriptProvider } from '../view/context';
 import { RowView } from '../view/rows/Row';
-import { storeWith } from '../view/rows/test-support';
+import type { TranscriptSource } from '../source/types';
 
 afterEach(() => {
   cleanup();
   resetSurfaceRegistry();
 });
+
+// P5 O6 M2: a session's store key is its id, an address on the page (rows/test-support's `storeWith` keys bare ids, which
+// the client refuses to send), so these sessions' stores are keyed by addresses.
+let keys = 0;
+async function sessionStoreWith(events: SessionEvent[]) {
+  const key = at(`local-${++keys}`);
+  const source: TranscriptSource = { subscribe: () => () => {}, snapshot: () => Promise.resolve(events) };
+  await useTranscriptStore.getState().attach(key, source);
+  return { key, rows: () => useTranscriptStore.getState().rows(key) };
+}
 
 function Transcript({ storeKey, presentation }: { storeKey: string; presentation?: 'local' }) {
   const rows = useTranscriptStore((s) => s.entries[storeKey].rows);
@@ -36,10 +49,10 @@ async function attachedSession(text: string) {
   b.turn('u');
   b.text('only', 0, text);
   b.end(['u']);
-  const store = await storeWith(b.events);
+  const store = await sessionStoreWith(b.events);
   const id = store.key as AppSessionId;
   const fake = fakeClient();
-  window.maws = fake.client;
+  window.maws = fake.client as unknown as PreloadBridge;
   useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: { clientId: 'maws-main' } }]]) });
   return { store, fake };
 }
@@ -78,9 +91,9 @@ it('forced local: a block with a mark reports local ink, which a surface clear k
   b.turn('v');
   b.text('plain', 0, 'Just text.');
   b.end(['v']);
-  const store = await storeWith(b.events);
+  const store = await sessionStoreWith(b.events);
   const id = store.key as AppSessionId;
-  window.maws = fakeClient().client;
+  window.maws = fakeClient().client as unknown as PreloadBridge;
   useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: { clientId: 'maws-main' } }]]) });
   render(<Transcript storeKey={store.key} presentation="local" />);
   const texts = store.rows().filter((r) => r.kind === 'assistant_text');

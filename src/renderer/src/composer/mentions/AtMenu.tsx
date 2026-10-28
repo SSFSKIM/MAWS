@@ -7,6 +7,8 @@
 // the arrows, so Enter neither sends the half-typed `@token` nor picks a row an older query found.
 import type { Editor, Range } from '@tiptap/core';
 import { useEffect, useMemo, useState } from 'react';
+import { machineOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../../ipc/client';
 import { mentionNode, textNode } from '../editor/doc';
 import { mentionLabel } from '../editor/recall';
@@ -46,7 +48,7 @@ const rootsFor = (cwd: string, additional: readonly string[], query: string) => 
 
 // Files for the query: the session's directory, and in path mode each additional directory (absolute paths); `null`
 // while the search has not answered this query yet.
-function useFiles(cwd: string, additional: readonly string[], query: string): AtItem[] | null {
+function useFiles(machine: MachineRef, cwd: string, additional: readonly string[], query: string): AtItem[] | null {
   const settled = useDebounced(query, 80);
   const [files, setFiles] = useState<{ query: string | null; items: AtItem[] }>({ query: null, items: [] });
   useEffect(() => {
@@ -56,7 +58,7 @@ function useFiles(cwd: string, additional: readonly string[], query: string): At
     const q = pathMode ? settled.replace(/^(~\/?|\.\.\/?|\/)/, '') : settled;
     void Promise.all(
       roots.map(async (root) => {
-        const result = await ipc.invoke('git.lsFiles', { directory: root, query: q, limit: FILE_LIMIT });
+        const result = await ipc.invoke('git.lsFiles', { directory: root, query: q, limit: FILE_LIMIT }, { machine });
         if (!result.ok) return [];
         return result.value.paths.map((path): AtItem => {
           const directory = path.endsWith('/');
@@ -72,7 +74,7 @@ function useFiles(cwd: string, additional: readonly string[], query: string): At
     return () => {
       live = false;
     };
-  }, [cwd, additional, settled]);
+  }, [machine, cwd, additional, settled]);
   if (rootsFor(cwd, additional, query).length === 0) return []; // nowhere to search: known empty at once
   return files.query === query ? files.items : null;
 }
@@ -84,8 +86,8 @@ const GROUPS: { group: AtItem['group']; label: string }[] = [
 ];
 
 export function AtMenu(props: PopupProps) {
-  const { cwd, additionalDirectories, catalog } = props.ctx;
-  const files = useFiles(cwd, additionalDirectories, props.query);
+  const { appSessionId, cwd, additionalDirectories, catalog } = props.ctx;
+  const files = useFiles(machineOf(appSessionId), cwd, additionalDirectories, props.query);
   const others = useMemo(() => atItems(catalog, props.query), [catalog, props.query]);
   const rows = useMemo(() => (files === null ? [SEARCHING, ...others.slice(0, ROW_LIMIT - 1).map(rowOf)] : [...files, ...others].slice(0, ROW_LIMIT).map(rowOf)), [files, others]);
   const { active, setActive, choose } = useListKeys(props, rows);

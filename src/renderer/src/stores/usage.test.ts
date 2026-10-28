@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { SessionRecord } from '@shared/graph/session';
 import type { AccountUsage, UsageSnapshot, UsageWindow } from '@shared/usage/types';
 import { record, status } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { createLayoutStore } from './layout';
 import { createSessionsStore } from './sessions';
 import { connectUsage, createUsageStore, ROUTE_HOLD_MS, windowsFor, type Windows } from './usage';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 
 const w = (percent: number): UsageWindow => ({ percent, resetsAt: '2026-09-29T11:20:00Z', recordedAt: '2026-09-29T07:34:17Z' });
 const windows = (five: number, seven: number): Windows => ({ fiveHour: w(five), sevenDay: w(seven), scoped: [] });
@@ -116,15 +118,16 @@ describe('usage store: connectUsage', () => {
     const usage = createUsageStore();
     const sessions = createSessionsStore();
     const layout = createLayoutStore();
-    sessions.getState().applyList({ sessions: [record('a'), record('b'), record('c', { engineSessionId: null })], revision: 1 });
+    const onPage = (id: string, over: Partial<SessionRecord> = {}) => record(id, { appId: at(id) as AppSessionId, ...over }); // the page holds addresses; the engine ids stay main's
+    sessions.getState().applyList({ sessions: [onPage('a'), onPage('b'), onPage('c', { engineSessionId: null })], revision: 1 }, TEST_MACHINE);
     layout.setState({ hydrated: true });
     return { fake, usage, sessions, layout };
   };
 
   it('subscribes before it asks, and asks with the engine ids of the open session tabs', async () => {
     const { fake, usage, sessions, layout } = setup();
-    layout.getState().openSession('a' as AppSessionId);
-    layout.getState().openSession('c' as AppSessionId, { how: 'tab' });
+    layout.getState().openSession(at('a') as AppSessionId);
+    layout.getState().openSession(at('c') as AppSessionId, { how: 'tab' });
     const off = connectUsage(fake.client, { usage, sessions, layout });
     expect(fake.calls.slice(0, 2)).toEqual(['on settings.usageChanged', 'invoke settings.usage']);
     expect(fake.invoked('settings.usage')).toEqual([{ engineSessionIds: ['eng-a'] }]);
@@ -137,7 +140,7 @@ describe('usage store: connectUsage', () => {
     const { fake, usage, sessions, layout } = setup();
     const off = connectUsage(fake.client, { usage, sessions, layout });
     await fake.reply('settings.usage', SNAP);
-    layout.getState().openSession('b' as AppSessionId);
+    layout.getState().openSession(at('b') as AppSessionId);
     expect(fake.invoked('settings.usage').at(-1)).toEqual({ engineSessionIds: ['eng-b'] });
     await fake.reply('settings.usage', SNAP);
     layout.getState().setSplitRatio(0.4);
@@ -147,7 +150,7 @@ describe('usage store: connectUsage', () => {
 
   it('applies settings.usageChanged at once, keeps its pins beside the held ones, and asks again for the open tabs', async () => {
     const { fake, usage, sessions, layout } = setup();
-    layout.getState().openSession('a' as AppSessionId);
+    layout.getState().openSession(at('a') as AppSessionId);
     const off = connectUsage(fake.client, { usage, sessions, layout });
     await fake.reply('settings.usage', { ...SNAP, pinsFor: { 'eng-a': 'other' } });
     fake.event('settings.usageChanged', { ...SNAP, accounts: [account('drain', windows(60, 63))], pinsFor: {} });

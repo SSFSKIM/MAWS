@@ -7,6 +7,8 @@
 // close) and theme pushes.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EventPayload, HostState, IpcError, MawsBridge, PtyExit, PtyId, PtyInfo } from '@shared/ipc/schema';
+import { machineOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 import type * as z from 'zod';
 import { ipc } from '../ipc/client';
 import { runAction } from '../keymap/actions-runtime';
@@ -186,7 +188,8 @@ export class TerminalRegistry {
   private theme: TerminalTheme | null = null;
   private themeKey = '';
   private fontKey: string | null = null; // C11: the font the renderers were last given, so a root `--font-mono` change reaches them
-  private hostState: HostState | null = null;
+  // Each machine's pty host, as its `pty.hostState` events say (P5 O6: they cross machine links); `host()` is this one's.
+  private readonly hostStates = new Map<MachineRef, HostState>();
   private readonly webglBudget: number;
 
   constructor(private readonly deps: RegistryDeps) {
@@ -200,7 +203,7 @@ export class TerminalRegistry {
     const { ipc: bridge } = this.deps;
     bridge.on('pty.data', (event) => this.receive(event));
     bridge.on('pty.exit', (event) => this.receiveExit(event));
-    bridge.on('pty.hostState', (state) => this.applyHost(state));
+    bridge.on('pty.hostState', (state, from) => this.applyHost(state, from.machine));
     bridge.on('layout.selectAll', () => this.selectAllFocused());
     bridge.on('settings.changed', () => this.refreshTheme());
     // C11 start: C11's appearance.monoFont is a `style` override of `--font-mono` on the root, set after settings.changed
@@ -208,7 +211,7 @@ export class TerminalRegistry {
     new MutationObserver(() => this.refreshFont()).observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
     // C11 end
     void bridge.invoke('pty.hostState', undefined).then((result) => {
-      if (result.ok) this.applyHost(result.value);
+      if (result.ok) this.applyHost(result.value, bridge.localMachine);
     });
     window.addEventListener('pagehide', () => this.checkpointAll());
     window.addEventListener('keydown', (ev) => ev.key === 'Meta' && (this.metaHeld = true), true);
@@ -256,7 +259,7 @@ export class TerminalRegistry {
   }
 
   host(): HostState | null {
-    return this.hostState;
+    return this.hostStates.get(this.deps.ipc.localMachine) ?? null;
   }
 
   subscribe(cb: (infos: TerminalInfo[], host: HostState | null) => void): () => void {
@@ -704,13 +707,16 @@ export class TerminalRegistry {
 
   // --- host, theme, publishing ---------------------------------------------------------------------------------
 
-  // A crashed or restarting host has taken every pty with it: live handles are lost (the supervisor's `pty.exit`
-  // events say the same and find them lost already).
-  private applyHost(state: HostState): void {
-    if (this.hostState && state.revision < this.hostState.revision) return;
-    this.hostState = state;
+  // A crashed or restarting host has taken every pty of its machine with it: that machine's live handles are lost (the
+  // supervisor's `pty.exit` events say the same and find them lost already). A terminal's machine is its owner's, the
+  // session whose address it was opened for. Each machine's revisions are its own host's.
+  private applyHost(state: HostState, machine: MachineRef): void {
+    const known = this.hostStates.get(machine);
+    if (known && state.revision < known.revision) return;
+    this.hostStates.set(machine, state);
     if (state.state === 'crashed' || state.state === 'restarting') {
       for (const entry of this.entries.values()) {
+        if (machineOf(entry.info.appSessionId) !== machine) continue;
         if (entry.info.status === 'running' || entry.info.status === 'starting') this.exited(entry, { exitCode: null, signal: null });
       }
     }
@@ -776,7 +782,8 @@ export class TerminalRegistry {
 
   private publish(): void {
     const infos = this.list();
-    this.listeners.forEach((cb) => cb(infos, this.hostState));
+    const host = this.host();
+    this.listeners.forEach((cb) => cb(infos, host));
   }
 }
 

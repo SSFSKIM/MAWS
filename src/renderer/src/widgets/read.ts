@@ -15,7 +15,7 @@ import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
+import type { CommandInput, CommandOutput, AddressedInvoke } from '@shared/ipc/schema';
 import type { AcquireOutcome } from '@shared/sessions/setup';
 import { ipc } from '../ipc/client';
 import { IpcCommandError, type QueryCommand } from '../ipc/query';
@@ -35,7 +35,7 @@ export type SessionRead = { [N in QueryCommand]: CommandInput<N> extends { appSe
 export const engineReadKey = <N extends SessionRead>(command: N, input: CommandInput<N>) => ['maws', command, input] as const;
 
 async function fetchEngineRead<N extends SessionRead>(command: N, input: CommandInput<N>): Promise<CommandOutput<N>> {
-  const result = await ipc.invoke(command, input);
+  const result = await (ipc.invoke as AddressedInvoke)(command, input); // its session's address names the machine
   if (!result.ok) throw new IpcCommandError(result.error);
   return result.value;
 }

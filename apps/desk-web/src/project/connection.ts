@@ -31,6 +31,7 @@ import {
 import { latency, RETURN_WINDOW_MS } from '../latency/latency';
 import type { LogRecord } from '../log/record';
 import { ProjectLog, type ProjectLogState } from '../log/project-log';
+import { movedToMaws, useCardsBoard } from '../cards/board';
 import { HumanRefused, ProjectClient, type ConnectionStatus } from '../hub/project-client';
 import { Conversation, type RequestRecord } from './conversation';
 
@@ -110,6 +111,8 @@ export class ProjectConnection {
       base: options.base,
       project,
       delay: options.delay,
+      // The freeze's seam (P5 O13): nothing is sent to a machine the device's org state lists as moved to MAWS.
+      movedToMaws: (machine) => movedToMaws(machine, useCardsBoard.getState().machines.map((m) => m.name)),
       handlers: {
         beforeFrame: this.frameCurrent,
         held: () => this.log.held(),
@@ -348,8 +351,8 @@ export class ProjectConnection {
   retryRpc(nonce: string): void {
     const entry = this.conversation.store.getState().rpcs[nonce];
     if (!entry) return;
-    this.conversation.retrying(nonce);
-    this.client.resendRpc(entry.rpc);
+    // One the client withholds (its machine moved to MAWS) stays as it was: nothing was sent.
+    if (this.client.resendRpc(entry.rpc)) this.conversation.retrying(nonce);
   }
 
   // Internals.

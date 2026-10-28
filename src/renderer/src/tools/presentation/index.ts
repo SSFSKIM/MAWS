@@ -2,7 +2,6 @@
 // the ledger's §7 `registerArtifactEditor`): the panel's Artifacts tool mounts `DeckPanel` in its record view and an
 // `artifact` main tab `DeckMain`, each with the state `createState` made for that tab (its replica and deck session,
 // kept until `dispose`), so the X32 header's close guard reads the tab's state while its body is unmounted.
-import type { AppSessionId } from '@shared/graph/ids';
 import { artifactHost } from '../../artifacts';
 import { ipc } from '../../ipc/client';
 import { displayTitle } from '../../sessions/title';
@@ -12,13 +11,14 @@ import { confirm } from '../../sessions/dialogs';
 import { handCommentCardOver } from '../document/comments'; // P4-B2
 import { DeckMain, DeckPanel } from './DeckBody';
 import { DeckTabState, type DeckTabDeps } from './tab-state';
+import { storedSessionOnPage } from '../../ipc/machine';
 
 const windowDeps = (): DeckTabDeps => ({
   host: artifactHost(),
   log: (line) => console.warn(`[presentation] ${line}`),
   ipc, // M8: the deck's history
   sessionTitle: (appSessionId) => {
-    const record = useSessions.getState().records.get(appSessionId as AppSessionId);
+    const record = useSessions.getState().records.get(storedSessionOnPage(appSessionId)); // P5 O6 M2: the artifact holds main's bare id
     return record ? displayTitle(record) : undefined;
   },
   confirmDiscard: (title, about) =>

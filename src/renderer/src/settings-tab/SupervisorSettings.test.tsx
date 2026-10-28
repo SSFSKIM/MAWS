@@ -4,7 +4,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { MawsBridge, Settings } from '@shared/ipc/schema';
+import type { PreloadBridge, Settings } from '@shared/ipc/schema';
 import type { HostStatus, SupervisorStatus } from '@shared/ipc/schema/host';
 import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
 import { useHosts } from '../stores/hosts';
@@ -79,7 +79,7 @@ afterEach(() => {
   useSettings.setState({ state: null });
   useHosts.setState({ supervisor: null, hosts: { engine: null, pty: null } });
   useNotices.setState({ notices: [] });
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 describe('the status line, from host.status', () => {

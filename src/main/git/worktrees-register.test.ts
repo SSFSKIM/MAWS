@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2: the router's local machine
 import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -48,7 +49,7 @@ describe('main answers git.worktree.* through the router', () => {
     const { createGitRunner } = await import('./runner'); // the same module instance as the service's, for its error classes
     const host = new FakeHolderHost();
     registerWorktreeHandlers(new WorktreeService({ git: createGitRunner({ env: repo.serviceEnv(), ...options }), holders: { dispatch: host.dispatch, sessions: { list: () => [] } } }));
-    installRouter({ appUrl: APP_URL });
+    installRouter({ appUrl: APP_URL, local: 'LocalMachineRef0000000' as MachineRef });
   }
   const invoke = (name: string, input?: unknown) => electron.handlers.get(`maws:cmd:${name}`)!(event, input) as Promise<Result>;
 

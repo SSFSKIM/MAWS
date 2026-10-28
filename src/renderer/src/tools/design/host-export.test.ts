@@ -17,7 +17,7 @@ function hostOver(answer: (input: Record<string, unknown>) => unknown) {
     },
     on: () => () => {},
   };
-  return { calls, host: createArtifactHost({ ipc: ipc as unknown as Pick<MawsBridge, 'invoke' | 'on'>, ports: { take: () => new Promise(() => {}) }, log: () => {} }) };
+  return { calls, host: createArtifactHost({ ipc: ipc as unknown as Pick<MawsBridge, 'invoke' | 'on' | 'localMachine'>, ports: { take: () => new Promise(() => {}) }, log: () => {} }) };
 }
 
 describe('the window’s host and a design export', () => {

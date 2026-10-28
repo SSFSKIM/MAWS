@@ -5,7 +5,7 @@ import { useEffect } from 'react';
 import { describeGit, describeGitFile, useGitDiagnostics } from '../stores/git-diagnostics';
 
 export function GitDiagnostics() {
-  const directory = useGitDiagnostics((s) => s.directory);
+  const directory = useGitDiagnostics((s) => s.selected?.directory ?? null);
   const status = useGitDiagnostics((s) => s.status);
   const error = useGitDiagnostics((s) => s.error);
 

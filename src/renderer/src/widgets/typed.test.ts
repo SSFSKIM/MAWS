@@ -5,9 +5,11 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, type WidgetBackend } from '../../../../test/support/widget-backend';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { ipc } from '../ipc/client';
 import { useComposerStore } from '../stores/composer';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
@@ -15,18 +17,21 @@ import { resetModelRequests } from './model';
 import { TYPED_APPLY } from './typed';
 
 const ROOT = join(__dirname, '../../../..');
-const READY = 'app-7412a115' as AppSessionId; // ready, idle, routed, auto, on Sonnet
+// P5 O6 M2: the backend is main (bare ids); the page holds the address
+const READY_ID = 'app-7412a115' as AppSessionId // ready, idle, routed, auto, on Sonnet
+const READY = at(READY_ID);
+const lifted = (status: EngineSessionStatus): EngineSessionStatus => ({ ...status, appSessionId: at(status.appSessionId) });
 let backend: WidgetBackend;
 
 beforeEach(() => {
   backend = createWidgetBackend({ root: ROOT, statuses: loadScenario(join(ROOT, 'test/fixtures/shell/nine-sessions.json')).engine });
   window.maws = backend.bridge();
   // the sessions store follows the backend's statuses, as connectShell does in the app
-  useSessions.setState({ engine: new Map([[READY, backend.status(READY)]]) });
-  window.maws.on('session.status', (event) => useSessions.getState().applyStatus(event));
+  useSessions.setState({ engine: new Map([[READY, lifted(backend.status(READY_ID))]]) });
+  ipc.on('session.status', (event) => useSessions.getState().applyStatus(event, TEST_MACHINE));
 });
 afterEach(() => {
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: unknown }).maws;
   useSessions.setState({ engine: new Map() });
   useComposerStore.setState({ models: new Map() });
   useNotices.setState({ notices: [] });
@@ -36,13 +41,13 @@ afterEach(() => {
 const controls = (command: string) => backend.calls.filter((c) => c.command === command).map((c) => c.input);
 const toasts = () => useNotices.getState().notices.filter((n) => n.kind === 'toast').map((n) => [n.level, n.text]);
 const toastSoon = () => expect.poll(toasts);
-const setStatus = (patch: Partial<EngineSessionStatus>) => useSessions.setState({ engine: new Map([[READY, backend.emitStatus(READY, patch)]]) });
+const setStatus = (patch: Partial<EngineSessionStatus>) => useSessions.setState({ engine: new Map([[READY, lifted(backend.emitStatus(READY_ID, patch))]]) });
 
 describe('model', () => {
   it('/model opus applies set_model and toasts the widget’s words', async () => {
     expect(await TYPED_APPLY.model!(READY, 'opus')).toBe(true);
     await toastSoon().toEqual([['info', 'Model · Opus 5.5 (1M context) · set · the next init frame confirms it']]);
-    expect(controls('session.setModel')).toEqual([{ appSessionId: READY, model: 'opus' }]);
+    expect(controls('session.setModel')).toEqual([{ appSessionId: READY_ID, model: 'opus' }]);
   });
 
   it('opens instead for an unknown name, a gateway model in auto (its local-lane note first), or no ready process', async () => {
@@ -93,7 +98,7 @@ describe('effort', () => {
       ['info', 'Effort · high · set · the next init frame confirms it'],
       ['info', "Effort · the model's default · set · the next init frame confirms it"],
     ]);
-    expect(controls('session.setEffort')).toEqual([{ appSessionId: READY, effort: 'high' }, { appSessionId: READY, effort: null }]);
+    expect(controls('session.setEffort')).toEqual([{ appSessionId: READY_ID, effort: 'high' }, { appSessionId: READY_ID, effort: null }]);
   });
 
   it('opens instead for a level that is not one', async () => {
@@ -103,7 +108,7 @@ describe('effort', () => {
 
   it('a rejected invoke toasts the transport words', async () => {
     useComposerStore.setState({ models: new Map([[READY, []]]) }); // the catalogue held, so the one invoke is the control's
-    window.maws = { ...window.maws, invoke: async () => ({ ok: false, error: { code: 'timeout', message: 'late' } }) } as unknown as MawsBridge;
+    window.maws = { ...window.maws, invoke: async () => ({ ok: false, error: { code: 'timeout', message: 'late' } }) } as unknown as PreloadBridge;
     expect(await TYPED_APPLY.effort!(READY, 'low')).toBe(true);
     await toastSoon().toEqual([['warning', 'The engine did not answer · showing the last value it reported']]);
   });
@@ -113,7 +118,7 @@ describe('permissions', () => {
   it('/permissions acceptEdits applies set_permission_mode and toasts the mode', async () => {
     expect(await TYPED_APPLY.permissions!(READY, 'acceptEdits')).toBe(true);
     await toastSoon().toEqual([['info', 'Permission mode · Accept edits']]);
-    expect(controls('session.setPermissionMode')).toEqual([{ appSessionId: READY, mode: 'acceptEdits' }]);
+    expect(controls('session.setPermissionMode')).toEqual([{ appSessionId: READY_ID, mode: 'acceptEdits' }]);
   });
 
   // W3: Haiku's live row omits `supportsAutoMode` (reads.jsonl seq 3), which the gate now reads as no auto, so the widget
@@ -136,7 +141,7 @@ describe('fast', () => {
     setStatus({ model: { requested: 'opus', resolved: 'claude-opus-5-5[1m]' } });
     expect(await TYPED_APPLY.fast!(READY, 'off')).toBe(true);
     await toastSoon().toEqual([['info', 'Fast mode · off · set · the next init frame confirms it']]);
-    expect(controls('session.applyFlagSettings')).toEqual([{ appSessionId: READY, settings: { fastMode: false } }]);
+    expect(controls('session.applyFlagSettings')).toEqual([{ appSessionId: READY_ID, settings: { fastMode: false } }]);
   });
 
   it('opens instead for /fast on (its lane warning first) and on a model without fast mode', async () => {

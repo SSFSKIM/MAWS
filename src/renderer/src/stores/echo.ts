@@ -6,9 +6,10 @@
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
+import { addressOf } from '@shared/machine/address';
 import { ipc } from '../ipc/client';
 
-export const DIAGNOSTICS_SESSION = 'diagnostics' as AppSessionId;
+export const DIAGNOSTICS_SESSION = addressOf(ipc.localMachine, 'diagnostics' as AppSessionId); // P5 O6 M2: the local machine's
 let runs = 0;
 
 export const ECHO_MARKER = 'MAWS_ECHO_OK';

@@ -21,6 +21,7 @@ import { cleanupTargetAt, confirm, removeWorktreeAction } from './dialogs';
 import { holderWords } from './holder-words';
 import { returnMessage } from './message-return';
 import { isStarting, startNoticeId, useSetup, type HeldMessage } from './store'; // P2-A: startNoticeId; P2-F: HeldMessage
+import { machineOf } from '@shared/machine/address';
 
 export type HookResult = { ok: true } | { ok: false; error: string };
 export type WorktreeResource = NonNullable<SetupResources['worktree']>;
@@ -222,7 +223,7 @@ export async function resolveWorktree(appSessionId: AppSessionId, resolution: 'd
   const { intent, worktree } = result.value;
   useSetup.getState().setIntent(intent);
   if (resolution === 'keep' && worktree.state === 'kept') {
-    const target = cleanupTargetAt(worktree, repositoryOf(intent));
+    const target = cleanupTargetAt(machineOf(intent.appSessionId), worktree, repositoryOf(intent));
     toast({ level: 'info', text: `Worktree ${basename(worktree.path)} kept as this session’s location`, actions: [removeWorktreeAction(target)], dismissible: true });
   }
   return worktree;
@@ -303,6 +304,6 @@ export async function beforeCloseUnstarted(appSessionId: AppSessionId): Promise<
   }
   // no record names this checkout, so the notice is its way into the cleanup
   const leftover = result.value.leftover?.worktree;
-  if (leftover) toast({ level: 'info', text: `Worktree ${leftover.path} was kept`, actions: [removeWorktreeAction(cleanupTargetAt(leftover, repositoryOf(intent)))], dismissible: true });
+  if (leftover) toast({ level: 'info', text: `Worktree ${leftover.path} was kept`, actions: [removeWorktreeAction(cleanupTargetAt(machineOf(intent.appSessionId), leftover, repositoryOf(intent)))], dismissible: true });
   return 'closed';
 }

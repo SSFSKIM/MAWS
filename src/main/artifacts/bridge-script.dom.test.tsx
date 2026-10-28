@@ -18,7 +18,9 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function reloadedFrame(initial: { width: number; height: number }, { late = false }: { late?: boolean } = {}) {
+// `viewport`: the page's own viewport, unsized (0 × 0) while the frame's process waits for the frame's size (a sandboxed,
+// process-isolated frame can load and run before it has one); `resizeViewport` gives it one.
+function reloadedFrame(initial: { width: number; height: number }, { late = false, viewport = { width: 408, height: 813 } }: { late?: boolean; viewport?: { width: number; height: number } } = {}) {
   const { resize } = installResizeObserver();
   let handle: FrameHandle | null = null;
   const view = render(<HtmlFrame url="maws-artifact://record/v1/index.html" title="Dashboard" onFrame={(frame) => void (handle = frame)} />);
@@ -32,6 +34,9 @@ function reloadedFrame(initial: { width: number; height: number }, { late = fals
   const hero = late ? Object.assign(doc.createElement('h1'), { id: 'hero', textContent: 'Sales overview' }) : doc.querySelector('h1')!;
   const measure = vi.spyOn(hero, 'getBoundingClientRect').mockReturnValue(new DOMRect(1061, 153, initial.width, initial.height));
   Object.defineProperty(page, 'ResizeObserver', { configurable: true, value: globalThis.ResizeObserver });
+  let shownViewport = viewport;
+  Object.defineProperty(page, 'innerWidth', { configurable: true, get: () => shownViewport.width });
+  Object.defineProperty(page, 'innerHeight', { configurable: true, get: () => shownViewport.height });
   // The iframe's postMessage boundary, preserving the source windows HtmlFrame and the bridge authenticate.
   vi.spyOn(page, 'postMessage').mockImplementation((data) => {
     page.dispatchEvent(new MessageEvent('message', { data, source: window }));
@@ -48,6 +53,13 @@ function reloadedFrame(initial: { width: number; height: number }, { late = fals
     layout: (width: number, height: number) => {
       measure.mockReturnValue(new DOMRect(1061, 153, width, height));
       resize(hero, { width, height });
+    },
+    // the frame's size reaches its page: the viewport and, where `anchor` is given, the anchor laid out in it, without
+    // the anchor's own resize (an anchor of fixed size moves but keeps its box)
+    resizeViewport: (width: number, height: number, anchor?: { x: number; y: number; width: number; height: number }) => {
+      shownViewport = { width, height };
+      if (anchor) measure.mockReturnValue(new DOMRect(anchor.x, anchor.y, anchor.width, anchor.height));
+      page.dispatchEvent(new Event('resize'));
     },
   };
 }
@@ -100,6 +112,28 @@ describe('the HTML frame bridge’s re-pin after a Reload', () => {
     expect(frame.replies.mock.calls[0]![0]).toMatchObject({ type: 'maws:located', selector: '#hero', rect: null });
     frame.add();
     await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(frame.replies).toHaveBeenCalledTimes(1);
+  });
+
+  // P5 O6 M2's e2e:default (side case 11): after a Reload the page measured its heading at 48 × 140, the heading's padding
+  // alone, because its viewport had no width yet, and the card pinned under that box for good
+  it('waits for the page to have a viewport before an anchor measured in none counts', async () => {
+    const frame = reloadedFrame({ width: 48, height: 140 }, { viewport: { width: 0, height: 0 } });
+    const located = frame.locate();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(frame.replies).not.toHaveBeenCalled();
+    frame.resizeViewport(408, 813, { x: 1061, y: 153, width: 408, height: 102 }); // the heading laid out across it
+    expect(await located).toEqual({ x: 1061, y: 153, width: 408, height: 102 });
+    frame.layout(408, 102); // the heading's own resize, delivered after
+    expect(frame.replies).toHaveBeenCalledTimes(1);
+  });
+
+  it('measures again when the viewport gains size though the anchor keeps its box', async () => {
+    const frame = reloadedFrame({ width: 300, height: 100 }, { viewport: { width: 0, height: 0 } });
+    const located = frame.locate();
+    frame.resizeViewport(408, 813, { x: 54, y: 20, width: 300, height: 100 });
+    expect(await located).toEqual({ x: 54, y: 20, width: 300, height: 100 });
+    frame.layout(400, 200);
     expect(frame.replies).toHaveBeenCalledTimes(1);
   });
 

@@ -1,27 +1,33 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import type { CommandName, EventName, MawsBridge } from '@shared/ipc/schema';
-import { createBridge, type BridgeTransport } from './bridge';
+import type { CommandName, EventName, PreloadBridge } from '@shared/ipc/schema';
+import type { MachineRef } from '@shared/machine/ref';
+import { localMachineArgument, localMachineFromArgv } from '@shared/machine/page-argument';
+import { createBridge as createBridgeOf, type BridgeTransport } from './bridge';
+
+const LOCAL = 'LocalMachineRef0000000' as MachineRef;
+const OTHER = 'OtherMachineRef0000000' as MachineRef;
+const createBridge = (transport: BridgeTransport, files?: Parameters<typeof createBridgeOf>[2]) => createBridgeOf(transport, LOCAL, files);
 
 function fakeTransport() {
-  const listeners = new Map<string, Set<(event: unknown, payload: unknown) => void>>();
+  const listeners = new Map<string, Set<(event: unknown, payload: unknown, machine?: unknown) => void>>();
   const transport = {
-    invoke: vi.fn<(channel: string, input: unknown) => Promise<unknown>>(async () => ({ ok: true, value: 'answer' })),
-    on: vi.fn((channel: string, listener: (event: unknown, payload: unknown) => void) => {
+    invoke: vi.fn<(channel: string, input: unknown, machine?: unknown) => Promise<unknown>>(async () => ({ ok: true, value: 'answer' })),
+    on: vi.fn((channel: string, listener: (event: unknown, payload: unknown, machine?: unknown) => void) => {
       if (!listeners.has(channel)) listeners.set(channel, new Set());
       listeners.get(channel)!.add(listener);
     }),
-    removeListener: vi.fn((channel: string, listener: (event: unknown, payload: unknown) => void) => {
+    removeListener: vi.fn((channel: string, listener: (event: unknown, payload: unknown, machine?: unknown) => void) => {
       listeners.get(channel)?.delete(listener);
     }),
   };
-  const deliver = (channel: string, payload: unknown) => listeners.get(channel)?.forEach((l) => l({}, payload));
+  const deliver = (channel: string, payload: unknown, machine?: unknown) => listeners.get(channel)?.forEach((l) => l({}, payload, machine));
   return { transport: transport as unknown as BridgeTransport & typeof transport, deliver, listeners };
 }
 
 // The page can call the bridge with any string; the registries' types do not reach across contextBridge.
-const loose = (bridge: MawsBridge) => bridge as unknown as {
+const loose = (bridge: PreloadBridge) => bridge as unknown as {
   invoke(name: string, input?: unknown): Promise<unknown>;
   on(name: string, listener: (payload: unknown) => void): () => void;
 };
@@ -50,9 +56,23 @@ describe('preload bridge', () => {
 
   it('invokes a registered command on its command channel and returns main’s result as is', async () => {
     const { transport } = fakeTransport();
-    const result = await createBridge(transport).invoke('settings.set', { theme: 'dark' });
-    expect(transport.invoke).toHaveBeenCalledWith('maws:cmd:settings.set', { theme: 'dark' });
+    const result = await createBridge(transport).invoke('settings.set', { theme: 'dark' }, OTHER);
+    expect(transport.invoke).toHaveBeenCalledWith('maws:cmd:settings.set', { theme: 'dark' }, OTHER);
     expect(result).toEqual({ ok: true, value: 'answer' });
+  });
+
+  // P5 O6 M2: the raw bridge's convenience for e2e specs and harness pages; the renderer client always names one
+  it('sends an invoke that names no machine as the local machine’s', async () => {
+    const { transport } = fakeTransport();
+    await createBridge(transport).invoke('settings.get', undefined);
+    expect(transport.invoke).toHaveBeenCalledWith('maws:cmd:settings.get', undefined, LOCAL);
+  });
+
+  it('exposes the local machine main passed in the window’s arguments', () => {
+    const { transport } = fakeTransport();
+    expect(createBridge(transport).localMachine).toBe(LOCAL);
+    expect(localMachineFromArgv(['/path/to/electron', '--type=renderer', localMachineArgument(LOCAL)])).toBe(LOCAL);
+    expect(() => localMachineFromArgv(['--type=renderer'])).toThrow('--maws-local-machine=');
   });
 
   it('turns a transport rejection into an internal error rather than a rejected promise', async () => {
@@ -75,22 +95,22 @@ describe('preload bridge', () => {
     const { transport, deliver, listeners } = fakeTransport();
     const listener = vi.fn();
     const off = createBridge(transport).on('pty.data', listener);
-    deliver('maws:evt:pty.data', { ptyId: 'p1', data: 'x' });
-    expect(listener).toHaveBeenCalledExactlyOnceWith({ ptyId: 'p1', data: 'x' });
+    deliver('maws:evt:pty.data', { ptyId: 'p1', data: 'x' }, OTHER);
+    expect(listener).toHaveBeenCalledExactlyOnceWith({ ptyId: 'p1', data: 'x' }, OTHER);
     off();
     deliver('maws:evt:pty.data', { ptyId: 'p1', data: 'y' });
     expect(listener).toHaveBeenCalledTimes(1);
     expect(listeners.get('maws:evt:pty.data')?.size).toBe(0);
   });
 
-  it('exposes exactly invoke, on and pathForFile', () => {
+  it('exposes exactly localMachine, invoke, on and pathForFile', () => {
     const { transport } = fakeTransport();
-    expect(Object.keys(createBridge(transport)).sort()).toEqual(['invoke', 'on', 'pathForFile']); // C7: pathForFile
+    expect(Object.keys(createBridge(transport)).sort()).toEqual(['invoke', 'localMachine', 'on', 'pathForFile']); // C7: pathForFile; P5 O6 M2: localMachine
   });
 });
 
 // Compile-time: the registries type the bridge.
-void ((bridge: MawsBridge) => {
+void ((bridge: PreloadBridge) => {
   const name: CommandName = 'settings.get';
   const event: EventName = 'settings.changed';
   void bridge.invoke(name, undefined);

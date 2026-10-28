@@ -9,6 +9,7 @@ import { useEffect, useMemo } from 'react';
 import type { FsState } from '@shared/ipc/schema/fs';
 import { GitDiagnostics } from './GitDiagnostics';
 import { ReplayDiagnostics } from './ReplayDiagnostics';
+import { machineFor } from '../ipc/machine';
 import { useGitDiagnostics } from '../stores/git-diagnostics';
 import {
   describeEvent,
@@ -27,7 +28,7 @@ export function StoreDiagnostics() {
   const records = useStoreDiagnostics((s) => s.records);
   const projects = useStoreDiagnostics((s) => s.projects);
   const followed = useStoreDiagnostics((s) => s.followed);
-  const gitDirectory = useGitDiagnostics((s) => s.directory);
+  const gitSelected = useGitDiagnostics((s) => s.selected);
   const rows = useMemo(() => rowsOf(records), [records]);
 
   useEffect(() => useStoreDiagnostics.getState().connect(), []);
@@ -51,7 +52,8 @@ export function StoreDiagnostics() {
           const badge = describeHolder(record.holder);
           const isFollowed = followed?.appSessionId === record.appId;
           const directory = record.worktree?.path ?? record.directory;
-          const isGitShown = directory !== '' && gitDirectory === directory;
+          const machine = machineFor(record.appId);
+          const isGitShown = directory !== '' && gitSelected?.directory === directory && gitSelected.machine === machine;
           return (
             <li key={record.appId} className="flex h-(--row-h) items-center gap-3 border-b border-border px-3 last:border-b-0">
               {record.pinned && (
@@ -76,7 +78,7 @@ export function StoreDiagnostics() {
                 type="button"
                 aria-pressed={isGitShown}
                 disabled={directory === ''}
-                onClick={() => void useGitDiagnostics.getState().select(isGitShown ? null : directory)}
+                onClick={() => void useGitDiagnostics.getState().select(isGitShown ? null : { machine, directory })}
                 className="shrink-0 rounded-sm border border-border px-2 text-fg hover:bg-bg-hover aria-pressed:bg-bg-active disabled:text-fg-faint"
               >
                 Git

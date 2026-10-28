@@ -6,9 +6,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { MawsBridge, SessionDigest } from '@shared/ipc/schema';
-import { loadScenario } from '../../../../test/support/scenario';
+import { ProjectRecordSchema, type SessionDigest } from '@shared/ipc/schema';
+import { EngineSessionStatusSchema } from '@shared/engine/status';
+import { SessionRecordSchema } from '@shared/graph/session';
+import { compileAddressing } from '@shared/machine/address';
+import { loadScenario, ScenarioDigestSchema } from '../../../../test/support/scenario';
 import { createWidgetBackend, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { registerSessionAction } from '../app/session-actions';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
@@ -17,7 +21,9 @@ import { clearPreviewCache } from '../resume/preview'; // P2-D
 import { ResumeWidget } from './ResumeWidget';
 
 const ROOT = join(__dirname, '../../../..');
-const READY = 'app-7412a115' as AppSessionId;
+const READY_ID = 'app-7412a115' as AppSessionId; // main's (the backend's) id
+const READY = at(READY_ID);
+const lift = <T,>(schema: Parameters<typeof compileAddressing>[0], value: T): T => compileAddressing(schema).lift(value, TEST_MACHINE);
 let backend: WidgetBackend;
 const scenario = () => loadScenario(join(ROOT, 'test/fixtures/shell/nine-sessions.json'));
 
@@ -25,12 +31,13 @@ beforeEach(() => {
   const s = scenario();
   backend = createWidgetBackend({ root: ROOT, statuses: s.engine, records: s.sessions });
   window.maws = backend.bridge();
-  useSessions.setState({ engine: new Map(s.engine.map((st) => [st.appSessionId, backend.status(st.appSessionId)])), records: new Map(s.sessions.map((r) => [r.appId, r])), digests: new Map(s.digests.map((d) => [d.appSessionId, d as unknown as SessionDigest])), projects: new Map(s.projects.map((p) => [p.id, p])) /* P2-D */ });
+  // P5 O6 M2: the store holds what the client lifts from main's answers, the scenario's ids as addresses
+  useSessions.setState({ engine: new Map(s.engine.map((st) => [at(st.appSessionId), lift(EngineSessionStatusSchema, backend.status(st.appSessionId))])), records: new Map(s.sessions.map((r) => [at(r.appId), lift(SessionRecordSchema, r)])), digests: new Map(s.digests.map((d) => [at(d.appSessionId), lift(ScenarioDigestSchema, d) as unknown as SessionDigest])), projects: new Map(s.projects.map((p) => [at(p.id), lift(ProjectRecordSchema, p)])) /* P2-D */ });
 });
 afterEach(() => {
   cleanup();
   useSessions.setState({ engine: new Map(), records: new Map(), digests: new Map(), projects: new Map() });
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: unknown }).maws;
 });
 
 const mount = (Widget: typeof RenameWidget, appSessionId: AppSessionId, args = '', close = vi.fn()) => {
@@ -46,11 +53,11 @@ describe('rename widget', () => {
   it("`/rename <title>` renames through C10's session.rename at once and says so", async () => {
     mount(RenameWidget, READY, 'Live C11');
     await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Renamed · Live C11'));
-    expect(backend.calls.filter((c) => c.command === 'session.rename').map((c) => c.input)).toEqual([{ appSessionId: READY, title: 'Live C11' }]);
+    expect(backend.calls.filter((c) => c.command === 'session.rename').map((c) => c.input)).toEqual([{ appSessionId: READY_ID, title: 'Live C11' }]);
   });
 
   it('renames a session without a process too (C10 names it through its record)', async () => {
-    mount(RenameWidget, 'app-bdb23713' as AppSessionId, 'Later');
+    mount(RenameWidget, at('app-bdb23713' as AppSessionId), 'Later');
     await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Renamed · Later'));
   });
 
@@ -88,7 +95,7 @@ describe('resume widget', () => {
   const titles = () => screen.getAllByRole('option').map((o) => o.querySelector('[data-title]')!.textContent);
 
   it("is the chooser over this session's project, without this session, newest first, the terminal-held one marked", () => {
-    mount(ResumeWidget, 'app-bac6130b' as AppSessionId);
+    mount(ResumeWidget, at('app-bac6130b' as AppSessionId));
     expect(screen.getByTestId('resume-scope').textContent).toBe('codex_somersault');
     expect(titles()).toEqual(['Somersault terminal run', 'Trace stream reconnects']);
     expect(within(screen.getAllByRole('option')[0]).getByRole('img').getAttribute('aria-label')).toBe('Live in terminal');
@@ -98,11 +105,11 @@ describe('resume widget', () => {
   // P2-A's availability, read only: a session no gesture continues from here says why, in A's words
   it('a terminal-held session says why it cannot be continued here; an exited one says nothing', () => {
     // main's read model derives availability (the scenario's digests carry none): the terminal's session is foreign-held
-    const held = 'app-466b0d0d' as AppSessionId;
+    const held = at('app-466b0d0d' as AppSessionId);
     const digests = new Map(useSessions.getState().digests);
     digests.set(held, { ...digests.get(held)!, availability: 'foreign_held' });
     useSessions.setState({ digests });
-    mount(ResumeWidget, 'app-bac6130b' as AppSessionId);
+    mount(ResumeWidget, at('app-bac6130b' as AppSessionId));
     expect(screen.getByTestId('resume-refusal').textContent).toMatch(/^Held by terminal · \d+$/);
     expect(screen.getAllByRole('option')[0].title).toBe(screen.getByTestId('resume-refusal').textContent);
     fireEvent.keyDown(screen.getByRole('combobox'), { key: 'ArrowDown' }); // Trace stream reconnects: no process
@@ -114,22 +121,22 @@ describe('resume widget', () => {
     const openTab = vi.fn();
     const layout = useLayout.getState();
     useLayout.setState({ openSession, openTab });
-    const close = mount(ResumeWidget, 'app-bac6130b' as AppSessionId);
+    const close = mount(ResumeWidget, at('app-bac6130b' as AppSessionId));
     const search = screen.getByRole('combobox');
     fireEvent.keyDown(search, { key: 'ArrowDown' });
     fireEvent.keyDown(search, { key: 'Enter' });
-    expect(openSession).toHaveBeenCalledWith('app-bdb23713');
+    expect(openSession).toHaveBeenCalledWith(at('app-bdb23713'));
     expect(close).toHaveBeenCalledTimes(1);
     fireEvent.keyDown(search, { key: 'Enter', metaKey: true });
-    expect(openTab).toHaveBeenCalledWith({ kind: 'session', appSessionId: 'app-bdb23713' });
+    expect(openTab).toHaveBeenCalledWith({ kind: 'session', appSessionId: at('app-bdb23713') });
     useLayout.setState({ openSession: layout.openSession, openTab: layout.openTab });
   });
 
   it('a session without a project opens on every project', () => {
-    mount(ResumeWidget, 'app-3d334c38' as AppSessionId); // no project
+    mount(ResumeWidget, at('app-3d334c38' as AppSessionId)); // no project
     expect(screen.getByTestId('resume-scope').textContent).toBe('All projects');
     expect(screen.getByRole('button', { name: /^All projects/ }).getAttribute('aria-pressed')).toBe('true');
-    expect(titles()).not.toContain(useSessions.getState().records.get('app-3d334c38' as AppSessionId)!.title.text);
+    expect(titles()).not.toContain(useSessions.getState().records.get(at('app-3d334c38' as AppSessionId))!.title.text);
     expect(titles().length).toBeGreaterThan(2);
   });
 });
