@@ -499,7 +499,7 @@ describe('registration', () => {
     await session.loaded;
     const code = await pairing();
     session.register(code.text);
-    await until(() => hub.pending.length === 1, 'the entry posted');
+    await until(() => hub.pending.length === 1 && session.status().state === 'registering' && (session.status() as { step: string }).step === 'approval', 'the wait for approval');
     session.cancel();
     expect(session.status()).toEqual({ state: 'none' });
     await hub.approve(code.k);
@@ -527,11 +527,14 @@ describe('registration', () => {
     const { session, logs } = make();
     await session.loaded;
     const code = await pairing();
+    // The entry reaches the hub before the session moves to its approval step (the fingerprint is computed between
+    // them), so each cancel waits for the step itself, not the hub's count.
+    const awaiting = () => session.status().state === 'registering' && (session.status() as { step: string }).step === 'approval';
     session.register(code.text);
-    await until(() => hub.pending.length === 1, 'the entry posted');
+    await until(() => hub.pending.length === 1 && awaiting(), 'the entry posted');
     session.cancel();
     session.register(code.text);
-    await until(() => hub.pending.length === 2, 'the second entry posted');
+    await until(() => hub.pending.length === 2 && awaiting(), 'the second entry posted');
     session.cancel();
     const attempts = logs.filter((line) => /^\[org\] attempt \d+/.test(line)).map((line) => line.slice(6));
     expect(attempts).toEqual([
