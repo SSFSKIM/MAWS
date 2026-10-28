@@ -178,6 +178,16 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
   /** Advanced by cancel and sign-out: an attempt that started under another generation writes nothing. */
   let generation = 0;
   let attempt: AbortController | null = null;
+  // Each attempt is numbered and logged at its start (with this process's pid, so a second main process on the same
+  // profile shows in a shared log) and at its end, however it ends: two browser trips in a log always say why.
+  let attempts = 0;
+  let attemptNo = 0;
+  let attemptEnded = false;
+  const endAttempt = (how: string) => {
+    if (attemptEnded) return;
+    attemptEnded = true;
+    log(`attempt ${attemptNo}: ${how}`);
+  };
   let value: SignedIn | null = null;
   let valueKey = '';
   let tokenTimer: ReturnType<typeof setTimeout> | null = null;
@@ -602,16 +612,27 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
   }
 
   /** Runs `body` as the one attempt: fenced, cancellable, its refusal reported on the status. */
-  function run(body: (signal: AbortSignal, fence: () => void) => Promise<void>, onEnd: () => void): void {
+  function run(what: string, body: (signal: AbortSignal, fence: () => void) => Promise<void>, onEnd: () => void): void {
     const controller = new AbortController();
     attempt = controller;
+    attemptNo = ++attempts;
+    attemptEnded = false;
+    const no = attemptNo;
+    log(`attempt ${no}: ${what}, pid ${process.pid}`);
+    const ended = (how: string) => {
+      if (attemptNo === no) endAttempt(how);
+    };
     const mine = generation;
     const fence = () => {
       if (generation !== mine || closed) throw new Fenced();
     };
     void body(controller.signal, fence)
+      .then(() => ended('done'))
       .catch((error: unknown) => {
-        if (error instanceof Fenced || generation !== mine || closed) return;
+        if (error instanceof Fenced || generation !== mine || closed) {
+          ended('fenced');
+          return;
+        }
         if (error instanceof Refusal) refused = error.refusal;
         else if (error instanceof AccessLoginError) refused = error.reason === 'cancelled' ? undefined : { code: 'access', detail: error.reason };
         else if (controller.signal.aborted) refused = undefined;
@@ -620,6 +641,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
           log(`an attempt failed: ${(error as Error).message}`);
         }
         if (refused !== undefined) log(`refused ${refused.code}${refused.detail === undefined ? '' : ` (${refused.detail})`}`);
+        ended(refused === undefined ? 'ended' : `refused ${refused.code}`);
       })
       .finally(() => {
         if (attempt === controller) attempt = null;
@@ -674,6 +696,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     registering = { step: 'browser', org: code.org, hub: code.hub, fingerprint: null, expires: null };
     changed();
     run(
+      `register (org ${code.org})`,
       (signal, fence) => registerWith(code, signal, fence),
       () => (registering = null),
     );
@@ -788,6 +811,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     signingIn = true;
     changed();
     run(
+      `sign in (org ${reg.org})`,
       async (signal, fence) => {
         const cred = await login(reg.hub, { signal });
         fence();
@@ -826,6 +850,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     signingIn = !hubLive();
     changed();
     run(
+      `re-anchor (org ${reg.org})`,
       async (signal, fence) => {
         const cred = hubLive() ? credential! : await loginFor(code.hub)!(code.hub, { signal });
         fence();
@@ -871,6 +896,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
 
   function cancel(): void {
     if (attempt === null) return;
+    endAttempt(`cancelled at ${registering?.step ?? (signingIn ? 'sign-in' : 're-anchor')}`);
     generation++;
     attempt.abort();
     attempt = null;
@@ -884,6 +910,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     if (registration === null) return Promise.resolve();
     // The fence moves now, so every attempt's commit queued before the marker writes nothing more; memory too, so the
     // status reads signed out at once and an anchor written before the marker's turn carries it.
+    if (attempt !== null) endAttempt('ended by sign-out');
     generation++;
     attempt?.abort();
     attempt = null;
@@ -939,6 +966,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     loaded,
     async close() {
       if (closed) return;
+      if (attempt !== null) endAttempt('ended by quit');
       generation++;
       attempt?.abort();
       closed = true;

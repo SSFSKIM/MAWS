@@ -644,6 +644,46 @@ describe.skipIf(!zsh)('production-run.sh', () => {
     });
   });
 
+  // zsh 5.9 leaves its internal Dash token (byte 0x9b) for every '-' of a default word that a nested expansion then
+  // gives a modifier: `${${1:-$HOME/a-b}:A}` is `$HOME/a\x9bb`, so `checkout` with no path named one that git refused
+  // ("Illegal byte sequence"; found in the production rollout). Neither case runs a script: the first evaluates the
+  // step's own assignment, the second reads every deploy script for the shape.
+  describe('the checkout path when none is given', () => {
+    const assignment = () => {
+      const script = readFileSync(join(deploy, 'production-run.sh'), 'utf8');
+      const step = script.slice(script.indexOf('\n  checkout)\n'), script.indexOf('for tmp in '));
+      const line = step.split('\n').find((each) => /^\s*P=/.test(each));
+      expect(line, 'the checkout step assigns P').toBeDefined();
+      return line!.trim();
+    };
+    const evaluated = (args: string[]) => {
+      const r = spawnSync('zsh', ['-fc', `f() { ${assignment()}; print -rn -- $P; }; f "$@"`, 'zsh', ...args], { env: { PATH: process.env.PATH, HOME: '/nonexistent-home' } });
+      expect(r.status, r.stderr.toString()).toBe(0);
+      return r.stdout;
+    };
+    it.skipIf(!zsh)('is $HOME/.local/share/maws-desk-deploy, byte for byte, and a path given is that path made absolute', () => {
+      // Each byte as JSON writes it, so a stray 0x9b reads as \u009b.
+      expect(JSON.stringify(evaluated([]).toString('latin1'))).toBe(JSON.stringify('/nonexistent-home/.local/share/maws-desk-deploy'));
+      expect(evaluated(['/nonexistent-home/my-deploy']).toString()).toBe('/nonexistent-home/my-deploy');
+    });
+
+    it('takes no default with a modifier through a nested expansion in any deploy script', () => {
+      const nested = /\$\{\$\{[^{}]*(?:\{[^{}]*\}[^{}]*)*:[-=+?][^{}]*(?:\{[^{}]*\}[^{}]*)*\}:[A-Za-z&]/;
+      const scripts = readdirSync(deploy).filter((name) => name.endsWith('.sh'));
+      expect(scripts).toEqual(expect.arrayContaining([...SCRIPTS, 'staging-deploy.sh', 'staging-run.sh']));
+      const found = scripts.flatMap((name) =>
+        readFileSync(join(deploy, name), 'utf8')
+          .split('\n')
+          .flatMap((line, i) => (nested.test(line) ? [`${name}:${i + 1}: ${line.trim()}`] : [])),
+      );
+      expect(found).toEqual([]);
+      // The pattern finds the shape it is for.
+      expect(nested.test('P=${${1:-$HOME/a-b}:A}')).toBe(true);
+      expect(nested.test('P=${${1:-${HOME}/a-b}:h}')).toBe(true);
+      expect(nested.test('P=${1:-$HOME/a-b}; P=${P:A}')).toBe(false);
+    });
+  });
+
   it('names its steps when given none it knows', () => {
     const w = world();
     const run = w.run('production-run.sh', ['deploy']);

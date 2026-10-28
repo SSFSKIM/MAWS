@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { BoundedPerson, within } from './bounded';
 import { phoneOf, pushProblems, webCardsProblems } from './items';
 import { Report } from './report';
-import { cardsCredentialId, cardsRunOf, laneBLeg, LANE_B_WAITING, machineName, memberEmail, readRun } from './run';
+import { cardsCredentialId, cardsRunOf, laneBLeg, LANE_B_WAITING, machineName, memberEmail, readRun, stopLine } from './run';
 import type { Person } from '../../../apps/desk-hub/deploy/hub';
 import type { OrgAdmin } from '../../../apps/desk-hub/deploy/org-admin';
 import { isRunSubscription, residueLines, residueOf, sweepRun, undoRun } from './sweep';
@@ -61,6 +61,49 @@ describe('the run, from the runner’s environment', () => {
     expect(laneBLeg(true, 'required')).toBe('run');
     expect(laneBLeg(false, 'probe')).toBe('wait');
     expect(laneBLeg(false, 'required')).toBe('fail');
+  });
+});
+
+describe('the stop line', () => {
+  /** An error as undici's fetch raises it: `fetch failed`, what happened kept under `cause`. */
+  const failed = (cause: unknown) => new TypeError('fetch failed', { cause });
+  const coded = (message: string, code: string, extra: Record<string, unknown> = {}) => Object.assign(new Error(message), { code, ...extra });
+
+  it('names the cause under undici’s `fetch failed`, its code and its message', () => {
+    expect(stopLine(failed(coded('read ECONNRESET', 'ECONNRESET', { errno: -54, syscall: 'read' })))).toBe('fetch failed; cause ECONNRESET: read ECONNRESET');
+    expect(stopLine(failed(Object.assign(coded('other side closed', 'UND_ERR_SOCKET'), { name: 'SocketError', socket: { localAddress: '10.0.0.2', remoteAddress: '104.16.0.1' } })))).toBe(
+      'fetch failed; cause UND_ERR_SOCKET: other side closed',
+    );
+    expect(stopLine(new TypeError('terminated', { cause: coded('read ECONNRESET', 'ECONNRESET') }))).toBe('terminated; cause ECONNRESET: read ECONNRESET');
+  });
+
+  it('reads an AggregateError’s errors when it has no message of its own (both addresses of a host refused)', () => {
+    const both = Object.assign(new AggregateError([coded('connect ECONNREFUSED ::1:8787', 'ECONNREFUSED'), coded('connect ECONNREFUSED 127.0.0.1:8787', 'ECONNREFUSED')], ''), { code: 'ECONNREFUSED' });
+    expect(stopLine(failed(both))).toBe('fetch failed; cause ECONNREFUSED: connect ECONNREFUSED ::1:8787, connect ECONNREFUSED 127.0.0.1:8787');
+  });
+
+  it('follows the chain a few levels, and an error with no cause is its message alone', () => {
+    let deep: Error = coded('the bottom', 'E5');
+    for (const level of ['E4', 'E3', 'E2', 'E1']) deep = Object.assign(new Error(`level ${level}`, { cause: deep }), { code: level });
+    expect(stopLine(new Error('the top', { cause: deep }))).toBe('the top; cause E1: level E1; cause E2: level E2; cause E3: level E3; cause E4: level E4; …');
+    expect(stopLine(new Error('no within 30000 ms'))).toBe('no within 30000 ms');
+    expect(stopLine(coded('read ECONNRESET', 'ECONNRESET'))).toBe('ECONNRESET: read ECONNRESET');
+    expect(stopLine('a string thrown')).toBe('a string thrown');
+    expect(stopLine(new Error('the top', { cause: 'a string' }))).toBe('the top; cause a string');
+  });
+
+  it('prints no URL and no query string, at any level, since either can carry a token', () => {
+    const top = new TypeError('Request cannot be constructed from a URL that includes credentials: https://user:eyJ.secret@desk.example/api?x=1');
+    expect(stopLine(top)).toBe('Request cannot be constructed from a URL that includes credentials: <url>');
+    expect(stopLine(new Error('GET /api/listings?project=p&token=eyJ.secret: 403 denied', { cause: coded('the socket to wss://desk.example/api/x?t=eyJ.secret was refused', 'E') }))).toBe(
+      'GET /api/listings?<query>: 403 denied; cause E: the socket to <url> was refused',
+    );
+    expect(stopLine(new Error('GET /api/x?t=a:b:c 500'))).toBe('GET /api/x?<query> 500');
+    expect(stopLine(new Error('GET /api/x?t=a:b'))).toBe('GET /api/x?<query>');
+    // A host and its port are no secret: undici's connect errors keep them.
+    expect(stopLine(failed(coded('getaddrinfo ENOTFOUND desk-hub-staging.example', 'ENOTFOUND', { hostname: 'desk-hub-staging.example' })))).toBe(
+      'fetch failed; cause ENOTFOUND: getaddrinfo ENOTFOUND desk-hub-staging.example',
+    );
   });
 });
 

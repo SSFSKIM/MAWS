@@ -245,7 +245,11 @@ async function member(request: Request, url: URL, env: Env, registry: DurableObj
   if (pathname === LISTINGS_PATH && method === 'GET') return answer(await registry.listings(you, url.searchParams.get('project')));
   const endpoint = MACHINE_ENDPOINT_PATH.exec(pathname);
   if (endpoint && method === 'GET') return answer(await registry.machineEndpoint(you, decodeURIComponent(endpoint[1])));
-  if (pathname === PENDING_DEVICES_PATH && method === 'GET') return answer(await registry.pendingDevices(you));
+  if (pathname === PENDING_DEVICES_PATH && method === 'GET') {
+    // No id, or one's own, is today's read; another member's is an admin's, which a Registry before it answers `hub-updating`.
+    const of = url.searchParams.get('member');
+    return answer(await (of === null || of === you.id ? registry.pendingDevices(you) : registry.pendingDevicesOf(you, of)));
+  }
   if (pathname === PENDING_DEVICES_PATH && method === 'POST') return answer(await registry.keepPendingDevice(you, await body(request)), 201);
   if (pathname === PUSH_KEY_PATH && method === 'GET') return json(200, await registry.pushKey());
   if (pathname === PUSH_SUBSCRIPTIONS_PATH) {

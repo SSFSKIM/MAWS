@@ -2,6 +2,7 @@
 // each status drawn; Sign in sends `org.register` with the trimmed code and clears the field; Cancel, Sign out and Sign
 // in again; the fingerprint at approval; Re-anchor in `held-chain`; a refusal's line; and no code shown back.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CommandName, PreloadBridge } from '@shared/ipc/schema';
 import { OrgStatusSchema, type OrgAttempt, type OrgStatus } from '@shared/ipc/schema/org';
@@ -29,7 +30,7 @@ const REGISTERED: OrgStatus = {
 let calls: { name: string; input: unknown }[];
 let emit: (status: OrgStatus) => void;
 
-function renderSection(status: OrgStatus, answers: Partial<Record<CommandName, () => unknown>> = {}) {
+function renderSection(status: OrgStatus, answers: Partial<Record<CommandName, () => unknown>> = {}, strict = false) {
   calls = [];
   const listeners = new Set<(payload: unknown) => void>();
   emit = (next) => act(() => listeners.forEach((listener) => listener(OrgStatusSchema.parse(next))));
@@ -58,7 +59,7 @@ function renderSection(status: OrgStatus, answers: Partial<Record<CommandName, (
     pathForFile: () => '',
     localMachine: TEST_MACHINE,
   } as unknown as PreloadBridge;
-  return render(<OrgSection />);
+  return render(strict ? <StrictMode><OrgSection /></StrictMode> : <OrgSection />);
 }
 const row = (label: string) => screen.getByRole('group', { name: label });
 const found = (label: string) => screen.findByRole('group', { name: label }); // once the status has been read
@@ -86,6 +87,23 @@ describe('Settings › Org', () => {
     emit({ state: 'registering', step: 'browser', org: 'org-1f2e', hub: 'https://hub.example.com', fingerprint: null, expires: null });
     expect(screen.getByText('Finish signing in in the browser.')).toBeTruthy();
     expect(document.body.innerHTML).not.toContain(CODE);
+  });
+
+  it('one Sign in under StrictMode sends one org.register and no org.cancel, through the browser, checking and approval', async () => {
+    renderSection({ state: 'none' }, {}, true);
+    const field = (await screen.findByRole('textbox', { name: 'Pairing code' })) as HTMLInputElement;
+    fireEvent.change(field, { target: { value: CODE } });
+    fireEvent.click(within(row('Pairing code')).getByRole('button', { name: 'Sign in' }));
+    await vi.waitFor(() => expect(sent('org.register')).toHaveLength(1));
+    const at = (step: 'browser' | 'checking' | 'approval') =>
+      emit({ state: 'registering', step, org: 'org-1f2e', hub: 'https://hub.example.com', fingerprint: step === 'approval' ? '65u7k-rscy7' : null, expires: step === 'approval' ? new Date(Date.now() + 600_000).toISOString() : null });
+    at('browser');
+    at('checking');
+    at('approval');
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(sent('org.register')).toHaveLength(1);
+    expect(sent('org.signIn')).toEqual([]);
+    expect(sent('org.cancel')).toEqual([]);
   });
 
   it('Enter sends too; a refusal from the command is one line under the field, worded by its code', async () => {
