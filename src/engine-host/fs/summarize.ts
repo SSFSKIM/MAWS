@@ -5,7 +5,7 @@
 // millisecond and a parsed record cannot be fooled by a value inside a torn line.
 import { basename } from 'node:path';
 import type { MessageUuid, SessionId } from '@shared/graph/ids';
-import { isMessageTool, messageCallText } from '@shared/owner/message-call'; // P4-R7
+import { isMadeUpFinalAnswer, isMessageTool, messageCallText } from '@shared/owner/message-call'; // P4-R7
 import { messageLine, previewLine } from '@shared/owner/preview';
 import { branchName } from '@shared/sessions/branch';
 import type { TranscriptSummary } from '@shared/wire/store';
@@ -232,10 +232,11 @@ function assistantText(record: TranscriptRecord): string | null {
 // The newest assistant line among `records` (given newest first): an assistant text's preview, or (P4-R7) an accepted
 // message tool call's message (`@shared/owner/message-call`), whichever is later. A call's result is written after
 // it, so walking newest first meets the result before the call; a call whose result the window does not hold is not
-// taken.
+// taken. The to-human plugin's made-up answer after a final message said nothing, so the line is older than it.
 function lastAssistantLine(records: TranscriptRecord[]): string | null {
   const refused = new Map<string, boolean>(); // tool-use id → whether its result is an error
   for (const record of records) {
+    if (isMadeUpFinalAnswer(record)) continue;
     const content = (record.message as { content?: unknown } | undefined)?.content;
     const blocks = (Array.isArray(content) ? content.filter(isBlock) : []) as CallBlock[];
     if (record.type === 'user') {
