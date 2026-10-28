@@ -16,7 +16,8 @@
 // plugin's rule), and only where its hooks load; MAWS_NATIVE_TO_HUMAN at 8, which the lane sets, admits MAWS's headless
 // launch. So a style carries the lane (`messageTool`) when it is that style, declares the tool (6 and up), the `to-human`
 // plugin is installed, enabled and applicable here as a style's plugin must be, and no setting turns every hook off (the
-// launch profile's hooks `none` does: its `disableAllHooks` keeps plugin hooks from loading).
+// launch profile's hooks `none` does: its `disableAllHooks` keeps plugin hooks from loading), nor does a managed policy let
+// only managed hooks run.
 import { readdir, readFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { carriesPluginMessageTool, PLUGIN_STYLE, STYLE_CONTRACT_KEY, styleShape, TO_HUMAN_PLUGIN, type StyleShape } from '@shared/owner/contract';
@@ -89,7 +90,7 @@ async function lookupIn(name: string, ctx: StyleContext, settings: SettingsFile[
     const contract = contractOf(style);
     const shape = styleShape(contract);
     if (shape === 'none') return none(null);
-    const messageTool = name === PLUGIN_STYLE && carriesPluginMessageTool(contract) && !hooksDisabled(settings) && typeof (await pluginInstallPaths(TO_HUMAN_PLUGIN, ctx, settings)) !== 'string';
+    const messageTool = name === PLUGIN_STYLE && carriesPluginMessageTool(contract) && !hooksDisabled(settings) && !(await managedHooksOnly(ctx)) && typeof (await pluginInstallPaths(TO_HUMAN_PLUGIN, ctx, settings)) !== 'string';
     return { name, shape, contract, unresolved: null, messageTool };
   }
   return none(colon > 0 ? `the plugin ${name.slice(0, colon)} has no output style ${wanted}` : `no output style named ${name} in the project or the config home`);
@@ -102,6 +103,9 @@ async function pluginStyleDirectories(plugin: string, ctx: StyleContext, setting
 }
 
 // P4-R7z: whether every hook is off, as the highest-precedence source that says so has it (`disableAllHooks`).
+// P4-R7z: whether managed settings let only managed hooks run (`allowManagedHooksOnly`, honoured there alone), which
+// keeps a user-installed plugin's hooks from loading; a to-human plugin installed by policy is read the same, off.
+const managedHooksOnly = async (ctx: StyleContext): Promise<boolean> => asObject(await readJson(ctx.managedSettingsPath ?? MANAGED_SETTINGS_PATH))?.allowManagedHooksOnly === true;
 const hooksDisabled = (settings: SettingsFile[]): boolean => settings.map((s) => s.disableAllHooks).find((value) => typeof value === 'boolean') === true;
 
 // The install paths of the enabled installations of a plugin that apply to the cwd, or why there are none.

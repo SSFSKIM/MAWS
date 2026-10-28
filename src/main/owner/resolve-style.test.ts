@@ -206,6 +206,14 @@ describe('whether the to-human plugin registers its message tool under the style
     expect(await resolveStyle(ctx({ flagSettings: { disableAllHooks: false } }))).toMatchObject({ messageTool: true }); // the higher source decides
   });
 
+  it('does not where managed settings let only managed hooks run; the key anywhere else changes nothing', async () => {
+    installToHumanPlugin(home);
+    userSettings({ outputStyle: PLUGIN_STYLE, enabledPlugins: { 'doperpowers@doperpowers': true, 'to-human@doperpowers': true }, allowManagedHooksOnly: true });
+    expect(await resolveStyle(ctx())).toMatchObject({ messageTool: true });
+    put(managed, { allowManagedHooksOnly: true });
+    expect(await resolveStyle(ctx())).toMatchObject({ name: PLUGIN_STYLE, contract: 6, messageTool: false });
+  });
+
   it('does not under any other style declaring 6: the plugin keys its tool on its own style’s name', async () => {
     installToHumanPlugin(home);
     put(join(home, 'output-styles/report.md'), style('report', '6'));
