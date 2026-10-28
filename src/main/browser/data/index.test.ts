@@ -320,6 +320,29 @@ describe('the browser\'s tables leave the index (P5 O3-A, the O3 document §4)',
     expect((rows(file, 'browser_activity') as { id: number }[]).map((row) => row.id)).toEqual([5, 6, 9, 12, 13, 40]); // 13 is the live row
   });
 
+  // §2 with §4: a run refused the spine creates no file of the spine's, and SQLite's read-only open of a WAL database no
+  // connection holds creates its -wal and -shm (hosted e2e:settings, e2e/spine-lock.spec.ts)
+  it('reads the version of an index no connection holds from its header, creating no -wal or -shm beside it; one held open is read through SQLite', () => {
+    const indexPath = join(dir.path, 'index.sqlite');
+    new Index(indexPath).close();
+    expect(readdirSync(dir.path).filter((name) => name.startsWith('index.sqlite')).sort()).toEqual(['index.sqlite']);
+    const data = new BrowserData({ file: browserDataFile(dir.path), index: indexPath });
+    expect(data.ready).toBe(true);
+    data.close();
+    expect(readdirSync(dir.path).filter((name) => name.startsWith('index.sqlite')).sort()).toEqual(['index.sqlite']);
+    // a holder with the index open: its -wal holds the committed version the header may not have yet
+    rmSync(join(dir.path, 'browser'), { recursive: true, force: true });
+    const raw = new DatabaseSync(indexPath);
+    raw.exec('PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0; PRAGMA user_version = 13');
+    const held = new BrowserData({ file: browserDataFile(dir.path), index: indexPath });
+    expect(held.ready).toBe(false);
+    raw.exec('PRAGMA user_version = 14'); // committed to the -wal, not yet checkpointed into the header
+    held.reattach([]);
+    expect(held.ready).toBe(true);
+    held.close();
+    raw.close();
+  });
+
   // §4: in O3-D the browser may start while `mawsd` migrates; it waits on the index's version and records nothing meanwhile
   it('waits on the index: absent or below 14 it is inert and writes nothing, and a later reattach that reads 14 promotes', () => {
     const absent = browserData();

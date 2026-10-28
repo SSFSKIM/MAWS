@@ -18,7 +18,7 @@
 // session the browser knows, from memory (the snapshot, then the changes it hears), never from the index, which closes
 // before the browser's last flush at a quit. With no snapshot (the spine unavailable) nothing is reconciled and no
 // activity is written, as an unavailable index wrote none.
-import { existsSync, mkdirSync, renameSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readSync, renameSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { BROWSER_COLUMNS, BROWSER_HANDOFF_INDEX_VERSION, BROWSER_TABLES, stagingTable } from '@shared/browser/data-schema';
@@ -119,10 +119,14 @@ export class BrowserData {
   }
 }
 
-// The index's `user_version` as committed, on a read-only connection; null when there is no index file yet or it cannot
-// be read, which reads as not ready.
+// The index's `user_version` as committed; null when there is no index file yet or it cannot be read, which reads as not
+// ready. With no -wal beside it, no connection holds the index in WAL mode and the file is whole, so its header holds
+// the committed version, read as bytes: SQLite's read-only open of a WAL database creates its -wal and -shm, files of
+// the spine's that a run refused the spine must not create (§2). With a -wal, a read-only connection reads what the WAL
+// committed beyond the header.
 function indexVersion(path: string): number | null {
   if (!existsSync(path)) return null;
+  if (!existsSync(`${path}-wal`)) return headerVersion(path);
   let db: DatabaseSync | undefined;
   try {
     db = new DatabaseSync(path, { readOnly: true });
@@ -133,6 +137,26 @@ function indexVersion(path: string): number | null {
     return null;
   } finally {
     db?.close();
+  }
+}
+
+// The database header's user_version (bytes 60 to 63, big-endian, of SQLite's 100-byte header); an empty file is a
+// database at version 0, and one without SQLite's header reads as not ready.
+const SQLITE_HEADER = 'SQLite format 3\0';
+function headerVersion(path: string): number | null {
+  let fd: number | undefined;
+  try {
+    fd = openSync(path, 'r');
+    const header = Buffer.alloc(100);
+    const read = readSync(fd, header, 0, 100, 0);
+    if (read === 0) return 0;
+    if (read < 100 || header.toString('latin1', 0, 16) !== SQLITE_HEADER) throw new Error('not a database header');
+    return header.readUInt32BE(60);
+  } catch (error) {
+    console.warn(`[browser] the index's version could not be read (${message(error)}); the browser's data waits`);
+    return null;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
 }
 
