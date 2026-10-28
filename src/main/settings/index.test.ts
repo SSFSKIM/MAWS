@@ -3,7 +3,7 @@ import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2: the router's
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
 
 // A fake nativeTheme that behaves like Electron's (`shouldUseDarkColors` follows `themeSource`, `system` follows the
 // fake OS), one fake app window that records its background colour and the events sent to it, and an `ipcMain` that
@@ -79,7 +79,7 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 const invoke = (name: string, input?: unknown) =>
   electron.handlers.get(`maws:cmd:${name}`)!({ sender: electron.win.webContents, senderFrame: electron.win.webContents.mainFrame }, input);
-const state = (theme: string, resolvedTheme: string) => ({ settings: { ...SETTINGS_DEFAULTS_V19, theme }, resolvedTheme });
+const state = (theme: string, resolvedTheme: string) => ({ settings: { ...SETTINGS_DEFAULTS_V20, theme }, resolvedTheme });
 const changed = (theme: string, resolvedTheme: string) => ['maws:evt:settings.changed', state(theme, resolvedTheme)];
 const clearRecords = () => {
   electron.win.backgrounds = [];
@@ -103,7 +103,7 @@ describe('theme switching in main', () => {
     expect(electron.theme.themeSource).toBe('dark');
     expect(electron.win.backgrounds).toEqual(['#131313']);
     expect(electron.win.sent).toEqual([changed('dark', 'dark')]);
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ ...SETTINGS_DEFAULTS_V19, theme: 'dark' });
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ ...SETTINGS_DEFAULTS_V20, theme: 'dark' });
     await expect(invoke('settings.get')).resolves.toEqual({ ok: true, value: state('dark', 'dark') });
   });
 
@@ -111,12 +111,12 @@ describe('theme switching in main', () => {
   it('settings.set of one gateway field changes that field alone, and settings.changed carries the whole state', async () => {
     startSettings(file);
     clearRecords();
-    const whole = { settings: { ...SETTINGS_DEFAULTS_V19, gateway: { ...SETTINGS_DEFAULTS_V19.gateway, relayUnreachable: 'wait' } }, resolvedTheme: 'light' };
+    const whole = { settings: { ...SETTINGS_DEFAULTS_V20, gateway: { ...SETTINGS_DEFAULTS_V20.gateway, relayUnreachable: 'wait' } }, resolvedTheme: 'light' };
     await expect(invoke('settings.set', { gateway: { relayUnreachable: 'wait' } })).resolves.toEqual({ ok: true, value: whole });
     expect(electron.win.sent).toEqual([['maws:evt:settings.changed', whole]]);
     await expect(invoke('settings.set', { notifications: { kinds: { errors: false } } })).resolves.toMatchObject({
       ok: true,
-      value: { settings: { notifications: { enabled: true, sound: false, kinds: { ...SETTINGS_DEFAULTS_V19.notifications.kinds, errors: false } } } },
+      value: { settings: { notifications: { enabled: true, sound: false, kinds: { ...SETTINGS_DEFAULTS_V20.notifications.kinds, errors: false } } } },
     });
   });
   // C11 end

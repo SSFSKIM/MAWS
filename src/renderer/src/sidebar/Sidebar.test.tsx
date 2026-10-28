@@ -16,7 +16,7 @@ import { registerSessionCreator } from '../keymap/actions-runtime';
 import { closeDialog, useDialogs } from '../sessions/dialogs';
 import { SessionDialogs } from '../sessions/SessionDialogs';
 import { Toolbar } from '../app/Toolbar';
-import { digest, item, project, record } from '../../../../test/support/builders';
+import { digest, item, project, record, status } from '../../../../test/support/builders';
 import { registerAction } from '../keymap/actions-runtime'; // C11
 import { useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
@@ -670,6 +670,29 @@ describe('an expanded project', () => {
     // C10: a live session offers no Resume; "Fork to a new worktree…" sits beside the fork in place
     expect(items.map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Open in split', 'Pin', 'Rename…', 'Fork', 'Fork to a new worktree…', 'Archive', 'Delete conversation…']);
     expect(items.map((m) => m.hasAttribute('data-disabled'))).toEqual([false, true, true, true, true, true, true, true, true]);
+  });
+
+  // P5 O2 M2: the owner's Keep running mark, offered while the session's engine status reports it
+  it('offers Keep running while the engine status reports the mark, and Stop keeping running once it holds', async () => {
+    const id = idOf('Charter + research');
+    const bare = bareIdOf('Charter + research'); // main's id, which the bridge receives
+    const fake = fakeClient({ 'session.setKeep': (input: { keep: boolean }) => ({ kept: input.keep }) });
+    window.maws = fake.client as unknown as PreloadBridge;
+    expand('proj-maws');
+    render(<Sidebar />);
+    fireEvent.contextMenu(row('Charter + research'));
+    expect(within(await screen.findByRole('menu')).queryByRole('menuitem', { name: 'Keep running' })).toBeNull(); // no mark reported yet
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+    const live = useSessions.getState().engine.get(id) ?? status(id);
+    act(() => useSessions.getState().applyStatuses([{ ...live, kept: false }], TEST_MACHINE));
+    fireEvent.contextMenu(row('Charter + research'));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Keep running' }));
+    expect(fake.invoked('session.setKeep')).toEqual([{ appSessionId: bare, keep: true }]);
+    act(() => useSessions.getState().applyStatuses([{ ...live, kept: true }], TEST_MACHINE));
+    fireEvent.contextMenu(row('Charter + research'));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Stop keeping running' }));
+    expect(fake.invoked('session.setKeep')).toEqual([{ appSessionId: bare, keep: true }, { appSessionId: bare, keep: false }]);
   });
 
   it('the hover overflow offers the same actions without opening the session', async () => {

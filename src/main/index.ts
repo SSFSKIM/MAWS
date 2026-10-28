@@ -10,9 +10,9 @@ import { hostname, totalmem } from 'node:os'; // C12: the default memory budget;
 import { app, BrowserWindow, dialog, screen } from 'electron';
 import type { ClientRef } from '@shared/ipc/client';
 import { pageOf } from './ipc/clients';
-import { createHosts } from './hosts';
+import { createHosts, prepareLaunch, refuseTestLaunchOnDefaultProfile, type LaunchShape } from './hosts'; // P5 O2 M7: prepareLaunch; the landing: the refusal
 import { dispatchLocal, installRouter } from './ipc/router'; // P5 O6 M3: dispatchLocal, the local link's and the stand-in's
-import { startSettings } from './settings';
+import { startSettings, type SettingsService } from './settings';
 import { startWithProfileLock } from './files/profile-lock';
 import { describeMainBuild, loadedBundlePath, olderInstanceNotice, staleBuildCheck, type MainBuild } from './build-identity'; // E11 §2.7; F2b 2.7b
 import { builtAtLabel } from '@shared/app/build-time'; // E11 §2.7
@@ -98,6 +98,7 @@ import { captureRegion } from './layout/capture-region'; // P3-G
 import { createClaudeUsageApp, execRunner } from './gateway/claude-usage-app';
 import { startEngineConfigure } from './settings/engine-configure';
 import { startHostConfigure } from './settings/host-configure'; // E10
+import { interestSet, startInterest } from './sessions/interest'; // P5 O2 M2
 import { revealPath } from './settings/reveal';
 import { sessionSettingsOf } from './settings/session-settings';
 import { knownSessionDirectories } from './settings/session-directories';
@@ -178,6 +179,9 @@ process.on('SIGUSR1', () => {});
 
 // A fresh profile for the end-to-end smoke (and anyone else who wants one); must be set before the app is ready.
 if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DATA);
+// P5 O2 landing: a test or harness launch never runs on the default profile, whose daemon and LaunchAgent are the
+// owner's; it exits here, before the profile lock, the machine identity, the settings or a host (hosts/mode.ts).
+refuseTestLaunchOnDefaultProfile();
 // The smoke runs unattended, so nothing may wait on a person: Chromium keeps its storage key in a mock keychain
 // instead of asking the login keychain, whose access prompt an unsigned or re-signed build can raise.
 if (process.env.MAWS_E2E) app.commandLine.appendSwitch('use-mock-keychain');
@@ -259,12 +263,28 @@ void startWithProfileLock(app, () => {
     return;
   }
   bindLocalMachine(local); // P5 O6 M2: the router's, `emit`'s and every app window's local machine
+  // P5 O2 M7: the settings are read before the hosts, and the launch's shape (`supervisor.shape`, read once) settled
+  // before they are created: the default profile's LaunchAgent installed, repaired or uninstalled first
+  const settings = startSettings(join(app.getPath('userData'), 'settings.json'));
+  const launch = prepareLaunch(settings.state().settings.supervisor.shape);
+  const machine = { local, localName };
+  if (!(launch instanceof Promise)) return startMain(settings, launch, machine);
+  void launch.then(
+    (settled) => startMain(settings, settled, machine),
+    (error: unknown) => {
+      console.error('[hosts] the launch could not settle its shape; quitting', error);
+      app.exit(1);
+    },
+  );
+}, { build: MAIN_BUILD, onSecondInstance: answerSecondLaunch }); // E11 §2.7
+
+function startMain(settings: SettingsService, launch: LaunchShape, { local, localName }: { local: MachineRef; localName: string }): void {
   installContentSecurityPolicy();
   // C9 block begin: the harness's fake session directories; a terminal's links open through pty.openLink
   if (process.env.MAWS_HARNESS === '1') prepareHarness();
   registerPtyOpenLink();
   // C9 block end
-  const hosts = createHosts(MAIN_BUILD); // E11 §2.7: main's build for host.status
+  const hosts = createHosts(MAIN_BUILD, launch); // E11 §2.7: main's build for host.status; P5 O2 M7: the launch's shape
   // P5 O8 M1: this profile's org session (src/main/org/org-session.ts): the sign-in from a pairing code, the held org
   // state and the hub's credential, read from <userData>/org/ in the background; a profile that never signs in makes no
   // keys, files or requests. A development build started with MAWS_DEV_ORG=<dir> runs O7's development session instead
@@ -321,7 +341,6 @@ void startWithProfileLock(app, () => {
   // P5 O1 M3 (OX4): the client port, the one way a machine-bound service reaches the person's screen: dialogs, the
   // Replace question, Finder, the browser, notifications, the badge and focus. `openWindow` is read when a focus needs it.
   const clientPort = electronClientPort({ env: process.env, openWindow: () => openWindow() });
-  const settings = startSettings(join(app.getPath('userData'), 'settings.json'));
   // E11: every will-quit step below joins one ordered list behind one listener (tracker row E10 "14 will-quit listeners");
   // a step's promise (the hosts' draining close of a kept supervisor's socket) holds the exit, bounded by the port's grace;
   // P4 W2-B: the hosts' stop is a drain, run before the rest, which stop once it has settled
@@ -600,6 +619,18 @@ void startWithProfileLock(app, () => {
     env: process.env,
   });
   shutdown.add('host configure', stopHostConfigure);
+  // P5 O2 M2: the sessions this app holds open, which the engine host's idle release never stops
+  const stopInterest = startInterest({
+    sessions: () => interestSet(layout.get('main.tabs'), sessions.model.visibleSessions(), local), // P5 O6: the local machine's
+    onChange: (listener) => {
+      const offs = [layout.onChange((key) => { if (key === 'main.tabs') listener(); }), sessions.model.on('visible', () => listener())];
+      return () => offs.forEach((off) => off());
+    },
+    streaming: () => hosts.streaming('engine-host'),
+    onStreaming: (listener) => hosts.onStreaming('engine-host', listener),
+    dispatch: (input) => hosts.dispatch('engine-host', 'host.interest', input) as Promise<CommandResult<'host.interest'>>,
+  });
+  shutdown.add('interest', stopInterest);
   // C12 start: the Settings tab's read of the configuration main holds for it
   registerMainHandler('settings.engineApplied', () => engineConfigure.applied());
   // C12 end
@@ -871,7 +902,7 @@ void startWithProfileLock(app, () => {
     // C3's engine host stops its sessions within the grace; a host that cannot answer (not started, or a build without
     // C3's command) has nothing to stop. E10: through the quit's stop-all (`host.stopAll` to a detached supervisor, which
     // then exits; `engine.shutdown` to a utility host), and keep offered in detached mode with the setting's default.
-    ...engineQuitDeps(hosts, () => settings.state().settings),
+    ...engineQuitDeps(hosts, () => settings.state().settings, () => launch.mode === 'daemon'), // P5 O2 M7: terminals outlive the app on the daemon shape
     // debt wave 6: past the bound, the ladder's SIGKILL rung for the engines still the engine host's children
     engines: { hostPid: () => hosts.snapshot('engine-host').pid, ps: listProcesses, kill: (pid) => process.kill(pid, 'SIGKILL') },
     // E5 start: the unsaved files the windows pushed, and Save all's round trip
@@ -931,4 +962,4 @@ void startWithProfileLock(app, () => {
     orgFeed.close();
     void orgSession?.close();
   });
-}, { build: MAIN_BUILD, onSecondInstance: answerSecondLaunch }); // E11 §2.7
+}

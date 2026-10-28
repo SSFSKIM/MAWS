@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HostState, PreloadBridge, SettingsState } from '@shared/ipc/schema';
 import { TEST_MACHINE } from '../../../test/support/machine';
-import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
 import { SUPERVISOR_NOTICES } from './app/copy';
 import { updatedStatus } from './test-support/host-status';
 
@@ -46,7 +46,7 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
     send('pty.data', { ptyId: 'p1', offset: line.byteLength, data: new TextEncoder().encode('MAWS_ECHO_OK\r\n$ ') });
     markEchoed();
   };
-  const state = () => ({ settings: { ...SETTINGS_DEFAULTS_V19, theme }, resolvedTheme: theme === 'dark' ? 'dark' : 'light' });
+  const state = () => ({ settings: { ...SETTINGS_DEFAULTS_V20, theme }, resolvedTheme: theme === 'dark' ? 'dark' : 'light' });
   const answer = (name: string, input: { theme: typeof theme; data: string }) => {
     switch (name) {
       case 'settings.set':
@@ -60,7 +60,7 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
         return HOSTS[name];
       // E10: the supervisor's status the hosts store reads at connect (the engine host in the app, as under the harness)
       case 'host.status':
-        return { transport: 'utility', state: 'ready', supervisor: null, appBuildId: 'b', appWire: 'w', mainBuild: { version: '0.0.0', commit: 'ac8724a6', builtAt: '2026-10-08T09:05:53.000Z' }, matches: null, reason: null, waitingLiveSessions: null, lastExit: null };
+        return { transport: 'utility', state: 'ready', supervisor: null, appBuildId: 'b', appWire: 'w', mainBuild: { version: '0.0.0', commit: 'ac8724a6', builtAt: '2026-10-08T09:05:53.000Z' }, matches: null, reason: null, waitingLiveSessions: null, lastExit: null, daemon: null, daemonUnavailable: null };
       case 'fs.state':
         return {
           configHome: '/Users/new/.claude',

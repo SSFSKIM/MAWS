@@ -16,6 +16,7 @@ import { orgKeyOf, sessionsOfRow } from '../stores/org-projects';
 import { useSessions } from '../stores/sessions';
 import { PROJECT_ACTION_IDS, PROJECT_ACTIONS, runProjectAction, useProjectActionEnabled, type ProjectActionId } from './project-actions';
 import { openResumeChooser } from '../resume/host'; // P2-D
+import { KEEP_RUNNING } from './copy'; // P5 O2 M2
 
 export type MenuTarget = { kind: 'machine'; machine: MachineRef } | { kind: 'session'; appSessionId: AppSessionId } | { kind: 'project'; projectId: ProjectId };
 
@@ -59,8 +60,28 @@ export function SidebarMenuContent({ target }: { target: MenuTarget | null }) {
 
 function SessionItems({ appSessionId, dropdown = false }: { appSessionId: AppSessionId; dropdown?: boolean }) {
   const record = useSessions((s) => s.records.get(appSessionId));
+  const kept = useSessions((s) => s.engine.get(appSessionId)?.kept); // P5 O2 M2: undefined while no status reports it
   if (!record) return null;
-  return sessionActionsFor(record).map((id) => <SessionItem key={id} id={id} record={record} dropdown={dropdown} />);
+  const foreign = record.holder.kind === 'terminal' || record.holder.kind === 'background_job'; // D-12: the opens only
+  return (
+    <>
+      {sessionActionsFor(record).map((id) => <SessionItem key={id} id={id} record={record} dropdown={dropdown} />)}
+      {kept !== undefined && !foreign && <KeepItem appSessionId={appSessionId} kept={kept} dropdown={dropdown} />}
+    </>
+  );
+}
+
+// P5 O2 M2: the owner's Keep running mark (`session.setKeep`), offered beside a session MAWS may act on
+function KeepItem({ appSessionId, kept, dropdown }: { appSessionId: AppSessionId; kept: boolean; dropdown?: boolean }) {
+  const toggle = async () => {
+    const result = await ipc.invoke('session.setKeep', { appSessionId, keep: !kept });
+    if (!result.ok) console.error('[sidebar] session.setKeep failed', result.error);
+  };
+  return (
+    <Item dropdown={dropdown} enabled onSelect={() => void toggle()}>
+      {kept ? KEEP_RUNNING.stopKeeping : KEEP_RUNNING.keep}
+    </Item>
+  );
 }
 
 function SessionItem({ id, record, dropdown }: { id: SessionActionId; record: SessionRecord; dropdown?: boolean }) {

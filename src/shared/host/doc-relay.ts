@@ -18,7 +18,12 @@ export interface RelayPort {
   on(event: 'close', listener: () => void): unknown;
   start(): void;
   close(): void;
+  // P5 O2 M5: told why the relay ends it, just before its close: the host's `documents.closed` (`host`, `reset`), or the
+  // connection's end (`upstream`). `mawsd`'s endpoint channels report it (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md).
+  closedBy?(reason: RelayCloseReason): void;
 }
+
+export type RelayCloseReason = 'host' | 'reset' | 'upstream';
 
 // The served connection to the supervisor, as the relay uses it.
 export interface RelayLink {
@@ -41,21 +46,21 @@ export class MainDocRelay {
 
   // A served connection: channels open on it from here.
   connect(link: RelayLink): void {
-    this.closeAll();
+    this.closeAll('upstream');
     this.link = link;
   }
 
   // The connection is gone: the host ended every channel with it, so every window's port is ended here.
   disconnect(): void {
     this.link = null;
-    this.closeAll();
+    this.closeAll('upstream');
   }
 
   // False (nothing asked, the port untouched) when no connection is served.
   open({ channel, artifactId, actor, doc }: HostDoc, port: RelayPort, owner: string | null): boolean {
     const link = this.link;
     if (!link) return false;
-    this.forget(channel)?.port.close(); // a number main reused: the stale port goes with it
+    this.forget(channel)?.port.close(); // a number main reused: the stale port goes with it (P5 O2 M5: no reason; nothing ended it)
     const entry: Relayed = { port, owner };
     this.channels.set(channel, entry);
     link.postMessage({ t: 'documents.open', channel, artifactId, actor, ...(doc && { doc }) });
@@ -75,9 +80,12 @@ export class MainDocRelay {
     this.channels.get(channel)?.port.postMessage(frame);
   }
 
-  // The host ended the channel (`documents.closed`).
-  closed(channel: number): void {
-    this.forget(channel)?.port.close();
+  // The host ended the channel (`documents.closed`; P5 O2 M5: with its reason, `upstream` when the connection ended).
+  closed(channel: number, reason: RelayCloseReason = 'host'): void {
+    const entry = this.forget(channel);
+    if (!entry) return;
+    entry.port.closedBy?.(reason);
+    entry.port.close();
   }
 
   // The client ended (its page closed, reloaded or crashed): its channels end on both sides.
@@ -90,8 +98,8 @@ export class MainDocRelay {
     }
   }
 
-  private closeAll(): void {
-    for (const channel of [...this.channels.keys()]) this.closed(channel);
+  private closeAll(reason: RelayCloseReason): void {
+    for (const channel of [...this.channels.keys()]) this.closed(channel, reason);
   }
 
   private forget(channel: number): Relayed | null {

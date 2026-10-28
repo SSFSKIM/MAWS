@@ -33,7 +33,7 @@ import * as maws from './schema/maws';
 import * as side from './schema/side';
 // E3 end
 // C11 start
-import { SETTINGS_DEFAULTS_V19 } from '../settings/defaults';
+import { SETTINGS_DEFAULTS_V20 } from '../settings/defaults';
 // C11 end
 // E9 start
 import * as voice from './schema/voice';
@@ -68,12 +68,13 @@ import * as connectors from './schema/connectors'; // P3-H H3b
 import * as delivery from './schema/delivery'; // P4-B5
 import * as customization from './schema/customization'; // UX2-K
 import * as catalog from './schema/catalog'; // P4-AGG M2
+import * as daemon from './schema/daemon'; // P5 O2 M5
 import * as machine from './schema/machine'; // P5 O6 M1
 import * as machines from './schema/machines'; // P5 O6 M3
 import * as org from './schema/org'; // P5 O8 M1
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
-const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */, designSystems /* P3-D */, presentations /* P3-C M6 */, connectors /* P3-H H3b */, delivery /* P4-B5 */, customization /* UX2-K */, catalog /* P4-AGG M2 */, machine /* P5 O6 M1 */, machines /* P5 O6 M3 */, org /* P5 O8 M1 */ } satisfies Record<
+const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */, designSystems /* P3-D */, presentations /* P3-C M6 */, connectors /* P3-H H3b */, delivery /* P4-B5 */, customization /* UX2-K */, catalog /* P4-AGG M2 */, daemon /* P5 O2 M5 */, machine /* P5 O6 M1 */, machines /* P5 O6 M3 */, org /* P5 O8 M1 */ } satisfies Record<
   Namespace,
   { commands: object; events: object }
 >;
@@ -347,7 +348,7 @@ describe('ipc schema validates both directions', () => {
   });
 
   describe('command output (renderer, on receipt)', () => {
-    const state = { settings: { ...SETTINGS_DEFAULTS_V19, theme: 'system' }, resolvedTheme: 'dark' };
+    const state = { settings: { ...SETTINGS_DEFAULTS_V20, theme: 'system' }, resolvedTheme: 'dark' };
 
     it('accepts a settings state and returns it unchanged', () => {
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
@@ -382,7 +383,7 @@ describe('ipc schema validates both directions', () => {
     it('accepts well-formed events unchanged', () => {
       const exit = { ptyId: 'p1', exitCode: null, signal: null };
       expect(validateEventPayload('pty.exit', exit)).toEqual({ ok: true, value: exit });
-      const changed = { settings: { ...SETTINGS_DEFAULTS_V19, theme: 'light' }, resolvedTheme: 'light' };
+      const changed = { settings: { ...SETTINGS_DEFAULTS_V20, theme: 'light' }, resolvedTheme: 'light' };
       expect(validateEventPayload('settings.changed', changed)).toEqual({ ok: true, value: changed });
     });
 
@@ -614,13 +615,13 @@ describe('ipc schema validates both directions', () => {
       // added since; E2's `deliverables` was too, until P3-L's cutover removed it).
       const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
       for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
-      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */, 'designSystems' /* P3-D */, 'presentations' /* P3-C M6 */, 'connectors' /* P3-H H3b */, 'delivery' /* P4-B5 */, 'customization' /* UX2-K */, 'catalog' /* P4-AGG M2 */, 'machine' /* P5 O6 M1 */, 'machines' /* P5 O6 M3 */, 'org' /* P5 O8 M1 */]);
+      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */, 'designSystems' /* P3-D */, 'presentations' /* P3-C M6 */, 'connectors' /* P3-H H3b */, 'delivery' /* P4-B5 */, 'customization' /* UX2-K */, 'catalog' /* P4-AGG M2 */, 'daemon' /* P5 O2 M5 */, 'machine' /* P5 O6 M1 */, 'machines' /* P5 O6 M3 */, 'org' /* P5 O8 M1 */]);
       for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });
 
-    it('settings.get and settings.changed carry the whole version 19 state', () => { // P4-R8: the app MCP servers; P4-A2: the launch profile
-      const state = { settings: { ...SETTINGS_DEFAULTS_V19, engine: { ...SETTINGS_DEFAULTS_V19.engine, mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }], launchProfile: { plugins: { off: ['ptc@ptc-tool'] }, hooks: 'none' } }, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
+    it('settings.get and settings.changed carry the whole version 20 state', () => { // P4-R8: the app MCP servers; P4-A2: the launch profile
+      const state = { settings: { ...SETTINGS_DEFAULTS_V20, engine: { ...SETTINGS_DEFAULTS_V20.engine, mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }], launchProfile: { plugins: { off: ['ptc@ptc-tool'] }, hooks: 'none' } }, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
       expect(validateEventPayload('settings.changed', state).ok).toBe(true);
       expect(validateEventPayload('settings.changed', { ...state, settings: { ...state.settings, version: 2 } }).ok).toBe(false);
@@ -1155,14 +1156,15 @@ describe('ipc schema validates both directions', () => {
       mode: 'detached', pid: 4321, startedAt: '2026-10-06T10:00:00.000Z', buildId: '0123456789abcdef', protocol: 1, wire: 'fedcba9876543210', liveSessions: 1, rows: 2,
       idleExitMs: 600_000, idleExitAt: null, exitWhenIdle: false, socketPath: '/u/supervisor/host.sock', logPath: '/u/supervisor/host.log', orphansKilled: 0,
     };
-    const status = { transport: 'detached', state: 'ready', supervisor, appBuildId: '0123456789abcdef', appWire: 'fedcba9876543210', mainBuild: { version: '0.0.0', commit: 'ac8724a6', builtAt: '2026-10-08T09:05:53.000Z' }, matches: 'same', reason: null, waitingLiveSessions: null, lastExit: null };
+    const status = { transport: 'detached', state: 'ready', supervisor, appBuildId: '0123456789abcdef', appWire: 'fedcba9876543210', mainBuild: { version: '0.0.0', commit: 'ac8724a6', builtAt: '2026-10-08T09:05:53.000Z' }, matches: 'same', reason: null, waitingLiveSessions: null, lastExit: null, daemon: null, daemonUnavailable: null }; // P5 O2 M7: the embedded shape
 
     it('adds the host namespace: four engine-host commands (three main-only senders), three main-owned, one event each side', () => {
+      // P5 O2 M2 adds host.interest (main-only, below)
       // P5 O10 M7: `host.op` and `host.opQuery`, lane B's operation ledger, are the endpoint's (main-only: never a window's)
-      expect(Object.keys(host.commands)).toEqual(['host.supervisorStatus', 'host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.op', 'host.opQuery', 'host.status', 'host.restart', 'host.openLog']);
+      expect(Object.keys(host.commands)).toEqual(['host.supervisorStatus', 'host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.interest', 'host.op', 'host.opQuery', 'host.status', 'host.restart', 'host.openLog']);
       const owners = Object.fromEntries(Object.entries(host.commands).map(([name, spec]) => [name, spec.owner]));
       expect(owners).toEqual({
-        'host.supervisorStatus': 'engine-host', 'host.configure': 'engine-host', 'host.stopAll': 'engine-host', 'host.exitWhenIdle': 'engine-host',
+        'host.supervisorStatus': 'engine-host', 'host.configure': 'engine-host', 'host.stopAll': 'engine-host', 'host.exitWhenIdle': 'engine-host', 'host.interest': 'engine-host',
         'host.op': 'engine-host', 'host.opQuery': 'engine-host',
         'host.status': 'main', 'host.restart': 'main', 'host.openLog': 'main',
       });
@@ -1170,6 +1172,19 @@ describe('ipc schema validates both directions', () => {
       // only main stops, configures or arms the supervisor: a renderer's stopAll would read as a crash to main's transport
       expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.op', 'host.opQuery']));
       expect([...NAMES.host.commands]).toEqual(['host.supervisorStatus', 'host.status', 'host.restart', 'host.openLog']);
+    });
+
+    it('P5 O2 M2: host.interest carries a client\'s full interest set, main-only; the status names the release', () => {
+      expect(MAIN_ONLY_COMMANDS).toContain('host.interest');
+      expect([...NAMES.host.commands]).not.toContain('host.interest');
+      expect(validateCommandInput('host.interest', { sessions: [] }).ok).toBe(true);
+      expect(validateCommandInput('host.interest', { sessions: ['a', 'b'] }).ok).toBe(true);
+      expect(validateCommandInput('host.interest', { sessions: [''] }).ok).toBe(false);
+      expect(validateCommandInput('host.interest', { sessions: ['a'], extra: 1 }).ok).toBe(false);
+      expect(validateCommandInput('host.interest', { sessions: Array.from({ length: 10_001 }, (_, i) => `s${i}`) }).ok).toBe(false);
+      expect(validateEventPayload('host.supervisorStatus', { ...supervisor, release: { role: 'server', idleMs: 86_400_000 } }).ok).toBe(true);
+      expect(validateEventPayload('host.supervisorStatus', { ...supervisor, release: { role: 'laptop', idleMs: null } }).ok).toBe(true);
+      expect(validateEventPayload('host.supervisorStatus', { ...supervisor, release: { role: 'desktop', idleMs: null } }).ok).toBe(false);
     });
 
     it('validates the supervisor status, its commands and the app-side status', () => {
@@ -1205,6 +1220,12 @@ describe('ipc schema validates both directions', () => {
       expect(validateEventPayload('host.status', waiting).ok).toBe(true);
       expect(validateEventPayload('host.status', { ...waiting, waitingLiveSessions: 1.5 }).ok).toBe(false);
       expect(validateEventPayload('host.status', { ...status, waitingLiveSessions: undefined }).ok).toBe(false);
+      // P5 O2 M7: the daemon shape: its transport, the daemon's own status, and why a launch asked for it runs embedded
+      const daemon = { pid: 4100, startedAt: 't', kind: 'unit', build: { version: '0.0.0', commit: 'c', builtAt: 't', buildId: 'b', engineHostBuildId: 'e' }, machine: 'mRef0123456789abcdefAB', profile: '/p', platform: 'darwin', role: 'laptop', hosts: { 'engine-host': { state: 'ready', pid: 1, build: 'e', liveSessions: 0 }, 'pty-host': { state: 'parked', pid: null, build: null, liveSessions: null } }, clients: { engineHost: true, ptyHost: false, machine: 1 }, idleExitAt: null, logPath: '/p/mawsd/mawsd.log', endpoint: { present: false, detail: null } };
+      expect(validateEventPayload('host.status', { ...status, transport: 'daemon', daemon }).ok).toBe(true);
+      expect(validateEventPayload('host.status', { ...status, daemonUnavailable: 'no LaunchAgent is installed' }).ok).toBe(true);
+      expect(validateEventPayload('host.status', { ...status, transport: 'daemon', daemon: { ...daemon, kind: 'remote' } }).ok).toBe(false);
+      expect(validateEventPayload('host.status', { ...status, daemon: undefined }).ok).toBe(false);
       expect(validateCommandInput('host.restart', { stopSessions: true }).ok).toBe(true);
       expect(validateCommandInput('host.restart', {}).ok).toBe(false);
       expect(validateCommandInput('host.openLog', undefined).ok).toBe(true);

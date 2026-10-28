@@ -38,6 +38,7 @@ export const grades = {
   'session.rewindFiles': 'manage',
   'session.setCwd': 'manage',
   'session.renameSession': 'manage',
+  'session.setKeep': 'manage', // P5 O2 M2: the Keep running mark changes when a session may be released
   'session.generateTitle': 'manage',
   'session.reloadPlugins': 'manage',
   'session.mcpReconnect': 'converse',

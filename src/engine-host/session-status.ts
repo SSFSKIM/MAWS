@@ -3,12 +3,16 @@
 // requested and effective with the pre-plan mode, the resolved model and engine version, the gateway verification and
 // the per-turn local auto-mode lane, C11's fast mode and plugin fields, MCP servers, background tasks, held peer
 // messages with their five-minute expiry, the memory sample, and C7's command catalogue. The session feeds it rows
-// after they were journaled and normalised; it writes nothing and emits no events.
+// after they were journaled and normalised; it writes nothing and emits no events. P5 O2 M2: it holds the process's
+// work state (work-state.ts), fed by the task snapshots, the cron tools in assistant frames at any depth, the main lane's
+// turn edges, the Stop callback and the durable crons' file, read at each Stop and at a resume's launch.
 import { PERMISSION_MODES, type AutoModeRefusalCode, type PermissionMode } from '@shared/graph/enums';
 import type { EventId, TaskId } from '@shared/graph/ids';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { InitializeResponse, ReloadPluginsResponse } from '@shared/wire/control';
+import type { CronRecord } from '@shared/engine/session-state-store'; // P5 O2 M2
+import { CRON_TOOLS, sessionCronsOf, WorkState, type CronRead, type LaunchKind } from './work-state'; // P5 O2 M2
 
 export const HELD_PEER_MESSAGE_TTL_MS = 5 * 60_000;
 
@@ -20,7 +24,7 @@ export type TrackedStatus = Pick<
   EngineSessionStatus,
   'engineState' | 'activity' | 'permissionMode' | 'prePlanMode' | 'fastMode' | 'plugins' | 'pluginErrors' | 'pluginWarnings' | 'backgroundTasks' | 'mcpServers' | 'heldPeerMessages' | 'memory'
   | 'pluginsObservedAt' /* P2-A */
-> & { gateway: Gateway; resolvedModel: string | null; engineVersion: string | null };
+> & { gateway: Gateway; resolvedModel: string | null; engineVersion: string | null; work: NonNullable<EngineSessionStatus['work']> /* P5 O2 M2 */ };
 
 const FAST_MODE_STATES = ['off', 'cooldown', 'on'] as const;
 const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
@@ -73,13 +77,27 @@ export class SessionStatusTracker {
     return this.currentTurnEventId;
   }
   private expiryTimer: ReturnType<typeof setTimeout> | null = null;
+  // P5 O2 M2: the work state, what it started from, and the durable crons' read
+  private readonly work: WorkState;
+  private readonly launchKind: LaunchKind;
+  private readonly durableCrons: () => CronRead;
+  private readonly onCronRecord: (record: CronRecord) => Promise<void>;
+  private recorded: string | null = null; // the cron record last written (or being written), as JSON; null after a failure
+  private readonly log: (line: string) => void;
 
   constructor(
     private readonly spec: LaunchSpec,
     private readonly onChange: () => void, // a held peer message expired
+    // P5 O2 M2: `onCronRecord` persists the cron record (P5 Decision Log 49), handed over at each Stop and cron tool
+    opts: { launchKind?: LaunchKind; durableCrons?: () => CronRead; onCronRecord?: (record: CronRecord) => Promise<void>; log?: (line: string) => void } = {},
   ) {
     this.requestedMode = spec.permissionMode ?? 'default';
     this.effectiveMode = this.requestedMode;
+    this.launchKind = opts.launchKind ?? (spec.resume === null ? 'fresh' : 'resumed');
+    this.work = new WorkState(this.launchKind);
+    this.durableCrons = opts.durableCrons ?? (() => []);
+    this.onCronRecord = opts.onCronRecord ?? (async () => {});
+    this.log = opts.log ?? (() => {});
   }
 
   snapshot(): TrackedStatus {
@@ -89,6 +107,7 @@ export class SessionStatusTracker {
       gateway: { ...this.gateway, localLane: this.gateway.localLane && { ...this.gateway.localLane } }, resolvedModel: this.resolvedModel, engineVersion: this.engineVersion,
       fastMode: { ...this.fastMode }, pluginsObservedAt: this.pluginsObservedAt /* P2-A */, plugins: this.plugins.map((p) => ({ ...p })), pluginErrors: this.pluginErrors.map((e) => ({ ...e })), pluginWarnings: this.pluginWarnings.map((w) => ({ ...w })),
       backgroundTasks: this.backgroundTasks.map((t) => ({ ...t })), mcpServers: this.mcpServers.map((s) => ({ ...s })), heldPeerMessages: this.heldPeerMessages.map((m) => ({ ...m })), memory: { ...this.memory },
+      work: this.work.snapshot(), // P5 O2 M2
     };
   }
 
@@ -129,10 +148,51 @@ export class SessionStatusTracker {
   }
 
   // A main-lane turn.started: the local-lane observation belongs to the turn it was made in (C11's correction).
+  // P5 O2 M2: and the work state's turn edge.
   turnStarted(eventId: EventId): void {
     this.currentTurnEventId = eventId;
     this.gateway.localLane = null;
+    this.work.turnStarted();
   }
+
+  // P5 O2 M2 start: the launch's state loaded (a `resumed` launch reads its cron record, P5 Decision Log 49, and any
+  // non-fresh one the durable crons), the main lane's turn.ended (an echo receipt is no turn), and the Stop callback's
+  // input with the durable crons read at it
+  launched(record: CronRecord | null): void {
+    if (this.launchKind === 'resumed') this.work.resumedWith(record);
+    if (this.launchKind !== 'fresh') this.work.durableRead(this.durableCrons());
+  }
+
+  turnEnded(): void {
+    this.work.turnEnded();
+  }
+
+  stopped(input: Record<string, unknown>): void {
+    this.work.stopped(sessionCronsOf(input, this.log), this.durableCrons());
+    this.record();
+  }
+
+  // The cron record, handed over when it differs from the one last written
+  private record(): void {
+    const record = this.work.cronRecord();
+    const json = JSON.stringify(record);
+    if (json === this.recorded) return;
+    this.recorded = json;
+    // a failed write is retried at the next Stop or cron tool, the same record included (the writer logs the failure)
+    this.onCronRecord(record).catch(() => {
+      if (this.recorded === json) this.recorded = null;
+    });
+  }
+
+  // A cron tool's tool_use block in an assistant frame, the main lane's or a subagent's
+  private observeCronTools(frame: Frame): void {
+    const content = (frame.message as { content?: unknown } | undefined)?.content;
+    if (list(content).some((block) => block.type === 'tool_use' && typeof block.name === 'string' && CRON_TOOLS.has(block.name))) {
+      this.work.cronTool();
+      this.record();
+    }
+  }
+  // P5 O2 M2 end
 
   // E8 (D-13): a successful reload_plugins answer is the session's plugins now, before the next turn's system/init; the
   // answer carries only a count of errors, so the last init's errors and warnings stay. Its commands and agents, in the
@@ -164,6 +224,7 @@ export class SessionStatusTracker {
 
   // One inbound frame (already journaled and normalised); `at` is its time.
   observe(frame: Frame, at: string): void {
+    if (frame.type === 'assistant') return this.observeCronTools(frame); // P5 O2 M2
     if (frame.type === 'stream_event') {
       const delta = (frame.event as { delta?: { safeguard_results?: unknown } } | undefined)?.delta;
       if (list(delta?.safeguard_results).some((r) => (r.status as { type?: unknown } | undefined)?.type === 'unavailable')) this.observeLocalLane(frame, at);
@@ -190,6 +251,7 @@ export class SessionStatusTracker {
         return;
       case 'background_tasks_changed':
         this.backgroundTasks = list(frame.tasks).map((t) => ({ taskId: String(t.task_id) as TaskId, taskType: String(t.task_type), description: String(t.description ?? ''), ambient: t.ambient === true }));
+        this.work.tasksChanged(); // P5 O2 M2
         return;
       case 'peer_message_hold':
         this.peerMessageHold(frame, at);

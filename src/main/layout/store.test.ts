@@ -62,6 +62,20 @@ describe('layout file store', () => {
     expect(reopened.get('panel.app-1')).toEqual({ tabs: [], activeTabId: null });
   });
 
+  it('P5 O2 M2: reports a renderer key set or deleted, never the window key', () => {
+    const store = new LayoutFileStore(file);
+    const keys: string[] = [];
+    const off = store.onChange((key) => void keys.push(key));
+    store.set('main.tabs', { version: 2 });
+    store.set('window.main', WINDOW);
+    store.delete('main.tabs');
+    store.delete('main.tabs'); // absent: nothing changed
+    off();
+    store.set('regions', { width: 240 });
+    expect(keys).toEqual(['main.tabs', 'main.tabs']);
+    store.flush();
+  });
+
   it('writes the window key 500 ms after its last change, and at once on flush', () => {
     vi.useFakeTimers();
     const store = new LayoutFileStore(file);

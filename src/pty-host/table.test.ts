@@ -43,6 +43,11 @@ interface Chunk {
 }
 
 function harness(environment: Record<string, string> = terminalEnvironment(BASE_ENV, { appVersion: '9.9.9' })) {
+  return harnessWith(Promise.resolve(environment));
+}
+
+// P5 O2 M4: a table whose environment resolves when the test says
+function harnessWith(environment: Promise<Record<string, string>>) {
   const chunks = new Map<string, Chunk[]>();
   const exits = new Map<string, EventPayload<'pty.exit'>>();
   const ackers = new Set<string>();
@@ -59,7 +64,7 @@ function harness(environment: Record<string, string> = terminalEnvironment(BASE_
     }
     return true;
   };
-  const table: PtyTable = createPtyTable({ emit, environment: Promise.resolve(environment) });
+  const table: PtyTable = createPtyTable({ emit, environment });
   tables.push(table);
   const bytes = (ptyId: string): Uint8Array => {
     const list = chunks.get(ptyId) ?? [];
@@ -217,6 +222,30 @@ describe('pty host checkpoint and replay window', () => {
     expect(attach.nextOffset).toBe(flow.total);
     expect(attach.replay).toEqual(h.bytes(ptyId).subarray(partial));
     expect(h.table.inspect(ptyId).flow).toMatchObject({ mode: 'flowing', acked: flow.total }); // attach resumed it
+  });
+
+  // P5 O2 M4: a remote viewer reads frames and the ring without taking the output credit from the reader that holds it
+  it('an attach with credit: false answers the replay and leaves a paused pty paused, acked unchanged; a crediting attach then resumes it', async () => {
+    const h = harness();
+    const { ptyId } = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'yes | head -c 5000000'] }));
+    await h.until(() => h.table.inspect(ptyId).flow.mode === 'paused', WAIT_MS, 'paused');
+    const partial = 100 * 1024;
+    h.table.ack({ ptyId, offset: partial });
+    h.table.checkpoint({ ptyId, offset: partial, state: 'STATE-AT-100K' });
+    const before = h.table.inspect(ptyId).flow;
+    const viewer = h.table.attach({ ptyId, credit: false });
+    expect(viewer.checkpoint).toEqual({ offset: partial, state: 'STATE-AT-100K' });
+    expect(viewer.replayFrom).toBe(partial);
+    expect(viewer.nextOffset).toBe(before.total);
+    expect(viewer.replay).toEqual(h.bytes(ptyId).subarray(partial));
+    expect(viewer.info.paused).toBe(true);
+    expect(h.table.inspect(ptyId).flow).toEqual(before); // paused, acked unchanged
+    await new Promise((r) => setTimeout(r, 200));
+    expect(h.table.inspect(ptyId).flow.total).toBe(before.total); // and still nothing flows
+
+    h.table.attach({ ptyId, credit: true });
+    expect(h.table.inspect(ptyId).flow).toMatchObject({ mode: 'flowing', acked: before.total });
+    await h.until(() => h.table.inspect(ptyId).flow.total > before.total, WAIT_MS, 'the pty resumed');
   });
 
   it('answers lossy when the flood outran the checkpoint: replay from the ring start, the whole ring', async () => {
@@ -468,6 +497,54 @@ describe('pty host lifecycle', () => {
     h.table.kill({ ptyId });
     await expect(h.exited(ptyId)).resolves.toEqual({ ptyId, exitCode: 0, signal: 1 });
     expect(h.table.list().ptys).toEqual([]);
+  });
+
+  // P5 O2 M4: the socket mode's exit order (exit now, SIGTERM) ends every live pty through its ladder
+  it('shutdown ends every live pty through its ladder, past an ignored HUP, and leaves a dead entry alone', async () => {
+    const h = harness();
+    const dead = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'exit 0'] }));
+    await h.exited(dead.ptyId);
+    const plain = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'sleep 30'] }));
+    const stubborn = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', "trap '' HUP; printf 'READY\\n'; while :; do read line; done"] }));
+    await h.until(() => h.text(stubborn.ptyId).includes('READY'), WAIT_MS, 'signal handlers installed');
+    await h.table.shutdown();
+    expect(h.exits.get(plain.ptyId)).toMatchObject({ signal: 1 });
+    expect(h.exits.get(stubborn.ptyId)).toMatchObject({ signal: 15 });
+    expect(h.table.list().ptys).toEqual([expect.objectContaining({ ptyId: dead.ptyId, alive: false })]);
+    for (const pid of [plain.pid, stubborn.pid]) expect(() => process.kill(pid, 0)).toThrow();
+  });
+
+  // P5 O2 M4 review: a spawn queued before the exit order's shutdown, or asked during it, never outlives it
+  it('fences spawns at shutdown: one waiting on the environment and one asked after shutdown began are refused, and no live pty remains', async () => {
+    const h = harness();
+    const stubborn = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', "trap '' HUP; printf 'READY\\n'; while :; do read line; done"] }));
+    await h.until(() => h.text(stubborn.ptyId).includes('READY'), WAIT_MS, 'signal handlers installed');
+    const queued = h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'sleep 30'] })); // not awaited: it waits on the environment
+    const shutdown = h.table.shutdown(); // the stubborn shell's ladder keeps it pending past HUP
+    const late = h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'sleep 30'] }));
+    await expect(queued).rejects.toThrow('the pty host is shutting down');
+    await expect(late).rejects.toThrow('the pty host is shutting down');
+    await shutdown;
+    expect(h.table.list().ptys.filter((pty) => pty.alive)).toEqual([]);
+  });
+
+  // P5 O2 M4: pty.recaptureEnv's table half: a fresh environment is used once it resolves; a spawn waiting keeps its own
+  it('uses a new environment for the spawns after it resolves, while a spawn already waiting keeps the one it awaited', async () => {
+    let resolveFirst!: (env: Record<string, string>) => void;
+    const first = new Promise<Record<string, string>>((resolve) => (resolveFirst = resolve));
+    const env = (mark: string) => ({ ...terminalEnvironment(BASE_ENV, { appVersion: '9.9.9' }), MAWS_TEST_MARK: mark });
+    const h = harnessWith(first);
+    const marked = (input: { ptyId: string }) => h.exited(input.ptyId).then(() => h.text(input.ptyId));
+    const printMark = () => spawnInput({ shell: '/bin/sh', args: ['-c', 'printf "mark=%s\\n" "$MAWS_TEST_MARK"'] });
+    const waiting = h.table.spawn(printMark());
+    let resolveSecond!: (env: Record<string, string>) => void;
+    h.table.setEnvironment(new Promise((resolve) => (resolveSecond = resolve)));
+    resolveFirst(env('first'));
+    expect(await marked(await waiting)).toContain('mark=first');
+    expect(await marked(await h.table.spawn(printMark()))).toContain('mark=first'); // the new capture has not resolved
+    resolveSecond(env('second'));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(await marked(await h.table.spawn(printMark()))).toContain('mark=second');
   });
 
   it('refuses a second live pty under the same session and label, and replaces a dead one', async () => {

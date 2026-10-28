@@ -145,6 +145,16 @@ export const SUPERVISOR = {
   cancel: 'Cancel',
   stopping: 'Stopping…',
   stopFailed: (why: string) => `The supervisor was not stopped · ${why}`,
+  // P5 O2 M7: the shape's switch, applied at the next launch, and the machine daemon's line
+  shape: 'Run sessions under the machine daemon',
+  shapeNote: 'Applies at the next launch. Sessions and terminals then run under mawsd, which keeps them running when MAWS quits.',
+  shapeLeaving: 'MAWS stops using the machine daemon when it opens again; this launch keeps running under it.',
+  shapeJoining: 'MAWS runs its sessions under the machine daemon when it opens again.',
+  daemon: 'Machine daemon',
+  daemonLine: (kind: 'unit' | 'private', pid: number, machine: string) => `${kind === 'unit' ? 'At login' : 'This profile only'} · pid ${pid} · machine ${machine}`,
+  daemonConnecting: 'Connecting',
+  daemonUnavailable: (why: string) => `Not in use this launch · ${why}`,
+  daemonEmbedded: 'Not in use · MAWS runs its sessions itself',
 };
 // E10 end
 

@@ -2,11 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandResult, MawsBridge, SettingsState } from '@shared/ipc/schema';
 import { TEST_MACHINE } from '../../../../test/support/machine';
 import { createSettingsStore } from './settings';
-import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
 
-const LIGHT: SettingsState = { settings: { ...SETTINGS_DEFAULTS_V19, theme: 'light' }, resolvedTheme: 'light' };
-const DARK: SettingsState = { settings: { ...SETTINGS_DEFAULTS_V19, theme: 'dark' }, resolvedTheme: 'dark' };
-const SYSTEM_DARK: SettingsState = { settings: { ...SETTINGS_DEFAULTS_V19, theme: 'system' }, resolvedTheme: 'dark' };
+const LIGHT: SettingsState = { settings: { ...SETTINGS_DEFAULTS_V20, theme: 'light' }, resolvedTheme: 'light' };
+const DARK: SettingsState = { settings: { ...SETTINGS_DEFAULTS_V20, theme: 'dark' }, resolvedTheme: 'dark' };
+const SYSTEM_DARK: SettingsState = { settings: { ...SETTINGS_DEFAULTS_V20, theme: 'system' }, resolvedTheme: 'dark' };
 
 // A client whose replies the test releases by hand, in any order, so event/reply orderings can be staged.
 function fakeClient() {

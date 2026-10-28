@@ -3,17 +3,34 @@
 // engine host through `buildLaunch`; C9's PTY host runs the same capture so terminals match). NUL-separated so
 // multi-line values survive; a chatty rc file that prints before the first pair is tolerated. On any failure (no shell,
 // a hang past the timeout, a non-zero exit) the host's own `process.env` stands in, with a logged warning.
+// P5 O2 M8: under a LaunchAgent or a systemd user unit there is no login shell and the environment is minimal, so the
+// shell is `$SHELL`, else the passwd entry's (`os.userInfo().shell`), else the platform's default (`loginShell`).
 import { spawn, type ChildProcess } from 'node:child_process';
+import { userInfo } from 'node:os';
 
 export const SHELL_CAPTURE_TIMEOUT_MS = 5_000;
 export const SHELL_CAPTURE_GRACE_MS = 250; // after the SIGKILL, before the capture gives up on the child
 const MAX_CAPTURE_BYTES = 16 * 1024 * 1024;
 
 export interface ShellCaptureOptions {
-  shell?: string; // default $SHELL, then /bin/zsh
+  shell?: string; // default loginShell()
   timeoutMs?: number;
   fallback?: NodeJS.ProcessEnv; // default process.env
   cache?: boolean; // default true: one capture per host start
+}
+
+// The user's login shell: $SHELL, else the passwd entry's shell, else /bin/zsh on macOS and /bin/sh elsewhere (P5 O2
+// M8's capture under a unit, whose environment may name no SHELL).
+export function loginShell(env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform, passwd: () => string | null = passwdShell): string {
+  return env.SHELL || passwd() || (platform === 'darwin' ? '/bin/zsh' : '/bin/sh');
+}
+
+function passwdShell(): string | null {
+  try {
+    return userInfo().shell || null;
+  } catch {
+    return null; // no passwd entry for this uid
+  }
 }
 
 const ENV_PAIR = /^[A-Za-z_][A-Za-z0-9_]*=/;
@@ -99,7 +116,7 @@ let cached: Promise<Record<string, string>> | null = null;
 export function captureShellEnvironment(opts: ShellCaptureOptions = {}): Promise<Record<string, string>> {
   const useCache = opts.cache ?? true;
   if (useCache && cached) return cached;
-  const shell = opts.shell ?? process.env.SHELL ?? '/bin/zsh';
+  const shell = opts.shell ?? loginShell();
   const timeoutMs = opts.timeoutMs ?? SHELL_CAPTURE_TIMEOUT_MS;
   const fallback = opts.fallback ?? process.env;
   const capture = runShellCapture({ shell, timeoutMs }).catch((error: unknown) => {

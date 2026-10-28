@@ -9,3 +9,6 @@ export const commands = [
 export const events = [
   'pty.hostState', 'pty.data', 'pty.exit',
 ] as const;
+
+// P5 O2 M4: only main (and `mawsd`, M5) asks the pty host to capture the login shell again; the renderer never does.
+export const mainOnlyCommands = ['pty.recaptureEnv'] as const;

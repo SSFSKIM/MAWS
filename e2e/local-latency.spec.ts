@@ -23,10 +23,14 @@
 // A measured group (gate.yml's MEASURED_E2E): `pnpm e2e:local-latency` sets MAWS_LOCAL_LATENCY_PERF=1, and the gate runs
 // it only when named, on the mini's exclusive instance behind the measured-job guard. It spends nothing and touches no
 // keychain: the stub makes no network call, and MAWS_E2E brings the mock keychain.
+// P5 O2 M7 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md): `pnpm e2e:local-latency-daemon` runs the same bench on
+// the daemon shape (MAWS_HOST_MODE=daemon), main reaching the engine host through the scratch profile's private `mawsd`,
+// whose relay is the hop OX7's budget holds against the same baseline; a measured group too.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
+import { DAEMON_FILES, daemonPaths } from '@shared/daemon/files';
 import type { AppSessionId } from '@shared/graph/ids';
 import { BENCH, budgetMisses, clockCheck, invalidReasons, latencyLine, summarize, type ClockBracket } from '../test/support/local-latency';
 import { MARKER_SOURCE, markerOf, writeLatencyEngine } from '../test/support/latency-engine';
@@ -147,7 +151,7 @@ test('local latency: delta to frame and command round trip of a lane B session o
   try {
     maws = await launchMaws({
       userData,
-      env: { MAWS_HARNESS: '0', MAWS_E2E_QUIET: '1', MAWS_HOST_MODE: 'detached', MAWS_E2E_ENGINE_BIN: bin },
+      env: { MAWS_HARNESS: '0', MAWS_E2E_QUIET: '1', MAWS_HOST_MODE: process.env.MAWS_HOST_MODE === 'daemon' ? 'daemon' : 'detached', MAWS_E2E_ENGINE_BIN: bin },
       // the bench's directory trusted and the user's default mode `default`, so the launch runs no trust bootstrap and
       // no auto-mode fallback: the stub's prelude is Session's minimal one
       prepare: ({ claudeConfigDir }) => {
@@ -219,21 +223,26 @@ test('local latency: delta to frame and command round trip of a lane B session o
   if (leftover !== null) throw leftover; // the body passed: a process of the scratch outliving it is the case's failure
 });
 
-// The app closed, then every process of the scratch killed (the detached supervisor by its lock's pid too), then the
-// supervisor's socket directory and the scratch removed. A survivor is answered, after the files are removed all the same.
+// The app closed, then every process of the scratch killed (the detached supervisor, and on the daemon shape `mawsd`,
+// by their locks' pids too), then their socket directories and the scratch removed. A survivor is answered, after the
+// files are removed all the same.
 async function removeScratch(root: string, userData: string, maws: MawsLaunch | null): Promise<unknown> {
-  const lock = (() => {
+  const lockAt = (path: string) => {
     try {
-      return JSON.parse(readFileSync(join(userData, 'supervisor', 'host.lock'), 'utf8')) as { pid: number; socketPath: string };
+      return JSON.parse(readFileSync(path, 'utf8')) as { pid: number; socketPath: string };
     } catch {
       return null;
     }
-  })();
+  };
+  const lock = lockAt(join(userData, 'supervisor', 'host.lock'));
+  const daemon = lockAt(join(userData, DAEMON_FILES.dir, DAEMON_FILES.lock));
   await maws?.cleanup().catch((error: unknown) => console.error(error));
   let leftover: unknown = null;
-  await killScratchProcesses(root, lock ? [lock.pid] : []).catch((error: unknown) => (leftover = error));
+  await killScratchProcesses(root, [lock, daemon].flatMap((l) => (l ? [l.pid] : []))).catch((error: unknown) => (leftover = error));
   const socketDir = lock ? tmpSocketDirOf(userData, lock.socketPath) : null;
   if (socketDir !== null) rmSync(socketDir, { recursive: true, force: true });
+  const { socketDir: daemonSockets } = daemonPaths(userData); // `mawsd`'s sockets' $TMPDIR fallback, when they took it
+  if (!daemonSockets.startsWith(root)) rmSync(daemonSockets, { recursive: true, force: true });
   rmSync(root, { recursive: true, force: true });
   return leftover;
 }

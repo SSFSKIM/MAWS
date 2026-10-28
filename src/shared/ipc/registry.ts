@@ -4,17 +4,18 @@
 import type * as z from 'zod';
 import type { IpcError } from './errors';
 import { MAIN_ONLY_COMMANDS } from './names';
-import { commands, events, HOST_EVENTS, type CommandSpec } from './schema';
+import { commands, events, HOST_EVENTS, PTY_HOST_EVENTS, type CommandSpec } from './schema';
 
 export interface WireRegistry {
   readonly commands: Readonly<Record<string, CommandSpec<z.ZodType, z.ZodType>>>;
   readonly events: Readonly<Record<string, z.ZodType>>;
   readonly hostEvents: readonly string[];
+  readonly ptyHostEvents: readonly string[]; // P5 O2 M4: what the pty host emits
   readonly mainOnly: ReadonlySet<string>; // commands only main sends; the rest are bridged to the renderer
 }
 
 // `satisfies`, not an annotation, so `typeof REGISTRY` keeps the production names.
-export const REGISTRY = { commands, events, hostEvents: HOST_EVENTS, mainOnly: new Set<string>(MAIN_ONLY_COMMANDS) } satisfies WireRegistry;
+export const REGISTRY = { commands, events, hostEvents: HOST_EVENTS, ptyHostEvents: PTY_HOST_EVENTS, mainOnly: new Set<string>(MAIN_ONLY_COMMANDS) } satisfies WireRegistry;
 
 // Types over a registry R.
 export type NameOf<R extends WireRegistry> = keyof R['commands'] & string;

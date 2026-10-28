@@ -830,3 +830,100 @@ test('p4/p4-agg-m4-signin: the engine\'s own sign-in over the control protocol, 
  const next = answered('next', 'mcp_status').at(-1).response.mcpServers;
  for (const name of ['fx-custom', 'fx-localhost', 'fx-pending', 'fx-cancel', 'fx-dynamic']) assert.equal(next.find((s) => s.name === name).status, 'connected', name);
 });
+// P5 O2 M2's spike (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M2 "The spike comes first"; scenarios/pass3/
+// p5-o2-stop-crons.mjs; findings-p5-o2-stop-crons.txt): what a Stop host callback registered through `initialize.hooks`
+// (maws_Stop_1) tells the engine host about the session's scheduled jobs, on the pinned engine 2.1.283 against the
+// scripted Messages API. Read from each launch's `step` notes: the frames of one prompt (or one wait), the probe's
+// answers to the Stop callbacks, and every request the script answered.
+const dir5=new URL('./fixtures/p5/',import.meta.url);
+const load5=n=>readFileSync(new URL(n+'.jsonl',dir5),'utf8').trim().split('\n').map(JSON.parse);
+const O2=['main','durable','durable-resume','session','session-resume'].map(s=>'p5-o2-stop-crons-'+s);
+const O2_HOOKS={Stop:[{hookCallbackIds:['maws_Stop_1'],timeout:10}]};
+const stepO2=(name,label)=>{const s=meta4(load5(name),'step').filter(x=>x.label===label);assert.equal(s.length,1,name+' '+label);return s[0];};
+const stopsO2=s=>s.frames.filter(f=>f.subtype==='hook_callback');
+const resultsO2=s=>s.frames.filter(f=>f.type==='result');
+const engineStartsO2=s=>s.frames.filter(f=>f.type==='command_lifecycle'&&f.state==='started'&&!f.sentByProbe);
+const toolResultsO2=(s,re)=>s.frames.filter(f=>f.type==='user').flatMap(f=>f.blocks.filter(b=>b.tool_result&&re.test(b.text)));
+const createdIdO2=s=>toolResultsO2(s,/^Scheduled recurring job /)[0].text.match(/job ([0-9a-f]{8})/)[1];
+const debugO2=name=>meta4(load5(name),'debug_lines')[0].lines;
+for(const name of O2)test('p5/'+name+' is ordered NDJSON with correlated replies, P5-O2 provenance on the pinned engine, the Stop callback registered, no managed settings, the owner file unchanged and no secret',()=>{
+ const text=readFileSync(new URL(name+'.jsonl',dir5),'utf8');assert.ok(!text.includes('sk-ant-'));if(secret&&secret.length>=8)assert.ok(!text.includes(secret));
+ const rows=text.trim().split('\n').map(JSON.parse);
+ assert.equal(pass3Open(rows).size,0);
+ const prov=meta4(rows,'provenance')[0];
+ assert.deepEqual([prov.child,prov.engineVersion,prov.pin,prov.document],['P5-O2','2.1.283','063f83c39b873ee8401870c12179a859c0ac31a5','docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md']);
+ assert.deepEqual(prov.hooks,O2_HOOKS);assert.deepEqual(prov.managedSettings,[]);
+ assert.equal(meta4(rows,'initialize_answer')[0].hooks_applied,true);
+ const owner=meta4(rows,'owner_file_check');assert.equal(owner.length,2);assert.equal(owner[1].same,true);
+ assert.ok(rows.some(r=>r.frame.event==='exit'&&r.frame.code===0));
+ // every Stop input carries both lists and the final message (which the normalizer drops from the event)
+ for(const s of meta4(rows,'step'))for(const stop of stopsO2(s)){
+  assert.deepEqual([stop.callback_id,stop.hook_event_name,stop.stop_hook_active],['maws_Stop_1','Stop',false]);
+  assert.ok(Array.isArray(stop.session_crons)&&Array.isArray(stop.background_tasks));
+  assert.ok(stop.inputKeys.includes('last_assistant_message'));
+ }
+ // every main-loop request went to the script, and the stub answered everything
+ for(const s of meta4(rows,'step'))for(const q of s.requests)assert.ok(['main','side','unscripted'].includes(q.kind));
+});
+test('p5 O2 (1) the Stop callback arrives before its turn\'s result, answered {} before it, listing a CronCreate\'s job in session_crons and [] after CronDelete',()=>{
+ const create=stepO2('p5-o2-stop-crons-main','create');
+ const [stop]=stopsO2(create);const [result]=resultsO2(create);
+ assert.equal(stopsO2(create).length,1);assert.ok(stop.seq<result.seq);
+ assert.deepEqual(create.stopAnswers.map(a=>a.response),[{}]);assert.ok(create.stopAnswers[0].seq<result.seq);
+ assert.deepEqual(stop.session_crons,[{id:createdIdO2(create),schedule:'0 3 * * *',recurring:true,prompt:'nightly report job'}]);
+ const del=stepO2('p5-o2-stop-crons-main','delete');
+ assert.deepEqual(stopsO2(del).map(s=>s.session_crons),[[]]);assert.ok(stopsO2(del)[0].seq<resultsO2(del)[0].seq);
+});
+test('p5 O2 (2) an interrupted turn sends no Stop; its CronCreate stands, and the next turn\'s Stop lists it',()=>{
+ const int=stepO2('p5-o2-stop-crons-main','interrupt');
+ assert.deepEqual(stopsO2(int),[]);assert.deepEqual(int.stopAnswers,[]);
+ assert.deepEqual(resultsO2(int).map(r=>[r.subtype,r.terminal_reason]),[['error_during_execution','aborted_tools']]);
+ const after=stepO2('p5-o2-stop-crons-main','after-interrupt');
+ assert.deepEqual(stopsO2(after).map(s=>s.session_crons),[[{id:createdIdO2(int),schedule:'0 5 * * *',recurring:true,prompt:'interrupted turn job'}]]);
+});
+test('p5 O2 (3) in -p a dynamic /loop tick that ends without ScheduleWakeup gets no keepalive: the wakeup is listed until it fires, the tick\'s Stop and every later one list none',()=>{
+ const LOOP='/loop [[P5O2:LOOP]] check the build';
+ const isLoop=c=>c.prompt===LOOP&&c.recurring===false;
+ const loop=stepO2('p5-o2-stop-crons-main','loop');
+ assert.equal(stopsO2(loop)[0].session_crons.filter(isLoop).length,1); // the pending wakeup, a one-shot at its minute
+ const tick=stepO2('p5-o2-stop-crons-main','loop-tick');
+ assert.equal(engineStartsO2(tick).length,1); // the engine started the tick itself
+ assert.ok(tick.requests.every(q=>q.marker==='LOOP'&&q.occurrence===1&&q.reply.every(b=>!b.tool_use))); // ended without ScheduleWakeup
+ assert.equal(stopsO2(tick).length,1);assert.ok(stopsO2(tick)[0].seq<resultsO2(tick)[0].seq);
+ for(const label of ['loop-tick','after-tick','list-after-tick'])for(const s of stopsO2(stepO2('p5-o2-stop-crons-main',label)))assert.deepEqual(s.session_crons.filter(isLoop),[],label);
+ assert.ok(!toolResultsO2(stepO2('p5-o2-stop-crons-main','list-after-tick'),/./).some(b=>b.text.includes('[[P5O2:LOOP]]')));
+ const debug=debugO2('p5-o2-stop-crons-main');
+ assert.ok(debug.some(l=>l.includes('[loop] dynamic wakeup scheduled: 60s')));assert.ok(!debug.some(l=>/keepalive/.test(l)));
+});
+test('p5 O2 (4) after --resume a cron fires before any Stop; the first Stop is the fire\'s and lists a session-only cron (resurrected), never a durable one',()=>{
+ for(const kind of ['durable','session']){
+  const waited=stepO2(`p5-o2-stop-crons-${kind}-resume`,'resumed-idle');
+  const [start]=engineStartsO2(waited);const [first]=stopsO2(waited);
+  assert.ok(start&&first&&start.seq<first.seq,kind); // the fire's turn, started by the engine before any Stop
+  assert.deepEqual(waited.requests.map(q=>q.marker),['FIRE'],kind);
+  assert.ok(first.seq<resultsO2(waited)[0].seq,kind);
+ }
+ const sessionId=createdIdO2(stepO2('p5-o2-stop-crons-session','hold'));
+ const sessionJob={id:sessionId,schedule:'* * * * *',recurring:true,prompt:'[[P5O2:FIRE]] session minute job'};
+ assert.deepEqual(stopsO2(stepO2('p5-o2-stop-crons-session','hold')).map(s=>s.session_crons),[[sessionJob]]);
+ assert.deepEqual(stopsO2(stepO2('p5-o2-stop-crons-session-resume','resumed-idle')).map(s=>s.session_crons),[[sessionJob]]);
+ assert.ok(debugO2('p5-o2-stop-crons-session-resume').some(l=>l.includes('resume: resurrected 1 session cron task(s)')));
+ // a durable job lives in .claude/scheduled_tasks.json and is in no Stop list, fresh or resumed, though CronList lists it
+ const hold=stepO2('p5-o2-stop-crons-durable','hold');const durableId=createdIdO2(hold);
+ assert.ok(toolResultsO2(hold,/Persisted to \.claude\/scheduled_tasks\.json/).length===1);
+ for(const [name,label] of [['p5-o2-stop-crons-durable','hold'],['p5-o2-stop-crons-durable-resume','resumed-idle'],['p5-o2-stop-crons-durable-resume','resumed-list']])assert.deepEqual(stopsO2(stepO2(name,label)).map(s=>s.session_crons),[[]],label);
+ assert.ok(toolResultsO2(stepO2('p5-o2-stop-crons-durable-resume','resumed-list'),new RegExp('^'+durableId+' — Every minute')).length===1);
+ assert.deepEqual(meta4(load5('p5-o2-stop-crons-durable'),'durable_file')[0].content.tasks.map(t=>[t.id,t.cron,t.recurring]),[[durableId,'* * * * *',true]]);
+});
+test('p5 O2 (5) a subagent cannot call CronCreate (no cron tool offered, the call refused), so the main thread\'s Stop lists none; the Stop lists the running subagent as a background task',()=>{
+ for(const label of ['subagent','subagent-foreground']){
+  const s=stepO2('p5-o2-stop-crons-main',label);
+  const sub=s.requests.filter(q=>q.marker==='SUBTASK');
+  assert.equal(sub.length,3,label);assert.ok(sub.every(q=>q.cronToolsOffered.length===0),label);
+  const refused=s.frames.filter(f=>f.type==='user'&&f.parent_tool_use_id).flatMap(f=>f.blocks).filter(b=>b.tool_result&&b.is_error&&b.text.includes('No such tool available: CronCreate'));
+  assert.equal(refused.length,1,label);
+  assert.ok(stopsO2(s).length>=1&&stopsO2(s).every(x=>x.session_crons.length===0),label);
+  assert.equal(stopsO2(s)[0].background_tasks[0].type,'subagent',label);
+ }
+ assert.deepEqual(toolResultsO2(stepO2('p5-o2-stop-crons-main','list-after-subagent'),/./).map(b=>b.text),['No scheduled jobs.']);
+});

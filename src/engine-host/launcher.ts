@@ -122,13 +122,16 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
         : seedOnFirstUser(projects, { cwd: plan.cwd, sessionId: plan.sessionId, engineVersion: plan.engineVersion, permissionMode: spec.permissionMode }, (message) => deps.log(`${spec.appSessionId}: ${message}`));
     const spawn = replay !== null ? () => replayEngine(appReplayHandshake(replay, spec.trust), { prelude: prelude!, surfaceReads: true /* R2 */, rowDelayMs: deps.replayRowMs /* E10 */, onFirstUser }) : deps.spawn;
     const outcome = deps.table.reserve(spec.appSessionId, () => {
+      const released = deps.table.takeReleased(spec.appSessionId); // C12; P5 O2 M2: also what the work state starts from
       const session = new EngineSession({
         spec, plan, spawn, store: deps.store, appVersion: deps.appVersion, relayHealth, log: (message) => deps.log(`${spec.appSessionId}: ${message}`),
         journal: openSessionJournal(deps.userData, spec.appSessionId, plan.launchId), // P3-HD
         // C12 start: the budget policy's stateful servers (keepAlive), and `process_exit` for the first launch after a release
         statefulMcpServers: () => deps.table.statefulMcpServers,
-        reconnectTrigger: deps.table.takeReleased(spec.appSessionId) ? 'process_exit' : 'user',
+        reconnectTrigger: released ? 'process_exit' : 'user',
         // C12 end
+        // P5 O2 M2: a resume after a release starts its crons known and empty; any other resume, unknown until its first Stop
+        launchKind: spec.resume === null ? 'fresh' : released ? 'resumed_after_release' : 'resumed',
         hasClient: deps.hasClient, // E10: the bridges fail fast with no app connected
         unsettledPrompts: () => unsettledPrompts(journalDir(deps.userData, spec.appSessionId), plan.launchId), // P2-C
         observedFacts: deps.observedFacts, // P2-A

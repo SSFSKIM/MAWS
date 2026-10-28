@@ -10,7 +10,7 @@ import { EngineSessionStatusSchema, type EngineSessionStatus } from '@shared/eng
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge, Settings } from '@shared/ipc/schema';
 import { compileAddressing } from '@shared/machine/address';
-import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
 import type { UsageSnapshot } from '@shared/usage/types';
 import { digest } from '../../../../../test/support/builders';
 import { at, TEST_MACHINE } from '../../../../../test/support/machine';
@@ -294,7 +294,7 @@ describe('session info of a session with no live process', () => {
 
 // W2 (C3; §5.5 as amended 2026-10-01): the status line is gone, so what only its usage popover's footer offered lives here.
 describe('the route switch and the Direct poll, re-homed from the status line', () => {
-  const settingsWith = (gateway: Partial<Settings['gateway']>) => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V19, gateway: { ...SETTINGS_DEFAULTS_V19.gateway, ...gateway } }, resolvedTheme: 'light' } as never });
+  const settingsWith = (gateway: Partial<Settings['gateway']>) => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V20, gateway: { ...SETTINGS_DEFAULTS_V20.gateway, ...gateway } }, resolvedTheme: 'light' } as never });
   const route = () => screen.getByText('Route', { selector: 'dt' }).nextElementSibling as HTMLElement;
 
   it('a routed session’s Route offers Switch to Direct…, which opens the switch’s confirm', async () => {

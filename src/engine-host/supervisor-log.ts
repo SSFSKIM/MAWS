@@ -1,17 +1,20 @@
-// The supervisor's log (E10 execution document, §Design 1 "The spawn"): `<supervisorDir>/host.log`, one timestamped
-// line per entry, rotated at 8 MiB to `host.log.1` (one previous generation). Main opens the same file for append as
-// the supervisor's stdout and stderr, so stray output lands beside it; the detached entry routes `console` here, so
-// the host's own logging follows the rotation. Diagnostics offers "Open log" on it.
-import { appendFileSync, chmodSync, mkdirSync, renameSync, statSync } from 'node:fs';
+// The supervisor's log (E10 execution document, §Design 1 "The spawn"; P5 O2 M4: and the pty host's in socket mode):
+// `<dir>/host.log`, one timestamped line per entry, rotated at 8 MiB to `host.log.1` (one previous generation). Main
+// opens the same file for append as the supervisor's stdout and stderr, so stray output lands beside it; the detached
+// entry routes `console` here, so the host's own logging follows the rotation. Diagnostics offers "Open log" on it.
+import { appendFileSync, mkdirSync, renameSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { SUPERVISOR_FILES } from './supervisor-files';
 
 export const LOG_ROTATE_BYTES = 8 * 1024 * 1024;
 
-export function openSupervisorLog(dir: string, maxBytes: number = LOG_ROTATE_BYTES): (line: string) => void {
+// P5 O2 M4: a missing directory is created 0700; an existing one is left as it is, since the log opens before the
+// start's private-directory check (@shared/host/private-listen), which refuses one more open than 0700 rather than
+// correcting it.
+// P5 O2 M5: `name` for another process's log in its own directory (`mawsd.log`).
+export function openSupervisorLog(dir: string, maxBytes: number = LOG_ROTATE_BYTES, name: string = SUPERVISOR_FILES.log): (line: string) => void {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  chmodSync(dir, 0o700);
-  const path = join(dir, SUPERVISOR_FILES.log);
+  const path = join(dir, name);
   let size = sizeOf(path);
   return (line) => {
     const text = `${new Date().toISOString()} ${line}\n`;

@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'; // E5: a window's webContents, as th
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
-import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults'; // P2-F L113
+import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults'; // P2-F L113
 import { humanTurn, record, status } from '../../../test/support/builders';
 import { clientOf } from '../ipc/clients'; // E5: the page's ClientRef, as the router hands it
 
@@ -1131,6 +1131,7 @@ describe('keeping sessions running at quit', () => {
       saveAll: vi.fn(async (): Promise<ReadonlyMap<string, string>> => new Map()),
       keepOffered: () => true, // detached mode
       keepDefault: () => true,
+      terminalsOutlive: () => false, // P5 O2 M7: the embedded shape
       ...over,
     };
     return { deps, control: installQuitGuard(model, deps) };
@@ -1166,6 +1167,46 @@ describe('keeping sessions running at quit', () => {
     expect(quitQuestion({ ...NONE, busyTerminals: 1, terminalsUnknown: true }, 'Quit', new Map(), offer(true)).detail).toBe(detail);
     expect(quitQuestion({ ...NONE, midTurn: 1 }, 'Quit', new Map(), offer(true)).detail).not.toContain('Terminals');
     expect(quitQuestion({ ...NONE, busyTerminals: 1 }, 'Quit').detail).not.toContain('Terminals'); // keep not offered
+  });
+
+  // P5 O2 M7: on the daemon shape the terminals belong to the pty host under `mawsd`, which outlives the app, so they
+  // keep running whichever answer is given: the question never asks for them, and says they keep running
+  it('on the daemon shape says busy terminals keep running, and never that they close', () => {
+    const daemon = (isDefault: boolean) => ({ ...offer(isDefault), terminalsOutlive: true });
+    const keepDetail = 'Kept running, sessions carry on and MAWS reconnects to them when it opens again. Quit stops them; transcripts stay on disk and can be resumed.';
+    const asked = quitQuestion({ ...NONE, midTurn: 1, busyTerminals: 2 }, 'Quit', new Map(), daemon(true));
+    expect(asked).toMatchObject({ message: '1 session mid-turn', detail: `${keepDetail}\n2 terminals running a command keep running; MAWS shows them again when it opens.` });
+    expect(asked.detail).not.toContain('Terminals close with the app.');
+    expect(quitQuestion({ ...NONE, midTurn: 1, busyTerminals: 1 }, 'Quit', new Map(), daemon(false)).detail).toBe(`${keepDetail}\n1 terminal running a command keeps running; MAWS shows it again when it opens.`);
+    expect(quitQuestion({ ...NONE, midTurn: 1, busyTerminals: 1, terminalsUnknown: true }, 'Quit', new Map(), daemon(true)).detail).toBe(`${keepDetail}\nTerminals keep running; MAWS shows them again when it opens.`);
+    expect(quitQuestion({ ...NONE, midTurn: 1 }, 'Quit', new Map(), daemon(true)).detail).toBe(keepDetail); // no busy terminal: no line
+    // the embedded shape, as before
+    expect(quitQuestion({ ...NONE, midTurn: 1, busyTerminals: 2 }, 'Quit', new Map(), offer(true))).toMatchObject({ message: '1 session mid-turn · 2 terminals running a command', detail: `${keepDetail}\nTerminals close with the app.` });
+    // E5's question names no terminal on the daemon shape either
+    expect(quitQuestion({ ...NONE, busyTerminals: 1, unsavedFiles: ['/r/a.ts'] }, 'Quit', new Map(), daemon(true)).message).toBe('1 unsaved file');
+  });
+
+  it('on the daemon shape a busy terminal alone does not hold the quit, and a wait does not wait for one', async () => {
+    const busy = { list: async () => [{ ptyId: 'p1', alive: true }] as never, foreground: async () => ({ busy: true }), hostGone: () => false };
+    const lines: string[] = [];
+    const ask = vi.fn(async (): Promise<'when_idle'> => 'when_idle');
+    const { deps } = guard(modelWith([]), { pty: busy, ask, terminalsOutlive: () => true, log: (line: string) => void lines.push(line) });
+    electron.app.attempt();
+    await vi.waitFor(() => expect(electron.app.quits).toBe(1));
+    expect(ask).not.toHaveBeenCalled();
+    expect(deps.shutdownEngine).toHaveBeenCalledOnce();
+    expect(lines).toEqual([expect.stringMatching(/^quit-report: \d+ ms · 1 busy terminal$/)]); // the report still names it
+
+    // a session mid-turn asks, with the terminal's line; the wait ends when the session does, the terminal still busy
+    electron.app.reset();
+    const model = modelWith(midTurn(1));
+    const asked = guard(model, { pty: busy, ask, terminalsOutlive: () => true, pollMs: 10 });
+    electron.app.attempt();
+    await vi.waitFor(() => expect(asked.deps.publish).toHaveBeenCalledWith(expect.objectContaining({ midTurn: 1, busyTerminals: 1 })));
+    const keep = (ask.mock.calls.at(-1) as unknown[])[2] as { terminalsOutlive?: boolean };
+    expect(keep.terminalsOutlive).toBe(true);
+    model.apply(status('s0' as AppSessionId, { process: 'ready', engineState: 'idle', turn: null }));
+    await vi.waitFor(() => expect(electron.app.quits).toBe(1));
   });
 
   it('with unsaved files E5’s question comes first, unchanged, and keep is not among its answers', async () => {
@@ -1222,16 +1263,17 @@ describe('keeping sessions running at quit', () => {
   // the e2e) the host is a utility process and keep is not among the buttons.
   it('offers keep by host mode: the development build runs detached and offers it; a utility host offers none', async () => {
     const cases = [
-      { env: {}, mode: 'detached', buttons: ['Quit and keep sessions running', 'Quit', 'Quit when idle', 'Cancel'] }, // `pnpm dev`, the packaged app
-      { env: { MAWS_HARNESS: '1' }, mode: 'utility', buttons: ['Quit', 'Quit when idle', 'Cancel'] }, // `pnpm dev:harness`
-      { env: { MAWS_E2E: '1' }, mode: 'utility', buttons: ['Quit', 'Quit when idle', 'Cancel'] },
+      { env: {}, shape: 'embedded', mode: 'detached', buttons: ['Quit and keep sessions running', 'Quit', 'Quit when idle', 'Cancel'] }, // `pnpm dev`, the packaged app
+      { env: {}, shape: 'daemon', mode: 'daemon', buttons: ['Quit and keep sessions running', 'Quit', 'Quit when idle', 'Cancel'] }, // P5 O2 M7: the engine host behind mawsd's detached relay
+      { env: { MAWS_HARNESS: '1' }, shape: 'daemon', mode: 'utility', buttons: ['Quit', 'Quit when idle', 'Cancel'] }, // `pnpm dev:harness`
+      { env: { MAWS_E2E: '1' }, shape: 'embedded', mode: 'utility', buttons: ['Quit', 'Quit when idle', 'Cancel'] },
     ] as const;
-    for (const { env, mode, buttons } of cases) {
+    for (const { env, shape, mode, buttons } of cases) {
       electron.app.reset();
-      expect(hostModeFromEnv(env)).toBe(mode);
-      const hosts = { stopAllForQuit: vi.fn(async () => {}), facts: () => ({ transport: mode }) };
+      expect(hostModeFromEnv(env, shape)).toBe(mode);
+      const hosts = { stopAllForQuit: vi.fn(async () => {}), facts: () => ({ transport: mode === 'utility' ? ('utility' as const) : ('detached' as const) }) };
       const ask = vi.fn(async (): Promise<'cancel'> => 'cancel');
-      guard(modelWith(midTurn(1)), { ask, ...engineQuitDeps(hosts, () => SETTINGS_DEFAULTS_V19) });
+      guard(modelWith(midTurn(1)), { ask, ...engineQuitDeps(hosts, () => SETTINGS_DEFAULTS_V20) });
       electron.app.attempt();
       await settle();
       const keep = (ask.mock.calls[0] as unknown[])[2] as Parameters<typeof quitQuestion>[3];

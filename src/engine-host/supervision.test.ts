@@ -5,23 +5,27 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandInput, CommandName, CommandOutput } from '@shared/ipc/schema';
 import type { SupervisorStatus } from '@shared/ipc/schema/host';
 import { validateCommandOutput, validateEventPayload } from '@shared/ipc/validate';
-import { DEFAULT_IDLE_EXIT_MS, Supervision, type SupervisorExit, type SupervisorIdentity } from './supervision';
+import { endableClientRef, type ClientRef } from '@shared/ipc/client'; // P5 O2 M2
+import type { MachineRole } from './role'; // P5 O2 M2
+import { DEFAULT_IDLE_EXIT_MS, RELEASE_WHILE_CONNECTED, SERVER_RELEASE_MS, Supervision, type SupervisorExit, type SupervisorIdentity } from './supervision';
 
 const T0 = new Date('2026-10-06T10:00:00.000Z');
 const IDLE = 60_000;
 const IDENTITY: SupervisorIdentity = { pid: 4321, startedAt: T0.toISOString(), buildId: '0123456789abcdef', protocol: 1, wire: 'fedcba9876543210', socketPath: null, logPath: null };
 const DETACHED: SupervisorIdentity = { ...IDENTITY, socketPath: '/u/supervisor/host.sock', logPath: '/u/supervisor/host.log' };
 
-function harness(mode: 'utility' | 'detached' = 'detached') {
+function harness(mode: 'utility' | 'detached' = 'detached', role: MachineRole = 'laptop') {
   const rows: { lifecycle: 'starting' | 'initializing' | 'ready' | 'exiting' | 'exited' }[] = [];
   const statusListeners = new Set<() => void>();
   const rowListeners = new Set<() => void>();
-  const releases: { idleMs: number | null; active: boolean }[] = [];
+  const releases: { idleMs: number | null; active: boolean; ignoreInterest?: boolean }[] = [];
+  const interest: { holder: ClientRef; sessions: readonly string[] }[] = []; // P5 O2 M2
   const table = {
     list: () => rows,
     onChange: (listener: () => void) => (statusListeners.add(listener), () => statusListeners.delete(listener)),
     onRowsChanged: (listener: () => void) => (rowListeners.add(listener), () => rowListeners.delete(listener)),
-    setIdleRelease: (policy: { idleMs: number | null; active: boolean }) => void releases.push({ ...policy }),
+    setIdleRelease: (policy: { idleMs: number | null; active: boolean; ignoreInterest?: boolean }) => void releases.push({ ...policy }),
+    setInterest: (holder: ClientRef, sessions: readonly string[]) => void interest.push({ holder, sessions: [...sessions] }), // P5 O2 M2
   };
   const plugins = { held: false, idle: new Set<() => void>() };
   const emitted: SupervisorStatus[] = [];
@@ -35,7 +39,7 @@ function harness(mode: 'utility' | 'detached' = 'detached') {
     return { stopped: rows.length, forced: 0 };
   });
   const supervision = new Supervision({
-    mode, identity: IDENTITY, table: table as never,
+    mode, identity: IDENTITY, table: table as never, role, // P5 O2 M2
     plugins: { busy: () => plugins.held, onIdle: (listener) => (plugins.idle.add(listener), () => plugins.idle.delete(listener)) },
     shutdown,
     emit: (status) => {
@@ -46,11 +50,11 @@ function harness(mode: 'utility' | 'detached' = 'detached') {
     },
     log: (line) => void lines.push(line),
   });
-  const handlers = new Map<string, (input: unknown) => Promise<unknown>>();
+  const handlers = new Map<string, (input: unknown, ctx: { client: ClientRef }) => Promise<unknown>>();
   const hooks: (() => void)[] = [];
-  supervision.register((name, handler) => void handlers.set(name, handler as (input: unknown) => Promise<unknown>), { onConnect: (hook) => void hooks.push(hook) });
-  const call = async <N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandOutput<N>> => {
-    const value = await handlers.get(name)!(input);
+  supervision.register((name, handler) => void handlers.set(name, handler as (input: unknown, ctx: { client: ClientRef }) => Promise<unknown>), { onConnect: (hook) => void hooks.push(hook) });
+  const call = async <N extends CommandName>(name: N, input: CommandInput<N>, client: ClientRef = endableClientRef('1')): Promise<CommandOutput<N>> => {
+    const value = await handlers.get(name)!(input, { client });
     const checked = validateCommandOutput(name, value);
     if (!checked.ok) throw new Error(`invalid output of ${name}: ${checked.error.message}`);
     return checked.value;
@@ -69,7 +73,7 @@ function harness(mode: 'utility' | 'detached' = 'detached') {
     plugins.held = false;
     for (const listener of plugins.idle) listener();
   };
-  return { supervision, rows, releases, plugins, emitted, lines, shutdown, shutdowns: () => shutdowns, handlers, hooks, call, exits, start, launch, exitRow, pluginsIdle };
+  return { supervision, rows, releases, interest, plugins, emitted, lines, shutdown, shutdowns: () => shutdowns, handlers, hooks, call, exits, start, launch, exitRow, pluginsIdle };
 }
 
 beforeEach(() => {
@@ -223,31 +227,61 @@ describe('exit-when-idle (detached)', () => {
 
   it('a utility host refuses it: it ends with the app', async () => {
     const h = harness('utility');
-    await expect(h.handlers.get('host.exitWhenIdle')!({ armed: true })).rejects.toMatchObject({ ipcError: { code: 'internal' } });
+    await expect(h.handlers.get('host.exitWhenIdle')!({ armed: true }, { client: endableClientRef('1') })).rejects.toMatchObject({ ipcError: { code: 'internal' } });
   });
 });
 
-describe('the idle-row release’s policy', () => {
-  it('is active while no client is connected or exit-when-idle is armed, with the idle time; never in utility mode', async () => {
+// P5 O2 M2: the idle release keyed on interest (idle-release.ts holds the rule; Supervision its policy). Only the one
+// test below reads whether it runs with a client connected (RELEASE_WHILE_CONNECTED), so an owner reversal is local.
+describe('the idle release’s policy', () => {
+  it('is active from the start with no client connected, with the idle time; interest is ignored while exit-when-idle is armed', async () => {
     const h = harness();
-    expect(h.releases.at(-1)).toEqual({ idleMs: DEFAULT_IDLE_EXIT_MS, active: true });
+    expect(h.releases.at(-1)).toEqual({ idleMs: DEFAULT_IDLE_EXIT_MS, active: true, ignoreInterest: false });
     h.start();
-    h.supervision.clientChanged(true);
-    expect(h.releases.at(-1)).toEqual({ idleMs: DEFAULT_IDLE_EXIT_MS, active: false });
     await h.call('host.configure', { idleExitMs: IDLE });
-    expect(h.releases.at(-1)).toEqual({ idleMs: IDLE, active: false });
+    expect(h.releases.at(-1)).toEqual({ idleMs: IDLE, active: true, ignoreInterest: false });
     h.supervision.armExitWhenIdle(true);
-    expect(h.releases.at(-1)).toEqual({ idleMs: IDLE, active: true }); // even with the client there
+    expect(h.releases.at(-1)).toEqual({ idleMs: IDLE, active: true, ignoreInterest: true });
     h.supervision.armExitWhenIdle(false);
-    h.supervision.clientChanged(false);
-    expect(h.releases.at(-1)).toEqual({ idleMs: IDLE, active: true });
+    expect(h.releases.at(-1)).toEqual({ idleMs: IDLE, active: true, ignoreInterest: false });
+    await h.call('host.configure', { idleExitMs: null });
+    expect(h.releases.at(-1)).toMatchObject({ idleMs: null }); // a laptop set to never
     const count = h.releases.length;
     h.launch();
     h.exitRow();
     expect(h.releases).toHaveLength(count); // set on a change of policy only
-    const utility = harness('utility');
-    utility.supervision.clientChanged(false);
-    expect(utility.releases.every((policy) => !policy.active)).toBe(true);
+  });
+
+  // The app-connected release (P5 Decision Logs 29 and 44; O2's pre-flight item 3): the one condition, the one test.
+  it('runs while a client is connected too, in either mode: a session nobody holds interest in is released with MAWS open', async () => {
+    expect(RELEASE_WHILE_CONNECTED).toBe(true);
+    const detached = harness();
+    detached.start();
+    detached.supervision.clientChanged(true);
+    expect(detached.releases.at(-1)).toMatchObject({ active: true });
+    const utility = harness('utility'); // main is its client for its whole life
+    expect(utility.releases.at(-1)).toMatchObject({ active: true });
+  });
+
+  it('takes the machine role’s idle time: a laptop’s is the idle exit’s, a server’s 24 hours whatever the app set; the status reports both', async () => {
+    const laptop = harness('detached', 'laptop');
+    await laptop.call('host.configure', { idleExitMs: IDLE });
+    expect(laptop.releases.at(-1)).toMatchObject({ idleMs: IDLE });
+    expect((await laptop.call('host.supervisorStatus', undefined)).release).toEqual({ role: 'laptop', idleMs: IDLE });
+    const server = harness('detached', 'server');
+    await server.call('host.configure', { idleExitMs: IDLE });
+    expect(server.releases.at(-1)).toMatchObject({ idleMs: SERVER_RELEASE_MS });
+    expect(SERVER_RELEASE_MS).toBe(24 * 60 * 60_000);
+    expect((await server.call('host.supervisorStatus', undefined)).release).toEqual({ role: 'server', idleMs: SERVER_RELEASE_MS });
+    expect((await server.call('host.supervisorStatus', undefined)).idleExitMs).toBe(IDLE); // the supervisor's own idle exit keeps the app's
+  });
+
+  it('host.interest hands the asking connection and its full set to the table', async () => {
+    const h = harness();
+    const connection = endableClientRef('3');
+    await h.call('host.interest', { sessions: ['a', 'b'] }, connection);
+    await h.call('host.interest', { sessions: [] }, connection);
+    expect(h.interest.map(({ holder, sessions }) => [holder.id, sessions])).toEqual([['3', ['a', 'b']], ['3', []]]);
   });
 });
 
@@ -294,7 +328,7 @@ describe('host.supervisorStatus', () => {
     h.start();
     h.supervision.clientChanged(true);
     const status = await h.call('host.supervisorStatus', undefined);
-    expect(status).toEqual({ mode: 'detached', ...DETACHED, liveSessions: 0, rows: 0, idleExitMs: DEFAULT_IDLE_EXIT_MS, idleExitAt: null, exitWhenIdle: false, orphansKilled: 0 });
+    expect(status).toEqual({ mode: 'detached', ...DETACHED, liveSessions: 0, rows: 0, idleExitMs: DEFAULT_IDLE_EXIT_MS, idleExitAt: null, exitWhenIdle: false, orphansKilled: 0, release: { role: 'laptop', idleMs: DEFAULT_IDLE_EXIT_MS } /* P5 O2 M2 */ });
     expect(h.emitted.at(-1)).toEqual(status);
     const count = h.emitted.length;
     h.supervision.clientChanged(true); // nothing changed
