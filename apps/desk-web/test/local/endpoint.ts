@@ -11,7 +11,7 @@
 // holds the admin device a1 and the phone; B, a second member with one Mac, who owns `la-b` and `app-b`.
 import { base64urlEncode, encodePairingCode, endorseDevice, generateSigningKey, type Action, type ByteDuplex, type DeviceIdentity, type SignedOrgState } from 'org-protocol';
 import { SoftwareAuthenticator } from 'org-protocol/test-support';
-import { ORG_STATE_PATH, PENDING_DEVICES_PATH, type OrgStateView, type PendingDevice } from 'desk-hub/protocol';
+import { encodeEnrollmentCodeV2, ORG_STATE_PATH, PENDING_DEVICES_PATH, type EnrollmentIssued, type OrgStateView, type PendingDevice } from 'desk-hub/protocol';
 import { create } from 'zustand';
 import type { HandlerContext } from '@shared/ipc/client';
 import type { HostResponse } from '@shared/ipc/host-protocol';
@@ -176,6 +176,8 @@ export type Phone = {
 
 export type World = {
   hub: LocalHub;
+  /** The hub's URL as the machine was enrolled with it and the phone pairs at it: the hub's own, or its `localhost` form. */
+  url: string;
   admin: Member;
   endpoint: Endpoint;
   services: FakeServices;
@@ -192,11 +194,25 @@ export type World = {
   laneB(appSessionId: string, owners?: string[], engine?: string | null): HostSession;
   /** The phone's device taken out of the state, its keys revoked. */
   removePhone(): Promise<SignedOrgState>;
+  /**
+   * A pairing for another `web-cards` device (a browser's, M5): the code the owner's Mac would print for the hub at
+   * `url`, and its approval as `deployment admin pair` gives it once the device posted its entry.
+   */
+  pairing(): Promise<{ code: string; approve(): Promise<void> }>;
   stop(): Promise<void>;
 };
 
+export type WorldOptions = {
+  /**
+   * Enrolls the machine and pairs the phone at `http://localhost:<port>` rather than the hub's `127.0.0.1`: a browser's
+   * passkey takes `localhost` as its relying party (an IP address it refuses), and the endpoint checks an assertion's
+   * origin against the hub its enrollment named.
+   */
+  localhost?: boolean;
+};
+
 /** Starts the world; a failure on the way stops what was started. */
-export async function startWorld(): Promise<World> {
+export async function startWorld(options: WorldOptions = {}): Promise<World> {
   const stops: Array<() => unknown> = [];
   const stop = async () => {
     for (const run of stops.splice(0).reverse()) {
@@ -208,16 +224,17 @@ export async function startWorld(): Promise<World> {
     }
   };
   try {
-    return await build(stops, stop);
+    return await build(stops, stop, options);
   } catch (error) {
     await stop();
     throw error;
   }
 }
 
-async function build(stops: Array<() => unknown>, stop: () => Promise<void>): Promise<World> {
+async function build(stops: Array<() => unknown>, stop: () => Promise<void>, options: WorldOptions): Promise<World> {
   const hub = await startLocalHub();
   stops.push(() => hub.stop());
+  const url = options.localhost === true ? hub.url.replace('127.0.0.1', 'localhost') : hub.url;
   const admin = await hub.admin();
   const B = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
   const b1 = await newDevice('b1');
@@ -263,7 +280,7 @@ async function build(stops: Array<() => unknown>, stop: () => Promise<void>): Pr
   records.bindLaneA(started.rl10.members);
   await started.start(services);
   stops.push(() => started.stop());
-  const issued = await admin.code();
+  const issued = await enrollmentCode(admin, url);
   const enrolling = started.cli('enroll', ['--name', 'mini', '--wait', '30', '--json'], issued.code);
   if ((await admin.awaitPosted(issued.enrollment)) === null) throw new Error('the endpoint posted no key');
   await admin.list(issued.enrollment, issued.k);
@@ -279,11 +296,12 @@ async function build(stops: Array<() => unknown>, stop: () => Promise<void>): Pr
   stops.push(() => (lane.stop(), s.close()));
   host.attach(true);
 
-  const phone = await registerPhone(hub, admin, ref);
+  const phone = await registerPhone(hub, url, admin, ref);
   stops.push(() => phone.socket.close());
 
   return Object.assign(world, {
     hub,
+    url,
     admin,
     endpoint: started,
     services,
@@ -297,6 +315,12 @@ async function build(stops: Array<() => unknown>, stop: () => Promise<void>): Pr
       const session = host.add(appSessionId, engine);
       if (engine !== null) records.set({ lane: 'B', session: engine, owners }, appSessionId);
       return session;
+    },
+    async pairing() {
+      const k = crypto.getRandomValues(new Uint8Array(16));
+      const head = await admin.head();
+      const code = encodePairingCode({ hub: url, org: LOCAL_ORG, member: admin.id, roots: head.state.root.keys, recoveryPub: head.state.root.recoveryPub, k: base64urlEncode(k) });
+      return { code, approve: () => approvePending(hub.person(), admin, k) };
     },
     async removePhone() {
       const head = await admin.head();
@@ -312,6 +336,14 @@ async function build(stops: Array<() => unknown>, stop: () => Promise<void>): Pr
     },
     stop,
   });
+}
+
+/** A v2 enrollment code naming the hub at `url`, as `Member.code` builds one at the hub's own URL. */
+async function enrollmentCode(admin: Member, url: string): Promise<{ code: string; k: Uint8Array; enrollment: string }> {
+  const issued = await admin.person.json<EnrollmentIssued>('/api/enrollments', { body: {} }, 201);
+  const k = crypto.getRandomValues(new Uint8Array(32));
+  const { root } = (await admin.head()).state;
+  return { code: encodeEnrollmentCodeV2({ hub: url, token: issued.token, roots: root.keys, recoveryPub: root.recoveryPub, k: base64urlEncode(k) }), k, enrollment: issued.enrollment.id };
 }
 
 /** A request still listed among the broker's items (the fake engine host's rule). */
@@ -335,14 +367,14 @@ function answerOn(host: FakeEngineHost, { appSessionId, requestId }: { appSessio
  * controller's sync reaching `listed`. Its Machine socket to `ref` signs in as the owner, as the browser's Access cookie
  * does.
  */
-async function registerPhone(hub: LocalHub, admin: Member, ref: string): Promise<Phone> {
+async function registerPhone(hub: LocalHub, url: string, admin: Member, ref: string): Promise<Phone> {
   const person = hub.person();
   const me = await person.json<Me>('/api/me');
   const head = await admin.head();
   const k = crypto.getRandomValues(new Uint8Array(16));
-  const code = encodePairingCode({ hub: hub.url, org: LOCAL_ORG, member: admin.id, roots: head.state.root.keys, recoveryPub: head.state.root.recoveryPub, k: base64urlEncode(k) });
-  const origin = new URL(hub.url).origin;
-  const rpId = new URL(hub.url).hostname;
+  const code = encodePairingCode({ hub: url, org: LOCAL_ORG, member: admin.id, roots: head.state.root.keys, recoveryPub: head.state.root.recoveryPub, k: base64urlEncode(k) });
+  const origin = new URL(url).origin;
+  const rpId = new URL(url).hostname;
   const passkey = new SoftwareAuthenticator(await generateSigningKey(), base64urlEncode(crypto.getRandomValues(new Uint8Array(16))), rpId);
   const source = (since: number) => person.json<OrgStateView>(`${ORG_STATE_PATH}?since=${since}`);
   const orgStore = new OrgStore(LOCAL_ORG, { persistence: memoryOrgPersistence(), source });
@@ -359,18 +391,7 @@ async function registerPhone(hub: LocalHub, admin: Member, ref: string): Promise
   try {
     await controller.load();
     await controller.register(code, me);
-    // The Mac's side: the one entry answering this code, judged and signed in.
-    const { pending } = await person.json<{ pending: PendingDevice[] }>(PENDING_DEVICES_PATH);
-    const listed = new Set((await admin.head()).state.members.flatMap((m) => m.devices.map((d) => d.id)));
-    const answering = [];
-    for (const entry of pending) {
-      const judged = await judgeEntry(entry, { org: LOCAL_ORG, member: admin.id, k, class: 'web-cards', listed });
-      if (judged.ok) answering.push(judged.device);
-    }
-    if (answering.length !== 1) throw new Error(`${answering.length} entries answered the pairing code`);
-    const [device] = answering;
-    const endorsement = await endorseDevice(LOCAL_ORG, admin.id, device, admin.device.stepUp.privateKey, admin.device.stepUp.pub);
-    await admin.amend('the phone listed', (s) => void s.members.find((m) => m.id === admin.id)!.devices.push({ ...device, endorsement }));
+    await approvePending(person, admin, k);
     await until(async () => (await controller.sync()) === 'listed', 'the phone listed', 15_000);
   } finally {
     controller.stop();
@@ -378,7 +399,7 @@ async function registerPhone(hub: LocalHub, admin: Member, ref: string): Promise
   const record = controller.record!;
   const identity = cardsIdentity(LOCAL_ORG, record);
   const headers = person.headers;
-  const socket = machineSocket(hub.url, ref, { connect: (url) => new WebSocket(url, { headers } as unknown as string[]), delay: () => 100 });
+  const socket = machineSocket(url, ref, { connect: (url) => new WebSocket(url, { headers } as unknown as string[]), delay: () => 100 });
   const carriers: Cuttable[] = [];
   return {
     record,
@@ -403,6 +424,21 @@ async function registerPhone(hub: LocalHub, admin: Member, ref: string): Promise
       return openChannel({ ref }, identity, orgStore, { ...rest, socket: dialing });
     },
   };
+}
+
+/** The Mac's side of a pairing: the one pending entry answering the secret `k`, judged, endorsed and signed in. */
+async function approvePending(person: ReturnType<LocalHub['person']>, admin: Member, k: Uint8Array): Promise<void> {
+  const { pending } = await person.json<{ pending: PendingDevice[] }>(PENDING_DEVICES_PATH);
+  const listed = new Set((await admin.head()).state.members.flatMap((m) => m.devices.map((d) => d.id)));
+  const answering = [];
+  for (const entry of pending) {
+    const judged = await judgeEntry(entry, { org: LOCAL_ORG, member: admin.id, k, class: 'web-cards', listed });
+    if (judged.ok) answering.push(judged.device);
+  }
+  if (answering.length !== 1) throw new Error(`${answering.length} entries answered the pairing code`);
+  const [device] = answering;
+  const endorsement = await endorseDevice(LOCAL_ORG, admin.id, device, admin.device.stepUp.privateKey, admin.device.stepUp.pub);
+  await admin.amend('a web-cards device listed', (s) => void s.members.find((m) => m.id === admin.id)!.devices.push({ ...device, endorsement }));
 }
 
 /** `channel`, keeping a copy of each action it sends as it left (for a replay, or another action's assertion). */

@@ -62,7 +62,9 @@ describe('a listing', () => {
     store.opened();
     await store.page([await listingOf(org.org, mini, 's1', 1)], false);
     expect(keys()).toEqual([]); // nothing until the last page
+    expect(store.loaded).toBe(false);
     await store.page([await listingOf(org.org, mini, 's2', 4)], true);
+    expect(store.loaded).toBe(true); // the connection's whole set is in
     expect(keys().sort()).toEqual([`${mini.ref}/s1`, `${mini.ref}/s2`].sort());
     await store.listing(await listingOf(org.org, mini, 's1', 3, 'working'));
     expect(store.listings().get(`${mini.ref}/s1`)?.body.fields.state).toBe('working');
