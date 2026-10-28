@@ -3,11 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { saveTextFile } from './save-text';
-import { openSettingsFile } from '../settings/store';
+import { openSettingsFile } from '@shared/settings/file-store';
 import { clientSettingsRules } from '../client/settings-store'; // P5 O3-A: the client file's rules
 import { LayoutFileStore } from '../layout/store';
-import { writeWhole } from '../sessions/json-files';
-import { FileAttentionStore } from '../attention/file-attention-store';
+import { writeWhole } from '../../services/sessions/json-files';
+import { FileAttentionStore } from '../../services/attention/file-attention-store';
 import type { AppSessionId } from '@shared/graph/ids';
 
 vi.mock('node:crypto', async (original) => ({ ...await original<typeof import('node:crypto')>(), randomUUID: () => 'fixed-random-id' }));

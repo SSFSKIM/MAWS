@@ -19,8 +19,8 @@ import { GATEWAY_AUTH_TOKEN, RELAY_URL } from '../../src/engine-host/launch';
 import { ENGINE_BIN, ENGINE_VERSION } from '../support/engine-pin'; // W13: the live suite runs the fixtures' engine
 import { compareVersions } from '../../src/engine-host/engine-compat'; // cua board #94
 import * as nodePty from 'node-pty'; // W7: the terminal-style second writer
-import { holderAuthority } from '../../src/main/sessions/holders'; // W7: main's resume guard, over this host
-import { releaseHolder } from '../../src/main/sessions/take-over'; // W7: "Take over here", over this host
+import { holderAuthority } from '../../src/services/sessions/holders'; // W7: main's resume guard, over this host
+import { releaseHolder } from '../../src/services/sessions/take-over'; // W7: "Take over here", over this host
 import { ChainFollower } from '../../src/engine-host/fs/chain-follower'; // W7: the pre-W7 follower, beside the product's
 import { FsFileReader } from '../../src/engine-host/fs/follow';
 import { HolderRegistry } from '../../src/engine-host/fs/holders';
@@ -1551,7 +1551,7 @@ describe('engine host live', () => {
 
   // W7 F2 (charter D-12 as amended 2026-10-01): "Take over here" on a session a terminal holds, the signal path live. The
   // holder is a terminal-style process this case starts itself (the pinned binary resuming the id in a PTY under the
-  // scratch home); main's release (`src/main/sessions/take-over.ts`) runs over this host with the real SIGTERM, and
+  // scratch home); main's release (`src/services/sessions/take-over.ts`) runs over this host with the real SIGTERM, and
   // then MAWS resumes the id the usual way and runs a turn on top of the terminal's.
   it('W7 take over a session a terminal holds', async (ctx) => {
     const g = live(ctx);

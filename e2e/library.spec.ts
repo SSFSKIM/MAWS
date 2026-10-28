@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { artifactUrl } from '../src/shared/artifacts/scheme';
-import { MIGRATIONS } from '../src/main/index/migrations';
+import { MIGRATIONS } from '../src/services/index/migrations';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { ownTitles } from './support/library';
 import { invoke, pageParentJournal, sideThreadOf, startSessionCase, threadJournal, value } from './support/library-session'; // M5b
@@ -52,7 +52,7 @@ async function libraryRevision(page: Page, artifactId: string): Promise<number |
   return (await ok<{ row: { revision: number } | null }>(page, 'library.get', { artifactId })).row?.revision ?? null;
 }
 
-// Main's library stops following change events until the next host connection (src/main/library/index.ts's seam,
+// Main's library stops following change events until the next host connection (src/services/library/index.ts's seam,
 // MAWS_E2E=1 only), once the reads it has already taken have landed.
 async function holdLibraryRefreshes(launch: MawsLaunch): Promise<void> {
   await launch.app.evaluate(() => (globalThis as unknown as { __maws_library: { holdRefreshes(): Promise<void> } }).__maws_library.holdRefreshes());

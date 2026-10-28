@@ -5,7 +5,7 @@
 // that is not a repository), not from the real index, which reads the owner's ~/.claude. Run on purpose only:
 //   pnpm build && MAWS_PANEL_LIVE=1 pnpm exec playwright test e2e/panel-live.spec.ts
 import { isolatedGitEnv } from '../test/support/git-env';
-import { gitEnv } from '../src/main/git/runner';
+import { gitEnv } from '../src/services/git/runner';
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

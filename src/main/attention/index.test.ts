@@ -9,9 +9,9 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { digest, item, record } from '../../../test/support/builders';
 import { fakeSpineView } from '../../../test/support/fake-spine-view';
-import { SessionReadModel } from '../sessions/read-model';
-import { createSpineView } from '../sessions/spine-view';
-import { PERSIST_RETRY_MS, startAttentionService } from './service';
+import { SessionReadModel } from '../../services/sessions/read-model';
+import { createSpineView } from '../../services/sessions/spine-view';
+import { PERSIST_RETRY_MS, startAttentionService } from '../../services/attention/service';
 import { electronClientPort } from '../client/electron-port';
 import { startAttention } from './index';
 

@@ -41,7 +41,7 @@ import type { OrgRows, RemoteRow } from '@shared/ipc/schema/org';
 import type { ProjectRecord } from '@shared/ipc/schema/session';
 import type { OrgKey } from '@shared/machine/org-key';
 import type { MachineRef } from '@shared/machine/ref';
-import { repoProjectId } from '../index/org-project';
+import { repoProjectId } from '@shared/machine/project-ids';
 import type { OrgFiles } from './files';
 import type { RegistryFeed } from './registry-feed';
 import type { OrgSession, SignedIn } from './session';

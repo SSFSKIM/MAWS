@@ -1,6 +1,6 @@
 import type { ProjectId } from '@shared/graph/ids';
-import { InactiveArchive, scheduleInactiveArchive } from './sessions/inactive-archive';
-import { createSpineView } from './sessions/spine-view'; // P5 O3-C: the spine's view, in process
+import { InactiveArchive, scheduleInactiveArchive } from '../services/sessions/inactive-archive';
+import { createSpineView } from '../services/sessions/spine-view'; // P5 O3-C: the spine's view, in process
 import { isActionable as archiveActionable, isOpen as archiveOpen } from '@shared/attention/kinds';
 import { guardStdio } from './stdio-guard'; // cua board #97
 import { disableChromiumFeatures, STARTUP_DISABLED_FEATURES } from './chromium-features'; // P3-F1 fix 3
@@ -14,18 +14,19 @@ import { createHosts, prepareLaunch, refuseTestLaunchOnDefaultProfile, type Laun
 import { dispatchLocal, installRouter } from './ipc/router'; // P5 O6 M3: dispatchLocal, the local link's and the stand-in's
 import { startSettings, type SettingsService } from './client/settings'; // P5 O3-A: the client half, composed with the machine's
 import { readLaunchShape } from './client/settings-store'; // P5 O3-A
-import { startMachineSettings } from './settings/machine'; // P5 O3-A
-import { settingsPaths, splitSettingsFiles } from './settings/split'; // P5 O3-A
-import { takeSpineLock, type SpineLock } from './settings/spine-lock'; // P5 O3-A
+import { startMachineSettings } from '../services/settings/machine'; // P5 O3-A
+import { settingsPaths } from '@shared/settings/paths';
+import { splitSettingsFiles } from '../services/settings/split'; // P5 O3-A
+import { takeSpineLock, type SpineLock } from '../services/settings/spine-lock'; // P5 O3-A
 import { startWithProfileLock } from './files/profile-lock';
 import { describeMainBuild, loadedBundlePath, olderInstanceNotice, staleBuildCheck, type MainBuild } from './build-identity'; // E11 §2.7; F2b 2.7b
 import { builtAtLabel } from '@shared/app/build-time'; // E11 §2.7
 import { registerPtyOpenLink } from './pty-links'; // C9
 import { appUrl, createWindow, installContentSecurityPolicy, prepareHarness } from './window'; // C9: prepareHarness
-// C3 start (the attention service's imports moved with its start into C4's block: src/main/index/attention-service.ts)
+// C3 start (the attention service's imports moved with its start into C4's block: src/services/index/attention-service.ts)
 import { emit } from './ipc/events';
 import { registerMachineHandler, registerMainHandler } from './ipc/router'; // P5 O6 M1: registerMachineHandler
-import { startMachineIdentity } from './machine/identity'; // P5 O6 M1
+import { startMachineIdentity } from '../services/machine/identity'; // P5 O6 M1
 import { bindLocalMachine } from './machine/local'; // P5 O6 M2
 import { startMachines } from './machines'; // P5 O6 M3: the connection manager, and the stand-in behind its gate
 import { createStateSigner, createStepUp } from './device/step-up'; // P5 O7 M1: the development org session's signer; P5 O8 M1: the production session's; M3: its state signer
@@ -42,14 +43,14 @@ import { orgFiles } from './org/files'; // P5 O8 M1
 import { createRemoteRows } from './org/rows'; // P5 O8 M2
 // C3 end
 // C4 start (emit comes with C3's imports)
-import { startIndexAttention } from './index/attention-service';
-import { Index } from './index/index';
-import { registerIndexHandlers } from './index/register';
-import { registerReplayHandlers } from './index/replay';
-import { appRoot, seedReplayFixtures } from './index/replay-fixtures';
-import { IndexSessionSource } from './index/source';
-import { registerGitHandlers } from './git/register';
-import { GitService } from './git/service';
+import { startIndexAttention } from '../services/index/attention-service';
+import { Index } from '../services/index/index';
+import { registerIndexHandlers } from '../services/index/register';
+import { registerReplayHandlers } from '../services/index/replay';
+import { appRoot, seedReplayFixtures } from '../services/index/replay-fixtures';
+import { IndexSessionSource } from '../services/index/source';
+import { registerGitHandlers } from '../services/git/register';
+import { GitService } from '../services/git/service';
 // C4 end
 // C5 start (emit comes with C3's imports)
 import { notificationActions } from './attention/actions';
@@ -61,40 +62,41 @@ import { registerMenuHandlers, startMenu } from './menu';
 import { registerOpenExternal } from './open-external';
 import { electronClientPort } from './client/electron-port'; // P5 O1 M3
 import { electronWindowShown } from './client/window-shown'; // P5 O1 M3
-import { startSessions } from './sessions';
-import { registerObservedFacts } from './sessions/observed'; // P2-A
-import { startYield } from './sessions/yield'; // W7
+import { startSessions } from '../services/sessions';
+import { registerObservedFacts } from '../services/sessions/observed'; // P2-A
+import { startYield } from '../services/sessions/yield'; // W7
 import { restoreWindowState, trackWindowState } from './window-state';
 // C5 end
 // C7 start
 import type { AppSessionId } from '@shared/graph/ids';
 import { pickFiles } from './files/pick';
-import { FileLister, followSpineRoots, spineRoots } from './git/ls-files';
+import { FileLister, followSpineRoots, spineRoots } from '../services/git/ls-files';
 import { onEmitted } from './ipc/events';
-import { createGitRunner } from './git/runner';
-import { claudeConfigDir, PromptHistory } from './history/prompt-history';
-import { readUserEngineDefaults } from './settings/user-engine-defaults'; // W3
+import { createGitRunner } from '../services/git/runner';
+import { claudeConfigDir } from '@shared/engine/config-dir';
+import { PromptHistory } from '../services/history/prompt-history';
+import { readUserEngineDefaults } from '../services/settings/user-engine-defaults'; // W3
 import { ClaudeUsageReader, claudeUsageDir } from './usage/claude-usage-reader';
 // C7 end
 import { baseUrlFrom, ClaudeUsageControl } from './usage/claude-usage-control'; // W6 route executor
 // C8c start (emit comes with C3's imports)
 import { shell } from 'electron';
-import { registerFilesHandlers } from './files/register';
-import { allowlistOf } from './files/allowlist'; // E11
+import { registerFilesHandlers } from '../services/files/register';
+import { allowlistOf } from '../services/files/allowlist'; // E11
 // C8c end
 // C10 start (emit comes with C3's imports, createGitRunner with C7's, shell with C8c's)
 import { captureShellEnvironment } from '@shared/host/shell-env';
-import { WorktreeService } from './git/worktrees';
-import { registerWorktreeHandlers } from './git/worktrees-register';
-import { BootstrapNotes, FileIntentStore } from './sessions/intents';
-import { ReplaySeam } from './sessions/replay-seam';
-import { trashFor } from './sessions/e2e-trash';
-import { SessionService } from './sessions/service';
-import { startOwnerChannel } from './owner/register'; // P2-C (2026-10-09)
-import { engineHostSettled, registerSessionServiceHandlers } from './sessions/service-register';
-import { transcriptPathOf } from './sessions/context'; // P2-D
-import { readRecentTurns } from './sessions/recent-turns'; // P2-D
-import { readRestoredCost } from './sessions/restored-cost'; // tracker 2026-09-29
+import { WorktreeService } from '../services/git/worktrees';
+import { registerWorktreeHandlers } from '../services/git/worktrees-register';
+import { BootstrapNotes, FileIntentStore } from '../services/sessions/intents';
+import { ReplaySeam } from '../services/sessions/replay-seam';
+import { trashFor } from '../services/sessions/e2e-trash';
+import { SessionService } from '../services/sessions/service';
+import { startOwnerChannel } from '../services/owner/register'; // P2-C (2026-10-09)
+import { engineHostSettled, registerSessionServiceHandlers } from '../services/sessions/service-register';
+import { transcriptPathOf } from '../services/sessions/context'; // P2-D
+import { readRecentTurns } from '../services/sessions/recent-turns'; // P2-D
+import { readRestoredCost } from '../services/sessions/restored-cost'; // tracker 2026-09-29
 // C10 end
 // C11 start
 // (electron's `shell` comes with C8c's imports above, `onEmitted` with C7's)
@@ -103,12 +105,12 @@ import { saveTextFile } from './files/save-text';
 import { captureChords } from './settings/capture-chords';
 import { captureRegion } from './layout/capture-region'; // P3-G
 import { createClaudeUsageApp, execRunner } from './gateway/claude-usage-app';
-import { startEngineConfigure } from './settings/engine-configure';
-import { startHostConfigure } from './settings/host-configure'; // E10
+import { startEngineConfigure } from '../services/settings/engine-configure';
+import { startHostConfigure } from '../services/settings/host-configure'; // E10
 import { appInterest, startInterest } from './sessions/interest'; // P5 O2 M2; P5 O3-C: appInterest
 import { revealPath } from './settings/reveal';
-import { sessionSettingsOf } from './settings/session-settings';
-import { knownSessionDirectories } from './settings/session-directories';
+import { sessionSettingsOf } from '../services/settings/session-settings';
+import { knownSessionDirectories } from '@shared/sessions/directories';
 import { CommandFailure, interceptCommand } from './ipc/router';
 import { installWidgetBackend } from './widgets/fixture-backend';
 // C11 end
@@ -122,12 +124,12 @@ import { startVoice } from './voice/register';
 import { trackUnsavedFiles } from './lifecycle/quit-guard';
 // E5 end
 // E6 start (createGitRunner comes with C7's imports; the login-shell capture is C7's engineEnv)
-import { createMutatingRunner } from './git/mutate';
-import { registerScmHandlers } from './scm/register';
-import { ScmService } from './scm/service';
+import { createMutatingRunner } from '../services/git/mutate';
+import { registerScmHandlers } from '../services/scm/register';
+import { ScmService } from '../services/scm/service';
 // E6 end
 // E3 start
-import { sideThreadEvents, startSideThreads } from './side/side-threads';
+import { sideThreadEvents, startSideThreads } from '../services/side/side-threads';
 // E3 end
 // E2 start
 import { appWindows } from './windows';
@@ -151,13 +153,13 @@ import { ImportedProfiles, startBrowserImport, sweepBrowserImports } from './bro
 // E4b end
 // P3-A start
 import { installStorePolicies, registerStoreSchemes, startArtifacts } from './artifacts';
-import { startArtifactDefaults } from './artifacts/defaults'; // P5 O3-C (D23): the spine's relay, beside the artifacts
+import { startArtifactDefaults } from '../services/artifacts/defaults'; // P5 O3-C (D23): the spine's relay, beside the artifacts
 // P3-A end
 // P3-L start
-import { startLibrary } from './library';
+import { startLibrary } from '../services/library';
 import { registerLibraryFiles } from './library/files'; // P5 O3-C (D22): the client's, beside the spine's derived index
 import type { ServicesBus } from '@shared/spine/bus'; // P5 O3-C
-import { fileAdmission } from './library/admission'; // M6b
+import { fileAdmission } from '../services/files/admission'; // M6b
 // P3-L end
 // P3-B start
 import { registerInspectionExporters } from './artifacts/inspection';

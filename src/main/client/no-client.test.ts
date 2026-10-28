@@ -17,7 +17,7 @@ import { zipFiles } from '../design-systems/zip';
 import { createAssetDownload } from '../dashboard/download';
 import { startDelivery, type GwsDriver } from '../delivery';
 import { gwsLogin } from '../delivery/gws';
-import { createFilesService } from '../files/service';
+import { createFilesService } from '../../services/files/service';
 import { pickFiles } from '../files/pick';
 import { saveTextFile } from '../files/save-text';
 import { createLibraryFiles, type LibraryFilesDeps } from '../library/files';

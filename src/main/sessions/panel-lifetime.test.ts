@@ -17,8 +17,8 @@ import { registerChatPanels } from './panel-lifetime';
 const handlers = vi.hoisted(() => new Map<string, (input: unknown) => unknown>());
 vi.mock('../ipc/router', () => ({ registerMainHandler: (name: string, handler: (input: unknown) => unknown) => void handlers.set(name, handler) }));
 const disk = vi.hoisted(() => ({ full: false }));
-vi.mock('../files/atomic-write', async (load) => {
-  const real = await load<typeof import('../files/atomic-write')>();
+vi.mock('@shared/fs/atomic-write', async (load) => {
+  const real = await load<typeof import('@shared/fs/atomic-write')>();
   return {
     ...real,
     atomicWriteFileSync: (...args: Parameters<typeof real.atomicWriteFileSync>) => {

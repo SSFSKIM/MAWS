@@ -49,7 +49,7 @@ vi.mock('./artifacts', () => ({ registerStoreSchemes: vi.fn() /* M7 */, installS
 vi.mock('./connectors', () => ({ startConnectors: () => ({ stop: vi.fn() }) })); // P3-H H3b: the connector broker's main side
 vi.mock('./design-systems/export', () => ({ registerDesignSystemExporters: vi.fn() })); // P3-D: the design system's exporter, registered into the artifacts' registry
 vi.mock('./artifacts/inspection', () => ({ registerInspectionExporters: vi.fn(() => () => {}) }));
-vi.mock('./artifacts/defaults', () => ({ startArtifactDefaults: vi.fn(() => () => {}) })); // P5 O3-C (D23): the spine's relay, beside the artifacts
+vi.mock('../services/artifacts/defaults', () => ({ startArtifactDefaults: vi.fn(() => () => {}) })); // P5 O3-C (D23): the spine's relay, beside the artifacts
 vi.mock('./presentations/export', () => ({ registerPresentationExporters: vi.fn() })); // P3-C M9: the presentation's exporters, registered into the artifacts' registry
 vi.mock('./design/export', () => ({ registerDesignExporters: vi.fn() })); // P3-E (E1's M5): the design's exporters, registered into the artifacts' registry
 vi.mock('./dashboard/export', () => ({ registerDashboardExporters: vi.fn(() => () => {}) })); // P3-E (E2 M5): the dashboard's exporters, registered into the artifacts' registry
@@ -57,38 +57,38 @@ vi.mock('./presentations/present', () => ({ registerPresenter: vi.fn(() => ({ en
 vi.mock('./browser/import', () => ({ ImportedProfiles: { open: () => ({ list: () => [] }) }, sweepBrowserImports: vi.fn(), startBrowserImport: () => ({ stop: vi.fn() }) })); // E4b: the Chrome import's main side
 vi.mock('./ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: vi.fn() /* C3 */, registerMachineHandler: vi.fn() /* P5 O6 M1 */, interceptCommand: vi.fn(), dispatchLocal: vi.fn() /* P5 O6 M3 */, CommandFailure: Error /* C11 */ }));
 vi.mock('./machines', () => ({ startMachines: vi.fn(() => ({ dispatch: vi.fn(), serve: vi.fn(), stop: vi.fn(), onRemote: vi.fn(() => () => {}) /* P5 O8 M2: the rows read the roster */ })) })); // P5 O6 M3: no links, no stand-in
-vi.mock('./machine/identity', () => ({ startMachineIdentity: vi.fn(() => ({ ref: 'TestMachineRef00000000' })) })); // P5 O6 M1: no machine.json under the fixed getPath; M2: main binds its ref
+vi.mock('../services/machine/identity', () => ({ startMachineIdentity: vi.fn(() => ({ ref: 'TestMachineRef00000000' })) })); // P5 O6 M1: no machine.json under the fixed getPath; M2: main binds its ref
 // C3 start: main's attention service and its store, started from index.ts, are replaced like the other wired modules
-vi.mock('./attention/service', () => ({ startAttentionService: vi.fn() }));
-vi.mock('./attention/file-attention-store', () => ({ FileAttentionStore: vi.fn() }));
+vi.mock('../services/attention/service', () => ({ startAttentionService: vi.fn() }));
+vi.mock('../services/attention/file-attention-store', () => ({ FileAttentionStore: vi.fn() }));
 // C3 end
 vi.mock('./client/settings', () => ({ startSettings: () => ({ state: () => ({ settings: SETTINGS_DEFAULTS_V21, resolvedTheme: 'light' }), onChange: vi.fn(() => vi.fn()) }) })); // P5 O3-A: the client half
 // P5 O3-A: the spine's lock and the settings split, held and done (no profile directory under the fixed getPath)
 const spineLock = vi.hoisted(() => ({ release: vi.fn() }));
-vi.mock('./settings/spine-lock', () => ({ takeSpineLock: async () => ({ refused: null, holder: null, release: spineLock.release }) }));
-vi.mock('./settings/split', () => ({ settingsPaths: (profile: string) => ({ client: `${profile}/settings.json`, machine: `${profile}/machine-settings.json` }), splitSettingsFiles: () => ({ outcome: 'none', machineRefused: null, unsplit: null }) }));
-vi.mock('./settings/machine', () => ({ startMachineSettings: () => ({}) }));
+vi.mock('../services/settings/spine-lock', () => ({ takeSpineLock: async () => ({ refused: null, holder: null, release: spineLock.release }) }));
+vi.mock('../services/settings/split', () => ({ settingsPaths: (profile: string) => ({ client: `${profile}/settings.json`, machine: `${profile}/machine-settings.json` }), splitSettingsFiles: () => ({ outcome: 'none', machineRefused: null, unsplit: null }) }));
+vi.mock('../services/settings/machine', () => ({ startMachineSettings: () => ({}) }));
 vi.mock('./window', () => ({ appUrl: 'file:///index.html', createWindow: fake.createWindow, installContentSecurityPolicy: vi.fn() }));
 // C4: the index and its session source are replaced too; the lifecycle only has to open, start and close them.
 const c4 = vi.hoisted(() => ({ close: vi.fn(), stopSource: vi.fn(), stopAttention: vi.fn(), started: 0 }));
-vi.mock('./index/index', () => ({ Index: class { close = c4.close; refreshOrgProjects = async () => {}; } }));
-vi.mock('./index/register', () => ({ registerIndexHandlers: vi.fn() }));
-vi.mock('./index/source', () => ({ IndexSessionSource: class { start = () => ((c4.started += 1), c4.stopSource); onScanned = () => () => {}; discoveryCurrent = () => false; } }));
-vi.mock('./index/attention-service', () => ({ startIndexAttention: () => ({ stop: c4.stopAttention }) })); // C3's service over the index
+vi.mock('../services/index/index', () => ({ Index: class { close = c4.close; refreshOrgProjects = async () => {}; } }));
+vi.mock('../services/index/register', () => ({ registerIndexHandlers: vi.fn() }));
+vi.mock('../services/index/source', () => ({ IndexSessionSource: class { start = () => ((c4.started += 1), c4.stopSource); onScanned = () => () => {}; discoveryCurrent = () => false; } }));
+vi.mock('../services/index/attention-service', () => ({ startIndexAttention: () => ({ stop: c4.stopAttention }) })); // C3's service over the index
 vi.mock('./ipc/events', () => ({ emit: vi.fn(), onEmitted: vi.fn(() => () => {}) })); // onEmitted: the services bus's taps (P5 O3-C)
-vi.mock('./index/replay', () => ({ registerReplayHandlers: () => ({ dispose: vi.fn() }) }));
-vi.mock('./index/replay-fixtures', () => ({ appRoot: (path: string) => path, seedReplayFixtures: vi.fn() }));
+vi.mock('../services/index/replay', () => ({ registerReplayHandlers: () => ({ dispose: vi.fn() }) }));
+vi.mock('../services/index/replay-fixtures', () => ({ appRoot: (path: string) => path, seedReplayFixtures: vi.fn() }));
 const git = vi.hoisted(() => ({ dispose: vi.fn(), registered: 0 }));
-vi.mock('./git/service', () => ({ GitService: class { dispose = git.dispose; } }));
-vi.mock('./git/register', () => ({ registerGitHandlers: () => void (git.registered += 1) }));
+vi.mock('../services/git/service', () => ({ GitService: class { dispose = git.dispose; } }));
+vi.mock('../services/git/register', () => ({ registerGitHandlers: () => void (git.registered += 1) }));
 // end C4
 // C5 start: the layout store, the external-link command and the read side
 vi.mock('./layout/store', () => ({ LayoutFileStore: class { flush() {} get() { return null; } set() {} }, registerLayoutHandlers: vi.fn() }));
 vi.mock('./sessions/panel-lifetime', () => ({ registerChatPanels: () => () => {} }));
-vi.mock('./sessions/spine-view', () => ({ createSpineView: () => ({ view: { on: () => () => {}, unavailable: () => null, record: () => null, records: () => [], projects: () => [], projectRows: () => [], intents: () => [] }, stop: vi.fn() }) })); // P5 O3-C: the spine's view, empty
+vi.mock('../services/sessions/spine-view', () => ({ createSpineView: () => ({ view: { on: () => () => {}, unavailable: () => null, record: () => null, records: () => [], projects: () => [], projectRows: () => [], intents: () => [] }, stop: vi.fn() }) })); // P5 O3-C: the spine's view, empty
 vi.mock('./open-external', () => ({ registerOpenExternal: vi.fn() }));
 // The read model starts C4's index source and stops it with the sessions, at will-quit.
-vi.mock('./sessions', () => ({
+vi.mock('../services/sessions', () => ({
   startSessions: ({ indexSource }: { indexSource: { start(writer: unknown): () => void } }) => ({ model: {}, stop: indexSource.start({}) }),
 }));
 vi.mock('./menu', () => ({ startMenu: vi.fn(), registerMenuHandlers: vi.fn() }));
@@ -100,14 +100,14 @@ vi.mock('./lifecycle/quit-guard', () => ({ installQuitGuard: vi.fn(), askToQuit:
 // lifecycle only has to construct, register and start it without a real shell or index
 const c10 = vi.hoisted(() => ({ started: 0 }));
 vi.mock('@shared/host/shell-env', () => ({ captureShellEnvironment: () => Promise.resolve({}) }));
-vi.mock('./sessions/service', () => ({ SessionService: class { start = async () => void (c10.started += 1); } }));
-vi.mock('./sessions/service-register', () => ({ registerSessionServiceHandlers: vi.fn(), engineHostSettled: vi.fn() }));
-vi.mock('./sessions/yield', () => ({ startYield: () => () => {} })); // W7
-vi.mock('./side/side-threads', () => ({ startSideThreads: () => () => {}, sideThreadEvents: () => [] })); // E3
+vi.mock('../services/sessions/service', () => ({ SessionService: class { start = async () => void (c10.started += 1); } }));
+vi.mock('../services/sessions/service-register', () => ({ registerSessionServiceHandlers: vi.fn(), engineHostSettled: vi.fn() }));
+vi.mock('../services/sessions/yield', () => ({ startYield: () => () => {} })); // W7
+vi.mock('../services/side/side-threads', () => ({ startSideThreads: () => () => {}, sideThreadEvents: () => [] })); // E3
 // C10 end
 // C11 start: the engine host's binary configuration follows the settings, which this test replaces
-vi.mock('./settings/engine-configure', () => ({ startEngineConfigure: () => ({ stop: () => {} }) })); // C12: the coordinator
-vi.mock('./settings/host-configure', () => ({ startHostConfigure: () => () => {} })); // E10: its sibling
+vi.mock('../services/settings/engine-configure', () => ({ startEngineConfigure: () => ({ stop: () => {} }) })); // C12: the coordinator
+vi.mock('../services/settings/host-configure', () => ({ startHostConfigure: () => () => {} })); // E10: its sibling
 vi.mock('./sessions/interest', () => ({ startInterest: () => () => {}, appInterest: () => ({ set: () => new Set(), onChange: () => () => {}, stop: () => {} }) })); // P5 O2 M2: its sibling; P5 O3-C: the app's interest
 vi.mock('./widgets/fixture-backend', () => ({ installWidgetBackend: () => null })); // the widget e2e's stand-in, off here
 // C11 end

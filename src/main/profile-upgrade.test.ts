@@ -14,11 +14,12 @@ import { item } from '../../test/support/builders';
 import { summary, tempDir } from '../../test/support/index-fixture';
 import { BrowserData } from './browser/data';
 import { composeSettings } from './client/settings-store';
-import { Index } from './index/index';
-import { MIGRATIONS } from './index/migrations';
-import { startMachineSettings } from './settings/machine';
-import { takeSpineLock } from './settings/spine-lock';
-import { settingsPaths, splitSettingsFiles } from './settings/split';
+import { Index } from '../services/index/index';
+import { MIGRATIONS } from '../services/index/migrations';
+import { startMachineSettings } from '../services/settings/machine';
+import { takeSpineLock } from '../services/settings/spine-lock';
+import { settingsPaths } from '@shared/settings/paths';
+import { splitSettingsFiles } from '../services/settings/split';
 
 const DS = '6f1c1d2e-0b7a-4c55-9a3e-2f1b0c9d8e71';
 // The owner's settings with every section away from its defaults

@@ -11,6 +11,7 @@
     "electron.vite.config.ts",
     "vitest.config.ts",
     "src/main/**/*",
+    "src/services/**/*", // P5 O3-C: the machine services library (the spine and the checkouts)
     "src/preload/**/*",
     "src/engine-host/**/*",
     "src/pty-host/**/*",

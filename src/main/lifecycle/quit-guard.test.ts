@@ -33,10 +33,10 @@ const electron = vi.hoisted(() => {
 });
 vi.mock('electron', () => ({ app: electron.app, BrowserWindow: { getAllWindows: () => [] }, ipcMain: { handle: vi.fn() } })); // C12: the sessions feed's imports
 
-const { SessionReadModel } = await import('../sessions/read-model');
+const { SessionReadModel } = await import('../../services/sessions/read-model');
 const { fakeSpineView } = await import('../../../test/support/fake-spine-view');
 const { askToQuit, busyReport, installQuitGuard, KILL_PS_TIMEOUT_MS, quitQuestion, SHUTDOWN_BOUND_MS } = await import('./quit-guard');
-const { hostEventSource } = await import('../sessions'); // C12
+const { hostEventSource } = await import('../../services/sessions'); // C12
 const { SAVE_ALL_BOUND_MS, trackUnsavedFiles } = await import('./quit-guard'); // E5
 const { engineQuitDeps } = await import('./engine-quit'); // P2-F L113
 const { hostModeFromEnv } = await import('../hosts/mode'); // P2-F L113

@@ -6,7 +6,7 @@ import type { SessionId } from '@shared/graph/ids';
 import { listTranscripts, loadJournal, loadSyntheticTranscript, loadTranscript, snapshotRecords, TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { MemoryFileReader } from '../../../test/support/memory-reader';
 import { ChainFollower } from '../../engine-host/fs/chain-follower';
-import { deliveryOf } from '../../main/sessions/recent-turns';
+import { deliveryOf } from '../../services/sessions/recent-turns';
 import { AgentMetaSchema, currentChain, LastPromptAnchorSchema, parseTranscriptRecord, withResponseGroups, type TranscriptRecord } from './transcript';
 
 const uuids = (records: TranscriptRecord[]) => records.map((r) => r.uuid);

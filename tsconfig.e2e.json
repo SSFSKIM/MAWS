@@ -64,10 +64,10 @@
     "src/engine-host/relay-health.ts",
     "src/engine-host/supervisor-files.ts", // P5 O2 M3: src/shared/host's detached transport and identity read the supervisor's files
     "src/engine-host/transport.ts",
-    "src/main/git/runner.ts",
-    "src/main/index/migrations.ts",
-    "src/main/index/browser-staging.ts", // P5 O3-A: migration 14's staging step, which migrations.ts imports
-    "src/main/index/db.ts",
+    "src/services/git/runner.ts",
+    "src/services/index/migrations.ts",
+    "src/services/index/browser-staging.ts", // P5 O3-A: migration 14's staging step, which migrations.ts imports
+    "src/services/index/db.ts",
     "src/renderer/src/app/date-format.ts",
     "src/renderer/src/composer/dev/resume-spec.ts",
     "src/renderer/src/harness/agents/api.ts",
