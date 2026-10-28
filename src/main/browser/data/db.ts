@@ -15,9 +15,13 @@ export class BrowserDb {
     return this.connection === null;
   }
 
-  // The connection, opened, migrated and promoted (index.ts), from now until `close`.
+  // The connection, once the index reads 14 or above (index.ts), from now until `close`.
   use(connection: DatabaseSync): void {
     this.connection = connection;
+  }
+
+  exec(sql: string): void {
+    this.open().exec(sql);
   }
 
   prepare(sql: string): StatementSync {

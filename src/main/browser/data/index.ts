@@ -93,17 +93,27 @@ export class BrowserData {
     this.db.close();
   }
 
+  // Reads the index's version and, at 14 or above, opens the file if it is not open yet, then brings its schema current
+  // and promotes any staging: staging an index restored from a backup left while the browser ran is promoted too.
   private open(): void {
-    if (!this.db.inert || this.unavailable !== null || this.closed) return;
+    if (this.unavailable !== null || this.closed) return;
     const version = indexVersion(this.paths.index);
     if (version === null || version < BROWSER_HANDOFF_INDEX_VERSION) return;
+    const opening = this.db.inert;
     try {
-      const opened = openPromoted(this.paths.file);
-      if (typeof opened !== 'string') return this.db.use(opened);
-      this.unavailable = opened;
-      console.error(`[browser] ${this.paths.file}: ${opened}; the browser's history, bookmarks and activity are unavailable this run and the file is left as it is`);
+      if (opening) {
+        const opened = openFile(this.paths.file);
+        if (typeof opened === 'string') {
+          this.unavailable = opened;
+          console.error(`[browser] ${this.paths.file}: ${opened}; the browser's history, bookmarks and activity are unavailable this run and the file is left as it is`);
+          return;
+        }
+        this.db.use(opened);
+      }
+      bringCurrent(this.db);
     } catch (error) {
-      console.error(`[browser] ${this.paths.file} could not be opened (${message(error)}); asked again at the next reattach`);
+      if (opening) this.db.close();
+      console.error(`[browser] ${this.paths.file} could not be brought current (${message(error)}); asked again at the next reattach`);
     }
   }
 }
@@ -115,6 +125,7 @@ function indexVersion(path: string): number | null {
   let db: DatabaseSync | undefined;
   try {
     db = new DatabaseSync(path, { readOnly: true });
+    db.exec('PRAGMA busy_timeout = 1000'); // a reader waits only out another connection's recovery of the index
     return (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
   } catch (error) {
     console.warn(`[browser] the index's version could not be read (${message(error)}); the browser's data waits`);
@@ -124,37 +135,54 @@ function indexVersion(path: string): number | null {
   }
 }
 
-// The file opened, its schema made current and staging promoted, in one transaction; or, for a file whose user_version
-// is newer than this build knows, the reason it is left alone (nothing written to it, its journal mode included).
-function openPromoted(path: string): DatabaseSync | string {
+// The file's own migrations and the promotion of staging, in one transaction, when either is due. Live rows win: live
+// tables hold rows at a promotion only when an index restored from a backup was migrated again, and then the rows the
+// browser wrote since are the later ones.
+function bringCurrent(db: BrowserDb): void {
+  const known = BROWSER_MIGRATIONS.length;
+  const pending = BROWSER_MIGRATIONS.slice(db.get<{ user_version: number }>('PRAGMA user_version')!.user_version);
+  if (pending.length === 0 && staged(db).length === 0) return;
+  db.transaction(() => {
+    for (const migration of pending) db.exec(migration.sql);
+    db.exec(`PRAGMA user_version = ${known}`);
+    for (const table of staged(db)) {
+      const columns = BROWSER_COLUMNS[table].join(', ');
+      db.exec(`INSERT OR IGNORE INTO ${table} (${columns}) SELECT ${columns} FROM ${stagingTable(table)}; DROP TABLE ${stagingTable(table)};`);
+    }
+  });
+}
+
+const staged = (db: BrowserDb) => BROWSER_TABLES.filter((table) => db.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", stagingTable(table)) !== null);
+
+// SQLite result codes that mean the file is no usable database (primary codes, carried in an extended code's low byte).
+const SQLITE_CORRUPT = 11;
+const SQLITE_NOTADB = 26;
+
+// The file opened in WAL mode; or, for one whose user_version is newer than this build knows, the reason it is left
+// alone (nothing written to it, its journal mode included). One SQLite reports as corrupt or not a database is moved
+// aside as `<path>.broken-<epoch>` (with its -wal and -shm), never deleted, and a fresh one made, as the index does with
+// its own: the browser's data is a convenience, which must not stop the browser.
+function openFile(path: string): DatabaseSync | string {
   mkdirSync(dirname(path), { recursive: true });
-  const db = openFile(path);
+  let probed: { db: DatabaseSync; version: number };
   try {
-    const { user_version: version } = db.prepare('PRAGMA user_version').get() as { user_version: number };
-    const known = BROWSER_MIGRATIONS.length;
+    probed = probe(path);
+  } catch (error) {
+    const code = (error as { errcode?: unknown }).errcode;
+    if (typeof code !== 'number' || ![SQLITE_CORRUPT, SQLITE_NOTADB].includes(code & 0xff)) throw error;
+    const aside = `${path}.broken-${Date.now()}`;
+    for (const suffix of ['', '-wal', '-shm']) if (existsSync(path + suffix)) renameSync(path + suffix, aside + suffix);
+    console.error(`[browser] ${path} is not a usable database (${message(error)}); moved aside as ${aside}`);
+    probed = probe(path);
+  }
+  const { db, version } = probed;
+  const known = BROWSER_MIGRATIONS.length;
+  try {
     if (version > known) {
       db.close();
       return `user_version ${version} is newer than this app knows (${known})`;
     }
     db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL');
-    const pending = BROWSER_MIGRATIONS.slice(version);
-    if (pending.length > 0 || staged(db).length > 0) {
-      db.exec('BEGIN IMMEDIATE');
-      try {
-        for (const migration of pending) db.exec(migration.sql);
-        db.exec(`PRAGMA user_version = ${known}`);
-        // Live rows win: live tables hold rows at a promotion only when an index restored from a backup was migrated
-        // again, and then the rows the browser wrote since are the later ones.
-        for (const table of staged(db)) {
-          const columns = BROWSER_COLUMNS[table].join(', ');
-          db.exec(`INSERT OR IGNORE INTO ${table} (${columns}) SELECT ${columns} FROM ${stagingTable(table)}; DROP TABLE ${stagingTable(table)};`);
-        }
-        db.exec('COMMIT');
-      } catch (error) {
-        if (db.isTransaction) db.exec('ROLLBACK');
-        throw error;
-      }
-    }
     return db;
   } catch (error) {
     if (db.isOpen) db.close();
@@ -162,35 +190,13 @@ function openPromoted(path: string): DatabaseSync | string {
   }
 }
 
-const staged = (db: DatabaseSync) =>
-  BROWSER_TABLES.filter((table) => db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(stagingTable(table)) !== undefined);
-
-// SQLite result codes that mean the file is no usable database (primary codes, carried in an extended code's low byte).
-const SQLITE_CORRUPT = 11;
-const SQLITE_NOTADB = 26;
-
-// The file opened, its version readable. One SQLite reports as corrupt or not a database is moved aside as
-// `<path>.broken-<epoch>` (with its -wal and -shm), never deleted, and a fresh one made, as the index does with its own:
-// the browser's data is a convenience, which must not stop the browser.
-function openFile(path: string): DatabaseSync {
-  try {
-    return probe(path);
-  } catch (error) {
-    const code = (error as { errcode?: unknown }).errcode;
-    if (typeof code !== 'number' || ![SQLITE_CORRUPT, SQLITE_NOTADB].includes(code & 0xff)) throw error;
-    const aside = `${path}.broken-${Date.now()}`;
-    for (const suffix of ['', '-wal', '-shm']) if (existsSync(path + suffix)) renameSync(path + suffix, aside + suffix);
-    console.error(`[browser] ${path} is not a usable database (${message(error)}); moved aside as ${aside}`);
-    return probe(path);
-  }
-}
-
-function probe(path: string): DatabaseSync {
+// The connection and the file's version, changing nothing: reading the version is what surfaces a file that is not a
+// database.
+function probe(path: string): { db: DatabaseSync; version: number } {
   const db = new DatabaseSync(path);
   try {
     db.exec('PRAGMA busy_timeout = 0');
-    db.prepare('PRAGMA user_version').get();
-    return db;
+    return { db, version: (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version };
   } catch (error) {
     db.close();
     throw error;

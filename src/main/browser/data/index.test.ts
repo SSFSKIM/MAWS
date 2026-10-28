@@ -296,7 +296,9 @@ describe('the browser\'s tables leave the index (P5 O3-A, the O3 document §4)',
   });
 
   // §4: live tables hold rows at a promotion only when an index restored from a backup is migrated again
-  it('a promotion never loses a live row: a restored index\'s rows are staged again and the live ones win', () => {
+  // The spine's process (mawsd from O3-D) migrates the restored index while the app's browser runs, which promotes the
+  // new staging at its next reattach; a browser that starts afterwards promotes it at its start (the crash cases above).
+  it('a promotion never loses a live row: a restored index\'s rows are staged again while the browser runs, and the live ones win at its next reattach', () => {
     v13Index(indexPath);
     const backup = readFileSync(indexPath);
     index().close();
@@ -305,13 +307,14 @@ describe('the browser\'s tables leave the index (P5 O3-A, the O3 document §4)',
     live.history.visit(MAWS, 'https://alpha.example/', { typed: false, at: 1_770_000_000_000 }); // since the backup
     live.activity.append([{ appSessionId: S1, tabId: TAB, at: '2026-10-27T00:00:00.000Z', activity: { kind: 'screenshot' } }]);
     const kept = allRows(file);
-    live.close();
 
     for (const suffix of ['-wal', '-shm']) rmSync(indexPath + suffix, { force: true });
     writeFileSync(indexPath, backup); // the owner restores index.sqlite from a backup at 13
     write(indexPath, `INSERT INTO browser_activity (id, app_session_id, tab_id, at, activity) VALUES (40, '${S2}', '${TAB}', '2026-10-24T00:00:00.000Z', '{"kind":"screenshot"}')`);
     index();
-    browserData();
+    expect(tables(file)).toEqual([...BROWSER_TABLES, ...BROWSER_TABLES.map(stagingTable)].sort());
+    live.reattach([S1, S2, S3]);
+    expect(tables(file)).toEqual([...BROWSER_TABLES].sort());
     expect(rows(file, 'browser_history')).toEqual(kept.browser_history); // the live counts, not the backup's
     expect(rows(file, 'browser_bookmarks')).toEqual(kept.browser_bookmarks);
     expect((rows(file, 'browser_activity') as { id: number }[]).map((row) => row.id)).toEqual([5, 6, 9, 12, 13, 40]); // 13 is the live row
