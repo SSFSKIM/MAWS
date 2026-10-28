@@ -9,12 +9,14 @@
 // jobs' pressure and counts shared clean pages, so three runs of the same supervisor spread 2x on the mini; the
 // footprint keeps compressed pages and leaves shared clean ones out. RSS stays in the line and the JSON as a diagnostic.
 //
-// The baseline is three runs of the supervisor's scene on the mini at M1's `src/`: the median of their footprint
-// medians and the median of their CPU times, with the run ids and the commit. The bound is derived from it alone (P5
-// Decision Log 57). The runtime floor is a diagnostic: three runs of the floor's scene, the bare Electron binary as
-// Node holding an empty script alive, which is what `mawsd` runs on, recorded as the median of their footprint medians
-// with the Electron version, since it measures the runtime and not `src/`. It tells how much of a footprint is the
-// runtime's, and enters no bound. Each record is written by a recording commit touching only this file.
+// The baseline is three runs of the supervisor's scene on the mini (e2e:daemon-idle-baseline): the median of their
+// footprint medians and the median of their CPU times, with the run ids and the commit. M1 recorded it at M1's `src/`;
+// since O2's landing it is the landing tree's own supervisor, re-measured when a landing misses. The bound is derived
+// from it alone (P5 Decision Log 57's derivation). The runtime floor is a diagnostic: three runs of the floor's scene,
+// the bare Electron binary as Node holding an empty script alive, which is what `mawsd` runs on, recorded as the median
+// of their footprint medians with the Electron version, since it measures the runtime and not `src/`. It tells how much
+// of a footprint is the runtime's, and enters no bound. Each record is written by a recording commit touching only this
+// file (and, at O2's landing, its test, which since derives from the records).
 import { execFileSync } from 'node:child_process';
 
 export const IDLE_RUN = { settleS: 120, windowS: 600, everyS: 30, samples: 21, maxLoad: 5 } as const;
@@ -33,9 +35,18 @@ export interface DaemonIdleRuntimeFloor extends IdleRecord {
   electron: string; // process.versions.electron of the binary the floor ran
 }
 
-// Recorded from three e2e:daemon-idle runs on the mini at d14e92991, the footprint reader on M1's `src/` (P5 Decision
-// Log 54): footprints 64481, 66033 and 63969 KiB, CPU 0.12, 0.11 and 0.11 s, load 3.3, 3.0 and 2.7.
-export const DAEMON_IDLE_BASELINE: DaemonIdleBaseline = { commit: 'd14e92991', runs: ['40490756731', '40492851056', '40495339208'], footprintKiB: 64481, cpuS: 0.11 };
+// History, no longer the bound's: M1's record, from three e2e:daemon-idle runs on the mini at d14e92991, the footprint
+// reader on M1's `src/` (P5 Decision Log 54): footprints 64481, 66033 and 63969 KiB, CPU 0.12, 0.11 and 0.11 s, load
+// 3.3, 3.0 and 2.7. It gave the bound 96721 KiB and 1.11 s.
+export const DAEMON_IDLE_BASELINE_M1: DaemonIdleBaseline = { commit: 'd14e92991', runs: ['40490756731', '40492851056', '40495339208'], footprintKiB: 64481, cpuS: 0.11 };
+
+// The bound's baseline: today's detached supervisor on the landing tree itself. The architect's ruling at O2's landing
+// (superseding P5 Decision Log 57's fixed number): the bound is 1.5 times today's supervisor measured on the same tree,
+// re-measured with e2e:daemon-idle-baseline whenever a landing misses it. Three valid runs on the mini: 65729 KiB at
+// 7ff8f582 (40650181035, load 4.2, CPU 0.10 s), 70881 KiB (40669418019, load 3.4, 0.11 s) and 67409 KiB (40673974571,
+// load 4.6, 0.14 s), the latter two at d6037a48a; three more were invalid on the load rule: 40647561480 (11.0),
+// 40652728419 (14.8) and 40657230165 (25.8).
+export const DAEMON_IDLE_BASELINE: DaemonIdleBaseline = { commit: 'd6037a48a', runs: ['40650181035', '40669418019', '40673974571'], footprintKiB: 67409, cpuS: 0.11 };
 
 // A diagnostic (P5 Decision Log 57), recorded from three valid e2e:daemon-idle-floor runs on the mini at 36704c984:
 // footprints 12689, 13153 and 13185 KiB (1.04x), CPU 0.00 s each, load 2.9, 4.3 and 3.3; a fourth run (40502284016,
@@ -62,6 +73,9 @@ export function idleBound(baseline: DaemonIdleBaseline, windowS: number = IDLE_R
   };
 }
 
+// 101113 KiB and 1.11 s. The daemon shape at the landing, judged in the same quiet window on d6037a48a: 40671838782 at
+// 97683 KiB (load 3.4) and 40676048769 at 99219 KiB (load 3.8) within it; 40678158535 at 96675 KiB was invalid on load
+// (7.6). Two of the two valid runs are within.
 export const DAEMON_IDLE_BOUND: DaemonIdleBound = idleBound(DAEMON_IDLE_BASELINE);
 
 // What is wrong with a recorded baseline or runtime floor, each one line; empty when it is well formed, and for none

@@ -4,6 +4,7 @@ import {
   boundMisses,
   cpuSeconds,
   DAEMON_IDLE_BASELINE,
+  DAEMON_IDLE_BASELINE_M1,
   DAEMON_IDLE_BOUND,
   DAEMON_IDLE_RUNTIME_FLOOR,
   floorLine,
@@ -155,9 +156,13 @@ describe('the baseline, the runtime floor and the bound (acceptance 7; P5 accept
     expect(idleBound(baseline, 1_200)).toEqual({ footprintKiB: 147_456, cpuS: 2.41 }); // the allowance is per 600 s
   });
 
-  it('is derived from the recorded baseline alone: 96721 KiB and 1.11 s, the runtime floor a diagnostic outside it', () => {
+  it('is derived from the recorded baseline alone, the runtime floor a diagnostic outside it', () => {
     expect(DAEMON_IDLE_BOUND).toEqual(idleBound(DAEMON_IDLE_BASELINE));
-    expect(DAEMON_IDLE_BOUND).toEqual({ footprintKiB: 96_721, cpuS: 1.11 });
+  });
+
+  it("re-derives on the landing tree's own supervisor: M1's record stays as history, the bound it gave no longer held", () => {
+    expect(idleBound(DAEMON_IDLE_BASELINE_M1)).toEqual({ footprintKiB: 96_721, cpuS: 1.11 });
+    expect(DAEMON_IDLE_BASELINE.commit).not.toBe(DAEMON_IDLE_BASELINE_M1.commit);
   });
 
   it('a record is three distinct runs at a commit with a positive footprint, a baseline a CPU time that is not negative, and a floor the Electron version it ran on', () => {
@@ -177,8 +182,9 @@ describe('the baseline, the runtime floor and the bound (acceptance 7; P5 accept
     ]);
   });
 
-  it('the recorded baseline is well formed', () => {
+  it('the recorded baselines are well formed', () => {
     expect(baselineProblems(DAEMON_IDLE_BASELINE)).toEqual([]);
+    expect(baselineProblems(DAEMON_IDLE_BASELINE_M1)).toEqual([]);
   });
 
   it('the recorded runtime floor is well formed', () => {
@@ -237,10 +243,10 @@ describe('the printed line', () => {
 
   // P5 O2 M5: Decision Log 57's early check
   it("reads mawsd's line against what the combined bound leaves it beside the engine host's baseline", () => {
-    expect(MAWSD_HEADROOM_KIB).toBe(96_721 - 64_481);
-    expect(mawsdLine({ footprintKiB: 24_000.6, rssKiB: 52_000, samples: 21, cpuS: 0.02, load: 3.04 })).toBe(
-      "[daemon-idle] mawsd footprint 24001 KiB (median of 21) · rss 52000 KiB · cpu 0.02 s over 600 s · within the 32240 KiB the bound leaves it beside the engine host's 64481 KiB · load 3.0",
+    expect(MAWSD_HEADROOM_KIB).toBe(DAEMON_IDLE_BOUND.footprintKiB - DAEMON_IDLE_BASELINE.footprintKiB);
+    expect(mawsdLine({ footprintKiB: MAWSD_HEADROOM_KIB - 0.4, rssKiB: 52_000, samples: 21, cpuS: 0.02, load: 3.04 })).toBe(
+      `[daemon-idle] mawsd footprint ${MAWSD_HEADROOM_KIB} KiB (median of 21) · rss 52000 KiB · cpu 0.02 s over 600 s · within the ${MAWSD_HEADROOM_KIB} KiB the bound leaves it beside the engine host's ${DAEMON_IDLE_BASELINE.footprintKiB} KiB · load 3.0`,
     );
-    expect(mawsdLine({ footprintKiB: 40_000, rssKiB: 60_000, samples: 21, cpuS: 0.02, load: 3 })).toContain('· over the 32240 KiB');
+    expect(mawsdLine({ footprintKiB: MAWSD_HEADROOM_KIB + 1, rssKiB: 60_000, samples: 21, cpuS: 0.02, load: 3 })).toContain(`· over the ${MAWSD_HEADROOM_KIB} KiB`);
   });
 });
