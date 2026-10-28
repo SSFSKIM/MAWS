@@ -218,7 +218,8 @@ credential is read or the hub asked anything, whatever the
 configuration's org, its `orgGenesis` or `--test-org` say (`redeploy-check`, whose RL1 leg writes the state, likewise).
 Within that, they write the state only where an operator's anchor allows:
 - in the configuration's own org, only when it serves a chain whose genesis is the configuration's `orgGenesis`
-  (staging's is pinned; production's config pins none, so they refuse it), and never a genesis;
+  (staging's is pinned, and a configuration that pins none is refused; production's, pinned since its rollout, never
+  gets this far, refused by name above), and never a genesis;
 - in a throwaway org named with `--test-org` (proof.ts's rule), where they post the genesis when it has none.
 
 Each machine they enroll is listed by a signed successor, owned by the device's member, and taken out again by another (its key retired, an honest departure, so what it signed keeps verifying), and
