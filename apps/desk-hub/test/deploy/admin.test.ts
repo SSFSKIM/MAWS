@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import {
   base64urlDecode,
   base64urlEncode,
+  canonicalize,
   decodePairingCode,
   generateSigningKey,
   keyId,
@@ -548,6 +549,131 @@ describe('a root device revoked', () => {
   });
 });
 
+describe('no two successors of one parent', () => {
+  // The anchor's `pending` slot (the spec's Decision Log, 2026-10-28): every signed proposal is written there before
+  // its POST and settled before anything else is signed, under the anchor's lock.
+  let hub: LocalHub;
+  let proxy: Server;
+  /** What the proxy does to the next state POST: forwards it (`pass`), forwards it and answers 500 (`stored`), or drops
+   * it before the hub sees it (`lost`). */
+  let post: 'pass' | 'stored' | 'lost' = 'pass';
+  let proxyUrl: string;
+  const keys = join(scratch, 'pending-keys', 'keys.json');
+  // The command always reaches the hub through the proxy (the anchor names one hub): `post` says what the proxy does.
+  const via = () => ['--hub', proxyUrl, '--user', ADMIN, '--keys', keys];
+  const head = async () => ((await hub.fetchAs(ADMIN, '/api/org/state').then((r) => r.json())) as { head: SignedOrgState }).head;
+  const anchor = () => JSON.parse(readFileSync(anchorFile(keys), 'utf8')) as { version: number; pending?: SignedOrgState };
+
+  beforeAll(async () => {
+    hub = await startLocalHub();
+    proxy = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk: Buffer) => chunks.push(chunk));
+      req.on('end', async () => {
+        const body = Buffer.concat(chunks);
+        const isPost = req.method === 'POST' && req.url === '/api/org/state';
+        if (isPost && post === 'lost') return void res.destroy();
+        const headers: Record<string, string> = {};
+        for (const name of ['x-desk-standin-user', 'content-type']) if (typeof req.headers[name] === 'string') headers[name] = req.headers[name] as string;
+        const upstream = await fetch(`${hub.url}${req.url}`, { method: req.method, headers, body: body.length ? body : undefined });
+        const answer = Buffer.from(await upstream.arrayBuffer());
+        if (isPost && post === 'stored' && upstream.status === 201) {
+          res.writeHead(500, { 'content-type': 'application/json' });
+          return void res.end('{"error":"internal"}');
+        }
+        res.writeHead(upstream.status, { 'content-type': upstream.headers.get('content-type') ?? 'application/json' });
+        res.end(answer);
+      });
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+    proxyUrl = `http://127.0.0.1:${(proxy.address() as { port: number }).port}`;
+    expect(await runAdmin(['init', '--keys', keys], fake().io)).toBe(0);
+    expect(await runAdmin(['genesis', '--recovery', join(dir('volume'), 'recovery.json'), ...via(), '--yes'], fake().io)).toBe(0);
+  });
+  afterAll(async () => {
+    await new Promise((resolve) => proxy?.close(resolve));
+    await hub?.close();
+  });
+
+  it('adopts a proposal the hub stored but answered an error to, and signs no second successor of its parent', async () => {
+    post = 'stored';
+    const failed = fake();
+    expect(await runAdmin(['refresh', ...via()], failed.io)).toBe(1);
+    post = 'pass';
+    const stored = await head();
+    expect(stored.state.version).toBe(2);
+    expect(canonicalize(anchor().pending)).toBe(canonicalize(stored));
+    const f = fake();
+    expect(await runAdmin(['refresh', ...via()], f.io)).toBe(0);
+    expect(f.out).toContain('pending version 2 is the hub\'s: adopted');
+    expect(f.out.at(-1)).toBe('refreshed: version 3 (no change)');
+    const chain = ((await hub.fetchAs(ADMIN, '/api/org/state?since=0').then((r) => r.json())) as { chain: SignedOrgState[] }).chain;
+    expect(chain.map((c) => c.state.version)).toEqual([1, 2, 3]);
+    expect(canonicalize(chain[1])).toBe(canonicalize(stored));
+    expect(chain[2].state.prev).toBe(await stateHash(stored.state));
+    expect(anchor()).toMatchObject({ version: 3 });
+    expect(anchor().pending).toBeUndefined();
+  });
+
+  it('sends a lost proposal again, byte for byte, before it signs anything else', async () => {
+    post = 'lost';
+    const lost = fake();
+    expect(await runAdmin(['refresh', ...via()], lost.io)).not.toBe(0);
+    post = 'pass';
+    expect((await head()).state.version).toBe(3);
+    const pending = anchor().pending!;
+    expect(pending.state.version).toBe(4);
+    const f = fake();
+    expect(await runAdmin(['devices', ...via()], f.io)).toBe(0);
+    expect(f.out).toContain('pending version 4 is not at the hub: sent again');
+    // ECDSA signatures are randomized: the same signature is the same bytes, not a second signing.
+    expect(canonicalize(await head())).toBe(canonicalize(pending));
+    expect(anchor()).toMatchObject({ version: 4 });
+    expect(anchor().pending).toBeUndefined();
+  });
+
+  it("refuses `fork` when the hub's head is another successor of the pending proposal's parent, and changes nothing", async () => {
+    const admin = await readAdminKeys(keys);
+    const parent = await head();
+    const proposal = await signOrgState(await successor(parent.state, () => {}), [admin.stepUp]);
+    const other = await signOrgState(await successor(parent.state, (s) => void s.projects.push({ id: 'p-other', name: 'other' })), [admin.stepUp]);
+    expect((await hub.fetchAs(ADMIN, '/api/org/state', { body: other })).status).toBe(201);
+    writeFileSync(anchorFile(keys), JSON.stringify({ ...anchor(), pending: proposal }), { mode: 0o600 });
+    const held = readFileSync(anchorFile(keys), 'utf8');
+    for (const args of [['refresh'], ['devices'], ['remove-device', 'nothing', '--yes']]) {
+      const f = fake();
+      expect(await runAdmin([...args, ...via()], f.io), args[0]).toBe(1);
+      expect(f.err.join('\n'), args[0]).toMatch(/fork: the hub holds version 5 .* where this device signed .*: nothing was signed/);
+      expect(readFileSync(anchorFile(keys), 'utf8')).toBe(held);
+      expect(canonicalize(await head())).toBe(canonicalize(other));
+    }
+  });
+
+  it('holds the anchor\'s lock for the whole run: a second invocation stops and names the holder, and a held lock is never taken over', async () => {
+    const forked = readFileSync(anchorFile(keys), 'utf8');
+    const settled = { ...JSON.parse(forked), version: 5 };
+    delete settled.pending;
+    writeFileSync(anchorFile(keys), JSON.stringify(settled), { mode: 0o600 });
+    const first = fake();
+    const pairing = runAdmin(['pair', '--class', 'web-cards', '--ttl', '2', ...via(), '--yes'], first.io);
+    const deadline = Date.now() + 15_000;
+    while (!first.out.some((l) => l.startsWith('pairing code: ')) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+    const second = fake();
+    expect(await runAdmin(['refresh', ...via()], second.io)).toBe(1);
+    expect(second.err.join('\n')).toMatch(new RegExp(`another run holds .*keys\\.json\\.org\\.json\\.lock \\(pid ${process.pid} on `));
+    expect(await pairing).toBe(1);
+    // Released once the first ends; a lock left by a run that died is the operator's to remove, never taken over.
+    writeFileSync(`${anchorFile(keys)}.lock`, JSON.stringify({ pid: 99999, host: 'elsewhere', at: '2026-10-28T00:00:00.000Z', token: 't' }));
+    const third = fake();
+    expect(await runAdmin(['refresh', ...via()], third.io)).toBe(1);
+    expect(third.err.join('\n')).toMatch(/another run holds .* \(pid 99999 on elsewhere, since 2026-10-28T00:00:00.000Z\)/);
+    rmSync(`${anchorFile(keys)}.lock`);
+    const fourth = fake();
+    expect(await runAdmin(['refresh', ...via()], fourth.io)).toBe(0);
+    expect(fourth.out.at(-1)).toBe('refreshed: version 6 (no change)');
+  });
+});
+
 describe('a genesis interrupted, then served with a forged head', () => {
   let server: Server;
   let serving: { chain: SignedOrgState[]; head: SignedOrgState };
@@ -662,6 +788,12 @@ describe('a genesis interrupted between its POST and its anchor', () => {
     const hash = await stateHash(first.chain[0].state);
     expect(existsSync(anchorFile(keys))).toBe(false);
     expect(await stateHash((JSON.parse(readFileSync(genesisFile(keys), 'utf8')) as SignedOrgState).state)).toBe(hash);
+
+    // The killed run's lock stays: it is the operator's to remove, once nothing runs (a held lock is never taken over).
+    const held = fake();
+    expect(await runAdmin(['genesis', '--hub', hub.url, '--user', ADMIN, '--yes', '--keys', keys, '--recovery', recovery], held.io)).toBe(1);
+    expect(held.err.join('\n')).toContain(`another run holds ${anchorFile(keys)}.lock (pid ${child!.pid} on `);
+    rmSync(`${anchorFile(keys)}.lock`);
 
     const f = fake();
     expect(await runAdmin(['genesis', '--hub', hub.url, '--user', ADMIN, '--yes', '--keys', keys, '--recovery', recovery], f.io)).toBe(0);

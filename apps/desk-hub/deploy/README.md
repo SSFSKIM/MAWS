@@ -312,9 +312,20 @@ signs in through the stand-in instead, and only there may `--yes` answer its con
   into `revoked` and its step-up key out of the root set if it was a root. Machines learn it at the hub's `state` notice, within its 10-minute poll at worst.
 
 Where it writes: the deployment's own org, under the anchor `<keys>.org.json` (`{hub, org, genesis, version, roots,
-recoveryPub}`, 0600), which `genesis` or `adopt` writes; every other subcommand reads the chain from its genesis,
-verifies it against the anchor's pins, refuses another genesis or a head older than the anchor's version, and moves
-the version forward. Never a throwaway org. Against a deployment, `genesis`, `pair` and `remove-device` open
+recoveryPub, pending?}`, 0600, each write synced and renamed into place), which `genesis` or `adopt` writes; every
+other subcommand reads the chain from its genesis, verifies it against the anchor's pins, refuses another genesis or a
+head older than the anchor's version, and moves the version forward. Never a throwaway org.
+
+No two successors of one parent: every successor this device signs (`refresh`, `pair`, `remove-device`, one path,
+`amend` in `admin.ts`) is written to the anchor's `pending` before its POST, and leaves it only once the hub took it.
+Any answer but 201, or none, leaves it there, and the next subcommand settles it before anything else: the hub's chain
+holding it adopts it (`pending version n is the hub's: adopted`); the hub's head still its parent sends the same bytes
+again (`pending version n is not at the hub: sent again`); the hub holding another state at its version refuses
+`fork: …: nothing was signed`, the anchor unchanged. A `not-head` refusal is not signed again: the next run finds the
+hub's other successor and refuses `fork`, which is the owner's to take to whoever runs the hub (or to the other admin
+device that signed it). Each subcommand but `init` holds `<keys>.org.json.lock` from its first read to its last write;
+a second one is refused, naming the holder's pid, host and start time, and a lock left by a run that died is removed by
+hand once nothing runs (`run-lock.ts`, never taken over). Against a deployment, `genesis`, `pair` and `remove-device` open
 `/dev/tty` before any request and confirm there: a shell with no controlling terminal stops at that open
 (`Device not configured`) and sends nothing.
 

@@ -18,13 +18,16 @@
 // holds them.
 //
 // Where it may write: the deployment's own org under the anchor `<keys>.org.json` ({hub, org, genesis, version, roots,
-// recoveryPub}), written by `genesis` or `adopt`. Every other subcommand reads the chain from its genesis, verifies it
-// against the anchor's pins (`verifyPinnedChain`), refuses another genesis or a head older than the anchor's version,
-// and moves the version forward. A throwaway org is not an option.
-import { closeSync, existsSync, openSync, readSync, renameSync, rmSync, writeFileSync, writeSync } from 'node:fs';
+// recoveryPub, pending?}), written by `genesis` or `adopt`. Every other subcommand reads the chain from its genesis,
+// verifies it against the anchor's pins (`verifyPinnedChain`), refuses another genesis or a head older than the anchor's
+// version, and moves the version forward. A successor is kept in `pending` before its POST and settled before anything
+// else is signed (`anchored`), and each subcommand but `init` holds the anchor's lock throughout (`run`), so this
+// device never signs two successors of one parent. `genesis` keeps its own `<keys>.genesis.json`: version 1 has no
+// parent, and no anchor exists until the hub holds it. A throwaway org is not an option.
+import { closeSync, existsSync, fsyncSync, openSync, readSync, renameSync, rmSync, writeSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import {
   base64urlEncode,
@@ -32,6 +35,7 @@ import {
   encodePairingCode,
   endorseDevice,
   isDevice,
+  isSignedOrgState,
   keyId,
   pairingFingerprint,
   signOrgState,
@@ -68,6 +72,7 @@ import { checkTarget, readDeployConfig, type DeployConfig } from './config';
 import { readSecrets } from './deploy';
 import { Person } from './hub';
 import { deviceEntry, successor } from './org-admin';
+import { withRunLock } from './run-lock';
 
 export const SUBCOMMANDS = ['init', 'genesis', 'adopt', 'refresh', 'pair', 'devices', 'remove-device'] as const;
 type Subcommand = (typeof SUBCOMMANDS)[number];
@@ -122,7 +127,16 @@ class StandinPerson extends Person {
 }
 
 /** The anchor: what this keys file's device signs for, and the newest version it has seen. */
-export type Anchor = { hub: string; org: string; genesis: string; version: number; roots: string[]; recoveryPub: string };
+export type Anchor = {
+  hub: string;
+  org: string;
+  genesis: string;
+  version: number;
+  roots: string[];
+  recoveryPub: string;
+  /** A successor this device signed and has not yet seen at the hub: settled before anything else is signed. */
+  pending?: SignedOrgState;
+};
 export const anchorFile = (keys: string) => `${keys}.org.json`;
 export const genesisFile = (keys: string) => `${keys}.genesis.json`;
 
@@ -138,16 +152,29 @@ function readAnchor(keys: string): Anchor | null {
     Number.isSafeInteger(a.version) &&
     Array.isArray(a.roots) &&
     a.roots.every((r) => typeof r === 'string') &&
-    typeof a.recoveryPub === 'string';
-  if (!ok) refuse(`${file} is not an anchor ({hub, org, genesis, version, roots, recoveryPub})`);
+    typeof a.recoveryPub === 'string' &&
+    (a.pending === undefined || isSignedOrgState(a.pending));
+  if (!ok) refuse(`${file} is not an anchor ({hub, org, genesis, version, roots, recoveryPub, pending?})`);
   return a as Anchor;
 }
 
-/** Writes the anchor whole (a new file renamed over the old), 0600. */
+/** Writes the anchor whole and durably (a new file, synced, renamed over the old, its directory synced), 0600. */
 function writeAnchor(keys: string, anchor: Anchor): void {
   const file = anchorFile(keys);
-  writeFileSync(`${file}.tmp`, `${JSON.stringify(anchor)}\n`, { mode: 0o600 });
+  const fd = openSync(`${file}.tmp`, 'w', 0o600);
+  try {
+    writeSync(fd, `${JSON.stringify(anchor)}\n`);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
   renameSync(`${file}.tmp`, file);
+  const dir = openSync(dirname(file), 'r');
+  try {
+    fsyncSync(dir);
+  } finally {
+    closeSync(dir);
+  }
 }
 
 /** "head version n, issued d days ago": every subcommand's first line, so the owner sees the backstop's clock. */
@@ -175,7 +202,7 @@ async function readServed(person: Person): Promise<Served> {
  * The served chain verified against the anchor: its genesis the anchor's, every state verified from it and anchored to
  * the anchor's pins, the served head the chain's last, and no older than the anchor's version.
  */
-async function verifiedHead(person: Person, anchor: Anchor): Promise<SignedOrgState> {
+async function verifiedHead(person: Person, anchor: Anchor): Promise<{ head: SignedOrgState; chain: SignedOrgState[] }> {
   const served = await readServed(person);
   if (served.chain.length === 0 || served.head === null) refuse(`${anchor.org} serves no org state, but this device anchors its genesis ${anchor.genesis}: refusing`);
   const genesis = await stateHash(served.chain[0].state);
@@ -185,7 +212,7 @@ async function verifiedHead(person: Person, anchor: Anchor): Promise<SignedOrgSt
   if (run.adopted.length !== served.chain.length) refuse(`the hub's chain breaks at version ${run.adopted.length + 1}`);
   if (canonicalize(run.head) !== canonicalize(served.head)) refuse(`the hub's head is not its chain's last state (version ${run.head.state.version})`);
   if (run.head.state.version < anchor.version) refuse(`the hub's head is version ${run.head.state.version}, older than the version ${anchor.version} this device has seen: refusing`);
-  return run.head;
+  return { head: run.head, chain: run.adopted };
 }
 
 /** Why `keys`'s device cannot sign the head's successors for `member`, or null. */
@@ -286,45 +313,84 @@ async function post(person: Person, signed: SignedOrgState): Promise<'ok' | 'not
   return refuse(`the hub refused version ${signed.state.version}: ${response.status} ${printable(text.slice(0, 300))}`);
 }
 
-/** The anchored org, the head verified, and the signed-in member's device able to sign its successors. */
+/**
+ * The anchored org as a signing verb meets it: the head verified against the anchor, a pending proposal settled first,
+ * and `amend`, the one way anything signs a successor (every verb's, O14's too). Called inside the anchor's lock (`run`).
+ *
+ * No two successors of one parent (the spec's Decision Log, 2026-10-28): `amend` writes the signed proposal into the
+ * anchor's `pending` slot, durably, before it posts, and only the hub's head showing it clears the slot. Before anything
+ * is signed, a pending proposal is settled: the hub's chain holds it → adopted; the hub holds no successor of its
+ * parent → the same bytes sent again; the hub holds another successor of that parent → `fork`, and nothing changes. A
+ * hub that stored a proposal but answered an error is therefore never handed a second, different successor of the
+ * same parent.
+ */
 async function anchored(ctx: Context, needsSigner: boolean) {
-  const anchor = readAnchor(ctx.keysPath) ?? refuse('no anchor: run genesis or adopt');
+  let anchor = readAnchor(ctx.keysPath) ?? refuse('no anchor: run genesis or adopt');
   if (anchor.hub !== ctx.hub) refuse(`this device anchors ${anchor.org} at ${anchor.hub}, not ${ctx.hub}`);
   if (ctx.config?.orgGenesis !== undefined && ctx.config.orgGenesis !== anchor.genesis) refuse(`the anchor's genesis ${anchor.genesis} is not the config's orgGenesis ${ctx.config.orgGenesis}`);
   const keys = await readAdminKeys(ctx.keysPath);
   const person = await ctx.person();
   const me = await signedIn(ctx, person);
   if (me.org !== anchor.org) refuse(`the deployment serves the org ${me.org}, not the anchor's ${anchor.org}`);
-  const head = await verifiedHead(person, anchor);
+  const verified = await verifiedHead(person, anchor);
+  let head = verified.head;
   ctx.io.out(ageLine(head));
-  if (head.state.version > anchor.version) writeAnchor(ctx.keysPath, { ...anchor, version: head.state.version });
+  const save = (next: Anchor) => writeAnchor(ctx.keysPath, (anchor = next));
+  // `pending: undefined` leaves the key out of the file (JSON.stringify).
+  const settled = (from: Anchor, version: number): Anchor => ({ ...from, pending: undefined, version });
+
+  const proposal = anchor.pending;
+  if (proposal !== undefined) {
+    const n = proposal.state.version;
+    const { chain } = verified;
+    const held = chain[n - 1];
+    if (held !== undefined && canonicalize(held) === canonicalize(proposal)) {
+      save(settled(anchor, head.state.version));
+      ctx.io.out(`pending version ${n} is the hub's: adopted`);
+    } else if (held !== undefined || head.state.version !== n - 1 || (await stateHash(head.state)) !== proposal.state.prev) {
+      const theirs = held ?? chain[n - 2] ?? head;
+      refuse(
+        `fork: the hub holds version ${theirs.state.version} ${await stateHash(theirs.state)} where this device signed version ${n} ${await stateHash(proposal.state)} (pending in ${anchorFile(ctx.keysPath)}): nothing was signed. Two successors of version ${n - 1} exist; take this to whoever runs the hub before anything else is signed`,
+      );
+    } else {
+      ctx.io.out(`pending version ${n} is not at the hub: sent again`);
+      await send(proposal);
+      head = (await verifiedHead(person, anchor)).head;
+    }
+  }
+  if (head.state.version > anchor.version) save({ ...anchor, version: head.state.version });
+
+  /** Posts the proposal in the anchor's `pending` slot; clears it on the hub's 201, keeps it on anything else. */
+  async function send(signed: SignedOrgState): Promise<void> {
+    const n = signed.state.version;
+    let response: Response;
+    let text: string;
+    try {
+      response = await person.fetch(ORG_STATE_PATH, { body: signed });
+      text = await response.text();
+    } catch (error) {
+      return refuse(`version ${n} got no answer (${error instanceof Error ? error.message : String(error)}): it stays pending in ${anchorFile(ctx.keysPath)}, and the next run settles it`);
+    }
+    if (response.status !== 201) refuse(`the hub answered ${response.status} to version ${n} (${printable(text.slice(0, 300))}): it stays pending in ${anchorFile(ctx.keysPath)}, and the next run settles it`);
+    save(settled(anchor, n));
+  }
+
+  /** A successor of the head, changed by `edit`, signed by the admin device, kept as pending, then posted. */
+  async function amend(edit: (state: OrgState) => Promise<void> | void): Promise<SignedOrgState> {
+    const next = await successor(head.state, () => {});
+    await edit(next);
+    const signed = await signOrgState(next, [keys.stepUp]);
+    save({ ...anchor, pending: signed });
+    await send(signed);
+    head = signed;
+    return signed;
+  }
+
   if (needsSigner) {
     const problem = await signerProblem(head.state, me.member.id, keys);
     if (problem) refuse(`${problem}: this device cannot sign its successors`);
   }
-  return { anchor, keys, person, me, head };
-}
-
-/**
- * A successor of the verified head, changed by `edit`, signed by the admin device and posted; a head that moved meanwhile
- * (`not-head`) is read and verified again and the edit made anew, once.
- */
-async function amend(ctx: Context, from: Awaited<ReturnType<typeof anchored>>, edit: (state: OrgState) => Promise<void> | void): Promise<SignedOrgState> {
-  let head = from.head;
-  for (let attempt = 0; ; attempt++) {
-    const next = await successor(head.state, () => {});
-    await edit(next);
-    const signed = await signOrgState(next, [from.keys.stepUp]);
-    if ((await post(from.person, signed)) === 'ok') {
-      writeAnchor(ctx.keysPath, { ...from.anchor, version: next.version });
-      return signed;
-    }
-    if (attempt > 0) refuse(`the head moved twice while version ${next.version} was signed: run it again`);
-    ctx.io.out(`the head moved (not-head): reading it again`);
-    head = await verifiedHead(from.person, { ...from.anchor, version: head.state.version });
-    const problem = await signerProblem(head.state, from.me.member.id, from.keys);
-    if (problem) refuse(problem);
-  }
+  return { anchor, keys, person, me, head, amend };
 }
 
 // ---- The subcommands ------------------------------------------------------------------------------------------------
@@ -481,7 +547,7 @@ async function adopt(ctx: Context): Promise<number> {
 
 async function refresh(ctx: Context): Promise<number> {
   const from = await anchored(ctx, true);
-  const signed = await amend(ctx, from, () => {});
+  const signed = await from.amend(() => {});
   ctx.io.out(`refreshed: version ${signed.state.version} (no change)`);
   return 0;
 }
@@ -501,7 +567,7 @@ async function removeDevice(ctx: Context): Promise<number> {
   const device = member.devices.find((d) => d.id === id) ?? refuse(`${from.me.member.id} has no device ${id} in the head (version ${from.head.state.version})`);
   if (id === from.keys.id) refuse(`${id} is this admin device: it is revoked from the app that replaces it (O8), never by itself`);
   if (!(await confirm(ctx, `revoke ${describeEntry(device)}? [y/N]`))) refuse('not revoked: nothing was signed');
-  const signed = await amend(ctx, from, async (s) => {
+  const signed = await from.amend(async (s) => {
     const m = s.members.find((x) => x.id === from.me.member.id);
     const d = m?.devices.find((x) => x.id === id);
     if (!m || !d) return refuse(`${id} left the head meanwhile: nothing to revoke`);
@@ -572,7 +638,7 @@ async function pair(ctx: Context): Promise<number> {
   // What is signed is what was shown: the list read again, one entry answering, the same one.
   const still = await answering();
   if (still === null || canonicalize(still) !== canonicalize(device)) refuse('the entry changed after it was shown: start over (the code is spent)');
-  const signed = await amend(ctx, from, async (s) => {
+  const signed = await from.amend(async (s) => {
     const m = s.members.find((x) => x.id === member)!;
     if (m.devices.some((d) => d.id === device.id)) return refuse(`${device.id} is listed already`);
     m.devices.push({ ...device, endorsement: await endorseDevice(org, member, device, from.keys.stepUp.privateKey, from.keys.stepUp.pub) });
@@ -668,7 +734,14 @@ async function run(argv: string[], io: AdminIo): Promise<number> {
       return (person = new Person(hub, token!));
     },
   };
-  return RUN[sub](ctx);
+  if (sub === 'init') return RUN.init(ctx);
+  // One run at a time per anchor, from its first read to its last write: a held lock is never taken over.
+  try {
+    return await withRunLock(`${anchorFile(keysPath)}.lock`, () => RUN[sub](ctx));
+  } catch (error) {
+    if (error instanceof Error && (error.cause as NodeJS.ErrnoException | undefined)?.code === 'EEXIST' && error.message.startsWith('another run holds ')) refuse(error.message);
+    throw error;
+  }
 }
 
 /** The local hub's origin: loopback only, so `--yes` and the stand-in identity never reach a deployment. */
