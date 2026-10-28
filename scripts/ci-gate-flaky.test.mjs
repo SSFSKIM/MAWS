@@ -1,7 +1,7 @@
 import console from 'node:console';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
@@ -88,12 +88,14 @@ test('the tail reader skips jobs that never ran and preserves other jobs and att
 test('a stalled gh read is bounded, warns by job name, and prints the other jobs instead of holding the verdict', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ci-flaky-timeout-'));
   try {
+    const node = join(dir, "node's executable");
+    symlinkSync(process.execPath, node);
     const jobs = JSON.stringify([{ jobs: [job(1, 'e2e:stalled'), job(2, 'e2e:readable')] }]);
     const notes = JSON.stringify([[{ title: 'MAWS flaky', message: 'flaky: e2e/kept.spec.ts:8' }]]);
-    writeFileSync(join(dir, 'gh'), `#!/bin/sh\ncase "$*" in\n  *'/jobs?'*) printf '%s' '${jobs}' ;;\n  *'/1/'*) exec '${process.execPath}' -e 'setInterval(() => {}, 1000)' ;;\n  *) printf '%s' '${notes}' ;;\nesac\n`);
+    writeFileSync(join(dir, 'gh'), `#!/bin/sh\ncase "$*" in\n  *'/jobs?'*) printf '%s' '${jobs}' ;;\n  *'/1/'*) exec "$NODE" -e 'setInterval(() => {}, 1000)' ;;\n  *) printf '%s' '${notes}' ;;\nesac\n`);
     chmodSync(join(dir, 'gh'), 0o755);
     const run = spawnSync(process.execPath, [join(root, 'scripts/ci-gate-flaky.mjs'), 'SSFSKIM/MAWS', '123'], {
-      encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}` }, timeout: 20_000,
+      encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, NODE: node }, timeout: 20_000,
     });
     assert.equal(run.signal, null, 'the reader must finish before its caller gives up');
     assert.equal(run.status, 0);

@@ -26,5 +26,6 @@ export default class FlakyReporter {
 // Invoked only by the dedicated publish step; absent when the test command never reached its reporter or had no flakes.
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url) && existsSync(process.argv[2])) {
   const lines = [...new Set(readFileSync(process.argv[2], 'utf8').split('\n').filter(Boolean))];
+  // GitHub bounds annotation messages; if a job ever exceeds that limit, its job summary remains the complete record.
   if (lines.length) console.log(`::notice title=MAWS flaky::${escapeData(lines.join('\n'))}`);
 }
