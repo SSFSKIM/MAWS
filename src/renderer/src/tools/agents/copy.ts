@@ -128,7 +128,6 @@ export const BACKGROUND_COPY = {
   // 2026-09-29), so the engine is not creating one; a live and a disk-only session read the same
   noTaskLists: 'The engine is not creating task lists in this session',
   shellsDiskOnly: 'Shells and monitors are known only while the session runs here',
-  shellsInTerminal: "A terminal session's background shells are listed and stopped in the terminal", // P5 O9 M5 (Q2): a session driven through its bridge
   runsOnDisk: (n: number) => `Workflow runs on disk · ${n}`,
   nothingRunning: 'Nothing running',
   // E7 start: the workflow widget and the compact card (E7 execution document, Design §2): the card shows one summary

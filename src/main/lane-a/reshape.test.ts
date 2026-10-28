@@ -27,7 +27,7 @@ describe('the reshaper', () => {
       rows: [{ never: 'sent' }],
     }));
     expect(kinds(out)).toEqual(['snapshot', 'raised']);
-    expect(out[0]).toEqual({ project: '', machine: ctx.machine, session: 'sess-1', kind: 'snapshot', sub: 'watch-1', n: 0, body: { streaming, usage: { context: { window: 200000 }, cost: null } } });
+    expect(out[0]).toEqual({ project: '', machine: ctx.machine, session: 'sess-1', kind: 'snapshot', sub: 'watch-1', n: 0, body: { streaming, usage: { context: { window: 200000 }, cost: null }, jobs: [] } });
     expect(out[1]).toEqual({
       project: '', machine: ctx.machine, session: 'sess-1', kind: 'raised', sub: null, n: null,
       body: { request: 'toolu_1', session: 'sess-1', tool: 'Bash', input: { command: 'ls' }, deadline: new Date(1_700_000_000_000).toISOString(), t: 5 },
@@ -42,6 +42,15 @@ describe('the reshaper', () => {
     expect(chunk).toEqual([{ project: '', machine: ctx.machine, session: 'sess-1', kind: 'chunk', sub: 'watch-1', n: 1, body: { turnId: 't1', agentId: null, step: 1, chunkIndex: 0, chunk: { index: 0, delta: { text: 'Hi' } }, t: 9 } }]);
     expect(row).toEqual([{ project: '', machine: ctx.machine, session: 'sess-1', kind: 'block-row', sub: 'watch-1', n: 2, body: { uuid: 'u1', turnId: 't1', agentId: null, step: 1, index: 0 } }]);
     expect(r.event({ type: 'row-seen', uuid: 'u2', agentId: null })).toEqual([]);
+  });
+
+  it('carries the session’s jobs in its snapshot, and each change of them as a numbered subagents message', () => {
+    const r = new Reshaper(ctx);
+    const job = { taskId: 'bsleep01', kind: 'shell' as const, toolUseId: 'toolu_1', startedAt: 'T1', description: 'sleep', command: 'sleep 60', outputFile: null, status: 'running' as const };
+    expect(bodies(r.snapshot(snap(), [job]))).toEqual([{ streaming: [], usage: null, jobs: [job] }]);
+    r.event({ type: 'chunk', turnId: 't1', agentId: null, step: 1, chunkIndex: 0, chunk: {} });
+    const ended = { ...job, status: 'stopped' as const, endedAt: 'T2' };
+    expect(r.jobs([ended])).toEqual({ project: '', machine: ctx.machine, session: 'sess-1', kind: 'subagents', sub: 'watch-1', n: 2, body: { subagents: [], jobs: [ended], mcp: [] } });
   });
 
   it('closes a step at its end, and every step of a turn still open at its completion', () => {

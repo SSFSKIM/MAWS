@@ -10,13 +10,16 @@
 // DX4 messages cross IPC as JSON values; they are read here as `desk-hub/protocol`'s `SessionMessage`. A page hears every
 // window's `laneA.plane` and reads only its own watch ids.
 //
+// The jobs a snapshot or a `subagents` message carries are kept in the lane A store (`useLaneAJobs`).
+//
 // The session-wide `op` and `compact` messages are kept by their op's id (the last 100 ops per session), so a caller that
 // learns an id from a control's answer after its op already ended still finds the op's messages.
 import type { SessionMessage } from 'desk-hub/protocol';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandResult, EventPayload, MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
-import { noteLaneAUsage, useLaneA, type LaneAUsage } from '../stores/lane-a';
+import type { Job } from 'desk-hub/protocol';
+import { laneAJobsWatchEnded, noteLaneAJobs, noteLaneAUsage, useLaneA, type LaneAUsage } from '../stores/lane-a';
 
 export type PlaneEvent = { kind: 'messages'; messages: SessionMessage[] } | { kind: 'reset' } | { kind: 'ended'; reason: string };
 
@@ -75,6 +78,8 @@ function receive(appSessionId: AppSessionId, entry: Entry, payload: Payload): vo
     for (const message of messages) {
       const usage = message.kind === 'usage' ? message.body : message.kind === 'snapshot' ? (message.body as { usage?: unknown }).usage : null;
       if (usage && typeof usage === 'object' && 'context' in usage) noteLaneAUsage(appSessionId, usage as LaneAUsage);
+      const jobs = message.kind === 'snapshot' || message.kind === 'subagents' ? (message.body as { jobs?: unknown }).jobs : undefined;
+      if (Array.isArray(jobs)) noteLaneAJobs(appSessionId, jobs as Job[]);
     }
     if (messages[0]?.kind === 'snapshot') entry.log = [...messages];
     else if (entry.log !== null) entry.log = entry.log.length + messages.length > LOG_MAX ? null : [...entry.log, ...messages];
@@ -85,6 +90,7 @@ function receive(appSessionId: AppSessionId, entry: Entry, payload: Payload): vo
   } else if ('ended' in payload) {
     entry.watch = null;
     entry.log = null;
+    laneAJobsWatchEnded(appSessionId);
     tell(entry, { kind: 'ended', reason: payload.ended });
     open(appSessionId, entry);
   }

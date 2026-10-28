@@ -336,6 +336,13 @@ void startWithProfileLock(app, () => {
     machine: local,
     home: engineEnv.then((shellEnv) => sminosHome(process.env, shellEnv)),
     userData: app.getPath('userData'),
+    // M5: a watched session's jobs are derived from its transcript: the path the index knows, else where the engine writes it
+    transcript: async (appId, engineSessionId) => {
+      if (index.unavailable !== null) return null;
+      const record = index.sessions.get(appId);
+      if (record?.engineSessionId !== engineSessionId) return null; // another transcript now: the driver follows the record
+      return index.sessions.summaryOf(appId)?.transcriptPath || transcriptPathOf(await engineEnv, record.directory, record.engineSessionId);
+    },
     emit: (name, payload) => void emit(name, payload),
   });
   registerLaneA(laneA, registerMainHandler);

@@ -1,6 +1,7 @@
 // A background shell's row and a monitor's (C8b execution document, M3): `<description> · running <elapsed>`, then
 // `· <status> <ago>` once it ends. A shell's `Output` opens the Log on the file the engine reported (the Bash result's
-// own sentence at start, or the notification), never a derived one, and is disabled until one is reported. `Stop` asks
+// own sentence at start, or the notification), never a derived one, and is disabled until one is reported (P5 O9 M5: and
+// absent for a lane A job, whose output tail is remote-only). `Stop` asks
 // no confirmation (the TUI's `x` asks none) and reads `stopping…` until the engine's terminal frame. A monitor's
 // interval is not on the wire and is not shown. Also the pieces the workflow card shares: the stop button, its error.
 import type { ReactNode } from 'react';
@@ -69,13 +70,15 @@ function TaskRow({ node, now, selected, stopError, onStop, kind, children }: Row
   );
 }
 
-export function ShellRow({ onOutput, ...props }: RowProps & { onOutput: (path: string) => void }) {
+export function ShellRow({ onOutput, ...props }: RowProps & { onOutput: ((path: string) => void) | null }) {
   const path = props.node.outputFile;
   return (
     <TaskRow {...props} kind="shell">
-      <button type="button" disabled={path === null} title={path === null ? BACKGROUND_COPY.outputPending : path} onClick={() => path !== null && onOutput(path)} className={ACTION}>
-        {BACKGROUND_COPY.output}
-      </button>
+      {onOutput !== null && (
+        <button type="button" disabled={path === null} title={path === null ? BACKGROUND_COPY.outputPending : path} onClick={() => path !== null && onOutput(path)} className={ACTION}>
+          {BACKGROUND_COPY.output}
+        </button>
+      )}
     </TaskRow>
   );
 }

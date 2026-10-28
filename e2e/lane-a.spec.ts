@@ -11,7 +11,7 @@ import { startFakeBridge, type FakeBridge } from '../test/support/fake-bridge';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
 import { launchMaws, test, type MawsLaunch } from './support/launch';
-import { assistantRecord, CATALOG, terminalSession, userRecord, type TerminalSession } from './support/lane-a';
+import { assistantRecord, backgroundBashRecords, CATALOG, taskNotificationRecord, terminalSession, userRecord, type TerminalSession } from './support/lane-a';
 import { openSurface } from './support/shell';
 import { sidebarRow } from './support/sidebar';
 
@@ -59,15 +59,18 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     }
   });
 
-  // A launch over an engine store holding the session's transcript (one exchange), the session in the sidebar.
-  async function begin(): Promise<Case> {
+  // A launch over an engine store holding the session's transcript (one exchange, then the rows `more` gives after its
+  // answer), the session in the sidebar.
+  async function begin(more: (sid: string, cwd: string, after: string) => Record<string, unknown>[] = () => []): Promise<Case> {
     const repo = await ScratchRepo.create();
     const store = await StoreFixture.create();
     const sid = randomUUID();
     const prompt = randomUUID();
+    const answer = randomUUID();
     const transcript = await store.addTranscript(repo.root, sid, [
       JSON.stringify(userRecord(sid, repo.root, prompt, null, 'Tell me a story.', T0)),
-      JSON.stringify(assistantRecord(sid, repo.root, randomUUID(), prompt, 'A short one, then.', '2026-10-28T10:00:02.000Z')),
+      JSON.stringify(assistantRecord(sid, repo.root, answer, prompt, 'A short one, then.', '2026-10-28T10:00:02.000Z')),
+      ...more(sid, repo.root, answer).map((row) => JSON.stringify(row)),
     ]);
     const maws = await launchMaws({ env: { CLAUDE_CONFIG_DIR: store.configHome } });
     const { page } = maws;
@@ -132,9 +135,25 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await (await sidebarRow(page, { appSessionId: c.appId })).click({ button: 'right' });
     await expect(page.getByRole('menuitem', { name: 'Take over in MAWS' })).toBeVisible();
     await page.keyboard.press('Escape');
-    // its background shells are the terminal's: the jobs list says so in place of an empty list
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
+  test('the jobs list: a background shell the transcript started runs, its Stop reaches the bridge, and the transcript ending it ends it', async () => {
+    const shellJob = { taskId: 'bsleep01', command: 'sleep 600', description: 'Wait ten minutes', at: '2026-10-28T10:00:03.000Z' };
+    const c = await begin((sid, cwd, after) => backgroundBashRecords(sid, cwd, after, shellJob));
+    const { page } = c;
+    const { bridge } = await drive(c);
     await openSurface(page, 'Background work');
-    await expect(page.locator('[data-shells-unavailable="terminal"]')).toHaveText("A terminal session's background shells are listed and stopped in the terminal");
+    const shell = page.locator('[data-shell="bsleep01"]');
+    await expect(shell, 'derived by main from the transcript, carried by the watch').toContainText('Wait ten minutes · running', { timeout: 15_000 });
+    await expect(shell.getByRole('button', { name: 'Output' }), 'a local job has no output tail').toHaveCount(0);
+    await shell.getByRole('button', { name: 'Stop' }).click();
+    await expect.poll(() => bodies(bridge, 'stop')).toEqual([{ op: 'stop', taskId: 'bsleep01' }]);
+    await expect(shell.getByRole('button', { name: 'stopping…' })).toBeVisible();
+    // the engine's notification that it ended, as the transcript records it
+    await c.store.appendLines(c.transcript, [JSON.stringify(taskNotificationRecord(c.sid, c.repo.root, randomUUID(), { taskId: 'bsleep01', status: 'killed', summary: 'Background command "Wait ten minutes" was stopped', at: '2026-10-28T10:00:09.000Z' }))]);
+    await expect(shell).toContainText('Wait ten minutes · stopped', { timeout: 10_000 });
+    await expect(shell.getByRole('button')).toHaveCount(0);
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 

@@ -1,6 +1,6 @@
 // The local lane A driver against the fake bridge (P5 O9 M2, "Proves"): discovery, the bridge's states, the state stream
 // and its backoff, watches, each control's body, the delivery lane, decisions, and the guard on the owner's sminos.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -41,7 +41,7 @@ afterEach(async () => {
 type Changed = { appSessionId: string; state: LaneAState | null };
 type Plane = { appSessionId: string; watch: string; messages?: PlaneMessage[]; reset?: true; ended?: string };
 
-function harness(home = process.env.SMINOS_HOME!, timing: Record<string, unknown> = {}) {
+function harness(home = process.env.SMINOS_HOME!, timing: Record<string, unknown> = {}, transcript: string | null = null) {
   const changes: Changed[] = [];
   const planes: Plane[] = [];
   const driver = createLaneADriver({
@@ -50,7 +50,9 @@ function harness(home = process.env.SMINOS_HOME!, timing: Record<string, unknown
     userData: process.env.MAWS_USER_DATA!,
     emit: (name, payload) => (name === 'laneA.changed' ? changes.push(payload as Changed) : planes.push(payload as Plane)),
     log: () => {},
+    transcript: async (appId, engine) => (appId === APP && engine === ENGINE ? transcript : null),
     timing: {
+      jobsPollMs: 30,
       probeMs: 500, commandWaitMs: 400, requestMs: 500, decisionMs: 500, dirPollMs: 50,
       backoff: { firstMs: 30, maxMs: 120, healthyMs: 60_000 },
       lane: { retryDelaysMs: [20, 40], answerMs: 600, keepMs: 2000, capacity: 8 },
@@ -258,6 +260,77 @@ describe('watches', () => {
     h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: { kind: 'none' } });
     expect(h.planes.at(-1)).toEqual({ appSessionId: APP, watch, ended: 'the session left the terminal' });
     expect(() => h.driver.watch(APP, client())).toThrow(/no bridge/);
+  });
+});
+
+describe('jobs', () => {
+  const row = (r: unknown) => `${JSON.stringify(r)}\n`;
+  const shell = (n: number) =>
+    row({ type: 'assistant', uuid: `a${n}`, timestamp: `T${n}`, message: { role: 'assistant', content: [{ type: 'tool_use', id: `toolu_${n}`, name: 'Bash', input: { command: `sleep ${n}`, description: `sleep ${n}` } }] } }) +
+    row({ type: 'user', uuid: `u${n}`, timestamp: `T${n}`, toolUseResult: { backgroundTaskId: `bshell00${n}` }, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `toolu_${n}`, content: 'Command running in background' }] } });
+  const ended = (n: number, status: string) =>
+    row({ type: 'attachment', uuid: `n${n}`, timestamp: `E${n}`, attachment: { type: 'queued_command', commandMode: 'task-notification', prompt: `<task-notification><task-id>bshell00${n}</task-id><status>${status}</status></task-notification>` } });
+  const jobsOf = (planes: Plane[], watch: string) =>
+    messagesOf(planes, watch).filter((m) => m.kind === 'snapshot' || m.kind === 'subagents').map((m) => (m.body as { jobs: { taskId: string; status: string }[] }).jobs.map((j) => `${j.taskId} ${j.status}`));
+
+  async function watched(transcriptRows: string) {
+    const path = join(tmp('o9t-'), 'session.jsonl');
+    writeFileSync(path, transcriptRows);
+    const b = await bridge();
+    const h = harness(undefined, {}, path);
+    h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: terminal });
+    await h.live();
+    const { watch } = h.driver.watch(APP, client());
+    await expect.poll(() => jobsOf(h.planes, watch).flat().includes('bshell001 running')).toBe(true);
+    return { b, h, path, watch };
+  }
+
+  it('carries the transcript’s jobs to a watch, and a subagents message each time they change', async () => {
+    const { h, path, watch } = await watched(shell(1));
+    appendFileSync(path, shell(2));
+    await expect.poll(() => jobsOf(h.planes, watch).at(-1)).toEqual(['bshell001 running', 'bshell002 running']);
+    appendFileSync(path, ended(1, 'completed'));
+    await expect.poll(() => jobsOf(h.planes, watch).at(-1)).toEqual(['bshell001 completed', 'bshell002 running']);
+    const last = messagesOf(h.planes, watch).at(-1)!;
+    expect(last).toMatchObject({ kind: 'subagents', sub: watch, body: { subagents: [], mcp: [] } });
+    const sent = jobsOf(h.planes, watch).length;
+    await new Promise((r) => setTimeout(r, 120)); // polls with nothing new send nothing
+    expect(jobsOf(h.planes, watch)).toHaveLength(sent);
+  });
+
+  it('says a running job exited when the session’s holder ends, before the watch ends', async () => {
+    const { h, watch } = await watched(shell(1) + shell(2) + ended(2, 'failed'));
+    await expect.poll(() => jobsOf(h.planes, watch).at(-1)).toEqual(['bshell001 running', 'bshell002 failed']);
+    h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: { kind: 'none' } });
+    const mine = h.planes.filter((p) => p.watch === watch);
+    expect(mine.at(-1)).toEqual({ appSessionId: APP, watch, ended: 'the session left the terminal' });
+    expect(jobsOf(h.planes, watch).at(-1)).toEqual(['bshell001 exited', 'bshell002 failed']);
+  });
+
+  it('says a running job exited when the session’s bridge goes', async () => {
+    const { b, h, watch } = await watched(shell(1));
+    await b.close();
+    await expect.poll(() => h.planes.some((p) => p.watch === watch && p.ended !== undefined), { timeout: 3000 }).toBe(true);
+    expect(jobsOf(h.planes, watch).at(-1)).toEqual(['bshell001 exited']);
+  });
+
+  it('stops only a job the transcript holds running; a task it doesn’t hold is the bridge’s to judge', async () => {
+    const { b, h } = await watched(shell(1) + shell(2) + ended(2, 'killed'));
+    expect(await h.driver.stopTask(APP, 'bshell002')).toEqual({ state: 'refused', code: 'not-running', message: expect.stringMatching(/not running/) as unknown });
+    expect(await h.driver.stopTask(APP, 'bshell001')).toMatchObject({ state: 'done' });
+    expect(await h.driver.stopTask(APP, 'b-agents1')).toMatchObject({ state: 'done' }); // a subagent's, say
+    expect(b.commands.map((c) => c.body)).toEqual([{ op: 'stop', taskId: 'bshell001' }, { op: 'stop', taskId: 'b-agents1' }]);
+  });
+
+  it('reads the transcript at a stop no watch follows', async () => {
+    const path = join(tmp('o9t-'), 'session.jsonl');
+    writeFileSync(path, shell(1) + ended(1, 'completed'));
+    const b = await bridge();
+    const h = harness(undefined, {}, path);
+    h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: terminal });
+    await h.live();
+    expect(await h.driver.stopTask(APP, 'bshell001')).toMatchObject({ state: 'refused', code: 'not-running' });
+    expect(b.commands).toEqual([]);
   });
 });
 

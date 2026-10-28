@@ -7,11 +7,17 @@
 // E7 (Design §2): its view is the list or one run's widget, as Subagents' is its lists or a drill-in (Back is a state
 // change; the host sees one tab); a card's title or chevron, the transcript's workflow ref and `open({ view: 'run' })`
 // open the widget. Its Scheduled section (Design §7) lists the session's cron jobs after Monitors.
+// P5 O9 M5: a terminal session driven through its bridge lists the shells and monitors main derives from its transcript
+// (../../../lane-a/jobs/lane-jobs.ts), each stopped through its bridge, with no output tail; an ended one's stay listed
+// exited.
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { AppSessionId, TaskId } from '@shared/graph/ids';
 import { Icon } from '../../../app/IconButton';
 import type { PanelTool, PanelToolContext } from '../../../panel/tool';
-import { useSessionControls } from '../../../session/controls/controls-for'; // P5 O9 M5
+import type { Job } from 'desk-hub/protocol';
+import { useDrivenJobs } from '../../../lane-a/jobs/lane-jobs'; // P5 O9 M5
+import { jobLists } from '../../../lane-a/jobs/job-nodes'; // P5 O9 M5
+import { stopSessionTask, useSessionControls } from '../../../session/controls/controls-for'; // P5 O9 M5
 import { BACKGROUND_COPY } from '../copy';
 import { openLog } from '../log/LogTool';
 import { elapsedOf } from '../model/elapsed';
@@ -60,6 +66,7 @@ export interface BackgroundState {
   scrollTop: number;
   stopErrors: Map<string, string>;
   reveal: number;
+  stoppingJobs: ReadonlySet<string>; // P5 O9 M5: a lane A job's stop the bridge took, until its job ends
 }
 
 const sectionOfNode = (node: TaskNode | undefined): BackgroundSection => (node?.kind === 'shell' ? 'shells' : node?.kind === 'monitor' ? 'monitors' : 'workflows');
@@ -71,7 +78,7 @@ export class BackgroundHandle {
 
   constructor(appSessionId: AppSessionId | null, params: BackgroundParams | undefined) {
     this.state = {
-      appSessionId, view: LIST, pendingRun: null, selected: null, expanded: new Set(ALL_SECTIONS), showEarlierTasks: false, scrollTop: 0, stopErrors: new Map(), reveal: 0,
+      appSessionId, view: LIST, pendingRun: null, selected: null, expanded: new Set(ALL_SECTIONS), showEarlierTasks: false, scrollTop: 0, stopErrors: new Map(), reveal: 0, stoppingJobs: new Set(),
     };
     this.watch(appSessionId);
     this.open(params);
@@ -150,12 +157,27 @@ export class BackgroundHandle {
     if (!result.ok && this.state.appSessionId === appSessionId) this.update({ stopErrors: new Map(this.state.stopErrors).set(taskId, result.message) });
   };
 
+  // P5 O9 M5: a lane A job's stop goes to the session's bridge; the row reads stopping… until the transcript ends the job
+  // (or its error, when the bridge refused it).
+  stopJob = async (taskId: TaskId) => {
+    const { appSessionId } = this.state;
+    if (appSessionId === null || this.state.stoppingJobs.has(taskId)) return;
+    const stopErrors = new Map(this.state.stopErrors);
+    stopErrors.delete(taskId);
+    this.update({ stopErrors, stoppingJobs: new Set(this.state.stoppingJobs).add(taskId) });
+    const result = await stopSessionTask(appSessionId, taskId);
+    if (result.state !== 'refused' || this.state.appSessionId !== appSessionId) return;
+    const stoppingJobs = new Set(this.state.stoppingJobs);
+    stoppingJobs.delete(taskId);
+    this.update({ stoppingJobs, stopErrors: new Map(this.state.stopErrors).set(taskId, result.message) });
+  };
+
   // A pinned tab's session changed under it: that session's work, with the selection, scroll and stop errors reset. No
   // session shown (the Overview) changes nothing: returning to the same session finds the tab as it was (as Subagents).
   follow = (appSessionId: AppSessionId | null) => {
     if (appSessionId === null || appSessionId === this.state.appSessionId) return;
     this.watch(appSessionId);
-    this.update({ appSessionId, view: LIST, pendingRun: null, selected: null, showEarlierTasks: false, scrollTop: 0, stopErrors: new Map() });
+    this.update({ appSessionId, view: LIST, pendingRun: null, selected: null, showEarlierTasks: false, scrollTop: 0, stopErrors: new Map(), stoppingJobs: new Set() });
   };
 
   dispose = () => {
@@ -194,12 +216,16 @@ function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
   const graph = useTaskGraph((s) => s.entries.get(appSessionId)?.graph ?? EMPTY_GRAPH);
   const runsError = useTaskGraph((s) => s.entries.get(appSessionId)?.disk.runsError ?? null);
   const live = ctx.status !== null;
-  // P5 O9 M5: a terminal session driven through its bridge has no source listing its shells here: they are the terminal's
+  // P5 O9 M5: a terminal session driven through its bridge lists the jobs derived from its transcript
   const controls = useSessionControls(appSessionId);
   const driven = controls !== null && controls.turn() !== null;
+  const jobs = useDrivenJobs(appSessionId, driven && !live);
+  const derived = live || jobs === null ? null : jobNodes(jobs, own ? snapshot.stoppingJobs : NO_JOBS);
+  const listed = live || derived !== null;
   const flows = workflows(graph);
-  const shellNodes = live ? shells(graph) : [];
-  const monitorNodes = live ? monitors(graph) : [];
+  const shellNodes = live ? shells(graph) : (derived?.shells ?? []);
+  const monitorNodes = live ? monitors(graph) : (derived?.monitors ?? []);
+  const onStop = derived !== null ? handle.stopJob : handle.stop;
   const selected = own ? snapshot.selected : null;
   const stopErrors = own ? snapshot.stopErrors : new Map<string, string>();
 
@@ -232,15 +258,11 @@ function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
   }, [arrived, handle]);
 
   const running = (nodes: TaskNode[]) => nodes.filter((n) => n.status === 'running').length;
-  const nothing = live && flows.length === 0 && shellNodes.length === 0 && monitorNodes.length === 0;
+  const nothing = listed && flows.length === 0 && shellNodes.length === 0 && monitorNodes.length === 0;
 
   return (
     <div ref={scroller} onScroll={(e) => handle.setScrollTop(e.currentTarget.scrollTop)} className="flex h-full min-h-0 flex-col overflow-auto">
-      {!live && (
-        <p data-shells-unavailable={driven ? 'terminal' : 'disk'} className="shrink-0 px-3.5 pt-3 text-ui-sm text-fg-muted">
-          {driven ? BACKGROUND_COPY.shellsInTerminal : BACKGROUND_COPY.shellsDiskOnly}
-        </p>
-      )}
+      {!listed && !driven && <p className="shrink-0 px-3.5 pt-3 text-ui-sm text-fg-muted">{BACKGROUND_COPY.shellsDiskOnly}</p>}
       {runsError !== null && <p className="shrink-0 px-3.5 pt-3 text-ui-sm text-danger">{BACKGROUND_COPY.runsUnavailable(runsError)}</p>}
       {pendingRun !== null && <p className="shrink-0 px-3.5 pt-3 text-ui-sm text-fg-muted">{BACKGROUND_COPY.runNotFound}</p>}
       {nothing && <p className="shrink-0 px-3.5 pt-3 text-ui text-fg-muted">{BACKGROUND_COPY.nothingRunning}</p>}
@@ -269,8 +291,8 @@ function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
               now={now}
               selected={selected === node.taskId}
               stopError={stopErrors.get(node.taskId) ?? null}
-              onStop={handle.stop}
-              onOutput={(path) => openLog(appSessionId, path, node.description)}
+              onStop={onStop}
+              onOutput={derived !== null ? null : (path) => openLog(appSessionId, path, node.description)} // a lane A job's tail is remote-only
             />
           ))}
         </Group>
@@ -278,7 +300,7 @@ function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
       {monitorNodes.length > 0 && (
         <Group id="monitors" heading={BACKGROUND_COPY.monitors(monitorNodes.length)} expanded={expanded.has('monitors')} onToggle={handle.toggle}>
           {monitorNodes.map((node) => (
-            <MonitorRow key={node.taskId} node={node} now={now} selected={selected === node.taskId} stopError={stopErrors.get(node.taskId) ?? null} onStop={handle.stop} />
+            <MonitorRow key={node.taskId} node={node} now={now} selected={selected === node.taskId} stopError={stopErrors.get(node.taskId) ?? null} onStop={onStop} />
           ))}
         </Group>
       )}
@@ -295,6 +317,14 @@ function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
       />
     </div>
   );
+}
+
+// P5 O9 M5: a lane A session's jobs as the list's rows, a stop the bridge took reading stopping… while its job runs.
+const NO_JOBS: ReadonlySet<string> = new Set();
+function jobNodes(jobs: readonly Job[], stopping: ReadonlySet<string>): { shells: TaskNode[]; monitors: TaskNode[] } {
+  const lists = jobLists(jobs);
+  const mark = (n: TaskNode): TaskNode => (n.status === 'running' && stopping.has(n.taskId) ? { ...n, stopping: true } : n);
+  return { shells: lists.shells.map(mark), monitors: lists.monitors.map(mark) };
 }
 
 export function BackgroundIcon({ className }: { className?: string }) {

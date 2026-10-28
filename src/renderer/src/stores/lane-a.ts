@@ -7,6 +7,7 @@
 //
 // M5 lists the local machine only: main's driver serves its own sessions, and a remote machine's lane A states come from
 // O9's remote adapter once a pane watches one (M9). A `laneA.changed` from any machine is applied.
+import type { Job } from 'desk-hub/protocol';
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -29,6 +30,7 @@ export interface LaneAStore {
   catalogs: ReadonlyMap<AppSessionId, LaneACatalog>; // the body for the state's fingerprint, once read
   pendingSends: ReadonlyMap<AppSessionId, readonly PendingSend[]>;
   usage: ReadonlyMap<AppSessionId, LaneAUsage>; // the latest `usage` a watch of this page heard (its snapshot's, then each turn's)
+  jobs: ReadonlyMap<AppSessionId, readonly Job[]>; // the latest jobs a watch of this page heard (its snapshot's, then each `subagents`)
 }
 
 // The bridge's `usage` (DX5, `desk-hub/protocol`'s `Usage`): the context's fill, absent until a response reported it.
@@ -37,7 +39,7 @@ export interface LaneAUsage {
   cost: { usd: number } | null;
 }
 
-const empty = (): LaneAStore => ({ states: new Map(), catalogs: new Map(), pendingSends: new Map(), usage: new Map() });
+const empty = (): LaneAStore => ({ states: new Map(), catalogs: new Map(), pendingSends: new Map(), usage: new Map(), jobs: new Map() });
 
 export const useLaneA = create<LaneAStore>()(empty);
 
@@ -139,6 +141,23 @@ export function noteLaneAUsage(appSessionId: AppSessionId, usage: LaneAUsage): v
 export const contextOfUsage = (usage: LaneAUsage | null): { percent: number; maxTokens: number; autoCompactThreshold: null } | null =>
   usage && usage.context.percent !== undefined ? { percent: usage.context.percent, maxTokens: usage.context.window, autoCompactThreshold: null } : null;
 export const useLaneAUsage = (appSessionId: AppSessionId): LaneAUsage | null => useLaneA((s) => s.usage.get(appSessionId) ?? null);
+
+// The session's background shells and monitors as main derives them from its transcript (M5). They outlast the watch
+// that heard them only when none still runs (the session's process gone, each job ended or exited): a running one whose
+// watch ended unheard-of is no longer known to run.
+export function noteLaneAJobs(appSessionId: AppSessionId, jobs: readonly Job[]): void {
+  useLaneA.setState((s) => ({ jobs: new Map(s.jobs).set(appSessionId, jobs) }));
+}
+export function laneAJobsWatchEnded(appSessionId: AppSessionId): void {
+  const jobs = useLaneA.getState().jobs.get(appSessionId);
+  if (!jobs?.some((j) => j.status === 'running')) return;
+  useLaneA.setState((s) => {
+    const next = new Map(s.jobs);
+    next.delete(appSessionId);
+    return { jobs: next };
+  });
+}
+export const useLaneAJobs = (appSessionId: AppSessionId): readonly Job[] | null => useLaneA((s) => s.jobs.get(appSessionId) ?? null);
 
 export function dismissPendingSend(appSessionId: AppSessionId, key: DeliveryKey): void {
   useLaneA.setState((s) => ({ pendingSends: withPending(s.pendingSends, appSessionId, (s.pendingSends.get(appSessionId) ?? []).filter((p) => !sameKey(p.key, key))) }));

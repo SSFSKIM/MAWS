@@ -4,6 +4,7 @@
 // sessions.spec.ts's foreign-live scene writes one), and the fake bridge (test/support/fake-bridge.ts) serves its
 // socket under the launch's scratch sminos home, with a catalog as the bridge pushes one.
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { startFakeBridge, type FakeBridge, type FakeBridgeOptions } from '../../test/support/fake-bridge';
 import type { StoreFixture } from '../../test/support/store-fixture';
 
@@ -67,5 +68,31 @@ export function assistantRecord(sessionId: string, cwd: string, uuid: string, pa
   return {
     type: 'assistant', uuid, parentUuid, cwd, sessionId, timestamp: at, isSidechain: false, userType: 'external', version: '2.1.300',
     message: { id: `msg_${uuid.slice(0, 8)}`, type: 'message', role: 'assistant', model: 'claude-opus-4-5', content: [{ type: 'text', text }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 10, output_tokens: 20 } },
+  };
+}
+
+// A shell the model ran in the background, as the engine writes it: the Bash call, then its result, whose toolUseResult
+// names the task and whose text the output file (the rows main's lane A jobs derivation reads, by sminos's rules).
+export function backgroundBashRecords(sessionId: string, cwd: string, parentUuid: string, job: { taskId: string; command: string; description: string; at: string }): Record<string, unknown>[] {
+  const call = randomUUID();
+  const toolUseId = `toolu_${job.taskId}`;
+  const base = { cwd, sessionId, timestamp: job.at, isSidechain: false, userType: 'external', version: '2.1.300' };
+  return [
+    {
+      ...base, type: 'assistant', uuid: call, parentUuid,
+      message: { id: `msg_${call.slice(0, 8)}`, type: 'message', role: 'assistant', model: 'claude-opus-4-5', content: [{ type: 'tool_use', id: toolUseId, name: 'Bash', input: { command: job.command, description: job.description, run_in_background: true } }], stop_reason: 'tool_use', stop_sequence: null, usage: { input_tokens: 10, output_tokens: 20 } },
+    },
+    {
+      ...base, type: 'user', uuid: randomUUID(), parentUuid: call, toolUseResult: { stdout: '', stderr: '', interrupted: false, isImage: false, backgroundTaskId: job.taskId },
+      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, is_error: false, content: `Command running in background with ID: ${job.taskId}. Output is being written to: /tmp/claude/tasks/${job.taskId}.output` }] },
+    },
+  ];
+}
+
+// The engine's notification that a background task ended, as the attachment row it queues for the model.
+export function taskNotificationRecord(sessionId: string, cwd: string, parentUuid: string, note: { taskId: string; status: string; summary: string; at: string }): Record<string, unknown> {
+  return {
+    type: 'attachment', uuid: randomUUID(), parentUuid, cwd, sessionId, timestamp: note.at, isSidechain: false, userType: 'external', version: '2.1.300',
+    attachment: { type: 'queued_command', commandMode: 'task-notification', prompt: `<task-notification>\n<task-id>${note.taskId}</task-id>\n<status>${note.status}</status>\n<summary>${note.summary}</summary>\n</task-notification>` },
   };
 }

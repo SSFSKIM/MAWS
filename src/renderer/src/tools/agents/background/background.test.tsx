@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, SessionId, TaskId } from '@shared/graph/ids';
-import type { EventPayload } from '@shared/ipc/schema';
+import type { EventName, EventPayload } from '@shared/ipc/schema';
 import type { SubagentEntry, WorkflowRun } from '@shared/ipc/schema/fs';
 import type { PersistedTask } from '@shared/wire/store';
 import { record, status } from '../../../../../../test/support/builders';
@@ -21,6 +21,9 @@ import type { PanelToolContext } from '../../../panel/tool';
 import { useSessions } from '../../../stores/sessions';
 import { applyLaneAState, resetLaneAStore } from '../../../stores/lane-a'; // P5 O9 M5
 import { laneAState } from '../../../lane-a/test-support/lane-a-state'; // P5 O9 M5
+import { resetLaneAWatches } from '../../../lane-a/watches'; // P5 O9 M5
+import type { Job } from 'desk-hub/protocol'; // P5 O9 M5
+import { fakeClient, type FakeClient } from '../../../../../../test/support/fake-client'; // P5 O9 M5
 import { useSetup } from '../../../sessions/store';
 import { setAgentWorkClient, type AgentWorkClient } from '../client';
 import { fakeAgentWorkClient, type FakeAgentWorkClient } from '../fake-work-client';
@@ -474,18 +477,110 @@ describe('background work', () => {
     expect(stop().textContent).toBe('Stop workflow');
   });
 
-  // P5 O9 M5: no source lists the shells of a terminal session driven through its bridge, so the list says where they are
-  it('a terminal session driven through its bridge says its shells are listed and stopped in the terminal', async () => {
-    seedSessions(null);
-    useSessions.setState((s) => ({ records: new Map([[A, { ...s.records.get(A)!, holder: { kind: 'terminal', pid: 4242 } }]]) }));
-    applyLaneAState(A, laneAState(A));
-    try {
-      render(<Mounted state={create(undefined)} />);
-      expect(screen.getByText("A terminal session's background shells are listed and stopped in the terminal")).toBeTruthy();
-      expect(screen.queryByText('Shells and monitors are known only while the session runs here')).toBeNull();
-    } finally {
+  // P5 O9 M5: a terminal session driven through its bridge lists the jobs main derives from its transcript, which its
+  // watch carries (a snapshot's `jobs`, then each `subagents`); Stop goes to its bridge; no output tail locally.
+  describe('a terminal session driven through its bridge', () => {
+    const job = (taskId: string, over: Partial<Job> = {}): Job => ({ taskId, kind: 'shell', toolUseId: `toolu_${taskId}`, startedAt: T, description: `run ${taskId}`, command: 'sleep 60', outputFile: `/tmp/${taskId}.output`, status: 'running', ...over });
+    const holder = (held: { kind: 'terminal'; pid: number } | { kind: 'none' }) => useSessions.setState((s) => ({ records: new Map([[A, { ...s.records.get(A)!, holder: held }]]) }));
+    const install = (given: Parameters<typeof fakeClient>[0]) => {
+      bridge = fakeClient({ 'laneA.watch': { watch: 'w1' }, 'laneA.unwatch': null, ...given });
+      const { client } = bridge;
+      // the preload's bridge over it: bare ids, its events from the local machine
+      (window as unknown as { maws: unknown }).maws = { localMachine: client.localMachine, invoke: client.invoke, on: (name: EventName, listener: (payload: unknown) => void) => client.on(name, (payload) => listener(payload)) };
+    };
+    let bridge: FakeClient;
+    const plane = (kind: 'snapshot' | 'subagents', jobs: Job[]) =>
+      act(() => bridge.event('laneA.plane', { appSessionId: 'A', watch: 'w1', messages: [{ project: '', machine: 'm', session: 'eng-A', kind, sub: 'w1', n: kind === 'snapshot' ? 0 : 1, body: kind === 'snapshot' ? { streaming: [], usage: null, jobs } : { subagents: [], jobs, mcp: [] } }] }));
+    const ended = (reason: string) => act(() => bridge.event('laneA.plane', { appSessionId: 'A', watch: 'w1', ended: reason }));
+    const row = (taskId: string) => document.querySelector<HTMLElement>(`[data-shell="${taskId}"]`);
+    const watched = async () => waitFor(() => expect(bridge.invoked('laneA.watch')).toHaveLength(1));
+
+    beforeEach(() => {
+      install({ 'laneA.stopTask': { state: 'done', result: null } });
+      seedSessions(null);
+      holder({ kind: 'terminal', pid: 4242 });
+      applyLaneAState(A, laneAState(A));
+    });
+    afterEach(() => {
+      cleanup();
+      resetLaneAWatches();
       resetLaneAStore();
-    }
+      Reflect.deleteProperty(window, 'maws');
+    });
+
+    it('lists its shells and monitors from its watch, with Stop for a running one and no output tail', async () => {
+      render(<Mounted state={create(undefined)} />);
+      await watched();
+      expect(bridge.invoked('laneA.watch')).toEqual([{ appSessionId: 'A' }]);
+      expect(screen.queryByText('Shells and monitors are known only while the session runs here')).toBeNull();
+      plane('snapshot', [job('bsleep01'), job('bbuild02', { status: 'failed', endedAt: T }), job('bmon0003', { kind: 'monitor', command: undefined, outputFile: null, description: 'watch the log' })]);
+      expect(heading('shells')).toBe('Shells · 1 running');
+      expect(within(row('bsleep01')!).getByRole('button', { name: 'Stop' })).toBeTruthy();
+      expect(within(row('bsleep01')!).queryByRole('button', { name: 'Output' })).toBeNull();
+      expect(within(row('bbuild02')!).queryByRole('button', { name: 'Stop' })).toBeNull();
+      expect(row('bbuild02')!.textContent).toContain('failed');
+      expect(document.querySelector('[data-monitor="bmon0003"]')!.textContent).toContain('watch the log');
+    });
+
+    it('stops a running shell through the bridge, reading stopping… until the transcript says it ended', async () => {
+      render(<Mounted state={create(undefined)} />);
+      await watched();
+      plane('snapshot', [job('bsleep01')]);
+      fireEvent.click(within(row('bsleep01')!).getByRole('button', { name: 'Stop' }));
+      await waitFor(() => expect(bridge.invoked('laneA.stopTask')).toEqual([{ appSessionId: 'A', taskId: 'bsleep01' }]));
+      expect(within(row('bsleep01')!).getByRole('button', { name: 'stopping…' })).toBeTruthy();
+      plane('subagents', [job('bsleep01', { status: 'stopped', endedAt: T })]);
+      expect(within(row('bsleep01')!).queryByRole('button')).toBeNull();
+      expect(row('bsleep01')!.textContent).toContain('stopped');
+    });
+
+    it('shows a refused stop on the row, its Stop offered again', async () => {
+      install({ 'laneA.stopTask': { state: 'refused', code: 'not-running', message: 'that background task is not running: it ended' } });
+      render(<Mounted state={create(undefined)} />);
+      await watched();
+      plane('snapshot', [job('bsleep01')]);
+      fireEvent.click(within(row('bsleep01')!).getByRole('button', { name: 'Stop' }));
+      await waitFor(() => expect(row('bsleep01')!.textContent).toContain('that background task is not running: it ended'));
+      expect(within(row('bsleep01')!).getByRole('button', { name: 'Stop' })).toBeTruthy();
+    });
+
+    it('keeps its jobs exited once its holder ends, and forgets running ones whose watch ended unsaid', async () => {
+      render(<Mounted state={create(undefined)} />);
+      await watched();
+      plane('snapshot', [job('bsleep01')]);
+      plane('subagents', [job('bsleep01', { status: 'exited' })]);
+      ended('the session left the terminal');
+      act(() => {
+        applyLaneAState(A, null);
+        holder({ kind: 'none' });
+      });
+      expect(row('bsleep01')!.textContent).toBe('run bsleep01 · ended with the session'); // exited
+      expect(within(row('bsleep01')!).queryByRole('button')).toBeNull();
+      expect(screen.queryByText('Shells and monitors are known only while the session runs here')).toBeNull();
+
+      const opened = bridge.invoked('laneA.watch').length;
+      act(() => {
+        holder({ kind: 'terminal', pid: 4243 });
+        applyLaneAState(A, laneAState(A));
+      });
+      await waitFor(() => expect(bridge.invoked('laneA.watch').length).toBeGreaterThan(opened));
+      plane('snapshot', [job('bsleep01')]);
+      ended('the session’s bridge went away');
+      act(() => {
+        applyLaneAState(A, null);
+        holder({ kind: 'none' });
+      });
+      expect(row('bsleep01')).toBeNull();
+      expect(screen.getByText('Shells and monitors are known only while the session runs here')).toBeTruthy();
+    });
+
+    it('the summary counts its running jobs', async () => {
+      render(<BackgroundSummary appSessionId={A} open={() => {}} />);
+      await watched();
+      plane('snapshot', [job('bsleep01'), job('bmon0003', { kind: 'monitor' }), job('bbuild02', { status: 'completed', endedAt: T })]);
+      expect(document.querySelector('[data-summary="background"]')!.textContent).toContain('1 shell · 1 monitor');
+      expect(screen.queryByText('Shells and monitors are known only while the session runs here')).toBeNull();
+    });
   });
 
   it('a disk-only session reads the shells sentence and lists the runs on disk with their state and summary', async () => {
