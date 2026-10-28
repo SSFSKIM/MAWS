@@ -198,7 +198,7 @@ test('the CLI refuses an unreadable tree or invalid plan without emitting a hint
 // A real local origin captures the pushed empty commit; gh and sleep alone are fake. No Actions run is created, so
 // ci-gate ends at "no run" (exit 1) after the push, and --keep leaves the message available for inspection.
 function pushedGate(args, { failure = '', affected = false } = {}) {
-  return fixture(({ dir, tree, git, put, sha }) => {
+  return fixture(({ dir, tree, git, put }) => {
     const origin = join(dir, 'origin.git');
     execFileSync('git', ['init', '--quiet', '--bare', origin]);
     git('remote', 'add', 'origin', origin);
@@ -207,7 +207,6 @@ function pushedGate(args, { failure = '', affected = false } = {}) {
       put('src/shared/pool-demand.ts', 'export const value = 2;\n');
       git('add', '.');
       git('commit', '--quiet', '-m', 'source change');
-      sha = git('rev-parse', 'HEAD');
     }
     if (failure === 'workflow') put('.github/workflows/gate.yml', 'env:\n  MAC_VM_E2E: [cannot, read]\n');
     if (failure === 'missing-planner') rmSync(join(tree, '.github/scripts/gate-plan.mjs'));
@@ -215,7 +214,6 @@ function pushedGate(args, { failure = '', affected = false } = {}) {
     if (['workflow', 'missing-planner', 'unsupported-planner'].includes(failure)) {
       git('add', '.');
       git('commit', '--quiet', '-m', 'target cannot provide a pool hint');
-      sha = git('rev-parse', 'HEAD');
     }
     // Dirty caller files must not affect the hint, even for --gates all.
     put('package.json', '{}');
