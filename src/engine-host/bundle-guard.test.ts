@@ -112,6 +112,10 @@ describe.skipIf(graph === null)('the built mawsd and its chunks', () => {
     expect(guardedEntryProblems({ entry: MAWSD, root: resolve(OUT, '..'), externals: (name) => allowed(name), deferred: true })).toEqual([]);
   });
 
+  it('require only Node builtins and the engine host’s externals, never electron', () => {
+    for (const [file, text] of graph!) expect(externals(text).filter((name) => !allowed(name)), file).toEqual([]);
+  });
+
   // P5 O10 M10: the bundler stands an empty object in for an optional dependency that is not installed (`ws`'s
   // `bufferutil` and `utf-8-validate`), which a `try { require(...) }` takes as present: `ws` then masks its first frame
   // of 48 bytes or more with a `mask` that isn't there. electron.vite.config.ts's defines keep `ws` off both, in mawsd's
