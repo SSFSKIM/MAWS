@@ -253,6 +253,72 @@ describe('a synced endpoint', () => {
     expect(onDisk()).toMatchObject({ head: forged3, highWater: 3 });
   });
 
+  /**
+   * The hub's recovery whose first state is a sibling of the endpoint's head: the endpoint took a state straight from an
+   * admin (`d3`) the hub never had, and the hub's line goes on from version 2 to its own version 3, under a transition the
+   * recovery key signed from 2 when `recovered`. A hub that serves `?since=` reads, each cursor recorded.
+   */
+  async function siblingAtHead(recovered: boolean, issued: { base: number; d3: number } = { base: Date.now(), d3: Date.now() }, now = () => Date.now()) {
+    const v1 = await genesis(ORG, A, a1, recovery, iso(issued.base));
+    const v2 = await successor(v1, [a1], () => {}, iso(issued.base));
+    const { org, changes } = await enrolled(a1, now);
+    await org.sync(hub([v1, v2]));
+    const d3 = await successor(v2, [a1], (s) => void s.projects.push({ id: 'direct', name: 'delivered' }), iso(issued.d3));
+    expect(await org.adopt([d3], [])).toMatchObject({ adopted: 1 });
+    const t = await transition(ORG, 2, [a1], recovery);
+    const h3 = await successor(v2, [a1], (s) => void s.projects.push({ id: 'hub', name: 'recovered' }));
+    const sinces: number[] = [];
+    const serve = hub([v1, v2, h3], recovered ? [t] : []);
+    const fetchView = (since: number) => (sinces.push(since), serve(since));
+    return { org, changes, v1, v2, d3, h3, t, sinces, fetchView };
+  }
+
+  it('follows a recovery whose first state is a sibling of its head, reading the hub again from the recovery’s base', async () => {
+    const { org, changes, v1, v2, d3, h3, t, sinces, fetchView } = await siblingAtHead(true);
+    expect(await org.sync(fetchView)).toMatchObject({ adopted: 1, rewound: true });
+    // `?since=3` holds nothing the recovery can be checked by; the read again starts below its base.
+    expect(sinces).toEqual([3, 1]);
+    expect(org.head()).toEqual(h3);
+    expect(onDisk()).toMatchObject({ head: h3, highWater: 3, acceptedTransitions: [t.body] });
+    expect(onDisk().hashes).toEqual(await Promise.all([v1, v2, h3].map((s) => stateHash(s.state))));
+    expect(org.since(0)).toEqual({ states: [v1, v2, h3], transitions: [t] });
+    expect(changes.at(-1)).toMatchObject({ previous: d3, head: h3, rewound: true });
+    // Once taken, the recovery is no reason to read the hub again from its base.
+    sinces.length = 0;
+    expect(await org.sync(fetchView)).toMatchObject({ adopted: 0 });
+    expect(sinces).toEqual([3]);
+    expect(lines.filter((l) => /refused/.test(l))).toEqual([]);
+  });
+
+  it('follows such a recovery when its base has aged out of the window, the read again carrying the base', async () => {
+    const now = Date.now();
+    const { org, v2, h3, fetchView } = await siblingAtHead(true, { base: now - 40 * DAY, d3: now - DAY }, () => now);
+    expect(org.since(0).states.map((s) => s.state.version)).toEqual([3]);
+    expect(await org.sync(fetchView)).toMatchObject({ adopted: 1, rewound: true });
+    expect(org.head()).toEqual(h3);
+    expect(onDisk().hashes[1]).toBe(await stateHash(v2.state));
+  });
+
+  it('reads a sibling of its head with no recovery behind it as a fork, keeping its head', async () => {
+    const { org, d3, sinces, fetchView } = await siblingAtHead(false);
+    const before = fs.readFileSync(join(root, 'endpoint', 'org.json'), 'utf8');
+    expect(await org.sync(fetchView)).toEqual({ adopted: 0, rewound: false, refused: 'fork' });
+    expect(sinces).toEqual([3]);
+    expect(org.head()).toEqual(d3);
+    expect(fs.readFileSync(join(root, 'endpoint', 'org.json'), 'utf8')).toBe(before);
+    expect(lines.filter((l) => /refused/.test(l))).toEqual(["endpoint: org state refused: fork (the hub's head at version 3 is not the endpoint's)"]);
+  });
+
+  it('reads a sibling as a fork when the transition behind it is not the recovery key’s, and reads nothing again for it', async () => {
+    const { org, d3, h3, v1, v2, sinces } = await siblingAtHead(false);
+    const stranger = await generateSigningKey();
+    const forged = await transition(ORG, 2, [a1], stranger);
+    const fetchView = (since: number) => (sinces.push(since), hub([v1, v2, h3], [forged])(since));
+    expect(await org.sync(fetchView)).toEqual({ adopted: 0, rewound: false, refused: 'fork' });
+    expect(sinces).toEqual([3]);
+    expect(org.head()).toEqual(d3);
+  });
+
   it('commits a rewind’s window with its head: a fault before the head is written leaves the window it had', async () => {
     const { org } = await enrolled();
     const s2 = await successor(s1, [a1]);
