@@ -218,10 +218,18 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await clear(editor(page));
     await editor(page).pressSequentially('/mcp');
     await editor(page).press('Enter');
+    // each run's id is its argument, and its end (the mod's `run end`) frees the widget for the next
+    bridge.answer('command', (body) => ({ status: 200, body: { ok: true, result: { started: true, id: `run:${String(body.args)}` } } }));
+    const ended = (args: string, text: string) => bridge.emit({ type: 'run', phase: 'end', id: `run:${args}`, name: 'mcp', readback: { how: 'text', text } });
     const server = page.locator('[data-mcp-server="probe"]');
     await server.getByRole('button', { name: 'Reconnect' }).click();
+    await expect.poll(() => bodies(bridge, 'command').length).toBe(2);
+    ended('reconnect probe', 'Reconnected to probe.');
+    await expect(page.getByRole('status').filter({ hasText: 'Reconnected to probe.' })).toBeVisible({ timeout: 10_000 });
     await page.getByRole('textbox', { name: 'Server to enable' }).fill('github');
     await page.getByRole('button', { name: 'Enable', exact: true }).click();
+    await expect.poll(() => bodies(bridge, 'command').length).toBe(3);
+    ended('enable github', 'Enabled github.');
     await expect.poll(() => bodies(bridge, 'command').slice(1)).toEqual([
       { op: 'command', name: 'mcp', args: 'reconnect probe' },
       { op: 'command', name: 'mcp', args: 'enable github' },
