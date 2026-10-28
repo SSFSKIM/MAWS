@@ -323,6 +323,8 @@ export class Endpoint implements EndpointModule {
       this.#headHash = await stateHash(org.head().state);
       // The ledger is re-read against a new head after the head is on disk; a crash between the two left it unread.
       this.#endRevokedGrants(org.head().state, log);
+      // So is legacy.json, which follows the head's retirement of the DX1 key.
+      this.#followLegacy(org.head().state, false, log);
     }
     // The standing is judged from what is on disk before anything is admitted: the marker a crash left may be stale.
     await this.#judge();
@@ -546,6 +548,7 @@ export class Endpoint implements EndpointModule {
       log(`endpoint: org state ${change.head.state.version}${change.rewound ? ' (a recovery rewind)' : ''} removed ${members.length} member(s), ${devices.length} device(s), revoked ${keys.length} key(s)`);
     }
     this.#endRevokedGrants(change.head.state, log);
+    this.#followLegacy(change.head.state, change.previous === null, log);
     void this.#judge();
     // The machine's owners or the admins may have changed: `@machine` listings are re-issued.
     void this.listings.refresh();
@@ -618,6 +621,26 @@ export class Endpoint implements EndpointModule {
     const serve = !this.#stopped && this.#speaks && enrollment?.state === 'org-listed' && this.#state?.refusing === null && stopped !== 're-enroll' && stopped !== 'revoked';
     if (serve && !this.rl10.serving) void this.rl10.serve();
     else if (!serve && this.rl10.serving) void this.rl10.unserve();
+  }
+
+  /**
+   * `legacy.json` made the head's (O14 M5a; rl10/legacy.ts): a tombstone under its `legacyRetired`, the key again without
+   * it. `first`: the head is this enrollment's first, under which a machine has no bytes to keep. RL10 hears of it with
+   * the adoption (`rl10.adopted`), which judges the v1 events held for want of a key again.
+   */
+  #followLegacy(head: OrgState, first: boolean, log: (line: string) => void): void {
+    const legacy = this.rl10.legacy;
+    try {
+      const was = legacy.retired;
+      if (!legacy.follow(head, first) || legacy.retired === was) return;
+      log(
+        legacy.retired
+          ? `endpoint: the org state at version ${head.version} retires the legacy org key: events go out v2-only, and v1 events come down unchecked`
+          : `endpoint: the org state at version ${head.version} no longer retires the legacy org key${legacy.held ? ': it is in use again' : ''}`,
+      );
+    } catch (error) {
+      log(`endpoint: legacy.json could not follow the org state at version ${head.version}: ${(error as Error).message}`);
+    }
   }
 
   #endRevokedGrants(head: OrgState, log: (line: string) => void): void {
