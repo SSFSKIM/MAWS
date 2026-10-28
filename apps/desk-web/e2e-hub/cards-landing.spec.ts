@@ -4,7 +4,7 @@
 // browser paired as a `web-cards` device through the Device panel.
 //
 // A `waiting` notice for the owner's lane A session, as the hub's `Registry.notify` builds it (`OwnerNotice`, its shape
-// pinned by desk-hub's push-owners.test.ts; a lane B session gets no push until O10's lane B notifier feed lands), is
+// pinned by desk-hub's push-owners.test.ts; a lane B session's, since O10's lane B notifier feed, is the same shape), is
 // delivered to the service worker through Chromium's DevTools protocol: the notification draws from it alone, and its
 // URL opens the session's cards over the machine's channel, cold and in a window already open. A landing on a delegated
 // VM certified since the phone last read the org state (a certificate moves no version and raises no notice) re-reads

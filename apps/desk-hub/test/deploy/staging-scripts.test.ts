@@ -314,7 +314,7 @@ describe('the phone step', () => {
   const token = `eyJ${'p'.repeat(20)}.synthetic`;
   // `api`: cloudflared's own request for a quick tunnel fails, the runner's to the quick-tunnel API answers, and
   // cloudflared runs on the credentials it wrote (the stub records the file's mode and whether it holds the secret).
-  const apiSecret = 'c3Bpa2Utc2VjcmV0LXN5bnRoZXRpYw';
+  const apiSecret = `qt${'s'.repeat(24)}.synthetic`; // low-entropy, assembled here: no committed line reads as a key
   const setup = (tunnel: 'fails' | 'up' | 'api', anchor = true, leak = false, hang = false) => {
     const dir = mkdtempSync(join(tmpdir(), 'staging-phone-'));
     const device = join(dir, 'device');
@@ -329,7 +329,7 @@ describe('the phone step', () => {
       [
         '#!/bin/sh',
         `if [ "$1" = access ]; then printf '%s' '${token}'; exit 0; fi`,
-        `case " $* " in *' --credentials-file '*) f=$(printf '%s\\n' "$@" | sed -n '/^--credentials-file$/{n;p;}'); echo api >> '${dir}/tunnels'; stat -f %Lp "$f" > '${dir}/creds-mode'; grep -c '${apiSecret}' "$f" > '${dir}/creds-secret'; echo 'INF Registered tunnel connection'; exec sleep 30;; esac`,
+        `case " $* " in *' --credentials-file '*) f=$(printf '%s\\n' "$@" | sed -n '/^--credentials-file$/{n;p;}'); echo api >> '${dir}/tunnels'; python3 -I -c 'import os, sys; print(oct(os.stat(sys.argv[1]).st_mode & 0o777)[2:])' "$f" > '${dir}/creds-mode'; grep -c '${apiSecret}' "$f" > '${dir}/creds-secret'; echo 'INF Registered tunnel connection'; exec sleep 30;; esac`,
         `echo try >> '${dir}/tunnels'`,
         tunnel === 'up' ? up : "echo 'ERR failed to request quick Tunnel'; exit 1",
         '',
