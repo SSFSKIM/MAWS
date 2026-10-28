@@ -49,4 +49,27 @@ describe('the hub client', () => {
     const read = await over(() => worker(200, view({ certs: [null, cert, { body: 1 }], retirements: [retirement, 'x'] }))).chain(0);
     expect(read).toMatchObject({ ok: true, value: { certificates: { certs: [cert], retirements: [retirement] } } });
   });
+
+  it('posts a signed state as its body, reads 201 as its version, and keeps a 409 verdict as its error code', async () => {
+    const posted: Array<{ method: string; url: string; body: unknown; type: string | null }> = [];
+    const signed = { state: { org: 'o', version: 2 }, sigs: [] } as never;
+    const client = (answer: Response) =>
+      hubClient({
+        url: `${HUB}/`,
+        headers: () => Promise.resolve({ 'cf-access-token': TOKEN }),
+        fetch: (async (url: string, init: RequestInit) => {
+          posted.push({ method: init.method!, url, body: JSON.parse(String(init.body)), type: new Headers(init.headers).get('content-type') });
+          return answer;
+        }) as typeof fetch,
+      });
+    expect(await client(worker(201, { version: 2 })).postState(signed)).toEqual({ ok: true, value: { version: 2 } });
+    expect(posted).toEqual([{ method: 'POST', url: `${HUB}/api/org/state`, body: signed, type: 'application/json' }]);
+    expect(await client(worker(409, { error: 'not-head', message: 'the head is version 3; fetch it and sign again on it' })).postState(signed)).toEqual({
+      ok: false,
+      kind: 'status',
+      status: 409,
+      error: 'not-head',
+    });
+    expect(await client(worker(201, { version: 'two' })).postState(signed)).toEqual({ ok: false, kind: 'status', status: 201, error: 'malformed' });
+  });
 });

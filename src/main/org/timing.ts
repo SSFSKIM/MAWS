@@ -30,6 +30,18 @@ export interface OrgTiming {
   ROWS_COALESCE_MS: number;
   ROWS_CACHE_WRITE_MS: number;
   UNVERIFIED_MAX: number;
+  /** M3's. The weekly successor is due once the held head is this many days old (Q6). */
+  WEEKLY_DUE_DAYS: number;
+  /** The least time between two asks with Touch ID, and between two notifications (Q6's once a day). */
+  ASK_GAP_MS: number;
+  /** How often the weekly asking checks, while no window is focused, whether to notify. */
+  WEEKLY_CHECK_MS: number;
+  /** The states a direct delivery carries back from the state it delivers. */
+  DELIVERY_SPAN: number;
+  /** How often an owed delivery is sent again, besides at its machine's next link up. */
+  DELIVERY_RETRY_MS: number;
+  /** The most bytes one `endpoint.state` run carries: an eighth of RL2's MESSAGE_MAX_BYTES (4 MiB). */
+  DELIVERY_MAX_BYTES: number;
 }
 
 export const ORG_TIMING: Readonly<OrgTiming> = Object.freeze({
@@ -48,6 +60,12 @@ export const ORG_TIMING: Readonly<OrgTiming> = Object.freeze({
   ROWS_COALESCE_MS: 100,
   ROWS_CACHE_WRITE_MS: 1_000,
   UNVERIFIED_MAX: 1_024,
+  WEEKLY_DUE_DAYS: 7,
+  ASK_GAP_MS: 86_400_000,
+  WEEKLY_CHECK_MS: 3_600_000,
+  DELIVERY_SPAN: 16,
+  DELIVERY_RETRY_MS: 3_600_000,
+  DELIVERY_MAX_BYTES: 524_288,
 });
 
 export const orgTiming = (overrides: Partial<OrgTiming> = {}): OrgTiming => ({ ...ORG_TIMING, ...overrides });

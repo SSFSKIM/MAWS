@@ -5,6 +5,10 @@
 // other) is logged and treated as absent; a directory that fails its checks closes the session (`problem: 'directory'`).
 // Nothing here is a key: the device's keys stay in `<userData>/device/` (src/main/device/keys.ts).
 //
+// `signing.json` (M3, Interfaces §C's addition) is the one file that fails closed rather than reading as absent: once
+// registration.json says `signing: true`, a missing or malformed one is the signing store's `damaged`
+// (signing-store.ts, its one writer).
+//
 // The directory is made only by a sign-in that reached its end, so a profile that never signs in has none.
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, rename, rm, type FileHandle } from 'node:fs/promises';
@@ -15,6 +19,7 @@ export const ORG_DIR = 'org';
 export const REGISTRATION_FILE = 'registration.json';
 export const CHAIN_FILE = 'chain.json';
 export const ACCESS_FILE = 'access.json';
+export const SIGNING_FILE = 'signing.json';
 
 /** The held head's place in the chain, by `stateHash` (base64url): what outlives `chain.json` (held.ts). */
 export type Anchor = { genesis: string; version: number; head: string };
@@ -29,6 +34,10 @@ export type RegistrationFile = {
   anchor: Anchor;
   registered: string;
   signedOut: boolean;
+  /** M3: set (before) signing.json is first written; from then a missing or malformed signing.json fails closed. */
+  signing?: true;
+  /** M3: a rekey's promotion under way (step 1 to step 4 of its transaction): the new device's id. */
+  rekey?: { device: string };
 };
 
 export type ChainFile = {
@@ -39,6 +48,36 @@ export type ChainFile = {
   certificates: Certificates;
   highWater: number;
   superseded: SignedOrgState[];
+};
+
+/**
+ * A signed state kept before it goes anywhere (M3's pending slot): its parent's `stateHash`, and where it may already be,
+ * written before each send (`exposed.hub` before the POST, a machine's ref before its `endpoint.state` act).
+ */
+export type Pending = { signed: SignedOrgState; parent: string; exposed: { hub: boolean; machines: string[] } };
+/**
+ * A state that ends keys, owed to the machines of the roster at its signing (M3's direct delivery): the signed bytes,
+ * the machines still owing an acknowledgement, each machine's cursor on the app's line (`line`: the count of accepted
+ * transitions held when it was set), the line each machine's recovery-first probe ran on, and the machines a run can't
+ * reach because one state exceeds the bound.
+ */
+export type Obligation = {
+  hash: string;
+  signed: SignedOrgState;
+  owed: string[];
+  known: Record<string, { version: number; line: number }>;
+  probed: Record<string, number>;
+  tooLarge: string[];
+};
+/** A discarded proposal: where it may still be held, from its exposure record. */
+export type Abandoned = { hash: string; version: number; hub: boolean; machines: string[] };
+export type SigningFile = {
+  version: 1;
+  pending: Pending | null;
+  deliveries: Obligation[];
+  abandoned: Abandoned[];
+  lastAsked: string | null;
+  lastNotified: string | null;
 };
 
 export type AccessFile =
@@ -178,7 +217,9 @@ export function isRegistrationFile(value: unknown): value is RegistrationFile {
     isText(pins.recoveryPub) &&
     isAnchor(anchor) &&
     isText(registered) &&
-    typeof signedOut === 'boolean'
+    typeof signedOut === 'boolean' &&
+    (value.signing === undefined || value.signing === true) &&
+    (value.rekey === undefined || (isObject(value.rekey) && isText(value.rekey.device)))
   );
 }
 
@@ -203,4 +244,40 @@ export function isAccessFile(value: unknown): value is AccessFile {
   if (!isObject(value) || value.version !== 1 || !isText(value.hub)) return false;
   if (value.kind === 'access') return isText(value.token) && isText(value.expires) && (value.email === null || typeof value.email === 'string');
   return value.kind === 'standin' && isText(value.user);
+}
+
+const isCount = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 0;
+const isTexts = (value: unknown): value is string[] => Array.isArray(value) && value.every(isText);
+const isInstantOrNull = (value: unknown): value is string | null => value === null || isText(value);
+const isRecordOf = <T>(value: unknown, item: (v: unknown) => v is T): value is Record<string, T> => isObject(value) && Object.values(value).every(item);
+
+function isPending(value: unknown): value is Pending {
+  if (!isObject(value) || !isSignedOrgState(value.signed) || !isText(value.parent) || !isObject(value.exposed)) return false;
+  return typeof value.exposed.hub === 'boolean' && isTexts(value.exposed.machines);
+}
+
+function isObligation(value: unknown): value is Obligation {
+  if (!isObject(value)) return false;
+  const { hash, signed, owed, known, probed, tooLarge } = value;
+  const isCursor = (c: unknown): c is { version: number; line: number } => isObject(c) && isVersion(c.version) && isCount(c.line);
+  return isText(hash) && isSignedOrgState(signed) && isTexts(owed) && isRecordOf(known, isCursor) && isRecordOf(probed, isCount) && isTexts(tooLarge);
+}
+
+function isAbandoned(value: unknown): value is Abandoned {
+  return isObject(value) && isText(value.hash) && isVersion(value.version) && typeof value.hub === 'boolean' && isTexts(value.machines);
+}
+
+/** The shape only, every field: the signing store refuses to write anything else, and reads anything else as damaged. */
+export function isSigningFile(value: unknown): value is SigningFile {
+  if (!isObject(value) || value.version !== 1) return false;
+  const { pending, deliveries, abandoned, lastAsked, lastNotified } = value;
+  return (
+    (pending === null || isPending(pending)) &&
+    Array.isArray(deliveries) &&
+    deliveries.every(isObligation) &&
+    Array.isArray(abandoned) &&
+    abandoned.every(isAbandoned) &&
+    isInstantOrNull(lastAsked) &&
+    isInstantOrNull(lastNotified)
+  );
 }
