@@ -99,11 +99,13 @@ export class EndpointOrg implements OrgView {
    * Reads the hub's state from the head on (from version 0 at the first sync), a page at a time, and adopts it. Its
    * `head` tells a rollback apart; its certificates are kept beside the state as served (each use verifies them). When
    * the hub holds a recovery from below the head that the endpoint would take, the states under the head it needs are
-   * read too (`#recovered`), beside those after the head: they never displace them.
+   * read too (`#recovered`), beside those after the head: they never displace them. One sync's reads together take at
+   * most `maxPages` pages, the read after the head first; what they brought when the budget ran out is adopted.
    */
   async sync(fetchView: (since: number) => Promise<OrgStateView>): Promise<AdoptResult> {
-    const read = await this.#read(fetchView, this.ready ? this.head().state.version : 0);
-    const below = await this.#recovered(fetchView, read.transitions);
+    const budget: Budget = { left: this.#maxPages };
+    const read = await this.#read(fetchView, budget, this.ready ? this.head().state.version : 0);
+    const below = await this.#recovered(fetchView, budget, read.transitions);
     const { view, transitions } = read;
     const served = isSignedOrgState(view.head) ? view.head : null;
     const certificates = isCertificates(view.certificates) ? view.certificates : null;
@@ -111,16 +113,18 @@ export class EndpointOrg implements OrgView {
   }
 
   /**
-   * The hub's chain after `since`, a page at a time, up to the page that reaches version `until`: the states, the last
-   * page's view and the transitions it served, the last version read, and whether the hub had nothing after it.
+   * The hub's chain after `since`, a page at a time, up to the page that reaches version `until`, at most `pages` pages
+   * and what is `left` of the sync's budget (a read is begun only with some left): the states, the last page's view and
+   * the transitions it served, the last version read, and whether the hub had nothing after it.
    */
-  async #read(fetchView: (since: number) => Promise<OrgStateView>, since: number, until = Infinity): Promise<Read> {
+  async #read(fetchView: (since: number) => Promise<OrgStateView>, budget: Budget, since: number, until = Infinity, pages = Infinity): Promise<Read> {
     let cursor = since;
     const chain: SignedOrgState[] = [];
     let view: OrgStateView;
     let ended = false;
     for (let page = 0; ; page++) {
       view = await fetchView(cursor);
+      budget.left--;
       const got = list(view.chain).filter(isSignedOrgState);
       chain.push(...got);
       if (view.more !== true || got.length === 0) {
@@ -128,8 +132,8 @@ export class EndpointOrg implements OrgView {
         break;
       }
       cursor = got[got.length - 1].state.version;
-      if (cursor >= until) break;
-      if (page + 1 >= this.#maxPages) {
+      if (cursor >= until || page + 1 >= pages) break;
+      if (budget.left <= 0) {
         this.#log(`endpoint: the org state's chain ran past ${this.#maxPages} pages; the rest waits for the next sync`);
         break;
       }
@@ -145,13 +149,13 @@ export class EndpointOrg implements OrgView {
    * delivered it straight to the machines).
    *
    * Each transition that passes `verifyRewind` against the head (only one the recovery key signed, and none already
-   * accepted) has its base and first state read, a page or two, and `#rewind` judges them. Only when it finds a rewind
+   * accepted) has its base and first state read, two pages at most, and `#rewind` judges them. Only when it finds a rewind
    * is the recovered line read on, up to the head's version (the states after it are the read after the head's). So a
    * genuine transition nothing is signed under costs those pages each sync, never the history up to the head, and
    * whatever is read here only joins the read after the head. It picks only what is read: `#adopt` verifies the rewind
    * again, against the head it adopts onto.
    */
-  async #recovered(fetchView: (since: number) => Promise<OrgStateView>, transitions: Signed<RootTransition>[]): Promise<SignedOrgState[]> {
+  async #recovered(fetchView: (since: number) => Promise<OrgStateView>, budget: Budget, transitions: Signed<RootTransition>[]): Promise<SignedOrgState[]> {
     const org = this.#state.org;
     const head = org?.head ?? null;
     if (org === null || head === null) return [];
@@ -161,12 +165,15 @@ export class EndpointOrg implements OrgView {
       if ((await verifyRewind(head, t, org.pinned.recoveryPub, org.acceptedTransitions)).ok) bases.add(t.body.fromVersion);
     }
     const probes = new Map<number, Read>();
-    for (const from of [...bases].sort((x, y) => x - y)) probes.set(from, await this.#read(fetchView, Math.max(0, from - 1), from + 1));
+    for (const from of [...bases].sort((x, y) => x - y)) {
+      if (budget.left <= 0) break;
+      probes.set(from, await this.#read(fetchView, budget, Math.max(0, from - 1), from + 1, 2));
+    }
     const rewind = await this.#rewind(org, this.#window(), [...probes.values()].flatMap((p) => p.chain), transitions, () => {});
     if (rewind === null) return [];
     const probe = probes.get(rewind.t.body.fromVersion) as Read;
-    if (probe.ended || probe.last >= head.state.version) return probe.chain;
-    return [...probe.chain, ...(await this.#read(fetchView, probe.last, head.state.version)).chain];
+    if (probe.ended || probe.last >= head.state.version || budget.left <= 0) return probe.chain;
+    return [...probe.chain, ...(await this.#read(fetchView, budget, probe.last, head.state.version)).chain];
   }
 
   /**
@@ -347,6 +354,7 @@ export class EndpointOrg implements OrgView {
 }
 
 type Window = { states: SignedOrgState[]; transitions: Signed<RootTransition>[] };
+type Budget = { left: number };
 type Read = { chain: SignedOrgState[]; view: OrgStateView; transitions: Signed<RootTransition>[]; last: number; ended: boolean };
 
 const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);

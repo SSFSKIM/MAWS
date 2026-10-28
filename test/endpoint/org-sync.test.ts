@@ -333,7 +333,7 @@ describe('a synced endpoint', () => {
     while (line.length < 6) line.push(await successor(line.at(-1)!, [a2]));
     const state = EndpointState.open(join(root, 'endpoint'), { log: (l) => lines.push(l) });
     state.setOrg({ version: 1, org: ORG, pinned: { roots: [await keyId(a1.stepUp.pub)], recoveryPub: recovery.pub }, head: null, chain: [], hashes: [], certificates: NO_CERTIFICATES, acceptedTransitions: [], highWater: 0 });
-    // A read takes at most 2 one-state pages.
+    // A sync reads at most 2 pages, here of one state each.
     const org = new EndpointOrg(state, { log: (l) => lines.push(l), maxPages: 2 });
     for (let at = 2; at <= 5; at++) await org.sync(hub(line.slice(0, at), [t1], 100));
     expect(org.head()).toEqual(line[4]);
@@ -342,11 +342,11 @@ describe('a synced endpoint', () => {
     const fetchView = (since: number) => (sinces.push(since), serve(since));
     expect(await org.sync(fetchView)).toMatchObject({ adopted: 1, rewound: false });
     expect(org.head()).toEqual(line[5]);
-    // What the unused transition costs: its base and the state after it, never the history up to the head.
-    expect(sinces).toEqual([5, 0, 1]);
+    // What the unused transition costs: what is left of the sync's pages (its base here), never the history to the head.
+    expect(sinces).toEqual([5, 0]);
     sinces.length = 0;
     expect(await org.sync(fetchView)).toMatchObject({ adopted: 0 });
-    expect(sinces).toEqual([6, 0, 1]);
+    expect(sinces).toEqual([6, 0]);
   });
 
   it('reads a recovered line on from its first state up to its head, and adopts it with the states after the head', async () => {
@@ -366,6 +366,27 @@ describe('a synced endpoint', () => {
     expect(sinces).toEqual([4, 0, 1, 2, 3]);
     expect(org.head()).toEqual(recovered[3]);
     expect(org.since(0).states).toEqual([s1, ...recovered]);
+  });
+
+  it('reads no more pages in one sync than a sync without recoveries may, whatever a hub serves under its head', async () => {
+    const line = [s1];
+    while (line.length < 5) line.push(await successor(line.at(-1)!, [a1]));
+    const state = EndpointState.open(join(root, 'endpoint'), { log: (l) => lines.push(l) });
+    state.setOrg({ version: 1, org: ORG, pinned: { roots: [await keyId(a1.stepUp.pub)], recoveryPub: recovery.pub }, head: null, chain: [], hashes: [], certificates: NO_CERTIFICATES, acceptedTransitions: [], highWater: 0 });
+    const org = new EndpointOrg(state, { log: (l) => lines.push(l), maxPages: 4 });
+    await org.sync(hub(line.slice(0, 4)));
+    expect(org.head()).toEqual(line[3]);
+    // Genuine transitions from 1, 2 and 3 to a root nobody used; under the head, the hub answers the genesis, "more" for good.
+    const unused = await newDevice('unused');
+    const transitions = await Promise.all([1, 2, 3].map((v) => transition(ORG, v, [unused], recovery)));
+    let requests = 0;
+    const hostile = async (since: number): Promise<OrgStateView> => {
+      requests++;
+      return since >= 4 ? { head: line[4], transitions, certificates: NO_CERTIFICATES, chain: [line[4]], more: false } : { head: line[4], transitions, certificates: NO_CERTIFICATES, chain: [s1], more: true };
+    };
+    expect(await org.sync(hostile)).toMatchObject({ adopted: 1 });
+    expect(org.head()).toEqual(line[4]);
+    expect(requests).toBeLessThanOrEqual(4);
   });
 
   it('commits a rewind’s window with its head: a fault before the head is written leaves the window it had', async () => {
