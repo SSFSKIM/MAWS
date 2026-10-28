@@ -134,9 +134,9 @@ async function runDaemon(profile: string, env: NodeJS.ProcessEnv, nth = 1): Prom
 }
 
 /** The command line as a process; `input` on its stdin. */
-function cli(env: NodeJS.ProcessEnv, args: string[], input = ''): Promise<{ status: number | null; stdout: string; stderr: string }> {
+function cli(env: NodeJS.ProcessEnv, args: string[], input = '', cwd?: string): Promise<{ status: number | null; stdout: string; stderr: string }> {
   return new Promise((done) => {
-    const child = spawn(process.execPath, [MAWSD, ...args], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [MAWSD, ...args], { env, cwd, stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk: Buffer) => void (stdout += chunk.toString()));
@@ -332,8 +332,9 @@ describe.skipIf(!existsSync(MAWSD))('the built mawsd with its endpoint', () => {
   it('runs every endpoint command through the command line, on a scratch profile', async () => {
     const { profile, env } = newProfile('commands');
     await runDaemon(profile, env);
-    const run = async (args: string[], code = 0) => {
-      const answer = await cli(env, ['endpoint', ...args]);
+    const home = join(profile, 'home');
+    const run = async (args: string[], code = 0, input = '') => {
+      const answer = await cli(env, ['endpoint', ...args], input, home); // run from the scratch home, as a person's shell would
       expect(answer.status, `${args.join(' ')}: ${answer.stdout}${answer.stderr}`).toBe(code);
       return answer.stdout;
     };
@@ -349,17 +350,19 @@ describe.skipIf(!existsSync(MAWSD))('the built mawsd with its endpoint', () => {
     expect(await run(['policy'])).toMatch(/read-only/);
     expect(JSON.parse(await run(['policy', '--read-only', 'off', '--ceiling', 'settings', '--json']))).toEqual({ read_only: false, ceiling: 'settings', source: 'set' });
 
-    // A signed state delivered by hand (a revocation's path), from a file the daemon reads by its absolute path.
+    // A signed state delivered by hand (a revocation's path), from a file named relative to the caller's directory (the
+    // scratch home; the daemon runs in this suite's): the daemon reads the path the command line made absolute.
     const next = await successor(chain[chain.length - 1], [a1]);
-    const stateFile = join(profile, 'home', 'state.json');
-    writeFileSync(stateFile, JSON.stringify(next), { mode: 0o600 });
-    expect(await run(['revoke', stateFile])).toBe(`adopted: the org state is at version ${next.state.version}\n`);
+    writeFileSync(join(home, 'state.json'), JSON.stringify(next), { mode: 0o600 });
+    expect(await run(['revoke', 'state.json'])).toBe(`adopted: the org state is at version ${next.state.version}\n`);
     await publish(next);
-    // A grant the owner signs for the machine's key.
+    // And one on stdin.
+    const after = await successor(next, [a1]);
+    expect(await run(['revoke', '-'], 0, JSON.stringify(after))).toBe(`adopted: the org state is at version ${after.state.version}\n`);
+    await publish(after);
+    // A grant the owner signs for the machine's key, on stdin.
     const grant: Grant = { org: ORG, machine: ref, machineKey: shown.keyId, member: A, rights: ['shell'], version: 1, issued: new Date().toISOString() };
-    const grantFile = join(profile, 'home', 'grant.json');
-    writeFileSync(grantFile, JSON.stringify(await signRecord(SIGNING_DOMAINS.grant, grant, a1.stepUp.privateKey, a1.stepUp.pub)), { mode: 0o600 });
-    expect(await run(['grant', grantFile])).toBe(`kept: version 1 for member ${A}, shell\n`);
+    expect(await run(['grant', '-'], 0, JSON.stringify(await signRecord(SIGNING_DOMAINS.grant, grant, a1.stepUp.privateKey, a1.stepUp.pub)))).toBe(`kept: version 1 for member ${A}, shell\n`);
     // The hub holds no phase-1 history for this machine: nothing to check, and the check says so.
     await run(['attest-history', '--check', '--json']);
 
