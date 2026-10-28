@@ -3,18 +3,26 @@
 // path from `enrollment.json`. It passes only when `GET /machine/stream` and `POST /machine/frames` both answer the
 // Worker's `404 {"error":"not-found"}` under BUILD, and exits nonzero on anything else: M5a's `403 v2-credential`, a
 // 404 from another build, Access's redirect. Against the local hub, and a stub for the answers it stands in for.
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { enroll } from '../support/clients';
 import { ADMIN, startLocalHub, type LocalHub } from '../support/local';
 
 const SCRIPT = readFileSync(resolve(import.meta.dirname, '../../deploy/vm-dx2-retired.mjs'), 'utf8');
 const SECRET = 'the-secret-never-printed';
+/** A production build's name: the hub's and the web app's ids joined by a space (deploy.ts, `buildName`). */
+const COMBINED = 'hub@6e53b882 web@p5-o14-m5b.6e53b882';
+/** The README's line that reads BUILD from the credential-free `POST /machine/enroll`, as the owner runs it. */
+const BUILD_LINE = readFileSync(resolve(import.meta.dirname, '../../deploy/README.md'), 'utf8')
+  .split('\n')
+  .map((line) => line.trim())
+  .find((line) => line.startsWith('BUILD=$(curl'))!;
 
 let hub: LocalHub;
 const dirs: string[] = [];
@@ -98,6 +106,23 @@ describe("the VM's check of DX2's removed routes", () => {
     other.server.close();
     expect(out).toMatch(/FAIL GET \/machine\/stream: 404 \{"error":"unknown-machine"\}/);
     expect(code).toBe(1);
+  });
+
+  it("passes on a production build's name, the hub's and the web's ids in one header, as the README reads it", async () => {
+    const deployed = await stub(404, '{"error":"not-found"}', COMBINED);
+    try {
+      // Asynchronously: the stub answering the line's curl runs in this process.
+      const { stdout: build } = await promisify(execFile)('sh', ['-c', `${BUILD_LINE}; printf '%s' "$BUILD"`], { env: { PATH: process.env.PATH ?? '', HUB: deployed.url }, timeout: 15_000 });
+      expect(build).toBe(COMBINED);
+      const home = configHome({ clientId: 'c.access', clientSecret: SECRET });
+      const whole = await run({ HUB: deployed.url, BUILD: build, XDG_CONFIG_HOME: home });
+      expect(whole.out).toContain(`PASS GET /machine/stream: 404 not-found under build ${COMBINED}`);
+      expect(whole.code).toBe(0);
+      // The build's first word alone is another build: what an extraction that kept one field passed.
+      expect((await run({ HUB: deployed.url, BUILD: 'hub@6e53b882', XDG_CONFIG_HOME: home })).code).toBe(1);
+    } finally {
+      deployed.server.close();
+    }
   });
 
   it('exits 2 without HUB or BUILD, or without a readable enrollment, printing nothing of the file', async () => {

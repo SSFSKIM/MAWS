@@ -3,6 +3,8 @@
 // `POST /machine/enroll` names (or `--build`), and `GET /api/org/keys` answers `410 retired` or the list. Every request
 // carries no body, so a hub before M5b refuses each (a bad shape, not the key's holder) and keeps nothing. Against the
 // local hub, and stubs for the answers a hub before M5b, a stale build, or something in front of the Worker gives.
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Person } from '../../deploy/hub.ts';
 import { deployedBuild, retiredCases } from '../../deploy/probe.ts';
@@ -57,6 +59,28 @@ describe('the probe’s retired-route cases', () => {
     expect(results.K1).toEqual({ pass: expect.stringMatching(/POST \/api\/org\/keys.*404.*dev/) as string });
     expect(results.K2).toEqual({ pass: expect.stringMatching(/DELETE \/api\/org\/keys\/x.*404.*dev/) as string });
     expect(results.K3).toEqual({ pass: expect.stringMatching(/GET \/api\/org\/keys.*the list/) as string });
+  });
+
+  it("take a production build's whole name, the hub's and the web's ids joined by a space (deploy.ts, buildName)", async () => {
+    const combined = 'hub@6e53b882 web@p5-o14-m5b.6e53b882';
+    const server = createServer((request, response) => {
+      request.resume();
+      response.writeHead(400, { 'content-type': 'application/json', 'x-desk-build': combined });
+      response.end('{"error":"bad-shape"}');
+    });
+    await new Promise<void>((listening) => server.listen(0, '127.0.0.1', listening));
+    try {
+      expect(await deployedBuild(`http://127.0.0.1:${(server.address() as AddressInfo).port}`)).toBe(combined);
+    } finally {
+      server.close();
+    }
+    const { owner } = stubbed({
+      'POST /api/org/keys': { status: 404, body: { error: 'not-found' }, build: combined },
+      'DELETE /api/org/keys/x': { status: 404, body: { error: 'not-found' }, build: combined },
+      'GET /api/org/keys': { ...RETIRED_GET, build: combined },
+    });
+    expect(await outcomes(owner, combined)).toMatchObject({ K1: { pass: expect.stringContaining(combined) }, K2: { pass: expect.any(String) }, K3: { pass: expect.any(String) } });
+    expect(await outcomes(owner, 'hub@6e53b882')).toMatchObject({ K1: { fail: expect.stringContaining(`under build ${combined}, not hub@6e53b882`) } });
   });
 
   it('pass on GET’s 410 retired, as after the purge', async () => {

@@ -465,7 +465,7 @@ deletes what it minted, however it ends. It fails if any of that fails.
 
   The machine-token half (DX2's two routes) runs on the VM, whose endpoint holds a service token: `deploy/vm-dx2-retired.mjs`, fed to the VM's node on stdin (it imports nothing but node's own modules), reads the token by path from the endpoint's `enrollment.json` (`credentials.clientId`, `credentials.clientSecret`; `${XDG_CONFIG_HOME:-$HOME/.config}/MAWS/mawsd/endpoint/` on Linux) and never prints it. It asks `GET /machine/stream` and `POST /machine/frames` with no body, and passes only when both answer the Worker's `404 {"error":"not-found"}` under `BUILD`, the build step 3's `curl` named; anything else fails it, exit 1: a hub before M5b answering the VM's v2 credential `403 v2-credential` (M5a), another build's answer, or Access's redirect with no build header. `HUB` and `BUILD` reach it as arguments of their own, never spliced into the remote command:
 
-      BUILD=$(curl -sI -X POST $HUB/machine/enroll | awk 'tolower($1) == "x-desk-build:" { print $2 }' | tr -d '\r')
+      BUILD=$(curl -sI -X POST $HUB/machine/enroll | awk 'tolower($1) == "x-desk-build:" { sub(/^[^:]*:[ \t]*/, ""); sub(/[ \t\r]*$/, ""); print }')
       devcloud vm ssh <vm> -- env "HUB=$HUB" "BUILD=$BUILD" node --input-type=module - < apps/desk-hub/deploy/vm-dx2-retired.mjs
 
 - `fake-check`: M4's fake machine, enrolled from a code, replays its recording, and a browser sees every row, request, decision, log event, and outcome, plus one RPC answered.
