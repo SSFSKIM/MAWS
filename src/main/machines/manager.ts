@@ -15,6 +15,11 @@
 //   no longer configured is dropped at launch. A directory whose far side answers another ref than the one known for it
 //   now holds another profile: that is logged and adopted. A remembered ref is a hint: a directory answering it live takes
 //   it over from one that is not up; only a machine another directory reaches while up is refused.
+// - RL2 machines (P5 O7 M1, docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §C) come from a second
+//   source: the org session's roster (remote/source.ts). Their entries are keyed by ref from creation, listed
+//   `connecting` until their link first answers, closed and dropped when the roster drops them, renamed when the head
+//   renames them; `known-machines.json` stays the socket links' file. One link up per ref spans both kinds: a link that
+//   comes `up` while another entry already reaches its ref `up` is closed.
 import type { ClientRef } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandName, CommandResult, EventName, EventPayload } from '@shared/ipc/schema';
@@ -22,6 +27,7 @@ import type { MachineState } from '@shared/ipc/schema/machines';
 import type { MachineRef } from '@shared/machine/ref';
 import type { MainContext } from '../ipc/router';
 import { readKnownMachines, writeKnownMachines, type KnownMachine } from './known-machines';
+import type { RemoteSource } from './remote/source';
 
 export type LinkState = 'connecting' | 'up' | 'down';
 
@@ -51,13 +57,17 @@ export interface ConnectionManagerDeps {
   configured: string[]; // the serve directories this app links to (config.ts)
   emitFrom: <N extends EventName>(machine: MachineRef, name: N, payload: EventPayload<N>) => boolean;
   connect(dir: string): MachineLink; // a socket link to `dir` (socket-link.ts); a test's fake otherwise
+  remote?: RemoteSource; // the RL2 machines (P5 O7 M1)
   log(line: string): void;
 }
 
-// One configured directory: its link, and what the manager knows of the machine behind it.
+/** What a link of the second source says beyond its state: its carrier and its permanent refusal (remote/link.ts). */
+type Described = MachineLink & { carrier?(): string | null; refusal?(): string | null };
+
+// One configured directory, or one RL2 machine (`dir` null): its link, and what the manager knows of the machine behind it.
 interface Entry {
-  dir: string;
-  link: MachineLink;
+  dir: string | null;
+  link: Described;
   ref: MachineRef | null; // known from the file or learned from the link; null until either says
   name: string;
   state: LinkState;
@@ -82,10 +92,32 @@ export function createConnectionManager(deps: ConnectionManagerDeps): Connection
   // still a new generation (M4 resets that machine's counters on one).
   const generations = new Map<MachineRef, number>();
 
+  // Every ref once: the entry that is up, else the first (a socket entry before an RL2 one).
+  function listed(): Entry[] {
+    const byRef = new Map<MachineRef, Entry>();
+    for (const entry of [...entries, ...remoteEntries.values()]) {
+      if (entry.ref === null) continue;
+      const held = byRef.get(entry.ref);
+      if (held === undefined || (held.state !== 'up' && entry.state === 'up')) byRef.set(entry.ref, entry);
+    }
+    return [...byRef.values()];
+  }
+
   function list(): MachineState[] {
     const machines: MachineState[] = [{ ref: local, name: localName, local: true, state: 'up', since: started, generation: 0 }];
-    for (const entry of entries) {
-      if (entry.ref !== null) machines.push({ ref: entry.ref, name: entry.name, local: false, state: entry.state, since: entry.since, generation: generations.get(entry.ref) ?? 0 });
+    for (const entry of listed()) {
+      const carrier = entry.state !== 'up' ? undefined : entry.dir !== null ? 'socket' : (entry.link.carrier?.() ?? undefined);
+      const refusal = entry.dir === null ? (entry.link.refusal?.() ?? undefined) : undefined;
+      machines.push({
+        ref: entry.ref!,
+        name: entry.name,
+        local: false,
+        state: entry.state,
+        since: entry.since,
+        generation: generations.get(entry.ref!) ?? 0,
+        ...(carrier === undefined ? {} : { carrier: carrier as 'socket' | 'direct' | 'relay' }),
+        ...(refusal === undefined ? {} : { refusal }),
+      });
     }
     return machines;
   }
@@ -103,7 +135,10 @@ export function createConnectionManager(deps: ConnectionManagerDeps): Connection
     }
   }
   const knownNow = (): KnownMachine[] =>
-    entries.flatMap((entry) => (entry.ref === null ? [] : [{ ref: entry.ref, name: entry.name, carrier: { kind: 'socket' as const, dir: entry.dir } }]));
+    entries.flatMap((entry) => (entry.ref === null || entry.dir === null ? [] : [{ ref: entry.ref, name: entry.name, carrier: { kind: 'socket' as const, dir: entry.dir } }]));
+  // The RL2 entries, by ref.
+  const remoteEntries = new Map<MachineRef, Entry>();
+  const upElsewhere = (entry: Entry, ref: MachineRef) => [...entries, ...remoteEntries.values()].find((other) => other !== entry && other.ref === ref && other.state === 'up');
 
   // The link said who it reaches: adopt it, unless it is this machine or one another directory reaches while up. A ref
   // remembered for another directory is a hint, not a claim: a directory that answers it live takes it over from an entry
@@ -112,15 +147,16 @@ export function createConnectionManager(deps: ConnectionManagerDeps): Connection
     const { machine: ref, name } = entry.link;
     if (ref === null) return false;
     const holder = entries.find((other) => other !== entry && other.ref === ref);
-    if (ref === local || holder?.state === 'up') {
-      log(`${entry.dir} serves machine ${ref}, which ${ref === local ? 'is this one' : `${holder!.dir} already reaches`}; closing that link`);
+    const reaching = ref === local ? undefined : upElsewhere(entry, ref);
+    if (ref === local || reaching !== undefined) {
+      log(`${entry.dir} serves machine ${ref}, which ${ref === local ? 'is this one' : `${reaching!.dir ?? 'an RL2 link'} already reaches`}; closing that link`);
       entry.link.close();
       return false;
     }
     if (holder) {
       log(`${entry.dir} now reaches machine ${ref}, remembered at ${holder.dir}, which is ${holder.state}; ${holder.dir} is kept with no machine until it answers`);
       holder.ref = null;
-      holder.name = holder.dir;
+      holder.name = holder.dir ?? holder.name;
     }
     if (entry.ref !== null && entry.ref !== ref) log(`${entry.dir} now serves machine ${ref} (it served ${entry.ref}): the directory holds another profile`);
     const differs = holder !== undefined || entry.ref !== ref || entry.name !== (name ?? entry.name);
@@ -148,12 +184,66 @@ export function createConnectionManager(deps: ConnectionManagerDeps): Connection
     });
   }
 
+  // ---- The second source: RL2 machines -------------------------------------------------------------------------------
+
+  const remote = deps.remote;
+  function reconcile(): void {
+    if (remote === undefined || closed) return;
+    const roster = remote.machines();
+    let differs = false;
+    for (const [ref, entry] of remoteEntries) {
+      if (roster.some((machine) => machine.ref === ref)) continue;
+      remoteEntries.delete(ref);
+      entry.link.close();
+      differs = true;
+    }
+    for (const machine of roster) {
+      const held = remoteEntries.get(machine.ref);
+      if (held !== undefined) {
+        if (held.name !== machine.name) {
+          held.name = machine.name;
+          differs = true;
+        }
+        continue;
+      }
+      if (machine.ref === local) continue;
+      const link = remote.connect(machine) as Described;
+      const entry: Entry = { dir: null, link, ref: machine.ref, name: machine.name, state: 'connecting', since: new Date().toISOString() };
+      remoteEntries.set(machine.ref, entry);
+      differs = true;
+      let described = '';
+      link.onState((state) => {
+        if (remoteEntries.get(machine.ref) !== entry) return;
+        if (state === 'up' && entry.state !== 'up' && upElsewhere(entry, machine.ref) !== undefined) {
+          log(`an RL2 link reached machine ${machine.ref}, which another link already reaches; closing the RL2 link`);
+          return link.close();
+        }
+        const now = `${link.carrier?.() ?? ''}|${link.refusal?.() ?? ''}`;
+        if (state === entry.state && now === described) return;
+        described = now;
+        if (state !== entry.state) {
+          entry.state = state;
+          entry.since = new Date().toISOString();
+          if (state === 'up') generations.set(machine.ref, (generations.get(machine.ref) ?? 0) + 1);
+        }
+        changed();
+      });
+      link.onEvent((name, payload) => {
+        if (remoteEntries.get(machine.ref) === entry && entry.state === 'up') deps.emitFrom(machine.ref, name, payload as never);
+      });
+    }
+    if (differs) changed();
+  }
+  let closed = false;
+  const unsubscribeRemote = remote?.onChanged(reconcile);
+  reconcile();
+
   return {
     local,
     async dispatch(machine, name, input, ctx) {
       if (machine === local) return localLink.dispatch(name, input, ctx.client);
-      const entry = entries.find((candidate) => candidate.ref === machine);
-      if (!entry || entry.state !== 'up') return { ok: false, error: ipcError('host_unavailable', `${name}: machine ${machine} is not connected`) };
+      const entry = [...entries, ...remoteEntries.values()].find((candidate) => candidate.ref === machine && candidate.state === 'up');
+      if (!entry) return { ok: false, error: ipcError('host_unavailable', `${name}: machine ${machine} is not connected`) };
       return entry.link.dispatch(name, input, ctx.client);
     },
     list,
@@ -162,7 +252,10 @@ export function createConnectionManager(deps: ConnectionManagerDeps): Connection
       return () => void listeners.delete(listener);
     },
     close() {
+      closed = true;
+      unsubscribeRemote?.();
       for (const entry of entries) entry.link.close();
+      for (const entry of remoteEntries.values()) entry.link.close();
     },
   };
 }

@@ -210,6 +210,17 @@ module.exports = defineConfig(
     ignores: ['test/endpoint/**'],
     rules: { 'no-restricted-imports': ['error', { patterns: ENDPOINT_PATTERNS }] },
   },
+  // P5 O7 M1 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Proves"): the app's RL2 link is proved against
+  // the endpoint's own harness (test/endpoint/sub-harness.ts, its org fixtures) and pins its timing to the endpoint's
+  // constants, so its suites reach inside the module as the module's own suites do. Only suites: the link's code doesn't.
+  {
+    files: ['src/main/machines/remote/*.test.ts', 'src/main/org/*.test.ts'],
+    rules: { 'no-restricted-imports': ['error', { patterns: YJS_PATTERNS }] },
+  },
+  {
+    files: ['test/machines/**/*.ts'],
+    rules: { 'no-restricted-imports': 'off' },
+  },
   // P5 O10 end
   // P3-B start: the one-schema rule (above).
   {
