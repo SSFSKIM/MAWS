@@ -277,18 +277,22 @@ signs in through the stand-in instead, and only there may `--yes` answer its con
 - `--keys <file>` (or `DESK_ADMIN_KEYS`): the admin device's keys, `{"device": "<id>", "keys": {"<id>.channel": <JWK>,
   "<id>.stepUp": <JWK>}}`, read and never printed. A file without `device` names `a1`, the staging test device's (so
   `adopt` takes O11's `keys.json` as it stands).
-- `init` writes a new device's keys 0600, never over a file, and runs `tmutil addexclusion` on it. It refuses a path
+- `init` makes the keys file empty (0600, never over a file), runs `tmutil addexclusion` on it, and only then writes
+  the new device's keys into it; when the exclusion fails it removes the empty file and writes no key. It refuses a path
   under `/tmp`, `/private/tmp` or `$TMPDIR` (a sweep), inside a git work tree (a commit), or under `~/.claude`,
   `~/Library/Mobile Documents` or `~/.config/claude-secrets` (a sync or a backup).
 - `genesis --recovery <path | paper>` makes the org's recovery key and writes its private half only to the destination:
-  a path on a removable volume mounted for the step (refused on the keys' volume, beside the keys, inside a sync or
-  backup scope, or over an existing file), or `paper`, printed once at the terminal. It reads the key back from the
+  a path on a removable volume mounted for the step, or `paper`, printed once at the terminal. A path is refused beside
+  the keys, inside a sync or backup scope, or over an existing file; against a deployment also on the keys' volume, or
+  on a volume Disk Utility does not report as removable or external (`df` names its device, `diskutil info -plist`
+  describes it; a mounted disk image is refused too, its file being on some other disk). It reads the key back from the
   path (or takes it typed back), refuses unless it is `recoveryPub`'s pair, asks `root <org> at <hub>? [y/N]`, signs
   version 1 (the owner alone, an admin, with this device as the root) and posts it. It prints `orgGenesis <hash>` for
   the deployment's config, which the owner commits; `recoveryPub` stays in the anchor, and nothing of the private half
   on this machine. It refuses a hub that holds a state. The state is written to `<keys>.genesis.json` before its POST:
   a run that stops after the hub took it finishes on a rerun (the volume mounted again, the key checked back again),
-  posting nothing new, and a rerun never builds a second genesis.
+  posting nothing new and anchoring only a head the served chain, verified from that genesis, reaches; a rerun never
+  builds a second genesis.
 - `adopt` anchors an org rooted before this command (staging's, rooted by O11 M3): the chain verified from the genesis
   the config's `orgGenesis` pins (required), this device listed under the signed-in member and a root key of the head.
 - `refresh` signs and posts a no-change successor. The endpoint refuses every remote action once the head is 30 days
@@ -297,13 +301,15 @@ signs in through the stand-in instead, and only there may `--yes` answer its con
 - `pair --class web-cards|native-mac [--ttl <s>]` prints a pairing code once (`smns-pair-v1.…`: the hub, the org, the
   member, the head's root key ids, `recoveryPub` and a fresh 128-bit `k`) to the terminal and the clipboard, never to
   stdout; then reads `GET /api/devices/pending` every 2 s for up to 10 minutes. An entry is this pairing's when its MAC
-  verifies under `k` over the org, the member and the whole entry (`org-protocol`'s `verifyPairingMac`); others are
-  named in the output and ignored. It shows the entry with its fingerprint (`pairingFingerprint`, `xxxxx-xxxxx`), which
+  verifies under `k` over the org, the member and the whole entry (`org-protocol`'s `verifyPairingMac`), whose device
+  id is base64url's alphabet and whose passkey's `rpId` is a host name; others are named in the output and ignored.
+  Everything the hub supplies is printed with its control characters escaped (`\u001b`), so an entry cannot draw a
+  line or a prompt of its own. It shows the entry with its fingerprint (`pairingFingerprint`, `xxxxx-xxxxx`), which
   the device's panel shows too: compare the two before `y`, since the clipboard exposes `k` to every process under
   your uid. Two entries answering one code are refused and the code is spent. It then signs a successor listing the
   device, endorsed by this device, and prints `listed: version n`.
 - `devices` lists the member's devices; `remove-device <id>` asks, then signs a successor dropping the device, its keys
-  into `revoked`. Machines learn it at the hub's `state` notice, within its 10-minute poll at worst.
+  into `revoked` and its step-up key out of the root set if it was a root. Machines learn it at the hub's `state` notice, within its 10-minute poll at worst.
 
 Where it writes: the deployment's own org, under the anchor `<keys>.org.json` (`{hub, org, genesis, version, roots,
 recoveryPub}`, 0600), which `genesis` or `adopt` writes; every other subcommand reads the chain from its genesis,

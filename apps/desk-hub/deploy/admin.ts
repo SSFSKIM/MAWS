@@ -57,6 +57,7 @@ import {
   recoveryFileText,
   recoveryPlacementProblem,
   typedBackMatches,
+  isRemovableVolume,
   volumeOf,
   writeAdminKeys,
   writeNewFile,
@@ -91,6 +92,8 @@ export type AdminIo = {
   /** Runs a command (`tmutil`, `pbcopy`), `input` on its stdin; rejects unless it exits 0. */
   exec(command: string, args: string[], input?: string): Promise<void>;
   volumeOf(path: string): unknown;
+  /** Whether a path is on removable or external media (diskutil); throws when it cannot be told. */
+  removableVolume(path: string): boolean;
   readText(path: string): string;
   placement: Placement;
   env: Record<string, string | undefined>;
@@ -213,8 +216,10 @@ export async function judgeEntry(
   pairing: { org: string; member: string; k: Uint8Array; class: Device['class']; listed: Set<string> },
 ): Promise<{ ok: true; device: Omit<Device, 'endorsement'> } | { ok: false; why: string }> {
   const device = entryDevice(entry);
-  if (device.class === 'web-cards' && device.stepUpPub !== undefined) return { ok: false, why: 'a web-cards entry with a step-up key, which the class never holds (RL §5.10)' };
+  if (device.class === 'web-cards' && device.stepUpPub !== undefined) return { ok: false, why: 'a web-cards entry with a step-up key, which the class never holds (RL 5.10)' };
   if (!isDevice(device)) return { ok: false, why: 'not a device entry the org state could list' };
+  if (!isPairedDeviceId(device.id)) return { ok: false, why: 'its id is outside the device id grammar (base64url)' };
+  if (device.passkey !== undefined && !isRpId(device.passkey.rpId)) return { ok: false, why: "its passkey's rpId is not a host name" };
   if (device.class !== pairing.class) return { ok: false, why: `of class ${device.class}, not ${pairing.class}` };
   if (device.class === 'web-cards' && device.passkey === undefined) return { ok: false, why: 'a web-cards entry with no passkey' };
   if (!(await verifyPairingMac(pairing.k, { org: pairing.org, member: pairing.member, device }, entry.mac))) return { ok: false, why: "its MAC is not under this code's secret" };
@@ -222,7 +227,23 @@ export async function judgeEntry(
   return { ok: true, device };
 }
 
-const describeEntry = (d: Omit<Device, 'endorsement'>) => `${d.id} ${d.class} ${d.keyStorage} rpId ${d.passkey?.rpId ?? '-'}`;
+/**
+ * A hub-supplied string as it may be printed: every character outside printable ASCII, and the backslash, written as an
+ * escape. What the hub serves (a device id, a relying party, a member's email, its refusal's text) could otherwise carry
+ * terminal controls or a line of its own that forge or hide what the owner compares before `y`.
+ */
+export const printable = (text: string) => text.replace(/[^\x20-\x5b\x5d-\x7e]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
+
+/** `text` with every control character (C0, DEL, C1, the Unicode line separators and bidirectional controls) escaped. */
+// eslint-disable-next-line no-control-regex -- matching the control characters is the point
+const noControls = (text: string) => text.replace(/[\x00-\x1f\x7f-\x9f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
+
+/** A device id as a pairing takes it: base64url's alphabet, as the phone's 16 random bytes and this command's ids are. */
+export const isPairedDeviceId = (id: string) => /^[A-Za-z0-9_-]{1,128}$/.test(id);
+/** A relying party id as a pairing takes it: a lower-case host name (dot-separated labels) or a dotted IPv4 address. */
+export const isRpId = (rpId: string) => rpId.length <= 253 && /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/.test(rpId);
+
+const describeEntry = (d: Omit<Device, 'endorsement'>) => printable(`${d.id} ${d.class} ${d.keyStorage} rpId ${d.passkey?.rpId ?? '-'}`);
 
 type Context = {
   sub: Subcommand;
@@ -262,7 +283,7 @@ async function post(person: Person, signed: SignedOrgState): Promise<'ok' | 'not
   const text = await response.text();
   if (response.status === 201) return 'ok';
   if (response.status === 409 && text.includes('"not-head"')) return 'not-head';
-  return refuse(`the hub refused version ${signed.state.version}: ${response.status} ${text.slice(0, 300)}`);
+  return refuse(`the hub refused version ${signed.state.version}: ${response.status} ${printable(text.slice(0, 300))}`);
 }
 
 /** The anchored org, the head verified, and the signed-in member's device able to sign its successors. */
@@ -312,13 +333,21 @@ async function init(ctx: Context): Promise<number> {
   const problem = keysPlacementProblem(ctx.keysPath, ctx.io.placement);
   if (problem) refuse(`${problem}: no keys written`);
   if (existsSync(ctx.keysPath)) refuse(`${ctx.keysPath} exists: an admin device's keys are never written over`);
-  const keys = await writeAdminKeys(ctx.keysPath);
-  ctx.io.out(`keys written: ${ctx.keysPath} (device ${keys.id})`);
+  // Time Machine excludes the file while it is still empty: no key is written unless the exclusion took.
+  let excluding: unknown = null;
+  const exclude = (path: string) =>
+    ctx.io.exec('tmutil', ['addexclusion', path]).catch((error: unknown) => {
+      excluding = error;
+      throw error;
+    });
+  let keys: AdminKeys;
   try {
-    await ctx.io.exec('tmutil', ['addexclusion', ctx.keysPath]);
+    keys = await writeAdminKeys(ctx.keysPath, exclude);
   } catch (error) {
-    refuse(`tmutil addexclusion ${ctx.keysPath} failed (${error instanceof Error ? error.message : String(error)}): exclude it from Time Machine before you go on`);
+    if (excluding === null) throw error;
+    return refuse(`tmutil addexclusion ${ctx.keysPath} failed (${error instanceof Error ? error.message : String(error)}): no key was written and the file was removed; run init again once Time Machine can exclude it`);
   }
+  ctx.io.out(`keys written: ${ctx.keysPath} (device ${keys.id})`);
   ctx.io.out(`excluded from Time Machine: ${ctx.keysPath}`);
   return 0;
 }
@@ -328,7 +357,7 @@ async function genesis(ctx: Context): Promise<number> {
   if (!recovery) return refuse('genesis --recovery <path on the removable volume | paper>');
   const paper = recovery === 'paper';
   if (!paper) {
-    const problem = recoveryPlacementProblem(recovery, ctx.keysPath, ctx.io.placement, { of: ctx.io.volumeOf, required: !ctx.local });
+    const problem = recoveryPlacementProblem(recovery, ctx.keysPath, ctx.io.placement, { of: ctx.io.volumeOf, removable: ctx.io.removableVolume, required: !ctx.local });
     if (problem) refuse(`${problem}: nothing was written`);
   }
   if (readAnchor(ctx.keysPath)) refuse(`${anchorFile(ctx.keysPath)} exists: this device anchors an org already, and genesis runs once`);
@@ -366,7 +395,15 @@ async function genesis(ctx: Context): Promise<number> {
     const hash = await stateHash(pending.state);
     if (servedGenesis !== null && servedGenesis !== hash) refuse(`the hub holds another genesis (${servedGenesis}, version ${served.head?.state.version}), not the one ${genesisFile(ctx.keysPath)} holds (${hash})`);
     await checkBack(pending.state.root.recoveryPub);
-    if (servedGenesis === hash) return finish(pending, served.head!.state.version, 'genesis already at the hub');
+    if (servedGenesis === hash) {
+      // The first run's POST landed: the served chain is verified from this genesis, as adopt verifies one, and the
+      // anchor takes only a head that chain reaches.
+      const run = await verifyPinnedChain(served.chain, served.transitions, { roots: pending.state.root.keys, recoveryPub: pending.state.root.recoveryPub });
+      if (!run.ok) refuse(`the hub's chain does not verify from this genesis: ${run.code}`);
+      if (run.adopted.length !== served.chain.length) refuse(`the hub's chain breaks at version ${run.adopted.length + 1}`);
+      if (served.head === null || canonicalize(run.head) !== canonicalize(served.head)) refuse(`the hub's head is not its chain's last state (version ${run.head.state.version})`);
+      return finish(pending, run.head.state.version, 'genesis already at the hub');
+    }
     if (!(await confirm(ctx, `root ${me.org} at ${ctx.hub}? [y/N]`))) refuse('not rooted: nothing was posted');
     if ((await post(person, pending)) !== 'ok') refuse('the hub took a state meanwhile: run genesis again to see which');
     return finish(pending, 1, 'genesis posted');
@@ -470,7 +507,12 @@ async function removeDevice(ctx: Context): Promise<number> {
     if (!m || !d) return refuse(`${id} left the head meanwhile: nothing to revoke`);
     m.devices = m.devices.filter((x) => x.id !== id);
     s.revoked.push({ keyId: await keyId(d.channelPub), holder: { member: m.id, device: d.id, class: d.class, key: 'channel' } });
-    if (d.stepUpPub !== undefined) s.revoked.push({ keyId: await keyId(d.stepUpPub), holder: { member: m.id, device: d.id, class: d.class, key: 'step-up' } });
+    if (d.stepUpPub !== undefined) {
+      const kid = await keyId(d.stepUpPub);
+      s.revoked.push({ keyId: kid, holder: { member: m.id, device: d.id, class: d.class, key: 'step-up' } });
+      // A root key leaves the root set with its device (org-state.ts: the root set is admin devices' step-up keys).
+      s.root.keys = s.root.keys.filter((k) => k !== kid);
+    }
   });
   ctx.io.out(`revoked: version ${signed.state.version}`);
   return 0;
@@ -491,7 +533,7 @@ async function pair(ctx: Context): Promise<number> {
     ctx.io.out(`pairing code: ${code}`);
   } else {
     const terminal = ctx.terminal();
-    terminal.write(`pairing code for a ${cls} device of ${from.me.member.email} (on the clipboard too; paste it into the device):\n\n${code}\n\n`);
+    terminal.write(`pairing code for a ${cls} device of ${printable(from.me.member.email)} (on the clipboard too; paste it into the device):\n\n${code}\n\n`);
     await ctx.io.exec('pbcopy', [], code).catch((error: unknown) => terminal.write(`(not copied to the clipboard: ${error instanceof Error ? error.message : String(error)})\n`));
   }
   ctx.io.out(`waiting up to ${ttl} s for a ${cls} device to answer the code`);
@@ -508,7 +550,7 @@ async function pair(ctx: Context): Promise<number> {
         continue;
       }
       const seen = `${entry.deviceId} ${entry.mac}`;
-      if (!named.has(seen)) ctx.io.out(`not this pairing's: ${entry.deviceId} (${judged.why})`);
+      if (!named.has(seen)) ctx.io.out(`not this pairing's: ${printable(String(entry.deviceId))} (${judged.why})`);
       named.add(seen);
     }
     if (found.length > 1) refuse('two devices answered this code: start over (the code is spent)');
@@ -542,7 +584,9 @@ async function pair(ctx: Context): Promise<number> {
 const RUN: Record<Subcommand, (ctx: Context) => Promise<number>> = { init, genesis, adopt, refresh, pair, devices, 'remove-device': removeDevice };
 
 /** The command over `argv`, its world reached through `io`. Its exit status. */
-export async function runAdmin(argv: string[], io: AdminIo): Promise<number> {
+export async function runAdmin(argv: string[], given: AdminIo): Promise<number> {
+  // Every line out is one line, with no terminal control in it, whatever a hub-supplied part of it held.
+  const io: AdminIo = { ...given, out: (line) => given.out(noControls(line)), err: (line) => given.err(noControls(line)) };
   try {
     return await run(argv, io);
   } catch (error) {
@@ -692,6 +736,7 @@ export function machineIo(): AdminIo {
     secrets: readSecrets,
     exec,
     volumeOf,
+    removableVolume: isRemovableVolume,
     readText,
     placement: machinePlacement(env, home),
     env,

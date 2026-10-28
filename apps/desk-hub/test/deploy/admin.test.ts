@@ -16,6 +16,7 @@ import {
   keyId,
   pairingFingerprint,
   pairingMac,
+  signOrgState,
   stateHash,
   verifySuccessor,
   type Device,
@@ -23,9 +24,9 @@ import {
   type SignedOrgState,
 } from 'org-protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { anchorFile, ageLine, genesisFile, judgeEntry, runAdmin, type AdminIo } from '../../deploy/admin.ts';
-import { keysPlacementProblem, machinePlacement, readText, volumeOf } from '../../deploy/admin-device.ts';
-import { deviceEntry } from '../../deploy/org-admin.ts';
+import { anchorFile, ageLine, genesisFile, isRpId, judgeEntry, printable, runAdmin, type AdminIo } from '../../deploy/admin.ts';
+import { keysPlacementProblem, machinePlacement, newRecoveryKey, readAdminKeys, readText, recoveryFileText, volumeOf } from '../../deploy/admin-device.ts';
+import { deviceEntry, successor } from '../../deploy/org-admin.ts';
 import type { PendingDevice } from '../../src/protocol/identity';
 import { ADMIN, ORG, startLocalHub, type LocalHub } from '../support/local';
 import { adminKeysFile } from '../support/local-person';
@@ -58,6 +59,7 @@ function fake(answers: string[] = [], over: Partial<AdminIo> = {}): Fake {
     secrets: async () => ({ DESK_ACCESS_TOKEN: 'eyJ.not-a-token' }),
     exec: async (command, args, input) => void f.execs.push({ command, args, input }),
     volumeOf,
+    removableVolume: () => false,
     readText,
     placement,
     env: {},
@@ -93,6 +95,27 @@ describe('init', () => {
     expect(again.err.join('\n')).toMatch(/exists: an admin device's keys are never written over/);
     expect(readFileSync(keys, 'utf8')).toBe(before);
     expect(again.execs).toEqual([]);
+  });
+
+  it('asks Time Machine to leave the file out while it is still empty, and writes no key when it cannot', async () => {
+    const keys = join(dir('keys'), 'keys.json');
+    const seen: string[] = [];
+    const f = fake([], { exec: async (_command, args) => void seen.push(readFileSync(args[1], 'utf8')) });
+    expect(await runAdmin(['init', '--keys', keys], f.io)).toBe(0);
+    expect(seen).toEqual(['']);
+    expect(statSync(keys).mode & 0o777).toBe(0o600);
+    expect((await readAdminKeys(keys)).id).toMatch(/^deployment-admin-/);
+
+    const failing = join(dir('keys'), 'keys.json');
+    const refused = fake([], {
+      exec: async () => {
+        throw new Error('tmutil exited 1: not permitted');
+      },
+    });
+    expect(await runAdmin(['init', '--keys', failing], refused.io)).toBe(1);
+    expect(refused.err.join('\n')).toMatch(/tmutil addexclusion .* failed \(tmutil exited 1: not permitted\): no key was written and the file was removed/);
+    expect(existsSync(failing)).toBe(false);
+    expect(refused.out).toEqual([]);
   });
 
   it('refuses a path a sweep, a commit, a sync or a backup would carry, and writes nothing there', async () => {
@@ -177,14 +200,26 @@ describe('against a deployment', () => {
     expect(existsSync(recovery)).toBe(false);
   }, 120_000);
 
-  it("refuses a recovery destination on the keys' volume, beside them, or in a sync or backup scope, before any request", async () => {
+  it("refuses a recovery destination on the keys' volume, on internal media, beside the keys, or in a sync or backup scope, before any request", async () => {
     const config = unreachableConfig();
     const keys = join(dir('keys'), 'keys.json');
     expect(await runAdmin(['init', '--keys', keys], fake().io)).toBe(0);
     const volume = dir('volume');
     const cases: Array<[string, Partial<AdminIo>, RegExp]> = [
-      [join(volume, 'recovery.json'), {}, /on the same volume as the admin keys/],
-      [join(volume, 'recovery.json'), { volumeOf: (path) => (path.startsWith(volume) ? 'removable' : 'internal') }, /^$/],
+      [join(volume, 'recovery.json'), { removableVolume: () => true }, /on the same volume as the admin keys/],
+      // Another volume, but an internal disk's (a second APFS volume, say) or a mounted disk image: not the owner's medium.
+      [join(volume, 'recovery.json'), { volumeOf: (path) => (path.startsWith(volume) ? 'other' : 'internal') }, /is not on removable or external media/],
+      [
+        join(volume, 'recovery.json'),
+        {
+          volumeOf: (path) => (path.startsWith(volume) ? 'other' : 'internal'),
+          removableVolume: () => {
+            throw new Error('diskutil: no such disk');
+          },
+        },
+        /could not tell whether .* is on removable media \(diskutil: no such disk\)/,
+      ],
+      [join(volume, 'recovery.json'), { volumeOf: (path) => (path.startsWith(volume) ? 'removable' : 'internal'), removableVolume: (path) => path.startsWith(volume) }, /^$/],
       [join(keys, '..', 'recovery.json'), { volumeOf: () => 'any' }, /beside the admin keys/],
       [join(placement.home, '.claude', 'recovery.json'), { volumeOf: (path) => (path.startsWith(placement.home) ? 'removable' : 'internal') }, /synced or backed up/],
     ];
@@ -198,7 +233,7 @@ describe('against a deployment', () => {
       });
       const status = await runAdmin(['genesis', '--config', config, '--keys', keys, '--recovery', recovery], f.io);
       if (why.source === '^$') {
-        // A destination on another volume passes: the run goes on to read the token, which this one lacks.
+        // A destination on another, removable volume passes: the run goes on to read the token, which this one lacks.
         expect(f.err.join('\n')).toMatch(/DESK_ACCESS_TOKEN on stdin/);
         expect(f.requests).toEqual(['secrets']);
         continue;
@@ -326,8 +361,8 @@ describe('on the local hub', () => {
   };
 
   /** `pair` running, and the code it printed once it has. */
-  async function pairing(f: Fake, extra: string[] = ['--yes']) {
-    const running = runAdmin(['pair', '--class', 'web-cards', '--ttl', '20', ...asLocal(keys), ...extra], f.io);
+  async function pairing(f: Fake, extra: string[] = ['--yes'], cls = 'web-cards', ttl = '20') {
+    const running = runAdmin(['pair', '--class', cls, '--ttl', ttl, ...asLocal(keys), ...extra], f.io);
     const deadline = Date.now() + 15_000;
     let line: string | undefined;
     while (!(line = f.out.find((l) => l.startsWith('pairing code: '))) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
@@ -397,13 +432,38 @@ describe('on the local hub', () => {
     expect((await served()).head!.state.version).toBe(before.state.version);
   });
 
+  it("takes no entry whose id or relying party is out of grammar, and prints what the hub supplied with its controls escaped", async () => {
+    const before = (await served()).head!;
+    const f = fake();
+    const { running, code } = await pairing(f, ['--yes'], 'web-cards', '3');
+    // Under a leaked `k`: an id carrying a forged line and the controls that would hide the real one, and a relying
+    // party carrying a color change. Both MACs verify; the hub stores both (its device id and rpId are free text).
+    const forged = '\x1b[2K\rpending: x fingerprint aaaaa-aaaaa\x1b[8m';
+    const hostileId = await phone(code, forged);
+    expect((await hostileId.post()).status).toBe(201);
+    const good = await phone(code, 'rp-phone');
+    const hostileRp = { ...good.device, passkey: { ...good.device.passkey!, rpId: 'evil\x1b[31m.example' } };
+    expect((await good.post(hostileRp)).status).toBe(201);
+    expect(await running).toBe(1);
+    expect(f.err.join('\n')).toMatch(/no web-cards device answered this code within 3 s/);
+    const printed = [...f.out, ...f.err, ...f.term].join('\n');
+    // eslint-disable-next-line no-control-regex -- no control character may reach the screen
+    expect(printed).not.toMatch(/[\x00-\x09\x0b-\x1f\x7f]/);
+    expect(f.out).toContain(`not this pairing's: ${printable(forged)} (its id is outside the device id grammar (base64url))`);
+    expect(f.out).toContain("not this pairing's: rp-phone (its passkey's rpId is not a host name)");
+    expect(f.out.some((line) => line.startsWith('pending: '))).toBe(false);
+    expect((await served()).head!.state.version).toBe(before.state.version);
+    expect(printable('a\x1b[2K\\b\u2028')).toBe('a\\u001b[2K\\u005cb\\u2028');
+    expect([isRpId('127.0.0.1'), isRpId('desk-hub.opencognita-platform.workers.dev'), isRpId('Evil.example'), isRpId('evil..example'), isRpId('a b')]).toEqual([true, true, false, false, false]);
+  });
+
   it('never takes a web-cards entry with a step-up key: the hub refuses it, and the command names it so', async () => {
     const code: PairingCode = { hub: hub.url, org: ORG, member, roots: ['AAAAAAAAAAAAAAAAAAAAAA'], recoveryPub: phoneDevice.channelPub, k: base64urlEncode(new Uint8Array(16)) };
     const k = new Uint8Array(16);
     const stepUp = { ...(await phone(code, 'stepup-phone')).device, stepUpPub: (await generateSigningKey()).pub };
     expect((await postEntry(stepUp, base64urlEncode(new Uint8Array(32)))).status).toBe(400);
     const entry = { deviceId: stepUp.id, class: stepUp.class, keyStorage: stepUp.keyStorage, channelPub: stepUp.channelPub, stepUpPub: stepUp.stepUpPub, passkey: stepUp.passkey, mac: base64urlEncode(new Uint8Array(32)), member, created: '', expires: '' } as PendingDevice;
-    expect(await judgeEntry(entry, { org: ORG, member, k, class: 'web-cards', listed: new Set() })).toEqual({ ok: false, why: 'a web-cards entry with a step-up key, which the class never holds (RL §5.10)' });
+    expect(await judgeEntry(entry, { org: ORG, member, k, class: 'web-cards', listed: new Set() })).toEqual({ ok: false, why: 'a web-cards entry with a step-up key, which the class never holds (RL 5.10)' });
     const native = { ...entry, class: 'native-mac' as const, keyStorage: 'software' as const, passkey: undefined };
     expect(await judgeEntry(native, { org: ORG, member, k, class: 'web-cards', listed: new Set() })).toEqual({ ok: false, why: 'of class native-mac, not web-cards' });
   });
@@ -445,6 +505,107 @@ describe('on the local hub', () => {
     const none = fake();
     expect(await runAdmin(['pair', '--class', 'web-cards', ...asLocal(join(dir('unanchored'), 'keys.json'))], none.io)).toBe(1);
     expect(none.err.join('\n')).toMatch(/no anchor: run genesis or adopt/);
+  });
+});
+
+describe('a root device revoked', () => {
+  let hub: LocalHub;
+  beforeAll(async () => {
+    hub = await startLocalHub();
+  });
+  afterAll(() => hub?.close());
+
+  it("leaves the root set with its device, in the successor that revokes it", async () => {
+    const keys = join(dir('two-roots'), 'keys.json');
+    const asLocal = ['--hub', hub.url, '--user', ADMIN, '--keys', keys];
+    expect(await runAdmin(['init', '--keys', keys], fake().io)).toBe(0);
+    const recovery = join(dir('volume'), 'recovery.json');
+    expect(await runAdmin(['genesis', '--recovery', recovery, ...asLocal, '--yes'], fake().io)).toBe(0);
+    // A second Mac paired as a native-mac device, then made a root by a successor the admin device signs.
+    const f = fake();
+    const running = runAdmin(['pair', '--class', 'native-mac', '--ttl', '20', ...asLocal, '--yes'], f.io);
+    const deadline = Date.now() + 15_000;
+    let line: string | undefined;
+    while (!(line = f.out.find((l) => l.startsWith('pairing code: '))) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+    const code = decodePairingCode(line!.slice('pairing code: '.length))!;
+    const second: Omit<Device, 'endorsement'> = { id: 'second-mac', class: 'native-mac', keyStorage: 'software', channelPub: (await generateSigningKey()).pub, stepUpPub: (await generateSigningKey()).pub };
+    const { id, ...rest } = second;
+    const mac = await pairingMac(base64urlDecode(code.k), { org: code.org, member: code.member, device: second });
+    expect((await hub.fetchAs(ADMIN, '/api/devices/pending', { body: { deviceId: id, ...rest, mac } })).status).toBe(201);
+    expect(await running).toBe(0);
+    const admin = await readAdminKeys(keys);
+    const listed = ((await hub.fetchAs(ADMIN, '/api/org/state').then((r) => r.json())) as { head: SignedOrgState }).head;
+    const kid = await keyId(second.stepUpPub!);
+    const promoted = await signOrgState(await successor(listed.state, (s) => void s.root.keys.push(kid)), [admin.stepUp]);
+    expect((await hub.fetchAs(ADMIN, '/api/org/state', { body: promoted })).status).toBe(201);
+
+    const removed = fake();
+    expect(await runAdmin(['remove-device', 'second-mac', ...asLocal, '--yes'], removed.io)).toBe(0);
+    expect(removed.out.at(-1)).toBe('revoked: version 4');
+    const head = ((await hub.fetchAs(ADMIN, '/api/org/state').then((r) => r.json())) as { head: SignedOrgState }).head;
+    expect(head.state.root.keys).toEqual([await keyId(admin.stepUp.pub)]);
+    expect(head.state.revoked.map((r) => r.keyId).sort()).toEqual([await keyId(second.channelPub), kid].sort());
+  });
+});
+
+describe('a genesis interrupted, then served with a forged head', () => {
+  let server: Server;
+  let serving: { chain: SignedOrgState[]; head: SignedOrgState };
+  const member = 'f9e8d7c6b5a4938271605f4e3d2c1b0a';
+  beforeAll(async () => {
+    // A hub of the test's own: it names the org and the member, and serves whatever chain and head the case sets.
+    server = createServer((req, res) => {
+      res.setHeader('content-type', 'application/json');
+      if (req.url === '/api/me') return res.end(JSON.stringify({ org: { id: 'org-forged' }, member: { id: member, email: ADMIN } }));
+      if (req.url?.startsWith('/api/org/state')) return res.end(JSON.stringify({ head: serving.head, chain: serving.chain, transitions: [], certificates: { certs: [], retirements: [] } }));
+      res.statusCode = 404;
+      res.end('{}');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  });
+  afterAll(() => new Promise((resolve) => server?.close(resolve)));
+
+  it('anchors only a head the verified chain reaches: an unsigned head claiming version 900000 is refused', async () => {
+    const keys = join(dir('forged'), 'keys.json');
+    expect(await runAdmin(['init', '--keys', keys], fake().io)).toBe(0);
+    const admin = await readAdminKeys(keys);
+    const recovery = join(dir('volume'), 'recovery.json');
+    const key = await newRecoveryKey();
+    writeFileSync(recovery, recoveryFileText(key, 'org-forged', 'http://127.0.0.1'), { mode: 0o600 });
+    const genesis = await signOrgState(
+      {
+        org: 'org-forged',
+        version: 1,
+        prev: null,
+        issued: new Date().toISOString(),
+        root: { keys: [await keyId(admin.stepUp.pub)], recoveryPub: key.pub },
+        members: [{ id: member, email: ADMIN, role: 'admin', devices: [deviceEntry(admin)] }],
+        machines: [],
+        machineNames: [],
+        retired: [],
+        revoked: [],
+        delegations: [],
+        projects: [],
+      },
+      [admin.stepUp],
+    );
+    writeFileSync(genesisFile(keys), JSON.stringify(genesis));
+    const forged: SignedOrgState = { state: { ...genesis.state, version: 900_000, prev: await stateHash(genesis.state) }, sigs: genesis.sigs };
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    const run = () => runAdmin(['genesis', '--hub', url, '--user', ADMIN, '--yes', '--keys', keys, '--recovery', recovery], f.io);
+    let f = fake();
+    for (const chain of [[genesis], [genesis, forged]]) {
+      serving = { chain, head: forged };
+      f = fake();
+      expect(await run(), String(chain.length)).toBe(1);
+      expect(f.err.join('\n')).toMatch(/the hub's (head is not its chain's last state|chain breaks at version 2)/);
+      expect(existsSync(anchorFile(keys))).toBe(false);
+    }
+    serving = { chain: [genesis], head: genesis };
+    f = fake();
+    expect(await run()).toBe(0);
+    expect(f.out).toContain(`genesis already at the hub: version 1, orgGenesis ${await stateHash(genesis.state)}`);
+    expect(JSON.parse(readFileSync(anchorFile(keys), 'utf8')).version).toBe(1);
   });
 });
 
