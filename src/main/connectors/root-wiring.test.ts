@@ -25,6 +25,7 @@ const state = vi.hoisted(() => ({
 vi.mock('electron', () => ({
   app: { whenReady: () => ({ then: (fn: () => unknown) => { state.ready = fn; } }), on: vi.fn(), requestSingleInstanceLock: () => true, hasSingleInstanceLock: () => true, getPath: (name: string) => join(state.root, name), getAppPath: () => state.root, getVersion: () => '0.0.0-test' /* P4-AGG M2: the catalog's user agent */, isPackaged: false, commandLine: { appendSwitch: vi.fn(), getSwitchValue: vi.fn(() => '') /* P3-F1: Electron's answer for a switch not given */ }, setPath: vi.fn() },
   BrowserWindow: { getAllWindows: () => [] }, dialog: {}, screen: { getAllDisplays: () => [], getPrimaryDisplay: () => ({ workArea: {} }) }, shell: {},
+  powerMonitor: { on: vi.fn() }, // P5 O8 M1: the Registry feed's wake and unlock probes
 }));
 vi.mock('../ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: (name: string, fn: (input?: unknown) => unknown) => state.handlers.set(name, fn), registerMachineHandler: (name: string, fn: (input?: unknown) => unknown) => state.handlers.set(name, fn) /* P5 O6 M1 */, interceptCommand: vi.fn(), dispatchLocal: vi.fn() /* P5 O6 M3 */, CommandFailure: class extends Error {} }));
 vi.mock('../machines', () => ({ startMachines: vi.fn(() => ({ dispatch: vi.fn(), serve: vi.fn(), stop: vi.fn() })) })); // P5 O6 M3: no links, no stand-in

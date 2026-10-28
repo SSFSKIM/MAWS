@@ -287,7 +287,7 @@ void startWithProfileLock(app, () => {
           build: `${MAIN_BUILD.version}+${MAIN_BUILD.commit}`,
           packaged: app.isPackaged,
           env: process.env,
-          openExternal: openExternalUrl,
+          openExternal: (url) => openExternalUrl(url),
           stepUp: (keys, device) => createStepUp({ device, key: keys.stepUp }),
           log: (line) => console.log(line),
         })
@@ -923,8 +923,9 @@ void startWithProfileLock(app, () => {
   // is ever stopped.
   machines.serve();
   shutdown.add('machines', () => machines.stop());
+  // P5 O8 M1: the feed and the session stop; nothing holds the quit (every org file is written whole and renamed)
   shutdown.add('org', () => {
     orgFeed.close();
-    return orgSession?.close();
+    void orgSession?.close();
   });
 }, { build: MAIN_BUILD, onSecondInstance: answerSecondLaunch }); // E11 §2.7

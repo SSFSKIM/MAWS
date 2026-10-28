@@ -38,6 +38,7 @@ vi.mock('electron', () => {
     BrowserWindow: { getAllWindows: () => fake.windows },
     dialog: { showMessageBox: fake.showMessageBox }, // E11 F2b
     screen: { getAllDisplays: () => [display], getPrimaryDisplay: () => display },
+    powerMonitor: { on: vi.fn() }, // P5 O8 M1: the Registry feed's wake and unlock probes
   };
 });
 vi.mock('./hosts', () => ({ createHosts: () => fake.hosts }));
