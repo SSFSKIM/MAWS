@@ -1,56 +1,58 @@
-// A session's listing read from the hub (P5 O13 M5), for a landing on a session's cards before the listings store's
-// snapshot is in (the app socket's first `listings` pages): `GET /api/listings`, the project's alone when the machine's
-// presence names it, and of what it serves for the session the newest that verifies against the org state this phone
-// holds (`verifyListing`: signed by the key that speaks for its machine now). The hub only carries listings; one that
-// does not verify, or a withdrawal, names nothing.
-import { isListingGone, verifyListing, type Certificates, type Listing, type Signed, type SignedOrgState } from 'org-protocol';
+// A session's listing at a landing on its cards before the listings store's snapshot is in (P5 O13 M5; the app
+// socket's first `listings` pages): the session's records read from the hub's `GET /api/listings` (the project's
+// alone when the machine's presence names it) are taken into the listings store as its frames are, so the view shows
+// only what the store holds. Each record is verified when the store takes it, against the org state the phone holds
+// then (`verifyListing`: signed by the key that speaks for its machine now), never at or below the session's newest
+// revision; a withdrawal, a later frame, a snapshot or a change of trust moves the session as it moves any other. The
+// hub only carries listings: what it serves moves nothing until it verifies.
+import type { Listing, Signed } from 'org-protocol';
 import { LISTINGS_PATH, type Listings } from 'desk-hub/protocol';
 import { hubJson } from '../hub/http';
 
-export async function fetchListing(
-  machine: string,
-  session: string,
-  project: string | null,
-  org: { head: SignedOrgState; certificates: Certificates },
-  get: (path: string) => Promise<Listings> = (path) => hubJson<Listings>(path),
-): Promise<Signed<Listing> | null> {
+/** The records the hub serves for `machine`'s `session`, unverified. */
+export async function fetchListings(machine: string, session: string, project: string | null, get: (path: string) => Promise<Listings> = (path) => hubJson<Listings>(path)): Promise<Signed<Listing>[]> {
   const { listings } = await get(project === null ? LISTINGS_PATH : `${LISTINGS_PATH}?project=${encodeURIComponent(project)}`);
-  const candidates = (Array.isArray(listings) ? listings : []).filter((l) => l?.body?.machine === machine && l.body.session === session).sort((a, b) => b.body.revision - a.body.revision);
-  const now = new Date();
-  for (const candidate of candidates) {
-    if (!(await verifyListing(org.head.state, candidate, org.certificates, now)).ok) continue;
-    return isListingGone(candidate.body) ? null : candidate;
-  }
-  return null;
+  return (Array.isArray(listings) ? listings : []).filter((l) => l?.body?.machine === machine && l.body.session === session);
 }
 
 /** What a cards view knows of its session's listing: still looking, the verified listing, or none (ended, or not the member's). */
 export type Looked = { state: 'looking' } | { state: 'found'; listing: Signed<Listing> } | { state: 'none' };
 
-type Store = { readonly loaded: boolean; listings(): Map<string, Signed<Listing>>; onChange(listener: () => void): () => void };
+type Store = { readonly loaded: boolean; listings(): Map<string, Signed<Listing>>; listing(record: Signed<Listing>): Promise<void>; onChange(listener: () => void): () => void };
 
 /**
  * `key`'s listing (`<machine ref>/<session>`) for a cards view, told to `tell` as it is known: the listings store's when
- * it holds one; none once its snapshot is in without one; before then, one read from the hub (`read`, null while it
- * cannot read yet), whose answer — a listing, or none when it serves none or cannot be read — stands until the store
- * says otherwise. Stopped by the function it returns.
+ * it holds one; none once its snapshot is in without one, or once it drops one it held. Before then the session's
+ * records are read from the hub once (`read`, null while it cannot read yet) and taken into the store, oldest first, as
+ * frames are; once they are, none until the store holds one. Stopped by the function it returns.
  */
-export function followSessionListing(key: string, store: Store, read: () => Promise<Signed<Listing> | null> | null, tell: (looked: Looked) => void): () => void {
+export function followSessionListing(key: string, store: Store, read: () => Promise<Signed<Listing>[]> | null, tell: (looked: Looked) => void): () => void {
   let live = true;
   let asked = false;
+  let answered = false;
+  let held = false; // the store has held the session's listing: its absence since is the store's word
   const look = () => {
-    const held = store.listings().get(key);
-    if (held !== undefined) return tell({ state: 'found', listing: held });
-    if (store.loaded) return tell({ state: 'none' });
+    const listing = store.listings().get(key);
+    if (listing !== undefined) {
+      held = true;
+      return tell({ state: 'found', listing });
+    }
+    if (store.loaded || answered || held) return tell({ state: 'none' });
     if (asked) return;
     const reading = read();
     if (reading === null) return;
     asked = true;
     reading
-      .catch((error: unknown) => (console.error('desk: reading the session’s listing', error), null))
-      .then((listing) => {
-        if (!live || store.listings().has(key) || store.loaded) return;
-        tell(listing === null ? { state: 'none' } : { state: 'found', listing });
+      .then(async (records) => {
+        // A snapshot is the whole set the hub holds: a read answered after it has nothing to add.
+        if (!live || store.loaded) return;
+        for (const record of [...records].sort((a, b) => a.body.revision - b.body.revision)) await store.listing(record);
+      })
+      .catch((error: unknown) => console.error('desk: reading the session’s listing', error))
+      .then(() => {
+        if (!live) return;
+        answered = true;
+        look();
       });
   };
   look();

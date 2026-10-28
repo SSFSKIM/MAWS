@@ -1,11 +1,12 @@
 // What a card's passkey gesture approves, in the card's words (P5 O13 M5; RL §5.10). The browser's prompt names the
 // relying party and nothing of the request, so the view says what the gesture answers before it asks for it:
 // "Face ID approves: Allow `pnpm test` in maws-45". A permission is named by its decision and what the tool would do (a
-// command by itself, another tool by its name and the file, address or pattern it is given); a question by its answer.
+// command by itself, another tool by its name and the file, address or pattern it is given); a question by its answer,
+// and a declined one by the question it declines.
 import { field, filePath, toolClass } from '../../../../../src/renderer/src/request-card/tools';
 import type { Answer } from '../../cards/answers';
 import type { Card } from '../../cards/cards';
-import { asPermission } from '../requests/RequestCard';
+import { asPermission, questionsOf } from '../requests/RequestCard';
 
 export type Gesture = { action: string; subject: string | null; where: string };
 
@@ -49,6 +50,10 @@ export function gestureOf(card: Card, given: Answer, where: string): Gesture {
     const answers = Object.entries(given.answers);
     if (answers.length === 1) return { action: `Answer “${short(answers[0][0])}” with`, subject: short(answers[0][1]), where };
     return { action: `Answer ${answers.length} questions`, subject: null, where };
+  }
+  if (given.kind === 'decline') {
+    const questions = card.lane === 'A' ? questionsOf(card.raised) : ((card.request as { questions?: Array<{ question: string }> }).questions ?? []);
+    return { action: questions.length === 1 ? `Decline “${short(questions[0].question)}”` : `Decline ${questions.length} questions`, subject: null, where };
   }
   const { tool, input } = asked(card);
   const { name, subject } = permission(tool, input);

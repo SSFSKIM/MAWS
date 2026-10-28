@@ -2,8 +2,10 @@
 // pieces (RequestCard.tsx's adapters and MAWS's variant pieces as RequestCard imports them: the question stepper, the
 // tool preview, the controls) and its copy, answered with the device's passkey. A permission offers Allow and Deny and
 // nothing more: no reason (a `message` is refused `class`) and no scope (a lane B Allow is `once`). A question offers
-// Submit, and cannot be declined from here. Before the passkey prompt the card says what the gesture approves, since
-// the prompt shows nothing of the request (RL §5.10). Its state is the adapter's (cards/card-state.ts).
+// Skip and Submit, and every question skipped declines a native lane A question, as DX6's card does. Before the passkey
+// prompt the card says what the gesture approves, since the prompt shows nothing of the request (RL §5.10); while an
+// answer is retained for a Retry the card draws that answer's request, labelled so, and a lane A input the bridge
+// capped says so, as today's card does. Its state is the adapter's (cards/card-state.ts).
 import type { AttentionItem } from '@shared/graph/attention';
 import type { Question, SessionEvent } from '@shared/graph/events';
 import type { RequestAnswer } from '@shared/engine/answers';
@@ -44,7 +46,13 @@ export type ChannelCardProps = {
   onNote(note: string | null): void;
 };
 
-export function ChannelCard({ card, state, attempt, note, where, machine, draftId, onAnswer, onRetry, onNote }: ChannelCardProps) {
+export function ChannelCard({ card: current, state, attempt, note, where, machine, draftId, onAnswer, onRetry, onNote }: ChannelCardProps) {
+  // An answer on its way, sent, or retained for a Retry is drawn over its own card, which its digest covers: never the
+  // card as a later set redrew it, though sminos republished the request with another input since.
+  const inFlight = attempt !== null && (state.kind === 'sending' || state.kind === 'sent' || state.kind === 'uncertain');
+  const card = inFlight ? attempt.card : current;
+  const retried = inFlight && (state.kind === 'uncertain' || attempt.operation !== null);
+  const changedSince = retried && JSON.stringify(card.digest) !== JSON.stringify(current.digest);
   const kind = cardKind(card);
   const asynchronous = card.lane === 'A' && isAsyncQuestion(card.raised as Parameters<typeof isAsyncQuestion>[0]);
   const verb = kind === 'question' ? 'asks' : kind === 'permission' ? `wants to ${toolVerb(permissionOf(card))}` : 'waits in MAWS';
@@ -65,12 +73,23 @@ export function ChannelCard({ card, state, attempt, note, where, machine, draftI
         <span className="text-fg-muted">{verb}</span>
         {asynchronous && <span className="text-fg-faint">· it keeps working while it waits</span>}
       </header>
+      {retried && (
+        <p className="m-0 text-ui-sm text-fg-muted" data-testid="retained">
+          Retry sends the first answer again, to this request as it was then.
+          {changedSince && ' It has changed since: the new request can be answered once this answer is known.'}
+        </p>
+      )}
       {kind === 'question' ? (
-        <QuestionPart card={card} answerable={answerable} draftId={draftId} onAnswer={onAnswer} onNote={onNote} />
+        <QuestionPart card={card} asynchronous={asynchronous} answerable={answerable} draftId={draftId} onAnswer={onAnswer} onNote={onNote} />
       ) : kind === 'permission' ? (
         <PermissionPart card={card} answerable={answerable} onAnswer={onAnswer} />
       ) : (
         <p className="m-0 text-ui-sm text-fg-muted">{card.lane === 'B' ? `${capitalized(card.request.kind.replace('.requested', ''))} request` : 'A request'}</p>
+      )}
+      {card.lane === 'A' && card.raised.truncated === true && (
+        <p className="m-0 text-ui-sm text-warning" data-testid="truncated">
+          The input shown was capped: the full input was too large to send. A decision binds to what is shown here.
+        </p>
       )}
       {note !== null && (
         <p className="m-0 text-ui-sm text-warning" role="status" data-testid="card-note">
@@ -101,7 +120,7 @@ function PermissionPart({ card, answerable, onAnswer }: { card: Card; answerable
   );
 }
 
-function QuestionPart({ card, answerable, draftId, onAnswer, onNote }: { card: Card; answerable: boolean; draftId: string; onAnswer(given: Answer): void; onNote(note: string | null): void }) {
+function QuestionPart({ card, asynchronous, answerable, draftId, onAnswer, onNote }: { card: Card; asynchronous: boolean; answerable: boolean; draftId: string; onAnswer(given: Answer): void; onNote(note: string | null): void }) {
   const questions = questionsOfCard(card);
   if (!answerable || questions.length === 0) {
     return (
@@ -115,13 +134,19 @@ function QuestionPart({ card, answerable, draftId, onAnswer, onNote }: { card: C
       </ul>
     );
   }
-  // An answer to at least one question is sent; one with every question skipped, or a decline, is not: the phone
-  // answers questions and declines none (a lane A decline is a `decide` the client builds only for a permission).
+  // An answer to at least one question is sent. One with every question skipped is the question declined, as DX6's card
+  // and Esc in the terminal decline it, for a native lane A question; an async question is answered, never declined,
+  // and a lane B question's decline is refused the phone (`class`), so for those nothing is sent and the card says why.
   const submit = (given: RequestAnswer) => {
     if (given.kind === 'question' && Object.keys(given.answers).length > 0) {
       onNote(null);
       onAnswer({ kind: 'question', answers: given.answers });
-    } else onNote('Nothing was sent: answer at least one question. A question is declined in MAWS or the terminal, not from here.');
+    } else if (asynchronous) onNote('Nothing was sent: an async question waits for an answer to at least one of its questions, and cannot be declined.');
+    else if (card.lane === 'B') onNote('Nothing was sent: answer at least one question. This question is declined in MAWS, not from here.');
+    else {
+      onNote(null);
+      onAnswer({ kind: 'decline' });
+    }
   };
   const item = (card.lane === 'B' ? { ...card.item, id: draftId } : { id: draftId }) as AttentionItem;
   const request = { kind: 'question.requested', questions } as QuestionEvent;

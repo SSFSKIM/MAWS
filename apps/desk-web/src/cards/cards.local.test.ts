@@ -19,6 +19,7 @@ import { recording, startWorld, until, type World } from '../../test/local/endpo
 import { answer, operationFor, retry, seal, type Answer, type Operation } from './answers';
 import { cardId, cardKind, laneACard, laneADigest, laneBCards, unanswerable, type Card, type CardSession } from './cards';
 import { followCards, subscribeCards, type MachineChannel } from './client';
+import { deviceStateIn } from './register';
 
 let world: World;
 const APP = 'app-own';
@@ -195,6 +196,21 @@ describe('lane A’s cards as sminos raises them', () => {
     a.close();
   });
 
+  it('declines a native question as `sminos.decide` deny over the question’s digest: done, its effect once', async () => {
+    world.sminos.raise(question('toolu_decline'));
+    const channel = await open();
+    const a = watch(channel, { lane: 'A', id: 'la-1' });
+    const card = find(await a.until(has('toolu_decline'), 'the question'), 'toolu_decline');
+    const before = counter();
+    expect((await answer(channel, world.phone.identity, card, { kind: 'decline' }, world.phone.assert)).outcome).toMatchObject({ state: 'done' });
+    expect(counter()).toBe(before + 1);
+    const sent = world.sminos.s.received.filter((f) => f.t === 'rpc' && (f.rpc as { args: { digest?: { request: string } } }).args.digest?.request === 'toolu_decline');
+    expect(sent.map((f) => f.rpc)).toMatchObject([{ rpc: 'decide', args: { session: 'la-1', decision: 'deny', digest: await laneADigest(question('toolu_decline')) } }]);
+    expect(world.sminos.effects.filter((e) => e.endsWith('toolu_decline'))).toEqual(['decide la-1 toolu_decline']);
+    await a.until(lacks('toolu_decline'), 'the question settled');
+    a.close();
+  });
+
   it('redraws a card sminos republishes changed under its id, and answers it over the new input’s digest', async () => {
     const old = { ...permission('toolu_changed'), input: { command: 'old' } };
     const changed = { ...old, input: { command: 'new' } };
@@ -259,6 +275,21 @@ describe('what the endpoint refuses', () => {
     world.host.session(APP).requests.set('rq-changed', { ...event, input: { command: 'rm -rf ~' } } as unknown as SessionEvent);
     expect((await answer(channel, world.phone.identity, find(set, 'rq-changed'), allow, world.phone.assert)).outcome).toEqual({ state: 'refused', reason: 'digest-mismatch' });
     expect(answeredOnce(`${APP} rq-changed`)).toBe(0);
+    b.close();
+  });
+
+  // A lane B question's decline is a permission deny (the engine's broker reads it so, src/engine-host/broker.ts), which
+  // the endpoint's class bound refuses a `web-cards` device on a pending question (src/endpoint/authorize.ts): the
+  // client builds none, and one built anyway is refused, the question still pending.
+  it('refuses a lane B question’s decline `class`', async () => {
+    world.host.request(APP, 'question', 'rq-decline');
+    const channel = await open();
+    const b = watch(channel, { lane: 'B', id: APP });
+    const card = find(await b.until(has('rq-decline'), 'the question'), 'rq-decline');
+    expect(() => operationFor(world.phone.identity, world.ref, card, { kind: 'decline' }, Date.now())).toThrow('declined in MAWS');
+    const decline = await changed(card, left, (op) => void (op.args.answer = { kind: 'permission', decision: 'deny' }));
+    expect(await acted(channel, decline)).toBe('class');
+    expect(answeredOnce(`${APP} rq-decline`)).toBe(0);
     b.close();
   });
 
@@ -463,6 +494,10 @@ describe('following a session across a dropped channel, and the device’s remov
     // `closed`: a refusal's reason is not shown before the channel is sealed.
     expect(refused).toBeInstanceOf(ChannelError);
     expect((refused as ChannelError).reason).toBe('closed');
+    // What the open card view turns on: the phone's next read of the hub's org state judges the device removed, so the
+    // view shows its standing rather than retrying a handshake that reads `closed` for ever (ChannelCards.tsx).
+    await world.phone.orgStore.sync(world.phone.record.pins);
+    expect(deviceStateIn(world.phone.record, world.phone.orgStore.head(), Date.now())).toEqual({ kind: 'removed', version: world.phone.orgStore.head().state.version });
     follow.close();
   });
 });
