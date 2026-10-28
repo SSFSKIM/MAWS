@@ -22,21 +22,30 @@
 //
 // RL10 (M6), the sminos daemon's local socket, is served while the machine speaks for its ref and is `org-listed`, and
 // not once the hub link stops for good with `re-enroll` or `revoked`: `rl10.json` and the socket exist only then.
+//
+// Actions (M7) are checked for freshness and replay before the gate authorizes them, then handed to the side that runs
+// them, each keeping its ledger: the engine host (lane B), sminos (lane A, over RL10) or the endpoint itself
+// (`endpoint.grant`, `endpoint.state`, under `<stateDir>/ops.jsonl`). A query routes to the executor it names and is
+// answered against the binding the executor stored.
 import { homedir, networkInterfaces } from 'node:os';
 import { importSigningKey, isListingGone, stateHash, type MachineIdentity, type OrgState, type Right, type Rl1Refusal, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { Authorizer, type AuthorizeContext } from './authorize';
 import { Channels } from './channels';
 import { DirectListener, type DirectListenerOptions } from './direct-listener';
+import { Actions } from './actions';
 import { runCli } from './cli';
+import { EndpointActions, type EffectResult } from './endpoint-actions';
 import { enrollDelegatedInto, speaksFor, syncAndPromote, type DelegatedInput, type EnrollContext, type EnrollmentState } from './enroll';
+import { Freshness } from './freshness';
 import { Gate } from './gate';
-import { dropRevokedGrants, machineOwnerMembers, machineRights } from './grants';
+import { acceptGrant, dropRevokedGrants, machineOwnerMembers, machineRights } from './grants';
 import type { HubDeps } from './hub-http';
 import { HubLink } from './hub-link';
 import { EndpointRecords, Listings, RecordRetries, type RecordsContext } from './listings';
 import { Notifier } from './notify';
 import { EndpointOrg, type OrgChange } from './org-sync';
 import { EndpointPolicy, settingsDefaultMode } from './policy';
+import { Queries } from './queries';
 import { Rl10 } from './rl10/link';
 import type { EndpointModule, EndpointServices } from './services';
 import type { CheckoutSource, RecordSource } from './sources';
@@ -89,6 +98,11 @@ export class Endpoint implements EndpointModule {
   readonly gate: Gate;
   /** RL10 (M6): the sminos daemon's socket; its members are the records and checkouts authorization reads. */
   readonly rl10: Rl10;
+  /** Actions to their executing side (M7), and the endpoint's own under its ledger. */
+  readonly actions: Actions;
+  readonly own: EndpointActions;
+  /** RL4's queries (M7), answered against the binding the executor stored. */
+  readonly queries: Queries;
   readonly #options: EndpointOptions;
   #direct: DirectListener | null = null;
   #directStarted = false;
@@ -101,6 +115,8 @@ export class Endpoint implements EndpointModule {
   /** Judgments begun: only the latest one's verdict is taken. */
   #judgments = 0;
   #headHash: string | null = null;
+  /** Why the engine host's operation ledger is closed, as its last ledger answer said; null while it answers. */
+  #engineHostLedger: string | null = null;
   #timer: ReturnType<typeof setInterval> | null = null;
   #syncing: Promise<unknown> | null = null;
   /** `stop()` was called: nothing in flight then (a sync, an adoption) opens the link or a timer again. */
@@ -239,7 +255,44 @@ export class Endpoint implements EndpointModule {
       registry: authorization.registry,
     });
     this.gate = new Gate({ authorize: (request, who, now) => this.authorizer.authorize(request, who, now), now: this.deps.now, log });
-    this.channels.setRoutes(this.gate.routes());
+    const dispatch: EndpointServices['dispatch'] = (owner, name, input) => {
+      if (this.#services === null) return Promise.reject(new Error('the endpoint has not started'));
+      return this.#services.dispatch(owner, name, input);
+    };
+    this.own = new EndpointActions({
+      stateDir: () => {
+        if (this.#services === null) throw new Error('the endpoint has not started');
+        return this.#services.machine.stateDir;
+      },
+      grant: (value) => this.#grant(value),
+      deliver: (states, transitions) => this.#deliver(states, transitions),
+      now: this.deps.now,
+      log: (line) => log(line),
+    });
+    this.actions = new Actions({
+      freshness: new Freshness(),
+      own: this.own,
+      rl10: this.rl10,
+      dispatch,
+      hold: (reason) => this.#services?.hold(reason) ?? (() => {}),
+      engineHostLedger: (closed) => (this.#engineHostLedger = closed),
+      offers: authorization.offers,
+      now: this.deps.now,
+      log,
+    });
+    this.queries = new Queries({
+      authorize: (request, who, now) => this.authorizer.authorize(request, who, now),
+      own: this.own,
+      rl10: this.rl10,
+      dispatch,
+      engineHostLedger: (closed) => (this.#engineHostLedger = closed),
+      now: this.deps.now,
+      log,
+    });
+    this.rl10.onResult((result) => this.actions.result(result));
+    this.gate.setExecutors({ act: (channel, m, decision) => this.actions.execute(channel, m, decision) });
+    const gated = this.gate.routes();
+    this.channels.setRoutes({ ...gated, act: (channel, m) => this.actions.receive(channel, m, gated.act), query: (channel, m) => this.queries.route(channel, m) });
   }
 
   async start(services: EndpointServices): Promise<void> {
@@ -256,6 +309,7 @@ export class Endpoint implements EndpointModule {
     this.#org = org;
     this.notifier.restore();
     if (state.refusing !== null) return;
+    this.own.open();
     if (state.machineKey !== null) {
       try {
         this.#key = await importSigningKey(state.machineKey.jwk);
@@ -283,6 +337,8 @@ export class Endpoint implements EndpointModule {
     this.#retries.clear();
     if (this.#timer !== null) clearInterval(this.#timer);
     this.#timer = null;
+    // No action more; those in flight record their results first (up to 2 s), then the channels close.
+    await this.actions.stop();
     // Each channel's sealed `restart` goes out before the carriers end: the hub link and the listener close after.
     await this.channels.closeAll('restart');
     await this.#direct?.stop();
@@ -300,7 +356,8 @@ export class Endpoint implements EndpointModule {
   status(): EndpointStatus {
     this.links.rl10 = { connected: this.rl10.connected };
     const stopped = this.hub.stopped;
-    return endpointStatus(this.#state, this.#headHash, this.links.refusing === undefined && stopped !== null ? { ...this.links, refusing: stopped } : this.links);
+    const links = this.links.refusing === undefined && stopped !== null ? { ...this.links, refusing: stopped } : this.links;
+    return endpointStatus(this.#state, this.#headHash, links, { endpoint: this.own.closed, engineHost: this.#engineHostLedger });
   }
 
   cli(command: string, args: readonly string[], secret?: string): Promise<{ code: number; out: string }> {
@@ -425,6 +482,32 @@ export class Endpoint implements EndpointModule {
     const org = this.#org;
     if (this.#state === null || this.#services === null || !org?.ready) return Promise.resolve([]);
     return machineRights(this.#state, org.head().state, org.certificates(), this.#services.machine.ref, member, new Date(this.deps.now()));
+  }
+
+  /** `endpoint.grant`'s effect: the grant kept by the ledger's rule, and the devices told their new grades. */
+  async #grant(value: unknown): Promise<EffectResult> {
+    const parts = this.parts;
+    if (parts === null) return { ok: false, error: { code: 'unavailable' } };
+    const result = await acceptGrant(parts.state, parts.org, parts.services.machine.ref, value, new Date(this.deps.now()));
+    if (!result.ok) return { ok: false, error: { code: result.reason } };
+    this.channels.refreshCaps();
+    const g = result.grant.body;
+    return { ok: true, value: { member: g.member, version: g.version, rights: g.rights } };
+  }
+
+  /**
+   * `endpoint.state`'s effect: an admin's delivered state adopted as any delivery is, answered once the new head is on
+   * disk; a delivery whose newest state is the head already held is done too.
+   */
+  async #deliver(states: unknown, transitions: unknown): Promise<EffectResult> {
+    const org = this.#org;
+    if (org === null || !org.ready) return { ok: false, error: { code: 'unavailable' } };
+    const result = await org.adopt(states, transitions ?? []);
+    const head = org.head().state;
+    if (result.adopted > 0) return { ok: true, value: { version: head.version, ...(result.rewound ? { rewound: true } : {}) } };
+    const held = Array.isArray(states) ? (states as SignedOrgState[]).find((s) => s?.state?.version === head.version) : undefined;
+    if (held !== undefined && (await stateHash(held.state)) === (await stateHash(head))) return { ok: true, value: { version: head.version } };
+    return { ok: false, error: { code: result.refused ?? 'not-newer' } };
   }
 
   /** The origin a web-cards device's code is served from, which its assertions name: the hub's (RL §5.10). */
