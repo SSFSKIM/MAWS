@@ -14,6 +14,7 @@ export * from './channel.ts';
 export * from './enrollment.ts';
 export * from './events.ts';
 export * from './frames.ts';
+export * from './history.ts';
 export * from './keys.ts';
 export * from './messages.ts';
 export * from './names.ts';

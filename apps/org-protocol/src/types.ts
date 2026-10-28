@@ -17,6 +17,8 @@ export const SIGNING_DOMAINS = {
   rl2: 'smns-rl2-v1',
   /** RL4's canonical action: its step-up signature, its WebAuthn challenge (action.ts). */
   action: 'smns-action-v1',
+  /** A machine's re-attestation of its phase-1 history (history.ts, O14 M4). */
+  historyAttest: 'smns-history-attest-v1',
 } as const;
 
 export type DeviceClass = 'native-mac' | 'web-cards';
@@ -131,3 +133,10 @@ export type Signer = { pub: B64; notAfter: string | null };
 export type LogEventV2 = { writer: string; sig: Sig; [field: string]: unknown };
 /** Where a log event lives: the org and the project its v2 signature binds. */
 export type EventContext = { org: string; project: string };
+
+/**
+ * A machine's checkpoint over one writer's phase-1 (DX1) events in a project (history.ts, O14 M4): `digest` folds the
+ * writer's events from seq 1 to `upTo`; `names` is the signer's claim, its current name first and then the former names
+ * it held on DX2. Signed by the machine key under `smns-history-attest-v1`.
+ */
+export type HistoryAttestation = { org: string; project: string; writer: string; names: string[]; upTo: number; digest: B64; created: string };
