@@ -462,7 +462,7 @@ The Org page's final shape, where it lives and what more it shows are the owner'
   - the held chain holds the pending state → cleared;
   - the hub holds no successor of its parent → the same bytes are posted again;
   - another state holds its version → `pending-fork`.
-- **`org.discardPending`** clears a `pending-fork` slot only while the hub's chain doesn't hold it, and only after the owner confirms the Org section's line in `abandon-pending`'s words (`admin.ts:1155-1168`): a hub or machine that kept the proposal can still show it as a fork. The weekly successor that lost a race to the deployment admin therefore waits for that confirmation. It is rare once the owner stops `refresh`.
+- **`org.discardPending`** clears a pending slot (a `pending-fork`, or one the hub keeps refusing, such as `409 key-purged`: Decision Log, 2026-10-28, Task 4) only while the hub's chain doesn't hold it, and only after the owner confirms the Org section's line in `abandon-pending`'s words (`admin.ts:1155-1168`): a hub or machine that kept the proposal can still show it as a fork. The weekly successor that lost a race to the deployment admin therefore waits for that confirmation. It is rare once the owner stops `refresh`.
 - **Rejected:** clearing an exposed proposal on `409` because no machine acknowledged it, which the round showed unsafe. The hub has the bytes, and an applied delivery can lose its answer.
 
 *The checks before signing* (`checks.ts`; P5 Decision Logs 26, 30, 31). `checkSuccessor(head, next, superseded, now)` returns every finding, each `refuse` or `warn`:
@@ -1448,6 +1448,20 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   8. A second rekey's promotion overwrites a `keys.retired.json` that is still waiting, which destroys the first old device's keys before a root removes that device. Accepted: destroying a key early is the safe direction, and that old device stays listed, removable as before. The rejected alternative refused a second rekey while a retired file waits, which would block the `removed` case that needs it.
   9. (Review fix, 7987431af.) Every read and change of a profile's key files runs in one in-process queue per profile, so two finishers of one promotion (or a load finishing it) can't retire the keys the other just installed. Reads are queued too, so `findDeviceKeys` can't answer `null` mid-promotion and make the replay drop a live rekey. Across processes, main's profile lock (`startWithProfileLock`, `index.ts:252`) keeps a second main off the profile. The queue serializes file steps, not the rekey transaction: Task 6's fence spans `createNextDeviceKeys` through step 1.
   Rationale: §K's shapes, with what the transaction needs made explicit.
+  Date/Author: 2026-10-28, O8's executor.
+
+- Decision: Task 4 (the signing store and the signer, 96ef54f3b) settles these points.
+  1. `discardPending` clears any slot the hub's chain doesn't hold, not only a `pending-fork` one. This is `abandon-pending`'s own rule (`admin.ts:1155-1168`). Otherwise a slot the hub keeps refusing (`409 key-purged`, say) blocks every sign forever. The owner's confirmation and the `abandoned` record guard it as before. Refusals: `held`, `hub`, `none`, `signing`.
+  2. `registration.json`'s `signing: true` is written before `signing.json`'s first write, in the same queue turn, so the file fails closed from its first byte.
+  3. Whether the slot is a fork is derived from the held chain (`judgePending`), never stored. A re-judge, at `onChanged` too, clears a slot the held chain holds, with no network call.
+  4. A sign first reads and adopts the hub's chain, so it doesn't propose a fork on a stale head. After Touch ID, `verifySuccessor` runs against the current head, and the slot's update checks the head again: if it moved, nothing is kept.
+  5. A sign while signed out is refused `not-root`. A store error during a sign reads `signing`.
+  6. `createOrgSigner` takes `marked()`, since the backup mark rides on neither the state signer nor the held view. `OrgSigner` gains `onChanged` and `close`. The deliveries' `obligation` hook may be async.
+  Task 6 inherits these:
+  - call `settle()` at start and at each feed open;
+  - `markRegistration` writes inside the current queue turn, without a nested `commit`, and updates the in-memory registration;
+  - the Org section offers Discard for a refused slot that isn't a fork;
+  - a post's `credentials` or `denied` answer goes to the session's hub-failure handling.
   Date/Author: 2026-10-28, O8's executor.
 
 ## Outcomes & Retrospective
