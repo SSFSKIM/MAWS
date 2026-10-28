@@ -76,6 +76,7 @@
     "e2e/support/canonical-mawsd.ts", // O14 residue 18: the packaged daemon-shape check's watch, exercised by test/support/canonical-mawsd.test.ts
     "e2e/support/best-effort-evidence.ts", // Reload diagnostics' bounded teardown, exercised by test/support/best-effort-evidence.test.ts
     "e2e/support/scratch-env.ts",
+    "e2e/support/local-org.ts", // P5 O10 M10: test/support/local-org.test.ts enrolls a built mawsd in the enrolled idle scene's org
     "e2e/support/p1-live.ts",
     "e2e/support/oopif-page.ts",
     // E11 end
