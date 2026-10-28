@@ -182,7 +182,9 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
     // home as it exits on its terminal's hang-up, which can come after the app has closed, so the removal waits for the
     // shells it found before the close (never signalling one) and retries a directory that filled meanwhile. P5 O3-B: on
     // the daemon shape a terminal's shell is the profile's pty host's, which outlives the app, so its shells count too.
-    const shells = shellsUnder([...(child && !closed ? [child.pid!] : []), ...processesNaming(join(userData, sep)).map((p) => p.pid)]);
+    const named = processesNaming(join(userData, sep));
+    reportShape(named);
+    const shells = shellsUnder([...(child && !closed ? [child.pid!] : []), ...named.map((p) => p.pid)]);
     let leftover: unknown;
     try {
       if (app && child && !closed) await closeOrKill(app, child);
@@ -287,6 +289,15 @@ async function reportForeground(app: ElectronApplication): Promise<void> {
     key = await keyed();
   }
   console.log(`[e2e] MAWS_E2E_FOREGROUND: the first window ${key ? 'is key' : 'is not key after 3 s (another app holds focus)'}`);
+}
+
+// P5 O3-B: once per worker, the processes naming the profile at a launch's cleanup, by their first word (`mawsd`,
+// `maws-engine-host`, `maws-pty-host` on the daemon shape), so a group's output shows the shape it ran on.
+let shapeReported = false;
+function reportShape(named: readonly { command: string }[]): void {
+  if (shapeReported) return;
+  shapeReported = true;
+  console.log(`[e2e] the profile's own processes at the first cleanup: ${named.map((p) => p.command.split(' ')[0]).join(', ') || 'none'}`);
 }
 
 // Playwright keeps a page's console messages and page errors from before anyone listened (Electron is attached from
