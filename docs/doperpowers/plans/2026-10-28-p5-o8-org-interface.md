@@ -1499,6 +1499,21 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   8. The planner's "last 16 held states" (the signer entry above) and `DELIVERY_SPAN` are superseded by the byte-bounded forward paging of the re-plan's rounds. The §H row is gone, and the constant leaves `timing.ts`.
   Date/Author: 2026-10-28, O8's executor.
 
+- Decision: Task 6a (the session's composition, 7fab342f5) settles these points of the main side.
+  1. The session takes one optional `signing` dep: the state signer, focus, notify, the roster, `onRoster` and the link. Main passes the roster and the link as lazy closures, since the machines start after the session.
+  2. The weekly asking and `maySign` also need `current()`, so a signed-out root is never asked for Touch ID. The signer's parts stay up across a sign-out.
+  3. The `signer` status part carries more than §K names: `pending.exposed`, `pending.refused`, `offer.withheld`, `owing[].tooLarge`, `abandoned` and `rekeying`. A rekey keeps the status `registered`.
+  4. `SignResult` puts a refusal's findings in `detail`, and `DiscardResult` is Task 4's. `org.discardPending` and `org.resetSigning` take `{confirmed: true}`.
+  5. Rekey:
+     - it checks the new device against the held chain, not the fresh code's pins;
+     - its key-file work is serialized, and the commit checks `keys.next.json` holds the new id before step 1;
+     - a new rekey is refused while an unfinished intent is recorded;
+     - a failure after step 1 is left to the replay at the next start.
+  6. `revokeSuperseded` composes the offer again at signing and refuses `invalid` if it no longer matches what was shown.
+  7. The retired key file is destroyed once no listed device holds either old key.
+  Not built: rekey for a profile whose `keys.json` is gone or refused. M1's `keys` problem covers that profile, and its path is to sign out and register afresh. Residue.
+  Date/Author: 2026-10-28, O8's executor.
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
