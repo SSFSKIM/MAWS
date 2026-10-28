@@ -82,6 +82,7 @@ describe('the routing classes', () => {
       // the rubric's row leaves it out; survey §2 keeps it with the client, as pty.hostState (the report's decisions)
       'engine.hostState',
       'machines.list', // P5 O6 M3: the app's own connection manager
+      ...NAMES.org.commands, // P5 O8 M1: this app's own sign-in to the org
     ].sort());
   });
 });
