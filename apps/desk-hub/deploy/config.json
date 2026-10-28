@@ -4,5 +4,6 @@
   "host": "desk-hub.opencognita-platform.workers.dev",
   "ownerEmail": "supremekim17@gmail.com",
   "sessionDuration": "720h",
-  "org": { "id": "ssfskim", "name": "SSFSKIM" }
+  "org": { "id": "ssfskim", "name": "SSFSKIM" },
+  "orgGenesis": "cbjUJ570nzMBTIvnYdl51NfYYTBHJ6RD-Gu6kCeruFo"
 }
