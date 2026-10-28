@@ -222,3 +222,37 @@ describe('a failed append', () => {
     expect(lines().map((l) => l.opId)).toEqual([OP, OP2]);
   });
 });
+
+// Review round 2: what the file holds may have reached only the page cache (an fsync that failed in the last process),
+// and a restart does not flush it; the ledger makes it durable before it serves any of it.
+describe('the open', () => {
+  it('syncs the file and its directory before serving a record, and stays unavailable when it cannot', () => {
+    open().query(OP, iso(now), true);
+    const fsync = vi.mocked(fs.fsyncSync);
+    fsync.mockClear();
+    const synced = open();
+    expect(synced.readable).toBe(true);
+    expect(fsync.mock.calls.length).toBeGreaterThanOrEqual(2);
+    fsync.mockImplementationOnce(() => {
+      throw Object.assign(new Error('i/o error'), { code: 'EIO' });
+    });
+    const ledger = open();
+    expect(ledger.query(OP, iso(now), true)).toEqual({ state: 'unavailable' });
+    expect(ledger.readable).toBe(false);
+    expect(ledger.closed).toBe('unsynced');
+    expect(open().query(OP, iso(now), false)).toEqual({ state: 'not-received' });
+  });
+
+  it('names why it is closed: a file it cannot read, or an append that failed', () => {
+    expect(open().closed).toBeNull();
+    fs.writeFileSync(join(dir, 'ops.jsonl'), 'garbage\n{}\n', { mode: 0o600 });
+    expect(open().closed).toBe('unreadable');
+    fs.rmSync(join(dir, 'ops.jsonl'));
+    const ledger = open();
+    vi.mocked(fs.writeSync).mockImplementationOnce(() => {
+      throw Object.assign(new Error('no space'), { code: 'ENOSPC' });
+    });
+    ledger.begin(OP, iso(now), claim(), () => null);
+    expect(ledger.closed).toBe('write-failed');
+  });
+});

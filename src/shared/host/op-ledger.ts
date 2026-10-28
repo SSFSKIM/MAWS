@@ -20,7 +20,12 @@
 // never `not-received`: it can't say what it holds. So does one whose append failed (a claim, a result or a tombstone):
 // the file may then hold a record the entries don't (an fsync that failed after the write) or a torn tail, and a later
 // append would bury that tail mid-file. It stays closed until it is opened again (a restart of its owner), when the load
-// reconciles it with the file as above.
+// reconciles it with the file as above; a restart is also where a claim left in progress is settled.
+//
+// What the file holds may have reached only the page cache (an fsync that failed in the last process), and a restart
+// does not flush it: the open fsyncs the file and its directory before it serves a record, and one that can't stays
+// closed. A closed ledger logs one line naming its file and why, and says why as a word (`closed`): `unreadable`,
+// `unsynced` or `write-failed`, for its owner's status.
 import { randomBytes } from 'node:crypto';
 import * as fs from 'node:fs';
 import { join } from 'node:path';
@@ -38,6 +43,9 @@ export type OpQueryAnswer =
   | ({ state: 'done'; outcome: unknown } & Omit<OpClaim, 'context'>)
   | ({ state: 'in-progress' } & Omit<OpClaim, 'context'>)
   | { state: 'not-received' | 'expired' | 'unavailable' };
+
+/** Why a ledger is closed: its file can't be read, what it holds can't be made durable, or a write failed. */
+export type OpLedgerClosed = 'unreadable' | 'unsynced' | 'write-failed';
 
 type Entry = { opCreated: string; at: number; claim: OpClaim | null; result?: { value: unknown } };
 
@@ -61,7 +69,7 @@ export class OpLedger {
   readonly #now: () => number;
   readonly #log: (line: string) => void;
   readonly #entries = new Map<string, Entry>();
-  #readable = true;
+  #closed: OpLedgerClosed | null = null;
 
   private constructor(dir: string, name: string, options: { now?(): number; log?(line: string): void }) {
     this.#dir = dir;
@@ -79,7 +87,12 @@ export class OpLedger {
 
   /** Whether the ledger answers: not when its file could not be read or an append failed; every op is then `unavailable`. */
   get readable(): boolean {
-    return this.#readable;
+    return this.#closed === null;
+  }
+
+  /** Why the ledger answers nothing until it is opened again, or null while it answers. */
+  get closed(): OpLedgerClosed | null {
+    return this.#closed;
   }
 
   /**
@@ -90,7 +103,7 @@ export class OpLedger {
    */
   begin(opId: string, opCreated: string, claim: OpClaim, check: () => string | null): { kind: 'claimed' } | { kind: 'answered'; answer: OpAnswer } {
     const answered = (answer: OpAnswer) => ({ kind: 'answered' as const, answer });
-    if (!this.#readable) return answered({ state: 'refused', reason: 'unavailable' });
+    if (this.#closed !== null) return answered({ state: 'refused', reason: 'unavailable' });
     const known = this.#entries.get(opId);
     if (known !== undefined) {
       if (known.claim === null) return answered({ state: 'refused', reason: 'tombstoned' });
@@ -129,7 +142,7 @@ export class OpLedger {
    * once a tombstone is on disk, so a copy arriving later is refused and never runs.
    */
   query(opId: string, opCreated: string, tombstoneIfAbsent: boolean): OpQueryAnswer {
-    if (!this.#readable) return { state: 'unavailable' };
+    if (this.#closed !== null) return { state: 'unavailable' };
     if (this.#expired(opCreated)) return { state: 'expired' };
     const entry = this.#entries.get(opId);
     if (entry?.claim != null) {
@@ -165,7 +178,13 @@ export class OpLedger {
       if (stat.isSymbolicLink() || !stat.isFile() || stat.uid !== process.getuid?.() || (stat.mode & 0o077) !== 0) throw new Error('is not a private regular file of this user');
       text = fs.readFileSync(this.#path, 'utf8');
     } catch (error) {
-      return this.#unreadable(error);
+      return this.#close('unreadable', `it cannot be read (${(error as Error).message})`);
+    }
+    try {
+      syncFile(this.#path);
+      syncDirectory(this.#dir);
+    } catch (error) {
+      return this.#close('unsynced', `what it holds cannot be made durable (${(error as Error).message})`);
     }
     const raw = text.split('\n');
     const terminated = raw[raw.length - 1] === '';
@@ -178,9 +197,9 @@ export class OpLedger {
       } catch {
         // Only the last line may be torn: a crash mid-append. One before it means the file is not what was written.
         if (i === raw.length - 1 && !terminated) continue;
-        return this.#unreadable(new Error(`line ${i + 1} does not parse`));
+        return this.#close('unreadable', `line ${i + 1} does not parse`);
       }
-      if (!this.#take(record)) return this.#unreadable(new Error(`line ${i + 1} is no ledger record`));
+      if (!this.#take(record)) return this.#close('unreadable', `line ${i + 1} is no ledger record`);
     }
     const cutoff = this.#now() - KEPT_S * 1000;
     for (const [opId, entry] of this.#entries) {
@@ -193,7 +212,7 @@ export class OpLedger {
     try {
       this.#rewrite();
     } catch (error) {
-      this.#unreadable(error);
+      this.#close('write-failed', `its compaction cannot be written (${(error as Error).message})`);
     }
   }
 
@@ -216,17 +235,16 @@ export class OpLedger {
     return true;
   }
 
-  #unreadable(error: unknown): void {
-    this.#readable = false;
+  /** The ledger closed: every op `unavailable` until it is opened again, said once in the log. */
+  #close(why: OpLedgerClosed, detail: string): void {
+    this.#closed = why;
     this.#entries.clear();
-    this.#log(`the operation ledger ${this.#path} cannot be read (${(error as Error).message}): every operation is unavailable`);
+    this.#log(`the operation ledger ${this.#path} is closed (${why}): ${detail}; every operation is unavailable until its process restarts`);
   }
 
   /** A failed append: the ledger answers every op `unavailable` until it is opened again. */
   #failed(what: string, error: unknown): void {
-    this.#readable = false;
-    this.#entries.clear();
-    this.#log(`${what} in ${this.#path} (${(error as Error).message}): every operation is unavailable until the ledger is reopened`);
+    this.#close('write-failed', `${what} (${(error as Error).message})`);
   }
 
   /** The kept entries written whole to a temporary file, fsynced and renamed over the ledger. */
@@ -274,6 +292,15 @@ function writeAll(path: string, flags: string, text: string): void {
     const bytes = Buffer.from(text, 'utf8');
     let at = 0;
     while (at < bytes.length) at += fs.writeSync(fd, bytes, at, bytes.length - at);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function syncFile(path: string): void {
+  const fd = fs.openSync(path, 'r');
+  try {
     fs.fsyncSync(fd);
   } finally {
     fs.closeSync(fd);
