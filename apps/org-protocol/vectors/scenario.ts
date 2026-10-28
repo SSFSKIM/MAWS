@@ -13,6 +13,7 @@ import { encodeProvisioningCodeV2, PROVISIONING_CODE_V2_PREFIX, type Provisionin
 import { signRecord } from '../src/records.ts';
 import { SIGNING_DOMAINS, type Signer, type Device, type RevokedKey, type EndpointRecord, type Grant, type Listing, type MachineCert, type OrgState, type RootTransition, type Signed, type SignedOrgState } from '../src/types.ts';
 import type { Verdict } from '../src/verdict.ts';
+import { buildHistoryScenario, type HistoryVectors } from './scenario-history.ts';
 import { buildRemoteScenario, RP_ID, type ActionEncoding, type ChannelVectors } from './scenario-remote.ts';
 
 export { buildRemoteOrg, ORG_REMOTE, ORIGIN, RP_ID, type ActionEncoding, type ChannelVectors, type HandshakeRun, type RemoteOrg } from './scenario-remote.ts';
@@ -106,6 +107,7 @@ export type VectorSet = {
   pairing: PairingVector;
   provisioning: ProvisioningVector;
   channel: ChannelVectors;
+  history: HistoryVectors;
 };
 
 export const ORG = 'org-vectors';
@@ -1187,7 +1189,7 @@ export async function buildScenario(k: Keys): Promise<VectorSet> {
     fingerprint: await pairingFingerprint(ORG, A, phoneEntry),
     swapped: { fields: swappedFields, mac: await pairingMac(pairingK, swappedFields), fingerprint: await pairingFingerprint(ORG, A, swappedFields.device) },
   };
-  return { fixtures, cases, dual, encodings, enrollment, pairing: devicePairing, provisioning: await provisioningVector(k), channel: remote.channel };
+  return { fixtures, cases, dual, encodings, enrollment, pairing: devicePairing, provisioning: await provisioningVector(k), channel: remote.channel, history: await buildHistoryScenario(k) };
 }
 
 /** The provisioning codes under the scenario's delegation, and the decoder's refusals of texts around them. */

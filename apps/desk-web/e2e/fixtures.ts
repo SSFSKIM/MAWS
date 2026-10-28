@@ -35,6 +35,8 @@ export async function seedKey(page: Page, hub: Pick<HubDouble, 'url'>, org: stri
       open.onupgradeneeded = () => {
         if (!open.result.objectStoreNames.contains(db.keys)) open.result.createObjectStore(db.keys);
         if (!open.result.objectStoreNames.contains(db.log)) open.result.createObjectStore(db.log);
+        if (!open.result.objectStoreNames.contains(db.device)) open.result.createObjectStore(db.device);
+        if (!open.result.objectStoreNames.contains(db.org)) open.result.createObjectStore(db.org);
       };
       const conn = await new Promise<IDBDatabase>((resolve, reject) => {
         open.onsuccess = () => resolve(open.result);

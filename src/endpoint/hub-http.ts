@@ -3,6 +3,7 @@
 // token guards it). RL1, the socket, is M3's. Every request has a deadline over its headers and its body together, and
 // every retry here its budget, which a request's deadline never passes; nothing logs a body, since a request or an
 // answer may carry a token or a credential.
+import { historyAttestationsPath, historyInventoryPath, historyLogPath, type HistoryAttestation, type HistoryAttestations, type HistoryInventory, type HistoryLogPage, type Signed } from 'org-protocol';
 import { MACHINE_ORG_STATE_PATH, type OrgStateView } from 'desk-hub/protocol';
 
 export type Credentials = { clientId: string; clientSecret: string };
@@ -86,3 +87,33 @@ export async function admittedRequest(deps: HubDeps, hub: string, path: string, 
 }
 
 export const ADMIT_MS = 90_000;
+
+// History re-attestation's reads and its one write (O14 M4, Interfaces §D), as the machine.
+
+async function machineJson<T>(deps: HubDeps, hub: string, credentials: Credentials, path: string, what: string): Promise<T> {
+  const response = await hubRequest(deps, hub, path, { credentials });
+  if (response.status !== 200) throw new HubError(what, response.status, await refusalOf(response));
+  return (await response.json()) as T;
+}
+
+/** Every project whose log holds a DX1 writer under `names`, with each writer's highest DX1 seq. */
+export const fetchHistoryInventory = (deps: HubDeps, hub: string, credentials: Credentials, names: string[]) =>
+  machineJson<HistoryInventory>(deps, hub, credentials, historyInventoryPath(names), 'the history inventory');
+
+/** One page of a writer's stored events after `after`. */
+export const fetchHistoryPage = (deps: HubDeps, hub: string, credentials: Credentials, project: string, writer: string, after: number) =>
+  machineJson<HistoryLogPage>(deps, hub, credentials, historyLogPath(project, writer, after), `the log of ${writer}`);
+
+/** The attestations a project keeps. */
+export const fetchAttestations = (deps: HubDeps, hub: string, credentials: Credentials, project: string) =>
+  machineJson<HistoryAttestations>(deps, hub, credentials, historyAttestationsPath(project), `the attestations of ${project}`);
+
+/** Posts an attestation: `kept` (201) or `held` (200), else the hub's refusal as `<status> <error>`. */
+export async function postAttestation(deps: HubDeps, hub: string, credentials: Credentials, record: Signed<HistoryAttestation>): Promise<{ ok: true } | { ok: false; refusal: string }> {
+  const response = await hubRequest(deps, hub, historyAttestationsPath(record.body.project), { credentials, body: { record } });
+  if (response.status === 200 || response.status === 201) {
+    await response.body?.cancel();
+    return { ok: true };
+  }
+  return { ok: false, refusal: `${response.status} ${await refusalOf(response)}` };
+}
