@@ -19,6 +19,8 @@ import { connectAgentWorkEvents } from '../../../ipc/events';
 import * as query from '../../../ipc/query';
 import type { PanelToolContext } from '../../../panel/tool';
 import { useSessions } from '../../../stores/sessions';
+import { applyLaneAState, resetLaneAStore } from '../../../stores/lane-a'; // P5 O9 M5
+import { laneAState } from '../../../lane-a/test-support/lane-a-state'; // P5 O9 M5
 import { useSetup } from '../../../sessions/store';
 import { setAgentWorkClient, type AgentWorkClient } from '../client';
 import { fakeAgentWorkClient, type FakeAgentWorkClient } from '../fake-work-client';
@@ -470,6 +472,20 @@ describe('background work', () => {
     await act(async () => fake.fail('stopTask', 'engine went away'));
     expect(within(card('wkmzd07jp')).getByText("Couldn't stop it: engine went away")).toBeTruthy();
     expect(stop().textContent).toBe('Stop workflow');
+  });
+
+  // P5 O9 M5: no source lists the shells of a terminal session driven through its bridge, so the list says where they are
+  it('a terminal session driven through its bridge says its shells are listed and stopped in the terminal', async () => {
+    seedSessions(null);
+    useSessions.setState((s) => ({ records: new Map([[A, { ...s.records.get(A)!, holder: { kind: 'terminal', pid: 4242 } }]]) }));
+    applyLaneAState(A, laneAState(A));
+    try {
+      render(<Mounted state={create(undefined)} />);
+      expect(screen.getByText("A terminal session's background shells are listed and stopped in the terminal")).toBeTruthy();
+      expect(screen.queryByText('Shells and monitors are known only while the session runs here')).toBeNull();
+    } finally {
+      resetLaneAStore();
+    }
   });
 
   it('a disk-only session reads the shells sentence and lists the runs on disk with their state and summary', async () => {

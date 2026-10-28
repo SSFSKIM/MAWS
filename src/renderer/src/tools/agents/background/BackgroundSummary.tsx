@@ -8,6 +8,7 @@
 import { useEffect } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { actionClass, Row } from '../../../panel/summary/Section';
+import { useSessionControls } from '../../../session/controls/controls-for'; // P5 O9 M5
 import { availabilityIn } from '../../../sessions/availability';
 import { isStarting, useSetup } from '../../../sessions/store';
 import { useSessions } from '../../../stores/sessions';
@@ -26,6 +27,8 @@ export function BackgroundSummary({ appSessionId, open }: { appSessionId: AppSes
   const live = useSessions((s) => s.engine.get(appSessionId)?.process === 'ready'); // P2-A: an exited status is not live; nothing here acquires
   const launching = useSessions((s) => availabilityIn(s, appSessionId) === 'starting');
   const settingUp = useSetup((s) => isStarting(s, appSessionId));
+  const controls = useSessionControls(appSessionId); // P5 O9 M5: a terminal session driven through its bridge
+  const driven = controls !== null && controls.turn() !== null;
   const action = (
     <button type="button" className={actionClass} onClick={() => open()}>
       {AGENTS_SUMMARY_COPY.open}
@@ -45,7 +48,7 @@ export function BackgroundSummary({ appSessionId, open }: { appSessionId: AppSes
             ) : (
               runsLoaded && <span>{AGENTS_SUMMARY_COPY.runsOnDisk(workflows(graph).length)}</span>
             )}
-            <span className="text-ui-sm text-fg-muted">{BACKGROUND_COPY.shellsDiskOnly}</span>
+            <span className="text-ui-sm text-fg-muted">{driven ? BACKGROUND_COPY.shellsInTerminal : BACKGROUND_COPY.shellsDiskOnly}</span>
           </div>
         )}
       </Row>

@@ -11,6 +11,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 import type { AppSessionId, TaskId } from '@shared/graph/ids';
 import { Icon } from '../../../app/IconButton';
 import type { PanelTool, PanelToolContext } from '../../../panel/tool';
+import { useSessionControls } from '../../../session/controls/controls-for'; // P5 O9 M5
 import { BACKGROUND_COPY } from '../copy';
 import { openLog } from '../log/LogTool';
 import { elapsedOf } from '../model/elapsed';
@@ -193,6 +194,9 @@ function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
   const graph = useTaskGraph((s) => s.entries.get(appSessionId)?.graph ?? EMPTY_GRAPH);
   const runsError = useTaskGraph((s) => s.entries.get(appSessionId)?.disk.runsError ?? null);
   const live = ctx.status !== null;
+  // P5 O9 M5: a terminal session driven through its bridge has no source listing its shells here: they are the terminal's
+  const controls = useSessionControls(appSessionId);
+  const driven = controls !== null && controls.turn() !== null;
   const flows = workflows(graph);
   const shellNodes = live ? shells(graph) : [];
   const monitorNodes = live ? monitors(graph) : [];
@@ -232,7 +236,11 @@ function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
 
   return (
     <div ref={scroller} onScroll={(e) => handle.setScrollTop(e.currentTarget.scrollTop)} className="flex h-full min-h-0 flex-col overflow-auto">
-      {!live && <p className="shrink-0 px-3.5 pt-3 text-ui-sm text-fg-muted">{BACKGROUND_COPY.shellsDiskOnly}</p>}
+      {!live && (
+        <p data-shells-unavailable={driven ? 'terminal' : 'disk'} className="shrink-0 px-3.5 pt-3 text-ui-sm text-fg-muted">
+          {driven ? BACKGROUND_COPY.shellsInTerminal : BACKGROUND_COPY.shellsDiskOnly}
+        </p>
+      )}
       {runsError !== null && <p className="shrink-0 px-3.5 pt-3 text-ui-sm text-danger">{BACKGROUND_COPY.runsUnavailable(runsError)}</p>}
       {pendingRun !== null && <p className="shrink-0 px-3.5 pt-3 text-ui-sm text-fg-muted">{BACKGROUND_COPY.runNotFound}</p>}
       {nothing && <p className="shrink-0 px-3.5 pt-3 text-ui text-fg-muted">{BACKGROUND_COPY.nothingRunning}</p>}

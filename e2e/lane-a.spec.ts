@@ -12,6 +12,7 @@ import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
 import { launchMaws, test, type MawsLaunch } from './support/launch';
 import { assistantRecord, CATALOG, terminalSession, userRecord, type TerminalSession } from './support/lane-a';
+import { openSurface } from './support/shell';
 import { sidebarRow } from './support/sidebar';
 
 function invoke<N extends CommandName>(page: Page, name: N, input: CommandInput<N>): Promise<CommandResult<N>> {
@@ -131,6 +132,9 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await (await sidebarRow(page, { appSessionId: c.appId })).click({ button: 'right' });
     await expect(page.getByRole('menuitem', { name: 'Take over in MAWS' })).toBeVisible();
     await page.keyboard.press('Escape');
+    // its background shells are the terminal's: the jobs list says so in place of an empty list
+    await openSurface(page, 'Background work');
+    await expect(page.locator('[data-shells-unavailable="terminal"]')).toHaveText("A terminal session's background shells are listed and stopped in the terminal");
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 
