@@ -1515,6 +1515,16 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   Not built: rekey for a profile whose `keys.json` is gone or refused. M1's `keys` problem covers that profile, and its path is to sign out and register afresh. Residue.
   Date/Author: 2026-10-28, O8's executor.
 
+- Decision: Task 6b (the Org section, fbed38051) settles these points of the signer's lines.
+  1. The discard's confirmation is worded from the status before the discard: never exposed, a fork, or exposed with the n − 1 fork warning. Its result line reports `{unsent, hubVersion, forkAt?}`.
+  2. Discard is offered for a fork or a refused non-fork slot. A slot that is only waiting reads as a muted line, with no Discard.
+  3. The buttons that sign need `maySign`. The offer and its withheld names show regardless.
+  4. Each signer action ends in one line on the Signer row, and a Touch ID cancel shows nothing.
+  5. Rekey refusals sit under the rekey field. Rekey and sign-in share `status.refused`, so the section tracks which control sent the attempt; a `refused.attempt` field would make that exact, and is residue for M4.
+  6. The weekly line sits on the Signer row. The `root add` line names the full device id, with the fingerprint in the row's note. A discarded proposal shows only when it was exposed.
+  7. OrgSection.tsx stays one file, about 440 lines. M4 splits it.
+  Date/Author: 2026-10-28, O8's executor.
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
