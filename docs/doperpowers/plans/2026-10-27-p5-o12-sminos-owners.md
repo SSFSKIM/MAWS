@@ -113,7 +113,7 @@ Phase 2's acceptance is P5's O12 items 2, 3, 5, 6 and 8, and item 4's rest, chec
    - each appended host event goes up RL10 as a session-lane `host` message with no subscription (`sub: null`), carrying its stable id `{writer, seq}`, whether or not anyone subscribes: with zero subscribers it still goes; with a cards-only subscriber it goes once and the subscriber's view carries nothing of it; with two full subscribers it goes once sub-less and once in each subscriber's own stream; after a reconnect the session's last 50 go again and the endpoint deduplicates by the id;
    - a fresh full subscription's snapshot carries the session's last 50;
    - on a machine not cut over, and in a git-mirrored project, host events go where they go today.
-9. **The mini** (item 8). After O14's brief cuts the mini over: the mini's `sminos daemon status` says `uplink: RL10 (local-only)` with a sminos at or above 1.26.0 (O14's floor for a cutover, the frames O10's fixture plays) and `sminos daemon owed` (M7c) exiting 0 after it; its unattended seats (the journal, Telegram) show no `retired` or `gone` across the install; from the MacBook, `sminos list --org` shows the mini's sessions with their owners, and a `sminos say` to one of them arrives there labelled. Evidence goes to Outcomes; no step of this document runs `claude` on the mini.
+9. **The mini** (item 8). After O14's brief cuts the mini over: the mini's `sminos daemon status` says `uplink: RL10 (local-only)` with a sminos at or above 1.27.0 (M7c's version: the frames O10's fixture plays came at 1.26.0, and `sminos daemon owed`, which the cutover's own gate runs, at 1.27.0) and `sminos daemon owed` exiting 0 after it; its unattended seats (the journal, Telegram) show no `retired` or `gone` across the install; from the MacBook, `sminos list --org` shows the mini's sessions with their owners, and a `sminos say` to one of them arrives there labelled. Evidence goes to Outcomes; no step of this document runs `claude` on the mini.
 
 ## Constraints that bind every milestone
 
@@ -572,7 +572,7 @@ It builds on M7a (the nonce-on-claim rule) and on M6 (whose `member` frames it e
 
 ### M9 — The mini
 
-**What exists at its end.** The mini runs this sminos, at or above 1.26.0 (O14's floor; `sminos daemon owed`, which B2's gate runs on the mini, exists from M7c's version), installed through the mini-ops session at the owner's request near O14's cutover of the mini (RL §9 step 2: the owner's standing rule forbids driving `claude` over ssh there), and once O14's brief has cut it over, its sminos is local-only with its unattended seats intact. This milestone verifies; it builds nothing and runs nothing on the mini itself.
+**What exists at its end.** The mini runs this sminos, at or above 1.27.0 (M7c's version, the floor for a cutover: B2's gate runs `sminos daemon owed` on the mini), installed through the mini-ops session at the owner's request near O14's cutover of the mini (RL §9 step 2: the owner's standing rule forbids driving `claude` over ssh there), and once O14's brief has cut it over, its sminos is local-only with its unattended seats intact. This milestone verifies; it builds nothing and runs nothing on the mini itself.
 
 **What it touches.** Nothing in either repository. Its evidence goes to Outcomes & Retrospective.
 
@@ -1187,9 +1187,13 @@ The joint review's second round (`9be0bc941`), 2026-10-27, two P1s, both reprodu
   Rationale: the replay is O10's acceptance 5 checked from sminos's side; with the fixture written to sminos's real frames, any line it cannot send as written is a defect on one side or the other, and must fail.
   Date/Author: 2026-10-27, O12's phase 2 executor, on the spec owner's instruction.
 
-- Decision: M7c, before M9: `bench_scale.py`'s RL10 mode, `sminos daemon owed`, and a test of the un-cutover branch, for O14's B2; M9's sminos floor becomes 1.26.0, not M8's version (1.23.0); the cutover's undo is O14's order, `mawsd endpoint unenroll` and then `identity.json`.
+- Decision: M7c, before M9: `bench_scale.py`'s RL10 mode, `sminos daemon owed`, and a test of the un-cutover branch, for O14's B2; M9's sminos floor becomes 1.26.0, not M8's version (1.23.0) (superseded: 1.27.0, the entry below); the cutover's undo is O14's order, `mawsd endpoint unenroll` and then `identity.json`.
   Rationale: O14's document (MAWS `60074ada2`) sets its floor at the frames O10's fixture plays (1.26.0, `spent`) and gates B2 on the bench's RL10 numbers and on nothing being owed, which `daemon status` does not show; it observed that removing `identity.json` while `rl10.json` is served re-cuts over within a second, so the undo's order is load-bearing and gets a test. P5 Decision Log 75 put this on O12's row as residue 17. B2 runs `daemon owed` on the mini, so the mini needs M7c's version for that step though the cutover's floor stays 1.26.0; events owed to a closed session do not make `daemon owed` fail, since they live in the log and a cutover cannot lose them, while a gate that never passed on a machine with an old closed seat would be ignored.
   Date/Author: 2026-10-27, O12's phase 2 executor, on the spec owner's instruction.
+
+- Decision: The floor for a machine's cutover, in M9 and Acceptance 9, is 1.27.0 (M7c's version), superseding the 1.26.0 of the entry above; one number everywhere. Events owed to a closed session stay on `daemon owed`'s own count line, outside its exit status.
+  Rationale: the cutover's own gate (O14's B2 step 4, B3 step 0) runs `sminos daemon owed`, which exists from 1.27.0, while the frames came at 1.26.0; the version a machine needs before it cuts over is the later one, a second number would give the briefs two values to check, and the mini updates to the newest anyway. A closed session's events sit in the log and are delivered when it resumes, whatever the transport; counting them would keep the gate shut on any machine with an old closed seat. O14 makes the same change in its spec; the architect takes the parent impact (P5 Decision Log 75 says 1.26.0).
+  Date/Author: 2026-10-27, O12's phase 2 executor, on the spec owner's ruling.
 
 ## Outcomes & Retrospective
 
