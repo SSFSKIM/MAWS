@@ -10,7 +10,8 @@ import { openDb, type Db } from './db';
 import { DraftStore } from './drafts';
 import { MIGRATIONS, REPAIRS } from './migrations';
 import { ProjectStore, type OrgRow } from './projects';
-import { deriveOrg, machineEnrollment, type Enrollment } from './org-project'; // P5 O6 M5
+import { deriveOrg, machineEnrollment, ORG_GIT_TIMEOUT_MS, type Enrollment } from './org-project'; // P5 O6 M5
+import { GIT_TIMEOUT_MS } from '../git/runner';
 import type { MachineRef } from '@shared/machine/ref';
 import { ReplayFixtureStore } from './replay-fixtures';
 import { SessionSearchStore } from './session-search';
@@ -27,6 +28,9 @@ const ORG_CONCURRENCY = 4; // the derivations in flight at once, as `warmLinkedW
 // each of these delays, then left for the next start (P5 O6 M6: on a hosted Mac two apps starting at once left a
 // project underived, so ungrouped, for the whole run).
 const ORG_RETRY_MS = [1_000, 4_000, 15_000] as const;
+// A retry waits for git as long as the git runner does: a cold `/usr/bin/git` shim outlasted the first try's timeout on
+// every try at that timeout, each try killed before the shim could warm (P5 O6 M6, hosted e2e:machines).
+const ORG_RETRY_GIT_TIMEOUT_MS = GIT_TIMEOUT_MS;
 
 export class Index {
   readonly sessions: SessionStore;
@@ -118,7 +122,7 @@ export class Index {
     };
     const one = async (row: OrgRow, attempt = 0): Promise<void> => {
       try {
-        const org = await inSlot(async () => (this.closed ? null : derive({ directory: row.directory, machine, projectId: row.id, name: row.name }, enrollment())));
+        const org = await inSlot(async () => (this.closed ? null : derive({ directory: row.directory, machine, projectId: row.id, name: row.name }, enrollment(), attempt === 0 ? ORG_GIT_TIMEOUT_MS : ORG_RETRY_GIT_TIMEOUT_MS)));
         if (this.closed) return;
         if (org !== null) this.projects.setOrg(row.id, org);
         else if (attempt < ORG_RETRY_MS.length) {

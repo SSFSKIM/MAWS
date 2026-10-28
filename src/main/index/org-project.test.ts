@@ -2,7 +2,7 @@
 // project follows sminos's rule, held to sminos 1.15.0's own vectors (test/fixtures/sminos/, PROVENANCE.md there), and
 // each derivation case is pinned on real temporary repositories under the OS temp dir, removed after each test.
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -135,6 +135,27 @@ describe('the derivation, on real repositories', () => {
     expect(await derive(plain, ENROLLED)).toEqual(await derive(plain, null));
   });
 
+  // M6 (hosted e2e:machines): a cold `/usr/bin/git` shim outlasted the 2 s timeout on every try, each try killed
+  // before it could warm; a derivation takes the timeout its caller gives, so a retry can wait longer.
+  it('git slower than the given timeout gives no answer; a longer timeout lets it answer', async () => {
+    const path = await repo('slow-git', [['origin', 'https://github.com/example/slow.git']]);
+    const slowGit = join(folder('bin'), 'git');
+    writeFileSync(slowGit, '#!/bin/sh\nsleep 0.5\nexec /usr/bin/git "$@"\n');
+    chmodSync(slowGit, 0o755);
+    const was = process.env.MAWS_GIT;
+    process.env.MAWS_GIT = slowGit;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const subject = { directory: path, machine: MACHINE, projectId: 'p-1', name: 'slow-git' };
+      expect(await deriveOrg(subject, null, 100)).toBeNull();
+      expect(await deriveOrg(subject, null, 5_000)).toMatchObject({ key: 'remote:github.com/example/slow' });
+    } finally {
+      warn.mockRestore();
+      if (was === undefined) delete process.env.MAWS_GIT;
+      else process.env.MAWS_GIT = was;
+    }
+  });
+
   it("the machine's own project: its key, its name, sminos's machine project id once enrolled", () => {
     expect(machineProject(MACHINE, 'macbook', null)).toEqual({ key: `machine:${MACHINE}`, name: 'macbook', smnsId: null });
     expect(machineProject(MACHINE, 'macbook', ENROLLED)).toEqual({ key: `machine:${MACHINE}`, name: 'macbook', smnsId: '6f2b2401-d443-52fb-a4cd-c9ebd370306b' });
@@ -198,11 +219,14 @@ describe("the index's org projects", () => {
       const added = index.projects.add(path);
       const org: ProjectOrg = { key: `folder:${MACHINE}:${added.id}` as ProjectOrg['key'], name: 'slow', source: 'folder', smnsId: null };
       const answers: (ProjectOrg | null)[] = [null, null, org];
-      const derive = vi.fn(async () => answers.shift() ?? null);
+      const derive = vi.fn<typeof deriveOrg>(async () => answers.shift() ?? null);
       await index.refreshOrgProjects({ machine: MACHINE, enrollment: () => null, derive });
       expect(index.projects.list()[0].org).toBeUndefined();
       await vi.advanceTimersByTimeAsync(60_000);
       expect(derive).toHaveBeenCalledTimes(3);
+      // the first try keeps the short timeout, so a slow git never holds up a start; a retry waits as long as the git
+      // runner does, long enough for a cold `/usr/bin/git` shim to answer once
+      expect(derive.mock.calls.map((call) => call[2]), 'the git timeout of each try').toEqual([2_000, 10_000, 10_000]);
       expect(index.projects.list()[0].org).toEqual(org);
 
       const never = join(tree.path, 'never');

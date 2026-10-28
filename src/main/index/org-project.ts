@@ -124,15 +124,16 @@ export function remoteName(url: string): string {
 
 // ---- reading the checkout -----------------------------------------------------------------------------------------------
 
-const GIT_TIMEOUT_MS = 2_000;
+// A derivation's first try: short, so a slow git never holds up a start (its caller may give a retry longer).
+export const ORG_GIT_TIMEOUT_MS = 2_000;
 
 // What a git call answered: its output, or its exit code; null when git gave no answer (it timed out, or could not
 // run), which decides nothing.
 type GitAnswer = { code: 0; stdout: string } | { code: number } | null;
 
-function git(args: string[]): Promise<GitAnswer> {
+function git(args: string[], timeoutMs: number): Promise<GitAnswer> {
   return new Promise((done) => {
-    execFile(gitBinary(process.env), args, { env: gitEnv(process.env), encoding: 'utf8', timeout: GIT_TIMEOUT_MS }, (error, stdout) => {
+    execFile(gitBinary(process.env), args, { env: gitEnv(process.env), encoding: 'utf8', timeout: timeoutMs }, (error, stdout) => {
       if (!error) done({ code: 0, stdout });
       else done(typeof error.code === 'number' && !error.killed ? { code: error.code } : null);
     });
@@ -143,7 +144,7 @@ function git(args: string[]): Promise<GitAnswer> {
 // the nearest `.git` upward; a directory is it, a file (a linked worktree's) points at its gitdir, whose `commondir`
 // leads to the main checkout's. '' outside git. A layout that is neither asks git, as sminos does; null when git gave
 // no answer.
-async function commonGitDir(directory: string): Promise<string | null> {
+async function commonGitDir(directory: string, timeoutMs: number): Promise<string | null> {
   let d = resolve(directory);
   while (!isDirectory(d)) {
     if (dirname(d) === d) return '';
@@ -152,7 +153,7 @@ async function commonGitDir(directory: string): Promise<string | null> {
   for (let at = d; ; at = dirname(at)) {
     const dot = join(at, '.git');
     if (isDirectory(dot)) return dot;
-    if (isFile(dot)) return linkedCommonDir(at, dot) ?? (await askedCommonDir(d));
+    if (isFile(dot)) return linkedCommonDir(at, dot) ?? (await askedCommonDir(d, timeoutMs));
     if (dirname(at) === at) return '';
   }
 }
@@ -173,8 +174,8 @@ function linkedCommonDir(at: string, dot: string): string | null {
   }
 }
 
-async function askedCommonDir(directory: string): Promise<string | null> {
-  const answer = await git(['-C', directory, 'rev-parse', '--git-common-dir']);
+async function askedCommonDir(directory: string, timeoutMs: number): Promise<string | null> {
+  const answer = await git(['-C', directory, 'rev-parse', '--git-common-dir'], timeoutMs);
   if (answer === null) return null;
   const common = 'stdout' in answer ? answer.stdout.trim() : '';
   return common === '' ? '' : resolve(isAbsolute(common) ? common : join(directory, common));
@@ -192,8 +193,8 @@ function isDirectory(path: string): boolean {
 // `git_config_remotes`, read by git's own parser with sminos's no-includes semantics. Every key of a remote section
 // counts, as it does for sminos, so a remote with only a `fetch` still makes two remotes. A config git refuses, and a
 // missing one, have no remote here (sminos derives no project from either); null when git gave no answer.
-async function configRemotes(common: string): Promise<Map<string, string> | null> {
-  const answer = await git(['config', '--file', join(common, 'config'), '--no-includes', '-z', '--get-regexp', '^remote\\.']);
+async function configRemotes(common: string, timeoutMs: number): Promise<Map<string, string> | null> {
+  const answer = await git(['config', '--file', join(common, 'config'), '--no-includes', '-z', '--get-regexp', '^remote\\.'], timeoutMs);
   if (answer === null) return null;
   if (!('stdout' in answer)) return new Map(); // 1: nothing matched or no file; 128: a file git refuses
   const remotes = new Map<string, string | null>();
@@ -284,16 +285,20 @@ export interface OrgSubject {
   name: string; // the project's name, which rule 4 takes
 }
 
-// The directory's org project; null when git gave no answer (a timeout), which decides nothing: the row keeps what it
-// had, and the next start asks again, so a slow git never moves a project's key.
-export async function deriveOrg({ directory, machine, projectId, name }: OrgSubject, enrollment: Enrollment | null): Promise<ProjectOrg | null> {
-  const common = await commonGitDir(directory);
+// The directory's org project; null when git gave no answer within `gitTimeoutMs` (a timeout), which decides nothing:
+// the row keeps what it had, and is asked again, so a slow git never moves a project's key.
+export async function deriveOrg(
+  { directory, machine, projectId, name }: OrgSubject,
+  enrollment: Enrollment | null,
+  gitTimeoutMs: number = ORG_GIT_TIMEOUT_MS,
+): Promise<ProjectOrg | null> {
+  const common = await commonGitDir(directory, gitTimeoutMs);
   if (common === null) return null;
   const owningRepo = common === '' ? '' : dirname(common);
   const smns = smnsAt(directory, owningRepo);
   if (smns) return { key: `smns:${smns.project}` as OrgKey, name: smns.name, source: 'smns', smnsId: smns.project };
   if (owningRepo === '') return { key: `folder:${machine}:${projectId}` as OrgKey, name, source: 'folder', smnsId: null };
-  const remotes = await configRemotes(common);
+  const remotes = await configRemotes(common, gitTimeoutMs);
   if (remotes === null) return null;
   const remote = remotes.has('origin') ? 'origin' : remotes.size === 1 ? [...remotes.keys()][0] : undefined;
   const url = remote === undefined ? '' : remotes.get(remote)!;
