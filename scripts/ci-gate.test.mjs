@@ -75,12 +75,39 @@ function gate(args, { alerts = false, base = {}, change } = {}) {
   }
 }
 
-// The trailers after the nonce, which is unique to each push.
+// Selection trailers after the unique nonce. Coverage advice (including timing) is checked separately below.
 const trailers = (message) => {
   const lines = message.trimEnd().split('\n\n').at(-1).split('\n');
   assert.match(lines[0], /^Nonce: \d+-\d+$/);
-  return lines.slice(1);
+  return lines.slice(1).filter((line) => !line.startsWith('E2E-Coverage:'));
 };
+
+test('omitted spec-import coverage warns before push and travels in the pushed commit without adding gates', () => {
+  const result = gate(['--gates', 'static', '--peer', 'none'], {
+    base: {
+      'package.json': JSON.stringify({ scripts: { e2e: 'playwright test', 'e2e:one': 'playwright test e2e/one.spec.ts' } }),
+      'playwright.config.ts': "export default { testDir: 'e2e' };",
+      'e2e/one.spec.ts': "import '../src/endpoint';",
+      'src/endpoint.ts': 'export const endpoint = 1;',
+    },
+    change(tree) { writeFileSync(join(tree, 'src/endpoint.ts'), 'export const endpoint = 2;'); },
+  });
+  assert.equal(result.status, 1); // the fake gh finds no run, but the advisory did not prevent the push
+  assert.equal(result.refs.length, 1);
+  assert.match(result.stdout, /ci-gate: warning: missing e2e:one; specs reach src\/endpoint.ts/);
+  assert.match(result.message, /^E2E-Coverage: missing e2e:one; specs reach src\/endpoint.ts$/m);
+  assert.deepEqual(trailers(result.message), ['Gates: static']);
+});
+
+test('a failed advisory does not stop a push, and all skips coverage entirely', () => {
+  // No origin/master: the advisory cannot form its diff on this one-commit fixture.
+  const failed = gate(['--gates', 'static', '--peer', 'none']);
+  assert.equal(failed.refs.length, 1);
+  assert.match(failed.message, /^E2E-Coverage: note: spec-import coverage unavailable/m);
+  const all = gate(['--gates', 'all', '--peer', 'none']);
+  assert.equal(all.refs.length, 1);
+  assert.doesNotMatch(all.message, /^E2E-Coverage:/m);
+});
 
 test('a call that names no gates is refused with exit 2 and the two forms, before the alert check and the push', () => {
   // The landing set that meant the whole set before, and the class 1a call that queued it by accident (runs 39342833882,
