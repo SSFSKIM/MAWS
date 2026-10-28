@@ -15,6 +15,12 @@
 // restated one yet, and what it carries is what the hub was told. Any other session's first count after a restart is
 // told as it is (`settled 0` clears a badge left from before).
 //
+// Lane B's counts are the engine host's, not sminos's: sminos's sets hold only the requests its bridges raised (lane A).
+// A lane B session's count is its broker items that wait on an answer, followed for every session whether or not a
+// device is subscribed (lane-b-pending.ts): each change of one session's items, and the engine host's whole set at each
+// link to it, which settles a lane B session it leaves out as sminos's restated set does a project's. The two lanes'
+// sets are kept apart, on disk too (`lane: 'B'`), so neither settles the other's sessions after a restart.
+//
 // `wrote` is a to-human message: a session-lane `host` message sent outside any subscription whose event is a
 // `message`, which O12's phase 2 sends as each is written, whether or not a device is subscribed. It is told once per
 // event, by the event's `(writer, seq)` in the host store, however often sminos sends it again. One that can't go yet is
@@ -54,6 +60,8 @@ export class Notifier {
   /** Withdrawn sessions whose `settled 0` no connection carried yet, with their project (on disk as `owed`). */
   readonly #owed = new Map<string, string>();
   readonly #inProject = new Map<string, Set<string>>();
+  /** Lane B sessions whose count here, or the hub's, may be above 0: what the engine host's next set settles if it leaves them out. */
+  readonly #laneB = new Set<string>();
   readonly #seen = new Set<string>();
   /** Sessions owed a `wrote`, oldest first. */
   #held: HeldWrote[] = [];
@@ -71,11 +79,13 @@ export class Notifier {
     this.#told.clear();
     this.#owed.clear();
     this.#inProject.clear();
-    for (const [session, { project, pending, owed }] of Object.entries(this.#ctx.store.read())) {
+    this.#laneB.clear();
+    for (const [session, { project, pending, owed, lane }] of Object.entries(this.#ctx.store.read())) {
       if (owed === true) this.#owed.set(session, project);
       else {
         this.#told.set(session, pending);
-        this.#inProject.set(project, new Set([...(this.#inProject.get(project) ?? []), session]));
+        if (lane === 'B') this.#laneB.add(session);
+        else this.#inProject.set(project, new Set([...(this.#inProject.get(project) ?? []), session]));
       }
     }
   }
@@ -87,6 +97,19 @@ export class Notifier {
     for (const session of this.#inProject.get(project) ?? []) if (!counts.has(session)) counts.set(session, 0);
     this.#inProject.set(project, new Set([...counts].filter(([, n]) => n > 0).map(([session]) => session)));
     for (const [session, count] of counts) this.pending(session, count);
+  }
+
+  /** The engine host's whole set of lane B counts: each session's, and 0 for a lane B session it leaves out. */
+  laneBSet(counts: ReadonlyMap<string, number>): void {
+    for (const session of [...this.#laneB]) if (!counts.has(session)) this.laneBCount(session, 0);
+    for (const [session, count] of counts) this.laneBCount(session, count);
+  }
+
+  /** A lane B session's count now; a 0 for one whose count was never above 0 here or at the hub tells nothing. */
+  laneBCount(session: string, count: number): void {
+    if (count > 0) this.#laneB.add(session);
+    else if (!this.#laneB.delete(session)) return;
+    this.pending(session, count);
   }
 
   /** A session's pending count now. */
@@ -114,6 +137,7 @@ export class Notifier {
   /** A session left the machine; a `settled 0` it still owes the hub stays owed. */
   forget(session: string): void {
     this.#counts.delete(session);
+    this.#laneB.delete(session);
     if (!this.#owed.has(session)) this.#setTold(session, '', undefined);
   }
 
@@ -194,9 +218,11 @@ export class Notifier {
     const file = this.#ctx.store.read();
     const kept = count !== undefined && count > 0;
     if (!kept && !(session in file)) return;
-    if (kept && file[session]?.project === project && file[session]?.pending === count && file[session]?.owed === undefined) return;
+    const lane = this.#laneB.has(session) ? 'B' : undefined;
+    const held = file[session];
+    if (kept && held?.project === project && held.pending === count && held.owed === undefined && held.lane === lane) return;
     const next = { ...file };
-    if (kept) next[session] = { project, pending: count };
+    if (kept) next[session] = { project, pending: count, ...(lane === undefined ? {} : { lane }) };
     else delete next[session];
     this.#ctx.store.write(next);
   }
