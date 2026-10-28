@@ -1457,6 +1457,12 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   4. A sign first reads and adopts the hub's chain, so it doesn't propose a fork on a stale head. After Touch ID, `verifySuccessor` runs against the current head, and the slot's update checks the head again: if it moved, nothing is kept.
   5. A sign while signed out is refused `not-root`. A store error during a sign reads `signing`.
   6. `createOrgSigner` takes `marked()`, since the backup mark rides on neither the state signer nor the held view. `OrgSigner` gains `onChanged` and `close`. The deliveries' `obligation` hook may be async.
+  7. (The architect's check of item 1, 2026-10-28.) The discard keeps `abandon-pending`'s distinctions (`admin.ts:1168-1196`).
+     - A slot never exposed (`exposed.hub` false and `exposed.machines` empty) reads as the CLI's never-sent case: "pending version n `<hash>` was never sent: nothing was posted", and the question says nothing can show it as a fork.
+     - An exposed slot (the hub, or any machine's act, since a delivery is exposure too) states where the hub stands, either not holding it or holding another state at version n (a fork). Its question carries the fork warning: "A later sign may make another successor of version n − 1, which a hub or machine that kept these bytes could show as a fork: discard it only once you know why the hub refused it."
+     - The signer's discard returns `{unsent, hubVersion, forkAt?}` for the Org section to word.
+     - The held floor after a discard is `max(slot's parent version, hub head)`, as `writeAnchor` sets it. In the app the held view never moves below the head it holds, which is at least the parent, and the discard adopts the hub's chain first. A test pins that no lower version is accepted after it.
+     - `abandon-pending`'s delegation-residue lines have no analogue: M3's signer adds no delegations. M4's delegation edits inherit them.
   Task 6 inherits these:
   - call `settle()` at start and at each feed open;
   - `markRegistration` writes inside the current queue turn, without a nested `commit`, and updates the in-memory registration;
