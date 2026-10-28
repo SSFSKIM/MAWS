@@ -13,6 +13,7 @@ import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
 import { launchMaws, test, type MawsLaunch } from './support/launch';
 import { assistantRecord, backgroundAgentRecords, backgroundAgentSidecars, backgroundBashRecords, CATALOG, editTurnRecords, taskNotificationRecord, terminalSession, userRecord, type TerminalSession } from './support/lane-a';
+import { addressed } from './support/address';
 import { openSurface } from './support/shell';
 import { sidebarOf, sidebarRow } from './support/sidebar';
 
@@ -413,7 +414,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await page.mouse.move(700, 20);
     await maws.app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('tab.overview')?.click());
     const overview = main(page).getByRole('dialog', { name: 'Overview' });
-    await expect(overview.locator(`[data-card="${c.appId}"]`).getByRole('radio', { name: 'Allow once' }), 'the card answers it through the port').toBeVisible({ timeout: 10_000 });
+    await expect(overview.locator(`[data-card="${await addressed(page, c.appId)}"]`).getByRole('radio', { name: 'Allow once' }), 'the card answers it through the port').toBeVisible({ timeout: 10_000 });
     await page.keyboard.press('Escape');
     await expect(overview).toHaveCount(0);
 
