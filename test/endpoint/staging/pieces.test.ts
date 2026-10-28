@@ -1,12 +1,17 @@
 // The staging phone run's pieces that need no hub (P5 O13 M7): the run read from the runner's environment, the report's
 // lines, lane B's gate, the sweep's reading of what a run left in an org state and its undoing, and the checks'
 // judgements of the notices a device read, the phone among the owner's devices and a web-cards entry.
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { generateSigningKey, type Device, type OrgState, type SignedOrgState } from 'org-protocol';
 import { describe, expect, it } from 'vitest';
+import { BoundedPerson, within } from './bounded';
 import { phoneOf, pushProblems, webCardsProblems } from './items';
 import { Report } from './report';
 import { cardsCredentialId, cardsRunOf, laneBLeg, LANE_B_WAITING, machineName, memberEmail, readRun } from './run';
-import { isRunSubscription, residueLines, residueOf, undoRun } from './sweep';
+import type { Person } from '../../../apps/desk-hub/deploy/hub';
+import type { OrgAdmin } from '../../../apps/desk-hub/deploy/org-admin';
+import { isRunSubscription, residueLines, residueOf, sweepRun, undoRun } from './sweep';
 
 const env = (over: Record<string, string | undefined> = {}) => ({
   DESK_STAGING_PHONE: '1',
@@ -161,6 +166,34 @@ describe('the sweep, by the run’s names', () => {
     expect(await undoRun(next, '7', OWNER, new Date())).toBeNull();
   });
 
+  // A run that ends after its second device posted its pairing entry, before the admin listed it: the entry stays at the
+  // hub, unlisted, until it expires (no route removes one), and the sweep says so instead of reading the run clean.
+  async function hub(s: OrgState, pending: unknown[]) {
+    const log: string[] = [];
+    const admin = { member: OWNER, read: async () => ({ state: s }), amend: async (_why: string, edit: (x: OrgState) => boolean) => void edit(s) } as unknown as OrgAdmin;
+    const routes: Record<string, unknown> = { '/api/devices/pending': { pending }, '/api/machines': { machines: [] }, '/api/push/subscriptions': { subscriptions: [] } };
+    const person = {
+      hub: 'https://hub.test',
+      headers: {},
+      fetch: async () => new Response(null, { status: 404 }),
+      json: async (path: string) => {
+        if (!(path in routes)) throw new Error(`no route ${path}`);
+        return routes[path];
+      },
+    } as unknown as Person;
+    return { left: await sweepRun(admin, person, '7', (line) => log.push(line)), log };
+  }
+  const entry = async (deviceId: string, credentialId: string) => ({ ...(await cards(deviceId, credentialId)), id: undefined, deviceId, mac: 'm'.repeat(43), member: OWNER, created: '2026-10-28T08:00:00.000Z', expires: '2026-10-28T08:10:00.000Z' });
+
+  it('reports a pairing entry of the run still pending at the hub, with its expiry, and never reads the run clean then', async () => {
+    const s = await state();
+    const { left, log } = await hub(s, [await entry('c-7-pending', cardsCredentialId('7')), await entry('c-8-pending', cardsCredentialId('8')), await entry('phone', 'cmVhbC1waG9uZQ')]);
+    expect(left).toEqual(["the hub still holds o13-c-7's pairing entry (device c-7-pending), unlisted, until it expires at 2026-10-28T08:10:00.000Z"]);
+    expect(log.join('\n')).not.toContain('nothing of the run is current');
+    expect(residueLines(residueOf(s, '7', OWNER))).toEqual([]);
+    expect((await hub(await state(), [])).log).toEqual([expect.stringContaining('nothing of the run is current')]);
+  });
+
   it('knows the run’s push subscriptions by their device or their sink endpoint', () => {
     const devices = new Set(['c-7']);
     expect(isRunSubscription({ endpoint: 'https://gone.trycloudflare.com/staging-run/o13-c-7', device: 'other' }, '7', devices)).toBe(true);
@@ -206,5 +239,35 @@ describe('the checks’ judgements', () => {
     expect(webCardsProblems(await cards('phone'), rpId)).toEqual([]);
     const wrong = await cards('phone', { keyStorage: 'software', stepUpPub: (await generateSigningKey()).pub, endorsement: undefined, passkey: { credentialId: 'x', publicKey: 'y', rpId: 'localhost' } });
     expect(webCardsProblems(wrong, rpId)).toEqual(['keyStorage software', 'a stepUpPub', 'passkey rpId localhost', 'no endorsement']);
+  });
+});
+
+describe('bounded waits', () => {
+  it('ends a wait whose probe never settles at its deadline, aborting the probe’s signal', async () => {
+    let seen: AbortSignal | null = null;
+    const started = Date.now();
+    await expect(within((signal) => ((seen = signal), new Promise<never>(() => {})), 'a stalled probe', 300)).rejects.toThrow('no a stalled probe within 300 ms');
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect((seen as AbortSignal | null)?.aborted).toBe(true);
+    expect(await within(async () => 'here', 'a probe', 300)).toBe('here');
+  });
+
+  it('ends a request whose response trickles, its body’s reading included', async () => {
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.write('{"a":');
+      const drip = setInterval(() => res.write(' '), 50);
+      res.on('close', () => clearInterval(drip));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const person = new BoundedPerson(`http://127.0.0.1:${(server.address() as AddressInfo).port}`, 'eyJ.synthetic', () => {}, 400);
+      const started = Date.now();
+      await expect(person.json('/slow')).rejects.toThrow();
+      expect(Date.now() - started).toBeLessThan(3000);
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 });

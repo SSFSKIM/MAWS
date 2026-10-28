@@ -481,8 +481,11 @@ production's Worker or host, or a preview alias of it (`<alias>-desk-hub.…`), 
     compares it with `prod before`.
   - `deploy`, `build`: the checkout to staging; staging's and production's `X-Desk-Build`.
   - `acceptance [--no-push]`, `relay-measure`: those commands under `staging-ssfskim` with the admin device's keys.
-    `acceptance`'s push item gets its sink behind an account-less quick tunnel (`cloudflared tunnel --url`), stopped
-    when the run ends; `--no-push` skips the item.
+    `acceptance`'s push item gets its sink behind an account-less quick tunnel, stopped when the run ends; `--no-push`
+    skips the item. The tunnel (`start_tunnel`, shared with `phone`) is `cloudflared tunnel --url` tried three times,
+    then the quick-tunnel API asked directly with a 60 s wait (cloudflared's own request gives up after 15 s, and the
+    API has taken 22-33 s to answer), with cloudflared run on the credentials it answered. That credentials file is
+    written 0600 into the state directory and removed when the tunnel stops; its secret is never printed.
   - `access-sync`: the people policy read back at the org state's head, with the machine credentials access-sync uses.
   - `admin <args…>`: `deployment admin` against `staging-ssfskim` with the admin device's `keys.json` (its anchor,
     `keys.json.org.json`, beside it once `admin adopt` ran). `adopt`, `devices` and `refresh` run unattended; `pair` and
@@ -516,9 +519,10 @@ production's Worker or host, or a preview alias of it (`<alias>-desk-hub.…`), 
     (the harness's own), the owner's lane B `app-1` and `app-2`, and `la-b`, owned by a second member `o13-b-<n>`
     (`@staging.invalid`, one `native-mac` device, no sign-in). The owner's second `web-cards` device `o13-c-<n>` (a
     software passkey) pairs through staging's pairing exchange by M3's code path and subscribes to push at the run's
-    sink, behind a quick tunnel tried three times. The run raises a question and a permission on each of the owner's
-    sessions, and one on `la-b`. `o13-c-<n>` drives acceptance 2's and 3's refusals on the harness's sessions, whose
-    cards are withdrawn after. Then the run waits up to 10 minutes (`WAITING …`) for the phone to answer `la-1`'s two
+    sink, behind the quick tunnel `acceptance` uses. The run raises a question and a permission on each of the owner's
+    sessions, and one on `la-b`. `o13-c-<n>` drives acceptance 2's and 3's refusals on the harness's sessions (on each
+    lane: an assertion replayed, another action's, and an answer on a session of the second member's, `la-b` or the
+    unlisted lane B `app-b`), whose cards are withdrawn after. Then the run waits up to 10 minutes (`WAITING …`) for the phone to answer `la-1`'s two
     cards: the phone is the owner's one `web-cards` device the run did not make, or `--device <id>`. `--rehearse` has
     `o13-c-<n>` answer them in the phone's place, which proves the whole run on staging before the owner sits down.
     It prints a line per check, then `PASS`, `FAIL`, `NOT RUN` or `NOT SHOWN` per item: `registration`, `round-trip
@@ -526,15 +530,20 @@ production's Worker or host, or a preview alias of it (`<alias>-desk-hub.…`), 
     - Lane B: until O10 feeds the endpoint's notifier from the engine host's broker, a lane B session gets no count at
       the hub, so it has no Cards row and no push. The run looks for that count and otherwise prints `NOT RUN
       round-trip lane B: waiting on O10's lane B notifier feed`. `--lane-b` makes its absence a failure, for runs after
-      the feed lands.
+      the feed lands. Lane B's refusals need no feed (the device subscribes to the harness's session by its id), so they
+      run either way, under the same item.
     - Cleanup: however the run ends, it takes the machine out of the state (its key retired, its service token revoked
       at the hub), removes `o13-b-<n>` and `o13-c-<n>` (their keys revoked) and deletes the sink's subscription. The
       step then runs a cleanup pass of its own (`DESK_STAGING_PHONE=cleanup`), which finds them by name again for a run
-      killed outright, and says `LEFT …` for anything still current. A rerun under the same `<n>` sweeps first. The
-      phone itself is never touched.
+      killed outright, and says `LEFT …` for anything still current. A pairing entry `o13-c-<n>` posted but never
+      listed (the run ended between the two) cannot be removed: it is `LEFT` with its expiry, ten minutes after it was
+      posted. A rerun under the same `<n>` sweeps first, and stops while anything is left. An INT or TERM to the step
+      stops the suite at once (it runs in a process group of its own, killed 10 s after TERM if it lingers) and then
+      runs the cleanup pass. The phone itself is never touched.
     - Nothing recorded: the owner's token reaches the suite in its environment alone, and the output passes the filter.
       The suite lists each secret it handles in `phone-<n>.scan`: the enrollment code and its one-time token, the
-      pairing code and its secret, and the machine's service token. After the run the log is searched for the token and
+      pairing code and its secret, and the machine's service token; the tunnel's secret is listed there too when the
+      quick-tunnel API gave it. After the run the log and the run's tunnel logs are searched for the token and
       for every listed secret, and the step fails if any file holds one. The sink keeps what it receives (encrypted
       notices) in memory alone. The endpoint's scratch profile, `phone-<n>.profile`, holds the machine's keys and
       ledgers; it and the list are removed however the step ends. Production's `X-Desk-Build` is compared before and

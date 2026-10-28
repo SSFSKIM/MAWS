@@ -2,11 +2,13 @@
 // (run.ts), so it needs nothing the run kept: the machine `o13-phone-<n>` out of the state, its key retired (an honest
 // departure, as `OrgAdmin.unlist` takes a machine out) and revoked at the hub (its service token deleted); the member
 // `o13-b-<n>` removed, their device's keys revoked; the owner's `o13-c-<n>` device removed, its keys revoked; the push
-// subscriptions bound to that device, or at its sink endpoint, deleted. The run calls it however it ends, and the
+// subscriptions bound to that device, or at its sink endpoint, deleted. A pairing entry `o13-c-<n>` posted and never
+// listed (the run ended between the two) cannot be removed (no route does; listing a device drops its entry) and is
+// reported `LEFT` with its expiry, ten minutes after it was posted. The run calls it however it ends, and the
 // runner once more after it (a run killed outright): a run with nothing left is a no-op. The phone the owner paired is
 // never touched; its `remove-device` is the owner's (the sitting's step 5).
 import { keyId, type Device, type OrgState, type RetiredKey, type RevokedKey } from 'org-protocol';
-import { HubClient } from 'org-protocol/test-support';
+import { PENDING_DEVICES_PATH, type PendingDevice } from 'desk-hub/protocol';
 import type { Person } from '../../../apps/desk-hub/deploy/hub';
 import type { OrgAdmin } from '../../../apps/desk-hub/deploy/org-admin';
 import { revoke } from '../../../apps/desk-hub/deploy/proof';
@@ -35,6 +37,13 @@ export function residueLines(r: Residue): string[] {
     ...r.members.map((m) => `the state still lists the member ${m.email}`),
     ...r.devices.map((d) => `the state still lists the owner's device ${d.id} (${d.passkey ? `passkey ${cardsDeviceName(cardsRunOf(d.passkey.credentialId) ?? '?')}` : 'no passkey'})`),
   ];
+}
+
+/** The hub's pending pairing entries that are run `n`'s second device's (its passkey names `o13-c-<n>`), one line each. */
+export function pendingLines(pending: PendingDevice[], n: string): string[] {
+  return pending
+    .filter((p) => p.passkey !== undefined && cardsRunOf(p.passkey.credentialId) === n)
+    .map((p) => `the hub still holds ${cardsDeviceName(n)}'s pairing entry (device ${p.deviceId}), unlisted, until it expires at ${p.expires}`);
 }
 
 const isEmpty = (r: Residue) => r.machines.length + r.members.length + r.devices.length === 0;
@@ -100,7 +109,8 @@ export async function sweepRun(admin: OrgAdmin, person: Person, n: string, log: 
       failures.push(`${what}: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
-  const hub = new HubClient(person.hub, person.headers);
+  type Subscriptions = { subscriptions: Array<{ endpoint: string; device?: string }> };
+  const subscriptions = async () => (await person.json<Subscriptions>('/api/push/subscriptions')).subscriptions;
   const devices = new Set<string>();
   await step('take the run out of the org state', async () => {
     const head = await admin.read();
@@ -112,7 +122,7 @@ export async function sweepRun(admin: OrgAdmin, person: Person, n: string, log: 
   });
   await step(`revoke ${machineName(n)} at the hub`, () => revoke(person, machineName(n)));
   await step('delete the run’s push subscriptions', async () => {
-    for (const s of (await hub.pushSubscriptions()).subscriptions) if (isRunSubscription(s, n, devices)) await hub.deletePush(s.endpoint);
+    for (const s of await subscriptions()) if (isRunSubscription(s, n, devices)) await person.json('/api/push/subscriptions', { method: 'DELETE', body: { endpoint: s.endpoint } });
   });
   // Read back: nothing of the run current.
   const left: string[] = [];
@@ -122,8 +132,9 @@ export async function sweepRun(admin: OrgAdmin, person: Person, n: string, log: 
     left.push(...machines.filter((m) => m.name === machineName(n)).map((m) => `the hub still holds the machine ${m.name}`));
   });
   await step('read the push subscriptions back', async () => {
-    left.push(...(await hub.pushSubscriptions()).subscriptions.filter((s) => isRunSubscription(s, n, devices)).map((s) => `the hub still holds a push subscription of the run (device ${s.device ?? 'none'})`));
+    left.push(...(await subscriptions()).filter((s) => isRunSubscription(s, n, devices)).map((s) => `the hub still holds a push subscription of the run (device ${s.device ?? 'none'})`));
   });
+  await step('read the pending pairing entries back', async () => void left.push(...pendingLines((await person.json<{ pending: PendingDevice[] }>(PENDING_DEVICES_PATH)).pending, n)));
   left.push(...failures.map((f) => `cleanup step failed: ${f}`));
   log(left.length === 0 ? `cleanup: ${machineName(n)} revoked, ${memberEmail(n)} removed, ${cardsDeviceName(n)} removed, its push subscriptions deleted; nothing of the run is current` : `cleanup: ${left.length} thing(s) left`);
   return [...new Set(left)];

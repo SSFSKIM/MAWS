@@ -9,7 +9,8 @@
 #   deploy                   the checkout to staging under staging-ssfskim
 #   build                    acceptance 1: staging's and production's X-Desk-Build, credential-free
 #   acceptance [--no-push]   `deployment acceptance` under staging-ssfskim (its default items); the push item's sink
-#                            behind an account-less quick tunnel (cloudflared tunnel --url), unless --no-push
+#                            behind an account-less quick tunnel (start_tunnel: cloudflared tunnel --url, then the
+#                            quick-tunnel API asked directly), unless --no-push
 #   relay-measure            `deployment relay-measure` under staging-ssfskim
 #   access-sync              `deployment access-sync`: the people policy read back at the org state's head
 #   admin <args…>            `deployment admin <args…>` against staging-ssfskim with the admin device's keys: adopt,
@@ -26,7 +27,7 @@
 #   phone <n> [--rehearse] [--lane-b] [--device <id>]
 #                            P5 O13 M7: test/endpoint/staging-phone.live.test.ts, MAWS's endpoint module enrolled as
 #                            o13-phone-<n>, the owner's cards answered from the phone (--rehearse: by the run's second
-#                            device in its place); the push sink behind a quick tunnel (three tries); the run's undoing
+#                            device in its place); the push sink behind a quick tunnel (start_tunnel); the run's undoing
 #                            run again after it, however it ended; production's X-Desk-Build compared before and after
 # Any further arguments go to the step's command. Environment (README "Staging runs"):
 #   DESK_STAGING_SECRETS  the directory holding CF_ACCESS_SETUP_TOKEN and CF_DESK_HUB_SERVICE_TOKENS
@@ -89,6 +90,75 @@ deployment() { pnpm -s -C $W --filter desk-hub deployment "$@" --config deploy/s
 # pnpm, whose recursive runner writes its own failure lines (ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL, the checkout's path) to
 # stdout even under -s: there stdout is the secret stream, and holds the command's own output alone.
 direct() { ( cd $W/apps/desk-hub && node --experimental-strip-types --disable-warning=ExperimentalWarning deploy/bin.ts "$@" --config deploy/staging.json ); }
+# ---- The push sink's tunnel (acceptance's item 5, phone's push clause): account-less, P5 Decision Log 39 ------------
+# TUNNEL holds its cloudflared's pid, PUBLIC its https base, TCREDS the credentials file it runs on (the API's way);
+# each attempt is told through the step's `say`.
+TUNNEL= PUBLIC= TCREDS=
+# Whether the cloudflared at TUNNEL, logging to <log>, registered within 45 s; PUBLIC is <public>, or read from the log.
+tunnel_up() {
+  local tl=$1 i
+  PUBLIC=$2
+  for i in {1..45}; do
+    [[ -n $2 ]] || PUBLIC=$(/usr/bin/grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' $tl | /usr/bin/grep -v '^https://api\.' | head -1)
+    [[ -n $PUBLIC ]] && /usr/bin/grep -q 'Registered tunnel connection' $tl && kill -0 $TUNNEL 2>/dev/null && return 0
+    kill -0 $TUNNEL 2>/dev/null || break
+    sleep 1
+  done
+  PUBLIC=
+  return 1
+}
+# A quick tunnel to 127.0.0.1:<port>: `cloudflared tunnel --url` three times, 5 s apart; then cloudflared's own request
+# for one made here, waiting 60 s for the quick-tunnel API where cloudflared waits 15 s (it has taken 22-33 s to answer:
+# the friction tracker's quick-tunnel-api-slower-than-cloudflared-timeout), and cloudflared run on the credentials it
+# answered, written to <creds> (0600, removed by stop_tunnel) and, when <scan> is given, their secret listed there for
+# the run's search; never printed. 1 when no tunnel came up.
+start_tunnel() {
+  local port=$1 tag=$2 creds=$3 scan=$4 try tl named
+  for try in 1 2 3; do
+    tl=$O/tunnel-$tag-$(stamp)-$try.log
+    cloudflared tunnel --no-autoupdate --url http://127.0.0.1:$port > $tl 2>&1 &
+    TUNNEL=$!
+    if tunnel_up $tl; then say "push sink: $PUBLIC -> 127.0.0.1:$port (try $try)"; return 0; fi
+    say "the quick tunnel did not come up (try $try): $(/usr/bin/grep -iE 'fail|error' $tl | head -1)"
+    stop_tunnel
+    (( try < 3 )) && sleep 5
+  done
+  TCREDS=$creds
+  named=$(curl -q -s --max-time 60 -X POST -H 'Content-Type: application/json' https://api.trycloudflare.com/tunnel < /dev/null | python3 -B -I -c '
+import json, os, re, sys
+try:
+    r = json.load(sys.stdin)["result"]
+    id, host, secret = r["id"], r["hostname"], r["secret"]
+    creds = {"AccountTag": r["account_tag"], "TunnelSecret": secret, "TunnelID": id}
+except Exception:
+    sys.exit("its answer named no tunnel")
+if not (isinstance(secret, str) and secret and re.fullmatch(r"[0-9a-f-]{36}", id) and re.fullmatch(r"[a-z0-9-]+\.trycloudflare\.com", host)):
+    sys.exit("its answer named no tunnel of the form expected")
+with os.fdopen(os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+    json.dump(creds, f)
+if sys.argv[2]:
+    with open(sys.argv[2], "a") as f:
+        f.write(secret + "\n")
+print(id, host)
+' $creds "$scan" 2>&1) || { say "the quick-tunnel API gave no tunnel: ${named:-no answer within 60 s}"; stop_tunnel; return 1; }
+  tl=$O/tunnel-$tag-$(stamp)-api.log
+  cloudflared tunnel --no-autoupdate --credentials-file $creds --url http://127.0.0.1:$port run ${named%% *} > $tl 2>&1 &
+  TUNNEL=$!
+  if tunnel_up $tl https://${named#* }; then say "push sink: $PUBLIC -> 127.0.0.1:$port (through the quick-tunnel API)"; return 0; fi
+  say "the tunnel the quick-tunnel API named did not come up: $(/usr/bin/grep -iE 'fail|error' $tl | head -1)"
+  stop_tunnel
+  return 1
+}
+# The tunnel stopped and its credentials removed; nothing when there is neither.
+stop_tunnel() {
+  [[ -n $TCREDS ]] && { rm -f $TCREDS; TCREDS=; }
+  [[ -z $TUNNEL ]] && return
+  local gone
+  kill $TUNNEL 2>/dev/null; wait $TUNNEL 2>/dev/null
+  kill -0 $TUNNEL 2>/dev/null && gone="STILL RUNNING" || gone="process gone"
+  say "tunnel stopped: pid $TUNNEL at $(date -u +%FT%TZ), $gone"
+  TUNNEL=
+}
 step=$1; (( $# )) && shift
 case $step in
   prod)
@@ -115,31 +185,12 @@ case $step in
     LOG=$O/acceptance-$(stamp).log
     push=()
     nopush=0; [[ $1 == --no-push ]] && { nopush=1; shift; }
+    say() { print -r -- "$*" | tee -a $LOG; }
     if (( ! nopush )); then
       PORT=18743
-      TL=$O/tunnel-$(stamp).log
-      stop_tunnel() {
-        [[ -z $TUNNEL ]] && return
-        kill $TUNNEL 2>/dev/null; wait $TUNNEL 2>/dev/null
-        kill -0 $TUNNEL 2>/dev/null && gone="STILL RUNNING" || gone="process gone"
-        print -r -- "tunnel stopped: pid $TUNNEL at $(date -u +%FT%TZ), $gone" | tee -a $LOG
-        TUNNEL=
-      }
       trap stop_tunnel EXIT
       trap 'exit 130' INT TERM
-      cloudflared tunnel --no-autoupdate --url http://127.0.0.1:$PORT > $TL 2>&1 &
-      TUNNEL=$!
-      print -r -- "tunnel started: pid $TUNNEL at $(date -u +%FT%TZ)" | tee -a $LOG
-      for i in {1..45}; do
-        PUBLIC=$(/usr/bin/grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' $TL | /usr/bin/grep -v '^https://api\.' | head -1)
-        [[ -n $PUBLIC ]] && /usr/bin/grep -q 'Registered tunnel connection' $TL && break
-        kill -0 $TUNNEL 2>/dev/null || break
-        sleep 1
-      done
-      if [[ -z $PUBLIC ]] || ! kill -0 $TUNNEL 2>/dev/null; then
-        print -r -- "the quick tunnel did not come up by $(date -u +%FT%TZ): $(/usr/bin/grep -iE 'fail|error' $TL | head -2): stop" | tee -a $LOG; exit 2
-      fi
-      print -r -- "push sink: $PUBLIC -> 127.0.0.1:$PORT" | tee -a $LOG
+      start_tunnel $PORT acceptance $O/acceptance-tunnel.json '' || { say "no tunnel for the push sink by $(date -u +%FT%TZ): stop"; exit 2; }
       push=(--push-url $PUBLIC/staging-run --push-port $PORT)
     fi
     printf 'DESK_ACCESS_TOKEN=%s\n' "$T" | deployment acceptance --device-keys $H/keys.json "${push[@]}" "$@" 2>&1 | filter | tee -a $LOG
@@ -225,18 +276,28 @@ case $step in
     owner_token
     before=$(header $PROD) || exit 3
     say "production before: $before"
-    # The push sink behind an account-less quick tunnel, tried three times (P5 Decision Log 39: its timeouts were transient).
-    PORT=18744 TUNNEL= PUBLIC=
-    stop_tunnel() {
-      [[ -z $TUNNEL ]] && return
-      kill $TUNNEL 2>/dev/null; wait $TUNNEL 2>/dev/null
-      kill -0 $TUNNEL 2>/dev/null && gone="STILL RUNNING" || gone="process gone"
-      say "tunnel stopped: pid $TUNNEL at $(date -u +%FT%TZ), $gone"
-      TUNNEL=
+    PORT=18744
+    # The suite runs in a process group of its own (zsh without a terminal has no job control), its id in $PGF, so a
+    # signal to this script stops all of it before the cleanup pass, instead of waiting for it to end.
+    PGF=$O/phone-$n.pgid SUITE=; rm -f $PGF
+    stop_suite() {
+      [[ -z $SUITE ]] && return
+      local pg= i
+      for i in {1..25}; do [[ -s $PGF ]] && break; kill -0 $SUITE 2>/dev/null || break; sleep 0.2; done
+      pg=$(<$PGF 2>/dev/null); rm -f $PGF
+      if [[ $pg == <-> ]] && kill -0 -$pg 2>/dev/null; then
+        kill -TERM -$pg 2>/dev/null
+        for i in {1..20}; do kill -0 -$pg 2>/dev/null || break; sleep 0.5; done
+        if kill -0 -$pg 2>/dev/null; then kill -KILL -$pg 2>/dev/null; say "the suite stopped: process group $pg killed, 10 s after TERM"
+        else say "the suite stopped: process group $pg ended on TERM"; fi
+      fi
+      wait $SUITE 2>/dev/null
+      SUITE=
     }
     finalized=0 ran=1
     finalize() {
       (( finalized )) && return; finalized=1
+      stop_suite
       stop_tunnel
       # The run's own cleanup ran in the run; this pass finds anything a run killed outright left, and undoes it.
       DESK_ACCESS_TOKEN=$T DESK_STAGING_PHONE=cleanup DESK_STAGING_PHONE_RUN=$n DESK_STAGING_ADMIN_KEYS=$H/keys.json \
@@ -245,44 +306,35 @@ case $step in
       (( swept == 0 )) || say "the cleanup pass failed (exit $swept): what the run made may still be current; run the step again with the same run id once the cause is fixed (it sweeps first)"
       after=$(header $PROD) || after="unread"
       if [[ $after == "$before" ]]; then say "production untouched: $after"; else say "production build CHANGED or unread: $after"; fi
-      leaked=$(secret_scan <(print -r -- "$T"; cat $SCAN) $LOG)
+      leaked=$(secret_scan <(print -r -- "$T"; cat $SCAN) $LOG $O/tunnel-$n-*.log(N))
       unset T
-      rm -rf $SCAN $PROFILE
+      rm -rf $SCAN $PROFILE $PGF
       say "files holding the Access token or a secret the run handled: $leaked; log $LOG"
       (( ran == 0 && swept == 0 && leaked == 0 )) && [[ $after == "$before" ]] && exit 0
       exit $(( ran ? ran : 1 ))
     }
     trap finalize EXIT
     trap 'exit 130' INT TERM
-    sinkenv=()
-    for try in 1 2 3; do
-      TL=$O/tunnel-$n-$(stamp)-$try.log
-      cloudflared tunnel --no-autoupdate --url http://127.0.0.1:$PORT > $TL 2>&1 &
-      TUNNEL=$! PUBLIC=
-      for i in {1..45}; do
-        PUBLIC=$(/usr/bin/grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' $TL | /usr/bin/grep -v '^https://api\.' | head -1)
-        [[ -n $PUBLIC ]] && /usr/bin/grep -q 'Registered tunnel connection' $TL && break
-        kill -0 $TUNNEL 2>/dev/null || break
-        sleep 1
-      done
-      if [[ -n $PUBLIC ]] && kill -0 $TUNNEL 2>/dev/null; then
-        say "push sink: $PUBLIC -> 127.0.0.1:$PORT (try $try)"
-        sinkenv=(DESK_STAGING_PHONE_SINK=$PUBLIC/staging-run DESK_STAGING_PHONE_SINK_PORT=$PORT)
-        break
-      fi
-      say "the quick tunnel did not come up (try $try): $(/usr/bin/grep -iE 'fail|error' $TL | head -1)"
-      stop_tunnel
-      (( try < 3 )) && sleep 5
-    done
-    (( ${#sinkenv} )) || sinkenv=(DESK_STAGING_PHONE_NO_SINK="tunnel: the quick tunnel did not come up in 3 tries")
+    # The push sink behind an account-less quick tunnel (start_tunnel); without one, the push clause is NOT SHOWN.
+    if start_tunnel $PORT $n $O/phone-$n.tunnel.json $SCAN; then
+      sinkenv=(DESK_STAGING_PHONE_SINK=$PUBLIC/staging-run DESK_STAGING_PHONE_SINK_PORT=$PORT)
+    else
+      sinkenv=(DESK_STAGING_PHONE_NO_SINK="tunnel: the quick tunnel did not come up in 3 tries, nor through the quick-tunnel API")
+    fi
     say "phone run $n ($mode) on staging; the machine o13-phone-$n; log $LOG"
     [[ $mode == phone ]] && say "on the phone, have staging's desk-web open (or closed: its notifications land on the cards); the run prints WAITING when it is the phone's turn"
     # The token reaches the suite in its environment alone (a prefix assignment or the builtin export, never an argument).
-    ( export "${sinkenv[@]}"
-      DESK_ACCESS_TOKEN=$T DESK_STAGING_PHONE=1 DESK_STAGING_PHONE_RUN=$n DESK_STAGING_PHONE_MODE=$mode DESK_STAGING_PHONE_LANE_B=$laneb \
-        DESK_STAGING_PHONE_DEVICE=$device DESK_STAGING_ADMIN_KEYS=$H/keys.json DESK_STAGING_PHONE_SCAN=$SCAN DESK_STAGING_PHONE_PROFILE=$PROFILE \
-        pnpm -s -C $W exec vitest run --project node test/endpoint/staging-phone.live.test.ts ) 2>&1 | filter | tee -a $LOG
-    ran=${pipestatus[1]}
+    # The suite leads a process group of its own (perl's setpgrp, then exec), its id written to $PGF; the pipeline runs
+    # in the background and is waited for, so INT and TERM reach their trap at once (stop_suite, then the cleanup pass).
+    { ( export "${sinkenv[@]}"
+        DESK_ACCESS_TOKEN=$T DESK_STAGING_PHONE=1 DESK_STAGING_PHONE_RUN=$n DESK_STAGING_PHONE_MODE=$mode DESK_STAGING_PHONE_LANE_B=$laneb \
+          DESK_STAGING_PHONE_DEVICE=$device DESK_STAGING_ADMIN_KEYS=$H/keys.json DESK_STAGING_PHONE_SCAN=$SCAN DESK_STAGING_PHONE_PROFILE=$PROFILE \
+          exec /usr/bin/perl -e 'setpgrp(0, 0) or die "setpgrp: $!"; open(my $f, ">", shift) or die "$!"; print $f "$$"; close $f; exec { $ARGV[0] } @ARGV or die "exec: $!"' \
+          $PGF pnpm -s -C $W exec vitest run --project node test/endpoint/staging-phone.live.test.ts ) 2>&1 | filter | tee -a $LOG
+      exit ${pipestatus[1]}; } &
+    SUITE=$!
+    wait $SUITE; ran=$?
+    SUITE=; rm -f $PGF
     say "phone run exit $ran"
     exit $ran ;;
   throwaway|desk-web)

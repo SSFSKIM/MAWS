@@ -9,15 +9,17 @@ import { canonicalize, verifyPinnedChain, type Action, type ChannelMessage, type
 import type { OrgStateView } from 'desk-hub/protocol';
 import { answer, operationFor, seal, type Answer, type Operation } from '../../../apps/desk-web/src/cards/answers';
 import { movedToMaws } from '../../../apps/desk-web/src/cards/board';
-import { cardId, laneACard, unanswerable, type Card, type CardSession } from '../../../apps/desk-web/src/cards/cards';
+import { requestDigestOf } from '@shared/host/request-digest';
+import { cardId, laneACard, laneBCards, unanswerable, type Card, type CardSession } from '../../../apps/desk-web/src/cards/cards';
 import { subscribeCards, type MachineChannel } from '../../../apps/desk-web/src/cards/client';
 import { cutOverMachines } from '../../../apps/desk-web/src/cards/machines';
 import { capabilities, MOVED_TO_MAWS, VERBS, type CapabilityInput } from '../../../apps/desk-web/src/conversation/capabilities';
 import { readPush } from '../../../apps/desk-hub/deploy/push-sink';
 import { until } from '../../../apps/desk-web/test/local/endpoint';
+import { item as itemOf } from '../sub-harness';
 import type { Report } from './report';
 import { cardsRunOf, laneBLeg, LANE_B_WAITING } from './run';
-import { HARNESS_A, HARNESS_B, OWN_A, OWN_B, RUN_PROJECT, THEIRS_A, type Raised, type StagingWorld } from './world';
+import { HARNESS_A, HARNESS_B, OWN_A, OWN_B, RUN_PROJECT, THEIRS_A, THEIRS_B, type Raised, type StagingWorld } from './world';
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 type Msg = ChannelMessage & Record<string, unknown>;
@@ -36,7 +38,9 @@ export function laneARequests(n: string) {
     theirs: permission(`toolu_b_${n}`, 'echo the second member', THEIRS_A),
   };
 }
-const LANE_B = { question: 'rq-q', permission: 'rq-p', list: 'rq-list' } as const;
+/** Lane B's requests: the owner's question and permission (`app-1`), the harness's (`app-2`: acceptance 3's list and
+ * acceptance 2's replayed and borrowed assertions), and the second member's (`app-b`). */
+const LANE_B = { question: 'rq-q', permission: 'rq-p', list: 'rq-list', replay: 'rq-replay', borrow: 'rq-borrow', theirs: 'rq-b' } as const;
 
 // ---- The second device on a channel -----------------------------------------------------------------------------------
 
@@ -78,6 +82,32 @@ function watch(channel: MachineChannel, session: CardSession) {
       }, what, ms),
   };
 }
+/**
+ * Acceptance 2's refusals on one lane, by the second device: `first` answered as the client answers, then its act sent
+ * again as it was; `second` sealed with `first`'s assertion (another action's: its challenge is that action's digest);
+ * `theirs`, a card of a session the member doesn't own, answered as the client answers. Each one's word.
+ */
+async function refusals(w: StagingWorld, channel: MachineChannel, first: Card, second: Card, theirs: Card): Promise<{ replayed: string; stepUp: string; theirs: string }> {
+  const sent: Action[] = [];
+  const recordingChannel = new Proxy(channel, {
+    get: (target, key) =>
+      key === 'send'
+        ? (message: ChannelMessage) => {
+            if (message.t === 'act') sent.push(structuredClone(message.action as Action));
+            return target.send(message);
+          }
+        : Reflect.get(target, key),
+  });
+  const allow: Answer = { kind: 'decision', decision: 'allow' };
+  const answered = await answer(recordingChannel, w.cards.identity, first, allow, w.cards.assert);
+  if (answered.outcome.state !== 'done') throw new Error(`the first answer: ${JSON.stringify(answered.outcome)}`);
+  const replayed = await acted(channel, sent[0]);
+  const borrowed = { ...(await seal(operationFor(w.cards.identity, w.ref, second, allow, Date.now()), w.cards.assert, Date.now())), webauthn: sent[0].webauthn };
+  const stepUp = await acted(channel, borrowed);
+  const outcome = (await answer(channel, w.cards.identity, theirs, allow, w.cards.assert)).outcome;
+  return { replayed, stepUp, theirs: outcome.state === 'refused' ? outcome.reason : JSON.stringify(outcome) };
+}
+
 const has = (...ids: string[]) => (set: Card[]) => ids.every((id) => set.some((c) => cardId(c) === id));
 const find = (set: Card[], id: string) => set.find((c) => cardId(c) === id)!;
 
@@ -191,6 +221,9 @@ export async function runItems(w: StagingWorld, report: Report, print: (line: st
   w.host.request(OWN_B, 'question', LANE_B.question);
   w.host.request(OWN_B, 'permission', LANE_B.permission);
   w.host.request(HARNESS_B, 'permission', LANE_B.list);
+  w.host.request(HARNESS_B, 'permission', LANE_B.replay);
+  w.host.request(HARNESS_B, 'permission', LANE_B.borrow);
+  const theirsB = w.host.request(THEIRS_B, 'permission', LANE_B.theirs);
   const presence = () => w.cards.socket.presence()?.pending ?? {};
   const laneAShown = await until(() => (presence()[OWN_A]?.pending ?? 0) >= 2 && (presence()[HARNESS_A]?.pending ?? 0) >= 3, 'the lane A counts at the hub', 30_000).then(
     () => true,
@@ -205,33 +238,31 @@ export async function runItems(w: StagingWorld, report: Report, print: (line: st
     const a = watch(channel, { lane: 'A', id: HARNESS_A });
     const b = watch(channel, { lane: 'B', id: HARNESS_B });
     const setA = await a.until(has(...req.device.map((r) => r.request)), "the harness's lane A cards");
-    const setB = await b.until(has(LANE_B.list), "the harness's lane B card");
+    const setB = await b.until(has(LANE_B.list, LANE_B.replay, LANE_B.borrow), "the harness's lane B cards");
 
-    // Acceptance 2's refusals, by the second device.
+    // Acceptance 2's refusals, by the second device, on each lane.
     await report.check('round-trip lane A', 'a replayed assertion, another action’s, and an answer on a session the member doesn’t own, each refused, nothing run', async () => {
-      const sent: Action[] = [];
-      const recordingChannel = new Proxy(channel, {
-        get: (target, key) =>
-          key === 'send'
-            ? (message: ChannelMessage) => {
-                if (message.t === 'act') sent.push(structuredClone(message.action as Action));
-                return target.send(message);
-              }
-            : Reflect.get(target, key),
-      });
-      const allow: Answer = { kind: 'decision', decision: 'allow' };
-      const first = await answer(recordingChannel, cards.identity, find(setA, req.device[0].request), allow, cards.assert);
-      if (first.outcome.state !== 'done') throw new Error(`the first answer: ${JSON.stringify(first.outcome)}`);
-      const replayed = await acted(channel, sent[0]);
-      const borrowed = { ...(await seal(operationFor(cards.identity, w.ref, find(setA, req.device[1].request), allow, Date.now()), cards.assert, Date.now())), webauthn: sent[0].webauthn };
-      const stepUp = await acted(channel, borrowed);
+      const got = await refusals(w, channel, find(setA, req.device[0].request), find(setA, req.device[1].request), await laneACard(req.theirs, 'LB'));
       const theirsSub = (await reply(channel, { t: 'sub', sub: 'theirs', session: { lane: 'A', id: THEIRS_A }, view: 'cards', cursor: null, credit: 1024 }, (m) => m.sub === 'theirs' && (m.t === 'ended' || m.t === 'subbed'))).reason;
-      const theirs = (await answer(channel, cards.identity, await laneACard(req.theirs, 'LB'), allow, cards.assert)).outcome;
       const ran = count(w.sminos.effects, (e) => e.endsWith(` ${req.device[1].request}`) || e.includes(` ${THEIRS_A} `));
-      const said = `replayed: ${replayed}; another action's assertion: ${stepUp}; a cards sub to ${THEIRS_A}: ${String(theirsSub)}; an answer there: ${theirs.state === 'refused' ? theirs.reason : JSON.stringify(theirs)}; ${ran} run`;
-      if (replayed !== 'replayed' || stepUp !== 'step-up' || theirsSub !== 'class' || !(theirs.state === 'refused' && theirs.reason === 'grade') || ran > 0) throw new Error(said);
+      const said = `replayed: ${got.replayed}; another action's assertion: ${got.stepUp}; a cards sub to ${THEIRS_A}: ${String(theirsSub)}; an answer there: ${got.theirs}; ${ran} run`;
+      if (got.replayed !== 'replayed' || got.stepUp !== 'step-up' || theirsSub !== 'class' || got.theirs !== 'grade' || ran > 0) throw new Error(said);
       return said;
     });
+    // Lane B's run on the harness's session and the second member's, which need no notifier feed: the cards come over
+    // the device's own subscription, and the second member's card is built as the client builds one.
+    await report.check('round-trip lane B', 'a replayed assertion, another action’s, and an answer on a session the member doesn’t own, each refused, nothing run', async () => {
+      const s = w.laneB.theirs;
+      const [theirs] = await laneBCards(THEIRS_B, { pendingItems: [{ item: itemOf(s, LANE_B.theirs, 'permission'), request: theirsB, context: { launchId: s.launchId, engineSessionId: s.engineSessionId }, requestDigest: requestDigestOf(THEIRS_B, theirsB) }] });
+      const why = unanswerable(theirs);
+      if (why !== null) throw new Error(`${THEIRS_B}'s card is not answerable: ${why.text}`);
+      const got = await refusals(w, channel, find(setB, LANE_B.replay), find(setB, LANE_B.borrow), theirs);
+      const ran = [count(w.host.answered, (e) => e === `${HARNESS_B} ${LANE_B.replay}`), count(w.host.answered, (e) => e === `${HARNESS_B} ${LANE_B.borrow}`), count(w.host.answered, (e) => e.startsWith(`${THEIRS_B} `))];
+      const said = `replayed: ${got.replayed}; another action's assertion: ${got.stepUp}; an answer on ${THEIRS_B}: ${got.theirs}; delivered ${ran.join('/')} (the first answer, the borrowed, the second member's)`;
+      if (got.replayed !== 'replayed' || got.stepUp !== 'step-up' || got.theirs !== 'grade' || ran.join('/') !== '1/0/0') throw new Error(said);
+      return said;
+    });
+    report.note('round-trip lane B', "the same refusals on both lanes, offline, are M4's cards.local.test.ts ('what the endpoint refuses')");
 
     // Acceptance 3: every item of the class's bound refused at the endpoint.
     await report.check('class-bound', 'every act, view and call outside the class refused `class`, a lane A query `grade`, nothing run', async () => {
@@ -282,6 +313,7 @@ export async function runItems(w: StagingWorld, report: Report, print: (line: st
     // The harness's cards leave the machine's sets (the counts fall: `settled`, which pushes nothing).
     for (const r of req.device) w.pending.drop(r.request);
     w.host.setItems(HARNESS_B, []);
+    w.host.setItems(THEIRS_B, []);
     if (!channel.closed) channel.close('done');
   }
 
@@ -303,9 +335,9 @@ export async function runItems(w: StagingWorld, report: Report, print: (line: st
       );
       await sleep(5000);
       const read = await pushes();
-      const problems = pushProblems(read, { project: RUN_PROJECT, machine: w.ref }, ownSessions, [THEIRS_A]);
+      const problems = pushProblems(read, { project: RUN_PROJECT, machine: w.ref }, ownSessions, [THEIRS_A, THEIRS_B]);
       if (problems.length > 0) throw new Error(problems.join('; '));
-      return `${read.length} notices, decrypted with the subscription's keys, one for each of ${ownSessions.join(', ')}, each exactly ${canonicalize({ project: RUN_PROJECT, machine: w.ref, session: '<session>', kind: 'waiting' })}; none for ${THEIRS_A}`;
+      return `${read.length} notices, decrypted with the subscription's keys, one for each of ${ownSessions.join(', ')}, each exactly ${canonicalize({ project: RUN_PROJECT, machine: w.ref, session: '<session>', kind: 'waiting' })}; none for ${THEIRS_A} or ${THEIRS_B}`;
     });
   }
   if (phone !== null) {

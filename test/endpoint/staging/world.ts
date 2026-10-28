@@ -14,12 +14,12 @@
 import { appendFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { base64urlEncode, encodePairingCode, endorseDevice, generateSigningKey, pairingFingerprint, verifyEnrollmentMac, type Device, type DeviceIdentity, type OrgPins } from 'org-protocol';
-import { HubClient, SoftwareAuthenticator } from 'org-protocol/test-support';
+import { SoftwareAuthenticator } from 'org-protocol/test-support';
 import { encodeEnrollmentCodeV2, ORG_STATE_PATH, PENDING_DEVICES_PATH, type EnrollmentIssued, type EnrollmentKey, type OrgStateView, type PendingDevice } from 'desk-hub/protocol';
 import { create } from 'zustand';
 import { checkTestHub, readDeployConfig, STAGING_HOST, STAGING_WORKER } from '../../../apps/desk-hub/deploy/config';
 import { judgeEntry } from '../../../apps/desk-hub/deploy/admin';
-import { Person } from '../../../apps/desk-hub/deploy/hub';
+import type { Person } from '../../../apps/desk-hub/deploy/hub';
 import { loadAdminDevice, OrgAdmin } from '../../../apps/desk-hub/deploy/org-admin';
 import { Cleanup } from '../../../apps/desk-hub/deploy/proof';
 import { httpPushSink, userAgent, type PushSink, type UserAgent } from '../../../apps/desk-hub/deploy/push-sink';
@@ -38,6 +38,7 @@ import { createEndpoint, type Endpoint } from '../../../src/endpoint';
 import { fakeServices, type FakeServices } from '../fake-services';
 import { newDevice } from '../org-fixtures';
 import { FakeEngineHost, laneAMember, PROJECT, Records, sminos, type Fixture, type HostSession } from '../sub-harness';
+import { BoundedPerson, within } from './bounded';
 import { cardsCredentialId, cardsDeviceName, machineName, memberEmail, type PhoneRun } from './run';
 import { sweepRun } from './sweep';
 
@@ -50,6 +51,9 @@ export const HARNESS_A = 'la-2';
 /** The owner's lane B sessions (their appSessionIds; their engine sessions `eng-<it>`): the phone's, and the harness's. */
 export const OWN_B = 'app-1';
 export const HARNESS_B = 'app-2';
+/** The second member's lane B session: owned by them in the machine's records, never listed, its card built as the
+ * client builds one (acceptance 2's answer on a session the member doesn't own). */
+export const THEIRS_B = 'app-b';
 
 /** The second `web-cards` device of the owner's: M3's device record and the channel it opens through the hub. */
 export type CardsDevice = {
@@ -132,8 +136,9 @@ export type StagingWorld = {
   cards: CardsDevice;
   /** The run's push sink and `o13-c-<n>`'s subscription there; null without a tunnel. */
   sink: { sink: PushSink; ua: UserAgent } | null;
-  /** The owner's lane B sessions, listed at the hub under their appSessionIds: the phone's, and the harness's. */
-  laneB: { own: HostSession; harness: HostSession };
+  /** The owner's lane B sessions, listed at the hub under their appSessionIds: the phone's, and the harness's; and the
+   * second member's, unlisted. */
+  laneB: { own: HostSession; harness: HostSession; theirs: HostSession };
   cleanup: Cleanup;
   /** What the run's undoing found still current once it ran (`LEFT …` lines): empty when it left nothing. */
   left: string[];
@@ -171,7 +176,7 @@ export function stagingTarget(): { hub: string; org: string; pinnedGenesis: stri
 /** The staging admin, signing for the configuration's own org under its pinned genesis. */
 export async function stagingAdmin(run: Pick<PhoneRun, 'keysFile' | 'token'>, cleanup: Cleanup, log: (line: string) => void): Promise<{ person: Person; admin: OrgAdmin; hub: string; org: string }> {
   const { hub, org, pinnedGenesis } = stagingTarget();
-  const person = new Person(hub, run.token, () => cleanup.check());
+  const person = new BoundedPerson(hub, run.token, () => cleanup.check());
   const admin = await OrgAdmin.open(person, { org, pinnedGenesis }, await loadAdminDevice(run.keysFile), log);
   return { person, admin, hub, org };
 }
@@ -223,9 +228,9 @@ async function build(run: PhoneRun, cleanup: Cleanup, log: (line: string) => voi
   const code = encodeEnrollmentCodeV2({ hub, token: issued.token, roots: root.keys, recoveryPub: root.recoveryPub, k: base64urlEncode(k) });
   for (const value of [issued.token, code, base64urlEncode(k)]) handled(run, value);
   const enrolling = started.cli('enroll', ['--name', name, '--wait', '300', '--json'], code);
-  const posted = await until(
-    async () => {
-      const response = await person.fetch(`/api/enrollments/${issued.enrollment.id}/key`);
+  const posted = await within(
+    async (signal) => {
+      const response = await person.fetch(`/api/enrollments/${issued.enrollment.id}/key`, { signal });
       if (response.status === 200) return (await response.json()) as EnrollmentKey;
       await response.body?.cancel();
       await new Promise((r) => setTimeout(r, 1000));
@@ -269,7 +274,9 @@ async function build(run: PhoneRun, cleanup: Cleanup, log: (line: string) => voi
   const laneB = {
     own: listLaneB(OWN_B, `o13 staging run ${run.n}: yours to answer, lane B`),
     harness: listLaneB(HARNESS_B, `o13 staging run ${run.n}: the harness's own lane B cards, not yours`),
+    theirs: host.add(THEIRS_B),
   };
+  records.set({ lane: 'B', session: laneB.theirs.engineSessionId!, owners: [B.id] }, THEIRS_B);
   function listLaneB(app: string, title: string): HostSession {
     const session = host.add(app);
     records.set({ lane: 'B', session: session.engineSessionId!, owners: ['@machine'] }, app);
@@ -285,7 +292,7 @@ async function build(run: PhoneRun, cleanup: Cleanup, log: (line: string) => voi
     const opened = await httpPushSink(run.sink.port, run.sink.url);
     cleanup.add('close the push sink', () => opened.close());
     const ua = await userAgent(opened.endpoint(cardsDeviceName(run.n)));
-    const { subscription } = await new HubClient(hub, person.headers).registerPush({ endpoint: ua.endpoint, keys: ua.keys, device: cards.record.deviceId });
+    const { subscription } = await person.json<{ subscription: { device?: string } }>('/api/push/subscriptions', { method: 'PUT', body: { endpoint: ua.endpoint, keys: ua.keys, device: cards.record.deviceId } });
     if (subscription.device !== cards.record.deviceId) throw new Error(`the hub bound the sink's subscription to ${subscription.device ?? 'no device'}`);
     sink = { sink: opened, ua };
     log(`${cards.name}'s push subscription at the run's sink, bound to its device`);
@@ -338,7 +345,7 @@ async function registerCards(run: PhoneRun, person: Person, admin: OrgAdmin, hub
     const macFingerprint = await pairingFingerprint(org, admin.member, device);
     const endorsement = await endorseDevice(org, admin.member, device, admin.device.stepUp.privateKey, admin.device.stepUp.pub);
     const signed = await admin.amend(`${cardsDeviceName(run.n)} (device ${device.id}) listed`, (s) => void s.members.find((m) => m.id === admin.member)!.devices.push({ ...device, endorsement }));
-    await until(async () => (await controller.sync()) === 'listed', `${cardsDeviceName(run.n)} listed`, 30_000);
+    await within(async () => (await controller.sync()) === 'listed', `${cardsDeviceName(run.n)} listed`, 30_000);
     return { deviceFingerprint, macFingerprint, listedAt: signed!.state.version };
   };
   let pairing: CardsDevice['pairing'];
