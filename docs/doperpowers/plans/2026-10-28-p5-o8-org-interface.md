@@ -25,10 +25,11 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
 
 ## Progress
 
-- [ ] M1 — The app's org session — **executable now** (needs O6, O10 M9, O11 and O13 M2, all landed; O7 M1's `src/main/org/session.ts` by the second-lands-takes-the-file rule)
+- [x] M1 — The app's org session — landed (PR #287, master 790002644, P5 Decision Log 105); the owner's staging sitting owed — (needs O6, O10 M9, O11 and O13 M2, all landed; O7 M1's `src/main/org/session.ts` by the second-lands-takes-the-file rule)
   - [x] (2026-10-28) Built on `p5-o8-m1`: `org.*`, `<userData>/org/`, the login transfer and stand-in, the hub client, the held view, the Registry feed, the production session, the Org section, main's composition over O7's seam (O7 M1 landed first, #285; its `session.ts` taken, the file this branch had copied byte for byte). The unit suites and `test/org/sign-in.local.test.ts` pass locally.
   - [x] (2026-10-28) reviewer-high converged: round 1 at ef4bb83cb (3 P1, 5 P2, all fixed at 59edeebe1), round 2 on the fix found nothing. Class 1a green at b5816709a (run 40683146373).
-  - [ ] The final gate on the PR's tree, and the owner's staging sitting.
+  - [x] (2026-10-28) The final gate on the PR's tree: run 40683839806, three reds none of #287's (c7 green on rerun 40699088283; design-systems a hosted flake; packaged's known `layout-transfer.spec.ts:541`).
+  - [ ] The owner's staging sitting.
 - [ ] M2 — The remote rows — **executable** once M1 and O7 M1 are on master
 - [ ] M3 — The app as the org's signer: a co-root, the weekly successor, the signing checks — *advisory*
 - [ ] M4 — The Org page — *advisory; taste (Q1)*
