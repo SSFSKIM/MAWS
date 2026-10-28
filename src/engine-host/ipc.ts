@@ -18,7 +18,7 @@ import type { HandlerContext } from '@shared/ipc/client'; // P5 O10 M7
 import { captureShellEnvironment, SHELL_CAPTURE_GRACE_MS, SHELL_CAPTURE_TIMEOUT_MS } from '@shared/host/shell-env';
 import type { CommandInput, CommandName, CommandOutput } from '@shared/ipc/schema';
 import type { C3_ENGINE_COMMANDS } from '@shared/ipc/schema/engine';
-import type { C3_SESSION_COMMANDS, E8_SESSION_COMMANDS, P2C_SESSION_COMMANDS /* P2-C */, R2_SESSION_COMMANDS } from '@shared/ipc/schema/session';
+import type { C3_SESSION_COMMANDS, E8_SESSION_COMMANDS, O10_SESSION_COMMANDS /* P5 O10 M8 */, P2C_SESSION_COMMANDS /* P2-C */, R2_SESSION_COMMANDS } from '@shared/ipc/schema/session';
 import { SURFACE_CLIENT_ID } from '@shared/engine/surface'; // R2
 import { createBinaryProbe, PROBE_BOUND_MS, type BinaryCheck } from './binary-info';
 import { TESTED_ENGINE_VERSION } from './engine-compat'; // W13
@@ -121,6 +121,8 @@ export const E8_DEADLINE_SHAPES: Record<(typeof E8_SESSION_COMMANDS)[number], De
 // P2-C start (2026-10-09): the steer cancel is one `cancel_async_message` round trip, bounded as `session.queue.hold`
 // is; the prompt record's read answers from the host's own journals on disk, as `session.events` does past its ring
 export const P2C_DEADLINE_SHAPES: Record<(typeof P2C_SESSION_COMMANDS)[number], DeadlineShape> = { 'session.steer.cancel': 'bounded', 'session.promptHistory': 'immediate' };
+// P5 O10 M8: the broker's items, answered from the session's own list
+export const O10_DEADLINE_SHAPES: Record<(typeof O10_SESSION_COMMANDS)[number], DeadlineShape> = { 'session.pendingItems': 'immediate' };
 // P2-C end
 // E1: the `maws` tool server's commands (P1 ledger §5), each immediate: answered from the host's table or at the
 // answer's flushed write
@@ -403,6 +405,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   });
   handle('session.pendingRequest', async ({ appSessionId, requestId }) => ({ event: streamOf(appSessionId).pendingRequest(requestId as RequestId) }));
   handle('session.catalog', async ({ appSessionId }) => sessionOf(appSessionId).catalog());
+  on('session.pendingItems', async ({ appSessionId }) => ({ items: sessionOf(appSessionId).brokerItems() })); // P5 O10 M8
 
   // -- the composer ----------------------------------------------------------------------------------------------------
   handle('session.send', async ({ appSessionId, content }) => {

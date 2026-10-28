@@ -689,6 +689,18 @@ export async function buildScenario(k: Keys): Promise<VectorSet> {
     }, 3), ['a1StepUp'], no('malformed'), 'v3');
   }
 
+  // The DX1 org key's retirement in the state (O14 M5a): added at its own version, kept or dropped after, never moved.
+  {
+    const retired = await sign(await next(v2, (s) => void (s.legacyRetired = { version: s.version, at: s.issued }), 2), 'a1StepUp');
+    keep('v3 legacy key retired', retired);
+    cases.push({ name: 'a successor retiring the legacy key', call: 'verifySuccessor', args: [signed('v2'), signed('v3 legacy key retired'), []], expect: ok() });
+    await successorCase('a successor retiring the legacy key at another version', await next(v2, (s) => void (s.legacyRetired = { version: 1, at: s.issued }), 2), ['a1StepUp'], no('malformed'));
+    await successorCase('then the legacy retirement kept', await next(retired, (s) => s.projects.push({ id: 'proj-kept', name: 'kept' }), 3), ['a1StepUp'], ok(), 'v3 legacy key retired');
+    await successorCase('then the legacy retirement dropped', await next(retired, (s) => delete s.legacyRetired, 3), ['a1StepUp'], ok(), 'v3 legacy key retired');
+    await successorCase('then the legacy retirement moved', await next(retired, (s) => void (s.legacyRetired = { version: 3, at: s.issued }), 3), ['a1StepUp'], no('malformed'), 'v3 legacy key retired');
+    await successorCase('a successor whose legacy retirement carries another field', await next(v2, (s) => void Object.assign(s, { legacyRetired: { version: s.version, at: s.issued, by: A } }), 2), ['a1StepUp'], no('malformed'));
+  }
+
   // Wire input RFC 8785 cannot write, or no shape at all: a verdict, never a throw.
   cases.push({ name: 'genesis that is not an object', call: 'verifyGenesis', args: [null], expect: no('malformed') });
   {
