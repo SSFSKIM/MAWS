@@ -1,7 +1,7 @@
 // The grade of a by-effect command, read from its input (O10 M5; RL §5.5, "including indirect paths"; P5 Decision Logs 36
 // and 43). One row for every by-effect command of the composed registry, a rule or an explicit `no-rule`
 // (test/endpoint/by-effect.test.ts fails when the registry gains a by-effect name this table lacks), and lane A's
-// `sminos.command`, graded as the slash command it runs. A rule answers the grade its input's effect takes; the endpoint
+// `sminos.command`, graded as the slash command it runs, and `sminos.send`, graded by its text (O9 M1). A rule answers the grade its input's effect takes; the endpoint
 // holds it to the command's floor where the two are both session ranks. `no-rule` is refused remotely (`no-rule`) until
 // someone reads what the command does for a remote caller.
 //
@@ -90,6 +90,8 @@ export const BY_EFFECT: Readonly<Record<string, EffectRule | typeof NO_RULE>> = 
   'session.applyFlagSettings': NO_RULE,
   // Its reader fields are the owner's own row's until O8 keeps them per member, and it is main-owned until O3.
   'session.update': NO_RULE,
-  // Lane A: the slash command the bridge runs.
+  // Lane A: the slash command the bridge runs, and a person's message graded by its text (sminos refuses a `/` text
+  // itself, but the endpoint grades it right on its own; a text that is no string is graded as the most it could be).
   'sminos.command': (input) => (typeof input.name === 'string' ? slashGrade(input.name) : 'manage'),
+  'sminos.send': (input) => (typeof input.text === 'string' ? textGrade(input.text) : 'manage'),
 };
