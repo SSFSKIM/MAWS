@@ -34,7 +34,7 @@ After O6:
 - [x] M3: machine links and the second-profile stand-in (2026-10-27; commits `98d55f9cf`..`4cc3aa1fc`, task review clean after two fix rounds; class 1a with e2e:cross-build GREEN 40537654843; hosted e2e:supervisor GREEN 40527949745 and self-hosted e2e:machines GREEN 40527965726, both at `f7672566b`, before the manager-only fixes)
 - [x] M4: per-machine stores, the shell per machine, explicit machines for paths (2026-10-27; commits `6370e06ec`..`3d385c4cb`, task review clean after one fix round; class 1a GREEN 40573698654; at `4b59cd5f5`, before the fix wave: hosted GREEN 40559770099, mini e2e:machines with M4's scene and e2e:default GREEN 40559769024, OX7 bench within budget 40563723819. At the fix head, once the mini's loginwindow alert (ci-kit-sandbox#59) closed: e2e:machines, e2e:default and e2e:cross-build GREEN, run 40585344264. Hosted e2e:layout's `shell.spec.ts:367`, red at the pre-fix head too (40577605822), was a race in the test, fixed in `18c452b74`)
 - [x] M5: org projects and the sidebar (2026-10-27; commits `18c452b74`..`de5d12a5b`; task review converged after one fix round, with two findings logged as debt; class 1a GREEN 40607054840; mini e2e:machines and e2e:default GREEN 40607045251; hosted at `361f4c0c0` GREEN 40591232003 and e2e:layout GREEN 40597601420; at `de5d12a5b` the hosted maws-app runs were green but four MAWS waiter jobs died with no log (40607043033), so M6's whole set stands in for them)
-- [ ] M6: acceptance
+- [x] M6: acceptance (2026-10-28T08:40Z; commits `d7e7b66f6`..`1941e8632`, the branch review at the high rung clean after its fix wave; acceptance 1 to 10 at `38e04607f`, tree `a52a8c8dcf37`: class 1a 40631062709, `--gates all` 40631062270, e2e:machines admitted 3 of 3 hosted (40631062922, 40631063249, 40631063380) against the no-hosted baseline 40632939975, bench 40632939812; at the final code head `1941e8632`, after two master merges and the e2e:panel test fix, `--gates all` 40650537683 green)
 
 ## Acceptance
 
@@ -1203,4 +1203,37 @@ Residue decisions O6's section leaves open, made above, for the architect to rec
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+**What landed (2026-10-28).**
+- O6 gives MAWS its machine dimension. Every machine has a ref. Every session, project, pty and attention id is an address, `<ref>/<bare>`, across the renderer boundary. Every command names its machine.
+- One connection manager reaches the local machine in-process, and a second profile through the same-uid stand-in.
+- The stores are partitioned per machine. The sidebar groups sessions by org project, under sminos's derivation rule, with a machine row for each machine's sessions of no project.
+- A machine that leaves greys its rows and keeps its tabs. When it returns, its rows are live again within 5 s.
+- One machine's behaviour is unchanged but for its ids. The OX7 bench stays within budget, and the engine-host fingerprint is unmoved.
+
+**Acceptance.** Acceptance 1 to 10 hold at the reviewed code head `38e04607f` (tree `a52a8c8dcf37`):
+- class 1a 40631062709;
+- `--gates all` hosted 40631062270, green after one `--failed` rerun of a hosted e2e:code flake;
+- e2e:machines' admission: hosted 40631062922, 40631063249 and 40631063380 against the no-hosted baseline 40632939975, each `1 passed`;
+- the bench 40632939812 at 25.0 / 38.1 ms;
+- the fingerprint `ff99b1c0711cd795` at the base and the head;
+- all six Concrete Steps 9 mutations fail as specified.
+
+At the final code head `1941e8632`, after two master merges (WIRE_MINOR 3) and the test-only e2e:panel fix `04a56ab2d`, `--gates all` is 40650537683, green (47 jobs). Its e2e:to-human was a hosted flake, green on a `--failed` rerun: attempt 2, job 122712528295, maws-app 40657766939, `2 passed`. Before that, at the first merge `edc0792a7`, class 1a with cross-build was 40640099058. The item-by-item evidence is in `2026-10-27-p5-o6-report.md`.
+
+**What went well.**
+- Landing the seam early as its own PR (#216) let O2 build on the identity file while O6 continued.
+- The codec's compile rules and the coverage snapshot made the "every id is an address" claim checkable: Concrete Steps 9's five schema mutations each fail by naming the field.
+- Per-milestone task reviews caught each milestone's machine-blind spots before they compounded.
+
+**What it cost, and what to carry forward.**
+- **Lifecycle events.** The branch review found a class the milestone reviews could not see: events that cross links (`engine.hostState`, `pty.hostState`) consumed by listeners that had only ever seen one machine.
+  - The lesson for O7 to O9: when a new dimension is added, sweep every listener of every event that crosses it, not only the commands.
+- **desk-web.** The desk's ids (`desk:<project>:<session>`) reached the renderer's address lowering through a shared component. Only `--gates all` runs e2e:desk-web, and no milestone ran it before M6.
+  - The lesson: a boundary change should run the whole Mac set once at its first reviewed milestone, not only at acceptance.
+- **The hosted git no-answer.** B's org derivation sometimes got no answer from git on hosted Macs at startup. It cost two acceptance rounds.
+  - The fix, in-run retries and a 10 s retry timeout inside the shared limiter, holds: eight hosted passes since.
+  - The cause is unconfirmed, because main's stderr isn't kept in hosted jobs.
+- **Hosted flakes need a diagnosis, not a rerun.** e2e:panel's corner drag failed 2 of 4 hosted runs. Twelve instrumented runs showed a press read before the just-floated card settled; the test now waits for a stable press point (`04a56ab2d`).
+- **The final set and the mini.** Running the final set as six parallel runs each repeated the cross-build peer check on the one Mac. Since `38e04607f` the coordinator's rule applies: one run per tree keeps the peer check.
+
+**Left for others.** These are in the report's Debt and Residue: numeric `.smns` spellings, context-only merge order, `panel.<address>` keys of a machine dropped from the roster, three machine-blind residuals of the listener sweep, and the surfaces left local until O7.
