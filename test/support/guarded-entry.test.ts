@@ -62,6 +62,16 @@ describe('the guarded-entry rule', () => {
     expect(problems).toContain('main/entry.js: a load of node-pty: neither a Node builtin nor an allowed external');
   });
 
+  // A load is judged only when its whole argument is one string literal; anything else (a concatenation, a template
+  // literal, a variable) is refused as unjudgeable rather than read as no load at all.
+  it('refuses a load whose argument is not one string literal, deferred or at start', () => {
+    for (const line of ['import("./chunks/" + name);', 'Promise.resolve().then(() => require("./chunks/" + name));', 'const m = require(`./chunks/${name}.js`);', 'const n = require(`./chunks/a.js`);', "const o = require('./a.js' + suffix);"]) {
+      expect(loadsOf('/o/e.js', line), line).toEqual({ loads: [], computed: 1 });
+      const out = built({ 'entry.js': line });
+      expect(guardedEntryProblems({ ...out, deferred: true }), line).toEqual(["main/entry.js: 1 load(s) of a computed specifier, which can't be judged"]);
+    }
+  });
+
   it('refuses every deferred load where the entry admits none, its chunk beside it included', () => {
     const out = built({ 'entry.js': deferredLoad('./chunks/endpoint-2.js'), 'chunks/endpoint-2.js': '' });
     expect(guardedEntryProblems({ ...out, deferred: false })).toEqual(['main/entry.js: a deferred load of ./chunks/endpoint-2.js: this entry admits no deferred load']);

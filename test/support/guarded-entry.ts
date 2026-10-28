@@ -28,10 +28,14 @@ export type GuardedEntry = {
 
 export type Load = { file: string; specifier: string; deferred: boolean };
 
-const DEFERRED_REQUIRE = /Promise\.resolve\(\)\.then\(\(\)\s*=>\s*require\(\s*(["'])([^"']+)\1\s*\)\)/g;
-const IMPORT = /\bimport\s*\(\s*(["'])([^"']+)\1\s*\)/g;
-const REQUIRE = /\brequire\(\s*(["'])([^"']+)\1\s*\)/g;
-const COMPUTED = /\b(?:import|require)\s*\(\s*(?!["')])/g;
+// Every call of `import` or `require`, its argument read from the paren: judged only when it is one string literal and
+// nothing else, so a concatenation, a template literal or a variable is computed, never read as no load at all. An empty
+// call (`require()` in a message's text) loads nothing. The build's deferred form is a `require` the arrow of
+// `Promise.resolve().then(() => …)` returns.
+const CALL = /\b(import|require)\s*\(/g;
+const LITERAL = /\(\s*(["'])([^"'\\\n]*)\1\s*\)/y; // sticky: read at the call's paren
+const EMPTY = /\(\s*\)/y;
+const DEFERRED_ARROW = /Promise\.resolve\(\)\.then\(\(\)\s*=>\s*$/;
 // A comment line (`*`, `/*`, `//`) is not code: inlined sources keep JSDoc that reads `import('../x.js')`.
 const code = (text: string) =>
   text
@@ -42,18 +46,22 @@ const code = (text: string) =>
 /** The loads `text` (a built file at `file`) makes, each marked deferred or at start; and its computed ones. */
 export function loadsOf(file: string, text: string): { loads: Load[]; computed: number } {
   const body = code(text);
-  const deferred = [...body.matchAll(DEFERRED_REQUIRE)].map((m) => m[2]);
-  const imports = [...body.matchAll(IMPORT)].map((m) => m[2]);
   const loads: Load[] = [];
-  const lazy = new Map<string, number>();
-  for (const specifier of deferred) lazy.set(specifier, (lazy.get(specifier) ?? 0) + 1);
-  for (const [, , specifier] of body.matchAll(REQUIRE)) {
-    const owed = lazy.get(specifier) ?? 0;
-    if (owed > 0) lazy.set(specifier, owed - 1);
-    loads.push({ file, specifier, deferred: owed > 0 });
+  let computed = 0;
+  for (const call of body.matchAll(CALL)) {
+    const paren = call.index + call[0].length - 1;
+    EMPTY.lastIndex = paren;
+    if (EMPTY.test(body)) continue;
+    LITERAL.lastIndex = paren;
+    const literal = LITERAL.exec(body);
+    if (literal === null) {
+      computed++;
+      continue;
+    }
+    const deferred = call[1] === 'import' || DEFERRED_ARROW.test(body.slice(Math.max(0, call.index - 64), call.index));
+    loads.push({ file, specifier: literal[2], deferred });
   }
-  for (const specifier of imports) loads.push({ file, specifier, deferred: true });
-  return { loads, computed: [...body.matchAll(COMPUTED)].length };
+  return { loads, computed };
 }
 
 /** What breaks the rule in `guarded`'s graph, one line each; empty when it holds. */
