@@ -367,3 +367,66 @@ deploy, `prod/`, the throwaway steps' snapshots and sweeps, `access-sync/` (its 
 
 Production's Access read-back (its apps and policies, GETs only, compared before and after a run) is not among them:
 it reads production's objects with the setup token, which no script here does.
+
+## Production runs: `production-deploy.sh`, `production-run.sh`
+
+Production's deploy and the steps around it (P5 Decision Log 40) are two scripts beside the staging ones, with their
+mechanism aimed the other way. **The owner runs them; an agent never does**, not even read-only or `--dry-run`
+against the real configuration. Each holds production's Worker, host and org (`desk-hub`,
+`desk-hub.opencognita-platform.workers.dev`, `ssfskim`, as `config.ts` names them) and staging's as named constants,
+reads `deploy/config.json` of its checkout first, and stops before anything else runs unless it names exactly
+production's Worker, host and org; a configuration naming staging's Worker or host, a preview alias (`<alias>-desk-hub.…`)
+or another org is refused as not production. Every token is read inside the script, by path, inside the pipe that
+hands it to a command, and never printed or passed as an argument; output goes through the staging scripts' filter
+(any line holding `token`, `secret`, `bearer` or `eyJ` is dropped, `wrangler target …` lines kept).
+
+- `zsh deploy/production-deploy.sh --checkout <path> --confirm <sha8> [--allow-head] [--dry-run]` deploys the checkout
+  (default: the one the script is in): the top of a git worktree with no uncommitted changes to tracked files, whose
+  HEAD is `--confirm` (as `git rev-parse --short=8 HEAD` prints it, so a command copied from a note cannot deploy
+  another commit) and, after a `git fetch origin master`, `origin/master`'s head. `--allow-head` deploys a HEAD that is
+  not master's (a hotfix), still named by `--confirm`. It builds desk-web with `VITE_DESK_WEB_BUILD=<label>` exported
+  (the build the phone's channel handshake names), then runs `deployment deploy --config deploy/config.json --assets
+  <checkout>/apps/desk-web/dist --web <label>` with the two API tokens on its stdin; `<label>` is `master.<sha8>`, or
+  `head.<sha8>` for a commit that is not master's. It prints production's `X-Desk-Build` before (credential-free),
+  fails if no wrangler call or any but `desk-hub`'s ran, then reads production's `X-Desk-Build` every 10 s for 2 minutes
+  until it carries `hub@<sha8>` (not `+dirty`), and fails if it never does. `--dry-run` makes every check, then prints
+  what it would run (no token in it) and runs none of it.
+- `zsh deploy/production-run.sh <step>`, one step at a time:
+  - `checkout [<path>]`: a detached worktree of `origin/master` at `<path>` (default `~/.local/share/maws-desk-deploy`;
+    a path under `/tmp`, `/private/tmp` or `$TMPDIR` is refused, since a sweep empties them): added from the worktree the
+    script is in (`git worktree add -f --detach`), or fetched and checked out again where it exists. Git never runs in
+    a worktree with uncommitted changes, so a dirty checkout, or a dirty worktree to add from, is refused. Then
+    `pnpm install --frozen-lockfile --filter 'desk-hub...' --filter 'desk-web...'` there, and the deploy command for
+    that commit is printed.
+  - `build`: production's `X-Desk-Build`, credential-free. `wait <sha8>`: the deploy's 2-minute wait, alone.
+  - `access-sync` (changes production's Access): `deployment access-sync` against production, reading the head as a
+    production machine enrolled v2 (O14), whose credentials the owner writes to `$DESK_PRODUCTION_DEVICE/machine.json`
+    (`{"DESK_MACHINE_CLIENT_ID": …, "DESK_MACHINE_CLIENT_SECRET": …}`); without the file it stops and says so. Its
+    checkpoint is `$DESK_PRODUCTION_DIR/access-sync/desk-hub.json`. It takes no option.
+  - `admin <args…>`: `deployment admin <args…>` (O13 M2) against production, with `--keys
+    $DESK_PRODUCTION_DEVICE/keys.json` and the owner's production Access token (`cloudflared access token
+    -app=https://desk-hub.opencognita-platform.workers.dev`, after `cloudflared access login` once) on its stdin; `init`
+    needs no token. The deployment and the keys are the script's: `--config`, `--keys`, `--hub`, `--user` and `--yes` are
+    refused. `genesis`, `pair` and `remove-device` ask on the terminal (`/dev/tty`) before they sign, and a pairing code
+    is written to the terminal alone, never to the step's log; `genesis` keeps no log at all (`--recovery paper` prints
+    the recovery key once).
+
+  The steps that change production (`access-sync`; `admin genesis`, `pair`, `remove-device`, `refresh`) say so in their
+  first line, before they read any credential, and stop at the first one they lack.
+
+What they read, at run time:
+- `DESK_PRODUCTION_SECRETS` (default `~/.config/claude-secrets/projects/-Users-new-Developer-GitHub-doperpowers`): the
+  directory holding `CF_ACCESS_SETUP_TOKEN` (the deploy, `access-sync`) and `CF_DESK_HUB_SERVICE_TOKENS` (the deploy);
+- `DESK_PRODUCTION_DEVICE` (default `$DESK_PRODUCTION_DIR/device`, created 0700): `keys.json`, the admin device's keys
+  (`admin init` writes it; the command keeps its own files beside it), and `machine.json` for `access-sync`;
+- `DESK_HEAVY_WRAPPER`, when set, prefixes the web build and the checkout's install (`with-slot.sh`, the Mac's slot
+  limiter, stays the owner's);
+- `TMPDIR`, only to refuse a checkout under it.
+
+Where they write: `DESK_PRODUCTION_DIR` (default `~/.local/state/desk-hub-production`, created 0700): one log per
+deploy (`production-deploy-<time>.log`), per `access-sync` and per `admin` run but `genesis`, and `access-sync/`.
+Nothing of production's Access objects is read.
+
+A deploy, in order: `zsh apps/desk-hub/deploy/production-run.sh checkout`, then from the checkout it names
+`zsh <checkout>/apps/desk-hub/deploy/production-deploy.sh --checkout <checkout> --confirm <sha8> --dry-run`, read, and
+the same without `--dry-run`.
