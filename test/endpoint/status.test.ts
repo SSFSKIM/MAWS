@@ -40,6 +40,7 @@ describe('status()', () => {
       rl10: { connected: false },
       listener: { bound: false },
       legacyKey: false,
+      legacyRetired: false,
     });
     await endpoint.stop();
   });
@@ -80,7 +81,7 @@ describe('status()', () => {
     const endpoint = createEndpoint();
     await endpoint.start(services);
     const status = endpoint.status() as Record<string, unknown>;
-    expect(status).toMatchObject({ enrollment: 'org-listed', name: 'mini', org: 'org-local', stateVersion: 2, headHash: await stateHash(head.state), legacyKey: true });
+    expect(status).toMatchObject({ enrollment: 'org-listed', name: 'mini', org: 'org-local', stateVersion: 2, headHash: await stateHash(head.state), legacyKey: true, legacyRetired: false });
     expect(leaks(status)).toEqual([]);
     // The walk itself catches what it should.
     expect(leaks({ ...status, extra: { dir: services.machine.stateDir, ip: '100.64.1.2', pub: key.pub } }).map((l) => l.at)).toEqual(['$.extra.dir', '$.extra.ip', '$.extra.pub']);

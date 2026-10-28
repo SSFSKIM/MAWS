@@ -80,7 +80,14 @@ export type OrgState = {
   revoked: RevokedKey[];
   delegations: Delegation[];
   projects: ProjectEntry[];
+  /**
+   * The DX1 org key's retirement (O14 M5a): set by the state that retires it (`version` is that state's own) and kept
+   * unchanged after; a successor may drop it (the retirement undone). Every endpoint that adopts a head carrying it
+   * stops dual-coding; the hub purges its wrapped copies only on its word.
+   */
+  legacyRetired?: LegacyRetired;
 };
+export type LegacyRetired = { version: number; at: string };
 export type SignedOrgState = { state: OrgState; sigs: Sig[] };
 
 /** A record signed once: `sig` is over `body` under the record kind's domain. */

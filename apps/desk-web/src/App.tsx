@@ -14,7 +14,11 @@ import { fetchMe, SignInError, type Me } from './hub/me';
 import { useAccess, watchAccess } from './hub/access';
 import { loadDeviceKey, useKeyHolder } from './key/holder';
 import { hubBase } from './hub/base';
+import { recordPushOutcome } from './push/outcome';
+import { browserPushEnv, resyncPush } from './push/device';
 import { orgWaiting, showBadge } from './pwa/badge';
+import { registerServiceWorker } from './pwa/service-worker';
+import { bootDevice, isDevice, stopDevice } from './cards/boot';
 import { followHistory, useDeskLayout } from './shell/layout';
 import { usePhoneProject } from './shell/phone';
 import { useNarrow } from './shell/viewport';
@@ -87,19 +91,20 @@ function Desk({ me }: { me: Me }) {
   useEffect(() => watchAccess(), []);
   useEffect(() => startGrid(hubBase()), []);
   useEffect(() => void loadDeviceKey(me.org.id), [me.org.id]);
-  // The device's record and org state, read once the member is known. A device already subscribed hands its
-  // subscription to the hub again (bound to the device while the org lists it); what came of it is kept for the
-  // Notifications panel, which shows a refusal and offers Retry.
-  // Its modules (the protocol package's verification with them) load as a chunk of their own, after the first screen.
+  // This browser as a `web-cards` device: started now when it is one already (its record, the org state it verified,
+  // the push binding), else only once the Device panel opens (cards/boot.ts). A device already subscribed hands its
+  // subscription to the hub again — the device's start does that, bound to the device while the org lists it; what came
+  // of it is kept for the Notifications panel, which shows a refusal and offers Retry.
   useEffect(() => {
     let live = true;
-    let stop: (() => void) | null = null;
-    void loadChunk(() => import('./cards/start')).then((m) => {
-      if (live) stop = m.startDevice(me);
-    });
+    const resync = () => void recordPushOutcome(resyncPush(browserPushEnv(registerServiceWorker())));
+    isDevice(me.org.id).then(
+      (device) => live && (device ? void bootDevice(me) : resync()),
+      () => live && resync(),
+    );
     return () => {
       live = false;
-      stop?.();
+      stopDevice();
     };
   }, [me]);
   // The app icon's badge follows the grid while the app is open (a push sets it from its payload while it is not), so

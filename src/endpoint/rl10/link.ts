@@ -6,7 +6,7 @@
 // The hello. sminos's first line carries the token; its `policy` is taken only while the endpoint holds none. The
 // welcome answers with the machine's identity under the head (`org`, `hub`, `name`, `former` as names, `ref`,
 // `enrolled`), the policy and the head's version; then the head's whole revocation set, the org directory, and, while
-// no legacy key is held, `legacy-key?`. After each welcome sminos restates its session-lane state whole and closes it
+// no legacy key is held and the org state has not retired it (legacy.ts), `legacy-key?`. After each welcome sminos restates its session-lane state whole and closes it
 // with `restated {}`, and the restatement replaces what was held (members.ts); the endpoint restates its revocation
 // set and directory whenever the head changes them.
 //
@@ -16,7 +16,8 @@
 //     (M3's notify counts), and `session` messages of every DX4 kind: a `machine` presence gives its project's
 //     checkouts, a sub-less `host` is a to-human event (M3's `wrote`, once per `(writer, seq)`, durably), and every
 //     message goes to the session listeners (M8's subscriptions);
-//   - `words?`, answered `words` (words.ts); `policy-set`, the policy changed and restated; `legacy-key`, kept;
+//   - `words?`, answered `words` (words.ts); `policy-set`, the policy changed and restated; `legacy-key`, kept (logged
+//     and dropped once the org state retires the key);
 //   - `rpc-result`, handed to the result listeners (M7) and acknowledged `rpc-ack {opId, nonce}`; `queried` and
 //     `tombstoned`, the answers to `query` and `tombstone`.
 //
@@ -102,7 +103,12 @@ export class Rl10 {
     };
     this.#ledger = new SignatureLedger(sub('signatures'));
     this.#index = new InboundIndex(sub('inbound'), ctx.now);
-    this.legacy = new LegacyKey(ctx.state, () => ctx.identity()?.org ?? null);
+    // The enrollment's org, listed or not: the first sync's head, which an enrollment adopts before it is listed, is
+    // one `legacy.json` follows (legacy.ts).
+    this.legacy = new LegacyKey(ctx.state, () => {
+      const state = ctx.state();
+      return ctx.identity()?.org ?? (state?.enrolled ? (state.enrollment?.org ?? null) : null);
+    });
     this.members = new Members({ dispatch: ctx.dispatch, listings: ctx.listings, listed: () => ctx.listings.listedSessions(), forget: (s) => ctx.notifier.forget(s), log: ctx.log, now: ctx.now });
     this.relay = new LogRelay({
       org: () => {
@@ -348,7 +354,7 @@ export class Rl10 {
     this.#welcomed = true;
     this.#link(true);
     await this.#restate(true);
-    if (!this.legacy.held) this.send({ t: 'legacy-key?' });
+    if (!this.legacy.held && !this.legacy.retired) this.send({ t: 'legacy-key?' });
     this.members.welcome();
   }
 

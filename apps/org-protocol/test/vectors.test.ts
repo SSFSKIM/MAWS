@@ -63,6 +63,13 @@ describe('the committed vectors', () => {
       "contested refs: a retired certificate on an entry's ref",
       "a VM's event after its certificate expired, under its renewal",
       "a retired certificate's event, its ref enrolled since",
+      // O14 M5a: the legacy key's retirement in the state.
+      'a successor retiring the legacy key',
+      'a successor retiring the legacy key at another version',
+      'then the legacy retirement kept',
+      'then the legacy retirement dropped',
+      'then the legacy retirement moved',
+      'a successor whose legacy retirement carries another field',
       // Wave 5: revocations in the state (RL DL 24), name namespaces and certificate refs (RL DL 25), grants' keys.
       "a successor rotating a machine's key, the old one neither retired nor revoked",
       'a successor dropping a device, its keys neither retired nor revoked',

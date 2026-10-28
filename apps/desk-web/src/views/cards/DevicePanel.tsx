@@ -12,6 +12,7 @@ import { formatClock } from '@shared/app/date-format';
 import type { Me } from '../../hub/me';
 import { browserPushEnv, pushState, type PushState } from '../../push/device';
 import { registerServiceWorker } from '../../pwa/service-worker';
+import { bootDevice } from '../../cards/boot';
 import { deviceController, RegisterError, useDevice } from '../../cards/register';
 import { CardsPasskeyError } from '../../cards/cards-passkey';
 import { HubRequestError } from '../../hub/http';
@@ -49,6 +50,8 @@ export function DevicePanel({ me, onClose }: { me: Me; onClose: () => void }) {
     const timer = setInterval(() => setNow(Date.now()), 60_000);
     return () => clearInterval(timer);
   }, []);
+  // A browser that is no device yet starts the device's part here (cards/boot.ts); one that is started at the app's start.
+  useEffect(() => void bootDevice(me), [me]);
   const deviceKey = record === null ? null : `${record.deviceId} ${record.state.kind}`;
   useEffect(() => {
     let live = true;
