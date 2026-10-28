@@ -46,7 +46,8 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-10-28) Task 6b, reviewed clean (fbed38051, fixes 37cdbf67d and 1d4bd558c): the Org section (its lines, buttons and confirmations) and `copy.ts`.
   - [x] (2026-10-28) Task 7, reviewed clean (1e38ae640): `test/org/signer.local.test.ts`, with the shared harness `test/org/local-org.ts`.
   - [x] (2026-10-28) Task 8, reviewed clean (740f0c46f): the app follows a recovery whose first state is a sibling at its head's version (Task 7's Discovery 2).
-  - [ ] reviewer-high on the PR, the desk track's review of the `admin.ts` hunk, and the final gate.
+  - [x] (2026-10-28) reviewer-high on the whole branch converged in three rounds. Round 1, on 559ddfc0c, found 3 P1 and 2 P2, fixed at c4a1d6801..ba781f87f. Round 2 reproduced one earlier interleaving of the first P1, fixed at b92b07573. Round 3 found nothing material.
+  - [ ] The desk track's review of the `deploy/` hunk, and the final gate (the full hosted set).
 - [ ] M4 — The Org page — *advisory; Q1 answered; needs M3 and O11's H1*
 - [ ] M5 — Owners on rows and the People toggle — **executable** (re-planned 2026-10-28; needs M2, landed)
 - [ ] M5b — Add owner — *later; needs O10's `record.owners` offer row and O12's sminos executor*
@@ -1556,6 +1557,29 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
 
 **M2 (2026-10-28, PR from `p5-o8-m2`; the live check at the first cut-over machine pending).** Main keeps every hub-served session listing that verifies against the held head, judged per key against a persisted mark that a withdrawal keeps and only a signed head ends, cached in `listings.json` and verified again at load and at each head; `org.rows` gives the renderer the RL2 roster's rows, `complete` and `pending`; the sidebar draws the member's own listed sessions under their org projects, and a covered machine is loaded and settled only once its rows are known. Evidence: `rows.test.ts` 22, `test/org/rows.local.test.ts` 4 (desk-hub's Worker in Miniflare, a real endpoint's lane A and lane B listings), the renderer suites (events 42, derive 38, Sidebar 91, org-projects 6, remote-openers 2), and the final gate (run 40691164424). Still owed: the live check at the first cut-over machine.
+
+**M3 (2026-10-28, PR from `p5-o8-m3`; the owner's sitting pending).** The app becomes an org signer once the held head lists its step-up key as a root:
+- it signs typed successors behind Touch ID, through the checks before signing and the package's `verifySuccessor`, from a durable pending slot whose exposure is written before every send;
+- it signs the weekly successor at a focus;
+- it offers the revocations a recovery left lost, each closure shown before Touch ID;
+- it delivers every key-ending state to the roster's machines over O7's links, recovering first after a recovery and paging within RL2's bound;
+- it makes new keys through a transaction that recovers at every boundary.
+
+`deployment admin root add` makes a listed admin `native-mac` device a co-root.
+
+Evidence:
+- the unit suites: `checks` 35, `signer` 39, `signing-store` 8, `weekly` 13, `deliveries` 22, `org-session` 94, `keys` 40, `step-up` 20, `OrgSection` 31, `admin` 35;
+- `test/org/signer.local.test.ts` 8, on desk-hub's Worker in Miniflare with O13's real admin and an enrolled endpoint, including a run at the delivery bound over the real link;
+- the gates the PR body lists.
+
+Still owed: the owner's sitting, `root add` on staging and then on production.
+
+Retrospective (M3). Built as eight tasks under subagent-driven execution, each reviewed at its frontier, then reviewer-high on the whole branch.
+- What the reviews found: ten task reviews found real defects in five of the eight tasks, and the whole-branch review found five more across tasks.
+- The defects shared one shape: a fact checked before an await and acted on after it. That covers a run planned on a held line that moved, a registration snapshot that overwrote a sign-out, a queued attempt that missed an intent recorded meanwhile, a confirmation that outlived its proposal, and a post that captured a sibling as its parent.
+- Every task-scoped review that read each module alone missed the cross-module form. The whole-branch review caught it, and its race reproductions held the named await open.
+
+A future child that composes async modules over shared state should list each act's preconditions and re-check them synchronously at the act, with a test that holds each await open. It should also bind any person's consent (a sheet, a confirmation) to the identity of what was shown.
 
 Retrospective (M2). The mark rule and the coverage rule, which the planning rounds had sharpened, were exactly where the build's two real defects lay: an unverified certificate read beside a verified record, and a set emptied across an await while another reader treated it as coverage. Both are the same shape: a trust or coverage fact derived from something that was not itself the verified or settled thing. A future child deriving state from verified records should take every derived fact from the verified object itself, and keep in-flight work visible in whatever a reader treats as coverage.
 
