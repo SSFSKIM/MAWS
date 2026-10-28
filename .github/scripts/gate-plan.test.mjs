@@ -1771,8 +1771,7 @@ test('unsigned packaged needs explicit admission regardless of Lane, and stays s
   const unlisted = { HEAD_MESSAGE: 'Gates: packaged\nRunner: macos', HOSTED_MAC_ROUTE: 'direct' };
   assert.equal(plan(unlisted).outputs.packaged_runner, undefined);
   assert.equal(plan({ ...unlisted, HEAD_MESSAGE: `${unlisted.HEAD_MESSAGE}\nLane: hosted` }).outputs.packaged_runner, undefined);
-  assert.equal(workflowList(readWorkflow(), 'HOSTED_MAC_JOBS'), '');
-  const base = { ...unlisted, HOSTED_MAC_JOBS: 'packaged' };
+  const base = { ...unlisted, HOSTED_MAC_JOBS: workflowList(readWorkflow(), 'HOSTED_MAC_JOBS') };
   assert.equal(plan({ ...base, HEAD_MESSAGE: `${base.HEAD_MESSAGE}\nLane: no-hosted` }).outputs.packaged_runner, '"macos-26"');
   const output = plan(base).outputs;
   assert.equal(output.packaged_runner, '"macos-26"');
