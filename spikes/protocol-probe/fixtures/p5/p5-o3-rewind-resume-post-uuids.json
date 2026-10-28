@@ -1,0 +1,14 @@
+{
+ "arm": "post",
+ "sessionId": "b9530c75-12dc-480a-be67-35fa525bbf10",
+ "token": "9ad0f5b1",
+ "engine": "2.1.283",
+ "uuids": {
+  "T1": "4bf79976-58e6-4d75-a8bb-236cc8e841f5",
+  "T2": "84b94f80-3d24-463d-9a4c-7fbf9fa2f95c",
+  "T3": "9dd7f7ad-4089-49d4-80d7-0e4938271876",
+  "T4": "913fd50d-b2c6-489f-abd1-8244d9c8f7de",
+  "T5": "e21a625a-a5f9-497d-996c-a292c1a6a2c7",
+  "T6": "fd74d583-0020-4bc7-9647-db60445fdeb4"
+ }
+}

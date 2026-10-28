@@ -1,0 +1,148 @@
+P5 O3-F: native rewind across --resume (RL §12.3, U6's half), measured on MAWS's own wire
+(docs/doperpowers/plans/2026-10-28-p5-o3-spine.md, child O3-F, document blob 67da2f63a992c9c6f6369ffe1ff3fc7605999c89
+at master 1d1d71937; parent docs/doperpowers/plans/2026-10-27-p5-org.md, P5; 2026-10-28). Findings only, never a merge.
+
+Question. Lane B's strict idle release makes resumes routine, so a rewind will often target a message an earlier
+process of the session wrote. Does the engine's `rewind_conversation`, as `session.rewind` sends it
+(src/engine-host/rewind.ts: target, the caller's last-seen uuid, interrupt_if_running false, then `rewind_files` for
+the same message when asked), restore or duplicate content when the target is from before a `--resume`? RL §12.3 asks
+because the lane A substitute (a compaction-hook cut, research/desk-remote/truncation-spike.md) duplicated kept
+assistant blocks and brought cut tool results back after a resume.
+
+Verdict: not broken. On 2.1.283 a rewind to a message from before the resume behaves exactly as one inside a launch.
+The engine finds the target in the resumed conversation, cuts it and what follows, and appends its rewind anchor
+(`last-prompt`, `rewound: true`, `leafUuid` the kept leaf) to the transcript at once, before any next prompt. The next
+turn's request, and every request after a further release and resume, carries the kept prefix exactly once and nothing
+from the target on; `rewindFiles` restores the earlier process's checkpoint; MAWS's live events and its disk follower
+hide the rewound turns across the launch boundary. No block appeared twice in any of the 9 arms' 136 main-loop
+request bodies. The engine host needs no refusal at a launch boundary, and the normaliser needs no change for this case.
+The truncation spike's duplication does not carry over: it came from re-minted record uuids beside unchanged API
+message ids, which the resume's sibling recovery joined (2.1.283 cli.pretty.js `qrr`, L967097-967273); a rewind
+re-mints nothing, and with the distinct message ids the real API gives, sibling recovery has nothing to join.
+
+Two residual defects, neither about the launch boundary, and one engine behaviour to know:
+  A. A crash in the anchor's flush window loses the rewind, and MAWS does not notice (owner: O3-D). Killed with
+     SIGKILL at once after the success answer, the process never wrote the anchor; the next resume gave the model the
+     rewound turn back, while MAWS's event log, which derives `boundary.rewind` from the answer, still hides it. At
+     200 ms and at 1 s after the answer the anchor was on disk and held. The source enqueues the anchor without
+     awaiting the write (a 100 ms drain); a release (`end_session`) flushes, so only a crash, OOM or SIGKILL in that
+     window reaches it.
+  B. MAWS's shared anchor schema refuses the anchor a "Load now" rewind writes (owner: O3-C, or a tracker fix now; it
+     is lane A's today). A resumed process that has taken no prompt writes the anchor without `lastPrompt`;
+     `LastPromptAnchorSchema` (src/shared/wire/transcript.ts:19) requires it, so `recentTurnsOf`
+     (src/main/sessions/recent-turns.ts:49, the resume chooser's preview) and `withResponseGroups`
+     (src/shared/wire/transcript.ts:141) skip it and show the rewound turn as the latest, until a next prompt is
+     written. The chain follower parses the anchor leniently (src/engine-host/fs/chain-follower.ts:244) and is right.
+  C. Engine behaviour, nothing to fix: a conversation-only rewind keeps the rewound turns' file edits on disk. In the
+     process that rewound, the read cache for them is evicted and the next Read returns the file. After a release and
+     a resume with no turn between, the engine's changed-files check finds the file newer than the kept Write and
+     tells the model in a reminder ("changed on disk since you last read it", with the diff), and the Read that
+     follows answers "Wasted call — file unchanged since your last Read". Either way the model sees the disk as it is.
+
+Method. scenarios/pass3/p5-o3-rewind-resume.mjs: MAWS's launch line and initialize (p1-common: ENGINE_FLAGS, a
+scratch CLAUDE_CONFIG_DIR, CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING=1, the trust attestation), a resume as MAWS
+launches one (`--resume <id>`, no `--session-id`), the release as the engine host's ladder starts it (`end_session`),
+every tool allowed. Engine 2.1.283, the fixture pin, installed by the official installer as a dedicated user. The
+Messages API is a scripted stand-in over stub-api.mjs's sseOf, keyed by content (`[[O3F:<turn>]]`), nothing spent.
+Every message id and tool-use id it mints is unique to the run: the resume joins assistant records by `message.id`, so
+a stub reusing ids across launches (one new server per launch would) fabricates the duplication under test. Each turn
+is the same four requests, every one leaving a marker the later request bodies are read for: WORKING_<t> text and a
+Read of state.txt, a Write of state.txt "STATE_<t>", a Write of <t>.txt "CONTENT_<t>", text REPLY_<t>. Each request
+body is recorded in brief (`context`, `counts`, `twice`) in the step notes; each step snapshots the transcript (its
+records in brief, the chain, the files, the checkpoint directory). Fixtures fixtures/p5/p5-o3-rewind-resume-<arm>-l<n>
+.jsonl, the prompt uuids -<arm>-uuids.json, each arm's final transcript under p5-o3-rewind-resume-transcripts/ (every
+snapshot is a prefix of it: the engine only appends). MAWS's side: p5-o3-rewind-resume-maws.ts runs the journals
+through the engine host's `Normalizer` (one per launch) into one renderer transcript state (`applyEvents`, `rowsOf`),
+and the transcript prefixes through `ChainFollower`, `recentTurnsOf` and `currentChain`; its output is
+p5-o3-rewind-resume-maws.json. Tests: p5-o3-rewind-resume.test.mjs (node --test, 15 pass).
+Where it ran: devcloud VM dc-o3spikes-b0eb (GCE e2-custom-4-8192, Ubuntu 24.04, kernel 7.0.0-1014-gcp, lease 6 h,
+deleted after the recording), Node 24.21.0, as a user with no access to the owner's home and no credential, with an
+empty environment, and with /etc/claude-code hidden by a private tmpfs mount (the host's managed settings route every
+engine to the relay; devcloud-pull-config.timer rewrites the file every 30 minutes, so moving it aside did not hold:
+one launch of an earlier recording was stopped by the probe's guard and is not in the fixtures). Every fixture's
+provenance records `managedSettings: []`. Never on the owner's MacBook (P5 Decision Log 29).
+
+Arms (T1..T6 are turns; l1..l3 launches; "release" is end_session; seqs are the step notes in each fixture).
+  (1) pre           l1: T1, T2. l2 --resume: T3, rewind to T2's prompt (l1's), last seen T3's, then T4. l3 --resume: T5.
+  (2) pre-files     the same with rewindFiles: a dry run, then the conversation, then the files.
+  (3) post          the control: l1: T1, T2. l2 --resume: T3, T4, rewind with files to T3's prompt (l2's), T5. l3: T6.
+  pre-release       l1: T1, T2. l2 --resume: at once a rewind to T2's prompt (RewindWidget's Load now on a dormant
+                    session), then a release with nothing sent. l3 --resume: T3.
+  same-release      l1: T1, T2, a rewind to T2's prompt, a release with nothing sent. l2 --resume: T3.
+  plain-release     the control for the two above: no rewind. l1: T1, T2. l2 --resume: T3.
+  kill-after-rewind, -200ms, -1s   as pre-release, but l2 is SIGKILLed 0, 200 or 1000 ms after the rewind's answer.
+
+1. A rewind to a message from before the resume (pre).
+   - The answer: rewound true, targetMessageUuid T2's (the uuid MAWS sent; the resumed transcript keeps the uuids a
+     launch was given), prefillText T2's prompt, precedingAssistantUuid T1's last row (l2 seq 72).
+   - The transcript: nothing removed or rewritten; one record appended, `last-prompt` rewound true with leafUuid T1's
+     last row (line 83, present 2 s after the answer and before T4). T4's user record parents on T1's last row, so T2
+     and T3 stay in the file as a dead branch.
+   - The model: T4's first request holds T1 and T4 only (request #17, 9 messages); after a second release and resume,
+     T5's holds T1, T4, T5 (l3 request #22). No marker of T2 or T3, no block twice, in any request of the arm.
+   - MAWS: the normaliser emits `boundary.rewind` (target T2, prefill T2's prompt) from the answer in l2; reduced over
+     the app session's events across l1 and l2, it finds T2's turn from l1 and hides T2 and T3 (6 rows); l3's events
+     add T5 below. The chain follower over the transcript at every later point hides the same two turns; the resume
+     preview lists T1 (and then T4, T5).
+2. The same with rewindFiles (pre-files).
+   - The dry run, before the conversation rewind: canRewind true, filesChanged state.txt, T2.txt and T3.txt (T3.txt
+     written by l2), 1 insertion, 3 deletions. The restore: canRewind true, skippedLinks 0 (l2 seq 76).
+   - The files afterwards: T1.txt and state.txt "STATE_T1": l1's checkpoint, restored by l2, T2.txt and T3.txt
+     removed. T4's Read of state.txt returns STATE_T1. The transcript, the requests and MAWS's events are as in (1).
+   - A resumed process restores a checkpoint an earlier one took because the resume reloads the chain's
+     `file-history-snapshot` records and reuses the session's backup directory (2.1.283 L969251-969258,
+     L967288-967313, L971260-971275; read, not probed beyond this arm).
+3. The control: a rewind with files to the first message after the resume (post).
+   - rewound true for T3 (l2 seq 137); files back to l1's end (T1.txt, T2.txt, state.txt "STATE_T2"); T5's request
+     holds T1, T2, T5; after a resume T6's holds T1, T2, T5, T6; MAWS hides T3 and T4. Identical in kind to (1) and (2).
+4. A rewind followed by a release with nothing sent (pre-release, same-release; control plain-release).
+   - The anchor survives the release and the resume honours it: T3's request holds T1 and T3, nothing of T2's prompt,
+     reply or writes as conversation (pre-release l3 request #14; same-release l2 request #13). MAWS's events and the
+     follower hide T2.
+   - STATE_T2 does reach that request once, in the changed-files reminder (C above); the control without a rewind
+     returns STATE_T2 from the Read itself.
+   - The Load now rewind's anchor has no `lastPrompt` (pre-release line 61); the release then appends a plain
+     `last-prompt` with T2's prompt and the kept leaf (line 62). The resume preview (`recentTurnsOf`) shows T2 at both
+     points (B above); after T3 is written it shows T1, T3. same-release's anchor carries `lastPrompt` and the preview
+     is right throughout.
+5. A crash after the rewind (kill-after-rewind arms).
+   - 0 ms: the answer was rewound true, then SIGKILL; the transcript stayed at 60 lines, no anchor; the resume gave the
+     model T1, T2, T3 (l3 request #14), the follower shows T1, T2, T3, and MAWS's event log hides T2 (A above).
+   - 200 ms and 1 s: the anchor (line 61) was on disk; T3's request held T1 and T3.
+
+Where the fixes belong.
+- A (O3-D, the session service's resume path): after a launch that exited without `end_session` completing, if the
+  launch's last act was a successful rewind with no later prompt, send the same `rewind_conversation` (target, last
+  seen the target) to the resumed process before anything else. The anchor's presence decides the outcome: if it
+  landed, the target is off the resumed chain and the engine refuses with target_not_found, a no-op (the refusal
+  findings-p4-w2a-rewind.txt measured); if it was lost, the target is still on the chain and the rewind repairs it.
+  The engine host then agrees with the boundary MAWS already shows; no event is retracted, and the start-time
+  recovery (src/main/sessions/recovery.ts) already reads the event log for `boundary.rewind` the same way. Rejected:
+  holding the host's answer until the anchor is on disk, which cannot stop the normaliser, which derives the boundary
+  from the journaled answer row before the host replies; and deriving the boundary from the disk anchor, which would
+  make every rewind wait on the follower.
+- B (O3-C, whose library move carries recent-turns; or a tracker fix now, since lane A has it): make `lastPrompt`
+  optional in `LastPromptAnchorSchema`, as the follower already reads it. One line, with a fixture case from
+  pre-release's transcript.
+- Also, low priority: `currentChain` (src/shared/wire/transcript.ts:57) ignores rewound anchors by design (file order
+  is the rule it states), so between a rewind and the next prompt it reports the rewound branch as the chain: T2 and
+  T3 in pre's l2-after-rewind, T2 in both release arms until the next prompt. Its only readers are the replay engine's
+  sources (fs/replay/transcript-source.ts:30, fs/replay/runner.ts:77), so a replay of a transcript cut in that window
+  would show the rewound turns. A tracker row.
+
+Notes.
+- Not probed: a real API (the stub's thinking-free replies; the truncation spike's thinking-block duplication needs
+  the re-minting this path does not do); a rewind across a compaction boundary (the engine resets its anchor state at
+  one, L969167); a `--fork-session` resume; subagent sidechains; rewindFiles after a second resume, where the source
+  says only the resumed chain's checkpoints are loaded (so a turn rewound away can no longer be restored to), read
+  and not measured; the exact flush time inside the 0 to 200 ms window; SIGTERM after a rewind (the engine flushes
+  on a graceful shutdown, L964171-964190, read).
+- Source references are to /Users/new/claude-code-bundle/2.1.283/cli.pretty.js (read by a subagent; no bundle code
+  was run): the handler L729938-729975 and L726141-726237, the anchor write L965636-965642, the unawaited queue
+  L963624 and L965344-965378 with its 100 ms drain L964366, leaf choice L969285-969383, the changed-files check
+  L940956 and L941736-941768, the read-cache rebuild on resume L202376-202459.
+- Fixtures carry the VM's scratch paths under /tmp and its time zone; the probe's token (8 hex) is in each
+  provenance row and in every stub id.
+- Rerun: on a Linux host or the mini, as a user with no credential, with /etc/claude-code hidden:
+    PROBE_ENGINE=~/.local/share/claude/versions/2.1.283 node run-pass3.mjs p5-o3-rewind-resume   (P5O3F_ARM=<arm,...>)
+  then, in an installed workspace, the bundle-and-run line at the head of p5-o3-rewind-resume-maws.ts.
