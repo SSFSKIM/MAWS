@@ -104,6 +104,7 @@ import {
   CLAIM_PATH,
   WRAPPED_KEY_SEED_PATH,
   PROJECT_RPCS_PATH,
+  PHASE_ONE_SINK_PATH,
 } from './send-fault';
 import { lacksMethod } from '../../src/objects/retry';
 
@@ -405,6 +406,10 @@ export class Machine extends DeployedMachine {
       return new Response('timed');
     }
     if (url.pathname === MACHINE_PROBE_PATH) return Response.json({ life: this.life });
+    if (url.pathname === PHASE_ONE_SINK_PATH) {
+      this.ctx.storage.kv.put('phase-one-sink', true);
+      return new Response('sinking');
+    }
     if (url.pathname === MACHINE_ABORT_PATH) this.ctx.abort(ABORT_REASON);
     return super.fetch(request);
   }
@@ -468,7 +473,9 @@ export class Machine extends DeployedMachine {
       this.ctx.storage.kv.delete('send-hold');
       await new Promise<void>((resolve) => (this.release = resolve));
     }
-    return super.send(frame, generation);
+    const sent = await super.send(frame, generation);
+    // Armed, a frame no connection holds is taken and dropped, as phase 1's stream took a project's replies.
+    return sent === 'offline' && this.ctx.storage.kv.get<boolean>('phase-one-sink') ? 'written' : sent;
   }
 }
 

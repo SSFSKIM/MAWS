@@ -143,3 +143,5 @@ export const CLAIM_PATH = '/__test/claim';
 export const WRAPPED_KEY_SEED_PATH = '/__test/wrapped-key-seed';
 /** Where the suites' `Project` answers how many RPC records it keeps (`{rpcs}`; none once DX6 is retired). */
 export const PROJECT_RPCS_PATH = '/__test/project-rpcs';
+/** Makes a machine's object take every frame no connection holds, as phase 1's stream took them (`phaseOneFrames`). */
+export const PHASE_ONE_SINK_PATH = '/__test/phase-one-sink';

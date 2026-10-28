@@ -385,11 +385,12 @@ org (`desk-hub-staging`, `desk-hub-staging.opencognita-platform.workers.dev`, `s
 stops before anything else runs unless it names exactly staging's Worker, host and org; a configuration naming
 production's Worker or host, or a preview alias of it (`<alias>-desk-hub.…`), is refused as production by name.
 
-- `zsh deploy/staging-deploy.sh [--checkout <path>] [--org-id staging-<…>] [--org-name <name>]` builds desk-web and
-  runs `deployment deploy --config deploy/staging.json` from the checkout (default: the one the script is in; it must
-  have no uncommitted changes to tracked files). `--org-id` deploys staging as a throwaway org. It prints production's
-  `X-Desk-Build` before and after, credential-free, and fails if any wrangler call named a Worker other than
-  `desk-hub-staging`.
+- `zsh deploy/staging-deploy.sh [--checkout <path>] [--org-id staging-<…>] [--org-name <name>]` builds desk-web with
+  `VITE_DESK_WEB_BUILD=<branch>.<sha8>` exported (the label the phone's channel handshake carries, `h1.build`) and
+  runs `deployment deploy --config deploy/staging.json --web <branch>.<sha8>` from the checkout (default: the one the
+  script is in; it must have no uncommitted changes to tracked files). `--org-id` deploys staging as a throwaway org.
+  It prints production's `X-Desk-Build` before and after, credential-free, and fails if any wrangler call named a
+  Worker other than `desk-hub-staging`.
 - `zsh deploy/staging-run.sh <step>`, one step at a time; any further arguments go to the step's command:
   - `prod <label>`: production's `X-Desk-Build`, credential-free, into `prod/prod-build-<label>.txt`; `prod after`
     compares it with `prod before`.

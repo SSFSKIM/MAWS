@@ -42,7 +42,7 @@ import type { AccessIdentity } from '../identity/access';
 import { ServiceTokenApiError, serviceTokens } from '../identity/service-tokens';
 import { importVapidKey, pushRequest, type VapidKey } from '../push/web-push';
 import { base64urlEncode, isBase64urlOf } from '../protocol/base64url';
-import { isListingGone, LISTINGS_PAGE_BYTES, REGISTRY_APP_PARAM, type Delegation, type Listing, type RegistryAppFrame, type Signed } from 'org-protocol';
+import { isListingGone, LISTINGS_PAGE_BYTES, REGISTRY_APP_PARAM, type Delegation, type HistoryInventory, type Listing, type RegistryAppFrame, type Signed } from 'org-protocol';
 import type { GridDown, ProjectSummary, PushNotice, RegistryDown } from '../protocol/browser';
 import { toWire } from '../protocol/parts';
 import {
@@ -623,6 +623,18 @@ export class Registry extends DurableObject<Env> {
   project(id: string): ProjectRecord | null {
     const row = this.sql.exec<ProjectRow>(`SELECT ${PROJECT_COLUMNS} FROM projects WHERE id = ?`, id).toArray()[0];
     return row ? projectOf(row) : null;
+  }
+
+  /**
+   * History re-attestation's inventory (O14 M4, Interfaces §D): every project of the directory, retired ones included,
+   * whose log holds a DX1 writer under one of `names`, with each such writer's highest DX1 seq, asked of each Project.
+   * The names are the machine's own claim (its current and its phase-1 names): the directory records no former names.
+   */
+  async historyInventory(names: string[]): Promise<HistoryInventory> {
+    const org = this.ensureOrg().id;
+    const ids = this.sql.exec<{ id: string }>('SELECT id FROM projects ORDER BY created, id').toArray().map((p) => p.id);
+    const projects = await Promise.all(ids.map(async (id) => ({ id, writers: await this.env.PROJECT.get(this.env.PROJECT.idFromName(`${org}:${id}`)).historyWriters(names) })));
+    return { projects: projects.filter((p) => p.writers.length > 0) };
   }
 
   /**

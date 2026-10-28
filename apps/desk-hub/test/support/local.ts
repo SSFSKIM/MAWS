@@ -70,6 +70,7 @@ import {
   CLAIM_PATH,
   WRAPPED_KEY_SEED_PATH,
   PROJECT_RPCS_PATH,
+  PHASE_ONE_SINK_PATH,
 } from './send-fault';
 
 const require = createRequire(import.meta.url);
@@ -273,6 +274,20 @@ export async function startLocalHub(options: { script?: string } = {}) {
     /** How many calls machines made to a project's object, and how many frames they carried. */
     async projectCalls(project: string): Promise<{ calls: number; frames: number }> {
       return JSON.parse(await seam('PROJECT', project, PROJECT_CALLS_PATH)) as { calls: number; frames: number };
+    },
+    /**
+     * Hands a project a machine's frames as DX2's stream handed them, under that machine's credential and a generation of
+     * the suite's: how a suite seeds the history phase 1 left in a log (DX1 writers, mac-only events) now that no machine
+     * reaches the hub but on RL1, whose machines the org state lists. Answers the project's account of them.
+     */
+    async phaseOneFrames(project: string, machine: string, client: string, generation: number, frames: unknown[]) {
+      // The project's replies (a hello's `have`, the backlog) are owed to a stream: the machine's object takes them.
+      await seam('MACHINE', machine, PHASE_ONE_SINK_PATH);
+      const namespace = await mf.getDurableObjectNamespace('PROJECT');
+      const stub = namespace.get(namespace.idFromName(`${ORG}:${project}`)) as unknown as {
+        fromMachine(ctx: object, frames: unknown[]): Promise<{ applied: number; stale: boolean; failed: boolean; refused: unknown[] }>;
+      };
+      return stub.fromMachine({ org: ORG, project, machine, client, generation, leaseMs: 60_000 }, frames);
     },
     /** Hands a project a lease's renewal or close for any generation, as a late one from an older stream would come. */
     async lease(project: string, change: { op: 'renew' | 'closed' | 'forget'; machine: string; generation: number; leaseMs?: number }) {
