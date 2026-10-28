@@ -119,6 +119,19 @@ describe('recentTurnsOf', () => {
     expect(after.earlier).toBe(true);
   });
 
+  it('a "Load now" rewind, whose anchor carries no lastPrompt, cuts the chain too: the kept prefix\'s latest prompt shows', () => {
+    // P5 O3-F's pre-release arm (spikes/protocol-probe/findings-p5-o3-rewind-resume.txt, residual B), recorded on the
+    // engine: a resumed process that has taken no prompt rewinds to T2's prompt, writing its anchor without `lastPrompt`
+    // (line 61); the release appends a plain anchor still naming T2's prompt (line 62); the next resume sends T3 (line 67)
+    const arm = readFileSync(join(ROOT, 'spikes/protocol-probe/fixtures/p5/p5-o3-rewind-resume-transcripts/p5-o3-rewind-resume-pre-release.jsonl'), 'utf8').split('\n');
+    const turns = (through: number) => recentTurnsOf(arm.slice(0, through).join('\n'), 20, false).turns.map((t) => [t.prompt?.text, t.answer?.text]);
+    const [t1, t2, t3] = ['T1', 'T2', 'T3'].map((t) => [`[[O3F:${t}]] PROMPT_${t} Do step ${t}.`, `REPLY_${t}: done.`]);
+    expect(turns(60), 'before the rewind').toEqual([t1, t2]);
+    expect(turns(61), 'the rewind\'s anchor').toEqual([t1]);
+    expect(turns(66), 'the release\'s plain anchor after it').toEqual([t1]);
+    expect(turns(arm.length), 'the next prompt').toEqual([t1, t3]);
+  });
+
   it('a progress row is never the leaf: one written last, pointing at an earlier prompt, keeps the later turns', () => {
     const answer = recentTurnsOf(
       records(

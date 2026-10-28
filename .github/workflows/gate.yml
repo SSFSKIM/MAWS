@@ -664,8 +664,9 @@ jobs:
         if: always()
         run: .github/scripts/hosted-mac.sh --cleanup
 
-  # The e2e groups outside the guest and mirror matrices (e2e_host), including direct hosted Macs. Each direct job
-  # builds its own out/: no pool prerequisite or artifact transfer. e2e-vm shares these steps for guest jobs.
+  # The e2e groups outside the guest and mirror matrices (e2e_host), including direct hosted Macs. A direct job builds
+  # out/ on its own Mac or restores it from the Actions cache (its entry's `cached`): no pool prerequisite or artifact
+  # transfer. e2e-vm shares these steps for guest jobs.
   e2e:
     needs: plan
     if: needs.plan.outputs.e2e_host != '[]'
@@ -705,6 +706,29 @@ jobs:
         with:
           name: e2e-build-${{ github.sha }}-${{ matrix.variant }}
           path: ${{ runner.temp }}/maws-e2e-build
+      # A direct hosted Mac's out/ (the entry's `cached` variant), restored from the Actions cache, where the run's first job
+      # to build that variant saved it under the commit and the variant; else built here and saved. A set larger than the
+      # account's 5 hosted Macs runs in rounds, and only the first round builds. The command's own build restores it from
+      # this directory, checking its digest, and builds after all when it does not match. The path is the same on every
+      # hosted Mac, as a cache entry's version requires; a save another job of the run made first never fails this one.
+      - id: build-cache
+        if: matrix.cached
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/maws-e2e-build/${{ github.sha }}/${{ matrix.cached }}
+          key: e2e-build-${{ runner.os }}-${{ github.sha }}-${{ matrix.cached }}
+      - if: matrix.cached && steps.build-cache.outputs.cache-hit != 'true'
+        env:
+          CACHED: ${{ matrix.cached }}
+        run: |
+          export MAWS_E2E_BUILD_CACHE=$RUNNER_TEMP/maws-e2e-build MAWS_E2E_BUILD_KEY=$GITHUB_SHA
+          .github/scripts/gate-run.sh 'built in|error|^e2e-build: ' scripts/e2e-build.sh "$CACHED"
+      - if: matrix.cached && steps.build-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/maws-e2e-build/${{ github.sha }}/${{ matrix.cached }}
+          key: e2e-build-${{ runner.os }}-${{ github.sha }}-${{ matrix.cached }}
       - if: matrix.build
         run: .github/scripts/gate-run.sh 'built in|error' pnpm build
       # A PEER_E2E group's peer (the plan's `peer`, the commit the `Peer:` trailer names): that commit alone fetched, checked
@@ -760,18 +784,21 @@ jobs:
       - env:
           SCRIPT: ${{ matrix.script }}
           VARIANT: ${{ matrix.variant }}
+          CACHED: ${{ matrix.cached }}
           MAWS_E2E_PEER_ROOT: ${{ matrix.peer && format('{0}/maws-peer', runner.temp) || '' }}
         run: |
           display=()
           if [[ $RUNNER_OS == Linux ]]; then display=(xvfb-run -a --server-args='-screen 0 1920x1080x24'); fi
           # A guest-eligible group restores e2e-build's out/, downloaded above, and never builds: scripts/e2e-build.sh fails
           # naming the key and the variant when the entry is missing or does not match its digest.
+          # A direct hosted Mac restores the out/ the cache steps above restored or built.
           # Else the Mac builds each out/ variant once per run and runner: scripts/e2e-build.sh restores it from this disk
           # (Decision Log 35); the key is the checked-out commit, whose sha the build stamp carries. One directory per
           # runner instance (ci-kit's mac-lane concurrency spec, M2): two shared jobs on one variant would otherwise race
           # its restore, its store and the prune.
           if [[ -n $VARIANT ]]; then
             export MAWS_E2E_BUILD_CACHE=$RUNNER_TEMP/maws-e2e-build MAWS_E2E_BUILD_KEY=$GITHUB_SHA MAWS_E2E_BUILD_REQUIRE=1
+          elif [[ -n $CACHED ]]; then export MAWS_E2E_BUILD_CACHE=$RUNNER_TEMP/maws-e2e-build MAWS_E2E_BUILD_KEY=$GITHUB_SHA
           elif [[ $RUNNER_OS == macOS ]]; then export MAWS_E2E_BUILD_CACHE=$HOME/Library/Caches/maws-e2e-build/$RUNNER_NAME MAWS_E2E_BUILD_KEY=$GITHUB_SHA; fi
           # default's own specs, when the step above derived them (macOS's bash 3.2 has no mapfile).
           specs=()
