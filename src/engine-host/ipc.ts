@@ -13,15 +13,19 @@ import { canYield } from '@shared/engine/status'; // W7
 import { SendContentSchema, type QueueState, type QueueEntry, type SessionStateStore } from '@shared/engine/session-state-store';
 import type { RelayHealth } from '@shared/engine/relay-health';
 import { HostCommandError, type HostEmit, type HostOn } from '@shared/host/runtime';
+import { OpLedger } from '@shared/host/op-ledger'; // P5 O10 M7
+import type { HandlerContext } from '@shared/ipc/client'; // P5 O10 M7
 import { captureShellEnvironment, SHELL_CAPTURE_GRACE_MS, SHELL_CAPTURE_TIMEOUT_MS } from '@shared/host/shell-env';
 import type { CommandInput, CommandName, CommandOutput } from '@shared/ipc/schema';
 import type { C3_ENGINE_COMMANDS } from '@shared/ipc/schema/engine';
-import type { C3_SESSION_COMMANDS, E8_SESSION_COMMANDS, P2C_SESSION_COMMANDS /* P2-C */, R2_SESSION_COMMANDS } from '@shared/ipc/schema/session';
+import type { C3_SESSION_COMMANDS, E8_SESSION_COMMANDS, O10_SESSION_COMMANDS /* P5 O10 M8 */, P2C_SESSION_COMMANDS /* P2-C */, R2_SESSION_COMMANDS } from '@shared/ipc/schema/session';
 import { SURFACE_CLIENT_ID } from '@shared/engine/surface'; // R2
 import { createBinaryProbe, PROBE_BOUND_MS, type BinaryCheck } from './binary-info';
 import { TESTED_ENGINE_VERSION } from './engine-compat'; // W13
 import * as controls from './controls';
 import { createLauncher } from './launcher';
+import { registerOps } from './ops'; // P5 O10 M7
+import { SUPERVISOR_FILES } from './supervisor-files'; // P5 O10 M7
 import { LaunchSpecConflict, mergeFlagSettings, RELAY_URL, type LaunchPlan } from './launch';
 // C11 start
 import { setBinaryConfig } from './launch';
@@ -117,6 +121,8 @@ export const E8_DEADLINE_SHAPES: Record<(typeof E8_SESSION_COMMANDS)[number], De
 // P2-C start (2026-10-09): the steer cancel is one `cancel_async_message` round trip, bounded as `session.queue.hold`
 // is; the prompt record's read answers from the host's own journals on disk, as `session.events` does past its ring
 export const P2C_DEADLINE_SHAPES: Record<(typeof P2C_SESSION_COMMANDS)[number], DeadlineShape> = { 'session.steer.cancel': 'bounded', 'session.promptHistory': 'immediate' };
+// P5 O10 M8: the broker's items, answered from the session's own list
+export const O10_DEADLINE_SHAPES: Record<(typeof O10_SESSION_COMMANDS)[number], DeadlineShape> = { 'session.pendingItems': 'immediate' };
 // P2-C end
 // E1: the `maws` tool server's commands (P1 ledger §5), each immediate: answered from the host's table or at the
 // answer's flushed write
@@ -128,7 +134,9 @@ export const SIDE_DEADLINE_SHAPES: Record<SideHostCommand, DeadlineShape> = { 's
 // E11: the supervisor's own commands (E10; registered by Supervision.register): three answer at once, `host.stopAll` is
 // engine.shutdown's body (the ladder's cap and the plugin runner's kill), bounded as engine.shutdown is
 type HostHostCommand = { [N in keyof typeof HostCommands]: (typeof HostCommands)[N]['owner'] extends 'engine-host' ? N : never }[keyof typeof HostCommands];
-export const HOST_DEADLINE_SHAPES: Record<HostHostCommand, DeadlineShape> = { 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate' };
+// P5 O10 M7: `host.op` runs a session command as its own deadline allows (session.interrupt's is bounded), and
+// `host.opQuery` reads the ledger at once; both registered by registerEngineIpc (ops.ts), not Supervision
+export const HOST_DEADLINE_SHAPES: Record<HostHostCommand, DeadlineShape> = { 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate', 'host.op': 'bounded', 'host.opQuery': 'immediate' };
 // P2-A (2026-10-09; X17): the observed-facts read, bounded: a file read, or a journal recovery under its 5 s reading
 // budget (observed-facts.ts), inside the bridge's 10 s
 export const P2A_DEADLINE_SHAPES: Record<'engine.observedFacts', DeadlineShape> = { 'engine.observedFacts': 'bounded' };
@@ -197,7 +205,13 @@ export async function bounded<T>(run: () => Promise<T>): Promise<T> {
 
 const isRefusal = (code: string | null): code is AutoModeRefusalCode => code !== null && (AUTO_MODE_REFUSAL_CODES as readonly string[]).includes(code);
 
-export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDeps): EngineIpc {
+export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIpcDeps): EngineIpc {
+  // P5 O10 M7: every handler registered here is kept, so `host.op` runs a remote action through the host's own table
+  const own = new Map<string, (input: unknown, ctx: HandlerContext) => Promise<unknown>>();
+  const on: HostOn = (name, handler) => {
+    own.set(name, handler as (input: unknown, ctx: HandlerContext) => Promise<unknown>);
+    hostOn(name, handler);
+  };
   const log = deps.log ?? ((message: string) => console.warn(`[engine-host] ${message}`));
   const table = deps.table ?? new ProcessTable();
   const store = deps.store ?? new FileSessionStateStore(deps.userData);
@@ -391,6 +405,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   });
   handle('session.pendingRequest', async ({ appSessionId, requestId }) => ({ event: streamOf(appSessionId).pendingRequest(requestId as RequestId) }));
   handle('session.catalog', async ({ appSessionId }) => sessionOf(appSessionId).catalog());
+  on('session.pendingItems', async ({ appSessionId }) => ({ items: sessionOf(appSessionId).brokerItems() })); // P5 O10 M8
 
   // -- the composer ----------------------------------------------------------------------------------------------------
   handle('session.send', async ({ appSessionId, content }) => {
@@ -876,6 +891,19 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     for (const event of plugins.running()) emit('plugins.operation', event);
   });
   // E10 end
+
+  // P5 O10 M7: lane B's operation ledger, compacted at the host's start, and the endpoint's two commands over the
+  // handlers registered above (registered on the host's own `on`: host.op never runs itself)
+  registerOps(hostOn, {
+    ledger: OpLedger.open(join(deps.userData, 'supervisor'), SUPERVISOR_FILES.ops, { log }),
+    handler: (name) => own.get(name),
+    status: (id) => {
+      const status = table.get(id as AppSessionId)?.status();
+      return status === undefined ? null : { launchId: status.launchId, engineSessionId: status.engineSessionId };
+    },
+    pending: (id, requestId) => streams.get(id as AppSessionId)?.pendingRequest(requestId as RequestId) ?? null,
+    log,
+  });
 
   return { table, plugins, shutdown };
 }

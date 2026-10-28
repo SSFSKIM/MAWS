@@ -12,6 +12,9 @@
 #                            behind an account-less quick tunnel (cloudflared tunnel --url), unless --no-push
 #   relay-measure            `deployment relay-measure` under staging-ssfskim
 #   access-sync              `deployment access-sync`: the people policy read back at the org state's head
+#   admin <args…>            `deployment admin <args…>` against staging-ssfskim with the admin device's keys: adopt,
+#                            devices, refresh run unattended; pair and remove-device confirm at /dev/tty, and pair's
+#                            code goes to the terminal alone, never to the log
 #   throwaway <n>            staging deployed under the throwaway org staging-probe-<n>, fake-check and redeploy-check
 #                            there, the account swept (staging-sweep.py), staging restored under staging-ssfskim
 #   desk-web <n>             the same around acceptance 8's desk-web check (apps/desk-web/e2e-staging) in place of
@@ -21,7 +24,8 @@
 #   DESK_STAGING_DIR      logs and state (default ~/.local/state/desk-hub-staging): one log per step; prod/; the
 #                         throwaway snapshots and sweeps; access-sync/ (access-sync's checkpoint)
 #   DESK_STAGING_DEVICE   the admin device's directory (default $DESK_STAGING_DIR/device): keys.json (the org's root
-#                         device, org-admin.ts) for acceptance and relay-measure; machine.json (access-sync's machine
+#                         device, org-admin.ts) for acceptance, relay-measure and admin (its anchor beside it,
+#                         keys.json.org.json, written by `admin adopt`); machine.json (access-sync's machine
 #                         credentials, {"DESK_MACHINE_CLIENT_ID": …, "DESK_MACHINE_CLIENT_SECRET": …}) for access-sync
 #   DESK_HEAVY_WRAPPER    a command prefix for the web build (passed to staging-deploy.sh)
 # The owner's staging Access token is cloudflared's (`cloudflared access login https://<staging host>` once).
@@ -52,7 +56,8 @@ print(c["account"])
 umask 077
 mkdir -p $O || exit 2
 stamp() { date -u +%Y%m%dT%H%M%SZ; }
-filter() { perl -ne 'print if /^wrangler target / || !/token|secret|bearer|eyJ/i'; }
+# Line by line ($| = 1): a step that asks at /dev/tty (admin pair) shows what it asks about before the question.
+filter() { perl -ne 'BEGIN { $| = 1 } print if /^wrangler target / || !/token|secret|bearer|eyJ/i'; }
 # A deployment's X-Desk-Build, credential-free; stops the script unless it names a hub build.
 header() {
   local h=$(curl -q -sI --max-time 30 -X POST $1/machine/enroll | /usr/bin/grep -i '^x-desk-build:' | tr -d '\r')
@@ -138,6 +143,18 @@ case $step in
       | DESK_HUB_STATE_DIR=$O/access-sync deployment access-sync "$@" 2>&1 | filter
     rc=${pipestatus[2]}; unset secrets
     print -r -- "access-sync exit $rc; checkpoint: $(cat $O/access-sync/$STAGING_WORKER.json 2>/dev/null)"; exit $rc ;;
+  admin)
+    [[ -f $H/keys.json ]] || { print -r -- "no admin device keys at $H/keys.json (DESK_STAGING_DEVICE): stop"; exit 2; }
+    # The step names the deployment and the keys itself; staging's admin device is O11's test device, adopted, not made.
+    [[ $1 == init ]] && { print -r -- "admin init: staging's admin device exists ($H/keys.json); run admin adopt: stop. Nothing was changed."; exit 2; }
+    for a in "$@"; do
+      [[ $a == (--hub|--user|--yes|--config|--keys)(|=*) ]] && { print -r -- "admin takes no $a here: the step acts on staging with $H/keys.json, confirming at /dev/tty: stop. Nothing was changed."; exit 2; }
+    done
+    owner_token
+    LOG=$O/admin-$(stamp).log
+    printf 'DESK_ACCESS_TOKEN=%s\n' "$T" | deployment admin "$@" --keys $H/keys.json 2>&1 | filter | tee -a $LOG
+    rc=${pipestatus[2]}; unset T
+    print -r -- "admin exit $rc; log $LOG"; exit $rc ;;
   throwaway|desk-web)
     n=${1:?a run id}; shift
     [[ $n =~ '^[a-z0-9-]{1,20}$' ]] || { print -r -- "bad run id $n"; exit 2; }
@@ -200,5 +217,5 @@ case $step in
       (( holding == 0 )) || checks+=(1)
     fi
     exit 0 ;;
-  *) print -r -- "prod <label> | deploy | build | acceptance [--no-push] | relay-measure | access-sync | throwaway <n> | desk-web <n>"; exit 2 ;;
+  *) print -r -- "prod <label> | deploy | build | acceptance [--no-push] | relay-measure | access-sync | admin <args…> | throwaway <n> | desk-web <n>"; exit 2 ;;
 esac

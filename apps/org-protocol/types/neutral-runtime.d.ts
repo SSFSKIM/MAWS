@@ -78,6 +78,7 @@ declare class URL {
   constructor(url: string);
   readonly protocol: string;
   readonly hostname: string;
+  readonly origin: string;
 }
 
 declare function setTimeout(handler: () => void, ms: number): unknown;

@@ -11,7 +11,7 @@ naming its account, Worker, host, owner and org:
 
 Everything here goes through one command, run from the MAWS worktree root:
 
-    pnpm --filter desk-hub deployment <deploy|probe|fake-check|redeploy-check|measure|frame-cost|counts|access-sync|relay-measure|acceptance> [--config deploy/<file>.json] [options]
+    pnpm --filter desk-hub deployment <deploy|probe|fake-check|redeploy-check|measure|frame-cost|counts|access-sync|relay-measure|acceptance|admin> [--config deploy/<file>.json] [options]
 
 Each command acts on the deployment `--config` names, `config.json` when it
 names none (the path resolves from `apps/desk-hub`, where pnpm runs the
@@ -263,6 +263,72 @@ signal stops the run, gives a request in flight 5 s to land, runs the cleanup (e
     printf 'DESK_ACCESS_TOKEN=%s\n' "$(cloudflared access token -app=$HUB)" \
       | pnpm --filter desk-hub deployment acceptance --config deploy/staging.json --device-keys <file> [--push-url <https> --push-port <port>]
 
+## `admin`: the owner's hand on the org state (P5 O13 M2)
+
+Until O8's Org page, the owner roots a deployment's org, pairs a device into it, revokes one and keeps the head
+fresh from the Mac with this command and an admin device of its own. It acts on the deployment `--config` names
+(production's `config.json` by default) as the signed-in owner, `DESK_ACCESS_TOKEN` on stdin; `checkTestHub` does not
+apply, and no agent runs it against production. Against the suites' local hub, `--hub <loopback url> --user <email>`
+signs in through the stand-in instead, and only there may `--yes` answer its confirmations.
+
+    pnpm --filter desk-hub deployment admin <init | genesis | adopt | refresh | pair | devices | remove-device>
+        [--config deploy/<file>.json] [--keys <file>] [--recovery <path | paper>] [--class web-cards|native-mac] [--ttl <s>] [<device id>]
+
+- `--keys <file>` (or `DESK_ADMIN_KEYS`): the admin device's keys, `{"device": "<id>", "keys": {"<id>.channel": <JWK>,
+  "<id>.stepUp": <JWK>}}`, read and never printed. A file without `device` names `a1`, the staging test device's (so
+  `adopt` takes O11's `keys.json` as it stands).
+- `init` makes the keys file empty (0600, never over a file), runs `tmutil addexclusion` on it, and only then writes
+  the new device's keys into it; when the exclusion fails it removes the empty file and writes no key. It refuses a path
+  under `/tmp`, `/private/tmp` or `$TMPDIR` (a sweep), inside a git work tree (a commit), or under `~/.claude`,
+  `~/Library/Mobile Documents` or `~/.config/claude-secrets` (a sync or a backup).
+- `genesis --recovery <path | paper>` makes the org's recovery key and writes its private half only to the destination:
+  a path on a removable volume mounted for the step, or `paper`, printed once at the terminal. A path is refused beside
+  the keys, inside a sync or backup scope, or over an existing file; against a deployment also on the keys' volume, or
+  on a volume Disk Utility does not report as removable or external (`df` names its device, `diskutil info -plist`
+  describes it; a mounted disk image is refused too, its file being on some other disk). It reads the key back from the
+  path (or takes it typed back), refuses unless it is `recoveryPub`'s pair, asks `root <org> at <hub>? [y/N]`, signs
+  version 1 (the owner alone, an admin, with this device as the root) and posts it. It prints `orgGenesis <hash>` for
+  the deployment's config, which the owner commits; `recoveryPub` stays in the anchor, and nothing of the private half
+  on this machine. It refuses a hub that holds a state. The state is written to `<keys>.genesis.json` before its POST:
+  a run that stops after the hub took it finishes on a rerun (the volume mounted again, the key checked back again),
+  posting nothing new and anchoring only a head the served chain, verified from that genesis, reaches; a rerun never
+  builds a second genesis.
+- `adopt` anchors an org rooted before this command (staging's, rooted by O11 M3): the chain verified from the genesis
+  the config's `orgGenesis` pins (required), this device listed under the signed-in member and a root key of the head.
+- `refresh` signs and posts a no-change successor. The endpoint refuses every remote action once the head is 30 days
+  old (`src/endpoint/org-sync.ts`), and while this command is the only admin device nothing else signs one: run it
+  before then. Every subcommand that reads the head prints `head version n, issued d days ago` first.
+- `pair --class web-cards|native-mac [--ttl <s>]` prints a pairing code once (`smns-pair-v1.…`: the hub, the org, the
+  member, the head's root key ids, `recoveryPub` and a fresh 128-bit `k`) to the terminal and the clipboard, never to
+  stdout; then reads `GET /api/devices/pending` every 2 s for up to 10 minutes. An entry is this pairing's when its MAC
+  verifies under `k` over the org, the member and the whole entry (`org-protocol`'s `verifyPairingMac`), whose device
+  id is base64url's alphabet and whose passkey's `rpId` is a host name; others are named in the output and ignored.
+  Everything the hub supplies is printed with its control characters escaped (`\u001b`), so an entry cannot draw a
+  line or a prompt of its own. It shows the entry with its fingerprint (`pairingFingerprint`, `xxxxx-xxxxx`), which
+  the device's panel shows too: compare the two before `y`, since the clipboard exposes `k` to every process under
+  your uid. Two entries answering one code are refused and the code is spent. It then signs a successor listing the
+  device, endorsed by this device, and prints `listed: version n`.
+- `devices` lists the member's devices; `remove-device <id>` asks, then signs a successor dropping the device, its keys
+  into `revoked` and its step-up key out of the root set if it was a root. Machines learn it at the hub's `state` notice, within its 10-minute poll at worst.
+
+Where it writes: the deployment's own org, under the anchor `<keys>.org.json` (`{hub, org, genesis, version, roots,
+recoveryPub, pending?}`, 0600, each write synced and renamed into place), which `genesis` or `adopt` writes; every
+other subcommand reads the chain from its genesis, verifies it against the anchor's pins, refuses another genesis or a
+head older than the anchor's version, and moves the version forward. Never a throwaway org.
+
+No two successors of one parent: every successor this device signs (`refresh`, `pair`, `remove-device`, one path,
+`amend` in `admin.ts`) is written to the anchor's `pending` before its POST, and leaves it only once the hub took it.
+Any answer but 201, or none, leaves it there, and the next subcommand settles it before anything else: the hub's chain
+holding it adopts it (`pending version n is the hub's: adopted`); the hub's head still its parent sends the same bytes
+again (`pending version n is not at the hub: sent again`); the hub holding another state at its version refuses
+`fork: …: nothing was signed`, the anchor unchanged. A `not-head` refusal is not signed again: the next run finds the
+hub's other successor and refuses `fork`, which is the owner's to take to whoever runs the hub (or to the other admin
+device that signed it). Each subcommand but `init` holds `<keys>.org.json.lock` from its first read to its last write;
+a second one is refused, naming the holder's pid, host and start time, and a lock left by a run that died is removed by
+hand once nothing runs (`run-lock.ts`, never taken over). Against a deployment, `genesis`, `pair` and `remove-device` open
+`/dev/tty` before any request and confirm there: a shell with no controlling terminal stops at that open
+(`Device not configured`) and sends nothing.
+
 ## `walk-console.js` (the walk's item 8, read into DevTools)
 
 `deploy/walk-console.js` is not a `deployment` command: it is a snippet the owner
@@ -321,6 +387,11 @@ production's Worker or host, or a preview alias of it (`<alias>-desk-hub.…`), 
     `acceptance`'s push item gets its sink behind an account-less quick tunnel (`cloudflared tunnel --url`), stopped
     when the run ends; `--no-push` skips the item.
   - `access-sync`: the people policy read back at the org state's head, with the machine credentials access-sync uses.
+  - `admin <args…>`: `deployment admin` against `staging-ssfskim` with the admin device's `keys.json` (its anchor,
+    `keys.json.org.json`, beside it once `admin adopt` ran). `adopt`, `devices` and `refresh` run unattended; `pair` and
+    `remove-device` ask at `/dev/tty`, and `pair`'s code goes to the terminal and the clipboard, never the step's log.
+    The step names the deployment and the keys itself: it refuses `--hub`, `--user`, `--yes`, `--config`, `--keys`
+    and `init`. Its output is filtered line by line, so a fingerprint is on screen before the question about it.
   - `throwaway <n>`: staging deployed under the throwaway org `staging-probe-<n>`, then `fake-check` and
     `redeploy-check` there (its RL1 leg included), then the account swept and staging deployed back under
     `staging-ssfskim`. The sweep and the restore run however the step ends, a failure or Ctrl-C included; the step
@@ -358,7 +429,7 @@ What they read, at run time, never printed or passed as an argument:
   spools to a temporary file; every curl call puts `-q` first, so the user's `~/.curlrc` (a `verbose` or `trace` there
   would print or keep the token) is never read;
 - `DESK_STAGING_DEVICE` (default `$DESK_STAGING_DIR/device`): `keys.json`, the admin device's keys (the org-state
-  commands above), and `machine.json`, `{"DESK_MACHINE_CLIENT_ID": …, "DESK_MACHINE_CLIENT_SECRET": …}` for
+  commands above and `admin`), and `machine.json`, `{"DESK_MACHINE_CLIENT_ID": …, "DESK_MACHINE_CLIENT_SECRET": …}` for
   `access-sync`.
 
 Where they write: `DESK_STAGING_DIR` (default `~/.local/state/desk-hub-staging`, created 0700): one log per step and
@@ -367,3 +438,73 @@ deploy, `prod/`, the throwaway steps' snapshots and sweeps, `access-sync/` (its 
 
 Production's Access read-back (its apps and policies, GETs only, compared before and after a run) is not among them:
 it reads production's objects with the setup token, which no script here does.
+
+## Production runs: `production-deploy.sh`, `production-run.sh`
+
+Production's deploy and the steps around it (P5 Decision Log 40) are two scripts beside the staging ones, with their
+mechanism aimed the other way. **The owner runs them; an agent never does**, not even read-only or `--dry-run`
+against the real configuration. Each holds production's Worker, host and org (`desk-hub`,
+`desk-hub.opencognita-platform.workers.dev`, `ssfskim`, as `config.ts` names them) and staging's as named constants,
+reads `deploy/config.json` of its checkout first, and stops before anything else runs unless it names exactly
+production's Worker, host and org; a configuration naming staging's Worker or host, a preview alias (`<alias>-desk-hub.…`)
+or another org is refused as not production. Every token is read inside the script, by path, inside the pipe that
+hands it to a command, and never printed or passed as an argument; output goes through the staging scripts' filter
+(any line holding `token`, `secret`, `bearer` or `eyJ` is dropped, `wrangler target …` lines kept).
+
+- `zsh deploy/production-deploy.sh --checkout <path> --confirm <sha8> [--allow-head] [--dry-run]` deploys the checkout
+  (default: the one the script is in): the top of a git worktree with no uncommitted changes to tracked files, whose
+  HEAD is `--confirm` (as `git rev-parse --short=8 HEAD` prints it, so a command copied from a note cannot deploy
+  another commit) and, after a `git fetch origin master`, `origin/master`'s head. `--allow-head` deploys a HEAD that is
+  not master's (a hotfix), still named by `--confirm`. It builds desk-web with `VITE_DESK_WEB_BUILD=<label>` exported
+  (the build the phone's channel handshake names), then runs `deployment deploy --config deploy/config.json --assets
+  <checkout>/apps/desk-web/dist --web <label>` with the two API tokens on its stdin; `<label>` is `master.<sha8>`, or
+  `head.<sha8>` for a commit that is not master's. The checkout is held under a lock for the whole run
+  (`desk-production.lock` in its git directory, which `production-run.sh checkout` takes too, so neither runs while the
+  other holds it; a lock left by a run that died is removed by hand), and after the web build, which may wait under
+  `DESK_HEAVY_WRAPPER`, the checkout must still be the confirmed commit with no uncommitted changes to tracked files
+  before the tokens are handed over. It prints production's `X-Desk-Build` before (credential-free), fails if no wrangler
+  call or any but `desk-hub`'s ran, then reads production's `X-Desk-Build` until it carries `hub@<sha8>` (not `+dirty`),
+  every 10 s within 2 minutes of elapsed time (each read's own timeout and each pause cut to what is left), and fails if
+  it never does. `--dry-run` makes every check, then prints
+  what it would run (no token in it) and runs none of it.
+- `zsh deploy/production-run.sh <step>`, one step at a time:
+  - `checkout [<path>]`: a detached worktree of `origin/master` at `<path>` (default `~/.local/share/maws-desk-deploy`;
+    a path under `/tmp`, `/private/tmp` or `$TMPDIR` is refused, since a sweep empties them): added from the worktree the
+    script is in (`git worktree add -f --detach`), or fetched and checked out again where it exists, under the
+    deploy's lock on that checkout. Git never runs in
+    a worktree with uncommitted changes, so a dirty checkout, or a dirty worktree to add from, is refused. Then
+    `pnpm install --frozen-lockfile --filter 'desk-hub...' --filter 'desk-web...'` there, and the deploy command for
+    that commit is printed.
+  - `build`: production's `X-Desk-Build`, credential-free; it fails, saying what it read, when there is none naming a
+    hub build. `wait <sha8>`: the deploy's 2-minute wait, alone.
+  - `access-sync` (changes production's Access): `deployment access-sync` against production, reading the head as a
+    production machine enrolled v2 (O14), whose credentials the owner writes to `$DESK_PRODUCTION_DEVICE/machine.json`
+    (`{"DESK_MACHINE_CLIENT_ID": …, "DESK_MACHINE_CLIENT_SECRET": …}`); without the file it stops and says so. Its
+    checkpoint is `$DESK_PRODUCTION_DIR/access-sync/desk-hub.json`. It takes no option.
+  - `admin <args…>`: `deployment admin <args…>` (O13 M2) against production, with `--keys
+    $DESK_PRODUCTION_DEVICE/keys.json` and the owner's production Access token (`cloudflared access token
+    -app=https://desk-hub.opencognita-platform.workers.dev`, after `cloudflared access login` once) on its stdin; `init`
+    needs no token. The deployment and the keys are the script's: `--config`, `--keys`, `--hub`, `--user` and `--yes` are
+    refused. `genesis`, `pair` and `remove-device` ask on the terminal (`/dev/tty`) before they sign, and a pairing code
+    is written to the terminal alone, never to the step's log; `genesis` keeps no log at all (`--recovery paper` prints
+    the recovery key once).
+
+  The steps that change production (`access-sync`; `admin genesis`, `pair`, `remove-device`, `refresh`) say so in their
+  first line, before they read any credential, and stop at the first one they lack.
+
+What they read, at run time:
+- `DESK_PRODUCTION_SECRETS` (default `~/.config/claude-secrets/projects/-Users-new-Developer-GitHub-doperpowers`): the
+  directory holding `CF_ACCESS_SETUP_TOKEN` (the deploy, `access-sync`) and `CF_DESK_HUB_SERVICE_TOKENS` (the deploy);
+- `DESK_PRODUCTION_DEVICE` (default `$DESK_PRODUCTION_DIR/device`, created 0700): `keys.json`, the admin device's keys
+  (`admin init` writes it; the command keeps its own files beside it), and `machine.json` for `access-sync`;
+- `DESK_HEAVY_WRAPPER`, when set, prefixes the web build and the checkout's install (`with-slot.sh`, the Mac's slot
+  limiter, stays the owner's);
+- `TMPDIR`, only to refuse a checkout under it.
+
+Where they write: `DESK_PRODUCTION_DIR` (default `~/.local/state/desk-hub-production`, created 0700): one log per
+deploy (`production-deploy-<time>.log`), per `access-sync` and per `admin` run but `genesis`, and `access-sync/`.
+Nothing of production's Access objects is read.
+
+A deploy, in order: `zsh apps/desk-hub/deploy/production-run.sh checkout`, then from the checkout it names
+`zsh <checkout>/apps/desk-hub/deploy/production-deploy.sh --checkout <checkout> --confirm <sha8> --dry-run`, read, and
+the same without `--dry-run`.

@@ -42,6 +42,7 @@ export const PATH_COMMANDS = [
   'connectors.add', 'connectors.remove', 'connectors.directResolve', 'connectors.directStart', 'connectors.directDiscover', 'connectors.directSend',
   'customization.inventory', 'customization.serverEndpoints',
   'catalog.home', 'catalog.query', 'catalog.item', 'catalog.postures',
+  'host.op', // P5 O10 M7: main-only (mawsd's ledger), never bridged; its `context.engineSessionId` makes it path
 ] as const satisfies readonly CommandName[];
 export type PathCommandName = (typeof PATH_COMMANDS)[number];
 

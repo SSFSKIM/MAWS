@@ -156,6 +156,11 @@ export class Members implements RecordSource, CheckoutSource {
     return this.#members.get(session) ?? null;
   }
 
+  /** Every session held now, by its engine session id. */
+  sessions(): string[] {
+    return [...this.#members.keys()];
+  }
+
   /** The id a session is listed under: lane A its session, lane B its appSessionId once joined (null before). */
   listingId(session: string): string | null {
     const member = this.#members.get(session);

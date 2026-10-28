@@ -135,6 +135,11 @@ export class OrgKeys {
     this.sql.exec('DELETE FROM wrapped_keys WHERE id = ?', id);
     return { ok: true, value: id };
   }
+
+  /** Deletes every copy, the last included: the purge on the org state's word (O14 M5a), the one way to none. */
+  purge(): void {
+    this.sql.exec('DELETE FROM wrapped_keys');
+  }
 }
 
 const notKeyHolder = () => refuse(403, 'not-key-holder', "changing the org's wrapped keys takes the org key: send its auth");

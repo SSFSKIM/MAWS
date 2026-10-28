@@ -8,10 +8,6 @@ export interface TranscriptSource {
   snapshot(): Promise<SessionEvent[]>; // everything so far; called once, after subscribe
   readonly key?: string; // additive: the store key (`appSessionId`, or `appSessionId:agentId`); absent, the transcript keys the source object
   readonly agentId?: AgentId; // additive: set on a child's source
-  // Additive (P4-R7): the message tools whose accepted calls the host reads as messages to the owner (classify.ts,
-  // `presentationOf`); absent, MAWS's own (`@shared/owner/message-call`). The desk's sources name the to-human plugin's
-  // too, since the sessions it shows message their owner through it.
-  readonly messageTools?: readonly string[];
   // Additive (child source provenance): the source's history changed form (a live child switched to its disk
   // transcript), so the store clears the key's state and runs the hydration protocol again.
   onReset?(listener: () => void): () => void;

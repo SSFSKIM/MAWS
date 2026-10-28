@@ -13,7 +13,7 @@ type FakeSubscription = { endpoint: string; options: { applicationServerKey: Arr
 let hub: PushDouble;
 let endpoints = 0;
 
-function fakeEnv(over: { permission?: NotificationPermission; answer?: NotificationPermission; pushManager?: boolean; standalone?: boolean } = {}) {
+function fakeEnv(over: { permission?: NotificationPermission; answer?: NotificationPermission; pushManager?: boolean; standalone?: boolean; device?: () => string | null } = {}) {
   let permission: NotificationPermission = over.permission ?? 'default';
   let current: FakeSubscription | null = null;
   const subscribeCalls: Array<{ applicationServerKey: string }> = [];
@@ -51,6 +51,7 @@ function fakeEnv(over: { permission?: NotificationPermission; answer?: Notificat
             },
           }),
     standalone: over.standalone ?? null,
+    device: over.device,
   };
   return { env, subscribeCalls, current: () => current, setCurrent: (key: Uint8Array) => (current = make(key)) };
 }
@@ -196,6 +197,21 @@ describe('resyncPush', () => {
     await resyncPush(device.env);
     expect(device.subscribeCalls).toEqual([{ applicationServerKey: hub.key }]);
     expect(hub.subscriptions.map((s) => s.endpoint)).toEqual([device.current()!.endpoint]);
+  });
+});
+
+describe('a subscription bound to the device (P5 O13 M3)', () => {
+  it("carries the listed device's id when there is one, and none when there is not, on every hand-over", async () => {
+    let listed: string | null = null;
+    const device = fakeEnv({ device: () => listed });
+    await enablePush(device.env);
+    expect(hub.subscriptions[0]).not.toHaveProperty('device');
+    listed = 'phone-device-id';
+    await resyncPush(device.env);
+    expect(hub.subscriptions).toMatchObject([{ endpoint: device.current()!.endpoint, device: 'phone-device-id' }]);
+    listed = null; // forgotten, or removed from the org: handed over unbound again
+    await retryPush(device.env);
+    expect(hub.subscriptions[0]).not.toHaveProperty('device');
   });
 });
 

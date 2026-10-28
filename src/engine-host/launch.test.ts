@@ -154,7 +154,7 @@ describe('launch contract builds the X6 command line and environment', () => {
       '--session-id', '11111111-1111-4111-8111-111111111111',
       '--mcp-config', JSON.stringify({ mcpServers: { x: { command: 'node' } } }),
       '--max-budget-usd', '0.5',
-      '--disallowedTools', 'AskUserQuestion', '--allowedTools', 'mcp__maws__message', 'mcp__maws__ask', // P2-C2: the app's initialize offers the maws server; P4-R7: its message tool allowed
+      '--disallowedTools', 'AskUserQuestion', '--allowedTools', 'mcp__maws__ask', // P2-C2: the app's initialize offers the maws server; P4-R7z: its ask tool alone allowed
       SETTINGS_FLAG, JSON.stringify({ dialogExpiry: 'never', effortLevel: 'high' }),
     ]);
     expect(plan.sessionId).toBe('11111111-1111-4111-8111-111111111111');
@@ -399,7 +399,7 @@ describe('the owner channel’s flags (P2-C)', () => {
       '--max-budget-usd', '0.5',
       '--append-system-prompt', CONTRACT,
       '--system-prompt-snapshot', 'off',
-      '--disallowedTools', 'AskUserQuestion', '--allowedTools', 'mcp__maws__message', 'mcp__maws__ask', // P2-C2; P4-R7
+      '--disallowedTools', 'AskUserQuestion', '--allowedTools', 'mcp__maws__ask', // P2-C2; P4-R7z
       SETTINGS_FLAG, JSON.stringify({ dialogExpiry: 'never' }),
     ]);
   });
@@ -422,7 +422,7 @@ describe('the owner channel’s flags (P2-C)', () => {
 
   it('passes "off" alone, without an append (a lane switched off on a session that recorded the contract)', () => {
     const plan = buildLaunch(spec({ systemPromptSnapshot: 'off' }), CAPTURED, { ...OPTS, declaresSystemPromptSnapshot: true });
-    expect(tail(plan.args).slice(-9)).toEqual(['--system-prompt-snapshot', 'off', '--disallowedTools', 'AskUserQuestion', '--allowedTools', 'mcp__maws__message', 'mcp__maws__ask', SETTINGS_FLAG, JSON.stringify({ dialogExpiry: 'never' })]);
+    expect(tail(plan.args).slice(-8)).toEqual(['--system-prompt-snapshot', 'off', '--disallowedTools', 'AskUserQuestion', '--allowedTools', 'mcp__maws__ask', SETTINGS_FLAG, JSON.stringify({ dialogExpiry: 'never' })]);
     expect(plan.args).not.toContain('--append-system-prompt');
   });
 
@@ -459,7 +459,8 @@ describe('the native ask withdrawn where the maws server is offered (P2-C2)', ()
       const end = rest.findIndex((arg) => arg.startsWith('--'));
       return end === -1 ? rest : rest.slice(0, end);
     };
-    expect(allowed(buildLaunch(spec({ permissionMode }), CAPTURED, OPTS).args)).toEqual(['mcp__maws__message', 'mcp__maws__ask']);
+    // P4-R7z: the to-human plugin's message tool needs no entry (the plugin answers its calls; the engine asks nothing)
+    expect(allowed(buildLaunch(spec({ permissionMode }), CAPTURED, OPTS).args)).toEqual(['mcp__maws__ask']);
     expect(allowed(buildLaunch(spec({ permissionMode }), CAPTURED, { ...OPTS, sdkMcpServers: [] }).args)).toEqual([]);
     expect(allowed(buildLaunch(spec({ permissionMode }), CAPTURED, { ...OPTS, sdkMcpServers: ['other'] }).args)).toEqual([]);
   });

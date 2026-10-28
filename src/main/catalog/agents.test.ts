@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { LaunchSpecSchema } from '@shared/engine/launch-spec';
 import { MAWS_SERVER_INSTRUCTIONS } from '@shared/maws/instructions';
 import { MAWS_TOOL_NAMES } from '@shared/maws/tools';
-import { MESSAGE_TOOL_ALIAS, TO_HUMAN_CONTRACT, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract';
+import { TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract';
 import { buildLaunch, ENGINE_FLAGS } from '../../engine-host/launch';
 import { CATALOG_FIXTURES_ENV } from './fetch';
 import { CATALOG_TEST_SOURCES_ENV } from './sources';
@@ -27,8 +27,8 @@ describe('what agents see of the catalog: nothing', () => {
     expect(MAWS_TOOL_NAMES.filter((name) => CATALOG_WORDS.test(name))).toEqual([]);
   });
 
-  it('no text MAWS gives the model mentions it: the server’s instructions, the to-human contract and supplement, the alias', () => {
-    for (const [name, text] of Object.entries({ MAWS_SERVER_INSTRUCTIONS, TO_HUMAN_CONTRACT, TO_HUMAN_SUPPLEMENT, MESSAGE_TOOL_ALIAS })) expect(text.match(CATALOG_WORDS), name).toBeNull();
+  it('no text MAWS gives the model mentions it: the server’s instructions and the to-human supplement', () => {
+    for (const [name, text] of Object.entries({ MAWS_SERVER_INSTRUCTIONS, TO_HUMAN_SUPPLEMENT })) expect(text.match(CATALOG_WORDS), name).toBeNull();
   });
 
   it('no launch argument or environment variable carries it, even when main runs with the catalog’s seams set', () => {

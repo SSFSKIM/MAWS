@@ -4,9 +4,11 @@
 import { actionDigest, actionFingerprint, actionSigningInput, isAction, verifyStepUp } from '../src/action.ts';
 import { verifyAttestation } from '../src/attest.ts';
 import { base64urlDecode, base64urlEncode } from '../src/base64url.ts';
+import { canonicalize } from '../src/canonical.ts';
 import { enrollmentMac, enrollmentMacInput } from '../src/enrollment.ts';
 import { verifyEvent, signerFor } from '../src/events.ts';
 import { keyId, signingInput } from '../src/keys.ts';
+import { decodePairingCode, encodePairingCode, pairingFingerprint, pairingMac, pairingMacInput, verifyPairingMac } from '../src/pairing.ts';
 import { stateHash, verifyGenesis, verifyRewind, verifySuccessor, verifyTransition } from '../src/org-state.ts';
 import { contestedRefs, machineKeys, verifyCertRetirement, verifyEndpointRecord, verifyGrant, verifyListing, verifyMachineCert } from '../src/records.ts';
 import type { OrgState, SignedOrgState } from '../src/types.ts';
@@ -14,7 +16,7 @@ import { verifyWebAuthn } from '../src/webauthn.ts';
 import { replayChannel } from './replay-channel.ts';
 import type { Case, VectorSet } from './scenario.ts';
 
-export type { Case, DualCase, EnrollmentCase, VectorSet } from './scenario.ts';
+export type { Case, DualCase, EnrollmentCase, PairingVector, VectorSet } from './scenario.ts';
 
 /** Resolves `{$signed}`, `{$state}` and `{$fixture}` references against the set's fixtures, at any depth. */
 function resolve(set: VectorSet, arg: unknown): unknown {
@@ -97,11 +99,30 @@ export async function replayVectors(set: VectorSet): Promise<string[]> {
     if ((await enrollmentMac(base64urlDecode(e.k), fields)) !== e.mac) failures.push(`enrollment mac of ${e.name}/${e.ref}/${e.tokenId}`);
   }
   if (new Set(set.enrollment.map((e) => e.input)).size !== set.enrollment.length) failures.push('two enrollments encode alike');
+  failures.push(...(await replayPairing(set.pairing)));
   for (const { name, action, input, digest, fingerprint } of set.encodings.actions) {
     if (new TextDecoder().decode(actionSigningInput(action)) !== input) failures.push(`action input of ${name}`);
     if (base64urlEncode(await actionDigest(action)) !== digest) failures.push(`action digest of ${name}`);
     if ((await actionFingerprint(action)) !== fingerprint) failures.push(`action fingerprint of ${name}`);
   }
   failures.push(...(await replayChannel(set.channel, set.fixtures)));
+  return failures;
+}
+
+/** The pairing code decoded and encoded again, its MAC input, MAC and fingerprint, and the swapped entry's (pairing.ts). */
+async function replayPairing(p: VectorSet['pairing']): Promise<string[]> {
+  const failures: string[] = [];
+  const k = base64urlDecode(p.decoded.k);
+  const decoded = decodePairingCode(p.code);
+  if (decoded === null || canonicalize(decoded) !== canonicalize(p.decoded)) failures.push('pairing code: decoded');
+  if (encodePairingCode(p.decoded) !== p.code) failures.push('pairing code: encoded');
+  if (base64urlEncode(pairingMacInput(p.fields)) !== p.input) failures.push('pairing mac: input');
+  if ((await pairingMac(k, p.fields)) !== p.mac || !(await verifyPairingMac(k, p.fields, p.mac))) failures.push('pairing mac: the entry');
+  if ((await pairingFingerprint(p.fields.org, p.fields.member, p.fields.device)) !== p.fingerprint) failures.push('pairing fingerprint: the entry');
+  const { swapped } = p;
+  if (swapped.fields.device.channelPub !== p.fields.device.channelPub) failures.push('pairing: the swapped entry keeps the channel key');
+  if ((await pairingMac(k, swapped.fields)) !== swapped.mac || (await verifyPairingMac(k, swapped.fields, p.mac))) failures.push('pairing mac: the swapped entry');
+  const print = await pairingFingerprint(swapped.fields.org, swapped.fields.member, swapped.fields.device);
+  if (print !== swapped.fingerprint || print === p.fingerprint) failures.push('pairing fingerprint: the swapped entry');
   return failures;
 }

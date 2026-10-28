@@ -32,6 +32,7 @@ export const commands = [
   'session.acquire',
   // P2-A end
   'session.recentTurns', // P2-D (2026-10-09): the resume chooser's preview read
+  'session.pendingItems', // P5 O10 M8: the broker's items as a read (a `view` read, as `session.pendingRequest` is)
 ] as const;
 
 // P4-AGG M4: the engine's own MCP sign-in, main's sign-in operation alone (src/main/connectors/sign-in.ts)

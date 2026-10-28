@@ -144,6 +144,7 @@ const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'commands.fs.agentEvents.output.events[]<kind=question.answered>.answers': ANSWERS,
   'commands.fs.agentEvents.output.events[]<kind=usage.sample>.modelUsage': MODEL_USAGE,
   'commands.fs.tasks.output.tasks[].metadata': "a task's metadata, as the engine's task store writes it",
+  'commands.host.op.input.input': JSON_OBJECT, // P5 O10 M7: an action's args (main-only, mawsd's ledger)
   'commands.maws.artifact.exported.input.answer<ok=false>.refusal.data': "a refusal's detail fields (ArtifactRefusalSchema.data)",
   'commands.session.appEvents.output.events[]<kind=question.answered>.answers': ANSWERS,
   'commands.session.appEvents.output.events[]<kind=usage.sample>.modelUsage': MODEL_USAGE,

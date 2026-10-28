@@ -42,7 +42,7 @@ import type { HostDispatch } from '../ipc/router';
 import { hostCall } from '../sessions/context';
 import { applyEvent, newAnswer, onItsWay, settleAnswers, statusOf, storedOf, type Answer, type PromptEvent } from './answers';
 import { laneOn } from './launch';
-import { pendingOf } from './mods';
+import { laneInEffect, pendingOf, styleCarriesNoLane } from './mods';
 import { blockMarksOf, ownerItemsOf } from './projection';
 import type { MarkUpdate, OwnerChannelStore, OwnerMarkRow } from './store';
 
@@ -216,12 +216,6 @@ export class OwnerChannelService {
     this.changed(appSessionId);
   }
 
-  // States the session's owner channel again: a decided launch's record (what it applied, what is pending) and its
-  // observed style (the mismatch) are part of it.
-  publish(appSessionId: AppSessionId): void {
-    this.emitState(appSessionId);
-  }
-
   // The seam's result for a question's answer (Design §6, "The card's send").
   answered(input: AnsweredInput): void {
     const appSessionId = input.appSessionId as AppSessionId;
@@ -341,18 +335,20 @@ export class OwnerChannelService {
     const row = this.deps.store.session(appSessionId);
     const override = row?.override ?? 'inherit';
     const on = laneOn(this.deps.appEnabled(), override);
+    const effective = laneInEffect(this.deps.appEnabled(), row); // P4-R7z: a style without the plugin's tool carries no lane
     const unsent = this.live.get(appSessionId)?.unsent;
     return {
       appSessionId,
       lane: {
-        on, override, applied: row?.applied ?? null, pending: pendingOf(row, on),
+        on: effective, override, applied: row?.applied ?? null, pending: pendingOf(row, on),
         mismatch: row?.styleMismatch && row.style !== null && row.observedStyle !== null ? { resolved: row.style, observed: row.observedStyle } : null,
       },
       marks: this.deps.store.marks(appSessionId).map((mark) => ownerMarkOf(mark, unsent?.get(mark.id as MarkId), this.unreadable(appSessionId, mark.id as MarkId))),
     };
   }
 
-  // The lane switched (the app's switch, or one session's override): presentation and items follow at once, silently.
+  // The lane switched (the app's switch, one session's override, or a decided launch's record, which carries the style's
+  // part and the observed style): presentation and items follow at once, silently.
   laneChanged(appSessionId?: AppSessionId): void {
     for (const id of appSessionId === undefined ? this.deps.store.markedSessions() : [appSessionId]) {
       this.project(id, true);
@@ -402,10 +398,12 @@ export class OwnerChannelService {
     if (marks.length === 0) return false;
     let added = false;
     try {
-      const enabledAt = this.deps.store.session(appSessionId)?.enabledAt ?? null;
+      const row = this.deps.store.session(appSessionId);
+      const enabledAt = row?.enabledAt ?? null;
       const record = this.deps.sessions.get(appSessionId);
-      const live = event.seq !== null && laneOn(this.deps.appEnabled(), this.deps.store.override(appSessionId)) && !isForeign(record);
-      const item = enabledAt !== null && Date.parse(event.at) >= Date.parse(enabledAt);
+      const live = event.seq !== null && laneInEffect(this.deps.appEnabled(), row) && !isForeign(record);
+      // P4-R7z: a mark written while the session's style carried no lane is never an item, though the watermark stands
+      const item = enabledAt !== null && Date.parse(event.at) >= Date.parse(enabledAt) && !styleCarriesNoLane(row);
       for (const mark of marks) {
         added =
           this.deps.store.putMark({
@@ -725,7 +723,7 @@ export class OwnerChannelService {
     try {
       const record = this.deps.sessions.get(appSessionId);
       if (record !== null) this.held.set(appSessionId, `${isForeign(record)}:${record.archived}`);
-      const on = record !== null && !record.archived && laneOn(this.deps.appEnabled(), this.deps.store.override(appSessionId));
+      const on = record !== null && !record.archived && laneInEffect(this.deps.appEnabled(), this.deps.store.session(appSessionId));
       const { items, quiet } = on
         ? ownerItemsOf(appSessionId, this.deps.store.marks(appSessionId), { sessionId: (record?.engineSessionId ?? null) as SessionId | null, foreignHeld: isForeign(record) })
         : { items: [], quiet: [] };

@@ -56,12 +56,8 @@ export const LAUNCH_PROFILE = {
   pluginsReading: 'Reading your plugins…',
   pluginsNone: 'Your settings turn on no plugins.',
   pluginOn: (id: string) => `Load ${id} in MAWS sessions`,
-  style: 'Output style in sessions',
-  styleNote: "Yours: the style your settings select. MAWS's: Claude Code's default style, with MAWS's own instructions for messaging you.",
-  styleYours: 'Yours',
-  styleMaws: "MAWS's",
   hooks: 'Hooks in sessions',
-  hooksNote: "None turns off every hook from your settings and your plugins in MAWS's sessions; MAWS still tells each session how to message you. Each change on this page applies at a session's next launch, never to a terminal session.",
+  hooksNote: "None turns off every hook from your settings and your plugins in MAWS's sessions, the to-human plugin's included, so they run without MAWS's report. Each change on this page applies at a session's next launch, never to a terminal session.", // P4-R7z: the plugin's message tool needs its hooks
   hooksYours: 'Yours',
   hooksNone: 'None',
 };

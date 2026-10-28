@@ -157,6 +157,8 @@
 "commands.session.memoryAppend.input":[".appSessionId AppSessionId"],
 "commands.session.observedFacts.input":[".appSessionId AppSessionId"],
 "commands.session.observedFacts.output":[".appSessionId AppSessionId"],
+"commands.session.pendingItems.input":[".appSessionId AppSessionId"],
+"commands.session.pendingItems.output":[".items[].appSessionId AppSessionId",".items[].id AttentionId"],
 "commands.session.pendingRequest.input":[".appSessionId AppSessionId"],
 "commands.session.pendingRequest.output":[".event<kind=maws.delivery.artifact>.ownerAppSessionId AppSessionId",".event<kind=side.thread.opened>.childAppSessionId AppSessionId",".event<kind=side.thread.summarised>.childAppSessionId AppSessionId"],
 "commands.session.projects.add.output":[".id ProjectId"],

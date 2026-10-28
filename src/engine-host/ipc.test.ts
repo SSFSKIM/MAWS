@@ -123,14 +123,17 @@ describe('x2 deadlines fit the bridge', () => {
   it('every host.* command the engine host owns has one deadline shape and a Supervision handler; stopAll alone is bounded', () => {
     const hostOwned = Object.entries(hostSchema.commands).filter(([, spec]) => spec.owner === 'engine-host').map(([name]) => name);
     expect(Object.keys(HOST_DEADLINE_SHAPES).sort()).toEqual(hostOwned.sort());
-    expect(HOST_DEADLINE_SHAPES).toEqual({ 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate' });
+    expect(HOST_DEADLINE_SHAPES).toEqual({ 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate', 'host.op': 'bounded', 'host.opQuery': 'immediate' });
+    // P5 O10 M7: lane B's operation ledger is the engine ipc's (ops.ts), not the supervisor's
+    const ledgerCommands = ['host.op', 'host.opQuery'];
+    expect([...engineHost().handlers.keys()].filter((name) => name.startsWith('host.')).sort()).toEqual(ledgerCommands);
     const registered: string[] = [];
     new Supervision({
       mode: 'utility', identity: { pid: 1, startedAt: 't', buildId: 'b', protocol: 1, wire: 'w', socketPath: null, logPath: null } as never,
       table: { onChange: () => () => {}, onRowsChanged: () => () => {}, setIdleRelease: () => {}, list: () => [] } as never,
       plugins: { busy: () => false, onIdle: () => () => {} }, shutdown: async () => ({ stopped: 0, forced: 0 }), emit: () => true, log: () => {},
     }).register((name) => void registered.push(name), { onConnect: () => {} });
-    expect(registered.sort()).toEqual(hostOwned.sort());
+    expect(registered.sort()).toEqual(hostOwned.filter((name) => !ledgerCommands.includes(name)).sort());
   });
 
   it('every bounded wait fits under the router\'s 10 s with the two IPC hops to spare', () => {
@@ -360,6 +363,30 @@ describe('engine host X2 surface', () => {
     expect(existsSync(stateFile)).toBe(true);
     expect(existsSync(journalDir)).toBe(false);
     expect((await store.loadLaunchSpec(id as AppSessionId))?.appSessionId).toBe(id);
+  });
+
+  // P5 O10 M8: the broker's items as a read, the same list `session.brokerItems` last published
+  it('session.pendingItems answers the session’s pending items: the permission while it waits, none once it is answered', async () => {
+    const { O10_DEADLINE_SHAPES } = await import('./ipc');
+    expect(O10_DEADLINE_SHAPES).toEqual({ 'session.pendingItems': 'immediate' });
+    const host = engineHost();
+    expect(host.handlers.has('session.pendingItems')).toBe(true);
+    const id = 'app-items';
+    await host.call('session.launch', { spec: replaySpec(id, 'spikes/protocol-probe/fixtures/permission-roundtrip.jsonl') });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    expect(await host.call('session.pendingItems', { appSessionId: id as AppSessionId })).toEqual({ items: [] });
+    await host.call('session.send', { appSessionId: id as AppSessionId, content: 'Use Bash to run exactly git log --oneline. Then say DONE.' });
+    await until(() => host.events(id).some((e) => e.kind === 'permission.requested'), 'permission.requested');
+    const published = host.emitted.filter((e) => e.name === 'session.brokerItems').at(-1)!.payload as { items: unknown[] };
+    const read = await host.call('session.pendingItems', { appSessionId: id as AppSessionId });
+    expect(read.items).toMatchObject([{ kind: 'permission', state: 'pending' }]);
+    expect(read).toEqual({ items: published.items });
+    const requested = host.events(id).find((e) => e.kind === 'permission.requested') as Extract<SessionEvent, { kind: 'permission.requested' }>;
+    await host.call('session.answer', { appSessionId: id as AppSessionId, requestId: requested.requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } });
+    await until(() => host.events(id).some((e) => e.kind === 'turn.ended'), 'turn.ended');
+    expect((await host.call('session.pendingItems', { appSessionId: id as AppSessionId })).items.filter((i) => i.state === 'pending')).toEqual([]);
+    await expect(host.call('session.pendingItems', { appSessionId: 'app-none' as AppSessionId })).rejects.toThrow(/unknown session/);
+    await host.call('session.stop', { appSessionId: id as AppSessionId, reason: 'stop' });
   });
 
   // P2-A M1 (X4 across an acquisition): an acquisition launches the record's resume through the same `session.launch`;

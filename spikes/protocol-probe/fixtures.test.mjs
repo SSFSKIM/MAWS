@@ -566,6 +566,10 @@ test('p4 R7 the eval: before, 4 of 11 mid-turn messages lost to progress notes, 
 // the engine sent, with each place the context appears), its `starts` note (the `hook_callback` requests, the hook
 // lifecycle frames) and, on the relay, what the model answered.
 const ownerContract=await import('../../src/shared/owner/contract.ts');
+// P4-R7z (the P4 spec's Decision Log 92) withdrew the alias, its SessionStart group, contract 7 and supplement 2; these
+// fixtures recorded them, so they read the texts in force when they were recorded.
+const recorded7={alias:ownerContract.LEGACY_MESSAGE_TOOL_ALIAS,contract:ownerContract.LEGACY_CONTRACT_7.text,version:ownerContract.LEGACY_CONTRACT_7.version,supplement:ownerContract.LEGACY_SUPPLEMENT_2.text,
+ group:()=>({hooks:[{type:'command',command:'/usr/bin/printf',args:['%s',JSON.stringify({hookSpecificOutput:{hookEventName:'SessionStart',additionalContext:ownerContract.LEGACY_MESSAGE_TOOL_ALIAS}})]}]})};
 const R7Y_STUB=['','-plain','-resume','-resume-again','-fork'].flatMap(s=>['callback','command'].map(m=>`p4-r7y-stub-${m}${s}`));
 const R7Y_RELAY=['p4-r7y-relay-control','p4-r7y-relay-resume','p4-r7y-relay-startup'];
 const steps7y=name=>meta4(load4(name),'step');
@@ -577,7 +581,7 @@ for(const name of [...R7Y_STUB,...R7Y_RELAY])test('p4/'+name+' is ordered NDJSON
  const text=readFileSync(new URL(name+'.jsonl',dir4),'utf8');assert.ok(!text.includes('sk-ant-'));if(secret&&secret.length>=8)assert.ok(!text.includes(secret));
  const rows=text.trim().split('\n').map(JSON.parse);
  assert.equal(pass3Open(rows).size,0);
- const prov=meta4(rows,'provenance')[0];assert.equal(prov.child,'P4-R7y');assert.equal(prov.engineVersion,'2.1.304');assert.equal(prov.pin,'bd54d325b4c967eeafb98fb6426049bff1c55669');assert.equal(prov.text,ownerContract.MESSAGE_TOOL_ALIAS);
+ const prov=meta4(rows,'provenance')[0];assert.equal(prov.child,'P4-R7y');assert.equal(prov.engineVersion,'2.1.304');assert.equal(prov.pin,'bd54d325b4c967eeafb98fb6426049bff1c55669');assert.equal(prov.text,recorded7.alias);
  const owner=meta4(rows,'owner_file_check');assert.equal(owner.length,2);assert.equal(owner[1].same,true);
  assert.ok(rows.some(r=>r.frame.event==='exit'&&r.frame.code===0));
  for(const s of meta4(rows,'step'))assert.equal(s.result.subtype,'success',s.prompt);
@@ -591,7 +595,7 @@ test('p4 R7y the host callback: called at a compaction and a clear, never at sta
  for(const s of ['-resume','-resume-again','-fork'])assert.deepEqual(copies7y('p4-r7y-stub-callback'+s),[[0]],s);
 });
 test('p4 R7y the command hook MAWS puts in --settings: it runs at every start (startup, compact, clear, resume, fork) and the next request carries the context once, as a SessionStart system message',()=>{
- const group=ownerContract.messageToolHookGroup();
+ const group=recorded7.group();
  for(const name of R7Y_STUB.filter(n=>n.includes('-command')&&!n.endsWith('-plain')))assert.deepEqual(meta4(load4(name),'provenance')[0].flagSettings.hooks,{SessionStart:[group]},name);
  assert.deepEqual(ran7y('p4-r7y-stub-command'),['SessionStart:startup:success','SessionStart:compact:success','SessionStart:clear:success']);
  assert.deepEqual(copies7y('p4-r7y-stub-command'),[[1],[1],[1],[],[1]]);
@@ -599,8 +603,8 @@ test('p4 R7y the command hook MAWS puts in --settings: it runs at every start (s
  assert.deepEqual(copies7y('p4-r7y-stub-command-plain'),[[0]]); // the session the resumes and the fork read had none
  for(const s of ['-resume','-resume-again','-fork'])assert.deepEqual(copies7y('p4-r7y-stub-command'+s),[[1]],s); // a later start's copy is not added again
  const hit=steps7y('p4-r7y-stub-command-resume')[0].requests.find(q=>q.copies===1).hits[0];
- assert.equal(hit.role,'system');assert.ok(hit.text.startsWith(`SessionStart hook additional context: ${ownerContract.MESSAGE_TOOL_ALIAS}`));
- assert.ok(meta4(load4('p4-r7y-stub-command'),'disk')[0].context.every(c=>c.hookEvent==='SessionStart'&&c.content.includes(ownerContract.MESSAGE_TOOL_ALIAS)));
+ assert.equal(hit.role,'system');assert.ok(hit.text.startsWith(`SessionStart hook additional context: ${recorded7.alias}`));
+ assert.ok(meta4(load4('p4-r7y-stub-command'),'disk')[0].context.every(c=>c.hookEvent==='SessionStart'&&c.content.includes(recorded7.alias)));
 });
 test('p4 R7y on a real model: without the hook it names no tool for mcp__to-human__message; with it, at a resume of that session and at a new session\'s startup, it names mcp__maws__message; under US$0.25',()=>{
  const answers=name=>steps7y(name)[0].requests.filter(q=>q.prompts.some(p=>p.head.startsWith('Without calling any tool'))).map(q=>[q.copies,q.answer.trim()]);
@@ -661,6 +665,9 @@ test('p4 R8 scratch: a server that needs auth reads needs-auth with no tools, an
 // of the owner's user-scope plugins and probe-owned user hooks. Stub arms against the scripted API (each launch's `step`
 // notes: every request with the alias and the user hooks' markers placed), two relay arms, and the home's manifest.
 const launchProfile=await import('../../src/shared/engine/launch-profile.ts');
+// Settings version 19 (the owner's ruling of 2026-10-28) took the profile's output style away; these fixtures recorded
+// version 17's profile, so they read it as it was then: today's keys, and MAWS's style (`maws`) as the engine's `default`.
+const recordedProfile2p=({outputStyle,...profile})=>{assert.ok(outputStyle==='user'||outputStyle==='maws',String(outputStyle));return {profile,settings:{...launchProfile.profileSettings(profile),...(outputStyle==='maws'?{outputStyle:'default'}:{})}};};
 const A2P_STUB=['plain','plugins','style','hooks-group','hooks','hooks-resume','hooks-fork','hooks-user-kept','hooks-user','full'].map(s=>'p4-a2p-stub-'+s);
 const A2P_RELAY=['p4-a2p-relay-plain','p4-a2p-relay-full'];
 const A2P_PLUGINS=['designer@designer','doperpowers@doperpowers','eli5@claude-community'];
@@ -670,15 +677,15 @@ const flat2p=name=>main2p(name).flat();
 const responses2p=name=>one2p(name,'hooks').frames.filter(h=>h.subtype==='hook_response').map(h=>h.hook_name);
 const noneOf2p=name=>one2p(name,'provenance').profile.hooks==='none';
 // MAWS's `--settings` and `--append-system-prompt` for a lane-on launch under a profile, from MAWS's own modules
-const flagFor2p=prov=>({dialogExpiry:'never',...launchProfile.profileSettings(prov.profile),env:{[ownerContract.NATIVE_TO_HUMAN_ENV]:String(ownerContract.TO_HUMAN_CONTRACT_VERSION)},...(prov.group?{hooks:{SessionStart:[ownerContract.messageToolHookGroup()]}}:{})});
-const appendFor2p=prov=>(prov.profile.outputStyle==='maws'?ownerContract.TO_HUMAN_CONTRACT:ownerContract.TO_HUMAN_SUPPLEMENT)+(prov.profile.hooks==='none'&&prov.group===false?`\n\n${ownerContract.MESSAGE_TOOL_ALIAS}`:'');
+const flagFor2p=prov=>({dialogExpiry:'never',...recordedProfile2p(prov.profile).settings,env:{[ownerContract.NATIVE_TO_HUMAN_ENV]:String(recorded7.version)},...(prov.group?{hooks:{SessionStart:[recorded7.group()]}}:{})});
+const appendFor2p=prov=>(prov.profile.outputStyle==='maws'?recorded7.contract:recorded7.supplement)+(prov.profile.hooks==='none'&&prov.group===false?`\n\n${recorded7.alias}`:'');
 const argAfter2p=(args,flag)=>{const i=args.indexOf(flag);return i<0?null:args[i+1];};
 for(const name of [...A2P_STUB,...A2P_RELAY])test('p4/'+name+' is ordered NDJSON with correlated replies, P4-A2P provenance on the installed engine, MAWS\'s launch under its profile, the owner file unchanged and no secret',()=>{
  const text=readFileSync(new URL(name+'.jsonl',dir4),'utf8');assert.ok(!text.includes('sk-ant-'));if(secret&&secret.length>=8)assert.ok(!text.includes(secret));
  const rows=text.trim().split('\n').map(JSON.parse);
  assert.equal(pass3Open(rows).size,0);
  const prov=meta4(rows,'provenance')[0];assert.equal(prov.child,'P4-A2P');assert.equal(prov.pin,'246354256c404b41189c6cbeb67a7c1157a9f0e6');assert.equal(prov.engineVersion,'2.1.306');
- assert.deepEqual(launchProfile.LaunchProfileSchema.parse(prov.profile),prov.profile);assert.deepEqual(prov.profileSettings,launchProfile.profileSettings(prov.profile));
+ const recorded=recordedProfile2p(prov.profile);assert.deepEqual(launchProfile.LaunchProfileSchema.parse(recorded.profile),recorded.profile);assert.deepEqual(prov.profileSettings,recorded.settings);
  assert.deepEqual(prov.flagSettings,flagFor2p(prov));assert.equal(prov.append,appendFor2p(prov));
  const args=meta4(rows,'spawn')[0].args;
  assert.ok(!args.includes('--model')); // the model and the effort come from the user scope
@@ -730,7 +737,7 @@ test('p4 A2P R-7 (2): the user\'s hooks and the plugins\' run under the user sco
  for(const name of ['p4-a2p-stub-hooks-group','p4-a2p-stub-hooks','p4-a2p-stub-hooks-resume','p4-a2p-stub-hooks-fork','p4-a2p-stub-full','p4-a2p-relay-full'])for(const q of flat2p(name))assert.deepEqual([q.hits.userSessionStart.messages.length,q.hits.userPromptSubmit.messages.length],[0,0],name);
  for(const name of ['p4-a2p-stub-hooks-user-kept','p4-a2p-stub-hooks-user'])for(const q of flat2p(name))assert.deepEqual([q.hits.userSessionStart.messages.length,q.hits.userPromptSubmit.messages.length,q.hits.alias.messages.length],[1,1,1],name);
  // MAWS's group still in the flag JSON beside disableAllHooks: it does not run, and the alias reaches the model nowhere
- const g=one2p('p4-a2p-stub-hooks-group','provenance');assert.deepEqual([g.flagSettings.disableAllHooks,g.flagSettings.hooks],[true,{SessionStart:[ownerContract.messageToolHookGroup()]}]);
+ const g=one2p('p4-a2p-stub-hooks-group','provenance');assert.deepEqual([g.flagSettings.disableAllHooks,g.flagSettings.hooks],[true,{SessionStart:[recorded7.group()]}]);
  for(const q of flat2p('p4-a2p-stub-hooks-group'))assert.deepEqual([q.hits.alias.system,q.hits.alias.messages.length,q.appendWhole],[0,0,true]);
 });
 test('p4 A2P R-7 (2) the route: under hooks none the alias appended after the supplement or the contract is in the system prompt at startup, after /compact and /clear, at a --resume and a --fork-session with snapshot off, and at a snapshot-off resume of a user-scope session',()=>{
@@ -748,7 +755,7 @@ test('p4 A2P R-7 (2) the route: under hooks none the alias appended after the su
 test('p4 A2P R-7 (2): without snapshot off a resume reuses the recorded system prompt, dropping the new append; a launch with snapshot off records no snapshot of its own',()=>{
  const [plain]=main2p('p4-a2p-stub-plain')[0];const [kept]=main2p('p4-a2p-stub-hooks-user-kept')[0];const [live]=main2p('p4-a2p-stub-hooks-user')[0];
  assert.deepEqual([kept.hits.alias.system,kept.appendWhole,kept.appended,kept.systemChars],[0,false,'supplement:2',plain.systemChars]);
- assert.deepEqual([live.hits.alias.system,live.appendWhole,live.systemChars-plain.systemChars],[1,true,`\n\n${ownerContract.MESSAGE_TOOL_ALIAS}`.length]);
+ assert.deepEqual([live.hits.alias.system,live.appendWhole,live.systemChars-plain.systemChars],[1,true,`\n\n${recorded7.alias}`.length]);
  const id=one2p('p4-a2p-stub-plain','inits').inits[0].session_id;
  for(const name of ['p4-a2p-stub-hooks-user-kept','p4-a2p-stub-hooks-user'])assert.equal(one2p(name,'provenance').resume,id,name);
  // after both resumes the user-scope session's transcript holds its first launch's snapshots only, neither with the alias
