@@ -63,6 +63,7 @@
   "org.cancel",
   "org.reanchor",
   "org.register",
+  "org.rows",
   "org.signIn",
   "org.signOut",
   "org.status",
