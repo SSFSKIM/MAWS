@@ -671,6 +671,63 @@ describe('lane A, through sminos’s ledger over RL10', () => {
     expect(await done(again, copy)).toEqual({ state: 'done', result: {} });
   });
 
+  it('hands a send down as an `rpc` named `send` with its args, context and fingerprint, and answers sminos’s result, its refusal of an RPC it lacks too', async () => {
+    const f = await start();
+    const s = await sminos(f);
+    const a = await open(f, a1, A);
+    const message = laneA(f, a, 'send', { text: 'please look at the tests' });
+    expect(await actA(a, s, message)).toBe('ok');
+    const rpc = (await s.next((x) => x.t === 'rpc', 'the send rpc')).rpc as Record<string, unknown>;
+    expect(rpc).toMatchObject({ rpc: 'send', project: PROJECT, member: A, device: 'a1', created: message.created, nonce: message.nonce, opId: message.opId, opCreated: message.opCreated });
+    expect(rpc.args).toEqual({ session: 'la-1', text: 'please look at the tests' });
+    expect(rpc.context).toEqual({ lane: 'A', session: 'la-1', launch: 'L1' });
+    expect(rpc.fingerprint).toBe(await actionFingerprint(message));
+    s.send({ t: 'rpc-result', project: PROJECT, opId: message.opId, nonce: message.nonce, outcome: { state: 'done', result: { entered: true, uuid: 'row-1' } } });
+    expect(await done(a, message)).toEqual({ state: 'done', result: { entered: true, uuid: 'row-1' } });
+    // A sminos that predates `send` refuses it as an RPC it doesn't have; the device reads that refusal's code.
+    const early = laneA(f, a, 'send', { text: 'are you there?' });
+    expect(await actA(a, s, early)).toBe('ok');
+    await s.next((x) => x.t === 'rpc' && (x.rpc as Record<string, unknown>).nonce === early.nonce, 'the second send rpc');
+    s.send({ t: 'rpc-result', project: PROJECT, opId: early.opId, nonce: early.nonce, outcome: { state: 'failed', error: { code: 'unsupported', message: "no RPC 'send' on this machine" } } });
+    expect(await done(a, early)).toEqual({ state: 'failed', error: { code: 'unsupported' } });
+  });
+
+  it('refuses a send whose args name another session than its context (`malformed`), sealed for another launch (`context`), or on a session with no bridge (`unavailable`), sending nothing down', async () => {
+    const f = await start();
+    const s = await sminos(f);
+    const a = await open(f, a1, A);
+    const elsewhere = a.device.action({ machine: f.ref, action: 'sminos.send', session: 'la-1', context: { lane: 'A', session: 'la-1', launch: 'L1' }, args: { session: 'la-other', text: 'x' } });
+    expect(await act(a, elsewhere)).toBe('malformed');
+    expect(await act(a, laneA(f, a, 'send', { text: 'x' }, 'L0'))).toBe('context');
+    member(s, undefined);
+    await until(() => f.endpoint.rl10.members.get('la-1')?.launch === undefined, 'the bridge gone');
+    expect(await act(a, laneA(f, a, 'send', { text: 'x' }))).toBe('unavailable');
+    await sleep(200);
+    expect(s.received.filter((x) => x.t === 'rpc')).toEqual([]);
+  });
+
+  it('refuses a send whose text is no message (`malformed`: no string, blank, or past 65,536 UTF-16 code units), sending nothing down, and hands one of exactly 65,536 down', async () => {
+    const f = await start();
+    const s = await sminos(f);
+    const a = await open(f, a1, A);
+    const texts: Array<[string, Record<string, unknown>]> = [
+      ['no text', {}],
+      ['a number', { text: 7 }],
+      ['empty', { text: '' }],
+      ['blank', { text: ' \n\t ' }],
+      ['65,537 characters', { text: 'x'.repeat(65_537) }],
+      // 32,769 code points, which a code-point count would take: the bound is MAWS's prompt limit, in UTF-16 units.
+      ['65,538 UTF-16 code units', { text: '😀'.repeat(32_769) }],
+    ];
+    for (const [what, args] of texts) expect(await act(a, laneA(f, a, 'send', args)), what).toBe('malformed');
+    await sleep(200);
+    expect(s.received.filter((x) => x.t === 'rpc')).toEqual([]);
+    const longest = laneA(f, a, 'send', { text: 'x'.repeat(65_536) });
+    expect(await actA(a, s, longest)).toBe('ok');
+    const rpc = (await s.next((x) => x.t === 'rpc', 'the longest send')).rpc as Record<string, unknown>;
+    expect((rpc.args as { text: string }).text).toHaveLength(65_536);
+  });
+
   it('refuses an action sealed for another launch (`context`), and one on a session with no bridge (`unavailable`), sending nothing down', async () => {
     const f = await start();
     const s = await sminos(f);
