@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandResult, MawsBridge, SettingsState } from '@shared/ipc/schema';
+import { TEST_MACHINE } from '../../../../test/support/machine';
 import { createSettingsStore } from './settings';
 import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
 
@@ -15,6 +16,7 @@ function fakeClient() {
     'settings.set': [],
   };
   const client = {
+    localMachine: TEST_MACHINE,
     invoke: vi.fn(
       (name: 'settings.get' | 'settings.set') =>
         new Promise<CommandResult<'settings.get'>>((resolve) => pending[name].push(resolve)),
@@ -107,7 +109,7 @@ describe('renderer settings store', () => {
     const fake = fakeClient();
     const store = createSettingsStore(fake.client);
     const done = store.getState().setTheme('dark');
-    expect(fake.raw.invoke).toHaveBeenCalledWith('settings.set', { theme: 'dark' });
+    expect(fake.raw.invoke).toHaveBeenCalledWith('settings.set', { theme: 'dark' }, { machine: TEST_MACHINE });
     await fake.reply('settings.set', 0, ok(DARK));
     await done;
     expect(store.getState().state).toEqual(DARK);

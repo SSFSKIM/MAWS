@@ -4,18 +4,22 @@
 // the gesture itself, which resumes or starts without a message, docks a trust or relay card and never answers it.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { MawsBridge, PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { record, status } from '../../../../test/support/builders';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { continueSetup } from '../sessions/setup-actions';
 import { useSetup } from '../sessions/store';
 import { resetComposerStore, useComposerStore } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
 import { artifactSessionContext, startArtifactSession, type ArtifactSessionStart } from './session-context';
 
-const OWN = 'own-session' as AppSessionId;
-const LINKED = 'linked-session' as AppSessionId;
-const P1 = 'p1' as ProjectId;
+// P5 O6 M2: the page's ids are addresses (the `client` below is a page-level bridge); main, installed as window.maws,
+// is asked and answers with the bare MAIN_OWN.
+const MAIN_OWN = 'own-session' as AppSessionId;
+const OWN = at(MAIN_OWN);
+const LINKED = at('linked-session' as AppSessionId);
+const P1 = at('p1') as ProjectId; // the page holds addresses; the project's machine is read off it
 const P2 = 'p2' as ProjectId;
 const SPACE = '55555555-5555-4555-8555-555555555555';
 
@@ -67,7 +71,7 @@ type Invoked = [string, unknown];
 // first, say). Events reach what `on` subscribed.
 function client(answers: Record<string, unknown>, during: Record<string, () => void> = {}) {
   const calls: Invoked[] = [];
-  const listeners = new Map<string, Set<(payload: unknown) => void>>();
+  const listeners = new Map<string, Set<(payload: unknown, from: { machine: typeof TEST_MACHINE }) => void>>();
   const bridge = {
     invoke: vi.fn(async (name: string, input: unknown) => {
       calls.push([name, input]);
@@ -75,14 +79,14 @@ function client(answers: Record<string, unknown>, during: Record<string, () => v
       const value = answers[name];
       return value instanceof Error ? { ok: false, error: { code: 'internal', message: value.message } } : { ok: true, value };
     }),
-    on: vi.fn((name: string, listener: (payload: unknown) => void) => {
+    on: vi.fn((name: string, listener: (payload: unknown, from: { machine: typeof TEST_MACHINE }) => void) => {
       const set = listeners.get(name) ?? new Set();
       set.add(listener);
       listeners.set(name, set);
       return () => set.delete(listener);
     }),
   };
-  const emit = (name: string, payload: unknown) => listeners.get(name)?.forEach((listener) => listener(payload));
+  const emit = (name: string, payload: unknown) => listeners.get(name)?.forEach((listener) => listener(payload, { machine: TEST_MACHINE }));
   const listening = (name: string) => listeners.get(name)?.size ?? 0;
   return { bridge: bridge as unknown as MawsBridge, calls, emit, listening };
 }
@@ -107,7 +111,7 @@ describe('the owner’s Start', () => {
   });
 
   it('creates a session in the directory and starts it requiring no message, docking a trust card it never answers', async () => {
-    const created = 'created' as AppSessionId;
+    const created = at('created' as AppSessionId);
     const trust = { key: '/work/app', directory: '/work/app', trusted: false };
     const { bridge, calls } = client({ 'session.create': { appSessionId: created, intent: intent(created) }, 'session.start': { status: 'needs_trust', appSessionId: created, trust } });
     const answer = await startArtifactSession({ kind: 'directory', path: '/work/app', projectId: P1 }, null, bridge);
@@ -120,7 +124,7 @@ describe('the owner’s Start', () => {
   });
 
   it('starts the session an earlier Start created rather than another, and resumes it once it is a record', async () => {
-    const earlier = 'earlier' as AppSessionId;
+    const earlier = at('earlier' as AppSessionId);
     useSetup.setState({ intents: new Map([[earlier, intent(earlier) as never]]) });
     const first = client({ 'session.start': { status: 'starting', appSessionId: earlier } });
     await expect(startArtifactSession({ kind: 'directory', path: '/work/app', projectId: P1 }, earlier, first.bridge)).resolves.toMatchObject({ status: 'starting', appSessionId: earlier });
@@ -141,7 +145,7 @@ describe('the owner’s Start', () => {
   });
 
   it('settles a start on its setup’s end, even one main announced before the start answered', async () => {
-    const created = 'created' as AppSessionId;
+    const created = at('created' as AppSessionId);
     const early = client(
       { 'session.create': { appSessionId: created, intent: intent(created) }, 'session.start': { status: 'starting', appSessionId: created } },
       { 'session.start': () => early.emit('session.setup', setupEvent(created, 'failed', { kind: 'error', message: 'the engine would not start', resources: RESOURCES })) },
@@ -154,7 +158,7 @@ describe('the owner’s Start', () => {
     const later = client({ 'session.start': { status: 'starting', appSessionId: created } });
     useSetup.setState({ intents: new Map([[created, intent(created) as never]]) });
     const second = (await startArtifactSession({ kind: 'directory', path: '/work/app', projectId: P1 }, created, later.bridge)) as Extract<ArtifactSessionStart, { status: 'starting' }>;
-    later.emit('session.setup', setupEvent('another' as AppSessionId, 'failed', null)); // another session's: not this one's end
+    later.emit('session.setup', setupEvent(at('another' as AppSessionId), 'failed', null)); // another session's: not this one's end
     later.emit('session.setup', setupEvent(created, 'launching', null));
     later.emit('session.setup', setupEvent(created, 'failed', { kind: 'relay_unreachable', health: { ok: false } }));
     await expect(second.settled).resolves.toEqual({ status: 'card', appSessionId: created, words: 'The relay is unreachable · the session offers Run direct' });
@@ -170,7 +174,7 @@ describe('the owner’s Start', () => {
   // P3-F F4 (c26): the owner's answer to a trust card, given on another surface, travels as the composer's card sends it
   // (StartOptions.trust) with the start or the resume; nothing here answers it by itself.
   it('answers a trust card with the folder it asks about, and carries the owner’s decision with the start or the resume', async () => {
-    const created = 'created' as AppSessionId;
+    const created = at('created' as AppSessionId);
     const trust = { directory: '/work/app', trustKey: '/work/app', keyKind: 'directory', configPath: '/config/.claude.json', trusted: false, source: null, isHome: false, found: [] };
     const asked = client({ 'session.create': { appSessionId: created, intent: intent(created) }, 'session.start': { status: 'needs_trust', appSessionId: created, trust } });
     await expect(startArtifactSession({ kind: 'directory', path: '/work/app', projectId: P1 }, null, asked.bridge)).resolves.toEqual({ status: 'card', appSessionId: created, words: 'Trust this folder in the session to continue', trust });
@@ -214,7 +218,7 @@ describe('the owner’s Start', () => {
     const message = { content: 'Draft the summary.', display: 'Draft the summary.' };
     const ready = { status: 'ready', appSessionId: OWN, launched: true, joined: false };
     const composer = fakeClient({ 'session.queue.list': { entries: [], paused: false }, 'session.send': { messageUuid: '22222222-2222-4222-8222-222222222222', disposition: 'sent', queueId: 'q1' }, 'session.history.append': undefined });
-    window.maws = composer.client;
+    window.maws = composer.client as unknown as PreloadBridge;
     try {
       resetComposerStore();
       useSessions.setState({ records: new Map([[OWN, record(OWN)]]), engine: new Map(), digests: new Map() });
@@ -226,10 +230,10 @@ describe('the owner’s Start', () => {
       await expect(startArtifactSession({ kind: 'session', appSessionId: OWN }, null, comment.bridge, 'accepted')).resolves.toEqual({ status: 'ready', appSessionId: OWN });
       expect(useSetup.getState().cards.get(OWN), 'the continuation’s card').toMatchObject({ kind: 'trust', message });
 
-      useSessions.getState().applyStatus({ appSessionId: OWN, status: status(OWN) });
-      await composer.reply('session.acquire', ready);
+      useSessions.getState().applyStatus({ appSessionId: OWN, status: status(OWN) }, TEST_MACHINE);
+      await composer.reply('session.acquire', { ...ready, appSessionId: MAIN_OWN });
       await expect(continuing).resolves.toEqual({ ok: true });
-      expect(composer.invoked('session.send')).toEqual([{ appSessionId: OWN, content: message.content }]);
+      expect(composer.invoked('session.send')).toEqual([{ appSessionId: MAIN_OWN, content: message.content }]);
       expect(useComposerStore.getState().prefills.get(OWN)).toEqual({ text: '' });
       expect(useSetup.getState().cards.has(OWN)).toBe(false);
     } finally {
@@ -238,7 +242,7 @@ describe('the owner’s Start', () => {
   });
 
   it('answers main’s refusal of a session holding a prompt with its words and the session to open', async () => {
-    const earlier = 'earlier' as AppSessionId;
+    const earlier = at('earlier' as AppSessionId);
     useSetup.setState({ intents: new Map([[earlier, intent(earlier) as never]]) });
     const words = 'A prompt is waiting in this session · open it to send or discard the prompt first';
     const { bridge, listening } = client({ 'session.start': { status: 'refused', appSessionId: earlier, reason: 'busy', message: words } });

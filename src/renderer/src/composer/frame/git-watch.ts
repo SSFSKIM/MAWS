@@ -2,37 +2,39 @@
 // mount (its answer is the first status), `git.changed` after, `git.unwatch` on unmount; one watch per composer mount.
 // Null until the first answer. W9 (H2): a refused watch is answered too, with C4's reason, so the chip can tell a folder
 // that is no repository (no branch label) from one git has not answered yet (sessions/branch-label.ts).
+// P5 O6 M4: the directory is the session's machine's, which every call names and whose `git.changed` alone it takes.
 import { useEffect, useState } from 'react';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { GitStatus } from '@shared/ipc/schema/git';
+import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../../ipc/client';
 
 export type GitWatch = { status: GitStatus; error: null } | { status: null; error: string };
 
-export function useGitWatch(directory: string | null, client: MawsBridge = ipc): GitWatch | null {
-  const [watch, setWatch] = useState<{ directory: string; answer: GitWatch } | null>(null);
+export function useGitWatch(machine: MachineRef, directory: string | null, client: MawsBridge = ipc): GitWatch | null {
+  const [watch, setWatch] = useState<{ machine: MachineRef; directory: string; answer: GitWatch } | null>(null);
   useEffect(() => {
     if (!directory) return;
     let live = true;
     let repoRoot: string | null = null;
-    const off = client.on('git.changed', (e) => {
-      if (live && repoRoot !== null && e.repoRoot === repoRoot) setWatch({ directory, answer: { status: e.status, error: null } });
+    const off = client.on('git.changed', (e, from) => {
+      if (live && repoRoot !== null && from.machine === machine && e.repoRoot === repoRoot) setWatch({ machine, directory, answer: { status: e.status, error: null } });
     });
-    const landed = client.invoke('git.watch', { directory }).then((result) => {
+    const landed = client.invoke('git.watch', { directory }, { machine }).then((result) => {
       if (!live) return;
       if (!result.ok) {
-        setWatch({ directory, answer: { status: null, error: result.error.message } });
+        setWatch({ machine, directory, answer: { status: null, error: result.error.message } });
         return;
       }
       repoRoot = result.value.repoRoot;
-      setWatch({ directory, answer: { status: result.value, error: null } });
+      setWatch({ machine, directory, answer: { status: result.value, error: null } });
     });
     return () => {
       live = false;
       off();
       // Main acquires ownership only after its asynchronous repository reads; release cannot overtake that acquire.
-      void landed.then(() => client.invoke('git.unwatch', { directory }));
+      void landed.then(() => client.invoke('git.unwatch', { directory }, { machine }));
     };
-  }, [directory, client]);
-  return watch !== null && watch.directory === directory ? watch.answer : null;
+  }, [machine, directory, client]);
+  return watch !== null && watch.machine === machine && watch.directory === directory ? watch.answer : null;
 }

@@ -26,6 +26,7 @@ import { connectSetupDock } from './SetupCard';
 import { beforeCloseUnstarted, unstartedReplaceVerdict } from './setup-actions'; // E11 F2b: unstartedReplaceVerdict
 import { connectSetup, useSetup } from './store';
 import { intentProjectName } from './useSetupIntent';
+import { machineOf } from '@shared/machine/address';
 
 // The project an unstarted session will run in, by name (`intentProjectName`).
 export function projectNameOf(appSessionId: AppSessionId): string | null {
@@ -69,7 +70,8 @@ export const retainsTab = (appSessionId: string): boolean => useSetup.getState()
 
 // "+" and ⌘N: an app session id with a setup intent; C5 opens its tab.
 export async function createUnstartedSession(projectId: ProjectId | null, client: MawsBridge = ipc, location: Location | null = null): Promise<AppSessionId | null> {
-  const result = await client.invoke('session.create', { projectId, location });
+  // P5 O6 M4: the project's machine; with none, this machine's (the setup intent's, until O7's machine picker)
+  const result = await client.invoke('session.create', { projectId, location }, { machine: projectId === null ? client.localMachine : machineOf(projectId) });
   if (!result.ok) {
     console.error('[sessions] session.create failed', result.error);
     return null;

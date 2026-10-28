@@ -2,11 +2,16 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type LayoutMainV1 } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
+import { addressOf } from '@shared/machine/address';
+import { machineKey } from '@shared/machine/org-key';
+import { at, OTHER_MACHINE, TEST_MACHINE as M } from '../../../../test/support/machine';
 import { createLayoutStore, registerReplaceGuard, type ReplaceVerdict } from './layout';
-import { currentSet } from './layout-model';
+import { allTabs, currentSet, type RekeyOf } from './layout-model';
 
-const A = 'app-a' as AppSessionId;
+const A = at('app-a' as AppSessionId);
+// A session's tab as a layout from before O6 holds it (bare: P5 O6 M2), and as it reads, lifted to the local machine.
 const session = (id: string) => ({ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false });
+const lifted = (id: string) => session(at(id));
 // Saved before W12: version 1, one pane layout.
 const persistedMain: LayoutMainV1 = {
   version: 1,
@@ -30,8 +35,8 @@ describe('layout and settings migrate', () => {
   it('hydrating a persisted layout whose session tab names an unknown appSessionId drops the tab', async () => {
     const { store } = await hydrate({ 'main.tabs': persistedMain });
     expect(store.getState().hydrated).toBe(true);
-    expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual(['session:app-a']);
-    expect(shown(store).panes[0].activeTabId).toBe('session:app-a');
+    expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual([`session:${A}`]);
+    expect(shown(store).panes[0].activeTabId).toBe(`session:${A}`);
   });
 
   // W5: every layout saved before the floating Overview holds the Overview's tab, usually first and active. Reading it must
@@ -41,7 +46,7 @@ describe('layout and settings migrate', () => {
     const overview = { id: 'overview', kind: 'overview', pinned: true };
     const saved = { ...persistedMain, panes: [{ tabs: [overview, session('app-a'), session('b')], activeTabId: 'overview' }], closedTabs: [overview] };
     const { store } = await hydrate({ 'main.tabs': saved }, () => true);
-    expect(store.getState().main).toEqual({ ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [session('app-a'), session('b')], activeTabId: 'session:app-a' }] } } });
+    expect(store.getState().main).toEqual({ ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [lifted('app-a'), lifted('b')], activeTabId: `session:${A}` }] } } });
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
   });
@@ -71,9 +76,9 @@ describe('layout and settings migrate', () => {
     const saved = { ...persistedMain, panes: [{ tabs: [session('gone'), file('/r/saved.ts')], activeTabId: 'session:gone' }] };
     const fake = fakeClient({ 'layout.list': { keys: ['main.tabs'] }, 'layout.get': ({ key }: { key: string }) => ({ value: key === 'main.tabs' ? saved : null }) });
     const store = createLayoutStore();
-    store.getState().openTab({ kind: 'file', path: '/r/early.ts', line: null, appSessionId: 'gone' as AppSessionId });
+    store.getState().openTab({ kind: 'file', path: '/r/early.ts', line: null, appSessionId: at('gone' as AppSessionId), machine: M });
     await store.getState().hydrate(fake.client, () => false);
-    expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual(['file:/r/saved.ts', 'file:/r/early.ts']);
+    expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual([`file:${M}:/r/saved.ts`, `file:${M}:/r/early.ts`]);
   });
 
   it('falls back to the default for a malformed main.tabs (a null pane or tab) and still hydrates', async () => {
@@ -95,9 +100,9 @@ describe('layout store actions', () => {
     s().openSession('c' as AppSessionId, { how: 'tab' });
     s().activateTab('session:b');
     s().closeTab('session:b');
-    expect(currentSet(s().main).panes[0].tabs.map((t) => t.id)).toEqual(['session:app-a', 'session:c']);
+    expect(currentSet(s().main).panes[0].tabs.map((t) => t.id)).toEqual([`session:${A}`, 'session:c']);
     s().reopenClosed();
-    expect(currentSet(s().main).panes[0].tabs.map((t) => t.id)).toEqual(['session:app-a', 'session:b', 'session:c']);
+    expect(currentSet(s().main).panes[0].tabs.map((t) => t.id)).toEqual([`session:${A}`, 'session:b', 'session:c']);
     s().dropSession(A);
     expect(currentSet(s().main).panes[0].tabs.map((t) => t.id)).toEqual(['session:b', 'session:c']);
   });
@@ -383,7 +388,7 @@ describe('replacing an unstarted tab', () => {
 describe('replacing a tab of any kind', () => {
   const NEW = 'new-1' as AppSessionId;
   const B = 'b' as AppSessionId;
-  const FILE = { kind: 'file', path: '/r/a.ts', line: null, appSessionId: A } as const;
+  const FILE = { kind: 'file', path: '/r/a.ts', line: null, appSessionId: A, machine: M } as const;
   const tabs = (store: ReturnType<typeof createLayoutStore>) => shown(store).panes[0].tabs.map((t) => t.id);
 
   function guarded(verdicts: Record<string, ReplaceVerdict>) {
@@ -412,16 +417,16 @@ describe('replacing a tab of any kind', () => {
   });
 
   it('a file with unsaved changes stays open and says why; the session opens beside it', () => {
-    const { announce, off } = guarded({ 'file:/r/a.ts': { keep: 'a.ts has unsaved changes' } });
+    const { announce, off } = guarded({ [`file:${M}:/r/a.ts`]: { keep: 'a.ts has unsaved changes' } });
     try {
       const store = createLayoutStore();
       store.getState().openSession(A);
       store.getState().openTab(FILE);
       store.getState().openSession(B);
-      expect(tabs(store)).toEqual([`session:${A}`, 'file:/r/a.ts', 'session:b']);
+      expect(tabs(store)).toEqual([`session:${A}`, `file:${M}:/r/a.ts`, 'session:b']);
       expect(shown(store).panes[0].activeTabId).toBe('session:b');
       expect(store.getState().main.closedTabs).toEqual([]);
-      expect(announce).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'file:/r/a.ts' }), { keep: 'a.ts has unsaved changes' });
+      expect(announce).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: `file:${M}:/r/a.ts` }), { keep: 'a.ts has unsaved changes' });
     } finally {
       off();
     }
@@ -449,9 +454,9 @@ describe('replacing a tab of any kind', () => {
       const store = createLayoutStore();
       store.getState().openSession(A);
       store.getState().openTab(FILE);
-      store.getState().togglePinned('file:/r/a.ts');
+      store.getState().togglePinned(`file:${M}:/r/a.ts`);
       store.getState().openSession(B);
-      expect(tabs(store)).toEqual(['file:/r/a.ts', 'session:b', `session:${A}`]); // the pinned tab first, the session after it
+      expect(tabs(store)).toEqual([`file:${M}:/r/a.ts`, 'session:b', `session:${A}`]); // the pinned tab first, the session after it
       expect(announce).not.toHaveBeenCalled();
     } finally {
       off();
@@ -573,10 +578,10 @@ describe('tab changes before hydration', () => {
     expect(fake.pending('layout.get')).toBe(3);
     for (const key of ['regions', 'main.tabs', 'panel.pinned']) await fake.reply('layout.get', { value: key === 'main.tabs' ? persistedMain : null });
     await hydrating;
-    expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual(['session:app-a', 'session:b']); // after the hydrated active tab
+    expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual([`session:${A}`, 'session:b']); // after the hydrated active tab
     expect(shown(store).panes[0].activeTabId).toBe('session:b');
     store.getState().openSession(A); // after hydration a change applies once, as before
-    expect(shown(store).panes[0].activeTabId).toBe('session:app-a');
+    expect(shown(store).panes[0].activeTabId).toBe(`session:${A}`);
   });
 });
 
@@ -622,5 +627,123 @@ describe('region changes before hydration', () => {
     for (const key of ['regions', 'main.tabs', 'panel.pinned']) await fake.reply('layout.get', { value: key === 'regions' ? saved : null });
     await hydrating;
     expect(store.getState().regions.sidebar.expandedProjects).toEqual(['proj-a', 'proj-b']);
+  });
+});
+
+// P5 O6 M4 ("The layout across machines"): a machine's first snapshot of the run settles its tabs, as hydration settles
+// this machine's.
+describe('settling a machine’s tabs', () => {
+  const onB = (id: string) => addressOf(OTHER_MACHINE, id as AppSessionId);
+  const main = (...ids: string[]) => ({
+    version: 3,
+    current: NO_PROJECT,
+    sets: { [NO_PROJECT]: { panes: [{ tabs: ids.map(session), activeTabId: `session:${ids[0]}` }], focusedPane: 0, splitRatio: 0.5 } },
+    closedTabs: [],
+  });
+  const tabIds = (store: ReturnType<typeof createLayoutStore>) => shown(store).panes.flatMap((p) => p.tabs.map((t) => t.id));
+
+  it('drops that machine’s tabs it does not list, and no other machine’s', async () => {
+    let loaded = false; // B's snapshot: until it is in, B's tabs are kept
+    const { store } = await hydrate({ 'main.tabs': main(A, onB('b1'), onB('b9')) }, (id) => id === A || id === onB('b1') || !loaded);
+    expect(tabIds(store)).toEqual([`session:${A}`, `session:${onB('b1')}`, `session:${onB('b9')}`]);
+    loaded = true;
+    store.getState().settleMachine(M);
+    expect(tabIds(store)).toHaveLength(3); // this machine's settle judges only its own tabs
+    store.getState().settleMachine(OTHER_MACHINE);
+    expect(tabIds(store)).toEqual([`session:${A}`, `session:${onB('b1')}`]);
+  });
+
+  it('does nothing before hydration', () => {
+    const store = createLayoutStore();
+    store.getState().openSession(onB('b9'), { how: 'tab' });
+    store.getState().settleMachine(OTHER_MACHINE);
+    expect(tabIds(store)).toEqual([`session:${onB('b9')}`]);
+  });
+});
+
+// P5 O6 M5 ("Migrating project-keyed state"): the sets, expanded rows and panel contexts keyed by a project's address (a
+// key from before M5) move to its org project's key at hydration, and again as each machine's projects arrive.
+describe('rekeying project-keyed state to org keys', () => {
+  const P1 = at('p1' as ProjectId);
+  const P2 = addressOf(OTHER_MACHINE, 'p2' as ProjectId);
+  const ORG = 'repo:maws' as never;
+  const set = (...ids: string[]) => ({ panes: [{ tabs: ids.map(session), activeTabId: `session:${ids[0]}` }], focusedPane: 0, splitRatio: 0.5 });
+  const B1 = addressOf(OTHER_MACHINE, 'b1' as AppSessionId);
+  const values = {
+    'main.tabs': { version: 3, current: P1, sets: { [P1]: set(A), [P2]: set(B1) }, closedTabs: [] },
+    regions: { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, expandedProjects: [P1, P2, 'other'] } },
+  };
+  let otherLoaded = false;
+  const projectOf = (id: AppSessionId) => (id === A ? ORG : id === B1 ? (otherLoaded ? ORG : undefined) : null); // B's records come with its snapshot
+
+  it('moves what it can at hydration, leaves a machine not loaded yet, and moves its keys on its arrival', async () => {
+    const rekeyOf: RekeyOf = (key) => (key === P1 ? ORG : otherLoaded ? ORG : 'wait');
+    const fake = fakeClient({ 'layout.list': { keys: Object.keys(values) }, 'layout.get': ({ key }: { key: string }) => ({ value: (values as Record<string, unknown>)[key] ?? null }) });
+    const store = createLayoutStore();
+    await store.getState().hydrate(fake.client, () => true, { projectOf, rekeyOf });
+    expect(Object.keys(store.getState().main.sets).sort()).toEqual([P2, ORG].sort());
+    expect(store.getState().main.current).toBe(ORG); // current follows its set
+    expect(store.getState().regions.sidebar.expandedProjects).toEqual([ORG, P2, `machine:${M}`]);
+    otherLoaded = true;
+    store.getState().rekeyProjects();
+    expect(Object.keys(store.getState().main.sets)).toEqual([ORG]);
+    expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual([`session:${A}`, `session:${B1}`]); // merged into the current set
+    expect(store.getState().regions.sidebar.expandedProjects).toEqual([ORG, `machine:${M}`]);
+  });
+
+  it('keeps a set waiting for its key whole, session tabs too, and migrates it whole once the key is known', async () => {
+    // a folder nobody opened, not derived yet: its sessions already file under the machine's row, its set waits
+    const PD = at('pd' as ProjectId);
+    const OWN = machineKey(M);
+    const notes = { id: `file:${M}:/d/notes.md`, kind: 'file', path: '/d/notes.md', line: null, appSessionId: null, machine: M, pinned: false };
+    const split = {
+      panes: [{ tabs: [session(A)], activeTabId: `session:${A}` }, { tabs: [notes], activeTabId: notes.id }],
+      focusedPane: 1,
+      splitRatio: 0.3,
+    };
+    const stored = { 'main.tabs': { version: 3, current: PD, sets: { [PD]: split }, closedTabs: [] } };
+    let derived = false;
+    const rekeyOf: RekeyOf = (key) => (key === PD && derived ? OWN : 'wait');
+    const fake = fakeClient({ 'layout.list': { keys: Object.keys(stored) }, 'layout.get': ({ key }: { key: string }) => ({ value: (stored as Record<string, unknown>)[key] ?? null }) });
+    const store = createLayoutStore();
+    await store.getState().hydrate(fake.client, () => true, { projectOf: (id) => (id === A ? OWN : null), rekeyOf });
+    expect(store.getState().main.current).toBe(PD);
+    expect(store.getState().main.sets).toEqual({ [PD]: split });
+    store.getState().refileTabs(); // a records change meanwhile moves nothing out of it either
+    expect(store.getState().main.sets).toEqual({ [PD]: split });
+    derived = true;
+    store.getState().rekeyProjects();
+    expect(store.getState().main.current).toBe(OWN);
+    expect(store.getState().main.sets).toEqual({ [OWN]: split });
+  });
+});
+
+// P5 O6 M2 (M6's scene): a session tab keeps its session's last-known title, so a tab of a machine that has not loaded in
+// this run (its record not held) is still named; the title is written only when it differs from the one the tab holds.
+describe('a session tab’s last-known title', () => {
+  it('is set when the tab opens and refreshed when its record’s title changes, and only then', async () => {
+    const titles = new Map<AppSessionId, string>([[A, 'First title']]);
+    const fake = fakeClient({ 'layout.list': { keys: [] }, 'layout.get': () => ({ value: null }) });
+    const store = createLayoutStore();
+    await store.getState().hydrate(fake.client, () => true, { titleOf: (id: AppSessionId) => titles.get(id) });
+    store.getState().openSession(A);
+    const tab = () => allTabs(store.getState().main).find((t) => t.id === `session:${A}`);
+    expect(tab()).toMatchObject({ title: 'First title' });
+    const before = store.getState().main;
+    store.getState().refreshTabTitles();
+    expect(store.getState().main, 'nothing differs: nothing changes, so nothing is written').toBe(before);
+    titles.set(A, 'Renamed');
+    store.getState().refreshTabTitles();
+    expect(tab()).toMatchObject({ title: 'Renamed' });
+    titles.delete(A); // its record not held (its machine not loaded): the title it had stays
+    store.getState().refreshTabTitles();
+    expect(tab()).toMatchObject({ title: 'Renamed' });
+  });
+
+  it('reads a tab saved before the title was kept, and a saved title back', async () => {
+    const titled = { ...lifted('app-a'), title: 'Saved title' };
+    const saved = { version: 3, current: NO_PROJECT, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [titled, lifted('app-b')], activeTabId: titled.id }] } }, closedTabs: [] };
+    const { store } = await hydrate({ 'main.tabs': saved }, () => true);
+    expect(allTabs(store.getState().main)).toEqual([titled, lifted('app-b')]);
   });
 });

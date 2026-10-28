@@ -11,7 +11,8 @@ import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import type { ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import type { ProjectRecord } from '@shared/ipc/schema/session';
+import type { ProjectOrg, ProjectRecord } from '@shared/ipc/schema/session';
+import type { OrgKey } from '@shared/machine/org-key';
 import { slugOf } from '../../engine-host/fs/paths';
 import { gitBinary, gitEnv } from '../git/runner';
 import type { Db } from './db';
@@ -26,6 +27,10 @@ interface ProjectRow {
   sort_order: number;
   created_at: string;
   last_activity_at: string | null;
+  org_key: string | null; // P5 O6 M5: the org project as derived (migration 13), null until it is
+  org_name: string | null;
+  org_source: ProjectOrg['source'] | null;
+  org_smns_id: string | null;
 }
 
 export type Origin = ProjectRow['origin'];
@@ -265,7 +270,19 @@ const project = (row: ProjectRow): ProjectRecord => ({
   createdAt: row.created_at,
   ...(row.origin !== 'user' ? { discovered: true } : {}),
   ...(row.hidden ? { hidden: true } : {}), // W11: carried on the renderer's list, which hides it
+  ...(row.org_key !== null && row.org_source !== null ? { org: orgOf(row)! } : {}), // P5 O6 M5: absent until derived
 });
+
+const orgOf = (row: ProjectRow): ProjectOrg | null =>
+  row.org_key === null || row.org_source === null ? null : { key: row.org_key as OrgKey, name: row.org_name ?? '', source: row.org_source, smnsId: row.org_smns_id };
+
+// P5 O6 M5: what the org-project rule reads of a row, and what derives one (`Index.refreshOrgProjects`).
+export interface OrgRow {
+  id: ProjectId;
+  directory: string;
+  name: string;
+}
+export type DeriveOrgOf = (row: OrgRow) => void;
 
 // A transcript removed by retention keeps an archived session record, not an otherwise empty discovered project
 // in the sidebar or Hidden projects. User-added projects and sessions awaiting their first transcript remain.
@@ -275,6 +292,7 @@ const HAS_PROJECT_CONTENT = `(origin = 'user' OR ${HAS_PRESENT_SESSION})`;
 
 export class ProjectStore {
   private readonly listeners = new Set<(revision: number) => void>();
+  private deriveOrg: DeriveOrgOf | null = null; // P5 O6 M5: set once the org refresh starts; a new row is derived after its commit
 
   constructor(
     private readonly db: Db,
@@ -348,6 +366,7 @@ export class ProjectStore {
       });
       this.changed();
       this.attachOrphans(id, realpath);
+      this.db.defer(`org:${id}`, () => this.deriveOrg?.({ id, directory: realpath, name: basename(realpath) || realpath }));
       return project(this.row(id));
     });
   }
@@ -364,6 +383,7 @@ export class ProjectStore {
       this.row(id);
       const values: Record<string, string | number> = {};
       if (patch.name !== undefined) values.name = patch.name;
+      if (patch.name !== undefined && this.row(id).org_source === 'folder') values.org_name = patch.name; // P5 O6 M5: rule 4 takes the project's name
       if (patch.order !== undefined) values.sort_order = patch.order;
       if (this.db.update('projects', 'id', id, values) > 0) this.changed();
       return project(this.row(id));
@@ -399,6 +419,28 @@ export class ProjectStore {
       const location = locate(row.directory);
       return location.worktreePath === null ? [] : [{ id: row.id as ProjectId, origin: row.origin, location }];
     });
+  }
+
+  // P5 O6 M5 ("Persisting and refreshing"): every row, for the start-up refresh; and the rule's answer for one, written
+  // (and told, as any project change is) only when it differs from what the row holds. A row gone meanwhile is left.
+  orgRows(): OrgRow[] {
+    return this.db.all<ProjectRow>('SELECT * FROM projects ORDER BY sort_order, created_at, id').map((row) => ({ id: row.id as ProjectId, directory: row.directory, name: row.name }));
+  }
+
+  setOrg(id: ProjectId, org: ProjectOrg): void {
+    if (this.db.readOnly) return;
+    this.db.transaction(() => {
+      const row = this.db.get<ProjectRow>('SELECT * FROM projects WHERE id = ?', id);
+      if (!row) return;
+      const before = orgOf(row);
+      if (before !== null && before.key === org.key && before.name === org.name && before.source === org.source && before.smnsId === org.smnsId) return;
+      this.db.update('projects', 'id', id, { org_key: org.key, org_name: org.name, org_source: org.source, org_smns_id: org.smnsId });
+      this.changed();
+    });
+  }
+
+  onCreated(derive: DeriveOrgOf | null): void {
+    this.deriveOrg = derive;
   }
 
   // A transcript appeared or vanished: discovered project visibility follows its present sessions.

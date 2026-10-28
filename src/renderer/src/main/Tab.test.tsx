@@ -4,8 +4,9 @@
 // Without an open project chat, the item is disabled and says why, even with a pinned Artifacts tab. P4-B3: through
 // the transfer's move (shell/transfer.ts),
 // which carries the editor's state, so the tab's own guard is not asked.
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { TEST_MACHINE } from '../../../../test/support/machine';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, tabId, type LayoutMain, type TabRef } from '@shared/ipc/schema/layout';
 import { resetSlots } from '../app/slots';
 import type { LibraryRow } from '@shared/ipc/schema/library';
@@ -19,10 +20,13 @@ import { fail, installFakeMain, ok } from '../test-support/code';
 import { A, panelOf, resetPanelStores, sessionTab } from '../test-support/panel';
 import { ARTIFACTS_TOOL_ID, artifactsTool, type ArtifactsHandle } from '../tools/artifacts/ArtifactsTool';
 import { MainArea } from './MainArea';
-import { SHOW_IN_PANEL_COPY } from './Tab';
+import { SHOW_IN_PANEL_COPY, useTabLabel } from './Tab';
+import { addressOf } from '@shared/machine/address';
+import type { AppSessionId } from '@shared/graph/ids';
+import { OTHER_MACHINE } from '../../../../test/support/machine';
 
 const DECK = '00000000-0000-4000-8000-000000000001';
-const ARTIFACT: TabRef = { id: tabId({ kind: 'artifact', artifactId: DECK }), kind: 'artifact', artifactId: DECK, pinned: false };
+const ARTIFACT: TabRef = { id: tabId({ kind: 'artifact', artifactId: DECK, machine: TEST_MACHINE }), kind: 'artifact', artifactId: DECK, machine: TEST_MACHINE, pinned: false };
 const offs: (() => void)[] = [];
 const metadata: LibraryRow = { id: DECK, kind: 'presentation', title: 'Launch deck', createdBy: { kind: 'human' }, createdAt: 0, updatedAt: 0, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 1, lastEditor: { kind: 'human' }, lastEditedAt: 0, sessions: [] };
 
@@ -64,7 +68,7 @@ describe('Show in panel on an artifact tab', () => {
     const own = panelOf(A);
     expect(own?.tabs.map((t) => t.toolId)).toEqual([ARTIFACTS_TOOL_ID]);
     expect(own?.activeTabId).toBe(own?.tabs[0]?.id);
-    expect(viewOf(own?.tabs[0]?.id)).toEqual({ kind: 'record', artifactId: DECK });
+    expect(viewOf(own?.tabs[0]?.id)).toEqual({ kind: 'record', artifactId: DECK, machine: TEST_MACHINE });
   });
 
   it('with no project session, stays disabled even with a pinned Artifacts tab', async () => {
@@ -103,7 +107,7 @@ describe('Show in panel on an artifact tab', () => {
     fireEvent.click(await menuItem());
     await waitFor(() => expect(artifactTabOpen()).toBe(false));
     expect(closeGuard).not.toHaveBeenCalled();
-    expect(viewOf(panelOf(A)?.tabs[0]?.id)).toEqual({ kind: 'record', artifactId: DECK });
+    expect(viewOf(panelOf(A)?.tabs[0]?.id)).toEqual({ kind: 'record', artifactId: DECK, machine: TEST_MACHINE });
   });
 
   // P3-F wave S (F16 review): the Artifacts tab the artifact lands in may show another one, whose guard can keep it. That
@@ -115,7 +119,7 @@ describe('Show in panel on an artifact tab', () => {
     beforeEach(() => {
       asks = 0;
       useLayout.setState({ main: showing(sessionTab(A), ARTIFACT) });
-      act(() => void (dest = panelHost.addTool(ARTIFACTS_TOOL_ID, { appSessionId: A, params: { target: 'other-1' }, activate: false })));
+      act(() => void (dest = panelHost.addTool(ARTIFACTS_TOOL_ID, { appSessionId: A, params: { target: 'other-1', machine: TEST_MACHINE }, activate: false })));
       const closeGuard = async () => {
         asks += 1;
         return allow;
@@ -129,7 +133,7 @@ describe('Show in panel on an artifact tab', () => {
       fireEvent.click(await menuItem());
       await act(async () => {});
       expect(artifactTabOpen()).toBe(true);
-      expect(viewOf(dest)).toEqual({ kind: 'record', artifactId: 'other-1' });
+      expect(viewOf(dest)).toEqual({ kind: 'record', artifactId: 'other-1', machine: TEST_MACHINE });
       expect(asks).toBe(1);
     });
 
@@ -138,7 +142,7 @@ describe('Show in panel on an artifact tab', () => {
       render(<MainArea />);
       fireEvent.click(await menuItem());
       await waitFor(() => expect(artifactTabOpen()).toBe(false));
-      expect(viewOf(dest)).toEqual({ kind: 'record', artifactId: DECK });
+      expect(viewOf(dest)).toEqual({ kind: 'record', artifactId: DECK, machine: TEST_MACHINE });
       expect(asks).toBe(1);
     });
   });
@@ -149,5 +153,15 @@ describe('Show in panel on an artifact tab', () => {
     fireEvent.contextMenu(document.querySelector<HTMLElement>(`[data-tab-id="${sessionTab(A).id}"]`)!);
     const menu = await screen.findByRole('menu');
     expect(within(menu).queryByRole('menuitem', { name: SHOW_IN_PANEL_COPY.label })).toBeNull();
+  });
+});
+
+// P5 O6 M2 (M6's scene): a session tab whose record the page does not hold (another machine not loaded in this run) is
+// titled by the title the tab last knew, not "New chat".
+describe('a session tab’s label without its record', () => {
+  it('is the tab’s last-known title', () => {
+    const onB = addressOf(OTHER_MACHINE, 'b-session' as AppSessionId);
+    const { result } = renderHook(() => useTabLabel({ id: `session:${onB}`, kind: 'session', appSessionId: onB, pinned: false, title: 'B’s shared session' }));
+    expect(result.current.title).toBe('B’s shared session');
   });
 });

@@ -1,9 +1,12 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it } from 'vitest';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
+import { bareOf } from '@shared/machine/address';
 import { status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { invalidateSession, resetSurfaceRegistry } from '../engine-surface/registry';
 import { connectKeys } from '../keymap/dispatcher';
 import { useSessions } from '../stores/sessions';
@@ -11,7 +14,8 @@ import { resetShellStores } from '../test-support/shell-stores';
 import { RequestCard, type Placement } from './RequestCard';
 import { fixtureRequest, itemFor } from './test-requests';
 
-const APP = 'app-question-surface' as AppSessionId;
+const APP = at('app-question-surface' as AppSessionId);
+const MAIN_APP = bareOf(APP); // P5 O6 M2: as main (the fake bridge) is asked
 const question: Extract<SessionEvent, { kind: 'question.requested' }> = {
   ...(fixtureRequest('pass1', 'question-roundtrip', 137) as Extract<SessionEvent, { kind: 'question.requested' }>),
   questions: [{ question: 'Where should we deploy?', header: 'Deployment', multiSelect: false, options: [
@@ -30,8 +34,8 @@ beforeEach(() => {
   resetSurfaceRegistry();
   drawing = { tree: { type: 'engine', ref: 0 }, props: {}, rewritten: false, hooked: false };
   fake = fakeClient({ 'session.ui.render': () => drawing, 'session.answer': () => ({ outcome: 'delivered' }) });
-  window.maws = fake.client;
-  useSessions.getState().applyStatus({ appSessionId: APP, status: { ...status(APP), uiSurface: { clientId: 'maws-main' } } });
+  window.maws = fake.client as unknown as PreloadBridge;
+  useSessions.getState().applyStatus({ appSessionId: APP, status: { ...status(APP), uiSurface: { clientId: 'maws-main' } } }, TEST_MACHINE);
   disconnect = connectKeys();
 });
 afterEach(() => {
@@ -48,7 +52,7 @@ const answers = () => fake.invoked('session.answer');
 it('asks with the tool-use identity and engine question shape, while an unhooked card still submits normally', async () => {
   mount();
   await waitFor(() => expect(asks()).toHaveLength(1));
-  expect(asks()[0]).toMatchObject({ appSessionId: APP, component: 'AskUserQuestion', instanceId: question.toolUseId,
+  expect(asks()[0]).toMatchObject({ appSessionId: MAIN_APP, component: 'AskUserQuestion', instanceId: question.toolUseId,
     props: { tool: 'AskUserQuestion', questions: [{ question: 'Where should we deploy?', header: 'Deployment', multiSelect: false, options: [
       { label: 'Local' }, { label: 'Cloud', description: 'Managed service' },
     ] }] },
@@ -57,7 +61,7 @@ it('asks with the tool-use identity and engine question shape, while an unhooked
   expect(JSON.stringify(asks()[0])).not.toContain('"description":null');
   fireEvent.click(screen.getByRole('radio', { name: 'Local' }));
   fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
-  await waitFor(() => expect(answers()).toEqual([{ appSessionId: APP, requestId: question.requestId,
+  await waitFor(() => expect(answers()).toEqual([{ appSessionId: MAIN_APP, requestId: question.requestId,
     answer: { kind: 'question', answers: { 'Where should we deploy?': 'Local' } },
   }]));
 });
@@ -69,7 +73,7 @@ it('an engine slot renders rewritten questions and submits answers against those
   expect(screen.queryByRole('radio', { name: 'Local' })).toBeNull();
   fireEvent.click(screen.getByRole('radio', { name: 'Europe' }));
   fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
-  await waitFor(() => expect(answers()).toEqual([{ appSessionId: APP, requestId: question.requestId,
+  await waitFor(() => expect(answers()).toEqual([{ appSessionId: MAIN_APP, requestId: question.requestId,
     answer: { kind: 'question', answers: { 'Which region?': 'Europe' } },
   }]));
 });
@@ -152,7 +156,7 @@ it('a hover preview never registers an interactive question surface', async () =
 });
 
 it('a detached session uses the native card without asking for a surface', async () => {
-  useSessions.getState().applyStatus({ appSessionId: APP, status: status(APP, { process: 'exited' }) });
+  useSessions.getState().applyStatus({ appSessionId: APP, status: status(APP, { process: 'exited' }) }, TEST_MACHINE);
   mount();
   await act(async () => {});
   expect(asks()).toEqual([]);

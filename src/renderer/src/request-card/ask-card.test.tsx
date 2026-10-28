@@ -3,14 +3,15 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { at } from '../../../../test/support/machine';
 import { resetShellStores } from '../test-support/shell-stores';
 import { registerTranscriptActions, type TranscriptActions } from '../transcript';
 import { RequestCard, type Placement } from './RequestCard';
 import { askItemFor, askOpened } from './test-requests';
 
-const APP = 'app-test';
+const APP = at('app-test'); // P5 O6 M2: the page's item names an addressed session
 let fake: FakeClient;
 let openAsk: Mock<TranscriptActions['openAsk']>;
 let unregister: () => void;
@@ -18,14 +19,14 @@ let unregister: () => void;
 beforeEach(() => {
   resetShellStores();
   fake = fakeClient();
-  window.maws = fake.client;
+  window.maws = fake.client as unknown as PreloadBridge;
   openAsk = vi.fn<TranscriptActions['openAsk']>();
   unregister = registerTranscriptActions({ openAsk });
 });
 afterEach(() => {
   unregister();
   cleanup();
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 function mount(placement: Placement, event = askOpened()) {

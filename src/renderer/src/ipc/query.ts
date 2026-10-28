@@ -4,7 +4,8 @@
 // through `ipc.invoke` (or a store action built on it, like `useSettings().setTheme`). Pushed state (events) lives in
 // Zustand stores; see `stores/settings.ts`.
 import { QueryClient, useQuery, type UseQueryOptions } from '@tanstack/react-query';
-import type { CommandInput, CommandName, CommandOutput, IpcError } from '@shared/ipc/schema';
+import type { CommandInput, CommandName, CommandOutput, InvokeOptions, InvokeRest, IpcError } from '@shared/ipc/schema';
+import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from './client';
 
 // Commands whose output is not `void` (a `z.void()` output infers `void`, which nothing else extends).
@@ -81,15 +82,21 @@ export class IpcCommandError extends Error {
   }
 }
 
+// P5 O6 M2 (OX2): the end of a read's query key that names its machine. A read of this machine's keeps the key it had
+// before O6 (so the keys a test or an invalidation names stay as they are); another machine's read is cached apart. A
+// command whose input holds addresses is keyed by them already.
+export const machineKey = (machine: MachineRef | undefined): [] | [{ machine: MachineRef }] => (machine === undefined || machine === ipc.localMachine ? [] : [{ machine }]);
+
 export function useCommand<N extends QueryCommand>(
   name: N,
   input: CommandInput<N>,
   options?: Omit<UseQueryOptions<CommandOutput<N>, IpcCommandError>, 'queryKey' | 'queryFn'>,
+  ...opts: InvokeRest<N> // P5 O6 M4: a path command's machine
 ) {
   return useQuery<CommandOutput<N>, IpcCommandError>({
-    queryKey: ['maws', name, input],
+    queryKey: ['maws', name, input, ...machineKey((opts[0] as InvokeOptions | undefined)?.machine)],
     queryFn: async () => {
-      const result = await ipc.invoke(name, input);
+      const result = await ipc.invoke(name, input, ...opts);
       if (!result.ok) throw new IpcCommandError(result.error);
       return result.value;
     },

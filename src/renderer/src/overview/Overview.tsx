@@ -1,5 +1,5 @@
 // The Overview board (§5.2; residue *Overview card*): one card per live or unread session, grouped Needs you first,
-// then the projects in sidebar order, then other sessions (`overviewGroups`). A scrolling `role="list"` of groups; the
+// then the projects in sidebar order, then each machine's sessions of no project (`overviewGroups`). A scrolling `role="list"` of groups; the
 // cards share one tab stop and the arrow keys move focus across them in reading order (Home and End to the ends),
 // Enter opens the focused card's session and ⌘Enter opens it in the split.
 // Debt wave 5 (the cold first paint): while the engine host's discovery pass reads the store (a cold index, the owner's
@@ -9,7 +9,10 @@ import { useRef, useState, type KeyboardEvent } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { AppSessionId } from '@shared/graph/ids';
 import { createSession, focusedProject, NEW_CHAT, useSessionCreatorRegistered } from '../keymap/actions-runtime';
+import { ipc } from '../ipc/client';
 import { selectNeedsYou, useAttention } from '../stores/attention';
+import { useMachines } from '../stores/machines';
+import { machineName } from '../stores/org-projects';
 import { useLayout } from '../stores/layout';
 import { selectProjectOrder, useSessions } from '../stores/sessions';
 import { CardGroup } from './CardGroup';
@@ -26,7 +29,9 @@ export function Overview({ paneIndex, onSessionCreated }: { paneIndex: PaneIndex
   );
   const attention = useAttention(useShallow((a) => ({ loaded: a.loaded, bySession: a.bySession, version: a.version })));
   const rows = selectNeedsYou(attention, sessions);
-  const groups = overviewGroups({ records: sessions.records, digests: sessions.digests, projects: sessions.projects, rows });
+  const machines = useMachines((s) => s.machines);
+  const local = ipc.localMachine;
+  const groups = overviewGroups({ records: sessions.records, digests: sessions.digests, projects: sessions.projects, rows, local, machineName: (m) => machineName(machines, m, local) });
   const order = groups.flatMap((g) => g.sessions);
 
   const board = useRef<HTMLDivElement>(null);

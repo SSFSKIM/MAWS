@@ -11,7 +11,7 @@ import { INDEX } from './copy';
 // One field through `settings.set`; the row re-renders from the settings store, which main's `settings.changed` feeds.
 // A refusal is a toast, and the row keeps showing what the store last held.
 export async function writeSettings(patch: SettingsPatch, client: MawsBridge = ipc): Promise<boolean> {
-  const result = await client.invoke('settings.set', patch);
+  const result = await client.invoke('settings.set', patch, { machine: client.localMachine }); // P5 O6 M4: this machine's settings (O3)
   if (result.ok) return true;
   console.error('[settings] settings.set failed', result.error);
   toast({ level: 'warning', text: INDEX.writeFailed(result.error.message), actions: [], dismissible: true });

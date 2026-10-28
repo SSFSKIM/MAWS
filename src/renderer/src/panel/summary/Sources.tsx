@@ -5,6 +5,7 @@
 import { useMemo } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { Icon } from '../../app/IconButton';
+import { machineFor } from '../../ipc/machine';
 import { useLayout } from '../../stores/layout';
 import { useTranscriptStore } from '../../stores/transcript';
 import type { TurnActivity } from '../../transcript';
@@ -63,7 +64,7 @@ function SourceRow({ source, appSessionId, directory }: { source: Source; appSes
         type="button"
         title={source.path}
         className={buttonClass}
-        onClick={() => useLayout.getState().openTab({ kind: 'file', path: absolutePath(source.path, directory), line: null, appSessionId })}
+        onClick={() => useLayout.getState().openTab({ kind: 'file', path: absolutePath(source.path, directory), line: null, appSessionId, machine: machineFor(appSessionId) })}
       >
         <FileIcon />
         <span className="min-w-0 flex-1 truncate">{displayPath(source.path, directory)}</span>

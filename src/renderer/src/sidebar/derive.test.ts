@@ -1,13 +1,18 @@
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { AppSessionId } from '@shared/graph/ids';
-import type { Lineage } from '@shared/graph/session';
-import type { SessionDigest } from '@shared/ipc/schema';
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import type { Lineage, SessionRecord } from '@shared/graph/session';
+import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
+import { addressOf } from '@shared/machine/address';
+import { machineKey, type OrgKey } from '@shared/machine/org-key';
+import type { MachineRef } from '@shared/machine/ref';
 import { digest, item, project, record } from '../../../../test/support/builders';
 import { TEST_FIXTURE_DIR } from '../../../../test/support/fixtures';
+import { at as addr, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { loadScenario } from '../../../../test/support/scenario';
 import { holderLine, needsYou, waitingItem } from '../attention/derive';
 import { orderProjects } from '../overview/derive';
+import { pageScenario } from '../test-support/shell-stores';
 import {
   filterProjectList,
   formatAge,
@@ -15,7 +20,6 @@ import {
   lineageCaption,
   nestLineage,
   needsYouAge,
-  OTHER_SESSIONS,
   projectList,
   projectSessions,
   rowBranch,
@@ -29,28 +33,42 @@ import {
 } from './derive';
 import { REL } from '../test-support/relative-time';
 
-const scenario = loadScenario(join(TEST_FIXTURE_DIR, 'shell/nine-sessions.json'));
+const scenario = pageScenario(loadScenario(join(TEST_FIXTURE_DIR, 'shell/nine-sessions.json')));
 const records = new Map(scenario.sessions.map((r) => [r.appId, r]));
 const digests = new Map(scenario.digests.map((d) => [d.appSessionId, { ...d, revision: 1 } as SessionDigest]));
 const bySession = new Map(scenario.attention.map((a) => [a.appSessionId, a.items]));
 const rows = needsYou(bySession, records);
 const projects = orderProjects(scenario.projects);
 const byId = new Map(projects.map((p) => [p.id, p]));
-const base: ProjectListInput = { records, digests, projects, rows };
+const NAMES = new Map([[TEST_MACHINE, 'This Mac'], [OTHER_MACHINE, 'Studio']]);
+const machineName = (m: MachineRef) => NAMES.get(m) ?? m;
+const input = (over: Partial<ProjectListInput> = {}): ProjectListInput => ({ records, digests, projects: byId, rows, local: TEST_MACHINE, machineName, ...over });
+const base = input();
+const mapOf = (list: ProjectRecord[]) => new Map(list.map((p) => [p.id, p]));
 const titleOf = (id: AppSessionId) => records.get(id)?.title.text ?? id;
 const titles = (list: { appId: AppSessionId }[]) => list.map((r) => titleOf(r.appId));
 const everyone = () => true;
+const LOCAL_ROW = machineKey(TEST_MACHINE);
+
+// A project and a session on either machine (their ids are addresses, as the page holds them).
+const there = <T extends string>(id: T): T => addressOf(OTHER_MACHINE, id);
+const repo = (key: string, name = key): ProjectRecord['org'] => ({ key: `repo:${key}` as OrgKey, name, source: 'remote', smnsId: null });
+const projectOn = (machine: MachineRef, id: string, order: number, over: Partial<ProjectRecord> = {}) =>
+  project(addressOf(machine, id), order, { name: id, ...over });
+const sessionOn = (machine: MachineRef, id: string, over: Partial<SessionRecord> = {}) => record(addressOf(machine, id), over);
 
 describe('the project list', () => {
-  it('lists every project, most recently active first, then Other sessions', () => {
+  it('lists every project, most recently active first, then this machine’s own row', () => {
     const list = projectList(base);
     expect(list.map((e) => [e.key, e.name, e.sessions.length])).toEqual([
-      ['proj-claude-usage-menubar', 'claude-usage-menubar', 3],
-      ['proj-codex-somersault', 'codex_somersault', 3],
-      ['proj-maws', 'MAWS', 4],
-      [OTHER_SESSIONS, 'Other sessions', 1],
+      [addr('proj-claude-usage-menubar'), 'claude-usage-menubar', 3],
+      [addr('proj-codex-somersault'), 'codex_somersault', 3],
+      [addr('proj-maws'), 'MAWS', 4],
+      [LOCAL_ROW, 'This Mac', 1],
     ]);
     expect(list.at(-1)!.project).toBeNull();
+    expect(list.at(-1)!.machine).toBe(TEST_MACHINE);
+    expect(list.at(-1)!.org.kind).toBe('machine');
   });
 
   it('counts each project’s waiting (Needs-you rows) and working sessions', () => {
@@ -59,61 +77,61 @@ describe('the project list', () => {
       MAWS: { waiting: 2, working: 1 },
       codex_somersault: { waiting: 1, working: 0 },
       'claude-usage-menubar': { waiting: 0, working: 1 },
-      'Other sessions': { waiting: 0, working: 0 },
+      'This Mac': { waiting: 0, working: 0 },
     });
   });
 
-  it('hides archived sessions, keeps their activity for the order, and puts a session of an unknown project under Other sessions', () => {
-    const a = project('a', 0, { createdAt: '2026-09-01T00:00:00Z' });
-    const b = project('b', 1, { createdAt: '2026-09-02T00:00:00Z' });
+  it('hides archived sessions, keeps their activity for the order, and puts a session of an unknown project under its machine’s row', () => {
+    const a = projectOn(TEST_MACHINE, 'a', 0, { createdAt: '2026-09-01T00:00:00Z' });
+    const b = projectOn(TEST_MACHINE, 'b', 1, { createdAt: '2026-09-02T00:00:00Z' });
     const recs = new Map([
-      ['old' as AppSessionId, record('old', { projectId: a.id, archived: true, updatedAt: '2026-09-28T12:00:00Z' })],
-      ['new' as AppSessionId, record('new', { projectId: b.id, updatedAt: '2026-09-27T12:00:00Z' })],
-      ['stray' as AppSessionId, record('stray', { projectId: 'gone' as never })],
-    ]);
-    const list = projectList({ records: recs, digests: new Map(), projects: [a, b], rows: [] });
+      sessionOn(TEST_MACHINE, 'old', { projectId: a.id, archived: true, updatedAt: '2026-09-28T12:00:00Z' }),
+      sessionOn(TEST_MACHINE, 'new', { projectId: b.id, updatedAt: '2026-09-27T12:00:00Z' }),
+      sessionOn(TEST_MACHINE, 'stray', { projectId: addr('gone') as ProjectId }),
+    ].map((r) => [r.appId, r]));
+    const list = projectList(input({ records: recs, digests: new Map(), projects: mapOf([a, b]), rows: [] }));
     expect(list.map((e) => [e.name, e.sessions.map((r) => r.appId)])).toEqual([
       ['a', []],
-      ['b', ['new']],
-      ['Other sessions', ['stray']],
+      ['b', [addr('new')]],
+      ['This Mac', [addr('stray')]],
     ]);
   });
 
   // W11 (I6): the project card's last activity, its sessions' latest movement (archived ones included)
   it('carries each project’s last activity, null without a session', () => {
-    const a = project('a', 0, { createdAt: '2026-09-01T00:00:00Z' });
-    const b = project('b', 1);
+    const a = projectOn(TEST_MACHINE, 'a', 0, { createdAt: '2026-09-01T00:00:00Z' });
+    const b = projectOn(TEST_MACHINE, 'b', 1);
     const recs = new Map([
-      ['old' as AppSessionId, record('old', { projectId: a.id, archived: true, updatedAt: '2026-09-28T12:00:00Z' })],
-      ['new' as AppSessionId, record('new', { projectId: a.id, updatedAt: '2026-09-27T12:00:00Z' })],
-    ]);
-    const list = projectList({ records: recs, digests: new Map(), projects: [a, b], rows: [] });
+      sessionOn(TEST_MACHINE, 'old', { projectId: a.id, archived: true, updatedAt: '2026-09-28T12:00:00Z' }),
+      sessionOn(TEST_MACHINE, 'new', { projectId: a.id, updatedAt: '2026-09-27T12:00:00Z' }),
+    ].map((r) => [r.appId, r]));
+    const list = projectList(input({ records: recs, digests: new Map(), projects: mapOf([a, b]), rows: [] }));
     expect(list.map((e) => [e.name, e.lastActivity])).toEqual([
       ['a', Date.parse('2026-09-28T12:00:00Z')],
       ['b', null],
     ]);
   });
 
-  // W11 (I5): a project removed from the sidebar takes its sessions with it, never to Other sessions
+  // W11 (I5): a project removed from the sidebar takes its sessions with it, never to its machine's row
   it('lists a hidden project’s sessions nowhere', () => {
-    const hidden = new Set(['proj-maws' as never]);
-    const list = projectList({ ...base, projects: projects.filter((p) => p.id !== 'proj-maws'), hidden });
+    const hidden = projects.map((p) => (p.id === addr('proj-maws') ? { ...p, hidden: true } : p));
+    const list = projectList(input({ projects: mapOf(hidden) }));
     expect(list.map((e) => [e.name, e.sessions.length])).toEqual([
       ['claude-usage-menubar', 3],
       ['codex_somersault', 3],
-      ['Other sessions', 1],
+      ['This Mac', 1],
     ]);
   });
 
-  it('places a project without sessions by when it was added, omits Other sessions without listed sessions', () => {
-    const fresh = project('fresh', 5, { createdAt: '2026-09-30T00:00:00Z' });
-    const list = projectList({ ...base, records: new Map([...records].filter(([, r]) => r.projectId !== null)), projects: [...projects, fresh] });
+  it('places a project without sessions by when it was added, omits a machine’s row without listed sessions', () => {
+    const fresh = projectOn(TEST_MACHINE, 'fresh', 5, { createdAt: '2026-09-30T00:00:00Z' });
+    const list = projectList(input({ records: new Map([...records].filter(([, r]) => r.projectId !== null)), projects: mapOf([...projects, fresh]) }));
     expect(list.map((e) => e.name)).toEqual(['fresh', 'claude-usage-menubar', 'codex_somersault', 'MAWS']);
   });
 
-  it('omits Other sessions when its only session is archived', () => {
-    const archived = record('archived-other', { projectId: null, archived: true });
-    expect(projectList({ records: new Map([[archived.appId, archived]]), projects: [], digests: new Map(), rows: [] })).toEqual([]);
+  it('omits a machine’s row when its only session is archived', () => {
+    const archived = sessionOn(TEST_MACHINE, 'archived-other', { projectId: null, archived: true });
+    expect(projectList(input({ records: new Map([[archived.appId, archived]]), projects: new Map(), digests: new Map(), rows: [] }))).toEqual([]);
   });
 
   it('filters by project name, or by a session the project holds (title, directory)', () => {
@@ -121,19 +139,72 @@ describe('the project list', () => {
     expect(filterProjectList(list, 'QUOTA', byId).map((e) => e.name)).toEqual(['codex_somersault']);
     expect(filterProjectList(list, 'usage-menu', byId).map((e) => e.name)).toEqual(['claude-usage-menubar']);
     expect(filterProjectList(list, 'qqboLh', byId).map((e) => e.name)).toEqual(['MAWS']);
-    expect(filterProjectList(list, 'terminal workflow', byId).map((e) => e.name)).toEqual(['Other sessions']);
+    expect(filterProjectList(list, 'terminal workflow', byId).map((e) => e.name)).toEqual(['This Mac']);
+    expect(filterProjectList(list, 'This Mac', byId)).toEqual([]); // a machine's row is found by its sessions only
     expect(filterProjectList(list, '  ', byId)).toBe(list);
+  });
+});
+
+// P5 O6 M5 (OX3; DL 28 T3, T4): one row per org project across machines, each machine's own row for the rest.
+describe('the project list across machines', () => {
+  const here = projectOn(TEST_MACHINE, 'maws', 0, { name: 'MAWS', org: repo('maws', 'MAWS') });
+  const away = projectOn(OTHER_MACHINE, 'maws-clone', 0, { name: 'maws-clone', org: repo('maws', 'MAWS') });
+  const recs = (...list: SessionRecord[]) => new Map(list.map((r) => [r.appId, r]));
+  const list = (ps: ProjectRecord[], rs: Map<AppSessionId, SessionRecord>, over: Partial<ProjectListInput> = {}) =>
+    projectList(input({ records: rs, digests: new Map(), projects: mapOf(ps), rows: [], ...over }));
+
+  it('groups both machines’ checkouts of one repository under one row, its sessions from both', () => {
+    const entries = list([here, away], recs(sessionOn(TEST_MACHINE, 's1', { projectId: here.id }), sessionOn(OTHER_MACHINE, 's2', { projectId: away.id })));
+    expect(entries.map((e) => [e.key, e.name, e.sessions.map((r) => r.appId).sort()])).toEqual([['repo:maws', 'MAWS', [addr('s1'), there('s2')].sort()]]);
+    expect(entries[0].project?.id).toBe(here.id); // the local checkout acts for the row
+    expect(entries[0].org.checkouts.map((c) => c.machine)).toEqual([TEST_MACHINE, OTHER_MACHINE]);
+  });
+
+  it('acts through the other machine’s checkout when this machine has none', () => {
+    const entries = list([away], recs(sessionOn(OTHER_MACHINE, 's2', { projectId: away.id })));
+    expect(entries.map((e) => [e.key, e.project?.id])).toEqual([['repo:maws', away.id]]);
+  });
+
+  it('lists an org project while one machine’s checkout is not hidden', () => {
+    const entries = list([{ ...here, hidden: true }, away], recs(sessionOn(TEST_MACHINE, 's1', { projectId: here.id }), sessionOn(OTHER_MACHINE, 's2', { projectId: away.id })));
+    expect(entries.map((e) => [e.key, e.sessions.map((r) => r.appId)])).toEqual([['repo:maws', [there('s2')]]]); // the hidden checkout's sessions still nowhere
+    expect(list([{ ...here, hidden: true }, { ...away, hidden: true }], recs(sessionOn(OTHER_MACHINE, 's2', { projectId: away.id })))).toEqual([]);
+  });
+
+  it('puts a session in a folder nobody opened under its machine’s row, named after the machine, this machine’s first', () => {
+    const tmp = projectOn(OTHER_MACHINE, 'tmp', 1, { discovered: true, org: { key: `folder:${OTHER_MACHINE}:tmp` as OrgKey, name: 'tmp', source: 'folder', smnsId: null } });
+    const entries = list([here, tmp], recs(
+      sessionOn(OTHER_MACHINE, 'in-tmp', { projectId: tmp.id }),
+      sessionOn(OTHER_MACHINE, 'home', { projectId: null }),
+      sessionOn(TEST_MACHINE, 'home-here', { projectId: null }),
+    ));
+    expect(entries.map((e) => [e.key, e.name, e.machine, e.sessions.map((r) => r.appId).sort()])).toEqual([
+      ['repo:maws', 'MAWS', null, []],
+      [LOCAL_ROW, 'This Mac', TEST_MACHINE, [addr('home-here')]],
+      [machineKey(OTHER_MACHINE), 'Studio', OTHER_MACHINE, [there('home'), there('in-tmp')].sort()],
+    ]);
+  });
+
+  it('lists a key the project filter names though no checkout lists it, with its sessions', () => {
+    const tmp = projectOn(OTHER_MACHINE, 'tmp', 1, { discovered: true, org: { key: `folder:${OTHER_MACHINE}:tmp` as OrgKey, name: 'tmp', source: 'folder', smnsId: null } });
+    const entries = list([tmp], recs(sessionOn(OTHER_MACHINE, 'in-tmp', { projectId: tmp.id })), { alsoListed: new Set([tmp.org!.key]) });
+    expect(entries.map((e) => [e.key, e.sessions.length])).toEqual([[tmp.org!.key, 1]]);
+  });
+
+  it('keeps a project its machine has not derived yet a row of its own, keyed by its address', () => {
+    const fresh = projectOn(OTHER_MACHINE, 'fresh', 1);
+    expect(list([fresh], recs()).map((e) => [e.key, e.name])).toEqual([[fresh.id, 'fresh']]);
   });
 });
 
 // W11 (I4, as the owner corrected it): one flat list per expanded project, five rows then "Show more" to eight.
 describe('an expanded project’s sessions', () => {
-  const maws = () => projectList(base).find((e) => e.key === 'proj-maws')!;
+  const maws = () => projectList(base).find((e) => e.key === addr('proj-maws'))!;
   const list = (over: Partial<ProjectSessionsInput> = {}) => projectSessions({ sessions: maws().sessions, digests, rows, sort: 'priority', matches: everyone, ...over });
 
   it('puts pinned sessions on top, then the rest in the chosen sort, worktree sessions among them', () => {
     expect(titles(list())).toEqual(['Workstation north star', 'Fix sidebar drag', 'Sidebar interaction pass', 'Charter + research']);
-    const usage = projectList(base).find((e) => e.key === 'proj-claude-usage-menubar')!;
+    const usage = projectList(base).find((e) => e.key === addr('proj-claude-usage-menubar'))!;
     expect(titles(projectSessions({ sessions: usage.sessions, digests, rows, sort: 'recency', matches: everyone }))).toEqual(['Usage reset countdown', 'Settings idle probe', 'SDK wire inventory']);
     const recs = [record('m', { projectId: 'p' as never }), record('w', { projectId: 'p' as never, worktree: { path: '/r/.claude/worktrees/w', branch: 'worktree-w' } })];
     expect(projectSessions({ sessions: recs, digests: new Map(), rows: [], sort: 'priority', matches: everyone }).map((r) => r.appId).sort()).toEqual(['m', 'w']);

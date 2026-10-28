@@ -8,6 +8,7 @@ import type { Lineage } from '@shared/graph/session';
 import { tabId } from '@shared/ipc/schema/layout';
 import { TOOL_ERRORS } from '@shared/maws/tools';
 import { fakeClient, type FakeClient } from '../../../../../../test/support/fake-client';
+import { TEST_MACHINE } from '../../../../../../test/support/machine';
 import { registerPanelTool } from '../../../panel/host';
 import { useLayout } from '../../../stores/layout';
 import { activeTab } from '../../../stores/layout-model';
@@ -32,9 +33,9 @@ describe('the pane bridge, window side (E1)', () => {
     show(fake, { pane: 'file', target: '/repo/src/a.ts', line: 3 });
     await settle();
     const tab = activeTab(useLayout.getState().main);
-    expect(tab).toMatchObject({ kind: 'file', path: '/repo/src/a.ts', line: 3, appSessionId: A });
+    expect(tab).toMatchObject({ kind: 'file', path: '/repo/src/a.ts', line: 3, appSessionId: A, machine: TEST_MACHINE });
     expect(fake.invoked('maws.pane.answer')).toEqual([
-      { appSessionId: A, requestId: 'r1', result: { ok: true, opened: { kind: 'main-tab', tabId: tabId({ kind: 'file', path: '/repo/src/a.ts', line: 3, appSessionId: A }), path: '/repo/src/a.ts', line: 3 } } },
+      { appSessionId: A, requestId: 'r1', result: { ok: true, opened: { kind: 'main-tab', tabId: tabId({ kind: 'file', path: '/repo/src/a.ts', line: 3, appSessionId: A, machine: TEST_MACHINE }), path: '/repo/src/a.ts', line: 3 } } },
     ]);
   });
 

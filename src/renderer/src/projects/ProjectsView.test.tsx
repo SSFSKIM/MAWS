@@ -1,9 +1,11 @@
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { MawsBridge, ProjectRecord } from '@shared/ipc/schema';
+import type { PreloadBridge, ProjectRecord } from '@shared/ipc/schema';
 import { project, record } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
+import { at } from '../../../../test/support/machine';
+import { bareOf } from '@shared/machine/address';
 import { registerSessionActions } from '../sessions/actions';
 import { closeDialog, useDialogs } from '../sessions/dialogs';
 import { useSessions } from '../stores/sessions';
@@ -11,10 +13,14 @@ import { resetShellStores } from '../test-support/shell-stores';
 import { ProjectsView } from './ProjectsView';
 import { AddProject } from '../sidebar/AddProject';
 
-const added = project('atlas-personal', 0, { name: 'atlas', directory: '/work/personal/atlas' });
-const discovered = project('atlas-team', 1, { name: 'atlas', directory: '/work/team/atlas', discovered: true });
-const hidden = project('notes', 2, { directory: '/work/writing/notes', hidden: true });
+// P5 O6 M2: a project as the page holds it: addressed, named and placed as the builder names and places the bare id
+const projectOnPage = (id: string, order: number, over: Partial<ProjectRecord> = {}) => project(at(id), order, { name: id, directory: `/work/${id}`, ...over });
+const added = projectOnPage('atlas-personal', 0, { name: 'atlas', directory: '/work/personal/atlas' });
+const discovered = projectOnPage('atlas-team', 1, { name: 'atlas', directory: '/work/team/atlas', discovered: true });
+const hidden = projectOnPage('notes', 2, { directory: '/work/writing/notes', hidden: true });
 const choices = [added, discovered, hidden];
+// Main (the fake bridge) answers with its own ids, bare
+const asMain = (p: ProjectRecord): ProjectRecord => ({ ...p, id: bareOf(p.id) });
 const offs: (() => void)[] = [];
 let fake: ReturnType<typeof fakeClient>;
 
@@ -35,21 +41,21 @@ beforeEach(() => {
   resetShellStores();
   setProjects(choices);
   fake = fakeClient();
-  window.maws = fake.client;
+  window.maws = fake.client as unknown as PreloadBridge;
 });
 afterEach(() => {
   cleanup();
   closeDialog();
   offs.splice(0).forEach((off) => off());
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 describe('Projects sidebar membership', () => {
   it('puts sidebar projects first on the page and in Add project, followed by hidden projects, then discoveries', async () => {
-    const mine = project('z-workstation', 0);
-    const other = project('b-notes', 1);
-    const hidden = project('y-hidden', 2, { hidden: true });
-    const discovered = project('a-temporary', 3, { discovered: true });
+    const mine = projectOnPage('z-workstation', 0);
+    const other = projectOnPage('b-notes', 1);
+    const hidden = projectOnPage('y-hidden', 2, { hidden: true });
+    const discovered = projectOnPage('a-temporary', 3, { discovered: true });
     setProjects([discovered, hidden, other, mine]);
     render(<><ProjectsView /><AddProject /></>);
     const lists = screen.getAllByRole('list');
@@ -63,7 +69,7 @@ describe('Projects sidebar membership', () => {
     expect(within(chooser).getByRole('button', { name: 'In sidebar: z-workstation' })).toHaveProperty('disabled', true);
     await userEvent.click(within(chooser).getByRole('button', { name: 'Add y-hidden' }));
     expect(fake.invoked('session.projects.add')).toEqual([{ directory: hidden.directory }]);
-    await act(() => fake.reply('session.projects.add', { ...hidden, hidden: false }));
+    await act(() => fake.reply('session.projects.add', asMain({ ...hidden, hidden: false })));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add project' })).toBeNull());
   });
 
@@ -85,7 +91,7 @@ describe('Projects sidebar membership', () => {
     await user.keyboard('{Escape}');
     expect(screen.getAllByRole('listitem')).toHaveLength(3);
     // Discovery can keep arriving while the page is open; none of it is membership.
-    setProjects([...choices, project('research', 3, { discovered: true })]);
+    setProjects([...choices, projectOnPage('research', 3, { discovered: true })]);
     expect(show('research')).toBeTruthy();
     expect(fake.calls).toEqual([]);
   });
@@ -102,7 +108,7 @@ describe('Projects sidebar membership', () => {
     await user.click(show(label));
     expect(fake.invoked('session.projects.add')).toHaveLength(1);
     const promoted = { ...chosen, discovered: false, hidden: false };
-    await act(() => fake.reply('session.projects.add', promoted));
+    await act(() => fake.reply('session.projects.add', asMain(promoted)));
     // A command response has no project-list revision and must not overwrite the store.
     expect(useSessions.getState().projects.get(chosen.id)).toBe(chosen);
     setProjects(choices.map((p) => p.id === chosen.id ? promoted : p));
@@ -121,11 +127,11 @@ describe('Projects sidebar membership', () => {
     await user.click(show('notes'));
     expect(screen.queryByRole('alert')).toBeNull();
     expect(fake.invoked('session.projects.add')).toEqual([{ directory: hidden.directory }, { directory: hidden.directory }]);
-    await act(() => fake.reply('session.projects.add', { ...hidden, hidden: false }));
+    await act(() => fake.reply('session.projects.add', asMain({ ...hidden, hidden: false })));
   });
 
   it('uses the existing confirmed hide action, leaving running sessions and their records untouched', async () => {
-    const running = record('running-atlas', { projectId: added.id });
+    const running = record(at('running-atlas'), { projectId: added.id });
     act(() => useSessions.setState({ records: new Map([[running.appId, running]]) }));
     offs.push(registerSessionActions());
     render(<ProjectsView />);
@@ -136,7 +142,7 @@ describe('Projects sidebar membership', () => {
     expect(fake.calls).toEqual([]);
     await user.click(hide('atlas · personal'));
     answerRemoval(true);
-    await waitFor(() => expect(fake.invoked('session.projects.remove')).toEqual([{ id: added.id }]));
+    await waitFor(() => expect(fake.invoked('session.projects.remove')).toEqual([{ id: bareOf(added.id) }]));
     await act(() => fake.reply('session.projects.remove', undefined));
     setProjects(choices.map((p) => p.id === added.id ? { ...p, hidden: true } : p));
     expect(show('atlas · personal')).toBeTruthy();

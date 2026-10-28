@@ -5,7 +5,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { MawsBridge, Settings } from '@shared/ipc/schema';
+import type { PreloadBridge, Settings } from '@shared/ipc/schema';
 import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
 import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
@@ -44,7 +44,7 @@ afterEach(() => {
   cleanup();
   useSettings.setState({ state: null });
   useNotices.setState({ notices: [] });
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 describe('Settings › Engine writes settings; main configures the host', () => {

@@ -16,6 +16,8 @@ import { useLayout } from '../stores/layout';
 import { activeTab, currentSet } from '../stores/layout-model';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { useSessions } from '../stores/sessions';
+import { localProjectOfSet } from '../stores/org-projects'; // P5 O6 M5
+import { ipc } from '../ipc/client';
 import { FolderIcon, Icon, IconButton, SidebarIcon } from './IconButton';
 import { useShellGeometry, useShellView } from './shell-view';
 import { mountChromeTabs } from '../main/chrome-tabs';
@@ -141,7 +143,7 @@ export const PROJECT_CHIP_COPY = {
 
 function ProjectChip() {
   const current = useLayout((s) => s.main.current);
-  const project = useSessions((s) => (current === NO_PROJECT ? undefined : s.projects.get(current)));
+  const project = useSessions((s) => (current === NO_PROJECT ? undefined : localProjectOfSet(s, current, ipc.localMachine))); // P5 O6 M5: the set's checkout here
   const canCreate = useSessionCreatorRegistered();
   const revealing = useRef(false); // the reveal focuses the project's row: the closing menu gives the chip no focus back
   if (!project) return null;

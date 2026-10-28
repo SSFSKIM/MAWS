@@ -60,7 +60,7 @@ export function TranscriptLink({ href, children }: ComponentProps<'a'> & ExtraPr
   if (href.startsWith('maws-path:')) {
     const { path, line } = pathOf(href.slice('maws-path:'.length));
     return (
-      <button type="button" className="transcript-chip" data-chip="path" title={path} onClick={() => actions.openFile(path, line)}>
+      <button type="button" className="transcript-chip" data-chip="path" title={path} onClick={() => actions.openFile(path, line, session)}>
         {children}
       </button>
     );

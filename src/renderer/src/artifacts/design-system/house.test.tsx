@@ -3,7 +3,8 @@
 // new house system moves it) and each `artifacts.resync`; an answer overtaken by a later read is dropped.
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CommandResult, EventName, MawsBridge } from '@shared/ipc/schema';
+import type { CommandResult, EventName, PreloadBridge } from '@shared/ipc/schema';
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { createClient } from '../../ipc/client';
 import { followHouseDesignSystem, useHouseDesignSystem } from './house';
 
@@ -20,6 +21,7 @@ function fakeBridge() {
     return new Promise<CommandResult<'designSystems.house'>>((resolve) => answers.push((houseId) => resolve({ ok: true, value: { houseId } })));
   });
   const bridge = {
+    localMachine: TEST_MACHINE,
     invoke,
     on: (name: string, listener: (payload: unknown) => void) => {
       const set = listeners.get(name) ?? listeners.set(name, new Set()).get(name)!;
@@ -27,7 +29,7 @@ function fakeBridge() {
       return () => void set.delete(listener);
     },
     pathForFile: () => '',
-  } as unknown as MawsBridge;
+  } as unknown as PreloadBridge;
   return {
     bridge,
     invoke,
@@ -41,7 +43,7 @@ const changed = (kind: string, change = 'updated') => ({ artifactId: DOC, kind, 
 
 afterEach(() => {
   cleanup();
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 describe('useHouseDesignSystem', () => {

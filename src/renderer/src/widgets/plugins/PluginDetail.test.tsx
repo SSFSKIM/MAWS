@@ -10,10 +10,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import type { InstalledPlugin, ManifestItemRef, PluginManifestView } from '@shared/ipc/schema/plugins';
 import type { AcquireOutcome } from '@shared/sessions/setup';
 import { digest, record } from '../../../../../test/support/builders';
+import { at, TEST_MACHINE } from '../../../../../test/support/machine';
 import { readManifestView } from '../../../../engine-host/plugins/manifest';
 import type { LoadedPlugins } from '../../sessions/observed';
 import { useSessions } from '../../stores/sessions';
@@ -48,7 +49,9 @@ const viewOf = (p: InstalledPlugin, over: Partial<PluginManifestView> = {}): Plu
   ...over,
 });
 const identityOf = (p: InstalledPlugin, view: PluginManifestView | null) => identitiesOf([p], [], view ? new Map([[manifestKeyOf(installationRef(p)), view]]) : new Map(), null)[0];
-const SESSION = 'app-detail' as AppSessionId;
+// P5 O6 M2: the page holds the address; a fake bridge is main, answering with the bare id
+const SESSION_ID = 'app-detail' as AppSessionId;
+const SESSION = at(SESSION_ID);
 const NO_RELOAD: SessionPlugins['reload'] = { line: null, failed: false };
 const loadedWith = (sources: string[], freshness: LoadedPlugins['freshness'], refresh: SessionPlugins['refresh'] = () => loadForRead(SESSION)): SessionPlugins => ({
   plugins: sources.map((source) => ({ name: source.split('@')[0], path: `/cfg/${source}`, source, version: null })),
@@ -77,7 +80,7 @@ afterEach(() => {
   cleanup();
   useSessions.setState({ records: new Map(), digests: new Map() });
   useReadLoads.setState({ loads: new Map() });
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: unknown }).maws;
 });
 
 describe('the detail: enabled for this project and loaded in this session', () => {
@@ -94,7 +97,7 @@ describe('the detail: enabled for this project and loaded in this session', () =
     let settle: (outcome: AcquireOutcome) => void = () => {};
     const refresh = vi.fn(() => loadForRead(SESSION));
     const invoke = vi.fn((name: string) => (name === 'session.acquire' ? new Promise((resolve) => (settle = (value) => resolve({ ok: true, value }))) : Promise.resolve({ ok: true, value: null })));
-    window.maws = { invoke, on: () => () => {}, pathForFile: () => '' } as unknown as MawsBridge;
+    window.maws = { localMachine: TEST_MACHINE, invoke, on: () => () => {}, pathForFile: () => '' } as unknown as PreloadBridge;
     useSessions.setState({ records: new Map([[SESSION, record(SESSION)]]), digests: new Map([[SESSION, digest(SESSION, { availability: 'resumable' })]]) });
     show(identityOf(p, viewOf(p)), { loaded: loadedWith(['other@x'], { kind: 'last', at: new Date().toISOString() }, refresh), loadedIds: new Set(['other@x']) });
     expect(fact('enabled').textContent).toBe('Enabled for this project');
@@ -103,7 +106,7 @@ describe('the detail: enabled for this project and loaded in this session', () =
     fireEvent.click(within(fact('loaded')).getByRole('button', { name: 'Refresh' }));
     expect(refresh).toHaveBeenCalledTimes(1);
     expect(within(fact('loaded')).getByRole('status').textContent).toBe('Starting…');
-    await act(async () => settle({ status: 'refused', appSessionId: SESSION, reason: 'busy', message: 'The session is busy elsewhere' } as AcquireOutcome));
+    await act(async () => settle({ status: 'refused', appSessionId: SESSION_ID, reason: 'busy', message: 'The session is busy elsewhere' } as AcquireOutcome));
     await waitFor(() => expect(fact('loaded').textContent).toContain('The session is busy elsewhere'));
     expect(refresh).toHaveBeenCalledTimes(1);
   });

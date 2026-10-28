@@ -15,9 +15,10 @@ import { activeTab } from '../../stores/layout-model';
 import { codeTranscriptActions } from '../../tools/code';
 import { Transcript, type TranscriptSource } from '../../transcript';
 import type { HarnessSession } from '../player';
+import { fakeId } from '../panel/fakeSessions';
 import { loadedSession, onTranscriptLoaded } from '../panel/summaryProbes';
 
-const TRANSCRIPT_OF = 'A'; // the fake session whose transcript the column shows
+const TRANSCRIPT_OF = fakeId('A'); // the fake session whose transcript the column shows (P5 O6 M2: by its address, as loads name it)
 
 // The session shown is taken when a load has released its history, never mid-load (C8a's page is then attaching it).
 let shown: HarnessSession | null = null;

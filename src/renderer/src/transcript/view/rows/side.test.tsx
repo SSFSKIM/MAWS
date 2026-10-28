@@ -31,7 +31,7 @@ describe('the anchored prompt', () => {
     expect(chip.textContent).toBe('x.ts:42');
     expect(chip.getAttribute('data-anchor-kind')).toBe('file-line');
     fireEvent.click(chip);
-    expect(actions.openFile).toHaveBeenCalledWith('/repo/src/x.ts', 42);
+    expect(actions.openFile).toHaveBeenCalledWith('/repo/src/x.ts', 42, null);
     const content = container.querySelector('[data-user-content]')!.textContent!;
     expect(content).toContain('Why twice?');
     expect(content).not.toContain('maws_anchor');

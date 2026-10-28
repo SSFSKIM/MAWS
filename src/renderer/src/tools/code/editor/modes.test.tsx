@@ -9,6 +9,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS, type TabRef } from '@shared/ipc/schema/layout';
+import { at, TEST_MACHINE } from '../../../../../../test/support/machine';
 import { connectCodeEvents } from '../../../ipc/events';
 import { useLayout } from '../../../stores/layout';
 import { fakeHash, installDisk, type DiskFile } from '../../../test-support/code-disk';
@@ -21,13 +22,16 @@ import { EditorDialogs, useEditorDialog } from './EditorDialogs';
 import { registerEditor } from './register'; // E11
 import { runAction } from '../../../keymap/actions-runtime'; // E11
 
-const A = 'app-a' as AppSessionId;
+// P5 O6 M2: the page's id is an address and its file tabs name their machine; the fake disk (main) is told MAIN_A.
+const MAIN_A = 'app-a' as AppSessionId;
+const A = at(MAIN_A);
+const FILE = (path: string) => `file:${TEST_MACHINE}:${path}`;
 const MiB = 1024 * 1024;
 const APP = '/r/app.ts';
 const MERGE = '/r/conflicts/merge.ts';
 
-const fileTab = (path: string): Extract<TabRef, { kind: 'file' }> => ({ id: `file:${path}`, kind: 'file', path, line: null, appSessionId: A, pinned: false });
-const entry = (path = APP) => useViewer.getState().entries.get(`file:${path}`)!;
+const fileTab = (path: string): Extract<TabRef, { kind: 'file' }> => ({ id: FILE(path), kind: 'file', path, line: null, appSessionId: A, machine: TEST_MACHINE, pinned: false });
+const entry = (path = APP) => useViewer.getState().entries.get(FILE(path))!;
 const view = () => EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement)!;
 const doc = () => view().state.doc.toString();
 const lines = (...texts: string[]) => texts.map((text) => `${text}\n`).join('');
@@ -81,7 +85,7 @@ describe('editor modes', () => {
     replaceLine(2, 'mine 2');
     await waitFor(() => expect(entry().dirty).toBe(true));
     opened.disk.files[APP] = numbered(10, { 8: 'theirs 8' });
-    act(() => opened.disk.emit('files.changed', { appSessionId: A, path: APP, kind: 'changed' }));
+    act(() => opened.disk.emit('files.changed', { appSessionId: MAIN_A, path: APP, kind: 'changed' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Compare' }));
     await waitFor(() => expect(document.querySelectorAll('.cm-deletedChunk')).toHaveLength(2));
     return opened;
@@ -136,7 +140,7 @@ describe('editor modes', () => {
     it('takes a newer disk version as the open merge view’s original', async () => {
       const { disk } = await merging();
       disk.files[APP] = numbered(10, { 8: 'theirs 8', 9: 'theirs 9' });
-      act(() => disk.emit('files.changed', { appSessionId: A, path: APP, kind: 'changed' }));
+      act(() => disk.emit('files.changed', { appSessionId: MAIN_A, path: APP, kind: 'changed' }));
       await waitFor(() => expect(getOriginalDoc(view().state).toString()).toBe(numbered(10, { 8: 'theirs 8', 9: 'theirs 9' })));
       expect(entry().theirs?.view).toBe('merge');
       expect(doc()).toBe(numbered(10, { 2: 'mine 2' }));
@@ -245,7 +249,7 @@ describe('editor modes', () => {
       await waitFor(() => expect(bar()?.textContent).toContain('1 conflict'));
       expect(document.querySelector('.cm-conflict-actions')).not.toBeNull();
       disk.files[APP] = numbered(10, { 8: 'theirs 8' });
-      act(() => disk.emit('files.changed', { appSessionId: A, path: APP, kind: 'changed' }));
+      act(() => disk.emit('files.changed', { appSessionId: MAIN_A, path: APP, kind: 'changed' }));
       fireEvent.click(await screen.findByRole('button', { name: 'Compare' }));
       await waitFor(() => expect(document.querySelector('.cm-deletedChunk')).not.toBeNull());
       expect(document.querySelector('.cm-conflict-actions')).toBeNull();
@@ -327,7 +331,7 @@ describe('editor modes', () => {
       replaceLine(1, 'mine');
       const { askClose } = await import('./EditorDialogs');
       let answer: string | null = null;
-      act(() => void askClose(`file:${APP}`, 'app.ts').then((choice) => (answer = choice)));
+      act(() => void askClose(FILE(APP), 'app.ts').then((choice) => (answer = choice)));
       await screen.findByRole('dialog', { name: 'Save changes to app.ts?' });
       fireEvent.click(mark(3)); // under the modal sheet
       await screen.findByRole('dialog', { name: 'Comment on app.ts:3' });

@@ -11,6 +11,7 @@ import { fakeClient, type FakeClient } from '../../../../test/support/fake-clien
 import { useSessions } from '../stores/sessions';
 import { invalidateSession, resetSurfaceRegistry } from './registry';
 import { SurfaceSite } from './SurfaceSite';
+import { TEST_MACHINE } from '../../../../test/support/machine';
 
 const ID = 'app-r2' as AppSessionId;
 const LINE = 18;
@@ -44,7 +45,7 @@ beforeEach(() => {
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => setTimeout(() => callback(0), 0));
   scrollAnswer = (input) => ({ moved: true, offset: input.offset + input.by, deny: null, followEnd: false });
   fake = fakeClient({ 'session.ui.render': () => drawn, 'session.ui.scroll': (input: { offset: number; by: number }) => scrollAnswer(input) });
-  act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...status(ID), uiSurface: { clientId: 'maws-main' } } }));
+  act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...status(ID), uiSurface: { clientId: 'maws-main' } } }, TEST_MACHINE));
 });
 afterEach(() => {
   cleanup();

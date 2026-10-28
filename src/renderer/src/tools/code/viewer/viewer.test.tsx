@@ -9,6 +9,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { FILES_READ_DEFAULT_LENGTH } from '@shared/ipc/schema/files';
 import { LAYOUT_DEFAULTS, type TabRef } from '@shared/ipc/schema/layout';
 import { record } from '../../../../../../test/support/builders';
+import { at, TEST_MACHINE } from '../../../../../../test/support/machine';
 import { connectCodeEvents } from '../../../ipc/events';
 import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
@@ -92,8 +93,12 @@ describe('viewer kinds', () => {
 
 // ---- the viewer over a fake main ------------------------------------------------------------------------------------
 
-const A = 'app-a' as AppSessionId;
-const B = 'app-b' as AppSessionId;
+// P5 O6 M2: the page's ids are addresses and its file tabs name their machine; the fake main is asked and emits with
+// the bare MAIN_A.
+const MAIN_A = 'app-a' as AppSessionId;
+const A = at(MAIN_A);
+const B = at('app-b' as AppSessionId);
+const FILE = (path: string) => `file:${TEST_MACHINE}:${path}`;
 const MiB = 1024 * 1024;
 
 // A file main serves: text (ASCII, so a byte is a character), a binary image, a file generated on demand (too large to
@@ -124,11 +129,12 @@ function serve(files: Record<string, Served>, gate?: (offset: number) => Promise
 }
 
 const fileTab = (path: string, line: number | null = null, appSessionId: AppSessionId | null = A): Extract<TabRef, { kind: 'file' }> => ({
-  id: `file:${path}`,
+  id: FILE(path),
   kind: 'file',
   path,
   line,
   appSessionId,
+  machine: TEST_MACHINE,
   pinned: false,
 });
 
@@ -160,7 +166,7 @@ describe('viewer', () => {
     expect(alert.textContent).toContain('/r/secret');
     await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
     expect(main.callsOf('files.read')).toHaveLength(1);
-    expect(main.callsOf('files.watch')).toEqual([{ appSessionId: A, path: '/r' }]); // the file's directory, watched before the read
+    expect(main.callsOf('files.watch')).toEqual([{ appSessionId: MAIN_A, path: '/r' }]); // the file's directory, watched before the read
   });
 
   it('opens code at the line, centred and flashed, and jumps again when the line changes', async () => {
@@ -170,7 +176,7 @@ describe('viewer', () => {
     expect(document.querySelector('[data-code-view]')?.getAttribute('data-language')).toBe('TypeScript');
     rerender(<FileViewer tab={fileTab('/r/app.ts', 40)} />);
     await waitFor(() => expect(flashed()).toBe('export const line40 = 40;'));
-    expect(useViewer.getState().entries.get('file:/r/app.ts')?.pendingJump).toBeNull();
+    expect(useViewer.getState().entries.get(FILE('/r/app.ts'))?.pendingJump).toBeNull();
   });
 
   it('completes a 2,200,000-byte text by continuation reads before presenting it complete, the line landing after its chunk', async () => {
@@ -192,7 +198,7 @@ describe('viewer', () => {
     await act(async () => gateAt(2 * MiB).resolve());
     await waitFor(() => expect(notice()).toBeNull());
     expect(main.callsOf('files.read').map((input) => input.offset)).toEqual([0, MiB, 2 * MiB]);
-    const entry = useViewer.getState().entries.get('file:/r/generated.ts')!;
+    const entry = useViewer.getState().entries.get(FILE('/r/generated.ts'))!;
     expect(entry.text).toBe(text);
     expect(entry.complete).toBe(true);
   });
@@ -211,7 +217,7 @@ describe('viewer', () => {
     render(<FileViewer tab={fileTab('/r/half.txt')} />);
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain("Refused: path outside the session's directories");
-    expect(useViewer.getState().entries.get('file:/r/half.txt')?.text).toBe('');
+    expect(useViewer.getState().entries.get(FILE('/r/half.txt'))?.text).toBe('');
     expect(document.querySelector('.cm-content')).toBeNull();
   });
 
@@ -228,7 +234,7 @@ describe('viewer', () => {
 
   it('opens links and path chips from standalone file Markdown', async () => {
     const main = serve({ '/r/README.md': '[Website](https://example.com)\n\n[Source](/r/app.ts#L7)' });
-    useLayout.getState().openTab({ kind: 'file', path: '/r/README.md', line: null, appSessionId: A });
+    useLayout.getState().openTab({ kind: 'file', path: '/r/README.md', line: null, appSessionId: A, machine: TEST_MACHINE });
     useLayout.getState().openTab({ kind: 'session', appSessionId: B });
     render(<FileViewer tab={fileTab('/r/README.md')} />);
     fireEvent.click(await screen.findByRole('link', { name: 'Website' }));
@@ -323,7 +329,7 @@ describe('viewer', () => {
     const { unmount } = render(<FileViewer tab={fileTab('/r/doc.pdf')} />);
     expect((await screen.findByText('PDF files open outside MAWS')).tagName).toBe('P');
     fireEvent.click(screen.getByRole('button', { name: 'Open externally' }));
-    await waitFor(() => expect(main.callsOf('files.openExternal')).toEqual([{ appSessionId: A, path: '/r/doc.pdf' }]));
+    await waitFor(() => expect(main.callsOf('files.openExternal')).toEqual([{ appSessionId: MAIN_A, path: '/r/doc.pdf' }]));
     expect(document.querySelector('iframe, embed, object')).toBeNull();
     unmount();
     render(<FileViewer tab={fileTab('/r/data.bin')} />);
@@ -354,12 +360,12 @@ describe('viewer', () => {
     render(<FileViewer tab={fileTab('/r/app.ts')} />);
     await waitFor(() => expect(codeText()).toBe('const a = 1;'));
     files['/r/app.ts'] = 'const a = 2;\n';
-    act(() => main.emit('files.changed', { appSessionId: A, path: '/private/r/app.ts', kind: 'changed' })); // realpath spelling
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: '/private/r/app.ts', kind: 'changed' })); // realpath spelling
     await waitFor(() => expect(codeText()).toBe('const a = 2;'));
     expect(document.querySelector('[data-updated]')?.textContent).toBe('Updated');
     expect(flashed()).toBeNull();
     delete files['/r/app.ts'];
-    act(() => main.emit('files.changed', { appSessionId: A, path: '/r/app.ts', kind: 'removed' }));
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: '/r/app.ts', kind: 'removed' }));
     await waitFor(() => expect(notice()).toBe('File removed'));
     expect(codeText()).toBe('const a = 2;');
   });
@@ -369,9 +375,9 @@ describe('viewer', () => {
     connect();
     render(<FileViewer tab={fileTab('/r/app.ts')} />);
     await waitFor(() => expect(codeText()).toBe('x'));
-    act(() => main.emit('files.changed', { appSessionId: A, path: '/x/r/app.ts', kind: 'removed' }));
-    act(() => main.emit('files.changed', { appSessionId: A, path: '/x/r', kind: 'changed' }));
-    act(() => main.emit('files.changed', { appSessionId: A, path: '/x/r', kind: 'invalidated' }));
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: '/x/r/app.ts', kind: 'removed' }));
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: '/x/r', kind: 'changed' }));
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: '/x/r', kind: 'invalidated' }));
     await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
     expect(main.callsOf('files.read')).toHaveLength(1);
     expect(notice()).toBeNull();
@@ -387,7 +393,7 @@ describe('viewer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
     await waitFor(() => expect(notice()).toBe('Showing the first 2.0 MB of 20.0 MB'));
     main.calls.splice(0);
-    act(() => main.emit('files.changed', { appSessionId: A, path: '/r/big.log', kind: 'changed' }));
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: '/r/big.log', kind: 'changed' }));
     await waitFor(() => expect(main.callsOf('files.read').map((input) => input.offset)).toEqual([0, MiB]));
     await waitFor(() => expect(document.querySelector('[data-updated]')).not.toBeNull());
     expect(notice()).toBe('Showing the first 2.0 MB of 20.0 MB');
@@ -407,7 +413,7 @@ describe('viewer', () => {
     });
     return { main, gated };
   }
-  const BIG_LOG = 'file:/r/big.log';
+  const BIG_LOG = FILE('/r/big.log');
   const bigLog = () => useViewer.getState().entries.get(BIG_LOG)!;
   // E11 W-E: the two supersede cases drive the store the viewer mounts, not the rendered tab: CodeMirror laying out
   // megabytes of text under happy-dom took most of their time and all of their sensitivity to load (the button is
@@ -437,7 +443,7 @@ describe('viewer', () => {
     const superseded = gated(MiB);
     useViewer.getState().loadMore(BIG_LOG);
     expect(bigLog().loadingMore).toBe(true);
-    main.emit('files.changed', { appSessionId: A, path: '/r/big.log', kind: 'changed' });
+    main.emit('files.changed', { appSessionId: MAIN_A, path: '/r/big.log', kind: 'changed' });
     await until((entry) => entry.updated === 1);
     expect(bigLog().loadingMore).toBe(false);
     useViewer.getState().loadMore(BIG_LOG);
@@ -454,7 +460,7 @@ describe('viewer', () => {
     mountBigLog();
     await until((entry) => entry.status === 'ready' && entry.loaded === MiB);
     const reread = gated(0);
-    main.emit('files.changed', { appSessionId: A, path: '/r/big.log', kind: 'changed' });
+    main.emit('files.changed', { appSessionId: MAIN_A, path: '/r/big.log', kind: 'changed' });
     await drained();
     expect(main.callsOf('files.read')).toHaveLength(2);
     const outrun = gated(MiB);
@@ -482,12 +488,12 @@ describe('viewer', () => {
     });
     connect();
     render(<FileViewer tab={fileTab('/r/log.txt')} />);
-    await waitFor(() => expect(useViewer.getState().entries.get('file:/r/log.txt')?.complete).toBe(true));
+    await waitFor(() => expect(useViewer.getState().entries.get(FILE('/r/log.txt'))?.complete).toBe(true));
     gone = true;
-    act(() => main.emit('files.changed', { appSessionId: A, path: '/r/log.txt', kind: 'changed' }));
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: '/r/log.txt', kind: 'changed' }));
     await waitFor(() => expect(notice()).toBe('File removed'));
     expect(screen.queryByRole('alert')).toBeNull();
-    expect(useViewer.getState().entries.get('file:/r/log.txt')?.text).toBe(text);
+    expect(useViewer.getState().entries.get(FILE('/r/log.txt'))?.text).toBe(text);
   });
 
   it('lets no load of a pruned tab land in the entry that replaced it', async () => {
@@ -505,8 +511,8 @@ describe('viewer', () => {
     const first = render(<FileViewer tab={fileTab('/r/a.txt')} />);
     await waitFor(() => expect(reads).toBe(1));
     first.unmount();
-    act(() => useLayout.getState().closeTab('file:/r/a.txt')); // pruned while its read is in flight
-    expect(useViewer.getState().entries.has('file:/r/a.txt')).toBe(false);
+    act(() => useLayout.getState().closeTab(FILE('/r/a.txt'))); // pruned while its read is in flight
+    expect(useViewer.getState().entries.has(FILE('/r/a.txt'))).toBe(false);
     openFile(A, '/r/a.txt');
     render(<FileViewer tab={fileTab('/r/a.txt')} />);
     await waitFor(() => expect(reads).toBe(2));
@@ -514,7 +520,7 @@ describe('viewer', () => {
     await waitFor(() => expect(codeText()).toBe('new'));
     await act(async () => gates[0].resolve());
     await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
-    expect(useViewer.getState().entries.get('file:/r/a.txt')?.text).toBe('new\n');
+    expect(useViewer.getState().entries.get(FILE('/r/a.txt'))?.text).toBe('new\n');
   });
 
   it("takes CodeMirror's dark theme with the page's, so none of its light base colours apply in dark", async () => {
@@ -538,7 +544,7 @@ describe('viewer', () => {
     render(<FileViewer tab={fileTab('/r/app.ts')} />);
     await waitFor(() => expect(codeText()).toBe('x'));
     main.calls.splice(0);
-    act(() => main.emit('files.changed', { appSessionId: A, path: '/r', kind: 'invalidated' }));
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: '/r', kind: 'invalidated' }));
     await waitFor(() => expect(main.calls.map((c) => c.name)).toEqual(['files.watch', 'files.read']));
   });
 
@@ -551,7 +557,7 @@ describe('viewer', () => {
     expect(screen.getByText('No session grants access to this file')).toBeTruthy();
     expect(main.callsOf('files.read')).toHaveLength(0);
     unmount();
-    render(<FileViewer tab={fileTab('/r/a.ts', null, 'app-z' as AppSessionId)} />);
+    render(<FileViewer tab={fileTab('/r/a.ts', null, at('app-z' as AppSessionId))} />);
     expect(await screen.findByText('No session grants access to this file')).toBeTruthy();
   });
 
@@ -563,9 +569,9 @@ describe('viewer', () => {
       unmount();
     }
     expect(useViewer.getState().entries.size).toBe(VIEWER_ENTRIES_MAX);
-    expect(useViewer.getState().entries.has('file:/r/f0.ts')).toBe(false); // the least recently used went first
-    act(() => useLayout.getState().closeTab('file:/r/f24.ts'));
-    expect(useViewer.getState().entries.has('file:/r/f24.ts')).toBe(false);
+    expect(useViewer.getState().entries.has(FILE('/r/f0.ts'))).toBe(false); // the least recently used went first
+    act(() => useLayout.getState().closeTab(FILE('/r/f24.ts')));
+    expect(useViewer.getState().entries.has(FILE('/r/f24.ts'))).toBe(false);
   });
 });
 
@@ -592,7 +598,7 @@ describe('a read-only mount (E2)', () => {
 
     openFile(A, '/r/app.ts');
     render(<FileViewer tab={fileTab('/r/app.ts')} />);
-    await waitFor(() => expect(useViewer.getState().entries.get('file:/r/app.ts')).toMatchObject({ editable: true, readOnly: false }));
+    await waitFor(() => expect(useViewer.getState().entries.get(FILE('/r/app.ts'))).toMatchObject({ editable: true, readOnly: false }));
   });
 });
 

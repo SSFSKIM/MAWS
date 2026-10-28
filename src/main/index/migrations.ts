@@ -243,6 +243,18 @@ CREATE INDEX session_text_chunks_app ON session_text_chunks(app_id);
 CREATE VIRTUAL TABLE session_text USING fts5(body, tokenize = 'trigram');
 CREATE TRIGGER session_text_delete AFTER DELETE ON session_text_chunks BEGIN DELETE FROM session_text WHERE rowid = old.id; END;
 ` },
+  {
+    version: 13,
+    // P5 O6 M5 (docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md, "Persisting and refreshing"; OX3): each
+    // project's org project as this machine derived it (src/main/index/org-project.ts), stored on its row so the first
+    // paint groups at once, and refreshed at every index start. Null until derived; nothing is re-indexed.
+    sql: `
+ALTER TABLE projects ADD COLUMN org_key TEXT;
+ALTER TABLE projects ADD COLUMN org_name TEXT;
+ALTER TABLE projects ADD COLUMN org_source TEXT CHECK (org_source IN ('smns','remote','repository','folder'));
+ALTER TABLE projects ADD COLUMN org_smns_id TEXT;
+`,
+  },
 ];
 
 export const REPAIRS: readonly Repair[] = [{ version: 1, table: 'sessions', column: 'removed_at', definition: 'TEXT' }];

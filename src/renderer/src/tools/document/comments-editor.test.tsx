@@ -15,7 +15,9 @@ import { schemaFor } from '@artifacts/document/schema';
 import { addTab, createDocument } from '@artifacts/document/tabs';
 import { getThread } from '@artifacts/document/threads';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../../test/support/fake-client';
+import { at } from '../../../../../test/support/machine';
 import { useCommentCard } from '../../side/card/store';
 import { openComment } from '../../side/register';
 import { resetShellStores } from '../../test-support/shell-stores';
@@ -24,7 +26,7 @@ import type { ArtifactHost } from '@artifacts/host';
 import { useDocumentComments } from './comments';
 import { DocumentTabState, type DocumentTabDeps } from './tab-state';
 
-const PARENT = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
+const PARENT = at('a1111111-1111-4111-8111-111111111111' as AppSessionId);
 const owner = memoryEditorHost({ actor: { kind: 'human' }, name: 'Owner', color: '--author-2' });
 
 let world: World | null = null;
@@ -32,7 +34,7 @@ let handle: DocumentHandle | null = null;
 let offComposer = () => {};
 beforeEach(() => {
   resetShellStores();
-  window.maws = fakeClient({ 'session.intent.get': null }).client;
+  window.maws = fakeClient({ 'session.intent.get': null }).client as unknown as PreloadBridge;
   offComposer = registerCommentComposer(openComment);
 });
 afterEach(() => {

@@ -12,6 +12,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import type { ScmStatus } from '@shared/ipc/schema/scm';
 import { NOT_A_REPOSITORY } from '../../sessions/branch-label';
+import { checkoutKey, machineFor } from '../../ipc/machine';
 import { useGit } from '../../stores/git';
 import { openFile } from '../code/open-file';
 import { CommitForm } from './CommitForm';
@@ -42,9 +43,10 @@ const Message = ({ children, role }: { children: string; role?: 'status' }) => (
 );
 
 export function ScmShell({ appSessionId, directory, ui }: ScmShellProps) {
-  useEffect(() => useGit.getState().watch(directory), [directory]);
+  const machine = machineFor(appSessionId);
+  useEffect(() => useGit.getState().watch(machine, directory), [machine, directory]);
   useEffect(() => useScm.getState().resume(appSessionId), [appSessionId]);
-  const entry = useGit((s) => s.entries.get(directory));
+  const entry = useGit((s) => s.entries.get(checkoutKey(machine, directory)));
   const status = entry?.status ?? null;
   const gitError = status === null ? (entry?.error ?? null) : null;
   const scm = useScmStatus(appSessionId);
@@ -81,7 +83,7 @@ export function ScmShell({ appSessionId, directory, ui }: ScmShellProps) {
 
   const actions: RowActions = {
     select: (selection) => ui.setState(selectFile(selection)),
-    stage: (paths) => void useScm.getState().stage(ui, appSessionId, paths),
+    stage: (paths) => void useScm.getState().stage(ui, appSessionId, directory, paths),
     unstage: (paths) => void useScm.getState().unstage(ui, appSessionId, paths),
     discard: (entries) => ui.setState({ sheet: { kind: 'discard', entries } }),
     open: (path) => openFile(appSessionId, checkoutPath(status.repoRoot, path), null),
@@ -199,7 +201,7 @@ function GroupSection({ name, groups, ui, selected, enabled, actions }: { name: 
 // The open sheet of this tool: Discard, Push or Open PR.
 function Sheets({ appSessionId, ui, status, scm, directory }: { appSessionId: AppSessionId; ui: StoreApi<ScmUi>; status: GitStatus; scm: ScmStatus | undefined; directory: string }) {
   const sheet = useStore(ui, (s) => s.sheet);
-  if (sheet?.kind === 'discard') return <DiscardSheet appSessionId={appSessionId} ui={ui} entries={sheet.entries} />;
+  if (sheet?.kind === 'discard') return <DiscardSheet appSessionId={appSessionId} ui={ui} directory={directory} entries={sheet.entries} />;
   if (sheet?.kind === 'push') return <PushSheet appSessionId={appSessionId} ui={ui} status={status} scm={scm} />;
   if (sheet?.kind === 'pr') return <PrSheet appSessionId={appSessionId} ui={ui} status={status} scm={scm} directory={directory} />;
   return null;

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2: the router's local machine
 import { EventEmitter } from 'node:events';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -58,7 +59,7 @@ describe('main answers files.* through the router', () => {
     const emit = vi.fn();
     const files = registerFilesHandlers((id) => records.get(id) ?? null, { emit, port: { openExternal, reveal }, env: {} });
     dispose = () => files.dispose();
-    installRouter({ appUrl: APP_URL });
+    installRouter({ appUrl: APP_URL, local: 'LocalMachineRef0000000' as MachineRef });
     return { files, emit, openExternal, followed: files.followed };
   }
   const invoke = (name: string, input?: unknown) => electron.handlers.get(`maws:cmd:${name}`)!(event, input) as Promise<Result>;

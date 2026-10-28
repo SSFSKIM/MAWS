@@ -2,6 +2,7 @@
 // Review, Files and the viewer draw, from their DOM (the chips, the list, the counter, the tree rows, the notices) and
 // the stores behind it (the hunk texts, the viewer's text), and drives them with the clicks a reader would make.
 import type { AppSessionId } from '@shared/graph/ids';
+import { checkoutKey, machineFor } from '../../ipc/machine';
 import { instanceOf, shownSession } from '../../panel/host';
 import { useGit } from '../../stores/git';
 import { useLayout } from '../../stores/layout';
@@ -90,12 +91,14 @@ function filesOf(target: ReviewTarget, scope: ReviewScope): { files: ReviewFile[
     const activity = useTranscriptStore.getState().activity(key).find((a) => a.turnId === target.turnId) ?? null;
     return { files: turnScopeFiles(dividerOf(entries[key].rows, target.turnId)?.files ?? [], activity), diff: null };
   }
-  const status = useGit.getState().entries.get(target.directory)?.status ?? null;
+  const machine = machineFor(target.appSessionId);
+  const status = useGit.getState().entries.get(checkoutKey(machine, target.directory))?.status ?? null;
   if (!status) return null;
-  const found = [...useReview.getState().diffs.keys()].find((key) => key.startsWith(`${target.directory}\0${scope}\0`));
+  const prefix = `${checkoutKey(machine, target.directory)}\0${scope}\0`;
+  const found = [...useReview.getState().diffs.keys()].find((key) => key.startsWith(prefix));
   if (!found) return null;
-  const base = found.slice(`${target.directory}\0${scope}\0`.length);
-  const diffTarget: DiffTarget = { directory: target.directory, scope, base: base === '' ? null : base };
+  const base = found.slice(prefix.length);
+  const diffTarget: DiffTarget = { machine, directory: target.directory, scope, base: base === '' ? null : base };
   const diff = diffOf(useReview.getState(), diffTarget);
   if (diff?.status !== 'ok') return null;
   return { files: gitScopeFiles({ scope, repoRoot: status.repoRoot, files: diff.files, patch: diff.patch, status }), diff: diffTarget };

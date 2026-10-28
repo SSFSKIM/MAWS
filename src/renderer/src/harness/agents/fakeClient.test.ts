@@ -4,6 +4,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { SubagentEntry, WorkflowRun } from '@shared/ipc/schema/fs';
 import type { PersistedTask } from '@shared/wire/store';
 import { event } from '../../../../../test/support/agents-events';
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { createFakeAgentWorkClient, FAKE_STOP_REFUSAL, snapshotOf, type FakeWire } from './fakeClient';
 
 const A = 'A' as AppSessionId;
@@ -63,11 +64,11 @@ describe('agents harness fake client', () => {
   it('pages a spill one byte short of the request, ending on a character boundary, and refuses an unknown path as C4 does', async () => {
     const text = 'a'.repeat(10) + 'é' + 'b'.repeat(5); // é is two bytes: 17 bytes in all
     const fake = createFakeAgentWorkClient({ session: A, spills: { '/tmp/x.output': text } });
-    expect(await fake.client.readSpill({ path: '/tmp/x.output', offset: 0, length: 8 })).toEqual({ content: 'a'.repeat(7), bytes: 17, offset: 0, length: 7, truncated: true });
+    expect(await fake.client.readSpill(TEST_MACHINE, { path: '/tmp/x.output', offset: 0, length: 8 })).toEqual({ content: 'a'.repeat(7), bytes: 17, offset: 0, length: 7, truncated: true });
     // bytes 7-11 asked; one short ends inside é (bytes 10-11), so the page backs off to the character boundary
-    expect(await fake.client.readSpill({ path: '/tmp/x.output', offset: 7, length: 5 })).toEqual({ content: 'aaa', bytes: 17, offset: 7, length: 3, truncated: true });
-    expect(await fake.client.readSpill({ path: '/tmp/x.output', offset: 10, length: 64 })).toEqual({ content: 'ébbbbb', bytes: 17, offset: 10, length: 7, truncated: false });
-    await expect(fake.client.readSpill({ path: '/tmp/nothing' })).rejects.toThrow('spill not found: /tmp/nothing');
+    expect(await fake.client.readSpill(TEST_MACHINE, { path: '/tmp/x.output', offset: 7, length: 5 })).toEqual({ content: 'aaa', bytes: 17, offset: 7, length: 3, truncated: true });
+    expect(await fake.client.readSpill(TEST_MACHINE, { path: '/tmp/x.output', offset: 10, length: 64 })).toEqual({ content: 'ébbbbb', bytes: 17, offset: 10, length: 7, truncated: false });
+    await expect(fake.client.readSpill(TEST_MACHINE, { path: '/tmp/nothing' })).rejects.toThrow('spill not found: /tmp/nothing');
     expect(fake.calls().readSpill.map((input) => input.offset ?? 0)).toEqual([0, 7, 10, 0]);
   });
 
@@ -86,8 +87,8 @@ describe('agents harness fake client', () => {
     expect((await fake.client.subagents(A)).map((a) => a.agentId)).toEqual(['a1', 'a2', 'w1']);
     expect(await fake.client.subagents(B)).toEqual([]);
     expect(await fake.client.workflows(A)).toEqual([run]);
-    expect(await fake.client.tasks('sess-1')).toHaveLength(1);
-    expect(await fake.client.tasks('other')).toEqual([]);
+    expect(await fake.client.tasks(TEST_MACHINE, 'sess-1')).toHaveLength(1);
+    expect(await fake.client.tasks(TEST_MACHINE, 'other')).toEqual([]);
     expect(seen).toEqual(['subagents A a1,a2', 'subagents A a1,a2,w1', 'workflow A wf_1', 'tasks sess-1']);
   });
 

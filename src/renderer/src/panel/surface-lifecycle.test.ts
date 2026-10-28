@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
+import { TEST_MACHINE } from '../../../../test/support/machine';
 import { createLayoutStore, useLayout } from '../stores/layout';
 import { useNotices } from '../stores/notices';
 import { cardHost, cardSession, floatPanel, FLOAT_COPY } from '../shell/floating';
@@ -21,7 +22,7 @@ describe('visible surface lifecycle', () => {
   it('selects, pins and hides tools in the remembered surface context while a document is in front', () => {
     const first = add('terminal');
     const second = panelHost.addTool('terminal', { appSessionId: A });
-    layout().openTab({ kind: 'artifact', artifactId: 'doc' });
+    layout().openTab({ kind: 'artifact', artifactId: 'doc', machine: TEST_MACHINE });
     expect(shownSession()).toBeNull(); // a panel context does not turn a document into a chat
     panelHost.selectTab(first);
     expect(selectedPanelTabId()).toBe(first);
