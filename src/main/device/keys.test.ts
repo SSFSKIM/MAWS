@@ -18,6 +18,7 @@ import {
   type OrgState,
 } from '../../../apps/org-protocol/src/index.ts';
 import { duplexPair } from '../../../apps/org-protocol/test-support/tamper-relay.ts';
+import { excludeFromBackup } from './backup-exclusion';
 import { DeviceKeysError, loadDeviceKeys, type DeviceKeys } from './keys';
 
 let profile: string;
@@ -197,6 +198,17 @@ describe('the device keys and Time Machine', () => {
       expect(keys.excludedFromBackupAtCreation).toBe(false);
       expect(await storedMark()).toBeUndefined();
       expect((await loadDeviceKeys(profile, { excludeFromBackup: async () => true })).excludedFromBackupAtCreation).toBe(false);
+      expect(await storedMark()).toBeUndefined();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it.runIf(process.platform === 'darwin')('carry no mark when the path excluded is shaped like a script, which osascript takes as data', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const keys = await loadDeviceKeys(profile, { excludeFromBackup: () => excludeFromBackup('-efunction run(){return true;}let device=1;0/device') });
+      expect(keys.excludedFromBackupAtCreation).toBe(false);
       expect(await storedMark()).toBeUndefined();
     } finally {
       warn.mockRestore();
