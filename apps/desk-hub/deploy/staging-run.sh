@@ -17,7 +17,8 @@
 #                            /dev/tty, and a pairing or enrollment code goes to the terminal alone, never to the log
 #   admin --pipe <verb…>     the secret-stream mode, for delegation create and code strip-legacy alone: the token in the
 #                            command's environment, its stdin and stdout untouched and unlogged, its stderr alone
-#                            filtered and logged; refused when stdout is a terminal (production-run.sh's, the same)
+#                            filtered and logged; refused when stdout is a terminal (production-run.sh's, the same);
+#                            delegation create posts no state, and the next admin verb (show) posts its proposal
 #   throwaway <n>            staging deployed under the throwaway org staging-probe-<n>, fake-check and redeploy-check
 #                            there, the account swept (staging-sweep.py), staging restored under staging-ssfskim
 #   desk-web <n>             the same around acceptance 8's desk-web check (apps/desk-web/e2e-staging) in place of

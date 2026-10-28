@@ -17,7 +17,9 @@
 #   admin --pipe <verb…> the secret-stream mode, for `delegation create` and `code strip-legacy` alone (the two verbs whose
 #                       stdout is a secret code): the token in the command's environment, its stdin and stdout passed
 #                       through untouched and unlogged, its stderr alone filtered and logged; refused when stdout is a
-#                       terminal. Every line of the runner's own goes to stderr.
+#                       terminal. Every line of the runner's own goes to stderr. `delegation create` posts no state: it
+#                       signs the delegation into the admin device's pending proposal, which the next admin verb (show,
+#                       once the stored code decodes under `code inspect`) posts.
 # The steps that change production (access-sync; admin genesis, pair, remove-device, refresh, enroll, delegation,
 # machine drop, provisioning revoke) say so first.
 # Environment (README "Production runs"):
@@ -146,7 +148,12 @@ case $step in
       remove-device) say "admin remove-device changes production: it revokes a device in $PRODUCTION_ORG's org state (a signed successor), asking on the terminal first" ;;
       refresh) say "admin refresh changes production: it posts a no-change successor of $PRODUCTION_ORG's org state" ;;
       enroll) say "admin enroll changes production: it mints an enrollment and lists the machine in $PRODUCTION_ORG's org state (a signed successor), asking on the terminal first" ;;
-      delegation) say "admin $verb changes production: it changes $PRODUCTION_ORG's delegations (a provisioning key and a signed successor), asking on the terminal first" ;;
+      delegation)
+        if [[ $verb == "delegation create" ]]; then
+          say "admin delegation create changes production: it mints a provisioning key at $URL and signs $PRODUCTION_ORG's successor listing the delegation as this device's pending proposal, posting none (the next admin verb, show, posts it once the code is stored), asking on the terminal first"
+        else
+          say "admin $verb changes production: it changes $PRODUCTION_ORG's delegations (a provisioning key and a signed successor), asking on the terminal first"
+        fi ;;
       machine) say "admin $verb changes production: it takes a machine out of $PRODUCTION_ORG's org state and deletes its hub row, asking on the terminal first" ;;
       provisioning) say "admin $verb changes production: it revokes a provisioning key at $URL, asking on the terminal first" ;;
       abandon-pending) say "admin abandon-pending changes what this admin device signs next: it drops a proposal production never took, asking on the terminal first" ;;

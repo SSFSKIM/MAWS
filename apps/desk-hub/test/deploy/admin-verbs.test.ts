@@ -96,7 +96,7 @@ describe('on the local hub', () => {
   const served = async () => (await hub.fetchAs(ADMIN, '/api/org/state?since=0').then((r) => r.json())) as { head: SignedOrgState; chain: SignedOrgState[]; certificates: { certs: Array<{ body: { name: string; machine: string; pub: string } }> } };
   const head = async () => (await served()).head;
   const hubRows = async () => ((await hub.fetchAs(ADMIN, '/api/machines').then((r) => r.json())) as { machines: MachineView[] }).machines;
-  const anchor = () => JSON.parse(readFileSync(anchorFile(keys), 'utf8')) as { version: number; pending?: SignedOrgState };
+  const anchor = () => JSON.parse(readFileSync(anchorFile(keys), 'utf8')) as { version: number; pending?: SignedOrgState; unsent?: true };
 
   beforeAll(async () => {
     hub = await startLocalHub();
@@ -236,7 +236,7 @@ describe('on the local hub', () => {
 
   let delegation: ProvisioningCodeV2;
 
-  it('creates a delegation: confirmed first, the provisioning key minted, the delegation signed in, the code on stdout alone', async () => {
+  it('creates a delegation: confirmed first, the provisioning key minted, the delegation signed into pending and posted by the next verb, the code on stdout alone', async () => {
     const before = await head();
     const keysBefore = ((await hub.fetchAs(ADMIN, '/api/provisioning-keys').then((r) => r.json())) as { keys: ProvisioningKeyRecord[] }).keys.length;
     const f = fake();
@@ -249,8 +249,25 @@ describe('on the local hub', () => {
     secrets.add(delegation.token);
     secrets.add(delegation.delegation.privateJwk.d!);
     expect(f.err).toContain('delegate vm- for 7776000 s? [y/N] yes (--yes)');
+    // Nothing is posted: the hub's head stays, and the anchor holds the signed successor, never sent.
+    const n = before.state.version + 1;
+    const id = delegation.delegation.id;
+    expect((await head()).state.version).toBe(before.state.version);
+    expect(anchor()).toMatchObject({ unsent: true, pending: { state: { version: n } } });
+    expect(anchor().pending!.state.delegations.map((d) => d.id)).toEqual([id]);
+    const said = f.err.join('\n');
+    expect(said).toContain(`version ${n} lists delegation ${id} (prefix vm-, expires ${anchor().pending!.state.delegations[0].expires}), signed and pending in ${anchorFile(keys)}: nothing was posted`);
+    expect(said).toMatch(new RegExp(`next: the store \\(gcloud secrets create\\) takes the code once this command exits; check the stored code with code inspect; then admin show posts version ${n}, and delegation ${id} is in effect`));
+    expect(said).toContain(`if the store failed or the stored code does not decode: admin abandon-pending (nothing was posted), then admin provisioning revoke ${id}`);
+    // The next verb settles it: `show` posts it and says so.
+    const shown = fake();
+    expect(await runAdmin(['show', ...asLocal()], shown.io)).toBe(0);
+    expect(shown.out).toContain(`pending version ${n} is not at the hub: sent`);
+    expect(shown.out).toContain(`delegation ${id} prefix vm- in effect from version ${n}`);
+    expect(anchor().pending).toBeUndefined();
+    expect(anchor()).not.toHaveProperty('unsent');
     const after = await head();
-    expect(after.state.version).toBe(before.state.version + 1);
+    expect(after.state.version).toBe(n);
     const pub = (await importSigningKey(delegation.delegation.privateJwk)).pub;
     expect(after.state.delegations).toEqual([expect.objectContaining({ id: delegation.delegation.id, prefix: 'vm-', pub, owners: [member] })]);
     expect(delegation).toEqual({ hub: hub.url, org: ORG, roots: after.state.root.keys, recoveryPub: after.state.root.recoveryPub, token: expect.any(String), delegation: { id: expect.stringMatching(/^[0-9a-f]{32}$/), prefix: 'vm-', privateJwk: expect.any(Object) } });
@@ -300,6 +317,7 @@ describe('on the local hub', () => {
     secrets.add(legacyDelegation.delegation.privateJwk.d!);
     expect(legacyDelegation.legacy).toEqual({ org: ORG, key: legacyKey });
     expect(f.err).toContain('delegate lg- for 3600 s? [y/N] yes (--yes)');
+    expect(await runAdmin(['show', ...asLocal()], fake().io)).toBe(0);
     expect((await head()).state.delegations.find((d) => d.prefix === 'lg-')).toMatchObject({ maxUses: 5 });
 
     const other = fake([], { stdin: encodeProvisioningCode({ hub: 'https://elsewhere.example', org: ORG, token: 't', prefix: 'old-', key: legacyKey }) });
@@ -504,17 +522,17 @@ describe('on the local hub', () => {
 const canonicalOf = (value: unknown) => canonicalize(value);
 
 describe('delegation create against a hub that misbehaves', () => {
-  // A proxy between the command and the local hub: `mint` rewrites the provisioning key's answer, `state` holds a
-  // state POST until the case releases it (then forwards it, or drops it as a lost answer).
+  // A proxy between the command and the local hub: `mint` rewrites the provisioning key's answer, and `statePosts`
+  // counts the state POSTs that reached it.
   let hub: LocalHub;
   let proxy: Server;
   let proxyUrl: string;
   let mint: ((key: ProvisioningKeyRecord) => ProvisioningKeyRecord) | null = null;
-  let state: 'pass' | { held: () => void; release: Promise<'forward' | 'lose'> } = 'pass';
+  let statePosts = 0;
   const keys = join(scratch, 'misbehaving', 'keys.json');
   const via = (...extra: string[]) => ['--hub', proxyUrl, '--user', ADMIN, '--keys', keys, ...extra];
   const head = async () => ((await hub.fetchAs(ADMIN, '/api/org/state').then((r) => r.json())) as { head: SignedOrgState }).head;
-  const anchor = () => JSON.parse(readFileSync(anchorFile(keys), 'utf8')) as { version: number; pending?: SignedOrgState };
+  const anchor = () => JSON.parse(readFileSync(anchorFile(keys), 'utf8')) as { version: number; pending?: SignedOrgState; unsent?: true };
   const create = (prefix: string, ...extra: string[]) => ['delegation', 'create', '--label', 'devcloud', '--prefix', prefix, '--code-to-stdout', ...extra, ...via('--yes')];
 
   beforeAll(async () => {
@@ -524,12 +542,7 @@ describe('delegation create against a hub that misbehaves', () => {
       req.on('data', (chunk: Buffer) => chunks.push(chunk));
       req.on('end', async () => {
         const body = Buffer.concat(chunks);
-        const posting = req.method === 'POST' && req.url === '/api/org/state';
-        if (posting && state !== 'pass') {
-          const held = state;
-          held.held();
-          if ((await held.release) === 'lose') return void res.destroy();
-        }
+        if (req.method === 'POST' && req.url === '/api/org/state') statePosts += 1;
         const headers: Record<string, string> = {};
         for (const name of ['x-desk-standin-user', 'content-type']) if (typeof req.headers[name] === 'string') headers[name] = req.headers[name] as string;
         const upstream = await fetch(`${hub.url}${req.url}`, { method: req.method, headers, body: body.length ? body : undefined });
@@ -572,38 +585,73 @@ describe('delegation create against a hub that misbehaves', () => {
     mint = null;
     const f = fake();
     expect(await runAdmin(create('dc-', '--ttl', '3600', '--max-uses', '1'), f.io)).toBe(0);
+    expect(await runAdmin(['show', ...via()], fake().io)).toBe(0);
     const [delegation] = (await head()).state.delegations;
     expect(delegation).toMatchObject({ prefix: 'dc-', maxUses: 1 });
     expect(Math.abs(Date.parse(delegation.expires) - (Date.now() + 3600_000))).toBeLessThan(60_000);
   });
 
-  it('writes the code once the proposal is durable, before its POST is answered, so a run killed there loses no key', async () => {
-    let held!: () => void;
-    const posted = new Promise<void>((resolve) => (held = resolve));
-    let release!: (how: 'forward' | 'lose') => void;
-    state = { held, release: new Promise((resolve) => (release = resolve)) };
-    const f = fake();
+  it('posts nothing: a run killed while it writes the code leaves the hub as it was and the proposal pending, never sent', async () => {
+    const version = (await head()).state.version;
+    const posts = statePosts;
+    let written!: (code: string) => void;
+    const writing = new Promise<string>((resolve) => (written = resolve));
+    let finish!: () => void;
+    const f = fake([], { secretOut: (text) => (written(text), new Promise<void>((resolve) => (finish = resolve))) });
     const running = runAdmin(create('lg-'), f.io);
-    await posted;
-    // The POST is at the hub's door, unanswered: the code is already on stdout, and the anchor holds its delegation.
-    expect(f.stdout).toHaveLength(1);
-    const code = decodeProvisioningCodeV2(f.stdout[0].trim());
-    expect(anchor().pending?.state.delegations.map((d) => d.id)).toContain(code.delegation.id);
-    release('lose');
-    state = 'pass';
-    expect(await running).toBe(1);
-    expect(f.stdout).toHaveLength(1);
-    expect(f.err.join('\n')).toMatch(new RegExp(`The code went to stdout when the proposal became durable: delegation ${code.delegation.id} is in effect once the hub holds version \\d+, which the next admin run settles; if it is abandoned instead, provisioning revoke ${code.delegation.id} and delete the stored code`));
+    // The code is in the pipe and the pipe still open, which is where a Ctrl-C finds a stalled store: what the run
+    // has done by now is what a kill leaves.
+    const code = decodeProvisioningCodeV2((await writing).trim());
+    secrets.add(code.token);
+    secrets.add(code.delegation.privateJwk.d!);
+    expect(statePosts).toBe(posts);
+    expect((await head()).state.version).toBe(version);
+    expect(anchor()).toMatchObject({ unsent: true, pending: { state: { version: version + 1 } } });
+    expect(anchor().pending!.state.delegations.map((d) => d.id)).toContain(code.delegation.id);
+    finish();
+    expect(await running).toBe(0);
+    expect(statePosts).toBe(posts);
+    expect((await head()).state.version).toBe(version);
   });
 
-  it("abandoned, such a proposal's minted key is named for revoking, and provisioning revoke takes it", async () => {
-    const id = anchor().pending!.state.delegations.find((d) => d.prefix === 'lg-')!.id;
+  it('abandons such a proposal with no fork to fear, since nothing was posted, even once another successor took its version', async () => {
+    const proposal = anchor().pending!;
+    const id = proposal.state.delegations.find((d) => d.prefix === 'lg-')!.id;
+    const n = proposal.state.version;
+    // Another successor of the same parent reaches the hub first: the unsent proposal is stale, not a fork.
+    const admin = await readAdminKeys(keys);
+    const theirs = await signOrgState(await successor((await head()).state, (s) => void s.projects.push({ id: 'p-other', name: 'other' })), [admin.stepUp]);
+    expect((await hub.fetchAs(ADMIN, '/api/org/state', { body: theirs })).status).toBe(201);
+    const stale = fake();
+    expect(await runAdmin(['show', ...via()], stale.io)).toBe(1);
+    expect(stale.err.join('\n')).toMatch(new RegExp(`the hub holds version ${n} .* where this device's unsent version ${n} .* was signed \\(pending in .*\\): nothing was posted, and no fork exists; admin abandon-pending drops it`));
+    expect(stale.err.join('\n')).not.toMatch(/Two successors/);
+
+    const hash = await stateHash(proposal.state);
     const f = fake(['y']);
     expect(await runAdmin(['abandon-pending', ...via()], f.io)).toBe(0);
-    expect(f.out).toContain(`the abandoned proposal held delegation ${id} (prefix lg-), never in effect: its provisioning key is minted at the hub and its code may be in your secret store; run provisioning revoke ${id} and delete the stored code`);
+    expect(f.out).toContain(`pending version ${n} ${hash} was never sent: nothing was posted`);
+    expect(f.term.join('')).toContain(`abandon version ${n} ${hash}? It was never posted, so nothing can show it as a fork [y/N]`);
+    expect(f.term.join('')).not.toMatch(/A later verb may sign/);
+    expect(f.out).toContain(`the abandoned proposal held delegation ${id} (prefix lg-), never posted: its provisioning key is minted at the hub; run provisioning revoke ${id}, and delete its code if it was stored`);
+    expect(anchor().pending).toBeUndefined();
+    expect(anchor()).not.toHaveProperty('unsent');
     const revoked = fake();
     expect(await runAdmin(['provisioning', 'revoke', id, ...via('--yes')], revoked.io)).toBe(0);
     expect(revoked.out.at(-1)).toBe(`revoked: provisioning key ${id}`);
+  });
+
+  it('drops its proposal when the code cannot be written (the pipe closed), and names the minted key for revoking', async () => {
+    const version = (await head()).state.version;
+    const posts = statePosts;
+    const f = fake([], { secretOut: async () => Promise.reject(Object.assign(new Error('write EPIPE'), { code: 'EPIPE' })) });
+    expect(await runAdmin(create('cl-'), f.io)).toBe(1);
+    const id = /provisioning revoke ([0-9a-f]{32})/.exec(f.err.join('\n'))?.[1];
+    expect(f.err.join('\n')).toMatch(new RegExp(`the code could not be written to stdout \\(write EPIPE\\): the proposal was dropped and nothing was posted; run provisioning revoke ${id}`));
+    expect(statePosts).toBe(posts);
+    expect((await head()).state.version).toBe(version);
+    expect(anchor().pending).toBeUndefined();
+    expect(await runAdmin(['provisioning', 'revoke', id!, ...via('--yes')], fake().io)).toBe(0);
   });
 });
 
