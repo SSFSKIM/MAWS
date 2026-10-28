@@ -102,9 +102,23 @@ export class Index {
     derive?: typeof deriveOrg;
   }): Promise<void> {
     if (this.db.readOnly) return;
+    // Every derivation, the start's queue, a new project's and a retry's alike, takes one of ORG_CONCURRENCY slots.
+    let active = 0;
+    const waiting: (() => void)[] = [];
+    const inSlot = async <T>(work: () => Promise<T>): Promise<T> => {
+      if (active >= ORG_CONCURRENCY) await new Promise<void>((resolve) => waiting.push(resolve));
+      else active += 1;
+      try {
+        return await work();
+      } finally {
+        const next = waiting.shift();
+        if (next) next(); // the slot passes straight to the next in line
+        else active -= 1;
+      }
+    };
     const one = async (row: OrgRow, attempt = 0): Promise<void> => {
       try {
-        const org = await derive({ directory: row.directory, machine, projectId: row.id, name: row.name }, enrollment());
+        const org = await inSlot(async () => (this.closed ? null : derive({ directory: row.directory, machine, projectId: row.id, name: row.name }, enrollment())));
         if (this.closed) return;
         if (org !== null) this.projects.setOrg(row.id, org);
         else if (attempt < ORG_RETRY_MS.length) {
@@ -118,10 +132,7 @@ export class Index {
     };
     this.projects.onCreated((row) => void one(row));
     const queue = this.projects.orgRows();
-    const worker = async () => {
-      for (let row = queue.shift(); row !== undefined && !this.closed; row = queue.shift()) await one(row);
-    };
-    await Promise.all(Array.from({ length: ORG_CONCURRENCY }, worker));
+    await Promise.all(queue.map((row) => one(row))); // a closed index asks git nothing more (`inSlot`'s work)
   }
 
   close(): void {

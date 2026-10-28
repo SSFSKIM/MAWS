@@ -224,6 +224,39 @@ describe("the index's org projects", () => {
     }
   });
 
+  // The branch review of the retry: the retries go through the same four derivations at a time as the start's queue, so
+  // many projects unanswered at start do not all ask git again at once.
+  it('asks again through the start’s limit: no more than four derivations in flight, retries included', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      for (let k = 0; k < 20; k++) {
+        const path = join(tree.path, `many-${k}`);
+        mkdirSync(path);
+        index.projects.add(path);
+      }
+      let inFlight = 0;
+      let most = 0;
+      let calls = 0;
+      const derive = vi.fn(async () => {
+        calls += 1;
+        inFlight += 1;
+        most = Math.max(most, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 100)); // git's answer takes a while
+        inFlight -= 1;
+        return null;
+      });
+      const refreshed = index.refreshOrgProjects({ machine: MACHINE, enrollment: () => null, derive });
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      await refreshed;
+      expect(calls, 'every project asked four times').toBe(80);
+      expect(most, 'at most four in flight, retries included').toBeLessThanOrEqual(4);
+    } finally {
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it('derives a project created after the refresh started, and keeps a folder project’s name with its rename', async () => {
     await index.refreshOrgProjects({ machine: MACHINE, enrollment: () => null });
     const path = join(tree.path, 'notes');
