@@ -117,9 +117,16 @@ function bind(values: Record<string, Value>): Record<string, SQLInputValue> {
 const SQLITE_CORRUPT = 11;
 const SQLITE_NOTADB = 26;
 
-function isBrokenFile(error: unknown): boolean {
+export function isBrokenFile(error: unknown): boolean {
   const code = (error as { errcode?: unknown }).errcode;
   return typeof code === 'number' && [SQLITE_CORRUPT, SQLITE_NOTADB].includes(code & 0xff);
+}
+
+// Moves a database file SQLite cannot use aside as `<path>.broken-<epoch>`, with its -wal and -shm; answers that name.
+export function moveAside(path: string): string {
+  const aside = `${path}.broken-${Date.now()}`;
+  for (const suffix of ['', '-wal', '-shm']) if (existsSync(path + suffix)) renameSync(path + suffix, aside + suffix);
+  return aside;
 }
 
 // Opens the index file and brings it to the newest schema (residue *Index schema and location*): a file SQLite reports
@@ -127,7 +134,8 @@ function isBrokenFile(error: unknown): boolean {
 // created, never deleted; any other failure at open propagates. A file whose `user_version` is newer than the app knows
 // is opened read-only, with one logged error, and marked unavailable: its schema may not be the one this app reads, so
 // every statement fails with `index unavailable: <reason>` rather than reading or writing it. Before the pending
-// migrations, in their transaction, each repair the file lacks is applied and logged (`Repair`).
+// migrations, in their transaction, each repair the file lacks is applied and logged (`Repair`); a pending entry's
+// `before` step runs just before its SQL, in the same transaction (P5 O3-A).
 export function openDb(path: string, migrations: readonly Migration[], repairs: readonly Repair[]): Db {
   const known = migrations.length;
   let db: DatabaseSync;
@@ -136,8 +144,7 @@ export function openDb(path: string, migrations: readonly Migration[], repairs: 
     ({ db, version } = probe(path));
   } catch (error) {
     if (!isBrokenFile(error)) throw error;
-    const aside = `${path}.broken-${Date.now()}`;
-    for (const suffix of ['', '-wal', '-shm']) if (existsSync(path + suffix)) renameSync(path + suffix, aside + suffix);
+    const aside = moveAside(path);
     console.error(`[index] ${path} is not a usable database (${error instanceof Error ? error.message : String(error)}); moved aside as ${aside}`);
     ({ db, version } = probe(path));
   }
@@ -170,7 +177,10 @@ export function openDb(path: string, migrations: readonly Migration[], repairs: 
     db.exec('BEGIN IMMEDIATE');
     try {
       for (const repair of missing) db.exec(`ALTER TABLE ${repair.table} ADD COLUMN ${repair.column} ${repair.definition}`);
-      for (const migration of pending) db.exec(migration.sql);
+      for (const migration of pending) {
+        migration.before?.(db, path);
+        db.exec(migration.sql);
+      }
       db.exec(`PRAGMA user_version = ${known}`);
       db.exec('COMMIT');
     } catch (error) {

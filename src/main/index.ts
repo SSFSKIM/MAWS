@@ -135,6 +135,10 @@ import { CLOSE_GRACE_MS } from '@shared/host/socket-port';
 // E4a start
 import { startBrowser, type Browser } from './browser';
 // E4a end
+// P5 O3-A start: the browser's own database, out of the index
+import { BROWSER_DATA_PATH } from '@shared/browser/data-schema';
+import { BrowserData } from './browser/data';
+// P5 O3-A end
 // E4b start
 import { ImportedProfiles, startBrowserImport, sweepBrowserImports } from './browser/import';
 // E4b end
@@ -675,12 +679,17 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
   if (stopWidgetBackend) shutdown.add('widget backend', stopWidgetBackend);
   // C11 end
 
+  // P5 O3-A start (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md §4): the browser's history, bookmarks and agent
+  // activity, in its own database since they left the index at migration 14; opened after the index, so it reads the
+  // index at 14 and promotes what migration 14 staged, and before the sweep, which removes rows from it
+  const browserData = new BrowserData({ file: join(app.getPath('userData'), ...BROWSER_DATA_PATH), index: join(app.getPath('userData'), 'index.sqlite') });
+  // P5 O3-A end
   // E4b start: the Chrome import's records and its boot sweep, before E4a's browser opens any partition (E4b execution
   // document, Decision Log 24, 27, 34): profiles.json's one owner in memory, which E4a reads through `profiles` below, and
   // the sweep of what a crash, a quit mid-import or a removal left (staging, unlisted partition folders, storage
   // directories and history rows).
   const browserProfiles = ImportedProfiles.open(app.getPath('userData'));
-  sweepBrowserImports({ userData: app.getPath('userData'), profiles: browserProfiles, history: index.browserHistory, bookmarks: index.browserBookmarks /* cua #90 */ });
+  sweepBrowserImports({ userData: app.getPath('userData'), profiles: browserProfiles, history: browserData.history, bookmarks: browserData.bookmarks /* cua #90 */ });
   // E4b end
 
   // E4a start: the in-app browser's main side (E4a execution document, Design §1 to §3, §9): the tab store over
@@ -693,6 +702,7 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
     userData: app.getPath('userData'),
     settings: () => settings.state().settings.browser,
     index,
+    data: browserData, // P5 O3-A
     register: registerMainHandler,
     emit,
     env: process.env,
@@ -710,7 +720,7 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
   const browserImport = startBrowserImport({
     userData: app.getPath('userData'),
     settings: () => settings.state().settings.browser,
-    index,
+    data: browserData, // P5 O3-A
     register: registerMainHandler,
     emit,
     env: process.env,
@@ -719,6 +729,8 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
   });
   shutdown.add('browser import', browserImport.stop);
   // E4b end
+  // P5 O3-A: once the browser and its import have stopped; the agent activity's last flush runs as it closes
+  shutdown.add('browser data', () => browserData.close());
 
   // The hosts belong to the app, not to a window or a page (§4.1): they start here, before any window exists, and
   // `start()` is idempotent, so opening a window again forks nothing and a reload never reaches them.

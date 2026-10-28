@@ -3,7 +3,7 @@
 // router's `isAppSender`), every input past its strict schema. A failing index answers an empty tree: the bar is a
 // convenience, and the page under it still works.
 import { emptyBookmarkTree } from '@shared/browser/bookmarks';
-import type { BrowserBookmarksStore } from '../../index/browser-bookmarks';
+import type { BrowserBookmarksStore } from '../data/bookmarks';
 import type { registerMainHandler } from '../../ipc/router';
 import { errorCode, importLog } from '../import/log';
 import type { BookmarkSync } from './sync';

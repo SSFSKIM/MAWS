@@ -1,10 +1,10 @@
-import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { BROWSER_ACTIVITIES_KEPT, type BrowserAgentActivity } from '@shared/browser/activity';
-import { summary, tempDir } from '../../../../test/support/index-fixture';
-import { Index } from '../../index/index';
+import { browserDataFile, browserDataIn } from '../../../../test/support/browser-data';
+import { tempDir } from '../../../../test/support/index-fixture';
+import type { BrowserData } from '../data';
 import { ACTIVITY_MAX_PER_SECOND, ActivityFeed, agentCapture, clickLabel, commandActivity, navigatedUrl, TYPED_COALESCE_MS, within } from './activity';
 
 const A = 'A' as AppSessionId;
@@ -147,31 +147,31 @@ describe('the windows\' feed', () => {
     expect(emitted).toHaveLength(ACTIVITY_MAX_PER_SECOND + 2);
   });
 
-  // cua board #93: the kept activity survives an app restart through the index, written on the turn after it was told
+  // cua board #93: the kept activity survives an app restart through the store (the browser's own database since P5
+  // O3-A), written on the turn after it was told
   const written = async () => {
     await drain();
     await new Promise((resolve) => setImmediate(resolve));
   };
-  const withIndex = async (body: (index: Index, path: string, reopen: () => Index) => Promise<void>) => {
+  const B = 'bbbbbbbb-0000-4000-8000-00000000000b' as AppSessionId; // a session the spine has a record of
+  const withData = async (body: (data: BrowserData, path: string, reopen: () => BrowserData) => Promise<void>) => {
     const dir = tempDir();
-    const path = join(dir.path, 'index.sqlite');
-    let index = new Index(path);
+    let data = browserDataIn(dir.path, [B]);
     try {
-      await body(index, path, () => {
-        index.close();
-        return (index = new Index(path));
+      await body(data, browserDataFile(dir.path), () => {
+        data.close();
+        return (data = browserDataIn(dir.path, [B]));
       });
     } finally {
-      index.close();
+      data.close();
       dir.dispose();
     }
   };
 
   it('loads a session\'s activity from the store on first use, then appends after it and writes each new one through', async () => {
-    await withIndex(async (index, _path, reopen) => {
-      const B = index.sessions.upsertFromSummary(summary()).record.appId;
+    await withData(async (data, _path, reopen) => {
       let now = 1_000_000;
-      const first = new ActivityFeed({ emit: () => {}, now: () => now, store: index.browserActivity });
+      const first = new ActivityFeed({ emit: () => {}, now: () => now, store: data.activity });
       for (let i = 0; i < BROWSER_ACTIVITIES_KEPT + 2; i++) {
         first.tell(B, `b_${String(i % 7).padStart(12, '0')}`, { kind: 'key', key: `F${i}` });
         now += 100; // under the rate bound
@@ -179,12 +179,12 @@ describe('the windows\' feed', () => {
       }
       const before = first.list(B);
 
-      // the app restarts, in a quit's order: the index closes before the browser stops; a new feed over the reopened
-      // index answers the same list, and what is told next joins it
-      index = reopen();
+      // the app restarts, in a quit's order: the browser stops, then its data closes; a new feed over the reopened store
+      // answers the same list, and what is told next joins it
       first.dispose();
+      data = reopen();
       const emitted: BrowserAgentActivity[] = [];
-      const second = new ActivityFeed({ emit: (_name, payload) => void emitted.push(payload as BrowserAgentActivity), now: () => now, store: index.browserActivity });
+      const second = new ActivityFeed({ emit: (_name, payload) => void emitted.push(payload as BrowserAgentActivity), now: () => now, store: data.activity });
       expect(second.list(B)).toEqual(before);
       expect(before[0]!.activity).toEqual({ kind: 'key', key: 'F2' });
       second.tell(B, T, { kind: 'screenshot' });
@@ -194,23 +194,23 @@ describe('the windows\' feed', () => {
       expect(after).toHaveLength(BROWSER_ACTIVITIES_KEPT);
       expect(after.slice(0, -1)).toEqual(before.slice(1));
       expect(after.at(-1)).toEqual(emitted[0]);
-      expect(index.browserActivity.list(B)).toEqual(after); // written, capped alike
+      expect(data.activity.list(B)).toEqual(after); // written, capped alike
       second.dispose();
     });
   });
 
-  it('writes a row still queued when the index closes before the feed is disposed, as a quit orders them', async () => {
-    await withIndex(async (index, _path, reopen) => {
-      const B = index.sessions.upsertFromSummary(summary()).record.appId;
+  it.each(['the feed is disposed, then the store closes (a quit\'s order)', 'the store closes before the feed is disposed'])('writes a row still queued when %s', async (order) => {
+    await withData(async (data, _path, reopen) => {
       const emitted: unknown[] = [];
-      const activity = new ActivityFeed({ emit: (_name, payload) => void emitted.push(payload), store: index.browserActivity });
+      const activity = new ActivityFeed({ emit: (_name, payload) => void emitted.push(payload), store: data.activity });
       activity.tell(B, T, { kind: 'screenshot' });
       for (let i = 0; i < 10; i++) await Promise.resolve(); // told live; its write still waits for the next turn
       expect(emitted).toHaveLength(1);
-      index = reopen(); // the index's will-quit step, then the browser's
+      if (order.startsWith('the feed')) activity.dispose();
+      data = reopen();
       activity.dispose();
       await written();
-      expect(index.browserActivity.list(B).map((a) => a.activity)).toEqual([{ kind: 'screenshot' }]);
+      expect(data.activity.list(B).map((a) => a.activity)).toEqual([{ kind: 'screenshot' }]);
     });
   });
 
@@ -229,11 +229,10 @@ describe('the windows\' feed', () => {
   });
 
   it('never waits for a write lock another connection holds: the live row goes out, the write fails at once and is logged', async () => {
-    await withIndex(async (index, path) => {
-      const B = index.sessions.upsertFromSummary(summary()).record.appId;
+    await withData(async (data, path) => {
       const log = vi.fn();
       const emitted: unknown[] = [];
-      const activity = new ActivityFeed({ emit: (_name, payload) => void emitted.push(payload), store: index.browserActivity, log });
+      const activity = new ActivityFeed({ emit: (_name, payload) => void emitted.push(payload), store: data.activity, log });
       activity.list(B); // loaded before the lock, as a session's first list is
       const other = new DatabaseSync(path);
       other.exec('BEGIN IMMEDIATE');
@@ -242,7 +241,7 @@ describe('the windows\' feed', () => {
         activity.tell(B, T, { kind: 'screenshot' });
         await written();
         await new Promise((resolve) => setTimeout(resolve, 0)); // a zero-delay timer: what the event loop waited for
-        expect(performance.now() - started).toBeLessThan(500); // the index's own connection would wait 2 s
+        expect(performance.now() - started).toBeLessThan(500); // a connection with a busy timeout would wait it out
         expect(emitted).toHaveLength(1);
         expect(log).toHaveBeenCalledTimes(1);
         expect(log.mock.calls[0]![0]).toMatch(/locked|busy/i);
@@ -252,7 +251,7 @@ describe('the windows\' feed', () => {
       }
       activity.tell(B, T, { kind: 'key', key: 'Enter' });
       await written();
-      expect(index.browserActivity.list(B).map((a) => a.activity)).toEqual([{ kind: 'key', key: 'Enter' }]); // the busy row was dropped, the next one written
+      expect(data.activity.list(B).map((a) => a.activity)).toEqual([{ kind: 'key', key: 'Enter' }]); // the busy row was dropped, the next one written
       activity.dispose();
     });
   });

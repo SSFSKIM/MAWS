@@ -22,7 +22,7 @@
 import type { Certificate, WebContents } from 'electron';
 import { isExtensionPage, type BrowserTab } from '@shared/browser/tab';
 import { validateBrowserUrl } from '@shared/browser/url';
-import type { BrowserHistoryStore } from '../index/browser-history';
+import type { BrowserHistoryStore } from './data/history';
 import type { Favicons } from './favicon';
 import type { BrowserSeam } from './seam';
 import type { BrowserEmit, TabEntry, TabStore } from './tabs';

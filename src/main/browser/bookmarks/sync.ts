@@ -11,7 +11,7 @@
 import type { Session } from 'electron';
 import type { BookmarkSyncError } from '@shared/browser/bookmarks';
 import type { ImportedBookmarks } from '@shared/browser/profiles';
-import type { BrowserBookmarksStore } from '../../index/browser-bookmarks';
+import type { BrowserBookmarksStore } from '../data/bookmarks';
 import { readChromeBookmarks, type BookmarksRead } from '../import/chrome/bookmarks';
 import { errorCode, importLog } from '../import/log';
 import type { ImportedProfiles } from '../import/profiles';

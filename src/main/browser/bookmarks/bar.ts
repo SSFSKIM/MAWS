@@ -11,7 +11,7 @@
 // click on a large folder cannot open a hundred tabs; under the e2e MAWS_E2E_OPEN_ALL_ANSWER answers it.
 import { dialog, type BrowserWindow, type MessageBoxOptions, type MessageBoxReturnValue } from 'electron';
 import { BOOKMARKS_OPEN_ALL_ASK_ABOVE, type BookmarkFolder, type BookmarkTree, type BookmarkUrl } from '@shared/browser/bookmarks';
-import type { BrowserBookmarksStore } from '../../index/browser-bookmarks';
+import type { BrowserBookmarksStore } from '../data/bookmarks';
 import type { Navigator } from '../navigation';
 import type { TabEntry, TabStore } from '../tabs';
 import { bookmarkMenu, findBookmark, type BookmarkMenuRequest, type MenuPresenter } from './menu';

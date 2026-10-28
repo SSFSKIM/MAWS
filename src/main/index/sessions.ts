@@ -205,6 +205,12 @@ export class SessionStore {
     return new Map(rows.map((row) => [row.app_id as AppSessionId, JSON.parse(row.summary) as TranscriptSummary]));
   }
 
+  // P5 O3-A: every record's app id, archived included: the browser's snapshot of the sessions the spine knows, which its
+  // activity rows are reconciled against (src/main/browser/data/).
+  appIds(): AppSessionId[] {
+    return this.db.all<{ app_id: AppSessionId }>('SELECT app_id FROM sessions').map((row) => row.app_id);
+  }
+
   summaryOf(appId: AppSessionId): TranscriptSummary | null {
     const row = this.db.get<{ summary: string | null }>('SELECT summary FROM sessions WHERE app_id = ?', appId);
     return row?.summary ? (JSON.parse(row.summary) as TranscriptSummary) : null;
