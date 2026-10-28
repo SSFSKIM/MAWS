@@ -1542,6 +1542,15 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   5. Discovery 1 is the desk track's residue (O10): an endpoint's own hub sync reads `?since=<head>`, so it can't take that same recovery. M3's recovery-first delivery covers it until then.
   Date/Author: 2026-10-28, O8's executor.
 
+- Decision: The whole-branch review's fixes (reviewer-high round 1 on 559ddfc0c: 3 P1, 2 P2; fixed 559ddfc0c..ba781f87f).
+  1. The hub post checks the held line again synchronously after its exposure write, as deliveries do, and posts nothing off the line.
+  2. The signer carries its own lifecycle epoch, which sign-out and close advance. It is checked before Touch ID, before the slot's write and before each post, and a fenced sign reads `not-root`. The session's generation was not used: a cancelled rekey advances it too. A slot published before a sign-out stays, and settles at the next sign-in.
+  3. The closure is shown before Touch ID. The status carries the superseded offer's lines, warnings and withheld names with a digest of them. The Org section shows them in a sheet, and `org.revokeSuperseded {offer}` names the digest it confirmed. A mismatch reads `stale`, whether at the call or when the offer is composed again on the hub's head (formerly `invalid`). Touch ID's own line counts the warnings shown in Settings › Org, since macOS's prompt carries one reason string.
+  4. A hub refusal of any post, settlement's re-posts included, is kept and shown as `refused`, so Discard is offered. No answer, or no hub, only waits.
+  5. The weekly ask writes nothing at focus. A gate run just before Touch ID checks focus, writes `lastAsked`, checks focus again and takes the date back if focus was lost, so an ask that never reached Touch ID spends no day.
+  Residue for O7: RL4 step-up actions (`createStepUp`) show Touch ID only the action and the machine, and drop the prompt's text the same way.
+  Date/Author: 2026-10-28, O8's executor.
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
