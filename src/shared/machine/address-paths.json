@@ -31,6 +31,7 @@
 "commands.engine.budget.output":[".blocked[].appSessionId AppSessionId",".lastRelease.appSessionId AppSessionId",".releasing AppSessionId"],
 "commands.engine.observedFacts.input":[".appSessionId AppSessionId"],
 "commands.engine.observedFacts.output":[".appSessionId AppSessionId"],
+"commands.engine.pendingItems.output":[".sessions[].appSessionId AppSessionId"],
 "commands.engine.policy.set.output":[".blocked[].appSessionId AppSessionId",".lastRelease.appSessionId AppSessionId",".releasing AppSessionId"],
 "commands.engine.sessions.output":["[].appSessionId AppSessionId"],
 "commands.files.list.input":[".appSessionId AppSessionId"],

@@ -366,9 +366,9 @@ describe('engine host X2 surface', () => {
   });
 
   // P5 O10 M8: the broker's items as a read, the same list `session.brokerItems` last published
-  it('session.pendingItems answers the session’s pending items: the permission while it waits, none once it is answered', async () => {
+  it('session.pendingItems answers the session’s pending items, and engine.pendingItems every session’s count waiting on an answer: the permission while it waits, none once it is answered', async () => {
     const { O10_DEADLINE_SHAPES } = await import('./ipc');
-    expect(O10_DEADLINE_SHAPES).toEqual({ 'session.pendingItems': 'immediate' });
+    expect(O10_DEADLINE_SHAPES).toEqual({ 'session.pendingItems': 'immediate', 'engine.pendingItems': 'immediate' });
     const host = engineHost();
     expect(host.handlers.has('session.pendingItems')).toBe(true);
     const id = 'app-items';
@@ -381,11 +381,14 @@ describe('engine host X2 surface', () => {
     const read = await host.call('session.pendingItems', { appSessionId: id as AppSessionId });
     expect(read.items).toMatchObject([{ kind: 'permission', state: 'pending' }]);
     expect(read).toEqual({ items: published.items });
+    // P5 O10: every row's count at once, the endpoint's restatement of lane B's counts
+    expect(await host.call('engine.pendingItems', undefined)).toEqual({ sessions: [{ appSessionId: id, waiting: 1 }] });
     const requested = host.events(id).find((e) => e.kind === 'permission.requested') as Extract<SessionEvent, { kind: 'permission.requested' }>;
     await host.call('session.answer', { appSessionId: id as AppSessionId, requestId: requested.requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } });
     await until(() => host.events(id).some((e) => e.kind === 'turn.ended'), 'turn.ended');
     expect((await host.call('session.pendingItems', { appSessionId: id as AppSessionId })).items.filter((i) => i.state === 'pending')).toEqual([]);
     await expect(host.call('session.pendingItems', { appSessionId: 'app-none' as AppSessionId })).rejects.toThrow(/unknown session/);
+    expect(await host.call('engine.pendingItems', undefined)).toEqual({ sessions: [] });
     await host.call('session.stop', { appSessionId: id as AppSessionId, reason: 'stop' });
   });
 

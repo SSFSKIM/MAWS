@@ -104,11 +104,12 @@ const ListingsSchema = z.record(
 /**
  * The sessions whose pending count the hub was last told above 0 (notify.ts), with their project: after a restart, a
  * pending set that leaves one out is told `settled 0`, which the hub would otherwise never hear. `owed`: the session was
- * withdrawn while no connection was up, and its `settled 0` goes at the next welcome.
+ * withdrawn while no connection was up, and its `settled 0` goes at the next welcome. `lane: 'B'`: the count is the
+ * engine host's (its broker items), settled by the engine host's set rather than a project's from sminos.
  */
 const NotifiedSchema = z.record(
   z.string().min(1),
-  z.strictObject({ project: z.string().min(1), pending: z.number().int().positive(), owed: z.literal(true).optional() }),
+  z.strictObject({ project: z.string().min(1), pending: z.number().int().positive(), owed: z.literal(true).optional(), lane: z.literal('B').optional() }),
 );
 
 /** A web-cards passkey's last signature counter, by credential id (M5): an assertion's must rise where it keeps one. */
