@@ -81,7 +81,7 @@ async function addProject(page: Page, directory: string): Promise<Project> {
       .poll(async () => (project = (await invoke<{ projects: Project[] }>(page, 'session.projects.list', undefined)).projects.find((p) => p.id === added.id))?.org?.key, { timeout: 30_000, message: `${directory} has its org project` })
       .toBeTruthy();
   } catch (error) {
-    throw new Error(`${(error as Error).message}\nthe project: ${JSON.stringify(project ?? added)}\nmain said:\n${(mainLines.get(page) ?? []).join('\n')}`);
+    throw new Error(`${(error as Error).message}\nthe project: ${JSON.stringify(project ?? added)}\nmain said:\n${(mainLines.get(page) ?? []).join('\n')}`, { cause: error });
   }
   return project!;
 }
