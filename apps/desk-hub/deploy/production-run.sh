@@ -53,8 +53,8 @@ mkdir -p $O || exit 2
 stamp() { date -u +%Y%m%dT%H%M%SZ; }
 # Line by line, flushed: a line the owner must read before a /dev/tty prompt (pair's fingerprint) is never held back.
 filter() { perl -ne 'BEGIN { $| = 1 } print if /^wrangler target / || !/token|secret|bearer|eyJ/i'; }
-# Production's X-Desk-Build, credential-free.
-build() { curl -q -sI --max-time 30 -X POST $URL/machine/enroll | /usr/bin/grep -i '^x-desk-build:' | tr -d '\r'; }
+# Production's X-Desk-Build, credential-free, within $1 seconds (default 30).
+build() { curl -q -sI --max-time ${1:-30} -X POST $URL/machine/enroll | /usr/bin/grep -i '^x-desk-build:' | tr -d '\r'; }
 deployment() { pnpm -s -C $W --filter desk-hub deployment "$@" --config deploy/config.json; }
 step=$1; (( $# )) && shift
 case $step in
@@ -68,6 +68,12 @@ case $step in
     clean() { [[ -z "$(git -C $1 status --porcelain --untracked-files=no)" ]] || { print -r -- "$1 has uncommitted changes: stop. Nothing was run."; exit 3; }; }
     if [[ -e $P ]]; then
       [[ $(git -C $P rev-parse --show-toplevel 2>/dev/null) == $P ]] || { print -r -- "$P exists and is not the top of a git worktree: stop"; exit 2; }
+      # production-deploy.sh's lock on this checkout: no update while a deploy of it runs, and no deploy during this one.
+      LOCK=$(git -C $P rev-parse --absolute-git-dir)/desk-production.lock
+      mkdir $LOCK 2>/dev/null || { print -r -- "$P is held by another production run ($(cat $LOCK/holder 2>/dev/null)): stop. If none is running, remove $LOCK. Nothing was run."; LOCK=; exit 6; }
+      trap '[[ -n $LOCK ]] && rm -rf $LOCK' EXIT
+      trap 'exit 130' INT TERM
+      print -r -- "production-run.sh checkout, pid $$ on $(hostname), since $(date -u +%FT%TZ)" > $LOCK/holder
       clean $P
       git -C $P fetch -q origin master && git -C $P checkout -q --detach origin/master || { print -r -- "could not update $P to origin/master: stop"; exit 2; }
     else
@@ -80,15 +86,20 @@ case $step in
     (( ${pipestatus[1]} == 0 )) || { print -r -- "the install failed in $P: stop"; exit 5; }
     print -r -- "next, the owner: zsh $P/apps/desk-hub/deploy/production-deploy.sh --checkout $P --confirm $head" ;;
   build)
-    print -r -- "production: $(build)" ;;
+    h=$(build)
+    [[ $h =~ '^[Xx]-[Dd]esk-[Bb]uild: hub@[0-9a-f]{8}' ]] || { print -r -- "no valid X-Desk-Build from $URL (read: '${h}'): stop"; exit 3; }
+    print -r -- "production: $h" ;;
   wait)
     sha=$1
     [[ $sha =~ '^[0-9a-f]{8,40}$' ]] || { print -r -- "wait needs the commit, as 'git rev-parse --short=8 HEAD' prints it: stop"; exit 2; }
-    for i in {1..12}; do
-      b=$(build)
+    # 2 minutes of elapsed time: each read and each pause is cut to what is left of them.
+    deadline=$(( $(date +%s) + 120 ))
+    while left=$(( deadline - $(date +%s) )); (( left > 0 )); do
+      b=$(build $(( left < 30 ? left : 30 )))
       print -r -- "$(date -u +%H:%M:%SZ) $b"
       [[ $b =~ "hub@$sha( |\$)" ]] && { print -r -- "production carries hub@$sha"; exit 0; }
-      (( i < 12 )) && sleep 10
+      left=$(( deadline - $(date +%s) ))
+      (( left > 0 )) && sleep $(( left < 10 ? left : 10 ))
     done
     print -r -- "production never carried hub@$sha within 2 minutes"; exit 1 ;;
   access-sync)

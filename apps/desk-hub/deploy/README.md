@@ -387,18 +387,25 @@ hands it to a command, and never printed or passed as an argument; output goes t
   not master's (a hotfix), still named by `--confirm`. It builds desk-web with `VITE_DESK_WEB_BUILD=<label>` exported
   (the build the phone's channel handshake names), then runs `deployment deploy --config deploy/config.json --assets
   <checkout>/apps/desk-web/dist --web <label>` with the two API tokens on its stdin; `<label>` is `master.<sha8>`, or
-  `head.<sha8>` for a commit that is not master's. It prints production's `X-Desk-Build` before (credential-free),
-  fails if no wrangler call or any but `desk-hub`'s ran, then reads production's `X-Desk-Build` every 10 s for 2 minutes
-  until it carries `hub@<sha8>` (not `+dirty`), and fails if it never does. `--dry-run` makes every check, then prints
+  `head.<sha8>` for a commit that is not master's. The checkout is held under a lock for the whole run
+  (`desk-production.lock` in its git directory, which `production-run.sh checkout` takes too, so neither runs while the
+  other holds it; a lock left by a run that died is removed by hand), and after the web build, which may wait under
+  `DESK_HEAVY_WRAPPER`, the checkout must still be the confirmed commit with no uncommitted changes to tracked files
+  before the tokens are handed over. It prints production's `X-Desk-Build` before (credential-free), fails if no wrangler
+  call or any but `desk-hub`'s ran, then reads production's `X-Desk-Build` until it carries `hub@<sha8>` (not `+dirty`),
+  every 10 s within 2 minutes of elapsed time (each read's own timeout and each pause cut to what is left), and fails if
+  it never does. `--dry-run` makes every check, then prints
   what it would run (no token in it) and runs none of it.
 - `zsh deploy/production-run.sh <step>`, one step at a time:
   - `checkout [<path>]`: a detached worktree of `origin/master` at `<path>` (default `~/.local/share/maws-desk-deploy`;
     a path under `/tmp`, `/private/tmp` or `$TMPDIR` is refused, since a sweep empties them): added from the worktree the
-    script is in (`git worktree add -f --detach`), or fetched and checked out again where it exists. Git never runs in
+    script is in (`git worktree add -f --detach`), or fetched and checked out again where it exists, under the
+    deploy's lock on that checkout. Git never runs in
     a worktree with uncommitted changes, so a dirty checkout, or a dirty worktree to add from, is refused. Then
     `pnpm install --frozen-lockfile --filter 'desk-hub...' --filter 'desk-web...'` there, and the deploy command for
     that commit is printed.
-  - `build`: production's `X-Desk-Build`, credential-free. `wait <sha8>`: the deploy's 2-minute wait, alone.
+  - `build`: production's `X-Desk-Build`, credential-free; it fails, saying what it read, when there is none naming a
+    hub build. `wait <sha8>`: the deploy's 2-minute wait, alone.
   - `access-sync` (changes production's Access): `deployment access-sync` against production, reading the head as a
     production machine enrolled v2 (O14), whose credentials the owner writes to `$DESK_PRODUCTION_DEVICE/machine.json`
     (`{"DESK_MACHINE_CLIENT_ID": …, "DESK_MACHINE_CLIENT_SECRET": …}`); without the file it stops and says so. Its

@@ -29,6 +29,9 @@ afterAll(() => {
   for (const root of roots) rmSync(root, { recursive: true, force: true });
 });
 
+/** The fake clock's start (rec/clock). */
+const CLOCK = 1_000_000;
+
 const STUBS: Record<string, string> = {
   // pnpm: the web build makes dist/ and records the label it was given; the deploy records its stdin and prints
   // STUB_DEPLOY_OUT. Anything else, and everything unless STUB_PNPM=deploy, fails.
@@ -36,7 +39,9 @@ const STUBS: Record<string, string> = {
 printf '%s\\n' "$*" >> "$STUB_REC/pnpm"
 if [ "$STUB_PNPM" = deploy ]; then
   case "$*" in
-    *"desk-web build"*) printf '%s\\n' "$VITE_DESK_WEB_BUILD" > "$STUB_REC/pnpm.label"; mkdir -p apps/desk-web/dist && echo built > apps/desk-web/dist/index.html; exit 0 ;;
+    *"desk-web build"*) printf '%s\\n' "$VITE_DESK_WEB_BUILD" > "$STUB_REC/pnpm.label"; mkdir -p apps/desk-web/dist && echo built > apps/desk-web/dist/index.html
+      [ -z "$STUB_DURING_BUILD" ] || { sh -c "$STUB_DURING_BUILD" > "$STUB_REC/during-build" 2>&1; echo "exit $?" >> "$STUB_REC/during-build"; }
+      exit 0 ;;
     *"deployment deploy"*) cat > "$STUB_REC/pnpm.stdin"; printf '%s\\n' "$STUB_DEPLOY_OUT"; exit 0 ;;
   esac
 fi
@@ -45,9 +50,26 @@ exit 1
 `,
   wrangler: `#!/bin/sh\nprintf '%s\\n' "$*" >> "$STUB_REC/wrangler"\nexit 1\n`,
   cloudflared: `#!/bin/sh\nprintf '%s\\n' "$*" >> "$STUB_REC/cloudflared"\n[ -n "$STUB_ACCESS" ] || exit 1\nprintf '%s\\n' "$STUB_ACCESS"\n`,
-  // curl: production's answer to a credential-free POST, carrying STUB_BUILD as its X-Desk-Build.
-  curl: `#!/bin/sh\nprintf '%s\\n' "$*" >> "$STUB_REC/curl"\n[ -n "$STUB_BUILD" ] || exit 7\nprintf 'HTTP/2 404\\r\\nx-desk-build: %s\\r\\n\\r\\n' "$STUB_BUILD"\n`,
-  sleep: `#!/bin/sh\nprintf '%s\\n' "$*" >> "$STUB_REC/sleep"\n`,
+  // curl: production's answer to a credential-free POST, carrying STUB_BUILD as its X-Desk-Build. It takes
+  // STUB_CURL_SECONDS of the fake clock, or its --max-time when that is less (a timeout, exit 28); each call's clock at
+  // its start and end and its --max-time go to curl.clock.
+  curl: `#!/bin/sh
+printf '%s\\n' "$*" >> "$STUB_REC/curl"
+max=0; prev=; for a in "$@"; do [ "$prev" = --max-time ] && max=$a; prev=$a; done
+start=$(cat "$STUB_REC/clock"); took=\${STUB_CURL_SECONDS:-0}
+[ "$took" -gt "$max" ] && took=$max
+echo $((start + took)) > "$STUB_REC/clock"
+echo "$start $((start + took)) $max" >> "$STUB_REC/curl.clock"
+[ \${STUB_CURL_SECONDS:-0} -le "$max" ] || exit 28
+[ -n "$STUB_BUILD" ] || exit 7
+printf 'HTTP/2 404\\r\\nx-desk-build: %s\\r\\n\\r\\n' "$STUB_BUILD"
+`,
+  // sleep and date: a clock of the run's own (rec/clock, in seconds), which a sleep advances at once.
+  sleep: `#!/bin/sh
+printf '%s\\n' "$*" >> "$STUB_REC/sleep"
+case "$1" in ''|*[!0-9]*) ;; *) echo $(( $(cat "$STUB_REC/clock") + $1 )) > "$STUB_REC/clock" ;; esac
+`,
+  date: `#!/bin/sh\nif [ "$1" = +%s ]; then cat "$STUB_REC/clock"; else exec /bin/date "$@"; fi\n`,
 };
 
 type Run = { status: number | null; out: string };
@@ -64,6 +86,9 @@ type World = {
   /** What each stub recorded: one line per call. */
   calls(stub: string): string[];
   head(): string;
+  /** The fake clock now, and each curl call's [start, end, --max-time] on it. */
+  clock(): number;
+  curlTimes(): number[][];
 };
 
 function world(config: Record<string, unknown> = production, under = tmpdir()): World {
@@ -73,6 +98,7 @@ function world(config: Record<string, unknown> = production, under = tmpdir()): 
   const [bin, home, secrets, rec] = ['bin', 'home', 'secrets', 'rec'].map((name) => join(root, name));
   for (const d of [bin, home, secrets, rec]) mkdirSync(d);
   for (const [name, body] of Object.entries(STUBS)) writeFileSync(join(bin, name), body, { mode: 0o755 });
+  writeFileSync(join(rec, 'clock'), `${CLOCK}\n`);
   writeFileSync(join(secrets, 'CF_ACCESS_SETUP_TOKEN'), `${SETUP}\n`);
   writeFileSync(join(secrets, 'CF_DESK_HUB_SERVICE_TOKENS'), `${SERVICE}\n`);
   const out = join(root, 'state');
@@ -116,6 +142,8 @@ function world(config: Record<string, unknown> = production, under = tmpdir()): 
     git: (...args) => git(dir, ...args),
     calls: (stub) => (existsSync(join(rec, stub)) ? readFileSync(join(rec, stub), 'utf8').split('\n').filter(Boolean) : []),
     head: () => git(dir, 'rev-parse', '--short=8', 'HEAD'),
+    clock: () => Number(readFileSync(join(rec, 'clock'), 'utf8')),
+    curlTimes: () => (existsSync(join(rec, 'curl.clock')) ? readFileSync(join(rec, 'curl.clock'), 'utf8').trim().split('\n').map((l) => l.split(' ').map(Number)) : []),
   };
 }
 
@@ -294,7 +322,9 @@ describe.skipIf(!zsh)('production-deploy.sh deploys only the commit the owner na
       expect(run.out).toMatch(new RegExp(`production carries hub@${head}`));
       expect(holdsCredential(w, run)).toEqual([]);
       // Production was read only credential-free: every curl call a POST of /machine/enroll with no header given.
-      for (const call of w.calls('curl')) expect(call).toBe(`-q -sI --max-time 30 -X POST https://${PRODUCTION_HOST}/machine/enroll`);
+      for (const call of w.calls('curl')) expect(call).toMatch(new RegExp(`^-q -sI --max-time \\d+ -X POST https://${PRODUCTION_HOST}/machine/enroll$`));
+      // The lock is released with the run.
+      expect(existsSync(join(w.dir, '.git/desk-production.lock'))).toBe(false);
     });
 
     it('fails when a wrangler call named another Worker, and never waits for the build', () => {
@@ -306,13 +336,78 @@ describe.skipIf(!zsh)('production-deploy.sh deploys only the commit the owner na
       expect(w.calls('sleep')).toEqual([]);
     });
 
-    it('fails when production never carries the commit within 2 minutes (12 reads, 10 s apart)', () => {
-      const w = world();
+    // The web build may wait in a queue (DESK_HEAVY_WRAPPER); nothing may change what is deployed meanwhile.
+    it('keeps a checkout update out for the whole deploy: production-run.sh checkout of the same path is refused', () => {
+      const w = world(production, durable);
       const head = w.head();
-      const run = w.run('production-deploy.sh', ['--checkout', w.dir, '--confirm', head], { STUB_PNPM: 'deploy', STUB_DEPLOY_OUT: deployOut(head), STUB_BUILD: `hub@${head}+dirty web@master.${head}` });
-      expect(run.status).toBe(1);
-      expect(run.out).toMatch(new RegExp(`production never carried hub@${head}`));
-      expect(w.calls('sleep').length).toBe(11);
+      const during = `zsh ${w.dir}/apps/desk-hub/deploy/production-run.sh checkout ${w.dir}`;
+      const run = w.run('production-deploy.sh', ['--checkout', w.dir, '--confirm', head], { STUB_PNPM: 'deploy', STUB_DEPLOY_OUT: deployOut(head), STUB_BUILD: `hub@${head}`, STUB_DURING_BUILD: during });
+      const refused = readFileSync(join(w.rec, 'during-build'), 'utf8');
+      expect(refused).toMatch(/is held by another production run \(production-deploy\.sh, pid \d+/);
+      expect(refused).toMatch(/exit 6$/m);
+      expect(run.status, run.out).toBe(0);
+      expect(w.head()).toBe(head);
+      expect(existsSync(join(w.dir, '.git/desk-production.lock'))).toBe(false);
+    });
+
+    it('refuses a deploy while another run holds the checkout, and leaves that run’s lock alone', () => {
+      const w = world();
+      mkdirSync(join(w.dir, '.git/desk-production.lock'));
+      writeFileSync(join(w.dir, '.git/desk-production.lock/holder'), 'production-run.sh checkout, pid 1\n');
+      const run = w.run('production-deploy.sh', ['--checkout', w.dir, '--confirm', w.head()], { STUB_PNPM: 'deploy' });
+      expect(run.status).toBe(6);
+      expect(run.out).toMatch(/is held by another production run \(production-run\.sh checkout, pid 1\)/);
+      expect(existsSync(join(w.dir, '.git/desk-production.lock/holder'))).toBe(true);
+      nothingRan(w);
+    });
+
+    it('checks the confirmed commit, a clean tree and the config again after the build, before any token is handed over', () => {
+      // Each, done behind the lock's back during the build: HEAD moved, a tracked file edited, the config edited (a
+      // tracked file too, so the same check finds it).
+      const moved = (w: World) => {
+        writeFileSync(join(w.dir, 'next.txt'), 'next\n');
+        w.git('add', 'next.txt');
+        w.git('commit', '-q', '-m', 'next');
+        return `git -C ${w.dir} checkout -q --detach HEAD^`;
+      };
+      const cases: Array<[string, (w: World) => string, RegExp]> = [
+        ['HEAD switched', moved, /moved during the build \(HEAD [0-9a-f]{8}, confirmed [0-9a-f]{8}/],
+        ['a tracked file edited', (w) => `echo edited >> ${w.dir}/.gitignore`, /moved during the build/],
+        ['the config made staging’s', (w) => `cp ${join(deploy, 'staging.json')} ${w.dir}/apps/desk-hub/deploy/config.json`, /moved during the build/],
+      ];
+      for (const [name, during, reason] of cases) {
+        const w = world();
+        const switchTo = during(w);
+        if (name === 'HEAD switched') w.git('push', '-q', 'origin', 'HEAD:master');
+        const head = w.head();
+        const run = w.run('production-deploy.sh', ['--checkout', w.dir, '--confirm', head], { STUB_PNPM: 'deploy', STUB_DEPLOY_OUT: deployOut(head), STUB_BUILD: `hub@${head}`, STUB_DURING_BUILD: switchTo });
+        expect(readFileSync(join(w.rec, 'during-build'), 'utf8'), name).toMatch(/^exit 0$/m);
+        expect(run.status, `${name}: ${run.out}`).toBe(3);
+        expect(run.out, name).toMatch(reason);
+        expect(run.out, name).toMatch(/Nothing was deployed/);
+        // The deploy command never ran, and the tokens were never read into a pipe.
+        expect(w.calls('pnpm'), name).toEqual(['--filter desk-web build']);
+        expect(existsSync(join(w.rec, 'pnpm.stdin')), name).toBe(false);
+      }
+    });
+
+    it('fails when production never carries the commit within 2 minutes of elapsed time, slow reads included', () => {
+      for (const seconds of ['0', '25', '30', '45']) {
+        const w = world();
+        const head = w.head();
+        const run = w.run('production-deploy.sh', ['--checkout', w.dir, '--confirm', head], { STUB_PNPM: 'deploy', STUB_DEPLOY_OUT: deployOut(head), STUB_BUILD: `hub@${head}+dirty web@master.${head}`, STUB_CURL_SECONDS: seconds });
+        expect(run.status, seconds).toBe(1);
+        expect(run.out).toMatch(new RegExp(`production never carried hub@${head} within 2 minutes`));
+        // The first read is "production before"; the wait starts at the second and ends 120 s after it, at the latest.
+        const [, ...polls] = w.curlTimes();
+        expect(polls.length, seconds).toBeGreaterThan(0);
+        const deadline = polls[0][0] + 120;
+        for (const [start, end, max] of polls) {
+          expect(max, `${seconds}: a read at ${start}`).toBe(Math.min(30, deadline - start));
+          expect(end).toBeLessThanOrEqual(deadline);
+        }
+        expect(w.clock() - polls[0][0], seconds).toBe(120);
+      }
     });
   });
 });
@@ -329,9 +424,27 @@ describe.skipIf(!zsh)('production-run.sh', () => {
     expect(late.status).toBe(1);
     expect(late.out).toMatch(new RegExp(`production never carried hub@${head}`));
     expect(w.run('production-run.sh', ['wait', 'master'], {}).status).toBe(2);
-    for (const call of w.calls('curl')) expect(call).toBe(`-q -sI --max-time 30 -X POST https://${PRODUCTION_HOST}/machine/enroll`);
+    // A read that takes all its time counts against the 2 minutes: reads at 0, 40 and 80 s, each 30 s, a pause of 10 s
+    // after each, and nothing after 120 s (twelve 30-second reads 10 s apart would have taken 470 s).
+    const start = w.clock();
+    const slow = w.run('production-run.sh', ['wait', head], { STUB_BUILD: 'hub@0badc0de', STUB_CURL_SECONDS: '30' });
+    expect(slow.status).toBe(1);
+    expect(w.clock() - start).toBe(120);
+    expect(w.curlTimes().filter(([at]) => at >= start).map(([at, end, max]) => [at - start, end - start, max])).toEqual([[0, 30, 30], [40, 70, 30], [80, 110, 30]]);
+    for (const call of w.calls('curl')) expect(call).toMatch(new RegExp(`^-q -sI --max-time \\d+ -X POST https://${PRODUCTION_HOST}/machine/enroll$`));
     expect(w.calls('pnpm')).toEqual([]);
     expect(w.calls('cloudflared')).toEqual([]);
+  });
+
+  it('build fails with a reason when production gives no X-Desk-Build', () => {
+    const w = world();
+    // The curl stub exits 7 (cannot connect) with no STUB_BUILD; then an answer without a hub build.
+    for (const extra of [{}, { STUB_BUILD: 'web@master.0badc0de' }] as Array<Record<string, string>>) {
+      const run = w.run('production-run.sh', ['build'], extra);
+      expect(run.status, run.out).toBe(3);
+      expect(run.out).toMatch(/no valid X-Desk-Build from https:\/\/desk-hub\.opencognita-platform\.workers\.dev \(read: '.*'\): stop/);
+      expect(run.out).not.toMatch(/^production: /m);
+    }
   });
 
   describe('the steps that change production say so first, and stop at the first credential they lack', () => {

@@ -55,11 +55,18 @@ if (worker, host, org) != (pw, ph, po):
 ' $C $PRODUCTION_WORKER $PRODUCTION_HOST $PRODUCTION_ORG $STAGING_WORKER $STAGING_HOST || { print -r -- "stop: nothing was deployed"; exit 4; }
 [[ -n $confirm ]] || { print -r -- "--confirm <sha8> is required: the checkout's HEAD, as 'git -C $D rev-parse --short=8 HEAD' prints it. Nothing was deployed."; exit 2; }
 [[ $(git -C $D rev-parse --show-toplevel 2>/dev/null) == "${D:A}" ]] || { print -r -- "$D is not the top of a git worktree: stop"; exit 2; }
+# The checkout's lock, which production-run.sh's checkout takes too: nothing updates the worktree while this deploys.
+# Never taken over: a lock left by a run that died is removed by hand, once no run is going.
+LOCK=$(git -C $D rev-parse --absolute-git-dir)/desk-production.lock
+mkdir $LOCK 2>/dev/null || { print -r -- "$D is held by another production run ($(cat $LOCK/holder 2>/dev/null)): stop. If none is running, remove $LOCK. Nothing was deployed."; LOCK=; exit 6; }
+trap '[[ -n $LOCK ]] && rm -rf $LOCK' EXIT
+trap 'exit 130' INT TERM
+print -r -- "production-deploy.sh, pid $$ on $(hostname), since $(date -u +%FT%TZ)" > $LOCK/holder
 [[ -z "$(git -C $D status --porcelain --untracked-files=no)" ]] || { print -r -- "$D has uncommitted changes: stop. Nothing was deployed."; exit 3; }
-head=$(git -C $D rev-parse --short=8 HEAD)
+head=$(git -C $D rev-parse --short=8 HEAD) full=$(git -C $D rev-parse HEAD)
 [[ $confirm == $head ]] || { print -r -- "--confirm $confirm is not $D's HEAD ($head): stop. Nothing was deployed."; exit 3; }
 git -C $D fetch -q origin master || { print -r -- "could not fetch origin's master into $D: stop"; exit 2; }
-if [[ $(git -C $D rev-parse HEAD) == $(git -C $D rev-parse -q --verify refs/remotes/origin/master) ]]; then
+if [[ $full == $(git -C $D rev-parse -q --verify refs/remotes/origin/master) ]]; then
   at="at origin/master $head"; label=master.$head
 elif (( allow_head )); then
   at="at $head, not origin/master (--allow-head)"; label=head.$head
@@ -82,14 +89,19 @@ umask 077
 mkdir -p $OUT || exit 2
 LOG=$OUT/production-deploy-$(date -u +%Y%m%dT%H%M%SZ).log
 cd $D || exit 2
-# Production's X-Desk-Build, credential-free.
-build() { curl -q -sI --max-time 30 -X POST https://$PRODUCTION_HOST/machine/enroll | /usr/bin/grep -i '^x-desk-build:' | tr -d '\r'; }
+# Production's X-Desk-Build, credential-free, within $1 seconds (default 30).
+build() { curl -q -sI --max-time ${1:-30} -X POST https://$PRODUCTION_HOST/machine/enroll | /usr/bin/grep -i '^x-desk-build:' | tr -d '\r'; }
 print -r -- "deploying production hub@$head web@$label ($at)" | tee $LOG
 print -r -- "production before: $(build)" | tee -a $LOG
 # The label the phone's handshake carries as its build (O13 M4), baked into the web build.
 VITE_DESK_WEB_BUILD=$label ${=DESK_HEAVY_WRAPPER} pnpm --filter desk-web build 2>&1 | tail -3
 (( ${pipestatus[1]} == 0 )) || { print -r -- "the web build failed: stop. Nothing was deployed." | tee -a $LOG; exit 5; }
 [[ -f $ASSETS/index.html ]] || { print -r -- "no web build at $ASSETS: stop. Nothing was deployed." | tee -a $LOG; exit 5; }
+# The build may have waited (DESK_HEAVY_WRAPPER), and deploy.ts stamps the HEAD it finds when it runs: before the tokens
+# are handed over, the checkout must still be the confirmed commit with no uncommitted changes to tracked files, which
+# config.json is, so the config checked above is still the one deployed.
+[[ $(git -C $D rev-parse HEAD) == $full && -z "$(git -C $D status --porcelain --untracked-files=no)" ]] \
+  || { print -r -- "$D moved during the build (HEAD $(git -C $D rev-parse --short=8 HEAD), confirmed $head, or uncommitted changes): stop. Nothing was deployed." | tee -a $LOG; exit 3; }
 printf '%s\n' "CF_ACCESS_SETUP_TOKEN=$(cat $S/CF_ACCESS_SETUP_TOKEN)" "CF_DESK_HUB_SERVICE_TOKENS=$(cat $S/CF_DESK_HUB_SERVICE_TOKENS)" \
   | pnpm --filter desk-hub $DEPLOY 2>&1 \
   | perl -ne 'print if /^wrangler target / || !/token|secret|bearer|eyJ/i' | tee -a $LOG | tail -30
@@ -100,12 +112,15 @@ targets=$(/usr/bin/grep -c '^wrangler target ' $LOG)
 others=$(/usr/bin/grep '^wrangler target ' $LOG | /usr/bin/grep -v -c "^wrangler target $PRODUCTION_WORKER (config worker $PRODUCTION_WORKER, ")
 print -r -- "wrangler calls: $targets, naming another Worker: $others" | tee -a $LOG
 if (( rc != 0 || targets == 0 || others != 0 )); then print -r -- "log: $LOG"; exit 1; fi
-# The deploy is done when production answers with this commit's hub (not one stamped +dirty): 12 reads, 10 s apart.
-for i in {1..12}; do
-  b=$(build)
+# The deploy is done when production answers with this commit's hub (not one stamped +dirty), within 2 minutes of
+# elapsed time: each read and each pause is cut to what is left of them.
+deadline=$(( $(date +%s) + 120 ))
+while left=$(( deadline - $(date +%s) )); (( left > 0 )); do
+  b=$(build $(( left < 30 ? left : 30 )))
   print -r -- "$(date -u +%H:%M:%SZ) $b" | tee -a $LOG
   if [[ $b =~ "hub@$head( |\$)" ]]; then print -r -- "production carries hub@$head" | tee -a $LOG; print -r -- "log: $LOG"; exit 0; fi
-  (( i < 12 )) && sleep 10
+  left=$(( deadline - $(date +%s) ))
+  (( left > 0 )) && sleep $(( left < 10 ? left : 10 ))
 done
 print -r -- "production never carried hub@$head within 2 minutes: check it with 'production-run.sh build'" | tee -a $LOG
 print -r -- "log: $LOG"
