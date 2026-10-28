@@ -148,11 +148,17 @@ for (const downloaded of ['valid', 'bad-digest', 'incomplete', 'failure']) {
   });
 }
 
-test('an unreadable group variant fails before lookup, and a real build failure remains fatal', (t) => {
+test('a group with no e2e-build variant reuses nothing, a missing script fails before lookup, and a real build failure remains fatal', (t) => {
   const f = fixture(t);
-  const unknown = f.command('prepare', { SCRIPT: 'e2e:unknown' });
-  assert.equal(unknown.status, 1);
-  assert.match(unknown.stderr, /variant.*e2e:unknown/);
+  // desk-web-hub's shape: it builds in its own package, so there is no out/ to look up, download or build.
+  const own = f.command('prepare', { SCRIPT: 'e2e:unknown' });
+  ok(own);
+  assert.deepEqual(own.outputs, { variant: '', 'artifact-id': '', 'run-id': '' });
+  assert.deepEqual(own.env, {});
+  assert.match(own.stdout, /e2e:unknown builds no e2e-build variant/);
+  const missing = f.command('prepare', { SCRIPT: 'e2e:nope' });
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /no package script e2e:nope/);
   assert.deepEqual(f.calls(), []);
   ok(f.command('prepare'));
   const failed = f.command('build', { FAIL_BUILD: '1' });
@@ -172,6 +178,8 @@ test('the workflow downloads only verified IDs, builds before uploading, and kee
   assert.match(job, /\n {4}permissions:\n {6}contents: read\n {6}actions: read\n/);
   for (const step of [steps[download], steps[upload]]) assert.match(step, /\n {8}continue-on-error: true\n/);
   assert.match(steps[download], /artifact-ids: \$\{\{ steps\.build-cache\.outputs\.artifact-id \}\}/);
+  // A group with no e2e-build variant (prepare's empty variant) builds nothing here; its own script builds.
+  assert.match(steps[build], /\n {8}if: steps\.build-cache\.outputs\.variant != ''\n/);
   assert.match(steps[download], /run-id: \$\{\{ steps\.build-cache\.outputs\.run-id \}\}/);
   assert.match(steps[upload], /retention-days: 1$/m);
   assert.match(steps[upload], /include-hidden-files: true\n/);
