@@ -1731,6 +1731,22 @@ test('only direct can host a peer group; the peer and package script reach the o
   assert.equal(plan({ ...env, HOSTED_MAC_ROUTE: 'direct', HOSTED_MAC_E2E: 'cross-build' }).outputs.e2e_host, direct.e2e_host);
 });
 
+// HOSTED_MAC_E2E cannot name a peer group (mirror refuses it), so under direct the auto-joined check of every run a minor
+// from its peer, class 1a's included, goes to a hosted Mac unlisted, on either lane; no-hosted, mirror, a live run and a
+// final ref keep it on the Mac's exclusive instance.
+test('under direct a peer group is hosted without a list entry, on either lane, unless no-hosted, mirror, live or a final ref', () => {
+  const env = { PEER_E2E: 'cross-build', HOSTED_MAC_ROUTE: 'direct', HEAD_MESSAGE: `ci-gate: test\n\nGates: static,unit,probes\nClass1a: pool\nRunner: macos\n${peerTrailers('3.3', '3.4')}` };
+  const entryOf = (scenario) => JSON.parse(plan(scenario).outputs.e2e).find((entry) => entry.group === 'cross-build');
+  const hostedEntry = { ...peerEntry, hosted: true, cached: 'plain', runner: '"macos-26"', timeout: 30 };
+  assert.deepEqual(entryOf(env), hostedEntry);
+  assert.deepEqual(entryOf({ ...env, HEAD_MESSAGE: env.HEAD_MESSAGE.replace('Runner: macos', 'Runner: linux') }), hostedEntry);
+  for (const scenario of [
+    { ...env, HEAD_MESSAGE: `${env.HEAD_MESSAGE}\nLane: no-hosted` },
+    { ...env, HOSTED_MAC_ROUTE: 'mirror' },
+    { ...env, GITHUB_REF: 'refs/heads/ci/e1-final-test' },
+  ]) assert.deepEqual(entryOf(scenario), peerEntry, JSON.stringify(scenario));
+});
+
 test('direct preserves never-hosted, no-hosted, Linux, live and final-ref exclusions', () => {
   const lists = { ...ownLists(), PEER_E2E: 'cross-build', HOSTED_MAC_ROUTE: 'direct' };
   const groups = ['default', 'connectors-oauth', 'discover', 'document-scale', 'desk-web'];
