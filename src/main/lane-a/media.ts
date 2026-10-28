@@ -155,10 +155,12 @@ function still(dir: Pinned): void {
 // Every mutation goes through here: `under` (and `also`, when given) checked to be the very directories the walk pinned,
 // reached with no link, and a file to unlink checked to be a regular file reached with no link, immediately before the
 // call. What remains is the window between that check and the syscall, which Node cannot close (it has no `mkdirat`,
-// `unlinkat` or `unlinkat(AT_REMOVEDIR)`): a racing process would have to swap a component inside it, and any process
-// that can is the user's own (RL §5.11's uid boundary), with the user's authority already. Accepted, and recorded in
-// the O9 document; rejected: a native or Python helper for the `*at` calls, a runtime dependency of main for a same-uid
-// race.
+// `unlinkat` or `unlinkat(AT_REMOVEDIR)`). Its bound: a racer that wins it redirects only what is asked here, which is
+// unlinking a regular file named as an upload's (`<upload>.<n>.<ext>`, `clear` filters every name) or removing an empty
+// directory, so the worst it reaches is another tree's upload files, which the sweep would remove anyway. The uid
+// boundary (RL §5.11) alone would not cover it: an engine running sandboxed writes only inside its tree, yet can plant a
+// link there and race; the naming filter is what bounds that case. Accepted (the O9 document's Decision Log); rejected:
+// a native or Python helper for the `*at` calls, a runtime dependency of main for this bounded race.
 function mutate(under: Pinned, change: { mkdir: string } | { unlink: string } | { rmdir: Pinned }): void {
   still(under);
   if ('mkdir' in change) {

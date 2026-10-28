@@ -370,6 +370,27 @@ describe('the records and the sweep', () => {
     expect(JSON.parse(readFileSync(join(data, 'uploads.json'), 'utf8')).roots.map((r: { path: string }) => r.path)).toEqual([linked]);
   });
 
+  it('refuses a sweep whose root was swapped for a link after its checked open, deleting nothing outside the tree, and keeps the record', () => {
+    const data = dir();
+    let now = 0;
+    const records = uploadRecords(join(data, 'uploads.json'), { now: () => now, log: () => {} });
+    const { root } = saveUpload(dir(), SESSION, 'up1', decoded([file_('a.png')]));
+    records.record(SESSION, root);
+    const outside = dir('o9m7-outside-');
+    writeFileSync(join(outside, 'up9.0.png'), 'sentinel');
+    once(root, () => {
+      renameSync(root, `${root}.moved`);
+      symlinkSync(outside, root);
+    });
+    now += 25 * 3600_000;
+    expect(records.sweep()).toBe(0);
+    expect(readFileSync(join(outside, 'up9.0.png'), 'utf8')).toBe('sentinel');
+    expect(readdirSync(outside)).toEqual(['up9.0.png']);
+    expect(JSON.parse(readFileSync(join(data, 'uploads.json'), 'utf8')).roots.map((r: { path: string }) => r.path)).toEqual([root]);
+    expect(records.sweep(), 'the root still a link on the next pass: refused again, before any listing').toBe(0);
+    expect(readdirSync(outside)).toEqual(['up9.0.png']);
+  });
+
   it('drops the record of a root already gone', () => {
     const data = dir();
     let now = 0;
