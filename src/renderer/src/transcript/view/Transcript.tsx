@@ -468,6 +468,10 @@ export interface TranscriptProps {
   // DC9, additive (the desk): the host's word that the session runs no turn (its machine reports it idle, or no
   // process) though no row ended its turn: the turn draws closed (`restingRows`), and the jump control its arrow
   atRest?: boolean;
+  // P5 O6 M6, additive (the desk): false where the host has no MAWS browser and no MAWS bridge, so the session's browser
+  // activity is neither listed nor drawn. The desk's keys (`desk:<project>:<session>`) are no addresses, and the client
+  // refuses a non-address in that slot; the desk is frozen at O13 and retired at cutover (P5 Decision Log 1).
+  browserActivity?: boolean;
 }
 
 const NO_ROWS: Row[] = [];
@@ -497,7 +501,7 @@ const focusIsHereOrNowhere = (root: HTMLElement | null) => {
 const NO_TAIL: readonly Row[] = [];
 const NOTHING_WITHDRAWN: ReadonlySet<string> = new Set();
 
-export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN, effort = null, startAt, presentation, ownerLane, atRest = false }: TranscriptProps) {
+export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN, effort = null, startAt, presentation, ownerLane, atRest = false, browserActivity = true }: TranscriptProps) {
   const storeKey = storeKeyOf(source);
   const stored = useTranscriptStore((state) => state.entries[storeKey]?.rows ?? NO_ROWS);
   const derived = useMemo(() => {
@@ -506,7 +510,7 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   }, [stored, atRest, storeKey]);
   // E13: a session's browser activity as rows, under the `js` call each happened in or at its time (a child's transcript
   // shows none: the session's rows carry them); what main kept is listed on mount, so a reload shows them again
-  const activitySession = variant === 'session' && source.key ? (source.key as AppSessionId) : null;
+  const activitySession = browserActivity && variant === 'session' && source.key ? (source.key as AppSessionId) : null;
   const activity = useBrowserActivityAttachment(storeKey, activitySession);
   useEffect(() => {
     if (activitySession !== null) void listBrowserActivity(activitySession);

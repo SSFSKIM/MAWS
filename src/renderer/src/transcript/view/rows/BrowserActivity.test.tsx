@@ -7,7 +7,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { BrowserActivity } from '@shared/browser/activity';
 import type { SessionEvent } from '@shared/graph/events';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeClient, type FakeClient } from '../../../../../../test/support/fake-client';
 import { at } from '../../../../../../test/support/machine';
 import { useTranscriptStore } from '../../../stores/transcript';
@@ -80,7 +80,7 @@ function runningTurn() {
 }
 
 // A session transcript over a source the test pushes later batches to.
-async function mount(key: string, events: SessionEvent[]) {
+async function mount(key: string, events: SessionEvent[], props: { browserActivity?: boolean } = {}) {
   let push: (batch: SessionEvent[]) => void = () => {};
   const source: TranscriptSource = {
     key,
@@ -90,7 +90,7 @@ async function mount(key: string, events: SessionEvent[]) {
     },
     snapshot: () => Promise.resolve([...events]),
   };
-  const view = render(<Transcript source={source} variant="session" />);
+  const view = render(<Transcript source={source} variant="session" {...props} />);
   await waitFor(() => expect(useTranscriptStore.getState().entries[key]?.phase).toBe('live'));
   return { view, push: (batch: SessionEvent[]) => act(() => push(batch)) };
 }
@@ -148,6 +148,34 @@ describe('the rows of a js call', () => {
     const second = await mount(LISTED, b.events);
     await waitFor(() => expect(activityRows(second.view.container)).toEqual(ACTION_ROWS));
     expect(main.callsOf('browser.agent.activities.list')).toHaveLength(2);
+  });
+
+  // P5 O6 M6 (e2e:desk-web): the desk mounts this transcript over its own `desk:<project>:<session>` keys and has no
+  // MAWS bridge. It turns the activity off at its mount, so its keys never reach the addressing; MAWS's own mounts still
+  // refuse a bare id there.
+  it('are not asked for where the host has no MAWS browser (the desk): its keys never reach the addressing', async () => {
+    const main = installFakeMain(() => ok({ activities: [] }));
+    const errors = vi.spyOn(console, 'error');
+    try {
+      await mount('desk:6f1c0a8e:ac0d9312', runningTurn().b.events, { browserActivity: false });
+      await act(async () => {});
+      expect(main.callsOf('browser.agent.activities.list')).toEqual([]);
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
+  it('are still refused on MAWS’s path for a key that is no address', async () => {
+    const main = installFakeMain(() => ok({ activities: [] }));
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await mount('App-bare', runningTurn().b.events);
+      await waitFor(() => expect(errors).toHaveBeenCalledWith(expect.stringMatching(/^\[ipc\] browser\.agent\.activities\.list: lower: .* holds a bare id where an address belongs/)));
+      expect(main.callsOf('browser.agent.activities.list')).toEqual([]);
+    } finally {
+      errors.mockRestore();
+    }
   });
 
   it('render page text as plain text', () => {
