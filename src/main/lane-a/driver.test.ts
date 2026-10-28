@@ -196,6 +196,34 @@ describe('the bridge’s states', () => {
     await h.live();
   });
 
+  it('resubscribes with backoff after a refusal cut off mid-body', async () => {
+    // a bridge that names itself starting and refuses /events with a 503 whose body never finishes
+    mkdirSync(join(process.env.SMINOS_HOME!, 'bridge'), { recursive: true, mode: 0o700 });
+    const path = join(process.env.SMINOS_HOME!, 'bridge', `${ENGINE}.sock`);
+    let subscriptions = 0;
+    const raw = createServer((socket) =>
+      socket.once('data', (data) => {
+        if (data.toString('utf8').startsWith('GET /events')) {
+          subscriptions += 1;
+          socket.write('HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{"error": "not re');
+          socket.destroy();
+          return;
+        }
+        const body = JSON.stringify({ session: ENGINE, pid: 1, protocol: 1, ready: false });
+        socket.end(`HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`);
+      }),
+    );
+    await new Promise<void>((r) => raw.listen(path, () => r()));
+    try {
+      const h = harness();
+      h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: terminal });
+      await expect.poll(() => h.state()?.bridge).toBe('starting');
+      await expect.poll(() => subscriptions, { timeout: 3000 }).toBeGreaterThanOrEqual(3);
+    } finally {
+      await new Promise<void>((r) => raw.close(() => r()));
+    }
+  });
+
   it('resubscribes its state stream after an end, and the fresh snapshot carries on', async () => {
     const b = await bridge();
     const h = harness();

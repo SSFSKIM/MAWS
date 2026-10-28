@@ -70,7 +70,7 @@ export interface EventStream {
 
 export interface EventHandlers {
   onLines(lines: Record<string, unknown>[]): void; // the snapshot line first, then the events, in order
-  onEnd(reason: string): void; // once, unless closed: a refusal (`503` while the bridge is not ready), an end, a reset
+  onEnd(reason: string): void; // exactly once, unless closed: a refusal (`503` while the bridge is not ready), an end, a reset, a cut
 }
 
 export function subscribe(socket: string, handlers: EventHandlers): EventStream {
@@ -82,9 +82,12 @@ export function subscribe(socket: string, handlers: EventHandlers): EventStream 
     handlers.onEnd(reason);
   };
   const req = request({ socketPath: socket, method: 'GET', path: '/events', agent: false, headers: { Connection: 'close' } }, (res) => {
+    // Whatever the answer, its connection's every way of ending ends the subscription: a truncated one emits no `end`.
+    res.on('error', (error) => end(error.message));
+    res.on('aborted', () => end('the bridge closed the stream'));
+    res.on('close', () => end('the bridge closed the stream'));
     if (res.statusCode !== 200) {
-      res.resume();
-      res.on('end', () => end(`the bridge refused the subscription (${res.statusCode ?? 0})`));
+      end(`the bridge refused the subscription (${res.statusCode ?? 0})`); // its body says nothing the driver reads
       return;
     }
     let rest = '';
@@ -103,8 +106,6 @@ export function subscribe(socket: string, handlers: EventHandlers): EventStream 
       if (lines.length > 0) handlers.onLines(lines);
     });
     res.on('end', () => end('the bridge ended the stream'));
-    res.on('error', (error) => end(error.message));
-    res.on('aborted', () => end('the bridge closed the stream'));
   });
   req.on('error', (error) => end(error.message));
   req.end();
