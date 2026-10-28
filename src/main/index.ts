@@ -30,6 +30,7 @@ import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2
 import { powerMonitor } from 'electron'; // P5 O8 M1: the Registry feed reconnects at wake and unlock
 import { openExternalUrl } from './open-external'; // P5 O8 M1: the Access login's browser trip
 import { createOrgSession } from './org/org-session'; // P5 O8 M1
+import { excludeFromBackup } from './device/backup-exclusion';
 import { createRegistryFeed } from './org/registry-feed'; // P5 O8 M1
 import { registerOrgHandlers } from './org/register'; // P5 O8 M1
 // C3 end
@@ -289,6 +290,8 @@ void startWithProfileLock(app, () => {
           env: process.env,
           openExternal: (url) => openExternalUrl(url),
           stepUp: (keys, device) => createStepUp({ device, key: keys.stepUp }),
+          // `<userData>/org/` stays out of Time Machine, as the device keys do: a restored token or chain is no one's
+          excludeFromBackup: (path) => excludeFromBackup(path),
           log: (line) => console.log(line),
         })
       : null;

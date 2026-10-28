@@ -19,6 +19,8 @@ import {
   NO_CERTIFICATES,
   pairingFingerprint,
   signOrgState,
+  signRecord,
+  SIGNING_DOMAINS,
   stateHash,
   verifyPairingMac,
   type Certificates,
@@ -371,6 +373,28 @@ const dirExists = (path: string) =>
   );
 const realFiles = () => orgFiles({ userData, log: () => {} });
 
+/** orgFiles whose next write of the armed name waits for `release`; `arm` resolves when that write is held. */
+function gatedFiles() {
+  const real = realFiles();
+  let armed: { name: string; held: () => void } | null = null;
+  let release: () => void = () => {};
+  const files: OrgFiles = {
+    ...real,
+    write: async (name, value) => {
+      if (armed !== null && armed.name === name) {
+        const { held } = armed;
+        armed = null;
+        await new Promise<void>((resolve) => {
+          release = resolve;
+          held();
+        });
+      }
+      return real.write(name, value);
+    },
+  };
+  return { files, arm: (name: string) => new Promise<void>((resolve) => (armed = { name, held: resolve })), release: () => release() };
+}
+
 /** A profile signed in on [s1, s2 listing this device]: keys made first, so registration is done at `checking`. */
 async function signedIn(over: Overrides = {}) {
   const keys = await preKeys();
@@ -599,6 +623,13 @@ describe('registration refusals', () => {
     expect(refused).toEqual({ code: 'hub', detail: '409 too-many' });
   });
 
+  it('hub: an error that is no code reads `unrecognized`, so a token the hub reflects reaches neither the status nor the log', async () => {
+    hub.pendingAnswer = () => worker(409, { error: `bad ${hub.calls.at(-1)!.headers['cf-access-token']}` });
+    const { refused, logs } = await refusedWith((await pairing()).text);
+    expect(refused).toEqual({ code: 'hub', detail: '409 unrecognized' });
+    for (const secret of secrets) expect(logs.join('\n')).not.toContain(secret);
+  });
+
   it('busy: a second register or sign-in while one runs', async () => {
     const login = testLogin();
     const { session } = make({ login });
@@ -807,10 +838,41 @@ describe('following the hub', () => {
   it('fires onChanged when the certificates the hub serves change', async () => {
     const { session, changes } = await signedIn({ timing: { CERTS_REFRESH_MS: 30 } });
     const c = changes();
-    const certificates = { certs: [{ body: { machine: 'm1' }, sig: { kid: 'k', sig: 's' } }], retirements: [] } as unknown as Certificates;
+    const delegation = await generateSigningKey();
+    const body = { org: ORG, machine: 'a'.repeat(32), name: 'vm-one', pub: (await generateSigningKey()).pub, delegation: 'b'.repeat(32), use: 1, issued: new Date().toISOString() };
+    const certificates: Certificates = { certs: [await signRecord(SIGNING_DOMAINS.machineCert, body, delegation.privateKey, delegation.pub)], retirements: [] };
     hub.certificates = certificates;
     await until(() => changes() > c, 'onChanged');
     expect(session.current()!.view.certificates()).toEqual(certificates);
+  });
+
+  it('a feed-started adoption whose chain.json write fails is logged, keeps the held head, and rejects nothing unhandled', async () => {
+    const real = realFiles();
+    let failChain = false;
+    let failed = 0;
+    const files: OrgFiles = { ...real, write: (name, value) => (failChain && name === CHAIN_FILE ? (failed++, Promise.reject(new Error('disk full'))) : real.write(name, value)) };
+    const { session, logs } = await signedIn({ files });
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => void unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const feed = fakeFeed();
+      session.attach(feed.hooks);
+      hub.chain.push(await successor(hub.head, [a1]));
+      failChain = true;
+      feed.state(3);
+      await until(() => failed === 1, 'the chain.json write');
+      await pause(30);
+      expect(unhandled).toEqual([]);
+      expect(logs.some((l) => l.includes('following the hub failed: disk full'))).toBe(true);
+      expect(session.current()!.view.head().state.version).toBe(2);
+      expect((await readJson<{ chain: SignedOrgState[] }>(CHAIN_FILE)).chain).toHaveLength(2);
+      failChain = false;
+      feed.state(3);
+      await until(() => session.current()!.view.head().state.version === 3, 'version 3 adopted once the disk takes it');
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
   });
 
   it('refuses a served rollback and says so on the status, the device still signed in', async () => {
@@ -996,36 +1058,16 @@ describe('sign out and sign in', () => {
     expect(session.current()).toBeNull();
   });
 
-  /** orgFiles whose next registration.json write, once armed, waits for `release`; `arm` resolves when it is held. */
-  function gatedRegistration() {
-    const real = realFiles();
-    let armed: (() => void) | null = null;
-    let release: () => void = () => {};
-    const files: OrgFiles = {
-      ...real,
-      write: async (name, value) => {
-        if (armed !== null && name === REGISTRATION_FILE) {
-          const held = armed;
-          armed = null;
-          await new Promise<void>((resolve) => {
-            release = resolve;
-            held();
-          });
-        }
-        return real.write(name, value);
-      },
-    };
-    return { files, arm: () => new Promise<void>((resolve) => (armed = resolve)), release: () => release() };
-  }
-
   it('an adoption whose anchor write is in flight across a sign-out does not sign the session back in', async () => {
-    const gate = gatedRegistration();
+    const gate = gatedFiles();
     const { session } = await signedIn({ files: gate.files });
-    const anchorHeld = gate.arm();
+    const anchorHeld = gate.arm(REGISTRATION_FILE);
     const adopted = session.current()!.view.advance([await successor(hub.head, [a1])], []);
     await anchorHeld;
-    await session.signOut();
+    const signingOut = session.signOut(); // its marker waits for the anchor write, queued first
+    expect(registered(session).session).toBe('signed-out');
     gate.release();
+    await signingOut;
     await adopted;
     expect(session.current()).toBeNull();
     expect(registered(session).session).toBe('signed-out');
@@ -1033,10 +1075,29 @@ describe('sign out and sign in', () => {
     expect(registered(restarted.session).session).toBe('signed-out');
   });
 
+  it('a sign-in whose registration write is held across an adoption keeps the adoption\'s anchor, on disk and in memory', async () => {
+    const gate = gatedFiles();
+    const { session } = await signedIn({ files: gate.files });
+    const markerHeld = gate.arm(REGISTRATION_FILE);
+    expect(session.signIn()).toEqual({ ok: true });
+    await markerHeld;
+    const s3 = await successor(hub.head, [a1]);
+    const adopted = session.current()!.view.advance([s3], []);
+    await until(async () => (await readJson<{ chain: SignedOrgState[] }>(CHAIN_FILE)).chain.length === 3, 'chain.json at version 3');
+    await pause(30);
+    gate.release();
+    await adopted;
+    await until(() => isSignedIn(session), 'signed in');
+    const anchor = { genesis: await stateHash(s1.state), version: 3, head: await stateHash(s3.state) };
+    expect((await readJson<RegistrationFile>(REGISTRATION_FILE)).anchor).toEqual(anchor);
+    await session.signOut(); // writes the registration memory holds
+    expect(await readJson<RegistrationFile>(REGISTRATION_FILE)).toMatchObject({ anchor, signedOut: true });
+  });
+
   it('a sign-in while a sign-out is still writing is refused `busy`, so its token is never removed under it', async () => {
-    const gate = gatedRegistration();
+    const gate = gatedFiles();
     const { session, code } = await signedIn({ files: gate.files });
-    const markerHeld = gate.arm();
+    const markerHeld = gate.arm(REGISTRATION_FILE);
     const signingOut = session.signOut();
     await markerHeld;
     expect(registered(session).session).toBe('signed-out');
@@ -1098,6 +1159,63 @@ describe('re-anchoring', () => {
     expect(moved.pins).toEqual({ roots: [await keyId(b1.stepUp.pub)], recoveryPub: recovery2.pub });
     const again = await restart();
     expect(isSignedIn(again.session)).toBe(true);
+  });
+
+  /** A signed-in profile whose chain.json is damaged while the hub serves an org rebuilt under new roots listing this device. */
+  async function heldChain(over: Overrides = {}) {
+    const { entry } = await signedIn(over);
+    const original = [...hub.chain];
+    await writeFile(join(orgDir(), CHAIN_FILE), '{"version":1}\n');
+    const b1 = await newDevice('b1');
+    const recovery2 = await generateSigningKey();
+    const g2 = await genesis(A, b1, recovery2);
+    hub.chain = [g2, await listing(g2, entry, b1)];
+    const made = await restart(over);
+    await until(() => made.logs.some((l) => l.includes('closed until a re-anchor')), 'the hub\'s chain refused');
+    return { ...made, original, g2, fresh: await pairing({ root: b1, recoveryPub: recovery2.pub }) };
+  }
+
+  it('a re-anchor whose access.json write is held across a sign-out leaves the profile signed out, with no token', async () => {
+    const gate = gatedFiles();
+    const { session, fresh } = await heldChain({ files: gate.files });
+    await session.signOut();
+    const tokenHeld = gate.arm(ACCESS_FILE);
+    expect(session.reanchor(fresh.text)).toEqual({ ok: true });
+    await tokenHeld;
+    const signingOut = session.signOut();
+    await Promise.race([signingOut, pause(50)]);
+    gate.release();
+    await signingOut;
+    await pause(30);
+    expect(await exists(join(orgDir(), ACCESS_FILE))).toBe(false);
+    expect((await readJson<RegistrationFile>(REGISTRATION_FILE)).signedOut).toBe(true);
+    const again = await restart();
+    expect(registered(again.session).session).toBe('signed-out');
+    expect(again.session.current()).toBeNull();
+  });
+
+  it('a recovery from the hub overlapping a re-anchor never replaces the re-anchored chain or anchor', async () => {
+    const gate = gatedFiles();
+    const { session, original, g2, fresh } = await heldChain({ files: gate.files, timing: { CERTS_REFRESH_MS: 20 } });
+    const committing = gate.arm(REGISTRATION_FILE);
+    expect(session.reanchor(fresh.text)).toEqual({ ok: true });
+    await committing;
+    // The hub serves the chain holding the old anchor again: a recovery now would take it.
+    hub.chain = original;
+    const reads = () => hub.calls.filter((c) => c.path === '/api/org/state?since=0').length;
+    const before = reads();
+    await until(() => reads() > before, 'a recovery reading the hub');
+    await pause(50);
+    gate.release();
+    await until(() => registered(session).problem === null && !registered(session).hubAccess.startsWith('signing'), 're-anchored');
+    await pause(50);
+    const genesisHash = await stateHash(g2.state);
+    expect((await readJson<{ chain: SignedOrgState[] }>(CHAIN_FILE)).chain[0]).toEqual(g2);
+    expect((await readJson<RegistrationFile>(REGISTRATION_FILE)).anchor.genesis).toBe(genesisHash);
+    expect(session.current()!.view.since(0).states[0]).toEqual(g2);
+    const again = await restart();
+    expect(isSignedIn(again.session)).toBe(true);
+    expect(again.session.current()!.view.since(0).states[0]).toEqual(g2);
   });
 
   it('refuses `removed` when the fresh code\'s chain does not list this device', async () => {

@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocketServer } from 'ws';
 import type { Listing, Signed } from '../../../apps/org-protocol/src/index.ts';
 import { BUILD_HEADER } from './hub-client';
-import { CLOSE_REMOVED, createRegistryFeed, REGISTRY_APP_PATH, type RegistryFeed, type WebSocketLike } from './registry-feed';
+import { CLOSE_REMOVED, createRegistryFeed, MAX_PART_SETS, MAX_PART_TEXT, REGISTRY_APP_PATH, type RegistryFeed, type WebSocketLike } from './registry-feed';
 import { heldOrgSession, type SignedIn } from './session';
 
 type Listener = (...args: never[]) => void;
@@ -298,6 +298,29 @@ describe('frames', () => {
     // the set is spent: its parts again start a new one
     h.last().send(part(1));
     expect(h.seen.listings).toHaveLength(1);
+  });
+
+  it('holds at most MAX_PART_SETS incomplete sets: one more drops them all, logged, and later sets join again', async () => {
+    const h = await opened();
+    const whole = (version: number) => JSON.stringify({ t: 'state', version });
+    const half = (id: string, version: number, index: number) => ({ t: 'part', id, index, count: 2, data: index === 0 ? whole(version).slice(0, 5) : whole(version).slice(5) });
+    for (let i = 0; i < MAX_PART_SETS; i++) h.last().send(half(`s${i}`, i + 1, 0));
+    h.last().send(half('one-more', 9, 0));
+    expect(h.lines.some((l) => l.includes(`more than ${MAX_PART_SETS} sets of parts are incomplete`))).toBe(true);
+    h.last().send(half('s0', 1, 1));
+    expect(h.seen.state).toEqual([]);
+    h.last().send(half('again', 7, 0));
+    h.last().send(half('again', 7, 1));
+    expect(h.seen.state).toEqual([7]);
+  });
+
+  it('holds at most MAX_PART_TEXT of incomplete parts: a set past it is dropped, logged', async () => {
+    const h = await opened();
+    const text = JSON.stringify({ t: 'state', version: 5, pad: 'x'.repeat(MAX_PART_TEXT + 1024) });
+    const size = Math.ceil(text.length / 5);
+    for (let i = 0; i < 5; i++) h.last().send({ t: 'part', id: 'big', index: i, count: 5, data: text.slice(i * size, (i + 1) * size) });
+    expect(h.seen.state).toEqual([]);
+    expect(h.lines.some((l) => l.includes('incomplete sets of parts hold more than'))).toBe(true);
   });
 
   it('drops a set whose joined text is not JSON, and ignores ill-formed parts', async () => {

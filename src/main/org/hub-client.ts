@@ -6,7 +6,11 @@
 // Who answered matters. Every answer of the Worker carries `X-Desk-Build` (but a `101` or an event stream); a 401, 403 or
 // redirect without it came from Access, so the hub credential has ended (`credentials`). A Worker's
 // `403 {error: 'not-a-member'}` says the hub no longer admits the person (`denied`), which is no verified removal.
-import type { Certificates, RootTransition, Signed, SignedOrgState } from '../../../apps/org-protocol/src/index.ts';
+//
+// No text of an answer leaves here unchecked: what a refusal, a log or a status may carry (an `error` code, an email, an
+// instant) must match a short grammar, else it reads as `unrecognized` or the answer as `malformed`, so a hostile hub
+// can't reflect the bearer token into the renderer or the log.
+import { isCertificates, isCertRetirement, isMachineCert, isSigned, type Certificates, type RootTransition, type Signed, type SignedOrgState } from '../../../apps/org-protocol/src/index.ts';
 import { orgTiming, type OrgTiming } from './timing';
 
 export const BUILD_HEADER = 'x-desk-build';
@@ -46,6 +50,22 @@ export interface HubClient {
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+/** A Worker's error code (`not-a-member`, `too-many`): anything else is reported as `unrecognized`. */
+const ERROR_CODE = /^[a-z][a-z0-9-]{0,39}$/;
+/** An address as Access names it: one `@`, no space or control, within RFC 5321's lengths (a token is far longer). */
+const EMAIL = /^[^\s@\p{Cc}]{1,64}@[^\s@\p{Cc}]{1,253}$/u;
+/** An ISO 8601 instant in UTC, as the Worker writes one. */
+const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
+
+/**
+ * The served certificates: absent is null; a set that is not one is malformed (undefined). Items that are not a signed
+ * certificate or retirement are dropped: each is judged where it is used, but a reader of the set may walk them first.
+ */
+function readCertificates(value: unknown): Certificates | null | undefined {
+  if (value === undefined || value === null) return null;
+  if (!isCertificates(value)) return undefined;
+  return { certs: value.certs.filter((c) => isSigned(c, isMachineCert)), retirements: value.retirements.filter((r) => isSigned(r, isCertRetirement)) };
+}
 
 export function hubClient(input: {
   url: string;
@@ -86,7 +106,7 @@ export function hubClient(input: {
       }
       return { ok: false, kind: 'status', status: response.status, error: null };
     }
-    const error = isObject(body) && typeof body.error === 'string' ? body.error : null;
+    const error = isObject(body) && typeof body.error === 'string' ? (ERROR_CODE.test(body.error) ? body.error : 'unrecognized') : null;
     if (response.status === 403 && error === 'not-a-member') return { ok: false, kind: 'denied', status: 403 };
     if (!response.ok) return { ok: false, kind: 'status', status: response.status, error };
     const value = read(body);
@@ -95,10 +115,12 @@ export function hubClient(input: {
 
   const readView = (body: unknown): OrgStateView | null => {
     if (!isObject(body) || !Array.isArray(body.transitions)) return null;
+    const certificates = readCertificates(body.certificates);
+    if (certificates === undefined) return null;
     return {
       head: (body.head ?? null) as SignedOrgState | null,
       transitions: body.transitions as Signed<RootTransition>[],
-      certificates: (body.certificates ?? null) as Certificates | null,
+      certificates,
       ...(Array.isArray(body.chain) ? { chain: body.chain as SignedOrgState[] } : {}),
       ...(body.more === true ? { more: true } : {}),
     };
@@ -109,7 +131,7 @@ export function hubClient(input: {
       request(ME_PATH, { signal }, (body) => {
         if (!isObject(body) || !isObject(body.org) || !isObject(body.member)) return null;
         const { org, member } = body;
-        if (typeof org.id !== 'string' || typeof member.id !== 'string' || typeof member.email !== 'string') return null;
+        if (typeof org.id !== 'string' || typeof member.id !== 'string' || typeof member.email !== 'string' || !EMAIL.test(member.email)) return null;
         return { org: { id: org.id }, member: { id: member.id, email: member.email, role: String(member.role) } };
       }),
     state: (signal) => request(ORG_STATE_PATH, { signal }, readView),
@@ -131,7 +153,7 @@ export function hubClient(input: {
     },
     postPending: (entry, signal) =>
       request(PENDING_DEVICES_PATH, { method: 'POST', body: entry, signal }, (body) =>
-        isObject(body) && isObject(body.pending) && typeof body.pending.expires === 'string' ? { pending: { expires: body.pending.expires } } : null,
+        isObject(body) && isObject(body.pending) && typeof body.pending.expires === 'string' && INSTANT.test(body.pending.expires) ? { pending: { expires: body.pending.expires } } : null,
       ),
   };
 }

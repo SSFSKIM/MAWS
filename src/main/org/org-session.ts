@@ -16,6 +16,9 @@
 // - Sign-out's commit point is the `signedOut` marker in registration.json, written before access.json is deleted; a
 //   registration with no readable access.json also reads signed out, so a failed marker write that still removes the
 //   token starts signed out. A running attempt is fenced by a generation counter that cancel and sign-out advance.
+// - One commit queue carries every write of registration.json and access.json and every change of the held chain's trust
+//   (`commit`): each operation takes the registration as it stands at its turn and checks its fence there, so no write
+//   lands a snapshot another has outdated, and none queued before a sign-out lands after it.
 // - A profile that never signs in has no keys, no `<userData>/org/` and makes no request.
 //
 // Electron-free: the browser opener, the step-up signer and the build string are injected from main.
@@ -116,6 +119,10 @@ class Fenced extends Error {}
 
 const MAX_TIMER_MS = 2 ** 31 - 1;
 
+/** The same registration as trust goes: this device of this member in this org, holding the same anchor and pins. */
+const sameTrust = (a: RegistrationFile, b: RegistrationFile): boolean =>
+  a.hub === b.hub && a.org === b.org && a.member.id === b.member.id && a.device === b.device && canonicalize(a.anchor) === canonicalize(b.anchor) && canonicalize(a.pins) === canonicalize(b.pins);
+
 /** The device entry this profile's keys make: its id is the channel key's id, so it changes exactly when the keys do. */
 async function deviceEntry(keys: DeviceKeys): Promise<Omit<Device, 'endorsement'>> {
   return { id: await keyId(keys.channel.pub), class: 'native-mac', keyStorage: 'software', channelPub: keys.channel.pub, stepUpPub: keys.stepUp.pub };
@@ -179,6 +186,22 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
   let syncing: Promise<void> | null = null;
   let syncAgain = false;
   let lastStatus = '';
+  let commits: Promise<unknown> = Promise.resolve();
+
+  /**
+   * Runs `body` after every commit queued before it. Nothing run here may wait on a held view's adoption queue, whose
+   * anchor writes wait here: a view made inside is given an `anchorSaver` that keeps its anchor until the view is held.
+   */
+  function commit<T>(body: () => Promise<T>): Promise<T> {
+    const turn = commits.then(body);
+    commits = turn.catch(() => {});
+    return turn;
+  }
+
+  /** A read the feed or a timer starts: a failure (a chain.json write, say) is logged, and the held state stays as it was. */
+  function background(what: string, task: () => Promise<void>): void {
+    task().catch((error: unknown) => log(`${what} failed: ${(error as Error).message}`));
+  }
 
   // ---- what the session answers ----
 
@@ -320,7 +343,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     }
     const following = live && computeCurrent() !== null;
     if (following && certsTimer === null) {
-      certsTimer = setInterval(() => void refreshCertificates(), timing.CERTS_REFRESH_MS);
+      certsTimer = setInterval(() => background('the certificate refresh', refreshCertificates), timing.CERTS_REFRESH_MS);
       (certsTimer as { unref?: () => void }).unref?.();
     } else if (!following && certsTimer !== null) {
       clearInterval(certsTimer);
@@ -330,7 +353,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     // feed never opens while current() is null, so nothing else would ask again before a sign-in or a restart).
     const recovering = live && problem === 'held-chain';
     if (recovering && recoverTimer === null) {
-      recoverTimer = setInterval(() => void recoverFromHub(), timing.CERTS_REFRESH_MS);
+      recoverTimer = setInterval(() => background('taking the hub\'s chain', recoverFromHub), timing.CERTS_REFRESH_MS);
       (recoverTimer as { unref?: () => void }).unref?.();
     } else if (!recovering && recoverTimer !== null) {
       clearInterval(recoverTimer);
@@ -429,14 +452,14 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
         feedOpen = true;
         if (hubAccess === 'unreachable' || hubAccess === 'connecting') hubAccess = 'connecting';
         changed();
-        void sync();
+        background('following the hub', sync);
       }),
       feed.onClose(() => {
         feedOpen = false;
         changed();
       }),
       feed.onState((version) => {
-        if (held !== null && held.ready() && version > held.head().state.version) void sync();
+        if (held !== null && held.ready() && version > held.head().state.version) background('following the hub', sync);
       }),
       feed.onRemoved(() => denied('the feed closed 4403')),
       feed.onCredentialsEnded(() => credentialEnded('Access answered the feed\'s upgrade')),
@@ -454,53 +477,71 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     if (view !== null) unheld = view.onAdopted(() => changed(true));
   }
 
-  /**
-   * Writes the held registration with `anchor`. Memory takes the anchor alone, so a write begun before a sign-out never
-   * reverts it to signed in; on disk the sign-out stands all the same, since a registration with no token reads signed out.
-   */
-  async function saveAnchor(anchor: Anchor): Promise<void> {
-    if (registration === null) return;
-    await files.write(REGISTRATION_FILE, { ...registration, anchor });
-    if (registration !== null) registration = { ...registration, anchor };
+  /** Writes `anchor` onto the registration as it stands, in the commit queue, while `view` is the held one. */
+  function writeAnchor(view: HeldOrg, anchor: Anchor): Promise<void> {
+    return commit(async () => {
+      if (held !== view || registration === null) return;
+      await files.write(REGISTRATION_FILE, { ...registration, anchor });
+      registration = { ...registration!, anchor };
+    });
   }
 
   /**
-   * The anchor saver of a view made before its registration is written (registration, re-anchoring): it keeps the anchor
-   * until `commit`, which the registration file carries; from then on each adoption writes it, as every held view's does.
+   * A view's anchor saver: until `hold(view)` it keeps the anchor, which whoever holds the view writes with the
+   * registration; from then on each adoption writes its anchor (`writeAnchor`).
    */
-  function pendingAnchor(): { save(anchor: Anchor): Promise<void>; anchor(): Anchor; commit(): void } {
+  function anchorSaver(): { save(anchor: Anchor): Promise<void>; kept(): Anchor | null; hold(view: HeldOrg): void } {
     let kept: Anchor | null = null;
-    let committed = false;
+    let mine: HeldOrg | null = null;
     return {
       save: async (anchor) => {
-        if (committed) await saveAnchor(anchor);
-        else kept = anchor;
+        if (mine === null) kept = anchor;
+        else await writeAnchor(mine, anchor);
       },
-      anchor: () => kept!,
-      commit: () => void (committed = true),
+      kept: () => kept,
+      hold: (view) => {
+        mine = view;
+        hold(view);
+      },
     };
   }
 
-  /** The held chain failed its load: the hub's is taken only if it holds the anchored state on its own line. */
+  /**
+   * The held chain failed its load: the hub's is taken only if it holds the anchored state on its own line. Taking it
+   * is a trust change, so it is made in the commit queue, and only while the chain is still closed on the registration
+   * it was read for: a re-anchoring that landed first stands.
+   */
   async function recoverFromHub(): Promise<void> {
     const reg = registration;
     const cred = credential;
-    if (reg === null || cred === null || !hubLive() || problem !== 'held-chain') return;
+    if (closed || reg === null || cred === null || !hubLive() || problem !== 'held-chain') return;
     const read = await client(reg.hub, cred).chain(0);
     if (!read.ok) return hubFailed(read);
-    if (registration !== reg || problem !== 'held-chain') return;
-    const started = await startHeldOrg({
-      files,
-      anchor: reg.anchor,
-      saveAnchor,
-      first: { chain: read.value.chain, transitions: read.value.transitions, certificates: read.value.certificates ?? { certs: [], retirements: [] } },
-      log,
+    const served = read.value;
+    await commit(async () => {
+      if (closed || problem !== 'held-chain' || held !== null || registration === null || !sameTrust(registration, reg)) return;
+      const saver = anchorSaver();
+      const started = await startHeldOrg({
+        files,
+        anchor: reg.anchor,
+        saveAnchor: saver.save,
+        first: { chain: served.chain, transitions: served.transitions, certificates: served.certificates ?? { certs: [], retirements: [] } },
+        log,
+      });
+      if (!started.ok) return log(`the hub's chain does not hold the anchored state (${started.reason}); closed until a re-anchor`);
+      const anchor = saver.kept()!;
+      try {
+        await files.write(REGISTRATION_FILE, { ...registration, anchor });
+        registration = { ...registration, anchor };
+      } catch (error) {
+        // chain.json holds the anchored state on its own line, so the next load takes it and moves the anchor up
+        log(`the anchor did not move with the hub's chain: ${(error as Error).message}`);
+      }
+      saver.hold(started.held);
+      problem = null;
+      log(`the held chain was taken again from the hub, at version ${started.held.head().state.version}`);
+      changed(true);
     });
-    if (!started.ok) return log(`the hub's chain does not hold the anchored state (${started.reason}); closed until a re-anchor`);
-    hold(started.held);
-    problem = null;
-    log(`the held chain was taken again from the hub, at version ${started.held.head().state.version}`);
-    changed(true);
   }
 
   // ---- startup ----
@@ -546,9 +587,14 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
         log(`the device keys don't load: ${(error as Error).message}`);
       }
     }
-    const started = await startHeldOrg({ files, anchor: reg.anchor, saveAnchor, log });
-    if (started.ok) hold(started.held);
-    else {
+    const saver = anchorSaver();
+    const started = await startHeldOrg({ files, anchor: reg.anchor, saveAnchor: saver.save, log });
+    if (started.ok) {
+      saver.hold(started.held);
+      // A crash between chain.json and the anchor left the anchor below the held head: it is moved up.
+      const moved = saver.kept();
+      if (moved !== null) await writeAnchor(started.held, moved).catch((error: unknown) => log(`the anchor was not moved up at load: ${(error as Error).message}`));
+    } else {
       problem = 'held-chain';
       log(`the held org chain fails its check (${started.reason}): closed until the hub's chain holds the anchored state, or a re-anchor`);
     }
@@ -700,46 +746,47 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       }
     }
     // Done: chain.json, access.json, then registration.json, the commit point.
-    fence();
-    const ready = await files.ensure();
-    if (!ready.ok) refuse('directory', ready.detail);
-    const anchor = pendingAnchor();
-    const started = await startHeldOrg({ files, anchor: null, pins, first: { chain, transitions, certificates }, saveAnchor: anchor.save, log });
-    if (!started.ok) refuse('chain', started.reason);
-    fence();
-    await files.write(ACCESS_FILE, toAccessFile(code.hub, cred));
-    fence();
-    const reg: RegistrationFile = {
-      version: 1,
-      hub: code.hub,
-      org: code.org,
-      member: { id: code.member, email: me.member.email },
-      device: entry.id,
-      pins,
-      anchor: anchor.anchor(),
-      registered: new Date(now()).toISOString(),
-      signedOut: false,
-    };
-    await files.write(REGISTRATION_FILE, reg);
-    const view = (started as Extract<typeof started, { ok: true }>).held;
-    try {
+    await commit(async () => {
       fence();
-    } catch (error) {
-      // Cancelled while the commit point was being written: take it back, so a cancel writes nothing.
-      await files.remove(REGISTRATION_FILE).catch(() => {});
-      throw error;
-    }
-    registration = reg;
-    anchor.commit();
-    credential = cred;
-    keys = made;
-    hubAccess = 'connecting';
-    problem = null;
-    refused = undefined;
-    registering = null;
-    hold(view);
-    log(`registered device ${entry.id.slice(0, 8)} in org ${code.org}, at version ${view.head().state.version}`);
-    changed(true);
+      const dir = await files.ensure();
+      if (!dir.ok) refuse('directory', dir.detail);
+      const saver = anchorSaver();
+      const started = await startHeldOrg({ files, anchor: null, pins, first: { chain, transitions, certificates }, saveAnchor: saver.save, log });
+      if (!started.ok) refuse('chain', started.reason);
+      fence();
+      await files.write(ACCESS_FILE, toAccessFile(code.hub, cred));
+      fence();
+      const reg: RegistrationFile = {
+        version: 1,
+        hub: code.hub,
+        org: code.org,
+        member: { id: code.member, email: me.member.email },
+        device: entry.id,
+        pins,
+        anchor: saver.kept()!,
+        registered: new Date(now()).toISOString(),
+        signedOut: false,
+      };
+      await files.write(REGISTRATION_FILE, reg);
+      const view = (started as Extract<typeof started, { ok: true }>).held;
+      try {
+        fence();
+      } catch (error) {
+        // Cancelled while the commit point was being written: take it back, so a cancel writes nothing.
+        await files.remove(REGISTRATION_FILE).catch(() => {});
+        throw error;
+      }
+      registration = reg;
+      credential = cred;
+      keys = made;
+      hubAccess = 'connecting';
+      problem = null;
+      refused = undefined;
+      registering = null;
+      saver.hold(view);
+      log(`registered device ${entry.id.slice(0, 8)} in org ${code.org}, at version ${view.head().state.version}`);
+      changed(true);
+    });
   }
 
   function signIn(): OrgAttempt {
@@ -757,19 +804,22 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
         const cred = await login(reg.hub, { signal });
         fence();
         await checkMe(client(reg.hub, cred), cred, reg.org, reg.member.id, signal);
-        fence();
-        await files.write(ACCESS_FILE, toAccessFile(reg.hub, cred));
-        fence();
-        const next = { ...registration!, signedOut: false };
-        await files.write(REGISTRATION_FILE, next);
-        fence();
-        registration = next;
-        credential = cred;
-        hubAccess = 'connecting';
-        signingIn = false;
-        log('signed in to the hub again');
-        changed(true);
-        if (problem === 'held-chain') void recoverFromHub();
+        // Only the marker is this attempt's: the registration is read at the commit's turn, so an anchor an adoption
+        // wrote meanwhile stays. A sign-out since then fences it before each write.
+        await commit(async () => {
+          fence();
+          await files.write(ACCESS_FILE, toAccessFile(reg.hub, cred));
+          fence();
+          await files.write(REGISTRATION_FILE, { ...registration!, signedOut: false });
+          fence();
+          registration = { ...registration!, signedOut: false };
+          credential = cred;
+          hubAccess = 'connecting';
+          signingIn = false;
+          log('signed in to the hub again');
+          changed(true);
+        });
+        if (problem === 'held-chain') background('taking the hub\'s chain', recoverFromHub);
       },
       () => (signingIn = false),
     );
@@ -798,23 +848,33 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
         fence();
         const entry = await deviceEntry(k);
         if (entry.id !== reg.device || !lists(first.head, code.member, entry)) refuse('removed', 'the org state doesn\'t list this device with its keys');
-        const anchor = pendingAnchor();
-        const started = await startHeldOrg({ files, anchor: null, pins, first, saveAnchor: anchor.save, log });
-        if (!started.ok) refuse('chain', started.reason);
-        fence();
-        if (cred !== credential) await files.write(ACCESS_FILE, toAccessFile(reg.hub, cred));
-        const next: RegistrationFile = { ...registration!, pins, anchor: anchor.anchor(), signedOut: false };
-        await files.write(REGISTRATION_FILE, next);
-        fence();
-        registration = next;
-        anchor.commit();
-        credential = cred;
-        hubAccess = 'connecting';
-        signingIn = false;
-        problem = null;
-        hold((started as Extract<typeof started, { ok: true }>).held);
-        log(`re-anchored at version ${first.head.state.version}`);
-        changed(true);
+        await commit(async () => {
+          fence();
+          // A recovery that took the hub's chain first stands: there is nothing left to re-anchor.
+          if (problem !== 'held-chain' || held !== null || registration === null || !sameTrust(registration, reg)) {
+            log('the held chain was opened again before the re-anchor\'s turn; it writes nothing');
+            throw new Fenced();
+          }
+          const saver = anchorSaver();
+          const started = await startHeldOrg({ files, anchor: null, pins, first, saveAnchor: saver.save, log });
+          if (!started.ok) refuse('chain', started.reason);
+          fence();
+          if (cred !== credential) {
+            await files.write(ACCESS_FILE, toAccessFile(reg.hub, cred));
+            fence();
+          }
+          const next: RegistrationFile = { ...registration, pins, anchor: saver.kept()!, signedOut: false };
+          await files.write(REGISTRATION_FILE, next);
+          fence();
+          registration = next;
+          credential = cred;
+          hubAccess = 'connecting';
+          signingIn = false;
+          problem = null;
+          saver.hold((started as Extract<typeof started, { ok: true }>).held);
+          log(`re-anchored at version ${first.head.state.version}`);
+          changed(true);
+        });
       },
       () => (signingIn = false),
     );
@@ -832,31 +892,34 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     changed();
   }
 
-  async function signOut(): Promise<void> {
-    if (registration === null) return;
+  function signOut(): Promise<void> {
+    if (registration === null) return Promise.resolve();
+    // The fence moves now, so every attempt's commit queued before the marker writes nothing more; memory too, so the
+    // status reads signed out at once and an anchor written before the marker's turn carries it.
     generation++;
     attempt?.abort();
     attempt = null;
     registering = null;
     signingIn = false;
     signingOut = true;
-    // Memory first, so an anchor write that starts while the marker is written carries the marker too.
     registration = { ...registration, signedOut: true };
-    try {
+    return commit(async () => {
       try {
-        await files.write(REGISTRATION_FILE, registration); // the commit point
-      } catch (error) {
-        log(`the sign-out marker could not be written (${(error as Error).message}); the token is removed all the same, which reads signed out`);
+        try {
+          await files.write(REGISTRATION_FILE, { ...registration!, signedOut: true }); // the commit point
+        } catch (error) {
+          log(`the sign-out marker could not be written (${(error as Error).message}); the token is removed all the same, which reads signed out`);
+        }
+        credential = null;
+        feedOpen = false;
+        hubAccess = 'expired';
+        await files.remove(ACCESS_FILE).catch((error: unknown) => log(`${ACCESS_FILE} could not be removed: ${(error as Error).message}`));
+      } finally {
+        signingOut = false;
       }
-      credential = null;
-      feedOpen = false;
-      hubAccess = 'expired';
-      await files.remove(ACCESS_FILE).catch((error: unknown) => log(`${ACCESS_FILE} could not be removed: ${(error as Error).message}`));
-    } finally {
-      signingOut = false;
-    }
-    log('signed out');
-    changed(true);
+      log('signed out');
+      changed(true);
+    });
   }
 
   const loaded = load()
@@ -865,7 +928,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       ready = true;
       lastStatus = '';
       changed(true);
-      if (problem === 'held-chain') void recoverFromHub();
+      if (problem === 'held-chain') background('taking the hub\'s chain', recoverFromHub);
     });
 
   return {

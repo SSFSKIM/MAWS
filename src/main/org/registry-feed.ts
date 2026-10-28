@@ -51,24 +51,50 @@ export interface WebSocketLike {
 type Part = { t: 'part'; id: string; index: number; count: number; data: string };
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
-/** Joins the hub's numbered parts into the frame they carry (desk-hub's `toWire`); anything else passes through. */
+/** The incomplete sets of parts held at once, and the text they may hold together: past either, all are dropped. */
+export const MAX_PART_SETS = 4;
+export const MAX_PART_TEXT = 8 * 1024 * 1024;
+
+/**
+ * Joins the hub's numbered parts into the frame they carry (desk-hub's `toWire`); anything else passes through. What it
+ * holds is bounded: a hub that starts sets it never finishes, or sends sets too big to join, has them dropped (logged).
+ */
 export class PartJoiner {
   readonly #sets = new Map<string, Array<string | undefined>>();
+  #text = 0;
+  readonly #log: (line: string) => void;
+  constructor(log: (line: string) => void = () => {}) {
+    this.#log = log;
+  }
   add(frame: Record<string, unknown>): Record<string, unknown> | undefined {
     if (frame.t !== 'part') return frame;
     const { id, index, count, data } = frame as unknown as Part;
     if (typeof id !== 'string' || !Number.isInteger(count) || count < 1 || count > 4096 || !Number.isInteger(index) || index < 0 || index >= count || typeof data !== 'string') return undefined;
-    const slices = this.#sets.get(id) ?? new Array<string | undefined>(count).fill(undefined);
+    let slices = this.#sets.get(id);
+    if (slices === undefined) {
+      if (this.#sets.size >= MAX_PART_SETS) return this.#overflow(`more than ${MAX_PART_SETS} sets of parts are incomplete`);
+      slices = new Array<string | undefined>(count).fill(undefined);
+    }
     if (slices.length !== count) return undefined;
+    const text = this.#text - (slices[index]?.length ?? 0) + data.length;
+    if (text > MAX_PART_TEXT) return this.#overflow(`the incomplete sets of parts hold more than ${MAX_PART_TEXT} characters`);
     this.#sets.set(id, slices);
+    this.#text = text;
     slices[index] = data;
     if (slices.some((slice) => slice === undefined)) return undefined;
     this.#sets.delete(id);
+    this.#text -= slices.reduce((sum, slice) => sum + slice!.length, 0);
     const whole: unknown = JSON.parse(slices.join(''));
     return isObject(whole) ? whole : undefined;
   }
   clear(): void {
     this.#sets.clear();
+    this.#text = 0;
+  }
+  #overflow(why: string): undefined {
+    this.#log(`${why}: dropped ${this.#sets.size} incomplete sets`);
+    this.clear();
+    return undefined;
   }
 }
 
@@ -200,7 +226,7 @@ export function createRegistryFeed(deps: {
   }
 
   function connect(hub: string, headers: Record<string, string>, key: string): void {
-    const joiner = new PartJoiner();
+    const joiner = new PartJoiner(log);
     let ended = false;
     let current: WebSocketLike;
     try {
