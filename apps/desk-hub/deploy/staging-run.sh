@@ -114,6 +114,9 @@ tunnel_up() {
 # the run's search; never printed. 1 when no tunnel came up.
 start_tunnel() {
   local port=$1 tag=$2 creds=$3 scan=$4 try tl named
+  # An earlier run's credentials under the same name (one killed outright, or a crash) go first, whichever way this one
+  # comes up.
+  rm -f $creds
   for try in 1 2 3; do
     tl=$O/tunnel-$tag-$(stamp)-$try.log
     cloudflared tunnel --no-autoupdate --url http://127.0.0.1:$port > $tl 2>&1 &

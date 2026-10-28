@@ -471,6 +471,18 @@ describe('the phone step', () => {
     expect(run.stdout).toContain('files holding the Access token or a secret the run handled: 0');
   }, 120_000);
 
+  it.skipIf(!zsh)('removes a credentials file an earlier run under the same id left, though the tunnel comes up on its first try', () => {
+    const { dir, env } = setup('up');
+    const state = join(dir, 'state');
+    mkdirSync(state, { recursive: true });
+    const stale = join(state, 'phone-r6.tunnel.json');
+    writeFileSync(stale, JSON.stringify({ AccountTag: 'acct0123', TunnelSecret: apiSecret, TunnelID: '0f0e0d0c-0b0a-4908-8706-050403020100' }), { mode: 0o600 });
+    const run = spawnSync('zsh', [runner, 'phone', 'r6', '--rehearse'], { encoding: 'utf8', env, timeout: 60_000 });
+    expect(run.status, run.stdout + run.stderr).toBe(0);
+    expect(readFileSync(join(dir, 'tunnels'), 'utf8')).toBe('try\n');
+    expect(existsSync(stale)).toBe(false);
+  }, 90_000);
+
   it.skipIf(!zsh)('hands the suite the sink once the tunnel is up, and stops the tunnel when the run ends', () => {
     const { dir, env } = setup('up');
     const run = spawnSync('zsh', [runner, 'phone', 'r2', '--device', 'AbC-_9'], { encoding: 'utf8', env, timeout: 60_000 });
