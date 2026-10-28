@@ -510,7 +510,9 @@ jobs:
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/supervisor-packaged
         run: .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)' pnpm e2e:supervisor:packaged
       # P5 O2 M7: the daemon shape's packaged check, a private mawsd of a scratch profile (no LaunchAgent: the spec fails if
-      # the account's canonical dev.maws.mawsd plist appears or changes)
+      # the job creates, removes or rewrites anything of the account's canonical dev.maws.mawsd it could cause, its plist,
+      # the default profile's sockets and lock, or that profile's mawsd/ tree; a live canonical mawsd's own logs and
+      # endpoint state are left out, e2e/support/canonical-mawsd.ts)
       - if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         env:
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/supervisor-daemon-packaged
