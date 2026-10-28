@@ -16,6 +16,13 @@
 // A hub deploy need not cut the socket (O11 M8 saw hibernated sockets survive one), so nothing here waits on a reconnect
 // to learn of a change: a frame of a kind this endpoint doesn't know is ignored with one log line per kind, and the
 // welcome is read for the fields it needs. Nothing logs a credential or a frame's body.
+//
+// The socket's send buffer (send-buffer.ts) is shared by RL1's own frames and every relayed channel, so it applies
+// back-pressure rather than closing the socket: the relayed channels' streams wait while it holds HUB_SEND_LIMITS's soft
+// cap unsent (`writable`), and go on as it drains; RL1's frames and the channels' control messages never wait. Past the
+// hard cap, which counts only channel data (what devices behind the relay can make the endpoint hold), the channel whose
+// frame would pass it is closed, and the connection and its other channels are kept. A hub that reads nothing is not
+// waited on: it answers no `hb`, so the connection is given up within two heartbeats, and what it held is let go.
 import {
   CHANNEL_CLOSE,
   CHANNEL_HEADER_BYTES,
@@ -35,6 +42,7 @@ import { MACHINE_SOCKET_PATH, PartAssembler, toWire, type Part } from 'desk-hub/
 import WebSocket, { type RawData } from 'ws';
 import type { IncomingMessage } from 'node:http';
 import type { Credentials } from './hub-http';
+import { SendBuffer, type SendLimits } from './send-buffer';
 
 /** Why the link stopped for good, as `status().refusing` says it: each needs the machine's owner, not a retry. */
 export type HubStop = 're-enroll' | 'revoked' | 'replaced';
@@ -85,6 +93,13 @@ export const REPLACED_WINDOW_MS = 60_000;
 export const OPEN_MS = 15_000;
 /** The heartbeat a welcome that names none is kept at: the deployed hub's. */
 export const DEFAULT_HEARTBEAT_MS = 15_000;
+/**
+ * The socket's send buffer. Relayed streams wait at 1 MiB unsent, as on a direct socket (direct-listener.ts says why).
+ * Channel data holds at most 32 MiB: past the soft cap each streaming channel adds at most its stream window and one
+ * message, about half a MiB with a snapshot page, so two dozen streaming at once still leave room for the answers to
+ * their requests; only answers that outrun the uplink for long reach it.
+ */
+export const HUB_SEND_LIMITS: SendLimits = { soft: 1024 * 1024, hard: 32 * 1024 * 1024 };
 /** The most of a refused upgrade's body read for its verdict. */
 const VERDICT_BYTES = 64 * 1024;
 
@@ -116,6 +131,7 @@ type Attempt = {
   /** The kind of the last frame sent, for a close that names a frame (1009, 4412). */
   lastSent: string;
   parts: PartAssembler;
+  buffer: SendBuffer;
   channels: Set<number>;
   timers: Array<ReturnType<typeof setTimeout>>;
   beat: ReturnType<typeof setInterval> | null;
@@ -129,6 +145,8 @@ export type HubLinkOptions = {
   hooks?: HubLinkHooks;
   now?(): number;
   random?(): number;
+  /** The socket's send buffer; HUB_SEND_LIMITS unless a suite bounds it smaller. */
+  sendLimits?: SendLimits;
 };
 
 export class HubLink {
@@ -231,12 +249,34 @@ export class HubLink {
     return this.#sendText(attempt, frame);
   }
 
-  /** Sends `payload` on an open channel; false while it isn't open on the welcomed connection. */
+  /** The bytes the connection's socket holds unsent (0 with none). */
+  get buffered(): number {
+    return this.#attempt?.buffer.buffered ?? 0;
+  }
+
+  /** Resolves once the connection's socket holds less than its soft cap unsent, or at once with none: what relayed streams wait on. */
+  writable(): Promise<void> {
+    return this.#attempt?.buffer.writable() ?? Promise.resolve();
+  }
+
+  /**
+   * Sends `payload` on an open channel; false while it isn't open on the welcomed connection, and when the frame would
+   * take the socket's channel data past its hard cap: the channel is then closed (its handler told, its device opening
+   * it again), the connection and its other channels kept.
+   */
   sendChannel(channel: number, payload: Uint8Array): boolean {
     if (CHANNEL_HEADER_BYTES + payload.length > RL1_MESSAGE_LIMIT) throw new RangeError(`a channel's message is at most ${RL1_MESSAGE_LIMIT - CHANNEL_HEADER_BYTES} bytes`);
     const attempt = this.#attempt;
     if (attempt === null || !attempt.welcomed || !attempt.channels.has(channel)) return false;
-    return this.#sendBinary(attempt, encodeChannelFrame('data', channel, payload));
+    if (attempt.socket.readyState !== WebSocket.OPEN) return false;
+    if (attempt.buffer.send(encodeChannelFrame('data', channel, payload), { binary: true, capped: true })) {
+      attempt.lastSent = 'channel';
+      return true;
+    }
+    this.#options.log(`endpoint: the hub's socket holds ${attempt.buffer.buffered} bytes unsent, and relayed channel ${channel}'s frame would take it past its hard cap; the channel is closed`);
+    this.closeChannel(channel);
+    this.#call(() => this.#channels?.closed(channel, 'closed'));
+    return false;
   }
 
   /** Closes a channel from this end. */
@@ -284,6 +324,7 @@ export class HubLink {
       unacked: 0,
       lastSent: 'hello',
       parts: new PartAssembler({ now: this.#now }),
+      buffer: new SendBuffer(socket, this.#options.sendLimits ?? HUB_SEND_LIMITS),
       channels: new Set(),
       timers: [],
       beat: null,
@@ -502,7 +543,7 @@ export class HubLink {
   #sendText(attempt: Attempt, frame: { t: string } & Record<string, unknown>): boolean {
     if (attempt.socket.readyState !== WebSocket.OPEN) return false;
     try {
-      for (const line of toWire(frame, RL1_MESSAGE_LIMIT)) attempt.socket.send(line);
+      for (const line of toWire(frame, RL1_MESSAGE_LIMIT)) attempt.buffer.send(line, { binary: false, capped: false });
       attempt.lastSent = frame.t;
       return true;
     } catch (error) {
@@ -511,9 +552,10 @@ export class HubLink {
     }
   }
 
+  /** A channel's `open` or `close`: control, which no cap holds. */
   #sendBinary(attempt: Attempt, bytes: Uint8Array): boolean {
     if (attempt.socket.readyState !== WebSocket.OPEN) return false;
-    attempt.socket.send(bytes);
+    attempt.buffer.send(bytes, { binary: true, capped: false });
     attempt.lastSent = 'channel';
     return true;
   }

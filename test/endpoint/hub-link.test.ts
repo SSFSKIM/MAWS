@@ -1,10 +1,12 @@
 // The hub link (O10 M3) against a stand-in hub (fake-hub.ts): the hello, the welcome read tolerantly, frames it doesn't
 // know ignored with one log line per kind, each upgrade verdict and close code of P5 Decision Log 41, liveness, the
-// backoff and its reset, the log plane's per-project order, parts, and the channel multiplex.
+// backoff and its reset, the log plane's per-project order, parts, the channel multiplex, and the socket's send buffer
+// against a hub that stops reading.
 import { CHANNEL_CLOSE, decodeChannelFrame, encodeChannelFrame, RL1_PROTOCOL } from 'org-protocol';
 import { toWire } from 'desk-hub/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import { HubLink, reconnectDelay, RECONNECT_MAX_MS, STEADY_MS, type ChannelHandler, type HubLinkOptions, type HubStop } from '../../src/endpoint/hub-link';
+import type { SendLimits } from '../../src/endpoint/send-buffer';
 import { mintRef } from './fake-services';
 import { FakeHub, until } from './fake-hub';
 
@@ -342,5 +344,78 @@ describe('the channel multiplex', () => {
     await until(() => events.length === 5, 'the connection’s end');
     expect(events).toEqual(['open 3 4', 'data 3 hi', 'open 5 0', 'close 5 app-gone', 'close 3 endpoint-gone']);
     expect(() => link.sendChannel(3, new Uint8Array(1024 * 1024))).toThrow(RangeError);
+  });
+});
+
+describe('the socket’s send buffer, against a hub that stops reading', () => {
+  const limits: SendLimits = { soft: 256 * 1024, hard: 4 * 1024 * 1024 };
+  const payload = new Uint8Array(128 * 1024);
+  /** What a frame on the multiplex is to the hub: its type and channel. */
+  const channelFrames = (hub: FakeHub, conn = 0) =>
+    hub.received.filter((r): r is { conn: number; binary: Buffer } => 'binary' in r && r.conn === conn).map((r) => decodeChannelFrame(r.binary)!);
+
+  /** A welcomed link with channels 1 and 2 open, its hub's socket paused (reading nothing), and the channels' events. */
+  async function stalled(heartbeatMs = 60_000) {
+    const hub = await fakeHub();
+    hub.heartbeatMs = heartbeatMs;
+    const { link } = linkTo(hub, { sendLimits: limits });
+    const events: string[] = [];
+    link.setChannels({ opened: (channel) => void events.push(`open ${channel}`), data: () => {}, closed: (channel, reason) => void events.push(`close ${channel} ${reason}`) });
+    link.start();
+    await until(() => link.connected, 'the welcome');
+    hub.current.send(encodeChannelFrame('open', 1, new Uint8Array(0)));
+    hub.current.send(encodeChannelFrame('open', 2, new Uint8Array(0)));
+    await until(() => events.length === 2, 'both channels open');
+    hub.current.pause();
+    return { hub, link, events };
+  }
+
+  it('holds the relayed streams while the socket is over its soft cap, sends RL1 control at once, and lets them go on once the hub reads', async () => {
+    const { hub, link } = await stalled();
+    // What a relayed stream does: a frame while the link is writable. Past the kernel's buffers the socket holds them.
+    let sent = 0;
+    while (link.buffered < limits.soft && sent < 512) if (link.sendChannel(1, payload)) sent++;
+    expect(link.buffered).toBeGreaterThanOrEqual(limits.soft);
+    let writable = false;
+    const drained = link.writable().then(() => void (writable = true));
+    // RL1's control waits on nothing.
+    expect(link.send({ t: 'events', project: 'p1', events: [] })).toBe(true);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(writable).toBe(false);
+    hub.current.resume();
+    await drained;
+    expect(link.buffered).toBeLessThan(limits.soft);
+    await until(() => channelFrames(hub).length === sent && hub.frames('events').length === 1, 'every frame at the hub');
+    expect(link.generation).toBe(1);
+    expect(link.sendChannel(1, payload)).toBe(true);
+  });
+
+  it('closes the relayed channel whose send would take the socket past its hard cap, and keeps the connection and its other channels', async () => {
+    const { hub, link, events } = await stalled();
+    let sent = 0;
+    while (sent < 512 && link.sendChannel(1, payload)) sent++;
+    expect(sent).toBeLessThan(512);
+    expect(link.buffered).toBeLessThanOrEqual(limits.hard);
+    expect(events).toEqual(['open 1', 'open 2', 'close 1 closed']);
+    expect(lines.some((line) => line.includes('relayed channel 1') && line.includes('past its hard cap'))).toBe(true);
+    expect(link.sendChannel(1, payload)).toBe(false);
+    hub.current.resume();
+    await link.writable();
+    expect(link.sendChannel(2, payload)).toBe(true);
+    await until(() => channelFrames(hub).some((f) => f.type === 'data' && f.channel === 2), 'channel 2’s frame at the hub');
+    expect(channelFrames(hub).filter((f) => f.type === 'close').map((f) => f.channel)).toEqual([1]);
+    expect(link.connected).toBe(true);
+    expect(link.generation).toBe(1);
+  });
+
+  it('gives up a connection whose hub reads nothing within its heartbeats, letting what it held go', async () => {
+    const { link, events } = await stalled(100);
+    for (let n = 0; n < 512 && link.buffered < limits.soft; n++) link.sendChannel(1, payload);
+    expect(link.buffered).toBeGreaterThanOrEqual(limits.soft);
+    await link.writable();
+    expect(lines.some((line) => line.includes('two heartbeats went unanswered'))).toBe(true);
+    expect(events).toContain('close 1 endpoint-gone');
+    await until(() => link.generation === 2, 'a new connection');
+    expect(link.buffered).toBeLessThan(limits.soft);
   });
 });

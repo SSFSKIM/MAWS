@@ -243,7 +243,7 @@ export class Subscription implements StreamSource {
 
 /** A re-check answered `unavailable` is tried again after each of these; still unanswered after the last, it ends. */
 export const RECHECK_RETRY_MS: readonly number[] = [1000, 2000, 4000, 8000, 15000];
-/** A stream message the channel hasn't sealed within this ends its carrier (stream-window.ts). */
+/** A stream message the channel's carrier hasn't taken within this ends the carrier (stream-window.ts). */
 export const TRANSMIT_DEADLINE_MS = 30_000;
 
 export type SubscriptionsContext = {
