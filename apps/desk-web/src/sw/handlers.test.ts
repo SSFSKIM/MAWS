@@ -90,6 +90,25 @@ describe("the app icon's badge", () => {
   });
 });
 
+describe('a v2 push', () => {
+  const v2 = { project: 'p1', machine: 'm1', session: 's1', kind: 'waiting' };
+
+  it('shows its notification, landing on the session’s cards', async () => {
+    const { worker, shown } = scope();
+    await onPush(worker, { json: () => v2 });
+    expect(shown).toHaveLength(1);
+    expect(shown[0].title).toBe('A session is waiting for your answer');
+    expect(shown[0].options.data).toEqual({ url: '/cards/m1/s1' });
+  });
+
+  it('leaves the badge alone: it carries no count', async () => {
+    const { worker, badges } = scope();
+    await onPush(worker, { json: () => v2 });
+    await onPush(worker, { json: () => ({ ...v2, kind: 'wrote' }) });
+    expect(badges).toEqual([]);
+  });
+});
+
 describe('onNotificationClick', () => {
   const notification = (data: unknown) => ({ data, close: vi.fn() });
 

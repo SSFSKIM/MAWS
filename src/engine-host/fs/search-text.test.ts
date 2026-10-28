@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest';
 import { mkdtemp, writeFile, rm, rename } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { SearchTextReader } from './search-text';
 
 let reader: SearchTextReader;
@@ -53,6 +54,14 @@ it('indexes user and assistant text, not tool results, thinking, metadata or a t
     expect(first.text).toBe('Find bg-finished\nDone 회의');
     expect(first.cursor).toBeNull();
   } finally { await rm(dir, { recursive: true }); }
+});
+
+// test/fixtures/transcript-to-human-final.jsonl: the to-human plugin's made-up answer after a final message said
+// nothing, so a search never finds a session by its words; the turn's own text stays indexed.
+it('does not index the to-human plugin’s answer after a final message', async () => {
+  const page = await reader.read(join(TEST_FIXTURE_DIR, 'transcript-to-human-final.jsonl'));
+  expect(page.text).toBe('Run the stages and tell me how it went.\nLooking first.');
+  expect(page.cursor).toBeNull();
 });
 
 it('does not create an extraction worker when the service stops during the initial open', async () => {

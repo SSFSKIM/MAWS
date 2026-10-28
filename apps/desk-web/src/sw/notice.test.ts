@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { OwnerNotice } from 'desk-hub/protocol';
 import { describeNotice, landingOf, noticeUrl, parseNotice, type Notice } from './notice';
 
 const PROJECT = 'b6d0c2a4-5e1f-4a3b-9c8d-7e6f5a4b3c2d';
@@ -140,5 +141,78 @@ describe('describeNotice', () => {
     expect(unknown.title).toBe('The desk');
     expect(unknown.options.body).toBe('Something needs you. Open the desk to see it.');
     expect(unknown.options.data).toEqual({ url: '/' });
+  });
+});
+
+// The hub's v2 push (RL §7.4, `Registry.notify`'s `OwnerNotice`, pinned by desk-hub's `push-owners.test.ts`): no `v`, no
+// alias, no name, no count; `machine` is the machine's ref.
+describe('the v2 notice', () => {
+  const MACHINE = 'm_8f3a2c1d9e7b6a54';
+  const waiting: OwnerNotice = { project: PROJECT, machine: MACHINE, session: SESSION, kind: 'waiting' };
+  const wrote: OwnerNotice = { ...waiting, kind: 'wrote' };
+
+  it('is read from the payload the hub sends, marked as v2', () => {
+    expect(parseNotice(waiting)).toEqual({ v2: true, ...waiting });
+    expect(parseNotice(wrote)).toEqual({ v2: true, ...wrote });
+  });
+
+  it("draws a waiting session without a title of its own, landing on the session's cards", () => {
+    const shown = describeNotice(parseNotice(waiting));
+    expect(shown.title).toBe('A session is waiting for your answer');
+    expect(shown.options.body).toBe('Opens at its cards');
+    expect(shown.options.tag).toBe(`cards/${MACHINE}/${SESSION}`);
+    expect(shown.options.data).toEqual({ url: `/cards/${MACHINE}/${SESSION}` });
+    expect(shown.options).not.toHaveProperty('actions');
+  });
+
+  it('draws a session that wrote as a pointer to MAWS, landing on the cards list', () => {
+    const shown = describeNotice(parseNotice(wrote));
+    expect(shown.title).toBe('A session sent you a message');
+    expect(shown.options.body).toBe('Open MAWS to read it');
+    expect(shown.options.tag).toBe(`wrote/${MACHINE}/${SESSION}`);
+    expect(shown.options.data).toEqual({ url: '/cards' });
+  });
+
+  it('tags one notification per session and kind, so a repeat replaces its own kind', () => {
+    expect(describeNotice(parseNotice(waiting)).options.tag).toBe(describeNotice(parseNotice({ ...waiting })).options.tag);
+    expect(describeNotice(parseNotice({ ...waiting, session: 'other' })).options.tag).toBe(`cards/${MACHINE}/other`);
+  });
+
+  it("never lets a session's message hide its waiting notice: the two kinds carry different tags", () => {
+    expect(describeNotice(parseNotice(waiting)).options.tag).not.toBe(describeNotice(parseNotice(wrote)).options.tag);
+  });
+
+  it('encodes a machine ref or session id that is not URL-safe in the landing', () => {
+    expect(noticeUrl({ v2: true, ...waiting, machine: 'a/b', session: 's?1#x' })).toBe('/cards/a%2Fb/s%3F1%23x');
+  });
+
+  it('refuses a malformed or mixed payload, which the worker draws as the plain prompt', () => {
+    const refused: unknown[] = [
+      { ...waiting, kind: 'question' },
+      { ...waiting, kind: 'settled' },
+      { ...waiting, machine: '' },
+      { ...waiting, machine: undefined },
+      { ...waiting, project: 7 },
+      { ...waiting, session: '' },
+      // mixed: a v2 payload carrying DX7's fields, or DX7's marker
+      { ...waiting, v: 1 },
+      { ...waiting, v: 2 },
+      { ...waiting, alias: 'maws-45' },
+      { ...waiting, request: 'toolu_01ABC' },
+      { ...waiting, waiting: 3 },
+      { ...waiting, name: 'MAWS' },
+      { ...waiting, v2: true },
+      // mixed: a DX7 payload carrying a v2 kind
+      { ...question, kind: 'waiting', machine: MACHINE },
+    ];
+    for (const value of refused) {
+      expect(parseNotice(value), JSON.stringify(value)).toBeNull();
+      expect(describeNotice(parseNotice(value)).title, JSON.stringify(value)).toBe('The desk');
+    }
+  });
+
+  it('leaves a v1 notice as it was, a stray `machine` included', () => {
+    expect(parseNotice({ ...question, machine: MACHINE })).toEqual(question);
+    expect(describeNotice(parseNotice({ ...question, machine: MACHINE }))).toEqual(describeNotice(question));
   });
 });
