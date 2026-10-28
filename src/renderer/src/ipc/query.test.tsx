@@ -3,7 +3,7 @@ import { renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { IpcCommandError, QUERY_COMMANDS, useCommand } from './query';
-import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -21,7 +21,7 @@ describe('useCommand', () => {
   });
 
   it('resolves to the validated command output', async () => {
-    const state = { settings: { ...SETTINGS_DEFAULTS_V19, theme: 'dark' }, resolvedTheme: 'dark' };
+    const state = { settings: { ...SETTINGS_DEFAULTS_V20, theme: 'dark' }, resolvedTheme: 'dark' };
     answer({ ok: true, value: state });
     const { result } = renderHook(() => useCommand('settings.get', undefined), { wrapper });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
@@ -39,7 +39,7 @@ describe('useCommand', () => {
 
   // P5 O6 M2 (OX2): a read names its machine; this machine's keeps the key it always had, another's is cached apart
   it('asks the machine its options name, keyed apart from the local machine’s read', async () => {
-    answer({ ok: true, value: { settings: SETTINGS_DEFAULTS_V19, resolvedTheme: 'light' } });
+    answer({ ok: true, value: { settings: SETTINGS_DEFAULTS_V20, resolvedTheme: 'light' } });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const own = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
     const local = renderHook(() => useCommand('settings.get', undefined, undefined, { machine: TEST_MACHINE }), { wrapper: own });

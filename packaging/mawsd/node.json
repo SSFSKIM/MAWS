@@ -1,0 +1,8 @@
+{
+  "$comment": "mawsd's Linux runtime (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M8 'The Linux runtime and the Node floor'): the Node release equal to Electron 44.4.5's process.versions.node (24.21.0, read from the repo's Electron binary run as Node), so the Mac and Linux run one Node line. sha256 of node-v<version>-linux-<arch>.tar.gz from https://nodejs.org/dist/v24.21.0/SHASUMS256.txt, fetched 2026-10-27. scripts/mawsd-pack.mjs checks the download against it before unpacking; an Electron bump moves this file with it.",
+  "version": "24.21.0",
+  "sha256": {
+    "linux-x64": "6e1db87ef58b8819e5d5402eff1536491b18edd8eb7bee5ef7897876e88dc5ff",
+    "linux-arm64": "724282c3b43aec998aa9527380465b45d229e021b58035f5f4f63095eabfe5d5"
+  }
+}

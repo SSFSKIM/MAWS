@@ -239,6 +239,7 @@ describe('layout value shapes', () => {
     const settings = { id: 'settings', kind: 'settings', section: 'browser', pinned: false };
     expect(TabRefSchema.parse(settings)).toEqual(settings);
     expect(TabRefSchema.safeParse({ ...settings, section: 'web' }).success).toBe(false);
+    expect(TabRefSchema.parse({ ...settings, section: 'org' })).toEqual({ ...settings, section: 'org' }); // P5 O8 M1: Settings › Org
   });
 
   // W5: only `StoredMainSchema` still knows the Overview's tab, to drop it from a layout saved before the panel.

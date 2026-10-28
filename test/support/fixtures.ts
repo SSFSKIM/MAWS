@@ -22,6 +22,11 @@ export function loadEngineJournal(name: string): JournalRow[] {
 }
 // C3 end
 
+// P5's probe journals under fixtures/p5 (O2's Stop-hook probe among them), X8-validated like the passes'.
+export function loadP5Journal(name: string): JournalRow[] {
+  return readJsonl(join(FIXTURE_DIR, 'p5', `${name}.jsonl`)).map(parseJournalRow);
+}
+
 function readJsonl(file: string): unknown[] {
   return readFileSync(file, 'utf8')
     .split('\n')

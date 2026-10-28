@@ -6,6 +6,9 @@ import type { AppSessionId, AttentionId, ProjectId, RequestId, SessionId } from 
 import type { SessionRecord } from '../../src/shared/graph/session';
 import type { EngineSessionStatus } from '../../src/shared/engine/status';
 import type { ProjectRecord, SessionDigest } from '../../src/shared/ipc/schema/session';
+import type { RemoteRow } from '../../src/shared/ipc/schema/org';
+import type { MachineRef } from '../../src/shared/machine/ref';
+import type { DaemonStatus } from '../../src/shared/ipc/schema/daemon'; // P5 O2 M7
 import { expandEngine, type CompactEngine } from './scenario';
 
 export const T0 = '2026-09-28T10:00:00.000Z';
@@ -22,6 +25,14 @@ export function record(appId: string, over: Partial<SessionRecord> = {}): Sessio
 
 export function project(id: string, order: number, over: Partial<ProjectRecord> = {}): ProjectRecord {
   return { id: id as ProjectId, name: id, directory: `/work/${id}`, order, createdAt: T0, ...over };
+}
+
+// P5 O8 M2: another machine's session as its listing's row says it (main's `org.rows`): lane B, idle, the member's own.
+export function remoteRow(machine: MachineRef, session: string, over: Partial<RemoteRow> = {}): RemoteRow {
+  return {
+    machine, session, lane: 'B', state: 'idle', title: session, owners: ['member-1'], project: null, orgKey: null, availability: null,
+    revision: 1, issued: T0, mine: true, ...over,
+  };
 }
 
 export function item(appSessionId: string, kind: AttentionKind, createdAt: string, over: Partial<AttentionItem> = {}): AttentionItem {
@@ -46,3 +57,23 @@ export function status(appSessionId: string, compact: Partial<Omit<CompactEngine
 }
 
 export const humanTurn = { origin: 'human' as const, startedAt: T0, userMessageUuids: [] };
+
+// P5 O2 M7: a private `mawsd`'s daemon.status, both hosts ready
+export function daemonStatus(over: Partial<DaemonStatus> = {}): DaemonStatus {
+  return {
+    pid: 4100,
+    startedAt: T0,
+    kind: 'private',
+    build: { version: '0.0.0', commit: 'a1b2c3d4', builtAt: T0, buildId: 'mawsd00000000001', engineHostBuildId: 'engine0000000001' },
+    machine: 'mRef0123456789abcdefAB' as DaemonStatus['machine'],
+    profile: '/p',
+    platform: 'darwin',
+    role: 'laptop',
+    hosts: { 'engine-host': { state: 'ready', pid: 4200, build: 'engine0000000001', liveSessions: 0 }, 'pty-host': { state: 'ready', pid: 4300, build: 'pty0000000000001', liveSessions: 0 } },
+    clients: { engineHost: true, ptyHost: true, machine: 1 },
+    idleExitAt: null,
+    logPath: '/p/mawsd/mawsd.log',
+    endpoint: { present: false, detail: null },
+    ...over,
+  };
+}

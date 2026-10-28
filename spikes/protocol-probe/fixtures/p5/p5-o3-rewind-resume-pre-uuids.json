@@ -1,0 +1,13 @@
+{
+ "arm": "pre",
+ "sessionId": "7e7dd83a-16aa-4ef7-89e0-31a928d590fa",
+ "token": "9ad0f5b1",
+ "engine": "2.1.283",
+ "uuids": {
+  "T1": "0af489f2-f83d-44a1-9de1-04861b473183",
+  "T2": "4f15ce00-412b-4685-8cde-c493dbff9024",
+  "T3": "86fc88a1-7721-4f44-95e1-6554eaaee941",
+  "T4": "045e4b7d-2ffe-4486-a307-00754ea6de7e",
+  "T5": "772909e9-75fd-4a21-8f38-60dab407ddce"
+ }
+}

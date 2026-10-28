@@ -29,6 +29,7 @@ const PROBE = {
   },
   events: { 'probe.event': z.strictObject({ n: z.number() }) },
   hostEvents: [],
+  ptyHostEvents: [],
   mainOnly: new Set<string>(),
 } satisfies WireRegistry;
 const TIMING = { fastRetryMs: 30, slowRetryMs: 60, fastWindowMs: 60_000, helloTimeoutMs: 500, requestTimeoutMs: 300 };

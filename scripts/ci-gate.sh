@@ -283,10 +283,16 @@ if gate_runner=$(gh variable get GATE_RUNNER -R "$REPO") &&
 else
   echo 'ci-gate: warning: could not plan pool demand; pushing without the advisory Pool-Demand trailer'
 fi
-# Advisory spec-import coverage: use the merge-base diff and the committed tree, even without worktree dependencies.
-# All/default already requests the whole set. A failed check never stops the push; its notes travel to the run summary.
+# Advisory unit and spec-import coverage: use the merge-base diff and the committed tree, even without dependencies.
+# All already requests the whole set. A failed check never stops the push; its notes travel to the run summary.
 if [[ -n $gates_trailer ]]; then
-  git -C "$git_dir" fetch --quiet origin master || echo 'ci-gate: warning: fetching origin/master failed; e2e coverage uses the local origin/master' >&2
+  git -C "$git_dir" fetch --quiet origin master || echo 'ci-gate: warning: fetching origin/master failed; coverage uses the local origin/master' >&2
+  if unit_trailers=$(node "$(dirname "$0")/ci-gate-unit-coverage.mjs" --git-dir "$git_dir" --sha "$sha" --gates "$gates_trailer"); then
+    [[ -z $unit_trailers ]] || trailers+=$'\n'"$unit_trailers"
+  else
+    echo 'ci-gate: warning: unit coverage failed; going ahead' >&2
+    trailers+=$'\n''Unit-Coverage: note: unit coverage failed; no advice available'
+  fi
   if coverage_trailers=$(node "$(dirname "$0")/ci-gate-e2e-coverage.mjs" --git-dir "$git_dir" --sha "$sha" --gates "$gates_trailer"); then
     [[ -z $coverage_trailers ]] || trailers+=$'\n'"$coverage_trailers"
   else
@@ -377,6 +383,8 @@ if [[ $conclusion != success ]]; then
 fi
 [[ -z $preemptions ]] || printf '%s\n' "$preemptions"
 [[ $conclusion == success ]] || refusals "$jobs" "$failed_log"
+# Retry passes are still flakes: keep their locations beside the verdict, also on a green run.
+if [[ $jobs == *e2e:* ]]; then node "$(dirname "$0")/ci-gate-flaky.mjs" "$REPO" "$run_id"; fi
 # The attempt on a line of its own, so the status line stays what every waiter matches (^ci-gate: run [0-9]+ [a-z_]+$).
 echo "ci-gate: run $run_id attempt $run_attempt"
 echo "ci-gate: run $run_id $conclusion"

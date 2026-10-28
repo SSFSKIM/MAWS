@@ -5,9 +5,13 @@
 // unless a registered tab retention (C10's) keeps it.
 // P5 O6 M4: the subscriptions are made once, and each event goes to the partition of the machine it came from; each
 // machine's snapshots are taken when its link comes up, and again for each new generation of it (`connectShell`).
+// P5 O8 M2 (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, "The snapshot rule"): the org's rows (`org.rows`,
+// `org.rows.changed`) fill the sessions store's listed partition; a machine they cover takes no record snapshot and loads
+// when they have.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EventPayload, MawsBridge, SessionDigest } from '@shared/ipc/schema';
 import type { MachineState } from '@shared/ipc/schema/machines';
+import type { OrgRows } from '@shared/ipc/schema/org';
 import { machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import { currentTabRetention, unstartedProjectOf } from '../keymap/actions-runtime';
@@ -87,6 +91,7 @@ export function connectShell(
   let connected = true;
   const on: MawsBridge['on'] = (name, listener) => client.on(name, (payload, from) => connected && listener(payload, from));
   const rosterFreshness = createFreshness(); // advanced by every `machines.changed`, which a `machines.list` answer must not undo
+  const rowsFreshness = createFreshness(); // P5 O8 M2: advanced by every `org.rows.changed`, which an `org.rows` answer must not undo
   const links = new Map<MachineRef, Link>();
   const linkOf = (machine: MachineRef): Link => {
     let link = links.get(machine);
@@ -179,11 +184,15 @@ export function connectShell(
         link.departures++;
         sessions().forgetStatuses(machine);
       }
-      if (regained) readEngineTable(machine);
+      if (regained && !sessions().listedMachines.has(machine)) readEngineTable(machine);
     }),
     on('machines.changed', ({ machines }) => {
       rosterFreshness.advance();
       takeRoster(machines);
+    }),
+    on('org.rows.changed', (rows) => {
+      rowsFreshness.advance();
+      takeRows(rows);
     }),
   ];
 
@@ -263,6 +272,8 @@ export function connectShell(
       queued = queued.filter((q) => q.m !== m.ref);
       sessions().resetMachine(m.ref);
       link.generation = m.generation;
+      // P5 O8 M2: a machine the rows cover answers none of the five reads; it loads with its rows (`takeRows`)
+      if (sessions().listedMachines.has(m.ref)) continue;
       void snapshot(m.ref).then((applied) => {
         if (!applied) return;
         stores.machines.getState().setLoaded(m.ref);
@@ -270,6 +281,28 @@ export function connectShell(
       });
     }
   };
+  // P5 O8 M2 ("The snapshot rule"): the rows replace the listed partition whole. A machine they name loads only once this
+  // run's hub snapshot has applied (`complete`) with none of its records awaiting verification (`pending`); until then
+  // `knownTab` keeps its restored tabs, and when it loads the layout settles them as a snapshot's machine's.
+  let covered = new Set<MachineRef>();
+  const takeRows = (rows: OrgRows) => {
+    sessions().applyRows(rows);
+    const pending = new Set(rows.pending);
+    const now = new Set(rows.complete ? rows.machines.filter((m) => m !== local && !pending.has(m)) : []);
+    for (const m of now) {
+      if (covered.has(m)) continue;
+      stores.machines.getState().setLoaded(m);
+      stores.layout.getState().settleMachine(m);
+    }
+    covered = now;
+  };
+  const rowsLive = rowsFreshness.stamp();
+  void client.invoke('org.rows', undefined).then((result) => {
+    if (!connected) return;
+    if (!result.ok) console.warn('[shell] org.rows unavailable; no other machine’s rows', result.error);
+    else if (rowsLive()) takeRows(result.value);
+  });
+
   const rosterLive = rosterFreshness.stamp();
   const roster = client.invoke('machines.list', undefined).then((result) => {
     if (!connected) return;
@@ -323,8 +356,9 @@ export function connectShell(
   // P5 O6 M4 ("The layout across machines"): a tab is kept when its session is held or retained; a tab of another
   // machine also while that machine has not loaded this run, or while no roster has answered (a failed or missing roster
   // is never an absence). A machine absent from an answered roster is no longer configured, and its tabs go.
+  // P5 O8 M2: and a tab whose address is listed.
   const knownTab = (id: AppSessionId): boolean => {
-    if (sessions().records.has(id) || (currentTabRetention()?.retains(id) ?? false)) return true;
+    if (sessions().records.has(id) || sessions().listed.has(id) || (currentTabRetention()?.retains(id) ?? false)) return true;
     const machine = machineOf(id);
     if (machine === local) return false;
     const { roster: state, machines, loaded } = stores.machines.getState();

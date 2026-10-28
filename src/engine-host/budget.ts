@@ -37,21 +37,27 @@ export function defaultBudgetKiB(totalBytes: number): number {
 }
 
 // What the process holds, in a fixed order. An open turn is also the queue's `busy`, so `busy` is named only without
-// one. Ambient background tasks are left out: the engine marks them as housekeeping it does not surface as user work
-// (every skip_transcript task, such as a memory extraction or a dream, and auto-started watchers; the SDK's
-// `SDKBackgroundTasksChangedMessage.tasks[].ambient`), and an auto-started watcher would otherwise hold a process
-// forever. Grants never appear (the snapshot re-applies on resume), nor does a server the owner did not list.
+// one. P5 O2 M2: `background_tasks` also names a cron and unreadable work (`holdsWork`). Ambient background tasks are
+// left out: the engine marks them as housekeeping it does not surface as user work (every skip_transcript task, such
+// as a memory extraction or a dream, and auto-started watchers; the SDK's `SDKBackgroundTasksChangedMessage.tasks[].
+// ambient`), and an auto-started watcher would otherwise hold a process forever. Grants never appear (the snapshot
+// re-applies on resume), nor does a server the owner did not list.
 export function hardReasons(s: EngineSessionStatus, stateful: ReadonlySet<string>): HardReason[] {
   const reasons: HardReason[] = [];
   if (s.turn !== null) reasons.push('turn');
   else if (s.busy) reasons.push('busy');
-  if (s.backgroundTasks.some((t) => !t.ambient)) reasons.push('background_tasks');
+  if (s.backgroundTasks.some((t) => !t.ambient) || holdsWork(s)) reasons.push('background_tasks');
   if (s.pendingRequests > 0 || s.pendingPlan !== null) reasons.push('pending_request');
   if (s.queue.length > 0) reasons.push('queued_messages');
   if (s.heldPeerMessages.length > 0) reasons.push('held_peer_message');
   if (s.mcpServers.some((m) => stateful.has(m.name) && (m.status === 'connected' || m.status === 'pending'))) reasons.push('stateful_mcp');
   return reasons;
 }
+
+// P5 O2 M2: the work beyond the task list (work-state.ts): a cron the last Stop listed, or work the host cannot read now,
+// which counts as work (P5 §2's strict release). Folded into `background_tasks`, since a new HardReason member would be a
+// breaking change to an engine-host output; the status's `work` carries the detail.
+const holdsWork = (s: EngineSessionStatus): boolean => s.work !== undefined && (s.work.unknown !== null || s.work.crons.length > 0);
 
 // A process whose tree is in the sum: launched and not already in its termination ladder (a tree in its ladder, up
 // to 7 s, is never counted twice).

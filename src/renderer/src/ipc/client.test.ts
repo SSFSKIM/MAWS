@@ -5,7 +5,7 @@ import type { PreloadBridge } from '@shared/ipc/schema';
 import { addressOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import { createClient, onCommandRefused } from './client';
-import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
 import { record } from '../../../../test/support/builders';
 
 const LOCAL = 'LocalMachineRef0000000' as MachineRef;
@@ -26,7 +26,7 @@ function fakeBridge(answer: unknown) {
   return { bridge: bridge as unknown as PreloadBridge & typeof bridge, deliver: (name: string, payload: unknown, machine?: MachineRef) => listeners.get(name)?.(payload, machine) };
 }
 
-const LIGHT = { settings: { ...SETTINGS_DEFAULTS_V19, theme: 'light' }, resolvedTheme: 'light' } as const;
+const LIGHT = { settings: { ...SETTINGS_DEFAULTS_V20, theme: 'light' }, resolvedTheme: 'light' } as const;
 
 describe('renderer ipc client', () => {
   beforeEach(() => vi.restoreAllMocks());

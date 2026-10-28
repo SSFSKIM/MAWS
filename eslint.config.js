@@ -204,11 +204,32 @@ module.exports = defineConfig(
       'no-restricted-syntax': ['error', CLIENT_PORT_DYNAMIC, YJS_DYNAMIC],
     },
   },
+  // P5 O2 M5: `mawsd` runs as plain Node where no Electron is installed, O1's rule with no exception; its files' one
+  // block of each rule, so it restates src/'s Yjs and endpoint rules (it reaches the endpoint module through its entry).
+  {
+    files: ['src/mawsd/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': ['error', { paths: [{ name: 'electron', message: CLIENT_PORT }], patterns: [{ group: ['**/open-external'], message: CLIENT_PORT }, ...YJS_PATTERNS, ...ENDPOINT_PATTERNS] }],
+      'no-restricted-syntax': ['error', CLIENT_PORT_DYNAMIC, YJS_DYNAMIC],
+    },
+  },
   // Outside src/: the suites (but the module's own) and the e2e specs reach the module through its entry too.
   {
     files: ['test/**/*.{ts,tsx}', 'e2e/**/*.ts'],
     ignores: ['test/endpoint/**'],
     rules: { 'no-restricted-imports': ['error', { patterns: ENDPOINT_PATTERNS }] },
+  },
+  // P5 O7 M1 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Proves"): the app's RL2 link is proved against
+  // the endpoint's own harness (test/endpoint/sub-harness.ts, its org fixtures) and pins its timing to the endpoint's
+  // constants, so its suites reach inside the module as the module's own suites do. Only suites: the link's code doesn't.
+  {
+    files: ['src/main/machines/remote/*.test.ts', 'src/main/org/*.test.ts'],
+    rules: { 'no-restricted-imports': ['error', { patterns: YJS_PATTERNS }] },
+  },
+  {
+    // P5 O8 M1: the org session's suites, against the same hub and endpoint harness
+    files: ['test/machines/**/*.ts', 'test/org/**/*.ts'],
+    rules: { 'no-restricted-imports': 'off' },
   },
   // P5 O10 end
   // P3-B start: the one-schema rule (above).

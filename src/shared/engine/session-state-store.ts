@@ -105,6 +105,15 @@ export interface GrantSnapshot {
 }
 export const GrantSnapshotSchema = z.strictObject({ allow: z.array(z.string()) });
 
+// P5 O2 M2 (P5 Decision Log 49): a session's cron knowledge as its engine host last had it (src/engine-host/work-state.ts):
+// the session-only crons the last Stop listed, and whether a cron tool ran (or a Stop was unreadable) since. A resume
+// that does not follow a release starts its crons known and empty only when this shows none listed and no tool since.
+export const CronRecordSchema = z.object({
+  sessionCrons: z.array(z.object({ id: z.string(), schedule: z.string(), recurring: z.boolean(), prompt: z.string() }).strip()),
+  toolSinceStop: z.boolean(),
+}).strip();
+export type CronRecord = z.infer<typeof CronRecordSchema>;
+
 export interface SessionStateStore {
   exists(appSessionId: AppSessionId): Promise<boolean>; // a state file exists for the id (C10's ask: `session.queue.list` for an unreserved id)
   loadQueue(appSessionId: AppSessionId): Promise<StoredQueue>; // reads only: the recovery transitions happen in MessageQueue
@@ -115,4 +124,17 @@ export interface SessionStateStore {
   saveLaunchSpec(appSessionId: AppSessionId, spec: LaunchSpec): Promise<void>;
   forgetJournal(appSessionId: AppSessionId): Promise<void>; // archive (charter §12 C10): the journal only; the state file with the queue and grants survives
   forget(appSessionId: AppSessionId): Promise<void>; // the whole erase, state file and journal (C10's delete conversation)
+  // P5 O2 M2: the owner's Keep running mark (`session.setKeep`), false when never set
+  loadKeep(appSessionId: AppSessionId): Promise<boolean>;
+  saveKeep(appSessionId: AppSessionId, keep: boolean): Promise<void>;
+  // P5 O2 M2 (P5 Decision Log 46): every engine session id the app session has had, which its durable crons are matched
+  // against (src/engine-host/durable-crons.ts); empty when never saved; rejects when they were lost (a state file moved
+  // aside as unreadable since they were last saved), so a lost lineage is unavailable, never a clean empty one
+  loadEngineSessionIds(appSessionId: AppSessionId): Promise<string[]>;
+  saveEngineSessionIds(appSessionId: AppSessionId, ids: string[]): Promise<void>;
+  // P5 O2 M2 (P5 Decision Log 49): the cron record; null when never written, of a shape this build cannot read, or
+  // after a save of it failed (a failed save removes the older record, which may be cleaner than the truth, so the
+  // record stays missing across a restart until a save succeeds)
+  loadCronRecord(appSessionId: AppSessionId): Promise<CronRecord | null>;
+  saveCronRecord(appSessionId: AppSessionId, record: CronRecord): Promise<void>;
 }

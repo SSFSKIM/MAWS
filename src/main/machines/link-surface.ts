@@ -23,7 +23,7 @@ const LINK_RULES = {
 };
 const CLIENT_RULES = {
   // `maws.*` are the host-to-app bridges, which the machine's own app answers
-  namespaces: ['layout', 'voice', 'browser', 'maws', 'settings', 'catalog', 'connectors', 'delivery', 'library', 'spaces', 'artifacts', 'plugins', 'machines'],
+  namespaces: ['layout', 'voice', 'browser', 'maws', 'settings', 'catalog', 'connectors', 'delivery', 'library', 'spaces', 'artifacts', 'plugins', 'machines', 'org'],
   names: ['attention.navigate', 'attention.notified', 'engine.budget', 'host.status', 'host.supervisorStatus'],
 };
 
@@ -46,5 +46,6 @@ export const LINK_REGISTRY: WireRegistry = {
   ),
   events: Object.fromEntries(LINK_EVENTS.map((name) => [name, REGISTRY.events[name]])),
   hostEvents: [],
+  ptyHostEvents: [], // P5 O2 M4: as hostEvents, the link serves no host
   mainOnly: new Set(),
 };

@@ -10,9 +10,9 @@ import { hostname, totalmem } from 'node:os'; // C12: the default memory budget;
 import { app, BrowserWindow, dialog, screen } from 'electron';
 import type { ClientRef } from '@shared/ipc/client';
 import { pageOf } from './ipc/clients';
-import { createHosts } from './hosts';
+import { createHosts, prepareLaunch, refuseTestLaunchOnDefaultProfile, type LaunchShape } from './hosts'; // P5 O2 M7: prepareLaunch; the landing: the refusal
 import { dispatchLocal, installRouter } from './ipc/router'; // P5 O6 M3: dispatchLocal, the local link's and the stand-in's
-import { startSettings } from './settings';
+import { startSettings, type SettingsService } from './settings';
 import { startWithProfileLock } from './files/profile-lock';
 import { describeMainBuild, loadedBundlePath, olderInstanceNotice, staleBuildCheck, type MainBuild } from './build-identity'; // E11 §2.7; F2b 2.7b
 import { builtAtLabel } from '@shared/app/build-time'; // E11 §2.7
@@ -26,7 +26,17 @@ import { bindLocalMachine } from './machine/local'; // P5 O6 M2
 import { startMachines } from './machines'; // P5 O6 M3: the connection manager, and the stand-in behind its gate
 import { createLaneADriver, registerLaneA } from './lane-a/driver'; // P5 O9 M2: terminal sessions' bridges
 import { sminosHome } from './lane-a/discovery'; // P5 O9 M2
+import { createStepUp } from './device/step-up'; // P5 O7 M1: the development org session's signer; P5 O8 M1: the production session's
+import { createDevOrgSession } from './org/dev-session'; // P5 O7 M1
 import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2
+import { powerMonitor } from 'electron'; // P5 O8 M1: the Registry feed reconnects at wake and unlock
+import { openExternalUrl } from './open-external'; // P5 O8 M1: the Access login's browser trip
+import { createOrgSession } from './org/org-session'; // P5 O8 M1
+import { excludeFromBackup } from './device/backup-exclusion';
+import { createRegistryFeed } from './org/registry-feed'; // P5 O8 M1
+import { registerOrgHandlers, registerRowsHandler } from './org/register'; // P5 O8 M1; M2: org.rows
+import { orgFiles } from './org/files'; // P5 O8 M1
+import { createRemoteRows } from './org/rows'; // P5 O8 M2
 // C3 end
 // C4 start (emit comes with C3's imports)
 import { startIndexAttention } from './index/attention-service';
@@ -92,6 +102,7 @@ import { captureRegion } from './layout/capture-region'; // P3-G
 import { createClaudeUsageApp, execRunner } from './gateway/claude-usage-app';
 import { startEngineConfigure } from './settings/engine-configure';
 import { startHostConfigure } from './settings/host-configure'; // E10
+import { interestSet, startInterest } from './sessions/interest'; // P5 O2 M2
 import { revealPath } from './settings/reveal';
 import { sessionSettingsOf } from './settings/session-settings';
 import { knownSessionDirectories } from './settings/session-directories';
@@ -172,6 +183,9 @@ process.on('SIGUSR1', () => {});
 
 // A fresh profile for the end-to-end smoke (and anyone else who wants one); must be set before the app is ready.
 if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DATA);
+// P5 O2 landing: a test or harness launch never runs on the default profile, whose daemon and LaunchAgent are the
+// owner's; it exits here, before the profile lock, the machine identity, the settings or a host (hosts/mode.ts).
+refuseTestLaunchOnDefaultProfile();
 // The smoke runs unattended, so nothing may wait on a person: Chromium keeps its storage key in a mock keychain
 // instead of asking the login keychain, whose access prompt an unsigned or re-signed build can raise.
 if (process.env.MAWS_E2E) app.commandLine.appendSwitch('use-mock-keychain');
@@ -253,12 +267,67 @@ void startWithProfileLock(app, () => {
     return;
   }
   bindLocalMachine(local); // P5 O6 M2: the router's, `emit`'s and every app window's local machine
+  // P5 O2 M7: the settings are read before the hosts, and the launch's shape (`supervisor.shape`, read once) settled
+  // before they are created: the default profile's LaunchAgent installed, repaired or uninstalled first
+  const settings = startSettings(join(app.getPath('userData'), 'settings.json'));
+  const launch = prepareLaunch(settings.state().settings.supervisor.shape);
+  const machine = { local, localName };
+  if (!(launch instanceof Promise)) return startMain(settings, launch, machine);
+  void launch.then(
+    (settled) => startMain(settings, settled, machine),
+    (error: unknown) => {
+      console.error('[hosts] the launch could not settle its shape; quitting', error);
+      app.exit(1);
+    },
+  );
+}, { build: MAIN_BUILD, onSecondInstance: answerSecondLaunch }); // E11 §2.7
+
+function startMain(settings: SettingsService, launch: LaunchShape, { local, localName }: { local: MachineRef; localName: string }): void {
   installContentSecurityPolicy();
   // C9 block begin: the harness's fake session directories; a terminal's links open through pty.openLink
   if (process.env.MAWS_HARNESS === '1') prepareHarness();
   registerPtyOpenLink();
   // C9 block end
-  const hosts = createHosts(MAIN_BUILD); // E11 §2.7: main's build for host.status
+  const hosts = createHosts(MAIN_BUILD, launch); // E11 §2.7: main's build for host.status; P5 O2 M7: the launch's shape
+  // P5 O8 M1: this profile's org session (src/main/org/org-session.ts): the sign-in from a pairing code, the held org
+  // state and the hub's credential, read from <userData>/org/ in the background; a profile that never signs in makes no
+  // keys, files or requests. A development build started with MAWS_DEV_ORG=<dir> runs O7's development session instead
+  // (dev-session.ts), and org.status says so. One Registry feed (?app=1) follows the hub for whichever session runs, and
+  // hands the production session its notices; org.* answers the Org section.
+  const devOrg =
+    process.env.MAWS_DEV_ORG && !app.isPackaged
+      ? createDevOrgSession({
+          dir: process.env.MAWS_DEV_ORG,
+          userData: app.getPath('userData'),
+          packaged: app.isPackaged,
+          build: `${MAIN_BUILD.version}+${MAIN_BUILD.commit}`,
+          stepUp: (keys, device) => createStepUp({ device, key: keys.stepUp }),
+          log: (line) => console.log(line),
+        })
+      : null;
+  // One handle on <userData>/org/ for the session and M2's rows cache; excluded from Time Machine at its creation
+  const orgDir = orgFiles({ userData: app.getPath('userData'), excludeFromBackup: (path) => excludeFromBackup(path), log: (line) => console.log(`[org] ${line}`) });
+  const orgSession =
+    devOrg === null
+      ? createOrgSession({
+          files: orgDir,
+          userData: app.getPath('userData'),
+          build: `${MAIN_BUILD.version}+${MAIN_BUILD.commit}`,
+          packaged: app.isPackaged,
+          env: process.env,
+          openExternal: (url) => openExternalUrl(url),
+          stepUp: (keys, device) => createStepUp({ device, key: keys.stepUp }),
+          // `<userData>/org/` stays out of Time Machine, as the device keys do: a restored token or chain is no one's
+          excludeFromBackup: (path) => excludeFromBackup(path),
+          log: (line) => console.log(line),
+        })
+      : null;
+  const session = devOrg ?? orgSession!;
+  const orgFeed = createRegistryFeed({ session, log: (line) => console.log(line) });
+  orgSession?.attach(orgFeed);
+  registerOrgHandlers({ register: registerMainHandler, emit: (name, status) => void emit(name, status), service: orgSession, development: devOrg });
+  powerMonitor.on('resume', () => orgFeed.probe());
+  powerMonitor.on('unlock-screen', () => orgFeed.probe());
   // P5 O6 M3: every other machine through the connection manager (one link per machine; MAWS_LOCAL_MACHINES names another
   // profile's serve directory in a build that is not packaged), and machines.list and machines.changed
   const machines = startMachines({
@@ -272,12 +341,13 @@ void startWithProfileLock(app, () => {
     appRoot: process.cwd(), // the development app root, as the browser's peer check reads the addon's prebuild
     register: registerMainHandler,
     dispatchLocal,
+    // P5 O7 M1: the org session the RL2 links read; P5 O8 M1: production's sign-in, or O7's development session
+    session,
   });
   installRouter({ appUrl, local, dispatchToHost: hosts.dispatch, remote: machines.dispatch });
   // P5 O1 M3 (OX4): the client port, the one way a machine-bound service reaches the person's screen: dialogs, the
   // Replace question, Finder, the browser, notifications, the badge and focus. `openWindow` is read when a focus needs it.
   const clientPort = electronClientPort({ env: process.env, openWindow: () => openWindow() });
-  const settings = startSettings(join(app.getPath('userData'), 'settings.json'));
   // E11: every will-quit step below joins one ordered list behind one listener (tracker row E10 "14 will-quit listeners");
   // a step's promise (the hosts' draining close of a kept supervisor's socket) holds the exit, bounded by the port's grace;
   // P4 W2-B: the hosts' stop is a drain, run before the rest, which stop once it has settled
@@ -298,6 +368,29 @@ void startWithProfileLock(app, () => {
   // P5 O6 M5: each project's org project, derived again in the background at every start (OX3)
   void index.refreshOrgProjects({ machine: local });
   registerIndexHandlers(index);
+  // P5 O8 M2: other machines' sessions, from their signed listings through the feed, verified against the held org state,
+  // for the machines of O7's RL2 roster (src/main/org/rows.ts); org.rows and org.rows.changed carry them to the sidebar
+  let roster: readonly MachineRef[] = [];
+  const rosterListeners = new Set<() => void>();
+  machines.onRemote((refs) => {
+    roster = refs;
+    for (const listener of [...rosterListeners]) listener();
+  });
+  const remoteRows = createRemoteRows({
+    session,
+    feed: orgFeed,
+    roster: () => roster,
+    onRoster: (listener) => {
+      rosterListeners.add(listener);
+      return () => void rosterListeners.delete(listener);
+    },
+    localProjects: async () => index.projects.listWithRemoved(),
+    onLocalProjects: (listener) => onEmitted('session.projects.changed', () => listener()),
+    files: orgDir,
+    emit: (rows) => void emit('org.rows.changed', rows),
+    log: (line) => console.log(`[org-rows] ${line}`),
+  });
+  registerRowsHandler({ register: registerMainHandler, rows: remoteRows });
   const indexSource = new IndexSessionSource(index, hosts, { emit });
   // C3's attention service, as C3 started it, with `Index.attention` as its store (C3's file store only when this app
   // cannot read the index); an archive the index records retires the session's attention.
@@ -580,6 +673,18 @@ void startWithProfileLock(app, () => {
     env: process.env,
   });
   shutdown.add('host configure', stopHostConfigure);
+  // P5 O2 M2: the sessions this app holds open, which the engine host's idle release never stops
+  const stopInterest = startInterest({
+    sessions: () => interestSet(layout.get('main.tabs'), sessions.model.visibleSessions(), local), // P5 O6: the local machine's
+    onChange: (listener) => {
+      const offs = [layout.onChange((key) => { if (key === 'main.tabs') listener(); }), sessions.model.on('visible', () => listener())];
+      return () => offs.forEach((off) => off());
+    },
+    streaming: () => hosts.streaming('engine-host'),
+    onStreaming: (listener) => hosts.onStreaming('engine-host', listener),
+    dispatch: (input) => hosts.dispatch('engine-host', 'host.interest', input) as Promise<CommandResult<'host.interest'>>,
+  });
+  shutdown.add('interest', stopInterest);
   // C12 start: the Settings tab's read of the configuration main holds for it
   registerMainHandler('settings.engineApplied', () => engineConfigure.applied());
   // C12 end
@@ -851,7 +956,7 @@ void startWithProfileLock(app, () => {
     // C3's engine host stops its sessions within the grace; a host that cannot answer (not started, or a build without
     // C3's command) has nothing to stop. E10: through the quit's stop-all (`host.stopAll` to a detached supervisor, which
     // then exits; `engine.shutdown` to a utility host), and keep offered in detached mode with the setting's default.
-    ...engineQuitDeps(hosts, () => settings.state().settings),
+    ...engineQuitDeps(hosts, () => settings.state().settings, () => launch.mode === 'daemon'), // P5 O2 M7: terminals outlive the app on the daemon shape
     // debt wave 6: past the bound, the ladder's SIGKILL rung for the engines still the engine host's children
     engines: { hostPid: () => hosts.snapshot('engine-host').pid, ps: listProcesses, kill: (pid) => process.kill(pid, 'SIGKILL') },
     // E5 start: the unsaved files the windows pushed, and Save all's round trip
@@ -906,4 +1011,11 @@ void startWithProfileLock(app, () => {
   // is ever stopped.
   machines.serve();
   shutdown.add('machines', () => machines.stop());
-}, { build: MAIN_BUILD, onSecondInstance: answerSecondLaunch }); // E11 §2.7
+  // P5 O8 M1: the feed and the session stop (every org file is written whole and renamed); M2: the rows' last change is
+  // written to their cache first, so a relaunch keeps every mark
+  shutdown.add('org', () => {
+    orgFeed.close();
+    void orgSession?.close();
+    return remoteRows.close();
+  });
+}

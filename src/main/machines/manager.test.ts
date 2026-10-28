@@ -12,6 +12,7 @@ import type { MainContext } from '../ipc/router';
 import { KNOWN_MACHINES_FILE, writeKnownMachines } from './known-machines';
 import { createLocalLink } from './local-link';
 import { createConnectionManager, type LinkState, type MachineLink } from './manager';
+import type { RemoteSource } from './remote/source';
 
 const LOCAL = 'LocalMachineRef0000000' as MachineRef;
 const B = 'StandinBMachineRef0000' as MachineRef;
@@ -72,7 +73,39 @@ afterEach(() => {
   for (const made of dirs.splice(0)) rmSync(made, { recursive: true, force: true });
 });
 
-function manager(configured: string[], known?: Parameters<typeof writeKnownMachines>[1]) {
+// The RL2 source the test drives (P5 O7 M1): `roster` is what the org session lists; `set` changes it.
+interface FakeRemote extends RemoteSource {
+  set(roster: { ref: MachineRef; name: string }[]): void;
+  links: Map<MachineRef, FakeLink & { carrierNow: string | null; refusalNow: string | null; carrier(): string | null; refusal(): string | null }>;
+}
+function fakeRemote(initial: { ref: MachineRef; name: string }[] = []): FakeRemote {
+  let roster = initial;
+  const listeners = new Set<() => void>();
+  const links: FakeRemote['links'] = new Map();
+  return {
+    links,
+    machines: () => roster,
+    onChanged: (listener) => (listeners.add(listener), () => void listeners.delete(listener)),
+    connect(machine) {
+      const base = fakeLink();
+      const link = Object.assign(base, {
+        carrierNow: null as string | null,
+        refusalNow: null as string | null,
+        carrier: () => link.carrierNow,
+        refusal: () => link.refusalNow,
+      });
+      Object.defineProperty(link, 'machine', { get: () => machine.ref });
+      links.set(machine.ref, link);
+      return link;
+    },
+    set(next) {
+      roster = next;
+      for (const listener of [...listeners]) listener();
+    },
+  };
+}
+
+function manager(configured: string[], known?: Parameters<typeof writeKnownMachines>[1], remote?: RemoteSource) {
   const dir = mkdtempSync(join(tmpdir(), 'maws-manager-'));
   dirs.push(dir);
   const knownMachinesFile = join(dir, KNOWN_MACHINES_FILE);
@@ -93,6 +126,7 @@ function manager(configured: string[], known?: Parameters<typeof writeKnownMachi
       links.set(at, link);
       return link;
     },
+    remote,
     log,
   });
   const changes: MachineState[][] = [];
@@ -230,5 +264,64 @@ describe('the connection manager', () => {
     const m = manager([DIR_B, DIR_C]);
     m.manager.close();
     expect([m.link(DIR_B).closed, m.link(DIR_C).closed]).toEqual([true, true]);
+  });
+});
+
+describe('RL2 machines (P5 O7 M1)', () => {
+  const D = 'RemoteDMachineRef00000' as MachineRef;
+  const E = 'RemoteEMachineRef00000' as MachineRef;
+
+  it('lists an RL2 machine `connecting` from creation, `up` with its carrier, renamed on a rename, dropped when the roster drops it', () => {
+    const remote = fakeRemote([{ ref: D, name: 'mini' }]);
+    const m = manager([], undefined, remote);
+    expect(m.manager.list().find((x) => x.ref === D)).toMatchObject({ ref: D, name: 'mini', state: 'connecting', local: false, generation: 0 });
+    const link = remote.links.get(D)!;
+    link.carrierNow = 'relay';
+    link.up(D, 'mini');
+    expect(m.manager.list().find((x) => x.ref === D)).toMatchObject({ state: 'up', carrier: 'relay', generation: 1 });
+    link.carrierNow = 'direct';
+    link.up(D, 'mini'); // the switch: heard, no new generation
+    expect(m.changes.at(-1)!.find((x) => x.ref === D)).toMatchObject({ state: 'up', carrier: 'direct', generation: 1 });
+    remote.set([{ ref: D, name: 'mini-2' }]);
+    expect(m.manager.list().find((x) => x.ref === D)!.name).toBe('mini-2');
+    remote.set([]);
+    expect(link.closed).toBe(true);
+    expect(m.manager.list().map((x) => x.ref)).toEqual([LOCAL]);
+  });
+
+  it('reports a link’s refusal while it holds', () => {
+    const remote = fakeRemote([{ ref: D, name: 'mini' }]);
+    const m = manager([], undefined, remote);
+    const link = remote.links.get(D)!;
+    link.refusalNow = 'removed';
+    link.down();
+    expect(m.manager.list().find((x) => x.ref === D)).toMatchObject({ state: 'down', refusal: 'removed' });
+    expect(m.manager.list().find((x) => x.ref === D)!.carrier).toBeUndefined();
+  });
+
+  it('closes an RL2 link that comes up for a ref a socket link already reaches up', () => {
+    const remote = fakeRemote([{ ref: B, name: 'standin-b' }]);
+    const m = manager([DIR_B], undefined, remote);
+    m.link(DIR_B).up(B, 'standin-b');
+    remote.links.get(B)!.up(B, 'standin-b');
+    expect(remote.links.get(B)!.closed).toBe(true);
+    expect(m.manager.list().filter((x) => x.ref === B)).toEqual([expect.objectContaining({ state: 'up', carrier: 'socket' })]);
+    expect(m.log).toHaveBeenCalledWith(expect.stringContaining('closing the RL2 link'));
+  });
+
+  it('dispatches to an RL2 entry by ref, and never to the local or an unknown one', async () => {
+    const remote = fakeRemote([{ ref: D, name: 'mini' }, { ref: E, name: 'vm' }]);
+    const m = manager([], undefined, remote);
+    remote.links.get(D)!.up(D, 'mini');
+    await expect(m.manager.dispatch(D, 'session.list', {}, ctx)).resolves.toEqual({ ok: true, value: { from: D } });
+    expect(remote.links.get(D)!.calls).toEqual([['session.list', {}]]);
+    await expect(m.manager.dispatch(E, 'session.list', {}, ctx)).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+  });
+
+  it('closes RL2 links at close', () => {
+    const remote = fakeRemote([{ ref: D, name: 'mini' }]);
+    const m = manager([], undefined, remote);
+    m.manager.close();
+    expect(remote.links.get(D)!.closed).toBe(true);
   });
 });

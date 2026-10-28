@@ -25,7 +25,7 @@ O7 makes the app use it, and then brings lane B to full depth across it. Lane B 
 
 ## Progress
 
-- [ ] M1 — The app's RL2 link (`RemoteLink`, O6's `MachineLink` over RL2) — **executable now** (needs O6, O10 M1–M9, O11: all landed)
+- [x] M1 — The app's RL2 link (`RemoteLink`, O6's `MachineLink` over RL2) — built on branch `p5-o7-m1` (2026-10-28); its PR carries the gate runs and the review (report `docs/doperpowers/plans/2026-10-28-p5-o7-report.md`)
 - [ ] M2 — Lane B's conversation over the link — *advisory; needs O10 M10 (so O2); app-less machines need O3*
 - [ ] M3 — Remote terminals and port forwarding — *advisory; needs O2's pty host and O10 M10, not O3*
 - [ ] M4 — The moved namespaces: diff, files, uploads and spawn anywhere — *advisory; needs O3*
@@ -111,7 +111,7 @@ The items, each with the milestone that proves it. Items 2–7 are restated from
   - A host error `host_unavailable` or `timeout` comes back as code `unavailable`. Other host error codes pass through (`calls.ts`).
   - A lane A read (`sminos.rows`, `diff`, `output`, `read`) must name the caller's own subscription on that session in `input.sub`.
   - Liveness: each side pings after 5–7 s of silence and closes after two unanswered pings (`channels.ts`, `PING_MS`).
-  - A device that stops reading loses its socket. Each carrier's send buffer (`send-buffer.ts`, P5 Decision Log 91) ends the socket past its ceiling or its stall bound, and the link reads that as a transient carrier close.
+  - On the direct carrier, a device that stops reading loses its socket: the listener's send buffer (`send-buffer.ts`, P5 Decision Log 91) ends the socket past its ceiling or its stall bound, and the link reads that as a transient carrier close. On the relay this holds only up to the hub: the endpoint's hub link is bounded, but the hub's last hop to the app socket has no byte or stall bound (`apps/desk-hub/src/objects/relay.ts`), a gap P5 Decision Log 94 tracks.
   - The direct listener allows 3 handshakes in a burst and 5 a minute per source address, and answers `503 busy` at the upgrade past that (`direct-listener.ts`, `HANDSHAKE_LIMITS`). It listens on port 47830 on tailnet addresses only.
   - Lane B's cursor is `(launchId, seq, idx)`. Lane A's is `(epoch, seq)`, the epoch being the endpoint's upstream subscription, which outlives a dropped channel for 120 s (`interest.ts`, `RESUME_MS`).
 - **The hub, for an app** (O11; `apps/desk-hub/src/worker.ts`). Each route takes a member authenticated by Access, or by the local stand-in's header in tests (`credentials(email)` from `apps/desk-hub/test/support/local.ts`).
@@ -152,8 +152,9 @@ M1 runs now and lands by its own PR. M2 and M3 need O10 M10 (the endpoint inside
   - `src/main/machines/index.ts` (composition, probes, `Machines.remote`);
   - `src/main/index.ts` (the session handed to `startMachines`);
   - `src/shared/ipc/schema/machines.ts` (two optional fields);
-  - `vitest.config.ts` (the local suite joins `TIMING_NODE_TESTS`);
-  - `test/endpoint/sub-harness.ts`, additively: `FakeEngineHost` today handles only `session.answer` under `host.op` and doesn't route `host.opQuery`, so a `session.send` act is refused `unavailable` before any claim. It gains a `session.send` handler that records each run and appends a journal row (and so a lane B event), and routes `host.opQuery` to `opCommands(...).opQuery`, as `test/endpoint/actions.test.ts`'s `engineHost()` does. No existing suite depends on the refusal (`calls.test.ts` asserts only `act-required` for a call).
+  - `vitest.config.ts` (both link suites join `TIMING_NODE_TESTS`);
+  - `eslint.config.js` (the link's unit suites and `test/machines/**` may import the endpoint and its test harness);
+  - `test/endpoint/sub-harness.ts`, additively (and `StartOptions.limits`, the direct listener's handshake limits, since the default per-source burst of 3 trips on loopback where every handshake shares one source): `FakeEngineHost` today handles only `session.answer` under `host.op` and doesn't route `host.opQuery`, so a `session.send` act is refused `unavailable` before any claim. It gains a `session.send` handler that records each run and appends a journal row (and so a lane B event), and routes `host.opQuery` to `opCommands(...).opQuery`, as `test/endpoint/actions.test.ts`'s `engineHost()` does. No existing suite depends on the refusal (`calls.test.ts` asserts only `act-required` for a call).
 
 **Interfaces.** It produces §A (`RemoteLink`, `Machines.remote`), §B (`OrgSession`), §C (the manager's `RemoteSource`), §D (`MachineState.carrier` and `.refusal`) and §E (`<userData>/endpoint-records.json`, `MAWS_DEV_ORG`). It consumes O6's `MachineLink`, `ConnectionManager` and `LINK_REGISTRY`/`onLink`, O10's `connectChannel`, `readMessage`, `Action`, `verifyEndpointRecord` and `verifyMachineCert`, O10 M9's `loadDeviceKeys` and `createStepUp`, and O1's `gradeOf` and `codecOf`.
 
@@ -223,7 +224,7 @@ M1 runs now and lands by its own PR. M2 and M3 need O10 M10 (the endpoint inside
 | `up` | channel lost: sealed `close` `restart`, `timeout` or any other transient reason, or a carrier close | `reconnecting` | an attempt at once |
 | `up`, `reconnecting` | sealed `close {reason: 'removed'}` | `refused` | subscriptions `ended('removed')`; acts never sent resolve `refused {reason: 'removed'}`, acts sent and not settled resolve `unknown {reason: 'removed'}` (a refused device can't query); calls fail `removed` |
 | any but `closed`, `refused` | `OrgSession` change that retires a machine key the current channel or a running attempt was authenticated against, or changes this device's identity | `reconnecting` (from `up`), unchanged otherwise | the trust generation goes up by one; the current channel is closed and an attempt runs at once; an attempt begun under an older generation is discarded when it completes |
-| `up` | probe | `up` | `ping` now; no `pong` within `PROBE_PONG_MS` (2 s) counts as channel lost (`timeout`) |
+| `up` | probe | `up` | `ping` now; no message of any kind within `PROBE_PONG_MS` (2 s) counts as channel lost (`timeout`) |
 | `up` (relay) | direct recheck or probe, direct handshake completes | `up` (direct) | the switch above |
 | `refused` | `OrgSession` changes, or a probe with reason `person` | `down` (attempting) | an attempt now |
 | any | `close()` | `closed` | subscriptions `ended('closed')`; acts never sent resolve `refused {reason: 'closed'}`, acts sent resolve `unknown {reason: 'closed'}`; `close` sent on the channel; the relay socket closed |
@@ -231,21 +232,21 @@ M1 runs now and lands by its own PR. M2 and M3 need O10 M10 (the endpoint inside
 - **Requests while `refused` or `closed`** end at once. A call fails `removed` (or `closed`), an act resolves `refused {reason: 'removed'}` (or `closed`), and a subscription is `ended('removed')` (or `closed`).
 - **One attempt at a time.** A probe or a backoff timer that fires during an attempt is remembered, and runs one more attempt if that one fails.
 - **Transient or permanent.**
-  - Permanent: only a sealed `close {reason: 'removed'}`, which arrives authenticated inside the channel. The link's own view decides the rest without any peer's word: a machine that leaves the roster is closed by the manager, and a device the head no longer lists is signed out by its `OrgSession`.
+  - Permanent: only a sealed `close {reason: 'removed'}`, which arrives authenticated inside the channel. `Channel.onClose` reports a sealed close's reason and a carrier's end alike, so every production carrier (`carriers.ts`, and the link's wrapper around any injected one) reports its own end as `carrier`, whatever reason the socket's close frame or the relay's channel close carried: a relay or a socket that closes with `removed` stays transient. The link's own view decides the rest without any peer's word: a machine that leaves the roster is closed by the manager, and a device the head no longer lists is signed out by its `OrgSession`.
   - Transient, and local to the carrier that produced it: every handshake `ChannelError`. `protocol`, `unknown-machine`, `revoked` and `contested` are raised from `h2` before its MAC and signature are checked (`openChannel`), and an endpoint's own refusal (`unknown-device`, `class`) reaches the device only as a carrier close. A hostile relay can forge any of them, so none stops the link, and the next attempt starts again from the direct carrier. Each is logged, once per reason per link. A machine that really speaks another major retries at the 30 s cap, which costs little. Rejected: stopping the link on these verdicts, which would let one rewritten `h2` on the relay keep the device off the direct carrier too.
   - `behind` is `connectChannel`'s own catch-up. It surfaces only when a page made no progress, and is transient.
-- **Trust changes close the channel.** When an attempt begins, the link records the key ids `machineKeys(head, ref, certificates, now)` returns and the identity it presents (org, member, device, channel key id), under a trust generation. At each `OrgSession` change it recomputes both. If a recorded machine key is no longer current, or the identity differs, the generation goes up: the current channel is closed and re-authenticated at once against the new head, and an attempt still running under the older generation is discarded when it completes. The handshake checks the machine's key only once, so a channel authenticated by a key the org has since retired would otherwise keep serving, and a compromised old key would not close it voluntarily. The `OrgSession` provider fires `onChanged` whenever its view adopts a new head, a link's handshake `advance` included (§B).
+- **Trust changes close the channel.** When an attempt begins, the link records the key ids `machineKeys(head, ref, certificates, now)` returns and the identity it presents (org, member, device, channel key id), under a trust generation. At each `OrgSession` change it recomputes both. If a recorded machine key is no longer current, or the identity differs, the generation goes up: the current channel is closed and re-authenticated at once against the new head, and an attempt still running under the older generation is discarded when it completes. The handshake checks the machine's key only once, so a channel authenticated by a key the org has since retired would otherwise keep serving, and a compromised old key would not close it voluntarily. The `OrgSession` provider fires `onChanged` whenever its view adopts a new head, a link's handshake `advance` included (§B). The generation an attempt carries is the one read before it reads the session, so a change while its keys are being computed discards it. A delegated machine's key also stops speaking for it when its delegation expires, with no session change: the same check runs at the next delegation `expires` of the machine's certificates, and the roster is recomputed at the next one of any certificate.
 - **Backoff** (RL §4.6).
   - After going `down` the delays are 0, 1, 2 and 4 s, then 5 s until `RESUME_WINDOW_MS` (120 s, the endpoint's `RESUME_MS`) has passed, then 30 s. Each delay is jittered ±20%.
   - Every probe runs an attempt at once and restarts the schedule. A probe is wake (`powerMonitor` `resume`), unlock (`unlock-screen`), focus (`app` `browser-window-focus`), a network change, or a person's action on that machine.
   - A network change is a change in the set of non-internal addresses from `os.networkInterfaces()`, read every `NETWORK_POLL_MS` (2 s) while any link exists.
   - Only a permanent verdict stops the retries.
 - **Grace and generations.** `up` survives a reconnect that completes within `UP_GRACE_MS`. Such a reconnect is not a new generation, so the renderer neither greys rows nor re-snapshots on a Wi-Fi blip. Past the grace the link reports `down`, and its next `up` is a new generation (O6 M4's reset). Rejected: `down` at every channel loss, which flashes a machine offline and re-reads it on every blip.
-- **Liveness.** As the endpoint's: after 5–7 s of silence (drawn anew each period), `ping {at}`. Any message received resets the period. A second consecutive silent period without a `pong` closes the channel `timeout`. An endpoint `ping` is answered `pong {at}` at once.
+- **Liveness.** As the endpoint's (`src/endpoint/channels.ts` `#arm`), in periods of 5–7 s drawn anew each time. A period in which any message was heard resets the count. Each silent period sends `ping {at}`. The third silent period in a row closes the channel `timeout`. An endpoint `ping` is answered `pong {at}` at once.
 - **The org state on the channel.** `connectChannel` advances `view` with what the handshake carries. A sealed `state {states, transitions}` from the endpoint is passed to `view.advance`. The endpoint sends none today. The link pushes no states.
 
 *Calls.*
-- `call(name, input)` sends `{t: 'call', id, name, input}` with a fresh `id` and resolves on the matching `result`.
+- `call(name, input)` sends `{t: 'call', id, name, input}` with a fresh `id` and resolves on the matching `result`. A call with no input sends `input: null`: `JSON.stringify` drops an `undefined` field, and the endpoint's `readMessage` would then find the `call` malformed and close the channel, taking every other stream with it.
 - While the link is `reconnecting` or `down`, a call waits for `up` up to its timeout (`CALL_TIMEOUT_MS`, 10 s), then fails `offline`. A call in flight when its channel is lost is sent again on the next channel: reads are idempotent.
 - Errors keep the endpoint's code (a `RefusalReason`, `unavailable`, or a host `IpcError` code passed through), plus the link's own `offline` and `timeout`.
 
@@ -261,7 +262,7 @@ M1 runs now and lands by its own PR. M2 and M3 need O10 M10 (the endpoint inside
   - `never` takes a `step-up` refusal as final.
   - A cancelled or failed confirmation resolves `refused {reason: 'step-up-cancelled'}`.
   - The signer stamps its own nonce and times when the person confirms.
-- **The send window.** An act is sent, or resealed, only within `ACT_FRESH_MS` (60 s, `FRESH_MS`) of its `opCreated`. One the link could not put on a channel within that window, because the link was `down` the whole time, resolves `refused {reason: 'offline'}` and is never sent. Rejected: holding acts until the machine returns, which would run a send, an interrupt or an approval minutes after the person asked. Open question A4 asks the owner whether sends should instead wait in an outbox.
+- **The send window.** An act is sent, or resealed, only within `ACT_FRESH_MS` (60 s, `FRESH_MS`) of its `opCreated`, or, for a step-up act, of its signature (the person's confirmation), so time spent at the prompt doesn't spend the window, as `step-up.ts` rules. One the link could not put on a channel within that window, because the link was `down` the whole time, resolves `refused {reason: 'offline'}` and is never sent. Rejected: holding acts until the machine returns, which would run a send, an interrupt or an approval minutes after the person asked. Open question A4 asks the owner whether sends should instead wait in an outbox.
 - **Outcomes** (Interfaces §A's `ActOutcome`). After a send:
   - `ack accepted` makes it `accepted`;
   - `ack refused {reason}` resolves `refused {reason}` only while the act is not **ambiguous**. An act is ambiguous once a transmission of it may have reached the executing side without its answer reaching the link: its channel was lost after it was sent and before a terminal answer, or `ACK_TIMEOUT_MS` passed. A refusal of a later transmission says nothing about an earlier one, since the endpoint checks freshness, grade and lane B's context before the executor's ledger (`src/endpoint/actions.ts`): a send that ran, lost its `ack` and `done`, and was resealed after a relaunch is refused `context` although it ran. So a refused transmission of an ambiguous act is followed by a query, and the executor's ledger decides;
@@ -276,10 +277,11 @@ M1 runs now and lands by its own PR. M2 and M3 need O10 M10 (the endpoint inside
 - **Queries.** A `queried` answer is read as follows:
   - `done` takes the outcome, read as `done`'s;
   - `refused` with an `outcome` is the op's own refusal, and terminal;
-  - `refused` with a `reason` and no outcome (`grade`, `class`: the machine will no longer say) resolves `unknown {reason}`;
+  - `refused` with the reason `unavailable` and no outcome (the executor's ledger can't be read now) asks again on the query backoff;
+  - `refused` with any other reason and no outcome (`grade`, `class`: the machine will no longer say) resolves `unknown {reason}`;
   - `in-progress` and `unavailable` ask again after 1, 2, 4, 8 s, then every 15 s, while `up`;
   - `not-received` resolves `not-sent`. The machine has tombstoned the id, so nothing ran and nothing will;
-  - `expired`, or a query still unresolved at `OP_HORIZON_S` by the app's clock, resolves `unknown {reason: 'expired'}`.
+  - `expired`, or a query still unresolved at `OP_HORIZON_S` by the app's clock, resolves `unknown {reason: 'expired'}`. Each act carries its own timer to that horizon, whatever the channel, so an act whose channel never returns still resolves: `unknown expired` if a copy went out, `refused expired` if none did.
 
   Only `not-sent` licenses sending again, under a new `opId`, and only the caller does it.
 - **Pending acts live in memory.** An app quit forgets them. The machine's ledger still holds each result for a day, and nothing runs twice. Rejected: persisting them in the profile, which would surface an operation from an earlier run with no view to show it in.
@@ -295,7 +297,7 @@ M1 runs now and lands by its own PR. M2 and M3 need O10 M10 (the endpoint inside
   - `snap` pages are joined by their `body` strings and parsed once `last` arrives. A page out of order, or one from another position, discards the assembly and logs. The endpoint re-sends replace-whole state on every resume.
   - An `ev` at or before the cursor within the same epoch is dropped. Positions compare by `(seq, idx ?? -1)`. This is a defence: the endpoint already guarantees no repeat.
   - The sink gets `subbed`, `snapshot`, `event`, `paused`, `resumed` and `ended` in arrival order.
-- **Credit.** Each delivered `ev` and `snap` counts its message's UTF-8 `JSON.stringify` length, as the endpoint charges. The link returns it as `credit` in batches of at least 256 KiB or every 250 ms, whichever comes first. The sink is in-process, so delivery is consumption. M2 revisits this if the renderer's pace needs to push back.
+- **Credit.** Each delivered `ev` and `snap` counts its message's UTF-8 `JSON.stringify` length, as the endpoint charges. The link returns it as `credit` in batches of at least 256 KiB or every 250 ms, whichever comes first. A refund larger than `SUB_CREDIT_MAX` goes as several `credit` messages of at most that much, keeping the exact total, since the endpoint finds a larger one malformed. The sink is in-process, so delivery is consumption. M2 revisits this if the renderer's pace needs to push back.
 - **Ending.** `ended {reason}` ends the subscription for good and removes it. `close()` sends `unsub` and removes it. A subscription beyond `MAX_SUBS` (64) on one link is `ended('busy')` at once, without a round trip.
 - **Losing the channel.** At `down` past the grace, each sink gets `paused('offline')` once. The next `subbed` resumes it.
 
@@ -317,7 +319,8 @@ M1 runs now and lands by its own PR. M2 and M3 need O10 M10 (the endpoint inside
 
 *Composition* (`src/main/machines/index.ts`, `src/main/index.ts`).
 - `startMachines` takes `session: OrgSession`. In `src/main/index.ts` that is `createDevOrgSession(...)` when `MAWS_DEV_ORG` is set, else `signedOut()`. O8 later replaces it with its sign-in's session.
-- It builds the remote source and passes it to the manager. It exposes `remote(ref)`.
+- It builds the remote source (with the local machine's ref, which the roster leaves out) and passes it to the manager. It exposes `remote(ref)`.
+- The router's `remote` option stays the plain `machines.dispatch`, so that O9 M9 can wrap it (P5 Decision Log 93); whichever child lands second keeps both.
 - It wires the probes: `powerMonitor` `resume` and `unlock-screen` to `probeAll('wake' | 'unlock')`, and `app` `browser-window-focus` to `probeAll('focus')`. The network watch lives in `source.ts` (Electron-free).
 - `stop()` closes every link.
 
@@ -490,8 +493,8 @@ Run all steps from the milestone's worktree `W`, after `pnpm install --frozen-lo
     npx vitest run --project node src/main/machines/remote/acts.test.ts
     npx vitest run --project node src/main/machines/remote/subs.test.ts
     npx vitest run --project node src/main/machines/manager.test.ts
-    npx vitest run --project node test/machines/remote-link.test.ts
-    npx vitest run --project node-timing test/machines/remote-link.local.test.ts    # Miniflare; about a minute
+    npx vitest run --project node-timing test/machines/remote-link.test.ts         # real sockets; about 10 s
+    npx vitest run --project node-timing test/machines/remote-link.local.test.ts    # Miniflare; about 5 s on this MacBook
 
     # lint the touched files, then the gates (never run the gates' commands locally)
     npx eslint src/main/machines src/main/org src/main/index.ts src/shared/ipc/schema/machines.ts test/machines
@@ -532,6 +535,8 @@ No new dependency. M1 uses `ws` 8.22.0 (in the tree), `org-protocol` (workspace)
       act(request: ActRequest): ActHandle;
       subscribe(request: SubscribeRequest, sink: SubscriptionSink): Subscription;
       probe(reason: ProbeReason): void;                                               // `person`: a person acted on this machine (also lifts `refused`)
+      // MachineLink.onState fires on a reported-state change, and also when the carrier or the refusal changes under the
+      // same reported state (a relay-to-direct switch), so the manager re-emits machines.changed; neither is a new generation.
     }
 
     export type CallResult = { ok: true; output: unknown } | { ok: false; error: { code: RefusalReason | 'offline' | 'timeout' | string; message?: string } };
@@ -589,7 +594,7 @@ No new dependency. M1 uses `ws` 8.22.0 (in the tree), `org-protocol` (workspace)
       random?(): number;                                                              // the jitter, for tests
       log(line: string): void;
     }
-    export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink;
+    export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(name: string): void };   // the source renames on a head's rename
 
     // carriers.ts
     export function dialDirect(url: string, timeoutMs: number): Promise<ByteDuplex>; // one ws:// WebSocket, binary messages; rejects past timeoutMs
@@ -598,7 +603,8 @@ No new dependency. M1 uses `ws` 8.22.0 (in the tree), `org-protocol` (workspace)
       onClose(listener: (reason: string) => void): void;                              // every channel on it has ended by then
       close(): void;
     }
-    export function openRelaySocket(url: string, headers: Record<string, string>): Promise<RelaySocket>;  // rejects on a failed upgrade, naming its status
+    export function openRelaySocket(url: string, headers: Record<string, string>, timeoutMs?: number): Promise<RelaySocket>;  // rejects on a failed upgrade (RelayUpgradeError, its status)
+    // Both carriers end every ByteDuplex as 'carrier' (CARRIER_CLOSED), whatever the socket or the relay said.
 
     // endpoint-records.ts
     export interface EndpointRecords {
@@ -647,7 +653,7 @@ No new dependency. M1 uses `ws` 8.22.0 (in the tree), `org-protocol` (workspace)
     export function createDevOrgSession(input: { dir: string; userData: string; packaged: boolean; build: string;
       stepUp: (keys: DeviceKeys, device: { org: string; device: string }) => SignedIn['stepUp'];   // main passes (keys, device) => createStepUp({ device, key: keys.stepUp })
       loadKeys?: typeof loadDeviceKeys;                                                            // tests inject one with excludeFromBackup stubbed
-      log(line: string): void }): OrgSession;   // returns at once, signed out; signs in when its load succeeds (onChanged fires), else stays out with a log line
+      log(line: string): void }): OrgSession & { loaded: Promise<void> };   // returns at once, signed out; signs in when its load succeeds (onChanged fires), else stays out with a log line; tests await `loaded`
 
 **§C. The manager's second source** (`src/main/machines/manager.ts`, `src/main/machines/remote/source.ts`).
 
@@ -657,8 +663,9 @@ No new dependency. M1 uses `ws` 8.22.0 (in the tree), `org-protocol` (workspace)
       connect(machine: { ref: MachineRef; name: string }): MachineLink;               // a RemoteLink; the source keeps it for `link`
     }
     // ConnectionManagerDeps gains `remote?: RemoteSource`; every other field is unchanged.
-    export function createRemoteSource(deps: { session: OrgSession; userData: string; log(line: string): void; now?(): number;
-      networkPollMs?: number; linkDeps?: Partial<RemoteLinkDeps> }): RemoteSource & {
+    export function createRemoteSource(deps: { session: OrgSession; userData: string; local: MachineRef; log(line: string): void; now?(): number;
+      networkPollMs?: number; interfaces?(): NodeJS.Dict<NetworkInterfaceInfo[]>;   // os.networkInterfaces by default; tests inject the watch
+      linkDeps?: Partial<RemoteLinkDeps> }): RemoteSource & {
       link(machine: MachineRef): RemoteLink | null;
       probeAll(reason: ProbeReason): void;
       close(): void;
@@ -756,11 +763,11 @@ No new dependency. M1 uses `ws` 8.22.0 (in the tree), `org-protocol` (workspace)
 Each is built provisionally as recommended, unless it says otherwise, and changed if the owner answers differently.
 
 - **A1. When the owner first sees remote machines in MAWS** (scheduling; for the architect and the owner). M1 runs now, but no production app can open a channel until it is signed in to the org, which is O8's sign-in (P5 Decision Log 38). *Recommendation:* split O8's sign-in into a first milestone and dispatch it now. It needs only O6 and O11, both landed, and its production `OrgSession` turns M1 on. *Alternative:* wait for O8 as planned, which also holds O9's remote lane A.
-- **A2. How the app shows a machine's path to it.** *Recommendation:* show no carrier on the machine chip. The machine row's hover says "direct (tailnet)" or "via the hub". "Hub unreachable" appears once, apart from any machine's "offline" greying, as P5 §3's "hub-offline, channel-up". A device the org removed greys that machine's rows with "This Mac is no longer allowed on `<machine>`". *Alternatives:* a small relay mark on the chip; showing nothing beyond online and offline.
+- **A2. How the app shows a machine's path to it.** *Recommendation:* show no carrier on the machine chip. The machine row's hover says "direct (tailnet)" or "via the hub". "Hub unreachable" appears once, apart from any machine's "offline" greying, as P5 §3's "hub-offline, channel-up". A device the org removed greys that machine's rows with "This Mac is no longer allowed on `<machine>`". *Alternatives:* a small relay mark on the chip; showing nothing beyond online and offline. **[owner, 2026-10-28: as recommended; P5 Decision Log 108.]**
 - **A3. Whether O7's log view exists** (for the architect first). P5 Decision Logs 51, 75 and 80 name "O7's log views" as a reader of migrated history, and P5 Decision Log 51 calls it "a project-wide view of what a person's sessions said". O8's project channel reads the same log plane. *Recommendation:* fold it into O8's channel, so the log plane has one reader and O14's B4 waits on one. *Alternative:* keep it in O7 as a per-person filter of the project's agent-to-agent traffic (M6).
-- **A4. A message sent to a remote session while its machine is unreachable.** *Recommendation:* hold it for 60 s, then show "Not sent: `<machine>` is offline" with Send again. M1 builds this rule. *Alternatives:* an outbox that sends typed messages whenever the machine returns, with answers and interrupts never waiting; failing at once.
-- **A5. The "+ Session" machine picker** (M4; to settle before it is re-planned). *Recommendation:* a machine menu beside the project picker, defaulting to this Mac, that lists the machines where the project has a checkout, with one line under it saying the lane and the inference route. *Alternatives:* the machine folded into the project row ("maws @ mini"); a two-step dialog.
-- **A6. Forwarded ports** (M3). *Recommendation:* a `localhost:<port>` link in a remote session opens through a forward in the in-app browser, marked "forwarded from `<machine>`", without asking. *Alternatives:* an explicit "Forward port…" command; asking each time.
+- **A4. A message sent to a remote session while its machine is unreachable.** *Recommendation:* hold it for 60 s, then show "Not sent: `<machine>` is offline" with Send again. M1 builds this rule. *Alternatives:* an outbox that sends typed messages whenever the machine returns, with answers and interrupts never waiting; failing at once. **[owner, 2026-10-28: as recommended; P5 Decision Log 108.]**
+- **A5. The "+ Session" machine picker** (M4; to settle before it is re-planned). *Recommendation:* a machine menu beside the project picker, defaulting to this Mac, that lists the machines where the project has a checkout, with one line under it saying the lane and the inference route. *Alternatives:* the machine folded into the project row ("maws @ mini"); a two-step dialog. **[owner, 2026-10-28: as recommended; P5 Decision Log 108.]**
+- **A6. Forwarded ports** (M3). *Recommendation:* a `localhost:<port>` link in a remote session opens through a forward in the in-app browser, marked "forwarded from `<machine>`", without asking. *Alternatives:* an explicit "Forward port…" command; asking each time. **[owner, 2026-10-28: as recommended; P5 Decision Log 108.]**
 
 ## Surprises & Discoveries
 
@@ -780,6 +787,17 @@ Each is built provisionally as recommended, unless it says otherwise, and change
 - Observation: a step-up signature covers `nonce` and `created`, so a resealed step-up action needs a new confirmation.
   Evidence: `apps/org-protocol/src/action.ts` `actionSigningInput`: the action without `stepUp` and `webauthn` only; `src/main/device/step-up.ts` stamps a fresh nonce and `created` at confirmation.
 
+- Observation (M1): the direct listener's per-source handshake limit (a burst of 3, 5 a minute) trips on loopback, where every handshake of a suite shares one source address, so a suite that reconnects more than three times is refused `503 busy`.
+  Evidence: `src/endpoint/direct-listener.ts` `HANDSHAKE_LIMITS`; the direct suite's reconnect cases failed until `test/endpoint/sub-harness.ts`'s `StartOptions.limits` raised the listener's limit and the link's `DIRECT_BUCKET` was raised to match.
+- Observation (M1): `Channel.onClose` hands the link a sealed `close`'s reason and a carrier's end through one listener, so a socket close frame or a relay channel close reading `removed` looked like the machine's sealed verdict.
+  Evidence: `apps/org-protocol/src/channel.ts`, the channel's close path; fixed on the device side by `carriers.ts` and the link's `sealedOnly` wrapper, which report every transport end as `carrier` (Decision Log, 2026-10-28, finding 1).
+- Observation (M1): the hub's last hop to the app socket has no byte or stall bound, so the claim that a device which stops reading loses its socket holds only for the direct carrier.
+  Evidence: `apps/desk-hub/src/objects/relay.ts`; P5 Decision Log 94 tracks it.
+- Observation (M1): the repository's eslint `no-restricted-imports` rule keeps `src/main` from importing `src/endpoint` and `test/endpoint`, tests included, which the link's suites need for a real endpoint and its harness.
+  Evidence: `eslint.config.js`; a block added for `src/main/machines/remote/*.test.ts`, `src/main/org/*.test.ts` and `test/machines/**`.
+- Observation (M1): an org state that drops a machine's key must list it in `retired`, so a rotation in a test is a successor with the new key and a retired entry for the old one.
+  Evidence: `apps/org-protocol` org-state validation; the direct suite's `rotation()` helper.
+
 ## Decision Log
 
 - Decision: Verification. This document gets one `doperpowers:adversarial-reviewer` buildability round on its execution section, focused on M1, repeated until a round yields nothing worth changing. M1's PR gets doperpowers:reviewer-high: it is the device side of RL2, it builds and step-up-signs actions, and it decides what is resealed. M2–M7 each get their own buildability round when they are re-planned after O3's cut, and the review rung that re-plan names.
@@ -798,6 +816,58 @@ Each is built provisionally as recommended, unless it says otherwise, and change
   Rationale: the skill's stop rule; a round that yields nothing worth changing.
   Date/Author: 2026-10-28, O7's planner.
 
+- Decision: M1's interface additions, checked with the architect before the tests were written. (1) `createRemoteSource` takes `local: MachineRef`, since the roster leaves the local ref out and §C's deps didn't carry it, and an optional `interfaces()` so tests inject the network watch. (2) A step-up act's 60 s send window runs from its signature, not from `opCreated`; the signer still receives and keeps `opId` and `opCreated`. (3) `MachineLink.onState` also fires when the carrier or the refusal changes under the same reported state, so a relay-to-direct switch re-emits `machines.changed` without a new generation. (4) A probe's ping is answered by any message that arrives within `PROBE_PONG_MS`, not only a `pong`. Also: the link reads `up` when `connectChannel` resolves (at `caps`), and it checks an act with `isAction` before sending and refuses one that fails as `malformed`, since the endpoint would close the whole channel on it.
+  Rationale: (1) the roster can't be computed without it; (2) a slow Touch ID prompt would otherwise end a confirmed act `refused offline`, against `step-up.ts`'s rule that time at the prompt doesn't make an act stale; (3) the manager reports the carrier, and a switch changes it; (4) every message already proves the channel live, as the liveness rule counts it. The architect agreed all four and the pre-check.
+  Date/Author: 2026-10-28, O7 M1's executor.
+
+- Decision: Finding 1 [P1], fixed by (a). A sealed `close {reason: 'removed'}` couldn't be told from a carrier close carrying the same word, because `Channel.onClose` reports both through one listener. Every production carrier now reports its own end as `carrier` (`CARRIER_CLOSED`), whatever the close frame or the relay's channel close said, and the link wraps every duplex it hands the handshake (`sealedOnly`), so an injected dialler can't leak a transport reason either. `removed` therefore reaches the link only from inside the channel. Tests: `carriers.test.ts` (a raw WebSocket close with reason `removed`, and a relay channel close, each end `carrier`), and the direct suite's carrier ended as `removed`, which stays transient.
+  Rationale: (b), an additive change to org-protocol's `Channel`, was not needed: with every carrier normalised below the channel, no transport word reaches `onClose`.
+  Date/Author: 2026-10-28, O7 M1's executor, from the architect's review.
+
+- Decision: Finding 2 [P2]. A query answered `refused` with the reason `unavailable` and no outcome asks again on the query backoff; any other reason with no outcome (`grade`, `class`) resolves `unknown {reason}`. §"Queries" says so now. Test: `acts.test.ts`.
+  Rationale: `unavailable` is the executor's ledger closed for a moment, not the machine declining to say.
+  Date/Author: 2026-10-28, O7 M1's executor, from the architect's review.
+
+- Decision: Finding 3 [P2]. A call with no input sends `input: null`. Test: `link.test.ts`, a void call answered while a subscription on the same channel stands.
+  Rationale: an `undefined` field vanishes in `JSON.stringify`, and the endpoint closes the channel on the malformed `call`, ending every other stream.
+  Date/Author: 2026-10-28, O7 M1's executor, from the architect's review.
+
+- Decision: Finding 4 [P2]. A credit refund is split into messages of at most `SUB_CREDIT_MAX`, keeping the exact total. Test: `subs.test.ts`, an overdraw beyond the cap.
+  Rationale: the endpoint finds a larger `credit` malformed.
+  Date/Author: 2026-10-28, O7 M1's executor, from the architect's review.
+
+- Decision: Finding 5 [P2]. Liveness matches the endpoint's `#arm`: a period in which anything was heard resets the count, each silent period pings, and the third silent period in a row closes `timeout`. §"Liveness" says so now. Tests: `link.test.ts`.
+  Rationale: the two sides should agree on when a quiet channel is dead.
+  Date/Author: 2026-10-28, O7 M1's executor, from the architect's review.
+
+- Decision: An act with no `ack` within `ACK_TIMEOUT_MS` on a live channel is marked ambiguous and queried, not resealed. A reseal goes only after the channel is lost (sent, not acked, unsigned, within its window).
+  Rationale: on a live channel the first copy is most likely queued, not lost; a query costs one round trip and lets the ledger answer, and `not-received` tombstones the id so a late first copy can't run. Rejected: resealing on the ack timeout, which on a slow endpoint would put two copies in flight for the ledger to deduplicate.
+  Date/Author: 2026-10-28, O7 M1's executor.
+
+- Decision: Orientation's claim that a device which stops reading loses its socket is narrowed to the direct carrier; the hub's last hop has no bound (P5 Decision Log 94).
+  Rationale: the architect's review, verified against `apps/desk-hub/src/objects/relay.ts`.
+  Date/Author: 2026-10-28, O7 M1's executor.
+
+- Decision: Both link suites run in vitest's `node-timing` project (`TIMING_NODE_TESTS`), the direct one included: it runs a real endpoint over real sockets and the handshake's WebCrypto under wall-clock timeouts.
+  Rationale: the timing project's pattern for suites that run real carriers (`test/endpoint/channels.local.test.ts` and its siblings).
+  Date/Author: 2026-10-28, O7 M1's executor.
+
+- Decision: reviewer-high's three findings on the built branch (2 P1, 1 P2), each reproduced by the reviewer and fixed by one fix wave with a test that failed first. (1) An attempt stamped its trust with the generation read after `machineKeys` resolved, so a session change during that await could let a channel authenticated against the superseded view be adopted; the generation is now read before the session. (2) A delegated machine's certificate key lapses at its delegation's `expires` with no session change, and nothing rechecked it; the link rechecks trust and the source the roster on a timer at the next expiry (`nextCertExpiry`, `timeoutAt`, stepped at most a day). (3) An act whose channel was lost and never came back never resolved, since the horizon check lived only in the query path; each act now has its own horizon timer.
+  Rationale: (1) and (2) let a channel outlive the org's trust in the key it was made under, which the trust generation exists to prevent; (3) breaks `ActHandle.outcome`'s promise to settle. An act that never had a copy out settles `refused expired` at the horizon rather than `unknown`, as `close()` distinguishes the two.
+  Date/Author: 2026-10-28, O7 M1's executor.
+
+- Decision: the first class 1a run was red on `link.test.ts` alone (11 of 26 on one unit shard). The suite holds the clock and lets real async work run for a fixed number of event-loop turns, and an attempt's key ids use WebCrypto's digest on libuv's thread pool, which a loaded runner shares. The suite now computes the same key ids synchronously (a `vi.mock` of `keyId`). Reproduced locally with the pool contended: 26 of 26 red before, 26 of 26 green after.
+  Rationale: a test race, not a link bug; acts and subs passed under the same contention unchanged.
+  Date/Author: 2026-10-28, O7 M1's executor.
+
+- Decision: The review has converged. A narrow reviewer-high round on the fix commit (336d08000) found nothing, and its focused runs passed: link 28, acts 22, source 4. That makes two rounds: 3 findings, then 0.
+  Rationale: the stop rule; a round with nothing worth changing.
+  Date/Author: 2026-10-28, O7 M1's executor.
+
+- Decision: The owner answered A2, A4, A5 and A6 as recommended. The provisional builds stand: M1's 60 s hold (A4) is unchanged; M3's and M4's re-plans build A6's forward and A5's machine menu as written; A2's carrier hover lands with the first milestone that carries a link's carrier to the renderer.
+  Rationale: the owner's product calls; recorded in P5 Decision Log 108.
+  Date/Author: 2026-10-28, the architect, from the owner's answers.
+
 The residue for P5's Decision Log. Each item is decided where it binds (M1 unless marked), with the alternative it rejected:
 
 1. M1 defines `OrgSession` and holds `signedOut()` in production, plus a development source behind `MAWS_DEV_ORG` in unpackaged builds; O8's sign-in implements it. Rejected: O7 building sign-in, so that two children build it.
@@ -815,6 +885,11 @@ The residue for P5's Decision Log. Each item is decided where it binds (M1 unles
 12. Both carriers use `ws`. Rejected: Node's global `WebSocket`.
 13. (M3, direction) Port forwarding is graded `shell`. Rejected: per-session `view`.
 14. (Schedule) M3 needs O2 and O10 M10, not O3. M2 needs O3 only for app-less machines.
+15. (M1, as built) Every production carrier reports its own end as `carrier`, so only a sealed `close` names the machine's word. Rejected: an additive change to org-protocol's `Channel` that marks sealed closes, unnecessary once no transport word reaches it.
+16. (M1, as built) A step-up act's send window runs from its signature. Rejected: from `opCreated`, which a slow confirmation would spend.
+17. (M1, as built) An ack timeout on a live channel queries the act; a reseal follows only a lost channel. Rejected: resealing on the ack timeout.
+18. (M1, as built) The direct listener's handshake limits are a `StartOptions` field of the endpoint's test harness, and the link's `DIRECT_BUCKET` an override, for suites on loopback. Rejected: a test-only bypass in the listener.
+19. (M1, as built) The link's suites may import `src/endpoint` and `test/endpoint` (an eslint exception for those test files only). Rejected: copying the harness under `test/machines`.
 
 P5 findings for its writer (things in P5 that are wrong or incomplete):
 
@@ -829,4 +904,21 @@ P5 findings for its writer (things in P5 that are wrong or incomplete):
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+**M1 (2026-10-28).** Acceptance 1 is met in tests, and nothing changes for the owner until O8's sign-in provides a production `OrgSession`.
+- **What landed:**
+  - main's RL2 link (`src/main/machines/remote/`) with the org session seam (`src/main/org/`);
+  - the manager's second source of links, `Machines.remote`, and `machines.list`'s `carrier` and `refusal`.
+- **Proof in tests:**
+  - the unit suites under `src/main/machines/remote/`, `src/main/org/dev-session.test.ts` and the extended manager suite;
+  - a real endpoint over the direct carrier (`test/machines/remote-link.test.ts`, 13);
+  - the hub's multiplex in Miniflare (`test/machines/remote-link.local.test.ts`, 4): up over the relay; a relay drop with an act that runs once and a subscription that loses and repeats nothing; the probe's switch to direct; the hub away across a relaunch.
+- **Where the build departed from the plan, each in the Decision Log:**
+  - the five findings the architect raised before the gates;
+  - the four interface additions;
+  - the ack-timeout query;
+  - reviewer-high's three trust and expiry fixes;
+  - the test-race fix the first gate run exposed.
+- **Retrospective:**
+  - The plan's tables held: every row of the transition table became a test as written. The fixes were all at the edges the tables left implicit: transport words reaching a sealed-close listener; time as an input to trust; a timer that a lost channel cleared.
+  - For later milestones: treat every `await` between reading the session and stamping trust as a window for a stale view, and give every promise the API calls "never pending" a deadline that no transport event clears.
+  - The endpoint's loopback handshake limit and the eslint import boundary both cost a round. Each is now a harness option and a scoped exception, recorded for O9's suites, which will meet both.

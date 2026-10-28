@@ -6,6 +6,8 @@ import { e2eRequested, installDocumentsSeam } from './artifacts/e2e-seam'; // P3
 import { installDesignSystemFixture } from './artifacts/design-system/e2e-fixture'; // P3-D M7
 import { installPresentationsSeam } from './tools/presentation/e2e-seam'; // P3-C M4
 import { PresentRoute, presentParams } from './tools/presentation/PresentRoute'; // P3-C M6
+import { installTerminalsSeam } from './terminal/e2e-seam'; // P5 O2 M7
+import { terminals } from './terminal/registry'; // P5 O2 M7
 import './styles/app.css';
 
 // P3-A M4: the store's e2e seam, in a window main loaded for the e2e harness only
@@ -14,6 +16,8 @@ if (e2eRequested(location.search)) installDocumentsSeam(window, artifactHost);
 if (e2eRequested(location.search)) installDesignSystemFixture(window);
 // P3-C M4: the presentations' seam (a deck seeded from files, timings), the same way
 if (e2eRequested(location.search)) installPresentationsSeam(window, artifactHost);
+// P5 O2 M7: the terminals' seam (what a terminal shows, read from its emulator's buffer), the same way
+if (e2eRequested(location.search)) installTerminalsSeam(window, terminals);
 
 // P3-C M6: a window main opened for `presentations.present` draws the show instead of the app
 const present = presentParams(location.search);

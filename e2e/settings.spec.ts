@@ -50,9 +50,10 @@ test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, ref
       // P2-C: to version 13, with the to-human lane and its two notification groups on. P3-D: to version 14, with the
       // house design system as the default and no Space defaults. P4-B1: to version 15, with the comments view expanded.
       // P4-R8: to version 16, with no app MCP servers. P4-A2: to version 17, with the launch profile at the user scope.
-      // UX1: to version 18. Then to version 19, the launch profile without an output style.
+      // UX1: to version 18. Then to version 19, the launch profile without an output style. P5 O2 M7: to version 20,
+      // under the machine daemon (the harness still runs its hosts in the app).
       expect(readSettings(userData)).toMatchObject({
-        version: 19, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14; P4-B1: 15; P4-R8: 16; P4-A2: 17; UX1: 18; the style removed: 19
+        version: 20, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14; P4-B1: 15; P4-R8: 16; P4-A2: 17; UX1: 18; the style removed: 19; P5 O2: 20
         sessions: { archiveInactiveDays: null },
         theme: 'system',
         keymap: { 'attention.next': 'Cmd+Alt+J' },
@@ -63,7 +64,7 @@ test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, ref
         appearance: { monoFont: null, transcriptWidth: 768 /* W2 */ },
         permissions: { autoFallback: 'acceptEdits' }, // W3
         voice: { locale: null }, // E9
-        supervisor: { idleExitMinutes: 10, keepRunningDefault: true }, // E10
+        supervisor: { idleExitMinutes: 10, keepRunningDefault: true, shape: 'daemon' }, // E10; P5 O2 M7: the machine daemon
         browser: { profile: null, searchUrl: 'https://www.google.com/search?q=%s', linkTarget: 'in-app', bookmarksBar: 'shown' }, // E4a; cua #90
         mods: { toHuman: { enabled: true } }, // P2-C
         artifacts: { defaultDesignSystem: null, spaceDesignSystems: {}, commentsView: 'expand' }, // P3-D; P4-B1

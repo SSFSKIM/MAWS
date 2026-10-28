@@ -14,6 +14,7 @@
     "src/preload/**/*",
     "src/engine-host/**/*",
     "src/pty-host/**/*",
+    "src/mawsd/**/*", // P5 O2 M5: the machine daemon
     "src/shared/**/*",
     "src/artifacts/**/*", // P3-A: the portable artifact layer, typechecked as the host will import it
     "apps/org-protocol/src/**/*.ts", // P5-O10 M9: the remote layer's protocol package, which main's device keys sign with
@@ -31,6 +32,12 @@
     "apps/desk-hub/deploy/hub.ts",
     "apps/desk-hub/deploy/org-admin.ts",
     "apps/desk-hub/deploy/proof.ts",
+    // P5 O8 M1: test/org/sign-in.local.test.ts roots its org and approves its pairing with O13's `deployment admin`
+    "apps/desk-hub/deploy/admin.ts",
+    "apps/desk-hub/deploy/admin-device.ts",
+    "apps/desk-hub/deploy/admin-machines.ts",
+    "apps/desk-hub/deploy/deploy.ts",
+    "apps/desk-hub/deploy/run-lock.ts",
     "apps/desk-hub/fake-machine/json-file.ts",
     "apps/desk-hub/fake-machine/link.ts",
     "apps/desk-hub/fake-machine/org.ts",
@@ -66,6 +73,7 @@
     // test/support/scratch-env.test.ts the e2e launches' environments, and test/support/p1-live.test.ts the live
     // sittings' pure parts and the OOPIF page (Task 6.1)
     "e2e/support/processes.ts",
+    "e2e/support/canonical-mawsd.ts", // O14 residue 18: the packaged daemon-shape check's watch, exercised by test/support/canonical-mawsd.test.ts
     "e2e/support/best-effort-evidence.ts", // Reload diagnostics' bounded teardown, exercised by test/support/best-effort-evidence.test.ts
     "e2e/support/scratch-env.ts",
     "e2e/support/p1-live.ts",
@@ -94,6 +102,7 @@
     "e2e/support/packaged-resolution.ts", // P3-F: test/support/packaged-resolution.test.ts checks packaged resolution
     // P3-HD M4a: test/support/connector-oauth*.test.ts run the toy OAuth fixture's logic, its scene support and fake browser
     "e2e/support/connector-oauth-core.d.mts",
+    "e2e/support/daemon-unit-guard.d.mts", // P5 O2 M7: test/support/daemon-unit-guard.test.ts runs e2e:daemon-unit's CI guard and labels
     "e2e/support/connector-oauth.ts",
     "e2e/support/keychain-guard.ts", // fixB: the custody's keychain prompt guard and engine-environment checks
     "e2e/support/connector-oauth-browser.ts",

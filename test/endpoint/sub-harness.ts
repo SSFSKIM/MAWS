@@ -105,12 +105,19 @@ export class FakeEngineHost {
   #ops: ReturnType<typeof opCommands> | null = null;
   /** Each answer the engine host delivered: `<appSessionId> <requestId>`. */
   readonly answered: string[] = [];
+  /** Each `session.send` the engine host ran under its op ledger, in order (P5 O7 M1): what a run-once proof reads. */
+  readonly runs: Array<{ appSessionId: string; content: unknown; launchId: string }> = [];
 
   /** Wires the fake into `services`' dispatch, onEvent, onAttachment and onUpstream, its op ledger in the machine's state directory. */
   serve(services: FakeServices): void {
     this.#ops = opCommands({
       ledger: OpLedger.open(services.machine.stateDir, 'host-ops.jsonl'),
-      handler: (name) => (name === 'session.answer' ? (input) => Promise.resolve(this.#answer(input as { appSessionId: string; requestId: string })) : undefined),
+      handler: (name) =>
+        name === 'session.answer'
+          ? (input) => Promise.resolve(this.#answer(input as { appSessionId: string; requestId: string }))
+          : name === 'session.send'
+            ? (input) => Promise.resolve(this.#send(input as { appSessionId: string; content: unknown }))
+            : undefined,
       status: (id) => {
         const s = this.sessions.get(id);
         return s === undefined || s.engineSessionId === null ? null : { launchId: s.launchId, engineSessionId: s.engineSessionId };
@@ -260,6 +267,11 @@ export class FakeEngineHost {
       const checked = validateCommandInput(name, input);
       return checked.ok ? ok(await this.#ops.op(checked.value as CommandInput<'host.op'>, { client: {} } as HandlerContext)) : no('internal');
     }
+    if (owner === 'engine-host' && name === 'host.opQuery' && this.#ops !== null) {
+      if (this.#failing.has(name)) return no('host_unavailable');
+      const checked = validateCommandInput(name, input);
+      return checked.ok ? ok(this.#ops.opQuery(checked.value as CommandInput<'host.opQuery'>)) : no('internal');
+    }
     const answer = this.#failing.has(name) ? no('host_unavailable') : this.answer(owner, name, input);
     if (this.#holding.has(name)) await new Promise<void>((resolve) => this.#held.set(name, [...(this.#held.get(name) ?? []), resolve]));
     return answer;
@@ -294,6 +306,14 @@ export class FakeEngineHost {
   #pending(s: HostSession | undefined, requestId: string): SessionEvent | null {
     if (s === undefined || !s.items.some((i) => (i.request as { requestId: string }).requestId === requestId)) return null;
     return s.requests.get(requestId) ?? null;
+  }
+
+  /** `session.send` run (P5 O7 M1): recorded, and its message is a journal row, so a lane B event. */
+  #send({ appSessionId, content }: { appSessionId: string; content: unknown }): { messageUuid: null; disposition: 'queued'; queueId: string } {
+    const s = this.session(appSessionId);
+    this.runs.push({ appSessionId, content, launchId: s.launchId });
+    this.row(appSessionId, 1);
+    return { messageUuid: null, disposition: 'queued', queueId: `q${this.runs.length}` };
   }
 
   /** `session.answer` delivered: the request settles, its item leaving the broker's set. */
@@ -409,7 +429,16 @@ export type Fixture = {
   sminos?: FakeSminos;
 };
 
-export type StartOptions = { services?: FakeServices; host?: FakeEngineHost; records?: Records; chain?: SignedOrgState[]; key?: SigningKey; subscriptions?: EndpointOptions['subscriptions'] };
+export type StartOptions = {
+  services?: FakeServices;
+  host?: FakeEngineHost;
+  records?: Records;
+  chain?: SignedOrgState[];
+  key?: SigningKey;
+  subscriptions?: EndpointOptions['subscriptions'];
+  /** The direct listener's handshake limits (P5 O7 M1: a suite that reconnects often from loopback raises them). */
+  limits?: NonNullable<EndpointOptions['direct']>['limits'];
+};
 
 export async function startEndpoint(org: Org, started: Fixture[], options: StartOptions = {}): Promise<Fixture> {
   const host = options.host ?? new FakeEngineHost();
@@ -448,7 +477,7 @@ export async function startEndpoint(org: Org, started: Fixture[], options: Start
   endpoint = createEndpoint({
     sleep: (ms) => sleep(Math.min(ms, 50)),
     env: { MAWS_ENDPOINT_DIRECT: '1' },
-    direct: { interfaces: () => ({ utun4: [{ address: TAILNET, family: 'IPv4', internal: false, netmask: '255.255.255.255', mac: '00:00:00:00:00:00', cidr: null }] }), listen },
+    direct: { interfaces: () => ({ utun4: [{ address: TAILNET, family: 'IPv4', internal: false, netmask: '255.255.255.255', mac: '00:00:00:00:00:00', cidr: null }] }), listen, ...(options.limits === undefined ? {} : { limits: options.limits }) },
     authorization: { records, checkouts: { known: (path) => endpoint?.rl10.members.known(path) ?? false }, settingsMode: () => 'default' },
     subscriptions: options.subscriptions,
   });

@@ -469,6 +469,22 @@ describe('normaliser: requests, responses and boundaries', () => {
   });
 });
 
+// P5 O2 M2: the Stop callback every launch registers would otherwise copy each turn's last assistant message into the
+// event stream; the journal keeps the whole frame
+describe('normaliser: the host Stop callback (P5 O2 M2)', () => {
+  const stop = (id: string, callbackId: string) => inRow({ type: 'control_request', request_id: id, request: { subtype: 'hook_callback', callback_id: callbackId, input: { hook_event_name: 'Stop', session_id: 's', stop_hook_active: false, last_assistant_message: 'the whole final text', background_tasks: [], session_crons: [] } } });
+
+  it('drops last_assistant_message from a maws_Stop_* callback\'s event input, and keeps the rest', () => {
+    const [event] = only(feed(make(), [stop('h-1', 'maws_Stop_1')]), 'hook.callback_requested');
+    expect(event!.input).toEqual({ hook_event_name: 'Stop', session_id: 's', stop_hook_active: false, background_tasks: [], session_crons: [] });
+  });
+
+  it('keeps it for any other callback', () => {
+    const [event] = only(feed(make(), [stop('h-2', 'maws_pre_stop')]), 'hook.callback_requested');
+    expect(event!.input).toMatchObject({ last_assistant_message: 'the whole final text' });
+  });
+});
+
 describe('normaliser: meta rows, system subtypes and the unknown', () => {
   it('a write_failed meta row yields error.raised { scope: transport } naming the request', () => {
     const events = feed(make(), [metaRow({ event: 'write_failed', frameType: 'control_response', subtype: null, requestId: 'r-1', message: 'EPIPE' })]);

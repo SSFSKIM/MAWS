@@ -1,11 +1,27 @@
 import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LaunchSpecSchema } from '@shared/engine/launch-spec';
 import type { QueueEntry, QueueState } from '@shared/engine/session-state-store';
 import { FileSessionStateStore } from './file-session-state-store';
+import { scriptedSession } from '../conformance/session-harness'; // P5 O2 M2
+
+// P5 O2 M2: a disk that fails a write (ENOSPC) or an unlink (EACCES) at chosen paths, for the cron record's fail-closed save
+const disk = vi.hoisted(() => ({ writeFails: null as ((path: string) => boolean) | null, unlinkFails: null as ((path: string) => boolean) | null }));
+vi.mock('node:fs/promises', async (original) => {
+  const actual = await original<typeof import('node:fs/promises')>();
+  const writeFile = (async (...args: Parameters<typeof actual.writeFile>) => {
+    if (disk.writeFails?.(String(args[0]))) throw Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' });
+    return actual.writeFile(...args);
+  }) as typeof actual.writeFile;
+  const unlink = (async (...args: Parameters<typeof actual.unlink>) => {
+    if (disk.unlinkFails?.(String(args[0]))) throw Object.assign(new Error('EACCES: permission denied, unlink'), { code: 'EACCES' });
+    return actual.unlink(...args);
+  }) as typeof actual.unlink;
+  return { ...actual, default: { ...actual, writeFile, unlink }, writeFile, unlink };
+});
 
 const ID = 'app-store-1' as AppSessionId;
 const spec = LaunchSpecSchema.parse({
@@ -21,6 +37,7 @@ beforeEach(async () => {
   userData = await mkdtemp(join(tmpdir(), 'maws-store-'));
 });
 afterEach(async () => {
+  disk.writeFails = disk.unlinkFails = null;
   await rm(userData, { recursive: true, force: true });
 });
 
@@ -218,3 +235,132 @@ describe('the owner channel’s launch-spec keys are not stored (P2-C)', () => {
   });
 });
 // P2-C end
+
+describe('FileSessionStateStore: the keep mark and the engine session ids (P5 O2 M2)', () => {
+  it('round-trips both through a new instance beside the queue, keeps them across the other saves, and reads an older file without them', async () => {
+    const dir = join(userData, 'engine-host', 'state');
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, `${ID}.json`), JSON.stringify({ version: 1, queue: { entries: [], paused: false }, grants: { allow: [] }, launchSpec: null }));
+    const older = new FileSessionStateStore(userData);
+    expect(await older.loadKeep(ID)).toBe(false);
+    expect(await older.loadEngineSessionIds(ID)).toEqual([]);
+
+    await Promise.all([older.saveKeep(ID, true), older.saveEngineSessionIds(ID, ['e-1', 'e-2']), older.saveQueue(ID, { entries: [entry()], paused: false }), older.saveLaunchSpec(ID, spec)]);
+    const after = new FileSessionStateStore(userData);
+    expect(await after.loadKeep(ID)).toBe(true);
+    expect(await after.loadEngineSessionIds(ID)).toEqual(['e-1', 'e-2']);
+    expect((await after.loadQueue(ID)).entries).toEqual([entry()]);
+  });
+
+  // Branch review: an unreadable state file took the ids with it, so they are unavailable, never a clean empty list (which
+  // would let a durable job an id before a /clear created read as no one's), until a save of them after a load succeeds.
+  it.each<[string, (store: FileSessionStateStore) => Promise<unknown>]>([
+    ['the ids\' own load', async () => {}],
+    ['the keep mark\'s load (a launch reads it first)', (store) => store.loadKeep(ID)],
+  ])('ids in a file moved aside as unreadable are unavailable, whichever load found it (%s), until they are saved again', async (_first, findFirst) => {
+    const dir = join(userData, 'engine-host', 'state');
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, `${ID}.json`), '{"version":1,"engineSessionIds":["e-old"');
+    const store = new FileSessionStateStore(userData, { warn: () => {} });
+    await findFirst(store);
+    await expect(store.loadEngineSessionIds(ID)).rejects.toThrow(/unavailable/);
+    await store.saveLaunchSpec(ID, spec); // the launch's own writes make a fresh file, without the ids
+    await expect(store.loadEngineSessionIds(ID)).rejects.toThrow(/unavailable/);
+    expect(await store.loadKeep(ID)).toBe(false); // the other loads recover as they did
+    expect((await store.loadQueue(ID)).corrupt).toMatch(/\.corrupt-\d+$/);
+    await store.saveEngineSessionIds(ID, ['e-new']);
+    expect(await store.loadEngineSessionIds(ID)).toEqual(['e-new']);
+  });
+});
+
+describe('FileSessionStateStore: the cron record (P5 O2 M2, P5 Decision Log 49)', () => {
+  const record = { sessionCrons: [{ id: 'c1', schedule: '0 3 * * *', recurring: true, prompt: 'nightly' }], toolSinceStop: false };
+  it('round-trips through a new instance; never written, it is null', async () => {
+    const store = new FileSessionStateStore(userData);
+    expect(await store.loadCronRecord(ID)).toBeNull();
+    await store.saveCronRecord(ID, record);
+    expect(await new FileSessionStateStore(userData).loadCronRecord(ID)).toEqual(record);
+  });
+
+  it('lives in its own file beside the state file, which a save of it never touches', async () => {
+    const store = new FileSessionStateStore(userData);
+    await store.saveGrants(ID, { allow: ['Bash(ls)'] });
+    await store.saveCronRecord(ID, record);
+    const dir = join(userData, 'engine-host', 'state');
+    expect((await readdir(dir)).sort()).toEqual([`${ID}.cron.json`, `${ID}.json`]);
+    expect(JSON.parse(await readFile(join(dir, `${ID}.json`), 'utf8'))).not.toHaveProperty('cronRecord');
+    expect(JSON.parse(await readFile(join(dir, `${ID}.cron.json`), 'utf8'))).toEqual(record);
+  });
+
+  // the cold restart: the engine host dies after the failed writes, and a new store must not trust the older record
+  const dirty = { sessionCrons: [], toolSinceStop: true };
+  const RESUMED = '44444444-4444-4444-8444-444444444444';
+  const resumedWork = async (store: FileSessionStateStore) => {
+    const s = scriptedSession({ spec: { appSessionId: ID, resume: { sessionId: RESUMED as never, fork: false }, sessionId: null }, session: { store } });
+    await s.session.start();
+    return s.session.status().work;
+  };
+
+  it('a clean record makes a resume over a new store known and empty (the control for the next test)', async () => {
+    await new FileSessionStateStore(userData).saveCronRecord(ID, { sessionCrons: [], toolSinceStop: false });
+    expect(await resumedWork(new FileSessionStateStore(userData))).toEqual({ crons: [], unknown: null });
+  });
+
+  it('after a rejected save (ENOSPC) a new store reads no record, so the older clean one cannot make the resume known and empty; a later save is read again', async () => {
+    const before = new FileSessionStateStore(userData);
+    await before.saveCronRecord(ID, { sessionCrons: [], toolSinceStop: false });
+    disk.writeFails = () => true; // the disk is full
+    await expect(before.saveCronRecord(ID, dirty)).rejects.toThrow('ENOSPC');
+    await expect(before.saveCronRecord(ID, record)).rejects.toThrow('ENOSPC');
+    expect(await before.loadCronRecord(ID)).toBeNull();
+    const after = new FileSessionStateStore(userData); // the engine host restarted
+    expect(await after.loadCronRecord(ID)).toBeNull();
+    expect(await resumedWork(after)).toEqual({ crons: [], unknown: 'resumed' });
+    disk.writeFails = null; // storage recovers
+    await after.saveCronRecord(ID, record);
+    expect(await new FileSessionStateStore(userData).loadCronRecord(ID)).toEqual(record);
+  });
+
+  it('a rejected save whose unlink fails too is logged, rethrows the write\'s error, and this store reads no record until a save succeeds', async () => {
+    const warnings: string[] = [];
+    const store = new FileSessionStateStore(userData, { warn: (m) => void warnings.push(m) });
+    await store.saveCronRecord(ID, { sessionCrons: [], toolSinceStop: false });
+    disk.writeFails = () => true; // the disk is full
+    disk.unlinkFails = (path) => path.endsWith(`${ID}.cron.json`);
+    await expect(store.saveCronRecord(ID, dirty)).rejects.toThrow('ENOSPC');
+    expect(warnings).toEqual([expect.stringMatching(/cron record for app-store-1 was not saved and its older record could not be removed \(EACCES/)]);
+    expect(await store.loadCronRecord(ID)).toBeNull();
+    disk.writeFails = disk.unlinkFails = null;
+    await store.saveCronRecord(ID, record);
+    expect(await store.loadCronRecord(ID)).toEqual(record);
+  });
+
+  it('a record of a shape this build cannot read is null, and the state file beside it still loads', async () => {
+    const dir = join(userData, 'engine-host', 'state');
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, `${ID}.json`), JSON.stringify({ version: 1, queue: { entries: [entry()], paused: false }, grants: { allow: ['Bash(ls)'] }, launchSpec: null }));
+    const store = new FileSessionStateStore(userData);
+    for (const text of [JSON.stringify({ sessionCrons: 'none' }), '{"sessionCrons": [']) {
+      await writeFile(join(dir, `${ID}.cron.json`), text);
+      expect(await store.loadCronRecord(ID)).toBeNull();
+    }
+    expect(await store.loadGrants(ID)).toEqual({ allow: ['Bash(ls)'] });
+    expect((await store.loadQueue(ID)).entries).toEqual([entry()]);
+  });
+
+  it('a record an earlier build of this branch left inside the state file reads as missing, and the file still loads', async () => {
+    const dir = join(userData, 'engine-host', 'state');
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, `${ID}.json`), JSON.stringify({ version: 1, queue: { entries: [], paused: false }, grants: { allow: ['Bash(ls)'] }, launchSpec: null, cronRecord: { sessionCrons: [], toolSinceStop: false } }));
+    const store = new FileSessionStateStore(userData);
+    expect(await store.loadCronRecord(ID)).toBeNull();
+    expect(await store.loadGrants(ID)).toEqual({ allow: ['Bash(ls)'] });
+  });
+
+  it('forget removes the cron record with the state file', async () => {
+    const store = new FileSessionStateStore(userData);
+    await store.saveCronRecord(ID, record);
+    await store.forget(ID);
+    expect(await new FileSessionStateStore(userData).loadCronRecord(ID)).toBeNull();
+  });
+});

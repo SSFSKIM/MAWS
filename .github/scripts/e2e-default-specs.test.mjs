@@ -69,7 +69,7 @@ for (const derivation of [whole, relaunch, widened]) derivation.catch(() => {});
 
 test("this tree: beside the macOS lane's other groups, default runs its own specs", async () => {
   const { specs, total } = await whole;
-  assert.equal(total, 97); // P5 O9 M5: e2e/lane-a.spec.ts, in e2e:lane-a (a terminal session driven through the fake bridge). P5 O6 M3: e2e/machines.spec.ts, in e2e:machines (the two-profile scenes, skipped without MAWS_MACHINES_E2E=1). P5 OX1: e2e/cross-build.spec.ts, default's own (the two-build check, skipped without MAWS_CROSS_BUILD_E2E=1; the plan adds its group beside a peer a minor apart). P5 O1 M1: e2e/local-latency.spec.ts, default's own (the measured bench, skipped without MAWS_LOCAL_LATENCY_PERF=1). P4-AGG M5: e2e/discover-live.spec.ts, default's own (the opt-in live smoke, skipped without MAWS_LIVE_SMOKE=1). P4-AGG M1: e2e/discover.spec.ts and discover-connectors.spec.ts in e2e:discover. UX2-L: ux2-shell.spec.ts is part of default as well as the focused layout group. // P4-A2 G2.7: e2e/presentations-provisional-live.spec.ts, default's own (a live group); P4-A2 G2.6: presentations-provisional.spec.ts, design-provisional.spec.ts and dashboard-provisional.spec.ts in e2e:presentations, e2e:design and e2e:dashboard; P4-B1: e2e/document-margin.spec.ts in e2e:document-app; P4-B3: e2e/layout-transfer.spec.ts, default's own; P4-B2: e2e/presentations-ime.spec.ts, presentations-ime-live.spec.ts and (M0) presentations-drag.spec.ts in e2e:presentations
+  assert.equal(total, 99); // P5 O9 M5: e2e/lane-a.spec.ts, in e2e:lane-a (a terminal session driven through the fake bridge). P5 O6 M3: e2e/machines.spec.ts, in e2e:machines (the two-profile scenes, skipped without MAWS_MACHINES_E2E=1). P5 O2 M7: e2e/daemon-unit.spec.ts in e2e:daemon-unit (the LaunchAgent group; e2e:supervisor-daemon reruns e2e/supervisor.spec.ts). P5 OX1: e2e/cross-build.spec.ts, default's own (the two-build check, skipped without MAWS_CROSS_BUILD_E2E=1; the plan adds its group beside a peer a minor apart). P5 O2 M1: e2e/daemon-idle.spec.ts, default's own (the measured idle cost, skipped without MAWS_DAEMON_IDLE_PERF=1). P5 O1 M1: e2e/local-latency.spec.ts, default's own (the measured bench, skipped without MAWS_LOCAL_LATENCY_PERF=1). P4-AGG M5: e2e/discover-live.spec.ts, default's own (the opt-in live smoke, skipped without MAWS_LIVE_SMOKE=1). P4-AGG M1: e2e/discover.spec.ts and discover-connectors.spec.ts in e2e:discover. UX2-L: ux2-shell.spec.ts is part of default as well as the focused layout group. // P4-A2 G2.7: e2e/presentations-provisional-live.spec.ts, default's own (a live group); P4-A2 G2.6: presentations-provisional.spec.ts, design-provisional.spec.ts and dashboard-provisional.spec.ts in e2e:presentations, e2e:design and e2e:dashboard; P4-B1: e2e/document-margin.spec.ts in e2e:document-app; P4-B3: e2e/layout-transfer.spec.ts, default's own; P4-B2: e2e/presentations-ime.spec.ts, presentations-ime-live.spec.ts and (M0) presentations-drag.spec.ts in e2e:presentations
   assert.deepEqual(specs, [
     'e2e/agent-tools-live.spec.ts',
     'e2e/bench-edit-live.spec.ts',
@@ -83,6 +83,7 @@ test("this tree: beside the macOS lane's other groups, default runs its own spec
     'e2e/composer-live.spec.ts',
     'e2e/connectors-soak.spec.ts',
     'e2e/cross-build.spec.ts', // P5 OX1, the two-build check (e2e:cross-build, beside a peer)
+    'e2e/daemon-idle.spec.ts', // P5 O2 M1, the measured idle cost
     'e2e/dashboard-live-data.spec.ts',
     'e2e/dashboard-live.spec.ts',
     'e2e/dashboard-scale.spec.ts',
@@ -130,7 +131,7 @@ test("this tree: a relaunch of default and two groups, DefaultBeside naming the 
 
 test("this tree: the same relaunch without DefaultBeside still widens default by the specs of the groups it leaves out, read from the job's output", async () => {
   const [all, part] = await Promise.all([whole, widened]);
-  assert.match(part.summary, /^#### e2e:default: its own \d+ of the bare set's 97 specs, beside 2 other e2e groups \(/);
+  assert.match(part.summary, /^#### e2e:default: its own \d+ of the bare set's 99 specs, beside 2 other e2e groups \(/);
   assert.deepEqual(all.specs.filter((spec) => !part.specs.includes(spec)), []);
   assert.ok(part.specs.includes('e2e/artifacts-store.spec.ts'), 'e2e:artifacts, absent from the relaunch, leaves its spec to default');
   assert.ok(!part.specs.includes('e2e/side.spec.ts') && !part.specs.includes('e2e/library.spec.ts'));
@@ -164,6 +165,13 @@ test('this tree: default alone, or beside a group whose script it cannot read, r
   const result = await defaultSpecs({ scripts: grepped, rootName, groups: ['library', 'side'], list: () => assert.fail('nothing is listed once a script is unreadable') });
   assert.equal(result.doubt, true);
   assert.match(result.bare, /cannot read e2e:side's script shape/);
+});
+
+// P5 O2 M7: a guard step between the build and Playwright selects nothing (e2e:daemon-unit's CI guard)
+test('a guard step before playwright is read past', () => {
+  assert.deepEqual(readScript(scripts['e2e:daemon-unit'], rootName), { env: { MAWS_DAEMON_UNIT_E2E: '1' }, args: ['e2e/daemon-unit.spec.ts'] });
+  assert.deepEqual(readScript('node e2e/support/a.mjs && node scripts/b.mjs && playwright test e2e/a.spec.ts', rootName), { env: {}, args: ['e2e/a.spec.ts'] });
+  for (const shape of ['scripts/e2e-build.sh plain && node e2e/a.mjs --flag && playwright test e2e/a.spec.ts', 'scripts/e2e-build.sh plain && node e2e/a.js && playwright test e2e/a.spec.ts']) assert.equal(readScript(shape, rootName), null, shape);
 });
 
 test('shapes it cannot read', () => {

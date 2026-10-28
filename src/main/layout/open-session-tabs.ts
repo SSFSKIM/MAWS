@@ -13,20 +13,22 @@ import type { MachineRef } from '@shared/machine/ref';
 import type { LayoutStore } from './store';
 
 export function openSessionTabs(layout: Pick<LayoutStore, 'get'>, local: MachineRef, onScreen: (appSessionId: AppSessionId) => boolean = () => false): (appSessionId: AppSessionId) => boolean {
-  const schema = storedMainSchema(local);
   let read: unknown = undefined;
   let open = new Set<AppSessionId>();
   return (appSessionId) => {
     const value = layout.get('main.tabs');
     if (value !== read) {
       read = value;
-      open = sessionsIn(schema.safeParse(value), local);
+      open = sessionsInTabs(value, local);
     }
     return open.has(appSessionId) || onScreen(appSessionId);
   };
 }
 
-function sessionsIn(parsed: ReturnType<ReturnType<typeof storedMainSchema>['safeParse']>, local: MachineRef): Set<AppSessionId> {
+// The set itself, from a `main.tabs` value: the local machine's sessions, by their bare ids (P5 O2 M2: main's interest
+// report, src/main/sessions/interest.ts).
+export function sessionsInTabs(value: unknown, local: MachineRef): Set<AppSessionId> {
+  const parsed = storedMainSchema(local).safeParse(value);
   if (!parsed.success) return new Set();
   const main = parsed.data;
   const sets = main.version === 3 ? Object.values(main.sets) : [main];

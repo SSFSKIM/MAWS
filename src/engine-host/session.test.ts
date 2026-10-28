@@ -109,6 +109,7 @@ describe('EngineSession: the handshake, journal-before-normalise and the gateway
     expect(transport.requestsOf('initialize')[0]!.request).toEqual({
       subtype: 'initialize', supportedDialogKinds: ['auto_mode_server_fallback', 'refusal_fallback_prompt'], perTaskStopAffordance: true, workspaceTrust: { accepted: true, directory: '/tmp/maws-session' },
       sdkMcpServers: ['maws'], // E1
+      hooks: { Stop: [{ hookCallbackIds: ['maws_Stop_1'], timeout: 10 }] }, // P5 O2 M2: the host's Stop callback, every launch's
     });
     expect(journal.rows[3]!.frame).toEqual({ event: 'initialize', current_permission_mode: 'auto', session_state: 'idle', hooks_applied: null, workspace_trust_recorded: null });
     expect(journal.rows[8]!.frame).toEqual({ event: 'status_check', baseUrl: RELAY_URL, autoModeServer: 'enabled', verified: 'routed' });
@@ -223,7 +224,9 @@ describe('EngineSession: the handshake, journal-before-normalise and the gateway
     expect(shape(journal)).toEqual(['meta:reconnect', 'meta:spawn', 'out:control_request/initialize', 'in:control_response', 'meta:initialize', 'meta:reconnect', 'out:control_request/set_max_thinking_tokens', 'out:control_request/get_status', 'in:control_response', 'in:control_response', 'meta:status_check', 'out:control_request/apply_flag_settings', 'in:control_response', 'meta:queue' /* P2-C: the queue's recovered row */, 'out:control_request/get_context_usage', 'in:control_response']); // then the ready read
     expect(transport.requestsOf('apply_flag_settings')[0]!.request).toEqual({ subtype: 'apply_flag_settings', settings: { permissions: { allow: ['Bash(touch granted.txt)'] } } });
     expect(events.map((e) => e.kind === 'session.reconnect' && e.phase)).toEqual(['attempting', 'reconnected']);
-    expect(session.status()).toMatchObject({ process: 'ready', grants: ['Bash(touch granted.txt)'], keepAlive: [] });
+    // P5 O2 M2: a resume's crons are unknown until its first Stop (--resume resurrects a session-only cron), which is
+    // background work
+    expect(session.status()).toMatchObject({ process: 'ready', grants: ['Bash(touch granted.txt)'], keepAlive: ['background_tasks'], work: { crons: [], unknown: 'resumed' } });
   });
 
   it('retains the command catalogue: initialize commands and agents, system/init skills and terminal commands, commands_changed', async () => {
@@ -466,8 +469,9 @@ describe('EngineSession: inbound requests, host hooks and exit', () => {
     expect(id).toBe('maws_PreToolUse_1');
     const { session, transport, events, logs } = setup({ session: { hooks } });
     await session.start();
-    expect(transport.requestsOf('initialize')[0]!.request.hooks).toEqual({ PreToolUse: [{ matcher: 'Bash', hookCallbackIds: ['maws_PreToolUse_1'], timeout: 15 }] });
-    expect(session.status().hostHooks).toEqual(['maws_PreToolUse_1']);
+    // P5 O2 M2: beside the session's own Stop callback, which every launch registers
+    expect(transport.requestsOf('initialize')[0]!.request.hooks).toEqual({ PreToolUse: [{ matcher: 'Bash', hookCallbackIds: ['maws_PreToolUse_1'], timeout: 15 }], Stop: [{ hookCallbackIds: ['maws_Stop_2'], timeout: 10 }] });
+    expect(session.status().hostHooks).toEqual(['maws_PreToolUse_1', 'maws_Stop_2']);
     transport.push({ type: 'control_request', request_id: 'h1', request: { subtype: 'hook_callback', callback_id: 'maws_PreToolUse_1', tool_use_id: 'toolu_1', input: { hook_event_name: 'PreToolUse', tool_name: 'Bash' } } });
     transport.push({ type: 'control_request', request_id: 'h2', request: { subtype: 'hook_callback', callback_id: 'maws_unknown', input: { hook_event_name: 'PostToolUse' } } });
     await flush();

@@ -18,6 +18,7 @@ import type { MachineState } from '@shared/ipc/schema/machines';
 import { isAddress, machineOf } from '@shared/machine/address';
 import { machineKey, type OrgKey } from '@shared/machine/org-key';
 import type { MachineRef } from '@shared/machine/ref';
+import type { ListedSession } from './sessions';
 
 // A row's key: an org project's, a machine's own project's, or the address of a project not derived yet.
 export type RowKey = OrgKey | ProjectId;
@@ -86,6 +87,16 @@ export function rowOfSession(index: OrgIndex, projects: ReadonlyMap<ProjectId, P
   if (project.hidden) return null;
   const key = orgKeyOf(project);
   return index.listed.has(key) || alsoListed?.has(key) ? key : machineKey(machineOf(record.appId));
+}
+
+// P5 O8 M2 ("How a row is filed"): the row a listed session sits under: its `orgKey`'s when the index lists it; nowhere
+// when that key's checkouts are all hidden (hiding is the owner's word on the project, and a remote checkout can't be
+// hidden from here); else its machine's own row.
+export function rowOfListed(index: OrgIndex, listed: ListedSession, alsoListed?: ReadonlySet<RowKey>): RowKey | null {
+  const key = listed.orgKey;
+  if (key !== null && (index.listed.has(key) || alsoListed?.has(key))) return key;
+  if (key !== null && (index.projects.get(key) ?? []).some(isCheckout)) return null; // listed by none, so every checkout is hidden
+  return machineKey(listed.machine);
 }
 
 // The tab set a project's sessions file into (W12): its row's; a hidden project's keep its org key, which no row

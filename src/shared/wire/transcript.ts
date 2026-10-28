@@ -16,9 +16,11 @@ export const TranscriptRecordSchema = z.looseObject({
 export type TranscriptRecord = z.infer<typeof TranscriptRecordSchema>;
 
 // The anchor a rewind appends (`rewound: true`); parsed and exposed for C4's anchor handling, never walked by currentChain.
+// `lastPrompt` is absent when the rewinding process has taken no prompt (a "Load now" rewind on a resumed session; P5
+// O3-F's pre-release fixture), and the anchor cuts all the same.
 export const LastPromptAnchorSchema = TranscriptRecordSchema.extend({
   type: z.literal('last-prompt'),
-  lastPrompt: z.string(),
+  lastPrompt: z.string().optional(),
   rewound: z.boolean().optional(),
   leafUuid: z.string().optional(),
 });

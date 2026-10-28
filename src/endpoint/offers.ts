@@ -68,7 +68,7 @@ export const OFFERS: Offers = {
     'sminos.diff': laneA('call', 'view'),
     'sminos.output': laneA('call', 'view'),
     'sminos.read': laneA('call', 'view'),
-    // The endpoint's own, and mawsd's content-free reads (O2 and O6 grade them `list`: `ungraded` until they land).
+    // The endpoint's own, and mawsd's content-free reads (O2 grades `daemon.status` `list`; O6's is `ungraded` until it lands).
     'endpoint.grant': { kind: 'act', executor: 'endpoint', target: 'machine', grade: null },
     'endpoint.state': { kind: 'act', executor: 'endpoint', target: 'machine', grade: null },
     'endpoint.listings': { kind: 'call', executor: 'endpoint', target: 'machine', grade: 'list' },

@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionServiceDeps } from './context';
 import { intentFor } from '../../../test/support/session-host';
-import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
 import type { Settings } from '@shared/ipc/schema';
 
 const state = vi.hoisted(() => ({
@@ -21,11 +21,12 @@ const state = vi.hoisted(() => ({
 vi.mock('electron', () => ({
   app: { whenReady: () => ({ then: (fn: () => unknown) => { state.ready = fn; } }), on: vi.fn(), requestSingleInstanceLock: () => true, hasSingleInstanceLock: () => true, getPath: (name: string) => join(state.root, name), getAppPath: () => state.root, getVersion: () => '0.0.0-test' /* P4-AGG M2: the catalog's user agent */, isPackaged: false, commandLine: { appendSwitch: vi.fn(), getSwitchValue: vi.fn(() => '') /* P3-F1: Electron's answer for a switch not given */ }, setPath: vi.fn() },
   BrowserWindow: { getAllWindows: () => [] }, dialog: {}, screen: { getAllDisplays: () => [], getPrimaryDisplay: () => ({ workArea: {} }) }, shell: {},
+  powerMonitor: { on: vi.fn() }, // P5 O8 M1: the Registry feed's wake and unlock probes
 }));
 vi.mock('../ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: (name: string, fn: (input?: unknown) => unknown) => state.handlers.set(name, fn), registerMachineHandler: (name: string, fn: (input?: unknown) => unknown) => state.handlers.set(name, fn) /* P5 O6 M1 */, interceptCommand: vi.fn(), dispatchLocal: vi.fn() /* P5 O6 M3 */, CommandFailure: class extends Error {} }));
-vi.mock('../machines', () => ({ startMachines: vi.fn(() => ({ dispatch: vi.fn(), serve: vi.fn(), stop: vi.fn() })) })); // P5 O6 M3: no links, no stand-in
+vi.mock('../machines', () => ({ startMachines: vi.fn(() => ({ dispatch: vi.fn(), serve: vi.fn(), stop: vi.fn(), onRemote: vi.fn(() => () => {}) /* P5 O8 M2: the rows read the roster */ })) })); // P5 O6 M3: no links, no stand-in
 vi.mock('@shared/host/shell-env', () => ({ captureShellEnvironment: async () => ({ HOME: join(state.root, 'home'), CLAUDE_CONFIG_DIR: state.shellConfig }) }));
-vi.mock('../hosts', () => ({ createHosts: () => ({ start: vi.fn(), stop: vi.fn(), onState: vi.fn(() => () => {}) /* E3: the dataset holds follow the host's state */, onEvent: vi.fn(() => () => {}) /* P4-AGG M2: the catalog hears plugins.changed */ }) }));
+vi.mock('../hosts', () => ({ createHosts: () => ({ start: vi.fn(), stop: vi.fn(), onState: vi.fn(() => () => {}) /* E3: the dataset holds follow the host's state */, onEvent: vi.fn(() => () => {}) /* P4-AGG M2: the catalog hears plugins.changed */ }), prepareLaunch: () => ({ mode: 'utility', daemon: null, unavailable: null }), refuseTestLaunchOnDefaultProfile: () => {} /* P5 O2 landing: a scratch-profile test launch */ /* P5 O2 M7: the launch's shape, settled at once */ }));
 vi.mock('../settings', () => ({ startSettings: () => ({ state: () => ({ settings: state.settings, resolvedTheme: 'light' }), onChange: vi.fn(() => vi.fn()) }) }));
 vi.mock('../window', () => ({ installContentSecurityPolicy: vi.fn(), appUrl: '', createWindow: vi.fn() }));
 vi.mock('../index/index', () => ({ Index: class { unavailable = 'test'; sessions = { get: () => null, list: () => [] }; projects = { list: () => [] }; refreshOrgProjects = async () => {}; } }));
@@ -53,6 +54,7 @@ vi.mock('../usage/claude-usage-control', () => ({ baseUrlFrom: () => null, Claud
 vi.mock('../gateway/claude-usage-app', () => ({ createClaudeUsageApp: () => ({}), execRunner: vi.fn() }));
 vi.mock('../settings/engine-configure', () => ({ startEngineConfigure: () => ({ stop: vi.fn() }) }));
 vi.mock('../settings/host-configure', () => ({ startHostConfigure: () => vi.fn() })); // E10
+vi.mock('./interest', () => ({ startInterest: () => () => {}, interestSet: () => [] })); // P5 O2 M2: its sibling
 vi.mock('../widgets/fixture-backend', () => ({ installWidgetBackend: vi.fn() }));
 vi.mock('../browser', () => ({ startBrowser: (deps: { settings(): unknown }) => { state.browserSettings = deps.settings; return { stop: vi.fn(), partitions: {} /* E4b */ }; } })); // E4a
 vi.mock('../artifacts', () => ({ registerStoreSchemes: vi.fn() /* M7 */, installStorePolicies: vi.fn() /* P3-L M6b: E2's startDeliverables' policies */, startArtifacts: () => ({ stop: vi.fn(), exporters: { register: () => () => {} } /* P3-B: the document exporters register here */ }) })); // P3-A: the artifact store's main side
@@ -72,7 +74,7 @@ describe('main setup-intent and shell-environment wiring', () => {
   beforeEach(async () => {
     vi.resetModules();
     state.handlers.clear();
-    state.settings = SETTINGS_DEFAULTS_V19; // E4a
+    state.settings = SETTINGS_DEFAULTS_V20; // E4a
     state.root = mkdtempSync(join(tmpdir(), 'maws-main-wiring-'));
     state.shellConfig = join(state.root, 'shell-config');
     for (const name of ['userData', 'home', 'shell-config', 'dock-config', 'additional']) mkdirSync(join(state.root, name));
@@ -152,9 +154,9 @@ describe('main setup-intent and shell-environment wiring', () => {
   // E4a: the browser reads settings 11's browser section from the service at each use, so a change reaches the next tab
   // opened and the next new-window link without a restart
   it('hands the browser the live browser settings, read at each call', () => {
-    expect(state.browserSettings!()).toEqual(SETTINGS_DEFAULTS_V19.browser);
+    expect(state.browserSettings!()).toEqual(SETTINGS_DEFAULTS_V20.browser);
     const browser = { profile: 'Profile 1', searchUrl: 'https://duckduckgo.com/?q=%s', linkTarget: 'external', bookmarksBar: 'hidden' } as const; // cua #90: bookmarksBar
-    state.settings = { ...SETTINGS_DEFAULTS_V19, browser };
+    state.settings = { ...SETTINGS_DEFAULTS_V20, browser };
     expect(state.browserSettings!()).toEqual(browser);
   });
 });

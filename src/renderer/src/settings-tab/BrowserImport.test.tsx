@@ -7,7 +7,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
 import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
 import { browserTab, T1, T2 } from '../test-support/browser';
@@ -27,7 +27,7 @@ const row = (name: string) => within(profile()).getByRole('group', { name });
 const dialog = () => screen.getByRole('dialog');
 
 function renderBlock(answers: ImportBridge['answers'] = {}, profileSetting: string | null = null) {
-  b = importBridge({ ...SETTINGS_DEFAULTS_V19, browser: { ...SETTINGS_DEFAULTS_V19.browser, profile: profileSetting } });
+  b = importBridge({ ...SETTINGS_DEFAULTS_V20, browser: { ...SETTINGS_DEFAULTS_V20.browser, profile: profileSetting } });
   Object.assign(b.answers, answers);
   window.maws = b.bridge;
   const queries = new QueryClient({ defaultOptions: { queries: { retry: false } } });

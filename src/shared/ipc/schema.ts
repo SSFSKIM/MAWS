@@ -61,8 +61,10 @@ import * as connectors from './schema/connectors'; // P3-H H3b
 import * as delivery from './schema/delivery'; // P4-B5
 import * as customization from './schema/customization'; // UX2-K
 import * as catalog from './schema/catalog'; // P4-AGG M2
+import * as daemon from './schema/daemon'; // P5 O2 M5
 import * as machine from './schema/machine'; // P5 O6 M1
 import * as machines from './schema/machines'; // P5 O6 M3
+import * as org from './schema/org'; // P5 O8 M1
 import * as laneA from './schema/lane-a'; // P5 O9 M2
 export { CustomizationInventorySchema, type CustomizationInventory, type CustomizationSkill, type CustomizationServer, type CustomizationEndpoint } from './schema/customization';
 
@@ -163,8 +165,10 @@ export const commands = {
   ...delivery.commands, // P4-B5
   ...customization.commands, // UX2-K
   ...catalog.commands, // P4-AGG M2
+  ...daemon.commands, // P5 O2 M5
   ...machine.commands, // P5 O6 M1
   ...machines.commands, // P5 O6 M3
+  ...org.commands, // P5 O8 M1
   ...laneA.commands, // P5 O9 M2
 } as const satisfies Record<`${Namespace}.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
@@ -213,8 +217,10 @@ export const events = {
   ...delivery.events, // P4-B5
   ...customization.events, // UX2-K
   ...catalog.events, // P4-AGG M2
+  ...daemon.events, // P5 O2 M5
   ...machine.events, // P5 O6 M1
   ...machines.events, // P5 O6 M3
+  ...org.events, // P5 O8 M1
   ...laneA.events, // P5 O9 M2
 } as const satisfies Record<`${Namespace}.${string}`, z.ZodType>;
 
@@ -256,6 +262,11 @@ export const HOST_EVENTS = [
   'connectors.directOperation', // P3-HD: a direct operation's end, its id alone
 ] as const satisfies readonly EventName[];
 // E10 end
+// P5 O2 M4 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md): the events the pty host emits. Under the daemon shape
+// the pty host is `mawsd`'s build, which may be another than the app's, so they join the wire manifest beside
+// HOST_EVENTS (not the protocol-2 fingerprint, which no pty host link ever speaks); the host runtime refuses a pty host
+// event outside the list, as it does the engine host's. `pty.hostState` is main's.
+export const PTY_HOST_EVENTS = ['pty.data', 'pty.exit'] as const satisfies readonly EventName[];
 export type CommandInput<N extends CommandName> = z.input<(typeof commands)[N]['input']>;
 export type CommandOutput<N extends CommandName> = z.output<(typeof commands)[N]['output']>;
 export type EventPayload<N extends EventName> = z.output<(typeof events)[N]>;

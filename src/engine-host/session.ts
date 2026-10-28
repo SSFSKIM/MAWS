@@ -15,7 +15,7 @@ import type { AppSessionId, MessageUuid, RequestId } from '@shared/graph/ids';
 import type { AutoModeRefusalCode, PermissionMode } from '@shared/graph/enums';
 import type { RequestAnswer } from '@shared/engine/answers';
 import type { Effort, LaunchSpec } from '@shared/engine/launch-spec';
-import type { QueueEntry, QueueState, SendContent, SessionStateStore } from '@shared/engine/session-state-store';
+import type { CronRecord, QueueEntry, QueueState, SendContent, SessionStateStore } from '@shared/engine/session-state-store';
 import type { RelayHealth } from '@shared/engine/relay-health';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SurfaceAnswer } from '@shared/engine/surface'; // R2
@@ -28,7 +28,9 @@ import { appInitialize } from '@shared/engine/initialize';
 import { cancelAsyncMessage, endSession, getContextUsage, getStatus, initialize, interrupt, REQUEST_TIMEOUT_MS, requestClassOf, setMaxThinkingTokens, setPermissionMode } from './controls';
 import { EMPTY_GRANTS, reapply, recordFromResponse, type GrantSnapshot } from './grants';
 import { ENGINE_COMPAT_NOTICE_KEY, EngineCompatWatch } from './engine-compat'; // W13
-import { HostHookRegistry } from './host-hooks';
+import { HostHookRegistry, registerStopHook } from './host-hooks';
+import type { LaunchKind } from './work-state'; // P5 O2 M2
+import { DurableCronSource, type ReadTextFile } from './durable-crons'; // P5 O2 M2
 import { RELAY_URL, spawnMeta, type LaunchPlan } from './launch';
 import { Normalizer, type NormalizerWarning } from './normalizer';
 import { JournalClosed, OutboundWriter, type WriteOptions } from './outbound-writer';
@@ -105,6 +107,10 @@ export interface EngineSessionOptions {
   statefulMcpServers?: () => ReadonlySet<string>;
   reconnectTrigger?: 'user' | 'process_exit';
   // C12 end
+  // P5 O2 M2: what the work state starts from (work-state.ts): the launcher's `resumed_after_release` for the first launch
+  // after a release; absent, `fresh` without a resume and `resumed` with one
+  launchKind?: LaunchKind;
+  scheduledTasksFile?: ReadTextFile; // P5 O2 M2: the durable crons' file read (durable-crons.ts); the disk by default
   sessionStartHookMs?: (plan: LaunchPlan) => Promise<number>; // debt wave 6: the hooks' bound; read from the settings by default
   // E10: whether an app is connected to the engine host (the runtime's); `show_pane` and `artifact_screenshot` fail at
   // once with `appNotOpen` while it is false. Absent, always connected.
@@ -208,6 +214,8 @@ export class EngineSession {
   private trustRecorded: boolean | null = null;
   private inheritedGrants = false;
   // C10 end
+  private kept = false; // P5 O2 M2: the owner's Keep running mark, from the store at the launch and `session.setKeep`
+  private readonly durableCrons: DurableCronSource; // P5 O2 M2: the durable crons and the engine session ids they match
 
   constructor(private readonly opts: EngineSessionOptions) {
     this.spec = opts.spec;
@@ -222,7 +230,26 @@ export class EngineSession {
     this.log = opts.log ?? ((message) => console.warn(`[engine-host ${opts.spec.appSessionId}] ${message}`));
     this.exited = new Promise((resolve) => (this.resolveExited = resolve));
     this.lastUsedAt = this.launchedAt; // C12
-    this.tracker = new SessionStatusTracker(opts.spec, () => this.touch());
+    // P5 O2 M2: the durable crons, in the scheduled-tasks file of the spawn directory or the engine's current one
+    this.durableCrons = new DurableCronSource({
+      engineSessionId: opts.plan.sessionId, dirs: () => [this.plan.cwd, this.tracker.engineCwd ?? this.spec.cwd], read: opts.scheduledTasksFile, log: this.log,
+      loadLineage: () => this.store.loadEngineSessionIds(this.spec.appSessionId),
+      saveLineage: (ids) => this.storeWrite(this.store.saveEngineSessionIds(this.spec.appSessionId, ids), 'engine session ids'),
+    });
+    this.tracker = new SessionStatusTracker(opts.spec, () => this.touch(), { // P5 O2 M2: the work state's start and sources
+      launchKind: opts.launchKind, durableCrons: () => this.durableCrons.read(), log: this.log,
+      onCronRecord: (record) => { // P5 Decision Log 49: tracked and logged here, its outcome the tracker's to retry on
+        const write = this.store.saveCronRecord(this.spec.appSessionId, record);
+        this.storeWrite(write, 'cron record');
+        return write;
+      },
+    });
+    // P5 O2 M2: the Stop callback, every launch's (host-hooks.ts): its `session_crons` into the work state, answered at once
+    registerStopHook(this.hooks, (input) => {
+      this.tracker.stopped(input);
+      this.touch();
+      return {};
+    });
     this.surface = new SessionSurface({ log: this.log, touch: () => this.touch() }); // R2
     // E1: served from construction on, since the engine's MCP handshake begins before initialize is answered (E0a Q1)
     this.maws = new SessionMaws({
@@ -584,6 +611,7 @@ export class EngineSession {
       memory: tracked.memory,
       journalPath: this.journal.path, hostHooks: this.hooks.ids(), lastEventSeq: this.lastEventSeq,
       trust: { attested: this.spec.trust !== null, recorded: this.trustRecorded }, // C10
+      work: tracked.work, kept: this.kept, // P5 O2 M2
       ...(this.surface.attached && { uiSurface: { clientId: this.surface.clientId } }), // R2
     };
     // C12: what an exit would lose, by the budget policy's rules (an exited process holds nothing)
@@ -604,6 +632,7 @@ export class EngineSession {
     }
     this.observed?.row(row); // P2-A (X17): the facts are read from the rows as journaled, as recovery reads them
     const events = this.normalizer.push(row);
+    this.durableCrons.note(this.normalizer.state.sessionId); // P5 O2 M2: every id the process carries joins the lineage
     for (const w of this.pendingWarnings.splice(0)) this.record('meta', { event: w.event, rowSeq: w.seq, detail: w.detail }); // journaled and normalised like any row; they yield no events
     if (events.length > 0) {
       this.lastEventSeq = row.seq;
@@ -766,8 +795,28 @@ export class EngineSession {
     }
   }
 
-  // The grant snapshot (unless the caller passed one) and the launch spec, from and to the SessionStateStore.
+  // P5 O2 M2: the owner's Keep running mark (`session.setKeep`, which persists it first); it exempts the idle release only
+  setKept(kept: boolean): void {
+    this.kept = kept;
+    this.touch();
+  }
+
+  // The grant snapshot (unless the caller passed one), the keep mark, the engine session ids and the launch spec, from
+  // and to the SessionStateStore.
   private async loadState(): Promise<void> {
+    try {
+      this.kept = await this.store.loadKeep(this.spec.appSessionId); // P5 O2 M2
+    } catch (error) {
+      this.log(`keep mark not loaded: ${messageOf(error)}`);
+    }
+    await this.durableCrons.load(); // P5 O2 M2: the lineage, then a resume's cron record and read of the durable crons
+    let cronRecord: CronRecord | null = null;
+    try {
+      cronRecord = await this.store.loadCronRecord(this.spec.appSessionId); // P5 Decision Log 49
+    } catch (error) {
+      this.log(`cron record not loaded: ${messageOf(error)}`);
+    }
+    this.tracker.launched(cronRecord);
     if (this.opts.grants === undefined) {
       try {
         this.grants = await this.store.loadGrants(this.spec.appSessionId);
@@ -975,6 +1024,7 @@ export class EngineSession {
       if (event.kind === 'turn.started') {
         this.tracker.turnStarted(event.id);
       } else if (event.kind === 'turn.ended' && !event.isEchoReceipt) {
+        this.tracker.turnEnded(); // P5 O2 M2: the work state's turn edge
         this.lastUsedAt = new Date().toISOString(); // C12: a turn's end is use, on the host's clock like every other (the status goes out with the frame's touch)
         // the queue first: while a host sequence (clear and implement) still holds the session, it releases nothing
         this.queue.onTurnEnded(event).catch((error: unknown) => this.log(`queue release failed: ${messageOf(error)}`));

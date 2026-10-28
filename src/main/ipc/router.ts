@@ -21,11 +21,12 @@
 // the route minus the sender check, the entry by which another profile's app reaches this machine's services through the
 // stand-in (src/main/machines/serve-standin.ts).
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
+import type { HostDispatch, HostOwner } from '@shared/host/host-supervisor'; // P5 O2 M3
 import { HostCommandError, thrownError } from '@shared/host/runtime';
-import type { ClientRef, HandlerContext } from '@shared/ipc/client';
+import type { HandlerContext } from '@shared/ipc/client';
 import { ipcError, type IpcError } from '@shared/ipc/errors';
 import { REGISTRY, type InputOf, type NameOf, type OutputOf, type WireRegistry } from '@shared/ipc/registry';
-import { commandChannel, type CommandInput, type CommandName, type CommandOutput, type CommandResult, type Owner } from '@shared/ipc/schema';
+import { commandChannel, type CommandInput, type CommandName, type CommandOutput, type CommandResult } from '@shared/ipc/schema';
 import { codecOf } from '@shared/ipc/validate';
 import { gradeOf } from '@shared/ipc/grades';
 import { MachineRefSchema, type MachineRef } from '@shared/machine/ref';
@@ -40,10 +41,10 @@ export { emit } from './events';
 export type MainContext = HandlerContext & { readonly target: MachineRef };
 export type MainHandler<N extends CommandName> = (input: CommandInput<N>, context: MainContext) => CommandOutput<N> | Promise<CommandOutput<N>>;
 export type MachineHandler<N extends CommandName> = (input: CommandInput<N>, context: HandlerContext) => CommandOutput<N> | Promise<CommandOutput<N>>;
-export type HostOwner = Exclude<Owner, 'main'>;
 // The supervisor interface M4 implements (`HostSupervisor.dispatch`): forward to the owning host, answer its result.
-// P5 O1 M5: `client` is the asker, passed for a `machine`-owned command only (the host binding).
-export type HostDispatch = (owner: HostOwner, name: string, input: unknown, client?: ClientRef) => Promise<CommandResult<CommandName>>;
+// P5 O1 M5: `client` is the asker, passed for a `machine`-owned command only (the host binding). P5 O2 M3: both types
+// moved with the host supervisor to @shared/host/host-supervisor.
+export type { HostDispatch, HostOwner };
 export type MachineBinding = { kind: 'embedded' } | { kind: 'host' };
 // P5 O6 M3: the connection manager's dispatch, for a command whose target is another machine (its input validated).
 export type RemoteDispatch = (machine: MachineRef, name: CommandName, input: unknown, ctx: MainContext) => Promise<CommandResult<CommandName>>;

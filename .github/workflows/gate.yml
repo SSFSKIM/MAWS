@@ -85,11 +85,14 @@ env:
   # §3.1's class-1 e2e groups, the default set on a macOS lane. A name whose script is not in package.json is skipped,
   # so a child's group joins the default set at the commit that adds its script. browser-cua and browser-chrome are
   # macOS-only and run on fakes (the cua host, a synthetic Chrome profile, the MAWS_E2E_KEYCHAIN seam; Decision Log 35).
+  # supervisor-daemon (P5 O2 M7) is e2e/supervisor.spec.ts on the daemon shape (MAWS_HOST_MODE=daemon), and daemon-unit
+  # its LaunchAgent end to end, which loads scratch-labelled agents into the runner's account and refuses outside CI; the
+  # e2e job's last step sweeps every `dev.maws.mawsd.e2e-*` after it, as the overlay's does on a hosted Mac.
   CLASS1_E2E: >-
     default artifacts library side tools to-human deliverables panel supervisor browser browser-comment browser-import
     settings transcript terminal code agents widgets c7 scm c12 available document document-app presentations
     design-systems browser-cua browser-chrome desk-web design dashboard connectors connectors-direct connectors-oauth delivery
-    discover machines lane-a
+    discover supervisor-daemon daemon-unit machines lane-a
   # The groups §3.1's table found green on a Linux runner, the only ones a Linux lane takes (never by default). desk-web
   # (DC5): the desk's web app in a browser, against its DX3 double, which needs no Electron and no Mac.
   LINUX_E2E: library artifacts available tools agents desk-web
@@ -134,10 +137,21 @@ env:
   # that republish through the host, the class-1 drag case under MAWS_PRESENTATIONS_PERF=1.
   # local-latency (P5 O1, OX7) is the local path's latency bench: a stub-engine session's delta to frame and command round
   # trip in detached mode, held to the baseline test/support/local-latency.ts records from three runs on the mini.
+  # local-latency-daemon (P5 O2 M7) is the same bench on the daemon shape, `mawsd`'s relay on the measured path, held to
+  # the same baseline and budget.
+  # daemon-idle (P5 O2, acceptance 14) is the idle cost of what stays behind with the app quit: on the daemon shape since
+  # O2's M9, mawsd and the engine host's physical footprint and CPU holding one kept idle session over 600 s, held to the
+  # bound test/support/daemon-idle.ts derives from the detached supervisor's recorded baseline.
+  # daemon-idle-baseline (P5 O2's landing) is the same scene on today's detached supervisor, no mawsd: it records only,
+  # asserting no bound, and is what the baseline is re-measured from on the tree under test when a landing misses.
+  # daemon-idle-floor (P5 Decision Logs 54 and 57), the same spec's other case, is the bare Electron runtime's footprint
+  # as Node, the share of mawsd's footprint that is the runtime's: a diagnostic, outside the bound.
+  # daemon-idle-mawsd (P5 O2 M5, Decision Log 57's early check), the spec's third case, is mawsd alone, idle with no hosts
+  # and no app: its footprint beside what the combined bound leaves it once the engine host's baseline is counted.
   # A group with a timing bound turns its timed cases on with a switch, MAWS_<name>_PERF or MAWS_<name>_SCALE set to 1 in
   # its package script, each such spec skipping without it or asserting its bounds only under it (presentations-drag's
   # one class-1 trial in e2e:presentations logs its p95), and is on this list: ci-kit's VM contract above rests on it.
-  MEASURED_E2E: artifacts-perf dashboard-scale design-scale document-scale document-scale-repeat local-latency presentations-drag presentations-scale tool-time-heavy-live
+  MEASURED_E2E: artifacts-perf daemon-idle daemon-idle-baseline daemon-idle-floor daemon-idle-mawsd dashboard-scale design-scale document-scale document-scale-repeat local-latency local-latency-daemon presentations-drag presentations-scale tool-time-heavy-live
   # The Mac jobs that may run beside another: e2e groups, and `unit:darwin`, that ask for ci-kit's shared instances
   # ([ci-kit-mac-shared], their only label), which run two jobs at a time on the mini's one desktop (ci-kit's mac-lane
   # concurrency spec, SSFSKIM/ci-kit docs/doperpowers/specs/2026-10-21-mac-lane-concurrency-design.md). Every other Mac
@@ -236,13 +250,15 @@ env:
   # d894ad360 (tree 5a096f4d1) the three `Lane: hosted` runs 40331386561, 40331422403 and 40331460850 (waiters on EC2
   # pool boxes) and the mini's run 40331504505 each gave terminal 15 passed, c7 35, browser 11 and transcript 37. That
   # leaves on the mini only default, the secret groups and browser-comment.
+  # supervisor-daemon and daemon-unit (P5 O2 M7): the daemon shape's suite and the LaunchAgent group, hosted by default
+  # (the architect's ruling: a hosted Mac's account is the job's alone, and gone with it).
   # machines (P5 O6 M6, docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md): the two-profile scenes, admitted
   # by the rule above on the tree that lists it, its three `Lane: hosted` runs and its `Lane: no-hosted` baseline
   # recorded in that document's Outcomes.
   HOSTED_MAC_E2E: >-
     document-app browser-chrome available artifacts settings connectors connectors-direct delivery to-human widgets side
     supervisor c12 browser-import document code scm agents library deliverables presentations dashboard design
-    design-systems tools panel browser-cua terminal c7 browser transcript machines
+    design-systems tools panel browser-cua terminal c7 browser transcript supervisor-daemon daemon-unit machines
   # Non-e2e jobs admitted to the direct hosted route. Lane: hosted/no-hosted never changes these.
   # packaged is unsigned but not admitted: run 40637823292 had four bare-suite failures
   # (layout-transfer:416 twice, :540; sessions:301). Admit only after fixes and 3/3 hosted passes.
@@ -558,10 +574,22 @@ jobs:
         env:
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/supervisor-packaged
         run: .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)' pnpm e2e:supervisor:packaged
+      # P5 O2 M7: the daemon shape's packaged check, a private mawsd of a scratch profile (no LaunchAgent: the spec fails if
+      # the job creates, removes or rewrites anything of the account's canonical dev.maws.mawsd it could cause, its plist,
+      # the default profile's sockets and lock, or that profile's mawsd/ tree; a live canonical mawsd's own logs and
+      # endpoint state are left out, e2e/support/canonical-mawsd.ts)
+      - if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        env:
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/supervisor-daemon-packaged
+        run: .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)' pnpm e2e:supervisor-daemon:packaged
       - if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         env:
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/voice-packaged
         run: .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)' pnpm e2e:voice:packaged
+      # As the e2e job's after e2e:daemon-unit: whatever the daemon-shape check did (it loads no agent), every
+      # `dev.maws.mawsd.e2e-*` agent and plist in this Mac's account is booted out and removed, and one left loaded fails.
+      - if: always() && steps.build.outcome == 'success'
+        run: .github/scripts/launchd-sweep.sh
       # Each run's HTML report keeps its screenshots and traces; test-results/ holds the last run's alone.
       - if: failure() || needs.plan.outputs.evidence == 'true'
         uses: actions/upload-artifact@v7
@@ -636,8 +664,9 @@ jobs:
         if: always()
         run: .github/scripts/hosted-mac.sh --cleanup
 
-  # The e2e groups outside the guest and mirror matrices (e2e_host), including direct hosted Macs. Each direct job
-  # builds its own out/: no pool prerequisite or artifact transfer. e2e-vm shares these steps for guest jobs.
+  # The e2e groups outside the guest and mirror matrices (e2e_host), including direct hosted Macs. A direct job builds
+  # out/ on its own Mac or restores it from the Actions cache (its entry's `cached`): no pool prerequisite or artifact
+  # transfer. e2e-vm shares these steps for guest jobs.
   e2e:
     needs: plan
     if: needs.plan.outputs.e2e_host != '[]'
@@ -677,6 +706,29 @@ jobs:
         with:
           name: e2e-build-${{ github.sha }}-${{ matrix.variant }}
           path: ${{ runner.temp }}/maws-e2e-build
+      # A direct hosted Mac's out/ (the entry's `cached` variant), restored from the Actions cache, where the run's first job
+      # to build that variant saved it under the commit and the variant; else built here and saved. A set larger than the
+      # account's 5 hosted Macs runs in rounds, and only the first round builds. The command's own build restores it from
+      # this directory, checking its digest, and builds after all when it does not match. The path is the same on every
+      # hosted Mac, as a cache entry's version requires; a save another job of the run made first never fails this one.
+      - id: build-cache
+        if: matrix.cached
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/maws-e2e-build/${{ github.sha }}/${{ matrix.cached }}
+          key: e2e-build-${{ runner.os }}-${{ github.sha }}-${{ matrix.cached }}
+      - if: matrix.cached && steps.build-cache.outputs.cache-hit != 'true'
+        env:
+          CACHED: ${{ matrix.cached }}
+        run: |
+          export MAWS_E2E_BUILD_CACHE=$RUNNER_TEMP/maws-e2e-build MAWS_E2E_BUILD_KEY=$GITHUB_SHA
+          .github/scripts/gate-run.sh 'built in|error|^e2e-build: ' scripts/e2e-build.sh "$CACHED"
+      - if: matrix.cached && steps.build-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/maws-e2e-build/${{ github.sha }}/${{ matrix.cached }}
+          key: e2e-build-${{ runner.os }}-${{ github.sha }}-${{ matrix.cached }}
       - if: matrix.build
         run: .github/scripts/gate-run.sh 'built in|error' pnpm build
       # A PEER_E2E group's peer (the plan's `peer`, the commit the `Peer:` trailer names): that commit alone fetched, checked
@@ -731,31 +783,45 @@ jobs:
           vm: any
       - env:
           SCRIPT: ${{ matrix.script }}
+          MAWS_E2E_RETRY: ${{ github.job == 'e2e' && matrix.retry && runner.environment == 'github-hosted' && runner.os == 'macOS' && '1' || '' }}
+          MAWS_E2E_FLAKY_FILE: ${{ runner.temp }}/maws-e2e-flaky.txt
           VARIANT: ${{ matrix.variant }}
+          CACHED: ${{ matrix.cached }}
           MAWS_E2E_PEER_ROOT: ${{ matrix.peer && format('{0}/maws-peer', runner.temp) || '' }}
         run: |
           display=()
           if [[ $RUNNER_OS == Linux ]]; then display=(xvfb-run -a --server-args='-screen 0 1920x1080x24'); fi
           # A guest-eligible group restores e2e-build's out/, downloaded above, and never builds: scripts/e2e-build.sh fails
           # naming the key and the variant when the entry is missing or does not match its digest.
+          # A direct hosted Mac restores the out/ the cache steps above restored or built.
           # Else the Mac builds each out/ variant once per run and runner: scripts/e2e-build.sh restores it from this disk
           # (Decision Log 35); the key is the checked-out commit, whose sha the build stamp carries. One directory per
           # runner instance (ci-kit's mac-lane concurrency spec, M2): two shared jobs on one variant would otherwise race
           # its restore, its store and the prune.
           if [[ -n $VARIANT ]]; then
             export MAWS_E2E_BUILD_CACHE=$RUNNER_TEMP/maws-e2e-build MAWS_E2E_BUILD_KEY=$GITHUB_SHA MAWS_E2E_BUILD_REQUIRE=1
+          elif [[ -n $CACHED ]]; then export MAWS_E2E_BUILD_CACHE=$RUNNER_TEMP/maws-e2e-build MAWS_E2E_BUILD_KEY=$GITHUB_SHA
           elif [[ $RUNNER_OS == macOS ]]; then export MAWS_E2E_BUILD_CACHE=$HOME/Library/Caches/maws-e2e-build/$RUNNER_NAME MAWS_E2E_BUILD_KEY=$GITHUB_SHA; fi
           # default's own specs, when the step above derived them (macOS's bash 3.2 has no mapfile).
           specs=()
           if [[ -s $RUNNER_TEMP/e2e-specs ]]; then while IFS= read -r spec; do specs+=("$spec"); done <"$RUNNER_TEMP/e2e-specs"; fi
           # Playwright's count lines, and vitest's for the one group that runs a vitest file (tool-time-heavy-live, P4-A2).
-          .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)|^e2e-build: |^ +(Test Files|Tests) +[0-9]' "${display[@]}" pnpm "$SCRIPT" "${specs[@]}"
+          .github/scripts/gate-run.sh '^flaky: |^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)|^e2e-build: |^ +(Test Files|Tests) +[0-9]' "${display[@]}" pnpm "$SCRIPT" "${specs[@]}"
+      # One aggregate notice in its own step: GitHub caps annotations per step, so even a group with many flakes keeps
+      # every location, without competing with the test command's other warnings. The summary above stays one per line.
+      - name: Publish flaky tests
+        if: always() && github.job == 'e2e' && matrix.retry && runner.environment == 'github-hosted' && runner.os == 'macOS' && steps.checkout.outcome == 'success'
+        run: node scripts/ci-flaky-reporter.mjs "$RUNNER_TEMP/maws-e2e-flaky.txt"
       # The peer's supervisors and this tree's outlive their apps by design (detached, each in a process group of its own),
       # so whatever the run did, every one of either build is stopped here, with the peer's apps and checkout: nothing the
       # job started is left to the next job on this Mac.
       # Any job of a peer group that checked out, so a prepare cancelled midway is undone too.
       - if: always() && matrix.peer && steps.checkout.outcome == 'success'
         run: .github/scripts/gate-peer.sh stop "$RUNNER_TEMP/maws-peer"
+      # e2e:daemon-unit (P5 O2 M7) loads LaunchAgents into this Mac's account, so whatever the run did, every
+      # `dev.maws.mawsd.e2e-*` agent and plist in the account is booted out and removed, this job's and any earlier one's.
+      - if: always() && matrix.group == 'daemon-unit' && steps.checkout.outcome == 'success'
+        run: .github/scripts/launchd-sweep.sh
       # Only after this job's own checkout: on the Mac the workspace persists between jobs and only the checkout's clean
       # clears the last job's reports, so a job that failed before it (a refused measured group) would upload another's.
       # desk-web's suites (desk-web, desk-web-hub) run under apps/desk-web and write their output there.

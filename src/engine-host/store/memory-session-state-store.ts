@@ -4,15 +4,18 @@
 import { assertSafeAppSessionId } from '@shared/engine/app-session-id';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
-import type { GrantSnapshot, QueueState, SessionStateStore, StoredQueue } from '@shared/engine/session-state-store';
+import type { CronRecord, GrantSnapshot, QueueState, SessionStateStore, StoredQueue } from '@shared/engine/session-state-store';
 
 export class MemorySessionStateStore implements SessionStateStore {
   readonly queues = new Map<AppSessionId, QueueState>();
   readonly grants = new Map<AppSessionId, GrantSnapshot>();
   readonly specs = new Map<AppSessionId, LaunchSpec>();
+  readonly keeps = new Map<AppSessionId, boolean>(); // P5 O2 M2
+  readonly engineSessionIds = new Map<AppSessionId, string[]>(); // P5 O2 M2
+  readonly cronRecords = new Map<AppSessionId, CronRecord>(); // P5 O2 M2
 
   async exists(id: AppSessionId): Promise<boolean> {
-    return this.queues.has(id) || this.grants.has(id) || this.specs.has(id);
+    return this.queues.has(id) || this.grants.has(id) || this.specs.has(id) || this.keeps.has(id) || this.engineSessionIds.has(id) || this.cronRecords.has(id);
   }
   async loadQueue(id: AppSessionId): Promise<StoredQueue> {
     return { ...structuredClone(this.queues.get(id) ?? { entries: [], paused: false }), corrupt: null };
@@ -32,6 +35,32 @@ export class MemorySessionStateStore implements SessionStateStore {
   async saveLaunchSpec(id: AppSessionId, spec: LaunchSpec): Promise<void> {
     this.specs.set(id, structuredClone(spec));
   }
+  async loadKeep(id: AppSessionId): Promise<boolean> {
+    return this.keeps.get(id) ?? false;
+  }
+  async saveKeep(id: AppSessionId, keep: boolean): Promise<void> {
+    this.keeps.set(id, keep);
+  }
+  async loadEngineSessionIds(id: AppSessionId): Promise<string[]> {
+    return [...(this.engineSessionIds.get(id) ?? [])];
+  }
+  async saveEngineSessionIds(id: AppSessionId, ids: string[]): Promise<void> {
+    this.engineSessionIds.set(id, [...ids]);
+  }
+  // P5 O2 M2: as the file store, a failed save removes the record, so it reads as missing until a save succeeds;
+  // `cronRecordWriteError`, while set, fails every save with it (a full disk, in tests)
+  cronRecordWriteError: Error | null = null;
+  async loadCronRecord(id: AppSessionId): Promise<CronRecord | null> {
+    const record = this.cronRecords.get(id);
+    return record === undefined ? null : structuredClone(record);
+  }
+  async saveCronRecord(id: AppSessionId, record: CronRecord): Promise<void> {
+    if (this.cronRecordWriteError) {
+      this.cronRecords.delete(id);
+      throw this.cronRecordWriteError;
+    }
+    this.cronRecords.set(id, structuredClone(record));
+  }
   // keeps no journal: nothing to delete, but the id is still checked as the file store checks it
   async forgetJournal(id: AppSessionId): Promise<void> {
     assertSafeAppSessionId(id);
@@ -40,5 +69,8 @@ export class MemorySessionStateStore implements SessionStateStore {
     this.queues.delete(id);
     this.grants.delete(id);
     this.specs.delete(id);
+    this.keeps.delete(id);
+    this.engineSessionIds.delete(id);
+    this.cronRecords.delete(id);
   }
 }

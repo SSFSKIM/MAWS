@@ -42,7 +42,9 @@ describe('replay fixtures in the index', () => {
       ...listJournals('pass1').map((name) => join(FIXTURE_DIR, `${name}.jsonl`)),
       ...(['pass2', 'pass3'] as const).flatMap((pass) => listJournals(pass).map((name) => join(FIXTURE_DIR, pass, `${name}.jsonl`))),
       // P4-B4's probe journals (the engine against the scripted API stand-in; not a conformance pass)
-      ...readdirSync(join(FIXTURE_DIR, 'p4')).filter((name) => name.endsWith('.jsonl')).map((name) => join(FIXTURE_DIR, 'p4', name)),
+      // and P5's: O2's Stop-hook probe (the pinned engine against the stand-in, as P4-B4's) and O3-F's (its arms' final
+      // transcripts, under p5/p5-o3-rewind-resume-transcripts/, are not journals)
+      ...(['p4', 'p5'] as const).flatMap((dir) => readdirSync(join(FIXTURE_DIR, dir)).filter((name) => name.endsWith('.jsonl')).map((name) => join(FIXTURE_DIR, dir, name))),
     ];
     expect(listJournals('pass3').length).toBeGreaterThan(0);
     expect(journals.map((f) => f.path).sort()).toEqual(expected.sort());

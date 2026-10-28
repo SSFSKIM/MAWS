@@ -32,6 +32,7 @@ export const commands = [
   'session.acquire',
   // P2-A end
   'session.recentTurns', // P2-D (2026-10-09): the resume chooser's preview read
+  'session.setKeep', // P5 O2 M2: the owner's Keep running mark
   'session.pendingItems', // P5 O10 M8: the broker's items as a read (a `view` read, as `session.pendingRequest` is)
 ] as const;
 

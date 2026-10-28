@@ -59,10 +59,10 @@ export interface LockDeps {
 
 const errnoOf = (error: unknown) => (error as NodeJS.ErrnoException).code;
 
-// The lock as written, or null when it is absent or unparseable.
-export function readLock(dir: string, fs: Pick<typeof nodeFs, 'readFileSync'> = nodeFs): LockFile | null {
+// The lock as written, or null when it is absent or unparseable. P5 O2 M3: `name` for another host's lock (`mawsd`'s).
+export function readLock(dir: string, fs: Pick<typeof nodeFs, 'readFileSync'> = nodeFs, name: string = SUPERVISOR_FILES.lock): LockFile | null {
   try {
-    return parseLock(fs.readFileSync(join(dir, SUPERVISOR_FILES.lock), 'utf8'));
+    return parseLock(fs.readFileSync(join(dir, name), 'utf8'));
   } catch {
     return null;
   }
@@ -78,13 +78,20 @@ export function isSameProcess(record: { pid: number; procStart: string }, deps: 
   return current === null || current === record.procStart;
 }
 
+// The lock's and its break file's names inside the directory (P5 O2 M4: another host's, the pty host's or `mawsd`'s).
+export interface LockNames {
+  lock: string;
+  breaker: string;
+}
+
 // Takes `<dir>/host.lock` for this candidate: 'taken', or 'held' when a live supervisor holds it, whatever its socket
-// does (one between its lock and its listen, or in its exit order, must not lose its files).
-export async function takeLock(dir: string, mine: Omit<LockFile, 'pid' | 'procStart' | 'startedAt'>, deps: LockDeps): Promise<'taken' | 'held'> {
+// does (one between its lock and its listen, or in its exit order, must not lose its files). P5 O2 M4: `names` for
+// another host's lock.
+export async function takeLock(dir: string, mine: Omit<LockFile, 'pid' | 'procStart' | 'startedAt'>, deps: LockDeps, names: LockNames = SUPERVISOR_FILES): Promise<'taken' | 'held'> {
   const { fs } = deps;
   const pid = deps.pid ?? process.pid;
-  const lockPath = join(dir, SUPERVISOR_FILES.lock);
-  const ownPath = join(dir, `${SUPERVISOR_FILES.lock}.${pid}`);
+  const lockPath = join(dir, names.lock);
+  const ownPath = join(dir, `${names.lock}.${pid}`);
   const lock: LockFile = { pid, procStart: deps.procStartOf(pid) ?? '', ...mine, startedAt: new Date(deps.now()).toISOString() };
   fs.writeFileSync(ownPath, JSON.stringify(lock), { mode: 0o600 });
   try {
@@ -123,7 +130,7 @@ export async function takeLock(dir: string, mine: Omit<LockFile, 'pid' | 'procSt
   // is what was judged stale: a fresh file another candidate put there meanwhile is linked back and waited for, so two
   // candidates that judged one dead breaker's file stale together never both break.
   function breakStale(staleRaw: string): boolean {
-    const breakPath = join(dir, SUPERVISOR_FILES.breaker);
+    const breakPath = join(dir, names.breaker);
     const ownBreak = `${breakPath}.${pid}`;
     const moved = `${breakPath}.${pid}.stale`;
     const own = JSON.stringify({ pid, procStart: lock.procStart, nonce: randomUUID() });
@@ -212,12 +219,13 @@ function parseLock(raw: string): LockFile | null {
 }
 
 // `<dir>/host.sock` when it fits sun_path, else a per-profile directory under the user's tmpdir (never /tmp, which is
-// shared). The lock records the path, so a client never computes the fallback itself.
-export function socketPathFor(dir: string, userData: string, tmpdir: string): string {
+// shared). The lock records the path, so a client never computes the fallback itself. P5 O2 M4: `fallback` names another
+// host's directory there (`<fallback>-<12 hex of the key's sha1>`), so two hosts of one profile never share one.
+export function socketPathFor(dir: string, userData: string, tmpdir: string, fallback: string = 'maws-supervisor'): string {
   const inDir = join(dir, SUPERVISOR_FILES.socket);
   if (Buffer.byteLength(inDir, 'utf8') <= SOCKET_PATH_MAX_BYTES) return inDir;
   const profile = createHash('sha1').update(userData).digest('hex').slice(0, 12);
-  return join(tmpdir, `maws-supervisor-${profile}`, SUPERVISOR_FILES.socket);
+  return join(tmpdir, `${fallback}-${profile}`, SUPERVISOR_FILES.socket);
 }
 
 const buildIds = new Map<string, string>();

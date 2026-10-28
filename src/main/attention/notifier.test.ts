@@ -3,7 +3,7 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { Settings } from '@shared/ipc/schema';
 import { digest, item, project, record } from '../../../test/support/builders';
-import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
 import type { ClientPort, NotifyEvent, NotifyRequest } from '@shared/client/port';
 
 // A stand-in for the client port's notifications, badge and focus: records every notification asked for, and lets a
@@ -46,7 +46,7 @@ type Writer = import('../sessions/read-model').ReadModelWriter;
 const CHARTER = 'app-charter' as AppSessionId;
 const LOOSE = 'app-loose' as AppSessionId;
 const T = '2026-09-28T10:00:00Z';
-const SETTINGS: Settings = SETTINGS_DEFAULTS_V19;
+const SETTINGS: Settings = SETTINGS_DEFAULTS_V20;
 
 function harness(opts: { focused?: boolean; settings?: Settings; before?: (w: Writer) => void; actions?: import('./actions').NotificationActions } = {}) {
   const model = new SessionReadModel('index');

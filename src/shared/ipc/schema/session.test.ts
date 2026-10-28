@@ -134,3 +134,14 @@ describe('C10 session lifecycle entries', () => {
   });
 });
 // C10 end
+
+describe('P5 O2 M2: session.setKeep', () => {
+  it('is the engine host\'s, takes the session and the mark, and answers the mark it holds', () => {
+    expect(commands['session.setKeep'].owner).toBe('engine-host');
+    expect(validateCommandInput('session.setKeep', { appSessionId: 'app-1', keep: true }).ok).toBe(true);
+    expect(validateCommandInput('session.setKeep', { appSessionId: 'app-1' }).ok).toBe(false);
+    expect(validateCommandInput('session.setKeep', { appSessionId: 'app-1', keep: 'yes' }).ok).toBe(false);
+    expect(validateCommandOutput('session.setKeep', { kept: false }).ok).toBe(true);
+    expect(validateCommandOutput('session.setKeep', { kept: false, extra: 1 }).ok).toBe(false);
+  });
+});

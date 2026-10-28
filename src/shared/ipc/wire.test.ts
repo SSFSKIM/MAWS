@@ -128,12 +128,14 @@ describe('wireManifestOf', () => {
       'probe.main': { input: z.void(), output: z.void(), owner: 'main' },
       'probe.pty': { input: z.void(), output: z.void(), owner: 'pty-host' },
     },
-    events: { 'probe.hostEvent': z.strictObject({ c: z.boolean() }), 'probe.mainEvent': z.strictObject({}) },
+    events: { 'probe.hostEvent': z.strictObject({ c: z.boolean() }), 'probe.mainEvent': z.strictObject({}), 'probe.ptyEvent': z.strictObject({}) },
     hostEvents: ['probe.hostEvent'],
+    ptyHostEvents: ['probe.ptyEvent'], // P5 O2 M4
     mainOnly: new Set<string>(),
   } satisfies WireRegistry;
 
-  it('covers the engine host’s and machine’s commands, the host events, the envelope and the socket layer, and nothing else', () => {
+  // P5 O2 M4: the pty host's commands and events joined the scope, since under the daemon shape it is mawsd's build
+  it('covers the engine host’s, the pty host’s and machine’s commands, the host and pty host events, the envelope and the socket layer, and nothing else', () => {
     const manifest = wireManifestOf(fixture);
     expect(manifest).toMatchObject({ major: WIRE_MAJOR, minor: WIRE_MINOR, capabilities: [...WIRE_CAPABILITIES].sort() });
     expect(wireManifestOf(fixture, ['b.second', 'a.first']).capabilities).toEqual(['a.first', 'b.second']);
@@ -141,13 +143,34 @@ describe('wireManifestOf', () => {
       [
         'commands.probe.host',
         'commands.probe.machine',
+        'commands.probe.pty',
         'events.probe.hostEvent',
+        'events.probe.ptyEvent',
         ...['clientGone', 'doc', 'evt', 'ready', 'req', 'res'].map((t) => `envelope.${t}`),
         ...['documents.close', 'documents.closed', 'documents.open', 'exit', 'hello', 'refuse', 'welcome'].map((t) => `socket.${t}`),
         ...['documents.close', 'documents.closed', 'documents.open', 'evt', 'exit', 'hello', 'ready', 'refuse', 'req', 'res', 'welcome'].map((t) => `socket.v2.${t}`),
       ].sort(),
     );
     expect(manifest.entries['commands.probe.host']).toEqual({ owner: 'engine-host', input: z.toJSONSchema(fixture.commands['probe.host'].input, { unrepresentable: 'any' }), output: { $schema: 'https://json-schema.org/draft/2020-12/schema' } });
+  });
+});
+
+// P5 O2 M4 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md): the production manifest's pty host entries and capability
+describe('the pty host on the wire (P5 O2 M4)', () => {
+  const manifest = wireManifestOf(REGISTRY);
+  it('lists every pty-host-owned command and the events it emits, and none of main’s pty commands', () => {
+    const ptyCommands = Object.keys(REGISTRY.commands).filter((name) => REGISTRY.commands[name as keyof typeof REGISTRY.commands].owner === 'pty-host');
+    expect(ptyCommands.length).toBeGreaterThan(0);
+    for (const name of ptyCommands) expect(manifest.entries).toHaveProperty([`commands.${name}`]);
+    expect(manifest.entries).toHaveProperty(['commands.pty.recaptureEnv']); // main's and mawsd's, additive under M2's minor
+    expect(manifest.entries).not.toHaveProperty(['commands.pty.hostState']);
+    expect(manifest.entries).not.toHaveProperty(['commands.pty.openLink']);
+    expect(REGISTRY.ptyHostEvents).toEqual(['pty.data', 'pty.exit']);
+    for (const name of REGISTRY.ptyHostEvents) expect(manifest.entries).toHaveProperty([`events.${name}`]);
+    expect(manifest.entries).not.toHaveProperty(['events.pty.hostState']); // main's
+  });
+  it('lists the pty frames capability', () => {
+    expect(manifest.capabilities).toContain('socket.ptyFrames');
   });
 });
 

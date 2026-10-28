@@ -6,6 +6,10 @@
 // Three kinds, never ranked against each other (P5 Decision Log 20). Only the session ranks are ordered; the types keep
 // the kinds apart, so `SESSION_RANKS.indexOf` takes a `SessionRank` alone, and a command graded by a machine grade or a
 // routing class can never be satisfied by a rank. O1 compares no grades; O10 defines the comparison.
+//
+// P5 O2 M5 (a rubric line beside O1 M4's, settled with O10): a main-only command is `internal` unless a remote caller
+// reaches it through the endpoint, in which case it takes its effect's grade (`daemon.status` is `list`, `daemon.restart`
+// `machine-admin`; grades/daemon.ts).
 import type { NAMES, Namespace } from './names';
 import { grades as artifacts } from './grades/artifacts';
 import { grades as attention } from './grades/attention';
@@ -13,6 +17,7 @@ import { grades as browser } from './grades/browser';
 import { grades as catalog } from './grades/catalog';
 import { grades as connectors } from './grades/connectors';
 import { grades as customization } from './grades/customization';
+import { grades as daemon } from './grades/daemon'; // P5 O2 M5
 import { grades as delivery } from './grades/delivery';
 import { grades as designSystems } from './grades/design-systems';
 import { grades as engine } from './grades/engine';
@@ -28,6 +33,7 @@ import { grades as library } from './grades/library';
 import { grades as marketplaces } from './grades/marketplaces';
 import { grades as maws } from './grades/maws';
 import { grades as mods } from './grades/mods';
+import { grades as org } from './grades/org'; // P5 O8 M1
 import { grades as ownerChannel } from './grades/owner-channel';
 import { grades as plugins } from './grades/plugins';
 import { grades as presentations } from './grades/presentations';
@@ -64,7 +70,7 @@ export type NamespaceGrades<C extends string> = GradeSpec | { readonly [K in C]:
 export const NAMESPACE_GRADES = {
   session, engine, fs, git, pty, layout, attention, settings, files, plugins, marketplaces, voice, maws, scm, side, host,
   browser, mods, ownerChannel, artifacts, spaces, library, designSystems, presentations, connectors, delivery,
-  customization, catalog, machine, machines, laneA,
+  customization, catalog, daemon, machine, machines, org, laneA, // P5 O2 M5: daemon; P5 O8 M1: org; P5 O9 M2: laneA
 } as const satisfies { readonly [N in Namespace]: NamespaceGrades<CommandsOf<N>> };
 
 const isSpec = (declared: NamespaceGrades<string>): declared is GradeSpec =>

@@ -7,7 +7,7 @@
 // In utility mode the two ends are entangled directly: main keeps neither, and a window that closes or reloads closes
 // its end, which the host sees as the port's `close`. When the host exits, its ends close with it and the renderer's
 // ArtifactHost re-opens (the one reopen path). In detached mode (M5) main keeps the host's end and relays it over the
-// supervisor's socket (hosts/doc-relay.ts) under the asking client's id, and ends that client's channels when it ends
+// supervisor's socket (@shared/host/doc-relay.ts) under the asking client's id, and ends that client's channels when it ends
 // (its page closes, navigates or crashes; Decision Log 34b), besides each port's own close.
 import type { MessageChannelMain } from 'electron';
 import type { Actor } from '@shared/artifacts/actor';
