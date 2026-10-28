@@ -26,7 +26,7 @@ Two residual defects, neither about the launch boundary, and one engine behaviou
      rewound turn back, while MAWS's event log, which derives `boundary.rewind` from the answer, still hides it. At
      200 ms and at 1 s after the answer the anchor was on disk and held. The source enqueues the anchor without
      awaiting the write (a 100 ms drain); a release (`end_session`) flushes, so only a crash, OOM or SIGKILL in that
-     window reaches it.
+     window reaches it. The repair below re-sends the rewind with its original last-seen cursor on the next resume.
   B. MAWS's shared anchor schema refuses the anchor a "Load now" rewind writes (owner: O3-C, or a tracker fix now; it
      is lane A's today). A resumed process that has taken no prompt writes the anchor without `lastPrompt`;
      `LastPromptAnchorSchema` (src/shared/wire/transcript.ts:19) requires it, so `recentTurnsOf`
@@ -79,7 +79,10 @@ Arms (T1..T6 are turns; l1..l3 launches; "release" is end_session; seqs are the 
      last row (line 83, present 2 s after the answer and before T4). T4's user record parents on T1's last row, so T2
      and T3 stay in the file as a dead branch.
    - The model: T4's first request holds T1 and T4 only (request #17, 9 messages); after a second release and resume,
-     T5's holds T1, T4, T5 (l3 request #22). No marker of T2 or T3, no block twice, in any request of the arm.
+     T5's holds T1, T4, T5 (l3 request #22). None of the discarded conversation (T2's or T3's prompt, replies, tool
+     calls or tool results) in any request after the rewind, and no block twice in any request of the arm. STATE_T3
+     does appear from T4's own Read of state.txt (request #18, carried into l3 request #22): the file T3 wrote, which
+     the conversation-only rewind kept on disk (C above), read fresh, not the discarded branch coming back.
    - MAWS: the normaliser emits `boundary.rewind` (target T2, prefill T2's prompt) from the answer in l2; reduced over
      the app session's events across l1 and l2, it finds T2's turn from l1 and hides T2 and T3 (6 rows); l3's events
      add T5 below. The chain follower over the transcript at every later point hides the same two turns; the resume
@@ -112,10 +115,15 @@ Arms (T1..T6 are turns; l1..l3 launches; "release" is end_session; seqs are the 
 
 Where the fixes belong.
 - A (O3-D, the session service's resume path): after a launch that exited without `end_session` completing, if the
-  launch's last act was a successful rewind with no later prompt, send the same `rewind_conversation` (target, last
-  seen the target) to the resumed process before anything else. The anchor's presence decides the outcome: if it
-  landed, the target is off the resumed chain and the engine refuses with target_not_found, a no-op (the refusal
-  findings-p4-w2a-rewind.txt measured); if it was lost, the target is still on the chain and the rewind repairs it.
+  launch's last act was a successful rewind with no later prompt, send the same `rewind_conversation` to the resumed
+  process before anything else: the same target and the same last-seen cursor the original request carried, kept with
+  the rewind (the journal's request row already holds both). Not the target as its own last seen: a rewind that
+  discarded several turns (pre: target T2, last seen T3) would leave T3 on the resumed chain after a lost anchor,
+  and a retry with last seen T2 would be refused `unseen_later_turn` (2.1.283 L726160-726176) instead of repairing.
+  The anchor's presence decides the outcome: if it landed, the target is off the resumed chain and the engine refuses
+  with target_not_found, a no-op (the refusal findings-p4-w2a-rewind.txt measured); if it was lost, the target is
+  still on the chain and the rewind repairs it. The kill arms measured only a target that was the newest prompt (last
+  seen = target there); the repair of a multi-turn rewind is inferred from the source, not measured.
   The engine host then agrees with the boundary MAWS already shows; no event is retracted, and the start-time
   recovery (src/main/sessions/recovery.ts) already reads the event log for `boundary.rewind` the same way. Rejected:
   holding the host's answer until the anchor is on disk, which cannot stop the normaliser, which derives the boundary

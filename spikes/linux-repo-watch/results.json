@@ -36,7 +36,8 @@
     "rssMiB": 147.2
    }
   ],
-  "note": "maws-bare carried a linked worktree at .claude/worktrees/wt1 (no node_modules) from the overlap run on; the overflow run watched both (2,153 directories)."
+  "note": "maws-bare carried a linked worktree at .claude/worktrees/wt1 (no node_modules) from the overlap run on; the overflow run watched both (2,153 directories).",
+  "rerecorded": "maws-nm-dirs, maws-nm-dirs-git, linux-dirs and maws-bare-dirs-overflow were re-recorded on 2026-10-28 after review, with the burst completion rule fixed (complete when every burst file has been named once, timed by that event); the recursive runs give one callback per burst file, so their figures stand as first recorded."
  },
  "runs": {
   "maws-nm": {
@@ -793,14 +794,14 @@
    },
    "census": {
     "dirs": 5903,
-    "files": 52047,
+    "files": 52040,
     "symlinks": 84,
     "other": 0,
     "ignoredEntries": 0,
     "byTop": {
      "node_modules": 47571,
      "src": 3792,
-     "spikes": 2402,
+     "spikes": 2395,
      "docs": 1844,
      "apps": 764,
      "e2e": 639,
@@ -815,14 +816,14 @@
      1188,
      "/Users/new/Developer/GitHub/MAWS/node_modules/es-toolkit/compat"
     ],
-    "walkMs": 552,
-    "entries": 58034
+    "walkMs": 6098,
+    "entries": 58027
    },
    "setup": {
     "thrown": null,
-    "wallMs": 852,
-    "blockedMs": 0,
-    "cpuMs": 952,
+    "wallMs": 1901,
+    "blockedMs": 4,
+    "cpuMs": 1806,
     "treeWatchers": 5903,
     "treeErrors": [],
     "exhausted": false,
@@ -830,13 +831,13 @@
      "instances": 1,
      "watches": 5903
     },
-    "rssMiB": 11.8,
+    "rssMiB": 12.5,
     "heapMiB": 5.5,
     "externalMiB": 0,
-    "rssTotalMiB": 76.9,
+    "rssTotalMiB": 78,
     "watchesPerEntry": 0.102,
     "watchesPerDir": 1,
-    "bytesPerWatch": 2090,
+    "bytesPerWatch": 2215,
     "eventsDuringSetup": 0,
     "errorsSoon": []
    },
@@ -847,16 +848,16 @@
      "create": {
       "n": 30,
       "missed": 0,
-      "p50": 0.68,
-      "p95": 1.25,
-      "max": 1.29
+      "p50": 0.33,
+      "p95": 0.68,
+      "max": 0.96
      },
      "modify": {
       "n": 30,
       "missed": 0,
-      "p50": 0.51,
-      "p95": 1.19,
-      "max": 1.24
+      "p50": 0.39,
+      "p95": 0.61,
+      "max": 0.83
      }
     },
     "deepest": {
@@ -865,16 +866,16 @@
      "create": {
       "n": 30,
       "missed": 0,
-      "p50": 0.33,
-      "p95": 1.09,
-      "max": 1.59
+      "p50": 0.32,
+      "p95": 0.75,
+      "max": 3.99
      },
      "modify": {
       "n": 30,
       "missed": 0,
-      "p50": 0.6,
-      "p95": 1.34,
-      "max": 1.34
+      "p50": 0.38,
+      "p95": 0.57,
+      "max": 0.79
      }
     },
     "largestDir": {
@@ -883,41 +884,43 @@
      "create": {
       "n": 30,
       "missed": 0,
-      "p50": 0.67,
-      "p95": 1.26,
-      "max": 1.35
+      "p50": 0.29,
+      "p95": 0.56,
+      "max": 3.54
      },
      "modify": {
       "n": 30,
       "missed": 0,
-      "p50": 0.78,
-      "p95": 1.25,
-      "max": 1.31
+      "p50": 0.36,
+      "p95": 0.61,
+      "max": 0.71
      }
     },
     "newDirectory": {
      "create": {
       "n": 30,
       "missed": 0,
-      "p50": 0.39,
-      "p95": 1.86,
-      "max": 2.25
+      "p50": 0.29,
+      "p95": 1.13,
+      "max": 1.15
      }
     }
    },
    "idle": {
     "seconds": 10,
-    "cpuMs": 26,
+    "cpuMs": 13,
     "events": 0
    },
    "churn": [
     {
      "files": 200,
      "op": "create",
-     "writerMs": 108,
-     "allHeardMs": 108,
+     "writerMs": 105,
+     "allHeardMs": 94,
+     "filesHeard": 200,
+     "eventsAtAllHeard": 399,
      "events": 400,
-     "cpuMs": 48,
+     "cpuMs": 49,
      "worstLoopLagMs": 4,
      "loopDelayP99Ms": 14,
      "loopDelayMaxMs": 14,
@@ -926,37 +929,43 @@
     {
      "files": 200,
      "op": "remove",
-     "writerMs": 72,
-     "allHeardMs": 72,
+     "writerMs": 75,
+     "allHeardMs": 65,
+     "filesHeard": 200,
+     "eventsAtAllHeard": 200,
      "events": 200,
-     "cpuMs": 26,
-     "worstLoopLagMs": 3,
-     "loopDelayP99Ms": 11,
-     "loopDelayMaxMs": 11,
+     "cpuMs": 43,
+     "worstLoopLagMs": 5,
+     "loopDelayP99Ms": 20,
+     "loopDelayMaxMs": 20,
      "watches": 5904
     },
     {
      "files": 2000,
      "op": "create",
-     "writerMs": 292,
-     "allHeardMs": 292,
+     "writerMs": 377,
+     "allHeardMs": 365,
+     "filesHeard": 2000,
+     "eventsAtAllHeard": 3999,
      "events": 4000,
-     "cpuMs": 266,
-     "worstLoopLagMs": 1,
-     "loopDelayP99Ms": 10,
-     "loopDelayMaxMs": 12,
+     "cpuMs": 365,
+     "worstLoopLagMs": 20,
+     "loopDelayP99Ms": 18,
+     "loopDelayMaxMs": 30,
      "watches": 5904
     },
     {
      "files": 2000,
      "op": "remove",
-     "writerMs": 162,
-     "allHeardMs": 162,
+     "writerMs": 205,
+     "allHeardMs": 184,
+     "filesHeard": 2000,
+     "eventsAtAllHeard": 2000,
      "events": 2000,
-     "cpuMs": 154,
-     "worstLoopLagMs": 49,
-     "loopDelayP99Ms": 59,
-     "loopDelayMaxMs": 59,
+     "cpuMs": 183,
+     "worstLoopLagMs": 40,
+     "loopDelayP99Ms": 50,
+     "loopDelayMaxMs": 50,
      "watches": 5904
     }
    ],
@@ -966,7 +975,7 @@
      "instances": 1,
      "watches": 5903
     },
-    "rssMiB": 83.2
+    "rssMiB": 96.8
    }
   },
   "maws-nm-dirs-git": {
@@ -983,13 +992,13 @@
    },
    "census": {
     "dirs": 1081,
-    "files": 9365,
+    "files": 9358,
     "symlinks": 0,
     "other": 0,
     "ignoredEntries": 6,
     "byTop": {
      "src": 3792,
-     "spikes": 2402,
+     "spikes": 2395,
      "docs": 1844,
      "apps": 759,
      "e2e": 639,
@@ -1005,14 +1014,14 @@
      274,
      "/Users/new/Developer/GitHub/MAWS/docs/doperpowers/evidence/p1-e11/gates"
     ],
-    "walkMs": 168,
-    "entries": 10446
+    "walkMs": 165,
+    "entries": 10439
    },
    "setup": {
     "thrown": null,
-    "wallMs": 153,
+    "wallMs": 247,
     "blockedMs": 1,
-    "cpuMs": 172,
+    "cpuMs": 248,
     "treeWatchers": 1081,
     "treeErrors": [],
     "exhausted": false,
@@ -1020,13 +1029,13 @@
      "instances": 1,
      "watches": 1081
     },
-    "rssMiB": 1,
+    "rssMiB": 0.9,
     "heapMiB": 0.9,
     "externalMiB": 0,
-    "rssTotalMiB": 60.5,
-    "watchesPerEntry": 0.103,
+    "rssTotalMiB": 62.7,
+    "watchesPerEntry": 0.104,
     "watchesPerDir": 1,
-    "bytesPerWatch": 970,
+    "bytesPerWatch": 849,
     "eventsDuringSetup": 0,
     "errorsSoon": []
    },
@@ -1037,16 +1046,16 @@
      "create": {
       "n": 30,
       "missed": 0,
-      "p50": 0.35,
-      "p95": 0.64,
-      "max": 0.77
+      "p50": 0.32,
+      "p95": 0.75,
+      "max": 0.93
      },
      "modify": {
       "n": 30,
       "missed": 0,
-      "p50": 0.42,
-      "p95": 0.6,
-      "max": 0.64
+      "p50": 0.41,
+      "p95": 0.61,
+      "max": 1.12
      }
     },
     "deepest": {
@@ -1055,16 +1064,16 @@
      "create": {
       "n": 30,
       "missed": 0,
-      "p50": 0.33,
-      "p95": 0.57,
-      "max": 1.53
+      "p50": 0.31,
+      "p95": 2.26,
+      "max": 2.4
      },
      "modify": {
       "n": 30,
       "missed": 0,
-      "p50": 0.39,
-      "p95": 0.51,
-      "max": 0.59
+      "p50": 0.36,
+      "p95": 0.57,
+      "max": 0.66
      }
     },
     "largestDir": {
@@ -1073,42 +1082,44 @@
      "create": {
       "n": 30,
       "missed": 0,
-      "p50": 0.32,
-      "p95": 0.49,
-      "max": 2.47
+      "p50": 0.29,
+      "p95": 0.54,
+      "max": 41.91
      },
      "modify": {
       "n": 30,
       "missed": 0,
-      "p50": 0.38,
-      "p95": 0.53,
-      "max": 0.53
+      "p50": 0.35,
+      "p95": 0.45,
+      "max": 0.47
      }
     },
     "newDirectory": {
      "create": {
       "n": 30,
       "missed": 0,
-      "p50": 0.29,
+      "p50": 0.3,
       "p95": 0.5,
-      "max": 0.54
+      "max": 0.52
      }
     }
    },
    "idle": {
     "seconds": 10,
-    "cpuMs": 14,
+    "cpuMs": 15,
     "events": 0
    },
    "churn": [
     {
      "files": 200,
      "op": "create",
-     "writerMs": 108,
-     "allHeardMs": 108,
+     "writerMs": 87,
+     "allHeardMs": 73,
+     "filesHeard": 200,
+     "eventsAtAllHeard": 399,
      "events": 400,
-     "cpuMs": 44,
-     "worstLoopLagMs": 5,
+     "cpuMs": 61,
+     "worstLoopLagMs": 12,
      "loopDelayP99Ms": 15,
      "loopDelayMaxMs": 15,
      "watches": 1082
@@ -1116,37 +1127,43 @@
     {
      "files": 200,
      "op": "remove",
-     "writerMs": 97,
-     "allHeardMs": 97,
+     "writerMs": 76,
+     "allHeardMs": 67,
+     "filesHeard": 200,
+     "eventsAtAllHeard": 200,
      "events": 200,
-     "cpuMs": 34,
-     "worstLoopLagMs": 8,
-     "loopDelayP99Ms": 14,
-     "loopDelayMaxMs": 14,
+     "cpuMs": 39,
+     "worstLoopLagMs": 7,
+     "loopDelayP99Ms": 21,
+     "loopDelayMaxMs": 21,
      "watches": 1082
     },
     {
      "files": 2000,
      "op": "create",
-     "writerMs": 280,
-     "allHeardMs": 280,
+     "writerMs": 374,
+     "allHeardMs": 369,
+     "filesHeard": 2000,
+     "eventsAtAllHeard": 3999,
      "events": 4000,
-     "cpuMs": 197,
-     "worstLoopLagMs": 40,
-     "loopDelayP99Ms": 51,
-     "loopDelayMaxMs": 51,
+     "cpuMs": 393,
+     "worstLoopLagMs": 104,
+     "loopDelayP99Ms": 114,
+     "loopDelayMaxMs": 114,
      "watches": 1082
     },
     {
      "files": 2000,
      "op": "remove",
-     "writerMs": 251,
-     "allHeardMs": 251,
+     "writerMs": 281,
+     "allHeardMs": 244,
+     "filesHeard": 2000,
+     "eventsAtAllHeard": 2000,
      "events": 2000,
-     "cpuMs": 220,
-     "worstLoopLagMs": 134,
-     "loopDelayP99Ms": 149,
-     "loopDelayMaxMs": 149,
+     "cpuMs": 322,
+     "worstLoopLagMs": 179,
+     "loopDelayP99Ms": 189,
+     "loopDelayMaxMs": 189,
      "watches": 1082
     }
    ],
@@ -1156,7 +1173,7 @@
      "instances": 1,
      "watches": 1081
     },
-    "rssMiB": 72
+    "rssMiB": 73.2
    }
   },
   "linux-rec-default": {
@@ -1866,14 +1883,14 @@
      1614,
      "/Users/new/o3g/linux/include/linux"
     ],
-    "walkMs": 741,
+    "walkMs": 8711,
     "entries": 103664
    },
    "setup": {
     "thrown": null,
-    "wallMs": 1267,
+    "wallMs": 1577,
     "blockedMs": 1,
-    "cpuMs": 1288,
+    "cpuMs": 1516,
     "treeWatchers": 6359,
     "treeErrors": [],
     "exhausted": false,
@@ -1881,13 +1898,13 @@
      "instances": 1,
      "watches": 6359
     },
-    "rssMiB": 13.6,
+    "rssMiB": 14,
     "heapMiB": 5.7,
     "externalMiB": 0,
-    "rssTotalMiB": 77.8,
+    "rssTotalMiB": 79.4,
     "watchesPerEntry": 0.061,
     "watchesPerDir": 1,
-    "bytesPerWatch": 2238,
+    "bytesPerWatch": 2316,
     "eventsDuringSetup": 0,
     "errorsSoon": []
    },
@@ -1898,16 +1915,16 @@
      "create": {
       "n": 20,
       "missed": 0,
-      "p50": 0.3,
-      "p95": 0.57,
-      "max": 0.57
+      "p50": 0.35,
+      "p95": 0.64,
+      "max": 0.64
      },
      "modify": {
       "n": 20,
       "missed": 0,
-      "p50": 0.34,
-      "p95": 0.7,
-      "max": 0.7
+      "p50": 0.37,
+      "p95": 0.56,
+      "max": 0.56
      }
     },
     "deepest": {
@@ -1916,16 +1933,16 @@
      "create": {
       "n": 20,
       "missed": 0,
-      "p50": 0.27,
-      "p95": 0.63,
-      "max": 0.63
+      "p50": 0.32,
+      "p95": 1.81,
+      "max": 1.81
      },
      "modify": {
       "n": 20,
       "missed": 0,
-      "p50": 0.35,
-      "p95": 0.58,
-      "max": 0.58
+      "p50": 0.42,
+      "p95": 0.7,
+      "max": 0.7
      }
     },
     "largestDir": {
@@ -1934,25 +1951,25 @@
      "create": {
       "n": 20,
       "missed": 0,
-      "p50": 0.28,
-      "p95": 0.64,
-      "max": 0.64
+      "p50": 0.29,
+      "p95": 3.45,
+      "max": 3.45
      },
      "modify": {
       "n": 20,
       "missed": 0,
-      "p50": 0.39,
-      "p95": 0.54,
-      "max": 0.54
+      "p50": 0.31,
+      "p95": 0.55,
+      "max": 0.55
      }
     },
     "newDirectory": {
      "create": {
       "n": 20,
       "missed": 0,
-      "p50": 0.28,
-      "p95": 0.5,
-      "max": 0.5
+      "p50": 0.25,
+      "p95": 0.41,
+      "max": 0.41
      }
     }
    },
@@ -1965,49 +1982,57 @@
     {
      "files": 200,
      "op": "create",
-     "writerMs": 79,
-     "allHeardMs": 79,
+     "writerMs": 72,
+     "allHeardMs": 63,
+     "filesHeard": 200,
+     "eventsAtAllHeard": 399,
      "events": 400,
-     "cpuMs": 41,
-     "worstLoopLagMs": 6,
-     "loopDelayP99Ms": 16,
-     "loopDelayMaxMs": 16,
+     "cpuMs": 39,
+     "worstLoopLagMs": 2,
+     "loopDelayP99Ms": 13,
+     "loopDelayMaxMs": 13,
      "watches": 6360
     },
     {
      "files": 200,
      "op": "remove",
-     "writerMs": 63,
-     "allHeardMs": 63,
+     "writerMs": 79,
+     "allHeardMs": 69,
+     "filesHeard": 200,
+     "eventsAtAllHeard": 200,
      "events": 200,
-     "cpuMs": 30,
-     "worstLoopLagMs": 3,
-     "loopDelayP99Ms": 11,
-     "loopDelayMaxMs": 11,
+     "cpuMs": 36,
+     "worstLoopLagMs": 2,
+     "loopDelayP99Ms": 13,
+     "loopDelayMaxMs": 13,
      "watches": 6360
     },
     {
      "files": 2000,
      "op": "create",
-     "writerMs": 197,
-     "allHeardMs": 197,
+     "writerMs": 234,
+     "allHeardMs": 225,
+     "filesHeard": 2000,
+     "eventsAtAllHeard": 3999,
      "events": 4000,
-     "cpuMs": 193,
-     "worstLoopLagMs": 8,
-     "loopDelayP99Ms": 18,
-     "loopDelayMaxMs": 18,
+     "cpuMs": 240,
+     "worstLoopLagMs": 19,
+     "loopDelayP99Ms": 29,
+     "loopDelayMaxMs": 29,
      "watches": 6360
     },
     {
      "files": 2000,
      "op": "remove",
-     "writerMs": 188,
-     "allHeardMs": 188,
+     "writerMs": 267,
+     "allHeardMs": 224,
+     "filesHeard": 2000,
+     "eventsAtAllHeard": 2000,
      "events": 2000,
-     "cpuMs": 171,
-     "worstLoopLagMs": 65,
-     "loopDelayP99Ms": 75,
-     "loopDelayMaxMs": 75,
+     "cpuMs": 197,
+     "worstLoopLagMs": 114,
+     "loopDelayP99Ms": 125,
+     "loopDelayMaxMs": 125,
      "watches": 6360
     }
    ],
@@ -2017,7 +2042,7 @@
      "instances": 1,
      "watches": 6359
     },
-    "rssMiB": 99.7
+    "rssMiB": 101.5
    }
   },
   "bare-rec-lowlimit": {
@@ -3006,14 +3031,14 @@
      274,
      "/Users/new/o3g/maws-bare/.claude/worktrees/wt1/docs/doperpowers/evidence/p1-e11/gates"
     ],
-    "walkMs": 235,
+    "walkMs": 1336,
     "entries": 20765
    },
    "setup": {
     "thrown": null,
-    "wallMs": 287,
+    "wallMs": 610,
     "blockedMs": 1,
-    "cpuMs": 306,
+    "cpuMs": 605,
     "treeWatchers": 2152,
     "treeErrors": [],
     "exhausted": false,
@@ -3021,13 +3046,13 @@
      "instances": 1,
      "watches": 2152
     },
-    "rssMiB": 5.4,
+    "rssMiB": 5.3,
     "heapMiB": 2.1,
     "externalMiB": 0,
-    "rssTotalMiB": 65.3,
+    "rssTotalMiB": 66.1,
     "watchesPerEntry": 0.104,
     "watchesPerDir": 1,
-    "bytesPerWatch": 2609,
+    "bytesPerWatch": 2558,
     "eventsDuringSetup": 0,
     "errorsSoon": []
    },
@@ -3035,25 +3060,29 @@
     {
      "files": 40000,
      "op": "create",
-     "writerMs": 3957,
-     "allHeardMs": 3957,
+     "writerMs": 3980,
+     "allHeardMs": 3967,
+     "filesHeard": 40000,
+     "eventsAtAllHeard": 79999,
      "events": 80000,
-     "cpuMs": 4384,
-     "worstLoopLagMs": 164,
-     "loopDelayP99Ms": 20,
-     "loopDelayMaxMs": 174,
+     "cpuMs": 4625,
+     "worstLoopLagMs": 174,
+     "loopDelayP99Ms": 50,
+     "loopDelayMaxMs": 184,
      "watches": 2153
     },
     {
      "files": 40000,
      "op": "remove",
-     "writerMs": 2613,
-     "allHeardMs": 2613,
+     "writerMs": 2590,
+     "allHeardMs": 2215,
+     "filesHeard": 40000,
+     "eventsAtAllHeard": 40000,
      "events": 40000,
-     "cpuMs": 3345,
-     "worstLoopLagMs": 1298,
-     "loopDelayP99Ms": 1308,
-     "loopDelayMaxMs": 1308,
+     "cpuMs": 3379,
+     "worstLoopLagMs": 1366,
+     "loopDelayP99Ms": 1377,
+     "loopDelayMaxMs": 1377,
      "watches": 2153
     }
    ],
@@ -3063,7 +3092,7 @@
      "instances": 1,
      "watches": 2152
     },
-    "rssMiB": 240.4
+    "rssMiB": 205.6
    }
   }
  }

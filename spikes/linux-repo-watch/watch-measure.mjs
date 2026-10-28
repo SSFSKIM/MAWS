@@ -227,13 +227,22 @@ async function burst(dir, n, op) {
   const c0 = process.cpuUsage(); const e0 = events.length; const s = now();
   const child = spawn(process.execPath, ['-e', `const fs=require('fs');for(let i=0;i<${n};i++)${op === 'create' ? `fs.writeFileSync(${JSON.stringify(dir)}+'/c'+i,'x'+i)` : `fs.rmSync(${JSON.stringify(dir)}+'/c'+i)`};`]);
   const wrote = await new Promise((r) => child.on('exit', () => r(now())));
+  // Complete when every burst file (`c<i>`) has been named at least once: the time is that event's own, and the event
+  // count is taken at that event and again after the settle (a created file can give more than one callback).
+  const name = new RegExp(`^${relative(root, dir).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/c(\\d+)$`);
+  const seen = new Set(); let scanned = e0, heardAt = null, eventsAtHeard = null;
   const deadline = s + 600_000;
-  while (events.length - e0 < n && now() < deadline) await delay(50);
-  const heard = now();
+  while (heardAt === null && now() < deadline) {
+    for (; scanned < events.length && heardAt === null; scanned++) {
+      const m = name.exec(String(events[scanned].filename ?? '').split(sep).join('/'));
+      if (m && !seen.has(m[1]) && (seen.add(m[1]), seen.size === n)) { heardAt = events[scanned].at; eventsAtHeard = scanned + 1 - e0; }
+    }
+    if (heardAt === null) await delay(50);
+  }
   await delay(300);
   clearInterval(tick); h.disable();
   const c = process.cpuUsage(c0);
-  return { files: n, op, writerMs: Math.round(wrote - s), allHeardMs: Math.round(heard - s), events: events.length - e0, cpuMs: Math.round((c.user + c.system) / 1000), worstLoopLagMs: Math.round(worstLag), loopDelayP99Ms: Math.round(h.percentile(99) / 1e6), loopDelayMaxMs: Math.round(h.max / 1e6), watches: inotifyOf().watches };
+  return { files: n, op, writerMs: Math.round(wrote - s), allHeardMs: heardAt === null ? null : Math.round(heardAt - s), filesHeard: seen.size, eventsAtAllHeard: eventsAtHeard, events: events.length - e0, cpuMs: Math.round((c.user + c.system) / 1000), worstLoopLagMs: Math.round(worstLag), loopDelayP99Ms: Math.round(h.percentile(99) / 1e6), loopDelayMaxMs: Math.round(h.max / 1e6), watches: inotifyOf().watches };
 }
 if (churnN > 0) {
   out.churn = [];
