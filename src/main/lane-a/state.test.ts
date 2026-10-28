@@ -10,7 +10,8 @@ describe('the bridge’s state from /status', () => {
     expect(classify({ ready: true, capabilities: { sminos: '1.25.0', controls } })).toEqual({ bridge: 'live', reason: null });
     expect(classify({ ready: false })).toEqual({ bridge: 'starting', reason: 'the session’s bridge is starting' });
     expect(classify({ ready: true, lane: 'match', capabilities: { controls } })).toEqual({ bridge: 'observer', reason: 'MAWS controls this session' });
-    expect(classify({ ready: true, lane: 'unresolved', capabilities: { controls } }).bridge).toBe('observer'); // the bridge observes until its verdict is mismatch
+    // the bridge observes until its verdict is mismatch, and retries an unresolved one: MAWS waits for it as for a start
+    expect(classify({ ready: true, lane: 'unresolved', capabilities: { controls } })).toEqual({ bridge: 'starting', reason: 'the bridge is still deciding whether MAWS controls this session' });
     expect(classify({ ready: true, lane: 'mismatch', capabilities: { controls } }).bridge).toBe('live');
   });
 

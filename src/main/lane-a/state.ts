@@ -8,14 +8,18 @@ type Event = Record<string, unknown>;
 export type BridgeState = Pick<LaneAState, 'bridge' | 'reason'>;
 
 const OBSERVER_REASON = 'MAWS controls this session'; // the bridge's own word for an observer's refusal
+const UNRESOLVED_REASON = 'the bridge is still deciding whether MAWS controls this session';
 const SETTLED_KEPT = 100;
 
 const record = (value: unknown): Record<string, unknown> | null => (value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null);
 
 // The bridge observes for a MAWS lane B session until its lane verdict is `mismatch` (`sminos_bridge.py` `observing`); a
-// foreign holder is never MAWS's lane B, but the state guards it anyway. A sminos older than 1.11.0 (MW1) says no
-// `controls`, so nothing it would do can be drawn from its capabilities.
+// foreign holder is never MAWS's lane B, but the state guards it anyway. An `unresolved` verdict is still being decided:
+// the bridge retries it (`settle_lane`) and a resolved one reaches its subscribers as a resync, so it is `starting`, its
+// state stream held open, until then. A sminos older than 1.11.0 (MW1) says no `controls`, so nothing it would do can be
+// drawn from its capabilities.
 export function classify(status: Record<string, unknown>): BridgeState {
+  if (status.lane === 'unresolved') return { bridge: 'starting', reason: UNRESOLVED_REASON };
   if (typeof status.lane === 'string' && status.lane !== 'mismatch') return { bridge: 'observer', reason: OBSERVER_REASON };
   if (status.ready !== true) return { bridge: 'starting', reason: 'the session’s bridge is starting' };
   const capabilities = record(status.capabilities);

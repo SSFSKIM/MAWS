@@ -160,6 +160,22 @@ describe('the bridge’s states', () => {
     expect(h.state()?.reason).toMatch(/sminos \(1\.10\.0\) predates MAWS’s controls: update sminos, then run \/reload-plugins/);
   });
 
+  // The bridge retries an unresolved lane verdict on its own (sminos_bridge.py `settle_lane`); a verdict that resolves
+  // reaches its subscribers as a resync, which ends each stream, so the state stream held open re-reads /status.
+  it('holds an unresolved verdict as starting, every control closed, and turns live when the verdict resolves to mismatch', async () => {
+    const b = await bridge({ lane: 'unresolved' });
+    const h = harness();
+    h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: terminal });
+    await expect.poll(() => h.state()?.bridge).toBe('starting');
+    expect(h.state()?.reason).toBe('the bridge is still deciding whether MAWS controls this session');
+    await expect.poll(() => b.subscribers()).toBe(1); // its state stream, held open for the verdict
+    expect(await h.driver.interrupt(APP)).toEqual({ state: 'refused', code: 'no-bridge', message: 'the bridge is still deciding whether MAWS controls this session' });
+    b.setStatus({ lane: 'mismatch' });
+    b.reset(); // the resync the resolved verdict brings ends every stream
+    await h.live();
+    expect(h.state()?.reason).toBeNull();
+  });
+
   it('turns a starting bridge live through its stream, with no holder or directory change', async () => {
     const b = await bridge({ ready: false, readyWaitMs: 5000 });
     const h = harness();
