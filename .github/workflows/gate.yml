@@ -756,6 +756,7 @@ jobs:
       - env:
           SCRIPT: ${{ matrix.script }}
           MAWS_E2E_RETRY: ${{ github.job == 'e2e' && matrix.retry && runner.environment == 'github-hosted' && runner.os == 'macOS' && '1' || '' }}
+          MAWS_E2E_FLAKY_FILE: ${{ runner.temp }}/maws-e2e-flaky.txt
           VARIANT: ${{ matrix.variant }}
           CACHED: ${{ matrix.cached }}
           MAWS_E2E_PEER_ROOT: ${{ matrix.peer && format('{0}/maws-peer', runner.temp) || '' }}
@@ -778,6 +779,11 @@ jobs:
           if [[ -s $RUNNER_TEMP/e2e-specs ]]; then while IFS= read -r spec; do specs+=("$spec"); done <"$RUNNER_TEMP/e2e-specs"; fi
           # Playwright's count lines, and vitest's for the one group that runs a vitest file (tool-time-heavy-live, P4-A2).
           .github/scripts/gate-run.sh '^flaky: |^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)|^e2e-build: |^ +(Test Files|Tests) +[0-9]' "${display[@]}" pnpm "$SCRIPT" "${specs[@]}"
+      # One aggregate notice in its own step: GitHub caps annotations per step, so even a group with many flakes keeps
+      # every location, without competing with the test command's other warnings. The summary above stays one per line.
+      - name: Publish flaky tests
+        if: always() && github.job == 'e2e' && matrix.retry && runner.environment == 'github-hosted' && runner.os == 'macOS' && steps.checkout.outcome == 'success'
+        run: node scripts/ci-flaky-reporter.mjs "$RUNNER_TEMP/maws-e2e-flaky.txt"
       # The peer's supervisors and this tree's outlive their apps by design (detached, each in a process group of its own),
       # so whatever the run did, every one of either build is stopped here, with the peer's apps and checkout: nothing the
       # job started is left to the next job on this Mac.
