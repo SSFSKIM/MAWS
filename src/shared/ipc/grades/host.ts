@@ -10,4 +10,7 @@ export const grades = {
   'host.configure': 'internal',
   'host.stopAll': 'internal',
   'host.exitWhenIdle': 'internal',
+  // P5 O10 M7: the endpoint's own route to lane B's ledger; a remote caller reaches it only through an `act`
+  'host.op': 'internal',
+  'host.opQuery': 'internal',
 } as const satisfies CommandGrades<'host'>;

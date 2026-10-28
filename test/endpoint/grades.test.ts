@@ -304,12 +304,11 @@ describe('only what is offered crosses', () => {
   });
 });
 
-describe('until M7 and M8 set their executors', () => {
-  it('answers an authorized request `unavailable`, and a refused one with its reason', async () => {
+describe('until M8 sets its executors', () => {
+  it('answers an authorized call or sub `unavailable`, and a refused one with its reason (acts are M7’s: actions.test.ts)', async () => {
     const f = await start({ executors: false });
     const a = await open(f, a1, A);
     expect(await call(a, 'session.status', { appSessionId: 'app-own' })).toBe('unavailable');
-    expect(await send(a, laneB(f, a, 'session.send', 'app-own', { content: 'hi' }))).toBe('unavailable');
     expect(await subscribe(a, { lane: 'B', id: 'app-own' })).toBe('unavailable');
     const c = await open(f, c1, C);
     expect(await call(c, 'session.status', { appSessionId: 'app-private' })).toBe('grade');
@@ -561,8 +560,10 @@ describe('the web-cards class (RL §5.10)', () => {
     expect(await send(phone, await phone.device.webauthn(laneB(f, phone, 'session.send', 'app-b', { content: 'hi' }), HUB))).toBe('class');
     const answered = await phone.device.webauthn(answerOn(f, phone, 'app-b', 'rq-question', question), HUB);
     expect(await send(phone, answered)).toBe('ok');
-    // The same action and assertion again (M7's nonce window aside): its counter did not rise.
-    expect(await send(phone, answered)).toBe('step-up');
+    // The same action and assertion again: M7's nonce window refuses it first; past the window (or after a restart, which
+    // loses it), authorization still would, its counter not having risen.
+    expect(await send(phone, answered)).toBe('replayed');
+    expect(await f.endpoint.authorizer.authorize({ kind: 'act', name: answered.action, input: answered.args, action: answered }, { member: B, device: 'bw', clientClass: 'web-cards' }, Date.now())).toEqual({ ok: false, reason: 'step-up' });
     // No assertion at all, or one for another origin.
     expect(await send(phone, answerOn(f, phone, 'app-b', 'rq-question', question))).toBe('step-up');
     expect(await send(phone, await phone.device.webauthn(answerOn(f, phone, 'app-b', 'rq-question', question), 'https://evil.example'))).toBe('step-up');

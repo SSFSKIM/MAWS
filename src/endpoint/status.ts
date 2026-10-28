@@ -16,14 +16,25 @@ export type EndpointStatus = {
   listener: { bound: boolean };
   legacyKey: boolean;
   refusing?: string;
+  /** The operation ledgers closed (op-ledger.ts): why, as its word; each answers every remote action `unavailable` until
+   * its process restarts (mawsd for the endpoint's, the engine host for its own). Absent while both answer. */
+  opLedgers?: { endpoint?: ClosedLedger; engineHost?: ClosedLedger };
 };
+
+export type ClosedLedger = { closed: string; clears: 'restart' };
+
+/** What the endpoint knows of the ledgers: its own's state, and the engine host's as its last ledger answer said. */
+export type LedgerStates = { endpoint: string | null; engineHost: string | null };
 
 /** The module's links, which M3 (the hub), M4 (channels and the listener) and M6 (RL10) keep current. */
 export type EndpointLinks = Pick<EndpointStatus, 'hub' | 'channels' | 'rl10' | 'listener'> & { refusing?: string };
 
 export const NO_LINKS: EndpointLinks = { hub: { connected: false }, channels: { relayed: 0, direct: 0 }, rl10: { connected: false }, listener: { bound: false } };
 
-export function endpointStatus(state: EndpointState | null, headHash: string | null, links: EndpointLinks): EndpointStatus {
+export function endpointStatus(state: EndpointState | null, headHash: string | null, links: EndpointLinks, ledgers: LedgerStates = { endpoint: null, engineHost: null }): EndpointStatus {
+  const opLedgers: NonNullable<EndpointStatus['opLedgers']> = {};
+  if (ledgers.endpoint !== null) opLedgers.endpoint = { closed: ledgers.endpoint, clears: 'restart' };
+  if (ledgers.engineHost !== null) opLedgers.engineHost = { closed: ledgers.engineHost, clears: 'restart' };
   const enrollment = state?.enrolled ? state.enrollment : null;
   const head = enrollment !== null ? (state?.org?.head ?? null) : null;
   const refusing = state?.refusing ?? (state?.stale && !state.enrolled ? 'stale-state' : links.refusing);
@@ -37,5 +48,6 @@ export function endpointStatus(state: EndpointState | null, headHash: string | n
     listener: { ...links.listener },
     legacyKey: state?.legacy ?? false,
     ...(refusing === undefined ? {} : { refusing }),
+    ...(Object.keys(opLedgers).length === 0 ? {} : { opLedgers }),
   };
 }
