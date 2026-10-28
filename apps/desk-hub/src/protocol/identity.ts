@@ -51,6 +51,14 @@ export type WrappedKeyRecord = {
  * `auth` whose digest that is, or is refused `not-key-holder` before anything else about the records is told.
  */
 export const ORG_KEYS_PATH = '/api/org/keys';
+/**
+ * `POST /api/org/keys/purge` (an admin; O14 M5a): once the org state's head carries `legacyRetired`, every wrapped copy
+ * and the org's key check and auth are deleted, answering `{purged}` (the head's version it acted under, and when), the
+ * same record again after; `409 not-retired` before. From then `GET /api/org/keys` and `DELETE /api/org/keys/<id>` answer
+ * `410 retired`, `POST /api/org/keys` `409 retired`, and a successor that drops `legacyRetired` is refused `409 key-purged`.
+ */
+export const ORG_KEYS_PURGE_PATH = '/api/org/keys/purge';
+export type OrgKeysPurged = { purged: { version: number; at: string } };
 export const KEY_CHECK_DOMAIN = 'smns-desk-key-check-v1';
 export const KEY_AUTH_DOMAIN = 'smns-desk-key-auth-v1';
 export type WrappedKeys = { key_check: string | null; keys: WrappedKeyRecord[] };

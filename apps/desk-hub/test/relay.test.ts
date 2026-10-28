@@ -6,12 +6,12 @@
 import { generateSigningKey, keyId, base64urlEncode, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FakeEndpoint } from '../fake-machine/endpoint';
-import { enrollV2, listing, type V2Machine } from '../fake-machine/org';
+import { enrollDelegated, enrollV2, listing, type DelegationKey, type V2Machine } from '../fake-machine/org';
 import { echoCheck, echoPayloads, RelayApp } from '../fake-machine/relay-app';
 import { newNonce } from '../src/protocol/codes';
-import { encodeEnrollmentCodeV2 } from '../src/protocol/identity';
+import { delegationFor, encodeEnrollmentCodeV2 } from '../src/protocol/identity';
 import type { LogEvent } from '../src/protocol/log';
-import { BrowserClient, enroll, GridClient, MachineClient, refusal, waitFor } from './support/clients';
+import { BrowserClient, enroll, GridClient, MachineClient, provisioningKey, refusal, waitFor } from './support/clients';
 import { ADMIN, credentials, ORG, startLocalHub, type LocalHub } from './support/local';
 import { genesis, memberId, newDevice, next, revokedDevice, signedBy, type TestDevice } from './support/org';
 import { decrypt, userAgent, type UserAgent } from './support/push';
@@ -46,6 +46,22 @@ async function v2(name: string): Promise<V2Machine> {
   const { token } = (await response.json()) as { token: string };
   const code = encodeEnrollmentCodeV2({ hub: hub.url, token, roots: [await keyId(a1.stepUp!.pub)], recoveryPub: recovery.pub, k: base64urlEncode(crypto.getRandomValues(new Uint8Array(32))) });
   return enrollV2(code, name);
+}
+
+let delegation: DelegationKey | undefined;
+let provisioning = '';
+/**
+ * A VM under a delegation, its certificate posted and no machine key: since O14 M5a the one v2 machine whose credential
+ * still opens DX2 (a posted key marks a credential v2's), so the cases of DX2 and RL1 under one name run on one.
+ */
+async function certified(name: string): Promise<V2Machine> {
+  if (delegation === undefined) {
+    const key = await provisioningKey(hub, ADMIN, { label: 'vms', prefix: 'vm-', max_uses: null, offline_revoke_s: null });
+    const made = { id: key.id, key: await generateSigningKey() };
+    await accept((s) => s.delegations.push(delegationFor(key.key, made.key.pub, 'org')));
+    [delegation, provisioning] = [made, key.token];
+  }
+  return enrollDelegated(hub.url, provisioning, name, delegation);
 }
 
 /** A v2 machine the org state lists, as RL1 needs (a ref only its key posted routes nowhere). */
@@ -384,14 +400,14 @@ describe('the lease, the generation and the fence', () => {
   });
 
   it('replaces a DX2 stream by an RL1 socket and back, by one generation counter', async () => {
-    const machine = await listed('both-ways');
-    const dx = new MachineClient(hub, 'both-ways', machine.credentials);
+    const machine = await certified('vm-both-ways');
+    const dx = new MachineClient(hub, machine.name, machine.credentials);
     await dx.connect();
     const endpoint = endpointOf(machine);
     const { generation } = await endpoint.connect();
     expect(generation).toBeGreaterThan(dx.generation);
     await waitFor(() => (dx.isEnded ? true : undefined));
-    const again = new MachineClient(hub, 'both-ways', machine.credentials);
+    const again = new MachineClient(hub, machine.name, machine.credentials);
     await again.connect();
     expect(again.generation).toBeGreaterThan(generation);
     await waitFor(() => (endpoint.ends.length > 0 ? true : undefined));
