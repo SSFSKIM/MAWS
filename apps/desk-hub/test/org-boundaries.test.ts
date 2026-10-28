@@ -47,6 +47,7 @@ const adminCalls: Array<[string, ...unknown[]]> = [
   ['designateArchive', '0a1b2c3d-0000-4000-8000-000000000000', { machine: null }],
   ['addOrgKey', {}],
   ['removeOrgKey', 'no-such-key', {}],
+  ['purgeOrgKeys'],
 ];
 const refusal = (error: string) => expect.objectContaining({ ok: false, status: 403, error });
 

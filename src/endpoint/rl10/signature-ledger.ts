@@ -84,6 +84,11 @@ export class SignatureLedger {
     return out;
   }
 
+  /** Drops what was read: `signatures/` was moved aside (an enrollment under another authority), and is read anew. */
+  forget(): void {
+    this.#projects.clear();
+  }
+
   /** Keeps what was signed at a position, on disk before it returns. */
   put(project: string, writer: string, seq: number, signature: Signature): void {
     const line: Line = { writer, seq, ...signature };

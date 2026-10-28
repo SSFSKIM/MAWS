@@ -19,6 +19,7 @@ import type {
   RevokedKey,
   CertRetirement,
   Certificates,
+  LegacyRetired,
   Member,
   OrgState,
   Passkey,
@@ -144,8 +145,12 @@ function isRevokedKey(value: unknown): value is RevokedKey {
   return (isKeyHolder(h) || (fields(h, ['delegation', 'prefix']) && isDelegationId(h.delegation) && typeof h.prefix === 'string' && isMachineName(h.prefix))) && isBase64urlOf(value.keyId, 16);
 }
 
+function isLegacyRetired(value: unknown): value is LegacyRetired {
+  return fields(value, ['version', 'at']) && isCount(value.version, 1) && isIsoMillis(value.at);
+}
+
 export function isOrgState(value: unknown): value is OrgState {
-  if (!fields(value, ['org', 'version', 'prev', 'issued', 'root', 'members', 'machines', 'machineNames', 'retired', 'revoked', 'delegations', 'projects'])) return false;
+  if (!fields(value, ['org', 'version', 'prev', 'issued', 'root', 'members', 'machines', 'machineNames', 'retired', 'revoked', 'delegations', 'projects'], ['legacyRetired'])) return false;
   const root = value.root;
   return (
     isText(value.org) &&
@@ -161,7 +166,8 @@ export function isOrgState(value: unknown): value is OrgState {
     isList(value.retired, isRetiredKey) &&
     isList(value.revoked, isRevokedKey) &&
     isList(value.delegations, isDelegation) &&
-    isList(value.projects, isProjectEntry)
+    isList(value.projects, isProjectEntry) &&
+    (!('legacyRetired' in value) || isLegacyRetired(value.legacyRetired))
   );
 }
 

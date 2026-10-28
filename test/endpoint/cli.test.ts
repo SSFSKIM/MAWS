@@ -1,5 +1,6 @@
 // `mawsd endpoint` commands that need no hub (O10 M2): the policy, a state delivered by hand (`revoke`), a grant kept
-// out of band by the ledger's rule, the legacy key's retirement, and the refusals around them.
+// out of band by the ledger's rule, the legacy key following the head's retirement, and the refusals around them; and
+// O14 M1's local `unenroll` and `retire`'s refusal of an attended enrollment.
 import * as fs from 'node:fs';
 import { join } from 'node:path';
 import { endorseDevice, generateSigningKey, keyId, NO_CERTIFICATES, SIGNING_DOMAINS, signRecord, type Grant, type SignedOrgState, type SigningKey } from 'org-protocol';
@@ -221,16 +222,51 @@ describe('enroll --wait', () => {
 });
 
 describe('the rest', () => {
-  it('retires the legacy key once', async () => {
-    const { endpoint } = await enrolled();
-    fs.writeFileSync(join(services.machine.stateDir, 'legacy.json'), JSON.stringify({ org: 'org-local', key: 'k'.repeat(43) }), { mode: 0o600 });
-    const again = createEndpoint();
-    await again.start(services);
-    expect(again.status()).toMatchObject({ legacyKey: true });
-    expect((await again.cli('legacy', ['retire'])).out).toMatch(/deleted/);
-    expect(fs.existsSync(join(services.machine.stateDir, 'legacy.json'))).toBe(false);
-    expect((await again.cli('legacy', ['retire'])).out).toBe('no legacy org key is held');
-    expect(endpoint).toBeTruthy();
+  it('follows the head’s retirement of the legacy key, keeps its bytes until purged, and has no verb of its own to retire it', async () => {
+    const { endpoint, head, a1 } = await enrolled();
+    const dir = services.machine.stateDir;
+    const key = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
+    fs.writeFileSync(join(dir, 'legacy.json'), JSON.stringify({ org: ORG, key }), { mode: 0o600 });
+    await endpoint.stop();
+    let current = createEndpoint();
+    await current.start(services);
+    const legacyFile = () => JSON.parse(fs.readFileSync(join(dir, 'legacy.json'), 'utf8')) as Record<string, unknown>;
+    expect(current.status()).toMatchObject({ legacyKey: true, legacyRetired: false });
+    expect((await current.cli('legacy', ['status'])).out).toBe('held');
+    expect(await current.cli('legacy', ['purge'])).toMatchObject({ code: 1, out: expect.stringMatching(/not retired by the org state/) as string });
+    const retire = await successor(head, [a1], (s) => void (s.legacyRetired = { version: s.version, at: s.issued }));
+    expect((await current.cli('revoke', ['-'], JSON.stringify(retire))).code).toBe(0);
+    expect(current.status()).toMatchObject({ legacyKey: false, legacyRetired: true });
+    expect(legacyFile()).toEqual({ org: ORG, retired: retire.state.legacyRetired!.at, key });
+    expect((await current.cli('legacy', ['status'])).out).toBe('retired (bytes kept)');
+    // The retirement undone by a successor: the bytes are the key again.
+    const undo = await successor(retire, [a1], (s) => void delete s.legacyRetired);
+    expect((await current.cli('revoke', ['-'], JSON.stringify(undo))).code).toBe(0);
+    expect(current.status()).toMatchObject({ legacyKey: true, legacyRetired: false });
+    expect(legacyFile()).toEqual({ org: ORG, key });
+    const again = await successor(undo, [a1], (s) => void (s.legacyRetired = { version: s.version, at: s.issued }));
+    expect((await current.cli('revoke', ['-'], JSON.stringify(again))).code).toBe(0);
+    // An undo's copy moved aside (M1's unenroll) is the key's bytes too.
+    const aside = join(dir, 'stale-2026-10-28T00-00-00.000Z');
+    fs.mkdirSync(aside, { mode: 0o700 });
+    fs.writeFileSync(join(aside, 'legacy.json'), JSON.stringify({ org: ORG, key }), { mode: 0o600 });
+    const purged = await current.cli('legacy', ['purge']);
+    expect(purged).toEqual({ code: 0, out: "purged: the legacy org key's bytes are deleted from legacy.json, stale-2026-10-28T00-00-00.000Z/legacy.json" });
+    expect(purged.out).not.toContain(key);
+    expect(legacyFile()).toEqual({ org: ORG, retired: again.state.legacyRetired!.at });
+    expect(fs.existsSync(join(aside, 'legacy.json'))).toBe(false);
+    expect((await current.cli('legacy', ['status'])).out).toBe('purged');
+    expect((await current.cli('legacy', ['purge'])).out).toBe('nothing to purge: no bytes of the legacy org key are held');
+    // A restart keeps the tombstone and what it says.
+    await current.stop();
+    current = createEndpoint();
+    await current.start(services);
+    expect(current.status()).toMatchObject({ legacyKey: false, legacyRetired: true });
+    expect((await current.cli('legacy', ['status'])).out).toBe('purged');
+    const retired = await current.cli('legacy', ['retire']);
+    expect(retired.code).toBe(1);
+    expect(retired.out).toMatch(/the org state retires the legacy org key/);
+    await current.stop();
   });
 
   it('answers not running before start, the usage for an unknown command, and never takes the code as an argument', async () => {
@@ -244,6 +280,65 @@ describe('the rest', () => {
     const refused = await endpoint.cli('enroll', ['--name', 'mini'], garbage);
     expect(refused.code).toBe(1);
     expect(refused.out).not.toContain(garbage);
-    expect((await endpoint.cli('keys', ['--json'])).out).toBe(JSON.stringify({ enrollment: 'none', ref: services.machine.ref }));
+    expect((await endpoint.cli('keys', ['--json'])).out).toBe(JSON.stringify({ enrollment: 'none', ref: services.machine.ref, delegated: false }));
+  });
+});
+
+describe('unenroll and retire, with no hub (O14 M1)', () => {
+  it('unenrolls a listed machine locally: RL10 unserved, every private key destroyed with its id kept, the rest aside', async () => {
+    const { endpoint, machineKey } = await enrolled();
+    const dir = services.machine.stateDir;
+    await expect.poll(() => fs.existsSync(join(dir, 'rl10.json'))).toBe(true);
+    // An earlier stale directory still holding private keys: the key-without-ledger rule's, or an earlier unenroll's.
+    const earlier = join(dir, 'stale-2026-10-01T00-00-00.000Z');
+    fs.mkdirSync(earlier, { mode: 0o700 });
+    const orphan = await generateSigningKey(true);
+    const delegation = await generateSigningKey(true);
+    fs.writeFileSync(join(earlier, 'machine-key.json'), JSON.stringify({ version: 1, keyId: await keyId(orphan.pub), jwk: await crypto.subtle.exportKey('jwk', orphan.privateKey), created: new Date().toISOString() }), { mode: 0o600 });
+    fs.writeFileSync(join(earlier, 'delegation.json'), JSON.stringify({ version: 1, id: 'a'.repeat(32), prefix: 'vm-', privateJwk: await crypto.subtle.exportKey('jwk', delegation.privateKey) }), { mode: 0o600 });
+    fs.writeFileSync(join(dir, 'legacy.json'), JSON.stringify({ org: ORG, key: 'k'.repeat(43) }), { mode: 0o600 });
+    // The signatures made and the replay index stay where a later enrollment under the same ref reads them.
+    const signatures = endpoint.parts!.state.subdirectory('signatures');
+    const inbound = endpoint.parts!.state.subdirectory('inbound');
+    fs.writeFileSync(join(signatures, 'p1.jsonl'), '{"writer":"mini/s","seq":1}\n', { mode: 0o600 });
+    fs.writeFileSync(join(inbound, 'p1.jsonl'), '{"writer":"hub/x","seq":1}\n', { mode: 0o600 });
+
+    const undone = await endpoint.cli('unenroll', ['--json']);
+    expect(undone.code, undone.out).toBe(0);
+    const view = JSON.parse(undone.out) as { enrollment: string; destroyed: string[]; aside: string };
+    expect(view.enrollment).toBe('none');
+    expect(new Set(view.destroyed)).toEqual(new Set([machineKey, await keyId(orphan.pub), await keyId(delegation.pub)]));
+    expect(fs.existsSync(join(dir, 'rl10.json'))).toBe(false);
+    for (const gone of [join(dir, 'machine-key.json'), join(earlier, 'machine-key.json'), join(earlier, 'delegation.json')]) expect(fs.existsSync(gone), gone).toBe(false);
+    const aside = join(dir, view.aside);
+    expect(JSON.parse(fs.readFileSync(join(aside, 'keys.json'), 'utf8'))).toEqual({ keyIds: view.destroyed });
+    for (const moved of ['grants.json', 'enrollment.json', 'org.json', 'legacy.json']) {
+      expect(fs.existsSync(join(aside, moved)), moved).toBe(true);
+      expect(fs.existsSync(join(dir, moved)), moved).toBe(false);
+    }
+    for (const kept of ['signatures/p1.jsonl', 'inbound/p1.jsonl']) {
+      expect(fs.existsSync(join(dir, kept)), kept).toBe(true);
+      expect(fs.existsSync(join(aside, kept)), kept).toBe(false);
+    }
+    expect(endpoint.status()).toMatchObject({ enrollment: 'none', legacyKey: false, delegated: false });
+    // A fresh process over the directory is unenrolled, refusing nothing.
+    const again = createEndpoint();
+    await again.start(services);
+    expect(again.status()).toMatchObject({ enrollment: 'none' });
+    expect(again.status().refusing).toBeUndefined();
+    await again.stop();
+    await endpoint.stop();
+  });
+
+  it('refuses to retire an attended enrollment, touching nothing, and has nothing to retire once unenrolled', async () => {
+    const { endpoint } = await enrolled();
+    const refused = await endpoint.cli('retire', []);
+    expect(refused.code).toBe(1);
+    expect(refused.out).toMatch(/^not-delegated: /);
+    expect(endpoint.status()).toMatchObject({ enrollment: 'org-listed' });
+    expect((await endpoint.cli('retire', ['--not-after', 'tomorrow'])).code).toBe(1);
+    expect((await endpoint.cli('unenroll', [])).code).toBe(0);
+    expect(await endpoint.cli('retire', [])).toEqual({ code: 0, out: 'nothing to retire: this machine holds no certificate and no credential' });
+    await endpoint.stop();
   });
 });

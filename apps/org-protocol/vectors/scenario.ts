@@ -9,9 +9,11 @@ import { eventSigningInput, signEvent } from '../src/events.ts';
 import { keyId, signInput, type B64, type SigningKey } from '../src/keys.ts';
 import { endorseDevice, signOrgState, signTransition, stateHash } from '../src/org-state.ts';
 import { encodePairingCode, pairingFingerprint, pairingMac, pairingMacInput, type PairingCode, type PairingFields } from '../src/pairing.ts';
+import { encodeProvisioningCodeV2, PROVISIONING_CODE_V2_PREFIX, type ProvisioningCodeV2 } from '../src/provisioning.ts';
 import { signRecord } from '../src/records.ts';
 import { SIGNING_DOMAINS, type Signer, type Device, type RevokedKey, type EndpointRecord, type Grant, type Listing, type MachineCert, type OrgState, type RootTransition, type Signed, type SignedOrgState } from '../src/types.ts';
 import type { Verdict } from '../src/verdict.ts';
+import { buildHistoryScenario, type HistoryVectors } from './scenario-history.ts';
 import { buildRemoteScenario, RP_ID, type ActionEncoding, type ChannelVectors } from './scenario-remote.ts';
 
 export { buildRemoteOrg, ORG_REMOTE, ORIGIN, RP_ID, type ActionEncoding, type ChannelVectors, type HandshakeRun, type RemoteOrg } from './scenario-remote.ts';
@@ -88,7 +90,25 @@ export type PairingVector = {
   fingerprint: string;
   swapped: { fields: PairingFields; mac: string; fingerprint: string };
 };
-export type VectorSet = { fixtures: Record<string, unknown>; cases: Case[]; dual: DualCase[]; encodings: Encodings; enrollment: EnrollmentCase[]; pairing: PairingVector; channel: ChannelVectors };
+/**
+ * The v2 provisioning code (provisioning.ts, P5 O14 §A): codes with and without the legacy key, each as its text and its
+ * decoded fields, and texts the decoder refuses, each with its named refusal (the TypeError's message).
+ */
+export type ProvisioningVector = {
+  codes: Array<{ name: string; text: string; decoded: ProvisioningCodeV2 }>;
+  refusals: Array<{ name: string; text: string; error: string }>;
+};
+export type VectorSet = {
+  fixtures: Record<string, unknown>;
+  cases: Case[];
+  dual: DualCase[];
+  encodings: Encodings;
+  enrollment: EnrollmentCase[];
+  pairing: PairingVector;
+  provisioning: ProvisioningVector;
+  channel: ChannelVectors;
+  history: HistoryVectors;
+};
 
 export const ORG = 'org-vectors';
 export const PROJECT = 'proj-1';
@@ -689,6 +709,18 @@ export async function buildScenario(k: Keys): Promise<VectorSet> {
     }, 3), ['a1StepUp'], no('malformed'), 'v3');
   }
 
+  // The DX1 org key's retirement in the state (O14 M5a): added at its own version, kept or dropped after, never moved.
+  {
+    const retired = await sign(await next(v2, (s) => void (s.legacyRetired = { version: s.version, at: s.issued }), 2), 'a1StepUp');
+    keep('v3 legacy key retired', retired);
+    cases.push({ name: 'a successor retiring the legacy key', call: 'verifySuccessor', args: [signed('v2'), signed('v3 legacy key retired'), []], expect: ok() });
+    await successorCase('a successor retiring the legacy key at another version', await next(v2, (s) => void (s.legacyRetired = { version: 1, at: s.issued }), 2), ['a1StepUp'], no('malformed'));
+    await successorCase('then the legacy retirement kept', await next(retired, (s) => s.projects.push({ id: 'proj-kept', name: 'kept' }), 3), ['a1StepUp'], ok(), 'v3 legacy key retired');
+    await successorCase('then the legacy retirement dropped', await next(retired, (s) => delete s.legacyRetired, 3), ['a1StepUp'], ok(), 'v3 legacy key retired');
+    await successorCase('then the legacy retirement moved', await next(retired, (s) => void (s.legacyRetired = { version: 3, at: s.issued }), 3), ['a1StepUp'], no('malformed'), 'v3 legacy key retired');
+    await successorCase('a successor whose legacy retirement carries another field', await next(v2, (s) => void Object.assign(s, { legacyRetired: { version: s.version, at: s.issued, by: A } }), 2), ['a1StepUp'], no('malformed'));
+  }
+
   // Wire input RFC 8785 cannot write, or no shape at all: a verdict, never a throw.
   cases.push({ name: 'genesis that is not an object', call: 'verifyGenesis', args: [null], expect: no('malformed') });
   {
@@ -1157,7 +1189,45 @@ export async function buildScenario(k: Keys): Promise<VectorSet> {
     fingerprint: await pairingFingerprint(ORG, A, phoneEntry),
     swapped: { fields: swappedFields, mac: await pairingMac(pairingK, swappedFields), fingerprint: await pairingFingerprint(ORG, A, swappedFields.device) },
   };
-  return { fixtures, cases, dual, encodings, enrollment, pairing: devicePairing, channel: remote.channel };
+  return { fixtures, cases, dual, encodings, enrollment, pairing: devicePairing, provisioning: await provisioningVector(k), channel: remote.channel, history: await buildHistoryScenario(k) };
+}
+
+/** The provisioning codes under the scenario's delegation, and the decoder's refusals of texts around them. */
+async function provisioningVector(k: Keys): Promise<ProvisioningVector> {
+  const privateJwk = (await crypto.subtle.exportKey('jwk', k.delegation.privateKey)) as JsonWebKey;
+  const plain: ProvisioningCodeV2 = {
+    hub: 'https://desk.example',
+    org: ORG,
+    roots: [await keyId(k.a1StepUp.pub)],
+    recoveryPub: k.recovery.pub,
+    token: 'provisioning-token-vm',
+    delegation: { id: DLG_VM, prefix: 'vm-', privateJwk },
+  };
+  // A fixed key (0x40, 0x41, …): the push scan's allowlist names this value (.github/maws-app/gitleaks.toml).
+  const legacy: ProvisioningCodeV2 = { ...plain, legacy: { org: ORG, key: base64urlEncode(new Uint8Array(32).map((_, i) => 0x40 + i)) } };
+  const wrap = (body: string) => PROVISIONING_CODE_V2_PREFIX + base64urlEncode(new TextEncoder().encode(body));
+  const publicJwk: JsonWebKey = { ...privateJwk };
+  delete publicJwk.d;
+  const without = (field: keyof ProvisioningCodeV2) => {
+    const code: Record<string, unknown> = { ...plain };
+    delete code[field];
+    return code;
+  };
+  const refusals: Array<[string, string, string]> = [
+    ['another prefix', `smns-provision-v1.${encodeProvisioningCodeV2(plain).slice(PROVISIONING_CODE_V2_PREFIX.length)}`, 'not smns-provision-v2'],
+    ['not JSON', wrap('{"hub":'), 'damaged'],
+    ['no token', wrap(JSON.stringify(without('token'))), 'no token'],
+    ['an unknown field', wrap(JSON.stringify({ ...plain, machine: 'vm-one' })), 'unknown field machine'],
+    ['a public key for the delegation key', wrap(JSON.stringify({ ...plain, delegation: { ...plain.delegation, privateJwk: publicJwk } })), 'bad delegation.privateJwk'],
+    ['a legacy key of 128 bits', wrap(JSON.stringify({ ...plain, legacy: { org: ORG, key: base64urlEncode(new Uint8Array(16)) } })), 'bad legacy.key'],
+  ];
+  return {
+    codes: [
+      { name: 'a code without the legacy key', text: encodeProvisioningCodeV2(plain), decoded: plain },
+      { name: 'a code carrying the legacy key', text: encodeProvisioningCodeV2(legacy), decoded: legacy },
+    ],
+    refusals: refusals.map(([name, text, reason]) => ({ name, text, error: `provisioning code: ${reason}` })),
+  };
 }
 
 /** DX1's seal of a log event (`codes.ts` `seal`), written out so the vectors need nothing from desk-hub. */

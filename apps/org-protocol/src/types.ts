@@ -17,6 +17,8 @@ export const SIGNING_DOMAINS = {
   rl2: 'smns-rl2-v1',
   /** RL4's canonical action: its step-up signature, its WebAuthn challenge (action.ts). */
   action: 'smns-action-v1',
+  /** A machine's re-attestation of its phase-1 history (history.ts, O14 M4). */
+  historyAttest: 'smns-history-attest-v1',
 } as const;
 
 export type DeviceClass = 'native-mac' | 'web-cards';
@@ -80,7 +82,14 @@ export type OrgState = {
   revoked: RevokedKey[];
   delegations: Delegation[];
   projects: ProjectEntry[];
+  /**
+   * The DX1 org key's retirement (O14 M5a): set by the state that retires it (`version` is that state's own) and kept
+   * unchanged after; a successor may drop it (the retirement undone). Every endpoint that adopts a head carrying it
+   * stops dual-coding; the hub purges its wrapped copies only on its word.
+   */
+  legacyRetired?: LegacyRetired;
 };
+export type LegacyRetired = { version: number; at: string };
 export type SignedOrgState = { state: OrgState; sigs: Sig[] };
 
 /** A record signed once: `sig` is over `body` under the record kind's domain. */
@@ -131,3 +140,10 @@ export type Signer = { pub: B64; notAfter: string | null };
 export type LogEventV2 = { writer: string; sig: Sig; [field: string]: unknown };
 /** Where a log event lives: the org and the project its v2 signature binds. */
 export type EventContext = { org: string; project: string };
+
+/**
+ * A machine's checkpoint over one writer's phase-1 (DX1) events in a project (history.ts, O14 M4): `digest` folds the
+ * writer's events from seq 1 to `upTo`; `names` is the signer's claim, its current name first and then the former names
+ * it held on DX2. Signed by the machine key under `smns-history-attest-v1`.
+ */
+export type HistoryAttestation = { org: string; project: string; writer: string; names: string[]; upTo: number; digest: B64; created: string };

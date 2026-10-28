@@ -3,7 +3,15 @@
 // assertion is enrollment's redemption (`/machine/enroll`), which Access does not guard either: its one-time token, or
 // a provisioning key's secret, does. Every path it answers is under `/api/*` or `/machine/*`, the routes wrangler.jsonc runs it first for; the web
 // app's assets answer the rest.
-import { REGISTRY_APP_PARAM } from 'org-protocol';
+import {
+  HISTORY_ATTESTATIONS_ROUTE,
+  HISTORY_INVENTORY_PATH,
+  HISTORY_LOG_ROUTE,
+  HISTORY_NAMES_MAX,
+  isMachineName,
+  MEMBER_ATTESTATIONS_ROUTE,
+  REGISTRY_APP_PARAM,
+} from 'org-protocol';
 import { drain, readLimited } from './drain';
 import { CLIENT_HEADER, hubConfig, MACHINE_HEADER, MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, REF_HEADER, type Env } from './env';
 import { AccessError, certsKeySource, verifyAccessAssertion, type KeySource } from './identity/access';
@@ -21,6 +29,7 @@ import {
   MACHINE_ENROLLMENT_PATH,
   MACHINE_ORG_STATE_PATH,
   ORG_KEYS_PATH,
+  ORG_KEYS_PURGE_PATH,
   ORG_STATE_PATH,
   ORG_TRANSITIONS_PATH,
   PENDING_DEVICES_PATH,
@@ -182,6 +191,27 @@ async function route(request: Request, env: Env): Promise<Response> {
   return principal.kind === 'member' ? member(request, url, env, registry, principal) : machine(request, url, env, registry, principal);
 }
 
+/** The Project object of a project the Registry holds, or the `404 unknown-project` to answer. */
+async function projectStub(env: Env, registry: DurableObjectStub<Registry>, org: string, project: string) {
+  if (!(await registry.project(project))) return json(404, { error: 'unknown-project' });
+  return env.PROJECT.get(env.PROJECT.idFromName(`${org}:${project}`));
+}
+
+/** `?names=` of the history inventory: one to HISTORY_NAMES_MAX machine names, comma-separated; null otherwise. */
+function historyNames(param: string | null): string[] | null {
+  if (param === null) return null;
+  const names = param.split(',');
+  return names.length <= HISTORY_NAMES_MAX && names.every(isMachineName) ? names : null;
+}
+
+/** `?writer=&after=` of a writer's log page: a `<name>/<feed>` writer and a seq from 0 (0 when absent); null otherwise. */
+function historyQuery(url: URL): { writer: string; after: number } | null {
+  const writer = url.searchParams.get('writer');
+  const after = url.searchParams.get('after') ?? '0';
+  if (writer === null || writer.length > 256 || !/^[^/]+\/.+$/.test(writer) || !/^(0|[1-9][0-9]{0,15})$/.test(after) || !Number.isSafeInteger(Number(after))) return null;
+  return { writer, after: Number(after) };
+}
+
 async function member(request: Request, url: URL, env: Env, registry: DurableObjectStub<Registry>, principal: Extract<Principal, { kind: 'member' }>): Promise<Response> {
   const { pathname } = url;
   const { method } = request;
@@ -194,7 +224,11 @@ async function member(request: Request, url: URL, env: Env, registry: DurableObj
   if (revoke && method === 'DELETE') return answer(await registry.revoke(you, decodeURIComponent(revoke[1])));
   const archive = PROJECT_ARCHIVE.exec(pathname);
   if (archive && method === 'PUT') return answer(await registry.designateArchive(you, archive[1], await body(request)));
-  if (pathname === ORG_KEYS_PATH && method === 'GET') return json(200, await registry.orgKeys());
+  if (pathname === ORG_KEYS_PATH && method === 'GET') {
+    const listed = await orOlder<Result<unknown>>(async () => await registry.wrappedOrgKeys(), 'wrappedOrgKeys', async () => ({ ok: true, value: await registry.orgKeys() }));
+    return answer(listed);
+  }
+  if (pathname === ORG_KEYS_PURGE_PATH && method === 'POST') return answer(await registry.purgeOrgKeys(you));
   if (pathname === ORG_KEYS_PATH && method === 'POST') return answer(await registry.addOrgKey(you, await body(request)), 201);
   const orgKey = ORG_KEY_PATH.exec(pathname);
   if (orgKey && method === 'DELETE') return answer(await registry.removeOrgKey(you, orgKey[1], await body(request)));
@@ -240,6 +274,12 @@ async function member(request: Request, url: URL, env: Env, registry: DurableObj
     const stub = env.MACHINE.get(env.MACHINE.idFromName(relayObjectName(principal.org.id, ref)));
     return stub.fetch(forward(request, 'https://machine/app', { [MEMBER_HEADER]: you.id, [ORG_HEADER]: principal.org.id, [REF_HEADER]: ref }));
   }
+  // A project's history attestations (O14 M4), for the readers that draw migrated history.
+  const attested = MEMBER_ATTESTATIONS_ROUTE.exec(pathname);
+  if (attested && method === 'GET') {
+    const stub = await projectStub(env, registry, principal.org.id, attested[1]);
+    return stub instanceof Response ? stub : json(200, { records: await stub.attestations() });
+  }
   const socket = PROJECT_SOCKET.exec(pathname);
   if (socket && method === 'GET') {
     const project = socket[1];
@@ -267,6 +307,28 @@ async function machine(request: Request, url: URL, env: Env, registry: DurableOb
   if (request.method === 'POST' && url.pathname === MACHINE_KEY_PATH) return kept(await registry.keepMachineKey(principal.machine, await body(request)));
   if (request.method === 'POST' && url.pathname === MACHINE_CERT_PATH) return kept(await registry.storeCert(principal.machine, await body(request)));
   if (request.method === 'POST' && url.pathname === MACHINE_CERT_RETIREMENTS_PATH) return kept(await registry.machineRetiresCert(principal.machine, await body(request)));
+  // History re-attestation (O14 M4, Interfaces §D): the inventory of the machine's DX1 writers, a writer's stored events,
+  // and the attestations each project keeps.
+  if (url.pathname === HISTORY_INVENTORY_PATH && request.method === 'GET') {
+    const names = historyNames(url.searchParams.get('names'));
+    if (names === null) return json(400, { error: 'bad-shape', message: `?names= is one to ${HISTORY_NAMES_MAX} machine names, comma-separated` });
+    return json(200, await registry.historyInventory(names));
+  }
+  const historyLog = HISTORY_LOG_ROUTE.exec(url.pathname);
+  if (historyLog && request.method === 'GET') {
+    const query = historyQuery(url);
+    if (query === null) return json(400, { error: 'bad-shape', message: '?writer= is <machine>/<feed> and ?after= a seq from 0' });
+    const stub = await projectStub(env, registry, principal.org.id, historyLog[1]);
+    return stub instanceof Response ? stub : json(200, await stub.historyPage(query.writer, query.after));
+  }
+  const attestations = HISTORY_ATTESTATIONS_ROUTE.exec(url.pathname);
+  if (attestations && (request.method === 'GET' || request.method === 'POST')) {
+    const stub = await projectStub(env, registry, principal.org.id, attestations[1]);
+    if (stub instanceof Response) return stub;
+    if (request.method === 'GET') return json(200, { records: await stub.attestations() });
+    const posted = (await body(request)) as { record?: unknown } | undefined;
+    return kept(await stub.keepAttestation(principal.org.id, attestations[1], typeof posted === 'object' && posted !== null ? posted.record : undefined));
+  }
   const identity = { [ORG_HEADER]: principal.org.id, [MACHINE_HEADER]: principal.machine.name, [CLIENT_HEADER]: principal.machine.client_id ?? '' };
   // RL1 (O11 M6): the endpoint's one socket, held by the object its ref addresses; its ref is the hub's own record of
   // this machine, never the client's word.
@@ -287,6 +349,11 @@ async function machine(request: Request, url: URL, env: Env, registry: DurableOb
     }
     const relay = env.MACHINE.get(env.MACHINE.idFromName(relayObjectName(principal.org.id, found.ref)));
     return relay.fetch(forward(request, 'https://machine/socket', { ...identity, [REF_HEADER]: found.ref }));
+  }
+  // DX2 is the phase-1 transport: a credential its enrollment's key post marked v2 never opens it (O14 M5a), so the
+  // credential a re-enrollment mints carries nothing but RL1 until its machine is listed.
+  if (principal.v2 && ((url.pathname === '/machine/stream' && request.method === 'GET') || (url.pathname === '/machine/frames' && request.method === 'POST'))) {
+    return json(403, { error: 'v2-credential', message: 'this credential belongs to a v2 enrollment (its machine key is posted): it connects over RL1 (/machine/socket), never DX2' });
   }
   const stub = env.MACHINE.get(env.MACHINE.idFromName(`${principal.org.id}:${principal.machine.name}`));
   if (url.pathname === '/machine/stream' && request.method === 'GET') return stub.fetch(forward(request, 'https://machine/stream', identity));

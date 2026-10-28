@@ -21,3 +21,11 @@ export const LOG_NEGATIVES = (codes.negatives as Vector[]).filter((v) => v.domai
  * as they are (O11 M5), so the web app's reader meets them.
  */
 export const DUAL_VECTORS = orgProtocol.dual.map((d) => ({ name: d.name, project: d.project, orgKey: base64urlDecode(d.orgKey), event: d.event as unknown as LogEvent }));
+
+/**
+ * The protocol package's pairing vector (O13 §A, its M2): a code and its decoded form, a `web-cards` entry with its MAC
+ * under the code's `k` and its fingerprint, and the same entry with its passkey swapped and its channel key kept, whose
+ * fingerprint differs. The phone makes each of these (src/cards/register.ts) and the owner's Mac checks them, so the
+ * web app replays them in its own runtime.
+ */
+export const PAIRING_VECTOR = orgProtocol.pairing;

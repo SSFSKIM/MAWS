@@ -66,6 +66,9 @@ function fake(answers: string[] = [], over: Partial<AdminIo> = {}): Fake {
     env: {},
     appDir: APP,
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, Math.min(ms, 50))),
+    readStdin: async () => '',
+    secretOut: async () => expect.unreachable('no O13 verb writes a secret to stdout'),
+    stdoutIsTerminal: false,
     ...over,
   };
   return f;
@@ -161,7 +164,7 @@ describe('the options', () => {
     }
     const f = fake();
     expect(await runAdmin(['forge', '--keys', keys], f.io)).toBe(2);
-    expect(f.err[0]).toMatch(/^usage: deployment admin <init \| genesis \| adopt \| refresh \| pair \| devices \| remove-device>/);
+    expect(f.err[0]).toMatch(/^usage: deployment admin <init \| genesis \| adopt \| refresh \| pair \| devices \| remove-device \| show \| enroll \| delegation \| machine \| code \| provisioning \| keys \| abandon-pending>/);
   });
 });
 

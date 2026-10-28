@@ -179,8 +179,13 @@ export class OrgChain {
       const current = this.headVersion();
       if (current !== expected) return this.refusedAgainst(current, 'not-head');
       if (transitions !== undefined && this.transitionCount() !== transitions) return 'transitions-moved' as const;
-      const now = iso(Date.now());
       const before = this.head()?.state;
+      // Once the wrapped copies are purged (the Registry's `key_purged`, O14 M5a) the retirement stands: a machine that
+      // went back to the key would ask for one nobody holds.
+      if (before?.legacyRetired !== undefined && s.state.legacyRetired === undefined && this.keyPurged()) {
+        return refused(409, 'key-purged', "the org key's wrapped copies are purged: a successor keeps legacyRetired");
+      }
+      const now = iso(Date.now());
       this.sql.exec('INSERT INTO org_states (version, body, accepted) VALUES (?, ?, ?)', s.state.version, canonicalize(s), now);
       const removed = this.projectMembers(s.state, now);
       this.projectDevices(s.state);
@@ -189,6 +194,11 @@ export class OrgChain {
       for (const m of s.state.machines) this.sql.exec('INSERT INTO state_machines (ref, name, pub, owners) VALUES (?, ?, ?, ?)', m.ref, m.name, m.pub, JSON.stringify(m.owners));
       return { ok: true as const, value: { version: s.state.version, removed } };
     });
+  }
+
+  /** Whether the Registry purged the org key's wrapped copies (its `org` row, in this storage). */
+  private keyPurged(): boolean {
+    return (this.sql.exec<{ key_purged: string | null }>('SELECT key_purged FROM org').toArray()[0]?.key_purged ?? null) !== null;
   }
 
   /** `members` made the head's, each keeping the time it was first admitted; answers the ids it dropped. */

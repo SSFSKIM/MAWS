@@ -27,6 +27,8 @@
 //   - Name namespaces (RL DL 25, 26), by the lower-cased key names compare by: no `machineNames` name starts with a
 //     delegation's prefix, live or revoked, and no such prefix equals another's or starts with it; no two delegations,
 //     live or revoked, share an id, and no entry's ref (nor any in `machineNames`) starts with a known id and `_`.
+//   - The DX1 org key's retirement (`legacyRetired`, O14 M5a): a state that adds it names its own version, and a
+//     successor keeps it as it stands or drops it (the retirement undone); it never moves.
 //   - A root transition is issued against the head (`fromVersion` = head's version). While one is held for the head,
 //     the successor must be signed by one of its new root keys, not the old root set, and take its keys as `root.keys`.
 import { canonicalize } from './canonical.ts';
@@ -236,6 +238,14 @@ function machineNamesKept(head: OrgState | null, state: OrgState): Verdict {
   return [...record.keys()].every((key) => owed.has(key)) ? accept() : refuse('malformed');
 }
 
+/** `legacyRetired` across a step (see the header): added at the state's own version, then kept unchanged or dropped. */
+function legacyRetiredKept(head: OrgState | null, state: OrgState): boolean {
+  const mark = state.legacyRetired;
+  if (mark === undefined) return true;
+  if (head?.legacyRetired !== undefined) return same(head.legacyRetired, mark);
+  return mark.version === state.version;
+}
+
 /** A well-formed signed state: its shape, then what needs the whole state. */
 async function wellFormed(s: unknown): Promise<boolean> {
   return isSignedOrgState(s) && (await stateInvariants(s.state));
@@ -262,7 +272,7 @@ export async function verifyGenesis(s: SignedOrgState): Promise<Verdict> {
   if (!(await wellFormed(s))) return refuse('malformed');
   if (s.state.version !== 1) return refuse('malformed');
   if (s.state.prev !== null) return refuse('bad-link');
-  if (s.state.retired.length > 0 || s.state.revoked.length > 0) return refuse('malformed');
+  if (s.state.retired.length > 0 || s.state.revoked.length > 0 || !legacyRetiredKept(null, s.state)) return refuse('malformed');
   const names = machineNamesKept(null, s.state);
   if (!names.ok) return names;
   return rootSigned(s.state, s.sigs, await rootKeys(s.state));
@@ -330,6 +340,7 @@ export async function verifySuccessor(head: SignedOrgState, next: SignedOrgState
   if (await revivesRevoked(before, after)) return refuse('revoked');
   if (!(await stateInvariants(after))) return refuse('malformed');
   if (after.issued < before.issued || after.root.recoveryPub !== before.root.recoveryPub) return refuse('malformed');
+  if (!legacyRetiredKept(before, after)) return refuse('malformed');
 
   const names = machineNamesKept(before, after);
   if (!names.ok) return names;

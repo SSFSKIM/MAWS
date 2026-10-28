@@ -4,7 +4,7 @@
 import { useCallback } from 'react';
 import { create } from 'zustand';
 import type { ProjectSummary } from 'desk-hub/protocol';
-import { GridClient } from '../hub/grid-client';
+import { GridClient, type AppFrames } from '../hub/grid-client';
 import type { ConnectionStatus } from '../hub/socket';
 import { latency } from '../latency/latency';
 
@@ -14,6 +14,8 @@ export type GridState = { projects: ProjectSummary[]; loaded: boolean; status: C
 export const useGrid = create<GridState>()(() => ({ projects: [], loaded: false, status: 'connecting', asOf: null }));
 
 let client: GridClient | null = null;
+/** Where the socket's app frames go once this browser is a device (P5 O13 M3); null opens it as the grid's alone. */
+let appFrames: AppFrames | null = null;
 /** The page's first grid has been timed: its cold load is timed once. */
 let firstGrid = false;
 
@@ -30,11 +32,18 @@ export function startGrid(base: string): () => void {
     status: (status) => useGrid.setState({ status }),
   });
   client = own;
+  own.setApp(appFrames);
   own.start();
   return () => {
     own.stop();
     if (client === own) client = null;
   };
+}
+
+/** Opens the registry socket as an app's, its frames to `app`, or as the grid's alone (null); see `GridClient.setApp`. */
+export function gridApp(app: AppFrames | null): void {
+  appFrames = app;
+  client?.setApp(app);
 }
 
 /** Waiting on you first (most first), then working, then by name; a project with every machine offline goes last. */
