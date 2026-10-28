@@ -9,8 +9,10 @@
 // ring alone, marked `historyUnavailable`, which may begin inside a row, since the ring drops events, not rows). A
 // cursor on the current launch reads from its own row (`afterSeq: seq - 1`); it is a `replay` only when what comes back
 // goes on from the cursor without a gap (its first event in the cursor's row, no later than the one after the cursor),
-// else `missing`. A cursor on another launch, or none, is a `snapshot`, or `missing` when the launch's start is gone
-// (`historyUnavailable`); a later page read after a whole row is `missing` on the same mark.
+// else `missing`; one at the launch's start (`seq` 0: a snapshot and no event since) replays from the launch's first
+// event when it is all there. A cursor on another launch, or none, is a `snapshot`, or `missing` when the launch's start
+// is gone (`historyUnavailable`); a later read, a page after a whole row or a re-attach's read from the start, is
+// `missing` on the same mark unless the device was already told so.
 // `replay` goes on after the cursor; `snapshot` and `missing` go on from the launch's first event (`seq` 0): lane B has
 // no other copy of the transcript a remote viewer could start from, as DX4's lane A snapshot carries its rows. Every
 // answer carries the session's replace-whole state, which changes outside the journal's sequence: `snap {status,
@@ -90,6 +92,8 @@ class Stream {
   readonly latest = new Map<Part, unknown>();
   /** `subbed` went: a later open is quiet unless it starts the stream over. */
   answered = false;
+  /** The device was told `missing` for this stream: what the launch's start lacks is announced, so a read of it stands. */
+  lost = false;
   /** Bumped by each (re)open: a flow that finds it moved stops. */
   gen = 0;
   hydration = 0;
@@ -183,13 +187,15 @@ export class PlaneB implements Plane {
     let mode: Mode = how === 'missing' ? 'missing' : 'snapshot';
     let first: Page | null = null;
     let from: At = START;
+    let fromStart = false;
     if (how === 'resume' && !relaunched) {
       mode = 'replay';
       from = stream.queued;
       stream.pastRow = pastRow;
     } else if (how === 'sub' && sub.cursor !== null && sub.cursor.epoch === launch) {
       const cursor: At = { seq: sub.cursor.seq, idx: sub.cursor.idx ?? -1 };
-      if (cursor.seq === 0) mode = 'replay';
+      // A cursor at the launch's start (a snapshot with no event since) replays from it if the start is all there.
+      if (cursor.seq === 0) fromStart = true;
       else {
         const page = await this.#events(stream, cursor.seq - 1);
         if (gen !== stream.gen) return;
@@ -207,6 +213,7 @@ export class PlaneB implements Plane {
       if (gen !== stream.gen) return;
       if (page === undefined) return sub.end('unavailable');
       if (!this.#gapless(page)) mode = 'missing';
+      else if (fromStart) mode = 'replay';
       first = page;
     }
     stream.queued = from;
@@ -215,6 +222,7 @@ export class PlaneB implements Plane {
     if (how !== 'resume' || relaunched) {
       sub.subbed(mode, this.#at(stream));
       stream.answered = true;
+      stream.lost = mode === 'missing';
     }
     sub.snap(this.#at(stream), { status, ...state }, 'state');
     stream.catching = true;
@@ -446,8 +454,9 @@ export class PlaneB implements Plane {
       stream.holdEvents = false;
       return void this.#open(stream, 'relaunch');
     }
-    // Anything but the launch's start must go on from where the stream stands, or what it needs is gone.
-    if (!start && !(pastRow ? this.#gapless(page) : this.#continues(stream, page, from))) {
+    // The read must go on from where the stream stands, or what it needs is gone: from the launch's start, unless the
+    // device was already told `missing` (a re-attach included, which reads from the start too).
+    if (!(start ? stream.lost || this.#gapless(page) : pastRow ? this.#gapless(page) : this.#continues(stream, page, from))) {
       stream.holdEvents = false;
       return void this.#open(stream, 'missing');
     }

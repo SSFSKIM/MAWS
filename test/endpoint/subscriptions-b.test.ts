@@ -621,3 +621,52 @@ describe('a lane B subscription whose access can’t be checked now', () => {
     sawExactly(a, 's1', held);
   });
 });
+
+// ---- Review round 3 (O10 M8) ---------------------------------------------------------------------------------------------
+
+describe('a lane B subscription standing at the launch’s start when the journal is lost', () => {
+  it('answers a resume from the snapshot’s cursor (`seq` 0) `missing` when the launch’s start is gone', async () => {
+    const f = await lab();
+    const s = f.host.session('app-1');
+    const a = await openRemote(f, org.a1, org.A);
+    const first = await subscribe(a, 's1', { lane: 'B', id: 'app-1' });
+    expect(first).toMatchObject({ mode: 'snapshot', seq: 0 });
+    await snapshot(a, 's1');
+    drop(a);
+    // The device saw the snapshot and no event. While it is away the launch writes ten rows, the ring drops the first
+    // four, and the journal is lost.
+    for (let i = 0; i < 10; i++) f.host.row('app-1', 1);
+    s.evicted = { seq: 4, idx: 0 };
+    s.journal = false;
+    const b = await openRemote(f, org.a1, org.A);
+    expect(await subscribe(b, 's1', { lane: 'B', id: 'app-1' }, { cursor: { epoch: first.epoch as string, seq: 0 } })).toMatchObject({ mode: 'missing' });
+  });
+
+  it('replays a resume from the snapshot’s cursor from the launch’s first event while it is all there', async () => {
+    const f = await lab();
+    const a = await openRemote(f, org.a1, org.A);
+    const first = await subscribe(a, 's1', { lane: 'B', id: 'app-1' });
+    await snapshot(a, 's1');
+    drop(a);
+    const rows = [...f.host.row('app-1', 2), ...f.host.row('app-1', 1)];
+    const b = await openRemote(f, org.a1, org.A);
+    expect(await subscribe(b, 's1', { lane: 'B', id: 'app-1' }, { cursor: { epoch: first.epoch as string, seq: 0 } })).toMatchObject({ mode: 'replay' });
+    await until(() => evs(b, 's1').length === 3, 'the launch’s events');
+    sawExactly(b, 's1', rows);
+  });
+
+  it('starts over `missing` when an app attaches and its catch-up from the launch’s start finds the start gone', async () => {
+    const f = await lab();
+    const s = f.host.session('app-1');
+    f.host.attach(false);
+    const a = await openRemote(f, org.a1, org.A);
+    expect(await subscribe(a, 's1', { lane: 'B', id: 'app-1' })).toMatchObject({ mode: 'snapshot' });
+    await waitFor(a, (m) => m.t === 'paused' && m.sub === 's1', 'paused');
+    // No app: the rows written meanwhile reach no one live; the ring drops the first four and the journal is lost.
+    for (let i = 0; i < 10; i++) f.host.row('app-1', 1);
+    s.evicted = { seq: 4, idx: 0 };
+    s.journal = false;
+    f.host.attach(true);
+    await waitFor(a, (m) => m.t === 'subbed' && m.sub === 's1' && m.mode === 'missing', 'a `missing` start-over');
+  });
+});
