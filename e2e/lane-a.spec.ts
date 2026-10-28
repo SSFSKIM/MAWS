@@ -415,7 +415,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await maws.app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('tab.overview')?.click());
     const overview = main(page).getByRole('dialog', { name: 'Overview' });
     await expect(overview.locator(`[data-card="${await addressed(page, c.appId)}"]`).getByRole('radio', { name: 'Allow once' }), 'the card answers it through the port').toBeVisible({ timeout: 10_000 });
-    await page.keyboard.press('Escape');
+    await overview.getByRole('button', { name: 'Close Overview' }).click();
     await expect(overview).toHaveCount(0);
 
     // allowed in MAWS: the fake takes Interfaces §D's body; its settle takes the item away within 1 s
