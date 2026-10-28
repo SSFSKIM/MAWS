@@ -97,8 +97,8 @@ OAuth token carries no Access scopes, which is why the setup token exists.
    - `CF_API_TOKEN`, from `CF_DESK_HUB_SERVICE_TOKENS` (`--put-api-token` rotates it);
    - `VAPID_KEY`, generated once. Browsers' push subscriptions are bound to it, so it is never regenerated, and it exists nowhere but the Worker.
 
-Every answer the Worker makes, except a WebSocket upgrade and a machine's
-stream, carries `X-Desk-Build`. The value names the build:
+Every answer the Worker makes, except a WebSocket upgrade, carries
+`X-Desk-Build`. The value names the build:
 - `hub@<commit>`, where the commit is the hub's, with `+dirty` when its tree differed;
 - `web@<label>` when `--web <label>` named the web build (`--web smns-erb-web.0fa05392`, say).
 
@@ -342,8 +342,9 @@ and closes. Both are meant to be refused: the hub holds no key, so it stores the
 audit banner), while the `steer` is forwarded and the machine refuses it
 `bad-code`, relayed back as `rpc-state` failed. It sends nothing else and never
 touches the org key, and it refuses to run against any project but the one in
-`DESK_WALK` (it checks the socket's `welcome`). Proven against the local hub in
-`test/deploy/walk-console.test.ts`.
+`DESK_WALK` (it checks the socket's `welcome`). Since O14 M5b the hub forwards no
+RPC: the `steer` is answered `refused retired` at the hub, so the walk's G3 half no
+longer runs as written, and its local-hub suite left with DX6.
 
 ## The checks (DC3.G2, G4, G6)
 
@@ -357,12 +358,22 @@ revocation, and their events are sealed with a throwaway org key.
 Each revokes what it enrolled, which deletes the machines' service tokens, and
 deletes what it minted, however it ends. It fails if any of that fails.
 
-- `probe`: the admission probe's five cases, plus enrollment's name refusal and the archive designation. Needs `DESK_ACCESS_TOKEN` and `CF_DESK_HUB_SERVICE_TOKENS`, the latter for minting the one never-enrolled token, which it deletes.
+- `probe`: the admission probe's five cases, plus enrollment's name refusal. Needs `DESK_ACCESS_TOKEN` and `CF_DESK_HUB_SERVICE_TOKENS`, the latter for minting the one never-enrolled token, which it deletes. The machine's admission is its own request (`GET /machine/enrollment`), which confirms it and registers its machine project, the project the browser case opens; the archive designation it once told at a DX2 hello left with that stream (O14 M5b).
+
+  `probe --rpc` runs one case alone, the one O14's B4 step 3 asks for: an `rpc` frame on a project socket opened with the owner's token is answered `refused retired`. The frame carries a nonce and nothing else, so it writes nothing on any build (one before M5b answers it a bad shape and keeps nothing, and the case fails there); it therefore runs in the deployment's own org, without `--test-org`, and needs `DESK_ACCESS_TOKEN` alone:
+
+      printf 'DESK_ACCESS_TOKEN=%s\n' "$(cloudflared access token -app=$HUB)" \
+        | pnpm --filter desk-hub deployment probe --rpc --config deploy/config.json
+
 - `fake-check`: M4's fake machine, enrolled from a code, replays its recording, and a browser sees every row, request, decision, log event, and outcome, plus one RPC answered.
 - `redeploy-check`: two fake machines and a browser write while the hub is redeployed mid-run, under the same throwaway org. The writing lasts 420 s by default (`--seconds`), because the cut came +314 to +329 s after the deploy. The redeploy is new code, since its build's name is new: Cloudflare restarts objects for new code only. Nothing may be lost or duplicated, and the check fails as "not exercised" when the redeploy cut no machine's stream. See M5's findings in DC3's plan: on 2026-10-15, Cloudflare kept the old version's connections open after a deploy.
   Beside them runs RL1's leg (O11): a v2 machine listed in the throwaway org's state holds RL1 through its endpoint, and an app holds a channel to it. A socket the redeploy drops must come back: the endpoint under a higher generation, the app through a new channel. It prints when each socket dropped (from the redeploy's start) and how long each took to come back. Cloudflare cuts the sockets when it chooses, and within the window it may not (O11 M8's phase B saw a cut in one run of three), so once the writing stops the leg cuts both sockets itself, from the client's end, twice in a row: each time the endpoint must be welcomed again under a higher generation and a new channel echo within 60 s (`rl1: forced cut <n>: …`). Those prove the reconnect, not the deploy's cut, which is what acceptance 3 asks for: only a run whose redeploy cut both RL1 sockets, both came back, and whose forced cuts came back is a PASS. A run that lost nothing and whose forced cuts came back but whose redeploy left an RL1 socket uncut (`rl1: neither socket was cut`) ends `INCONCLUSIVE: deploy cut: not exercised (…)` with status 3, neither PASS nor FAIL. The state is signed by an admin device: `--device-keys <file>` (below), or without it a device made for the run, which posts the throwaway org's genesis and so needs an org with no state yet.
 - `measure`: machines streaming chunks into one project, with browsers subscribed. It runs three series: the phase-1 budget (one session at 150 chunks/s watched by 1 to 3 browsers, with another machine's presence and log events crossing it), fan-out, and a ramp. It reports throughput, latency, and the load average per step, as DC3's plan records them (G6).
 - `frame-cost`: what a POST and each frame in it cost on the path from a machine to its project.
+
+`fake-check`, `redeploy-check`'s two fake machines, `measure` and `frame-cost` drive DX2's stream (the fake machine,
+`fake-machine/`), which a hub from O14 M5b on answers 404: they prove a build before it, and go once the cutover is
+done.
 
 
 ## Staging runs: `staging-deploy.sh`, `staging-run.sh`, `staging-sweep.py`
