@@ -36,7 +36,7 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-10-28) The final gate on bcb8959b7: run 40691164424, 41 of 42 jobs green; the one red is packaged's known `layout-transfer.spec.ts:541` (O2's skip). The landing gate runs on the merge with the master O2 leaves (the architect).
   - [x] (2026-10-28) The landing gate on the merge with O2's master (fd1d65c44): runs 40716613510 and 40716660100 green, no flaky lines.
   - [ ] The live check at the first cut-over machine.
-- [ ] M3 — The app as the org's signer: a co-root, the weekly successor, the signing checks — **executable** (re-planned 2026-10-28; needs M1 and O7 M1, both landed); the owner's sitting (`root add` on staging, then production) owed after M1's
+- [x] M3 — The app as the org's signer: a co-root, the weekly successor, the signing checks — landed (PR #314, master 716a2675d, P5 Decision Log 126); the owner's sitting (`root add` on staging, then production) owed — (re-planned 2026-10-28; needed M1 and O7 M1)
   - [x] (2026-10-28) Task 1: `root add` in `deploy/admin.ts`, its `production-run.sh` line, and its proofs in `admin.test.ts`.
   - [x] (2026-10-28) Task 2: `checks.ts` (`checkSuccessor`, `supersededRevocations`) and its proofs, the zero-roots ones included.
   - [x] (2026-10-28) Task 3: the device module, `createStateSigner` and the next keys (create, promote, destroy).
@@ -47,9 +47,12 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-10-28) Task 7, reviewed clean (1e38ae640): `test/org/signer.local.test.ts`, with the shared harness `test/org/local-org.ts`.
   - [x] (2026-10-28) Task 8, reviewed clean (740f0c46f): the app follows a recovery whose first state is a sibling at its head's version (Task 7's Discovery 2).
   - [x] (2026-10-28) reviewer-high on the whole branch converged in three rounds. Round 1, on 559ddfc0c, found 3 P1 and 2 P2, fixed at c4a1d6801..ba781f87f. Round 2 reproduced one earlier interleaving of the first P1, fixed at b92b07573. Round 3 found nothing material.
-  - [ ] The desk track's review of the `deploy/` hunk, and the final gate (the full hosted set).
+  - [x] (2026-10-28) The desk track reviewed the `deploy/` hunk and shaped the wrapper fix. The final gate, run 40771309800, had two browser reds (`browser-cua.spec.ts:483`, `browser-chrome.spec.ts:681`), none of #314's; its rerun, 40783162110, was green.
+  - [ ] The owner's sitting: `root add` on staging, then production (the steps are in the report, `2026-10-28-p5-o8-report.md`).
 - [ ] M4 — The Org page — *advisory; Q1 answered; needs M3 and O11's H1*
 - [ ] M5 — Owners on rows and the People toggle — **executable** (re-planned 2026-10-28; needs M2, landed)
+  - [x] (2026-10-28) Built on `p5-o8-m5` at b78445447, one task: `memberName`, `OrgRows.members` and `member`, the `sidebar.people` key and `stores/people.ts`, `ownersLabel` and `RowTitle`, `projectList`'s ownership-first filing, the People hover action and menu item, owners in the hover cards. The focused suites pass locally, each file alone.
+  - [ ] Class 1a on the merge with master, reviewer-medium, and the final gate (the full hosted set).
 - [ ] M5b — Add owner — *later; needs O10's `record.owners` offer row and O12's sminos executor*
 - [ ] M6 — Visibility, shares and per-member reader state — *advisory; taste (Q4); needs O3*
 - [ ] M7 — The project channel — *advisory; taste (Q5); needs O7 M2 and M6, O3, O12's to-human store; its people's words wait for O14's last machine*
@@ -1238,6 +1241,10 @@ Each is built as its recommendation when its milestone is re-planned, unless the
   - the staging and production wrappers, which appended their own `--config`/`--keys` after `"$@"` and now put them first.
   Evidence: class 1a run 40768996939 at b92b07573: `remove-device: … Unknown option '-y'` in `signer.local.test.ts`'s rekey case, which had passed at 559ddfc0c with another random id. Fixed at 031c476da and in the wrapper commit after it.
 
+- Observation (M5, 2026-10-28): `stores/summary.ts`'s `load()` has no production caller, so `summary.sections` is written but never read back; collapsed summary sections reset at each launch. M5's People store is loaded from `App.tsx` instead.
+  Evidence: `grep -rn "getState().load()" src/renderer/src`, outside tests, finds no summary caller.
+- Observation (M5): `App.test.tsx` runs in the `renderer-timing` vitest project, not `renderer` (`vitest.config.ts:57`).
+
 ## Decision Log
 
 - Decision: Verification. This document gets one `doperpowers:adversarial-reviewer` buildability round on its execution section, focused on the first milestone (M1 and M2), repeated until a round yields nothing worth changing. M1's and M2's PRs each get doperpowers:reviewer-high. M3–M8 each get their own buildability round when re-planned, and the review rung their re-plan names.
@@ -1561,6 +1568,21 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
 - Decision: Device ids go after `--` wherever M3 passes or prints one (031c476da). The staging and production wrappers pass the owner's arguments last (1ec366d08): `deployment()` and `direct()` keep the command word first for `bin.ts`, then the wrapper's `--config`, then `"$@"`; the admin sites put `--keys` after `admin`.
   Approved by the architect, with the desk track's shape and three pinned forms in `production-scripts.test.ts`: B1 step 2's `admin --pipe delegation create …` on the `direct()` path, `admin root add -- <a '-'-led id>` through both wrappers, and one non-admin verb through each wrapper with `--config` after the command word. `admin show` is also pinned, unchanged in form. A caller's own `--config` is refused, as before, since `--config` is not repeatable.
   Rejected: printing the bare id and adding `--` only for a `-`-led id, which fails through the wrappers for one id in 64 until they change.
+  Date/Author: 2026-10-28, O8's executor.
+
+- Decision: M5's build (b78445447) settles these points the milestone left open.
+  1. The label shows two entries in all, "you" among them: "you, Ana +1" for you, Ana and Ben. The cap bounds the row's width, so "you" counts.
+  2. `ownersLabel`'s `me` is `string | null`: signed out, nobody reads "you". Empty owners give `null`.
+  3. Names widen one level further than §L: two members whose local parts also collide (`ana@a`, `ana@b`) read their whole emails.
+  4. `memberName` takes Unicode letters (`élodie` reads "Élodie"), upper-cases the first and lower-cases the rest (`GINA` reads "Gina"), falls back to the whole local part when it has no letters, and compares collisions case-insensitively.
+  5. `OrgRows.members` is ordered by the sorted rows' first naming of each id, which keeps main's JSON dedup stable.
+  6. Others' hidden rows add no activity: a project holding only hidden rows ranks by `createdAt`. What you can't see doesn't reorder your list. Drawn others' rows count.
+  7. Others' archived records are not counted in "+N others", as archived records are never drawn. "+1 other" is singular, and it shows whether the project is open or closed.
+  8. The People hover action is the first of the four buttons, so Resume, Remove and "+" keep their places at the right edge. The menu's item carries a trailing check, as the menu has no indicator gutter.
+  9. The hover card lists owners only where the row's label shows (not on a session you own alone); "you" carries your email, a former member none.
+  10. `usePeople.load()` runs once from `App.tsx`'s mount, not the Sidebar, which keeps IPC out of every Sidebar test.
+  11. A toggle made before the stored set is read is applied over it when the read lands, and nothing is written before. Rejected: `summary.ts`'s "toggle wins", which would replace the whole stored set with one early toggle.
+  Debt, not built: `sidebar.people` keys are neither moved when an address key becomes an org key (`layout-model.ts`'s `rekeySets` does so for `expandedProjects`) nor pruned; the toggle reads off until set again. Others' records still reach Needs you and "Mark all read"; attention across machines is O7 M6's and O3's.
   Date/Author: 2026-10-28, O8's executor.
 
 ## Outcomes & Retrospective
