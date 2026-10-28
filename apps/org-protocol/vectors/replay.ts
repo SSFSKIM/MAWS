@@ -14,6 +14,7 @@ import { contestedRefs, machineKeys, verifyCertRetirement, verifyEndpointRecord,
 import type { OrgState, SignedOrgState } from '../src/types.ts';
 import { verifyWebAuthn } from '../src/webauthn.ts';
 import { replayChannel } from './replay-channel.ts';
+import { replayHistory } from './replay-history.ts';
 import type { Case, VectorSet } from './scenario.ts';
 
 export type { Case, DualCase, EnrollmentCase, PairingVector, VectorSet } from './scenario.ts';
@@ -106,6 +107,7 @@ export async function replayVectors(set: VectorSet): Promise<string[]> {
     if ((await actionFingerprint(action)) !== fingerprint) failures.push(`action fingerprint of ${name}`);
   }
   failures.push(...(await replayChannel(set.channel, set.fixtures)));
+  failures.push(...(await replayHistory(set.history)));
   return failures;
 }
 
