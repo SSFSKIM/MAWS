@@ -1045,7 +1045,7 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
     void orgSession?.close();
     return remoteRows.close();
   });
-  // P5 O3-A: the last step, once every service that writes the machine's files has stopped (the process's exit releases
-  // it too, for a quit that never reaches the steps)
-  shutdown.add('spine lock', spine.release);
+  // P5 O3-A: spine.lock is released at the process's exit alone (startSpineData), never at a will-quit step: the steps'
+  // promises settle after the last step is called, and a writer still finishing (an intent's rename) must not run
+  // beside a candidate that took the lock meanwhile.
 }

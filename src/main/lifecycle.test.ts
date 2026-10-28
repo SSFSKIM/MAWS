@@ -63,7 +63,8 @@ vi.mock('./attention/file-attention-store', () => ({ FileAttentionStore: vi.fn()
 // C3 end
 vi.mock('./client/settings', () => ({ startSettings: () => ({ state: () => ({ settings: SETTINGS_DEFAULTS_V21, resolvedTheme: 'light' }), onChange: vi.fn(() => vi.fn()) }) })); // P5 O3-A: the client half
 // P5 O3-A: the spine's lock and the settings split, held and done (no profile directory under the fixed getPath)
-vi.mock('./settings/spine-lock', () => ({ takeSpineLock: async () => ({ refused: null, holder: null, release: () => {} }) }));
+const spineLock = vi.hoisted(() => ({ release: vi.fn() }));
+vi.mock('./settings/spine-lock', () => ({ takeSpineLock: async () => ({ refused: null, holder: null, release: spineLock.release }) }));
 vi.mock('./settings/split', () => ({ settingsPaths: (profile: string) => ({ client: `${profile}/settings.json`, machine: `${profile}/machine-settings.json` }), splitSettingsFiles: () => ({ outcome: 'none', machineRefused: null, unsplit: null }) }));
 vi.mock('./settings/machine', () => ({ startMachineSettings: () => ({}) }));
 vi.mock('./window', () => ({ appUrl: 'file:///index.html', createWindow: fake.createWindow, installContentSecurityPolicy: vi.fn() }));
@@ -183,6 +184,8 @@ describe('app lifecycle (macOS, D-11)', () => {
     expect(c4.started).toBe(1);
     expect(c4.stopSource).toHaveBeenCalledOnce();
     expect(c4.close).toHaveBeenCalledOnce();
+    // P5 O3-A: spine.lock outlives the will-quit steps (their promises settle after them); the process's exit releases it
+    expect(spineLock.release).not.toHaveBeenCalled();
     // The source reads the index, so it stops (C5's sessions.stop) before the index closes.
     expect(c4.stopSource.mock.invocationCallOrder[0]).toBeLessThan(c4.close.mock.invocationCallOrder[0]);
     expect(c4.stopAttention).toHaveBeenCalledOnce();
