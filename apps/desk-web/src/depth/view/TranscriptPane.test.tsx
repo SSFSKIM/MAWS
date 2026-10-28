@@ -8,6 +8,7 @@ import { createRef } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { useTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
 import type { TranscriptListHandle } from '../../../../../src/renderer/src/transcript/view/Transcript';
+import type { PlaneTranscript } from '../../../../../src/renderer/src/lane-a/plane-transcript';
 import { FakePlane } from '../../../../../src/renderer/src/lane-a/test-support/fake-plane';
 import { readRecording, scriptOf } from '../../../../../src/renderer/src/lane-a/test-support/session-stream';
 import type { DeskSession } from '../../shell/sessions';

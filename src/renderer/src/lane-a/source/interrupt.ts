@@ -14,16 +14,16 @@
 // stores as meta user rows of text blocks with the plugin's origin (2.1.300 `cli.pretty.js:1462`):
 // - the engine's marker, one text block exactly one of the engine's two forms, on a user row with no `origin` and not
 //   meta (Esc; a typed prompt carries `origin.kind`), or on the bridge's meta row (the bridge's interrupt from
-//   doperpowers #225 on, which writes the marker alone and then a note row, "The interrupt came from …", with a line
+//   doperpowers PR 225 on, which writes the marker alone and then a note row, "The interrupt came from …", with a line
 //   per background task; the note is meta and one of the bridge's records, never a steer (`bridge-rows.ts`), so neither
 //   a prompt nor a bubble, and ends nothing);
-// - the bridge's record before #225 (`interruptText`), kept for the history that holds it and the plugins that still
+// - the bridge's record before PR 225 (`interruptText`), kept for the history that holds it and the plugins that still
 //   write it: on the bridge's meta row, one text block whose first line is one of its two marker lines ("… from the
 //   desk]", "… from outside the terminal]") and whose other lines, if any, are each one of its own "Task …" lines for a
 //   Bash call the interrupt stopped or could not stop.
 // A typed prompt, another plugin's row, or a row whose lines are not those never ends one, nor does a delivery frame.
-// Residual (the composite's writer's ruling, tech debt): a steer through a plugin older than #225 whose whole text is
-// one of these, since the bridge's steers are the same meta rows; #225's steer refuses such a text, and from 7.180.0 a
+// Residual (the composite's writer's ruling, tech debt): a steer through a plugin older than PR 225 whose whole text is
+// one of these, since the bridge's steers are the same meta rows; PR 225's steer refuses such a text, and from 7.180.0 a
 // steer's row opens with its own line (`bridge-rows.ts`, `STEER_LINE`), so its whole text is none of these.
 //
 // The bridge's record with "Task …" lines is multi-line, so MAWS's marker rule misses it. Its mapping takes it
@@ -62,7 +62,7 @@ export function isEngineMarker(row: JsonObject): boolean {
   return text !== null && ENGINE_MARKERS.has(text.trim());
 }
 
-/** The bridge's record before #225, its lines with its marker line first; null for any other row. */
+/** The bridge's record before PR 225, its lines with its marker line first; null for any other row. */
 export function bridgeRecordLines(row: JsonObject): string[] | null {
   if (!isBridgeRow(row)) return null;
   const text = singleText(row);

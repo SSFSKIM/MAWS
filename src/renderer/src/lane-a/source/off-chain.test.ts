@@ -237,7 +237,7 @@ describe('the rows off the live chain', () => {
     expect(user(undone.rows, 'Run the suites.')).toMatchObject({ messageUuid: first.uuid, dropped: true });
   });
 
-  it('an Esc that a notice of the engine branched (#238’s restore): the prompt sent again edited and the delivery appended again draw once', async () => {
+  it('an Esc that a notice of the engine branched (PR 238’s restore): the prompt sent again edited and the delivery appended again draw once', async () => {
     const c = new Chain();
     c.prompt('Write a story.');
     c.answer('Once upon a time.');

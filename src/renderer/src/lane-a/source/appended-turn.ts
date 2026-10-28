@@ -1,9 +1,9 @@
 // The turn a row the bridge appended belongs to. A steer, or a delivery the bridge appends into a running turn
-// (doperpowers #233: every Send to a busy session), is drawn as the owner's prompt queued there (`bridge-rows.ts`,
+// (doperpowers PR 233: every Send to a busy session), is drawn as the owner's prompt queued there (`bridge-rows.ts`,
 // `conversation/delivery-frame.ts`): MAWS's reducer folds it into the turn that runs. One that lands while no turn runs
 // has no turn to fold into, and MAWS's reducer keeps it as a prompt waiting for its own: appended while its turn was
 // ending, after the turn's `turn_duration` (a race the bridge answers with its wake), or after an Esc stopped the turn
-// (doperpowers #238: the owner's message after an Esc goes in as such a row, and only the bridge's wake goes through the
+// (doperpowers PR 238: the owner's message after an Esc goes in as such a row, and only the bridge's wake goes through the
 // inbox). Left so, it waits forever — "Sends at the next step" once a turn runs — and the turn it would open holds only
 // its bubble and never ends.
 //

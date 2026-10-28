@@ -1,7 +1,7 @@
 // A delivered send's frame line, as the session view draws its row (DC9 M6, the owner's review of M4): the first line
 // sminos writes for a delivery names its event, which the session read and the tail matched; the owner's own send drops
 // it from view (its bubble already says who wrote it), and a peer's draws it as a label naming who sent it. A delivery
-// queued into a running turn, or appended into it by the bridge (doperpowers #233), is drawn as MAWS draws a prompt
+// queued into a running turn, or appended into it by the bridge (doperpowers PR 233), is drawn as MAWS draws a prompt
 // queued there, under the message's own identity. The text the session read is unchanged otherwise, and a row that marks
 // no delivery's provenance is never touched.
 import type { JsonObject } from 'desk-hub/protocol';
@@ -179,7 +179,7 @@ describe('a delivered send’s frame line', () => {
     }
   });
 
-  it('is never read off the bridge’s other appended rows: a steer, the interrupt’s marker and note, a stop’s note, the record before #225', () => {
+  it('is never read off the bridge’s other appended rows: a steer, the interrupt’s marker and note, a stop’s note, the record before PR 225', () => {
     for (const text of [
       'use the split store', // a steer
       `Run the suites.\n${OWN}`, // a steer quoting a frame past its first line
@@ -263,7 +263,7 @@ describe('a delivered send’s frame line', () => {
 
   it('is drawn once when the bridge appended it again after an Esc: the later copy, the one the engine read, in the turn that read it', async () => {
     // An Esc before the model answered handed the owner's prompt back; the prompt sent next went in under the same parent,
-    // leaving the first copy on a branch no request reads, and the bridge appended the delivery again (doperpowers #233).
+    // leaving the first copy on a branch no request reads, and the bridge appended the delivery again (doperpowers PR 233).
     const at = (second: number) => `2026-10-17T10:00:${String(second).padStart(2, '0')}.000Z`;
     for (const [frame, words, text] of [
       [OWN, 'Run the suites.', 'Run the suites.'],

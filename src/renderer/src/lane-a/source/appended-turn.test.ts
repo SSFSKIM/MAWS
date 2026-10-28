@@ -1,5 +1,5 @@
 // The turn a row the bridge appended belongs to (`appended-turn.ts`), through MAWS's own store, reducer and report, on
-// rows in the shapes the engine and the bridge write them (`test-support/chain-rows.ts`, after doperpowers #238's probe
+// rows in the shapes the engine and the bridge write them (`test-support/chain-rows.ts`, after doperpowers PR 238's probe
 // runs): a steer or a delivery appended after its turn ended (the race with the turn's end; the owner's message after an
 // Esc) opens the turn the bridge's wake starts, which closes; one appended into a running turn is that turn's; the
 // bridge's mirror of either is not drawn.
@@ -65,7 +65,7 @@ describe('a row the bridge appended while no turn ran', () => {
     expect(held(entry)).toEqual([]); // the steer's mirror line is the terminal's
   });
 
-  it('the owner’s message after an Esc (doperpowers #238) opens the wake’s turn: never waiting, no mirror, the turn ends', async () => {
+  it('the owner’s message after an Esc (doperpowers PR 238) opens the wake’s turn: never waiting, no mirror, the turn ends', async () => {
     const c = new Chain();
     c.prompt('Run exactly this Bash command, then reply in one short sentence.');
     const call = c.call('toolu_e1');

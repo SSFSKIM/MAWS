@@ -5,16 +5,16 @@
 // delivery's provenance:
 // - idle, the bridge submits it as the user (`$.prompt.submit({asUser: true})` writes a user row whose `origin` is
 //   `{kind: "plugin", asUser: true}`);
-// - while the main turn runs (doperpowers #233 on), the bridge appends it into the turn (`$.session.append`), read at the
+// - while the main turn runs (doperpowers PR 233 on), the bridge appends it into the turn (`$.session.append`), read at the
 //   loop's next model request: the engine keeps a plugin's appended row as a user row, `isMeta`, origin `{kind:
 //   "plugin", name: <the bridge's plugin>}` and no `asUser` (`isBridgeRow`), whatever the plugin asks, so the frame is
 //   the only word that it is one. The bridge's steers, interrupt rows and notes have the same shape, and none opens with a whole
 //   frame line (a steer's own first line, `[sminos steer from human]`, names no event: `depth/source/bridge-rows.ts`);
-// - through sminos's inbox, the engine's messaging socket (a session with no bridge, or #233's fallback after an Esc),
+// - through sminos's inbox, the engine's messaging socket (a session with no bridge, or PR 233's fallback after an Esc),
 //   the engine keeps it as a peer message: a user row (idle) or a `queued_command` (busy) of origin `peer`, the frame
 //   the first line of its envelope's body (`parsePeerMessage`'s `frame`); an engine through 2.1.289 queued it raw, the
 //   frame the prompt's own first line;
-// - the bridge's busy submission before #233 is a `queued_command` of origin `plugin`.
+// - the bridge's busy submission before PR 233 is a `queued_command` of origin `plugin`.
 // A prompt typed at the terminal, another plugin's row, or a row that marks no origin, never is.
 //
 // The tail matches a send by its frame (`tail.ts`). The session view draws a delivered row without its frame line: the
@@ -35,7 +35,7 @@
 //
 // A delivered row can be on disk twice. An Esc before the model answers hands the human's prompt back to the input box,
 // and the prompt sent next goes in under the same parent: a row the bridge appended after the first one is left on a
-// branch no request reads, and the bridge appends it again (doperpowers #233, `recheckDeliveries`), the same text. Its
+// branch no request reads, and the bridge appends it again (doperpowers PR 233, `recheckDeliveries`), the same text. Its
 // frame line names its event (`id=<msg_id>`, or the chat frame's `<writer_short>:<seq>`), so the session view draws one
 // row per frame line, the last held: the copy the engine read (`supersededDeliveries`). A producer that marks the rows
 // off the live chain says so of the first copy itself (`depth/source/off-chain.ts`); this dedupe stays for the rows it
@@ -156,7 +156,7 @@ export function supersededDeliveries(rows: readonly JsonObject[]): Set<string> {
   return superseded;
 }
 
-/** The first line of every prompt the bridge sends of its own to wake a session (#233: `STEER_WAKE`, `DELIVERY_WAKE`). */
+/** The first line of every prompt the bridge sends of its own to wake a session (PR 233: `STEER_WAKE`, `DELIVERY_WAKE`). */
 export const BRIDGE_WAKE_LINE = '[sminos bridge]';
 
 /**

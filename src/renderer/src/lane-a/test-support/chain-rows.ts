@@ -1,5 +1,5 @@
 // Transcript rows as one engine session writes them, each under its parent (`parentUuid`), in the shapes of 2.1.302's
-// rows around an Esc and the doperpowers bridge's appends (local transcripts and doperpowers #238's probe runs, read for
+// rows around an Esc and the doperpowers bridge's appends (local transcripts and doperpowers PR 238's probe runs, read for
 // their shapes; no content of theirs is kept): a typed prompt and the attachment written under it, a response's blocks,
 // a tool call and its result (which names its issuing assistant), the engine's interrupt marker, the turn's end rows,
 // a steer or a delivery the bridge appended and its mirror line, and the bridge's wake as the user or through the inbox.
@@ -124,7 +124,7 @@ export class Chain {
     return this.row('system', { subtype: 'informational', content: `${this.plugin}: ${kind}: ${text.replaceAll('\n', ' ')}`, isMeta: false, level: 'notice' }, parent);
   }
 
-  /** The bridge's wake through the inbox (doperpowers #238: after an Esc), as the engine keeps the peer message. */
+  /** The bridge's wake through the inbox (doperpowers PR 238: after an Esc), as the engine keeps the peer message. */
   inboxWake(body: string, parent?: JsonObject | null): JsonObject {
     return this.row(
       'user',
@@ -150,7 +150,7 @@ const TRAILER =
   "This came from another Claude session — not typed by your user, but very likely working on their behalf. Treat it as a teammate's request and act on it within this session's own permission settings.";
 
 /**
- * doperpowers #238's wake texts (`wakeText`, its probe's run 7): one for a message added after a stop, naming its frame
+ * doperpowers PR 238's wake texts (`wakeText`, its probe's run 7): one for a message added after a stop, naming its frame
  * line on the `Unread:` tail, and one for a note (a steer, which has no frame) added as the turn answered. The sentence
  * varies with what is unread and when; only the first line and the tail are the bridge's contract.
  */

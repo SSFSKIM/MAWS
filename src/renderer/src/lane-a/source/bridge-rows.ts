@@ -11,12 +11,12 @@
 // - a steer (doperpowers 7.180.0 on): its first line the steer's own, `[sminos steer from human]`, the owner's words
 //   after it (`STEER_LINE`, the bridge's, and the line `sminos steer` opens its inbox fallback with);
 // - a delivery: its first line a whole sminos frame (`conversation/delivery-frame.ts`, which draws it);
-// - the interrupt's marker: the engine's `[Request interrupted by user]` whole (doperpowers #225 on);
+// - the interrupt's marker: the engine's `[Request interrupted by user]` whole (doperpowers PR 225 on);
 // - the interrupt's note: `The interrupt came from the desk.` (or `… from outside the terminal.`), then only its lines
 //   for the Bash calls the interrupt stopped or could not stop;
 // - a stop's note, its whole text: `Task <id>, a background task, was stopped from the desk: it is not running.` (or
 //   `… from outside the terminal: …`);
-// - the interrupt's record before #225: `[Request interrupted by user from the desk]` (or `… from outside the
+// - the interrupt's record before PR 225: `[Request interrupted by user from the desk]` (or `… from outside the
 //   terminal]`), then only those same Bash lines;
 // - the `/secret` mod's record, appended by doperpowers 7.138 and 7.139 before the mod moved to the cua plugin: `The
 //   person stored a secret under <KEY>. You never see its value. …`;

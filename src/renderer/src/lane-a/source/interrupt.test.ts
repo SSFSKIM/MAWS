@@ -102,7 +102,7 @@ describe('an interrupted turn', () => {
     expect(dividers(rows)).toEqual(['stopped', 'working']);
   });
 
-  it('ends at the bridge’s two rows (doperpowers #225): the marker, then its note; neither draws a bubble', async () => {
+  it('ends at the bridge’s two rows (doperpowers PR 225): the marker, then its note; neither draws a bubble', async () => {
     for (const note of ['The interrupt came from the desk.', ['The interrupt came from outside the terminal.', STOPPED('bk3x9a1'), RUNNING('b_7-q')].join('\n')]) {
       const { rows, turns } = await rowsOf([prompt('Write a long essay'), ...answer('Once upon', 2), pendingCall(3), appended('[Request interrupted by user]', 5), appended(note, 5), backgroundedResult(6)]);
       expect(dividers(rows), note).toEqual(['stopped']);
@@ -113,8 +113,8 @@ describe('an interrupted turn', () => {
     }
   });
 
-  it('accepts a residual: a steer through a plugin older than #225 whose whole text is a marker ends the turn', async () => {
-    // The bridge's steers are the same meta rows as its interrupt records; #225's steer refuses these texts, an older
+  it('accepts a residual: a steer through a plugin older than PR 225 whose whole text is a marker ends the turn', async () => {
+    // The bridge's steers are the same meta rows as its interrupt records; PR 225's steer refuses these texts, an older
     // plugin's does not, so the human's words are read as the interrupt they spell (the composite's writer's ruling).
     for (const text of ['[Request interrupted by user]', '[Request interrupted by user from the desk]']) {
       const { rows } = await rowsOf([prompt('Write a long essay'), ...answer('Once upon', 2), appended(text, 5)]);

@@ -1,4 +1,4 @@
-// The bridge's wake (doperpowers #233). When a turn ends with a steer or a delivered row the session has not read, the
+// The bridge's wake (doperpowers PR 233). When a turn ends with a steer or a delivered row the session has not read, the
 // bridge sends a prompt of its own that points the session at it, its first line `[sminos bridge]`
 // (`conversation/delivery-frame.ts`, `isBridgeWake`): as the user, or, after an Esc (the engine then refuses a plugin's
 // prompt), through the session's inbox, kept as a peer message. MAWS's backfill draws the first as the owner's bubble
@@ -6,7 +6,7 @@
 // the turn (a plugin's line, the way the terminal draws one under the plugin's name, kept in view when the turn folds),
 // and the turn it opens as one the session continued on its own: its divider reads "Continued for …", as a task
 // notification's does. The held row stays verbatim. The rows it points at went in during the turn that ended or after
-// it (doperpowers #238: the owner's message after an Esc), so the line names neither; a row that went in after the turn
+// it (doperpowers PR 238: the owner's message after an Esc), so the line names neither; a row that went in after the turn
 // opens the wake's turn instead, the owner's words answered there (`appended-turn.ts`).
 import type { SessionEvent } from '@shared/graph/events';
 import type { JsonObject } from 'desk-hub/protocol';

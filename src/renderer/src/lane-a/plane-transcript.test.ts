@@ -576,7 +576,7 @@ describe('the main transcript through the session plane', () => {
 
   it('draws a delivery the bridge appended again after an Esc once: the copy drawn leaves as the one the engine read lands', async () => {
     // An Esc before the model answered left the first copy on a dead branch (the owner's prompt sent again went in under
-    // the same parent), and the bridge appended the delivery again (doperpowers #233), the same text.
+    // the same parent), and the bridge appended the delivery again (doperpowers PR 233), the same text.
     const last = recording.session.at(-1)!;
     const id = (n: number) => `e5c0e5c0-0000-4000-8000-${String(n).padStart(12, '0')}`;
     const at = (second: number) => `2027-01-01T00:00:${String(second).padStart(2, '0')}.000Z`;

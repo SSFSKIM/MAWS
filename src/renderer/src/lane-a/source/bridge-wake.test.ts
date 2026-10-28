@@ -1,4 +1,4 @@
-// The bridge's wake (doperpowers #233, `STEER_WAKE` and `DELIVERY_WAKE` in `hooks/mods/bridge.tsx`): a prompt of the
+// The bridge's wake (doperpowers PR 233, `STEER_WAKE` and `DELIVERY_WAKE` in `hooks/mods/bridge.tsx`): a prompt of the
 // bridge's own, first line `[sminos bridge]`, that points a session at a row its turn left unread. It reaches the
 // transcript as the bridge's prompt as the user, or, after an Esc, as the engine's peer message for the bridge's inbox
 // frame, idle or queued into a running turn. Each is drawn as the bridge's line in the turn, never as the owner's bubble

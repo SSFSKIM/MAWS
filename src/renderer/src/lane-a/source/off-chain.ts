@@ -14,7 +14,7 @@
 // "Before the session read it": no response was written under it, nor, for a row appended while a tool ran, under the
 // call's result (a row the model answered and a `/rewind` then undid was read, and goes with its turn). "Sent again": a
 // later owner input on the chain with the same words (an Esc's prompt sent again as it was, a delivery the bridge
-// appended again after an Esc, doperpowers #233), or, for a prompt typed at the terminal, a typed prompt sent in its
+// appended again after an Esc, doperpowers PR 233), or, for a prompt typed at the terminal, a typed prompt sent in its
 // place, edited or not: the next one from the same point of the conversation, with no response and no other owner input
 // in between. An Esc hands the prompt back to the input box, and most go back in edited (local transcripts, 2026-10-18:
 // of 975 prompts sent again from the same point, 159 as they were), so nothing was lost. A steer or a delivery is a

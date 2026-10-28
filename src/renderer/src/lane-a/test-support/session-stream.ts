@@ -12,7 +12,9 @@ import type { JsonObject, SessionBodies, SessionPresence, Streaming, StreamingBl
 
 export type Recording = { session: JsonObject[]; subagents: Array<SubagentMeta & { rows: JsonObject[] }> };
 
-export const RECORDING_DIR = join(import.meta.dirname, '../../../../../test/fixtures/lane-a');
+// `__dirname`, not `import.meta`: desk-web's browser suites load this module as CommonJS (it sits under the root
+// package, which declares no module type), and vitest gives both.
+export const RECORDING_DIR = join(__dirname, '../../../../../test/fixtures/lane-a');
 
 const jsonl = (path: string): JsonObject[] =>
   readFileSync(path, 'utf8')
