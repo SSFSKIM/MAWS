@@ -58,7 +58,7 @@ export interface StateWatchDeps {
   onChange(scope: string, kind: ChangeKind): void; // 'all' or a cwd
   watch?: WatchFn;
   poll?: PollFn;
-  appSettings?: string; // MAWS's own settings file, whose app MCP servers the engine is given (<userData>/settings.json)
+  appSettings?: string; // MAWS's own settings file whose app MCP servers the engine is given (P5 O3-A: <userData>/machine-settings.json)
 }
 
 // A project's folders whose `.mcp.json` the engine reads: the cwd and every ancestor down to but excluding the file system

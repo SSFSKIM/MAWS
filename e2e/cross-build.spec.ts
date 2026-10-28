@@ -175,6 +175,7 @@ const DROPPED = /dropped \S+ from .*, a field this build does not know|dropped e
 // the engine host's client and relays it to the app.
 type Shape = 'detached' | 'daemon';
 interface Shapes { keeper: Shape; attacher: Shape }
+const DAEMON_SHAPE_MINOR = 5; // P5 O2's wire minor: a build at or past it knows the daemon shape, and leaves it on purpose
 const EMBEDDED: Shapes = { keeper: 'detached', attacher: 'detached' };
 const onShape = (shape: Shape) => (st: HostStatus) => shape === 'detached' || st.daemon !== null; // the daemon shape's main also knows its mawsd
 
@@ -220,10 +221,20 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   if (attacherDaemon !== null) expect(s.daemonLog(), "mawsd's log: the upstream's welcome, at the supervisor's minor").toContain(welcome);
   said.push(`  hello: ${hello}…`, `  welcome: ${welcome}…`);
   if (keeperDaemon !== null) {
-    // the peer's app took the engine host from the keeper's `mawsd`, which stops reaching it and exits 0 (residue 38)
+    // How the keeper's `mawsd` goes depends on the attacher's build. One that knows the daemon shape (P5 O2, wire minor 5)
+    // leaves it on purpose: launched embedded on a profile with a `mawsd`, it ends that `mawsd` before its own hosts start
+    // (src/main/hosts/daemon.ts, prepareShape and leaveDaemonShape), and the kept engine host runs on. One from before
+    // O2 takes the engine host from the `mawsd`, which stops reaching it and exits 0 (residue 38).
+    const leaves = attacher.manifest.minor >= DAEMON_SHAPE_MINOR;
     await expect.poll(() => isAlive(keeperDaemon), { timeout: 15_000, message: 'the keeper’s mawsd exits once the engine host is taken' }).toBe(false);
-    expect(s.daemonLog(), 'mawsd says why it left').toContain('the engine-host was taken by another client; exiting');
-    said.push(`  mawsd pid ${keeperDaemon} exited: the engine host was taken by ${attacher.label}'s app`);
+    if (leaves) {
+      expect(second.output(), `${attacher.label}'s main ends the profile's mawsd as it leaves the daemon shape`).toContain(`[hosts] ending mawsd, pid ${keeperDaemon}, as the profile leaves the daemon shape`);
+      expect(s.daemonLog(), 'mawsd says why it left').toContain('exiting (signal)');
+      said.push(`  mawsd pid ${keeperDaemon} exited: ${attacher.label}'s app ended it, leaving the daemon shape`);
+    } else {
+      expect(s.daemonLog(), 'mawsd says why it left').toContain('the engine-host was taken by another client; exiting');
+      said.push(`  mawsd pid ${keeperDaemon} exited: the engine host was taken by ${attacher.label}'s app`);
+    }
   }
 
   // the tail: what the kept supervisor journaled while no app ran reaches this main, its live derivation included

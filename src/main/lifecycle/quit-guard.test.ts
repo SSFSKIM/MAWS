@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'; // E5: a window's webContents, as th
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
-import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults'; // P2-F L113
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults'; // P2-F L113
 import { humanTurn, record, status } from '../../../test/support/builders';
 import { clientOf } from '../ipc/clients'; // E5: the page's ClientRef, as the router hands it
 
@@ -1281,7 +1281,7 @@ describe('keeping sessions running at quit', () => {
       expect(hostModeFromEnv(env, shape)).toBe(mode);
       const hosts = { stopAllForQuit: vi.fn(async () => {}), facts: () => ({ transport: mode === 'utility' ? ('utility' as const) : ('detached' as const) }) };
       const ask = vi.fn(async (): Promise<'cancel'> => 'cancel');
-      guard(modelWith(midTurn(1)), { ask, ...engineQuitDeps(hosts, () => SETTINGS_DEFAULTS_V20) });
+      guard(modelWith(midTurn(1)), { ask, ...engineQuitDeps(hosts, () => SETTINGS_DEFAULTS_V21) });
       electron.app.attempt();
       await settle();
       const keep = (ask.mock.calls[0] as unknown[])[2] as Parameters<typeof quitQuestion>[3];

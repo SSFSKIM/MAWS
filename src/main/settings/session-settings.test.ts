@@ -11,7 +11,7 @@ import { sessionIdFor, summary } from '../../../test/support/index-fixture'; // 
 import { T0 } from '../../../test/support/builders'; // P4-A2
 import { userScopeProfile, type LaunchProfile } from '@shared/engine/launch-profile'; // P4-A2
 import { sessionSettingsOf } from './session-settings';
-import { openSettingsStore } from './store';
+import { openSettingsFiles } from '../../../test/support/settings-files'; // P5 O3-A: the two files
 
 vi.mock('electron', () => {
   throw new Error('the session settings must not load Electron');
@@ -23,7 +23,7 @@ describe('the session service reads the settings store', () => {
 
   async function setup() {
     const dir = mkdtempSync(join(tmpdir(), 'maws-c11-session-settings-'));
-    const store = openSettingsStore(join(dir, 'settings.json'));
+    const store = openSettingsFiles(dir);
     const h = await new SessionHarness({ settings: () => sessionSettingsOf(store.settings) }).start();
     cleanups.push(() => {
       h.dispose();
@@ -87,7 +87,7 @@ describe('the session service reads the settings store', () => {
   it('maps the six fields C10 reads and nothing else', () => { // W3: the auto fallback; P4-R8: the app MCP servers; P4-A2: the launch profile
     const dir = mkdtempSync(join(tmpdir(), 'maws-c11-session-settings-'));
     cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
-    const store = openSettingsStore(join(dir, 'settings.json'));
+    const store = openSettingsFiles(dir);
     expect(sessionSettingsOf(store.settings).engine.launchProfile).toEqual(userScopeProfile()); // P4-A2: the default
     const launchProfile: LaunchProfile = { plugins: { off: ['cua@cua'] }, hooks: 'none' };
     store.update({ gateway: { relayUnreachable: 'wait', offerDirect: false }, engine: { subagentModel: 'haiku', memoryBudgetMiB: 4096, mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }], launchProfile } });

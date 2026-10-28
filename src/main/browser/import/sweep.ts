@@ -15,8 +15,8 @@ import { join } from 'node:path';
 import type { ImportedProfile } from '@shared/browser/profiles';
 import { partitionDirName } from '@shared/browser/profiles';
 import { profilePartition } from '@shared/browser/tab';
-import type { BrowserBookmarksStore } from '../../index/browser-bookmarks';
-import type { BrowserHistoryStore } from '../../index/browser-history';
+import type { BrowserBookmarksStore } from '../data/bookmarks';
+import type { BrowserHistoryStore } from '../data/history';
 import { importLog } from './log';
 
 const PREFIX = 'maws-chrome-';

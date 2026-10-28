@@ -499,7 +499,7 @@ describe('registration', () => {
     await session.loaded;
     const code = await pairing();
     session.register(code.text);
-    await until(() => hub.pending.length === 1, 'the entry posted');
+    await until(() => hub.pending.length === 1 && session.status().state === 'registering' && (session.status() as { step: string }).step === 'approval', 'the wait for approval');
     session.cancel();
     expect(session.status()).toEqual({ state: 'none' });
     await hub.approve(code.k);
@@ -507,6 +507,64 @@ describe('registration', () => {
     expect(session.status()).toEqual({ state: 'none' });
     expect(session.current()).toBeNull();
     expect(await dirExists(orgDir())).toBe(false);
+  });
+
+  it('logs an attempt\'s end at quit at once, even with its work still held', async () => {
+    const login = testLogin();
+    const { session, logs } = make({ login });
+    await session.loaded;
+    login.hold();
+    session.register((await pairing()).text);
+    await until(() => login.mock.calls.length === 1, 'the login');
+    await session.close();
+    expect(logs.filter((line) => /^\[org\] attempt \d+/.test(line)).map((line) => line.slice(6))).toEqual([
+      `attempt 1: register (org ${ORG}), pid ${process.pid}`,
+      'attempt 1: ended by quit',
+    ]);
+  });
+
+  it('logs each attempt\'s start and its end, a cancel included, so two browser trips in a log always show why', async () => {
+    const { session, logs } = make();
+    await session.loaded;
+    const code = await pairing();
+    // The entry reaches the hub before the session moves to its approval step (the fingerprint is computed between
+    // them), so each cancel waits for the step itself, not the hub's count.
+    const awaiting = () => session.status().state === 'registering' && (session.status() as { step: string }).step === 'approval';
+    session.register(code.text);
+    await until(() => hub.pending.length === 1 && awaiting(), 'the entry posted');
+    session.cancel();
+    session.register(code.text);
+    await until(() => hub.pending.length === 2 && awaiting(), 'the second entry posted');
+    session.cancel();
+    const attempts = logs.filter((line) => /^\[org\] attempt \d+/.test(line)).map((line) => line.slice(6));
+    expect(attempts).toEqual([
+      `attempt 1: register (org ${ORG}), pid ${process.pid}`,
+      'attempt 1: cancelled at approval',
+      `attempt 2: register (org ${ORG}), pid ${process.pid}`,
+      'attempt 2: cancelled at approval',
+    ]);
+  });
+
+  it('logs an attempt that completes and one that is refused', async () => {
+    const { session, logs } = make();
+    await session.loaded;
+    const bad = await pairing();
+    hub.pendingAnswer = () => worker(409, { error: 'too-many' });
+    session.register(bad.text);
+    await until(() => logs.includes('[org] attempt 1: refused hub'), 'refused');
+    hub.pendingAnswer = undefined;
+    const before = hub.pending.length;
+    const code = await pairing();
+    session.register(code.text);
+    await until(() => hub.pending.length === before + 1 && session.status().state === 'registering' && (session.status() as { step: string }).step === 'approval', 'the entry posted');
+    await hub.approve(code.k);
+    await until(() => isSignedIn(session), 'signed in');
+    expect(logs.filter((line) => /^\[org\] attempt \d+/.test(line)).map((line) => line.slice(6))).toEqual([
+      `attempt 1: register (org ${ORG}), pid ${process.pid}`,
+      'attempt 1: refused hub',
+      `attempt 2: register (org ${ORG}), pid ${process.pid}`,
+      'attempt 2: done',
+    ]);
   });
 
   it('cancel in the browser aborts the login', async () => {

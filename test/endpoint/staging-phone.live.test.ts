@@ -14,7 +14,7 @@ describe.skipIf(gate !== '1' && gate !== 'cleanup')('the staging phone run', () 
   it(
     gate === 'cleanup' ? 'undoes what the run left' : 'runs acceptance 1-3 and 5 on staging',
     async () => {
-      const { readRun } = await import('./staging/run');
+      const { readRun, stopLine } = await import('./staging/run');
       const run = readRun(process.env);
       if (run.mode === 'cleanup') {
         const { Cleanup } = await import('../../apps/desk-hub/deploy/proof');
@@ -36,7 +36,7 @@ describe.skipIf(gate !== '1' && gate !== 'cleanup')('the staging phone run', () 
         world = await startStagingWorld(run, write);
         await runItems(world, report, write);
       } catch (error) {
-        stopped = error instanceof Error ? error.message : String(error);
+        stopped = stopLine(error);
         write(`the run stopped: ${stopped}`);
       } finally {
         const failed = world === null ? [] : await world.cleanup.run();

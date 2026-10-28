@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import type { BrowserTab } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
-import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { record } from '../../../../../../test/support/builders';
 import { at } from '../../../../../../test/support/machine';
 import { useFloatingCard } from '../../../shell/floating';
@@ -32,7 +32,7 @@ import { Chrome, type ChromeProps } from './Chrome';
 const MAIN_A = 'app-a' as AppSessionId;
 const A = at(MAIN_A);
 const B = at('app-b' as AppSessionId);
-const SEARCH = SETTINGS_DEFAULTS_V20.browser.searchUrl;
+const SEARCH = SETTINGS_DEFAULTS_V21.browser.searchUrl;
 
 let main: ReturnType<typeof installFakeMain>;
 let disconnect: () => void;

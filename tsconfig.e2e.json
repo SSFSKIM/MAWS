@@ -67,6 +67,8 @@
     "src/engine-host/transport.ts",
     "src/main/git/runner.ts",
     "src/main/index/migrations.ts",
+    "src/main/index/browser-staging.ts", // P5 O3-A: migration 14's staging step, which migrations.ts imports
+    "src/main/index/db.ts",
     "src/renderer/src/app/date-format.ts",
     "src/renderer/src/composer/dev/resume-spec.ts",
     "src/renderer/src/harness/agents/api.ts",

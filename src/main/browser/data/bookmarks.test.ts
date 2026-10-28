@@ -1,14 +1,12 @@
-// An imported profile's bookmarks in the index (cua board #90's spec, "Storage"; migration 7): one row per node, keyed per
-// partition, replaced whole at every sync, read back as the tree, matched for the address field, removed per partition
-// and by the boot sweep; a read-only index lists nothing and takes nothing.
-import { copyFileSync } from 'node:fs';
-import { join } from 'node:path';
+// An imported profile's bookmarks (cua board #90's spec, "Storage"; index migration 7, the browser's own database since
+// P5 O3-A): one row per node, keyed per partition, replaced whole at every sync, read back as the tree, matched for the
+// address field, removed per partition and by the boot sweep; browser data not in use lists nothing and takes nothing.
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { emptyBookmarkTree, type BookmarkFolder, type BookmarkNode, type BookmarkTree } from '@shared/browser/bookmarks';
-import { tempDir } from '../../../test/support/index-fixture';
-import { Index } from './index';
-import { MIGRATIONS } from './migrations';
+import { browserDataFile, browserDataIn, waitingBrowserDataIn } from '../../../../test/support/browser-data';
+import { tempDir } from '../../../../test/support/index-fixture';
+import type { BrowserData } from './index';
 
 const P = 'persist:maws-chrome-Default';
 const W = 'persist:maws-chrome-Profile 1';
@@ -43,7 +41,7 @@ const ids = (t: BookmarkTree): number[] => {
 describe('BrowserBookmarksStore', () => {
   let dir: ReturnType<typeof tempDir>;
   let path: string;
-  let index: Index;
+  let data: BrowserData;
   const raw = <T,>(sql: string, ...params: (string | number)[]): T[] => {
     const db = new DatabaseSync(path, { readOnly: true });
     try {
@@ -56,46 +54,45 @@ describe('BrowserBookmarksStore', () => {
 
   beforeEach(() => {
     dir = tempDir();
-    path = join(dir.path, 'index.sqlite');
-    index = new Index(path);
+    path = browserDataFile(dir.path);
+    data = browserDataIn(dir.path);
   });
   afterEach(() => {
-    index.close();
+    data.close();
     dir.dispose();
   });
 
-  it('migration 7 creates the table with its two checks and the tree and url indexes', () => {
-    expect(index.applied).toContain(7);
+  it('the table has its two checks and the tree and url indexes (index migration 7’s)', () => {
     const columns = raw<{ name: string; type: string; notnull: number; pk: number }>('PRAGMA table_info(browser_bookmarks)').map((c) => [c.name, c.type, c.notnull, c.pk]);
     expect(columns).toEqual([
       ['id', 'INTEGER', 0, 1], ['partition', 'TEXT', 1, 0], ['parent_id', 'INTEGER', 0, 0], ['root', 'TEXT', 1, 0], ['position', 'INTEGER', 1, 0],
       ['kind', 'TEXT', 1, 0], ['name', 'TEXT', 1, 0], ['url', 'TEXT', 0, 0], ['added_at_ms', 'INTEGER', 0, 0],
     ]);
     expect(raw<{ name: string }>('PRAGMA index_list(browser_bookmarks)').map((i) => i.name).sort()).toEqual(['browser_bookmarks_tree', 'browser_bookmarks_url']);
-    index.close();
+    data.close();
     const db = new DatabaseSync(path);
     expect(() => db.prepare("INSERT INTO browser_bookmarks (partition, root, position, kind, name) VALUES ('p', 'toolbar', 0, 'folder', 'x')").run()).toThrow(/CHECK/);
     expect(() => db.prepare("INSERT INTO browser_bookmarks (partition, root, position, kind, name) VALUES ('p', 'bar', 0, 'separator', 'x')").run()).toThrow(/CHECK/);
     db.close();
-    index = new Index(path);
+    data = browserDataIn(dir.path);
   });
 
   it('answers empty roots for a partition with no rows', () => {
-    expect(index.browserBookmarks.tree(P)).toEqual(emptyBookmarkTree());
+    expect(data.bookmarks.tree(P)).toEqual(emptyBookmarkTree());
   });
 
   it('replaces a partition’s rows and answers the tree in Chrome’s order, folders nested, dates kept', () => {
-    index.browserBookmarks.replace(P, SAMPLE);
-    const read = index.browserBookmarks.tree(P);
+    data.bookmarks.replace(P, SAMPLE);
+    const read = data.bookmarks.tree(P);
     expect(shapes(read)).toEqual(shapes(SAMPLE));
     expect(rowsOf(P)).toBe(3 + 2 + 6); // the three roots, two folders and six URLs: every node a row
   });
 
   it('is idempotent: the same tree twice leaves the same rows and the same tree, with ids reassigned', () => {
-    index.browserBookmarks.replace(P, SAMPLE);
-    const first = index.browserBookmarks.tree(P);
-    index.browserBookmarks.replace(P, SAMPLE);
-    const second = index.browserBookmarks.tree(P);
+    data.bookmarks.replace(P, SAMPLE);
+    const first = data.bookmarks.tree(P);
+    data.bookmarks.replace(P, SAMPLE);
+    const second = data.bookmarks.tree(P);
     expect(shapes(second)).toEqual(shapes(first));
     expect(rowsOf(P)).toBe(11);
     expect(new Set(ids(second)).size).toBe(ids(second).length);
@@ -104,68 +101,64 @@ describe('BrowserBookmarksStore', () => {
   });
 
   it('keeps partitions apart: replacing or removing one leaves the other', () => {
-    index.browserBookmarks.replace(P, SAMPLE);
-    index.browserBookmarks.replace(W, tree([u('W1', 'https://w1.example/')]));
-    expect(shapeOf(index.browserBookmarks.tree(W).bar)).toEqual(['Bookmarks bar', ['W1 https://w1.example/ 1700000000000']]);
-    index.browserBookmarks.replace(P, tree([u('A2', 'https://a.example/')]));
-    expect(shapeOf(index.browserBookmarks.tree(W).bar)).toEqual(['Bookmarks bar', ['W1 https://w1.example/ 1700000000000']]);
-    index.browserBookmarks.removePartition(P);
+    data.bookmarks.replace(P, SAMPLE);
+    data.bookmarks.replace(W, tree([u('W1', 'https://w1.example/')]));
+    expect(shapeOf(data.bookmarks.tree(W).bar)).toEqual(['Bookmarks bar', ['W1 https://w1.example/ 1700000000000']]);
+    data.bookmarks.replace(P, tree([u('A2', 'https://a.example/')]));
+    expect(shapeOf(data.bookmarks.tree(W).bar)).toEqual(['Bookmarks bar', ['W1 https://w1.example/ 1700000000000']]);
+    data.bookmarks.removePartition(P);
     expect(rowsOf(P)).toBe(0);
-    expect(index.browserBookmarks.tree(P)).toEqual(emptyBookmarkTree());
+    expect(data.bookmarks.tree(P)).toEqual(emptyBookmarkTree());
     expect(rowsOf(W)).toBe(4);
   });
 
   it('replaces in one transaction: a tree that fails part-way leaves the previous rows', () => {
-    index.browserBookmarks.replace(P, SAMPLE);
+    data.bookmarks.replace(P, SAMPLE);
     const broken = tree([u('ok', 'https://ok.example/'), { kind: 'url', id: 1, name: null as unknown as string, url: 'https://bad.example/', addedAt: null }]); // name's NOT NULL fails
-    expect(() => index.browserBookmarks.replace(P, broken)).toThrow();
-    expect(shapes(index.browserBookmarks.tree(P))).toEqual(shapes(SAMPLE));
+    expect(() => data.bookmarks.replace(P, broken)).toThrow();
+    expect(shapes(data.bookmarks.tree(P))).toEqual(shapes(SAMPLE));
   });
 
   it('suggests URL bookmarks whose name or URL holds the query, in document order, each URL once', () => {
-    index.browserBookmarks.replace(P, tree([u('Alpha', 'https://alpha.example/'), f('F', [u('Fun', 'https://fun.example/'), u('Alpha again', 'https://alpha.example/')])], [u('fan', 'https://x.example/f')]));
-    index.browserBookmarks.replace(W, tree([u('Fun', 'https://fun.example/')]));
-    expect(index.browserBookmarks.suggest(P, 'f', 8)).toEqual([
+    data.bookmarks.replace(P, tree([u('Alpha', 'https://alpha.example/'), f('F', [u('Fun', 'https://fun.example/'), u('Alpha again', 'https://alpha.example/')])], [u('fan', 'https://x.example/f')]));
+    data.bookmarks.replace(W, tree([u('Fun', 'https://fun.example/')]));
+    expect(data.bookmarks.suggest(P, 'f', 8)).toEqual([
       { url: 'https://fun.example/', title: 'Fun' },
       { url: 'https://x.example/f', title: 'fan' },
     ]);
-    expect(index.browserBookmarks.suggest(P, 'ALPHA', 8)).toEqual([{ url: 'https://alpha.example/', title: 'Alpha' }]);
-    expect(index.browserBookmarks.suggest(P, 'example', 2)).toHaveLength(2);
-    expect(index.browserBookmarks.suggest(P, '%', 8)).toEqual([]); // LIKE's wildcards are text
-    expect(index.browserBookmarks.suggest(P, '', 8)).toEqual([]); // an empty field suggests history only
+    expect(data.bookmarks.suggest(P, 'ALPHA', 8)).toEqual([{ url: 'https://alpha.example/', title: 'Alpha' }]);
+    expect(data.bookmarks.suggest(P, 'example', 2)).toHaveLength(2);
+    expect(data.bookmarks.suggest(P, '%', 8)).toEqual([]); // LIKE's wildcards are text
+    expect(data.bookmarks.suggest(P, '', 8)).toEqual([]); // an empty field suggests history only
   });
 
   // cua #90 M1b: Chrome's omnibox ranks a title match over a URL match; a URL's random path must not crowd out the
   // bookmark whose name the person typed (the field shows at most 3)
   it('ranks a name that starts with the query, then a name that holds it, then a URL that holds it, each in document order', () => {
-    index.browserBookmarks.replace(P, tree([u('A', 'https://a.example/x-f1'), u('B', 'https://b.example/'), u('Of1', 'https://c.example/'), u('F1', 'https://d.example/'), u('f1 again', 'https://e.example/')]));
-    expect(index.browserBookmarks.suggest(P, 'f1', 3).map(({ title }) => title)).toEqual(['F1', 'f1 again', 'Of1']);
-    expect(index.browserBookmarks.suggest(P, 'f1', 8).map(({ title }) => title)).toEqual(['F1', 'f1 again', 'Of1', 'A']);
+    data.bookmarks.replace(P, tree([u('A', 'https://a.example/x-f1'), u('B', 'https://b.example/'), u('Of1', 'https://c.example/'), u('F1', 'https://d.example/'), u('f1 again', 'https://e.example/')]));
+    expect(data.bookmarks.suggest(P, 'f1', 3).map(({ title }) => title)).toEqual(['F1', 'f1 again', 'Of1']);
+    expect(data.bookmarks.suggest(P, 'f1', 8).map(({ title }) => title)).toEqual(['F1', 'f1 again', 'Of1', 'A']);
   });
 
   it('the boot sweep removes every partition it is not given', () => {
-    index.browserBookmarks.replace(P, SAMPLE);
-    index.browserBookmarks.replace(W, tree([u('W1', 'https://w1.example/')]));
-    expect(index.browserBookmarks.removeExcept([W])).toBe(11);
+    data.bookmarks.replace(P, SAMPLE);
+    data.bookmarks.replace(W, tree([u('W1', 'https://w1.example/')]));
+    expect(data.bookmarks.removeExcept([W])).toBe(11);
     expect(rowsOf(P)).toBe(0);
     expect(rowsOf(W)).toBe(4);
-    expect(index.browserBookmarks.removeExcept([])).toBe(4);
+    expect(data.bookmarks.removeExcept([])).toBe(4);
   });
 
-  it('a read-only index (a newer app’s) lists nothing, suggests nothing, removes nothing and refuses a replace as indexUnavailable', () => {
-    index.browserBookmarks.replace(P, SAMPLE);
-    index.close();
-    const newer = join(dir.path, 'newer.sqlite');
-    copyFileSync(path, newer);
-    const db = new DatabaseSync(newer);
-    db.exec(`PRAGMA user_version = ${MIGRATIONS.length + 1}`);
-    db.close();
-    index = new Index(newer);
-    expect(index.readOnly).toBe(true);
-    expect(index.browserBookmarks.tree(P)).toEqual(emptyBookmarkTree());
-    expect(index.browserBookmarks.suggest(P, 'a', 8)).toEqual([]);
-    expect(() => index.browserBookmarks.removePartition(P)).not.toThrow();
-    expect(index.browserBookmarks.removeExcept([])).toBe(0);
-    expect(() => index.browserBookmarks.replace(P, SAMPLE)).toThrow(expect.objectContaining({ code: 'indexUnavailable' }));
+  // P5 O3-A: rows the file already holds are not read while the browser waits on the index (the O3 document §4)
+  it('waiting on the index, it lists nothing, suggests nothing, removes nothing and refuses a replace as indexUnavailable', () => {
+    data.bookmarks.replace(P, SAMPLE);
+    data.close();
+    data = waitingBrowserDataIn(dir.path);
+    expect(data.bookmarks.readOnly).toBe(true);
+    expect(data.bookmarks.tree(P)).toEqual(emptyBookmarkTree());
+    expect(data.bookmarks.suggest(P, 'a', 8)).toEqual([]);
+    expect(() => data.bookmarks.removePartition(P)).not.toThrow();
+    expect(data.bookmarks.removeExcept([])).toBe(0);
+    expect(() => data.bookmarks.replace(P, SAMPLE)).toThrow(expect.objectContaining({ code: 'indexUnavailable' }));
   });
 });

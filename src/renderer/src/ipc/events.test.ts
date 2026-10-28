@@ -5,7 +5,7 @@ import { EMPTY_TAB_SET, NO_PROJECT } from '@shared/ipc/schema/layout';
 import type { MachineState } from '@shared/ipc/schema/machines';
 import { addressOf } from '@shared/machine/address';
 import type { OrgKey } from '@shared/machine/org-key';
-import { digest, item, project, record, status } from '../../../../test/support/builders';
+import { digest, item, project, record, remoteRow, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { preloadOf } from '../test-support/preload-of';
@@ -60,7 +60,7 @@ describe('shell event subscription', () => {
     const subscriptions = fake.calls.slice(0, firstInvoke);
     expect(subscriptions.sort()).toEqual(
       [
-        'attention.changed', 'attention.notified', 'engine.hostState', 'fs.scanProgress', 'machines.changed', 'session.changed', 'session.digest', 'session.projects.changed', 'session.removed', 'session.status',
+        'attention.changed', 'attention.notified', 'engine.hostState', 'fs.scanProgress', 'machines.changed', 'org.rows.changed', 'session.changed', 'session.digest', 'session.projects.changed', 'session.removed', 'session.status',
       ].map((n) => `on ${n}`),
     );
     expect(fake.calls.slice(firstInvoke).filter((c) => c.startsWith('on'))).toEqual([]);
@@ -600,5 +600,86 @@ describe('the shell per machine', () => {
     await answerSnapshots(answered.fake);
     await vi.waitFor(() => expect(answered.stores.layout.getState().hydrated).toBe(true));
     expect(tabIds(answered.stores)).toEqual([`session:${A}`]);
+  });
+});
+
+// P5 O8 M2 (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, "The snapshot rule"): the org's rows fill the listed
+// partition; a machine they name takes no record snapshot, and loads only once they are complete without it pending.
+describe('the org rows', () => {
+  const onB = (id: string) => addressOf(OTHER_MACHINE, id as AppSessionId);
+  const sessionTabs = (...ids: string[]) => ({
+    version: 3,
+    current: NO_PROJECT,
+    sets: { [NO_PROJECT]: { panes: [{ tabs: ids.map((id) => ({ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false })), activeTabId: `session:${ids[0]}` }], focusedPane: 0, splitRatio: 0.5 } },
+    closedTabs: [],
+  });
+  const rowsOf = (over: { complete?: boolean; pending?: string[]; sessions?: string[] } = {}) => ({
+    machines: [OTHER_MACHINE],
+    rows: (over.sessions ?? ['b1']).map((id) => remoteRow(OTHER_MACHINE, id, { title: `Studio ${id}` })),
+    complete: over.complete ?? true,
+    pending: over.pending ?? [],
+  });
+  const SNAPSHOT_READS = ['session.list', 'session.projects.list', 'session.digests', 'attention.list', 'engine.sessions'] as const;
+
+  it('applies org.rows to the listed partition by address, and each org.rows.changed whole', async () => {
+    const { fake, stores } = setup();
+    expect(fake.invoked('org.rows')).toHaveLength(1);
+    await fake.reply('org.rows', rowsOf({ sessions: ['b1', 'b2'] }));
+    expect([...stores.sessions.getState().listed.keys()]).toEqual([onB('b1'), onB('b2')]);
+    expect(stores.sessions.getState().listed.get(onB('b1'))).toMatchObject({ appId: onB('b1'), machine: OTHER_MACHINE, session: 'b1', title: 'Studio b1' });
+    expect([...stores.sessions.getState().listedMachines]).toEqual([OTHER_MACHINE]);
+    fake.event('org.rows.changed', rowsOf({ sessions: ['b3'] }));
+    expect([...stores.sessions.getState().listed.keys()]).toEqual([onB('b3')]);
+  });
+
+  it('applies no org.rows answer older than an org.rows.changed', async () => {
+    const { fake, stores } = setup();
+    fake.event('org.rows.changed', rowsOf({ sessions: ['newer'] }));
+    await fake.reply('org.rows', rowsOf({ sessions: ['older'] }));
+    expect([...stores.sessions.getState().listed.keys()]).toEqual([onB('newer')]);
+  });
+
+  it('a machine the rows name takes none of the five snapshot reads when its link comes up, nor a table read when its host regains ready', async () => {
+    const { fake, stores } = setup(0, { machines: [LOCAL_ENTRY, other('connecting', 0)] });
+    await answerSnapshots(fake);
+    await fake.reply('org.rows', rowsOf({ complete: false }));
+    fake.event('machines.changed', { machines: [LOCAL_ENTRY, other('up', 1)] });
+    fake.event('engine.hostState', { state: 'ready' }, OTHER_MACHINE);
+    for (const name of SNAPSHOT_READS) expect(fake.machines(name), name).toEqual([TEST_MACHINE]);
+    expect(stores.machines.getState().loaded.has(OTHER_MACHINE)).toBe(false);
+  });
+
+  it('a machine the rows do not name yet is read as before', async () => {
+    const { fake } = setup(0, { machines: [LOCAL_ENTRY, other('up', 1)] });
+    await answerSnapshots(fake);
+    for (const name of SNAPSHOT_READS) expect(fake.machines(name), name).toEqual([TEST_MACHINE, OTHER_MACHINE]);
+  });
+
+  it('keeps the named machine’s restored tabs while the rows are incomplete or it is pending, and loads it only at complete rows without it pending, keeping a listed tab', async () => {
+    const { fake, stores } = setup(0, { machines: [LOCAL_ENTRY, other('connecting', 0)], tabs: sessionTabs(A, onB('b1'), onB('b9')) });
+    const every = [`session:${A}`, `session:${onB('b1')}`, `session:${onB('b9')}`].sort();
+    await fake.reply('org.rows', rowsOf({ complete: false, sessions: [] })); // the cache alone, before the hub's snapshot
+    await answerSnapshots(fake);
+    await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
+    fake.event('machines.changed', { machines: [LOCAL_ENTRY, other('up', 1)] });
+    expect(tabIds(stores).sort()).toEqual(every);
+    fake.event('org.rows.changed', rowsOf({ complete: false })); // a multi-page snapshot still arriving
+    expect(tabIds(stores).sort()).toEqual(every);
+    expect(stores.machines.getState().loaded.has(OTHER_MACHINE)).toBe(false);
+    fake.event('org.rows.changed', rowsOf({ pending: [OTHER_MACHINE] })); // the last page in before a delayed key rotation
+    expect(tabIds(stores).sort()).toEqual(every);
+    expect(stores.machines.getState().loaded.has(OTHER_MACHINE)).toBe(false);
+    fake.event('org.rows.changed', rowsOf());
+    expect(stores.machines.getState().loaded.has(OTHER_MACHINE)).toBe(true);
+    expect(tabIds(stores).sort()).toEqual([`session:${A}`, `session:${onB('b1')}`].sort()); // b1 listed, b9 known to nobody
+  });
+
+  it('hydrates against the rows: a listed tab of a machine already loaded is kept, an unknown one dropped', async () => {
+    const { fake, stores } = setup(0, { machines: [LOCAL_ENTRY, other('up', 1)], tabs: sessionTabs(A, onB('b1'), onB('b9')) });
+    await fake.reply('org.rows', rowsOf());
+    expect(stores.machines.getState().loaded.has(OTHER_MACHINE)).toBe(true);
+    await answerSnapshots(fake);
+    await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
+    expect(tabIds(stores).sort()).toEqual([`session:${A}`, `session:${onB('b1')}`].sort());
   });
 });

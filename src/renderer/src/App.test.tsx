@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HostState, PreloadBridge, SettingsState } from '@shared/ipc/schema';
 import { TEST_MACHINE } from '../../../test/support/machine';
-import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { SUPERVISOR_NOTICES } from './app/copy';
 import { updatedStatus } from './test-support/host-status';
 
@@ -46,7 +46,7 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
     send('pty.data', { ptyId: 'p1', offset: line.byteLength, data: new TextEncoder().encode('MAWS_ECHO_OK\r\n$ ') });
     markEchoed();
   };
-  const state = () => ({ settings: { ...SETTINGS_DEFAULTS_V20, theme }, resolvedTheme: theme === 'dark' ? 'dark' : 'light' });
+  const state = () => ({ settings: { ...SETTINGS_DEFAULTS_V21, theme }, resolvedTheme: theme === 'dark' ? 'dark' : 'light' });
   const answer = (name: string, input: { theme: typeof theme; data: string }) => {
     switch (name) {
       case 'settings.set':
@@ -75,6 +75,8 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
         };
       case 'machines.list': // P5 O6 M4: the roster the shell reads at connect: this machine only
         return { machines: [{ ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-10-27T10:00:00.000Z', generation: 0 }] };
+      case 'org.rows': // P5 O8 M2: the org's rows at connect: no other machine, nothing listed
+        return { machines: [], rows: [], complete: true, pending: [] };
       case 'session.list':
         return { sessions: [], revision: 1 };
       case 'session.projects.list':

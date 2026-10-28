@@ -12,7 +12,7 @@ import { HostResponseSchema, type HostResponse } from '@shared/ipc/host-protocol
 import { WIRE_MINOR } from '@shared/ipc/wire';
 import { validateCommandOutput } from '@shared/ipc/validate';
 import { SOCKET_PROTOCOL, splitLines } from '@shared/host/socket-protocol';
-import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { probeLayout, readLog, startHttpFixture } from './connector-direct-probe';
 import { shellQuoted } from './connector-direct-checks';
 import { invoke, value } from './connector-scene';
@@ -97,7 +97,8 @@ export async function coldHttpDelivery(info: TestInfo): Promise<void> {
         writeFileSync(join(claudeConfigDir, '.claude.json'), JSON.stringify({ mcpServers: {} }));
         writeFileSync(join(layout.config, '.claude.json'), JSON.stringify({ mcpServers: { 'cold-user': { type: 'http', url: user.url } } }));
         appendFileSync(join(shellHome, '.zprofile'), `export CLAUDE_CONFIG_DIR=${shellQuoted(layout.config)}\n`);
-        writeFileSync(join(userData, 'settings.json'), JSON.stringify({ ...SETTINGS_DEFAULTS_V20, engine: { ...SETTINGS_DEFAULTS_V20.engine, mcpServers: [{ name: 'cold-app', type: 'http', url: app.url }] } }));
+        // P5 O3-A: an O2-era unified file, which the launch splits; the app scope's identity keeps naming settings.json
+        writeFileSync(join(userData, 'settings.json'), JSON.stringify({ ...SETTINGS_DEFAULTS_V21, version: 20, engine: { ...SETTINGS_DEFAULTS_V21.engine, mcpServers: [{ name: 'cold-app', type: 'http', url: app.url }] } }));
       },
     });
     child = maws.app.process();

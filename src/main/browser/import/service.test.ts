@@ -2,7 +2,8 @@
 // Chrome profile, the run's phase order, the counts and the report's shape (parsed with the M1 schema), the partitioned
 // row through the import view's debugger only and verified, the unverified count, a wrong key, the Keychain outcomes,
 // cancel and failure rolling back whole with no record, the staging deleted on every exit, and the refusals at start.
-// The Electron session, the import view, the Keychain and the extensions phase are fakes; the index is a real one.
+// The Electron session, the import view, the Keychain and the extensions phase are fakes; the browser's data (its own
+// database since P5 O3-A) is a real one.
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,7 +14,8 @@ import type { ImportedExtension, ImportPhase, ImportReport } from '@shared/brows
 import { ImportReportSchema } from '@shared/browser/import';
 import { summaryWords } from '@shared/browser/import-summary';
 import { buildChromeUserData, type ChromeUserData } from '../../../../test/support/chrome-profile';
-import { Index } from '../../index/index';
+import { browserDataIn } from '../../../../test/support/browser-data';
+import type { BrowserData } from '../data';
 import type { AvatarImage } from './avatar';
 import { readChromeBookmarks } from './chrome/bookmarks';
 import { deriveKey } from './chrome/crypto';
@@ -119,7 +121,7 @@ const untilCancelled = (signal: AbortSignal) =>
 
 describe('BrowserImportService', () => {
   let userData: string;
-  let index: Index;
+  let data: BrowserData;
   let profiles: ImportedProfiles;
   let emitted: Emitted[];
   let session: ReturnType<typeof fakeSession>;
@@ -140,8 +142,8 @@ describe('BrowserImportService', () => {
       userData,
       env: {},
       partitions: { session: vi.fn(() => session.session) },
-      history: index.browserHistory,
-      bookmarks: index.browserBookmarks, // cua #90
+      history: data.history,
+      bookmarks: data.bookmarks, // cua #90
       profiles,
       emit: (name, payload) => {
         const event = { name, payload } as Emitted;
@@ -167,11 +169,11 @@ describe('BrowserImportService', () => {
 
   const phases = () => [...new Set(emitted.filter((e) => e.name === 'browser.import.progress').map((e) => e.payload.phase))];
   const stagingLeft = () => (existsSync(join(userData, 'browser', 'import')) ? readdirSync(join(userData, 'browser', 'import')) : []);
-  const historyOf = (partition = PARTITION) => index.browserHistory.suggest(partition, '', 100);
+  const historyOf = (partition = PARTITION) => data.history.suggest(partition, '', 100);
 
   beforeEach(() => {
     userData = mkdtempSync(join(root, 'userData-'));
-    index = new Index(join(userData, 'index.sqlite'));
+    data = browserDataIn(userData);
     profiles = ImportedProfiles.open(userData);
     emitted = [];
     onEmit = () => {};
@@ -185,7 +187,7 @@ describe('BrowserImportService', () => {
   });
   afterEach(() => {
     vi.restoreAllMocks();
-    index.close();
+    data.close();
   });
 
   describe('inspect', () => {
@@ -308,7 +310,7 @@ describe('BrowserImportService', () => {
     onEmit = (event) => {
       if (event.payload.phase === 'keychain' && event.payload.done === 0) svc.cancel(svc.running()!.importId);
     };
-    const removePartition = vi.spyOn(index.browserHistory, 'removePartition');
+    const removePartition = vi.spyOn(data.history, 'removePartition');
     const { report } = await importAll(svc);
 
     expect(report.outcome).toBe('cancelled');
@@ -477,7 +479,7 @@ describe('BrowserImportService', () => {
     db.exec('COMMIT');
     db.close();
     let clock = 0;
-    const importRows = vi.spyOn(index.browserHistory, 'importRows');
+    const importRows = vi.spyOn(data.history, 'importRows');
     const svc = service({ now: () => (clock += 1000) }); // every progress event passes the throttle
     onEmit = (event) => {
       if (event.payload.phase === 'history' && event.payload.done === 500) svc.cancel(svc.running()!.importId);
@@ -494,7 +496,7 @@ describe('BrowserImportService', () => {
 
   // cua #90 start: the fourth category
   describe('bookmarks', () => {
-    const barNames = () => index.browserBookmarks.tree(PARTITION).bar.children.map((node) => node.name);
+    const barNames = () => data.bookmarks.tree(PARTITION).bar.children.map((node) => node.name);
 
     it('the inspection counts the URL bookmarks the import would keep, and answers null for a profile with no file', async () => {
       const svc = service();
@@ -506,7 +508,7 @@ describe('BrowserImportService', () => {
       const { report } = await importAll(service());
       expect(report.bookmarks).toEqual({ imported: 46, skipped: 1, error: null });
       expect(barNames().slice(0, 4)).toEqual(['A', 'B', 'F', 'N01']);
-      expect(index.browserBookmarks.tree(PARTITION).other.children.map((node) => node.name)).toEqual(['O1']);
+      expect(data.bookmarks.tree(PARTITION).other.children.map((node) => node.name)).toEqual(['O1']);
       const record = profiles.get('Default')!;
       expect(record.bookmarks).toEqual({ consentedAt: report.startedAt, syncedAt: expect.any(String), count: 46, error: null, errorAt: null });
       expect(record).toMatchObject({ gaiaName: 'Probe Owner', userName: 'probe@example.test', avatar: { kind: 'initials' } });
@@ -554,7 +556,7 @@ describe('BrowserImportService', () => {
       const { report } = await importAll(svc, { extensionIds: [fixture.extensions.probe.id] });
       expect(report).toMatchObject({ outcome: 'cancelled', bookmarks: { imported: 46 } });
       expect(barNames()).toEqual([]);
-      expect(index.browserBookmarks.tree(PARTITION).other.children).toEqual([]);
+      expect(data.bookmarks.tree(PARTITION).other.children).toEqual([]);
       expect(profiles.get('Default')).toBeNull();
     });
 

@@ -4,6 +4,8 @@
 // Main-to-renderer only, so outside the wire manifest. Nothing here carries a token, a key, a nonce or a pairing secret:
 // the code goes in with `org.register` and `org.reanchor` and is never echoed back.
 import * as z from 'zod';
+import { OrgKeySchema } from '../../machine/org-key';
+import { MachineRefSchema } from '../../machine/ref';
 import type { CommandSpec } from './common';
 
 /**
@@ -50,6 +52,34 @@ export type OrgAttempt = z.infer<typeof OrgAttemptSchema>;
 
 const CodeInputSchema = z.strictObject({ code: z.string().max(4096) });
 
+/**
+ * M2 (Interfaces §G): another machine's session as its signed listing says it, verified against the held org state. Not a
+ * record: a listing has no directory, model, mode, holder or lineage. `session` is a plain string, never an
+ * `AppSessionId`, so O6's codec lifts nothing in a row; the renderer forms the address with `addressOf(machine, session)`.
+ */
+export const RemoteRowSchema = z.strictObject({
+  machine: MachineRefSchema, // the listing's ref
+  session: z.string().min(1), // lane A: the engine session id; lane B: the appSessionId (O9's R1)
+  lane: z.enum(['A', 'B']), // R2
+  state: z.string(), // sminos's word (R4)
+  title: z.string(), // R4
+  owners: z.array(z.string()), // member ids (R5)
+  project: z.string().nullable(), // sminos's project id, the smnsId (R5)
+  orgKey: OrgKeySchema.nullable(), // the local org key it joins, by the signed-in org (R5)
+  availability: z.literal('foreign_held').nullable(), // lane A: held on its machine (R3); lane B: null
+  revision: z.number().int().nonnegative(),
+  issued: z.string(),
+  mine: z.boolean(), // the signed-in member is an owner
+});
+export type RemoteRow = z.infer<typeof RemoteRowSchema>;
+export const OrgRowsSchema = z.strictObject({
+  machines: z.array(MachineRefSchema), // the RL2 roster: these take no record snapshot
+  rows: z.array(RemoteRowSchema),
+  complete: z.boolean(), // this run's hub snapshot applied, the announced head adopted
+  pending: z.array(MachineRefSchema), // roster machines with records awaiting verification
+});
+export type OrgRows = z.infer<typeof OrgRowsSchema>;
+
 export const commands = {
   'org.status': { input: z.void(), output: OrgStatusSchema, owner: 'main' },
   'org.register': { input: CodeInputSchema, output: OrgAttemptSchema, owner: 'main' },
@@ -57,8 +87,10 @@ export const commands = {
   'org.reanchor': { input: CodeInputSchema, output: OrgAttemptSchema, owner: 'main' },
   'org.cancel': { input: z.void(), output: z.void(), owner: 'main' },
   'org.signOut': { input: z.void(), output: z.void(), owner: 'main' },
+  'org.rows': { input: z.void(), output: OrgRowsSchema, owner: 'main' }, // M2
 } as const satisfies Record<`org.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
   'org.changed': OrgStatusSchema, // at every change of the status, the whole status
+  'org.rows.changed': OrgRowsSchema, // M2: coalesced, the whole list
 } as const satisfies Record<`org.${string}`, z.ZodType>;

@@ -19,7 +19,9 @@ export interface SecondInstanceHandoff {
 
 // Call after setting userData, before opening stores or starting hosts. Electron's ProcessSingleton uses that
 // directory, so separate scratch profiles can run together. Never release it while the app is alive.
-export function startWithProfileLock(app: LockingApp, start: () => void, handoff: SecondInstanceHandoff): Promise<void> {
+// P5 O3-A: `start` may answer a promise (main's start settles its launch's shape and takes spine.lock first), which the
+// answer waits for.
+export function startWithProfileLock(app: LockingApp, start: () => void | Promise<void>, handoff: SecondInstanceHandoff): Promise<void> {
   if (!app.requestSingleInstanceLock({ build: handoff.build })) {
     app.quit();
     return Promise.resolve();
@@ -30,6 +32,6 @@ export function startWithProfileLock(app: LockingApp, start: () => void, handoff
       app.quit();
       return;
     }
-    start();
+    return start();
   });
 }

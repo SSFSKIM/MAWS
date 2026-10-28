@@ -152,8 +152,10 @@ operator holds:
 - **A lock**, `<worker>.json.lock` beside the checkpoint, held for the whole
   run, so two runs (a retry beside a slow run, in another terminal) never
   overlap: the second is refused before it reads anything, naming the lock's
-  pid, host and start time. A lock is never taken over, even one whose run
-  died: remove it by hand once you have checked that no run is going. A member the state
+  pid, host and start time (and, when that pid is gone from this host, saying
+  so). A run ended by Ctrl-C, a closed terminal or a SIGTERM removes its own
+  lock as it exits (130, 129, 143). A lock is never taken over, even one whose
+  run died: remove it by hand once you have checked that no run is going. A member the state
 admits, or an email it changes, reaches the hub only after this runs; one it
 removes is refused by the Registry at once, and by Access once this runs.
 
@@ -216,7 +218,8 @@ credential is read or the hub asked anything, whatever the
 configuration's org, its `orgGenesis` or `--test-org` say (`redeploy-check`, whose RL1 leg writes the state, likewise).
 Within that, they write the state only where an operator's anchor allows:
 - in the configuration's own org, only when it serves a chain whose genesis is the configuration's `orgGenesis`
-  (staging's is pinned; production's config pins none, so they refuse it), and never a genesis;
+  (staging's is pinned, and a configuration that pins none is refused; production's, pinned since its rollout, never
+  gets this far, refused by name above), and never a genesis;
 - in a throwaway org named with `--test-org` (proof.ts's rule), where they post the genesis when it has none.
 
 Each machine they enroll is listed by a signed successor, owned by the device's member, and taken out again by another (its key retired, an honest departure, so what it signed keeps verifying), and
@@ -327,8 +330,10 @@ again (`pending version n is not at the hub: sent again`); the hub holding anoth
 `fork: …: nothing was signed`, the anchor unchanged. A `not-head` refusal is not signed again: the next run finds the
 hub's other successor and refuses `fork`, which is the owner's to take to whoever runs the hub (or to the other admin
 device that signed it). Each subcommand but `init` holds `<keys>.org.json.lock` from its first read to its last write;
-a second one is refused, naming the holder's pid, host and start time, and a lock left by a run that died is removed by
-hand once nothing runs (`run-lock.ts`, never taken over). Against a deployment, `genesis`, `pair` and `remove-device` open
+a second one is refused, naming the holder's pid, host and start time (and saying when that pid is gone from this host).
+A run ended by Ctrl-C, its terminal closed or a SIGTERM, in `pair`'s wait or at a prompt, removes its own lock as it
+exits; a lock left by a run that died otherwise (a SIGKILL, a crash) is removed by hand once nothing runs (`run-lock.ts`,
+never taken over). Against a deployment, `genesis`, `pair` and `remove-device` open
 `/dev/tty` before any request and confirm there: a shell with no controlling terminal stops at that open
 (`Device not configured`) and sends nothing.
 
