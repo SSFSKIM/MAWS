@@ -96,3 +96,47 @@ export function taskNotificationRecord(sessionId: string, cwd: string, parentUui
     attachment: { type: 'queued_command', commandMode: 'task-notification', prompt: `<task-notification>\n<task-id>${note.taskId}</task-id>\n<status>${note.status}</status>\n<summary>${note.summary}</summary>\n</task-notification>` },
   };
 }
+
+// One tool call and its result, then the model's closing answer, as the engine writes a turn's rows after `parentUuid`.
+function toolTurn(sessionId: string, cwd: string, parentUuid: string, call: { id: string; name: string; input: Record<string, unknown>; result: string; toolUseResult: Record<string, unknown>; answer: string; at: string }): Record<string, unknown>[] {
+  const base = { cwd, sessionId, timestamp: call.at, isSidechain: false, userType: 'external', version: '2.1.300' };
+  const [use, result, answer] = [randomUUID(), randomUUID(), randomUUID()];
+  const message = (uuid: string, content: unknown[], stop: string) => ({ id: `msg_${uuid.slice(0, 8)}`, type: 'message', role: 'assistant', model: 'claude-opus-4-5', content, stop_reason: stop, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 20 } });
+  return [
+    { ...base, type: 'assistant', uuid: use, parentUuid, message: message(use, [{ type: 'tool_use', id: call.id, name: call.name, input: call.input }], 'tool_use') },
+    { ...base, type: 'user', uuid: result, parentUuid: use, toolUseResult: call.toolUseResult, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: call.id, is_error: false, content: call.result }] } },
+    { ...base, type: 'assistant', uuid: answer, parentUuid: result, message: message(answer, [{ type: 'text', text: call.answer }], 'end_turn') },
+  ];
+}
+
+// A turn that edited a file: its divider offers Restore files.
+export function editTurnRecords(sessionId: string, cwd: string, parentUuid: string, edit: { file: string; at: string }): Record<string, unknown>[] {
+  return toolTurn(sessionId, cwd, parentUuid, {
+    id: `toolu_${randomUUID().slice(0, 8)}`, name: 'Edit', input: { file_path: edit.file, old_string: 'once', new_string: 'twice' },
+    result: `The file ${edit.file} has been updated.`, toolUseResult: { filePath: edit.file, oldString: 'once', newString: 'twice', structuredPatch: [] }, answer: 'Edited.', at: edit.at,
+  });
+}
+
+// A subagent the model started in the background: the Agent call and its launch result in the main transcript
+// (`backgroundAgentRecords`), and the agent's own transcript and meta beside it (`subagents/agent-<id>.*`).
+export function backgroundAgentRecords(sessionId: string, cwd: string, parentUuid: string, agent: BackgroundAgent): Record<string, unknown>[] {
+  return toolTurn(sessionId, cwd, parentUuid, {
+    id: `toolu_${agent.agentId}`, name: 'Agent', input: { description: agent.description, prompt: agent.prompt, subagent_type: 'general-purpose', run_in_background: true },
+    result: `Async agent launched successfully.\nagentId: ${agent.agentId} (internal ID - do not mention to user.)`,
+    toolUseResult: { isAsync: true, status: 'async_launched', agentId: agent.agentId, description: agent.description, prompt: agent.prompt },
+    answer: 'It is working in the background.', at: agent.at,
+  });
+}
+
+export interface BackgroundAgent {
+  agentId: string;
+  description: string;
+  prompt: string;
+  at: string;
+}
+
+export async function backgroundAgentSidecars(store: StoreFixture, sessionId: string, cwd: string, agent: BackgroundAgent): Promise<void> {
+  await store.addSidecar(sessionId, `subagents/agent-${agent.agentId}.meta.json`, { agentType: 'general-purpose', description: agent.description, toolUseId: `toolu_${agent.agentId}`, spawnDepth: 1, requestShape: 'background' });
+  const prompt = { parentUuid: null, isSidechain: true, agentId: agent.agentId, type: 'user', message: { role: 'user', content: agent.prompt }, uuid: randomUUID(), timestamp: agent.at, userType: 'external', cwd, sessionId, version: '2.1.300' };
+  await store.addSidecar(sessionId, `subagents/agent-${agent.agentId}.jsonl`, `${JSON.stringify(prompt)}\n`);
+}

@@ -7,11 +7,11 @@
 import { randomUUID } from 'node:crypto';
 import { expect, type Locator, type Page } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
-import { startFakeBridge, type FakeBridge } from '../test/support/fake-bridge';
+import { FULL_CAPABILITIES, startFakeBridge, type FakeBridge } from '../test/support/fake-bridge';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
 import { launchMaws, test, type MawsLaunch } from './support/launch';
-import { assistantRecord, backgroundBashRecords, CATALOG, taskNotificationRecord, terminalSession, userRecord, type TerminalSession } from './support/lane-a';
+import { assistantRecord, backgroundAgentRecords, backgroundAgentSidecars, backgroundBashRecords, CATALOG, editTurnRecords, taskNotificationRecord, terminalSession, userRecord, type TerminalSession } from './support/lane-a';
 import { openSurface } from './support/shell';
 import { sidebarRow } from './support/sidebar';
 
@@ -40,6 +40,9 @@ const main = (page: Page) => page.locator('[data-region="main"]');
 const editor = (page: Page) => main(page).getByRole('textbox', { name: 'Message' });
 const notice = (page: Page) => main(page).getByRole('note');
 const strip = (page: Page) => main(page).getByRole('list', { name: 'Messages not confirmed yet' });
+
+// The bridge's sentence as MAWS shows one: its first letter capitalised (session/controls/lane-a.ts).
+const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 // The fake's commands of one op, their bodies in order.
 const bodies = (bridge: FakeBridge, op: string) => bridge.commands.filter((c) => c.op === op).map((c) => c.body);
@@ -108,7 +111,10 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
   }
 
   test('no bridge: the holder notice and Take over here, as before; a live bridge then gives the composer, its gaps greyed with their reasons', async () => {
-    const c = await begin();
+    const c = await begin((sid, cwd, after) => {
+      const ask = randomUUID();
+      return [userRecord(sid, cwd, ask, after, 'Change once to twice.', '2026-10-28T10:00:03.000Z'), ...editTurnRecords(sid, cwd, ask, { file: `${cwd}/notes.md`, at: '2026-10-28T10:00:04.000Z' })];
+    });
     const { page } = c;
     c.terminal = await terminalSession({ store: c.store, sminosHome: c.maws.sminosHome, sessionId: c.sid, cwd: c.repo.root, bridged: false });
     await expect.poll(async () => value(await invoke(page, 'session.get', { appSessionId: c.appId }))?.holder.kind, { timeout: 10_000 }).toBe('terminal');
@@ -125,12 +131,41 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     c.terminal = { bridge, pid: registryOnly.pid, close: async () => (await bridge.close(), await registryOnly.close()) };
     await expect(editor(page)).toBeVisible({ timeout: 15_000 });
     await expect(notice(page)).toHaveCount(0);
+    // acceptance 2: each gap in place with its reason, the bridge's words from the capability fixture
+    const reasonOf = (key: string) => sentence(FULL_CAPABILITIES.controls![key]!.reason!);
     await expect(main(page).getByRole('button', { name: /^Permission mode/ })).toHaveAttribute('title', "A terminal session's mode is changed in the terminal");
     await editor(page).click();
     await editor(page).pressSequentially('/doc');
     await expect(page.getByRole('option', { name: /doctor/ }), 'a command only the terminal runs, listed with why').toContainText(/runs only in the terminal/i);
+    await clear(editor(page));
+    await editor(page).pressSequentially('/rewind');
+    await expect(page.getByRole('option', { name: /rewind/ }).first(), 'rewind, a terminal panel').toContainText('Rewind is a terminal panel: use /rewind there');
     await page.keyboard.press('Escape');
     await clear(editor(page));
+    await main(page).getByRole('button', { name: 'Turn summary' }).last().click();
+    const restore = page.getByRole('button', { name: 'Restore files to before this turn' });
+    await expect(restore, 'file rollback, in place').toBeDisabled();
+    await expect(restore).toHaveAttribute('title', reasonOf('rewind-files'));
+    await page.keyboard.press('Escape');
+    // Session info lists every control the bridge doesn't reach, with its reason. Forget and the queue have no control of
+    // their own on a terminal session; the cards' gaps (deny-and-interrupt, an edited input, a plan's clear, a form) are
+    // each card's (M6's scene); MCP disable is the /mcp widget's (the controls scene).
+    await openSurface(page, 'Session info');
+    const info = page.locator('[data-region="panel"] [data-surface][aria-label="Session info"]');
+    await expect(info).toContainText('Not available here');
+    for (const [label, reason] of [
+      ['Permission mode', "A terminal session's mode is changed in the terminal"],
+      ['Rewind', 'Rewind is a terminal panel: use /rewind there'],
+      ['Forget a message', reasonOf('forget')],
+      ['Roll back files', reasonOf('rewind-files')],
+      ['Deny and interrupt', reasonOf('decide.interrupt')],
+      ['Answer a form', 'Answer this form in the terminal'],
+      ['Disable an MCP server', reasonOf('mcp.disable')],
+      ['Queue', 'The terminal keeps its own queue'],
+    ] as const) {
+      await expect(info, label).toContainText(label);
+      await expect(info, label).toContainText(reason);
+    }
     // the session menu offers Take over in MAWS, the pane no longer showing the notice that carried it
     await (await sidebarRow(page, { appSessionId: c.appId })).click({ button: 'right' });
     await expect(page.getByRole('menuitem', { name: 'Take over in MAWS' })).toBeVisible();
@@ -201,8 +236,13 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
   });
 
   test('each control reaches the bridge with its body: the model chip, a slash command, interrupt, compact with instructions, MCP reconnect and enable, a side question answered from its op’s end, and the agent and shell stops', async () => {
-    test.setTimeout(120_000);
-    const c = await begin();
+    test.setTimeout(150_000);
+    const agent = { agentId: 'a1e2e000000000001', description: 'Count the words', prompt: 'Count the words in notes.md.', at: '2026-10-28T10:00:03.000Z' };
+    const c = await begin((sid, cwd, after) => {
+      const ask = randomUUID();
+      return [userRecord(sid, cwd, ask, after, 'Count the words in the background.', '2026-10-28T10:00:03.000Z'), ...backgroundAgentRecords(sid, cwd, ask, agent)];
+    });
+    await backgroundAgentSidecars(c.store, c.sid, c.repo.root, agent);
     const { page } = c;
     const { bridge } = await drive(c);
 
@@ -212,10 +252,22 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await page.getByRole('menuitemradio', { name: /^sonnet/ }).click();
     await expect.poll(() => bodies(bridge, 'model')).toEqual([{ op: 'model', model: 'sonnet', effort: null }]); // main keeps the effort the bridge holds
     await page.keyboard.press('Escape');
+    // the effort on its own: main reads the model fresh and sends it unchanged beside the new effort
+    await main(page).getByRole('button', { name: /^Model / }).click();
+    await page.getByRole('slider', { name: 'Effort' }).locator('[data-level="high"]').click();
+    await expect.poll(() => bodies(bridge, 'model')).toEqual([
+      { op: 'model', model: 'sonnet', effort: null },
+      { op: 'model', model: 'sonnet', effort: 'high' },
+    ]);
+    await page.keyboard.press('Escape');
 
-    // a runnable slash command, its outcome from its op
+    // a runnable slash command, its outcome from its op's `run` end (each run's id is its argument, as the MCP runs' below)
+    bridge.answer('command', (body) => ({ status: 200, body: { ok: true, result: { started: true, id: `run:${String(body.args)}` } } }));
+    const ended = (args: string, text: string, name = 'mcp') => bridge.emit({ type: 'run', phase: 'end', id: `run:${args}`, name, readback: { how: 'text', text } });
     await typeAndSend(page, '/rename o9-sitting');
     await expect.poll(() => bodies(bridge, 'command')).toEqual([{ op: 'command', name: 'rename', args: 'o9-sitting' }]);
+    ended('o9-sitting', 'Session renamed to o9-sitting.', 'rename');
+    await expect(page.getByText('/rename: Session renamed to o9-sitting.', { exact: true })).toBeVisible({ timeout: 10_000 });
 
     // interrupt, while a turn runs
     bridge.emit({ type: 'turn', phase: 'start', turnId: 'turn-i' });
@@ -241,10 +293,11 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await clear(editor(page));
     await editor(page).pressSequentially('/mcp');
     await editor(page).press('Enter');
-    // each run's id is its argument, and its end (the mod's `run end`) frees the widget for the next
-    bridge.answer('command', (body) => ({ status: 200, body: { ok: true, result: { started: true, id: `run:${String(body.args)}` } } }));
-    const ended = (args: string, text: string) => bridge.emit({ type: 'run', phase: 'end', id: `run:${args}`, name: 'mcp', readback: { how: 'text', text } });
+    // each run's end (the mod's `run end`) frees the widget for the next; Disable stays in place, closed with the route
+    // table's reason (acceptance 2)
     const server = page.locator('[data-mcp-server="probe"]');
+    await expect(server.getByRole('button', { name: 'Disable' })).toBeDisabled();
+    await expect(server.getByRole('button', { name: 'Disable' })).toHaveAttribute('title', sentence(FULL_CAPABILITIES.controls!['mcp.disable']!.reason!));
     await server.getByRole('button', { name: 'Reconnect' }).click();
     await expect.poll(() => bodies(bridge, 'command').length).toBe(2);
     ended('reconnect probe', 'Reconnected to probe.');
@@ -268,15 +321,17 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     bridge.emit({ type: 'btw', phase: 'end', id: 'btw-1', text: 'Because you asked for a short one.' });
     await expect(page.getByText('Because you asked for a short one.')).toBeVisible({ timeout: 10_000 });
 
-    // the agents tool's and the jobs list's stops, and a message to a subagent, through their commands
-    for (const [name, input, op, body] of [
-      ['laneA.stopAgent', { appSessionId: c.appId, agentId: 'agent-1' }, 'stop-agent', { op: 'stop-agent', agentId: 'agent-1' }],
-      ['laneA.tell', { appSessionId: c.appId, agentId: 'agent-1', text: 'wrap up' }, 'tell', { op: 'tell', agentId: 'agent-1', text: 'wrap up' }],
-      ['laneA.stopTask', { appSessionId: c.appId, taskId: 'shell-1' }, 'stop', { op: 'stop', taskId: 'shell-1' }],
-    ] as const) {
-      expect(value(await invoke(page, name, input as never))).toMatchObject({ state: 'done' });
-      expect(bodies(bridge, op)).toEqual([body]);
-    }
+    // the agents tool: the subagent the transcript started (its sidecars on disk), told through the drill-in's box, then
+    // stopped through its Stop (the jobs list's stop has its own scene)
+    await openSurface(page, 'Subagents');
+    await page.locator('[data-agent-row]').filter({ hasText: agent.description }).click();
+    const relay = page.locator('[data-region="panel"] [data-key-sink="composer"]'); // the drill-in's box, not the pane's composer
+    await relay.getByRole('textbox', { name: /^Message / }).fill('wrap up');
+    await relay.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect.poll(() => bodies(bridge, 'tell')).toEqual([{ op: 'tell', agentId: agent.agentId, text: 'wrap up' }]);
+    await page.getByRole('button', { name: 'Stop agent' }).click();
+    await page.getByRole('button', { name: 'Stop', exact: true }).last().click(); // the confirm
+    await expect.poll(() => bodies(bridge, 'stop-agent')).toEqual([{ op: 'stop-agent', agentId: agent.agentId }]);
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 
