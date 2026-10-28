@@ -5,15 +5,17 @@
 // after it: the renderer asks for an action by its fields and never supplies the bytes that are signed or the words
 // that are shown.
 //
-// How the person confirms is injected (`Confirm`), because U5 settles it by a spike on the MacBook
-// (spikes/u5-local-auth/): Electron's `promptTouchID`, a LocalAuthentication addon with device-owner authentication, or
-// an app-level confirmation recorded as a weaker device. Whichever wins plugs in here unchanged.
+// How the person confirms is a strategy (`Confirm`). U5's spike (spikes/u5-local-auth/, the MacBook's record of
+// 2026-10-27) settled it on Electron's `promptTouchID`, which main uses unless it injects another: Touch ID, or the
+// login password where there is none. Its tested fallback is a LocalAuthentication addon with device-owner
+// authentication (the spike's candidate 2), should `promptTouchID` ever lose the password path.
+import { systemPreferences, type SystemPreferences } from 'electron';
 import { base64urlEncode, canonicalize, isAction, NONCE_BYTES, signStepUp, type Action, type SigningKey } from '../../../apps/org-protocol/src/index.ts';
 
 /** What the person is asked to confirm: `summary` fits a system prompt's one line; `text` is every field, one per line. */
 export type StepUpPrompt = { summary: string; text: string };
 export type Confirmation = { ok: true } | { ok: false; reason: 'cancelled' | 'unavailable' | 'failed' };
-/** The confirmation strategy (U5's winner). It resolves once the person has answered; it never sees a key. */
+/** The confirmation strategy. It resolves once the person has answered; it never sees a key. */
 export type Confirm = (prompt: StepUpPrompt) => Promise<Confirmation>;
 
 /** An action as the renderer asks for it: its typed fields. A reseal names the operation's `opId` and `opCreated`. */
@@ -22,8 +24,28 @@ export type StepUpResult = { ok: true; action: Action } | { ok: false; reason: E
 
 const random = (bytes: number) => base64urlEncode(crypto.getRandomValues(new Uint8Array(bytes)));
 
-export function createStepUp(deps: { device: { org: string; device: string }; key: SigningKey; confirm: Confirm; now?: () => Date }): { sign(request: StepUpRequest): Promise<StepUpResult> } {
+/**
+ * U5's winner: macOS's own prompt, through Electron's `promptTouchID` (LAContext with user presence, which takes Touch ID
+ * or the login password). The summary is its reason; the full text is left to the app's own view. Electron rejects with
+ * only the localized description, so a cancel can't be told from another failure to authenticate: either is a refusal,
+ * reported as `cancelled`. `canPromptTouchID()` is not consulted, since it is false on a Mac with no Touch ID, where this
+ * prompt still takes the password.
+ */
+export function promptTouchIDConfirmation(prefs: Pick<SystemPreferences, 'promptTouchID'>): Confirm {
+  return async ({ summary }) => {
+    try {
+      await prefs.promptTouchID(summary);
+      return { ok: true };
+    } catch {
+      return { ok: false, reason: 'cancelled' };
+    }
+  };
+}
+
+/** `confirm` defaults to `promptTouchIDConfirmation(systemPreferences)`, main's confirmation. */
+export function createStepUp(deps: { device: { org: string; device: string }; key: SigningKey; confirm?: Confirm; now?: () => Date }): { sign(request: StepUpRequest): Promise<StepUpResult> } {
   const now = deps.now ?? (() => new Date());
+  const confirm = deps.confirm ?? promptTouchIDConfirmation(systemPreferences);
   return {
     async sign(request) {
       // The fields come from the request by name, so nothing else it carries reaches the action.
@@ -52,7 +74,7 @@ export function createStepUp(deps: { device: { org: string; device: string }; ke
       const prompt = renderAction(shown);
       let answer: Confirmation;
       try {
-        answer = await deps.confirm(prompt);
+        answer = await confirm(prompt);
       } catch {
         answer = { ok: false, reason: 'failed' };
       }

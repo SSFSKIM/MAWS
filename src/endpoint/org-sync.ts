@@ -52,6 +52,7 @@ type Options = { log: (line: string) => void; now?: () => number };
 export class EndpointOrg implements OrgView {
   #queue: Promise<unknown> = Promise.resolve();
   readonly #listeners = new Set<(change: OrgChange) => void>();
+  readonly #certificateListeners = new Set<() => void>();
   readonly #state: EndpointState;
   readonly #log: (line: string) => void;
   readonly #now: () => number;
@@ -129,6 +130,15 @@ export class EndpointOrg implements OrgView {
     return () => this.#listeners.delete(listener);
   }
 
+  /**
+   * Called after a sync puts a changed certificate set on disk under the same head (an adoption's set is the
+   * `onAdopted` listeners' to read). A listener's failure is logged and stops nothing.
+   */
+  onCertificates(listener: () => void): () => void {
+    this.#certificateListeners.add(listener);
+    return () => this.#certificateListeners.delete(listener);
+  }
+
   /** `state-too-old` while the head was issued more than 30 days ago (reads and subscriptions go on). */
   actionsRefusal(): 'state-too-old' | null {
     const head = this.#state.org?.head ?? null;
@@ -165,7 +175,10 @@ export class EndpointOrg implements OrgView {
     if (adopted.length === 0) {
       const refused = await this.#refusal(org.head, org.highWater, states, served);
       if (refused !== null) this.#log(`endpoint: org state refused: ${refused}`);
-      if (certificates !== null && JSON.stringify(certificates) !== JSON.stringify(org.certificates)) this.#state.setOrg({ ...org, certificates });
+      if (certificates !== null && JSON.stringify(certificates) !== JSON.stringify(org.certificates)) {
+        this.#state.setOrg({ ...org, certificates });
+        this.#tell(this.#certificateListeners, undefined);
+      }
       return { adopted: 0, rewound: false, ...(refused === null ? {} : { refused: refused.split(' ')[0] }) };
     }
     const below = adopted[0].state.version - 1;
@@ -255,9 +268,13 @@ export class EndpointOrg implements OrgView {
     const chain = windowEntries(next.states, next.transitions, next.head, this.#now());
     this.#state.setOrg({ ...org, head: next.head, chain, hashes: next.hashes, certificates: next.certificates, acceptedTransitions: next.accepted, highWater: next.head.state.version });
     const change: OrgChange = { previous: next.previous, head: next.head, rewound: next.rewound, removed: removals(next.previous?.state ?? null, next.head.state) };
-    for (const listener of this.#listeners) {
+    this.#tell(this.#listeners, change);
+  }
+
+  #tell<T>(listeners: Set<(value: T) => void>, value: T): void {
+    for (const listener of listeners) {
       try {
-        listener(change);
+        listener(value);
       } catch (error) {
         this.#log(`endpoint: a listener of the org state failed: ${(error as Error).message}`);
       }

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { open } from 'node:fs/promises';
 import { Worker } from 'node:worker_threads';
+import { isMadeUpFinalAnswer } from '@shared/owner/message-call';
 
 // At worst JSON escaping costs six bytes per UTF-16 code unit: a page is < 1 MiB,
 // well below the shared detached transport's 64 MiB line cap.
@@ -16,6 +17,7 @@ const WORKER = String.raw`
 const { parentPort } = require('node:worker_threads');
 const { createInterface } = require('node:readline');
 const PAGE_CHARS = ${PAGE_CHARS};
+const isMadeUpFinalAnswer = ${isMadeUpFinalAnswer}; // the to-human plugin's answer after a final message, which said nothing
 async function* extract(file, size) {
   if (!size) return;
   const input = file.createReadStream({ autoClose: false, end: size - 1 });
@@ -31,7 +33,7 @@ async function* extract(file, size) {
       scanned += Buffer.byteLength(line) + 1;
       let row;
       try { row = JSON.parse(line); } catch { row = null; }
-      if (row && ['user', 'assistant'].includes(row.type) && row.isMeta !== true) {
+      if (row && ['user', 'assistant'].includes(row.type) && row.isMeta !== true && !isMadeUpFinalAnswer(row)) {
         const content = row.message?.content;
         const blocks = typeof content === 'string' ? [content] : Array.isArray(content)
           ? content.filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text) : [];

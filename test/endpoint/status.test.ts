@@ -9,7 +9,7 @@ import { createEndpoint } from '../../src/endpoint';
 import { EndpointOrg } from '../../src/endpoint/org-sync';
 import { EndpointState } from '../../src/endpoint/state/store';
 import { fakeServices, type FakeServices } from './fake-services';
-import { genesis, memberId, newDevice } from './org-fixtures';
+import { genesis, memberId, newDevice, successor } from './org-fixtures';
 
 const PATH = /[/\\]|^~/;
 const IP = /\b\d{1,3}(?:\.\d{1,3}){3}\b|\b[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){2,7}\b/i;
@@ -65,15 +65,22 @@ describe('status()', () => {
     });
     const a1 = await newDevice('a1');
     const recovery = await generateSigningKey();
-    const head = await genesis('org-local', memberId(), a1, recovery);
-    state.setOrg({ version: 1, org: 'org-local', pinned: { roots: head.state.root.keys, recoveryPub: recovery.pub }, head: null, chain: [], hashes: [], certificates: NO_CERTIFICATES, acceptedTransitions: [], highWater: 0 });
-    await new EndpointOrg(state, { log: () => {} }).adopt([head], []);
+    const A = memberId();
+    const first = await genesis('org-local', A, a1, recovery);
+    // The head lists the machine: the standing the enrollment's `org-listed` claims is judged from it at start.
+    const ref = services.machine.ref;
+    const head = await successor(first, [a1], (s) => {
+      s.machines.push({ name: 'mini', ref, pub: key.pub, owners: [A] });
+      s.machineNames.push({ name: 'mini', ref });
+    });
+    state.setOrg({ version: 1, org: 'org-local', pinned: { roots: first.state.root.keys, recoveryPub: recovery.pub }, head: null, chain: [], hashes: [], certificates: NO_CERTIFICATES, acceptedTransitions: [], highWater: 0 });
+    await new EndpointOrg(state, { log: () => {} }).adopt([first, head], []);
     fs.writeFileSync(join(services.machine.stateDir, 'legacy.json'), JSON.stringify({ org: 'org-local', key: 'k'.repeat(43) }), { mode: 0o600 });
 
     const endpoint = createEndpoint();
     await endpoint.start(services);
     const status = endpoint.status() as Record<string, unknown>;
-    expect(status).toMatchObject({ enrollment: 'org-listed', name: 'mini', org: 'org-local', stateVersion: 1, headHash: await stateHash(head.state), legacyKey: true });
+    expect(status).toMatchObject({ enrollment: 'org-listed', name: 'mini', org: 'org-local', stateVersion: 2, headHash: await stateHash(head.state), legacyKey: true });
     expect(leaks(status)).toEqual([]);
     // The walk itself catches what it should.
     expect(leaks({ ...status, extra: { dir: services.machine.stateDir, ip: '100.64.1.2', pub: key.pub } }).map((l) => l.at)).toEqual(['$.extra.dir', '$.extra.ip', '$.extra.pub']);

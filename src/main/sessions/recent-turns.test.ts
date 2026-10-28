@@ -261,6 +261,16 @@ describe('recentTurnsOf', () => {
       // the same window cut before the final span: the last status sent is the answer
       expect(recentTurnsOf(text.split('\n').slice(0, -1).join('\n'), 5, false).turns[0]).toMatchObject({ answer: { text: expect.stringMatching(/^Stage 3 of 4 is done\. The classifier is trained\./) }, toolCalls: 4 });
     });
+
+    // test/fixtures/transcript-to-human-final.jsonl: the turn ends on an accepted final call of the plugin's tool, then
+    // the plugin's made-up answer, which said nothing and is no answer; the call reads as MAWS reads the plugin's tool,
+    // and the same turn under MAWS's name reads its message as the answer.
+    it('the to-human plugin’s answer after a final message is no answer of its turn', () => {
+      const turn = readFileSync(join(ROOT, 'test/fixtures/transcript-to-human-final.jsonl'), 'utf8');
+      const answers = (text: string) => recentTurnsOf(text, 5, false).turns.map((t) => [t.prompt?.text ?? null, t.answer?.text ?? null, t.toolCalls]);
+      expect(answers(turn)).toEqual([['Run the stages and tell me how it went.', 'Looking first.', 2]]);
+      expect(answers(turn.replaceAll('mcp__to-human__message', 'mcp__maws__message'))).toEqual([['Run the stages and tell me how it went.', 'Both stages ran; 37 labels are missing.', 1]]);
+    });
   });
 
   it('an empty or unparsable text has no turns', () => {

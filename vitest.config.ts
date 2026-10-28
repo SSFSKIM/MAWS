@@ -39,6 +39,10 @@ const TIMING_NODE_TESTS = [
   'test/artifacts/one-schema.test.ts', // P3-B: the portability test's pattern, for the one-schema rule
   'test/one-locale.test.ts', // the same pattern, for the one-locale rule over src/ and the desk's web app
   'test/endpoint/enroll.test.ts', // P5 O10 M2: enrolls against desk-hub's local runner, a wrangler dev child process
+  'test/endpoint/hub-link.test.ts', // P5 O10 M3: reconnects on the hub link's backoff, timed against a stand-in hub
+  'test/endpoint/hub-link.local.test.ts', // P5 O10 M3: RL1 against desk-hub's Worker in Miniflare (cuts, redeploys, leases)
+  'test/endpoint/channels.local.test.ts', // P5 O10 M4: RL2 over the hub's multiplex (desk-hub's Worker in Miniflare) and the direct listener
+  'test/endpoint/rl10/conversation.local.test.ts', // P5 O10 M6: RL10's conversation replayed against the real socket and desk-hub's Worker in Miniflare
 ];
 const TIMING_RENDERER_TESTS = [
   'src/renderer/src/App.test.tsx',

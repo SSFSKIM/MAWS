@@ -11,7 +11,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, SessionId } from '@shared/graph/ids';
 import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
 import { ChainFollower } from '../../../../engine-host/fs/chain-follower';
-import { FIXTURE_DIR } from '../../../../../test/support/fixtures';
+import { FIXTURE_DIR, TEST_FIXTURE_DIR } from '../../../../../test/support/fixtures';
 import { MemoryFileReader } from '../../../../../test/support/memory-reader';
 import { journalToEvents } from '../dev/journal';
 import { isPersistentRow, rowsOf, turnPhrases, turnSummary, withAllExpanded } from './derive';
@@ -210,6 +210,41 @@ describe('a call of the to-human plugin’s message tool', () => {
     expect(turnSummary(plugin.turns.get(T1)!, BOTH)).toEqual(turnSummary(maws.turns.get(T1)!));
     expect(turnPhrases(plugin.turns.get(T1)!, BOTH)).toBe(turnPhrases(maws.turns.get(T1)!));
     expect(turnPhrases(plugin.turns.get(T1)!)).not.toBe(turnPhrases(maws.turns.get(T1)!)); // MAWS's reading: one MCP call more
+  });
+});
+
+// test/fixtures/transcript-to-human-final.jsonl, a terminal session's turn followed from disk: it ends on an accepted
+// final call of the plugin's tool, then the plugin's made-up answer (`Message sent to the human.`), which the chain keeps
+// and no row draws. The call draws as each host reads the plugin's tool: MAWS's MCP cell, the desk's message.
+describe('the to-human plugin’s answer after a final message', () => {
+  async function followed() {
+    const events: SessionEvent[] = [];
+    const follower = new ChainFollower(new MemoryFileReader(readFileSync(join(TEST_FIXTURE_DIR, 'transcript-to-human-final.jsonl'))), 'final-session' as SessionId, null, (e) => e.t === 'events' && events.push(...e.events), { holders: () => 0 });
+    await follower.start();
+    const { chain } = follower.snapshot();
+    follower.stop();
+    return { events, chain };
+  }
+  const MESSAGE = 'Both stages ran; 37 labels are missing.';
+
+  it('draws nothing, folded or not, read as MAWS reads the plugin’s tool or as the desk does', async () => {
+    const { events, chain } = await followed();
+    expect(chain).toEqual(['p1', 'a1', 'a2', 'r1', 'a3', 'r2', 'made-up', 'd1']);
+    for (const state of [reduce(events), reduceReadingBoth(events)]) {
+      for (const rows of [folded(state), expanded(state)]) expect(JSON.stringify(rows)).not.toContain('Message sent to the human.');
+    }
+  });
+
+  it('leaves the call as each host reads it: MAWS’s MCP cell after the commentary, the desk’s message as the turn’s last row', async () => {
+    const { events } = await followed();
+    const T = turnId.ofMessage(uuid('p1'));
+    const maws = reduce(events);
+    expect(reading(expanded(maws))).toEqual(['commentary: Looking first.', 'Bash: done', `${PLUGIN}: done`]);
+    expect(ofKind(expanded(maws), 'divider')).toMatchObject([{ state: 'completed', toolCalls: 2 }]);
+    const desk = reduceReadingBoth(events);
+    expect(reading(expanded(desk))).toEqual(['commentary: Looking first.', 'Bash: done', `message: ${MESSAGE}`]);
+    expect(ofKind(folded(desk), 'to_human')).toMatchObject([{ toolUseId: 'toolu_01Final', text: MESSAGE, pending: false }]);
+    expect(turnSummary(desk.turns.get(T)!, BOTH)).toMatchObject({ toolCalls: 1 });
   });
 });
 

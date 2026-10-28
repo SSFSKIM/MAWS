@@ -8,9 +8,32 @@
 // Intake runs in the org view's queue (`EndpointOrg.exclusive`), as adoptions do: the ledger and the head it is checked
 // against are read and written with nothing else between, so two grants arriving together, or a grant and a revocation,
 // land one after the other.
-import { isGrant, isSigned, verifyGrant, type Grant, type OrgState, type Signed } from 'org-protocol';
+import { isGrant, isSigned, machineOwners, ownerMembers, verifyGrant, type Certificates, type Grant, type OrgState, type Right, type Signed } from 'org-protocol';
 import type { EndpointOrg } from './org-sync';
 import type { EndpointState } from './state/store';
+
+/** A machine's grades, in the order RL7's `caps` lists them. */
+export const MACHINE_RIGHTS: readonly Right[] = ['spawn', 'shell', 'machine-admin'];
+
+/**
+ * The member's grades on this machine (RL §6.3): every one for a machine owner (its member owners, or the admins of an
+ * org-owned machine, or its delegation's owners), else the rights of the member's grant in force, else none. M4 tells a
+ * device these in `caps`; M5's authorization reads the same.
+ */
+export async function machineRights(state: EndpointState, head: OrgState, certificates: Certificates, ref: string, member: string, now: Date): Promise<Right[]> {
+  if ((await machineOwnerMembers(head, certificates, ref, now)).includes(member)) return [...MACHINE_RIGHTS];
+  const rights = state.ledger?.grants[member]?.body.rights ?? [];
+  return MACHINE_RIGHTS.filter((r) => rights.includes(r));
+}
+
+/**
+ * The machine's owners as members (RL §6.3, §5.8's `@machine`): its entry's member owners, the admins of an org-owned
+ * machine, or a certificate machine's delegation's owners; none for a ref the head doesn't place.
+ */
+export async function machineOwnerMembers(head: OrgState, certificates: Certificates, ref: string, now: Date): Promise<string[]> {
+  const owners = await machineOwners(head, ref, certificates, now);
+  return owners === null ? [] : ownerMembers(head, owners);
+}
 
 export type GrantIntake = { ok: true; grant: Signed<Grant> } | { ok: false; reason: string };
 

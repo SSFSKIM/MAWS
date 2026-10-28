@@ -9,12 +9,14 @@ import { join } from 'node:path';
 import {
   isCertificates,
   isGrant,
+  isListing,
   isMachineCert,
   isRootTransition,
   isSigned,
   isSignedOrgState,
   type Certificates,
   type Grant,
+  type Listing,
   type MachineCert,
   type RootTransition,
   type Signed,
@@ -78,12 +80,49 @@ const OrgSchema = z.strictObject({
   highWater: z.number().int().nonnegative(),
 });
 const PolicySchema = z.strictObject({ read_only: z.boolean(), ceiling: z.enum([...PERMISSION_MODES, 'settings']) });
+/**
+ * Each listed session's last listing (listings.ts): its revision, when it was issued, the hash of its fields, and the
+ * signed record itself, which each welcome sends again byte for byte (the hub takes a resend of what it holds, and
+ * refuses a new signature at a revision it holds).
+ */
+const ListingsSchema = z.record(
+  z.string().min(1),
+  z.strictObject({ revision: z.number().int().positive(), issued: Iso, hash: z.string().min(1), record: custom<Signed<Listing>>((v) => isSigned(v, isListing)) }),
+);
+
+/**
+ * The sessions whose pending count the hub was last told above 0 (notify.ts), with their project: after a restart, a
+ * pending set that leaves one out is told `settled 0`, which the hub would otherwise never hear. `owed`: the session was
+ * withdrawn while no connection was up, and its `settled 0` goes at the next welcome.
+ */
+const NotifiedSchema = z.record(
+  z.string().min(1),
+  z.strictObject({ project: z.string().min(1), pending: z.number().int().positive(), owed: z.literal(true).optional() }),
+);
+
+/** A web-cards passkey's last signature counter, by credential id (M5): an assertion's must rise where it keeps one. */
+const WebAuthnSchema = z.record(z.string().min(1), z.number().int().nonnegative());
+
+/** The DX1 org key sminos handed over on RL10 (M6), for outbound dual-coding and legacy events, until O14's final brief. */
+const LegacySchema = z.strictObject({ org: z.string().min(1), key: z.string().regex(/^[A-Za-z0-9_-]{43}$/) });
+
+/**
+ * The host events (sminos's to-human store) taken from RL10 (M6), as each writer's highest `seq` per project: sminos
+ * sends each writer's in `seq` order, and every welcome again the last 50, so one at or below the mark was taken before
+ * and raises no second `wrote`, a restart of the endpoint's included.
+ */
+const HostsSchema = z.record(z.string().min(1), z.record(z.string().min(1), z.number().int().nonnegative()));
 
 export type MachineKeyFile = z.infer<typeof MachineKeySchema>;
 export type LedgerFile = z.infer<typeof LedgerSchema>;
 export type EnrollmentFile = z.infer<typeof EnrollmentSchema>;
 export type OrgFile = z.infer<typeof OrgSchema>;
 export type PolicyFile = z.infer<typeof PolicySchema>;
+export type ListingsFile = z.infer<typeof ListingsSchema>;
+export type NotifiedFile = z.infer<typeof NotifiedSchema>;
+export type WebAuthnFile = z.infer<typeof WebAuthnSchema>;
+export type LegacyFile = z.infer<typeof LegacySchema>;
+export type HostsFile = z.infer<typeof HostsSchema>;
 export type ChainEntry = z.infer<typeof ChainEntrySchema>;
 
 const FILES = {
@@ -93,6 +132,10 @@ const FILES = {
   org: 'org.json',
   policy: 'policy.json',
   legacy: 'legacy.json',
+  listings: 'listings.json',
+  notified: 'notified.json',
+  webauthn: 'webauthn.json',
+  hosts: 'hosts.json',
 } as const;
 
 type Options = { uid?: number; now?: () => number; log?: (line: string) => void };
@@ -107,7 +150,11 @@ export class EndpointState {
   #enrollment: EnrollmentFile | null = null;
   #org: OrgFile | null = null;
   #policy: PolicyFile | null = null;
-  #legacy = false;
+  #listings: ListingsFile = {};
+  #notified: NotifiedFile = {};
+  #webauthn: WebAuthnFile = {};
+  #legacy: LegacyFile | null = null;
+  #hosts: HostsFile = {};
 
   private constructor(
     readonly dir: string,
@@ -139,7 +186,11 @@ export class EndpointState {
       const enrollment = read(FILES.enrollment, EnrollmentSchema);
       const org = read(FILES.org, OrgSchema);
       const policy = read(FILES.policy, PolicySchema);
-      const legacy = checkPrivateFile(join(dir, FILES.legacy), options.uid);
+      const listings = read(FILES.listings, ListingsSchema);
+      const notified = read(FILES.notified, NotifiedSchema);
+      const webauthn = read(FILES.webauthn, WebAuthnSchema);
+      const legacy = read(FILES.legacy, LegacySchema);
+      const hosts = read(FILES.hosts, HostsSchema);
 
       const alone = (machineKey === null) !== (ledger === null);
       const state = new EndpointState(dir, null, alone);
@@ -158,7 +209,11 @@ export class EndpointState {
       }
       state.#org = org;
       state.#policy = policy;
+      state.#listings = listings ?? {};
+      state.#notified = notified ?? {};
+      state.#webauthn = webauthn ?? {};
       state.#legacy = legacy;
+      state.#hosts = hosts ?? {};
       return state;
     } catch (error) {
       if (error instanceof PrivatePathError || error instanceof StateFileError) return refuse(error.reason, error.message);
@@ -185,8 +240,29 @@ export class EndpointState {
   get policy(): PolicyFile | null {
     return this.#policy;
   }
+  /** Whether the DX1 org key is held. */
   get legacy(): boolean {
+    return this.#legacy !== null;
+  }
+  /** The DX1 org key and its org, or null (never logged, never sent on). */
+  get legacyKey(): LegacyFile | null {
     return this.#legacy;
+  }
+  /** Each project's host writers' highest taken `seq`; empty when none was taken. */
+  get hosts(): HostsFile {
+    return this.#hosts;
+  }
+  /** Each listed session's last listing; empty when none was made. */
+  get listings(): ListingsFile {
+    return this.#listings;
+  }
+  /** The sessions whose pending count the hub was last told above 0; empty when none. */
+  get notified(): NotifiedFile {
+    return this.#notified;
+  }
+  /** Each web-cards credential's last signature counter; empty when none was seen. */
+  get webauthn(): WebAuthnFile {
+    return this.#webauthn;
   }
 
   setMachineKey(value: MachineKeyFile): void {
@@ -209,11 +285,46 @@ export class EndpointState {
     this.#write(FILES.policy, PolicySchema.parse(value));
     this.#policy = value;
   }
+  setListings(value: ListingsFile): void {
+    this.#write(FILES.listings, ListingsSchema.parse(value));
+    this.#listings = value;
+  }
+  setNotified(value: NotifiedFile): void {
+    this.#write(FILES.notified, NotifiedSchema.parse(value));
+    this.#notified = value;
+  }
+  setWebAuthn(value: WebAuthnFile): void {
+    this.#write(FILES.webauthn, WebAuthnSchema.parse(value));
+    this.#webauthn = value;
+  }
+  setLegacy(value: LegacyFile): void {
+    this.#write(FILES.legacy, LegacySchema.parse(value));
+    this.#legacy = value;
+  }
+  setHosts(value: HostsFile): void {
+    this.#write(FILES.hosts, HostsSchema.parse(value));
+    this.#hosts = value;
+  }
   /** Deletes the DX1 org key (`mawsd endpoint legacy retire`, O14's final brief). */
   removeLegacy(): void {
     this.#refuseWrites();
     removeFile(this.dir, FILES.legacy);
-    this.#legacy = false;
+    this.#legacy = null;
+  }
+
+  /**
+   * A private subdirectory of the state directory (`signatures/`, `inbound/`), made 0700 when absent; refused (thrown)
+   * when it is a symlink, another uid's or more open, as the directory itself is.
+   */
+  subdirectory(name: string): string {
+    this.#refuseWrites();
+    const path = join(this.dir, name);
+    if (!fs.existsSync(path)) {
+      fs.mkdirSync(path, { mode: 0o700 });
+      syncDirectory(this.dir);
+    }
+    assertPrivateDirectory(path);
+    return path;
   }
 
   #write(name: string, value: unknown): void {

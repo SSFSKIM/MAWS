@@ -104,7 +104,7 @@ export type Rl1Welcome = { t: 'welcome'; generation: number; heartbeat_ms: numbe
  * opened and answers `hb-ack`. */
 export type Rl1Heartbeat = { t: 'hb'; generation: number };
 export type Rl1HeartbeatAck = { t: 'hb-ack'; generation: number };
-/** A machine-signed listing (RL6's projection) for the hub to keep and serve to the org's apps. */
+/** A machine-signed listing (RL6's projection) for the hub to keep and serve to the org's apps; one in `LISTING_GONE` withdraws its session. */
 export type ListingFrame = { t: 'listing'; record: Signed<Listing> };
 /** The machine's endpoint record (RL §4.1's direct carriers). */
 export type EndpointRecordFrame = { t: 'endpoint'; record: Signed<EndpointRecord> };

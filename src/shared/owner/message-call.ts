@@ -28,3 +28,18 @@ export function messageCallText(input: unknown): string | null {
 export type MessageCallState = 'pending' | 'sent' | 'refused';
 export const messageCallState = (result: { isError: boolean } | null | undefined): MessageCallState =>
   result === null || result === undefined ? 'pending' : result.isError ? 'refused' : 'sent';
+
+// The response the to-human plugin makes up after a final message (doperpowers #411, to-human 0.7.0): a call of its
+// tool with `final: true` ends the turn once sent, the plugin answering the engine's next step itself with no request,
+// and the transcript keeps that answer as the turn's last assistant record: one text block, `Message sent to the
+// human.`, the engine's `answeredWithoutRequest` flag, no `requestId`, a `msg_hook_` message id. The plugin's view draws
+// it as nothing, and no MAWS reader shows it, counts it or takes it as a session's last line: the backfill maps it to
+// no event, so no reader of events meets it; the readers of records (the summary, the search text) pass over it, and
+// the desk's reading of what a response read does not count it, since it read nothing.
+// Known as the plugin's view knows it in the file, by the flag and the exact text, so another hook's made-up response
+// and a model that writes the same sentence stay as written. Self-contained: the search text's worker runs its source.
+export function isMadeUpFinalAnswer(record: { type?: unknown; answeredWithoutRequest?: unknown; message?: unknown }): boolean {
+  const content = (record.message as { content?: unknown } | null | undefined)?.content;
+  const block = Array.isArray(content) && content.length === 1 ? (content[0] as { type?: unknown; text?: unknown } | null) : null;
+  return record.type === 'assistant' && record.answeredWithoutRequest === true && block?.type === 'text' && typeof block.text === 'string' && block.text.trim() === 'Message sent to the human.';
+}
