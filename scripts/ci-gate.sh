@@ -283,6 +283,17 @@ if gate_runner=$(gh variable get GATE_RUNNER -R "$REPO") &&
 else
   echo 'ci-gate: warning: could not plan pool demand; pushing without the advisory Pool-Demand trailer'
 fi
+# Advisory spec-import coverage: use the merge-base diff and the committed tree, even without worktree dependencies.
+# All/default already requests the whole set. A failed check never stops the push; its notes travel to the run summary.
+if [[ -n $gates_trailer ]]; then
+  git -C "$git_dir" fetch --quiet origin master || echo 'ci-gate: warning: fetching origin/master failed; e2e coverage uses the local origin/master' >&2
+  if coverage_trailers=$(node "$(dirname "$0")/ci-gate-e2e-coverage.mjs" --git-dir "$git_dir" --sha "$sha" --gates "$gates_trailer"); then
+    [[ -z $coverage_trailers ]] || trailers+=$'\n'"$coverage_trailers"
+  else
+    echo 'ci-gate: warning: spec-import coverage failed; going ahead' >&2
+    trailers+=$'\n''E2E-Coverage: note: spec-import coverage failed; no advice available'
+  fi
+fi
 pushed=$(git -C "$git_dir" commit-tree "$sha^{tree}" -p "$sha" -m "ci-gate: $short${affected:+ affected}" -m "$trailers") || exit 1
 
 run_id=''

@@ -68,6 +68,17 @@ describe('words and slash commands', () => {
     expect(await grade('sminos.command', { session: 's', name: '/clear' })).toBe('manage');
     expect(await grade('sminos.command', { session: 's', name: 'compact', args: 'keep the plan' })).toBe('manage');
   });
+
+  it('grades lane A’s `send` by its text, as `session.send`’s: plain text converse, a slash command by its own grade', async () => {
+    expect(await grade('sminos.send', { session: 's', text: 'please look at the tests' })).toBe('converse');
+    expect(await grade('sminos.send', { session: 's', text: '/model sonnet' })).toBe('converse');
+    expect(await grade('sminos.send', { session: 's', text: '/clear' })).toBe('manage');
+    expect(await grade('sminos.send', { session: 's', text: ' /clear' })).toBe('manage');
+    expect(await grade('sminos.send', { session: 's', text: '\n/compact keep the plan' })).toBe('manage');
+    // A text that is no string is no message sminos takes: it is graded as the most it could be.
+    expect(await grade('sminos.send', { session: 's' })).toBe('manage');
+    expect(await grade('sminos.send', { session: 's', text: [{ type: 'text', text: 'hi' }] })).toBe('manage');
+  });
 });
 
 describe('the other rows', () => {

@@ -61,6 +61,8 @@ export const OFFERS: Offers = {
     'sminos.decide': laneA('act', 'approve'),
     'sminos.compact': laneA('act', 'manage'),
     'sminos.command': laneA('act', { floor: 'converse', byEffect: true }),
+    // A person's message, in either turn state (O9 M1; its Interfaces §E): graded by its text, as `session.send`'s.
+    'sminos.send': laneA('act', { floor: 'converse', byEffect: true }),
     'sminos.spawn': { kind: 'act', executor: 'sminos', target: 'machine', grade: 'spawn' },
     'sminos.rows': laneA('call', 'view'),
     'sminos.diff': laneA('call', 'view'),

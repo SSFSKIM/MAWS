@@ -24,6 +24,9 @@ import { registerMachineHandler, registerMainHandler } from './ipc/router'; // P
 import { startMachineIdentity } from './machine/identity'; // P5 O6 M1
 import { bindLocalMachine } from './machine/local'; // P5 O6 M2
 import { startMachines } from './machines'; // P5 O6 M3: the connection manager, and the stand-in behind its gate
+import { createStepUp } from './device/step-up'; // P5 O7 M1: the development org session's signer
+import { createDevOrgSession } from './org/dev-session'; // P5 O7 M1
+import { signedOut } from './org/session'; // P5 O7 M1
 import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2
 // C3 end
 // C4 start (emit comes with C3's imports)
@@ -287,6 +290,18 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
     appRoot: process.cwd(), // the development app root, as the browser's peer check reads the addon's prebuild
     register: registerMainHandler,
     dispatchLocal,
+    // P5 O7 M1: the org session the RL2 links read. Production is signed out until O8's sign-in; a development build
+    // started with MAWS_DEV_ORG=<dir> signs in from that directory (dev-session.ts).
+    session: process.env.MAWS_DEV_ORG
+      ? createDevOrgSession({
+          dir: process.env.MAWS_DEV_ORG,
+          userData: app.getPath('userData'),
+          packaged: app.isPackaged,
+          build: `${MAIN_BUILD.version}+${MAIN_BUILD.commit}`,
+          stepUp: (keys, device) => createStepUp({ device, key: keys.stepUp }),
+          log: (line) => console.log(line),
+        })
+      : signedOut(),
   });
   installRouter({ appUrl, local, dispatchToHost: hosts.dispatch, remote: machines.dispatch });
   // P5 O1 M3 (OX4): the client port, the one way a machine-bound service reaches the person's screen: dialogs, the
