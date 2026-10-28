@@ -276,7 +276,9 @@ test('daemon idle mawsd alone: the physical footprint and CPU of mawsd idle with
 // the same machine. Valid when both windows are, the kept session holds through both, and the hub link is still up at
 // the end. Its line names the increment in footprint and CPU, each process's share, the budget's verdict, the validity
 // and both loads, and asserts no bound; it writes test-results/daemon-idle-enrolled.json. `pnpm e2e:daemon-idle-enrolled`
-// runs this case alone, on the daemon shape (about 27 minutes: two settles and two windows).
+// runs this case alone, on the daemon shape (about 27 minutes: two settles and two windows). Its unenrolled window is
+// this scene's own baseline, raised by the local hub running beside it (M10's readings: mawsd 34.0 and 41.7 MiB there,
+// 31.2 to 31.8 in the first case's scene), and is never compared with DAEMON_IDLE_BOUND, which the first case reads.
 test('daemon idle enrolled endpoint: the footprint and CPU an enrolled, listed endpoint adds to the daemon shape holding one kept idle session', async () => {
   test.skip(!DAEMON, 'the enrolled endpoint is measured on the daemon shape (pnpm e2e:daemon-idle-enrolled)');
   test.setTimeout(40 * 60_000);
