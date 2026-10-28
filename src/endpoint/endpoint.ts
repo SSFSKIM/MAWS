@@ -41,7 +41,7 @@ import { DirectListener, type DirectListenerOptions } from './direct-listener';
 import { Actions } from './actions';
 import { runCli } from './cli';
 import { EndpointActions, type EffectResult } from './endpoint-actions';
-import { enrollDelegatedInto, speaksFor, syncAndPromote, type DelegatedInput, type EnrollContext, type EnrollmentState } from './enroll';
+import { speaksFor, syncAndPromote, type EnrollContext, type EnrollmentState } from './enroll';
 import { Freshness } from './freshness';
 import { Gate } from './gate';
 import { acceptGrant, dropRevokedGrants, machineOwnerMembers, machineRights } from './grants';
@@ -54,6 +54,8 @@ import { EndpointOrg, type OrgChange } from './org-sync';
 import { PlaneA } from './plane-a';
 import { PlaneB } from './plane-b';
 import { EndpointPolicy, settingsDefaultMode } from './policy';
+import { completeProvisioning, provisionInto, type DelegatedInput } from './provision';
+import { retireInto, type Retired } from './retire';
 import { Queries } from './queries';
 import { Rl10 } from './rl10/link';
 import type { EndpointModule, EndpointServices } from './services';
@@ -144,6 +146,8 @@ export class Endpoint implements EndpointModule {
   #stopped = false;
   /** Records the hub refused for now, tried again while the connection lasts. */
   readonly #retries = new RecordRetries();
+  /** The changes of the enrollment begun, one after another (`EnrollContext.lifecycle`). */
+  #lifecycle: Promise<unknown> = Promise.resolve();
 
   constructor(options: EndpointOptions = {}) {
     this.#options = options;
@@ -399,6 +403,8 @@ export class Endpoint implements EndpointModule {
     );
     this.notifier.restore();
     if (state.refusing !== null) return;
+    // A provisioning interrupted mid-set (O14 M1) is whole again before anything below reads the directory.
+    await completeProvisioning(state, org, log, () => this.rl10.forgetRecords());
     this.own.open();
     if (state.machineKey !== null) {
       try {
@@ -478,6 +484,11 @@ export class Endpoint implements EndpointModule {
       ref: parts.services.machine.ref,
       deps: this.deps,
       log: (line) => parts.services.log(line),
+      lifecycle: (run) => this.#serialLifecycle(run),
+      recordsMoved: () => {
+        this.rl10.forgetRecords();
+        parts.services.log('endpoint: RL10\'s kept signatures and replay index were another authority\'s: moved aside');
+      },
       keyChanged: (key) => {
         this.#key = key;
         // The new key speaks for the machine once it is judged to; the channels the old key authenticated end, their
@@ -497,8 +508,54 @@ export class Endpoint implements EndpointModule {
     };
   }
 
-  enrollDelegated(input: DelegatedInput): Promise<EnrollmentState> {
-    return enrollDelegatedInto(this.enrollContext(), input);
+  /** Delegated enrollment (O14 M1's `provision` with no wait): `org-listed` once the certificate is live. */
+  async enrollDelegated(input: DelegatedInput): Promise<EnrollmentState> {
+    return (await provisionInto(this.enrollContext(), { ...input, waitMs: 0 })).result;
+  }
+
+  /**
+   * `mawsd endpoint unenroll` (O14 M1): the endpoint taken back to `enrollment: none` on this machine alone, whatever the
+   * hub knows. The state directory's private keys are destroyed and the rest moved aside first (`EndpointState.unenroll`,
+   * in the org view's queue so no adoption in flight writes after it), so nothing judged meanwhile can serve again; then
+   * RL10 is unserved (`rl10.json` and the socket gone, so sminos sees no endpoint), every channel closes `removed`, and
+   * the hub link and the direct listener stop. The profile's `machine.json` is kept: a later enrollment takes a new key
+   * under the same ref.
+   */
+  unenroll(): Promise<{ aside: string; keyIds: string[] }> {
+    return this.#serialLifecycle(() => this.#unenroll());
+  }
+
+  /** `mawsd endpoint retire` (O14 M1, retire.ts), after any change of the enrollment begun; its own unenroll runs inside it. */
+  retire(input: { notAfter?: string }): Promise<Retired> {
+    return this.#serialLifecycle(() => retireInto(this.enrollContext(), () => this.#unenroll(), input));
+  }
+
+  #serialLifecycle<T>(run: () => Promise<T>): Promise<T> {
+    const next = this.#lifecycle.then(run);
+    this.#lifecycle = next.catch(() => {});
+    return next;
+  }
+
+  async #unenroll(): Promise<{ aside: string; keyIds: string[] }> {
+    const parts = this.parts;
+    if (parts === null) throw new Error('the endpoint has not started');
+    const result = await parts.org.exclusive(() => parts.state.unenroll(this.deps.now()));
+    this.#judgments++;
+    this.#speaks = false;
+    this.#key = null;
+    this.#headHash = null;
+    if (this.#timer !== null) clearInterval(this.#timer);
+    this.#timer = null;
+    await this.rl10.unserve();
+    await this.channels.closeAll('removed');
+    await this.#direct?.stop();
+    this.#directStarted = false;
+    this.links.listener = { bound: false };
+    await this.hub.stop();
+    this.hub.reset();
+    this.links.hub = { connected: false };
+    parts.services.log(`endpoint: unenrolled; ${result.keyIds.length} private key(s) destroyed, the rest of the state moved aside to ${result.aside}`);
+    return result;
   }
 
   /** Reads the hub's org state now (one at a time); a failure is logged and waits for the next. */

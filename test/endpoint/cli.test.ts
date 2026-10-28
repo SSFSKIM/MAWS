@@ -1,5 +1,6 @@
 // `mawsd endpoint` commands that need no hub (O10 M2): the policy, a state delivered by hand (`revoke`), a grant kept
-// out of band by the ledger's rule, the legacy key following the head's retirement, and the refusals around them.
+// out of band by the ledger's rule, the legacy key following the head's retirement, and the refusals around them; and
+// O14 M1's local `unenroll` and `retire`'s refusal of an attended enrollment.
 import * as fs from 'node:fs';
 import { join } from 'node:path';
 import { endorseDevice, generateSigningKey, keyId, NO_CERTIFICATES, SIGNING_DOMAINS, signRecord, type Grant, type SignedOrgState, type SigningKey } from 'org-protocol';
@@ -279,6 +280,65 @@ describe('the rest', () => {
     const refused = await endpoint.cli('enroll', ['--name', 'mini'], garbage);
     expect(refused.code).toBe(1);
     expect(refused.out).not.toContain(garbage);
-    expect((await endpoint.cli('keys', ['--json'])).out).toBe(JSON.stringify({ enrollment: 'none', ref: services.machine.ref }));
+    expect((await endpoint.cli('keys', ['--json'])).out).toBe(JSON.stringify({ enrollment: 'none', ref: services.machine.ref, delegated: false }));
+  });
+});
+
+describe('unenroll and retire, with no hub (O14 M1)', () => {
+  it('unenrolls a listed machine locally: RL10 unserved, every private key destroyed with its id kept, the rest aside', async () => {
+    const { endpoint, machineKey } = await enrolled();
+    const dir = services.machine.stateDir;
+    await expect.poll(() => fs.existsSync(join(dir, 'rl10.json'))).toBe(true);
+    // An earlier stale directory still holding private keys: the key-without-ledger rule's, or an earlier unenroll's.
+    const earlier = join(dir, 'stale-2026-10-01T00-00-00.000Z');
+    fs.mkdirSync(earlier, { mode: 0o700 });
+    const orphan = await generateSigningKey(true);
+    const delegation = await generateSigningKey(true);
+    fs.writeFileSync(join(earlier, 'machine-key.json'), JSON.stringify({ version: 1, keyId: await keyId(orphan.pub), jwk: await crypto.subtle.exportKey('jwk', orphan.privateKey), created: new Date().toISOString() }), { mode: 0o600 });
+    fs.writeFileSync(join(earlier, 'delegation.json'), JSON.stringify({ version: 1, id: 'a'.repeat(32), prefix: 'vm-', privateJwk: await crypto.subtle.exportKey('jwk', delegation.privateKey) }), { mode: 0o600 });
+    fs.writeFileSync(join(dir, 'legacy.json'), JSON.stringify({ org: ORG, key: 'k'.repeat(43) }), { mode: 0o600 });
+    // The signatures made and the replay index stay where a later enrollment under the same ref reads them.
+    const signatures = endpoint.parts!.state.subdirectory('signatures');
+    const inbound = endpoint.parts!.state.subdirectory('inbound');
+    fs.writeFileSync(join(signatures, 'p1.jsonl'), '{"writer":"mini/s","seq":1}\n', { mode: 0o600 });
+    fs.writeFileSync(join(inbound, 'p1.jsonl'), '{"writer":"hub/x","seq":1}\n', { mode: 0o600 });
+
+    const undone = await endpoint.cli('unenroll', ['--json']);
+    expect(undone.code, undone.out).toBe(0);
+    const view = JSON.parse(undone.out) as { enrollment: string; destroyed: string[]; aside: string };
+    expect(view.enrollment).toBe('none');
+    expect(new Set(view.destroyed)).toEqual(new Set([machineKey, await keyId(orphan.pub), await keyId(delegation.pub)]));
+    expect(fs.existsSync(join(dir, 'rl10.json'))).toBe(false);
+    for (const gone of [join(dir, 'machine-key.json'), join(earlier, 'machine-key.json'), join(earlier, 'delegation.json')]) expect(fs.existsSync(gone), gone).toBe(false);
+    const aside = join(dir, view.aside);
+    expect(JSON.parse(fs.readFileSync(join(aside, 'keys.json'), 'utf8'))).toEqual({ keyIds: view.destroyed });
+    for (const moved of ['grants.json', 'enrollment.json', 'org.json', 'legacy.json']) {
+      expect(fs.existsSync(join(aside, moved)), moved).toBe(true);
+      expect(fs.existsSync(join(dir, moved)), moved).toBe(false);
+    }
+    for (const kept of ['signatures/p1.jsonl', 'inbound/p1.jsonl']) {
+      expect(fs.existsSync(join(dir, kept)), kept).toBe(true);
+      expect(fs.existsSync(join(aside, kept)), kept).toBe(false);
+    }
+    expect(endpoint.status()).toMatchObject({ enrollment: 'none', legacyKey: false, delegated: false });
+    // A fresh process over the directory is unenrolled, refusing nothing.
+    const again = createEndpoint();
+    await again.start(services);
+    expect(again.status()).toMatchObject({ enrollment: 'none' });
+    expect(again.status().refusing).toBeUndefined();
+    await again.stop();
+    await endpoint.stop();
+  });
+
+  it('refuses to retire an attended enrollment, touching nothing, and has nothing to retire once unenrolled', async () => {
+    const { endpoint } = await enrolled();
+    const refused = await endpoint.cli('retire', []);
+    expect(refused.code).toBe(1);
+    expect(refused.out).toMatch(/^not-delegated: /);
+    expect(endpoint.status()).toMatchObject({ enrollment: 'org-listed' });
+    expect((await endpoint.cli('retire', ['--not-after', 'tomorrow'])).code).toBe(1);
+    expect((await endpoint.cli('unenroll', [])).code).toBe(0);
+    expect(await endpoint.cli('retire', [])).toEqual({ code: 0, out: 'nothing to retire: this machine holds no certificate and no credential' });
+    await endpoint.stop();
   });
 });
