@@ -10,12 +10,14 @@
 // when its pending count in the machine's presence moves. No view reads the endpoint's `caps` grades as what this phone
 // may do: the endpoint decides each answer.
 //
-// A push's tap lands here (P5 O13 M6, `/cards/<ref>/<session>`), cold or in a window already open. A landing on a
-// machine the org state this phone holds does not resolve — a VM certified since the last read, which moved no version
-// and raised no notice — reads the state again for that machine, at most once a minute (org-store.ts's `refresh`, keyed
-// by the ref as a listing's unresolved signer is), whatever the view's own read on opening found too recent to repeat.
+// A push's tap lands here (P5 O13 M6, `/cards/<ref>/<session>`), cold or in a window already open. At each landing (a
+// second tap on the same cards reuses this view) and at the view's opening, a machine the org state this phone holds
+// does not resolve — a VM certified since the last read, which moved no version and raised no notice — has the state
+// read again for it, at most once a minute (org-store.ts's `refresh`, keyed by the ref as a listing's unresolved
+// signer is), whatever the view's own read on opening found too recent to repeat.
 import { useEffect, useState } from 'react';
 import type { Me } from '../../hub/me';
+import { useCardsLanding } from '../../pwa/service-worker';
 import { useDeskLayout } from '../../shell/layout';
 import { useNarrow } from '../../shell/viewport';
 import { bootDevice } from '../../cards/boot';
@@ -58,9 +60,10 @@ export function ChannelCards({ me, machine, session, onDevice }: { me: Me; machi
   const looked = useSessionListing(machine, session, loaded && listed);
   const resolved = useCardsBoard((s) => s.machines.find((m) => m.ref === machine)?.name);
   const watching = useCardsBoard((s) => s.watching);
+  const landing = useCardsLanding((s) => (s.landed?.machine === machine && s.landed.session === session ? s.landed.n : 0));
   useEffect(() => {
     if (watching && resolved === undefined) refreshOrg(machine);
-  }, [machine, watching, resolved]);
+  }, [machine, watching, resolved, landing]);
   const name = resolved ?? `${machine.slice(0, 8)}…`;
   const navigate = useDeskLayout((s) => s.navigate);
   const narrow = useNarrow(); // a phone's top bar has the way back
