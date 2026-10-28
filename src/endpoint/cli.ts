@@ -7,6 +7,8 @@
 //   grant <file|->         a signed grant, kept by the ledger's rule (grants.ts)
 //   policy [--read-only on|off] [--ceiling MODE|settings] [--json]
 //   legacy retire          deletes the DX1 org key (O14's final brief)
+//   attest-history [--former NAME]… [--project ID] [--check] [--json]
+//                          signs the machine's phase-1 history, or checks what the hub keeps of it (history.ts, O14 M4)
 //
 // `-` reads the file's content from the request's `secret`, as `mawsd`'s client sends stdin. Exit codes are O2's: 0
 // done, 1 failed, 2 not available here, 3 not running, 4 enrolled with the hub but not yet listed in the org state.
@@ -14,6 +16,7 @@ import { readFileSync } from 'node:fs';
 import { parseArgs, type ParseArgsOptionsConfig } from 'node:util';
 import { keyId, stateHash, type SignedOrgState } from 'org-protocol';
 import { EnrollError, enrollAttended } from './enroll';
+import { attestHistory, checkHistory, historyNames, type Attested, type Checked } from './history';
 import type { Endpoint } from './endpoint';
 import { acceptGrant } from './grants';
 import { describePolicy, isCeiling } from './policy';
@@ -23,7 +26,8 @@ export const EXIT = { done: 0, failed: 1, notHere: 2, notRunning: 3, notListed: 
 type Out = { code: number; out: string };
 
 const USAGE = `usage: mawsd endpoint enroll [--name N] [--replace] [--wait [s]] [--json] | keys [--json] | status [--json]
-                     | revoke <file|-> | grant <file|-> | policy [--read-only on|off] [--ceiling MODE|settings] | legacy retire`;
+                     | revoke <file|-> | grant <file|-> | policy [--read-only on|off] [--ceiling MODE|settings] | legacy retire
+                     | attest-history [--former NAME]… [--project ID] [--check] [--json]`;
 /** `--wait` with no number waits this long (O2 M6). */
 const DEFAULT_WAIT_S = 300;
 
@@ -45,6 +49,8 @@ export async function runCli(endpoint: Endpoint, command: string, args: readonly
         return policy(endpoint, args);
       case 'legacy':
         return legacy(endpoint, args);
+      case 'attest-history':
+        return await attestHistoryCommand(endpoint, args);
       default:
         return { code: EXIT.failed, out: USAGE };
     }
@@ -177,4 +183,69 @@ function legacy(endpoint: Endpoint, args: readonly string[]): Out {
   if (!state.legacy) return { code: EXIT.done, out: 'no legacy org key is held' };
   state.removeLegacy();
   return { code: EXIT.done, out: 'the legacy org key is deleted: events go out v2-only from now on' };
+}
+
+/**
+ * `attest-history`: the machine's DX1 writers under its current name and each `--former` one, attested (exit 0 when
+ * every one is attested or was already, 1 when any is skipped or refused), or with `--check` judged against what the hub
+ * keeps (exit 0 only when every one is `verified`). Attesting needs the legacy key, to check each event's code; the check
+ * needs none. Both need the machine listed in the org state, whose key signs.
+ */
+async function attestHistoryCommand(endpoint: Endpoint, args: readonly string[]): Promise<Out> {
+  const { values } = parse(args, { former: { type: 'string', multiple: true }, project: { type: 'string' }, check: { type: 'boolean' }, json: { type: 'boolean' } });
+  const { state, org, services } = endpoint.parts!;
+  const enrollment = state.enrolled ? state.enrollment : null;
+  if (enrollment === null) return { code: EXIT.failed, out: 'not enrolled: there is no machine key to sign with' };
+  if (enrollment.state !== 'org-listed' || endpoint.key === null || !org.ready) {
+    return { code: EXIT.notListed, out: `${enrollment.name} is not listed in the org state yet: nothing its key signs would verify` };
+  }
+  const names = historyNames(enrollment.name, values.former ?? []);
+  if (typeof names === 'string') throw new UsageError(`${names}\n${USAGE}`);
+  const legacy = endpoint.rl10.legacy;
+  if (!values.check && !legacy.held) return { code: EXIT.failed, out: 'no legacy org key is held: no event’s code can be checked, so nothing is attested (`--check` needs none)' };
+  const ctx = {
+    deps: endpoint.deps,
+    hub: enrollment.hub,
+    credentials: enrollment.credentials,
+    org: enrollment.org,
+    ref: services.machine.ref,
+    key: endpoint.key,
+    head: org.head().state,
+    certificates: org.certificates(),
+    verifiesCode: (project: string, event: object) => legacy.verifies(project, event),
+  };
+  if (values.check) {
+    const checked = await checkHistory(ctx, names, values.project);
+    const code = checked.every((c) => c.outcome === 'verified') ? EXIT.done : EXIT.failed;
+    if (values.json) return { code, out: JSON.stringify({ names, writers: checked }) };
+    return { code, out: [...checked.map(checkedLine), summary(checked, names)].join('\n') };
+  }
+  const attested = await attestHistory(ctx, names, values.project);
+  const code = attested.every((a) => a.outcome === 'attested' || a.outcome === 'already') ? EXIT.done : EXIT.failed;
+  if (values.json) return { code, out: JSON.stringify({ names, writers: attested }) };
+  return { code, out: [...attested.map(attestedLine), summary(attested, names)].join('\n') };
+}
+
+function attestedLine(a: Attested): string {
+  const at = `${a.project}/${a.writer}`;
+  if (a.outcome === 'attested') return `attested ${at} through ${a.upTo}`;
+  if (a.outcome === 'already') return `already attested ${at} through ${a.upTo}`;
+  if (a.outcome === 'skipped') return `skipped ${at}: seq ${a.seq} ${a.reason}`;
+  return `refused ${at}: ${a.refusal}`;
+}
+
+function checkedLine(c: Checked): string {
+  const at = `${c.project}/${c.writer}`;
+  if (c.outcome === 'verified') return `verified ${at} through ${c.upTo}`;
+  if (c.outcome === 'mismatch') return `mismatch ${at}: ${c.reason}`;
+  if (c.outcome === 'missing') return `missing ${at}: the hub serves its events short of seq ${c.upTo}`;
+  return `uncovered ${at}: no attestation reaches seq ${c.upTo}`;
+}
+
+/** `n outcome, …` over the writers, and the names they were asked under. */
+function summary(rows: ReadonlyArray<{ outcome: string }>, names: string[]): string {
+  const counts = new Map<string, number>();
+  for (const r of rows) counts.set(r.outcome, (counts.get(r.outcome) ?? 0) + 1);
+  const said = [...counts].map(([outcome, n]) => `${n} ${outcome}`).join(', ');
+  return `${rows.length === 0 ? 'no DX1 writer' : said} under ${names.join(', ')}`;
 }
