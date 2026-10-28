@@ -608,6 +608,7 @@ M3's own edits are the no-change successor and that revocation. The delegation a
   - `rekey`: new keys registered with a second `pair`, `remove-device` of the old id by the admin, the retired file destroyed.
   - a delivery to an endpoint more than 16 states behind, adopted through the genesis fallback and acknowledged;
   - a delivery while the local hub refuses the post, the endpoint adopting the pending state over the link.
+  - one run of consecutive states filling `DELIVERY_MAX_BYTES` delivered over the real link and adopted, with an `endpoint.state` done. A single state over the bound is `too-large` in `deliveries.test.ts` and is never sent (the architect, 2026-10-28).
 - `OrgSection.test.tsx`: the root line, and no `root add` guidance for an unmarked device; the quiet line and Re-sign now; the superseded offer; owing machines; `pending-fork` with Discard behind its confirmation; `signing` with Reset behind its confirmation; the rekey offer with its code field.
 
 ### M4 — The Org page *(advisory; taste: Q1, answered)*
@@ -1486,6 +1487,10 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   5. Recovery first starts at the newest transition's `fromVersion`. Any judging answer records the probe.
   6. A forward `not-newer` or `rollback` drops the cursor and resumes head-finding past the run.
   7. `too-large` clears the cursor and keeps the machine owed, and a retry finds its head from caps.
+  9. (The architect's check, 2026-10-28.) The bound comes from the receiving side.
+     - A delivery reaches the endpoint as one RL2 message (`endpoint.state` in a call). RL2 messages are capped at `MESSAGE_MAX_BYTES` (4 MiB, `org-protocol` `channel.ts:50`). The endpoint's calls hold that cap less 1 KiB (`src/endpoint/calls.ts:101`). RL2 pages a message over RL1's 1 MiB frames (`RL1_MESSAGE_LIMIT`, `relay.ts:19`; `HANDSHAKE_PAGE_BYTES`).
+     - `DELIVERY_MAX_BYTES`, 512 KiB, is an eighth of that cap. That leaves margin for the call's envelope and the transitions it carries.
+     - Task 7 proves one run at the bound end to end over the real link. `deliveries.test.ts` proves that a single over-bound state reads `too-large` and is not retried in a loop.
   8. The planner's "last 16 held states" (the signer entry above) and `DELIVERY_SPAN` are superseded by the byte-bounded forward paging of the re-plan's rounds. The §H row is gone, and the constant leaves `timing.ts`.
   Date/Author: 2026-10-28, O8's executor.
 
