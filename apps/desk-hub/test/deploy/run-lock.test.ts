@@ -36,13 +36,14 @@ const holding = (lock: string) =>
 await withRunLock(${JSON.stringify(lock)}, () => { process.stdout.write('held\\n'); setInterval(() => {}, 1000); return new Promise(() => {}); });`;
 
 /** Starts `source` in a child, waits for its `held`, runs `then`, and resolves with how the child ended (bounded). */
-async function signalled(source: string, signal: NodeJS.Signals, then: () => void = () => {}): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
-  const child = spawn(process.execPath, nodeArgs(source), { stdio: ['ignore', 'pipe', 'inherit'] });
+async function signalled(source: string, signal: NodeJS.Signals, then: () => void = () => {}, stdin: 'ignore' | 'pipe' = 'ignore'): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
+  // With `stdin: 'pipe'` the child's stdin is a pipe this side holds open and never writes to.
+  const child = spawn(process.execPath, nodeArgs(source), { stdio: [stdin, 'pipe', 'inherit'] });
   const ended = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => child.once('exit', (code, sig) => resolve({ code, signal: sig })));
   try {
     await new Promise<void>((resolve, reject) => {
       let seen = '';
-      child.stdout.on('data', (chunk: Buffer) => (seen += chunk.toString()).includes('held') && resolve());
+      child.stdout!.on('data', (chunk: Buffer) => (seen += chunk.toString()).includes('held') && resolve());
       void ended.then(() => reject(new Error(`the child ended before it held the lock: ${seen}`)));
     });
     then();
@@ -161,6 +162,9 @@ def reap(seconds):
     return None
 if b'READY' not in drain(20):
     os.kill(pid, signal.SIGKILL); os.waitpid(pid, 0); print(json.dumps({'ended': 'never asked'})); sys.exit()
+# The prompt is waiting, as the owner's would be: a hangup before its first read would be read as the end of input
+# before the loop ever saw the SIGHUP.
+time.sleep(0.3)
 if how == 'hangup': os.close(master)
 elif how == 'ctrl-c': os.write(master, b'\\x03')
 elif how == 'type': os.write(master, b'yes\\nmore\\n')
@@ -171,18 +175,19 @@ if status is None:
 print(json.dumps({'ended': f'exit {os.WEXITSTATUS(status)}' if os.WIFEXITED(status) else f'signal {os.WTERMSIG(status)}', 'shown': shown.decode(errors='replace')}))`;
 
 describe.skipIf(spawnSync('python3', ['-c', 'import pty']).status !== 0)('a run ended by a signal at the owner’s prompt', () => {
-  const asking = (lock: string) =>
+  /** A run asking at the deployment's terminal (/dev/tty), or at the local hub's (stdin and stdout). */
+  const asking = (lock: string, deployment = true) =>
     `import { withRunLock } from ${JSON.stringify(deploy('run-lock.ts'))};
 import { openTerminal } from ${JSON.stringify(deploy('terminal.ts'))};
 await withRunLock(${JSON.stringify(lock)}, async () => {
-  const terminal = openTerminal(true);
+  const terminal = openTerminal(${deployment});
   terminal.write('approve? READY\\n');
   const first = await terminal.readLine();
   const second = await terminal.readLine();
   terminal.write(\`read \${JSON.stringify([first, second])}\\n\`);
 });`;
-  const atPrompt = (how: string) => {
-    const r = spawnSync('python3', ['-I', '-c', PTY, how, process.execPath, ...nodeArgs(asking(lock))], { encoding: 'utf8', timeout: 30_000 });
+  const atPrompt = (how: string, deployment = true) => {
+    const r = spawnSync('python3', ['-I', '-c', PTY, how, process.execPath, ...nodeArgs(asking(lock, deployment))], { encoding: 'utf8', timeout: 30_000 });
     return JSON.parse(r.stdout) as { ended: string; shown?: string };
   };
 
@@ -201,6 +206,54 @@ await withRunLock(${JSON.stringify(lock)}, async () => {
     ['hangup', 'exit 129'],
   ])('ends at %s while the prompt waits for a line, removing its lock', (how, ended) => {
     expect(atPrompt(how).ended).toBe(ended);
+    expect(existsSync(lock)).toBe(false);
+  });
+
+  // At the local hub the prompt is stdin's: a terminal there (the pty) as an operator runs it by hand.
+  it('reads each line typed at the local hub’s terminal', () => {
+    const { ended, shown } = atPrompt('type', false);
+    expect(ended).toBe('exit 0');
+    expect(shown).toContain('read ["yes","more"]');
+    expect(existsSync(lock)).toBe(false);
+  });
+
+  it.each([
+    ['SIGINT', 'exit 130'],
+    ['ctrl-c', 'exit 130'],
+    ['SIGTERM', 'exit 143'],
+    ['hangup', 'exit 129'],
+  ])('ends at %s while the local hub’s terminal prompt waits, removing its lock', (how, ended) => {
+    expect(atPrompt(how, false).ended).toBe(ended);
+    expect(existsSync(lock)).toBe(false);
+  });
+});
+
+describe('the local hub’s prompt on a pipe', () => {
+  /** A run holding the lock that reads its answers from stdin, printing `held` before the first and each line after it. */
+  const reading = (lock: string, lines: number) =>
+    `import { withRunLock } from ${JSON.stringify(deploy('run-lock.ts'))};
+import { openTerminal } from ${JSON.stringify(deploy('terminal.ts'))};
+await withRunLock(${JSON.stringify(lock)}, async () => {
+  const terminal = openTerminal(false);
+  process.stdout.write('held\\n');
+  for (let i = 0; i < ${lines}; i++) process.stdout.write(\`line \${JSON.stringify(await terminal.readLine())}\\n\`);
+  let rest = '';
+  for await (const chunk of process.stdin) rest += chunk;
+  process.stdout.write(\`rest \${JSON.stringify(rest)}\\n\`);
+});`;
+
+  it.each(['SIGINT', 'SIGTERM'] as const)('ends at %s while it waits for a line that never comes, removing its lock', async (signal) => {
+    expect(await signalled(reading(lock, 1), signal, () => {}, 'pipe')).toEqual({ code: 128 + constants.signals[signal], signal: null });
+    expect(existsSync(lock)).toBe(false);
+  });
+
+  it('reads line by line, and leaves what follows its lines on stdin for whatever reads it next', () => {
+    const r = spawnSync(process.execPath, nodeArgs(reading(lock, 2)), { input: 'yes\nno\nthe rest\nof it', encoding: 'utf8', timeout: 20_000 });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toBe('held\nline "yes"\nline "no"\nrest "the rest\\nof it"\n');
+    // Input that ends before a newline is the last line; after the end, a line is empty.
+    const short = spawnSync(process.execPath, nodeArgs(reading(lock, 2)), { input: 'y', encoding: 'utf8', timeout: 20_000 });
+    expect(short.stdout).toBe('held\nline "y"\nline ""\nrest ""\n');
     expect(existsSync(lock)).toBe(false);
   });
 });
