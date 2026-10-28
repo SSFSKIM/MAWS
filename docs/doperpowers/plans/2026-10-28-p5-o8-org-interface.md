@@ -763,16 +763,16 @@ Each is built as its recommendation when its milestone is re-planned, unless the
   - **Machines**: name, owners, online, rights, and "Enroll a machine" giving a code;
   - **Org**: the state's version and age, the roots, the recovery key's id, and revocations still owed.
 
-  Each change opens a sheet that shows exactly what will be signed and asks Touch ID. *Alternatives:* a dedicated Org tab outside Settings, with more room for a page opened rarely; or machines managed from the sidebar's machine rows, closer to where machines appear but splitting administration across two places.
-- **Q2. Owners on rows** (M5). *Recommendation:* show owners only where they aren't just you. Your own sessions look as today. A session someone else owns, or you co-own, shows first names after the title in the chip's secondary style ("Ana, Ben +3" past two), and the hover card lists them all. This rewords P5 acceptance 11's "every session row shows its owners" to "every row of a session you don't own alone", for P5's writer. *Alternatives:* an owner chip on every row, as acceptance 11 is worded; avatars.
-- **Q3. The per-project toggle** (M5; O6's T6). *Recommendation:* a "People" toggle on the project row's hover and in its menu, off by default and remembered per project. When it is on, others' sessions join the list in activity order, each with its owner. While it is off, the project row says "+N others", faint, only when there are any. *Alternatives:* one toggle in the sidebar's header for every project; others' sessions in an "Others" group under each project.
+  Each change opens a sheet that shows exactly what will be signed and asks Touch ID. *Alternatives:* a dedicated Org tab outside Settings, with more room for a page opened rarely; or machines managed from the sidebar's machine rows, closer to where machines appear but splitting administration across two places. **[owner, 2026-10-28: as recommended; P5 Decision Log 111.]**
+- **Q2. Owners on rows** (M5). *Recommendation:* show owners only where they aren't just you. Your own sessions look as today. A session someone else owns, or you co-own, shows first names after the title in the chip's secondary style ("Ana, Ben +3" past two), and the hover card lists them all. This rewords P5 acceptance 11's "every session row shows its owners" to "every row of a session you don't own alone", for P5's writer. *Alternatives:* an owner chip on every row, as acceptance 11 is worded; avatars. **[owner, 2026-10-28: as recommended; P5 Decision Log 111.]**
+- **Q3. The per-project toggle** (M5; O6's T6). *Recommendation:* a "People" toggle on the project row's hover and in its menu, off by default and remembered per project. When it is on, others' sessions join the list in activity order, each with its owner. While it is off, the project row says "+N others", faint, only when there are any. *Alternatives:* one toggle in the sidebar's header for every project; others' sessions in an "Others" group under each project. **[owner, 2026-10-28: as recommended; P5 Decision Log 111.]**
 - **Q4. Visibility and shares** (M6). *Recommendation:* a Share sheet from the session's header and its row menu, shaped like a shared document's:
   - General access: Private, Listed (the default), Org can view, or Org can talk, each with one line on what it means;
   - People, each with View, Converse or Approve, and Add person;
   - Touch ID on save;
   - with Private, the line that the messages its agent sends other agents stay readable across the org (RL §6.2).
 
-  A row whose access isn't the default shows a small lock or people mark. *Alternatives:* visibility only in the session's info panel; a default per project.
+  A row whose access isn't the default shows a small lock or people mark. *Alternatives:* visibility only in the session's info panel; a default per project. **[owner, 2026-10-28: as recommended; P5 Decision Log 111.]**
 - **Q5. The project channel** (M7). *Recommendation:* a tab opened from the project row (a "Channel" item), reading like the desk's group chat:
   - one stream for the project across machines;
   - each to-human message as an entry with its session's title and machine chip;
@@ -782,9 +782,9 @@ Each is built as its recommendation when its milestone is re-planned, unless the
   - an offline machine's entries from the cache, with "as of" its time;
   - migrated events labelled "attested at migration by `<machine>`".
 
-  *Alternatives:* one inbox across projects, filtered by project; agent-to-agent traffic shown unfolded.
-- **Q6. The signer's prompts** (M3, M8). *Recommendation:* the weekly successor asks once, with Touch ID, at the first focus of the app after the head turns 7 days old: a quiet line in the Org section and one notification, never more than once a day. Making the app a root, and later ending the deployment admin, are guided flows in the Org page, each step named. *Alternative:* re-sign only once the head nears 21 days, with fewer prompts and less margin before the 30-day backstop.
-- **Q7. Renewing the hub sign-in** (M1, built as recommended). *Recommendation:* one browser trip each time the Access session ends (720 h on staging), shown in the Org section and as one notification; Cloudflare's team-wide org token discarded. *Alternative:* keep the org token as `cloudflared` does, so the app renews with no browser, at the cost of holding a credential that signs you in to every Access application of the team, not only the hub.
+  *Alternatives:* one inbox across projects, filtered by project; agent-to-agent traffic shown unfolded. **[owner, 2026-10-28: as recommended; P5 Decision Log 111.]**
+- **Q6. The signer's prompts** (M3, M8). *Recommendation:* the weekly successor asks once, with Touch ID, at the first focus of the app after the head turns 7 days old: a quiet line in the Org section and one notification, never more than once a day. Making the app a root, and later ending the deployment admin, are guided flows in the Org page, each step named. *Alternative:* re-sign only once the head nears 21 days, with fewer prompts and less margin before the 30-day backstop. **[owner, 2026-10-28: as recommended; P5 Decision Log 111.]**
+- **Q7. Renewing the hub sign-in** (M1, built as recommended). *Recommendation:* one browser trip each time the Access session ends (720 h on staging), shown in the Org section and as one notification; Cloudflare's team-wide org token discarded. *Alternative:* keep the org token as `cloudflared` does, so the app renews with no browser, at the cost of holding a credential that signs you in to every Access application of the team, not only the hub. **[owner, 2026-10-28: as recommended; P5 Decision Log 111.]**
 
 ## Surprises & Discoveries
 
