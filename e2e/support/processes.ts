@@ -2,10 +2,15 @@
 // helpers): a supervisor's command line names the profile's root (`--detached <dir>`), so a case's cleanup kills every
 // pid it recorded and every process naming the root, and then checks that none outlives it. Used by e2e/supervisor.spec.ts
 // and e2e/supervisor-packaged.spec.ts; free of Playwright, so test/support/processes.test.ts runs it under vitest. The
-// launch's own cleanup (launch.ts) waits here for the shells the app started before it removes their scratch home.
+// launch's own cleanup (launch.ts) waits here for the shells the app started before it removes their scratch home, and
+// (P5 O3-B) ends what the daemon shape leaves running on the profile (endProfileProcesses).
 import { execFileSync } from 'node:child_process';
-import { readlinkSync, realpathSync } from 'node:fs';
-import { basename, sep } from 'node:path';
+import { existsSync, readlinkSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, dirname, join, sep } from 'node:path';
+import { daemonPaths } from '../../src/shared/daemon/files';
+import { socketPathFor } from '../../src/engine-host/supervisor-files';
+import { ptyHostSocketPath } from '../../src/pty-host/files';
 
 export function isAlive(pid: number): boolean {
   try {
@@ -124,10 +129,11 @@ export interface ProcessIdentity {
 // A shell's name as `ps` reports it (a login shell's carries a leading dash), by its last path component.
 const SHELL_NAME = /^-?(ba|z|da|k|tc|c|fi)?sh$/;
 
-// The shells among `rootPid`'s descendants (a terminal's login shell, a host's environment capture): what may still be
-// saving its history into a launch's scratch shell home as it exits on its terminal's hang-up, after the app has closed.
-// Their own children (a command a shell runs) are not shells and are not listed unless they are shells themselves.
-export function shellsUnder(rootPid: number): ProcessIdentity[] {
+// The shells among the descendants of `rootPids` (a terminal's login shell, a host's environment capture): what may still
+// be saving its history into a launch's scratch shell home as it exits on its terminal's hang-up, after the app has
+// closed. Their own children (a command a shell runs) are not shells and are not listed unless they are shells themselves.
+// P5 O3-B: on the daemon shape a terminal's shell is the profile's pty host's, not the app's, so a launch names both.
+export function shellsUnder(rootPids: number | readonly number[]): ProcessIdentity[] {
   const out = execFileSync('ps', ['-axo', 'pid=,ppid=,comm='], { encoding: 'utf8' });
   const children = new Map<number, { pid: number; comm: string }[]>();
   for (const line of out.split('\n')) {
@@ -137,7 +143,7 @@ export function shellsUnder(rootPid: number): ProcessIdentity[] {
     children.set(ppid, [...(children.get(ppid) ?? []), { pid: Number(m[1]), comm: m[3]!.trim() }]);
   }
   const shells: number[] = [];
-  const queue = [rootPid];
+  const queue = typeof rootPids === 'number' ? [rootPids] : [...rootPids];
   while (queue.length > 0) {
     for (const child of children.get(queue.pop()!) ?? []) {
       queue.push(child.pid);
@@ -160,6 +166,27 @@ export async function untilExited(processes: readonly ProcessIdentity[], timeout
     if (left.length === 0 || Date.now() >= deadline) return left;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
+}
+
+// P5 O3-B (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md, O3-B, acceptance 1): what a launch leaves on its profile
+// once the app has gone. On the daemon shape the profile's private `mawsd`, its engine host and its pty host outlive the
+// app, as the owner's do, each naming the profile in its command line (`--dir <profile>/mawsd`, `--detached <profile>/…`),
+// with the engines they started. Each is killed, as the utility shape's hosts ended with the app, so a relaunch over the
+// profile starts its own and nothing outlives the test; one that does is reported. Then the daemon shape's socket
+// directories outside the profile, when its paths were too long for sun_path, each named for this profile alone.
+export async function endProfileProcesses(userData: string, opts: { timeoutMs?: number; kill?: (pid: number) => void } = {}): Promise<void> {
+  if (!existsSync(userData)) return;
+  try {
+    await killScratchProcesses(join(userData, sep), [], opts); // the separator: never a profile whose path this one prefixes
+  } finally {
+    for (const dir of socketFallbacks(userData)) rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function socketFallbacks(userData: string): string[] {
+  const daemon = daemonPaths(userData);
+  const dirs = [daemon.socketDir, dirname(socketPathFor(join(userData, 'supervisor'), userData, tmpdir())), dirname(ptyHostSocketPath(daemon.ptyHost))];
+  return dirs.filter((dir) => !`${dir}${sep}`.startsWith(join(userData, sep)));
 }
 
 // The TCP addresses the process listens on (`lsof`, which needs no privilege for one's own process), sorted; [] for none.

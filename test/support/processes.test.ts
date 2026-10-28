@@ -6,7 +6,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpat
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { isAlive, killScratchProcesses, processesNaming, ps, shellsUnder, untilExited, type ProcessIdentity } from '../../e2e/support/processes';
+import { daemonPaths } from '../../src/shared/daemon/files';
+import { endProfileProcesses, isAlive, killScratchProcesses, processesNaming, ps, shellsUnder, untilExited, type ProcessIdentity } from '../../e2e/support/processes';
 
 // Only the PID-reuse case replaces an OS reading; the other cases delegate every command to the real OS.
 vi.mock('node:child_process', async (original) => ({ ...await original<typeof import('node:child_process')>(), execFileSync: vi.fn((await original<typeof import('node:child_process')>()).execFileSync) }));
@@ -162,6 +163,38 @@ fs.writeFileSync('parent-ready', ''); setInterval(() => {}, 1_000);`;
   });
 });
 
+// P5 O3-B: what the daemon shape leaves on a launch's profile once the app has gone (a private mawsd and its hosts, each
+// naming a path under the profile) is ended at the launch's cleanup, never a process of a profile this one's path prefixes
+describe('endProfileProcesses', () => {
+  it('kills every process naming a path under the profile, and none of a profile whose path it prefixes', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'maws-profile-'));
+    roots.push(root);
+    const [profile, longer] = [join(root, 'ud'), join(root, 'ud2')];
+    for (const dir of [profile, longer]) mkdirSync(join(dir, 'mawsd'), { recursive: true });
+    const mawsd = await namedChild(join(profile, 'mawsd'));
+    const other = await namedChild(join(longer, 'mawsd'));
+    await endProfileProcesses(profile);
+    await exited(mawsd);
+    expect(mawsd.signalCode).toBe('SIGKILL');
+    expect(isAlive(other.pid!), 'the other profile’s process runs').toBe(true);
+    expect(processesNaming(join(profile, 'mawsd'))).toEqual([]);
+  });
+
+  it('removes the daemon shape’s socket directory outside a profile too long for sun_path, and answers at once for a profile already gone', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'maws-profile-'));
+    roots.push(root);
+    const profile = join(root, 'a-profile-whose-path-is-long-enough-that-its-sockets-fall-back-to-the-tmpdir');
+    const { socketDir } = daemonPaths(profile);
+    expect(socketDir.startsWith(profile), 'the fallback is outside the profile').toBe(false);
+    mkdirSync(profile, { recursive: true });
+    mkdirSync(socketDir, { recursive: true });
+    roots.push(socketDir);
+    await endProfileProcesses(profile);
+    expect(existsSync(socketDir)).toBe(false);
+    await endProfileProcesses(join(root, 'gone'));
+  });
+});
+
 // A Node process in its own process group whose children run `commands` (each through `/bin/sh -c`, or `sleep` alone for
 // a non-shell child): the app's main process, its shells below it, as a launch's cleanup sees them.
 async function parentOf(children: ({ shell: string } | { sleep: number })[], count: number): Promise<number> {
@@ -180,6 +213,12 @@ describe('shellsUnder and untilExited', () => {
     const [shell] = shellsUnder(root);
     expect(shell!.pid).not.toBe(root);
     expect(shell!.started).not.toBe('');
+  });
+
+  it('finds the shells below each of several processes (P5 O3-B: the app and its profile’s pty host)', async () => {
+    const [app, ptyHost] = [await parentOf([{ shell: 'sleep 30; :' }], 1), await parentOf([{ shell: 'sleep 30; :' }, { shell: 'sleep 30; :' }], 2)];
+    expect(shellsUnder([app, ptyHost]).map((s) => s.pid).sort()).toEqual([...shellsUnder(app), ...shellsUnder(ptyHost)].map((s) => s.pid).sort());
+    expect(shellsUnder([app, ptyHost])).toHaveLength(3);
   });
 
   it('waits for a shell to exit, signalling nothing', async () => {

@@ -382,6 +382,9 @@ test('maws-artifact: reaches the app and the capture partition only, an artifact
 //                (migrations.ts); bound < 10 ms.
 //   ackedLost    acknowledged keystrokes missing after a host SIGKILL mid-typing, summed over three kills; bound 0.
 const PERF_BOUNDS = { firstSyncMs: 150, ackP95Ms: 10, ackedLost: 0 } as const;
+// P5 O3-B: the bounds are utility mode's, whose host ends with its app (so each relaunch's first sync is cold) and is
+// restarted by main after a SIGKILL; on the daemon shape the host outlives the app and is `mawsd`'s
+const PERF_ENV = { MAWS_HOST_MODE: 'utility' };
 const load = () => loadavg().map((value) => Math.round(value * 100) / 100);
 function recordBound(bound: keyof typeof PERF_BOUNDS, value: number, detail: Record<string, unknown>): void {
   const limit = PERF_BOUNDS[bound];
@@ -398,7 +401,7 @@ test('S2’s numbers in the product: first sync of a 1 MB document, keystroke to
   test.setTimeout(10 * 60_000);
   const seed = seedDocument(1_000_000);
   profile = mkdtempSync(join(tmpdir(), 'maws-e2e-artifacts-perf-'));
-  launch = await launchMaws({ userData: profile });
+  launch = await launchMaws({ userData: profile, env: PERF_ENV });
   await seamReady(launch.page);
   await hostReady(launch.page);
 
@@ -420,7 +423,7 @@ test('S2’s numbers in the product: first sync of a 1 MB document, keystroke to
   const trials: { ms: number; load: number[] }[] = [];
   for (let trial = 0; trial < 3; trial++) {
     await launch.app.close();
-    launch = await launchMaws({ userData: profile });
+    launch = await launchMaws({ userData: profile, env: PERF_ENV });
     await seamReady(launch.page);
     await hostReady(launch.page);
     await launch.page.waitForTimeout(1_000); // the window's own start-up settles; the store has not loaded the document
@@ -450,7 +453,7 @@ test('S2’s numbers in the product: first sync of a 1 MB document, keystroke to
   const kills: { typed: number; acked: number; lost: number; load: number[] }[] = [];
   for (let run = 1; run <= 3; run++) {
     await launch.app.close();
-    launch = await launchMaws({ userData: profile });
+    launch = await launchMaws({ userData: profile, env: PERF_ENV });
     const { page } = launch;
     await seamReady(page);
     const { pid } = await hostReady(page);

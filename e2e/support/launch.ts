@@ -1,17 +1,19 @@
 // Launches MAWS for an end-to-end test: the built app (`out/main/index.js` under the repo's Electron) by default, or
 // the executable named by MAWS_E2E_EXECUTABLE (the packaged `MAWS.app/Contents/MacOS/MAWS`). Every launch gets
 // MAWS_E2E=1, a fresh `userData` under the OS temp directory, an empty engine store (`CLAUDE_CONFIG_DIR`) and a scratch
-// shell home, so nothing depends on or touches a real profile or the owner's shell history.
+// shell home, so nothing depends on or touches a real profile or the owner's shell history. The app runs the shape the
+// owner's does, the daemon's with a private `mawsd` on the scratch profile, unless MAWS_HOST_MODE or the profile's
+// settings name another (P5 O3-B), and a launch's cleanup ends every process the profile's launch left.
 // Later children's end-to-end tests start from here, through the `maws` fixture of `test`.
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { _electron, test as base, type ElectronApplication, type Page } from '@playwright/test';
 import { writeReplayEngine } from '../../test/support/replay-engine';
 import { writeScratchShellHome } from '../../test/support/shell-home';
 import { writeDiscoverScratch, type DiscoverScratch, type DiscoverScratchOptions } from './discover-scratch'; // P4-AGG M1
-import { shellsUnder, untilExited } from './processes';
+import { endProfileProcesses, processesNaming, shellsUnder, untilExited } from './processes';
 import { realEngine, type RealEngine } from './real-engine'; // P4-AGG M1
 import { assertEngineKeychainEnv, assertNoKeychainPrompt, killTree, loginShellEnvironment, watchKeychainPrompt } from './keychain-guard'; // fixB
 import { launchEnvironment } from './scratch-env';
@@ -168,16 +170,22 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
     keychainWatch = null;
     // P3-F (the terminal e2e's ENOTEMPTY, tracker 2026-10-17): a shell the app started saves its history into the shell
     // home as it exits on its terminal's hang-up, which can come after the app has closed, so the removal waits for the
-    // shells it found before the close (never signalling one) and retries a directory that filled meanwhile.
-    const shells = child && !closed ? shellsUnder(child.pid!) : [];
+    // shells it found before the close (never signalling one) and retries a directory that filled meanwhile. P5 O3-B: on
+    // the daemon shape a terminal's shell is the profile's pty host's, which outlives the app, so its shells count too.
+    const shells = shellsUnder([...(child && !closed ? [child.pid!] : []), ...processesNaming(join(userData, sep)).map((p) => p.pid)]);
+    let leftover: unknown;
     try {
       if (app && child && !closed) await closeOrKill(app, child);
     } finally {
+      // P5 O3-B: the daemon shape's private `mawsd` and its hosts outlive the app; they end here, for a given profile too,
+      // as the utility shape's hosts ended with the app (processes.ts), and one that will not is the launch's failure
+      leftover = await endProfileProcesses(userData).then(() => null, (error: unknown) => error);
       const left = await untilExited(shells, SHELL_EXIT_MS);
       if (left.length > 0) console.error(`[e2e] shells still running ${SHELL_EXIT_MS} ms after the app closed: ${left.map((p) => p.pid).join(', ')}`);
       if (ownsUserData) rmSync(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); // C5: a given profile is the caller's
     }
     if (prompted) throw prompted;
+    if (leftover) throw leftover;
     if (keychainScene) assertNoKeychainPrompt('after the app closed');
   };
 

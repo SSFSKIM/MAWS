@@ -87,6 +87,8 @@ export async function coldHttpDelivery(info: TestInfo): Promise<void> {
   try {
     const user = await startHttpFixture(layout, 'cold-user', { tools: [NOTION_TOOL] }); fixtures.push(user);
     const app = await startHttpFixture(layout, 'cold-app', { tools: [NOTION_TOOL] }); fixtures.push(app);
+    // P5 O3-B: the embedded shape's detached supervisor is what the scene takes over: its client is main alone, so the
+    // stand-in below attaches to the supervisor's own socket once main is gone (on the daemon shape `mawsd` is its client)
     maws = await launchMaws({
       userData,
       env: { HOME: layout.home, SHELL: '/bin/zsh', MAWS_HARNESS: '0', MAWS_HOST_MODE: 'detached' },
