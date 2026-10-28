@@ -63,7 +63,9 @@
 #                      selected run counts as red (default: off)
 #   --peer             the build the PEER_E2E groups (gate.yml: e2e:cross-build, the two-build check) run the tested tree
 #                      against, a ref this checkout resolves, or `none`. Default: the merge base with origin/master,
-#                      fetched first. The commit goes in a `Peer:` trailer beside both trees' wires (`Peer-Wire:`, `Wire:`,
+#                      fetched first. Either candidate maps to the first master first-parent commit containing it; a
+#                      mid-branch draft is not a master state. An explicit peer outside master ancestry is refused.
+#                      The resolved commit goes in a `Peer:` trailer beside both trees' wires (`Peer-Wire:`, `Wire:`,
 #                      each the major.minor of its src/shared/ipc/wire-manifest.json), and the plan adds those groups to a
 #                      run whose two wires are a minor apart and whose gates hold unit, unit:darwin or an e2e group (so
 #                      class 1a and --gates all do, a static or probes check does not), unless the run is --live or

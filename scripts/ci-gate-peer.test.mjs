@@ -51,7 +51,7 @@ function repository(t, { master = {}, branch = {} } = {}) {
     execFileSync('git', ['clone', '--quiet', ...args, `file://${join(dir, 'origin.git')}`, at], { env });
     return at;
   };
-  return { git, base, head, peerAt, clone, peer: (...args) => peerAt(head, args) };
+  return { git, write, base, head, peerAt, clone, peer: (...args) => peerAt(head, args) };
 }
 
 test("a branch a minor past master's wire names the merge base, both wires, and says they are a minor apart", (t) => {
@@ -93,14 +93,14 @@ test("no peer for a tree with no manifest, master's own tree, or a master with n
 
 // A checkout that cannot find the merge base would drop the check a bump needs without a word: it is refused, naming
 // --peer, while master's own tree (its own merge base) stays quiet.
-test('a shallow checkout, a single-branch one and a tree with no merge base are refused, naming --peer; --peer still works there', (t) => {
+test('a shallow checkout, a single-branch one and a tree with no merge base are refused, naming --peer; --peer none still works there', (t) => {
   const { git, head, peerAt, clone } = repository(t, { master: { [MANIFEST]: manifest(3, 0) }, branch: { [MANIFEST]: manifest(3, 1) } });
   git('push', '--quiet', 'origin', 'HEAD:refs/heads/branch');
   const advice = 'so this tree\'s peer cannot be found: pass --peer <ref> (the build to check it against) or --peer none';
   const shallow = clone('--depth=1', '--branch', 'branch');
   assert.deepEqual(peerAt(head, [], shallow), { status: 2, trailers: [], notes: [`ci-gate: this checkout is shallow, and its merge base with origin/master may lie past its history, ${advice}`] });
   assert.equal(peerAt(head, ['--peer', 'none'], shallow).status, 0);
-  assert.deepEqual(peerAt(head, ['--peer', 'HEAD'], shallow).notes, ['ci-gate: the peer would be the tested commit itself (--peer HEAD), so no peer']);
+  assert.equal(peerAt(head, ['--peer', 'HEAD'], shallow).status, 2, 'an explicit unmerged peer is not a master state, even when it equals the tested sha');
   const single = clone('--single-branch', '--branch', 'branch');
   assert.deepEqual(peerAt(head, [], single), { status: 2, trailers: [], notes: [`ci-gate: ${head.slice(0, 8)} has no merge base with origin/master (none fetched, or a single-branch checkout), ${advice}`] });
   git('checkout', '--quiet', '--orphan', 'unrelated');
@@ -108,4 +108,76 @@ test('a shallow checkout, a single-branch one and a tree with no merge base are 
   const unrelated = git('rev-parse', 'HEAD');
   assert.equal(peerAt(unrelated).status, 2);
   assert.match(peerAt(unrelated).notes.at(-1), /has no merge base with origin\/master .*pass --peer <ref>/);
+});
+
+
+// A child branches from the draft, while its parent branch advances and later merges into master. The merge-base
+// with the child is the draft, but the first master state containing it is the merge, not the draft or today's tip.
+function middleOfMergedBranch(t, { missingDraft = false } = {}) {
+  const repo = repository(t, { master: { [MANIFEST]: manifest(3, 0) }, branch: { [MANIFEST]: missingDraft ? null : manifest(3, 1) } });
+  const { git, write, base, head: draft } = repo;
+  git('branch', 'child', draft);
+  write({ [MANIFEST]: manifest(3, 2) });
+  git('commit', '--quiet', '-m', 'settled parent branch wire');
+  const parent = git('rev-parse', 'HEAD');
+  git('checkout', '--quiet', '-b', 'master-line', base);
+  write({ 'master-only.txt': 'advance master independently\n' });
+  git('commit', '--quiet', '-m', 'master advanced');
+  git('merge', '--quiet', '--no-ff', 'branch', '-m', 'land the parent branch');
+  const landed = git('rev-parse', 'HEAD');
+  write({ 'after-landing.txt': 'a later master state\n' });
+  git('commit', '--quiet', '-m', 'later master');
+  git('push', '--quiet', 'origin', 'HEAD:refs/heads/master');
+  git('checkout', '--quiet', 'child');
+  write({ [MANIFEST]: manifest(3, 3) });
+  git('commit', '--quiet', '-m', 'child branch wire');
+  return { ...repo, draft, parent, landed, tested: git('rev-parse', 'HEAD') };
+}
+
+test('a default peer from a merged branch middle maps to the first master state containing it', (t) => {
+  const { git, peerAt, draft, landed, tested } = middleOfMergedBranch(t);
+  assert.equal(git('merge-base', 'origin/master', tested), draft);
+  const result = peerAt(tested);
+  assert.equal(result.status, 0, result.notes.join('\n'));
+  assert.deepEqual(result.trailers, [`Peer: ${landed}`, 'Peer-Wire: 3.2', 'Wire: 3.3']);
+  assert.ok(result.notes.includes(`ci-gate: peer ${draft.slice(0, 8)} is not a master state; using ${landed.slice(0, 8)}, the first master commit that contains it`));
+});
+
+test('explicit peers use the same mapping, while a first-parent master peer keeps its identity', (t) => {
+  const { git, peerAt, base, draft, parent, landed, tested } = middleOfMergedBranch(t);
+  git('tag', 'draft-peer', draft);
+  for (const ref of ['draft-peer', draft, parent]) {
+    const result = peerAt(tested, ['--peer', ref]);
+    assert.equal(result.status, 0, result.notes.join('\n'));
+    assert.deepEqual(result.trailers, [`Peer: ${landed}`, 'Peer-Wire: 3.2', 'Wire: 3.3']);
+    assert.match(result.notes.join('\n'), /is not a master state; using/);
+  }
+  for (const [ref, minor] of [[base, 0], [landed, 2]]) {
+    const result = peerAt(tested, ['--peer', ref]);
+    assert.deepEqual(result.trailers, [`Peer: ${ref}`, `Peer-Wire: 3.${minor}`, 'Wire: 3.3']);
+    assert.doesNotMatch(result.notes.join('\n'), /is not a master state/);
+  }
+  assert.deepEqual(peerAt(landed, ['--peer', landed]).trailers, [], 'a tested master state still has no peer against itself');
+});
+
+test('an explicit valid-manifest peer outside master ancestry is refused, even if it is the tested commit', (t) => {
+  const { git, peerAt, base, tested } = middleOfMergedBranch(t);
+  for (const ref of [tested, 'child']) {
+    const result = peerAt(tested, ['--peer', ref]);
+    assert.equal(result.status, 2);
+    assert.deepEqual(result.trailers, []);
+    assert.match(result.notes.join('\n'), /--peer .*not an ancestor of origin\/master/);
+  }
+  // A different unmerged branch is refused too; equality with sha is not what decides ancestry.
+  git('checkout', '--quiet', '-b', 'unmerged', base);
+  git('commit', '--quiet', '--allow-empty', '-m', 'not landed');
+  assert.equal(peerAt(tested, ['--peer', 'unmerged']).status, 2);
+});
+
+test('explicit draft with no manifest is refused even when its containing master state has one', (t) => {
+  const { peerAt, draft, tested } = middleOfMergedBranch(t, { missingDraft: true });
+  const result = peerAt(tested, ['--peer', draft]);
+  assert.equal(result.status, 2);
+  assert.deepEqual(result.trailers, []);
+  assert.match(result.notes.join('\n'), /has no src\/shared\/ipc\/wire-manifest.json/);
 });
