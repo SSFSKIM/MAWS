@@ -17,7 +17,7 @@ O3 moves MAWS's machine services (the session index and read model, attention, t
 Nothing a person sees changes in O3-C. What changes is the code's shape, so the next landing changes a process and not a design:
 
 - **The spine is a library.** Everything §5 moves at O3-D (and git, scm and files, which move at O3-E) lives under `src/services/`, imports nothing from Electron or from `src/main/`, and is composed by two functions, one per set, that take every dependency they need. Main's startup calls them ("the embedded root"); at O3-D `mawsd` calls the same functions ("mawsd's root").
-- **The app reads the spine through one view.** The notifier, the quit guard, the chat panels, the browser, connectors, the export authors, the org rows, Settings' reveal, and (until O3-E) files, `git.lsFiles` and scm read records, digests, attention, intents and the rest only through `SpineView`. Main's startup holds nothing of the spine but that view and the roots' stop functions.
+- **The app reads the spine through one view.** The notifier, the quit guard, the chat panels, the browser, connectors, the export authors, the org rows, Settings' reveal, and (until O3-E) files, `git.lsFiles` and scm read records, digests, attention, intents and the rest only through `SpineView`. Main's startup holds nothing of the spine but that view, the machine half of the settings it composes the renderer's settings from (O3X3), and the roots' stop functions.
 - **The sweep follows interest.** The inactive sweep keeps what the machine's interest set holds (OX5), not what `layout.json` says, so at O3-D a session a remote viewer watches is never archived.
 - **O3-D starts from a number.** The spine composed alone under the runtime `mawsd` uses, idle over a profile the size of the owner's, has a measured footprint, loaded and released.
 
@@ -143,6 +143,7 @@ The order is M1 to M6, each on the one branch. M1 and M2 work in place, so their
 - A handler that must fail with a specific `IpcError` throws `HostCommandError` (`@shared/host/runtime`), which main's router already answers intact for any owner and every host runtime answers the same way (D5). Client code keeps `CommandFailure`.
 - `emittedAttentionSource` and `emittedAppEventsSource` (`sessions/index.ts`) take the bus's `onEmitted` as their tap, as they already take a tap parameter.
 - Main's binding is `{ register: registerMainHandler, intercept: interceptCommand, emit, onEmitted }` from `src/main/ipc/`, so every tap main's client code holds (the menu's, the stand-in's) still hears the library's events.
+- `startLibrary` still composes the library's files (O4's `registerLibraryFiles`) until M4 splits them (D22); in between, `registerLibraryFiles` types its `register` as `ServicesBus['register']`, which its handlers satisfy (none reads the target machine).
 
 **Does not touch.** File locations. The client modules' own imports of main's IPC. Any command's owner or schema.
 
@@ -188,12 +189,13 @@ The order is M1 to M6, each on the one branch. M1 and M2 work in place, so their
 
 **At its end.** `src/services/spine-root.ts` (`openSpineData`, `startSpine`) and `src/services/checkouts-root.ts` (`startCheckouts`) compose their sets from the dependencies of Interfaces §D, and `src/services/entry.ts` exports them. Main's root calls `openSpineData` where `startSpineData` ran, `startSpine` and `startCheckouts` where their parts were built, and from then on holds only `SpineRoot.view`, the checkouts' `readResolved` and the two stop functions. The entry is a third input of main's build, `out/main/services.js`, held by the bundle guard to mawsd's rule. Acceptance 1's test passes under plain Node. Rule B narrows `src/main/index.ts` to the entry. The app behaves as before.
 
-**Touches.** `src/services/{spine-root,checkouts-root,entry}.ts` (new), `src/main/index.ts` (the spine's and the checkouts' composition leave it), `src/services/library/index.ts` (its files part leaves, D22), `src/main/artifacts/index.ts` (the defaults relay leaves, D23), the machine-half readers (`src/services/settings/{engine-configure,host-configure,session-settings}.ts`, `src/services/owner/register.ts`, `src/services/artifacts/defaults.ts`, the sweep's schedule; D12), `src/services/sessions/inactive-archive.ts` (the port), `src/services/sessions/service.ts` and `context.ts` (the browser socket and trash ports), `electron.vite.config.ts`, `src/engine-host/bundle-guard.test.ts`, `src/main/lifecycle.test.ts`, `src/services/spine-root.test.ts` and `test/support/fake-spine-host.ts` (new), `eslint.config.js`. O9's composition when on master.
+**Touches.** `src/services/{spine-root,checkouts-root,entry}.ts` (new), `src/main/index.ts` (the spine's and the checkouts' composition leave it), `src/services/library/index.ts` (its files part leaves, D22), `src/main/artifacts/index.ts` (the defaults relay leaves, D23), the machine-half readers (`src/services/settings/{engine-configure,host-configure,session-settings}.ts`, `src/services/owner/register.ts`, `src/services/artifacts/defaults.ts`, the sweep's schedule; D12), `electron.vite.config.ts`, `src/engine-host/bundle-guard.test.ts`, `src/main/lifecycle.test.ts`, `src/services/spine-root.test.ts` and `test/support/fake-spine-host.ts` (new), `eslint.config.js`. O9's composition when on master.
 
 **Decisions.**
 - What each root composes is §5's set exactly; the commands each registers through the bus are pinned by a test in `spine-root.test.ts`, and the lists go into the record for O3-D's retag (D25).
 - The spine reads the machine half of the settings only (D12); main composes the client half from `SpineData.machineSettings` as O3-A's `startSettings` does.
 - O3-A's refused run is the root's: with `data.refused` set, `startSpine` starts none of attention's core, replays, the prompt history's commands, the worktree and session services, the owner channel, the sweep, yield, side threads, the engine and host configure relays, the design-system defaults relay or the retired-custody removal; it keeps the read model, the inert index source and the library; the view's `unavailable()` names the refusal, its `acquire` rejects with "MAWS cannot reach its sessions this run: <reason>", and `settings.engineApplied` rejects with the refusal, all as today.
+- The ports map onto dependencies the services already take: the session service's `browserBackend`, `trash` (wrapped by `trashFor`) and `port`, the sweep's `interest` (M2), so `service.ts`, `context.ts` and `inactive-archive.ts` keep their signatures.
 - Order inside main's root, each kept from today: the machine identity first; `openSpineData` after the launch's shape settles and before either settings file is written; `startSpine` before `new BrowserData(…)`, which must read the index at version 14 after migration 14 ran; `startCheckouts` after `startSpine` (it takes the view); the library's files (`registerLibraryFiles`) after `startCheckouts` (`readResolved`); the cua socket port a closure over the browser's `cua`, set once the browser starts, as today.
 - Shutdown: each root's `stop` is one step, added where its first part's step is today (`'spine'` at the place of `'git, replays and attention'`, `'checkouts'` right after it); inside, `startSpine`'s stop runs its parts in today's relative order, the index closing after the read model has stopped the source that reads it and the library stopping in the same pass (D21).
 - `settings.userEngineDefaults`, `settings.engineApplied`, `session.recentTurns` and the prompt history's two commands are registered by `startSpine`: each answers the machine's engine or the machine's files (D24).
@@ -443,10 +445,15 @@ Main's bindings on the embedded shape: `hosts` its `createHosts(…)`; `bus` §A
     // e2e:daemon-idle-spine's subject (O3 §11's diagnostic reading): the spine composed alone over `profile` with stand-in
     // ports (an engine host that never streams and answers every dispatch host_unavailable; a bus with no client; a
     // client port that answers noClient; an empty interest set; no browser socket; process.env as the shell capture).
-    // Logs `spine idle: composed` once `startSpine` has returned, and on SIGUSR2 stops the root, drops every reference to
-    // it, runs globalThis.gc twice when the runtime exposes it, and logs `spine idle: released` with `gc: true|false`.
-    // Keeps the process alive either way.
-    export function idleReading(options: { profile: string; build: string; log(line: string): void }): Promise<void>;
+    // Logs `spine idle: composed` once `startSpine` has returned, and when released (SIGUSR2 by default; a test passes
+    // its own trigger) stops the root, drops every reference to it, runs globalThis.gc twice when the runtime exposes
+    // it, and logs `spine idle: released` with `gc: true|false`. Keeps the process alive either way.
+    export function idleReading(options: {
+      profile: string;
+      build: string;
+      log(line: string): void;
+      onRelease?(release: () => void): void; // default: process.once('SIGUSR2', release)
+    }): Promise<void>;
 
 The spec's case: a scratch root, the fixture written into `<root>/ud` by `test/support/spine-fixture.ts`, then the Electron binary as Node (`ELECTRON_RUN_AS_NODE=1`, `--disable-sigusr1 --expose-gc`, argv0 `maws-spine`, an environment of its own with `HOME` the scratch root and `MAWS_USER_DATA` the profile) running a three-line wrapper written into the scratch root that requires `out/main/services.js` and calls `idleReading`. It waits for `composed`, settles 120 s, measures a 600 s window (21 samples), sends SIGUSR2, waits for `released`, settles 120 s, measures a 300 s window (11 samples), then kills the scratch's processes as the other cases do.
 
