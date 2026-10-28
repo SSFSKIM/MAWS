@@ -213,10 +213,10 @@ test('--affected names the change in the subject and lists its paths, a rename w
       rmSync(dir, { recursive: true, force: true });
     }
   };
-  assert.match(plan(result.message).summary, /\nSelection: affected — full suite: a deleted non-test file \(src\/shared\/d.ts\)\n$/);
+  assert.match(plan(result.message).summary, /^Selection: affected — full suite: a deleted non-test file \(src\/shared\/d.ts\)$/m);
   const kept = plan(result.message.replace('\nAffected: D\tsrc/shared/d.ts', '').replace('Affected-Count: 4', 'Affected-Count: 3'));
   assert.match(kept.outputs, /\nrelated=\["src\/shared\/a.ts","src\/shared\/e.ts","src\/shared\/f.test.ts",/);
-  assert.match(kept.summary, /\nSelection: affected — 3 paths, unit runs vitest related\n$/);
+  assert.match(kept.summary, /^Selection: affected — 3 paths, unit runs vitest related$/m);
 });
 
 test('--affected on master\'s own tree pushes an affected subject and a zero count, with no path trailers', () => {
