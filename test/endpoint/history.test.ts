@@ -18,6 +18,7 @@ const ORG_KEY = new Uint8Array(32).fill(7);
 const P1 = '1a0e2d3c-4b5a-4968-8776-a5b4c3d2e1f0';
 const P2 = '2a0e2d3c-4b5a-4968-8776-a5b4c3d2e1f0';
 const P3 = '3a0e2d3c-4b5a-4968-8776-a5b4c3d2e1f0';
+const P4 = '4a0e2d3c-4b5a-4968-8776-a5b4c3d2e1f0';
 const S = 'e0ad139c-18bc-45bd-9489-be8653145f80';
 const writer = (name: string) => `${name}/${S}`;
 
@@ -68,13 +69,15 @@ async function phaseOne(name: string, writes: Record<string, unknown[]>): Promis
   controller.abort();
 }
 
-/** What the hub answers on its way to the endpoint, for a test to alter. */
+/** What the hub answers on its way to the endpoint, for a test to alter, and where it reads it from (`redirect`). */
 let rewrite: ((path: string, body: unknown) => unknown) | null = null;
+let redirect: ((path: string) => string) | null = null;
 const posts: string[] = [];
 const through: typeof fetch = async (input, init) => {
   const url = new URL(String(input));
   if (init?.method === 'POST' && url.pathname.endsWith('/attestations')) posts.push(url.pathname);
-  const response = await fetch(input, init);
+  if (redirect !== null) url.pathname = redirect(url.pathname);
+  const response = await fetch(url, init);
   if (rewrite === null || response.status !== 200 || !url.pathname.startsWith('/machine/projects/')) return response;
   const body = rewrite(url.pathname, await response.json());
   return Response.json(body, { status: 200 });
@@ -95,7 +98,7 @@ beforeAll(async () => {
   member = await hub.admin();
   // Phase 1: the Mac as `mini` and, before a rename, as `oldmini`; `other` writes a project of its own.
   await phaseOne('mini', { [P1]: [await say(P1, 'mini', 1), await say(P1, 'mini', 2), await say(P1, 'mini', 3)] });
-  await phaseOne('oldmini', { [P1]: [await say(P1, 'oldmini', 1), await say(P1, 'oldmini', 2)], [P2]: [await say(P2, 'oldmini', 1), await say(P2, 'oldmini', 2, true)] });
+  await phaseOne('oldmini', { [P1]: [await say(P1, 'oldmini', 1), await say(P1, 'oldmini', 2)], [P2]: [await say(P2, 'oldmini', 1), await say(P2, 'oldmini', 2, true)], [P4]: [await say(P4, 'oldmini', 1)] });
   await phaseOne('other', { [P3]: [await say(P3, 'other', 1)] });
   // The cutover: `mini` re-enrolled in place, listed, and holding the legacy key sminos handed over.
   mini = await endpointOn();
@@ -117,6 +120,21 @@ afterAll(async () => {
 const lines = (out: string) => out.split('\n');
 
 describe('mawsd endpoint attest-history', () => {
+  it('signs nothing over a position the hub serves twice, a forged event beside the genuine one', async () => {
+    // A second event at seq 1 under a code that verifies (the hub holds sealed events), served after the genuine one.
+    const forged = { ts: '2026-10-15T08:00:01.000Z', writer: writer('oldmini'), seq: 1, kind: 'say', from: 'oldmini', to: '*', text: 'never said' };
+    const sealed = await seal(await importOrgKey(ORG_KEY), 'log', P4, forged);
+    rewrite = (path, body) => (path.endsWith('/log') ? { ...(body as HistoryLogPage), events: [...(body as HistoryLogPage).events, sealed] } : body);
+    try {
+      const result = await mini.cli('attest-history', ['--former', 'oldmini', '--project', P4]);
+      expect(result.code).toBe(1);
+      expect(lines(result.out)).toContain(`skipped ${P4}/${writer('oldmini')}: seq 1 is served twice`);
+      expect(posts).toEqual([]);
+    } finally {
+      rewrite = null;
+    }
+  });
+
   it('attests every writer of the inventory under the current and the claimed former name, skipping one whose code fails', async () => {
     const result = await mini.cli('attest-history', ['--former', 'oldmini']);
     expect(result.code).toBe(1);
@@ -128,7 +146,8 @@ describe('mawsd endpoint attest-history', () => {
       ]),
     );
     expect(result.out).not.toContain(P3);
-    expect(posts).toHaveLength(2);
+    expect(lines(result.out)).toContain(`attested ${P4}/${writer('oldmini')} through 1`);
+    expect(posts).toHaveLength(3);
   });
 
   it('changes nothing when run again', async () => {
@@ -205,5 +224,22 @@ describe('mawsd endpoint attest-history --check', () => {
     const result = await check((path, body) => (path.endsWith('/attestations') ? { records: (body as HistoryAttestations).records.filter((r) => r.body.writer !== writer('mini')) } : body));
     expect(result.code).toBe(1);
     expect(lines(result.out)).toContain(`uncovered ${P1}/${writer('mini')}: no attestation reaches seq 3`);
+  });
+
+  it('binds each record to the project asked: one project’s record and events served under another’s routes are refused', async () => {
+    redirect = (path) => path.replace(`/machine/projects/${P2}/`, `/machine/projects/${P1}/`);
+    try {
+      const checked = await mini.cli('attest-history', ['--check', '--former', 'oldmini', '--project', P2]);
+      expect(checked.code).toBe(1);
+      expect(lines(checked.out)).toContain(`mismatch ${P2}/${writer('oldmini')}: binding`);
+      expect(checked.out).not.toMatch(/^verified/m);
+      // Attesting takes P1's record for none of P2's, and P1's events fail their codes as P2's.
+      posts.length = 0;
+      const attested = await mini.cli('attest-history', ['--former', 'oldmini', '--project', P2]);
+      expect(lines(attested.out)).toContain(`skipped ${P2}/${writer('oldmini')}: seq 1 fails its code`);
+      expect(posts).toEqual([]);
+    } finally {
+      redirect = null;
+    }
   });
 });

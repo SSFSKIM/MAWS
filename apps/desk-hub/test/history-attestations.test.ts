@@ -169,7 +169,7 @@ describe('the attestations', () => {
     ]);
     const view = (await (await hub.fetchAs(ADMIN, '/api/org/state')).json()) as OrgStateView;
     for (const record of member.records) {
-      expect(await verifyHistoryAttestation(record, await events(P1, record.body.writer), view.head!.state, view.certificates)).toEqual({ ok: true, by: { ref: mini.ref, name: 'mini' } });
+      expect(await verifyHistoryAttestation(record, await events(P1, record.body.writer), view.head!.state, view.certificates, { project: P1, writer: record.body.writer })).toEqual({ ok: true, by: { ref: mini.ref, name: 'mini' } });
     }
     expect(((await (await hub.fetchAs(ADMIN, `/api/projects/${P2}/attestations`)).json()) as HistoryAttestations).records).toEqual([]);
     expect(await refusal(await hub.fetchAs(ADMIN, `/api/projects/${UNKNOWN}/attestations`))).toBe('404 unknown-project');

@@ -582,7 +582,8 @@ export class Project extends DurableObject<Env> {
     const view = await this.readOrgState();
     if (view.head === null) return { ok: false, status: 403, error: 'bad-signature', message: 'the org has no signed state to check it against' };
     const now = new Date(this.now());
-    const signer = await verifyHistorySigner(record, view.head.state, view.certificates, now);
+    const at = { project, writer: record.body.writer };
+    const signer = await verifyHistorySigner(record, view.head.state, view.certificates, at, now);
     if (!signer.ok) {
       return signer.reason === 'binding'
         ? { ok: false, status: 403, error: 'not-bound', message: `the signer can't speak for ${record.body.writer}: another machine holds the name, or the record does not claim it` }
@@ -590,7 +591,7 @@ export class Project extends DurableObject<Env> {
     }
     // A held record that verifies no more (its key revoked since) gives way to a new one at the same upTo.
     const held = this.history.held(record.body.writer);
-    const voided = held !== undefined && !(await verifyHistorySigner(held, view.head.state, view.certificates, now)).ok ? held : undefined;
+    const voided = held !== undefined && !(await verifyHistorySigner(held, view.head.state, view.certificates, at, now)).ok ? held : undefined;
     const kept = this.history.keep(record, voided);
     if (kept === 'stale') return { ok: false, status: 409, error: 'stale-attestation', message: 'a record for this writer at the same or a higher upTo is held' };
     return { ok: true, value: { stored: kept === 'stored' } };

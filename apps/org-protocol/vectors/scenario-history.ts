@@ -11,8 +11,11 @@ import { SIGNING_DOMAINS, type Certificates, type HistoryAttestation, type Machi
 import type { KeyName, Keys } from './scenario.ts';
 
 export type HistoryVerdict = { ok: true; by: { ref: string; name: string } } | { ok: false; reason: 'signature' | 'binding' | 'digest' | 'short' };
-/** `head` and `certificates` name entries of the section's `heads` and `certificates`; `events`, of its `logs`. */
-export type HistoryCase = { name: string; record: Signed<HistoryAttestation>; events: string; head: string; certificates: string; now: string; expect: HistoryVerdict };
+/**
+ * `head` and `certificates` name entries of the section's `heads` and `certificates`; `events`, of its `logs`; `at` is
+ * the project and writer the reader asks the record to attest.
+ */
+export type HistoryCase = { name: string; record: Signed<HistoryAttestation>; events: string; head: string; certificates: string; at: { project: string; writer: string }; now: string; expect: HistoryVerdict };
 export type HistoryVectors = {
   heads: Record<string, OrgState>;
   certificates: Record<string, Certificates>;
@@ -41,6 +44,11 @@ export const HISTORY_CASES = [
   'an event changed after the attestation',
   'an event dropped inside the attested prefix',
   'the events served short of upTo',
+  'a position served twice',
+  "the writer's events served out of turn",
+  'a digest folded over a forged event beside the genuine one at a position',
+  "another project's record and events",
+  "another writer's record",
   'the record altered after it was signed',
   'a record signed by a key the org never listed',
   "a retired machine key's attestation created before its notAfter",
@@ -110,7 +118,9 @@ export async function buildHistoryScenario(k: Keys): Promise<HistoryVectors> {
   logs['mini changed'] = logs.mini.map((e) => (e.seq === 2 ? { ...e, text: 'not what was said' } : e));
   logs['mini dropped'] = logs.mini.filter((e) => e.seq !== 2);
   logs['mini short'] = logs.mini.slice(0, 2);
-  logs['mini among others'] = [logs.mini[2], ...logs.builder, logs.mini[0], logs.mini[1]];
+  logs['mini doubled'] = [logs.mini[0], logs.mini[1], { ...logs.mini[1], text: 'said twice' }, logs.mini[2]];
+  logs['mini out of turn'] = [logs.mini[2], ...logs.builder, logs.mini[0], logs.mini[1]];
+  logs['mini forged beside'] = [logs.mini[0], { ...logs.mini[0], text: 'never said' }];
 
   const record = async (signer: KeyName, log: string, over: Partial<HistoryAttestation> = {}) => {
     const events = logs[log];
@@ -128,15 +138,20 @@ export async function buildHistoryScenario(k: Keys): Promise<HistoryVectors> {
   };
 
   const cases: HistoryCase[] = [];
-  const add = (name: (typeof HISTORY_CASES)[number], r: Signed<HistoryAttestation>, events: string, expect: HistoryVerdict, more: { head?: string; certificates?: string } = {}) =>
-    cases.push({ name, record: r, events, head: more.head ?? 'head', certificates: more.certificates ?? 'both VMs', now: NOW, expect });
+  const add = (name: (typeof HISTORY_CASES)[number], r: Signed<HistoryAttestation>, events: string, expect: HistoryVerdict, more: { head?: string; certificates?: string; at?: { project: string; writer: string } } = {}) =>
+    cases.push({ name, record: r, events, head: more.head ?? 'head', certificates: more.certificates ?? 'both VMs', at: more.at ?? { project: r.body.project, writer: r.body.writer }, now: NOW, expect });
   const byMini: HistoryVerdict = { ok: true, by: { ref: REF_MINI, name: 'mini' } };
 
   const own = await record('miniRotated', 'mini');
   add('a machine attests its own writer', own, 'mini', byMini);
   add('an event changed after the attestation', own, 'mini changed', { ok: false, reason: 'digest' });
-  add('an event dropped inside the attested prefix', own, 'mini dropped', { ok: false, reason: 'digest' });
+  add('an event dropped inside the attested prefix', own, 'mini dropped', { ok: false, reason: 'short' });
   add('the events served short of upTo', own, 'mini short', { ok: false, reason: 'short' });
+  add('a position served twice', own, 'mini doubled', { ok: false, reason: 'digest' });
+  add("the writer's events served out of turn", own, 'mini out of turn', { ok: false, reason: 'digest' });
+  add('a digest folded over a forged event beside the genuine one at a position', await record('miniRotated', 'mini forged beside', { upTo: 1 }), 'mini forged beside', { ok: false, reason: 'digest' });
+  add("another project's record and events", own, 'mini', { ok: false, reason: 'binding' }, { at: { project: 'proj-2', writer: own.body.writer } });
+  add("another writer's record", own, 'mini', { ok: false, reason: 'binding' }, { at: { project: PROJECT, writer: `mini/${SESSION_2}` } });
   add('the record altered after it was signed', { body: { ...own.body, upTo: 2 }, sig: own.sig }, 'mini', { ok: false, reason: 'signature' });
   add('a record signed by a key the org never listed', await record('stranger', 'mini'), 'mini', { ok: false, reason: 'signature' });
   add("a retired machine key's attestation created before its notAfter", await record('mini', 'mini', { created: at(4) }), 'mini', byMini);

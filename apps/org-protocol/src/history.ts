@@ -18,8 +18,8 @@
 // and confers no authority, which is the trust phase-1 history had.
 //
 // The consumer contract (O7's log views, O8's project channel): a DX1 event whose project and writer have a stored
-// attestation that verifies, its seq at most `upTo`, is drawn "attested at migration by <by.name>"; any other DX1 event
-// is drawn (unverified, legacy).
+// attestation that verifies as attesting that very project and writer (`at`), its seq at most `upTo`, is drawn
+// "attested at migration by <by.name>"; any other DX1 event is drawn (unverified, legacy).
 import { base64urlEncode, isBase64urlOf } from './base64url.ts';
 import { canonicalize } from './canonical.ts';
 import { keyId, signingInput, utf8, verifyInput } from './keys.ts';
@@ -33,6 +33,12 @@ export type StoredEvent = { writer: string; seq: number; [field: string]: unknow
 
 /** Who a verified attestation is by: the signer's ref and the current name its record gives. */
 export type HistorySigner = { ref: string; name: string };
+/**
+ * The project and writer a reader asks a record to attest. The record names them inside its signature, but the events it
+ * covers don't (the digest leaves out the `mac` that bound each to its project), so a hub could serve one project's record
+ * and events as another's: every verification is asked about a position, and a record of another one is `binding`.
+ */
+export type HistoryPosition = { project: string; writer: string };
 export type HistoryVerdict = { ok: true; by: HistorySigner } | { ok: false; reason: 'signature' | 'binding' | 'digest' | 'short' };
 
 // ---- The hub's routes (Interfaces §D) --------------------------------------------------------------------------
@@ -100,10 +106,18 @@ export async function historyDigest(events: readonly object[]): Promise<string> 
 /**
  * The record's signer and its binding to the writer (see the header), judged at `now`, without the events: what the
  * hub's courtesy check runs on arrival. `signature` for a record that is malformed, of another org, or not signed by a
- * key `names[0]` binds at its `created`; `binding` for a writer the signer can't speak for.
+ * key `names[0]` binds at its `created`; `binding` for a record of another project or writer than `at`, or a writer the
+ * signer can't speak for.
  */
-export async function verifyHistorySigner(record: Signed<HistoryAttestation>, head: OrgState, certificates: Certificates, now: Date = new Date()): Promise<{ ok: true; by: HistorySigner } | { ok: false; reason: 'signature' | 'binding' }> {
+export async function verifyHistorySigner(
+  record: Signed<HistoryAttestation>,
+  head: OrgState,
+  certificates: Certificates,
+  at: HistoryPosition,
+  now: Date = new Date(),
+): Promise<{ ok: true; by: HistorySigner } | { ok: false; reason: 'signature' | 'binding' }> {
   if (!isSigned(record, isHistoryAttestation) || !isCertificates(certificates) || record.body.org !== head.org) return { ok: false, reason: 'signature' };
+  if (record.body.project !== at.project || record.body.writer !== at.writer) return { ok: false, reason: 'binding' };
   const { names, writer, created } = record.body;
   const current = names[0];
   const kid = record.sig.kid;
@@ -130,17 +144,29 @@ export async function verifyHistorySigner(record: Signed<HistoryAttestation>, he
 }
 
 /**
- * A stored attestation against the events the verifier holds (a whole log will do: the record's writer's events at or
- * before `upTo` are taken, in seq order): `short` when they don't reach `upTo`, `digest` when they don't fold to the
- * record's digest (an event changed, dropped inside the prefix, or moved), else the signer's verdict.
+ * A stored attestation of the writer at `at`, against the events the verifier holds (a whole log will do: the record's
+ * writer's events at or before `upTo` are taken, in the order given). They must be exactly one event per position, seq 1
+ * to `upTo` in turn: `short` when a position is missing (the events don't reach `upTo`, or skip one), `digest` when one
+ * repeats or comes out of turn, or when they don't fold to the record's digest (an event changed). A digest over two
+ * events at one position is never accepted, so a hub can't slip a forged event in beside a genuine one. Else the
+ * signer's verdict.
  */
-export async function verifyHistoryAttestation(record: Signed<HistoryAttestation>, events: readonly StoredEvent[], head: OrgState, certificates: Certificates, now: Date = new Date()): Promise<HistoryVerdict> {
-  const signer = await verifyHistorySigner(record, head, certificates, now);
+export async function verifyHistoryAttestation(
+  record: Signed<HistoryAttestation>,
+  events: readonly StoredEvent[],
+  head: OrgState,
+  certificates: Certificates,
+  at: HistoryPosition,
+  now: Date = new Date(),
+): Promise<HistoryVerdict> {
+  const signer = await verifyHistorySigner(record, head, certificates, at, now);
   if (!signer.ok) return signer;
   const { writer, upTo, digest } = record.body;
   if (!Array.isArray(events)) return { ok: false, reason: 'short' };
-  const prefix = events.filter((e) => isObject(e) && e.writer === writer && isLogSeq(e.seq) && e.seq <= upTo).sort((a, b) => a.seq - b.seq);
-  if (prefix.length === 0 || prefix[prefix.length - 1].seq < upTo) return { ok: false, reason: 'short' };
+  const prefix = events.filter((e) => isObject(e) && e.writer === writer && isLogSeq(e.seq) && e.seq <= upTo);
+  const seqs = new Set(prefix.map((e) => e.seq));
+  if (seqs.size < upTo) return { ok: false, reason: 'short' };
+  if (prefix.length !== upTo || prefix.some((e, i) => e.seq !== i + 1)) return { ok: false, reason: 'digest' };
   try {
     if ((await historyDigest(prefix)) !== digest) return { ok: false, reason: 'digest' };
   } catch {

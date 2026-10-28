@@ -101,28 +101,52 @@ describe('the record', () => {
 });
 
 describe('the verifier', () => {
-  it('reads the attested writer’s events up to upTo from a whole log, in seq order, whatever else it holds', async () => {
+  const AT = { project: 'p1', writer: WRITER };
+
+  it('reads the attested writer’s events up to upTo from a whole log, other writers and later events beside them', async () => {
     const { key, state } = await machine();
     const events = [event(1), event(2), event(3)];
     const record = await signRecord(SIGNING_DOMAINS.historyAttest, await body(events), key.privateKey, key.pub);
-    const log = [event(3), event(1, 'other/x'), event(2), event(4), event(1)];
-    expect(await verifyHistoryAttestation(record, log, state, NO_CERTIFICATES)).toEqual({ ok: true, by: { ref: REF, name: 'mini' } });
-    expect(await verifyHistoryAttestation(record, [event(1), event(2)], state, NO_CERTIFICATES)).toEqual({ ok: false, reason: 'short' });
-    expect(await verifyHistoryAttestation(record, [event(1), event(3)], state, NO_CERTIFICATES)).toEqual({ ok: false, reason: 'digest' });
-    expect(await verifyHistoryAttestation(record, 'not events' as unknown as StoredEvent[], state, NO_CERTIFICATES)).toEqual({ ok: false, reason: 'short' });
+    const log = [event(1), event(1, 'other/x'), event(2), event(3), event(4)];
+    expect(await verifyHistoryAttestation(record, log, state, NO_CERTIFICATES, AT)).toEqual({ ok: true, by: { ref: REF, name: 'mini' } });
+    expect(await verifyHistoryAttestation(record, [event(1), event(2)], state, NO_CERTIFICATES, AT)).toEqual({ ok: false, reason: 'short' });
+    expect(await verifyHistoryAttestation(record, 'not events' as unknown as StoredEvent[], state, NO_CERTIFICATES, AT)).toEqual({ ok: false, reason: 'short' });
+  });
+
+  it('folds exactly one event per position, 1 to upTo in turn: a gap is short, a repeat or a turn out of order is not the digest', async () => {
+    const { key, state } = await machine();
+    const record = await signRecord(SIGNING_DOMAINS.historyAttest, await body([event(1), event(2), event(3)]), key.privateKey, key.pub);
+    expect(await verifyHistoryAttestation(record, [event(1), event(3)], state, NO_CERTIFICATES, AT)).toEqual({ ok: false, reason: 'short' });
+    expect(await verifyHistoryAttestation(record, [event(3), event(1), event(2)], state, NO_CERTIFICATES, AT)).toEqual({ ok: false, reason: 'digest' });
+    expect(await verifyHistoryAttestation(record, [event(1), event(2), event(2), event(3)], state, NO_CERTIFICATES, AT)).toEqual({ ok: false, reason: 'digest' });
+    // A hub's forged second event at seq 1, folded in beside the genuine one: the record's digest covers both, and still
+    // no reader accepts it, since position 1 holds two events.
+    const forged = { ...event(1), text: 'never said' };
+    const doubled = await signRecord(SIGNING_DOMAINS.historyAttest, await body([event(1), forged], { upTo: 1 }), key.privateKey, key.pub);
+    expect(await verifyHistoryAttestation(doubled, [event(1), forged], state, NO_CERTIFICATES, AT)).toEqual({ ok: false, reason: 'digest' });
+  });
+
+  it('binds the record to the project and the writer the reader draws: another’s record is refused, whatever its events', async () => {
+    const { key, state } = await machine();
+    const events = [event(1)];
+    const record = await signRecord(SIGNING_DOMAINS.historyAttest, await body(events), key.privateKey, key.pub);
+    expect(await verifyHistoryAttestation(record, events, state, NO_CERTIFICATES, { project: 'p2', writer: WRITER })).toEqual({ ok: false, reason: 'binding' });
+    expect(await verifyHistoryAttestation(record, events, state, NO_CERTIFICATES, { project: 'p1', writer: 'mini/another' })).toEqual({ ok: false, reason: 'binding' });
+    expect(await verifyHistorySigner(record, state, NO_CERTIFICATES, { project: 'p2', writer: WRITER })).toEqual({ ok: false, reason: 'binding' });
   });
 
   it('judges the signer and the binding without the events (the hub’s courtesy check)', async () => {
     const { key, state } = await machine();
     const record = await signRecord(SIGNING_DOMAINS.historyAttest, await body([event(1)]), key.privateKey, key.pub);
-    expect(await verifyHistorySigner(record, state, NO_CERTIFICATES)).toEqual({ ok: true, by: { ref: REF, name: 'mini' } });
-    const hubWriter = await signRecord(SIGNING_DOMAINS.historyAttest, await body([event(1)], { writer: `hub/${'a'.repeat(32)}` }), key.privateKey, key.pub);
-    expect(await verifyHistorySigner(hubWriter, state, NO_CERTIFICATES)).toEqual({ ok: false, reason: 'binding' });
+    expect(await verifyHistorySigner(record, state, NO_CERTIFICATES, AT)).toEqual({ ok: true, by: { ref: REF, name: 'mini' } });
+    const hubAt = { project: 'p1', writer: `hub/${'a'.repeat(32)}` };
+    const hubWriter = await signRecord(SIGNING_DOMAINS.historyAttest, await body([event(1)], { writer: hubAt.writer }), key.privateKey, key.pub);
+    expect(await verifyHistorySigner(hubWriter, state, NO_CERTIFICATES, hubAt)).toEqual({ ok: false, reason: 'binding' });
     const malformed = { body: { ...record.body, extra: true }, sig: record.sig };
-    expect(await verifyHistorySigner(malformed as never, state, NO_CERTIFICATES)).toEqual({ ok: false, reason: 'signature' });
-    expect(await verifyHistorySigner(record, { ...state, org: 'another' }, NO_CERTIFICATES)).toEqual({ ok: false, reason: 'signature' });
+    expect(await verifyHistorySigner(malformed as never, state, NO_CERTIFICATES, AT)).toEqual({ ok: false, reason: 'signature' });
+    expect(await verifyHistorySigner(record, { ...state, org: 'another' }, NO_CERTIFICATES, AT)).toEqual({ ok: false, reason: 'signature' });
     // A key of the right id that signed another body does not verify.
-    expect(await verifyHistorySigner({ body: { ...record.body, upTo: 2 }, sig: record.sig }, state, NO_CERTIFICATES)).toEqual({ ok: false, reason: 'signature' });
+    expect(await verifyHistorySigner({ body: { ...record.body, upTo: 2 }, sig: record.sig }, state, NO_CERTIFICATES, AT)).toEqual({ ok: false, reason: 'signature' });
     expect(await keyId(key.pub)).toBe(record.sig.kid);
   });
 });

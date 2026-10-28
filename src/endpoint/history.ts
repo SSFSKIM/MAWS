@@ -16,6 +16,7 @@
 import {
   HISTORY_NAMES_MAX,
   historyDigest,
+  isLogSeq,
   isMachineName,
   machineNameKey,
   signRecord,
@@ -66,21 +67,24 @@ async function inventory(ctx: HistoryContext, names: string[], project?: string)
   return projects.filter((p) => project === undefined || p.id === project);
 }
 
-/** A writer's stored events from seq 1 through `upTo` (fewer when the hub serves fewer), page by page. */
+/**
+ * A writer's stored events as the hub serves them, page by page, until a page reaches `upTo` or none follows. Nothing
+ * is filtered out: the caller judges every position the hub sent in the order it sent them.
+ */
 async function eventsThrough(ctx: HistoryContext, project: string, writer: string, upTo: number): Promise<StoredEvent[]> {
   const out: StoredEvent[] = [];
   let after = 0;
   for (;;) {
     const page = await fetchHistoryPage(ctx.deps, ctx.hub, ctx.credentials, project, writer, after);
-    for (const event of page.events) if (event.seq > after && event.seq <= upTo) out.push(event);
+    out.push(...page.events);
     const last = page.events.at(-1)?.seq;
     // A page that doesn't move past `after` ends the read: a hub can't hold it in a loop.
-    if (!page.more || last === undefined || last <= after || last >= upTo) return out;
+    if (!page.more || typeof last !== 'number' || last <= after || last >= upTo) return out;
     after = last;
   }
 }
 
-/** The attestations a project keeps, by writer. */
+/** The attestations a project keeps, by the writer each names. */
 async function stored(ctx: HistoryContext, project: string): Promise<Map<string, Signed<HistoryAttestation>>> {
   return new Map((await fetchAttestations(ctx.deps, ctx.hub, ctx.credentials, project)).records.map((r) => [r.body.writer, r]));
 }
@@ -91,28 +95,43 @@ export async function attestHistory(ctx: HistoryContext, names: string[], projec
     const held = await stored(ctx, p.id);
     for (const { writer, upTo } of p.writers) {
       const at = { project: p.id, writer };
-      if (await attestedAlready(ctx, held.get(writer), upTo)) out.push({ ...at, outcome: 'already', upTo });
+      if (await attestedAlready(ctx, held.get(writer), at, upTo)) out.push({ ...at, outcome: 'already', upTo });
       else out.push(await attestWriter(ctx, names, at, upTo));
     }
   }
   return out;
 }
 
-/** Whether `record` covers `upTo` and is still this machine's own: one whose key was revoked since is attested again. */
-async function attestedAlready(ctx: HistoryContext, record: Signed<HistoryAttestation> | undefined, upTo: number): Promise<boolean> {
+/**
+ * Whether `record` attests the writer at `at` (the record's own project and writer, whatever the hub served it under)
+ * through `upTo`, and is still this machine's own: one whose key was revoked since is attested again.
+ */
+async function attestedAlready(ctx: HistoryContext, record: Signed<HistoryAttestation> | undefined, at: At, upTo: number): Promise<boolean> {
   if (record === undefined || record.body.upTo < upTo) return false;
-  const signer = await verifyHistorySigner(record, ctx.head, ctx.certificates, new Date(ctx.deps.now()));
+  const signer = await verifyHistorySigner(record, ctx.head, ctx.certificates, at, new Date(ctx.deps.now()));
   return signer.ok && signer.by.ref === ctx.ref;
 }
 
+/**
+ * Attests the writer at `at` through `upTo`: exactly the hub's events 1 to `upTo`, each the writer's, each at its own
+ * position in turn and each under a DX1 code that verifies, are folded and signed. Anything else in their place (another
+ * writer's event, a position missing, repeated or out of turn) skips the writer: the machine signs only what it checked.
+ */
 async function attestWriter(ctx: HistoryContext, names: string[], at: At, upTo: number): Promise<Attested> {
-  const events = await eventsThrough(ctx, at.project, at.writer, upTo);
-  for (let seq = 1; seq <= upTo; seq++) {
-    const event = events[seq - 1];
-    if (event?.seq !== seq) return { ...at, outcome: 'skipped', seq, reason: 'is not served by the hub' };
+  const prefix: StoredEvent[] = [];
+  for (const event of await eventsThrough(ctx, at.project, at.writer, upTo)) {
+    const seq = prefix.length + 1;
+    if (event.writer !== at.writer) return { ...at, outcome: 'skipped', seq, reason: 'is served as another writer’s event' };
+    if (isLogSeq(event.seq) && event.seq > upTo) break;
+    if (event.seq !== seq) {
+      const repeated = isLogSeq(event.seq) && event.seq < seq;
+      return { ...at, outcome: 'skipped', seq: repeated ? event.seq : seq, reason: repeated ? 'is served twice' : 'is not served by the hub in turn' };
+    }
     if (!(await ctx.verifiesCode(at.project, event))) return { ...at, outcome: 'skipped', seq, reason: 'fails its code' };
+    prefix.push(event);
   }
-  const body: HistoryAttestation = { org: ctx.org, project: at.project, writer: at.writer, names, upTo, digest: await historyDigest(events), created: new Date(ctx.deps.now()).toISOString() };
+  if (prefix.length < upTo) return { ...at, outcome: 'skipped', seq: prefix.length + 1, reason: 'is not served by the hub' };
+  const body: HistoryAttestation = { org: ctx.org, project: at.project, writer: at.writer, names, upTo, digest: await historyDigest(prefix), created: new Date(ctx.deps.now()).toISOString() };
   const record = await signRecord(SIGNING_DOMAINS.historyAttest, body, ctx.key.privateKey, ctx.key.pub);
   const posted = await postAttestation(ctx.deps, ctx.hub, ctx.credentials, record);
   return posted.ok ? { ...at, outcome: 'attested', upTo } : { ...at, outcome: 'refused', upTo, refusal: posted.refusal };
@@ -127,23 +146,28 @@ export async function checkHistory(ctx: HistoryContext, names: string[], project
       const record = held.get(writer);
       held.delete(writer);
       if (record === undefined || record.body.upTo < upTo) out.push({ project: p.id, writer, upTo, outcome: 'uncovered' });
-      else out.push(await checkRecord(ctx, p.id, record));
+      else out.push(await checkRecord(ctx, { project: p.id, writer }, record));
     }
     // What the hub keeps under the names for a writer its inventory no longer lists.
     for (const record of held.values()) {
       const name = writerMachine(record.body.writer);
-      if (name !== null && keys.has(machineNameKey(name))) out.push(await checkRecord(ctx, p.id, record));
+      if (name !== null && keys.has(machineNameKey(name))) out.push(await checkRecord(ctx, { project: p.id, writer: record.body.writer }, record));
     }
   }
   return out;
 }
 
-async function checkRecord(ctx: HistoryContext, project: string, record: Signed<HistoryAttestation>): Promise<Checked> {
-  const { writer, upTo } = record.body;
-  const at = { project, writer, upTo };
-  const events = await eventsThrough(ctx, project, writer, upTo);
-  const verdict = await verifyHistoryAttestation(record, events, ctx.head, ctx.certificates, new Date(ctx.deps.now()));
-  if (!verdict.ok) return verdict.reason === 'short' ? { ...at, outcome: 'missing' } : { ...at, outcome: 'mismatch', reason: verdict.reason };
-  if (verdict.by.ref !== ctx.ref) return { ...at, outcome: 'mismatch', reason: `signed by another machine (${verdict.by.name})` };
-  return { ...at, outcome: 'verified' };
+/**
+ * The record the hub served for the writer at `at`, judged as attesting that very position (a record of another project
+ * served under this one's routes is `mismatch: binding`) against the events the hub serves for it, which must be that
+ * writer's alone.
+ */
+async function checkRecord(ctx: HistoryContext, at: At, record: Signed<HistoryAttestation>): Promise<Checked> {
+  const row = { ...at, upTo: record.body.upTo };
+  const events = await eventsThrough(ctx, at.project, at.writer, record.body.upTo);
+  if (events.some((e) => e.writer !== at.writer)) return { ...row, outcome: 'mismatch', reason: 'the hub serves another writer’s events as its' };
+  const verdict = await verifyHistoryAttestation(record, events, ctx.head, ctx.certificates, at, new Date(ctx.deps.now()));
+  if (!verdict.ok) return verdict.reason === 'short' ? { ...row, outcome: 'missing' } : { ...row, outcome: 'mismatch', reason: verdict.reason };
+  if (verdict.by.ref !== ctx.ref) return { ...row, outcome: 'mismatch', reason: `signed by another machine (${verdict.by.name})` };
+  return { ...row, outcome: 'verified' };
 }
