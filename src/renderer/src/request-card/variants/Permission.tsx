@@ -13,12 +13,12 @@ import { CardButton, CardTextarea, Controls, Muted } from '../controls';
 import { ToolPreview } from '../preview/ToolPreview';
 import { quickApproval } from '../quick-approval';
 import { scopeOptions, type Scope, type ScopeOption } from '../scope';
-import { gated, type VariantProps } from './types';
+import { carried, gated, type VariantProps } from './types';
 
 const ALLOWED: Record<Scope, string> = { once: 'Allowed once', session: 'Allowed for this session', local_settings: 'Always allowed in this project' };
 const HINT_MS = 2_000;
 
-export function PermissionBody({ item, request, busy, submit, bindKeys, capability }: VariantProps<'permission.requested'>) {
+export function PermissionBody({ item, request, busy, submit, bindKeys, capability = carried }: VariantProps<'permission.requested'>) {
   const project = useSessions((s) => {
     const record = s.records.get(item.appSessionId);
     return record?.projectId ? (s.projects.get(record.projectId) ?? null) : null;

@@ -9,9 +9,9 @@ import { TranscriptActionsProvider } from '../../transcript/view/context';
 import { openFile } from '../../tools/code/open-file';
 import { toAnswer } from '../answers';
 import { CardButton, CardTextarea, Controls, Muted } from '../controls';
-import { gated, type VariantProps } from './types';
+import { carried, gated, type VariantProps } from './types';
 
-export function PlanBody({ item, request, busy, submit, bindKeys, capability }: VariantProps<'plan.requested'>) {
+export function PlanBody({ item, request, busy, submit, bindKeys, capability = carried }: VariantProps<'plan.requested'>) {
   const [expanded, setExpanded] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null); // null: the feedback box is closed
   const [confirming, setConfirming] = useState(false);

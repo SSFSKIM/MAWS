@@ -23,9 +23,12 @@ export interface VariantProps<K extends SessionEvent['kind']> {
   submit(answer: RequestAnswer, what: string, delivered?: () => void): void;
   bindKeys(keys: CardKeys): void;
   // P5 O9 M6: whether the session's controls port carries this answer (`answerCapability`), and why not; an option it
-  // can't carry is drawn disabled in place with its reason, never sent, and no key answers it.
-  capability(answer: RequestAnswer): Capability;
+  // can't carry is drawn disabled in place with its reason, never sent, and no key answers it. Absent (a body hosted
+  // outside the card, as desk-web's cards host the question stepper), every answer is carried.
+  capability?: (answer: RequestAnswer) => Capability;
 }
+
+export const carried = (): Capability => ({ available: true });
 
 // A control's disabled state and its reason on hover, from a capability.
 export const gated = (capability: Capability): { disabled: boolean; title: string | undefined } =>

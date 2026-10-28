@@ -19,7 +19,7 @@ import { normalizeQuestionSelections, questionAnswers, questionValue, toAnswer }
 import { CardButton, Controls } from '../controls';
 import { SandboxedPreview } from '../preview/SandboxedPreview';
 import { advance, answerOf, EMPTY_DRAFT, goTo, pick, setOther, skip, toggle, type QuestionDraft } from '../question-steps';
-import { gated, type VariantProps } from './types';
+import { carried, gated, type VariantProps } from './types';
 
 const OTHER = '\u0000other'; // the Other row's radio value: no option label can be it
 
@@ -141,7 +141,7 @@ function keyOwner(body: HTMLElement, placement: VariantProps<'question.requested
 
 const ARROW = 'rounded-sm px-1 text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent';
 
-export function QuestionBody({ item, request, placement, busy, submit, bindKeys, capability }: VariantProps<'question.requested'>) {
+export function QuestionBody({ item, request, placement, busy, submit, bindKeys, capability = carried }: VariantProps<'question.requested'>) {
   const { questions } = request;
   const count = questions.length;
   const storedDraft = useAttention((s) => s.drafts.get(item.id)) ?? EMPTY_DRAFT;
