@@ -92,9 +92,10 @@ describe.skipIf(graph === null)('the built mawsd and its chunks', () => {
 
   // P5 O10 M10: the bundler stands an empty object in for an optional dependency that is not installed (`ws`'s
   // `bufferutil` and `utf-8-validate`), which a `try { require(...) }` takes as present: `ws` then masks its first frame
-  // of 48 bytes or more with a `mask` that isn't there. electron.vite.config.ts's defines keep `ws` off both.
-  it('carry no stand-in for an optional dependency', () => {
-    for (const [file, text] of graph!) expect(code(text).filter((line) => line.includes('__viteOptionalPeerDep_')), file).toEqual([]);
+  // of 48 bytes or more with a `mask` that isn't there. electron.vite.config.ts's defines keep `ws` off both, in mawsd's
+  // graph and in main's (its remote links bundle `ws` too).
+  it('carry no stand-in for an optional dependency, nor does main', () => {
+    for (const [file, text] of [...graph!, ...graphOf(join(OUT, 'index.js'))!]) expect(code(text).filter((line) => line.includes('__viteOptionalPeerDep_')), file).toEqual([]);
   });
 
   it('name the host bundles main names (one build, one build id)', () => {
