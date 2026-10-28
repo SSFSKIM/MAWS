@@ -57,6 +57,11 @@ export interface Plane {
   retained?(): Array<{ key: string; session: SessionRef; view: 'full' | 'cards'; who: Who }>;
   /** A retained cursor that no longer qualifies: dropped. */
   forget?(key: string): void;
+  /**
+   * A session's record moved: what the plane carries of it (lane A cards' launch) goes again. Called after the table
+   * held the session's subscriptions for their re-check, so it reaches a device only after a current grant.
+   */
+  recordChanged?(target: SessionTarget): void;
   stop(): void;
 }
 
@@ -263,7 +268,12 @@ export class Subscriptions {
 
   constructor(ctx: SubscriptionsContext) {
     this.#ctx = ctx;
-    this.#off = ctx.records.onChange((target) => this.recheck(target));
+    // One listener, in this order: the re-check holds the session's subscriptions, then the plane refreshes what it
+    // carries of the record, which so waits behind the hold (not on the order listeners were registered in).
+    this.#off = ctx.records.onChange((target) => {
+      this.recheck(target);
+      this.#ctx.planes[target.lane].recordChanged?.(target);
+    });
   }
 
   /** The channel's `sub` route: registered now, then `authorized` (the gate, which calls `start` or `refused`). */

@@ -319,10 +319,6 @@ export class Endpoint implements EndpointModule {
     this.rl10.onSession((message) => this.planeA.message(message));
     this.rl10.onPending((project, raised) => this.planeA.pendingSet(project, raised));
     this.rl10.onLink((connected) => connected || this.planeA.linkLost());
-    // A lane A member's launch moved: its cards views carry the launch, sent again.
-    this.rl10.members.onChange((target) => {
-      if (target.lane === 'A') this.planeA.memberChanged(target.session);
-    });
     this.subscriptions = new Subscriptions({
       recheckRetryMs: seams.recheckRetryMs,
       transmitDeadlineMs: seams.transmitDeadlineMs,

@@ -296,3 +296,29 @@ describe('a lane A `cards` subscription’s launch (O13’s phone)', () => {
     expect(snapshots(a, 'c1').at(-1)).toEqual({ raised: [RAISED], launch: null });
   });
 });
+
+describe('a lane A `cards` subscription whose member frame moves its launch and its access at once', () => {
+  it('sends nothing of the new record before its access is decided: one frame that relaunches and drops the viewer ends it with no snapshot', async () => {
+    const f = await startEndpoint(org, started);
+    const s = await sminos(f, [laneAMember({ owners: [org.B] })]);
+    s.send({ t: 'pending', project: PROJECT, raised: [RAISED] });
+    const b = await openRemote(f, org.b1, org.B);
+    await subscribe(b, 'c1', { lane: 'A', id: 'la-1' }, { view: 'cards' });
+    expect((await snapshot(b, 'c1')).body).toEqual({ raised: [RAISED], launch: 'L1' });
+    s.send({ t: 'member', ...laneAMember({ owners: [org.A], launch: 'L2' }) });
+    await waitFor(b, (m) => m.t === 'ended' && m.sub === 'c1' && m.reason === 'removed', 'ended removed');
+    await sleep(30);
+    expect(snapshots(b, 'c1')).toEqual([{ raised: [RAISED], launch: 'L1' }]);
+  });
+
+  it('sends the new launch once its access is decided and holds', async () => {
+    const f = await startEndpoint(org, started);
+    const s = await sminos(f, [laneAMember({ owners: [org.B] })]);
+    const b = await openRemote(f, org.b1, org.B);
+    await subscribe(b, 'c1', { lane: 'A', id: 'la-1' }, { view: 'cards' });
+    await snapshot(b, 'c1');
+    s.send({ t: 'member', ...laneAMember({ owners: [org.B], launch: 'L2' }) });
+    await until(() => snapshots(b, 'c1').length === 2, 'the new launch');
+    expect(snapshots(b, 'c1').at(-1)).toEqual({ raised: [], launch: 'L2' });
+  });
+});

@@ -34,6 +34,7 @@ import { randomBytes } from 'node:crypto';
 import type { Who } from './authorize';
 import type { SessionLaneMessage } from './notify';
 import { RESUME_MS } from './interest';
+import type { SessionTarget } from './sources';
 import type { Plane, Position, Subscription } from './subscriptions';
 
 export const RING_BYTES = 2 * 1024 * 1024;
@@ -267,9 +268,13 @@ export class PlaneA implements Plane {
     return { raised: this.pending.of(sub.session.id), launch: this.#ctx.member(sub.session.id)?.launch ?? null };
   }
 
-  /** A session's member record moved (sminos's `member`): a cards view whose launch moved is sent again. */
-  memberChanged(session: string): void {
-    for (const [sub, card] of this.#cards) if (sub.session.id === session && !sub.ended) this.#cardSnap(sub, card);
+  /**
+   * A session's record moved (sminos's `member`): a cards view whose launch moved is sent again. The table calls it after
+   * holding the session's subscriptions for their re-check, so what it sends waits for a current grant.
+   */
+  recordChanged(target: SessionTarget): void {
+    if (target.lane !== 'A') return;
+    for (const [sub, card] of this.#cards) if (sub.session.id === target.session && !sub.ended) this.#cardSnap(sub, card);
   }
 
   /**
