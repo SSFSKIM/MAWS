@@ -24,7 +24,7 @@ const supervisorStatus = (over: Partial<SupervisorStatus> = {}): SupervisorStatu
   socketPath: '/u/supervisor/host.sock', logPath: '/u/supervisor/host.log', orphansKilled: 0, ...over,
 });
 
-function harness(transport: HostFacts['transport'] = 'detached', shape: Pick<HostStatusDeps, 'daemon' | 'daemonUnavailable'> = {}) {
+function harness(transport: HostFacts['transport'] = 'detached', shape: Pick<HostStatusDeps, 'daemon' | 'daemonUnavailable' | 'spineRefused'> = {}) {
   let state: HostState = { state: 'starting', pid: null, restarts: 0, revision: 0 };
   let facts: HostFacts = { transport, reason: null, refused: null, waitingLiveSessions: null, lastExit: null };
   const stateListeners = new Set<(s: HostState) => void>();
@@ -75,6 +75,7 @@ describe('host.status', () => {
     await expect(h.call('host.status')).resolves.toEqual({
       transport: 'detached', state: 'starting', supervisor: null, appBuildId: APP_BUILD, appWire: APP_WIRE, mainBuild: MAIN_BUILD, matches: null, reason: null, waitingLiveSessions: null, lastExit: null,
       daemon: null, daemonUnavailable: null, // P5 O2 M7: the embedded shape
+      spineRefused: null, // P5 O3-A: this run holds spine.lock
     });
     h.move({ state: 'ready', pid: 4242 });
     expect(h.emitted.at(-1)).toMatchObject({ state: 'ready', supervisor: null, matches: null });
@@ -175,6 +176,16 @@ describe('host.status', () => {
   it('says why a launch asked for the daemon runs embedded', async () => {
     const h = harness('detached', { daemonUnavailable: 'no LaunchAgent is installed' });
     await expect(h.call('host.status')).resolves.toMatchObject({ transport: 'detached', daemon: null, daemonUnavailable: 'no LaunchAgent is installed' });
+  });
+
+  // P5 O3-A (the O3 document §2; O3-A acceptance 5): a run refused the spine says so, naming the holder, for Diagnostics
+  it('carries why this run does not run the spine, in the answer and in every emission', async () => {
+    const refused = 'spine.lock is held by pid 4242 (build 1.0.0+abc), so this run starts none of the machine\'s services and writes none of its files';
+    const h = harness('detached', { spineRefused: refused });
+    await expect(h.call('host.status')).resolves.toMatchObject({ spineRefused: refused });
+    h.move({ state: 'ready', pid: 4242 });
+    expect(h.emitted.at(-1)).toMatchObject({ spineRefused: refused });
+    expect(validateEventPayload('host.status', h.emitted.at(-1)).ok).toBe(true);
   });
 
   it('stop unsubscribes', () => {

@@ -25,6 +25,7 @@ export interface HostStatusDeps {
   openPath(path: string): Promise<string>; // shell.openPath: '' when opened, else the reason
   daemon?(): DaemonStatus | null; // P5 O2 M7: the daemon shape's last daemon.status (null until it first answers)
   daemonUnavailable?: string | null; // P5 O2 M7: why the daemon shape the setting asks for does not run this launch
+  spineRefused?: string | null; // P5 O3-A: why this run does not run the spine (src/main/settings/spine-lock.ts)
 }
 
 export interface HostStatusService {
@@ -69,6 +70,7 @@ export function startHostStatus(deps: HostStatusDeps): HostStatusService {
       lastExit,
       daemon: deps.daemon?.() ?? null, // P5 O2 M7
       daemonUnavailable: deps.daemonUnavailable ?? null,
+      spineRefused: deps.spineRefused ?? null, // P5 O3-A
     };
   };
 

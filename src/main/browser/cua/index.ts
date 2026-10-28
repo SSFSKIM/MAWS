@@ -22,7 +22,7 @@ import { createServer, type Server, type Socket } from 'node:net';
 import { join } from 'node:path';
 import type { BrowserAgentActivity } from '@shared/browser/activity';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { BrowserActivityStore } from '../../index/browser-activity';
+import type { BrowserActivityStore } from '../data/activity';
 import type { MawsDownloadRecorded } from '@shared/ipc/schema/maws';
 import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
 import type { LeaseHolds } from '../agent/visible';
@@ -79,7 +79,7 @@ export interface CuaBackend extends LeaseHolds {
   // M3: the `-run-dialog` wrap's held route: a leased tab's alert or confirm, answered by the vendor or the 30 s default
   dialogs: { holds(tabId: string): boolean; hold(entry: TabEntry, info: RunDialogInfo, callback: RunDialogCallback): void };
   // M3 fix wave: the session's agent activity, oldest first (`browser.agent.activities.list`); since cua board #93 an
-  // earlier app run's too, from the index
+  // earlier app run's too, from the browser's data
   activities(appSessionId: AppSessionId): BrowserAgentActivity[];
   dispose(): void;
 }
@@ -231,7 +231,7 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
       }
     },
     closeSession(appSessionId) {
-      feed?.forgetSession(appSessionId); // the session was removed: its activity goes with it (its index rows with its record)
+      feed?.forgetSession(appSessionId); // the session was removed: its activity goes with it (its stored rows too, BrowserData)
       engineRoots.delete(appSessionId);
       const listening = sessions.get(appSessionId);
       if (!listening) return;

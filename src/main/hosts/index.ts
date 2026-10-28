@@ -76,7 +76,8 @@ function refuse(code: number, line: string): never {
   process.exit(code);
 }
 
-export function createHosts(mainBuild: MainBuild, launch: LaunchShape): HostSupervisor {
+// P5 O3-A: `spineRefused`, why this run does not run the spine, for host.status
+export function createHosts(mainBuild: MainBuild, launch: LaunchShape, { spineRefused = null }: { spineRefused?: string | null } = {}): HostSupervisor {
   const { mode } = launch;
   const daemon = mode === 'daemon';
   const userData = app.getPath('userData');
@@ -127,6 +128,7 @@ export function createHosts(mainBuild: MainBuild, launch: LaunchShape): HostSupe
     openPath: (path) => shell.openPath(path),
     ...(watch ? { daemon: () => watch.status() } : {}),
     daemonUnavailable: launch.unavailable,
+    spineRefused, // P5 O3-A
   });
   return supervisor;
 }

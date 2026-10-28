@@ -42,6 +42,7 @@ export interface ArtifactsDeps {
   env: Record<string, string | undefined>;
   openWindow(): BrowserWindow; // the e2e seam's second window
   root: string; // P3-A M7: `<userData>/artifacts`, where the library's exports are written
+  relayDefaults?: boolean; // P5 O3-A: false in a run refused the spine, which relays none of the machine's settings
 }
 
 // The store frames' policies on the window's default session and on the capture partition (P3-L M6b; E2's, in
@@ -54,7 +55,7 @@ export function installStorePolicies(env: NodeJS.ProcessEnv, appUrl: string): vo
 }
 
 // P4-B5: `exports`, the export service itself (X31), for main's delivery (Send to), which exports as the library does
-export function startArtifacts({ hosts, register, emit, settings, onSettingsChanged, env, openWindow, root }: ArtifactsDeps): { stop(): void; exporters: ExporterRegistry; exports: Pick<ReturnType<typeof startExportService>, 'exportForLibrary'> } {
+export function startArtifacts({ hosts, register, emit, settings, onSettingsChanged, env, openWindow, root, relayDefaults = true }: ArtifactsDeps): { stop(): void; exporters: ExporterRegistry; exports: Pick<ReturnType<typeof startExportService>, 'exportForLibrary'> } {
   const deps = { dispatch: hosts.dispatch, postDocPort: hosts.postDocPort, closeDocPorts: hosts.closeDocPorts, channel: () => new MessageChannelMain() };
   register('artifacts.open', ({ artifactId, doc }, { client }) => openDocument(deps, artifactId, client, doc));
   // P3-A M7: the scheme and the export service
@@ -85,7 +86,7 @@ export function startArtifacts({ hosts, register, emit, settings, onSettingsChan
     content,
     env,
   });
-  const stopDefaults = startArtifactDefaults({
+  const stopDefaults = !relayDefaults ? () => {} : startArtifactDefaults({
     settings,
     onSettingsChanged,
     hostState: (): HostState => hosts.snapshot('engine-host'),

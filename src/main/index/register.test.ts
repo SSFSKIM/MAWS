@@ -130,7 +130,7 @@ describe('main answers the record side of session.* from the index', () => {
     registerIndexHandlers(index);
     installRouter({ appUrl: APP_URL, local: 'LocalMachineRef0000000' as MachineRef });
     expect(index.readOnly).toBe(true);
-    const unavailable = { ok: false, error: { code: 'internal', message: 'index unavailable: user_version 99 is newer than this app knows (13)' } }; // P2-C2: 9; P3-L: 10; P5 O6 M5: 13
+    const unavailable = { ok: false, error: { code: 'internal', message: 'index unavailable: user_version 99 is newer than this app knows (14)' } }; // P2-C2: 9; P3-L: 10; P5 O6 M5: 13; P5 O3-A: 14
     const appSessionId = randomUUID();
     expect(await invoke('session.list', {})).toEqual(unavailable);
     expect(await invoke('session.get', { appSessionId })).toEqual(unavailable);

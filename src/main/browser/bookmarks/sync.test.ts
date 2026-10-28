@@ -2,15 +2,15 @@
 // prepared and on `browser.bookmarks.sync`; the rows replaced and the record's state written; a failed read keeping the
 // rows and setting `error`/`errorAt`; refused while an import or a removal runs or the index is read-only; and a removal
 // finishing mid-read leaving neither rows nor record.
-import { join } from 'node:path';
 import type { Session } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { emptyBookmarkTree, type BookmarkTree } from '@shared/browser/bookmarks';
 import type { ImportedBookmarks, ImportedProfile } from '@shared/browser/profiles';
 import { profilePartition } from '@shared/browser/tab';
 import { BOOKMARKS_REPORT } from '../../../../test/support/import-reports';
+import { browserDataIn } from '../../../../test/support/browser-data';
 import { tempDir } from '../../../../test/support/index-fixture';
-import { Index } from '../../index/index';
+import type { BrowserData } from '../data';
 import type { BookmarksRead } from '../import/chrome/bookmarks';
 import { ImportedProfiles } from '../import/profiles';
 import { BookmarkSync, type BookmarkSyncDeps } from './sync';
@@ -38,7 +38,7 @@ const treeOf = (...names: string[]): BookmarkTree => ({
   bar: { kind: 'folder', id: 1, name: 'Bookmarks bar', children: names.map((name, k) => ({ kind: 'url' as const, id: k + 2, name, url: `https://${name.toLowerCase()}.example/`, addedAt: null })) },
 });
 const ok = (...names: string[]): BookmarksRead => ({ ok: true, tree: treeOf(...names), urls: names.length, skipped: 0 });
-const barNames = (index: Index) => index.browserBookmarks.tree(PARTITION).bar.children.map((node) => node.name);
+const barNames = (data: BrowserData) => data.bookmarks.tree(PARTITION).bar.children.map((node) => node.name);
 
 // A read the test answers when it chooses.
 function deferredRead() {
@@ -49,7 +49,7 @@ function deferredRead() {
 
 describe('BookmarkSync', () => {
   let dir: ReturnType<typeof tempDir>;
-  let index: Index;
+  let data: BrowserData;
   let profiles: ImportedProfiles;
   let emit: ReturnType<typeof vi.fn<(name: string, payload: unknown) => unknown>>;
   let busy: 'importing' | 'removing' | null;
@@ -57,19 +57,19 @@ describe('BookmarkSync', () => {
 
   beforeEach(async () => {
     dir = tempDir('maws-90-sync-');
-    index = new Index(join(dir.path, 'index.sqlite'));
+    data = browserDataIn(dir.path);
     profiles = ImportedProfiles.open(dir.path);
     await profiles.put(record());
-    index.browserBookmarks.replace(PARTITION, treeOf('A'));
+    data.bookmarks.replace(PARTITION, treeOf('A'));
     emit = vi.fn<(name: string, payload: unknown) => unknown>();
     busy = null;
-    deps = { profiles, store: index.browserBookmarks, busy: () => busy, read: vi.fn(async () => ok('A2', 'Z')), emit: emit as BookmarkSyncDeps['emit'], env: {}, now: () => NOW };
+    deps = { profiles, store: data.bookmarks, busy: () => busy, read: vi.fn(async () => ok('A2', 'Z')), emit: emit as BookmarkSyncDeps['emit'], env: {}, now: () => NOW };
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'info').mockImplementation(() => {});
   });
   afterEach(() => {
     vi.restoreAllMocks();
-    index.close();
+    data.close();
     dir.dispose();
   });
 
@@ -77,7 +77,7 @@ describe('BookmarkSync', () => {
     const sync = new BookmarkSync(deps);
     expect(await sync.sync('Default')).toEqual({ syncedAt: '2026-10-08T12:00:00.000Z', count: 2 });
     expect(deps.read).toHaveBeenCalledWith('/chrome', 'Default');
-    expect(barNames(index)).toEqual(['A2', 'Z']);
+    expect(barNames(data)).toEqual(['A2', 'Z']);
     expect(profiles.get('Default')!.bookmarks).toEqual({ ...CONSENTED, syncedAt: '2026-10-08T12:00:00.000Z', count: 2 });
     expect(emit).toHaveBeenCalledWith('browser.bookmarks.changed', { partition: PARTITION });
     expect(emit).toHaveBeenCalledWith('browser.import.changed', { profiles: profiles.list() });
@@ -86,7 +86,7 @@ describe('BookmarkSync', () => {
   it.each([['missing'], ['unreadable']] as const)('a %s file keeps the rows and records the error and its time, keeping the last sync', async (error) => {
     const sync = new BookmarkSync({ ...deps, read: async () => ({ ok: false, error }) });
     expect(await sync.sync('Default')).toEqual({ error });
-    expect(barNames(index)).toEqual(['A']);
+    expect(barNames(data)).toEqual(['A']);
     expect(profiles.get('Default')!.bookmarks).toEqual({ ...CONSENTED, error, errorAt: '2026-10-08T12:00:00.000Z' });
     expect(emit).not.toHaveBeenCalledWith('browser.bookmarks.changed', expect.anything());
   });
@@ -101,7 +101,7 @@ describe('BookmarkSync', () => {
     const store = { replace: vi.fn(() => { throw Object.assign(new Error('disk I/O error'), { code: 'ERR_SQLITE_ERROR' }); }), readOnly: false };
     const sync = new BookmarkSync({ ...deps, store });
     expect(await sync.sync('Default')).toEqual({ error: 'indexUnavailable' });
-    expect(barNames(index)).toEqual(['A']);
+    expect(barNames(data)).toEqual(['A']);
     expect(profiles.get('Default')!.bookmarks).toMatchObject({ error: 'indexUnavailable', errorAt: '2026-10-08T12:00:00.000Z' });
   });
 
@@ -120,7 +120,7 @@ describe('BookmarkSync', () => {
     const sync = new BookmarkSync(deps);
     expect(await sync.sync('Default')).toEqual({ error: 'refused', reason });
     expect(deps.read).not.toHaveBeenCalled();
-    expect(barNames(index)).toEqual(['A']);
+    expect(barNames(data)).toEqual(['A']);
     expect(profiles.get('Default')!.bookmarks).toEqual(CONSENTED);
   });
 
@@ -140,7 +140,7 @@ describe('BookmarkSync', () => {
     const release = profiles.withdraw('Default');
     answer(ok('A2'));
     expect(await pending).toEqual({ error: 'refused', reason: 'not an imported profile' });
-    expect(barNames(index)).toEqual(['A']);
+    expect(barNames(data)).toEqual(['A']);
     expect(profiles.get('Default')!.bookmarks).toEqual(CONSENTED);
     release();
   });
@@ -152,12 +152,12 @@ describe('BookmarkSync', () => {
     await vi.waitFor(() => expect(read).toHaveBeenCalled());
     // the removal: withdrawn, its rows removed, its record dropped
     const release = profiles.withdraw('Default');
-    index.browserBookmarks.removePartition(PARTITION);
+    data.bookmarks.removePartition(PARTITION);
     await profiles.remove('Default');
     release();
     answer(ok('A2', 'Z'));
     expect(await pending).toEqual({ error: 'refused', reason: 'not an imported profile' });
-    expect(index.browserBookmarks.tree(PARTITION)).toEqual(emptyBookmarkTree());
+    expect(data.bookmarks.tree(PARTITION)).toEqual(emptyBookmarkTree());
     expect(profiles.get('Default')).toBeNull();
     expect(profiles.list()).toEqual([]);
   });
@@ -174,7 +174,7 @@ describe('BookmarkSync', () => {
     await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(2));
     reads[1]!(ok('Second', 'Two'));
     expect(await second).toMatchObject({ count: 2 });
-    expect(barNames(index)).toEqual(['Second', 'Two']);
+    expect(barNames(data)).toEqual(['Second', 'Two']);
   });
 
   describe('when a partition is prepared', () => {
@@ -184,7 +184,7 @@ describe('BookmarkSync', () => {
       const sync = new BookmarkSync(deps);
       expect(() => sync.onPartitionPrepared(ses, PARTITION)).not.toThrow();
       await sync.idle();
-      expect(barNames(index)).toEqual(['A2', 'Z']);
+      expect(barNames(data)).toEqual(['A2', 'Z']);
       expect(profiles.get('Default')!.bookmarks).toMatchObject({ count: 2, error: null });
     });
 

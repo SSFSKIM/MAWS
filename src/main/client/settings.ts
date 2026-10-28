@@ -2,12 +2,17 @@
 // native chrome through `nativeTheme.themeSource`, resolves `system` against the OS, keeps the window background on
 // the resolved theme's `--bg`, and emits `settings.changed` on start, on every set, and when the OS moves the
 // resolved theme. The renderer only mirrors what it is told onto `<html data-theme>`.
+// P5 O3-A (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md §3; contract O3X3): this is the client half, moved out of
+// the machine-bound `src/main/settings/`. It composes the renderer's one `Settings` (its version the client file's) from
+// its own file (./settings-store.ts) and the machine half's service (src/main/settings/machine.ts), routes each field of
+// a patch to its owner, and publishes on a change to either. The renderer's `settings.*` keeps its shape.
 import { nativeTheme } from 'electron';
 import type { SettingsState, ThemeSetting } from '@shared/ipc/schema';
 import { emit } from '../ipc/events';
 import { registerMainHandler } from '../ipc/router';
+import type { MachineSettingsService } from '../settings/machine';
 import { applyWindowBackground } from '../window';
-import { openSettingsStore, resolveTheme } from './store';
+import { composeSettings, resolveTheme } from './settings-store';
 
 export interface SettingsService {
   state(): SettingsState;
@@ -16,12 +21,9 @@ export interface SettingsService {
   onChange(listener: (state: SettingsState) => void): () => void;
 }
 
-export function startSettings(file: string): SettingsService {
-  const store = openSettingsStore(file);
-  const state = (): SettingsState => ({
-    settings: store.settings,
-    resolvedTheme: resolveTheme(store.settings.theme, nativeTheme.shouldUseDarkColors),
-  });
+export function startSettings({ clientFile, machine }: { clientFile: string; machine: MachineSettingsService }): SettingsService {
+  const store = composeSettings({ clientFile, machine });
+  const state = (): SettingsState => ({ settings: store.settings, resolvedTheme: resolveTheme(store.settings.theme, nativeTheme.shouldUseDarkColors) });
 
   const listeners = new Set<(state: SettingsState) => void>(); // P2-C M4
   let published: SettingsState | null = null;
@@ -47,10 +49,26 @@ export function startSettings(file: string): SettingsService {
   nativeTheme.on('updated', () => {
     if (!writingThemeSource && state().resolvedTheme !== published?.resolvedTheme) publish();
   });
+  // P5 O3-A: a change to the machine half publishes, except the one a set below makes, which publishes once itself
+  let setting = false;
+  machine.onChange(() => {
+    if (!setting) publish();
+  });
 
   registerMainHandler('settings.get', state);
   registerMainHandler('settings.set', (patch) => {
-    setThemeSource(store.update(patch).theme);
+    // P5 O3-A: each half takes only its own fields (composeSettings). A half that refuses its write (a file this build
+    // cannot own; the machine file in a run refused the spine) fails the set; what the other half already wrote is
+    // published before the error is answered.
+    setting = true;
+    try {
+      setThemeSource(store.update(patch).theme);
+    } catch (error) {
+      publish();
+      throw error;
+    } finally {
+      setting = false;
+    }
     return publish();
   });
 

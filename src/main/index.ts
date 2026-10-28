@@ -12,7 +12,11 @@ import type { ClientRef } from '@shared/ipc/client';
 import { pageOf } from './ipc/clients';
 import { createHosts, prepareLaunch, refuseTestLaunchOnDefaultProfile, type LaunchShape } from './hosts'; // P5 O2 M7: prepareLaunch; the landing: the refusal
 import { dispatchLocal, installRouter } from './ipc/router'; // P5 O6 M3: dispatchLocal, the local link's and the stand-in's
-import { startSettings, type SettingsService } from './settings';
+import { startSettings, type SettingsService } from './client/settings'; // P5 O3-A: the client half, composed with the machine's
+import { readLaunchShape } from './client/settings-store'; // P5 O3-A
+import { startMachineSettings } from './settings/machine'; // P5 O3-A
+import { settingsPaths, splitSettingsFiles } from './settings/split'; // P5 O3-A
+import { takeSpineLock, type SpineLock } from './settings/spine-lock'; // P5 O3-A
 import { startWithProfileLock } from './files/profile-lock';
 import { describeMainBuild, loadedBundlePath, olderInstanceNotice, staleBuildCheck, type MainBuild } from './build-identity'; // E11 §2.7; F2b 2.7b
 import { builtAtLabel } from '@shared/app/build-time'; // E11 §2.7
@@ -138,6 +142,10 @@ import { CLOSE_GRACE_MS } from '@shared/host/socket-port';
 // E4a start
 import { startBrowser, type Browser } from './browser';
 // E4a end
+// P5 O3-A start: the browser's own database, out of the index
+import { BROWSER_DATA_PATH } from '@shared/browser/data-schema';
+import { BrowserData } from './browser/data';
+// P5 O3-A end
 // E4b start
 import { ImportedProfiles, startBrowserImport, sweepBrowserImports } from './browser/import';
 // E4b end
@@ -266,28 +274,48 @@ void startWithProfileLock(app, () => {
     return;
   }
   bindLocalMachine(local); // P5 O6 M2: the router's, `emit`'s and every app window's local machine
-  // P5 O2 M7: the settings are read before the hosts, and the launch's shape (`supervisor.shape`, read once) settled
-  // before they are created: the default profile's LaunchAgent installed, repaired or uninstalled first
-  const settings = startSettings(join(app.getPath('userData'), 'settings.json'));
-  const launch = prepareLaunch(settings.state().settings.supervisor.shape);
+  // P5 O2 M7: the launch's shape (`supervisor.shape`, read once) settled before the hosts are created: the default
+  // profile's LaunchAgent installed, repaired or uninstalled first. P5 O3-A (the O3 document §2): the shape is the client
+  // file's own field, read without the spine lock and writing nothing; the lock is taken once the shape is settled.
+  const profile = app.getPath('userData');
+  const paths = settingsPaths(profile);
   const machine = { local, localName };
-  if (!(launch instanceof Promise)) return startMain(settings, launch, machine);
-  void launch.then(
-    (settled) => startMain(settings, settled, machine),
+  return Promise.resolve(prepareLaunch(readLaunchShape(paths.client))).then(
+    async (settled) => startMain(await startSpineData(profile, paths), settled, machine),
     (error: unknown) => {
       console.error('[hosts] the launch could not settle its shape; quitting', error);
       app.exit(1);
     },
-  );
+  ).catch((error: unknown) => {
+    console.error('[main] MAWS could not start; quitting', error);
+    app.exit(1);
+  });
 }, { build: MAIN_BUILD, onSecondInstance: answerSecondLaunch }); // E11 §2.7
 
-function startMain(settings: SettingsService, launch: LaunchShape, { local, localName }: { local: MachineRef; localName: string }): void {
+// P5 O3-A (the O3 document §2, §3; contracts O3X2, O3X3): `spine.lock` before either settings file is migrated or
+// written and before the index opens (startMain); then, holding it, the split of a unified settings file, once, and both
+// halves. Refused, nothing is migrated, the machine half is read and never written, and the client file is written only
+// once it is a client file. The lock is held for the process's life.
+async function startSpineData(profile: string, paths: ReturnType<typeof settingsPaths>): Promise<{ settings: SettingsService; spine: SpineLock }> {
+  const spine = await takeSpineLock(profile, { build: `${MAIN_BUILD.version}+${MAIN_BUILD.commit}` });
+  process.once('exit', spine.release);
+  const split = spine.refused === null ? splitSettingsFiles(paths) : null;
+  const machineSettings = startMachineSettings(paths.machine, { refused: spine.refused ?? split?.machineRefused ?? null, unsplit: split?.unsplit });
+  return { settings: startSettings({ clientFile: paths.client, machine: machineSettings }), spine };
+}
+
+function startMain({ settings, spine }: { settings: SettingsService; spine: SpineLock }, launch: LaunchShape, { local, localName }: { local: MachineRef; localName: string }): void {
   installContentSecurityPolicy();
   // C9 block begin: the harness's fake session directories; a terminal's links open through pty.openLink
   if (process.env.MAWS_HARNESS === '1') prepareHarness();
   registerPtyOpenLink();
   // C9 block end
-  const hosts = createHosts(MAIN_BUILD, launch); // E11 §2.7: main's build for host.status; P5 O2 M7: the launch's shape
+  // P5 O3-A (the O3 document §2): whether this run holds `spine.lock`. Refused, none of the spine's services that write
+  // the machine's files or launch a session starts below (the attention service and its fallback file, replays, the
+  // prompt history, the worktree and session services with their intents, bootstraps and deletions, the owner channel,
+  // the sweep, yield and side threads), the index is opened unavailable, and the client half runs.
+  const spineRuns = spine.refused === null;
+  const hosts = createHosts(MAIN_BUILD, launch, { spineRefused: spine.refused }); // E11 §2.7: main's build for host.status; P5 O2 M7: the launch's shape; P5 O3-A: why the spine does not run
   // P5 O1 M3 (OX4): the client port, the one way a machine-bound service reaches the person's screen: dialogs, the
   // Replace question, Finder, the browser, notifications, the badge and focus. `openWindow` is read when a focus needs it.
   // (Made before the org session, whose weekly successor notifies through it: P5 O8 M3.)
@@ -394,7 +422,8 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
   // C4 start: the index (<userData>/index.sqlite) answers the record side of session.*, and its session source folds the
   // engine host's store events into it once the host is ready. C5's read model starts the source (its block below:
   // SessionReadModel.register, which refuses it in launch mode scenario) and stops it at will-quit.
-  const index = new Index(join(app.getPath('userData'), 'index.sqlite'));
+  // P5 O3-A: unavailable, its file never opened, in a run refused the spine
+  const index = new Index(join(app.getPath('userData'), 'index.sqlite'), { refused: spine.refused });
   // P5 O6 M5: each project's org project, derived again in the background at every start (OX3)
   void index.refreshOrgProjects({ machine: local });
   registerIndexHandlers(index);
@@ -419,25 +448,28 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
   const indexSource = new IndexSessionSource(index, hosts, { emit });
   // C3's attention service, as C3 started it, with `Index.attention` as its store (C3's file store only when this app
   // cannot read the index); an archive the index records retires the session's attention.
-  const attention = startIndexAttention(index, {
-    onEvent: (name, listener) => hosts.onEvent(name, listener),
-    onState: (owner, listener) => hosts.onState(owner, listener),
-    dispatch: hosts.dispatch,
-    emit,
-    register: registerMainHandler,
-    fallbackFile: join(app.getPath('userData'), 'attention.json'),
-  });
+  // P5 O3-A: none in a run refused the spine, whose index is unavailable and which writes no attention fallback
+  const attention = spineRuns
+    ? startIndexAttention(index, {
+        onEvent: (name, listener) => hosts.onEvent(name, listener),
+        onState: (owner, listener) => hosts.onState(owner, listener),
+        dispatch: hosts.dispatch,
+        emit,
+        register: registerMainHandler,
+        fallbackFile: join(app.getPath('userData'), 'attention.json'),
+      })
+    : null;
   // Replay (M5): started here, run in the engine host; the fixtures table lists the checkout's probe journals and
-  // transcripts (none in a packaged app).
-  const replays = registerReplayHandlers(index, hosts);
+  // transcripts (none in a packaged app). P5 O3-A: none in a run refused the spine.
+  const replays = spineRuns ? registerReplayHandlers(index, hosts) : null;
   if (index.unavailable === null) seedReplayFixtures(index.fixtures, appRoot(app.getAppPath()));
   // The read-only git service (M6): git.* for any directory in a repository, and git.changed for watched roots.
   const git = new GitService({ emit: (change) => void emit('git.changed', change) });
   registerGitHandlers(git);
   shutdown.add('git, replays and attention', () => {
     git.dispose();
-    replays.dispose();
-    attention.stop();
+    replays?.dispose();
+    attention?.stop();
     // (the index closes at will-quit after C5's block below, once the read model has stopped the source that reads it)
   });
   // C4 end
@@ -522,8 +554,11 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
       return record && { directory: record.directory, engineSessionId: record.engineSessionId };
     },
   }));
-  registerMainHandler('session.history.list', async ({ appSessionId, limit }) => ({ entries: await (await history).list(appSessionId as AppSessionId, limit) }));
-  registerMainHandler('session.history.append', async ({ appSessionId, display, pastedContents, project }) => (await history).append(appSessionId as AppSessionId, display, pastedContents, project ?? null));
+  // P5 O3-A: the prompt history is the machine's file, kept by the spine; none in a run refused it
+  if (spineRuns) {
+    registerMainHandler('session.history.list', async ({ appSessionId, limit }) => ({ entries: await (await history).list(appSessionId as AppSessionId, limit) }));
+    registerMainHandler('session.history.append', async ({ appSessionId, display, pastedContents, project }) => (await history).append(appSessionId as AppSessionId, display, pastedContents, project ?? null));
+  }
   // listable roots: the directories of every unarchived session the read model holds (both launch modes) or the index
   // holds, and every indexed project's directory; read again after any session or project change main tells the renderer
   const roots = () => {
@@ -557,69 +592,76 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
   });
   shutdown.add('files', () => filesService.dispose());
   // C8c end
-  // C10 start: the worktree service (M2): git.worktree.*, every git mutation MAWS makes, with occupancy from holder
-  // authority (C3's process table and C4's fresh registry read through the engine host, the index's records).
-  const worktrees = new WorktreeService({ git: createGitRunner(), holders: { dispatch: hosts.dispatch, sessions: index.sessions } });
-  registerWorktreeHandlers(worktrees);
-  // The session service (M3): intents, start, fork, archive, delete, rename and the trust check, reading the global
-  // config and the store with the environment the engine receives (the login-shell capture, as C3's host builds every
-  // launch's). Its start resets every stale `self` holder at once (D-16), then forgets stale bootstrap ids and
-  // reconciles interrupted handoffs once the engine host answers; `session.intent.list` waits for that.
+  // C10 start
   // E13: the session's cua socket for its launch (the in-app browser spec of 2026-10-08); the browser starts below, and a
   // launch asked before it (none is expected) carries no socket
   let cuaSockets: Browser['cua'] | null = null;
-  // P2-C start (2026-10-09): the owner channel's launch half (the P2-C document, §2, §9): mods.* over the index, and the
-  // decision every MAWS-owned launch takes for the to-human lane, reading the engine's config home from its environment;
-  // M4: the marks, the answers and their attention items (ownerChannel.*), projected into C3's attention service
-  const ownerChannel = startOwnerChannel({
-    index, settings: () => settings.state().settings, engineEnv, onEvent: (name, listener) => hosts.onEvent(name, listener), register: registerMainHandler,
-    attention, dispatch: hosts.dispatch, onHostState: (listener) => hosts.onState('engine-host', listener), onStreaming: (listener) => hosts.onStreaming('engine-host', listener),
-    streaming: () => hosts.streaming('engine-host'), emit: (name, payload) => void emit(name, payload), onSettings: (listener) => settings.onChange(listener),
-  });
-  shutdown.add('owner channel', ownerChannel.stop);
-  // P2-C end
-  const sessionService = new SessionService({
-    index,
-    host: {
-      dispatch: hosts.dispatch,
-      onEvent: (name, listener) => hosts.onEvent(name, listener),
-      ready: () => engineHostSettled(hosts),
-      onReady: (listener) => hosts.onStreaming('engine-host', listener), // E10: a recovery deferred while the host was unreachable
-    },
-    git: createGitRunner(),
-    worktrees,
-    intents,
-    bootstraps: new BootstrapNotes(join(sessionsDir, 'bootstraps')),
-    userData: app.getPath('userData'),
-    env: engineEnv,
-    emit,
-    trash: trashFor(process.env, (path) => shell.trashItem(path)), // the e2e seam (MAWS_E2E_TRASH_DIR) or the Trash
-    port: clientPort, // session.revealPath
-    replay: ReplaySeam.fromEnv(process.env, process.cwd()), // the e2e seam (MAWS_E2E_REPLAY_FIXTURES)
-    settings: () => sessionSettingsOf(settings.state().settings), // C11: the route, the relay policy and the subagent model from settings v3
-    userDefaults, // W3: the user's defaultMode seeds a new intent's mode (read only)
-    launchGate: () => engineConfigure.launchGate(), // C12: a launch waits for the host to hold the binary settings name (W13: custody retired)
-    browserBackend: (appSessionId) => cuaSockets?.socketPathFor(appSessionId) ?? null, // E13
-    ownerChannel: ownerChannel.launches, // P2-C (2026-10-09)
-    acquisitions: sessions.model, // P2-A (X16): the digest's availability follows each acquisition
-  });
-  registerSessionServiceHandlers(sessionService);
-  const inactiveArchive = new InactiveArchive({
-    index, git: createGitRunner(), status: (id) => sessions.model.engineStatus(id),
-    waiting: (id) => sessions.model.attention(id).some((item) => archiveOpen(item) && archiveActionable(item)),
-    archive: (id, eligible, stillEligible) => sessionService.archive(id, { onlyIfIdle: true, eligible, stillEligible }),
-    discovered: (engineSessionId) => indexSource.discoveryCurrent(engineSessionId), // a closed app's CLI use is read first
-    open: openSessionTabs(layout, local, (id) => sessions.model.isVisible(id)), // the sweep keeps what the owner keeps in a tab (P5 O6 M2: the local machine's)
-    activity: (id) => {
-      const digest = sessions.model.digest(id);
-      const times = [digest?.turnStartedAt, digest?.lastTurnEndedAt].flatMap((at) => at ? [Date.parse(at)] : []).filter(Number.isFinite);
-      return times.length ? Math.max(...times) : null;
-    },
-  });
-  registerMainHandler('session.archiveOlder', ({ days, projectId }) => inactiveArchive.run(days, projectId as ProjectId | null));
-  shutdown.add('inactive archive', scheduleInactiveArchive(inactiveArchive, () => settings.state().settings.sessions.archiveInactiveDays, (changed) => settings.onChange(changed), (scanned) => indexSource.onScanned(scanned)));
+  // P5 O3-A: the worktree and session services (intents, bootstraps, deletions, every launch), the owner channel and
+  // the sweep run only while this run holds spine.lock; refused, none starts and their commands have no handler.
+  let sessionService: SessionService | null = null;
+  if (spineRuns) {
+    // the worktree service (M2): git.worktree.*, every git mutation MAWS makes, with occupancy from holder authority
+    // (C3's process table and C4's fresh registry read through the engine host, the index's records).
+    const worktrees = new WorktreeService({ git: createGitRunner(), holders: { dispatch: hosts.dispatch, sessions: index.sessions } });
+    registerWorktreeHandlers(worktrees);
+    // The session service (M3): intents, start, fork, archive, delete, rename and the trust check, reading the global
+    // config and the store with the environment the engine receives (the login-shell capture, as C3's host builds every
+    // launch's). Its start resets every stale `self` holder at once (D-16), then forgets stale bootstrap ids and
+    // reconciles interrupted handoffs once the engine host answers; `session.intent.list` waits for that.
+    // P2-C start (2026-10-09): the owner channel's launch half (the P2-C document, §2, §9): mods.* over the index, and the
+    // decision every MAWS-owned launch takes for the to-human lane, reading the engine's config home from its environment;
+    // M4: the marks, the answers and their attention items (ownerChannel.*), projected into C3's attention service
+    const ownerChannel = startOwnerChannel({
+      index, settings: () => settings.state().settings, engineEnv, onEvent: (name, listener) => hosts.onEvent(name, listener), register: registerMainHandler,
+      attention: attention!, dispatch: hosts.dispatch, onHostState: (listener) => hosts.onState('engine-host', listener), onStreaming: (listener) => hosts.onStreaming('engine-host', listener),
+      streaming: () => hosts.streaming('engine-host'), emit: (name, payload) => void emit(name, payload), onSettings: (listener) => settings.onChange(listener),
+    });
+    shutdown.add('owner channel', ownerChannel.stop);
+    // P2-C end
+    const service = new SessionService({
+      index,
+      host: {
+        dispatch: hosts.dispatch,
+        onEvent: (name, listener) => hosts.onEvent(name, listener),
+        ready: () => engineHostSettled(hosts),
+        onReady: (listener) => hosts.onStreaming('engine-host', listener), // E10: a recovery deferred while the host was unreachable
+      },
+      git: createGitRunner(),
+      worktrees,
+      intents,
+      bootstraps: new BootstrapNotes(join(sessionsDir, 'bootstraps')),
+      userData: app.getPath('userData'),
+      env: engineEnv,
+      emit,
+      trash: trashFor(process.env, (path) => shell.trashItem(path)), // the e2e seam (MAWS_E2E_TRASH_DIR) or the Trash
+      port: clientPort, // session.revealPath
+      replay: ReplaySeam.fromEnv(process.env, process.cwd()), // the e2e seam (MAWS_E2E_REPLAY_FIXTURES)
+      settings: () => sessionSettingsOf(settings.state().settings), // C11: the route, the relay policy and the subagent model from settings v3
+      userDefaults, // W3: the user's defaultMode seeds a new intent's mode (read only)
+      launchGate: () => engineConfigure!.launchGate(), // C12: a launch waits for the host to hold the binary settings name (W13: custody retired)
+      browserBackend: (appSessionId) => cuaSockets?.socketPathFor(appSessionId) ?? null, // E13
+      ownerChannel: ownerChannel.launches, // P2-C (2026-10-09)
+      acquisitions: sessions.model, // P2-A (X16): the digest's availability follows each acquisition
+    });
+    registerSessionServiceHandlers(service);
+    sessionService = service;
+    const inactiveArchive = new InactiveArchive({
+      index, git: createGitRunner(), status: (id) => sessions.model.engineStatus(id),
+      waiting: (id) => sessions.model.attention(id).some((item) => archiveOpen(item) && archiveActionable(item)),
+      archive: (id, eligible, stillEligible) => service.archive(id, { onlyIfIdle: true, eligible, stillEligible }),
+      discovered: (engineSessionId) => indexSource.discoveryCurrent(engineSessionId), // a closed app's CLI use is read first
+      open: openSessionTabs(layout, local, (id) => sessions.model.isVisible(id)), // the sweep keeps what the owner keeps in a tab (P5 O6 M2: the local machine's)
+      activity: (id) => {
+        const digest = sessions.model.digest(id);
+        const times = [digest?.turnStartedAt, digest?.lastTurnEndedAt].flatMap((at) => at ? [Date.parse(at)] : []).filter(Number.isFinite);
+        return times.length ? Math.max(...times) : null;
+      },
+    });
+    registerMainHandler('session.archiveOlder', ({ days, projectId }) => inactiveArchive.run(days, projectId as ProjectId | null));
+    shutdown.add('inactive archive', scheduleInactiveArchive(inactiveArchive, () => settings.state().settings.sessions.archiveInactiveDays, (changed) => settings.onChange(changed), (scanned) => indexSource.onScanned(scanned)));
+    service.start().catch((error: unknown) => console.error('[sessions] the session service failed to start:', error));
+  }
   registerObservedFacts(hosts.dispatch); // P2-A (X17): the engine host's observed facts, beside session.digests
-  sessionService.start().catch((error: unknown) => console.error('[sessions] the session service failed to start:', error));
   // C10 end
   // E6 start: source control (E6 execution document, M1, M2): scm.* over the session's checkout, from the read model in
   // both launch modes; mutations through the mutating runner under the login-shell capture, which is also the environment
@@ -640,19 +682,22 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
   shutdown.add('scm', () => scm.dispose());
   // E6 end
   // W7: a live MAWS process yields when a terminal or job that resumed its session starts writing into it
-  const stopYield = startYield({ dispatch: hosts.dispatch, onEvent: (name, listener) => hosts.onEvent(name, listener), sessions: index.sessions, emit });
-  shutdown.add('yield', stopYield);
-  // E3 start: each live turn end of a side thread summarises it in its parent's transcript (E3 execution document, Design §5)
-  const stopSideThreads = startSideThreads({ onEvent: (name, listener) => hosts.onEvent(name, listener), emit, sessions: index.sessions, sideThreads: index.sideThreads });
-  shutdown.add('side threads', stopSideThreads);
-  // E3 end
+  // E3: each live turn end of a side thread summarises it in its parent's transcript (E3 execution document, Design §5)
+  // P5 O3-A: neither in a run refused the spine
+  if (spineRuns) {
+    shutdown.add('yield', startYield({ dispatch: hosts.dispatch, onEvent: (name, listener) => hosts.onEvent(name, listener), sessions: index.sessions, emit }));
+    shutdown.add('side threads', startSideThreads({ onEvent: (name, listener) => hosts.onEvent(name, listener), emit, sessions: index.sessions, sideThreads: index.sideThreads }));
+  }
 
   // C11 start: the plumbing of settings v3 (C11 execution document, M1). The engine host's binary configuration follows
   // settings.engine; ClaudeUsage's hand-off and status; the reveal guard; the export's Save as….
   // W13: custody of a pinned copy is retired (charter D-1 as amended 2026-10-01); the copy an earlier run kept under
   // <userData>/engine/ is MAWS's own data, removed here
-  void rm(join(app.getPath('userData'), 'engine'), { recursive: true, force: true }).catch((error: unknown) => console.warn('[engine] could not remove the retired custody copy', error));
-  const engineConfigure = startEngineConfigure({ // C12: the coordinator (C11's stopEngineConfigure is its stop)
+  // P5 O3-A: the machine settings' relays to the engine host (engine.configure and the budget's policy, the idle time,
+  // and the design-system defaults in startArtifacts below) are the spine's: a run refused it pushes none, so nothing it
+  // read before the holder changed a setting can overwrite what the holder pushed; nor does it remove anything here
+  if (spineRuns) void rm(join(app.getPath('userData'), 'engine'), { recursive: true, force: true }).catch((error: unknown) => console.warn('[engine] could not remove the retired custody copy', error));
+  const engineConfigure = !spineRuns ? null : startEngineConfigure({ // C12: the coordinator (C11's stopEngineConfigure is its stop)
     settings: () => settings.state().settings,
     onSettingsChanged: (listener) => onEmitted('settings.changed', (state) => listener(state.settings)),
     hostState: () => hosts.snapshot('engine-host'),
@@ -663,17 +708,16 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
     totalMemBytes: totalmem(),
     // C12 end
   });
-  shutdown.add('engine configure', engineConfigure.stop); // C12: .stop
+  if (engineConfigure) shutdown.add('engine configure', engineConfigure.stop); // C12: .stop
   // E10: the supervisor's idle time, pushed beside engine.configure at every ready
-  const stopHostConfigure = startHostConfigure({
+  if (spineRuns) shutdown.add('host configure', startHostConfigure({
     settings: () => settings.state().settings,
     onSettingsChanged: (listener) => onEmitted('settings.changed', (state) => listener(state.settings)),
     hostState: () => hosts.snapshot('engine-host'),
     onHostState: (listener) => hosts.onState('engine-host', listener),
     dispatch: (input) => hosts.dispatch('engine-host', 'host.configure', input) as Promise<CommandResult<'host.configure'>>,
     env: process.env,
-  });
-  shutdown.add('host configure', stopHostConfigure);
+  }));
   // P5 O2 M2: the sessions this app holds open, which the engine host's idle release never stops
   const stopInterest = startInterest({
     sessions: () => interestSet(layout.get('main.tabs'), sessions.model.visibleSessions(), local), // P5 O6: the local machine's
@@ -687,7 +731,7 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
   });
   shutdown.add('interest', stopInterest);
   // C12 start: the Settings tab's read of the configuration main holds for it
-  registerMainHandler('settings.engineApplied', () => engineConfigure.applied());
+  registerMainHandler('settings.engineApplied', () => (engineConfigure ? engineConfigure.applied() : Promise.reject(new Error(`the engine settings are not applied this run: ${spine.refused}`)))); // P5 O3-A
   // C12 end
   // Under the end-to-end harness nothing may activate the owner's ClaudeUsage: `open` answers as if it had.
   const e2e = process.env.MAWS_E2E === '1';
@@ -730,12 +774,17 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
   if (stopWidgetBackend) shutdown.add('widget backend', stopWidgetBackend);
   // C11 end
 
+  // P5 O3-A start (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md §4): the browser's history, bookmarks and agent
+  // activity, in its own database since they left the index at migration 14; opened after the index, so it reads the
+  // index at 14 and promotes what migration 14 staged, and before the sweep, which removes rows from it
+  const browserData = new BrowserData({ file: join(app.getPath('userData'), ...BROWSER_DATA_PATH), index: join(app.getPath('userData'), 'index.sqlite') });
+  // P5 O3-A end
   // E4b start: the Chrome import's records and its boot sweep, before E4a's browser opens any partition (E4b execution
   // document, Decision Log 24, 27, 34): profiles.json's one owner in memory, which E4a reads through `profiles` below, and
   // the sweep of what a crash, a quit mid-import or a removal left (staging, unlisted partition folders, storage
   // directories and history rows).
   const browserProfiles = ImportedProfiles.open(app.getPath('userData'));
-  sweepBrowserImports({ userData: app.getPath('userData'), profiles: browserProfiles, history: index.browserHistory, bookmarks: index.browserBookmarks /* cua #90 */ });
+  sweepBrowserImports({ userData: app.getPath('userData'), profiles: browserProfiles, history: browserData.history, bookmarks: browserData.bookmarks /* cua #90 */ });
   // E4b end
 
   // E4a start: the in-app browser's main side (E4a execution document, Design §1 to §3, §9): the tab store over
@@ -748,6 +797,7 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
     userData: app.getPath('userData'),
     settings: () => settings.state().settings.browser,
     index,
+    data: browserData, // P5 O3-A
     register: registerMainHandler,
     emit,
     env: process.env,
@@ -765,7 +815,7 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
   const browserImport = startBrowserImport({
     userData: app.getPath('userData'),
     settings: () => settings.state().settings.browser,
-    index,
+    data: browserData, // P5 O3-A
     register: registerMainHandler,
     emit,
     env: process.env,
@@ -774,6 +824,8 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
   });
   shutdown.add('browser import', browserImport.stop);
   // E4b end
+  // P5 O3-A: once the browser and its import have stopped; the agent activity's last flush runs as it closes
+  shutdown.add('browser data', () => browserData.close());
 
   // The hosts belong to the app, not to a window or a page (§4.1): they start here, before any window exists, and
   // `start()` is idempotent, so opening a window again forks nothing and a reload never reaches them.
@@ -794,6 +846,7 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
     env: process.env,
     openWindow,
     root: join(app.getPath('userData'), 'artifacts'), // P3-A M7: the store's directory (the host's own rule)
+    relayDefaults: spineRuns, // P5 O3-A: the design-system defaults are the machine's settings, relayed by the spine
   });
   shutdown.add('artifacts', artifacts.stop);
   // P3-H H3b: an artifact page's connector calls and watches and the owner's grants (main's broker; route E through the
@@ -921,7 +974,7 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
   // E5 end
 
   // ---- C5: notifications, dock badge and the quit guard ----
-  startAttention(sessions.model, { actions: notificationActions({ dispatch: hosts.dispatch, acquire: (id, reason) => sessionService.acquire(id, reason), pending: (id, attentionId) => sessions.model.attention(id).find((item) => item.id === attentionId) }), restoredIds: attention.restoredIds, settings: () => settings.state().settings, port: clientPort });
+  startAttention(sessions.model, { actions: notificationActions({ dispatch: hosts.dispatch, acquire: (id, reason) => (sessionService ? sessionService.acquire(id, reason) : Promise.reject(new Error(`MAWS cannot reach its sessions this run: ${spine.refused}`))), pending: (id, attentionId) => sessions.model.attention(id).find((item) => item.id === attentionId) }), restoredIds: attention?.restoredIds ?? new Set(), settings: () => settings.state().settings, port: clientPort });
   // C12: the busy report asks C9's pty host (read only: pty.list and pty.foreground) and publishes Quit when idle's wait
   const quitGuard = installQuitGuard(sessions.model, {
     // C12 start
@@ -1019,4 +1072,7 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
     void orgSession?.close();
     return remoteRows.close();
   });
+  // P5 O3-A: spine.lock is released at the process's exit alone (startSpineData), never at a will-quit step: the steps'
+  // promises settle after the last step is called, and a writer still finishing (an intent's rename) must not run
+  // beside a candidate that took the lock meanwhile.
 }
