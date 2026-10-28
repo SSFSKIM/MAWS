@@ -250,6 +250,64 @@ describe('against a deployment', () => {
   });
 });
 
+describe('genesis --media-check at the local hub', () => {
+  // The owner's check of their own removable drive before production's genesis (P5 Decision Log 74, O13 M7's sitting):
+  // a loopback genesis whose recovery destination meets the deployment's volume rules. The flag only adds refusals.
+  const attempt = async (args: string[], over: Partial<AdminIo> = {}) => {
+    const f = fake([], {
+      ...over,
+      secrets: async () => {
+        f.requests.push('secrets');
+        return {};
+      },
+    });
+    const status = await runAdmin(args, f.io);
+    return { status, err: f.err.join('\n'), requests: f.requests };
+  };
+  const atLocalHub = (keys: string, recovery: string) => ['genesis', '--hub', 'http://127.0.0.1:1', '--user', ADMIN, '--keys', keys, '--recovery', recovery];
+
+  it('refuses a destination exactly as a deployment refuses it, and without the flag takes it as before', async () => {
+    const keys = join(dir('keys'), 'keys.json');
+    expect(await runAdmin(['init', '--keys', keys], fake().io)).toBe(0);
+    const volume = dir('volume');
+    const recovery = join(volume, 'recovery.json');
+    // A temporary directory beside the scratch keys (one volume), and another volume that is an internal disk's.
+    const internal: Partial<AdminIo> = { volumeOf: (path) => (path.startsWith(volume) ? 'other' : 'internal') };
+    for (const [over, why] of [
+      [{}, /on the same volume as the admin keys/],
+      [internal, /is not on removable or external media/],
+    ] as const) {
+      const deployment = await attempt(['genesis', '--config', unreachableConfig(), '--keys', keys, '--recovery', recovery], over);
+      const checked = await attempt([...atLocalHub(keys, recovery), '--media-check'], over);
+      expect(deployment.err).toMatch(why);
+      expect(checked).toEqual(deployment);
+      expect(checked.status).toBe(1);
+      expect(checked.requests).toEqual([]);
+      // Without the flag, the local hub takes the same destination: the run goes on to the hub, which no one serves here.
+      const today = await attempt(atLocalHub(keys, recovery), over);
+      expect(today.err).not.toMatch(why);
+      expect(today.err).toMatch(/fetch failed|ECONNREFUSED/);
+      expect(existsSync(recovery)).toBe(false);
+    }
+    // A removable volume passes the check with the flag too, as at a deployment.
+    const removable = await attempt([...atLocalHub(keys, recovery), '--media-check'], { volumeOf: (path) => (path.startsWith(volume) ? 'usb' : 'internal'), removableVolume: (path) => path.startsWith(volume) });
+    expect(removable.err).toMatch(/fetch failed|ECONNREFUSED/);
+  });
+
+  it("is genesis's option, at the local hub alone", async () => {
+    const keys = join(dir('keys'), 'keys.json');
+    for (const [args, why] of [
+      [['genesis', '--config', unreachableConfig(), '--keys', keys, '--recovery', join(dir('volume'), 'r.json'), '--media-check'], /--media-check is for the local hub \(--hub\)/],
+      [['refresh', '--hub', 'http://127.0.0.1:1', '--user', ADMIN, '--keys', keys, '--media-check'], /--media-check is genesis's option/],
+    ] as const) {
+      const f = await attempt([...args]);
+      expect(f.status, args.join(' ')).toBe(1);
+      expect(f.err, args.join(' ')).toMatch(why);
+      expect(f.requests).toEqual([]);
+    }
+  });
+});
+
 describe('on the local hub', () => {
   let hub: LocalHub;
   const asLocal = (keys: string) => ['--hub', hub.url, '--user', ADMIN, '--keys', keys];
