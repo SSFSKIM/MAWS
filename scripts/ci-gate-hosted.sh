@@ -4,7 +4,7 @@
 # scripts/ci-gate-hosted.test.mjs. A hosted group's report stays in SSFSKIM/maws-app, as the artifact e2e-<slug> of the
 # run that tested it; the group's waiter prints that run's URL as its verdict line, `hosted: <conclusion> <run URL>`.
 # ci-gate.sh runs with its caller's gh login, which reads a public repository's artifacts, so it takes each failed
-# group's report from there, beside the private run's own. No job in either repository reads the other's artifacts.
+# group's report from there, beside the private run's own, in ci-gate's invocation-scoped reports directory. No job in either repository reads the other's artifacts.
 
 hosted_reports() { # <the failed jobs' logs, as gh run view --log-failed gives them> <the reports directory>
   local id
