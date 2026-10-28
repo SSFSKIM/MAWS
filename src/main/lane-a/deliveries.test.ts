@@ -155,6 +155,40 @@ describe('the delivery lane', () => {
     gate.resolve(submitted);
   });
 
+  it('posts nothing more once the lane closes while a post is out, the send settled unconfirmed', async () => {
+    const gate = deferred<PostResult>();
+    let posts = 0;
+    const { lane } = laneWith(() => {
+      posts += 1;
+      return posts === 1 ? gate.promise : Promise.resolve(submitted);
+    });
+    const answer = lane.send('one');
+    await expect.poll(() => posts).toBe(1);
+    lane.close('the session left the terminal');
+    gate.resolve({ kind: 'lost', why: 'gone' }); // the post out when it closed is lost: a temporary loss would retry it
+    await new Promise((r) => setTimeout(r, 120)); // past both retry delays
+    expect(posts).toBe(1);
+    expect(await answer).toMatchObject({ key: { seq: 1 }, state: 'unconfirmed' });
+    expect(lane.entries()).toMatchObject([{ key: { seq: 1 }, state: 'unconfirmed' }]);
+  });
+
+  it('keeps retrying the send being posted across a bridge loss, refusing only what waits behind it', async () => {
+    let posts = 0;
+    const { lane } = laneWith(async () => {
+      posts += 1;
+      return posts === 1 ? { kind: 'lost', why: 'gone' } : submitted;
+    });
+    const first = lane.send('one');
+    const second = lane.send('two');
+    await expect.poll(() => posts).toBe(1);
+    lane.dropQueued('the session’s bridge went away');
+    expect(await second).toMatchObject({ key: { seq: 2 }, state: 'refused' });
+    await expect.poll(() => posts).toBe(2); // its retry, under the same key
+    await expect.poll(() => lane.entries()[0]?.state).toBe('submitted');
+    lane.fate({ writer: 'maws/ref', seq: 1 }, 'entered', 'row-1');
+    expect(await first).toMatchObject({ state: 'entered' });
+  });
+
   it('starts above the clock when its file does not parse, so no key falls below a mark already taken', () => {
     const data = userData();
     const file = join(data, 'deliveries.json');

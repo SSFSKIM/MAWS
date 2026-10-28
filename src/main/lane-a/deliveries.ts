@@ -12,7 +12,9 @@
 //   the send `unconfirmed` and the lane moves on;
 // - the fate is tracked by the key: `submitted` at the post's answer, then `entered` or `refused` from the state stream;
 //   a send still `submitted` when that stream ends is `unconfirmed` once its fresh snapshot arrives, since the stream
-//   that would have named its fate is gone. Settled entries are kept a while for the renderer.
+//   that would have named its fate is gone. Settled entries are kept a while for the renderer;
+// - a bridge lost for a while refuses only what waits: the send being posted keeps retrying on the same lane, so no later
+//   key passes the bridge's mark first. The lane's final close (the session gone) posts nothing more.
 import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { DeliveryKey, LaneADelivery, LaneASendOutput } from '@shared/ipc/schema/lane-a';
@@ -76,6 +78,7 @@ type Send = LaneADelivery & {
 const FINAL = new Set<LaneADelivery['state']>(['entered', 'refused', 'unconfirmed']);
 const KNOWN = new Set<LaneADelivery['state']>(['entered', 'refused']);
 const LOST_REASON = 'the bridge’s stream was lost before it said whether this entered';
+const CLOSED_REASON = 'the session left the terminal before its bridge said whether this entered';
 const sameKey = (a: DeliveryKey, b: { writer?: unknown; seq?: unknown }) => a.writer === b.writer && a.seq === b.seq;
 
 export class DeliveryLane {
@@ -158,10 +161,12 @@ export class DeliveryLane {
     for (const s of this.sends) if (s.state === 'queued' && s !== this.head) this.settle(s, 'refused', { reason, code: 'no-bridge' });
   }
 
-  // The session is gone: nothing more is taken or posted.
+  // The session is gone: nothing more is taken or posted. The send being posted, and any the bridge took whose fate the
+  // closed stream would have named, are unconfirmed: whether they entered, nothing can say now.
   close(reason: string): void {
     this.closed = true;
     this.dropQueued(reason);
+    for (const s of this.sends) if ((s === this.head && !FINAL.has(s.state)) || s.state === 'submitted') this.settle(s, 'unconfirmed', { reason: CLOSED_REASON });
   }
 
   private async pump(): Promise<void> {
@@ -186,7 +191,7 @@ export class DeliveryLane {
     const { retryDelaysMs } = this.options.timing;
     for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
       if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, retryDelaysMs[attempt - 1]));
-      if (FINAL.has(send.state)) return; // its fate came on the stream meanwhile
+      if (FINAL.has(send.state) || this.closed) return; // its fate came on the stream meanwhile, or the lane closed (settling it)
       if (this.down) send.lost = 'lost'; // posted with no stream to name its fate
       const posted = await this.options.post({ op: 'deliver', key: send.key, text: send.text }, send.launch);
       if (FINAL.has(send.state)) return; // the stream named its fate before the post answered
