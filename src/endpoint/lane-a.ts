@@ -13,7 +13,9 @@
 // same sender (sminos answers under the latest copy's nonce, but an earlier copy's may already be on its way), to each
 // one's channel while open; then they are let go, so a copy after the result is asked about afresh. A copy whose result
 // never comes is held KEPT_S (as long as sminos keeps the op), its nonce taken (`replayed`, whoever sends it: the
-// freshness window is each device's). A closed channel frees nothing. At most LANE_A_MAX copies are held (`busy`).
+// freshness window is each device's). A closed channel frees nothing. At most LANE_A_MAX copies are held (`busy`), a
+// reseal's included, the count met again after sminos was asked. A copy that went down with no binding behind it hears
+// a failure or a refusal by its code only (`outcomeFor`).
 import { KEPT_S, type Action, type RefusalReason } from 'org-protocol';
 import type { RemoteChannel } from './channels';
 import type { QueryAnswer, Rl10, RpcResult } from './rl10/link';
@@ -25,20 +27,38 @@ export type LaneAContext = {
   rl10: Pick<Rl10, 'draw' | 'rpc' | 'query'>;
   hold(reason: string): () => void;
   now(): number;
+  /** The cap on held copies (LANE_A_MAX). */
+  max?: number;
 };
 
 type Sender = { member: string; fingerprint: string };
 /** A copy handed down: its op, its sender, its channel (and that channel's close listener), the hold while awaited. */
-type Copy = Sender & { opId: string; channel: RemoteChannel; until: number; off(): void; release: (() => void) | null };
+type Copy = Sender & { opId: string; bound: boolean; channel: RemoteChannel; until: number; off(): void; release: (() => void) | null };
 
 const isText = (value: unknown): value is string => typeof value === 'string' && value !== '';
 const same = (a: Sender, b: Sender) => a.member === b.member && a.fingerprint === b.fingerprint;
 
-/** What sminos's answer for an op says of a copy from `sender`: it may go down, or why not. */
-export function admission(answer: QueryAnswer, sender: Sender): 'go' | 'op-conflict' | 'unavailable' {
+/** What sminos's answer for an op says of a copy from `sender`: it goes down bound (sminos holds the op as this
+ * sender's) or unbound (sminos holds no binding for it), or why not. */
+export function admission(answer: QueryAnswer, sender: Sender): 'bound' | 'unbound' | 'op-conflict' | 'unavailable' {
   if (answer.state === 'unavailable') return 'unavailable';
-  if (isText(answer.member) && isText(answer.fingerprint)) return same({ member: answer.member, fingerprint: answer.fingerprint }, sender) ? 'go' : 'op-conflict';
-  return answer.state === 'not-received' || answer.state === 'expired' ? 'go' : 'op-conflict';
+  if (isText(answer.member) && isText(answer.fingerprint)) return same({ member: answer.member, fingerprint: answer.fingerprint }, sender) ? 'bound' : 'op-conflict';
+  return answer.state === 'not-received' || answer.state === 'expired' ? 'unbound' : 'op-conflict';
+}
+
+/**
+ * A result as a copy may hear it. One admitted with no binding behind it (`unbound`) may be answered by a refusal sminos
+ * made before its ledger, for an earlier copy under the same nonce that was not this sender's (the endpoint keeps no
+ * nonce across a restart): such a refusal's message names the original request, so a failure or refusal says only its
+ * code. A `done` is never such an answer (an op sminos ran is bound, and asked about first), and a bound copy hears the
+ * whole outcome; the full one is the sender's by `query`, authorized against the binding.
+ */
+export function outcomeFor(outcome: unknown, bound: boolean): unknown {
+  if (bound || typeof outcome !== 'object' || outcome === null) return outcome;
+  const { state, error, reason } = outcome as { state?: unknown; error?: { code?: unknown }; reason?: unknown };
+  if (state === 'failed') return { state, error: { code: typeof error === 'object' && error !== null ? error.code : undefined } };
+  if (state === 'refused') return { state, reason };
+  return outcome;
 }
 
 export class LaneA {
@@ -64,7 +84,7 @@ export class LaneA {
       this.#letGo(nonce, held);
       if (held.channel.closed || told.has(held.channel)) continue;
       told.add(held.channel);
-      held.channel.send({ t: 'done', opId: copy.opId, outcome: result.outcome });
+      held.channel.send({ t: 'done', opId: copy.opId, outcome: outcomeFor(result.outcome, copy.bound) });
     }
   }
 
@@ -79,17 +99,23 @@ export class LaneA {
     const drawn = this.ctx.rl10.draw(action, who, fingerprint);
     if (!drawn.ok) return drawn.reason;
     const sender = { member: who.member, fingerprint };
-    if (![...this.#copies.values()].some((held) => held.opId === action.opId && same(held, sender))) {
-      if (this.#copies.size >= LANE_A_MAX) return 'busy';
+    const max = this.ctx.max ?? LANE_A_MAX;
+    if (this.#copies.size >= max) return 'busy';
+    const mine = [...this.#copies.values()].filter((held) => held.opId === action.opId && same(held, sender));
+    let bound = mine.some((held) => held.bound);
+    if (mine.length === 0) {
       const admitted = admission(await this.ctx.rl10.query(action.opId, action.opCreated), sender);
-      if (admitted !== 'go') return admitted;
+      if (admitted === 'op-conflict' || admitted === 'unavailable') return admitted;
+      bound = admitted === 'bound';
+      // Asked across a wait: another copy may have taken the nonce, or the last slot.
       if (this.#copies.has(action.nonce)) return 'replayed';
+      if (this.#copies.size >= max) return 'busy';
     }
     if (channel.closed) return 'unavailable';
     // Sent through `rpc`, which checks the launch again: it may have moved while sminos was asked.
     const sent = this.ctx.rl10.rpc(action, who, fingerprint);
     if (!sent.ok) return sent.reason;
-    const copy: Copy = { ...sender, opId: action.opId, channel, until: now + KEPT_S * 1000, off: () => {}, release: this.ctx.hold('op') };
+    const copy: Copy = { ...sender, opId: action.opId, bound, channel, until: now + KEPT_S * 1000, off: () => {}, release: this.ctx.hold('op') };
     copy.off = channel.onClose(() => {
       copy.release?.();
       copy.release = null;

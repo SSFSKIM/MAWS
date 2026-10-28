@@ -607,6 +607,30 @@ describe('lane A, through sminos’s ledger over RL10', () => {
     expect(b.inbox.filter((x) => x.t === 'done')).toEqual([]);
   });
 
+  it('tells a copy admitted on `not-received` only the code of a failure: a refusal before sminos’s ledger may be another sender’s, under a nonce reused after a restart', async () => {
+    const f = await start();
+    const s = await sminos(f);
+    await bobsSession(f, s);
+    const a = await open(f, a1, A);
+    const alice = laneA(f, a, 'steer', { text: 'alice' });
+    expect(await actA(a, s, alice)).toBe('ok');
+    await s.next((x) => x.t === 'rpc', 'Alice’s rpc');
+    // sminos refused Alice's copy before its ledger (kept by no binding), and the endpoint restarted before the refusal.
+    const g = await restartEndpoint(f);
+    const s2 = await sminos(g);
+    await bobsSession(g, s2);
+    const b = await open(g, b1, B);
+    const bob = { ...bobsSteer(g, b), opId: alice.opId, opCreated: alice.opCreated, nonce: alice.nonce };
+    expect(await actA(b, s2, bob)).toBe('ok');
+    s2.send({ t: 'rpc-result', project: PROJECT, opId: alice.opId, nonce: alice.nonce, outcome: { state: 'failed', error: { code: 'no-session', message: 'session la-1 of project main-app is not here', winner: 'x' } } });
+    expect(await done(b, bob)).toEqual({ state: 'failed', error: { code: 'no-session' } });
+    // A copy admitted on sminos's binding of its own sender hears the whole failure.
+    const own = bobsSteer(g, b);
+    expect(await actA(b, s2, own, { state: 'in-progress', member: B, device: 'b1', fingerprint: await actionFingerprint(own), target: { kind: 'session', session: 'la-b' } })).toBe('ok');
+    s2.send({ t: 'rpc-result', project: PROJECT, opId: own.opId, nonce: own.nonce, outcome: { state: 'failed', error: { code: 'read-only', message: 'the machine is read-only' } } });
+    expect(await done(b, own)).toEqual({ state: 'failed', error: { code: 'read-only', message: 'the machine is read-only' } });
+  });
+
   it('never makes a copy sminos refused the op’s owner: the op’s own sender is asked about afresh and goes down', async () => {
     const f = await start();
     const s = await sminos(f);
