@@ -25,6 +25,7 @@ import { TESTED_ENGINE_VERSION } from './engine-compat'; // W13
 import * as controls from './controls';
 import { createLauncher } from './launcher';
 import { registerOps } from './ops'; // P5 O10 M7
+import { pendingCounts } from './pending-counts'; // P5 O10
 import { SUPERVISOR_FILES } from './supervisor-files'; // P5 O10 M7
 import { LaunchSpecConflict, mergeFlagSettings, RELAY_URL, type LaunchPlan } from './launch';
 // C11 start
@@ -406,8 +407,8 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   handle('session.pendingRequest', async ({ appSessionId, requestId }) => ({ event: streamOf(appSessionId).pendingRequest(requestId as RequestId) }));
   handle('session.catalog', async ({ appSessionId }) => sessionOf(appSessionId).catalog());
   on('session.pendingItems', async ({ appSessionId }) => ({ items: sessionOf(appSessionId).brokerItems() })); // P5 O10 M8
-  // P5 O10: every row's items at once, for the endpoint's lane B counts (the rows the connect burst republishes)
-  on('engine.pendingItems', async () => ({ sessions: table.list().map((session) => ({ appSessionId: session.status().appSessionId, items: session.brokerItems() })) }));
+  // P5 O10: every row's count of items waiting on an answer, for the endpoint's lane B counts (pending-counts.ts)
+  on('engine.pendingItems', async () => pendingCounts(table.list()));
 
   // -- the composer ----------------------------------------------------------------------------------------------------
   handle('session.send', async ({ appSessionId, content }) => {

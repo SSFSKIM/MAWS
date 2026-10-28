@@ -22,6 +22,7 @@ import { validateCommandInput } from '@shared/ipc/validate';
 import { opCommands } from '../../src/engine-host/ops';
 import { createEndpoint, type Endpoint } from '../../src/endpoint';
 import type { EndpointOptions } from '../../src/endpoint/endpoint';
+import { waitingCount } from '../../src/endpoint/lane-b-pending';
 import { EndpointOrg } from '../../src/endpoint/org-sync';
 import type { RecordSource, SessionRecord, SessionTarget } from '../../src/endpoint/sources';
 import { EndpointState } from '../../src/endpoint/state/store';
@@ -269,7 +270,7 @@ export class FakeEngineHost {
     const { appSessionId, afterSeq, limit, requestId } = (input ?? {}) as { appSessionId?: string; afterSeq?: number | null; limit?: number | null; requestId?: string };
     const s = appSessionId === undefined ? undefined : this.sessions.get(appSessionId);
     if (name === 'engine.sessions') return ok([...this.sessions.values()].map((x) => this.status(x)));
-    if (name === 'engine.pendingItems') return ok({ sessions: [...this.sessions.values()].map((x) => ({ appSessionId: x.appSessionId, items: x.items })) });
+    if (name === 'engine.pendingItems') return ok({ sessions: [...this.sessions.values()].flatMap((x) => (waitingCount(x.items) > 0 ? [{ appSessionId: x.appSessionId, waiting: waitingCount(x.items) }] : [])) });
     if (s === undefined) return no('internal');
     switch (name) {
       case 'session.status':

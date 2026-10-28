@@ -16,7 +16,6 @@ import { HardReasonSchema } from '../../engine/status';
 import { AbsolutePathSchema } from './settings';
 // C11 end
 import { ObservedFactsAnswerSchema } from '../../engine/observed-facts'; // P2-A
-import { AttentionItemSchema } from '../../graph/attention'; // P5 O10
 
 // C3 start: the engine host level (C3 execution document, Interfaces "X2 — commands and events"): the binary, the
 // relay, the process table and shutdown. Owner engine-host.
@@ -94,13 +93,14 @@ const p2aCommands = {
 } as const;
 // P2-A end
 // P5 O10 start (docs/doperpowers/plans/2026-10-27-p5-o10-endpoint.md, Decision Log: lane B's pending counts): every
-// session's broker items at once, each the list `session.brokerItems` last published, as the connect burst republishes
-// them. The endpoint reads it at each link to the engine host, so `notify`'s lane B counts are restated whole, with no
+// session's count of broker items that wait on an answer (`waitsOnAnswer`), sessions with none left out, never the items
+// (src/engine-host/pending-counts.ts states the size bound; a card's items are `session.pendingItems`'s). The endpoint
+// reads it at each link to the engine host as the whole set, so `notify`'s lane B counts are restated with no
 // subscription and no per-session read. Owner engine-host; immediate; sent from `mawsd`, never a window.
 const o10Commands = {
   'engine.pendingItems': {
     input: z.void(),
-    output: z.strictObject({ sessions: z.array(z.strictObject({ appSessionId: AppSessionIdSchema, items: z.array(AttentionItemSchema) })) }),
+    output: z.strictObject({ sessions: z.array(z.strictObject({ appSessionId: AppSessionIdSchema, waiting: z.number().int().positive() })) }),
     owner: 'engine-host',
   },
 } as const;
