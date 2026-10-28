@@ -1231,6 +1231,12 @@ Each is built as its recommendation when its milestone is re-planned, unless the
   Evidence: held.ts `#commit` (the file, then memory, then `saveAnchor`, then the listeners); `test/org/sign-in.local.test.ts`'s refresh case first raced on it.
 - Observation: the Worker refuses a removed member's socket upgrade `403 not-a-member` with `X-Desk-Build` (its member resolution runs before every route), so a refused upgrade tells Access's end of a credential from the hub's refusal by that header.
   Evidence: `apps/desk-hub/src/worker.ts` `route`: `if (!principal) return json(403, { error: … 'not-a-member' … })`, then `fetch` names the build on every answer but a `101`.
+- Observation (M3, 2026-10-28): a device id is a base64url key id, so about one id in 64 starts with `-`. A CLI that parses options (`parseArgs`) then reads such an id as an option. Any CLI that takes a key id has this trap. The fix puts ids after `--` everywhere M3 passes or prints one:
+  - the O8 suites and their shared harness;
+  - the Org section's `root add -- <id>` and `remove-device -- <old id>`;
+  - the deploy README;
+  - the staging and production wrappers, which appended their own `--config`/`--keys` after `"$@"` and now put them first.
+  Evidence: class 1a run 40768996939 at b92b07573: `remove-device: … Unknown option '-y'` in `signer.local.test.ts`'s rekey case, which had passed at 559ddfc0c with another random id. Fixed at 031c476da and in the wrapper commit after it.
 
 ## Decision Log
 
@@ -1550,6 +1556,11 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   4. A hub refusal of any post, settlement's re-posts included, is kept and shown as `refused`, so Discard is offered. No answer, or no hub, only waits.
   5. The weekly ask writes nothing at focus. A gate run just before Touch ID checks focus, writes `lastAsked`, checks focus again and takes the date back if focus was lost, so an ask that never reached Touch ID spends no day.
   Residue for O7: RL4 step-up actions (`createStepUp`) show Touch ID only the action and the machine, and drop the prompt's text the same way.
+  Date/Author: 2026-10-28, O8's executor.
+
+- Decision: Device ids go after `--` wherever M3 passes or prints one (031c476da). The staging and production wrappers pass the owner's arguments last (1ec366d08): `deployment()` and `direct()` keep the command word first for `bin.ts`, then the wrapper's `--config`, then `"$@"`; the admin sites put `--keys` after `admin`.
+  Approved by the architect, with the desk track's shape and three pinned forms in `production-scripts.test.ts`: B1 step 2's `admin --pipe delegation create …` on the `direct()` path, `admin root add -- <a '-'-led id>` through both wrappers, and one non-admin verb through each wrapper with `--config` after the command word. `admin show` is also pinned, unchanged in form. A caller's own `--config` is refused, as before, since `--config` is not repeatable.
+  Rejected: printing the bare id and adding `--` only for a `-`-led id, which fails through the wrappers for one id in 64 until they change.
   Date/Author: 2026-10-28, O8's executor.
 
 ## Outcomes & Retrospective
