@@ -1,10 +1,11 @@
 // P4-A2 (settings version 17; P4 §4.2 "The per-session launch profile", the owner's ruling of 2026-10-21: one profile,
 // chosen here, never when a session starts): Settings › Engine, the launch profile every session MAWS launches runs
-// under (src/shared/engine/launch-profile.ts). Three rows beside the engine's other launch settings: the user's plugins,
-// each with its switch (off keeps it out of MAWS's sessions), the output style (the user's or MAWS's own) and the hooks
-// (the user's or none). Each change writes the whole profile through `settings.set` and reaches a session at its next
-// launch. The plugins listed are the ones the user's settings turn on (the plugin CLI's user-scope records, read in the
-// engine's config home), with any already switched off kept in the list so they can come back.
+// under (src/shared/engine/launch-profile.ts). Two rows beside the engine's other launch settings: the user's plugins,
+// each with its switch (off keeps it out of MAWS's sessions), and the hooks (the user's or none); the output style is
+// always the user's (settings version 19, the owner's ruling of 2026-10-28). Each change writes the whole profile
+// through `settings.set` and reaches a session at its next launch. The plugins listed are the ones the user's settings
+// turn on (the plugin CLI's user-scope records, read in the engine's config home), with any already switched off kept
+// in the list so they can come back.
 import { useState } from 'react';
 import type { Settings } from '@shared/ipc/schema';
 import type { LaunchProfile } from '@shared/engine/launch-profile';
@@ -35,17 +36,6 @@ export function LaunchProfileSettings({ settings }: { settings: Settings }) {
   return (
     <>
       <Plugins profile={profile} disabled={busy} write={write} />
-      <Setting label={LAUNCH_PROFILE.style} note={LAUNCH_PROFILE.styleNote}>
-        <Segment
-          label={LAUNCH_PROFILE.style}
-          value={profile.outputStyle}
-          options={[
-            { value: 'user', label: LAUNCH_PROFILE.styleYours },
-            { value: 'maws', label: LAUNCH_PROFILE.styleMaws },
-          ]}
-          onChange={(outputStyle) => void write({ ...profile, outputStyle })}
-        />
-      </Setting>
       <Setting label={LAUNCH_PROFILE.hooks} note={LAUNCH_PROFILE.hooksNote}>
         <Segment
           label={LAUNCH_PROFILE.hooks}

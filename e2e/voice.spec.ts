@@ -495,7 +495,7 @@ test('Settings › Voice reads the status from main and writes the language to s
 
   await language.selectOption({ label: 'English (United Kingdom)' });
   const readVoice = () => (JSON.parse(readFileSync(join(userData, 'settings.json'), 'utf8')) as { version: number; voice: unknown });
-  await expect.poll(() => readVoice()).toMatchObject({ version: 18, voice: { locale: 'en-GB' } }); // E10: settings version 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14; P4-B1: 15; P4-R8: 16; P4-A2: 17; UX1: 18
+  await expect.poll(() => readVoice()).toMatchObject({ version: 19, voice: { locale: 'en-GB' } }); // E10: settings version 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14; P4-B1: 15; P4-R8: 16; P4-A2: 17; UX1: 18; the style removed: 19
   expect(voiceApp.consoleErrors()).toEqual([]);
 });
 

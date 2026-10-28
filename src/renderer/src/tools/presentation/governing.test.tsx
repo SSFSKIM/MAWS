@@ -8,7 +8,7 @@ import { DesignSystemHouseContext, type HouseDesignSystem } from '@artifacts/des
 import { ARTIFACT_KINDS } from '@shared/artifacts/entity';
 import type { CommandName } from '@shared/ipc/schema';
 import type { LibraryRow } from '@shared/ipc/schema/library';
-import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
 import { resetLibrary } from '../../library/store';
 import { useSettings } from '../../stores/settings';
 import { installFakeMain, ok } from '../../test-support/code';
@@ -43,7 +43,7 @@ const row = (id: string): LibraryRow => ({
 const counts = Object.fromEntries(ARTIFACT_KINDS.map((kind) => [kind, 0]));
 
 beforeEach(() => {
-  useSettings.setState({ state: { settings: SETTINGS_DEFAULTS_V18, resolvedTheme: 'light' } });
+  useSettings.setState({ state: { settings: SETTINGS_DEFAULTS_V19, resolvedTheme: 'light' } });
   // main's library, which the hook reads for the live systems
   installFakeMain((name: CommandName) => (name === 'library.list' ? ok({ rows: [HOUSE, NEXT_HOUSE, OWN].map(row), counts }) : ok(null)));
 });

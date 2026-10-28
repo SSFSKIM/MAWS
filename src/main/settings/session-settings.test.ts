@@ -57,8 +57,8 @@ describe('the session service reads the settings store', () => {
   // flight whatever the setting says, a change never touches a live session, and the session's next launch takes it.
   it('a launch-profile change reaches the next launch alone: a launch in flight keeps the profile it read and is joined, a live session is never relaunched for it', async () => {
     const { store, h } = await setup();
-    const P1: LaunchProfile = { plugins: { off: ['ptc@ptc-tool'] }, outputStyle: 'user', hooks: 'user' };
-    const P2: LaunchProfile = { plugins: { off: [] }, outputStyle: 'maws', hooks: 'none' };
+    const P1: LaunchProfile = { plugins: { off: ['ptc@ptc-tool'] }, hooks: 'user' };
+    const P2: LaunchProfile = { plugins: { off: [] }, hooks: 'none' };
     const record = h.index.sessions.upsertFromSummary(summary({ sessionId: sessionIdFor(0xa2f01), directory: h.work })).record;
     const launches = () => h.host.launches.filter((spec) => spec.appSessionId === record.appId);
     store.update({ engine: { launchProfile: P1 } });
@@ -81,7 +81,7 @@ describe('the session service reads the settings store', () => {
     const live = h.host.table.get(record.appId)!;
     h.host.table.set(record.appId, { ...live, process: 'exited', exit: { code: null, signal: null, reason: 'stop', at: T0, release: null } });
     expect(await h.service.acquire(record.appId, 'read')).toMatchObject({ status: 'ready', launched: true });
-    expect(launches().map((spec) => spec.extraSettings)).toEqual([{ enabledPlugins: { 'ptc@ptc-tool': false } }, { outputStyle: 'default', disableAllHooks: true }]);
+    expect(launches().map((spec) => spec.extraSettings)).toEqual([{ enabledPlugins: { 'ptc@ptc-tool': false } }, { disableAllHooks: true }]);
   });
 
   it('maps the six fields C10 reads and nothing else', () => { // W3: the auto fallback; P4-R8: the app MCP servers; P4-A2: the launch profile
@@ -89,7 +89,7 @@ describe('the session service reads the settings store', () => {
     cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
     const store = openSettingsStore(join(dir, 'settings.json'));
     expect(sessionSettingsOf(store.settings).engine.launchProfile).toEqual(userScopeProfile()); // P4-A2: the default
-    const launchProfile: LaunchProfile = { plugins: { off: ['cua@cua'] }, outputStyle: 'maws', hooks: 'user' };
+    const launchProfile: LaunchProfile = { plugins: { off: ['cua@cua'] }, hooks: 'none' };
     store.update({ gateway: { relayUnreachable: 'wait', offerDirect: false }, engine: { subagentModel: 'haiku', memoryBudgetMiB: 4096, mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }], launchProfile } });
     expect(sessionSettingsOf(store.settings)).toEqual({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'wait' }, engine: { subagentModel: 'haiku', mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }], launchProfile }, permissions: { autoFallback: 'acceptEdits' } });
   });

@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MawsBridge, Settings } from '@shared/ipc/schema';
 import type { AppMcpServer } from '@shared/engine/app-mcp-servers';
-import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
 import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
 import { settingsBridge, type SettingsBridge } from '../test-support/settings-bridge';
@@ -17,7 +17,7 @@ let b: SettingsBridge;
 let unsubscribe = () => {};
 const current = () => useSettings.getState().state!.settings;
 
-function renderRow(initial: Settings = SETTINGS_DEFAULTS_V18) {
+function renderRow(initial: Settings = SETTINGS_DEFAULTS_V19) {
   b = settingsBridge(initial);
   window.maws = b.bridge;
   const rendered = render(<McpServers settings={current()} />);
@@ -28,7 +28,7 @@ function renderRow(initial: Settings = SETTINGS_DEFAULTS_V18) {
 }
 const row = () => screen.getByRole('group', { name: MCP_SERVERS.label });
 const type = (label: string, value: string) => fireEvent.change(within(row()).getByRole('textbox', { name: label }), { target: { value } });
-const withServers = (servers: AppMcpServer[]): Settings => ({ ...SETTINGS_DEFAULTS_V18, engine: { ...SETTINGS_DEFAULTS_V18.engine, mcpServers: servers } });
+const withServers = (servers: AppMcpServer[]): Settings => ({ ...SETTINGS_DEFAULTS_V19, engine: { ...SETTINGS_DEFAULTS_V19.engine, mcpServers: servers } });
 
 afterEach(() => {
   unsubscribe();

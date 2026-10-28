@@ -245,12 +245,12 @@ describe('the launch profile', () => {
   const argsOf = (spec: ReturnType<typeof toLaunchSpec>) => buildLaunch(spec, {}, { relayUrl: 'http://127.0.0.1:8641', bin: '/bin/claude', engineVersion: '2.1.306', spawnerPid: 1 }).args;
   const flagOf = (args: string[]) => args[args.indexOf('--settings') + 1]!;
   const OFF = { 'cua@cua': false, 'ptc@ptc-tool': false };
-  const PROFILE: LaunchProfile = { plugins: { off: ['ptc@ptc-tool', 'cua@cua', 'ptc@ptc-tool'] }, outputStyle: 'maws', hooks: 'none' };
+  const PROFILE: LaunchProfile = { plugins: { off: ['ptc@ptc-tool', 'cua@cua', 'ptc@ptc-tool'] }, hooks: 'none' };
 
   it('is the user scope by default, and the user scope gives today’s launch byte for byte', () => {
     expect(C10_SETTING_DEFAULTS.engine.launchProfile).toEqual(userScopeProfile());
     const today = launches(C10_SETTING_DEFAULTS);
-    const explicit = launches(withProfile({ plugins: { off: [] }, outputStyle: 'user', hooks: 'user' }));
+    const explicit = launches(withProfile({ plugins: { off: [] }, hooks: 'user' }));
     for (const kind of Object.keys(today) as (keyof typeof today)[]) {
       expect(explicit[kind], kind).toEqual(today[kind]);
       expect(today[kind].extraSettings, kind).toBeNull();
@@ -265,15 +265,20 @@ describe('the launch profile', () => {
   });
 
   it('turns each plugin in `off` off at flag level, sorted and once, leaving every other plugin to the user’s settings', () => {
-    for (const [kind, spec] of Object.entries(launches(withProfile({ plugins: { off: ['ptc@ptc-tool', 'cua@cua', 'ptc@ptc-tool'] }, outputStyle: 'user', hooks: 'user' })))) {
+    for (const [kind, spec] of Object.entries(launches(withProfile({ plugins: { off: ['ptc@ptc-tool', 'cua@cua', 'ptc@ptc-tool'] }, hooks: 'user' })))) {
       expect(spec.extraSettings, kind).toEqual({ enabledPlugins: OFF });
       expect(flagOf(argsOf(spec)), kind).toContain('"enabledPlugins":{"cua@cua":false,"ptc@ptc-tool":false}');
     }
   });
 
-  it('selects the engine’s built-in default style for MAWS’s own, and turns every hook off with disableAllHooks', () => {
-    for (const [kind, spec] of Object.entries(launches(withProfile({ plugins: { off: [] }, outputStyle: 'maws', hooks: 'user' })))) expect(spec.extraSettings, kind).toEqual({ outputStyle: 'default' });
-    for (const [kind, spec] of Object.entries(launches(withProfile({ plugins: { off: [] }, outputStyle: 'user', hooks: 'none' })))) expect(spec.extraSettings, kind).toEqual({ disableAllHooks: true });
+  // Version 19 (the owner's ruling of 2026-10-28): the profile names no output style, so no launch sets one and the
+  // user's own style applies, whatever else the profile turns off
+  it('turns every hook off with disableAllHooks, and never sets an output style', () => {
+    for (const [kind, spec] of Object.entries(launches(withProfile({ plugins: { off: [] }, hooks: 'none' })))) expect(spec.extraSettings, kind).toEqual({ disableAllHooks: true });
+    for (const [kind, spec] of Object.entries(launches(withProfile(PROFILE), '/u/cua.sock'))) {
+      expect(spec.extraSettings ?? {}, kind).not.toHaveProperty('outputStyle');
+      expect(JSON.parse(flagOf(argsOf(spec))) as Record<string, unknown>, kind).not.toHaveProperty('outputStyle');
+    }
   });
 
   it('keeps `user` among the setting sources, the effort, the browser socket and the app’s MCP servers, and adds no effort of its own', () => {
@@ -283,7 +288,7 @@ describe('the launch profile', () => {
       const args = argsOf(spec);
       expect(args[args.indexOf('--setting-sources') + 1], kind).toBe('user,project,local');
       const flag = JSON.parse(flagOf(args)) as Record<string, unknown>;
-      expect(flag, kind).toMatchObject({ enabledPlugins: OFF, outputStyle: 'default', disableAllHooks: true, ...(kind === 'bootstrap' ? {} : { env: { CUA_BROWSER_BACKENDS: '/u/cua.sock' } }) }); // the bootstrap has no socket
+      expect(flag, kind).toMatchObject({ enabledPlugins: OFF, disableAllHooks: true, ...(kind === 'bootstrap' ? {} : { env: { CUA_BROWSER_BACKENDS: '/u/cua.sock' } }) }); // the bootstrap has no socket
       expect(flag.effortLevel ?? null, kind).toBe(spec.effort); // the spec's effort as before; the profile names none
       // turning plugins off leaves the app's servers alone (the bootstrap takes none, as before)
       if (kind !== 'bootstrap') expect(JSON.parse(args[args.indexOf('--mcp-config') + 1]!), kind).toEqual({ mcpServers: { notion: { type: 'http', url: 'https://mcp.notion.com/mcp' } } });
@@ -295,12 +300,12 @@ describe('the launch profile', () => {
   it('under hooks none appends the supplement alone, the profile’s keys kept, and nothing with the lane off', () => {
     const off = launches(withProfile(PROFILE)).new;
     const on = withOwnerChannel(off, { laneOn: true, append: 'supplement', snapshotOff: true });
-    expect(on.extraSettings).toEqual({ enabledPlugins: OFF, outputStyle: 'default', disableAllHooks: true, env: { [NATIVE_TO_HUMAN_ENV]: String(TO_HUMAN_CONTRACT_VERSION) } });
+    expect(on.extraSettings).toEqual({ enabledPlugins: OFF, disableAllHooks: true, env: { [NATIVE_TO_HUMAN_ENV]: String(TO_HUMAN_CONTRACT_VERSION) } });
     expect(on).toMatchObject({ appendSystemPrompt: TO_HUMAN_SUPPLEMENT, systemPromptSnapshot: 'off' });
     expect(LaunchSpecSchema.parse(on)).toEqual(on);
     const laneOff = withOwnerChannel(off, { laneOn: false, append: null, snapshotOff: false });
     expect(laneOff).not.toHaveProperty('appendSystemPrompt');
-    expect(laneOff.extraSettings).toEqual({ enabledPlugins: OFF, outputStyle: 'default', disableAllHooks: true });
+    expect(laneOff.extraSettings).toEqual({ enabledPlugins: OFF, disableAllHooks: true });
   });
 });
 // P4-A2 end
