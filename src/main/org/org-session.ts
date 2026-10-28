@@ -56,7 +56,7 @@ import {
   type OrgFiles,
   type RegistrationFile,
 } from './files';
-import { startHeldOrg, type HeldOrg } from './held';
+import { rereadFrom, startHeldOrg, type HeldOrg } from './held';
 import { hubClient, type HubClient, type HubResult, type Me, type Served } from './hub-client';
 import type { RegistryFeedHooks } from './registry-feed';
 import type { OrgSession, SignedIn } from './session';
@@ -409,18 +409,6 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       if (!read.ok) return hubFailed(read);
     }
     await adopt(view, read.value);
-  }
-
-  /** The version to read the chain again from, when the served page may carry a recovery from below the held head. */
-  function rereadFrom(view: HeldOrg, served: Served): number | null {
-    const version = view.head().state.version;
-    const known = new Set(view.since(0).transitions.map((t) => canonicalize(t.body)));
-    const below = served.transitions
-      .filter((t) => typeof t?.body?.fromVersion === 'number' && t.body.fromVersion < version && !known.has(canonicalize(t.body)))
-      .map((t) => t.body.fromVersion);
-    if (below.length > 0) return Math.max(0, Math.min(...below));
-    const head = served.head?.state?.version;
-    return typeof head === 'number' && head < version ? 0 : null;
   }
 
   async function refreshCertificates(): Promise<void> {

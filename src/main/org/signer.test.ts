@@ -18,11 +18,14 @@ import {
   keyId,
   NO_CERTIFICATES,
   signOrgState,
+  signTransition,
   stateHash,
   verifySuccessor,
   type Device,
   type OrgState,
   type RevokedKey,
+  type RootTransition,
+  type Signed,
   type SignedOrgState,
   type SigningKey,
 } from '../../../apps/org-protocol/src/index.ts';
@@ -30,7 +33,7 @@ import {
 vi.mock('electron', () => ({ systemPreferences: { promptTouchID: () => Promise.reject(new Error('no system prompt in the suites')) } }));
 
 import { createStateSigner, type Confirmation, type StepUpPrompt } from '../device/step-up';
-import { orgFiles, SIGNING_FILE, type Anchor, type Obligation, type OrgFiles, type SigningFile } from './files';
+import { CHAIN_FILE, orgFiles, SIGNING_FILE, type Anchor, type Obligation, type OrgFiles, type SigningFile } from './files';
 import { startHeldOrg, type HeldOrg } from './held';
 import type { HubClient, HubResult, Served } from './hub-client';
 import { heldOrgSession, type SignedIn } from './session';
@@ -117,8 +120,13 @@ class FakeHub implements HubClient {
   states: SignedOrgState[];
   posts: SignedOrgState[] = [];
   reads = 0;
-  /** `unreachable`: no answer, nothing taken; `lost-answer`: taken, and its answer lost; `purged`: a courtesy refusal. */
-  mode: 'accept' | 'unreachable' | 'lost-answer' | 'purged' = 'accept';
+  /** Root transitions the hub keeps beside its chain, served with every read. */
+  transitions: Signed<RootTransition>[] = [];
+  /**
+   * `unreachable`: no answer, nothing taken; `lost-answer`: taken, and its answer lost; `purged`: a courtesy refusal;
+   * `lying`: a 201 for a post it never kept.
+   */
+  mode: 'accept' | 'unreachable' | 'lost-answer' | 'purged' | 'lying' = 'accept';
   /** Runs at each post before it is judged (an admin's state landing first, a look at the profile's files). */
   beforePost: ((signed: SignedOrgState) => Promise<void> | void) | null = null;
 
@@ -131,7 +139,8 @@ class FakeHub implements HubClient {
     await this.beforePost?.(signed);
     if (this.mode === 'unreachable') return { ok: false, kind: 'unreachable', detail: 'the hub is down' };
     if (this.mode === 'purged') return { ok: false, kind: 'status', status: 409, error: 'key-purged' };
-    const verdict = await verifySuccessor(this.states.at(-1)!, signed, []);
+    if (this.mode === 'lying') return { ok: true, value: { version: signed.state.version } };
+    const verdict = await verifySuccessor(this.states.at(-1)!, signed, this.transitions);
     if (!verdict.ok) return { ok: false, kind: 'status', status: 409, error: verdict.code };
     this.states.push(signed);
     if (this.mode === 'lost-answer') return { ok: false, kind: 'unreachable', detail: 'the answer was lost' };
@@ -141,7 +150,7 @@ class FakeHub implements HubClient {
   async chain(since: number): Promise<HubResult<Served>> {
     this.reads++;
     if (this.mode === 'unreachable') return { ok: false, kind: 'unreachable', detail: 'the hub is down' };
-    return { ok: true, value: { chain: this.states.filter((s) => s.state.version > since), head: this.states.at(-1)!, transitions: [], certificates: NO_CERTIFICATES } };
+    return { ok: true, value: { chain: this.states.filter((s) => s.state.version > since), head: this.states.at(-1)!, transitions: this.transitions, certificates: NO_CERTIFICATES } };
   }
 
   me(): never {
@@ -185,6 +194,8 @@ type Harness = {
   files: OrgFiles;
   /** Every write to the profile's org files, in order: the store's and the registration flag's. */
   writes: Array<{ name: string; value: unknown }>;
+  /** `chain`: every chain.json write fails (a full disk under the held view's adoption). */
+  faults: { chain: boolean };
   hub: FakeHub;
   /** The hub the signer is given: `null` while `hub` is false. */
   online: boolean;
@@ -210,14 +221,22 @@ async function harness(options: Options = {}): Promise<Harness> {
   const base = orgFiles({ userData: dir, log: () => {} });
   expect(await base.ensure()).toEqual({ ok: true });
   const writes: Harness['writes'] = [];
-  const files: OrgFiles = { ...base, write: async (name, value) => (writes.push({ name, value: structuredClone(value) }), base.write(name, value)) };
+  const faults = { chain: false };
+  const files: OrgFiles = {
+    ...base,
+    write: async (name, value) => {
+      if (faults.chain && name === CHAIN_FILE) throw new Error('disk full');
+      writes.push({ name, value: structuredClone(value) });
+      return base.write(name, value);
+    },
+  };
   let anchor: Anchor | null = null;
   const saveAnchor = async (next: Anchor) => void (anchor = next);
   const started = await startHeldOrg({ files, anchor: null, saveAnchor, pins: { roots: g.state.root.keys, recoveryPub: g.state.root.recoveryPub }, first: { chain: [g], transitions: [], certificates: NO_CERTIFICATES }, log: () => {} });
   if (!started.ok) throw new Error(started.reason);
   const hub = new FakeHub([g]);
   const registration: { signing?: true } = {};
-  const shared = { dir, files, writes, hub, registration, genesis: g, prompts: [] as StepUpPrompt[] };
+  const shared = { dir, files, writes, faults, hub, registration, genesis: g, prompts: [] as StepUpPrompt[] };
 
   async function compose(held: HeldOrg, online: boolean): Promise<Harness> {
     let commits: Promise<unknown> = Promise.resolve();
@@ -301,6 +320,26 @@ describe('who signs', () => {
       expect(h.hub.posts).toEqual([]);
       expect(h.disk()).toBeNull();
     }
+  });
+});
+
+describe('following a recovery before a sign', () => {
+  it('takes a recovery from below the held head before anything is shown, so a root the recovery removed is refused `not-root`', async () => {
+    const h = await harness();
+    expect(await h.signer.sign(noChangeEdit())).toEqual({ ok: true, version: 2 });
+    expect(await h.signer.sign(noChangeEdit())).toEqual({ ok: true, version: 3 });
+    const { admin, recovery } = await org();
+    // The recovery key rewinds the org to version 1 with the deployment admin the one root: the app's key is no longer.
+    const t = await signTransition({ org: ORG, fromVersion: 1, newRootKeys: [admin.stepUp.pub], issued: iso(NOW) }, recovery.privateKey, recovery.pub);
+    const recovered = await adminSuccessor(h.genesis, (s) => void (s.root.keys = s.root.keys.slice(0, 1)));
+    h.hub.states = [h.genesis, recovered];
+    h.hub.transitions = [t];
+
+    expect(await h.signer.sign(noChangeEdit())).toEqual({ ok: false, reason: 'not-root' });
+    expect(h.prompts).toHaveLength(2);
+    expect(h.hub.posts).toHaveLength(2);
+    expect(h.held.head()).toEqual(recovered);
+    expect(h.signer.isRoot()).toBe(false);
   });
 });
 
@@ -401,6 +440,31 @@ describe('the pending slot', () => {
     expect(h.disk()!.pending).toBeNull();
     expect(h.disk()!.deliveries.map((o) => o.hash)).toEqual([hash]);
     await vi.waitFor(() => expect(h.deliveries.sends).toBeGreaterThan(0));
+  });
+
+  it('reports no success when the hub took the state but the held view could not adopt it, and settles it once it can', async () => {
+    const h = await harness();
+    h.hub.beforePost = () => void (h.faults.chain = true);
+    const outcome = await h.signer.sign(noChangeEdit());
+    expect(outcome).toMatchObject({ ok: false, reason: 'hub' });
+    expect((outcome as { detail: string }).detail).toContain('not adopted');
+    expect(h.held.head().state.version).toBe(1);
+    expect(h.signer.pending()).toEqual({ version: 2, exposed: true, fork: false });
+
+    h.faults.chain = false;
+    await h.signer.settle();
+    expect(h.held.head().state.version).toBe(2);
+    expect(h.disk()!.pending).toBeNull();
+  });
+
+  it('reports no success for a 201 whose hub then serves another state at that version', async () => {
+    const h = await harness();
+    const theirs = await adminSuccessor(h.genesis);
+    h.hub.mode = 'lying';
+    h.hub.beforePost = () => void (h.hub.states.length === 1 && h.hub.states.push(theirs));
+    expect(await h.signer.sign(noChangeEdit())).toMatchObject({ ok: false, reason: 'hub' });
+    expect(h.held.head()).toEqual(theirs);
+    expect(h.signer.pending()).toEqual({ version: 2, exposed: true, fork: true });
   });
 
   it('signs nothing while a state is pending', async () => {
@@ -510,7 +574,8 @@ describe('discarding a pending proposal', () => {
     expect(await h.signer.discardPending(false as unknown as true)).toMatchObject({ ok: false });
     expect(h.disk()!.pending).not.toBeNull();
 
-    expect(await h.signer.discardPending(true)).toEqual({ ok: true });
+    // Exposed at the hub, which holds the admin's version 2: a fork the Org section words with its warning.
+    expect(await h.signer.discardPending(true)).toEqual({ ok: true, unsent: false, hubVersion: 2, forkAt: 2 });
     const file = h.disk()!;
     expect(file.pending).toBeNull();
     expect(file.deliveries).toEqual([]);
@@ -527,8 +592,26 @@ describe('discarding a pending proposal', () => {
     await h.signer.settle();
     expect(h.hub.posts).toHaveLength(2);
     expect(h.signer.pending()).toEqual({ version: 2, exposed: true, fork: false });
-    expect(await h.signer.discardPending(true)).toEqual({ ok: true });
+    expect(await h.signer.discardPending(true)).toEqual({ ok: true, unsent: false, hubVersion: 1 });
     expect(h.disk()!.abandoned).toEqual([{ hash: await stateHash(h.hub.posts[0].state), version: 2, hub: true, machines: [] }]);
+  });
+
+  it('reads a slot never exposed as unsent, adopts the hub\'s chain first, and accepts no version below that floor after it', async () => {
+    const h = await harness({ hub: false });
+    expect(await h.signer.sign(noChangeEdit())).toMatchObject({ ok: false, reason: 'hub' });
+    // Meanwhile the deployment admin signs versions 2 and 3 at the hub.
+    const two = await adminSuccessor(h.genesis);
+    const three = await adminSuccessor(two);
+    h.hub.states.push(two, three);
+    h.online = true;
+
+    expect(await h.signer.discardPending(true)).toEqual({ ok: true, unsent: true, hubVersion: 3, forkAt: 2 });
+    expect(h.held.head()).toEqual(three);
+    // The floor is max(the slot's parent version, the hub's head): an older chain is refused as a rollback.
+    expect(await h.held.adoptServed({ chain: [], head: h.genesis, transitions: [], certificates: null })).toMatchObject({ adopted: 0, refused: 'rollback' });
+    expect(await h.held.adoptServed({ chain: [], head: two, transitions: [], certificates: null })).toMatchObject({ adopted: 0, refused: 'rollback' });
+    expect(h.held.head()).toEqual(three);
+    expect(await h.signer.sign(noChangeEdit())).toEqual({ ok: true, version: 4 });
   });
 
   it('is refused while the hub can\'t be read, since only the hub says it doesn\'t hold the state', async () => {

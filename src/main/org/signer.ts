@@ -9,7 +9,8 @@
 //   backup mark (`excludedFromBackupAtCreation`, a local fact nothing signed can carry). Not a root: `not-root`;
 //   unmarked: `unmarked`; signing.json damaged: `signing`. Each before anything is shown that would sign.
 // - The slot (`deployment admin`'s anchor `pending`, admin.ts's `anchored`): written before the state goes anywhere,
-//   its obligation in the same write; `exposed.hub` written before the POST. 201 adopts and clears it. A 409
+//   its obligation in the same write; `exposed.hub` written before the POST. A 201 is done only once the held chain
+//   holds the state (adopted from the hub's chain, or directly); until then the slot stays for settling. A 409
 //   `not-head` or `rollback` adopts the hub's chain: if that holds the state it is settled, else the slot stays and
 //   reads `pending-fork`, since the hub may keep and serve what it refused. Anything else leaves it pending.
 // - Settling (at start and at each feed open, which the session calls, and before any sign): the held chain holds the
@@ -23,12 +24,12 @@
 //
 // Network calls and adoptions run outside the signing store's updates (whose queue adoption's anchor write waits on).
 // Electron-free: the state signer is injected (step-up.ts's `createStateSigner`, imported here for its type only).
-import { canonicalize, stateHash, verifySuccessor, type OrgState, type SignedOrgState } from '../../../apps/org-protocol/src/index.ts';
+import { canonicalize, isSignedOrgState, stateHash, verifySuccessor, type OrgState, type SignedOrgState } from '../../../apps/org-protocol/src/index.ts';
 import type { StateSigner } from '../device/step-up';
 import { checkSuccessor, type Finding, type SupersededOffer } from './checks';
 import type { Obligation, Pending } from './files';
-import type { HeldOrg } from './held';
-import type { HubClient, HubResult } from './hub-client';
+import { rereadFrom, type HeldOrg } from './held';
+import type { HubClient, HubResult, Served } from './hub-client';
 import type { OrgSession } from './session';
 import { SigningDamaged, withExposure, type SigningStore } from './signing-store';
 
@@ -40,8 +41,15 @@ export type SignOutcome =
   | { ok: false; reason: 'not-root' | 'unmarked' | 'signing' | 'cancelled' | 'pending' | 'invalid' | 'hub' | 'busy'; detail?: string }
   | { ok: false; reason: 'refused'; findings: Finding[] };
 
-/** Why a discard did nothing: the hub holds it, the hub can't be read, nothing is pending, or signing.json is damaged. */
-export type DiscardOutcome = { ok: true } | { ok: false; reason?: 'held' | 'hub' | 'none' | 'signing' };
+/**
+ * A discard, in `abandon-pending`'s distinctions (admin.ts:1168-1196), for the Org section to word: `unsent`, never
+ * exposed (no POST, no machine's act), so nothing can show it as a fork; else where the hub stood when it was read,
+ * `hubVersion` its head and `forkAt` the version where it holds another state. Refused: the hub holds it, the hub can't
+ * be read (or its head couldn't be adopted, so the floor below isn't reached), nothing is pending, or signing.json is
+ * damaged. After a discard the held head is at least max(the slot's parent version, `hubVersion`): the floor no lower
+ * version passes.
+ */
+export type DiscardOutcome = { ok: true; unsent: boolean; hubVersion: number; forkAt?: number } | { ok: false; reason?: 'held' | 'hub' | 'none' | 'signing' };
 
 export interface OrgSigner {
   /** The held head's `root.keys` holds this device's step-up key id. */
@@ -205,22 +213,41 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     return true;
   }
 
-  /** The hub's chain after the held head, adopted; the read's answer (null with no hub or no view). */
-  async function follow(hub: HubClient): Promise<Awaited<ReturnType<HubClient['chain']>> | null> {
+  /**
+   * The hub's chain read and adopted, by M1's rule (held.ts's `rereadFrom`): after the held head (or `from`), and again
+   * from a recovery's base when the page carries a recovery from below the head, so a rewind is authenticated and taken
+   * rather than refused as a rollback. `agreed`: the held head is now the hub's head; `why`: what kept it from being.
+   */
+  async function follow(hub: HubClient, from?: number): Promise<{ read: HubResult<Served>; agreed: boolean; why?: string } | null> {
     const view = deps.held();
     if (view === null) return null;
-    const read = await hub.chain(view.head().state.version);
+    let read = await hub.chain(from ?? view.head().state.version);
+    if (read.ok) {
+      const again = rereadFrom(view, read.value);
+      if (again !== null && (from === undefined || again < from)) read = await hub.chain(again);
+    }
     if (!read.ok) {
       log(`the hub's chain did not read: ${describe(read)}`);
-      return read;
+      return { read, agreed: false, why: describe(read) };
     }
+    let why: string | undefined;
     try {
-      const adopted = await view.adoptServed(read.value);
-      if (adopted.refused !== undefined) log(`the hub's chain was not adopted: ${adopted.refused}`);
+      why = (await view.adoptServed(read.value)).refused;
     } catch (error) {
-      log(`adopting the hub's chain failed: ${(error as Error).message}`);
+      why = (error as Error).message;
     }
-    return read;
+    if (why !== undefined) log(`the hub's chain was not adopted: ${why}`);
+    const now = deps.held();
+    const served = read.value.head;
+    const agreed = now !== null && isSignedOrgState(served) && (await stateHash(now.head().state)) === (await stateHash(served.state));
+    return { read, agreed, ...(agreed ? {} : { why: why ?? `the hub's head is not the held one` }) };
+  }
+
+  /** The held chain holds `signed`'s state at its version. */
+  async function onChain(signed: SignedOrgState): Promise<boolean> {
+    const view = deps.held();
+    const at = view === null ? undefined : stateAt(view, signed.state.version);
+    return at !== undefined && (await stateHash(at.state)) === (await stateHash(signed.state));
   }
 
   /**
@@ -246,11 +273,24 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     const answer = await hub.postState(signed);
     if (answer.ok) {
       log(`version ${version} accepted by the hub`);
-      await follow(hub);
+      let why = (await follow(hub))?.why;
       const view = deps.held();
-      // The hub took it, so it verifies: adopted directly when the chain's read didn't bring it.
-      if (view !== null && stateAt(view, version) === undefined) await view.adoptServed({ chain: [signed], head: null, transitions: [], certificates: null }).catch(() => {});
-      await clearIfHeld();
+      // Adopted directly when the chain's read didn't bring it: the held view verifies it as any state.
+      if (view !== null && stateAt(view, version) === undefined) {
+        try {
+          why = (await view.adoptServed({ chain: [signed], head: null, transitions: [], certificates: null })).refused ?? why;
+        } catch (error) {
+          why = (error as Error).message;
+        }
+      }
+      // Done only once the state is on the held chain (a concurrent re-judge may have cleared the slot already). A 201
+      // is the hub's word, which proves nothing (RL §5.9): until then the slot stays, and settling finishes it.
+      if (!(await onChain(signed))) {
+        const detail = `the hub took version ${version}, but it was not adopted here (${why ?? 'another state holds its version'}): it stays pending`;
+        log(detail);
+        return { ok: false, reason: 'hub', detail };
+      }
+      await clearIfHeld().catch((error: unknown) => log(`clearing settled version ${version} failed: ${(error as Error).message}; the next settle clears it`));
       return { ok: true, version };
     }
     log(`version ${version}: the hub answered ${describe(answer)}; it stays pending`);
@@ -273,15 +313,15 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     if (verdict === 'candidate') {
       const hub = deps.hub();
       if (hub === null) return;
-      const read = await follow(hub);
-      if (read === null || !read.ok) return;
+      const followed = await follow(hub);
+      if (followed === null || !followed.read.ok) return;
       const now = deps.held();
       if (now === null) return;
       verdict = await judgePending(slot, now);
-      const served = read.value;
+      const served = followed.read.value;
       if (verdict === 'candidate') {
-        // The hub's head is still the parent, with no successor of it: the same bytes go again.
-        if (served.chain.length === 0 && served.head !== null && (await stateHash(served.head.state)) === slot.parent) {
+        // The hub's head is still the parent, so it holds no successor of it: the same bytes go again.
+        if (isSignedOrgState(served.head) && (await stateHash(served.head.state)) === slot.parent) {
           log(`pending version ${version} is not at the hub: sent again`);
           await post(slot.signed);
         } else {
@@ -311,8 +351,13 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     if (file === 'damaged') return { ok: false, reason: 'signing' };
     if (file.pending !== null) return { ok: false, reason: 'pending' };
     // On the hub's head where the hub is reachable, so a successor of a stale head isn't proposed (and left a fork).
+    // A hub that can't be read is passed over (direct delivery needs no hub); one whose head the held view won't take
+    // is not: the held head may be one a recovery superseded, signed for with a root the recovery removed.
     const hub = deps.hub();
-    if (hub !== null) await follow(hub);
+    const followed = hub === null ? null : await follow(hub);
+    if (followed !== null && followed.read.ok && !followed.agreed) {
+      return { ok: false, reason: 'hub', detail: `the hub's head was not taken here (${followed.why}): nothing is signed until the two agree` };
+    }
     const again = standing();
     if (again !== null) return again;
 
@@ -407,27 +452,32 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
         if (await clearIfHeld()) return { ok: false, reason: 'held' };
         const hub = deps.hub();
         if (hub === null) return { ok: false, reason: 'hub' };
-        const read = await hub.chain(version - 1);
-        if (!read.ok) return { ok: false, reason: 'hub' };
-        const there = read.value.chain.find((s) => s.state.version === version);
+        // The hub's chain from the slot's version, adopted first: the floor after the discard is its head.
+        const followed = await follow(hub, version - 1);
+        if (followed === null || !followed.read.ok) return { ok: false, reason: 'hub' };
+        const served = followed.read.value;
+        const there = served.chain.find((s) => s.state.version === version);
         if (there !== undefined && canonicalize(there.state) === canonicalize(slot.signed.state)) {
-          // The hub holds it: the next settle (or this adoption) makes it the app's too.
-          await deps.held()?.adoptServed(read.value).catch(() => {});
-          await clearIfHeld();
+          // The hub holds it: adopted with the read, it settles as the hub's.
+          await clearIfHeld().catch(() => false);
           return { ok: false, reason: 'held' };
         }
+        const hubVersion = isSignedOrgState(served.head) ? served.head.state.version : 0;
+        const view = deps.held();
+        if (view === null || view.head().state.version < hubVersion) return { ok: false, reason: 'hub' };
         const hash = await stateHash(slot.signed.state);
         const key = canonicalize(slot.signed.state);
         const done = await store.update((f) => {
-          if (f.pending === null || canonicalize(f.pending.signed.state) !== key) return { next: f, value: false };
+          if (f.pending === null || canonicalize(f.pending.signed.state) !== key) return { next: f, value: null };
           const { hub: atHub, machines } = f.pending.exposed;
           f.pending = null;
           f.deliveries = f.deliveries.filter((o) => o.hash !== hash);
           f.abandoned.push({ hash, version, hub: atHub, machines: [...machines] });
-          return { next: f, value: true };
+          return { next: f, value: { unsent: !atHub && machines.length === 0 } };
         });
-        if (done) log(`pending version ${version} ${hash} abandoned on the owner's word`);
-        return done ? { ok: true } : { ok: false, reason: 'none' };
+        if (done === null) return { ok: false, reason: 'none' };
+        log(`pending version ${version} ${hash} abandoned on the owner's word${done.unsent ? ' (never sent)' : ''}; the hub's head is version ${hubVersion}`);
+        return { ok: true, unsent: done.unsent, hubVersion, ...(there === undefined ? {} : { forkAt: version }) };
       });
       await refreshNow();
       return outcome;

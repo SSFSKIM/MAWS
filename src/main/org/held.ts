@@ -143,6 +143,24 @@ async function recover(input: StartInput, anchor: Anchor, first: NonNullable<Sta
   return { ok: true, held };
 }
 
+/**
+ * The version to read the hub's chain again from, when a page read after the held head (`?since=<head>`) may carry a
+ * recovery from below it, or null when the page is enough. A recovery needs the states from its `fromVersion` on, which
+ * that page leaves out (the first state under it authenticates the rewind); a served head below the held one is judged
+ * with the whole chain, which tells a rewind from a rollback. M1's sync and M3's signer both follow the hub by it.
+ */
+export function rereadFrom(view: HeldOrg, served: Pick<Served, 'transitions' | 'head'>): number | null {
+  const version = view.head().state.version;
+  const known = new Set(view.since(0).transitions.map((t) => canonicalize(t.body)));
+  const below = list(served.transitions)
+    .filter((t): t is Signed<RootTransition> => typeof (t as Signed<RootTransition>)?.body?.fromVersion === 'number')
+    .filter((t) => t.body.fromVersion < version && !known.has(canonicalize(t.body)))
+    .map((t) => t.body.fromVersion);
+  if (below.length > 0) return Math.max(0, Math.min(...below));
+  const head = served.head?.state?.version;
+  return typeof head === 'number' && head < version ? 0 : null;
+}
+
 const fresh = (chain: SignedOrgState[], transitions: Signed<RootTransition>[], certificates: Certificates): Held => ({
   chain,
   transitions,
