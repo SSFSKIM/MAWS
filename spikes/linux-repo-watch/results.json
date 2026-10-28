@@ -1,0 +1,3070 @@
+{
+ "host": {
+  "vm": "dc-o3spikes-b0eb (GCE e2-custom-4-8192, 4 vCPU, 8 GB, us-west1-b, devcloud image, Ubuntu 24.04)",
+  "kernel": "7.0.0-1014-gcp",
+  "node": "v24.21.0",
+  "limits": {
+   "max_user_watches": 64104,
+   "max_user_instances": 128,
+   "max_queued_events": 16384
+  },
+  "baseline": "owner user: 3 inotify instances, 11 watches (systemd --user); an idle engine 2.1.283 process: 1 instance, 5 watches",
+  "gitStatusMs": {
+   "maws (with node_modules)": 45,
+   "maws bare clone": 46,
+   "linux": 392
+  },
+  "overlap": [
+   {
+    "step": "start",
+    "watches": 0,
+    "rssMiB": 44.2
+   },
+   {
+    "step": "checkout",
+    "watches": 20765,
+    "rssMiB": 113.8
+   },
+   {
+    "step": "worktree root",
+    "watches": 20765,
+    "rssMiB": 146.7
+   },
+   {
+    "step": "common dir",
+    "watches": 20765,
+    "rssMiB": 147.2
+   }
+  ],
+  "note": "maws-bare carried a linked worktree at .claude/worktrees/wt1 (no node_modules) from the overlap run on; the overflow run watched both (2,153 directories)."
+ },
+ "runs": {
+  "maws-nm": {
+   "label": "maws-with-node_modules",
+   "root": "/Users/new/Developer/GitHub/MAWS",
+   "node": "v24.21.0",
+   "kernel": "7.0.0-1014-gcp",
+   "ignore": "none",
+   "limits": {
+    "max_user_watches": 64104,
+    "max_user_instances": 128,
+    "max_queued_events": 16384
+   },
+   "census": {
+    "dirs": 5903,
+    "files": 52047,
+    "symlinks": 84,
+    "other": 0,
+    "ignoredEntries": 0,
+    "byTop": {
+     "node_modules": 47571,
+     "src": 3792,
+     "spikes": 2402,
+     "docs": 1844,
+     "apps": 764,
+     "e2e": 639,
+     "test": 604,
+     "research": 187
+    },
+    "deepest": {
+     "depth": 9,
+     "dir": "/Users/new/Developer/GitHub/MAWS/node_modules/@xterm/xterm/src/vs/base/browser/ui/scrollbar"
+    },
+    "largestDir": [
+     1188,
+     "/Users/new/Developer/GitHub/MAWS/node_modules/es-toolkit/compat"
+    ],
+    "walkMs": 1272,
+    "entries": 58034
+   },
+   "setup": {
+    "thrown": null,
+    "blockedMs": 1402,
+    "cpuMs": 1811,
+    "inotify": {
+     "instances": 1,
+     "watches": 52174
+    },
+    "rssMiB": 171.1,
+    "heapMiB": 71,
+    "externalMiB": 0,
+    "rssTotalMiB": 236.4,
+    "watchesPerEntry": 0.899,
+    "watchesPerDir": 8.84,
+    "bytesPerWatch": 3439,
+    "eventsDuringSetup": 0,
+    "errorsSoon": []
+   },
+   "latency": {
+    "root": {
+     "dir": ".",
+     "entries": 36,
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.55,
+      "p95": 0.68,
+      "max": 1.27
+     },
+     "modify": {
+      "n": 30,
+      "missed": 0,
+      "p50": 1,
+      "p95": 1.18,
+      "max": 1.18
+     }
+    },
+    "deepest": {
+     "dir": "node_modules/@xterm/xterm/src/vs/base/browser/ui/scrollbar",
+     "entries": 8,
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.48,
+      "p95": 0.66,
+      "max": 0.68
+     },
+     "modify": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.81,
+      "p95": 0.93,
+      "max": 1.09
+     }
+    },
+    "largestDir": {
+     "dir": "node_modules/es-toolkit/compat",
+     "entries": 1188,
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 1.58,
+      "p95": 1.82,
+      "max": 1.88
+     },
+     "modify": {
+      "n": 30,
+      "missed": 0,
+      "p50": 6.95,
+      "p95": 7.51,
+      "max": 7.6
+     }
+    },
+    "newDirectory": {
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.4,
+      "p95": 0.54,
+      "max": 0.54
+     }
+    }
+   },
+   "idle": {
+    "seconds": 20,
+    "cpuMs": 12,
+    "events": 0
+   },
+   "churn": [
+    {
+     "files": 200,
+     "op": "create",
+     "writerMs": 411,
+     "allHeardMs": 411,
+     "events": 200,
+     "cpuMs": 383,
+     "worstLoopLagMs": 357,
+     "loopDelayP99Ms": 368,
+     "loopDelayMaxMs": 368,
+     "watches": 52375
+    },
+    {
+     "files": 200,
+     "op": "remove",
+     "writerMs": 3345,
+     "allHeardMs": 3345,
+     "events": 200,
+     "cpuMs": 3352,
+     "worstLoopLagMs": 3292,
+     "loopDelayP99Ms": 3305,
+     "loopDelayMaxMs": 3305,
+     "watches": 52175
+    },
+    {
+     "files": 2000,
+     "op": "create",
+     "writerMs": 32975,
+     "allHeardMs": 32975,
+     "events": 2000,
+     "cpuMs": 33031,
+     "worstLoopLagMs": 32922,
+     "loopDelayP99Ms": 32934,
+     "loopDelayMaxMs": 32934,
+     "watches": 54175
+    },
+    {
+     "files": 2000,
+     "op": "remove",
+     "writerMs": 33453,
+     "allHeardMs": 33453,
+     "events": 2000,
+     "cpuMs": 33696,
+     "worstLoopLagMs": 33379,
+     "loopDelayP99Ms": 33403,
+     "loopDelayMaxMs": 33403,
+     "watches": 52175
+    }
+   ],
+   "errors": [],
+   "final": {
+    "inotify": {
+     "instances": 1,
+     "watches": 52174
+    },
+    "rssMiB": 171.1
+   }
+  },
+  "maws-ign-maws": {
+   "label": "maws-ignore-preset",
+   "root": "/Users/new/Developer/GitHub/MAWS",
+   "node": "v24.21.0",
+   "kernel": "7.0.0-1014-gcp",
+   "ignore": "maws",
+   "limits": {
+    "max_user_watches": 64104,
+    "max_user_instances": 128,
+    "max_queued_events": 16384
+   },
+   "census": {
+    "dirs": 1083,
+    "files": 9369,
+    "symlinks": 0,
+    "other": 0,
+    "ignoredEntries": 4,
+    "byTop": {
+     "src": 3792,
+     "spikes": 2402,
+     "docs": 1844,
+     "apps": 759,
+     "e2e": 639,
+     "test": 604,
+     "research": 187,
+     "mockups": 60
+    },
+    "deepest": {
+     "depth": 8,
+     "dir": "/Users/new/Developer/GitHub/MAWS/e2e/fixtures/catalog/marketplace/plugins/skills-only/skills/greet"
+    },
+    "largestDir": [
+     274,
+     "/Users/new/Developer/GitHub/MAWS/docs/doperpowers/evidence/p1-e11/gates"
+    ],
+    "walkMs": 186,
+    "entries": 10452
+   },
+   "setup": {
+    "thrown": null,
+    "blockedMs": 310,
+    "cpuMs": 448,
+    "inotify": {
+     "instances": 1,
+     "watches": 10452
+    },
+    "rssMiB": 29.7,
+    "heapMiB": 13.2,
+    "externalMiB": 0,
+    "rssTotalMiB": 89.4,
+    "watchesPerEntry": 1,
+    "watchesPerDir": 9.65,
+    "bytesPerWatch": 2980,
+    "eventsDuringSetup": 0,
+    "errorsSoon": []
+   },
+   "latency": {
+    "root": {
+     "dir": ".",
+     "entries": 36,
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.67,
+      "p95": 1.05,
+      "max": 1.31
+     },
+     "modify": {
+      "n": 30,
+      "missed": 0,
+      "p50": 1.02,
+      "p95": 1.67,
+      "max": 1.87
+     }
+    },
+    "deepest": {
+     "dir": "e2e/fixtures/catalog/marketplace/plugins/skills-only/skills/greet",
+     "entries": 1,
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.49,
+      "p95": 0.76,
+      "max": 1.91
+     },
+     "modify": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.76,
+      "p95": 1.04,
+      "max": 1.06
+     }
+    },
+    "largestDir": {
+     "dir": "docs/doperpowers/evidence/p1-e11/gates",
+     "entries": 274,
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.81,
+      "p95": 1.2,
+      "max": 2.16
+     },
+     "modify": {
+      "n": 30,
+      "missed": 0,
+      "p50": 2.64,
+      "p95": 4.02,
+      "max": 5.48
+     }
+    },
+    "newDirectory": {
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.43,
+      "p95": 0.62,
+      "max": 0.88
+     }
+    }
+   },
+   "idle": {
+    "seconds": 10,
+    "cpuMs": 14,
+    "events": 0
+   },
+   "churn": [
+    {
+     "files": 200,
+     "op": "create",
+     "writerMs": 424,
+     "allHeardMs": 424,
+     "events": 200,
+     "cpuMs": 391,
+     "worstLoopLagMs": 360,
+     "loopDelayP99Ms": 370,
+     "loopDelayMaxMs": 370,
+     "watches": 10653
+    },
+    {
+     "files": 200,
+     "op": "remove",
+     "writerMs": 705,
+     "allHeardMs": 705,
+     "events": 200,
+     "cpuMs": 692,
+     "worstLoopLagMs": 654,
+     "loopDelayP99Ms": 670,
+     "loopDelayMaxMs": 670,
+     "watches": 10453
+    },
+    {
+     "files": 2000,
+     "op": "create",
+     "writerMs": 35527,
+     "allHeardMs": 35527,
+     "events": 2000,
+     "cpuMs": 35695,
+     "worstLoopLagMs": 35473,
+     "loopDelayP99Ms": 35501,
+     "loopDelayMaxMs": 35501,
+     "watches": 12453
+    },
+    {
+     "files": 2000,
+     "op": "remove",
+     "writerMs": 6868,
+     "allHeardMs": 6868,
+     "events": 2000,
+     "cpuMs": 6837,
+     "worstLoopLagMs": 6815,
+     "loopDelayP99Ms": 6824,
+     "loopDelayMaxMs": 6824,
+     "watches": 10453
+    }
+   ],
+   "errors": [],
+   "final": {
+    "inotify": {
+     "instances": 1,
+     "watches": 10452
+    },
+    "rssMiB": 215.5
+   }
+  },
+  "maws-ign-git": {
+   "label": "maws-ignore-git",
+   "root": "/Users/new/Developer/GitHub/MAWS",
+   "node": "v24.21.0",
+   "kernel": "7.0.0-1014-gcp",
+   "ignore": "git",
+   "limits": {
+    "max_user_watches": 64104,
+    "max_user_instances": 128,
+    "max_queued_events": 16384
+   },
+   "census": {
+    "dirs": 1081,
+    "files": 9365,
+    "symlinks": 0,
+    "other": 0,
+    "ignoredEntries": 6,
+    "byTop": {
+     "src": 3792,
+     "spikes": 2402,
+     "docs": 1844,
+     "apps": 759,
+     "e2e": 639,
+     "test": 604,
+     "research": 187,
+     "mockups": 60
+    },
+    "deepest": {
+     "depth": 8,
+     "dir": "/Users/new/Developer/GitHub/MAWS/e2e/fixtures/catalog/marketplace/plugins/skills-only/skills/greet"
+    },
+    "largestDir": [
+     274,
+     "/Users/new/Developer/GitHub/MAWS/docs/doperpowers/evidence/p1-e11/gates"
+    ],
+    "walkMs": 142,
+    "entries": 10446
+   },
+   "setup": {
+    "thrown": null,
+    "blockedMs": 290,
+    "cpuMs": 421,
+    "inotify": {
+     "instances": 1,
+     "watches": 10446
+    },
+    "rssMiB": 29.5,
+    "heapMiB": 13.1,
+    "externalMiB": 0,
+    "rssTotalMiB": 89.3,
+    "watchesPerEntry": 1,
+    "watchesPerDir": 9.66,
+    "bytesPerWatch": 2965,
+    "eventsDuringSetup": 0,
+    "errorsSoon": []
+   },
+   "latency": {
+    "root": {
+     "dir": ".",
+     "entries": 36,
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.65,
+      "p95": 0.87,
+      "max": 0.9
+     },
+     "modify": {
+      "n": 30,
+      "missed": 0,
+      "p50": 1.09,
+      "p95": 1.45,
+      "max": 1.72
+     }
+    },
+    "deepest": {
+     "dir": "e2e/fixtures/catalog/marketplace/plugins/skills-only/skills/greet",
+     "entries": 1,
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.5,
+      "p95": 0.61,
+      "max": 0.61
+     },
+     "modify": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.76,
+      "p95": 0.94,
+      "max": 1.01
+     }
+    },
+    "largestDir": {
+     "dir": "docs/doperpowers/evidence/p1-e11/gates",
+     "entries": 274,
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.81,
+      "p95": 1.09,
+      "max": 1.4
+     },
+     "modify": {
+      "n": 30,
+      "missed": 0,
+      "p50": 2.83,
+      "p95": 3.16,
+      "max": 3.2
+     }
+    },
+    "newDirectory": {
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.43,
+      "p95": 0.63,
+      "max": 0.67
+     }
+    }
+   },
+   "idle": {
+    "seconds": 10,
+    "cpuMs": 13,
+    "events": 0
+   },
+   "churn": [
+    {
+     "files": 200,
+     "op": "create",
+     "writerMs": 448,
+     "allHeardMs": 449,
+     "events": 200,
+     "cpuMs": 419,
+     "worstLoopLagMs": 386,
+     "loopDelayP99Ms": 398,
+     "loopDelayMaxMs": 398,
+     "watches": 10647
+    },
+    {
+     "files": 200,
+     "op": "remove",
+     "writerMs": 654,
+     "allHeardMs": 654,
+     "events": 200,
+     "cpuMs": 662,
+     "worstLoopLagMs": 601,
+     "loopDelayP99Ms": 619,
+     "loopDelayMaxMs": 619,
+     "watches": 10447
+    },
+    {
+     "files": 2000,
+     "op": "create",
+     "writerMs": 40434,
+     "allHeardMs": 40434,
+     "events": 2000,
+     "cpuMs": 40623,
+     "worstLoopLagMs": 40378,
+     "loopDelayP99Ms": 40400,
+     "loopDelayMaxMs": 40400,
+     "watches": 12447
+    },
+    {
+     "files": 2000,
+     "op": "remove",
+     "writerMs": 7072,
+     "allHeardMs": 7072,
+     "events": 2000,
+     "cpuMs": 7045,
+     "worstLoopLagMs": 7020,
+     "loopDelayP99Ms": 7030,
+     "loopDelayMaxMs": 7030,
+     "watches": 10447
+    }
+   ],
+   "errors": [],
+   "final": {
+    "inotify": {
+     "instances": 1,
+     "watches": 10446
+    },
+    "rssMiB": 216.2
+   }
+  },
+  "maws-bare": {
+   "label": "maws-bare-clone",
+   "root": "/Users/new/o3g/maws-bare",
+   "node": "v24.21.0",
+   "kernel": "7.0.0-1014-gcp",
+   "ignore": "none",
+   "limits": {
+    "max_user_watches": 64104,
+    "max_user_instances": 128,
+    "max_queued_events": 16384
+   },
+   "census": {
+    "dirs": 1082,
+    "files": 9316,
+    "symlinks": 0,
+    "other": 0,
+    "ignoredEntries": 0,
+    "byTop": {
+     "src": 3792,
+     "spikes": 2348,
+     "docs": 1844,
+     "apps": 759,
+     "e2e": 639,
+     "test": 604,
+     "research": 187,
+     "mockups": 60
+    },
+    "deepest": {
+     "depth": 8,
+     "dir": "/Users/new/o3g/maws-bare/e2e/fixtures/catalog/marketplace/plugins/skills-only/skills/greet"
+    },
+    "largestDir": [
+     274,
+     "/Users/new/o3g/maws-bare/docs/doperpowers/evidence/p1-e11/gates"
+    ],
+    "walkMs": 122,
+    "entries": 10398
+   },
+   "setup": {
+    "thrown": null,
+    "blockedMs": 274,
+    "cpuMs": 346,
+    "inotify": {
+     "instances": 1,
+     "watches": 10398
+    },
+    "rssMiB": 29.5,
+    "heapMiB": 13.3,
+    "externalMiB": 0,
+    "rssTotalMiB": 89.6,
+    "watchesPerEntry": 1,
+    "watchesPerDir": 9.61,
+    "bytesPerWatch": 2971,
+    "eventsDuringSetup": 0,
+    "errorsSoon": []
+   },
+   "latency": {
+    "root": {
+     "dir": ".",
+     "entries": 33,
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.51,
+      "p95": 0.86,
+      "max": 0.92
+     },
+     "modify": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.94,
+      "p95": 1.29,
+      "max": 1.32
+     }
+    },
+    "deepest": {
+     "dir": "e2e/fixtures/catalog/marketplace/plugins/skills-only/skills/greet",
+     "entries": 1,
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.41,
+      "p95": 0.62,
+      "max": 0.65
+     },
+     "modify": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.68,
+      "p95": 0.85,
+      "max": 0.87
+     }
+    },
+    "largestDir": {
+     "dir": "docs/doperpowers/evidence/p1-e11/gates",
+     "entries": 274,
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.85,
+      "p95": 1.02,
+      "max": 1.27
+     },
+     "modify": {
+      "n": 30,
+      "missed": 0,
+      "p50": 2.25,
+      "p95": 2.7,
+      "max": 2.76
+     }
+    },
+    "newDirectory": {
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.44,
+      "p95": 0.57,
+      "max": 0.6
+     }
+    }
+   },
+   "idle": {
+    "seconds": 10,
+    "cpuMs": 14,
+    "events": 0
+   },
+   "churn": [
+    {
+     "files": 200,
+     "op": "create",
+     "writerMs": 340,
+     "allHeardMs": 340,
+     "events": 200,
+     "cpuMs": 315,
+     "worstLoopLagMs": 286,
+     "loopDelayP99Ms": 298,
+     "loopDelayMaxMs": 298,
+     "watches": 10599
+    },
+    {
+     "files": 200,
+     "op": "remove",
+     "writerMs": 537,
+     "allHeardMs": 537,
+     "events": 200,
+     "cpuMs": 534,
+     "worstLoopLagMs": 473,
+     "loopDelayP99Ms": 482,
+     "loopDelayMaxMs": 482,
+     "watches": 10399
+    },
+    {
+     "files": 2000,
+     "op": "create",
+     "writerMs": 30034,
+     "allHeardMs": 30034,
+     "events": 2000,
+     "cpuMs": 30198,
+     "worstLoopLagMs": 29981,
+     "loopDelayP99Ms": 29998,
+     "loopDelayMaxMs": 29998,
+     "watches": 12399
+    },
+    {
+     "files": 2000,
+     "op": "remove",
+     "writerMs": 5458,
+     "allHeardMs": 5458,
+     "events": 2000,
+     "cpuMs": 5425,
+     "worstLoopLagMs": 5395,
+     "loopDelayP99Ms": 5406,
+     "loopDelayMaxMs": 5406,
+     "watches": 10399
+    }
+   ],
+   "errors": [],
+   "final": {
+    "inotify": {
+     "instances": 1,
+     "watches": 10398
+    },
+    "rssMiB": 215.9
+   }
+  },
+  "maws-nm-dirs": {
+   "label": "maws-with-node_modules-dirs",
+   "root": "/Users/new/Developer/GitHub/MAWS",
+   "mode": "dirs",
+   "node": "v24.21.0",
+   "kernel": "7.0.0-1014-gcp",
+   "ignore": "none",
+   "limits": {
+    "max_user_watches": 64104,
+    "max_user_instances": 128,
+    "max_queued_events": 16384
+   },
+   "census": {
+    "dirs": 5903,
+    "files": 52047,
+    "symlinks": 84,
+    "other": 0,
+    "ignoredEntries": 0,
+    "byTop": {
+     "node_modules": 47571,
+     "src": 3792,
+     "spikes": 2402,
+     "docs": 1844,
+     "apps": 764,
+     "e2e": 639,
+     "test": 604,
+     "research": 187
+    },
+    "deepest": {
+     "depth": 9,
+     "dir": "/Users/new/Developer/GitHub/MAWS/node_modules/@xterm/xterm/src/vs/base/browser/ui/scrollbar"
+    },
+    "largestDir": [
+     1188,
+     "/Users/new/Developer/GitHub/MAWS/node_modules/es-toolkit/compat"
+    ],
+    "walkMs": 552,
+    "entries": 58034
+   },
+   "setup": {
+    "thrown": null,
+    "wallMs": 852,
+    "blockedMs": 0,
+    "cpuMs": 952,
+    "treeWatchers": 5903,
+    "treeErrors": [],
+    "exhausted": false,
+    "inotify": {
+     "instances": 1,
+     "watches": 5903
+    },
+    "rssMiB": 11.8,
+    "heapMiB": 5.5,
+    "externalMiB": 0,
+    "rssTotalMiB": 76.9,
+    "watchesPerEntry": 0.102,
+    "watchesPerDir": 1,
+    "bytesPerWatch": 2090,
+    "eventsDuringSetup": 0,
+    "errorsSoon": []
+   },
+   "latency": {
+    "root": {
+     "dir": ".",
+     "entries": 36,
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.68,
+      "p95": 1.25,
+      "max": 1.29
+     },
+     "modify": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.51,
+      "p95": 1.19,
+      "max": 1.24
+     }
+    },
+    "deepest": {
+     "dir": "node_modules/@xterm/xterm/src/vs/base/browser/ui/scrollbar",
+     "entries": 8,
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.33,
+      "p95": 1.09,
+      "max": 1.59
+     },
+     "modify": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.6,
+      "p95": 1.34,
+      "max": 1.34
+     }
+    },
+    "largestDir": {
+     "dir": "node_modules/es-toolkit/compat",
+     "entries": 1188,
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.67,
+      "p95": 1.26,
+      "max": 1.35
+     },
+     "modify": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.78,
+      "p95": 1.25,
+      "max": 1.31
+     }
+    },
+    "newDirectory": {
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.39,
+      "p95": 1.86,
+      "max": 2.25
+     }
+    }
+   },
+   "idle": {
+    "seconds": 10,
+    "cpuMs": 26,
+    "events": 0
+   },
+   "churn": [
+    {
+     "files": 200,
+     "op": "create",
+     "writerMs": 108,
+     "allHeardMs": 108,
+     "events": 400,
+     "cpuMs": 48,
+     "worstLoopLagMs": 4,
+     "loopDelayP99Ms": 14,
+     "loopDelayMaxMs": 14,
+     "watches": 5904
+    },
+    {
+     "files": 200,
+     "op": "remove",
+     "writerMs": 72,
+     "allHeardMs": 72,
+     "events": 200,
+     "cpuMs": 26,
+     "worstLoopLagMs": 3,
+     "loopDelayP99Ms": 11,
+     "loopDelayMaxMs": 11,
+     "watches": 5904
+    },
+    {
+     "files": 2000,
+     "op": "create",
+     "writerMs": 292,
+     "allHeardMs": 292,
+     "events": 4000,
+     "cpuMs": 266,
+     "worstLoopLagMs": 1,
+     "loopDelayP99Ms": 10,
+     "loopDelayMaxMs": 12,
+     "watches": 5904
+    },
+    {
+     "files": 2000,
+     "op": "remove",
+     "writerMs": 162,
+     "allHeardMs": 162,
+     "events": 2000,
+     "cpuMs": 154,
+     "worstLoopLagMs": 49,
+     "loopDelayP99Ms": 59,
+     "loopDelayMaxMs": 59,
+     "watches": 5904
+    }
+   ],
+   "errors": [],
+   "final": {
+    "inotify": {
+     "instances": 1,
+     "watches": 5903
+    },
+    "rssMiB": 83.2
+   }
+  },
+  "maws-nm-dirs-git": {
+   "label": "maws-dirs-ignore-git",
+   "root": "/Users/new/Developer/GitHub/MAWS",
+   "mode": "dirs",
+   "node": "v24.21.0",
+   "kernel": "7.0.0-1014-gcp",
+   "ignore": "git",
+   "limits": {
+    "max_user_watches": 64104,
+    "max_user_instances": 128,
+    "max_queued_events": 16384
+   },
+   "census": {
+    "dirs": 1081,
+    "files": 9365,
+    "symlinks": 0,
+    "other": 0,
+    "ignoredEntries": 6,
+    "byTop": {
+     "src": 3792,
+     "spikes": 2402,
+     "docs": 1844,
+     "apps": 759,
+     "e2e": 639,
+     "test": 604,
+     "research": 187,
+     "mockups": 60
+    },
+    "deepest": {
+     "depth": 8,
+     "dir": "/Users/new/Developer/GitHub/MAWS/e2e/fixtures/catalog/marketplace/plugins/skills-only/skills/greet"
+    },
+    "largestDir": [
+     274,
+     "/Users/new/Developer/GitHub/MAWS/docs/doperpowers/evidence/p1-e11/gates"
+    ],
+    "walkMs": 168,
+    "entries": 10446
+   },
+   "setup": {
+    "thrown": null,
+    "wallMs": 153,
+    "blockedMs": 1,
+    "cpuMs": 172,
+    "treeWatchers": 1081,
+    "treeErrors": [],
+    "exhausted": false,
+    "inotify": {
+     "instances": 1,
+     "watches": 1081
+    },
+    "rssMiB": 1,
+    "heapMiB": 0.9,
+    "externalMiB": 0,
+    "rssTotalMiB": 60.5,
+    "watchesPerEntry": 0.103,
+    "watchesPerDir": 1,
+    "bytesPerWatch": 970,
+    "eventsDuringSetup": 0,
+    "errorsSoon": []
+   },
+   "latency": {
+    "root": {
+     "dir": ".",
+     "entries": 36,
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.35,
+      "p95": 0.64,
+      "max": 0.77
+     },
+     "modify": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.42,
+      "p95": 0.6,
+      "max": 0.64
+     }
+    },
+    "deepest": {
+     "dir": "e2e/fixtures/catalog/marketplace/plugins/skills-only/skills/greet",
+     "entries": 1,
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.33,
+      "p95": 0.57,
+      "max": 1.53
+     },
+     "modify": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.39,
+      "p95": 0.51,
+      "max": 0.59
+     }
+    },
+    "largestDir": {
+     "dir": "docs/doperpowers/evidence/p1-e11/gates",
+     "entries": 274,
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.32,
+      "p95": 0.49,
+      "max": 2.47
+     },
+     "modify": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.38,
+      "p95": 0.53,
+      "max": 0.53
+     }
+    },
+    "newDirectory": {
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.29,
+      "p95": 0.5,
+      "max": 0.54
+     }
+    }
+   },
+   "idle": {
+    "seconds": 10,
+    "cpuMs": 14,
+    "events": 0
+   },
+   "churn": [
+    {
+     "files": 200,
+     "op": "create",
+     "writerMs": 108,
+     "allHeardMs": 108,
+     "events": 400,
+     "cpuMs": 44,
+     "worstLoopLagMs": 5,
+     "loopDelayP99Ms": 15,
+     "loopDelayMaxMs": 15,
+     "watches": 1082
+    },
+    {
+     "files": 200,
+     "op": "remove",
+     "writerMs": 97,
+     "allHeardMs": 97,
+     "events": 200,
+     "cpuMs": 34,
+     "worstLoopLagMs": 8,
+     "loopDelayP99Ms": 14,
+     "loopDelayMaxMs": 14,
+     "watches": 1082
+    },
+    {
+     "files": 2000,
+     "op": "create",
+     "writerMs": 280,
+     "allHeardMs": 280,
+     "events": 4000,
+     "cpuMs": 197,
+     "worstLoopLagMs": 40,
+     "loopDelayP99Ms": 51,
+     "loopDelayMaxMs": 51,
+     "watches": 1082
+    },
+    {
+     "files": 2000,
+     "op": "remove",
+     "writerMs": 251,
+     "allHeardMs": 251,
+     "events": 2000,
+     "cpuMs": 220,
+     "worstLoopLagMs": 134,
+     "loopDelayP99Ms": 149,
+     "loopDelayMaxMs": 149,
+     "watches": 1082
+    }
+   ],
+   "errors": [],
+   "final": {
+    "inotify": {
+     "instances": 1,
+     "watches": 1081
+    },
+    "rssMiB": 72
+   }
+  },
+  "linux-rec-default": {
+   "label": "linux-recursive-default-limit",
+   "root": "/Users/new/o3g/linux",
+   "mode": "recursive",
+   "node": "v24.21.0",
+   "kernel": "7.0.0-1014-gcp",
+   "ignore": "none",
+   "limits": {
+    "max_user_watches": 64104,
+    "max_user_instances": 128,
+    "max_queued_events": 16384
+   },
+   "census": {
+    "dirs": 6359,
+    "files": 97199,
+    "symlinks": 106,
+    "other": 0,
+    "ignoredEntries": 0,
+    "byTop": {
+     "drivers": 40675,
+     "arch": 19885,
+     "Documentation": 12321,
+     "tools": 11101,
+     "include": 7104,
+     "sound": 3218,
+     "fs": 2463,
+     "net": 1985
+    },
+    "deepest": {
+     "depth": 10,
+     "dir": "/Users/new/o3g/linux/drivers/gpu/drm/amd/display/dc/dml2_0/dml21/inc/bounding_boxes"
+    },
+    "largestDir": [
+     1614,
+     "/Users/new/o3g/linux/include/linux"
+    ],
+    "walkMs": 701,
+    "entries": 103664
+   },
+   "setup": {
+    "thrown": null,
+    "wallMs": 1656,
+    "blockedMs": 1656,
+    "cpuMs": 2098,
+    "inotify": {
+     "instances": 1,
+     "watches": 64093
+    },
+    "rssMiB": 187.5,
+    "heapMiB": 77.8,
+    "externalMiB": 0,
+    "rssTotalMiB": 252.8,
+    "watchesPerEntry": 0.618,
+    "watchesPerDir": 10.08,
+    "bytesPerWatch": 3067,
+    "eventsDuringSetup": 0,
+    "errorsSoon": []
+   },
+   "latency": {
+    "root": {
+     "dir": ".",
+     "entries": 43,
+     "create": {
+      "n": 10,
+      "missed": 0,
+      "p50": 0.64,
+      "p95": 1.15,
+      "max": 1.15
+     },
+     "modify": {
+      "n": 10,
+      "missed": 10,
+      "p50": null,
+      "p95": null,
+      "max": null
+     }
+    },
+    "deepest": {
+     "dir": "drivers/gpu/drm/amd/display/dc/dml2_0/dml21/inc/bounding_boxes",
+     "entries": 9,
+     "create": {
+      "n": 10,
+      "missed": 0,
+      "p50": 0.51,
+      "p95": 0.73,
+      "max": 0.73
+     },
+     "modify": {
+      "n": 10,
+      "missed": 10,
+      "p50": null,
+      "p95": null,
+      "max": null
+     }
+    },
+    "largestDir": {
+     "dir": "include/linux",
+     "entries": 1614,
+     "create": {
+      "n": 10,
+      "missed": 10,
+      "p50": null,
+      "p95": null,
+      "max": null
+     },
+     "modify": {
+      "n": 10,
+      "missed": 10,
+      "p50": null,
+      "p95": null,
+      "max": null
+     }
+    },
+    "newDirectory": {
+     "create": {
+      "n": 10,
+      "missed": 10,
+      "p50": null,
+      "p95": null,
+      "max": null
+     }
+    }
+   },
+   "unwatched": [
+    {
+     "index": 0,
+     "of": 6359,
+     "dir": ".",
+     "seenMs": 0.52
+    },
+    {
+     "index": 334,
+     "of": 6359,
+     "dir": "Documentation/devicetree/bindings/soc/fsl/cpm_qe/cpm",
+     "seenMs": 0.84
+    },
+    {
+     "index": 669,
+     "of": 6359,
+     "dir": "Documentation/translations/zh_CN/arch/loongarch",
+     "seenMs": 0.27
+    },
+    {
+     "index": 1003,
+     "of": 6359,
+     "dir": "arch/arm64/include/asm/xen",
+     "seenMs": 0.33
+    },
+    {
+     "index": 1338,
+     "of": 6359,
+     "dir": "arch/powerpc/net",
+     "seenMs": 0.34
+    },
+    {
+     "index": 1673,
+     "of": 6359,
+     "dir": "arch/xtensa/platforms/xt2000/include/platform",
+     "seenMs": 0.28
+    },
+    {
+     "index": 2007,
+     "of": 6359,
+     "dir": "drivers/gpib/tnt4882",
+     "seenMs": 0.26
+    },
+    {
+     "index": 2342,
+     "of": 6359,
+     "dir": "drivers/gpu/drm/amd/include/asic_reg/gca",
+     "seenMs": 0.32
+    },
+    {
+     "index": 2677,
+     "of": 6359,
+     "dir": "drivers/hwmon/peci",
+     "seenMs": 0.45
+    },
+    {
+     "index": 3011,
+     "of": 6359,
+     "dir": "drivers/media/usb/cx231xx",
+     "seenMs": 0.3
+    },
+    {
+     "index": 3346,
+     "of": 6359,
+     "dir": "drivers/net/ethernet/sfc",
+     "seenMs": 0.58
+    },
+    {
+     "index": 3680,
+     "of": 6359,
+     "dir": "drivers/platform/x86/intel/atomisp2",
+     "seenMs": null
+    },
+    {
+     "index": 4015,
+     "of": 6359,
+     "dir": "drivers/staging/media/atomisp/pci/runtime/debug/src",
+     "seenMs": null
+    },
+    {
+     "index": 4350,
+     "of": 6359,
+     "dir": "include/dt-bindings/arm",
+     "seenMs": null
+    },
+    {
+     "index": 4684,
+     "of": 6359,
+     "dir": "kernel/bpf/preload",
+     "seenMs": null
+    },
+    {
+     "index": 5019,
+     "of": 6359,
+     "dir": "scripts/dtc/dt-style-selftest",
+     "seenMs": null
+    },
+    {
+     "index": 5354,
+     "of": 6359,
+     "dir": "tools/arch/riscv/include/uapi",
+     "seenMs": null
+    },
+    {
+     "index": 5688,
+     "of": 6359,
+     "dir": "tools/perf/pmu-events/arch/nds32",
+     "seenMs": null
+    },
+    {
+     "index": 6023,
+     "of": 6359,
+     "dir": "tools/testing/selftests/ftrace/samples",
+     "seenMs": null
+    },
+    {
+     "index": 6358,
+     "of": 6359,
+     "dir": "virt/lib",
+     "seenMs": null
+    }
+   ],
+   "lateDirectory": {
+    "seenMs": null
+   },
+   "errors": [
+    {
+     "at": 2629,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/.o3g-probe-16177-0'"
+    },
+    {
+     "at": 2630,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/fs'"
+    },
+    {
+     "at": 2651,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/.o3g-probe-16177-1'"
+    },
+    {
+     "at": 2652,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/include'"
+    },
+    {
+     "at": 2673,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/.o3g-probe-16177-2'"
+    },
+    {
+     "at": 2674,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/init'"
+    },
+    {
+     "at": 2694,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/.o3g-probe-16177-3'"
+    },
+    {
+     "at": 2694,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/io_uring'"
+    },
+    {
+     "at": 2715,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/.o3g-probe-16177-4'"
+    },
+    {
+     "at": 2715,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/ipc'"
+    },
+    {
+     "at": 2736,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/.o3g-probe-16177-5'"
+    },
+    {
+     "at": 2737,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/kernel'"
+    },
+    {
+     "at": 2757,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/.o3g-probe-16177-6'"
+    },
+    {
+     "at": 2757,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/lib'"
+    },
+    {
+     "at": 2778,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/.o3g-probe-16177-7'"
+    },
+    {
+     "at": 2779,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/mm'"
+    },
+    {
+     "at": 2800,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/.o3g-probe-16177-8'"
+    },
+    {
+     "at": 2801,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/net'"
+    },
+    {
+     "at": 2821,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/.o3g-probe-16177-9'"
+    },
+    {
+     "at": 2821,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/rust'"
+    },
+    {
+     "at": 2842,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/samples'"
+    },
+    {
+     "at": 4864,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/scripts'"
+    },
+    {
+     "at": 6888,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/security'"
+    },
+    {
+     "at": 8910,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/sound'"
+    },
+    {
+     "at": 10931,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/tools'"
+    },
+    {
+     "at": 12955,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/usr'"
+    },
+    {
+     "at": 14977,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/virt'"
+    },
+    {
+     "at": 23269,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/drivers/gpu/drm/amd/display/dc/dml2_0/dml21/inc/bounding_boxes/.o3g-probe-16177-0'"
+    },
+    {
+     "at": 23290,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/drivers/gpu/drm/amd/display/dc/dml2_0/dml21/inc/bounding_boxes/.o3g-probe-16177-1'"
+    },
+    {
+     "at": 23312,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/drivers/gpu/drm/amd/display/dc/dml2_0/dml21/inc/bounding_boxes/.o3g-probe-16177-2'"
+    },
+    {
+     "at": 23333,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/drivers/gpu/drm/amd/display/dc/dml2_0/dml21/inc/bounding_boxes/.o3g-probe-16177-3'"
+    },
+    {
+     "at": 23354,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/drivers/gpu/drm/amd/display/dc/dml2_0/dml21/inc/bounding_boxes/.o3g-probe-16177-4'"
+    },
+    {
+     "at": 23375,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/drivers/gpu/drm/amd/display/dc/dml2_0/dml21/inc/bounding_boxes/.o3g-probe-16177-5'"
+    },
+    {
+     "at": 23396,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/drivers/gpu/drm/amd/display/dc/dml2_0/dml21/inc/bounding_boxes/.o3g-probe-16177-6'"
+    },
+    {
+     "at": 23418,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/drivers/gpu/drm/amd/display/dc/dml2_0/dml21/inc/bounding_boxes/.o3g-probe-16177-7'"
+    },
+    {
+     "at": 23439,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/drivers/gpu/drm/amd/display/dc/dml2_0/dml21/inc/bounding_boxes/.o3g-probe-16177-8'"
+    },
+    {
+     "at": 23460,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/drivers/gpu/drm/amd/display/dc/dml2_0/dml21/inc/bounding_boxes/.o3g-probe-16177-9'"
+    },
+    {
+     "at": 84563,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/.o3g-fresh-16177'"
+    },
+    {
+     "at": 105573,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/.o3g-seen-16177'"
+    },
+    {
+     "at": 105574,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/Documentation/devicetree/bindings/soc/fsl/cpm_qe/cpm/.o3g-seen-16177'"
+    },
+    {
+     "at": 105574,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/Documentation/translations/zh_CN/arch/loongarch/.o3g-seen-16177'"
+    },
+    {
+     "at": 105575,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/arch/arm64/include/asm/xen/.o3g-seen-16177'"
+    },
+    {
+     "at": 105575,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/arch/powerpc/net/.o3g-seen-16177'"
+    },
+    {
+     "at": 105576,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/arch/xtensa/platforms/xt2000/include/platform/.o3g-seen-16177'"
+    },
+    {
+     "at": 105576,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/drivers/gpib/tnt4882/.o3g-seen-16177'"
+    },
+    {
+     "at": 105577,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/drivers/gpu/drm/amd/include/asic_reg/gca/.o3g-seen-16177'"
+    },
+    {
+     "at": 105578,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/drivers/hwmon/peci/.o3g-seen-16177'"
+    },
+    {
+     "at": 105578,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/drivers/media/usb/cx231xx/.o3g-seen-16177'"
+    },
+    {
+     "at": 105579,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/drivers/net/ethernet/sfc/.o3g-seen-16177'"
+    },
+    {
+     "at": 123603,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/linux/.o3g-late-16177'"
+    }
+   ],
+   "final": {
+    "inotify": {
+     "instances": 1,
+     "watches": 64093
+    },
+    "rssMiB": 176
+   }
+  },
+  "linux-rec-raised": {
+   "label": "linux-recursive-raised-limit",
+   "root": "/Users/new/o3g/linux",
+   "mode": "recursive",
+   "node": "v24.21.0",
+   "kernel": "7.0.0-1014-gcp",
+   "ignore": "none",
+   "limits": {
+    "max_user_watches": 1048576,
+    "max_user_instances": 128,
+    "max_queued_events": 16384
+   },
+   "census": {
+    "dirs": 6359,
+    "files": 97199,
+    "symlinks": 106,
+    "other": 0,
+    "ignoredEntries": 0,
+    "byTop": {
+     "drivers": 40675,
+     "arch": 19885,
+     "Documentation": 12321,
+     "tools": 11101,
+     "include": 7104,
+     "sound": 3218,
+     "fs": 2463,
+     "net": 1985
+    },
+    "deepest": {
+     "depth": 10,
+     "dir": "/Users/new/o3g/linux/drivers/gpu/drm/amd/display/dc/dml2_0/dml21/inc/bounding_boxes"
+    },
+    "largestDir": [
+     1614,
+     "/Users/new/o3g/linux/include/linux"
+    ],
+    "walkMs": 683,
+    "entries": 103664
+   },
+   "setup": {
+    "thrown": null,
+    "wallMs": 2377,
+    "blockedMs": 2377,
+    "cpuMs": 3157,
+    "inotify": {
+     "instances": 1,
+     "watches": 103558
+    },
+    "rssMiB": 277.7,
+    "heapMiB": 126.3,
+    "externalMiB": 0,
+    "rssTotalMiB": 342.5,
+    "watchesPerEntry": 0.999,
+    "watchesPerDir": 16.29,
+    "bytesPerWatch": 2812,
+    "eventsDuringSetup": 0,
+    "errorsSoon": []
+   },
+   "latency": {
+    "root": {
+     "dir": ".",
+     "entries": 43,
+     "create": {
+      "n": 20,
+      "missed": 0,
+      "p50": 0.63,
+      "p95": 1.02,
+      "max": 1.02
+     },
+     "modify": {
+      "n": 20,
+      "missed": 0,
+      "p50": 0.98,
+      "p95": 1.57,
+      "max": 1.57
+     }
+    },
+    "deepest": {
+     "dir": "drivers/gpu/drm/amd/display/dc/dml2_0/dml21/inc/bounding_boxes",
+     "entries": 9,
+     "create": {
+      "n": 20,
+      "missed": 0,
+      "p50": 0.46,
+      "p95": 0.63,
+      "max": 0.63
+     },
+     "modify": {
+      "n": 20,
+      "missed": 0,
+      "p50": 0.76,
+      "p95": 1.04,
+      "max": 1.04
+     }
+    },
+    "largestDir": {
+     "dir": "include/linux",
+     "entries": 1614,
+     "create": {
+      "n": 20,
+      "missed": 0,
+      "p50": 1.95,
+      "p95": 2.19,
+      "max": 2.19
+     },
+     "modify": {
+      "n": 20,
+      "missed": 0,
+      "p50": 7.4,
+      "p95": 8.57,
+      "max": 8.57
+     }
+    },
+    "newDirectory": {
+     "create": {
+      "n": 20,
+      "missed": 0,
+      "p50": 0.42,
+      "p95": 0.63,
+      "max": 0.63
+     }
+    }
+   },
+   "idle": {
+    "seconds": 10,
+    "cpuMs": 9,
+    "events": 0
+   },
+   "churn": [
+    {
+     "files": 200,
+     "op": "create",
+     "writerMs": 367,
+     "allHeardMs": 367,
+     "events": 200,
+     "cpuMs": 338,
+     "worstLoopLagMs": 309,
+     "loopDelayP99Ms": 319,
+     "loopDelayMaxMs": 319,
+     "watches": 103759
+    },
+    {
+     "files": 200,
+     "op": "remove",
+     "writerMs": 3953,
+     "allHeardMs": 3953,
+     "events": 200,
+     "cpuMs": 3932,
+     "worstLoopLagMs": 3891,
+     "loopDelayP99Ms": 3905,
+     "loopDelayMaxMs": 3905,
+     "watches": 103559
+    }
+   ],
+   "errors": [],
+   "final": {
+    "inotify": {
+     "instances": 1,
+     "watches": 103558
+    },
+    "rssMiB": 386.1
+   }
+  },
+  "linux-dirs": {
+   "label": "linux-dirs",
+   "root": "/Users/new/o3g/linux",
+   "mode": "dirs",
+   "node": "v24.21.0",
+   "kernel": "7.0.0-1014-gcp",
+   "ignore": "none",
+   "limits": {
+    "max_user_watches": 64104,
+    "max_user_instances": 128,
+    "max_queued_events": 16384
+   },
+   "census": {
+    "dirs": 6359,
+    "files": 97199,
+    "symlinks": 106,
+    "other": 0,
+    "ignoredEntries": 0,
+    "byTop": {
+     "drivers": 40675,
+     "arch": 19885,
+     "Documentation": 12321,
+     "tools": 11101,
+     "include": 7104,
+     "sound": 3218,
+     "fs": 2463,
+     "net": 1985
+    },
+    "deepest": {
+     "depth": 10,
+     "dir": "/Users/new/o3g/linux/drivers/gpu/drm/amd/display/dc/dml2_0/dml21/inc/bounding_boxes"
+    },
+    "largestDir": [
+     1614,
+     "/Users/new/o3g/linux/include/linux"
+    ],
+    "walkMs": 741,
+    "entries": 103664
+   },
+   "setup": {
+    "thrown": null,
+    "wallMs": 1267,
+    "blockedMs": 1,
+    "cpuMs": 1288,
+    "treeWatchers": 6359,
+    "treeErrors": [],
+    "exhausted": false,
+    "inotify": {
+     "instances": 1,
+     "watches": 6359
+    },
+    "rssMiB": 13.6,
+    "heapMiB": 5.7,
+    "externalMiB": 0,
+    "rssTotalMiB": 77.8,
+    "watchesPerEntry": 0.061,
+    "watchesPerDir": 1,
+    "bytesPerWatch": 2238,
+    "eventsDuringSetup": 0,
+    "errorsSoon": []
+   },
+   "latency": {
+    "root": {
+     "dir": ".",
+     "entries": 43,
+     "create": {
+      "n": 20,
+      "missed": 0,
+      "p50": 0.3,
+      "p95": 0.57,
+      "max": 0.57
+     },
+     "modify": {
+      "n": 20,
+      "missed": 0,
+      "p50": 0.34,
+      "p95": 0.7,
+      "max": 0.7
+     }
+    },
+    "deepest": {
+     "dir": "drivers/gpu/drm/amd/display/dc/dml2_0/dml21/inc/bounding_boxes",
+     "entries": 9,
+     "create": {
+      "n": 20,
+      "missed": 0,
+      "p50": 0.27,
+      "p95": 0.63,
+      "max": 0.63
+     },
+     "modify": {
+      "n": 20,
+      "missed": 0,
+      "p50": 0.35,
+      "p95": 0.58,
+      "max": 0.58
+     }
+    },
+    "largestDir": {
+     "dir": "include/linux",
+     "entries": 1614,
+     "create": {
+      "n": 20,
+      "missed": 0,
+      "p50": 0.28,
+      "p95": 0.64,
+      "max": 0.64
+     },
+     "modify": {
+      "n": 20,
+      "missed": 0,
+      "p50": 0.39,
+      "p95": 0.54,
+      "max": 0.54
+     }
+    },
+    "newDirectory": {
+     "create": {
+      "n": 20,
+      "missed": 0,
+      "p50": 0.28,
+      "p95": 0.5,
+      "max": 0.5
+     }
+    }
+   },
+   "idle": {
+    "seconds": 10,
+    "cpuMs": 14,
+    "events": 0
+   },
+   "churn": [
+    {
+     "files": 200,
+     "op": "create",
+     "writerMs": 79,
+     "allHeardMs": 79,
+     "events": 400,
+     "cpuMs": 41,
+     "worstLoopLagMs": 6,
+     "loopDelayP99Ms": 16,
+     "loopDelayMaxMs": 16,
+     "watches": 6360
+    },
+    {
+     "files": 200,
+     "op": "remove",
+     "writerMs": 63,
+     "allHeardMs": 63,
+     "events": 200,
+     "cpuMs": 30,
+     "worstLoopLagMs": 3,
+     "loopDelayP99Ms": 11,
+     "loopDelayMaxMs": 11,
+     "watches": 6360
+    },
+    {
+     "files": 2000,
+     "op": "create",
+     "writerMs": 197,
+     "allHeardMs": 197,
+     "events": 4000,
+     "cpuMs": 193,
+     "worstLoopLagMs": 8,
+     "loopDelayP99Ms": 18,
+     "loopDelayMaxMs": 18,
+     "watches": 6360
+    },
+    {
+     "files": 2000,
+     "op": "remove",
+     "writerMs": 188,
+     "allHeardMs": 188,
+     "events": 2000,
+     "cpuMs": 171,
+     "worstLoopLagMs": 65,
+     "loopDelayP99Ms": 75,
+     "loopDelayMaxMs": 75,
+     "watches": 6360
+    }
+   ],
+   "errors": [],
+   "final": {
+    "inotify": {
+     "instances": 1,
+     "watches": 6359
+    },
+    "rssMiB": 99.7
+   }
+  },
+  "bare-rec-lowlimit": {
+   "label": "maws-bare-recursive-limit-600",
+   "root": "/Users/new/o3g/maws-bare",
+   "mode": "recursive",
+   "node": "v24.21.0",
+   "kernel": "7.0.0-1014-gcp",
+   "ignore": "none",
+   "limits": {
+    "max_user_watches": 600,
+    "max_user_instances": 128,
+    "max_queued_events": 16384
+   },
+   "census": {
+    "dirs": 1082,
+    "files": 9316,
+    "symlinks": 0,
+    "other": 0,
+    "ignoredEntries": 0,
+    "byTop": {
+     "src": 3792,
+     "spikes": 2348,
+     "docs": 1844,
+     "apps": 759,
+     "e2e": 639,
+     "test": 604,
+     "research": 187,
+     "mockups": 60
+    },
+    "deepest": {
+     "depth": 8,
+     "dir": "/Users/new/o3g/maws-bare/e2e/fixtures/catalog/marketplace/plugins/skills-only/skills/greet"
+    },
+    "largestDir": [
+     274,
+     "/Users/new/o3g/maws-bare/docs/doperpowers/evidence/p1-e11/gates"
+    ],
+    "walkMs": 114,
+    "entries": 10398
+   },
+   "setup": {
+    "thrown": null,
+    "wallMs": 20,
+    "blockedMs": 20,
+    "cpuMs": 32,
+    "inotify": {
+     "instances": 1,
+     "watches": 589
+    },
+    "rssMiB": 1.1,
+    "heapMiB": 0.9,
+    "externalMiB": 0,
+    "rssTotalMiB": 61,
+    "watchesPerEntry": 0.057,
+    "watchesPerDir": 0.54,
+    "bytesPerWatch": 2003,
+    "eventsDuringSetup": 0,
+    "errorsSoon": []
+   },
+   "unwatched": [
+    {
+     "index": 0,
+     "of": 1082,
+     "dir": ".",
+     "seenMs": 1.44
+    },
+    {
+     "index": 56,
+     "of": 1082,
+     "dir": "apps/desk-web/e2e-hub",
+     "seenMs": 0.58
+    },
+    {
+     "index": 113,
+     "of": 1082,
+     "dir": "apps/org-protocol/types",
+     "seenMs": null
+    },
+    {
+     "index": 170,
+     "of": 1082,
+     "dir": "docs/doperpowers/evidence/p3-finish",
+     "seenMs": null
+    },
+    {
+     "index": 227,
+     "of": 1082,
+     "dir": "e2e/fixtures/catalog/marketplace",
+     "seenMs": null
+    },
+    {
+     "index": 284,
+     "of": 1082,
+     "dir": "e2e/fixtures/connectors-direct/run-39069174863/git-child",
+     "seenMs": null
+    },
+    {
+     "index": 341,
+     "of": 1082,
+     "dir": "e2e/fixtures/connectors-direct/run-39083207174/sources",
+     "seenMs": null
+    },
+    {
+     "index": 398,
+     "of": 1082,
+     "dir": "spikes/browser-probe/ext",
+     "seenMs": null
+    },
+    {
+     "index": 455,
+     "of": 1082,
+     "dir": "spikes/p3-store/s3",
+     "seenMs": null
+    },
+    {
+     "index": 512,
+     "of": 1082,
+     "dir": "spikes/p4-parity-bench/record-2026-10-21/run/desktop-B7-r6",
+     "seenMs": null
+    },
+    {
+     "index": 568,
+     "of": 1082,
+     "dir": "spikes/p4-parity-bench/record-2026-10-21/run/maws-B7-r2/after/project/slides",
+     "seenMs": null
+    },
+    {
+     "index": 625,
+     "of": 1082,
+     "dir": "spikes/p4-parity-bench/record-a3-2026-10-21/run-a/maws-attach-B5-r1/after/project/slides",
+     "seenMs": null
+    },
+    {
+     "index": 682,
+     "of": 1082,
+     "dir": "spikes/p4-parity-bench/record-a3-2026-10-21/run-a/maws-attach-B7-r4/before",
+     "seenMs": null
+    },
+    {
+     "index": 739,
+     "of": 1082,
+     "dir": "spikes/protocol-probe/fixtures",
+     "seenMs": null
+    },
+    {
+     "index": 796,
+     "of": 1082,
+     "dir": "src/artifacts/slides/editor/present",
+     "seenMs": null
+    },
+    {
+     "index": 853,
+     "of": 1082,
+     "dir": "src/main/catalog",
+     "seenMs": null
+    },
+    {
+     "index": 910,
+     "of": 1082,
+     "dir": "src/renderer/src/engine-surface",
+     "seenMs": null
+    },
+    {
+     "index": 967,
+     "of": 1082,
+     "dir": "src/renderer/src/tools/browser/comment",
+     "seenMs": null
+    },
+    {
+     "index": 1024,
+     "of": 1082,
+     "dir": "src/shared/owner",
+     "seenMs": null
+    },
+    {
+     "index": 1081,
+     "of": 1082,
+     "dir": "test/support/engine-pin",
+     "seenMs": null
+    }
+   ],
+   "lateDirectory": {
+    "seenMs": null
+   },
+   "errors": [
+    {
+     "at": 575,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/maws-bare/.o3g-seen-17120'"
+    },
+    {
+     "at": 576,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/maws-bare/build'"
+    },
+    {
+     "at": 576,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/maws-bare/docs'"
+    },
+    {
+     "at": 576,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/maws-bare/apps/desk-web/e2e-hub/.o3g-seen-17120'"
+    },
+    {
+     "at": 36616,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/maws-bare/.o3g-late-17120'"
+    },
+    {
+     "at": 38920,
+     "code": "ENOSPC",
+     "message": "ENOSPC: System limit for number of file watchers reached, watch '/Users/new/o3g/maws-bare/e2e'"
+    }
+   ],
+   "final": {
+    "inotify": {
+     "instances": 1,
+     "watches": 589
+    },
+    "rssMiB": 61.5
+   }
+  },
+  "bare-dirs-lowlimit": {
+   "label": "maws-bare-dirs-limit-600",
+   "root": "/Users/new/o3g/maws-bare",
+   "mode": "dirs",
+   "node": "v24.21.0",
+   "kernel": "7.0.0-1014-gcp",
+   "ignore": "none",
+   "limits": {
+    "max_user_watches": 600,
+    "max_user_instances": 128,
+    "max_queued_events": 16384
+   },
+   "census": {
+    "dirs": 1082,
+    "files": 9316,
+    "symlinks": 0,
+    "other": 0,
+    "ignoredEntries": 0,
+    "byTop": {
+     "src": 3792,
+     "spikes": 2348,
+     "docs": 1844,
+     "apps": 759,
+     "e2e": 639,
+     "test": 604,
+     "research": 187,
+     "mockups": 60
+    },
+    "deepest": {
+     "depth": 8,
+     "dir": "/Users/new/o3g/maws-bare/e2e/fixtures/catalog/marketplace/plugins/skills-only/skills/greet"
+    },
+    "largestDir": [
+     274,
+     "/Users/new/o3g/maws-bare/docs/doperpowers/evidence/p1-e11/gates"
+    ],
+    "walkMs": 119,
+    "entries": 10398
+   },
+   "setup": {
+    "thrown": null,
+    "wallMs": 186,
+    "blockedMs": 1,
+    "cpuMs": 179,
+    "treeWatchers": 589,
+    "treeErrors": [
+     {
+      "code": "ENOSPC",
+      "dir": "e2e/fixtures/connectors-direct/run-39007800364/negative-absent"
+     }
+    ],
+    "exhausted": true,
+    "inotify": {
+     "instances": 1,
+     "watches": 589
+    },
+    "rssMiB": 0.9,
+    "heapMiB": 0.7,
+    "externalMiB": 0,
+    "rssTotalMiB": 60.3,
+    "watchesPerEntry": 0.057,
+    "watchesPerDir": 0.54,
+    "bytesPerWatch": 1558,
+    "eventsDuringSetup": 0,
+    "errorsSoon": []
+   },
+   "unwatched": [
+    {
+     "index": 0,
+     "of": 1082,
+     "dir": ".",
+     "seenMs": 1.53
+    },
+    {
+     "index": 56,
+     "of": 1082,
+     "dir": "apps/desk-web/e2e-hub",
+     "seenMs": 0.23
+    },
+    {
+     "index": 113,
+     "of": 1082,
+     "dir": "apps/org-protocol/types",
+     "seenMs": 0.3
+    },
+    {
+     "index": 170,
+     "of": 1082,
+     "dir": "docs/doperpowers/evidence/p3-finish",
+     "seenMs": 0.22
+    },
+    {
+     "index": 227,
+     "of": 1082,
+     "dir": "e2e/fixtures/catalog/marketplace",
+     "seenMs": 0.16
+    },
+    {
+     "index": 284,
+     "of": 1082,
+     "dir": "e2e/fixtures/connectors-direct/run-39069174863/git-child",
+     "seenMs": null
+    },
+    {
+     "index": 341,
+     "of": 1082,
+     "dir": "e2e/fixtures/connectors-direct/run-39083207174/sources",
+     "seenMs": null
+    },
+    {
+     "index": 398,
+     "of": 1082,
+     "dir": "spikes/browser-probe/ext",
+     "seenMs": 0.39
+    },
+    {
+     "index": 455,
+     "of": 1082,
+     "dir": "spikes/p3-store/s3",
+     "seenMs": 0.17
+    },
+    {
+     "index": 512,
+     "of": 1082,
+     "dir": "spikes/p4-parity-bench/record-2026-10-21/run/desktop-B7-r6",
+     "seenMs": null
+    },
+    {
+     "index": 568,
+     "of": 1082,
+     "dir": "spikes/p4-parity-bench/record-2026-10-21/run/maws-B7-r2/after/project/slides",
+     "seenMs": null
+    },
+    {
+     "index": 625,
+     "of": 1082,
+     "dir": "spikes/p4-parity-bench/record-a3-2026-10-21/run-a/maws-attach-B5-r1/after/project/slides",
+     "seenMs": null
+    },
+    {
+     "index": 682,
+     "of": 1082,
+     "dir": "spikes/p4-parity-bench/record-a3-2026-10-21/run-a/maws-attach-B7-r4/before",
+     "seenMs": null
+    },
+    {
+     "index": 739,
+     "of": 1082,
+     "dir": "spikes/protocol-probe/fixtures",
+     "seenMs": 0.25
+    },
+    {
+     "index": 796,
+     "of": 1082,
+     "dir": "src/artifacts/slides/editor/present",
+     "seenMs": null
+    },
+    {
+     "index": 853,
+     "of": 1082,
+     "dir": "src/main/catalog",
+     "seenMs": 0.24
+    },
+    {
+     "index": 910,
+     "of": 1082,
+     "dir": "src/renderer/src/engine-surface",
+     "seenMs": 0.15
+    },
+    {
+     "index": 967,
+     "of": 1082,
+     "dir": "src/renderer/src/tools/browser/comment",
+     "seenMs": null
+    },
+    {
+     "index": 1024,
+     "of": 1082,
+     "dir": "src/shared/owner",
+     "seenMs": 0.2
+    },
+    {
+     "index": 1081,
+     "of": 1082,
+     "dir": "test/support/engine-pin",
+     "seenMs": 0.35
+    }
+   ],
+   "lateDirectory": {
+    "seenMs": null
+   },
+   "errors": [],
+   "final": {
+    "inotify": {
+     "instances": 1,
+     "watches": 589
+    },
+    "rssMiB": 60.4
+   }
+  },
+  "bare-rec-noinst": {
+   "label": "maws-bare-recursive-instances-exhausted",
+   "root": "/Users/new/o3g/maws-bare",
+   "mode": "recursive",
+   "node": "v24.21.0",
+   "kernel": "7.0.0-1014-gcp",
+   "ignore": "none",
+   "limits": {
+    "max_user_watches": 64104,
+    "max_user_instances": 3,
+    "max_queued_events": 16384
+   },
+   "census": {
+    "dirs": 1082,
+    "files": 9316,
+    "symlinks": 0,
+    "other": 0,
+    "ignoredEntries": 0,
+    "byTop": {
+     "src": 3792,
+     "spikes": 2348,
+     "docs": 1844,
+     "apps": 759,
+     "e2e": 639,
+     "test": 604,
+     "research": 187,
+     "mockups": 60
+    },
+    "deepest": {
+     "depth": 8,
+     "dir": "/Users/new/o3g/maws-bare/e2e/fixtures/catalog/marketplace/plugins/skills-only/skills/greet"
+    },
+    "largestDir": [
+     274,
+     "/Users/new/o3g/maws-bare/docs/doperpowers/evidence/p1-e11/gates"
+    ],
+    "walkMs": 122,
+    "entries": 10398
+   },
+   "setup": {
+    "thrown": null,
+    "wallMs": 1,
+    "blockedMs": 1,
+    "cpuMs": 1,
+    "inotify": {
+     "instances": 0,
+     "watches": 0
+    },
+    "rssMiB": 0,
+    "heapMiB": 0,
+    "externalMiB": 0,
+    "rssTotalMiB": 59.5,
+    "watchesPerEntry": 0,
+    "watchesPerDir": 0,
+    "bytesPerWatch": null,
+    "eventsDuringSetup": 0,
+    "errorsSoon": []
+   },
+   "latency": {
+    "root": {
+     "dir": ".",
+     "entries": 33,
+     "create": {
+      "n": 3,
+      "missed": 3,
+      "p50": null,
+      "p95": null,
+      "max": null
+     },
+     "modify": {
+      "n": 3,
+      "missed": 3,
+      "p50": null,
+      "p95": null,
+      "max": null
+     }
+    },
+    "deepest": {
+     "dir": "e2e/fixtures/catalog/marketplace/plugins/skills-only/skills/greet",
+     "entries": 1,
+     "create": {
+      "n": 3,
+      "missed": 3,
+      "p50": null,
+      "p95": null,
+      "max": null
+     },
+     "modify": {
+      "n": 3,
+      "missed": 3,
+      "p50": null,
+      "p95": null,
+      "max": null
+     }
+    },
+    "largestDir": {
+     "dir": "docs/doperpowers/evidence/p1-e11/gates",
+     "entries": 274,
+     "create": {
+      "n": 3,
+      "missed": 3,
+      "p50": null,
+      "p95": null,
+      "max": null
+     },
+     "modify": {
+      "n": 3,
+      "missed": 3,
+      "p50": null,
+      "p95": null,
+      "max": null
+     }
+    },
+    "newDirectory": {
+     "create": {
+      "n": 3,
+      "missed": 3,
+      "p50": null,
+      "p95": null,
+      "max": null
+     }
+    }
+   },
+   "errors": [],
+   "final": {
+    "inotify": {
+     "instances": 0,
+     "watches": 0
+    },
+    "rssMiB": 59.7
+   }
+  },
+  "bare-dirs-noinst": {
+   "label": "maws-bare-dirs-instances-exhausted",
+   "root": "/Users/new/o3g/maws-bare",
+   "mode": "dirs",
+   "node": "v24.21.0",
+   "kernel": "7.0.0-1014-gcp",
+   "ignore": "none",
+   "limits": {
+    "max_user_watches": 64104,
+    "max_user_instances": 3,
+    "max_queued_events": 16384
+   },
+   "census": {
+    "dirs": 1082,
+    "files": 9316,
+    "symlinks": 0,
+    "other": 0,
+    "ignoredEntries": 0,
+    "byTop": {
+     "src": 3792,
+     "spikes": 2348,
+     "docs": 1844,
+     "apps": 759,
+     "e2e": 639,
+     "test": 604,
+     "research": 187,
+     "mockups": 60
+    },
+    "deepest": {
+     "depth": 8,
+     "dir": "/Users/new/o3g/maws-bare/e2e/fixtures/catalog/marketplace/plugins/skills-only/skills/greet"
+    },
+    "largestDir": [
+     274,
+     "/Users/new/o3g/maws-bare/docs/doperpowers/evidence/p1-e11/gates"
+    ],
+    "walkMs": 118,
+    "entries": 10398
+   },
+   "setup": {
+    "thrown": null,
+    "wallMs": 1,
+    "blockedMs": 0,
+    "cpuMs": 1,
+    "treeWatchers": 0,
+    "treeErrors": [
+     {
+      "code": "EMFILE",
+      "dir": ""
+     }
+    ],
+    "exhausted": true,
+    "inotify": {
+     "instances": 0,
+     "watches": 0
+    },
+    "rssMiB": 0.1,
+    "heapMiB": 0,
+    "externalMiB": 0,
+    "rssTotalMiB": 59.8,
+    "watchesPerEntry": 0,
+    "watchesPerDir": 0,
+    "bytesPerWatch": null,
+    "eventsDuringSetup": 0,
+    "errorsSoon": []
+   },
+   "latency": {
+    "root": {
+     "dir": ".",
+     "entries": 33,
+     "create": {
+      "n": 3,
+      "missed": 3,
+      "p50": null,
+      "p95": null,
+      "max": null
+     },
+     "modify": {
+      "n": 3,
+      "missed": 3,
+      "p50": null,
+      "p95": null,
+      "max": null
+     }
+    },
+    "deepest": {
+     "dir": "e2e/fixtures/catalog/marketplace/plugins/skills-only/skills/greet",
+     "entries": 1,
+     "create": {
+      "n": 3,
+      "missed": 3,
+      "p50": null,
+      "p95": null,
+      "max": null
+     },
+     "modify": {
+      "n": 3,
+      "missed": 3,
+      "p50": null,
+      "p95": null,
+      "max": null
+     }
+    },
+    "largestDir": {
+     "dir": "docs/doperpowers/evidence/p1-e11/gates",
+     "entries": 274,
+     "create": {
+      "n": 3,
+      "missed": 3,
+      "p50": null,
+      "p95": null,
+      "max": null
+     },
+     "modify": {
+      "n": 3,
+      "missed": 3,
+      "p50": null,
+      "p95": null,
+      "max": null
+     }
+    },
+    "newDirectory": {
+     "create": {
+      "n": 3,
+      "missed": 3,
+      "p50": null,
+      "p95": null,
+      "max": null
+     }
+    }
+   },
+   "errors": [],
+   "final": {
+    "inotify": {
+     "instances": 0,
+     "watches": 0
+    },
+    "rssMiB": 59.8
+   }
+  },
+  "store-5000-recursive": {
+   "label": "store-5000-recursive",
+   "root": "/tmp/o3g/store/projects",
+   "mode": "recursive",
+   "node": "v24.21.0",
+   "kernel": "7.0.0-1014-gcp",
+   "ignore": "none",
+   "limits": {
+    "max_user_watches": 64104,
+    "max_user_instances": 128,
+    "max_queued_events": 16384
+   },
+   "census": {
+    "dirs": 3,
+    "files": 5200,
+    "symlinks": 0,
+    "other": 0,
+    "ignoredEntries": 0,
+    "byTop": {
+     "-proj-a": 5001,
+     "-proj-b": 201
+    },
+    "deepest": {
+     "depth": 1,
+     "dir": "/tmp/o3g/store/projects/-proj-a"
+    },
+    "largestDir": [
+     5000,
+     "/tmp/o3g/store/projects/-proj-a"
+    ],
+    "walkMs": 50,
+    "entries": 5203
+   },
+   "setup": {
+    "thrown": null,
+    "wallMs": 127,
+    "blockedMs": 127,
+    "cpuMs": 183,
+    "inotify": {
+     "instances": 1,
+     "watches": 5203
+    },
+    "rssMiB": 13.8,
+    "heapMiB": 6.5,
+    "externalMiB": 0,
+    "rssTotalMiB": 74.4,
+    "watchesPerEntry": 1,
+    "watchesPerDir": 1734.33,
+    "bytesPerWatch": 2786,
+    "eventsDuringSetup": 0,
+    "errorsSoon": []
+   },
+   "latency": {
+    "root": {
+     "dir": ".",
+     "entries": 2,
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.49,
+      "p95": 0.76,
+      "max": 0.76
+     },
+     "modify": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.64,
+      "p95": 0.8,
+      "max": 0.93
+     }
+    },
+    "deepest": {
+     "dir": "-proj-a",
+     "entries": 5000,
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 4.53,
+      "p95": 5.11,
+      "max": 5.49
+     },
+     "modify": {
+      "n": 30,
+      "missed": 0,
+      "p50": 20.09,
+      "p95": 27.12,
+      "max": 29.22
+     }
+    },
+    "largestDir": {
+     "dir": "-proj-a",
+     "entries": 5000,
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 4.58,
+      "p95": 5.02,
+      "max": 5.46
+     },
+     "modify": {
+      "n": 30,
+      "missed": 0,
+      "p50": 19.27,
+      "p95": 25.37,
+      "max": 29.07
+     }
+    },
+    "newDirectory": {
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.42,
+      "p95": 0.59,
+      "max": 0.68
+     }
+    }
+   },
+   "errors": [],
+   "final": {
+    "inotify": {
+     "instances": 1,
+     "watches": 5203
+    },
+    "rssMiB": 134.3
+   }
+  },
+  "store-5000-dirs": {
+   "label": "store-5000-dirs",
+   "root": "/tmp/o3g/store/projects",
+   "mode": "dirs",
+   "node": "v24.21.0",
+   "kernel": "7.0.0-1014-gcp",
+   "ignore": "none",
+   "limits": {
+    "max_user_watches": 64104,
+    "max_user_instances": 128,
+    "max_queued_events": 16384
+   },
+   "census": {
+    "dirs": 3,
+    "files": 5200,
+    "symlinks": 0,
+    "other": 0,
+    "ignoredEntries": 0,
+    "byTop": {
+     "-proj-a": 5001,
+     "-proj-b": 201
+    },
+    "deepest": {
+     "depth": 1,
+     "dir": "/tmp/o3g/store/projects/-proj-a"
+    },
+    "largestDir": [
+     5000,
+     "/tmp/o3g/store/projects/-proj-a"
+    ],
+    "walkMs": 56,
+    "entries": 5203
+   },
+   "setup": {
+    "thrown": null,
+    "wallMs": 10,
+    "blockedMs": 0,
+    "cpuMs": 13,
+    "treeWatchers": 3,
+    "treeErrors": [],
+    "exhausted": false,
+    "inotify": {
+     "instances": 1,
+     "watches": 3
+    },
+    "rssMiB": 0.4,
+    "heapMiB": 0,
+    "externalMiB": 0,
+    "rssTotalMiB": 61.4,
+    "watchesPerEntry": 0.001,
+    "watchesPerDir": 1,
+    "bytesPerWatch": 131072,
+    "eventsDuringSetup": 0,
+    "errorsSoon": []
+   },
+   "latency": {
+    "root": {
+     "dir": ".",
+     "entries": 2,
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.28,
+      "p95": 0.52,
+      "max": 0.59
+     },
+     "modify": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.35,
+      "p95": 0.46,
+      "max": 0.53
+     }
+    },
+    "deepest": {
+     "dir": "-proj-a",
+     "entries": 5000,
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.37,
+      "p95": 0.47,
+      "max": 0.5
+     },
+     "modify": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.36,
+      "p95": 0.5,
+      "max": 0.5
+     }
+    },
+    "largestDir": {
+     "dir": "-proj-a",
+     "entries": 5000,
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.34,
+      "p95": 0.53,
+      "max": 0.65
+     },
+     "modify": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.33,
+      "p95": 0.58,
+      "max": 1.48
+     }
+    },
+    "newDirectory": {
+     "create": {
+      "n": 30,
+      "missed": 0,
+      "p50": 0.26,
+      "p95": 0.44,
+      "max": 0.93
+     }
+    }
+   },
+   "errors": [],
+   "final": {
+    "inotify": {
+     "instances": 1,
+     "watches": 3
+    },
+    "rssMiB": 61.7
+   }
+  },
+  "maws-bare-dirs-overflow": {
+   "label": "maws-bare-dirs-overflow",
+   "root": "/Users/new/o3g/maws-bare",
+   "mode": "dirs",
+   "node": "v24.21.0",
+   "kernel": "7.0.0-1014-gcp",
+   "ignore": "none",
+   "limits": {
+    "max_user_watches": 64104,
+    "max_user_instances": 128,
+    "max_queued_events": 16384
+   },
+   "census": {
+    "dirs": 2152,
+    "files": 18613,
+    "symlinks": 0,
+    "other": 0,
+    "ignoredEntries": 0,
+    "byTop": {
+     ".claude": 10356,
+     "src": 3792,
+     "spikes": 2348,
+     "docs": 1844,
+     "apps": 759,
+     "e2e": 639,
+     "test": 604,
+     "research": 187
+    },
+    "deepest": {
+     "depth": 11,
+     "dir": "/Users/new/o3g/maws-bare/.claude/worktrees/wt1/e2e/fixtures/catalog/marketplace/plugins/skills-only/skills/greet"
+    },
+    "largestDir": [
+     274,
+     "/Users/new/o3g/maws-bare/.claude/worktrees/wt1/docs/doperpowers/evidence/p1-e11/gates"
+    ],
+    "walkMs": 235,
+    "entries": 20765
+   },
+   "setup": {
+    "thrown": null,
+    "wallMs": 287,
+    "blockedMs": 1,
+    "cpuMs": 306,
+    "treeWatchers": 2152,
+    "treeErrors": [],
+    "exhausted": false,
+    "inotify": {
+     "instances": 1,
+     "watches": 2152
+    },
+    "rssMiB": 5.4,
+    "heapMiB": 2.1,
+    "externalMiB": 0,
+    "rssTotalMiB": 65.3,
+    "watchesPerEntry": 0.104,
+    "watchesPerDir": 1,
+    "bytesPerWatch": 2609,
+    "eventsDuringSetup": 0,
+    "errorsSoon": []
+   },
+   "churn": [
+    {
+     "files": 40000,
+     "op": "create",
+     "writerMs": 3957,
+     "allHeardMs": 3957,
+     "events": 80000,
+     "cpuMs": 4384,
+     "worstLoopLagMs": 164,
+     "loopDelayP99Ms": 20,
+     "loopDelayMaxMs": 174,
+     "watches": 2153
+    },
+    {
+     "files": 40000,
+     "op": "remove",
+     "writerMs": 2613,
+     "allHeardMs": 2613,
+     "events": 40000,
+     "cpuMs": 3345,
+     "worstLoopLagMs": 1298,
+     "loopDelayP99Ms": 1308,
+     "loopDelayMaxMs": 1308,
+     "watches": 2153
+    }
+   ],
+   "errors": [],
+   "final": {
+    "inotify": {
+     "instances": 1,
+     "watches": 2152
+    },
+    "rssMiB": 240.4
+   }
+  }
+ }
+}
