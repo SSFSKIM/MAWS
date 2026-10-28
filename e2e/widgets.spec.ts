@@ -1005,8 +1005,9 @@ test('P2-C /plugins shows MAWS mods · Built in: To-human with its version, its 
   const row = myItems.getByRole('region', { name: 'MAWS mods · Built in' }).locator('[data-mod-row="maws.to-human"]');
   await expect(row).toContainText('To-human');
   await expect(row).toContainText('Built in');
-  await expect(row).toContainText('Version 7'); // P2-C2: contract 5; P4-R7: 7
-  await expect(row).toContainText('MAWS gives the agent its instructions');
+  await expect(row).toContainText('Version 8'); // P2-C2: contract 5; P4-R7: 7; P4-R7z: 8
+  // P4-R7z: the scratch settings select no style declaring the to-human plugin's message tool, so a new launch's lane is off
+  await expect(row).toContainText('Off: the agent is not asked to mark anything');
   await expect(row.getByRole('radiogroup', { name: 'To-human in this session' }).getByRole('radio')).toHaveCount(3);
   await expect(row.getByRole('radio', { name: 'Default (On)' })).toBeChecked();
   const appSwitch = row.getByRole('switch', { name: 'To-human in every session' });

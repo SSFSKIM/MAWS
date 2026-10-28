@@ -5,7 +5,7 @@ import type { DenialKind, SafeguardVerdict } from '@shared/graph/enums';
 import { MAWS_SERVER_NAME, MAWS_TOOL_NAMES, type MawsToolName } from '@shared/maws/tools'; // E1
 import { HISTORICAL_ARTIFACT_UPDATE } from '@shared/maws/artifact-update'; // P3-A
 import type { BrowserToolName } from '@shared/maws/browser'; // E4c
-import { MESSAGE_TOOLS } from '@shared/owner/message-call'; // P4-R7
+import { isMessageTool } from '@shared/owner/message-call'; // P4-R7
 import type { ToolCategory, ToolClassification } from './rows';
 
 export type Presentation = 'cell' | 'subagent' | 'agent_message' | 'question' | 'plan' | /* E1 */ 'ask' | 'delivery' | /* E7 */ 'agent_list' | /* E2 */ 'artifact' | /* E4c */ 'browser_action' | /* P4-R7 */ 'message';
@@ -66,10 +66,10 @@ const ROW_KIND_TOOLS: Record<string, Presentation> = {
   // E4c end
 };
 
-// P4-R7: a call of a message tool the host reads (`messageTools`; MAWS's own unless the host names others, the
-// transcript source's `messageTools`) is the message it sends (derive.ts's `to_human` row).
-export function presentationOf(toolName: string, messageTools: readonly string[] = MESSAGE_TOOLS): Presentation {
-  if (messageTools.includes(toolName)) return 'message';
+// P4-R7: a call of a message tool (`@shared/owner/message-call`: the to-human plugin's, and MAWS's former one in a
+// recorded session) is the message it sends (derive.ts's `to_human` row).
+export function presentationOf(toolName: string): Presentation {
+  if (isMessageTool(toolName)) return 'message';
   return Object.hasOwn(ROW_KIND_TOOLS, toolName) ? ROW_KIND_TOOLS[toolName] : 'cell';
 }
 

@@ -11,7 +11,6 @@ import { rowId, turnId as turnIdOf } from './keys';
 import type { CellDetail, Row, RowId, Spill, SubagentRef, SubagentStatus, ToolCategory, TurnId } from './rows';
 import { appendStripped, stripAnsi } from '@shared/wire/ansi';
 import { parseAskSteer } from '@shared/maws/ask'; // E1
-import { MESSAGE_TOOLS } from '@shared/owner/message-call'; // P4-R7
 import type { AskAnswer } from '@shared/maws/tools'; // E1
 import { isInterruptionMarker, isLocalCommand } from './user-text';
 
@@ -173,7 +172,6 @@ export interface TranscriptState {
   sideThreads?: Map<AppSessionId, SideThreadOwner>;
   // E3 end
   agents?: AgentLookup; // the host's agent lookup (withAgents); absent: none supplied
-  messageTools: readonly string[]; // P4-R7: the message tools the host reads (its source's `messageTools`), fixed for the state's life
 }
 
 // E3
@@ -185,9 +183,9 @@ export interface PluginStatus {
   at: string;
 }
 
-export function createState(sessionId: SessionId | null, agentId: AgentId | null, messageTools: readonly string[] = MESSAGE_TOOLS): TranscriptState {
+export function createState(sessionId: SessionId | null, agentId: AgentId | null): TranscriptState {
   return {
-    sessionId, agentId, messageTools, turns: new Map(), order: [], loose: [], hidden: null, pending: new Map(), seen: new Set(), echoUuids: new Set(),
+    sessionId, agentId, turns: new Map(), order: [], loose: [], hidden: null, pending: new Map(), seen: new Set(), echoUuids: new Set(),
     ui: { assistantInk: new Set(), expandedTurns: new Set(), collapsedTurns: new Set(), expandedGroups: new Set(), expandedCells: new Set(), revealedBoundaries: new Set(), receipts: new Map(), spills: new Map(), global: 0, stamps: new Map(), version: 0 },
     current: null, cwd: null, pluginStatus: new Map(), placement: new Map(),
     index: { toolUses: new Map(), tasks: new Map(), requests: new Map(), hooks: new Map(), messages: new Map(), pluginIssues: new Set() },

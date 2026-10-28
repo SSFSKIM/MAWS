@@ -3,7 +3,8 @@
 // last one after the last compact boundary instead of rendering. MAWS's appended contract is that snapshot's segment
 // opening with the contract's header; an output style never reaches it (U2 run 6). So the state is `contract:<n>`,
 // `supplement:<n>` (P2-C2: the supplement appended beside a message-tool style, its own header), `alias` (P4-A2: the
-// to-human alias appended alone, a compatible style under the launch profile's hooks `none`), `none` (a snapshot without
+// to-human alias appended alone, a compatible style under the launch profile's hooks `none`; P4-R7z withdrew the alias,
+// so no launch records it now and one that finds it renders anew), `none` (a snapshot without
 // any of them) or `unrecorded` (no snapshot after the last boundary, or no readable transcript).
 //
 // The read scans from the end of the file in chunks for the two record types and stops at the first it meets: a snapshot
@@ -15,7 +16,7 @@
 // (`transcriptEvidence`, Design §6) and what a rewind took off the chain (`transcriptChain`, Design §5).
 import { open } from 'node:fs/promises';
 import type { MessageUuid } from '@shared/graph/ids';
-import { CONTRACT_HEADER, MESSAGE_TOOL_ALIAS, SUPPLEMENT_HEADER } from '@shared/owner/contract';
+import { CONTRACT_HEADER, LEGACY_MESSAGE_TOOL_ALIAS, SUPPLEMENT_HEADER } from '@shared/owner/contract';
 
 export type RecordedState = 'unrecorded' | `contract:${number}` | `supplement:${number}` | 'alias' | 'none';
 
@@ -33,7 +34,7 @@ export function classifySnapshot(systemPrompt: unknown): RecordedState {
   let alias = false;
   for (const segment of systemPrompt) {
     if (typeof segment !== 'string') continue;
-    if (segment === MESSAGE_TOOL_ALIAS) alias = true;
+    if (segment === LEGACY_MESSAGE_TOOL_ALIAS) alias = true;
     for (const { kind, header, prefix } of HEADERS) {
       if (!segment.startsWith(prefix)) continue;
       const version: number = Number(/^\d+/.exec(segment.slice(prefix.length))?.[0] ?? NaN);

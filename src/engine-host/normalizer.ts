@@ -42,6 +42,7 @@ import { mapSystemFrame, pluginLoadIssues, type TaskRegistry } from './normalize
 import type { SafeguardVerdict } from '@shared/graph/enums';
 import { messageText, peerEventsOf } from '@shared/engine/peer-envelope'; // E7
 import { MAWS_SERVER_NAME } from '@shared/maws/tools'; // P2-C3
+import { isHookMadeMessageId, isMadeUpFinalAnswer, isMessageTool, messageCallText } from '@shared/owner/message-call'; // P4-R7z
 
 export interface NormalizerWarning {
   event: 'block_pairing' | 'unknown_denial_kind' | 'unmatched_response' | 'unknown_permission_mode';
@@ -83,6 +84,10 @@ export interface NormalizerState {
   // (pass3/p2-c3-subagent-ask), so the server's call names one of them by its `claudecode/toolUseId`. Never pruned: a
   // handful per launch.
   subagentMawsUses: Set<ToolUseId>;
+  // P4-R7z: the main lane's last message call in the open turn (its text), and whether the to-human plugin answered the
+  // step after it in place of a request (a final message): the turn's result then reads the made-up answer, and the
+  // turn's reply is the message
+  lastMessage: { text: string | null; final: boolean };
 }
 
 // C10 start: the engine's trust line on stderr (fixture pass2/trust-no-attestation seq 5). It is printed at settings
@@ -122,6 +127,7 @@ export class Normalizer {
       trustNotice: { held: null, settled: false }, // C10
       openAsks: new Set(), // E1
       subagentMawsUses: new Set(), // P2-C3
+      lastMessage: { text: null, final: false }, // P4-R7z
     };
   }
 
@@ -283,6 +289,9 @@ export class Normalizer {
         const delta = event.delta as { type?: string; text?: string; thinking?: string; partial_json?: string } | undefined;
         if (!delta || delta.type === 'signature_delta') return; // a signature carries no content; the complete block carries it
         const current = this.state.streaming.get(lane);
+        // P4-R7z: a response a hook made up streams no partials, since whether it is a reply is known only once it is
+        // whole (the to-human plugin's answer after a final message is none; `assistant` decides)
+        if (isHookMadeMessageId(current?.apiMessageId)) return;
         const index = Number(event.index);
         const started = current?.started.find((s) => s.index === index);
         const blockType = started?.type ?? (delta.type === 'text_delta' ? 'text' : delta.type === 'thinking_delta' ? 'thinking' : delta.type === 'input_json_delta' ? 'tool_use' : String(delta.type));
@@ -317,6 +326,13 @@ export class Normalizer {
   // One frame per content block on the wire; the block index is the stream's (`content_block_start`) index paired
   // per message id in order, and content order per message id when the message was not streamed (children).
   private assistant(frame: AssistantFrame, row: JournalRow, out: Emitter, attribution: Attribution): void {
+    // P4-R7z: the to-human plugin's answer after a final message said nothing (`@shared/owner/message-call`)
+    if (isMadeUpFinalAnswer(frame)) {
+      if (attribution.parentToolUseId === null) this.state.lastMessage.final = true;
+      return;
+    }
+    // a response after it (a Stop hook that blocked the stop) is the turn's again: its result is its own
+    if (attribution.parentToolUseId === null) this.state.lastMessage.final = false;
     const lane = this.state.streaming.get(attribution.parentToolUseId);
     const apiMessageId = frame.message.id as ApiMessageId;
     const messageUuid = frame.uuid as MessageUuid;
@@ -343,6 +359,7 @@ export class Normalizer {
       if (block.type === 'tool_use') {
         out.emit({ kind: 'tool.use', toolUseId: String(block.id) as ToolUseId, toolName: String(block.name), input: block.input, apiMessageId, messageUuid }, attribution);
         if (attribution.parentToolUseId !== null && String(block.name).startsWith(MAWS_TOOL_PREFIX)) this.state.subagentMawsUses.add(String(block.id) as ToolUseId); // P2-C3
+        if (attribution.parentToolUseId === null && isMessageTool(block.name)) this.state.lastMessage = { text: messageCallText(block.input), final: false }; // P4-R7z
       }
     }
   }
@@ -407,8 +424,10 @@ export class Normalizer {
     const usage = tokenUsageOf(frame.usage);
     const origin = (f.origin as { kind?: unknown } | undefined)?.kind;
     if (attribution.parentToolUseId === null) {
+      const message = this.state.lastMessage; // P4-R7z: after a final message the reply is the message, not the made-up answer
+      this.state.lastMessage = { text: null, final: false };
       out.emit({
-        kind: 'turn.ended', result: frame.subtype, isError: frame.is_error, terminalReason, resultText: stringOrNull(f.result), durationMs: frame.duration_ms, numTurns: frame.num_turns,
+        kind: 'turn.ended', result: frame.subtype, isError: frame.is_error, terminalReason, resultText: message.final ? message.text : stringOrNull(f.result), durationMs: frame.duration_ms, numTurns: frame.num_turns,
         costUsd: frame.total_cost_usd, usage, permissionDenials: denials, errors: Array.isArray(f.errors) ? f.errors.map(String) : [],
         userMessageUuids: (Array.isArray(f.user_message_uuids) ? f.user_message_uuids : []) as MessageUuid[], origin: stringOrNull(origin),
         resultIndex: typeof f.result_index === 'number' ? f.result_index : null, isEchoReceipt,
