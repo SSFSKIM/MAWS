@@ -151,7 +151,8 @@ M1 runs now and lands by its own PR. M2 and M3 need O10 M10 (the endpoint inside
   - `src/main/machines/index.ts` (composition, probes, `Machines.remote`);
   - `src/main/index.ts` (the session handed to `startMachines`);
   - `src/shared/ipc/schema/machines.ts` (two optional fields);
-  - `vitest.config.ts` (the local suite joins `TIMING_NODE_TESTS`).
+  - `vitest.config.ts` (the local suite joins `TIMING_NODE_TESTS`);
+  - `test/endpoint/sub-harness.ts`, additively: `FakeEngineHost` today handles only `session.answer` under `host.op` and doesn't route `host.opQuery`, so a `session.send` act is refused `unavailable` before any claim. It gains a `session.send` handler that records each run and appends a journal row (and so a lane B event), and routes `host.opQuery` to `opCommands(...).opQuery`, as `test/endpoint/actions.test.ts`'s `engineHost()` does. No existing suite depends on the refusal (`calls.test.ts` asserts only `act-required` for a call).
 
 **Interfaces.** It produces §A (`RemoteLink`, `Machines.remote`), §B (`OrgSession`), §C (the manager's `RemoteSource`), §D (`MachineState.carrier` and `.refusal`) and §E (`<userData>/endpoint-records.json`, `MAWS_DEV_ORG`). It consumes O6's `MachineLink`, `ConnectionManager` and `LINK_REGISTRY`/`onLink`, O10's `connectChannel`, `readMessage`, `Action`, `verifyEndpointRecord` and `verifyMachineCert`, O10 M9's `loadDeviceKeys` and `createStepUp`, and O1's `gradeOf` and `codecOf`.
 
@@ -218,20 +219,21 @@ M1 runs now and lands by its own PR. M2 and M3 need O10 M10 (the endpoint inside
 | `reconnecting` | transient failure | `reconnecting` | next attempt on the backoff; the grace timer runs on |
 | `reconnecting` | grace elapses | `down` | every subscription's sink gets `paused('offline')` |
 | `down` | backoff due, or any probe | `down` (attempting) | an attempt; a probe also resets the backoff |
-| any but `closed` | permanent failure | `refused` | subscriptions `ended(<verdict>)`; acts never sent resolve `refused {reason: <verdict>}`, acts sent resolve `unknown {reason: <verdict>}`; calls fail with the verdict |
 | `up` | channel lost: sealed `close` `restart`, `timeout` or any other transient reason, or a carrier close | `reconnecting` | an attempt at once |
-| `up` | sealed `close` `removed` | `refused` | as a permanent failure |
+| `up`, `reconnecting` | sealed `close {reason: 'removed'}` | `refused` | subscriptions `ended('removed')`; acts never sent resolve `refused {reason: 'removed'}`, acts sent and not settled resolve `unknown {reason: 'removed'}` (a refused device can't query); calls fail `removed` |
+| any but `closed`, `refused` | `OrgSession` change that retires a machine key the current channel or a running attempt was authenticated against, or changes this device's identity | `reconnecting` (from `up`), unchanged otherwise | the trust generation goes up by one; the current channel is closed and an attempt runs at once; an attempt begun under an older generation is discarded when it completes |
 | `up` | probe | `up` | `ping` now; no `pong` within `PROBE_PONG_MS` (2 s) counts as channel lost (`timeout`) |
 | `up` (relay) | direct recheck or probe, direct handshake completes | `up` (direct) | the switch above |
 | `refused` | `OrgSession` changes, or a probe with reason `person` | `down` (attempting) | an attempt now |
 | any | `close()` | `closed` | subscriptions `ended('closed')`; acts never sent resolve `refused {reason: 'closed'}`, acts sent resolve `unknown {reason: 'closed'}`; `close` sent on the channel; the relay socket closed |
 
-- **Requests while `refused` or `closed`** end at once. A call fails with the verdict (or `closed`), an act resolves `refused {reason: <verdict>}`, and a subscription is `ended(<verdict>)`.
+- **Requests while `refused` or `closed`** end at once. A call fails `removed` (or `closed`), an act resolves `refused {reason: 'removed'}` (or `closed`), and a subscription is `ended('removed')` (or `closed`).
 - **One attempt at a time.** A probe or a backoff timer that fires during an attempt is remembered, and runs one more attempt if that one fails.
 - **Transient or permanent.**
-  - Permanent: a handshake `ChannelError` whose reason is `wrong-machine`, `unknown-machine`, `contested`, `unknown-device`, `class`, `revoked` or `protocol`, and a sealed `close {reason: 'removed'}`. These are verdicts of the org state or of the protocol major, which a retry can't change.
-  - Transient: everything else, including `bad-mac` and `bad-signature` (logged loudly). A tampering relay or a flipped byte produces those, and treating them as permanent would hand a hostile hub a cheap way to keep the device off the direct carrier too.
+  - Permanent: only a sealed `close {reason: 'removed'}`, which arrives authenticated inside the channel. The link's own view decides the rest without any peer's word: a machine that leaves the roster is closed by the manager, and a device the head no longer lists is signed out by its `OrgSession`.
+  - Transient, and local to the carrier that produced it: every handshake `ChannelError`. `protocol`, `unknown-machine`, `revoked` and `contested` are raised from `h2` before its MAC and signature are checked (`openChannel`), and an endpoint's own refusal (`unknown-device`, `class`) reaches the device only as a carrier close. A hostile relay can forge any of them, so none stops the link, and the next attempt starts again from the direct carrier. Each is logged, once per reason per link. A machine that really speaks another major retries at the 30 s cap, which costs little. Rejected: stopping the link on these verdicts, which would let one rewritten `h2` on the relay keep the device off the direct carrier too.
   - `behind` is `connectChannel`'s own catch-up. It surfaces only when a page made no progress, and is transient.
+- **Trust changes close the channel.** When an attempt begins, the link records the key ids `machineKeys(head, ref, certificates, now)` returns and the identity it presents (org, member, device, channel key id), under a trust generation. At each `OrgSession` change it recomputes both. If a recorded machine key is no longer current, or the identity differs, the generation goes up: the current channel is closed and re-authenticated at once against the new head, and an attempt still running under the older generation is discarded when it completes. The handshake checks the machine's key only once, so a channel authenticated by a key the org has since retired would otherwise keep serving, and a compromised old key would not close it voluntarily. The `OrgSession` provider fires `onChanged` whenever its view adopts a new head, a link's handshake `advance` included (§B).
 - **Backoff** (RL §4.6).
   - After going `down` the delays are 0, 1, 2 and 4 s, then 5 s until `RESUME_WINDOW_MS` (120 s, the endpoint's `RESUME_MS`) has passed, then 30 s. Each delay is jittered ±20%.
   - Every probe runs an attempt at once and restarts the schedule. A probe is wake (`powerMonitor` `resume`), unlock (`unlock-screen`), focus (`app` `browser-window-focus`), a network change, or a person's action on that machine.
@@ -261,13 +263,14 @@ M1 runs now and lands by its own PR. M2 and M3 need O10 M10 (the endpoint inside
 - **The send window.** An act is sent, or resealed, only within `ACT_FRESH_MS` (60 s, `FRESH_MS`) of its `opCreated`. One the link could not put on a channel within that window, because the link was `down` the whole time, resolves `refused {reason: 'offline'}` and is never sent. Rejected: holding acts until the machine returns, which would run a send, an interrupt or an approval minutes after the person asked. Open question A4 asks the owner whether sends should instead wait in an outbox.
 - **Outcomes** (Interfaces §A's `ActOutcome`). After a send:
   - `ack accepted` makes it `accepted`;
-  - `ack refused {reason}` resolves `refused {reason}`;
+  - `ack refused {reason}` resolves `refused {reason}` only while the act is not **ambiguous**. An act is ambiguous once a transmission of it may have reached the executing side without its answer reaching the link: its channel was lost after it was sent and before a terminal answer, or `ACK_TIMEOUT_MS` passed. A refusal of a later transmission says nothing about an earlier one, since the endpoint checks freshness, grade and lane B's context before the executor's ledger (`src/endpoint/actions.ts`): a send that ran, lost its `ack` and `done`, and was resealed after a relaunch is refused `context` although it ran. So a refused transmission of an ambiguous act is followed by a query, and the executor's ledger decides;
   - `done {outcome}` is read in the executing side's words. `{state: 'done', result}`, `{state: 'failed', error}` and `{state: 'refused', reason}` are terminal. `{state: 'in-progress'}` and `{state: 'unknown'}` are not: the link queries.
 - **After a lost channel**, at the next `up`:
   - an act sent but never acked, still within `ACT_FRESH_MS` and not step-up-signed, is **resealed**: a fresh `nonce` and `created`, the same `opId`, `opCreated`, `args`, `context` and `requestDigest` (O10 test-support's `TestDevice.reseal` shows the transformation). The executing side's ledger returns the stored result if it already ran.
   - every other non-terminal act (acked without `done`, past the window, or carrying a step-up) is **queried**: `query {opId, opCreated, executor}`.
   - An act with a step-up is never resealed: a reseal changes `nonce` and `created`, which the step-up signature covers, so it would need the person to confirm again for a resend they didn't ask for.
-  - No `ack` within `ACK_TIMEOUT_MS` (10 s) on a live channel counts as lost. No `done` within `DONE_QUERY_MS` (60 s) after `accepted` starts querying.
+  - No `ack` within `ACK_TIMEOUT_MS` (10 s) on a live channel counts as lost, and the act is ambiguous from then. No `done` within `DONE_QUERY_MS` (60 s) after `accepted` starts querying.
+  - Under `if-asked`, an `ack refused {reason: 'step-up'}` on an ambiguous act is queried like any other refusal, never signed and resent.
 - **Queries.** A `queried` answer is read as follows:
   - `done` takes the outcome, read as `done`'s;
   - `refused` with an `outcome` is the op's own refusal, and terminal;
@@ -349,6 +352,8 @@ M1 runs now and lands by its own PR. M2 and M3 need O10 M10 (the endpoint inside
     - a step-up act queried and never resealed;
     - `if-asked` signing after a `step-up` refusal and resending under the same opId;
     - a cancelled confirmation resolving `refused step-up-cancelled`;
+    - an ambiguous act whose reseal is refused (`context`, `grade`) queried rather than resolved `refused`, and resolving with the first transmission's result when the ledger holds it;
+    - a `step-up` refusal on an ambiguous act queried, never signed;
     - an act held past 60 s resolving `refused offline` and never sent;
     - `expired`, and `refused {reason: 'grade'}` resolving `unknown`.
   - `subs.test.ts`:
@@ -375,7 +380,10 @@ M1 runs now and lands by its own PR. M2 and M3 need O10 M10 (the endpoint inside
 - **`test/machines/remote-link.test.ts`** (the endpoint's `sub-harness.ts`, direct carrier at loopback, the profile's real keys through `loadDeviceKeys` with `excludeFromBackup` injected):
   - the link `up` over direct, and `caps` read;
   - `call('session.status')` answered;
-  - a lane B `session.send` act whose channel is dropped before its `ack`, resealed, and shown once in the fake engine host's ledger and journal;
+  - a lane B `session.send` act whose channel is dropped before its `ack`, resealed, and run once, asserted on the fake engine host's recorded runs and journal, not on `host.op` having been dispatched;
+  - a `session.send` that ran, whose `ack` and `done` were lost with its channel, and whose session was relaunched before the reconnect: the reseal is refused `context`, the link queries, and the act resolves `done` with the first run's result;
+  - a carrier wrapper that rewrites the first `h2` (its protocol major, or its `keyId`) on one attempt: that attempt fails `protocol` or `unknown-machine`, the link keeps retrying, and the next attempt comes `up`;
+  - a new head that replaces the machine's key under the same ref, adopted by the org session: the live channel is closed and re-authenticated against the new key, and an attempt that completes after the change under the old generation is discarded;
   - a lane B subscription resumed after a forced drop with every event's `(launchId, seq, idx)` checked against the fake host's numbering, nothing lost or repeated, a drop between two events of one row included;
   - a lane A `full` subscription, and a `sminos.rows` call naming its `sub`;
   - a new head removing the device, delivered to the endpoint as `test/endpoint/channels.test.ts`'s removal case does, closing the link `removed`, with no attempt after it until the org session changes;
@@ -412,9 +420,9 @@ M1 runs now and lands by its own PR. M2 and M3 need O10 M10 (the endpoint inside
 **Acceptance mapping.** Item 2's terminal; §5's port forwarding.
 
 **Offer-table rows.**
-- `pty.spawn`, `pty.write`, `pty.resize`, `pty.kill` as acts. `pty.attach` and `pty.list` as calls, filtered to the caller's own terminals.
-- Each is graded `shell`, the machine owners' or an explicit shell right, with step-up for a non-owner (OX9; O10 M5).
-- Each runs under a pty-host op ledger, which lifts O10 M7's `no-ledger`.
+- Every `pty.*` command is graded `shell` (`src/shared/ipc/grades/pty.ts`), the machine owners' or an explicit shell right, with step-up for a non-owner (OX9; O10 M5). The endpoint answers a `call` only for `list` or `view` (`src/endpoint/authorize.ts`, `act-required`), so every row is an act, `pty.attach` and `pty.list` included, `pty.list` filtered to the caller's own terminals. Rejected: re-grading `pty.list` and `pty.attach` to `view`, which would let a viewer of one session read every terminal on the machine. The alternative M3's re-plan may weigh is an authorization change that admits `shell`-graded calls, asked of O10's owner.
+- `pty.spawn`, `pty.write`, `pty.resize` and `pty.kill` run under a pty-host op ledger, which lifts O10 M7's `no-ledger`. `pty.attach` and `pty.list` are reads that need no ledger entry, so M3 decides whether reads that are acts are exempt from `no-ledger`.
+- Flow control and checkpoints. The pty host pauses a pty once 256 KiB are unacknowledged (`src/pty-host/flow.ts`), and O2's seam attaches the endpoint with `credit: false` and refuses its `pty.ack` and `pty.checkpoint`, because `mawsd` owns the pty's credit. M3 maps a remote viewer's RL2 stream credit onto `mawsd`'s acknowledgements, so that a slow remote viewer neither stalls the pty for a local one nor loses output (offset dedup, RL §4.8), and decides where a remote viewer's emulator checkpoint lives.
 - A forward-open act, also graded `shell`. Forwarding reaches every service on the machine's loopback, which is machine-level access like a shell. Rejected: per-session `view`, under which a viewer of one session could reach every local service.
 
 **RL2 additions,** each behind a capability and an RL2 minor bump:
@@ -617,7 +625,8 @@ No new dependency. M1 uses `ws` 8.22.0 (in the tree), `org-protocol` (workspace)
 
     export interface OrgSession {
       current(): SignedIn | null;                                                     // null: signed out, or this profile's device not listed in the held state
-      onChanged(listener: () => void): () => void;                                    // sign-in, sign-out, a new head adopted, the hub's address or credentials changed
+      onChanged(listener: () => void): () => void;                                    // sign-in, sign-out, a new head adopted by any path (a link's handshake `advance`
+                                                                                      // included), the hub's address or credentials changed
     }
     export interface SignedIn {
       identity: DeviceIdentity;                                                       // clientClass 'native-mac'; channelKey from loadDeviceKeys; build: main's build string; capabilities []
@@ -752,6 +761,11 @@ Each is built provisionally as recommended, unless it says otherwise, and change
 
 ## Surprises & Discoveries
 
+- Observation: the endpoint checks freshness, grade and lane B's context before it reaches the executor's ledger, so a refused reseal does not prove that an earlier copy never ran.
+  Evidence: `src/endpoint/actions.ts` `#execute`: `session.status` is compared with `action.context` (`refuse('context')`) before `host.op` is dispatched.
+- Observation: `openChannel` raises `protocol`, `unknown-machine`, `revoked` and `contested` from `h2` before checking its MAC and signature, so a relay can forge all four.
+  Evidence: `apps/org-protocol/src/channel.ts` `openChannel`: the major and `machineKeys(...)`/`h2.keyId` checks come before `macVerifies` and `verifyInput`.
+
 - Observation: the app holds no org state, hub session or registered device. P5 Decision Log 45's edge for M1 holds for building and testing, but a production device can't open a channel until O8's sign-in.
   Evidence: `src/main` imports `apps/org-protocol` only in `src/main/device/` (keys and step-up), and nothing calls `loadDeviceKeys` or `createStepUp` at startup. The hub's app routes (`/api/machines/<ref>/{socket,endpoint}`) take an Access-authenticated member (`apps/desk-hub/src/worker.ts`), and P5 Decision Log 38 gives that sign-in to O8.
 - Observation: remote terminals and port forwarding need no O3. `pty.*` is the pty host's, and O2 forks it under `mawsd`. Diff, files and the editor do need O3: `git.*` (13), `files.*` (7) and `scm.*` (12) are all `owner: 'main'`.
@@ -769,6 +783,10 @@ Each is built provisionally as recommended, unless it says otherwise, and change
   Rationale: M1 sits on the trust boundary, as O10's milestones did. The advisory milestones can't be reviewed for buildability before their dependencies exist.
   Date/Author: 2026-10-28, O7's planner.
 
+- Decision: The first buildability round (doperpowers:adversarial-reviewer, 3 P1 and 2 P2, each verified against the code) is folded in. An ambiguous act's refused reseal is now queried, not read as "nothing ran". Handshake verdicts no longer stop the link, since they come from an unauthenticated `h2`. A trust generation closes a channel whose machine key the org retired. M1 now extends `test/endpoint/sub-harness.ts` so that a `session.send` runs and `host.opQuery` answers, and its proofs gained the four cases these need. M3's terminal rows are all acts (`pty.*` is `shell`, and a call takes only `list` or `view`), with the pty's flow control and checkpoints named.
+  Rationale: each finding was real against the code; the review's verdict otherwise found the signed-out seam, the stable subscription ids, the cursor rules, the tolerant output codec and the no-bump decision sound.
+  Date/Author: 2026-10-28, O7's planner.
+
 The residue for P5's Decision Log. Each item is decided where it binds (M1 unless marked), with the alternative it rejected:
 
 1. M1 defines `OrgSession` and holds `signedOut()` in production, plus a development source behind `MAWS_DEV_ORG` in unpackaged builds; O8's sign-in implements it. Rejected: O7 building sign-in, so that two children build it.
@@ -776,8 +794,9 @@ The residue for P5's Decision Log. Each item is decided where it binds (M1 unles
 3. `RemoteLink` extends O6's `MachineLink` with `call`, `act`, `subscribe`, `caps` and `probe`. It is reached only through `Machines.remote(ref)`, and `boundary.test.ts` refuses any other channel opener in main or the renderer. Rejected: a raw message pipe, which would have each consumer reimplement RL4's lifecycle; and a second link for O9 (P5 Decision Log 45).
 4. Direct first: tailnet `ws://` addresses raced within 1 s, under a per-machine bucket that mirrors the listener's handshake limit; the relay otherwise; direct rechecked every 60 s and on every probe; a switch after the new handshake completes. Rejected: dialling any signed address; dialling until `busy`; overlapping two channels during a switch.
 5. `up` survives a reconnect within 2 s, and is not a new generation. Rejected: `down` at every loss.
-6. Permanent verdicts are org-state and protocol-major verdicts, plus a sealed `removed`. Crypto failures in the handshake are transient. Rejected: treating `bad-mac` and `bad-signature` as permanent, which would let a hostile relay keep the device off the direct carrier too.
-7. Acts: sent or resealed only within 60 s of creation; acked-without-done and older acts queried; a step-up act never resealed; `if-asked` signs after a `step-up` refusal under the same opId; pending acts in memory. Rejected: resealing up to `OP_HORIZON`; query-only; persisting pending acts.
+6. The only permanent verdict is a sealed `close {reason: 'removed'}`. Every handshake failure is transient and local to its carrier, because `protocol`, `unknown-machine`, `revoked` and `contested` come from an unauthenticated `h2`, and the endpoint's own refusals arrive as a bare carrier close. The link's own view drops a machine (the roster) or the device (sign-out). Rejected: stopping the link on handshake verdicts, which would let a hostile relay keep the device off the direct carrier too.
+6a. A trust change closes the channel: a retired machine key or a changed device identity bumps a trust generation, re-authenticates at once, and discards older attempts. Rejected: relying on the endpoint to close channels under a retired key, which a holder of a compromised key would not do.
+7. Acts: sent or resealed only within 60 s of creation; acked-without-done and older acts queried; a step-up act never resealed; `if-asked` signs after a `step-up` refusal under the same opId; a refusal is final only for an act that is not ambiguous, and an ambiguous act's refusal is followed by a query; pending acts in memory. Rejected: resealing up to `OP_HORIZON`; query-only; reading a reseal's refusal as "nothing ran"; persisting pending acts.
 8. Subscriptions: the cursor moves at each delivered `ev`, and to a snapshot's position only once its last page arrives; subscription ids are stable across channels; credit is returned on delivery. Rejected: one subscription id per channel, which would break lane A reads after a reconnect.
 9. Endpoint records are fetched at each attempt, verified, and cached in `<userData>/endpoint-records.json`, so a hub outage across a relaunch still dials direct. Rejected: memory only.
 10. On the router path, `list`- and `view`-graded commands go as calls, and refusals map to `internal` with `issues.refusal`. Rejected: a new `IpcError` code, which is breaking.
