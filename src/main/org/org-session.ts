@@ -1314,6 +1314,9 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       await prior;
       fence();
       if (keys !== old || registration?.device !== reg.device) refuse('busy', 'this Mac\'s keys changed meanwhile');
+      // An attempt ahead of this one may have recorded its intent and then failed to promote: its next keys are the
+      // replay's, so none are made over them (the entry guard saw the registration before that intent was written).
+      if (registration.rekey !== undefined) refuse('busy', 'a rekey is still being finished: restart MAWS');
       const cred = hubLive() ? credential! : await loginFor(code.hub)!(code.hub, { signal });
       step({ step: 'checking' });
       const hub = client(code.hub, cred);
@@ -1367,7 +1370,9 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
         // Step 4, from the registration as it stands now (a sign-out's marker set meanwhile is kept).
         const promoted: RegistrationFile = { ...withoutRekey(registration), device: entry.id };
         await files.write(REGISTRATION_FILE, promoted);
-        registration = promoted;
+        // Merged into the registration as it stands after the write: a sign-out's marker set during it stays in memory
+        // (its own queued write puts it on disk).
+        registration = { ...withoutRekey(registration), device: entry.id };
         keys = made;
         facts = prepared.facts;
         stateSigner = prepared.stateSigner;

@@ -1836,4 +1836,76 @@ describe('M3: rekey', () => {
     expect(reg).not.toHaveProperty('rekey');
     expect(await currentKeyId()).toBe(old.id);
   });
+
+  /** orgFiles whose first registration.json write matching `which` waits inside the write until released. */
+  function pausedRegistrationWrite(which: (value: RegistrationFile) => boolean) {
+    const real = realFiles();
+    let reached!: () => void;
+    let release!: () => void;
+    const atWrite = new Promise<void>((resolve) => (reached = resolve));
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let armed = true;
+    const files: OrgFiles = {
+      ...real,
+      write: async (name, value) => {
+        if (armed && name === REGISTRATION_FILE && which(value as RegistrationFile)) {
+          armed = false;
+          reached();
+          await released;
+        }
+        return real.write(name, value);
+      },
+    };
+    return { files, atWrite, release };
+  }
+
+  it('a sign-out while step 4\'s registration write is in flight stays signed out, in memory as on disk', async () => {
+    const keys = await unmarkedKeys();
+    const oldId = (await entryOf(keys)).id;
+    const paused = pausedRegistrationWrite((reg) => reg.rekey === undefined && reg.device !== oldId);
+    const { session } = await signedIn({ files: paused.files }, async () => keys);
+    const { code, newId } = await toApproval(session);
+    await hub.approve(code.k);
+    await paused.atWrite;
+    const signedOut = session.signOut();
+    paused.release();
+    await signedOut;
+    expect(session.current()).toBeNull();
+    expect(registered(session)).toMatchObject({ device: newId, session: 'signed-out' });
+    const reg = await readRegistration();
+    expect(reg).toMatchObject({ device: newId, signedOut: true });
+    expect(reg).not.toHaveProperty('rekey');
+    expect(await exists(join(orgDir(), ACCESS_FILE))).toBe(false);
+  });
+
+  it('a rekey queued behind a recorded intent whose promotion failed creates no next keys: the replay finishes the first', async () => {
+    const paused = pausedRegistrationWrite((reg) => reg.rekey !== undefined);
+    let created = 0;
+    let promotions = 0;
+    const keyFiles: Partial<DeviceKeyFiles> = {
+      createNext: (profile, deps) => (created++, createNextDeviceKeys(profile, deps)),
+      promote: async (profile) => {
+        if (promotions++ === 0) throw new Error('disk full before the first rename');
+        return promoteNextDeviceKeys(profile);
+      },
+    };
+    const { session, entry } = await signedIn({ files: paused.files, keyFiles }, unmarkedKeys);
+    const { code, newId } = await toApproval(session);
+    await hub.approve(code.k);
+    // The first attempt is inside its step-1 write; a cancel there no longer stops it, and a second attempt starts.
+    await paused.atWrite;
+    session.cancel();
+    expect(session.rekey((await pairing()).text)).toEqual({ ok: true });
+    paused.release();
+    await until(() => registered(session).refused?.code === 'busy', 'the second attempt refused');
+    expect(created).toBe(1);
+    expect((await deviceKeyIds(userData, 'next'))?.device).toBe(newId);
+    expect((await readRegistration()).rekey).toEqual({ device: newId });
+    expect(session.current()?.identity.device).toBe(entry.id);
+
+    // The next start's replay finishes the recorded transaction.
+    const again = await restart();
+    expect(again.session.current()?.identity.device).toBe(newId);
+    expect(await currentKeyId()).toBe(newId);
+  });
 });
