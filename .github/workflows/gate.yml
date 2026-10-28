@@ -135,6 +135,8 @@ env:
   # daemon-idle (P5 O2, acceptance 14) is the idle cost of what stays behind with the app quit: on the daemon shape since
   # O2's M9, mawsd and the engine host's physical footprint and CPU holding one kept idle session over 600 s, held to the
   # bound test/support/daemon-idle.ts derives from the detached supervisor's recorded baseline.
+  # daemon-idle-baseline (P5 O2's landing) is the same scene on today's detached supervisor, no mawsd: it records only,
+  # asserting no bound, and is what the baseline is re-measured from on the tree under test when a landing misses.
   # daemon-idle-floor (P5 Decision Logs 54 and 57), the same spec's other case, is the bare Electron runtime's footprint
   # as Node, the share of mawsd's footprint that is the runtime's: a diagnostic, outside the bound.
   # daemon-idle-mawsd (P5 O2 M5, Decision Log 57's early check), the spec's third case, is mawsd alone, idle with no hosts
@@ -142,7 +144,7 @@ env:
   # A group with a timing bound turns its timed cases on with a switch, MAWS_<name>_PERF or MAWS_<name>_SCALE set to 1 in
   # its package script, each such spec skipping without it or asserting its bounds only under it (presentations-drag's
   # one class-1 trial in e2e:presentations logs its p95), and is on this list: ci-kit's VM contract above rests on it.
-  MEASURED_E2E: artifacts-perf daemon-idle daemon-idle-floor daemon-idle-mawsd dashboard-scale design-scale document-scale document-scale-repeat local-latency local-latency-daemon presentations-drag presentations-scale tool-time-heavy-live
+  MEASURED_E2E: artifacts-perf daemon-idle daemon-idle-baseline daemon-idle-floor daemon-idle-mawsd dashboard-scale design-scale document-scale document-scale-repeat local-latency local-latency-daemon presentations-drag presentations-scale tool-time-heavy-live
   # The Mac jobs that may run beside another: e2e groups, and `unit:darwin`, that ask for ci-kit's shared instances
   # ([ci-kit-mac-shared], their only label), which run two jobs at a time on the mini's one desktop (ci-kit's mac-lane
   # concurrency spec, SSFSKIM/ci-kit docs/doperpowers/specs/2026-10-21-mac-lane-concurrency-design.md). Every other Mac

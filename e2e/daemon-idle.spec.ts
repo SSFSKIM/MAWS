@@ -31,9 +31,10 @@
 // bound (P5 Decision Logs 54 and 57); it writes test-results/daemon-idle-floor.json. The third (P5 O2 M5, Decision Log
 // 57's early check) is `mawsd` alone, idle with no hosts and no app; it writes test-results/daemon-idle-mawsd.json.
 //
-// Three measured groups (gate.yml's MEASURED_E2E), one case each, chosen by title: `pnpm e2e:daemon-idle` (the
-// scene, on the daemon shape since M9; M1's detached form is the same case under MAWS_HOST_MODE=detached, and its
-// baseline is re-recorded from runs at M1's commit), `pnpm e2e:daemon-idle-floor` (the floor, which needs no build) and `pnpm e2e:daemon-idle-mawsd` (mawsd
+// Four measured groups (gate.yml's MEASURED_E2E), one case each, chosen by title: `pnpm e2e:daemon-idle` (the
+// scene, on the daemon shape since M9), `pnpm e2e:daemon-idle-baseline` (the same case under MAWS_HOST_MODE=detached,
+// today's supervisor alone, recording only: the baseline is re-measured from it on the tree under test when a landing
+// misses), `pnpm e2e:daemon-idle-floor` (the floor, which needs no build) and `pnpm e2e:daemon-idle-mawsd` (mawsd
 // alone). Each sets MAWS_DAEMON_IDLE_PERF=1, and the gate runs it only when named, on the mini's exclusive instance
 // behind the measured-job guard. None spends anything or touches a keychain: a replay runs no engine, and mawsd alone
 // wakes no host.
@@ -53,7 +54,7 @@ import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { isAlive, killScratchProcesses, processesNaming, ps } from './support/processes';
 import { tmpSocketDirOf } from './support/supervisor-socket';
 
-test.skip(process.env.MAWS_DAEMON_IDLE_PERF !== '1', 'the idle-cost measurement runs under pnpm e2e:daemon-idle and e2e:daemon-idle-floor (MAWS_DAEMON_IDLE_PERF=1)');
+test.skip(process.env.MAWS_DAEMON_IDLE_PERF !== '1', 'the idle-cost measurement runs under pnpm e2e:daemon-idle, e2e:daemon-idle-baseline, e2e:daemon-idle-floor and e2e:daemon-idle-mawsd (MAWS_DAEMON_IDLE_PERF=1)');
 test.describe.configure({ timeout: 20 * 60_000 }); // about 13 minutes: the scene, the settle and the window
 
 // C3's permission round trip: a prompt, ~44 rows, a Bash `can_use_tool` (seq 49) the replay holds at until it is
