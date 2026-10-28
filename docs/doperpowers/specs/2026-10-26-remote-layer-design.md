@@ -321,6 +321,7 @@ All keys are P-256: ECDSA for signatures, ECDH for channel keys. Node, WebCrypto
   - **No copies.** An admin device's key file is kept out of every backup and sync scope. It is excluded from Time Machine, never under a synced directory (iCloud Drive, or `~/.claude`, which syncs between the owner's Macs), and never in a store that agents read secrets from.
     - A copy is a root key the state doesn't list. A key with a copy can't be retired honestly either, since retirement needs the key destroyed (above).
     - A lost admin key is replaced through the owner's other admin device or the recovery key (§8), never restored from a backup.
+    - The exclusion applies from the moment the file is created. The app's key file (`<profile>/device/keys.json`, O10 M9, `src/main/device/keys.ts`) is created today with none, and an O10 follow-up writes it excluded. Excluding a file later leaves the copies already made, so a device whose key file may have been copied before then is re-registered with new keys (§11) before it becomes a root.
   - **Signing takes the person.** Against a deployment, a stand-in reads its signing confirmation from the terminal (`/dev/tty`), never from stdin. A process with no terminal, such as an agent's shell, then can't sign through it. This stops a mistaken run, not a process that reads the key file.
   - **A stand-in ends.** A root device that isn't the app is a stand-in. Once the app's device is a root, a successor the app signs removes the stand-in, and its keys go into `revoked`.
     - Revoking it discredits nothing it signed. A state verifies against its predecessor, and an endorsement only in the step that adds its device, so every state and device it signed stands. O13's command signs no log events, so retiring its keys would keep nothing more.
@@ -346,7 +347,8 @@ All keys are P-256: ECDSA for signatures, ECDH for channel keys. Node, WebCrypto
   - The hub stores the certificates, and serves them beside the state.
 - **A device.** A new MAWS install generates its keys: in the Enclave on signed builds, as software keys before that (§5.1).
   - The approving device shows a one-time pairing code, which the person types into the new install. The new device sends its public keys with a MAC under that code, as for a machine.
-    - The MAC holds only while the code is secret, and a code passed by clipboard is readable by every process of the uid. So both screens also show a short fingerprint of the new device's channel key, computed by the protocol package beside the MAC, and the person compares them before approving (Decision Log 28).
+    - The MAC holds only while the code is secret, and a code passed by clipboard is readable by every process of the uid. So both screens also show a short fingerprint of the new device's entry, computed by the protocol package beside the MAC, and the person compares them before approving (Decision Log 28).
+    - The fingerprint is over the same canonical entry the MAC covers: the org, the member, and the device's id, class, `keyStorage` and every credential (`channelPub`, `stepUpPub` where present, and the passkey's `credentialId`, `publicKey` and `rpId`). A fingerprint of one key leaves the others substitutable by whoever holds the code.
     - Two entries that verify under one code are both refused, since the code has leaked.
   - An admin countersigns when needed (§5.2).
   - The phone registers its WebCrypto key and its passkey the same way.
@@ -963,9 +965,10 @@ These are named here with their binding fields. Byte-level schemas and test vect
    - Production holds no signed state, and the phone's device entry (O13) needs one before the app's Org page (O8) exists. O13 roots it with a command on the owner's Mac that has a software device of its own.
    - A software root is admitted. Every root key is a software key until signed builds, the app's own device's included, so an Enclave-held first root would leave the org unrooted until C12.
    - What bounds a software root is how many copies of its key exist, and what can make it sign. So admin key files stay out of every backup and sync scope, and a stand-in signs only on a confirmation from the terminal.
+   - The exclusion holds from a key file's creation. The app's key file is created today without it, so a device whose file may have been copied first is re-registered with new keys before it becomes a root.
    - A stand-in ends once the app's device is a root, and its keys go into `revoked`. Its end is the app's arrival, not the Enclave, which the app's device reaches only with signed builds.
    - `recoveryPub` never changes after genesis, so how setup handles the recovery key holds for the org's life. Setup writes it only where the owner keeps it offline, and reads it back and checks it before the genesis is signed.
-   - Device pairing compares a fingerprint of the new device's channel key on both screens, since the pairing code may travel by a clipboard that every process of the uid can read.
+   - Device pairing compares a fingerprint of the new device's whole entry on both screens, since the pairing code may travel by a clipboard that every process of the uid can read. It covers what the MAC covers, every credential included, so a leaked code can't swap one key while another still matches.
    - The backstop needs a signer while the stand-in is the only admin device, so the stand-in signs a no-change successor at the owner's hand before the head turns 30 days old.
    - Rejected: retiring the stand-in's keys. It signs no log events, so retirement keeps nothing that revocation loses, and it needs the key destroyed, which a file kept for weeks can't show.
    - Rejected: requiring an Enclave-held first root, which no build can make before signed builds.
