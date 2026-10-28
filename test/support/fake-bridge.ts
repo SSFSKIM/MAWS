@@ -4,7 +4,7 @@
 // its routes: the pending requests and recent settlements, the turns, the streaming steps, the override and the catalog
 // (a light fold of the events a test emits), `deliver`'s high-water mark per writer, and the launch fence. It runs no
 // mod: a command is answered by its op's script (default ok), and the events a test emits stand for the mod's.
-import { chmodSync, mkdirSync, renameSync, rmSync } from 'node:fs';
+import { chmodSync, mkdirSync, realpathSync, renameSync, rmSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { join } from 'node:path';
 
@@ -177,6 +177,29 @@ export async function startFakeBridge(options: FakeBridgeOptions): Promise<FakeB
     fanOut(e);
   };
 
+  // `media` as the mod takes it (doperpowers `bridge-media.tsx` `acceptMedia`): its upload id and absolute root, 1 to 4
+  // files each a file inside the root by its own real path; an upload already held answers `duplicate`.
+  const uploads = new Set<string>();
+  const acceptMedia = (body: Record<string, unknown>): FakeReply => {
+    const { upload, root, files } = body;
+    const refuse = (error: string): FakeReply => ({ status: 200, body: { ok: false, error } });
+    if (typeof upload !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(upload) || typeof root !== 'string' || !root.startsWith('/')) return refuse('media needs its upload id and the absolute directory it was saved in');
+    if (!Array.isArray(files) || files.length === 0 || files.length > 4) return refuse('media holds 1 to 4 files');
+    if (uploads.has(upload)) return { status: 200, body: { ok: true, result: { duplicate: true, upload } } };
+    for (const f of files as Record<string, unknown>[]) {
+      const path = typeof f.path === 'string' ? f.path : '';
+      let real: string | null;
+      try {
+        real = statSync(path).isFile() ? realpathSync(path) : null;
+      } catch {
+        return refuse(`${String(f.name)} is missing: nothing is at ${path}`);
+      }
+      if (real !== path || !path.startsWith(`${root}/`)) return refuse(`${String(f.name)} is not a file inside its upload directory ${root}`);
+    }
+    uploads.add(upload);
+    return { status: 200, body: { ok: true, result: { queued: true, upload } } };
+  };
+
   const defaultReply = (body: Record<string, unknown>): FakeReply => {
     if (body.op === 'deliver') {
       emit({ type: 'delivered', key: body.key, outcome: 'entered', uuid: `row-${String((body.key as { seq?: unknown }).seq)}` });
@@ -188,8 +211,10 @@ export async function startFakeBridge(options: FakeBridgeOptions): Promise<FakeB
       return { status: 200, body: { ok: true, result: next } };
     }
     if (body.op === 'read' && body.what === 'status') {
-      return { status: 200, body: { ok: true, result: { version: { version: '2.1.300' }, model: sessionInfo.model ?? null, cwd: home, root: home, repo: null, surfaces: [], override } } };
+      const cwd = typeof sessionInfo.cwd === 'string' ? sessionInfo.cwd : home;
+      return { status: 200, body: { ok: true, result: { version: { version: '2.1.300' }, model: sessionInfo.model ?? null, cwd, root: cwd, repo: null, surfaces: [], override } } };
     }
+    if (body.op === 'media') return acceptMedia(body);
     return { status: 200, body: { ok: true, result: {} } };
   };
 

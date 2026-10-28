@@ -20,6 +20,8 @@
 // - Controls post `POST /command?wait=10000` carrying the launch `/status` named. A 504 or a closed socket is `unknown`:
 //   the op may have run. Nothing is retried on its own but `deliver` (./deliveries.ts). Decisions are built from typed
 //   fields (./decisions.ts) after a fresh `GET /requests/<id>`, with `by: 'maws'`. `from` is never sent.
+// - Media (M7): an upload is checked, saved under the session's own directory and handed to the bridge's `media` op
+//   (./media.ts), retried under its upload id; the roots it wrote are swept once no upload went to them for a day.
 // - The uid boundary (RL §5.11): the driver authenticates nothing and is authorized by the uid, as `sminos steer` is, so
 //   it makes the checks sminos's daemon makes on a remote RPC itself.
 //
@@ -33,10 +35,12 @@ import type { ClientRef } from '@shared/ipc/client';
 import type { CommandName, EventPayload } from '@shared/ipc/schema';
 import type { ControlResult, LaneAAnswerOutput, LaneACatalog, LaneASendOutput, LaneAState } from '@shared/ipc/schema/lane-a';
 import type { MainHandler } from '../ipc/router';
+import { createGitRunner, type GitRun } from '../git/runner';
 import { BridgeUnreachable, call, subscribe, type BridgeAnswer, type EventStream } from './bridge-client';
 import { decisionFor } from './decisions';
 import { DeliveryLane, fileSeqStore, LANE_TIMING, type LaneTiming, type PostResult, type SeqStore } from './deliveries';
 import { bridgeSocket, watchBridgeDir, type BridgeDirWatch } from './discovery';
+import { sendMedia, uploadRecords } from './media';
 import { Reshaper } from './reshape';
 import { classify, SessionFold, type BridgeState, type MainTool } from './state';
 import { TranscriptJobs } from './transcript-jobs';
@@ -49,6 +53,7 @@ export interface LaneATiming {
   backoff: { firstMs: number; maxMs: number; healthyMs: number };
   dirPollMs: number;
   jobsPollMs: number; // how often a watched session's transcript is read for its jobs
+  sweepMs: number; // how often the upload roots are swept of those a day old (M7)
   lane: LaneTiming;
 }
 
@@ -60,6 +65,7 @@ export const LANE_A_TIMING: LaneATiming = {
   backoff: { firstMs: 500, maxMs: 8000, healthyMs: 60_000 },
   dirPollMs: 2000,
   jobsPollMs: 1000,
+  sweepMs: 3600_000,
   lane: LANE_TIMING,
 };
 
@@ -72,6 +78,7 @@ export interface LaneADeps {
   transcript?(appId: AppSessionId, engineSessionId: string): Promise<string | null>; // the session's transcript path, null while none is known
   emit<N extends LaneAEvent>(name: N, payload: EventPayload<N>): void;
   log?(line: string): void;
+  git?: GitRun; // the uploads' exclude entry (M7); main's read runner by default
   timing?: Partial<LaneATiming>;
 }
 
@@ -171,6 +178,7 @@ export interface LaneADriver {
   stopAgent(appId: AppSessionId, agentId: string): Promise<ControlResult>;
   tell(appId: AppSessionId, agentId: string, text: string): Promise<ControlResult>;
   stopTask(appId: AppSessionId, taskId: string): Promise<ControlResult>;
+  media(appId: AppSessionId, files: readonly { name: string; mediaType: string; data: string }[]): Promise<ControlResult>;
   onChange(listener: LaneAListener): () => void; // M6: each session's view as it changes, from now on
   stop(): void;
 }
@@ -187,6 +195,21 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
   let stopped = false;
   const warned = new Set<string>();
   const listeners = new Set<LaneAListener>();
+  const uploads = uploadRecords(join(deps.userData, 'lane-a', 'uploads.json'), { log });
+  let git: GitRun | null = deps.git ?? null;
+  const sweep = () => {
+    try {
+      const swept = uploads.sweep();
+      if (swept > 0) log(`swept ${swept} upload root${swept === 1 ? '' : 's'} no upload went to for a day`);
+    } catch (error) {
+      log(`the upload roots were not swept (${error instanceof Error ? error.message : String(error)})`);
+    }
+  };
+  const sweeper = setInterval(sweep, timing.sweepMs);
+  sweeper.unref();
+  setImmediate(() => {
+    if (!stopped) sweep();
+  });
 
   void Promise.resolve(deps.home).then(
     (resolved) => {
@@ -721,12 +744,21 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     stopAgent: (appId, agentId) => control(appId, 'stop-agent', { agentId }),
     tell: (appId, agentId, text) => control(appId, 'tell', { agentId, text }),
     stopTask,
+    async media(appId, files) {
+      const s = liveFor(appId, 'media');
+      if (!('appId' in s)) return s;
+      const given = record(record(record(s.status?.capabilities)?.controls)?.media);
+      if (given?.available !== true) return refused('unsupported', typeof given?.reason === 'string' ? given.reason : 'this session’s bridge takes no images or PDFs');
+      git ??= createGitRunner();
+      return sendMedia({ session: s.engine, launch: launchOf(s), post: (body, launch) => post(s, body, launch), records: uploads, git, retryDelaysMs: timing.lane.retryDelaysMs, log }, files);
+    },
     onChange(listener) {
       listeners.add(listener);
       return () => void listeners.delete(listener);
     },
     stop() {
       stopped = true;
+      clearInterval(sweeper);
       for (const s of [...sessions.values()]) drop(s);
       dirWatch?.close();
       dirWatch = null;
@@ -756,5 +788,6 @@ export function registerLaneA(driver: LaneADriver, register: Register): void {
   register('laneA.stopAgent', ({ appSessionId, agentId }) => driver.stopAgent(id(appSessionId), agentId));
   register('laneA.tell', ({ appSessionId, agentId, text }) => driver.tell(id(appSessionId), agentId, text));
   register('laneA.stopTask', ({ appSessionId, taskId }) => driver.stopTask(id(appSessionId), taskId));
+  register('laneA.media', ({ appSessionId, files }) => driver.media(id(appSessionId), files));
 }
 

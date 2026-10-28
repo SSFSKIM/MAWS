@@ -60,6 +60,7 @@
 "commands.laneA.compact.input":[".appSessionId AppSessionId"],
 "commands.laneA.interrupt.input":[".appSessionId AppSessionId"],
 "commands.laneA.list.output":[".states[].appSessionId AppSessionId"],
+"commands.laneA.media.input":[".appSessionId AppSessionId"],
 "commands.laneA.model.input":[".appSessionId AppSessionId"],
 "commands.laneA.read.input":[".appSessionId AppSessionId"],
 "commands.laneA.send.input":[".appSessionId AppSessionId"],

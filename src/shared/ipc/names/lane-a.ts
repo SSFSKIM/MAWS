@@ -3,7 +3,7 @@
 export const commands = [
   'laneA.list', 'laneA.state', 'laneA.watch', 'laneA.unwatch', 'laneA.catalog', 'laneA.read',
   'laneA.send', 'laneA.interrupt', 'laneA.answer', 'laneA.model', 'laneA.command', 'laneA.btw', 'laneA.compact',
-  'laneA.stopAgent', 'laneA.tell', 'laneA.stopTask',
+  'laneA.stopAgent', 'laneA.tell', 'laneA.stopTask', 'laneA.media',
 ] as const;
 
 export const events = ['laneA.changed', 'laneA.plane'] as const;

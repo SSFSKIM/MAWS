@@ -135,6 +135,15 @@ export const LaneAReadOutputSchema = z.discriminatedUnion('ok', [
 
 const nullableName = z.string().min(1).nullable();
 
+// P5 O9 M7: one file of an upload as the composer serialized it (an image or document block's base64 bytes), with the
+// name the person gave it, for display only: the bridge's rule, 1 to 128 characters, none a control character or a line
+// separator. Main decodes and checks the bytes (src/main/lane-a/media.ts).
+export const LaneAMediaFileSchema = z.strictObject({
+  name: z.string().regex(/^[^\x00-\x1f\x7f\u2028\u2029]{1,128}$/), // eslint-disable-line no-control-regex
+  mediaType: z.string().min(1),
+  data: z.string().min(1),
+});
+
 export const commands = {
   'laneA.list': { input: z.void(), output: z.strictObject({ states: z.array(LaneAStateSchema) }), owner: 'main' }, // this machine's bridged foreign sessions
   'laneA.state': { input: input({}), output: LaneAStateSchema.nullable(), owner: 'main' },
@@ -160,6 +169,9 @@ export const commands = {
   'laneA.stopAgent': { input: input({ agentId: z.string().min(1) }), output: ControlResultSchema, owner: 'main' },
   'laneA.tell': { input: input({ agentId: z.string().min(1), text: z.string().min(1) }), output: ControlResultSchema, owner: 'main' },
   'laneA.stopTask': { input: input({ taskId: z.string().min(1) }), output: ControlResultSchema, owner: 'main' },
+  // M7: 1 to 4 images or PDFs, saved by main and handed to the bridge's `media` op; `result.upload` names the `op` messages
+  // that follow each file's state (`op: 'media'`, `id` the upload).
+  'laneA.media': { input: input({ files: z.array(LaneAMediaFileSchema).min(1).max(4) }), output: ControlResultSchema, owner: 'main' },
 } as const satisfies Record<`laneA.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 const watchEvent = <S extends z.ZodRawShape>(shape: S) => z.strictObject({ ...session, watch: z.string(), ...shape });

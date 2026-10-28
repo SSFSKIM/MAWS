@@ -22,4 +22,5 @@ export const grades = {
   'laneA.stopAgent': 'converse',
   'laneA.tell': 'converse',
   'laneA.stopTask': 'converse',
+  'laneA.media': 'converse', // P5 O9 M7: an image or a PDF goes with a person's words
 } as const satisfies CommandGrades<'laneA'>;

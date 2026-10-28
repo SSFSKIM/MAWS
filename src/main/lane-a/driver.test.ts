@@ -1,6 +1,6 @@
 // The local lane A driver against the fake bridge (P5 O9 M2, "Proves"): discovery, the bridge's states, the state stream
 // and its backoff, watches, each control's body, the delivery lane, decisions, and the guard on the owner's sminos.
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,6 +9,7 @@ import type { ClientRef } from '@shared/ipc/client';
 import { endableClientRef } from '@shared/ipc/client';
 import type { LaneAState, PlaneMessage } from '@shared/ipc/schema/lane-a';
 import { FULL_CAPABILITIES, startFakeBridge, type FakeBridge } from '../../../test/support/fake-bridge';
+import { GitFixture } from '../../../test/support/git-fixture';
 import { createLaneADriver, type LaneADriver, type LaneAView } from './driver';
 
 const MACHINE = 'machineref0123456789';
@@ -613,5 +614,101 @@ describe('the view main’s own consumers follow', () => {
     await expect.poll(() => views.at(-1)?.fresh, { timeout: 3000 }).toBe(true);
     h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: { kind: 'none' } });
     expect(views.at(-1)).toBeNull();
+  });
+});
+
+// P5 O9 M7: an upload through the bridge's `media` op, saved under the session's own directory (a scratch repository).
+describe('media', () => {
+  const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const PDF = Buffer.from('%PDF-1.4\n%%EOF\n').toString('base64');
+  const files = [{ name: 'shot.png', mediaType: 'image/png', data: PNG }, { name: 'notes.pdf', mediaType: 'application/pdf', data: PDF }];
+
+  async function liveIn(cwd: string, options: Partial<Parameters<typeof startFakeBridge>[0]> = {}) {
+    const b = await bridge({ sessionInfo: { session: ENGINE, cwd, model: 'claude-opus-4-5', version: '2.1.300' }, ...options });
+    const h = harness();
+    h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: terminal });
+    await h.live();
+    return { b, h };
+  }
+
+  async function repo(): Promise<GitFixture> {
+    const f = await GitFixture.create();
+    scratch.push(f.root, f.home);
+    return f;
+  }
+
+  it('reads where the session works, saves the files there and posts media naming them, the exclude entry added and the root recorded', async () => {
+    const f = await repo();
+    const { b, h } = await liveIn(f.root);
+    const result = await h.driver.media(APP, files);
+    const root = join(f.root, '.claude', 'desk-uploads', ENGINE);
+    expect(result).toMatchObject({ state: 'done', result: { root } });
+    const upload = (result as { result: { upload: string } }).result.upload;
+    expect(upload).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect(b.commands.map((c) => c.body)).toEqual([
+      { op: 'read', what: 'status' },
+      {
+        op: 'media', upload, root, files: [
+          { n: 0, path: join(root, `${upload}.0.png`), name: 'shot.png', mediaType: 'image/png' },
+          { n: 1, path: join(root, `${upload}.1.pdf`), name: 'notes.pdf', mediaType: 'application/pdf' },
+        ],
+      },
+    ]);
+    expect(readFileSync(join(root, `${upload}.0.png`)).toString('base64')).toBe(PNG);
+    expect(readFileSync(join(root, `${upload}.1.pdf`)).toString('base64')).toBe(PDF);
+    expect(readFileSync(join(f.root, '.git', 'info', 'exclude'), 'utf8')).toContain('**/.claude/desk-uploads/');
+    expect(JSON.parse(readFileSync(join(process.env.MAWS_USER_DATA!, 'lane-a', 'uploads.json'), 'utf8')).roots).toEqual([{ path: root, session: ENGINE, at: expect.any(String) as unknown }]);
+  });
+
+  it('refuses what the bridge would not take before anything is written or posted', async () => {
+    const f = await repo();
+    const { b, h } = await liveIn(f.root);
+    expect(await h.driver.media(APP, Array.from({ length: 5 }, () => files[0]!))).toMatchObject({ state: 'refused', code: 'bad-args' });
+    expect(await h.driver.media(APP, [{ name: 'fake.png', mediaType: 'image/png', data: PDF }])).toMatchObject({ state: 'refused', code: 'bad-args', message: expect.stringContaining('fake.png') as unknown });
+    expect(b.commands).toEqual([]);
+    expect(existsSync(join(f.root, '.claude'))).toBe(false);
+  });
+
+  it('takes the files back when the bridge refuses the upload', async () => {
+    const f = await repo();
+    const { b, h } = await liveIn(f.root);
+    b.answer('media', () => ({ status: 200, body: { ok: false, error: 'the upload could not be kept in the session state' } }));
+    expect(await h.driver.media(APP, files)).toMatchObject({ state: 'refused', message: 'the upload could not be kept in the session state' });
+    expect(existsSync(join(f.root, '.claude', 'desk-uploads', ENGINE))).toBe(false);
+  });
+
+  it('posts a lost answer again under the same upload, a duplicate meaning the bridge holds it; all lost is unknown and the files stay', async () => {
+    const f = await repo();
+    const { b, h } = await liveIn(f.root);
+    let posts = 0;
+    b.answer('media', (body) => (++posts === 1 ? { status: 504, body: { error: 'the session did not answer' } } : { status: 200, body: { ok: true, result: { duplicate: true, upload: body.upload } } }));
+    expect(await h.driver.media(APP, files)).toMatchObject({ state: 'done' });
+    const sent = b.commands.filter((c) => c.op === 'media').map((c) => c.body.upload);
+    expect(sent).toHaveLength(2);
+    expect(sent[1]).toBe(sent[0]);
+
+    b.answer('media', () => ({ drop: true }));
+    const lost = await h.driver.media(APP, [files[0]!]);
+    expect(lost).toMatchObject({ state: 'unknown', why: 'timeout' });
+    const upload = (lost as { id: string }).id;
+    expect(b.commands.filter((c) => c.op === 'media' && c.body.upload === upload)).toHaveLength(3);
+    expect(existsSync(join(f.root, '.claude', 'desk-uploads', ENGINE, `${upload}.0.png`))).toBe(true);
+  });
+
+  it('is refused, with the bridge’s reason, for a session whose bridge closes media', async () => {
+    const f = await repo();
+    const closed = { ...FULL_CAPABILITIES, controls: { ...FULL_CAPABILITIES.controls, media: { available: false, reason: 'this engine takes no desk uploads' } } };
+    const { b, h } = await liveIn(f.root, { capabilities: closed });
+    expect(await h.driver.media(APP, files)).toEqual({ state: 'refused', code: 'unsupported', message: 'this engine takes no desk uploads' });
+    expect(b.commands).toEqual([]);
+  });
+
+  it('fences the read of where the session works by the launch, so nothing is saved for another process', async () => {
+    const f = await repo();
+    const { b, h } = await liveIn(f.root);
+    b.setStatus({ launch: 'launch-2' });
+    expect(await h.driver.media(APP, files)).toMatchObject({ state: 'refused', code: 'launch' });
+    expect(b.commands).toEqual([]); // the fake fences before it records, as the child does before it acts
+    expect(existsSync(join(f.root, '.claude'))).toBe(false);
   });
 });

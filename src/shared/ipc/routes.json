@@ -102,6 +102,7 @@
   "laneA.command",
   "laneA.compact",
   "laneA.interrupt",
+  "laneA.media",
   "laneA.model",
   "laneA.read",
   "laneA.send",
