@@ -185,7 +185,8 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
 
     // the model chip: the catalog's models, a pick sending only the model
     await main(page).getByRole('button', { name: /^Model / }).click();
-    await page.getByRole('menuitemradio', { name: /sonnet/ }).first().click();
+    await page.getByRole('button', { name: /· Select model$/ }).click(); // the chip opens on the effort view
+    await page.getByRole('menuitemradio', { name: /^sonnet/ }).click();
     await expect.poll(() => bodies(bridge, 'model')).toEqual([{ op: 'model', model: 'sonnet' }]);
     await page.keyboard.press('Escape');
 
