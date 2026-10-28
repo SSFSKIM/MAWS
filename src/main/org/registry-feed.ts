@@ -145,13 +145,16 @@ export function createRegistryFeed(deps: {
     if (timer !== null) clearTimeout(timer);
     timer = null;
   };
+  /** Ends the feed's socket by its own decision; one that was open is told as closed (but not on `close()`). */
   const drop = () => {
     clearTimer();
     const held = socket;
+    const wasOpen = open;
     socket = null;
     open = false;
     target = null;
     held?.close();
+    if (wasOpen && !closed) tell(listeners.close);
   };
 
   function delay(): number {
@@ -213,12 +216,12 @@ export function createRegistryFeed(deps: {
     const end = (then: () => void) => {
       if (ended) return;
       ended = true;
-      const wasOpen = socket === current && open;
-      if (socket === current) {
-        socket = null;
-        open = false;
-        target = null;
-      }
+      // a socket the feed dropped (`drop`) ends as the feed's own decision: nothing to retry, nothing to tell
+      if (socket !== current) return;
+      const wasOpen = open;
+      socket = null;
+      open = false;
+      target = null;
       if (wasOpen) tell(listeners.close);
       if (!closed) then();
     };

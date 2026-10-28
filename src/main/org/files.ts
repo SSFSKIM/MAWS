@@ -116,7 +116,7 @@ async function readPrivateFile(file: string, uid: number): Promise<string | null
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'ENOENT') return null;
-    if (code === 'ELOOP') throw new Error('is a symlink');
+    if (code === 'ELOOP') throw new Error('is a symlink', { cause: error });
     throw error;
   }
   try {
