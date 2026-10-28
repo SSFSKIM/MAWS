@@ -75,9 +75,9 @@ export const HostOpInputSchema = z.strictObject({
 // nothing, as a JSON copy of an undefined one reads) or `{ok: false, error}`.
 export const HostOpResultSchema = z.union([z.strictObject({ ok: z.literal(true), value: z.unknown().optional() }), z.strictObject({ ok: z.literal(false), error: IpcErrorSchema })]);
 export const HostOpOutputSchema = z.discriminatedUnion('state', [
-  z.strictObject({ state: z.literal('done'), result: HostOpResultSchema }),
-  z.strictObject({ state: z.literal('refused'), reason: z.string(), ledger: z.string().optional() }), // `ledger`: why a closed one is `unavailable`
-  z.strictObject({ state: z.literal('in-progress') }),
+  z.strictObject({ state: z.literal('done'), result: HostOpResultSchema, ledger: z.string().optional() }),
+  z.strictObject({ state: z.literal('refused'), reason: z.string(), ledger: z.string().optional() }), // `ledger` on any state: why the ledger is closed
+  z.strictObject({ state: z.literal('in-progress'), ledger: z.string().optional() }),
 ]);
 export const HostOpQueryOutputSchema = z.strictObject({
   state: z.enum(['done', 'in-progress', 'not-received', 'expired', 'unavailable']),
@@ -87,7 +87,7 @@ export const HostOpQueryOutputSchema = z.strictObject({
   fingerprint: z.string().optional(),
   target: z.string().nullable().optional(), // the appSessionId the op acts on
   name: z.string().optional(), // the command it ran
-  ledger: z.string().optional(), // why a closed ledger is `unavailable` (op-ledger.ts's word)
+  ledger: z.string().optional(), // on any state: why the ledger is closed (op-ledger.ts's word)
 });
 
 const host = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'engine-host' as const });

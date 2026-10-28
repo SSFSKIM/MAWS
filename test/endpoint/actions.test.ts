@@ -813,4 +813,24 @@ describe('a closed ledger, in the endpoint’s status', () => {
     expect(f.endpoint.status().opLedgers).toBeUndefined();
   });
 
+  it('keeps showing it while the engine host says so on a `done` or an `in-progress`, and tells the device neither', async () => {
+    hostDir = fs.mkdtempSync(join(tmpdir(), 'm7-host-'));
+    fs.chmodSync(hostDir, 0o700);
+    const host = engineHost();
+    const said = { ledger: 'write-failed' as string | undefined, inProgress: false };
+    const dispatch = host.dispatch;
+    host.dispatch = async (owner, name, input) => {
+      const response = await dispatch(owner, name, input);
+      if (name !== 'host.op' || !response.ok || said.ledger === undefined) return response;
+      const value = said.inProgress ? { state: 'in-progress' } : (response.value as object);
+      return { ...response, value: { ...value, ledger: said.ledger } };
+    };
+    const f = await start({ host });
+    const a = await open(f, a1, A);
+    expect(await run(a, send(f, a, 'ran as it closed'))).toMatchObject({ state: 'done', result: { disposition: 'queued' } });
+    expect(f.endpoint.status().opLedgers).toEqual({ engineHost: { closed: 'write-failed', clears: 'restart' } });
+    said.inProgress = true;
+    expect(await run(a, send(f, a, 'held'))).toEqual({ state: 'in-progress' });
+    expect(f.endpoint.status().opLedgers).toEqual({ engineHost: { closed: 'write-failed', clears: 'restart' } });
+  });
 });

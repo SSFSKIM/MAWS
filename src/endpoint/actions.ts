@@ -61,10 +61,12 @@ export function outcomeOf(result: unknown): unknown {
 function answered(answer: unknown): unknown {
   if (!isObject(answer)) return answer;
   if (answer.state === 'done') return outcomeOf(answer.result);
-  return answer.state === 'refused' ? { state: 'refused', reason: answer.reason } : answer;
+  const outcome = { ...answer };
+  delete outcome.ledger;
+  return outcome;
 }
 
-/** Why the engine host's ledger is closed, as its answer says it (`ledger`), or null for an answer of an open one. */
+/** Why the engine host's ledger is closed, as its answer says it (`ledger`, on every answer while it is), or null: open. */
 export function closedLedgerOf(value: unknown): string | null {
   return isObject(value) && typeof value.ledger === 'string' ? value.ledger : null;
 }

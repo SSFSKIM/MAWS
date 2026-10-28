@@ -15,8 +15,10 @@
 //     `{ok: false, error}`, a throw included: it was tried) is kept and returned.
 // `host.opQuery {opId, opCreated, tombstoneIfAbsent}`: RL4's states with the stored binding; an absent id tombstoned
 // first when asked, under the same synchronous turn as every claim.
-// A closed ledger's `unavailable` says why (`ledger`: op-ledger.ts's word), the route by which the endpoint in `mawsd`
-// shows this process's ledger in its status; a restart of the engine host reopens it.
+// While the ledger is closed every answer says so (`ledger`: op-ledger.ts's word), `done` included (a run that ended
+// after another op's claim closed it, or whose own result could not be kept), so its absence means the ledger answers:
+// the route by which the endpoint in `mawsd` shows this process's ledger in its status. A restart of the engine host
+// reopens it.
 import { thrownError, type HostOn } from '@shared/host/runtime';
 import type { OpLedger } from '@shared/host/op-ledger';
 import { requestDigestOf, type RequestDigest } from '@shared/host/request-digest';
@@ -81,17 +83,16 @@ export function opCommands(deps: OpsDeps): { op(input: OpInput, ctx: HandlerCont
       result = { ok: false, error: thrownError(error) };
     }
     ledger.finish(opId, result);
-    return { state: 'done', result };
+    return closedSaid({ state: 'done', result });
   }
 
   function opQuery({ opId, opCreated, tombstoneIfAbsent }: OpQueryInput): OpQueryOutput {
     return closedSaid(ledger.query(opId, opCreated, tombstoneIfAbsent));
   }
 
-  /** A closed ledger's `unavailable`, with why. */
-  function closedSaid<T extends { state: string; reason?: string }>(answer: T): T {
-    const unavailable = answer.state === 'unavailable' || (answer.state === 'refused' && answer.reason === 'unavailable');
-    return unavailable && ledger.closed !== null ? { ...answer, ledger: ledger.closed } : answer;
+  /** An answer, with why the ledger is closed while it is. */
+  function closedSaid<T extends object>(answer: T): T {
+    return ledger.closed !== null ? { ...answer, ledger: ledger.closed } : answer;
   }
 
   return { op, opQuery };
