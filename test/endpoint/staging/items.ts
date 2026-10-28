@@ -218,12 +218,17 @@ export async function runItems(w: StagingWorld, report: Report, print: (line: st
 
   // Everything raised at once: each of the owner's sessions counts up from 0 once.
   w.pending.raise(...req.owners, ...req.device, req.theirs);
+  // Lane B's likewise: a rise in a session's count is a new request waiting, which pushes (notify.ts), so its requests
+  // are raised while the engine host's link to mawsd is down and told by the whole-set read at the next link
+  // (lane-b-pending.ts `restate`), one rise per session. Each answer later moves its count through the per-change path.
+  w.host.upstream(false);
   w.host.request(OWN_B, 'question', LANE_B.question);
   w.host.request(OWN_B, 'permission', LANE_B.permission);
   w.host.request(HARNESS_B, 'permission', LANE_B.list);
   w.host.request(HARNESS_B, 'permission', LANE_B.replay);
   w.host.request(HARNESS_B, 'permission', LANE_B.borrow);
   const theirsB = w.host.request(THEIRS_B, 'permission', LANE_B.theirs);
+  w.host.upstream(true);
   const presence = () => w.cards.socket.presence()?.pending ?? {};
   const laneAShown = await until(() => (presence()[OWN_A]?.pending ?? 0) >= 2 && (presence()[HARNESS_A]?.pending ?? 0) >= 3, 'the lane A counts at the hub', 30_000).then(
     () => true,

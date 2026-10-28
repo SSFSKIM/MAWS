@@ -527,11 +527,13 @@ production's Worker or host, or a preview alias of it (`<alias>-desk-hub.…`), 
     `o13-c-<n>` answer them in the phone's place, which proves the whole run on staging before the owner sits down.
     It prints a line per check, then `PASS`, `FAIL`, `NOT RUN` or `NOT SHOWN` per item: `registration`, `round-trip
     lane A`, `round-trip lane B`, `class-bound`, `push-owner-only`, `freeze-seam`.
-    - Lane B: until O10 feeds the endpoint's notifier from the engine host's broker, a lane B session gets no count at
-      the hub, so it has no Cards row and no push. The run looks for that count and otherwise prints `NOT RUN
-      round-trip lane B: waiting on O10's lane B notifier feed`. `--lane-b` makes its absence a failure, for runs after
-      the feed lands. Lane B's refusals need no feed (the device subscribes to the harness's session by its id), so they
-      run either way, under the same item.
+    - Lane B: O10's notifier feed (#272, P5 Decision Log 90) gives a lane B session its count at the hub, so it has a
+      Cards row and a push. The run looks for that count, and without it prints `NOT RUN round-trip lane B: waiting on
+      O10's lane B notifier feed`. Run it with `--lane-b`, which makes that absence a failure. Lane B's refusals need no
+      feed (the device subscribes to the harness's session by its id), so they run either way, under the same item.
+      Its scope: the harness runs the endpoint in this process over the fake engine host, which is always attached, so
+      a `PASS round-trip lane B` proves the endpoint's lane B path. It does not prove a real machine's counts under P5
+      Decision Log 29 (lane B's events reach the endpoint only while an app is linked, until O3).
     - Cleanup: however the run ends, it takes the machine out of the state (its key retired, its service token revoked
       at the hub), removes `o13-b-<n>` and `o13-c-<n>` (their keys revoked) and deletes the sink's subscription. The
       step then runs a cleanup pass of its own (`DESK_STAGING_PHONE=cleanup`), which finds them by name again for a run
@@ -618,24 +620,25 @@ terminal: it holds the staging admin's `keys.json` and its anchor, `keys.json.or
      fingerprint xxxxx-xxxxx — compare the fingerprint with the device's, then approve? [y/N]`.
    - The owner compares the two fingerprints, answers `y`, and sees `listed: version <v>`. Within 10 s the panel reads
      *Listed, version <v>*.
-4. **The run** (the agent: `zsh apps/desk-hub/deploy/staging-run.sh phone <n>`; the owner, on the phone).
+4. **The run** (the agent: `zsh apps/desk-hub/deploy/staging-run.sh phone <n> --lane-b`; the owner, on the phone).
    - Within about two minutes (the enrollment, then Access admitting the machine's new service token), the phone shows
      two notifications reading *A session is waiting for your answer*: one for `la-1` and one for the harness's `la-2`.
-     With O10's lane B feed, there are four.
+     With O10's lane B feed, there are four: `app-1` and the harness's `app-2` as well.
    - The owner opens *Cards* (or either notification) and the machine `o13-phone-<n>`'s session *o13 staging run <n>:
      yours to answer*. They answer *o13 staging run <n>: which way?* either way and Allow or Deny `echo o13-phone-<n>
-     permission`, each with Face ID. Each card settles within a few seconds.
+     permission`, each with Face ID. Then the same on *o13 staging run <n>: yours to answer, lane B*. Each card settles
+     within a few seconds.
    - The owner leaves the harness's sessions alone: their cards are withdrawn within about half a minute.
    - The owner takes a screenshot of the notifications, and says what they saw: how many notifications, their text,
      and none for the second member's session. Nothing of the run records the phone.
-   - The run ends with its `PASS` lines (`round-trip lane B` reads `NOT RUN` until O10's feed lands), its cleanup and
-     `production untouched`.
+   - The run ends with its `PASS` lines, its cleanup and `production untouched`. The agent runs it with `--lane-b`
+     now that O10's feed has landed.
 5. **Cleanup**: the run's own is automatic (step 4's last lines). The phone stays listed on staging. To take it off:
    the owner runs `staging-run.sh admin devices` for its id, then `staging-run.sh admin remove-device <id>`, which asks
    `revoke <id>? [y/N]` at the terminal and prints `revoked: version <v>`. Then *Forget* in the phone's Device panel,
    and the home-screen icon removed.
 
-Before the owner sits down, the agent runs `zsh apps/desk-hub/deploy/staging-run.sh phone <n> --rehearse`: the same run
+Before the owner sits down, the agent runs `zsh apps/desk-hub/deploy/staging-run.sh phone <n> --rehearse --lane-b`: the same run
 with `o13-c-<n>` answering in the phone's place, and the `registration` item checking `o13-c-<n>`'s own pairing.
 
 ## Production runs: `production-deploy.sh`, `production-run.sh`
