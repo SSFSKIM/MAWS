@@ -15,12 +15,15 @@
 // `words?`, `rpc-result`) waits on the uplink. An upload that would take the queue past its cap is let go, its events
 // already in the ledger, leaving each writer in it a hole at its first position let go. The hub stores a writer's events
 // only in one run (each at its next seq, a gap answered by its own `resend`), so nothing of a writer's past its hole is
-// queued until the hole is filled: sminos is asked (`resend`) from the hole once the queue is at most half full, and the
-// upload that fills it, rebuilt byte for byte from the ledger, is queued past the cap, the rest following it in order.
-// The hub's own `resend` for a position the endpoint signed is taken as a hole the same way, asked for once, not passed
-// to sminos with each batch the hub refuses. While RL1 is down the queue is let go, its writers holed and nothing asked:
-// each RL1 welcome checks the hub's `have` against the ledger (below) and asks from there. So a drop costs a resend,
-// never an event, and a backlog however long reaches the hub in about one resend for each half queue of it.
+// queued until the hole is filled: sminos is asked (`resend`) from one hole at a time, the next once the last is filled
+// and the queue is at most half full. Only an upload of an asked hole fills it (rebuilt byte for byte from the ledger),
+// and it alone may take UPLINK_RESERVE past the cap; past that it is let go, the hole asked for again later. No position
+// is queued twice. So the queue holds at most UPLINK_BYTES and UPLINK_RESERVE (or one upload, while it is empty),
+// whatever sminos sends. The hub's own `resend` for a position the endpoint signed is taken as a hole the same way,
+// asked for once, not passed to sminos with each batch the hub refuses. While RL1 is down the queue is let go, its
+// writers holed and nothing asked: each RL1 welcome checks the hub's `have` against the ledger (below) and asks from
+// there. So a drop costs a resend, never an event, and a backlog however long reaches the hub in about one resend for
+// each half queue of it.
 //
 // Down. An arriving event goes to sminos only verified, wrapped `{event, signer, owners?}`:
 //   - under one of this machine's own writers (its current name, or a former one `machineNames` binds to its ref), only
@@ -99,6 +102,12 @@ type Judged =
  */
 export const UPLINK_BYTES = 8 * 1024 * 1024;
 
+/**
+ * The room past UPLINK_BYTES that a hole's filling may take, and only it (one asked for at a time): four of sminos's
+ * batches (256 KiB), so the queue holds at most UPLINK_BYTES and this, whatever sminos sends.
+ */
+export const UPLINK_RESERVE = 1024 * 1024;
+
 /** How many arriving events the relay holds at most, and how long each, while their verdict waits on the head. */
 export const HOLD_MAX = 1000;
 export const HOLD_MS = 3_600_000;
@@ -119,8 +128,8 @@ export type RelayContext = {
   opened(project: string): void;
   now(): number;
   log(line: string): void;
-  /** The uplink queue's cap (UPLINK_BYTES unless given). */
-  uplinkBytes?: number;
+  /** The uplink queue's cap and its reserve for a hole's filling (UPLINK_BYTES and UPLINK_RESERVE unless given). */
+  uplink?: { bytes: number; reserve: number };
 };
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -143,12 +152,17 @@ export class LogRelay {
   /** Signed uploads waiting for the hub link's room, in order, and their bytes. */
   readonly #uplink: Array<{ project: string; events: Record<string, unknown>[]; bytes: number }> = [];
   #uplinkBytes = 0;
+  /** The positions in the queue, by `project\nwriter\nseq`: none is queued twice. */
+  readonly #queuedAt = new Set<string>();
   #draining = false;
   /**
    * Each writer's hole, by project, then writer: the first position the hub is owed and the uplink let go, and whether
-   * sminos was asked for it since. Nothing of the writer's past it is queued until it is filled (see the header).
+   * sminos was asked for it since (only then is an upload of it its filling). Nothing of the writer's past it is queued
+   * until it is filled (see the header).
    */
   readonly #holes = new Map<string, Map<string, { from: number; asked: boolean }>>();
+  /** The hole `#ask` asked for last, by `project\nwriter`, until it is filled or let go: the next waits on it. */
+  #asking: string | null = null;
   /** The arriving events held for a head that can judge them, by project, then `writer\nseq`, in arrival order. */
   readonly #held = new Map<string, Map<string, { event: unknown; since: number }>>();
 
@@ -192,6 +206,8 @@ export class LogRelay {
       else {
         const at = position(e);
         this.#ctx.toSminos({ t: 'refused', project, refusal: { reason: signed.reason, ...(at ?? {}), message: signed.message } });
+        // A hole's filling refused: sminos's next welcome asks for it again; the next hole is asked for meanwhile.
+        if (at !== null && this.#asking === `${project}\n${at.writer}` && this.#holes.get(project)?.get(at.writer)?.from === at.seq) this.#asking = null;
       }
     }
     if (out.length > 0) this.#upload(project, out);
@@ -203,60 +219,91 @@ export class LogRelay {
   }
 
   get #cap(): number {
-    return this.#ctx.uplinkBytes ?? UPLINK_BYTES;
+    return this.#ctx.uplink?.bytes ?? UPLINK_BYTES;
   }
 
   /**
-   * An upload to the uplink queue, but for what lies past a writer's hole; past the cap, dropped, a hole left at each
-   * writer's first position in it. An upload that fills a hole is queued past the cap: it is the one sminos was asked
-   * for, at most one for each hole each time it is asked.
+   * An upload to the uplink queue, but for what lies past a writer's hole and any position queued already. Past the
+   * cap it is let go, a hole left at each writer's first position in it; an upload that fills a hole sminos was asked
+   * for may take the reserve too, and past that is let go, the hole asked for again later.
    */
   #upload(project: string, events: Record<string, unknown>[]): void {
     const holes = this.#holes.get(project);
+    /** Each holed writer's next position from its hole on, as this upload fills it. */
     const filling = new Map<string, number>();
+    let fills = false;
     const admitted = events.filter((e) => {
       const { writer, seq } = e as { writer: string; seq: number };
+      const queued = this.#queuedAt.has(`${project}\n${writer}\n${seq}`);
       const hole = holes?.get(writer);
-      if (hole === undefined || seq < hole.from) return true;
+      if (hole === undefined || seq < hole.from) return !queued;
       const next = filling.get(writer) ?? hole.from;
-      if (seq !== next) return false;
+      if (!hole.asked || seq !== next) return false;
       filling.set(writer, next + 1);
+      if (queued) return false;
+      fills = true;
       return true;
     });
-    if (admitted.length === 0) return;
-    const bytes = Buffer.byteLength(JSON.stringify({ t: 'events', project, events: admitted }));
-    if (filling.size === 0 && this.#uplink.length > 0 && this.#uplinkBytes + bytes > this.#cap) {
+    const bytes = admitted.length === 0 ? 0 : Buffer.byteLength(JSON.stringify({ t: 'events', project, events: admitted }));
+    if (admitted.length > 0 && this.#uplink.length > 0 && this.#uplinkBytes + bytes > this.#cap + (fills ? (this.#ctx.uplink?.reserve ?? UPLINK_RESERVE) : 0)) {
       if (this.#holes.size === 0) this.#ctx.log(`endpoint: the hub is taking uploads slower than sminos sends them; uploads past ${this.#cap} bytes are let go and asked again from sminos as the uplink drains`);
-      for (const e of admitted) this.#hole(project, (e as { writer: string }).writer, (e as { seq: number }).seq, false);
+      for (const writer of filling.keys()) this.#unask(project, writer);
+      for (const e of admitted) this.#hole(project, (e as { writer: string }).writer, (e as { seq: number }).seq);
       return;
     }
     // sminos sends a writer's positions in order from where it was asked, so the rest follows the hole's filling.
-    for (const writer of filling.keys()) holes?.delete(writer);
-    if (holes?.size === 0) this.#holes.delete(project);
+    for (const writer of filling.keys()) this.#filled(project, writer);
+    if (admitted.length === 0) return;
     this.#uplink.push({ project, events: admitted, bytes });
     this.#uplinkBytes += bytes;
+    for (const e of admitted) this.#queuedAt.add(`${project}\n${(e as { writer: string }).writer}\n${(e as { seq: number }).seq}`);
     void this.#drain();
   }
 
-  /** A hole at `from` in `writer`'s uploads, unless it holds one no later already. */
-  #hole(project: string, writer: string, from: number, asked: boolean): void {
+  /** A hole at `from` in `writer`'s uploads, to be asked for, unless it holds one no later already. */
+  #hole(project: string, writer: string, from: number): void {
     let holes = this.#holes.get(project);
     if (holes === undefined) this.#holes.set(project, (holes = new Map()));
     const held = holes.get(writer);
-    if (held === undefined || from < held.from) holes.set(writer, { from, asked });
+    if (held !== undefined && held.from <= from) return;
+    holes.set(writer, { from, asked: false });
+    if (this.#asking === `${project}\n${writer}`) this.#asking = null;
+  }
+
+  /** `writer`'s hole to be asked for again (its filling let go). */
+  #unask(project: string, writer: string): void {
+    const hole = this.#holes.get(project)?.get(writer);
+    if (hole !== undefined) hole.asked = false;
+    if (this.#asking === `${project}\n${writer}`) this.#asking = null;
+  }
+
+  /** `writer`'s hole filled, or the hub holding all of it: gone, and the next hole asked for once there is room. */
+  #filled(project: string, writer: string): void {
+    const holes = this.#holes.get(project);
+    holes?.delete(writer);
+    if (holes?.size === 0) this.#holes.delete(project);
+    if (this.#asking === `${project}\n${writer}`) this.#asking = null;
+  }
+
+  /** Every hole counted as asked and none waited on: sminos's next welcome asks (RL1, or sminos, gone). */
+  #askedAll(): void {
+    for (const holes of this.#holes.values()) for (const hole of holes.values()) hole.asked = true;
+    this.#asking = null;
   }
 
   /**
-   * sminos asked (`resend`) for each hole not yet asked for, once the queue is at most half full: the room the hole's
-   * filling and what follows it go up in, ahead of anything later of that writer's.
+   * sminos asked (`resend`) for the next hole not yet asked for, once the last one asked is filled and the queue is at
+   * most half full: the room its filling and what follows go up in, ahead of anything later of that writer's.
    */
   #ask(): void {
-    if (this.#uplinkBytes > this.#cap / 2) return;
+    if (this.#asking !== null || this.#uplinkBytes > this.#cap / 2) return;
     for (const [project, holes] of this.#holes) {
       for (const [writer, hole] of holes) {
         if (hole.asked) continue;
         hole.asked = true;
+        this.#asking = `${project}\n${writer}`;
         this.#ctx.toSminos({ t: 'resend', project, writer, from: hole.from });
+        return;
       }
     }
   }
@@ -270,6 +317,7 @@ export class LogRelay {
         await this.#ctx.hub.writable?.();
         const next = this.#uplink.shift()!;
         this.#uplinkBytes -= next.bytes;
+        for (const e of next.events) this.#queuedAt.delete(`${next.project}\n${(e as { writer: string }).writer}\n${(e as { seq: number }).seq}`);
         if (this.#ctx.hub.send({ t: 'events', project: next.project, events: next.events })) {
           this.#ask();
           continue;
@@ -277,10 +325,11 @@ export class LogRelay {
         // RL1 is down: what was queued is let go, a hole left for each writer in it, and nothing is asked now, only
         // to be lost the same way; the next welcome checks every project's `have` against the ledger and asks then.
         for (const { project, events } of [next, ...this.#uplink.splice(0)]) {
-          for (const e of events) this.#hole(project, (e as { writer: string }).writer, (e as { seq: number }).seq, true);
+          for (const e of events) this.#hole(project, (e as { writer: string }).writer, (e as { seq: number }).seq);
         }
         this.#uplinkBytes = 0;
-        for (const holes of this.#holes.values()) for (const hole of holes.values()) hole.asked = true;
+        this.#queuedAt.clear();
+        this.#askedAll();
       }
     } finally {
       this.#draining = false;
@@ -299,6 +348,8 @@ export class LogRelay {
     this.#projects.clear();
     this.#fresh.clear();
     this.#held.clear();
+    // What was asked of this connection is lost with it: its successor's hello and `have` ask again.
+    this.#askedAll();
   }
 
   /** The head, the certificates or the legacy key moved: every held event judged again, in the order it arrived. */
@@ -381,7 +432,7 @@ export class LogRelay {
     if (frame.t === 'events') return this.#arrived(frame.project, frame.events);
     if (frame.t === 'resend' && this.#owed(frame.project, frame.writer, frame.from)) {
       // A gap the hub names in what the endpoint signed: a hole, asked for once there is room (see the header).
-      this.#hole(frame.project, frame.writer as string, frame.from as number, false);
+      this.#hole(frame.project, frame.writer as string, frame.from as number);
       return this.#ask();
     }
     this.#ctx.toSminos(frame);
@@ -396,14 +447,12 @@ export class LogRelay {
       const name = writerMachine(writer);
       if (name === null || machineNameKey(name) !== machineNameKey(org.name)) continue;
       const at = typeof have[writer] === 'number' ? (have[writer] as number) : 0;
-      const holes = this.#holes.get(project);
+      this.#filled(project, writer);
       if (signed > at) {
-        if (holes === undefined) this.#holes.set(project, new Map([[writer, { from: at + 1, asked: true }]]));
-        else holes.set(writer, { from: at + 1, asked: true });
+        // Asked here, every such writer at once: their fillings share the reserve, and one let go is asked again.
+        this.#hole(project, writer, at + 1);
+        this.#holes.get(project)!.get(writer)!.asked = true;
         this.#ctx.toSminos({ t: 'resend', project, writer, from: at + 1 });
-      } else {
-        holes?.delete(writer);
-        if (holes?.size === 0) this.#holes.delete(project);
       }
     }
   }

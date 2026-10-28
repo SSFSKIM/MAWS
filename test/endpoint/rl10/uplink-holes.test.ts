@@ -23,6 +23,7 @@ const REF = 'q4Hc2Wv9Kp0Lm8Tr1Xy7Za';
 const NO_CERTS: Certificates = { certs: [], retirements: [] };
 const WRITERS = [`${NAME}/human`, `${NAME}/a`];
 const CAP = 64 * 1024;
+const RESERVE = 32 * 1024;
 const PER = 4; // events a frame
 const TEXT = 'x'.repeat(4 * 1024); // so a frame is about 16 KiB, four to the queue
 
@@ -36,7 +37,7 @@ afterEach(() => {
 const turn = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 /** A relay signing as `host`, its hub a model of desk-hub's acceptance whose socket takes a frame when `take()`n. */
-async function scene() {
+async function scene(writers = WRITERS) {
   const a1 = await newDevice('a1');
   const machine = await generateSigningKey();
   const A = memberId();
@@ -51,7 +52,7 @@ async function scene() {
   const state = EndpointState.open(dir);
 
   // The hub: each writer's last stored seq, a run with no gap; a gap answered by `resend`, the writer's batch let go.
-  const hub = { last: new Map<string, number>(WRITERS.map((w) => [w, 0])), gaps: 0, replies: [] as Frame[], up: true };
+  const hub = { last: new Map<string, number>(writers.map((w) => [w, 0])), gaps: 0, replies: [] as Frame[], up: true };
   const accept = (frame: Frame) => {
     const stopped = new Set<string>();
     for (const e of frame.events as Event[]) {
@@ -75,7 +76,7 @@ async function scene() {
   };
 
   // sminos: each writer's cursor (its last uploaded seq), rewound by a `resend`.
-  const cursor = new Map<string, number>(WRITERS.map((w) => [w, 0]));
+  const cursor = new Map<string, number>(writers.map((w) => [w, 0]));
   const toSminos: Frame[] = [];
   const relay = new LogRelay({
     org: () => ({ head: head.state, certificates: NO_CERTS, ref: REF, name: NAME }),
@@ -101,24 +102,32 @@ async function scene() {
     opened: () => {},
     now: Date.now,
     log: () => {},
-    uplinkBytes: CAP,
+    uplink: { bytes: CAP, reserve: RESERVE },
   });
   relay.hello({ t: 'hello', project: P, name: 'maws', have: {} });
 
+  /** The most the uplink queue held: it grows only as an upload is taken, so it is read after each. */
+  const queue = { peak: 0 };
+  const event = (writer: string, seq: number) => ({ ts: '2026-10-27T18:02:11.482Z', writer, seq, kind: 'human', from: 'human', to: '*', text: TEXT });
+  /** An upload of `events` as sminos (or anything holding its connection) sends it. */
+  const submit = async (events: unknown[]) => {
+    await relay.events({ t: 'events', project: P, events });
+    queue.peak = Math.max(queue.peak, relay.uplinkQueued);
+  };
   /** sminos's next frame for `writer` from its cursor, up to `total`; false once it has none. */
   const upload = async (writer: string, total: number) => {
     const from = cursor.get(writer)! + 1;
     if (from > total) return false;
-    const events = Array.from({ length: Math.min(PER, total - from + 1) }, (_, i) => ({ ts: '2026-10-27T18:02:11.482Z', writer, seq: from + i, kind: 'human', from: 'human', to: '*', text: TEXT }));
+    const events = Array.from({ length: Math.min(PER, total - from + 1) }, (_, i) => event(writer, from + i));
     cursor.set(writer, from + events.length - 1);
-    await relay.events({ t: 'events', project: P, events });
+    await submit(events);
     return true;
   };
   /** The hub's replies so far, on to the relay as RL1 would deliver them. */
   const reply = async () => {
     for (const frame of hub.replies.splice(0)) await relay.fromHub(frame as Frame & { project: string });
   };
-  return { relay, hub, take, upload, reply, toSminos, resends: () => toSminos.filter((f) => f.t === 'resend') };
+  return { relay, hub, take, upload, submit, event, queue, reply, toSminos, resends: () => toSminos.filter((f) => f.t === 'resend') };
 }
 
 describe('the uplink’s recovery from a dropped upload', () => {
@@ -139,6 +148,7 @@ describe('the uplink’s recovery from a dropped upload', () => {
     }
     expect(writers.map((w) => s.hub.last.get(w))).toEqual(writers.map(() => total));
     expect(s.hub.gaps).toBe(0);
+    expect(s.queue.peak).toBeLessThanOrEqual(CAP + RESERVE);
     // Each resend is asked with half the queue free, so each recovers about that much: 2 MiB over 32 KiB.
     expect(s.resends().length).toBeLessThanOrEqual((writers.length * total * TEXT.length) / (CAP / 2));
   }, 60_000);
@@ -185,4 +195,43 @@ describe('the uplink’s recovery from a dropped upload', () => {
     expect(s.hub.gaps).toBe(0);
     expect(s.resends()).toHaveLength(1);
   });
+  it('holds no more than its cap and reserve against an adversary resubmitting held positions while the hub reads nothing', async () => {
+    const s = await scene();
+    const [writer] = WRITERS;
+    // The hub takes the first upload and nothing after.
+    await s.submit([s.event(writer, 1)]);
+    await turn();
+    // One event, over and over; then forty positions in turn, each let go over the cap and resubmitted unasked.
+    for (let i = 0; i < 1000; i++) await s.submit([s.event(writer, 2)]);
+    for (let i = 0; i < 1000; i++) await s.submit([s.event(writer, 3 + (i % 40))]);
+    expect(s.queue.peak).toBeLessThanOrEqual(CAP);
+    expect(s.resends()).toEqual([]);
+  }, 60_000);
+
+  it('bounds many writers’ fillings together by the reserve, though every one was asked at once, and still brings each whole', async () => {
+    const writers = Array.from({ length: 32 }, (_, i) => `${NAME}/w${i}`);
+    const s = await scene(writers);
+    const TOTAL = 32; // each writer's: 128 KiB, 4 MiB in all
+    // Each writer's first frame, the hub reading only the first: past the cap the rest are let go, holes left.
+    for (const writer of writers) await s.upload(writer, TOTAL);
+    await turn();
+    // A welcome whose `have` holds nothing: every writer asked from 1 at once, and each fills at once.
+    s.relay.hubWelcomed();
+    await s.relay.fromHub({ t: 'have', project: P, have: {} });
+    expect(s.resends()).toHaveLength(writers.length);
+    for (const writer of writers) await s.upload(writer, TOTAL);
+    expect(s.queue.peak).toBeLessThanOrEqual(CAP + RESERVE);
+    // Then the hub reads, a frame a pass: every writer's whole run is stored, the queue bounded throughout.
+    let passes = 0;
+    while (writers.some((w) => s.hub.last.get(w)! < TOTAL)) {
+      await s.reply();
+      for (const writer of writers) await s.upload(writer, TOTAL);
+      s.take();
+      await turn();
+      if (++passes > 4000) throw new Error(`no convergence after ${passes} passes: the hub holds ${writers.map((w) => s.hub.last.get(w)).join(', ')}`);
+    }
+    expect(s.hub.gaps).toBe(0);
+    expect(s.queue.peak).toBeLessThanOrEqual(CAP + RESERVE);
+    expect(s.resends().length).toBeLessThanOrEqual(writers.length + (writers.length * TOTAL * TEXT.length) / (CAP / 2));
+  }, 60_000);
 });
