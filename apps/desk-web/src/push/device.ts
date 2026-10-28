@@ -5,6 +5,7 @@
 // not keep reads `unsynced`, with why when the hub said, and `retryPush` hands it over again. The app does that at
 // every start too (`resyncPush`); a rotated hub key means subscribing anew.
 import { base64urlDecode, base64urlEncode, type PushSubscriptionRequest } from 'desk-hub/protocol';
+import { boundPushDevice } from './bound-device';
 import { forgetSubscription, hubPushKey, hubSubscriptions, keepSubscription } from './hub-push';
 
 export type PushState =
@@ -35,6 +36,11 @@ export type PushEnv = {
   pushManager: (() => Promise<PushManagerLike>) | null;
   /** iOS Safari's `navigator.standalone` (true in a home-screen app); null in every other browser. */
   standalone: boolean | null;
+  /**
+   * The org-state device a subscription is bound to (P5 O13 M3, Decision Log 41): this browser's `web-cards` device
+   * while the head lists it, so revoking the device ends its pushes at the hub; null keeps it unbound.
+   */
+  device?: () => string | null;
 };
 
 const off: PushState = { kind: 'off' };
@@ -54,6 +60,7 @@ export function browserPushEnv(registration: Promise<ServiceWorkerRegistration> 
       return (await navigator.serviceWorker.ready).pushManager as unknown as PushManagerLike;
     },
     standalone,
+    device: boundPushDevice,
   };
 }
 
@@ -76,9 +83,9 @@ async function held(endpoint: string): Promise<PushState> {
 }
 
 /** Hands the subscription to the hub, answering on, or unsynced with the hub's refusal. */
-async function handOver(subscription: SubscriptionLike): Promise<PushState> {
+async function handOver(subscription: SubscriptionLike, device: string | null): Promise<PushState> {
   try {
-    await keepSubscription(requestOf(subscription));
+    await keepSubscription(requestOf(subscription, device));
     return { kind: 'on', endpoint: subscription.endpoint };
   } catch (error) {
     return { kind: 'unsynced', endpoint: subscription.endpoint, error };
@@ -96,7 +103,7 @@ export async function enablePush(env: PushEnv): Promise<PushState> {
   const answer = await env.notifications.requestPermission();
   if (answer === 'denied') return { kind: 'denied' };
   if (answer !== 'granted') return off;
-  return handOver(await subscribed(env.pushManager));
+  return handOver(await subscribed(env.pushManager), env.device?.() ?? null);
 }
 
 /** Hands this device's subscription to the hub again (Retry), without turning anything off. */
@@ -104,7 +111,7 @@ export async function retryPush(env: PushEnv): Promise<PushState> {
   if (!env.notifications || !env.pushManager || env.notifications.permission() !== 'granted') return pushState(env);
   if (!(await (await env.pushManager()).getSubscription())) return off;
   try {
-    return await handOver(await subscribed(env.pushManager));
+    return await handOver(await subscribed(env.pushManager), env.device?.() ?? null);
   } catch (error) {
     const held = await (await env.pushManager()).getSubscription();
     return held ? { kind: 'unsynced', endpoint: held.endpoint, error } : off;
@@ -146,10 +153,13 @@ async function subscribed(manager: () => Promise<PushManagerLike>): Promise<Subs
   return pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: Uint8Array.from(base64urlDecode(key)) });
 }
 
-/** What the hub keeps, its keys in canonical base64url (no padding) whatever spelling the browser gave. */
-function requestOf(subscription: SubscriptionLike): PushSubscriptionRequest {
+/** What the hub keeps, its keys in canonical base64url (no padding) whatever spelling the browser gave, bound to `device`
+ * when one is given. */
+function requestOf(subscription: SubscriptionLike, device: string | null): PushSubscriptionRequest {
   const { keys } = subscription.toJSON();
   if (!keys?.p256dh || !keys.auth) throw new Error('the push subscription carries no keys');
   const canonical = (value: string) => base64urlEncode(base64urlDecode(value.replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_')));
-  return { endpoint: subscription.endpoint, keys: { p256dh: canonical(keys.p256dh), auth: canonical(keys.auth) } };
+  const request: PushSubscriptionRequest = { endpoint: subscription.endpoint, keys: { p256dh: canonical(keys.p256dh), auth: canonical(keys.auth) } };
+  if (device !== null) request.device = device;
+  return request;
 }

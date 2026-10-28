@@ -1293,7 +1293,7 @@ test('a run without the Selection: trailer writes the outputs and the summary it
     // The VM lane's (ci-kit's mac-lane concurrency spec, "out/ is built on the pool"): no e2e job, so none on the guest.
     'e2e_host=[]', 'e2e_vm=[]', 'e2e_build=[]', `e2e_build_runner=${JSON.stringify(['self-hosted', 'ci-kit-pool', 'cpus-4'])}`,
     // The hosted Macs' (ci-kit's hosted-Mac spec, Placement): no e2e job, so none hosted.
-    'e2e_hosted=[]',
+    'e2e_hosted=[]', 'peer_wait=[]',
   ];
   assert.equal(pushed.raw, `${outputs.join('\n')}\n`);
   assert.equal(pushed.summary, '### Gates\n\n- `static`\n- `unit`\n- `probes`\n\nFrom: the `Gates:` trailer. Class 1a: pool. E2e lane: linux.\n');
@@ -1576,4 +1576,55 @@ test("gate.yml lists e2e:cross-build as its peer group, and its e2e job builds t
     // in that order: the peer before the run, the stop after it
     assert.ok(body.indexOf('gate-peer.sh prepare') < body.indexOf('MAWS_E2E_PEER_ROOT: ') && body.indexOf('MAWS_E2E_PEER_ROOT: ') < body.indexOf('gate-peer.sh stop'), job);
   }
+});
+
+test('a held peer check omits only the automatic join and names its run in the summary and stdout', () => {
+  const inputs = { PEER_E2E: 'cross-build', HEAD_MESSAGE: `Gates: unit\n${peerTrailers('3.0', '3.1')}` };
+  assert.deepEqual(JSON.parse(plan({ ...inputs, PEER_HELD_BY: '' }).outputs.e2e), [peerEntry]);
+  const { outputs, summary, stdout } = plan({ ...inputs, PEER_HELD_BY: '40631062270 queued' });
+  assert.equal(outputs.unit, 'true');
+  assert.equal(outputs.e2e, '[]');
+  const line = "Peer: 01234567, wire 3.0; this tree's 3.1, a minor apart; e2e:cross-build is checked in run 40631062270 (queued), so not here.";
+  assert.ok(summary.includes(line));
+  assert.ok(stdout.includes(line));
+});
+
+test('a held peer check never suppresses an explicit peer group in Gates or dispatch inputs', () => {
+  for (const extra of [{ HEAD_MESSAGE: `Gates: e2e:cross-build\n${peerTrailers('3.0', '3.1')}` }, { EVENT: 'workflow_dispatch', INPUT_GATES: 'e2e:cross-build' }]) {
+    const { outputs, summary } = plan({ PEER_E2E: 'cross-build', PEER_HELD_BY: '90 succeeded', ...extra });
+    assert.equal(JSON.parse(outputs.e2e)[0].group, 'cross-build');
+    assert.ok(!summary.includes('so not here'));
+  }
+});
+
+test('a deferred peer group gets a bounded hosted waiter, while explicit requests keep their real job', () => {
+  const base = { PEER_E2E: 'cross-build', PEER_HELD_BY: '90 queued', HEAD_MESSAGE: `Gates: unit\n${peerTrailers('3.0', '3.1')}` };
+  const deferred = plan(base);
+  assert.equal(deferred.outputs.e2e, '[]');
+  assert.deepEqual(JSON.parse(deferred.outputs.peer_wait), [{ group: 'cross-build', run: '90', timeout: 180, wait: 175 }]);
+  assert.match(deferred.summary, /verdict.*awaited.*hosted Linux/i);
+  for (const extra of [{ PEER_HELD_BY: '' }, { HEAD_MESSAGE: `Gates: e2e:cross-build\n${peerTrailers('3.0', '3.1')}` }]) {
+    const result = plan({ ...base, ...extra });
+    assert.equal(result.outputs.peer_wait, '[]');
+    assert.equal(JSON.parse(result.outputs.e2e)[0].group, 'cross-build');
+  }
+});
+
+test('the deferred peer matrix is wired to a hosted verdict job with action-read permission and its group name', () => {
+  const workflow = readWorkflow();
+  assert.match(jobBody(workflow, 'plan'), /peer_wait: \$\{\{ steps\.plan\.outputs\.peer_wait \}\}/);
+  const body = jobBody(workflow, 'e2e-peer-wait');
+  assert.match(body, /needs: plan/);
+  assert.match(body, /if: needs\.plan\.outputs\.peer_wait != '\[\]'/);
+  assert.match(body, /include: \$\{\{ fromJSON\(needs\.plan\.outputs\.peer_wait\) \}\}/);
+  assert.match(body, /name: e2e:\$\{\{ matrix\.group \}\}/);
+  assert.match(body, /runs-on: ubuntu-24\.04/);
+  assert.match(body, /timeout-minutes: \$\{\{ matrix\.timeout \}\}/);
+  assert.match(body, /actions: read/);
+  assert.match(body, /contents: read/);
+  assert.match(body, /GITHUB_TOKEN: \$\{\{ github\.token \}\}/);
+  assert.match(body, /PEER_RUN: \$\{\{ matrix\.run \}\}/);
+  assert.match(body, /PEER_GROUP: \$\{\{ matrix\.group \}\}/);
+  assert.match(body, /PEER_WAIT_MINUTES: \$\{\{ matrix\.wait \}\}/);
+  assert.match(body, /run: .*node \.github\/scripts\/gate-peer-wait\.mjs/);
 });

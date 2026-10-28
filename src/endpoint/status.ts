@@ -18,6 +18,8 @@ export type EndpointStatus = {
   legacyKey: boolean;
   /** The org state retired it (O14 M5a): `legacy.json` is its tombstone. */
   legacyRetired: boolean;
+  /** The machine holds a delegation (O14 M1): it provisioned itself under one, and `retire` is its departure. */
+  delegated: boolean;
   refusing?: string;
   /** The operation ledgers closed (op-ledger.ts): why, as its word; each answers every remote action `unavailable` until
    * its process restarts (mawsd for the endpoint's, the engine host for its own). Absent while both answer. */
@@ -39,11 +41,13 @@ export function endpointStatus(state: EndpointState | null, headHash: string | n
   if (ledgers.endpoint !== null) opLedgers.endpoint = { closed: ledgers.endpoint, clears: 'restart' };
   if (ledgers.engineHost !== null) opLedgers.engineHost = { closed: ledgers.engineHost, clears: 'restart' };
   const enrollment = state?.enrolled ? state.enrollment : null;
+  // A redemption whose set is not yet whole is the hub's already (O14 M1): a departure must see it to retire it.
+  const pending = enrollment === null ? (state?.provisioning?.redeemed ?? null) : null;
   const head = enrollment !== null ? (state?.org?.head ?? null) : null;
   const refusing = state?.refusing ?? (state?.stale && !state.enrolled ? 'stale-state' : links.refusing);
   return {
-    enrollment: enrollment?.state ?? 'none',
-    ...(enrollment === null ? {} : { name: enrollment.name, org: enrollment.org }),
+    enrollment: enrollment?.state ?? (pending === null ? 'none' : 'hub-confirmed'),
+    ...(enrollment !== null ? { name: enrollment.name, org: enrollment.org } : pending !== null ? { name: pending.machine, org: pending.org } : {}),
     ...(head === null ? {} : { stateVersion: head.state.version, ...(headHash === null ? {} : { headHash }) }),
     hub: { ...links.hub },
     channels: { ...links.channels },
@@ -51,6 +55,7 @@ export function endpointStatus(state: EndpointState | null, headHash: string | n
     listener: { ...links.listener },
     legacyKey: state?.legacy ?? false,
     legacyRetired: state?.legacyRetired ?? false,
+    delegated: (state?.delegation ?? null) !== null,
     ...(refusing === undefined ? {} : { refusing }),
     ...(Object.keys(opLedgers).length === 0 ? {} : { opLedgers }),
   };

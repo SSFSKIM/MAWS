@@ -214,6 +214,47 @@ describe.skipIf(!zsh)('admin --pipe with the real launcher', () => {
   }, 240_000);
 });
 
+describe('the staging deploy', () => {
+  // `staging-deploy.sh` (O13 M4): the web build carries the label the deploy names with `--web`, as VITE_DESK_WEB_BUILD,
+  // so the phone's channel handshake says which build it runs (`h1.build`, `desk-web/<label>`). Run from a copy in a
+  // throwaway git checkout, with stubs for pnpm (recording the label it builds with and the deploy's arguments), curl and
+  // sleep, and a synthetic secrets directory: nothing reaches staging.
+  it.skipIf(!zsh)('builds desk-web with VITE_DESK_WEB_BUILD set to the --web label', () => {
+    const root = mkdtempSync(join(tmpdir(), 'staging-deploy-'));
+    const [bin, secrets, state, dir] = ['bin', 'secrets', 'state', 'maws'].map((name) => join(root, name));
+    for (const d of [bin, secrets, join(dir, 'apps/desk-hub/deploy')]) mkdirSync(d, { recursive: true });
+    writeFileSync(join(secrets, 'CF_ACCESS_SETUP_TOKEN'), 'setup-SYNTHETIC\n');
+    writeFileSync(join(secrets, 'CF_DESK_HUB_SERVICE_TOKENS'), 'service-SYNTHETIC\n');
+    writeFileSync(
+      join(bin, 'pnpm'),
+      `#!/bin/sh
+case "$*" in
+  *"desk-web build"*) printf '%s\\n' "$VITE_DESK_WEB_BUILD" > '${root}/label'; mkdir -p apps/desk-web/dist && echo built > apps/desk-web/dist/index.html ;;
+  *"deployment deploy"*) printf '%s\\n' "$@" > '${root}/deploy-args'; cat > /dev/null; echo 'wrangler target desk-hub-staging (config worker desk-hub-staging, account a): deploy' ;;
+esac
+exit 0
+`,
+      { mode: 0o755 },
+    );
+    writeFileSync(join(bin, 'curl'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    writeFileSync(join(bin, 'sleep'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    for (const name of ['staging-deploy.sh', 'staging.json']) writeFileSync(join(dir, 'apps/desk-hub/deploy', name), readFileSync(join(deploy, name)));
+    writeFileSync(join(dir, '.gitignore'), 'apps/desk-web/dist/\n');
+    const git = (...args: string[]) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: dir, encoding: 'utf8' });
+    for (const args of [['init', '-q', '-b', 'o13-m4'], ['add', '-A'], ['commit', '-q', '-m', 'one']]) expect(git(...args).status).toBe(0);
+    const head = git('rev-parse', '--short=8', 'HEAD').stdout.trim();
+    const run = spawnSync('zsh', [join(dir, 'apps/desk-hub/deploy/staging-deploy.sh')], {
+      encoding: 'utf8',
+      env: { PATH: `${bin}:${process.env.PATH}`, HOME: root, LANG: 'C', DESK_STAGING_SECRETS: secrets, DESK_STAGING_DIR: state },
+    });
+    expect(run.status, run.stdout + run.stderr).toBe(0);
+    const label = `o13-m4.${head}`;
+    expect(readFileSync(join(root, 'label'), 'utf8').trim()).toBe(label);
+    const args = readFileSync(join(root, 'deploy-args'), 'utf8').trim().split('\n');
+    expect(args[args.indexOf('--web') + 1]).toBe(label);
+  });
+});
+
 describe('curl and the owner’s token', () => {
   it('is handed its configuration through a pipe, never a here-string (zsh spools one to a file)', () => {
     for (const { name, text } of scripts) expect(text.includes('<<<'), name).toBe(false);

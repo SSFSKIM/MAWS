@@ -412,6 +412,9 @@ importers:
       desk-hub:
         specifier: workspace:*
         version: link:../desk-hub
+      org-protocol:
+        specifier: workspace:*
+        version: link:../org-protocol
       react:
         specifier: ^19.3.0
         version: 19.3.0

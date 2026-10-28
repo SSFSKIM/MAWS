@@ -47,7 +47,7 @@ export class PushDouble {
   }
 
   private keep(member: MemberRecord, body: unknown): Answer {
-    const b = (typeof body === 'object' && body !== null ? body : {}) as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } };
+    const b = (typeof body === 'object' && body !== null ? body : {}) as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown }; device?: unknown };
     if (!isHttpsUrl(b.endpoint) || !bytesOf(b.keys?.p256dh, 65) || !bytesOf(b.keys?.auth, 16)) {
       return { status: 400, body: { error: 'bad-shape', message: 'the body is {endpoint: an https URL, keys: {p256dh: 65 bytes, auth: 16 bytes}}' } };
     }
@@ -55,6 +55,8 @@ export class PushDouble {
     const others = this.subscriptions.filter((s) => s.member === member.id && s.endpoint !== endpoint);
     if (others.length >= MAX_SUBSCRIPTIONS) return { status: 409, body: { error: 'too-many', message: `a member keeps at most ${MAX_SUBSCRIPTIONS} devices` } };
     const record: PushSubscriptionRecord = { member: member.id, endpoint, keys: { p256dh: b.keys!.p256dh as string, auth: b.keys!.auth as string }, created: new Date().toISOString() };
+    // Bound to the member's device when named (O11 M4); the double holds no org state, so it takes the name as given.
+    if (typeof b.device === 'string') record.device = b.device;
     this.subscriptions = [...this.subscriptions.filter((s) => s.endpoint !== endpoint), record];
     return { status: 200, body: { subscription: record } };
   }
