@@ -129,7 +129,8 @@
     "e2e/support/live-data-bounds.ts", // E3 M4: test/support/live-data-bounds.test.ts runs the live block's on-screen judgement
     "e2e/support/quiet.ts", // P4-W: test/support/quiet.test.ts runs the measured specs' quiet admission
     "e2e/support/clock.ts", // P4 W2-D: test/support/clock.test.ts holds the e2e clock pin to the app's own clock
-    "e2e/support/window-origin.ts" // ci-kit's mac-lane concurrency spec, M2: test/support/window-origin.test.ts runs a shared desktop's corners
+    "e2e/support/window-origin.ts", // ci-kit's mac-lane concurrency spec, M2: test/support/window-origin.test.ts runs a shared desktop's corners
+    "e2e/support/host-ready.ts" // P5 O3-B: test/support/host-ready.test.ts runs the launch's bounded wait for the daemon shape's engine host
   ],
   // P3-B: the document editor's React and DOM, and the importers that parse HTML through the DOM (M6), typechecked by
   // tsconfig.web.json. P3-D M4: the design system's React and DOM (the apply API's scopes, the page), likewise. P3-C M4:

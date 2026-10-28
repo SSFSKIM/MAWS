@@ -13,6 +13,7 @@ import { _electron, test as base, type ElectronApplication, type Page } from '@p
 import { writeReplayEngine } from '../../test/support/replay-engine';
 import { writeScratchShellHome } from '../../test/support/shell-home';
 import { writeDiscoverScratch, type DiscoverScratch, type DiscoverScratchOptions } from './discover-scratch'; // P4-AGG M1
+import { untilHostReady } from './host-ready'; // P5 O3-B
 import { endProfileProcesses, killProfileProcessesNow, processesNaming, shellsUnder, untilExited } from './processes';
 import { realEngine, type RealEngine } from './real-engine'; // P4-AGG M1
 import { assertEngineKeychainEnv, assertNoKeychainPrompt, killTree, loginShellEnvironment, watchKeychainPrompt } from './keychain-guard'; // fixB
@@ -87,6 +88,8 @@ export interface ShellLaunchOptions extends MawsLaunchOptions {
   // marketplace and its test-source descriptor, the recorded catalog sources, and a scratch HOME unless `home: 'runner'`.
   // The engine store stays the launch's own `claude-config`.
   realEngine?: DiscoverScratchOptions;
+  // P5 O3-B (default true): false skips the wait for the daemon shape's engine host, for a spec timing the window from `launchedAt`
+  hostReady?: boolean;
   // The two-build check (e2e/cross-build.spec.ts): the root of another checkout, a build of its own (its out/ and its
   // node_modules), whose app runs in this one's place: its out/main/index.js under its own Electron, from its root, as
   // this checkout's runs from here. Its supervisor is then that build's, spawned from its own bundle.
@@ -225,7 +228,7 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
     await sizeForGroup(app, page); // P3-F1
     await placeForInstance(app); // ci-kit's mac-lane concurrency spec, M2
     await reportForeground(app);
-    await untilDaemonHostReady(page, launchedAt); // P5 O3-B
+    if (opts.hostReady !== false) await untilDaemonHostReady(page, launchedAt); // P5 O3-B
     return { app, page, consoleErrors, userData, shellHome: shellHome.dir, packaged: executable !== null, launchedAt, ...(engine && discover && { realEngine: { ...engine, scratch: discover } }), cleanup };
   } catch (error) {
     await cleanup().catch((cleanupError) => console.error('[e2e] cleanup after a failed launch also failed', cleanupError));
@@ -234,11 +237,13 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
 }
 
 // One launch per test, closed and removed at teardown; a teardown failure is reported beside the test's own result.
-// C3: `test.use({ mawsEnv: { … } })` sets extra environment variables for a file's launches.
-export const test = base.extend<{ maws: MawsLaunch; mawsEnv: Record<string, string> }>({
+// C3: `test.use({ mawsEnv: { … } })` sets extra environment variables for a file's launches. P5 O3-B:
+// `test.use({ mawsHostReady: false })` passes `hostReady: false` to them.
+export const test = base.extend<{ maws: MawsLaunch; mawsEnv: Record<string, string>; mawsHostReady: boolean }>({
   mawsEnv: [{}, { option: true }], // C3
-  maws: async ({ mawsEnv }, use) => {
-    const maws = await launchMaws({ env: mawsEnv }); // C3: the env option
+  mawsHostReady: [true, { option: true }], // P5 O3-B
+  maws: async ({ mawsEnv, mawsHostReady }, use) => {
+    const maws = await launchMaws({ env: mawsEnv, hostReady: mawsHostReady }); // C3: the env option; P5 O3-B: the host wait
     try {
       await use(maws);
     } finally {
@@ -278,24 +283,18 @@ async function placeForInstance(app: ElectronApplication): Promise<void> {
 // P5 O3-B: on the daemon shape a launch starts its hosts cold, `mawsd` first and then the engine host and pty host it
 // serves, where the utility shape forked them beside the window; the specs' first waits after a launch (a seeded session
 // indexed through the engine host's scan within 5 s) were written for the utility shape's start. So on the daemon shape
-// the launch returns once the engine host is ready through `mawsd`; bounded and never failing, so a spec about a host
-// that does not come up still reads its state itself. Any other shape, or a page without the bridge, returns at once.
-// Each daemon-shape launch prints one line with the wait and the time from the launch to the host's ready (`[e2e]
-// daemon host ready:`), so a slower cold start shows in the job logs rather than hiding behind the wait.
-const DAEMON_HOST_READY_MS = 30_000;
+// the launch returns once the engine host is ready through `mawsd`; bounded at 30 s even while a read is pending, and
+// never failing, so a spec about a host that does not come up still reads its state itself (host-ready.ts). Any other
+// shape, or a page without the bridge, returns at once. Each daemon-shape launch prints one line with the wait and the
+// time from the launch to the host's ready (`[e2e] daemon host ready:`), so a slower cold start shows in the job logs
+// rather than hiding behind the wait.
 async function untilDaemonHostReady(page: Page, launchedAt: number): Promise<void> {
-  const started = Date.now();
-  const until = started + DAEMON_HOST_READY_MS;
-  for (;;) {
-    const status = await page.evaluate(() => window.maws.invoke('host.status', undefined)).catch(() => null);
-    if (!status?.ok || status.value.transport !== 'daemon') return;
-    const ready = status.value.state === 'ready' && status.value.supervisor !== null;
-    if (ready || Date.now() >= until) {
-      const now = Date.now();
-      return console.log(`[e2e] daemon host ready: waited ${now - started} ms after the window, ${now - launchedAt} ms after the launch${ready ? '' : ` (the ${DAEMON_HOST_READY_MS / 1000} s bound: ${status.value.state}; the launch goes on)`}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
+  const line = await untilHostReady({
+    read: () => page.evaluate(() => window.maws.invoke('host.status', undefined)).then((status) => (status.ok ? status.value : null)),
+    now: () => Date.now(),
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  }, launchedAt);
+  if (line !== null) console.log(line);
 }
 
 // Under MAWS_E2E_FOREGROUND=1 (src/main/window-show.ts) the app activates and its window

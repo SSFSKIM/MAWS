@@ -11,6 +11,10 @@ import { clientSettingsDefaults } from '../src/shared/settings/defaults';
 const LIGHT_BG = 'rgb(250, 249, 246)'; // #faf9f6, light `--bg`
 const DARK_BG = 'rgb(19, 19, 19)'; // #131313, dark `--bg`
 
+// P5 O3-B: item 1 times the window's own start from `launchedAt`, which the launch's wait for the daemon shape's engine
+// host would count.
+test.use({ mawsHostReady: false });
+
 test('preload bundle has no external runtime imports', () => {
   // A sandboxed preload's `require` loads only a few Electron built-ins, so anything but `electron` would leave
   // `window.maws` undefined at page load (M3's bundled preload).
