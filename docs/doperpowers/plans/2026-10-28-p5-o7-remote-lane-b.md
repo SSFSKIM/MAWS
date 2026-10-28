@@ -235,7 +235,7 @@ M1 runs now and lands by its own PR. M2 and M3 need O10 M10 (the endpoint inside
   - Permanent: only a sealed `close {reason: 'removed'}`, which arrives authenticated inside the channel. `Channel.onClose` reports a sealed close's reason and a carrier's end alike, so every production carrier (`carriers.ts`, and the link's wrapper around any injected one) reports its own end as `carrier`, whatever reason the socket's close frame or the relay's channel close carried: a relay or a socket that closes with `removed` stays transient. The link's own view decides the rest without any peer's word: a machine that leaves the roster is closed by the manager, and a device the head no longer lists is signed out by its `OrgSession`.
   - Transient, and local to the carrier that produced it: every handshake `ChannelError`. `protocol`, `unknown-machine`, `revoked` and `contested` are raised from `h2` before its MAC and signature are checked (`openChannel`), and an endpoint's own refusal (`unknown-device`, `class`) reaches the device only as a carrier close. A hostile relay can forge any of them, so none stops the link, and the next attempt starts again from the direct carrier. Each is logged, once per reason per link. A machine that really speaks another major retries at the 30 s cap, which costs little. Rejected: stopping the link on these verdicts, which would let one rewritten `h2` on the relay keep the device off the direct carrier too.
   - `behind` is `connectChannel`'s own catch-up. It surfaces only when a page made no progress, and is transient.
-- **Trust changes close the channel.** When an attempt begins, the link records the key ids `machineKeys(head, ref, certificates, now)` returns and the identity it presents (org, member, device, channel key id), under a trust generation. At each `OrgSession` change it recomputes both. If a recorded machine key is no longer current, or the identity differs, the generation goes up: the current channel is closed and re-authenticated at once against the new head, and an attempt still running under the older generation is discarded when it completes. The handshake checks the machine's key only once, so a channel authenticated by a key the org has since retired would otherwise keep serving, and a compromised old key would not close it voluntarily. The `OrgSession` provider fires `onChanged` whenever its view adopts a new head, a link's handshake `advance` included (§B).
+- **Trust changes close the channel.** When an attempt begins, the link records the key ids `machineKeys(head, ref, certificates, now)` returns and the identity it presents (org, member, device, channel key id), under a trust generation. At each `OrgSession` change it recomputes both. If a recorded machine key is no longer current, or the identity differs, the generation goes up: the current channel is closed and re-authenticated at once against the new head, and an attempt still running under the older generation is discarded when it completes. The handshake checks the machine's key only once, so a channel authenticated by a key the org has since retired would otherwise keep serving, and a compromised old key would not close it voluntarily. The `OrgSession` provider fires `onChanged` whenever its view adopts a new head, a link's handshake `advance` included (§B). The generation an attempt carries is the one read before it reads the session, so a change while its keys are being computed discards it. A delegated machine's key also stops speaking for it when its delegation expires, with no session change: the same check runs at the next delegation `expires` of the machine's certificates, and the roster is recomputed at the next one of any certificate.
 - **Backoff** (RL §4.6).
   - After going `down` the delays are 0, 1, 2 and 4 s, then 5 s until `RESUME_WINDOW_MS` (120 s, the endpoint's `RESUME_MS`) has passed, then 30 s. Each delay is jittered ±20%.
   - Every probe runs an attempt at once and restarts the schedule. A probe is wake (`powerMonitor` `resume`), unlock (`unlock-screen`), focus (`app` `browser-window-focus`), a network change, or a person's action on that machine.
@@ -281,7 +281,7 @@ M1 runs now and lands by its own PR. M2 and M3 need O10 M10 (the endpoint inside
   - `refused` with any other reason and no outcome (`grade`, `class`: the machine will no longer say) resolves `unknown {reason}`;
   - `in-progress` and `unavailable` ask again after 1, 2, 4, 8 s, then every 15 s, while `up`;
   - `not-received` resolves `not-sent`. The machine has tombstoned the id, so nothing ran and nothing will;
-  - `expired`, or a query still unresolved at `OP_HORIZON_S` by the app's clock, resolves `unknown {reason: 'expired'}`.
+  - `expired`, or a query still unresolved at `OP_HORIZON_S` by the app's clock, resolves `unknown {reason: 'expired'}`. Each act carries its own timer to that horizon, whatever the channel, so an act whose channel never returns still resolves: `unknown expired` if a copy went out, `refused expired` if none did.
 
   Only `not-sent` licenses sending again, under a new `opId`, and only the caller does it.
 - **Pending acts live in memory.** An app quit forgets them. The machine's ledger still holds each result for a day, and nothing runs twice. Rejected: persisting them in the profile, which would surface an operation from an earlier run with no view to show it in.
@@ -852,6 +852,18 @@ Each is built provisionally as recommended, unless it says otherwise, and change
   Rationale: the timing project's pattern for suites that run real carriers (`test/endpoint/channels.local.test.ts` and its siblings).
   Date/Author: 2026-10-28, O7 M1's executor.
 
+- Decision: reviewer-high's three findings on the built branch (2 P1, 1 P2), each reproduced by the reviewer and fixed by one fix wave with a test that failed first. (1) An attempt stamped its trust with the generation read after `machineKeys` resolved, so a session change during that await could let a channel authenticated against the superseded view be adopted; the generation is now read before the session. (2) A delegated machine's certificate key lapses at its delegation's `expires` with no session change, and nothing rechecked it; the link rechecks trust and the source the roster on a timer at the next expiry (`nextCertExpiry`, `timeoutAt`, stepped at most a day). (3) An act whose channel was lost and never came back never resolved, since the horizon check lived only in the query path; each act now has its own horizon timer.
+  Rationale: (1) and (2) let a channel outlive the org's trust in the key it was made under, which the trust generation exists to prevent; (3) breaks `ActHandle.outcome`'s promise to settle. An act that never had a copy out settles `refused expired` at the horizon rather than `unknown`, as `close()` distinguishes the two.
+  Date/Author: 2026-10-28, O7 M1's executor.
+
+- Decision: the first class 1a run was red on `link.test.ts` alone (11 of 26 on one unit shard). The suite holds the clock and lets real async work run for a fixed number of event-loop turns, and an attempt's key ids use WebCrypto's digest on libuv's thread pool, which a loaded runner shares. The suite now computes the same key ids synchronously (a `vi.mock` of `keyId`). Reproduced locally with the pool contended: 26 of 26 red before, 26 of 26 green after.
+  Rationale: a test race, not a link bug; acts and subs passed under the same contention unchanged.
+  Date/Author: 2026-10-28, O7 M1's executor.
+
+- Decision: The review has converged. A narrow reviewer-high round on the fix commit (336d08000) found nothing, and its focused runs passed: link 28, acts 22, source 4. That makes two rounds: 3 findings, then 0.
+  Rationale: the stop rule; a round with nothing worth changing.
+  Date/Author: 2026-10-28, O7 M1's executor.
+
 The residue for P5's Decision Log. Each item is decided where it binds (M1 unless marked), with the alternative it rejected:
 
 1. M1 defines `OrgSession` and holds `signedOut()` in production, plus a development source behind `MAWS_DEV_ORG` in unpackaged builds; O8's sign-in implements it. Rejected: O7 building sign-in, so that two children build it.
@@ -888,4 +900,21 @@ P5 findings for its writer (things in P5 that are wrong or incomplete):
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+**M1 (2026-10-28).** Acceptance 1 is met in tests, and nothing changes for the owner until O8's sign-in provides a production `OrgSession`.
+- **What landed:**
+  - main's RL2 link (`src/main/machines/remote/`) with the org session seam (`src/main/org/`);
+  - the manager's second source of links, `Machines.remote`, and `machines.list`'s `carrier` and `refusal`.
+- **Proof in tests:**
+  - the unit suites under `src/main/machines/remote/`, `src/main/org/dev-session.test.ts` and the extended manager suite;
+  - a real endpoint over the direct carrier (`test/machines/remote-link.test.ts`, 13);
+  - the hub's multiplex in Miniflare (`test/machines/remote-link.local.test.ts`, 4): up over the relay; a relay drop with an act that runs once and a subscription that loses and repeats nothing; the probe's switch to direct; the hub away across a relaunch.
+- **Where the build departed from the plan, each in the Decision Log:**
+  - the five findings the architect raised before the gates;
+  - the four interface additions;
+  - the ack-timeout query;
+  - reviewer-high's three trust and expiry fixes;
+  - the test-race fix the first gate run exposed.
+- **Retrospective:**
+  - The plan's tables held: every row of the transition table became a test as written. The fixes were all at the edges the tables left implicit: transport words reaching a sealed-close listener; time as an input to trust; a timer that a lost channel cleared.
+  - For later milestones: treat every `await` between reading the session and stamping trust as a window for a stale view, and give every promise the API calls "never pending" a deadline that no transport event clears.
+  - The endpoint's loopback handshake limit and the eslint import boundary both cost a round. Each is now a harness option and a scoped exception, recorded for O9's suites, which will meet both.
