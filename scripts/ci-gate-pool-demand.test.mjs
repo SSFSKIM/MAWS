@@ -2,7 +2,7 @@
 // gate.yml's static job collects this file with scripts/*.test.mjs.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import process from 'node:process';
@@ -42,8 +42,8 @@ function fixture(run) {
   }
 }
 
-function demand(tree, sha, trailers, vars = variables) {
-  return spawnSync(process.execPath, [cli, '--git-dir', tree, '--sha', sha], {
+function demand(tree, sha, trailers, vars = variables, script = cli) {
+  return spawnSync(process.execPath, [script, '--git-dir', tree, '--sha', sha], {
     cwd: tmpdir(), // neither package.json nor gate.yml may come from the caller's cwd
     encoding: 'utf8',
     env: { ...process.env, ...vars, HEAD_MESSAGE: message(trailers) },
@@ -118,6 +118,15 @@ for (const [name, trailers, expected] of scenarios) {
     assert.equal(result.stdout.trim(), scheduledPoolDemand(workflowPlan(dir, trailers)));
   }));
 }
+
+// Node canonicalizes import.meta.url but leaves argv[1] as spelled, so a symlinked checkout path must still run the CLI.
+test('the CLI prints its demand when invoked through a symlinked directory', () => fixture(({ dir, tree, sha }) => {
+  const linked = join(dir, 'linked-scripts');
+  symlinkSync(join(root, 'scripts'), linked);
+  const result = demand(tree, sha, 'Gates: static,unit,probes', variables, join(linked, 'ci-gate-pool-demand.mjs'));
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, '16x1 8x4 2x1\n');
+}));
 
 test('the CLI reads scripts and env lists at the pushed sha, ignoring dirty files and ambient workflow inputs', () => fixture(({ tree, sha, put, git }) => {
   const changedScripts = JSON.parse(packageJson);
