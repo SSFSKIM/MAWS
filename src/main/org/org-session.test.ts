@@ -509,6 +509,20 @@ describe('registration', () => {
     expect(await dirExists(orgDir())).toBe(false);
   });
 
+  it('logs an attempt\'s end at quit at once, even with its work still held', async () => {
+    const login = testLogin();
+    const { session, logs } = make({ login });
+    await session.loaded;
+    login.hold();
+    session.register((await pairing()).text);
+    await until(() => login.mock.calls.length === 1, 'the login');
+    await session.close();
+    expect(logs.filter((line) => /^\[org\] attempt \d+/.test(line)).map((line) => line.slice(6))).toEqual([
+      `attempt 1: register (org ${ORG}), pid ${process.pid}`,
+      'attempt 1: ended by quit',
+    ]);
+  });
+
   it('logs each attempt\'s start and its end, a cancel included, so two browser trips in a log always show why', async () => {
     const { session, logs } = make();
     await session.loaded;

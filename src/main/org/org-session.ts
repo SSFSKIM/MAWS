@@ -978,6 +978,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     loaded,
     async close() {
       if (closed) return;
+      if (attempt !== null) endAttempt('ended by quit');
       generation++;
       attempt?.abort();
       closed = true;
