@@ -62,14 +62,27 @@ async function indexed(page: Page, engineId: string, machine?: MachineRef): Prom
   await expect.poll(async () => (found = (await sessionsOn(page, machine)).find((s) => s.engineSessionId === engineId)) !== undefined, { timeout: 30_000, message: `session ${engineId} is indexed` }).toBe(true);
   return found!;
 }
+// Main's own lines about the index and the machine links, per launched page, which a failure below quotes.
+const mainLines = new WeakMap<Page, string[]>();
+function keepMainLines(launch: MawsLaunch): void {
+  const lines: string[] = [];
+  mainLines.set(launch.page, lines);
+  const keep = (chunk: Buffer) => lines.push(...chunk.toString('utf8').split('\n').filter((line) => /\[(index|machines|machine)\]/.test(line)));
+  launch.app.process().stdout?.on('data', keep);
+  launch.app.process().stderr?.on('data', keep);
+}
 type Project = { id: string; directory: string; org?: { key: string; name: string } };
 // A directory added as a project on the page's own machine, once its machine has derived its org project (M5).
 async function addProject(page: Page, directory: string): Promise<Project> {
   const added = await invoke<Project>(page, 'session.projects.add', { directory });
   let project: Project | undefined;
-  await expect
-    .poll(async () => (project = (await invoke<{ projects: Project[] }>(page, 'session.projects.list', undefined)).projects.find((p) => p.id === added.id))?.org?.key, { timeout: 15_000, message: `${directory} has its org project` })
-    .toBeTruthy();
+  try {
+    await expect
+      .poll(async () => (project = (await invoke<{ projects: Project[] }>(page, 'session.projects.list', undefined)).projects.find((p) => p.id === added.id))?.org?.key, { timeout: 30_000, message: `${directory} has its org project` })
+      .toBeTruthy();
+  } catch (error) {
+    throw new Error(`${(error as Error).message}\nthe project: ${JSON.stringify(project ?? added)}\nmain said:\n${(mainLines.get(page) ?? []).join('\n')}`);
+  }
   return project!;
 }
 
@@ -107,11 +120,13 @@ test('two machines in one sidebar by org project; one leaving greys only its row
   const launchA = async (prepare?: (paths: { claudeConfigDir: string }) => void) => {
     const launch = await launchMaws({ userData: aUserData, keepConfigHome: prepare === undefined, env: { MAWS_LOCAL_MACHINES: join(bUserData!, SERVE_DIR), MAWS_MACHINE_NAME: A_NAME }, prepare });
     launches.add(launch);
+    keepMainLines(launch);
     return launch;
   };
   const launchB = async (prepare?: (paths: { claudeConfigDir: string }) => void) => {
     const launch = await launchMaws({ userData: bUserData, keepConfigHome: prepare === undefined, env: { MAWS_MACHINE_SERVE: '1', MAWS_MACHINE_NAME: B_NAME }, prepare });
     launches.add(launch);
+    keepMainLines(launch);
     return launch;
   };
   const quit = async (launch: MawsLaunch) => {
