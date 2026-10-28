@@ -413,6 +413,18 @@ describe('pty host coalesces reads into fewer events', () => {
     expect(events.slice(0, -1).join('')).toContain('MAWS_LAST');
   });
 
+  it('tells the live ptys’ count after each spawn and each exit (P5 Decision Log 124’s quiet)', async () => {
+    const live: number[] = [];
+    const table = createPtyTable({ emit: () => true, environment: Promise.resolve(terminalEnvironment(BASE_ENV, { appVersion: '0' })), onLive: (count) => void live.push(count) });
+    tables.push(table);
+    const held = await table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'read line'] }));
+    await table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'exit 0'] }));
+    await vi.waitFor(() => expect(live.at(-1)).toBe(1), { timeout: WAIT_MS, interval: 20 }); // the second exited
+    table.write({ ptyId: held.ptyId, data: 'done\n' });
+    await vi.waitFor(() => expect(live.at(-1)).toBe(0), { timeout: WAIT_MS, interval: 20 });
+    expect(live).toEqual([1, 2, 1, 0]);
+  });
+
   it('answers attach with every byte it has read: nextOffset covers what is still waiting to be flushed', async () => {
     const h = harness();
     const { ptyId } = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'yes | head -c 1000000'] }));

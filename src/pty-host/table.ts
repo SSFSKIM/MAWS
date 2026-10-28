@@ -69,6 +69,7 @@ export interface PtyTableOptions {
   // The terminal environment every pty starts with (`terminalEnvironment` over `baseEnvironment()`); a promise
   // because the login-shell capture runs once, asynchronously, at host start.
   environment: Promise<Record<string, string>>;
+  onLive?(live: number): void; // the live ptys' count after each spawn and each exit (P5 Decision Log 124's quiet)
 }
 
 export interface PtyTable {
@@ -87,8 +88,9 @@ export interface PtyTable {
   inspect(ptyId: string): { flow: Flow; ringStart: number; reads: number; read: number };
 }
 
-export function createPtyTable({ emit, environment: initial }: PtyTableOptions): PtyTable {
+export function createPtyTable({ emit, environment: initial, onLive }: PtyTableOptions): PtyTable {
   const entries = new Map<string, PtyEntry>();
+  const tellLive = () => onLive?.([...entries.values()].filter((entry) => entry.info.alive).length);
   let environment = initial; // P5 O2 M4: what a spawn waits on; replaced once a recapture resolves
   let latestCapture: Promise<Record<string, string>> | null = null; // the newest recapture, which alone may replace it
   let closing = false; // P5 O2 M4: shutdown began; no spawn starts a pty
@@ -195,6 +197,7 @@ export function createPtyTable({ emit, environment: initial }: PtyTableOptions):
         read: 0,
       };
       entries.set(ptyId, entry);
+      tellLive();
 
       pty.onData((chunk: string | Buffer) => {
         const buffer = chunk as Buffer;
@@ -219,6 +222,7 @@ export function createPtyTable({ emit, environment: initial }: PtyTableOptions):
         const exit = { exitCode, signal: signal || null };
         entry.info = { ...entry.info, alive: false, exit };
         emit('pty.exit', { ptyId, ...exit });
+        tellLive();
         if (entry.killed) remove(ptyId);
         else if (entries.get(ptyId) === entry) {
           entry.expiry = setTimeout(() => remove(ptyId), DEAD_ENTRY_TTL_MS);

@@ -145,6 +145,7 @@ export class MawsdScene {
   readonly self: string; // a stand-in mawsd bundle (its build id)
   readonly processes = new FakeProcesses();
   readonly logs: string[] = [];
+  readonly collect = vi.fn(); // the idle collection's stand-in (P5 Decision Log 124): a scene runs no real one
   readonly exits: number[] = [];
   readonly commands: string[][] = [];
   readonly engines: StandIn[] = [];
@@ -235,6 +236,7 @@ export class MawsdScene {
       execPath: '/opt/maws/node',
       restartBackoffMs: [30, 60, 90],
       helloHoldMs: 2_000,
+      collect: this.collect,
       ...extra,
     };
   }

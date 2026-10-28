@@ -29,6 +29,7 @@ export interface IdleReleaseDeps {
   current(session: EngineSession): EngineSessionStatus | null; // the session's status while it is its id's row, else null
   stateful(): ReadonlySet<string>;
   log(line: string): void;
+  interestChanged?(): void; // a holder's set replaced or ended (the supervisor's quiet reads `interested`)
 }
 
 interface RowClock { appSessionId: AppSessionId; since: number | null; kept: boolean; keptClearedAt: number | null }
@@ -87,6 +88,12 @@ export class IdleRelease {
     this.schedule();
   }
 
+  // Whether any holder holds interest in any session.
+  interested(): boolean {
+    for (const set of this.holders.values()) if (set.size > 0) return true;
+    return false;
+  }
+
   private replaceInterest(holderId: string, next: ReadonlySet<AppSessionId> | null): void {
     const before = this.union();
     if (next === null) this.holders.delete(holderId);
@@ -95,6 +102,7 @@ export class IdleRelease {
     const now = Date.now();
     for (const id of before) if (!after.has(id)) this.interestEnded.set(id, now);
     this.schedule();
+    this.deps.interestChanged?.();
   }
 
   private union(): Set<AppSessionId> {

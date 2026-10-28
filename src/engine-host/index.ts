@@ -4,6 +4,7 @@
 // E10: one bundle, two modes, decided at load: `process.parentPort` present → `utility` (an Electron utility process
 // forked by main, served over a MessagePort, as before); `--detached <supervisorDir>` in argv → `detached` (the
 // supervisor: the Electron binary as Node, outliving the app, served over a Unix socket; detached.ts).
+import { idleCollector } from '@shared/host/idle-collect';
 import { hostPing, runHost, type HostOn, type HostRegister } from '@shared/host/runtime';
 import { captureShellEnvironment } from '@shared/host/shell-env';
 // C3 start
@@ -141,6 +142,7 @@ const register: HostRegister = (untimedOn, emit, client) => {
     log: (line) => console.warn(`[engine-host] ${line}`),
   });
   // E10: registered after the engine ipc, so the status ends the connect burst
+  const idle = idleCollector({ log: (line) => console.log(`[supervisor] ${line}`) });
   supervision = new Supervision({
     mode,
     identity: { pid: process.pid, startedAt: new Date().toISOString(), buildId: buildIdOf(entryFile), protocol: SOCKET_PROTOCOL, wire: wireFingerprint(), socketPath: null, logPath: null },
@@ -148,6 +150,7 @@ const register: HostRegister = (untimedOn, emit, client) => {
     role: readMachineRole(), // P5 O2 M2: read once, at the start
     emit: (status) => emit('host.supervisorStatus', status),
     log: (line) => console.log(`[supervisor] ${line}`),
+    quiet: (quiet) => idle.set(quiet), // P5 Decision Log 124's lever: a collection at each quiet entry
   });
   supervision.register(on, client);
   return designSystems.ready; // one bounded startup admission gate, before any request handler may run

@@ -31,6 +31,7 @@ import { createHostSupervisor, type HostSupervisor } from '@shared/host/host-sup
 import { supervisorEnv, type DetachedTransportOptions } from '@shared/host/detached-transport';
 import type { RelayPort } from '@shared/host/doc-relay';
 import { appIdentity } from '@shared/host/identity';
+import { idleCollector, type Collect } from '@shared/host/idle-collect';
 import { makePrivateDirectory, clearSocketPath } from '@shared/host/private-listen';
 import { PrivatePathError } from '@shared/host/private-path';
 import { createHostRuntime } from '@shared/host/runtime';
@@ -84,6 +85,7 @@ export interface DaemonOptions {
   departureBoundMs?: number;
   helloHoldMs?: number;
   restartBackoffMs?: readonly number[];
+  collect?: Collect; // the idle collection (@shared/host/idle-collect.ts's lastResortCollect)
 }
 
 export interface RunningDaemon {
@@ -208,6 +210,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   });
 
   // --- the clocks -----------------------------------------------------------------------------------------------------
+  const idle = idleCollector({ log, collect: options.collect }); // P5 Decision Log 124's lever: a collection at each quiet entry
   const clocks = new DaemonClocks(kind, {
     armEnginePark: () => {
       log('no app and no interest for the idle time: asking the engine host to exit when idle');
@@ -224,6 +227,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       log('no client, both hosts parked and no hold for the idle time');
       void stop('idle', 0);
     },
+    quiet: (quiet) => idle.set(quiet),
   });
 
   // --- the interest union (OX5): the relay connection's set and the endpoint's remote viewers -------------------------
@@ -686,6 +690,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   }
   const [engineAdopted, ptyAdopted] = await Promise.all([hosts.adopt('engine-host'), hosts.adopt('pty-host')]);
   log(`serving; engine host ${engineAdopted ? 'adopted' : 'parked'}, pty host ${ptyAdopted ? 'adopted' : 'parked'}`);
+  clocks.served(); // its quiet is told from here: no client yet is its first entry, with the start's garbage behind it
 
   return { paths, ref, hosts, services, status, stop };
 }

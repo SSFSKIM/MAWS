@@ -13,10 +13,15 @@
 //   Its idle time is the machine role's (role.ts): a laptop's is the idle exit's, a server's 24 hours. Under an armed
 //   exit-when-idle interest is ignored, so an old supervisor still serving empties unless the owner kept a session.
 // - `host.stopAll`: engine.shutdown's body, answered, then the exit (a host that ran it can never launch again).
+// - Quiet (P5 Decision Log 124's idle collection, @shared/host/idle-collect.ts): once the host serves, no client holds
+//   interest in any session, every live row is idle by E10's rule (budget.ts `isIdleRow`, no stateful server counted:
+//   ready, no turn, nothing working, waiting or queued) and the plugin runner holds nothing. Each change is told, so the
+//   engine host collects at every entry: a kept session's turn ending after the app left is one.
 import type { HostClientHooks, HostOn } from '@shared/host/runtime';
 import { HostCommandError } from '@shared/host/runtime';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SupervisorStatus } from '@shared/ipc/schema/host';
+import { isIdleRow } from './budget';
 import type { PluginsRunner } from './plugins/runner';
 import type { ProcessTable } from './process-table';
 import type { MachineRole } from './role';
@@ -38,13 +43,16 @@ export type SupervisorIdentity = Pick<SupervisorStatus, 'pid' | 'startedAt' | 'b
 export interface SupervisionDeps {
   mode: 'utility' | 'detached';
   identity: SupervisorIdentity;
-  table: Pick<ProcessTable, 'onChange' | 'onRowsChanged' | 'setIdleRelease' | 'setInterest'> & { list(): readonly Pick<EngineSession, 'lifecycle'>[] };
+  table: Pick<ProcessTable, 'onChange' | 'onRowsChanged' | 'setIdleRelease' | 'setInterest' | 'interested' | 'onInterestChanged'> & { list(): readonly Pick<EngineSession, 'lifecycle' | 'status'>[] };
   role: MachineRole; // P5 O2 M2: read once at the engine host's start (role.ts)
   plugins: Pick<PluginsRunner, 'busy' | 'onIdle'>;
   shutdown(graceMs: number): Promise<{ stopped: number; forced: number }>; // engine.shutdown's body
   emit(status: SupervisorStatus): boolean; // host.supervisorStatus
   log(line: string): void;
+  quiet?(quiet: boolean): void; // the idle collection's (index.ts); a harness that does not read it leaves it out
 }
+
+const NO_STATEFUL: ReadonlySet<string> = new Set(); // a stateful server holds a row's release, not its quiet
 
 export class Supervision {
   private identity: SupervisorIdentity;
@@ -59,11 +67,15 @@ export class Supervision {
   private release: { idleMs: number | null; active: boolean; ignoreInterest: boolean } | null = null; // the idle release's policy as last set
   private published = '';
   private orphansKilled = 0; // the engines of a dead predecessor the start-up sweep stopped (Task 2.5)
+  private serving: boolean; // a utility host serves from its register, a detached one from `started`
+  private quietNow: boolean | null = null; // as last told
 
   constructor(private readonly deps: SupervisionDeps) {
     this.identity = deps.identity;
     this.connected = deps.mode === 'utility';
+    this.serving = deps.mode === 'utility';
     deps.table.onChange(() => this.refresh());
+    if (deps.quiet) deps.table.onInterestChanged(() => this.refresh());
     deps.table.onRowsChanged(() => this.refresh());
     deps.plugins.onIdle(() => this.refresh());
     this.refresh();
@@ -108,6 +120,7 @@ export class Supervision {
   started(identity: SupervisorIdentity, exit: (reason: SupervisorExit) => void): void {
     this.identity = identity;
     this.exit = exit;
+    this.serving = true;
     this.refresh();
   }
 
@@ -143,6 +156,7 @@ export class Supervision {
   // a configuration. Cheap: it reads the table's rows and compares.
   private refresh(): void {
     const live = this.deps.table.list().some((row) => row.lifecycle !== 'exited');
+    if (this.deps.quiet) this.tellQuiet();
     const active = RELEASE_WHILE_CONNECTED || (this.deps.mode === 'detached' && (!this.connected || this.exitWhenIdle));
     const idleMs = this.releaseIdleMs();
     if (this.release === null || this.release.idleMs !== idleMs || this.release.active !== active || this.release.ignoreInterest !== this.exitWhenIdle) {
@@ -156,6 +170,15 @@ export class Supervision {
       else this.clearIdle();
     }
     this.publish(false);
+  }
+
+  private tellQuiet(): void {
+    if (!this.serving) return;
+    const quiet = this.leaving === null && !this.deps.plugins.busy() && !this.deps.table.interested()
+      && this.deps.table.list().every((row) => row.lifecycle === 'exited' || isIdleRow(row.status(), NO_STATEFUL));
+    if (quiet === this.quietNow) return;
+    this.quietNow = quiet;
+    this.deps.quiet?.(quiet);
   }
 
   // P5 O2 M2: a laptop releases after the idle exit's time (the app's setting, null for never), a server after 24 hours

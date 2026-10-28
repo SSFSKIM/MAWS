@@ -10,6 +10,8 @@
 // - A private daemon exits once no client has been on any of its sockets for `idleExitMs`, both hosts are parked and no
 //   hold is out; a unit daemon never exits by itself.
 // - `idleExitMs` is the last `host.configure` an app sent, 10 minutes until then; `null` arms nothing.
+// - Quiet (P5 Decision Log 124's lever, @shared/host/idle-collect.ts): once the daemon serves, no client on any socket,
+//   an empty interest union and no hold out. Each change of it is told, so `mawsd` collects at every entry.
 // (The pty host's park is a check, not a clock: the daemon asks `pty.list` at the app's departure and at each `pty.exit`.)
 
 export const DEFAULT_IDLE_EXIT_MS = 10 * 60_000;
@@ -18,6 +20,7 @@ export interface ClockActions {
   armEnginePark(): void; // `exit {when: 'idle'}` to the served engine host
   disarmEnginePark(): void; // `host.exitWhenIdle {armed: false}`, and the transport told
   exitDaemon(): void; // a private daemon's idle exit
+  quiet(quiet: boolean): void; // the daemon's quiet changed (told from `served()` on)
 }
 
 export class DaemonClocks {
@@ -32,6 +35,8 @@ export class DaemonClocks {
   private holdCount = 0;
   private clientsGoneSince: number;
   private exited = false;
+  private serving = false;
+  private quietNow: boolean | null = null; // as last told
   private timer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
 
@@ -88,6 +93,12 @@ export class DaemonClocks {
     this.evaluate();
   }
 
+  // Start step (8) is done: the daemon serves, and its quiet is told from now on.
+  served(): void {
+    this.serving = true;
+    this.evaluate();
+  }
+
   // A private daemon's exit clock while no client is on any socket; null otherwise.
   idleExitAt(): string | null {
     const due = this.exitDue();
@@ -122,6 +133,11 @@ export class DaemonClocks {
 
   private evaluate(): void {
     if (this.stopped) return;
+    const quiet = this.clientCount === 0 && this.interestEmpty && this.holdCount === 0;
+    if (this.serving && quiet !== this.quietNow) {
+      this.quietNow = quiet;
+      this.actions.quiet(quiet);
+    }
     this.clearTimer();
     const now = Date.now();
     const waits: number[] = [];

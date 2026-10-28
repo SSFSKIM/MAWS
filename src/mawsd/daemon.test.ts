@@ -33,6 +33,18 @@ const mode = (path: string) => statSync(path).mode & 0o777;
 const ACTOR = { kind: 'session' as const, appSessionId: 'app-1' as AppSessionId };
 const ARTIFACT = '6f1c1d2e-3b4a-4c5d-8e9f-0a1b2c3d4e5f';
 
+describe('the idle collection (P5 Decision Log 124)', () => {
+  it('collects once it serves with no client, and not while a client is on a socket', async () => {
+    await scene.start();
+    await until(() => scene.collect.mock.calls.length === 1, 5_000, 'the start’s collection');
+    expect(scene.logs.some((line) => /^idle: collected in \d+ ms, heap /.test(line))).toBe(true);
+    const app = await scene.app('machine');
+    await app.request('daemon.status');
+    await sleep(20);
+    expect(scene.collect).toHaveBeenCalledOnce();
+  });
+});
+
 describe('the start', () => {
   it('serves three private sockets with both hosts parked and nothing spawned; its directory, token and endpoint directory private', async () => {
     const daemon = await scene.start();

@@ -109,6 +109,7 @@ export class ProcessTable {
   // E10 start: the idle-row release (P5 O2 M2: its rule in idle-release.ts) and the row set's listeners
   private readonly idle: IdleRelease;
   private readonly rowsListeners = new Set<() => void>();
+  private readonly interestListeners = new Set<() => void>(); // P5 Decision Log 124
   private readonly procStartOf: (pid: number) => string | null;
   private liveLedger: ((rows: LiveRow[]) => void) | null = null; // the orphan ledger's writer, once recording
   private readonly ledgerKeys = new WeakMap<EngineSession, string>(); // each row's part of the ledger: exited, pid
@@ -127,7 +128,7 @@ export class ProcessTable {
     this.budgetSignature = signatureOf(this.budget);
     this.exitedRowsMax = opts.exitedRowsMax ?? EXITED_ROWS_MAX;
     // C12 end
-    this.idle = new IdleRelease({ current: (session) => this.currentStatus(session), stateful: () => this.stateful, log: (line) => this.log(line) }); // P5 O2 M2
+    this.idle = new IdleRelease({ current: (session) => this.currentStatus(session), stateful: () => this.stateful, log: (line) => this.log(line), interestChanged: () => this.interestChanged() }); // P5 O2 M2
   }
 
   private readonly log: (message: string) => void;
@@ -230,6 +231,27 @@ export class ProcessTable {
   // P5 O2 M2: `host.interest`, a client connection's full set of the sessions it holds interest in
   setInterest(holder: ClientRef, sessions: readonly AppSessionId[]): void {
     this.idle.setInterest(holder, sessions);
+  }
+
+  // Whether any client holds interest in any session, and each change of a holder's set, its end included (P5 Decision
+  // Log 124: the supervisor's quiet).
+  interested(): boolean {
+    return this.idle.interested();
+  }
+
+  onInterestChanged(listener: () => void): () => void {
+    this.interestListeners.add(listener);
+    return () => this.interestListeners.delete(listener);
+  }
+
+  private interestChanged(): void {
+    for (const listener of this.interestListeners) {
+      try {
+        listener();
+      } catch (error) {
+        this.log(`interest listener failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
   }
 
   private currentStatus(session: EngineSession): EngineSessionStatus | null {
