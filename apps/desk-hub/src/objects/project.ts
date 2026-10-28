@@ -21,7 +21,7 @@
 // before its event is stored, by the protocol package against the org-state head this object caches from its Registry
 // (signed-events.ts); a `mac` is still never checked here.
 import { DurableObject } from 'cloudflare:workers';
-import type { LogEventV2 } from 'org-protocol';
+import { HISTORY_PAGE_BYTES, isHistoryAttestation, isSigned, machineNameKey, verifyHistorySigner, type HistoryAttestation, type HistoryLogPage, type LogEventV2, type Signed } from 'org-protocol';
 import { MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, type Env } from '../env';
 import { isBase64urlOf } from '../protocol/base64url';
 import { BROWSER_SET_LIMIT, BROWSER_SET_PARTS, isOutputTail, isTaskId, OUTPUT_TAIL_MAX, readShapeError, type AuditEntry, type PendingRequest, type ProjectDown, type PushNotice } from '../protocol/browser';
@@ -34,8 +34,9 @@ import { FRAME_LIMIT, PartAssembler, PartsBudgetError, toWire, type Part } from 
 import { RPC_FRESHNESS_MS, RPC_NAMES, type Rpc, type RpcError, type RpcErrorCode, type RpcOutcome } from '../protocol/rpc';
 import { SESSION_WIDE_KINDS, SUBSCRIPTION_KINDS, SUGGESTION_BYTES_MAX, SUGGESTIONS_MAX, type Delivery, type MachinePresence, type Raised, type SessionKind, type SessionMessage, type Settled } from '../protocol/session';
 import type { Sent } from './machine';
+import { HistoryStore } from './history-store';
 import { BATCH_BYTES, eventShapeError, LogStore, resendNonce, sameEvent, type AuditRow, type Stored } from './log-store';
-import type { SummaryReport } from './registry';
+import type { Result, SummaryReport } from './registry';
 import { RETRY_ATTEMPTS, RETRY_BASE_MS, retryDelay } from './retry';
 import { pendingKey, SessionStore, type Lease, type Route, type RpcRecord } from './session-store';
 import { SignedEvents, STATE_READ_TIMEOUT_MS, STATE_UNAVAILABLE, type SignatureCheck } from './signed-events';
@@ -94,6 +95,8 @@ const isName = (v: unknown, max = 200): v is string => typeof v === 'string' && 
 export class Project extends DurableObject<Env> {
   private readonly log: LogStore;
   private readonly plane: SessionStore;
+  /** Machines' attestations of their phase-1 history in this log (O14 M4). */
+  private readonly history: HistoryStore;
   /** This project's two promise chains per machine stream (`<machine>#<generation>#<lane>`, the `replies` and
    * `control` lanes), so every frame this object sends a stream on one lane arrives in the order it was queued there; a
    * chain that failed stays failed, its stream ended (`toMachine`). */
@@ -116,6 +119,7 @@ export class Project extends DurableObject<Env> {
     super(ctx, env);
     this.log = new LogStore(ctx.storage);
     this.plane = new SessionStore(ctx.storage);
+    this.history = new HistoryStore(ctx.storage);
     this.signatures = new SignedEvents(
       () => this.readOrgState(),
       () => this.now(),
@@ -546,6 +550,50 @@ export class Project extends DurableObject<Env> {
       ...(frame.message === undefined ? {} : { message: frame.message }),
     };
     this.broadcast(this.audited(this.log.record('rejected', rejection)));
+  }
+
+  // ---- History re-attestation (O14 M4, Interfaces §D) -----------------------------------------------------------
+
+  /** This log's DX1 writers under `names` with their highest DX1 seq, for the Registry's inventory. */
+  historyWriters(names: string[]): Array<{ writer: string; upTo: number }> {
+    return this.log.dx1Writers(new Set(names.map(machineNameKey)));
+  }
+
+  /** A writer's stored events after `after`, about a page of them, as a machine reads its own history. */
+  historyPage(writer: string, after: number): HistoryLogPage {
+    return this.log.writerPage(writer, after, HISTORY_PAGE_BYTES);
+  }
+
+  /** The attestations this log keeps, the newest per writer. */
+  attestations(): Signed<HistoryAttestation>[] {
+    return this.history.records();
+  }
+
+  /**
+   * A machine's attestation for this project, kept after the courtesy check (RL §5.5) of its signer and its writer's
+   * binding against the Registry's head and certificates, read afresh (a post is rare): `403 bad-signature` or
+   * `403 not-bound`, and `409 stale-attestation` for a record no newer than the one held while that one verifies.
+   */
+  async keepAttestation(org: string, project: string, record: unknown): Promise<Result<{ stored: boolean }>> {
+    if (!isSigned(record, isHistoryAttestation) || record.body.org !== org || record.body.project !== project) {
+      return { ok: false, status: 400, error: 'bad-shape', message: 'the body is {record}, a signed HistoryAttestation of this org and project' };
+    }
+    this.remember(org, project);
+    const view = await this.readOrgState();
+    if (view.head === null) return { ok: false, status: 403, error: 'bad-signature', message: 'the org has no signed state to check it against' };
+    const now = new Date(this.now());
+    const signer = await verifyHistorySigner(record, view.head.state, view.certificates, now);
+    if (!signer.ok) {
+      return signer.reason === 'binding'
+        ? { ok: false, status: 403, error: 'not-bound', message: `the signer can't speak for ${record.body.writer}: another machine holds the name, or the record does not claim it` }
+        : { ok: false, status: 403, error: 'bad-signature', message: 'the record is not signed by a machine key its current name binds at its created' };
+    }
+    // A held record that verifies no more (its key revoked since) gives way to a new one at the same upTo.
+    const held = this.history.held(record.body.writer);
+    const voided = held !== undefined && !(await verifyHistorySigner(held, view.head.state, view.certificates, now)).ok ? held : undefined;
+    const kept = this.history.keep(record, voided);
+    if (kept === 'stale') return { ok: false, status: 409, error: 'stale-attestation', message: 'a record for this writer at the same or a higher upTo is held' };
+    return { ok: true, value: { stored: kept === 'stored' } };
   }
 
   // ---- The session plane, from machines ------------------------------------------------------------------------
