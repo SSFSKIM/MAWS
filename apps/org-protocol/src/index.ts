@@ -20,6 +20,7 @@ export * from './names.ts';
 export * from './org-state.ts';
 export * from './org-view.ts';
 export * from './pairing.ts';
+export * from './provisioning.ts';
 export * from './records.ts';
 export * from './relay.ts';
 export { isCertRetirement, isCertificates, isDevice, isEndpointRecord, isGrant, isListing, isMachineCert, isOrgState, isRootTransition, isSigned, isSignedOrgState } from './shapes.ts';
