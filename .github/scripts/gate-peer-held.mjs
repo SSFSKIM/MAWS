@@ -2,7 +2,8 @@
 // a timestamp. The API is only an optimization: an unreadable answer leaves gate-plan's automatic join intact.
 import { appendFileSync, readFileSync, realpathSync } from 'node:fs';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
+import { URLSearchParams, fileURLToPath } from 'node:url';
+import console from 'node:console';
 import { planOf } from './gate-plan.mjs';
 
 const active = new Set(['queued', 'in_progress', 'waiting']);
@@ -79,9 +80,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const { scripts } = JSON.parse(readFileSync('package.json', 'utf8'));
     const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
     held = await peerHeldBy({ env: process.env, scripts, event, api: async (path) => {
-      const response = await fetch(`${process.env.GITHUB_API_URL || 'https://api.github.com'}${path}`, {
+      const response = await globalThis.fetch(`${process.env.GITHUB_API_URL || 'https://api.github.com'}${path}`, {
         headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${process.env.GITHUB_TOKEN}`, 'X-GitHub-Api-Version': '2022-11-28' },
-        signal: AbortSignal.timeout(15_000),
+        signal: globalThis.AbortSignal.timeout(15_000),
       });
       if (!response.ok) throw new Error(`GitHub API ${response.status} for ${path}`);
       return response.json();
